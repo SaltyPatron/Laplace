@@ -17,6 +17,7 @@
 #  define M_PI 3.14159265358979323846
 #endif
 
+#include "laplace_pg/centroid_abi_v1.h"
 #include "laplace_pg/cpuid.h"
 #include "laplace_pg/geometry4d.h"
 #include "laplace_pg/glicko2.h"
@@ -265,6 +266,83 @@ static void test_hausdorff_basic(void)
     EXPECT(fabs(d - 5.0) < 1e-12, "hausdorff to far singleton wrong");
 }
 
+static void test_centroid_abi_round_trip(void)
+{
+    laplace_point4d_t p = {0.5, -0.5, 0.5, -0.5};
+    /* Pre-normalize to S^3 then encode payload. */
+    laplace_s3_normalize(&p, &p);
+
+    const laplace_centroid_payload_v1_t payload_in = {
+        .prime_flags = LAPLACE_FLAG_NOUN | LAPLACE_FLAG_ANIMATE | LAPLACE_FLAG_CONCRETE
+                       | LAPLACE_FLAG_SINGULAR | LAPLACE_FLAG_TEXT,
+        .entity_id   = 0xDEADBEEFu,
+        .modality    = LAPLACE_MODALITY_TEXT,
+        .language_id = 1234,
+        .model_id    = 0,
+        .tier        = 1,
+        .reserved    = 0,
+    };
+    laplace_centroid_encode_v1(&p, &payload_in);
+
+    laplace_centroid_payload_v1_t payload_out;
+    laplace_centroid_decode_v1(&p, &payload_out);
+
+    EXPECT(payload_out.prime_flags == payload_in.prime_flags, "centroid abi: prime_flags lost");
+    EXPECT(payload_out.entity_id   == payload_in.entity_id,   "centroid abi: entity_id lost");
+    EXPECT(payload_out.modality    == payload_in.modality,    "centroid abi: modality lost");
+    EXPECT(payload_out.language_id == payload_in.language_id, "centroid abi: language_id lost");
+    EXPECT(payload_out.model_id    == payload_in.model_id,    "centroid abi: model_id lost");
+    EXPECT(payload_out.tier        == payload_in.tier,        "centroid abi: tier lost");
+}
+
+static void test_centroid_abi_geometry_preserved(void)
+{
+    /* After encoding payload into mantissa, position should still be
+     * within ~10^-10 of unit norm (well below super-Fibonacci spacing). */
+    laplace_point4d_t p = {0.6, 0.0, 0.8, 0.0};
+    laplace_s3_normalize(&p, &p);
+    const double norm_before = laplace_point4d_norm(&p);
+
+    const laplace_centroid_payload_v1_t payload = {
+        .prime_flags = ~0ULL,           /* worst case: all bits set */
+        .entity_id   = 0xFFFFFFFFu,
+        .modality    = 0xFFu,
+        .language_id = 0xFFFFu,
+        .model_id    = 0xFFu,
+        .tier        = 0x0Fu,
+        .reserved    = 0xFFFFFu,
+    };
+    laplace_centroid_encode_v1(&p, &payload);
+
+    const double norm_after = laplace_point4d_norm(&p);
+    EXPECT(fabs(norm_after - norm_before) < 1e-10,
+           "centroid abi: encoding perturbed unit norm beyond 10^-10");
+}
+
+static void test_centroid_abi_strip(void)
+{
+    laplace_point4d_t p = {0.5, 0.5, 0.5, 0.5};
+    laplace_s3_normalize(&p, &p);
+    const laplace_centroid_payload_v1_t payload = {
+        .prime_flags = LAPLACE_FLAG_VERB | LAPLACE_FLAG_PAST,
+        .entity_id   = 42,
+        .modality    = LAPLACE_MODALITY_TEXT,
+        .language_id = 0,
+        .model_id    = 0,
+        .tier        = 2,
+        .reserved    = 0,
+    };
+    laplace_point4d_t stuffed = p;
+    laplace_centroid_encode_v1(&stuffed, &payload);
+
+    laplace_point4d_t stripped;
+    laplace_centroid_strip_payload_v1(&stuffed, &stripped);
+
+    /* Stripped version should be within 10^-10 of pre-encode position. */
+    EXPECT(laplace_point4d_distance(&stripped, &p) < 1e-10,
+           "centroid abi: strip should restore geometry to within 10^-10");
+}
+
 int main(void)
 {
     test_version();
@@ -285,6 +363,9 @@ int main(void)
     test_hilbert_locality();
     test_frechet_basic();
     test_hausdorff_basic();
+    test_centroid_abi_round_trip();
+    test_centroid_abi_geometry_preserved();
+    test_centroid_abi_strip();
 
     if (fail_count == 0) {
         printf("OK: all native smoke tests passed\n");
