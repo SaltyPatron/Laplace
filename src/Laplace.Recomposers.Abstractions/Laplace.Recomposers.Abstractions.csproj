@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Laplace.Recomposers.Abstractions</RootNamespace>
+    <AssemblyName>Laplace.Recomposers.Abstractions</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Laplace.Core.Abstractions\Laplace.Core.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

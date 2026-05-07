@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Laplace.Cognition.Godel</RootNamespace>
+    <AssemblyName>Laplace.Cognition.Godel</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Laplace.Core.Abstractions\Laplace.Core.Abstractions.csproj" />
+    <ProjectReference Include="..\Laplace.Inference.Abstractions\Laplace.Inference.Abstractions.csproj" />
+    <ProjectReference Include="..\Laplace.Cognition.Abstractions\Laplace.Cognition.Abstractions.csproj" />
+    <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
+    <ProjectReference Include="..\Laplace.Cognition.Ooda\Laplace.Cognition.Ooda.csproj" />
+  </ItemGroup>
+
+</Project>

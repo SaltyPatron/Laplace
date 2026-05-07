@@ -1,0 +1,7 @@
+# laplace_pg PostgreSQL extension control file
+comment = 'Universal digital content substrate — native compute layer'
+default_version = '0.1.0'
+module_pathname = '$libdir/laplace_pg'
+relocatable = false
+trusted = false
+schema = laplace

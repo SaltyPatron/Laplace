@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Laplace.Decomposers.Calendar</RootNamespace>
+    <AssemblyName>Laplace.Decomposers.Calendar</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Laplace.Core.Abstractions\Laplace.Core.Abstractions.csproj" />
+    <ProjectReference Include="..\Laplace.Pipeline.Abstractions\Laplace.Pipeline.Abstractions.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.Abstractions\Laplace.Decomposers.Abstractions.csproj" />
+    <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
+    <ProjectReference Include="..\Laplace.Pipeline\Laplace.Pipeline.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.Text\Laplace.Decomposers.Text.csproj" />
+  </ItemGroup>
+
+</Project>

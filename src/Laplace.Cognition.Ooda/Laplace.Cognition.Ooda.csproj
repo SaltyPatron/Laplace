@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Laplace.Cognition.Ooda</RootNamespace>
+    <AssemblyName>Laplace.Cognition.Ooda</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Laplace.Core.Abstractions\Laplace.Core.Abstractions.csproj" />
+    <ProjectReference Include="..\Laplace.Inference.Abstractions\Laplace.Inference.Abstractions.csproj" />
+    <ProjectReference Include="..\Laplace.Cognition.Abstractions\Laplace.Cognition.Abstractions.csproj" />
+    <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
+  </ItemGroup>
+
+</Project>

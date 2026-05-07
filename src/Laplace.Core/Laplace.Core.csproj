@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Laplace.Core</RootNamespace>
+    <AssemblyName>Laplace.Core</AssemblyName>
+    <UseNativeRuntime>true</UseNativeRuntime>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Laplace.Core.Abstractions\Laplace.Core.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

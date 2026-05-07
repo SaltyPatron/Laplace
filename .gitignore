@@ -1,0 +1,107 @@
+# Build outputs
+[Bb]in/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Oo]ut/
+[Dd]ist/
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# Rider / JetBrains
+.idea/
+
+# VS Code (allow shared workspace settings; ignore per-user)
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/tasks.json
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CMakeUserPresets.json
+*.cmake
+!ext/laplace_pg/CMakeLists.txt
+!CMakeLists.txt
+compile_commands.json
+
+# Native build artifacts
+*.o
+*.obj
+*.lo
+*.a
+*.lib
+*.dll
+*.so
+*.so.*
+*.dylib
+*.exp
+*.pdb
+*.ilk
+*.tlog/
+*.tlb
+*.exe
+!scripts/*.exe.config
+
+# .NET
+project.lock.json
+project.fragment.lock.json
+artifacts/
+*.nupkg
+*.snupkg
+**/packages/*
+!**/packages/build/
+*.binlog
+.dotnet/
+
+# Test
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.trx
+*.coverage
+*.coveragexml
+coverage*.json
+coverage*.xml
+coverage*.info
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+$RECYCLE.BIN/
+
+# Logs
+logs/
+*.log
+
+# Temp
+temp/
+tmp/
+*.tmp
+*.bak
+
+# Seed data caches (data lives at D:\Models, do NOT mirror here)
+seeded-cache/
+
+# Model artifacts (per-developer; do NOT commit weights)
+**/exports/
+**/models-test-fixtures/
+
+# Ignore generated UCD binary tables produced by Phase 3
+ext/laplace_pg/include/laplace_pg/generated/
+ext/laplace_pg/src/ucd/generated/
+
+# AddressSanitizer / sanitizer output
+asan.log*
+lsan.log*
+ubsan.log*

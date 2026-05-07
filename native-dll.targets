@@ -1,0 +1,34 @@
+<Project>
+
+  <!--
+    Centralized rules for staging the native runtime alongside .NET output.
+    A consumer project opts in by setting <UseNativeRuntime>true</UseNativeRuntime>
+    in its csproj. The Laplace.Core P/Invoke surface should always opt in.
+    Other projects that don't directly P/Invoke can leave it false.
+
+    The native binary is produced by the CMake build under
+    `<repo-root>\ext\laplace_pg\build\Release\laplace_native.dll` (or platform-equivalent).
+  -->
+
+  <PropertyGroup>
+    <LaplaceNativeBuildDir Condition="'$(LaplaceNativeBuildDir)' == ''">$(MSBuildThisFileDirectory)ext\laplace_pg\build\$(Configuration)</LaplaceNativeBuildDir>
+    <LaplaceNativeRuntimeDll Condition="$([MSBuild]::IsOSPlatform('Windows'))">laplace_native.dll</LaplaceNativeRuntimeDll>
+    <LaplaceNativeRuntimeDll Condition="$([MSBuild]::IsOSPlatform('Linux'))">liblaplace_native.so</LaplaceNativeRuntimeDll>
+    <LaplaceNativeRuntimeDll Condition="$([MSBuild]::IsOSPlatform('OSX'))">liblaplace_native.dylib</LaplaceNativeRuntimeDll>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(UseNativeRuntime)' == 'true' And Exists('$(LaplaceNativeBuildDir)\$(LaplaceNativeRuntimeDll)')">
+    <Content Include="$(LaplaceNativeBuildDir)\$(LaplaceNativeRuntimeDll)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <Visible>false</Visible>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="WarnIfLaplaceNativeMissing"
+          Condition="'$(UseNativeRuntime)' == 'true' And !Exists('$(LaplaceNativeBuildDir)\$(LaplaceNativeRuntimeDll)')"
+          BeforeTargets="Build">
+    <Warning Text="laplace_native runtime not found at '$(LaplaceNativeBuildDir)\$(LaplaceNativeRuntimeDll)'. Build the native side first via 'scripts\build.ps1' (CMake)." />
+  </Target>
+
+</Project>

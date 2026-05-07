@@ -1,0 +1,62 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- Solution-wide target framework and language version -->
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Quality gates: strict warnings, deterministic, reproducible -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsAsErrors />
+    <WarningsNotAsErrors />
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!-- Native interop / AOT-friendly P/Invoke source generators -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <PolySharpUseInteropServices2>false</PolySharpUseInteropServices2>
+
+    <!-- Common code analysis -->
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <AnalysisMode>AllEnabledByDefault</AnalysisMode>
+    <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+
+    <!-- Source link / debug -->
+    <DebugType>portable</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <!-- Centralized output paths to keep csproj files clean -->
+    <BaseOutputPath>$(MSBuildThisFileDirectory)bin\$(MSBuildProjectName)\</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+
+    <!-- Common assembly metadata -->
+    <Company>Laplace</Company>
+    <Product>Laplace Substrate</Product>
+    <Authors>Anthony Hart</Authors>
+    <Copyright>Copyright (c) Anthony Hart</Copyright>
+
+    <!-- Package metadata defaults (override per project) -->
+    <PackageProjectUrl>https://github.com/yourorg/laplace</PackageProjectUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>UNLICENSED</PackageLicenseExpression>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Solution-wide source-link support -->
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" Condition="'$(SourceLinkInclude)' != 'false'" />
+  </ItemGroup>
+
+  <!-- Native DLL copy rules (apply to projects that opt in via <UseNativeRuntime>true</UseNativeRuntime>) -->
+  <Import Project="$(MSBuildThisFileDirectory)native-dll.targets" Condition="'$(UseNativeRuntime)' == 'true'" />
+
+</Project>

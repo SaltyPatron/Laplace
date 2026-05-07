@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Laplace.Cognition.Abstractions</RootNamespace>
+    <AssemblyName>Laplace.Cognition.Abstractions</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Laplace.Core.Abstractions\Laplace.Core.Abstractions.csproj" />
+    <ProjectReference Include="..\Laplace.Inference.Abstractions\Laplace.Inference.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

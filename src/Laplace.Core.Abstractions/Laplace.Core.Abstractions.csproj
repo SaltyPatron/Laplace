@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Laplace.Core.Abstractions</RootNamespace>
+    <AssemblyName>Laplace.Core.Abstractions</AssemblyName>
+  </PropertyGroup>
+
+</Project>
