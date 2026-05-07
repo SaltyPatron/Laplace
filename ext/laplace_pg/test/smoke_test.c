@@ -13,9 +13,18 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifndef M_PI
+#  define M_PI 3.14159265358979323846
+#endif
+
 #include "laplace_pg/cpuid.h"
+#include "laplace_pg/geometry4d.h"
+#include "laplace_pg/glicko2.h"
+#include "laplace_pg/gram_schmidt.h"
 #include "laplace_pg/hash.h"
+#include "laplace_pg/quaternion.h"
 #include "laplace_pg/rle.h"
+#include "laplace_pg/s3.h"
 #include "laplace_pg/superfib.h"
 
 extern uint32_t laplace_native_version(void);
@@ -109,6 +118,101 @@ static void test_superfib_distinct(void)
            "consecutive super-fibonacci samples must differ");
 }
 
+static void test_point4d_distance(void)
+{
+    const laplace_point4d_t a = {0.0, 0.0, 0.0, 0.0};
+    const laplace_point4d_t b = {1.0, 0.0, 0.0, 0.0};
+    EXPECT(fabs(laplace_point4d_distance(&a, &b) - 1.0) < 1e-12,
+           "point4d distance basic");
+}
+
+static void test_s3_normalize_and_geodesic(void)
+{
+    const laplace_point4d_t p = {3.0, 0.0, 0.0, 4.0};
+    laplace_point4d_t       u;
+    laplace_s3_normalize(&p, &u);
+    EXPECT(fabs(laplace_point4d_norm(&u) - 1.0) < 1e-12, "s3 normalize result not unit");
+
+    const laplace_point4d_t a = {1.0, 0.0, 0.0, 0.0};
+    const laplace_point4d_t b = {0.0, 1.0, 0.0, 0.0};
+    const double            d = laplace_s3_geodesic_distance(&a, &b);
+    EXPECT(fabs(d - (M_PI / 2.0)) < 1e-12, "geodesic between orthogonal axes != pi/2");
+}
+
+static void test_s3_slerp_endpoints(void)
+{
+    const laplace_point4d_t a = {1.0, 0.0, 0.0, 0.0};
+    const laplace_point4d_t b = {0.0, 0.0, 0.0, 1.0};
+    laplace_point4d_t       p0, p1, ph;
+    laplace_s3_slerp(&a, &b, 0.0, &p0);
+    laplace_s3_slerp(&a, &b, 1.0, &p1);
+    laplace_s3_slerp(&a, &b, 0.5, &ph);
+    EXPECT(laplace_point4d_distance(&p0, &a) < 1e-12, "slerp t=0 != a");
+    EXPECT(laplace_point4d_distance(&p1, &b) < 1e-12, "slerp t=1 != b");
+    EXPECT(fabs(laplace_point4d_norm(&ph) - 1.0) < 1e-12, "slerp midpoint not unit");
+}
+
+static void test_quaternion_identity(void)
+{
+    const laplace_point4d_t id = {0.0, 0.0, 0.0, 1.0};
+    const laplace_point4d_t q  = {0.1, 0.2, 0.3, 0.92736185};
+    laplace_point4d_t       out;
+    laplace_quaternion_multiply(&id, &q, &out);
+    EXPECT(laplace_point4d_distance(&out, &q) < 1e-12, "1 * q != q");
+    laplace_quaternion_multiply(&q, &id, &out);
+    EXPECT(laplace_point4d_distance(&out, &q) < 1e-12, "q * 1 != q");
+}
+
+static void test_gram_schmidt_basic(void)
+{
+    /* Two collinear vectors → second collapses, rank 1. */
+    double rows[6] = {
+        1.0, 0.0, 0.0,
+        2.0, 0.0, 0.0
+    };
+    const size_t kept = laplace_gram_schmidt_orthonormalize(rows, 2, 3, 1e-12);
+    EXPECT(kept == 1, "collinear pair should collapse to rank 1");
+    EXPECT(fabs(rows[0] - 1.0) < 1e-12, "first row should be unit e_x");
+}
+
+static void test_glicko2_period_decay(void)
+{
+    const laplace_glicko2_state_t in = {0.0, laplace_glicko2_from_rating_dev(200.0), 0.06, 0};
+    laplace_glicko2_state_t       out;
+    laplace_glicko2_period_decay(&in, &out);
+    EXPECT(out.phi > in.phi, "period decay should grow RD");
+    EXPECT(out.mu == in.mu,  "period decay should not move mu");
+}
+
+static void test_glicko2_paper_example(void)
+{
+    /* Glickman 2013 worked example, §5: player rating 1500 RD 200 sigma 0.06,
+     * three opponents — wins vs 1400 RD 30, loses vs 1550 RD 100, loses vs
+     * 1700 RD 300, with tau = 0.5. Expected r ≈ 1464.06, RD ≈ 151.52,
+     * sigma ≈ 0.05999. */
+    laplace_glicko2_state_t in;
+    in.mu    = laplace_glicko2_from_rating(1500.0);
+    in.phi   = laplace_glicko2_from_rating_dev(200.0);
+    in.sigma = 0.06;
+    in.games = 0;
+
+    laplace_glicko2_observation_t obs[3] = {
+        {laplace_glicko2_from_rating(1400.0), laplace_glicko2_from_rating_dev( 30.0), 1.0, 1.0},
+        {laplace_glicko2_from_rating(1550.0), laplace_glicko2_from_rating_dev(100.0), 0.0, 1.0},
+        {laplace_glicko2_from_rating(1700.0), laplace_glicko2_from_rating_dev(300.0), 0.0, 1.0}
+    };
+
+    laplace_glicko2_state_t out;
+    laplace_glicko2_apply(&in, obs, 3, 0.5, &out);
+
+    const double r  = laplace_glicko2_to_rating(out.mu);
+    const double rd = laplace_glicko2_to_rating_dev(out.phi);
+    printf("  glicko2 result: r=%.3f rd=%.3f sigma=%.6f\n", r, rd, out.sigma);
+    EXPECT(fabs(r  - 1464.06) < 0.5,    "glicko2 paper example: rating off");
+    EXPECT(fabs(rd -  151.52) < 0.5,    "glicko2 paper example: RD off");
+    EXPECT(fabs(out.sigma - 0.05999) < 1e-3, "glicko2 paper example: sigma off");
+}
+
 int main(void)
 {
     test_version();
@@ -118,6 +222,13 @@ int main(void)
     test_rle_round_trip_bytes();
     test_superfib_unit_norm();
     test_superfib_distinct();
+    test_point4d_distance();
+    test_s3_normalize_and_geodesic();
+    test_s3_slerp_endpoints();
+    test_quaternion_identity();
+    test_gram_schmidt_basic();
+    test_glicko2_period_decay();
+    test_glicko2_paper_example();
 
     if (fail_count == 0) {
         printf("OK: all native smoke tests passed\n");

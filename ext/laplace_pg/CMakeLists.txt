@@ -38,6 +38,21 @@ set(LAPLACE_CORE_SOURCES
 
   # B4 — SuperFibonacciService
   src/superfib/superfib_4d.c
+
+  # B5 — Geometry4DService (interim: POINT4D primitives only)
+  src/geometry4d/point4d_ops.c
+
+  # B7 — S3DomainService
+  src/geometry4d/s3_ops.c
+
+  # B8 — QuaternionService
+  src/geometry4d/quaternion.c
+
+  # B16 — GramSchmidtService
+  src/gram_schmidt/gram_schmidt.c
+
+  # B18 — Glicko2Service (paper-faithful Glickman 2013)
+  src/glicko2/glicko2_apply.c
 )
 
 # Common include directories applied to both targets.
