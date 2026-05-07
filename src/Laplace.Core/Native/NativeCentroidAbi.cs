@@ -10,7 +10,7 @@ internal static partial class NativeCentroidAbi
     {
         public ulong  PrimeFlags;
         public uint   EntityId;
-        public byte   Modality;
+        public byte   StructuralFlags;
         public ushort LanguageId;
         public byte   ModelId;
         public byte   Tier;

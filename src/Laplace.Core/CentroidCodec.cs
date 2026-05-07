@@ -13,13 +13,13 @@ public sealed class CentroidCodec : ICentroidCodec
         var native = ToNative(position);
         var p = new NativeCentroidAbi.PayloadV1
         {
-            PrimeFlags = payload.PrimeFlags,
-            EntityId   = payload.EntityId,
-            Modality   = payload.Modality,
-            LanguageId = payload.LanguageId,
-            ModelId    = payload.ModelId,
-            Tier       = payload.Tier,
-            Reserved   = payload.Reserved,
+            PrimeFlags      = payload.PrimeFlags,
+            EntityId        = payload.EntityId,
+            StructuralFlags = payload.StructuralFlags,
+            LanguageId      = payload.LanguageId,
+            ModelId         = payload.ModelId,
+            Tier            = payload.Tier,
+            Reserved        = payload.Reserved,
         };
         NativeCentroidAbi.EncodeV1(ref native, in p);
         return ToManaged(native);
@@ -30,13 +30,13 @@ public sealed class CentroidCodec : ICentroidCodec
         var native = ToNative(position);
         NativeCentroidAbi.DecodeV1(in native, out var p);
         return new CentroidPayloadV1(
-            PrimeFlags: p.PrimeFlags,
-            EntityId:   p.EntityId,
-            Modality:   p.Modality,
-            LanguageId: p.LanguageId,
-            ModelId:    p.ModelId,
-            Tier:       p.Tier,
-            Reserved:   p.Reserved);
+            PrimeFlags:      p.PrimeFlags,
+            EntityId:        p.EntityId,
+            StructuralFlags: p.StructuralFlags,
+            LanguageId:      p.LanguageId,
+            ModelId:         p.ModelId,
+            Tier:            p.Tier,
+            Reserved:        p.Reserved);
     }
 
     public Point4D StripPayload(Point4D position)

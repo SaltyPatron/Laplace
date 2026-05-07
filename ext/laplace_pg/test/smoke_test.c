@@ -273,26 +273,26 @@ static void test_centroid_abi_round_trip(void)
     laplace_s3_normalize(&p, &p);
 
     const laplace_centroid_payload_v1_t payload_in = {
-        .prime_flags = LAPLACE_FLAG_NOUN | LAPLACE_FLAG_ANIMATE | LAPLACE_FLAG_CONCRETE
-                       | LAPLACE_FLAG_SINGULAR | LAPLACE_FLAG_TEXT,
-        .entity_id   = 0xDEADBEEFu,
-        .modality    = LAPLACE_MODALITY_TEXT,
-        .language_id = 1234,
-        .model_id    = 0,
-        .tier        = 1,
-        .reserved    = 0,
+        .prime_flags      = LAPLACE_FLAG_NOUN | LAPLACE_FLAG_ANIMATE | LAPLACE_FLAG_CONCRETE
+                            | LAPLACE_FLAG_SINGULAR | LAPLACE_FLAG_TEXT | LAPLACE_FLAG_IMAGE,
+        .entity_id        = 0xDEADBEEFu,
+        .structural_flags = LAPLACE_STRUCT_INTERROG | LAPLACE_STRUCT_MODAL,
+        .language_id      = 1234,
+        .model_id         = 0,
+        .tier             = 1,
+        .reserved         = 0,
     };
     laplace_centroid_encode_v1(&p, &payload_in);
 
     laplace_centroid_payload_v1_t payload_out;
     laplace_centroid_decode_v1(&p, &payload_out);
 
-    EXPECT(payload_out.prime_flags == payload_in.prime_flags, "centroid abi: prime_flags lost");
-    EXPECT(payload_out.entity_id   == payload_in.entity_id,   "centroid abi: entity_id lost");
-    EXPECT(payload_out.modality    == payload_in.modality,    "centroid abi: modality lost");
-    EXPECT(payload_out.language_id == payload_in.language_id, "centroid abi: language_id lost");
-    EXPECT(payload_out.model_id    == payload_in.model_id,    "centroid abi: model_id lost");
-    EXPECT(payload_out.tier        == payload_in.tier,        "centroid abi: tier lost");
+    EXPECT(payload_out.prime_flags      == payload_in.prime_flags,      "centroid abi: prime_flags lost");
+    EXPECT(payload_out.entity_id        == payload_in.entity_id,        "centroid abi: entity_id lost");
+    EXPECT(payload_out.structural_flags == payload_in.structural_flags, "centroid abi: structural_flags lost");
+    EXPECT(payload_out.language_id      == payload_in.language_id,      "centroid abi: language_id lost");
+    EXPECT(payload_out.model_id         == payload_in.model_id,         "centroid abi: model_id lost");
+    EXPECT(payload_out.tier             == payload_in.tier,             "centroid abi: tier lost");
 }
 
 static void test_centroid_abi_geometry_preserved(void)
@@ -304,13 +304,13 @@ static void test_centroid_abi_geometry_preserved(void)
     const double norm_before = laplace_point4d_norm(&p);
 
     const laplace_centroid_payload_v1_t payload = {
-        .prime_flags = ~0ULL,           /* worst case: all bits set */
-        .entity_id   = 0xFFFFFFFFu,
-        .modality    = 0xFFu,
-        .language_id = 0xFFFFu,
-        .model_id    = 0xFFu,
-        .tier        = 0x0Fu,
-        .reserved    = 0xFFFFFu,
+        .prime_flags      = ~0ULL,           /* worst case: all bits set */
+        .entity_id        = 0xFFFFFFFFu,
+        .structural_flags = 0xFFu,
+        .language_id      = 0xFFFFu,
+        .model_id         = 0xFFu,
+        .tier             = 0x0Fu,
+        .reserved         = 0xFFFFFu,
     };
     laplace_centroid_encode_v1(&p, &payload);
 
@@ -324,13 +324,13 @@ static void test_centroid_abi_strip(void)
     laplace_point4d_t p = {0.5, 0.5, 0.5, 0.5};
     laplace_s3_normalize(&p, &p);
     const laplace_centroid_payload_v1_t payload = {
-        .prime_flags = LAPLACE_FLAG_VERB | LAPLACE_FLAG_PAST,
-        .entity_id   = 42,
-        .modality    = LAPLACE_MODALITY_TEXT,
-        .language_id = 0,
-        .model_id    = 0,
-        .tier        = 2,
-        .reserved    = 0,
+        .prime_flags      = LAPLACE_FLAG_VERB | LAPLACE_FLAG_PAST | LAPLACE_FLAG_TEXT,
+        .entity_id        = 42,
+        .structural_flags = 0,
+        .language_id      = 0,
+        .model_id         = 0,
+        .tier             = 2,
+        .reserved         = 0,
     };
     laplace_point4d_t stuffed = p;
     laplace_centroid_encode_v1(&stuffed, &payload);

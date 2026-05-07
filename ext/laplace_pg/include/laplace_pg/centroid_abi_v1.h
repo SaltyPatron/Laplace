@@ -10,10 +10,11 @@
  *
  * Layout (152 bits total, distributed across the 4 doubles of a POINT4D):
  *
- *   Bits   0..63  : prime-flag bitmask (universal, language-agnostic)
+ *   Bits   0..63  : prime-flag bitmask (universal, language-agnostic; ALL bits
+ *                   are powers of two, OR-combinable for multi-choice)
  *   Bits  64..95  : entity_id (32-bit substrate-monotonic; codepoint
  *                              integer for tier-0, allocated id for tier-1+)
- *   Bits  96..103 : modality enum (8 bits)
+ *   Bits  96..103 : structural_flags (8 bits, ALL powers of two — bitmask)
  *   Bits 104..119 : language id (16 bits, ISO 639 + extensions)
  *   Bits 120..127 : model id (8 bits — for fireflies; 0 for substrate atoms)
  *   Bits 128..131 : tier (4 bits)
@@ -99,10 +100,11 @@ extern "C" {
 #define LAPLACE_FLAG_CASE_ABL      (1ULL << 42)
 #define LAPLACE_FLAG_CASE_VOC      (1ULL << 43)
 
-/* Modality kind (8 bits, 44..51). Distinct from the per-centroid
- * `modality` byte at bits 96..103: this flag bitmask records which
- * modalities a composition spans (a parallel-corpus sentence might
- * have TEXT ∪ AUDIO if it has an audio recording). */
+/* Modality (16 bits, 44..59). All powers of two — OR-combinable bitmask.
+ * A composition that spans multiple modalities sets multiple bits
+ * (a parallel-corpus sentence with audio sets TEXT | AUDIO; a multimodal
+ * embedding sets TEXT | IMAGE; a structured spreadsheet of code samples
+ * sets STRUCTURED | CODE | TEXT). */
 #define LAPLACE_FLAG_TEXT          (1ULL << 44)
 #define LAPLACE_FLAG_SPEECH        (1ULL << 45)
 #define LAPLACE_FLAG_IMAGE         (1ULL << 46)
@@ -111,43 +113,32 @@ extern "C" {
 #define LAPLACE_FLAG_MATH          (1ULL << 49)
 #define LAPLACE_FLAG_CODE          (1ULL << 50)
 #define LAPLACE_FLAG_SIGN          (1ULL << 51)
-
-/* Structural (8 bits, 52..59). */
-#define LAPLACE_FLAG_SELF_REF      (1ULL << 52)
-#define LAPLACE_FLAG_NEGATION      (1ULL << 53)
-#define LAPLACE_FLAG_INTERROG      (1ULL << 54)
-#define LAPLACE_FLAG_IMPERATIVE    (1ULL << 55)
-#define LAPLACE_FLAG_CONDITIONAL   (1ULL << 56)
-#define LAPLACE_FLAG_COUNTERFACT   (1ULL << 57)
-#define LAPLACE_FLAG_MODAL         (1ULL << 58)
-#define LAPLACE_FLAG_EVIDENTIAL    (1ULL << 59)
+#define LAPLACE_FLAG_STRUCTURED    (1ULL << 52)
+#define LAPLACE_FLAG_TIMESERIES    (1ULL << 53)
+#define LAPLACE_FLAG_GEO           (1ULL << 54)
+#define LAPLACE_FLAG_NETWORK       (1ULL << 55)
+#define LAPLACE_FLAG_BIO           (1ULL << 56)
+#define LAPLACE_FLAG_CAD           (1ULL << 57)
+#define LAPLACE_FLAG_GAME          (1ULL << 58)
+#define LAPLACE_FLAG_ENCRYPTED     (1ULL << 59)
 
 /* Bits 60..63 reserved for v1.x prime extensions. */
 
 /* ------------------------------------------------------------------ */
-/* Modality enum — bits 96..103.                                       */
+/* Structural flags — bits 96..103 (8 bits, ALL powers of two).        */
+/*                                                                     */
+/* These were previously co-located in prime_flags 52..59; lifting     */
+/* them to their own byte freed those bits for modality expansion.     */
 /* ------------------------------------------------------------------ */
 
-#define LAPLACE_MODALITY_UNKNOWN     0
-#define LAPLACE_MODALITY_TEXT        1
-#define LAPLACE_MODALITY_SPEECH      2
-#define LAPLACE_MODALITY_IMAGE       3
-#define LAPLACE_MODALITY_AUDIO       4
-#define LAPLACE_MODALITY_VIDEO       5
-#define LAPLACE_MODALITY_MATH        6
-#define LAPLACE_MODALITY_CODE        7
-#define LAPLACE_MODALITY_SIGN        8
-#define LAPLACE_MODALITY_STRUCTURED  9   /* JSON/XML/YAML/etc.    */
-#define LAPLACE_MODALITY_TIMESERIES 10
-#define LAPLACE_MODALITY_GEO        11
-#define LAPLACE_MODALITY_NETWORK    12
-#define LAPLACE_MODALITY_BIO        13
-#define LAPLACE_MODALITY_CAD        14
-#define LAPLACE_MODALITY_GAME       15
-#define LAPLACE_MODALITY_ENCRYPTED  16
-#define LAPLACE_MODALITY_COMPRESSED 17
-#define LAPLACE_MODALITY_FILESYSTEM 18
-/* 19..255 reserved for v1.x. */
+#define LAPLACE_STRUCT_NEGATION    (1u << 0)
+#define LAPLACE_STRUCT_INTERROG    (1u << 1)
+#define LAPLACE_STRUCT_IMPERATIVE  (1u << 2)
+#define LAPLACE_STRUCT_CONDITIONAL (1u << 3)
+#define LAPLACE_STRUCT_COUNTERFACT (1u << 4)
+#define LAPLACE_STRUCT_MODAL       (1u << 5)
+#define LAPLACE_STRUCT_EVIDENTIAL  (1u << 6)
+#define LAPLACE_STRUCT_SELF_REF    (1u << 7)
 
 /* ------------------------------------------------------------------ */
 /* Encode / decode payload from a POINT4D centroid.                    */
@@ -157,13 +148,13 @@ extern "C" {
 /* ------------------------------------------------------------------ */
 
 typedef struct {
-    uint64_t prime_flags;     /* 64-bit bitmask of LAPLACE_FLAG_* */
+    uint64_t prime_flags;       /* 64-bit OR-combinable bitmask of LAPLACE_FLAG_* */
     uint32_t entity_id;
-    uint8_t  modality;        /* LAPLACE_MODALITY_*            */
-    uint16_t language_id;     /* ISO 639 + extensions          */
-    uint8_t  model_id;        /* 0 for substrate atoms         */
-    uint8_t  tier;            /* 0..15                         */
-    uint32_t reserved;        /* bits 132..151 (use 0 in v1.0) */
+    uint8_t  structural_flags;  /* 8-bit OR-combinable bitmask of LAPLACE_STRUCT_* */
+    uint16_t language_id;       /* ISO 639 + extensions          */
+    uint8_t  model_id;          /* 0 for substrate atoms         */
+    uint8_t  tier;              /* 0..15                         */
+    uint32_t reserved;          /* bits 132..151 (use 0 in v1.0) */
 } laplace_centroid_payload_v1_t;
 
 /* Encode payload into the mantissa bits of `position`. Modifies the

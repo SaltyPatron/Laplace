@@ -11,20 +11,23 @@ namespace Laplace.Core.Abstractions;
 public readonly record struct CentroidPayloadV1(
     ulong  PrimeFlags,
     uint   EntityId,
-    byte   Modality,
+    byte   StructuralFlags,
     ushort LanguageId,
     byte   ModelId,
     byte   Tier,
     uint   Reserved = 0)
 {
-    public CentroidPayloadV1 WithPrimeFlags(ulong flags)        => this with { PrimeFlags = flags };
-    public CentroidPayloadV1 OrPrimeFlags(ulong flags)          => this with { PrimeFlags = PrimeFlags | flags };
-    public CentroidPayloadV1 WithModality(byte modality)        => this with { Modality = modality };
-    public CentroidPayloadV1 WithLanguage(ushort lang)          => this with { LanguageId = lang };
-    public CentroidPayloadV1 WithModelId(byte model)            => this with { ModelId = model };
+    public CentroidPayloadV1 WithPrimeFlags(ulong flags)             => this with { PrimeFlags = flags };
+    public CentroidPayloadV1 OrPrimeFlags(ulong flags)               => this with { PrimeFlags = PrimeFlags | flags };
+    public CentroidPayloadV1 WithStructuralFlags(byte flags)         => this with { StructuralFlags = flags };
+    public CentroidPayloadV1 OrStructuralFlags(byte flags)           => this with { StructuralFlags = (byte)(StructuralFlags | flags) };
+    public CentroidPayloadV1 WithLanguage(ushort lang)               => this with { LanguageId = lang };
+    public CentroidPayloadV1 WithModelId(byte model)                 => this with { ModelId = model };
 
     public bool HasPrime(ulong mask)     => (PrimeFlags & mask) != 0;
     public bool HasAllPrimes(ulong mask) => (PrimeFlags & mask) == mask;
+    public bool HasStructural(byte mask)     => (StructuralFlags & mask) != 0;
+    public bool HasAllStructural(byte mask)  => (StructuralFlags & mask) == mask;
 }
 
 /// <summary>
@@ -94,53 +97,41 @@ public static class PrimeFlags
     public const ulong CaseAblative     = 1UL << 42;
     public const ulong CaseVocative     = 1UL << 43;
 
-    /* Modality kind flags (8 bits, 44..51). Distinct from the per-centroid
-     * modality enum byte at bits 96..103: this flag bitmask records which
-     * modalities a composition spans (a parallel-corpus sentence might
-     * have Text ∪ Audio if it has an audio recording). */
-    public const ulong Text     = 1UL << 44;
-    public const ulong Speech   = 1UL << 45;
-    public const ulong Image    = 1UL << 46;
-    public const ulong Audio    = 1UL << 47;
-    public const ulong Video    = 1UL << 48;
-    public const ulong Math     = 1UL << 49;
-    public const ulong Code     = 1UL << 50;
-    public const ulong Sign     = 1UL << 51;
-
-    /* Structural (8 bits, 52..59). */
-    public const ulong SelfReferential = 1UL << 52;
-    public const ulong Negation        = 1UL << 53;
-    public const ulong Interrogative   = 1UL << 54;
-    public const ulong Imperative      = 1UL << 55;
-    public const ulong Conditional     = 1UL << 56;
-    public const ulong Counterfactual  = 1UL << 57;
-    public const ulong Modal           = 1UL << 58;
-    public const ulong Evidential      = 1UL << 59;
+    /* Modality (16 bits, 44..59). All powers of two — OR-combinable bitmask.
+     * A composition that spans multiple modalities sets multiple bits. */
+    public const ulong Text         = 1UL << 44;
+    public const ulong Speech       = 1UL << 45;
+    public const ulong Image        = 1UL << 46;
+    public const ulong Audio        = 1UL << 47;
+    public const ulong Video        = 1UL << 48;
+    public const ulong Math         = 1UL << 49;
+    public const ulong Code         = 1UL << 50;
+    public const ulong Sign         = 1UL << 51;
+    public const ulong Structured   = 1UL << 52;
+    public const ulong TimeSeries   = 1UL << 53;
+    public const ulong Geo          = 1UL << 54;
+    public const ulong Network      = 1UL << 55;
+    public const ulong Bio          = 1UL << 56;
+    public const ulong Cad          = 1UL << 57;
+    public const ulong Game         = 1UL << 58;
+    public const ulong Encrypted    = 1UL << 59;
 
     /* Bits 60..63 reserved for v1.x extensions. */
 }
 
-/// <summary>Modality enum constants — bits 96..103 of the centroid payload.</summary>
-public static class ModalityKind
+/// <summary>
+/// Structural flags — 8-bit OR-combinable bitmask at bits 96..103 of the
+/// centroid payload. All powers of two; lifted out of prime_flags 52..59
+/// to free those bits for modality flag expansion to 16 modalities.
+/// </summary>
+public static class StructuralFlags
 {
-    public const byte Unknown     = 0;
-    public const byte Text        = 1;
-    public const byte Speech      = 2;
-    public const byte Image       = 3;
-    public const byte Audio       = 4;
-    public const byte Video       = 5;
-    public const byte Math        = 6;
-    public const byte Code        = 7;
-    public const byte Sign        = 8;
-    public const byte Structured  = 9;
-    public const byte TimeSeries  = 10;
-    public const byte Geo         = 11;
-    public const byte Network     = 12;
-    public const byte Bio         = 13;
-    public const byte Cad         = 14;
-    public const byte Game        = 15;
-    public const byte Encrypted   = 16;
-    public const byte Compressed  = 17;
-    public const byte Filesystem  = 18;
-    /* 19..255 reserved for v1.x. */
+    public const byte Negation       = 1 << 0;
+    public const byte Interrogative  = 1 << 1;
+    public const byte Imperative     = 1 << 2;
+    public const byte Conditional    = 1 << 3;
+    public const byte Counterfactual = 1 << 4;
+    public const byte Modal          = 1 << 5;
+    public const byte Evidential     = 1 << 6;
+    public const byte SelfReferential = 1 << 7;
 }

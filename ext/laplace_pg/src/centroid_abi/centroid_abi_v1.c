@@ -64,8 +64,8 @@ static void pack_payload(const laplace_centroid_payload_v1_t *p,
     /* entity_id (32 bits) → buf bits 64..95 */
     buf[1] |= (uint64_t) p->entity_id;
 
-    /* modality (8 bits) → buf bits 96..103 */
-    buf[1] |= ((uint64_t) p->modality) << 32;
+    /* structural_flags (8 bits) → buf bits 96..103 */
+    buf[1] |= ((uint64_t) p->structural_flags) << 32;
 
     /* language_id (16 bits) → buf bits 104..119 */
     buf[1] |= ((uint64_t) p->language_id) << 40;
@@ -112,13 +112,13 @@ static void unpack_payload(const uint64_t                  chunks[4],
         }
     }
 
-    out->prime_flags = buf[0];
-    out->entity_id   = (uint32_t) (buf[1] & 0xFFFFFFFFu);
-    out->modality    = (uint8_t) ((buf[1] >> 32) & 0xFFu);
-    out->language_id = (uint16_t) ((buf[1] >> 40) & 0xFFFFu);
-    out->model_id    = (uint8_t) ((buf[1] >> 56) & 0xFFu);
-    out->tier        = (uint8_t) (buf[2] & 0xFu);
-    out->reserved    = (uint32_t) ((buf[2] >> 4) & 0xFFFFFu);
+    out->prime_flags      = buf[0];
+    out->entity_id        = (uint32_t) (buf[1] & 0xFFFFFFFFu);
+    out->structural_flags = (uint8_t) ((buf[1] >> 32) & 0xFFu);
+    out->language_id      = (uint16_t) ((buf[1] >> 40) & 0xFFFFu);
+    out->model_id         = (uint8_t) ((buf[1] >> 56) & 0xFFu);
+    out->tier             = (uint8_t) (buf[2] & 0xFu);
+    out->reserved         = (uint32_t) ((buf[2] >> 4) & 0xFFFFFu);
 }
 
 void laplace_centroid_encode_v1(laplace_point4d_t                   *position,
