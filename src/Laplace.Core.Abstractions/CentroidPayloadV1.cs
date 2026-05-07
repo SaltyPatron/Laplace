@@ -1,45 +1,21 @@
 namespace Laplace.Core.Abstractions;
 
 /// <summary>
-/// Managed mirror of the substrate's frozen v1.0 centroid mantissa ABI.
-/// Bit positions and field semantics are documented in the native header
-/// <c>centroid_abi_v1.h</c>; ANY change here MUST be made in lockstep with
-/// the native side and bumps the ABI version.
+/// v1.0 prime-flag bit constants. Used as VALUES of the entity.prime_flags
+/// bigint column — NOT as positions in a POINT4D mantissa, NOT as entity
+/// references. Each constant is a power of two so multiple flags compose
+/// via bitwise OR.
 ///
-/// Phase 2 / Track D / cross-cutting (centroid mantissa codec).
-/// </summary>
-public readonly record struct CentroidPayloadV1(
-    ulong  PrimeFlags,
-    uint   EntityId,
-    byte   StructuralFlags,
-    ushort LanguageId,
-    byte   ModelId,
-    byte   Tier,
-    uint   Reserved = 0)
-{
-    public CentroidPayloadV1 WithPrimeFlags(ulong flags)             => this with { PrimeFlags = flags };
-    public CentroidPayloadV1 OrPrimeFlags(ulong flags)               => this with { PrimeFlags = PrimeFlags | flags };
-    public CentroidPayloadV1 WithStructuralFlags(byte flags)         => this with { StructuralFlags = flags };
-    public CentroidPayloadV1 OrStructuralFlags(byte flags)           => this with { StructuralFlags = (byte)(StructuralFlags | flags) };
-    public CentroidPayloadV1 WithLanguage(ushort lang)               => this with { LanguageId = lang };
-    public CentroidPayloadV1 WithModelId(byte model)                 => this with { ModelId = model };
-
-    public bool HasPrime(ulong mask)     => (PrimeFlags & mask) != 0;
-    public bool HasAllPrimes(ulong mask) => (PrimeFlags & mask) == mask;
-    public bool HasStructural(byte mask)     => (StructuralFlags & mask) != 0;
-    public bool HasAllStructural(byte mask)  => (StructuralFlags & mask) == mask;
-}
-
-/// <summary>
-/// Frozen v1.0 prime-flag bit constants. These mirror the LAPLACE_FLAG_*
-/// macros in <c>centroid_abi_v1.h</c> bit-for-bit. Changing any constant
-/// invalidates every centroid in every substrate database.
+/// The bit positions have NO name in any natural language. They are pure
+/// positional enumerations in a frozen substrate ABI. Cross-language
+/// equivalence (cat / neko / gato / chat) is graph-emergent from ingested
+/// sources (WordNet, OMW, Wiktionary, Tatoeba, UD), NOT from any anchor
+/// entity. The flags here mark per-entity attested categories.
 ///
-/// The bit positions have NO name in any natural language — they are pure
-/// enumerations. cat / neko / gato / chat / кот / 猫 / kissa are peer
-/// entities; cross-language equivalence is graph-emergent from ingested
-/// sources (WordNet, OMW, Wiktionary, Tatoeba, UD), not from any anchor
-/// entity. The flags here just mark per-entity attested categories.
+/// Position is a pure function of content (super-Fibonacci for tier-0,
+/// centroid-of-children for tier-1+) and never mutates. These flags
+/// accumulate via OR on the sidecar column as sources attest more
+/// categories — without ever perturbing geometry.
 /// </summary>
 public static class PrimeFlags
 {
@@ -97,8 +73,7 @@ public static class PrimeFlags
     public const ulong CaseAblative     = 1UL << 42;
     public const ulong CaseVocative     = 1UL << 43;
 
-    /* Modality (16 bits, 44..59). All powers of two — OR-combinable bitmask.
-     * A composition that spans multiple modalities sets multiple bits. */
+    /* Modality (16 bits, 44..59). All powers of two — OR-combinable. */
     public const ulong Text         = 1UL << 44;
     public const ulong Speech       = 1UL << 45;
     public const ulong Image        = 1UL << 46;
@@ -120,18 +95,17 @@ public static class PrimeFlags
 }
 
 /// <summary>
-/// Structural flags — 8-bit OR-combinable bitmask at bits 96..103 of the
-/// centroid payload. All powers of two; lifted out of prime_flags 52..59
-/// to free those bits for modality flag expansion to 16 modalities.
+/// v1.0 structural flag constants. Used as VALUES of the
+/// entity.structural_flags smallint column. Powers of two, OR-combinable.
 /// </summary>
 public static class StructuralFlags
 {
-    public const byte Negation       = 1 << 0;
-    public const byte Interrogative  = 1 << 1;
-    public const byte Imperative     = 1 << 2;
-    public const byte Conditional    = 1 << 3;
-    public const byte Counterfactual = 1 << 4;
-    public const byte Modal          = 1 << 5;
-    public const byte Evidential     = 1 << 6;
+    public const byte Negation        = 1 << 0;
+    public const byte Interrogative   = 1 << 1;
+    public const byte Imperative      = 1 << 2;
+    public const byte Conditional     = 1 << 3;
+    public const byte Counterfactual  = 1 << 4;
+    public const byte Modal           = 1 << 5;
+    public const byte Evidential      = 1 << 6;
     public const byte SelfReferential = 1 << 7;
 }

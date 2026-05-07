@@ -59,9 +59,6 @@ set(LAPLACE_CORE_SOURCES
 
   # B18 — Glicko2Service (paper-faithful Glickman 2013)
   src/glicko2/glicko2_apply.c
-
-  # CentroidAbiService — v1.0 mantissa bit-bang ABI for centroid payload
-  src/centroid_abi/centroid_abi_v1.c
 )
 
 # C3 — SQL-side function bindings (compiled into the laplace_pg PG extension

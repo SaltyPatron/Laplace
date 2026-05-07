@@ -71,3 +71,35 @@ LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
 
 COMMENT ON FUNCTION laplace.hilbert_index(bytea) IS
   '64-bit Hilbert index for a 4D position bytea (Skilling 2003, 16 bits per axis).';
+
+-- ---------- Sidecar metadata predicates --------------------------------
+--
+-- Operate on the physicality.prime_flags / structural_flags / language_id
+-- / model_id sidecar columns — pure SQL, IMMUTABLE + PARALLEL SAFE so they
+-- participate in index predicate pushdown. Position is content-derived and
+-- never mutates; these flags accumulate via UPDATE ... SET prime_flags =
+-- prime_flags | $new as more sources attest.
+
+CREATE FUNCTION laplace.has_prime(flags bigint, mask bigint)
+RETURNS boolean
+AS $$ SELECT ($1 & $2) <> 0 $$
+LANGUAGE SQL IMMUTABLE PARALLEL SAFE;
+
+COMMENT ON FUNCTION laplace.has_prime(bigint, bigint) IS
+  'True if any bit in mask is set in flags. Use for OR-style filters.';
+
+CREATE FUNCTION laplace.has_all_primes(flags bigint, mask bigint)
+RETURNS boolean
+AS $$ SELECT ($1 & $2) = $2 $$
+LANGUAGE SQL IMMUTABLE PARALLEL SAFE;
+
+COMMENT ON FUNCTION laplace.has_all_primes(bigint, bigint) IS
+  'True only if every bit in mask is set in flags. Use for conjunctive filters.';
+
+CREATE FUNCTION laplace.has_structural(flags smallint, mask smallint)
+RETURNS boolean
+AS $$ SELECT ($1::int & $2::int) <> 0 $$
+LANGUAGE SQL IMMUTABLE PARALLEL SAFE;
+
+COMMENT ON FUNCTION laplace.has_structural(smallint, smallint) IS
+  'True if any bit in mask is set in structural_flags.';
