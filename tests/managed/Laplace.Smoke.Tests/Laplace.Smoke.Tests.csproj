@@ -5,6 +5,8 @@
     <AssemblyName>Laplace.Smoke.Tests</AssemblyName>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- Test method names follow xUnit's MethodName_Scenario_ExpectedBehavior convention -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

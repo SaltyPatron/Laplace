@@ -15,7 +15,10 @@ public class SmokeTests
     public void AtomId_FromSpan_RoundTrips()
     {
         var bytes = new byte[AtomId.SizeBytes];
-        for (var i = 0; i < bytes.Length; i++) bytes[i] = (byte)i;
+        for (var i = 0; i < bytes.Length; i++)
+        {
+            bytes[i] = (byte)i;
+        }
 
         var atom = AtomId.FromSpan(bytes);
 
