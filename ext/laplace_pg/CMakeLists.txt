@@ -61,6 +61,15 @@ set(LAPLACE_CORE_SOURCES
   src/glicko2/glicko2_apply.c
 )
 
+# C3 — SQL-side function bindings (compiled into the laplace_pg PG extension
+# target only; gated by LAPLACE_BUILD_PG_EXTENSION inside each file).
+set(LAPLACE_SQL_BINDING_SOURCES
+  src/sql_bindings/sql_hash.c
+  src/sql_bindings/sql_glicko2.c
+  src/sql_bindings/sql_superfib.c
+  src/sql_bindings/sql_hilbert.c
+)
+
 # Common include directories applied to both targets.
 set(LAPLACE_COMMON_INCLUDE_DIRS
   ${LAPLACE_PG_PUBLIC_INCLUDE_DIR}
@@ -79,7 +88,7 @@ set(LAPLACE_COMMON_DEFS
 # Target 1 — laplace_pg : PostgreSQL extension shared library
 # ------------------------------------------------------------------
 
-add_library(laplace_pg MODULE ${LAPLACE_CORE_SOURCES})
+add_library(laplace_pg MODULE ${LAPLACE_CORE_SOURCES} ${LAPLACE_SQL_BINDING_SOURCES})
 
 set_target_properties(laplace_pg PROPERTIES
   PREFIX ""
