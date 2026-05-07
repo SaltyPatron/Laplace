@@ -100,6 +100,7 @@ seeded-cache/
 # Ignore generated UCD binary tables produced by Phase 3
 ext/laplace_pg/include/laplace_pg/generated/
 ext/laplace_pg/src/ucd/generated/
+ext/laplace_pg/generated/
 
 # AddressSanitizer / sanitizer output
 asan.log*

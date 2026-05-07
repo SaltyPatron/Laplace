@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Laplace.SeedTableGenerator</RootNamespace>
+    <AssemblyName>laplace-seed-gen</AssemblyName>
+    <UseNativeRuntime>true</UseNativeRuntime>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Laplace.Core.Abstractions\Laplace.Core.Abstractions.csproj" />
+    <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.Ucd\Laplace.Decomposers.Ucd.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.Iso639\Laplace.Decomposers.Iso639.csproj" />
+  </ItemGroup>
+
+</Project>
