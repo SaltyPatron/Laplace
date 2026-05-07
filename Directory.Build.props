@@ -45,7 +45,8 @@
     <Copyright>Copyright (c) Anthony Hart</Copyright>
 
     <!-- Package metadata defaults (override per project) -->
-    <PackageProjectUrl>https://github.com/yourorg/laplace</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/SaltyPatron/Laplace</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/SaltyPatron/Laplace</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>UNLICENSED</PackageLicenseExpression>
     <IsPackable>false</IsPackable>
