@@ -1,25 +1,26 @@
 namespace Laplace.Pipeline.Abstractions;
 
+using System.Threading;
+using System.Threading.Tasks;
+
 using Laplace.Core.Abstractions;
 
 /// <summary>
-/// In-process cache of (codepoint integer ↔ atom hash) for the full Unicode
-/// codepoint pool. Loaded at startup once Phase 3 has seeded the substrate;
-/// immutable thereafter.
-///
-/// The substrate's tier-0 atom pool is the FULL 1,114,112-codepoint Unicode
-/// space (17 planes × 65,536), not just currently-assigned (~155K). Reserved
-/// codepoints have atom rows so their S³ positions exist for future Unicode
-/// versions to light up.
+/// In-memory codepoint → entity_hash lookup. Loaded once at startup from
+/// the SeedTableGenerator's seed_db_rows.tsv (or computed on-the-fly via
+/// IIdentityHashing as a fallback). Decomposers hit this for tier-0 atom
+/// hashes without round-tripping the database — the substrate's content-
+/// addressed identity invariant means same codepoint always produces the
+/// same hash regardless of which lookup mechanism resolves it.
 /// </summary>
 public interface ICodepointPool
 {
-    /// <summary>Total codepoints in the pool — always 1,114,112.</summary>
-    int TotalCodepoints { get; }
+    /// <summary>Load the codepoint → hash mapping from a generator TSV (idempotent).</summary>
+    Task LoadFromTsvAsync(string seedDbRowsTsvPath, CancellationToken cancellationToken);
 
-    /// <summary>Look up the atom hash for a codepoint (0..0x10FFFF).</summary>
-    AtomId AtomFor(int codepoint);
-
-    /// <summary>Bulk lookup for a stream of codepoints (avoids per-codepoint dictionary cost in tight loops).</summary>
-    void AtomsFor(System.ReadOnlySpan<int> codepoints, System.Span<AtomId> destination);
+    /// <summary>
+    /// Resolve a codepoint to its substrate entity_hash. Falls back to
+    /// computing the hash if the codepoint is not in the pool yet.
+    /// </summary>
+    AtomId AtomIdFor(int codepoint);
 }
