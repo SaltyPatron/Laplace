@@ -42,11 +42,17 @@ set(LAPLACE_CORE_SOURCES
   # B5 — Geometry4DService (interim: POINT4D primitives only)
   src/geometry4d/point4d_ops.c
 
+  # B6 — Geometry4DOperatorsService (interim: Frechet + Hausdorff)
+  src/geometry4d/polyline4d_distances.c
+
   # B7 — S3DomainService
   src/geometry4d/s3_ops.c
 
   # B8 — QuaternionService
   src/geometry4d/quaternion.c
+
+  # B9 — HilbertCurveService (Skilling 2003, 4D, 16-bit-per-axis)
+  src/hilbert/hilbert_4d.c
 
   # B16 — GramSchmidtService
   src/gram_schmidt/gram_schmidt.c

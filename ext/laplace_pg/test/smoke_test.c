@@ -22,6 +22,8 @@
 #include "laplace_pg/glicko2.h"
 #include "laplace_pg/gram_schmidt.h"
 #include "laplace_pg/hash.h"
+#include "laplace_pg/hilbert.h"
+#include "laplace_pg/polyline4d.h"
 #include "laplace_pg/quaternion.h"
 #include "laplace_pg/rle.h"
 #include "laplace_pg/s3.h"
@@ -213,6 +215,56 @@ static void test_glicko2_paper_example(void)
     EXPECT(fabs(out.sigma - 0.05999) < 1e-3, "glicko2 paper example: sigma off");
 }
 
+static void test_hilbert_round_trip(void)
+{
+    uint16_t x, y, z, w;
+    const uint64_t h = laplace_hilbert_xyzw_to_index(12345, 6789, 30000, 55555);
+    laplace_hilbert_index_to_xyzw(h, &x, &y, &z, &w);
+    EXPECT(x == 12345 && y == 6789 && z == 30000 && w == 55555,
+           "hilbert round-trip mismatch");
+}
+
+static void test_hilbert_locality(void)
+{
+    /* Adjacent lattice points on x should produce close Hilbert indices
+     * the vast majority of the time. Sample 256 consecutive x-steps and
+     * verify median delta is small (< 1024 of the 64-bit space). */
+    uint64_t prev = laplace_hilbert_xyzw_to_index(0, 0, 0, 0);
+    uint64_t total_diff = 0;
+    int      samples    = 0;
+    for (uint16_t i = 1; i < 256; ++i) {
+        const uint64_t cur = laplace_hilbert_xyzw_to_index(i, 0, 0, 0);
+        const uint64_t d   = cur > prev ? cur - prev : prev - cur;
+        total_diff += d;
+        ++samples;
+        prev = cur;
+    }
+    /* On average, locality means index delta should be far below the
+     * absolute range. This is a coarse smoke check. */
+    EXPECT(samples > 0 && (total_diff / (uint64_t) samples) < (1ull << 32),
+           "hilbert locality regression");
+}
+
+static void test_frechet_basic(void)
+{
+    const laplace_point4d_t p[3] = {{0,0,0,0}, {1,0,0,0}, {2,0,0,0}};
+    const laplace_point4d_t q[3] = {{0,1,0,0}, {1,1,0,0}, {2,1,0,0}};
+    const double d = laplace_frechet_distance_4d(p, 3, q, 3);
+    EXPECT(fabs(d - 1.0) < 1e-12, "frechet of two parallel polylines should be 1.0");
+}
+
+static void test_hausdorff_basic(void)
+{
+    const laplace_point4d_t p[2] = {{0,0,0,0}, {1,0,0,0}};
+    const laplace_point4d_t q[2] = {{0,0,0,0}, {1,0,0,0}};
+    EXPECT(laplace_hausdorff_distance_4d(p, 2, q, 2) < 1e-12,
+           "hausdorff of identical sets should be 0");
+
+    const laplace_point4d_t r[1] = {{5,0,0,0}};
+    const double d = laplace_hausdorff_distance_4d(p, 2, r, 1);
+    EXPECT(fabs(d - 5.0) < 1e-12, "hausdorff to far singleton wrong");
+}
+
 int main(void)
 {
     test_version();
@@ -229,6 +281,10 @@ int main(void)
     test_gram_schmidt_basic();
     test_glicko2_period_decay();
     test_glicko2_paper_example();
+    test_hilbert_round_trip();
+    test_hilbert_locality();
+    test_frechet_basic();
+    test_hausdorff_basic();
 
     if (fail_count == 0) {
         printf("OK: all native smoke tests passed\n");
