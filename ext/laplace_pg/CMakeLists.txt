@@ -59,6 +59,9 @@ set(LAPLACE_CORE_SOURCES
 
   # B18 — Glicko2Service (paper-faithful Glickman 2013)
   src/glicko2/glicko2_apply.c
+
+  # B19 — TensorDecodeService (safetensors header parser)
+  src/safetensors/safetensors_header.c
 )
 
 # C3 — SQL-side function bindings (compiled into the laplace_pg PG extension
@@ -66,8 +69,21 @@ set(LAPLACE_CORE_SOURCES
 set(LAPLACE_SQL_BINDING_SOURCES
   src/sql_bindings/sql_hash.c
   src/sql_bindings/sql_glicko2.c
-  src/sql_bindings/sql_superfib.c
-  src/sql_bindings/sql_hilbert.c
+)
+
+# GEOMETRY4D type family — PG-extension-only sources (PG headers required).
+# Compiled into laplace_pg target only via LAPLACE_BUILD_PG_EXTENSION guard.
+# POINT4D / LINESTRING4D / BOX4D land here; remaining subtypes (POLYGON4D,
+# MULTI*, TRIANGLE4D, TIN4D, POLYHEDRALSURFACE4D, CIRCULARSTRING4D,
+# COMPOUNDCURVE4D, CURVEPOLYGON4D, MULTICURVE4D, MULTISURFACE4D) land as
+# their downstream consumers come online per the synthesis doc.
+set(LAPLACE_GEOMETRY4D_TYPE_SOURCES
+  src/types/point4d_io.c
+  src/types/point4d_binary.c
+  src/types/point4d_ops_sql.c
+  src/types/linestring4d_io.c
+  src/types/linestring4d_ops_sql.c
+  src/types/box4d_io.c
 )
 
 # Common include directories applied to both targets.
@@ -88,7 +104,10 @@ set(LAPLACE_COMMON_DEFS
 # Target 1 — laplace_pg : PostgreSQL extension shared library
 # ------------------------------------------------------------------
 
-add_library(laplace_pg MODULE ${LAPLACE_CORE_SOURCES} ${LAPLACE_SQL_BINDING_SOURCES})
+add_library(laplace_pg MODULE
+  ${LAPLACE_CORE_SOURCES}
+  ${LAPLACE_SQL_BINDING_SOURCES}
+  ${LAPLACE_GEOMETRY4D_TYPE_SOURCES})
 
 set_target_properties(laplace_pg PROPERTIES
   PREFIX ""

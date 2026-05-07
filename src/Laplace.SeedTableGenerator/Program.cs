@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 
 using Laplace.Core;
 using Laplace.Decomposers.Ucd;
@@ -83,6 +84,8 @@ internal static class Program
     {
         var ucdXmlPath = ArgValue(args, "--ucd-xml")
                       ?? "D:/Models/UCD/Public/UCD/latest/ucdxml/ucd.all.flat.xml";
+        var iso639Dir  = ArgValue(args, "--iso639")
+                      ?? "D:/Models/ISO639";
         var outputDir = ArgValue(args, "--output")
                       ?? Path.Combine(
                           AppContext.BaseDirectory, "..", "..", "..", "..", "..",
@@ -92,6 +95,7 @@ internal static class Program
 
         Console.WriteLine($"Generating to {outputDir}");
         Console.WriteLine($"  UCD XML: {ucdXmlPath}");
+        Console.WriteLine($"  ISO 639: {iso639Dir}");
 
         var hashing  = new IdentityHashing();
         var superFib = new SuperFibonacci();
@@ -108,8 +112,6 @@ internal static class Program
         Console.WriteLine($"  parsed {records.Count} char records in {(DateTime.UtcNow - t0).TotalSeconds:F1}s");
 
         Console.WriteLine("Building canonical ordering...");
-        // UCA + Unihan integration ships in follow-up emitters; placeholder
-        // ordering keys still sort deterministically by (script, gc, cp).
         var ordering = CanonicalOrdering.Sort(
             records,
             ucaPrimaryFor:    static _ => 0,
@@ -121,11 +123,81 @@ internal static class Program
         var entries = builder.Build(ordering);
         Console.WriteLine($"  built {entries.Count} entries in {(DateTime.UtcNow - t0).TotalSeconds:F1}s");
 
+        Console.WriteLine("Building codepoint→hash lookup...");
+        var codepointHashes = new Dictionary<int, Laplace.Core.Abstractions.AtomId>(entries.Count);
+        foreach (var e in entries)
+        {
+            codepointHashes[e.Codepoint] = e.EntityHash;
+        }
+
         Console.WriteLine("Emitting codepoint_table.{h,c}...");
         CodepointTableEmitter.Emit(entries, outputDir);
 
         Console.WriteLine("Emitting seed_db_rows.tsv...");
         SeedDbRowsEmitter.Emit(entries, outputDir);
+
+        Console.WriteLine("Emitting codepoint_names.{h,c}...");
+        NamePoolEmitter.Emit(entries, outputDir);
+
+        Console.WriteLine("Emitting codepoint_decompositions.{h,c}...");
+        DecompositionTableEmitter.Emit(records, outputDir);
+
+        Console.WriteLine("Emitting registries (script, block, age, gc, bidi)...");
+        RegistryEmitter.Emit("script", entries.Select(e => e.Script), codepointHashes, hashing, outputDir);
+        RegistryEmitter.Emit("block",  entries.Select(e => e.Block),  codepointHashes, hashing, outputDir);
+        RegistryEmitter.Emit("age",    entries.Select(e => e.Age),    codepointHashes, hashing, outputDir);
+        RegistryEmitter.Emit("gc",     entries.Select(e => e.GeneralCategory), codepointHashes, hashing, outputDir);
+        RegistryEmitter.Emit("bidi",   entries.Select(e => e.BidiClass), codepointHashes, hashing, outputDir);
+
+        var ucaPath = ArgValue(args, "--uca")
+                   ?? "D:/Models/UCD/Public/UCD/latest/uca/allkeys.txt";
+        if (File.Exists(ucaPath))
+        {
+            Console.WriteLine($"Parsing UCA allkeys.txt ({ucaPath})...");
+            var ucaEntries = new List<UcaEntry>();
+            foreach (var ue in UcaAllKeysParser.Parse(ucaPath)) { ucaEntries.Add(ue); }
+            Console.WriteLine($"  parsed {ucaEntries.Count} UCA entries");
+            Console.WriteLine("Emitting uca_weights.{h,c}...");
+            UcaWeightsEmitter.Emit(ucaEntries, outputDir);
+        }
+        else
+        {
+            Console.WriteLine($"  UCA allkeys.txt not found at {ucaPath}; skipping");
+        }
+
+        var emojiDir = ArgValue(args, "--emoji")
+                    ?? "D:/Models/UCD/Public/UCD/latest/emoji";
+        if (Directory.Exists(emojiDir))
+        {
+            Console.WriteLine($"Parsing emoji sequences ({emojiDir})...");
+            var emojiEntries = new List<EmojiSequenceEntry>();
+            foreach (var ee in EmojiSequencesParser.ParseAll(emojiDir)) { emojiEntries.Add(ee); }
+            Console.WriteLine($"  parsed {emojiEntries.Count} emoji sequence rows");
+            Console.WriteLine("Emitting emoji_sequences.{h,c}...");
+            EmojiSequencesEmitter.Emit(emojiEntries, codepointHashes, hashing, outputDir);
+        }
+        else
+        {
+            Console.WriteLine($"  emoji directory not found at {emojiDir}; skipping");
+        }
+
+        Console.WriteLine("Parsing ISO 639-3...");
+        var iso639Languages = new List<Decomposers.Iso639.Iso639LanguageRecord>();
+        var iso639TabPath = Path.Combine(iso639Dir, "iso-639-3.tab");
+        if (File.Exists(iso639TabPath))
+        {
+            foreach (var lang in Decomposers.Iso639.Iso639TabParser.ParseLanguages(iso639TabPath))
+            {
+                iso639Languages.Add(lang);
+            }
+            Console.WriteLine($"  parsed {iso639Languages.Count} languages");
+            Console.WriteLine("Emitting iso639_languages.{h,c}...");
+            Iso639LanguagesEmitter.Emit(iso639Languages, codepointHashes, hashing, outputDir);
+        }
+        else
+        {
+            Console.WriteLine($"  ISO 639-3 file not found at {iso639TabPath}; skipping");
+        }
 
         Console.WriteLine("Done.");
         return 0;
