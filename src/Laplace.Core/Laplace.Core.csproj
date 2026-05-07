@@ -4,6 +4,7 @@
     <RootNamespace>Laplace.Core</RootNamespace>
     <AssemblyName>Laplace.Core</AssemblyName>
     <UseNativeRuntime>true</UseNativeRuntime>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
