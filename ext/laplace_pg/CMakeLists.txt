@@ -18,9 +18,26 @@ cmake_minimum_required(VERSION 3.28)
 
 set(LAPLACE_PG_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
-# Phase-1 stub — replaced by real PG_init in Phase 2 (Track B / C2).
+# Native source list. Each service contributes one .c file per operation per
+# the coding standards (one operation per file, files as small as cohesion
+# allows). New services added here as Track B work lands.
 set(LAPLACE_CORE_SOURCES
   src/laplace_pg.c
+
+  # B1 — CpuidService
+  src/util/cpuid.c
+
+  # B2 — BLAKE3HashService
+  src/hash/blake3_atom.c
+  src/hash/blake3_composition.c
+  src/hash/blake3_edge.c
+
+  # B3 — RleService
+  src/rle/rle_encode.c
+  src/rle/rle_decode.c
+
+  # B4 — SuperFibonacciService
+  src/superfib/superfib_4d.c
 )
 
 # Common include directories applied to both targets.
