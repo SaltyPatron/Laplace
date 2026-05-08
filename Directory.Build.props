@@ -57,7 +57,11 @@
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" Condition="'$(SourceLinkInclude)' != 'false'" />
   </ItemGroup>
 
-  <!-- Native DLL copy rules (apply to projects that opt in via <UseNativeRuntime>true</UseNativeRuntime>) -->
-  <Import Project="$(MSBuildThisFileDirectory)native-dll.targets" Condition="'$(UseNativeRuntime)' == 'true'" />
+  <!--
+    Native DLL copy rules live in native-dll.targets and are imported via
+    Directory.Build.targets (which evaluates AFTER the per-project csproj),
+    so $(UseNativeRuntime) is observed correctly. Importing here would be
+    too early — Directory.Build.props evaluates BEFORE the csproj.
+  -->
 
 </Project>

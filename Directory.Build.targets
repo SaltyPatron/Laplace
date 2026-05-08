@@ -1,0 +1,12 @@
+<Project>
+
+  <!--
+    Imported automatically by MSBuild AFTER the per-project csproj has been
+    evaluated. By this point $(UseNativeRuntime) reflects the project's own
+    setting, so the conditional below resolves correctly. (Trying to do this
+    in Directory.Build.props is too early — props is imported BEFORE the
+    csproj, so the property is empty there.)
+  -->
+  <Import Project="$(MSBuildThisFileDirectory)native-dll.targets" Condition="'$(UseNativeRuntime)' == 'true'" />
+
+</Project>

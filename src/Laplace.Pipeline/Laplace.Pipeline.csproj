@@ -9,6 +9,7 @@
     <ProjectReference Include="..\Laplace.Core.Abstractions\Laplace.Core.Abstractions.csproj" />
     <ProjectReference Include="..\Laplace.Pipeline.Abstractions\Laplace.Pipeline.Abstractions.csproj" />
     <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.Abstractions\Laplace.Decomposers.Abstractions.csproj" />
     <PackageReference Include="Npgsql" Version="9.0.2" />
   </ItemGroup>
 

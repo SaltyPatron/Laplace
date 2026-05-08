@@ -9,9 +9,13 @@
 
 #include "postgres.h"
 #include "fmgr.h"
+#include "varatt.h"           /* SET_VARSIZE / VARSIZE — header sometimes
+                               * not pulled transitively on Windows MSVC. */
 #include "utils/builtins.h"
 #include "lib/stringinfo.h"
 #include "libpq/pqformat.h"
+#include "port.h"             /* pg_strncasecmp (portable, beats POSIX
+                               * strncasecmp which doesn't exist on MSVC). */
 
 #include "laplace_pg/linestring4d_type.h"
 
@@ -45,7 +49,7 @@ Datum linestring4d_in(PG_FUNCTION_ARGS)
     /* Skip optional "LINESTRING4D" prefix. */
     const char *cursor = str;
     while (isspace((unsigned char) *cursor)) { ++cursor; }
-    if (strncasecmp(cursor, "LINESTRING4D", 12) == 0) { cursor += 12; }
+    if (pg_strncasecmp(cursor, "LINESTRING4D", 12) == 0) { cursor += 12; }
     while (isspace((unsigned char) *cursor)) { ++cursor; }
     if (*cursor != '(') {
         ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),

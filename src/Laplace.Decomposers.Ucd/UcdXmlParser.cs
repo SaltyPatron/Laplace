@@ -69,6 +69,25 @@ public sealed class UcdXmlParser
                     }
                     break;
                 }
+
+                /* UAX#42 also has <reserved>, <surrogate>, <noncharacter>
+                 * elements that fill the codepoint space between assigned
+                 * chars. Per CLAUDE.md invariant: substrate has rows for the
+                 * full 1,114,112 codepoint slots so future Unicode versions
+                 * slot in. Each yields a record with general_category set so
+                 * downstream consumers (CanonicalOrdering, registries) treat
+                 * the slot consistently. */
+                case "reserved":
+                case "surrogate":
+                case "noncharacter":
+                {
+                    var record = ReadSpecialRange(reader, groupDefaults, reader.LocalName);
+                    if (record is not null)
+                    {
+                        yield return record;
+                    }
+                    break;
+                }
             }
         }
     }
@@ -149,5 +168,69 @@ public sealed class UcdXmlParser
         }
 
         return new UcdCodepointRecord(firstCp, lastCp, attrs, aliases);
+    }
+
+    private static UcdCodepointRecord? ReadSpecialRange(
+        XmlReader reader,
+        Dictionary<string, string>? groupDefaults,
+        string elementName)
+    {
+        var attrs = ReadAttributes(reader);
+
+        if (groupDefaults is not null)
+        {
+            foreach (var kv in groupDefaults)
+            {
+                attrs.TryAdd(kv.Key, kv.Value);
+            }
+        }
+
+        int firstCp, lastCp;
+        if (attrs.TryGetValue("cp", out var cpHex))
+        {
+            firstCp = int.Parse(cpHex, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            lastCp  = firstCp;
+        }
+        else if (attrs.TryGetValue("first-cp", out var firstHex) &&
+                 attrs.TryGetValue("last-cp",  out var lastHex))
+        {
+            firstCp = int.Parse(firstHex, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            lastCp  = int.Parse(lastHex,  NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            return null;
+        }
+
+        /* Stamp the right general_category so downstream code sees the slot
+         * for what it is. Surrogate codepoints get Cs; reserved/noncharacter
+         * both get Cn (Unassigned/Other-Not-Assigned). The Unicode standard
+         * treats noncharacters as a sub-class of Cn for general_category. */
+        var gcOverride = elementName switch
+        {
+            "surrogate"    => "Cs",
+            "noncharacter" => "Cn",
+            _              => "Cn",   /* reserved */
+        };
+        attrs["gc"] = gcOverride;
+        attrs.TryAdd("sc", "Zzzz");   /* Unknown script. */
+        attrs["__ucd_kind"] = elementName;
+
+        if (!reader.IsEmptyElement)
+        {
+            /* Skip any nested elements — reserved/surrogate/noncharacter
+             * elements typically have no children, but be tolerant. */
+            while (reader.Read())
+            {
+                if (reader.NodeType == XmlNodeType.EndElement &&
+                    reader.LocalName == elementName &&
+                    reader.NamespaceURI == UcdNamespace)
+                {
+                    break;
+                }
+            }
+        }
+
+        return new UcdCodepointRecord(firstCp, lastCp, attrs, new List<UcdNameAlias>(0));
     }
 }

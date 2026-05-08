@@ -14,9 +14,86 @@ using System.Text.Json;
 /// Yields one <see cref="TokenizerVocabRecord"/> per vocab entry. Special
 /// tokens (BOS, EOS, PAD, UNK, MASK, etc.) marked with IsSpecial=true so
 /// the F5 decomposer can attach the appropriate substrate flags.
+///
+/// Also detects <see cref="TokenizerKind"/> (WordPiece / ByteLevelBpe /
+/// SentencePieceUnigram / Bpe) from <c>model.type</c> + the pre_tokenizer
+/// chain — needed by F5 surface canonicalization (per the
+/// HF-tokenizer-format-diversity feedback memory) so cross-model dedup
+/// holds: "##ing" (BERT) and "ing" (BERT) and "▁ing" (T5) and "Ġing"
+/// (Llama BPE) all canonicalize to "ing" → same substrate entity hash.
 /// </summary>
 public sealed class TokenizerJsonParser
 {
+    /// <summary>
+    /// Detect the tokenizer family from <paramref name="path"/>'s JSON
+    /// header. Reads <c>model.type</c> first, then inspects the
+    /// <c>pre_tokenizer</c> chain to discriminate ByteLevelBpe from raw Bpe.
+    /// </summary>
+    public static TokenizerKind DetectKind(string path)
+    {
+        using var fs       = File.OpenRead(path);
+        using var document = JsonDocument.Parse(fs);
+        var root = document.RootElement;
+
+        if (root.ValueKind != JsonValueKind.Object) { return TokenizerKind.Unknown; }
+        if (!root.TryGetProperty("model", out var model)) { return TokenizerKind.Unknown; }
+        if (!model.TryGetProperty("type",  out var typeEl) || typeEl.ValueKind != JsonValueKind.String)
+        {
+            return TokenizerKind.Unknown;
+        }
+
+        var modelType = typeEl.GetString();
+        return modelType switch
+        {
+            "WordPiece" => TokenizerKind.WordPiece,
+            "Unigram"   => TokenizerKind.SentencePieceUnigram,
+            "BPE"       => HasByteLevelStep(root) ? TokenizerKind.ByteLevelBpe : TokenizerKind.Bpe,
+            "WordLevel" => TokenizerKind.Unknown,
+            _           => TokenizerKind.Unknown,
+        };
+    }
+
+    private static bool HasByteLevelStep(JsonElement root)
+    {
+        // pre_tokenizer / decoder may be a single object {"type": "ByteLevel", ...}
+        // or a Sequence {"type": "Sequence", "pretokenizers": [{"type": "ByteLevel"}]}.
+        return ContainsByteLevel(root, "pre_tokenizer")
+            || ContainsByteLevel(root, "decoder");
+    }
+
+    private static bool ContainsByteLevel(JsonElement root, string field)
+    {
+        if (!root.TryGetProperty(field, out var node)) { return false; }
+        return ContainsByteLevelRecursive(node);
+    }
+
+    private static bool ContainsByteLevelRecursive(JsonElement el)
+    {
+        switch (el.ValueKind)
+        {
+            case JsonValueKind.Object:
+                if (el.TryGetProperty("type", out var t) &&
+                    t.ValueKind == JsonValueKind.String &&
+                    t.GetString() == "ByteLevel")
+                {
+                    return true;
+                }
+                foreach (var prop in el.EnumerateObject())
+                {
+                    if (ContainsByteLevelRecursive(prop.Value)) { return true; }
+                }
+                return false;
+            case JsonValueKind.Array:
+                foreach (var item in el.EnumerateArray())
+                {
+                    if (ContainsByteLevelRecursive(item)) { return true; }
+                }
+                return false;
+            default:
+                return false;
+        }
+    }
+
     public static IReadOnlyList<TokenizerVocabRecord> Parse(string path)
     {
         var json = File.ReadAllText(path);

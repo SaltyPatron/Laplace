@@ -12,6 +12,7 @@
     <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
     <ProjectReference Include="..\Laplace.Pipeline\Laplace.Pipeline.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.Text\Laplace.Decomposers.Text.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.WordNet\Laplace.Decomposers.WordNet.csproj" />
   </ItemGroup>
 
 </Project>

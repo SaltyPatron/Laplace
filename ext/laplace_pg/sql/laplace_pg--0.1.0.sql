@@ -216,6 +216,205 @@ COMMENT ON TYPE box4d IS
   'Substrate 4D axis-aligned bounding box — 8 IEEE 754 doubles.';
 
 -- =====================================================================
+-- POINT4D GiST opclass — KNN spatial index on the 4D point type
+-- =====================================================================
+-- Storage = BOX4D; leaf compress wraps each POINT4D as a degenerate box
+-- (min == max == p), internal nodes union children's bounding boxes.
+-- Supports two strategies on the 4D point space:
+--   1  =   (point4d, point4d)             — exact equality with recheck
+--   15 <-> (point4d, point4d) ORDER BY    — KNN distance ordering
+-- The <-> operator (defined above) carries through to the index for
+-- ORDER BY KNN queries:
+--   SELECT entity_hash FROM physicality
+--   WHERE physicality_type_hash = $1
+--   ORDER BY position <-> $2 LIMIT $k;
+-- The planner picks the GiST index if one exists on the position column.
+
+CREATE FUNCTION point4d_gist_consistent(internal, point4d, smallint, oid, internal)
+RETURNS boolean
+AS '$libdir/laplace_pg', 'point4d_gist_consistent'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE FUNCTION point4d_gist_union(internal, internal) RETURNS box4d
+AS '$libdir/laplace_pg', 'point4d_gist_union'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE FUNCTION point4d_gist_compress(internal) RETURNS internal
+AS '$libdir/laplace_pg', 'point4d_gist_compress'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE FUNCTION point4d_gist_penalty(internal, internal, internal) RETURNS internal
+AS '$libdir/laplace_pg', 'point4d_gist_penalty'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE FUNCTION point4d_gist_picksplit(internal, internal) RETURNS internal
+AS '$libdir/laplace_pg', 'point4d_gist_picksplit'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE FUNCTION point4d_gist_same(box4d, box4d, internal) RETURNS internal
+AS '$libdir/laplace_pg', 'point4d_gist_same'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE FUNCTION point4d_gist_distance(internal, point4d, smallint, oid, internal)
+RETURNS double precision
+AS '$libdir/laplace_pg', 'point4d_gist_distance'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE OPERATOR CLASS point4d_gist_ops
+    DEFAULT FOR TYPE point4d USING gist AS
+    OPERATOR  1   =   (point4d, point4d),
+    OPERATOR  15  <-> (point4d, point4d) FOR ORDER BY float_ops,
+    FUNCTION  1 point4d_gist_consistent(internal, point4d, smallint, oid, internal),
+    FUNCTION  2 point4d_gist_union(internal, internal),
+    FUNCTION  3 point4d_gist_compress(internal),
+    FUNCTION  5 point4d_gist_penalty(internal, internal, internal),
+    FUNCTION  6 point4d_gist_picksplit(internal, internal),
+    FUNCTION  7 point4d_gist_same(box4d, box4d, internal),
+    FUNCTION  8 point4d_gist_distance(internal, point4d, smallint, oid, internal),
+    STORAGE box4d;
+
+-- =====================================================================
+-- LINESTRING4D GiST opclass — Fréchet KNN on tier-1+ trajectories
+-- =====================================================================
+-- Storage = BOX4D; leaf compress takes the AABB over a LINESTRING4D's
+-- vertices, internal nodes union children's bounding boxes. Re-uses
+-- the BOX4D-keyed union/same/penalty/picksplit functions registered
+-- above for point4d_gist_ops (they operate purely on BOX4D, identical
+-- regardless of leaf source type).
+--
+-- Strategy:
+--   15 <-> (linestring4d, linestring4d) ORDER BY  — KNN by Fréchet
+--
+-- The <-> operator is bound to laplace.frechet_distance (the substrate's
+-- named primitive for trajectory shape similarity per substrate-synthesis
+-- lines 78, 246, 289). Index lower bound is bbox_min_distance(query_bbox,
+-- entry_bbox), admissible because every alignment between two
+-- trajectories has at least one matched pair with distance >=
+-- bbox_min_distance, so the alignment's max pair-distance (its Fréchet
+-- score) is bounded below by this value.
+--
+-- Trajectory-near-a-point queries belong on the centroid POINT4D column
+-- with point4d_gist_ops, NOT on this opclass — per synthesis line 76 the
+-- substrate stores a tier-1+ composition's representative position as
+-- the centroid POINT4D in the 4-ball; the LINESTRING4D is the trajectory
+-- itself, queried by shape, not by proximity-to-point.
+
+CREATE FUNCTION linestring4d_gist_consistent(internal, linestring4d, smallint, oid, internal)
+RETURNS boolean
+AS '$libdir/laplace_pg', 'linestring4d_gist_consistent'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE FUNCTION linestring4d_gist_compress(internal) RETURNS internal
+AS '$libdir/laplace_pg', 'linestring4d_gist_compress'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE FUNCTION linestring4d_gist_distance(internal, linestring4d, smallint, oid, internal)
+RETURNS double precision
+AS '$libdir/laplace_pg', 'linestring4d_gist_distance'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE OPERATOR <-> (
+    LEFTARG    = linestring4d,
+    RIGHTARG   = linestring4d,
+    PROCEDURE  = laplace.frechet_distance
+);
+
+CREATE OPERATOR CLASS linestring4d_gist_ops
+    DEFAULT FOR TYPE linestring4d USING gist AS
+    OPERATOR  15  <-> (linestring4d, linestring4d) FOR ORDER BY float_ops,
+    FUNCTION  1 linestring4d_gist_consistent(internal, linestring4d, smallint, oid, internal),
+    FUNCTION  2 point4d_gist_union(internal, internal),
+    FUNCTION  3 linestring4d_gist_compress(internal),
+    FUNCTION  5 point4d_gist_penalty(internal, internal, internal),
+    FUNCTION  6 point4d_gist_picksplit(internal, internal),
+    FUNCTION  7 point4d_gist_same(box4d, box4d, internal),
+    FUNCTION  8 linestring4d_gist_distance(internal, linestring4d, smallint, oid, internal),
+    STORAGE box4d;
+
+-- =====================================================================
+-- UcdLookupService — Track B / B14
+-- =====================================================================
+-- O(1) lookup of any Unicode codepoint's substrate identity (hash, S³
+-- position, Hilbert index, prime_flags) against the linked-in codepoint
+-- table emitted by Laplace.SeedTableGenerator. Each function is STRICT
+-- and IMMUTABLE; the table is constant data so PG can fully fold these
+-- into query plans (e.g. partition pruning by laplace.ucd_hilbert($cp)).
+-- Returns NULL for codepoints outside [0, 0x110000) or absent from the
+-- table (cannot happen for the canonical full-Unicode-space build).
+
+CREATE FUNCTION laplace.ucd_hash(integer) RETURNS bytea
+AS '$libdir/laplace_pg', 'pg_laplace_ucd_hash'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE FUNCTION laplace.ucd_position(integer) RETURNS point4d
+AS '$libdir/laplace_pg', 'pg_laplace_ucd_position'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE FUNCTION laplace.ucd_hilbert(integer) RETURNS bigint
+AS '$libdir/laplace_pg', 'pg_laplace_ucd_hilbert'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE FUNCTION laplace.ucd_prime_flags(integer) RETURNS bigint
+AS '$libdir/laplace_pg', 'pg_laplace_ucd_prime_flags'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE FUNCTION laplace.ucd_exists(integer) RETURNS boolean
+AS '$libdir/laplace_pg', 'pg_laplace_ucd_exists'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+-- =====================================================================
+-- QuaternionService — Track B / B8
+-- =====================================================================
+-- Hamilton (i, j, k) algebra over POINT4D in (x, y, z, w) layout. Used
+-- for substrate composition operations on S³ unit quaternions: rotation
+-- composition, S³ slerp endpoint construction, antipodal canonicalization.
+
+CREATE FUNCTION laplace.quaternion_multiply(point4d, point4d) RETURNS point4d
+AS '$libdir/laplace_pg', 'quaternion_multiply'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE FUNCTION laplace.quaternion_conjugate(point4d) RETURNS point4d
+AS '$libdir/laplace_pg', 'quaternion_conjugate'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE FUNCTION laplace.quaternion_inverse(point4d) RETURNS point4d
+AS '$libdir/laplace_pg', 'quaternion_inverse'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+-- =====================================================================
+-- HilbertCurveService inverse — Track B / B9
+-- =====================================================================
+-- Forward direction (point4d → bigint) is laplace.point4d_hilbert_index.
+-- This adds the inverse so the curve round-trips at the SQL surface.
+-- Lossy below 2^-15 per axis (forward quantizes each axis to 16 bits);
+-- callers should treat the returned POINT4D as a representative grid-
+-- cell corner rather than the original input.
+
+CREATE FUNCTION laplace.hilbert_decode(bigint) RETURNS point4d
+AS '$libdir/laplace_pg', 'hilbert_decode'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+-- =====================================================================
+-- RleService — Track B / B3
+-- =====================================================================
+-- Substrate invariant 3: "Entities referenced as FEW times as physically
+-- possible. RLE everywhere there's adjacency." Encode/decode at the SQL
+-- surface so DDL paths (entity_child rle_count emission, sequence runs)
+-- and ad-hoc tooling collapse runs without round-tripping managed code.
+
+CREATE FUNCTION laplace.rle_encode_bytes(
+  input  bytea,
+  OUT values bytea,
+  OUT counts integer[]
+) RETURNS record
+AS '$libdir/laplace_pg', 'rle_encode_bytes'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+CREATE FUNCTION laplace.rle_decode_bytes(values bytea, counts integer[]) RETURNS bytea
+AS '$libdir/laplace_pg', 'rle_decode_bytes'
+LANGUAGE C IMMUTABLE PARALLEL SAFE STRICT;
+
+-- =====================================================================
 -- Hashing
 -- =====================================================================
 
@@ -447,6 +646,11 @@ END$$;
 
 CREATE INDEX physicality_by_entity   ON physicality (entity_hash, entity_tier);
 CREATE INDEX physicality_by_hilbert  ON physicality (physicality_type_hash, hilbert_index);
+
+-- 4D GiST spatial index — backs `ORDER BY position <-> $q LIMIT $k`
+-- queries used by firefly KNN, fault-line edge detection, and Voronoi
+-- consensus traversal. Uses the point4d_gist_ops opclass declared above.
+CREATE INDEX physicality_position_gist ON physicality USING gist (position);
 
 -- ---------- sequence (ordered children where RLE doesn't compress) ----
 

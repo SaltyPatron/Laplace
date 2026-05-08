@@ -28,7 +28,9 @@ typedef struct {
 
 #define DatumGetBox4D(d)        ((laplace_box4d_pg_t *) DatumGetPointer(d))
 #define Box4DGetDatum(p)        PointerGetDatum(p)
-#define PG_GETARG_BOX4D(n)      DatumGetBox4D(PG_DETOAST_DATUM(PG_GETARG_DATUM(n)))
+/* BOX4D is fixed-length 64 bytes, STORAGE=plain — never toasted, so
+ * PG_DETOAST_DATUM is incorrect (varlena* vs Datum mismatch trips C4047). */
+#define PG_GETARG_BOX4D(n)      DatumGetBox4D(PG_GETARG_DATUM(n))
 #define PG_RETURN_BOX4D(p)      PG_RETURN_POINTER(p)
 
 #endif /* LAPLACE_BUILD_PG_EXTENSION */

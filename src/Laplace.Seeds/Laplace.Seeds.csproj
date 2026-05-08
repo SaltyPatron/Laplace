@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Laplace.Seeds</RootNamespace>
+    <AssemblyName>Laplace.Seeds</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Laplace.Decomposers.Iso639\Laplace.Decomposers.Iso639.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.WordNet\Laplace.Decomposers.WordNet.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.Omw\Laplace.Decomposers.Omw.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.Tatoeba\Laplace.Decomposers.Tatoeba.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.Ud\Laplace.Decomposers.Ud.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.Atomic\Laplace.Decomposers.Atomic.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.Wiktionary\Laplace.Decomposers.Wiktionary.csproj" />
+  </ItemGroup>
+
+</Project>

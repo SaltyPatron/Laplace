@@ -28,6 +28,7 @@
 #include "laplace_pg/rle.h"
 #include "laplace_pg/s3.h"
 #include "laplace_pg/superfib.h"
+#include "laplace_pg/ucd_lookup.h"
 
 extern uint32_t laplace_native_version(void);
 

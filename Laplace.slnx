@@ -60,8 +60,10 @@
     <Project Path="src/Laplace.Recomposers.Text/Laplace.Recomposers.Text.csproj" />
     <Project Path="src/Laplace.Recomposers.Video/Laplace.Recomposers.Video.csproj" />
     <Project Path="src/Laplace.SeedTableGenerator/Laplace.SeedTableGenerator.csproj" />
+    <Project Path="src/Laplace.Seeds/Laplace.Seeds.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/managed/Laplace.Smoke.Tests/Laplace.Smoke.Tests.csproj" />
+    <Project Path="tests/managed/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj" />
   </Folder>
 </Solution>

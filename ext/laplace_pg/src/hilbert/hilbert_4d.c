@@ -61,16 +61,19 @@ static void axes_to_transpose(uint16_t coord[LAPLACE_HILBERT_N])
     }
 }
 
-/* Skilling's "TransposetoAxes" — decode Hilbert transpose to integer coords. */
+/* Skilling's "TransposetoAxes" — decode Hilbert transpose to integer coords.
+ * M and Q are uint32_t because M = 2^P = 65536 for P=16 does not fit in
+ * uint16_t. The loop body still operates on uint16_t coord values; Q < M
+ * when the body executes so its low 16 bits are well-defined. */
 static void transpose_to_axes(uint16_t coord[LAPLACE_HILBERT_N])
 {
-    const uint16_t M = (uint16_t) 2u << (LAPLACE_HILBERT_P - 1);
+    const uint32_t M = 1u << LAPLACE_HILBERT_P;
     uint16_t       t = (uint16_t)(coord[LAPLACE_HILBERT_N - 1] >> 1);
     for (int i = LAPLACE_HILBERT_N - 1; i > 0; --i) {
         coord[i] ^= coord[i - 1];
     }
     coord[0] ^= t;
-    for (uint16_t Q = 2; Q != M; Q <<= 1) {
+    for (uint32_t Q = 2; Q != M; Q <<= 1) {
         const uint16_t P = (uint16_t)(Q - 1);
         for (int i = LAPLACE_HILBERT_N - 1; i >= 0; --i) {
             if (coord[i] & Q) {

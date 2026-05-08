@@ -1,0 +1,15 @@
+-- laplace_pg installs the canonical substrate schema:
+--   - laplace schema
+--   - GEOMETRY4D type family (POINT4D / LINESTRING4D / BOX4D and downstream)
+--   - point4d_gist_ops + linestring4d_gist_ops opclasses
+--   - laplace.hash_atom / laplace.hash_composition (BLAKE3)
+--   - laplace.glicko2_apply (paper-faithful Glickman 2013)
+--   - laplace.frechet_distance / laplace.hausdorff_distance (4D)
+--   - super-Fibonacci, Hilbert, S3 ops on POINT4D
+--   - tier-0 atom + tier-1+ composition tables, edge / edge_member, sequence,
+--     three-layer Glicko-2 significance (source / entity / edge), physicality
+--     partitioned by physicality_type (open vocabulary)
+--
+-- Pre-1.0 contract: ONE canonical schema in laplace_pg--0.1.0.sql, edited in
+-- place. No migrations. Schema refactors reinstall the extension.
+CREATE EXTENSION IF NOT EXISTS laplace_pg;

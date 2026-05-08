@@ -5,6 +5,8 @@
     <AssemblyName>Laplace.Smoke.Tests</AssemblyName>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- F1 property tests P/Invoke through IdentityHashing -> NativeHash. -->
+    <UseNativeRuntime>true</UseNativeRuntime>
     <!-- Test method names follow xUnit's MethodName_Scenario_ExpectedBehavior convention -->
     <NoWarn>$(NoWarn);CA1707</NoWarn>
   </PropertyGroup>
@@ -17,6 +19,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Laplace.Core.Abstractions\Laplace.Core.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\src\Laplace.Core\Laplace.Core.csproj" />
+    <ProjectReference Include="..\..\..\src\Laplace.Pipeline.Abstractions\Laplace.Pipeline.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\src\Laplace.Pipeline\Laplace.Pipeline.csproj" />
+    <ProjectReference Include="..\..\..\src\Laplace.Decomposers.Text\Laplace.Decomposers.Text.csproj" />
+    <ProjectReference Include="..\..\..\src\Laplace.Decomposers.Math\Laplace.Decomposers.Math.csproj" />
+    <ProjectReference Include="..\..\..\src\Laplace.Decomposers.Tatoeba\Laplace.Decomposers.Tatoeba.csproj" />
+    <ProjectReference Include="..\..\..\src\Laplace.Decomposers.Model\Laplace.Decomposers.Model.csproj" />
   </ItemGroup>
 
 </Project>

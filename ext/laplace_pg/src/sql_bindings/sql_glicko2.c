@@ -12,6 +12,7 @@
 
 #include "postgres.h"
 #include "fmgr.h"
+#include "funcapi.h"           /* get_call_result_type + TYPEFUNC_COMPOSITE */
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "catalog/pg_type.h"

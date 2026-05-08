@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.28)
+cmake_minimum_required(VERSION 3.22)
 
 project(Laplace
   VERSION 0.1.0
@@ -23,12 +23,31 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-# Strict warnings as errors per coding standards
+# Strict warnings as errors per coding standards apply to OUR targets only,
+# never to FetchContent dependencies (BLAKE3, Eigen, Spectra, Catch2). Each
+# project applies the right strictness for its own code.
+#
+# Common globally-safe defines stay at this scope; per-target compile options
+# are applied via the laplace_strict_flags interface library below.
 if(MSVC)
-  add_compile_options(/W4 /WX /permissive- /utf-8)
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
+add_library(laplace_strict_flags INTERFACE)
+if(MSVC)
+  target_compile_options(laplace_strict_flags INTERFACE
+    "$<$<COMPILE_LANGUAGE:C,CXX>:/W4>"
+    "$<$<COMPILE_LANGUAGE:C,CXX>:/WX>"
+    "$<$<COMPILE_LANGUAGE:C,CXX>:/permissive->"
+    "$<$<COMPILE_LANGUAGE:C,CXX>:/utf-8>"
+  )
 else()
-  add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+  target_compile_options(laplace_strict_flags INTERFACE
+    "$<$<COMPILE_LANGUAGE:C,CXX>:-Wall>"
+    "$<$<COMPILE_LANGUAGE:C,CXX>:-Wextra>"
+    "$<$<COMPILE_LANGUAGE:C,CXX>:-Wpedantic>"
+    "$<$<COMPILE_LANGUAGE:C,CXX>:-Werror>"
+  )
 endif()
 
 # ==========================================================================
@@ -89,9 +108,6 @@ FetchContent_Declare(Catch2
 FetchContent_MakeAvailable(Catch2)
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 
-# ICU — UAX29 segmentation and Unicode normalization
-find_package(ICU COMPONENTS uc i18n REQUIRED)
-
 # Intel MKL via oneAPI — BLAS / LAPACK / FFT / VML / VSL
 find_package(MKL CONFIG QUIET)
 if(NOT MKL_FOUND)
@@ -108,10 +124,39 @@ if(NOT TBB_FOUND)
   message(WARNING "Intel TBB not found; parallelism in native services will be limited.")
 endif()
 
-# PostgreSQL — required for the laplace_pg extension
-find_package(PostgreSQL REQUIRED)
-message(STATUS "PostgreSQL include: ${PostgreSQL_INCLUDE_DIRS}")
-message(STATUS "PostgreSQL libraries: ${PostgreSQL_LIBRARIES}")
+# PostgreSQL — required for the laplace_pg extension target only.
+# laplace_native.dll (the managed P/Invoke target) does not depend on PG;
+# making detection optional lets the managed-side build proceed even when
+# PG dev headers/libs are absent (e.g. on a CI runner without PG installed,
+# or before the developer has set up a local PG dev environment).
+#
+# The laplace_pg extension target inside ext/laplace_pg is gated on
+# PostgreSQL_FOUND and silently skipped when PG is unavailable.
+#
+# Standard Windows install (C:\Program Files\PostgreSQL\<major>) is
+# auto-discovered via hint paths below. Override by exporting
+# PostgreSQL_ROOT or passing -DPostgreSQL_ROOT=...
+if(WIN32 AND NOT DEFINED PostgreSQL_ROOT AND NOT DEFINED ENV{PostgreSQL_ROOT})
+  file(GLOB _pg_candidate_dirs LIST_DIRECTORIES TRUE
+    "C:/Program Files/PostgreSQL/*"
+    "D:/Program Files/PostgreSQL/*")
+  foreach(_pg_dir ${_pg_candidate_dirs})
+    if(IS_DIRECTORY "${_pg_dir}" AND EXISTS "${_pg_dir}/include/libpq-fe.h")
+      set(PostgreSQL_ROOT "${_pg_dir}")
+      message(STATUS "PostgreSQL hint path: ${PostgreSQL_ROOT}")
+      break()
+    endif()
+  endforeach()
+endif()
+
+find_package(PostgreSQL)
+if(PostgreSQL_FOUND)
+  message(STATUS "PostgreSQL include:   ${PostgreSQL_INCLUDE_DIRS}")
+  message(STATUS "PostgreSQL libraries: ${PostgreSQL_LIBRARIES}")
+else()
+  message(STATUS "PostgreSQL not found; laplace_pg extension target will be skipped. "
+                 "laplace_native.dll (managed P/Invoke target) builds unconditionally.")
+endif()
 
 # Optional: CGAL for 4D Voronoi tessellation
 find_package(CGAL CONFIG QUIET)
@@ -142,8 +187,11 @@ message(STATUS "  Build type:        ${CMAKE_BUILD_TYPE}")
 message(STATUS "  C standard:        ${CMAKE_C_STANDARD}")
 message(STATUS "  C++ standard:      ${CMAKE_CXX_STANDARD}")
 message(STATUS "  AddressSanitizer:  ${LAPLACE_ASAN}")
-message(STATUS "  PostgreSQL:        ${PostgreSQL_VERSION_STRING}")
-message(STATUS "  ICU:               ${ICU_VERSION}")
+if(PostgreSQL_FOUND)
+  message(STATUS "  PostgreSQL:        ${PostgreSQL_VERSION_STRING}")
+else()
+  message(STATUS "  PostgreSQL:        NOT FOUND (laplace_pg target skipped)")
+endif()
 message(STATUS "  MKL:               ${MKL_FOUND}")
 message(STATUS "  TBB:               ${TBB_FOUND}")
 message(STATUS "  CGAL:              ${CGAL_FOUND}")

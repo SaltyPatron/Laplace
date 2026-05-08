@@ -1,0 +1,44 @@
+# laplace-pg --- Laplace substrate Postgres dev stack.
+#
+# The image is built externally by scripts/docker/Build.ps1 (4-layer
+# source-compiled stack at docker/{postgres,postgis,pgext,final}.Dockerfile
+# on intel/oneapi-hpckit + intel/oneapi-runtime bases, with PG / PostGIS /
+# PROJ / GEOS source-compiled from external/* submodules pinned in
+# docker/versions.env). This compose file is the runtime stack only; it
+# does NOT trigger a docker build.
+#
+# Bring-up:    pwsh scripts/docker/Build.ps1
+#              docker compose -f infra/laplace-pg/docker-compose.yml up -d
+# Tear-down:   docker compose -f infra/laplace-pg/docker-compose.yml down -v
+# Health:      docker compose -f infra/laplace-pg/docker-compose.yml ps
+#
+# Substrate identity (extension = laplace_pg, schema = laplace, type family =
+# GEOMETRY4D) is independent of the deployment artifact name.
+
+services:
+  laplace-pg:
+    container_name: laplace-pg
+    image: laplace-pg:latest
+    restart: unless-stopped
+    ports:
+      # Avoid conflicts with local PG (5432) and prior-iteration containers (5433).
+      - "5435:5432"
+    environment:
+      POSTGRES_DB: laplace
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      # Substrate integrity: data checksums + deterministic locale + UTF-8.
+      POSTGRES_INITDB_ARGS: "--data-checksums --locale=C --encoding=UTF8"
+    volumes:
+      - laplace-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d laplace"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    shm_size: 256m
+
+volumes:
+  laplace-pgdata:
+    name: laplace-pgdata

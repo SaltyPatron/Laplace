@@ -32,7 +32,10 @@ typedef struct {
 
 #define DatumGetPoint4D(d)   ((laplace_point4d_pg_t *) DatumGetPointer(d))
 #define Point4DGetDatum(p)   PointerGetDatum(p)
-#define PG_GETARG_POINT4D(n) DatumGetPoint4D(PG_DETOAST_DATUM(PG_GETARG_DATUM(n)))
+/* POINT4D is fixed-length 32 bytes, STORAGE=plain — never toasted, so
+ * PG_DETOAST_DATUM is incorrect (it returns varlena* instead of Datum and
+ * trips C4047 on MSVC). Pass the Datum straight through. */
+#define PG_GETARG_POINT4D(n) DatumGetPoint4D(PG_GETARG_DATUM(n))
 #define PG_RETURN_POINT4D(p) PG_RETURN_POINTER(p)
 
 #endif /* LAPLACE_BUILD_PG_EXTENSION */

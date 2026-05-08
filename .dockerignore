@@ -1,0 +1,53 @@
+# Build context = repo root for the 4-layer source-compiled stack at
+# docker/{postgres,postgis,pgext,final}.Dockerfile + docker/entrypoint.sh +
+# docker/initdb.d/. The pgext layer needs CMakeLists.txt + ext/laplace_pg/
+# (including generated/*.c and generated/*.h). The postgres + postgis layers
+# need external/{postgres,postgis,proj,geos} submodules.
+
+# === .NET managed-tier (not part of native PG extension build) ===
+src/**/bin/
+src/**/obj/
+tests/**/bin/
+tests/**/obj/
+bin/
+obj/
+**/.vs/
+**/.vscode/
+
+# === CMake / Visual Studio intermediate (multi-GB FetchContent caches) ===
+ext/laplace_pg/build/
+**/build/
+*.user
+*.suo
+
+# === SeedTableGenerator output: TSVs (~5 GB) ===
+# Bulk-loaded into PG via COPY at bootstrap, NOT compiled into the .so.
+# The generated *.c and *.h files (codepoint_table.c, registries) ARE in
+# context — they compile into the laplace_generated static library that's
+# linked into both laplace_pg.so and laplace_native.so.
+ext/laplace_pg/generated/*.tsv
+
+# === VCS / editor / OS noise ===
+.git/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# === Plans / docs / memory (not used by Docker build) ===
+docs/
+plans/
+memory/
+logs/
+reports/
+
+# === Native build artifacts that may exist alongside source (defensive) ===
+*.dll
+*.pdb
+*.exp
+*.lib
+
+# === Old standalone Dockerfile location (superseded by docker/*.Dockerfile) ===
+# infra/laplace-pg/Dockerfile is the prior school-project pattern; keep its
+# directory ignored from the new layered context.
+infra/laplace-pg/Dockerfile

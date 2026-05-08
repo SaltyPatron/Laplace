@@ -65,8 +65,13 @@ public sealed class TokenizerAssetDecomposer
     /// from the model's safetensors / config artifacts via Merkle composition).
     /// <paramref name="modelSourceCanonicalName"/> is used to resolve the
     /// per-model provenance source entity (e.g., "huggingface_model_meta_llama_4_maverick").
+    ///
+    /// Returns a (token_id → substrate token entity hash) dictionary so
+    /// downstream firefly extractors can bind tensor row indices to
+    /// substrate token entities (embedding row N corresponds to the model's
+    /// token with id N, which routes through F1 to a substrate text entity).
     /// </summary>
-    public async Task DecomposeAsync(
+    public async Task<IReadOnlyDictionary<int, AtomId>> DecomposeAsync(
         AtomId             modelEntityHash,
         string             modelSourceCanonicalName,
         string             tokenizerJsonPath,
@@ -78,13 +83,28 @@ public sealed class TokenizerAssetDecomposer
         var roleToken       = _conceptResolver.Resolve("token");
         var rolePosition    = _conceptResolver.Resolve("position");
 
+        var kind  = TokenizerJsonParser.DetectKind(tokenizerJsonPath);
         var vocab = TokenizerJsonParser.Parse(tokenizerJsonPath);
+
+        var tokenIdToSubstrateEntity = new Dictionary<int, AtomId>(vocab.Count);
 
         foreach (var entry in vocab)
         {
-            // 1. Surface string → substrate entity (cross-model dedup automatic).
+            // 1. Tokenizer surface → canonical text via TokenizerSurfaceDecoder
+            //    (strip ## / Ġ / ▁ / GPT-2 byte-fallback per detected kind).
+            //    Special tokens pass straight through — they are model-private
+            //    structural markers, not lexical content. Without this step,
+            //    "##ing" (WordPiece) / "▁ing" (SentencePiece) / "Ġing" (Llama
+            //    BPE) would each get a DIFFERENT substrate entity hash —
+            //    cross-model dedup would silently break.
+            var canonicalSurface = entry.IsSpecial
+                ? entry.Surface
+                : TokenizerSurfaceDecoder.DecodeToCanonical(kind, entry.Surface);
+
+            // 2. Canonical surface → substrate entity (cross-model dedup automatic).
             var tokenEntityHash = await _textDecomposer.DecomposeAsync(
-                entry.Surface, cancellationToken).ConfigureAwait(false);
+                canonicalSurface, cancellationToken).ConfigureAwait(false);
+            tokenIdToSubstrateEntity[entry.TokenId] = tokenEntityHash;
 
             // 2. Edge: model → has_vocab_token → token, with position role
             //    carrying the token_id as a substrate-entity-encoded integer
@@ -113,5 +133,7 @@ public sealed class TokenizerAssetDecomposer
                 new EdgeProvenanceRecord(hasVocabToken, edgeHash, sourceHash),
                 cancellationToken).ConfigureAwait(false);
         }
+
+        return tokenIdToSubstrateEntity;
     }
 }

@@ -88,7 +88,7 @@ internal static class Program
                       ?? "D:/Models/ISO639";
         var outputDir = ArgValue(args, "--output")
                       ?? Path.Combine(
-                          AppContext.BaseDirectory, "..", "..", "..", "..", "..",
+                          AppContext.BaseDirectory, "..", "..", "..", "..",
                           "ext", "laplace_pg", "generated");
         outputDir = Path.GetFullPath(outputDir);
         Directory.CreateDirectory(outputDir);
@@ -111,11 +111,79 @@ internal static class Program
         }
         Console.WriteLine($"  parsed {records.Count} char records in {(DateTime.UtcNow - t0).TotalSeconds:F1}s");
 
+        // Parse UCA UP FRONT so its primary weights feed the canonical
+        // ordering rather than the stub-zero lookup. UTS #10 ordering by
+        // primary weight is what makes 'a' and 'A' sequence together, etc.
+        // Contractions (multi-codepoint source sequences) are skipped for
+        // the per-codepoint lookup since they don't define a single-cp
+        // weight; @implicitweights ranges are expanded.
+        var ucaPath = ArgValue(args, "--uca")
+                   ?? "D:/Models/UCD/Public/UCD/latest/uca/allkeys.txt";
+        var ucaPrimaryByCp = new Dictionary<int, ushort>(capacity: 50_000);
+        var ucaEntriesAll  = new List<UcaEntry>();
+        if (File.Exists(ucaPath))
+        {
+            Console.WriteLine($"Parsing UCA allkeys.txt ({ucaPath})...");
+            foreach (var ue in UcaAllKeysParser.Parse(ucaPath)) { ucaEntriesAll.Add(ue); }
+            Console.WriteLine($"  parsed {ucaEntriesAll.Count} UCA entries");
+
+            foreach (var entry in ucaEntriesAll)
+            {
+                if (entry.Elements.Count == 0) { continue; }
+                var primary = entry.Elements[0].Primary;
+                if (entry.IsImplicit)
+                {
+                    foreach (var cp in entry.SourceCodepoints)
+                    {
+                        ucaPrimaryByCp.TryAdd(cp, primary);
+                    }
+                }
+                else if (entry.SourceCodepoints.Count == 1)
+                {
+                    ucaPrimaryByCp[entry.SourceCodepoints[0]] = primary;
+                }
+            }
+            Console.WriteLine($"  UCA primary lookup: {ucaPrimaryByCp.Count} codepoints with weights");
+        }
+        else
+        {
+            Console.WriteLine($"  UCA allkeys.txt not found at {ucaPath}; ordering will use 0 for primary weight");
+        }
+
+        // Unihan radical-stroke for CJK comes from the kRSUnicode attribute
+        // already present on each <char> in ucd.all.flat.xml. Format examples:
+        // "9.5"   = radical 9, +5 strokes
+        // "9.5'"  = simplified-radical variant (we strip the prime)
+        // We compose radical*100 + strokes into a single sortable int so
+        // codepoints in the Han script cluster by radical first then by
+        // stroke count within radical.
+        var unihanRadicalByCp = new Dictionary<int, int>(capacity: 90_000);
+        foreach (var rec in records)
+        {
+            var rs = rec.Get("kRSUnicode");
+            if (string.IsNullOrEmpty(rs)) { continue; }
+            // kRSUnicode can be a space-separated list — take the first.
+            var firstSpace = rs.IndexOf(' ');
+            var token = firstSpace > 0 ? rs[..firstSpace] : rs;
+            // Strip variant marker.
+            if (token.EndsWith('\'')) { token = token[..^1]; }
+            var dot = token.IndexOf('.');
+            if (dot <= 0) { continue; }
+            if (!int.TryParse(token[..dot], NumberStyles.Integer, CultureInfo.InvariantCulture, out var radical)) { continue; }
+            if (!int.TryParse(token[(dot + 1)..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var strokes)) { continue; }
+            var composite = radical * 100 + strokes;
+            for (int cp = rec.FirstCodepoint; cp <= rec.LastCodepoint; ++cp)
+            {
+                unihanRadicalByCp[cp] = composite;
+            }
+        }
+        Console.WriteLine($"  Unihan radical lookup: {unihanRadicalByCp.Count} CJK codepoints with kRSUnicode");
+
         Console.WriteLine("Building canonical ordering...");
         var ordering = CanonicalOrdering.Sort(
             records,
-            ucaPrimaryFor:    static _ => 0,
-            unihanRadicalFor: static _ => 0);
+            ucaPrimaryFor:    cp => ucaPrimaryByCp.TryGetValue(cp, out var w) ? w : (ushort)0,
+            unihanRadicalFor: cp => unihanRadicalByCp.TryGetValue(cp, out var r) ? r : 0);
         Console.WriteLine($"  ordered {ordering.Count} codepoints");
 
         Console.WriteLine("Computing entries (BLAKE3 + super-Fibonacci + Hilbert + flags)...");
@@ -133,8 +201,52 @@ internal static class Program
         Console.WriteLine("Emitting codepoint_table.{h,c}...");
         CodepointTableEmitter.Emit(entries, outputDir);
 
-        Console.WriteLine("Emitting seed_db_rows.tsv...");
-        SeedDbRowsEmitter.Emit(entries, outputDir);
+        Console.WriteLine("Emitting entity_tier0.tsv + physicality_atoms.tsv...");
+        SeedDbRowsEmitter.Emit(entries, codepointHashes, hashing, outputDir);
+
+        // Parse ISO 639-3 BEFORE concept entities so we can include the
+        // language codes + ref_names + scope/type values in the tier-1
+        // concept emission (one TSV-per-table, no after-the-fact appends).
+        Console.WriteLine("Parsing ISO 639-3 (early — feeding language code names into concept entities)...");
+        var iso639Languages = new List<Decomposers.Iso639.Iso639LanguageRecord>();
+        var iso639TabPathEarly = Path.Combine(iso639Dir, "iso-639-3.tab");
+        if (File.Exists(iso639TabPathEarly))
+        {
+            foreach (var lang in Decomposers.Iso639.Iso639TabParser.ParseLanguages(iso639TabPathEarly))
+            {
+                iso639Languages.Add(lang);
+            }
+            Console.WriteLine($"  parsed {iso639Languages.Count} languages");
+        }
+
+        Console.WriteLine("Emitting entity_tier1.tsv + entity_child.tsv (concept entities)...");
+        var additionalNames = new List<string>();
+        additionalNames.AddRange(SeedIso639Emitter.EnumerateConceptNames(iso639Languages));
+        additionalNames.AddRange(SeedUnihanEmitter.EnumerateConceptValues(ordering));
+        additionalNames.AddRange(SeedDecompositionEmitter.EnumerateDecompositionTypeValues(ordering));
+        var conceptResult = SeedConceptEntitiesEmitter.Emit(
+            entries, codepointHashes, hashing, outputDir,
+            additionalConceptNames: additionalNames);
+        Console.WriteLine($"  emitted {conceptResult.ConceptByName.Count} concept entities");
+
+        Console.WriteLine("Emitting edge.tsv + edge_member.tsv (UCD property attestations)...");
+        var conceptByName = new Dictionary<string, Laplace.Core.Abstractions.AtomId>(
+            conceptResult.ConceptByName, System.StringComparer.Ordinal);
+        SeedPropertyEdgesEmitter.Emit(entries, codepointHashes, conceptByName, hashing, outputDir);
+
+        if (iso639Languages.Count > 0)
+        {
+            Console.WriteLine("Emitting edge_iso639.tsv + edge_member_iso639.tsv (language attestations)...");
+            SeedIso639Emitter.Emit(iso639Languages, conceptByName, hashing, outputDir);
+        }
+
+        Console.WriteLine("Emitting edge_unihan.tsv + edge_member_unihan.tsv (CJK property attestations)...");
+        SeedUnihanEmitter.Emit(ordering, codepointHashes, conceptByName, hashing, outputDir);
+
+        Console.WriteLine("Emitting decomposition target compositions + dt/dm edges...");
+        var positionByCp = new Dictionary<int, Laplace.Core.Abstractions.Point4D>(entries.Count);
+        foreach (var e in entries) { positionByCp[e.Codepoint] = e.Position; }
+        SeedDecompositionEmitter.Emit(ordering, codepointHashes, positionByCp, conceptByName, hashing, outputDir);
 
         Console.WriteLine("Emitting codepoint_names.{h,c}...");
         NamePoolEmitter.Emit(entries, outputDir);
@@ -149,20 +261,12 @@ internal static class Program
         RegistryEmitter.Emit("gc",     entries.Select(e => e.GeneralCategory), codepointHashes, hashing, outputDir);
         RegistryEmitter.Emit("bidi",   entries.Select(e => e.BidiClass), codepointHashes, hashing, outputDir);
 
-        var ucaPath = ArgValue(args, "--uca")
-                   ?? "D:/Models/UCD/Public/UCD/latest/uca/allkeys.txt";
-        if (File.Exists(ucaPath))
+        // UCA was parsed up front; emit the weights table from the parsed
+        // entries (re-parsing would be wasteful).
+        if (ucaEntriesAll.Count > 0)
         {
-            Console.WriteLine($"Parsing UCA allkeys.txt ({ucaPath})...");
-            var ucaEntries = new List<UcaEntry>();
-            foreach (var ue in UcaAllKeysParser.Parse(ucaPath)) { ucaEntries.Add(ue); }
-            Console.WriteLine($"  parsed {ucaEntries.Count} UCA entries");
             Console.WriteLine("Emitting uca_weights.{h,c}...");
-            UcaWeightsEmitter.Emit(ucaEntries, outputDir);
-        }
-        else
-        {
-            Console.WriteLine($"  UCA allkeys.txt not found at {ucaPath}; skipping");
+            UcaWeightsEmitter.Emit(ucaEntriesAll, outputDir);
         }
 
         var emojiDir = ArgValue(args, "--emoji")
@@ -181,22 +285,16 @@ internal static class Program
             Console.WriteLine($"  emoji directory not found at {emojiDir}; skipping");
         }
 
-        Console.WriteLine("Parsing ISO 639-3...");
-        var iso639Languages = new List<Decomposers.Iso639.Iso639LanguageRecord>();
-        var iso639TabPath = Path.Combine(iso639Dir, "iso-639-3.tab");
-        if (File.Exists(iso639TabPath))
+        // ISO 639-3 was parsed up front (above) — emit the C accelerator
+        // table from the already-parsed records.
+        if (iso639Languages.Count > 0)
         {
-            foreach (var lang in Decomposers.Iso639.Iso639TabParser.ParseLanguages(iso639TabPath))
-            {
-                iso639Languages.Add(lang);
-            }
-            Console.WriteLine($"  parsed {iso639Languages.Count} languages");
             Console.WriteLine("Emitting iso639_languages.{h,c}...");
             Iso639LanguagesEmitter.Emit(iso639Languages, codepointHashes, hashing, outputDir);
         }
         else
         {
-            Console.WriteLine($"  ISO 639-3 file not found at {iso639TabPath}; skipping");
+            Console.WriteLine($"  ISO 639-3 file not loaded; skipping C accelerator table");
         }
 
         Console.WriteLine("Done.");
