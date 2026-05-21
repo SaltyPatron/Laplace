@@ -265,6 +265,49 @@ bootstrap_pg_legacy_cleanup() {
         || green "✓ 'ahart' PG role already unprivileged (or absent)"
 }
 
+bootstrap_pg_database_and_postgis() {
+    say "Ensure 'laplace' database + postgis extension (superuser-required ops)"
+
+    # The 'laplace' database is owned by laplace_admin. We create it here (as
+    # postgres) so subsequent Layer-1 work doesn't need EnsureDatabase to
+    # connect as a role that can't CREATE DATABASE on this cluster. (DbUp's
+    # EnsureDatabase would also work via laplace_admin's CREATEDB privilege —
+    # this is defense in depth + makes 'status' reporting cleaner.)
+    if sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='laplace'" | grep -q 1; then
+        green "✓ Database 'laplace' already exists"
+    else
+        sudo -u postgres createdb -O laplace_admin laplace
+        green "✓ Created database 'laplace' owned by laplace_admin"
+    fi
+
+    # postgis requires SUPERUSER to CREATE EXTENSION (it's not marked
+    # 'trusted' in stock Debian/Ubuntu packaging of PG 18). laplace_admin
+    # is intentionally NOT superuser — so we install postgis here as
+    # 'postgres'. Layer-1 DbUp's CREATE EXTENSION IF NOT EXISTS postgis
+    # then short-circuits (PG returns NOTICE before privilege check).
+    if sudo -u postgres psql -d laplace -tAc "SELECT 1 FROM pg_extension WHERE extname='postgis'" | grep -q 1; then
+        green "✓ Extension 'postgis' already present in 'laplace'"
+    else
+        sudo -u postgres psql -d laplace -v ON_ERROR_STOP=1 -c "CREATE EXTENSION postgis" >/dev/null
+        green "✓ Installed extension 'postgis' in 'laplace'"
+    fi
+
+    # Grant CONNECT to app + readonly roles so they can use the DB once
+    # extension setup is complete (Layer-1 grants schema USAGE on top).
+    sudo -u postgres psql -d laplace -v ON_ERROR_STOP=1 <<'PG_EOF' >/dev/null
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'laplace_app') THEN
+        EXECUTE 'GRANT CONNECT ON DATABASE laplace TO laplace_app';
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'laplace_readonly') THEN
+        EXECUTE 'GRANT CONNECT ON DATABASE laplace TO laplace_readonly';
+    END IF;
+END $$;
+PG_EOF
+    green "✓ CONNECT grants for laplace_app / laplace_readonly"
+}
+
 bootstrap_pg_auth() {
     say "Configure peer auth (pg_ident.conf + pg_hba.conf)"
 
@@ -501,6 +544,7 @@ do_bootstrap() {
     bootstrap_pg_roles
     bootstrap_pg_legacy_cleanup
     bootstrap_pg_auth
+    bootstrap_pg_database_and_postgis
     bootstrap_sudoers
 
     say "Verification"

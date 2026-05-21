@@ -138,10 +138,23 @@ layer1_nuke() {
 # ---------------------------------------------------------------------------
 # Mode dispatchers
 # ---------------------------------------------------------------------------
+layer1_build_install_extension() {
+    say "Layer 1 — Build + install the laplace PG extension"
+    # PGXS build of the C source. Produces extension/laplace.so locally.
+    (cd "$REPO_DIR/extension" && make PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config | tail -3)
+    # `sudo make install` places .so + .control + .sql into PG's extension
+    # dirs. The bounded NOPASSWD sudoers entry for laplace-runner covers
+    # this exact invocation pattern (`make install*`), so when this is
+    # called from the laplace-runner-owned CI context it's password-free.
+    (cd "$REPO_DIR/extension" && sudo make install PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config | tail -3)
+    green "✓ laplace.so + .control + .sql installed in PG extension dirs"
+}
+
 do_setup() {
     ensure_dotnet_present
-    say "Layer 0 — System account, runner, PG roles, peer auth, sudoers"
+    say "Layer 0 — System account, runner, PG roles, peer auth, sudoers, DB, postgis"
     sudo "$BOOTSTRAP" bootstrap
+    layer1_build_install_extension
     layer1_up
 
     say "DONE — host is set up."
@@ -231,6 +244,7 @@ case "$MODE" in
         ;;
     layer1)
         ensure_dotnet_present
+        layer1_build_install_extension
         layer1_up
         ;;
     -h|--help|help)
