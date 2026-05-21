@@ -1,15 +1,24 @@
 # Laplace — Project State
 
-**Last updated:** 2026-05-21 (foundation + CI/CD initialized; runner online)
-**Updated by:** claude (project framework + CI/CD setup)
+**Last updated:** 2026-05-21 (Chunk 0 complete — skeleton builds + CI verifies)
+**Updated by:** claude (Chunk 0 execution)
 
 ---
 
 ## Current phase
 
-**Phase 0 — Foundation documentation + CI/CD.** Complete.
+**Chunk 0 — Plan + deps + skeleton.** ✅ COMPLETE
 
-Framework documentation, rules, glossary, standards, design spec, operations manual, agent definitions, and status-tracking infrastructure all in place. GitHub Actions CI/CD active (hosted PR-validation + self-hosted integration on `hart-server`). No code yet.
+All acceptance criteria green:
+- ✅ `just build` succeeds (engine + extension + app)
+- ✅ Engine produces `liblaplace_engine.so.0.1.0` with proper soname symlinks; ctest passes
+- ✅ PG extension produces `laplace.so` via PGXS
+- ✅ C# app produces `Laplace.Engine.dll` (net10.0)
+- ✅ `integration.yml` build job passes on `hart-server` self-hosted runner
+- ✅ `ci.yml` (GitHub-hosted) passes for doc/lint/banned-vocab checks
+- ✅ GitHub Issues #1-#8 created for Chunks 1-8
+
+Framework documentation, rules, glossary, standards, design spec, operations manual, agent definitions, and status-tracking infrastructure all in place. GitHub Actions CI/CD active (hosted PR-validation + self-hosted integration on `hart-server`).
 
 ## Repository
 
@@ -34,18 +43,17 @@ Framework documentation, rules, glossary, standards, design spec, operations man
 
 | # | Milestone | Status | Verified by |
 |---|---|---|---|
-| 0 | Framework documentation in place | ✅ DONE | initial framework init |
-| 1 | Chunk 1 — engine skeleton + extension scaffold + schema | ⏳ NEXT | — |
-| 2 | Chunk 2 — coord4d + hash128 + hilbert4d + mantissa pack | — | — |
-| 3 | Chunk 3 — geometry4d serialize/deserialize + GIST integration | — | — |
-| 4 | Chunk 4 — perf-cache build from Unicode UCD + DB seed | — | — |
-| 5 | Chunk 5 — first linguistic source plugin (WordNet) + ingestion verified | — | — |
-| 6 | Chunk 6 — Glicko-2 fixed-point + cross-source consensus working | — | — |
-| 7 | Chunk 7 — TransformerModelSource probe + Procrustes pipeline + physicalities | — | — |
-| 8 | Chunk 8 — first synthesis pipeline (LlamaTemplate / QwenTemplate) | — | — |
-| 9 | Chunk 9 — Qwen3 round-trip → llama.cpp → chat (the milestone) | — | — |
+| 0 | Plan + deps + skeleton | ✅ DONE | commit 1f11511, CI green |
+| 1 | Core math primitives (coord4d, hash128, hilbert4d, mantissa) | ⏳ NEXT | [#1](https://github.com/SaltyPatron/Laplace/issues/1) |
+| 2 | Geometry serde + GIST integration | — | [#2](https://github.com/SaltyPatron/Laplace/issues/2) |
+| 3 | Perf-cache + T0 seed (Unicode UCD) | — | [#3](https://github.com/SaltyPatron/Laplace/issues/3) |
+| 4 | First linguistic source (WordNet) | — | [#4](https://github.com/SaltyPatron/Laplace/issues/4) |
+| 5 | Glicko-2 + cross-source dynamics | — | [#5](https://github.com/SaltyPatron/Laplace/issues/5) |
+| 6 | TransformerModelSource + Procrustes + lottery-ticket sparsity | — | [#6](https://github.com/SaltyPatron/Laplace/issues/6) |
+| 7 | Synthesis pipeline (LlamaTemplate + extractors + GGUFWriter) | — | [#7](https://github.com/SaltyPatron/Laplace/issues/7) |
+| 8 | Round-trip + chat verification (MILESTONE) | — | [#8](https://github.com/SaltyPatron/Laplace/issues/8) |
 
-(Chunk numbering is provisional; user will produce the canonical plan next.)
+Canonical plan in [.agent/status/plan.md](plan.md).
 
 ## In progress
 
