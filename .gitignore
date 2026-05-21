@@ -427,3 +427,68 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# ==================================================================
+# Laplace project-specific
+# ==================================================================
+
+# CMake build output
+engine/build/
+build/
+**/CMakeCache.txt
+**/CMakeFiles/
+**/cmake_install.cmake
+
+# Compiled engine library
+*.so
+*.so.*
+*.dll
+*.dylib
+*.a
+
+# PG extension build artifacts (PGXS)
+extension/*.o
+extension/*.bc
+extension/results/
+extension/regression.diffs
+extension/regression.out
+extension/tmp_check/
+
+# Perf-cache + ingestion intermediate artifacts (large binaries; not source)
+data/
+*.perfcache
+
+# Postgres dumps
+*.dump
+*.sql.gz
+
+# Local-only configuration / secrets
+.env.local
+.env.*.local
+secrets/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / editor caches not covered by VS template
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# Python (build scripts only — no Python in main codebase)
+__pycache__/
+*.pyc
+
+# Ingested model artifacts (large; never committed — they live in /vault/models/)
+*.safetensors
+*.gguf
+*.onnx
+*.bin
+!engine/test/fixtures/*.bin
