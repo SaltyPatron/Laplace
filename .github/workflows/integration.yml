@@ -65,14 +65,25 @@ jobs:
             exit 1
           fi
 
-      - name: Eigen + ICU + xxHash
+      - name: Eigen + ICU + BLAKE3 toolchain
         run: |
           pkg-config --modversion eigen3 || echo "::warning::eigen3 pkg-config not found"
           pkg-config --modversion icu-uc || echo "::warning::ICU not found"
-          dpkg -l libxxhash0 2>/dev/null | grep -q "^ii" && echo "✓ libxxhash0 installed" || echo "::warning::libxxhash0 not installed"
+
+      - name: Peer auth (laplace-runner → laplace_admin) per ADR 0019
+        run: |
+          # Per ADR 0019 the runner is the laplace-runner system account.
+          # Peer auth resolves it to the laplace_admin PG role on local socket.
+          RESULT=$(psql -d postgres -tAc "SELECT current_user || ' on ' || current_database();")
+          echo "Peer-auth probe: $RESULT"
+          if [ "$RESULT" != "laplace_admin on postgres" ]; then
+            echo "::error::Expected 'laplace_admin on postgres', got '$RESULT'"
+            echo "::error::Run: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
+            exit 1
+          fi
 
   build:
-    name: Build engine + extension + app
+    name: Build engine + extension + app + migrations
     needs: capabilities
     runs-on: [self-hosted, laplace]
     steps:
@@ -94,67 +105,90 @@ jobs:
           cd extension
           make PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
 
-      - name: Build C# app (dotnet)
+      - name: Build C# app + migrations
         run: |
           cd app
           dotnet build Laplace.slnx -c Release
 
-  extension-smoke-test:
-    name: Install extension + create test DB + smoke test
+  # Layer 1 — extension lifecycle (ADR 0023): install extension binaries,
+  # then DbUp orchestrates EnsureDatabase + CREATE EXTENSION + role grants.
+  db-ensure:
+    name: Install extension + apply DbUp migrations (Layer 1)
     needs: build
     runs-on: [self-hosted, laplace]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build PG extension
+      - name: Build + install PG extension (bounded sudo, per ADR 0019)
         run: |
           cd extension
           make PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
-
-      - name: Install extension into PG18
-        # Requires NOPASSWD sudo for /usr/bin/make for the runner user.
-        # See one-time setup in CONTRIBUTING.md.
-        run: |
-          cd extension
           sudo make install PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
 
-      - name: Create ephemeral test database
-        # Requires PG superuser role for the runner user (ahart).
-        # See one-time setup in CONTRIBUTING.md.
+      - name: DbUp — EnsureDatabase('laplace') + apply migrations
         run: |
-          TESTDB="laplace_ci_${{ github.run_id }}"
-          echo "TESTDB=$TESTDB" >> $GITHUB_ENV
-          dropdb --if-exists "$TESTDB" || true
-          createdb "$TESTDB"
-          echo "::notice::Created test DB $TESTDB"
+          cd app
+          dotnet run \
+            --project Laplace.Migrations/Laplace.Migrations.csproj \
+            -c Release -- up
 
-      - name: Install extensions + smoke test
+      - name: Verify extensions installed at expected version
         run: |
-          # Install PostGIS (required by RULES.md R1)
-          psql -d "$TESTDB" -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+          psql -d laplace -tAc "\dx" | sed 's/^/  /'
+          VERSION=$(psql -d laplace -tAc "SELECT laplace.laplace_version();")
+          echo "laplace.laplace_version() → '$VERSION'"
+          EXPECTED=$(awk -F"'" '/^default_version/{print $2}' extension/laplace.control)
+          if [ "$VERSION" != "$EXPECTED" ]; then
+            echo "::error::Version mismatch: extension reports '$VERSION', .control declares '$EXPECTED'"
+            exit 1
+          fi
+          echo "::notice::laplace extension at version $VERSION (matches .control)"
 
-          # Install Laplace extension
-          psql -d "$TESTDB" -c "CREATE EXTENSION laplace;"
+      - name: DbUp status
+        run: |
+          cd app
+          dotnet run \
+            --project Laplace.Migrations/Laplace.Migrations.csproj \
+            -c Release -- status
 
-          # Smoke test: laplace_version() returns the expected string
-          RESULT=$(psql -tA -d "$TESTDB" -c "SELECT laplace_version();")
-          echo "laplace_version() returned: '$RESULT'"
-          if [ "$RESULT" != "0.1.0" ]; then
-            echo "::error::Expected '0.1.0', got '$RESULT'"
+  # Smoke test runs against the agent-managed 'laplace' database directly
+  # (not an ephemeral DB) — the substrate is the substrate; CI verifies
+  # the deployed instance survives a push-to-main rebuild.
+  extension-smoke-test:
+    name: Smoke-test laplace extension
+    needs: db-ensure
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: laplace_version() returns expected version
+        run: |
+          EXPECTED=$(awk -F"'" '/^default_version/{print $2}' extension/laplace.control)
+          RESULT=$(psql -tA -d laplace -c "SELECT laplace.laplace_version();")
+          echo "laplace_version() returned: '$RESULT' (expected '$EXPECTED')"
+          if [ "$RESULT" != "$EXPECTED" ]; then
+            echo "::error::Expected '$EXPECTED', got '$RESULT'"
             exit 1
           fi
           echo "::notice::laplace_version() OK"
 
-          # Verify both extensions present
-          psql -d "$TESTDB" -c "\dx" -P "footer=off"
-
-      - name: Cleanup test database
-        if: always()
+      - name: Required extensions present
         run: |
-          if [ -n "$TESTDB" ]; then
-            dropdb --if-exists "$TESTDB" || true
-            echo "::notice::Cleaned up $TESTDB"
-          fi
+          psql -d laplace -c "\dx" -P "footer=off"
+          for ext in postgis laplace; do
+            if ! psql -d laplace -tAc "SELECT 1 FROM pg_extension WHERE extname='$ext';" | grep -q 1; then
+              echo "::error::Extension '$ext' not present"
+              exit 1
+            fi
+          done
+
+      - name: Role grants in place
+        run: |
+          # laplace_app should be able to USAGE the laplace schema
+          psql -d laplace -tAc "
+            SELECT has_schema_privilege('laplace_app', 'laplace', 'USAGE'),
+                   has_schema_privilege('laplace_readonly', 'laplace', 'USAGE');
+          " | sed 's/^/  /'
 
   # Future jobs (per .agent/status/plan.md):
   # - pg_regress test-extension (Chunk 2+; after laplace--*.sql has real functions)
