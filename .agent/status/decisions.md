@@ -68,6 +68,16 @@ Append-only timestamped record of architectural / engineering decisions. Format:
 **What:** Six plugin interfaces: `ISource`, `IDecomposer`, `IArchitectureTemplate`, `IFormatWriter`, `IFeatureExtractor`, `IProtocolEndpoint`. Adding new capability = ONE plugin, never schema + query + synthesis touches.
 **Why:** Codebase stays maintainable. See [RULES.md R10](../../RULES.md).
 
+## 2026-05-21 — Two-tier CI/CD: GitHub-hosted for PR validation; self-hosted for integration on push-to-main only
+**By:** user + framework setup
+**What:** Two workflow files. `ci.yml` runs on GitHub-hosted disposable VMs (free for public repos) for doc checks, lints, banned-vocabulary scan, link integrity. Triggers on push + PR + manual. `integration.yml` runs on self-hosted `hart-server` runner (oneAPI + PG18 + .NET 10) for build / test / verify. Triggers on push-to-main + workflow_dispatch ONLY — never on pull_request.
+**Why:** Hybrid is the right security posture for a public repo with a self-hosted runner. PR code (potentially malicious) runs on disposable VMs. Trusted code (post-merge / manual) runs on the self-hosted machine that has access to local resources (oneAPI, /vault/models, PG). User's credentials are the only path to triggering self-hosted workflows.
+
+## 2026-05-21 — Self-hosted runner: hart-server, systemd service, label-routed
+**By:** framework setup
+**What:** Installed GitHub Actions runner v2.334.0 at `~/actions-runner/`. Configured as systemd service `actions.runner.SaltyPatron-Laplace.hart-server.service`. Labels: `self-hosted, Linux, X64, laplace, oneapi, postgres-18, dotnet-10, avx2`. Workflows opt in via `runs-on: [self-hosted, laplace]`.
+**Why:** Enterprise-grade CI/CD with persistent local resource access (oneAPI / PG / large data dirs / models). Survives reboots via systemd. Label-routed so workflows specifically targeting Laplace's capabilities land on this machine.
+
 ## 2026-05-21 — Mantissa packing: 8 tier + 12 position + 60 truncated hash bits per vertex
 **By:** initial framework
 **What:** Trajectory vertex coords carry constituent identity in low mantissa bits: 8 bits tier + 12 bits position-in-trajectory + 60 bits truncated constituent hash. High mantissa bits preserve approximate spatial position for indexing.
