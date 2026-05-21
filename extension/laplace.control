@@ -1,0 +1,6 @@
+# Laplace substrate PostgreSQL extension
+default_version = '1.0.0'
+module_pathname = '$libdir/laplace'
+relocatable = true
+comment = 'Laplace substrate — geometric-attestation AI substrate (skeleton; populated per DESIGN.md chunks)'
+# Future (Chunk 2+): requires = 'postgis'

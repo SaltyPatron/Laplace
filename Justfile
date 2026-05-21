@@ -18,8 +18,9 @@ check-prereqs:
 build: build-engine build-extension build-app
 
 build-engine:
-    cd engine && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx
+    # CMake picks compiler from PATH (CC/CXX env). With oneAPI's setvars.sh
+    # sourced, icx/icpx are preferred. Without it, gcc/g++ is fine.
+    cd engine && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
     cd engine && cmake --build build
 
 build-extension:
@@ -29,7 +30,7 @@ install-extension: build-extension
     cd extension && sudo make USE_PGXS=1 PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config install
 
 build-app:
-    cd app && dotnet build -c Release
+    cd app && dotnet build Laplace.slnx -c Release
 
 build-perfcache:
     scripts/build-perfcache.sh

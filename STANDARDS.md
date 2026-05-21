@@ -191,6 +191,28 @@ laplace/                              ← project root (= /home/ahart/Projects/L
 
 ---
 
+## Dependency sources (locked)
+
+Adding a new dep requires (a) listing it here, (b) declaring install path/method, (c) verifying RULES.md doesn't ban it, (d) user authorization.
+
+| Library | Source | Notes |
+|---|---|---|
+| **Eigen 3.4** | `apt install libeigen3-dev` | Found via `pkg-config eigen3` (→ `/usr/include/eigen3`) |
+| **Intel oneMKL** | Intel oneAPI 2026 (`/opt/intel/oneapi/mkl/latest`) | Comes with oneAPI; needs `setvars.sh` sourced for compiler tooling, but lib path is discoverable via `MKLROOT` |
+| **Intel oneTBB** | Intel oneAPI 2026 | Same as oneMKL |
+| **Intel IPP / DPL** | Intel oneAPI 2026 | Available as needed |
+| **Spectra** | CMake `FetchContent`, pinned `v1.2.0` | Header-only; no apt; FetchContent is self-contained in CMakeLists.txt |
+| **libxxhash 0.8.1** | `apt install libxxhash-dev` | System pkg; XXH3-128 collision-safe for ~10¹⁸ entities |
+| **tree-sitter runtime** | `/usr/local/lib/libtree-sitter.so` | Manual install (pre-existing); link directly |
+| **tree-sitter grammars** | `/vault/Data/TreeSitter` | 303 grammars curated; decomposer selects per modality |
+| **PostgreSQL 18** | apt (pgdg repository) | + PostGIS 3.6.3 (system-installed; provides `gist_geometry_ops_nd`) |
+| **ICU 70.1** | apt (`libicu-dev`) | UCA collation support; `pkg-config icu-uc icu-i18n` |
+| **Boost 1.74** | apt (`libboost-dev`) | Minimal use |
+| **BLAKE3** | NOT INSTALLED | XXH3-128 used instead; revisit only if cryptographic strength becomes a requirement |
+| **.NET 10 SDK** | Microsoft package | Already installed at `/usr/lib/dotnet/` |
+
+**vcpkg** is present at `/home/ahart/vcpkg` but **NOT in use**. Reserved for if/when we accumulate a second C++ dependency that's neither in apt nor trivially fetchable. For now, the dep set is small enough that vcpkg's toolchain overhead isn't justified.
+
 ## Build standards
 
 - **C/C++:** primary compiler `icx`/`icpx` (Intel 2026); fallback `g++` 11.4 / `clang++` 14.

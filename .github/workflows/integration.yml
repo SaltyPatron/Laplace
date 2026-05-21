@@ -71,10 +71,36 @@ jobs:
           pkg-config --modversion icu-uc || echo "::warning::ICU not found"
           dpkg -l libxxhash0 2>/dev/null | grep -q "^ii" && echo "✓ libxxhash0 installed" || echo "::warning::libxxhash0 not installed"
 
-  # Placeholder jobs that will fill out as code arrives:
-  # - build-engine: cmake + ninja build of liblaplace_engine.so
-  # - build-extension: PGXS build of laplace.so
-  # - build-app: dotnet build of C# projects
-  # - test-engine, test-extension, test-app, test-integration
-  # - verify-determinism, verify-fk, verify-perfcache
-  # Each runs only on push to main (this branch is the trusted trigger).
+  build:
+    name: Build engine + extension + app
+    needs: capabilities
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build engine (CMake + Ninja)
+        run: |
+          cd engine
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+
+      - name: Run engine tests
+        run: |
+          cd engine/build
+          ctest --output-on-failure
+
+      - name: Build PG extension (PGXS)
+        run: |
+          cd extension
+          make PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
+
+      - name: Build C# app (dotnet)
+        run: |
+          cd app
+          dotnet build -c Release
+
+  # Future jobs (per .agent/status/plan.md):
+  # - test-extension (pg_regress), test-app (dotnet test), test-integration
+  # - verify-determinism, verify-fk, verify-perfcache (Chunk 3+)
+  # - round-trip end-to-end test (Chunk 8)
+  # All trigger only on push to main / workflow_dispatch — never PRs from forks.

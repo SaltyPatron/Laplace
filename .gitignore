@@ -446,9 +446,10 @@ build/
 *.dylib
 *.a
 
-# PG extension build artifacts (PGXS)
-extension/*.o
-extension/*.bc
+# PG extension build artifacts (PGXS — produces .o and .bc in src/)
+extension/**/*.o
+extension/**/*.bc
+extension/*.so
 extension/results/
 extension/regression.diffs
 extension/regression.out
