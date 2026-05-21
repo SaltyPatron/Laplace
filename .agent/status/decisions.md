@@ -23,10 +23,11 @@ Append-only timestamped record of architectural / engineering decisions. Format:
 **What:** Substrate has `entities`, `physicalities`, `attestations` only. No `observations` table.
 **Why:** Attestation IS consensus state, not event log entry. Repeated source assertions are idempotent. Provenance lives in `source_hash` column. See [RULES.md R2 / R5](../../RULES.md).
 
-## 2026-05-21 — XXH3-128 for entity hashing
+## 2026-05-21 — XXH3-128 for entity hashing (SUPERSEDED by BLAKE3 decision below)
 **By:** initial framework
 **What:** Use libxxhash3's 128-bit variant for entity content hashing. Stored as `bytea(16)` in Postgres.
 **Why:** SIMD-vectorized, fast, 128-bit collision-resistance comfortable for ~10¹⁸ entities. Already installed (libxxhash 0.8.1). BLAKE3 considered but rejected — cryptographic strength not needed (we control all ingested content); build-from-source overhead.
+**Superseded by:** "BLAKE3 truncated to 128 bits" (2026-05-21, later same day)
 
 ## 2026-05-21 — int64 fixed-point at scale 1e9 for Glicko-2
 **By:** initial framework
@@ -67,6 +68,25 @@ Append-only timestamped record of architectural / engineering decisions. Format:
 **By:** user (engineering discipline)
 **What:** Six plugin interfaces: `ISource`, `IDecomposer`, `IArchitectureTemplate`, `IFormatWriter`, `IFeatureExtractor`, `IProtocolEndpoint`. Adding new capability = ONE plugin, never schema + query + synthesis touches.
 **Why:** Codebase stays maintainable. See [RULES.md R10](../../RULES.md).
+
+## 2026-05-21 — BLAKE3 truncated to 128 bits for entity hashing (supersedes XXH3 decision)
+**By:** user (Anthony, after consideration)
+**What:** Switch from XXH3-128 to **BLAKE3** (official C implementation, FetchContent pinned to v1.5.4), truncated to 128 bits. Stored as `bytea(16)` in PG; `hash128_t = {uint64_t hi, lo}` in C engine; `byte[16]` in C#.
+**Why:** SIMD-accelerated (BLAKE3 builds with SSE2/SSE4.1/AVX2/AVX-512 variants — verified in CMake configure output). Cryptographic strength is free insurance for signed substrate snapshots / supply-chain verification. Familiar from prior iteration. Vendor cost is one FetchContent block. The XXH3-128 marginal speed advantage on small inputs doesn't outweigh BLAKE3's other properties for "enterprise-grade / incredibly capable" framing.
+**Discipline:** Raw bytes end-to-end. NO `bytea ↔ text` casts; NO hex conversions outside debug-only paths; NO `varchar` / `text` for hash storage. See STANDARDS.md "Hash discipline (no casts, no hex)".
+**Supersedes:** "XXH3-128 for entity hashing" (earlier same day).
+
+## 2026-05-21 — Reusable helpers — DRY at every layer (project-wide discipline)
+**By:** user (Anthony)
+**What:** Every operation used more than once must be a named, tested, single-source-of-truth helper. Applies to: hash ops, coord arithmetic, Hilbert encode/decode, mantissa pack/unpack, geometry serialization, Glicko-2 update, marshalling (PG ↔ engine ↔ C#).
+**Why:** Correctness solved once; performance optimized in one place; behavior consistent; bugs have one place to fix not 17 inlined copies. Cross-language consistency: ONE canonical engine implementation; PG wrappers and C# bindings are thin glue.
+**Codified in:** STANDARDS.md "Reusable helpers — DRY at every layer" section.
+
+## 2026-05-21 — Agent cadence — proactively review/update issues on user input
+**By:** user (Anthony, as standing instruction)
+**What:** Standing agent operating procedure: when user surfaces requirements/decisions/changes, scan affected issues, update or open new ones; append decisions.md if architectural; reflect in standards/design with user authorization. Don't wait to be told. Update STATE.md per chunk completion. Re-read plan + RULES + STANDARDS + DESIGN at chunk start.
+**Why:** Prevents drift. Keeps issues + status + decisions ledger current as the conversation evolves. The cadence is the anti-pattern for the 0%-after-12-months failure mode.
+**Codified in:** CLAUDE.md "Cadence — standing agent operating procedure" section.
 
 ## 2026-05-21 — Two-tier CI/CD: GitHub-hosted for PR validation; self-hosted for integration on push-to-main only
 **By:** user + framework setup

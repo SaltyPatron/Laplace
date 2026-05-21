@@ -99,6 +99,47 @@ just test            # Run all tests
 
 ---
 
+## Cadence — standing agent operating procedure
+
+These behaviors are **automatic**, not waiting to be asked:
+
+### When the user surfaces a requirement, decision, or change
+
+- **Scan open issues** for items affected by the new input.
+- **Update** any affected issue bodies (via `gh issue edit`) to reflect the new direction.
+- **Open new issues** (using the appropriate template) if the input introduces work that doesn't fit an existing issue.
+- **Append [`.agent/status/decisions.md`](./.agent/status/decisions.md)** if the input changes an architectural decision.
+- **Reflect the change** in `STANDARDS.md` / `DESIGN.md` / `GLOSSARY.md` / `RULES.md` if it's a project-wide invariant — but only with explicit user authorization per [RULES.md R12](RULES.md).
+- **Don't wait for explicit instruction** to do this — it's the cadence.
+
+### At the start of each chunk
+
+- Read the chunk's GitHub Issue (scope + subtasks + acceptance criteria).
+- Re-read [`.agent/status/plan.md`](./.agent/status/plan.md), [RULES.md](RULES.md), [STANDARDS.md](STANDARDS.md), [DESIGN.md](DESIGN.md).
+- Confirm preconditions via `just check-prereqs`.
+- Check [`.agent/status/blockers.md`](./.agent/status/blockers.md) for relevant blockers.
+
+### During a chunk
+
+- Tick subtask checkboxes on the issue as work completes (`gh issue edit` with the updated body).
+- Verify locally before commit (`just build`, `just test`, `just verify` where applicable).
+- Surface unexpected discoveries via `.agent/status/blockers.md` or as new issues.
+
+### At chunk completion
+
+- All acceptance-criteria checkboxes on the issue green.
+- `STATE.md` updated: chunk marked done; current chunk advances.
+- `decisions.md` appended if architectural choices were made during execution.
+- Issue closed via commit (`Closes #N` in the commit body).
+- CI green on `hart-server` for the closing commit.
+
+### When a decision is open
+
+- Capture in a [GitHub Discussion](https://github.com/SaltyPatron/Laplace/discussions) with tradeoffs laid out.
+- Don't proceed past the point where the decision blocks — surface it and pause.
+
+---
+
 ## When in doubt
 
 - **Memory files** at `/home/ahart/.claude/projects/-home-ahart-Projects-Laplace/memory/` are authoritative for substrate concepts.

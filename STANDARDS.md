@@ -9,7 +9,7 @@ These are the binding standards for all code in this project. Inconsistency here
 | Concern | Type | Notes |
 |---|---|---|
 | 4D coordinate component | `float64` (per component) | Room for mantissa packing; sufficient precision |
-| Entity hash | `uint128` stored as `bytea(16)` in PG; `hash128_t = {uint64_t hi, lo}` in C/C++ | XXH3-128; collision-safe for ~10¹⁸ entities |
+| Entity hash | `uint128` stored as `bytea(16)` in PG; `hash128_t = {uint64_t hi, lo}` in C/C++ | BLAKE3 truncated to 128 bits; collision-safe for ~10¹⁸ entities; **raw bytes only — never hex/text** |
 | Hilbert curve index | `uint128` stored as `bytea(16)` in PG; `hilbert128_t = {uint64_t hi, lo}` in C/C++ | 4D × 32-bit-per-dim |
 | Glicko-2 rating / RD / volatility | `int64` fixed-point, scale = 10⁹ | Deterministic, vectorizable, no FP drift |
 | Tier ID | `uint8` (range 0–255) | 256 tiers max — wildly sufficient |
@@ -202,7 +202,7 @@ Adding a new dep requires (a) listing it here, (b) declaring install path/method
 | **Intel oneTBB** | Intel oneAPI 2026 | Same as oneMKL |
 | **Intel IPP / DPL** | Intel oneAPI 2026 | Available as needed |
 | **Spectra** | CMake `FetchContent`, pinned `v1.2.0` | Header-only; no apt; FetchContent is self-contained in CMakeLists.txt |
-| **libxxhash 0.8.1** | `apt install libxxhash-dev` | System pkg; XXH3-128 collision-safe for ~10¹⁸ entities |
+| **BLAKE3** | CMake `FetchContent` (official `c/` subdir), pinned `1.5.4` | SIMD-accelerated cryptographic hash; 128-bit truncated → comfortable collision space for ~10¹⁸ entities; raw 16-byte output (no hex/text conversions ever) |
 | **tree-sitter runtime** | `/usr/local/lib/libtree-sitter.so` | Manual install (pre-existing); link directly |
 | **tree-sitter grammars** | `/vault/Data/TreeSitter` | 303 grammars curated; decomposer selects per modality |
 | **PostgreSQL 18** | apt (pgdg repository) | + PostGIS 3.6.3 (system-installed; provides `gist_geometry_ops_nd`) |
@@ -224,6 +224,73 @@ Adding a new dep requires (a) listing it here, (b) declaring install path/method
 - **Vectorization target:** `-march=haswell` minimum (AVX2 on this dev box); `-march=sapphirerapids` or `-mavx512f` for AVX-512 deployment targets.
 
 ---
+
+## Reusable helpers — DRY at every layer
+
+Every operation used more than once **must** be a named, tested, single-source-of-truth helper. Helpers exist to ensure:
+
+1. **Correctness** is solved once.
+2. **Performance** is optimized in one place (SIMD, caching, alignment).
+3. **Behavior** is consistent across all callers.
+4. **Bugs** have one place to be fixed, not 17 inlined copies.
+
+### Applies to (non-exhaustive)
+
+- Hash operations (`hash128_from_bytes`, `hash128_merkle`, `hash128_equals`, `hash128_zero`, `hash128_compare`, ...)
+- Coord arithmetic (`coord4d_distance`, `coord4d_centroid`, `coord4d_norm`, ...)
+- Hilbert encode/decode (`hilbert4d_encode`, `hilbert4d_decode`, `hilbert128_compare`)
+- Mantissa pack/unpack (`mantissa_pack`, `mantissa_unpack`)
+- Geometry serialization (`geometry4d_serialize`, `geometry4d_deserialize` — both bounds-checked)
+- Glicko-2 update (`glicko2_update`, `glicko2_decay_rd_in_place`)
+- Trajectory enumeration (`trajectory_constituents`, `trajectory_build`)
+- PG ↔ engine marshalling (one wrapper macro per arg pattern)
+- C# ↔ engine marshalling (one P/Invoke binding per engine function — never call native API ad-hoc)
+- Determinism shims (fixed-point arithmetic on rating/RD/volatility)
+
+### Don't
+
+- Inline a hash invocation in multiple `.c`/`.cpp`/`.cs` files
+- Duplicate marshalling code across PG_FUNCTION wrappers
+- Re-implement a geometric operation across languages (engine is the canonical source)
+- Skip the helper because "it's just one line" — that one line still gets multiplied N times
+- Define ad-hoc inline conversions at marshalling boundaries
+
+### Do
+
+- Define each helper **in a single header**, implement once
+- Test exhaustively at the helper level (not at every caller)
+- Call the helper from all callers — no exceptions
+- Centralize optimization within the helper
+- Document the helper's contract (preconditions, postconditions, ownership rules)
+
+### Cross-language consistency
+
+For any operation exposed in BOTH PG and C# (i.e., callable via SQL and via P/Invoke), there is exactly **one canonical implementation in the C/C++ engine**. PG wrappers (PG_FUNCTION_INFO_V1) and C# wrappers (LibraryImport) are thin glue around the engine helper. Behavior across SQL/C#/engine direct is byte-identical, verified by cross-language consistency tests.
+
+## Hash discipline (no casts, no hex)
+
+The hash representation MUST be **raw bytes** end to end. No exceptions.
+
+| Layer | Representation |
+|---|---|
+| Engine C | `hash128_t = { uint64_t hi, lo }` (16 B, naturally aligned, POD) |
+| Postgres storage | `bytea` with `CHECK (octet_length(VALUE) = 16)` constraint |
+| Postgres comparison | btree on `bytea` — native byte compare, identical to memcmp |
+| Postgres FK references | `bytea` to `bytea` — no casts |
+| C# interop | `byte[16]` or POD struct via `[StructLayout(LayoutKind.Sequential)]` |
+| WKB / mantissa-pack | Raw bytes embedded |
+| Wire/disk format | Raw bytes |
+
+**Banned:**
+
+- `bytea ↔ text` casts in hot paths (`encode(h, 'hex')` is debugging-only)
+- `varchar`, `text`, or any character-encoded type for hashes
+- C# `string` for hash values; no `BitConverter.ToString`, no `Encoding.*`
+- `tolower` / `toupper` / normalization of hash representations
+- Hex-string parsing of incoming hashes
+- Any conversion ceremony at marshalling boundaries
+
+Add a debug-only `laplace_hash_to_hex(bytea) → text` if it helps inspection, but it MUST NOT appear in any data-flow path.
 
 ## Versioning
 

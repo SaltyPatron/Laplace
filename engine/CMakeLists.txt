@@ -38,6 +38,18 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(Spectra)
 
+# BLAKE3 — official C implementation, fetched at configure time, pinned to 1.5.4.
+# SIMD-accelerated cryptographic hash. We truncate to 128 bits for entity hashing.
+# Raw bytes only — never hex/text per STANDARDS.md "Hash discipline" section.
+FetchContent_Declare(
+    BLAKE3
+    GIT_REPOSITORY https://github.com/BLAKE3-team/BLAKE3.git
+    GIT_TAG        1.5.4
+    GIT_SHALLOW    TRUE
+    SOURCE_SUBDIR  c
+)
+FetchContent_MakeAvailable(BLAKE3)
+
 # === Library target ===
 add_library(laplace_engine SHARED
     src/laplace.cpp
