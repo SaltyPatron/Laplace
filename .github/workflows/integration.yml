@@ -73,12 +73,16 @@ jobs:
       - name: Peer auth (laplace-runner → laplace_admin) per ADR 0019
         run: |
           # Per ADR 0019 the runner is the laplace-runner system account.
-          # Peer auth resolves it to the laplace_admin PG role on local socket.
-          RESULT=$(psql -d postgres -tAc "SELECT current_user || ' on ' || current_database();")
+          # pg_hba.conf has: local all laplace_admin peer map=laplace_map
+          # pg_ident.conf maps: laplace-runner -> laplace_admin
+          # We must explicitly request -U laplace_admin so PG applies that
+          # hba rule (default would be PG role = OS user = 'laplace-runner',
+          # which is not a PG role).
+          RESULT=$(psql -d postgres -U laplace_admin -tAc "SELECT current_user || ' on ' || current_database();")
           echo "Peer-auth probe: $RESULT"
           if [ "$RESULT" != "laplace_admin on postgres" ]; then
             echo "::error::Expected 'laplace_admin on postgres', got '$RESULT'"
-            echo "::error::Run: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
+            echo "::error::Run: scripts/setup-host.sh   (idempotent; full Layer 0+1 setup)"
             exit 1
           fi
 
@@ -134,8 +138,8 @@ jobs:
 
       - name: Verify extensions installed at expected version
         run: |
-          psql -d laplace -tAc "\dx" | sed 's/^/  /'
-          VERSION=$(psql -d laplace -tAc "SELECT laplace.laplace_version();")
+          psql -d laplace -U laplace_admin -tAc "\dx" | sed 's/^/  /'
+          VERSION=$(psql -d laplace -U laplace_admin -tAc "SELECT laplace.laplace_version();")
           echo "laplace.laplace_version() → '$VERSION'"
           EXPECTED=$(awk -F"'" '/^default_version/{print $2}' extension/laplace.control)
           if [ "$VERSION" != "$EXPECTED" ]; then
@@ -174,9 +178,9 @@ jobs:
 
       - name: Required extensions present
         run: |
-          psql -d laplace -c "\dx" -P "footer=off"
+          psql -d laplace -U laplace_admin -c "\dx" -P "footer=off"
           for ext in postgis laplace; do
-            if ! psql -d laplace -tAc "SELECT 1 FROM pg_extension WHERE extname='$ext';" | grep -q 1; then
+            if ! psql -d laplace -U laplace_admin -tAc "SELECT 1 FROM pg_extension WHERE extname='$ext';" | grep -q 1; then
               echo "::error::Extension '$ext' not present"
               exit 1
             fi
@@ -185,7 +189,7 @@ jobs:
       - name: Role grants in place
         run: |
           # laplace_app should be able to USAGE the laplace schema
-          psql -d laplace -tAc "
+          psql -d laplace -U laplace_admin -tAc "
             SELECT has_schema_privilege('laplace_app', 'laplace', 'USAGE'),
                    has_schema_privilege('laplace_readonly', 'laplace', 'USAGE');
           " | sed 's/^/  /'

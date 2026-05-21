@@ -215,9 +215,23 @@ bootstrap_runner_register() {
 
 bootstrap_runner_service() {
     say "Install + start systemd service ($RUNNER_USER)"
-    (cd "$RUNNER_DIR" && ./svc.sh install "$RUNNER_USER" && ./svc.sh start)
-    sleep 1
-    green "✓ Service installed + started"
+    local unit_file="/etc/systemd/system/$RUNNER_SERVICE"
+    if [ -f "$unit_file" ]; then
+        green "✓ Service unit $unit_file already exists — skipping svc.sh install"
+        # Ensure it's enabled + running.
+        systemctl enable "$RUNNER_SERVICE" >/dev/null 2>&1 || true
+        if systemctl is-active "$RUNNER_SERVICE" >/dev/null 2>&1; then
+            green "✓ Service already active"
+        else
+            systemctl start "$RUNNER_SERVICE"
+            sleep 1
+            green "✓ Service started"
+        fi
+    else
+        (cd "$RUNNER_DIR" && ./svc.sh install "$RUNNER_USER" && ./svc.sh start)
+        sleep 1
+        green "✓ Service installed + started"
+    fi
     (cd "$RUNNER_DIR" && ./svc.sh status | head -3) || true
 }
 
@@ -499,15 +513,20 @@ do_bootstrap() {
     sudo -u "$GH_SUDO_USER" -H gh api "repos/$REPO/actions/runners" \
         --jq '.runners[] | "\(.name) \(.status) labels=[\(.labels | map(.name) | join(","))]"' 2>/dev/null || true
 
+    # Peer auth flow: pg_hba.conf rule applies to the *requested* PG role
+    # (laplace_admin), and pg_ident.conf's laplace_map allows OS user
+    # laplace-runner (or ahart) to fulfill that request. So we MUST pass
+    # -U laplace_admin explicitly — psql's default of (PG role = OS user)
+    # would request role `laplace-runner`, which doesn't exist as a PG role.
     echo
-    echo "Peer auth (laplace-runner → laplace_admin to 'postgres' DB):"
-    sudo -u "$RUNNER_USER" psql -d postgres -tAc \
+    echo "Peer auth (OS laplace-runner → PG laplace_admin on 'postgres' DB):"
+    sudo -u "$RUNNER_USER" psql -d postgres -U laplace_admin -tAc \
         "SELECT current_user || ' on ' || current_database();" 2>&1 \
         | sed 's/^/  → /'
 
     echo
-    echo "Peer auth (ahart → laplace_admin to 'postgres' DB):"
-    sudo -u ahart psql -d postgres -tAc \
+    echo "Peer auth (OS ahart → PG laplace_admin on 'postgres' DB):"
+    sudo -u ahart psql -d postgres -U laplace_admin -tAc \
         "SELECT current_user || ' on ' || current_database();" 2>&1 \
         | sed 's/^/  → /'
 
