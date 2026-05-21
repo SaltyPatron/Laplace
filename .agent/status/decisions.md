@@ -102,3 +102,39 @@ Append-only timestamped record of architectural / engineering decisions. Format:
 **By:** initial framework
 **What:** Trajectory vertex coords carry constituent identity in low mantissa bits: 8 bits tier + 12 bits position-in-trajectory + 60 bits truncated constituent hash. High mantissa bits preserve approximate spatial position for indexing.
 **Why:** Self-contained trajectories. 60-bit hash collision probability negligible within a trajectory; full 128-bit hash resolution via entity-table lookup when needed.
+
+## 2026-05-21 — Three-layer architecture: bootstrap / CI / local dev
+**By:** user (Anthony) — emerging from sudo-commands-in-chat correction
+**What:** Layer 0 = root-only one-time setup (system account, runner, PG roles, peer auth, sudoers). Layer 1 = DbUp + extension lifecycle (database, CREATE EXTENSION, role grants). Layer 2 = CI + Justfile (build, install, db-up, smoke test). Each layer independently resettable.
+**ADR:** [0018-three-layer-architecture.md](../../docs/adr/0018-three-layer-architecture.md)
+**Why:** Prevents the "everything in one big setup script" sabotage pattern. Reset paths are explicit (`bootstrap-reset` doesn't touch substrate data; `db-nuke` doesn't touch runner identity).
+
+## 2026-05-21 — Dedicated `laplace-runner` system account replaces `ahart` as the CI runner
+**By:** user (Anthony) — "we can add it as a system account with no home folder"
+**What:** GitHub Actions runner runs as the `laplace-runner` system account (no home in /home, no shell), installed at `/var/lib/laplace-runner/actions-runner`. Peer-authenticates as PG role `laplace_admin` (CREATEDB CREATEROLE). Bounded NOPASSWD sudo for `/usr/bin/make install*` only.
+**ADR:** [0019-laplace-runner-system-account.md](../../docs/adr/0019-laplace-runner-system-account.md) (supersedes ADR 0014)
+**Why:** Separation of concerns: CI identity ≠ interactive developer identity. Reduces blast radius if runner is compromised. Eliminates "ahart is a PG superuser" anti-pattern.
+
+## 2026-05-21 — Conventional Commits + release-please for automated CHANGELOG + SemVer
+**By:** user (Anthony) — full SDLC adoption
+**What:** All commits on main follow Conventional Commits format. release-please-action@v4 watches main and opens release PRs that bump version (per type → SemVer mapping) and update CHANGELOG.md.
+**ADR:** [0020-conventional-commits-and-release-please.md](../../docs/adr/0020-conventional-commits-and-release-please.md)
+**Why:** Versioning, changelog, and "Done means Done" share one definition. release-please removes humans from the version-bump loop entirely.
+
+## 2026-05-21 — DbUp + Npgsql for migrations (replaces initially-drafted dbmate)
+**By:** user (Anthony) — "dbmate? what the fuck is that? aren't we using npgsql?"
+**What:** `app/Laplace.Migrations/` is a .NET 10 console app using DbUp + Npgsql. `up` / `status` / `reset` / `nuke` modes. Resolves connection from `--connection-string` > `DATABASE_URL` > `PG_*` env vars > peer-auth default.
+**ADR:** [0021-dbup-for-migrations.md](../../docs/adr/0021-dbup-for-migrations.md) (narrowed by ADR 0023)
+**Why:** Project's app layer is already .NET / Npgsql. Adding a Go binary (dbmate) for a parallel toolchain was MVP-shaped corner-cutting.
+
+## 2026-05-21 — ADRs (Nygard format) as the canonical decision-record format
+**By:** user (Anthony) — SDLC adoption
+**What:** Every architectural decision lands in `docs/adr/NNNN-kebab-title.md` using the Nygard template (Status / Context / Decision / Consequences / Alternatives / References). Supersedence is explicit (never silently re-decide).
+**ADR:** [0022-adrs-as-decision-format.md](../../docs/adr/0022-adrs-as-decision-format.md)
+**Why:** `decisions.md` in `.agent/status/` is the lightweight ledger; ADRs are the first-class durable record discoverable from the repo root. New contributors (human or agent) can read the ADR set and understand WHY the codebase looks the way it does.
+
+## 2026-05-21 — Laplace extension owns its schema; DbUp orchestrates lifecycle (narrows ADR 0021)
+**By:** user (Anthony) — "you're ignoring the database/table/schema creation capabilities of postgres extensions"
+**What:** The `laplace` extension OWNS the substrate's schema, tables (`entities` / `physicalities` / `attestations`), composite types, GIST opclasses, SRFs, aggregates, and indexes via `laplace--A.B.C.sql`. Tables holding user data are marked with `pg_extension_config_dump()`. Schema evolution uses `laplace--A.B.C--D.E.F.sql` upgrade scripts triggered by `ALTER EXTENSION laplace UPDATE`. DbUp narrows to: `CREATE EXTENSION` orchestration + role grants + non-extension operational tables (none currently). Extension is non-relocatable (`relocatable = false`) because it references `@extschema@`-qualified objects.
+**ADR:** [0023-extension-owns-schema-dbup-orchestrates.md](../../docs/adr/0023-extension-owns-schema-dbup-orchestrates.md) (narrows ADR 0021)
+**Why:** Substrate-binary and substrate-SQL versions must evolve together (a C function pointer in `laplace.so` must match its declaration in `laplace--X.Y.Z.sql`). PG's extension upgrade machinery is purpose-built for that lockstep. `pg_dump` of a Laplace database compacts to one `CREATE EXTENSION` line + the three tables' data via `pg_extension_config_dump`. Splitting substrate schema across "extension SQL" and "DbUp migrations" would have been the sabotage-shaped path.
