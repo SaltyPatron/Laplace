@@ -187,10 +187,15 @@ bootstrap_runner_install() {
 bootstrap_runner_register() {
     say "Register runner with $REPO_URL"
 
-    # Skip if already registered + service exists
-    if systemctl list-unit-files --type=service 2>/dev/null \
-            | grep -q "^$RUNNER_SERVICE"; then
-        green "✓ Runner service $RUNNER_SERVICE already exists — skipping config.sh"
+    # Idempotency check — the actions-runner writes a `.runner` file (its
+    # config + credentials) when config.sh succeeds. If that file exists,
+    # this host is already registered with GitHub and re-running config.sh
+    # would fail with "Cannot configure: already configured". Use the
+    # presence of .runner as the canonical idempotency signal, plus the
+    # systemd unit file as a second guard.
+    if [ -f "$RUNNER_DIR/.runner" ] \
+       || [ -f "/etc/systemd/system/$RUNNER_SERVICE" ]; then
+        green "✓ Runner already registered (.runner or service unit present) — skipping config.sh"
         return
     fi
 
