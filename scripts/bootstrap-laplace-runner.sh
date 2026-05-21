@@ -266,13 +266,12 @@ bootstrap_pg_legacy_cleanup() {
 }
 
 bootstrap_pg_database_and_postgis() {
-    say "Ensure 'laplace' database + postgis extension (superuser-required ops)"
+    say "Ensure 'laplace' database + laplace_priv schema + postgis"
 
-    # The 'laplace' database is owned by laplace_admin. We create it here (as
-    # postgres) so subsequent Layer-1 work doesn't need EnsureDatabase to
-    # connect as a role that can't CREATE DATABASE on this cluster. (DbUp's
-    # EnsureDatabase would also work via laplace_admin's CREATEDB privilege —
-    # this is defense in depth + makes 'status' reporting cleaner.)
+    # ---------------------------------------------------------------
+    # (1) Database — owned by laplace_admin (CREATEDB + DB-owner means
+    #     laplace_admin can later DROP + recreate without superuser).
+    # ---------------------------------------------------------------
     if sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='laplace'" | grep -q 1; then
         green "✓ Database 'laplace' already exists"
     else
@@ -280,20 +279,121 @@ bootstrap_pg_database_and_postgis() {
         green "✓ Created database 'laplace' owned by laplace_admin"
     fi
 
-    # postgis requires SUPERUSER to CREATE EXTENSION (it's not marked
-    # 'trusted' in stock Debian/Ubuntu packaging of PG 18). laplace_admin
-    # is intentionally NOT superuser — so we install postgis here as
-    # 'postgres'. Layer-1 DbUp's CREATE EXTENSION IF NOT EXISTS postgis
-    # then short-circuits (PG returns NOTICE before privilege check).
+    # ---------------------------------------------------------------
+    # (2) laplace_priv schema + SECURITY DEFINER wrappers.
+    #
+    #     laplace_admin is intentionally NOT a cluster-wide SUPERUSER.
+    #     To give it "full control of the laplace database" (incl.
+    #     installing extensions that normally require superuser, like
+    #     postgis), we expose narrow, allowlist-bounded SECURITY DEFINER
+    #     functions owned by postgres. The functions:
+    #
+    #       - run with postgres's privileges (CREATE EXTENSION works)
+    #       - reject names outside the allowlist
+    #       - reject calls from any DB other than 'laplace'
+    #
+    #     Result: laplace_admin can manage extensions in laplace via
+    #     SELECT laplace_priv.install_extension('postgis'), but cannot
+    #     escape to alter postgres-DB / drop other databases / install
+    #     arbitrary superuser-required extensions.
+    #
+    #     Idempotent (CREATE OR REPLACE). Re-runnable after db-nuke
+    #     because the schema lives in the laplace DB.
+    # ---------------------------------------------------------------
+    sudo -u postgres psql -d laplace -v ON_ERROR_STOP=1 >/dev/null <<'PG_EOF'
+CREATE SCHEMA IF NOT EXISTS laplace_priv AUTHORIZATION postgres;
+GRANT USAGE ON SCHEMA laplace_priv TO laplace_admin;
+REVOKE CREATE ON SCHEMA laplace_priv FROM laplace_admin;
+REVOKE CREATE ON SCHEMA laplace_priv FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION laplace_priv.install_extension(ext_name text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $func$
+BEGIN
+    -- Allowlist — substrate-honest only. See
+    -- ~/.claude/projects/.../memory/feedback_conventional_db_reflex.md
+    -- for why pg_trgm/intarray/citext/unaccent/bloom are NOT here even
+    -- though "they sound useful". The substrate replaces those.
+    IF ext_name NOT IN (
+        -- Geometry (the substrate extends PostGIS, ADR 0001)
+        'postgis', 'postgis_topology', 'postgis_raster', 'postgis_sfcgal',
+        -- GIST/GIN composition with scalar predicates alongside geometry
+        'btree_gist', 'btree_gin',
+        -- Crypto primitives for future signed-attestation envelopes
+        'pgcrypto',
+        -- Observability — required to tune the cascade
+        'pg_stat_statements', 'auto_explain', 'pg_buffercache',
+        'pg_prewarm', 'pg_visibility',
+        -- Future-substrate federation across hosts
+        'postgres_fdw',
+        -- The substrate itself
+        'laplace'
+    ) THEN
+        RAISE EXCEPTION 'extension % is not in the laplace allowlist', ext_name
+            USING HINT = 'Widen the allowlist via bootstrap if substrate-honest; see feedback_conventional_db_reflex.md before adding';
+    END IF;
+    IF current_database() != 'laplace' THEN
+        RAISE EXCEPTION 'laplace_priv.install_extension may only be called from the laplace database (current: %)', current_database();
+    END IF;
+    EXECUTE format('CREATE EXTENSION IF NOT EXISTS %I', ext_name);
+END;
+$func$;
+
+REVOKE ALL ON FUNCTION laplace_priv.install_extension(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION laplace_priv.install_extension(text) TO laplace_admin;
+
+CREATE OR REPLACE FUNCTION laplace_priv.drop_extension(ext_name text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $func$
+BEGIN
+    IF ext_name NOT IN (
+        'postgis', 'postgis_topology', 'postgis_raster', 'postgis_sfcgal',
+        'btree_gist', 'btree_gin',
+        'pgcrypto',
+        'pg_stat_statements', 'auto_explain', 'pg_buffercache',
+        'pg_prewarm', 'pg_visibility',
+        'postgres_fdw',
+        'laplace'
+    ) THEN
+        RAISE EXCEPTION 'extension % is not in the laplace allowlist', ext_name;
+    END IF;
+    IF current_database() != 'laplace' THEN
+        RAISE EXCEPTION 'laplace_priv.drop_extension may only be called from the laplace database (current: %)', current_database();
+    END IF;
+    EXECUTE format('DROP EXTENSION IF EXISTS %I CASCADE', ext_name);
+END;
+$func$;
+
+REVOKE ALL ON FUNCTION laplace_priv.drop_extension(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION laplace_priv.drop_extension(text) TO laplace_admin;
+PG_EOF
+    green "✓ laplace_priv schema + install_extension/drop_extension wrappers"
+
+    # ---------------------------------------------------------------
+    # (3) Install postgis via the wrapper (proves the wrapper is the
+    #     canonical path; bootstrap dogfoods what laplace_admin will use).
+    # ---------------------------------------------------------------
     if sudo -u postgres psql -d laplace -tAc "SELECT 1 FROM pg_extension WHERE extname='postgis'" | grep -q 1; then
         green "✓ Extension 'postgis' already present in 'laplace'"
     else
-        sudo -u postgres psql -d laplace -v ON_ERROR_STOP=1 -c "CREATE EXTENSION postgis" >/dev/null
-        green "✓ Installed extension 'postgis' in 'laplace'"
+        # Call via the wrapper — works because SECURITY DEFINER elevates to
+        # the postgres owner regardless of caller.
+        sudo -u postgres psql -d laplace -v ON_ERROR_STOP=1 \
+            -c "SELECT laplace_priv.install_extension('postgis')" >/dev/null
+        green "✓ Installed postgis via laplace_priv.install_extension"
     fi
 
-    # Grant CONNECT to app + readonly roles so they can use the DB once
-    # extension setup is complete (Layer-1 grants schema USAGE on top).
+    # ---------------------------------------------------------------
+    # (4) Database-level CONNECT grants for app + readonly roles.
+    #     (Schema USAGE is Layer 1's job — the schema is created by the
+    #     laplace extension's .sql file, not by us here.)
+    # ---------------------------------------------------------------
     sudo -u postgres psql -d laplace -v ON_ERROR_STOP=1 <<'PG_EOF' >/dev/null
 DO $$
 BEGIN
