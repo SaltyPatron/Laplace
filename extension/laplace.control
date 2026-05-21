@@ -1,6 +1,12 @@
 # Laplace substrate PostgreSQL extension
-default_version = '1.0.0'
+default_version = '0.1.0'
 module_pathname = '$libdir/laplace'
-relocatable = true
-comment = 'Laplace substrate — geometric-attestation AI substrate (skeleton; populated per DESIGN.md chunks)'
-# Future (Chunk 2+): requires = 'postgis'
+# Non-relocatable: the extension owns the 'laplace' schema (per ADR 0023)
+# and uses @extschema@ to reference its own objects. ALTER EXTENSION SET
+# SCHEMA is disallowed because schema-qualified opclasses / FK targets
+# in the .sql file would break.
+relocatable = false
+schema = 'laplace'
+superuser = false
+requires = 'postgis'
+comment = 'Laplace substrate — geometric-attestation AI substrate (populated per DESIGN.md chunks)'

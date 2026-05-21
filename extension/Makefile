@@ -6,7 +6,7 @@
 MODULE_big = laplace
 OBJS = src/laplace.o
 EXTENSION = laplace
-DATA = laplace--1.0.0.sql
+DATA = laplace--0.1.0.sql
 
 # Pin to PG 18 explicitly
 PG_CONFIG ?= /usr/lib/postgresql/18/bin/pg_config
