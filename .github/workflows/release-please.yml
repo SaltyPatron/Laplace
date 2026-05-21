@@ -1,0 +1,29 @@
+name: Release Please
+
+# Auto-generates a release PR on push to main, aggregating Conventional Commits
+# into version bumps + CHANGELOG.md updates.
+# When the release PR is merged, a GitHub Release is tagged.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          # Conventional Commits-driven versioning.
+          # Single-component project; no manifests.
+          release-type: simple
+          # Skip GitHub Release "Generate release notes" link generation
+          # since we maintain CHANGELOG.md per Keep-a-Changelog.
+          skip-github-release: false
+          # Initial version starts at 0.1.0 per SemVer for unreleased projects.
+          # Bump rules: feat → minor; fix → patch; "!" or BREAKING CHANGE → major.
