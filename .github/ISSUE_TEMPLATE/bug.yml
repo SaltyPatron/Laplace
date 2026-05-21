@@ -1,0 +1,58 @@
+name: Bug
+description: Defect in built code, build system, or CI
+title: "bug: <summary>"
+labels: ["type:bug"]
+body:
+  - type: textarea
+    id: what_happens
+    attributes:
+      label: What happens
+      description: Observed behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_expected
+    attributes:
+      label: What was expected
+      description: Behavior expected per DESIGN.md / RULES.md / STANDARDS.md
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. just setup
+        2. just ingest wordnet
+        3. ...
+        Observe: <error>
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit / branch
+      placeholder: "git rev-parse HEAD"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - blocker (chunk progress halted)
+        - high (correctness violation, but workaround exists)
+        - normal (degraded behavior)
+        - low (cosmetic)
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostic
+    attributes:
+      label: Diagnostic notes
+      description: stderr, logs, CI link, etc.

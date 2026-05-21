@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Project context
+    url: https://github.com/SaltyPatron/Laplace/blob/main/CLAUDE.md
+    about: Project instructions for agents and contributors
+  - name: Plan
+    url: https://github.com/SaltyPatron/Laplace/blob/main/.agent/status/plan.md
+    about: Canonical chunk plan — see what's in scope per chunk
+  - name: Current state
+    url: https://github.com/SaltyPatron/Laplace/blob/main/.agent/status/STATE.md
+    about: Live project state and milestones
