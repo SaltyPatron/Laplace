@@ -87,41 +87,52 @@ ensure_dotnet_present() {
     fi
 }
 
-layer1_build() {
-    say "Layer 1 — Build Laplace.Migrations (Release)"
-    (cd "$REPO_DIR" && dotnet build "$MIGRATIONS_PROJ" -c Release | tail -5)
-    green "✓ Build OK"
+# Build artifacts under app/Laplace.Migrations/{bin,obj} MUST be owned by
+# laplace-runner — that's the user that 'dotnet run' executes as. If a
+# prior `dotnet build` ran under a different user (e.g., `ahart` during
+# local dev), the obj/ dir is unwritable to laplace-runner and dotnet's
+# NuGet restore step fails with "Access denied" on a *.tmp file.
+layer1_clean_foreign_build_artifacts() {
+    local cleaned=0
+    for dir in obj bin; do
+        local d="$REPO_DIR/app/Laplace.Migrations/$dir"
+        if [ -e "$d" ] && [ "$(stat -c '%U' "$d")" != "$RUNNER_USER" ]; then
+            sudo rm -rf "$d"
+            yellow "  - removed $d (was not owned by $RUNNER_USER)"
+            cleaned=1
+        fi
+    done
+    return 0
 }
 
-layer1_up() {
-    say "Layer 1 — DbUp: EnsureDatabase + apply migrations"
-    # Run as laplace-runner so peer auth resolves to laplace_admin.
-    # Pass through PATH (so dotnet is found) + HOME so .NET fixed-cache works.
+# Run a dotnet command as laplace-runner with the right environment.
+# Centralises PATH propagation + .NET cache settings + HOME via -H.
+runner_dotnet() {
     sudo -u "$RUNNER_USER" -H \
         PATH="$PATH" \
         DOTNET_NOLOGO=1 \
         DOTNET_CLI_TELEMETRY_OPTOUT=1 \
-        bash -c "cd '$REPO_DIR/app' && dotnet run --project '$MIGRATIONS_PROJ' -c Release -- up"
+        bash -c "cd '$REPO_DIR/app' && dotnet $*"
+}
+
+layer1_up() {
+    say "Layer 1 — Build + run Laplace.Migrations as $RUNNER_USER"
+    layer1_clean_foreign_build_artifacts
+    runner_dotnet "run --project '$MIGRATIONS_PROJ' -c Release -- up"
     green "✓ Layer 1 ready: laplace DB + extensions + grants"
 }
 
 layer1_status() {
     say "Layer 1 — DbUp status"
-    sudo -u "$RUNNER_USER" -H \
-        PATH="$PATH" \
-        DOTNET_NOLOGO=1 \
-        DOTNET_CLI_TELEMETRY_OPTOUT=1 \
-        bash -c "cd '$REPO_DIR/app' && dotnet run --project '$MIGRATIONS_PROJ' -c Release -- status" \
+    layer1_clean_foreign_build_artifacts
+    runner_dotnet "run --project '$MIGRATIONS_PROJ' -c Release -- status" \
         || yellow "(database not yet present; run setup or layer1)"
 }
 
 layer1_nuke() {
     say "Layer 1 — DbUp nuke (DROP DATABASE laplace + recreate empty)"
-    sudo -u "$RUNNER_USER" -H \
-        PATH="$PATH" \
-        DOTNET_NOLOGO=1 \
-        DOTNET_CLI_TELEMETRY_OPTOUT=1 \
-        bash -c "cd '$REPO_DIR/app' && dotnet run --project '$MIGRATIONS_PROJ' -c Release -- nuke"
+    layer1_clean_foreign_build_artifacts
+    runner_dotnet "run --project '$MIGRATIONS_PROJ' -c Release -- nuke"
 }
 
 # ---------------------------------------------------------------------------
@@ -131,7 +142,6 @@ do_setup() {
     ensure_dotnet_present
     say "Layer 0 — System account, runner, PG roles, peer auth, sudoers"
     sudo "$BOOTSTRAP" bootstrap
-    layer1_build
     layer1_up
 
     say "DONE — host is set up."
@@ -221,7 +231,6 @@ case "$MODE" in
         ;;
     layer1)
         ensure_dotnet_present
-        layer1_build
         layer1_up
         ;;
     -h|--help|help)
