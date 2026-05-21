@@ -78,7 +78,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build engine (CMake + Ninja)
+      - name: Build engine (CMake + Ninja, fetches Spectra + BLAKE3)
         run: |
           cd engine
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -97,10 +97,68 @@ jobs:
       - name: Build C# app (dotnet)
         run: |
           cd app
-          dotnet build -c Release
+          dotnet build Laplace.slnx -c Release
+
+  extension-smoke-test:
+    name: Install extension + create test DB + smoke test
+    needs: build
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build PG extension
+        run: |
+          cd extension
+          make PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
+
+      - name: Install extension into PG18
+        # Requires NOPASSWD sudo for /usr/bin/make for the runner user.
+        # See one-time setup in CONTRIBUTING.md.
+        run: |
+          cd extension
+          sudo make install PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
+
+      - name: Create ephemeral test database
+        # Requires PG superuser role for the runner user (ahart).
+        # See one-time setup in CONTRIBUTING.md.
+        run: |
+          TESTDB="laplace_ci_${{ github.run_id }}"
+          echo "TESTDB=$TESTDB" >> $GITHUB_ENV
+          dropdb --if-exists "$TESTDB" || true
+          createdb "$TESTDB"
+          echo "::notice::Created test DB $TESTDB"
+
+      - name: Install extensions + smoke test
+        run: |
+          # Install PostGIS (required by RULES.md R1)
+          psql -d "$TESTDB" -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+
+          # Install Laplace extension
+          psql -d "$TESTDB" -c "CREATE EXTENSION laplace;"
+
+          # Smoke test: laplace_version() returns the expected string
+          RESULT=$(psql -tA -d "$TESTDB" -c "SELECT laplace_version();")
+          echo "laplace_version() returned: '$RESULT'"
+          if [ "$RESULT" != "0.1.0" ]; then
+            echo "::error::Expected '0.1.0', got '$RESULT'"
+            exit 1
+          fi
+          echo "::notice::laplace_version() OK"
+
+          # Verify both extensions present
+          psql -d "$TESTDB" -c "\dx" -P "footer=off"
+
+      - name: Cleanup test database
+        if: always()
+        run: |
+          if [ -n "$TESTDB" ]; then
+            dropdb --if-exists "$TESTDB" || true
+            echo "::notice::Cleaned up $TESTDB"
+          fi
 
   # Future jobs (per .agent/status/plan.md):
-  # - test-extension (pg_regress), test-app (dotnet test), test-integration
+  # - pg_regress test-extension (Chunk 2+; after laplace--*.sql has real functions)
+  # - test-app (dotnet test) (Chunk 1+; after C# tests exist)
   # - verify-determinism, verify-fk, verify-perfcache (Chunk 3+)
   # - round-trip end-to-end test (Chunk 8)
   # All trigger only on push to main / workflow_dispatch — never PRs from forks.

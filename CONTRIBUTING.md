@@ -111,9 +111,28 @@ When in doubt: ask. The cost of asking is low; the cost of unwinding bad assumpt
 Two workflows, both required:
 
 - **`ci.yml`** (GitHub-hosted) — runs on every push + PR. Required-files check, markdown lint, link check, banned-vocabulary scan.
-- **`integration.yml`** (self-hosted `hart-server`) — runs on push-to-main + `workflow_dispatch` ONLY. Build engine + extension + app, run tests, verify integrity.
+- **`integration.yml`** (self-hosted `hart-server`) — runs on push-to-main + `workflow_dispatch` ONLY. Build engine + extension + app, install extension, create ephemeral test DB, smoke-test extension.
 
 Self-hosted workflows **never** run on `pull_request` events from forks — that's the security boundary.
+
+### One-time runner setup (for integration.yml to fully pass)
+
+These commands need to be run once on the runner host (`hart-server`) by a sudoer so `ahart` can install extensions and operate Postgres without password prompts in CI:
+
+```sh
+# 1. Make ahart a Postgres superuser (so createdb/dropdb/psql work as ahart)
+sudo -u postgres createuser --superuser ahart
+sudo -u postgres createdb ahart        # default DB matching the OS user (peer auth)
+
+# 2. Allow ahart NOPASSWD sudo for `make` (used by `make install` for extensions)
+sudo bash -c 'cat > /etc/sudoers.d/laplace-runner <<EOF
+ahart ALL=(root) NOPASSWD: /usr/bin/make install*, /usr/bin/make USE_PGXS=1 *install*
+EOF'
+sudo chmod 440 /etc/sudoers.d/laplace-runner
+sudo visudo -c                          # verify syntax
+```
+
+After this, the `integration.yml` `extension-smoke-test` job can install the extension, create a test database, run the smoke test, and clean up — all without password prompts in CI.
 
 ---
 
