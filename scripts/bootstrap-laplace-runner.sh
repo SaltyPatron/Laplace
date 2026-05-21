@@ -531,9 +531,19 @@ do_bootstrap() {
         | sed 's/^/  → /'
 
     echo
-    echo "Sudo (laplace-runner can run /usr/bin/make without password):"
-    sudo -u "$RUNNER_USER" sudo -n /usr/bin/make --version 2>&1 | head -1 \
-        | sed 's/^/  → /'
+    echo "Sudoers entry (laplace-runner NOPASSWD for /usr/bin/make install*):"
+    # Use sudo -ln (list allowed commands, non-interactive) so we don't have
+    # to invoke a command that matches the allowed pattern. sudo -n alone
+    # would attempt to authorize a specific command and fail under pipefail
+    # if the command doesn't match the sudoers pattern — that's a probe bug,
+    # not a real failure.
+    if sudo -u "$RUNNER_USER" -H sudo -ln 2>&1 | grep -qE 'NOPASSWD.*make install'; then
+        sudo -u "$RUNNER_USER" -H sudo -ln 2>&1 | grep -E 'NOPASSWD.*make' \
+            | sed 's/^/  → /'
+        green "✓ Sudoers rule active"
+    else
+        red "✗ Sudoers rule NOT active for laplace-runner"
+    fi
 
     echo
     green "===== LAYER 0 BOOTSTRAP COMPLETE ====="
