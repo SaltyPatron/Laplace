@@ -165,39 +165,56 @@ the script without arguments.
 
 ---
 
-## One-time host setup (Layer 0)
+## One-time host setup
 
-The CI runner needs a one-time root setup on `hart-server`. Per [ADR 0018](docs/adr/0018-three-layer-architecture.md) and [ADR 0019](docs/adr/0019-laplace-runner-system-account.md), this is automated by `scripts/bootstrap-laplace-runner.sh`:
+**TL;DR — set up `hart-server` (or any new Laplace host) in one command:**
 
 ```sh
-# Idempotent — safe to re-run. Creates:
-#   - laplace-runner system account (no home in /home, no shell)
-#   - GitHub Actions runner at /var/lib/laplace-runner/actions-runner
-#   - PG roles laplace_admin / laplace_app / laplace_readonly
-#   - pg_hba.conf + pg_ident.conf entries for peer auth
-#   - /etc/sudoers.d/laplace-runner for bounded NOPASSWD on `make install*`
+cd ~/Projects/Laplace && git pull origin main
+scripts/setup-host.sh           # or: just setup-host
+```
+
+That single (idempotent, re-runnable) script does Layer 0 (root) + Layer 1 (DbUp) end to end. After it completes the host is ready and you can trigger CI:
+
+```sh
+gh workflow run integration.yml
+```
+
+### What `setup-host.sh` does
+
+| Step | Phase | What | Resettable via |
+|---|---|---|---|
+| 1 | Layer 0 | `sudo bootstrap-laplace-runner.sh bootstrap` — creates `laplace-runner` system account, installs the GitHub Actions runner at `/var/lib/laplace-runner/actions-runner`, creates PG roles (`laplace_admin` / `laplace_app` / `laplace_readonly`), writes `pg_hba.conf` + `pg_ident.conf` entries for peer auth, writes bounded NOPASSWD sudoers for `make install*`. | `just bootstrap-reset` |
+| 2 | Layer 1 | Builds `Laplace.Migrations` (Release) | `just clean-app` |
+| 3 | Layer 1 | `sudo -u laplace-runner dotnet run -- up` — DbUp `EnsureDatabase('laplace')`, `CREATE EXTENSION postgis + laplace`, schema USAGE grants, default privileges | `just db-reset` (re-apply migrations) or `just db-nuke` (DROP DATABASE) |
+
+Per [ADR 0018](docs/adr/0018-three-layer-architecture.md), the three layers are **independently resettable** — Layer-0 reset doesn't touch substrate data, Layer-1 reset doesn't touch the runner / roles / auth.
+
+### Granular control (when you only want one layer)
+
+```sh
+# Layer 0 only — system account, runner, PG roles, peer auth, sudoers:
 sudo scripts/bootstrap-laplace-runner.sh bootstrap
-
-# Show current state
 sudo scripts/bootstrap-laplace-runner.sh status
+sudo scripts/bootstrap-laplace-runner.sh reset      # requires typing 'RESET'
 
-# Tear down everything Layer 0 owns (requires typing 'RESET')
-sudo scripts/bootstrap-laplace-runner.sh reset
+# Layer 1 only — DbUp:
+just db-up                                          # EnsureDatabase + CREATE EXTENSION + grants
+just db-status                                      # applied / pending
+just db-reset                                       # drop SchemaVersions; re-apply
+just db-nuke                                        # DROP DATABASE laplace; requires typing 'NUKE'
+
+# Both layers together — what most people want:
+scripts/setup-host.sh                               # bootstrap + db-up
+scripts/setup-host.sh status                        # both-layer state
+scripts/setup-host.sh reset                         # both-layer teardown; requires typing 'RESET'
 ```
 
-After Layer 0 bootstrap, Layer 1 takes over via DbUp:
+### What `setup-host.sh` does NOT do
 
-```sh
-# EnsureDatabase + CREATE EXTENSION postgis + laplace + role grants
-just db-up
-
-# Status, reset (drop SchemaVersions), nuke (drop the whole DB)
-just db-status
-just db-reset
-just db-nuke   # requires typing 'NUKE'
-```
-
-The three layers are **independently resettable** — `bootstrap-reset` does not touch substrate data, and `db-nuke` does not touch the runner / roles / auth. This is intentional ([ADR 0018](docs/adr/0018-three-layer-architecture.md)).
+- It doesn't install PostgreSQL, PostGIS, or .NET. Those are host-level prerequisites — see [OPERATIONS.md](OPERATIONS.md) for one-time-per-host system install.
+- It doesn't seed the substrate (`just seed-t0`) — that's a Layer-2 operation that runs after the engine + extension builds land in Chunk 3.
+- It doesn't `gh auth login` for you. Your `gh` CLI must already be authenticated as a SaltyPatron/Laplace admin (Layer 0 uses your `gh` config to mint runner registration tokens).
 
 ---
 

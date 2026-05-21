@@ -27,6 +27,21 @@ bootstrap-status:
 bootstrap-reset:
     sudo scripts/bootstrap-laplace-runner.sh reset
 
+# === One-shot host setup (Layer 0 + Layer 1 combined) ===
+# Calls scripts/setup-host.sh which orchestrates bootstrap-laplace-runner.sh
+# (Layer 0) and dotnet run --project Laplace.Migrations -- up (Layer 1) in
+# sequence. Idempotent. Use this on a fresh host (or after a reset) instead
+# of running bootstrap + db-up separately.
+
+setup-host:
+    scripts/setup-host.sh setup
+
+setup-host-status:
+    scripts/setup-host.sh status
+
+setup-host-reset:
+    scripts/setup-host.sh reset
+
 # === Build ===
 
 build: build-engine build-extension build-app
