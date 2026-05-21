@@ -1,0 +1,80 @@
+name: Integration — self-hosted (oneAPI + Postgres + Laplace)
+
+# Self-hosted runner with oneAPI, PG 18, .NET 10 access.
+# SECURITY: triggers ONLY on push to main + workflow_dispatch.
+# DO NOT add `pull_request` triggers — untrusted PR code must NEVER run on the self-hosted runner.
+# PR validation is handled by ci.yml on GitHub-hosted disposable VMs.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capabilities:
+    name: Verify self-hosted runner capabilities
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System info
+        run: |
+          echo "::group::OS / kernel"
+          uname -a
+          cat /etc/os-release | grep -E '^(NAME|VERSION)='
+          echo "::endgroup::"
+
+          echo "::group::CPU + AVX support"
+          lscpu | grep -E 'Model name|Architecture|^CPU\(s\):'
+          grep -oE 'avx[a-z0-9_]*' /proc/cpuinfo | sort -u
+          echo "::endgroup::"
+
+          echo "::group::Memory"
+          free -h | head -3
+          echo "::endgroup::"
+
+      - name: Intel oneAPI present
+        run: |
+          if [ -d /opt/intel/oneapi ]; then
+            echo "✓ oneAPI installed at /opt/intel/oneapi"
+            ls /opt/intel/oneapi/compiler/latest/bin/ | head -10
+          else
+            echo "::error::Intel oneAPI not found at /opt/intel/oneapi"
+            exit 1
+          fi
+
+      - name: PostgreSQL + PostGIS
+        run: |
+          if command -v pg_config >/dev/null 2>&1; then
+            pg_config --version
+            pg_config --includedir-server
+          else
+            echo "::error::pg_config not found"
+            exit 1
+          fi
+
+      - name: .NET SDK
+        run: |
+          if command -v dotnet >/dev/null 2>&1; then
+            dotnet --version
+            dotnet --list-sdks
+          else
+            echo "::error::dotnet not found"
+            exit 1
+          fi
+
+      - name: Eigen + ICU + xxHash
+        run: |
+          pkg-config --modversion eigen3 || echo "::warning::eigen3 pkg-config not found"
+          pkg-config --modversion icu-uc || echo "::warning::ICU not found"
+          dpkg -l libxxhash0 2>/dev/null | grep -q "^ii" && echo "✓ libxxhash0 installed" || echo "::warning::libxxhash0 not installed"
+
+  # Placeholder jobs that will fill out as code arrives:
+  # - build-engine: cmake + ninja build of liblaplace_engine.so
+  # - build-extension: PGXS build of laplace.so
+  # - build-app: dotnet build of C# projects
+  # - test-engine, test-extension, test-app, test-integration
+  # - verify-determinism, verify-fk, verify-perfcache
+  # Each runs only on push to main (this branch is the trusted trigger).
