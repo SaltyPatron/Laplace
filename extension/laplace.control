@@ -7,13 +7,17 @@ module_pathname = '$libdir/laplace'
 # in the .sql file would break.
 relocatable = false
 schema = 'laplace'
-# superuser = false + trusted = true means: any user with CREATE on the
-# database can install the extension; the install script runs in
-# bootstrap-superuser context (so CREATE FUNCTION ... LANGUAGE C works
-# without the caller needing language-c USAGE), but the extension itself
-# is owned by the calling user (e.g., laplace_admin) — which is what
-# we want so DbUp running as laplace_admin can manage it.
-superuser = false
+# trusted = true (with the default superuser = true) means: any user with
+# CREATE on the database can install the extension; the install script
+# runs in bootstrap-superuser context (so CREATE FUNCTION ... LANGUAGE C
+# works without the caller needing language-c USAGE); but the extension
+# is owned by the calling user (e.g., laplace_admin) — which is what we
+# want so DbUp running as laplace_admin can manage it.
+#
+# NOTE: superuser = false is INCOMPATIBLE with trusted = true. Setting
+# superuser = false makes PG honor "no elevation needed" and IGNORE the
+# trusted hint. We need the default (superuser = true, implicit) so the
+# trusted-elevation actually fires when laplace_admin installs.
 trusted = true
 requires = 'postgis'
 comment = 'Laplace substrate — geometric-attestation AI substrate (populated per DESIGN.md chunks)'
