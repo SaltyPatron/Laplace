@@ -36,23 +36,37 @@
 SELECT laplace_priv.install_extension('postgis');
 
 -- ============================================================
--- Step 2: laplace (extension uses the laplace schema pre-created by Layer 0)
+-- Step 2: laplace (self-heal if mis-owned, then install as laplace_admin)
 -- ============================================================
--- The laplace schema is pre-created by Layer 0 bootstrap with
--- AUTHORIZATION laplace_admin (per `bootstrap_pg_database_and_postgis` in
--- scripts/bootstrap-laplace-runner.sh). Per PG semantics: if the schema
--- declared by the extension's .control already exists, CREATE EXTENSION
--- uses it without changing ownership.
---
 -- The laplace extension is marked superuser=false in laplace.control
--- (per ADR 0023), so laplace_admin (DB owner, has CREATE on the DB)
--- can install it directly via plain CREATE EXTENSION. No wrapper needed
--- for this one — the wrapper exists for postgis (which IS superuser-only).
+-- (per ADR 0023). So laplace_admin (DB owner, has CREATE on the DB)
+-- can install it directly via plain CREATE EXTENSION — which is what
+-- we want, because then the laplace schema (declared by the extension's
+-- .control) gets owned by laplace_admin.
 --
--- The laplace extension's binary + .control + .sql files must be installed
--- in PG's extension dirs before this runs. The CI flow:
---   cd extension && sudo make install PG_CONFIG=...   (bounded sudo per ADR 0019)
---   dotnet run --project app/Laplace.Migrations -- up
+-- Self-heal: if a previous run mis-installed the extension (e.g., via
+-- a SECURITY DEFINER wrapper, making postgres own the schema), the
+-- laplace schema's owner won't be laplace_admin. In that case, drop
+-- the extension via the wrapper (which runs as postgres via SECURITY
+-- DEFINER and CAN drop a postgres-owned extension) so the subsequent
+-- CREATE EXTENSION runs cleanly as laplace_admin. Idempotent: no-op
+-- when the extension is absent OR when the schema is already correctly
+-- owned. Fully agentic — runs entirely as laplace_admin via Npgsql; no
+-- bootstrap re-run needed for recovery.
+--
+-- The laplace extension's binary + .control + .sql files must be
+-- installed in PG's extension dirs before this runs (CI's `sudo make
+-- install` step per ADR 0019).
+DO $$
+DECLARE
+    schema_owner name;
+BEGIN
+    SELECT pg_catalog.pg_get_userbyid(nspowner) INTO schema_owner
+    FROM pg_namespace WHERE nspname = 'laplace';
+    IF schema_owner IS NOT NULL AND schema_owner <> 'laplace_admin' THEN
+        PERFORM laplace_priv.drop_extension('laplace');
+    END IF;
+END $$;
 CREATE EXTENSION IF NOT EXISTS laplace;
 
 -- Future: when bumping default_version in extension/laplace.control, a
