@@ -375,8 +375,8 @@ BEGIN
         'pg_prewarm', 'pg_visibility',
         -- Future-substrate federation across hosts
         'postgres_fdw',
-        -- The substrate itself
-        'laplace'
+        -- The substrate itself (two extensions per ADR 0025)
+        'laplace_geom', 'laplace_substrate'
     ) THEN
         RAISE EXCEPTION 'extension % is not in the laplace allowlist', ext_name
             USING HINT = 'Widen the allowlist via bootstrap if substrate-honest; see feedback_conventional_db_reflex.md before adding';
@@ -405,7 +405,7 @@ BEGIN
         'pg_stat_statements', 'auto_explain', 'pg_buffercache',
         'pg_prewarm', 'pg_visibility',
         'postgres_fdw',
-        'laplace'
+        'laplace_geom', 'laplace_substrate'
     ) THEN
         RAISE EXCEPTION 'extension % is not in the laplace allowlist', ext_name;
     END IF;
@@ -421,14 +421,15 @@ GRANT EXECUTE ON FUNCTION laplace_priv.drop_extension(text) TO laplace_admin;
 PG_EOF
 
     # The laplace schema itself is NOT pre-created here. It gets created
-    # by CREATE EXTENSION laplace at Layer-1 time, owned by laplace_admin
-    # (since laplace.control says superuser=false → DbUp runs CREATE
-    # EXTENSION directly as laplace_admin per ADR 0023). If it gets
-    # mis-owned by anything else (e.g., a transitional dev session where
-    # it was installed via SECURITY DEFINER wrapper), DbUp self-heals
-    # via `laplace_priv.drop_extension('laplace')` — see the initial
-    # migration in db/migrations/. No sudo bootstrap re-run required for
-    # the recovery path.
+    # by CREATE EXTENSION laplace_substrate at Layer-1 time, owned by
+    # laplace_admin (laplace_substrate.control declares schema='laplace'
+    # + trusted=true → DbUp runs CREATE EXTENSION directly as
+    # laplace_admin per ADR 0023 + 0025). If it gets mis-owned by
+    # anything else (e.g., a transitional dev session where it was
+    # installed via SECURITY DEFINER wrapper), DbUp self-heals via
+    # `laplace_priv.drop_extension('laplace_substrate')` — see the
+    # initial migration in db/migrations/. No sudo bootstrap re-run
+    # required for the recovery path.
     green "✓ laplace_priv schema + install_extension/drop_extension wrappers"
 
     # ---------------------------------------------------------------

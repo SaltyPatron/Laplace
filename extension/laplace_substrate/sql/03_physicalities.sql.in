@@ -1,0 +1,8 @@
+/* 03_physicalities.sql.in — per-source 4D projections.
+ *
+ * Per DESIGN.md I: source-scoped physicalities recording where each
+ * entity lives in a given source's embedding space (after Procrustes
+ * alignment). PK is (entity_hash, source_hash). Real DDL Chunk 2. */
+
+-- CREATE TABLE physicalities ( ... per DESIGN.md I ... );
+-- SELECT pg_extension_config_dump('physicalities', '');

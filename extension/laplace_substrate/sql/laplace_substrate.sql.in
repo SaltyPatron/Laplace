@@ -1,0 +1,16 @@
+/* extension/laplace_substrate/sql/laplace_substrate.sql.in
+ *
+ * Entry point for the laplace_substrate extension install script.
+ * Per ADR 0034 — #includes the numbered modules in load order. */
+
+#include "sqldefines.h"
+
+#include "01_schema.sql.in"
+#include "02_entities.sql.in"
+#include "03_physicalities.sql.in"
+#include "04_attestations.sql.in"
+#include "05_indexes.sql.in"
+#include "06_glicko2.sql.in"
+#include "07_cascade.sql.in"
+#include "08_sp_trajectory_ops.sql.in"
+#include "09_brin_tier_ops.sql.in"

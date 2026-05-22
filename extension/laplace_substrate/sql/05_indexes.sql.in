@@ -1,0 +1,8 @@
+/* 05_indexes.sql.in — substrate indexes (per DESIGN.md V).
+ *
+ * Multi-index strategy: B-tree on hash + hilbert_index + tier + radius
+ * + per-source FK columns; GIST(gist_geometry_ops_nd) on coord + trajectory;
+ * BRIN on time-series columns. Custom opclasses from laplace_geom apply
+ * here (laplace_btree_hash128_ops on hash columns).
+ *
+ * Real DDL Chunk 2. */

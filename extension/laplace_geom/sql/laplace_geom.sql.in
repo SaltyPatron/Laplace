@@ -1,0 +1,19 @@
+/* extension/laplace_geom/sql/laplace_geom.sql.in
+ *
+ * Entry point for the laplace_geom extension install script. Per ADR 0034,
+ * #includes the numbered module files (NN_ prefix locks load order; SQL
+ * runs in a single transaction so DDL dependencies must resolve in order).
+ *
+ * The PostGIS submodule (external/postgis/postgis/postgis.sql.in) is the
+ * reference for this pattern.
+ */
+
+#include "sqldefines.h"
+
+#include "01_meta.sql.in"
+#include "02_hash128.sql.in"
+#include "03_hash128_ops.sql.in"
+#include "04_hilbert.sql.in"
+#include "05_mantissa.sql.in"
+#include "06_st_4d.sql.in"
+#include "07_s3_opclass.sql.in"

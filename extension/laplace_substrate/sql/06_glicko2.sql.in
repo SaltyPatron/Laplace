@@ -1,0 +1,19 @@
+/* 06_glicko2.sql.in — Glicko-2 SFUNC + FINALFUNC + CREATE AGGREGATE.
+ *
+ * Per ADR 0004 + 0030: int64 fixed-point at scale 1e9. SQL-side
+ * aggregation per RULES.md R6 (only runtime DB-side compute beyond
+ * index lookups). Arena-aware update logic per ADR 0036 + RULES.md R20
+ * — agreement/disagreement events filtered by attestation kind's
+ * arena semantics.
+ *
+ * Real wrappers land Chunk 5 (Stories 5.1-5.7). */
+
+-- CREATE FUNCTION laplace_glicko2_sfunc(state internal, score integer,
+--                                       source_credibility integer,
+--                                       observed_at timestamptz) RETURNS internal
+--     AS 'MODULE_PATHNAME', 'pg_laplace_glicko2_sfunc' LANGUAGE C;
+--
+-- CREATE FUNCTION laplace_glicko2_finalfunc(state internal) RETURNS record
+--     AS 'MODULE_PATHNAME', 'pg_laplace_glicko2_finalfunc' LANGUAGE C;
+--
+-- CREATE AGGREGATE laplace_glicko2_accumulate (...) ...
