@@ -31,6 +31,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 POSTGIS_SRC="$REPO_DIR/external/postgis"
 PG_PREFIX="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
+PROJ_PREFIX="${LAPLACE_PROJ_PREFIX:-/opt/laplace/proj}"
+GEOS_PREFIX="${LAPLACE_GEOS_PREFIX:-/opt/laplace/geos}"
+GDAL_PREFIX="${LAPLACE_GDAL_PREFIX:-/opt/laplace/gdal}"
 TARGET_ISA="${LAPLACE_TARGET_ISA:-AVX2}"
 
 # --- arg parsing --------------------------------------------------------------
@@ -74,23 +77,26 @@ fi
 command -v icx >/dev/null  || { red "icx not in PATH — source oneAPI setvars.sh"; exit 1; }
 command -v icpx >/dev/null || { red "icpx not in PATH — source oneAPI setvars.sh"; exit 1; }
 
-# System deps for PostGIS
-require_lib() {
-    pkg-config --exists "$1" 2>/dev/null \
-        || { red "Missing pkg-config dependency: $1 — install libX-dev for it"; exit 1; }
-}
-require_lib geos      || true   # PostGIS uses geos-config not pkg-config
-require_lib proj
-require_lib libxml-2.0
-command -v geos-config >/dev/null || { red "geos-config not on PATH (libgeos-dev not installed?)"; exit 1; }
-command -v gdal-config >/dev/null || { red "gdal-config not on PATH (libgdal-dev not installed?)"; exit 1; }
+# Verify custom-built GEOS/PROJ/GDAL prefixes exist (built by scripts/build-{proj,geos,gdal}.sh)
+[ -x "$PROJ_PREFIX/bin/proj" ]         || { red "PROJ not at $PROJ_PREFIX — run scripts/build-proj.sh first"; exit 1; }
+[ -x "$GEOS_PREFIX/bin/geos-config" ]  || { red "GEOS not at $GEOS_PREFIX — run scripts/build-geos.sh first"; exit 1; }
+[ -x "$GDAL_PREFIX/bin/gdal-config" ]  || { red "GDAL not at $GDAL_PREFIX — run scripts/build-gdal.sh first"; exit 1; }
+
+# Put the custom builds on PATH so PostGIS's configure picks up their
+# {geos,gdal}-config tools. PKG_CONFIG_PATH lets configure resolve PROJ.
+export PATH="$GEOS_PREFIX/bin:$GDAL_PREFIX/bin:$PROJ_PREFIX/bin:$PATH"
+export PKG_CONFIG_PATH="$PROJ_PREFIX/lib/pkgconfig:$GEOS_PREFIX/lib/pkgconfig:$GDAL_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+export LD_LIBRARY_PATH="$PROJ_PREFIX/lib:$GEOS_PREFIX/lib:$GDAL_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+
+# Sanity: pkg-config needs libxml2-dev installed
+pkg-config --exists libxml-2.0 || { red "libxml-2.0 not found via pkg-config — install libxml2-dev"; exit 1; }
 
 green "✓ icx:           $(icx --version | head -1)"
 green "✓ Custom PG:     $($PG_PREFIX/bin/pg_config --version)"
 green "✓ PostGIS src:   $POSTGIS_SRC (commit $(cd "$POSTGIS_SRC" && git rev-parse --short HEAD))"
-green "✓ geos:          $(geos-config --version)"
-green "✓ proj:          $(pkg-config --modversion proj)"
-green "✓ gdal:          $(gdal-config --version)"
+green "✓ GEOS (custom): $($GEOS_PREFIX/bin/geos-config --version) at $GEOS_PREFIX"
+green "✓ PROJ (custom): $(pkg-config --modversion proj) at $PROJ_PREFIX"
+green "✓ GDAL (custom): $($GDAL_PREFIX/bin/gdal-config --version) at $GDAL_PREFIX"
 
 # --- compiler flags -----------------------------------------------------------
 
@@ -134,9 +140,9 @@ if [ ! -f "$POSTGIS_SRC/GNUmakefile" ] || [ "$DO_CLEAN" = 1 ]; then
         CFLAGS="$CFLAGS_BASE" \
         CXXFLAGS="$CFLAGS_BASE" \
         --with-pgconfig="$PG_PREFIX/bin/pg_config" \
-        --with-geosconfig="$(command -v geos-config)" \
-        --with-gdalconfig="$(command -v gdal-config)" \
-        --with-projdir=/usr        # PROJ system install
+        --with-geosconfig="$GEOS_PREFIX/bin/geos-config" \
+        --with-gdalconfig="$GDAL_PREFIX/bin/gdal-config" \
+        --with-projdir="$PROJ_PREFIX"
     cd "$REPO_DIR"
     green "✓ Configured against custom PG at $PG_PREFIX"
 else
