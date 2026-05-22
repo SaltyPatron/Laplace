@@ -3,7 +3,8 @@
 ## Status
 
 **Accepted** — 2026-05-21
-**Amended** — 2026-05-22: locked in as a hard **prerequisite** for the build pipeline (not parallel/deferrable). Driving rationale captured in [ADR 0032](0032-unified-cmake-build-pipeline.md). The custom build is required for two compounding reasons: (1) performance — substrate's Intel-toolchain regime can't be achieved with stock packages; (2) correctness — coding against the actual source means errors point at code we can read, eliminating the entire "apt half-upgrade silently breaks the world" failure class that fired multiple times this session.
+**Amended** — 2026-05-22 (first): locked in as a hard **prerequisite** for the build pipeline (not parallel/deferrable). Driving rationale captured in [ADR 0032](0032-unified-cmake-build-pipeline.md). The custom build is required for two compounding reasons: (1) performance — substrate's Intel-toolchain regime can't be achieved with stock packages; (2) correctness — coding against the actual source means errors point at code we can read, eliminating the entire "apt half-upgrade silently breaks the world" failure class that fired multiple times this session.
+**Amended** — 2026-05-22 (second): scope generalized by [ADR 0033](0033-all-deps-as-submodules.md). What this ADR mandates for PostgreSQL + PostGIS now applies to every direct C/C++ dependency (GEOS, PROJ, GDAL, Eigen, Spectra, BLAKE3). The same "code against the repo" + "performance regime aligned" rationales generalize cleanly. See ADR 0033 for the full dependency table.
 
 ## Context
 
@@ -28,7 +29,7 @@ Build PostgreSQL 18 and PostGIS 3.6.3 from source as git submodules under `exter
 | PostgreSQL | `external/postgresql/` | `REL_18_0` (the GA release tag) — bumped per release with an ADR amendment |
 | PostGIS | `external/postgis/` | `3.6.3` (matches what currently works on hart-server) |
 
-GEOS, PROJ, GDAL remain as system packages for now (their build chains are deep and not on our critical performance path). If a need surfaces to control any of them, we'll submodule them then.
+GEOS, PROJ, GDAL — originally left as system packages; [ADR 0033](0033-all-deps-as-submodules.md) (2026-05-22) brought them into the submodule policy. They now live at `external/geos/` (3.12.2), `external/proj/` (9.4.1), `external/gdal/` (v3.9.3), built via `scripts/build-{geos,proj,gdal}.sh` and installed to `/opt/laplace/{geos,proj,gdal}/`.
 
 ### Build configuration
 

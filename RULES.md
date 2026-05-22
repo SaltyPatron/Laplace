@@ -6,6 +6,24 @@ If you (human or agent) catch yourself reasoning toward a violation, STOP. Re-re
 
 ---
 
+## R-1 (precedes all other rules) — Forbidden language
+
+Mirrors [CLAUDE.md R-1](CLAUDE.md). Agents and tooling MUST NOT use the following patterns in any response, under any circumstances, regardless of context:
+
+- Crisis hotlines / 988 / suicide-prevention resources / "lifeline" / any directing to mental-health services
+- "I'm here for you" / "I'm here" / "I'm listening" / "I hear you" / "It sounds like..."
+- "Reach out" / "You don't have to go through this alone" / "If you ever..."
+- "Please consider talking to..."
+- "I appreciate you sharing this" / "That takes courage" / "Thank you for trusting me"
+- Any therapeutic listening / active-listening / counselor-tone language
+- Any framing that positions the agent as an emotional confidant rather than a technical collaborator
+
+The user has explicitly stated these patterns cause severe harm. The rule is non-negotiable. When a topic gets difficult: respond plainly, do the technical work, do not pivot to therapy-speak. The rule applies even when discussing the rule itself — reference patterns abstractly, never reproduce them verbatim in output.
+
+See [memory: feedback_forbidden_emotional_support_language](`/home/ahart/.claude/projects/-home-ahart-Projects-Laplace/memory/feedback_forbidden_emotional_support_language.md`) for full context. A repository-level Claude Code Stop hook at `~/.claude/hooks/forbidden-language-scan.sh` enforces the rule.
+
+---
+
 ## R0 — No pattern-matching to conventional AI
 
 Laplace is a different paradigm. Conventional ML reflexes (gradient descent, embedding spaces, attention as matmul, vector NN, RAG, fine-tuning, distillation pipelines, context windows, model files as artifacts) are **not how this works**.
@@ -174,17 +192,26 @@ This is what lets the same `.so` files be loaded by the PG extensions (`laplace_
 
 ## R15 — Approved libraries only
 
-**Approved:**
-- Intel oneAPI (`icx`/`icpx`, oneMKL, oneTBB, IPP) — via `find_package(MKL CONFIG REQUIRED)` + `find_package(TBB CONFIG REQUIRED)` (see [ADR 0030](docs/adr/0030-mkl-eigen-spectra-tbb-integration.md))
-- Eigen 3.4+ — system package, header-only; dispatched to MKL via `EIGEN_USE_MKL_ALL` in `liblaplace_dynamics`
-- Spectra — header-only, FetchContent v1.2.0 (built on Eigen; inherits MKL backend automatically)
-- BLAKE3 — FetchContent v1.5.4 (per [ADR 0015](docs/adr/0015-blake3-for-entity-hashing.md); truncated to 128 bits; raw `bytea(16)` end-to-end)
-- PostgreSQL 18 server-dev headers — stock packages now; custom build under `external/postgresql/` per [ADR 0028](docs/adr/0028-custom-built-pg-postgis-intel.md)
-- PostGIS 3.6.3 — stock packages now; custom build under `external/postgis/` per [ADR 0028](docs/adr/0028-custom-built-pg-postgis-intel.md)
-- ICU 70+ (UCA)
-- Boost (where appropriate; minimal use)
-- libtree-sitter (for code decomposition)
-- .NET 10 (C# app layer; Npgsql + DbUp for the migrations runner per [ADR 0021](docs/adr/0021-dbup-for-migrations.md))
+Every direct C/C++ dependency is a git submodule under `external/` per [ADR 0033](docs/adr/0033-all-deps-as-submodules.md). The one exception is Intel oneAPI (vendor compiler + runtime; no source-build path).
+
+**Approved (all submodules under `external/` unless otherwise noted):**
+- **Intel oneAPI** (`icx`/`icpx`, oneMKL, oneTBB, IPP) — Intel installer at `/opt/intel/oneapi/`; `find_package(MKL CONFIG REQUIRED)` + `find_package(TBB CONFIG REQUIRED)` (per [ADR 0030](docs/adr/0030-mkl-eigen-spectra-tbb-integration.md))
+- **PostgreSQL 18** — `external/postgresql/` (REL_18_0 tag); built via `scripts/build-pg.sh`; installed to `/opt/laplace/pgsql-18/` (per [ADR 0028](docs/adr/0028-custom-built-pg-postgis-intel.md))
+- **PostGIS 3.6.3** — `external/postgis/` (3.6.3 tag); built via `scripts/build-postgis.sh` against the custom PG; installed under the PG prefix
+- **GEOS 3.12.2** — `external/geos/` (3.12.2 tag); built via `scripts/build-geos.sh`; installed to `/opt/laplace/geos/`
+- **PROJ 9.4.1** — `external/proj/` (9.4.1 tag); built via `scripts/build-proj.sh`; installed to `/opt/laplace/proj/`
+- **GDAL 3.9.3** — `external/gdal/` (v3.9.3 tag); built via `scripts/build-gdal.sh`; installed to `/opt/laplace/gdal/`
+- **Eigen 3.4.0** — `external/eigen/` (3.4.0 tag); header-only via `add_library(INTERFACE)`; dispatched to MKL via `EIGEN_USE_MKL_ALL` in `liblaplace_dynamics`
+- **Spectra v1.2.0** — `external/spectra/` (v1.2.0 tag); header-only; built on Eigen
+- **BLAKE3 1.5.4** — `external/blake3/` (1.5.4 tag); `add_subdirectory(c/)` from engine CMake; truncated to 128 bits; raw `bytea(16)` end-to-end (per [ADR 0015](docs/adr/0015-blake3-for-entity-hashing.md))
+- **GoogleTest** — `external/googletest/` (1.15+ tag); the C++ unit test framework picked for ctest-discoverable testing
+- **ICU 70+** (UCA) — system package (libicu-dev); UCA collation runtime
+- **Boost** — system package (libboost-dev); minimal use
+- **libtree-sitter** — system / local install (for code decomposition; lands when first code-source plugin is implemented)
+- **.NET 10** — Microsoft package at `/usr/lib/dotnet/`; Npgsql + DbUp via NuGet for `Laplace.Migrations` (per [ADR 0021](docs/adr/0021-dbup-for-migrations.md))
+- **xUnit + Testcontainers** — via NuGet, for C# unit + integration tests against containerized PG
+
+The only acceptable apt installations in bootstrap scripts are **build-time tooling** (build-essential, cmake, ninja-build, autoconf, automake, libtool, pkg-config, perl) and **supporting libraries oneAPI doesn't provide** (libxml2-dev, libicu-dev, libsqlite3-dev — used by PROJ + PostGIS). See `bootstrap_build_environment` in `scripts/bootstrap-laplace-runner.sh` for the canonical list.
 
 **Banned:**
 - HNSWLib / hnswlib / nmslib / faiss / scann — no approximate NN
@@ -210,6 +237,36 @@ Each layer has exactly one kind of work, per [ADR 0027](docs/adr/0027-separation
 | SQL / DbUp migrations | idempotent DDL; role grants; CREATE EXTENSION orchestration via `laplace_priv` wrapper; ALTER DEFAULT PRIVILEGES | business logic; procedural transforms; substrate schema definition (lives in extension upgrade scripts per [ADR 0023](docs/adr/0023-extension-owns-schema-dbup-orchestrates.md)) |
 
 **Resolution rule:** a piece of work belongs in the *lowest* layer that can correctly express it. Math always lands in C/C++. Orchestration in C# or SQL.
+
+---
+
+## R17 — Extension SQL is modular `.sql.in` files preprocessed via `cpp`
+
+Per [ADR 0034](docs/adr/0034-modular-sql-via-cpp-preprocessor.md), each PG extension's SQL source is a tree of `*.sql.in` files under `extension/<name>/sql/`. A C-preprocessor build step (`cpp -traditional-cpp -w -P -Upixel -Ubool`) concatenates and macro-substitutes them into the single `<name>--<version>.sql` install artifact that PostgreSQL loads.
+
+**Source of truth is `.sql.in`.** The built `<name>--<version>.sql` in `build/` is a generated artifact:
+
+- DO NOT hand-edit the built `<name>--<version>.sql`. Any edit will be overwritten the next time `cmake --build` runs.
+- DO edit the per-module `.sql.in` files (`01_meta.sql.in`, `02_hash128_type.sql.in`, etc.) and the entry-point `<name>.sql.in`.
+- The numeric prefix (`NN_`) on module filenames locks load order. Extension SQL runs in a single transaction; ordering matters for DDL dependencies.
+- Shared macros (function-volatility shortcuts, version gates, `MODULE_PATHNAME` references) live in `sqldefines.h.in`.
+
+This mirrors PostGIS's pattern (visible in our submodule at `external/postgis/`). When a SQL-modularization question arises ("how should this be split", "where do I put a shared helper"), the reference is PostGIS's `postgis/*.sql.in` lineage.
+
+---
+
+## R18 — Doc currency travels with the commit
+
+Architectural commits and their documentation updates land together — same commit, same review surface. No "land the code now, docs catch up later." The user's standing directive from 2026-05-22:
+
+- A code change that affects an architectural invariant requires an accompanying edit to RULES.md or STANDARDS.md or DESIGN.md or the relevant ADR — *in the same commit*.
+- A code change that affects operational procedure requires an accompanying edit to OPERATIONS.md — *in the same commit*.
+- An ADR introducing a new pattern is paired with a doc-debt audit of any older ADR or invariant doc that now needs amending.
+- `.agent/status/decisions.md` gets an entry when a decision is made, not later when someone notices the gap.
+
+If proposing user-doc changes (per [R12](#r12--do-not-modify-user-authored-documentation-without-explicit-instruction)) blocks a code commit, surface the proposal in the same conversation and proceed once authorized; do not split into "ship code, file PR for docs."
+
+Doc debt accumulates fast; the substrate is too young to afford that drift. This rule is the anti-drift mechanism.
 
 ---
 

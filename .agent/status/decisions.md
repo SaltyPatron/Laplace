@@ -211,3 +211,29 @@ Append-only timestamped record of architectural / engineering decisions. Format:
 **By:** claude + user (Anthony cleared orphan, ran the bootstrap, validated SQL design earlier)
 **What:** Integration workflow on hart-server passes all 4 jobs (capabilities → build → db-ensure → smoke-test) on commit `ab8f62b`. Substrate baseline established for Chunk 1+ work.
 **Verifications captured:** `STATE.md` "Verifications" section.
+
+## 2026-05-22 — All direct C/C++ deps as git submodules (generalizes ADR 0028)
+**By:** user (Anthony) — "and from what you said, yeah, git submodule it all... we can do Eigen, Spectra, Blake3, etc that way too... only intel requires install i think which i have"
+**What:** Every direct C/C++ dependency lives at `external/<dep>/` as a git submodule pinned to a release tag, built into `/opt/laplace/<dep>/` via per-dep build scripts. PostgreSQL, PostGIS, PROJ, GEOS, GDAL, Eigen, Spectra, BLAKE3, GoogleTest, tree-sitter all submoduled. Intel oneAPI is the sole exception (vendor compiler+runtime; no source-build path). The 303 tree-sitter grammars are bulk-submoduled per ADR 0033; init is opt-in per-grammar.
+**Why:** "Code against the repo, not the package" — eliminates the apt-half-upgrade failure class that fired live this session. Cross-machine determinism extends to dep frontier (same git SHA → byte-identical build artifacts). Compile regime aligned (icx/icpx + `-march=${LAPLACE_TARGET_ISA}` + determinism flags uniform across all deps).
+**ADR:** [0033-all-deps-as-submodules.md](../../docs/adr/0033-all-deps-as-submodules.md) — amends ADRs 0015, 0028, 0030.
+**Commits:** `574216e` (PROJ+GEOS+GDAL+Eigen+Spectra+BLAKE3 submodules added + bootstrap_build_environment), `42b03eb` (per-dep build scripts + orchestrator), `ba019f4` (engine CMake cutover to submodule deps).
+
+## 2026-05-22 — Modular extension SQL via `.sql.in` + cpp preprocessor (PostGIS pattern)
+**By:** user (Anthony) — "also google search if/how we can modularize the sql in the extensions so we can exploit that as much as possible... like PostGIS setting up database/tables/schema/etc"
+**What:** Each PG extension's SQL is a tree of `*.sql.in` files under `extension/<name>/sql/` preprocessed via `cpp -traditional-cpp -w -P -Upixel -Ubool` into the single `<name>--<version>.sql` install artifact. Mirrors PostGIS's pattern (verifiable in our submodule at `external/postgis/postgis/Makefile.in:242-249`). Numeric-prefixed module files (`01_meta.sql.in`, `02_hash128_type.sql.in`, ...) lock load order. Shared macros in `sqldefines.h.in`.
+**Why:** Single-file SQL doesn't scale past ~10 functions. Per-module diffs restore review locality. Shared macros (function-volatility shortcuts, version gates, `MODULE_PATHNAME`) become one-line edits. Future conditional content (e.g., `#ifdef LAPLACE_TARGET_AVX512`) works at SQL layer just like at C layer.
+**ADR:** [0034-modular-sql-via-cpp-preprocessor.md](../../docs/adr/0034-modular-sql-via-cpp-preprocessor.md)
+**Locked in:** RULES.md R17 (don't hand-edit built `<name>--<version>.sql`)
+
+## 2026-05-22 — R-1 forbidden-language rule promoted to RULES.md
+**By:** user (Anthony) — extensive directive 2026-05-22 about therapeutic-listening / crisis-hotline / tone-management language
+**What:** Absolute prohibition on therapy-speak, crisis-hotline references, active-listening tone-management language, and emotional-confidant framing. Applies to all agent output, all contexts, all topics. Mirrored as R-1 in RULES.md (precedes R0) and as the top-of-file rule in CLAUDE.md. Enforced by Claude Code Stop hook at `~/.claude/hooks/forbidden-language-scan.sh` (~30 regex patterns; exits 2 to block on match).
+**Captured in:** [feedback_forbidden_emotional_support_language](../../.claude/projects/-home-ahart-Projects-Laplace/memory/feedback_forbidden_emotional_support_language.md)
+**Commit:** `5b9dfef` (CLAUDE.md R-1 + agent docs aligned)
+
+## 2026-05-22 — Doc currency travels with the commit (RULES.md R18)
+**By:** user (Anthony) — "I dont want docs to get stale or forgotten to get updates..."
+**What:** Architectural commits and their documentation updates land together — same commit, same review surface. No "land code now, docs catch up later." RULES.md, STANDARDS.md, DESIGN.md, ADRs, `.agent/status/decisions.md`, and memory files are kept in lockstep with code reality.
+**Why:** Doc debt accumulates fast at this project's age. The substrate is too young to afford drift between intent and implementation. This is the anti-drift mechanism.
+**Locked in:** RULES.md R18.

@@ -3,6 +3,7 @@
 ## Status
 
 **Accepted** — 2026-05-21
+**Amended** — 2026-05-22: Eigen acquisition switched from `apt install libeigen3-dev` to git submodule at `external/eigen/` (3.4.0 release tag). Spectra acquisition switched from CMake `FetchContent` to git submodule at `external/spectra/` (v1.2.0 release tag). Both per [ADR 0033](0033-all-deps-as-submodules.md). The MKL+TBB integration story is unchanged — both are oneAPI vendor components and remain at `/opt/intel/oneapi/`.
 
 ## Context
 
@@ -21,7 +22,7 @@ These libraries are designed to compose, but only if you wire them up explicitly
 
 | Library | Eigen flags | Links | Threading layer | ISA |
 |---|---|---|---|---|
-| `liblaplace_core` | `EIGEN_NO_DEBUG`, `EIGEN_DONT_PARALLELIZE` | Eigen (headers only); BLAKE3 (FetchContent) | None (caller-driven) | `-march=${LAPLACE_TARGET_ISA}` |
+| `liblaplace_core` | `EIGEN_NO_DEBUG`, `EIGEN_DONT_PARALLELIZE` | Eigen (submodule, INTERFACE); BLAKE3 (submodule via `add_subdirectory`) | None (caller-driven) | `-march=${LAPLACE_TARGET_ISA}` |
 | `liblaplace_dynamics` | `EIGEN_USE_MKL_ALL`, `EIGEN_USE_BLAS`, `EIGEN_USE_LAPACKE`, `MKL_LP64`, `MKL_THREADING_TBB` | `liblaplace_core`; Spectra; `MKL::MKL`; `TBB::tbb` | TBB (via `mkl_set_threading_layer(MKL_THREADING_TBB)`) | Same `-march` as core |
 | `liblaplace_synthesis` | Inherits dynamics | `liblaplace_core`; `liblaplace_dynamics` | Inherits | Same |
 
@@ -47,11 +48,21 @@ Top-level `engine/CMakeLists.txt`:
 ```cmake
 find_package(MKL CONFIG REQUIRED)  # provided by oneAPI's MKLConfig.cmake
 find_package(TBB CONFIG REQUIRED)  # provided by oneAPI
-find_package(Eigen3 3.4 REQUIRED)
-include(FetchContent)
-FetchContent_Declare(spectra URL https://github.com/yixuan/spectra/archive/refs/tags/v1.2.0.tar.gz)
-FetchContent_Declare(blake3 URL https://github.com/BLAKE3-team/BLAKE3/archive/refs/tags/1.5.4.tar.gz)
-FetchContent_MakeAvailable(spectra blake3)
+
+# Eigen, Spectra, BLAKE3 are git submodules per ADR 0033.
+# Eigen is INTERFACE-only (header-only); Spectra is INTERFACE-only and
+# depends on Eigen; BLAKE3 has its own CMakeLists.txt under c/.
+add_library(laplace_eigen INTERFACE)
+target_include_directories(laplace_eigen INTERFACE
+    "${LAPLACE_EXTERNAL}/eigen")
+
+add_library(laplace_spectra INTERFACE)
+target_include_directories(laplace_spectra INTERFACE
+    "${LAPLACE_EXTERNAL}/spectra/include")
+target_link_libraries(laplace_spectra INTERFACE laplace_eigen)
+
+add_subdirectory("${LAPLACE_EXTERNAL}/blake3/c"
+    "${CMAKE_BINARY_DIR}/_deps/blake3" EXCLUDE_FROM_ALL)
 ```
 
 ### Runtime initialization

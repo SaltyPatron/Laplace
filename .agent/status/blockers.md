@@ -15,17 +15,6 @@ Format: open blockers first (most recent at top). Resolved blockers move to a "R
 
 ## Open
 
-## 2026-05-21 — Spectra library not vendored yet
-**Severity:** medium (needed for Laplacian eigenmaps in physicality pipeline, Chunk 6/7)
-**Context:** Preparing for AI model ingestion pipeline implementation.
-**Proposed resolution:** Per STANDARDS.md, Spectra ships via CMake `FetchContent` pinned to v1.2.0; integration happens during Chunk 6's `engine/dynamics/CMakeLists.txt` setup. Story D.3 (#161) tracks the linkage.
-
-## 2026-05-21 — tree-sitter library not installed
-**Severity:** medium (needed for code decomposition in `CodeDecomposer`, post-Chunk-7)
-**Context:** Preparing for code ingestion via `IDecomposer` interface.
-**Diagnostic:** `dpkg -l libtree-sitter-dev` returns no result.
-**Proposed resolution:** `sudo apt install libtree-sitter-dev`. Defer until first code-ingestion source is implemented.
-
 ## 2026-05-21 — AVX-512 not available on dev machine
 **Severity:** informational (not blocking; deployment-target consideration)
 **Context:** Dev machine is i7-6850K (Broadwell-E), AVX2 only.
@@ -63,3 +52,9 @@ Format: open blockers first (most recent at top). Resolved blockers move to a "R
 ### 2026-05-22 — Smoke-test `psql -tA -d laplace` defaulted to OS user as PG role
 **Context:** My earlier global replace of `psql -d laplace` → `psql -d laplace -U laplace_admin` didn't match the `-tA` flag prefix in the smoke-test step.
 **Resolved by:** Added `-U laplace_admin` to the smoke-test psql invocation. CI green end-to-end as of commit `ab8f62b`.
+
+### 2026-05-22 — Spectra library not vendored yet
+**Resolved by:** ADR 0033 (all-deps-as-submodules). Spectra now lives at `external/spectra/` pinned to v1.2.0 as a git submodule (not CMake FetchContent). Engine CMakeLists uses `add_library(laplace_spectra INTERFACE)` with `target_include_directories(... "${LAPLACE_EXTERNAL}/spectra/include")`. Verified building locally on commit `ba019f4`.
+
+### 2026-05-22 — tree-sitter library not installed
+**Resolved by:** ADR 0033 — tree-sitter runtime added as `external/tree-sitter/` submodule (deferred install until first CodeDecomposer work; submodule pinning ready). The 303 grammars at `/vault/Data/TreeSitter/` are bulk-imported as `external/tree-sitter-grammars/<lang>/` submodules via `scripts/import-tree-sitter-grammars.sh` (follow-up commit; init is opt-in per-grammar).

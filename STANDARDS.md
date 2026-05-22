@@ -101,7 +101,7 @@ These are the binding standards for all code in this project. Inconsistency here
 
 - **FP determinism:** pin FP regime in the engine (no `-ffast-math` on hot paths; specific oneMKL CBWR settings for deterministic SVD; deterministic reduction order for parallel sums).
 - **Glicko-2 fixed-point:** all math in `int64`; no `double` intermediates.
-- **Hashing:** BLAKE3 is deterministic by spec; use the official C implementation (FetchContent v1.5.4); truncate to 128 bits via the `hash128_t` helper.
+- **Hashing:** BLAKE3 is deterministic by spec; use the official C implementation (git submodule at `external/blake3/` pinned to 1.5.4 per ADR 0033); truncate to 128 bits via the `hash128_t` helper.
 - **Hilbert encoding:** pure integer bit-twiddling; no FP involved.
 
 ### Concurrency
@@ -118,10 +118,14 @@ These are the binding standards for all code in this project. Inconsistency here
 
 ### Testing
 
-- **Unit tests:** `engine/test/` for engine code (C++ test framework — Catch2 or doctest); `extension/test/` for PG via `pg_regress`; `app/test/` for C# (xUnit or NUnit).
-- **Integration tests:** `test/integration/` — end-to-end scenarios crossing the engine/extension/app boundary.
-- **Round-trip determinism tests:** cross-machine reproducibility verified per release.
-- **Cross-language consistency:** the same engine function called via SQL and via C# P/Invoke must produce byte-identical results.
+Three test surfaces; each layer's tests run from CMake's CTest harness or `dotnet test`. The framework picks are locked:
+
+- **C/C++ engine unit tests** — **GoogleTest** via `external/googletest/` submodule. Per-module test sources at `engine/{core,dynamics,synthesis}/tests/test_*.cpp`. CMake's `gtest_discover_tests` registers each test case with CTest automatically. Run via `cd build && ctest --output-on-failure`.
+- **PG extension SQL tests** — **`pg_regress`** with the conventional `sql/`+`expected/` directory pattern per extension. Each `extension/{laplace_geom,laplace_substrate}/tests/sql/*.sql` has a matching `tests/expected/*.out`. CMake adds a CTest target invoking `pg_regress --temp-instance` against the custom-built PG. Most SQL-layer regressions are caught at the C++ layer first (SQL is thin offload per RULES.md R6); pg_regress catches the marshalling layer + opclass behavior.
+- **C# unit + integration tests** — **xUnit** + **Testcontainers.PostgreSql** via NuGet. Project structure: `app/Laplace.Engine.Core.Tests/`, `app/Laplace.Engine.Dynamics.Tests/`, `app/Laplace.Migrations.Tests/`. P/Invoke smoke tests link against the built engine `.so`. DbUp tests use Testcontainers to spin up a `postgis/postgis:18` container per fixture; `IAsyncLifetime` handles container lifecycle. Run via `dotnet test`.
+- **Full-stack integration** — `test/integration/` — end-to-end scenarios crossing engine + extension + app boundaries, exercised in `integration.yml` against the deployed custom-PG cluster.
+- **Round-trip determinism tests** — cross-machine reproducibility verified per release; ctest case asserts byte-identical output across `TBB_NUM_THREADS={1,2,4,8}` for any Procrustes/eigenmaps computation (per ADR 0030).
+- **Cross-language consistency** — the same engine function called via SQL (extension wrapper) and via C# P/Invoke must produce byte-identical results. Verified by a dedicated ctest case that calls both paths with the same input and asserts equality.
 
 ### Documentation
 
@@ -157,32 +161,65 @@ laplace/                              ← project root (= /home/ahart/Projects/L
 │       ├── STATE.md
 │       ├── decisions.md
 │       └── blockers.md
+├── CMakeLists.txt                    ← top-level orchestrator (ADR 0032 Path B)
 ├── engine/                           ← C/C++ engine (3 shared libs per ADR 0024)
-│   ├── CMakeLists.txt                ← top-level orchestration
+│   ├── CMakeLists.txt                ← engine-level orchestration
 │   ├── core/                         ← liblaplace_core.so (no MKL)
 │   │   ├── include/laplace/core/     ← coord4d, hash128, hilbert4d, mantissa, etc.
 │   │   ├── src/
-│   │   ├── tests/
+│   │   ├── tests/                    ← GoogleTest; ctest-discoverable
 │   │   └── CMakeLists.txt
 │   ├── dynamics/                     ← liblaplace_dynamics.so (MKL+Spectra+TBB)
 │   │   ├── include/laplace/dynamics/ ← Procrustes, eigenmaps, Gram-Schmidt, sparsity
 │   │   ├── src/, tests/, CMakeLists.txt
-│   ├── synthesis/                    ← liblaplace_synthesis.so
-│   │   ├── include/laplace/synthesis/← recipe, arch_template, gguf_writer
-│   │   ├── src/, tests/, CMakeLists.txt
-│   └── third_party/                  ← Spectra, BLAKE3 (FetchContent)
-├── external/                         ← git submodules (PG + PostGIS per ADR 0028)
-│   ├── postgresql/                   ← pinned to PG 18 release tag
-│   └── postgis/                      ← pinned to 3.6.3 release tag
+│   └── synthesis/                    ← liblaplace_synthesis.so
+│       ├── include/laplace/synthesis/← recipe, arch_template, gguf_writer
+│       └── src/, tests/, CMakeLists.txt
+├── external/                         ← git submodules per ADR 0033
+│   ├── postgresql/                   ← REL_18_0
+│   ├── postgis/                      ← 3.6.3
+│   ├── proj/                         ← 9.4.1
+│   ├── geos/                         ← 3.12.2
+│   ├── gdal/                         ← v3.9.3
+│   ├── eigen/                        ← 3.4.0 (header-only via INTERFACE library)
+│   ├── spectra/                      ← v1.2.0 (header-only, on Eigen)
+│   ├── blake3/                       ← 1.5.4 (add_subdirectory c/)
+│   └── googletest/                   ← test framework for engine ctest
 ├── extension/                        ← PostgreSQL extensions (2 per ADR 0025)
 │   ├── laplace_geom/                 ← general-purpose 4D PostGIS additions
-│   │   ├── Makefile (PGXS), src/, tests/
-│   │   ├── laplace_geom.control
-│   │   └── laplace_geom--0.1.0.sql
+│   │   ├── CMakeLists.txt            ← extension build via CMake (no PGXS, per ADR 0032)
+│   │   ├── src/                      ← C wrapper functions (PG_FUNCTION_INFO_V1)
+│   │   ├── sql/                      ← .sql.in source modules (per ADR 0034)
+│   │   │   ├── sqldefines.h.in
+│   │   │   ├── laplace_geom.sql.in   ← entry — #includes the modules
+│   │   │   ├── 01_meta.sql.in
+│   │   │   ├── 02_hash128_type.sql.in
+│   │   │   ├── 03_hash128_ops.sql.in
+│   │   │   ├── 04_hilbert.sql.in
+│   │   │   ├── 05_mantissa.sql.in
+│   │   │   ├── 06_st_4d.sql.in
+│   │   │   ├── 07_s3_opclass.sql.in
+│   │   │   └── uninstall_laplace_geom.sql.in
+│   │   ├── tests/                    ← pg_regress sql/+expected/ pairs
+│   │   └── laplace_geom.control.in
 │   └── laplace_substrate/            ← substrate schema; requires laplace_geom
-│       ├── Makefile (PGXS), src/, tests/
-│       ├── laplace_substrate.control
-│       └── laplace_substrate--0.1.0.sql
+│       ├── CMakeLists.txt
+│       ├── src/
+│       ├── sql/                      ← .sql.in source modules
+│       │   ├── sqldefines.h.in
+│       │   ├── laplace_substrate.sql.in
+│       │   ├── 01_schema.sql.in
+│       │   ├── 02_entities.sql.in
+│       │   ├── 03_physicalities.sql.in
+│       │   ├── 04_attestations.sql.in
+│       │   ├── 05_indexes.sql.in
+│       │   ├── 06_glicko2.sql.in
+│       │   ├── 07_cascade.sql.in
+│       │   ├── 08_sp_trajectory_ops.sql.in
+│       │   ├── 09_brin_tier_ops.sql.in
+│       │   └── uninstall_laplace_substrate.sql.in
+│       ├── tests/                    ← pg_regress sql/+expected/ pairs
+│       └── laplace_substrate.control.in
 ├── app/                              ← C# .NET 10 projects (per ADR 0026)
 │   ├── Laplace.slnx
 │   ├── Laplace.Engine.{Core,Dynamics,Synthesis}/    ← P/Invoke per engine lib
@@ -205,39 +242,89 @@ laplace/                              ← project root (= /home/ahart/Projects/L
 
 - C/C++: `snake_case.{c,cpp,h,hpp}`
 - C#: `PascalCase.cs`
-- SQL: `snake_case.sql` (with extension version: `laplace--<version>.sql`, `laplace--<from>--<to>.sql` for migrations)
+- SQL modules (source): `NN_module_name.sql.in` (numeric prefix locks load order; per ADR 0034)
+- SQL entry: `<extension_name>.sql.in` (`#include`s the modules)
+- SQL shared header: `sqldefines.h.in` (configured via CMake `configure_file`)
+- SQL built artifact: `<extension_name>--<version>.sql` (generated; never hand-edited per RULES.md R17)
+- SQL upgrade scripts: `<extension_name>--<from>--<to>.sql` (also generated from `.sql.in` sources)
 - Scripts: `kebab-case.sh`
 - Markdown: `UPPERCASE.md` for top-level project docs; `kebab-case.md` for sub-docs.
 
 ---
 
-## Dependency sources (locked)
+## Dependency sources (locked — submodule policy per ADR 0033)
 
-Adding a new dep requires (a) listing it here, (b) declaring install path/method, (c) verifying RULES.md doesn't ban it, (d) user authorization.
+Every direct C/C++ dependency is a git submodule under `external/` pinned to a release tag (per [ADR 0033](docs/adr/0033-all-deps-as-submodules.md)). The only exceptions are (a) Intel oneAPI (vendor compiler + runtime; no source-build path), (b) build-time tooling (cmake, ninja, autoconf, perl), and (c) supporting system libraries oneAPI doesn't provide (libxml2, libicu, libsqlite3).
 
-| Library | Source | Notes |
+Adding a new dep requires (a) listing it here, (b) adding the submodule under `external/` pinned to a release tag, (c) writing a `scripts/build-<dep>.sh` if it's not header-only, (d) wiring it into `scripts/build-all-deps.sh`, (e) verifying RULES.md doesn't ban it, (f) user authorization.
+
+### Direct C/C++ dependencies (all submodules under `external/`)
+
+| Library | Submodule path | Pinned to | Build step | Install prefix |
+|---|---|---|---|---|
+| **PostgreSQL 18** | `external/postgresql/` | `REL_18_0` | `scripts/build-pg.sh` (icx/icpx, VPATH build) | `/opt/laplace/pgsql-18/` |
+| **PostGIS 3.6.3** | `external/postgis/` | `3.6.3` | `scripts/build-postgis.sh` (against custom PG + custom GEOS/PROJ/GDAL) | under PG prefix |
+| **GEOS 3.12.2** | `external/geos/` | `3.12.2` | `scripts/build-geos.sh` (CMake) | `/opt/laplace/geos/` |
+| **PROJ 9.4.1** | `external/proj/` | `9.4.1` | `scripts/build-proj.sh` (CMake) | `/opt/laplace/proj/` |
+| **GDAL 3.9.3** | `external/gdal/` | `v3.9.3` | `scripts/build-gdal.sh` (CMake, links PROJ) | `/opt/laplace/gdal/` |
+| **Eigen 3.4.0** | `external/eigen/` | `3.4.0` | header-only; `add_library(laplace_eigen INTERFACE)` in engine CMake | n/a |
+| **Spectra v1.2.0** | `external/spectra/` | `v1.2.0` | header-only; `add_library(laplace_spectra INTERFACE)` on Eigen | n/a |
+| **BLAKE3 1.5.4** | `external/blake3/` | `1.5.4` | `add_subdirectory(external/blake3/c)` in engine CMake | n/a (linked statically into engine libs) |
+| **GoogleTest** | `external/googletest/` | `1.15+` (TBD on Epic A) | `add_subdirectory(external/googletest)` for test targets | n/a |
+| **tree-sitter** | `external/tree-sitter/` | `v0.22.6` (or current stable) | `scripts/build-tree-sitter.sh` (small Makefile/CMake build) | `/opt/laplace/tree-sitter/` |
+
+**tree-sitter grammars** (303 `tree-sitter-<lang>` parser source repos, ~1.9 GB unpacked) live at `external/tree-sitter-grammars/<lang>/` — one git submodule per grammar:
+
+- The 303 submodules are added in bulk via `scripts/import-tree-sitter-grammars.sh`, which reads `/vault/Data/TreeSitter/<lang>/.git/HEAD` to determine each grammar's pinned SHA, then issues `git submodule add <upstream-url> external/tree-sitter-grammars/<lang>` for each.
+- `.gitmodules` grows by 303 entries (~50KB). Acceptable one-time cost for full reproducibility.
+- **Init is opt-in per grammar.** Most contributors won't need all 303 — only the language they're working on. `git submodule update --init external/tree-sitter-grammars/tree-sitter-python` pulls just that one.
+- `/vault/Data/TreeSitter` is the *warm-cache fallback* on hart-server (laplace-runner can reuse the already-fetched .git objects via `git clone --reference`), but submodule URLs point at upstream GitHub so any machine can rebuild from scratch.
+- Per-grammar build (`grammar.js → src/parser.c → loadable .so`) is performed lazily by the future `CodeDecomposer` at first use — not at submodule-init time.
+
+### Vendor toolchain (installer, not submodule)
+
+| Library | Path | Notes |
 |---|---|---|
-| **Eigen 3.4** | `apt install libeigen3-dev` | Found via `pkg-config eigen3` (→ `/usr/include/eigen3`) |
-| **Intel oneMKL** | Intel oneAPI 2026 (`/opt/intel/oneapi/mkl/latest`) | Comes with oneAPI; needs `setvars.sh` sourced for compiler tooling, but lib path is discoverable via `MKLROOT` |
-| **Intel oneTBB** | Intel oneAPI 2026 | Same as oneMKL |
-| **Intel IPP / DPL** | Intel oneAPI 2026 | Available as needed |
-| **Spectra** | CMake `FetchContent`, pinned `v1.2.0` | Header-only; no apt; FetchContent is self-contained in CMakeLists.txt |
-| **BLAKE3** | CMake `FetchContent` (official `c/` subdir), pinned `1.5.4` | SIMD-accelerated cryptographic hash; 128-bit truncated → comfortable collision space for ~10¹⁸ entities; raw 16-byte output (no hex/text conversions ever). Per ADR 0015. |
-| **tree-sitter runtime** | `/usr/local/lib/libtree-sitter.so` | Manual install (pre-existing); link directly |
-| **tree-sitter grammars** | `/vault/Data/TreeSitter` | 303 grammars curated; decomposer selects per modality |
-| **PostgreSQL 18** | apt (pgdg repository) now; `external/postgresql/` submodule via ADR 0028 once Epic B lands | Custom build under `/opt/laplace/pgsql-18/` with `icx`/`icpx` |
-| **PostGIS 3.6.3** | apt now; `external/postgis/` submodule via ADR 0028 | Provides `gist_geometry_ops_nd`; substrate adds custom opclasses per ADR 0029 |
-| **ICU 70.1** | apt (`libicu-dev`) | UCA collation support; `pkg-config icu-uc icu-i18n` |
-| **Boost 1.74** | apt (`libboost-dev`) | Minimal use |
-| **.NET 10 SDK** | Microsoft package | Already installed at `/usr/lib/dotnet/`; Npgsql + DbUp via NuGet for `Laplace.Migrations` |
+| **Intel oneAPI 2026** | `/opt/intel/oneapi/` | Includes `icx`, `icpx`, oneMKL, oneTBB, IPP. Sourced via `source /opt/intel/oneapi/setvars.sh` for compiler tooling. `find_package(MKL CONFIG REQUIRED)` + `find_package(TBB CONFIG REQUIRED)` for CMake integration. |
 
-**vcpkg** is present at `/home/ahart/vcpkg` but **NOT in use**. Reserved for if/when we accumulate a second C++ dependency that's neither in apt nor trivially fetchable. For now, the dep set is small enough that vcpkg's toolchain overhead isn't justified.
+### System libraries (apt — supporting only)
+
+| Library | Source | Used by | Why apt is OK |
+|---|---|---|---|
+| **libxml2-dev** | `apt install libxml2-dev` | PROJ, PostGIS configure | Build-time XML parsing helper; stable interface |
+| **libicu-dev** | `apt install libicu-dev` | PostgreSQL configure (--with-icu); UCA collation runtime | Stable ABI; UCA collation is the contract, not a build-time fragility surface |
+| **libsqlite3-dev** | `apt install libsqlite3-dev` | PROJ (datum grid storage) | Stable ABI; PROJ uses it only for grid metadata |
+| **.NET 10 SDK** | Microsoft package at `/usr/lib/dotnet/` | C# app layer | Microsoft's distribution is the supported channel |
+
+### Build-time tooling (apt — bootstrap only)
+
+The `bootstrap_build_environment` step in `scripts/bootstrap-laplace-runner.sh` installs:
+
+`build-essential, cmake, ninja-build, autoconf, automake, libtool, pkg-config, perl, bison, flex, gettext`
+
+These are pure build infrastructure — they don't end up linked into the substrate or its extensions.
+
+### NuGet dependencies (C# app layer)
+
+Managed via project `.csproj` files in `app/`. Pinned via `<PackageReference Version=...>`:
+
+- **Npgsql** — PostgreSQL ADO.NET provider
+- **DbUp** — migration runner (per ADR 0021)
+- **xUnit** + **xunit.runner.visualstudio** — unit test framework
+- **Testcontainers.PostgreSql** — containerized PG for `Laplace.Migrations.Tests`
+- **Microsoft.Extensions.Logging** — structured logging
+
+### Banned / removed
+
+- **vcpkg** — previously at `/home/ahart/vcpkg`; not in use. ADR 0033 makes it irrelevant (all C++ deps are direct submodules).
+- **apt for direct C/C++ deps** — explicitly forbidden by ADR 0033. The bootstrap script's `bootstrap_build_environment` step is the only place apt is invoked for libraries, and only for build-time helpers and supporting libs (above).
+- **CMake `FetchContent`** for direct deps — replaced by submodules per ADR 0033. The exception is build-time-only fetches with no end-user impact (none currently).
 
 ## Build standards
 
 - **C/C++:** primary compiler `icx`/`icpx` (Intel 2026); fallback `g++` 11.4 / `clang++` 14.
 - **C++ standard:** C++23 where available; C++20 minimum.
-- **CMake** as the engine build system; **PGXS** for the extension; **dotnet** CLI for C# projects.
+- **CMake** as the engine + extension + top-level build system (Path B per ADR 0032; PGXS retired); **dotnet** CLI for C# projects.
 - **Build modes:** `Debug` (no opt, full symbols), `Release` (O3 / `/O2`, LTO), `RelWithDebInfo` (O2 + symbols).
 - **Sanitizers in CI:** ASan, UBSan on Debug builds.
 - **No `-ffast-math`** on hot paths (breaks FP determinism).

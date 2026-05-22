@@ -93,7 +93,7 @@ graph TB
 | **Hashing** | BLAKE3 truncated to 128 bits (per ADR 0015) | 128-bit collision-safe for ~10¹⁸ entities; SIMD-vectorized; raw `bytea(16)` end-to-end |
 | **App layer** | C# / .NET 10 | Plugin host for protocol-endpoint extensions; Synthesis UI |
 | **Compiler** | Intel `icx` / `icpx` 2026 (primary) · `gcc` 11 / `clang` 14 (fallback) | AVX2 baseline → AVX-512 deployment-target dispatch |
-| **Build** | CMake + Ninja (engine) · PGXS (extension) · `dotnet build` (app) | Standard tooling per stack |
+| **Build** | CMake + Ninja (top-level orchestrates engine + extensions per ADR 0032 Path B) · `dotnet build` (app) | Single CMake tree under `/opt/laplace/` |
 | **CI/CD** | GitHub Actions: hosted (PR validation) + self-hosted `hart-server` (integration build/test) | Two-tier; trusted self-hosted on push-to-main only |
 
 See [STANDARDS.md](STANDARDS.md) for the locked dependency-source table.
@@ -119,7 +119,7 @@ Live project state: [.agent/status/STATE.md](.agent/status/STATE.md)
 just check-prereqs
 ```
 
-Required: PostgreSQL 18, PostGIS 3.6, Intel oneAPI 2026, .NET 10, Eigen 3.4, ICU 70, cmake, ninja, just. (BLAKE3 + Spectra fetched at build time via CMake FetchContent.)
+Required on the host: Intel oneAPI 2026, .NET 10, cmake, ninja, just, plus the build-time tooling apt deps installed by `bootstrap_build_environment` (build-essential, autoconf, libxml2-dev, libicu-dev, ...). All direct C/C++ deps (PostgreSQL 18, PostGIS 3.6.3, PROJ, GEOS, GDAL, Eigen, Spectra, BLAKE3, tree-sitter, GoogleTest) are git submodules under `external/` per ADR 0033 — built into `/opt/laplace/` via `just build-deps`.
 
 ### Build everything
 
@@ -127,7 +127,7 @@ Required: PostgreSQL 18, PostGIS 3.6, Intel oneAPI 2026, .NET 10, Eigen 3.4, ICU
 just build
 ```
 
-Builds the C/C++ engine (CMake + Ninja), the PG extension (PGXS), and the C# app (dotnet).
+Builds the C/C++ engine + PG extensions + C# app from one top-level CMake tree (per ADR 0032). Run `just build-deps` first on a fresh checkout to compile the submodule deps (PostgreSQL, PostGIS, PROJ, GEOS, GDAL) — ~25 min one-time; cached on subsequent runs.
 
 ### Set up the database
 

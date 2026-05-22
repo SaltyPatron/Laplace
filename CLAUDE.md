@@ -79,7 +79,7 @@ Located in [`.claude/agents/`](./.claude/agents/):
 | Agent | Domain |
 |---|---|
 | `substrate-architect` | Geometric / mathematical design; holds the substrate model |
-| `postgres-extension` | PG extension authoring; PGXS; type registration; opclasses; SRFs |
+| `postgres-extension` | PG extension authoring (CMake-driven per ADR 0032; PGXS retired); modular `.sql.in` files per ADR 0034; type registration; opclasses; SRFs |
 | `cpp-performance` | SIMD / AVX2, Eigen, oneMKL, cache behavior, memory layout |
 | `type-taxonomy` | Attestation kind hierarchy; per-architecture and per-source-schema types |
 | `ingestion-pipeline` | Source plugin authoring; probe protocols; lottery-ticket sparse recording |

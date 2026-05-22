@@ -3,6 +3,7 @@
 ## Status
 
 **Accepted** — 2026-05-21 (supersedes ADR 0003)
+**Amended** — 2026-05-22: BLAKE3 acquisition switched from CMake `FetchContent` to git submodule at `external/blake3/` per [ADR 0033](0033-all-deps-as-submodules.md). Version pin unchanged (1.5.4). The `add_subdirectory(${external}/blake3/c)` pattern from `engine/CMakeLists.txt` produces the same `blake3` CMake target as before; downstream linkers are unaffected.
 
 ## Context
 
@@ -12,7 +13,7 @@ Also a concern about casts / hex conversions / `text` vs `bytea` representations
 
 ## Decision
 
-Use **BLAKE3** (official C implementation, CMake FetchContent pinned to `1.5.4`), **truncated to 128 bits**.
+Use **BLAKE3** (official C implementation, git submodule at `external/blake3/` pinned to `1.5.4` per [ADR 0033](0033-all-deps-as-submodules.md)), **truncated to 128 bits**.
 
 Stored as `bytea(16)` in PG; `hash128_t = {uint64_t hi, lo}` in C engine; `byte[16]` / POD struct in C# via `[StructLayout(Sequential)]`.
 

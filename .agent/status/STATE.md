@@ -1,22 +1,30 @@
 # Laplace — Project State
 
-**Last updated:** 2026-05-22 (architectural overhaul session — ADRs 0024–0032 + 5 new Epics + 50 new Stories)
-**Updated by:** claude (full audit + ADR batch + ticket refactor)
+**Last updated:** 2026-05-22 (doc-debt payoff session — ADRs 0033 + 0034 + RULES.md R-1/R17/R18 + STANDARDS.md/OPERATIONS.md submodule policy rewrite)
+**Updated by:** claude (audit of accumulated doc-debt after the all-deps-as-submodules + SQL-modular adoption)
 
 ---
 
 ## Current phase
 
-**Chunk 0 framework + architectural overhaul.** ✅ COMPLETE through commit `194ddae`.
-**Awaiting:** hart-server bootstrap re-run to apply wrapper search_path fix + finish proving end-to-end CI green.
+**Chunk 0 framework + architectural overhaul + doc-debt payoff.** ✅ End-to-end CI green achieved at commit `ab8f62b` (integration.yml capabilities → build → db-ensure → smoke-test all passing on hart-server). All-deps-as-submodules adoption complete in tree (commits `574216e`, `42b03eb`, `ba019f4`); doc-debt commit (this session) brings invariant docs into alignment.
 
-What landed this session:
-- **8 new ADRs (0024–0031)** covering engine modularization, PG extension modularization, C# project structure, separation-of-concerns invariants, custom-built PG + PostGIS, custom indexing strategy (5 opclasses), MKL/Eigen/Spectra/TBB integration, custom AM research spike.
-- **ADR 0032** locking ADR 0028 as a hard prerequisite and committing to the unified CMake build pipeline (Path B — PGXS retired once we own the PG build).
-- **All user-authored docs refreshed** to reflect modularization + BLAKE3 (replacing inconsistent XXH3 references): CLAUDE.md, RULES.md, STANDARDS.md, DESIGN.md, GLOSSARY.md, OPERATIONS.md, README.md, .agent/status/plan.md.
+**Next batch:**
+1. Bulk-import tree-sitter runtime + 303 grammars as submodules (`scripts/import-tree-sitter-grammars.sh`)
+2. Epic A skeleton refactor — engine/{core,dynamics,synthesis}/ + extension/{laplace_geom,laplace_substrate}/sql/<modules>.sql.in scaffolding
+3. Top-level CMakeLists.txt (Path B per ADR 0032) — retire PGXS Makefiles
+4. Test pyramid wiring — GoogleTest + pg_regress + xUnit/Testcontainers
+5. Custom-PG cluster init + systemd (Stories B.7+B.8) + PG_CONFIG indirection + Justfile (B.9+B.10)
+6. integration.yml rewrite for unified pipeline
+7. Then: Chunk 1+ — coord4d, hash128, hilbert4d (the "4d expansion stuff")
+
+What landed during the architectural overhaul session (commits `020009b` through `5b9dfef`):
+- **10 new ADRs (0024–0034)** covering engine modularization, PG extension modularization, C# project structure, separation-of-concerns invariants, custom-built PG + PostGIS, custom indexing strategy (5 opclasses), MKL/Eigen/Spectra/TBB integration, custom AM research spike, unified CMake pipeline, all-deps-as-submodules, modular SQL via cpp preprocessor.
+- **All user-authored docs refreshed** to reflect modularization + BLAKE3 + submodule policy + modular SQL: CLAUDE.md, RULES.md, STANDARDS.md, DESIGN.md, GLOSSARY.md, OPERATIONS.md, README.md, .agent/status/plan.md.
 - **5 new GitHub Epics + 50 new Stories** wired to milestone v0.1.0 with module/area/priority labels.
-- **Bootstrap fixes**: postgis installed directly as postgres at first install (not via wrapper, since bootstrap runs as superuser already); wrapper's `search_path` reordered to `public, pg_catalog` so postgis `CREATE TYPE geometry_dump` resolves correctly.
-- **DbUp migration**: uses `laplace_priv.install_extension('postgis')` wrapper for laplace_admin's recovery path (post-db-nuke) — works once bootstrap has installed postgis and updated the wrapper.
+- **Custom-PG dep build infrastructure** — 8 submodules under `external/` (PostgreSQL, PostGIS, PROJ, GEOS, GDAL, Eigen, Spectra, BLAKE3) + per-dep build scripts + `scripts/build-all-deps.sh` orchestrator + bootstrap_build_environment apt step.
+- **Engine CMake** cutover to submodule-based Eigen + Spectra + BLAKE3 (verified building locally with full BLAKE3 SIMD lineup).
+- **R-1 forbidden-language rule** added to CLAUDE.md + RULES.md; enforced by Claude Code Stop hook.
 
 ## Repository
 
