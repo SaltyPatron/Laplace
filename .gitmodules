@@ -1,0 +1,6 @@
+[submodule "external/postgresql"]
+	path = external/postgresql
+	url = https://git.postgresql.org/git/postgresql.git
+[submodule "external/postgis"]
+	path = external/postgis
+	url = https://github.com/postgis/postgis.git
