@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(laplace_engine
     VERSION 0.1.0
-    DESCRIPTION "Laplace substrate engine — shared C ABI library"
+    DESCRIPTION "Laplace substrate engine — three shared C ABI libraries (ADR 0024)"
     LANGUAGES C CXX
 )
 
@@ -14,85 +14,73 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # === Determinism discipline (RULES.md R7) ===
 # NO -ffast-math, NO fp-contract fusion on hot paths.
-# Hot-path math must be cross-machine reproducible.
 add_compile_options(
     -Wall -Wextra -Wpedantic
     -fno-fast-math
     -ffp-contract=off
 )
 
-# === Where the submodule sources live ===
-# Per ADR 0028 + 0032 + the all-deps-as-submodules policy (commit 574216e),
-# every direct dependency is a git submodule under ../external/.
-set(LAPLACE_EXTERNAL "${CMAKE_CURRENT_SOURCE_DIR}/../external" CACHE PATH "Path to external/ submodule tree")
+# === ISA targeting (per ADR 0030) ===
+set(LAPLACE_TARGET_ISA "AVX2" CACHE STRING "AVX2 (default dev) | AVX512 (deploy)")
+set_property(CACHE LAPLACE_TARGET_ISA PROPERTY STRINGS AVX2 AVX512)
+if(LAPLACE_TARGET_ISA STREQUAL "AVX2")
+    add_compile_options(-march=haswell)
+elseif(LAPLACE_TARGET_ISA STREQUAL "AVX512")
+    add_compile_options(-march=sapphirerapids)
+endif()
+
+# === Submodule external/ tree (per ADR 0033) ===
+set(LAPLACE_EXTERNAL "${CMAKE_CURRENT_SOURCE_DIR}/../external"
+    CACHE PATH "Path to external/ submodule tree")
 
 if(NOT EXISTS "${LAPLACE_EXTERNAL}/eigen/Eigen/Dense")
     message(FATAL_ERROR
         "external/eigen submodule not initialized. Run:\n"
-        "    git submodule update --init external/eigen external/spectra external/blake3\n")
+        "    git submodule update --init external/eigen external/spectra external/blake3 external/googletest\n")
 endif()
 
-# === Dependencies — from submodules, not from apt or FetchContent ===
+# === Header-only deps via INTERFACE libraries (per ADR 0030 amended by 0033) ===
 
-# --- Eigen 3.4.0 — header-only template linalg ---
-# Per ADR 0030, hot paths get Eigen via templates only in liblaplace_core;
-# liblaplace_dynamics later flips on EIGEN_USE_MKL_ALL to dispatch heavy
-# linalg through MKL. For now (Chunk 0 / 1 work) it's pure Eigen.
+# Eigen 3.4.0 — header-only template linalg
 add_library(laplace_eigen INTERFACE)
 target_include_directories(laplace_eigen INTERFACE "${LAPLACE_EXTERNAL}/eigen")
 target_compile_definitions(laplace_eigen INTERFACE
-    EIGEN_NO_DEBUG           # release-build assertions off
+    EIGEN_NO_DEBUG
     EIGEN_DONT_PARALLELIZE   # one engine kernel = one task; TBB schedules above
 )
 
-# --- Spectra v1.2.0 — sparse eigensolvers built on Eigen ---
-# Header-only. Used by liblaplace_dynamics for Laplacian eigenmaps.
+# Spectra v1.2.0 — sparse eigensolvers on Eigen
 add_library(laplace_spectra INTERFACE)
 target_include_directories(laplace_spectra INTERFACE "${LAPLACE_EXTERNAL}/spectra/include")
 target_link_libraries(laplace_spectra INTERFACE laplace_eigen)
 
-# --- BLAKE3 1.5.4 — content hashing (per ADR 0015) ---
-# The repo includes ready-made CMakeLists in c/ subdir.
-add_subdirectory("${LAPLACE_EXTERNAL}/blake3/c" "${CMAKE_BINARY_DIR}/_deps/blake3" EXCLUDE_FROM_ALL)
+# BLAKE3 1.5.4 — content hashing (per ADR 0015)
+add_subdirectory("${LAPLACE_EXTERNAL}/blake3/c"
+    "${CMAKE_BINARY_DIR}/_deps/blake3" EXCLUDE_FROM_ALL)
 
-# === Library target (current single-lib; will split per ADR 0024 in Epic A) ===
-add_library(laplace_engine SHARED
-    src/laplace.cpp
-)
-
-set_target_properties(laplace_engine PROPERTIES
-    VERSION ${PROJECT_VERSION}
-    SOVERSION ${PROJECT_VERSION_MAJOR}
-    OUTPUT_NAME laplace_engine
-)
-
-target_include_directories(laplace_engine
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
-)
-
-target_link_libraries(laplace_engine
-    PUBLIC
-        laplace_eigen
-        laplace_spectra
-    PRIVATE
-        blake3
-)
-
-# === Tests ===
+# === Testing (GoogleTest via submodule per ADR 0033 + STANDARDS.md) ===
 enable_testing()
+include(CTest)
 
-add_executable(test_placeholder test/test_placeholder.cpp)
-target_link_libraries(test_placeholder PRIVATE laplace_engine)
-add_test(NAME placeholder COMMAND test_placeholder)
+# Only configure GoogleTest if we're actually building tests
+if(BUILD_TESTING)
+    if(NOT EXISTS "${LAPLACE_EXTERNAL}/googletest/CMakeLists.txt")
+        message(WARNING
+            "external/googletest submodule not initialized — tests will be skipped. "
+            "Run: git submodule update --init external/googletest")
+        set(BUILD_TESTING OFF)
+    else()
+        set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+        add_subdirectory("${LAPLACE_EXTERNAL}/googletest"
+            "${CMAKE_BINARY_DIR}/_deps/googletest" EXCLUDE_FROM_ALL)
+        include(GoogleTest)
+    endif()
+endif()
 
-# === Install (optional; for system-wide deployment) ===
-install(TARGETS laplace_engine
-    LIBRARY DESTINATION lib
-    PUBLIC_HEADER DESTINATION include/laplace
-)
-install(DIRECTORY include/laplace
-    DESTINATION include
-    FILES_MATCHING PATTERN "*.h"
-)
+# === Engine module split (per ADR 0024) ===
+# Three shared libraries; each subdir owns its own CMakeLists.
+
+add_subdirectory(core)
+add_subdirectory(dynamics)
+add_subdirectory(synthesis)
