@@ -385,41 +385,36 @@ $func$;
 
 REVOKE ALL ON FUNCTION laplace_priv.drop_extension(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION laplace_priv.drop_extension(text) TO laplace_admin;
-
--- ------------------------------------------------------------------
--- take_schema_ownership(schema_name) — transfer a substrate-allowlist
--- schema's ownership to laplace_admin. Needed for the legacy case
--- where a schema was created with postgres as owner (e.g., laplace
--- schema previously created via install_extension as postgres) and
--- now needs to be managed by laplace_admin (so it can GRANT USAGE
--- without privilege errors). Idempotent — re-owning to a role that
--- already owns is a no-op.
--- ------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION laplace_priv.take_schema_ownership(schema_name text)
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_catalog
-AS $func$
-BEGIN
-    IF schema_name NOT IN ('laplace') THEN
-        RAISE EXCEPTION 'schema % is not in the laplace-managed allowlist', schema_name
-            USING HINT = 'Only the laplace schema is managed by this helper. Widen the allowlist via bootstrap if substrate adds another owned schema.';
-    END IF;
-    IF current_database() != 'laplace' THEN
-        RAISE EXCEPTION 'laplace_priv.take_schema_ownership may only be called from the laplace database (current: %)', current_database();
-    END IF;
-    -- Skip if schema doesn't exist yet (caller race).
-    IF NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = schema_name) THEN
-        RETURN;
-    END IF;
-    EXECUTE format('ALTER SCHEMA %I OWNER TO laplace_admin', schema_name);
-END;
-$func$;
-
-REVOKE ALL ON FUNCTION laplace_priv.take_schema_ownership(text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION laplace_priv.take_schema_ownership(text) TO laplace_admin;
 PG_EOF
+
+    # ---------------------------------------------------------------
+    # (2b) Pre-create the laplace schema with laplace_admin as owner.
+    #      The laplace extension's .control declares `schema = 'laplace'`.
+    #      Per PG semantics, if the schema already exists when CREATE
+    #      EXTENSION runs, the extension uses it (without changing
+    #      ownership). By creating the schema HERE as postgres with
+    #      explicit AUTHORIZATION laplace_admin, we guarantee:
+    #        - laplace_admin owns the schema from the start
+    #        - the eventual CREATE EXTENSION laplace (run later as
+    #          laplace_admin from DbUp) doesn't have to be the one to
+    #          create it
+    #        - GRANT USAGE / ALTER DEFAULT PRIVILEGES in DbUp work
+    #          without any SECURITY DEFINER workarounds
+    #      Idempotent: ALTER SCHEMA OWNER TO is a no-op when ownership
+    #      is already correct; CREATE SCHEMA IF NOT EXISTS handles
+    #      the absent case.
+    # ---------------------------------------------------------------
+    sudo -u postgres psql -d laplace -v ON_ERROR_STOP=1 >/dev/null <<'PG_EOF'
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'laplace') THEN
+        CREATE SCHEMA laplace AUTHORIZATION laplace_admin;
+    ELSE
+        ALTER SCHEMA laplace OWNER TO laplace_admin;
+    END IF;
+END $$;
+PG_EOF
+    green "✓ Schema 'laplace' exists and is owned by laplace_admin"
     green "✓ laplace_priv schema + install_extension/drop_extension wrappers"
 
     # ---------------------------------------------------------------
