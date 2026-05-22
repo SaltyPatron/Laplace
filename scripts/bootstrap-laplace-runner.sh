@@ -391,30 +391,22 @@ PG_EOF
     # (2b) Pre-create the laplace schema with laplace_admin as owner.
     #      The laplace extension's .control declares `schema = 'laplace'`.
     #      Per PG semantics, if the schema already exists when CREATE
-    #      EXTENSION runs, the extension uses it (without changing
-    #      ownership). By creating the schema HERE as postgres with
-    #      explicit AUTHORIZATION laplace_admin, we guarantee:
-    #        - laplace_admin owns the schema from the start
-    #        - the eventual CREATE EXTENSION laplace (run later as
-    #          laplace_admin from DbUp) doesn't have to be the one to
-    #          create it
-    #        - GRANT USAGE / ALTER DEFAULT PRIVILEGES in DbUp work
-    #          without any SECURITY DEFINER workarounds
-    #      Idempotent: ALTER SCHEMA OWNER TO is a no-op when ownership
-    #      is already correct; CREATE SCHEMA IF NOT EXISTS handles
-    #      the absent case.
+    #      EXTENSION runs, the extension uses it without changing
+    #      ownership. By creating it HERE as postgres with explicit
+    #      AUTHORIZATION laplace_admin, laplace_admin owns the schema
+    #      from the start — subsequent GRANT USAGE / ALTER DEFAULT
+    #      PRIVILEGES in DbUp work natively, no privilege workarounds.
+    #
+    #      If the schema already exists with the WRONG owner (e.g.,
+    #      from a prior misconfigured install), bootstrap doesn't try
+    #      to "fix" it — that's a clean-slate concern, not bootstrap's
+    #      job. Recovery path: `just db-nuke` drops + recreates the
+    #      laplace DB; bootstrap re-runs and creates the schema correctly.
     # ---------------------------------------------------------------
     sudo -u postgres psql -d laplace -v ON_ERROR_STOP=1 >/dev/null <<'PG_EOF'
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'laplace') THEN
-        CREATE SCHEMA laplace AUTHORIZATION laplace_admin;
-    ELSE
-        ALTER SCHEMA laplace OWNER TO laplace_admin;
-    END IF;
-END $$;
+CREATE SCHEMA IF NOT EXISTS laplace AUTHORIZATION laplace_admin;
 PG_EOF
-    green "✓ Schema 'laplace' exists and is owned by laplace_admin"
+    green "✓ Schema 'laplace' present (owner: laplace_admin via fresh creation; recover via 'just db-nuke' if mis-owned from prior install)"
     green "✓ laplace_priv schema + install_extension/drop_extension wrappers"
 
     # ---------------------------------------------------------------

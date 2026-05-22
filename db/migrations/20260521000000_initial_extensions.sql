@@ -36,19 +36,18 @@
 SELECT laplace_priv.install_extension('postgis');
 
 -- ============================================================
--- Step 2: laplace (laplace.control says superuser = false → DIRECT install)
+-- Step 2: laplace (extension uses the laplace schema pre-created by Layer 0)
 -- ============================================================
--- The laplace extension is marked superuser=false in its .control file
--- (per ADR 0023), so laplace_admin (DB owner, has CREATE on the laplace
--- DB) can install it directly via plain CREATE EXTENSION. Installing
--- DIRECTLY (not via SECURITY DEFINER wrapper) means the laplace schema
--- gets created with laplace_admin as owner — laplace_admin can then
--- grant USAGE on it to laplace_app + laplace_readonly in Step 3.
+-- The laplace schema is pre-created by Layer 0 bootstrap with
+-- AUTHORIZATION laplace_admin (per `bootstrap_pg_database_and_postgis` in
+-- scripts/bootstrap-laplace-runner.sh). Per PG semantics: if the schema
+-- declared by the extension's .control already exists, CREATE EXTENSION
+-- uses it without changing ownership.
 --
--- (Using the wrapper for laplace would make postgres the schema owner,
--- and the subsequent GRANT USAGE in this same migration would fail with
--- "permission denied for schema laplace" since laplace_admin wouldn't
--- own it.)
+-- The laplace extension is marked superuser=false in laplace.control
+-- (per ADR 0023), so laplace_admin (DB owner, has CREATE on the DB)
+-- can install it directly via plain CREATE EXTENSION. No wrapper needed
+-- for this one — the wrapper exists for postgis (which IS superuser-only).
 --
 -- The laplace extension's binary + .control + .sql files must be installed
 -- in PG's extension dirs before this runs. The CI flow:
@@ -64,7 +63,9 @@ CREATE EXTENSION IF NOT EXISTS laplace;
 -- ============================================================
 -- Step 3: Role USAGE grants on the 'laplace' schema
 -- ============================================================
--- The schema is created by the laplace extension's .sql file (per ADR 0023).
+-- Schema 'laplace' is owned by laplace_admin (pre-created in Layer 0
+-- bootstrap with explicit AUTHORIZATION laplace_admin). laplace_admin
+-- can GRANT USAGE on its own schema without any privilege workaround.
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'laplace_app') THEN
