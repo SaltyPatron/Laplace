@@ -61,6 +61,7 @@ Never renumber existing ADRs. If an ADR is superseded, the new one gets the next
 | 0029 | [Custom indexing strategy — five substrate-shaped opclasses](0029-custom-indexing-strategy.md) | Accepted (amends RULES.md R1) |
 | 0030 | [MKL / Eigen / Spectra / TBB integration + determinism via MKL_CBWR](0030-mkl-eigen-spectra-tbb-integration.md) | Accepted |
 | 0031 | [Custom Access Method backed by perf-cache — research spike (post-v0.1.0)](0031-custom-am-spike.md) | Accepted (as tracked spike) |
+| 0032 | [Unified CMake build pipeline — PGXS retired in favor of one tree](0032-unified-cmake-build-pipeline.md) | Accepted (locks ADR 0028 as prerequisite) |
 
 ## Workflow
 

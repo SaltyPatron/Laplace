@@ -3,6 +3,7 @@
 ## Status
 
 **Accepted** — 2026-05-21
+**Amended** — 2026-05-22: locked in as a hard **prerequisite** for the build pipeline (not parallel/deferrable). Driving rationale captured in [ADR 0032](0032-unified-cmake-build-pipeline.md). The custom build is required for two compounding reasons: (1) performance — substrate's Intel-toolchain regime can't be achieved with stock packages; (2) correctness — coding against the actual source means errors point at code we can read, eliminating the entire "apt half-upgrade silently breaks the world" failure class that fired multiple times this session.
 
 ## Context
 
