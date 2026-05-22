@@ -43,20 +43,35 @@ setup-host-reset:
     scripts/setup-host.sh reset
 
 # === Build ===
+#
+# Top-level CMake (per ADR 0032 Path B) drives engine + extension from
+# one tree. `just build` is the canonical entry point. PG_PREFIX defaults
+# to /usr/lib/postgresql/18 (stock); override via LAPLACE_PG_PREFIX env
+# var to point at the custom build at /opt/laplace/pgsql-18.
 
-build: build-engine build-extension build-app
+# Build deps from external/ submodules (PROJ, GEOS, GDAL, PG, PostGIS).
+# Idempotent — skips already-built deps. One-time cost ~25 min on a clean
+# /opt/laplace. Required before `just build` against the custom PG path.
+build-deps:
+    scripts/build-all-deps.sh
 
-build-engine:
-    # CMake picks compiler from PATH (CC/CXX env). With oneAPI's setvars.sh
-    # sourced, icx/icpx are preferred. Without it, gcc/g++ is fine.
-    cd engine && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-    cd engine && cmake --build build
+# Build everything: 3 engine .so + 2 extension .so + 2 preprocessed SQL
+# install scripts. One command, one ninja graph.
+build:
+    cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+        -DLAPLACE_PG_PREFIX=${LAPLACE_PG_PREFIX:-/usr/lib/postgresql/18}
+    cmake --build build
 
-build-extension:
-    cd extension && make USE_PGXS=1 PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
+# Install engine .so + both extensions into the configured PG prefix.
+# For stock PG that's /usr/lib/postgresql/18/{lib,share}; needs sudo.
+# For custom PG at /opt/laplace/pgsql-18 (laplace-runner-owned), no sudo.
+install: build
+    sudo cmake --install build
 
-install-extension: build-extension
-    cd extension && sudo make USE_PGXS=1 PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config install
+# Same install path as `just install`, scoped for laplace-runner-owned
+# /opt/laplace prefix (no sudo).
+install-laplace-prefix: build
+    cmake --install build
 
 build-app:
     cd app && dotnet build Laplace.slnx -c Release
@@ -67,6 +82,10 @@ build-migrations:
 build-perfcache:
     scripts/build-perfcache.sh
 
+# Wipe build/ (idempotent re-run preserves /opt/laplace/* dep installs).
+clean:
+    rm -rf build
+
 # === Launch ===
 
 launch-db:
@@ -76,7 +95,7 @@ launch-db:
 # Per ADR 0021 (DbUp + Npgsql) + ADR 0023 (extension owns schema).
 # These wrap dotnet run --project app/Laplace.Migrations.
 
-db-up: install-extension
+db-up: install
     cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- up
 
 db-status:
@@ -168,31 +187,23 @@ status:
     @cat .agent/status/blockers.md 2>/dev/null || echo "(none)"
 
 # === Test ===
+#
+# Three test surfaces per STANDARDS.md Testing:
+#   ctest        → engine C++ unit tests (GoogleTest, gtest_discover_tests)
+#   pg_regress   → extension SQL tests (lands per-Chunk with the first real
+#                  function under extension/{laplace_geom,laplace_substrate}/tests/)
+#   dotnet test  → C# xUnit + Testcontainers (Migrations DbUp idempotency
+#                  against a postgis/postgis:18 container)
 
-test: test-engine test-extension test-app test-integration
+test: test-engine test-app
 
+# ctest runs everything discovered by gtest_discover_tests in each engine
+# subdir. Requires `just build` first.
 test-engine:
-    cd engine && cmake --build build --target test
-    cd engine/build && ctest --output-on-failure
+    cd build && ctest --output-on-failure
 
-test-extension:
-    cd extension && make installcheck PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
-
+# dotnet test covers all .Tests projects (Laplace.Engine.*.Tests +
+# Laplace.Migrations.Tests). Testcontainers requires a running Docker
+# daemon.
 test-app:
-    cd app && dotnet test -c Release
-
-test-integration:
-    scripts/test-integration.sh
-
-# === Clean ===
-
-clean: clean-engine clean-extension clean-app
-
-clean-engine:
-    rm -rf engine/build
-
-clean-extension:
-    cd extension && make clean 2>/dev/null || true
-
-clean-app:
-    cd app && dotnet clean 2>/dev/null || true
+    cd app && dotnet test Laplace.slnx -c Release

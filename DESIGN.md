@@ -203,6 +203,49 @@ Operationally: truths cluster across independent, high-trust, structurally adjac
 
 ---
 
+## II.B. Module map (Story A.13)
+
+The substrate is implemented across three layers, each owning one kind of work (per [ADR 0027 separation-of-concerns invariants](docs/adr/0027-separation-of-concerns-invariants.md) + [RULES.md R16](RULES.md)):
+
+| Layer | Project / library | Responsibilities | Links |
+|---|---|---|---|
+| **C/C++ engine** (3 shared libs per [ADR 0024](docs/adr/0024-engine-modularization.md)) | `liblaplace_core.so` | math4d kernels on raw `double[4]` (no parallel datatype per [R22](RULES.md)); `hash128_t` BLAKE3 helpers; `hilbert128_t` Skilling-2004 encode/decode; `mantissa_payload_t` pack/unpack; `glicko2_state_t` int64 fixed-point; `astar_query_t` cascade frontier (compiled traversal per [ADR 0035](docs/adr/0035-prompt-ingestion-and-compiled-cascade.md)); `codepoint_table` mmap'd T0 perf-cache; `trajectory` builders | `engine/core/` |
+| | `liblaplace_dynamics.so` | Procrustes (oneMKL SVD via Eigen); Laplacian eigenmaps (Spectra); Gram-Schmidt (Eigen HouseholderQR); lottery-ticket sparsity per [R3](RULES.md). MKL+TBB integration per [ADR 0030](docs/adr/0030-mkl-eigen-spectra-tbb-integration.md); `laplace_dynamics_init` locks `MKL_THREADING_TBB` + `MKL_CBWR` for substrate determinism. | `engine/dynamics/` |
+| | `liblaplace_synthesis.so` | Recipe parsing (per [ADR 0009](docs/adr/0009-recipe-extraction-and-overrides.md)); architecture-template materialization (`LlamaTemplate` etc., per [ADR 0011](docs/adr/0011-polymorphic-plugin-architecture.md)); feature extractors; GGUF writer with sparse-by-construction emission per [R4](RULES.md). | `engine/synthesis/` |
+| **PG extensions** (2 per [ADR 0025](docs/adr/0025-pg-extension-modularization.md)) | `laplace_geom` | General-purpose 4D PostGIS additions: `ST_*_4d` family (extends PostGIS per [R1](RULES.md)); BLAKE3-128 `hash128` helpers on `bytea(16)`; Hilbert encoder/decoder; mantissa pack/unpack; `laplace_btree_hash128_ops` + `laplace_gist_s3_ops` custom opclasses (per [ADR 0029](docs/adr/0029-custom-indexing-strategy.md)). Built via CMake (no PGXS per [ADR 0032](docs/adr/0032-unified-cmake-build-pipeline.md)). Modular SQL via `.sql.in` + cpp preprocessor per [ADR 0034](docs/adr/0034-modular-sql-via-cpp-preprocessor.md). | `extension/laplace_geom/` |
+| | `laplace_substrate` | Substrate domain: the three core tables (entities / physicalities / attestations) marked with `pg_extension_config_dump()`; arena-aware Glicko-2 aggregate per [ADR 0036](docs/adr/0036-arena-semantics-and-source-trust.md); `laplace_astar_path` compiled-cascade SRF per [ADR 0035](docs/adr/0035-prompt-ingestion-and-compiled-cascade.md); `laplace_sp_trajectory_ops` + `laplace_brin_tier_ops` custom opclasses per [ADR 0029](docs/adr/0029-custom-indexing-strategy.md). Same build pattern as `laplace_geom`. | `extension/laplace_substrate/` |
+| **C# app layer** (multiple projects per [ADR 0026](docs/adr/0026-csharp-project-structure.md)) | `Laplace.Engine.Core` | P/Invoke bindings for `liblaplace_core.so`. | `app/Laplace.Engine.Core/` |
+| | `Laplace.Engine.Dynamics` | P/Invoke for `liblaplace_dynamics.so`; static ctor calls `laplace_dynamics_init`. | `app/Laplace.Engine.Dynamics/` |
+| | `Laplace.Engine.Synthesis` | P/Invoke for `liblaplace_synthesis.so`. | `app/Laplace.Engine.Synthesis/` |
+| | `Laplace.Migrations` | DbUp runner per [ADR 0021](docs/adr/0021-dbup-for-migrations.md). Orchestrates `CREATE EXTENSION laplace_geom` + `CREATE EXTENSION laplace_substrate` + role grants. | `app/Laplace.Migrations/` |
+| | `Laplace.Cli` | CLI subcommands: `cascade`, `synthesize`, etc. (lands Chunks 5/7). | `app/Laplace.Cli/` (planned) |
+| | `Laplace.Endpoints.*` | Protocol-endpoint plugins (OpenAI-compat, etc., per [ADR 0011](docs/adr/0011-polymorphic-plugin-architecture.md)). | `app/Laplace.Endpoints.*/` (planned) |
+| | `Laplace.Sources.*` | `ISource` plugins per modality / per-corpus. | `app/Laplace.Sources.*/` (planned) |
+| | `Laplace.Decomposers.*` | `IDecomposer` plugins per modality. | `app/Laplace.Decomposers.*/` (planned) |
+| **Test surfaces** (per [STANDARDS.md Testing](STANDARDS.md#testing)) | `engine/*/tests/` | GoogleTest C++ unit tests; `gtest_discover_tests` registers each `TEST()` with CTest. | engine subdirs |
+| | `extension/*/tests/sql/` + `expected/` | pg_regress integration tests; CTest add_test wraps `pg_regress --temp-instance` (wiring lands per-Chunk with the first real SQL function). | extension subdirs |
+| | `app/Laplace.*.Tests/` | xUnit unit + integration tests. `Laplace.Migrations.Tests` uses `Testcontainers.PostgreSql` to spin up a `postgis/postgis:18` container for DbUp idempotency checks. | `app/Laplace.*.Tests/` |
+
+### Direct dependencies (all submodules per [ADR 0033](docs/adr/0033-all-deps-as-submodules.md))
+
+`external/postgresql/` (PG 18), `external/postgis/` (3.6.3), `external/proj/` (9.4.1), `external/geos/` (3.12.2), `external/gdal/` (v3.9.3), `external/eigen/` (3.4.0), `external/spectra/` (v1.2.0), `external/blake3/` (1.5.4), `external/googletest/` (v1.15.2), `external/tree-sitter/` (v0.22.6). Intel oneAPI is the sole non-submodule (vendor compiler + runtime at `/opt/intel/oneapi/`).
+
+### Build pipeline (per [ADR 0032 Path B](docs/adr/0032-unified-cmake-build-pipeline.md))
+
+One top-level CMake tree:
+
+```sh
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DLAPLACE_PG_PREFIX=/usr/lib/postgresql/18   # or /opt/laplace/pgsql-18 after Epic B
+cmake --build build       # 3 engine .so + 2 extension .so + 2 SQLPP-built SQL scripts
+cmake --install build     # installs into the PG prefix (sudo for system prefix)
+ctest --test-dir build    # 22+ engine tests; pg_regress + dotnet test surfaces per-Chunk
+```
+
+`just build` / `just install` / `just test-engine` / `just test-app` wrap these for local iteration.
+
+---
+
 ## III. Custom functions (laplace_geom + laplace_substrate extensions)
 
 PostGIS gives us most ops free. These are the additions where PostGIS is 2D/3D-only or where we need substrate-specific math. Functions land in whichever extension owns the concept (per ADR 0025).
