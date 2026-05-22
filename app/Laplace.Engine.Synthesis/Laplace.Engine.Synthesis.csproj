@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Laplace.Engine.Synthesis</RootNamespace>
+    <AssemblyName>Laplace.Engine.Synthesis</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Laplace.Engine.Core\Laplace.Engine.Core.csproj" />
+    <ProjectReference Include="..\Laplace.Engine.Dynamics\Laplace.Engine.Dynamics.csproj" />
+  </ItemGroup>
+
+</Project>

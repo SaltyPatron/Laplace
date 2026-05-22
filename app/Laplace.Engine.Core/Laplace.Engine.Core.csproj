@@ -6,8 +6,8 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>latest</LangVersion>
-    <RootNamespace>Laplace.Engine</RootNamespace>
-    <AssemblyName>Laplace.Engine</AssemblyName>
+    <RootNamespace>Laplace.Engine.Core</RootNamespace>
+    <AssemblyName>Laplace.Engine.Core</AssemblyName>
   </PropertyGroup>
 
 </Project>

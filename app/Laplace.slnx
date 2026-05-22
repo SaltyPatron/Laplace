@@ -1,4 +1,10 @@
 <Solution>
-  <Project Path="Laplace.Engine/Laplace.Engine.csproj" />
+  <Project Path="Laplace.Engine.Core/Laplace.Engine.Core.csproj" />
+  <Project Path="Laplace.Engine.Core.Tests/Laplace.Engine.Core.Tests.csproj" />
+  <Project Path="Laplace.Engine.Dynamics/Laplace.Engine.Dynamics.csproj" />
+  <Project Path="Laplace.Engine.Dynamics.Tests/Laplace.Engine.Dynamics.Tests.csproj" />
+  <Project Path="Laplace.Engine.Synthesis/Laplace.Engine.Synthesis.csproj" />
+  <Project Path="Laplace.Engine.Synthesis.Tests/Laplace.Engine.Synthesis.Tests.csproj" />
   <Project Path="Laplace.Migrations/Laplace.Migrations.csproj" />
+  <Project Path="Laplace.Migrations.Tests/Laplace.Migrations.Tests.csproj" />
 </Solution>
