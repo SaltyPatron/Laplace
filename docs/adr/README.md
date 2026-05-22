@@ -53,6 +53,14 @@ Never renumber existing ADRs. If an ADR is superseded, the new one gets the next
 | 0021 | [DbUp + Npgsql for migrations](0021-dbup-for-migrations.md) | Accepted |
 | 0022 | [ADRs as decision-record format](0022-adrs-as-decision-format.md) | Accepted |
 | 0023 | [Laplace extension owns its schema; DbUp orchestrates extension lifecycle](0023-extension-owns-schema-dbup-orchestrates.md) | Accepted (narrows ADR 0021) |
+| 0024 | [Engine modularization — core / dynamics / synthesis](0024-engine-modularization.md) | Accepted |
+| 0025 | [PG extension modularization — laplace_geom + laplace_substrate](0025-pg-extension-modularization.md) | Accepted (refines ADR 0023) |
+| 0026 | [C# project structure — orchestration-only, mirroring engine modularization](0026-csharp-project-structure.md) | Accepted |
+| 0027 | [Separation of concerns invariants](0027-separation-of-concerns-invariants.md) | Accepted |
+| 0028 | [Custom-built PostgreSQL 18 + PostGIS 3.6.3 with Intel toolchain](0028-custom-built-pg-postgis-intel.md) | Accepted |
+| 0029 | [Custom indexing strategy — five substrate-shaped opclasses](0029-custom-indexing-strategy.md) | Accepted (amends RULES.md R1) |
+| 0030 | [MKL / Eigen / Spectra / TBB integration + determinism via MKL_CBWR](0030-mkl-eigen-spectra-tbb-integration.md) | Accepted |
+| 0031 | [Custom Access Method backed by perf-cache — research spike (post-v0.1.0)](0031-custom-am-spike.md) | Accepted (as tracked spike) |
 
 ## Workflow
 
