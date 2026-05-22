@@ -315,13 +315,21 @@ CREATE OR REPLACE FUNCTION laplace_priv.install_extension(ext_name text)
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = public, pg_catalog
 AS $func$
 BEGIN
     -- Allowlist — substrate-honest only. See
     -- ~/.claude/projects/.../memory/feedback_conventional_db_reflex.md
     -- for why pg_trgm/intarray/citext/unaccent/bloom are NOT here even
     -- though "they sound useful". The substrate replaces those.
+    --
+    -- search_path is set to (public, pg_catalog) — NOT (pg_catalog, public).
+    -- Reason: extension install scripts that create objects without a schema
+    -- qualifier (e.g., postgis's `CREATE TYPE geometry_dump AS (...)`) resolve
+    -- to the FIRST writable schema in search_path. With pg_catalog first,
+    -- PG tries to create in pg_catalog and fails (even SUPERUSER can't easily
+    -- create into pg_catalog at extension-install time). With public first,
+    -- extension objects land in public as intended.
     IF ext_name NOT IN (
         -- Geometry (the substrate extends PostGIS, ADR 0001)
         'postgis', 'postgis_topology', 'postgis_raster', 'postgis_sfcgal',
@@ -354,7 +362,7 @@ CREATE OR REPLACE FUNCTION laplace_priv.drop_extension(ext_name text)
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = public, pg_catalog
 AS $func$
 BEGIN
     IF ext_name NOT IN (
@@ -381,17 +389,24 @@ PG_EOF
     green "✓ laplace_priv schema + install_extension/drop_extension wrappers"
 
     # ---------------------------------------------------------------
-    # (3) Install postgis via the wrapper (proves the wrapper is the
-    #     canonical path; bootstrap dogfoods what laplace_admin will use).
+    # (3) Install postgis directly as postgres (we're already running
+    #     `sudo -u postgres psql` — no wrapper needed for THIS install).
+    #
+    #     Why not via the wrapper? Because at first install, the wrapper
+    #     is meant for laplace_admin's RECOVERY path (post-db-nuke).
+    #     Direct CREATE EXTENSION as postgres is cleaner: extension's
+    #     install script gets postgres's full default-search_path context
+    #     and creates objects in public as designed. The DbUp migration's
+    #     `SELECT laplace_priv.install_extension('postgis')` will then be
+    #     a NOTICE-and-skip no-op (PG short-circuits IF NOT EXISTS BEFORE
+    #     the privilege check when the extension is already present).
     # ---------------------------------------------------------------
     if sudo -u postgres psql -d laplace -tAc "SELECT 1 FROM pg_extension WHERE extname='postgis'" | grep -q 1; then
         green "✓ Extension 'postgis' already present in 'laplace'"
     else
-        # Call via the wrapper — works because SECURITY DEFINER elevates to
-        # the postgres owner regardless of caller.
         sudo -u postgres psql -d laplace -v ON_ERROR_STOP=1 \
-            -c "SELECT laplace_priv.install_extension('postgis')" >/dev/null
-        green "✓ Installed postgis via laplace_priv.install_extension"
+            -c "CREATE EXTENSION postgis" >/dev/null
+        green "✓ Installed postgis (direct as postgres; future re-installs go through laplace_priv wrapper)"
     fi
 
     # ---------------------------------------------------------------

@@ -8,9 +8,9 @@ This file is loaded automatically when working in this project. **Read it carefu
 
 A content-addressable geometric-attestation substrate built as:
 
-- **PostgreSQL 18 extension** (extending PostGIS — never replacing — using standard `geometry` with Z+M = 4D and `gist_geometry_ops_nd` for indexing)
-- **Shared C/C++ engine library** (same `.so` loaded by the PG extension AND by the C# app via P/Invoke — one source of math truth)
-- **Thin C# app layer** for orchestration + plugin host for protocol-endpoint extensions (OpenAI-compat, etc.)
+- **Two PostgreSQL 18 extensions** (extending PostGIS — never replacing — per ADRs 0001 + 0025): `laplace_geom` (general-purpose 4D additions to PostGIS: `ST_*_4d` family, `hash128` type, Hilbert encoder, custom S³-aware GIST opclass) and `laplace_substrate` (substrate schema: entities / physicalities / attestations + cascade SRFs + Glicko-2 aggregate + custom SP-GiST/BRIN opclasses). Both use standard `geometry` with Z+M = 4D plus custom opclasses per ADR 0029.
+- **Three shared C/C++ engine libraries** (per ADR 0024): `liblaplace_core.so` (coord4d, hash128 BLAKE3, hilbert4d, mantissa, geom4d serde, Glicko-2 fixed-point, A* primitives), `liblaplace_dynamics.so` (Procrustes, eigenmaps, Gram-Schmidt, sparsity — links oneMKL + Spectra + TBB), `liblaplace_synthesis.so` (recipe extraction, architecture templates, GGUF writer). Same `.so` files loaded by the PG extensions AND by the C# app via P/Invoke — one source of math truth.
+- **C# app layer** composed of multiple projects (per ADR 0026): `Laplace.Engine.{Core,Dynamics,Synthesis}` (P/Invoke bindings), `Laplace.Migrations` (DbUp), `Laplace.Cli`, `Laplace.Endpoints.*` (protocol-endpoint plugins), `Laplace.Sources.*` (ISource plugins), `Laplace.Decomposers.*`. Orchestration only — per ADR 0027, math lives in C/C++.
 
 It replaces the conventional AI stack: model files, runtimes (llama.cpp / vLLM / TensorRT-LLM / Triton), training infrastructure, inference servers, fine-tuning pipelines, RAG, vector-DB hacks, ensembling, model-merging, context-window engineering, distillation. The substrate plus its endpoint extensions IS the model serving layer.
 
@@ -153,7 +153,8 @@ These behaviors are **automatic**, not waiting to be asked:
 
 - `MEMORY.md` — index
 - `project_laplace_invention.md` — full invention spec
-- `project_laplace_performance.md` — performance regime + libraries + datatype standards
+- `project_laplace_performance.md` — performance regime + libraries + datatype standards (CPU-native; oneMKL/Spectra/TBB; no GPU at runtime)
 - `project_laplace_origin.md` — origin context (do-not-read-Hartonomous-files)
 - `feedback_no_sabotage.md` — anti-sabotage rules (zero tolerance)
 - `feedback_memory_discipline.md` — memory hygiene
+- `feedback_conventional_db_reflex.md` — PG extensions that solve "conventional DB" problems (Bloom / pg_trgm / citext / unaccent / intarray) often duplicate work the substrate has already done structurally; substrate-native answers (ST_Frechet, UCD metadata, perf-cache)

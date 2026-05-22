@@ -12,7 +12,7 @@ The Laplace database itself. Holds entities, physicalities, and attestations. Ac
 
 ### Entity
 
-A unique observed n-gram of digital content, identified by its content hash (XXH3-128). Stored as one row in the `entities` table. Plays **two roles simultaneously**: content (the thing observed) AND building block (referenced by higher-tier entities via mantissa-packed trajectories). Same content → same hash → ONE row.
+A unique observed n-gram of digital content, identified by its content hash (BLAKE3 truncated to 128 bits — per ADR 0015). Stored as one row in the `entities` table (owned by the `laplace_substrate` extension per ADR 0025). Plays **two roles simultaneously**: content (the thing observed) AND building block (referenced by higher-tier entities via mantissa-packed trajectories). Same content → same hash → ONE row.
 
 ### Atom
 
@@ -172,11 +172,20 @@ Property of Substrate Synthesis output: positions with no significant attestatio
 
 ### Engine
 
-The shared C/C++ library (`liblaplace_engine.so` / `.dll`). Linked by the PG extension AND by the C# app layer. Single source of math truth.
+Three shared C/C++ libraries (per ADR 0024):
+- `liblaplace_core.so` — coord4d, hash128 (BLAKE3), hilbert4d, mantissa, geom4d serde, Glicko-2 fixed-point, A* primitives
+- `liblaplace_dynamics.so` — Procrustes, eigenmaps, Gram-Schmidt, lottery-ticket sparsity (links oneMKL + Spectra + TBB)
+- `liblaplace_synthesis.so` — recipe extraction, architecture templates, feature extractors, GGUF writer
+
+The same `.so` files are loaded by the PG extensions AND by the C# app layer via P/Invoke. Single source of math truth.
 
 ### PG extension
 
-The PostgreSQL extension (`laplace`). Thin wrappers around engine functions, exposed via `PG_FUNCTION_INFO_V1`. Adds custom 4D-aware functions where standard PostGIS is 2D/3D-only.
+Two PostgreSQL extensions (per ADR 0025):
+- **`laplace_geom`** — general-purpose 4D additions to PostGIS: `ST_*_4d` functions, `hash128` type, Hilbert encoder, mantissa pack/unpack, custom GIST opclasses for S³-aware indexes
+- **`laplace_substrate`** — substrate schema: three core tables, attestation kind hierarchy, Glicko-2 aggregate, cascade SRFs, custom SP-GiST + BRIN opclasses
+
+Thin wrappers around engine functions, exposed via `PG_FUNCTION_INFO_V1`. Add custom 4D-aware functions where standard PostGIS is 2D/3D-only.
 
 ### Perf-cache
 

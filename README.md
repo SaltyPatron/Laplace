@@ -47,16 +47,16 @@ graph TB
         Synthesis[Substrate Synthesis UI<br/>+ recipe management]
         Interop[Native Interop<br/>P/Invoke → engine C ABI]
     end
-    subgraph Engine["Engine (C/C++) — liblaplace_engine.so"]
-        Math[coord4d · hash128 · hilbert4d · mantissa<br/>geometry4d · glicko2 · astar · frechet]
-        Sources[Source plugins<br/>WordNet · UD · Wiktionary · ConceptNet<br/>TransformerModelSource · TextCorpusSource]
-        Templates[Architecture templates<br/>Llama · Mamba · CNN · Diffusion]
-        Pipeline[Procrustes · Laplacian eigenmaps · Gram-Schmidt<br/>Lottery-ticket-aware sparsity]
+    subgraph Engine["Engine (C/C++) — 3 shared libs per ADR 0024"]
+        Math[liblaplace_core<br/>coord4d · hash128 (BLAKE3) · hilbert4d · mantissa<br/>geometry4d · glicko2 · astar]
+        Pipeline[liblaplace_dynamics<br/>Procrustes · Laplacian eigenmaps · Gram-Schmidt<br/>Lottery-ticket-aware sparsity · oneMKL · Spectra · TBB]
+        Templates[liblaplace_synthesis<br/>Recipe · LlamaTemplate · feature extractors · GGUFWriter]
+        Sources[C# Source plugins → loaded into substrate via Engine.Dynamics<br/>WordNet · UD · Wiktionary · ConceptNet · Transformer · TextCorpus]
     end
-    subgraph DB["PostgreSQL 18 + PostGIS 3.6"]
-        Ext[laplace extension<br/>thin PG_FUNCTION wrappers]
+    subgraph DB["PostgreSQL 18 + PostGIS 3.6 — 2 extensions per ADR 0025"]
+        ExtGeom[laplace_geom<br/>ST_*_4d · hash128 type<br/>laplace_btree_hash128_ops · laplace_gist_s3_ops]
+        ExtSub[laplace_substrate<br/>entities · physicalities · attestations<br/>Glicko-2 aggregate · cascade SRFs<br/>laplace_sp_trajectory_ops · laplace_brin_tier_ops]
         Tables[(entities · physicalities · attestations)]
-        Indexes[gist_geometry_ops_nd · btree on Hilbert · GIN · pg_trgm]
     end
     subgraph Storage["External"]
         UCD[Unicode UCD]
@@ -90,7 +90,7 @@ graph TB
 | **Database** | PostgreSQL 18 + PostGIS 3.6 (extended via custom 4D-aware functions) | Decades of mature spatial-DB engineering; we **extend** PostGIS rather than replace |
 | **Engine** | C/C++ shared library | Native speed; single source of math truth |
 | **Linear algebra** | Intel oneMKL (SVD / BLAS / LAPACK) + Eigen (small matrices) + Spectra (sparse eigendecomp) | Industry-standard CPU-native math |
-| **Hashing** | XXH3-128 *(pending revisit — possibly BLAKE3)* | 128-bit collision-safe for ~10¹⁸ entities |
+| **Hashing** | BLAKE3 truncated to 128 bits (per ADR 0015) | 128-bit collision-safe for ~10¹⁸ entities; SIMD-vectorized; raw `bytea(16)` end-to-end |
 | **App layer** | C# / .NET 10 | Plugin host for protocol-endpoint extensions; Synthesis UI |
 | **Compiler** | Intel `icx` / `icpx` 2026 (primary) · `gcc` 11 / `clang` 14 (fallback) | AVX2 baseline → AVX-512 deployment-target dispatch |
 | **Build** | CMake + Ninja (engine) · PGXS (extension) · `dotnet build` (app) | Standard tooling per stack |
@@ -119,7 +119,7 @@ Live project state: [.agent/status/STATE.md](.agent/status/STATE.md)
 just check-prereqs
 ```
 
-Required: PostgreSQL 18, PostGIS 3.6, Intel oneAPI 2026, .NET 10, Eigen 3.4, ICU 70, libxxhash, cmake, ninja, just.
+Required: PostgreSQL 18, PostGIS 3.6, Intel oneAPI 2026, .NET 10, Eigen 3.4, ICU 70, cmake, ninja, just. (BLAKE3 + Spectra fetched at build time via CMake FetchContent.)
 
 ### Build everything
 

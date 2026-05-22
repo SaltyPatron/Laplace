@@ -49,7 +49,7 @@ CREATE INDEX entities_first_observed  ON entities USING btree (first_observed_by
 
 **Notes:**
 
-- `hash` is XXH3-128 stored as `bytea(16)`. Content-addressable PK. No separate ID column.
+- `hash` is BLAKE3 truncated to 128 bits stored as `bytea(16)` (per ADR 0015). Content-addressable PK. No separate ID column. Raw bytes only — no hex, no casts.
 - `tier` is a `smallint` (one byte sufficient, but Postgres has no native uint8).
 - `canonical_coord` is a standard PostGIS `geometry` constrained to ZM-flagged Point.
 - `trajectory` is NULL for T0 atoms; mantissa-packed LINESTRING for T≥1.
@@ -128,45 +128,53 @@ Was over-engineering. Attestation rows ARE consensus state, not event log entrie
 
 ## II. Type system at the SQL layer
 
-```sql
-CREATE EXTENSION IF NOT EXISTS postgis;
+Two extensions, both installed via `laplace_priv.install_extension` (SECURITY DEFINER wrapper) per ADR 0023 + 0025:
 
-CREATE EXTENSION laplace;
--- Provided by extension/laplace--1.0.0.sql:
---   - Custom 4D-aware functions (laplace_*_4d)
---   - Hilbert encoder/decoder
---   - Mantissa pack/unpack
---   - Glicko-2 update aggregate
---   - A* set-returning function
---   - Trajectory construction helpers
+```sql
+SELECT laplace_priv.install_extension('postgis');           -- requires SUPERUSER; wrapped
+SELECT laplace_priv.install_extension('laplace_geom');      -- requires postgis
+SELECT laplace_priv.install_extension('laplace_substrate'); -- requires laplace_geom + postgis
 ```
+
+`laplace_geom` provides (per ADR 0025):
+- `hash128` type + `laplace_btree_hash128_ops` opclass (ADR 0029)
+- 4D-aware geometric functions: `ST_distance_4d`, `ST_dwithin_4d`, `ST_centroid_4d`, `ST_radius_origin`, `ST_frechet_4d`, `ST_hausdorff_4d`, `ST_length_4d`
+- Hilbert encoder/decoder, mantissa pack/unpack
+- `laplace_gist_s3_ops` custom GIST opclass for 4D geometry (ADR 0029)
+
+`laplace_substrate` provides:
+- The three core tables (`entities`, `physicalities`, `attestations`) marked with `pg_extension_config_dump()` so substrate data survives `pg_dump`
+- Composite types for attestation kinds
+- `laplace_sp_trajectory_ops` SP-GiST opclass + `laplace_brin_tier_ops` BRIN opclass (ADR 0029)
+- Glicko-2 aggregate
+- Cascade SRFs (`laplace_astar_path`, etc.)
 
 We do NOT create a `geometry4d` type. We use standard PostGIS `geometry` with Z+M flags = 4D.
 
 ---
 
-## III. Custom functions (laplace extension)
+## III. Custom functions (laplace_geom + laplace_substrate extensions)
 
-PostGIS gives us most ops free. These are the additions where PostGIS is 2D/3D-only or where we need substrate-specific math.
+PostGIS gives us most ops free. These are the additions where PostGIS is 2D/3D-only or where we need substrate-specific math. Functions land in whichever extension owns the concept (per ADR 0025).
 
-### 4D-aware geometric functions
+### 4D-aware geometric functions (laplace_geom)
 
 ```sql
-laplace_distance_4d(a geometry, b geometry) RETURNS double precision
-laplace_dwithin_4d(a geometry, b geometry, eps double precision) RETURNS boolean
-laplace_length_4d(line geometry) RETURNS double precision
-laplace_centroid_4d(g geometry) RETURNS geometry        -- true 4D centroid
-laplace_frechet_4d(a geometry, b geometry) RETURNS double precision
-laplace_hausdorff_4d(a geometry, b geometry) RETURNS double precision
-laplace_radius_origin(p geometry) RETURNS double precision  -- distance from origin in 4D
+ST_distance_4d(a geometry, b geometry) RETURNS double precision
+ST_dwithin_4d(a geometry, b geometry, eps double precision) RETURNS boolean
+ST_length_4d(line geometry) RETURNS double precision
+ST_centroid_4d(g geometry) RETURNS geometry          -- true 4D centroid
+ST_frechet_4d(a geometry, b geometry) RETURNS double precision
+ST_hausdorff_4d(a geometry, b geometry) RETURNS double precision
+ST_radius_origin(p geometry) RETURNS double precision  -- distance from origin in 4D
 ```
 
-### Hilbert + hash
+### Hilbert + hash (laplace_geom)
 
 ```sql
 laplace_hilbert_encode(p geometry) RETURNS bytea
 laplace_hilbert_decode(h bytea) RETURNS geometry
-laplace_hash128_xxh3(data bytea) RETURNS bytea
+laplace_hash128_blake3(data bytea) RETURNS bytea               -- BLAKE3 → 16 bytes (truncated)
 laplace_hash128_merkle(tier smallint, child_hashes bytea[]) RETURNS bytea
 ```
 
@@ -244,7 +252,7 @@ int       hilbert128_compare(const hilbert128_t* a, const hilbert128_t* b);
 // hash128.h
 typedef struct { uint64_t hi, lo; } hash128_t;
 
-void      hash128_xxh3(const uint8_t* data, size_t len, hash128_t* out);
+void      hash128_blake3(const uint8_t* data, size_t len, hash128_t* out);     // BLAKE3 → truncate to 128 bits
 void      hash128_merkle(uint8_t tier, const hash128_t* children, size_t n, hash128_t* out);
 int       hash128_compare(const hash128_t* a, const hash128_t* b);
 

@@ -30,7 +30,7 @@ Chunk-based, not phase-based. Each chunk:
 - This file (`.agent/status/plan.md`)
 - Dep sources locked in STANDARDS.md (Eigen apt, oneMKL/TBB oneAPI, Spectra FetchContent v1.2.0, tree-sitter system, ...)
 - `engine/`, `extension/`, `app/`, `scripts/` scaffolded
-- `engine/CMakeLists.txt` produces empty `liblaplace_engine.so`
+- `engine/CMakeLists.txt` orchestrates three shared libraries per ADR 0024 (`liblaplace_core.so`, `liblaplace_dynamics.so`, `liblaplace_synthesis.so`); each subdir has its own CMakeLists
 - `extension/Makefile` (PGXS) produces `laplace.so` loadable via `CREATE EXTENSION laplace;`
 - `app/Laplace.Engine` C# project with placeholder P/Invoke bindings
 - `scripts/check-prereqs.sh` (real impl); other scripts stubbed
@@ -47,11 +47,11 @@ Chunk-based, not phase-based. Each chunk:
 
 ## Chunk 1 — Core math primitives
 
-**Scope:** `coord4d`, `hash128` (XXH3 + Merkle), `hilbert4d` encode/decode, `mantissa_pack`/`_unpack`.
+**Scope:** `coord4d`, `hash128` (BLAKE3 truncated + Merkle), `hilbert4d` encode/decode, `mantissa_pack`/`_unpack`. All land in `engine/core/` per ADR 0024.
 
 **Deliverables:**
-- `engine/include/laplace/coord4d.h` + impl + unit tests
-- `engine/include/laplace/hash128.h` + impl + tests (libxxhash linkage)
+- `engine/core/include/laplace/core/coord4d.h` + impl + unit tests
+- `engine/core/include/laplace/core/hash128.h` + impl + tests (BLAKE3 linkage via FetchContent, per ADR 0015)
 - `engine/include/laplace/hilbert4d.h` + impl + tests (Skilling 2004)
 - `engine/include/laplace/mantissa_pack.h` + impl + tests (round-trip lossless on payload bits)
 - Cross-language consistency tests (SQL ↔ C# ↔ engine same result)
@@ -71,7 +71,7 @@ Chunk-based, not phase-based. Each chunk:
 **Deliverables:**
 - `engine/include/laplace/geometry4d.h` + impl + tests
 - PG wrapper functions: `laplace_distance_4d`, `laplace_dwithin_4d`, `laplace_centroid_4d`, `laplace_radius_origin`, `laplace_frechet_4d`, `laplace_hausdorff_4d`, `laplace_hilbert_encode`, `laplace_hilbert_decode`, `laplace_mantissa_pack`, `laplace_mantissa_unpack`
-- `extension/laplace--1.0.0.sql` populated with function declarations
+- `extension/laplace_geom/laplace_geom--0.1.0.sql` populated with `ST_*_4d` + hash128 + Hilbert + mantissa + opclasses (per ADR 0025); `extension/laplace_substrate/laplace_substrate--0.1.0.sql` populated with substrate schema
 - `extension/src/laplace.c` populated with PG_FUNCTION_INFO_V1 wrappers
 - Schema DDL applied: `entities`, `physicalities`, `attestations` per DESIGN.md
 

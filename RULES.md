@@ -31,11 +31,13 @@ Each of these has a Laplace-native replacement. See [GLOSSARY.md](GLOSSARY.md) a
 
 ## R1 — Extend PostGIS, never replace
 
-Use standard PostGIS `geometry` type with Z+M = 4D (X, Y, Z spatial + M as fourth spatial dim). Use `gist_geometry_ops_nd` (PostGIS's native N-dimensional GiST opclass) for indexing. Inherit `ST_X`, `ST_Y`, `ST_Z`, `ST_M`, `ST_MakePoint`, `ST_NDims`, `ST_HasZ`, `ST_HasM`, `ST_PointN`, `ST_NumPoints`, `ST_Force4D`, WKB I/O — all free.
+Use standard PostGIS `geometry` type with Z+M = 4D (X, Y, Z spatial + M as fourth spatial dim). Inherit `ST_X`, `ST_Y`, `ST_Z`, `ST_M`, `ST_MakePoint`, `ST_NDims`, `ST_HasZ`, `ST_HasM`, `ST_PointN`, `ST_NumPoints`, `ST_Force4D`, WKB I/O — all free.
 
-**Write custom functions ONLY where standard PostGIS is 2D/3D-only** (centroid, distance, dwithin, length, Fréchet, Hausdorff). Naming convention: `laplace_*_4d` (e.g., `laplace_distance_4d`, `laplace_centroid_4d`).
+**Write custom functions ONLY where standard PostGIS is 2D/3D-only** (centroid, distance, dwithin, length, Fréchet, Hausdorff). Naming convention: `ST_*_4d` (e.g., `ST_distance_4d`, `ST_centroid_4d`) in the `laplace_geom` extension.
 
-**Do NOT** create a parallel `geometry4d` type. **Do NOT** write custom GIST opclasses unless PostGIS's `gist_geometry_ops_nd` provably fails for our access pattern (it doesn't).
+**Do NOT** create a parallel `geometry4d` type.
+
+**Custom GIST/SP-GiST/BRIN opclasses ARE permitted** where they exploit substrate-specific structure that general-purpose opclasses can't — per [ADR 0029](docs/adr/0029-custom-indexing-strategy.md). Each custom opclass requires its own ADR documenting the structural fact exploited + measurable acceptance benchmark vs the stock alternative. Speculatively replacing working general-purpose opclasses is still forbidden.
 
 ---
 
@@ -164,33 +166,50 @@ Progress, decisions, open blockers, chunk status, agent notes — all live in `.
 
 ## R14 — C ABI at engine boundaries
 
-The C/C++ engine library exposes a strict C ABI. No name-mangled C++ symbols crossing the boundary. POD structs only at the ABI surface. No exceptions through the ABI.
+The three C/C++ engine shared libraries (`liblaplace_core.so`, `liblaplace_dynamics.so`, `liblaplace_synthesis.so` — per [ADR 0024](docs/adr/0024-engine-modularization.md)) each expose a strict C ABI. No name-mangled C++ symbols crossing the boundary. POD structs only at the ABI surface. No exceptions through the ABI.
 
-This is what lets the same `.so` be loaded by the PG extension AND by .NET via P/Invoke. Violating this breaks the single-source-of-math-truth property.
+This is what lets the same `.so` files be loaded by the PG extensions (`laplace_geom`, `laplace_substrate` — per [ADR 0025](docs/adr/0025-pg-extension-modularization.md)) AND by .NET via P/Invoke (the `Laplace.Engine.{Core,Dynamics,Synthesis}` projects — per [ADR 0026](docs/adr/0026-csharp-project-structure.md)). Violating this breaks the single-source-of-math-truth property.
 
 ---
 
 ## R15 — Approved libraries only
 
 **Approved:**
-- Intel oneAPI (`icx`/`icpx`, oneMKL, oneTBB, IPP)
-- Eigen 3.4+
-- Spectra (header-only, downloaded)
-- libxxhash (XXH3-128 for hashing)
-- PostgreSQL 18 server-dev headers
-- PostGIS 3.6.3+
+- Intel oneAPI (`icx`/`icpx`, oneMKL, oneTBB, IPP) — via `find_package(MKL CONFIG REQUIRED)` + `find_package(TBB CONFIG REQUIRED)` (see [ADR 0030](docs/adr/0030-mkl-eigen-spectra-tbb-integration.md))
+- Eigen 3.4+ — system package, header-only; dispatched to MKL via `EIGEN_USE_MKL_ALL` in `liblaplace_dynamics`
+- Spectra — header-only, FetchContent v1.2.0 (built on Eigen; inherits MKL backend automatically)
+- BLAKE3 — FetchContent v1.5.4 (per [ADR 0015](docs/adr/0015-blake3-for-entity-hashing.md); truncated to 128 bits; raw `bytea(16)` end-to-end)
+- PostgreSQL 18 server-dev headers — stock packages now; custom build under `external/postgresql/` per [ADR 0028](docs/adr/0028-custom-built-pg-postgis-intel.md)
+- PostGIS 3.6.3 — stock packages now; custom build under `external/postgis/` per [ADR 0028](docs/adr/0028-custom-built-pg-postgis-intel.md)
 - ICU 70+ (UCA)
 - Boost (where appropriate; minimal use)
 - libtree-sitter (for code decomposition)
-- .NET 10 (C# app layer)
+- .NET 10 (C# app layer; Npgsql + DbUp for the migrations runner per [ADR 0021](docs/adr/0021-dbup-for-migrations.md))
 
 **Banned:**
 - HNSWLib / hnswlib / nmslib / faiss / scann — no approximate NN
 - oneDNN / cuDNN / oneAPI DNNL — no DNN runtime
 - llama.cpp / vLLM / TensorRT-LLM / Triton — no conventional inference runtimes (we ARE the runtime)
+- pgvector / pgvecto.rs / pg_embedding / vchord — no vector-DB extensions (substrate replaces them); see [feedback_conventional_db_reflex memory note](../.claude/projects/-home-ahart-Projects-Laplace/memory/feedback_conventional_db_reflex.md)
+- libxxhash (XXH3-128) — superseded by BLAKE3 per [ADR 0015](docs/adr/0015-blake3-for-entity-hashing.md)
 - Anything implementing gradient descent or backprop
 
 If a new library is needed, **propose it via conversation** with rationale; do not silently introduce.
+
+---
+
+## R16 — Separation of concerns: math in C/C++, orchestration in C#/SQL
+
+Each layer has exactly one kind of work, per [ADR 0027](docs/adr/0027-separation-of-concerns-invariants.md):
+
+| Layer | MAY do | MUST NOT do |
+|---|---|---|
+| C/C++ engine | math, linalg, hashing, geometry, sparsity, codec, SIMD, fixed-point, file I/O | pipeline orchestration, plugin loading, network I/O, DB connection management |
+| PG extension (C wrappers) | Datum↔engine-struct marshalling, PG_TRY/PG_CATCH, opclass support functions, schema DDL | re-implementing engine math; non-trivial PL/pgSQL; control flow that isn't dispatching |
+| C# orchestration | pipelines, plugin host, protocol endpoints, DB connection, CLI, recipe parsing | math beyond trivial accounting; reimplementing engine functions for "convenience"; hot-path numerical code |
+| SQL / DbUp migrations | idempotent DDL; role grants; CREATE EXTENSION orchestration via `laplace_priv` wrapper; ALTER DEFAULT PRIVILEGES | business logic; procedural transforms; substrate schema definition (lives in extension upgrade scripts per [ADR 0023](docs/adr/0023-extension-owns-schema-dbup-orchestrates.md)) |
+
+**Resolution rule:** a piece of work belongs in the *lowest* layer that can correctly express it. Math always lands in C/C++. Orchestration in C# or SQL.
 
 ---
 

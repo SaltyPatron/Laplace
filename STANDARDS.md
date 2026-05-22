@@ -9,7 +9,7 @@ These are the binding standards for all code in this project. Inconsistency here
 | Concern | Type | Notes |
 |---|---|---|
 | 4D coordinate component | `float64` (per component) | Room for mantissa packing; sufficient precision |
-| Entity hash | `uint128` stored as `bytea(16)` in PG; `hash128_t = {uint64_t hi, lo}` in C/C++ | BLAKE3 truncated to 128 bits; collision-safe for ~10¹⁸ entities; **raw bytes only — never hex/text** |
+| Entity hash | `uint128` stored as `bytea(16)` in PG (with `hash128` typed wrapper from `laplace_geom`); `hash128_t = {uint64_t hi, lo}` in C/C++ | BLAKE3 truncated to 128 bits (per ADR 0015); collision-safe for ~10¹⁸ entities; **raw bytes only — never hex/text** |
 | Hilbert curve index | `uint128` stored as `bytea(16)` in PG; `hilbert128_t = {uint64_t hi, lo}` in C/C++ | 4D × 32-bit-per-dim |
 | Glicko-2 rating / RD / volatility | `int64` fixed-point, scale = 10⁹ | Deterministic, vectorizable, no FP drift |
 | Tier ID | `uint8` (range 0–255) | 256 tiers max — wildly sufficient |
@@ -101,7 +101,7 @@ These are the binding standards for all code in this project. Inconsistency here
 
 - **FP determinism:** pin FP regime in the engine (no `-ffast-math` on hot paths; specific oneMKL CBWR settings for deterministic SVD; deterministic reduction order for parallel sums).
 - **Glicko-2 fixed-point:** all math in `int64`; no `double` intermediates.
-- **Hashing:** XXH3-128 is deterministic by spec; use standard variant.
+- **Hashing:** BLAKE3 is deterministic by spec; use the official C implementation (FetchContent v1.5.4); truncate to 128 bits via the `hash128_t` helper.
 - **Hilbert encoding:** pure integer bit-twiddling; no FP involved.
 
 ### Concurrency
@@ -157,22 +157,42 @@ laplace/                              ← project root (= /home/ahart/Projects/L
 │       ├── STATE.md
 │       ├── decisions.md
 │       └── blockers.md
-├── engine/                           ← C/C++ engine library
-│   ├── CMakeLists.txt
-│   ├── include/laplace/              ← public headers (C ABI)
-│   ├── src/                          ← implementation (C++)
-│   ├── test/                         ← unit tests
-│   └── third_party/                  ← Spectra, etc.
-├── extension/                        ← PostgreSQL extension
-│   ├── Makefile                      ← PGXS-based
-│   ├── laplace.control
-│   ├── laplace--1.0.0.sql
-│   ├── src/                          ← PG_FUNCTION wrappers
-│   └── test/                         ← pg_regress tests
-├── app/                              ← C# .NET 10 projects
-│   ├── Laplace.Engine/               ← P/Invoke bindings
-│   ├── Laplace.Synthesis/            ← Substrate Synthesis API
-│   └── Laplace.Endpoints.OpenAI/     ← OpenAI-compat plugin
+├── engine/                           ← C/C++ engine (3 shared libs per ADR 0024)
+│   ├── CMakeLists.txt                ← top-level orchestration
+│   ├── core/                         ← liblaplace_core.so (no MKL)
+│   │   ├── include/laplace/core/     ← coord4d, hash128, hilbert4d, mantissa, etc.
+│   │   ├── src/
+│   │   ├── tests/
+│   │   └── CMakeLists.txt
+│   ├── dynamics/                     ← liblaplace_dynamics.so (MKL+Spectra+TBB)
+│   │   ├── include/laplace/dynamics/ ← Procrustes, eigenmaps, Gram-Schmidt, sparsity
+│   │   ├── src/, tests/, CMakeLists.txt
+│   ├── synthesis/                    ← liblaplace_synthesis.so
+│   │   ├── include/laplace/synthesis/← recipe, arch_template, gguf_writer
+│   │   ├── src/, tests/, CMakeLists.txt
+│   └── third_party/                  ← Spectra, BLAKE3 (FetchContent)
+├── external/                         ← git submodules (PG + PostGIS per ADR 0028)
+│   ├── postgresql/                   ← pinned to PG 18 release tag
+│   └── postgis/                      ← pinned to 3.6.3 release tag
+├── extension/                        ← PostgreSQL extensions (2 per ADR 0025)
+│   ├── laplace_geom/                 ← general-purpose 4D PostGIS additions
+│   │   ├── Makefile (PGXS), src/, tests/
+│   │   ├── laplace_geom.control
+│   │   └── laplace_geom--0.1.0.sql
+│   └── laplace_substrate/            ← substrate schema; requires laplace_geom
+│       ├── Makefile (PGXS), src/, tests/
+│       ├── laplace_substrate.control
+│       └── laplace_substrate--0.1.0.sql
+├── app/                              ← C# .NET 10 projects (per ADR 0026)
+│   ├── Laplace.slnx
+│   ├── Laplace.Engine.{Core,Dynamics,Synthesis}/    ← P/Invoke per engine lib
+│   ├── Laplace.Migrations/                          ← DbUp runner
+│   ├── Laplace.Cli/                                 ← cascade / synthesize subcommands
+│   ├── Laplace.Endpoints[.*]/                       ← protocol endpoint host + plugins
+│   ├── Laplace.Sources.*/                           ← ISource plugins (WordNet, Transformer, ...)
+│   └── Laplace.Decomposers.*/                       ← IDecomposer plugins (Safetensors, Text, ...)
+├── db/                               ← DbUp migrations (Layer 1 per ADR 0023)
+│   └── migrations/
 ├── scripts/                          ← operational scripts
 │   ├── build-perfcache.sh
 │   ├── seed-t0.sh
@@ -202,14 +222,14 @@ Adding a new dep requires (a) listing it here, (b) declaring install path/method
 | **Intel oneTBB** | Intel oneAPI 2026 | Same as oneMKL |
 | **Intel IPP / DPL** | Intel oneAPI 2026 | Available as needed |
 | **Spectra** | CMake `FetchContent`, pinned `v1.2.0` | Header-only; no apt; FetchContent is self-contained in CMakeLists.txt |
-| **BLAKE3** | CMake `FetchContent` (official `c/` subdir), pinned `1.5.4` | SIMD-accelerated cryptographic hash; 128-bit truncated → comfortable collision space for ~10¹⁸ entities; raw 16-byte output (no hex/text conversions ever) |
+| **BLAKE3** | CMake `FetchContent` (official `c/` subdir), pinned `1.5.4` | SIMD-accelerated cryptographic hash; 128-bit truncated → comfortable collision space for ~10¹⁸ entities; raw 16-byte output (no hex/text conversions ever). Per ADR 0015. |
 | **tree-sitter runtime** | `/usr/local/lib/libtree-sitter.so` | Manual install (pre-existing); link directly |
 | **tree-sitter grammars** | `/vault/Data/TreeSitter` | 303 grammars curated; decomposer selects per modality |
-| **PostgreSQL 18** | apt (pgdg repository) | + PostGIS 3.6.3 (system-installed; provides `gist_geometry_ops_nd`) |
+| **PostgreSQL 18** | apt (pgdg repository) now; `external/postgresql/` submodule via ADR 0028 once Epic B lands | Custom build under `/opt/laplace/pgsql-18/` with `icx`/`icpx` |
+| **PostGIS 3.6.3** | apt now; `external/postgis/` submodule via ADR 0028 | Provides `gist_geometry_ops_nd`; substrate adds custom opclasses per ADR 0029 |
 | **ICU 70.1** | apt (`libicu-dev`) | UCA collation support; `pkg-config icu-uc icu-i18n` |
 | **Boost 1.74** | apt (`libboost-dev`) | Minimal use |
-| **BLAKE3** | NOT INSTALLED | XXH3-128 used instead; revisit only if cryptographic strength becomes a requirement |
-| **.NET 10 SDK** | Microsoft package | Already installed at `/usr/lib/dotnet/` |
+| **.NET 10 SDK** | Microsoft package | Already installed at `/usr/lib/dotnet/`; Npgsql + DbUp via NuGet for `Laplace.Migrations` |
 
 **vcpkg** is present at `/home/ahart/vcpkg` but **NOT in use**. Reserved for if/when we accumulate a second C++ dependency that's neither in apt nor trivially fetchable. For now, the dep set is small enough that vcpkg's toolchain overhead isn't justified.
 

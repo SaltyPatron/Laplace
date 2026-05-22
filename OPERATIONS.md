@@ -22,7 +22,7 @@ The canonical command runner is **`just`** (Justfile at project root). Scripts l
 | Eigen | 3.4.0 | `/usr/include/eigen3/` |
 | Spectra | TBD | `engine/third_party/spectra/` (header-only, downloaded) |
 | tree-sitter | TBD | `sudo apt install libtree-sitter-dev` |
-| libxxhash | 0.8.1 | system pkg |
+| BLAKE3 | 1.5.4 | FetchContent (engine `third_party/`); per ADR 0015 |
 | ICU | 70.1+ | `/usr/include/unicode/` |
 
 Verify with: `just check-prereqs`
@@ -195,7 +195,7 @@ nuke-db:
 
 ### Build
 
-The engine library is built once per Postgres major version + Unicode version. Rebuilds for code changes are incremental via ninja. Output: `engine/build/liblaplace_engine.so`.
+The three engine libraries (`liblaplace_core.so`, `liblaplace_dynamics.so`, `liblaplace_synthesis.so` — per ADR 0024) are built once per Postgres major version + Unicode version. Rebuilds for code changes are incremental via ninja. Outputs under `engine/build/{core,dynamics,synthesis}/`.
 
 The PG extension links the engine library. Install copies `laplace.so`, `laplace.control`, and the SQL files into the Postgres extension directory.
 
