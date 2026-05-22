@@ -1,0 +1,13 @@
+/* 02_entities.sql.in — entities table (per DESIGN.md I + RULES.md R2).
+ *
+ * Every unique observed n-gram. Content-addressable PK on hash bytea(16).
+ * BLAKE3-truncated (ADR 0015). Canonical coord is standard PostGIS
+ * geometry with Z+M = 4D (R1). Trajectory is mantissa-packed LINESTRING
+ * for T≥1 (NULL for T0 atoms).
+ *
+ * Real table DDL lands Chunk 2 alongside the C wrappers. The pg_extension_
+ * config_dump() call ensures substrate data survives pg_dump per ADR 0025. */
+
+-- Real table DDL lands Chunk 2 Story 2.4:
+-- CREATE TABLE entities ( ... per DESIGN.md I ... );
+-- SELECT pg_extension_config_dump('entities', '');

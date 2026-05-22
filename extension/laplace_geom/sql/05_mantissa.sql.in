@@ -1,0 +1,18 @@
+/* 05_mantissa.sql.in — mantissa-packed payload pack/unpack.
+ *
+ * Per ADR 0012: high 64 bits of a hash pack into one coordinate's
+ * mantissa, low 64 bits into another — substrate-specific read pattern
+ * justifying the hash128_t {hi, lo} struct in C (per RULES.md R22).
+ *
+ * Real wrappers land Chunk 1 Story 1.7. */
+
+-- CREATE FUNCTION laplace_mantissa_pack(base geometry, tier smallint,
+--                                       position integer, child_hash bytea)
+--     RETURNS geometry
+--     AS 'MODULE_PATHNAME', 'pg_laplace_mantissa_pack'
+--     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+--
+-- CREATE FUNCTION laplace_mantissa_unpack(vertex geometry)
+--     RETURNS TABLE(tier smallint, position integer, hash_partial bytea)
+--     AS 'MODULE_PATHNAME', 'pg_laplace_mantissa_unpack'
+--     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

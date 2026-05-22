@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "defaultMode": "auto"
+  },
+  "_documentation": {
+    "purpose": "Project-level Claude Code settings for Laplace.",
+    "see_also": [
+      "../CLAUDE.md — project instructions and hard rules",
+      "../AGENTS.md — cross-tool agent context",
+      "../RULES.md — architectural invariants (zero tolerance)",
+      "./agents/ — specialized subagent definitions"
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+/* 09_brin_tier_ops.sql.in — laplace_brin_tier_ops BRIN opclass.
+ *
+ * Per ADR 0029: substrate-specific BRIN opclass exploiting that
+ * entities clustered by tier insertion order have tight tier-range
+ * pages. Real opclass + support functions land Chunk 3 Story 3.13
+ * (#171). */

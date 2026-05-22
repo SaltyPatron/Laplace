@@ -1,0 +1,12 @@
+/* 04_attestations.sql.in — typed semantic relations + consensus state.
+ *
+ * Per RULES.md R5: attestation rows ARE consensus state, not event log.
+ * One row per (subject, kind, object, source, context) tuple, idempotent
+ * on repeat. Glicko-2 rating/rd/volatility as int64 fixed-point (ADR 0004).
+ * Arena semantics per ADR 0036 + RULES.md R20.
+ *
+ * Real DDL Chunk 2. */
+
+-- CREATE TABLE attestations ( ... per DESIGN.md I ... );
+-- SELECT pg_extension_config_dump('attestations', '');
+-- SELECT pg_extension_config_dump('attestations_id_seq', '');

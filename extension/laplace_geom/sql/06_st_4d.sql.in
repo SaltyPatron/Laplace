@@ -1,0 +1,24 @@
+/* 06_st_4d.sql.in — ST_*_4d function family.
+ *
+ * Per RULES.md R1: extend PostGIS, never replace. Standard PostGIS
+ * `geometry` with Z+M flags = 4D. Custom functions ONLY where PostGIS
+ * is 2D/3D-only (centroid, distance, dwithin, length, Fréchet, Hausdorff).
+ *
+ * Engine kernels operate on POINT4D / POINTARRAY raw double buffers
+ * (per RULES.md R22 — POINT4D from liblwgeom IS the canonical type;
+ * the engine sees raw `double*` since liblaplace_core stays free of
+ * liblwgeom dependency).
+ *
+ * Real wrappers land Chunk 2. */
+
+-- CREATE FUNCTION ST_distance_4d(a geometry, b geometry)
+--     RETURNS double precision
+--     AS 'MODULE_PATHNAME', 'pg_st_distance_4d'
+--     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+--
+-- CREATE FUNCTION ST_dwithin_4d(a geometry, b geometry, eps double precision)
+--     RETURNS boolean
+--     AS 'MODULE_PATHNAME', 'pg_st_dwithin_4d'
+--     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+--
+-- (... centroid, length, frechet, hausdorff, radius_origin lands here)

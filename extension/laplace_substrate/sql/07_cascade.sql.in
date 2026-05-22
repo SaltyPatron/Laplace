@@ -1,0 +1,17 @@
+/* 07_cascade.sql.in — compiled cascade traversal SRF.
+ *
+ * Per ADR 0035 + RULES.md R19: cascade is a single SQL-call surface
+ * implemented as a set-returning C function. The C/C++ engine owns
+ * the frontier queue, visited set, A* heuristic, tier transitions,
+ * arena-aware effective-score ranking, and honest abstention.
+ *
+ * NOT a recursive CTE. NOT app-layer SELECT loop. NOT cursor-driven.
+ *
+ * Real wrapper lands Chunk 5+. The C-side astar_query_t state machine
+ * lives in engine/core/include/laplace/core/astar.h (stub today). */
+
+-- CREATE FUNCTION laplace_astar_path(
+--     start bytea, goal_region bytea,
+--     max_depth integer DEFAULT 10, k_paths integer DEFAULT 1
+-- ) RETURNS TABLE(step_idx integer, entity_hash bytea, g double precision, h double precision)
+--     AS 'MODULE_PATHNAME', 'pg_laplace_astar_path' LANGUAGE C LAPLACE_STABLE_STRICT;

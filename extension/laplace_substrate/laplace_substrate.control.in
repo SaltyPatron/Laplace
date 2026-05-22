@@ -1,0 +1,11 @@
+# laplace_substrate extension control file (configured at build time).
+# Per ADR 0025 — substrate domain (entities, physicalities, attestations,
+# Glicko-2 aggregate, cascade SRFs, custom opclasses). Requires
+# laplace_geom (which itself requires postgis).
+comment = 'Laplace substrate: entities + physicalities + attestations + cascade + Glicko-2'
+default_version = '@PROJECT_VERSION@'
+module_pathname = '$libdir/laplace_substrate'
+relocatable = false
+schema = 'laplace'
+trusted = true
+requires = 'laplace_geom'

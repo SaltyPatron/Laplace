@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>Laplace.Migrations.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- Testcontainers.PostgreSql spins up a postgis/postgis:18 container
+         for DbUp idempotency tests per STANDARDS.md Testing section. -->
+    <PackageReference Include="Testcontainers.PostgreSql" Version="3.10.0" />
+    <!-- Npgsql comes from the transitive ref via Laplace.Migrations (10.0.2);
+         no explicit version here to avoid NU1605 downgrade errors. -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Laplace.Migrations\Laplace.Migrations.csproj" />
+  </ItemGroup>
+
+</Project>

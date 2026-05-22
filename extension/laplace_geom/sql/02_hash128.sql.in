@@ -1,0 +1,21 @@
+/* 02_hash128.sql.in — BLAKE3-128-truncated entity hash convenience.
+ *
+ * Per ADR 0015 + STANDARDS.md "Hash discipline": hashes are bytea(16)
+ * end-to-end; never hex, never text. Per RULES.md R22 (use existing
+ * types), we do NOT create a parallel `hash128` PG type — bytea with
+ * CHECK constraints is the canonical storage. Substrate-specific
+ * comparison semantics live in the custom opclass (03_hash128_ops).
+ *
+ * Real BLAKE3 wrappers (laplace_hash128_blake3, laplace_hash128_merkle)
+ * land Chunk 1 Story 1.3 — wrap blake3_hasher_* via liblaplace_core. */
+
+-- Functions land Chunk 1 Story 1.3:
+-- CREATE FUNCTION laplace_hash128_blake3(data bytea)
+--     RETURNS bytea
+--     AS 'MODULE_PATHNAME', 'pg_laplace_hash128_blake3'
+--     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+--
+-- CREATE FUNCTION laplace_hash128_merkle(tier smallint, child_hashes bytea[])
+--     RETURNS bytea
+--     AS 'MODULE_PATHNAME', 'pg_laplace_hash128_merkle'
+--     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

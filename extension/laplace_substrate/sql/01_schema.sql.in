@@ -1,0 +1,16 @@
+/* 01_schema.sql.in — substrate schema setup + version function.
+ *
+ * The `laplace` schema is declared in laplace_substrate.control
+ * (schema = 'laplace'), so PG creates it automatically at install time.
+ * This module adds the version function + identity check. */
+
+CREATE FUNCTION laplace_substrate_version()
+    RETURNS text
+    AS 'MODULE_PATHNAME', 'pg_laplace_substrate_version'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+
+COMMENT ON FUNCTION laplace_substrate_version() IS
+    'Returns the laplace_substrate version (linked against laplace_core + laplace_dynamics).';
+
+/* Grants on the schema land in DbUp migration 20260521000000 (per ADR 0023).
+ * The schema itself is created/owned by laplace_admin via trusted=true. */

@@ -1,0 +1,18 @@
+/* 04_hilbert.sql.in — 4D Hilbert curve encoder/decoder.
+ *
+ * Per ADR 0005: single 4D Hilbert curve over the [-1,1]^4 bounding
+ * hyperbox, indexing both S³ surface entities and 4-ball interior
+ * centroids with consistent 1D locality.
+ *
+ * Real wrappers land Chunk 1 Story 1.5 — wrap hilbert4d_encode /
+ * hilbert4d_decode from liblaplace_core. */
+
+-- CREATE FUNCTION laplace_hilbert_encode(p geometry)
+--     RETURNS bytea
+--     AS 'MODULE_PATHNAME', 'pg_laplace_hilbert_encode'
+--     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+--
+-- CREATE FUNCTION laplace_hilbert_decode(h bytea)
+--     RETURNS geometry
+--     AS 'MODULE_PATHNAME', 'pg_laplace_hilbert_decode'
+--     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

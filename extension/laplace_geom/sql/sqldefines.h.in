@@ -1,0 +1,22 @@
+/* extension/laplace_geom/sql/sqldefines.h.in
+ *
+ * Shared macros for laplace_geom .sql.in modules (per ADR 0034). This
+ * file is preprocessed via cpp -traditional-cpp + configure_file()
+ * substitution into sqldefines.h in the build tree, then #included by
+ * each .sql.in module.
+ *
+ * Mirrors PostGIS's pattern in external/postgis/postgis/sqldefines.h.
+ */
+
+#define LAPLACE_GEOM_VERSION   '@PROJECT_VERSION@'
+
+/* Function-modifier shortcuts. Use as:
+ *   CREATE FUNCTION laplace_distance_4d(geometry, geometry)
+ *     RETURNS double precision
+ *     AS 'MODULE_PATHNAME', 'pg_laplace_distance_4d'
+ *     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+ */
+#define LAPLACE_IMMUTABLE_STRICT  IMMUTABLE STRICT PARALLEL SAFE
+#define LAPLACE_IMMUTABLE         IMMUTABLE        PARALLEL SAFE
+#define LAPLACE_STABLE_STRICT     STABLE   STRICT  PARALLEL SAFE
+#define LAPLACE_VOLATILE_STRICT   VOLATILE STRICT

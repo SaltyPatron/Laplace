@@ -1,0 +1,927 @@
+[submodule "external/postgresql"]
+	path = external/postgresql
+	url = https://git.postgresql.org/git/postgresql.git
+[submodule "external/postgis"]
+	path = external/postgis
+	url = https://github.com/postgis/postgis.git
+[submodule "external/proj"]
+	path = external/proj
+	url = https://github.com/OSGeo/PROJ.git
+[submodule "external/geos"]
+	path = external/geos
+	url = https://github.com/libgeos/geos.git
+[submodule "external/gdal"]
+	path = external/gdal
+	url = https://github.com/OSGeo/gdal.git
+[submodule "external/eigen"]
+	path = external/eigen
+	url = https://gitlab.com/libeigen/eigen.git
+[submodule "external/spectra"]
+	path = external/spectra
+	url = https://github.com/yixuan/spectra.git
+[submodule "external/blake3"]
+	path = external/blake3
+	url = https://github.com/BLAKE3-team/BLAKE3.git
+[submodule "external/googletest"]
+	path = external/googletest
+	url = https://github.com/google/googletest.git
+[submodule "external/tree-sitter"]
+	path = external/tree-sitter
+	url = https://github.com/tree-sitter/tree-sitter.git
+[submodule "external/tree-sitter-grammars/tree-sitter-ada"]
+	path = external/tree-sitter-grammars/tree-sitter-ada
+	url = https://github.com/briot/tree-sitter-ada
+[submodule "external/tree-sitter-grammars/tree-sitter-agda"]
+	path = external/tree-sitter-grammars/tree-sitter-agda
+	url = https://github.com/tree-sitter/tree-sitter-agda
+[submodule "external/tree-sitter-grammars/tree-sitter-angular"]
+	path = external/tree-sitter-grammars/tree-sitter-angular
+	url = https://github.com/dlvandenberg/tree-sitter-angular
+[submodule "external/tree-sitter-grammars/tree-sitter-arduino"]
+	path = external/tree-sitter-grammars/tree-sitter-arduino
+	url = https://github.com/ObserverOfTime/tree-sitter-arduino
+[submodule "external/tree-sitter-grammars/tree-sitter-asm"]
+	path = external/tree-sitter-grammars/tree-sitter-asm
+	url = https://github.com/RubixDev/tree-sitter-asm
+[submodule "external/tree-sitter-grammars/tree-sitter-astro"]
+	path = external/tree-sitter-grammars/tree-sitter-astro
+	url = https://github.com/virchau13/tree-sitter-astro
+[submodule "external/tree-sitter-grammars/tree-sitter-authzed"]
+	path = external/tree-sitter-grammars/tree-sitter-authzed
+	url = https://github.com/mleonidas/tree-sitter-authzed
+[submodule "external/tree-sitter-grammars/tree-sitter-awk"]
+	path = external/tree-sitter-grammars/tree-sitter-awk
+	url = https://github.com/Beaglefoot/tree-sitter-awk
+[submodule "external/tree-sitter-grammars/tree-sitter-bash"]
+	path = external/tree-sitter-grammars/tree-sitter-bash
+	url = https://github.com/tree-sitter/tree-sitter-bash
+[submodule "external/tree-sitter-grammars/tree-sitter-bass"]
+	path = external/tree-sitter-grammars/tree-sitter-bass
+	url = https://github.com/vito/tree-sitter-bass
+[submodule "external/tree-sitter-grammars/tree-sitter-beancount"]
+	path = external/tree-sitter-grammars/tree-sitter-beancount
+	url = https://github.com/polarmutex/tree-sitter-beancount
+[submodule "external/tree-sitter-grammars/tree-sitter-bibtex"]
+	path = external/tree-sitter-grammars/tree-sitter-bibtex
+	url = https://github.com/latex-lsp/tree-sitter-bibtex
+[submodule "external/tree-sitter-grammars/tree-sitter-bicep"]
+	path = external/tree-sitter-grammars/tree-sitter-bicep
+	url = https://github.com/amaanq/tree-sitter-bicep
+[submodule "external/tree-sitter-grammars/tree-sitter-bitbake"]
+	path = external/tree-sitter-grammars/tree-sitter-bitbake
+	url = https://github.com/amaanq/tree-sitter-bitbake
+[submodule "external/tree-sitter-grammars/tree-sitter-blade"]
+	path = external/tree-sitter-grammars/tree-sitter-blade
+	url = https://github.com/EmranMR/tree-sitter-blade
+[submodule "external/tree-sitter-grammars/tree-sitter-blueprint"]
+	path = external/tree-sitter-grammars/tree-sitter-blueprint
+	url = https://gitlab.com/gabmus/tree-sitter-blueprint.git
+[submodule "external/tree-sitter-grammars/tree-sitter-bp"]
+	path = external/tree-sitter-grammars/tree-sitter-bp
+	url = https://github.com/ambroisie/tree-sitter-bp
+[submodule "external/tree-sitter-grammars/tree-sitter-brightscript"]
+	path = external/tree-sitter-grammars/tree-sitter-brightscript
+	url = https://github.com/ajdelcimmuto/tree-sitter-brightscript
+[submodule "external/tree-sitter-grammars/tree-sitter-c"]
+	path = external/tree-sitter-grammars/tree-sitter-c
+	url = https://github.com/tree-sitter/tree-sitter-c
+[submodule "external/tree-sitter-grammars/tree-sitter-caddy"]
+	path = external/tree-sitter-grammars/tree-sitter-caddy
+	url = https://github.com/opa-oz/tree-sitter-caddy
+[submodule "external/tree-sitter-grammars/tree-sitter-cairo"]
+	path = external/tree-sitter-grammars/tree-sitter-cairo
+	url = https://github.com/amaanq/tree-sitter-cairo
+[submodule "external/tree-sitter-grammars/tree-sitter-capnp"]
+	path = external/tree-sitter-grammars/tree-sitter-capnp
+	url = https://github.com/amaanq/tree-sitter-capnp
+[submodule "external/tree-sitter-grammars/tree-sitter-chatito"]
+	path = external/tree-sitter-grammars/tree-sitter-chatito
+	url = https://github.com/ObserverOfTime/tree-sitter-chatito
+[submodule "external/tree-sitter-grammars/tree-sitter-circom"]
+	path = external/tree-sitter-grammars/tree-sitter-circom
+	url = https://github.com/Decurity/tree-sitter-circom
+[submodule "external/tree-sitter-grammars/tree-sitter-clojure"]
+	path = external/tree-sitter-grammars/tree-sitter-clojure
+	url = https://github.com/sogaiu/tree-sitter-clojure
+[submodule "external/tree-sitter-grammars/tree-sitter-cmake"]
+	path = external/tree-sitter-grammars/tree-sitter-cmake
+	url = https://github.com/uyha/tree-sitter-cmake
+[submodule "external/tree-sitter-grammars/tree-sitter-comment"]
+	path = external/tree-sitter-grammars/tree-sitter-comment
+	url = https://github.com/stsewd/tree-sitter-comment
+[submodule "external/tree-sitter-grammars/tree-sitter-commonlisp"]
+	path = external/tree-sitter-grammars/tree-sitter-commonlisp
+	url = https://github.com/theHamsta/tree-sitter-commonlisp
+[submodule "external/tree-sitter-grammars/tree-sitter-cooklang"]
+	path = external/tree-sitter-grammars/tree-sitter-cooklang
+	url = https://github.com/addcninblue/tree-sitter-cooklang
+[submodule "external/tree-sitter-grammars/tree-sitter-corn"]
+	path = external/tree-sitter-grammars/tree-sitter-corn
+	url = https://github.com/jakestanger/tree-sitter-corn
+[submodule "external/tree-sitter-grammars/tree-sitter-cpon"]
+	path = external/tree-sitter-grammars/tree-sitter-cpon
+	url = https://github.com/amaanq/tree-sitter-cpon
+[submodule "external/tree-sitter-grammars/tree-sitter-cpp"]
+	path = external/tree-sitter-grammars/tree-sitter-cpp
+	url = https://github.com/tree-sitter/tree-sitter-cpp
+[submodule "external/tree-sitter-grammars/tree-sitter-c-sharp"]
+	path = external/tree-sitter-grammars/tree-sitter-c-sharp
+	url = https://github.com/tree-sitter/tree-sitter-c-sharp
+[submodule "external/tree-sitter-grammars/tree-sitter-css"]
+	path = external/tree-sitter-grammars/tree-sitter-css
+	url = https://github.com/tree-sitter/tree-sitter-css
+[submodule "external/tree-sitter-grammars/tree-sitter-csv"]
+	path = external/tree-sitter-grammars/tree-sitter-csv
+	url = https://github.com/amaanq/tree-sitter-csv
+[submodule "external/tree-sitter-grammars/tree-sitter-cuda"]
+	path = external/tree-sitter-grammars/tree-sitter-cuda
+	url = https://github.com/theHamsta/tree-sitter-cuda
+[submodule "external/tree-sitter-grammars/tree-sitter-cue"]
+	path = external/tree-sitter-grammars/tree-sitter-cue
+	url = https://github.com/eonpatapon/tree-sitter-cue
+[submodule "external/tree-sitter-grammars/tree-sitter-cylc"]
+	path = external/tree-sitter-grammars/tree-sitter-cylc
+	url = https://github.com/elliotfontaine/tree-sitter-cylc
+[submodule "external/tree-sitter-grammars/tree-sitter-d"]
+	path = external/tree-sitter-grammars/tree-sitter-d
+	url = https://github.com/gdamore/tree-sitter-d
+[submodule "external/tree-sitter-grammars/tree-sitter-dart"]
+	path = external/tree-sitter-grammars/tree-sitter-dart
+	url = https://github.com/UserNobody14/tree-sitter-dart
+[submodule "external/tree-sitter-grammars/tree-sitter-desktop"]
+	path = external/tree-sitter-grammars/tree-sitter-desktop
+	url = https://github.com/ValdezFOmar/tree-sitter-desktop
+[submodule "external/tree-sitter-grammars/tree-sitter-devicetree"]
+	path = external/tree-sitter-grammars/tree-sitter-devicetree
+	url = https://github.com/joelspadin/tree-sitter-devicetree
+[submodule "external/tree-sitter-grammars/tree-sitter-dhall"]
+	path = external/tree-sitter-grammars/tree-sitter-dhall
+	url = https://github.com/jbellerb/tree-sitter-dhall
+[submodule "external/tree-sitter-grammars/tree-sitter-diff"]
+	path = external/tree-sitter-grammars/tree-sitter-diff
+	url = https://github.com/the-mikedavis/tree-sitter-diff
+[submodule "external/tree-sitter-grammars/tree-sitter-disassembly"]
+	path = external/tree-sitter-grammars/tree-sitter-disassembly
+	url = https://github.com/ColinKennedy/tree-sitter-disassembly
+[submodule "external/tree-sitter-grammars/tree-sitter-djot"]
+	path = external/tree-sitter-grammars/tree-sitter-djot
+	url = https://github.com/treeman/tree-sitter-djot
+[submodule "external/tree-sitter-grammars/tree-sitter-dockerfile"]
+	path = external/tree-sitter-grammars/tree-sitter-dockerfile
+	url = https://github.com/camdencheek/tree-sitter-dockerfile
+[submodule "external/tree-sitter-grammars/tree-sitter-dot"]
+	path = external/tree-sitter-grammars/tree-sitter-dot
+	url = https://github.com/rydesun/tree-sitter-dot
+[submodule "external/tree-sitter-grammars/tree-sitter-doxygen"]
+	path = external/tree-sitter-grammars/tree-sitter-doxygen
+	url = https://github.com/amaanq/tree-sitter-doxygen
+[submodule "external/tree-sitter-grammars/tree-sitter-earthfile"]
+	path = external/tree-sitter-grammars/tree-sitter-earthfile
+	url = https://github.com/glehmann/tree-sitter-earthfile
+[submodule "external/tree-sitter-grammars/tree-sitter-editorconfig"]
+	path = external/tree-sitter-grammars/tree-sitter-editorconfig
+	url = https://github.com/ValdezFOmar/tree-sitter-editorconfig
+[submodule "external/tree-sitter-grammars/tree-sitter-eds"]
+	path = external/tree-sitter-grammars/tree-sitter-eds
+	url = https://github.com/uyha/tree-sitter-eds
+[submodule "external/tree-sitter-grammars/tree-sitter-eex"]
+	path = external/tree-sitter-grammars/tree-sitter-eex
+	url = https://github.com/connorlay/tree-sitter-eex
+[submodule "external/tree-sitter-grammars/tree-sitter-elixir"]
+	path = external/tree-sitter-grammars/tree-sitter-elixir
+	url = https://github.com/elixir-lang/tree-sitter-elixir
+[submodule "external/tree-sitter-grammars/tree-sitter-elm"]
+	path = external/tree-sitter-grammars/tree-sitter-elm
+	url = https://github.com/elm-tooling/tree-sitter-elm
+[submodule "external/tree-sitter-grammars/tree-sitter-elsa"]
+	path = external/tree-sitter-grammars/tree-sitter-elsa
+	url = https://github.com/glapa-grossklag/tree-sitter-elsa
+[submodule "external/tree-sitter-grammars/tree-sitter-elvish"]
+	path = external/tree-sitter-grammars/tree-sitter-elvish
+	url = https://github.com/elves/tree-sitter-elvish
+[submodule "external/tree-sitter-grammars/tree-sitter-embedded-template"]
+	path = external/tree-sitter-grammars/tree-sitter-embedded-template
+	url = https://github.com/tree-sitter/tree-sitter-embedded-template
+[submodule "external/tree-sitter-grammars/tree-sitter-enforce"]
+	path = external/tree-sitter-grammars/tree-sitter-enforce
+	url = https://github.com/simonvic/tree-sitter-enforce
+[submodule "external/tree-sitter-grammars/tree-sitter-erlang"]
+	path = external/tree-sitter-grammars/tree-sitter-erlang
+	url = https://github.com/WhatsApp/tree-sitter-erlang
+[submodule "external/tree-sitter-grammars/tree-sitter-facility"]
+	path = external/tree-sitter-grammars/tree-sitter-facility
+	url = https://github.com/FacilityApi/tree-sitter-facility
+[submodule "external/tree-sitter-grammars/tree-sitter-faust"]
+	path = external/tree-sitter-grammars/tree-sitter-faust
+	url = https://github.com/khiner/tree-sitter-faust
+[submodule "external/tree-sitter-grammars/tree-sitter-fennel"]
+	path = external/tree-sitter-grammars/tree-sitter-fennel
+	url = https://github.com/alexmozaidze/tree-sitter-fennel
+[submodule "external/tree-sitter-grammars/tree-sitter-fidl"]
+	path = external/tree-sitter-grammars/tree-sitter-fidl
+	url = https://github.com/google/tree-sitter-fidl
+[submodule "external/tree-sitter-grammars/tree-sitter-firrtl"]
+	path = external/tree-sitter-grammars/tree-sitter-firrtl
+	url = https://github.com/amaanq/tree-sitter-firrtl
+[submodule "external/tree-sitter-grammars/tree-sitter-fish"]
+	path = external/tree-sitter-grammars/tree-sitter-fish
+	url = https://github.com/ram02z/tree-sitter-fish
+[submodule "external/tree-sitter-grammars/tree-sitter-foam"]
+	path = external/tree-sitter-grammars/tree-sitter-foam
+	url = https://github.com/FoamScience/tree-sitter-foam
+[submodule "external/tree-sitter-grammars/tree-sitter-forth"]
+	path = external/tree-sitter-grammars/tree-sitter-forth
+	url = https://github.com/AlexanderBrevig/tree-sitter-forth
+[submodule "external/tree-sitter-grammars/tree-sitter-fortran"]
+	path = external/tree-sitter-grammars/tree-sitter-fortran
+	url = https://github.com/stadelmanma/tree-sitter-fortran
+[submodule "external/tree-sitter-grammars/tree-sitter-fsh"]
+	path = external/tree-sitter-grammars/tree-sitter-fsh
+	url = https://github.com/mgramigna/tree-sitter-fsh
+[submodule "external/tree-sitter-grammars/tree-sitter-fsharp"]
+	path = external/tree-sitter-grammars/tree-sitter-fsharp
+	url = https://github.com/ionide/tree-sitter-fsharp
+[submodule "external/tree-sitter-grammars/tree-sitter-func"]
+	path = external/tree-sitter-grammars/tree-sitter-func
+	url = https://github.com/amaanq/tree-sitter-func
+[submodule "external/tree-sitter-grammars/tree-sitter-fusion"]
+	path = external/tree-sitter-grammars/tree-sitter-fusion
+	url = https://gitlab.com/jirgn/tree-sitter-fusion.git
+[submodule "external/tree-sitter-grammars/tree-sitter-gap"]
+	path = external/tree-sitter-grammars/tree-sitter-gap
+	url = https://github.com/gap-system/tree-sitter-gap
+[submodule "external/tree-sitter-grammars/tree-sitter-gaptst"]
+	path = external/tree-sitter-grammars/tree-sitter-gaptst
+	url = https://github.com/gap-system/tree-sitter-gaptst
+[submodule "external/tree-sitter-grammars/tree-sitter-gdscript"]
+	path = external/tree-sitter-grammars/tree-sitter-gdscript
+	url = https://github.com/PrestonKnopp/tree-sitter-gdscript
+[submodule "external/tree-sitter-grammars/tree-sitter-gdshader"]
+	path = external/tree-sitter-grammars/tree-sitter-gdshader
+	url = https://github.com/GodOfAvacyn/tree-sitter-gdshader
+[submodule "external/tree-sitter-grammars/tree-sitter-gitattributes"]
+	path = external/tree-sitter-grammars/tree-sitter-gitattributes
+	url = https://github.com/ObserverOfTime/tree-sitter-gitattributes
+[submodule "external/tree-sitter-grammars/tree-sitter-gitcommit"]
+	path = external/tree-sitter-grammars/tree-sitter-gitcommit
+	url = https://github.com/gbprod/tree-sitter-gitcommit
+[submodule "external/tree-sitter-grammars/tree-sitter-git-config"]
+	path = external/tree-sitter-grammars/tree-sitter-git-config
+	url = https://github.com/the-mikedavis/tree-sitter-git-config
+[submodule "external/tree-sitter-grammars/tree-sitter-gitignore"]
+	path = external/tree-sitter-grammars/tree-sitter-gitignore
+	url = https://github.com/shunsambongi/tree-sitter-gitignore
+[submodule "external/tree-sitter-grammars/tree-sitter-git-rebase"]
+	path = external/tree-sitter-grammars/tree-sitter-git-rebase
+	url = https://github.com/the-mikedavis/tree-sitter-git-rebase
+[submodule "external/tree-sitter-grammars/tree-sitter-gleam"]
+	path = external/tree-sitter-grammars/tree-sitter-gleam
+	url = https://github.com/gleam-lang/tree-sitter-gleam
+[submodule "external/tree-sitter-grammars/tree-sitter-glimmer"]
+	path = external/tree-sitter-grammars/tree-sitter-glimmer
+	url = https://github.com/ember-tooling/tree-sitter-glimmer
+[submodule "external/tree-sitter-grammars/tree-sitter-glimmer-javascript"]
+	path = external/tree-sitter-grammars/tree-sitter-glimmer-javascript
+	url = https://github.com/NullVoxPopuli/tree-sitter-glimmer-javascript
+[submodule "external/tree-sitter-grammars/tree-sitter-glimmer-typescript"]
+	path = external/tree-sitter-grammars/tree-sitter-glimmer-typescript
+	url = https://github.com/NullVoxPopuli/tree-sitter-glimmer-typescript
+[submodule "external/tree-sitter-grammars/tree-sitter-glsl"]
+	path = external/tree-sitter-grammars/tree-sitter-glsl
+	url = https://github.com/theHamsta/tree-sitter-glsl
+[submodule "external/tree-sitter-grammars/tree-sitter-gn"]
+	path = external/tree-sitter-grammars/tree-sitter-gn
+	url = https://github.com/amaanq/tree-sitter-gn
+[submodule "external/tree-sitter-grammars/tree-sitter-gnuplot"]
+	path = external/tree-sitter-grammars/tree-sitter-gnuplot
+	url = https://github.com/dpezto/tree-sitter-gnuplot
+[submodule "external/tree-sitter-grammars/tree-sitter-go"]
+	path = external/tree-sitter-grammars/tree-sitter-go
+	url = https://github.com/tree-sitter/tree-sitter-go
+[submodule "external/tree-sitter-grammars/tree-sitter-goctl"]
+	path = external/tree-sitter-grammars/tree-sitter-goctl
+	url = https://github.com/chaozwn/tree-sitter-goctl
+[submodule "external/tree-sitter-grammars/tree-sitter-godot-resource"]
+	path = external/tree-sitter-grammars/tree-sitter-godot-resource
+	url = https://github.com/PrestonKnopp/tree-sitter-godot-resource
+[submodule "external/tree-sitter-grammars/tree-sitter-go-mod"]
+	path = external/tree-sitter-grammars/tree-sitter-go-mod
+	url = https://github.com/camdencheek/tree-sitter-go-mod
+[submodule "external/tree-sitter-grammars/tree-sitter-go-sum"]
+	path = external/tree-sitter-grammars/tree-sitter-go-sum
+	url = https://github.com/amaanq/tree-sitter-go-sum
+[submodule "external/tree-sitter-grammars/tree-sitter-go-template"]
+	path = external/tree-sitter-grammars/tree-sitter-go-template
+	url = https://github.com/ngalaiko/tree-sitter-go-template
+[submodule "external/tree-sitter-grammars/tree-sitter-go-work"]
+	path = external/tree-sitter-grammars/tree-sitter-go-work
+	url = https://github.com/omertuc/tree-sitter-go-work
+[submodule "external/tree-sitter-grammars/tree-sitter-gpg-config"]
+	path = external/tree-sitter-grammars/tree-sitter-gpg-config
+	url = https://github.com/ObserverOfTime/tree-sitter-gpg-config
+[submodule "external/tree-sitter-grammars/tree-sitter-graphql"]
+	path = external/tree-sitter-grammars/tree-sitter-graphql
+	url = https://github.com/bkegley/tree-sitter-graphql
+[submodule "external/tree-sitter-grammars/tree-sitter-gren"]
+	path = external/tree-sitter-grammars/tree-sitter-gren
+	url = https://github.com/MaeBrooks/tree-sitter-gren
+[submodule "external/tree-sitter-grammars/tree-sitter-groovy"]
+	path = external/tree-sitter-grammars/tree-sitter-groovy
+	url = https://github.com/murtaza64/tree-sitter-groovy
+[submodule "external/tree-sitter-grammars/tree-sitter-gstlaunch"]
+	path = external/tree-sitter-grammars/tree-sitter-gstlaunch
+	url = https://github.com/theHamsta/tree-sitter-gstlaunch
+[submodule "external/tree-sitter-grammars/tree-sitter-hack"]
+	path = external/tree-sitter-grammars/tree-sitter-hack
+	url = https://github.com/slackhq/tree-sitter-hack
+[submodule "external/tree-sitter-grammars/tree-sitter-hare"]
+	path = external/tree-sitter-grammars/tree-sitter-hare
+	url = https://github.com/amaanq/tree-sitter-hare
+[submodule "external/tree-sitter-grammars/tree-sitter-haskell"]
+	path = external/tree-sitter-grammars/tree-sitter-haskell
+	url = https://github.com/tree-sitter/tree-sitter-haskell
+[submodule "external/tree-sitter-grammars/tree-sitter-haskell-persistent"]
+	path = external/tree-sitter-grammars/tree-sitter-haskell-persistent
+	url = https://github.com/MercuryTechnologies/tree-sitter-haskell-persistent
+[submodule "external/tree-sitter-grammars/tree-sitter-hcl"]
+	path = external/tree-sitter-grammars/tree-sitter-hcl
+	url = https://github.com/MichaHoffmann/tree-sitter-hcl
+[submodule "external/tree-sitter-grammars/tree-sitter-heex"]
+	path = external/tree-sitter-grammars/tree-sitter-heex
+	url = https://github.com/connorlay/tree-sitter-heex
+[submodule "external/tree-sitter-grammars/tree-sitter-hjson"]
+	path = external/tree-sitter-grammars/tree-sitter-hjson
+	url = https://github.com/winston0410/tree-sitter-hjson
+[submodule "external/tree-sitter-grammars/tree-sitter-hlsl"]
+	path = external/tree-sitter-grammars/tree-sitter-hlsl
+	url = https://github.com/theHamsta/tree-sitter-hlsl
+[submodule "external/tree-sitter-grammars/tree-sitter-hlsplaylist"]
+	path = external/tree-sitter-grammars/tree-sitter-hlsplaylist
+	url = https://github.com/Freed-Wu/tree-sitter-hlsplaylist
+[submodule "external/tree-sitter-grammars/tree-sitter-hocon"]
+	path = external/tree-sitter-grammars/tree-sitter-hocon
+	url = https://github.com/antosha417/tree-sitter-hocon
+[submodule "external/tree-sitter-grammars/tree-sitter-hoon"]
+	path = external/tree-sitter-grammars/tree-sitter-hoon
+	url = https://github.com/urbit-pilled/tree-sitter-hoon
+[submodule "external/tree-sitter-grammars/tree-sitter-html"]
+	path = external/tree-sitter-grammars/tree-sitter-html
+	url = https://github.com/tree-sitter/tree-sitter-html
+[submodule "external/tree-sitter-grammars/tree-sitter-htmldjango"]
+	path = external/tree-sitter-grammars/tree-sitter-htmldjango
+	url = https://github.com/interdependence/tree-sitter-htmldjango
+[submodule "external/tree-sitter-grammars/tree-sitter-http"]
+	path = external/tree-sitter-grammars/tree-sitter-http
+	url = https://github.com/rest-nvim/tree-sitter-http
+[submodule "external/tree-sitter-grammars/tree-sitter-hurl"]
+	path = external/tree-sitter-grammars/tree-sitter-hurl
+	url = https://github.com/pfeiferj/tree-sitter-hurl
+[submodule "external/tree-sitter-grammars/tree-sitter-hyprlang"]
+	path = external/tree-sitter-grammars/tree-sitter-hyprlang
+	url = https://github.com/luckasRanarison/tree-sitter-hyprlang
+[submodule "external/tree-sitter-grammars/tree-sitter-idl"]
+	path = external/tree-sitter-grammars/tree-sitter-idl
+	url = https://github.com/cathaysia/tree-sitter-idl
+[submodule "external/tree-sitter-grammars/tree-sitter-idris"]
+	path = external/tree-sitter-grammars/tree-sitter-idris
+	url = https://github.com/kayhide/tree-sitter-idris
+[submodule "external/tree-sitter-grammars/tree-sitter-ini"]
+	path = external/tree-sitter-grammars/tree-sitter-ini
+	url = https://github.com/justinmk/tree-sitter-ini
+[submodule "external/tree-sitter-grammars/tree-sitter-inko"]
+	path = external/tree-sitter-grammars/tree-sitter-inko
+	url = https://github.com/inko-lang/tree-sitter-inko
+[submodule "external/tree-sitter-grammars/tree-sitter-ispc"]
+	path = external/tree-sitter-grammars/tree-sitter-ispc
+	url = https://github.com/fab4100/tree-sitter-ispc
+[submodule "external/tree-sitter-grammars/tree-sitter-janet-simple"]
+	path = external/tree-sitter-grammars/tree-sitter-janet-simple
+	url = https://github.com/sogaiu/tree-sitter-janet-simple
+[submodule "external/tree-sitter-grammars/tree-sitter-java"]
+	path = external/tree-sitter-grammars/tree-sitter-java
+	url = https://github.com/tree-sitter/tree-sitter-java
+[submodule "external/tree-sitter-grammars/tree-sitter-javadoc"]
+	path = external/tree-sitter-grammars/tree-sitter-javadoc
+	url = https://github.com/rmuir/tree-sitter-javadoc
+[submodule "external/tree-sitter-grammars/tree-sitter-javascript"]
+	path = external/tree-sitter-grammars/tree-sitter-javascript
+	url = https://github.com/tree-sitter/tree-sitter-javascript
+[submodule "external/tree-sitter-grammars/tree-sitter-jinja"]
+	path = external/tree-sitter-grammars/tree-sitter-jinja
+	url = https://github.com/cathaysia/tree-sitter-jinja
+[submodule "external/tree-sitter-grammars/tree-sitter-jq"]
+	path = external/tree-sitter-grammars/tree-sitter-jq
+	url = https://github.com/flurie/tree-sitter-jq
+[submodule "external/tree-sitter-grammars/tree-sitter-jsdoc"]
+	path = external/tree-sitter-grammars/tree-sitter-jsdoc
+	url = https://github.com/tree-sitter/tree-sitter-jsdoc
+[submodule "external/tree-sitter-grammars/tree-sitter-json"]
+	path = external/tree-sitter-grammars/tree-sitter-json
+	url = https://github.com/tree-sitter/tree-sitter-json
+[submodule "external/tree-sitter-grammars/tree-sitter-json5"]
+	path = external/tree-sitter-grammars/tree-sitter-json5
+	url = https://github.com/Joakker/tree-sitter-json5
+[submodule "external/tree-sitter-grammars/tree-sitter-jsonc"]
+	path = external/tree-sitter-grammars/tree-sitter-jsonc
+	url = https://gitlab.com/WhyNotHugo/tree-sitter-jsonc.git
+[submodule "external/tree-sitter-grammars/tree-sitter-jsonnet"]
+	path = external/tree-sitter-grammars/tree-sitter-jsonnet
+	url = https://github.com/sourcegraph/tree-sitter-jsonnet
+[submodule "external/tree-sitter-grammars/tree-sitter-julia"]
+	path = external/tree-sitter-grammars/tree-sitter-julia
+	url = https://github.com/tree-sitter/tree-sitter-julia
+[submodule "external/tree-sitter-grammars/tree-sitter-just"]
+	path = external/tree-sitter-grammars/tree-sitter-just
+	url = https://github.com/IndianBoy42/tree-sitter-just
+[submodule "external/tree-sitter-grammars/tree-sitter-kcl"]
+	path = external/tree-sitter-grammars/tree-sitter-kcl
+	url = https://github.com/kcl-lang/tree-sitter-kcl
+[submodule "external/tree-sitter-grammars/tree-sitter-kconfig"]
+	path = external/tree-sitter-grammars/tree-sitter-kconfig
+	url = https://github.com/amaanq/tree-sitter-kconfig
+[submodule "external/tree-sitter-grammars/tree-sitter-kdl"]
+	path = external/tree-sitter-grammars/tree-sitter-kdl
+	url = https://github.com/amaanq/tree-sitter-kdl
+[submodule "external/tree-sitter-grammars/tree-sitter-kotlin"]
+	path = external/tree-sitter-grammars/tree-sitter-kotlin
+	url = https://github.com/fwcd/tree-sitter-kotlin
+[submodule "external/tree-sitter-grammars/tree-sitter-koto"]
+	path = external/tree-sitter-grammars/tree-sitter-koto
+	url = https://github.com/koto-lang/tree-sitter-koto
+[submodule "external/tree-sitter-grammars/tree-sitter-kusto"]
+	path = external/tree-sitter-grammars/tree-sitter-kusto
+	url = https://github.com/Willem-J-an/tree-sitter-kusto
+[submodule "external/tree-sitter-grammars/tree-sitter-lalrpop"]
+	path = external/tree-sitter-grammars/tree-sitter-lalrpop
+	url = https://github.com/traxys/tree-sitter-lalrpop
+[submodule "external/tree-sitter-grammars/tree-sitter-latex"]
+	path = external/tree-sitter-grammars/tree-sitter-latex
+	url = https://github.com/latex-lsp/tree-sitter-latex
+[submodule "external/tree-sitter-grammars/tree-sitter-ledger"]
+	path = external/tree-sitter-grammars/tree-sitter-ledger
+	url = https://github.com/cbarrete/tree-sitter-ledger
+[submodule "external/tree-sitter-grammars/tree-sitter-leo"]
+	path = external/tree-sitter-grammars/tree-sitter-leo
+	url = https://github.com/r001/tree-sitter-leo
+[submodule "external/tree-sitter-grammars/tree-sitter-linkerscript"]
+	path = external/tree-sitter-grammars/tree-sitter-linkerscript
+	url = https://github.com/amaanq/tree-sitter-linkerscript
+[submodule "external/tree-sitter-grammars/tree-sitter-liquid"]
+	path = external/tree-sitter-grammars/tree-sitter-liquid
+	url = https://github.com/hankthetank27/tree-sitter-liquid
+[submodule "external/tree-sitter-grammars/tree-sitter-liquidsoap"]
+	path = external/tree-sitter-grammars/tree-sitter-liquidsoap
+	url = https://github.com/savonet/tree-sitter-liquidsoap
+[submodule "external/tree-sitter-grammars/tree-sitter-llvm"]
+	path = external/tree-sitter-grammars/tree-sitter-llvm
+	url = https://github.com/benwilliamgraham/tree-sitter-llvm
+[submodule "external/tree-sitter-grammars/tree-sitter-lua"]
+	path = external/tree-sitter-grammars/tree-sitter-lua
+	url = https://github.com/MunifTanjim/tree-sitter-lua
+[submodule "external/tree-sitter-grammars/tree-sitter-luadoc"]
+	path = external/tree-sitter-grammars/tree-sitter-luadoc
+	url = https://github.com/amaanq/tree-sitter-luadoc
+[submodule "external/tree-sitter-grammars/tree-sitter-luap"]
+	path = external/tree-sitter-grammars/tree-sitter-luap
+	url = https://github.com/amaanq/tree-sitter-luap
+[submodule "external/tree-sitter-grammars/tree-sitter-luau"]
+	path = external/tree-sitter-grammars/tree-sitter-luau
+	url = https://github.com/amaanq/tree-sitter-luau
+[submodule "external/tree-sitter-grammars/tree-sitter-m68k"]
+	path = external/tree-sitter-grammars/tree-sitter-m68k
+	url = https://github.com/grahambates/tree-sitter-m68k
+[submodule "external/tree-sitter-grammars/tree-sitter-make"]
+	path = external/tree-sitter-grammars/tree-sitter-make
+	url = https://github.com/alemuller/tree-sitter-make
+[submodule "external/tree-sitter-grammars/tree-sitter-markdown"]
+	path = external/tree-sitter-grammars/tree-sitter-markdown
+	url = https://github.com/MDeiml/tree-sitter-markdown
+[submodule "external/tree-sitter-grammars/tree-sitter-matlab"]
+	path = external/tree-sitter-grammars/tree-sitter-matlab
+	url = https://github.com/acristoffers/tree-sitter-matlab
+[submodule "external/tree-sitter-grammars/tree-sitter-menhir"]
+	path = external/tree-sitter-grammars/tree-sitter-menhir
+	url = https://github.com/Kerl13/tree-sitter-menhir
+[submodule "external/tree-sitter-grammars/tree-sitter-mermaid"]
+	path = external/tree-sitter-grammars/tree-sitter-mermaid
+	url = https://github.com/monaqa/tree-sitter-mermaid
+[submodule "external/tree-sitter-grammars/tree-sitter-meson"]
+	path = external/tree-sitter-grammars/tree-sitter-meson
+	url = https://github.com/Decodetalkers/tree-sitter-meson
+[submodule "external/tree-sitter-grammars/tree-sitter-mlir"]
+	path = external/tree-sitter-grammars/tree-sitter-mlir
+	url = https://github.com/artagnon/tree-sitter-mlir
+[submodule "external/tree-sitter-grammars/tree-sitter-muttrc"]
+	path = external/tree-sitter-grammars/tree-sitter-muttrc
+	url = https://github.com/neomutt/tree-sitter-muttrc
+[submodule "external/tree-sitter-grammars/tree-sitter-nasm"]
+	path = external/tree-sitter-grammars/tree-sitter-nasm
+	url = https://github.com/naclsn/tree-sitter-nasm
+[submodule "external/tree-sitter-grammars/tree-sitter-nginx"]
+	path = external/tree-sitter-grammars/tree-sitter-nginx
+	url = https://github.com/opa-oz/tree-sitter-nginx
+[submodule "external/tree-sitter-grammars/tree-sitter-nickel"]
+	path = external/tree-sitter-grammars/tree-sitter-nickel
+	url = https://github.com/nickel-lang/tree-sitter-nickel
+[submodule "external/tree-sitter-grammars/tree-sitter-nim"]
+	path = external/tree-sitter-grammars/tree-sitter-nim
+	url = https://github.com/alaviss/tree-sitter-nim
+[submodule "external/tree-sitter-grammars/tree-sitter-nim-format-string"]
+	path = external/tree-sitter-grammars/tree-sitter-nim-format-string
+	url = https://github.com/aMOPel/tree-sitter-nim-format-string
+[submodule "external/tree-sitter-grammars/tree-sitter-ninja"]
+	path = external/tree-sitter-grammars/tree-sitter-ninja
+	url = https://github.com/alemuller/tree-sitter-ninja
+[submodule "external/tree-sitter-grammars/tree-sitter-nix"]
+	path = external/tree-sitter-grammars/tree-sitter-nix
+	url = https://github.com/cstrahan/tree-sitter-nix
+[submodule "external/tree-sitter-grammars/tree-sitter-norg"]
+	path = external/tree-sitter-grammars/tree-sitter-norg
+	url = https://github.com/nvim-neorg/tree-sitter-norg
+[submodule "external/tree-sitter-grammars/tree-sitter-po"]
+	path = external/tree-sitter-grammars/tree-sitter-po
+	url = https://github.com/erasin/tree-sitter-po
+[submodule "external/tree-sitter-grammars/tree-sitter-pod"]
+	path = external/tree-sitter-grammars/tree-sitter-pod
+	url = https://github.com/tree-sitter-perl/tree-sitter-pod
+[submodule "external/tree-sitter-grammars/tree-sitter-poe-filter"]
+	path = external/tree-sitter-grammars/tree-sitter-poe-filter
+	url = https://github.com/ObserverOfTime/tree-sitter-poe-filter
+[submodule "external/tree-sitter-grammars/tree-sitter-pony"]
+	path = external/tree-sitter-grammars/tree-sitter-pony
+	url = https://github.com/amaanq/tree-sitter-pony
+[submodule "external/tree-sitter-grammars/tree-sitter-powershell"]
+	path = external/tree-sitter-grammars/tree-sitter-powershell
+	url = https://github.com/airbus-cert/tree-sitter-powershell
+[submodule "external/tree-sitter-grammars/tree-sitter-printf"]
+	path = external/tree-sitter-grammars/tree-sitter-printf
+	url = https://github.com/ObserverOfTime/tree-sitter-printf
+[submodule "external/tree-sitter-grammars/tree-sitter-prisma"]
+	path = external/tree-sitter-grammars/tree-sitter-prisma
+	url = https://github.com/victorhqc/tree-sitter-prisma
+[submodule "external/tree-sitter-grammars/tree-sitter-prolog"]
+	path = external/tree-sitter-grammars/tree-sitter-prolog
+	url = https://github.com/foxyseta/tree-sitter-prolog
+[submodule "external/tree-sitter-grammars/tree-sitter-promql"]
+	path = external/tree-sitter-grammars/tree-sitter-promql
+	url = https://github.com/MichaHoffmann/tree-sitter-promql
+[submodule "external/tree-sitter-grammars/tree-sitter-properties"]
+	path = external/tree-sitter-grammars/tree-sitter-properties
+	url = https://github.com/tree-sitter-grammars/tree-sitter-properties
+[submodule "external/tree-sitter-grammars/tree-sitter-proto"]
+	path = external/tree-sitter-grammars/tree-sitter-proto
+	url = https://github.com/treywood/tree-sitter-proto
+[submodule "external/tree-sitter-grammars/tree-sitter-prql"]
+	path = external/tree-sitter-grammars/tree-sitter-prql
+	url = https://github.com/PRQL/tree-sitter-prql
+[submodule "external/tree-sitter-grammars/tree-sitter-rasi"]
+	path = external/tree-sitter-grammars/tree-sitter-rasi
+	url = https://github.com/Fymyte/tree-sitter-rasi
+[submodule "external/tree-sitter-grammars/tree-sitter-razor"]
+	path = external/tree-sitter-grammars/tree-sitter-razor
+	url = https://github.com/tris203/tree-sitter-razor
+[submodule "external/tree-sitter-grammars/tree-sitter-rbs"]
+	path = external/tree-sitter-grammars/tree-sitter-rbs
+	url = https://github.com/joker1007/tree-sitter-rbs
+[submodule "external/tree-sitter-grammars/tree-sitter-re2c"]
+	path = external/tree-sitter-grammars/tree-sitter-re2c
+	url = https://github.com/amaanq/tree-sitter-re2c
+[submodule "external/tree-sitter-grammars/tree-sitter-readline"]
+	path = external/tree-sitter-grammars/tree-sitter-readline
+	url = https://github.com/ribru17/tree-sitter-readline
+[submodule "external/tree-sitter-grammars/tree-sitter-regex"]
+	path = external/tree-sitter-grammars/tree-sitter-regex
+	url = https://github.com/tree-sitter/tree-sitter-regex
+[submodule "external/tree-sitter-grammars/tree-sitter-rego"]
+	path = external/tree-sitter-grammars/tree-sitter-rego
+	url = https://github.com/FallenAngel97/tree-sitter-rego
+[submodule "external/tree-sitter-grammars/tree-sitter-requirements"]
+	path = external/tree-sitter-grammars/tree-sitter-requirements
+	url = https://github.com/ObserverOfTime/tree-sitter-requirements
+[submodule "external/tree-sitter-grammars/tree-sitter-rescript"]
+	path = external/tree-sitter-grammars/tree-sitter-rescript
+	url = https://github.com/rescript-lang/tree-sitter-rescript
+[submodule "external/tree-sitter-grammars/tree-sitter-rnoweb"]
+	path = external/tree-sitter-grammars/tree-sitter-rnoweb
+	url = https://github.com/bamonroe/tree-sitter-rnoweb
+[submodule "external/tree-sitter-grammars/tree-sitter-robot"]
+	path = external/tree-sitter-grammars/tree-sitter-robot
+	url = https://github.com/Hubro/tree-sitter-robot
+[submodule "external/tree-sitter-grammars/tree-sitter-robots-txt"]
+	path = external/tree-sitter-grammars/tree-sitter-robots-txt
+	url = https://github.com/opa-oz/tree-sitter-robots-txt
+[submodule "external/tree-sitter-grammars/tree-sitter-roc"]
+	path = external/tree-sitter-grammars/tree-sitter-roc
+	url = https://github.com/faldor20/tree-sitter-roc
+[submodule "external/tree-sitter-grammars/tree-sitter-ron"]
+	path = external/tree-sitter-grammars/tree-sitter-ron
+	url = https://github.com/amaanq/tree-sitter-ron
+[submodule "external/tree-sitter-grammars/tree-sitter-rst"]
+	path = external/tree-sitter-grammars/tree-sitter-rst
+	url = https://github.com/stsewd/tree-sitter-rst
+[submodule "external/tree-sitter-grammars/tree-sitter-ruby"]
+	path = external/tree-sitter-grammars/tree-sitter-ruby
+	url = https://github.com/tree-sitter/tree-sitter-ruby
+[submodule "external/tree-sitter-grammars/tree-sitter-runescript"]
+	path = external/tree-sitter-grammars/tree-sitter-runescript
+	url = https://github.com/2004Scape/tree-sitter-runescript
+[submodule "external/tree-sitter-grammars/tree-sitter-rust"]
+	path = external/tree-sitter-grammars/tree-sitter-rust
+	url = https://github.com/tree-sitter/tree-sitter-rust
+[submodule "external/tree-sitter-grammars/tree-sitter-scala"]
+	path = external/tree-sitter-grammars/tree-sitter-scala
+	url = https://github.com/tree-sitter/tree-sitter-scala
+[submodule "external/tree-sitter-grammars/tree-sitter-scfg"]
+	path = external/tree-sitter-grammars/tree-sitter-scfg
+	url = https://github.com/rockorager/tree-sitter-scfg
+[submodule "external/tree-sitter-grammars/tree-sitter-scheme"]
+	path = external/tree-sitter-grammars/tree-sitter-scheme
+	url = https://github.com/6cdh/tree-sitter-scheme
+[submodule "external/tree-sitter-grammars/tree-sitter-scss"]
+	path = external/tree-sitter-grammars/tree-sitter-scss
+	url = https://github.com/serenadeai/tree-sitter-scss
+[submodule "external/tree-sitter-grammars/tree-sitter-sfapex"]
+	path = external/tree-sitter-grammars/tree-sitter-sfapex
+	url = https://github.com/aheber/tree-sitter-sfapex
+[submodule "external/tree-sitter-grammars/tree-sitter-slang"]
+	path = external/tree-sitter-grammars/tree-sitter-slang
+	url = https://github.com/theHamsta/tree-sitter-slang
+[submodule "external/tree-sitter-grammars/tree-sitter-slim"]
+	path = external/tree-sitter-grammars/tree-sitter-slim
+	url = https://github.com/theoo/tree-sitter-slim
+[submodule "external/tree-sitter-grammars/tree-sitter-slint"]
+	path = external/tree-sitter-grammars/tree-sitter-slint
+	url = https://github.com/slint-ui/tree-sitter-slint
+[submodule "external/tree-sitter-grammars/tree-sitter-smali"]
+	path = external/tree-sitter-grammars/tree-sitter-smali
+	url = https://github.com/tree-sitter-grammars/tree-sitter-smali
+[submodule "external/tree-sitter-grammars/tree-sitter-smithy"]
+	path = external/tree-sitter-grammars/tree-sitter-smithy
+	url = https://github.com/indoorvivants/tree-sitter-smithy
+[submodule "external/tree-sitter-grammars/tree-sitter-snakemake"]
+	path = external/tree-sitter-grammars/tree-sitter-snakemake
+	url = https://github.com/osthomas/tree-sitter-snakemake
+[submodule "external/tree-sitter-grammars/tree-sitter-solidity"]
+	path = external/tree-sitter-grammars/tree-sitter-solidity
+	url = https://github.com/JoranHonig/tree-sitter-solidity
+[submodule "external/tree-sitter-grammars/tree-sitter-sourcepawn"]
+	path = external/tree-sitter-grammars/tree-sitter-sourcepawn
+	url = https://github.com/nilshelmig/tree-sitter-sourcepawn
+[submodule "external/tree-sitter-grammars/tree-sitter-sparql"]
+	path = external/tree-sitter-grammars/tree-sitter-sparql
+	url = https://github.com/GordianDziwis/tree-sitter-sparql
+[submodule "external/tree-sitter-grammars/tree-sitter-sql"]
+	path = external/tree-sitter-grammars/tree-sitter-sql
+	url = https://github.com/derekstride/tree-sitter-sql
+[submodule "external/tree-sitter-grammars/tree-sitter-squirrel"]
+	path = external/tree-sitter-grammars/tree-sitter-squirrel
+	url = https://github.com/amaanq/tree-sitter-squirrel
+[submodule "external/tree-sitter-grammars/tree-sitter-ssh-config"]
+	path = external/tree-sitter-grammars/tree-sitter-ssh-config
+	url = https://github.com/ObserverOfTime/tree-sitter-ssh-config
+[submodule "external/tree-sitter-grammars/tree-sitter-starlark"]
+	path = external/tree-sitter-grammars/tree-sitter-starlark
+	url = https://github.com/amaanq/tree-sitter-starlark
+[submodule "external/tree-sitter-grammars/tree-sitter-strace"]
+	path = external/tree-sitter-grammars/tree-sitter-strace
+	url = https://github.com/sigmaSd/tree-sitter-strace
+[submodule "external/tree-sitter-grammars/tree-sitter-styled"]
+	path = external/tree-sitter-grammars/tree-sitter-styled
+	url = https://github.com/mskelton/tree-sitter-styled
+[submodule "external/tree-sitter-grammars/tree-sitter-supercollider"]
+	path = external/tree-sitter-grammars/tree-sitter-supercollider
+	url = https://github.com/madskjeldgaard/tree-sitter-supercollider
+[submodule "external/tree-sitter-grammars/tree-sitter-surface"]
+	path = external/tree-sitter-grammars/tree-sitter-surface
+	url = https://github.com/connorlay/tree-sitter-surface
+[submodule "external/tree-sitter-grammars/tree-sitter-svelte"]
+	path = external/tree-sitter-grammars/tree-sitter-svelte
+	url = https://github.com/tree-sitter-grammars/tree-sitter-svelte
+[submodule "external/tree-sitter-grammars/tree-sitter-sway"]
+	path = external/tree-sitter-grammars/tree-sitter-sway
+	url = https://github.com/FuelLabs/tree-sitter-sway.git
+[submodule "external/tree-sitter-grammars/tree-sitter-swift"]
+	path = external/tree-sitter-grammars/tree-sitter-swift
+	url = https://github.com/alex-pinkus/tree-sitter-swift
+[submodule "external/tree-sitter-grammars/tree-sitter-sxhkdrc"]
+	path = external/tree-sitter-grammars/tree-sitter-sxhkdrc
+	url = https://github.com/RaafatTurki/tree-sitter-sxhkdrc
+[submodule "external/tree-sitter-grammars/tree-sitter-systemtap"]
+	path = external/tree-sitter-grammars/tree-sitter-systemtap
+	url = https://github.com/ok-ryoko/tree-sitter-systemtap
+[submodule "external/tree-sitter-grammars/tree-sitter-systemverilog"]
+	path = external/tree-sitter-grammars/tree-sitter-systemverilog
+	url = https://github.com/gmlarumbe/tree-sitter-systemverilog
+[submodule "external/tree-sitter-grammars/tree-sitter-t32"]
+	path = external/tree-sitter-grammars/tree-sitter-t32
+	url = https://gitlab.com/xasc/tree-sitter-t32.git
+[submodule "external/tree-sitter-grammars/tree-sitter-tablegen"]
+	path = external/tree-sitter-grammars/tree-sitter-tablegen
+	url = https://github.com/amaanq/tree-sitter-tablegen
+[submodule "external/tree-sitter-grammars/tree-sitter-templ"]
+	path = external/tree-sitter-grammars/tree-sitter-templ
+	url = https://github.com/vrischmann/tree-sitter-templ
+[submodule "external/tree-sitter-grammars/tree-sitter-tera"]
+	path = external/tree-sitter-grammars/tree-sitter-tera
+	url = https://github.com/uncenter/tree-sitter-tera
+[submodule "external/tree-sitter-grammars/tree-sitter-textproto"]
+	path = external/tree-sitter-grammars/tree-sitter-textproto
+	url = https://github.com/PorterAtGoogle/tree-sitter-textproto
+[submodule "external/tree-sitter-grammars/tree-sitter-thrift"]
+	path = external/tree-sitter-grammars/tree-sitter-thrift
+	url = https://github.com/duskmoon314/tree-sitter-thrift
+[submodule "external/tree-sitter-grammars/tree-sitter-tiger"]
+	path = external/tree-sitter-grammars/tree-sitter-tiger
+	url = https://github.com/ambroisie/tree-sitter-tiger
+[submodule "external/tree-sitter-grammars/tree-sitter-tlaplus"]
+	path = external/tree-sitter-grammars/tree-sitter-tlaplus
+	url = https://github.com/tlaplus-community/tree-sitter-tlaplus
+[submodule "external/tree-sitter-grammars/tree-sitter-tmux"]
+	path = external/tree-sitter-grammars/tree-sitter-tmux
+	url = https://github.com/Freed-Wu/tree-sitter-tmux
+[submodule "external/tree-sitter-grammars/tree-sitter-todotxt"]
+	path = external/tree-sitter-grammars/tree-sitter-todotxt
+	url = https://github.com/arnarg/tree-sitter-todotxt
+[submodule "external/tree-sitter-grammars/tree-sitter-toml"]
+	path = external/tree-sitter-grammars/tree-sitter-toml
+	url = https://github.com/tree-sitter-grammars/tree-sitter-toml
+[submodule "external/tree-sitter-grammars/tree-sitter-turtle"]
+	path = external/tree-sitter-grammars/tree-sitter-turtle
+	url = https://github.com/GordianDziwis/tree-sitter-turtle
+[submodule "external/tree-sitter-grammars/tree-sitter-twig"]
+	path = external/tree-sitter-grammars/tree-sitter-twig
+	url = https://github.com/gbprod/tree-sitter-twig
+[submodule "external/tree-sitter-grammars/tree-sitter-typescript"]
+	path = external/tree-sitter-grammars/tree-sitter-typescript
+	url = https://github.com/tree-sitter/tree-sitter-typescript
+[submodule "external/tree-sitter-grammars/tree-sitter-typespec"]
+	path = external/tree-sitter-grammars/tree-sitter-typespec
+	url = https://github.com/happenslol/tree-sitter-typespec
+[submodule "external/tree-sitter-grammars/tree-sitter-typoscript"]
+	path = external/tree-sitter-grammars/tree-sitter-typoscript
+	url = https://github.com/Teddytrombone/tree-sitter-typoscript
+[submodule "external/tree-sitter-grammars/tree-sitter-typst"]
+	path = external/tree-sitter-grammars/tree-sitter-typst
+	url = https://github.com/uben0/tree-sitter-typst
+[submodule "external/tree-sitter-grammars/tree-sitter-udev"]
+	path = external/tree-sitter-grammars/tree-sitter-udev
+	url = https://github.com/ObserverOfTime/tree-sitter-udev
+[submodule "external/tree-sitter-grammars/tree-sitter-ungrammar"]
+	path = external/tree-sitter-grammars/tree-sitter-ungrammar
+	url = https://github.com/Philipp-M/tree-sitter-ungrammar
+[submodule "external/tree-sitter-grammars/tree-sitter-unison"]
+	path = external/tree-sitter-grammars/tree-sitter-unison
+	url = https://github.com/kylegoetz/tree-sitter-unison
+[submodule "external/tree-sitter-grammars/tree-sitter-usd"]
+	path = external/tree-sitter-grammars/tree-sitter-usd
+	url = https://github.com/ColinKennedy/tree-sitter-usd
+[submodule "external/tree-sitter-grammars/tree-sitter-uxntal"]
+	path = external/tree-sitter-grammars/tree-sitter-uxntal
+	url = https://github.com/amaanq/tree-sitter-uxntal
+[submodule "external/tree-sitter-grammars/tree-sitter-vala"]
+	path = external/tree-sitter-grammars/tree-sitter-vala
+	url = https://github.com/vala-lang/tree-sitter-vala
+[submodule "external/tree-sitter-grammars/tree-sitter-vento"]
+	path = external/tree-sitter-grammars/tree-sitter-vento
+	url = https://github.com/ventojs/tree-sitter-vento
+[submodule "external/tree-sitter-grammars/tree-sitter-vhdl"]
+	path = external/tree-sitter-grammars/tree-sitter-vhdl
+	url = https://github.com/jpt13653903/tree-sitter-vhdl
+[submodule "external/tree-sitter-grammars/tree-sitter-vhs"]
+	path = external/tree-sitter-grammars/tree-sitter-vhs
+	url = https://github.com/charmbracelet/tree-sitter-vhs
+[submodule "external/tree-sitter-grammars/tree-sitter-vim"]
+	path = external/tree-sitter-grammars/tree-sitter-vim
+	url = https://github.com/neovim/tree-sitter-vim
+[submodule "external/tree-sitter-grammars/tree-sitter-vimdoc"]
+	path = external/tree-sitter-grammars/tree-sitter-vimdoc
+	url = https://github.com/neovim/tree-sitter-vimdoc
+[submodule "external/tree-sitter-grammars/tree-sitter-vrl"]
+	path = external/tree-sitter-grammars/tree-sitter-vrl
+	url = https://github.com/belltoy/tree-sitter-vrl
+[submodule "external/tree-sitter-grammars/tree-sitter-vue"]
+	path = external/tree-sitter-grammars/tree-sitter-vue
+	url = https://github.com/tree-sitter-grammars/tree-sitter-vue
+[submodule "external/tree-sitter-grammars/tree-sitter-wgsl"]
+	path = external/tree-sitter-grammars/tree-sitter-wgsl
+	url = https://github.com/szebniok/tree-sitter-wgsl
+[submodule "external/tree-sitter-grammars/tree-sitter-wgsl-bevy"]
+	path = external/tree-sitter-grammars/tree-sitter-wgsl-bevy
+	url = https://github.com/theHamsta/tree-sitter-wgsl-bevy
+[submodule "external/tree-sitter-grammars/tree-sitter-wing"]
+	path = external/tree-sitter-grammars/tree-sitter-wing
+	url = https://github.com/winglang/tree-sitter-wing
+[submodule "external/tree-sitter-grammars/tree-sitter-wit"]
+	path = external/tree-sitter-grammars/tree-sitter-wit
+	url = https://github.com/liamwh/tree-sitter-wit
+[submodule "external/tree-sitter-grammars/tree-sitter-xcompose"]
+	path = external/tree-sitter-grammars/tree-sitter-xcompose
+	url = https://github.com/ObserverOfTime/tree-sitter-xcompose
+[submodule "external/tree-sitter-grammars/tree-sitter-xml"]
+	path = external/tree-sitter-grammars/tree-sitter-xml
+	url = https://github.com/tree-sitter-grammars/tree-sitter-xml
+[submodule "external/tree-sitter-grammars/tree-sitter-xresources"]
+	path = external/tree-sitter-grammars/tree-sitter-xresources
+	url = https://github.com/ValdezFOmar/tree-sitter-xresources
+[submodule "external/tree-sitter-grammars/tree-sitter-yaml"]
+	path = external/tree-sitter-grammars/tree-sitter-yaml
+	url = https://github.com/tree-sitter-grammars/tree-sitter-yaml
+[submodule "external/tree-sitter-grammars/tree-sitter-yang"]
+	path = external/tree-sitter-grammars/tree-sitter-yang
+	url = https://github.com/Hubro/tree-sitter-yang
+[submodule "external/tree-sitter-grammars/tree-sitter-yuck"]
+	path = external/tree-sitter-grammars/tree-sitter-yuck
+	url = https://github.com/Philipp-M/tree-sitter-yuck
+[submodule "external/tree-sitter-grammars/tree-sitter-zathurarc"]
+	path = external/tree-sitter-grammars/tree-sitter-zathurarc
+	url = https://github.com/Freed-Wu/tree-sitter-zathurarc
+[submodule "external/tree-sitter-grammars/tree-sitter-zig"]
+	path = external/tree-sitter-grammars/tree-sitter-zig
+	url = https://github.com/tree-sitter-grammars/tree-sitter-zig
+[submodule "external/tree-sitter-grammars/tree-sitter-nu"]
+	path = external/tree-sitter-grammars/tree-sitter-nu
+	url = https://github.com/nushell/tree-sitter-nu
+[submodule "external/tree-sitter-grammars/tree-sitter-objc"]
+	path = external/tree-sitter-grammars/tree-sitter-objc
+	url = https://github.com/amaanq/tree-sitter-objc
+[submodule "external/tree-sitter-grammars/tree-sitter-objdump"]
+	path = external/tree-sitter-grammars/tree-sitter-objdump
+	url = https://github.com/ColinKennedy/tree-sitter-objdump
+[submodule "external/tree-sitter-grammars/tree-sitter-ocaml"]
+	path = external/tree-sitter-grammars/tree-sitter-ocaml
+	url = https://github.com/tree-sitter/tree-sitter-ocaml
+[submodule "external/tree-sitter-grammars/tree-sitter-ocamllex"]
+	path = external/tree-sitter-grammars/tree-sitter-ocamllex
+	url = https://github.com/atom-ocaml/tree-sitter-ocamllex
+[submodule "external/tree-sitter-grammars/tree-sitter-odin"]
+	path = external/tree-sitter-grammars/tree-sitter-odin
+	url = https://github.com/amaanq/tree-sitter-odin
+[submodule "external/tree-sitter-grammars/tree-sitter-pascal"]
+	path = external/tree-sitter-grammars/tree-sitter-pascal
+	url = https://github.com/Isopod/tree-sitter-pascal
+[submodule "external/tree-sitter-grammars/tree-sitter-passwd"]
+	path = external/tree-sitter-grammars/tree-sitter-passwd
+	url = https://github.com/ath3/tree-sitter-passwd
+[submodule "external/tree-sitter-grammars/tree-sitter-pem"]
+	path = external/tree-sitter-grammars/tree-sitter-pem
+	url = https://github.com/ObserverOfTime/tree-sitter-pem
+[submodule "external/tree-sitter-grammars/tree-sitter-perl"]
+	path = external/tree-sitter-grammars/tree-sitter-perl
+	url = https://github.com/tree-sitter-perl/tree-sitter-perl
+[submodule "external/tree-sitter-grammars/tree-sitter-php"]
+	path = external/tree-sitter-grammars/tree-sitter-php
+	url = https://github.com/tree-sitter/tree-sitter-php
+[submodule "external/tree-sitter-grammars/tree-sitter-phpdoc"]
+	path = external/tree-sitter-grammars/tree-sitter-phpdoc
+	url = https://github.com/claytonrcarter/tree-sitter-phpdoc
+[submodule "external/tree-sitter-grammars/tree-sitter-pioasm"]
+	path = external/tree-sitter-grammars/tree-sitter-pioasm
+	url = https://github.com/leo60228/tree-sitter-pioasm
+[submodule "external/tree-sitter-grammars/tree-sitter-puppet"]
+	path = external/tree-sitter-grammars/tree-sitter-puppet
+	url = https://github.com/amaanq/tree-sitter-puppet
+[submodule "external/tree-sitter-grammars/tree-sitter-purescript"]
+	path = external/tree-sitter-grammars/tree-sitter-purescript
+	url = https://github.com/postsolar/tree-sitter-purescript
+[submodule "external/tree-sitter-grammars/tree-sitter-pymanifest"]
+	path = external/tree-sitter-grammars/tree-sitter-pymanifest
+	url = https://github.com/ObserverOfTime/tree-sitter-pymanifest
+[submodule "external/tree-sitter-grammars/tree-sitter-python"]
+	path = external/tree-sitter-grammars/tree-sitter-python
+	url = https://github.com/tree-sitter/tree-sitter-python
+[submodule "external/tree-sitter-grammars/tree-sitter-ql"]
+	path = external/tree-sitter-grammars/tree-sitter-ql
+	url = https://github.com/tree-sitter/tree-sitter-ql
+[submodule "external/tree-sitter-grammars/tree-sitter-qmldir"]
+	path = external/tree-sitter-grammars/tree-sitter-qmldir
+	url = https://github.com/Decodetalkers/tree-sitter-qmldir
+[submodule "external/tree-sitter-grammars/tree-sitter-qmljs"]
+	path = external/tree-sitter-grammars/tree-sitter-qmljs
+	url = https://github.com/yuja/tree-sitter-qmljs
+[submodule "external/tree-sitter-grammars/tree-sitter-query"]
+	path = external/tree-sitter-grammars/tree-sitter-query
+	url = https://github.com/nvim-treesitter/tree-sitter-query
+[submodule "external/tree-sitter-grammars/tree-sitter-r"]
+	path = external/tree-sitter-grammars/tree-sitter-r
+	url = https://github.com/r-lib/tree-sitter-r
+[submodule "external/tree-sitter-grammars/tree-sitter-racket"]
+	path = external/tree-sitter-grammars/tree-sitter-racket
+	url = https://github.com/6cdh/tree-sitter-racket
+[submodule "external/tree-sitter-grammars/tree-sitter-ralph"]
+	path = external/tree-sitter-grammars/tree-sitter-ralph
+	url = https://github.com/alephium/tree-sitter-ralph
+[submodule "external/tree-sitter-grammars/tree-sitter-tcl"]
+	path = external/tree-sitter-grammars/tree-sitter-tcl
+	url = https://github.com/tree-sitter-grammars/tree-sitter-tcl
+[submodule "external/tree-sitter-grammars/tree-sitter-teal"]
+	path = external/tree-sitter-grammars/tree-sitter-teal
+	url = https://github.com/euclidianAce/tree-sitter-teal
+[submodule "external/tree-sitter-grammars/tree-sitter-nqc"]
+	path = external/tree-sitter-grammars/tree-sitter-nqc
+	url = https://github.com/amaanq/tree-sitter-nqc
+[submodule "external/tree-sitter-grammars/tree-sitter-pug"]
+	path = external/tree-sitter-grammars/tree-sitter-pug
+	url = https://github.com/zealot128/tree-sitter-pug
+[submodule "external/tree-sitter-grammars/tree-sitter-tact"]
+	path = external/tree-sitter-grammars/tree-sitter-tact
+	url = https://github.com/tact-lang/tree-sitter-tact
