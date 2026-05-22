@@ -385,6 +385,40 @@ $func$;
 
 REVOKE ALL ON FUNCTION laplace_priv.drop_extension(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION laplace_priv.drop_extension(text) TO laplace_admin;
+
+-- ------------------------------------------------------------------
+-- take_schema_ownership(schema_name) — transfer a substrate-allowlist
+-- schema's ownership to laplace_admin. Needed for the legacy case
+-- where a schema was created with postgres as owner (e.g., laplace
+-- schema previously created via install_extension as postgres) and
+-- now needs to be managed by laplace_admin (so it can GRANT USAGE
+-- without privilege errors). Idempotent — re-owning to a role that
+-- already owns is a no-op.
+-- ------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION laplace_priv.take_schema_ownership(schema_name text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $func$
+BEGIN
+    IF schema_name NOT IN ('laplace') THEN
+        RAISE EXCEPTION 'schema % is not in the laplace-managed allowlist', schema_name
+            USING HINT = 'Only the laplace schema is managed by this helper. Widen the allowlist via bootstrap if substrate adds another owned schema.';
+    END IF;
+    IF current_database() != 'laplace' THEN
+        RAISE EXCEPTION 'laplace_priv.take_schema_ownership may only be called from the laplace database (current: %)', current_database();
+    END IF;
+    -- Skip if schema doesn't exist yet (caller race).
+    IF NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = schema_name) THEN
+        RETURN;
+    END IF;
+    EXECUTE format('ALTER SCHEMA %I OWNER TO laplace_admin', schema_name);
+END;
+$func$;
+
+REVOKE ALL ON FUNCTION laplace_priv.take_schema_ownership(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION laplace_priv.take_schema_ownership(text) TO laplace_admin;
 PG_EOF
     green "✓ laplace_priv schema + install_extension/drop_extension wrappers"
 
