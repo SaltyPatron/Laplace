@@ -62,6 +62,11 @@ Never renumber existing ADRs. If an ADR is superseded, the new one gets the next
 | 0030 | [MKL / Eigen / Spectra / TBB integration + determinism via MKL_CBWR](0030-mkl-eigen-spectra-tbb-integration.md) | Accepted |
 | 0031 | [Custom Access Method backed by perf-cache — research spike (post-v0.1.0)](0031-custom-am-spike.md) | Accepted (as tracked spike) |
 | 0032 | [Unified CMake build pipeline — PGXS retired in favor of one tree](0032-unified-cmake-build-pipeline.md) | Accepted (locks ADR 0028 as prerequisite) |
+| 0033 | [All direct dependencies as git submodules](0033-all-deps-as-submodules.md) | Accepted |
+| 0034 | [Modular extension SQL via `.sql.in` + C preprocessor](0034-modular-sql-via-cpp-preprocessor.md) | Accepted |
+| 0035 | [Prompt ingestion and compiled cascade traversal](0035-prompt-ingestion-and-compiled-cascade.md) | Accepted |
+| 0036 | [Arena semantics and source-trust consensus](0036-arena-semantics-and-source-trust.md) | Accepted |
+| 0037 | [Layered seed ingestion and model-codec fidelity](0037-layered-seed-ingestion-and-model-codec-fidelity.md) | Accepted |
 
 ## Workflow
 

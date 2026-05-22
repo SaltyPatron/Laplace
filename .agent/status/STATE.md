@@ -1,13 +1,13 @@
 # Laplace — Project State
 
-**Last updated:** 2026-05-22 (doc-debt payoff session — ADRs 0033 + 0034 + RULES.md R-1/R17/R18 + STANDARDS.md/OPERATIONS.md submodule policy rewrite)
-**Updated by:** claude (audit of accumulated doc-debt after the all-deps-as-submodules + SQL-modular adoption)
+**Last updated:** 2026-05-22 (concept capture session — ADRs 0035-0037 + RULES.md R19-R21 + canonical docs/agent guidance refreshed)
+**Updated by:** copilot (documentation pass after prompt-ingestion / compiled-cascade / source-trust / seed-ladder clarification)
 
 ---
 
 ## Current phase
 
-**Chunk 0 framework + architectural overhaul + doc-debt payoff.** ✅ End-to-end CI green achieved at commit `ab8f62b` (integration.yml capabilities → build → db-ensure → smoke-test all passing on hart-server). All-deps-as-submodules adoption complete in tree (commits `574216e`, `42b03eb`, `ba019f4`); doc-debt commit (this session) brings invariant docs into alignment.
+**Chunk 0 framework + architectural overhaul + concept-capture payoff.** ✅ End-to-end CI green achieved at commit `ab8f62b` (integration.yml capabilities → build → db-ensure → smoke-test all passing on hart-server). All-deps-as-submodules adoption complete in tree (commits `574216e`, `42b03eb`, `ba019f4`). ADRs 0035-0037 now lock prompt ingestion, compiled cascade traversal, arena/source-trust consensus, layered seed ingestion, and model-codec fidelity.
 
 **Next batch:**
 1. Bulk-import tree-sitter runtime + 303 grammars as submodules (`scripts/import-tree-sitter-grammars.sh`)
@@ -25,6 +25,11 @@ What landed during the architectural overhaul session (commits `020009b` through
 - **Custom-PG dep build infrastructure** — 8 submodules under `external/` (PostgreSQL, PostGIS, PROJ, GEOS, GDAL, Eigen, Spectra, BLAKE3) + per-dep build scripts + `scripts/build-all-deps.sh` orchestrator + bootstrap_build_environment apt step.
 - **Engine CMake** cutover to submodule-based Eigen + Spectra + BLAKE3 (verified building locally with full BLAKE3 SIMD lineup).
 - **R-1 forbidden-language rule** added to CLAUDE.md + RULES.md; enforced by Claude Code Stop hook.
+
+What landed during the concept-capture documentation pass:
+- **3 new ADRs (0035-0037)** covering prompt ingestion + compiled cascade traversal, arena/source-trust consensus, and layered seed ingestion + model-codec fidelity.
+- **RULES.md R19-R21** added: prompt is ingestion; cascade is compiled; arena/source trust semantics are mandatory; model ingest is a codec.
+- **Canonical docs refreshed**: README.md, GLOSSARY.md, RULES.md, STANDARDS.md, DESIGN.md, OPERATIONS.md, CLAUDE.md, AGENTS.md, .github/copilot-instructions.md, and relevant `.claude/agents/*` guidance.
 
 ## Repository
 
@@ -62,7 +67,7 @@ What landed during the architectural overhaul session (commits `020009b` through
 
 ## GitHub issue structure (post-refactor)
 
-**Total open issues: 169** (155 Stories + 12 Epics + 2 Spike-labeled items)
+**Total open issues: 161** (148 Stories + 12 Epics + 1 Spike-labeled item; refreshed after creating ADR 0035-0037 acceptance stories)
 
 **Epics (12):**
 | # | Title | Status |
@@ -76,6 +81,8 @@ What landed during the architectural overhaul session (commits `020009b` through
 **Spike (1):** #122 (Custom AM, post-v0.1.0)
 
 **5 opclass Stories** slotted into existing Chunks #1, #2, #2, #3, #5 (#168–#172).
+
+**New ADR acceptance Stories:** #179 (prompt ingestion + compiled cascade), #180 (arena/source-trust consensus), #181 (seed ingestion + model-codec fidelity).
 
 ## Runner (per ADR 0019 + 0018)
 
@@ -116,7 +123,7 @@ After this, CI's db-ensure should pass.
 
 ## Decisions log
 
-See [decisions.md](decisions.md) for one-liners; full ADRs in [docs/adr/](../../docs/adr/) (32 ADRs).
+See [decisions.md](decisions.md) for one-liners; full ADRs in [docs/adr/](../../docs/adr/) (37 ADRs).
 
 ## Memory
 

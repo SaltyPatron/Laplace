@@ -126,6 +126,26 @@ Was over-engineering. Attestation rows ARE consensus state, not event log entrie
 
 ---
 
+## I.A. Content-addressed computational model
+
+The substrate's core compute unit is the tiered Merkle DAG, not a model tensor and not a row-per-occurrence log.
+
+```text
+raw content
+→ T0 Unicode atoms from perf-cache
+→ T1/T2/T3/... entities built from child hashes
+→ trajectories over child entities
+→ physicalities and attestations
+```
+
+Deduplication is O(tier depth + novel structure). When a content span has already been observed, its BLAKE3-128 hash identifies the existing entity; new parents reference it through trajectories instead of duplicating content. Reconstruction walks the same DAG from parent trajectory to child entities to atoms. Materializing bytes is O(output bytes), but identity, reuse, deduplication, and reconstruction planning are tier/path operations rather than corpus scans.
+
+The T0 perf-cache is mandatory for this model. It contains codepoint hash, canonical coordinate, Hilbert index, UCA order, and flags for all 1,114,112 Unicode codepoints. Clients and ingestion workers use it to compute atom identity and coordinates locally; they do not round-trip to Postgres for per-codepoint math. T1+ entity math is computed in the C/C++ engine before INSERT: Merkle hash, centroid, trajectory, Hilbert index, and n-constituent metadata arrive pre-baked.
+
+The 4D substrate is the coordinate/index chassis. It supplies canonical positions, physicalities, radial abstraction, Hilbert locality, and candidate narrowing. It is not the sole semantic judge; hot-path selection follows typed, rated attestations ordered by effective score and constrained by arena semantics.
+
+---
+
 ## II. Type system at the SQL layer
 
 Two extensions, both installed via `laplace_priv.install_extension` (SECURITY DEFINER wrapper) per ADR 0023 + 0025:
@@ -150,6 +170,36 @@ SELECT laplace_priv.install_extension('laplace_substrate'); -- requires laplace_
 - Cascade SRFs (`laplace_astar_path`, etc.)
 
 We do NOT create a `geometry4d` type. We use standard PostGIS `geometry` with Z+M flags = 4D.
+
+### Source trust and arena semantics
+
+Attestation kinds are substrate entities and may carry meta-attestations declaring their arena semantics:
+
+- compatibility: multi-valued, functional, inverse-functional, mutually exclusive, scalar, symmetric, etc.
+- context policy: context-free, context-required, temporal interval, comparison frame, source-local, prompt-local, fiction/speculation mode, etc.
+- competition set: which `(subject, kind, context)` tuples compete for one or more winning objects
+- source trust policy: which source classes are authoritative, admissible, discounted, or prompt-local
+- effective-score inputs: rating, RD, volatility, source credibility for kind, trust class, context compatibility, and structural support
+
+Examples:
+
+```text
+rake HAS_POS NOUN
+rake HAS_POS VERB
+```
+
+Both can be true globally because POS is multi-valued at the lexical level.
+
+```text
+France HAS_CURRENT_CAPITAL Paris
+France HAS_CURRENT_CAPITAL Los Angeles
+```
+
+These compete in the same functional current-capital arena under the same geopolitical/current-time context.
+
+Source trust classes seed priors before per-kind Glicko-2 dynamics refine credibility: foundational constants, standards-derived sources, curated academic resources, academically linked user-curated resources, structured corpora/treebanks, AI-model probe observations, and prompt-local/user content. Repetition inside a correlated source family is not counted as independent consensus.
+
+Operationally: truths cluster across independent, high-trust, structurally adjacent sources; unsupported claims scatter or cluster only inside source-scoped low-trust families. Low-trust claims remain available for analysis as claims-about-sources without winning strict traversal or synthesis scopes.
 
 ---
 
@@ -217,7 +267,17 @@ laplace_astar_path(
     max_depth integer DEFAULT 10,
     k_paths integer DEFAULT 1
 ) RETURNS TABLE(step_idx integer, entity_hash bytea, g double precision, h double precision)
+
+laplace_cascade(
+    prompt bytea,
+    mode text DEFAULT 'strict',
+    source_scope bytea[] DEFAULT NULL,
+    max_depth integer DEFAULT 12,
+    k_paths integer DEFAULT 32
+) RETURNS TABLE(path_idx integer, entity_hash bytea, effective_mu bigint, rd bigint, source_trace bytea[])
 ```
+
+`laplace_cascade` is the compiled prompt-ingestion + traversal surface. It decomposes/records prompt content according to policy, creates or references the prompt context entity, seeds the frontier, walks the attestation DAG, and streams ranked paths. It is implemented in C/C++ as an SRF; recursive SQL is not the hot path.
 
 ### Estimated count: ~15–20 custom functions total
 
@@ -368,6 +428,48 @@ int           trajectory_constituents(const geometry4d_t* traj, hash128_t* out, 
 
 **Multiple indexes per column** are permitted where access patterns warrant (e.g., a partial GIST per tier, BRIN alongside btree on the same Hilbert column). **Partitioning** by source / tier / time is operational ease — not required for query performance at our scale.
 
+### Runtime execution model
+
+Cascade traversal is invoked through one SQL-call surface and executed by the C/C++ engine inside the PostgreSQL backend.
+
+```sql
+SELECT *
+FROM laplace_cascade(
+        prompt => convert_to('Hello! Tell me something interesting.', 'UTF8'),
+        mode => 'strict',
+        source_scope => NULL,
+        max_depth => 12,
+        k_paths => 32
+);
+```
+
+The engine loop owns:
+
+- prompt decomposition and context entity creation/reference
+- priority queue and visited-set management
+- tier-up / tier-down / radial-abstraction transitions
+- indexed candidate lookup by subject, kind/arena, context, source scope, and effective score
+- geometry/Hilbert filtering as candidate narrowing, not semantic final judgment
+- early abstention when no sufficiently supported path exists
+- streaming SRF output
+
+SPI/executor calls are allowed only as batched, prepared, indexed lookups. The hot path MUST NOT be recursive CTE traversal, cursor polling, or app-layer row-by-row SELECT loops.
+
+The common attestation expansion pattern is:
+
+```sql
+SELECT a.object_hash, a.rating, a.rd, a.volatility, a.source_hash
+FROM attestations a
+WHERE a.subject_hash = $1
+    AND a.kind_hash = ANY($2)
+    AND a.context_hash IS NOT DISTINCT FROM $3
+    AND ($4 IS NULL OR a.source_hash = ANY($4))
+ORDER BY a.rating DESC, a.rd ASC
+LIMIT $5;
+```
+
+The C/C++ engine turns that tuple stream into an arena-aware effective score and A* frontier operation.
+
 ---
 
 ## VI. Polymorphic plugin interfaces
@@ -422,6 +524,25 @@ public:
 };
 ```
 
+### Layered seed source order
+
+Early source plugins are implemented in a deliberate order so later sources land in an already constrained substrate:
+
+| Order | Source layer | Primary fidelity gained |
+|---|---|---|
+| 1 | Unicode / UCD / UCA / UAX | atoms, scripts, categories, normalization, collation, segmentation |
+| 2 | ISO / CLDR / Glottolog-style registries | language identity, script/region mapping, names/aliases |
+| 3 | WordNet | POS, lemmas, synsets, senses, lexical relations |
+| 4 | OMW | cross-lingual synset mapping; omniglottal sense bridges |
+| 5 | UD Treebanks | observed syntax, morphology, dependency relations, lemmas |
+| 6 | Wiktionary | definitions, forms, pronunciations, etymology, examples |
+| 7 | Tatoeba | aligned multilingual sentences and audio samples |
+| 8 | ConceptNet / Atomic2020 | commonsense, causal, social, and event relations |
+| 9 | Tree-sitter grammars / code corpora | parseable programming-language structure |
+| 10 | Text/audio/image/model sources | high-volume observations, recipes, physicalities, behavioral attestations |
+
+Each layer adds explicit fidelity channels. AI model sources are late evidence sources measured against the substrate, not the initial source of meaning.
+
 ---
 
 ## VII. Lottery-ticket-aware sparsity (AI model ingestion only)
@@ -438,6 +559,19 @@ public:
 ```
 
 **Linguistic resources:** no filter; every entry at full fidelity.
+
+### Model-codec fidelity
+
+For AI model sources, fidelity means `TransformerModelSource` captures the source model's load-bearing computation in substrate form:
+
+- recipe metadata from `config.json`, tokenizer files, and auxiliary architecture files
+- tokenizer/content entities and recipe attestations
+- anchor physicalities from the Procrustes/Laplacian/Gram-Schmidt pipeline
+- probe observations over prompts/tasks selected for the architecture
+- architecture-specific attestation arenas (`ATTENDS_TO<head,layer>`, `HAS_FEATURE<layer>`, `EMBEDS_AS<position>`, etc.)
+- lottery-ticket sparse edges that survive per-tensor, per-row, and probe validation gates
+
+For a source-scoped round-trip, if ingestion is faithful and synthesis uses the source recipe/scope, missing source-model behavior is a codec bug or tuning failure, not an accepted architectural gap. The expected comparison is stock source model vs. native substrate traversal vs. synthesized export under fixed prompts and sampler settings.
 
 ---
 
@@ -486,7 +620,8 @@ JSON-driven synthesis → reproducible variants. Same JSON + same substrate stat
 |---|---|---|
 | **Build (one-time)** | Derive perf-cache + DB seed from Unicode UCD (independently) | None — bulk seed insert |
 | **Ingestion (per write)** | C/C++ extension precomputes entity values; raw INSERT or skip-on-dedup | **None** — Postgres just stores pre-baked rows |
-| **Query (per read)** | C/C++ extension reads perf-cache + B-tree/GIST; cascades A* | None for entity-math; only index lookups |
+| **Prompt ingestion (per request)** | Decompose prompt to substrate entities; create/reference context entity | None for entity-math; pre-baked rows or existing hashes |
+| **Query (per read)** | C/C++ extension reads perf-cache + B-tree/GIST; compiled cascade/A* walks indexed attestations | None for entity-math; only batched indexed lookups |
 | **Rating accumulation** | Glicko-2 updates fire on observation events | **Only** runtime DB-side compute (fixed-point arithmetic) |
 
 ---
@@ -497,6 +632,7 @@ These are explicit non-decisions. They will be made at execution time with the u
 
 - **Glicko-2 adaptation formula** for consensus calibration (vs. competitive matches)
 - **A\* heuristic h()** specific formula + admissibility analysis
+- **Effective mu formula** combining rating/RD/volatility/source-kind credibility/context compatibility
 - **Lottery-ticket criteria parameters** (per-tensor k%, per-row k, probe-set design)
 - **Per-architecture probe protocols** (transformer first; mamba/diffusion/CNN later)
 - **Feature-extractor dim assignments** for first synthesis (~1500 for Qwen3-1.5B)

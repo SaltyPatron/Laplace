@@ -12,6 +12,13 @@ Laplace is a content-addressable geometric-attestation substrate built as a Post
 
 **It is not** another AI framework, RAG system, vector database, fine-tuning tool, or wrapper around llama.cpp / vLLM. If your reasoning starts with "this is like X" where X is conventional AI tooling, **stop** and re-read [RULES.md](RULES.md).
 
+Load-bearing mechanics:
+
+- A prompt is ingestion. It is decomposed into substrate entities and represented by a context entity/trajectory before inference; there is no context-window buffer primitive.
+- Cascade traversal is compiled. One SQL-call surface enters a C/C++ SRF/operator that owns frontier management, A*, tier transitions, effective-score ranking, and abstention; no recursive CTE/RBAR/cursor/app-loop hot path.
+- Consensus is arena-aware and source-trust-aware. Raw repetition does not manufacture truth; independent high-trust structure pulls hard, low-trust/correlated claims remain source-scoped or disputed.
+- AI model ingest is a codec. v0.1 proves model → substrate → sparse GGUF → chat for a source-scoped model before broader seed-stack synthesis.
+
 ---
 
 ## Required reading (in order)
@@ -33,6 +40,8 @@ Laplace is a content-addressable geometric-attestation substrate built as a Post
 4. **No reading `/home/ahart/Projects/Hartonomous-001/`** — previous iteration; reading pollutes the framing.
 5. **Status tracking goes in `.agent/status/`** — never in user docs.
 6. **User instructions in conversation override everything.**
+7. **Prompt ingestion + compiled cascade per ADR 0035.** No context-window architecture, recursive SQL graph walk, cursor traversal, or app-layer frontier loop.
+8. **Arena/source trust semantics per ADR 0036.** Glicko-2 updates and effective mu require cardinality/context/competition/source-lineage semantics.
 
 ---
 

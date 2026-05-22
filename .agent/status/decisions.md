@@ -237,3 +237,31 @@ Append-only timestamped record of architectural / engineering decisions. Format:
 **What:** Architectural commits and their documentation updates land together — same commit, same review surface. No "land code now, docs catch up later." RULES.md, STANDARDS.md, DESIGN.md, ADRs, `.agent/status/decisions.md`, and memory files are kept in lockstep with code reality.
 **Why:** Doc debt accumulates fast at this project's age. The substrate is too young to afford drift between intent and implementation. This is the anti-drift mechanism.
 **Locked in:** RULES.md R18.
+
+## 2026-05-22 — Use existing types; invent only where the read pattern requires it (RULES.md R19)
+**By:** user (Anthony) — "so why would we have our own datatype when we can link and reference that? (ultrathink on this as a whole across everything we're gonna do)"
+**What:** Before defining any C/C++ struct/typedef/class, read the relevant submodule header (in `external/<dep>/`) first. If the upstream provides a type that fits — use it directly (`POINT4D`, `LWGEOM` family, `Eigen::Matrix`). Invent a type only when (a) no upstream provides the concept (substrate-specific: `mantissa_payload_t`, `glicko2_state_t`, plugin interfaces), or (b) the dominant *read pattern* needs a layout no existing type provides (example: `hash128_t = {hi, lo}` because mantissa-pack reads hi and lo into different coord mantissas). Always document the read pattern in the header.
+**Why:** The substrate is read-heavy by design (ingest once, traverse-cascade many times). Type decisions optimize the dominant read pattern, not the write pattern. Vanity wrappers around upstream types waste maintenance budget AND mislead future contributors about whether the wrapper is load-bearing. The 2026-05-22 audit deleted `coord4d_t` (duplicated `POINT4D`) and `geometry4d_t` (duplicated `LWPOINT`/`LWLINE`/`LWGEOM`); kept `hash128_t` (mantissa-pack justifies the split); reduced `hilbert128_t` to `uint8_t[16]` at the API boundary (algorithm-internal layout decoupled from public ABI).
+**Locked in:** RULES.md R22 (R19-R21 were taken by the concept-capture session for prompt-ingestion / arena-semantics / layered-seeds). Memory note `project_code_against_repo` extended with the "read submodule headers before scaffolding" operational corollary.
+**Origin:** Caught when scaffolding `engine/core/include/laplace/core/geometry4d.h` — Anthony pushed back ("did you really make a geometry4d? is that a datatype to REPLACE GEOMETRYZM?"). Web search + reading `external/postgis/liblwgeom/liblwgeom.h.in:412-416` confirmed `POINT4D = {double x, y, z, m}` is the canonical type.
+
+## 2026-05-22 — Prompt ingestion + compiled cascade traversal
+**By:** user (Anthony) + copilot documentation pass
+**What:** Prompts are ingested as substrate content/context before inference. Cascade traversal is exposed as one SQL-call SRF/operator, with the C/C++ engine owning frontier management, A*, tier transitions, effective-score ordering, and abstention. Recursive CTEs, cursors, RBAR, and app-layer frontier loops are forbidden on the hot path.
+**Why:** The substrate replaces the context-window/forward-pass serving model. Keeping the traversal loop compiled avoids executor/network/control-flow overhead and preserves the DB-as-indexed-store architecture.
+**ADR:** [0035-prompt-ingestion-and-compiled-cascade.md](../../docs/adr/0035-prompt-ingestion-and-compiled-cascade.md)
+**Locked in:** RULES.md R19, DESIGN.md runtime execution model, OPERATIONS.md query section.
+
+## 2026-05-22 — Arena semantics + source-trust consensus
+**By:** user (Anthony) + copilot documentation pass
+**What:** Attestation kinds carry arena semantics: compatibility, cardinality, context policy, competition set, source-trust policy, and effective-score inputs. Glicko-2 agreement/disagreement is not raw voting; correlated repetition cannot manufacture truth.
+**Why:** Truth-like claims and source/community claims must coexist without collapsing into a single flat confidence number. Independent high-trust structure should pull hard; low-trust/correlated clusters stay source-scoped, high-RD/low-rated, disputed, or excluded from strict scopes.
+**ADR:** [0036-arena-semantics-and-source-trust.md](../../docs/adr/0036-arena-semantics-and-source-trust.md)
+**Locked in:** RULES.md R20, GLOSSARY.md arena/source terms, DESIGN.md source trust section.
+
+## 2026-05-22 — Layered seed ingestion + model-codec fidelity
+**By:** user (Anthony) + copilot documentation pass
+**What:** Early ingestion follows a source-fidelity ladder: Unicode/UCD/UCA/UAX → language registries → WordNet → OMW → UD → Wiktionary → Tatoeba/audio → ConceptNet/Atomic → tree-sitter/code → corpora/models. AI model ingest is a codec that must capture source-model recipe, physicalities, probes, architecture arenas, and sparse load-bearing structure.
+**Why:** Seed resources provide explicit fidelity channels before model-derived observations arrive. For v0.1, a narrow model → substrate → sparse GGUF → chat round-trip is the proof; broader seed stack improves substrate fidelity but is not a conventional training corpus.
+**ADR:** [0037-layered-seed-ingestion-and-model-codec-fidelity.md](../../docs/adr/0037-layered-seed-ingestion-and-model-codec-fidelity.md)
+**Locked in:** RULES.md R21, DESIGN.md seed source order/model-codec fidelity, OPERATIONS.md round-trip comparison target.

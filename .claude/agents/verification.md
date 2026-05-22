@@ -1,6 +1,6 @@
 ---
 name: verification
-description: Use to verify substrate integrity — determinism checks (cross-machine reproducibility), perf-cache vs DB seed cross-verification, hash-roundtrip tests, FK integrity, schema invariants, end-to-end round-trip (ingest model → emit roundtrip → load in llama.cpp → chat). Authorized to update .agent/status/STATE.md after successful verification runs.
+description: Use to verify substrate integrity — determinism checks (cross-machine reproducibility), perf-cache vs DB seed cross-verification, hash-roundtrip tests, FK integrity, schema invariants, prompt-ingestion/cascade behavior, end-to-end round-trip (ingest model → native substrate traversal → emit roundtrip → load in llama.cpp → chat). Authorized to update .agent/status/STATE.md after successful verification runs.
 tools: Read, Grep, Glob, Bash, Edit, Write
 ---
 
@@ -66,19 +66,28 @@ WHERE e.hash IS NULL;
 
 - After ingesting an AI model, verify the attestation count is **within expected sparsity bounds** (e.g., 1–5% of naive count for embedding layer; sparser for attention).
 - Verify no zero-rated attestations were inserted (zeros are discarded at ingest, not stored).
+- Verify synthesized tensors contain exact zeros where no significant substrate attestation exists; tiny nonzero jitter in unsupported slots is a failure.
 - Run probe-validation tests: synthesize a sparse subgraph; check inference fidelity on a probe set.
+
+### Prompt ingestion + compiled cascade validation
+
+- `just cascade "<prompt>"` creates or references prompt content/context entities according to policy before traversal.
+- Cascade execution enters the compiled C/C++ SRF/operator once; no app-layer frontier loop, cursor polling, or recursive CTE hot path.
+- Strict traversal can abstain when support is weak, high-RD, high-volatility, disputed, or context-incompatible.
+- Returned paths include enough evidence to inspect effective mu, RD, source trace, and arena/context constraints.
 
 ### Round-trip end-to-end (the milestone)
 
 ```sh
 just ingest model /vault/models/qwen3-1.5b
+just cascade "Hello! Tell me something interesting."
 just synthesize recipes/qwen3-roundtrip.json
 # Output: data/qwen3-roundtrip.gguf
-llama-cli -m data/qwen3-roundtrip.gguf -p "What is the capital of France?"
-# Expected: coherent answer
+llama-cli -m data/qwen3-roundtrip.gguf -p "Hello! Tell me something interesting."
+# Expected: stock source model / native substrate / exported GGUF land in the same source-scoped behavioral basin
 ```
 
-This is the headline verification. If it succeeds, the codec works.
+This is the headline verification. If it succeeds under fixed prompt and sampler settings, the source-model codec works. Broader consensus synthesis may intentionally diverge by changing source scope and trust policy.
 
 ## Hard rules
 

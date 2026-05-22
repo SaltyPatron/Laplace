@@ -8,6 +8,8 @@
 
 A content-addressable geometric-attestation substrate built as a PostgreSQL extension + shared C/C++ engine + thin C# app layer. It **replaces** the conventional AI stack (model files, runtimes, RAG, vector DBs, fine-tuning, distillation). The substrate IS the model.
 
+Prompt text is ingested into the substrate before inference; it is not a context-window buffer. Runtime traversal is a compiled C/C++ cascade entered through one SQL-call SRF/operator, not recursive CTE traversal, cursors, or app-layer row-by-row loops. Glicko-2 consensus is arena-aware and source-trust-aware: raw repetition does not manufacture truth. AI model ingest is a codec; v0.1 proves model → substrate → sparse GGUF → chat for one source-scoped model before broader consensus synthesis.
+
 **It is NOT** another AI framework, vector database, RAG system, fine-tuning pipeline, or wrapper around llama.cpp / vLLM. Conventional AI reflexes are sabotage in this codebase.
 
 ---
@@ -34,6 +36,8 @@ In order:
 5. **DB as dumb columnar store.** All entity math in C/C++ before INSERT. Only Glicko-2 update runs SQL-side.
 6. **No modifying user-authored docs** without explicit user instruction.
 7. **Status tracking goes in `.agent/status/`** — never in user docs.
+8. **Prompt is ingestion; cascade is compiled.** No context-window architecture, RBAR, recursive CTE graph walk, cursors, or app-layer traversal loop.
+9. **Arena/source-trust semantics are mandatory.** Glicko-2 agreement/disagreement depends on kind semantics, context, source lineage, source credibility, RD/volatility, and structural support.
 
 ---
 
@@ -46,4 +50,4 @@ See [`../STANDARDS.md`](../STANDARDS.md) for the full spec. Highlights:
 - **Ratings:** `int64` fixed-point at scale 10⁹. Never float.
 - **Naming:** `snake_case` for SQL/C; `PascalCase` for C++ classes; `camelCase` for C# members.
 - **SIMD:** AVX2 on this dev box; design for AVX-512 deployment targets.
-- **Libraries:** Intel oneMKL, Eigen, Spectra, oneTBB, BLAKE3. **Not** HNSWLib, **not** oneDNN, **not** libxxhash (banned — superseded by BLAKE3 per ADR 0015).
+- **Libraries:** Intel oneMKL, Eigen, Spectra, oneTBB, BLAKE3. **Not** HNSWLib / FAISS / ScaNN, **not** oneDNN, **not** libxxhash (banned — superseded by BLAKE3 per ADR 0015).

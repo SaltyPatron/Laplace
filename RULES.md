@@ -270,6 +270,76 @@ Doc debt accumulates fast; the substrate is too young to afford that drift. This
 
 ---
 
+## R19 — Prompt is ingestion; cascade is compiled
+
+Prompts are substrate content. At request time, the prompt is decomposed into tiered entities and represented by a context entity/trajectory (ephemeral or durable by policy) before inference begins. Do NOT treat the prompt as an ephemeral forward-pass buffer or context-window payload.
+
+Cascade traversal is a compiled substrate operator exposed via SQL, not SQL-as-control-flow. The hot path is a C/C++ set-returning function that owns frontier management, A* priority queues, visited sets, tier transitions, context checks, effective-score ranking, and early abstention. PostgreSQL provides storage, MVCC visibility, and indexes; SPI/executor access may perform batched, prepared, indexed lookups.
+
+**Forbidden on the hot path:** app-layer row-by-row SELECT loops, recursive CTE graph search, cursor-driven traversal, or RBAR patterns that bounce between client and database for each frontier step.
+
+---
+
+## R20 — Arena semantics and source trust are mandatory
+
+Every attestation kind that participates in rating composition belongs to an arena with explicit semantics: compatibility, cardinality, context policy, competition set, source-trust policy, and effective-score inputs. Glicko-2 updates MUST interpret agreement/disagreement through those arena semantics.
+
+Raw source counts are never consensus. Source credibility is tracked per source per attestation kind, and source trust classes are part of the prior: foundational constants, standards-derived sources, curated academic resources, academically linked user-curated resources, structured corpora, AI-model probe observations, and prompt-local/user content. Correlated source families do not become independent tugs merely by repetition.
+
+Unsupported or low-trust claims MAY be stored as source-scoped observations, but they do not win strict traversal or synthesis scopes unless they survive the relevant arena competition against higher-trust, structurally supported evidence.
+
+---
+
+## R21 — Layered seed ingestion and model-codec fidelity
+
+Early ingestion follows the layered seed order in [ADR 0037](docs/adr/0037-layered-seed-ingestion-and-model-codec-fidelity.md): Unicode/UCD/UCA/UAX, language registries, WordNet, OMW, UD, Wiktionary, Tatoeba/audio, ConceptNet/Atomic2020, tree-sitter/code, corpora, then AI model sources. Each layer adds explicit fidelity channels before later sources arrive.
+
+AI model ingestion is a codec. `TransformerModelSource` records the model recipe, tokenizer content, source physicalities, probe observations, architecture-specific attestation arenas, and lottery-ticket sparse load-bearing structure. If source-scoped ingestion is faithful and synthesis uses the source recipe/scope, missing behavior is an implementation/codec bug, not an accepted architectural gap.
+
+The v0.1 proof may be narrow: Unicode-derived T0 + one Qwen-family source model + sparse attestations + GGUF emission + chat verification. It does not need the full omniglottal seed stack to prove the AI⇄DB codec.
+
+---
+
+## R22 — Use existing types; invent only where the read pattern requires it
+
+The submodules under `external/` (per [ADR 0033](docs/adr/0033-all-deps-as-submodules.md)) aren't only build inputs — they're **reference material**. The exact type definitions we'll link against are in our tree, readable.
+
+### Before defining any C/C++ struct, typedef, or class
+
+1. **Read the relevant submodule header first.** `external/postgis/liblwgeom/liblwgeom.h.in`, `external/postgresql/src/include/...`, `external/eigen/Eigen/...`, `external/blake3/c/blake3.h`, `external/spectra/include/Spectra/...`. Don't scaffold from training-data recollection of what an API "probably" looks like.
+2. **If the upstream provides a type that fits, use it directly.** Examples:
+   - `POINT4D` from liblwgeom — NOT a parallel `coord4d_t` typedef
+   - `LWPOINT`, `LWLINE`, `LWPOLY`, `LWMPOINT`, `LWGEOM` — NOT a parallel `geometry4d_t`
+   - `Eigen::Matrix<double, 4, 1>` — NOT a hand-rolled 4-vector struct
+   - `Eigen::Affine3d` / `Eigen::Transform` — NOT a hand-rolled affine struct
+3. **Type-erased C ABI handles** (`procrustes_transform_t*`, `astar_query_t*`) are still permitted — they exist to bridge C++ templates/classes into the C ABI per [R14](#r14--c-abi-at-engine-boundaries). The C-side handle is opaque; the upstream type lives inside.
+
+### Invent a type only when
+
+1. **No upstream provides the concept.** Substrate-specific inventions: `mantissa_payload_t` (ADR 0012), `glicko2_state_t` (ADR 0004), `astar_query_t` (cascade traversal), plugin interfaces (`ISource`/`IDecomposer`/...), `Recipe` (ADR 0009).
+2. **The dominant read pattern needs a layout no existing type provides.** Example: `hash128_t = {uint64_t hi, uint64_t lo}` exists because mantissa-pack (ADR 0012) writes hi and lo into *different coordinate mantissas* — a `uint8_t[16]` layout would force byte-reconstruction at every pack/unpack site. The `{hi, lo}` layout is load-bearing for the substrate's hot read path.
+
+### Document the read pattern in the header
+
+When inventing a layout, the header comment must name the read sites that justify the layout. If you can't name a recurring read pattern, the type is a vanity wrapper — delete it.
+
+### The acid test
+
+Before adding any struct or typedef, ask: *"Could a contributor reasonably ask 'Why didn't we just use X from `external/<dep>`?'"* If yes — use X. If no — document why.
+
+### What this rules out
+
+- Typedefs that duplicate an upstream type with a different name (`coord4d_t` when `POINT4D` exists).
+- "Type safety" wrappers around `bytea` / `uint8_t[]` when no read site benefits.
+- Custom WKB parsers when `lwgeom_from_gserialized` exists.
+- Custom dense-linalg primitives when Eigen is linked.
+- Custom sparse-eigensolvers when Spectra is linked.
+- Custom thread-pool when oneTBB is linked.
+
+This rule operationalizes [memory: project_code_against_repo](`/home/ahart/.claude/projects/-home-ahart-Projects-Laplace/memory/project_code_against_repo.md`) for type-definition decisions specifically. The substrate is read-heavy by design; type decisions optimize the dominant read pattern, not the write pattern.
+
+---
+
 ## When a rule conflicts with reality
 
 If you discover a rule that genuinely cannot be followed (e.g., a PostgreSQL limitation that forces a workaround), **surface it to the user immediately**. Do not silently violate. Do not engineer around it without authorization.

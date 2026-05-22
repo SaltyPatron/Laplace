@@ -26,6 +26,9 @@ Closes #
 - [ ] No new banned-vocabulary mentions outside allowlist (RULES.md R0)
 - [ ] No `-ffast-math` introduced on hot paths (STANDARDS.md / RULES.md R7)
 - [ ] No silent failures, no flat thresholds, no MVPs (RULES.md R9)
+- [ ] Prompt/cascade work preserves ADR 0035 (prompt ingestion + compiled cascade, no RBAR/recursive CTE/cursor/app-loop hot path)
+- [ ] Consensus/source work preserves ADR 0036 (arena semantics + source trust/source lineage, no raw repetition as truth)
+- [ ] Model-ingest/synthesis work preserves ADR 0037 (model ingest as codec; exact-zero sparse emission where unsupported)
 
 ## Architectural impact
 
@@ -33,9 +36,11 @@ Closes #
 
 - [ ] Schema (entities / physicalities / attestations)
 - [ ] Engine C ABI (laplace.h)
-- [ ] PG extension surface (laplace--*.sql)
+- [ ] PG extension surface (`.sql.in` modules / generated `--*.sql`)
 - [ ] C# app boundary (P/Invoke signatures)
 - [ ] Plugin interfaces (ISource / IDecomposer / etc.)
+- [ ] Prompt ingestion / cascade traversal
+- [ ] Arena semantics / source trust policy
 - [ ] Build system (CMakeLists.txt / Makefile / Justfile)
 - [ ] Dependencies (STANDARDS.md dep table)
 

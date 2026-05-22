@@ -20,7 +20,7 @@ Chunk-based, not phase-based. Each chunk:
 
 **Unit:** turns of focused agent work. **NOT** human-weeks.
 
-**Milestone:** ingest Qwen3 → emit Qwen3-roundtrip from substrate → load in llama.cpp → chat with it.
+**Milestone:** ingest Qwen-family model → native substrate cascade over source-scoped state → emit sparse Qwen round-trip GGUF from substrate → load in llama.cpp → chat with it under fixed prompt/sampler settings.
 
 ---
 
@@ -28,10 +28,10 @@ Chunk-based, not phase-based. Each chunk:
 
 **Deliverables:**
 - This file (`.agent/status/plan.md`)
-- Dep sources locked in STANDARDS.md (Eigen apt, oneMKL/TBB oneAPI, Spectra FetchContent v1.2.0, tree-sitter system, ...)
+- Dep sources locked in STANDARDS.md/ADRs (direct C/C++ deps as submodules under `external/`; Intel oneAPI as the sole vendor install exception)
 - `engine/`, `extension/`, `app/`, `scripts/` scaffolded
 - `engine/CMakeLists.txt` orchestrates three shared libraries per ADR 0024 (`liblaplace_core.so`, `liblaplace_dynamics.so`, `liblaplace_synthesis.so`); each subdir has its own CMakeLists
-- `extension/Makefile` (PGXS) produces `laplace.so` loadable via `CREATE EXTENSION laplace;`
+- Unified CMake + modular `.sql.in` SQLPP produces extension `.so`s and install SQL loadable via `CREATE EXTENSION laplace_geom; CREATE EXTENSION laplace_substrate;`
 - `app/Laplace.Engine` C# project with placeholder P/Invoke bindings
 - `scripts/check-prereqs.sh` (real impl); other scripts stubbed
 - `integration.yml` workflow extended with `build` job
@@ -98,6 +98,7 @@ Chunk-based, not phase-based. Each chunk:
 - [ ] `just build-perfcache` → deterministic `data/perfcache.bin` (re-run produces byte-identical output)
 - [ ] `just seed-t0` inserts 1,114,112 T0 entity rows
 - [ ] `just verify-perfcache` confirms perf-cache and DB seed match byte-for-byte
+- [ ] Prompt/entity decomposition can compute codepoint hash/coord/Hilbert/UCA/flags from perf-cache with no per-codepoint DB round trip
 - [ ] Cross-machine determinism (or strongly bounded — verify via CI)
 
 ---
@@ -121,18 +122,21 @@ Chunk-based, not phase-based. Each chunk:
 
 ## Chunk 5 — Glicko-2 + cross-source dynamics
 
-**Scope:** Fixed-point int64 Glicko-2 update; `CREATE AGGREGATE`; source-credibility-per-kind via meta-attestations.
+**Scope:** Fixed-point int64 Glicko-2 update; `CREATE AGGREGATE`; source-credibility-per-kind via meta-attestations; arena semantics for compatibility/cardinality/context/competition/source trust.
 
 **Deliverables:**
 - `engine/include/laplace/glicko2.h` + impl + tests
 - PG `CREATE AGGREGATE laplace_glicko2_accumulate`
 - `engine/src/credibility.cpp` (cross-source consensus + credibility derivation)
+- Arena metadata for core kinds (multi-valued POS, functional current-capital style relations, source-local/prompt-local modes)
 - ConceptNet source plugin (gives us a second source for cross-source tests)
 
 **Acceptance:**
 - [ ] Glicko-2 unit tests pass: rating progresses with observations; converges; deterministic across runs
 - [ ] Cross-source test: ingest WordNet + ConceptNet on same fact → consensus rating reflects both
 - [ ] Source credibility updates correctly when sources disagree
+- [ ] Correlated/repeated low-trust assertions do not count as independent consensus
+- [ ] Effective mu calculation includes rating/RD/volatility/source-kind credibility/context compatibility
 
 ---
 
@@ -154,6 +158,7 @@ Chunk-based, not phase-based. Each chunk:
 - [ ] Physicalities populated for shared anchor codepoints; alignment_residual reasonable
 - [ ] Attestation count ≤ ~5% of naive parameter count (lottery-ticket-aware sparsity working)
 - [ ] Recipe entity present with typed attestations (HAS_HIDDEN_SIZE, HAS_NUM_LAYERS, etc.)
+- [ ] Source-scoped codec verification identifies recipe/tokenizer/physicality/probe/sparse-attestation coverage gaps explicitly
 
 ---
 
@@ -173,7 +178,7 @@ Chunk-based, not phase-based. Each chunk:
 **Acceptance:**
 - [ ] `just synthesize recipes/qwen3-roundtrip.json` produces a valid GGUF file
 - [ ] llama.cpp `llama-cli` loads the GGUF without errors
-- [ ] Sparse-by-construction emission: actual zero count > 50% (lottery-ticket implication realized in output)
+- [ ] Sparse-by-construction emission: actual zero count > 50% and unsupported positions are exact zero, not tiny nonzero jitter
 
 ---
 
@@ -181,15 +186,15 @@ Chunk-based, not phase-based. Each chunk:
 
 **Scope:** The headline test — chat with a substrate-synthesized model.
 
-**Deliverables:**
-- `scripts/roundtrip.sh` (real: ingest → synthesize → load in llama-cli)
+- `scripts/roundtrip.sh` (real: ingest → native substrate cascade → synthesize → load in llama-cli)
 - Integration test: end-to-end roundtrip on Qwen3-0.6B
 - CI workflow extended to run the round-trip test on self-hosted
 
 **Acceptance:**
 - [ ] `just roundtrip /vault/models/qwen3-0.6b` succeeds
+- [ ] Native substrate cascade answers the smoke prompt through prompt ingestion + compiled cascade, not context-window buffering
 - [ ] `llama-cli` loads the output GGUF
-- [ ] Chat session: "What is the capital of France?" → coherent response
+- [ ] Three-way smoke prompt: stock source model / native substrate / exported GGUF on "Hello! Tell me something interesting." land in the same source-scoped behavioral basin
 - [ ] Round-trip CI workflow passes on `hart-server`
 
 ---

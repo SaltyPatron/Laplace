@@ -23,7 +23,7 @@ Changelog entries are generated from [Conventional Commits](https://www.conventi
 - Scripts: `check-prereqs.sh` (real), `bootstrap-laplace-runner.sh` (Layer-0 root setup with idempotent + resettable modes), `setup-host.sh` (one-shot Layer 0 + Layer 1 wrapper), other operational stubs
 - Issue + PR templates
 - LICENSE (proprietary — Anthony Hart sole inventor)
-- SDLC framework: this CHANGELOG, ADR directory under `docs/adr/` (32 ADRs covering every architectural decision through this session), release-please workflow, Conventional Commits enforcement, pre-commit hooks
+- SDLC framework: this CHANGELOG, ADR directory under `docs/adr/` (37 ADRs covering every architectural decision through this session), release-please workflow, Conventional Commits enforcement, pre-commit hooks
 - Definition of Done in CONTRIBUTING.md (Code / Documentation / Migrations / Commits / Retros sections — no partials)
 - Chunk-retro discipline: `.agent/retros/chunk-<N>-retro.md` per chunk, written before the chunk closes
 - **Architectural overhaul (ADRs 0024–0032):**
@@ -39,6 +39,7 @@ Changelog entries are generated from [Conventional Commits](https://www.conventi
 - **GitHub issue refactor:** 5 new Epics (A, B, B′, D + Spike S1) + 50 new Stories created and wired to milestone v0.1.0 with module/area/priority labels; 5 opclass Stories slotted into existing Chunks 1, 2, 3, 5
 - **Memory notes:** `feedback_conventional_db_reflex.md`, `project_code_against_repo.md`, `feedback_no_bandaids_on_chunk0.md`, `feedback_setup_host_is_one_time.md`, `feedback_transparency_over_workarounds.md`
 - **End-to-end CI green** on commit `ab8f62b` — capabilities → build → db-ensure (DbUp) → smoke-test all passing
+- **Concept-capture ADRs (0035-0037):** prompt ingestion + compiled cascade traversal, arena/source-trust consensus, layered seed ingestion + model-codec fidelity.
 
 ### Changed
 
@@ -56,6 +57,8 @@ Changelog entries are generated from [Conventional Commits](https://www.conventi
 - `RULES.md` R14: references all 3 engine libraries + 2 PG extensions (was singular "the C/C++ engine library").
 - `RULES.md` R15: BLAKE3 replaces libxxhash on approved list; pgvector family explicitly banned.
 - New `RULES.md` R16: separation-of-concerns invariants codified.
+- New `RULES.md` R19-R21: prompt is ingestion and cascade is compiled; arena/source-trust semantics are mandatory; AI model ingest is a codec with source-scoped round-trip fidelity as a v0.1 proof target.
+- Canonical docs and agent instructions refreshed to preserve prompt ingestion, compiled cascade, exact-zero sparse emission, source trust/effective mu, truth-clustering, seed-source order, and stock/substrate/export round-trip comparison.
 
 ### Fixed
 
@@ -67,6 +70,6 @@ Changelog entries are generated from [Conventional Commits](https://www.conventi
 
 ### Decisions
 
-See [docs/adr/](docs/adr/) for architectural decision records (current count: 32, with explicit supersedence chains for 0003→0015 and 0014→0019, narrowed scope from 0021→0023, expanded from 0023→0025 with PG extension split, ADR 0029 amends RULES.md R1, ADR 0032 locks ADR 0028 as prerequisite).
+See [docs/adr/](docs/adr/) for architectural decision records (current count: 37, with explicit supersedence chains for 0003→0015 and 0014→0019, narrowed scope from 0021→0023, expanded from 0023→0025 with PG extension split, ADR 0029 amends RULES.md R1, ADR 0032 locks ADR 0028 as prerequisite, ADRs 0035-0037 lock prompt/cascade, source-trust, and model-codec semantics).
 
 [Unreleased]: https://github.com/SaltyPatron/Laplace/compare/HEAD...HEAD

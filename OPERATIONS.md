@@ -84,11 +84,13 @@ build-engine:
         -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx
     cd engine && cmake --build build
 
-# Build the PostgreSQL extension (PGXS)
+# Build the PostgreSQL extension.
+# Current bridge path uses PGXS until Epic B/B' lands the full ADR 0032 CMake build.
 build-extension:
     cd extension && make USE_PGXS=1 PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
 
-# Install the PG extension into the cluster
+# Install the PG extension into the cluster.
+# Current bridge path uses PGXS until Epic B/B' lands the full ADR 0032 CMake build.
 install-extension: build-extension
     cd extension && sudo make USE_PGXS=1 PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config install
 
@@ -252,8 +254,36 @@ Per-source procedure:
 ### Query
 
 - Raw SQL: `just query "<sql>"` → standard psql
-- Cascade inference: `just cascade "<prompt>"` → goes through the engine; substrate query, not SQL
-- Substrate Synthesis: `just synthesize <recipe.json>` → emits a model file
+- Cascade inference: `just cascade "<prompt>"` → prompt is ingested as substrate content, then one compiled cascade call walks indexed attestations through the engine
+- Substrate Synthesis: `just synthesize <recipe.json>` → emits a sparse model file from substrate state
+
+`just cascade` is not a raw SQL graph traversal and not an app-layer loop issuing repeated SELECTs. The CLI calls into the app layer, which invokes the database SRF/operator surface; the C/C++ engine owns prompt decomposition, context entity creation/reference, frontier management, A*, tier transitions, source-scope filtering, effective-score ordering, and abstention. PostgreSQL supplies indexes and MVCC visibility.
+
+Prompts have no context-window primitive. A prompt can be ephemeral or durable by policy, but either way it becomes content in the tiered entity DAG before traversal begins. The practical limits are ingestion cost, storage policy, and traversal budget.
+
+Traversal modes are operational choices:
+
+- `strict` — high effective mu, low RD, trusted source scopes; abstain when support is weak or conflicting
+- `speculative` — allow uncertain paths but return uncertainty and source traces
+- `creative` / `fiction` — allow lower-rated or context-marked walks under explicit mode labels
+
+### Round-trip comparison target
+
+Chunk 8's `just roundtrip <model_path>` implementation compares three surfaces under fixed prompt and sampler settings:
+
+```text
+stock source model      → original model package loaded directly
+native substrate        → prompt ingestion + compiled cascade over source-scoped substrate state
+synthesized export      → GGUF emitted from the same source-scoped recipe/scope
+```
+
+The default smoke prompt is:
+
+```text
+Hello! Tell me something interesting.
+```
+
+For source-scoped tests, differences should point to the model-ingest codec, sparse gate settings, synthesis writer, or sampler/runtime settings. Broader consensus synthesis may intentionally diverge by changing source scope and trust policy.
 
 ### Update
 

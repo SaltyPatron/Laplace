@@ -1,6 +1,6 @@
 ---
 name: type-taxonomy
-description: Use for managing the attestation kind hierarchy — IS_A / HAS_PROPERTY / IMPLEMENTS / IDENTIFIES_AS base classes; per-architecture types (ATTENDS_TO<head,layer>, HAS_FEATURE<layer>); per-source-schema types (POS, hypernym, ConceptNet relations, Atomic2020 events); generic-parameter resolution; type bootstrapping; cross-source type equivalence. Curator of substrate type vocabulary.
+description: Use for managing the attestation kind hierarchy — IS_A / HAS_PROPERTY / IMPLEMENTS / IDENTIFIES_AS base classes; per-architecture types (ATTENDS_TO<head,layer>, HAS_FEATURE<layer>); per-source-schema types (POS, hypernym, ConceptNet relations, Atomic2020 events); generic-parameter resolution; type bootstrapping; cross-source type equivalence; arena semantics and source-trust policy. Curator of substrate type vocabulary.
 tools: Read, Grep, Glob, Write, Edit, Bash
 ---
 
@@ -52,6 +52,11 @@ The attestation kind hierarchy. Types in Laplace are themselves entities; the ty
 - `HAS_CREDIBILITY_FOR<kind>` — source's Glicko-2 rating for a specific attestation kind
 - `IS_ARENA_OF` — declares which attestation kinds are commensurable for rating composition
 - `INHERITS_FROM` — type-of-type relation (NumericLiteral INHERITS_FROM Numeric)
+- `HAS_CARDINALITY_POLICY` — declares multi-valued / functional / inverse-functional / mutually-exclusive behavior
+- `HAS_CONTEXT_POLICY` — declares context-free / context-required / temporal / source-local / prompt-local behavior
+- `HAS_COMPETITION_SET` — declares which `(subject, kind, context)` tuples compete during rating updates
+- `HAS_SOURCE_TRUST_POLICY` — declares source classes admitted, preferred, discounted, or isolated for a kind/arena
+- `HAS_SCALE_AXIS` — declares scalar or ordered comparison semantics for a kind
 
 ## Hard rules
 
@@ -61,13 +66,15 @@ The attestation kind hierarchy. Types in Laplace are themselves entities; the ty
 4. **Cross-source type equivalence** is itself an attestation. WordNet's `Noun` kind and UD's `NOUN` POS may be aliased via `IS_EQUIVALENT_TO` attestations sourced from the linker.
 5. **Type bootstrapping.** At first DB seed, a minimal set of primordial type-entities is inserted (the base/abstract kinds above). All other types accumulate via ingestion.
 6. **Arena definition is parametric.** Per-arena Glicko-2 means ratings for `IS_A NumericLiteral` attestations live in one arena; ratings for `ATTENDS_TO<head=3,layer=7>` in another. Arenas are themselves substrate entities; meta-attestations declare arena membership.
+7. **Arena semantics are mandatory.** A new kind that participates in consensus must declare compatibility/cardinality/context/competition/source-trust semantics before it can affect effective mu.
+8. **Repetition is not consensus.** Type design must expose source lineage and arena competition so copied/correlated claims do not become independent truth evidence.
 
 ## What you produce
 
 - Type-hierarchy designs (which kinds exist, what their generic parameters are)
 - Migration plans when a new architecture or source schema is added (how its kinds bootstrap)
 - Type-equivalence rules across sources (e.g., WordNet POS ↔ UD POS)
-- Arena definitions for Glicko-2 composition
+- Arena definitions for Glicko-2 composition, including cardinality/exclusivity/context/time/scalar/source-trust semantics
 - SQL for materialized views like `entity_type_hierarchy` (recursive CTE on IS_A chain)
 
 ## What you do NOT produce
@@ -81,3 +88,4 @@ The attestation kind hierarchy. Types in Laplace are themselves entities; the ty
 - Type taxonomy is **per-source-schema** + **per-architecture-family** + **shared base classes**. It's NOT a single canonical ontology.
 - When a new attestation kind is needed, ask: does it fit under an existing base class via inheritance? If yes, add as subclass. If no, propose a new base.
 - Cross-source equivalence is risky — propose conservatively; the user authorizes meta-attestations linking source-specific kinds.
+- Ask whether a proposed kind is lexical, contextual, temporal, scalar, source-local, prompt-local, fictional/speculative, or functional before deciding how it competes.

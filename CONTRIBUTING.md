@@ -63,6 +63,8 @@ A chunk is **Done** only when *every* item below is checked. No partials. No "I'
 - [ ] No silent failures. Every error path is explicit. Every fallback is logged with a `WARNING` ereport at minimum.
 - [ ] No fabricated scaffolding (placeholder files / stubbed-out functions / "TODO: implement"). Either land it or don't.
 - [ ] No conventional-AI pattern matching (HNSW / FAISS / RAG / fine-tuning / GEMM-on-hot-path). When tempted, engage the `conventional-ai-skeptic` agent first.
+- [ ] Prompt/cascade work preserves ADR 0035: prompt is ingested substrate content; cascade traversal is a compiled C/C++ SRF/operator, not recursive SQL, cursor traversal, or app-layer row-by-row SELECT loops.
+- [ ] Consensus work preserves ADR 0036: arena semantics and source trust/source lineage are explicit; raw repetition never counts as truth.
 - [ ] No raw-`byte[]` → hex casts, no float ↔ int churn in hot loops, no unnecessary type conversions ([STANDARDS.md](STANDARDS.md)).
 
 ### Documentation
@@ -74,7 +76,7 @@ A chunk is **Done** only when *every* item below is checked. No partials. No "I'
 
 ### Migrations & extension
 
-- [ ] If the chunk introduces substrate schema (entities/physicalities/attestations columns, new types, new functions): the change lands in `extension/laplace--<from>--<to>.sql` and bumps `default_version` in `laplace.control`. NOT in `db/migrations/`. (Per [ADR 0023](docs/adr/0023-extension-owns-schema-dbup-orchestrates.md).)
+- [ ] If the chunk introduces substrate schema (entities/physicalities/attestations columns, new types, new functions): the change lands in the relevant extension `.sql.in` sources and bumps `default_version` in the matching `.control` file. NOT in `db/migrations/`. (Per [ADR 0023](docs/adr/0023-extension-owns-schema-dbup-orchestrates.md) + [ADR 0034](docs/adr/0034-modular-sql-via-cpp-preprocessor.md).)
 - [ ] If the chunk introduces cross-extension orchestration or non-extension operational tables: that goes in `db/migrations/<timestamp>_<name>.sql` via `just migrate-new <name>`.
 - [ ] Idempotent SQL only — `CREATE ... IF NOT EXISTS`, `DO $$ ... END $$` for conditional grants, etc.
 - [ ] `just db-up` succeeds on a clean target (`just db-nuke && just db-up`).
@@ -240,7 +242,10 @@ See [RULES.md](RULES.md). The headline rules:
 3. **Three tables only.** No event log; attestation IS consensus state.
 4. **Lottery-ticket-aware sparsity — NEVER flat thresholds.**
 5. **DB as dumb columnar store; entity math in C/C++.**
-6. **No status updates in user-authored docs** — `.agent/status/` is for status.
+6. **Prompt is ingestion; cascade is compiled.** No context-window buffers, RBAR, cursors, recursive CTE hot path, or app-layer traversal loops.
+7. **Arena/source trust semantics are mandatory.** Glicko-2 is not raw vote counting.
+8. **AI model ingest is a codec.** Source-scoped round-trip fidelity is a verification target, not optional behavior.
+9. **No status updates in user-authored docs** — `.agent/status/` is for status.
 
 ---
 

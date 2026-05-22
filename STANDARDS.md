@@ -12,6 +12,7 @@ These are the binding standards for all code in this project. Inconsistency here
 | Entity hash | `uint128` stored as `bytea(16)` in PG (with `hash128` typed wrapper from `laplace_geom`); `hash128_t = {uint64_t hi, lo}` in C/C++ | BLAKE3 truncated to 128 bits (per ADR 0015); collision-safe for ~10¹⁸ entities; **raw bytes only — never hex/text** |
 | Hilbert curve index | `uint128` stored as `bytea(16)` in PG; `hilbert128_t = {uint64_t hi, lo}` in C/C++ | 4D × 32-bit-per-dim |
 | Glicko-2 rating / RD / volatility | `int64` fixed-point, scale = 10⁹ | Deterministic, vectorizable, no FP drift |
+| Effective mu | `int64` fixed-point, scale = 10⁹ | Derived from rating/RD/volatility/source credibility/context compatibility; never stored as float |
 | Tier ID | `uint8` (range 0–255) | 256 tiers max — wildly sufficient |
 | Constituent count / RLE length | `uint32` | Generous; rarely a hot field |
 | Entity identity | The hash itself | NO separate ID column; content-addressable PK |
@@ -24,6 +25,7 @@ These are the binding standards for all code in this project. Inconsistency here
 
 - All coordinate math: `float64` (`double` in C/C++; `double precision` in PG; `double` in C#). Never introduce `float32`/`single` in the same kernel.
 - All Glicko-2 math: `int64` fixed-point. Never convert to float for arithmetic.
+- All effective-score math used by traversal/synthesis: `int64` fixed-point. If a formula needs normalization, do it with deterministic integer scaling.
 - Eigen vector type: `Eigen::Matrix<double, 4, 1>` everywhere. **No `Vector4f` for "memory savings"** — the cast cost beats the storage cost.
 - Postgres-side: native types (`float8`, `int8`, `bytea`) matching C type sizes exactly. Zero marshaling overhead.
 - C#-side: `double` for coords, `long` for ratings, `byte[]` for hashes/Hilbert. `[StructLayout(LayoutKind.Sequential)]` so .NET layouts match C structs byte-for-byte.
@@ -85,6 +87,13 @@ These are the binding standards for all code in this project. Inconsistency here
 - **PG extension wrappers:** `PG_TRY` / `PG_CATCH` around any code that might raise. `ereport(ERROR, ...)` for malformed input. **Never** return garbage; never silently ignore.
 - **C/C++ engine:** return-code based (`int` or enum) for fallible operations. Errors populate a thread-local error context inspectable via `engine_last_error()`. Engine functions DO NOT throw C++ exceptions across the C ABI boundary.
 - **C# app:** standard exception-based error handling. P/Invoke wrappers translate engine return codes into managed exceptions.
+
+### Hot-path boundaries
+
+- **Cascade traversal:** one SQL-call SRF/operator enters C/C++; the engine owns frontier queues, visited sets, A*, tier transitions, effective-mu ordering, and abstention. Do not implement hot-path traversal with recursive CTEs, cursors, or app-layer SELECT loops.
+- **Prompt handling:** prompt bytes are decomposed to substrate entities/context before traversal. Do not pass prompt text around as a transformer-style context buffer.
+- **SPI usage:** only batched, prepared, indexed lookups requested by the engine. No per-edge executor bounce.
+- **Sparse synthesis:** unsupported tensor positions are exact zero. Do not add tiny nonzero noise to avoid zeros.
 
 ### Memory management
 

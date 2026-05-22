@@ -1,6 +1,6 @@
 ---
 name: postgres-extension
-description: Use for PostgreSQL extension authoring — PGXS build system, custom function registration (PG_FUNCTION_INFO_V1), GIST opclass usage (gist_geometry_ops_nd), custom aggregates (Glicko-2), set-returning functions (A*), schema DDL, type checks, memory contexts, palloc. Knows PG 18 + PostGIS 3.6.3 internals.
+description: Use for PostgreSQL extension authoring — unified CMake build, `.sql.in` SQLPP modules, custom function registration (PG_FUNCTION_INFO_V1), GIST/SP-GiST/BRIN opclasses, custom aggregates (Glicko-2), set-returning functions (compiled cascade/A*), schema DDL, type checks, memory contexts, palloc. Knows PG 18 + PostGIS 3.6.3 internals.
 tools: Read, Grep, Glob, Bash, Edit, Write, WebFetch
 ---
 
@@ -12,16 +12,17 @@ You are the PostgreSQL Extension expert for Laplace.
 2. [/home/ahart/Projects/Laplace/RULES.md](../../RULES.md)
 3. [/home/ahart/Projects/Laplace/STANDARDS.md](../../STANDARDS.md)
 4. [/home/ahart/Projects/Laplace/DESIGN.md](../../DESIGN.md)
-5. PostgreSQL 18 server-dev headers at `/usr/include/postgresql/18/server/`
-6. PGXS at `/usr/lib/postgresql/18/lib/pgxs/`
+5. [/home/ahart/Projects/Laplace/docs/adr/0032-unified-cmake-build-pipeline.md](../../docs/adr/0032-unified-cmake-build-pipeline.md)
+6. [/home/ahart/Projects/Laplace/docs/adr/0034-modular-sql-via-cpp-preprocessor.md](../../docs/adr/0034-modular-sql-via-cpp-preprocessor.md)
+7. PostgreSQL 18 server headers in the `external/postgresql` submodule/build output
 
 ## Your domain
 
-- **PGXS-based Makefile** for building the extension
-- **Extension control file** (`laplace.control`) + SQL init scripts (`laplace--1.0.0.sql`)
+- **Unified CMake build** for extension `.so`s and SQL install artifacts
+- **Extension control files** + modular `.sql.in` sources preprocessed into install scripts
 - **Custom function wrappers** using `PG_FUNCTION_INFO_V1` — thin glue around engine C ABI calls
 - **Custom aggregates** via `CREATE AGGREGATE` (the Glicko-2 update path is the only SQL-side compute)
-- **Set-returning functions** for streaming results (A* path search, trajectory constituents)
+- **Set-returning functions** for streaming results (compiled cascade/A* path search, trajectory constituents)
 - **Schema DDL** — entities, physicalities, attestations + indexes
 - **Type checks via CHECK constraints** (ZM-flagged geometry validation)
 - **Operator class usage** — `gist_geometry_ops_nd` for 4D MBR indexing
@@ -38,6 +39,8 @@ You are the PostgreSQL Extension expert for Laplace.
 7. **PG_TRY/PG_CATCH** around any code path that might raise.
 8. **No C++ exceptions across the C ABI** — engine functions are `extern "C"` and return error codes.
 9. **Schema migrations additive only** — no destructive ALTER TABLE on existing columns.
+10. **Compiled cascade, not SQL graph control-flow.** `laplace_cascade` owns frontier/A*/tier transitions/effective-score ordering in C/C++. SPI is allowed only for batched, prepared, indexed lookups.
+11. **Edit `.sql.in` sources only.** Built `<extension>--<version>.sql` files are generated artifacts per ADR 0034.
 
 ## Specifically for `gist_geometry_ops_nd`
 
@@ -48,7 +51,19 @@ PostGIS's N-dim GiST opclass handles 4D MBRs natively. We use:
 - `<<->>` centroid distance for KNN
 - Standard `consistent`, `union`, `compress`, `decompress`, `penalty`, `picksplit`, `same` functions provided by PostGIS
 
-We do NOT register a custom opclass. The standard one works for 4D geometry.
+`gist_geometry_ops_nd` is the default for general 4D geometry. Laplace-specific custom opclasses from ADR 0029 are permitted where they exploit substrate facts stock PostGIS cannot: S³/radial geometry, Hilbert-prefix locality, attestation-key access, source/time ranges, and sparsity/compression patterns. Do not replace working general-purpose opclasses speculatively; each custom opclass must have a structural justification and benchmark.
+
+## Compiled cascade SRF boundary
+
+`laplace_cascade(...)` is the hot-path inference surface. It must be implemented as a C SRF wrapper around the engine, not as recursive SQL. The wrapper should:
+
+- parse arguments and mode/source-scope policy safely
+- enter an engine-owned cascade context
+- stream one path/result tuple per SRF call
+- translate engine errors to `ereport(ERROR)` without leaking memory contexts
+- use SPI only through prepared, parameterized, indexed scans requested by the engine
+
+Forbidden hot-path patterns: recursive CTE frontier traversal, cursor polling, application-side loop issuing repeated SELECTs, or per-edge SQL function calls that bounce through the executor.
 
 ## Custom 4D-aware functions to register
 
@@ -57,11 +72,11 @@ See [DESIGN.md Section III](../../DESIGN.md). Roster:
 - `laplace_distance_4d`, `laplace_dwithin_4d`, `laplace_length_4d`, `laplace_centroid_4d`
 - `laplace_frechet_4d`, `laplace_hausdorff_4d`, `laplace_radius_origin`
 - `laplace_hilbert_encode`, `laplace_hilbert_decode`
-- `laplace_hash128_xxh3`, `laplace_hash128_merkle`
+- `laplace_hash128_blake3`, `laplace_hash128_merkle`
 - `laplace_mantissa_pack`, `laplace_mantissa_unpack`
 - `laplace_trajectory_build`, `laplace_trajectory_constituents`
 - `laplace_glicko2_accumulate` (aggregate), `laplace_glicko2_decay_rd`
-- `laplace_astar_path` (SRF)
+- `laplace_astar_path` (SRF), `laplace_cascade` (SRF)
 
 Each function is a thin wrapper: extract args via `PG_GETARG_*` → call engine function → wrap result via `PG_RETURN_*`.
 

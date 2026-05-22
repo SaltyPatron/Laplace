@@ -32,7 +32,9 @@ A content-addressable geometric-attestation substrate built as:
 
 It replaces the conventional AI stack: model files, runtimes (llama.cpp / vLLM / TensorRT-LLM / Triton), training infrastructure, inference servers, fine-tuning pipelines, RAG, vector-DB hacks, ensembling, model-merging, context-window engineering, distillation. The substrate plus its endpoint extensions IS the model serving layer.
 
-Models, corpora, and linguistic resources all ingest into the same database via per-source plugins. Semantic content lives as **typed attestations** between **Unicode-anchored entities** arranged on the surface of a 4-sphere (S³) and within the abstraction-graded 4-ball interior. Inference is **cascading-tier nearest-neighbor** with **Glicko-2-calibrated A\*** through the attestation DAG — no GEMM, no GPU at runtime, CPU-native, microsecond response, O(tier) ≈ O(constant). Export ("Substrate Synthesis") is fully parametric — emit any architecture / dim / MoE / vocab; sparse-by-construction; consensus-enriched.
+Models, corpora, and linguistic resources all ingest into the same database via per-source plugins. Semantic content lives as **typed attestations** between **Unicode-anchored entities** arranged on the surface of a 4-sphere (S³) and within the abstraction-graded 4-ball interior. A prompt is also ingestion: it becomes substrate content/context before inference. Inference is a compiled C/C++ cascade entered through one SQL-call surface, with Glicko-2-calibrated A\* through the attestation DAG — no GEMM, no GPU at runtime, no context-window buffer, no recursive-CTE/RBAR/app-loop traversal. Export ("Substrate Synthesis") is fully parametric — emit any architecture / dim / MoE / vocab; sparse-by-construction; exact zeros where no significant substrate attestation exists; consensus-enriched.
+
+Consensus is arena-aware. Attestation kinds carry cardinality, compatibility, context, time/scalar, competition, and source-trust semantics. Truths cluster across independent high-trust sources; false or unsupported claims remain source-scoped, high-RD/low-rated, disputed, or excluded from strict synthesis scopes. Raw repetition cannot manufacture truth.
 
 ## What Laplace IS NOT
 
@@ -69,6 +71,9 @@ Models, corpora, and linguistic resources all ingest into the same database via 
 5. **Use the specialized agents in [`.claude/agents/`](./.claude/agents/)** for their respective domains. Don't pretend to know what `substrate-architect` knows; spawn it.
 6. **Status tracking goes in `.agent/status/`** — never in user-facing documentation.
 7. **The user's instructions in conversation override everything else.** When a rule needs to be changed, the user changes it; you don't.
+8. **Prompt is ingestion; cascade is compiled.** Do not design context-window buffers, recursive SQL graph traversal, cursors, or app-layer frontier loops. The hot path is the C/C++ SRF/operator per ADR 0035.
+9. **Arena/source trust semantics are first-class.** Glicko-2 is not raw voting; effective mu depends on source-kind credibility, RD/volatility, context compatibility, structural support, and arena semantics per ADR 0036.
+10. **Model ingest is a codec.** For v0.1, one faithful source-model round-trip (model → substrate → sparse GGUF → chat) is decisive; the broader seed ladder improves substrate fidelity but is not a conventional training corpus per ADR 0037.
 
 ---
 

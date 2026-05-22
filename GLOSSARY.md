@@ -14,6 +14,10 @@ The Laplace database itself. Holds entities, physicalities, and attestations. Ac
 
 A unique observed n-gram of digital content, identified by its content hash (BLAKE3 truncated to 128 bits — per ADR 0015). Stored as one row in the `entities` table (owned by the `laplace_substrate` extension per ADR 0025). Plays **two roles simultaneously**: content (the thing observed) AND building block (referenced by higher-tier entities via mantissa-packed trajectories). Same content → same hash → ONE row.
 
+### Tiered Merkle DAG
+
+The content-addressed structure formed by hashing each entity from its tier and constituent child hashes. T0 atoms are Unicode codepoints; T≥1 entities are n-grams of lower-tier entities. Deduplication, identity checks, and reconstruction walk the DAG from trunk to leaf and cost O(tier depth + novel structure), not O(total corpus size).
+
 ### Atom
 
 A T0 (tier 0) entity. Always a Unicode codepoint. Universal across all modalities and languages. Fixed set of 1,114,112 possible atoms (the entire Unicode codepoint space). Distributed quasi-uniformly on S³ via super-Fibonacci + Hopf + UCA.
@@ -38,9 +42,17 @@ A per-source 4D projection of an entity. Each ingested model gives each entity a
 
 An entity that emits attestations. Linguistic resources (WordNet, UD, Wiktionary, ConceptNet, Atomic2020, Tatoeba), AI models, knowledge graphs, and text corpora are all sources. Sources are themselves substrate entities (content-recorded); their credibility-per-kind is tracked via meta-attestations.
 
+### Source Trust Class
+
+The prior trust band assigned to a source before per-kind credibility updates: foundational constants, standards-derived sources (Unicode/UCD/UCA/UAX), curated academic resources (WordNet, UD), academically linked user-curated resources (OMW, Wiktionary), structured corpora, AI-model probe observations, and prompt-local/user content. Trust class is not truth by fiat; it weights Glicko-2 agreement/disagreement inside an arena.
+
 ### Context
 
 An entity representing the context in which an attestation holds. For context-bound attestations (e.g., a POS reading valid only in a specific sentence), the `context_hash` column references a context entity. For context-free attestations (e.g., a universal IS_A), `context_hash` is NULL.
+
+### Prompt Ingestion
+
+The rule that prompts are decomposed into substrate entities and represented by a context entity/trajectory before inference. A prompt is not an ephemeral token buffer with a context-window limit; it is substrate content, either ephemeral or durable by policy, and cascade traversal starts from that content graph.
 
 ---
 
@@ -114,6 +126,14 @@ A rating system extending Glicko (Mark Glickman). Provides rating + rating-devia
 
 A semantically-coherent subset of attestations whose ratings compose. Defined by the attestation-kind hierarchy: e.g., all POS attestations form one arena; all attention-edge attestations from one transformer architecture form another. Ratings within an arena are commensurable; ratings across arenas are not.
 
+### Arena Semantics
+
+The metadata attached to an arena or attestation kind that tells Glicko-2 how to interpret agreement and disagreement: multi-valued compatibility, functional cardinality, inverse-functional cardinality, mutually exclusive object sets, scalar axes, temporal/context requirements, source-scope rules, and competition sets. `rake HAS_POS NOUN` and `rake HAS_POS VERB` can coexist; `France HAS_CURRENT_CAPITAL Paris` and `France HAS_CURRENT_CAPITAL Los Angeles` compete in the same current-capital arena/context.
+
+### Effective Mu
+
+The traversal/synthesis score derived from Glicko-2 rating (`mu`) adjusted by rating deviation, volatility, source credibility for the attestation kind, context compatibility, source trust class, and structural support. Hot-path selection orders by effective mu, not raw source count.
+
 ### Lottery-Ticket-Aware Sparsity
 
 Multi-pass filter for AI model ingestion. **NEVER a flat numeric threshold.** Combines: (a) per-tensor top-k% by importance; (b) per-row top-k for attention / MLP structure preservation; (c) probe-validated retention test. Applies to weight-based sources only. Linguistic resources are ingested at full fidelity.
@@ -126,6 +146,10 @@ The lottery-ticket-aware filter applied during AI model ingestion that discards 
 
 The substrate's inference algorithm. A query enters at some tier, decomposes to constituents, multi-vertical NN at that tier, Glicko-2 filters candidates, aggregates to higher-tier candidates, re-evaluates, cascades upward (compositional) and inward (radial abstraction) until reaching the answer region. Each cascade step is O(tier) ≈ O(constant).
 
+### Compiled Cascade
+
+The implementation rule for cascade traversal: one SQL-call surface enters a C/C++ set-returning function that owns frontier management, priority queues, visited sets, tier transitions, context checks, and ranking. SPI/executor access may perform batched indexed lookups; recursive CTEs, cursors, and app-layer row-by-row loops are not the hot path.
+
 ### Multi-vertical NN
 
 Querying the substrate via three (or more) orthogonal similarity dimensions simultaneously: geometric (S³ position), content (n-gram / trajectory structural), attestation (graph-walk semantic). Each operable at every tier. Composable.
@@ -134,6 +158,18 @@ Querying the substrate via three (or more) orthogonal similarity dimensions simu
 
 Best-first graph search through the attestation DAG. Edge cost = function of Glicko-2 rating + RD; heuristic h() = lower-bound estimate of remaining cost to goal region. Streamed via set-returning C function for incremental token generation.
 
+### Honest Abstention
+
+The substrate-native refusal mode caused by missing or weak path support: no viable path, low effective mu, high RD, high volatility, unresolved arena conflict, or context mismatch. Abstention is structural, not a generated phrase pattern.
+
+### Traversal Mode
+
+The policy that controls how cascade walks the substrate: strict mode requires high effective mu and trusted source scopes; speculative mode surfaces uncertain paths with uncertainty intact; creative/fiction modes deliberately allow lower-rated, analogical, or context-marked walks. Hallucination is therefore an explicit traversal choice, not an opaque failure mode.
+
+### Truths Cluster / Lies Scatter
+
+The source-rating principle that true claims tend to gather support across independent, high-trust, structurally adjacent sources, while unsupported claims scatter or cluster only inside correlated low-trust source families. Low-trust clusters can be stored as claims-about-sources without winning strict truth-seeking arenas.
+
 ---
 
 ## Codec concepts
@@ -141,6 +177,10 @@ Best-first graph search through the attestation DAG. Edge cost = function of Gli
 ### AI⇄DB codec
 
 The reframing of AI operations as database operations: ingest = INSERT; train = `WHERE` clause; distill = `SELECT INTO model_file`; prune = `DELETE`; unlearn = `DELETE WHERE source = X`; combine = ingest both into same substrate.
+
+### Model-Codec Fidelity
+
+For source-scoped model round-trip, the property that `TransformerModelSource` captures the source model's load-bearing computation as recipe metadata, tokenizer content, physicalities, probe observations, architecture-specific attestations, and lottery-ticket sparse edges. If ingestion and synthesis are faithful under the source's own recipe/scope, the emitted model should land in the source model's behavioral basin.
 
 ### Vampire mode
 
@@ -165,6 +205,10 @@ Fully parametric model emission from substrate state. User specifies (via JSON r
 ### Sparse-by-construction emission
 
 Property of Substrate Synthesis output: positions with no significant attestation emit zero. Emitted models are automatically pruned, ensembled, and consensus-cleaned without any explicit pruning / ensembling step.
+
+### Zero Calories
+
+The performance consequence of sparse-by-construction emission: exact zero tensor positions carry no substrate-supported evidence and may be skipped, compressed, or omitted by sparse-aware runtimes. Tiny nonzero gradient jitter still costs memory traffic and multiply/add work; exact zero changes the computational contract.
 
 ---
 
