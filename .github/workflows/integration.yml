@@ -168,7 +168,7 @@ jobs:
       - name: laplace_version() returns expected version
         run: |
           EXPECTED=$(awk -F"'" '/^default_version/{print $2}' extension/laplace.control)
-          RESULT=$(psql -tA -d laplace -c "SELECT laplace.laplace_version();")
+          RESULT=$(psql -tA -d laplace -U laplace_admin -c "SELECT laplace.laplace_version();")
           echo "laplace_version() returned: '$RESULT' (expected '$EXPECTED')"
           if [ "$RESULT" != "$EXPECTED" ]; then
             echo "::error::Expected '$EXPECTED', got '$RESULT'"
