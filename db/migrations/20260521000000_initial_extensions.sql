@@ -27,18 +27,34 @@
 -- wrapper itself uses CREATE EXTENSION IF NOT EXISTS internally.
 
 -- ============================================================
--- Step 1: postgis (superuser-required; via wrapper)
+-- Step 1: postgis (superuser-required → via wrapper)
 -- ============================================================
+-- postgis is NOT trusted in stock packaging → laplace_admin can't install
+-- it directly. The wrapper runs as postgres via SECURITY DEFINER. If
+-- postgis is already installed (bootstrap installed it during Layer 0),
+-- the IF NOT EXISTS inside the wrapper short-circuits to a NOTICE.
 SELECT laplace_priv.install_extension('postgis');
 
 -- ============================================================
--- Step 2: laplace (substrate extension; via wrapper for consistency)
+-- Step 2: laplace (laplace.control says superuser = false → DIRECT install)
 -- ============================================================
+-- The laplace extension is marked superuser=false in its .control file
+-- (per ADR 0023), so laplace_admin (DB owner, has CREATE on the laplace
+-- DB) can install it directly via plain CREATE EXTENSION. Installing
+-- DIRECTLY (not via SECURITY DEFINER wrapper) means the laplace schema
+-- gets created with laplace_admin as owner — laplace_admin can then
+-- grant USAGE on it to laplace_app + laplace_readonly in Step 3.
+--
+-- (Using the wrapper for laplace would make postgres the schema owner,
+-- and the subsequent GRANT USAGE in this same migration would fail with
+-- "permission denied for schema laplace" since laplace_admin wouldn't
+-- own it.)
+--
 -- The laplace extension's binary + .control + .sql files must be installed
 -- in PG's extension dirs before this runs. The CI flow:
 --   cd extension && sudo make install PG_CONFIG=...   (bounded sudo per ADR 0019)
 --   dotnet run --project app/Laplace.Migrations -- up
-SELECT laplace_priv.install_extension('laplace');
+CREATE EXTENSION IF NOT EXISTS laplace;
 
 -- Future: when bumping default_version in extension/laplace.control, a
 -- separate timestamped migration file calls ALTER EXTENSION laplace UPDATE.
