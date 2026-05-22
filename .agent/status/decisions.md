@@ -138,3 +138,48 @@ Append-only timestamped record of architectural / engineering decisions. Format:
 **What:** The `laplace` extension OWNS the substrate's schema, tables (`entities` / `physicalities` / `attestations`), composite types, GIST opclasses, SRFs, aggregates, and indexes via `laplace--A.B.C.sql`. Tables holding user data are marked with `pg_extension_config_dump()`. Schema evolution uses `laplace--A.B.C--D.E.F.sql` upgrade scripts triggered by `ALTER EXTENSION laplace UPDATE`. DbUp narrows to: `CREATE EXTENSION` orchestration + role grants + non-extension operational tables (none currently). Extension is non-relocatable (`relocatable = false`) because it references `@extschema@`-qualified objects.
 **ADR:** [0023-extension-owns-schema-dbup-orchestrates.md](../../docs/adr/0023-extension-owns-schema-dbup-orchestrates.md) (narrows ADR 0021)
 **Why:** Substrate-binary and substrate-SQL versions must evolve together (a C function pointer in `laplace.so` must match its declaration in `laplace--X.Y.Z.sql`). PG's extension upgrade machinery is purpose-built for that lockstep. `pg_dump` of a Laplace database compacts to one `CREATE EXTENSION` line + the three tables' data via `pg_extension_config_dump`. Splitting substrate schema across "extension SQL" and "DbUp migrations" would have been the sabotage-shaped path.
+
+## 2026-05-22 — Engine modularization: 3 shared libraries (core / dynamics / synthesis)
+**By:** claude (recommendation) + user (acceptance)
+**What:** `liblaplace_core.so` (no MKL; loaded by PG backend), `liblaplace_dynamics.so` (MKL+Spectra+TBB; C# only), `liblaplace_synthesis.so` (depends on dynamics; C# only). Folder restructure: `engine/{core,dynamics,synthesis}/`.
+**ADR:** [0024-engine-modularization.md](../../docs/adr/0024-engine-modularization.md)
+
+## 2026-05-22 — PG extension modularization: laplace_geom + laplace_substrate
+**By:** claude (recommendation) + user (acceptance)
+**What:** `laplace_geom` (general-purpose 4D PostGIS additions, reusable) + `laplace_substrate` (substrate domain, requires laplace_geom). Refines ADR 0023.
+**ADR:** [0025-pg-extension-modularization.md](../../docs/adr/0025-pg-extension-modularization.md)
+
+## 2026-05-22 — C# project structure: per-engine-lib bindings + functional + plugins
+**By:** claude
+**What:** `Laplace.Engine.{Core,Dynamics,Synthesis}` (1:1 with engine .so files) + `Laplace.Migrations` + `Laplace.Cli` + `Laplace.Endpoints[.*]` + `Laplace.Sources.*` + `Laplace.Decomposers.*`. .slnx coordinates.
+**ADR:** [0026-csharp-project-structure.md](../../docs/adr/0026-csharp-project-structure.md)
+
+## 2026-05-22 — Separation of concerns invariants codified
+**By:** user (Anthony) — "SQL and C# are orchestration with C/C++ as the heavy lifters"
+**What:** Per-layer may/must-not matrix. Math in C/C++. Orchestration in C#/SQL. PG extension is binding glue only. SQL migrations declarative DDL only. Codified into RULES.md R16.
+**ADR:** [0027-separation-of-concerns-invariants.md](../../docs/adr/0027-separation-of-concerns-invariants.md)
+
+## 2026-05-22 — Custom-built PostgreSQL 18 + PostGIS 3.6.3 with Intel toolchain (PREREQUISITE)
+**By:** user (Anthony) — "epic b is required... we code against the repo itself"
+**What:** Git submodules under `external/postgresql/` and `external/postgis/`, pinned to release tags, built with `icx`/`icpx`, installed to `/opt/laplace/pgsql-18/`. Hard prerequisite (not parallel/deferrable) for performance regime alignment + "code against the repo" correctness. Eliminates the apt-half-upgrade failure class that fired multiple times this session.
+**ADR:** [0028-custom-built-pg-postgis-intel.md](../../docs/adr/0028-custom-built-pg-postgis-intel.md) (amended 2026-05-22 to lock in)
+
+## 2026-05-22 — Custom indexing strategy: 5 substrate-shaped opclasses (amends RULES.md R1)
+**By:** user (Anthony) — "custom gist/sp-gist indexing if we can do custom stuff to make my invention faster"
+**What:** `laplace_btree_hash128_ops` + `laplace_gist_s3_ops` + `laplace_sp_trajectory_ops` + `laplace_brin_tier_ops` + Glicko-2-aware GIST internal stats. Distributed across the two PG extensions and Chunks 1-5.
+**ADR:** [0029-custom-indexing-strategy.md](../../docs/adr/0029-custom-indexing-strategy.md)
+
+## 2026-05-22 — MKL / Eigen / Spectra / TBB integration regime + MKL_CBWR determinism
+**By:** user (Anthony) — "doesnt mkl benefit from integration with eigen and/or spectra as well? they all intermingle"
+**What:** `EIGEN_USE_MKL_ALL` in dynamics; `mkl_set_threading_layer(MKL_THREADING_TBB)` unified scheduler; `mkl_cbwr_set(AVX2|AVX512)` for substrate determinism (5-10% perf cost accepted per RULES.md R7).
+**ADR:** [0030-mkl-eigen-spectra-tbb-integration.md](../../docs/adr/0030-mkl-eigen-spectra-tbb-integration.md)
+
+## 2026-05-22 — Custom Access Method spike (perf-cache-backed; post-v0.1.0)
+**By:** claude (proposal)
+**What:** Time-boxed 2-week prototype of `laplace_perfcache_am` post-v0.1.0. Go/no-go thresholds: ≥2× cascade speedup, ≥3× cold-cache.
+**ADR:** [0031-custom-am-spike.md](../../docs/adr/0031-custom-am-spike.md)
+
+## 2026-05-22 — Unified CMake build pipeline (Path B) — PGXS retired
+**By:** user (Anthony) — "Ultrathink about how postgres requires PGXS and such... While we're focused on this we should focus on our cmake file too"
+**What:** Top-level CMakeLists drives external/ submodules + engine/ + extension/. Phase 1 bridge keeps PGXS while on stock PG; Phase 2 fully retires PGXS once Epic B lands. One `cmake -B build && cmake --build build && cmake --install build` builds + installs everything.
+**ADR:** [0032-unified-cmake-build-pipeline.md](../../docs/adr/0032-unified-cmake-build-pipeline.md) — locks ADR 0028 as prerequisite
