@@ -183,3 +183,31 @@ Append-only timestamped record of architectural / engineering decisions. Format:
 **By:** user (Anthony) — "Ultrathink about how postgres requires PGXS and such... While we're focused on this we should focus on our cmake file too"
 **What:** Top-level CMakeLists drives external/ submodules + engine/ + extension/. Phase 1 bridge keeps PGXS while on stock PG; Phase 2 fully retires PGXS once Epic B lands. One `cmake -B build && cmake --build build && cmake --install build` builds + installs everything.
 **ADR:** [0032-unified-cmake-build-pipeline.md](../../docs/adr/0032-unified-cmake-build-pipeline.md) — locks ADR 0028 as prerequisite
+
+## 2026-05-22 — Layer-1 self-heal pattern: use existing wrappers, don't add new ones
+**By:** user (Anthony) — "no hacks and bandaids... why are we doing these permission hacks to put bandaids over bulletholes?"
+**What:** When state in laplace DB is broken (mis-owned extension/schema), DbUp's migration uses the EXISTING `laplace_priv.drop_extension` wrapper to drop and let CREATE EXTENSION recreate. No new SECURITY DEFINER helpers for "fix legacy state." If the wrappers genuinely don't cover a need, that's an ADR question — not a one-off helper.
+**Why:** Layered helpers compound the mess and entrench bad patterns. The wrappers exist as the privilege-escalation boundary; use them for what they're for. For broken state in a pre-data repo, the answer is drop + recreate (`just db-nuke` if needed), not engineering around it.
+**Captured in:** [feedback_no_bandaids_on_chunk0](../../.claude/projects/-home-ahart-Projects-Laplace/memory/feedback_no_bandaids_on_chunk0.md), [feedback_setup_host_is_one_time](../../.claude/projects/-home-ahart-Projects-Laplace/memory/feedback_setup_host_is_one_time.md).
+
+## 2026-05-22 — `laplace.control`: `trusted = true` ON, `superuser = false` OFF (incompatible combination)
+**By:** claude (discovered empirically)
+**What:** PG's `trusted = true` mechanism (lets non-superusers install extensions that need superuser privileges, running the install script as bootstrap superuser) only fires when the default `superuser = true` is in effect. Setting `superuser = false` AND `trusted = true` is contradictory — PG honors `superuser = false` ("no elevation needed") and IGNORES the trusted hint.
+**Why:** We need the trusted-elevation so `laplace_admin` can install the laplace extension (which defines `laplace_version()` as `LANGUAGE C` — would otherwise require language-c USAGE, a superuser-only privilege). Verified by comparison: stock `pgcrypto` works (trusted=true, default superuser=true). With our prior `superuser = false`, install failed with `permission denied for language c`. Removing it made the install succeed.
+**Fixed in:** commit `1af5890` (extension/laplace.control: removed `superuser = false`, kept `trusted = true`).
+
+## 2026-05-22 — laplace schema ownership: `laplace_admin` via direct trusted CREATE EXTENSION
+**By:** claude (after iteration)
+**What:** The `laplace` schema (declared via `schema = 'laplace'` in laplace.control) must be owned by laplace_admin so DbUp can `GRANT USAGE` on it. The clean path: laplace_admin runs `CREATE EXTENSION laplace` directly (no SECURITY DEFINER wrapper); trusted=true makes the install script elevated, but the extension + its schema are owned by the calling user. Postgis uses the wrapper because it requires SUPERUSER and isn't trusted.
+**Why:** Earlier attempts via the SECURITY DEFINER wrapper caused the schema to be owned by `postgres`, breaking laplace_admin's ability to grant on it. Direct trusted install threads the needle: elevated where needed (language c usage), but ownership stays with the caller.
+**Captured in:** ADR 0023 (extension owns schema) + commit `0edbdb2` (DbUp installs laplace direct).
+
+## 2026-05-22 — Transparency over workarounds is the trust contract
+**By:** user (Anthony) — "Problems like this are okay with me as long as you're transparent about it... 'Hey, we made an honest mistake and running these exact commands rights the ship' . . . its when you do other shit that gets to me"
+**What:** When an honest mistake happens (e.g., orphan schema from a transitional commit), the right response is: name the mistake, name the single exact command that fixes it, stop. Don't propose a refactor in the same breath. Don't add helpers to engineer around the mistake. Don't ask the user to do work that should be agent-driven.
+**Captured in:** [feedback_transparency_over_workarounds](../../.claude/projects/-home-ahart-Projects-Laplace/memory/feedback_transparency_over_workarounds.md).
+
+## 2026-05-22 — End-to-end CI green achieved
+**By:** claude + user (Anthony cleared orphan, ran the bootstrap, validated SQL design earlier)
+**What:** Integration workflow on hart-server passes all 4 jobs (capabilities → build → db-ensure → smoke-test) on commit `ab8f62b`. Substrate baseline established for Chunk 1+ work.
+**Verifications captured:** `STATE.md` "Verifications" section.
