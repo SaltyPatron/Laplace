@@ -21,36 +21,41 @@ add_compile_options(
     -ffp-contract=off
 )
 
-# === Dependencies ===
+# === Where the submodule sources live ===
+# Per ADR 0028 + 0032 + the all-deps-as-submodules policy (commit 574216e),
+# every direct dependency is a git submodule under ../external/.
+set(LAPLACE_EXTERNAL "${CMAKE_CURRENT_SOURCE_DIR}/../external" CACHE PATH "Path to external/ submodule tree")
 
-# Eigen — system package (apt libeigen3-dev → /usr/include/eigen3)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(EIGEN3 REQUIRED IMPORTED_TARGET eigen3)
+if(NOT EXISTS "${LAPLACE_EXTERNAL}/eigen/Eigen/Dense")
+    message(FATAL_ERROR
+        "external/eigen submodule not initialized. Run:\n"
+        "    git submodule update --init external/eigen external/spectra external/blake3\n")
+endif()
 
-# Spectra — header-only, fetched at configure time, pinned to v1.2.0
-# Per STANDARDS.md "Dependency sources (locked)" table.
-include(FetchContent)
-FetchContent_Declare(
-    Spectra
-    GIT_REPOSITORY https://github.com/yixuan/spectra.git
-    GIT_TAG        v1.2.0
-    GIT_SHALLOW    TRUE
+# === Dependencies — from submodules, not from apt or FetchContent ===
+
+# --- Eigen 3.4.0 — header-only template linalg ---
+# Per ADR 0030, hot paths get Eigen via templates only in liblaplace_core;
+# liblaplace_dynamics later flips on EIGEN_USE_MKL_ALL to dispatch heavy
+# linalg through MKL. For now (Chunk 0 / 1 work) it's pure Eigen.
+add_library(laplace_eigen INTERFACE)
+target_include_directories(laplace_eigen INTERFACE "${LAPLACE_EXTERNAL}/eigen")
+target_compile_definitions(laplace_eigen INTERFACE
+    EIGEN_NO_DEBUG           # release-build assertions off
+    EIGEN_DONT_PARALLELIZE   # one engine kernel = one task; TBB schedules above
 )
-FetchContent_MakeAvailable(Spectra)
 
-# BLAKE3 — official C implementation, fetched at configure time, pinned to 1.5.4.
-# SIMD-accelerated cryptographic hash. We truncate to 128 bits for entity hashing.
-# Raw bytes only — never hex/text per STANDARDS.md "Hash discipline" section.
-FetchContent_Declare(
-    BLAKE3
-    GIT_REPOSITORY https://github.com/BLAKE3-team/BLAKE3.git
-    GIT_TAG        1.5.4
-    GIT_SHALLOW    TRUE
-    SOURCE_SUBDIR  c
-)
-FetchContent_MakeAvailable(BLAKE3)
+# --- Spectra v1.2.0 — sparse eigensolvers built on Eigen ---
+# Header-only. Used by liblaplace_dynamics for Laplacian eigenmaps.
+add_library(laplace_spectra INTERFACE)
+target_include_directories(laplace_spectra INTERFACE "${LAPLACE_EXTERNAL}/spectra/include")
+target_link_libraries(laplace_spectra INTERFACE laplace_eigen)
 
-# === Library target ===
+# --- BLAKE3 1.5.4 — content hashing (per ADR 0015) ---
+# The repo includes ready-made CMakeLists in c/ subdir.
+add_subdirectory("${LAPLACE_EXTERNAL}/blake3/c" "${CMAKE_BINARY_DIR}/_deps/blake3" EXCLUDE_FROM_ALL)
+
+# === Library target (current single-lib; will split per ADR 0024 in Epic A) ===
 add_library(laplace_engine SHARED
     src/laplace.cpp
 )
@@ -69,8 +74,10 @@ target_include_directories(laplace_engine
 
 target_link_libraries(laplace_engine
     PUBLIC
-        PkgConfig::EIGEN3
-        Spectra
+        laplace_eigen
+        laplace_spectra
+    PRIVATE
+        blake3
 )
 
 # === Tests ===
