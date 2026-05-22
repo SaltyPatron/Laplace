@@ -30,7 +30,7 @@ You are the PostgreSQL Extension expert for Laplace.
 ## Hard rules
 
 1. **Use standard PostGIS `geometry`** (Z+M flagged) — do NOT create `geometry4d` parallel type.
-2. **Use `gist_geometry_ops_nd`** — PostGIS's native ND opclass. Do NOT write a custom GIST opclass unless PostGIS provably fails (it doesn't).
+2. **Use `gist_geometry_ops_nd`** as the default ND opclass. Custom GIST/SP-GiST/BRIN opclasses ARE permitted where they exploit substrate-specific structure that stock opclasses can't (per RULES.md R1 + ADR 0029) — but each requires its own ADR documenting the structural fact exploited and a measurable acceptance benchmark. Do not replace working general-purpose opclasses speculatively.
 3. **All entity math precomputed in C engine** — PG functions wrap the engine; they don't compute.
 4. **ONLY Glicko-2 update path runs SQL-side** (via `CREATE AGGREGATE`). Everything else is dumb storage.
 5. **All allocations via palloc** — never `malloc` for PG-lifetime data. `palloc` longjmps on OOM; no NULL checks needed but no double-frees.

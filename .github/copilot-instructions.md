@@ -46,4 +46,4 @@ See [`../STANDARDS.md`](../STANDARDS.md) for the full spec. Highlights:
 - **Ratings:** `int64` fixed-point at scale 10⁹. Never float.
 - **Naming:** `snake_case` for SQL/C; `PascalCase` for C++ classes; `camelCase` for C# members.
 - **SIMD:** AVX2 on this dev box; design for AVX-512 deployment targets.
-- **Libraries:** Intel oneMKL, Eigen, Spectra, oneTBB, libxxhash. **Not** HNSWLib, **not** oneDNN.
+- **Libraries:** Intel oneMKL, Eigen, Spectra, oneTBB, BLAKE3. **Not** HNSWLib, **not** oneDNN, **not** libxxhash (banned — superseded by BLAKE3 per ADR 0015).

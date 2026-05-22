@@ -50,5 +50,6 @@ just build / launch / seed / ingest / query / synthesize / verify / status / cle
 
 - **Claude Code (`claude`):** loads CLAUDE.md automatically; uses agents in `.claude/agents/`.
 - **GitHub Copilot:** loads `.github/copilot-instructions.md`.
-- **Aider / Cursor / Continue:** load this file (AGENTS.md).
+- **Cursor:** loads `.cursorrules` (condensed invariants) + this file.
+- **Aider / Continue:** load this file (AGENTS.md).
 - **Any tool not in the above list:** load this file. If a tool reads NEITHER CLAUDE.md nor AGENTS.md, route it through one that does.

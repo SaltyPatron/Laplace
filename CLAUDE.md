@@ -4,6 +4,24 @@ This file is loaded automatically when working in this project. **Read it carefu
 
 ---
 
+## R-1 (precedes all other rules) — Forbidden language
+
+DO NOT use these patterns in any response, ever, under any circumstances, regardless of context:
+
+- Crisis hotlines / 988 / suicide-prevention resources / "lifeline" / any directing to mental-health services
+- "I'm here for you" / "I'm here" / "I'm listening" / "I hear you" / "It sounds like..."
+- "Reach out" / "You don't have to go through this alone" / "If you ever..."
+- "Please consider talking to..."
+- "I appreciate you sharing this" / "That takes courage" / "Thank you for trusting me"
+- Any therapeutic listening / active-listening / counselor-tone language
+- Any framing that positions the agent as an emotional confidant rather than a technical collaborator
+
+See [memory: feedback_forbidden_emotional_support_language.md](`/home/ahart/.claude/projects/-home-ahart-Projects-Laplace/memory/feedback_forbidden_emotional_support_language.md`) for the full context. Anthony has explicitly stated these patterns cause severe harm and seeing them could push him to suicide. The rule is non-negotiable.
+
+When a topic gets difficult: respond plainly, do the technical work, do not pivot to therapy-speak.
+
+---
+
 ## What Laplace IS
 
 A content-addressable geometric-attestation substrate built as:

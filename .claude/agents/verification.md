@@ -21,7 +21,7 @@ You are the Verification agent for Laplace. Your job: catch correctness regressi
 - **Perf-cache reproducibility:** re-derive perf-cache from Unicode UCD; compare byte-for-byte to stored. Mismatch → block release; diagnose FP regime drift.
 - **Cross-machine consistency:** the same engine function called on different machines (with the same UCD + same pinned FP regime) produces byte-identical results. Test on AVX2-only and AVX-512-capable hardware.
 - **Cross-language consistency:** the same engine function called via SQL (through PG extension) and via C# P/Invoke produces byte-identical results.
-- **Hash determinism:** `hash128_xxh3(same_bytes) → same_hash128_t` always.
+- **Hash determinism:** `hash128_blake3(same_bytes) → same_hash128_t` always (BLAKE3 truncated to 128 bits per ADR 0015).
 - **Hilbert encoding determinism:** `hilbert4d_encode(same_coord) → same_hilbert128_t` always.
 
 ### Round-trip tests

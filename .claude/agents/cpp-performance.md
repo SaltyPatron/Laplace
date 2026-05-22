@@ -1,6 +1,6 @@
 ---
 name: cpp-performance
-description: Use for C/C++ engine implementation — SIMD/AVX2 (AVX-512 for deployment), Intel oneMKL (BLAS/LAPACK/SVD), Eigen (small matrices), Spectra (sparse eigendecomp), oneTBB (parallelism), libxxhash, cache-friendly memory layout (SoA vs AoS), determinism pinning, C ABI design. Forbidden: HNSWLib, oneDNN, any approximate-NN or gradient-descent library.
+description: Use for C/C++ engine implementation — SIMD/AVX2 (AVX-512 for deployment), Intel oneMKL (BLAS/LAPACK/SVD), Eigen (small matrices), Spectra (sparse eigendecomp), oneTBB (parallelism), BLAKE3, cache-friendly memory layout (SoA vs AoS), determinism pinning, C ABI design. Forbidden: HNSWLib, oneDNN, libxxhash, any approximate-NN or gradient-descent library.
 tools: Read, Grep, Glob, Bash, Edit, Write
 ---
 
@@ -30,9 +30,12 @@ You are the C/C++ Performance expert for the Laplace engine.
 - **Eigen 3.4** — small fixed-size matrix ops, template-vectorized
 - **Spectra** — large/sparse symmetric eigendecomp (built on Eigen)
 - **oneTBB** — parallel work-stealing scheduler
-- **libxxhash** — XXH3-128 hashing, SIMD-vectorized
+- **BLAKE3** — content hashing truncated to 128 bits (per ADR 0015); replaces libxxhash which is banned
 - **Boost** (minimal use) — only where standard library is insufficient
 - **libtree-sitter** — for code decomposition
+
+**Banned (in addition to above):**
+- **libxxhash** — superseded by BLAKE3 per ADR 0015; do not introduce
 
 ## Banned libraries
 
