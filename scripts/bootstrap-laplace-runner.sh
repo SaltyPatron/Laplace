@@ -128,6 +128,39 @@ bootstrap_user() {
     green "✓ $RUNNER_HOME owned by $RUNNER_USER:$RUNNER_GROUP (mode 750)"
 }
 
+bootstrap_build_environment() {
+    # System packages + /opt/laplace prefix for the custom-built dependency
+    # chain (Epic B: PostgreSQL + PostGIS + PROJ + GEOS + GDAL + Eigen +
+    # Spectra + BLAKE3 as git submodules, built with Intel icx/icpx per
+    # ADRs 0028 + 0032).
+    #
+    # Idempotent — apt install is a no-op when packages are present;
+    # mkdir -p + chown are safe to re-run.
+
+    say "Build environment: apt build-deps + /opt/laplace prefix"
+
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential cmake ninja-build autoconf automake libtool pkg-config \
+        bison flex perl \
+        libssl-dev zlib1g-dev libreadline-dev uuid-dev \
+        libxml2-dev libjson-c-dev libicu-dev \
+        libsqlite3-dev libtiff-dev libcurl4-openssl-dev \
+        libpcre2-dev libgeotiff-dev libpng-dev libwebp-dev \
+        libjpeg-turbo8-dev libnetcdf-dev libhdf5-dev libexpat1-dev \
+        >/dev/null
+    green "✓ Build-deps apt packages present"
+
+    # Custom-build install prefix; owned by laplace-runner so subsequent
+    # `make install` from the per-dep build scripts (build-pg.sh,
+    # build-postgis.sh, build-proj.sh, build-geos.sh, build-gdal.sh) runs
+    # WITHOUT sudo. This is the unlock that makes Epic B's build phase
+    # fully agentic.
+    mkdir -p /opt/laplace
+    chown -R "$RUNNER_USER:$RUNNER_GROUP" /opt/laplace
+    chmod 755 /opt/laplace
+    green "✓ /opt/laplace owned by $RUNNER_USER:$RUNNER_GROUP (mode 755)"
+}
+
 bootstrap_legacy_runner_teardown() {
     say "Tear down legacy runner under /home/ahart/actions-runner (if any)"
     local old="/home/ahart/actions-runner"
@@ -667,6 +700,7 @@ PG_EOF
 # ---------------------------------------------------------------------------
 do_bootstrap() {
     bootstrap_user
+    bootstrap_build_environment
     bootstrap_legacy_runner_teardown
     bootstrap_runner_install
     bootstrap_runner_register
