@@ -80,8 +80,11 @@ for name in "${names[@]}"; do
         continue
     fi
 
-    # Cache entries are full clones — point at their .git dir.
-    ref_dir="$CACHE/$path/.git"
+    # Cache entries are full clones at $CACHE/<name>/ — strip the
+    # in-repo "external/" prefix from $path to find the right entry
+    # (cache layout is /opt/laplace/external/<name>/, not
+    # /opt/laplace/external/external/<name>/).
+    ref_dir="$CACHE/${path#external/}/.git"
     ws_mod=".git/modules/$path"
 
     # Fetch into cache if it's behind the pinned SHA.

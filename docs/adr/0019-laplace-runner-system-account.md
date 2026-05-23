@@ -6,6 +6,8 @@
 
 **Amended** — 2026-05-23: The bounded-sudoers clause for `cmake --install` / `make install*` is **retired**. With `CMAKE_INSTALL_PREFIX=/opt/laplace` (laplace-runner-group-writable, setgid 2775) and PG's `extension_control_path` / `dynamic_library_path` pointing at the same prefix via `bootstrap_pg_extension_paths`, the runner installs extensions into a directory it already owns — no escalation needed. `bootstrap_remove_legacy_sudoers` in `scripts/bootstrap-laplace-runner.sh` removes the `/etc/sudoers.d/laplace-runner` artifact from prior bootstraps.
 
+**Amended** — 2026-05-23: The runner home moves from `/var/lib/laplace-runner` (on the cramped `/var` LV) to `/var/lib/agents/laplace-runner` (on the dedicated `vg-hosting/lv-agents` 64G LV, which exists precisely for agent installations). `bootstrap_migrate_runner_home` in `scripts/bootstrap-laplace-runner.sh` performs the one-time move idempotently (rsync, `usermod -d`, systemd unit path rewrite, restart). Pre-migration tree is archived as `${RUNNER_HOME_LEGACY}.pre-migration-<timestamp>` until manually removed.
+
 ## Context
 
 Initial runner setup (ADR 0014) used the developer's interactive OS user (`ahart`) for the GitHub Actions runner. Problems:
@@ -23,9 +25,9 @@ Create a dedicated system account `laplace-runner`:
 - System UID (< 1000)
 - `--no-create-home` — no home directory in `/home`
 - `--shell /usr/sbin/nologin` — no interactive login
-- `--home-dir /var/lib/laplace-runner`
+- `--home-dir /var/lib/agents/laplace-runner` (per 2026-05-23 amendment — was `/var/lib/laplace-runner`)
 
-Install the GitHub Actions runner at `/var/lib/laplace-runner/actions-runner/`, owned by `laplace-runner:laplace-runner`.
+Install the GitHub Actions runner at `/var/lib/agents/laplace-runner/actions-runner/` (per 2026-05-23 amendment — was `/var/lib/laplace-runner/actions-runner/`), owned by `laplace-runner:laplace-runner`.
 
 Systemd service runs as `laplace-runner`.
 

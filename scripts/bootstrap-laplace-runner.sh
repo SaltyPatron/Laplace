@@ -12,7 +12,10 @@
 #   1. System account `laplace-runner` (no home in /home, no shell) + interactive
 #      dev user added to that group so `just *` recipes write to laplace-runner-
 #      owned files (obj/, bin/, /opt/laplace) via group perms — no sudo
-#   2. GitHub Actions runner installed at /var/lib/laplace-runner/actions-runner
+#   2. GitHub Actions runner installed at /var/lib/agents/laplace-runner/actions-runner
+#      (on the dedicated vg-hosting/lv-agents LV — older bootstraps placed it at
+#      /var/lib/laplace-runner on /var; bootstrap_migrate_runner_home performs
+#      the one-time move).
 #   3. systemd service running as laplace-runner
 #   4. PG roles laplace_admin / laplace_app / laplace_readonly
 #   5. pg_ident.conf  → maps OS user laplace-runner (and ahart, for interactive
@@ -72,7 +75,11 @@ set -eo pipefail
 # ---------------------------------------------------------------------------
 RUNNER_USER="laplace-runner"
 RUNNER_GROUP="laplace-runner"
-RUNNER_HOME="/var/lib/laplace-runner"
+# Runner home lives on the dedicated vg-hosting/lv-agents LV (64G), not /var.
+# Older bootstraps placed it at /var/lib/laplace-runner; bootstrap_migrate_runner_home
+# below handles the one-time move from the legacy location.
+RUNNER_HOME="/var/lib/agents/laplace-runner"
+RUNNER_HOME_LEGACY="/var/lib/laplace-runner"
 RUNNER_DIR="$RUNNER_HOME/actions-runner"
 PG_VERSION="18"
 PG_CONFIG_DIR="/etc/postgresql/$PG_VERSION/main"
@@ -218,6 +225,84 @@ bootstrap_build_environment() {
     chown -R "$GH_SUDO_USER:$RUNNER_GROUP" /opt/laplace
     chmod -R 2775 /opt/laplace
     green "✓ /opt/laplace owned by $GH_SUDO_USER:$RUNNER_GROUP (mode 2775 — owner + group writable, setgid)"
+}
+
+bootstrap_migrate_runner_home() {
+    # The runner was originally placed at /var/lib/laplace-runner — which is
+    # on the /var LV (cramped). vg-hosting/lv-agents is mounted at
+    # /var/lib/agents (64G dedicated, mostly empty) and was set up precisely
+    # for this kind of agent installation. Move the runner home to its
+    # rightful drive. Idempotent — no-op once migrated.
+    say "Migrate runner home: $RUNNER_HOME_LEGACY -> $RUNNER_HOME (dedicated lv-agents LV)"
+
+    if [ ! -d "$RUNNER_HOME_LEGACY" ] || [ -z "$(ls -A "$RUNNER_HOME_LEGACY" 2>/dev/null)" ]; then
+        green "✓ No legacy $RUNNER_HOME_LEGACY content to migrate"
+        # Still ensure the new home exists, owned correctly.
+        mkdir -p "$RUNNER_HOME"
+        chown -R "$RUNNER_USER:$RUNNER_GROUP" "$RUNNER_HOME"
+        chmod 750 "$RUNNER_HOME"
+        return
+    fi
+
+    if [ ! -d /var/lib/agents ] || ! mountpoint -q /var/lib/agents; then
+        yellow "  /var/lib/agents not mounted — skipping migration (keeping runner at $RUNNER_HOME_LEGACY)"
+        # Adjust globals so the rest of the bootstrap uses the legacy path.
+        RUNNER_HOME="$RUNNER_HOME_LEGACY"
+        RUNNER_DIR="$RUNNER_HOME/actions-runner"
+        return
+    fi
+
+    # Stop the runner service while we move things.
+    local runner_was_active=0
+    if systemctl is-active --quiet "$RUNNER_SERVICE" 2>/dev/null; then
+        runner_was_active=1
+        systemctl stop "$RUNNER_SERVICE"
+        echo "  stopped $RUNNER_SERVICE for migration"
+    fi
+
+    # Rsync everything (preserves hardlinks, xattrs, ownership).
+    mkdir -p "$RUNNER_HOME"
+    rsync -aHAX "$RUNNER_HOME_LEGACY/" "$RUNNER_HOME/"
+    chown -R "$RUNNER_USER:$RUNNER_GROUP" "$RUNNER_HOME"
+    chmod 750 "$RUNNER_HOME"
+    green "✓ Copied $RUNNER_HOME_LEGACY -> $RUNNER_HOME"
+
+    # Update the OS user's home-dir metadata to the new location.
+    if [ "$(getent passwd "$RUNNER_USER" | cut -d: -f6)" != "$RUNNER_HOME" ]; then
+        usermod -d "$RUNNER_HOME" "$RUNNER_USER"
+        green "✓ usermod -d $RUNNER_HOME $RUNNER_USER"
+    fi
+
+    # The systemd unit references the OLD path via WorkingDirectory + ExecStart.
+    # The runner's svc.sh writes these into /etc/systemd/system/<unit>; rewrite
+    # the paths in place (between the unit's [Service] lines).
+    local unit_file="/etc/systemd/system/$RUNNER_SERVICE"
+    if [ -f "$unit_file" ] && grep -q "$RUNNER_HOME_LEGACY" "$unit_file"; then
+        sed -i "s|$RUNNER_HOME_LEGACY|$RUNNER_HOME|g" "$unit_file"
+        systemctl daemon-reload
+        green "✓ Rewrote $unit_file: $RUNNER_HOME_LEGACY -> $RUNNER_HOME"
+    fi
+
+    # Archive the legacy tree (don't blow it away — keeps a fallback for a
+    # single bootstrap iteration in case the new location has any issue).
+    local archive="${RUNNER_HOME_LEGACY}.pre-migration-$(date +%Y%m%d-%H%M%S)"
+    mv "$RUNNER_HOME_LEGACY" "$archive"
+    green "✓ Archived legacy tree to $archive (rm -rf when satisfied)"
+
+    if [ "$runner_was_active" -eq 1 ]; then
+        systemctl start "$RUNNER_SERVICE"
+        sleep 1
+        if systemctl is-active --quiet "$RUNNER_SERVICE"; then
+            green "✓ Runner service restarted from new location"
+        else
+            red "✗ Runner service failed to start from new location"
+            yellow "  Check: journalctl -u $RUNNER_SERVICE -n 30"
+            yellow "  Rollback: sudo mv $archive $RUNNER_HOME_LEGACY"
+            yellow "           sudo sed -i \"s|$RUNNER_HOME|$RUNNER_HOME_LEGACY|g\" $unit_file"
+            yellow "           sudo usermod -d $RUNNER_HOME_LEGACY $RUNNER_USER"
+            yellow "           sudo systemctl daemon-reload && sudo systemctl start $RUNNER_SERVICE"
+        fi
+    fi
 }
 
 bootstrap_legacy_runner_teardown() {
@@ -677,27 +762,56 @@ bootstrap_submodule_cache() {
     local cache_root="/opt/laplace/external"
     install -d -m 2775 -o "$GH_SUDO_USER" -g "$RUNNER_GROUP" "$cache_root"
 
-    local count_cloned=0 count_fetched=0 count_failed=0
+    # Group-write umask: new files come out mode 664, new dirs 2775.
+    # Combined with /opt/laplace's setgid + laplace-runner group, this
+    # means ahart (group member) AND laplace-runner (group member) can
+    # both update the cache without sudo / user-switching.
+    umask 002
+
+    # Total count for progress display.
+    local total
+    total=$(grep -c '^\[submodule' "$repo_root/.gitmodules")
+    echo "  total submodules to process: $total"
+
+    local count_cloned=0 count_fetched=0 count_failed=0 count_seen=0
+    local last_progress=0
     # Enumerate (path, url) pairs from .gitmodules.
     while IFS=$'\t' read -r path url; do
         [ -n "$path" ] && [ -n "$url" ] || continue
-        local target="$cache_root/$path"
+        count_seen=$((count_seen + 1))
+        # .gitmodules paths start with "external/" (the in-repo location).
+        # Strip that prefix so cache entries land directly under the
+        # cache root, i.e. /opt/laplace/external/<name>/ — not the
+        # absurd /opt/laplace/external/external/<name>/.
+        local rel="${path#external/}"
+        local target="$cache_root/$rel"
         if [ -d "$target/.git" ]; then
-            if sudo -u "$RUNNER_USER" -H git -C "$target" fetch --quiet --tags \
+            # Group-writable cache + setgid → no user-switching needed.
+            if git -C "$target" fetch --quiet --tags \
                 origin '+refs/heads/*:refs/remotes/origin/*' 2>/dev/null; then
                 count_fetched=$((count_fetched + 1))
             else
                 count_failed=$((count_failed + 1))
-                yellow "  fetch failed for $path"
+                yellow "  [$count_seen/$total] fetch failed: $path"
             fi
         else
-            install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$(dirname "$target")"
-            if sudo -u "$RUNNER_USER" -H git clone --quiet "$url" "$target" 2>/dev/null; then
+            # Parent dir for nested paths (e.g. tree-sitter-grammars/<lang>).
+            # setgid inherits laplace-runner group from /opt/laplace.
+            mkdir -p "$(dirname "$target")"
+            if git clone --quiet "$url" "$target" 2>/dev/null; then
                 count_cloned=$((count_cloned + 1))
             else
                 count_failed=$((count_failed + 1))
-                yellow "  clone failed for $path ($url)"
+                yellow "  [$count_seen/$total] clone failed: $path ($url)"
             fi
+        fi
+        # Progress heartbeat every 25 submodules so the operator sees
+        # the loop is making progress (relevant on first-time runs that
+        # take 10-20 min cloning ~300 small grammar repos).
+        if [ $((count_seen - last_progress)) -ge 25 ]; then
+            printf "  [%d/%d] cloned=%d fetched=%d failed=%d\n" \
+                "$count_seen" "$total" "$count_cloned" "$count_fetched" "$count_failed"
+            last_progress=$count_seen
         fi
     done < <(
         awk '
@@ -744,6 +858,16 @@ bootstrap_runner_gh_auth() {
         green "✓ $RUNNER_USER can authenticate with GitHub"
     else
         yellow "  gh auth status failed under $RUNNER_USER — token may have host-binding or scope issue"
+    fi
+
+    # Configure git's credential helper to use gh's token. This is what
+    # makes `git clone https://github.com/...` authenticated (instead of
+    # anonymous + rate-limited) for subsequent bootstrap_submodule_cache
+    # runs as well as any workflow's git operations.
+    if sudo -u "$RUNNER_USER" -H gh auth setup-git >/dev/null 2>&1; then
+        green "✓ git credential helper wired to gh for $RUNNER_USER"
+    else
+        yellow "  gh auth setup-git failed under $RUNNER_USER — submodule clones will fall back to anonymous"
     fi
 }
 
@@ -902,6 +1026,18 @@ PG_EOF
         rm -rf "$RUNNER_HOME"
         green "✓ Removed $RUNNER_HOME"
     fi
+    # Also remove the legacy /var/lib/laplace-runner path in case a
+    # pre-migration bootstrap is being reset.
+    if [ -d "$RUNNER_HOME_LEGACY" ] && [ "$RUNNER_HOME_LEGACY" != "$RUNNER_HOME" ]; then
+        rm -rf "$RUNNER_HOME_LEGACY"
+        green "✓ Removed legacy $RUNNER_HOME_LEGACY"
+    fi
+    # And any pre-migration archives left behind.
+    for archive in "$RUNNER_HOME_LEGACY".pre-migration-*; do
+        [ -e "$archive" ] || continue
+        rm -rf "$archive"
+        green "✓ Removed migration archive $archive"
+    done
 
     say "Remove system account $RUNNER_USER"
     if id -u "$RUNNER_USER" >/dev/null 2>&1; then
@@ -923,6 +1059,7 @@ PG_EOF
 do_bootstrap() {
     bootstrap_user
     bootstrap_build_environment
+    bootstrap_migrate_runner_home
     bootstrap_legacy_runner_teardown
     bootstrap_runner_install
     bootstrap_runner_register
@@ -939,8 +1076,8 @@ do_bootstrap() {
     bootstrap_engine_lib_path
     bootstrap_pg_extension_paths
     bootstrap_remove_legacy_sudoers
+    bootstrap_runner_gh_auth      # before submodule cache so clones are authenticated
     bootstrap_submodule_cache
-    bootstrap_runner_gh_auth
 
     say "Verification"
     echo "Runner service:"

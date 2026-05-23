@@ -27,22 +27,25 @@ jobs:
     name: Verify self-hosted runner capabilities
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Pre-checkout — strip legacy tree-sitter-nqc state
+      - name: Pre-checkout — wipe stale workspace submodule state (scratch _work)
         shell: bash
         run: |
-          # tree-sitter-nqc has an upstream orphan gitlink (examples/nqc with
-          # no backing .gitmodules entry). actions/checkout v4's submodule
-          # cleanup walks gitlinks and fails with
-          #   fatal: No url found for submodule path …/examples/nqc
-          # scripts/ci-init-submodules.sh skips nqc entirely, so this step
-          # only clears residual state from older workflow runs. Every other
-          # submodule (deps + 300+ grammars) is preserved.
+          # _work is scratch by design (see ci-init-submodules.sh header);
+          # the canonical persistent cache is /opt/laplace/external/
+          # populated by bootstrap_submodule_cache. Without this wipe,
+          # actions/checkout v4's auth helper walks 309+ stale .git/modules/
+          # entries from prior runs (one `git config --get-regexp
+          # ^includeIf.gitdir:` per submodule) before our init step
+          # even starts. Wiping it forces a clean start each run; the
+          # workspace .git/modules + external/ trees are rebuilt by
+          # scripts/ci-init-submodules.sh from the persistent cache in
+          # seconds (objects shared via --reference, no network).
           for p in \
-            "$GITHUB_WORKSPACE/.git/modules/external/tree-sitter-grammars/tree-sitter-nqc" \
-            "$GITHUB_WORKSPACE/external/tree-sitter-grammars/tree-sitter-nqc"; do
+            "$GITHUB_WORKSPACE/.git/modules" \
+            "$GITHUB_WORKSPACE/external"; do
             if [ -e "$p" ]; then
               rm -rf "$p"
-              echo "  cleared $p"
+              echo "  wiped $p"
             fi
           done
           :
@@ -124,22 +127,25 @@ jobs:
     needs: capabilities
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Pre-checkout — strip legacy tree-sitter-nqc state
+      - name: Pre-checkout — wipe stale workspace submodule state (scratch _work)
         shell: bash
         run: |
-          # tree-sitter-nqc has an upstream orphan gitlink (examples/nqc with
-          # no backing .gitmodules entry). actions/checkout v4's submodule
-          # cleanup walks gitlinks and fails with
-          #   fatal: No url found for submodule path …/examples/nqc
-          # scripts/ci-init-submodules.sh skips nqc entirely, so this step
-          # only clears residual state from older workflow runs. Every other
-          # submodule (deps + 300+ grammars) is preserved.
+          # _work is scratch by design (see ci-init-submodules.sh header);
+          # the canonical persistent cache is /opt/laplace/external/
+          # populated by bootstrap_submodule_cache. Without this wipe,
+          # actions/checkout v4's auth helper walks 309+ stale .git/modules/
+          # entries from prior runs (one `git config --get-regexp
+          # ^includeIf.gitdir:` per submodule) before our init step
+          # even starts. Wiping it forces a clean start each run; the
+          # workspace .git/modules + external/ trees are rebuilt by
+          # scripts/ci-init-submodules.sh from the persistent cache in
+          # seconds (objects shared via --reference, no network).
           for p in \
-            "$GITHUB_WORKSPACE/.git/modules/external/tree-sitter-grammars/tree-sitter-nqc" \
-            "$GITHUB_WORKSPACE/external/tree-sitter-grammars/tree-sitter-nqc"; do
+            "$GITHUB_WORKSPACE/.git/modules" \
+            "$GITHUB_WORKSPACE/external"; do
             if [ -e "$p" ]; then
               rm -rf "$p"
-              echo "  cleared $p"
+              echo "  wiped $p"
             fi
           done
           :
@@ -199,22 +205,25 @@ jobs:
     needs: build
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Pre-checkout — strip legacy tree-sitter-nqc state
+      - name: Pre-checkout — wipe stale workspace submodule state (scratch _work)
         shell: bash
         run: |
-          # tree-sitter-nqc has an upstream orphan gitlink (examples/nqc with
-          # no backing .gitmodules entry). actions/checkout v4's submodule
-          # cleanup walks gitlinks and fails with
-          #   fatal: No url found for submodule path …/examples/nqc
-          # scripts/ci-init-submodules.sh skips nqc entirely, so this step
-          # only clears residual state from older workflow runs. Every other
-          # submodule (deps + 300+ grammars) is preserved.
+          # _work is scratch by design (see ci-init-submodules.sh header);
+          # the canonical persistent cache is /opt/laplace/external/
+          # populated by bootstrap_submodule_cache. Without this wipe,
+          # actions/checkout v4's auth helper walks 309+ stale .git/modules/
+          # entries from prior runs (one `git config --get-regexp
+          # ^includeIf.gitdir:` per submodule) before our init step
+          # even starts. Wiping it forces a clean start each run; the
+          # workspace .git/modules + external/ trees are rebuilt by
+          # scripts/ci-init-submodules.sh from the persistent cache in
+          # seconds (objects shared via --reference, no network).
           for p in \
-            "$GITHUB_WORKSPACE/.git/modules/external/tree-sitter-grammars/tree-sitter-nqc" \
-            "$GITHUB_WORKSPACE/external/tree-sitter-grammars/tree-sitter-nqc"; do
+            "$GITHUB_WORKSPACE/.git/modules" \
+            "$GITHUB_WORKSPACE/external"; do
             if [ -e "$p" ]; then
               rm -rf "$p"
-              echo "  cleared $p"
+              echo "  wiped $p"
             fi
           done
           :
@@ -293,22 +302,25 @@ jobs:
     needs: db-deploy
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Pre-checkout — strip legacy tree-sitter-nqc state
+      - name: Pre-checkout — wipe stale workspace submodule state (scratch _work)
         shell: bash
         run: |
-          # tree-sitter-nqc has an upstream orphan gitlink (examples/nqc with
-          # no backing .gitmodules entry). actions/checkout v4's submodule
-          # cleanup walks gitlinks and fails with
-          #   fatal: No url found for submodule path …/examples/nqc
-          # scripts/ci-init-submodules.sh skips nqc entirely, so this step
-          # only clears residual state from older workflow runs. Every other
-          # submodule (deps + 300+ grammars) is preserved.
+          # _work is scratch by design (see ci-init-submodules.sh header);
+          # the canonical persistent cache is /opt/laplace/external/
+          # populated by bootstrap_submodule_cache. Without this wipe,
+          # actions/checkout v4's auth helper walks 309+ stale .git/modules/
+          # entries from prior runs (one `git config --get-regexp
+          # ^includeIf.gitdir:` per submodule) before our init step
+          # even starts. Wiping it forces a clean start each run; the
+          # workspace .git/modules + external/ trees are rebuilt by
+          # scripts/ci-init-submodules.sh from the persistent cache in
+          # seconds (objects shared via --reference, no network).
           for p in \
-            "$GITHUB_WORKSPACE/.git/modules/external/tree-sitter-grammars/tree-sitter-nqc" \
-            "$GITHUB_WORKSPACE/external/tree-sitter-grammars/tree-sitter-nqc"; do
+            "$GITHUB_WORKSPACE/.git/modules" \
+            "$GITHUB_WORKSPACE/external"; do
             if [ -e "$p" ]; then
               rm -rf "$p"
-              echo "  cleared $p"
+              echo "  wiped $p"
             fi
           done
           :
