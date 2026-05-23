@@ -104,26 +104,44 @@ static void laplace_transpose_to_axes(uint32_t X[LAPLACE_HILBERT_DIMS]) {
 }
 
 static void laplace_pack_transpose_to_bytes(const uint32_t X[LAPLACE_HILBERT_DIMS], uint8_t out[16]) {
-    /* Interleave bits of the transpose into 128 contiguous bits, MSB-first.
-     *   index bit k (0 = MSB of out[0]) = bit (BITS-1 - k/DIMS) of X[k mod DIMS]
-     * Write big-endian so memcmp on out[] matches numerical order of the
-     * 128-bit Hilbert index. */
+    /* Interleave Skilling-transpose bits into a single 128-bit index, big-
+     * endian byte layout (memcmp on out[] = numeric order of the index).
+     *
+     * Convention (matching the canonical galtay/hilbertcurve reference,
+     * verified against its byte-for-byte output for 4D curves at p=2..32):
+     *   bit (j*n + (n-1-i)) of the index (LSB=0)  =  bit j of X[i]
+     * Equivalently, MSB-first across the index:
+     *   index bit 0 (MSB)   = bit (b-1) of X[0]
+     *   index bit 1         = bit (b-1) of X[1]
+     *   index bit n-1       = bit (b-1) of X[n-1]
+     *   index bit n         = bit (b-2) of X[0]
+     *   ...
+     *   index bit n*b-1     = bit 0 of X[n-1]
+     *
+     * The dim ordering matters: Skilling's AxestoTranspose uses X[0] as a
+     * pivot, and the algorithm only produces a valid Hilbert curve when X[0]
+     * is interleaved into the HIGH bits of the index. Using X[n-1] at high
+     * bits gives a self-consistent but non-Hilbert curve. */
     memset(out, 0, 16);
-    for (int k = 0; k < LAPLACE_HILBERT_DIMS * LAPLACE_HILBERT_BITS; k++) {
-        const int dim = k % LAPLACE_HILBERT_DIMS;
-        const int src_bit = LAPLACE_HILBERT_BITS - 1 - (k / LAPLACE_HILBERT_DIMS);
-        const uint32_t b = (X[dim] >> src_bit) & 1u;
-        out[k >> 3] |= (uint8_t)(b << (7 - (k & 7)));
+    for (int j = 0; j < LAPLACE_HILBERT_BITS; ++j) {
+        for (int i = 0; i < LAPLACE_HILBERT_DIMS; ++i) {
+            const int bit_pos_lsb = j * LAPLACE_HILBERT_DIMS + (LAPLACE_HILBERT_DIMS - 1 - i);
+            const int bit_pos_msb = (LAPLACE_HILBERT_DIMS * LAPLACE_HILBERT_BITS - 1) - bit_pos_lsb;
+            const uint32_t b = (X[i] >> j) & 1u;
+            out[bit_pos_msb >> 3] |= (uint8_t)(b << (7 - (bit_pos_msb & 7)));
+        }
     }
 }
 
 static void laplace_unpack_bytes_to_transpose(const uint8_t in[16], uint32_t X[LAPLACE_HILBERT_DIMS]) {
     memset(X, 0, sizeof(uint32_t) * LAPLACE_HILBERT_DIMS);
-    for (int k = 0; k < LAPLACE_HILBERT_DIMS * LAPLACE_HILBERT_BITS; k++) {
-        const int dim = k % LAPLACE_HILBERT_DIMS;
-        const int dst_bit = LAPLACE_HILBERT_BITS - 1 - (k / LAPLACE_HILBERT_DIMS);
-        const uint32_t b = (in[k >> 3] >> (7 - (k & 7))) & 1u;
-        X[dim] |= (b << dst_bit);
+    for (int j = 0; j < LAPLACE_HILBERT_BITS; ++j) {
+        for (int i = 0; i < LAPLACE_HILBERT_DIMS; ++i) {
+            const int bit_pos_lsb = j * LAPLACE_HILBERT_DIMS + (LAPLACE_HILBERT_DIMS - 1 - i);
+            const int bit_pos_msb = (LAPLACE_HILBERT_DIMS * LAPLACE_HILBERT_BITS - 1) - bit_pos_lsb;
+            const uint32_t b = (in[bit_pos_msb >> 3] >> (7 - (bit_pos_msb & 7))) & 1u;
+            X[i] |= (b << j);
+        }
     }
 }
 
