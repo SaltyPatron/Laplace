@@ -205,6 +205,22 @@ ExternalProject_Add(postgresql
 # autogen.sh runs as PATCH_COMMAND to generate ./configure from configure.ac.
 # ---------------------------------------------------------------------------
 
+# PostGIS's configure runs AC_CHECK_LIB-style link tests for initGEOS in
+# -lgeos_c (and similar for proj/gdal). Those tests use the host linker
+# search path — which doesn't include /opt/laplace/{geos,proj,gdal}/lib
+# even though --with-{geos,proj,gdal} are passed. Pass an explicit LDFLAGS
+# with -L plus -Wl,-rpath so (a) the link tests succeed and (b) the
+# resulting postgis.so finds the right libs at load time.
+#
+# Also strip PGXS for the same reason as the postgresql target above —
+# PostGIS reads it during configure to decide which PG it's targeting,
+# and a stale shell export would point at the system PG instead of our
+# /opt/laplace/pgsql-18 one.
+set(_POSTGIS_LDFLAGS
+    "-L${LAPLACE_DEPS_PREFIX}/geos/lib -Wl,-rpath,${LAPLACE_DEPS_PREFIX}/geos/lib \
+-L${LAPLACE_DEPS_PREFIX}/proj/lib -Wl,-rpath,${LAPLACE_DEPS_PREFIX}/proj/lib \
+-L${LAPLACE_DEPS_PREFIX}/gdal/lib -Wl,-rpath,${LAPLACE_DEPS_PREFIX}/gdal/lib")
+
 ExternalProject_Add(postgis
     SOURCE_DIR  "${CMAKE_CURRENT_SOURCE_DIR}/postgis"
     INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/pgsql-18"
@@ -212,17 +228,19 @@ ExternalProject_Add(postgis
     BUILD_IN_SOURCE 1
     PATCH_COMMAND "<SOURCE_DIR>/autogen.sh"
     CONFIGURE_COMMAND
+        env -u PGXS
         "<SOURCE_DIR>/configure"
         "CC=gcc"
         "CXX=g++"
         "CFLAGS=${_LAPLACE_CFLAGS}"
         "CXXFLAGS=${_LAPLACE_CFLAGS}"
+        "LDFLAGS=${_POSTGIS_LDFLAGS}"
         "--with-pgconfig=${LAPLACE_DEPS_PREFIX}/pgsql-18/bin/pg_config"
         "--with-geosconfig=${LAPLACE_DEPS_PREFIX}/geos/bin/geos-config"
         "--with-gdalconfig=${LAPLACE_DEPS_PREFIX}/gdal/bin/gdal-config"
         "--with-projdir=${LAPLACE_DEPS_PREFIX}/proj"
-    BUILD_COMMAND   make -j ${_NPROC}
-    INSTALL_COMMAND make install
+    BUILD_COMMAND   env -u PGXS make -j ${_NPROC}
+    INSTALL_COMMAND env -u PGXS make install
 )
 
 # ---------------------------------------------------------------------------
