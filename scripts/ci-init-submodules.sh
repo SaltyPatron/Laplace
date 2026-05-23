@@ -113,14 +113,20 @@ for name in "${names[@]}"; do
         continue
     fi
 
+    # Pinned SHA the parent expects for this submodule. `git submodule update`
+    # checks out this SHA but does NOT fetch by default — if the runner's local
+    # clone of the submodule is stale (older than a pin bump), the checkout
+    # fails with "Unable to find current revision". We pre-fetch the SHA below.
+    pinned=$(git ls-tree HEAD "$path" 2>/dev/null | awk '{print $3}')
+
     if [ "$CACHE_AVAILABLE" = "1" ]; then
         key=$(mirror_key "$url")
         mirror="$CACHE_DIR/${key}.git"
 
         if [ -d "$mirror" ]; then
-            # Delta-fetch into the mirror (network-bound on actual updates,
-            # near-instant on no-op). Failures are non-fatal — the checkout
-            # below still works against the cached state.
+            # Delta-fetch into the mirror. With --mirror the refspec is
+            # `+refs/*:refs/*`, so this pulls heads, tags, and pull refs —
+            # any pinned SHA reachable from upstream lands here.
             git -C "$mirror" remote update --prune >/dev/null 2>&1 \
                 || warn "mirror fetch failed for $name (continuing with cached state)"
         else
@@ -133,23 +139,51 @@ for name in "${names[@]}"; do
             fresh_mirrors=$((fresh_mirrors + 1))
         fi
 
-        # Initialize the submodule using the mirror as object source.
-        # `--reference` is honored on initial clone; on a subsequent run the
-        # existing .git/modules/<name> is reused and we set up an alternates
-        # file so future objects are also shared.
+        # Ensure the workspace module dir borrows objects from the mirror
+        # BEFORE we try to check out the pinned SHA. Two cases:
+        #   * fresh init  → `--reference` plants the alternates on clone
+        #   * existing    → we write alternates ourselves so the next op
+        #                   resolves the pinned SHA via the mirror's objects
         if [ ! -e ".git/modules/$path" ]; then
-            git submodule update --init --reference "$mirror" -- "$path" \
-                || { err "submodule init failed: $path"; errors=$((errors + 1)); continue; }
+            init_status=0
+            git submodule update --init --reference "$mirror" -- "$path" || init_status=$?
         else
             mkdir -p ".git/modules/$path/objects/info"
             printf '%s\n' "$mirror/objects" > ".git/modules/$path/objects/info/alternates"
-            git submodule update --init -- "$path" \
-                || { err "submodule update failed: $path"; errors=$((errors + 1)); continue; }
+            init_status=0
+            git submodule update --init -- "$path" || init_status=$?
         fi
     else
-        # No cache — fall back to direct init from upstream.
-        git submodule update --init -- "$path" \
-            || { err "direct submodule init failed: $path"; errors=$((errors + 1)); continue; }
+        # No cache — direct upstream init.
+        init_status=0
+        git submodule update --init -- "$path" || init_status=$?
+    fi
+
+    # Recovery: a non-zero exit from `git submodule update` is almost always
+    # "Unable to find current revision" caused by stale local state that
+    # predates a pin bump (the script's most common runtime failure). Fetch
+    # the pinned SHA explicitly into whatever clone exists, then retry.
+    # If that still fails, wipe the local state and re-clone fresh.
+    if [ "$init_status" -ne 0 ]; then
+        mod_git=".git/modules/$path"
+        if [ -d "$mod_git" ] && [ -n "$pinned" ]; then
+            git --git-dir="$mod_git" fetch --quiet --tags origin "+refs/heads/*:refs/remotes/origin/*" 2>/dev/null \
+                || git --git-dir="$mod_git" fetch --quiet origin "$pinned" 2>/dev/null \
+                || true
+            init_status=0
+            git submodule update --init --force -- "$path" || init_status=$?
+        fi
+    fi
+    if [ "$init_status" -ne 0 ]; then
+        warn "$path: stale local clone (pinned $pinned unreachable); wiping and re-cloning"
+        rm -rf -- ".git/modules/$path" "$path"
+        if [ "$CACHE_AVAILABLE" = "1" ] && [ -n "${mirror:-}" ] && [ -d "$mirror" ]; then
+            git submodule update --init --reference "$mirror" -- "$path" \
+                || { err "submodule init failed after wipe: $path"; errors=$((errors + 1)); continue; }
+        else
+            git submodule update --init -- "$path" \
+                || { err "submodule init failed after wipe: $path"; errors=$((errors + 1)); continue; }
+        fi
     fi
 
     inited=$((inited + 1))
