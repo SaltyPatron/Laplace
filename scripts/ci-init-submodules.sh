@@ -1,198 +1,202 @@
 #!/bin/bash
 # scripts/ci-init-submodules.sh
 #
-# Mirror-backed submodule init for the self-hosted CI runner.
+# Move submodule gitdir storage OUT of the GitHub Actions runner work folder.
 #
-# Why this exists
-# ---------------
-# The runner workspace at /var/lib/laplace-runner/actions-runner/_work/Laplace/Laplace
-# is treated as scratch — actions/checkout can clean it, and we deliberately
-# wipe `$WORKSPACE/.git/modules` paths that hold legacy state. None of the
-# 300+ submodule clones should live there: re-cloning them on every push
-# burns 30+ minutes and saturates upstream. Submodule objects belong in a
-# persistent host-side store.
+# The agent treats $GITHUB_WORKSPACE as scratch. Anything that lands inside
+# .git/modules/ inside the workspace is one `rm -rf` away from being gone
+# forever — and historically the workflow has done exactly that, forcing
+# a 300+ submodule re-clone on every push.
 #
-# Layout
-# ------
-# Persistent bare-mirror cache:
-#   $LAPLACE_SUBMODULE_CACHE                    (default: /opt/laplace/submodule-cache)
-#     <sha256-hex32-of-url>.git/                bare mirror of each submodule URL
+# Fix: replace $GITHUB_WORKSPACE/.git/modules with a symlink into a
+# persistent host-side directory ($LAPLACE_SUBMODULE_MODULES, default
+# /opt/laplace/submodule-modules — Layer-0-provisioned, owned by
+# laplace-runner). All git-submodule operations then write through the
+# symlink into persistent storage. The workspace can be wiped freely; the
+# gitdirs survive.
 #
-# Each workspace clone uses `git clone --reference $mirror` so its objects
-# are shared (hardlink-on-the-same-fs / read-from-alternates otherwise).
+# Per submodule the invariant is:
 #
-# First-run cost  : one full clone of each submodule INTO the mirror.
-# Steady-state    : a small `git remote update` delta-fetch into the mirror,
-#                   then `git submodule update` fast-forwards the checkout —
-#                   typically seconds, regardless of how many submodules.
+#   1. .git/modules/<path>           (lives in persistent store via symlink)
+#      contains the pinned SHA from `git ls-tree HEAD <path>`.
+#   2. <path>                        (workspace working tree)
+#      is checked out at that SHA.
 #
-# Wiping the workspace is now safe: re-init pulls from the mirror, not from
-# upstream.
+# Three checks enforce it:
 #
-# Skip list
-# ---------
-# `tree-sitter-nqc` (NQC = LEGO Mindstorms "Not Quite C") has an upstream
-# orphan gitlink at `examples/nqc/` with no `.gitmodules` entry to back it.
-# `actions/checkout@v4`'s recursive submodule cleanup walks gitlinks and
-# fails with `fatal: No url found for submodule path …/examples/nqc`. We
-# never check out nqc, so the orphan never lands in the runner workspace
-# and the cleanup walk has nothing to trip on. The single-grammar loss is
-# acceptable.
+#   * If the persistent module dir is behind a pin bump, fetch heads + tags
+#     (and the pinned SHA explicitly as a final fallback) before update.
+#   * If `git submodule update --init --force` still aborts, wipe the
+#     module dir + working tree once and re-clone from upstream.
+#   * Verify post-init HEAD matches the pin; mismatch is a hard error.
 #
-# Exit codes
-# ----------
-#   0   all required submodules initialized (or fall-through init succeeded)
-#   1   submodule cache missing AND --strict was requested
-#   2   .gitmodules missing (run from repo root)
+# If the pinned SHA is not reachable from the configured upstream URL
+# (force-push at origin, fork URL gone, etc.) the script fails loudly
+# naming the offending submodule. The pin is wrong in that case, not
+# the script.
+#
+# Skip list — submodules deliberately NOT initialized:
+#   * external/tree-sitter-grammars/tree-sitter-nqc — upstream has an
+#     orphan gitlink at examples/nqc (no .gitmodules entry backing it)
+#     which trips actions/checkout's recursive submodule cleanup. With
+#     nqc absent from .git/modules/ and the working tree, the cleanup
+#     walk never reaches the orphan.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CACHE_DIR="${LAPLACE_SUBMODULE_CACHE:-/opt/laplace/submodule-cache}"
-STRICT="${LAPLACE_SUBMODULE_STRICT:-0}"
+PERSISTENT_MODULES="${LAPLACE_SUBMODULE_MODULES:-/opt/laplace/submodule-modules}"
+# Optional seed: a fully-populated .git/modules tree we can copy from
+# the first time the persistent store is empty. Default is the dev
+# workspace on this host; the runner user (laplace-runner) reaches it
+# via /home/ahart traversal (mode 751) + the publicly-readable
+# Projects/Laplace tree underneath. Override or unset to disable.
+SEED_SOURCE="${LAPLACE_SUBMODULE_SEED:-/home/ahart/Projects/Laplace/.git/modules}"
 SKIP_PATHS=(
     "external/tree-sitter-grammars/tree-sitter-nqc"
 )
 
-# --- helpers -----------------------------------------------------------------
-say()  { printf '%s\n' "$*"; }
-warn() { printf '::warning::%s\n' "$*" >&2; }
-err()  { printf '::error::%s\n'   "$*" >&2; }
+err() { printf '::error::%s\n' "$*" >&2; }
 
+[ -f .gitmodules ] || { err "no .gitmodules at $(pwd) — run from repo root"; exit 2; }
+[ -d .git ] || [ -f .git ] || { err "no .git at $(pwd)"; exit 2; }
+
+# --- persistent gitdir store -------------------------------------------------
+if [ ! -d "$PERSISTENT_MODULES" ]; then
+    if ! mkdir -p "$PERSISTENT_MODULES" 2>/dev/null; then
+        err "cannot create $PERSISTENT_MODULES — fix ownership of its parent in Layer 0 (scripts/bootstrap-laplace-runner.sh)"
+        exit 1
+    fi
+fi
+[ -w "$PERSISTENT_MODULES" ] || { err "$PERSISTENT_MODULES not writable by $(id -un)"; exit 1; }
+
+# Seed the persistent store from an existing populated .git/modules tree
+# (the dev workspace on this host) the first time it's empty. Avoids a
+# 300+ submodule re-download from upstream on first CI run after
+# Layer-0 provisioning. Best-effort: failure (perm denied, source
+# missing, rsync absent) is silent and we fall through to normal init.
+if [ -z "$(ls -A "$PERSISTENT_MODULES" 2>/dev/null)" ] \
+   && [ -n "${SEED_SOURCE}" ] \
+   && [ -d "${SEED_SOURCE}" ] \
+   && [ -r "${SEED_SOURCE}" ]; then
+    echo "::notice::seeding $PERSISTENT_MODULES from $SEED_SOURCE (one-time)"
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -aH "$SEED_SOURCE/" "$PERSISTENT_MODULES/" 2>/dev/null || true
+    else
+        cp -aH "$SEED_SOURCE/." "$PERSISTENT_MODULES/" 2>/dev/null || true
+    fi
+fi
+
+# Ensure .git/modules is a symlink to the persistent store. Three cases:
+#   * already correct symlink   → no-op
+#   * wrong-target symlink      → relink
+#   * real directory            → migrate contents into persistent store, then relink
+#   * absent                    → create symlink
+ws_modules=".git/modules"
+target_canon=$(readlink -f "$PERSISTENT_MODULES")
+if [ -L "$ws_modules" ]; then
+    if [ "$(readlink -f "$ws_modules")" != "$target_canon" ]; then
+        rm -- "$ws_modules"
+        ln -s "$PERSISTENT_MODULES" "$ws_modules"
+    fi
+elif [ -d "$ws_modules" ]; then
+    # One-time migration. rsync preserves perms + hardlinks; --ignore-existing
+    # keeps anything already on the persistent side (e.g. from another workspace).
+    rsync -aH --ignore-existing "$ws_modules/" "$PERSISTENT_MODULES/" >/dev/null
+    rm -rf -- "$ws_modules"
+    ln -s "$PERSISTENT_MODULES" "$ws_modules"
+elif [ -e "$ws_modules" ]; then
+    err "$ws_modules exists and is neither a directory nor a symlink — refusing to touch it"
+    exit 1
+else
+    ln -s "$PERSISTENT_MODULES" "$ws_modules"
+fi
+
+# --- helpers -----------------------------------------------------------------
 is_skipped() {
-    local p="$1"
-    local s
-    for s in "${SKIP_PATHS[@]}"; do
-        [ "$p" = "$s" ] && return 0
-    done
+    local p="$1" s
+    for s in "${SKIP_PATHS[@]}"; do [ "$p" = "$s" ] && return 0; done
     return 1
 }
 
-# Filesystem-safe mirror key: sha256(url) truncated to 32 hex chars.
-mirror_key() {
-    printf '%s' "$1" | sha256sum | cut -c1-32
+init_one() {
+    local name="$1"
+    local path url pinned mod_git actual
+    path=$(git config -f .gitmodules "submodule.${name}.path")
+    url=$(git config -f .gitmodules  "submodule.${name}.url")
+
+    if is_skipped "$path"; then
+        rm -rf -- ".git/modules/$path" "$path"
+        return 0
+    fi
+
+    pinned=$(git ls-tree HEAD "$path" 2>/dev/null | awk '{print $3}')
+    if [ -z "$pinned" ]; then
+        err "$path: no gitlink at HEAD"
+        return 1
+    fi
+
+    mod_git=".git/modules/$path"   # → persistent store via symlink
+
+    # If the persistent module dir is behind a pin bump, fetch before update.
+    if [ -d "$mod_git" ]; then
+        if ! git --git-dir="$mod_git" cat-file -e "${pinned}^{commit}" 2>/dev/null; then
+            git --git-dir="$mod_git" fetch --quiet --tags origin \
+                '+refs/heads/*:refs/remotes/origin/*' \
+                '+refs/tags/*:refs/tags/*' >/dev/null 2>&1 \
+                || git --git-dir="$mod_git" fetch --quiet origin "$pinned" >/dev/null 2>&1 \
+                || true
+        fi
+    fi
+
+    # Update. `--force` tolerates a dirty working tree from a partial prior run
+    # (workspace can be wiped between runs — submodule working trees included).
+    if ! git submodule update --init --force -- "$path" 2>/dev/null; then
+        # Last resort — wipe persistent module dir + working tree and reclone.
+        rm -rf -- "$mod_git" "$path"
+        git submodule update --init -- "$path" || {
+            err "$path: re-clone failed after wipe (pinned $pinned from $url)"
+            return 1
+        }
+    fi
+
+    actual=$(git -C "$path" rev-parse HEAD 2>/dev/null || true)
+    if [ "$actual" != "$pinned" ]; then
+        err "$path: post-init HEAD=$actual pinned=$pinned"
+        return 1
+    fi
+    return 0
 }
 
-# --- preflight ---------------------------------------------------------------
-[ -f .gitmodules ] || { err ".gitmodules not found at $(pwd)"; exit 2; }
-
-CACHE_AVAILABLE=1
-if [ ! -d "$CACHE_DIR" ]; then
-    if [ "$STRICT" = "1" ]; then
-        err "Submodule cache missing at $CACHE_DIR — run: sudo scripts/bootstrap-laplace-runner.sh"
-        exit 1
-    fi
-    warn "Submodule cache missing at $CACHE_DIR — falling back to direct upstream init (no caching)"
-    warn "Speed-fix once the cache directory exists; objects will start flowing through the mirror automatically"
-    CACHE_AVAILABLE=0
-fi
-
-# Parse submodule (name, path, url) triples from .gitmodules
+# --- main --------------------------------------------------------------------
 mapfile -t names < <(
     git config -f .gitmodules --get-regexp '^submodule\..*\.path$' \
     | awk '{print $1}' \
     | sed 's/^submodule\.//; s/\.path$//'
 )
-[ "${#names[@]}" -gt 0 ] || { warn "no submodules declared in .gitmodules; nothing to init"; exit 0; }
+total=${#names[@]}
+[ "$total" -gt 0 ] || { echo "no submodules in .gitmodules"; exit 0; }
 
-inited=0
+ok=0
+fail=0
 skipped=0
-fresh_mirrors=0
-errors=0
-
-# --- main --------------------------------------------------------------------
 for name in "${names[@]}"; do
     path=$(git config -f .gitmodules "submodule.${name}.path")
-    url=$(git config -f .gitmodules "submodule.${name}.url")
-
     if is_skipped "$path"; then
-        # Make sure no stale checkout / module dir lingers — actions/checkout's
-        # cleanup walks anything it finds in .git/modules or the working tree.
-        rm -rf -- ".git/modules/$path" "$path" 2>/dev/null || true
-        skipped=$((skipped + 1))
+        if init_one "$name"; then skipped=$((skipped + 1)); else fail=$((fail + 1)); fi
         continue
     fi
-
-    # Pinned SHA the parent expects for this submodule. `git submodule update`
-    # checks out this SHA but does NOT fetch by default — if the runner's local
-    # clone of the submodule is stale (older than a pin bump), the checkout
-    # fails with "Unable to find current revision". We pre-fetch the SHA below.
-    pinned=$(git ls-tree HEAD "$path" 2>/dev/null | awk '{print $3}')
-
-    if [ "$CACHE_AVAILABLE" = "1" ]; then
-        key=$(mirror_key "$url")
-        mirror="$CACHE_DIR/${key}.git"
-
-        if [ -d "$mirror" ]; then
-            # Delta-fetch into the mirror. With --mirror the refspec is
-            # `+refs/*:refs/*`, so this pulls heads, tags, and pull refs —
-            # any pinned SHA reachable from upstream lands here.
-            git -C "$mirror" remote update --prune >/dev/null 2>&1 \
-                || warn "mirror fetch failed for $name (continuing with cached state)"
-        else
-            say "  [mirror] cloning $url → $mirror"
-            if ! git clone --mirror --quiet "$url" "$mirror"; then
-                err "failed to create mirror at $mirror for $name"
-                errors=$((errors + 1))
-                continue
-            fi
-            fresh_mirrors=$((fresh_mirrors + 1))
-        fi
-
-        # Ensure the workspace module dir borrows objects from the mirror
-        # BEFORE we try to check out the pinned SHA. Two cases:
-        #   * fresh init  → `--reference` plants the alternates on clone
-        #   * existing    → we write alternates ourselves so the next op
-        #                   resolves the pinned SHA via the mirror's objects
-        if [ ! -e ".git/modules/$path" ]; then
-            init_status=0
-            git submodule update --init --reference "$mirror" -- "$path" || init_status=$?
-        else
-            mkdir -p ".git/modules/$path/objects/info"
-            printf '%s\n' "$mirror/objects" > ".git/modules/$path/objects/info/alternates"
-            init_status=0
-            git submodule update --init -- "$path" || init_status=$?
-        fi
+    if init_one "$name"; then
+        ok=$((ok + 1))
     else
-        # No cache — direct upstream init.
-        init_status=0
-        git submodule update --init -- "$path" || init_status=$?
+        fail=$((fail + 1))
     fi
-
-    # Recovery: a non-zero exit from `git submodule update` is almost always
-    # "Unable to find current revision" caused by stale local state that
-    # predates a pin bump (the script's most common runtime failure). Fetch
-    # the pinned SHA explicitly into whatever clone exists, then retry.
-    # If that still fails, wipe the local state and re-clone fresh.
-    if [ "$init_status" -ne 0 ]; then
-        mod_git=".git/modules/$path"
-        if [ -d "$mod_git" ] && [ -n "$pinned" ]; then
-            git --git-dir="$mod_git" fetch --quiet --tags origin "+refs/heads/*:refs/remotes/origin/*" 2>/dev/null \
-                || git --git-dir="$mod_git" fetch --quiet origin "$pinned" 2>/dev/null \
-                || true
-            init_status=0
-            git submodule update --init --force -- "$path" || init_status=$?
-        fi
-    fi
-    if [ "$init_status" -ne 0 ]; then
-        warn "$path: stale local clone (pinned $pinned unreachable); wiping and re-cloning"
-        rm -rf -- ".git/modules/$path" "$path"
-        if [ "$CACHE_AVAILABLE" = "1" ] && [ -n "${mirror:-}" ] && [ -d "$mirror" ]; then
-            git submodule update --init --reference "$mirror" -- "$path" \
-                || { err "submodule init failed after wipe: $path"; errors=$((errors + 1)); continue; }
-        else
-            git submodule update --init -- "$path" \
-                || { err "submodule init failed after wipe: $path"; errors=$((errors + 1)); continue; }
-        fi
-    fi
-
-    inited=$((inited + 1))
 done
 
-# CRLF-fixture overrides for the 5 tree-sitter grammars that fight git's
-# default text=lf normalization. Idempotent; silent when there's nothing
-# to fix.
+# CRLF-fixture local overrides for the 5 grammars that fight git's
+# text=lf normalization. Idempotent.
 scripts/normalize-submodule-attributes.sh
 
-say "ci-init-submodules: inited=$inited skipped=$skipped fresh-mirrors=$fresh_mirrors errors=$errors cache=$CACHE_DIR"
-[ "$errors" -eq 0 ]
+printf 'ci-init-submodules: ok=%d skipped=%d fail=%d total=%d store=%s\n' \
+       "$ok" "$skipped" "$fail" "$total" "$PERSISTENT_MODULES"
+[ "$fail" -eq 0 ]
