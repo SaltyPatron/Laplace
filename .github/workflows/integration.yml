@@ -17,18 +17,24 @@ jobs:
     name: Verify self-hosted runner capabilities
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Pre-checkout — wipe stale submodule state from persistent runner workspace
+      - name: Pre-checkout — surgical wipe of nested tree-sitter grammar state
         shell: bash
         run: |
-          # The self-hosted runner workspace persists across runs. tree-sitter-nqc
-          # has an upstream orphan gitlink (examples/nqc with no .gitmodules entry)
-          # which trips actions/checkout's `git submodule foreach --recursive` cleanup
-          # step even with `submodules: false`. Wiping .git/modules forces a clean
-          # submodule state — the Initialize step after checkout re-inits top-level
-          # submodules (non-recursive) so we never recurse through the orphan.
-          if [ -d "$GITHUB_WORKSPACE/.git/modules" ]; then
-            rm -rf "$GITHUB_WORKSPACE/.git/modules"
-            echo "  cleared stale .git/modules"
+          # tree-sitter-nqc has an upstream orphan gitlink (examples/nqc with no
+          # .gitmodules entry) which trips actions/checkout's
+          # `git submodule foreach --recursive` cleanup step even with
+          # `submodules: false`. The recursion path is:
+          #   .git/modules/external/tree-sitter-grammars/modules/tree-sitter-nqc/...
+          # so we only need to clear the nested-grammar layer. Top-level submodule
+          # caches (postgresql, postgis, geos, proj, gdal, eigen, spectra, blake3,
+          # googletest, tree-sitter, tree-sitter-grammars itself) are preserved
+          # across runs — ~1 GB of re-download avoided per CI run.
+          nested="$GITHUB_WORKSPACE/.git/modules/external/tree-sitter-grammars/modules"
+          if [ -d "$nested" ]; then
+            rm -rf "$nested"
+            echo "  cleared nested grammar state at $nested"
+          else
+            echo "  no nested grammar state present — nothing to clear"
           fi
 
       - uses: actions/checkout@v4
@@ -113,18 +119,24 @@ jobs:
     needs: capabilities
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Pre-checkout — wipe stale submodule state from persistent runner workspace
+      - name: Pre-checkout — surgical wipe of nested tree-sitter grammar state
         shell: bash
         run: |
-          # The self-hosted runner workspace persists across runs. tree-sitter-nqc
-          # has an upstream orphan gitlink (examples/nqc with no .gitmodules entry)
-          # which trips actions/checkout's `git submodule foreach --recursive` cleanup
-          # step even with `submodules: false`. Wiping .git/modules forces a clean
-          # submodule state — the Initialize step after checkout re-inits top-level
-          # submodules (non-recursive) so we never recurse through the orphan.
-          if [ -d "$GITHUB_WORKSPACE/.git/modules" ]; then
-            rm -rf "$GITHUB_WORKSPACE/.git/modules"
-            echo "  cleared stale .git/modules"
+          # tree-sitter-nqc has an upstream orphan gitlink (examples/nqc with no
+          # .gitmodules entry) which trips actions/checkout's
+          # `git submodule foreach --recursive` cleanup step even with
+          # `submodules: false`. The recursion path is:
+          #   .git/modules/external/tree-sitter-grammars/modules/tree-sitter-nqc/...
+          # so we only need to clear the nested-grammar layer. Top-level submodule
+          # caches (postgresql, postgis, geos, proj, gdal, eigen, spectra, blake3,
+          # googletest, tree-sitter, tree-sitter-grammars itself) are preserved
+          # across runs — ~1 GB of re-download avoided per CI run.
+          nested="$GITHUB_WORKSPACE/.git/modules/external/tree-sitter-grammars/modules"
+          if [ -d "$nested" ]; then
+            rm -rf "$nested"
+            echo "  cleared nested grammar state at $nested"
+          else
+            echo "  no nested grammar state present — nothing to clear"
           fi
 
       - uses: actions/checkout@v4
@@ -186,18 +198,24 @@ jobs:
     needs: build
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Pre-checkout — wipe stale submodule state from persistent runner workspace
+      - name: Pre-checkout — surgical wipe of nested tree-sitter grammar state
         shell: bash
         run: |
-          # The self-hosted runner workspace persists across runs. tree-sitter-nqc
-          # has an upstream orphan gitlink (examples/nqc with no .gitmodules entry)
-          # which trips actions/checkout's `git submodule foreach --recursive` cleanup
-          # step even with `submodules: false`. Wiping .git/modules forces a clean
-          # submodule state — the Initialize step after checkout re-inits top-level
-          # submodules (non-recursive) so we never recurse through the orphan.
-          if [ -d "$GITHUB_WORKSPACE/.git/modules" ]; then
-            rm -rf "$GITHUB_WORKSPACE/.git/modules"
-            echo "  cleared stale .git/modules"
+          # tree-sitter-nqc has an upstream orphan gitlink (examples/nqc with no
+          # .gitmodules entry) which trips actions/checkout's
+          # `git submodule foreach --recursive` cleanup step even with
+          # `submodules: false`. The recursion path is:
+          #   .git/modules/external/tree-sitter-grammars/modules/tree-sitter-nqc/...
+          # so we only need to clear the nested-grammar layer. Top-level submodule
+          # caches (postgresql, postgis, geos, proj, gdal, eigen, spectra, blake3,
+          # googletest, tree-sitter, tree-sitter-grammars itself) are preserved
+          # across runs — ~1 GB of re-download avoided per CI run.
+          nested="$GITHUB_WORKSPACE/.git/modules/external/tree-sitter-grammars/modules"
+          if [ -d "$nested" ]; then
+            rm -rf "$nested"
+            echo "  cleared nested grammar state at $nested"
+          else
+            echo "  no nested grammar state present — nothing to clear"
           fi
 
       - uses: actions/checkout@v4
@@ -274,18 +292,24 @@ jobs:
     needs: db-deploy
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Pre-checkout — wipe stale submodule state from persistent runner workspace
+      - name: Pre-checkout — surgical wipe of nested tree-sitter grammar state
         shell: bash
         run: |
-          # The self-hosted runner workspace persists across runs. tree-sitter-nqc
-          # has an upstream orphan gitlink (examples/nqc with no .gitmodules entry)
-          # which trips actions/checkout's `git submodule foreach --recursive` cleanup
-          # step even with `submodules: false`. Wiping .git/modules forces a clean
-          # submodule state — the Initialize step after checkout re-inits top-level
-          # submodules (non-recursive) so we never recurse through the orphan.
-          if [ -d "$GITHUB_WORKSPACE/.git/modules" ]; then
-            rm -rf "$GITHUB_WORKSPACE/.git/modules"
-            echo "  cleared stale .git/modules"
+          # tree-sitter-nqc has an upstream orphan gitlink (examples/nqc with no
+          # .gitmodules entry) which trips actions/checkout's
+          # `git submodule foreach --recursive` cleanup step even with
+          # `submodules: false`. The recursion path is:
+          #   .git/modules/external/tree-sitter-grammars/modules/tree-sitter-nqc/...
+          # so we only need to clear the nested-grammar layer. Top-level submodule
+          # caches (postgresql, postgis, geos, proj, gdal, eigen, spectra, blake3,
+          # googletest, tree-sitter, tree-sitter-grammars itself) are preserved
+          # across runs — ~1 GB of re-download avoided per CI run.
+          nested="$GITHUB_WORKSPACE/.git/modules/external/tree-sitter-grammars/modules"
+          if [ -d "$nested" ]; then
+            rm -rf "$nested"
+            echo "  cleared nested grammar state at $nested"
+          else
+            echo "  no nested grammar state present — nothing to clear"
           fi
 
       - uses: actions/checkout@v4
