@@ -71,10 +71,10 @@ Each extension follows its own version trajectory and ships its own upgrade scri
 - **`laplace_geom` is potentially open-sourceable later.** It's a general-purpose 4D-PostGIS extension. Any researcher / scientific-viz / ML-feature-space user could install it without taking on the substrate's opinions. Drawing the boundary now means its API doesn't drift to depend on substrate-specific assumptions.
 - **Substrate version evolves independently** from 4D-PostGIS primitives. A new attestation kind or cascade heuristic bumps `laplace_substrate`'s version without churning `laplace_geom`.
 - **PG's `requires` chain** handles installation order. `CREATE EXTENSION laplace_substrate` automatically installs `laplace_geom` and `postgis` first.
-- **DbUp migration calls the wrapper twice** — `SELECT laplace_priv.install_extension('laplace_geom'); SELECT laplace_priv.install_extension('laplace_substrate');` — both go through the bounded SECURITY DEFINER wrapper from Layer-0 bootstrap.
+- **DbUp migration calls `CREATE EXTENSION` directly** — `CREATE EXTENSION IF NOT EXISTS laplace_geom; CREATE EXTENSION IF NOT EXISTS laplace_substrate;`. `laplace_admin` is `SUPERUSER` per [ADR 0045](0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md), so no SECURITY DEFINER wrapper is needed. *(Pre-ADR-0045 this used `SELECT laplace_priv.install_extension(...)` — see ADR 0045 for why that was collapsed.)*
 - **Folder restructure required.** `extension/` becomes `extension/{laplace_geom,laplace_substrate}/`, each with its own `Makefile` (PGXS), `.control`, `--A.B.C.sql`, `src/`, `tests/` subdirs.
 - **CI build/install steps double up** — `sudo make install` runs in both extension subdirs. Bounded sudoers entry (`make install*`, per [ADR 0019](0019-laplace-runner-system-account.md)) already covers this.
-- **Bootstrap allowlist update** — `laplace_priv.install_extension` allowlist gets `'laplace_geom'` and `'laplace_substrate'` (already has `'laplace'` as placeholder; that becomes obsolete).
+- ~~**Bootstrap allowlist update** — `laplace_priv.install_extension` allowlist gets `'laplace_geom'` and `'laplace_substrate'`~~. *No longer applicable — wrapper + allowlist removed by [ADR 0045](0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md). `laplace_admin` as `SUPERUSER` can `CREATE EXTENSION` any installed extension directly.*
 
 ## Alternatives considered
 

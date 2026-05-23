@@ -28,7 +28,7 @@ Install the GitHub Actions runner at `/var/lib/laplace-runner/actions-runner/`, 
 Systemd service runs as `laplace-runner`.
 
 Permissions:
-- **PG access**: peer auth mapping `laplace-runner` OS user → `laplace_admin` PG role (via `/etc/postgresql/18/main/pg_ident.conf` + `pg_hba.conf`). No password needed for local PG access; `laplace_admin` has CREATEDB + CREATEROLE.
+- **PG access**: peer auth mapping `laplace-runner` OS user → `laplace_admin` PG role (via `/etc/postgresql/18/main/pg_ident.conf` + `pg_hba.conf`). No password needed for local PG access. **`laplace_admin` is `SUPERUSER` + `CREATEDB` + `CREATEROLE`** (amended 2026-05-23 per [ADR 0045](0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md) — the prior `CREATEDB + CREATEROLE`-only configuration required a `SECURITY DEFINER` wrapper to install non-trusted extensions like PostGIS, which broke `just db-nuke` and made trusted-extension ownership transfer require additional `ALTER OWNER` machinery; the dedicated-cluster superuser pattern collapses both).
 - **Bounded sudo**: `/etc/sudoers.d/laplace-runner` grants `NOPASSWD: /usr/bin/make install*, /usr/bin/make USE_PGXS=1 *install*` — only enough to install PG extensions.
 - **Read-only access** to /vault/Data (world-readable for ingestion) and /vault/models.
 

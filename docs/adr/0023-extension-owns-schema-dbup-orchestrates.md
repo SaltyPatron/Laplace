@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted** — 2026-05-21
+**Accepted** — 2026-05-21 — **amended 2026-05-23 by [ADR 0045](0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md)**: the substrate-owns-schema invariant in this ADR stands; the "DbUp orchestrates via `laplace_priv.install_extension(...)` SECURITY DEFINER wrapper" mechanism is replaced by plain `CREATE EXTENSION IF NOT EXISTS ...` calls since `laplace_admin` is now a `SUPERUSER`.
 
 Narrows the scope of [ADR 0021 — DbUp + Npgsql for migrations](0021-dbup-for-migrations.md) without superseding it.
 
