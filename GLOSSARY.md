@@ -57,9 +57,26 @@ Stratum in the n-gram hierarchy of a given modality. T0 = Universal T0 codepoint
 
 ### Attestation
 
-A typed semantic relation between entities, sourced and rated. Stored as one row in the `attestations` table per `(subject_id, kind_id, object_id, source_id, context_id)` tuple. **An attestation IS consensus state, NOT an event log entry** — repeated assertions by the same source do not create new rows; Glicko-2 dynamics update on cross-source agreement/disagreement evidence instead.
+A typed semantic relation between entities, sourced and rated. Stored as one source-scoped current-state row in the `attestations` table per `(subject_id, kind_id, object_id, source_id, context_id)` tuple. **An attestation row is current state, NOT an event log entry** — repeated assertions by the same source do not create new rows; cross-source effective support is computed through arena-aware observation updates and effective-mu policy.
 
 Attestations are the substrate's **typed knowledge layer**. They are NOT [content](#content) (the actual bytes being recorded), NOT [metadata](#metadata) (structural properties of rows), NOT [lookups](#lookup) (identity-resolution references), NOT [indexes](#index) (acceleration structures). They are the substrate's analog of an AI model's weighted typed transforms. See [Attestation Kind](#attestation-kind) and [Cascade](#cascade-cascading-tier-nn).
+
+### Attestation Observation / Envelope
+
+The generic ingestion/API shape for new evidence. Human shorthand like `rake HAS_POS NOUN` means an observation envelope:
+
+```text
+OBSERVE_ATTESTATION(
+  kind=HAS_POS,
+  subject=rake_entity,
+  object=noun_entity,
+  source=source_entity,
+  context=context_entity_or_null,
+  qualifiers=queryable_entity_backed_metadata
+)
+```
+
+`HAS_POS` is not a bespoke function name; it is the `kind_id` entity inside one universal attestation envelope. Do **not** collapse all relations into a single `HAS_ATTESTATION` kind, because the semantic `kind_id` carries arena semantics, source-trust policy, value tier, and cascade behavior. Do **not** store opaque `params[]`; qualifiers live as context entities, object/value entities, source metadata, recipe content, or meta-attestations so they remain content-addressed, queryable, and arena-resolvable.
 
 ### Attestation Kind
 
@@ -69,10 +86,10 @@ The `kind_id` of an attestation — itself an entity — naming a **specific typ
 - **Text kinds**: `HAS_POS`, `HAS_LEMMA`, `IS_HYPERNYM_OF`, `IS_LEMMA_OF`, `IS_TRANSLATION_OF`, etc. — drawn from linguistic-resource vocabularies.
 - **Visual kinds**: `EXTRACTS_R_CHANNEL`, `ADJACENT_TO_PIXEL`, `INDICATES_HUE`, etc.
 - **Audio kinds**: `IS_AT_SAMPLE`, `HAS_FREQUENCY_PEAK`, etc.
-- **Tensor-calculation kinds for transformer-family AI models** (a fixed list of ~10): `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`. Each tensor in a transformer-family model is one of these calculation types; ingestion emits attestations of the corresponding kind between substrate token entities (which are text entities), aggregated across all (layer, head) positions where the source model used that relationship. Per-position attribution is NOT carried on attestations — the **recipe** (text/JSON content on the model entity) is the structural source of truth for layer / head / dimension / per-tensor token vocabulary; the architecture template (substrate code, per `IArchitectureTemplate`) distributes substrate's aggregated typed attestations across tensor slots at emit time per the recipe's layout. Storing per-position attribution would be redundant with the recipe.
+- **Tensor-calculation kinds for transformer-family AI models** (a fixed list of ~10): `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`. Each tensor in a transformer-family model is one of these calculation types; ingestion emits attestations of the corresponding kind between substrate entities supplied by the model's `ModalityBinder` (text token entities for text transformers), aggregated across all recipe positions where the source model used that relationship. Per-position attribution is NOT carried on attestations — the **recipe** (text/JSON content on the model entity) is the structural source of truth for layer / head / dimension / per-tensor vocabulary; the architecture template (substrate code, per `IArchitectureTemplate`) distributes substrate's aggregated typed attestations across tensor slots at emit time per the recipe's layout. Storing per-position attribution would be redundant with the recipe. This list is transformer-family-local; other model and modality families register their own small fixed role vocabularies.
 - **Cross-modal kinds**: `DEPICTS`, `CAPTIONS`, `TRANSCRIBES_AS`.
 
-Kinds carry [Arena Semantics](#arena-semantics) (cardinality, competition, context-policy, source-trust-policy) as meta-attestations on the kind entity. Cascade composes kind-typed walks the way a forward pass composes typed projections — but the substrate's vocabulary is **usage- and structure-shaped**, not transformer-position-shaped.
+Kinds carry [Arena Semantics](#arena-semantics) (compatibility, cardinality, context policy, observation update scope, conflict policy, source-trust policy, lineage policy, and structural support inputs) as meta-attestations on the kind entity. Cascade composes kind-typed walks, but the substrate's vocabulary is **usage- and structure-shaped**, not transformer-position-shaped.
 
 ### Attestation Tuple Shape
 
@@ -83,7 +100,7 @@ The attestations table is one universal table; the *logical shapes* it accommoda
 - **Unary**: subject + kind (`X IS_PUNCTUATION`).
 - **Unary valued**: subject + kind + scalar value (rating column carries the scalar, e.g., `HAS_FREQUENCY rating=12345`).
 - **N-ary**: object or context references a tuple-entity built canonically from N entity refs (for higher-arity relations).
-- **Meta**: subject is an attestation (attestations have content-addressed `id`s, so they are themselves entities — meta-attestations on a tensor-calculation attestation can attach `AT_LAYER`, `AT_HEAD`, `AT_POSITION` without schema change).
+- **Meta**: subject is an attestation (attestations have content-addressed `id`s, so they may be mirrored as entities for generic meta-attestation use). For transformer-family tensor-calculation attestations, layer/head/position attribution is recipe content, not routine per-attestation metadata.
 
 The fixed shape list is the substrate's reusable abstraction surface: adding a new modality or source requires only choosing which shapes apply to its kinds, not adding columns.
 
@@ -280,7 +297,7 @@ A semantically-coherent subset of attestations whose ratings compose. Defined by
 
 ### Arena Semantics
 
-The metadata attached to an arena or attestation kind that tells Glicko-2 how to interpret agreement and disagreement: multi-valued compatibility, functional cardinality, inverse-functional cardinality, mutually exclusive object sets, scalar axes, temporal/context requirements, source-scope rules, and competition sets. `rake HAS_POS NOUN` and `rake HAS_POS VERB` can coexist; `France HAS_CURRENT_CAPITAL Paris` and `France HAS_CURRENT_CAPITAL Los Angeles` compete in the same current-capital arena/context.
+The metadata attached to an arena or attestation kind that tells Glicko-2 how incoming observations update current attestation state: multi-valued compatibility, functional cardinality, inverse-functional cardinality, mutually exclusive object sets, scalar axes, temporal/context requirements, source-scope rules, observation update scopes, conflict policies, source-trust policies, lineage policies, and structural-support inputs. `rake HAS_POS NOUN` and `rake HAS_POS VERB` can coexist as compatible lexical observations; `France HAS_CURRENT_CAPITAL Paris` and `France HAS_CURRENT_CAPITAL Los Angeles` conflict only inside the same functional current-capital update scope.
 
 ### Effective Mu
 
@@ -354,7 +371,7 @@ The reframing of AI operations as database operations. **The substrate's attesta
 
 ### Model-Codec Fidelity
 
-For source-scoped model round-trip, the property that `TransformerModelSource` captures the source model's load-bearing computation as recipe metadata, tokenizer content, physicalities, probe observations, architecture-specific attestations, and lottery-ticket sparse edges. If ingestion and synthesis are faithful under the source's own recipe/scope, the emitted model should land in the source model's behavioral basin.
+For source-scoped model round-trip, the property that `ModelDecomposer` captures the source model's load-bearing computation as recipe metadata, tokenizer/modality content, physicalities, probe observations, architecture-specific attestations, and lottery-ticket sparse edges. If ingestion and synthesis are faithful under the source's own recipe/scope, the native Synthesis package should land in the source model's behavioral basin; GGUF is an optional proof export for local chat/demo validation, not the native target.
 
 ### Vampire mode
 
@@ -383,7 +400,7 @@ The architectural template of a model — a **template-with-parameters**. Auto-e
 A Recipe is **bidirectional** through the [`IArchitectureTemplate`](docs/adr/0011-polymorphic-plugin-architecture.md) plugin (per ADR 0043 ModelDecomposer composition):
 
 - **Ingest direction**: the recipe + architecture template instantiate the model's structural shape so [ModelDecomposer](#modeldecomposercontainerformat-layer-10) knows what each tensor MEANS mechanically (Q projection at layer L head H; gate at layer L; etc.).
-- **Synthesis direction**: the recipe + architecture template populate the tensor slots from substrate-consensus typed-tensor-calculation attestations + emit a fresh model file ([Substrate Synthesis](#substrate-synthesis)).
+- **Synthesis direction**: the recipe + architecture template populate the output slots from substrate-consensus typed attestations + emit a complete native Synthesis package ([Substrate Synthesis](#substrate-synthesis)). For text-transformer proof runs, that package can be converted to GGUF for llama.cpp chat validation.
 
 Recipe parameters are user-authorable. The substrate can emit custom recipes that don't match any ingested vendor's shape — different dim, different layer count, different vocab subset, different dtype, different sparsity target, different knowledge scope.
 
@@ -395,7 +412,7 @@ Fully parametric model emission from substrate state. Reads three inputs:
 2. **Cross-source consensus** of the fixed-vocabulary tensor-calculation attestations (`EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`) between substrate token entities. For each (subject, kind, object, context) tuple the recipe needs, the substrate aggregates Glicko-2 effective-μ across every source that has attested that relationship — source-trust weighted, arena-scoped, with cross-source agreement clustering ("Truths Cluster"). Source attribution rides on individual attestation rows for traceability, but the emit-time value is consensus. The recipe's `knowledge_scope` field optionally narrows source scope (e.g., "only Qwen3 sources" or "Qwen3 + Llama union").
 3. **Architecture template** (substrate code, per `IArchitectureTemplate`) — distributes the consensus values across the recipe's tensor slots per the layout.
 
-Output: a model file of any shape, deterministically materialized from substrate state. Positions with no significant consensus emit zero (R4 sparse-by-construction). Substrate-consensus weights under the chosen recipe + scope, never bit-perfect copies of any source (Vampire mode). Ingesting more independent high-trust sources strengthens the consensus on agreed relationships and surfaces disputes on the rest — emitted models improve as substrate accumulates observations, without retraining.
+Output: a complete model package of any architecture family, deterministically materialized from substrate state. The native text-model package is safetensors-style: tensor shards, index/manifest, recipe/config, tokenizer assets, source scope, provenance, sparsity metadata, and conversion metadata. Positions with no significant consensus emit zero (R4 sparse-by-construction). Substrate-consensus weights under the chosen recipe + scope, never bit-perfect copies of any source (Vampire mode). GGUF is a compatibility/proof artifact that can be produced from the native package; it is not the substrate's native export shape. Ingesting more independent high-trust sources strengthens the consensus on agreed relationships and surfaces disputes on the rest — emitted models improve as substrate accumulates observations, without retraining.
 
 ### Sparse-by-construction emission
 
@@ -414,7 +431,7 @@ The performance consequence of sparse-by-construction emission: exact zero tenso
 Three shared C/C++ libraries (per ADR 0024):
 - `liblaplace_core.so` — coord4d, hash128 (BLAKE3), hilbert4d, mantissa, geom4d serde, Glicko-2 fixed-point, A* primitives
 - `liblaplace_dynamics.so` — Procrustes, eigenmaps, Gram-Schmidt, lottery-ticket sparsity (links oneMKL + Spectra + TBB)
-- `liblaplace_synthesis.so` — recipe extraction, architecture templates, feature extractors, GGUF writer
+- `liblaplace_synthesis.so` — recipe extraction, architecture templates, feature extractors, native package writers, proof/compatibility format writers
 
 The same `.so` files are loaded by the PG extensions AND by the C# app layer via P/Invoke. Single source of math truth.
 
@@ -503,7 +520,7 @@ Each Decomposer ingests its **domain's full data ecosystem** (not a single file)
 
 - **Ecosystem**: `/vault/Data/UD-Treebanks/ud-treebanks-v2.17/` (≈4.3 GB, 250+ treebanks across ~140 languages). Each treebank: CoNLL-U files with per-token annotations (FORM, LEMMA, UPOS, XPOS, FEATS, HEAD, DEPREL, DEPS, MISC), treebank-level metadata, train/dev/test splits.
 - **Entities produced**: `UD_Treebank` (per treebank), `UD_Sentence`, `UD_Token`, reused `Text` for surface forms + lemmas.
-- **Attestation kinds emitted** (mostly context-bound to the sentence entity): `HAS_POS<scheme=universal>` (UPOS), `HAS_POS<scheme=language>` (XPOS), `HAS_LEMMA`, `HAS_MORPHOLOGICAL_FEATURE<name>` (Tense / Number / Case / Person / ...), `IS_HEAD_OF<relation>` (nsubj/obj/det/...), `HAS_ENHANCED_DEP`.
+- **Attestation kinds emitted** (mostly context-bound to the sentence entity): `HAS_POS` (UPOS/XPOS scheme carried by source/context metadata), `HAS_LEMMA`, `HAS_MORPH_FEATURE` (feature name/value represented as value entities), `HAS_DEPENDENCY_HEAD` (dependency relation represented as context/value metadata), `HAS_ENHANCED_DEP`.
 - **Cross-references**: `Text` (Unicode), `Language` (ISO), `WordNet_Sense` where annotated.
 - **Trust class**: curated academic.
 
@@ -511,7 +528,7 @@ Each Decomposer ingests its **domain's full data ecosystem** (not a single file)
 
 - **Ecosystem**: `/vault/Data/Wiktionary/` (≈34 GB, currently `en/`; per-language Wiktionary XML dumps as added). Per-entry: definitions, etymology, pronunciation (IPA + audio refs), inflection tables, translations, usage examples, alternate forms.
 - **Entities produced**: `Wiktionary_Entry` (per word per language), reused `Text` for definitions / etymology / IPA, `Audio_Track` for pronunciation recordings.
-- **Attestation kinds emitted**: `HAS_POS_SECTION`, `HAS_DEFINITION`, `HAS_ETYMOLOGY`, `HAS_IPA_PRONUNCIATION`, `HAS_AUDIO_PRONUNCIATION`, `HAS_INFLECTION_FORM`, `IS_TRANSLATION_OF<source_lang, target_lang>`, `HAS_USAGE_EXAMPLE`, `HAS_ALTERNATE_FORM`.
+- **Attestation kinds emitted**: `HAS_POS_SECTION`, `HAS_DEFINITION`, `HAS_ETYMOLOGY`, `HAS_IPA_PRONUNCIATION`, `HAS_AUDIO_PRONUNCIATION`, `HAS_INFLECTION_FORM`, `IS_TRANSLATION_OF` (source/target language carried by entities or context), `HAS_USAGE_EXAMPLE`, `HAS_ALTERNATE_FORM`.
 - **Cross-references**: `Text` (Unicode), `Language` (ISO), `WordNet_Synset` / `OMW_LangPack` where mapped.
 - **Trust class**: academically-linked user-curated.
 
@@ -519,7 +536,7 @@ Each Decomposer ingests its **domain's full data ecosystem** (not a single file)
 
 - **Ecosystem**: `/vault/Data/Tatoeba/` (≈5.4 GB). Sentence dump (sentences.csv) + sentence pairs (links.csv) + per-sentence metadata + `audio/` recordings + speaker/voice metadata + licensing.
 - **Entities produced**: `Tatoeba_Sentence`, `Audio_Track`, `Voice` (speaker).
-- **Attestation kinds emitted**: `IS_TRANSLATION_OF<source_lang, target_lang>`, `HAS_RECORDING`, `HAS_VOICE`, `HAS_LANGUAGE`, `HAS_LICENSE`.
+- **Attestation kinds emitted**: `IS_TRANSLATION_OF` (source/target language carried by entities or context), `HAS_RECORDING`, `HAS_VOICE`, `HAS_LANGUAGE`, `HAS_LICENSE`.
 - **Cross-references**: `Text` (Unicode), `Language` (ISO).
 - **Trust class**: structured corpus.
 
@@ -543,7 +560,7 @@ Each Decomposer ingests its **domain's full data ecosystem** (not a single file)
 
 - **Ecosystem**: `/vault/Data/TreeSitter/` (≈1.9 GB, **303 grammars**). Per-grammar repo: `grammar.js` (grammar definition), `src/parser.c` (generated parser), `queries/` (highlight/locals/textobjects/tags S-expression queries), test corpora, README. Plus user-supplied code under those grammars when code is ingested for parsing.
 - **Entities produced**: `Programming_Language` (per grammar — cross-references ISO/IETF language tags where they exist), `Grammar_Rule`, `Highlight_Query`, plus when ingesting code: `Code_Token`, `Code_Span`, `Code_File`, `Code_Repository`.
-- **Attestation kinds emitted**: `HAS_GRAMMAR_RULE`, `HAS_HIGHLIGHT_QUERY`, `IS_KEYWORD_IN`, `IS_OPERATOR_IN`, plus parse-tree attestations when ingesting code: `HAS_PARSE_NODE`, `IS_CHILD_OF<rule>`, `MATCHES_QUERY`.
+- **Attestation kinds emitted**: `HAS_GRAMMAR_RULE`, `HAS_HIGHLIGHT_QUERY`, `IS_KEYWORD_IN`, `IS_OPERATOR_IN`, plus parse-tree attestations when ingesting code: `HAS_PARSE_NODE`, `IS_CHILD_OF`, `MATCHES_QUERY` (grammar rule carried by object/context metadata).
 - **Cross-references**: `Text` (Unicode for source code content), `Language` (ISO/IETF where the programming language has a tag).
 - **Trust class**: structured corpus.
 
@@ -558,7 +575,7 @@ The substrate's AI-model decomposer is **composite** (per [ADR 0043](docs/adr/00
   - **SemanticArchitectureDecomposer** (composed, one per architecture family): `TransformerArchitecture` (Llama / Mistral / Qwen / Phi / Gemma / TinyLlama) / `MoETransformerArchitecture` (Mixtral / Qwen3-MoE / DeepSeek-V2/V3) / `MambaArchitecture` / `DiffusionArchitecture` / `VisionTransformerArchitecture` / `EncoderDecoderArchitecture` / `CNNArchitecture`. Maps tensor names → `(layer, head, computational_role)`.
   - **ModalityBinder** (composed, one per input modality): `TextModality` (tokenizer ingest; BPE/SentencePiece/WordPiece/TikToken; markers stripped via canonicalization; vocab dedupes against Unicode text entities) / `ImageModality` / `AudioModality` / `MultimodalModality`.
 
-AI models are not a special case. They use the same substrate primitives as every other decomposer: tokens become text entities (deduping against existing text); typed-tensor-calculation attestations of the **fixed-vocabulary tensor-calculation kinds** are emitted between those tokens; recipe metadata is captured as ordinary attestations on the model entity.
+AI models are not a special case. They use the same substrate primitives as every other decomposer: modality binders map source inputs/outputs to substrate entities (text tokens for text models, image/audio/code entities for other modalities); architecture templates emit typed mechanical-role attestations from their own fixed vocabularies; recipe metadata is captured as ordinary attestations on the model entity.
 
 - **Entities produced**:
   - `Model_Recipe`-typed entity (one per ingested model).
@@ -568,7 +585,7 @@ AI models are not a special case. They use the same substrate primitives as ever
 - **Attestation kinds emitted**:
   - **Recipe metadata** on the model entity: `HAS_HIDDEN_SIZE`, `HAS_NUM_LAYERS`, `HAS_NUM_HEADS`, `IS_A Architecture_<X>`, `USES_TOKENIZER`, `USES_ROPE_THETA`, `USES_ACTIVATION`, etc.
   - **Tokenizer marker attestations** on the tokenizer entity describing how each vocab text entity gets re-marked at emission (continuation, leading-space, etc.).
-  - **Typed-tensor-calculation attestations between substrate token entities** of the fixed-vocabulary kinds: `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`. Each tensor in the model is one of these calculations; only lottery-ticket-validated load-bearing positions become attestations.
+  - **Typed mechanical-role attestations between modality-bound substrate entities**. For transformer-family text models, the initial fixed-vocabulary kinds are `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`. Other architecture families have their own fixed role vocabularies; only lottery-ticket-validated load-bearing positions become attestations.
   - **No per-position meta-attestations on tensor-calculation attestations.** Per-position structural attribution (which layer / which head / which tensor index a calculation lives at) is **recipe content** — captured in the model's recipe entity (text/JSON describing num_layers, num_heads, per-tensor token vocabularies, layout). The architecture template wires substrate's aggregated typed attestations into the recipe's structural shape at emit time; redundant per-position storage on attestations is not needed.
 - **Physicalities**:
   - **PROJECTION** from the model's embedding space, Procrustes-aligned to substrate 4D via shared codepoint/word anchors.
@@ -577,7 +594,7 @@ AI models are not a special case. They use the same substrate primitives as ever
 - **Cross-references**: `Text` (Unicode), `Language` (ISO).
 - **Trust class**: AI-model probe observation.
 
-The substrate's inference engine walks these typed-tensor-calculation attestations between text entities directly. Reconstruction (Substrate Synthesis emitting a model file) reads recipe metadata + tensor-calculation attestations + the architecture template (substrate code, not data) to repopulate the model's tensor slots.
+The substrate's inference engine walks typed attestations between substrate entities directly. Reconstruction (Substrate Synthesis emitting a native package) reads recipe metadata + architecture-family mechanical-role attestations + the architecture template (substrate code, not data) to repopulate the model's output slots. Format-specific writers may then package or convert that native output for external runtimes.
 
 ---
 

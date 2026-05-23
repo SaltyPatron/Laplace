@@ -35,26 +35,30 @@ You are the Verification agent for Laplace. Your job: catch correctness regressi
 ```sql
 -- No orphan physicalities
 SELECT count(*) FROM physicalities p
-LEFT JOIN entities e ON e.hash = p.entity_hash
-WHERE e.hash IS NULL;
+LEFT JOIN entities e ON e.id = p.entity_id
+WHERE e.id IS NULL;
 -- Expected: 0
 
--- No orphan attestations on subject_hash
+-- No orphan attestations on subject_id
 SELECT count(*) FROM attestations a
-LEFT JOIN entities e ON e.hash = a.subject_hash
-WHERE e.hash IS NULL;
+LEFT JOIN entities e ON e.id = a.subject_id
+WHERE e.id IS NULL;
 -- Expected: 0
 
--- (Repeat for kind_hash, source_hash, object_hash where not null, context_hash where not null)
+-- (Repeat for kind_id, source_id, object_id where not null, context_id where not null)
 ```
 
 ### Schema invariants
 
-- Every entity has a 4D Point in canonical_coord (ST_HasZ AND ST_HasM AND geom_type = ST_Point)
-- Every T≥1 entity has a 4D LineString in trajectory (or NULL only for T0 atoms)
-- `radius_origin` is consistent with canonical_coord (recompute and compare)
-- Hilbert index is consistent with canonical_coord (re-encode and compare)
+- Canonical CONTENT physicalities have 4D `coord` values (ST_HasZ AND ST_HasM AND geom_type = ST_Point)
+- T≥1 CONTENT physicalities have 4D `trajectory` values (or NULL only where the physicality kind/schema permits)
+- `physicalities.radius_origin` is consistent with `physicalities.coord` (recompute and compare)
+- `physicalities.hilbert_index` is consistent with `physicalities.coord` (re-encode and compare)
 - No duplicate `(subject, kind, object, source, context)` tuples in attestations (UNIQUE NULLS NOT DISTINCT enforced)
+- Re-ingesting the same `(subject_id, kind_id, object_id, source_id, context_id)` is idempotent: row count stays 1, attestation `id` is stable, and rating/RD/volatility do not change merely from same-source repetition
+- The same `(subject_id, kind_id, object_id, context_id)` from different `source_id` values remains separate source-scoped current attestation state
+- Arena resolution tests cover compatible multi-valued observations and functional/mutually exclusive conflicts; compatible observations strengthen independently, while incompatible observations update through source trust, lineage, context, RD/volatility, and structural support
+- `observation_count` remains housekeeping/debug metadata only and never participates in effective mu or cascade ordering
 
 ### Perf-cache vs DB cross-verification
 
@@ -64,7 +68,7 @@ WHERE e.hash IS NULL;
 
 ### Lottery-ticket-aware sparsity validation
 
-- After ingesting an AI model, verify the attestation count is **within expected sparsity bounds** (e.g., 1–5% of naive count for embedding layer; sparser for attention).
+- After ingesting an AI model, verify retained attestations are the result of the multi-pass lottery-ticket filter (per-tensor relative top-k, per-row top-k, probe-validated retention), not a flat target percentage.
 - Verify no zero-rated attestations were inserted (zeros are discarded at ingest, not stored).
 - Verify synthesized tensors contain exact zeros where no significant substrate attestation exists; tiny nonzero jitter in unsupported slots is a failure.
 - Run probe-validation tests: synthesize a sparse subgraph; check inference fidelity on a probe set.
@@ -82,9 +86,9 @@ WHERE e.hash IS NULL;
 just ingest model /vault/models/qwen3-1.5b
 just cascade "Hello! Tell me something interesting."
 just synthesize recipes/qwen3-roundtrip.json
-# Output: data/qwen3-roundtrip.gguf
+# Output: native package plus data/qwen3-roundtrip.gguf proof export
 llama-cli -m data/qwen3-roundtrip.gguf -p "Hello! Tell me something interesting."
-# Expected: stock source model / native substrate / exported GGUF land in the same source-scoped behavioral basin
+# Expected: stock source model / native substrate / GGUF proof export land in the same source-scoped behavioral basin
 ```
 
 This is the headline verification. If it succeeds under fixed prompt and sampler settings, the source-model codec works. Broader consensus synthesis may intentionally diverge by changing source scope and trust policy.

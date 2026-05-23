@@ -13,5 +13,5 @@
 -- CREATE FUNCTION laplace_astar_path(
 --     start bytea, goal_region bytea,
 --     max_depth integer DEFAULT 10, k_paths integer DEFAULT 1
--- ) RETURNS TABLE(step_idx integer, entity_hash bytea, g double precision, h double precision)
+-- ) RETURNS TABLE(step_idx integer, entity_id bytea, g double precision, h double precision)
 --     AS 'MODULE_PATHNAME', 'pg_laplace_astar_path' LANGUAGE C LAPLACE_STABLE_STRICT;

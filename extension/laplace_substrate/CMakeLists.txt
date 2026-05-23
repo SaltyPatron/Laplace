@@ -89,3 +89,8 @@ install(FILES
     ${EXT_BUILT_SQL}
     DESTINATION ${LAPLACE_EXT_SHAREDIR}
 )
+
+# === Tests (pg_regress via CTest — see tests/CMakeLists.txt; landed by B′.9 #196) ===
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()

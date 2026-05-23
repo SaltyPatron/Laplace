@@ -55,7 +55,7 @@ Tree-sitter / code corpora     → code syntax and structured-code entities
 AI models                      → recipes, physicalities, sparse behavioral attestations
 ```
 
-AI models arrive as evidence sources, not as sacred artifacts. A source-scoped round-trip proves the codec: ingest a model, record its load-bearing computation as substrate state, synthesize a sparse GGUF from the source recipe, and compare stock model / native substrate traversal / exported model behavior.
+AI models arrive as evidence sources, not as sacred artifacts. A source-scoped round-trip proves the codec: ingest a model, record its load-bearing computation as substrate state, synthesize a complete native safetensors-style package from the source recipe, optionally convert that package to a GGUF proof artifact, and compare stock model / native substrate traversal / proof export behavior.
 
 ## What this replaces
 
@@ -66,7 +66,7 @@ AI models arrive as evidence sources, not as sacred artifacts. A source-scoped r
 | Training (gradient descent) | Ingestion (attestation accumulation) |
 | Fine-tuning / LoRA / adapters | `WHERE` clause on substrate |
 | Distillation | `SELECT ... INTO model_file` |
-| Pruning | `DELETE WHERE rating < threshold` |
+| Pruning | Arena-scoped effective-mu policy |
 | Unlearning | `DELETE WHERE source = M` |
 | Ensembling | Glicko-2 consensus across sources |
 | RAG / vector DB | Multi-vertical NN over substrate |
@@ -89,7 +89,7 @@ graph TB
     subgraph Engine["Engine (C/C++) — 3 shared libs per ADR 0024"]
         Math[liblaplace_core<br/>coord4d · hash128 (BLAKE3) · hilbert4d · mantissa<br/>geometry4d · glicko2 · astar]
         Pipeline[liblaplace_dynamics<br/>Procrustes · Laplacian eigenmaps · Gram-Schmidt<br/>Lottery-ticket-aware sparsity · oneMKL · Spectra · TBB]
-        Templates[liblaplace_synthesis<br/>Recipe · LlamaTemplate · feature extractors · GGUFWriter]
+        Templates[liblaplace_synthesis<br/>Recipe · architecture templates · feature extractors · native package writer · GGUF proof writer]
         Sources[C# Source plugins → loaded into substrate via Engine.Dynamics<br/>WordNet · UD · Wiktionary · ConceptNet · Transformer · TextCorpus]
     end
     subgraph DB["PostgreSQL 18 + PostGIS 3.6 — 2 extensions per ADR 0025"]
@@ -119,7 +119,7 @@ graph TB
     Models --> Sources
     Corpora --> Sources
     Templates --> Math
-    Math -.synthesis output.- Output[GGUF / safetensors / ONNX]
+    Math -.synthesis output.- Output[safetensors package / ONNX / GGUF proof]
 ```
 
 ## Stack

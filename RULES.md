@@ -89,7 +89,7 @@ At export, positions in the target tensor with no significant substrate attestat
 - Synthesized from arena/source-trust effective support over the selected source scope
 - Cleaned (no gradient jitter, no init residue)
 
-Default output format for chattable proofs: GGUF with appropriate Q-format (so sparsity benefits are realized in llama.cpp).
+Native model export is a complete Synthesis package for the target architecture family. For text-transformer exports that means a safetensors-style package (tensor shards, manifest/index, recipe/config, tokenizer assets, source scope, provenance, and sparsity metadata). GGUF with appropriate Q-format is a chattable proof/compatibility artifact that can be produced from the native package for llama.cpp validation; it is not the substrate's native output shape.
 
 ---
 
@@ -290,7 +290,7 @@ Early ingestion follows the layered seed order in [ADR 0037](docs/adr/0037-layer
 
 AI model ingestion is a codec. `TransformerModelSource` records the model recipe, tokenizer content, source physicalities, probe observations, architecture-specific attestation arenas, and lottery-ticket sparse load-bearing structure. If source-scoped ingestion is faithful and synthesis uses the source recipe/scope, missing behavior is an implementation/codec bug, not an accepted architectural gap.
 
-The v0.1 proof may be narrow: Unicode-derived T0 + one Qwen-family source model + sparse attestations + GGUF emission + chat verification. It does not need the full omniglottal seed stack to prove the AI⇄DB codec.
+The v0.1 proof may be narrow: Unicode-derived T0 + one Qwen-family source model + sparse attestations + native safetensors-style package emission + GGUF proof conversion + chat verification. It does not need the full omniglottal seed stack to prove the AI⇄DB codec.
 
 ---
 

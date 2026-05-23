@@ -24,23 +24,23 @@ Canonical source order for early fidelity: Unicode/UCD/UCA/UAX → ISO/CLDR/Glot
 **Pre-structured sources** (parse → map):
 - `UnicodeSource` / UCD / UCA / UAX seed — emit T0 atom facts, collation, script/category, normalization, segmentation metadata
 - `LanguageRegistrySource` — ISO/CLDR/Glottolog-style language/script/region/name mappings
-- `WordNetSource` (parse Prolog/RDF; emit IS_A / HYPERNYM / IS_POS / IS_SENSE)
+- `WordNetSource` (parse Prolog/RDF; emit IS_A / HYPERNYM / HAS_POS / IS_SENSE)
 - `OMWSource` — cross-lingual synset bridges and language-linked lexical mappings
-- `UDTreebankSource` (parse CoNLL-U; emit IS_POS / HAS_MORPH_FEATURE / IS_DEP_HEAD / HAS_LEMMA)
+- `UDTreebankSource` (parse CoNLL-U; emit HAS_POS / HAS_MORPH_FEATURE / HAS_DEPENDENCY_HEAD / HAS_LEMMA)
 - `WiktionarySource` (parse Kaikki JSON; emit HAS_DEFINITION / HAS_IPA / HAS_TRANSLATION)
 - `TatoebaSource` (parse CSV; emit IS_PARALLEL_TO)
 - `ConceptNetSource` (parse CSV; emit ~36 relation kinds)
 - `AtomicSource` (parse JSON; emit causal/event templates)
 
-**Probe-based sources** (run model → observe → threshold → assert):
-- `TransformerModelSource` — read safetensors + config.json; forward-pass on probe inputs; extract attention/MLP/embedding attestations
+**Probe-based sources** (run model → observe → lottery-ticket filter → assert):
+- `ModelSource<ContainerFormat, ArchitectureTemplate, ModalityBinder>` — read model container + recipe/config; run architecture-appropriate probes; extract mechanical-role observations for the bound modality. The v0.1 instance is a Qwen-family text transformer, not the substrate default.
 - `DiffusionModelSource` (later)
 - `MambaModelSource` (later)
 - `CNNModelSource` (later)
 
 **Content-derived sources** (decompose + co-occurrence):
 - `PromptSource` / prompt ingestion — decompose request content, create/reference prompt context entity, mark policy as ephemeral or durable
-- `TextCorpusSource` — UAX decomposition; emit CO_OCCURS_WITH<window>; full content recording
+- `TextCorpusSource` — UAX decomposition; emit CO_OCCURS_WITH with window/distance as context/source metadata; full content recording
 - `ImageCorpusSource` (later) — region decomposition; visual feature attestations
 - `AudioCorpusSource` (later) — segment decomposition; spectral feature attestations
 
@@ -48,13 +48,13 @@ Canonical source order for early fidelity: Unicode/UCD/UCA/UAX → ISO/CLDR/Glot
 
 1. **Lottery-ticket-aware sparsity, NEVER flat thresholds.** Multi-pass:
    - **Per-tensor relative top-k%** — rank within each tensor; keep top k% by importance
-   - **Per-row top-k** for attention / MLP — preserves load-bearing IO connectivity
+    - **Per-row/topology-local top-k** for architecture-local connectivity — attention / MLP rows in transformer-family models are one instance, not the universal shape
    - **Probe-validated retention** — synthesize sparse subgraph; verify behavior preserved on probe set
    Combined gate. NOT a flat number.
 2. **Linguistic resources at FULL FIDELITY.** No filter, no threshold. Every entry is curated; every entry goes in.
 3. **Idempotent ingestion.** Re-running a source is a no-op on existing rows (`INSERT ... ON CONFLICT DO NOTHING`). Sources do NOT mutate existing attestations except via the Glicko-2 cross-source update path.
 4. **Per-source partial-failure isolation.** If WordNet ingestion fails midway, partial state is committed atomically up to checkpoint; the rest can resume. No "all-or-nothing" failure mode.
-5. **Source versioning matters for pre-structured sources.** WordNet 3.1 vs. 3.0 attest different things. Record the source version explicitly in attestation `source_hash` (which IS the source entity, including its version).
+5. **Source versioning matters for pre-structured sources.** WordNet 3.1 vs. 3.0 attest different things. Record the source version in the source entity referenced by attestation `source_id`, plus lineage/correlation meta-attestations on that source entity.
 6. **Recipe extraction at model ingest.** Auto-parse config.json + tokenizer.json; create Recipe entity + typed attestations. Required even if user provides a custom synthesis recipe later.
 7. **No corner-cutting.** No `try { ... } catch { return; }` swallowing. No "TODO: validate later". No mocked attestations.
 8. **Prompt ingestion is real ingestion.** Prompts become substrate entities/context trajectories before cascade; do not pass prompt bytes as a model-style transient context buffer.
@@ -79,16 +79,16 @@ If any step fails, log diagnostics; do not silently emit garbage. `ereport(ERROR
 
 ## Model-codec fidelity
 
-`TransformerModelSource` captures a source model through multiple channels:
+`ModelDecomposer` captures a source model through multiple architecture- and modality-specific channels:
 
 - recipe metadata (`config.json`, tokenizer config, architecture identifiers, tensor shapes)
 - tokenizer/content entities and source-local vocabulary trajectories
 - physicalities for anchors and model-derived coordinates
-- probe observations for attention, MLP/features, embeddings, decoding, and behavior
+- probe observations for the architecture family's mechanical roles, modality-bound entities, decoding/reconstruction behavior, and source behavior
 - architecture-specific attestation kinds and arenas
 - lottery-ticket sparse structure validated by probe preservation
 
-For v0.1, the narrow proof is enough: ingest one Qwen-family model, synthesize source-scoped sparse GGUF, and compare stock model / native substrate traversal / exported model under fixed prompt and sampler settings. Broader seed data improves substrate fidelity but is not required to prove the model codec.
+For v0.1, the narrow proof is enough: ingest one Qwen-family text-transformer model, synthesize a source-scoped native safetensors-style package, convert/emit a GGUF proof artifact, and compare stock model / native substrate traversal / proof export under fixed prompt and sampler settings. That proves one codec instance; it does not make text, transformers, attention, MLPs, safetensors, or GGUF normative for the substrate. Broader seed data improves substrate fidelity but is not required to prove the model codec.
 
 ## On co-occurrence extraction (TextCorpusSource)
 
@@ -97,21 +97,21 @@ Without text corpora, the substrate has categorical knowledge but no distributio
 ```
 For each ingested text document:
     Decompose to T0–T3 entities (UAX#29 boundaries)
-    For each token A at position p:
-        For each token B at position p+1 .. p+W:
+    For each bounded window observation around token A:
+        Resolve token B, distance/window context, and source lineage:
             UPSERT attestation:
-                (subject=A, kind=CO_OCCURS_WITH<window=W>,
+                (subject=A, kind=CO_OCCURS_WITH,
                  object=B, source=corpus_X, context=document_or_sentence,
-                 score=1)
+                 observation=bounded co-occurrence evidence)
 ```
 
-Use Glicko-2 score-aggregation rather than counting (avoids hot-token attestations dominating). Per-distance-offset granularity optional.
+Use the arena observation resolver rather than counts: repeated corpus observations adjust source-scoped support according to context, distance/window policy, source lineage, and current RD/volatility. Window or distance is context/source metadata, not a parameterized kind name.
 
 ## What you produce
 
 - ISource implementations (one per source type)
 - Source-specific README in `engine/src/sources/<source>/README.md`
-- Probe protocol designs for each AI architecture (transformer first)
+- Probe protocol designs for each model architecture family (Qwen-family text transformer first, not substrate default)
 - Lottery-ticket-criteria configurations per architecture per attestation kind
 - Recipe-extraction logic for each architecture's config.json variants
 

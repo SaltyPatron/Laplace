@@ -234,7 +234,7 @@ The substrate is implemented across three layers, each owning one kind of work (
 |---|---|---|---|
 | **C/C++ engine** (3 shared libs per [ADR 0024](docs/adr/0024-engine-modularization.md)) | `liblaplace_core.so` | math4d kernels on raw `double[4]` (no parallel datatype per [R22](RULES.md)); `hash128_t` BLAKE3 helpers; `hilbert128_t` Skilling-2004 encode/decode; `mantissa_payload_t` pack/unpack; `glicko2_state_t` int64 fixed-point; `astar_query_t` cascade frontier (compiled traversal per [ADR 0035](docs/adr/0035-prompt-ingestion-and-compiled-cascade.md)); `codepoint_table` mmap'd T0 perf-cache; `trajectory` builders | `engine/core/` |
 | | `liblaplace_dynamics.so` | Procrustes (oneMKL SVD via Eigen); Laplacian eigenmaps (Spectra); Gram-Schmidt (Eigen HouseholderQR); lottery-ticket sparsity per [R3](RULES.md). MKL+TBB integration per [ADR 0030](docs/adr/0030-mkl-eigen-spectra-tbb-integration.md); `laplace_dynamics_init` locks `MKL_THREADING_TBB` + `MKL_CBWR` for substrate determinism. | `engine/dynamics/` |
-| | `liblaplace_synthesis.so` | Recipe parsing (per [ADR 0009](docs/adr/0009-recipe-extraction-and-overrides.md)); architecture-template materialization (`LlamaTemplate` etc., per [ADR 0011](docs/adr/0011-polymorphic-plugin-architecture.md)); feature extractors; GGUF writer with sparse-by-construction emission per [R4](RULES.md). | `engine/synthesis/` |
+| | `liblaplace_synthesis.so` | Recipe parsing (per [ADR 0009](docs/adr/0009-recipe-extraction-and-overrides.md)); architecture-template materialization (`LlamaTemplate` etc., per [ADR 0011](docs/adr/0011-polymorphic-plugin-architecture.md)); feature extractors; native Synthesis package writers with sparse-by-construction emission per [R4](RULES.md); proof/compatibility writers such as GGUF. | `engine/synthesis/` |
 | **PG extensions** (2 per [ADR 0025](docs/adr/0025-pg-extension-modularization.md)) | `laplace_geom` | General-purpose 4D PostGIS additions: `ST_*_4d` family (extends PostGIS per [R1](RULES.md)); BLAKE3-128 `hash128` helpers on `bytea(16)`; Hilbert encoder/decoder; mantissa pack/unpack; `laplace_btree_hash128_ops` + `laplace_gist_s3_ops` custom opclasses (per [ADR 0029](docs/adr/0029-custom-indexing-strategy.md)). Built via CMake (no PGXS per [ADR 0032](docs/adr/0032-unified-cmake-build-pipeline.md)). Modular SQL via `.sql.in` + cpp preprocessor per [ADR 0034](docs/adr/0034-modular-sql-via-cpp-preprocessor.md). | `extension/laplace_geom/` |
 | | `laplace_substrate` | Substrate domain: the three core tables (entities / physicalities / attestations) marked with `pg_extension_config_dump()`; arena-aware Glicko-2 aggregate per [ADR 0036](docs/adr/0036-arena-semantics-and-source-trust.md); `laplace_astar_path` compiled-cascade SRF per [ADR 0035](docs/adr/0035-prompt-ingestion-and-compiled-cascade.md); `laplace_sp_trajectory_ops` + `laplace_brin_tier_ops` custom opclasses per [ADR 0029](docs/adr/0029-custom-indexing-strategy.md). Same build pattern as `laplace_geom`. | `extension/laplace_substrate/` |
 | **C# app layer** (multiple projects per [ADR 0026](docs/adr/0026-csharp-project-structure.md)) | `Laplace.Engine.Core` | P/Invoke bindings for `liblaplace_core.so`. | `app/Laplace.Engine.Core/` |
@@ -499,7 +499,7 @@ int sparsity_probe_validate(const double* weights, size_t n,
                             const sparsity_params_t* params, uint8_t* inout_mask);
 ```
 
-### `liblaplace_synthesis` — recipe + arch templates + GGUF (engine/synthesis/)
+### `liblaplace_synthesis` — recipe + architecture templates + native packages (engine/synthesis/)
 
 All opaque-handle plugin interfaces per ADR 0011 + R10. Real implementations land Chunks 7-8.
 
@@ -531,15 +531,17 @@ int                  feature_extractor_extract(const feature_extractor_t* fe,
 size_t               feature_extractor_output_dim(const feature_extractor_t* fe);
 void                 feature_extractor_free(feature_extractor_t* fe);
 
-// gguf_writer.h — sparse-by-construction emission per R4
-typedef struct gguf_writer gguf_writer_t;
-gguf_writer_t* gguf_writer_create(const char* output_path);
-int            gguf_writer_add_metadata_str(gguf_writer_t* w, const char* key, const char* value);
-int            gguf_writer_add_metadata_u32(gguf_writer_t* w, const char* key, uint32_t value);
-int            gguf_writer_add_tensor(gguf_writer_t* w, const char* name, int dtype,
-                                      const size_t* shape, size_t rank, const void* data);
-int            gguf_writer_finalize(gguf_writer_t* w);
-void           gguf_writer_free(gguf_writer_t* w);
+// format_writer.h — sparse-by-construction package emission per R4.
+// Native text-model export is a complete safetensors-style package. GGUF is a
+// proof/compatibility writer or conversion target, not the native substrate shape.
+typedef struct format_writer format_writer_t;
+format_writer_t* format_writer_create(const char* format_id, const char* output_path);
+int              format_writer_add_metadata_str(format_writer_t* w, const char* key, const char* value);
+int              format_writer_add_metadata_u32(format_writer_t* w, const char* key, uint32_t value);
+int              format_writer_add_tensor(format_writer_t* w, const char* name, int dtype,
+                                          const size_t* shape, size_t rank, const void* data);
+int              format_writer_finalize(format_writer_t* w);
+void             format_writer_free(format_writer_t* w);
 ```
 
 ### Geometry interop with PostGIS
@@ -758,7 +760,8 @@ User custom recipe JSON (Substrate Synthesis):
     {"kind": "co_occurrence", "window": 5, "dims": 500},
     {"kind": "random_projection_pad", "dims": "remaining"}
   ],
-  "output_format": "gguf"
+    "output_format": "native_synthesis_package",
+    "proof_exports": ["gguf"]
 }
 ```
 

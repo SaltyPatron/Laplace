@@ -14,15 +14,15 @@ The substrate has **exactly three** tables: `entities`, `physicalities`, `attest
 
 - One row per `(subject, kind, object, source, context)` tuple in `attestations`.
 - Repeated assertions from the same source are no-ops (`INSERT ON CONFLICT DO NOTHING`).
-- Provenance is the `source_hash` column.
-- Glicko-2 dynamics live in source-credibility-per-kind (via meta-attestations), updated on cross-source agreement/disagreement evidence.
+- Provenance is the `source_id` column, which references the source entity.
+- Glicko-2 dynamics live in arena-resolved observation updates, using source-kind credibility, trust class, lineage, context, current state, and structural support.
 
 ## Consequences
 
 - Schema is leaner.
 - Repetition by a low-credibility source doesn't inflate ratings (one row, one credibility-weighted contribution).
 - Cross-source consensus emerges from per-source rows + meta-credibility, not from event counting.
-- No event log means no easy "show me every observation in order" query — provenance must be reconstructed from `source_hash` + `last_observed_at`.
+- No event log means no easy "show me every observation in order" query — provenance must be reconstructed from `source_id` + source lineage meta-attestations + `last_observed_at`.
 
 ## References
 

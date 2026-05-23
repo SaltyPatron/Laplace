@@ -1,9 +1,9 @@
-/* 04_attestations.sql.in — typed semantic relations + Glicko-2 consensus state
+/* 04_attestations.sql.in — typed semantic relations + Glicko-2 current state
  * (per DESIGN.md §I + RULES.md R5 + ADR 0036 + ADR 0039 + ADR 0044).
  *
- * Each row is ONE consensus state per (subject, kind, object, source, context)
- * tuple. Repeated assertions are idempotent on UPSERT-no-op (per R5). Glicko-2
- * dynamics update on cross-source agreement/disagreement evidence.
+ * Each row is ONE source-scoped current state per (subject, kind, object,
+ * source, context) tuple. Repeated assertions are idempotent on UPSERT-no-op
+ * (per R5). Glicko-2 dynamics update through arena-resolved observations.
  *
  * id is content-addressed BLAKE3-128 of the 5-tuple -- stable across re-
  * observation. Glicko-2 state initialized per kind-value-tier (ADR 0044

@@ -16,7 +16,7 @@ extern "C" {
  *
  * Bookkeeping:
  *   last_observed_at_unix_ns  -- nanoseconds since epoch of last update
- *   observation_count         -- total observations ever applied
+ *   observation_count         -- debug count of resolver-produced evidence items applied; never source-count truth evidence
  */
 typedef struct {
     int64_t rating;
@@ -70,10 +70,10 @@ void glicko2_update_period(glicko2_state_t* st,
                            int64_t now_ns);
 
 /* Convenience: single-observation update treated as a rating period of one.
- * source_credibility plays the opponent_rating role; opponent_rd is fixed at
- * a small value reflecting source confidence (30.0 in Glicko-1 scale ->
- * 30_000_000_000). score = 1e9 (full assent). For arena-aware multi-source
- * aggregation, use glicko2_update_period directly. */
+ * This is test/debug adapter math, not substrate arena semantics. Production
+ * attestation ingestion must resolve incoming evidence through typed arena
+ * policy, then call glicko2_update_period with the resolver-produced
+ * observation batch. */
 void glicko2_update(glicko2_state_t* st,
                     int64_t score,
                     int64_t source_credibility,

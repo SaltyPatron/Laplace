@@ -252,7 +252,7 @@ TEST(LaplaceCoreGlicko2, EmptyPeriodMatchesPaperFormula) {
     EXPECT_NEAR(from_fp(st.rd), 51.07, 0.02);
 }
 
-TEST(LaplaceCoreGlicko2, WinAgainstStrongerOpponentRaisesRating) {
+TEST(LaplaceCoreGlicko2, PositiveEvidenceAgainstHigherRatedReferenceRaisesRating) {
     glicko2_state_t st;
     glicko2_init(&st, to_fp(1500.0), to_fp(100.0), to_fp(0.06));
     glicko2_observation_t obs = { to_fp(1700.0), to_fp(50.0), to_fp(1.0) };
@@ -261,7 +261,7 @@ TEST(LaplaceCoreGlicko2, WinAgainstStrongerOpponentRaisesRating) {
     EXPECT_LT(st.rd, to_fp(100.0));
 }
 
-TEST(LaplaceCoreGlicko2, LossToWeakerOpponentLowersRating) {
+TEST(LaplaceCoreGlicko2, NegativeEvidenceAgainstLowerRatedReferenceLowersRating) {
     glicko2_state_t st;
     glicko2_init(&st, to_fp(1500.0), to_fp(100.0), to_fp(0.06));
     glicko2_observation_t obs = { to_fp(1300.0), to_fp(50.0), to_fp(0.0) };

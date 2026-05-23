@@ -85,22 +85,22 @@ Fixed vocabularies bootstrapped at install:
 - **Text**: `HAS_POS`, `HAS_LEMMA`, `IS_HYPERNYM_OF`, `IS_LEMMA_OF`, `IS_TRANSLATION_OF`, ... (per linguistic-source taxonomies).
 - **Visual**: `EXTRACTS_R_CHANNEL`, `EXTRACTS_G_CHANNEL`, `EXTRACTS_B_CHANNEL`, `ADJACENT_TO_PIXEL`, `INDICATES_HUE`, ...
 - **Audio**: `IS_AT_SAMPLE`, `HAS_FREQUENCY_PEAK`, ...
-- **AI tensor-calculation kinds** (transformer family, ~10): `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`. Other architecture families have their own fixed lists.
+- **AI tensor-calculation kinds** (transformer family, ~10): `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`. Other architecture and modality families have their own fixed mechanical-role lists.
 - **Cross-modal**: `DEPICTS`, `CAPTIONS`, `TRANSCRIBES_AS`, `IS_LOSSY_ENCODING_OF`.
 
 ### Attestation tuple shapes are a small fixed enumeration
 
 One universal `attestations` table accommodates the fixed shape list determined by which slots of `(subject, kind, object, source, context)` populate plus the cardinality semantics of each kind: binary, binary-contextual, unary, unary-valued (rating-as-scalar), n-ary (via tuple-entity in object or context slot), meta (attestation-as-subject; attestations are entities with content-addressed `id`s). Adding kinds = choosing which shapes apply; never adding columns.
 
-### AI model ingestion uses the same primitives — tokens are text, sequences are content, calculations are typed attestations
+### AI model ingestion uses the same primitives — modality binders supply entities, sequences are content, calculations are typed attestations
 
 - Tokenizer ingestion: each vocab text → text entity (dedup; canonicalization strips BPE/SentencePiece/WordPiece markers like `Ġ`, `▁`, `##` so subword tokens dedup to their underlying text content). Tokenizer entity carries marker attestations describing how to re-mark text at emission.
 - Probe input/output sequences → CONTENT physicalities on sequence entities, mantissa-packed trajectories through token references (same primitive prompts ride on per R19).
-- Tensor calculations → typed attestations between substrate text entities, of the fixed-vocabulary tensor-calculation kinds, sourced to the model, lottery-ticket-sparse load-bearing entries only.
+- Tensor calculations → typed attestations between modality-bound substrate entities, using the architecture family's fixed mechanical-role vocabulary, sourced to the model, lottery-ticket-sparse load-bearing entries only.
 - Recipe metadata → ordinary attestations on the model entity (`HAS_NUM_LAYERS`, etc.).
 - Per-position attribution (layer, head, per-tensor token vocabulary) → **recipe content** on the model's recipe entity (text/JSON describing the model's structure); never per-attestation metadata, never per-position synthetic entity IDs. The architecture template (`IArchitectureTemplate`) consumes recipe + aggregated typed attestations to wire emit-time tensor slots; substrate-side storage of position attribution would be redundant.
 
-The substrate doesn't know or care that a `Q_PROJECTS` attestation came from a transformer rather than from text co-occurrence statistics — typed kind + rated edge + sourced + arena-scoped. Same primitive.
+Storage is uniform, but kind semantics are not interchangeable. `CO_OCCURS_WITH` and `Q_PROJECTS` are both typed, rated, sourced, arena-scoped attestations in the same table, but they remain distinct transforms with distinct arena semantics.
 
 ## Consequences
 

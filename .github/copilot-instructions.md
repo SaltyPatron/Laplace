@@ -8,7 +8,7 @@
 
 A content-addressable geometric-attestation substrate built as a PostgreSQL extension + shared C/C++ engine + thin C# app layer. It **replaces** the conventional AI stack (model files, runtimes, RAG, vector DBs, fine-tuning, distillation). The substrate IS the model.
 
-Prompt text is ingested into the substrate before inference; it is not a context-window buffer. Runtime traversal is a compiled C/C++ cascade entered through one SQL-call SRF/operator, not recursive CTE traversal, cursors, or app-layer row-by-row loops. Glicko-2 consensus is arena-aware and source-trust-aware: raw repetition does not manufacture truth. AI model ingest is a codec; v0.1 proves model → substrate → sparse GGUF → chat for one source-scoped model before broader consensus synthesis.
+Prompt text is ingested into the substrate before inference; it is not a context-window buffer. Runtime traversal is a compiled C/C++ cascade entered through one SQL-call SRF/operator, not recursive CTE traversal, cursors, or app-layer row-by-row loops. Glicko-2 updates are arena-aware, source-trust-aware observation updates: raw repetition does not manufacture truth. AI model ingest is a codec; v0.1 proves model → substrate → native safetensors-style package → GGUF proof export → chat for one source-scoped model before broader consensus synthesis.
 
 **It is NOT** another AI framework, vector database, RAG system, fine-tuning pipeline, or wrapper around llama.cpp / vLLM. Conventional AI reflexes are sabotage in this codebase.
 
@@ -37,7 +37,7 @@ In order:
 6. **No modifying user-authored docs** without explicit user instruction.
 
 8. **Prompt is ingestion; cascade is compiled.** No context-window architecture, RBAR, recursive CTE graph walk, cursors, or app-layer traversal loop.
-9. **Arena/source-trust semantics are mandatory.** Glicko-2 agreement/disagreement depends on kind semantics, context, source lineage, source credibility, RD/volatility, and structural support.
+9. **Arena/source-trust semantics are mandatory.** Glicko-2 observation updates depend on kind semantics, context, source lineage, source-kind credibility, RD/volatility, current state, and structural support.
 
 ---
 

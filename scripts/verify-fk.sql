@@ -2,53 +2,74 @@
 -- FK integrity checks for the substrate.
 -- Run via: psql -d laplace -f scripts/verify-fk.sql
 --
--- All counts must be 0 for the substrate's referential integrity to hold.
+-- All orphan checks must be empty for referential integrity to hold.
 -- These tables don't exist until Chunk 2 (Geometry serde) creates the schema;
--- this script errors gracefully in that case.
+-- this script skips gracefully in that case.
 
-\set ON_ERROR_STOP off
+\set ON_ERROR_STOP on
 
-\echo
-\echo === Orphan physicalities (entity_hash references missing entity) ===
-SELECT count(*) AS orphans
-FROM physicalities p
-LEFT JOIN entities e ON e.hash = p.entity_hash
-WHERE e.hash IS NULL;
+DO $$
+BEGIN
+	IF to_regclass('laplace.entities') IS NULL
+	   OR to_regclass('laplace.physicalities') IS NULL
+	   OR to_regclass('laplace.attestations') IS NULL THEN
+		RAISE NOTICE 'substrate tables not present; skipping FK verification';
+		RETURN;
+	END IF;
 
-\echo
-\echo === Orphan attestations on subject_hash ===
-SELECT count(*) AS orphans
-FROM attestations a
-LEFT JOIN entities e ON e.hash = a.subject_hash
-WHERE e.hash IS NULL;
+	IF EXISTS (
+		SELECT 1
+		FROM laplace.physicalities p
+		LEFT JOIN laplace.entities e ON e.id = p.entity_id
+		WHERE e.id IS NULL
+	) THEN
+		RAISE EXCEPTION 'orphan physicalities.entity_id rows found';
+	END IF;
 
-\echo
-\echo === Orphan attestations on kind_hash ===
-SELECT count(*) AS orphans
-FROM attestations a
-LEFT JOIN entities e ON e.hash = a.kind_hash
-WHERE e.hash IS NULL;
+	IF EXISTS (
+		SELECT 1
+		FROM laplace.attestations a
+		LEFT JOIN laplace.entities e ON e.id = a.subject_id
+		WHERE e.id IS NULL
+	) THEN
+		RAISE EXCEPTION 'orphan attestations.subject_id rows found';
+	END IF;
 
-\echo
-\echo === Orphan attestations on source_hash ===
-SELECT count(*) AS orphans
-FROM attestations a
-LEFT JOIN entities e ON e.hash = a.source_hash
-WHERE e.hash IS NULL;
+	IF EXISTS (
+		SELECT 1
+		FROM laplace.attestations a
+		LEFT JOIN laplace.entities e ON e.id = a.kind_id
+		WHERE e.id IS NULL
+	) THEN
+		RAISE EXCEPTION 'orphan attestations.kind_id rows found';
+	END IF;
 
-\echo
-\echo === Orphan attestations on object_hash (where not NULL) ===
-SELECT count(*) AS orphans
-FROM attestations a
-LEFT JOIN entities e ON e.hash = a.object_hash
-WHERE a.object_hash IS NOT NULL AND e.hash IS NULL;
+	IF EXISTS (
+		SELECT 1
+		FROM laplace.attestations a
+		LEFT JOIN laplace.entities e ON e.id = a.source_id
+		WHERE e.id IS NULL
+	) THEN
+		RAISE EXCEPTION 'orphan attestations.source_id rows found';
+	END IF;
 
-\echo
-\echo === Orphan attestations on context_hash (where not NULL) ===
-SELECT count(*) AS orphans
-FROM attestations a
-LEFT JOIN entities e ON e.hash = a.context_hash
-WHERE a.context_hash IS NOT NULL AND e.hash IS NULL;
+	IF EXISTS (
+		SELECT 1
+		FROM laplace.attestations a
+		LEFT JOIN laplace.entities e ON e.id = a.object_id
+		WHERE a.object_id IS NOT NULL AND e.id IS NULL
+	) THEN
+		RAISE EXCEPTION 'orphan attestations.object_id rows found';
+	END IF;
 
-\echo
-\echo === All counts above MUST be 0 for FK integrity to hold ===
+	IF EXISTS (
+		SELECT 1
+		FROM laplace.attestations a
+		LEFT JOIN laplace.entities e ON e.id = a.context_id
+		WHERE a.context_id IS NOT NULL AND e.id IS NULL
+	) THEN
+		RAISE EXCEPTION 'orphan attestations.context_id rows found';
+	END IF;
+
+	RAISE NOTICE 'FK integrity verified';
+END $$;

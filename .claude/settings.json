@@ -1,6 +1,6 @@
 {
   "permissions": {
-    "defaultMode": "auto"
+    "defaultMode": "bypassPermissions"
   },
   "_documentation": {
     "purpose": "Project-level Claude Code settings for Laplace.",

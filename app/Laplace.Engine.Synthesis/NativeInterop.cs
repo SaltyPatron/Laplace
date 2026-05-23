@@ -5,9 +5,9 @@ namespace Laplace.Engine.Synthesis;
 /// <summary>
 /// P/Invoke bindings to liblaplace_synthesis (per ADR 0024 + 0026).
 ///
-/// Recipe parsing, architecture-template materialization, and GGUF
-/// emission live here. Real bindings land Chunks 7-8 (Stories 7.1
-/// onward).
+/// Recipe parsing, architecture-template materialization, native package
+/// emission, and proof/compatibility exports such as GGUF live here. Real
+/// bindings land Chunks 7-8 (Stories 7.1 onward).
 /// </summary>
 public static partial class NativeInterop
 {
@@ -19,5 +19,5 @@ public static partial class NativeInterop
     // TODO Chunk 7.16: recipe_parse / recipe_get_field / recipe_free
     // TODO Chunk 7.1-7.2: arch_template_load / arch_template_required_tensors / arch_template_free
     // TODO Chunk 7.3-7.10: feature_extractor_load / extract / output_dim / free
-    // TODO Chunk 7.15: gguf_writer_create / add_metadata / add_tensor / finalize / free
+    // TODO Chunk 7.15: native package writer + gguf proof writer bindings
 }

@@ -1,0 +1,107 @@
+-- Smoke test for laplace_hash128_blake3 + laplace_hash128_merkle PG wrappers.
+-- Verifies the engine kernels are reachable from SQL and produce byte-
+-- identical output to the C ABI (cross-language consistency per ADR 0030).
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION laplace_geom;
+-- BLAKE3 of the empty string -- the empty-string truncated digest is
+-- a known canonical value verified against the engine's
+-- LaplaceCoreHash128.BlakeEmptyMatchesKnownTruncatedVector test.
+SELECT octet_length(laplace_hash128_blake3(''::bytea)) AS empty_len;
+ empty_len 
+-----------
+        16
+(1 row)
+
+-- BLAKE3 of "hello" -- deterministic; same input always same 16 bytes.
+SELECT encode(laplace_hash128_blake3('hello'::bytea), 'hex') AS hello_hex;
+            hello_hex             
+----------------------------------
+ ea8f163db38682925e4491c5e58d4bb3
+(1 row)
+
+-- BLAKE3 is deterministic: same input twice -> same output.
+SELECT laplace_hash128_blake3('foo'::bytea)
+     = laplace_hash128_blake3('foo'::bytea) AS deterministic;
+ deterministic 
+---------------
+ t
+(1 row)
+
+-- Different inputs produce different outputs.
+SELECT laplace_hash128_blake3('foo'::bytea)
+    <> laplace_hash128_blake3('bar'::bytea) AS distinct_inputs_distinct_outputs;
+ distinct_inputs_distinct_outputs 
+----------------------------------
+ t
+(1 row)
+
+-- Merkle composition: deterministic, order-dependent, tier-prefix domain-
+-- separating.
+SELECT octet_length(
+    laplace_hash128_merkle(
+        0::smallint,
+        ARRAY[
+            laplace_hash128_blake3('a'::bytea),
+            laplace_hash128_blake3('b'::bytea)
+        ]
+    )
+) AS merkle_len;
+ merkle_len 
+------------
+         16
+(1 row)
+
+-- Tier byte is domain-separating: tier 0 vs tier 1 over the same children
+-- produces distinct outputs.
+SELECT laplace_hash128_merkle(
+        0::smallint,
+        ARRAY[laplace_hash128_blake3('x'::bytea)]
+    )
+    <> laplace_hash128_merkle(
+        1::smallint,
+        ARRAY[laplace_hash128_blake3('x'::bytea)]
+    ) AS tier_prefix_domain_separates;
+ tier_prefix_domain_separates 
+------------------------------
+ t
+(1 row)
+
+-- Child order matters: (a, b) != (b, a).
+SELECT laplace_hash128_merkle(
+        0::smallint,
+        ARRAY[
+            laplace_hash128_blake3('a'::bytea),
+            laplace_hash128_blake3('b'::bytea)
+        ]
+    )
+    <> laplace_hash128_merkle(
+        0::smallint,
+        ARRAY[
+            laplace_hash128_blake3('b'::bytea),
+            laplace_hash128_blake3('a'::bytea)
+        ]
+    ) AS child_order_matters;
+ child_order_matters 
+---------------------
+ t
+(1 row)
+
+-- Validation: child hashes must be exactly 16 bytes (raise error if not).
+DO $$
+BEGIN
+    PERFORM laplace_hash128_merkle(
+        0::smallint,
+        ARRAY['short'::bytea]
+    );
+    RAISE EXCEPTION 'expected error for non-16-byte child';
+EXCEPTION WHEN invalid_parameter_value THEN
+    -- Expected.
+    NULL;
+END;
+$$;
+SELECT 'merkle_short_child_rejected' AS validation_check;
+      validation_check       
+-----------------------------
+ merkle_short_child_rejected
+(1 row)
+

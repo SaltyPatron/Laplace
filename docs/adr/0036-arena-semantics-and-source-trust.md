@@ -6,7 +6,7 @@
 
 ## Context
 
-Glicko-2 gives Laplace rating, RD, and volatility, but the rating update needs substrate-native semantics. Not every disagreement means the same thing. Some attestation kinds are multi-valued and compatible (`rake HAS_POS NOUN` and `rake HAS_POS VERB`). Some are functional under a context (`France HAS_CURRENT_CAPITAL Paris` vs. `France HAS_CURRENT_CAPITAL Los Angeles`). Some are scalar, temporal, symmetric, inverse-functional, or context-required.
+Glicko-2 gives Laplace rating, RD, and volatility, but the rating update needs substrate-native semantics. Not every observation means the same thing. Shorthand such as `rake HAS_POS NOUN` means a generic observation envelope with `kind_id = HAS_POS`, `subject_id = rake`, and `object_id = NOUN`; `HAS_POS` is the semantic kind entity, not a bespoke function call. Some attestation kinds are multi-valued and compatible (`rake HAS_POS NOUN` and `rake HAS_POS VERB`). Some are functional under a context (`France HAS_CURRENT_CAPITAL Paris` vs. `France HAS_CURRENT_CAPITAL Los Angeles`). Some are scalar, temporal, symmetric, inverse-functional, or context-required.
 
 Laplace must also distinguish independent high-trust convergence from low-trust repetition. Foundational constants, standards, curated academic resources, user-curated linked resources, corpora, model-derived observations, prompts, and ordinary user content are not equal sources. Repetition from one source or a correlated source family must not become fake consensus.
 
@@ -15,10 +15,13 @@ Laplace must also distinguish independent high-trust convergence from low-trust 
 Attestation kinds carry arena semantics. At minimum, each arena/kind defines:
 
 - compatibility: multi-valued, functional, inverse-functional, mutually exclusive set, scalar axis, symmetric relation, etc.
+- cardinality: single-valued, multi-valued, bounded set, unbounded set, scalar, tuple-valued, etc.
 - context policy: context-free, context-required, temporal interval, comparison frame, source-local, prompt-local, fiction/speculation mode, etc.
-- competition set: which `(subject, kind, context)` group competes for one or more winning objects
+- observation update scope: which tuple slots decide whether an incoming observation updates the same current attestation state or a separate state
+- conflict policy: which alternatives within the update scope are incompatible; only functional or mutually exclusive arenas create disagreement pressure
 - source-trust policy: which source classes are allowed, preferred, discounted, or prompt-local
-- effective-score formula inputs: rating, RD, volatility, source credibility for kind, context compatibility, and structural support
+- lineage policy: how source lineage/correlation families affect independence of support
+- effective-score formula inputs: rating, RD, volatility, source credibility for kind, context compatibility, lineage independence, and structural support
 
 Source credibility is tracked per source per attestation kind. Source classes are ordered by trust and purpose, including:
 
@@ -30,13 +33,15 @@ Source credibility is tracked per source per attestation kind. Source classes ar
 6. AI model-derived probe observations
 7. prompt-local or ordinary user content
 
-The operational rule is: truths cluster across independent, high-trust, structurally adjacent sources; false or unsupported claims may cluster inside correlated low-trust source families but remain source-scoped, low-rated, high-RD, context-bound, disputed, or excluded from strict synthesis scopes.
+The operational rule is: incoming observations update current attestation state through the relevant arena's policy. Truths cluster across independent, high-trust, structurally adjacent observations; false or unsupported claims may cluster inside correlated low-trust source families but remain source-scoped, low-rated, high-RD, context-bound, disputed, or excluded from strict synthesis scopes.
+
+An arena is not global all-pairs competition. `rake HAS_POS NOUN` and `rake HAS_POS VERB` are compatible lexical-observation shorthand and can strengthen independently. Qualifiers such as POS scheme, language, treebank, tensor position, or grammar rule are represented as context entities, object/value entities, source metadata, recipe content, or meta-attestations, not opaque `params[]`. A functional/current-time arena such as current capital creates conflict only among incompatible observations in the same update scope.
 
 Bad claims are not deleted merely because they are bad. They are contained as observations about their sources/communities unless they win the relevant arena competition under high-trust evidence.
 
 ## Consequences
 
-- Glicko-2 updates are not raw vote counting. They are arena-aware agreement/disagreement events.
+- Glicko-2 updates are not raw vote counting. They are arena-aware observation updates against current attestation state.
 - Repeated assertions from one source remain idempotent; repeated copies from a source family are discounted by provenance/lineage.
 - `Nihon` vs. `Japan` is represented as identity/alias/translation/endonym-exonym structure, not contradiction.
 - `France HAS_CURRENT_CAPITAL Paris` vs. `France HAS_CURRENT_CAPITAL Los Angeles` is competition inside a functional current-capital arena.

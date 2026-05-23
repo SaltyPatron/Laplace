@@ -16,8 +16,8 @@ Load-bearing mechanics:
 
 - A prompt is ingestion. It is decomposed into substrate entities and represented by a context entity/trajectory before inference; there is no context-window buffer primitive.
 - Cascade traversal is compiled. One SQL-call surface enters a C/C++ SRF/operator that owns frontier management, A*, tier transitions, effective-score ranking, and abstention; no recursive CTE/RBAR/cursor/app-loop hot path.
-- Consensus is arena-aware and source-trust-aware. Raw repetition does not manufacture truth; independent high-trust structure pulls hard, low-trust/correlated claims remain source-scoped or disputed.
-- AI model ingest is a codec. v0.1 proves model → substrate → sparse GGUF → chat for a source-scoped model before broader seed-stack synthesis.
+- Consensus is arena-aware and source-trust-aware. Incoming observations update current attestation state through typed arena policy; raw repetition does not manufacture truth; independent high-trust structure pulls hard, low-trust/correlated claims remain source-scoped or disputed.
+- AI model ingest is a codec. v0.1 proves model → substrate → native safetensors-style package → GGUF proof export → chat for a source-scoped model before broader seed-stack synthesis.
 
 ---
 
@@ -41,7 +41,7 @@ Load-bearing mechanics:
 
 6. **User instructions in conversation override everything.**
 7. **Prompt ingestion + compiled cascade per ADR 0035.** No context-window architecture, recursive SQL graph walk, cursor traversal, or app-layer frontier loop.
-8. **Arena/source trust semantics per ADR 0036.** Glicko-2 updates and effective mu require cardinality/context/competition/source-lineage semantics.
+8. **Arena/source trust semantics per ADR 0036.** Glicko-2 updates and effective mu require compatibility, cardinality, context policy, observation update scope, conflict policy, source-trust policy, lineage policy, and structural-support semantics.
 
 ---
 

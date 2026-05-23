@@ -197,9 +197,45 @@ jobs:
                    has_schema_privilege('laplace_readonly', 'laplace', 'USAGE');
           " | sed 's/^/  /'
 
+  # Per B′.9 #196 — pg_regress smoke tests for both extensions against
+  # the deployed staged-extension install. Drops + recreates per-extension
+  # test DBs (laplace_regress_geom, laplace_regress_substrate) as
+  # laplace_admin (peer auth — runner is laplace-runner), runs pg_regress,
+  # diffs vs extension/<name>/tests/expected/*.out. Independent of the
+  # production `laplace` DB.
+  regress:
+    name: pg_regress smoke (laplace_geom + laplace_substrate)
+    needs: db-deploy
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: cmake configure + build (re-uses /opt/laplace deps + install)
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
+            -DLAPLACE_PG_PREFIX=/usr/lib/postgresql/18
+          LD_LIBRARY_PATH="$(pwd)/build/engine/core:$(pwd)/build/engine/dynamics:$(pwd)/build/engine/synthesis:${LD_LIBRARY_PATH:-}" \
+            cmake --build build
+
+      - name: ctest -L regress (pg_regress fixtures + tests)
+        run: |
+          cd build
+          ctest --output-on-failure -L regress
+
+      - name: Show regress diffs on failure
+        if: failure()
+        run: |
+          for f in build/extension/*/tests/regress_output/regression.diffs; do
+            [ -f "$f" ] || continue
+            echo "::group::$f"
+            cat "$f"
+            echo "::endgroup::"
+          done
+
   # - test-app (dotnet test with Testcontainers — Chunk 1+; once Docker
   #   daemon access is granted to laplace-runner)
-  # - test-extension (pg_regress against the deployed cluster — Chunk 2+;
-  #   after the first ST_*_4d / opclass functions ship)
   # - verify-determinism, verify-fk, verify-perfcache (Chunk 3+)
   # - round-trip end-to-end test (Chunk 8)

@@ -24,7 +24,7 @@ Initial kind value tiers (per substrate canon):
 
 | Tier | Kind shape | Examples | Prior (rating, RD, volatility) | Cascade weight |
 |---|---|---|---|---|
-| **T1 Mandate** | Substrate-asserted invariant | `HAS_TYPE`, `HAS_TIER`, `HAS_CANONICAL_COORD` (when emitted by substrate-canonical source) | (2500, 30, 0.001) | 1.0× (full traversal weight) |
+| **T1 Mandate** | Substrate-asserted invariant | `HAS_TYPE`, `HAS_TIER`, substrate-canonical source/type invariants | (2500, 30, 0.001) | 1.0× (full traversal weight) |
 | **T2 Standards Structural** | Codified standards-derived attribute | `HAS_GENERAL_CATEGORY`, `HAS_BIDI_CLASS`, `HAS_ISO_639_1_CODE`, `HAS_UCA_PRIMARY_WEIGHT`, `HAS_VALIDITY` | (2300, 60, 0.005) | 1.0× |
 | **T3 Taxonomic** | Logical-class membership | `IS_A`, `IS_HYPERNYM_OF`, `IS_HYPONYM_OF`, `BELONGS_TO_MACROLANGUAGE`, `IS_VERB_GROUP_OF` | (1900, 150, 0.03) | 0.9× |
 | **T4 Partitive** | Structural composition | `IS_PART_OF`, `PART_OF`, `IS_MERONYM_OF`, `IS_HOLONYM_OF`, `HAS_PART`, `MADE_OF` | (1800, 170, 0.04) | 0.85× |
@@ -32,7 +32,7 @@ Initial kind value tiers (per substrate canon):
 | **T6 Equivalence / Translation** | Mutual-substitution (often multi-valued) | `IS_TRANSLATION_OF`, `SAME_COLOR_AS`, `IS_SIMILAR_TO`, `HAS_VARIANT_OF`, `IS_LEMMA_OF` (in OMW per-language context) | (1600, 220, 0.05) | 0.7× (asymmetric utility: equivalence enables traversal sideways but doesn't deepen) |
 | **T7 Oppositional / Constraining** | Definitional opposition | `IS_ANTONYM_OF`, `EXCLUDES`, `IS_REPLACED_BY` (retirement) | (1550, 240, 0.05) | 0.6× (constrains but doesn't equate; cascade uses for pruning) |
 | **T8 Associative / Co-occurrence** | Usage/proximity correlation | `CO_OCCURS_WITH`, `FOLLOWS`, `PRECEDES`, `OCCURS_IN_CONTEXT`, `IS_DERIVATIONALLY_RELATED_TO`, `USED_FOR`, `AT_LOCATION`, `HAS_PROPERTY` | (1500, 280, 0.06) | 0.5× (suggestive; supports candidate narrowing but doesn't drive decisions alone) |
-| **T9 Tensor-Calculation** | AI-model-derived computational role | `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`, `TENSOR_NAME_MEANS_MECHANICAL_ROLE` | (1400, 300, 0.06) | 0.4× (single-model-probe trust; cluster across many models for higher weight) |
+| **T9 Tensor-Calculation** | AI-model-derived computational role | Transformer-family examples: `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`; other architecture families define their own fixed mechanical-role vocabularies | (1400, 300, 0.06) | 0.4× (single-model-probe trust; cluster across many models for higher weight) |
 | **T10 Scalar-Valued** | Numeric attribute (value in rating column) | `HAS_NUMERIC_VALUE`, `HAS_STROKE_COUNT`, `HAS_UCA_COLLATION_ORDER`, `HAS_AGE`, `HAS_FREQUENCY`, RLE counts | (n/a — rating IS the value; RD captures measurement uncertainty) | n/a (scalar; queried directly, not traversed) |
 | **T11 Probationary / User** | User-supplied content; awaits corroboration | user-emitted attestations from prompt-local context | (1300, 350, 0.06) | 0.3× (session-scoped trust; cascade considers but discounts) |
 
@@ -88,7 +88,7 @@ Decomposers SHOULD emit the canonical kind name when their source's term is a sy
 - Every decomposer at first run registers its emitted kinds against the tier system (meta-attestations: `HAS_KIND_VALUE_TIER`); novel kinds default to Tier 8 Associative until a decomposer / type-taxonomy override specifies otherwise.
 - Every source at first observation registers a `HAS_TRUST_CLASS` meta-attestation pointing at one of the 10 trust-class entities.
 - Glicko-2 attestation initialization (Stories 5.1+) uses the per-kind prior tier + per-source trust class weight to compute initial (rating, RD, volatility); not a global default.
-- Cascade A* effective-μ computation incorporates kind cascade weight × source trust multiplier × arena policy × context compatibility — no single multiplicative shortcut.
+- Cascade A* effective-μ computation incorporates rating/RD/volatility, kind cascade weight, source-kind credibility, source trust class, lineage/correlation policy, arena policy, context compatibility, and structural support — no single multiplicative shortcut.
 - The kind taxonomy + trust class hierarchy are themselves substrate content (meta-attestations on kind/source/trust-class entities); they can evolve via attestation refinement without code changes.
 
 ## Alternatives considered

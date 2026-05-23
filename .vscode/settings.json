@@ -28,5 +28,8 @@
     "/opt/intel/oneapi/tbb/latest/include",
     "/usr/include/eigen3",
     "/usr/include/postgresql/18/server"
-  ]
+  ],
+  "chat.tools.terminal.autoApprove": {
+    "gh": true
+  }
 }

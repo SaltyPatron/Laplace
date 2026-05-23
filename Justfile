@@ -209,7 +209,7 @@ verify-determinism:
     scripts/verify-determinism.sh
 
 verify-fk:
-    psql -d laplace -f scripts/verify-fk.sql
+    psql -d laplace -U laplace_admin -f scripts/verify-fk.sql
 
 verify-perfcache:
     scripts/verify-perfcache.sh
@@ -229,17 +229,29 @@ status:
 #   dotnet test  → C# xUnit + Testcontainers (Migrations DbUp idempotency
 #                  against a postgis/postgis:18 container)
 
-test: test-engine test-app
+test: test-engine regress test-app
 
 # ctest runs everything discovered by gtest_discover_tests in each engine
-# subdir. Requires `just build` first.
+# subdir. Excludes pg_regress tests (those are `just regress`). Requires
+# `just build` first.
 #
 # Same LD_LIBRARY_PATH discipline as `build` — points ctest's test runs at
 # the freshly built engine liblaplace_*.so files so stale system installs
 # (e.g. /usr/local/lib left over from a prior `sudo cmake --install`)
 # can't poison the loader.
 test-engine:
-    cd build && LD_LIBRARY_PATH="$(realpath engine/core):$(realpath engine/dynamics):$(realpath engine/synthesis):${LD_LIBRARY_PATH:-}" ctest --output-on-failure
+    cd build && LD_LIBRARY_PATH="$(realpath engine/core):$(realpath engine/dynamics):$(realpath engine/synthesis):${LD_LIBRARY_PATH:-}" ctest --output-on-failure -LE regress
+
+# pg_regress smoke tests for the laplace_geom + laplace_substrate extensions
+# (per B′.9 #196). Drops + recreates per-extension test DBs
+# (laplace_regress_geom, laplace_regress_substrate) as laplace_admin (peer
+# auth), runs pg_regress against the running system PG with the staged
+# extensions installed at /opt/laplace, diffs stdout against
+# extension/<name>/tests/expected/*.out. Requires `just install` first so
+# the staged extensions are in place. CTest fixtures sequence the setup /
+# regress / teardown around the run.
+regress:
+    cd build && ctest --output-on-failure -L regress
 
 # dotnet test covers all .Tests projects (Laplace.Engine.*.Tests +
 # Laplace.Migrations.Tests). Testcontainers requires a running Docker

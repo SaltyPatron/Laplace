@@ -7,8 +7,9 @@
 extern "C" {
 #endif
 
-/* GGUF format writer — emits a model file in GGUF binary format
- * (llama.cpp's interchange format). Per RULES.md R4 (sparse-by-
+/* GGUF proof/compatibility writer — emits a GGUF artifact from a native
+ * Synthesis package so llama.cpp can validate chat behavior. GGUF is not
+ * the substrate's native export shape. Per RULES.md R4 (sparse-by-
  * construction emission): positions with no significant substrate
  * attestation emit exact zero.
  *
@@ -20,7 +21,7 @@ extern "C" {
  * Real impl lands Chunk 7 Story 7.15. */
 typedef struct gguf_writer gguf_writer_t;
 
-/* Begin writing a GGUF file. `output_path` will be truncated. */
+/* Begin writing a GGUF proof artifact. `output_path` will be truncated. */
 gguf_writer_t* gguf_writer_create(const char* output_path);
 
 /* Add a metadata key-value pair (architecture name, vocab, etc.). */

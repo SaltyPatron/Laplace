@@ -253,7 +253,7 @@ Per-source procedure:
 
 - Raw SQL: `just query "<sql>"` → standard psql
 - Cascade inference: `just cascade "<prompt>"` → prompt is ingested as substrate content, then one compiled cascade call walks indexed attestations through the engine
-- Substrate Synthesis: `just synthesize <recipe.json>` → emits a sparse model file from substrate state
+- Substrate Synthesis: `just synthesize <recipe.json>` → emits a sparse native Synthesis package from substrate state, with optional proof/compatibility exports such as GGUF
 
 `just cascade` is not a raw SQL graph traversal and not an app-layer loop issuing repeated SELECTs. The CLI calls into the app layer, which invokes the database SRF/operator surface; the C/C++ engine owns prompt decomposition, context entity creation/reference, frontier management, A*, tier transitions, source-scope filtering, effective-score ordering, and abstention. PostgreSQL supplies indexes and MVCC visibility.
 
@@ -272,7 +272,8 @@ Chunk 8's `just roundtrip <model_path>` implementation compares three surfaces u
 ```text
 stock source model      → original model package loaded directly
 native substrate        → prompt ingestion + compiled cascade over source-scoped substrate state
-synthesized export      → GGUF emitted from the same source-scoped recipe/scope
+synthesized export      → native package emitted from the same source-scoped recipe/scope
+proof export            → GGUF converted/emitted from the native package for llama.cpp validation
 ```
 
 The default smoke prompt is:
@@ -365,8 +366,9 @@ Located in `recipes/`. Examples:
 {
   "based_on": "qwen3-1.5b",
   "name": "qwen3-roundtrip",
-  "knowledge_scope": { "include_sources": ["qwen3-1.5b"], "rating_threshold": 0.5 },
-  "output_format": "gguf"
+    "knowledge_scope": { "include_sources": ["qwen3-1.5b"], "effective_mu_policy": "source_scoped_roundtrip" },
+    "output_format": "native_synthesis_package",
+    "proof_exports": ["gguf"]
 }
 
 // recipes/qwen3-consensus.json — Qwen3 architecture, knowledge from multiple sources
@@ -375,9 +377,10 @@ Located in `recipes/`. Examples:
   "name": "qwen3-consensus",
   "knowledge_scope": {
     "include_sources": ["qwen3-1.5b", "llama-3.2-1b", "wikipedia_en", "wordnet"],
-    "rating_threshold": 0.4
+    "effective_mu_policy": "arena_default"
   },
-  "output_format": "gguf"
+    "output_format": "native_synthesis_package",
+    "proof_exports": ["gguf"]
 }
 ```
 
@@ -401,7 +404,7 @@ Located in `recipes/`. Examples:
 | Perf-cache hash mismatch with DB seed | Mismatched Unicode versions | Rebuild both from the SAME UCD version: `just build-perfcache && just seed-t0` |
 | Ingestion fails with FK violation | T0 not seeded | `just seed-t0` |
 | `engine_last_error` shows non-zero | Engine-side error | Check stderr; consult [.claude/agents/verification.md](.claude/agents/verification.md) |
-| GGUF file fails to load in llama.cpp | Format version mismatch | Verify `LLAMA_FILE_VERSION` against llama.cpp version; rebuild |
+| GGUF proof export fails to load in llama.cpp | Format version mismatch or native-package conversion bug | Verify `LLAMA_FILE_VERSION` against llama.cpp version; rebuild the proof export from the native package |
 
 ---
 

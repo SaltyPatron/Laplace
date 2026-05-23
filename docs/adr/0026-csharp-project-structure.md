@@ -28,7 +28,7 @@ Adopt a modular C# project layout under `app/`, with explicit separation between
 |---|---|---|
 | `Laplace.Engine.Core` | `liblaplace_core.so` | Bindings for coord4d, hash128, hilbert4d, mantissa, geom4d serde, Glicko-2 fixed-point, A* primitives |
 | `Laplace.Engine.Dynamics` | `liblaplace_dynamics.so` | Bindings for Procrustes, eigenmaps, Gram-Schmidt, sparsity passes — used only at ingest time |
-| `Laplace.Engine.Synthesis` | `liblaplace_synthesis.so` | Bindings for recipe extraction, architecture templates, feature extractors, GGUF writer — used only at export time |
+| `Laplace.Engine.Synthesis` | `liblaplace_synthesis.so` | Bindings for recipe extraction, architecture templates, feature extractors, native package writers, and proof/compatibility writers such as GGUF — used only at export time |
 
 Each binding project declares `[StructLayout(LayoutKind.Sequential)]` POD structs matching the engine C ABI byte-for-byte (per [STANDARDS.md](../../STANDARDS.md) datatype standards). `LibraryImport` source-generators (preferred over `DllImport` in .NET 10) emit the marshalling boilerplate.
 

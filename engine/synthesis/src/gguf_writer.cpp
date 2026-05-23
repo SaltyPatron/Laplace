@@ -2,10 +2,10 @@
 
 #include <cstddef>
 
-/* Real impl lands Chunk 7 Story 7.15 — GGUF binary writer per the spec
- * at github.com/ggerganov/ggml. Per RULES.md R4: sparse-by-construction
- * emission (positions with no significant substrate attestation emit
- * exact zero). Stubs satisfy linkage. */
+/* Real impl lands Chunk 7 Story 7.15 — GGUF proof/compatibility writer per
+ * the spec at github.com/ggerganov/ggml. Per RULES.md R4: sparse-by-
+ * construction emission (positions with no significant substrate attestation
+ * emit exact zero). Stubs satisfy linkage. */
 
 struct gguf_writer {
     int _placeholder;

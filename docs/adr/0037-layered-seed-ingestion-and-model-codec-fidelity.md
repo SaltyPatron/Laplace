@@ -32,9 +32,9 @@ Canonical layer order (each layer = one Decomposer ingesting its full domain eco
 
 The dependency arrows propagate: Layer N's decomposer references entities Layer M<N's decomposer produced (via shared content-addressed IDs in the same hash space). Examples: ISODecomposer's `Script` rows are the same rows UnicodeDecomposer emitted; WordNetDecomposer's `Text` lemmas reuse Unicode-codepoint-decomposed text entities; OMWDecomposer's per-language lemmas reference ISO's `Language` entities; UDDecomposer's treebank metadata references ISO + Unicode; etc.
 
-AI model ingestion is a codec, not a conventional distillation/training step. It records recipe metadata, tokenizer content, physicalities, probe observations, architecture-specific attestation arenas, and lottery-ticket sparse load-bearing structure. If `TransformerModelSource` captures the source model faithfully and synthesis uses the source recipe/scope, the emitted model should land in the source model's behavioral basin. Differences should come from intentional sparsity, sampler settings, or broader substrate consensus scope — not accidental missingness.
+AI model ingestion is a codec, not a conventional distillation/training step. It records recipe metadata, tokenizer/modality content, physicalities, probe observations, architecture-specific attestation arenas, and lottery-ticket sparse load-bearing structure. If `ModelDecomposer` captures the source model faithfully and synthesis uses the source recipe/scope, the native Synthesis package should land in the source model's behavioral basin. Differences should come from intentional sparsity, sampler settings, or broader substrate consensus scope — not accidental missingness. GGUF is a proof/compatibility artifact for chat validation, not the native export target.
 
-The v0.1 proof can be narrow and still decisive: Unicode-derived T0 + one Qwen-family source model + recipe extraction + sparse attestations + GGUF emission + chat verification.
+The v0.1 proof can be narrow and still decisive: Unicode-derived T0 + one Qwen-family source model + recipe extraction + sparse attestations + native safetensors-style package emission + GGUF proof conversion + chat verification.
 
 ## Consequences
 

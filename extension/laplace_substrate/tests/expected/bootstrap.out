@@ -1,0 +1,99 @@
+-- Smoke test for laplace_substrate bootstrap (ADR 0042 + ADR 0044).
+-- Verifies the install-time seeding ran cleanly and produced the expected
+-- substrate-canonical entities + meta-attestations.
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION laplace_geom;
+CREATE EXTENSION laplace_substrate;
+-- Substrate tables live in the laplace schema; engine kernels in public.
+SET search_path TO laplace, public;
+-- After bootstrap there must be 46 substrate-canonical entities:
+--   4 meta-types + 1 SubstrateCanonical + 3 PhysicalityKinds
+--   + 10 trust classes + 11 kind value tiers + 17 kind entities = 46.
+SELECT count(*) AS entity_count FROM entities;
+ entity_count 
+--------------
+           46
+(1 row)
+
+-- After bootstrap there must be 2 substrate-canonical meta-attestations:
+--   SubstrateCanonical HAS_TRUST_CLASS SubstrateMandate
+--   HAS_KIND_VALUE_TIER IS_A T2_StandardsStructural
+SELECT count(*) AS attestation_count FROM attestations;
+ attestation_count 
+-------------------
+                 2
+(1 row)
+
+-- SubstrateCanonical source entity must exist at the expected canonical id.
+SELECT EXISTS(
+    SELECT 1 FROM entities
+    WHERE id = laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
+) AS substrate_canonical_present;
+ substrate_canonical_present 
+-----------------------------
+ t
+(1 row)
+
+-- All 11 kind value tiers must exist.
+SELECT count(*) AS tier_count FROM entities
+WHERE id IN (
+    laplace_hash128_blake3('substrate/kind_tier/T1_Mandate/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind_tier/T2_StandardsStructural/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind_tier/T3_Taxonomic/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind_tier/T4_Partitive/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind_tier/T5_Causal/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind_tier/T6_Equivalence/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind_tier/T7_Oppositional/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind_tier/T8_Associative/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind_tier/T9_TensorCalculation/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind_tier/T10_ScalarValued/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind_tier/T11_Probationary/v1'::bytea)
+);
+ tier_count 
+------------
+         11
+(1 row)
+
+-- All 10 trust classes must exist.
+SELECT count(*) AS trust_class_count FROM entities
+WHERE id IN (
+    laplace_hash128_blake3('substrate/trust_class/SubstrateMandate/v1'::bytea),
+    laplace_hash128_blake3('substrate/trust_class/StandardsDerived/v1'::bytea),
+    laplace_hash128_blake3('substrate/trust_class/AcademicCurated/v1'::bytea),
+    laplace_hash128_blake3('substrate/trust_class/AcademicCuratedWithUserInput/v1'::bytea),
+    laplace_hash128_blake3('substrate/trust_class/StructuredCorpus/v1'::bytea),
+    laplace_hash128_blake3('substrate/trust_class/UserCuratedResource/v1'::bytea),
+    laplace_hash128_blake3('substrate/trust_class/AIModelProbe/v1'::bytea),
+    laplace_hash128_blake3('substrate/trust_class/AppDerived/v1'::bytea),
+    laplace_hash128_blake3('substrate/trust_class/UserPromptContent/v1'::bytea),
+    laplace_hash128_blake3('substrate/trust_class/AdversarialUntrusted/v1'::bytea)
+);
+ trust_class_count 
+-------------------
+                10
+(1 row)
+
+-- HAS_TRUST_CLASS meta-attestation on SubstrateCanonical points at
+-- SubstrateMandate.
+SELECT EXISTS(
+    SELECT 1 FROM attestations
+    WHERE subject_id = laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
+      AND kind_id    = laplace_hash128_blake3('substrate/kind/HAS_TRUST_CLASS/v1'::bytea)
+      AND object_id  = laplace_hash128_blake3('substrate/trust_class/SubstrateMandate/v1'::bytea)
+      AND source_id  = laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
+) AS substrate_canonical_trust_class_set;
+ substrate_canonical_trust_class_set 
+-------------------------------------
+ t
+(1 row)
+
+-- FK constraints exist post-bootstrap.
+SELECT count(*) AS deferred_fk_count
+FROM pg_constraint
+WHERE conrelid = 'entities'::regclass
+  AND conname IN ('entities_type_fk', 'entities_first_observed_fk');
+ deferred_fk_count 
+-------------------
+                 2
+(1 row)
+

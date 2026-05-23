@@ -104,11 +104,8 @@ install(FILES
     DESTINATION ${LAPLACE_EXT_SHAREDIR}
 )
 
-# === Tests (pg_regress via CTest — real wiring lands when first
-# functions ship in Chunk 1+) ===
+# === Tests (pg_regress via CTest — see tests/CMakeLists.txt for the
+# fixture + add_test() wiring; landed by B′.9 #196). ===
 if(BUILD_TESTING)
-    # Placeholder — pg_regress integration via add_test() lands with the
-    # first real SQL function (Chunk 1 Story 1.x). For now: the build
-    # succeeds, the .so + .control + .sql are produced, and CTest is
-    # ready for test cases under tests/sql/ + tests/expected/.
+    add_subdirectory(tests)
 endif()

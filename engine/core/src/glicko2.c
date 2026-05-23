@@ -418,9 +418,10 @@ void glicko2_update(glicko2_state_t* st,
                     int64_t now_ns)
 {
     if (!st) return;
-    /* Treat the source as a Glicko-1-rated opponent with RD = 30 (high
-     * confidence in the source's stated value). For arena/multi-source
-     * aggregation, callers should use glicko2_update_period directly. */
+    /* Narrow test/debug adapter only. Substrate callers must resolve source
+     * trust, lineage, compatibility, conflict, and current state in the arena
+     * layer, then pass the resulting observation batch to
+     * glicko2_update_period. */
     glicko2_observation_t obs = {
         .opponent_rating = source_credibility,
         .opponent_rd     = 30LL * LAPLACE_FP_ONE,

@@ -49,7 +49,7 @@ These are the binding standards for all code in this project. Inconsistency here
 - Column names: singular (`hash`, `tier`, `canonical_coord`, `hilbert_index`, `trajectory`).
 - Function names: `snake_case`. Custom 4D functions: `laplace_*_4d` (e.g., `laplace_distance_4d`, `laplace_centroid_4d`, `laplace_frechet_4d`).
 - Index names: `<table>_<column>_<type>` (e.g., `entities_hilbert_btree`, `entities_coord_gist_nd`).
-- Constraint names: `<table>_<column>_<check>` (e.g., `entities_canonical_coord_is_4d_point`).
+- Constraint names: `<table>_<column>_<check>` (e.g., `physicalities_coord_is_4d_point`).
 
 ### C (PG extension wrappers + engine C-ABI)
 
@@ -443,17 +443,19 @@ The canonicalization rule for each type lives with that type's IDecomposer plugi
 
 ## Attestation kind discipline (typed transform vocabulary)
 
-Attestation kinds are not arbitrary labels — they are the substrate's typed-computation vocabulary. Each kind is itself an entity (content-addressed by its canonical name, not by hashing arbitrary parameter tuples) with arena semantics (cardinality, competition, context policy, source-trust policy) recorded as meta-attestations. Cascade A* composes kind-typed walks the way a forward pass composes typed projections — but the substrate's vocabulary is **usage- and structure-shaped**, not transformer-position-shaped.
+Attestation kinds are not arbitrary labels — they are the substrate's typed-computation vocabulary inside one generic attestation observation envelope. Each kind is itself an entity (content-addressed by its canonical name, not by hashing arbitrary parameter tuples) with arena semantics (compatibility, cardinality, context policy, observation update scope, conflict policy, source-trust policy, lineage policy, and structural support inputs) recorded as meta-attestations. Cascade A* composes kind-typed walks, but the substrate's vocabulary is **usage- and structure-shaped**, not transformer-position-shaped.
 
 Naming convention for attestation kinds:
 
 - UPPER_SNAKE_CASE for the kind name.
 - Each kind is drawn from a **small fixed vocabulary** per modality / per architecture family. Vocabularies are documented; new kinds require the type-taxonomy agent to extend the documented vocabulary.
-- **Forbidden**: synthesizing per-(layer, head, position) kind entities via hash-concatenation of architectural metadata. Layer/head/position are not part of kind identity; they ride on individual attestations as meta-attestations or context, never as kind-name parameters that explode the kind-entity space.
+- The generic operation is `OBSERVE_ATTESTATION(kind_id, subject_id, object_id, source_id, context_id, qualifiers)`. Kind names such as `HAS_POS` are semantic entities inside that envelope, not bespoke APIs.
+- **Forbidden**: synthesizing per-(layer, head, position) kind entities via hash-concatenation of architectural metadata. Layer/head/position are not part of kind identity. For transformer-family tensor-calculation kinds, they live in recipe content, never as kind-name parameters or routine per-attestation metadata.
+- **Forbidden**: opaque `params[]` as a storage or hot-path escape hatch. Qualifiers must be modeled as context entities, object/value entities, source metadata, recipe content, or meta-attestations so arena resolution can inspect them.
 - Modality-specific kinds carry a modality prefix or unambiguous semantic (`EXTRACTS_R_CHANNEL` rather than `EXTRACTS_R` to avoid collision with non-pixel modalities).
 - Cross-modal kinds are first-class: `DEPICTS`, `CAPTIONS`, `TRANSCRIBES_AS`.
 
-Tensor-calculation kinds for transformer-family AI models are a fixed ~10-element vocabulary: `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`. Per-position attribution (layer, head, per-tensor token vocabulary) is **recipe content** — text/JSON on the model recipe entity, not per-attestation metadata. Attestations aggregate across positions; the architecture template (substrate code, per `IArchitectureTemplate`) distributes the aggregated typed attestations across recipe-shaped tensor slots at emit time. Storing position attribution on attestation rows would be redundant with the recipe.
+Tensor-calculation kinds for transformer-family AI models are a fixed ~10-element architecture-family vocabulary: `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`. Per-position attribution (layer, head, per-tensor vocabulary) is **recipe content** — text/JSON on the model recipe entity, not per-attestation metadata. Attestations aggregate across positions; the architecture template (substrate code, per `IArchitectureTemplate`) distributes the aggregated typed attestations across recipe-shaped tensor slots at emit time. Storing position attribution on attestation rows would be redundant with the recipe. This transformer-family list is not universal; other model architectures and modalities must define their own small fixed role vocabularies under the same generic observation envelope.
 
 ### Kind value tiers + Glicko-2 priors (ADR 0044)
 
