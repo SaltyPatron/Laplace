@@ -94,11 +94,17 @@ while IFS=$'\t' read -r sm_path sm_url; do
     for s in "${SKIP[@]}"; do [ "$sm_path" = "$s" ] && skip_this=1 && break; done
     [ "$skip_this" = 1 ] && continue
 
-    rel="${sm_path#external/}"     # /opt/laplace/external/<name>, not /external/external/
+    rel="${sm_path#external/}"     # /opt/laplace/external/<name>
     cache_entry="$CACHE/$rel"
 
-    if [ -d "$cache_entry/.git" ]; then
-        if git -C "$cache_entry" fetch --quiet --tags \
+    # Cache entries are bare-style gitdirs (HEAD, refs/, objects/, config
+    # at the top level — not nested under .git/). Initial seed comes from
+    # `rsync .git/modules/external/ → /opt/laplace/external/`. Refresh is
+    # via direct `git --git-dir=<entry> fetch`. Missing entries (new
+    # submodules added to .gitmodules since the seed) get cloned --bare
+    # from upstream, landing in the same shape.
+    if [ -d "$cache_entry/objects" ]; then
+        if git --git-dir="$cache_entry" fetch --quiet --tags \
             origin '+refs/heads/*:refs/remotes/origin/*' 2>/dev/null; then
             cache_fetched=$((cache_fetched + 1))
         else
@@ -107,7 +113,7 @@ while IFS=$'\t' read -r sm_path sm_url; do
         fi
     else
         mkdir -p "$(dirname "$cache_entry")"
-        if git clone --quiet "$sm_url" "$cache_entry" 2>/dev/null; then
+        if git clone --bare --quiet "$sm_url" "$cache_entry" 2>/dev/null; then
             cache_cloned=$((cache_cloned + 1))
         else
             cache_failed=$((cache_failed + 1))
@@ -166,11 +172,10 @@ for name in "${names[@]}"; do
         continue
     fi
 
-    # Cache entries are full clones at $CACHE/<name>/ — strip the
-    # in-repo "external/" prefix from $path to find the right entry
-    # (cache layout is /opt/laplace/external/<name>/, not
-    # /opt/laplace/external/external/<name>/).
-    ref_dir="$CACHE/${path#external/}/.git"
+    # Cache entries are bare-style gitdirs at $CACHE/<name>/ (top-level
+    # HEAD/refs/objects/config — same layout git stashes in .git/modules/).
+    # Strip the in-repo "external/" prefix from $path to find the entry.
+    ref_dir="$CACHE/${path#external/}"
     ws_mod=".git/modules/$path"
 
     # Fetch into cache if it's behind the pinned SHA.
