@@ -20,13 +20,19 @@
 #      runtime (libsvml/libirc/libimf) registered with the dynamic linker
 #      so engine .so files (and the PG extensions that DT_NEED them) load
 #      under the `postgres` user without LD_LIBRARY_PATH
-#   8. postgresql.conf extension_control_path + dynamic_library_path →
+#   8. Sweep of stale Laplace + Hartonomous installs from /usr/local/lib +
+#      /usr/lib/postgresql/$PG_VERSION/lib + /usr/share/postgresql/$PG_VERSION/extension
+#      (left behind by prior `sudo cmake --install` runs that used the
+#      old install layout; superseded by the /opt/laplace-staged layout)
+#   9. postgresql.conf extension_control_path + dynamic_library_path →
 #      point the running PG at /opt/laplace/{share,lib}/postgresql/$PG_VERSION
 #      (so `just install-laplace-prefix` lands extensions where CREATE
-#      EXTENSION finds them, without sudo on per-iteration)
-#   9. /etc/sudoers.d/laplace-runner — bounded NOPASSWD for `cmake --install` + legacy `make install*`
+#      EXTENSION finds them, without sudo on per-iteration); managed
+#      between marker comments so re-runs replace cleanly instead of
+#      appending duplicates
+#  10. /etc/sudoers.d/laplace-runner — bounded NOPASSWD for `cmake --install` + legacy `make install*`
 #      so the runner can install the extension into PG's extension dirs
-#  10. Cleanup of legacy state (ahart-as-superuser, ahart DB, old runner
+#  11. Cleanup of legacy state (ahart-as-superuser, ahart DB, old runner
 #      under /home/ahart/actions-runner)
 #
 # What this does NOT touch (those live in Layer 1 / Justfile):
@@ -585,19 +591,23 @@ bootstrap_engine_lib_path() {
 bootstrap_pg_extension_paths() {
     say "Set extension_control_path + dynamic_library_path in postgresql.conf"
     local conf="$PG_CONFIG_DIR/postgresql.conf"
+    local marker_begin="# >>> laplace-runner managed: extension paths >>>"
+    local marker_end="# <<< laplace-runner managed: extension paths <<<"
     local desired_ecp="extension_control_path = '/opt/laplace/share/postgresql/$PG_VERSION:\$system'"
     local desired_dlp="dynamic_library_path = '\$libdir:/opt/laplace/lib/postgresql/$PG_VERSION'"
 
-    # Strip any existing (active OR commented) settings of these two GUCs
-    # so we can rewrite cleanly. sed -i handles in-place edit safely.
-    sed -i -E \
-        -e '/^[[:space:]]*#?[[:space:]]*extension_control_path[[:space:]]*=/d' \
-        -e '/^[[:space:]]*#?[[:space:]]*dynamic_library_path[[:space:]]*=/d' \
+    # Strip prior managed block (between begin/end markers) AND any loose
+    # GUC lines anywhere else in the file (so an older non-marker write
+    # or a hand-edit can't shadow this one). Idempotent across re-runs.
+    sed -i \
+        -e "/$marker_begin/,/$marker_end/d" \
+        -e '/^[[:space:]]*#\?[[:space:]]*extension_control_path[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#\?[[:space:]]*dynamic_library_path[[:space:]]*=/d' \
         "$conf"
 
     cat >> "$conf" <<EOF
 
-# === Managed by scripts/bootstrap-laplace-runner.sh ===
+$marker_begin
 # Lets the running PG find Laplace extensions installed to /opt/laplace
 # without sudo per ADR 0019 (laplace-runner-owned prefix). PG 18 appends
 # '/extension' to each custom extension_control_path entry, so the value
@@ -606,12 +616,78 @@ bootstrap_pg_extension_paths() {
 # liblaplace_*.so files registered via /etc/ld.so.conf.d/laplace.conf).
 $desired_ecp
 $desired_dlp
+$marker_end
 EOF
     chown postgres:postgres "$conf"
     green "✓ Updated $conf (extension_control_path + dynamic_library_path)"
 
     systemctl reload postgresql
     green "✓ Reloaded PostgreSQL (new paths active without restart)"
+}
+
+# ---------------------------------------------------------------------------
+# bootstrap_cleanup_stale_installs — sweep system PG paths + /usr/local/lib
+# of anything left by a prior `sudo cmake --install` of Laplace or an older
+# project. Required because (a) until this script ran, ad-hoc installs
+# landed there; (b) the new /opt/laplace-staged install layout means those
+# files are now strictly stale; (c) leaving them around lets the loader /
+# PG dlopen find the wrong copy on hosts where ld.so.cache reaches into
+# /usr/local/lib first. This runs as part of bootstrap so the user
+# doesn't accumulate "one more sudo command the agent forgot to script."
+# Idempotent — silently absent is fine.
+# ---------------------------------------------------------------------------
+bootstrap_cleanup_stale_installs() {
+    say "Remove stale Laplace + Hartonomous installs from system PG + /usr/local"
+    local removed=0
+    local f
+
+    # Stale engine .so left in /usr/local/lib by a pre-/opt/laplace
+    # `sudo cmake --install`. These now live at /opt/laplace/lib + are
+    # registered with ld.so via bootstrap_engine_lib_path.
+    for f in /usr/local/lib/liblaplace_*.so*; do
+        [ -e "$f" ] || continue
+        rm -f "$f" && removed=$((removed + 1))
+    done
+
+    # Stale extension .so left in system PG pkglibdir by a prior
+    # `sudo cmake --install`. Includes the pre-ADR-0025 monolithic
+    # `laplace.so` AND the split `laplace_{geom,substrate}.so`. New ones
+    # live at /opt/laplace/lib/postgresql/$PG_VERSION via dynamic_library_path.
+    for f in /usr/lib/postgresql/$PG_VERSION/lib/laplace.so \
+             /usr/lib/postgresql/$PG_VERSION/lib/laplace_geom.so \
+             /usr/lib/postgresql/$PG_VERSION/lib/laplace_substrate.so; do
+        [ -e "$f" ] || continue
+        rm -f "$f" && removed=$((removed + 1))
+    done
+
+    # Stale extension control + .sql files in system PG sharedir. Same
+    # rationale; new ones live at /opt/laplace/share/postgresql/$PG_VERSION/extension.
+    for f in /usr/share/postgresql/$PG_VERSION/extension/laplace.control \
+             /usr/share/postgresql/$PG_VERSION/extension/laplace--*.sql \
+             /usr/share/postgresql/$PG_VERSION/extension/laplace_geom.control \
+             /usr/share/postgresql/$PG_VERSION/extension/laplace_geom--*.sql \
+             /usr/share/postgresql/$PG_VERSION/extension/laplace_substrate.control \
+             /usr/share/postgresql/$PG_VERSION/extension/laplace_substrate--*.sql; do
+        [ -e "$f" ] || continue
+        rm -f "$f" && removed=$((removed + 1))
+    done
+
+    # Hartonomous-* leftovers from the previous-iteration project (per
+    # CLAUDE.md R-4 / RULES R11 — Hartonomous-001 is the predecessor and
+    # must not bleed into this host). Removes the library, extension
+    # files, and the dynamic_library_path entry that referenced it.
+    for f in /usr/lib/postgresql/$PG_VERSION/lib/libhartonomous*.so* \
+             /usr/share/postgresql/$PG_VERSION/extension/hartonomous*; do
+        [ -e "$f" ] || continue
+        rm -f "$f" && removed=$((removed + 1))
+    done
+
+    if [ "$removed" -gt 0 ]; then
+        ldconfig
+        green "✓ Removed $removed stale install files; reran ldconfig"
+    else
+        green "✓ No stale install files to remove"
+    fi
 }
 
 bootstrap_sudoers() {
@@ -829,6 +905,7 @@ do_bootstrap() {
     bootstrap_pg_auth
     bootstrap_pg_database_and_postgis
     bootstrap_engine_lib_path
+    bootstrap_cleanup_stale_installs
     bootstrap_pg_extension_paths
     bootstrap_sudoers
 

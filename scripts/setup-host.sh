@@ -99,24 +99,35 @@ ensure_dotnet_present() {
 # local dev), the obj/ dir is unwritable to laplace-runner and dotnet's
 # NuGet restore step fails with "Access denied" on a *.tmp file.
 layer1_clean_foreign_build_artifacts() {
-    # The project directory app/Laplace.Migrations is owned by the
-    # interactive dev user (ahart) — laplace-runner has read-only access via
-    # /home/ahart's POSIX perms. When dotnet runs as laplace-runner it tries
-    # to create obj/ and bin/ subdirectories there, which fails with
-    # "Access to the path ... is denied". So in addition to removing any
-    # foreign-owned obj/ and bin/ (left by a prior `ahart`-side build), we
-    # PRE-CREATE both subdirs owned by laplace-runner so the dotnet build
-    # can populate them without needing write access to the parent.
-    for dir in obj bin; do
-        local d="$REPO_DIR/app/Laplace.Migrations/$dir"
-        if [ -e "$d" ] && [ "$(stat -c '%U' "$d")" != "$RUNNER_USER" ]; then
-            sudo rm -rf "$d"
-            yellow "  - removed $d (was not owned by $RUNNER_USER)"
-        fi
-        if [ ! -e "$d" ]; then
-            sudo install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 775 "$d"
-            yellow "  - created $d owned by $RUNNER_USER"
-        fi
+    # All app/Laplace.*/ project directories are owned by the interactive
+    # dev user (ahart) — laplace-runner has read-only access via /home/ahart's
+    # POSIX perms. When dotnet runs as laplace-runner it tries to create
+    # obj/ and bin/ subdirectories in each project root, which fails with
+    # "Access to the path ... is denied". So for every project, we
+    # (a) remove any obj/ + bin/ NOT already owned by laplace-runner (likely
+    #     left by a local `dotnet build` from VS Code as ahart), and
+    # (b) PRE-CREATE both subdirs owned by laplace-runner so the build can
+    #     populate them via the subdir's own write bit instead of needing
+    #     write access to the project root.
+    #
+    # Walking the full app/Laplace.* set (not just .Migrations) keeps
+    # `just test-app` + any future dotnet target safe under laplace-runner.
+    local proj
+    for proj in "$REPO_DIR"/app/Laplace.*; do
+        [ -d "$proj" ] || continue
+        # Skip non-project dirs (e.g. a stray .sln/.slnx-adjacent file).
+        ls "$proj"/*.csproj >/dev/null 2>&1 || continue
+        for dir in obj bin; do
+            local d="$proj/$dir"
+            if [ -e "$d" ] && [ "$(stat -c '%U' "$d")" != "$RUNNER_USER" ]; then
+                sudo rm -rf "$d"
+                yellow "  - removed $d (was not owned by $RUNNER_USER)"
+            fi
+            if [ ! -e "$d" ]; then
+                sudo install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 775 "$d"
+                yellow "  - created $d owned by $RUNNER_USER"
+            fi
+        done
     done
     return 0
 }
