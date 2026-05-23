@@ -9,7 +9,9 @@ These are the binding standards for all code in this project. Inconsistency here
 | Concern | Type | Notes |
 |---|---|---|
 | 4D coordinate component | `float64` (per component) | Room for mantissa packing; sufficient precision |
-| Entity hash | `bytea(16)` in PG (no wrapper PG TYPE per R22 + ADR 0034 — `CHECK (octet_length(VALUE) = 16)` + custom `laplace_btree_hash128_ops` opclass); `hash128_t = {uint64_t hi, lo}` POD struct in C/C++ ({hi, lo} layout justified by mantissa-pack read pattern) | BLAKE3 truncated to 128 bits (per ADR 0015); collision-safe for ~10¹⁸ entities; **raw bytes only — never hex/text** |
+| Entity ID | Column-role `id` (PK) or `<role>_id` (FK) of type `bytea(16)` in PG with `CHECK (octet_length(VALUE) = 16)` + custom `laplace_btree_hash128_ops` opclass (no wrapper PG TYPE per R22 + ADR 0034); `hash128_t = {uint64_t hi, lo}` POD struct in C/C++ ({hi, lo} layout justified by mantissa-pack read pattern) | The column-role is `id`; the value IS a BLAKE3-128 hash of the entity's canonical (type-canonicalized) content bytes (per ADR 0015). Collision-safe for ~10¹⁸ entities. **Raw bytes only — never hex/text.** The fact that the ID is a hash is in the CHECK constraint + ID discipline (see below), not the column name. |
+| Physicality ID | `bytea(16)` PK on `physicalities`, BLAKE3 of canonical `(entity_id, source_id, kind, coord, trajectory)` bytes | Lets attestations or higher-tier physicalities reference a specific physicality if needed |
+| Attestation ID | `bytea(16)` PK on `attestations`, BLAKE3 of the 5-tuple `(subject_id, kind_id, object_id, source_id, context_id)` | Stable across re-observation — same tuple → same id |
 | Hilbert curve index | `uint128` stored as `bytea(16)` in PG; `hilbert128_t = {uint64_t hi, lo}` in C/C++ | 4D × 32-bit-per-dim |
 | Glicko-2 rating / RD / volatility | `int64` fixed-point, scale = 10⁹ | Deterministic, vectorizable, no FP drift |
 | Effective mu | `int64` fixed-point, scale = 10⁹ | Derived from rating/RD/volatility/source credibility/context compatibility; never stored as float |
@@ -376,30 +378,62 @@ Every operation used more than once **must** be a named, tested, single-source-o
 
 For any operation exposed in BOTH PG and C# (i.e., callable via SQL and via P/Invoke), there is exactly **one canonical implementation in the C/C++ engine**. PG wrappers (PG_FUNCTION_INFO_V1) and C# wrappers (LibraryImport) are thin glue around the engine helper. Behavior across SQL/C#/engine direct is byte-identical, verified by cross-language consistency tests.
 
-## Hash discipline (no casts, no hex)
+## ID discipline (no casts, no hex)
 
-The hash representation MUST be **raw bytes** end to end. No exceptions.
+The substrate's ID values MUST be **raw bytes** end to end. No exceptions. Column-role is `id` (PK) or `<role>_id` (FK); the value IS a BLAKE3-128 hash of canonical content. Column-name reflects role; CHECK constraint + this discipline reflect the hash-value mechanism.
 
 | Layer | Representation |
 |---|---|
 | Engine C | `hash128_t = { uint64_t hi, lo }` (16 B, naturally aligned, POD) |
-| Postgres storage | `bytea` with `CHECK (octet_length(VALUE) = 16)` constraint |
+| Postgres storage | `bytea` with `CHECK (octet_length(VALUE) = 16)` constraint, column-named `id` (PK) or `<role>_id` (FK) |
 | Postgres comparison | btree on `bytea` — native byte compare, identical to memcmp |
 | Postgres FK references | `bytea` to `bytea` — no casts |
 | C# interop | `byte[16]` or POD struct via `[StructLayout(LayoutKind.Sequential)]` |
-| WKB / mantissa-pack | Raw bytes embedded |
+| WKB / mantissa-pack | Raw bytes embedded (XYZ of a trajectory vertex carries the full 128-bit entity_id) |
 | Wire/disk format | Raw bytes |
 
 **Banned:**
 
 - `bytea ↔ text` casts in hot paths (`encode(h, 'hex')` is debugging-only)
-- `varchar`, `text`, or any character-encoded type for hashes
-- C# `string` for hash values; no `BitConverter.ToString`, no `Encoding.*`
-- `tolower` / `toupper` / normalization of hash representations
-- Hex-string parsing of incoming hashes
+- `varchar`, `text`, or any character-encoded type for IDs
+- C# `string` for ID values; no `BitConverter.ToString`, no `Encoding.*`
+- `tolower` / `toupper` / normalization of ID representations
+- Hex-string parsing of incoming IDs
 - Any conversion ceremony at marshalling boundaries
+- Naming the PK column `hash` — the column-role is `id`. The value-mechanism is hashing, recorded in the CHECK constraint and in this discipline.
+- Truncating an ID to fewer than 128 bits anywhere (no truncated-hash storage; mantissa-packing carries the full 128-bit value)
 
-Add a debug-only `laplace_hash_to_hex(bytea) → text` if it helps inspection, but it MUST NOT appear in any data-flow path.
+Add a debug-only `laplace_id_to_hex(bytea) → text` if it helps inspection, but it MUST NOT appear in any data-flow path.
+
+## Canonicalization discipline (lossless, per type)
+
+Entity IDs are BLAKE3-128 of **canonical content bytes**, where canonical is defined per entity type and is **lossless** — every input that decodes to the same canonical bytes hashes to the same ID. Examples:
+
+- Text: NFC-normalized Unicode codepoint sequence (UTF-8 vs UTF-16 of identical codepoints → same ID).
+- Pixel (RGB type): canonical `(r, g, b)` triple bytes (per-channel uint8). RGBA, CMYK, HSV are *different types*, related by attestations, not by ID equivalence.
+- Lossless image container: canonical pixel grid bytes (PNG vs lossless WebP of identical pixels → same ID).
+- Audio frame (PCM): canonical PCM sample bytes at canonical sample rate/bit depth.
+- Model recipe: canonical config + tokenizer JSON normalized form (sorted keys, no whitespace variation).
+
+**Lossy conversions are NOT equivalent under canonicalization.** A JPEG of an image has different canonical bytes from the lossless original (different pixel values after decode) — they are different entities, cross-linked by `IS_LOSSY_ENCODING_OF` attestations. An MP3 of a FLAC is a different entity. A quantized GGUF is a different artifact from the safetensors it was derived from (and per Vampire mode, model files are not preserved as entities at all).
+
+The canonicalization rule for each type lives with that type's IDecomposer plugin. The substrate-canonical source emits the canonical-form attestation; cross-type / cross-format equivalence is captured as attestations, not as ID collapse.
+
+## Attestation kind discipline (typed transform vocabulary)
+
+Attestation kinds are not arbitrary labels — they are the substrate's typed-computation vocabulary. Each kind is itself an entity (content-addressed by its canonical name, not by hashing arbitrary parameter tuples) with arena semantics (cardinality, competition, context policy, source-trust policy) recorded as meta-attestations. Cascade A* composes kind-typed walks the way a forward pass composes typed projections — but the substrate's vocabulary is **usage- and structure-shaped**, not transformer-position-shaped.
+
+Naming convention for attestation kinds:
+
+- UPPER_SNAKE_CASE for the kind name.
+- Each kind is drawn from a **small fixed vocabulary** per modality / per architecture family. Vocabularies are documented; new kinds require the type-taxonomy agent to extend the documented vocabulary.
+- **Forbidden**: synthesizing per-(layer, head, position) kind entities via hash-concatenation of architectural metadata. Layer/head/position are not part of kind identity; they ride on individual attestations as meta-attestations or context, never as kind-name parameters that explode the kind-entity space.
+- Modality-specific kinds carry a modality prefix or unambiguous semantic (`EXTRACTS_R_CHANNEL` rather than `EXTRACTS_R` to avoid collision with non-pixel modalities).
+- Cross-modal kinds are first-class: `DEPICTS`, `CAPTIONS`, `TRANSCRIBES_AS`.
+
+Tensor-calculation kinds for transformer-family AI models are a fixed ~10-element vocabulary: `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`. Per-position attribution (layer, head, per-tensor token vocabulary) is **recipe content** — text/JSON on the model recipe entity, not per-attestation metadata. Attestations aggregate across positions; the architecture template (substrate code, per `IArchitectureTemplate`) distributes the aggregated typed attestations across recipe-shaped tensor slots at emit time. Storing position attribution on attestation rows would be redundant with the recipe.
+
+Adding a new attestation kind requires (a) defining its arena semantics as meta-attestations, (b) declaring its source-trust policy, (c) registering it as an entity with the substrate-canonical source attesting its kind-properties. The type-taxonomy agent is the canonical owner.
 
 ## Versioning
 

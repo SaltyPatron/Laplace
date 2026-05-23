@@ -10,139 +10,151 @@ Before working on any code, read [CLAUDE.md](CLAUDE.md), [GLOSSARY.md](GLOSSARY.
 
 Three core tables. No event log. Postgres 18 + PostGIS 3.6.3.
 
-### `entities` — every unique observed n-gram
+### `entities` — pure identity + tier + type
+
+Entities are **identity-only**. They carry no geometry, no trajectory, no per-source representation. All of that lives in [`physicalities`](#physicalities--per-source-per-kind-4d-representations). One row per unique observed n-gram, content-addressed by BLAKE3-128 of the canonical (type-canonicalized) content bytes.
 
 ```sql
 CREATE TABLE entities (
-    hash             bytea         PRIMARY KEY,
-    tier             smallint      NOT NULL CHECK (tier >= 0 AND tier < 256),
-    canonical_coord  geometry      NOT NULL
-                                   CHECK (ST_HasZ(canonical_coord)
-                                          AND ST_HasM(canonical_coord)
-                                          AND ST_GeometryType(canonical_coord) = 'ST_Point'),
-    hilbert_index    bytea         NOT NULL,
-    trajectory       geometry      CHECK (trajectory IS NULL
-                                          OR (ST_HasZ(trajectory) AND ST_HasM(trajectory)
-                                              AND ST_GeometryType(trajectory) = 'ST_LineString')),
-    radius_origin    double precision GENERATED ALWAYS AS (
-        sqrt(ST_X(canonical_coord)^2 + ST_Y(canonical_coord)^2 +
-             ST_Z(canonical_coord)^2 + ST_M(canonical_coord)^2)
-    ) STORED,
-    n_constituents    integer       NOT NULL DEFAULT 0 CHECK (n_constituents >= 0),
-    first_observed_by bytea,                                                    -- references entities(hash); self-ref deferred
-    created_at        timestamptz   NOT NULL DEFAULT now()
+    id                 bytea            PRIMARY KEY CHECK (octet_length(id) = 16),  -- BLAKE3-128 of canonical content
+    tier               smallint         NOT NULL CHECK (tier >= 0 AND tier < 256),
+    type_id            bytea            NOT NULL REFERENCES entities(id),           -- e.g., Text, Pixel, WordNet_Synset, Model_Recipe, ...
+    first_observed_by  bytea            REFERENCES entities(id),                    -- source entity that first observed this; nullable for bootstrap rows
+    created_at         timestamptz      NOT NULL DEFAULT now()
 );
 
--- Indexes
-CREATE INDEX entities_hilbert_btree   ON entities USING btree (hilbert_index);
-CREATE INDEX entities_coord_nd        ON entities USING gist  (canonical_coord gist_geometry_ops_nd);
-CREATE INDEX entities_trajectory_nd   ON entities USING gist  (trajectory gist_geometry_ops_nd) WHERE trajectory IS NOT NULL;
-CREATE INDEX entities_tier_btree      ON entities USING btree (tier);
-CREATE INDEX entities_radius_btree    ON entities USING btree (radius_origin);
-CREATE INDEX entities_first_observed  ON entities USING btree (first_observed_by) WHERE first_observed_by IS NOT NULL;
-
--- Optional partial indexes (added as access patterns warrant — multiple-indexes-per-column is permitted)
--- CREATE INDEX entities_coord_t0       ON entities USING gist (canonical_coord gist_geometry_ops_nd) WHERE tier = 0;
--- CREATE INDEX entities_coord_interior ON entities USING gist (canonical_coord gist_geometry_ops_nd) WHERE radius_origin < 0.3;
--- CREATE INDEX entities_hilbert_brin   ON entities USING brin  (hilbert_index) WITH (pages_per_range = 32);
+CREATE INDEX entities_tier      ON entities USING btree (tier);
+CREATE INDEX entities_type      ON entities USING btree (type_id);
+CREATE INDEX entities_tier_type ON entities USING btree (tier, type_id);
+CREATE INDEX entities_first_observed ON entities USING btree (first_observed_by) WHERE first_observed_by IS NOT NULL;
 ```
 
 **Notes:**
 
-- `hash` is BLAKE3 truncated to 128 bits stored as `bytea(16)` (per ADR 0015). Content-addressable PK. No separate ID column. Raw bytes only — no hex, no casts.
-- `tier` is a `smallint` (one byte sufficient, but Postgres has no native uint8).
-- `canonical_coord` is a standard PostGIS `geometry` constrained to ZM-flagged Point.
-- `trajectory` is NULL for T0 atoms; mantissa-packed LINESTRING for T≥1.
-- `radius_origin` is a STORED generated column for cheap abstraction-level queries.
-- `gist_geometry_ops_nd` is PostGIS's native N-dimensional GiST opclass — handles 4D MBRs out of the box.
+- `id` is BLAKE3-128 stored as `bytea(16)` (per ADR 0015). Column-role is `id`; value happens to be a hash (per STANDARDS hash discipline). Raw bytes only — no hex, no casts.
+- `tier` is a `smallint` (256 tiers max — wildly sufficient).
+- `type_id` references the type-entity declaring what kind of thing this is (Text, Pixel, Patch, Region, Image, Audio_Frame, Model_Recipe, WordNet_Synset, UD_Sentence, ...). Type drives canonicalization rule, decomposition rule, reconstruction rule, and modality-applicable attestation kinds. Type-entities are themselves rows in `entities`, bootstrapped at install.
+- `first_observed_by` references the source entity (also a row in `entities`) that first ingested this content. Nullable for the bootstrap type entities + substrate-canonical source.
+- No geometry, Hilbert index, trajectory, radius_origin, or n_constituents on this table. Those live on `physicalities`.
 
-### `physicalities` — per-source 4D projections
+### `physicalities` — per-source, per-kind 4D representations
+
+One-to-many entity→physicality. Each row is one **lens** on an entity provided by one **source**: CONTENT (decomposition view), BUILDING_BLOCK (used-as-constituent view), or PROJECTION (source-embedding-space view). Holds all geometry + trajectory + per-source metadata.
 
 ```sql
 CREATE TABLE physicalities (
-    entity_hash        bytea            NOT NULL REFERENCES entities(hash) ON DELETE CASCADE,
-    source_hash        bytea            NOT NULL REFERENCES entities(hash) ON DELETE CASCADE,
+    id                 bytea            PRIMARY KEY CHECK (octet_length(id) = 16),
+    entity_id          bytea            NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    source_id          bytea            NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    kind               smallint         NOT NULL,                                   -- 1=CONTENT, 2=BUILDING_BLOCK, 3=PROJECTION (extensible)
     coord              geometry         NOT NULL
                                         CHECK (ST_HasZ(coord) AND ST_HasM(coord)
                                                AND ST_GeometryType(coord) = 'ST_Point'),
     hilbert_index      bytea            NOT NULL,
-    alignment_residual double precision NOT NULL,
-    source_dim         integer          NOT NULL CHECK (source_dim > 0),
+    trajectory         geometry         CHECK (trajectory IS NULL
+                                               OR (ST_HasZ(trajectory) AND ST_HasM(trajectory)
+                                                   AND ST_GeometryType(trajectory) = 'ST_LineString')),
+    radius_origin      double precision GENERATED ALWAYS AS (
+        sqrt(ST_X(coord)^2 + ST_Y(coord)^2 + ST_Z(coord)^2 + ST_M(coord)^2)
+    ) STORED,
+    n_constituents     integer          NOT NULL DEFAULT 0 CHECK (n_constituents >= 0),
+    alignment_residual double precision,                                            -- nullable; substrate-canonical = 0; PROJECTION carries the Procrustes residual
+    source_dim         integer          CHECK (source_dim IS NULL OR source_dim > 0),
     observed_at        timestamptz      NOT NULL DEFAULT now(),
-    PRIMARY KEY (entity_hash, source_hash)
+    UNIQUE (entity_id, source_id, kind)
 );
 
-CREATE INDEX physicalities_coord_nd     ON physicalities USING gist  (coord gist_geometry_ops_nd);
-CREATE INDEX physicalities_hilbert      ON physicalities USING btree (hilbert_index);
-CREATE INDEX physicalities_source_hash  ON physicalities USING btree (source_hash);
-CREATE INDEX physicalities_residual     ON physicalities USING btree (alignment_residual);
-
--- Optional: partition by hash(source_hash) when ingesting many large models
--- CREATE TABLE physicalities (...) PARTITION BY HASH (source_hash);
+CREATE INDEX physicalities_entity        ON physicalities USING btree (entity_id);
+CREATE INDEX physicalities_source        ON physicalities USING btree (source_id);
+CREATE INDEX physicalities_kind          ON physicalities USING btree (kind);
+CREATE INDEX physicalities_coord_nd      ON physicalities USING gist  (coord gist_geometry_ops_nd);
+CREATE INDEX physicalities_hilbert       ON physicalities USING btree (hilbert_index);
+CREATE INDEX physicalities_radius        ON physicalities USING btree (radius_origin);
+CREATE INDEX physicalities_residual      ON physicalities USING btree (alignment_residual) WHERE alignment_residual IS NOT NULL;
+-- Trajectory column: GIST on mantissa-packed LINESTRINGs collapses to a fixed bounding box per ADR 0012,
+-- so gist_geometry_ops_nd would filter nothing. Structural opclass replacement is tracked in §V.
 ```
+
+**Notes:**
+
+- `id` is the physicality's own content-addressed identifier (BLAKE3 of canonical `(entity_id, source_id, kind, coord, trajectory)` bytes). Lets attestations or higher-tier physicalities reference a specific physicality if needed.
+- `kind` enum is small (CONTENT / BUILDING_BLOCK / PROJECTION + future extensions). Implemented as `smallint` for compactness; values are mirrored in a substrate-canonical lookup of kind-entities.
+- `trajectory` may be NULL: T0 atoms have no constituents (CONTENT physicality with NULL trajectory); BUILDING_BLOCK typically carries no trajectory; Vampire-mode AI ingestion produces PROJECTION physicalities with NULL trajectory.
+- `(entity_id, source_id, kind)` UNIQUE — one physicality per (entity, source, kind) tuple.
+- Cascade-friendly: partial indexes by `kind` are added as access patterns warrant.
 
 ### `attestations` — typed semantic relations, consensus state per source
 
 ```sql
 CREATE TABLE attestations (
-    id                bigserial     PRIMARY KEY,
-    subject_hash      bytea         NOT NULL REFERENCES entities(hash),
-    kind_hash         bytea         NOT NULL REFERENCES entities(hash),
-    object_hash       bytea                  REFERENCES entities(hash),
-    source_hash       bytea         NOT NULL REFERENCES entities(hash),
-    context_hash      bytea                  REFERENCES entities(hash),
-    rating            bigint        NOT NULL,                              -- fixed-point ×10⁹
+    id                bytea         PRIMARY KEY CHECK (octet_length(id) = 16),     -- BLAKE3-128 of (subject_id, kind_id, object_id, source_id, context_id)
+    subject_id        bytea         NOT NULL REFERENCES entities(id),
+    kind_id           bytea         NOT NULL REFERENCES entities(id),               -- attestation-kind entity (typed transform vocabulary)
+    object_id         bytea                  REFERENCES entities(id),
+    source_id         bytea         NOT NULL REFERENCES entities(id),
+    context_id        bytea                  REFERENCES entities(id),
+    rating            bigint        NOT NULL,                                       -- Glicko-2 mu, fixed-point ×10⁹
     rd                bigint        NOT NULL CHECK (rd > 0),
     volatility        bigint        NOT NULL CHECK (volatility > 0),
     last_observed_at  timestamptz   NOT NULL,
     observation_count bigint        NOT NULL DEFAULT 1 CHECK (observation_count >= 0),
-    CONSTRAINT attestations_dedup UNIQUE NULLS NOT DISTINCT
-        (subject_hash, kind_hash, object_hash, source_hash, context_hash)
+    UNIQUE NULLS NOT DISTINCT (subject_id, kind_id, object_id, source_id, context_id)
 );
 
-CREATE INDEX attestations_subject       ON attestations USING btree (subject_hash);
-CREATE INDEX attestations_kind          ON attestations USING btree (kind_hash);
-CREATE INDEX attestations_object        ON attestations USING btree (object_hash) WHERE object_hash IS NOT NULL;
-CREATE INDEX attestations_source        ON attestations USING btree (source_hash);
-CREATE INDEX attestations_context       ON attestations USING btree (context_hash) WHERE context_hash IS NOT NULL;
+CREATE INDEX attestations_subject       ON attestations USING btree (subject_id);
+CREATE INDEX attestations_kind          ON attestations USING btree (kind_id);
+CREATE INDEX attestations_object        ON attestations USING btree (object_id) WHERE object_id IS NOT NULL;
+CREATE INDEX attestations_source        ON attestations USING btree (source_id);
+CREATE INDEX attestations_context       ON attestations USING btree (context_id) WHERE context_id IS NOT NULL;
 CREATE INDEX attestations_rating        ON attestations USING btree (rating DESC, rd ASC);
-CREATE INDEX attestations_subject_kind  ON attestations USING btree (subject_hash, kind_hash);
+CREATE INDEX attestations_subject_kind  ON attestations USING btree (subject_id, kind_id);
 CREATE INDEX attestations_last_observed ON attestations USING brin  (last_observed_at);
 
 -- Ingestion idempotency:
--- INSERT INTO attestations (...) VALUES (...) ON CONFLICT (subject_hash, kind_hash, object_hash, source_hash, context_hash) DO NOTHING;
+-- INSERT INTO attestations (...) VALUES (...) ON CONFLICT (subject_id, kind_id, object_id, source_id, context_id) DO NOTHING;
 ```
 
 **Notes:**
 
-- Synthetic `id` PK + `UNIQUE NULLS NOT DISTINCT` constraint handles dedup with nullable object/context cleanly.
-- `rating`/`rd`/`volatility` are int64 fixed-point at scale 10⁹.
+- `id` is content-addressed (BLAKE3 of the 5-tuple) — stable across re-observation; same tuple → same `id` regardless of insertion order.
+- `kind_id` is the substrate's **typed transform vocabulary** — a small fixed enumeration per modality / per architecture family. Each kind plays a functional role in cascade composition; the substrate's actual vocabulary is usage- and structure-shaped (`CO_OCCURS_WITH`, `FOLLOWS`, `IS_HYPERNYM_OF`, `Q_PROJECTS`, etc.), not architecture-position-shaped. Kind entities are parameter-free; per-position attribution (layer, head, etc.) lives as meta-attestations.
+- `rating` / `rd` / `volatility` are int64 fixed-point at scale 10⁹. Glicko-2 dynamics update on cross-source agreement/disagreement evidence — per [ADR 0036](docs/adr/0036-arena-semantics-and-source-trust.md).
 - `ON DELETE CASCADE` on physicalities (purging a source removes its physicalities); **no** cascade on attestations (entity removal is deliberate).
-- Hash-partitioning by `source_hash` is optional for operational ease — not required for query performance at the scales we're targeting (10⁹–10¹⁰ rows).
+- Hash-partitioning by `source_id` is optional for operational ease — not required for query performance at the scales we're targeting (10⁹–10¹⁰ rows).
 
 ### No `observations` table
 
-Was over-engineering. Attestation rows ARE consensus state, not event log entries. Repeated assertions from the same source are idempotent. Provenance lives in the `source_hash` column.
+Was over-engineering. Attestation rows ARE consensus state, not event log entries. Repeated assertions from the same source are idempotent. Provenance lives in the `source_id` column.
 
 ---
 
 ## I.A. Content-addressed computational model
 
-The substrate's core compute unit is the tiered Merkle DAG, not a model tensor and not a row-per-occurrence log.
+The substrate's core compute unit is the **typed attestation graph traversed by Glicko-2-weighted A***, evaluated against the **semantic Merkle DAG of content-addressed entities**. Not a model tensor. Not a row-per-occurrence log. Not a vector index.
 
 ```text
-raw content
-→ T0 Unicode atoms from perf-cache
-→ T1/T2/T3/... entities built from child hashes
-→ trajectories over child entities
-→ physicalities and attestations
+raw input bytes
+→ type-specific canonicalization (lossless)             ─┐
+→ BLAKE3-128 of canonical bytes = entity id              │ identity layer
+→ entity row (id + tier + type_id) — dedup on hash       ─┘
+
+→ per-source IDecomposer breaks content into             ─┐
+  lower-tier constituent entities                         │
+→ mantissa-packed trajectory on a CONTENT physicality     │ representation layer
+→ procrustes-aligned coord on a PROJECTION physicality    │ (per source × per kind)
+→ usage-aggregated coord on a BUILDING_BLOCK physicality ─┘
+
+→ typed attestations emitted with Glicko-2 ratings        ─┐ knowledge layer
+  per arena, source, context                              ─┘
 ```
 
-Deduplication is O(tier depth + novel structure). When a content span has already been observed, its BLAKE3-128 hash identifies the existing entity; new parents reference it through trajectories instead of duplicating content. Reconstruction walks the same DAG from parent trajectory to child entities to atoms. Materializing bytes is O(output bytes), but identity, reuse, deduplication, and reconstruction planning are tier/path operations rather than corpus scans.
+**Universal T0**: every modality's tier ladder bottoms at the same Unicode-codepoint atoms. The codepoint `5` is one row in `entities`, shared by text (`"$255 rent"`), pixel data (RGB red-channel value 255), audio sample magnitudes, model-weight textual representations, postal codes, prices, page numbers — same hash, one row, referenced from every modality.
 
-The T0 perf-cache is mandatory for this model. It contains codepoint hash, canonical coordinate, Hilbert index, UCA order, and flags for all 1,114,112 Unicode codepoints. Clients and ingestion workers use it to compute atom identity and coordinates locally; they do not round-trip to Postgres for per-codepoint math. T1+ entity math is computed in the C/C++ engine before INSERT: Merkle hash, centroid, trajectory, Hilbert index, and n-constituent metadata arrive pre-baked.
+**Deduplication is O(tier depth + novel structure)**. Walking the Merkle DAG top-down on hash equality short-circuits at every existing-id hit. Re-ingesting identical content is O(1); ingesting content sharing constituents with prior observations is O(depth-until-novelty + novelty-size); fully novel content is O(total novel structure).
 
-The 4D substrate is the coordinate/index chassis. It supplies canonical positions, physicalities, radial abstraction, Hilbert locality, and candidate narrowing. It is not the sole semantic judge; hot-path selection follows typed, rated attestations ordered by effective score and constrained by arena semantics.
+**T0 perf-cache** holds codepoint id + substrate-canonical-CONTENT-physicality coord + Hilbert index + UCA order + flags for all 1,114,112 codepoints. Clients and ingestion workers compute atom identity and coordinates locally. T1+ entity math (id, physicality coords/trajectories, Hilbert indices) is computed in the C/C++ engine before INSERT and arrives pre-baked.
+
+**The 4D geometric layer is value-additive enrichment, not the engine**. The inference engine is graph A* through the typed attestation graph weighted by Glicko-2 effective-μ. The composition pattern is structurally analogous to a transformer's forward pass (typed-projection composition + weighted aggregation + nonlinear feature combination), but the substrate's vocabulary of typed transforms is its own — drawn from small fixed enumerations per modality / per architecture family, not from transformer-position labels. Geometric verticals (Hilbert range scan, physicality-coord KNN) accelerate candidate narrowing; semantic decisions follow typed, rated attestations ordered by effective score and constrained by arena semantics.
 
 ---
 
@@ -274,16 +286,24 @@ laplace_hash128_merkle(tier smallint, child_hashes bytea[]) RETURNS bytea
 ### Mantissa packing
 
 ```sql
-laplace_mantissa_pack(base geometry, tier smallint, position integer, child_hash bytea) RETURNS geometry
-laplace_mantissa_unpack(vertex geometry) RETURNS TABLE(tier smallint, position integer, hash_partial bytea)
+laplace_mantissa_pack(entity_id bytea, ordinal integer, run_length integer, flags bigint) RETURNS geometry
+laplace_mantissa_unpack(vertex geometry) RETURNS TABLE(entity_id bytea, ordinal integer, run_length integer, flags bigint)
 ```
+
+Per ADR 0012: vertex is a 4D point whose XYZ encodes the full 128-bit `entity_id` and whose M encodes the per-vertex metadata. No `base` parameter — trajectory vertices are metadata containers, not spatial points being annotated. Full 212-bit utilization (128 id + 16 ordinal + 16 run_length + 52 reserved flags).
 
 ### Trajectory construction
 
 ```sql
-laplace_trajectory_build(constituent_hashes bytea[]) RETURNS geometry  -- builds mantissa-packed LINESTRING
-laplace_trajectory_constituents(traj geometry) RETURNS TABLE(position integer, constituent_hash bytea)
+laplace_trajectory_build(entity_ids bytea[], ordinals integer[] DEFAULT NULL,
+                         run_lengths integer[] DEFAULT NULL, flags bigint[] DEFAULT NULL)
+    RETURNS geometry                                            -- builds mantissa-packed LINESTRING
+laplace_trajectory_constituents(traj geometry)
+    RETURNS TABLE(ordinal integer, entity_id bytea,
+                  run_length integer, flags bigint)             -- enumerates mantissa-packed vertices
 ```
+
+`laplace_trajectory_build` defaults ordinals to 1..N, run_lengths to 1, flags to 0 when arrays are NULL. The function name retains "constituents" because that names the *role* the referenced entities play in this particular trajectory; the returned `entity_id` matches `entities.id` exactly (one hash space).
 
 ### Glicko-2
 
@@ -309,7 +329,7 @@ laplace_astar_path(
     goal_region bytea,
     max_depth integer DEFAULT 10,
     k_paths integer DEFAULT 1
-) RETURNS TABLE(step_idx integer, entity_hash bytea, g double precision, h double precision)
+) RETURNS TABLE(step_idx integer, entity_id bytea, g double precision, h double precision)
 
 laplace_cascade(
     prompt bytea,
@@ -317,7 +337,7 @@ laplace_cascade(
     source_scope bytea[] DEFAULT NULL,
     max_depth integer DEFAULT 12,
     k_paths integer DEFAULT 32
-) RETURNS TABLE(path_idx integer, entity_hash bytea, effective_mu bigint, rd bigint, source_trace bytea[])
+) RETURNS TABLE(path_idx integer, entity_id bytea, effective_mu bigint, rd bigint, source_trace bytea[])
 ```
 
 `laplace_cascade` is the compiled prompt-ingestion + traversal surface. It decomposes/records prompt content according to policy, creates or references the prompt context entity, seeds the frontier, walks the attestation DAG, and streams ranked paths. It is implemented in C/C++ as an SRF; recursive SQL is not the hot path.
@@ -365,9 +385,18 @@ void hilbert4d_decode(const hilbert128_t* h, double out[4]);
 int  hilbert128_compare(const hilbert128_t* a, const hilbert128_t* b);
 
 // mantissa.h — payload riding in FP64 mantissas (ADR 0012)
-typedef struct { uint8_t tier; uint16_t position; uint64_t hash_partial; } mantissa_payload_t;
+// 212-bit per-vertex budget: XYZ encodes the full 128-bit entity_id, M
+// encodes ordinal/run_length/flags. Biased exponent pinned to 0x3FF so every
+// coord is a finite normal double. No `base` — vertices are metadata
+// containers, not spatial points being annotated.
+typedef struct {
+    hash128_t entity_id;     // 128 bits — full BLAKE3-128, no truncation
+    uint16_t  ordinal;       // position in trajectory's vertex sequence
+    uint16_t  run_length;    // RLE count of consecutive identical entity refs
+    uint64_t  flags;         // low 52 bits used; high 12 MUST be zero
+} mantissa_payload_t;
 
-void mantissa_pack(double vertex[4], const double base[4], const mantissa_payload_t* p);
+void mantissa_pack(double vertex[4], const mantissa_payload_t* p);
 void mantissa_unpack(const double vertex[4], mantissa_payload_t* out);
 
 // codepoint_table.h — T0 perf-cache (mmap'd; 1.114M × 64 B = ~67 MiB)
@@ -406,8 +435,12 @@ bool           astar_next(astar_query_t* q, astar_step_t* out_step);
 void           astar_close(astar_query_t* q);
 
 // trajectory.h — mantissa-packed XYZM buffers (PG wrapper marshals
-// LWLINE ↔ double* via liblwgeom's POINTARRAY)
-int trajectory_build(const hash128_t* constituent_hashes, size_t n, double* out_xyzm);
+// LWLINE ↔ double* via liblwgeom's POINTARRAY). Vertices reference entities
+// in the same hash space as `entities.hash`; "constituent" names the role
+// the referenced entity plays at this vertex's position, not a separate
+// entity kind. Real-impl signatures will widen to thread ordinal /
+// run_length / flags through to mantissa_pack.
+int trajectory_build(const hash128_t* entity_ids, size_t n, double* out_xyzm);
 int trajectory_constituents(const double* trajectory_xyzm, size_t n_points,
                             hash128_t* out_hashes, size_t out_cap);
 
@@ -482,7 +515,7 @@ void             arch_template_free(arch_template_t* t);
 typedef struct feature_extractor feature_extractor_t;
 feature_extractor_t* feature_extractor_load(const char* extractor_name);
 int                  feature_extractor_extract(const feature_extractor_t* fe,
-                                               const void* entity_hash,
+                                               const void* entity_id,
                                                double* out_features, size_t out_dim);
 size_t               feature_extractor_output_dim(const feature_extractor_t* fe);
 void                 feature_extractor_free(feature_extractor_t* fe);
@@ -508,26 +541,30 @@ Where the substrate touches PostGIS geometries (PG extension wrappers, ingestion
 
 | Table | Index | Purpose |
 |---|---|---|
-| entities | `hash` PK | exact lookup |
-| entities | `hilbert_index` btree | 1D range scan |
-| entities | `canonical_coord` GiST (`gist_geometry_ops_nd`) | 4D spatial KNN |
-| entities | `trajectory` GiST partial | trajectory similarity |
+| entities | `id` PK | exact lookup |
 | entities | `tier` btree | tier filter |
-| entities | `radius_origin` btree | abstraction-level queries |
-| physicalities | `(entity_hash, source_hash)` PK | exact lookup |
-| physicalities | `coord` GiST nd | per-source spatial KNN |
-| physicalities | `hilbert_index` btree | per-source 1D range |
-| physicalities | `source_hash` btree | source-scoped scans |
-| physicalities | `alignment_residual` btree | quality-filtered queries |
+| entities | `type_id` btree | per-modality scans |
+| entities | `(tier, type_id)` btree | type-scoped tier filter |
+| entities | `first_observed_by` btree partial | provenance lookup |
+| physicalities | `id` PK | physicality identity |
+| physicalities | `(entity_id, source_id, kind)` UNIQUE | natural-key dedup |
+| physicalities | `entity_id` btree | enumerate all lenses on an entity |
+| physicalities | `source_id` btree | source-scoped scans |
+| physicalities | `kind` btree | filter by CONTENT / BUILDING_BLOCK / PROJECTION |
+| physicalities | `coord` GiST (`gist_geometry_ops_nd`) | 4D spatial KNN per source/kind |
+| physicalities | `hilbert_index` btree | 1D locality range scan |
+| physicalities | `radius_origin` btree | abstraction-level queries |
+| physicalities | `alignment_residual` btree partial | quality-filtered queries |
+| physicalities | `trajectory` structural opclass | _PENDING — mantissa-pack (ADR 0012) collapses every trajectory's bounding box to `[1, 2)⁴ ∪ (-2, -1]⁴`; `gist_geometry_ops_nd` filters nothing. Replacement is a substrate-aware opclass over (entity_id range, ordinal range, run_length filter); tracked in a separate ADR alongside §VI plugins._ |
 | attestations | `id` PK | row identity |
 | attestations | 5-col UNIQUE NULLS NOT DISTINCT | dedup |
-| attestations | `subject_hash` btree | subject-scoped |
-| attestations | `kind_hash` btree | arena filter |
-| attestations | `object_hash` btree partial | reverse lookup |
-| attestations | `source_hash` btree | source-scoped |
-| attestations | `context_hash` btree partial | context-scoped |
+| attestations | `subject_id` btree | subject-scoped |
+| attestations | `kind_id` btree | arena / typed-transform filter |
+| attestations | `object_id` btree partial | reverse lookup |
+| attestations | `source_id` btree | source-scoped |
+| attestations | `context_id` btree partial | context-scoped |
 | attestations | `(rating DESC, rd ASC)` btree | top-rated |
-| attestations | `(subject_hash, kind_hash)` btree | very common pattern |
+| attestations | `(subject_id, kind_id)` btree | cascade-frontier expansion pattern |
 | attestations | `last_observed_at` BRIN | time-range scans |
 
 **Multiple indexes per column** are permitted where access patterns warrant (e.g., a partial GIST per tier, BRIN alongside btree on the same Hilbert column). **Partitioning** by source / tier / time is operational ease — not required for query performance at our scale.
@@ -562,12 +599,12 @@ SPI/executor calls are allowed only as batched, prepared, indexed lookups. The h
 The common attestation expansion pattern is:
 
 ```sql
-SELECT a.object_hash, a.rating, a.rd, a.volatility, a.source_hash
+SELECT a.object_id, a.rating, a.rd, a.volatility, a.source_id
 FROM attestations a
-WHERE a.subject_hash = $1
-    AND a.kind_hash = ANY($2)
-    AND a.context_hash IS NOT DISTINCT FROM $3
-    AND ($4 IS NULL OR a.source_hash = ANY($4))
+WHERE a.subject_id = $1
+    AND a.kind_id = ANY($2)
+    AND a.context_id IS NOT DISTINCT FROM $3
+    AND ($4 IS NULL OR a.source_id = ANY($4))
 ORDER BY a.rating DESC, a.rd ASC
 LIMIT $5;
 ```
@@ -672,7 +709,7 @@ For AI model sources, fidelity means `TransformerModelSource` captures the sourc
 - tokenizer/content entities and recipe attestations
 - anchor physicalities from the Procrustes/Laplacian/Gram-Schmidt pipeline
 - probe observations over prompts/tasks selected for the architecture
-- architecture-specific attestation arenas (`ATTENDS_TO<head,layer>`, `HAS_FEATURE<layer>`, `EMBEDS_AS<position>`, etc.)
+- fixed-vocabulary tensor-calculation attestation kinds for transformer-family models (`EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`); per-position attribution rides as meta-attestations, NOT as parameterized kind entities
 - lottery-ticket sparse edges that survive per-tensor, per-row, and probe validation gates
 
 For a source-scoped round-trip, if ingestion is faithful and synthesis uses the source recipe/scope, missing source-model behavior is a codec bug or tuning failure, not an accepted architectural gap. The expected comparison is stock source model vs. native substrate traversal vs. synthesized export under fixed prompts and sampler settings.
@@ -722,11 +759,11 @@ JSON-driven synthesis → reproducible variants. Same JSON + same substrate stat
 
 | Phase | What runs | DB-side compute |
 |---|---|---|
-| **Build (one-time)** | Derive perf-cache + DB seed from Unicode UCD (independently) | None — bulk seed insert |
-| **Ingestion (per write)** | C/C++ extension precomputes entity values; raw INSERT or skip-on-dedup | **None** — Postgres just stores pre-baked rows |
-| **Prompt ingestion (per request)** | Decompose prompt to substrate entities; create/reference context entity | None for entity-math; pre-baked rows or existing hashes |
-| **Query (per read)** | C/C++ extension reads perf-cache + B-tree/GIST; compiled cascade/A* walks indexed attestations | None for entity-math; only batched indexed lookups |
-| **Rating accumulation** | Glicko-2 updates fire on observation events | **Only** runtime DB-side compute (fixed-point arithmetic) |
+| **Build (one-time)** | Derive perf-cache + DB seed from Unicode UCD (independently). Bootstrap substrate-canonical source entity + Entity Type entities (`Text`, `Pixel`, `Image`, `Audio_Frame`, `Model_Recipe`, `WordNet_Synset`, ...) + per-modality kind entities. Seed T0 codepoint entities + their substrate-canonical CONTENT physicalities. | None — bulk seed insert |
+| **Ingestion (per write)** | IDecomposer plugin canonicalizes content per source's entity type; C/C++ engine computes IDs + physicalities + attestations; raw INSERT or skip-on-dedup via O(tier depth + novelty) Merkle walk | **None** — Postgres just stores pre-baked rows |
+| **Prompt ingestion (per request)** | Decompose prompt to substrate entities (R19); create/reference context entity; dedup against existing entity rows so substrate-supplied attestation cloud is reachable on the prompt's constituents | None for entity-math; pre-baked rows or existing IDs |
+| **Query (per read)** | C/C++ extension reads perf-cache + B-tree/GIST; compiled cascade A* walks the typed attestation graph weighted by Glicko-2 effective-μ; geometric verticals (Hilbert range, physicality coord KNN) accelerate candidate narrowing | None for entity-math; only batched indexed lookups |
+| **Rating accumulation** | Glicko-2 updates fire on observation events per arena/source-trust semantics (ADR 0036) | **Only** runtime DB-side compute (fixed-point arithmetic) |
 
 ---
 

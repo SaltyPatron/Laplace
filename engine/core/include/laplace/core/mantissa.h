@@ -2,22 +2,54 @@
 
 #include <stdint.h>
 
+#include "laplace/core/hash128.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Mantissa-packed payload riding in low bits of FP64 coordinate components
- * (per ADR 0012). Operates on XYZM-packed double buffers — matches POINT4D
- * memory layout (no parallel datatype per RULES.md R1). */
+/* Mantissa-packed payload riding inside a 4D LINESTRING vertex's FP64
+ * components. Each vertex of an entity's `trajectory` column references
+ * another entity (the one playing the constituent role at this vertex's
+ * position). Same hash space as `entities.hash` — one identity, two roles
+ * (per GLOSSARY "Entity": content AND building block, simultaneously).
+ *
+ * Per-vertex 212-bit budget = 4 × (1 sign + 52 mantissa) per FP64 component,
+ * with the biased exponent pinned to 0x3FF so every coord is a finite, normal
+ * double of magnitude in [1, 2) — PG-geometry-valid, no NaN, no inf.
+ *
+ * Conceptual split: XYZ carries the referenced entity's ID; M carries the
+ * per-vertex metadata of how this entity occupies this position.
+ *
+ *   X (53b): hash bits   0..52      (low 53 of entity_id.lo)
+ *   Y (53b): hash bits  53..105     (high 11 of lo + low 42 of hi)
+ *   Z (53b): hash bits 106..127     (high 22 of hi) + flags[0..30]   (31)
+ *   M (53b): ordinal (16) + run_length (16) +        flags[31..51]   (21)
+ *
+ * Consequences of the layout:
+ *   - The 128-bit BLAKE3 entity ID round-trips exactly through XYZ
+ *     (no truncation — STANDARDS.md hash discipline).
+ *   - Same entity → same XYZ bit pattern → same 3D scatter position across
+ *     every trajectory that references it. Directly visualizable.
+ *   - M is a scalar metadata channel (ordinal, run_length, plus 21 free flag
+ *     bits) — usable for filtering / labeling / coloring without re-layout.
+ *   - 52 free flag bits (31 in Z's high half + 21 in M's high half) reserved
+ *     for modality, indexing, visualization markers, continuation, etc.
+ *   - Trajectory vertices have NO per-vertex spatial meaning (every coord is
+ *     in [1, 2) ∪ (-2, -1]). GIST-on-trajectory therefore filters nothing;
+ *     structural indexing must be done via separate columns/opclasses.
+ *
+ * No `base` parameter: trajectory vertices are pure metadata containers, not
+ * spatial points being annotated. */
 typedef struct {
-    uint8_t  tier;
-    uint16_t position;
-    uint64_t hash_partial;
+    hash128_t entity_id;   /* 128 bits — full BLAKE3-128, no truncation */
+    uint16_t  ordinal;       /* position in this trajectory's vertex sequence */
+    uint16_t  run_length;    /* RLE count of consecutive identical entities */
+    uint64_t  flags;         /* low 52 bits used; high 12 MUST be zero */
 } mantissa_payload_t;
 
-/* Implementations land in Chunk 1 Story 1.7. Round-trip lossless on
- * payload bits. */
-void mantissa_pack(double vertex[4], const double base[4], const mantissa_payload_t* p);
+/* Round-trip lossless on all 212 payload bits. */
+void mantissa_pack(double vertex[4], const mantissa_payload_t* p);
 void mantissa_unpack(const double vertex[4], mantissa_payload_t* out);
 
 #ifdef __cplusplus

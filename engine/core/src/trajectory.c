@@ -3,10 +3,10 @@
 /* Real implementations land Chunk 2+ alongside mantissa_pack/unpack.
  * Stubs satisfy linkage. */
 
-int trajectory_build(const hash128_t* constituent_hashes,
+int trajectory_build(const hash128_t* entity_hashes,
                      size_t           n,
                      double*          out_xyzm) {
-    (void)constituent_hashes; (void)n; (void)out_xyzm;
+    (void)entity_hashes; (void)n; (void)out_xyzm;
     return -1;
 }
 
