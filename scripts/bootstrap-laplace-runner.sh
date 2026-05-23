@@ -675,11 +675,13 @@ bootstrap_cleanup_stale_installs() {
     # Hartonomous-* leftovers from the previous-iteration project (per
     # CLAUDE.md R-4 / RULES R11 — Hartonomous-001 is the predecessor and
     # must not bleed into this host). Removes the library, extension
-    # files, and the dynamic_library_path entry that referenced it.
+    # files, and any extension-aux subdirs (e.g. /usr/share/postgresql/
+    # $PG_VERSION/extension/hartonomous-ucd is a directory, not a file —
+    # rm -rf so the glob handles both cases). Pre-Laplace; safe to nuke.
     for f in /usr/lib/postgresql/$PG_VERSION/lib/libhartonomous*.so* \
              /usr/share/postgresql/$PG_VERSION/extension/hartonomous*; do
         [ -e "$f" ] || continue
-        rm -f "$f" && removed=$((removed + 1))
+        rm -rf "$f" && removed=$((removed + 1))
     done
 
     if [ "$removed" -gt 0 ]; then
@@ -904,8 +906,12 @@ do_bootstrap() {
     bootstrap_pg_legacy_cleanup
     bootstrap_pg_auth
     bootstrap_pg_database_and_postgis
-    bootstrap_engine_lib_path
+    # Cleanup runs BEFORE the engine_lib_path ldconfig so we don't get
+    # the "libhartonomous.so.0 is not a symbolic link" warning on the
+    # first ldconfig of a re-bootstrap (the sweep removes the offending
+    # file; engine_lib_path's subsequent ldconfig then sees a clean tree).
     bootstrap_cleanup_stale_installs
+    bootstrap_engine_lib_path
     bootstrap_pg_extension_paths
     bootstrap_sudoers
 
