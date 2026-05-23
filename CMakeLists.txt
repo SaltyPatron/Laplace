@@ -50,6 +50,57 @@ message(STATUS "  server includes:  ${LAPLACE_PG_INCLUDEDIR_SERVER}")
 message(STATUS "  pkglibdir:        ${LAPLACE_PG_PKGLIBDIR}")
 message(STATUS "  sharedir:         ${LAPLACE_PG_SHAREDIR}")
 
+# === Extension install destination ===
+#
+# By default (LAPLACE_INSTALL_STAGED=OFF), PG extensions install to the
+# absolute pkglibdir/sharedir that pg_config reports — i.e. the system PG
+# tree (/usr/lib/postgresql/$PG_MAJOR/lib and /usr/share/postgresql/$PG_MAJOR
+# for a stock Debian/Ubuntu PG). That tree is root-owned, so installing
+# requires sudo. This is the right default for CI and for installing into
+# a custom /opt/laplace/pgsql-$PG_MAJOR built by `just build-deps`.
+#
+# When LAPLACE_INSTALL_STAGED=ON, extensions install to the PARALLEL
+# layout under CMAKE_INSTALL_PREFIX — e.g. /opt/laplace/lib/postgresql/$PG_MAJOR
+# and /opt/laplace/share/postgresql/$PG_MAJOR/extension. /opt/laplace is
+# laplace-runner-owned (per bootstrap_build_environment), so the install is
+# sudo-free. The running PG is told to look there via the
+# extension_control_path + dynamic_library_path GUCs set by
+# bootstrap_pg_extension_paths (one-time, in sudo just bootstrap).
+#
+# Derive PG major version from pg_config --version output, e.g.
+# "PostgreSQL 18.3" → "18".
+string(REGEX MATCH "PostgreSQL +([0-9]+)" _pg_major_match "${LAPLACE_PG_VERSION}")
+set(LAPLACE_PG_MAJOR "${CMAKE_MATCH_1}")
+if(NOT LAPLACE_PG_MAJOR)
+    message(FATAL_ERROR
+        "Could not parse PG major version from '${LAPLACE_PG_VERSION}'. "
+        "Expected output of `pg_config --version` to look like 'PostgreSQL 18.X'.")
+endif()
+
+option(LAPLACE_INSTALL_STAGED
+    "Install PG extensions to CMAKE_INSTALL_PREFIX/{lib,share}/postgresql/PG_MAJOR (sudo-free) instead of pg_config's absolute system paths"
+    OFF)
+
+if(LAPLACE_INSTALL_STAGED)
+    set(LAPLACE_EXT_LIBDIR
+        "${CMAKE_INSTALL_PREFIX}/lib/postgresql/${LAPLACE_PG_MAJOR}"
+        CACHE PATH "Where PG extension .so files install (staged)")
+    set(LAPLACE_EXT_SHAREDIR
+        "${CMAKE_INSTALL_PREFIX}/share/postgresql/${LAPLACE_PG_MAJOR}/extension"
+        CACHE PATH "Where PG extension control + SQL files install (staged)")
+else()
+    set(LAPLACE_EXT_LIBDIR   "${LAPLACE_PG_PKGLIBDIR}"
+        CACHE PATH "Where PG extension .so files install (system)")
+    set(LAPLACE_EXT_SHAREDIR "${LAPLACE_PG_SHAREDIR}/extension"
+        CACHE PATH "Where PG extension control + SQL files install (system)")
+endif()
+
+message(STATUS "Laplace extension install:")
+message(STATUS "  staged:           ${LAPLACE_INSTALL_STAGED}")
+message(STATUS "  install prefix:   ${CMAKE_INSTALL_PREFIX}")
+message(STATUS "  ext libdir:       ${LAPLACE_EXT_LIBDIR}")
+message(STATUS "  ext sharedir:     ${LAPLACE_EXT_SHAREDIR}")
+
 # === SQL preprocessor (per ADR 0034 — PostGIS-pattern .sql.in → .sql) ===
 find_program(LAPLACE_SQLPP NAMES cpp gpp_
     DOC "C preprocessor used to expand extension .sql.in modules into the built .sql artifact")

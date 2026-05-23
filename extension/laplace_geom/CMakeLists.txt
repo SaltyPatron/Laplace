@@ -96,12 +96,12 @@ add_dependencies(${EXT_NAME} ${EXT_NAME}_sql)
 
 # === Install ===
 install(TARGETS ${EXT_NAME}
-    LIBRARY DESTINATION ${LAPLACE_PG_PKGLIBDIR}
+    LIBRARY DESTINATION ${LAPLACE_EXT_LIBDIR}
 )
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.control
     ${EXT_BUILT_SQL}
-    DESTINATION ${LAPLACE_PG_SHAREDIR}/extension
+    DESTINATION ${LAPLACE_EXT_SHAREDIR}
 )
 
 # === Tests (pg_regress via CTest — real wiring lands when first

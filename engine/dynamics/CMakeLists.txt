@@ -58,6 +58,15 @@ target_link_libraries(laplace_dynamics
 
 option(LAPLACE_REQUIRE_MKL "Fail configure if MKL/TBB not found (Epic D production)" OFF)
 
+# Pin MKL interface to LP64 (32-bit int) BEFORE find_package(MKL). oneMKL's
+# MKLConfig.cmake selects between lp64 and ilp64 based on this variable;
+# without it some versions default to ilp64, which makes lapack_int
+# resolve to `long long` while our EIGEN_USE_LAPACKE path assumes `int*`
+# and fails compile in Eigen/src/QR/ColPivHouseholderQR_LAPACKE.h. The
+# MKL_LP64 compile define below (passed to Eigen) must match this choice.
+set(MKL_INTERFACE "lp64" CACHE STRING "MKL int-size interface (lp64=int, ilp64=long long)")
+set(MKL_THREADING "tbb_thread" CACHE STRING "MKL threading layer")
+
 if(LAPLACE_REQUIRE_MKL)
     find_package(MKL CONFIG REQUIRED)
     find_package(TBB CONFIG REQUIRED)

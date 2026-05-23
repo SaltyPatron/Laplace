@@ -65,28 +65,49 @@ build-deps:
 # applied via cmake/toolchains/intel-oneapi.cmake — earns its slot via
 # MKL/Spectra/TBB in liblaplace_dynamics.
 #
+# Iterative defaults (per `sudo just bootstrap` host setup):
+#   CMAKE_INSTALL_PREFIX=/opt/laplace     (laplace-runner-owned, sudo-free)
+#   LAPLACE_INSTALL_STAGED=ON             (extensions land in
+#                                          /opt/laplace/{lib,share}/postgresql/$PG_MAJOR;
+#                                          PG finds them via the conf
+#                                          paths set in bootstrap_pg_extension_paths)
+#   LAPLACE_PG_PREFIX=/usr/lib/postgresql/18
+#                                         (system PG; override only when
+#                                          a custom /opt/laplace/pgsql-18
+#                                          is built via `just build-deps`)
+#
+# Override any of these via env var for CI or special-purpose builds:
+#   LAPLACE_INSTALL_PREFIX=/usr/local LAPLACE_INSTALL_STAGED=OFF just build
+#
 # LD_LIBRARY_PATH points gtest_discover_tests (which runs each test binary
 # at build time to enumerate test names) at the freshly built engine
-# liblaplace_*.so files. Without this the loader picks up any stale
+# liblaplace_*.so files. Without this the loader can pick up any stale
 # liblaplace_core.so left in /usr/local/lib by an old `sudo cmake --install`
-# (via /etc/ld.so.cache), which causes "undefined symbol" failures the
-# moment we add a new exported function to liblaplace_core.
+# (via /etc/ld.so.cache), which causes "undefined symbol" failures when a
+# new exported function is added.
 build:
     cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
-        -DLAPLACE_PG_PREFIX=${LAPLACE_PG_PREFIX:-/usr/lib/postgresql/18}
+        -DLAPLACE_PG_PREFIX=${LAPLACE_PG_PREFIX:-/usr/lib/postgresql/18} \
+        -DCMAKE_INSTALL_PREFIX=${LAPLACE_INSTALL_PREFIX:-/opt/laplace} \
+        -DLAPLACE_INSTALL_STAGED=${LAPLACE_INSTALL_STAGED:-ON}
     LD_LIBRARY_PATH="$(pwd)/build/engine/core:$(pwd)/build/engine/dynamics:$(pwd)/build/engine/synthesis:${LD_LIBRARY_PATH:-}" cmake --build build
 
-# Install engine .so + both extensions into the configured PG prefix.
-# For stock PG that's /usr/lib/postgresql/18/{lib,share}; needs sudo.
-# For custom PG at /opt/laplace/pgsql-18 (laplace-runner-owned), no sudo.
+# Install engine .so + both extensions to /opt/laplace — sudo-free.
+# Per `sudo just bootstrap`:
+#   /opt/laplace is laplace-runner-owned (writable by ahart + laplace-runner)
+#   /opt/laplace/lib is registered with the dynamic linker (ld.so.cache)
+#   The running PG knows to look in /opt/laplace/{share,lib}/postgresql/18
+#   for extension control + .so files (via extension_control_path +
+#   dynamic_library_path GUCs).
+# That means CREATE EXTENSION laplace_geom and CREATE EXTENSION
+# laplace_substrate find everything immediately after this completes.
 install: build
-    sudo cmake --install build
-
-# Same install path as `just install`, scoped for laplace-runner-owned
-# /opt/laplace prefix (no sudo).
-install-laplace-prefix: build
     cmake --install build
+
+# Legacy alias — both targets now do the same sudo-free install. Kept so
+# existing CI / docs that reference `install-laplace-prefix` keep working.
+install-laplace-prefix: install
 
 build-app:
     cd app && dotnet build Laplace.slnx -c Release

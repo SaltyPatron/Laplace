@@ -16,9 +16,17 @@
 #   5. pg_ident.conf  → maps OS user laplace-runner (and ahart, for interactive
 #      dev) onto PG role laplace_admin
 #   6. pg_hba.conf    → peer auth for laplace_admin via that map
-#   7. /etc/sudoers.d/laplace-runner — bounded NOPASSWD for `cmake --install` + legacy `make install*`
+#   7. /etc/ld.so.conf.d/laplace.conf → /opt/laplace/lib + the Intel oneAPI
+#      runtime (libsvml/libirc/libimf) registered with the dynamic linker
+#      so engine .so files (and the PG extensions that DT_NEED them) load
+#      under the `postgres` user without LD_LIBRARY_PATH
+#   8. postgresql.conf extension_control_path + dynamic_library_path →
+#      point the running PG at /opt/laplace/{share,lib}/postgresql/$PG_VERSION
+#      (so `just install-laplace-prefix` lands extensions where CREATE
+#      EXTENSION finds them, without sudo on per-iteration)
+#   9. /etc/sudoers.d/laplace-runner — bounded NOPASSWD for `cmake --install` + legacy `make install*`
 #      so the runner can install the extension into PG's extension dirs
-#   8. Cleanup of legacy state (ahart-as-superuser, ahart DB, old runner
+#  10. Cleanup of legacy state (ahart-as-superuser, ahart DB, old runner
 #      under /home/ahart/actions-runner)
 #
 # What this does NOT touch (those live in Layer 1 / Justfile):
@@ -514,6 +522,98 @@ EOF
     green "✓ Reloaded PostgreSQL"
 }
 
+# ---------------------------------------------------------------------------
+# bootstrap_engine_lib_path — register /opt/laplace/lib with the dynamic
+# linker so test binaries + the PG extension .so files find liblaplace_*.so
+# automatically (no LD_LIBRARY_PATH dance, no rpath gymnastics, no being
+# poisoned by stale .so files left in /usr/local/lib by a prior install).
+# Idempotent — re-writing the same conf + re-running ldconfig is a no-op.
+# ---------------------------------------------------------------------------
+bootstrap_engine_lib_path() {
+    say "Register /opt/laplace/lib + Intel oneAPI runtime with ld.so.conf.d"
+    local conf=/etc/ld.so.conf.d/laplace.conf
+    # /opt/laplace/lib hosts the engine liblaplace_*.so files. The Intel
+    # oneAPI runtime dir hosts libsvml.so, libirc.so, libimf.so etc., which
+    # any .so compiled with icx/icpx DT_NEEDS at load. Without this entry
+    # the `postgres` user (which doesn't source setvars.sh on login) gets
+    # "libsvml.so: cannot open shared object file" the first time it tries
+    # to dlopen a Laplace extension. The `latest` symlink in the Intel path
+    # keeps this entry stable across oneAPI version bumps.
+    local intel_runtime=/opt/intel/oneapi/compiler/latest/lib
+    local desired_lines=(
+        "/opt/laplace/lib"
+        "$intel_runtime"
+    )
+    local changed=0
+    for line in "${desired_lines[@]}"; do
+        if ! { [ -f "$conf" ] && grep -qxF "$line" "$conf"; }; then
+            changed=1
+            break
+        fi
+    done
+    if [ "$changed" -eq 1 ]; then
+        printf '%s\n' "${desired_lines[@]}" > "$conf"
+        chmod 644 "$conf"
+        green "✓ Wrote $conf"
+        for line in "${desired_lines[@]}"; do
+            echo "  $line"
+        done
+    else
+        green "✓ $conf already lists /opt/laplace/lib + Intel runtime"
+    fi
+    ldconfig
+    green "✓ Ran ldconfig"
+}
+
+# ---------------------------------------------------------------------------
+# bootstrap_pg_extension_paths — tell the running system PG (PG_VERSION)
+# to look for Laplace extensions and their engine .so deps under
+# /opt/laplace, so `just install-laplace-prefix` is sudo-free and DbUp
+# `CREATE EXTENSION laplace_geom; CREATE EXTENSION laplace_substrate;`
+# finds the freshly-installed files.
+#
+# PG 18 caveat (per project memory project_pg18_extension_control_path):
+# extension_control_path appends "/extension" to each custom entry — so
+# pass the sharedir (.../share/postgresql/$PG_VERSION) NOT the extension
+# subdir (.../share/postgresql/$PG_VERSION/extension). Get this wrong and
+# CREATE EXTENSION silently loads a stale $system install instead.
+#
+# Also strips any pre-existing extension_control_path / dynamic_library_path
+# lines, including stale entries pointing at older Hartonomous-* projects
+# left over on this host. Idempotent — same desired-value writes are no-ops.
+# ---------------------------------------------------------------------------
+bootstrap_pg_extension_paths() {
+    say "Set extension_control_path + dynamic_library_path in postgresql.conf"
+    local conf="$PG_CONFIG_DIR/postgresql.conf"
+    local desired_ecp="extension_control_path = '/opt/laplace/share/postgresql/$PG_VERSION:\$system'"
+    local desired_dlp="dynamic_library_path = '\$libdir:/opt/laplace/lib/postgresql/$PG_VERSION'"
+
+    # Strip any existing (active OR commented) settings of these two GUCs
+    # so we can rewrite cleanly. sed -i handles in-place edit safely.
+    sed -i -E \
+        -e '/^[[:space:]]*#?[[:space:]]*extension_control_path[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#?[[:space:]]*dynamic_library_path[[:space:]]*=/d' \
+        "$conf"
+
+    cat >> "$conf" <<EOF
+
+# === Managed by scripts/bootstrap-laplace-runner.sh ===
+# Lets the running PG find Laplace extensions installed to /opt/laplace
+# without sudo per ADR 0019 (laplace-runner-owned prefix). PG 18 appends
+# '/extension' to each custom extension_control_path entry, so the value
+# here is the SHAREDIR, not the extension subdir. dynamic_library_path
+# resolves the extensions' .so files (which in turn DT_NEEDED the engine
+# liblaplace_*.so files registered via /etc/ld.so.conf.d/laplace.conf).
+$desired_ecp
+$desired_dlp
+EOF
+    chown postgres:postgres "$conf"
+    green "✓ Updated $conf (extension_control_path + dynamic_library_path)"
+
+    systemctl reload postgresql
+    green "✓ Reloaded PostgreSQL (new paths active without restart)"
+}
+
 bootstrap_sudoers() {
     say "Sudoers: bounded NOPASSWD for 'cmake --install' + legacy 'make install'"
     cat > "$SUDOERS_FILE" <<EOF
@@ -728,6 +828,8 @@ do_bootstrap() {
     bootstrap_pg_legacy_cleanup
     bootstrap_pg_auth
     bootstrap_pg_database_and_postgis
+    bootstrap_engine_lib_path
+    bootstrap_pg_extension_paths
     bootstrap_sudoers
 
     say "Verification"
