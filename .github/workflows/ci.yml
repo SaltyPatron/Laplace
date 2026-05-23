@@ -105,8 +105,9 @@ jobs:
           for term in "${banned_terms[@]}"; do
             while IFS= read -r match; do
               file=$(echo "$match" | cut -d: -f1)
-              # Allow mentions in GLOSSARY.md (anti-vocabulary), RULES.md, the conventional-ai-skeptic agent, and this workflow file
+              # Allow mentions in GLOSSARY.md (anti-vocabulary), RULES.md, the conventional-ai-skeptic agent, ADRs (where they're cited as superseded options), and this workflow file.
               case "$file" in
+                ./GLOSSARY.md|./RULES.md|./CLAUDE.md|./.claude/agents/conventional-ai-skeptic.md|./.github/workflows/ci.yml|./docs/adr/*)
                   ;;
                 *)
                   echo "::warning file=$file::Banned term '$term' appears outside allowed files"

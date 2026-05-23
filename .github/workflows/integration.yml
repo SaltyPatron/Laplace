@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true  # NOT recursive — tree-sitter-nqc has an upstream-broken nested submodule (examples/nqc) that fails actions/checkout when recursing. Top-level submodules are all we use.
 
       - name: System info
         run: |
@@ -93,7 +93,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true  # NOT recursive — tree-sitter-nqc has an upstream-broken nested submodule (examples/nqc) that fails actions/checkout when recursing. Top-level submodules are all we use.
 
       - name: Build system deps (unified ExternalProject pipeline)
         run: |
@@ -144,7 +144,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true  # NOT recursive — tree-sitter-nqc has an upstream-broken nested submodule (examples/nqc) that fails actions/checkout when recursing. Top-level submodules are all we use.
 
       - name: cmake configure + build (intel toolchain; deps re-used from build job)
         run: |
@@ -210,7 +210,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true  # NOT recursive — tree-sitter-nqc has an upstream-broken nested submodule (examples/nqc) that fails actions/checkout when recursing. Top-level submodules are all we use.
 
       - name: cmake configure + build (re-uses /opt/laplace deps + install)
         run: |
