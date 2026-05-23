@@ -17,37 +17,32 @@ jobs:
     name: Verify self-hosted runner capabilities
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Pre-checkout — surgical wipe of nested tree-sitter grammar state
+      - name: Pre-checkout — strip legacy tree-sitter-nqc state
         shell: bash
         run: |
-          # tree-sitter-nqc has an upstream orphan gitlink (examples/nqc with no
-          # .gitmodules entry) which trips actions/checkout's
-          # `git submodule foreach --recursive` cleanup step even with
-          # `submodules: false`. The recursion path is:
-          #   .git/modules/external/tree-sitter-grammars/modules/tree-sitter-nqc/...
-          # so we only need to clear the nested-grammar layer. Top-level submodule
-          # caches (postgresql, postgis, geos, proj, gdal, eigen, spectra, blake3,
-          # googletest, tree-sitter, tree-sitter-grammars itself) are preserved
-          # across runs — ~1 GB of re-download avoided per CI run.
-          nested="$GITHUB_WORKSPACE/.git/modules/external/tree-sitter-grammars/modules"
-          if [ -d "$nested" ]; then
-            rm -rf "$nested"
-            echo "  cleared nested grammar state at $nested"
-          else
-            echo "  no nested grammar state present — nothing to clear"
-          fi
+          # tree-sitter-nqc has an upstream orphan gitlink (examples/nqc with
+          # no backing .gitmodules entry). actions/checkout v4's submodule
+          # cleanup walks gitlinks and fails with
+          #   fatal: No url found for submodule path …/examples/nqc
+          # scripts/ci-init-submodules.sh skips nqc entirely, so this step
+          # only clears residual state from older workflow runs. Every other
+          # submodule (deps + 300+ grammars) is preserved.
+          for p in \
+            "$GITHUB_WORKSPACE/.git/modules/external/tree-sitter-grammars/tree-sitter-nqc" \
+            "$GITHUB_WORKSPACE/external/tree-sitter-grammars/tree-sitter-nqc"; do
+            if [ -e "$p" ]; then
+              rm -rf "$p"
+              echo "  cleared $p"
+            fi
+          done
+          :
 
       - uses: actions/checkout@v4
         with:
-          submodules: false  # See manual init step below — actions/checkout sub-init recurses into tree-sitter-nqc/examples/nqc (upstream-broken) even with submodules:true; we use plain git below to control it.
+          submodules: false  # scripts/ci-init-submodules.sh handles init via the persistent host-side mirror cache at /opt/laplace/submodule-cache
 
-      - name: Initialize submodules (non-recursive — skips upstream-broken nested entries)
-        run: |
-          # Plain git, not actions/checkout's submodule logic — explicitly non-recursive.
-          # tree-sitter-nqc's broken nested examples/nqc submodule is what we're avoiding.
-          # Then run our CRLF-fixture normalization so the workspace stays clean across runs.
-          git submodule update --init
-          scripts/normalize-submodule-attributes.sh
+      - name: Initialize submodules from persistent host-side mirror cache
+        run: scripts/ci-init-submodules.sh
 
       - name: System info
         run: |
@@ -119,37 +114,32 @@ jobs:
     needs: capabilities
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Pre-checkout — surgical wipe of nested tree-sitter grammar state
+      - name: Pre-checkout — strip legacy tree-sitter-nqc state
         shell: bash
         run: |
-          # tree-sitter-nqc has an upstream orphan gitlink (examples/nqc with no
-          # .gitmodules entry) which trips actions/checkout's
-          # `git submodule foreach --recursive` cleanup step even with
-          # `submodules: false`. The recursion path is:
-          #   .git/modules/external/tree-sitter-grammars/modules/tree-sitter-nqc/...
-          # so we only need to clear the nested-grammar layer. Top-level submodule
-          # caches (postgresql, postgis, geos, proj, gdal, eigen, spectra, blake3,
-          # googletest, tree-sitter, tree-sitter-grammars itself) are preserved
-          # across runs — ~1 GB of re-download avoided per CI run.
-          nested="$GITHUB_WORKSPACE/.git/modules/external/tree-sitter-grammars/modules"
-          if [ -d "$nested" ]; then
-            rm -rf "$nested"
-            echo "  cleared nested grammar state at $nested"
-          else
-            echo "  no nested grammar state present — nothing to clear"
-          fi
+          # tree-sitter-nqc has an upstream orphan gitlink (examples/nqc with
+          # no backing .gitmodules entry). actions/checkout v4's submodule
+          # cleanup walks gitlinks and fails with
+          #   fatal: No url found for submodule path …/examples/nqc
+          # scripts/ci-init-submodules.sh skips nqc entirely, so this step
+          # only clears residual state from older workflow runs. Every other
+          # submodule (deps + 300+ grammars) is preserved.
+          for p in \
+            "$GITHUB_WORKSPACE/.git/modules/external/tree-sitter-grammars/tree-sitter-nqc" \
+            "$GITHUB_WORKSPACE/external/tree-sitter-grammars/tree-sitter-nqc"; do
+            if [ -e "$p" ]; then
+              rm -rf "$p"
+              echo "  cleared $p"
+            fi
+          done
+          :
 
       - uses: actions/checkout@v4
         with:
-          submodules: false  # See manual init step below — actions/checkout sub-init recurses into tree-sitter-nqc/examples/nqc (upstream-broken) even with submodules:true; we use plain git below to control it.
+          submodules: false  # scripts/ci-init-submodules.sh handles init via the persistent host-side mirror cache at /opt/laplace/submodule-cache
 
-      - name: Initialize submodules (non-recursive — skips upstream-broken nested entries)
-        run: |
-          # Plain git, not actions/checkout's submodule logic — explicitly non-recursive.
-          # tree-sitter-nqc's broken nested examples/nqc submodule is what we're avoiding.
-          # Then run our CRLF-fixture normalization so the workspace stays clean across runs.
-          git submodule update --init
-          scripts/normalize-submodule-attributes.sh
+      - name: Initialize submodules from persistent host-side mirror cache
+        run: scripts/ci-init-submodules.sh
 
       - name: Build system deps (unified ExternalProject pipeline)
         run: |
@@ -198,37 +188,32 @@ jobs:
     needs: build
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Pre-checkout — surgical wipe of nested tree-sitter grammar state
+      - name: Pre-checkout — strip legacy tree-sitter-nqc state
         shell: bash
         run: |
-          # tree-sitter-nqc has an upstream orphan gitlink (examples/nqc with no
-          # .gitmodules entry) which trips actions/checkout's
-          # `git submodule foreach --recursive` cleanup step even with
-          # `submodules: false`. The recursion path is:
-          #   .git/modules/external/tree-sitter-grammars/modules/tree-sitter-nqc/...
-          # so we only need to clear the nested-grammar layer. Top-level submodule
-          # caches (postgresql, postgis, geos, proj, gdal, eigen, spectra, blake3,
-          # googletest, tree-sitter, tree-sitter-grammars itself) are preserved
-          # across runs — ~1 GB of re-download avoided per CI run.
-          nested="$GITHUB_WORKSPACE/.git/modules/external/tree-sitter-grammars/modules"
-          if [ -d "$nested" ]; then
-            rm -rf "$nested"
-            echo "  cleared nested grammar state at $nested"
-          else
-            echo "  no nested grammar state present — nothing to clear"
-          fi
+          # tree-sitter-nqc has an upstream orphan gitlink (examples/nqc with
+          # no backing .gitmodules entry). actions/checkout v4's submodule
+          # cleanup walks gitlinks and fails with
+          #   fatal: No url found for submodule path …/examples/nqc
+          # scripts/ci-init-submodules.sh skips nqc entirely, so this step
+          # only clears residual state from older workflow runs. Every other
+          # submodule (deps + 300+ grammars) is preserved.
+          for p in \
+            "$GITHUB_WORKSPACE/.git/modules/external/tree-sitter-grammars/tree-sitter-nqc" \
+            "$GITHUB_WORKSPACE/external/tree-sitter-grammars/tree-sitter-nqc"; do
+            if [ -e "$p" ]; then
+              rm -rf "$p"
+              echo "  cleared $p"
+            fi
+          done
+          :
 
       - uses: actions/checkout@v4
         with:
-          submodules: false  # See manual init step below — actions/checkout sub-init recurses into tree-sitter-nqc/examples/nqc (upstream-broken) even with submodules:true; we use plain git below to control it.
+          submodules: false  # scripts/ci-init-submodules.sh handles init via the persistent host-side mirror cache at /opt/laplace/submodule-cache
 
-      - name: Initialize submodules (non-recursive — skips upstream-broken nested entries)
-        run: |
-          # Plain git, not actions/checkout's submodule logic — explicitly non-recursive.
-          # tree-sitter-nqc's broken nested examples/nqc submodule is what we're avoiding.
-          # Then run our CRLF-fixture normalization so the workspace stays clean across runs.
-          git submodule update --init
-          scripts/normalize-submodule-attributes.sh
+      - name: Initialize submodules from persistent host-side mirror cache
+        run: scripts/ci-init-submodules.sh
 
       - name: cmake configure + build (intel toolchain; deps re-used from build job)
         run: |
@@ -292,37 +277,32 @@ jobs:
     needs: db-deploy
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Pre-checkout — surgical wipe of nested tree-sitter grammar state
+      - name: Pre-checkout — strip legacy tree-sitter-nqc state
         shell: bash
         run: |
-          # tree-sitter-nqc has an upstream orphan gitlink (examples/nqc with no
-          # .gitmodules entry) which trips actions/checkout's
-          # `git submodule foreach --recursive` cleanup step even with
-          # `submodules: false`. The recursion path is:
-          #   .git/modules/external/tree-sitter-grammars/modules/tree-sitter-nqc/...
-          # so we only need to clear the nested-grammar layer. Top-level submodule
-          # caches (postgresql, postgis, geos, proj, gdal, eigen, spectra, blake3,
-          # googletest, tree-sitter, tree-sitter-grammars itself) are preserved
-          # across runs — ~1 GB of re-download avoided per CI run.
-          nested="$GITHUB_WORKSPACE/.git/modules/external/tree-sitter-grammars/modules"
-          if [ -d "$nested" ]; then
-            rm -rf "$nested"
-            echo "  cleared nested grammar state at $nested"
-          else
-            echo "  no nested grammar state present — nothing to clear"
-          fi
+          # tree-sitter-nqc has an upstream orphan gitlink (examples/nqc with
+          # no backing .gitmodules entry). actions/checkout v4's submodule
+          # cleanup walks gitlinks and fails with
+          #   fatal: No url found for submodule path …/examples/nqc
+          # scripts/ci-init-submodules.sh skips nqc entirely, so this step
+          # only clears residual state from older workflow runs. Every other
+          # submodule (deps + 300+ grammars) is preserved.
+          for p in \
+            "$GITHUB_WORKSPACE/.git/modules/external/tree-sitter-grammars/tree-sitter-nqc" \
+            "$GITHUB_WORKSPACE/external/tree-sitter-grammars/tree-sitter-nqc"; do
+            if [ -e "$p" ]; then
+              rm -rf "$p"
+              echo "  cleared $p"
+            fi
+          done
+          :
 
       - uses: actions/checkout@v4
         with:
-          submodules: false  # See manual init step below — actions/checkout sub-init recurses into tree-sitter-nqc/examples/nqc (upstream-broken) even with submodules:true; we use plain git below to control it.
+          submodules: false  # scripts/ci-init-submodules.sh handles init via the persistent host-side mirror cache at /opt/laplace/submodule-cache
 
-      - name: Initialize submodules (non-recursive — skips upstream-broken nested entries)
-        run: |
-          # Plain git, not actions/checkout's submodule logic — explicitly non-recursive.
-          # tree-sitter-nqc's broken nested examples/nqc submodule is what we're avoiding.
-          # Then run our CRLF-fixture normalization so the workspace stays clean across runs.
-          git submodule update --init
-          scripts/normalize-submodule-attributes.sh
+      - name: Initialize submodules from persistent host-side mirror cache
+        run: scripts/ci-init-submodules.sh
 
       - name: cmake configure + build (re-uses /opt/laplace deps + install)
         run: |
