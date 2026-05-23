@@ -55,20 +55,26 @@ usage() {
 Usage: $0 <mode>
 
 Modes:
-  setup     (default) Full Layer 0 + Layer 1 set-up. Idempotent.
-            Calls 'sudo bootstrap-laplace-runner.sh bootstrap' for Layer 0
-            (system account, runner, PG roles, peer auth, sudoers), then
-            runs 'dotnet run --project Laplace.Migrations -- up' as the
-            laplace-runner user for Layer 1 (EnsureDatabase + CREATE EXTENSION
-            + role grants).
+  setup     (default) Full Layer 0 + 0.5 + 1 set-up. Idempotent.
+            Layer 0 (sudo): bootstrap-laplace-runner.sh bootstrap — system
+                            account, runner, PG roles, peer auth, sudoers,
+                            ld.so.conf.d/laplace.conf, postgresql.conf
+                            extension paths.
+            Layer 0.5     : cmake --build build/deps — builds vendor deps
+                            (proj/geos/gdal/pg/postgis/tree-sitter) into
+                            /opt/laplace (no sudo, idempotent).
+            Layer 1       : cmake --install build (extensions to /opt/laplace),
+                            then dotnet run Laplace.Migrations -- up
+                            (DbUp EnsureDatabase + CREATE EXTENSION + grants).
 
   status    Print Layer 0 + Layer 1 state. No mutations.
 
   reset     Tear down Layer 1 (db-nuke) then Layer 0 (bootstrap-laplace-runner.sh
             reset). Requires typing 'RESET' to confirm.
 
-  layer0    Layer-0 only (system + runner + PG roles + auth).
-  layer1    Layer-1 only (DbUp: EnsureDatabase + migrations).
+  layer0    Layer-0 only (system + runner + PG roles + auth + paths).
+  deps      Layer-0.5 only (build vendor deps into /opt/laplace).
+  layer1    Layer-1 only (cmake --install + DbUp).
 
 After 'setup' completes the host is ready. Trigger CI:
   gh workflow run integration.yml
@@ -165,10 +171,29 @@ layer1_build_install_extensions() {
     green "✓ laplace_geom + laplace_substrate .so/.control/.sql installed in PG extension dirs"
 }
 
+layer0_5_build_deps() {
+    say "Layer 0.5 — Build vendor deps (proj/geos/gdal/pg/postgis/tree-sitter) into /opt/laplace"
+    # Runs as the invoking user (typically ahart). /opt/laplace is owned by
+    # that user (per bootstrap_build_environment) so the install is sudo-free.
+    # Idempotent — ExternalProject_Add's stamp-based tracking skips deps that
+    # are already built at the current submodule SHA. One-time cost on a
+    # fresh tree is ~10-15 min; re-runs are seconds.
+    #
+    # Sits between Layer 0 (system + auth + paths) and Layer 1 (extensions
+    # + DbUp). Layer 1's CMake build prefers /opt/laplace/pgsql-18 (custom
+    # PG produced here) when LAPLACE_PG_PREFIX points there; otherwise it
+    # falls back to the stock system PG (Layer 0 already configured the
+    # running system PG with the /opt/laplace extension paths regardless).
+    (cd "$REPO_DIR" && cmake -B build/deps -S external 2>&1 | tail -5)
+    (cd "$REPO_DIR" && cmake --build build/deps -j 2>&1 | tail -10)
+    green "✓ Vendor deps built into /opt/laplace"
+}
+
 do_setup() {
     ensure_dotnet_present
     say "Layer 0 — System account, runner, PG roles, peer auth, sudoers, DB, postgis"
     sudo "$BOOTSTRAP" bootstrap
+    layer0_5_build_deps
     layer1_build_install_extensions
     layer1_up
 
@@ -256,6 +281,9 @@ case "$MODE" in
         ;;
     layer0)
         sudo "$BOOTSTRAP" bootstrap
+        ;;
+    deps|layer0.5)
+        layer0_5_build_deps
         ;;
     layer1)
         ensure_dotnet_present

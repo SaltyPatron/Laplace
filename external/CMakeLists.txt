@@ -166,11 +166,23 @@ ExternalProject_Add(tree-sitter
 # PostgreSQL 18 — autoconf-based, VPATH out-of-source build
 # ---------------------------------------------------------------------------
 
+# `env -u PGXS` strips PGXS from the build environment. If the developer
+# shell has a PG install's setup script sourced (e.g. PGXS pointed at
+# /usr/lib/postgresql/18/lib/pgxs/src/makefiles/pgxs.mk), PG's own
+# src/Makefile.global takes the PGXS extension-build branch — which sets
+# srcdir = $(dir $(firstword $(MAKEFILE_LIST))) instead of
+# $(top_srcdir)/$(subdir). The very first sub-include
+# (src/backend/Makefile line 26: `include $(srcdir)/common.mk`) then
+# resolves to "./common.mk" inside the BINARY_DIR (which doesn't have
+# common.mk) and the build dies with "Makefile:26: common.mk: No such
+# file or directory". Stripping PGXS for these invocations makes the build
+# independent of the developer's shell exports.
 ExternalProject_Add(postgresql
     SOURCE_DIR  "${CMAKE_CURRENT_SOURCE_DIR}/postgresql"
     BINARY_DIR  "${CMAKE_BINARY_DIR}/postgresql-build"
     INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/pgsql-18"
     CONFIGURE_COMMAND
+        env -u PGXS
         "<SOURCE_DIR>/configure"
         "CC=gcc"
         "CXX=g++"
@@ -183,8 +195,8 @@ ExternalProject_Add(postgresql
         "--with-uuid=e2fs"
         "--with-libxml"
         "--without-readline"
-    BUILD_COMMAND   make -j ${_NPROC}
-    INSTALL_COMMAND make install
+    BUILD_COMMAND   env -u PGXS make -j ${_NPROC}
+    INSTALL_COMMAND env -u PGXS make install
 )
 
 # ---------------------------------------------------------------------------
