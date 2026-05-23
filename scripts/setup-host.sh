@@ -93,13 +93,23 @@ ensure_dotnet_present() {
 # local dev), the obj/ dir is unwritable to laplace-runner and dotnet's
 # NuGet restore step fails with "Access denied" on a *.tmp file.
 layer1_clean_foreign_build_artifacts() {
-    local cleaned=0
+    # The project directory app/Laplace.Migrations is owned by the
+    # interactive dev user (ahart) — laplace-runner has read-only access via
+    # /home/ahart's POSIX perms. When dotnet runs as laplace-runner it tries
+    # to create obj/ and bin/ subdirectories there, which fails with
+    # "Access to the path ... is denied". So in addition to removing any
+    # foreign-owned obj/ and bin/ (left by a prior `ahart`-side build), we
+    # PRE-CREATE both subdirs owned by laplace-runner so the dotnet build
+    # can populate them without needing write access to the parent.
     for dir in obj bin; do
         local d="$REPO_DIR/app/Laplace.Migrations/$dir"
         if [ -e "$d" ] && [ "$(stat -c '%U' "$d")" != "$RUNNER_USER" ]; then
             sudo rm -rf "$d"
             yellow "  - removed $d (was not owned by $RUNNER_USER)"
-            cleaned=1
+        fi
+        if [ ! -e "$d" ]; then
+            sudo install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 775 "$d"
+            yellow "  - created $d owned by $RUNNER_USER"
         fi
     done
     return 0
