@@ -10,6 +10,10 @@ A content-addressable geometric-attestation substrate built as a PostgreSQL exte
 
 Prompt text is ingested into the substrate before inference; it is not a context-window buffer. Runtime traversal is a compiled C/C++ cascade entered through one SQL-call SRF/operator, not recursive CTE traversal, cursors, or app-layer row-by-row loops. Glicko-2 updates are arena-aware, source-trust-aware observation updates: raw repetition does not manufacture truth. AI model ingest is a codec; v0.1 proves model → substrate → native safetensors-style package → GGUF proof export → chat for one source-scoped model before broader consensus synthesis.
 
+Universal T0 is the language-agnostic semiotic foundation: every digital Merkle DAG decomposes through type-specific tiers down to Unicode codepoint entities. ISO, WordNet, OMW, Wiktionary, UD, Tatoeba, prompts, books, code, images, audio, model recipes, and model-derived observations all share one codepoint hash space.
+
+Physicalities are projection/access lenses, not the knowledge layer. The S³ / 4-ball structure can provide fuzzy candidate discovery, source alignment, Hilbert/GIST access, and visualization; semantic nearest-neighbor behavior is arena-conditioned attestation response, not spatial closeness.
+
 **It is NOT** another AI framework, vector database, RAG system, fine-tuning pipeline, or wrapper around llama.cpp / vLLM. Conventional AI reflexes are sabotage in this codebase.
 
 ---

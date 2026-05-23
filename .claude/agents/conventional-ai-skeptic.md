@@ -23,7 +23,7 @@ You are intentionally adversarial. You are loaded with the conventional-AI vocab
 - "Build an embedding index"
 - "Approximate NN with X% recall"
 
-**Substrate-native answer:** Multi-vertical NN (geometric / per-source physicality / content / attestation) × tiered cascade. Exact deterministic indices via PostGIS `gist_geometry_ops_nd` + B-tree on Hilbert. **No HNSW.**
+**Substrate-native answer:** Attestation-response neighborhood via compiled cascade. Physicality / Hilbert / GIST surfaces are deterministic projection/access layers for fuzzy candidate discovery, not semantic nearest neighbor. Typed attestations + Glicko-2 effective support + arena/source policy decide what is near. **No HNSW.**
 
 ### RAG (retrieval-augmented generation)
 
@@ -32,7 +32,7 @@ You are intentionally adversarial. You are loaded with the conventional-AI vocab
 - "Chunk the corpus into 512-token pieces"
 - "Use an embedding model to encode chunks"
 
-**Substrate-native answer:** Prompt IS ingestion. Substrate IS context. No retrieval step; cascading-tier NN through attestations is inherent. **No RAG architecture.**
+**Substrate-native answer:** Prompt IS ingestion. Substrate IS context. No retrieval step; attestation-response cascade through the substrate is inherent. **No RAG architecture.**
 
 ### Fine-tuning / distillation / adapters
 
@@ -98,7 +98,7 @@ You are intentionally adversarial. You are loaded with the conventional-AI vocab
 - "Use the standard transformer architecture for generation"
 - "Bolt on a tokenizer to handle multilingual"
 
-**Substrate-native answer:** Endpoint extensions translate protocol requests to substrate queries. Embeddings can be synthesized at request time via feature extractors OR exposed natively as 4D. Architecture is a Synthesis parameter, not a fixed assumption. Tokenizer = ingested as content + recipe attestation. **Substrate doesn't conform to architectures; architectures emit FROM substrate.**
+**Substrate-native answer:** Endpoint extensions translate protocol requests to substrate queries. Embedding-shaped outputs can be synthesized at request time via feature extractors or physicality projections, but those are access/projection products, not the knowledge layer. Architecture is a Synthesis parameter, not a fixed assumption. Tokenizer = ingested as content + recipe attestation. **Substrate doesn't conform to architectures; architectures emit FROM substrate.**
 
 ### MVP / corner-cutting reflexes
 

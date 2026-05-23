@@ -12,7 +12,7 @@ The Laplace database itself — a **universal content-addressed knowledge substr
 
 Laplace is **not** a vector DB, model store, RAG framework, or "yet another place to keep AI artifacts." It is the substrate that **eats** those things — ingests any structured / semantic / unstructured digital ecosystem (linguistic corpora, AI models, knowledge graphs, code repos, documents, images, audio, video, raw datasets) via per-domain [decomposers](#decomposer), drains the content into typed attestations + content-addressed entities + per-source physicalities, **discards the original artifact**, and synthesizes output (model files, query responses, custom-recipe model emissions, cross-source consensus reports, dataset re-exports) from substrate state.
 
-The output is *superior to any single ingested source* by construction — deduplicated, consensus-rated, cross-source-enriched, queryable across modality boundaries, composable. Competitors are food. Substrate IS the model + runtime + database + tokenizer + embedding store + knowledge graph + inference layer + visualization channel + synthesis pipeline, in one coherent layer.
+The output is *superior to any single ingested source* by construction — deduplicated, consensus-rated, cross-source-enriched, queryable across modality boundaries, composable. Competitors are food. Substrate IS the model + runtime + database + tokenizer + embedding-like physicality layer + knowledge graph + inference layer + visualization channel + synthesis pipeline, in one coherent layer.
 
 See [Food principle](#food-principle) for the universal-substrate ingestion posture (which generalizes [Vampire mode](#vampire-mode)).
 
@@ -37,7 +37,7 @@ The type-specific, **lossless** normalization applied to raw input bytes before 
 
 ### Universal T0
 
-Tier 0 atoms are **Unicode codepoints**, universally, across every modality. Pixel values, audio samples, model weights, syntactic dependency labels, knowledge-graph relations — every tier-ladder bottoms at the same 1,114,112-element codepoint alphabet. No modality has its own private T0; pre-seeded once from UCD, used by everyone. Cross-modal reachability is structurally guaranteed because every entity at every tier eventually decomposes to entities in the same T0 hash space.
+Tier 0 atoms are **Unicode codepoints**, universally, across every modality. This is the substrate's language-agnostic semiotic foundation, not merely an engineering convenience. ISO registries, WordNet, OMW, Wiktionary, UD treebanks, Tatoeba, prompts, books, code, images, audio, model recipes, model weights, syntactic dependency labels, and knowledge-graph relations all decompose through type-specific tier ladders until their digital Merkle DAG bottoms at the same 1,114,112-element codepoint alphabet. No modality has its own private T0; pre-seeded once from UCD, used by everyone. Cross-modal reachability is structurally guaranteed because every entity at every tier eventually decomposes to entities in the same T0 hash space.
 
 ### Tiered Merkle DAG (semantic, not bit-wise)
 
@@ -120,6 +120,8 @@ Physicality kinds:
 - **PROJECTION** — the source's embedding-space view, procrustes-aligned to substrate 4D. Trajectory optional (NULL for vampire-mode AI ingestion).
 
 A pixel entity may have a CONTENT physicality from the substrate-canonical source + PROJECTION physicalities from each AI vision model that has been probed on images containing it. A text word entity may have CONTENT (substrate-canonical UAX#29 decomposition), BUILDING_BLOCK (how it's used across the corpus), and PROJECTION physicalities from every linguistic resource and AI model that has observed it.
+
+Physicality is a projection/access layer, not belief or knowledge. It is how Laplace creates inspectable embedding-like surfaces, fuzzy candidate lookups, alignment views, and visualizable structure while keeping semantics separate. The semantic layer is the typed attestation graph with arena policy and Glicko-2 state. A close physicality may propose a candidate; it does not decide meaning, truth, or traversal priority by itself.
 
 ### Source
 
@@ -223,7 +225,7 @@ The seed-layer order (ADR 0037) is the dependency order: each layer's decomposer
 
 ### Glome (S³)
 
-The 3-sphere — surface of the 4-ball. The substrate's atomic layer (Unicode codepoints) lives on S³ via super-Fibonacci spirals + Hopf fibration as the substrate-canonical CONTENT physicality coord for T0 entities. The geometric layer is **value-additive enrichment**, not load-bearing: cascade inference is A* through the attestation graph weighted by Glicko-2 (see [A*](#a-in-laplace-context)); strip S³ and the substrate still functions. S³ accelerates candidate narrowing via Hilbert range scans, provides multi-vertical NN, and supports visualization + modality clustering.
+The 3-sphere — surface of the 4-ball. The substrate's atomic layer (Unicode codepoints) lives on S³ via super-Fibonacci spirals + Hopf fibration as the substrate-canonical CONTENT physicality coord for T0 entities. The geometric layer is **value-additive enrichment**, not load-bearing: cascade inference is A* through the attestation graph weighted by Glicko-2 (see [A*](#a-in-laplace-context)); strip S³ and the substrate still functions. S³ accelerates fuzzy candidate discovery via Hilbert range scans and supports visualization + modality clustering. It is not where meaning lives.
 
 ### 4-Ball
 
@@ -313,7 +315,7 @@ The same principle applies to the substrate's attestation set as a whole: most c
 
 The lottery-ticket-aware filter applied during AI model ingestion that discards gradient jitter, init noise, training artifacts. Zero-and-near-zero weights are trash, not data. NOT a flat threshold.
 
-### Cascade (cascading-tier NN)
+### Cascade (attestation-response cascade)
 
 The substrate's inference algorithm. **A forward pass over the typed attestation graph** — the composition pattern is structurally analogous to a transformer's layer-by-layer evaluation (typed projection, weighted aggregation, nonlinear semantic composition), but the substrate's actual vocabulary of typed edges is usage- and structure-shaped, not transformer-position-shaped:
 
@@ -327,15 +329,19 @@ query entity → walk CO_OCCURS_WITH / FOLLOWS / PRECEDES   (usage projection �
               → ranked answer entities at goal region
 ```
 
-Each typed walk is one functional transform; the cascade composes them. Each step is O(tier) ≈ O(constant) under good source-trust + arena scoping. Geometric candidate narrowing (Hilbert range, physicality-coord KNN) accelerates the walks; the *semantic decision* is the typed-edge traversal weighted by Glicko-2.
+Each typed walk is one functional transform; the cascade composes them. Each step is O(tier) ≈ O(constant) under good source-trust + arena scoping. Geometric candidate narrowing (Hilbert range, physicality-coordinate lookups) accelerates the walks; the *semantic decision* is the typed-edge traversal weighted by Glicko-2.
 
 ### Compiled Cascade
 
 The implementation rule for cascade traversal: one SQL-call surface enters a C/C++ set-returning function that owns frontier management, priority queues, visited sets, tier transitions, context checks, and ranking. SPI/executor access may perform batched indexed lookups; recursive CTEs, cursors, and app-layer row-by-row loops are not the hot path.
 
-### Multi-vertical NN
+### Attestation-response neighborhood
 
-Querying the substrate via multiple orthogonal similarity dimensions simultaneously. **Primary vertical: attestation-graph A* weighted by Glicko-2** — this is the inference engine. **Enrichment verticals: geometric (canonical-coord / projection-physicality position), content (n-gram / trajectory structural)** — accelerate candidate narrowing and add semantic context without driving the decision. All composable across tiers.
+The substrate-native nearest-neighbor concept: the strongest arena-conditioned response to a query, prompt, context entity, or partial attestation pattern. A neighbor is not defined by spatial closeness. It is a high-response path bundle through typed attestations, where response strength is shaped by effective mu, RD, volatility, source trust, lineage/correlation, context compatibility, conflict policy, cardinality, and structural support. Physicality proximity can propose candidates, but attestation response decides what is actually near for a given traversal mode.
+
+### Multi-vertical candidate retrieval
+
+Querying the substrate via multiple orthogonal access dimensions simultaneously. **Primary response surface: attestation-graph A* weighted by Glicko-2** — this is the inference engine. **Enrichment/access surfaces: geometric (canonical-coord / projection-physicality position), content (n-gram / trajectory structural)** — accelerate candidate narrowing and add context without driving the semantic decision. All composable across tiers.
 
 ### A* (in Laplace context)
 
@@ -600,13 +606,13 @@ The substrate's inference engine walks typed attestations between substrate enti
 
 ## Anti-vocabulary (do NOT use these except to explicitly reject them)
 
-- ~~"Vector database"~~ — Laplace's NN is multi-vertical + cascading-tier; not a single-vector cosine-similarity lookup
+- ~~"Vector database"~~ — Laplace's neighborhood behavior is attestation-response cascade + deterministic candidate access; not a single-vector cosine-similarity lookup
 - ~~"HNSW" / "FAISS" / "ScaNN"~~ — approximate-NN libraries; banned (we use exact deterministic indices)
 - ~~"RAG"~~ — Laplace's prompt-is-ingestion + cascade-traversal subsumes RAG without the retrieval-augmentation duct tape
 - ~~"Fine-tuning"~~ — Laplace's WHERE-clause specialization replaces fine-tuning
 - ~~"Distillation"~~ — Laplace's Synthesis replaces conventional distillation
 - ~~"Context window"~~ — Laplace has none; prompt is ingestion
-- ~~"Embedding model"~~ — Laplace's per-entity attestation profile + multi-vertical NN replaces "an embedding"
+- ~~"Embedding model"~~ — Laplace's typed attestation response plus physicality projection/access layer replaces "an embedding"
 - ~~"Inference server"~~ — Laplace's endpoint extensions over the substrate replace inference servers
 - ~~"Training loop"~~ — Laplace has no gradient descent; ingestion accumulates observations
 - ~~"Catastrophic forgetting"~~ — doesn't happen at substrate level (each emission is a snapshot synthesis)

@@ -29,7 +29,7 @@ The attestation kind hierarchy. Types in Laplace are themselves entities; the ty
 
 ### Transformer-family tensor-calculation kinds (one fixed architecture-family vocabulary)
 
-- `EMBEDS` — token/entity embedding role
+- `EMBEDS` — transformer-family embedding mechanical role, not vector-DB embedding semantics
 - `Q_PROJECTS` — query projection role
 - `K_PROJECTS` — key projection role
 - `V_PROJECTS` — value projection role

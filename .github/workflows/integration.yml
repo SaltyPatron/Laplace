@@ -17,6 +17,20 @@ jobs:
     name: Verify self-hosted runner capabilities
     runs-on: [self-hosted, laplace]
     steps:
+      - name: Pre-checkout — wipe stale submodule state from persistent runner workspace
+        shell: bash
+        run: |
+          # The self-hosted runner workspace persists across runs. tree-sitter-nqc
+          # has an upstream orphan gitlink (examples/nqc with no .gitmodules entry)
+          # which trips actions/checkout's `git submodule foreach --recursive` cleanup
+          # step even with `submodules: false`. Wiping .git/modules forces a clean
+          # submodule state — the Initialize step after checkout re-inits top-level
+          # submodules (non-recursive) so we never recurse through the orphan.
+          if [ -d "$GITHUB_WORKSPACE/.git/modules" ]; then
+            rm -rf "$GITHUB_WORKSPACE/.git/modules"
+            echo "  cleared stale .git/modules"
+          fi
+
       - uses: actions/checkout@v4
         with:
           submodules: false  # See manual init step below — actions/checkout sub-init recurses into tree-sitter-nqc/examples/nqc (upstream-broken) even with submodules:true; we use plain git below to control it.
@@ -99,6 +113,20 @@ jobs:
     needs: capabilities
     runs-on: [self-hosted, laplace]
     steps:
+      - name: Pre-checkout — wipe stale submodule state from persistent runner workspace
+        shell: bash
+        run: |
+          # The self-hosted runner workspace persists across runs. tree-sitter-nqc
+          # has an upstream orphan gitlink (examples/nqc with no .gitmodules entry)
+          # which trips actions/checkout's `git submodule foreach --recursive` cleanup
+          # step even with `submodules: false`. Wiping .git/modules forces a clean
+          # submodule state — the Initialize step after checkout re-inits top-level
+          # submodules (non-recursive) so we never recurse through the orphan.
+          if [ -d "$GITHUB_WORKSPACE/.git/modules" ]; then
+            rm -rf "$GITHUB_WORKSPACE/.git/modules"
+            echo "  cleared stale .git/modules"
+          fi
+
       - uses: actions/checkout@v4
         with:
           submodules: false  # See manual init step below — actions/checkout sub-init recurses into tree-sitter-nqc/examples/nqc (upstream-broken) even with submodules:true; we use plain git below to control it.
@@ -158,6 +186,20 @@ jobs:
     needs: build
     runs-on: [self-hosted, laplace]
     steps:
+      - name: Pre-checkout — wipe stale submodule state from persistent runner workspace
+        shell: bash
+        run: |
+          # The self-hosted runner workspace persists across runs. tree-sitter-nqc
+          # has an upstream orphan gitlink (examples/nqc with no .gitmodules entry)
+          # which trips actions/checkout's `git submodule foreach --recursive` cleanup
+          # step even with `submodules: false`. Wiping .git/modules forces a clean
+          # submodule state — the Initialize step after checkout re-inits top-level
+          # submodules (non-recursive) so we never recurse through the orphan.
+          if [ -d "$GITHUB_WORKSPACE/.git/modules" ]; then
+            rm -rf "$GITHUB_WORKSPACE/.git/modules"
+            echo "  cleared stale .git/modules"
+          fi
+
       - uses: actions/checkout@v4
         with:
           submodules: false  # See manual init step below — actions/checkout sub-init recurses into tree-sitter-nqc/examples/nqc (upstream-broken) even with submodules:true; we use plain git below to control it.
@@ -232,6 +274,20 @@ jobs:
     needs: db-deploy
     runs-on: [self-hosted, laplace]
     steps:
+      - name: Pre-checkout — wipe stale submodule state from persistent runner workspace
+        shell: bash
+        run: |
+          # The self-hosted runner workspace persists across runs. tree-sitter-nqc
+          # has an upstream orphan gitlink (examples/nqc with no .gitmodules entry)
+          # which trips actions/checkout's `git submodule foreach --recursive` cleanup
+          # step even with `submodules: false`. Wiping .git/modules forces a clean
+          # submodule state — the Initialize step after checkout re-inits top-level
+          # submodules (non-recursive) so we never recurse through the orphan.
+          if [ -d "$GITHUB_WORKSPACE/.git/modules" ]; then
+            rm -rf "$GITHUB_WORKSPACE/.git/modules"
+            echo "  cleared stale .git/modules"
+          fi
+
       - uses: actions/checkout@v4
         with:
           submodules: false  # See manual init step below — actions/checkout sub-init recurses into tree-sitter-nqc/examples/nqc (upstream-broken) even with submodules:true; we use plain git below to control it.

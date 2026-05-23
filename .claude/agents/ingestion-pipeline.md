@@ -22,7 +22,7 @@ Canonical source order for early fidelity: Unicode/UCD/UCA/UAX → ISO/CLDR/Glot
 ### Source types you implement
 
 **Pre-structured sources** (parse → map):
-- `UnicodeSource` / UCD / UCA / UAX seed — emit T0 atom facts, collation, script/category, normalization, segmentation metadata
+- `UnicodeDecomposer` / UCD / UCA / UAX seed — emit the Universal T0 codepoint foundation, collation, script/category, normalization, segmentation metadata. This is the shared language-agnostic ground every later decomposer references.
 - `LanguageRegistrySource` — ISO/CLDR/Glottolog-style language/script/region/name mappings
 - `WordNetSource` (parse Prolog/RDF; emit IS_A / HYPERNYM / HAS_POS / IS_SENSE)
 - `OMWSource` — cross-lingual synset bridges and language-linked lexical mappings
@@ -66,12 +66,12 @@ Canonical source order for early fidelity: Unicode/UCD/UCA/UAX → ISO/CLDR/Glot
 Most complex single piece. Read [.claude/agents/cpp-performance.md](./cpp-performance.md) for the C++ implementation details. Your domain is the **orchestration**:
 
 1. **Identify shared anchors** — entities the model embeds that ALSO exist in the substrate (start with codepoints + common word-forms).
-2. **Extract source's embeddings** for those anchors (read from safetensors).
-3. **Build k-NN graph** in source's N-dim space (k = 50 typical).
+2. **Extract source projections/embeddings** for those anchors (read from safetensors).
+3. **Build an exact ingest-time neighborhood graph** in source's N-dim projection space (k = 50 typical) for alignment only, not runtime semantic NN.
 4. **Run Laplacian eigenmaps** → reduce N-dim → intermediate dim (say 16).
 5. **Gram-Schmidt orthonormalize** the reduced basis.
 6. **Run Procrustes alignment** → SVD on cross-covariance of (reduced + orthonormalized) anchors vs. substrate canonical positions for the same anchors → optimal rigid transform.
-7. **Apply transform** to ALL of source's embeddings → 4D substrate Physicalities.
+7. **Apply transform** to ALL of source's projections → 4D substrate Physicalities.
 8. **Insert physicalities** with `alignment_residual` tracked per source.
 9. **Per-source credibility update** based on alignment residual distribution.
 

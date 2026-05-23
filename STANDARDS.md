@@ -390,6 +390,8 @@ The substrate distinguishes five storage classes by *purpose*. Code that mixes t
 | **Lookup** | PK + FK columns: `*.id`, `*_id` | Identity resolution; same `bytea(16)` content-addressed type everywhere | custom `laplace_btree_hash128_ops` opclass |
 | **Index** | btree / GIST / BRIN / SP-GiST + the 4 substrate-specific opclasses (ADR 0029) | Acceleration; not data | n/a (indexes index data) |
 
+`physicalities.coord`, `hilbert_index`, `radius_origin`, and source PROJECTION rows form the projection/access layer. They may support fuzzy candidate discovery and embedding-shaped exports, but they are not the knowledge layer and never participate directly in Effective Mu. Semantic response is computed from typed attestations under arena/source policy.
+
 **Rules:**
 
 - Putting knowledge in a metadata column → wrong. Metadata is structural; knowledge belongs in attestations.

@@ -11,7 +11,7 @@ The substrate must accommodate every digital modality — text, code, pixels, pa
 Key design observations from the working sessions:
 
 1. **Every entity is content-addressed by canonical content bytes.** The hash is BLAKE3-128 of *canonical* content, not of raw input bytes. Two different encodings that decode to the same canonical content yield the same entity ID. Two lossy encodings of "the same source" are *different entities* — they have different canonical bytes after lossy decode.
-2. **Universal T0**: every modality's tier ladder bottoms at Unicode codepoints. Pixel color values, audio sample magnitudes, model-weight scalars, syntactic dependency labels — every constituent eventually decomposes to substrate entities whose bottom-tier is the universal codepoint alphabet (1,114,112 atoms pre-seeded from UCD).
+2. **Universal T0**: every modality's tier ladder bottoms at Unicode codepoints. This is the language-agnostic semiotic foundation for the substrate, not a private text convenience. ISO registries, WordNet, OMW, Wiktionary, UD, Tatoeba, prompts, books, code, pixels, audio samples, model-weight scalars, syntactic dependency labels, and knowledge-graph relations all eventually decompose to substrate entities whose bottom-tier is the universal codepoint alphabet (1,114,112 atoms pre-seeded from UCD).
 3. **Tiers are type-specific above T0**: text has UAX#29 graphemes / word-forms / sentences / paragraphs / sections / documents; visual has pixel / patch / region / image / collection; audio has sample / frame / track; structured-data has source-specific schemas (synset, sentence, treebank, etc.).
 4. **Semantic Merkle DAG, not bit-wise**: content-addressing is meaningful at the *semantic* layer per type. The Merkle property holds: a parent entity's hash uniquely identifies its content, and that content is reproducible by walking the parent's CONTENT physicality trajectory.
 5. **AI models are not special**: tokens are text entities (deduping across all models that tokenize the same text); model knowledge is typed attestations between substrate entities, of fixed-vocabulary kinds. No model-flavored tables; no per-(layer, head) synthetic entity IDs.
@@ -59,9 +59,9 @@ Adding a new modality = adding install-time type entities (if cross-modal-univer
 
 ### Universal T0 — codepoints under every tier ladder
 
-T0 atoms are Unicode codepoints, universally. A pixel's color triple `(255, 0, 0)` canonicalizes to a structured byte form whose tier-ladder walk eventually bottoms at codepoint atoms (the digits and punctuation that express the value, or whatever the canonical byte representation expresses). Model-weight scalars, audio samples, dependency labels — all bottom at codepoints via type-specific intermediate tiers.
+T0 atoms are Unicode codepoints, universally. Unicode is the substrate's shared symbolic ground: the framework that makes Laplace language-agnostic, source-agnostic, and modality-agnostic while preserving content-addressed identity. A pixel's color triple `(255, 0, 0)` canonicalizes to a structured byte form whose tier-ladder walk eventually bottoms at codepoint atoms (the digits and punctuation that express the value, or whatever the canonical byte representation expresses). Model-weight scalars, audio samples, dependency labels, ISO language identifiers, WordNet synset identifiers, OMW bridges, Wiktionary entries, UD feature labels, Tatoeba sentences, prompts, books, and code all bottom at codepoints via type-specific intermediate tiers.
 
-This guarantees **cross-modal reachability**: every entity at every tier is reachable from every other entity through their shared T0 descendants. Attestations across modalities are first-class because their endpoints live in the same hash space.
+This guarantees **cross-modal reachability**: every entity at every tier is reachable from every other entity through their shared T0 descendants. Attestations across languages, modalities, source ecosystems, and model families are first-class because their endpoints live in the same hash space.
 
 ### Canonicalization is lossless per type
 

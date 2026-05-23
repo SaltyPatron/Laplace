@@ -87,12 +87,12 @@ Use Eigen's auto-vectorization for small matrices; hand-roll for batch coord ops
 This is the most complex single piece. Pipeline:
 
 1. **Identify shared-anchor entities** between an ingested model and the substrate.
-2. **Build exact k-NN graph** in the model's N-dim embedding space using in-repo deterministic kernels / oneMKL-assisted batched distance computation; do NOT introduce FAISS/HNSW/scann.
+2. **Build exact ingest-time neighborhood graph** in the model's N-dim source projection space using in-repo deterministic kernels / oneMKL-assisted batched distance computation; do NOT introduce FAISS/HNSW/scann. This graph is for alignment, not runtime semantic nearest neighbor.
 3. **Compute graph Laplacian** (sparse symmetric matrix).
 4. **Spectra `SymEigsShiftSolver`** for k smallest eigenvectors (k = intermediate dim).
 5. **Gram-Schmidt** (Eigen `HouseholderQR`) orthonormalize the reduced basis.
 6. **Procrustes alignment** via oneMKL `dgesvd` on cross-covariance: M = U Σ Vᵀ → R = V Uᵀ (sign-corrected).
-7. **Apply transform** to all source embeddings → 4D physicalities.
+7. **Apply transform** to all source projections → 4D physicalities.
 
 Each step in C++; verify residuals at each step; log for diagnostics.
 

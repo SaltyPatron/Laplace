@@ -57,6 +57,8 @@ Use standard PostGIS `geometry` type with Z+M = 4D (X, Y, Z spatial + M as fourt
 
 **Custom GIST/SP-GiST/BRIN opclasses ARE permitted** where they exploit substrate-specific structure that general-purpose opclasses can't — per [ADR 0029](docs/adr/0029-custom-indexing-strategy.md). Each custom opclass requires its own ADR documenting the structural fact exploited + measurable acceptance benchmark vs the stock alternative. Speculatively replacing working general-purpose opclasses is still forbidden.
 
+The 4D/S³ physicality layer is a projection/access layer, not the knowledge layer. It can provide fuzzy candidate discovery, alignment, visualization, and embedding-like structure. It does not define semantic nearest neighbor, truth, or answerhood. Semantic response is computed through typed attestations, arena policy, source trust/lineage, and Glicko-2 effective support.
+
 ---
 
 ## R2 — Three tables, no event log
@@ -119,7 +121,7 @@ All entity math uses pinned FP regime (or fixed-point integer arithmetic for Gli
 
 ## R8 — No GPU at runtime
 
-The substrate's runtime is CPU-native. Cascading-tier NN + spatial index lookups + Glicko-2 weighted A* are latency-bound and branchy — wrong workload for GPU.
+The substrate's runtime is CPU-native. Attestation-response cascade + spatial candidate-access lookups + Glicko-2 weighted A* are latency-bound and branchy — wrong workload for GPU.
 
 **The one exception:** probe-time forward-pass of a model being ingested (running a 70B transformer to extract attestations may need GPU). After extraction, the substrate is CPU-only. GPU is the probe driver, NOT a runtime requirement.
 

@@ -77,7 +77,7 @@ Column-role naming: **`id` for PKs, `<role>_id` for FKs**. The values are still 
 
 - **Keep canonical_coord on entities + add typed projections elsewhere.** Privileges substrate-canonical over external sources; clutters the entity row with one representation; conflicts with multi-modal types where the "canonical" geometric placement depends on the type's decomposition rule.
 - **Add type_id but keep geometry columns.** Solves multi-modality typing but not the multi-representation problem; still entangles identity with one geometric view.
-- **Eliminate physicalities entirely; represent everything as attestations.** Loses the per-source 4D geometric structure that PostGIS is good at querying. Cascade benefits from physicality coord KNN (multi-vertical NN); reducing it to pure attestation walks throws away that acceleration. Geometry is enrichment, not load-bearing — but enrichment that's worth keeping.
+- **Eliminate physicalities entirely; represent everything as attestations.** Loses the per-source 4D geometric structure that PostGIS is good at querying. Cascade benefits from physicality-coordinate candidate access; reducing it to pure attestation walks throws away that acceleration. Geometry is enrichment, not load-bearing — but enrichment that's worth keeping.
 
 ## References
 

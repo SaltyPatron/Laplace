@@ -40,7 +40,7 @@ CREATE INDEX entities_first_observed ON entities USING btree (first_observed_by)
 
 ### `physicalities` — per-source, per-kind 4D representations
 
-One-to-many entity→physicality. Each row is one **lens** on an entity provided by one **source**: CONTENT (decomposition view), BUILDING_BLOCK (used-as-constituent view), or PROJECTION (source-embedding-space view). Holds all geometry + trajectory + per-source metadata.
+One-to-many entity→physicality. Each row is one **lens** on an entity provided by one **source**: CONTENT (decomposition view), BUILDING_BLOCK (used-as-constituent view), or PROJECTION (source-embedding-space view). Holds all geometry + trajectory + per-source metadata. Physicalities are projection/access structures: they support fuzzy candidate discovery, alignment, visualization, and indexing. They are not the knowledge layer; semantic state lives in typed attestations.
 
 ```sql
 CREATE TABLE physicalities (
@@ -158,13 +158,13 @@ raw input bytes
   per arena, source, context                              ─┘
 ```
 
-**Universal T0**: every modality's tier ladder bottoms at the same Unicode-codepoint atoms. The codepoint `5` is one row in `entities`, shared by text (`"$255 rent"`), pixel data (RGB red-channel value 255), audio sample magnitudes, model-weight textual representations, postal codes, prices, page numbers — same hash, one row, referenced from every modality.
+**Universal T0**: every modality's tier ladder bottoms at the same Unicode-codepoint atoms. This is the language-agnostic semiotic foundation for the digital Merkle DAG: ISO / language registries, WordNet, OMW, Wiktionary, UD, Tatoeba, prompts, text, books, code, image/audio data, model recipes, and model-weight representations all decompose down to codepoint entities. The codepoint `5` is one row in `entities`, shared by text (`"$255 rent"`), pixel data (RGB red-channel value 255), audio sample magnitudes, model-weight textual representations, postal codes, prices, page numbers — same hash, one row, referenced from every modality.
 
 **Deduplication is O(tier depth + novel structure)**. Walking the Merkle DAG top-down on hash equality short-circuits at every existing-id hit. Re-ingesting identical content is O(1); ingesting content sharing constituents with prior observations is O(depth-until-novelty + novelty-size); fully novel content is O(total novel structure).
 
 **T0 perf-cache** holds codepoint id + substrate-canonical-CONTENT-physicality coord + Hilbert index + UCA order + flags for all 1,114,112 codepoints. Clients and ingestion workers compute atom identity and coordinates locally. T1+ entity math (id, physicality coords/trajectories, Hilbert indices) is computed in the C/C++ engine before INSERT and arrives pre-baked.
 
-**The 4D geometric layer is value-additive enrichment, not the engine**. The inference engine is graph A* through the typed attestation graph weighted by Glicko-2 effective-μ. The composition pattern is structurally analogous to a transformer's forward pass (typed-projection composition + weighted aggregation + nonlinear feature combination), but the substrate's vocabulary of typed transforms is its own — drawn from small fixed enumerations per modality / per architecture family, not from transformer-position labels. Geometric verticals (Hilbert range scan, physicality-coord KNN) accelerate candidate narrowing; semantic decisions follow typed, rated attestations ordered by effective score and constrained by arena semantics.
+**The 4D geometric layer is value-additive enrichment, not the engine**. Physicalities are Laplace's inspectable embedding-like projection/access layer: useful for fuzzy candidate discovery, source alignment, clustering, and visualization, but semantically separated from knowledge. The inference engine is graph A* through the typed attestation graph weighted by Glicko-2 effective-μ. Nearest-neighbor behavior is not spatial closeness; it is arena-conditioned attestation response: tug a query/context strand, then rank what pulls back and how hard under source trust, lineage, RD/volatility, context compatibility, conflict policy, and structural support. Geometric verticals (Hilbert range scan, physicality-coordinate lookups) can seed candidates; semantic decisions follow typed, rated attestations ordered by effective score and constrained by arena semantics.
 
 ---
 
@@ -564,7 +564,7 @@ Where the substrate touches PostGIS geometries (PG extension wrappers, ingestion
 | physicalities | `entity_id` btree | enumerate all lenses on an entity |
 | physicalities | `source_id` btree | source-scoped scans |
 | physicalities | `kind` btree | filter by CONTENT / BUILDING_BLOCK / PROJECTION |
-| physicalities | `coord` GiST (`gist_geometry_ops_nd`) | 4D spatial KNN per source/kind |
+| physicalities | `coord` GiST (`gist_geometry_ops_nd`) | 4D candidate access per source/kind |
 | physicalities | `hilbert_index` btree | 1D locality range scan |
 | physicalities | `radius_origin` btree | abstraction-level queries |
 | physicalities | `alignment_residual` btree partial | quality-filtered queries |

@@ -15,6 +15,8 @@ Laplace is a content-addressable geometric-attestation substrate built as a Post
 Load-bearing mechanics:
 
 - A prompt is ingestion. It is decomposed into substrate entities and represented by a context entity/trajectory before inference; there is no context-window buffer primitive.
+- Universal T0 is the language-agnostic semiotic foundation. ISO, WordNet, OMW, Wiktionary, UD, Tatoeba, prompts, text, books, code, images, audio, model recipes, and model-derived observations all decompose through type-specific tiers down to Unicode codepoint entities in one hash space.
+- Physicalities are projection/access lenses, not the knowledge layer. The S³ / 4-ball structure can provide fuzzy candidate discovery, source alignment, Hilbert/GIST access, and visualization; semantic nearest-neighbor behavior is arena-conditioned attestation response, not spatial closeness.
 - Cascade traversal is compiled. One SQL-call surface enters a C/C++ SRF/operator that owns frontier management, A*, tier transitions, effective-score ranking, and abstention; no recursive CTE/RBAR/cursor/app-loop hot path.
 - Consensus is arena-aware and source-trust-aware. Incoming observations update current attestation state through typed arena policy; raw repetition does not manufacture truth; independent high-trust structure pulls hard, low-trust/correlated claims remain source-scoped or disputed.
 - AI model ingest is a codec. v0.1 proves model → substrate → native safetensors-style package → GGUF proof export → chat for a source-scoped model before broader seed-stack synthesis.

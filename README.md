@@ -16,7 +16,9 @@ A content-addressable geometric-attestation substrate that replaces the conventi
 
 ## What this is
 
-Models, corpora, and linguistic resources ingest into a single PostgreSQL database via per-source plugins. Semantic content lives as **typed attestations** between **Unicode-anchored entities** on the surface of a 4-sphere (S³) and within its abstraction-graded interior. Inference is **compiled cascading-tier A\*** through the attestation DAG — CPU-native, no GEMM, no GPU at runtime, no context-window buffer, and no app-layer row-by-row graph walk. A prompt is ingested as substrate content, then a single SQL-call surface enters the C/C++ engine to traverse indexed, Glicko-2-rated strands.
+Models, corpora, and linguistic resources ingest into a single PostgreSQL database via per-source plugins. Semantic content lives as **typed attestations** between **Unicode-anchored entities**. Entities may also carry per-source **physicalities**: 4D CONTENT / BUILDING_BLOCK / PROJECTION lenses used for fuzzy candidate discovery, indexing, alignment, and visualization. The S³ / 4-ball layer is an embedding-like access layer, not the knowledge layer. Inference is **compiled cascading-tier A\*** through the attestation DAG — CPU-native, no GEMM, no GPU at runtime, no context-window buffer, and no app-layer row-by-row graph walk. A prompt is ingested as substrate content, then a single SQL-call surface enters the C/C++ engine to traverse indexed, Glicko-2-rated strands.
+
+Universal T0 is the language-agnostic ground: every digital Merkle DAG, whether ISO registry, WordNet synset, OMW bridge, Wiktionary entry, UD treebank, Tatoeba sentence, prompt, book, image, audio segment, code repository, or model recipe, decomposes down to the same Unicode codepoint atoms. That shared alphabet is how all sources enter one hash space instead of living in private modality silos.
 
 **Substrate Synthesis** emits any model from substrate state: any architecture, any dimensionality, any MoE config, any vocab; sparse-by-construction; consensus-enriched. Protocol-endpoint extensions (OpenAI-compat, ...) make the substrate the served model directly — dissolving llama.cpp / vLLM / TensorRT-LLM from the deployment stack.
 
@@ -34,9 +36,11 @@ raw content
 → indexed traversal and synthesis
 ```
 
-Deduplication and reconstruction follow tiered content paths rather than corpus scans. The same span (`Call me Ishmael`, `noreply@`, a verse, a license header, a function body) resolves to the same hash and becomes one reusable building block. T0 codepoint data is precomputed into a memory-mapped perf-cache, so clients and ingestion workers can compute atom hashes, coordinates, Hilbert indices, UCA order, and flags without round-tripping to the database.
+Deduplication and reconstruction follow tiered content paths rather than corpus scans. The same span (`Call me Ishmael`, `noreply@`, a verse, a license header, a function body) resolves to the same hash and becomes one reusable building block. Every reconstruction path eventually walks back to Unicode codepoints. T0 codepoint data is precomputed into a memory-mapped perf-cache, so clients and ingestion workers can compute atom hashes, coordinates, Hilbert indices, UCA order, and flags without round-tripping to the database.
 
 Truth-seeking is arena-rated, not raw voting. Attestation kinds define compatibility and competition rules; source credibility is tracked per kind. Truths cluster across independent, high-trust, structurally adjacent sources. Unsupported or low-trust claims may be recorded as source-scoped evidence, but they do not pull hard in strict traversal or synthesis scopes.
+
+Nearest-neighbor behavior is substrate-native: it is the strongest arena-conditioned attestation response to a query/prompt/context, not spatial closeness in S³. Physicality indexes can propose fuzzy candidates; typed attestations, Glicko-2 effective support, source lineage, and arena semantics decide what pulls back and how hard.
 
 ## Seed ladder
 
@@ -69,7 +73,7 @@ AI models arrive as evidence sources, not as sacred artifacts. A source-scoped r
 | Pruning | Arena-scoped effective-mu policy |
 | Unlearning | `DELETE WHERE source = M` |
 | Ensembling | Glicko-2 consensus across sources |
-| RAG / vector DB | Multi-vertical NN over substrate |
+| RAG / vector DB | Attestation-response cascade + deterministic candidate access |
 | Context window | Prompt is ingestion — bounded by storage/traversal policy, not a fixed buffer |
 | Hallucination | Traversal policy: strict abstention, speculative walk, or creative mode |
 | Runtime GEMM | Ingestion-time evidence extraction + indexed A* pathfinding |
