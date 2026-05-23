@@ -64,11 +64,18 @@ build-deps:
 # install scripts. One command, one ninja graph. Intel toolchain (icpx)
 # applied via cmake/toolchains/intel-oneapi.cmake — earns its slot via
 # MKL/Spectra/TBB in liblaplace_dynamics.
+#
+# LD_LIBRARY_PATH points gtest_discover_tests (which runs each test binary
+# at build time to enumerate test names) at the freshly built engine
+# liblaplace_*.so files. Without this the loader picks up any stale
+# liblaplace_core.so left in /usr/local/lib by an old `sudo cmake --install`
+# (via /etc/ld.so.cache), which causes "undefined symbol" failures the
+# moment we add a new exported function to liblaplace_core.
 build:
     cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
         -DLAPLACE_PG_PREFIX=${LAPLACE_PG_PREFIX:-/usr/lib/postgresql/18}
-    cmake --build build
+    LD_LIBRARY_PATH="$(pwd)/build/engine/core:$(pwd)/build/engine/dynamics:$(pwd)/build/engine/synthesis:${LD_LIBRARY_PATH:-}" cmake --build build
 
 # Install engine .so + both extensions into the configured PG prefix.
 # For stock PG that's /usr/lib/postgresql/18/{lib,share}; needs sudo.
@@ -205,8 +212,13 @@ test: test-engine test-app
 
 # ctest runs everything discovered by gtest_discover_tests in each engine
 # subdir. Requires `just build` first.
+#
+# Same LD_LIBRARY_PATH discipline as `build` — points ctest's test runs at
+# the freshly built engine liblaplace_*.so files so stale system installs
+# (e.g. /usr/local/lib left over from a prior `sudo cmake --install`)
+# can't poison the loader.
 test-engine:
-    cd build && ctest --output-on-failure
+    cd build && LD_LIBRARY_PATH="$(realpath engine/core):$(realpath engine/dynamics):$(realpath engine/synthesis):${LD_LIBRARY_PATH:-}" ctest --output-on-failure
 
 # dotnet test covers all .Tests projects (Laplace.Engine.*.Tests +
 # Laplace.Migrations.Tests). Testcontainers requires a running Docker

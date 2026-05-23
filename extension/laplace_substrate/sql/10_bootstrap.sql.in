@@ -85,10 +85,10 @@ BEGIN
      * is self-referential: we compute its id first, then insert the row
      * with type_id = itself. */
 
-    type_id             := laplace_hash128_blake3('substrate/type/Type/v1'::bytea);
-    kind_id             := laplace_hash128_blake3('substrate/type/Kind/v1'::bytea);
-    physicality_kind_id := laplace_hash128_blake3('substrate/type/PhysicalityKind/v1'::bytea);
-    source_id           := laplace_hash128_blake3('substrate/type/Source/v1'::bytea);
+    type_id             := public.laplace_hash128_blake3('substrate/type/Type/v1'::bytea);
+    kind_id             := public.laplace_hash128_blake3('substrate/type/Kind/v1'::bytea);
+    physicality_kind_id := public.laplace_hash128_blake3('substrate/type/PhysicalityKind/v1'::bytea);
+    source_id           := public.laplace_hash128_blake3('substrate/type/Source/v1'::bytea);
 
     /* Insert Type (self-typed). FK constraints to entities(id) are deferred
      * until after bootstrap completes (see end of this block). */
@@ -100,15 +100,15 @@ BEGIN
 
     /* === Stage 1: substrate-canonical Source entity ==================== */
 
-    subscan_id := laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea);
+    subscan_id := public.laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea);
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
         (subscan_id, META_TIER, source_id, NULL);
 
     /* === Stage 2: PhysicalityKind enum entities ======================== */
 
-    pk_content_id    := laplace_hash128_blake3('substrate/physicality_kind/CONTENT/v1'::bytea);
-    pk_buildblock_id := laplace_hash128_blake3('substrate/physicality_kind/BUILDING_BLOCK/v1'::bytea);
-    pk_projection_id := laplace_hash128_blake3('substrate/physicality_kind/PROJECTION/v1'::bytea);
+    pk_content_id    := public.laplace_hash128_blake3('substrate/physicality_kind/CONTENT/v1'::bytea);
+    pk_buildblock_id := public.laplace_hash128_blake3('substrate/physicality_kind/BUILDING_BLOCK/v1'::bytea);
+    pk_projection_id := public.laplace_hash128_blake3('substrate/physicality_kind/PROJECTION/v1'::bytea);
 
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
         (pk_content_id,    META_TIER, physicality_kind_id, subscan_id),
@@ -122,16 +122,16 @@ BEGIN
      * order: trust classes first, then kind tiers, then kinds, then the
      * meta-attestations binding them. */
 
-    tc_mandate_id       := laplace_hash128_blake3('substrate/trust_class/SubstrateMandate/v1'::bytea);
-    tc_standards_id     := laplace_hash128_blake3('substrate/trust_class/StandardsDerived/v1'::bytea);
-    tc_academic_id      := laplace_hash128_blake3('substrate/trust_class/AcademicCurated/v1'::bytea);
-    tc_academic_user_id := laplace_hash128_blake3('substrate/trust_class/AcademicCuratedWithUserInput/v1'::bytea);
-    tc_corpus_id        := laplace_hash128_blake3('substrate/trust_class/StructuredCorpus/v1'::bytea);
-    tc_user_curated_id  := laplace_hash128_blake3('substrate/trust_class/UserCuratedResource/v1'::bytea);
-    tc_ai_probe_id      := laplace_hash128_blake3('substrate/trust_class/AIModelProbe/v1'::bytea);
-    tc_app_derived_id   := laplace_hash128_blake3('substrate/trust_class/AppDerived/v1'::bytea);
-    tc_user_prompt_id   := laplace_hash128_blake3('substrate/trust_class/UserPromptContent/v1'::bytea);
-    tc_adversarial_id   := laplace_hash128_blake3('substrate/trust_class/AdversarialUntrusted/v1'::bytea);
+    tc_mandate_id       := public.laplace_hash128_blake3('substrate/trust_class/SubstrateMandate/v1'::bytea);
+    tc_standards_id     := public.laplace_hash128_blake3('substrate/trust_class/StandardsDerived/v1'::bytea);
+    tc_academic_id      := public.laplace_hash128_blake3('substrate/trust_class/AcademicCurated/v1'::bytea);
+    tc_academic_user_id := public.laplace_hash128_blake3('substrate/trust_class/AcademicCuratedWithUserInput/v1'::bytea);
+    tc_corpus_id        := public.laplace_hash128_blake3('substrate/trust_class/StructuredCorpus/v1'::bytea);
+    tc_user_curated_id  := public.laplace_hash128_blake3('substrate/trust_class/UserCuratedResource/v1'::bytea);
+    tc_ai_probe_id      := public.laplace_hash128_blake3('substrate/trust_class/AIModelProbe/v1'::bytea);
+    tc_app_derived_id   := public.laplace_hash128_blake3('substrate/trust_class/AppDerived/v1'::bytea);
+    tc_user_prompt_id   := public.laplace_hash128_blake3('substrate/trust_class/UserPromptContent/v1'::bytea);
+    tc_adversarial_id   := public.laplace_hash128_blake3('substrate/trust_class/AdversarialUntrusted/v1'::bytea);
 
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
         (tc_mandate_id,       TRUST_TIER, type_id, subscan_id),
@@ -147,17 +147,17 @@ BEGIN
 
     /* === Stage 3: kind-value-tier entities (ADR 0044 Part A) =========== */
 
-    tier_t1_id  := laplace_hash128_blake3('substrate/kind_tier/T1_Mandate/v1'::bytea);
-    tier_t2_id  := laplace_hash128_blake3('substrate/kind_tier/T2_StandardsStructural/v1'::bytea);
-    tier_t3_id  := laplace_hash128_blake3('substrate/kind_tier/T3_Taxonomic/v1'::bytea);
-    tier_t4_id  := laplace_hash128_blake3('substrate/kind_tier/T4_Partitive/v1'::bytea);
-    tier_t5_id  := laplace_hash128_blake3('substrate/kind_tier/T5_Causal/v1'::bytea);
-    tier_t6_id  := laplace_hash128_blake3('substrate/kind_tier/T6_Equivalence/v1'::bytea);
-    tier_t7_id  := laplace_hash128_blake3('substrate/kind_tier/T7_Oppositional/v1'::bytea);
-    tier_t8_id  := laplace_hash128_blake3('substrate/kind_tier/T8_Associative/v1'::bytea);
-    tier_t9_id  := laplace_hash128_blake3('substrate/kind_tier/T9_TensorCalculation/v1'::bytea);
-    tier_t10_id := laplace_hash128_blake3('substrate/kind_tier/T10_ScalarValued/v1'::bytea);
-    tier_t11_id := laplace_hash128_blake3('substrate/kind_tier/T11_Probationary/v1'::bytea);
+    tier_t1_id  := public.laplace_hash128_blake3('substrate/kind_tier/T1_Mandate/v1'::bytea);
+    tier_t2_id  := public.laplace_hash128_blake3('substrate/kind_tier/T2_StandardsStructural/v1'::bytea);
+    tier_t3_id  := public.laplace_hash128_blake3('substrate/kind_tier/T3_Taxonomic/v1'::bytea);
+    tier_t4_id  := public.laplace_hash128_blake3('substrate/kind_tier/T4_Partitive/v1'::bytea);
+    tier_t5_id  := public.laplace_hash128_blake3('substrate/kind_tier/T5_Causal/v1'::bytea);
+    tier_t6_id  := public.laplace_hash128_blake3('substrate/kind_tier/T6_Equivalence/v1'::bytea);
+    tier_t7_id  := public.laplace_hash128_blake3('substrate/kind_tier/T7_Oppositional/v1'::bytea);
+    tier_t8_id  := public.laplace_hash128_blake3('substrate/kind_tier/T8_Associative/v1'::bytea);
+    tier_t9_id  := public.laplace_hash128_blake3('substrate/kind_tier/T9_TensorCalculation/v1'::bytea);
+    tier_t10_id := public.laplace_hash128_blake3('substrate/kind_tier/T10_ScalarValued/v1'::bytea);
+    tier_t11_id := public.laplace_hash128_blake3('substrate/kind_tier/T11_Probationary/v1'::bytea);
 
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
         (tier_t1_id,  KIND_TIER, type_id, subscan_id),
@@ -174,23 +174,23 @@ BEGIN
 
     /* === Stage 3: modality-agnostic attestation kinds ================== */
 
-    kind_is_a_id              := laplace_hash128_blake3('substrate/kind/IS_A/v1'::bytea);
-    kind_has_part_id          := laplace_hash128_blake3('substrate/kind/HAS_PART/v1'::bytea);
-    kind_co_occurs_with_id    := laplace_hash128_blake3('substrate/kind/CO_OCCURS_WITH/v1'::bytea);
-    kind_follows_id           := laplace_hash128_blake3('substrate/kind/FOLLOWS/v1'::bytea);
-    kind_precedes_id          := laplace_hash128_blake3('substrate/kind/PRECEDES/v1'::bytea);
-    kind_occurs_in_context_id := laplace_hash128_blake3('substrate/kind/OCCURS_IN_CONTEXT/v1'::bytea);
-    kind_has_language_id      := laplace_hash128_blake3('substrate/kind/HAS_LANGUAGE/v1'::bytea);
-    kind_is_translation_of_id := laplace_hash128_blake3('substrate/kind/IS_TRANSLATION_OF/v1'::bytea);
-    kind_depicts_id           := laplace_hash128_blake3('substrate/kind/DEPICTS/v1'::bytea);
-    kind_captions_id          := laplace_hash128_blake3('substrate/kind/CAPTIONS/v1'::bytea);
-    kind_transcribes_as_id    := laplace_hash128_blake3('substrate/kind/TRANSCRIBES_AS/v1'::bytea);
-    kind_is_lossy_enc_id      := laplace_hash128_blake3('substrate/kind/IS_LOSSY_ENCODING_OF/v1'::bytea);
-    kind_has_variant_of_id    := laplace_hash128_blake3('substrate/kind/HAS_VARIANT_OF/v1'::bytea);
-    kind_is_replaced_by_id    := laplace_hash128_blake3('substrate/kind/IS_REPLACED_BY/v1'::bytea);
-    kind_has_trust_class_id   := laplace_hash128_blake3('substrate/kind/HAS_TRUST_CLASS/v1'::bytea);
-    kind_has_kind_tier_id     := laplace_hash128_blake3('substrate/kind/HAS_KIND_VALUE_TIER/v1'::bytea);
-    kind_is_alias_of_id       := laplace_hash128_blake3('substrate/kind/IS_ALIAS_OF/v1'::bytea);
+    kind_is_a_id              := public.laplace_hash128_blake3('substrate/kind/IS_A/v1'::bytea);
+    kind_has_part_id          := public.laplace_hash128_blake3('substrate/kind/HAS_PART/v1'::bytea);
+    kind_co_occurs_with_id    := public.laplace_hash128_blake3('substrate/kind/CO_OCCURS_WITH/v1'::bytea);
+    kind_follows_id           := public.laplace_hash128_blake3('substrate/kind/FOLLOWS/v1'::bytea);
+    kind_precedes_id          := public.laplace_hash128_blake3('substrate/kind/PRECEDES/v1'::bytea);
+    kind_occurs_in_context_id := public.laplace_hash128_blake3('substrate/kind/OCCURS_IN_CONTEXT/v1'::bytea);
+    kind_has_language_id      := public.laplace_hash128_blake3('substrate/kind/HAS_LANGUAGE/v1'::bytea);
+    kind_is_translation_of_id := public.laplace_hash128_blake3('substrate/kind/IS_TRANSLATION_OF/v1'::bytea);
+    kind_depicts_id           := public.laplace_hash128_blake3('substrate/kind/DEPICTS/v1'::bytea);
+    kind_captions_id          := public.laplace_hash128_blake3('substrate/kind/CAPTIONS/v1'::bytea);
+    kind_transcribes_as_id    := public.laplace_hash128_blake3('substrate/kind/TRANSCRIBES_AS/v1'::bytea);
+    kind_is_lossy_enc_id      := public.laplace_hash128_blake3('substrate/kind/IS_LOSSY_ENCODING_OF/v1'::bytea);
+    kind_has_variant_of_id    := public.laplace_hash128_blake3('substrate/kind/HAS_VARIANT_OF/v1'::bytea);
+    kind_is_replaced_by_id    := public.laplace_hash128_blake3('substrate/kind/IS_REPLACED_BY/v1'::bytea);
+    kind_has_trust_class_id   := public.laplace_hash128_blake3('substrate/kind/HAS_TRUST_CLASS/v1'::bytea);
+    kind_has_kind_tier_id     := public.laplace_hash128_blake3('substrate/kind/HAS_KIND_VALUE_TIER/v1'::bytea);
+    kind_is_alias_of_id       := public.laplace_hash128_blake3('substrate/kind/IS_ALIAS_OF/v1'::bytea);
 
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
         (kind_is_a_id,              KIND_TIER, kind_id, subscan_id),
@@ -230,7 +230,7 @@ BEGIN
         id, subject_id, kind_id, object_id, source_id, context_id,
         rating, rd, volatility, last_observed_at, observation_count
     ) VALUES (
-        laplace_hash128_merkle(0::smallint, ARRAY[
+        public.laplace_hash128_merkle(0::smallint, ARRAY[
             subscan_id, kind_has_trust_class_id, tc_mandate_id, subscan_id, '\x00000000000000000000000000000000'::bytea
         ]),
         subscan_id, kind_has_trust_class_id, tc_mandate_id, subscan_id, NULL,
@@ -250,7 +250,7 @@ BEGIN
         id, subject_id, kind_id, object_id, source_id, context_id,
         rating, rd, volatility, last_observed_at, observation_count
     ) VALUES (
-        laplace_hash128_merkle(0::smallint, ARRAY[
+        public.laplace_hash128_merkle(0::smallint, ARRAY[
             kind_has_kind_tier_id, kind_is_a_id, tier_t2_id, subscan_id, '\x00000000000000000000000000000000'::bytea
         ]),
         kind_has_kind_tier_id, kind_is_a_id, tier_t2_id, subscan_id, NULL,
