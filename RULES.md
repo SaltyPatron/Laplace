@@ -63,7 +63,7 @@ Use standard PostGIS `geometry` type with Z+M = 4D (X, Y, Z spatial + M as fourt
 
 The substrate has **exactly three** core tables: `entities`, `physicalities`, `attestations`. No `observations` table — that was over-engineering. Attestation rows ARE the consensus state; repeated observations from the same source UPSERT-no-op (`ON CONFLICT DO NOTHING`).
 
-Provenance lives in the `source_hash` column of attestation rows, NOT in a separate event log.
+Provenance lives in the `source_id` column of attestation rows, NOT in a separate event log. Source version, trust class, and lineage/correlation family live as meta-attestations on the source entity.
 
 ---
 
@@ -86,18 +86,18 @@ For **linguistic resources** (WordNet, OMW, UD, Wiktionary, Tatoeba, ConceptNet,
 At export, positions in the target tensor with no significant substrate attestation emit **zero**. This makes emitted models automatically:
 
 - Pruned (5–20% non-zero typical)
-- Ensembled (Glicko-2 consensus across all relevant sources)
+- Synthesized from arena/source-trust effective support over the selected source scope
 - Cleaned (no gradient jitter, no init residue)
 
 Default output format for chattable proofs: GGUF with appropriate Q-format (so sparsity benefits are realized in llama.cpp).
 
 ---
 
-## R5 — Attestation IS consensus state, NOT event log
+## R5 — Attestation rows are current state, NOT event log
 
 One row per `(subject, kind, object, source, context)` tuple. Idempotent on repeat (`INSERT ON CONFLICT DO NOTHING`). The same source asserting the same thing N times does NOT update the rating N times.
 
-Glicko-2 dynamics live in **source-credibility-per-kind**, not per-tuple repetition. Updates fire only on cross-source agreement/disagreement evidence.
+Glicko-2 dynamics live in arena-resolved observation updates, not per-tuple repetition. Updates apply when incoming evidence from source-scoped observations is resolved through kind semantics, source trust, lineage, context, current state, and structural support.
 
 ---
 
@@ -229,7 +229,7 @@ Each layer has exactly one kind of work, per [ADR 0027](docs/adr/0027-separation
 | C/C++ engine | math, linalg, hashing, geometry, sparsity, codec, SIMD, fixed-point, file I/O | pipeline orchestration, plugin loading, network I/O, DB connection management |
 | PG extension (C wrappers) | Datum↔engine-struct marshalling, PG_TRY/PG_CATCH, opclass support functions, schema DDL | re-implementing engine math; non-trivial PL/pgSQL; control flow that isn't dispatching |
 | C# orchestration | pipelines, plugin host, protocol endpoints, DB connection, CLI, recipe parsing | math beyond trivial accounting; reimplementing engine functions for "convenience"; hot-path numerical code |
-| SQL / DbUp migrations | idempotent DDL; role grants; CREATE EXTENSION orchestration via `laplace_priv` wrapper; ALTER DEFAULT PRIVILEGES | business logic; procedural transforms; substrate schema definition (lives in extension upgrade scripts per [ADR 0023](docs/adr/0023-extension-owns-schema-dbup-orchestrates.md)) |
+| SQL / DbUp migrations | idempotent DDL; role grants; direct `CREATE EXTENSION` orchestration (`laplace_admin` is `SUPERUSER` per [ADR 0045](docs/adr/0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md)); `ALTER DEFAULT PRIVILEGES` | business logic; procedural transforms; substrate schema definition (lives in extension upgrade scripts per [ADR 0023](docs/adr/0023-extension-owns-schema-dbup-orchestrates.md)) |
 
 **Resolution rule:** a piece of work belongs in the *lowest* layer that can correctly express it. Math always lands in C/C++. Orchestration in C# or SQL.
 
@@ -276,11 +276,11 @@ Cascade traversal is a compiled substrate operator exposed via SQL, not SQL-as-c
 
 ## R20 — Arena semantics and source trust are mandatory
 
-Every attestation kind that participates in rating composition belongs to an arena with explicit semantics: compatibility, cardinality, context policy, competition set, source-trust policy, and effective-score inputs. Glicko-2 updates MUST interpret agreement/disagreement through those arena semantics.
+Every attestation kind that participates in rating composition belongs to an arena with explicit semantics: compatibility, cardinality, context policy, observation update scope, conflict policy, source-trust policy, lineage policy, and effective-score inputs. Glicko-2 updates MUST interpret incoming observations through those arena semantics.
 
 Raw source counts are never consensus. Source credibility is tracked per source per attestation kind, and source trust classes are part of the prior: foundational constants, standards-derived sources, curated academic resources, academically linked user-curated resources, structured corpora, AI-model probe observations, and prompt-local/user content. Correlated source families do not become independent tugs merely by repetition.
 
-Unsupported or low-trust claims MAY be stored as source-scoped observations, but they do not win strict traversal or synthesis scopes unless they survive the relevant arena competition against higher-trust, structurally supported evidence.
+Unsupported or low-trust claims MAY be stored as source-scoped observations, but they do not win strict traversal or synthesis scopes unless their arena-aware effective mu is supported by independent, trusted, structurally adjacent observations.
 
 ---
 

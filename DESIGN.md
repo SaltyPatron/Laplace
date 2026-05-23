@@ -125,9 +125,10 @@ CREATE INDEX attestations_last_observed ON attestations USING brin  (last_observ
 
 - `id` — **lookup** (PK). Content-addressed (BLAKE3 of the 5-tuple); stable across re-observation. Same tuple → same `id` regardless of insertion order.
 - `subject_id` / `kind_id` / `object_id` / `source_id` / `context_id` — **lookup** (FKs to entities). All entity references.
-- `kind_id` is the substrate's **typed knowledge vocabulary** — a small fixed enumeration per modality / per architecture family. Each kind plays a functional role in cascade composition; the substrate's actual vocabulary is usage- and structure-shaped (`CO_OCCURS_WITH`, `FOLLOWS`, `IS_HYPERNYM_OF`, `Q_PROJECTS`, etc.), not architecture-position-shaped. Kind entities are parameter-free; per-position attribution (layer, head, etc.) lives as meta-attestations or as recipe content on the source entity.
-- `rating` / `rd` / `volatility` — **attestation knowledge** (the Glicko-2 state per attestation). int64 fixed-point at scale 10⁹. Glicko-2 dynamics update on cross-source agreement/disagreement evidence — per [ADR 0036](docs/adr/0036-arena-semantics-and-source-trust.md). The substrate's "weight magnitude" analog.
-- `last_observed_at` / `observation_count` — **metadata** (housekeeping; time decay input + dedup counter).
+- `kind_id` is the substrate's **typed knowledge vocabulary** — a small fixed enumeration per modality / per architecture family. Each kind plays a functional role in cascade composition; the substrate's actual vocabulary is usage- and structure-shaped (`CO_OCCURS_WITH`, `FOLLOWS`, `IS_HYPERNYM_OF`, `Q_PROJECTS`, etc.), not architecture-position-shaped. Kind entities are parameter-free; for transformer-family tensor-calculation kinds, per-position attribution (layer, head, tensor slot, modality vocabulary layout) is recipe content on the model recipe entity. Transformer-family roles are one architecture-family vocabulary, not the universal model ontology.
+- Generic ingestion/API mental model: `OBSERVE_ATTESTATION(kind_id, subject_id, object_id, source_id, context_id, qualifiers)`. `HAS_POS` is a kind entity inside that envelope, not a bespoke function. Qualifiers are queryable entity-backed metadata; no opaque `params[]` in storage or hot-path semantics.
+- `rating` / `rd` / `volatility` — **attestation knowledge** (the Glicko-2 state per source-scoped attestation row). int64 fixed-point at scale 10⁹. Glicko-2 dynamics update through arena-resolved incoming observations — per [ADR 0036](docs/adr/0036-arena-semantics-and-source-trust.md). The substrate's "weight magnitude" analog.
+- `last_observed_at` / `observation_count` — **metadata** (housekeeping only; not effective-mu evidence and never a source-count truth signal).
 - `ON DELETE CASCADE` on physicalities (purging a source removes its physicalities); **no** cascade on attestations (entity removal is deliberate).
 - Hash-partitioning by `source_id` is optional for operational ease — not required for query performance at the scales we're targeting (10⁹–10¹⁰ rows).
 
@@ -169,12 +170,12 @@ raw input bytes
 
 ## II. Type system at the SQL layer
 
-Two extensions, both installed via `laplace_priv.install_extension` (SECURITY DEFINER wrapper) per ADR 0023 + 0025:
+Two extensions, installed directly by DbUp as `laplace_admin` (which is `SUPERUSER` per [ADR 0045](docs/adr/0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md)):
 
 ```sql
-SELECT laplace_priv.install_extension('postgis');           -- requires SUPERUSER; wrapped
-SELECT laplace_priv.install_extension('laplace_geom');      -- requires postgis
-SELECT laplace_priv.install_extension('laplace_substrate'); -- requires laplace_geom + postgis
+CREATE EXTENSION IF NOT EXISTS postgis;            -- not trusted; SUPERUSER required (we are one)
+CREATE EXTENSION IF NOT EXISTS laplace_geom;       -- requires postgis
+CREATE EXTENSION IF NOT EXISTS laplace_substrate;  -- requires laplace_geom + postgis
 ```
 
 `laplace_geom` provides (per ADR 0025):
@@ -198,7 +199,8 @@ Attestation kinds are substrate entities and may carry meta-attestations declari
 
 - compatibility: multi-valued, functional, inverse-functional, mutually exclusive, scalar, symmetric, etc.
 - context policy: context-free, context-required, temporal interval, comparison frame, source-local, prompt-local, fiction/speculation mode, etc.
-- competition set: which `(subject, kind, context)` tuples compete for one or more winning objects
+- observation update scope: which tuple slots decide whether an incoming observation updates the same attestation state or a separate state
+- conflict policy: which alternatives within that update scope are incompatible; absent for compatible multi-valued arenas
 - source trust policy: which source classes are authoritative, admissible, discounted, or prompt-local
 - effective-score inputs: rating, RD, volatility, source credibility for kind, trust class, context compatibility, and structural support
 
@@ -216,7 +218,7 @@ France HAS_CURRENT_CAPITAL Paris
 France HAS_CURRENT_CAPITAL Los Angeles
 ```
 
-These compete in the same functional current-capital arena under the same geopolitical/current-time context.
+These conflict in the same functional current-capital observation update scope under the same geopolitical/current-time context.
 
 Source trust classes seed priors before per-kind Glicko-2 dynamics refine credibility: foundational constants, standards-derived sources, curated academic resources, academically linked user-curated resources, structured corpora/treebanks, AI-model probe observations, and prompt-local/user content. Repetition inside a correlated source family is not counted as independent consensus.
 
@@ -718,7 +720,7 @@ For AI model sources, fidelity means `TransformerModelSource` captures the sourc
 - tokenizer/content entities and recipe attestations
 - anchor physicalities from the Procrustes/Laplacian/Gram-Schmidt pipeline
 - probe observations over prompts/tasks selected for the architecture
-- fixed-vocabulary tensor-calculation attestation kinds for transformer-family models (`EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`); per-position attribution rides as meta-attestations, NOT as parameterized kind entities
+- fixed-vocabulary tensor-calculation attestation kinds for transformer-family models (`EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`); per-position attribution is recipe content on the model recipe entity, NOT parameterized kind entities or routine per-attestation metadata. Other architecture families register their own fixed mechanical-role vocabularies through their `IArchitectureTemplate`.
 - lottery-ticket sparse edges that survive per-tensor, per-row, and probe validation gates
 
 For a source-scoped round-trip, if ingestion is faithful and synthesis uses the source recipe/scope, missing source-model behavior is a codec bug or tuning failure, not an accepted architectural gap. The expected comparison is stock source model vs. native substrate traversal vs. synthesized export under fixed prompts and sampler settings.
@@ -747,7 +749,7 @@ User custom recipe JSON (Substrate Synthesis):
   "knowledge_scope": {
     "include_sources": ["wikipedia_en", "wordnet", "qwen3-1.5b"],
     "exclude_sources": [],
-    "rating_threshold": 0.5
+    "effective_mu_policy": "arena_default"
   },
   "feature_extractors": [
     {"kind": "canonical_coord", "dims": 5},
@@ -784,7 +786,7 @@ These are explicit non-decisions. They will be made at execution time with the u
 - **A\* heuristic h()** specific formula + admissibility analysis
 - **Effective mu formula** combining rating/RD/volatility/source-kind credibility/context compatibility
 - **Lottery-ticket criteria parameters** (per-tensor k%, per-row k, probe-set design)
-- **Per-architecture probe protocols** (transformer first; mamba/diffusion/CNN later)
+- **Per-architecture probe protocols** (Qwen-family text transformer first codec target; mamba/diffusion/CNN/vision/audio/code model families later)
 - **Feature-extractor dim assignments** for first synthesis (~1500 for Qwen3-1.5B)
 - **Specific modality decomposers** for vision/audio/video (text via UAX + code via tree-sitter are settled)
 
