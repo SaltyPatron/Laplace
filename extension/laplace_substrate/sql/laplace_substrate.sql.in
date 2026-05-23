@@ -10,6 +10,7 @@
 #include "03_physicalities.sql.in"
 #include "04_attestations.sql.in"
 #include "05_indexes.sql.in"
+#include "10_bootstrap.sql.in"
 #include "06_glicko2.sql.in"
 #include "07_cascade.sql.in"
 #include "08_sp_trajectory_ops.sql.in"
