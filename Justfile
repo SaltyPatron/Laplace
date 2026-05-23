@@ -49,6 +49,15 @@ setup-host-reset:
 # to /usr/lib/postgresql/18 (stock); override via LAPLACE_PG_PREFIX env
 # var to point at the custom build at /opt/laplace/pgsql-18.
 
+# Apply local-only attribute overrides that suppress text-normalization
+# of upstream CRLF test fixtures in 5 of 303 tree-sitter grammars (awk,
+# bash, c, djot, jsdoc). Without this prereq, every fresh `git clone
+# --recursive` leaves those submodules DIRTY after checkout — see
+# scripts/normalize-submodule-attributes.sh for full rationale.
+# Idempotent: silent no-op on clean state.
+submodule-sanity:
+    @scripts/normalize-submodule-attributes.sh
+
 # Build deps from external/ submodules (PROJ, GEOS, GDAL, PG, PostGIS,
 # tree-sitter runtime) via the unified ExternalProject_Add pipeline at
 # external/CMakeLists.txt per ADR 0038. gcc toolchain for the dep chain
@@ -56,7 +65,10 @@ setup-host-reset:
 # upstream bug and builds ~2-3x faster). Idempotent — stamp-based; re-runs
 # with the same submodule SHAs are no-ops. One-time ~10-12 min on a clean
 # /opt/laplace.
-build-deps:
+#
+# Depends on submodule-sanity so the CRLF-fixture override fix runs
+# before any build artifact gets pinned to dirty source state.
+build-deps: submodule-sanity
     cmake -B build/deps -S external
     cmake --build build/deps -j
 
