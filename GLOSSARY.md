@@ -110,7 +110,22 @@ An entity that emits attestations and/or physicalities. Linguistic resources (Un
 
 ### Source Trust Class
 
-The prior trust band assigned to a source before per-kind credibility updates: foundational constants, standards-derived sources (Unicode/UCD/UCA/UAX), curated academic resources (WordNet, UD), academically linked user-curated resources (OMW, Wiktionary), structured corpora, AI-model probe observations, and prompt-local/user content. Trust class is not truth by fiat; it weights Glicko-2 agreement/disagreement inside an arena.
+A 10-tier hierarchy of substrate-canonical entities (per [ADR 0044](docs/adr/0044-attestation-kind-priors-and-source-trust-taxonomy.md)) that classifies each source by its trust band. Adding a new source = picking which tier it falls under + recording a `HAS_TRUST_CLASS` meta-attestation pointing at that tier's entity. Trust class entities carry prior weight, effective-μ multiplier, arena admittance policy, and retention policy as meta-attestations.
+
+| Tier | Class | Examples |
+|---|---|---|
+| 1 | `TrustClass_SubstrateMandate` | Substrate-canonical source itself; Universal T0 mapping; super-Fibonacci placement |
+| 2 | `TrustClass_StandardsDerived` | Unicode/UCD/UCA/UAX; ISO 639/15924/10646; BCP-47 (IANA); W3C/IETF/RFC |
+| 3 | `TrustClass_AcademicCurated` | Princeton WordNet; UD treebanks; NSF-funded KBs (Atomic2020) |
+| 4 | `TrustClass_AcademicCuratedWithUserInput` | OMW; CLDR community contributions; ConceptNet's WordNet/JMDict sub-sources |
+| 5 | `TrustClass_StructuredCorpus` | Tatoeba; ConceptNet's Wikipedia sub-source; structured public datasets |
+| 6 | `TrustClass_UserCuratedResource` | Wiktionary; Common Crawl tier; OMCS within ConceptNet |
+| 7 | `TrustClass_AIModelProbe` | Single-model probe observations |
+| 8 | `TrustClass_AppDerived` | Runtime logs, internal state, app-side derivations |
+| 9 | `TrustClass_UserPromptContent` | Prompt-local user assertions; uploaded content awaiting corroboration |
+| 10 | `TrustClass_AdversarialUntrusted` | Flagged content (spam / prompt-injection / corruption); excluded from cascade |
+
+Trust class is NOT truth by fiat; it weights Glicko-2 agreement/disagreement inside an arena. Cross-source agreement at tiers 2-5 builds high-confidence consensus; lone tier-7 model probes get discounted; tier-10 content doesn't admit to any arena.
 
 ### Context
 
@@ -241,7 +256,7 @@ Decomposition of S³ as S¹ fiber over S² base. Used (alongside super-Fibonacci
 
 ### UCA (Unicode Collation Algorithm)
 
-ICU-provided deterministic sort order for Unicode codepoints. Used to assign each codepoint its position in the super-Fibonacci sequence.
+Deterministic linguistic sort order for Unicode codepoints, per Unicode Technical Standard #10. The substrate ingests UCA via the **DUCET** (Default Unicode Collation Element Table) source file `allkeys.txt` published at `https://www.unicode.org/Public/UCA/<ver>/allkeys.txt` (locally at `/vault/Data/Unicode/Public/UCA/<ver>/allkeys.txt`). [UnicodeDecomposer](#unicodedecomposer-layer-1) parses DUCET directly — not via ICU — because the substrate needs the *raw weights* (primary / secondary / tertiary) as attestations on each codepoint, plus the *full collation order* as the input index to super-Fibonacci placement on S³. Runtime locale-aware collation queries (per-locale tailorings) can still go through ICU if needed at query time; substrate ingestion uses the source directly for determinism.
 
 ### Procrustes alignment
 
@@ -363,7 +378,14 @@ The attestation facet of an entity: rows in `attestations` whose subject/object/
 
 ### Recipe
 
-The architectural template of a model. Auto-extracted at ingest from `config.json` + `tokenizer.json` + auxiliary files; stored as a `Model_Recipe`-typed entity with typed attestations (`HAS_HIDDEN_SIZE`, `HAS_NUM_LAYERS`, etc.). Used as the default template for round-trip emission. User can override with custom JSON.
+The architectural template of a model — a **template-with-parameters**. Auto-extracted at ingest from `config.json` + `tokenizer.json` + auxiliary architecture files; stored as a `Model_Recipe`-typed entity (text/JSON content) with typed attestations (`HAS_HIDDEN_SIZE`, `HAS_NUM_LAYERS`, `HAS_NUM_HEADS`, `HAS_NUM_KV_HEADS`, `HAS_INTERMEDIATE_SIZE`, `HAS_VOCAB_SIZE`, `HAS_DTYPE`, `USES_TOKENIZER`, `USES_ROPE_THETA`, `USES_ACTIVATION`, `IS_A Architecture_<X>`, etc.).
+
+A Recipe is **bidirectional** through the [`IArchitectureTemplate`](docs/adr/0011-polymorphic-plugin-architecture.md) plugin (per ADR 0043 ModelDecomposer composition):
+
+- **Ingest direction**: the recipe + architecture template instantiate the model's structural shape so [ModelDecomposer](#modeldecomposercontainerformat-layer-10) knows what each tensor MEANS mechanically (Q projection at layer L head H; gate at layer L; etc.).
+- **Synthesis direction**: the recipe + architecture template populate the tensor slots from substrate-consensus typed-tensor-calculation attestations + emit a fresh model file ([Substrate Synthesis](#substrate-synthesis)).
+
+Recipe parameters are user-authorable. The substrate can emit custom recipes that don't match any ingested vendor's shape — different dim, different layer count, different vocab subset, different dtype, different sparsity target, different knowledge scope.
 
 ### Substrate Synthesis
 
@@ -408,9 +430,9 @@ Thin wrappers around engine functions, exposed via `PG_FUNCTION_INFO_V1`. Add cu
 
 Memory-mapped binary file containing precomputed T0 codepoint data: IDs, 4D canonical coords, Hilbert indices, UCA orders, flags. Built once at deploy time from Unicode UCD. ~67 MiB; fits in CPU L2/L3 cache.
 
-### Build pipeline (Unicode UCD → artifacts)
+### Build pipeline (UnicodeDecomposer → perf-cache + DB seed sibling artifacts)
 
-The deterministic derivation that produces TWO sibling artifacts from Unicode UCD: (1) the perf-cache binary, (2) the DB seed of T0 entity rows + their substrate-canonical CONTENT physicalities. Neither feeds the other; both trace to Unicode itself as the canonical source.
+Per [ADR 0006](docs/adr/0006-perfcache-and-db-seed-siblings.md), [UnicodeDecomposer](#unicodedecomposer-layer-1)'s install-time run produces TWO sibling artifacts from its Unicode-ecosystem ingest (UCDXML + UCA DUCET + Unihan + emoji + auxiliary segmentation + CLDR-unicode): (1) the perf-cache binary (≈67 MiB, mmap'd at runtime), (2) the DB seed of T0 codepoint rows + their substrate-canonical CONTENT physicalities + the rich attestation cloud per codepoint. Neither feeds the other; both trace to Unicode itself as the canonical source. Same UCD + UCA version + same UnicodeDecomposer build → byte-identical artifacts on every machine.
 
 ### Three-phase architecture
 

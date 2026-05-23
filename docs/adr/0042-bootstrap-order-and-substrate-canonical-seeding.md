@@ -32,11 +32,32 @@ Stage-0 set: `Type` (self-typed), `Kind`, `PhysicalityKind`, `Source`, `Substrat
 
 Three rows of `type_id = <PhysicalityKind>`: `CONTENT`, `BUILDING_BLOCK`, `PROJECTION` (extensible). The `physicalities.kind smallint` column values alias to these entities; the entities exist so per-kind meta-attestations can attach.
 
-**Stage 3 — substrate-canonical attestation-kind vocabulary (modality-agnostic):**
+**Stage 3 — substrate-canonical attestation-kind vocabulary (modality-agnostic) + kind-value tiers:**
 
-`IS_A`, `HAS_PART`, `CO_OCCURS_WITH`, `FOLLOWS`, `PRECEDES`, `OCCURS_IN_CONTEXT`, `HAS_LANGUAGE`, `IS_TRANSLATION_OF`, `DEPICTS`, `CAPTIONS`, `TRANSCRIBES_AS`, `IS_LOSSY_ENCODING_OF`, ...
+Modality-agnostic kinds: `IS_A`, `HAS_PART`, `CO_OCCURS_WITH`, `FOLLOWS`, `PRECEDES`, `OCCURS_IN_CONTEXT`, `HAS_LANGUAGE`, `IS_TRANSLATION_OF`, `DEPICTS`, `CAPTIONS`, `TRANSCRIBES_AS`, `IS_LOSSY_ENCODING_OF`, `HAS_VARIANT_OF`, `IS_REPLACED_BY`, `HAS_TRUST_CLASS`, `HAS_KIND_VALUE_TIER`, `IS_ALIAS_OF`, ...
 
-Per-modality kinds (`HAS_GENERAL_CATEGORY`, `HAS_VALIDITY`, `IS_HYPERNYM_OF`, `Q_PROJECTS`, ...) are bootstrapped by their owning decomposer at first run, not at install — they don't change the install's bootstrap hash.
+Per-modality kinds (`HAS_GENERAL_CATEGORY`, `HAS_VALIDITY`, `IS_HYPERNYM_OF`, `Q_PROJECTS`, ...) are bootstrapped by their owning decomposer at first run, not at install.
+
+Plus the **11 kind-value-tier entities** per [ADR 0044](0044-attestation-kind-priors-and-source-trust-taxonomy.md) (T1 Mandate / T2 Standards Structural / T3 Taxonomic / T4 Partitive / T5 Causal / T6 Equivalence / T7 Oppositional / T8 Associative / T9 Tensor-Calculation / T10 Scalar-Valued / T11 Probationary). Each tier entity carries the Glicko-2 prior (rating, RD, volatility) + cascade-weight multiplier as meta-attestations.
+
+**Stage 3.5 — source-trust-class taxonomy (10-tier hierarchy):**
+
+Per [ADR 0044](0044-attestation-kind-priors-and-source-trust-taxonomy.md), bootstrap seeds the 10 trust-class entities:
+
+1. `TrustClass_SubstrateMandate`
+2. `TrustClass_StandardsDerived`
+3. `TrustClass_AcademicCurated`
+4. `TrustClass_AcademicCuratedWithUserInput`
+5. `TrustClass_StructuredCorpus`
+6. `TrustClass_UserCuratedResource`
+7. `TrustClass_AIModelProbe`
+8. `TrustClass_AppDerived`
+9. `TrustClass_UserPromptContent`
+10. `TrustClass_AdversarialUntrusted`
+
+Each entity carries meta-attestations: `HAS_PRIOR_WEIGHT`, `HAS_EFF_MU_MULTIPLIER`, `HAS_ARENA_ADMITTANCE_POLICY`, `HAS_RETENTION_POLICY`. The substrate-canonical source entity gets `HAS_TRUST_CLASS → TrustClass_SubstrateMandate` immediately on bootstrap.
+
+Plus initial **cross-decomposer kind-reconciliation aliases** (per ADR 0044 Part C) — e.g., `IS_ALIAS_OF` meta-attestations linking ConceptNet's `IsA` to canonical `IS_A`, OMW's per-language `IS_LEMMA_OF` variants to the canonical kind, etc.
 
 **Stage 4 — substrate-canonical Entity Type vocabulary:**
 

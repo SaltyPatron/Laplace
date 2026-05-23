@@ -455,6 +455,30 @@ Naming convention for attestation kinds:
 
 Tensor-calculation kinds for transformer-family AI models are a fixed ~10-element vocabulary: `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`. Per-position attribution (layer, head, per-tensor token vocabulary) is **recipe content** — text/JSON on the model recipe entity, not per-attestation metadata. Attestations aggregate across positions; the architecture template (substrate code, per `IArchitectureTemplate`) distributes the aggregated typed attestations across recipe-shaped tensor slots at emit time. Storing position attribution on attestation rows would be redundant with the recipe.
 
+### Kind value tiers + Glicko-2 priors (ADR 0044)
+
+Every attestation kind belongs to one of 11 **value tiers** that determine its Glicko-2 prior (initial rating / RD / volatility) and its cascade-weight multiplier. Tier assignment is a meta-attestation on the kind entity (`HAS_KIND_VALUE_TIER`). Tiers + their priors are bootstrapped at install per [ADR 0042](docs/adr/0042-bootstrap-order-and-substrate-canonical-seeding.md) Stage 3.
+
+Summary (full per-tier values in [ADR 0044](docs/adr/0044-attestation-kind-priors-and-source-trust-taxonomy.md)):
+
+- **T1 Mandate** — substrate invariants (highest prior + 1.0× weight)
+- **T2 Standards Structural** — codified standards-derived (rating ≈ 2300, weight 1.0×)
+- **T3 Taxonomic** — `IS_A`, `IS_HYPERNYM_OF`, ... (rating ≈ 1900, weight 0.9×)
+- **T4 Partitive** — `IS_PART_OF`, `IS_MERONYM_OF`, ... (rating ≈ 1800, weight 0.85×)
+- **T5 Causal** — `CAUSES`, `BECAUSE`, `ENTAILS`, ... (rating ≈ 1700, weight 0.8×)
+- **T6 Equivalence** — `IS_TRANSLATION_OF`, `IS_SIMILAR_TO`, ... (rating ≈ 1600, weight 0.7×)
+- **T7 Oppositional** — `IS_ANTONYM_OF`, `EXCLUDES`, ... (rating ≈ 1550, weight 0.6×)
+- **T8 Associative** — `CO_OCCURS_WITH`, `FOLLOWS`, `USED_FOR`, ... (rating ≈ 1500, weight 0.5×)
+- **T9 Tensor-Calculation** — `Q_PROJECTS`, ... (rating ≈ 1400, weight 0.4×; single-probe trust; cluster across many models for higher confidence)
+- **T10 Scalar-Valued** — `HAS_NUMERIC_VALUE`, `HAS_FREQUENCY`, ... (rating IS the value; RD captures measurement uncertainty)
+- **T11 Probationary** — user-prompt-emitted attestations (rating ≈ 1300, weight 0.3×; session-scoped)
+
+A kind entity MAY carry per-kind overrides (meta-attestations) to deviate from tier defaults when justified.
+
+### Source trust class discipline (ADR 0044)
+
+Sources MUST register a `HAS_TRUST_CLASS` meta-attestation pointing at one of the 10 bootstrapped trust-class entities. Glicko-2 attestation initialization combines the kind's prior tier + the source's trust class weight to compute initial (rating, RD, volatility) — NOT a global default. Trust-class weight + arena admittance policy lives on the trust-class entity (not in plugin code).
+
 Adding a new attestation kind requires (a) defining its arena semantics as meta-attestations, (b) declaring its source-trust policy, (c) registering it as an entity with the substrate-canonical source attesting its kind-properties. The type-taxonomy agent is the canonical owner.
 
 ## Versioning

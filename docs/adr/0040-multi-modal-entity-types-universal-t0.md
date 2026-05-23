@@ -27,17 +27,35 @@ Key design observations from the working sessions:
 - **Reconstruction rule** — how to emit bytes back from a trajectory walk.
 - **Modality-applicable attestation kinds** — which typed transforms apply (e.g., `EXTRACTS_R_CHANNEL` for pixel-type entities; `HAS_POS` for text-type entities).
 
-Type entities are themselves rows in `entities`, bootstrapped at install. Initial type vocabulary:
+Type entities are themselves rows in `entities`, bootstrapped per [ADR 0042](0042-bootstrap-order-and-substrate-canonical-seeding.md). The vocabulary splits into:
 
-- **Universal**: `Codepoint` (T0).
-- **Text**: `Text`, `Grapheme`, `Word_Form`, `Sentence`, `Paragraph`, `Section`, `Document`, `Corpus`.
-- **Code**: `Code_Token`, `Code_Span`, `Code_File`, `Code_Repository` (tree-sitter-driven).
-- **Visual**: `Pixel`, `Patch`, `Region`, `Image`, `Image_Collection`.
-- **Audio**: `Audio_Sample`, `Audio_Frame`, `Audio_Track`.
-- **AI model**: `Model_Recipe`, `Model_Tokenizer`, `Model_Architecture` (and the substrate-canonical tensor-calculation-kind entities — see below).
-- **Structured linguistic**: `WordNet_Synset`, `UD_Sentence`, `UD_Token`, `Wiktionary_Entry`, `Tatoeba_Sentence`, `Atomic2020_Event`, `ConceptNet_Concept`.
+**Install-time bootstrap (ADR 0042 Stage 4)** — universally-applicable types every substrate needs:
 
-Adding a new modality = adding new type entities + registering an IDecomposer plugin for them. Schema unchanged.
+- **Meta** (Stage 0): `Type`, `Kind`, `PhysicalityKind`, `Source`, `SubstrateCanonical`.
+- **Universal atomic**: `Codepoint` (T0).
+- **Text-modality tiers**: `Text`, `Grapheme`, `Word_Form`, `Sentence`, `Paragraph`, `Section`, `Document`, `Corpus`.
+- **Visual-modality tiers**: `Pixel`, `Patch`, `Region`, `Image`, `Image_Collection`.
+- **Audio-modality tiers**: `Audio_Sample`, `Audio_Frame`, `Audio_Track`.
+- **Code-modality tiers**: `Code_Token`, `Code_Span`, `Code_File`, `Code_Repository`, `Programming_Language`.
+- **AI model**: `Model_Recipe`, `Model_Tokenizer`, `Model_Architecture`.
+
+**Decomposer-time bootstrap (per ADR 0042 Stage 6+)** — domain-specific types each decomposer introduces at its first run:
+
+| Decomposer | New types it bootstraps |
+|---|---|
+| UnicodeDecomposer | `Script`, `Block`, `General_Category`, `BiDi_Class`, `Canonical_Combining_Class`, `Line_Break_Class`, `Grapheme_Break_Class`, `Word_Break_Class`, `Sentence_Break_Class`, `East_Asian_Width`, `Unicode_Version`, `Named_Sequence`, `Emoji_ZWJ_Sequence`, `Variation_Sequence`, `Hangul_Syllable_Type`, `Indic_Positional_Category`, `Indic_Syllabic_Category`, `Vertical_Orientation` |
+| ISODecomposer | `Language`, `Region` (geopolitical — distinct from visual `Region`; namespaced as `ISO_Region` if collision matters), `Currency`, `Variant`, `Subdivision`, `Unit`, `Macrolanguage` (`Script` is shared with UnicodeDecomposer — same row, both attach attestations) |
+| WordNetDecomposer | `WordNet_Synset`, `WordNet_Sense` |
+| OMWDecomposer | `OMW_LangPack` |
+| UDDecomposer | `UD_Treebank`, `UD_Sentence`, `UD_Token` |
+| WiktionaryDecomposer | `Wiktionary_Entry` |
+| TatoebaDecomposer | `Tatoeba_Sentence`, `Voice` (speaker) |
+| Atomic2020Decomposer | `Atomic2020_Event` |
+| ConceptNetDecomposer | `ConceptNet_Concept` |
+| TreeSitterDecomposer | `Grammar_Rule`, `Highlight_Query` (`Programming_Language` is install-time per Code-modality bootstrap) |
+| ModelDecomposer | (uses install-time `Model_*` types; specific architectures may add architecture-instance entities if needed) |
+
+Adding a new modality = adding install-time type entities (if cross-modal-universal) + registering an IDecomposer plugin that bootstraps domain-specific types at first run. Schema unchanged.
 
 ### Universal T0 — codepoints under every tier ladder
 
