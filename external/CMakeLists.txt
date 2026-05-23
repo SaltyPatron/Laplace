@@ -235,6 +235,15 @@ ExternalProject_Add(postgis
         "CFLAGS=${_LAPLACE_CFLAGS}"
         "CXXFLAGS=${_LAPLACE_CFLAGS}"
         "LDFLAGS=${_POSTGIS_LDFLAGS}"
+        # --with-pgconfig routes extension .so + .sql + .control into PG's
+        # tree (/opt/laplace/pgsql-18/{lib,share/extension}), but PostGIS's
+        # topology Makefile install-importer hardcodes `$(bindir)` for
+        # pgtopo_import, which falls back to autoconf's /usr/local/bin
+        # default — root-owned, install fails. --prefix + --bindir +
+        # --datarootdir pin every install dest under /opt/laplace/pgsql-18.
+        "--prefix=${LAPLACE_DEPS_PREFIX}/pgsql-18"
+        "--bindir=${LAPLACE_DEPS_PREFIX}/pgsql-18/bin"
+        "--datarootdir=${LAPLACE_DEPS_PREFIX}/pgsql-18/share"
         "--with-pgconfig=${LAPLACE_DEPS_PREFIX}/pgsql-18/bin/pg_config"
         "--with-geosconfig=${LAPLACE_DEPS_PREFIX}/geos/bin/geos-config"
         "--with-gdalconfig=${LAPLACE_DEPS_PREFIX}/gdal/bin/gdal-config"
