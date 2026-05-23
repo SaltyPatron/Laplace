@@ -42,11 +42,11 @@
 #      the install is sudo-free per ADR 0019 amendment 2026-05-23.
 #  11. Cleanup of legacy state (ahart-as-superuser, ahart DB, old runner
 #      under /home/ahart/actions-runner)
-#  12. /opt/laplace/external/ — canonical persistent clone of every submodule
-#      in .gitmodules. Cloned once from upstream, fetched on subsequent runs.
-#      Used as --reference target by scripts/ci-init-submodules.sh so the
-#      runner workspace never re-downloads 5+ GB of submodule sources between
-#      workflow runs. Owned ahart:laplace-runner setgid (matches /opt/laplace).
+#  12. /opt/laplace/external/ — empty cache directory with the right perms
+#      (ahart:laplace-runner setgid 2775). POPULATION is project state, not
+#      machine state — it belongs in the pipeline. scripts/ci-init-submodules.sh
+#      (invoked from integration.yml or run by a developer via group membership)
+#      populates + refreshes the cache idempotently, no sudo required.
 #  13. /var/lib/laplace-runner/.config/gh/hosts.yml — gh CLI auth for the
 #      runner user, derived from $SUDO_USER's existing gh config. Lets the
 #      runner do `gh issue edit` / `gh api` per CLAUDE.md cadence without
@@ -735,97 +735,19 @@ bootstrap_remove_legacy_sudoers() {
     fi
 }
 
-bootstrap_submodule_cache() {
-    # Per ADR 0033 — all C/C++ deps are submodules under external/. The
-    # runner workspace is scratch (actions/checkout cleans it); to keep
-    # CI from re-downloading 5+ GB of submodule sources every workflow
-    # run, /opt/laplace/external/ holds one persistent canonical clone
-    # per submodule. scripts/ci-init-submodules.sh points each workspace
-    # submodule init at this cache via git's --reference / alternates.
+bootstrap_submodule_cache_dir() {
+    # Create the empty /opt/laplace/external/ tree with the right perms
+    # so the pipeline (or a developer running scripts/ci-init-submodules.sh
+    # directly via group membership) can populate it without sudo.
     #
-    # First run: clones every submodule URL from .gitmodules. Network-
-    # bound; ~10-20 min depending on link speed (~530 MB checked out per
-    # ADR 0033 estimate; ~1 GB with all 303 tree-sitter grammars).
-    # Subsequent runs: `git fetch` in each existing clone — sub-minute.
-    #
-    # Runs as laplace-runner so ownership lands right from the start.
-    # Files inherit the laplace-runner group via /opt/laplace's setgid.
-    say "Populate /opt/laplace/external/ submodule cache"
-
-    local repo_root
-    repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-    if [ ! -f "$repo_root/.gitmodules" ]; then
-        red "Expected .gitmodules at $repo_root — run bootstrap from the Laplace repo"
-        exit 1
-    fi
-
-    local cache_root="/opt/laplace/external"
-    install -d -m 2775 -o "$GH_SUDO_USER" -g "$RUNNER_GROUP" "$cache_root"
-
-    # Group-write umask: new files come out mode 664, new dirs 2775.
-    # Combined with /opt/laplace's setgid + laplace-runner group, this
-    # means ahart (group member) AND laplace-runner (group member) can
-    # both update the cache without sudo / user-switching.
-    umask 002
-
-    # Total count for progress display.
-    local total
-    total=$(grep -c '^\[submodule' "$repo_root/.gitmodules")
-    echo "  total submodules to process: $total"
-
-    local count_cloned=0 count_fetched=0 count_failed=0 count_seen=0
-    local last_progress=0
-    # Enumerate (path, url) pairs from .gitmodules.
-    while IFS=$'\t' read -r path url; do
-        [ -n "$path" ] && [ -n "$url" ] || continue
-        count_seen=$((count_seen + 1))
-        # .gitmodules paths start with "external/" (the in-repo location).
-        # Strip that prefix so cache entries land directly under the
-        # cache root, i.e. /opt/laplace/external/<name>/ — not the
-        # absurd /opt/laplace/external/external/<name>/.
-        local rel="${path#external/}"
-        local target="$cache_root/$rel"
-        if [ -d "$target/.git" ]; then
-            # Group-writable cache + setgid → no user-switching needed.
-            if git -C "$target" fetch --quiet --tags \
-                origin '+refs/heads/*:refs/remotes/origin/*' 2>/dev/null; then
-                count_fetched=$((count_fetched + 1))
-            else
-                count_failed=$((count_failed + 1))
-                yellow "  [$count_seen/$total] fetch failed: $path"
-            fi
-        else
-            # Parent dir for nested paths (e.g. tree-sitter-grammars/<lang>).
-            # setgid inherits laplace-runner group from /opt/laplace.
-            mkdir -p "$(dirname "$target")"
-            if git clone --quiet "$url" "$target" 2>/dev/null; then
-                count_cloned=$((count_cloned + 1))
-            else
-                count_failed=$((count_failed + 1))
-                yellow "  [$count_seen/$total] clone failed: $path ($url)"
-            fi
-        fi
-        # Progress heartbeat every 25 submodules so the operator sees
-        # the loop is making progress (relevant on first-time runs that
-        # take 10-20 min cloning ~300 small grammar repos).
-        if [ $((count_seen - last_progress)) -ge 25 ]; then
-            printf "  [%d/%d] cloned=%d fetched=%d failed=%d\n" \
-                "$count_seen" "$total" "$count_cloned" "$count_fetched" "$count_failed"
-            last_progress=$count_seen
-        fi
-    done < <(
-        awk '
-            /^\[submodule/ { in_sm=1; path=""; url=""; next }
-            in_sm && /^[[:space:]]*path[[:space:]]*=/ { sub(/^[^=]*=[[:space:]]*/,""); path=$0 }
-            in_sm && /^[[:space:]]*url[[:space:]]*=/  { sub(/^[^=]*=[[:space:]]*/,""); url=$0 }
-            in_sm && path != "" && url != "" { printf "%s\t%s\n", path, url; in_sm=0 }
-        ' "$repo_root/.gitmodules"
-    )
-
-    green "✓ submodule cache: cloned=$count_cloned fetched=$count_fetched failed=$count_failed under $cache_root"
-    if [ "$count_failed" -gt 0 ]; then
-        yellow "  (failures don't abort bootstrap — re-run to retry; or fix individual upstream issues)"
-    fi
+    # Cache POPULATION is project state, not machine state — it belongs in
+    # the pipeline, not here. scripts/ci-init-submodules.sh handles the
+    # clone-if-missing + fetch-if-present loop, running as the workflow's
+    # laplace-runner identity or as the developer (ahart) interactively.
+    say "Ensure /opt/laplace/external/ (cache directory only — population happens in pipeline)"
+    install -d -m 2775 -o "$GH_SUDO_USER" -g "$RUNNER_GROUP" /opt/laplace/external
+    green "✓ /opt/laplace/external/ ready (owned $GH_SUDO_USER:$RUNNER_GROUP, mode 2775 setgid)"
+    echo "  → cache populated by: scripts/ci-init-submodules.sh (pipeline step or developer)"
 }
 
 bootstrap_runner_gh_auth() {
@@ -1076,8 +998,8 @@ do_bootstrap() {
     bootstrap_engine_lib_path
     bootstrap_pg_extension_paths
     bootstrap_remove_legacy_sudoers
-    bootstrap_runner_gh_auth      # before submodule cache so clones are authenticated
-    bootstrap_submodule_cache
+    bootstrap_runner_gh_auth
+    bootstrap_submodule_cache_dir   # empty dir w/ correct perms; population is a pipeline concern
 
     say "Verification"
     echo "Runner service:"

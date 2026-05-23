@@ -1,16 +1,26 @@
 #!/bin/bash
 # scripts/ci-init-submodules.sh
 #
-# Submodule init for self-hosted CI — fast path via the persistent
-# canonical clone tree at /opt/laplace/external/, populated and
-# refreshed by bootstrap-laplace-runner.sh's bootstrap_submodule_cache
-# step. The runner work folder stays scratch; this script never
-# re-downloads from upstream — it only points workspace submodule
-# inits at the cached clones via git's --reference / alternates.
+# Submodule init + cache management for the Laplace pipeline (and for
+# developers running this directly via group membership — no sudo).
 #
-# Cache layout: /opt/laplace/external/<submodule-path>/  (full clone
-# with .git/ inside). $ref_dir = $CACHE/$path/.git is the gitdir we
-# hand to `git submodule update --reference`.
+# Two responsibilities, both idempotent:
+#
+#   1. Ensure the persistent cache at /opt/laplace/external/<name>/ has a
+#      full clone of every submodule in .gitmodules. Missing entries are
+#      cloned from upstream once; existing entries are fetched (cheap if
+#      already at the pinned SHA). Bootstrap creates the empty cache dir
+#      with the right group + setgid; this script populates it. New
+#      submodules added to .gitmodules get picked up on the next run.
+#
+#   2. Initialize the workspace's .git/modules/<path> using the cache as
+#      a git --reference / alternates source — objects come from the
+#      cache, nothing re-downloads from upstream. Workspace clones are
+#      thin pointers backed by the cache's object store.
+#
+# Cache layout: /opt/laplace/external/<submodule-name>/ (the in-repo
+# "external/" path prefix is stripped — repo's external/postgresql lives
+# at /opt/laplace/external/postgresql). $ref_dir = $CACHE/<name>/.git.
 #
 # Why we don't symlink .git/modules into the cache: each submodule's
 # .git/modules/<sm>/config records core.worktree as a RELATIVE path
@@ -43,14 +53,90 @@ cd "$(dirname "$0")/.."
 CACHE="${LAPLACE_SUBMODULE_CACHE:-/opt/laplace/external}"
 SKIP=("external/tree-sitter-grammars/tree-sitter-nqc")
 
-err() { printf '::error::%s\n' "$*" >&2; }
+err()  { printf '::error::%s\n' "$*" >&2; }
+warn() { printf '::warning::%s\n' "$*" >&2; }
+log()  { printf '%s\n' "$*"; }
 
 [ -f .gitmodules ] || { err "no .gitmodules at $(pwd)"; exit 2; }
 
 if [ ! -d "$CACHE" ]; then
-    err "submodule cache $CACHE does not exist — run: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
+    err "$CACHE does not exist — run: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
+    err "(bootstrap creates the empty cache directory with the right perms;"
+    err " this script populates it from .gitmodules.)"
     exit 1
 fi
+if [ ! -w "$CACHE" ]; then
+    err "$CACHE not writable by $(id -un) — confirm you are in the laplace-runner group"
+    exit 1
+fi
+
+# Files we create in the cache need to be group-writable so ahart and
+# laplace-runner can both update entries. setgid on the parent inherits
+# the group; umask 002 ensures files come out 664 / dirs 2775.
+umask 002
+
+# ---------------------------------------------------------------------------
+# Phase A — populate cache: for every submodule in .gitmodules, ensure
+# /opt/laplace/external/<name>/ has a full clone. Missing → clone once.
+# Present → fetch (cheap when already at the pinned SHA).
+# ---------------------------------------------------------------------------
+log "Phase A: ensure cache /opt/laplace/external/ is populated from .gitmodules"
+
+cache_total=$(grep -c '^\[submodule' .gitmodules)
+cache_cloned=0; cache_fetched=0; cache_failed=0; cache_seen=0; cache_last_log=0
+
+while IFS=$'\t' read -r sm_path sm_url; do
+    [ -n "$sm_path" ] && [ -n "$sm_url" ] || continue
+    cache_seen=$((cache_seen + 1))
+
+    # Skip the known-bad nqc grammar (orphan gitlink).
+    skip_this=0
+    for s in "${SKIP[@]}"; do [ "$sm_path" = "$s" ] && skip_this=1 && break; done
+    [ "$skip_this" = 1 ] && continue
+
+    rel="${sm_path#external/}"     # /opt/laplace/external/<name>, not /external/external/
+    cache_entry="$CACHE/$rel"
+
+    if [ -d "$cache_entry/.git" ]; then
+        if git -C "$cache_entry" fetch --quiet --tags \
+            origin '+refs/heads/*:refs/remotes/origin/*' 2>/dev/null; then
+            cache_fetched=$((cache_fetched + 1))
+        else
+            cache_failed=$((cache_failed + 1))
+            warn "cache fetch failed: $sm_path"
+        fi
+    else
+        mkdir -p "$(dirname "$cache_entry")"
+        if git clone --quiet "$sm_url" "$cache_entry" 2>/dev/null; then
+            cache_cloned=$((cache_cloned + 1))
+        else
+            cache_failed=$((cache_failed + 1))
+            warn "cache clone failed: $sm_path ($sm_url)"
+        fi
+    fi
+
+    if [ $((cache_seen - cache_last_log)) -ge 25 ]; then
+        printf "  [%d/%d] cloned=%d fetched=%d failed=%d\n" \
+            "$cache_seen" "$cache_total" "$cache_cloned" "$cache_fetched" "$cache_failed"
+        cache_last_log=$cache_seen
+    fi
+done < <(
+    awk '
+        /^\[submodule/ { in_sm=1; path=""; url=""; next }
+        in_sm && /^[[:space:]]*path[[:space:]]*=/ { sub(/^[^=]*=[[:space:]]*/,""); path=$0 }
+        in_sm && /^[[:space:]]*url[[:space:]]*=/  { sub(/^[^=]*=[[:space:]]*/,""); url=$0 }
+        in_sm && path != "" && url != "" { printf "%s\t%s\n", path, url; in_sm=0 }
+    ' .gitmodules
+)
+
+log "  cache summary: cloned=$cache_cloned fetched=$cache_fetched failed=$cache_failed total=$cache_total"
+
+# ---------------------------------------------------------------------------
+# Phase B — init workspace submodules using the cache as --reference.
+# Workspace gets thin clones; objects come from /opt/laplace/external.
+# ---------------------------------------------------------------------------
+log ""
+log "Phase B: init workspace submodules from cache"
 
 is_skip() {
     local p="$1" s
