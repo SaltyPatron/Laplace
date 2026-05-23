@@ -8,7 +8,13 @@ Every term used in this codebase. If a term you intend to use isn't here, **add 
 
 ### Substrate
 
-The Laplace database itself. Holds entities, physicalities, and attestations. Acts as both storage and inference engine. Replaces what conventional AI calls "model + runtime + database" with a single coherent layer.
+The Laplace database itself — a **universal content-addressed knowledge substrate**. Holds entities, physicalities, and attestations. Acts as both storage and inference engine.
+
+Laplace is **not** a vector DB, model store, RAG framework, or "yet another place to keep AI artifacts." It is the substrate that **eats** those things — ingests any structured / semantic / unstructured digital ecosystem (linguistic corpora, AI models, knowledge graphs, code repos, documents, images, audio, video, raw datasets) via per-domain [decomposers](#decomposer), drains the content into typed attestations + content-addressed entities + per-source physicalities, **discards the original artifact**, and synthesizes output (model files, query responses, custom-recipe model emissions, cross-source consensus reports, dataset re-exports) from substrate state.
+
+The output is *superior to any single ingested source* by construction — deduplicated, consensus-rated, cross-source-enriched, queryable across modality boundaries, composable. Competitors are food. Substrate IS the model + runtime + database + tokenizer + embedding store + knowledge graph + inference layer + visualization channel + synthesis pipeline, in one coherent layer.
+
+See [Food principle](#food-principle) for the universal-substrate ingestion posture (which generalizes [Vampire mode](#vampire-mode)).
 
 ### Entity
 
@@ -53,7 +59,7 @@ Stratum in the n-gram hierarchy of a given modality. T0 = Universal T0 codepoint
 
 A typed semantic relation between entities, sourced and rated. Stored as one row in the `attestations` table per `(subject_id, kind_id, object_id, source_id, context_id)` tuple. **An attestation IS consensus state, NOT an event log entry** — repeated assertions by the same source do not create new rows; Glicko-2 dynamics update on cross-source agreement/disagreement evidence instead.
 
-Attestations are the substrate's **typed computational vocabulary**. They are not metadata about entities; they are the substrate's analog of an AI model's weighted typed transforms. See [Attestation Kind](#attestation-kind) and [Cascade](#cascade-cascading-tier-nn).
+Attestations are the substrate's **typed knowledge layer**. They are NOT [content](#content) (the actual bytes being recorded), NOT [metadata](#metadata) (structural properties of rows), NOT [lookups](#lookup) (identity-resolution references), NOT [indexes](#index) (acceleration structures). They are the substrate's analog of an AI model's weighted typed transforms. See [Attestation Kind](#attestation-kind) and [Cascade](#cascade-cascading-tier-nn).
 
 ### Attestation Kind
 
@@ -123,6 +129,61 @@ Operational implication: a user prompt `"what is a cat?"` decomposes to entities
 ### Prompt Ingestion
 
 The rule that prompts are decomposed into substrate entities and represented by a context entity/trajectory before inference. A prompt is not an ephemeral token buffer with a context-window limit; it is substrate content, either ephemeral or durable by policy. Prompt entities dedupe against existing rows by hash, so the cascade enters with full substrate-attestation context available on the prompt's constituents — see [Data Class](#data-class-app--substrate--user).
+
+---
+
+## Storage classes
+
+The substrate distinguishes five storage classes by *purpose*. Don't confuse them.
+
+### Content
+
+The actual digital bytes being recorded. Stored as **entity rows** in the `entities` table (one row per unique observation, content-addressed by BLAKE3-128 of the canonical (type-canonicalized, lossless) content bytes per ADR 0015 + ADR 0040), plus the constituent sequence stored as a **mantissa-packed `LINESTRING`** in the CONTENT-kind physicality's `trajectory` column (per ADR 0012). Reconstructing content = walking the trajectory recursively down to T0 codepoints and emitting the bytes. The substrate is content-addressed; same content → same row, forever.
+
+### Metadata
+
+Structural properties of a row that aren't part of the substrate's knowledge layer:
+- `entities.tier`, `entities.type_id`, `entities.first_observed_by`, `entities.created_at`
+- `physicalities.kind`, `physicalities.alignment_residual`, `physicalities.source_dim`, `physicalities.observed_at`
+- `attestations.last_observed_at`, `attestations.observation_count`
+
+Metadata says HOW or WHEN a row exists, not WHAT the substrate believes about an entity. Metadata columns may be indexed (housekeeping, filtering), but they don't participate in [Effective Mu](#effective-mu) calculation and they don't drive cascade decisions.
+
+### Lookup
+
+Identity-resolution via primary keys + foreign keys on the three core tables: `entities.id`, `physicalities.id` + `entity_id` + `source_id`, `attestations.id` + `subject_id` + `kind_id` + `object_id` + `source_id` + `context_id`. All `bytea(16)` content-addressed (per STANDARDS ID discipline). Lookups are dense — every cascade step is a lookup. Lookup columns demand the tightest indexes.
+
+### Index
+
+Acceleration structures layered on top of identity / spatial / temporal data. Indexes are NOT data; they're how data gets found fast. The substrate's index surface (per ADR 0029):
+- `laplace_btree_hash128_ops` — custom byte-lexicographic B-tree for ID columns
+- `laplace_gist_s3_ops` — S³-aware GIST for physicality coords (substrate-specific spatial structure)
+- `laplace_sp_trajectory_ops` — mantissa-pack-aware SP-GiST over `physicalities.trajectory` (the standard `gist_geometry_ops_nd` filters nothing because every mantissa-packed trajectory has the same bounding box)
+- `laplace_brin_tier_ops` — tier-clustered BRIN for tier-range scans
+- Stock B-tree / BRIN where the column doesn't need substrate-specific structure (created_at, observed_at, alignment_residual, etc.)
+
+---
+
+## Foundational concepts (continued)
+
+### Decomposer
+
+The plugin (per `IDecomposer` interface, [ADR 0011](docs/adr/0011-polymorphic-plugin-architecture.md)) that ingests one **domain's full data ecosystem** into substrate content + attestations + physicalities. Decomposer's scope is the DOMAIN, not a single file:
+
+- UnicodeDecomposer ingests UCDXML + UCA DUCET + Unihan + emoji + auxiliary segmentation + CLDR-unicode.
+- ISODecomposer ingests ISO 639-3 + ISO 15924 + ISO 10646 + BCP-47 + CLDR validity + IANA Language Subtag Registry + LoC + SIL + Glottolog.
+- WordNetDecomposer ingests the complete WordNet 3.0 (data + index + glosses + senses + examples + relations + lexicographer files + exception lists + ILI mappings).
+- ...one Decomposer per Layer of the seed ladder (ADR 0037).
+
+**Single-file decomposers are a smell** — they ignore data the domain provides. The richer the decomposer's ingest, the richer the substrate's attestation cloud on the entities it produces.
+
+Decomposers also bootstrap the [type vocabulary](#entity-type) + [attestation kind](#attestation-kind) entities for their domain (per ADR 0040): Codepoint / Script / Block / BiDi_Class types and `HAS_GENERAL_CATEGORY` / `HAS_BIDI_CLASS` / `HAS_SCRIPT` kinds for UnicodeDecomposer; Language / Region / Currency types and `IS_LEMMA_OF` / `HAS_LIKELY_REGION` kinds for ISODecomposer; etc.
+
+### Cross-decomposer dependency
+
+A decomposer's output is consumed by later decomposers via shared entity IDs in the same hash space. UnicodeDecomposer produces the `Latn` Script entity at some BLAKE3 hash; ISODecomposer attaches ISO 15924 numeric codes + EN/FR names to **that same row**; WordNetDecomposer's English-language lemmas reference the Language entity ISODecomposer produced (English); UDDecomposer's per-treebank metadata references the same Language + Script entities. Content-addressing makes this enrichment compound — every higher source that mentions a shared concept resolves through the same row, gaining whatever attestations every other source has piled on.
+
+The seed-layer order (ADR 0037) is the dependency order: each layer's decomposer assumes the prior layers' entities exist.
 
 ---
 
@@ -282,7 +343,15 @@ For source-scoped model round-trip, the property that `TransformerModelSource` c
 
 ### Vampire mode
 
-The substrate's posture toward AI model weights: drain knowledge into attestations; **discard the weight bytes entirely**; synthesize fresh packaging on demand. Model files do NOT become substrate entities at the byte level — the substrate never preserves model weights bit-perfectly. Only the recipe, tokenizer, architecture-template entities and the extracted typed attestations remain. Round-trips emit *fresh* files from current substrate state, not copies.
+The AI-models-specific instance of the universal [Food principle](#food-principle): drain knowledge into attestations; **discard the weight bytes entirely**; synthesize fresh packaging on demand. Model files do NOT become substrate entities at the byte level — the substrate never preserves model weights bit-perfectly. Only the recipe, tokenizer, architecture-template entities and the extracted typed attestations remain. Round-trips emit *fresh* files from current substrate state, not copies.
+
+### Food principle
+
+The substrate's universal ingestion posture: any digital artifact — AI models (Vampire mode), document corpora, image archives, video collections, audio libraries, code repositories, scientific datasets, government open data, knowledge graphs, database exports, web archives, ANY structured or semi-structured data ecosystem — is **food**, not an artifact to preserve. Per-domain [decomposers](#decomposer) ingest the artifact, extract its semantic content + typed attestations into substrate state, and **discard the original**. The substrate retains only what's substrate-native (content-addressed entities + typed attestations + physicalities); the source's idiosyncratic packaging (file format, container, schema, runtime metadata) is dropped.
+
+Output (queries, custom-recipe model emissions, dataset re-exports, visualization renderings, format-conversions) is **synthesized fresh** from substrate state on demand. The synthesized output is *superior to any single ingested source* — deduplicated, consensus-rated, cross-source-enriched, modality-agnostic, composable. Re-ingesting the same artifact is idempotent (content-addressed dedup); ingesting a competitor's output adds to substrate consensus without entrenching the competitor's biases as authoritative.
+
+The substrate doesn't preserve. It *consumes, learns, and synthesizes*.
 
 ### Content recording
 
@@ -370,61 +439,104 @@ A plugin in the C# app layer that exposes a protocol (e.g., OpenAI-compat) over 
 
 ---
 
-## Per-source decomposition (modality-specific)
+## Per-decomposer ecosystems
 
-Each ingestion source defines its own decomposition rule (an IDecomposer plugin) and its own set of attestation kinds. All sources emit into the same `entities` / `physicalities` / `attestations` tables; all bottom at Universal T0.
+Each Decomposer ingests its **domain's full data ecosystem** (not a single file), bootstraps the type + kind vocabulary entities its domain introduces, and emits content + attestations + physicalities that cross-reference earlier decomposers' output. Layer order per ADR 0037 = dependency order. All decomposers emit into the same three core tables; all bottom at [Universal T0](#universal-t0).
 
-### WordNet
+### UnicodeDecomposer (Layer 1)
 
-- **Entities produced**: `Text` (lemma text entities), `WordNet_Synset` (the synset itself, content-addressed by canonical (POS + sorted lemmas + gloss hash) bytes), `Text` for glosses + example sentences.
-- **Attestation kinds emitted**: `IS_LEMMA_OF`, `HAS_POS<part_of_speech>`, `HAS_GLOSS`, `HAS_EXAMPLE`, `IS_HYPERNYM_OF`, `IS_HYPONYM_OF`, `IS_MERONYM_OF`, `IS_HOLONYM_OF`, `IS_ANTONYM_OF`, `IS_SIMILAR_TO`, `IS_DERIVATIONALLY_RELATED_TO`.
-- **Source trust class**: curated academic resource.
-- **Physicalities**: PROJECTION from Laplacian-eigenmaps on the synset relation graph, Procrustes-aligned via shared Unicode anchors.
+- **Ecosystem**: `/vault/Data/Unicode/` (≈37 GB). Primary parse path: **UCDXML** (`Public/<ver>/ucdxml/ucd.all.flat.xml` — structured, complete, including Unihan + emoji + all derived properties). Supplementary text files where XML lacks coverage: `Blocks.txt`, `Scripts.txt`, `ScriptExtensions.txt`, `PropList.txt`, `DerivedCoreProperties.txt`, `DerivedNormalizationProps.txt`, `NameAliases.txt`, `NamedSequences.txt`, `BidiBrackets.txt`, `BidiMirroring.txt`, `CaseFolding.txt`, `LineBreak.txt`, `EastAsianWidth.txt`, `Hangul*.txt`, `Indic*.txt`, `VerticalOrientation.txt`, plus `auxiliary/` (UAX-#29 segmentation: GraphemeBreakProperty / WordBreakProperty / SentenceBreakProperty), `emoji/` (emoji-data, emoji-sequences, emoji-variation-sequences, emoji-zwj-sequences, emoji-test). **UCA DUCET** for collation order (`Public/UCA/<ver>/allkeys.txt`) — required input for super-Fibonacci codepoint placement. Unihan (`Public/<ver>/ucd/Unihan.zip`) for CJK-specific properties.
+- **Entities produced**: `Codepoint` (1,114,112 T0 atoms), `Script`, `Block`, `General_Category`, `BiDi_Class`, `Line_Break_Class`, `Grapheme_Break_Class`, `Word_Break_Class`, `Sentence_Break_Class`, `East_Asian_Width`, `Unicode_Version`, `Named_Sequence`, `Emoji_ZWJ_Sequence`, `Variation_Sequence`.
+- **Attestation kinds emitted**: `HAS_GENERAL_CATEGORY`, `IS_IN_BLOCK`, `HAS_SCRIPT`, `HAS_SCRIPT_EXTENSION`, `HAS_BIDI_CLASS`, `HAS_CANONICAL_COMBINING_CLASS`, `HAS_LINE_BREAK_CLASS`, `HAS_GRAPHEME_BREAK_PROP`, `HAS_WORD_BREAK_PROP`, `HAS_SENTENCE_BREAK_PROP`, `HAS_EAST_ASIAN_WIDTH`, `HAS_AGE`, `HAS_UPPERCASE_MAPPING`, `HAS_LOWERCASE_MAPPING`, `HAS_TITLECASE_MAPPING`, `HAS_CASE_FOLDING`, `DECOMPOSES_TO`, `HAS_NFD_DECOMPOSITION`, `HAS_NFKC_DECOMPOSITION`, `HAS_NUMERIC_VALUE`, `IS_EMOJI`, `IS_EMOJI_PRESENTATION`, `IS_EMOJI_MODIFIER`, `IS_EMOJI_COMPONENT`, `HAS_UCA_PRIMARY_WEIGHT`, `HAS_UCA_SECONDARY_WEIGHT`, `HAS_UCA_TERTIARY_WEIGHT`, `HAS_UCA_COLLATION_ORDER`, `HAS_RADICAL`, `HAS_STROKE_COUNT`, `HAS_PINYIN`, `HAS_JYUTPING`, `HAS_ON_READING`, `HAS_KUN_READING`, `HAS_VARIANT_OF`, ...
+- **Physicalities**: substrate-canonical CONTENT physicality on every Codepoint (coord via super-Fibonacci(UCA collation order); trajectory = NULL for T0). Sequences (Named/ZWJ/Variation) get CONTENT physicalities with codepoint-constituent trajectories.
+- **Trust class**: foundational constants (highest).
+- **Build artifact siblings (per ADR 0006)**: perf-cache binary (≈67 MiB, mmap'd at runtime) + DB seed rows. Both derive from UnicodeDecomposer's canonicalized output; neither feeds the other.
 
-### OMW (Open Multilingual WordNet)
+### ISODecomposer (Layer 2)
 
-- Reuses WordNet's synset entities (cross-lingual synset IDs map to the same `WordNet_Synset` entities).
-- New lemma entities per language; new `IS_LEMMA_OF<language=<lang>>` and `HAS_LANGUAGE` attestation kinds.
-- Cross-lingual sense bridges traversable via lemma → synset → lemma in any language.
-- **Source trust class**: academically linked user-curated resource.
+- **Ecosystem**: `/vault/Data/ISO639/` (ISO 639-3 SIL tables, CLDR validity, IANA Language Subtag Registry, LoC, SIL, Glottolog) + `/vault/Data/Unicode/iso15924/` (ISO 15924 script registry) + `/vault/Data/Unicode/wg2/iso10646/` (ISO 10646 character-set standard underlying Unicode).
+- **Entities produced**: `Language` (~7,800 from ISO 639-3 + macrolanguage chains), `Script` (~200, shared hash space with UnicodeDecomposer — the `Latn` row is one row referenced by both), `Region` (~250 from CLDR validity-region + BCP-47), `Currency` (~200), `Variant`, `Subdivision`, `Unit`.
+- **Attestation kinds emitted**: `HAS_SCOPE`, `HAS_LANGUAGE_TYPE` (Living/Extinct/Ancient/Historical/Constructed), `HAS_ISO_639_1_CODE`, `HAS_ISO_639_2B_CODE`, `HAS_ISO_639_2T_CODE`, `HAS_REFERENCE_NAME`, `HAS_INVERTED_NAME`, `BELONGS_TO_MACROLANGUAGE`, `IS_MACROLANGUAGE_OF`, `IS_RETIRED_AS`, `HAS_VALIDITY` (regular/deprecated/private-use/unknown/macroregion), `HAS_ISO_15924_NUMERIC`, `HAS_ISO_15924_EN_NAME`, `HAS_ISO_15924_FR_NAME`, `HAS_UCD_PVA`, `ADDED_IN_UNICODE_VERSION`, `HAS_LIKELY_SCRIPT`, `HAS_LIKELY_REGION`, `HAS_LIKELY_LANGUAGE`, `HAS_ISO_3166_ALPHA_2`, `HAS_ISO_3166_ALPHA_3`, `HAS_ISO_3166_NUMERIC`, `IS_MACROREGION_OF`, `BELONGS_TO_MACROREGION`, `HAS_ISO_4217_CODE`, `HAS_TERRITORY`, `IS_REPLACED_BY`.
+- **Cross-references**: `Script` rows shared with UnicodeDecomposer; `Language` rows referenced from every subsequent multilingual decomposer.
+- **Trust class**: standards-derived.
 
-### UD Treebanks
+### WordNetDecomposer (Layer 3)
 
-- **Entities produced**: `UD_Sentence` (per parsed sentence), `UD_Token` (per token-in-sentence), reused `Text` entities for token surface forms and lemmas.
-- **Attestation kinds emitted** (mostly context-bound to the sentence entity): `HAS_POS<pos>` (context = sentence), `HAS_LEMMA` (context = sentence), `HAS_MORPHOLOGICAL_FEATURE<name>` (context = sentence), `IS_HEAD_OF<relation>` (head→dependent dep arc, context = sentence).
-- Arena semantics: `HAS_POS` is multi-valued lexically but functional within a context.
-- **Source trust class**: curated academic resource.
+- **Ecosystem**: `/vault/Data/Wordnet/WordNet-3.0/` (≈49 MB). Full WordNet 3.0: `data.{noun,verb,adj,adv}`, `index.{noun,verb,adj,adv}`, `dict/`, lexicographer files, exception lists, morphological exceptions, sense indexes, ILI mappings, glosses + examples.
+- **Entities produced**: `WordNet_Synset` (~117K, content-addressed by canonical POS + sorted-lemmas + gloss bytes), `WordNet_Sense` (lemma-in-synset), reused `Text` entities for lemmas + glosses + examples.
+- **Attestation kinds emitted**: `IS_LEMMA_OF`, `HAS_POS`, `HAS_GLOSS`, `HAS_EXAMPLE`, `IS_HYPERNYM_OF`, `IS_HYPONYM_OF`, `IS_MERONYM_OF` (member/part/substance variants), `IS_HOLONYM_OF`, `IS_ANTONYM_OF`, `IS_SIMILAR_TO`, `IS_DERIVATIONALLY_RELATED_TO`, `IS_PERTAINYM_OF`, `HAS_ATTRIBUTE`, `ENTAILS`, `CAUSES`, `IS_VERB_GROUP_OF`, `HAS_DOMAIN_TOPIC`, `HAS_DOMAIN_REGION`, `HAS_DOMAIN_USAGE`.
+- **Cross-references**: `Text` (Unicode), `Language` (ISO — English).
+- **Physicalities**: PROJECTION from Laplacian eigenmaps on the synset relation graph, Procrustes-aligned via shared Unicode-anchored entities.
+- **Trust class**: curated academic.
 
-### Wiktionary
+### OMWDecomposer (Layer 4)
 
-- **Entities produced**: `Wiktionary_Entry`-typed entities per word entry; `Text` for definitions, etymology, IPA; `Audio_Track` for pronunciation recordings.
-- **Attestation kinds emitted**: `HAS_POS_SECTION`, `HAS_DEFINITION`, `HAS_ETYMOLOGY`, `HAS_IPA_PRONUNCIATION`, `HAS_AUDIO_PRONUNCIATION`, `HAS_INFLECTION_FORM`, `IS_TRANSLATION_OF<source_lang, target_lang>`, `HAS_USAGE_EXAMPLE`.
-- **Source trust class**: academically linked user-curated resource.
+- **Ecosystem**: `/vault/Data/omw/wns/` (≈245 MB, 100+ language WordNet packs). Each language's pack: synset-lemma tables + cross-lingual synset bridges + per-language licensing/provenance metadata.
+- **Entities produced**: per-language `Text` lemma entities (dedup against existing where the same surface form pre-exists), `OMW_LangPack` metadata entity per language.
+- **Attestation kinds emitted**: `IS_LEMMA_OF` (context = `Language` entity), `HAS_LANGUAGE`, `IS_TRANSLATION_OF` (via shared synset).
+- **Cross-references**: `WordNet_Synset` (WordNet — same row across all languages), `Language` (ISO), `Text` (Unicode).
+- **Trust class**: academically-linked user-curated.
 
-### Tatoeba
+### UDDecomposer (Layer 5)
 
-- **Entities produced**: `Tatoeba_Sentence`-typed (sentence text content), `Audio_Track` for recordings.
-- **Attestation kinds emitted**: `IS_TRANSLATION_OF<source_lang, target_lang>` between sentence entities, `HAS_RECORDING<voice>` linking sentence → audio.
-- Same sentence text observed in multiple Tatoeba pairs dedupes by hash; one row, many translation-pair attestations.
-- **Source trust class**: structured corpus.
+- **Ecosystem**: `/vault/Data/UD-Treebanks/ud-treebanks-v2.17/` (≈4.3 GB, 250+ treebanks across ~140 languages). Each treebank: CoNLL-U files with per-token annotations (FORM, LEMMA, UPOS, XPOS, FEATS, HEAD, DEPREL, DEPS, MISC), treebank-level metadata, train/dev/test splits.
+- **Entities produced**: `UD_Treebank` (per treebank), `UD_Sentence`, `UD_Token`, reused `Text` for surface forms + lemmas.
+- **Attestation kinds emitted** (mostly context-bound to the sentence entity): `HAS_POS<scheme=universal>` (UPOS), `HAS_POS<scheme=language>` (XPOS), `HAS_LEMMA`, `HAS_MORPHOLOGICAL_FEATURE<name>` (Tense / Number / Case / Person / ...), `IS_HEAD_OF<relation>` (nsubj/obj/det/...), `HAS_ENHANCED_DEP`.
+- **Cross-references**: `Text` (Unicode), `Language` (ISO), `WordNet_Sense` where annotated.
+- **Trust class**: curated academic.
 
-### Atomic2020
+### WiktionaryDecomposer (Layer 6)
 
-- **Entities produced**: `Atomic2020_Event`-typed entities (event text content).
-- **Attestation kinds emitted**: `BECAUSE`, `INTENDS`, `EFFECT`, `REQUIRES`, `IS_AFTER`, `IS_BEFORE`, `OXEFFECT_ON`, `XINTENT`, `XATTR`, etc.
-- Mostly context-free commonsense inference relations.
-- **Source trust class**: structured corpus (commonsense KB).
+- **Ecosystem**: `/vault/Data/Wiktionary/` (≈34 GB, currently `en/`; per-language Wiktionary XML dumps as added). Per-entry: definitions, etymology, pronunciation (IPA + audio refs), inflection tables, translations, usage examples, alternate forms.
+- **Entities produced**: `Wiktionary_Entry` (per word per language), reused `Text` for definitions / etymology / IPA, `Audio_Track` for pronunciation recordings.
+- **Attestation kinds emitted**: `HAS_POS_SECTION`, `HAS_DEFINITION`, `HAS_ETYMOLOGY`, `HAS_IPA_PRONUNCIATION`, `HAS_AUDIO_PRONUNCIATION`, `HAS_INFLECTION_FORM`, `IS_TRANSLATION_OF<source_lang, target_lang>`, `HAS_USAGE_EXAMPLE`, `HAS_ALTERNATE_FORM`.
+- **Cross-references**: `Text` (Unicode), `Language` (ISO), `WordNet_Synset` / `OMW_LangPack` where mapped.
+- **Trust class**: academically-linked user-curated.
 
-### ConceptNet
+### TatoebaDecomposer (Layer 7)
 
-- **Entities produced**: `ConceptNet_Concept`-typed entities; multilingual via per-language lemma entities.
-- **Attestation kinds emitted**: `IS_A`, `PART_OF`, `USED_FOR`, `CAPABLE_OF`, `AT_LOCATION`, `HAS_PROPERTY`, `CAUSES`, `MOTIVATED_BY_GOAL`, etc.
-- Sub-sources: Wikipedia, OMCS, WordNet, JMDict, etc., each as a distinct source entity, with their own trust class within ConceptNet's umbrella.
-- **Source trust class**: structured corpus (mixed via sub-sources).
+- **Ecosystem**: `/vault/Data/Tatoeba/` (≈5.4 GB). Sentence dump (sentences.csv) + sentence pairs (links.csv) + per-sentence metadata + `audio/` recordings + speaker/voice metadata + licensing.
+- **Entities produced**: `Tatoeba_Sentence`, `Audio_Track`, `Voice` (speaker).
+- **Attestation kinds emitted**: `IS_TRANSLATION_OF<source_lang, target_lang>`, `HAS_RECORDING`, `HAS_VOICE`, `HAS_LANGUAGE`, `HAS_LICENSE`.
+- **Cross-references**: `Text` (Unicode), `Language` (ISO).
+- **Trust class**: structured corpus.
 
-### TransformerModelSource (AI Model)
+### Atomic2020Decomposer (Layer 8a)
 
-AI models are not a special case. They use the same substrate primitives as every other source: tokens become text entities (deduping against existing text); typed-tensor-calculation attestations of the **fixed-vocabulary tensor-calculation kinds** are emitted between those tokens; recipe metadata is captured as ordinary attestations on the model entity.
+- **Ecosystem**: `/vault/Data/Atomic2020/` (≈66 MB). ~1.3M commonsense triples across ~25 relation types.
+- **Entities produced**: `Atomic2020_Event` (event text content).
+- **Attestation kinds emitted**: `BECAUSE`, `INTENDS`, `EFFECT`, `REQUIRES`, `IS_AFTER`, `IS_BEFORE`, `OXEFFECT_ON`, `OXREACT_TO`, `OXATTR`, `XINTENT`, `XEFFECT`, `XREACT`, `XATTR`, `XNEED`, `XWANT`, `HINDERED_BY`, ...
+- **Cross-references**: `Text` (Unicode).
+- **Trust class**: structured corpus.
+
+### ConceptNetDecomposer (Layer 8b)
+
+- **Ecosystem**: `/vault/Data/ConceptNet/` (≈9.5 GB). ConceptNet 5.7+ multilingual; ~30 relation types. Sub-sources (Wikipedia, OMCS, WordNet, JMDict, Verbosity, GlobalMind, etc.) each tracked as distinct source entities under the ConceptNet umbrella.
+- **Entities produced**: `ConceptNet_Concept` (URI-keyed; multilingual via Language context).
+- **Attestation kinds emitted**: `IS_A`, `PART_OF`, `USED_FOR`, `CAPABLE_OF`, `AT_LOCATION`, `HAS_PROPERTY`, `CAUSES`, `MOTIVATED_BY_GOAL`, `HAS_SUBEVENT`, `HAS_FIRST_SUBEVENT`, `HAS_LAST_SUBEVENT`, `RECEIVES_ACTION`, `MADE_OF`, `SIMILAR_TO`, `DERIVED_FROM`, `ENTAILS`, `MANNER_OF`, `LOCATED_NEAR`, `HAS_PREREQUISITE`, ...
+- **Cross-references**: `Text` (Unicode), `Language` (ISO), `WordNet_Synset` / `OMW_LangPack` where mapped, `Wiktionary_Entry` where mapped.
+- **Trust class**: structured corpus (mixed via sub-sources — each sub-source carries its own trust class).
+
+### TreeSitterDecomposer (Layer 9)
+
+- **Ecosystem**: `/vault/Data/TreeSitter/` (≈1.9 GB, **303 grammars**). Per-grammar repo: `grammar.js` (grammar definition), `src/parser.c` (generated parser), `queries/` (highlight/locals/textobjects/tags S-expression queries), test corpora, README. Plus user-supplied code under those grammars when code is ingested for parsing.
+- **Entities produced**: `Programming_Language` (per grammar — cross-references ISO/IETF language tags where they exist), `Grammar_Rule`, `Highlight_Query`, plus when ingesting code: `Code_Token`, `Code_Span`, `Code_File`, `Code_Repository`.
+- **Attestation kinds emitted**: `HAS_GRAMMAR_RULE`, `HAS_HIGHLIGHT_QUERY`, `IS_KEYWORD_IN`, `IS_OPERATOR_IN`, plus parse-tree attestations when ingesting code: `HAS_PARSE_NODE`, `IS_CHILD_OF<rule>`, `MATCHES_QUERY`.
+- **Cross-references**: `Text` (Unicode for source code content), `Language` (ISO/IETF where the programming language has a tag).
+- **Trust class**: structured corpus.
+
+### ModelDecomposer&lt;ContainerFormat&gt; (Layer 10)
+
+The substrate's AI-model decomposer is **composite** (per [ADR 0043](docs/adr/0043-composite-decomposer-architecture.md)), parameterized by container format and composed of sub-decomposer plugins along orthogonal axes:
+
+- **Ecosystem**: `/vault/models/<model>/` (e.g., TinyLlama-1.1B, Phi-2, Qwen3, ...). Per-model: `*.safetensors` (or sharded `model-*.safetensors` + `model.safetensors.index.json`) — or `*.gguf`, `*.onnx`, `*.pt`/`*.bin` (PyTorch pickle), TF SavedModel — plus `config.json` (architecture metadata), `tokenizer.json` + `tokenizer_config.json` + `special_tokens_map.json` + (optionally) `tokenizer.model` (SentencePiece) or `vocab.json` + `merges.txt` (BPE).
+- **Sub-decomposer composition**:
+  - **ContainerFormat&lt;T&gt;** (parameter): `SafetensorsContainer` / `GGUFContainer` / `ONNXContainer` / `PyTorchContainer` / `TensorFlowSavedModelContainer`. Parses bytes-on-disk → `(tensor_name, shape, dtype, raw_bytes, recipe_metadata)`.
+  - **TensorDtypeDecoder** (composed, one per dtype): `FP32` / `FP16` / `BF16` / `FP8_E5M2` / `FP8_E4M3` / `INT*` / GGUF quant `Q4_0` / `Q4_K_M` / `Q5_0` / `Q5_K_M` / `Q6_K` / `Q8_0` / `Q8_K` / other-quant `BNB_NF4` / `GPTQ` / `AWQ` / `EXL2`. Decodes raw tensor bytes → canonical numerical form.
+  - **SemanticArchitectureDecomposer** (composed, one per architecture family): `TransformerArchitecture` (Llama / Mistral / Qwen / Phi / Gemma / TinyLlama) / `MoETransformerArchitecture` (Mixtral / Qwen3-MoE / DeepSeek-V2/V3) / `MambaArchitecture` / `DiffusionArchitecture` / `VisionTransformerArchitecture` / `EncoderDecoderArchitecture` / `CNNArchitecture`. Maps tensor names → `(layer, head, computational_role)`.
+  - **ModalityBinder** (composed, one per input modality): `TextModality` (tokenizer ingest; BPE/SentencePiece/WordPiece/TikToken; markers stripped via canonicalization; vocab dedupes against Unicode text entities) / `ImageModality` / `AudioModality` / `MultimodalModality`.
+
+AI models are not a special case. They use the same substrate primitives as every other decomposer: tokens become text entities (deduping against existing text); typed-tensor-calculation attestations of the **fixed-vocabulary tensor-calculation kinds** are emitted between those tokens; recipe metadata is captured as ordinary attestations on the model entity.
 
 - **Entities produced**:
   - `Model_Recipe`-typed entity (one per ingested model).
@@ -440,7 +552,8 @@ AI models are not a special case. They use the same substrate primitives as ever
   - **PROJECTION** from the model's embedding space, Procrustes-aligned to substrate 4D via shared codepoint/word anchors.
   - **CONTENT** physicalities on probe input and output sequence entities, sourced to the model's tokenizer source, with mantissa-packed trajectories carrying the token references in the tokenizer's BPE order (ordinal = position, run_length = repeats, flags = BOS/EOS/continuation). Same mantissa-pack primitive as text trajectories, prompts (R19), and any other sequence content — token sequences are content; no new mechanism.
   - **CONTENT** physicalities on each tokenizer vocab text entity from the model's tokenizer source, recording this tokenizer's view of how that text decomposes (BPE merges into sub-tokens, etc.).
-- **Source trust class**: AI-model probe observation.
+- **Cross-references**: `Text` (Unicode), `Language` (ISO).
+- **Trust class**: AI-model probe observation.
 
 The substrate's inference engine walks these typed-tensor-calculation attestations between text entities directly. Reconstruction (Substrate Synthesis emitting a model file) reads recipe metadata + tensor-calculation attestations + the architecture template (substrate code, not data) to repopulate the model's tensor slots.
 

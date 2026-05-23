@@ -378,6 +378,28 @@ Every operation used more than once **must** be a named, tested, single-source-o
 
 For any operation exposed in BOTH PG and C# (i.e., callable via SQL and via P/Invoke), there is exactly **one canonical implementation in the C/C++ engine**. PG wrappers (PG_FUNCTION_INFO_V1) and C# wrappers (LibraryImport) are thin glue around the engine helper. Behavior across SQL/C#/engine direct is byte-identical, verified by cross-language consistency tests.
 
+## Storage-class discipline
+
+The substrate distinguishes five storage classes by *purpose*. Code that mixes them is a smell.
+
+| Class | Storage surface | Role | Indexed how |
+|---|---|---|---|
+| **Content** | `entities.id` rows + `physicalities.trajectory` (mantissa-packed LINESTRING) | The actual digital bytes being recorded; reconstructible by trajectory walk to T0 | `entities.id` PK (`laplace_btree_hash128_ops`); structural opclass on `physicalities.trajectory` per ADR 0029 |
+| **Metadata** | structural columns: `entities.{tier,type_id,first_observed_by,created_at}`; `physicalities.{kind,alignment_residual,source_dim,observed_at}`; `attestations.{last_observed_at,observation_count}` | HOW or WHEN a row exists; not knowledge | stock B-tree / BRIN; never participates in [Effective Mu](GLOSSARY.md#effective-mu) |
+| **Attestation** | `attestations` table rows | Typed knowledge edges with Glicko-2 ratings; the substrate's "weights" | btree on `subject_id` / `kind_id` / `object_id` / `source_id` / `context_id` + `(rating DESC, rd ASC)` |
+| **Lookup** | PK + FK columns: `*.id`, `*_id` | Identity resolution; same `bytea(16)` content-addressed type everywhere | custom `laplace_btree_hash128_ops` opclass |
+| **Index** | btree / GIST / BRIN / SP-GiST + the 4 substrate-specific opclasses (ADR 0029) | Acceleration; not data | n/a (indexes index data) |
+
+**Rules:**
+
+- Putting knowledge in a metadata column → wrong. Metadata is structural; knowledge belongs in attestations.
+- Putting metadata in an attestation → wrong. `last_observed_at` doesn't need a Glicko-2 rating; it's a timestamp.
+- Putting content in an attestation → wrong. Content is bytes (trajectory of constituent IDs); attestations are typed edges between entities.
+- Building a lookup index on a metadata column → fine. Building a lookup index on a content column → forbidden (content is identified by hash, looked up by `id`).
+- Adding columns to the three core tables to satisfy a domain — wrong. The substrate's schema is fixed at three tables (per RULES R2 + ADR 0002); domain-specific knowledge goes in attestations, period.
+
+Decomposers emit content + attestations; metadata is set automatically by ingestion (tier, type_id, observed_at); lookup + index are schema-time concerns, not per-row concerns.
+
 ## ID discipline (no casts, no hex)
 
 The substrate's ID values MUST be **raw bytes** end to end. No exceptions. Column-role is `id` (PK) or `<role>_id` (FK); the value IS a BLAKE3-128 hash of canonical content. Column-name reflects role; CHECK constraint + this discipline reflect the hash-value mechanism.

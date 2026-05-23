@@ -8,7 +8,7 @@ Before working on any code, read [CLAUDE.md](CLAUDE.md), [GLOSSARY.md](GLOSSARY.
 
 ## I. Schema
 
-Three core tables. No event log. Postgres 18 + PostGIS 3.6.3.
+Three core tables. No event log. Postgres 18 + PostGIS 3.6.3. Per [STANDARDS "Storage-class discipline"](STANDARDS.md#storage-class-discipline) each column has a *purpose*: **content** (bytes being recorded), **metadata** (structural / housekeeping properties), **attestation** (typed knowledge edges with Glicko-2 ratings), **lookup** (PK/FK identity-resolution), or **index** (acceleration only). Columns are annotated below.
 
 ### `entities` — pure identity + tier + type
 
@@ -29,13 +29,14 @@ CREATE INDEX entities_tier_type ON entities USING btree (tier, type_id);
 CREATE INDEX entities_first_observed ON entities USING btree (first_observed_by) WHERE first_observed_by IS NOT NULL;
 ```
 
-**Notes:**
+**Column purposes:**
 
-- `id` is BLAKE3-128 stored as `bytea(16)` (per ADR 0015). Column-role is `id`; value happens to be a hash (per STANDARDS hash discipline). Raw bytes only — no hex, no casts.
-- `tier` is a `smallint` (256 tiers max — wildly sufficient).
-- `type_id` references the type-entity declaring what kind of thing this is (Text, Pixel, Patch, Region, Image, Audio_Frame, Model_Recipe, WordNet_Synset, UD_Sentence, ...). Type drives canonicalization rule, decomposition rule, reconstruction rule, and modality-applicable attestation kinds. Type-entities are themselves rows in `entities`, bootstrapped at install.
-- `first_observed_by` references the source entity (also a row in `entities`) that first ingested this content. Nullable for the bootstrap type entities + substrate-canonical source.
-- No geometry, Hilbert index, trajectory, radius_origin, or n_constituents on this table. Those live on `physicalities`.
+- `id` — **lookup** (PK). BLAKE3-128 stored as `bytea(16)` (per ADR 0015). Column-role is `id`; value IS a hash. Raw bytes only — no hex, no casts.
+- `tier` — **metadata** (structural; which tier of the Merkle DAG).
+- `type_id` — **lookup** (FK to type-entity) + **metadata** (declares what KIND of thing this is — Text / Pixel / Patch / Region / Image / Audio_Frame / Model_Recipe / WordNet_Synset / UD_Sentence / ...). Type drives canonicalization rule, decomposition rule, reconstruction rule, and modality-applicable attestation kinds. Type-entities are themselves rows in `entities`, bootstrapped at install (per the planned ADR on bootstrap ordering).
+- `first_observed_by` — **metadata** (provenance — which source first ingested this content). Nullable for the bootstrap type entities + substrate-canonical source entity.
+- `created_at` — **metadata** (housekeeping).
+- No geometry, Hilbert index, trajectory, radius_origin, or n_constituents on this table — those are **content** + **metadata** properties of a particular source/kind's view of the entity, which live on `physicalities`.
 
 ### `physicalities` — per-source, per-kind 4D representations
 
@@ -75,13 +76,19 @@ CREATE INDEX physicalities_residual      ON physicalities USING btree (alignment
 -- so gist_geometry_ops_nd would filter nothing. Structural opclass replacement is tracked in §V.
 ```
 
-**Notes:**
+**Column purposes:**
 
-- `id` is the physicality's own content-addressed identifier (BLAKE3 of canonical `(entity_id, source_id, kind, coord, trajectory)` bytes). Lets attestations or higher-tier physicalities reference a specific physicality if needed.
-- `kind` enum is small (CONTENT / BUILDING_BLOCK / PROJECTION + future extensions). Implemented as `smallint` for compactness; values are mirrored in a substrate-canonical lookup of kind-entities.
-- `trajectory` may be NULL: T0 atoms have no constituents (CONTENT physicality with NULL trajectory); BUILDING_BLOCK typically carries no trajectory; Vampire-mode AI ingestion produces PROJECTION physicalities with NULL trajectory.
+- `id` — **lookup** (PK). Physicality's own content-addressed identifier (BLAKE3 of canonical `(entity_id, source_id, kind, coord, trajectory)` bytes). Lets attestations or higher-tier physicalities reference a specific physicality if needed.
+- `entity_id` / `source_id` — **lookup** (FKs to entities). Both are entity references; sources are themselves entities.
+- `kind` — **metadata** (which lens: CONTENT / BUILDING_BLOCK / PROJECTION + future extensions). Implemented as `smallint` for compactness; values mirrored in a substrate-canonical lookup of kind-entities.
+- `coord` — **content** (4D geometric position of this entity under this source/kind view).
+- `hilbert_index` — **index-derived value** stored as a column (B-tree-indexable redundant projection of `coord` for 1D locality range scans).
+- `trajectory` — **content** (mantissa-packed LINESTRING per ADR 0012 — the constituent sequence as this source decomposes the entity). NULL for T0 atoms (no constituents); NULL for BUILDING_BLOCK (the kind doesn't carry a downward decomposition); NULL for Vampire-mode AI ingestion (no weight-bytes preserved).
+- `radius_origin` — **content-derived** STORED generated column (for cheap radial-abstraction queries).
+- `n_constituents` — **metadata** (count of the trajectory's vertices; 0 for NULL trajectory).
+- `alignment_residual` / `source_dim` — **metadata** (per-source ingestion quality + dimensionality). Substrate-canonical physicality leaves `alignment_residual` at 0 (no projection); PROJECTION-kind carries the Procrustes residual.
+- `observed_at` — **metadata** (housekeeping).
 - `(entity_id, source_id, kind)` UNIQUE — one physicality per (entity, source, kind) tuple.
-- Cascade-friendly: partial indexes by `kind` are added as access patterns warrant.
 
 ### `attestations` — typed semantic relations, consensus state per source
 
@@ -114,11 +121,13 @@ CREATE INDEX attestations_last_observed ON attestations USING brin  (last_observ
 -- INSERT INTO attestations (...) VALUES (...) ON CONFLICT (subject_id, kind_id, object_id, source_id, context_id) DO NOTHING;
 ```
 
-**Notes:**
+**Column purposes:**
 
-- `id` is content-addressed (BLAKE3 of the 5-tuple) — stable across re-observation; same tuple → same `id` regardless of insertion order.
-- `kind_id` is the substrate's **typed transform vocabulary** — a small fixed enumeration per modality / per architecture family. Each kind plays a functional role in cascade composition; the substrate's actual vocabulary is usage- and structure-shaped (`CO_OCCURS_WITH`, `FOLLOWS`, `IS_HYPERNYM_OF`, `Q_PROJECTS`, etc.), not architecture-position-shaped. Kind entities are parameter-free; per-position attribution (layer, head, etc.) lives as meta-attestations.
-- `rating` / `rd` / `volatility` are int64 fixed-point at scale 10⁹. Glicko-2 dynamics update on cross-source agreement/disagreement evidence — per [ADR 0036](docs/adr/0036-arena-semantics-and-source-trust.md).
+- `id` — **lookup** (PK). Content-addressed (BLAKE3 of the 5-tuple); stable across re-observation. Same tuple → same `id` regardless of insertion order.
+- `subject_id` / `kind_id` / `object_id` / `source_id` / `context_id` — **lookup** (FKs to entities). All entity references.
+- `kind_id` is the substrate's **typed knowledge vocabulary** — a small fixed enumeration per modality / per architecture family. Each kind plays a functional role in cascade composition; the substrate's actual vocabulary is usage- and structure-shaped (`CO_OCCURS_WITH`, `FOLLOWS`, `IS_HYPERNYM_OF`, `Q_PROJECTS`, etc.), not architecture-position-shaped. Kind entities are parameter-free; per-position attribution (layer, head, etc.) lives as meta-attestations or as recipe content on the source entity.
+- `rating` / `rd` / `volatility` — **attestation knowledge** (the Glicko-2 state per attestation). int64 fixed-point at scale 10⁹. Glicko-2 dynamics update on cross-source agreement/disagreement evidence — per [ADR 0036](docs/adr/0036-arena-semantics-and-source-trust.md). The substrate's "weight magnitude" analog.
+- `last_observed_at` / `observation_count` — **metadata** (housekeeping; time decay input + dedup counter).
 - `ON DELETE CASCADE` on physicalities (purging a source removes its physicalities); **no** cascade on attestations (entity removal is deliberate).
 - Hash-partitioning by `source_id` is optional for operational ease — not required for query performance at the scales we're targeting (10⁹–10¹⁰ rows).
 

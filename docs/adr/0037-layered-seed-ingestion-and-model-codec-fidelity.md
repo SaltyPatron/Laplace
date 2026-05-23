@@ -3,6 +3,7 @@
 ## Status
 
 **Accepted** — 2026-05-22
+**Amended** — 2026-05-23: each "layer" is one **Decomposer plugin** ingesting its domain's FULL data ecosystem (per the new Decomposer-scope ADR — companion to this one). Layer names below renamed accordingly. Single-file-per-layer framing is wrong; layers are domain-scoped, not file-scoped.
 
 ## Context
 
@@ -12,18 +13,24 @@ This changes what "fidelity" means. For a source-scoped model round-trip, fideli
 
 ## Decision
 
-Canonical early ingestion order:
+Canonical layer order (each layer = one Decomposer ingesting its full domain ecosystem):
 
-1. Unicode / UCD / UCA / UAX — T0 atoms, collation, normalization, scripts, categories, segmentation
-2. ISO / CLDR / Glottolog-style language registries — language identity, script/region mappings, names/aliases
-3. WordNet — POS, lemmas, synsets, senses, lexical relations, hypernyms
-4. OMW — cross-lingual WordNet mappings and omniglottal sense bridges
-5. UD Treebanks — observed sentences with POS, morphology, dependency relations, lemmas
-6. Wiktionary — definitions, forms, pronunciations, etymology, POS, senses, examples
-7. Tatoeba — multilingual aligned sentences and audio samples
-8. ConceptNet / Atomic2020 — commonsense, causal, social, and event relations
-9. Tree-sitter grammars / code corpora — parseable programming-language structure
-10. Text/audio/image/model sources — high-volume observations, model recipes, physicalities, and behavioral attestations
+| # | Decomposer | Ecosystem (full set, not single file) | Local data root |
+|---|---|---|---|
+| 1 | **UnicodeDecomposer** | UCDXML + UCA DUCET + Unihan + emoji + auxiliary segmentation (UAX-#29) + CLDR-unicode | `/vault/Data/Unicode/` (≈37 GB) |
+| 2 | **ISODecomposer** | ISO 639-3 (SIL) + ISO 15924 + ISO 10646 + BCP-47 (IANA) + CLDR validity + LoC + Glottolog | `/vault/Data/ISO639/` + `/vault/Data/Unicode/iso15924/` |
+| 3 | **WordNetDecomposer** | Full WordNet 3.0: data + index + glosses + senses + examples + lexicographer files + exception lists + ILI mappings | `/vault/Data/Wordnet/WordNet-3.0/` (≈49 MB) |
+| 4 | **OMWDecomposer** | 100+ language WordNet packs + cross-lingual synset bridges + per-language licensing | `/vault/Data/omw/wns/` (≈245 MB) |
+| 5 | **UDDecomposer** | Universal Dependencies v2.17 — 250+ treebanks across ~140 languages, CoNLL-U per sentence | `/vault/Data/UD-Treebanks/ud-treebanks-v2.17/` (≈4.3 GB) |
+| 6 | **WiktionaryDecomposer** | Per-language Wiktionary XML dumps (definitions, etymology, IPA, audio refs, inflections, translations, examples) | `/vault/Data/Wiktionary/` (≈34 GB; currently `en/` only) |
+| 7 | **TatoebaDecomposer** | sentence dump + per-pair links + per-sentence metadata + `audio/` recordings + speaker/voice metadata + licensing | `/vault/Data/Tatoeba/` (≈5.4 GB) |
+| 8a | **Atomic2020Decomposer** | ~1.3M commonsense triples across ~25 relation types | `/vault/Data/Atomic2020/` (≈66 MB) |
+| 8b | **ConceptNetDecomposer** | ConceptNet 5.7+ multilingual; ~30 relation types; sub-sources (Wikipedia / OMCS / WordNet / JMDict / Verbosity / GlobalMind / ...) tracked per assertion | `/vault/Data/ConceptNet/` (≈9.5 GB) |
+| 9 | **TreeSitterDecomposer** | 303 tree-sitter grammar repos (grammar.js + parser.c + queries/) + code corpora when ingested | `/vault/Data/TreeSitter/` (≈1.9 GB) |
+| 10 | **TransformerModelDecomposer** | per-model safetensors + config.json + tokenizer.json + auxiliary architecture files | `/vault/models/<model>/` (TinyLlama-1.1B + Phi-2 + Qwen variants present) |
+| 10+ | Other modality decomposers (Image / Audio / Video corpora) | per-modality ecosystems | TBD |
+
+The dependency arrows propagate: Layer N's decomposer references entities Layer M<N's decomposer produced (via shared content-addressed IDs in the same hash space). Examples: ISODecomposer's `Script` rows are the same rows UnicodeDecomposer emitted; WordNetDecomposer's `Text` lemmas reuse Unicode-codepoint-decomposed text entities; OMWDecomposer's per-language lemmas reference ISO's `Language` entities; UDDecomposer's treebank metadata references ISO + Unicode; etc.
 
 AI model ingestion is a codec, not a conventional distillation/training step. It records recipe metadata, tokenizer content, physicalities, probe observations, architecture-specific attestation arenas, and lottery-ticket sparse load-bearing structure. If `TransformerModelSource` captures the source model faithfully and synthesis uses the source recipe/scope, the emitted model should land in the source model's behavioral basin. Differences should come from intentional sparsity, sampler settings, or broader substrate consensus scope — not accidental missingness.
 
