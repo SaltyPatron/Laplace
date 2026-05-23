@@ -1,49 +1,56 @@
 #!/bin/bash
 # scripts/ci-init-submodules.sh
 #
-# Submodule init for self-hosted CI. Two rules:
+# Submodule init for self-hosted CI.
 #
-#   1. .git/modules lives in /opt/laplace/submodule-modules, not in the
-#      runner work folder. The work folder is scratch; the persistent
-#      store survives wipes.
+# Persistent object cache at $LAPLACE_SUBMODULE_CACHE
+# (default /opt/laplace/submodule-modules — owned by laplace-runner,
+# already populated from a prior seed of the dev workspace). The runner
+# work folder stays scratch; the cache survives wipes.
 #
-#   2. The persistent store is seeded from /home/ahart/Projects/Laplace
-#      the first time it's empty. The runner already has every object on
-#      disk via the dev workspace — no upstream re-download.
+# Why we don't symlink .git/modules into the cache: each submodule's
+# .git/modules/<sm>/config records core.worktree as a RELATIVE path
+# (e.g. ../../../../external/postgresql). That path resolves through
+# the workspace's real .git/modules layout — through a symlink to a
+# different parent, it resolves to the wrong place and `git submodule
+# update` aborts with "cannot chdir to ../../../../external/<sm>".
 #
-# After that, per submodule:
-#   * fetch only if the persistent store's local clone is behind the
-#     parent's pinned SHA;
-#   * git submodule update --init --force;
-#   * verify post-init HEAD == pinned, else fail naming the submodule.
+# Instead: workspace .git/modules is a real directory. Each per-submodule
+# gitdir borrows objects from the cache via git's --reference / alternates
+# mechanism. The cache provides the bytes; the workspace gitdir provides
+# the per-workspace refs + config (including a correct core.worktree).
+#
+# Per submodule the script:
+#   1. If the cache's copy lacks the pinned SHA, fetch heads + tags into
+#      the cache (one network op per actually-bumped submodule).
+#   2. If workspace .git/modules/<sm> doesn't exist: `git submodule update
+#      --init --reference <cache>` — fresh workspace gitdir, alternates
+#      pointing at cache, no upstream re-download.
+#   3. If workspace .git/modules/<sm> exists: write alternates to point at
+#      cache, then `git submodule update --init --force`.
+#   4. Verify post-init HEAD matches pinned SHA; mismatch is a hard error.
 #
 # Skip list: external/tree-sitter-grammars/tree-sitter-nqc (upstream
-# orphan gitlink at examples/nqc trips actions/checkout's recursive
-# submodule cleanup).
+# orphan gitlink at examples/nqc trips actions/checkout cleanup).
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-PERSISTENT_MODULES="${LAPLACE_SUBMODULE_MODULES:-/opt/laplace/submodule-modules}"
-SEED_SOURCE="${LAPLACE_SUBMODULE_SEED:-/home/ahart/Projects/Laplace/.git/modules}"
+CACHE="${LAPLACE_SUBMODULE_CACHE:-/opt/laplace/submodule-modules}"
+SEED="${LAPLACE_SUBMODULE_SEED:-/home/ahart/Projects/Laplace/.git/modules}"
 SKIP=("external/tree-sitter-grammars/tree-sitter-nqc")
 
 err() { printf '::error::%s\n' "$*" >&2; }
 
 [ -f .gitmodules ] || { err "no .gitmodules at $(pwd)"; exit 2; }
 
-mkdir -p "$PERSISTENT_MODULES"
-[ -w "$PERSISTENT_MODULES" ] || { err "$PERSISTENT_MODULES not writable by $(id -un)"; exit 1; }
+mkdir -p "$CACHE"
+[ -w "$CACHE" ] || { err "$CACHE not writable by $(id -un)"; exit 1; }
 
-# Seed the persistent store from the dev workspace on first use.
-if [ -z "$(ls -A "$PERSISTENT_MODULES" 2>/dev/null)" ] && [ -r "$SEED_SOURCE" ]; then
-    rsync -aH "$SEED_SOURCE/" "$PERSISTENT_MODULES/"
+# Seed cache from dev workspace on first use.
+if [ -z "$(ls -A "$CACHE" 2>/dev/null)" ] && [ -r "$SEED" ]; then
+    rsync -aH "$SEED/" "$CACHE/"
 fi
-
-# .git/modules is always a symlink into the persistent store.
-mkdir -p .git
-rm -rf -- .git/modules
-ln -s "$PERSISTENT_MODULES" .git/modules
 
 is_skip() {
     local p="$1" s
@@ -73,18 +80,35 @@ for name in "${names[@]}"; do
         continue
     fi
 
-    mod_git=".git/modules/$path"
+    ref_dir="$CACHE/$path"
+    ws_mod=".git/modules/$path"
 
-    # Fetch only if the local clone is behind the pinned SHA.
-    if [ -d "$mod_git" ] && ! git --git-dir="$mod_git" cat-file -e "${pinned}^{commit}" 2>/dev/null; then
-        git --git-dir="$mod_git" fetch --quiet --tags origin \
-            '+refs/heads/*:refs/remotes/origin/*' >/dev/null
+    # Fetch into cache if it's behind the pinned SHA.
+    if [ -d "$ref_dir" ] && ! git --git-dir="$ref_dir" cat-file -e "${pinned}^{commit}" 2>/dev/null; then
+        git --git-dir="$ref_dir" fetch --quiet --tags origin \
+            '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1 || true
     fi
 
-    if ! git submodule update --init --force -- "$path"; then
-        err "$path: update failed (pinned $pinned, url $(git config -f .gitmodules "submodule.${name}.url"))"
-        fail=$((fail + 1))
-        continue
+    if [ ! -d "$ws_mod" ] && [ -d "$ref_dir" ]; then
+        git submodule update --init --reference "$ref_dir" -- "$path" || {
+            err "$path: init failed (pinned $pinned)"
+            fail=$((fail + 1))
+            continue
+        }
+    elif [ -d "$ws_mod" ] && [ -d "$ref_dir" ]; then
+        mkdir -p "$ws_mod/objects/info"
+        printf '%s\n' "$ref_dir/objects" > "$ws_mod/objects/info/alternates"
+        git submodule update --init --force -- "$path" || {
+            err "$path: update failed (pinned $pinned)"
+            fail=$((fail + 1))
+            continue
+        }
+    else
+        git submodule update --init --force -- "$path" || {
+            err "$path: update failed without cache entry (pinned $pinned)"
+            fail=$((fail + 1))
+            continue
+        }
     fi
 
     actual=$(git -C "$path" rev-parse HEAD 2>/dev/null || true)
@@ -98,6 +122,6 @@ done
 
 scripts/normalize-submodule-attributes.sh
 
-printf 'ci-init-submodules: ok=%d skipped=%d fail=%d total=%d store=%s\n' \
-       "$ok" "$skipped" "$fail" "${#names[@]}" "$PERSISTENT_MODULES"
+printf 'ci-init-submodules: ok=%d skipped=%d fail=%d total=%d cache=%s\n' \
+       "$ok" "$skipped" "$fail" "${#names[@]}" "$CACHE"
 [ "$fail" -eq 0 ]
