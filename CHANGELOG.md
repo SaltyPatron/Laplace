@@ -38,6 +38,22 @@ Changelog entries are generated from [Conventional Commits](https://www.conventi
 - **GitHub issue refactor:** 5 new Epics (A, B, B′, D + Spike S1) + 50 new Stories created and wired to milestone v0.1.0 with module/area/priority labels; 5 opclass Stories slotted into existing Chunks 1, 2, 3, 5
 - **End-to-end CI green** on commit `ab8f62b` — capabilities → build → db-ensure (DbUp) → smoke-test all passing
 - **Concept-capture ADRs (0035-0037):** prompt ingestion + compiled cascade traversal, arena/source-trust consensus, layered seed ingestion + model-codec fidelity.
+- **Schema reorganization ADRs (0039-0040, 2026-05-23):**
+  - **ADR 0039** — entity is identity, physicality is representation. `entities` stripped to `id` + `tier` + `type_id` + light metadata; `physicalities` gains its own `id` PK, `kind` column (CONTENT / BUILDING_BLOCK / PROJECTION), and the trajectory column; one entity → many physicalities; column-role is `id` not `hash` (value IS a BLAKE3-128 hash).
+  - **ADR 0040** — multi-modal entity types + universal T0 + lossless canonicalization. Entities carry `type_id` (Text / Pixel / Patch / Image / Audio_Frame / Model_Recipe / WordNet_Synset / ...); every modality's tier ladder bottoms at universal Unicode codepoints; canonical content is lossless per type; cross-format equivalence is attestation, not identity collapse; AI models aren't a special case (tokens are text entities with BPE markers stripped via canonicalization; tensor calculations are typed attestations of a fixed-vocabulary kind).
+- **Engine core math primitives (Chunk 1 Stories 1.1–1.11, 2026-05-23):**
+  - `math4d` (was Chunk 1 Stories 1.1/1.2/1.3 — coord4d) — operates on raw `double[4]` per R22 (no parallel datatype; POINT4D-shaped memory): `dot`, `norm`, `radius_from_origin`, `distance`, `distance_sq`, `angular_distance`, `add`/`sub`/`scale`, `centroid`.
+  - `hash128` — BLAKE3-128 (via `external/blake3/` submodule per ADR 0033): `hash128_blake3`, `hash128_merkle` (tier-prefixed domain-separated composition), `hash128_compare` (byte-lex == memcmp), `hash128_equals`, `hash128_zero`.
+  - `hilbert4d` — Skilling 2004 4D Hilbert encoder + decoder. **Bug found + fixed in commit 7ea3535** against the canonical galtay/hilbertcurve reference: dim-interleave must put X[0] at the HIGH bits of the index (Skilling's algorithm uses X[0] as a pivot and only produces a valid Hilbert curve when that convention holds). Definitive correctness via consecutive-cells test: 65535 consecutive indices map to single-cell-adjacent cells (>99.9%).
+  - `mantissa` — 212-bit XYZ=entity_id + M=metadata layout per ADR 0012 v2. Full BLAKE3-128 entity_id (no truncation); fixed-exponent FP64 components in `[1, 2) ∪ (-2, -1]` so vertices are PG-geometry-valid; 16-bit ordinal + 16-bit run_length + 52 reserved flag bits.
+  - `super_fibonacci` (Story 3.3) — Marc Alexa CVPR 2022 quasi-uniform unit quaternions on S³. Algebraically exact unit-norm. Verified at full Unicode codepoint scale (1.1M quaternions in ~67ms).
+  - 54 engine-core unit tests; all pass.
+- **Engine dynamics math primitives (Chunk 6 Stories 6.6/6.7/6.8, 2026-05-23):**
+  - `eigenmaps` — Laplacian eigenmaps (Belkin & Niyogi 2003) via Spectra's `SymEigsShiftSolver` (sparse symmetric shift-invert + Lanczos) on regularized graph Laplacian. Ring-manifold recovery verified (60 points on 1D ring in 10D → 2D embedding with ≥90% neighbor-preservation).
+  - `gram_schmidt` — via Eigen's `HouseholderQR` (oneMKL `dgeqrf`/`dorgqr` backed). Backward-stable; handles ill-conditioned bases that break classical/modified GS.
+  - `procrustes` — Schönemann 1966 + Umeyama 1991 with rectangular-case correction (classic Umeyama scale formula assumes square R; corrected to use `‖Pc·R‖²` in the denominator). Eigen `JacobiSVD` (oneMKL `dgesdd` backed).
+  - 12 dynamics unit tests; all pass.
+- **GitHub issue tracking refresh:** 8 per-source IDecomposer specs opened (#183-#191): UnicodeUCDSource, WordNetSource, OMWSource, UDTreebankSource, WiktionarySource, TatoebaSource, Atomic2020Source, ConceptNetSource, TransformerModelSource. Architectural snapshot discussion #192.
 
 ### Changed
 
@@ -57,6 +73,10 @@ Changelog entries are generated from [Conventional Commits](https://www.conventi
 - New `RULES.md` R16: separation-of-concerns invariants codified.
 - New `RULES.md` R19-R21: prompt is ingestion and cascade is compiled; arena/source-trust semantics are mandatory; AI model ingest is a codec with source-scoped round-trip fidelity as a v0.1 proof target.
 - Canonical docs and agent instructions refreshed to preserve prompt ingestion, compiled cascade, exact-zero sparse emission, source trust/effective mu, truth-clustering, seed-source order, and stock/substrate/export round-trip comparison.
+- **ADR 0012 revised (2026-05-23):** mantissa-packing format. Original 8-tier / 12-position / 60-truncated-hash layout superseded by 212-bit XYZ=entity_id + M=metadata layout. The original layout conflated content-recording trajectories (metadata containers) with the entity-table canonical-coord layer (where 4D position WAS load-bearing under the original schema) and truncated the entity ID — violating STANDARDS.md ID discipline (no truncation). Revised: trajectory now lives on `physicalities` (specifically CONTENT-kind), not `entities`; vertices carry full 128-bit `entity_id`.
+- **GLOSSARY rewritten (2026-05-23):** Entity/Physicality/Attestation/Trajectory entries reframed for the entity-as-pure-identity model. New entries: Entity Type, Universal T0, Canonicalization, Attestation Kind, Attestation Tuple Shape, Data Class (app/substrate/user). Per-source decomposition mini-specs added (WordNet, OMW, UD, Wiktionary, Tatoeba, Atomic2020, ConceptNet, TransformerModelSource).
+- **STANDARDS.md** — "Hash discipline" renamed to "ID discipline" (column-role is `id`; value IS a BLAKE3-128 hash); added "Canonicalization discipline" (lossless per type) + "Attestation kind discipline" (parameter-free kind entities; fixed vocabularies per modality / per architecture family; forbids synthesizing per-(layer, head, position) kind IDs via hash-concatenation of architectural metadata).
+- **DESIGN.md §I (Schema)** rewritten: entities = identity + tier + type_id; physicalities expanded with id PK + kind + trajectory. §V (Indexing) regenerated for the new schema. §IX (three-phase) updated with bootstrap responsibilities (substrate-canonical source + type entities + kind entities).
 
 ### Fixed
 
@@ -65,6 +85,8 @@ Changelog entries are generated from [Conventional Commits](https://www.conventi
 - Postgis package mismatch on hart-server: `update-alternatives --auto postgresql-18-postgis.control` restored the symlink chain after `postgis.control` had been pinned to a stale `3.7.0dev` from a prior install.
 - `laplace_priv.install_extension` wrapper search_path reordered from `pg_catalog, public` → `public, pg_catalog` so postgis's `CREATE TYPE geometry_dump` (no schema qualifier) resolves to `public` instead of `pg_catalog`.
 - Orphan `laplace` schema on hart-server (owned by `postgres` from a transitional commit's pre-create step) — manually dropped via `sudo -u postgres psql -d laplace -c "DROP SCHEMA laplace CASCADE"`; future installs use the `trusted = true` path which creates the schema with `laplace_admin` as owner.
+- **`hilbert4d` dim-interleave bug (commit 7ea3535):** Skilling 2004 transcription originally placed X[0] at the LOW bits of the 128-bit index. Encoder/decoder were inverse so the round-trip test passed, but the output was a self-consistent NON-Hilbert curve (consecutive indices ≠ adjacent cells). Found via the new ConsecutiveIndicesProduceAdjacentCells correctness test, fixed against the canonical galtay/hilbertcurve Python reference (Skilling's algorithm uses X[0] as a pivot and requires X[0] at the HIGH bits of the index for the curve to be valid).
+- **Procrustes rectangular-case Umeyama scale (commit 275ba22):** classic Umeyama formula `s = Σ.sum() / ‖Pc‖²` assumes square R (d_src == d_tgt) where `‖Pc·R‖² = ‖Pc‖²` holds. For rectangular R (d_src ≠ d_tgt) the equality breaks and the formula gives the wrong scale. Corrected to use `‖Pc·R‖²` in the denominator.
 
 ### Decisions
 
