@@ -1,21 +1,26 @@
-/* 02_hash128.sql.in — BLAKE3-128-truncated entity hash convenience.
+/* 02_hash128.sql.in -- BLAKE3-128-truncated content-addressed identifier helpers.
  *
- * Per ADR 0015 + STANDARDS.md "Hash discipline": hashes are bytea(16)
- * end-to-end; never hex, never text. Per RULES.md R22 (use existing
- * types), we do NOT create a parallel `hash128` PG type — bytea with
- * CHECK constraints is the canonical storage. Substrate-specific
- * comparison semantics live in the custom opclass (03_hash128_ops).
+ * Per ADR 0015 + STANDARDS "ID discipline": IDs are bytea(16) end-to-end;
+ * never hex, never text. Per RULES R22, no parallel `hash128` PG type --
+ * bytea with CHECK (octet_length = 16) is the canonical storage.
+ * Substrate-specific comparison semantics live in 03_hash128_ops (custom
+ * laplace_btree_hash128_ops opclass per ADR 0029).
  *
- * Real BLAKE3 wrappers (laplace_hash128_blake3, laplace_hash128_merkle)
- * land Chunk 1 Story 1.3 — wrap blake3_hasher_* via liblaplace_core. */
+ * Wrappers thread through to liblaplace_core kernels per RULES R6 (DB as
+ * dumb store; math in C). */
 
--- Functions land Chunk 1 Story 1.3:
--- CREATE FUNCTION laplace_hash128_blake3(data bytea)
---     RETURNS bytea
---     AS 'MODULE_PATHNAME', 'pg_laplace_hash128_blake3'
---     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
---
--- CREATE FUNCTION laplace_hash128_merkle(tier smallint, child_hashes bytea[])
---     RETURNS bytea
---     AS 'MODULE_PATHNAME', 'pg_laplace_hash128_merkle'
---     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+CREATE FUNCTION laplace_hash128_blake3(data bytea)
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_hash128_blake3'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+
+COMMENT ON FUNCTION laplace_hash128_blake3(bytea) IS
+    'BLAKE3-128 (truncated to 16 bytes) of the input. Used to compute entity / physicality / attestation ids from their canonical content bytes (per STANDARDS ID discipline).';
+
+CREATE FUNCTION laplace_hash128_merkle(tier smallint, child_hashes bytea[])
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_hash128_merkle'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+
+COMMENT ON FUNCTION laplace_hash128_merkle(smallint, bytea[]) IS
+    'Tier-prefixed Merkle composition: BLAKE3-128 of (tier_byte || concat(child_hashes)). Each child_hashes element must be exactly 16 bytes. Order-preserving (children processed in array order). Tier byte prevents collision between tier-N compositions and lower-tier raw hashes.';

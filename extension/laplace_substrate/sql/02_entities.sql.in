@@ -1,13 +1,30 @@
-/* 02_entities.sql.in — entities table (per DESIGN.md I + RULES.md R2).
+/* 02_entities.sql.in — entities table (per DESIGN.md §I + ADR 0039).
  *
- * Every unique observed n-gram. Content-addressable PK on hash bytea(16).
- * BLAKE3-truncated (ADR 0015). Canonical coord is standard PostGIS
- * geometry with Z+M = 4D (R1). Trajectory is mantissa-packed LINESTRING
- * for T≥1 (NULL for T0 atoms).
- *
- * Real table DDL lands Chunk 2 alongside the C wrappers. The pg_extension_
- * config_dump() call ensures substrate data survives pg_dump per ADR 0025. */
+ * Entities are pure identity: id + tier + type_id + lightweight metadata.
+ * No geometry, no trajectory, no canonical_coord -- those live on
+ * physicalities (per ADR 0039 schema reorganization). The id column-role
+ * is "id"; the value IS a BLAKE3-128 hash of canonical (type-canonicalized)
+ * content bytes (per ADR 0015 + ADR 0040 + STANDARDS ID discipline). */
 
--- Real table DDL lands Chunk 2 Story 2.4:
--- CREATE TABLE entities ( ... per DESIGN.md I ... );
--- SELECT pg_extension_config_dump('entities', '');
+CREATE TABLE entities (
+    id                 bytea            PRIMARY KEY CHECK (octet_length(id) = 16),
+    tier               smallint         NOT NULL CHECK (tier >= 0 AND tier < 256),
+    type_id            bytea            NOT NULL,                                   -- FK to entities(id) added in 99_constraints.sql.in after bootstrap rows exist
+    first_observed_by  bytea,
+    created_at         timestamptz      NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE entities IS
+    'Pure identity layer. One row per unique observed n-gram, content-addressed by BLAKE3-128 of canonical content bytes per type. No geometry on this table -- that lives on physicalities (per ADR 0039). type_id and first_observed_by are FKs to entities(id); the FK constraints are added after bootstrap to allow the self-referential meta-type rows to insert.';
+
+COMMENT ON COLUMN entities.id IS
+    'BLAKE3-128 of canonical content bytes per the entity type. Column-role is "id"; value IS a hash (per STANDARDS ID discipline). Raw bytes only -- no hex, no casts.';
+COMMENT ON COLUMN entities.tier IS
+    'Stratum in the Merkle DAG. T0 = atoms (Codepoint), T1 = graphemes/word-forms (modality-dependent), etc. Metadata, not knowledge.';
+COMMENT ON COLUMN entities.type_id IS
+    'FK to entities(id) -- the type entity (Text / Pixel / Codepoint / Language / Model_Recipe / WordNet_Synset / ...). Drives canonicalization, decomposition, reconstruction, and modality-applicable attestation kinds (per ADR 0040).';
+COMMENT ON COLUMN entities.first_observed_by IS
+    'FK to entities(id) -- the source entity that first ingested this content. Nullable for bootstrap meta-type and substrate-canonical source rows.';
+
+/* Ensure substrate data survives pg_dump per ADR 0025. */
+SELECT pg_extension_config_dump('entities', '');

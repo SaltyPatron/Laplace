@@ -1,12 +1,41 @@
-/* 04_attestations.sql.in — typed semantic relations + consensus state.
+/* 04_attestations.sql.in — typed semantic relations + Glicko-2 consensus state
+ * (per DESIGN.md §I + RULES.md R5 + ADR 0036 + ADR 0039 + ADR 0044).
  *
- * Per RULES.md R5: attestation rows ARE consensus state, not event log.
- * One row per (subject, kind, object, source, context) tuple, idempotent
- * on repeat. Glicko-2 rating/rd/volatility as int64 fixed-point (ADR 0004).
- * Arena semantics per ADR 0036 + RULES.md R20.
+ * Each row is ONE consensus state per (subject, kind, object, source, context)
+ * tuple. Repeated assertions are idempotent on UPSERT-no-op (per R5). Glicko-2
+ * dynamics update on cross-source agreement/disagreement evidence.
  *
- * Real DDL Chunk 2. */
+ * id is content-addressed BLAKE3-128 of the 5-tuple -- stable across re-
+ * observation. Glicko-2 state initialized per kind-value-tier (ADR 0044
+ * Part A) x source-trust-class (ADR 0044 Part B), NOT a global default. */
 
--- CREATE TABLE attestations ( ... per DESIGN.md I ... );
--- SELECT pg_extension_config_dump('attestations', '');
--- SELECT pg_extension_config_dump('attestations_id_seq', '');
+CREATE TABLE attestations (
+    id                bytea         PRIMARY KEY CHECK (octet_length(id) = 16),
+    subject_id        bytea         NOT NULL REFERENCES entities(id),
+    kind_id           bytea         NOT NULL REFERENCES entities(id),
+    object_id         bytea                  REFERENCES entities(id),
+    source_id         bytea         NOT NULL REFERENCES entities(id),
+    context_id        bytea                  REFERENCES entities(id),
+    rating            bigint        NOT NULL,
+    rd                bigint        NOT NULL CHECK (rd > 0),
+    volatility        bigint        NOT NULL CHECK (volatility > 0),
+    last_observed_at  timestamptz   NOT NULL,
+    observation_count bigint        NOT NULL DEFAULT 1 CHECK (observation_count >= 0),
+    UNIQUE NULLS NOT DISTINCT (subject_id, kind_id, object_id, source_id, context_id)
+);
+
+COMMENT ON TABLE attestations IS
+    'Typed knowledge edges with Glicko-2 consensus state. Per RULES R5: attestation rows ARE consensus state, NOT event log entries. One row per (subject, kind, object, source, context); repeated assertions are UPSERT-no-op idempotent. Glicko-2 dynamics update on cross-source agreement/disagreement per ADR 0036 arena semantics + ADR 0044 kind-tier and trust-class priors.';
+
+COMMENT ON COLUMN attestations.id IS
+    'Content-addressed BLAKE3-128 of canonical (subject_id, kind_id, object_id, source_id, context_id) bytes. Stable across re-observation; same tuple -> same id regardless of insertion order.';
+COMMENT ON COLUMN attestations.kind_id IS
+    'FK to entities(id) -- the kind entity (typed transform vocabulary; one of the substrate-canonical kinds bootstrapped at install per ADR 0042, plus decomposer-domain-specific kinds). The kind entity carries its value tier + cascade weight as meta-attestations per ADR 0044.';
+COMMENT ON COLUMN attestations.rating IS
+    'Glicko-2 mu. int64 fixed-point at scale 10^9. Initial value per ADR 0044: kind-value-tier prior x source-trust-class weight. NOT a global default.';
+COMMENT ON COLUMN attestations.rd IS
+    'Glicko-2 rating deviation (uncertainty). int64 fixed-point at scale 10^9. Initial per ADR 0044 tier prior.';
+COMMENT ON COLUMN attestations.volatility IS
+    'Glicko-2 volatility. int64 fixed-point at scale 10^9. Initial per ADR 0044 tier prior.';
+
+SELECT pg_extension_config_dump('attestations', '');

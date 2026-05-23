@@ -1,8 +1,46 @@
-/* 05_indexes.sql.in — substrate indexes (per DESIGN.md V).
+/* 05_indexes.sql.in — substrate indexes (per DESIGN.md §V + ADR 0029 + ADR 0039).
  *
- * Multi-index strategy: B-tree on hash + hilbert_index + tier + radius
- * + per-source FK columns; GIST(gist_geometry_ops_nd) on coord + trajectory;
- * BRIN on time-series columns. Custom opclasses from laplace_geom apply
- * here (laplace_btree_hash128_ops on hash columns).
- *
- * Real DDL Chunk 2. */
+ * Index strategy split by storage class (per STANDARDS storage-class discipline):
+ * - LOOKUP indexes: PK btree on id, FK btrees on entity_id/source_id/subject_id/
+ *   kind_id/object_id/context_id (custom laplace_btree_hash128_ops opclass per
+ *   ADR 0029 lands later as Story 1.14 / 2.15; stock bytea btree until then).
+ * - METADATA indexes: btree on tier/type_id/kind/observed_at-class columns.
+ * - CONTENT indexes: GIST on physicalities.coord (gist_geometry_ops_nd; ADR
+ *   0029's laplace_gist_s3_ops lands as Story 2.15 / 5.12);
+ *   structural opclass on physicalities.trajectory (laplace_sp_trajectory_ops
+ *   per ADR 0029; lands as Story 2.16 -- stock gist_geometry_ops_nd is
+ *   useless on mantissa-packed trajectories since all collapse to the same
+ *   bounding box per ADR 0012).
+ * - ATTESTATION indexes: btree on (rating DESC, rd ASC) for top-rated scans;
+ *   composite btree on (subject_id, kind_id) for cascade frontier expansion.
+ * - TEMPORAL indexes: BRIN on created_at / observed_at / last_observed_at. */
+
+/* --- entities (identity + tier + type_id) --- */
+
+CREATE INDEX entities_tier_btree           ON entities USING btree (tier);
+CREATE INDEX entities_type_btree           ON entities USING btree (type_id);
+CREATE INDEX entities_tier_type_btree      ON entities USING btree (tier, type_id);
+CREATE INDEX entities_first_observed_btree ON entities USING btree (first_observed_by) WHERE first_observed_by IS NOT NULL;
+CREATE INDEX entities_created_at_brin      ON entities USING brin  (created_at);
+
+/* --- physicalities (per-source per-kind 4D views) --- */
+
+CREATE INDEX physicalities_entity_btree    ON physicalities USING btree (entity_id);
+CREATE INDEX physicalities_source_btree    ON physicalities USING btree (source_id);
+CREATE INDEX physicalities_kind_btree      ON physicalities USING btree (kind);
+CREATE INDEX physicalities_coord_gist      ON physicalities USING gist  (coord gist_geometry_ops_nd);
+CREATE INDEX physicalities_hilbert_btree   ON physicalities USING btree (hilbert_index);
+CREATE INDEX physicalities_radius_btree    ON physicalities USING btree (radius_origin);
+CREATE INDEX physicalities_residual_btree  ON physicalities USING btree (alignment_residual) WHERE alignment_residual IS NOT NULL;
+CREATE INDEX physicalities_observed_brin   ON physicalities USING brin  (observed_at);
+
+/* --- attestations (typed knowledge edges + Glicko-2 state) --- */
+
+CREATE INDEX attestations_subject_btree       ON attestations USING btree (subject_id);
+CREATE INDEX attestations_kind_btree          ON attestations USING btree (kind_id);
+CREATE INDEX attestations_object_btree        ON attestations USING btree (object_id) WHERE object_id IS NOT NULL;
+CREATE INDEX attestations_source_btree        ON attestations USING btree (source_id);
+CREATE INDEX attestations_context_btree       ON attestations USING btree (context_id) WHERE context_id IS NOT NULL;
+CREATE INDEX attestations_rating_btree        ON attestations USING btree (rating DESC, rd ASC);
+CREATE INDEX attestations_subject_kind_btree  ON attestations USING btree (subject_id, kind_id);
+CREATE INDEX attestations_last_observed_brin  ON attestations USING brin  (last_observed_at);
