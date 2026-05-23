@@ -171,15 +171,17 @@ layer1_build_install_extensions() {
     # from one tree. PGXS retired. Produces engine .sos + extension .sos +
     # preprocessed SQL install scripts in build/.
     (cd "$REPO_DIR" && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        -DLAPLACE_PG_PREFIX=/usr/lib/postgresql/18 | tail -3)
+        -DCMAKE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" \
+        -DLAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/usr/lib/postgresql/18}" | tail -3)
     (cd "$REPO_DIR" && cmake --build build | tail -3)
-    # `sudo cmake --install build` places engine .so + both extensions'
-    # .so + .control + .sql into PG's extension dirs. The bounded NOPASSWD
-    # sudoers entry for laplace-runner covers `cmake --install *` per
-    # bootstrap_sudoers, so from the laplace-runner CI context it's
-    # password-free.
-    (cd "$REPO_DIR" && sudo cmake --install build | tail -3)
-    green "✓ laplace_geom + laplace_substrate .so/.control/.sql installed in PG extension dirs"
+    # `cmake --install` places engine .so + both extensions' .so + .control
+    # + .sql into $LAPLACE_INSTALL_PREFIX (default /opt/laplace, owned
+    # ahart:laplace-runner setgid 2775). PG's extension_control_path +
+    # dynamic_library_path already point there via bootstrap_pg_extension_paths,
+    # so CREATE EXTENSION finds the install — no sudo, no NOPASSWD entry.
+    # Per ADR 0019 amendment (2026-05-23).
+    (cd "$REPO_DIR" && cmake --install build --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" | tail -3)
+    green "✓ laplace_geom + laplace_substrate .so/.control/.sql installed at ${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 }
 
 layer0_5_build_deps() {

@@ -1,0 +1,54 @@
+#!/bin/bash
+# scripts/configure-github-repo.sh
+#
+# Idempotent: pushes the repo-level Actions variables that integration.yml
+# reads to find the canonical paths on the self-hosted runner. Variables
+# (not secrets — these are paths, not credentials) are surfaced in
+# Settings → Variables → Actions so they're discoverable, auditable, and
+# overrideable per-environment.
+#
+# Run as a user with `repo:admin` (or maintainer) scope on SaltyPatron/Laplace:
+#   scripts/configure-github-repo.sh
+#
+# The variables match the integration.yml `env:` block fallbacks; setting
+# them here just makes the values explicit in repo settings rather than
+# relying on the hardcoded defaults in the workflow.
+
+set -euo pipefail
+
+REPO="${REPO:-SaltyPatron/Laplace}"
+
+err() { printf '\033[0;31m%s\033[0m\n' "$*" >&2; }
+ok()  { printf '\033[0;32m%s\033[0m\n' "$*"; }
+
+if ! command -v gh >/dev/null; then
+    err "gh CLI not found"; exit 1
+fi
+if ! gh auth status >/dev/null 2>&1; then
+    err "gh not authenticated; run: gh auth login"; exit 1
+fi
+
+# (name, value, description-not-pushed-but-tracked-here)
+declare -A vars=(
+    [LAPLACE_SUBMODULE_CACHE]="/opt/laplace/external"
+    [LAPLACE_INSTALL_PREFIX]="/opt/laplace"
+    [LAPLACE_PG_PREFIX]="/usr/lib/postgresql/18"
+)
+
+for name in "${!vars[@]}"; do
+    val="${vars[$name]}"
+    # gh variable set is idempotent — it updates if the var exists.
+    if gh variable set "$name" --body "$val" --repo "$REPO" >/dev/null 2>&1; then
+        ok "✓ $name = $val"
+    else
+        err "✗ failed to set $name (insufficient scope? need admin or maintainer)"
+        exit 1
+    fi
+done
+
+echo
+ok "All Laplace workflow variables pushed to $REPO."
+echo "See: https://github.com/$REPO/settings/variables/actions"
+echo
+echo "Override per-run via 'gh workflow run integration.yml -f LAPLACE_PG_PREFIX=...'"
+echo "(once workflow_dispatch inputs are wired) or by editing the variable above."

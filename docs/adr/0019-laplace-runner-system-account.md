@@ -4,6 +4,8 @@
 
 **Accepted** — 2026-05-21 (supersedes ADR 0014)
 
+**Amended** — 2026-05-23: The bounded-sudoers clause for `cmake --install` / `make install*` is **retired**. With `CMAKE_INSTALL_PREFIX=/opt/laplace` (laplace-runner-group-writable, setgid 2775) and PG's `extension_control_path` / `dynamic_library_path` pointing at the same prefix via `bootstrap_pg_extension_paths`, the runner installs extensions into a directory it already owns — no escalation needed. `bootstrap_remove_legacy_sudoers` in `scripts/bootstrap-laplace-runner.sh` removes the `/etc/sudoers.d/laplace-runner` artifact from prior bootstraps.
+
 ## Context
 
 Initial runner setup (ADR 0014) used the developer's interactive OS user (`ahart`) for the GitHub Actions runner. Problems:
@@ -29,7 +31,7 @@ Systemd service runs as `laplace-runner`.
 
 Permissions:
 - **PG access**: peer auth mapping `laplace-runner` OS user → `laplace_admin` PG role (via `/etc/postgresql/18/main/pg_ident.conf` + `pg_hba.conf`). No password needed for local PG access. **`laplace_admin` is `SUPERUSER` + `CREATEDB` + `CREATEROLE`** (amended 2026-05-23 per [ADR 0045](0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md) — the prior `CREATEDB + CREATEROLE`-only configuration required a `SECURITY DEFINER` wrapper to install non-trusted extensions like PostGIS, which broke `just db-nuke` and made trusted-extension ownership transfer require additional `ALTER OWNER` machinery; the dedicated-cluster superuser pattern collapses both).
-- **Bounded sudo**: `/etc/sudoers.d/laplace-runner` grants `NOPASSWD: /usr/bin/make install*, /usr/bin/make USE_PGXS=1 *install*` — only enough to install PG extensions.
+- **No sudo for installs** (per 2026-05-23 amendment above): `cmake --install build --prefix /opt/laplace` writes into a directory the runner already owns via group membership + setgid. The old bounded-NOPASSWD sudoers entry has been removed. See `bootstrap_remove_legacy_sudoers` in `scripts/bootstrap-laplace-runner.sh`.
 - **Read-only access** to /vault/Data (world-readable for ingestion) and /vault/models.
 
 ## Consequences

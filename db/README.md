@@ -56,7 +56,11 @@ The `integration.yml` workflow's `db-ensure` job runs:
 
 ```yaml
 - run: |
-    cd extension && sudo make install PG_CONFIG=...
+    cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/opt/laplace \
+      -DLAPLACE_PG_PREFIX=/usr/lib/postgresql/18
+    cmake --build build
+    cmake --install build      # no sudo — installs into laplace-runner-owned /opt/laplace
 - run: |
     cd app
     dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- up

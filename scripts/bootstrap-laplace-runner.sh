@@ -32,10 +32,23 @@
 #      EXTENSION finds them, without sudo on per-iteration); managed
 #      between marker comments so re-runs replace cleanly instead of
 #      appending duplicates
-#  10. /etc/sudoers.d/laplace-runner — bounded NOPASSWD for `cmake --install` + legacy `make install*`
-#      so the runner can install the extension into PG's extension dirs
+#  10. Removal of legacy /etc/sudoers.d/laplace-runner (the prior bounded-
+#      NOPASSWD-for-cmake-install workaround). With CMAKE_INSTALL_PREFIX
+#      = /opt/laplace (laplace-runner-group writable, setgid) plus PG's
+#      extension_control_path / dynamic_library_path pointing there,
+#      the install is sudo-free per ADR 0019 amendment 2026-05-23.
 #  11. Cleanup of legacy state (ahart-as-superuser, ahart DB, old runner
 #      under /home/ahart/actions-runner)
+#  12. /opt/laplace/external/ — canonical persistent clone of every submodule
+#      in .gitmodules. Cloned once from upstream, fetched on subsequent runs.
+#      Used as --reference target by scripts/ci-init-submodules.sh so the
+#      runner workspace never re-downloads 5+ GB of submodule sources between
+#      workflow runs. Owned ahart:laplace-runner setgid (matches /opt/laplace).
+#  13. /var/lib/laplace-runner/.config/gh/hosts.yml — gh CLI auth for the
+#      runner user, derived from $SUDO_USER's existing gh config. Lets the
+#      runner do `gh issue edit` / `gh api` per CLAUDE.md cadence without
+#      manual login (the runner has no shell — no interactive `gh auth login`
+#      is possible).
 #
 # What this does NOT touch (those live in Layer 1 / Justfile):
 #   - The `laplace` database (DbUp creates it via EnsureDatabase)
@@ -619,33 +632,118 @@ bootstrap_cleanup_stale_installs() {
     fi
 }
 
-bootstrap_sudoers() {
-    say "Sudoers: bounded NOPASSWD for 'cmake --install' + legacy 'make install'"
-    cat > "$SUDOERS_FILE" <<EOF
-# Laplace CI runner — bounded NOPASSWD sudo for installing the laplace
-# PG extensions. The runner user (laplace-runner) needs root only to
-# write to the stock PG paths:
-#   /usr/lib/postgresql/18/lib/                  (extension .so files)
-#   /usr/share/postgresql/18/extension/          (control + SQL files)
-#
-# Per ADR 0032 (unified CMake build pipeline, Path B — PGXS retired)
-# 'cmake --install build' replaces 'make install'. Legacy 'make install*'
-# entries kept as a safety net during the PGXS → CMake transition.
-#
-# Once Epic B's custom PG cluster lands at /opt/laplace/pgsql-18 (owned
-# by laplace-runner), neither path requires sudo — these entries become
-# dead weight at that point and can be removed.
-
-laplace-runner ALL=(root) NOPASSWD: /usr/bin/cmake --install *, /usr/bin/make install*, /usr/bin/make USE_PGXS=1 *install*
-EOF
-    chmod 440 "$SUDOERS_FILE"
-    chown root:root "$SUDOERS_FILE"
-
-    if visudo -c -f "$SUDOERS_FILE" >/dev/null 2>&1; then
-        green "✓ $SUDOERS_FILE valid"
+bootstrap_remove_legacy_sudoers() {
+    # Removes /etc/sudoers.d/laplace-runner left over from prior bootstrap
+    # iterations. The NOPASSWD-for-cmake-install entry was a workaround
+    # for installing extensions into root-owned system PG paths. With
+    # CMAKE_INSTALL_PREFIX=/opt/laplace (laplace-runner-owned, mode 2775)
+    # plus extension_control_path / dynamic_library_path managed by
+    # bootstrap_pg_extension_paths, the runner installs extensions to
+    # /opt/laplace/share/postgresql/$PG_VERSION/extension and PG finds
+    # them there — no sudo, no escalation, no NOPASSWD lying around.
+    say "Remove legacy /etc/sudoers.d/laplace-runner (workaround no longer needed)"
+    if [ -f "$SUDOERS_FILE" ]; then
+        rm -f "$SUDOERS_FILE"
+        green "✓ Removed $SUDOERS_FILE (cmake install no longer needs sudo)"
     else
-        red "✗ $SUDOERS_FILE failed validation"
+        green "✓ $SUDOERS_FILE already absent"
+    fi
+}
+
+bootstrap_submodule_cache() {
+    # Per ADR 0033 — all C/C++ deps are submodules under external/. The
+    # runner workspace is scratch (actions/checkout cleans it); to keep
+    # CI from re-downloading 5+ GB of submodule sources every workflow
+    # run, /opt/laplace/external/ holds one persistent canonical clone
+    # per submodule. scripts/ci-init-submodules.sh points each workspace
+    # submodule init at this cache via git's --reference / alternates.
+    #
+    # First run: clones every submodule URL from .gitmodules. Network-
+    # bound; ~10-20 min depending on link speed (~530 MB checked out per
+    # ADR 0033 estimate; ~1 GB with all 303 tree-sitter grammars).
+    # Subsequent runs: `git fetch` in each existing clone — sub-minute.
+    #
+    # Runs as laplace-runner so ownership lands right from the start.
+    # Files inherit the laplace-runner group via /opt/laplace's setgid.
+    say "Populate /opt/laplace/external/ submodule cache"
+
+    local repo_root
+    repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    if [ ! -f "$repo_root/.gitmodules" ]; then
+        red "Expected .gitmodules at $repo_root — run bootstrap from the Laplace repo"
         exit 1
+    fi
+
+    local cache_root="/opt/laplace/external"
+    install -d -m 2775 -o "$GH_SUDO_USER" -g "$RUNNER_GROUP" "$cache_root"
+
+    local count_cloned=0 count_fetched=0 count_failed=0
+    # Enumerate (path, url) pairs from .gitmodules.
+    while IFS=$'\t' read -r path url; do
+        [ -n "$path" ] && [ -n "$url" ] || continue
+        local target="$cache_root/$path"
+        if [ -d "$target/.git" ]; then
+            if sudo -u "$RUNNER_USER" -H git -C "$target" fetch --quiet --tags \
+                origin '+refs/heads/*:refs/remotes/origin/*' 2>/dev/null; then
+                count_fetched=$((count_fetched + 1))
+            else
+                count_failed=$((count_failed + 1))
+                yellow "  fetch failed for $path"
+            fi
+        else
+            install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$(dirname "$target")"
+            if sudo -u "$RUNNER_USER" -H git clone --quiet "$url" "$target" 2>/dev/null; then
+                count_cloned=$((count_cloned + 1))
+            else
+                count_failed=$((count_failed + 1))
+                yellow "  clone failed for $path ($url)"
+            fi
+        fi
+    done < <(
+        awk '
+            /^\[submodule/ { in_sm=1; path=""; url=""; next }
+            in_sm && /^[[:space:]]*path[[:space:]]*=/ { sub(/^[^=]*=[[:space:]]*/,""); path=$0 }
+            in_sm && /^[[:space:]]*url[[:space:]]*=/  { sub(/^[^=]*=[[:space:]]*/,""); url=$0 }
+            in_sm && path != "" && url != "" { printf "%s\t%s\n", path, url; in_sm=0 }
+        ' "$repo_root/.gitmodules"
+    )
+
+    green "✓ submodule cache: cloned=$count_cloned fetched=$count_fetched failed=$count_failed under $cache_root"
+    if [ "$count_failed" -gt 0 ]; then
+        yellow "  (failures don't abort bootstrap — re-run to retry; or fix individual upstream issues)"
+    fi
+}
+
+bootstrap_runner_gh_auth() {
+    # The runner user has no shell, so `gh auth login` is not possible.
+    # Mirror $SUDO_USER's gh hosts.yml into the runner's $XDG_CONFIG_HOME
+    # so the runner can invoke `gh issue edit`, `gh api`, etc. per the
+    # CLAUDE.md cadence.
+    #
+    # Security note: this shares the invoking user's GitHub token with
+    # the runner. For tighter separation, replace with a runner-specific
+    # fine-grained PAT after bootstrap. The token's scope is whatever
+    # the invoking user has minted; trust boundary is the local machine.
+    say "Set up gh CLI auth for $RUNNER_USER (mirror $GH_SUDO_USER's token)"
+
+    local src="/home/$GH_SUDO_USER/.config/gh/hosts.yml"
+    if [ ! -f "$src" ]; then
+        yellow "  $src not present — skipping (run 'gh auth login' as $GH_SUDO_USER first, then re-run bootstrap)"
+        return
+    fi
+
+    local dst_dir="$RUNNER_HOME/.config/gh"
+    local dst="$dst_dir/hosts.yml"
+    install -d -m 700 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$RUNNER_HOME/.config"
+    install -d -m 700 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$dst_dir"
+    install -m 600 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$src" "$dst"
+    green "✓ Mirrored $src -> $dst (mode 600, owned $RUNNER_USER)"
+
+    # Sanity probe.
+    if sudo -u "$RUNNER_USER" -H gh auth status >/dev/null 2>&1; then
+        green "✓ $RUNNER_USER can authenticate with GitHub"
+    else
+        yellow "  gh auth status failed under $RUNNER_USER — token may have host-binding or scope issue"
     fi
 }
 
@@ -840,7 +938,9 @@ do_bootstrap() {
     bootstrap_cleanup_stale_installs
     bootstrap_engine_lib_path
     bootstrap_pg_extension_paths
-    bootstrap_sudoers
+    bootstrap_remove_legacy_sudoers
+    bootstrap_submodule_cache
+    bootstrap_runner_gh_auth
 
     say "Verification"
     echo "Runner service:"

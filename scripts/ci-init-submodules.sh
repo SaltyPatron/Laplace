@@ -1,12 +1,16 @@
 #!/bin/bash
 # scripts/ci-init-submodules.sh
 #
-# Submodule init for self-hosted CI.
+# Submodule init for self-hosted CI — fast path via the persistent
+# canonical clone tree at /opt/laplace/external/, populated and
+# refreshed by bootstrap-laplace-runner.sh's bootstrap_submodule_cache
+# step. The runner work folder stays scratch; this script never
+# re-downloads from upstream — it only points workspace submodule
+# inits at the cached clones via git's --reference / alternates.
 #
-# Persistent object cache at $LAPLACE_SUBMODULE_CACHE
-# (default /opt/laplace/submodule-modules — owned by laplace-runner,
-# already populated from a prior seed of the dev workspace). The runner
-# work folder stays scratch; the cache survives wipes.
+# Cache layout: /opt/laplace/external/<submodule-path>/  (full clone
+# with .git/ inside). $ref_dir = $CACHE/$path/.git is the gitdir we
+# hand to `git submodule update --reference`.
 #
 # Why we don't symlink .git/modules into the cache: each submodule's
 # .git/modules/<sm>/config records core.worktree as a RELATIVE path
@@ -36,20 +40,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CACHE="${LAPLACE_SUBMODULE_CACHE:-/opt/laplace/submodule-modules}"
-SEED="${LAPLACE_SUBMODULE_SEED:-/home/ahart/Projects/Laplace/.git/modules}"
+CACHE="${LAPLACE_SUBMODULE_CACHE:-/opt/laplace/external}"
 SKIP=("external/tree-sitter-grammars/tree-sitter-nqc")
 
 err() { printf '::error::%s\n' "$*" >&2; }
 
 [ -f .gitmodules ] || { err "no .gitmodules at $(pwd)"; exit 2; }
 
-mkdir -p "$CACHE"
-[ -w "$CACHE" ] || { err "$CACHE not writable by $(id -un)"; exit 1; }
-
-# Seed cache from dev workspace on first use.
-if [ -z "$(ls -A "$CACHE" 2>/dev/null)" ] && [ -r "$SEED" ]; then
-    rsync -aH "$SEED/" "$CACHE/"
+if [ ! -d "$CACHE" ]; then
+    err "submodule cache $CACHE does not exist — run: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
+    exit 1
 fi
 
 is_skip() {
@@ -80,7 +80,8 @@ for name in "${names[@]}"; do
         continue
     fi
 
-    ref_dir="$CACHE/$path"
+    # Cache entries are full clones — point at their .git dir.
+    ref_dir="$CACHE/$path/.git"
     ws_mod=".git/modules/$path"
 
     # Fetch into cache if it's behind the pinned SHA.
@@ -104,11 +105,9 @@ for name in "${names[@]}"; do
             continue
         }
     else
-        git submodule update --init --force -- "$path" || {
-            err "$path: update failed without cache entry (pinned $pinned)"
-            fail=$((fail + 1))
-            continue
-        }
+        err "$path: cache miss at $ref_dir — bootstrap_submodule_cache should have created it"
+        fail=$((fail + 1))
+        continue
     fi
 
     actual=$(git -C "$path" rev-parse HEAD 2>/dev/null || true)
