@@ -13,6 +13,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/hash128.h
     include/laplace/core/hilbert4d.h
     include/laplace/core/mantissa.h
+    include/laplace/core/super_fibonacci.h
     include/laplace/core/glicko2.h
     include/laplace/core/codepoint_table.h
     include/laplace/core/astar.h
@@ -29,6 +30,7 @@ set(LAPLACE_CORE_SOURCES
     src/hash128.c
     src/hilbert4d.c
     src/mantissa.c
+    src/super_fibonacci.c
     src/glicko2.c
     src/codepoint_table.c
     src/astar.c
