@@ -19,7 +19,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true  # NOT recursive — tree-sitter-nqc has an upstream-broken nested submodule (examples/nqc) that fails actions/checkout when recursing. Top-level submodules are all we use.
+          submodules: false  # See manual init step below — actions/checkout sub-init recurses into tree-sitter-nqc/examples/nqc (upstream-broken) even with submodules:true; we use plain git below to control it.
+
+      - name: Initialize submodules (non-recursive — skips upstream-broken nested entries)
+        run: |
+          # Plain git, not actions/checkout's submodule logic — explicitly non-recursive.
+          # tree-sitter-nqc's broken nested examples/nqc submodule is what we're avoiding.
+          # Then run our CRLF-fixture normalization so the workspace stays clean across runs.
+          git submodule update --init
+          scripts/normalize-submodule-attributes.sh
 
       - name: System info
         run: |
@@ -93,7 +101,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true  # NOT recursive — tree-sitter-nqc has an upstream-broken nested submodule (examples/nqc) that fails actions/checkout when recursing. Top-level submodules are all we use.
+          submodules: false  # See manual init step below — actions/checkout sub-init recurses into tree-sitter-nqc/examples/nqc (upstream-broken) even with submodules:true; we use plain git below to control it.
+
+      - name: Initialize submodules (non-recursive — skips upstream-broken nested entries)
+        run: |
+          # Plain git, not actions/checkout's submodule logic — explicitly non-recursive.
+          # tree-sitter-nqc's broken nested examples/nqc submodule is what we're avoiding.
+          # Then run our CRLF-fixture normalization so the workspace stays clean across runs.
+          git submodule update --init
+          scripts/normalize-submodule-attributes.sh
 
       - name: Build system deps (unified ExternalProject pipeline)
         run: |
@@ -144,7 +160,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true  # NOT recursive — tree-sitter-nqc has an upstream-broken nested submodule (examples/nqc) that fails actions/checkout when recursing. Top-level submodules are all we use.
+          submodules: false  # See manual init step below — actions/checkout sub-init recurses into tree-sitter-nqc/examples/nqc (upstream-broken) even with submodules:true; we use plain git below to control it.
+
+      - name: Initialize submodules (non-recursive — skips upstream-broken nested entries)
+        run: |
+          # Plain git, not actions/checkout's submodule logic — explicitly non-recursive.
+          # tree-sitter-nqc's broken nested examples/nqc submodule is what we're avoiding.
+          # Then run our CRLF-fixture normalization so the workspace stays clean across runs.
+          git submodule update --init
+          scripts/normalize-submodule-attributes.sh
 
       - name: cmake configure + build (intel toolchain; deps re-used from build job)
         run: |
@@ -210,7 +234,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true  # NOT recursive — tree-sitter-nqc has an upstream-broken nested submodule (examples/nqc) that fails actions/checkout when recursing. Top-level submodules are all we use.
+          submodules: false  # See manual init step below — actions/checkout sub-init recurses into tree-sitter-nqc/examples/nqc (upstream-broken) even with submodules:true; we use plain git below to control it.
+
+      - name: Initialize submodules (non-recursive — skips upstream-broken nested entries)
+        run: |
+          # Plain git, not actions/checkout's submodule logic — explicitly non-recursive.
+          # tree-sitter-nqc's broken nested examples/nqc submodule is what we're avoiding.
+          # Then run our CRLF-fixture normalization so the workspace stays clean across runs.
+          git submodule update --init
+          scripts/normalize-submodule-attributes.sh
 
       - name: cmake configure + build (re-uses /opt/laplace deps + install)
         run: |
