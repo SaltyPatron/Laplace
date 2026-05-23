@@ -351,7 +351,7 @@ laplace_cascade(
 ) RETURNS TABLE(path_idx integer, entity_id bytea, effective_mu bigint, rd bigint, source_trace bytea[])
 ```
 
-`laplace_cascade` is the compiled prompt-ingestion + traversal surface. It decomposes/records prompt content according to policy, creates or references the prompt context entity, seeds the frontier, walks the attestation DAG, and streams ranked paths. It is implemented in C/C++ as an SRF; recursive SQL is not the hot path.
+`laplace_cascade` is the compiled prompt-ingestion + traversal surface. It decomposes/records prompt content according to policy, creates or references the prompt context entity, records prompt-local observations (occurrence/order/composition/source/session/mode) without promoting user claims to global truth, seeds the frontier, walks the attestation DAG, and streams ranked paths. It is implemented in C/C++ as an SRF; recursive SQL is not the hot path.
 
 ### Estimated count: ~15–20 custom functions total
 
@@ -600,6 +600,8 @@ FROM laplace_cascade(
 The engine loop owns:
 
 - prompt decomposition and context entity creation/reference
+- prompt-local observation scoping; user claims stay session/source scoped unless explicitly promoted
+- traversal mode enforcement (`strict`, `speculative`, `creative`/`fiction`) so hallucination/drift are policy, not hidden failure
 - priority queue and visited-set management
 - tier-up / tier-down / radial-abstraction transitions
 - indexed candidate lookup by subject, kind/arena, context, source scope, and effective score
@@ -775,8 +777,8 @@ JSON-driven synthesis → reproducible variants. Same JSON + same substrate stat
 |---|---|---|
 | **Build (one-time)** | Derive perf-cache + DB seed from Unicode UCD (independently). Bootstrap substrate-canonical source entity + Entity Type entities (`Text`, `Pixel`, `Image`, `Audio_Frame`, `Model_Recipe`, `WordNet_Synset`, ...) + per-modality kind entities. Seed T0 codepoint entities + their substrate-canonical CONTENT physicalities. | None — bulk seed insert |
 | **Ingestion (per write)** | IDecomposer plugin canonicalizes content per source's entity type; C/C++ engine computes IDs + physicalities + attestations; raw INSERT or skip-on-dedup via O(tier depth + novelty) Merkle walk | **None** — Postgres just stores pre-baked rows |
-| **Prompt ingestion (per request)** | Decompose prompt to substrate entities (R19); create/reference context entity; dedup against existing entity rows so substrate-supplied attestation cloud is reachable on the prompt's constituents | None for entity-math; pre-baked rows or existing IDs |
-| **Query (per read)** | C/C++ extension reads perf-cache + B-tree/GIST; compiled cascade A* walks the typed attestation graph weighted by Glicko-2 effective-μ; geometric verticals (Hilbert range, physicality coord KNN) accelerate candidate narrowing | None for entity-math; only batched indexed lookups |
+| **Prompt ingestion (per request)** | Decompose prompt to substrate entities (R19); create/reference context entity; dedup against existing entity rows so substrate-supplied attestation cloud is reachable on the prompt's constituents; record prompt-local occurrence/order/composition observations without promoting user claims to global truth | None for entity-math; pre-baked rows or existing IDs |
+| **Query (per read)** | C/C++ extension reads perf-cache + B-tree/GIST; compiled cascade A* walks the typed attestation graph weighted by Glicko-2 effective-μ under traversal mode/source scope; geometric verticals (Hilbert range, physicality-coordinate lookups) accelerate candidate narrowing | None for entity-math; only batched indexed lookups |
 | **Rating accumulation** | Glicko-2 updates fire on observation events per arena/source-trust semantics (ADR 0036) | **Only** runtime DB-side compute (fixed-point arithmetic) |
 
 ---

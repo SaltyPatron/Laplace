@@ -16,6 +16,8 @@ The key runtime question is where the recursive traversal loop lives. If it live
 
 A prompt is ingested as substrate content before inference. It may be ephemeral or durable by policy, but it is always decomposed into tiered entities and represented by a context entity/trajectory before cascade traversal begins.
 
+Prompt ingestion records real content facts: entity identity, occurrence, order, composition, source/session, and requested traversal mode. It does **not** grant global truth to claims written by the user. User-supplied assertions remain prompt-local/source-scoped observations unless an explicit promotion workflow admits them to a broader arena after corroboration.
+
 Cascade inference is exposed as a single SQL-call surface, implemented as a set-returning C function owned by `laplace_substrate`. The C/C++ engine owns the recursive traversal loop: priority queue, visited set, tier transitions, effective-score ranking, context compatibility, and early abstention. PostgreSQL provides storage, MVCC visibility, and indexes. SPI/executor access is permitted only for batched, prepared, indexed lookups; it is not the traversal brain.
 
 The implementation MUST NOT express the cascade frontier as recursive CTEs, cursors, app-layer polling, or row-by-row loops. SQL is the invocation surface for compiled substrate operators.
@@ -27,6 +29,8 @@ T0 perf-cache is part of the runtime contract. Clients and ingestion workers can
 - Laplace has no context-window primitive. Context is ingested substrate content.
 - Long prompts, documents, corpora, and previous conversations are bounded by storage, ingestion cost, and traversal budget, not a transformer positional buffer.
 - Duplicate prompt/content spans collapse to existing entity hashes and trajectories. Novel spans create only novel entities.
+- Prompt-local content can tug the substrate immediately through reused entities and context constraints, while prompt-local claims remain low-trust source-scoped evidence by default.
+- Hallucination and drift are controlled by traversal mode: strict mode abstains on weak support; speculative/creative modes may walk weaker or analogical paths with uncertainty and source traces intact.
 - One SQL call can recursively walk across tiers and attestation arenas while streaming results.
 - The database is not used as a procedural language for graph search; the compiled engine loop avoids RBAR/CTE/cursor overhead.
 - Native endpoint responses can expose path evidence: source trace, effective rating, RD, volatility, context, and competing paths.

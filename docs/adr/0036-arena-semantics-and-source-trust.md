@@ -8,7 +8,7 @@
 
 Glicko-2 gives Laplace rating, RD, and volatility, but the rating update needs substrate-native semantics. Not every observation means the same thing. Shorthand such as `rake HAS_POS NOUN` means a generic observation envelope with `kind_id = HAS_POS`, `subject_id = rake`, and `object_id = NOUN`; `HAS_POS` is the semantic kind entity, not a bespoke function call. Some attestation kinds are multi-valued and compatible (`rake HAS_POS NOUN` and `rake HAS_POS VERB`). Some are functional under a context (`France HAS_CURRENT_CAPITAL Paris` vs. `France HAS_CURRENT_CAPITAL Los Angeles`). Some are scalar, temporal, symmetric, inverse-functional, or context-required.
 
-Laplace must also distinguish independent high-trust convergence from low-trust repetition. Foundational constants, standards, curated academic resources, user-curated linked resources, corpora, model-derived observations, prompts, and ordinary user content are not equal sources. Repetition from one source or a correlated source family must not become fake consensus.
+Laplace must also distinguish independent high-trust convergence from low-trust repetition. Foundational constants, standards, curated academic resources, user-curated linked resources, corpora, model-derived observations, prompts, and ordinary user content are not equal sources. Prompt content identity is a real content fact; prompt/user claims are low-trust source-scoped observations unless promoted. Repetition from one source or a correlated source family must not become fake consensus.
 
 ## Decision
 
@@ -39,6 +39,8 @@ An arena is not global all-pairs competition. `rake HAS_POS NOUN` and `rake HAS_
 
 Bad claims are not deleted merely because they are bad. They are contained as observations about their sources/communities unless they win the relevant arena competition under high-trust evidence.
 
+Prompt-local observations can seed traversal immediately because they bind existing entities into a live context. That is not the same as global attestation promotion. Strict arenas must treat prompt/user claims as prompt-local until source-trust policy, lineage policy, context compatibility, and independent structural support justify broader scope.
+
 ## Consequences
 
 - Glicko-2 updates are not raw vote counting. They are arena-aware observation updates against current attestation state.
@@ -47,6 +49,7 @@ Bad claims are not deleted merely because they are bad. They are contained as ob
 - `France HAS_CURRENT_CAPITAL Paris` vs. `France HAS_CURRENT_CAPITAL Los Angeles` is competition inside a functional current-capital arena.
 - Misinformation saturation is contained: the substrate can answer both "what is true under strict source scope" and "what does this low-trust group claim" without confusing the two.
 - Honest abstention becomes mechanical: no path, weak path, high RD, high volatility, or unresolved arena conflict can return abstention instead of invented certainty.
+- Drift and hallucination become explicit traversal-mode choices rather than opaque model failures.
 
 ## Alternatives considered
 

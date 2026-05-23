@@ -40,6 +40,8 @@ Deduplication and reconstruction follow tiered content paths rather than corpus 
 
 Truth-seeking is arena-rated, not raw voting. Attestation kinds define compatibility and competition rules; source credibility is tracked per kind. Truths cluster across independent, high-trust, structurally adjacent sources. Unsupported or low-trust claims may be recorded as source-scoped evidence, but they do not pull hard in strict traversal or synthesis scopes.
 
+Prompt text is real substrate content without becoming truth by default. A prompt sentence reuses existing entities and records a prompt-local composition/context, so it can tug all prior uses of those entities. Any user-supplied claim remains session/source scoped unless an explicit promotion policy plus corroborating sources admits it to broader arenas. Drift and hallucination are traversal-mode choices, not unavoidable model moods.
+
 Nearest-neighbor behavior is substrate-native: it is the strongest arena-conditioned attestation response to a query/prompt/context, not spatial closeness in S³. Physicality indexes can propose fuzzy candidates; typed attestations, Glicko-2 effective support, source lineage, and arena semantics decide what pulls back and how hard.
 
 ## Seed ladder
@@ -75,7 +77,7 @@ AI models arrive as evidence sources, not as sacred artifacts. A source-scoped r
 | Ensembling | Glicko-2 consensus across sources |
 | RAG / vector DB | Attestation-response cascade + deterministic candidate access |
 | Context window | Prompt is ingestion — bounded by storage/traversal policy, not a fixed buffer |
-| Hallucination | Traversal policy: strict abstention, speculative walk, or creative mode |
+| Hallucination / drift | Traversal policy: strict abstention, speculative walk, or creative mode |
 | Runtime GEMM | Ingestion-time evidence extraction + indexed A* pathfinding |
 
 ## Architecture

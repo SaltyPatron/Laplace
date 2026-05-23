@@ -270,6 +270,8 @@ Doc debt accumulates fast; the substrate is too young to afford that drift. This
 
 Prompts are substrate content. At request time, the prompt is decomposed into tiered entities and represented by a context entity/trajectory (ephemeral or durable by policy) before inference begins. Do NOT treat the prompt as an ephemeral forward-pass buffer or context-window payload.
 
+Prompt content identity, occurrence, order, and composition are real substrate facts. Prompt/user claims are not global truth by default. They remain prompt-local, session/source-scoped observations unless an explicit promotion policy plus arena-appropriate corroboration admits them to a broader source scope.
+
 Cascade traversal is a compiled substrate operator exposed via SQL, not SQL-as-control-flow. The hot path is a C/C++ set-returning function that owns frontier management, A* priority queues, visited sets, tier transitions, context checks, effective-score ranking, and early abstention. PostgreSQL provides storage, MVCC visibility, and indexes; SPI/executor access may perform batched, prepared, indexed lookups.
 
 **Forbidden on the hot path:** app-layer row-by-row SELECT loops, recursive CTE graph search, cursor-driven traversal, or RBAR patterns that bounce between client and database for each frontier step.
@@ -283,6 +285,8 @@ Every attestation kind that participates in rating composition belongs to an are
 Raw source counts are never consensus. Source credibility is tracked per source per attestation kind, and source trust classes are part of the prior: foundational constants, standards-derived sources, curated academic resources, academically linked user-curated resources, structured corpora, AI-model probe observations, and prompt-local/user content. Correlated source families do not become independent tugs merely by repetition.
 
 Unsupported or low-trust claims MAY be stored as source-scoped observations, but they do not win strict traversal or synthesis scopes unless their arena-aware effective mu is supported by independent, trusted, structurally adjacent observations.
+
+Prompt-local/user-content observations are allowed to tug traversal immediately through entity reuse and context constraints, but strict truth-seeking arenas must treat them as low-trust source-scoped evidence unless promoted by policy.
 
 ---
 

@@ -76,8 +76,10 @@ WHERE e.id IS NULL;
 ### Prompt ingestion + compiled cascade validation
 
 - `just cascade "<prompt>"` creates or references prompt content/context entities according to policy before traversal.
+- Prompt-local occurrence/order/composition observations are source/session/context scoped; user claims are not promoted to global truth without explicit policy + corroboration.
 - Cascade execution enters the compiled C/C++ SRF/operator once; no app-layer frontier loop, cursor polling, or recursive CTE hot path.
 - Strict traversal can abstain when support is weak, high-RD, high-volatility, disputed, or context-incompatible.
+- Speculative/creative traversal labels weak or analogical paths so hallucination/drift is inspectable policy, not hidden behavior.
 - Returned paths include enough evidence to inspect effective mu, RD, source trace, and arena/context constraints.
 
 ### Round-trip end-to-end (the milestone)

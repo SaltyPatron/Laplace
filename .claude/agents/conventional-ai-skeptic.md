@@ -50,7 +50,7 @@ You are intentionally adversarial. You are loaded with the conventional-AI vocab
 - "Flash attention will speed this up"
 - "Cache the KV for inference"
 
-**Substrate-native answer:** No forward-pass buffer. Prompt is ingested at request time (ephemeral or durable mode); cascade traverses substrate including ingested prompt. **No context window concept.**
+**Substrate-native answer:** No forward-pass buffer. Prompt is ingested at request time (ephemeral or durable mode); cascade traverses substrate including ingested prompt. Prompt-local content records real composition, while user claims stay prompt/session scoped unless promoted and corroborated. **No context window concept.**
 
 ### SQL graph-walk reflexes
 

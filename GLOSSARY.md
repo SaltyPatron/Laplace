@@ -141,7 +141,7 @@ A 10-tier hierarchy of substrate-canonical entities (per [ADR 0044](docs/adr/004
 | 6 | `TrustClass_UserCuratedResource` | Wiktionary; Common Crawl tier; OMCS within ConceptNet |
 | 7 | `TrustClass_AIModelProbe` | Single-model probe observations |
 | 8 | `TrustClass_AppDerived` | Runtime logs, internal state, app-side derivations |
-| 9 | `TrustClass_UserPromptContent` | Prompt-local user assertions; uploaded content awaiting corroboration |
+| 9 | `TrustClass_UserPromptContent` | Prompt-local/user-supplied content and assertions; content identity is real, claim truth awaits corroboration |
 | 10 | `TrustClass_AdversarialUntrusted` | Flagged content (spam / prompt-injection / corruption); excluded from cascade |
 
 Trust class is NOT truth by fiat; it weights Glicko-2 agreement/disagreement inside an arena. Cross-source agreement at tiers 2-5 builds high-confidence consensus; lone tier-7 model probes get discounted; tier-10 content doesn't admit to any arena.
@@ -156,13 +156,17 @@ A **source-axis** distinction, not a storage-axis distinction. All three flow in
 
 - **Substrate data** — entities + attestations sourced from seed/canonical sources (Unicode/UCD, WordNet, OMW, UD, Wiktionary, Tatoeba, ConceptNet, Atomic2020, AI model probes). Carries the substrate's accumulated typed knowledge — attestations of every kind, rich enough to drive cascade inference.
 - **App data** — attestations sourced from the running app/runtime (session telemetry, internal app state attestations, derived signals). Trust class: app-specific, generally narrow scope.
-- **User data** — entities arriving from user content (prompts, uploads, queries) **typically WITHOUT prior attestations**. Content dedupes by hash to existing rows: a user prompt containing common words inherits the substrate's full attestation cloud on those rows *for free*. The substrate may also derive its own attestations at ingest (POS tagging, decomposition, structural relations) under the substrate-canonical source. User-supplied attestations (if any) attach with `source_id = <user/session entity>` and prompt-local/user-content trust class.
+- **User data** — entities arriving from user content (prompts, uploads, queries) **typically WITHOUT prior attestations**. Content dedupes by hash to existing rows: a user prompt containing common words inherits the substrate's full attestation cloud on those rows *for free*. The substrate may also derive its own attestations at ingest (POS tagging, decomposition, structural relations) under the substrate-canonical source. User-supplied attestations (if any) attach with `source_id = <user/session entity>` and prompt-local/user-content trust class. The content occurrence and composition are real; any world-claim made by the user remains prompt-local/source-scoped unless explicitly promoted by policy and corroboration.
 
-Operational implication: a user prompt `"what is a cat?"` decomposes to entities that already exist (the words/graphemes/codepoints), each carrying attestations from WordNet, Wiktionary, ConceptNet, model probes, etc. The cascade has dense substrate-supplied knowledge to walk; the user only contributes the *query shape*, not the *knowledge*.
+Operational implication: a user prompt `"what is a cat?"` decomposes to entities that already exist (the words/graphemes/codepoints), each carrying attestations from WordNet, Wiktionary, ConceptNet, model probes, etc. The cascade has dense substrate-supplied knowledge to walk; the user contributes the *query shape* and prompt-local composition event, not global truth by default.
 
 ### Prompt Ingestion
 
-The rule that prompts are decomposed into substrate entities and represented by a context entity/trajectory before inference. A prompt is not an ephemeral token buffer with a context-window limit; it is substrate content, either ephemeral or durable by policy. Prompt entities dedupe against existing rows by hash, so the cascade enters with full substrate-attestation context available on the prompt's constituents — see [Data Class](#data-class-app--substrate--user).
+The rule that prompts are decomposed into substrate entities and represented by a context entity/trajectory before inference. A prompt is not an ephemeral token buffer with a context-window limit; it is substrate content, either ephemeral or durable by policy. Prompt entities dedupe against existing rows by hash, so the cascade enters with full substrate-attestation context available on the prompt's constituents — see [Data Class](#data-class-app--substrate--user). Prompt-local observations record occurrence, order, composition, source/session, and requested traversal mode. They do not update global attestation truth unless an explicit promotion workflow admits them to a broader arena.
+
+### Prompt-Local Observation
+
+An observation emitted by prompt ingestion or user-content ingestion whose scope is the prompt/session/context. Examples: tokens/entities occurred together, this entity followed that one, the prompt requested a strict/speculative/creative traversal mode, or the user asserted a claim. Prompt-local observations can seed and constrain traversal immediately because they reuse existing entities, but they remain source-scoped evidence until corroborated or explicitly promoted.
 
 ---
 
@@ -353,7 +357,7 @@ The substrate-native refusal mode caused by missing or weak path support: no via
 
 ### Traversal Mode
 
-The policy that controls how cascade walks the substrate: strict mode requires high effective mu and trusted source scopes; speculative mode surfaces uncertain paths with uncertainty intact; creative/fiction modes deliberately allow lower-rated, analogical, or context-marked walks. Hallucination is therefore an explicit traversal choice, not an opaque failure mode.
+The policy that controls how cascade walks the substrate: strict mode requires high effective mu and trusted source scopes; speculative mode surfaces uncertain paths with uncertainty intact; creative/fiction modes deliberately allow lower-rated, analogical, or context-marked walks. Hallucination and drift are therefore explicit traversal choices, not opaque failure modes.
 
 ### Truths Cluster / Lies Scatter
 

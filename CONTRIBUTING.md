@@ -57,7 +57,8 @@ A chunk is **Done** only when *every* item below is checked. No partials. No "I'
 - [ ] No silent failures. Every error path is explicit. Every fallback is logged with a `WARNING` ereport at minimum.
 - [ ] No fabricated scaffolding (placeholder files / stubbed-out functions / "TODO: implement"). Either land it or don't.
 - [ ] No conventional-AI pattern matching (HNSW / FAISS / RAG / fine-tuning / GEMM-on-hot-path). When tempted, engage the `conventional-ai-skeptic` agent first.
-- [ ] Prompt/cascade work preserves ADR 0035: prompt is ingested substrate content; cascade traversal is a compiled C/C++ SRF/operator, not recursive SQL, cursor traversal, or app-layer row-by-row SELECT loops.
+- [ ] Prompt/cascade work preserves ADR 0035: prompt is ingested substrate content; prompt-local observations stay session/source scoped unless explicitly promoted and corroborated; cascade traversal is a compiled C/C++ SRF/operator, not recursive SQL, cursor traversal, or app-layer row-by-row SELECT loops.
+- [ ] Strict/speculative/creative traversal modes are explicit where relevant; hallucination/drift are inspectable policy choices with source/evidence traces, not hidden behavior.
 - [ ] Consensus work preserves ADR 0036: arena semantics and source trust/source lineage are explicit; raw repetition never counts as truth.
 - [ ] No raw-`byte[]` → hex casts, no float ↔ int churn in hot loops, no unnecessary type conversions ([STANDARDS.md](STANDARDS.md)).
 
@@ -234,7 +235,7 @@ See [RULES.md](RULES.md). The headline rules:
 3. **Three tables only.** No event log; attestation IS consensus state.
 4. **Lottery-ticket-aware sparsity — NEVER flat thresholds.**
 5. **DB as dumb columnar store; entity math in C/C++.**
-6. **Prompt is ingestion; cascade is compiled.** No context-window buffers, RBAR, cursors, recursive CTE hot path, or app-layer traversal loops.
+6. **Prompt is ingestion; cascade is compiled.** Prompt-local content is real structure, prompt claims stay scoped unless promoted and corroborated, and there are no context-window buffers, RBAR, cursors, recursive CTE hot paths, or app-layer traversal loops.
 7. **Arena/source trust semantics are mandatory.** Glicko-2 is not raw vote counting.
 8. **AI model ingest is a codec.** Source-scoped round-trip fidelity is a verification target, not optional behavior.
 

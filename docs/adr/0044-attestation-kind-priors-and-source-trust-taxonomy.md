@@ -34,7 +34,7 @@ Initial kind value tiers (per substrate canon):
 | **T8 Associative / Co-occurrence** | Usage/proximity correlation | `CO_OCCURS_WITH`, `FOLLOWS`, `PRECEDES`, `OCCURS_IN_CONTEXT`, `IS_DERIVATIONALLY_RELATED_TO`, `USED_FOR`, `AT_LOCATION`, `HAS_PROPERTY` | (1500, 280, 0.06) | 0.5× (suggestive; supports candidate narrowing but doesn't drive decisions alone) |
 | **T9 Tensor-Calculation** | AI-model-derived computational role | Transformer-family examples: `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`; other architecture families define their own fixed mechanical-role vocabularies | (1400, 300, 0.06) | 0.4× (single-model-probe trust; cluster across many models for higher weight) |
 | **T10 Scalar-Valued** | Numeric attribute (value in rating column) | `HAS_NUMERIC_VALUE`, `HAS_STROKE_COUNT`, `HAS_UCA_COLLATION_ORDER`, `HAS_AGE`, `HAS_FREQUENCY`, RLE counts | (n/a — rating IS the value; RD captures measurement uncertainty) | n/a (scalar; queried directly, not traversed) |
-| **T11 Probationary / User** | User-supplied content; awaits corroboration | user-emitted attestations from prompt-local context | (1300, 350, 0.06) | 0.3× (session-scoped trust; cascade considers but discounts) |
+| **T11 Probationary / User** | User-supplied content and assertions; content identity is real, claim truth awaits corroboration | user-emitted attestations from prompt-local context | (1300, 350, 0.06) | 0.3× (session-scoped trust; cascade considers but discounts) |
 
 **Per-kind overrides**: a kind entity may carry meta-attestations overriding its tier defaults (e.g., `Glicko2_PRIOR_RATING(this_kind, 2200)` to bump a particular kind into higher confidence based on substrate-side analysis).
 
@@ -59,7 +59,7 @@ Each source entity carries a `HAS_TRUST_CLASS` meta-attestation pointing at one 
 | **User-Curated Resource** | 6 | Wiktionary; Common Crawl tier; OMCS within ConceptNet | 0.60 | 0.60 | open + user-curated arenas | long |
 | **AI Model Probe** | 7 | TransformerModelDecomposer probe observations from a single model | 0.50 | 0.50 | model-probe arena + cross-model-consensus arena | medium (decays without cross-model corroboration) |
 | **App-Derived** | 8 | runtime logs, internal state, app-side derivations | 0.40 | 0.40 | app-internal arenas + telemetry arenas | short (operational; trimmed by retention policy) |
-| **User Prompt / User Content** | 9 | prompt-local user assertions; uploaded content awaiting corroboration | 0.30 | 0.30 | user-scope arenas; cross-user arenas only after corroboration | session-scoped + optional opt-in durability |
+| **User Prompt / User Content** | 9 | prompt-local/user-supplied content and assertions; content identity is real, claim truth awaits corroboration | 0.30 | 0.30 | user-scope arenas; cross-user/global arenas only after explicit promotion + corroboration | session-scoped + optional opt-in durability |
 | **Adversarial / Untrusted** | 10 | flagged content (known spam, suspected prompt-injection, deliberately corrupted) | 0.0 | 0.0 (effectively excluded) | closed (no arena admits) | short (preserved for analysis-of-attacks, not for reasoning) |
 
 Tier 1 trust class is reserved for the substrate-canonical source entity itself (bootstrapped at install per ADR 0042 Stage 1). Tiers 2–6 are bootstrapped at install too (sources within those tiers register against the existing trust-class entity by `HAS_TRUST_CLASS` meta-attestation). Tiers 7–10 are runtime-assigned when their first source registers.

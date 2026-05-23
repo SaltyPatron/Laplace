@@ -259,6 +259,8 @@ Per-source procedure:
 
 Prompts have no context-window primitive. A prompt can be ephemeral or durable by policy, but either way it becomes content in the tiered entity DAG before traversal begins. The practical limits are ingestion cost, storage policy, and traversal budget.
 
+Prompt-local content is useful immediately because it reuses existing entities and records a context trajectory. User claims inside that content stay prompt/session/source scoped unless explicit promotion and corroboration admit them to broader arenas. Operationally, hallucination and drift are diagnosed by inspecting traversal mode, source scope, evidence trace, and where the path left high-support attestations.
+
 Traversal modes are operational choices:
 
 - `strict` — high effective mu, low RD, trusted source scopes; abstain when support is weak or conflicting
