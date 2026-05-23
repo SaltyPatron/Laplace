@@ -69,13 +69,13 @@ internal static class Program
 
     private static int RunUp(string connectionString)
     {
-        // EnsureDatabase from a custom TEMPLATE database. DbUp's default
-        // EnsureDatabase.For.PostgresqlDatabase() creates an EMPTY database;
-        // that's wrong for us because the laplace DB needs postgis +
-        // laplace_priv before any migration can run, and Layer 0 sets those
-        // up in `template_laplace` so cloned laplace DBs inherit them
-        // without needing superuser. See bootstrap_pg_database_and_postgis.
-        EnsureDatabaseFromTemplate(connectionString, templateName: "template_laplace");
+        // EnsureDatabase: connect to maintenance DB ('postgres') as our role,
+        // create the target DB if missing. laplace_admin is SUPERUSER per
+        // bootstrap_pg_roles, so the migration's CREATE EXTENSION postgis
+        // works against the empty DB without any template-DB or
+        // laplace_priv wrapper machinery. Per ADR 0023, the database
+        // itself is a Layer-1 concern.
+        EnsureDatabase.For.PostgresqlDatabase(connectionString);
 
         var engine = BuildEngine(connectionString);
         var result = engine.PerformUpgrade();
@@ -189,61 +189,18 @@ internal static class Program
             drop.ExecuteNonQuery();
             Console.WriteLine($"[migrate nuke] Dropped {targetDb}.");
         }
-        // Clone from template_laplace (set up by Layer 0 bootstrap_pg_database_and_postgis).
-        // The template already has postgis + laplace_priv installed, so the
-        // recreated DB inherits both without needing superuser — laplace_admin
-        // is DB owner of template_laplace and so allowed to use it as TEMPLATE.
-        // Without this, the next `db-up` would fail with "schema laplace_priv
-        // does not exist" because Layer-0 per-DB state died with the DROP.
+        // Recreate empty. laplace_admin is SUPERUSER so the next `db-up`
+        // can CREATE EXTENSION postgis + laplace_geom + laplace_substrate
+        // without any template machinery.
         using (var create = new NpgsqlCommand(
-            $"CREATE DATABASE {quoted} TEMPLATE template_laplace OWNER laplace_admin", conn))
+            $"CREATE DATABASE {quoted} OWNER laplace_admin", conn))
         {
             create.ExecuteNonQuery();
-            Console.WriteLine($"[migrate nuke] Re-created {targetDb} from template_laplace (postgis + laplace_priv inherited).");
+            Console.WriteLine($"[migrate nuke] Re-created empty {targetDb}.");
         }
 
         Console.WriteLine("[migrate nuke] Done. Run 'up' to re-apply CREATE EXTENSION + grants.");
         return 0;
-    }
-
-    /// <summary>
-    /// EnsureDatabase that, if the target DB doesn't exist, creates it via
-    /// CREATE DATABASE ... TEMPLATE &lt;templateName&gt; OWNER laplace_admin.
-    /// Allows the target to inherit prebuilt per-DB state (postgis +
-    /// laplace_priv) from a Layer-0-managed template, so per-DB recovery
-    /// (drop laplace → recreate) doesn't require a Layer-0 sudo re-run.
-    /// Idempotent: no-op when target DB already exists.
-    /// </summary>
-    private static void EnsureDatabaseFromTemplate(string connectionString,
-                                                    string templateName)
-    {
-        var builder = new NpgsqlConnectionStringBuilder(connectionString);
-        var targetDb = builder.Database
-            ?? throw new InvalidOperationException("Target database name missing from connection string.");
-
-        // Connect to the maintenance DB ('postgres') as our role for the check + create.
-        var maintenance = new NpgsqlConnectionStringBuilder(connectionString) { Database = "postgres" };
-        using var conn = new NpgsqlConnection(maintenance.ConnectionString);
-        conn.Open();
-
-        using (var check = new NpgsqlCommand("SELECT 1 FROM pg_database WHERE datname = @db", conn))
-        {
-            check.Parameters.AddWithValue("db", targetDb);
-            if (check.ExecuteScalar() != null)
-            {
-                // Already exists — leave alone, db-up is non-destructive.
-                return;
-            }
-        }
-
-        // Defensive quoting against unusual names (the connection string is
-        // user-controlled in principle; keep this safe).
-        string Quote(string ident) => "\"" + ident.Replace("\"", "\"\"") + "\"";
-        using var create = new NpgsqlCommand(
-            $"CREATE DATABASE {Quote(targetDb)} TEMPLATE {Quote(templateName)} OWNER laplace_admin",
-            conn);
-        create.ExecuteNonQuery();
-        Console.WriteLine($"[ensure-database] Created {targetDb} from TEMPLATE {templateName}.");
     }
 
     private static UpgradeEngine BuildEngine(string connectionString)

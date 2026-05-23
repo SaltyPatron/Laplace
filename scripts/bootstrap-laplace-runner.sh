@@ -320,12 +320,33 @@ bootstrap_runner_service() {
 }
 
 bootstrap_pg_roles() {
-    say "Ensure PG roles: laplace_admin / laplace_app / laplace_readonly"
+    say "Ensure PG roles: laplace_admin (SUPERUSER) / laplace_app / laplace_readonly"
+    # laplace_admin is a SUPERUSER. Rationale:
+    #   * postgis is not a trusted extension — CREATE EXTENSION postgis
+    #     requires SUPERUSER (PG docs). Without it laplace_admin can't
+    #     install postgis, so we'd need either a SECURITY DEFINER wrapper
+    #     (laplace_priv approach, accumulates per-DB state that dies with
+    #     `just db-nuke`) or a custom template DB (more moving parts).
+    #     Both are workarounds for the constraint that laplace_admin isn't
+    #     a superuser.
+    #   * For trusted extensions, contained-object ownership stays with
+    #     the bootstrap superuser unless the install script explicitly
+    #     does `ALTER ... OWNER TO`. Same problem class.
+    #   * Standard PG pattern for a dedicated-cluster substrate is for the
+    #     operator role to be a superuser. ahart already has OS sudo on
+    #     this host (it's the dev box); making laplace_admin a SUPERUSER
+    #     doesn't widen the attack surface — it just stops fighting PG's
+    #     ownership / privilege model. AWS RDS uses rds_superuser, GCP
+    #     Cloud SQL uses cloudsqlsuperuser; both are the same pattern.
+    # laplace_app + laplace_readonly remain ordinary roles for future
+    # least-privilege application + analyst access.
     sudo -u postgres psql -v ON_ERROR_STOP=1 <<'PG_EOF'
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'laplace_admin') THEN
-        CREATE ROLE laplace_admin WITH LOGIN CREATEDB CREATEROLE;
+        CREATE ROLE laplace_admin WITH LOGIN SUPERUSER CREATEDB CREATEROLE;
+    ELSE
+        ALTER ROLE laplace_admin WITH LOGIN SUPERUSER CREATEDB CREATEROLE;
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'laplace_app') THEN
         CREATE ROLE laplace_app WITH LOGIN;
@@ -335,7 +356,7 @@ BEGIN
     END IF;
 END $$;
 PG_EOF
-    green "✓ Roles present (CREATEDB on laplace_admin so Layer 1 can EnsureDatabase)"
+    green "✓ Roles present (laplace_admin = SUPERUSER; substrate operator role per AWS/GCP RDS pattern)"
 }
 
 bootstrap_pg_legacy_cleanup() {
@@ -350,200 +371,56 @@ bootstrap_pg_legacy_cleanup() {
 }
 
 bootstrap_pg_database_and_postgis() {
-    say "Ensure template_laplace + laplace database (cloned from template)"
+    say "Ensure 'laplace' database owned by laplace_admin"
 
-    # =================================================================
-    # Architecture: custom TEMPLATE database (template_laplace)
-    # =================================================================
+    # Single responsibility: ensure the laplace DB exists and is owned
+    # by laplace_admin. That's it. Per-DB state (postgis, the laplace
+    # schema + tables, role grants) is Layer-1 (DbUp) — laplace_admin
+    # being a SUPERUSER means it can do all of that itself without any
+    # wrapper, template, or sudo escalation in the iterative loop.
     #
-    # Prior implementation put postgis + the laplace_priv SECURITY DEFINER
-    # wrappers DIRECTLY in the laplace database during bootstrap. That
-    # made the substrate-canonical Layer-1 recovery path (`just db-nuke`
-    # then `just db-up`) require a sudo re-bootstrap — because dropping
-    # laplace also dropped postgis and laplace_priv, and laplace_admin
-    # (CREATEDB, not SUPERUSER) cannot re-install postgis on its own.
-    #
-    # Fix (this function): set up `template_laplace` as a PG template
-    # database (datistemplate=true) that already contains postgis +
-    # laplace_priv. Then `CREATE DATABASE laplace TEMPLATE template_laplace
-    # OWNER laplace_admin` produces a fully-bootstrapped substrate DB
-    # — including postgis — without needing superuser. laplace_admin can
-    # do that itself (DB owner of template => allowed to clone from it).
-    #
-    # Result: `db-nuke` drops laplace + recreates from template_laplace
-    # (no sudo). `db-up` then proceeds against a DB that already has
-    # postgis + laplace_priv. Layer 0 setup only ever needs to run once
-    # per host (template setup); per-DB state is regenerated from the
-    # template on every nuke.
+    # `just db-nuke` drops + recreates the empty DB as laplace_admin (no
+    # sudo). `just db-up` then runs `CREATE EXTENSION postgis;
+    # CREATE EXTENSION laplace_geom; CREATE EXTENSION laplace_substrate;`
+    # as laplace_admin, which is SUPERUSER, so all three install cleanly
+    # and own their objects. No `laplace_priv` SECURITY DEFINER wrapper.
+    # No custom `template_laplace`. No `ALTER OWNER` bandaids.
 
-    # ---------------------------------------------------------------
-    # (1) Ensure template_laplace exists with datistemplate=true.
-    #     Owned by laplace_admin so laplace_admin can CREATE DATABASE
-    #     ... TEMPLATE template_laplace without superuser.
-    # ---------------------------------------------------------------
-    if sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='template_laplace'" | grep -q 1; then
-        green "✓ Database 'template_laplace' already exists"
-    else
-        # Temporarily clear datistemplate so we can populate it; we set
-        # it back to true at the end of (2).
-        sudo -u postgres createdb -O laplace_admin template_laplace
-        green "✓ Created database 'template_laplace' owned by laplace_admin"
-    fi
-
-    # ---------------------------------------------------------------
-    # (2) Install postgis + laplace_priv wrappers INTO template_laplace.
-    #     laplace_priv exists so future Layer-1 callers (laplace_admin,
-    #     not superuser) can install allowlisted EXTRA extensions into
-    #     a cloned laplace DB if needed (recovery / new ext additions).
-    #     The base postgis lives in the template so cloned DBs inherit
-    #     it without needing the wrapper.
-    #
-    #     Idempotent (CREATE OR REPLACE). Re-runnable.
-    # ---------------------------------------------------------------
-    sudo -u postgres psql -d template_laplace -v ON_ERROR_STOP=1 >/dev/null <<'PG_EOF'
--- (a) laplace_priv schema + wrappers
-CREATE SCHEMA IF NOT EXISTS laplace_priv AUTHORIZATION postgres;
-GRANT USAGE ON SCHEMA laplace_priv TO laplace_admin;
-REVOKE CREATE ON SCHEMA laplace_priv FROM laplace_admin;
-REVOKE CREATE ON SCHEMA laplace_priv FROM PUBLIC;
-
-CREATE OR REPLACE FUNCTION laplace_priv.install_extension(ext_name text)
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_catalog
-AS $func$
-BEGIN
-    -- Allowlist — substrate-honest only. See RULES.md R15 for why
-    -- pg_trgm/intarray/citext/unaccent/bloom are NOT here even though
-    -- "they sound useful". The substrate replaces those.
-    --
-    -- search_path is (public, pg_catalog) — NOT (pg_catalog, public).
-    -- Extension install scripts that create objects without schema
-    -- qualifier (e.g. postgis's `CREATE TYPE geometry_dump AS (...)`)
-    -- resolve to the FIRST writable schema. With pg_catalog first PG
-    -- can't create into pg_catalog at extension-install time. With
-    -- public first, extension objects land in public as intended.
-    IF ext_name NOT IN (
-        'postgis', 'postgis_topology', 'postgis_raster', 'postgis_sfcgal',
-        'btree_gist', 'btree_gin',
-        'pgcrypto',
-        'pg_stat_statements', 'auto_explain', 'pg_buffercache',
-        'pg_prewarm', 'pg_visibility',
-        'postgres_fdw',
-        'laplace_geom', 'laplace_substrate'
-    ) THEN
-        RAISE EXCEPTION 'extension % is not in the laplace allowlist', ext_name
-            USING HINT = 'Widen the allowlist via bootstrap if substrate-honest; see RULES.md R15 before adding';
-    END IF;
-    IF current_database() NOT IN ('laplace', 'template_laplace') THEN
-        RAISE EXCEPTION 'laplace_priv.install_extension may only be called from laplace or template_laplace (current: %)', current_database();
-    END IF;
-    EXECUTE format('CREATE EXTENSION IF NOT EXISTS %I', ext_name);
-END;
-$func$;
-
-REVOKE ALL ON FUNCTION laplace_priv.install_extension(text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION laplace_priv.install_extension(text) TO laplace_admin;
-
-CREATE OR REPLACE FUNCTION laplace_priv.drop_extension(ext_name text)
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_catalog
-AS $func$
-BEGIN
-    IF ext_name NOT IN (
-        'postgis', 'postgis_topology', 'postgis_raster', 'postgis_sfcgal',
-        'btree_gist', 'btree_gin',
-        'pgcrypto',
-        'pg_stat_statements', 'auto_explain', 'pg_buffercache',
-        'pg_prewarm', 'pg_visibility',
-        'postgres_fdw',
-        'laplace_geom', 'laplace_substrate'
-    ) THEN
-        RAISE EXCEPTION 'extension % is not in the laplace allowlist', ext_name;
-    END IF;
-    IF current_database() NOT IN ('laplace', 'template_laplace') THEN
-        RAISE EXCEPTION 'laplace_priv.drop_extension may only be called from laplace or template_laplace (current: %)', current_database();
-    END IF;
-    EXECUTE format('DROP EXTENSION IF EXISTS %I CASCADE', ext_name);
-END;
-$func$;
-
-REVOKE ALL ON FUNCTION laplace_priv.drop_extension(text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION laplace_priv.drop_extension(text) TO laplace_admin;
-
--- (b) postgis directly as postgres (we're already sudo -u postgres).
---     Clones of template_laplace inherit postgis without needing the
---     wrapper, which is exactly what we want for db-nuke recovery.
-CREATE EXTENSION IF NOT EXISTS postgis;
-PG_EOF
-    green "✓ laplace_priv schema + install_extension/drop_extension wrappers in template_laplace"
-    green "✓ postgis installed in template_laplace"
-
-    # ---------------------------------------------------------------
-    # (3) Flip datistemplate=true on template_laplace so it's usable
-    #     as a TEMPLATE for CREATE DATABASE. Also set datallowconn=true
-    #     (PG default templates have datallowconn=false; we want
-    #     laplace_admin to be able to verify/inspect the template).
-    # ---------------------------------------------------------------
-    sudo -u postgres psql -v ON_ERROR_STOP=1 >/dev/null <<'PG_EOF'
-UPDATE pg_database
-   SET datistemplate = true,
-       datallowconn  = true
- WHERE datname = 'template_laplace';
-PG_EOF
-    green "✓ template_laplace marked as TEMPLATE (datistemplate=true)"
-
-    # ---------------------------------------------------------------
-    # (4) Ensure laplace database exists, cloned from template_laplace.
-    #     Owned by laplace_admin so laplace_admin can DROP/RECREATE
-    #     freely (db-nuke path). If it already exists we leave it
-    #     alone — re-running bootstrap does NOT nuke user data.
-    # ---------------------------------------------------------------
     if sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='laplace'" | grep -q 1; then
-        green "✓ Database 'laplace' already exists (unchanged — use 'just db-nuke' to recreate from template)"
+        green "✓ Database 'laplace' already exists (use 'just db-nuke' for a clean slate)"
     else
-        sudo -u postgres psql -v ON_ERROR_STOP=1 >/dev/null <<'PG_EOF'
-CREATE DATABASE laplace TEMPLATE template_laplace OWNER laplace_admin;
-PG_EOF
-        green "✓ Created laplace database from template_laplace, owned by laplace_admin"
+        sudo -u postgres createdb -O laplace_admin laplace
+        green "✓ Created database 'laplace' owned by laplace_admin"
     fi
 
-    # The laplace schema itself is NOT pre-created here. It gets created
-    # by CREATE EXTENSION laplace_substrate at Layer-1 time, owned by
-    # laplace_admin (laplace_substrate.control declares schema='laplace'
-    # + trusted=true → DbUp runs CREATE EXTENSION directly as
-    # laplace_admin per ADR 0023 + 0025). If it gets mis-owned by
-    # anything else (e.g., a transitional dev session where it was
-    # installed via SECURITY DEFINER wrapper), DbUp self-heals via
-    # `laplace_priv.drop_extension('laplace_substrate')` — see the
-    # initial migration in db/migrations/. No sudo bootstrap re-run
-    # required for the recovery path.
-    green "✓ laplace_priv schema + install_extension/drop_extension wrappers"
-
-    # ---------------------------------------------------------------
-    # (5) Database-level CONNECT grants for app + readonly roles.
-    #     Granted on BOTH laplace AND template_laplace (so any future
-    #     db-nuke + clone-from-template carries the grants forward).
-    #     Schema USAGE is Layer 1's job — the laplace schema is created
-    #     by CREATE EXTENSION laplace_substrate, not by this bootstrap.
-    # ---------------------------------------------------------------
-    for db in template_laplace laplace; do
-        sudo -u postgres psql -d "$db" -v ON_ERROR_STOP=1 <<PG_EOF >/dev/null
-DO \$\$
+    # CONNECT grants on the database for app + readonly roles. (Schema
+    # USAGE is Layer 1's job since the laplace schema is created by
+    # CREATE EXTENSION laplace_substrate, not here.)
+    sudo -u postgres psql -d laplace -v ON_ERROR_STOP=1 <<'PG_EOF' >/dev/null
+DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'laplace_app') THEN
-        EXECUTE 'GRANT CONNECT ON DATABASE $db TO laplace_app';
+        EXECUTE 'GRANT CONNECT ON DATABASE laplace TO laplace_app';
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'laplace_readonly') THEN
-        EXECUTE 'GRANT CONNECT ON DATABASE $db TO laplace_readonly';
+        EXECUTE 'GRANT CONNECT ON DATABASE laplace TO laplace_readonly';
     END IF;
-END \$\$;
+END $$;
 PG_EOF
-    done
-    green "✓ CONNECT grants for laplace_app / laplace_readonly on laplace + template_laplace"
+    green "✓ CONNECT grants on laplace for laplace_app / laplace_readonly"
+
+    # Clean up legacy template_laplace + per-DB laplace_priv if present
+    # from prior bootstrap iterations that used wrapper/template patterns.
+    # All harmless to remove now that laplace_admin is SUPERUSER and the
+    # migration uses plain CREATE EXTENSION.
+    sudo -u postgres psql -d postgres -v ON_ERROR_STOP=0 <<'PG_EOF' >/dev/null 2>&1
+UPDATE pg_database SET datistemplate = false WHERE datname = 'template_laplace';
+DROP DATABASE IF EXISTS template_laplace;
+PG_EOF
+    sudo -u postgres psql -d laplace -v ON_ERROR_STOP=0 <<'PG_EOF' >/dev/null 2>&1
+DROP SCHEMA IF EXISTS laplace_priv CASCADE;
+PG_EOF
+    green "✓ Removed legacy template_laplace / laplace_priv (if present from prior bootstrap iterations)"
 }
 
 bootstrap_pg_auth() {
