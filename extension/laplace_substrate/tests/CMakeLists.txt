@@ -17,7 +17,7 @@ if(NOT LAPLACE_PG_REGRESS)
 endif()
 
 set(REGRESS_DB "laplace_regress_substrate")
-set(REGRESS_TESTS bootstrap)
+set(REGRESS_TESTS bootstrap glicko2_aggregate)
 set(REGRESS_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/regress_output")
 file(MAKE_DIRECTORY "${REGRESS_OUTPUT_DIR}")
 

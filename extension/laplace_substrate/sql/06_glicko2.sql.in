@@ -1,19 +1,63 @@
 /* 06_glicko2.sql.in — Glicko-2 SFUNC + FINALFUNC + CREATE AGGREGATE.
  *
- * Per ADR 0004 + 0030: int64 fixed-point at scale 1e9. SQL-side
- * aggregation per RULES.md R6 (only runtime DB-side compute beyond
- * index lookups). Arena-aware update logic per ADR 0036 + RULES.md R20
- * — agreement/disagreement events filtered by attestation kind's
- * arena semantics.
+ * Story 5.6 / #68. Engine math (Glickman 2013, "Example of the Glicko-2
+ * system") lives in liblaplace_core; this is the SQL-side wrapper that
+ * exposes the engine through CREATE AGGREGATE so per-attestation rating
+ * updates flow through the C kernel without DB-side math (RULES.md R6).
  *
- * Real wrappers land Chunk 5 (Stories 5.1-5.7). */
+ * Per ADR 0004 + 0030: int64 fixed-point at scale 1e9 throughout. SFUNC
+ * accumulates observations into aggcontext-allocated state; FINALFUNC
+ * invokes glicko2_update_period (Illinois iteration on log-volatility +
+ * batched mu/phi update). Per ADR 0036: arena/source-trust resolution
+ * happens BEFORE the aggregate is invoked — by the time observations
+ * reach the SFUNC, they are the resolver's evidence batch. The aggregate
+ * does not vote-count and does not weight by raw source repetition.
+ */
 
--- CREATE FUNCTION laplace_glicko2_sfunc(state internal, score integer,
---                                       source_credibility integer,
---                                       observed_at timestamptz) RETURNS internal
---     AS 'MODULE_PATHNAME', 'pg_laplace_glicko2_sfunc' LANGUAGE C;
---
--- CREATE FUNCTION laplace_glicko2_finalfunc(state internal) RETURNS record
---     AS 'MODULE_PATHNAME', 'pg_laplace_glicko2_finalfunc' LANGUAGE C;
---
--- CREATE AGGREGATE laplace_glicko2_accumulate (...) ...
+/* Composite return type — the result of one rating-period update. All
+ * fields are int64 fixed-point ×1e9 (Glicko-1 scale for rating/rd,
+ * Glicko-2 scale for volatility). */
+CREATE TYPE laplace_glicko2_result AS (
+    rating     bigint,
+    rd         bigint,
+    volatility bigint
+);
+
+CREATE FUNCTION laplace_glicko2_sfunc(
+    internal,                  -- aggregate state
+    bigint, bigint, bigint,    -- prior_rating, prior_rd, prior_volatility (read on first row only)
+    bigint, bigint, bigint,    -- opponent_rating, opponent_rd, score (per row)
+    bigint                     -- tau (system constant ×1e9; read on first row only)
+) RETURNS internal
+    AS 'MODULE_PATHNAME', 'pg_laplace_glicko2_sfunc'
+    LANGUAGE C;
+
+CREATE FUNCTION laplace_glicko2_finalfunc(internal)
+    RETURNS laplace_glicko2_result
+    AS 'MODULE_PATHNAME', 'pg_laplace_glicko2_finalfunc'
+    LANGUAGE C;
+
+/* The aggregate. Prior + tau are repeated on every row (one attestation's
+ * prior is constant for the period); SFUNC reads them only from the first
+ * non-NULL row. Observations (opp_rating, opp_rd, score) vary per row.
+ * Glicko-2 within a rating period is commutative — same observations in
+ * any SELECT ordering produce identical output (per Glickman §"Step 7";
+ * pinned by determinism vector in tests/sql/glicko2_aggregate.sql).
+ *
+ * Not declared PARALLEL SAFE — pre-aggregate parallel combine would need
+ * a separate COMBINEFUNC + SERIALFUNC/DESERIALFUNC pair to merge two
+ * partial observation buffers, which we don't need until per-attestation
+ * batch sizes exceed planner parallelism thresholds. */
+CREATE AGGREGATE laplace_glicko2_accumulate(
+    prior_rating     bigint,
+    prior_rd         bigint,
+    prior_volatility bigint,
+    opponent_rating  bigint,
+    opponent_rd      bigint,
+    score            bigint,
+    tau              bigint
+) (
+    SFUNC     = laplace_glicko2_sfunc,
+    STYPE     = internal,
+    FINALFUNC = laplace_glicko2_finalfunc
+);
