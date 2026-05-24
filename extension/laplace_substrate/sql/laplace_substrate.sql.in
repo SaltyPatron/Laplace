@@ -15,3 +15,4 @@
 #include "07_cascade.sql.in"
 #include "08_sp_trajectory_ops.sql.in"
 #include "09_brin_tier_ops.sql.in"
+#include "11_entities_exist_bitmap.sql.in"

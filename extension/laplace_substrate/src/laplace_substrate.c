@@ -11,9 +11,12 @@
 #include "postgres.h"
 #include "fmgr.h"
 #include "funcapi.h"
+#include "executor/spi.h"
+#include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
 #include "access/htup_details.h"
+#include "catalog/pg_type.h"
 #include "nodes/execnodes.h"
 
 #include "laplace/core/version.h"
@@ -170,6 +173,116 @@ pg_laplace_glicko2_finalfunc(PG_FUNCTION_ARGS)
 
     tuple = heap_form_tuple(tupdesc, values, nulls);
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
+/* ------------------------------------------------------------------------- */
+/* entities_exist_bitmap (Story D.3 / #250 / Framework Epic #232).           */
+/*                                                                           */
+/* SQL signature:                                                            */
+/*   laplace.entities_exist_bitmap(ids bytea[]) RETURNS bytea                */
+/*                                                                           */
+/* For N candidate IDs, returns a packed bitmap of ceil(N/8) bytes where     */
+/* bit i (LSB-first within each byte) is set iff candidates[i] is already    */
+/* in laplace.entities.                                                      */
+/*                                                                           */
+/* Implementation: single SPI execute joining unnest(WITH ORDINALITY)        */
+/* against the indexed entities.id; iterate result and set bits. One DB      */
+/* round-trip (the SPI execute) regardless of candidate count.               */
+/* ------------------------------------------------------------------------- */
+
+PG_FUNCTION_INFO_V1(pg_laplace_entities_exist_bitmap);
+
+Datum
+pg_laplace_entities_exist_bitmap(PG_FUNCTION_ARGS)
+{
+    ArrayType*  ids_array;
+    int         candidate_count;
+    int         bitmap_bytes;
+    bytea*      result;
+    uint8*      bm;
+    Oid         argtypes[1];
+    Datum       args[1];
+    int         spi_rc;
+    uint64      i;
+
+    if (PG_ARGISNULL(0))
+        ereport(ERROR,
+            (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+             errmsg("entities_exist_bitmap: ids array must not be NULL")));
+
+    ids_array = PG_GETARG_ARRAYTYPE_P(0);
+
+    if (ARR_NDIM(ids_array) > 1)
+        ereport(ERROR,
+            (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+             errmsg("entities_exist_bitmap: ids array must be 1-dimensional")));
+
+    if (ARR_ELEMTYPE(ids_array) != BYTEAOID)
+        ereport(ERROR,
+            (errcode(ERRCODE_DATATYPE_MISMATCH),
+             errmsg("entities_exist_bitmap: ids array element type must be bytea")));
+
+    if (ARR_HASNULL(ids_array))
+        ereport(ERROR,
+            (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+             errmsg("entities_exist_bitmap: ids array must not contain NULL")));
+
+    candidate_count = ARR_NDIM(ids_array) == 0
+                      ? 0
+                      : ArrayGetNItems(ARR_NDIM(ids_array), ARR_DIMS(ids_array));
+
+    bitmap_bytes = (candidate_count + 7) / 8;
+
+    result = (bytea*) palloc(VARHDRSZ + bitmap_bytes);
+    SET_VARSIZE(result, VARHDRSZ + bitmap_bytes);
+    if (bitmap_bytes > 0)
+        memset(VARDATA(result), 0, bitmap_bytes);
+    bm = (uint8*) VARDATA(result);
+
+    if (candidate_count == 0)
+        PG_RETURN_BYTEA_P(result);
+
+    if (SPI_connect() != SPI_OK_CONNECT)
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("entities_exist_bitmap: SPI_connect failed")));
+
+    argtypes[0] = BYTEAARRAYOID;
+    args[0]     = PointerGetDatum(ids_array);
+
+    spi_rc = SPI_execute_with_args(
+        "SELECT (u.ord - 1)::int "
+        "FROM unnest($1::bytea[]) WITH ORDINALITY u(id, ord) "
+        "JOIN laplace.entities e ON e.id = u.id",
+        1, argtypes, args, NULL,
+        true /* read_only */, 0 /* unlimited */);
+
+    if (spi_rc != SPI_OK_SELECT)
+    {
+        SPI_finish();
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("entities_exist_bitmap: SPI_execute_with_args failed (rc=%d)", spi_rc)));
+    }
+
+    for (i = 0; i < SPI_processed; i++)
+    {
+        bool   isnull;
+        Datum  d = SPI_getbinval(SPI_tuptable->vals[i],
+                                  SPI_tuptable->tupdesc,
+                                  1, &isnull);
+        if (!isnull)
+        {
+            int pos = DatumGetInt32(d);
+            if (pos >= 0 && pos < candidate_count)
+            {
+                bm[pos >> 3] |= (uint8)(1u << (pos & 7u));
+            }
+        }
+    }
+
+    SPI_finish();
+    PG_RETURN_BYTEA_P(result);
 }
 
 /*

@@ -1,0 +1,256 @@
+using System.Collections.Immutable;
+using global::Npgsql;
+using Xunit;
+using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD;
+using Laplace.SubstrateCRUD.Npgsql;
+
+namespace Laplace.SubstrateCRUD.Tests;
+
+/// <summary>
+/// Integration tests for <see cref="NpgsqlSubstrateWriter"/> against the
+/// live local PG (per <see cref="LocalPgFixture"/>). Verifies the apply
+/// path's correctness + idempotency + dedup-hit shortcircuit.
+///
+/// Skip note: tests require the local PG to be running with the laplace
+/// extensions installed (just install / just db-up). When PG isn't
+/// reachable, the fixture throws and the entire class is skipped at
+/// runtime — by design, since the bare-engine + bare-types unit tests
+/// already give core coverage.
+/// </summary>
+public class NpgsqlSubstrateWriterTests : IClassFixture<LocalPgFixture>
+{
+    private readonly LocalPgFixture _pg;
+
+    public NpgsqlSubstrateWriterTests(LocalPgFixture pg) => _pg = pg;
+
+    private static Hash128 H(int seed) => Hash128.Blake3(BitConverter.GetBytes(seed));
+
+    [Fact]
+    public async Task ApplyAsync_EmptyIntentIsNoOp()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var src = Hash128.OfCanonical("substrate/source/test/empty");
+        var change = new SubstrateChangeBuilder(src, "empty-unit").Build();
+        var result = await writer.ApplyAsync(change);
+        Assert.Equal(0, result.EntitiesInserted);
+        Assert.Equal(0, result.PhysicalitiesInserted);
+        Assert.Equal(0, result.AttestationsInserted);
+        Assert.True(result.TrunkShortcircuitHit);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_InsertsNovelEntities()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var src = Hash128.OfCanonical("substrate/source/test/novel-ents");
+        var typeId = await EnsureTestTypeAsync(src);
+
+        var idA = H(1001);
+        var idB = H(1002);
+        var change = new SubstrateChangeBuilder(src, "novel-unit")
+            .AddEntity(idA, 0, typeId)
+            .AddEntity(idB, 0, typeId)
+            .Build();
+        var result = await writer.ApplyAsync(change);
+
+        Assert.Equal(2, result.EntitiesAttempted);
+        Assert.Equal(2, result.EntitiesInserted);
+        Assert.False(result.TrunkShortcircuitHit);
+
+        // Verify rows landed
+        await using var cmd = _pg.DataSource.CreateCommand(
+            "SELECT count(*) FROM laplace.entities WHERE id = ANY($1::bytea[])");
+        var p = cmd.Parameters.AddWithValue(new[] { idA.ToBytes(), idB.ToBytes() });
+        p.NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea;
+        var n = (long)(await cmd.ExecuteScalarAsync())!;
+        Assert.Equal(2L, n);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_IsIdempotentOnReapply()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var src = Hash128.OfCanonical("substrate/source/test/idempotent");
+        var typeId = await EnsureTestTypeAsync(src);
+
+        var change = new SubstrateChangeBuilder(src, "idem-unit")
+            .AddEntity(H(2001), 0, typeId)
+            .AddEntity(H(2002), 0, typeId)
+            .Build();
+
+        var first = await writer.ApplyAsync(change);
+        Assert.Equal(2, first.EntitiesInserted);
+        Assert.False(first.TrunkShortcircuitHit);
+
+        var second = await writer.ApplyAsync(change);
+        // No physicalities or attestations in this intent, so the second
+        // apply trunk-shortcircuits when all entities are now present.
+        Assert.True(second.TrunkShortcircuitHit);
+        Assert.Equal(0, second.EntitiesInserted);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_DedupsEntitiesAcrossIntents()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var src = Hash128.OfCanonical("substrate/source/test/dedup");
+        var typeId = await EnsureTestTypeAsync(src);
+
+        var shared = H(3001);
+        var first = new SubstrateChangeBuilder(src, "dedup-A")
+            .AddEntity(shared, 0, typeId)
+            .AddEntity(H(3002), 0, typeId)
+            .Build();
+        var second = new SubstrateChangeBuilder(src, "dedup-B")
+            .AddEntity(shared, 0, typeId)                  // already present
+            .AddEntity(H(3003), 0, typeId)                 // novel
+            .Build();
+
+        await writer.ApplyAsync(first);
+        var r = await writer.ApplyAsync(second);
+        Assert.Equal(2, r.EntitiesAttempted);
+        Assert.Equal(1, r.EntitiesInserted); // only the novel one
+    }
+
+    [Fact]
+    public async Task ApplyAsync_InsertsPhysicalityAndAttestation()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var src = Hash128.OfCanonical("substrate/source/test/full-row");
+        var typeId = await EnsureTestTypeAsync(src);
+        var kindId = await EnsureTestKindAsync(src, "HAS_TEST");
+
+        var subjId = H(4001);
+        var change = new SubstrateChangeBuilder(src, "full-unit")
+            .AddEntity(subjId, 0, typeId)
+            .AddPhysicality(new PhysicalityRow(
+                Id: H(4002), EntityId: subjId, SourceId: src,
+                Kind: PhysicalityKind.Content,
+                CoordX: 0.1, CoordY: 0.2, CoordZ: 0.3, CoordM: 0.4,
+                HilbertIndex: Hilbert128.Encode(stackalloc double[] { 0.1, 0.2, 0.3, 0.4 }),
+                TrajectoryXyzm: null,
+                NConstituents: 0,
+                AlignmentResidual: null,
+                SourceDim: null,
+                ObservedAtUnixUs: IntentStage.PgEpochUnixUs))
+            .AddAttestation(new AttestationRow(
+                Id: H(4003), SubjectId: subjId, KindId: kindId,
+                ObjectId: null, SourceId: src, ContextId: null,
+                RatingFp1e9: 1_500_000_000_000L,
+                RdFp1e9: 350_000_000_000L,
+                VolatilityFp1e9: 60_000_000L,
+                LastObservedAtUnixUs: IntentStage.PgEpochUnixUs,
+                ObservationCount: 1L))
+            .Build();
+
+        var result = await writer.ApplyAsync(change);
+        Assert.Equal(1, result.EntitiesInserted);
+        Assert.Equal(1, result.PhysicalitiesInserted);
+        Assert.Equal(1, result.AttestationsInserted);
+
+        // Verify physicality landed with the right coord
+        await using var pCmd = _pg.DataSource.CreateCommand(
+            "SELECT ST_X(coord), ST_Y(coord), ST_Z(coord), ST_M(coord) FROM laplace.physicalities WHERE id = $1");
+        pCmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, H(4002).ToBytes());
+        await using var rdr = await pCmd.ExecuteReaderAsync();
+        Assert.True(await rdr.ReadAsync());
+        Assert.Equal(0.1, rdr.GetDouble(0));
+        Assert.Equal(0.4, rdr.GetDouble(3));
+    }
+
+    [Fact]
+    public async Task ApplyAsync_RollsBackOnFatalError()
+    {
+        // Trigger a constraint violation: emit an attestation whose subject_id
+        // is missing from entities. PG raises FK violation; the COPY pipeline
+        // must roll back the entire intent (no partial writes).
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var src = Hash128.OfCanonical("substrate/source/test/rollback");
+        var typeId = await EnsureTestTypeAsync(src);
+
+        // Add an entity, then an attestation that references a missing subject.
+        var goodEntity = H(5001);
+        var missingSubject = H(5099);
+        var kindId = await EnsureTestKindAsync(src, "HAS_TEST_ROLLBACK");
+        var change = new SubstrateChangeBuilder(src, "rollback-unit")
+            .AddEntity(goodEntity, 0, typeId)
+            .AddAttestation(new AttestationRow(
+                H(5002), missingSubject, kindId, null, src, null,
+                1_500_000_000_000L, 350_000_000_000L, 60_000_000L,
+                IntentStage.PgEpochUnixUs, 1))
+            .Build();
+
+        await Assert.ThrowsAsync<global::Npgsql.PostgresException>(
+            () => writer.ApplyAsync(change));
+
+        // After rollback, the good entity must NOT be in the DB
+        await using var cmd = _pg.DataSource.CreateCommand(
+            "SELECT count(*) FROM laplace.entities WHERE id = $1");
+        cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, goodEntity.ToBytes());
+        var n = (long)(await cmd.ExecuteScalarAsync())!;
+        Assert.Equal(0L, n);
+    }
+
+    [Fact]
+    public async Task SubstrateReader_CountByTypeAndExistBitmapWork()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var reader = new NpgsqlSubstrateReader(_pg.DataSource);
+        var src = Hash128.OfCanonical("substrate/source/test/reader");
+        var typeId = await EnsureTestTypeAsync(src);
+
+        var idA = H(6001);
+        var idB = H(6002);
+        await writer.ApplyAsync(new SubstrateChangeBuilder(src, "reader-unit")
+            .AddEntity(idA, 0, typeId)
+            .AddEntity(idB, 0, typeId)
+            .Build());
+
+        var count = await reader.CountEntitiesByTypeAsync(typeId);
+        Assert.True(count >= 2L);
+
+        var bitmap = await reader.EntitiesExistBitmapAsync(new[] { idA, H(6099), idB });
+        Assert.Single(bitmap);
+        // Bits 0 and 2 set; bit 1 clear → 0b00000101 = 5
+        Assert.Equal((byte)0b00000101, bitmap[0]);
+    }
+
+    // === fixture helpers ===
+
+    /// <summary>Ensures a Type entity exists with id = BLAKE3 of the type name,
+    /// and that the source entity exists too (so physicalities/attestations
+    /// that reference source_id satisfy the FK constraint). Returns the type
+    /// entity id.</summary>
+    private async Task<Hash128> EnsureTestTypeAsync(Hash128 source)
+    {
+        var typeId = Hash128.OfCanonical("substrate/type/TestFixture/v1");
+        await using var cmdType = _pg.DataSource.CreateCommand(
+            "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) "
+          + "VALUES ($1, 0::smallint, $1, NULL) ON CONFLICT (id) DO NOTHING");
+        cmdType.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, typeId.ToBytes());
+        await cmdType.ExecuteNonQueryAsync();
+
+        await using var cmdSrc = _pg.DataSource.CreateCommand(
+            "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) "
+          + "VALUES ($1, 0::smallint, $2, NULL) ON CONFLICT (id) DO NOTHING");
+        cmdSrc.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, source.ToBytes());
+        cmdSrc.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, typeId.ToBytes());
+        await cmdSrc.ExecuteNonQueryAsync();
+        return typeId;
+    }
+
+    /// <summary>Ensures a Kind entity exists; returns its id.</summary>
+    private async Task<Hash128> EnsureTestKindAsync(Hash128 source, string name)
+    {
+        var kindId = Hash128.OfCanonical($"substrate/kind/{name}/v1");
+        var typeId = Hash128.OfCanonical("substrate/type/TestFixture/v1");
+        await using var cmd = _pg.DataSource.CreateCommand(
+            "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) "
+          + "VALUES ($1, 0::smallint, $2, NULL) ON CONFLICT (id) DO NOTHING");
+        cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, kindId.ToBytes());
+        cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, typeId.ToBytes());
+        await cmd.ExecuteNonQueryAsync();
+        return kindId;
+    }
+}
