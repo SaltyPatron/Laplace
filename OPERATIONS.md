@@ -8,7 +8,7 @@ The canonical command runner is **`just`** (Justfile at project root). Scripts l
 
 ## Prerequisites (verified on dev machine)
 
-Per [ADR 0033](docs/adr/0033-all-deps-as-submodules.md), all direct C/C++ deps are git submodules under `external/` and build under `/opt/laplace/`. The only non-submodule direct dep is Intel oneAPI (vendor compiler + runtime).
+Per [ADR 0033](docs/adr/0033-all-deps-as-submodules.md), all direct C/C++ deps are git submodules pinned in `.gitmodules`. Per [ADR 0046](docs/adr/0046-persistent-submodule-cache.md), the canonical source checkouts live at **`/opt/laplace/external/<dep>/`** as non-bare working trees maintained by `scripts/sync-external.sh` at the `.gitmodules` pin. CMake reads from `$LAPLACE_EXTERNAL` (default `/opt/laplace/external`) — no workspace `external/` is required for the build. The only non-submodule direct dep is Intel oneAPI (vendor compiler + runtime) at `/opt/intel/oneapi/`.
 
 ### System (apt — supporting only)
 
@@ -16,9 +16,10 @@ Per [ADR 0033](docs/adr/0033-all-deps-as-submodules.md), all direct C/C++ deps a
 |---|---|---|
 | OS | Ubuntu 22.04 LTS | — |
 | CPU | x86_64 with AVX2 (AVX-512 on deployment targets) | verified via `lscpu` + `grep -o 'avx[a-z0-9_]*' /proc/cpuinfo` |
-| Intel oneAPI | 2026.0.0 | `/opt/intel/oneapi/`; source `setvars.sh` before build |
+| Intel oneAPI | 2026.0.0 | `/opt/intel/oneapi/`; sourced automatically by the build via `cmake/toolchains/intel-oneapi.cmake` |
+| PostgreSQL 18 + PostGIS 3 | stock apt | `postgresql-18` + `postgresql-18-postgis-3`; runtime cluster the substrate connects to (per [ADR 0045](docs/adr/0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md)) |
 | .NET SDK | 10.0.107 | `/usr/lib/dotnet/` |
-| GCC / Clang | 11.4 / 14 | fallback compilers when oneAPI is not sourced |
+| GCC | 11.4 | dep-chain toolchain (per [ADR 0038](docs/adr/0038-unified-deps-cmake-pipeline-gcc-toolchain.md)) |
 | CMake | 3.22+ | top-level build orchestrator (ADR 0032) |
 | Ninja | 1.10+ | CMake generator |
 | build-essential, autoconf, automake, libtool, pkg-config, perl, bison, flex, gettext | latest apt | build-time tooling for submodule builds |
@@ -26,32 +27,40 @@ Per [ADR 0033](docs/adr/0033-all-deps-as-submodules.md), all direct C/C++ deps a
 
 Build-environment apt packages are installed by `bootstrap_build_environment` in `scripts/bootstrap-laplace-runner.sh`.
 
-### Submodule deps under `external/` (built into `/opt/laplace/`)
+### Submodule deps under `/opt/laplace/external/` (built into `/opt/laplace/`)
 
-| Component | Version | Submodule | Built to | Build script |
+| Component | Version | Submodule path (workspace) | Source consumed by build | Built to |
 |---|---|---|---|---|
-| PostgreSQL | 18 (REL_18_0) | `external/postgresql/` | `/opt/laplace/pgsql-18/` | `scripts/build-pg.sh` |
-| PostGIS | 3.6.3 | `external/postgis/` | under PG prefix | `scripts/build-postgis.sh` |
-| PROJ | 9.4.1 | `external/proj/` | `/opt/laplace/proj/` | `scripts/build-proj.sh` |
-| GEOS | 3.12.2 | `external/geos/` | `/opt/laplace/geos/` | `scripts/build-geos.sh` |
-| GDAL | v3.9.3 | `external/gdal/` | `/opt/laplace/gdal/` | `scripts/build-gdal.sh` |
-| Eigen | 3.4.0 | `external/eigen/` | header-only (INTERFACE) | — |
-| Spectra | v1.2.0 | `external/spectra/` | header-only (INTERFACE) | — |
-| BLAKE3 | 1.5.4 | `external/blake3/` | `add_subdirectory` from engine | — |
-| GoogleTest | 1.15+ | `external/googletest/` | `add_subdirectory` for ctest | — |
-| tree-sitter | v0.22.6 | `external/tree-sitter/` | `/opt/laplace/tree-sitter/` | `scripts/build-tree-sitter.sh` (lands when first CodeDecomposer is needed) |
+| PostgreSQL | 18 (REL_18_0) | `external/postgresql/` | `${LAPLACE_EXTERNAL}/postgresql/` | `/opt/laplace/pgsql-18/` |
+| PostGIS | 3.6.3 | `external/postgis/` | `${LAPLACE_EXTERNAL}/postgis/` | under PG prefix |
+| PROJ | 9.4.1 | `external/proj/` | `${LAPLACE_EXTERNAL}/proj/` | `/opt/laplace/proj/` |
+| GEOS | 3.12.2 | `external/geos/` | `${LAPLACE_EXTERNAL}/geos/` | `/opt/laplace/geos/` |
+| GDAL | v3.9.3 | `external/gdal/` | `${LAPLACE_EXTERNAL}/gdal/` | `/opt/laplace/gdal/` |
+| Eigen | 3.4.0 | `external/eigen/` | `${LAPLACE_EXTERNAL}/eigen/` | header-only (INTERFACE) |
+| Spectra | v1.2.0 | `external/spectra/` | `${LAPLACE_EXTERNAL}/spectra/` | header-only (INTERFACE) |
+| BLAKE3 | 1.5.4 | `external/blake3/` | `${LAPLACE_EXTERNAL}/blake3/` | `add_subdirectory` from engine |
+| GoogleTest | 1.15+ | `external/googletest/` | `${LAPLACE_EXTERNAL}/googletest/` | `add_subdirectory` for ctest |
+| tree-sitter | v0.22.6 | `external/tree-sitter/` | `${LAPLACE_EXTERNAL}/tree-sitter/` | `/opt/laplace/tree-sitter/` |
 
-Submodule init: `git clone --recurse-submodules <repo>` on fresh clone, or `git submodule update --init --recursive` after a plain clone.
+`$LAPLACE_EXTERNAL` defaults to `/opt/laplace/external/`. Override via env var only when working against an alternate checkout location.
+
+Sync the cache to the `.gitmodules` pin (idempotent — no-op when nothing moved):
+
+```sh
+scripts/sync-external.sh
+```
+
+For local-only editing, developers may also keep a workspace `external/<dep>/` via `git submodule update --init <path>`; this is ergonomics, not load-bearing. The build reads from `$LAPLACE_EXTERNAL`.
 
 ### One-command dep build
 
 ```sh
-just build-deps          # invokes scripts/build-all-deps.sh — proj → geos → gdal → pg → postgis
-# Or selectively:
-scripts/build-all-deps.sh proj geos      # only build PROJ + GEOS
+just build-deps
 ```
 
-The dep build is idempotent: re-running skips already-built deps. To force a fresh build of one dep: `scripts/build-pg.sh --clean`.
+This runs `cmake -B build/deps -S external && cmake --build build/deps -j` against `external/CMakeLists.txt` (per [ADR 0038](docs/adr/0038-unified-deps-cmake-pipeline-gcc-toolchain.md)). Each dep is an `ExternalProject_Add` built in its own isolated CMake context; ordering is encoded via `DEPENDS` (proj → gdal; postgis → pg + geos + proj + gdal). Stamp-based caching — re-runs with the same submodule SHAs are sub-second no-ops; one-time clean build is ~10-12 min.
+
+gcc toolchain (`cmake/toolchains/gcc-deterministic.cmake`) is used for every dep; icpx is reserved for the engine where it earns its slot via oneMKL/Spectra/TBB.
 
 Verify everything with: `just check-prereqs`
 
@@ -59,187 +68,151 @@ Verify everything with: `just check-prereqs`
 
 ## The Justfile (command index)
 
-```just
-# Justfile — canonical command runner for Laplace
-# Run `just` with no arguments to list all commands.
+The Justfile is the authoritative reference — `just --list` is always current. Below is a guide to what each recipe does and when to use it.
 
-# === Environment ===
+### Environment
 
-# Source Intel oneAPI environment (must run before build/test commands that need it)
-source-oneapi:
-    @echo "Run: source /opt/intel/oneapi/setvars.sh"
+| Recipe | Purpose |
+|---|---|
+| `just check-prereqs` | Verify host has the right system deps + oneAPI + PG + .NET. |
 
-# Verify all prerequisites are installed
-check-prereqs:
-    @scripts/check-prereqs.sh
+### Layer 0 — bootstrap (one-time, sudo)
 
-# === Build ===
+Per [ADR 0018](docs/adr/0018-three-layer-architecture.md) + [ADR 0019](docs/adr/0019-laplace-runner-system-account.md). `scripts/bootstrap-laplace-runner.sh` is the **only** privileged surface — creates the `laplace-runner` system account, PG roles, peer auth, `/opt/laplace/{external,lib,share,include,bin}` with correct ownership + mode 2775, ld.so.cache registration of `/opt/laplace/lib`, and the PG `extension_control_path` / `dynamic_library_path` GUCs per [ADR 0045](docs/adr/0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md).
 
-# Build everything (engine + extension + app)
-build: build-engine build-extension build-app
+| Recipe | Purpose |
+|---|---|
+| `sudo just bootstrap` | Run Layer 0 setup (one-time per machine; idempotent). |
+| `sudo just bootstrap-status` | Show current Layer 0 state. |
+| `sudo just bootstrap-reset` | Tear down Layer 0 state (destructive — use only on a host being repurposed). |
 
-# Build the C/C++ engine library
-build-engine:
-    cd engine && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx
-    cd engine && cmake --build build
+### One-shot host setup
 
-# Build the PostgreSQL extension.
-# Current bridge path uses PGXS until Epic B/B' lands the full ADR 0032 CMake build.
-build-extension:
-    cd extension && make USE_PGXS=1 PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
+`scripts/setup-host.sh` orchestrates bootstrap (Layer 0) + DbUp migrations (Layer 1) in sequence — for fresh hosts or after a reset.
 
-# Install the PG extension into the cluster.
-# Current bridge path uses PGXS until Epic B/B' lands the full ADR 0032 CMake build.
-install-extension: build-extension
-    cd extension && sudo make USE_PGXS=1 PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config install
+| Recipe | Purpose |
+|---|---|
+| `just setup-host` | Layer 0 + Layer 1. |
+| `just setup-host-status` | Status of both. |
+| `just setup-host-reset` | Reset both. |
 
-# Build the C# app projects
-build-app:
-    cd app && dotnet build -c Release
+### Build
 
-# Build perf-cache from Unicode UCD (one-time)
-build-perfcache:
-    scripts/build-perfcache.sh
+Per [ADR 0032](docs/adr/0032-unified-cmake-build-pipeline.md): one top-level CMake tree drives 3 engine `.so` + 2 PG extensions + 2 preprocessed SQL install scripts.
 
-# === Launch ===
+| Recipe | Purpose |
+|---|---|
+| `just submodule-sanity` | Apply CRLF-fixture overrides for 5 of 303 tree-sitter grammars (silent no-op when clean). Auto-runs before `build-deps`. |
+| `just build-deps` | Build PROJ → GEOS → GDAL → PG → PostGIS → tree-sitter from `${LAPLACE_EXTERNAL}/<dep>/` to `/opt/laplace/<dep>/`. gcc toolchain. Stamp-cached. |
+| `just build` | Build engine + extensions. icpx toolchain (`cmake/toolchains/intel-oneapi.cmake`). Defaults: `CMAKE_INSTALL_PREFIX=/opt/laplace`, `LAPLACE_INSTALL_STAGED=ON`, `LAPLACE_PG_PREFIX=/usr/lib/postgresql/18` (stock PG; override via env var for the custom-built PG at `/opt/laplace/pgsql-18`). |
+| `just install` | `cmake --install build` — sudo-free thanks to `LAPLACE_INSTALL_STAGED=ON` (extensions land in `/opt/laplace/{lib,share}/postgresql/$PG_MAJOR`; PG finds them via the conf paths set by `bootstrap_pg_extension_paths`). |
+| `just install-laplace-prefix` | Legacy alias for `just install` — kept so existing CI/docs keep working. |
+| `just build-app` | `dotnet build Laplace.slnx -c Release`. |
+| `just build-migrations` | `dotnet build Laplace.Migrations`. |
+| `just build-perfcache` | Build perf-cache from UCD (one-time). |
+| `just clean` | Wipe `build/`. Preserves `/opt/laplace/*` dep installs. |
 
-# Start Postgres (if not already running)
-launch-db:
-    sudo systemctl start postgresql || pg_ctlcluster 18 main start
+#### Custom PG build (optional path)
 
-# Create the Laplace database
-create-db:
-    sudo -u postgres createdb laplace
-    sudo -u postgres psql -d laplace -c "CREATE EXTENSION postgis;"
-    sudo -u postgres psql -d laplace -c "CREATE EXTENSION laplace;"
+The substrate normally runs against the system PG (`/usr/lib/postgresql/18`) with extensions staged at `/opt/laplace/{lib,share}/postgresql/18` per [ADR 0045](docs/adr/0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md). For benchmarking against an Intel-toolchain custom PG build:
 
-# Apply schema (entities, physicalities, attestations + indexes)
-apply-schema:
-    psql -d laplace -f extension/schema.sql
-
-# Seed T0 codepoint entities from Unicode UCD
-seed-t0: build-perfcache
-    scripts/seed-t0.sh
-
-# Full setup: launch + create + apply-schema + seed-t0
-setup: launch-db install-extension create-db apply-schema seed-t0
-    @echo "Laplace ready. Try: just query 'SELECT count(*) FROM entities;'"
-
-# === Ingest ===
-
-# Ingest a source (linguistic resource, AI model, text corpus)
-# Usage: just ingest wordnet
-#        just ingest model /vault/models/qwen3-1.5b
-#        just ingest text-corpus /vault/Data/wikipedia-en
-ingest source path="":
-    scripts/ingest-source.sh {{source}} {{path}}
-
-# === Query ===
-
-# Run an arbitrary SQL query against the substrate
-# Usage: just query "SELECT count(*) FROM entities WHERE tier = 0"
-query sql:
-    psql -d laplace -c "{{sql}}"
-
-# Run a substrate cascade query (via engine, not raw SQL)
-# Usage: just cascade "what does running mean"
-cascade prompt:
-    app/Laplace.Cli/bin/Release/net10.0/laplace-cli cascade --prompt "{{prompt}}"
-
-# === Synthesis ===
-
-# Run Substrate Synthesis with a recipe JSON
-# Usage: just synthesize recipes/qwen3-roundtrip.json
-synthesize recipe:
-    app/Laplace.Cli/bin/Release/net10.0/laplace-cli synthesize --recipe {{recipe}}
-
-# Round-trip test: ingest model → synthesize same architecture → load in llama.cpp → chat
-# Usage: just roundtrip /vault/models/qwen3-1.5b
-roundtrip model_path:
-    scripts/roundtrip.sh {{model_path}}
-
-# === Verify ===
-
-# Run all integrity checks (determinism, FK, perf-cache vs DB)
-verify: verify-determinism verify-fk verify-perfcache
-
-verify-determinism:
-    scripts/verify-determinism.sh
-
-verify-fk:
-    psql -d laplace -f scripts/verify-fk.sql
-
-verify-perfcache:
-    scripts/verify-perfcache.sh
-
-# === Status ===
-
-# Show agent-tracked progress + open blockers
-status:
-
-    @echo ""
-    @echo "=== Blockers ==="
-
-# === Test ===
-
-# Run all tests (engine + extension + app + integration)
-test: test-engine test-extension test-app test-integration
-
-test-engine:
-    cd engine && cmake --build build --target test
-    cd engine/build && ctest --output-on-failure
-
-test-extension:
-    cd extension && make installcheck PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
-
-test-app:
-    cd app && dotnet test -c Release
-
-test-integration:
-    scripts/test-integration.sh
-
-# === Clean ===
-
-clean: clean-engine clean-extension clean-app
-
-clean-engine:
-    rm -rf engine/build
-
-clean-extension:
-    cd extension && make clean
-
-clean-app:
-    cd app && dotnet clean
-
-# Wipe the database (destructive — confirms)
-nuke-db:
-    @read -p "DROP database laplace? [y/N] " confirm; [[ "$$confirm" == "y" ]] || exit 1
-    sudo -u postgres dropdb laplace
+```sh
+just build-deps                                  # builds /opt/laplace/pgsql-18/
+LAPLACE_PG_PREFIX=/opt/laplace/pgsql-18 just build install
+# (then point a separately-managed cluster at the custom binaries)
 ```
+
+The custom-PG cluster path is not the runtime the substrate depends on — it remains available as a build target for future hermetic-cluster work.
+
+### Layer 1 — extension lifecycle (DbUp)
+
+Per [ADR 0021](docs/adr/0021-dbup-for-migrations.md) + [ADR 0023](docs/adr/0023-extension-owns-schema-dbup-orchestrates.md). DbUp orchestrates extension lifecycle (CREATE EXTENSION postgis + laplace_geom + laplace_substrate, version pins, cross-extension setup); it does NOT define substrate schema. Substrate schema lives in `extension/laplace_substrate/sql/`.
+
+| Recipe | Purpose |
+|---|---|
+| `just launch-db` | Start the system Postgres cluster if not running. |
+| `just db-up` | Apply DbUp migrations (creates DB if missing, runs CREATE EXTENSION ladder). |
+| `just db-status` | Show current migration state. |
+| `just db-reset` | Drop SchemaVersions only — preserves substrate data; next `db-up` re-applies migrations. |
+| `just db-nuke` | DROP DATABASE laplace + re-create empty. Loses all substrate data. |
+| `just migrate-new <name>` | Generate a new timestamped migration file in `db/migrations/`. |
+
+`just db-up` depends on `just install` — installing the latest extension SQL before DbUp tries to CREATE EXTENSION ensures the staged-extension files are in place.
+
+### Seed
+
+| Recipe | Purpose |
+|---|---|
+| `just seed-t0` | Seed T0 codepoint entities from UCD (1,114,112 entities). Depends on `build-perfcache`. |
+| `just setup` | `launch-db` → `db-up` → `seed-t0`. Convenience composite for a clean substrate. |
+
+### Ingest
+
+| Recipe | Purpose |
+|---|---|
+| `just ingest <source> [path]` | Dispatch to `scripts/ingest-source.sh` (per-source plugin invocation). |
+
+### Query / Cascade
+
+| Recipe | Purpose |
+|---|---|
+| `just query <sql>` | Run raw SQL via `psql -d laplace`. |
+| `just cascade <prompt>` | Run a compiled cascade query via the CLI (prompt → ingestion → engine SRF/operator → response). |
+
+### Synthesis
+
+| Recipe | Purpose |
+|---|---|
+| `just synthesize <recipe.json>` | Emit a sparse native Synthesis package + optional proof exports (e.g., GGUF). |
+| `just roundtrip <model_path>` | Ingest model → synthesize same architecture → load in llama.cpp → chat (Chunk 8 milestone). |
+
+### Verify
+
+| Recipe | Purpose |
+|---|---|
+| `just verify` | All integrity checks (determinism, FK, perf-cache vs DB). Required before any commit touching hot-path code. |
+| `just verify-determinism` | Re-derive perf-cache from UCD; byte-compare to stored. |
+| `just verify-fk` | FK integrity across physicalities + attestations. |
+| `just verify-perfcache` | Cross-check perf-cache rows vs DB entities. |
+
+### Status
+
+| Recipe | Purpose |
+|---|---|
+| `just status` | Last 10 commits (`git log --oneline -10`). Project state lives in GitHub issues + ADRs, not in a status file. |
+
+### Test
+
+Three test surfaces per [STANDARDS.md Testing](STANDARDS.md):
+
+| Recipe | Purpose |
+|---|---|
+| `just test` | Composite: `test-engine` → `regress` → `test-app`. |
+| `just test-engine` | ctest over GoogleTest binaries. Excludes pg_regress. Requires `just build` first. |
+| `just regress` | pg_regress smoke tests for `laplace_geom` + `laplace_substrate` against the running system PG with staged extensions installed (per [#196](https://github.com/SaltyPatron/Laplace/issues/196)). Requires `just install` first. CTest fixtures sequence setup/teardown. |
+| `just test-app` | `dotnet test Laplace.slnx -c Release` (xUnit + Testcontainers; requires Docker daemon). |
 
 ---
 
 ## Command reference (deeper than the Justfile)
 
-### Build
+### Build internals
 
-The three engine libraries (`liblaplace_core.so`, `liblaplace_dynamics.so`, `liblaplace_synthesis.so` — per ADR 0024) are built once per Postgres major version + Unicode version. Rebuilds for code changes are incremental via ninja. Outputs under `engine/build/{core,dynamics,synthesis}/`.
+Three engine libraries — `liblaplace_core.so`, `liblaplace_dynamics.so`, `liblaplace_synthesis.so` (per [ADR 0024](docs/adr/0024-engine-modularization.md)) — built once per Postgres major version + Unicode version. Code-change rebuilds are incremental via ninja. Outputs land under `build/engine/{core,dynamics,synthesis}/`.
 
-The PG extension links the engine library. Install copies `laplace.so`, `laplace.control`, and the SQL files into the Postgres extension directory.
+The two PG extensions (`laplace_geom`, `laplace_substrate` per [ADR 0025](docs/adr/0025-pg-extension-modularization.md)) link the engine libraries. `cmake --install build` copies them with `LAPLACE_INSTALL_STAGED=ON` to `/opt/laplace/{lib,share}/postgresql/$PG_MAJOR/`.
 
-The C# app projects link the engine library via P/Invoke (`[DllImport("laplace_engine")]`).
+The C# app projects link the engine libraries via P/Invoke (`[DllImport("laplace_core")]` etc.) per [ADR 0026](docs/adr/0026-csharp-project-structure.md).
 
-### Launch
+### Launch internals
 
-`just setup` is the one-time bootstrap. After that:
+The substrate runs against the **system PG cluster** (`/usr/lib/postgresql/18`) per ADR 0045. The PG `postgresql.conf` is amended by `bootstrap_pg_extension_paths` to add `/opt/laplace/{lib,share}/postgresql/18` to `dynamic_library_path` and `extension_control_path`, so `CREATE EXTENSION laplace_geom` finds the staged files immediately after `just install`.
 
-- `just launch-db` starts Postgres
-- The extension is auto-loaded when a query uses one of its functions (since it's installed cluster-wide)
+`laplace_admin` is a SUPERUSER role (per ADR 0045); DbUp connects as `laplace_admin` via peer auth and runs `CREATE EXTENSION` directly — no SECURITY DEFINER wrapper, no parallel cluster, no custom systemd unit.
 
 ### Ingest
 
-Each source plugin has a corresponding `scripts/ingest-<source>.sh` wrapper. The unified `just ingest <source> [path]` dispatches to the right one.
+Each source plugin has a corresponding `scripts/ingest-<source>.sh` wrapper. The unified `just ingest <source> [path]` dispatches.
 
 Per-source procedure:
 
@@ -288,8 +261,8 @@ For source-scoped tests, differences should point to the model-ingest codec, spa
 
 ### Update
 
-- **Schema migrations** are additive only. New migration file lives in `extension/<name>/sql/upgrade/<from>--<to>.sql.in`. Built artifact `<name>--<from>--<to>.sql` is generated by the SQLPP step (per ADR 0034). Apply via `ALTER EXTENSION <name> UPDATE TO '<to>';`
-- **Engine library updates** require rebuild + reinstall + Postgres restart (the engine `.so`s are loaded by the postmaster via the extensions).
+- **Schema migrations** are additive only. New migration file lives in `extension/<name>/sql/upgrade/<from>--<to>.sql.in`. Built artifact `<name>--<from>--<to>.sql` is generated by the SQLPP step (per [ADR 0034](docs/adr/0034-modular-sql-via-cpp-preprocessor.md)). Apply via `ALTER EXTENSION <name> UPDATE TO '<to>';`
+- **Engine library updates** require rebuild + reinstall (`just install`). No PG restart needed in the staged-extension model when only the `.so` content changed; restart only when extension control / SQL signatures change.
 - **Source re-ingestion:** idempotent (UPSERT on attestation dedup key). Re-running `just ingest <source>` is safe.
 
 ### Editing extension SQL (per ADR 0034)
@@ -318,8 +291,8 @@ Numeric prefixes (`NN_`) lock load order. To add a new function:
 2. Edit the `.sql.in`. Use `MODULE_PATHNAME` as the C-function lib placeholder (cpp will substitute the real `$libdir/laplace_geom` path); use the `LAPLACE_IMMUTABLE_STRICT` / `LAPLACE_VOLATILE_STRICT` macros from `sqldefines.h.in` for function modifiers.
 3. Add a matching C wrapper in `extension/laplace_geom/src/laplace_geom.c` (PG_FUNCTION_INFO_V1 + the actual marshalling to the engine call).
 4. Add a pg_regress test pair: `extension/laplace_geom/tests/sql/<name>.sql` + `extension/laplace_geom/tests/expected/<name>.out`.
-5. Rebuild: `just build` (or `cmake --build build`). The built artifact `laplace_geom--0.1.0.sql` appears under `build/extension/laplace_geom/`.
-6. Reinstall + verify: `just install-extension && just db-up && just test-extension`.
+5. Rebuild + reinstall: `just install` (depends on `just build`).
+6. Verify: `just db-up && just regress`.
 
 ### Verify
 
@@ -331,8 +304,14 @@ Numeric prefixes (`NN_`) lock load order. To add a new function:
 
 ### Status
 
-- The verification agent updates STATE.md after successful verifications.
-- The ingestion-pipeline agent updates STATE.md after successful ingestions.
+Project state lives in:
+
+- **GitHub issues** — chunk progress, story tracking, blockers
+- **`docs/adr/`** — accepted architectural decisions
+- **`CHANGELOG.md`** — user-visible changes per release
+- **`git log`** — full commit history
+
+`just status` shows recent commits; chunk/story progress is at https://github.com/SaltyPatron/Laplace/issues. There is intentionally no `STATE.md` cadence file (it was tried in prior iterations and degraded into a conversation log — issues + ADRs are the durable record).
 
 ---
 
@@ -340,22 +319,33 @@ Numeric prefixes (`NN_`) lock load order. To add a new function:
 
 ```
 laplace/                              ← project root
-├── engine/build/                     ← engine build artifacts (gitignored)
-├── extension/                        ← PG extension source + Makefile
-├── app/                              ← C# projects
-├── scripts/                          ← bash/python operational scripts
+├── external/                         ← workspace submodule checkouts (developer ergonomics only)
+├── build/                            ← top-level CMake build artifacts (gitignored)
+│   └── deps/                         ← ExternalProject_Add stamp tree + per-dep build dirs
+├── engine/{core,dynamics,synthesis}/ ← C/C++ engine source per ADR 0024
+├── extension/{laplace_geom,laplace_substrate}/  ← PG extensions per ADR 0025
+├── app/                              ← C# projects per ADR 0026
+├── db/migrations/                    ← DbUp migrations per ADR 0021
+├── scripts/                          ← bash operational scripts
 ├── data/                             ← gitignored: perf-cache binary, intermediate artifacts
 │   └── perfcache.bin                 ← built from UCD
 ├── recipes/                          ← Substrate Synthesis recipe JSONs
-
+└── docs/adr/                         ← Architecture Decision Records
 ```
+
+Persistent state outside the repo:
+
+- `/opt/laplace/external/` — canonical source for dep checkouts (per [ADR 0046](docs/adr/0046-persistent-submodule-cache.md))
+- `/opt/laplace/{proj,geos,gdal,pgsql-18,tree-sitter}/` — built dep install prefixes (per ADR 0033)
+- `/opt/laplace/{lib,share,include,bin}/` — engine library + staged-extension install (per ADR 0045)
+- `/opt/intel/oneapi/` — Intel oneAPI toolchain + libraries
+- `/var/lib/postgresql/18/main/` — system PG data directory
 
 Data on the user's machine (NOT in the repo):
 
 - `/vault/models/` — ingested model packages (Qwen3, Llama, etc.)
 - `/vault/Data/` — linguistic resources, text corpora
 - `/data/models/` — secondary model collection
-- Postgres data: `/var/lib/postgresql/18/main/`
 
 ---
 
@@ -401,12 +391,14 @@ Located in `recipes/`. Examples:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `CREATE EXTENSION laplace` fails | Extension not installed | `just install-extension` |
-| `function laplace_distance_4d does not exist` | Extension installed but not loaded | Reload schema or reconnect |
+| `CREATE EXTENSION laplace_geom` fails | Extension not installed at staged path | `just install` |
+| `function laplace_distance_4d does not exist` | Extension installed but not loaded in the session | Reconnect or `SET search_path` |
 | Perf-cache hash mismatch with DB seed | Mismatched Unicode versions | Rebuild both from the SAME UCD version: `just build-perfcache && just seed-t0` |
 | Ingestion fails with FK violation | T0 not seeded | `just seed-t0` |
 | `engine_last_error` shows non-zero | Engine-side error | Check stderr; consult [.claude/agents/verification.md](.claude/agents/verification.md) |
 | GGUF proof export fails to load in llama.cpp | Format version mismatch or native-package conversion bug | Verify `LLAMA_FILE_VERSION` against llama.cpp version; rebuild the proof export from the native package |
+| `cmake --build build/deps` fails on PROJ with `-fno-fast-math: not found` | Old icpx toolchain leaking into deps | Should not happen post-[ADR 0038](docs/adr/0038-unified-deps-cmake-pipeline-gcc-toolchain.md); ensure `cmake/toolchains/gcc-deterministic.cmake` is in effect for `build-deps` |
+| `git submodule update` slow / rate-limited | Per-job init not using the `/opt/laplace/external/` cache | Use `scripts/sync-external.sh` instead (per [ADR 0046](docs/adr/0046-persistent-submodule-cache.md)) |
 
 ---
 
