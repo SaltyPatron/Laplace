@@ -100,22 +100,41 @@ endif()
 # CMake strips build-tree RPATH at install by default, leaving installed
 # .so files unable to find their non-system deps. The engine's dynamics
 # library links MKL + TBB + Intel compiler runtime (libsvml, libimf,
-# libintlc) — all under /opt/intel/oneapi/{mkl,tbb,compiler}/latest/.
-# laplace_substrate.so links engine libs at /opt/laplace/lib (transitively
-# pulls MKL/TBB through dynamics). Without this, PG can't load the
-# extension at runtime — "libmkl_intel_lp64.so.3: cannot open shared
-# object file" — unless the PG service has LD_LIBRARY_PATH set to include
-# these paths, which it doesn't and shouldn't need to.
+# libintlc). laplace_substrate.so links engine libs at /opt/laplace/lib
+# (transitively pulls MKL/TBB through dynamics). Without this, PG can't
+# load the extension at runtime — "libmkl_intel_lp64.so.3: cannot open
+# shared object file" — unless the PG service has LD_LIBRARY_PATH set
+# to include these paths, which it doesn't and shouldn't need to.
+#
+# Paths are derived from the oneAPI env vars set by /opt/intel/oneapi/setvars.sh
+# (MKLROOT, TBBROOT, CMPLR_ROOT) so this is portable across machines —
+# any oneAPI install layout (different versions, alternative prefix)
+# resolves correctly as long as setvars.sh was sourced before configure.
+# If setvars.sh wasn't sourced, the build wouldn't have found icpx / MKL /
+# TBB in the first place, so a missing env var here means the build is
+# already broken at configure — we fail loud rather than embed a guess.
 #
 # Build-tree RPATH (CMAKE_BUILD_RPATH) is preserved separately and lets
 # ctest in build/ work without install. CMAKE_BUILD_WITH_INSTALL_RPATH
 # defaults FALSE, so install rewrites RPATH from build-tree values to these.
-set(CMAKE_INSTALL_RPATH
-    "/opt/laplace/lib"
-    "/opt/intel/oneapi/mkl/latest/lib"
-    "/opt/intel/oneapi/tbb/latest/lib/intel64/gcc4.8"
-    "/opt/intel/oneapi/compiler/latest/lib"
-)
+set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
+foreach(_oneapi_var_pair IN ITEMS
+        "MKLROOT;/lib"
+        "TBBROOT;/lib/intel64/gcc4.8"
+        "CMPLR_ROOT;/lib")
+    list(GET _oneapi_var_pair 0 _var)
+    list(GET _oneapi_var_pair 1 _suffix)
+    if(NOT DEFINED ENV{${_var}})
+        message(FATAL_ERROR
+            "$ENV{${_var}} is unset. Source /opt/intel/oneapi/setvars.sh "
+            "before configuring — oneAPI env vars drive both the build "
+            "(icpx/MKL/TBB discovery) and the install RPATH.")
+    endif()
+    list(APPEND CMAKE_INSTALL_RPATH "$ENV{${_var}}${_suffix}")
+endforeach()
+unset(_oneapi_var_pair)
+unset(_var)
+unset(_suffix)
 
 message(STATUS "Laplace extension install:")
 message(STATUS "  staged:           ${LAPLACE_INSTALL_STAGED}")

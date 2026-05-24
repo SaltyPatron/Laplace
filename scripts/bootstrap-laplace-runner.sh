@@ -164,14 +164,19 @@ bootstrap_user() {
     green "✓ $RUNNER_HOME owned by $RUNNER_USER:$RUNNER_GROUP (mode 750)"
 
     # Add the interactive dev user (GH_SUDO_USER — typically `ahart`) to
-    # the laplace-runner group. Both /opt/laplace (mode 2775) AND the
-    # app/Laplace.*/{obj,bin} pre-created by setup-host's layer1 (mode 775,
-    # owned by laplace-runner:laplace-runner) rely on this group membership
-    # for `just db-up` / `just test-app` / etc. running as the dev user to
-    # write into laplace-runner-owned files via group perms instead of
-    # needing sudo per iteration. The CI runner (running as laplace-runner)
-    # writes via owner perms. Idempotent — adding to a group you're already
-    # in is a no-op.
+    # the laplace-runner group. /opt/laplace is laplace-runner:laplace-runner
+    # mode 2775 setgid. Group membership gives the dev user read+write+execute
+    # for almost all iteration: just db-up, just test-app, sync-external.sh,
+    # cmake --build, running binaries from build/, psql against the deployed
+    # extensions, etc.
+    #
+    # EXCEPTION: `cmake --install` calls chmod, which requires being the file
+    # owner (not just group write — Linux chmod is unconditionally owner-only
+    # by POSIX). Local installs as the dev user must use `sudo -u laplace-runner
+    # cmake --install build`. CI runs as laplace-runner natively so its installs
+    # work without any sudo.
+    #
+    # Idempotent — adding to a group you're already in is a no-op.
     if id "$GH_SUDO_USER" >/dev/null 2>&1; then
         if id -nG "$GH_SUDO_USER" | tr ' ' '\n' | grep -qx "$RUNNER_GROUP"; then
             green "✓ $GH_SUDO_USER already in $RUNNER_GROUP group"
