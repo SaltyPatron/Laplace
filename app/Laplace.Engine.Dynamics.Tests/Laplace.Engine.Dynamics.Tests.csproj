@@ -16,6 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-</ItemGroup>
+    <ProjectReference Include="..\Laplace.Engine.Dynamics\Laplace.Engine.Dynamics.csproj" />
+  </ItemGroup>
 
 </Project>
