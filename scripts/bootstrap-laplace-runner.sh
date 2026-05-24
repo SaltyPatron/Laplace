@@ -568,7 +568,7 @@ EOF
 # Idempotent — re-writing the same conf + re-running ldconfig is a no-op.
 # ---------------------------------------------------------------------------
 bootstrap_engine_lib_path() {
-    say "Register /opt/laplace/lib + Intel oneAPI runtime with ld.so.conf.d"
+    say "Register /opt/laplace/lib + dep prefixes + Intel oneAPI runtime with ld.so.conf.d"
     local conf=/etc/ld.so.conf.d/laplace.conf
     # /opt/laplace/lib hosts the engine liblaplace_*.so files. The Intel
     # oneAPI runtime dir hosts libsvml.so, libirc.so, libimf.so etc., which
@@ -577,9 +577,27 @@ bootstrap_engine_lib_path() {
     # "libsvml.so: cannot open shared object file" the first time it tries
     # to dlopen a Laplace extension. The `latest` symlink in the Intel path
     # keeps this entry stable across oneAPI version bumps.
+    #
+    # /opt/laplace/{geos,proj,gdal}/lib host the from-source dep libraries
+    # built via `just build-deps` (per ADR 0033 + 0038). Registering them
+    # here, with laplace.conf processed BEFORE libc.conf and
+    # x86_64-linux-gnu.conf (alphabetical .d order), makes ld.so.cache
+    # prefer our libgeos.so.3.12.2 / libgeos_c.so.1.18.2 / libproj.so.25
+    # / libgdal.so over the system 3.10.2 / older variants. This is
+    # load-bearing for laplace_geom: liblwgeom (static-linked into our
+    # extension) transitively references the GEOS C API; without ld.so
+    # preferring our versions, the backend ends up with system libgeos
+    # 3.10.2 in its address space and `CREATE EXTENSION laplace_geom`
+    # fails with `undefined symbol: GEOSConcaveHullOfPolygons` (a
+    # GEOS 3.11+ symbol). The same goes for postgis-3.so when running
+    # against /opt/laplace/pgsql-18/lib/postgis-3.so (PostGIS 3.6.3
+    # built against /opt/laplace/geos 3.12.2 — needs 3.11+ symbols).
     local intel_runtime=/opt/intel/oneapi/compiler/latest/lib
     local desired_lines=(
         "/opt/laplace/lib"
+        "/opt/laplace/geos/lib"
+        "/opt/laplace/proj/lib"
+        "/opt/laplace/gdal/lib"
         "$intel_runtime"
     )
     local changed=0

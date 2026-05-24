@@ -123,6 +123,15 @@ ExternalProject_Add(geos
     CMAKE_ARGS
         ${_COMMON_CMAKE_ARGS}
         "-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>"
+        # CMAKE_INSTALL_RPATH points the installed libgeos_c.so at our
+        # libgeos.so so dependents (postgis-3.so, our laplace_geom.so,
+        # any process loading libgeos_c) find the matching libgeos.so.X.Y.Z
+        # via RUNPATH instead of falling through to ld.so.cache (where
+        # SYSTEM libgeos 3.10.2 lives under the SAME SONAME — ABI mismatch).
+        # Without this RUNPATH, postgis-3.so + laplace_geom.so end up
+        # using system 3.10.2 (missing the GEOS 3.11+ symbols PostGIS
+        # 3.6.3 requires, e.g. GEOSConcaveHullOfPolygons).
+        "-DCMAKE_INSTALL_RPATH=${LAPLACE_DEPS_PREFIX}/geos/lib"
     BUILD_COMMAND
         "${CMAKE_COMMAND}" --build <BINARY_DIR> -j ${_NPROC}
 )
@@ -276,12 +285,28 @@ ExternalProject_Add(postgis
     # `geometry` Datums into POINT4D coords for the ST_*_4d engine kernels.
     # postgis-3.so itself hides those symbols (-fvisibility=hidden — only 9
     # lwgeom_* symbols exported), so we statically link the lwgeom artifacts
-    # PostGIS builds anyway. Install them into the PG prefix's include/lib
-    # next to the PG server headers so find_path/find_library locate them
-    # alongside `pg_config --includedir-server` lookups.
+    # PostGIS builds anyway. Install:
+    #   include/liblwgeom.h        — main API header
+    #   include/lwinline.h         — inline helpers liblwgeom.h #includes
+    #   postgis_config.h           — autotools-generated config, included by
+    #                                liblwgeom.h via `../postgis_config.h`
+    #                                relative path; living at the include
+    #                                dir's parent makes the relative path
+    #                                resolve correctly when the extension
+    #                                compiles with -I<prefix>/include.
+    #   lib/liblwgeom.a            — static library
     COMMAND ${CMAKE_COMMAND} -E copy
             "<SOURCE_DIR>/liblwgeom/liblwgeom.h"
             "${LAPLACE_DEPS_PREFIX}/pgsql-18/include/liblwgeom.h"
+    COMMAND ${CMAKE_COMMAND} -E copy
+            "<SOURCE_DIR>/liblwgeom/lwinline.h"
+            "${LAPLACE_DEPS_PREFIX}/pgsql-18/include/lwinline.h"
+    COMMAND ${CMAKE_COMMAND} -E copy
+            "<SOURCE_DIR>/postgis_config.h"
+            "${LAPLACE_DEPS_PREFIX}/pgsql-18/postgis_config.h"
+    COMMAND ${CMAKE_COMMAND} -E copy
+            "<SOURCE_DIR>/postgis_revision.h"
+            "${LAPLACE_DEPS_PREFIX}/pgsql-18/postgis_revision.h"
     COMMAND ${CMAKE_COMMAND} -E copy
             "<SOURCE_DIR>/liblwgeom/.libs/liblwgeom.a"
             "${LAPLACE_DEPS_PREFIX}/pgsql-18/lib/liblwgeom.a"

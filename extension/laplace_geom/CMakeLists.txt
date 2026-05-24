@@ -68,13 +68,57 @@ message(STATUS "laplace_geom: liblwgeom.h = ${LAPLACE_LIBLWGEOM_INCLUDE_DIR}/lib
 message(STATUS "laplace_geom: liblwgeom.a = ${LAPLACE_LIBLWGEOM_STATIC}")
 target_include_directories(${EXT_NAME} PRIVATE ${LAPLACE_LIBLWGEOM_INCLUDE_DIR})
 
-# Link against laplace_core engine .so (the extension calls C ABI
-# functions from liblaplace_core for hash/coord/hilbert math) + liblwgeom
-# static for geometry deserialization. rpath points at the engine's
-# install location so the extension can find the engine .so at PG load.
+# liblwgeom.h transitively #includes "proj.h" — must be on the include
+# path. PROJ from external/CMakeLists.txt's proj step lands at
+# /opt/laplace/proj/include/.
+find_path(LAPLACE_PROJ_INCLUDE_DIR
+    NAMES proj.h
+    HINTS "/opt/laplace/proj/include"
+    NO_DEFAULT_PATH
+)
+if(NOT LAPLACE_PROJ_INCLUDE_DIR)
+    message(FATAL_ERROR
+        "laplace_geom needs proj.h (transitively pulled in by liblwgeom.h). "
+        "Expected /opt/laplace/proj/include/proj.h. Run `just build-deps`.")
+endif()
+target_include_directories(${EXT_NAME} PRIVATE ${LAPLACE_PROJ_INCLUDE_DIR})
+
+# liblwgeom static-links a lot of geometry code that transitively
+# references libgeos (lwgeom_geos.o, lwgeom_topo.o, etc.) and libproj
+# (lwspheroid.o → geod_*). We link all three so every undefined
+# symbol resolves at PG load time.
+#
+# Critical: this only works when PG itself runs against the consistent
+# /opt/laplace dep set. If the running PG already loaded SYSTEM
+# postgis-3.so → SYSTEM libgeos 3.10.2, our extension's libgeos
+# resolves to the same pinned 3.10.2 at load (despite our RUNPATH
+# preferring 3.12.2) and PostGIS 3.6.3 symbols like
+# GEOSConcaveHullOfPolygons are missing. The substrate runtime
+# therefore must use the /opt/laplace/pgsql-18 cluster — system PG
+# is not supported once laplace_geom is loaded into the backend.
+find_library(LAPLACE_LIBGEOS_C geos_c
+    HINTS "/opt/laplace/geos/lib"
+    NO_DEFAULT_PATH)
+find_library(LAPLACE_LIBGEOS geos
+    HINTS "/opt/laplace/geos/lib"
+    NO_DEFAULT_PATH)
+find_library(LAPLACE_LIBPROJ proj
+    HINTS "/opt/laplace/proj/lib"
+    NO_DEFAULT_PATH)
+if(NOT LAPLACE_LIBGEOS_C OR NOT LAPLACE_LIBGEOS OR NOT LAPLACE_LIBPROJ)
+    message(FATAL_ERROR
+        "laplace_geom needs libgeos_c.so + libgeos.so (transitive: "
+        "liblwgeom GEOS algorithms) + libproj.so (transitive: liblwgeom "
+        "spheroid math). Expected libgeos*.so in /opt/laplace/geos/lib/ "
+        "and libproj.so in /opt/laplace/proj/lib/. Run `just build-deps`.")
+endif()
+
 target_link_libraries(${EXT_NAME} PRIVATE
     laplace_core
     ${LAPLACE_LIBLWGEOM_STATIC}
+    ${LAPLACE_LIBGEOS_C}
+    ${LAPLACE_LIBGEOS}
+    ${LAPLACE_LIBPROJ}
 )
 target_link_options(${EXT_NAME} PRIVATE
     "-Wl,-rpath,$<TARGET_FILE_DIR:laplace_core>"

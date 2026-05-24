@@ -118,6 +118,13 @@ endif()
 # ctest in build/ work without install. CMAKE_BUILD_WITH_INSTALL_RPATH
 # defaults FALSE, so install rewrites RPATH from build-tree values to these.
 set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
+# /opt/laplace/geos/lib so laplace_geom finds libgeos_c at PG load time.
+# liblwgeom.a is static-linked into laplace_geom; its lwgeom_geos_* code
+# paths reference the GEOS C API at runtime. We don't want to depend on
+# postgis-3.so being loaded first (RTLD_NOW resolves DT_NEEDED before
+# any other extension's deps are visible).
+list(APPEND CMAKE_INSTALL_RPATH "/opt/laplace/geos/lib")
+list(APPEND CMAKE_INSTALL_RPATH "/opt/laplace/proj/lib")
 foreach(_oneapi_var_pair IN ITEMS
         "MKLROOT;/lib"
         "TBBROOT;/lib/intel64/gcc4.8"

@@ -4,15 +4,21 @@
  * hyperbox, indexing both S³ surface entities and 4-ball interior
  * centroids with consistent 1D locality.
  *
- * Real wrappers land Chunk 1 Story 1.5 — wrap hilbert4d_encode /
- * hilbert4d_decode from liblaplace_core. */
+ * Wraps hilbert4d_encode / hilbert4d_decode from liblaplace_core
+ * (Skilling 2004; pure integer bit-twiddling — no FP). */
 
--- CREATE FUNCTION laplace_hilbert_encode(p geometry)
---     RETURNS bytea
---     AS 'MODULE_PATHNAME', 'pg_laplace_hilbert_encode'
---     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
---
--- CREATE FUNCTION laplace_hilbert_decode(h bytea)
---     RETURNS geometry
---     AS 'MODULE_PATHNAME', 'pg_laplace_hilbert_decode'
---     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+CREATE FUNCTION @extschema@.laplace_hilbert_encode(p geometry)
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_hilbert_encode'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+
+COMMENT ON FUNCTION @extschema@.laplace_hilbert_encode(geometry) IS
+'4D Hilbert encoding of a POINT4D into a 16-byte locality-preserving sortable key.';
+
+CREATE FUNCTION @extschema@.laplace_hilbert_decode(h bytea)
+    RETURNS geometry
+    AS 'MODULE_PATHNAME', 'pg_laplace_hilbert_decode'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+
+COMMENT ON FUNCTION @extschema@.laplace_hilbert_decode(bytea) IS
+'Inverse of laplace_hilbert_encode: 16-byte Hilbert key → POINT4D.';

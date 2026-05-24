@@ -32,7 +32,7 @@ endif()
 message(STATUS "Laplace pg_regress: ${LAPLACE_PG_REGRESS}")
 
 set(REGRESS_DB "laplace_regress_geom")
-set(REGRESS_TESTS hash128)
+set(REGRESS_TESTS hash128 st_4d)
 set(REGRESS_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/regress_output")
 file(MAKE_DIRECTORY "${REGRESS_OUTPUT_DIR}")
 
