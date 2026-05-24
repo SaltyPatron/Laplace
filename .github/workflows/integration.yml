@@ -334,6 +334,14 @@ jobs:
           printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|LD_LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
           echo "PATH=$PATH" >> "$GITHUB_ENV"
 
+      - name: Normalize /opt/laplace ownership (recover from stale local-install perms)
+        # Re-runnable chown/chmod sweep — the only sudo surface required for
+        # install-time recovery. Fixes the recurring "Permission denied on
+        # /opt/laplace/include/laplace/core/version.h" class where a previous
+        # install dropped files owned by a non-runner user. Per RULES.md R23
+        # (CI owns setup) and the pain-avoidance memo (stop the bootstrap loop).
+        run: sudo scripts/bootstrap-laplace-runner.sh fix-perms
+
       - name: cmake --install (no sudo — laplace-runner owns /opt/laplace)
         run: cmake --install build
 

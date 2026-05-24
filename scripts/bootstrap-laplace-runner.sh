@@ -143,6 +143,10 @@ Modes:
   bootstrap   Idempotent set-up (default if no mode given)
               - Creates system account, runner, PG roles, peer auth, sudoers
               - Safe to re-run; only adds what's missing
+  fix-perms   Re-normalize /opt/laplace ownership + perms ONLY (no other state
+              changes). Safe to re-run any time before/after a cmake --install
+              that may have landed files as a non-runner user. Idempotent.
+              Fails loudly if normalization didn't fully take.
   status      Print current state (no changes)
   reset       Tear down everything this script created
               - Deregisters + removes runner
@@ -253,17 +257,52 @@ bootstrap_build_environment() {
     # collision when CI installed over ahart-owned files; flipped to
     # laplace-runner ownership per the 2026-05-24 alignment.
     mkdir -p /opt/laplace
-    # chown -R + chmod -R against /opt/laplace can race with a concurrent
-    # CI job's sync-external.sh that's rewriting submodule files at the
-    # same time (TOCTOU: chmod's readdir sees a name that's been moved/
-    # deleted before chmod's stat fires — `chmod: cannot access
-    # '/opt/laplace/external/tree-sitter-grammars/.../X': No such file or
-    # directory`, exit nonzero, script aborts under `set -e`). The chown
-    # + chmod here are best-effort hygiene; per-entry failures are not
-    # load-bearing. Swallow exit code with `|| true`.
-    chown -R "$RUNNER_USER:$RUNNER_GROUP" /opt/laplace 2>/dev/null || true
-    chmod -R 2775 /opt/laplace 2>/dev/null || true
-    green "✓ /opt/laplace owned by $RUNNER_USER:$RUNNER_GROUP (mode 2775 — laplace-runner-owned, group writable, setgid)"
+    normalize_install_prefix
+}
+
+# Re-runnable: normalize /opt/laplace ownership + perms so that subsequent
+# `cmake --install` calls (CI as laplace-runner; dev as ahart via group write)
+# don't hit Permission denied on stale files from a previous install owned by
+# a different user. Idempotent. Verifies after the sweep and fails loudly if
+# anything was left non-conformant — no `|| true` silent masking, since the
+# whole point of this helper is to GUARANTEE the install prefix is writable.
+# TOCTOU against concurrent sync-external.sh is mitigated by retrying the
+# sweep up to 3 times; persistent mismatch fails with a directory listing
+# of the offenders so the operator knows what's wrong.
+normalize_install_prefix() {
+    local attempts=0 max_attempts=3
+    while (( attempts < max_attempts )); do
+        chown -R "$RUNNER_USER:$RUNNER_GROUP" /opt/laplace 2>/dev/null || true
+        chmod -R u+rwX,g+rwX,o+rX /opt/laplace 2>/dev/null || true
+        # Restore setgid + g+w on directories so newly-created files inherit
+        # the laplace-runner group and group-writable bit.
+        find /opt/laplace -type d -exec chmod 2775 {} + 2>/dev/null || true
+
+        # Verify. Anything not owned by laplace-runner OR any directory not
+        # group-writable is an offender that will break a future cmake-install.
+        local bad
+        bad="$(find /opt/laplace \
+                    \( ! -user "$RUNNER_USER" \
+                       -o \( -type d ! -perm -g+w \) \) \
+                    -print 2>/dev/null | head -20 || true)"
+        if [[ -z "$bad" ]]; then
+            green "✓ /opt/laplace normalized: $RUNNER_USER:$RUNNER_GROUP, dirs 2775, files g+rw"
+            return 0
+        fi
+        attempts=$((attempts + 1))
+        if (( attempts < max_attempts )); then
+            yellow "  normalize attempt $attempts saw offenders (likely TOCTOU vs sync-external); retrying"
+            sleep 1
+        fi
+    done
+
+    red "✗ normalize_install_prefix could not normalize /opt/laplace after $max_attempts attempts"
+    red "  Offenders (up to 20):"
+    find /opt/laplace \
+         \( ! -user "$RUNNER_USER" \
+            -o \( -type d ! -perm -g+w \) \) \
+         -printf '    %u:%g %m %p\n' 2>/dev/null | head -20 || true
+    exit 1
 }
 
 bootstrap_migrate_runner_home() {
@@ -1387,6 +1426,12 @@ case "$MODE" in
     bootstrap)
         require_root
         do_bootstrap
+        ;;
+    fix-perms)
+        require_root
+        say "fix-perms: re-normalize /opt/laplace ownership + perms"
+        mkdir -p /opt/laplace
+        normalize_install_prefix
         ;;
     reset)
         require_root
