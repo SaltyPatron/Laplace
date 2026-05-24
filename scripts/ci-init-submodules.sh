@@ -103,21 +103,30 @@ while IFS=$'\t' read -r sm_path sm_url; do
     # via direct `git --git-dir=<entry> fetch`. Missing entries (new
     # submodules added to .gitmodules since the seed) get cloned --bare
     # from upstream, landing in the same shape.
-    if [ -d "$cache_entry/objects" ]; then
+    if [ -d "$cache_entry/objects" ] && [ -f "$cache_entry/HEAD" ]; then
         if git --git-dir="$cache_entry" fetch --quiet --tags \
-            origin '+refs/heads/*:refs/remotes/origin/*' 2>/dev/null; then
+            origin '+refs/heads/*:refs/remotes/origin/*'; then
             cache_fetched=$((cache_fetched + 1))
         else
             cache_failed=$((cache_failed + 1))
-            warn "cache fetch failed: $sm_path"
+            err "cache fetch failed: $sm_path"
         fi
+    elif [ -e "$cache_entry" ]; then
+        # Entry exists but isn't a bare gitdir (no top-level HEAD+objects/).
+        # Most commonly: a legacy non-bare working-tree clone from a
+        # pre-0d104c7 bootstrap. Hard-fail rather than silently colliding
+        # with `git clone --bare`; the migration script preserves objects
+        # in place (no upstream re-download).
+        err "$sm_path: cache entry exists at $cache_entry but is not bare-style"
+        err "  remediate: run scripts/migrate-submodule-cache-to-bare.sh"
+        cache_failed=$((cache_failed + 1))
     else
         mkdir -p "$(dirname "$cache_entry")"
-        if git clone --bare --quiet "$sm_url" "$cache_entry" 2>/dev/null; then
+        if git clone --bare --quiet "$sm_url" "$cache_entry"; then
             cache_cloned=$((cache_cloned + 1))
         else
             cache_failed=$((cache_failed + 1))
-            warn "cache clone failed: $sm_path ($sm_url)"
+            err "cache clone failed: $sm_path ($sm_url)"
         fi
     fi
 
