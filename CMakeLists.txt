@@ -81,18 +81,19 @@ option(LAPLACE_INSTALL_STAGED
     "Install PG extensions to CMAKE_INSTALL_PREFIX/{lib,share}/postgresql/PG_MAJOR (sudo-free) instead of pg_config's absolute system paths"
     OFF)
 
+# Derived from LAPLACE_INSTALL_STAGED — NOT cached. With CACHE PATH the
+# previous configure's value sticks (subsequent set() is a no-op for
+# already-cached entries), so toggling STAGED in a persistent build dir
+# (e.g. CI with clean: false) would still see the stale install paths.
+# These are derived knobs; the user-facing toggle is LAPLACE_INSTALL_STAGED.
 if(LAPLACE_INSTALL_STAGED)
     set(LAPLACE_EXT_LIBDIR
-        "${CMAKE_INSTALL_PREFIX}/lib/postgresql/${LAPLACE_PG_MAJOR}"
-        CACHE PATH "Where PG extension .so files install (staged)")
+        "${CMAKE_INSTALL_PREFIX}/lib/postgresql/${LAPLACE_PG_MAJOR}")
     set(LAPLACE_EXT_SHAREDIR
-        "${CMAKE_INSTALL_PREFIX}/share/postgresql/${LAPLACE_PG_MAJOR}/extension"
-        CACHE PATH "Where PG extension control + SQL files install (staged)")
+        "${CMAKE_INSTALL_PREFIX}/share/postgresql/${LAPLACE_PG_MAJOR}/extension")
 else()
-    set(LAPLACE_EXT_LIBDIR   "${LAPLACE_PG_PKGLIBDIR}"
-        CACHE PATH "Where PG extension .so files install (system)")
-    set(LAPLACE_EXT_SHAREDIR "${LAPLACE_PG_SHAREDIR}/extension"
-        CACHE PATH "Where PG extension control + SQL files install (system)")
+    set(LAPLACE_EXT_LIBDIR   "${LAPLACE_PG_PKGLIBDIR}")
+    set(LAPLACE_EXT_SHAREDIR "${LAPLACE_PG_SHAREDIR}/extension")
 endif()
 
 message(STATUS "Laplace extension install:")
