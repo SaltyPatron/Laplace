@@ -245,14 +245,21 @@ jobs:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
 
-      - name: cmake configure (intel toolchain)
+      - name: cmake configure (intel toolchain; STAGED install for sudo-free /opt/laplace path)
         run: |
+          # LAPLACE_INSTALL_STAGED=ON puts extensions at
+          #   /opt/laplace/lib/postgresql/$PG_MAJOR/<ext>.so      ← matches dynamic_library_path
+          #   /opt/laplace/share/postgresql/$PG_MAJOR/extension/  ← matches extension_control_path
+          # configured by scripts/bootstrap-laplace-runner.sh bootstrap_pg_extension_paths.
+          # Without it, install targets pg_config's --pkglibdir (/usr/lib/postgresql/18/lib/)
+          # which is root-owned → cmake --install fails with EACCES.
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
             -DCMAKE_INSTALL_PREFIX="$LAPLACE_INSTALL_PREFIX" \
             -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX" \
-            -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
+            -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL" \
+            -DLAPLACE_INSTALL_STAGED=ON
 
       - name: cmake build (ninja incremental)
         run: cmake --build build
