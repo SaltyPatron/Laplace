@@ -82,12 +82,15 @@ add_custom_target(${EXT_NAME}_sql ALL DEPENDS ${EXT_BUILT_SQL})
 add_dependencies(${EXT_NAME} ${EXT_NAME}_sql)
 
 install(TARGETS ${EXT_NAME}
-    LIBRARY DESTINATION ${LAPLACE_EXT_LIBDIR}
+    LIBRARY
+        DESTINATION ${LAPLACE_EXT_LIBDIR}
+        PERMISSIONS ${LAPLACE_INSTALL_EXEC_PERMS}
 )
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.control
     ${EXT_BUILT_SQL}
     DESTINATION ${LAPLACE_EXT_SHAREDIR}
+    PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )
 
 # === Tests (pg_regress via CTest — see tests/CMakeLists.txt; landed by B′.9 #196) ===

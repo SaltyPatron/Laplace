@@ -62,6 +62,10 @@ if(BUILD_TESTING)
 endif()
 
 install(TARGETS laplace_core
-    LIBRARY DESTINATION lib
-    PUBLIC_HEADER DESTINATION include/laplace/core
+    LIBRARY
+        DESTINATION lib
+        PERMISSIONS ${LAPLACE_INSTALL_EXEC_PERMS}
+    PUBLIC_HEADER
+        DESTINATION include/laplace/core
+        PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )

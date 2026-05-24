@@ -159,48 +159,104 @@ if(NOT LAPLACE_SQLPP)
 endif()
 message(STATUS "Laplace SQLPP: ${LAPLACE_SQLPP}")
 
-# === Pre-install wipe (ownership-agnostic re-install safety) ===
+# === Install permissions discipline (repo-wide, ownership-agnostic) ===
 #
-# Why this exists: cmake `file(INSTALL ...)` copies content via O_TRUNC then
-# unconditionally calls chmod(). POSIX chmod is owner-only — group-write
-# isn't enough. So when one laplace-runner-group user (e.g. ahart locally)
-# installs and a different group user (laplace-runner in CI) re-installs
-# over the same files, the chmod step fails with EACCES even though the
-# group has rwX on everything.
+# THE INVARIANT: every Laplace install destination — directory and file —
+# is group-writable + setgid'd to laplace-runner. /opt/laplace dirs are 2775
+# with no sticky bit, so unlink() needs only parent-dir-write (which the
+# group has) — file owner is irrelevant. With this invariant established,
+# `cmake --install build` works for any laplace-runner-group user (ahart
+# locally, laplace-runner in CI) without sudo, without `sudo -u laplace-runner`,
+# without NOPASSWD entries, without recovery scripts.
 #
-# The escape hatch: /opt/laplace dirs are mode 2775 with NO sticky bit, so
-# `unlink()` only needs write+execute on the parent dir (not file owner).
-# By pre-wiping our own install destinations here — before any install(TARGETS)
-# or install(FILES) fires in the engine/ and extension/ subdir CMakeLists —
-# we guarantee each cmake --install creates *fresh* files owned by the
-# installer. The post-copy chmod then always succeeds.
+# WHY THE INVARIANT IS NECESSARY:
+#   1. cmake `file(INSTALL DIRECTORY ...)` always calls chmod() on the dest
+#      directory, unconditionally — even when the dir's mode already matches
+#      the desired mode. POSIX chmod is owner-only. Cross-user chmod = EPERM.
+#      → Pre-wipe the dir so the installer creates it fresh + owns it.
+#   2. To pre-wipe a dir requires unlinking its contents, which needs
+#      parent-dir write. If the parent dir is g-w (mode 755), nobody in
+#      the group except the owner can unlink. → All dirs must be g+w.
+#   3. install(DIRECTORY ...) by default copies SOURCE permissions (the repo
+#      dir's mode 755). That re-creates the g-w bad state on every install
+#      unless overridden. → Every install(DIRECTORY) needs DIRECTORY_PERMISSIONS.
+#   4. Implicit dirs cmake creates for install(TARGETS) / install(FILES) follow
+#      CMAKE_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS. → Set it globally.
 #
-# This block runs first in build/cmake_install.cmake because it's declared
-# before add_subdirectory(engine) / add_subdirectory(extension). The wipe
-# enumerates only Laplace-owned destinations under ${CMAKE_INSTALL_PREFIX};
-# it never touches vendor deps (geos/proj/gdal/pgsql-18/tree-sitter), other
-# subdirs of /opt/laplace, or anything outside the prefix.
+# These three perm vars are referenced by every install() call in engine/
+# and extension/ subdir CMakeLists; do NOT inline literal permission lists
+# in those files (drift hazard — one updated, others forgotten).
+set(LAPLACE_INSTALL_DIR_PERMS
+    OWNER_READ OWNER_WRITE OWNER_EXECUTE
+    GROUP_READ GROUP_WRITE GROUP_EXECUTE
+    WORLD_READ WORLD_EXECUTE
+    SETGID
+    CACHE INTERNAL "Mode 2775+setgid for every install-destination directory")
+set(LAPLACE_INSTALL_FILE_PERMS
+    OWNER_READ OWNER_WRITE
+    GROUP_READ GROUP_WRITE
+    WORLD_READ
+    CACHE INTERNAL "Mode 0664 for every installed regular file (headers, .control, .sql)")
+set(LAPLACE_INSTALL_EXEC_PERMS
+    OWNER_READ OWNER_WRITE OWNER_EXECUTE
+    GROUP_READ GROUP_WRITE GROUP_EXECUTE
+    WORLD_READ WORLD_EXECUTE
+    CACHE INTERNAL "Mode 0775 for every installed shared lib / module / executable")
+
+# Sets the mode for dirs cmake creates IMPLICITLY (e.g. parent dirs of
+# install(TARGETS LIBRARY DESTINATION lib) when those don't yet exist).
+# install(DIRECTORY) still needs explicit DIRECTORY_PERMISSIONS — that one
+# defaults to USE_SOURCE_PERMISSIONS, not this var.
+set(CMAKE_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS ${LAPLACE_INSTALL_DIR_PERMS})
+
+# === Pre-install ownership-tolerant cleanup ===
 #
-# Result: `cmake --install build` works for any laplace-runner-group user
-# without sudo, without `sudo -u laplace-runner`, without NOPASSWD entries,
-# and without a recovery script — the exact "no manual hacks, no bandaids"
-# property the bootstrap design intended.
+# Runs FIRST in build/cmake_install.cmake because it's declared before any
+# add_subdirectory call. Two phases:
+#   1. chmod-recursive every Laplace install destination the installer owns
+#      to mode 2775 (dirs) / 0664-0775 (files). chmod is owner-only, so this
+#      is a no-op for files we don't own; that's expected — once the
+#      structural perm invariant holds, the dirs are already 2775 and the
+#      next install's pre-wipe succeeds without needing this phase.
+#   2. rm -rf the Laplace install destinations. With phase-1's chmod plus
+#      the structural invariant, every dir under them is g+w so any group
+#      member can unlink any file regardless of owner.
+#
+# Output is captured (OUTPUT_QUIET + ERROR_QUIET) but the rc is checked. If
+# rm fails it indicates a cross-user g-w dir from a pre-fix install — one-
+# time recovery: `sudo rm -rf /opt/laplace/include/laplace`. Forward state
+# under the structural fix cannot reach that condition.
 install(CODE "
-  message(STATUS \"Laplace pre-install wipe under \${CMAKE_INSTALL_PREFIX} (ownership-agnostic)\")
-  # Engine headers (per ADR 0024 layout: include/laplace/{core,dynamics,synthesis}).
-  file(REMOVE_RECURSE \"\${CMAKE_INSTALL_PREFIX}/include/laplace\")
-  # Engine shared libs + soname links (lib/liblaplace_{core,dynamics,synthesis}.so*).
-  file(GLOB _laplace_stale_engine \"\${CMAKE_INSTALL_PREFIX}/lib/liblaplace_*.so*\")
-  # PG extension shared libs (lib/postgresql/\${LAPLACE_PG_MAJOR}/laplace_*.so).
-  file(GLOB _laplace_stale_pg_lib
-    \"\${CMAKE_INSTALL_PREFIX}/lib/postgresql/${LAPLACE_PG_MAJOR}/laplace_*.so\")
-  # PG extension control + preprocessed SQL files
-  # (share/postgresql/\${LAPLACE_PG_MAJOR}/extension/laplace_*.{control,sql}).
-  file(GLOB _laplace_stale_pg_share
-    \"\${CMAKE_INSTALL_PREFIX}/share/postgresql/${LAPLACE_PG_MAJOR}/extension/laplace_*\")
-  foreach(_f IN LISTS _laplace_stale_engine _laplace_stale_pg_lib _laplace_stale_pg_share)
-    file(REMOVE \"\${_f}\")
-  endforeach()
+  message(STATUS \"Laplace pre-install cleanup under \${CMAKE_INSTALL_PREFIX}\")
+  execute_process(
+    COMMAND sh -c \"
+      set -u
+      paths='\${CMAKE_INSTALL_PREFIX}/include/laplace'
+      for p in \$paths; do
+        [ -e \\\"\$p\\\" ] || continue
+        # Phase 1: chmod what we own (no-op for others); makes own-dirs g+w
+        # so phase 2 can traverse + unlink inside them.
+        find \\\"\$p\\\" -type d -exec chmod 2775 {} + 2>/dev/null || true
+        find \\\"\$p\\\" -type f -exec chmod 0664 {} + 2>/dev/null || true
+      done
+      # Phase 2: nuke from orbit. -f swallows ENOENT; permission failures
+      # surface as non-zero rc which set -e propagates.
+      set -e
+      rm -rf \\\"\${CMAKE_INSTALL_PREFIX}/include/laplace\\\"
+      rm -f \${CMAKE_INSTALL_PREFIX}/lib/liblaplace_*.so* 2>/dev/null || true
+      rm -f \${CMAKE_INSTALL_PREFIX}/lib/postgresql/${LAPLACE_PG_MAJOR}/laplace_*.so 2>/dev/null || true
+      rm -f \${CMAKE_INSTALL_PREFIX}/share/postgresql/${LAPLACE_PG_MAJOR}/extension/laplace_* 2>/dev/null || true
+    \"
+    RESULT_VARIABLE _laplace_wipe_rc
+  )
+  if(NOT _laplace_wipe_rc EQUAL 0)
+    message(FATAL_ERROR
+      \"Laplace pre-install cleanup failed under \${CMAKE_INSTALL_PREFIX}.\"
+      \"\\nLikely a pre-fix cross-user g-w directory from a previous install.\"
+      \"\\nOne-time recovery (run once, never again under the structural fix):\"
+      \"\\n    sudo rm -rf \${CMAKE_INSTALL_PREFIX}/include/laplace\"
+      \"\\nThen re-run cmake --install. Forward installs cannot reach this state.\")
+  endif()
 ")
 
 # === Engine (3 shared libs per ADR 0024) ===
