@@ -21,8 +21,16 @@ public static partial class NativeInterop
     private const string Library = "laplace_core";
 
     /// <summary>Returns the liblaplace_core version string.</summary>
-    [LibraryImport(Library, EntryPoint = "laplace_core_version", StringMarshalling = StringMarshalling.Utf8)]
-    public static partial string LaplaceCoreVersion();
+    // Returns IntPtr (not string) because the C side returns a pointer to a
+    // .rodata string literal. `string` + StringMarshalling.Utf8 would make
+    // the source-generated marshaller call NativeMemory.Free() on the
+    // returned pointer after copy — crashing with `free(): invalid pointer`
+    // on the .rodata pointer. PtrToStringUTF8 copies without freeing.
+    [LibraryImport(Library, EntryPoint = "laplace_core_version")]
+    private static partial IntPtr LaplaceCoreVersionPtr();
+
+    public static string LaplaceCoreVersion() =>
+        Marshal.PtrToStringUTF8(LaplaceCoreVersionPtr()) ?? string.Empty;
 
     // TODO Chunk 1: math4d_distance, math4d_norm, math4d_centroid (operate on double[4])
     // TODO Chunk 1: hash128_blake3, hash128_merkle, hash128_compare

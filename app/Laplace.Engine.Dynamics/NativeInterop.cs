@@ -22,8 +22,15 @@ public static partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_dynamics_init")]
     public static partial int LaplaceDynamicsInit();
 
-    [LibraryImport(Library, EntryPoint = "laplace_dynamics_version", StringMarshalling = StringMarshalling.Utf8)]
-    public static partial string LaplaceDynamicsVersion();
+    // Returns IntPtr (not string): C side returns .rodata string literal,
+    // so `string` + StringMarshalling.Utf8 would have the source generator
+    // call NativeMemory.Free() on the returned pointer post-copy and
+    // crash with `free(): invalid pointer`.
+    [LibraryImport(Library, EntryPoint = "laplace_dynamics_version")]
+    private static partial IntPtr LaplaceDynamicsVersionPtr();
+
+    public static string LaplaceDynamicsVersion() =>
+        Marshal.PtrToStringUTF8(LaplaceDynamicsVersionPtr()) ?? string.Empty;
 
     static NativeInterop()
     {
