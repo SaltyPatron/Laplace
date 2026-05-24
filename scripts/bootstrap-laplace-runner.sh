@@ -105,8 +105,15 @@ RUNNER_VERSION="v2.334.0"
 RUNNER_TARBALL="actions-runner-linux-x64-${RUNNER_VERSION#v}.tar.gz"
 RUNNER_DL_URL="https://github.com/actions/runner/releases/download/$RUNNER_VERSION/$RUNNER_TARBALL"
 SUDOERS_FILE="/etc/sudoers.d/laplace-runner"
-PG_HBA_FILE="$LAPLACE_PG_DATA/pg_hba.conf"
-PG_IDENT_FILE="$LAPLACE_PG_DATA/pg_ident.conf"
+# Auth configs live OUTSIDE the data dir so developers in the laplace-runner
+# group can read + edit them without sudo. PG enforces 0700 on the data dir
+# itself (hard startup check), so files inside it are unreachable to anyone
+# but the postgres process. PG supports hba_file + ident_file pointing
+# anywhere — we put them at /opt/laplace/pgsql-18/conf/ which is 2750
+# (group laplace-runner, group readable + writable via setgid + group bit).
+LAPLACE_PG_CONF_DIR="$LAPLACE_PG_PREFIX/conf"
+PG_HBA_FILE="$LAPLACE_PG_CONF_DIR/pg_hba.conf"
+PG_IDENT_FILE="$LAPLACE_PG_CONF_DIR/pg_ident.conf"
 PG_POSTGRESQL_CONF="$LAPLACE_PG_DATA/postgresql.conf"
 RUNNER_SERVICE="actions.runner.SaltyPatron-Laplace.hart-server.service"
 
@@ -528,6 +535,10 @@ bootstrap_laplace_pg_cluster() {
     fi
 
     install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_PREFIX/log"
+    # 2775 conf dir: setgid + group laplace-runner + group writable.
+    # Developers in the laplace-runner group (ahart) can read + edit
+    # pg_hba.conf / pg_ident.conf without sudo.
+    install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_CONF_DIR"
 
     # initdb if not yet a cluster. Detect by PG_VERSION marker file.
     if [ ! -f "$LAPLACE_PG_DATA/PG_VERSION" ]; then
@@ -573,6 +584,8 @@ bootstrap_laplace_pg_cluster() {
         -e '/^[[:space:]]*#\?[[:space:]]*log_directory[[:space:]]*=/d' \
         -e '/^[[:space:]]*#\?[[:space:]]*log_filename[[:space:]]*=/d' \
         -e '/^[[:space:]]*#\?[[:space:]]*log_file_mode[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#\?[[:space:]]*hba_file[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#\?[[:space:]]*ident_file[[:space:]]*=/d' \
         "$PG_POSTGRESQL_CONF"
     sudo -u "$RUNNER_USER" tee -a "$PG_POSTGRESQL_CONF" >/dev/null <<EOF
 
@@ -596,6 +609,10 @@ logging_collector = on
 log_directory = '$LAPLACE_PG_PREFIX/log'
 log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
 log_file_mode = 0640
+# hba_file + ident_file outside the 0700 data dir so the
+# laplace-runner group can read+edit them without sudo.
+hba_file = '$PG_HBA_FILE'
+ident_file = '$PG_IDENT_FILE'
 $marker_end
 EOF
     green "✓ Wrote substrate cluster config to $PG_POSTGRESQL_CONF"
