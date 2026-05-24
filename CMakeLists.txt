@@ -96,6 +96,27 @@ else()
     set(LAPLACE_EXT_SHAREDIR "${LAPLACE_PG_SHAREDIR}/extension")
 endif()
 
+# === Install-time RPATH ===
+# CMake strips build-tree RPATH at install by default, leaving installed
+# .so files unable to find their non-system deps. The engine's dynamics
+# library links MKL + TBB + Intel compiler runtime (libsvml, libimf,
+# libintlc) — all under /opt/intel/oneapi/{mkl,tbb,compiler}/latest/.
+# laplace_substrate.so links engine libs at /opt/laplace/lib (transitively
+# pulls MKL/TBB through dynamics). Without this, PG can't load the
+# extension at runtime — "libmkl_intel_lp64.so.3: cannot open shared
+# object file" — unless the PG service has LD_LIBRARY_PATH set to include
+# these paths, which it doesn't and shouldn't need to.
+#
+# Build-tree RPATH (CMAKE_BUILD_RPATH) is preserved separately and lets
+# ctest in build/ work without install. CMAKE_BUILD_WITH_INSTALL_RPATH
+# defaults FALSE, so install rewrites RPATH from build-tree values to these.
+set(CMAKE_INSTALL_RPATH
+    "/opt/laplace/lib"
+    "/opt/intel/oneapi/mkl/latest/lib"
+    "/opt/intel/oneapi/tbb/latest/lib/intel64/gcc4.8"
+    "/opt/intel/oneapi/compiler/latest/lib"
+)
+
 message(STATUS "Laplace extension install:")
 message(STATUS "  staged:           ${LAPLACE_INSTALL_STAGED}")
 message(STATUS "  install prefix:   ${CMAKE_INSTALL_PREFIX}")
