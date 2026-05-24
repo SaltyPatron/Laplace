@@ -462,12 +462,20 @@ bootstrap_disable_system_postgresql() {
     local sys_unit="postgresql@${PG_VERSION}-main.service"
     local sys_wrapper="postgresql.service"
 
-    if ! systemctl list-unit-files "$sys_unit" 2>/dev/null | grep -q "$sys_unit"; then
-        green "✓ System $sys_unit not installed — nothing to disable"
+    # systemctl list-unit-files only shows unit TEMPLATES (postgresql@.service),
+    # not INSTANCES (postgresql@18-main.service). Probe the instance via
+    # status — exit 0/3 means "known to systemd"; exit 4 means "not loaded."
+    systemctl status "$sys_unit" --no-pager >/dev/null 2>&1
+    local sys_status=$?
+    if [ $sys_status -eq 4 ]; then
+        green "✓ System $sys_unit not present — nothing to disable"
         return
     fi
 
-    if systemctl is-active --quiet "$sys_unit" 2>/dev/null; then
+    # Stop forcefully. system PG owns /var/run/postgresql/.s.PGSQL.5432 by
+    # default, and the substrate cluster (same port) collides + fails if
+    # the system unit isn't down BEFORE we start ours.
+    if systemctl is-active --quiet "$sys_unit"; then
         systemctl stop "$sys_unit"
         green "✓ Stopped $sys_unit"
     else
@@ -478,14 +486,15 @@ bootstrap_disable_system_postgresql() {
         systemctl disable "$sys_unit" 2>/dev/null || true
         green "✓ Disabled $sys_unit"
     else
-        green "✓ $sys_unit already disabled"
+        green "✓ $sys_unit already disabled (or not enableable)"
     fi
 
     # The postgresql.service wrapper auto-starts all postgresql@*-main units
-    # on boot. Disable it too so no system PG cluster comes back on reboot.
+    # on boot. Mask it so socket activation + boot-time start can't bring
+    # system PG back behind our cluster's back.
     if systemctl is-enabled --quiet "$sys_wrapper" 2>/dev/null; then
-        systemctl disable "$sys_wrapper" 2>/dev/null || true
-        green "✓ Disabled $sys_wrapper wrapper"
+        systemctl mask "$sys_wrapper" >/dev/null 2>&1 || true
+        green "✓ Masked $sys_wrapper wrapper (prevents boot-time auto-start)"
     fi
 }
 
@@ -563,6 +572,7 @@ bootstrap_laplace_pg_cluster() {
         -e '/^[[:space:]]*#\?[[:space:]]*logging_collector[[:space:]]*=/d' \
         -e '/^[[:space:]]*#\?[[:space:]]*log_directory[[:space:]]*=/d' \
         -e '/^[[:space:]]*#\?[[:space:]]*log_filename[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#\?[[:space:]]*log_file_mode[[:space:]]*=/d' \
         "$PG_POSTGRESQL_CONF"
     sudo -u "$RUNNER_USER" tee -a "$PG_POSTGRESQL_CONF" >/dev/null <<EOF
 
@@ -579,10 +589,13 @@ unix_socket_directories = '$LAPLACE_PG_SOCKET_DIR,/tmp'
 extension_control_path = '/opt/laplace/share/postgresql/$PG_VERSION:\$system'
 dynamic_library_path = '\$libdir:/opt/laplace/lib/postgresql/$PG_VERSION'
 # Logging — collect to /opt/laplace/pgsql-18/log/ so logs survive the
-# systemd unit's stdout/stderr handling.
+# systemd unit's stdout/stderr handling. log_file_mode 0640 + dir owned
+# by laplace-runner with group laplace-runner makes logs group-readable;
+# any dev in the laplace-runner group (ahart) tails without sudo.
 logging_collector = on
 log_directory = '$LAPLACE_PG_PREFIX/log'
 log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
+log_file_mode = 0640
 $marker_end
 EOF
     green "✓ Wrote substrate cluster config to $PG_POSTGRESQL_CONF"
