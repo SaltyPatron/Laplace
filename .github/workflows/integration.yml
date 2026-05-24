@@ -257,8 +257,12 @@ jobs:
       - name: cmake build (ninja incremental)
         run: cmake --build build
 
-      - name: ctest (engine C++ unit tests via GoogleTest)
-        run: ctest --test-dir build --output-on-failure
+      - name: ctest (engine C++ unit tests via GoogleTest; excludes pg_regress)
+        run: |
+          # -LE regress excludes pg_regress tests (laplace_geom, laplace_substrate).
+          # Those require the extensions to be installed against a running PG with
+          # the deployed schema — handled by the regress job after db-deploy.
+          ctest --test-dir build --output-on-failure -LE regress
 
       - name: Verify SQL artifacts produced
         run: |
