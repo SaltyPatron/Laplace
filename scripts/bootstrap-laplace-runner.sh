@@ -472,8 +472,9 @@ bootstrap_disable_system_postgresql() {
     # systemctl list-unit-files only shows unit TEMPLATES (postgresql@.service),
     # not INSTANCES (postgresql@18-main.service). Probe the instance via
     # status — exit 0/3 means "known to systemd"; exit 4 means "not loaded."
-    systemctl status "$sys_unit" --no-pager >/dev/null 2>&1
-    local sys_status=$?
+    # `|| sys_status=$?` keeps set -e from killing us when status returns 3.
+    local sys_status=0
+    systemctl status "$sys_unit" --no-pager >/dev/null 2>&1 || sys_status=$?
     if [ $sys_status -eq 4 ]; then
         green "✓ System $sys_unit not present — nothing to disable"
         return
