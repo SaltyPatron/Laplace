@@ -246,8 +246,16 @@ bootstrap_build_environment() {
     # collision when CI installed over ahart-owned files; flipped to
     # laplace-runner ownership per the 2026-05-24 alignment.
     mkdir -p /opt/laplace
-    chown -R "$RUNNER_USER:$RUNNER_GROUP" /opt/laplace
-    chmod -R 2775 /opt/laplace
+    # chown -R + chmod -R against /opt/laplace can race with a concurrent
+    # CI job's sync-external.sh that's rewriting submodule files at the
+    # same time (TOCTOU: chmod's readdir sees a name that's been moved/
+    # deleted before chmod's stat fires — `chmod: cannot access
+    # '/opt/laplace/external/tree-sitter-grammars/.../X': No such file or
+    # directory`, exit nonzero, script aborts under `set -e`). The chown
+    # + chmod here are best-effort hygiene; per-entry failures are not
+    # load-bearing. Swallow exit code with `|| true`.
+    chown -R "$RUNNER_USER:$RUNNER_GROUP" /opt/laplace 2>/dev/null || true
+    chmod -R 2775 /opt/laplace 2>/dev/null || true
     green "✓ /opt/laplace owned by $RUNNER_USER:$RUNNER_GROUP (mode 2775 — laplace-runner-owned, group writable, setgid)"
 }
 
