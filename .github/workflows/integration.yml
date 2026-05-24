@@ -332,10 +332,14 @@ jobs:
 
       - name: Smoke — version functions report 0.1.0
         run: |
-          GEOM=$(psql -tA -d laplace -U laplace_admin -c "SELECT laplace_geom_version();")
-          SUB=$(psql  -tA -d laplace -U laplace_admin -c "SELECT laplace_substrate_version();")
-          echo "laplace_geom_version()      → '$GEOM'"
-          echo "laplace_substrate_version() → '$SUB'"
+          # laplace_geom lives in public (per its .control); laplace_substrate
+          # lives in the laplace schema (per its .control: schema = 'laplace').
+          # Schema-qualify the substrate call so the test doesn't depend on
+          # whatever search_path the connection happens to have.
+          GEOM=$(psql -tA -d laplace -U laplace_admin -c "SELECT public.laplace_geom_version();")
+          SUB=$(psql  -tA -d laplace -U laplace_admin -c "SELECT laplace.laplace_substrate_version();")
+          echo "public.laplace_geom_version()       → '$GEOM'"
+          echo "laplace.laplace_substrate_version() → '$SUB'"
           [ "$GEOM" = "0.1.0" ] && [ "$SUB" = "0.1.0" ] || {
             echo "::error::Version mismatch — expected '0.1.0' from both"; exit 1; }
           echo "::notice::Both substrate extensions report 0.1.0; engine link chain verified"
