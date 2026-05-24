@@ -53,7 +53,12 @@ jobs:
 
       - name: Ensure /opt/laplace install destinations exist (idempotent)
         run: |
-          for d in tree-sitter geos proj gdal pgsql-18; do
+          # Per-dep dirs (system deps land here from `cmake --build build/deps`)
+          # + engine dirs (top-level `cmake --install build` lands liblaplace_*.so,
+          # headers, PG extension files here). Created by laplace-runner →
+          # owned by laplace-runner; setgid + group inherit from /opt/laplace/'s
+          # 2775 → mode 2775 group laplace-runner. No sudo, no chown.
+          for d in tree-sitter geos proj gdal pgsql-18 include lib share bin; do
             if [ ! -d "/opt/laplace/$d" ]; then
               mkdir -p "/opt/laplace/$d"
               echo "  created /opt/laplace/$d ($(stat -c '%U:%G mode=%a' /opt/laplace/$d))"

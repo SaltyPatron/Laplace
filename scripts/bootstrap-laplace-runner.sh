@@ -747,12 +747,18 @@ bootstrap_external_dirs() {
     # it belongs in the pipeline. scripts/sync-external.sh maintains
     # /opt/laplace/external/<sm>/ as non-bare checkouts at .gitmodules-pinned
     # SHAs, idempotent, no sudo required.
-    say "Ensure /opt/laplace/external/ + per-dep install destinations"
+    say "Ensure /opt/laplace/external/ + per-dep install destinations + engine install destinations"
     install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" /opt/laplace/external
+    # System-dep install destinations (per-dep cmake --install or make install lands here)
     for dep in tree-sitter geos proj gdal pgsql-18; do
         install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "/opt/laplace/$dep"
     done
-    green "✓ /opt/laplace/external/ + {tree-sitter,geos,proj,gdal,pgsql-18}/ ready (owned $RUNNER_USER:$RUNNER_GROUP, mode 2775 setgid)"
+    # Engine install destinations (top-level cmake --install build lands here:
+    # liblaplace_*.so, headers, PG extension .so + .control + .sql).
+    for sub in include lib share bin; do
+        install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "/opt/laplace/$sub"
+    done
+    green "✓ /opt/laplace/{external,tree-sitter,geos,proj,gdal,pgsql-18,include,lib,share,bin}/ ready (owned $RUNNER_USER:$RUNNER_GROUP, mode 2775 setgid)"
     echo "  → /opt/laplace/external/ populated by: scripts/sync-external.sh (pipeline step or developer)"
 }
 
