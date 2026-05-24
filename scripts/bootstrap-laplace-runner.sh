@@ -209,22 +209,24 @@ bootstrap_build_environment() {
     # sqlite3 (binary, not just libsqlite3-dev) is required by PROJ's CMake
     # to populate proj.db during configure (PROJ 6+ replaced datumgrid files
 
-    # Custom-build install prefix. Owned by the invoking user ($GH_SUDO_USER —
-    # typically ahart) with laplace-runner as the group, so:
-    #   - The developer (and the AGENT running as them) write /opt/laplace
-    #     directly via owner permissions — no sudo, no group-membership shell
-    #     restart dance.
-    #   - The systemd-run CI runner (running as laplace-runner) writes via
-    #     group permissions.
-    #   - The setgid bit (2775) ensures new files inherit the laplace-runner
-    #     group, preserving CI access regardless of who creates them.
-    # Without this ownership shape `just build-deps` / `just install-laplace-prefix`
-    # fail at the install step because the developer has no /opt/laplace write
-    # access — which was the bug that caused two sessions of sudo-prompt churn
+    # Custom-build install prefix. Owned by laplace-runner (the CI runner's
+    # identity) with laplace-runner as the group, mode 2775 (setgid + g+w):
+    #   - CI's `cmake --install` runs as laplace-runner → it owns the install
+    #     destinations → `chmod` calls in install rules succeed (chmod is
+    #     owner-only; group write isn't enough).
+    #   - Developers (ahart) in the laplace-runner group can READ + WRITE
+    #     files in /opt/laplace via group permissions (setgid keeps new
+    #     files' group as laplace-runner regardless of creator). They
+    #     CANNOT chmod laplace-runner-owned files. For local installs
+    #     (cmake --install), developers must `sudo -u laplace-runner cmake
+    #     --install build` OR use a per-user CMAKE_INSTALL_PREFIX.
+    # The earlier shape (chown to $GH_SUDO_USER) caused the chmod-by-non-owner
+    # collision when CI installed over ahart-owned files; flipped to
+    # laplace-runner ownership per the 2026-05-24 alignment.
     mkdir -p /opt/laplace
-    chown -R "$GH_SUDO_USER:$RUNNER_GROUP" /opt/laplace
+    chown -R "$RUNNER_USER:$RUNNER_GROUP" /opt/laplace
     chmod -R 2775 /opt/laplace
-    green "✓ /opt/laplace owned by $GH_SUDO_USER:$RUNNER_GROUP (mode 2775 — owner + group writable, setgid)"
+    green "✓ /opt/laplace owned by $RUNNER_USER:$RUNNER_GROUP (mode 2775 — laplace-runner-owned, group writable, setgid)"
 }
 
 bootstrap_migrate_runner_home() {
