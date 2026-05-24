@@ -82,6 +82,22 @@ RUNNER_HOME="/var/lib/agents/laplace-runner"
 RUNNER_HOME_LEGACY="/var/lib/laplace-runner"
 RUNNER_DIR="$RUNNER_HOME/actions-runner"
 PG_VERSION="18"
+# Substrate cluster lives at /opt/laplace/pgsql-18/data (the custom-built
+# PG 18.3 produced by `just build-deps`, against /opt/laplace GEOS 3.12.2
+# + PROJ 9.x). System apt-installed postgresql@18-main on /etc/postgresql/18/main
+# is stopped + disabled — the substrate must run against the consistent
+# /opt/laplace dep set so liblwgeom's libgeos/libproj transitive references
+# all resolve to one version per ABI. (Two libproj versions in the backend
+# segfault on shutdown: libproj.so.22's UnitOfMeasure destructor double-frees
+# state libproj.so.25 already freed. Verified via core dump 2026-05-24.)
+LAPLACE_PG_PREFIX="/opt/laplace/pgsql-18"
+LAPLACE_PG_DATA="$LAPLACE_PG_PREFIX/data"
+LAPLACE_PG_PORT="5432"
+LAPLACE_PG_SOCKET_DIR="/var/run/postgresql"
+LAPLACE_PG_SERVICE="laplace-postgresql.service"
+# Legacy paths still referenced for the system-PG teardown step; once
+# bootstrap_disable_system_postgresql runs, the substrate stops touching
+# /etc/postgresql/$PG_VERSION/main entirely.
 PG_CONFIG_DIR="/etc/postgresql/$PG_VERSION/main"
 REPO="SaltyPatron/Laplace"
 REPO_URL="https://github.com/$REPO"
@@ -89,8 +105,9 @@ RUNNER_VERSION="v2.334.0"
 RUNNER_TARBALL="actions-runner-linux-x64-${RUNNER_VERSION#v}.tar.gz"
 RUNNER_DL_URL="https://github.com/actions/runner/releases/download/$RUNNER_VERSION/$RUNNER_TARBALL"
 SUDOERS_FILE="/etc/sudoers.d/laplace-runner"
-PG_HBA_FILE="$PG_CONFIG_DIR/pg_hba.conf"
-PG_IDENT_FILE="$PG_CONFIG_DIR/pg_ident.conf"
+PG_HBA_FILE="$LAPLACE_PG_DATA/pg_hba.conf"
+PG_IDENT_FILE="$LAPLACE_PG_DATA/pg_ident.conf"
+PG_POSTGRESQL_CONF="$LAPLACE_PG_DATA/postgresql.conf"
 RUNNER_SERVICE="actions.runner.SaltyPatron-Laplace.hart-server.service"
 
 GH_SUDO_USER="${SUDO_USER:-ahart}"
@@ -424,6 +441,238 @@ bootstrap_runner_service() {
     (cd "$RUNNER_DIR" && ./svc.sh status | head -3) || true
 }
 
+# ---------------------------------------------------------------------------
+# bootstrap_disable_system_postgresql — stop + disable apt-installed
+# postgresql@$PG_VERSION-main so the substrate doesn't share /var/run/postgresql
+# with another cluster. Required because the substrate cluster (laplace-postgresql)
+# binds /var/run/postgresql/.s.PGSQL.$LAPLACE_PG_PORT, which the system unit
+# already owns by default. Idempotent — silent no-op if the system unit is
+# already disabled or not installed.
+# ---------------------------------------------------------------------------
+bootstrap_disable_system_postgresql() {
+    say "Disable system postgresql@$PG_VERSION-main (substrate uses /opt/laplace cluster only)"
+    local sys_unit="postgresql@${PG_VERSION}-main.service"
+    local sys_wrapper="postgresql.service"
+
+    if ! systemctl list-unit-files "$sys_unit" 2>/dev/null | grep -q "$sys_unit"; then
+        green "✓ System $sys_unit not installed — nothing to disable"
+        return
+    fi
+
+    if systemctl is-active --quiet "$sys_unit" 2>/dev/null; then
+        systemctl stop "$sys_unit"
+        green "✓ Stopped $sys_unit"
+    else
+        green "✓ $sys_unit already stopped"
+    fi
+
+    if systemctl is-enabled --quiet "$sys_unit" 2>/dev/null; then
+        systemctl disable "$sys_unit" 2>/dev/null || true
+        green "✓ Disabled $sys_unit"
+    else
+        green "✓ $sys_unit already disabled"
+    fi
+
+    # The postgresql.service wrapper auto-starts all postgresql@*-main units
+    # on boot. Disable it too so no system PG cluster comes back on reboot.
+    if systemctl is-enabled --quiet "$sys_wrapper" 2>/dev/null; then
+        systemctl disable "$sys_wrapper" 2>/dev/null || true
+        green "✓ Disabled $sys_wrapper wrapper"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# bootstrap_laplace_pg_cluster — provision + start the /opt/laplace/pgsql-18
+# substrate cluster as a systemd unit running as laplace-runner.
+#
+# Lays down (idempotent at every step):
+#   1. initdb $LAPLACE_PG_DATA as laplace-runner if data dir not yet a cluster
+#   2. postgresql.conf: port 5432, listen_addresses=localhost,
+#      unix_socket_directories=/var/run/postgresql,/tmp,
+#      extension_control_path + dynamic_library_path → /opt/laplace,
+#      logging to /opt/laplace/pgsql-18/log/
+#   3. pg_hba.conf: peer auth via laplace_map for local connections
+#   4. pg_ident.conf: laplace_map maps OS users (laplace-runner, ahart) → laplace_admin
+#   5. systemd unit /etc/systemd/system/laplace-postgresql.service
+#   6. /var/run/postgresql ownership so laplace-runner can bind the socket
+#   7. systemctl daemon-reload + enable + start + wait for ready
+#
+# The cluster owns the /var/run/postgresql socket at port 5432 — same shape
+# as the system cluster it replaces, so existing `psql -d laplace -U laplace_admin`
+# invocations (DbUp, Justfile, pg_regress) Just Work without per-command
+# PGHOST/PGPORT overrides.
+# ---------------------------------------------------------------------------
+bootstrap_laplace_pg_cluster() {
+    say "Provision /opt/laplace/pgsql-18 cluster (substrate runtime PG)"
+
+    if [ ! -x "$LAPLACE_PG_PREFIX/bin/postgres" ]; then
+        red "✗ $LAPLACE_PG_PREFIX/bin/postgres missing — run \`just build-deps\` first"
+        return 1
+    fi
+
+    install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_PREFIX/log"
+
+    # initdb if not yet a cluster. Detect by PG_VERSION marker file.
+    if [ ! -f "$LAPLACE_PG_DATA/PG_VERSION" ]; then
+        if [ -d "$LAPLACE_PG_DATA" ] && [ -n "$(ls -A "$LAPLACE_PG_DATA" 2>/dev/null)" ]; then
+            yellow "  $LAPLACE_PG_DATA exists + non-empty but no PG_VERSION — bailing rather than wipe"
+            yellow "  Manual fix: rm -rf $LAPLACE_PG_DATA && sudo $0 bootstrap"
+            return 1
+        fi
+        install -d -m 0700 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_DATA"
+        sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/initdb" \
+            -D "$LAPLACE_PG_DATA" \
+            --auth-host=trust --auth-local=peer \
+            --username=laplace_admin \
+            --no-locale --encoding=UTF8 \
+            >/dev/null
+        green "✓ initdb'd $LAPLACE_PG_DATA"
+    else
+        green "✓ Cluster already initialized at $LAPLACE_PG_DATA"
+    fi
+
+    # Ensure the data dir is fully owned by $RUNNER_USER. PG refuses to
+    # start when the data dir contents have mixed ownership (a prior
+    # interactive `pg_ctl start` as a different user can leave files
+    # behind owned by that user). Chown is idempotent on a correctly-
+    # owned tree.
+    chown -R "$RUNNER_USER:$RUNNER_GROUP" "$LAPLACE_PG_DATA"
+    chmod 0700 "$LAPLACE_PG_DATA"
+    green "✓ $LAPLACE_PG_DATA owned by $RUNNER_USER (mode 0700)"
+
+    # Configure postgresql.conf. Idempotent — strip prior managed block,
+    # then append fresh values. Same begin/end marker pattern as
+    # bootstrap_pg_extension_paths.
+    local marker_begin="# >>> laplace-runner managed: cluster config >>>"
+    local marker_end="# <<< laplace-runner managed: cluster config <<<"
+    sudo -u "$RUNNER_USER" sed -i \
+        -e "/$marker_begin/,/$marker_end/d" \
+        -e '/^[[:space:]]*#\?[[:space:]]*port[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#\?[[:space:]]*listen_addresses[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#\?[[:space:]]*unix_socket_directories[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#\?[[:space:]]*extension_control_path[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#\?[[:space:]]*dynamic_library_path[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#\?[[:space:]]*logging_collector[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#\?[[:space:]]*log_directory[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#\?[[:space:]]*log_filename[[:space:]]*=/d' \
+        "$PG_POSTGRESQL_CONF"
+    sudo -u "$RUNNER_USER" tee -a "$PG_POSTGRESQL_CONF" >/dev/null <<EOF
+
+$marker_begin
+# Substrate cluster — written by scripts/bootstrap-laplace-runner.sh.
+# Owns /var/run/postgresql/.s.PGSQL.$LAPLACE_PG_PORT so existing
+# psql -d laplace -U laplace_admin invocations connect here.
+port = $LAPLACE_PG_PORT
+listen_addresses = 'localhost'
+unix_socket_directories = '$LAPLACE_PG_SOCKET_DIR,/tmp'
+# Extension paths — same shape as the prior system-PG bootstrap.
+# PG 18 appends '/extension' to each custom extension_control_path entry,
+# so this is the SHAREDIR, not the extension subdir.
+extension_control_path = '/opt/laplace/share/postgresql/$PG_VERSION:\$system'
+dynamic_library_path = '\$libdir:/opt/laplace/lib/postgresql/$PG_VERSION'
+# Logging — collect to /opt/laplace/pgsql-18/log/ so logs survive the
+# systemd unit's stdout/stderr handling.
+logging_collector = on
+log_directory = '$LAPLACE_PG_PREFIX/log'
+log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
+$marker_end
+EOF
+    green "✓ Wrote substrate cluster config to $PG_POSTGRESQL_CONF"
+
+    # pg_hba.conf — peer auth via laplace_map for local + unix-socket
+    # connections; trust for IPv4 localhost (so dev tools like psql -h 127.0.0.1
+    # work without password). Idempotent — strip prior managed block, rewrite.
+    local hba_begin="# >>> laplace-runner managed: hba >>>"
+    local hba_end="# <<< laplace-runner managed: hba <<<"
+    sudo -u "$RUNNER_USER" sed -i -e "/$hba_begin/,/$hba_end/d" "$PG_HBA_FILE"
+    sudo -u "$RUNNER_USER" tee -a "$PG_HBA_FILE" >/dev/null <<EOF
+
+$hba_begin
+# laplace_map = OS users (laplace-runner, ahart) → PG role laplace_admin.
+# Mapping defined in pg_ident.conf (bootstrap_pg_auth).
+local   all             laplace_admin                           peer map=laplace_map
+local   all             all                                     peer
+host    all             all             127.0.0.1/32            trust
+host    all             all             ::1/128                 trust
+$hba_end
+EOF
+    green "✓ Wrote substrate cluster pg_hba.conf"
+
+    # pg_ident.conf — laplace_map.
+    if ! sudo -u "$RUNNER_USER" grep -q "^laplace_map" "$PG_IDENT_FILE" 2>/dev/null; then
+        sudo -u "$RUNNER_USER" tee -a "$PG_IDENT_FILE" >/dev/null <<EOF
+
+# laplace_map — OS users authorized to connect as laplace_admin via peer auth.
+laplace_map   laplace-runner   laplace_admin
+laplace_map   ahart            laplace_admin
+laplace_map   postgres         laplace_admin
+EOF
+        green "✓ Wrote laplace_map to $PG_IDENT_FILE"
+    else
+        green "✓ laplace_map already present in $PG_IDENT_FILE"
+    fi
+
+    # /var/run/postgresql needs to be writable by laplace-runner (the systemd
+    # unit's User=). Default ownership is postgres:postgres; setgid + group
+    # add laplace-runner so both can write without sudo gymnastics.
+    install -d -m 2775 -o postgres -g "$RUNNER_GROUP" "$LAPLACE_PG_SOCKET_DIR" 2>/dev/null \
+        || install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_SOCKET_DIR"
+    green "✓ $LAPLACE_PG_SOCKET_DIR writable by $RUNNER_GROUP"
+
+    # systemd unit. Type=notify uses postgres's built-in sd_notify support
+    # for proper start synchronization. ExecStart inherits the kernel's
+    # ld.so.cache (via bootstrap_engine_lib_path) so /opt/laplace/{geos,proj,gdal}/lib
+    # take precedence — no Environment=LD_LIBRARY_PATH needed.
+    local unit_file="/etc/systemd/system/$LAPLACE_PG_SERVICE"
+    cat > "$unit_file" <<EOF
+[Unit]
+Description=Laplace substrate PostgreSQL cluster (/opt/laplace/pgsql-18)
+Documentation=https://github.com/SaltyPatron/Laplace
+After=network.target
+ConditionPathExists=$LAPLACE_PG_DATA/PG_VERSION
+
+[Service]
+Type=notify
+User=$RUNNER_USER
+Group=$RUNNER_GROUP
+ExecStart=$LAPLACE_PG_PREFIX/bin/postgres -D $LAPLACE_PG_DATA
+ExecReload=/bin/kill -HUP \$MAINPID
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutSec=120
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    chmod 644 "$unit_file"
+    systemctl daemon-reload
+    green "✓ Installed $unit_file"
+
+    if systemctl is-active --quiet "$LAPLACE_PG_SERVICE" 2>/dev/null; then
+        systemctl restart "$LAPLACE_PG_SERVICE"
+        green "✓ Restarted $LAPLACE_PG_SERVICE (picks up new conf + ld.so.cache)"
+    else
+        systemctl enable "$LAPLACE_PG_SERVICE" >/dev/null 2>&1 || true
+        systemctl start "$LAPLACE_PG_SERVICE"
+        green "✓ Enabled + started $LAPLACE_PG_SERVICE"
+    fi
+
+    # Wait for the socket to appear (Type=notify makes systemctl start block
+    # until ready, but defensively poll the socket too).
+    local tries=0
+    while [ $tries -lt 30 ]; do
+        if [ -S "$LAPLACE_PG_SOCKET_DIR/.s.PGSQL.$LAPLACE_PG_PORT" ]; then
+            green "✓ Substrate cluster accepting connections on $LAPLACE_PG_SOCKET_DIR/.s.PGSQL.$LAPLACE_PG_PORT"
+            return 0
+        fi
+        sleep 1
+        tries=$((tries + 1))
+    done
+    red "✗ Substrate cluster failed to come up — check journalctl -u $LAPLACE_PG_SERVICE"
+    return 1
+}
+
 bootstrap_pg_roles() {
     say "Ensure PG roles: laplace_admin (SUPERUSER) / laplace_app / laplace_readonly"
     # laplace_admin is a SUPERUSER. Rationale:
@@ -445,7 +694,13 @@ bootstrap_pg_roles() {
     #     Cloud SQL uses cloudsqlsuperuser; both are the same pattern.
     # laplace_app + laplace_readonly remain ordinary roles for future
     # least-privilege application + analyst access.
-    sudo -u postgres psql -v ON_ERROR_STOP=1 <<'PG_EOF'
+    # Connects to our substrate cluster via peer auth as laplace_admin
+    # (initdb created the cluster with laplace_admin as the bootstrap
+    # superuser; pg_hba + pg_ident grant ahart/laplace-runner OS users
+    # peer access to that role).
+    sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
+        -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" \
+        -d postgres -U laplace_admin -v ON_ERROR_STOP=1 <<'PG_EOF'
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'laplace_admin') THEN
@@ -465,13 +720,18 @@ PG_EOF
 }
 
 bootstrap_pg_legacy_cleanup() {
-    say "Clean up legacy 'ahart' PG state"
-    sudo -u postgres dropdb --if-exists ahart 2>/dev/null \
-        && green "✓ Dropped accidental 'ahart' database" \
+    say "Clean up legacy 'ahart' PG state (substrate cluster)"
+    sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/dropdb" \
+        -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" -U laplace_admin \
+        --if-exists ahart 2>/dev/null \
+        && green "✓ Dropped accidental 'ahart' database (if present)" \
         || green "✓ No 'ahart' database to drop"
 
-    sudo -u postgres psql -c "ALTER ROLE ahart NOSUPERUSER NOCREATEDB NOCREATEROLE;" 2>/dev/null \
-        && green "✓ Revoked elevated privileges from 'ahart' PG role" \
+    sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
+        -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" \
+        -d postgres -U laplace_admin \
+        -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='ahart') THEN ALTER ROLE ahart NOSUPERUSER NOCREATEDB NOCREATEROLE; END IF; END \$\$;" >/dev/null 2>&1 \
+        && green "✓ Revoked elevated privileges from 'ahart' PG role (if present)" \
         || green "✓ 'ahart' PG role already unprivileged (or absent)"
 }
 
@@ -491,17 +751,22 @@ bootstrap_pg_database_and_postgis() {
     # and own their objects. No `laplace_priv` SECURITY DEFINER wrapper.
     # No custom `template_laplace`. No `ALTER OWNER` bandaids.
 
-    if sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='laplace'" | grep -q 1; then
+    local pgbin="$LAPLACE_PG_PREFIX/bin"
+    local conn=(-h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" -U laplace_admin)
+
+    if sudo -u "$RUNNER_USER" "$pgbin/psql" "${conn[@]}" -d postgres -tAc \
+        "SELECT 1 FROM pg_database WHERE datname='laplace'" | grep -q 1; then
         green "✓ Database 'laplace' already exists (use 'just db-nuke' for a clean slate)"
     else
-        sudo -u postgres createdb -O laplace_admin laplace
+        sudo -u "$RUNNER_USER" "$pgbin/createdb" "${conn[@]}" -O laplace_admin laplace
         green "✓ Created database 'laplace' owned by laplace_admin"
     fi
 
     # CONNECT grants on the database for app + readonly roles. (Schema
     # USAGE is Layer 1's job since the laplace schema is created by
     # CREATE EXTENSION laplace_substrate, not here.)
-    sudo -u postgres psql -d laplace -v ON_ERROR_STOP=1 <<'PG_EOF' >/dev/null
+    sudo -u "$RUNNER_USER" "$pgbin/psql" "${conn[@]}" -d laplace \
+        -v ON_ERROR_STOP=1 >/dev/null <<'PG_EOF'
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'laplace_app') THEN
@@ -518,46 +783,24 @@ PG_EOF
     # from prior bootstrap iterations that used wrapper/template patterns.
     # All harmless to remove now that laplace_admin is SUPERUSER and the
     # migration uses plain CREATE EXTENSION.
-    sudo -u postgres psql -d postgres -v ON_ERROR_STOP=0 <<'PG_EOF' >/dev/null 2>&1
+    sudo -u "$RUNNER_USER" "$pgbin/psql" "${conn[@]}" -d postgres \
+        -v ON_ERROR_STOP=0 >/dev/null 2>&1 <<'PG_EOF'
 UPDATE pg_database SET datistemplate = false WHERE datname = 'template_laplace';
 DROP DATABASE IF EXISTS template_laplace;
 PG_EOF
-    sudo -u postgres psql -d laplace -v ON_ERROR_STOP=0 <<'PG_EOF' >/dev/null 2>&1
+    sudo -u "$RUNNER_USER" "$pgbin/psql" "${conn[@]}" -d laplace \
+        -v ON_ERROR_STOP=0 >/dev/null 2>&1 <<'PG_EOF'
 DROP SCHEMA IF EXISTS laplace_priv CASCADE;
 PG_EOF
     green "✓ Removed legacy template_laplace / laplace_priv (if present from prior bootstrap iterations)"
 }
 
+# bootstrap_pg_auth — superseded by bootstrap_laplace_pg_cluster, which
+# writes pg_hba.conf + pg_ident.conf + postgresql.conf together as one
+# managed block in $LAPLACE_PG_DATA/. Kept as a no-op shim so any
+# external script invoking it directly doesn't break.
 bootstrap_pg_auth() {
-    say "Configure peer auth (pg_ident.conf + pg_hba.conf)"
-
-    if ! grep -q "^laplace_map" "$PG_IDENT_FILE" 2>/dev/null; then
-        cat >> "$PG_IDENT_FILE" <<EOF
-
-# Laplace runner mapping — maps OS users to PG role laplace_admin
-laplace_map   laplace-runner   laplace_admin
-laplace_map   ahart            laplace_admin
-EOF
-        green "✓ Added laplace_map to $PG_IDENT_FILE"
-    else
-        green "✓ laplace_map already present in $PG_IDENT_FILE"
-    fi
-
-    if ! grep -qE "laplace_admin.*peer.*map=laplace_map" "$PG_HBA_FILE" 2>/dev/null; then
-        awk -v line="local   all             laplace_admin                           peer map=laplace_map" '
-            /^# TYPE/ && !done { print; print line; done=1; next }
-            { print }
-        ' "$PG_HBA_FILE" > "${PG_HBA_FILE}.new"
-        mv "${PG_HBA_FILE}.new" "$PG_HBA_FILE"
-        chown postgres:postgres "$PG_HBA_FILE"
-        chmod 640 "$PG_HBA_FILE"
-        green "✓ Added laplace_admin peer auth to $PG_HBA_FILE"
-    else
-        green "✓ laplace_admin peer auth already present in $PG_HBA_FILE"
-    fi
-
-    systemctl reload postgresql
-    green "✓ Reloaded PostgreSQL"
+    green "✓ pg_hba.conf + pg_ident.conf maintained by bootstrap_laplace_pg_cluster"
 }
 
 # ---------------------------------------------------------------------------
@@ -638,41 +881,12 @@ bootstrap_engine_lib_path() {
 # lines, including stale entries pointing at older Hartonomous-* projects
 # left over on this host. Idempotent — same desired-value writes are no-ops.
 # ---------------------------------------------------------------------------
+# bootstrap_pg_extension_paths — superseded by bootstrap_laplace_pg_cluster,
+# which sets extension_control_path + dynamic_library_path in
+# $PG_POSTGRESQL_CONF as part of the substrate cluster's managed config
+# block. Kept as a no-op shim for callers that invoke it directly.
 bootstrap_pg_extension_paths() {
-    say "Set extension_control_path + dynamic_library_path in postgresql.conf"
-    local conf="$PG_CONFIG_DIR/postgresql.conf"
-    local marker_begin="# >>> laplace-runner managed: extension paths >>>"
-    local marker_end="# <<< laplace-runner managed: extension paths <<<"
-    local desired_ecp="extension_control_path = '/opt/laplace/share/postgresql/$PG_VERSION:\$system'"
-    local desired_dlp="dynamic_library_path = '\$libdir:/opt/laplace/lib/postgresql/$PG_VERSION'"
-
-    # Strip prior managed block (between begin/end markers) AND any loose
-    # GUC lines anywhere else in the file (so an older non-marker write
-    # or a hand-edit can't shadow this one). Idempotent across re-runs.
-    sed -i \
-        -e "/$marker_begin/,/$marker_end/d" \
-        -e '/^[[:space:]]*#\?[[:space:]]*extension_control_path[[:space:]]*=/d' \
-        -e '/^[[:space:]]*#\?[[:space:]]*dynamic_library_path[[:space:]]*=/d' \
-        "$conf"
-
-    cat >> "$conf" <<EOF
-
-$marker_begin
-# Lets the running PG find Laplace extensions installed to /opt/laplace
-# without sudo per ADR 0019 (laplace-runner-owned prefix). PG 18 appends
-# '/extension' to each custom extension_control_path entry, so the value
-# here is the SHAREDIR, not the extension subdir. dynamic_library_path
-# resolves the extensions' .so files (which in turn DT_NEEDED the engine
-# liblaplace_*.so files registered via /etc/ld.so.conf.d/laplace.conf).
-$desired_ecp
-$desired_dlp
-$marker_end
-EOF
-    chown postgres:postgres "$conf"
-    green "✓ Updated $conf (extension_control_path + dynamic_library_path)"
-
-    systemctl reload postgresql
-    green "✓ Reloaded PostgreSQL (new paths active without restart)"
+    green "✓ extension_control_path + dynamic_library_path set by bootstrap_laplace_pg_cluster"
 }
 
 # ---------------------------------------------------------------------------
@@ -853,15 +1067,21 @@ do_status() {
         --jq '.runners[] | "\(.name) \(.status) labels=[\(.labels | map(.name) | join(","))]"' 2>/dev/null \
         || echo "  (gh CLI unavailable or unauthenticated for $GH_SUDO_USER)"
 
-    say "PG roles"
-    sudo -u postgres psql -tAc \
+    say "Substrate cluster systemd service ($LAPLACE_PG_SERVICE)"
+    systemctl status "$LAPLACE_PG_SERVICE" --no-pager 2>/dev/null | head -5 \
+        || echo "  (absent: $LAPLACE_PG_SERVICE)"
+
+    say "PG roles (substrate cluster)"
+    sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
+        -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" \
+        -d postgres -U laplace_admin -tAc \
         "SELECT rolname, rolcanlogin, rolcreatedb, rolcreaterole, rolsuper
          FROM pg_roles WHERE rolname IN ('laplace_admin','laplace_app','laplace_readonly','ahart');" \
-        2>/dev/null || echo "  (postgres not running, or no roles set up)"
+        2>/dev/null || echo "  (substrate cluster not running, or no roles set up)"
 
-    say "Peer auth in pg_hba"
+    say "Peer auth in pg_hba (substrate cluster)"
     grep "laplace_admin" "$PG_HBA_FILE" 2>/dev/null || echo "  (no laplace_admin entry)"
-    say "Peer auth map in pg_ident"
+    say "Peer auth map in pg_ident (substrate cluster)"
     grep "laplace_map" "$PG_IDENT_FILE" 2>/dev/null || echo "  (no laplace_map entry)"
 
     say "Sudoers"
@@ -871,9 +1091,12 @@ do_status() {
         echo "  (absent: $SUDOERS_FILE)"
     fi
 
-    say "Layer-1 state (databases)"
-    sudo -u postgres psql -tAc "SELECT datname FROM pg_database WHERE datname IN ('laplace','ahart');" \
-        2>/dev/null || echo "  (postgres unavailable)"
+    say "Layer-1 state (databases in substrate cluster)"
+    sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
+        -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" \
+        -d postgres -U laplace_admin -tAc \
+        "SELECT datname FROM pg_database WHERE datname IN ('laplace','ahart');" \
+        2>/dev/null || echo "  (substrate cluster unavailable)"
 }
 
 # ---------------------------------------------------------------------------
@@ -930,50 +1153,34 @@ EOF
     rm -f "$SUDOERS_FILE"
     green "✓ $SUDOERS_FILE removed"
 
-    # --- Reverse step 6: pg_hba + pg_ident ---
-    say "Remove peer-auth entries from pg_hba.conf + pg_ident.conf"
-    if [ -f "$PG_HBA_FILE" ]; then
-        sed -i '/laplace_admin.*peer.*map=laplace_map/d' "$PG_HBA_FILE"
-        green "✓ Stripped laplace_admin peer-auth lines from $PG_HBA_FILE"
+    # --- Reverse steps 5+6: tear down substrate cluster (roles, DBs, data dir, unit) ---
+    say "Stop + disable substrate cluster systemd unit ($LAPLACE_PG_SERVICE)"
+    if systemctl list-unit-files "$LAPLACE_PG_SERVICE" 2>/dev/null | grep -q "$LAPLACE_PG_SERVICE"; then
+        systemctl stop "$LAPLACE_PG_SERVICE" 2>/dev/null || true
+        systemctl disable "$LAPLACE_PG_SERVICE" 2>/dev/null || true
+        rm -f "/etc/systemd/system/$LAPLACE_PG_SERVICE"
+        systemctl daemon-reload
+        green "✓ Removed $LAPLACE_PG_SERVICE"
+    else
+        green "✓ $LAPLACE_PG_SERVICE not installed"
     fi
-    if [ -f "$PG_IDENT_FILE" ]; then
-        # Remove the whole Laplace block (comment + two map lines)
-        sed -i '/# Laplace runner mapping/,/^laplace_map.*ahart.*laplace_admin/d' "$PG_IDENT_FILE"
-        # Defensive: also remove any orphaned laplace_map lines
-        sed -i '/^laplace_map/d' "$PG_IDENT_FILE"
-        green "✓ Stripped laplace_map from $PG_IDENT_FILE"
+
+    say "Remove substrate cluster data dir + logs"
+    if [ -d "$LAPLACE_PG_DATA" ]; then
+        rm -rf "$LAPLACE_PG_DATA"
+        green "✓ Removed $LAPLACE_PG_DATA (cluster wiped)"
     fi
-    systemctl reload postgresql 2>/dev/null || true
+    if [ -d "$LAPLACE_PG_PREFIX/log" ]; then
+        rm -rf "$LAPLACE_PG_PREFIX/log"
+        green "✓ Removed $LAPLACE_PG_PREFIX/log"
+    fi
 
-    # --- Reverse step 5: PG roles + any DBs they own ---
-    say "Drop laplace database (if present) + PG roles"
-    sudo -u postgres dropdb --if-exists laplace 2>/dev/null \
-        && green "✓ Dropped 'laplace' database" \
-        || green "✓ No 'laplace' database to drop"
-
-    sudo -u postgres psql -v ON_ERROR_STOP=0 <<'PG_EOF'
--- REASSIGN/DROP OWNED is the safe way to drop a role with grants in any DB.
--- These DOs handle the case where the role doesn't exist.
-DO $$ BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'laplace_readonly') THEN
-        DROP OWNED BY laplace_readonly CASCADE;
-        DROP ROLE laplace_readonly;
-    END IF;
-END $$;
-DO $$ BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'laplace_app') THEN
-        DROP OWNED BY laplace_app CASCADE;
-        DROP ROLE laplace_app;
-    END IF;
-END $$;
-DO $$ BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'laplace_admin') THEN
-        DROP OWNED BY laplace_admin CASCADE;
-        DROP ROLE laplace_admin;
-    END IF;
-END $$;
-PG_EOF
-    green "✓ PG roles dropped (with OWNED objects)"
+    say "Re-enable system postgresql@$PG_VERSION-main (if installed) so the host has a default PG"
+    local sys_unit="postgresql@${PG_VERSION}-main.service"
+    if systemctl list-unit-files "$sys_unit" 2>/dev/null | grep -q "$sys_unit"; then
+        systemctl enable "$sys_unit" 2>/dev/null || true
+        green "✓ Re-enabled $sys_unit (start it manually if you want it back)"
+    fi
 
     # --- Reverse steps 1–4: runner dir + user ---
     say "Remove runner installation"
@@ -1023,20 +1230,40 @@ do_bootstrap() {
     bootstrap_runner_install
     bootstrap_runner_register
     bootstrap_runner_service
+
+    # ld.so.cache must list /opt/laplace/{geos,proj,gdal}/lib BEFORE our
+    # substrate cluster starts — otherwise the postgres binary forks
+    # backends that resolve libgeos/libproj to system 3.10.2 / 8.x first
+    # and segfault at backend exit (verified via core dump 2026-05-24:
+    # libproj.so.22's UnitOfMeasure destructor double-frees state
+    # libproj.so.25 already freed when both ABIs are loaded).
+    bootstrap_engine_lib_path
+    # /opt/laplace/external/ + per-dep install destinations need correct
+    # ownership before the cluster's data dir is initdb'd (which lives
+    # under /opt/laplace/pgsql-18/).
+    bootstrap_external_dirs
+
+    # Stand up the substrate PG cluster: stop system PG, initdb
+    # /opt/laplace/pgsql-18/data as laplace-runner, write managed
+    # conf/hba/ident blocks, install + start systemd unit. Owns
+    # /var/run/postgresql/.s.PGSQL.5432 — same shape as system PG
+    # so all existing psql/DbUp connections keep working.
+    bootstrap_disable_system_postgresql
+    bootstrap_laplace_pg_cluster
+
+    # PG roles + database now operate against the substrate cluster
+    # (peer auth via laplace_map, as laplace-runner → laplace_admin).
     bootstrap_pg_roles
     bootstrap_pg_legacy_cleanup
-    bootstrap_pg_auth
+    bootstrap_pg_auth                # no-op shim — cluster owns its own conf
     bootstrap_pg_database_and_postgis
-    # Cleanup runs BEFORE the engine_lib_path ldconfig so we don't get
-    # the "libhartonomous.so.0 is not a symbolic link" warning on the
-    # first ldconfig of a re-bootstrap (the sweep removes the offending
-    # file; engine_lib_path's subsequent ldconfig then sees a clean tree).
+
+    # Cleanup runs AFTER the substrate cluster is up but BEFORE any
+    # downstream operations might depend on the cleaned state.
     bootstrap_cleanup_stale_installs
-    bootstrap_engine_lib_path
-    bootstrap_pg_extension_paths
+    bootstrap_pg_extension_paths     # no-op shim — cluster owns its own conf
     bootstrap_remove_legacy_sudoers
     bootstrap_runner_gh_auth
-    bootstrap_external_dirs         # /opt/laplace/external/ + per-dep install destinations w/ laplace-runner ownership
 
     say "Verification"
     echo "Runner service:"
