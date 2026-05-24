@@ -39,6 +39,14 @@ project(laplace-deps LANGUAGES NONE)
 include(ExternalProject)
 include(ProcessorCount)
 
+# Single source of truth for external dependency trees. Defaults to the
+# in-repo external/ (this directory) for local dev where workspace
+# submodules are initialized. CI overrides with -DLAPLACE_EXTERNAL=/opt/laplace/external
+# so the build reads from the persistent host-side checkout directly —
+# no workspace .git/modules, no --reference alternates, no per-job re-init.
+set(LAPLACE_EXTERNAL "${CMAKE_CURRENT_SOURCE_DIR}" CACHE PATH
+    "Path to the external/ dependency source tree")
+
 ProcessorCount(_NPROC)
 if(_NPROC EQUAL 0)
     set(_NPROC 1)
@@ -92,7 +100,7 @@ set(_COMMON_CMAKE_ARGS
 # ---------------------------------------------------------------------------
 
 ExternalProject_Add(proj
-    SOURCE_DIR  "${CMAKE_CURRENT_SOURCE_DIR}/proj"
+    SOURCE_DIR  "${LAPLACE_EXTERNAL}/proj"
     BINARY_DIR  "${CMAKE_BINARY_DIR}/proj-build"
     INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/proj"
     CMAKE_ARGS
@@ -109,7 +117,7 @@ ExternalProject_Add(proj
 # ---------------------------------------------------------------------------
 
 ExternalProject_Add(geos
-    SOURCE_DIR  "${CMAKE_CURRENT_SOURCE_DIR}/geos"
+    SOURCE_DIR  "${LAPLACE_EXTERNAL}/geos"
     BINARY_DIR  "${CMAKE_BINARY_DIR}/geos-build"
     INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/geos"
     CMAKE_ARGS
@@ -124,7 +132,7 @@ ExternalProject_Add(geos
 # ---------------------------------------------------------------------------
 
 ExternalProject_Add(gdal
-    SOURCE_DIR  "${CMAKE_CURRENT_SOURCE_DIR}/gdal"
+    SOURCE_DIR  "${LAPLACE_EXTERNAL}/gdal"
     BINARY_DIR  "${CMAKE_BINARY_DIR}/gdal-build"
     INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/gdal"
     DEPENDS     proj
@@ -149,7 +157,7 @@ ExternalProject_Add(gdal
 # ---------------------------------------------------------------------------
 
 ExternalProject_Add(tree-sitter
-    SOURCE_DIR  "${CMAKE_CURRENT_SOURCE_DIR}/tree-sitter"
+    SOURCE_DIR  "${LAPLACE_EXTERNAL}/tree-sitter"
     INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/tree-sitter"
     BUILD_IN_SOURCE 1
     CONFIGURE_COMMAND ""
@@ -178,7 +186,7 @@ ExternalProject_Add(tree-sitter
 # file or directory". Stripping PGXS for these invocations makes the build
 # independent of the developer's shell exports.
 ExternalProject_Add(postgresql
-    SOURCE_DIR  "${CMAKE_CURRENT_SOURCE_DIR}/postgresql"
+    SOURCE_DIR  "${LAPLACE_EXTERNAL}/postgresql"
     BINARY_DIR  "${CMAKE_BINARY_DIR}/postgresql-build"
     INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/pgsql-18"
     CONFIGURE_COMMAND
@@ -222,7 +230,7 @@ set(_POSTGIS_LDFLAGS
 -L${LAPLACE_DEPS_PREFIX}/gdal/lib -Wl,-rpath,${LAPLACE_DEPS_PREFIX}/gdal/lib")
 
 ExternalProject_Add(postgis
-    SOURCE_DIR  "${CMAKE_CURRENT_SOURCE_DIR}/postgis"
+    SOURCE_DIR  "${LAPLACE_EXTERNAL}/postgis"
     INSTALL_DIR "${LAPLACE_DEPS_PREFIX}/pgsql-18"
     DEPENDS     postgresql geos proj gdal
     BUILD_IN_SOURCE 1

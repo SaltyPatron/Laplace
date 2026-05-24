@@ -16,46 +16,27 @@ permissions:
 # override the defaults; defaults match the bootstrap script's layout
 # so the workflow runs out-of-the-box on a freshly-bootstrapped host.
 #
-# Push these via: scripts/configure-github-repo.sh
+# LAPLACE_EXTERNAL is the canonical source for dep checkouts: a single
+# non-bare working tree per submodule, maintained at the .gitmodules-pinned
+# SHA by scripts/sync-external.sh (run on the host, not per-job).
+# CMake reads dep sources directly from here via -DLAPLACE_EXTERNAL=...
+# No workspace external/, no .git/modules, no per-job submodule init.
 env:
-  LAPLACE_SUBMODULE_CACHE: ${{ vars.LAPLACE_SUBMODULE_CACHE || '/opt/laplace/external' }}
-  LAPLACE_INSTALL_PREFIX:  ${{ vars.LAPLACE_INSTALL_PREFIX  || '/opt/laplace' }}
-  LAPLACE_PG_PREFIX:       ${{ vars.LAPLACE_PG_PREFIX       || '/usr/lib/postgresql/18' }}
+  LAPLACE_EXTERNAL:       ${{ vars.LAPLACE_EXTERNAL       || '/opt/laplace/external' }}
+  LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
+  LAPLACE_PG_PREFIX:      ${{ vars.LAPLACE_PG_PREFIX      || '/usr/lib/postgresql/18' }}
 
 jobs:
   capabilities:
     name: Verify self-hosted runner capabilities
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Pre-checkout — wipe stale workspace submodule state (scratch _work)
-        shell: bash
-        run: |
-          # _work is scratch by design (see ci-init-submodules.sh header);
-          # the canonical persistent cache is /opt/laplace/external/
-          # populated by bootstrap_submodule_cache. Without this wipe,
-          # actions/checkout v4's auth helper walks 309+ stale .git/modules/
-          # entries from prior runs (one `git config --get-regexp
-          # ^includeIf.gitdir:` per submodule) before our init step
-          # even starts. Wiping it forces a clean start each run; the
-          # workspace .git/modules + external/ trees are rebuilt by
-          # scripts/ci-init-submodules.sh from the persistent cache in
-          # seconds (objects shared via --reference, no network).
-          for p in \
-            "$GITHUB_WORKSPACE/.git/modules" \
-            "$GITHUB_WORKSPACE/external"; do
-            if [ -e "$p" ]; then
-              rm -rf "$p"
-              echo "  wiped $p"
-            fi
-          done
-          :
-
       - uses: actions/checkout@v4
         with:
-          submodules: false  # scripts/ci-init-submodules.sh handles init via the persistent host-side cache at /opt/laplace/external (populated by bootstrap-laplace-runner.sh)
+          submodules: false  # CMake reads from $LAPLACE_EXTERNAL (=/opt/laplace/external) directly
 
-      - name: Initialize submodules from persistent host-side mirror cache
-        run: scripts/ci-init-submodules.sh
+      - name: Sync /opt/laplace/external/ to .gitmodules pin (no-op when already at pin)
+        run: scripts/sync-external.sh
 
       - name: System info
         run: |
@@ -101,13 +82,13 @@ jobs:
             exit 1
           fi
 
-      - name: Submodule presence (sanity)
+      - name: External tree present at $LAPLACE_EXTERNAL
         run: |
           for dep in eigen spectra blake3 googletest postgresql postgis proj geos gdal tree-sitter; do
-            if [ -d "external/$dep" ] && [ -n "$(ls external/$dep 2>/dev/null)" ]; then
-              echo "✓ external/$dep present"
+            if [ -d "$LAPLACE_EXTERNAL/$dep/.git" ]; then
+              echo "✓ $LAPLACE_EXTERNAL/$dep present (HEAD=$(git -c safe.directory='*' -C "$LAPLACE_EXTERNAL/$dep" rev-parse --short HEAD))"
             else
-              echo "::error::external/$dep submodule missing"
+              echo "::error::$LAPLACE_EXTERNAL/$dep missing or not a git repo — sync-external.sh should have populated it"
               exit 1
             fi
           done
@@ -127,41 +108,16 @@ jobs:
     needs: capabilities
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Pre-checkout — wipe stale workspace submodule state (scratch _work)
-        shell: bash
-        run: |
-          # _work is scratch by design (see ci-init-submodules.sh header);
-          # the canonical persistent cache is /opt/laplace/external/
-          # populated by bootstrap_submodule_cache. Without this wipe,
-          # actions/checkout v4's auth helper walks 309+ stale .git/modules/
-          # entries from prior runs (one `git config --get-regexp
-          # ^includeIf.gitdir:` per submodule) before our init step
-          # even starts. Wiping it forces a clean start each run; the
-          # workspace .git/modules + external/ trees are rebuilt by
-          # scripts/ci-init-submodules.sh from the persistent cache in
-          # seconds (objects shared via --reference, no network).
-          for p in \
-            "$GITHUB_WORKSPACE/.git/modules" \
-            "$GITHUB_WORKSPACE/external"; do
-            if [ -e "$p" ]; then
-              rm -rf "$p"
-              echo "  wiped $p"
-            fi
-          done
-          :
-
       - uses: actions/checkout@v4
         with:
-          submodules: false  # scripts/ci-init-submodules.sh handles init via the persistent host-side cache at /opt/laplace/external (populated by bootstrap-laplace-runner.sh)
-
-      - name: Initialize submodules from persistent host-side mirror cache
-        run: scripts/ci-init-submodules.sh
+          submodules: false
 
       - name: Build system deps (unified ExternalProject pipeline)
         run: |
           # Per ADR 0038 — gcc toolchain for the system dep chain.
+          # Reads dep sources from $LAPLACE_EXTERNAL (=/opt/laplace/external).
           # Stamp-based: re-runs with unchanged submodule SHAs are no-ops.
-          cmake -B build/deps -S external
+          cmake -B build/deps -S external -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
           cmake --build build/deps -j
 
       - name: cmake configure (engine + extensions; intel toolchain)
@@ -170,7 +126,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
             -DCMAKE_INSTALL_PREFIX="$LAPLACE_INSTALL_PREFIX" \
-            -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX"
+            -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX" \
+            -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
 
       - name: cmake build (engine + extensions + SQLPP preprocessing)
         run: |
@@ -205,42 +162,17 @@ jobs:
     needs: build
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Pre-checkout — wipe stale workspace submodule state (scratch _work)
-        shell: bash
-        run: |
-          # _work is scratch by design (see ci-init-submodules.sh header);
-          # the canonical persistent cache is /opt/laplace/external/
-          # populated by bootstrap_submodule_cache. Without this wipe,
-          # actions/checkout v4's auth helper walks 309+ stale .git/modules/
-          # entries from prior runs (one `git config --get-regexp
-          # ^includeIf.gitdir:` per submodule) before our init step
-          # even starts. Wiping it forces a clean start each run; the
-          # workspace .git/modules + external/ trees are rebuilt by
-          # scripts/ci-init-submodules.sh from the persistent cache in
-          # seconds (objects shared via --reference, no network).
-          for p in \
-            "$GITHUB_WORKSPACE/.git/modules" \
-            "$GITHUB_WORKSPACE/external"; do
-            if [ -e "$p" ]; then
-              rm -rf "$p"
-              echo "  wiped $p"
-            fi
-          done
-          :
-
       - uses: actions/checkout@v4
         with:
-          submodules: false  # scripts/ci-init-submodules.sh handles init via the persistent host-side cache at /opt/laplace/external (populated by bootstrap-laplace-runner.sh)
-
-      - name: Initialize submodules from persistent host-side mirror cache
-        run: scripts/ci-init-submodules.sh
+          submodules: false
 
       - name: cmake configure + build (intel toolchain; deps re-used from build job)
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
             -DCMAKE_INSTALL_PREFIX="$LAPLACE_INSTALL_PREFIX" \
-            -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX"
+            -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX" \
+            -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
           cmake --build build
 
       - name: cmake install (no sudo — installs into laplace-runner-owned /opt/laplace)
@@ -302,42 +234,17 @@ jobs:
     needs: db-deploy
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Pre-checkout — wipe stale workspace submodule state (scratch _work)
-        shell: bash
-        run: |
-          # _work is scratch by design (see ci-init-submodules.sh header);
-          # the canonical persistent cache is /opt/laplace/external/
-          # populated by bootstrap_submodule_cache. Without this wipe,
-          # actions/checkout v4's auth helper walks 309+ stale .git/modules/
-          # entries from prior runs (one `git config --get-regexp
-          # ^includeIf.gitdir:` per submodule) before our init step
-          # even starts. Wiping it forces a clean start each run; the
-          # workspace .git/modules + external/ trees are rebuilt by
-          # scripts/ci-init-submodules.sh from the persistent cache in
-          # seconds (objects shared via --reference, no network).
-          for p in \
-            "$GITHUB_WORKSPACE/.git/modules" \
-            "$GITHUB_WORKSPACE/external"; do
-            if [ -e "$p" ]; then
-              rm -rf "$p"
-              echo "  wiped $p"
-            fi
-          done
-          :
-
       - uses: actions/checkout@v4
         with:
-          submodules: false  # scripts/ci-init-submodules.sh handles init via the persistent host-side cache at /opt/laplace/external (populated by bootstrap-laplace-runner.sh)
-
-      - name: Initialize submodules from persistent host-side mirror cache
-        run: scripts/ci-init-submodules.sh
+          submodules: false
 
       - name: cmake configure + build (re-uses /opt/laplace deps + install)
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
             -DCMAKE_INSTALL_PREFIX="$LAPLACE_INSTALL_PREFIX" \
-            -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX"
+            -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX" \
+            -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
           LD_LIBRARY_PATH="$(pwd)/build/engine/core:$(pwd)/build/engine/dynamics:$(pwd)/build/engine/synthesis:${LD_LIBRARY_PATH:-}" \
             cmake --build build
 
