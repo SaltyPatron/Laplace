@@ -45,4 +45,18 @@ public static partial class NativeInterop
     // TODO Chunk 6.6: laplacian_eigenmaps
     // TODO Chunk 6.7: gram_schmidt_orthonormalize
     // TODO Chunk 6.10-6.12: sparsity_per_tensor_topk / sparsity_per_row_topk / sparsity_probe_validate
+    //   (multi-pass lottery-ticket filter — distinct from streaming variants below)
+
+    // === Streaming sparsity (Framework Epic #232 / Stories B.1 + B.2) ===
+    // Single-pass per-tensor + per-row top-k variants used by WeightTensorETL
+    // (ADR 0056). Deterministic per MKL_CBWR mode lock above. TBB-parallel
+    // for large inputs (n >= 65536 per-tensor; row_count >= 4 per-row).
+
+    [LibraryImport(Library, EntryPoint = "sparsity_per_tensor_topk_streaming")]
+    internal static unsafe partial int SparsityPerTensorTopkStreaming(
+        double* values, nuint n, double topkPct, byte* outMask);
+
+    [LibraryImport(Library, EntryPoint = "sparsity_per_row_topk_streaming")]
+    internal static unsafe partial int SparsityPerRowTopkStreaming(
+        double* rows, nuint rowCount, nuint rowSize, nuint k, byte* outMasks);
 }
