@@ -245,6 +245,19 @@ jobs:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
 
+      - name: Source oneAPI env (MKLROOT / TBBROOT / CMPLR_ROOT for build + INSTALL_RPATH)
+        run: |
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          # Persist oneAPI env vars to subsequent steps in this job. GH Actions
+          # runs each step in a fresh shell; without this the intel toolchain
+          # cmake configure errors with "MKLROOT is unset" per CMakeLists.txt
+          # (the env-var-derived CMAKE_INSTALL_RPATH from commit da6810c).
+          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|LD_LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
+          # PATH gets appended (oneAPI bins prepended to existing PATH)
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+
       - name: cmake configure (intel toolchain; STAGED install for sudo-free /opt/laplace path)
         run: |
           # LAPLACE_INSTALL_STAGED=ON puts extensions at
@@ -313,6 +326,14 @@ jobs:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
 
+      - name: Source oneAPI env (needed for any cmake reconfigure on this build)
+        run: |
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|LD_LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+
       - name: cmake --install (no sudo — laplace-runner owns /opt/laplace)
         run: cmake --install build
 
@@ -368,6 +389,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
+
+      - name: Source oneAPI env (LD_LIBRARY_PATH needed for ctest to run engine .so binaries)
+        run: |
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|LD_LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
 
       - name: ctest -L regress
         run: |
