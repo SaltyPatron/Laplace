@@ -30,7 +30,7 @@ fi
 
 # (name, value, description-not-pushed-but-tracked-here)
 declare -A vars=(
-    [LAPLACE_SUBMODULE_CACHE]="/opt/laplace/external"
+    [LAPLACE_EXTERNAL]="/opt/laplace/external"
     [LAPLACE_INSTALL_PREFIX]="/opt/laplace"
     [LAPLACE_PG_PREFIX]="/usr/lib/postgresql/18"
 )

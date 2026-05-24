@@ -203,7 +203,12 @@ ExternalProject_Add(postgresql
         "--with-uuid=e2fs"
         "--with-libxml"
         "--without-readline"
-    BUILD_COMMAND   env -u PGXS make -j ${_NPROC}
+    # submake-generated-headers must run before -j parallel build, otherwise
+    # src/common/hashfn.c races errcodes.h generation and fails with
+    # "utils/errcodes.h: No such file or directory". Single-threaded
+    # generation step is fast; -j catches up immediately after.
+    BUILD_COMMAND   env -u PGXS make submake-generated-headers
+            COMMAND env -u PGXS make -j ${_NPROC}
     INSTALL_COMMAND env -u PGXS make install
 )
 

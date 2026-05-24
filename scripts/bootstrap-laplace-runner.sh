@@ -44,9 +44,9 @@
 #      under /home/ahart/actions-runner)
 #  12. /opt/laplace/external/ — empty cache directory with the right perms
 #      (ahart:laplace-runner setgid 2775). POPULATION is project state, not
-#      machine state — it belongs in the pipeline. scripts/ci-init-submodules.sh
+#      machine state — it belongs in the pipeline. scripts/sync-external.sh
 #      (invoked from integration.yml or run by a developer via group membership)
-#      populates + refreshes the cache idempotently, no sudo required.
+#      maintains it as non-bare checkouts at .gitmodules-pinned SHAs, idempotent.
 #  13. /var/lib/laplace-runner/.config/gh/hosts.yml — gh CLI auth for the
 #      runner user, derived from $SUDO_USER's existing gh config. Lets the
 #      runner do `gh issue edit` / `gh api` per CLAUDE.md cadence without
@@ -735,19 +735,25 @@ bootstrap_remove_legacy_sudoers() {
     fi
 }
 
-bootstrap_submodule_cache_dir() {
-    # Create the empty /opt/laplace/external/ tree with the right perms
-    # so the pipeline (or a developer running scripts/ci-init-submodules.sh
-    # directly via group membership) can populate it without sudo.
+bootstrap_external_dirs() {
+    # Create /opt/laplace/external/ AND the per-dep install destinations
+    # (tree-sitter, geos, proj, gdal, pgsql-18) with laplace-runner ownership
+    # and setgid 2775 — so cmake --install / make install from the runner
+    # (laplace-runner) can chmod the dirs it creates (must be owner) AND
+    # ahart-in-laplace-runner-group can write through setgid+gw, without
+    # collisions.
     #
-    # Cache POPULATION is project state, not machine state — it belongs in
-    # the pipeline, not here. scripts/ci-init-submodules.sh handles the
-    # clone-if-missing + fetch-if-present loop, running as the workflow's
-    # laplace-runner identity or as the developer (ahart) interactively.
-    say "Ensure /opt/laplace/external/ (cache directory only — population happens in pipeline)"
-    install -d -m 2775 -o "$GH_SUDO_USER" -g "$RUNNER_GROUP" /opt/laplace/external
-    green "✓ /opt/laplace/external/ ready (owned $GH_SUDO_USER:$RUNNER_GROUP, mode 2775 setgid)"
-    echo "  → cache populated by: scripts/ci-init-submodules.sh (pipeline step or developer)"
+    # /opt/laplace/external/ POPULATION is project state, not machine state —
+    # it belongs in the pipeline. scripts/sync-external.sh maintains
+    # /opt/laplace/external/<sm>/ as non-bare checkouts at .gitmodules-pinned
+    # SHAs, idempotent, no sudo required.
+    say "Ensure /opt/laplace/external/ + per-dep install destinations"
+    install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" /opt/laplace/external
+    for dep in tree-sitter geos proj gdal pgsql-18; do
+        install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "/opt/laplace/$dep"
+    done
+    green "✓ /opt/laplace/external/ + {tree-sitter,geos,proj,gdal,pgsql-18}/ ready (owned $RUNNER_USER:$RUNNER_GROUP, mode 2775 setgid)"
+    echo "  → /opt/laplace/external/ populated by: scripts/sync-external.sh (pipeline step or developer)"
 }
 
 bootstrap_runner_gh_auth() {
@@ -999,7 +1005,7 @@ do_bootstrap() {
     bootstrap_pg_extension_paths
     bootstrap_remove_legacy_sudoers
     bootstrap_runner_gh_auth
-    bootstrap_submodule_cache_dir   # empty dir w/ correct perms; population is a pipeline concern
+    bootstrap_external_dirs         # /opt/laplace/external/ + per-dep install destinations w/ laplace-runner ownership
 
     say "Verification"
     echo "Runner service:"
