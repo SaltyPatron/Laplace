@@ -627,10 +627,18 @@ EOF
         || install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_SOCKET_DIR"
     green "✓ $LAPLACE_PG_SOCKET_DIR writable by $RUNNER_GROUP"
 
-    # systemd unit. Type=notify uses postgres's built-in sd_notify support
-    # for proper start synchronization. ExecStart inherits the kernel's
-    # ld.so.cache (via bootstrap_engine_lib_path) so /opt/laplace/{geos,proj,gdal}/lib
-    # take precedence — no Environment=LD_LIBRARY_PATH needed.
+    # systemd unit. Type=simple — our custom /opt/laplace/pgsql-18/bin/postgres
+    # was built WITHOUT --with-systemd (it's the from-source build pinned to
+    # the upstream REL_18_0 tag; sd_notify support requires explicit configure
+    # flag which we don't pass). Without --with-systemd, postgres has no
+    # sd_notify READY=1 to send → Type=notify deadlocks → systemd kills it
+    # with status=1.
+    # With logging_collector=on, postgres forks the log collector child but
+    # doesn't itself daemonize — the main process stays as the postmaster
+    # listening on the unix socket. Type=simple correctly tracks that.
+    # ExecStart inherits the kernel's ld.so.cache (via bootstrap_engine_lib_path)
+    # so /opt/laplace/{geos,proj,gdal}/lib take precedence — no
+    # Environment=LD_LIBRARY_PATH needed.
     local unit_file="/etc/systemd/system/$LAPLACE_PG_SERVICE"
     cat > "$unit_file" <<EOF
 [Unit]
@@ -640,7 +648,7 @@ After=network.target
 ConditionPathExists=$LAPLACE_PG_DATA/PG_VERSION
 
 [Service]
-Type=notify
+Type=simple
 User=$RUNNER_USER
 Group=$RUNNER_GROUP
 ExecStart=$LAPLACE_PG_PREFIX/bin/postgres -D $LAPLACE_PG_DATA
@@ -649,6 +657,10 @@ KillMode=mixed
 KillSignal=SIGINT
 TimeoutSec=120
 Restart=on-failure
+# Group-readable logs so developers can tail them without sudo (postgres
+# forks the log collector before this UMask takes effect for already-
+# created log files; the bootstrap also chmods the log dir g+r).
+UMask=0027
 
 [Install]
 WantedBy=multi-user.target
