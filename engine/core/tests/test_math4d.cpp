@@ -150,3 +150,165 @@ TEST(LaplaceCoreMath4d, CentroidDeterministicAcrossRuns) {
     math4d_centroid(points, 4, b);
     EXPECT_EQ(0, std::memcmp(a, b, sizeof(a)));
 }
+
+/* === math4d_frechet ====================================================== */
+
+TEST(LaplaceCoreMath4d, FrechetEmptyTrajectoryReturnsNaN) {
+    const double p[4] = {0, 0, 0, 0};
+    EXPECT_TRUE(std::isnan(math4d_frechet(p, 1, nullptr, 0)));
+    EXPECT_TRUE(std::isnan(math4d_frechet(nullptr, 0, p, 1)));
+    EXPECT_TRUE(std::isnan(math4d_frechet(nullptr, 0, nullptr, 0)));
+}
+
+TEST(LaplaceCoreMath4d, FrechetIdenticalSinglePointIsZero) {
+    const double p[4] = {1.0, 2.0, 3.0, 4.0};
+    EXPECT_DOUBLE_EQ(math4d_frechet(p, 1, p, 1), 0.0);
+}
+
+TEST(LaplaceCoreMath4d, FrechetSinglePointEqualsEuclidean) {
+    const double p[4] = {0.0, 0.0, 0.0, 0.0};
+    const double q[4] = {1.0, 1.0, 1.0, 1.0};
+    EXPECT_DOUBLE_EQ(math4d_frechet(p, 1, q, 1), 2.0);  /* sqrt(4) */
+}
+
+TEST(LaplaceCoreMath4d, FrechetIdenticalTrajectoriesAreZero) {
+    /* Same 3-point trajectory walked at the same speed → leash length 0. */
+    const double traj[12] = {
+        0.0, 0.0, 0.0, 0.0,
+        1.0, 0.0, 0.0, 0.0,
+        2.0, 0.0, 0.0, 0.0,
+    };
+    EXPECT_DOUBLE_EQ(math4d_frechet(traj, 3, traj, 3), 0.0);
+}
+
+TEST(LaplaceCoreMath4d, FrechetParallelTrajectoriesEqualOffset) {
+    /* Two parallel straight trajectories offset by (0,1,0,0).
+     * Each P[i] aligns with Q[i] at distance 1; min leash = 1. */
+    const double p[12] = {
+        0.0, 0.0, 0.0, 0.0,
+        1.0, 0.0, 0.0, 0.0,
+        2.0, 0.0, 0.0, 0.0,
+    };
+    const double q[12] = {
+        0.0, 1.0, 0.0, 0.0,
+        1.0, 1.0, 0.0, 0.0,
+        2.0, 1.0, 0.0, 0.0,
+    };
+    EXPECT_DOUBLE_EQ(math4d_frechet(p, 3, q, 3), 1.0);
+}
+
+TEST(LaplaceCoreMath4d, FrechetCoarseSamplingPaysGapCost) {
+    /* Same geometric line, but P samples only the endpoints while Q
+     * samples 5 points along it. DISCRETE Fréchet (unlike continuous)
+     * pays the cost of mismatched sampling: at the optimal coupling
+     * the middle Q[2] = (2,0,0,0) must pair with either P[0] or P[1],
+     * each at distance 2.0. Hand-derived: ca[4,1] = 2.0. */
+    const double p[8] = {
+        0.0, 0.0, 0.0, 0.0,
+        4.0, 0.0, 0.0, 0.0,
+    };
+    const double q[20] = {
+        0.0, 0.0, 0.0, 0.0,
+        1.0, 0.0, 0.0, 0.0,
+        2.0, 0.0, 0.0, 0.0,
+        3.0, 0.0, 0.0, 0.0,
+        4.0, 0.0, 0.0, 0.0,
+    };
+    EXPECT_DOUBLE_EQ(math4d_frechet(p, 2, q, 5), 2.0);
+}
+
+TEST(LaplaceCoreMath4d, FrechetSymmetric) {
+    /* Frechet(P,Q) = Frechet(Q,P). */
+    const double p[8] = {
+        0.0, 0.0, 0.0, 0.0,
+        1.0, 1.0, 0.0, 0.0,
+    };
+    const double q[12] = {
+        0.0, 0.5, 0.0, 0.0,
+        0.5, 0.5, 0.0, 0.0,
+        1.0, 0.5, 0.0, 0.0,
+    };
+    EXPECT_DOUBLE_EQ(math4d_frechet(p, 2, q, 3),
+                     math4d_frechet(q, 3, p, 2));
+}
+
+TEST(LaplaceCoreMath4d, FrechetDeterministicAcrossRuns) {
+    const double p[12] = {0.1, 0.2, 0.3, 0.4,
+                          -0.5, 0.6, -0.7, 0.8,
+                          0.9, -0.1, 0.2, -0.3};
+    const double q[16] = {0.0, 0.0, 0.0, 0.0,
+                          0.3, 0.3, 0.3, 0.3,
+                          0.6, 0.6, 0.6, 0.6,
+                          0.9, 0.9, 0.9, 0.9};
+    const double a = math4d_frechet(p, 3, q, 4);
+    const double b = math4d_frechet(p, 3, q, 4);
+    EXPECT_DOUBLE_EQ(a, b);
+}
+
+/* === math4d_hausdorff ==================================================== */
+
+TEST(LaplaceCoreMath4d, HausdorffEmptySetReturnsNaN) {
+    const double p[4] = {0, 0, 0, 0};
+    EXPECT_TRUE(std::isnan(math4d_hausdorff(p, 1, nullptr, 0)));
+    EXPECT_TRUE(std::isnan(math4d_hausdorff(nullptr, 0, p, 1)));
+    EXPECT_TRUE(std::isnan(math4d_hausdorff(nullptr, 0, nullptr, 0)));
+}
+
+TEST(LaplaceCoreMath4d, HausdorffIdenticalSetsAreZero) {
+    const double pts[12] = {
+        0.0, 0.0, 0.0, 0.0,
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+    };
+    EXPECT_DOUBLE_EQ(math4d_hausdorff(pts, 3, pts, 3), 0.0);
+}
+
+TEST(LaplaceCoreMath4d, HausdorffSinglePointEqualsEuclidean) {
+    const double p[4] = {0.0, 0.0, 0.0, 0.0};
+    const double q[4] = {3.0, 0.0, 0.0, 0.0};
+    EXPECT_DOUBLE_EQ(math4d_hausdorff(p, 1, q, 1), 3.0);
+}
+
+TEST(LaplaceCoreMath4d, HausdorffSymmetric) {
+    /* By construction symmetric: max(directed(A,B), directed(B,A)). */
+    const double a[8] = {
+        0.0, 0.0, 0.0, 0.0,
+        1.0, 0.0, 0.0, 0.0,
+    };
+    const double b[12] = {
+        0.5, 0.0, 0.0, 0.0,
+        1.0, 0.5, 0.0, 0.0,
+        2.0, 0.0, 0.0, 0.0,
+    };
+    EXPECT_DOUBLE_EQ(math4d_hausdorff(a, 2, b, 3),
+                     math4d_hausdorff(b, 3, a, 2));
+}
+
+TEST(LaplaceCoreMath4d, HausdorffSupersetAndSubset) {
+    /* B is a superset of A. directed(A,B) = 0 (every a∈A is in B exactly).
+     * directed(B,A) = max distance from any b∈B to nearest A — = 1.0 here.
+     * Symmetric Hausdorff = max(0, 1.0) = 1.0. */
+    const double a[8] = {
+        0.0, 0.0, 0.0, 0.0,
+        2.0, 0.0, 0.0, 0.0,
+    };
+    const double b[12] = {
+        0.0, 0.0, 0.0, 0.0,
+        1.0, 0.0, 0.0, 0.0,
+        2.0, 0.0, 0.0, 0.0,
+    };
+    EXPECT_DOUBLE_EQ(math4d_hausdorff(a, 2, b, 3), 1.0);
+}
+
+TEST(LaplaceCoreMath4d, HausdorffDeterministicAcrossRuns) {
+    const double p[16] = {0.1, 0.2, 0.3, 0.4,
+                          -0.5, 0.6, -0.7, 0.8,
+                          0.9, -0.1, 0.2, -0.3,
+                          -0.4, 0.5, -0.6, 0.7};
+    const double q[12] = {0.0, 0.0, 0.0, 0.0,
+                          0.5, 0.5, 0.5, 0.5,
+                          -0.5, -0.5, -0.5, -0.5};
+    const double a = math4d_hausdorff(p, 4, q, 3);
+    const double b = math4d_hausdorff(p, 4, q, 3);
+    EXPECT_DOUBLE_EQ(a, b);
+}

@@ -270,6 +270,21 @@ ExternalProject_Add(postgis
         "--with-projdir=${LAPLACE_DEPS_PREFIX}/proj"
     BUILD_COMMAND   env -u PGXS make -j ${_NPROC}
     INSTALL_COMMAND env -u PGXS make install
+    # PostGIS upstream's make install does NOT install liblwgeom standalone —
+    # only postgis-3.so (with lwgeom statically baked in). The laplace_geom
+    # extension needs the lwgeom API at compile time to deserialize PostGIS
+    # `geometry` Datums into POINT4D coords for the ST_*_4d engine kernels.
+    # postgis-3.so itself hides those symbols (-fvisibility=hidden — only 9
+    # lwgeom_* symbols exported), so we statically link the lwgeom artifacts
+    # PostGIS builds anyway. Install them into the PG prefix's include/lib
+    # next to the PG server headers so find_path/find_library locate them
+    # alongside `pg_config --includedir-server` lookups.
+    COMMAND ${CMAKE_COMMAND} -E copy
+            "<SOURCE_DIR>/liblwgeom/liblwgeom.h"
+            "${LAPLACE_DEPS_PREFIX}/pgsql-18/include/liblwgeom.h"
+    COMMAND ${CMAKE_COMMAND} -E copy
+            "<SOURCE_DIR>/liblwgeom/.libs/liblwgeom.a"
+            "${LAPLACE_DEPS_PREFIX}/pgsql-18/lib/liblwgeom.a"
 )
 
 # ---------------------------------------------------------------------------

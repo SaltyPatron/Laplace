@@ -25,11 +25,57 @@ target_include_directories(${EXT_NAME} PRIVATE
     ${LAPLACE_PG_INCLUDEDIR_SERVER}
 )
 
+# === liblwgeom for ST_*_4d geometry deserialization ===
+# postgis-3.so hides its internal lwgeom API (-fvisibility=hidden — only
+# 9 lwgeom_* symbols exported), and stock apt PostGIS doesn't ship dev
+# headers. We statically link against the liblwgeom the PostGIS submodule
+# build produced — installed at ${LAPLACE_DEPS_LWGEOM_PREFIX}/{include,lib}/
+# by external/CMakeLists.txt's postgis ExternalProject step. Static link
+# keeps our wrappers' lwgeom independent of whatever postgis-3.so is
+# loaded at runtime (system PG or custom); we only use lwgeom for raw
+# gserialized → POINT4D extraction, no cross-function state.
+#
+# Lookup is independent of LAPLACE_PG_PREFIX (which selects the RUNTIME PG
+# the extension will be loaded into — stock or custom). liblwgeom always
+# comes from the PostGIS submodule build at /opt/laplace/pgsql-18/, since
+# that's where `just build-deps` produces it regardless of which PG the
+# substrate is targeting at runtime.
+#
+# Prerequisites: `just build-deps` must have run. The check below fails
+# the configure with a clear pointer if it hasn't.
+set(LAPLACE_DEPS_LWGEOM_PREFIX "/opt/laplace/pgsql-18"
+    CACHE PATH "Prefix where liblwgeom.{h,a} are installed by external/CMakeLists.txt's postgis step")
+find_path(LAPLACE_LIBLWGEOM_INCLUDE_DIR
+    NAMES liblwgeom.h
+    HINTS "${LAPLACE_DEPS_LWGEOM_PREFIX}/include"
+    NO_DEFAULT_PATH
+)
+find_library(LAPLACE_LIBLWGEOM_STATIC
+    NAMES liblwgeom.a
+    HINTS "${LAPLACE_DEPS_LWGEOM_PREFIX}/lib"
+    NO_DEFAULT_PATH
+)
+if(NOT LAPLACE_LIBLWGEOM_INCLUDE_DIR OR NOT LAPLACE_LIBLWGEOM_STATIC)
+    message(FATAL_ERROR
+        "laplace_geom requires liblwgeom from the PostGIS submodule build. "
+        "Expected: ${LAPLACE_DEPS_LWGEOM_PREFIX}/include/liblwgeom.h + "
+        "${LAPLACE_DEPS_LWGEOM_PREFIX}/lib/liblwgeom.a. "
+        "Run `just build-deps` first (it produces both as part of the "
+        "PostGIS ExternalProject install step in external/CMakeLists.txt). "
+        "Override the lookup prefix via -DLAPLACE_DEPS_LWGEOM_PREFIX=<path>.")
+endif()
+message(STATUS "laplace_geom: liblwgeom.h = ${LAPLACE_LIBLWGEOM_INCLUDE_DIR}/liblwgeom.h")
+message(STATUS "laplace_geom: liblwgeom.a = ${LAPLACE_LIBLWGEOM_STATIC}")
+target_include_directories(${EXT_NAME} PRIVATE ${LAPLACE_LIBLWGEOM_INCLUDE_DIR})
+
 # Link against laplace_core engine .so (the extension calls C ABI
-# functions from liblaplace_core for hash/coord/hilbert math). rpath
-# points at the engine's install location so the extension can find
-# the engine .so at PG load time.
-target_link_libraries(${EXT_NAME} PRIVATE laplace_core)
+# functions from liblaplace_core for hash/coord/hilbert math) + liblwgeom
+# static for geometry deserialization. rpath points at the engine's
+# install location so the extension can find the engine .so at PG load.
+target_link_libraries(${EXT_NAME} PRIVATE
+    laplace_core
+    ${LAPLACE_LIBLWGEOM_STATIC}
+)
 target_link_options(${EXT_NAME} PRIVATE
     "-Wl,-rpath,$<TARGET_FILE_DIR:laplace_core>"
 )
