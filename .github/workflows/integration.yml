@@ -35,6 +35,20 @@ jobs:
         with:
           submodules: false  # CMake reads from $LAPLACE_EXTERNAL (=/opt/laplace/external) directly
 
+      - name: Ensure /opt/laplace install destinations exist (idempotent)
+        run: |
+          # Created by laplace-runner (this job's user) → owned by laplace-runner.
+          # Setgid + group inherit from /opt/laplace/'s 2775 → mode 2775, group laplace-runner.
+          # Per RULES.md R23: CI owns idempotent setup; no sudo, no manual chown.
+          for d in tree-sitter geos proj gdal pgsql-18; do
+            if [ ! -d "/opt/laplace/$d" ]; then
+              mkdir -p "/opt/laplace/$d"
+              echo "  created /opt/laplace/$d ($(stat -c '%U:%G mode=%a' /opt/laplace/$d))"
+            else
+              echo "  exists  /opt/laplace/$d ($(stat -c '%U:%G mode=%a' /opt/laplace/$d))"
+            fi
+          done
+
       - name: Sync /opt/laplace/external/ to .gitmodules pin (no-op when already at pin)
         run: scripts/sync-external.sh
 

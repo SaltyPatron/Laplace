@@ -204,10 +204,17 @@ ExternalProject_Add(postgresql
         "--with-libxml"
         "--without-readline"
     # submake-generated-headers must run before -j parallel build, otherwise
-    # src/common/hashfn.c races errcodes.h generation and fails with
-    # "utils/errcodes.h: No such file or directory". Single-threaded
-    # generation step is fast; -j catches up immediately after.
-    BUILD_COMMAND   env -u PGXS make submake-generated-headers
+    # src/common/hashfn.c races errcodes.h generation. The target has a
+    # MAKELEVEL=0 guard in src/Makefile.global.in:
+    #   submake-generated-headers:
+    #       ifeq ($(MAKELEVEL),0)
+    #           $(MAKE) -C $(top_builddir)/src/backend generated-headers
+    #       endif
+    # When ExternalProject invokes our BUILD_COMMAND, this make is a sub-make
+    # of CMake's outer make → MAKELEVEL > 0 → the guard makes the target a
+    # silent no-op → errcodes.h never gets generated → the next -j make fails
+    # immediately on src/common/hashfn.c. Force MAKELEVEL=0 to bypass.
+    BUILD_COMMAND   env -u PGXS MAKELEVEL=0 make submake-generated-headers
             COMMAND env -u PGXS make -j ${_NPROC}
     INSTALL_COMMAND env -u PGXS make install
 )
