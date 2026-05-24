@@ -27,12 +27,6 @@ bootstrap-status:
 bootstrap-reset:
     sudo scripts/bootstrap-laplace-runner.sh reset
 
-# Re-normalize /opt/laplace ownership + perms after a stray install dropped
-# files as a non-runner user. Idempotent. Run this if `cmake --install`
-# (or `just install`) hits Permission denied on /opt/laplace/...
-fix-perms:
-    sudo scripts/bootstrap-laplace-runner.sh fix-perms
-
 # === One-shot host setup (Layer 0 + Layer 1 combined) ===
 # Calls scripts/setup-host.sh which orchestrates bootstrap-laplace-runner.sh
 # (Layer 0) and dotnet run --project Laplace.Migrations -- up (Layer 1) in

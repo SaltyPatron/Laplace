@@ -159,6 +159,50 @@ if(NOT LAPLACE_SQLPP)
 endif()
 message(STATUS "Laplace SQLPP: ${LAPLACE_SQLPP}")
 
+# === Pre-install wipe (ownership-agnostic re-install safety) ===
+#
+# Why this exists: cmake `file(INSTALL ...)` copies content via O_TRUNC then
+# unconditionally calls chmod(). POSIX chmod is owner-only — group-write
+# isn't enough. So when one laplace-runner-group user (e.g. ahart locally)
+# installs and a different group user (laplace-runner in CI) re-installs
+# over the same files, the chmod step fails with EACCES even though the
+# group has rwX on everything.
+#
+# The escape hatch: /opt/laplace dirs are mode 2775 with NO sticky bit, so
+# `unlink()` only needs write+execute on the parent dir (not file owner).
+# By pre-wiping our own install destinations here — before any install(TARGETS)
+# or install(FILES) fires in the engine/ and extension/ subdir CMakeLists —
+# we guarantee each cmake --install creates *fresh* files owned by the
+# installer. The post-copy chmod then always succeeds.
+#
+# This block runs first in build/cmake_install.cmake because it's declared
+# before add_subdirectory(engine) / add_subdirectory(extension). The wipe
+# enumerates only Laplace-owned destinations under ${CMAKE_INSTALL_PREFIX};
+# it never touches vendor deps (geos/proj/gdal/pgsql-18/tree-sitter), other
+# subdirs of /opt/laplace, or anything outside the prefix.
+#
+# Result: `cmake --install build` works for any laplace-runner-group user
+# without sudo, without `sudo -u laplace-runner`, without NOPASSWD entries,
+# and without a recovery script — the exact "no manual hacks, no bandaids"
+# property the bootstrap design intended.
+install(CODE "
+  message(STATUS \"Laplace pre-install wipe under \${CMAKE_INSTALL_PREFIX} (ownership-agnostic)\")
+  # Engine headers (per ADR 0024 layout: include/laplace/{core,dynamics,synthesis}).
+  file(REMOVE_RECURSE \"\${CMAKE_INSTALL_PREFIX}/include/laplace\")
+  # Engine shared libs + soname links (lib/liblaplace_{core,dynamics,synthesis}.so*).
+  file(GLOB _laplace_stale_engine \"\${CMAKE_INSTALL_PREFIX}/lib/liblaplace_*.so*\")
+  # PG extension shared libs (lib/postgresql/\${LAPLACE_PG_MAJOR}/laplace_*.so).
+  file(GLOB _laplace_stale_pg_lib
+    \"\${CMAKE_INSTALL_PREFIX}/lib/postgresql/${LAPLACE_PG_MAJOR}/laplace_*.so\")
+  # PG extension control + preprocessed SQL files
+  # (share/postgresql/\${LAPLACE_PG_MAJOR}/extension/laplace_*.{control,sql}).
+  file(GLOB _laplace_stale_pg_share
+    \"\${CMAKE_INSTALL_PREFIX}/share/postgresql/${LAPLACE_PG_MAJOR}/extension/laplace_*\")
+  foreach(_f IN LISTS _laplace_stale_engine _laplace_stale_pg_lib _laplace_stale_pg_share)
+    file(REMOVE \"\${_f}\")
+  endforeach()
+")
+
 # === Engine (3 shared libs per ADR 0024) ===
 add_subdirectory(engine)
 
