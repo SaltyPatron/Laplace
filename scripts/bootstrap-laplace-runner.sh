@@ -600,24 +600,26 @@ $marker_end
 EOF
     green "✓ Wrote substrate cluster config to $PG_POSTGRESQL_CONF"
 
-    # pg_hba.conf — peer auth via laplace_map for local + unix-socket
-    # connections; trust for IPv4 localhost (so dev tools like psql -h 127.0.0.1
-    # work without password). Idempotent — strip prior managed block, rewrite.
-    local hba_begin="# >>> laplace-runner managed: hba >>>"
-    local hba_end="# <<< laplace-runner managed: hba <<<"
-    sudo -u "$RUNNER_USER" sed -i -e "/$hba_begin/,/$hba_end/d" "$PG_HBA_FILE"
-    sudo -u "$RUNNER_USER" tee -a "$PG_HBA_FILE" >/dev/null <<EOF
-
-$hba_begin
-# laplace_map = OS users (laplace-runner, ahart) → PG role laplace_admin.
-# Mapping defined in pg_ident.conf (bootstrap_pg_auth).
+    # pg_hba.conf — overwrite with our managed block ONLY. PG processes
+    # rules top-to-bottom and the FIRST match wins, so any initdb default
+    # `local all all peer` rule above ours would be matched before the
+    # mapped `local all laplace_admin peer map=laplace_map` rule and
+    # peer auth would fail (OS user laplace-runner != PG role laplace_admin
+    # without the map). Easier than ordering preservation: own the file
+    # entirely. This cluster is the substrate's, not a generic PG instance.
+    sudo -u "$RUNNER_USER" tee "$PG_HBA_FILE" >/dev/null <<EOF
+# Substrate cluster auth — managed by scripts/bootstrap-laplace-runner.sh.
+# Do not hand-edit; re-run \`sudo just bootstrap\` to regenerate.
+#
+# laplace_map = OS users (laplace-runner, ahart, postgres) → PG role
+# laplace_admin. Mapping defined in pg_ident.conf.
 local   all             laplace_admin                           peer map=laplace_map
 local   all             all                                     peer
 host    all             all             127.0.0.1/32            trust
 host    all             all             ::1/128                 trust
-$hba_end
 EOF
-    green "✓ Wrote substrate cluster pg_hba.conf"
+    sudo -u "$RUNNER_USER" chmod 0600 "$PG_HBA_FILE"
+    green "✓ Wrote substrate cluster pg_hba.conf (managed block as full file)"
 
     # pg_ident.conf — laplace_map.
     if ! sudo -u "$RUNNER_USER" grep -q "^laplace_map" "$PG_IDENT_FILE" 2>/dev/null; then
