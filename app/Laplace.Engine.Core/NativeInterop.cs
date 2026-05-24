@@ -94,6 +94,11 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "tier_tree_set_hilbert")]
     internal static partial int TierTreeSetHilbert(IntPtr tree, uint idx, Hilbert128* hilbert);
 
+    // === text_decomposer (engine/core/include/laplace/core/text_decomposer.h) ===
+
+    [LibraryImport(Library, EntryPoint = "laplace_text_decomposer_run")]
+    internal static partial int TextDecomposerRun(byte* utf8, nuint len, IntPtr* outTree);
+
     [LibraryImport(Library, EntryPoint = "tier_tree_id_array")]
     internal static partial IntPtr TierTreeIdArray(IntPtr tree);
 

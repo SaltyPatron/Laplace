@@ -33,6 +33,24 @@ endif()
 set(LAPLACE_EXTERNAL "${CMAKE_CURRENT_SOURCE_DIR}/../external"
     CACHE PATH "Path to external/ submodule tree")
 
+# === UCD path + version (per ADR 0047 + ADR 0053) ===
+# Defaults match the local /vault/Data/Unicode/Public/<ver>/ucd mirror
+# the project's UnicodeDecomposer + TextDecomposer build against. Override
+# via -DLAPLACE_UCD_PATH=... and -DLAPLACE_UNICODE_VERSION=... for CI /
+# alternate-version builds.
+set(LAPLACE_UNICODE_VERSION "18.0.0"
+    CACHE STRING "Unicode version pinned for UCD + perfcache + TextDecomposer (RULES R7)")
+set(LAPLACE_UCD_PATH "/vault/Data/Unicode/Public/${LAPLACE_UNICODE_VERSION}/ucd"
+    CACHE PATH "Path to the UCD tree of the pinned Unicode version")
+if(NOT EXISTS "${LAPLACE_UCD_PATH}/auxiliary/GraphemeBreakProperty.txt")
+    message(FATAL_ERROR
+        "LAPLACE_UCD_PATH does not look like a UCD tree:\n"
+        "  ${LAPLACE_UCD_PATH}/auxiliary/GraphemeBreakProperty.txt missing.\n"
+        "Override -DLAPLACE_UCD_PATH=... to a directory containing\n"
+        "auxiliary/GraphemeBreakProperty.txt (and the other UCD .txt files).")
+endif()
+message(STATUS "Laplace UCD: version=${LAPLACE_UNICODE_VERSION} path=${LAPLACE_UCD_PATH}")
+
 if(NOT EXISTS "${LAPLACE_EXTERNAL}/eigen/Eigen/Dense")
     message(FATAL_ERROR
         "external/eigen submodule not initialized. Run:\n"
@@ -120,3 +138,8 @@ endif()
 add_subdirectory(core)
 add_subdirectory(dynamics)
 add_subdirectory(synthesis)
+
+# === Build-time codegen tools (must come after the targets that depend
+# on their outputs are declared, so add_dependencies in core/CMakeLists.txt
+# can reach them). ===
+add_subdirectory(core/tools/ucd_tables_emit)

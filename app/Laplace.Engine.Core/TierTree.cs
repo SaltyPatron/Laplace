@@ -47,6 +47,16 @@ public sealed class TierTree : SafeHandle
         return new TierTree(handle);
     }
 
+    /// <summary>Wrap a tier_tree_t* that was allocated by an engine call
+    /// (e.g. <see cref="TextDecomposer.Run"/>). Ownership transfers to
+    /// the returned <see cref="TierTree"/>; caller MUST NOT call
+    /// <c>tier_tree_free</c> on the handle.</summary>
+    internal static TierTree FromExistingHandle(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero) throw new ArgumentException("handle is null", nameof(handle));
+        return new TierTree(handle);
+    }
+
     /// <summary>Number of nodes currently in the tree.</summary>
     public int NodeCount
     {

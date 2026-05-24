@@ -21,7 +21,15 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_intent_stage.cpp
     test_merkle_dedup.cpp
     test_hash_composer.cpp
+    test_grapheme_break.cpp
+    test_word_break.cpp
+    test_sentence_break.cpp
+    test_normalize_nfc.cpp
+    test_text_decomposer.cpp
 )
+
+# Conformance tests need the UCD test corpus path baked in.
+add_compile_definitions(LAPLACE_UCD_PATH_FOR_TESTS="${LAPLACE_UCD_PATH}")
 
 add_executable(laplace_core_tests ${LAPLACE_CORE_TEST_SOURCES})
 
