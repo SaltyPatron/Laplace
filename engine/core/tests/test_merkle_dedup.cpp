@@ -1,0 +1,249 @@
+#include <gtest/gtest.h>
+
+#include <cstring>
+#include <vector>
+
+#include "laplace/core/merkle_dedup.h"
+#include "laplace/core/hash128.h"
+#include "laplace/core/tier_tree.h"
+
+namespace {
+
+hash128_t make_hash(uint8_t fill) {
+    hash128_t h;
+    std::memset(&h, fill, sizeof(h));
+    return h;
+}
+
+/* Build a 7-node tree identical to test_tier_tree's sample. */
+tier_tree_t* sample_tree() {
+    tier_tree_t* t = tier_tree_new(8);
+    tier_tree_add_leaf(t, 0, 100, 0, 1);
+    tier_tree_add_leaf(t, 0, 101, 1, 1);
+    tier_tree_add_leaf(t, 0, 102, 2, 1);
+    tier_tree_add_leaf(t, 0, 103, 3, 1);
+    tier_tree_add_node(t, 1, 0, 2, 0, 2);  /* idx 4 */
+    tier_tree_add_node(t, 1, 2, 2, 2, 2);  /* idx 5 */
+    tier_tree_add_node(t, 2, 4, 2, 0, 4);  /* idx 6 = root */
+    tier_tree_finalize(t);
+    return t;
+}
+
+} // namespace
+
+TEST(LaplaceCoreMerkleDedup, FilterNovelEmptyInputReturnsZero) {
+    size_t out_n = 99;
+    EXPECT_EQ(0, merkle_dedup_filter_novel(nullptr, 0, nullptr, 0, nullptr, &out_n));
+    EXPECT_EQ(0u, out_n);
+}
+
+TEST(LaplaceCoreMerkleDedup, FilterNovelRejectsNullArgs) {
+    hash128_t h = make_hash(0);
+    uint8_t bm = 0;
+    hash128_t out[1];
+    size_t n = 0;
+    EXPECT_NE(0, merkle_dedup_filter_novel(nullptr, 1, &bm, 8, out, &n));
+    EXPECT_NE(0, merkle_dedup_filter_novel(&h, 1, nullptr, 8, out, &n));
+    EXPECT_NE(0, merkle_dedup_filter_novel(&h, 1, &bm, 8, nullptr, &n));
+    EXPECT_NE(0, merkle_dedup_filter_novel(&h, 1, &bm, 8, out, nullptr));
+}
+
+TEST(LaplaceCoreMerkleDedup, FilterNovelRejectsTooSmallBitmap) {
+    hash128_t h = make_hash(0);
+    uint8_t bm = 0;
+    hash128_t out[1];
+    size_t n = 0;
+    EXPECT_NE(0, merkle_dedup_filter_novel(&h, 1, &bm, 0, out, &n));
+}
+
+TEST(LaplaceCoreMerkleDedup, FilterNovelAllAbsentEmitsAll) {
+    std::vector<hash128_t> in(5);
+    for (uint8_t i = 0; i < 5; ++i) in[i] = make_hash(i);
+    uint8_t bm[1] = {0};  /* all bits clear */
+    std::vector<hash128_t> out(5);
+    size_t out_n = 0;
+    ASSERT_EQ(0, merkle_dedup_filter_novel(in.data(), in.size(), bm, 8,
+                                            out.data(), &out_n));
+    EXPECT_EQ(5u, out_n);
+    for (size_t i = 0; i < 5; ++i) {
+        EXPECT_TRUE(hash128_equals(&out[i], &in[i])) << "i=" << i;
+    }
+}
+
+TEST(LaplaceCoreMerkleDedup, FilterNovelAllPresentEmitsZero) {
+    std::vector<hash128_t> in(5);
+    for (uint8_t i = 0; i < 5; ++i) in[i] = make_hash(i);
+    uint8_t bm[1] = {0xFF};  /* first 5 bits set */
+    std::vector<hash128_t> out(5);
+    size_t out_n = 99;
+    ASSERT_EQ(0, merkle_dedup_filter_novel(in.data(), in.size(), bm, 8,
+                                            out.data(), &out_n));
+    EXPECT_EQ(0u, out_n);
+}
+
+TEST(LaplaceCoreMerkleDedup, FilterNovelPreservesOrder) {
+    std::vector<hash128_t> in(8);
+    for (uint8_t i = 0; i < 8; ++i) in[i] = make_hash(i + 1);
+    /* Keep indices 1, 3, 4, 7 — those have bits CLEAR */
+    uint8_t bm[1] = { 0b01100101 };  /* bits 0,2,5,6 set; 1,3,4,7 clear */
+    std::vector<hash128_t> out(8);
+    size_t out_n = 0;
+    ASSERT_EQ(0, merkle_dedup_filter_novel(in.data(), in.size(), bm, 8,
+                                            out.data(), &out_n));
+    ASSERT_EQ(4u, out_n);
+    EXPECT_TRUE(hash128_equals(&out[0], &in[1]));
+    EXPECT_TRUE(hash128_equals(&out[1], &in[3]));
+    EXPECT_TRUE(hash128_equals(&out[2], &in[4]));
+    EXPECT_TRUE(hash128_equals(&out[3], &in[7]));
+}
+
+TEST(LaplaceCoreMerkleDedup, FilterNovelWorksAcrossByteBoundaries) {
+    /* 17 candidates spanning 3 bitmap bytes. Bits set at idx 0, 8, 16. */
+    std::vector<hash128_t> in(17);
+    for (uint8_t i = 0; i < 17; ++i) in[i] = make_hash(i);
+    uint8_t bm[3] = { 0b00000001, 0b00000001, 0b00000001 };
+    std::vector<hash128_t> out(17);
+    size_t out_n = 0;
+    ASSERT_EQ(0, merkle_dedup_filter_novel(in.data(), in.size(), bm, 24,
+                                            out.data(), &out_n));
+    EXPECT_EQ(14u, out_n);
+    /* Idx 0, 8, 16 are present → skipped */
+    EXPECT_FALSE(hash128_equals(&out[0], &in[0]));  /* first emitted should be in[1] */
+    EXPECT_TRUE(hash128_equals(&out[0], &in[1]));
+    EXPECT_TRUE(hash128_equals(&out[6], &in[7]));   /* skip 8 then emit 9,10,... */
+    EXPECT_TRUE(hash128_equals(&out[7], &in[9]));
+}
+
+TEST(LaplaceCoreMerkleDedup, FilterNovelLargeBatchPerf) {
+    /* Soak test — 100K candidates, alternating present/absent. Just verify
+     * count + first/last; tight loop is auto-vectorized. */
+    const size_t N = 100'000;
+    std::vector<hash128_t> in(N);
+    for (size_t i = 0; i < N; ++i) in[i] = make_hash((uint8_t)(i & 0xFF));
+    std::vector<uint8_t> bm((N + 7) / 8, 0);
+    for (size_t i = 0; i < N; i += 2) bm[i >> 3] |= (uint8_t)(1u << (i & 7));
+    std::vector<hash128_t> out(N);
+    size_t out_n = 0;
+    ASSERT_EQ(0, merkle_dedup_filter_novel(in.data(), N, bm.data(), N,
+                                            out.data(), &out_n));
+    EXPECT_EQ(N / 2, out_n);
+    /* First emitted is in[1] (idx 0 present) */
+    EXPECT_TRUE(hash128_equals(&out[0], &in[1]));
+}
+
+/* === Trunk shortcircuit === */
+
+TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitRejectsNullArgs) {
+    tier_tree_t* t = sample_tree();
+    uint8_t bm[1] = {0};
+    uint32_t out[7];
+    size_t n = 0;
+    EXPECT_NE(0, merkle_dedup_trunk_shortcircuit(nullptr, bm, 7, out, &n));
+    EXPECT_NE(0, merkle_dedup_trunk_shortcircuit(t, nullptr, 7, out, &n));
+    EXPECT_NE(0, merkle_dedup_trunk_shortcircuit(t, bm, 7, nullptr, &n));
+    EXPECT_NE(0, merkle_dedup_trunk_shortcircuit(t, bm, 7, out, nullptr));
+    tier_tree_free(t);
+}
+
+TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitEmptyTreeIsZero) {
+    tier_tree_t* t = tier_tree_new(0);
+    uint8_t bm = 0;
+    uint32_t out[1];
+    size_t n = 99;
+    EXPECT_EQ(0, merkle_dedup_trunk_shortcircuit(t, &bm, 0, out, &n));
+    EXPECT_EQ(0u, n);
+    tier_tree_free(t);
+}
+
+TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitAllAbsentEmitsEveryIndex) {
+    tier_tree_t* t = sample_tree();
+    uint8_t bm[1] = {0};  /* all bits clear; nothing in substrate */
+    uint32_t out[7];
+    size_t n = 0;
+    ASSERT_EQ(0, merkle_dedup_trunk_shortcircuit(t, bm, 7, out, &n));
+    EXPECT_EQ(7u, n);
+    for (uint32_t i = 0; i < 7; ++i) EXPECT_EQ(i, out[i]);
+    tier_tree_free(t);
+}
+
+TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitRootPresentEmitsNothing) {
+    tier_tree_t* t = sample_tree();
+    /* root is idx 6 → bit 6 set */
+    uint8_t bm[1] = { (uint8_t)(1u << 6) };
+    uint32_t out[7];
+    size_t n = 99;
+    ASSERT_EQ(0, merkle_dedup_trunk_shortcircuit(t, bm, 7, out, &n));
+    EXPECT_EQ(0u, n);
+    tier_tree_free(t);
+}
+
+TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitInteriorPresentSkipsItsSubtree) {
+    tier_tree_t* t = sample_tree();
+    /* Node 4 (inter0, children 0+1) is in substrate. Expected to skip
+     * 0, 1, 4 — emit 2, 3, 5, 6. */
+    uint8_t bm[1] = { (uint8_t)(1u << 4) };
+    uint32_t out[7];
+    size_t n = 0;
+    ASSERT_EQ(0, merkle_dedup_trunk_shortcircuit(t, bm, 7, out, &n));
+    ASSERT_EQ(4u, n);
+    EXPECT_EQ(2u, out[0]);
+    EXPECT_EQ(3u, out[1]);
+    EXPECT_EQ(5u, out[2]);
+    EXPECT_EQ(6u, out[3]);
+    tier_tree_free(t);
+}
+
+TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitLeafPresentSkipsOnlyLeaf) {
+    tier_tree_t* t = sample_tree();
+    /* Node 1 (leaf under inter0) is present. Skip 1 only — emit
+     * 0, 2, 3, 4, 5, 6. */
+    uint8_t bm[1] = { (uint8_t)(1u << 1) };
+    uint32_t out[7];
+    size_t n = 0;
+    ASSERT_EQ(0, merkle_dedup_trunk_shortcircuit(t, bm, 7, out, &n));
+    ASSERT_EQ(6u, n);
+    const uint32_t expected[] = {0, 2, 3, 4, 5, 6};
+    for (size_t i = 0; i < 6; ++i) EXPECT_EQ(expected[i], out[i]);
+    tier_tree_free(t);
+}
+
+TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitMatchesFilterNovelOnSubsetInvariant) {
+    /* When the substrate invariant holds (parent present ⇒ all
+     * descendants present), the indices emitted by shortcircuit equal
+     * those emitted by filter_novel applied to the tree's id array.
+     * Construct a bitmap consistent with the invariant and verify. */
+    tier_tree_t* t = sample_tree();
+    /* Mark inter0 + its descendants as present (0, 1, 4). */
+    uint8_t bm[1] = { (uint8_t)((1u << 0) | (1u << 1) | (1u << 4)) };
+
+    /* Build the id array (zeros are fine — we don't need real hashes for
+     * this comparison; filter_novel just uses the bits). */
+    const hash128_t* ids = tier_tree_id_array(t);
+    ASSERT_NE(nullptr, ids);
+
+    std::vector<hash128_t> filter_out(7);
+    size_t filter_n = 0;
+    ASSERT_EQ(0, merkle_dedup_filter_novel(ids, 7, bm, 7, filter_out.data(), &filter_n));
+
+    std::vector<uint32_t> short_out(7);
+    size_t short_n = 0;
+    ASSERT_EQ(0, merkle_dedup_trunk_shortcircuit(t, bm, 7, short_out.data(), &short_n));
+
+    /* filter_novel emits hashes for indices 2,3,5,6 → 4 hashes
+     * shortcircuit emits indices 2,3,5,6 → 4 indices
+     * counts must match */
+    EXPECT_EQ(filter_n, short_n);
+    EXPECT_EQ(4u, short_n);
+    const uint32_t expected[] = {2, 3, 5, 6};
+    for (size_t i = 0; i < 4; ++i) EXPECT_EQ(expected[i], short_out[i]);
+    tier_tree_free(t);
+}
+
+TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitRejectsTooSmallBitmap) {
+    tier_tree_t* t = sample_tree();
+    uint8_t bm = 0;
+    uint32_t out[7];
+    size_t n = 0;
+    EXPECT_NE(0, merkle_dedup_trunk_shortcircuit(t, &bm, 6, out, &n)); /* 7 nodes need >=7 bits */
+    tier_tree_free(t);
+}

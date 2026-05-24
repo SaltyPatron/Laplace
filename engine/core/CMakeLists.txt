@@ -18,6 +18,10 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/codepoint_table.h
     include/laplace/core/astar.h
     include/laplace/core/trajectory.h
+    include/laplace/core/tier_tree.h
+    include/laplace/core/intent_stage.h
+    include/laplace/core/merkle_dedup.h
+    include/laplace/core/hash_composer.h
 )
 
 # No coord4d_t / geometry4d_t custom datatypes — POINT4D, LWPOINT, LWLINE,
@@ -35,6 +39,10 @@ set(LAPLACE_CORE_SOURCES
     src/codepoint_table.c
     src/astar.c
     src/trajectory.c
+    src/tier_tree.c
+    src/intent_stage.c
+    src/merkle_dedup.c
+    src/hash_composer.c
 )
 
 add_library(laplace_core SHARED ${LAPLACE_CORE_SOURCES})
