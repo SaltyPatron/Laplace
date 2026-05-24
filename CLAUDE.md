@@ -152,10 +152,11 @@ These behaviors are **automatic**, not waiting to be asked:
 ### At chunk completion
 
 - All acceptance-criteria checkboxes on the issue green.
-- `STATE.md` updated: chunk marked done; current chunk advances.
-- `decisions.md` appended if architectural choices were made during execution.
 - Issue closed via commit (`Closes #N` in the commit body).
+- ADR filed in `docs/adr/` if the work shaped an invariant (per [ADR 0022](docs/adr/0022-adrs-as-decision-format.md)).
 - CI green on `hart-server` for the closing commit.
+
+> Issues + ADRs are the durable record. There is intentionally no `STATE.md` / `decisions.md` cadence file (tried in prior iterations; degraded into a conversation log). See [OPERATIONS.md](OPERATIONS.md) → "When in doubt" and [ADR 0017](docs/adr/0017-agent-operating-cadence.md).
 
 ### When a decision is open
 
