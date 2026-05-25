@@ -29,7 +29,8 @@ set(LAPLACE_CORE_TEST_SOURCES
 )
 
 # Conformance tests need the UCD test corpus path baked in.
-add_compile_definitions(LAPLACE_UCD_PATH_FOR_TESTS="${LAPLACE_UCD_PATH}")
+# Test corpora live alongside the .txt files; UCDXML doesn't include them.
+add_compile_definitions(LAPLACE_UCD_PATH_FOR_TESTS="${LAPLACE_UCD_CONFORMANCE_DIR}")
 
 add_executable(laplace_core_tests ${LAPLACE_CORE_TEST_SOURCES})
 

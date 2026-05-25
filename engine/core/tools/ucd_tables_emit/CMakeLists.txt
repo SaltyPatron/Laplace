@@ -12,6 +12,12 @@ add_executable(laplace_ucd_tables_emit
 
 target_compile_features(laplace_ucd_tables_emit PRIVATE cxx_std_20)
 
+# libxml2 SAX parser — system dep per STANDARDS.md approved libraries
+# (libicu/libxml2/libsqlite3 carve-out). The tool ONLY runs at build
+# time, never links into liblaplace_core.
+find_package(LibXml2 REQUIRED)
+target_link_libraries(laplace_ucd_tables_emit PRIVATE LibXml2::LibXml2)
+
 # Built once per build; does NOT link into the engine .so. Pure host
 # tool consumed by the add_custom_command below.
 set_target_properties(laplace_ucd_tables_emit PROPERTIES

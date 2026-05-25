@@ -56,39 +56,38 @@ set(LAPLACE_CORE_SOURCES
 )
 
 # === Generated UCD property tables (per ADR 0047 + ADR 0053) ===
-# Codegen step: run laplace_ucd_tables_emit at build time to produce
-# ucd_tables.generated.{h,c} from the LAPLACE_UCD_PATH tree. The output
-# files compile into liblaplace_core (alongside the hand-written sources).
-# Stamp-cached: re-runs only when the codegen tool source, the UCD files,
-# or the version changes.
+# Codegen step: at build time, unzip ucd.nounihan.flat.zip + run
+# laplace_ucd_tables_emit against the resulting XML to produce
+# ucd_tables.generated.{h,c}. UCDXML is the substrate's canonical UCD
+# parse path (GLOSSARY: "Primary parse path: UCDXML"); never .txt.
 
 set(LAPLACE_UCD_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(LAPLACE_UCD_GEN_HEADER "${LAPLACE_UCD_GEN_DIR}/ucd_tables.generated.h")
 set(LAPLACE_UCD_GEN_SOURCE "${LAPLACE_UCD_GEN_DIR}/ucd_tables.generated.c")
+set(LAPLACE_UCDXML_FILE "${LAPLACE_UCD_GEN_DIR}/ucd.nounihan.flat.xml")
 
-# The UCD inputs the tool reads. Listed explicitly so CMake re-runs the
-# codegen when any of them changes.
-set(LAPLACE_UCD_INPUTS
-    "${LAPLACE_UCD_PATH}/auxiliary/GraphemeBreakProperty.txt"
-    "${LAPLACE_UCD_PATH}/auxiliary/WordBreakProperty.txt"
-    "${LAPLACE_UCD_PATH}/auxiliary/SentenceBreakProperty.txt"
-    "${LAPLACE_UCD_PATH}/emoji/emoji-data.txt"
-    "${LAPLACE_UCD_PATH}/DerivedCoreProperties.txt"
-    "${LAPLACE_UCD_PATH}/UnicodeData.txt"
-    "${LAPLACE_UCD_PATH}/CompositionExclusions.txt"
+# Extract the UCDXML zip at build time. The .xml is ~67 MB; stamp-cached
+# via the .zip's mtime + this rule's output.
+add_custom_command(
+    OUTPUT ${LAPLACE_UCDXML_FILE}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${LAPLACE_UCD_GEN_DIR}
+    COMMAND ${CMAKE_COMMAND} -E tar xf "${LAPLACE_UCDXML_ZIP}"
+            WORKING_DIRECTORY ${LAPLACE_UCD_GEN_DIR}
+    DEPENDS "${LAPLACE_UCDXML_ZIP}"
+    COMMENT "Extracting UCDXML ${LAPLACE_UNICODE_VERSION} (${LAPLACE_UCDXML_ZIP})"
+    VERBATIM
 )
 
 add_custom_command(
     OUTPUT  ${LAPLACE_UCD_GEN_HEADER} ${LAPLACE_UCD_GEN_SOURCE}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${LAPLACE_UCD_GEN_DIR}
     COMMAND $<TARGET_FILE:laplace_ucd_tables_emit>
-            --ucd-path     "${LAPLACE_UCD_PATH}"
-            --emoji-path   "${LAPLACE_UCD_PATH}/emoji"
+            --ucdxml       "${LAPLACE_UCDXML_FILE}"
             --out-header   ${LAPLACE_UCD_GEN_HEADER}
             --out-source   ${LAPLACE_UCD_GEN_SOURCE}
             --version      ${LAPLACE_UNICODE_VERSION}
-    DEPENDS laplace_ucd_tables_emit ${LAPLACE_UCD_INPUTS}
-    COMMENT "Emitting UCD tables (Grapheme/Word/Sentence break) from ${LAPLACE_UCD_PATH}"
+    DEPENDS laplace_ucd_tables_emit ${LAPLACE_UCDXML_FILE}
+    COMMENT "Emitting UCD tables from UCDXML ${LAPLACE_UCDXML_FILE}"
     VERBATIM
 )
 

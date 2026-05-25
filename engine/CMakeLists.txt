@@ -34,22 +34,42 @@ set(LAPLACE_EXTERNAL "${CMAKE_CURRENT_SOURCE_DIR}/../external"
     CACHE PATH "Path to external/ submodule tree")
 
 # === UCD path + version (per ADR 0047 + ADR 0053) ===
-# Defaults match the local /vault/Data/Unicode/Public/<ver>/ucd mirror
-# the project's UnicodeDecomposer + TextDecomposer build against. Override
-# via -DLAPLACE_UCD_PATH=... and -DLAPLACE_UNICODE_VERSION=... for CI /
-# alternate-version builds.
-set(LAPLACE_UNICODE_VERSION "18.0.0"
-    CACHE STRING "Unicode version pinned for UCD + perfcache + TextDecomposer (RULES R7)")
-set(LAPLACE_UCD_PATH "/vault/Data/Unicode/Public/${LAPLACE_UNICODE_VERSION}/ucd"
-    CACHE PATH "Path to the UCD tree of the pinned Unicode version")
-if(NOT EXISTS "${LAPLACE_UCD_PATH}/auxiliary/GraphemeBreakProperty.txt")
+# Pinned to latest STABLE Unicode (17.0.0, released 2025-09-09). Do NOT
+# bump to 18.0.0 until it goes stable (planned 2026-09-15) — per Unicode
+# stability policy, property values can change during alpha/beta review,
+# which would shift every substrate hash and break RULES R7 cross-machine
+# determinism.
+#
+# UCDXML is the substrate's canonical UCD parse path (GLOSSARY: "Primary
+# parse path: UCDXML"). The codegen tool extracts ucd.nounihan.flat.zip
+# at build time and reads the resulting XML via libxml2 SAX. Unihan is
+# excluded here because the engine codegen only consumes 7 properties
+# (GBP/WBP/SBP/InCB/CCC/decomposition/composition_exclusion); the full
+# all-flat.zip is reserved for UnicodeDecomposer (#183) ingestion.
+set(LAPLACE_UNICODE_VERSION "17.0.0"
+    CACHE STRING "Unicode version pinned for substrate determinism (RULES R7). MUST be a stable release; never alpha/beta.")
+set(LAPLACE_UCD_PATH "/vault/Data/Unicode/Public/${LAPLACE_UNICODE_VERSION}"
+    CACHE PATH "Path to the Public/<ver>/ tree of the pinned Unicode version (contains ucd/, ucdxml/, etc.)")
+set(LAPLACE_UCDXML_ZIP "${LAPLACE_UCD_PATH}/ucdxml/ucd.nounihan.flat.zip"
+    CACHE FILEPATH "UCDXML zip (nounihan flat). 67 MB uncompressed; carries all properties the engine codegen needs.")
+if(NOT EXISTS "${LAPLACE_UCDXML_ZIP}")
     message(FATAL_ERROR
-        "LAPLACE_UCD_PATH does not look like a UCD tree:\n"
-        "  ${LAPLACE_UCD_PATH}/auxiliary/GraphemeBreakProperty.txt missing.\n"
-        "Override -DLAPLACE_UCD_PATH=... to a directory containing\n"
-        "auxiliary/GraphemeBreakProperty.txt (and the other UCD .txt files).")
+        "LAPLACE_UCDXML_ZIP not found:\n"
+        "  ${LAPLACE_UCDXML_ZIP}\n"
+        "Override -DLAPLACE_UCDXML_ZIP=... to the path of\n"
+        "ucd.nounihan.flat.zip (download from https://www.unicode.org/Public/${LAPLACE_UNICODE_VERSION}/ucdxml/).")
 endif()
-message(STATUS "Laplace UCD: version=${LAPLACE_UNICODE_VERSION} path=${LAPLACE_UCD_PATH}")
+# Also surface a separate per-test corpus path (the conformance .txt
+# files DO ship alongside the XML in the same Public/<ver>/ tree).
+set(LAPLACE_UCD_CONFORMANCE_DIR "${LAPLACE_UCD_PATH}/ucd"
+    CACHE PATH "Directory holding the UAX#29/UAX#15 conformance test .txt files (auxiliary/Grapheme/Word/SentenceBreakTest.txt + NormalizationTest.txt)")
+if(NOT EXISTS "${LAPLACE_UCD_CONFORMANCE_DIR}/auxiliary/GraphemeBreakTest.txt")
+    message(FATAL_ERROR
+        "LAPLACE_UCD_CONFORMANCE_DIR/auxiliary/GraphemeBreakTest.txt missing at\n"
+        "  ${LAPLACE_UCD_CONFORMANCE_DIR}\n"
+        "Override -DLAPLACE_UCD_CONFORMANCE_DIR=... to the ucd/ subdir.")
+endif()
+message(STATUS "Laplace UCD: version=${LAPLACE_UNICODE_VERSION} xml=${LAPLACE_UCDXML_ZIP}")
 
 if(NOT EXISTS "${LAPLACE_EXTERNAL}/eigen/Eigen/Dense")
     message(FATAL_ERROR
