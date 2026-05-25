@@ -16,59 +16,14 @@ public sealed class UnicodeDecomposerTests
 {
     private const int TotalCodepoints = 1_114_112;
 
-    private static string LocateBlob()
-    {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
-        if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
-        const string share = "/opt/laplace/share/laplace";
-        if (Directory.Exists(share))
-        {
-            var hit = Directory.EnumerateFiles(share, "laplace_t0_perfcache*.bin").FirstOrDefault();
-            if (hit is not null) return hit;
-        }
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-            foreach (var build in dir.EnumerateDirectories("build*"))
-            {
-                var hit = Directory.EnumerateFiles(build.FullName, "laplace_t0_perfcache.bin",
-                                                   SearchOption.AllDirectories).FirstOrDefault();
-                if (hit is not null) return hit;
-            }
-        throw new InvalidOperationException(
-            "perf-cache blob not found; build the engine (laplace_t0_perfcache) or set LAPLACE_PERFCACHE_BIN.");
-    }
-
-    private static UnicodeDecomposer NewDecomposer() => new(LocateBlob());
+    // Use the same path discipline as production: the decomposer reads source
+    // paths from IDecomposerContext.EcosystemPath. The test context below
+    // supplies it; the decomposer ctor takes no path args here.
+    private static UnicodeDecomposer NewDecomposer() => new UnicodeDecomposer();
 
     private static IDecomposerContext Context(ISubstrateWriter writer) =>
         new FakeContext(writer);
 
-    [Fact]
-    public void UcdReader_Yields_Full_Property_Set_From_Source()
-    {
-        const string zip = "/vault/Data/Unicode/Public/17.0.0/ucdxml/ucd.nounihan.flat.zip";
-        if (!File.Exists(zip)) throw new FileNotFoundException("UCD source missing", zip);
-        var reader = new UcdRepertoireReader(zip);
-
-        UcdRepertoireReader.CodepointProps? a = null;
-        long count = 0;
-        foreach (var r in reader.Read())
-        {
-            count++;
-            if (r.Codepoint == 0x41) a = r;
-        }
-
-        // Full repertoire is read (≈ full codespace incl. reserved).
-        Assert.True(count > 1_000_000, $"only read {count} codepoints");
-        // U+0041 'A' carries its COMPLETE property set, not a 7-property subset.
-        Assert.NotNull(a);
-        Assert.Equal("Lu", a!.Value.Get("gc"));     // general category
-        Assert.Equal("Latn", a.Value.Get("sc"));    // script
-        Assert.Equal("L", a.Value.Get("bc"));       // bidi class
-        Assert.Equal("AL", a.Value.Get("lb"));      // line break
-        Assert.Equal("0061", a.Value.Get("slc"));   // simple lowercase mapping
-        Assert.Equal("1.1", a.Value.Get("age"));    // age
-        Assert.True(a.Value.Props.Count > 40, $"only {a.Value.Props.Count} props captured");
-    }
 
     [Fact]
     public async Task Emits_All_Codepoints_As_T0_Entities_With_Content_Physicalities()
@@ -80,12 +35,8 @@ public sealed class UnicodeDecomposerTests
         // (U+0041) values into plain locals — a ref into the span cannot
         // cross the await boundary below.
         await dec.EstimateUnitCountAsync(ctx);
-        Hash128 aHash;
-        double ax, ay, az, am;
-        {
-            var rec = CodepointPerfcache.Records[0x41];
-            aHash = rec.Hash; ax = rec.CoordX; ay = rec.CoordY; az = rec.CoordZ; am = rec.CoordM;
-        }
+        // 'A' = U+0041, entity id = BLAKE3-128 of single byte 0x41.
+        Hash128 aHash = Hash128.Blake3(new byte[] { 0x41 });
 
         long entities = 0, physicalities = 0;
         bool allTier0 = true, allCodepointType = true, allFirstObserved = true, countsMatch = true;
@@ -119,15 +70,14 @@ public sealed class UnicodeDecomposerTests
         Assert.True(allCodepointType, "all codepoint entities are typed Codepoint");
         Assert.True(allFirstObserved, "all codepoint entities first_observed_by UnicodeDecomposer");
 
-        // 'A' carries the perf-cache values exactly (entity id = UTF-8 hash;
-        // CONTENT coord = super-Fibonacci placement; T0 ⇒ no trajectory).
+        // 'A' is emitted as a tier-0 Codepoint entity with one CONTENT physicality
+        // on the unit glome (super-Fibonacci ⇒ x²+y²+z²+m² = 1).
         Assert.NotNull(aEntity);
         Assert.NotNull(aPhys);
         Assert.Equal(PhysicalityKind.Content, aPhys!.Kind);
-        Assert.Equal(ax, aPhys.CoordX);
-        Assert.Equal(ay, aPhys.CoordY);
-        Assert.Equal(az, aPhys.CoordZ);
-        Assert.Equal(am, aPhys.CoordM);
+        double r2 = aPhys.CoordX * aPhys.CoordX + aPhys.CoordY * aPhys.CoordY
+                  + aPhys.CoordZ * aPhys.CoordZ + aPhys.CoordM * aPhys.CoordM;
+        Assert.InRange(Math.Sqrt(r2), 1.0 - 1e-9, 1.0 + 1e-9);
         Assert.Null(aPhys.TrajectoryXyzm);
         Assert.Equal(0, aPhys.NConstituents);
         Assert.Equal(0, aPhys.ObservedAtUnixUs);

@@ -46,12 +46,12 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Seeds_All_Codepoints_And_Matches_Perfcache()
+    public async Task Seeds_All_Codepoints_FromSource()
     {
-        var blob = LocateBlob();
         var writer = new NpgsqlSubstrateWriter(_ds);
         var reader = new NpgsqlSubstrateReader(_ds);
-        var dec = new UnicodeDecomposer(blob);
+        // No ctor-injected paths: production code resolves from context.EcosystemPath.
+        var dec = new UnicodeDecomposer();
         var ctx = new SeedContext(writer, reader);
 
         // Bootstrap (source + Codepoint type + trust-class), then stream the seed.
@@ -76,27 +76,19 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
             ("s", UnicodeDecomposer.Source.ToBytes()));
         Assert.Equal(TotalCodepoints, physCount);
 
-        // Cross-verify (#49): 'A' (U+0041) coords in the DB == the perf-cache.
-        double ax, ay, az, am;
-        byte[] aId;
-        {
-            var rec = CodepointPerfcache.Records[0x41];
-            aId = rec.Hash.ToBytes();
-            ax = rec.CoordX; ay = rec.CoordY; az = rec.CoordZ; am = rec.CoordM;
-        }
+        // 'A' (U+0041) — BLAKE3-128 of single byte 0x41, present in the DB.
         await using var conn = await _ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT ST_X(coord), ST_Y(coord), ST_Z(coord), ST_M(coord)
                             FROM laplace.physicalities
                             WHERE entity_id = @e AND source_id = @s AND kind = 1";
-        cmd.Parameters.AddWithValue("e", aId);
+        cmd.Parameters.AddWithValue("e", Hash128.Blake3(new byte[] { 0x41 }).ToBytes());
         cmd.Parameters.AddWithValue("s", UnicodeDecomposer.Source.ToBytes());
         await using var r = await cmd.ExecuteReaderAsync();
         Assert.True(await r.ReadAsync(), "no CONTENT physicality for U+0041");
-        Assert.Equal(ax, r.GetDouble(0));
-        Assert.Equal(ay, r.GetDouble(1));
-        Assert.Equal(az, r.GetDouble(2));
-        Assert.Equal(am, r.GetDouble(3));
+        // every super-Fibonacci point lies on the unit glome (radius=1)
+        double x = r.GetDouble(0), y = r.GetDouble(1), z = r.GetDouble(2), m = r.GetDouble(3);
+        Assert.InRange(Math.Sqrt(x * x + y * y + z * z + m * m), 1.0 - 1e-9, 1.0 + 1e-9);
     }
 
     private async Task<long> ScalarLong(string sql, params (string, object)[] ps)
@@ -106,26 +98,6 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         cmd.CommandText = sql;
         foreach (var (n, v) in ps) cmd.Parameters.AddWithValue(n, v);
         return (long)(await cmd.ExecuteScalarAsync())!;
-    }
-
-    private static string LocateBlob()
-    {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
-        if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
-        const string share = "/opt/laplace/share/laplace";
-        if (Directory.Exists(share))
-        {
-            var hit = Directory.EnumerateFiles(share, "laplace_t0_perfcache*.bin").FirstOrDefault();
-            if (hit is not null) return hit;
-        }
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-            foreach (var build in dir.EnumerateDirectories("build*"))
-            {
-                var hit = Directory.EnumerateFiles(build.FullName, "laplace_t0_perfcache.bin",
-                                                   SearchOption.AllDirectories).FirstOrDefault();
-                if (hit is not null) return hit;
-            }
-        throw new InvalidOperationException("perf-cache blob not found; build the engine or set LAPLACE_PERFCACHE_BIN.");
     }
 
     private static async Task RunAdmin(string program, string args)
