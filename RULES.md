@@ -372,7 +372,7 @@ Do NOT route these through manual invocations. CI handles them.
 
 ### Legitimate patterns (NOT blocked)
 
-- Documenting the two-step one-time machine setup procedure in README / OPERATIONS / CHANGELOG.
+- Documenting the two-step one-time machine setup procedure in README / OPERATIONS.
 - Pointing the user at `scripts/bootstrap-laplace-runner.sh` or `scripts/build-all-deps.sh` for a fresh machine clone.
 - Asking the user to extend either Layer-0 or Layer-0.5 script when a new dep needs one-time setup.
 - Asking the user to run a one-shot debugging command for diagnosis.

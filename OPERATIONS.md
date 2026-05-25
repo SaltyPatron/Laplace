@@ -309,7 +309,6 @@ Project state lives in:
 
 - **GitHub issues** — chunk progress, story tracking, blockers
 - **`docs/adr/`** — accepted architectural decisions
-- **`CHANGELOG.md`** — user-visible changes per release
 - **`git log`** — full commit history
 
 `just status` shows recent commits; chunk/story progress is at https://github.com/SaltyPatron/Laplace/issues. There is intentionally no `STATE.md` cadence file (it was tried in prior iterations and degraded into a conversation log — issues + ADRs are the durable record).
