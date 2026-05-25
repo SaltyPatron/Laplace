@@ -48,7 +48,12 @@ public static unsafe class CodepointPerfcache
     /// <summary>The full records array as a read-only span over the mmap'd
     /// region (record <c>i</c> is codepoint <c>i</c>; length 1,114,112). The
     /// span is valid until <see cref="Unload"/> or a reload. Throws if no
-    /// table is loaded.</summary>
+    /// table is loaded.
+    ///
+    /// <para>This is a <c>ref struct</c> span and cannot live across
+    /// <c>await</c>/<c>yield</c>; streaming consumers re-acquire it per
+    /// synchronous batch (it is just a view over stable mmap'd memory).</para>
+    /// </summary>
     public static ReadOnlySpan<CodepointRecord> Records
     {
         get
@@ -60,6 +65,23 @@ public static unsafe class CodepointPerfcache
                 throw new InvalidOperationException(
                     "codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
             return new ReadOnlySpan<CodepointRecord>(recs, checked((int)count));
+        }
+    }
+
+    /// <summary>Record count of the loaded table (1,114,112) without
+    /// materializing the span — usable across async batch boundaries.
+    /// Throws if no table is loaded.</summary>
+    public static int Count
+    {
+        get
+        {
+            CodepointRecord* recs;
+            ulong count;
+            int rc = NativeInterop.CodepointTableRecords(&recs, &count);
+            if (rc != 0)
+                throw new InvalidOperationException(
+                    "codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
+            return checked((int)count);
         }
     }
 }

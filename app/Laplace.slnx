@@ -15,4 +15,6 @@
   <Project Path="Laplace.Decomposers.Containers.Abstractions.Tests/Laplace.Decomposers.Containers.Abstractions.Tests.csproj" />
   <Project Path="Laplace.Ingestion/Laplace.Ingestion.csproj" />
   <Project Path="Laplace.Ingestion.Tests/Laplace.Ingestion.Tests.csproj" />
+  <Project Path="Laplace.Decomposers.Unicode/Laplace.Decomposers.Unicode.csproj" />
+  <Project Path="Laplace.Decomposers.Unicode.Tests/Laplace.Decomposers.Unicode.Tests.csproj" />
 </Solution>
