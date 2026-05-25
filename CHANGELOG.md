@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Changelog entries are generated from [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) on `main` via [release-please](https://github.com/googleapis/release-please).
 
+## 1.0.0 (2026-05-25)
+
+
+### Features
+
+* **app:** land Chunk C P/Invoke bindings for Chunk A+B engine primitives ([bbf8819](https://github.com/SaltyPatron/Laplace/commit/bbf88190d231e28db10de8f07aeebb4eef88bba2))
+* **bootstrap:** substrate runs against /opt/laplace/pgsql-18 cluster — system PG retired ([67c3808](https://github.com/SaltyPatron/Laplace/commit/67c3808cef39709aeedf109d9edefb9985f685ab))
+* **crud,extension:** land Chunk D — Laplace.SubstrateCRUD + entities_exist_bitmap SRF ([282dedc](https://github.com/SaltyPatron/Laplace/commit/282dedcf094b49b199878c4cdc7414f5351ef237))
+* **decomposers,ingestion:** land Chunks E + F — Decomposers.Abstractions + Containers.Abstractions + Ingestion (Framework Epic [#232](https://github.com/SaltyPatron/Laplace/issues/232) complete) ([fae1bd5](https://github.com/SaltyPatron/Laplace/commit/fae1bd51f5e17cb410a319aefc5eb166efcc5f45))
+* **engine,app:** land Story A.2 — full UAX[#29](https://github.com/SaltyPatron/Laplace/issues/29) + NFC TextDecomposer against UCD 18.0.0 ([4180de2](https://github.com/SaltyPatron/Laplace/commit/4180de2e5b81fa71c3c58436df78498fdd257fe0))
+* **engine:** land Chunk A primitives + Chunk B sparsity streaming variants ([e82e068](https://github.com/SaltyPatron/Laplace/commit/e82e068be5b7cfe67bb32b8425ce632f2e34262c))
+* **geom,engine:** foundation for ST_*_4d wrappers — liblwgeom + Frechet + Hausdorff ([eb18a2a](https://github.com/SaltyPatron/Laplace/commit/eb18a2a194853280ae3573ef703f8e81edef8c81))
+* **geom:** Chunk 2 ST_*_4d wrappers — 8 PG functions + pg_regress + bootstrap dep-path fix ([d58776d](https://github.com/SaltyPatron/Laplace/commit/d58776d5eaaab943733dbf5522878232ae21aabd))
+
+
+### Bug Fixes
+
+* **bootstrap:** hba+ident outside 0700 data dir — group-editable, no sudo, no psql bandaids ([523bde9](https://github.com/SaltyPatron/Laplace/commit/523bde936d5e9bf9868561de79f32a5ce26334eb))
+* **bootstrap:** laplace-postgresql.service Type=simple (custom PG lacks --with-systemd) ([c3b2097](https://github.com/SaltyPatron/Laplace/commit/c3b20970f5f158e5be93d3ac57c67a7ba2135652))
+* **bootstrap:** race-tolerate chown/chmod sweep against /opt/laplace ([f3e8b2b](https://github.com/SaltyPatron/Laplace/commit/f3e8b2b6de7175a4b213c5baca1f2f9e37fdaa47))
+* **bootstrap:** re-runnable /opt/laplace perm normalization — kills the recurring cmake-install EACCES class ([81afdee](https://github.com/SaltyPatron/Laplace/commit/81afdee3f70cc9b65b9437260be666c6d6eb5aba))
+* **bootstrap:** set -e trap in bootstrap_disable_system_postgresql ([3147966](https://github.com/SaltyPatron/Laplace/commit/3147966fd75dcef3611ff3de376c6fd19af457a7))
+* **bootstrap:** substrate pg_hba.conf — managed block as full file, not append ([d54b284](https://github.com/SaltyPatron/Laplace/commit/d54b284354856bcd9a8b0fb8d7d18fd08a63a963))
+* **bootstrap:** system PG instance detection + group-readable substrate logs ([d16b9cc](https://github.com/SaltyPatron/Laplace/commit/d16b9cc7871afdc2ebdb6c853dddcbe5c062c336))
+* **engine:** P/Invoke string-marshaller frees .rodata pointer ([558fe24](https://github.com/SaltyPatron/Laplace/commit/558fe24ddcf54e12c73bb0eaf84b5acd2973bac2))
+* **install:** pre-wipe via install(CODE) — install is ownership-agnostic, no sudo, no fix-perms ([208f075](https://github.com/SaltyPatron/Laplace/commit/208f075f659ab51c9527093db87e9f730f95ec71))
+* **install:** repo-wide group-writable install perms — install is permanently ownership-agnostic ([c9ff8a1](https://github.com/SaltyPatron/Laplace/commit/c9ff8a10cce4e9ba4bf668386087fa46027a4358))
+
 ## [Unreleased]
 
 ### Added
