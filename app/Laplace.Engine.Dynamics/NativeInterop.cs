@@ -41,9 +41,57 @@ public static partial class NativeInterop
         _ = LaplaceDynamicsInit();
     }
 
-    // TODO Chunk 6.8: procrustes_fit / procrustes_apply / procrustes_residual / procrustes_free
-    // TODO Chunk 6.6: laplacian_eigenmaps
-    // TODO Chunk 6.7: gram_schmidt_orthonormalize
+    // === Laplacian eigenmaps ===
+
+    /// <summary>
+    /// Project high_dim_pts (n × high_dim, row-major) to low_dim_out (n × target_dim, row-major)
+    /// via Laplacian eigenmaps over a k-NN graph. Returns 0 on success, negative on error.
+    /// NOTE: k-NN construction is O(n² × high_dim) — use on representative anchors, not full 32K vocab.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "laplacian_eigenmaps")]
+    public static unsafe partial int LaplacianEigenmaps(
+        double* highDimPts, nuint n, nuint highDim,
+        nuint kNeighbors, nuint targetDim,
+        double* lowDimOut);
+
+    // === Gram-Schmidt ===
+
+    /// <summary>
+    /// In-place orthonormalization of vectors (n_vecs × dim, row-major) via Eigen HouseholderQR.
+    /// Returns 0 on success, nonzero if rank-deficient.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "gram_schmidt_orthonormalize")]
+    public static unsafe partial int GramSchmidtOrthonormalize(
+        double* vectors, nuint nVecs, nuint dim);
+
+    // === Procrustes alignment ===
+
+    /// <summary>
+    /// Fit a Procrustes transform aligning source_pts (n × source_dim) to target_pts (n × 4).
+    /// Returns opaque handle; caller must free with ProcrustesFree.
+    /// Returns IntPtr.Zero on failure.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "procrustes_fit")]
+    public static unsafe partial IntPtr ProcrustesFit(
+        double* sourcePts, nuint n, nuint sourceDim,
+        double* targetPts);   // n × 4 doubles
+
+    /// <summary>
+    /// Apply the Procrustes transform to a single source vector → 4D output.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "procrustes_apply")]
+    public static unsafe partial void ProcrustesApply(
+        IntPtr transform,
+        double* sourceVec, nuint sourceDim,
+        double* out4);   // 4 doubles
+
+    /// <summary>Frobenius residual of the Procrustes fit.</summary>
+    [LibraryImport(Library, EntryPoint = "procrustes_residual")]
+    public static partial double ProcrustesResidual(IntPtr transform);
+
+    [LibraryImport(Library, EntryPoint = "procrustes_free")]
+    public static partial void ProcrustesFree(IntPtr transform);
+
     // TODO Chunk 6.10-6.12: sparsity_per_tensor_topk / sparsity_per_row_topk / sparsity_probe_validate
     //   (multi-pass lottery-ticket filter — distinct from streaming variants below)
 
@@ -53,10 +101,10 @@ public static partial class NativeInterop
     // for large inputs (n >= 65536 per-tensor; row_count >= 4 per-row).
 
     [LibraryImport(Library, EntryPoint = "sparsity_per_tensor_topk_streaming")]
-    internal static unsafe partial int SparsityPerTensorTopkStreaming(
+    public static unsafe partial int SparsityPerTensorTopkStreaming(
         double* values, nuint n, double topkPct, byte* outMask);
 
     [LibraryImport(Library, EntryPoint = "sparsity_per_row_topk_streaming")]
-    internal static unsafe partial int SparsityPerRowTopkStreaming(
+    public static unsafe partial int SparsityPerRowTopkStreaming(
         double* rows, nuint rowCount, nuint rowSize, nuint k, byte* outMasks);
 }

@@ -1,7 +1,6 @@
 # engine/synthesis/tests/CMakeLists.txt
 #
-# GoogleTest-based unit tests for liblaplace_synthesis. Real test
-# bodies land Chunks 7-8. Stubs for now.
+# GoogleTest-based unit tests for liblaplace_synthesis.
 
 set(LAPLACE_SYNTHESIS_TEST_SOURCES
     test_version.cpp
@@ -9,6 +8,8 @@ set(LAPLACE_SYNTHESIS_TEST_SOURCES
     test_arch_template.cpp
     test_feature_extractor.cpp
     test_gguf_writer.cpp
+    test_bf16_decoder.cpp
+    test_token_attn_scorer.cpp
 )
 
 add_executable(laplace_synthesis_tests ${LAPLACE_SYNTHESIS_TEST_SOURCES})
