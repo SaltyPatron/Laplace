@@ -18,7 +18,7 @@ internal static class Program
 {
     private static string ConnString =>
         Environment.GetEnvironmentVariable("LAPLACE_DB")
-        ?? "Host=/var/run/postgresql;Username=laplace_admin;Database=laplace";
+        ?? "Host=/var/run/postgresql;Username=laplace_admin;Database=laplace;Include Error Detail=true";
 
     private static async Task<int> Main(string[] args)
     {

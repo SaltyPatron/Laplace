@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using global::Npgsql;
+using NpgsqlTypes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Laplace.Engine.Core;
@@ -99,6 +100,30 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 TrunkShortcircuitHit: true);
         }
 
+        // 2b. Physicality dedup — the same "do you have these ids?" walk as
+        // entities, applied to physicalities. COPY can't ON CONFLICT, so we
+        // filter to novel ids before COPY: re-ingest and content shared across
+        // documents (the same grapheme/word) become no-ops instead of a
+        // physicalities_pkey clash.
+        var existingPhys = new HashSet<Hash128>();
+        if (change.Physicalities.Length > 0)
+        {
+            var pidBytes = new byte[change.Physicalities.Length][];
+            for (int i = 0; i < change.Physicalities.Length; i++)
+                pidBytes[i] = change.Physicalities[i].Id.ToBytes();
+            await using var ec = await _ds.OpenConnectionAsync(ct);
+            await using var eq = ec.CreateCommand();
+            eq.CommandText = "SELECT id FROM laplace.physicalities WHERE id = ANY(@ids)";
+            eq.Parameters.Add(new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea) { Value = pidBytes });
+            await using var er = await eq.ExecuteReaderAsync(ct);
+            while (await er.ReadAsync(ct))
+            {
+                var bts = (byte[])er[0];
+                existingPhys.Add(new Hash128(BitConverter.ToUInt64(bts, 0), BitConverter.ToUInt64(bts, 8)));
+            }
+            roundTrips++;
+        }
+
         // 3. Materialize COPY BINARY buffers via engine IntentStage.
         using var stage = IntentStage.New(
             Math.Max(novelEntities.Count, change.Physicalities.Length));
@@ -110,6 +135,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         Span<double> coord = stackalloc double[4];
         foreach (var p in change.Physicalities)
         {
+            if (existingPhys.Contains(p.Id)) continue;   // novel only
             coord[0] = p.CoordX; coord[1] = p.CoordY; coord[2] = p.CoordZ; coord[3] = p.CoordM;
             stage.AddPhysicality(
                 p.Id, p.EntityId, p.SourceId, (short)p.Kind,

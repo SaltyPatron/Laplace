@@ -110,59 +110,77 @@ internal static class ContentRoundtrip
         return documentId;
     }
 
-    /// <summary>Reconstruct the original bytes by reading the document's CONTENT
-    /// trajectory out of the database and walking it down to codepoints. The
-    /// codepoint id→value map comes from the loaded perf-cache.</summary>
+    /// <summary>Reconstruct the original bytes from the database. Scales to
+    /// large content: ONE batched read pulls every composed entity's trajectory
+    /// for this source into an in-memory id→children DAG (bounded by the number
+    /// of UNIQUE n-grams, not by text length), then a DFS from the document
+    /// walks the DAG emitting codepoints. Codepoint id→value comes from the
+    /// perf-cache.</summary>
     public static async Task<byte[]> ReconstructAsync(
         NpgsqlDataSource ds, Hash128 documentId, CancellationToken ct = default)
     {
-        // codepoint entity-id → codepoint value (reverse of BLAKE3(utf8(cp)))
         var idToCp = new Dictionary<Hash128, uint>(1_114_112);
         ReadOnlySpan<CodepointRecord> recs = CodepointPerfcache.Records;
         for (int i = 0; i < recs.Length; i++) idToCp[recs[i].Hash] = recs[i].Codepoint;
 
-        await using var conn = await ds.OpenConnectionAsync(ct);
+        // One query: all (entity → ordered constituent ids) for this source.
+        var nConst = new Dictionary<Hash128, int>();
+        var pts = new Dictionary<Hash128, List<(int path, double x, double y, double z, double m)>>();
+
+        await using (var conn = await ds.OpenConnectionAsync(ct))
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = @"
+                SELECT p.entity_id, p.n_constituents, (g.path)[1],
+                       ST_X(g.geom), ST_Y(g.geom), ST_Z(g.geom), ST_M(g.geom)
+                FROM laplace.physicalities p,
+                     LATERAL ST_DumpPoints(p.trajectory) AS g
+                WHERE p.source_id = @s AND p.kind = 1";
+            cmd.Parameters.AddWithValue("s", PromptSource.ToBytes());
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                var id = ReadHash(r, 0);
+                nConst[id] = r.GetInt32(1);
+                if (!pts.TryGetValue(id, out var list)) pts[id] = list = new();
+                list.Add((r.GetInt32(2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5), r.GetDouble(6)));
+            }
+        }
+
+        // Build id → ordered children (sliced to the true constituent count).
+        var children = new Dictionary<Hash128, Hash128[]>(pts.Count);
+        foreach (var (id, list) in pts)
+        {
+            list.Sort((a, b) => a.path.CompareTo(b.path));
+            var xyzm = new double[list.Count * 4];
+            for (int i = 0; i < list.Count; i++)
+            {
+                xyzm[i * 4] = list[i].x; xyzm[i * 4 + 1] = list[i].y;
+                xyzm[i * 4 + 2] = list[i].z; xyzm[i * 4 + 3] = list[i].m;
+            }
+            Hash128[] verts = Trajectory.Constituents(xyzm);
+            int take = Math.Min(nConst[id], verts.Length);
+            children[id] = verts[..take];
+        }
+
+        // DFS from the document (tier depth is ~5, so recursion is shallow).
         var sb = new StringBuilder();
-        await EmitAsync(conn, documentId, idToCp, sb, ct);
+        Emit(documentId, children, idToCp, sb);
         return Encoding.UTF8.GetBytes(sb.ToString());
     }
 
-    private static async Task EmitAsync(
-        NpgsqlConnection conn, Hash128 id, Dictionary<Hash128, uint> idToCp,
-        StringBuilder sb, CancellationToken ct)
+    private static void Emit(Hash128 id, Dictionary<Hash128, Hash128[]> children,
+                             Dictionary<Hash128, uint> idToCp, StringBuilder sb)
     {
         if (idToCp.TryGetValue(id, out uint cp)) { sb.Append(char.ConvertFromUtf32((int)cp)); return; }
+        if (children.TryGetValue(id, out var kids))
+            foreach (var k in kids) Emit(k, children, idToCp, sb);
+    }
 
-        // Read this entity's CONTENT trajectory (prompt source) — n_constituents
-        // is the true child count (the trajectory may be padded to satisfy the
-        // LINESTRING ≥2 rule), vertices in ordinal order.
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
-            SELECT p.n_constituents,
-                   ST_X(g.geom), ST_Y(g.geom), ST_Z(g.geom), ST_M(g.geom), g.path
-            FROM laplace.physicalities p,
-                 LATERAL ST_DumpPoints(p.trajectory) AS g
-            WHERE p.entity_id = @e AND p.source_id = @s AND p.kind = 1
-            ORDER BY g.path";
-        cmd.Parameters.AddWithValue("e", id.ToBytes());
-        cmd.Parameters.AddWithValue("s", PromptSource.ToBytes());
-
-        int nConstituents = 0;
-        var xyzm = new List<double>();
-        await using (var r = await cmd.ExecuteReaderAsync(ct))
-        {
-            while (await r.ReadAsync(ct))
-            {
-                nConstituents = r.GetInt32(0);
-                xyzm.Add(r.GetDouble(1)); xyzm.Add(r.GetDouble(2));
-                xyzm.Add(r.GetDouble(3)); xyzm.Add(r.GetDouble(4));
-            }
-        }
-        if (xyzm.Count == 0) return;   // no trajectory → nothing to emit
-
-        Hash128[] verts = Trajectory.Constituents(xyzm.ToArray());
-        int take = nConstituents > 0 ? Math.Min(nConstituents, verts.Length) : verts.Length;
-        for (int i = 0; i < take; i++) await EmitAsync(conn, verts[i], idToCp, sb, ct);
+    private static Hash128 ReadHash(NpgsqlDataReader r, int ord)
+    {
+        var bytes = (byte[])r[ord];
+        return new Hash128(BitConverter.ToUInt64(bytes, 0), BitConverter.ToUInt64(bytes, 8));
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
