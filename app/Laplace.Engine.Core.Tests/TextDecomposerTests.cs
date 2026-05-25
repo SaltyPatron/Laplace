@@ -3,8 +3,17 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Engine.Core.Tests;
 
+/// <summary>
+/// Exercises the engine text-decomposition path, which (post-decouple) reads
+/// segmentation + NFC properties from the runtime-loaded perf-cache — hence
+/// the <see cref="PerfcacheTestFixture"/> via the "Perfcache" collection.
+/// </summary>
+[Collection("Perfcache")]
 public class TextDecomposerTests
 {
+    public TextDecomposerTests(PerfcacheTestFixture _) { }
+
+
     [Fact]
     public void EmptyString_ProducesRootOnly()
     {

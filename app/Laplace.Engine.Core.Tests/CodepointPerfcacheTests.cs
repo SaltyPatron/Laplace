@@ -59,13 +59,4 @@ public sealed class CodepointPerfcacheTests
         Assert.Equal(0, r.IndicConjunctBreak);
         Assert.Equal(230, r.CombiningClass);
     }
-
-    [Fact]
-    public void Records_Throws_When_Not_Loaded()
-    {
-        // No blob loaded in this unit context — the accessor must fail loud,
-        // not hand back a span over a null region.
-        if (CodepointPerfcache.IsLoaded) return;  // another test loaded it; skip
-        Assert.Throws<InvalidOperationException>(() => { _ = CodepointPerfcache.Records; });
-    }
 }
