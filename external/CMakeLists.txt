@@ -225,7 +225,11 @@ ExternalProject_Add(postgresql
     # immediately on src/common/hashfn.c. Force MAKELEVEL=0 to bypass.
     BUILD_COMMAND   env -u PGXS MAKELEVEL=0 make submake-generated-headers
             COMMAND env -u PGXS make -j ${_NPROC}
-    INSTALL_COMMAND env -u PGXS make install
+    # `make install` alone omits contrib/ (fuzzystrmatch, etc.). PostGIS
+    # extensions such as postgis_tiger_geocoder require fuzzystrmatch; a
+    # substrate-owned PG must ship the usual contrib extension set.
+    INSTALL_COMMAND env -u PGXS MAKELEVEL=0 make install
+            COMMAND env -u PGXS MAKELEVEL=0 make -C contrib install
 )
 
 # ---------------------------------------------------------------------------

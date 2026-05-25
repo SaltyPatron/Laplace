@@ -72,6 +72,12 @@ build-deps: submodule-sanity
     cmake -B build/deps -S external
     cmake --build build/deps -j
 
+# Verify /opt/laplace/pgsql-18 + PostGIS extension artifacts (and SQL smoke
+# when the substrate cluster is up). Run after build-deps or bootstrap.
+verify-deps:
+    @chmod +x scripts/verify-pg-postgis.sh
+    @scripts/verify-pg-postgis.sh
+
 # Build everything: 3 engine .so + 2 extension .so + 2 preprocessed SQL
 # install scripts. One command, one ninja graph. Intel toolchain (icpx)
 # applied via cmake/toolchains/intel-oneapi.cmake — earns its slot via
