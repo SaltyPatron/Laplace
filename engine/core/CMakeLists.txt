@@ -27,6 +27,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/sentence_break.h
     include/laplace/core/normalize_nfc.h
     include/laplace/core/text_decomposer.h
+    include/laplace/core/unicode_seed.h
 )
 
 # No coord4d_t / geometry4d_t custom datatypes — POINT4D, LWPOINT, LWLINE,
@@ -53,6 +54,7 @@ set(LAPLACE_CORE_SOURCES
     src/sentence_break.c
     src/normalize_nfc.c
     src/text_decomposer.c
+    src/unicode_seed.cpp
 )
 
 # === T0 codepoint perf-cache (ADR 0006 + ADR 0053) ===
@@ -114,9 +116,11 @@ target_include_directories(laplace_core
         $<INSTALL_INTERFACE:include>
 )
 
+find_package(LibXml2 REQUIRED)
 target_link_libraries(laplace_core
     PUBLIC  laplace_eigen        # template-only; no MKL leak
     PRIVATE blake3               # static link; no shared blake3 dep at runtime
+    PRIVATE LibXml2::LibXml2     # for laplace_unicode_seed_compute (UCDXML parse)
 )
 
 if(BUILD_TESTING)

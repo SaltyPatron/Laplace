@@ -124,6 +124,31 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             roundTrips++;
         }
 
+        // 2c. Attestation dedup by id (same shape). NOTE: this is the IDENTITY
+        // filter — attestation ids are content-addressed BLAKE3 of
+        // (subject,kind,object,source,context) so the same observation re-emitted
+        // is the same id and must not collide. Glicko-2 matchup updates on
+        // RE-OBSERVATION are a separate, later concern (DO UPDATE with double-
+        // count guards) — distinct from this "already wrote this exact row" check.
+        var existingAtt = new HashSet<Hash128>();
+        if (change.Attestations.Length > 0)
+        {
+            var aidBytes = new byte[change.Attestations.Length][];
+            for (int i = 0; i < change.Attestations.Length; i++)
+                aidBytes[i] = change.Attestations[i].Id.ToBytes();
+            await using var ec = await _ds.OpenConnectionAsync(ct);
+            await using var eq = ec.CreateCommand();
+            eq.CommandText = "SELECT id FROM laplace.attestations WHERE id = ANY(@ids)";
+            eq.Parameters.Add(new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea) { Value = aidBytes });
+            await using var er = await eq.ExecuteReaderAsync(ct);
+            while (await er.ReadAsync(ct))
+            {
+                var bts = (byte[])er[0];
+                existingAtt.Add(new Hash128(BitConverter.ToUInt64(bts, 0), BitConverter.ToUInt64(bts, 8)));
+            }
+            roundTrips++;
+        }
+
         // 3. Materialize COPY BINARY buffers via engine IntentStage.
         using var stage = IntentStage.New(
             Math.Max(novelEntities.Count, change.Physicalities.Length));
@@ -148,6 +173,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         }
         foreach (var a in change.Attestations)
         {
+            if (existingAtt.Contains(a.Id)) continue;   // novel only (identity dedup)
             stage.AddAttestation(
                 a.Id, a.SubjectId, a.KindId, a.ObjectId, a.SourceId, a.ContextId,
                 a.RatingFp1e9, a.RdFp1e9, a.VolatilityFp1e9,

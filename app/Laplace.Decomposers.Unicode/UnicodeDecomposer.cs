@@ -5,52 +5,24 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Unicode;
 
-/// <summary>
-/// Layer-0 decomposer for the universal T0 codepoint alphabet (#183, bounded
-/// to the codepoint seed). Emits all 1,114,112 Unicode codepoints as T0
-/// entities, each with the substrate-canonical CONTENT physicality whose
-/// coordinate is the super-Fibonacci placement over DUCET collation rank
-/// (ADR 0006). The entity id IS the BLAKE3-128 of the codepoint's UTF-8 bytes
-/// — the universal ground every higher-tier Merkle DAG bottoms in.
-///
-/// <para>
-/// The values come from the T0 perf-cache blob (the build-time sibling of this
-/// DB seed per ADR 0006), read via <see cref="CodepointPerfcache"/> — the same
-/// bytes the engine state machines and PG extension see (one source of truth).
-/// This seed is the DB half; cross-verifying the two byte-for-byte is #49.
-/// </para>
-///
-/// <para>
-/// The supporting vocabulary, Unihan, emoji, segmentation-class attestation
-/// cloud, and sequence entities (the full #183 ecosystem) layer on top of this
-/// foundation and are not in this bounded seed.
-/// </para>
-///
-/// <para>Determinism (RULES R7): same Unicode + UCA version ⇒ byte-identical
-/// rows on every machine. No wall-clock in any row (observed_at = 0); the
-/// substrate sets insert timestamps.</para>
-/// </summary>
 public sealed class UnicodeDecomposer : IDecomposer
 {
-    /// <summary>Source entity id — <c>BLAKE3("substrate/source/UnicodeDecomposer/v1")</c>.</summary>
     public static readonly Hash128 Source = Hash128.OfCanonical("substrate/source/UnicodeDecomposer/v1");
-
-    /// <summary>Unicode is a standards body ⇒ Tier-2 StandardsDerived trust
-    /// (bootstrapped by 10_bootstrap.sql.in per ADR 0044). Tier-1
-    /// SubstrateMandate is reserved for the substrate-canonical source.</summary>
     public static readonly Hash128 TrustClass = Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
-
-    /// <summary>The Codepoint T0 type entity, registered at init.</summary>
     public static readonly Hash128 CodepointType = Hash128.OfCanonical("substrate/type/Codepoint/v1");
 
-    private const int DefaultBatch = 8192;
+    private const string UnicodeVersion = "17.0.0";
+    private const int DefaultBatch = 16384;
 
-    private readonly string? _blobPath;
+    private readonly string? _ucdxmlZip;
+    private readonly string? _ducet;
+    private CodepointRecord[]? _records;
 
-    /// <param name="perfcacheBlobPath">Explicit perf-cache blob path; when null
-    /// the installed <c>/opt/laplace/share/laplace/laplace_t0_perfcache*.bin</c>
-    /// is used.</param>
-    public UnicodeDecomposer(string? perfcacheBlobPath = null) => _blobPath = perfcacheBlobPath;
+    public UnicodeDecomposer(string? ucdxmlZip = null, string? ducet = null)
+    {
+        _ucdxmlZip = ucdxmlZip;
+        _ducet = ducet;
+    }
 
     public Hash128 SourceId => Source;
     public string SourceName => "UnicodeDecomposer";
@@ -59,7 +31,6 @@ public sealed class UnicodeDecomposer : IDecomposer
 
     public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        EnsureLoaded();
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("Codepoint");
         return context.Writer.ApplyAsync(boot.Build(), ct);
@@ -70,31 +41,25 @@ public sealed class UnicodeDecomposer : IDecomposer
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        EnsureLoaded();
-        int total = CodepointPerfcache.Count;
+        EnsureComputed(context);
+        int total = _records!.Length;
         int batch = options.BatchSize > 1 ? options.BatchSize : DefaultBatch;
 
         for (int start = 0; start < total; start += batch)
         {
             ct.ThrowIfCancellationRequested();
             int end = Math.Min(start + batch, total);
-            // BuildBatch is synchronous and holds the ref-struct span only
-            // within its own frame — never across the yield.
-            SubstrateChange change = BuildBatch(start, end);
-            yield return change;
-            await Task.Yield();   // cooperative: let the writer drain between batches
+            yield return BuildBatch(start, end);
+            await Task.Yield();
         }
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        EnsureLoaded();
-        return Task.FromResult<long?>(CodepointPerfcache.Count);
-    }
+        => Task.FromResult<long?>(UnicodeSeed.CodepointCount);
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;  // perf-cache is process-wide; not ours to unload
+    public ValueTask DisposeAsync() { _records = null; return ValueTask.CompletedTask; }
 
-    private static SubstrateChange BuildBatch(int start, int end)
+    private SubstrateChange BuildBatch(int start, int end)
     {
         int n = end - start;
         var b = new SubstrateChangeBuilder(
@@ -102,10 +67,10 @@ public sealed class UnicodeDecomposer : IDecomposer
             parentIntentId: null,
             entityCapacity: n, physicalityCapacity: n, attestationCapacity: 0);
 
-        ReadOnlySpan<CodepointRecord> records = CodepointPerfcache.Records;
+        CodepointRecord[] recs = _records!;
         for (int cp = start; cp < end; cp++)
         {
-            ref readonly CodepointRecord r = ref records[cp];
+            ref readonly CodepointRecord r = ref recs[cp];
             Hash128 entityId = r.Hash;
 
             b.AddEntity(entityId, tier: 0, CodepointType, firstObservedBy: Source);
@@ -122,33 +87,27 @@ public sealed class UnicodeDecomposer : IDecomposer
                 Kind: PhysicalityKind.Content,
                 CoordX: r.CoordX, CoordY: r.CoordY, CoordZ: r.CoordZ, CoordM: r.CoordM,
                 HilbertIndex: r.Hilbert,
-                TrajectoryXyzm: null,        // T0 atom — no decomposition trajectory
+                TrajectoryXyzm: null,
                 NConstituents: 0,
-                AlignmentResidual: 0.0,      // substrate-canonical, not a projection
+                AlignmentResidual: 0.0,
                 SourceDim: null,
-                ObservedAtUnixUs: 0));       // timeless; substrate sets insert clock
+                ObservedAtUnixUs: 0));
         }
         return b.Build();
     }
 
-    private void EnsureLoaded()
+    private void EnsureComputed(IDecomposerContext context)
     {
-        if (CodepointPerfcache.IsLoaded) return;
-        CodepointPerfcache.Load(_blobPath ?? ResolveInstalledBlob());
+        if (_records is not null) return;
+        var (xml, duc) = ResolveSource(context);
+        _records = UnicodeSeed.Compute(xml, duc);
     }
 
-    private static string ResolveInstalledBlob()
+    private (string xml, string duc) ResolveSource(IDecomposerContext context)
     {
-        const string share = "/opt/laplace/share/laplace";
-        if (Directory.Exists(share))
-        {
-            string? hit = Directory.EnumerateFiles(share, "laplace_t0_perfcache*.bin")
-                                   .OrderByDescending(p => p).FirstOrDefault();
-            if (hit is not null) return hit;
-        }
-        throw new InvalidOperationException(
-            "T0 perf-cache blob not found under /opt/laplace/share/laplace. Build + install " +
-            "the engine (the laplace_t0_perfcache target installs it) or pass an explicit " +
-            "path to the UnicodeDecomposer constructor.");
+        string baseDir = context.EcosystemPath;
+        string xml = _ucdxmlZip ?? Path.Combine(baseDir, "Public", UnicodeVersion, "ucdxml", "ucd.nounihan.flat.zip");
+        string duc = _ducet ?? Path.Combine(baseDir, "Public", UnicodeVersion, "uca", "allkeys.txt");
+        return (xml, duc);
     }
 }

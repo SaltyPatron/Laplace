@@ -104,7 +104,7 @@ internal static class Program
         var writer = new NpgsqlSubstrateWriter(ds);
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader);
-        var dec = new UnicodeDecomposer(ResolveBlob());
+        var dec = new UnicodeDecomposer();
 
         Console.WriteLine($"ingest unicode via IngestRunner → {ConnString} ...");
         var sw = Stopwatch.StartNew();
@@ -135,7 +135,7 @@ internal static class Program
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         var writer = new NpgsqlSubstrateWriter(ds);
         var reader = new NpgsqlSubstrateReader(ds);
-        var dec = new UnicodeDecomposer(ResolveBlob());
+        var dec = new UnicodeDecomposer();
         var ctx = new CliContext(writer, reader);
 
         Console.WriteLine($"seeding T0 codepoints into {ConnString} ...");

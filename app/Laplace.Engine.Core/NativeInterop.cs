@@ -69,6 +69,12 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "hilbert128_compare")]
     internal static partial int Hilbert128Compare(Hilbert128* a, Hilbert128* b);
 
+    // === unicode_seed (engine/core/include/laplace/core/unicode_seed.h) ===
+
+    [LibraryImport(Library, EntryPoint = "laplace_unicode_seed_compute", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int UnicodeSeedCompute(string ucdxmlPath, string ducetPath,
+                                                   CodepointRecord* outRecords, nuint outCapacity);
+
     // === codepoint_table (engine/core/include/laplace/core/codepoint_table.h) ===
 
     [LibraryImport(Library, EntryPoint = "codepoint_table_load_perfcache", StringMarshalling = StringMarshalling.Utf8)]

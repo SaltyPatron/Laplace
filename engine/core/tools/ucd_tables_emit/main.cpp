@@ -43,6 +43,7 @@
 #include "laplace/core/super_fibonacci.h"
 #include "laplace/core/perfcache_format.h"
 #include "laplace/core/ucd_property_values.h"
+#include "laplace/core/unicode_seed.h"
 
 namespace fs = std::filesystem;
 
@@ -292,7 +293,26 @@ static size_t utf8_encode(uint32_t cp, uint8_t o[4]) {
 int main(int argc, char** argv) {
     Cli cli = parse_cli(argc, argv);
 
-    // --- parse UCDXML ---
+    // --- Records: the ONE source of truth. Computed by the C ABI function in
+    //     liblaplace_core; the C# UnicodeDecomposer calls the same function so
+    //     the blob and the DB seed are byte-identical siblings, not one fed
+    //     from the other. ---
+    std::vector<laplace_perfcache_record_t> rec_array(CP_COUNT);
+    int rc = laplace_unicode_seed_compute(cli.ucdxml.string().c_str(),
+                                          cli.ducet.string().c_str(),
+                                          rec_array.data(), rec_array.size());
+    if (rc != 0) {
+        std::fprintf(stderr, "laplace_unicode_seed_compute returned %d\n", rc);
+        return 4;
+    }
+    // Serialise the records to the on-disk byte form (header section).
+    std::vector<uint8_t> records;
+    records.resize(sizeof(laplace_perfcache_record_t) * CP_COUNT);
+    std::memcpy(records.data(), rec_array.data(), records.size());
+
+    // --- The emitter ALSO needs a UCDXML pass for the decomp/compose
+    //     side-tables (blob-only artifacts; not part of the DB seed). The
+    //     records computed above are NOT overwritten by this. ---
     UcdData d;
     SaxCtx ctx{&d, false};
     xmlSAXHandler sax{}; sax.initialized = XML_SAX2_MAGIC;
@@ -302,42 +322,6 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "UCDXML parse failed\n"); return 4;
     }
     xmlCleanupParser();
-
-    // --- parse DUCET → collation keys ---
-    DucetKeys dk;
-    parse_ducet(cli.ducet, dk);
-
-    // --- UCA order: stable sort all codepoints by (key, cp) ---
-    std::vector<uint32_t> order(CP_COUNT);
-    for (uint32_t i = 0; i < CP_COUNT; ++i) order[i] = i;
-    std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b){
-        if (dk.key[a] != dk.key[b]) return dk.key[a] < dk.key[b];
-        return a < b;
-    });
-    std::vector<uint32_t> uca_rank(CP_COUNT);
-    for (uint32_t r = 0; r < CP_COUNT; ++r) uca_rank[order[r]] = r;
-
-    // --- super-Fibonacci coords on S^3, indexed by uca_rank ---
-    std::vector<double> sf(4ull * CP_COUNT);
-    super_fibonacci(CP_COUNT, sf.data());
-
-    // --- build records ---
-    std::vector<uint8_t> records; records.reserve((size_t)CP_COUNT * 80);
-    for (uint32_t cp = 0; cp < CP_COUNT; ++cp) {
-        uint32_t rank = uca_rank[cp];
-        double coord[4] = { sf[4ull*rank+0], sf[4ull*rank+1], sf[4ull*rank+2], sf[4ull*rank+3] };
-        hilbert128_t hb; hilbert4d_encode(coord, &hb);
-        uint8_t u8[4]; size_t n = utf8_encode(cp, u8);
-        hash128_t h; hash128_blake3(u8, n, &h);
-        uint32_t flags = laplace_pc_pack_flags(d.gb[cp], d.wb[cp], d.sb[cp], d.incb[cp], d.ccc[cp]);
-        put_u32(records, cp);
-        put_u32(records, rank);
-        for (int k=0;k<4;++k) put_f64(records, coord[k]);
-        put_hb128(records, hb);
-        put_h128(records, h);
-        put_u32(records, flags);
-        put_u32(records, 0);  // _pad
-    }
 
     // --- decomposition side-table (full canonical decomposition, recursive) ---
     std::function<void(uint32_t, std::vector<uint32_t>&)> full;
