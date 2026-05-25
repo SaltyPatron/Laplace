@@ -384,6 +384,50 @@ jobs:
           " | sed 's/^/  /'
 
   # ------------------------------------------------------------------
+  # dotnet-test — run the C# test suites (closes #258: CI previously only
+  # `dotnet build`, so C# regressions passed silently). Needs db-deploy so
+  # the engine .so + perf-cache blob are installed and the laplace extension
+  # is live for the substrate integration tests (which hit the deployed
+  # cluster as laplace_admin, not Testcontainers). Excludes
+  # Laplace.Migrations.Tests — it uses Testcontainers/Docker, and DbUp is
+  # already exercised by db-deploy.
+  # ------------------------------------------------------------------
+  dotnet-test:
+    name: dotnet test (engine bindings + substrate integration)
+    needs: db-deploy
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+
+      - name: Source oneAPI env (LD_LIBRARY_PATH for engine .so; MKL/TBB for dynamics)
+        run: |
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|LD_LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+
+      - name: dotnet test (P/Invoke loads the built engine .so; substrate tests hit the live cluster)
+        run: |
+          export LD_LIBRARY_PATH="$(pwd)/build/engine/core:$(pwd)/build/engine/dynamics:$(pwd)/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
+          export LAPLACE_PERFCACHE_BIN="$(pwd)/build/engine/core/perfcache/laplace_t0_perfcache.bin"
+          cd app
+          for proj in \
+            Laplace.Engine.Core.Tests \
+            Laplace.Engine.Dynamics.Tests \
+            Laplace.Engine.Synthesis.Tests \
+            Laplace.Decomposers.Abstractions.Tests \
+            Laplace.Decomposers.Containers.Abstractions.Tests \
+            Laplace.SubstrateCRUD.Tests \
+            Laplace.Ingestion.Tests \
+            Laplace.Decomposers.Unicode.Tests; do
+            echo "::group::dotnet test $proj"
+            dotnet test "$proj/$proj.csproj" -c Release
+            echo "::endgroup::"
+          done
+
+  # ------------------------------------------------------------------
   # regress — pg_regress smoke tests against the deployed extensions.
   # Independent test DBs (laplace_regress_geom, _substrate); reuses
   # build/ + /opt/laplace/install from engine + db-deploy.
