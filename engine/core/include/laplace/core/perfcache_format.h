@@ -128,8 +128,22 @@ typedef struct {
     uint64_t compose_record_count;
     uint64_t compose_records_offset;
     hash128_t ucd_hash;              /* BLAKE3-128 fingerprint of the UCDXML source */
-    uint8_t  reserved[8];
-} laplace_perfcache_header_t;        /* total 128 B */
+    uint8_t  reserved[16];           /* pads the header to a true 128 B */
+} laplace_perfcache_header_t;        /* total 128 B (two cache lines) */
+
+/* The emitter writes the header by appending each field in declaration
+ * order with no padding; the loader casts the mmap'd bytes straight to
+ * this struct. Both rely on the struct having NO internal padding and the
+ * exact documented sizes. Assert it so a field reorder / type change can
+ * never silently shift section offsets (the off-by-8 that 120 vs 128
+ * bytes would otherwise cause). */
+#ifdef __cplusplus
+static_assert(sizeof(laplace_perfcache_record_t) == 80, "perfcache record must be 80 bytes");
+static_assert(sizeof(laplace_perfcache_header_t) == 128, "perfcache header must be 128 bytes");
+#else
+_Static_assert(sizeof(laplace_perfcache_record_t) == 80, "perfcache record must be 80 bytes");
+_Static_assert(sizeof(laplace_perfcache_header_t) == 128, "perfcache header must be 128 bytes");
+#endif
 
 /* Trailer (16 bytes): BLAKE3-128 of everything from byte 0 up to (not
  * including) the trailer. Refuse to load on mismatch. */

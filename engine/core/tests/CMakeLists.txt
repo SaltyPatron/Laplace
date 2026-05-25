@@ -7,6 +7,7 @@
 # TEST() with CTest automatically.
 
 set(LAPLACE_CORE_TEST_SOURCES
+    perfcache_env.cpp
     test_version.cpp
     test_math4d.cpp
     test_hash128.cpp
@@ -32,7 +33,16 @@ set(LAPLACE_CORE_TEST_SOURCES
 # Test corpora live alongside the .txt files; UCDXML doesn't include them.
 add_compile_definitions(LAPLACE_UCD_PATH_FOR_TESTS="${LAPLACE_UCD_CONFORMANCE_DIR}")
 
+# The state machines + codepoint_table now read from a runtime-loaded
+# perf-cache. perfcache_env.cpp registers a GoogleTest global environment
+# that mmaps this blob before any test runs (RULES R7: the same blob the
+# emitter produces from the pinned UCD/UCA drives every conformance test).
+add_compile_definitions(LAPLACE_PERFCACHE_PATH_FOR_TESTS="${LAPLACE_PERFCACHE_BIN}")
+
 add_executable(laplace_core_tests ${LAPLACE_CORE_TEST_SOURCES})
+
+# The blob must exist before the test binary runs.
+add_dependencies(laplace_core_tests laplace_t0_perfcache)
 
 target_link_libraries(laplace_core_tests
     PRIVATE laplace_core GTest::gtest_main

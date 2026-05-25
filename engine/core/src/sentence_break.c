@@ -1,6 +1,6 @@
 #include "laplace/core/sentence_break.h"
 
-#include "ucd_tables.generated.h"
+#include "laplace/core/codepoint_table.h"
 
 /* === UAX#29 sentence boundary state machine ===
  *
@@ -20,10 +20,10 @@
  *   SB11: (STerm|ATerm) Close* Sp* (Sep|CR|LF)? ÷
  *   SB998: any × any  (default no break for sentence) */
 
-static uint8_t sb(uint32_t cp) { return laplace_ucd_sb_lookup(cp); }
+static uint8_t sb(uint32_t cp) { return codepoint_table_sb(cp); }
 
 static int is_ignored(uint8_t p) {
-    return p == LAPLACE_UCD_SB_EXTEND || p == LAPLACE_UCD_SB_FORMAT;
+    return p == LAPLACE_SB_EXTEND || p == LAPLACE_SB_FORMAT;
 }
 
 /* Previous significant property at-or-before idx (skipping Extend|Format),
@@ -55,12 +55,12 @@ static int trailing_term_pattern(const uint32_t* cps, size_t i,
         k -= 1;
         uint8_t v = sb(cps[k]);
         if (is_ignored(v)) continue;
-        if (phase_sp_ok && v == LAPLACE_UCD_SB_SP) { had_sp = 1; continue; }
+        if (phase_sp_ok && v == LAPLACE_SB_SP) { had_sp = 1; continue; }
         phase_sp_ok = 0;
-        if (phase_close_ok && v == LAPLACE_UCD_SB_CLOSE) { continue; }
+        if (phase_close_ok && v == LAPLACE_SB_CLOSE) { continue; }
         phase_close_ok = 0;
-        if (v == LAPLACE_UCD_SB_ATERM) { *out_is_aterm = 1; *out_had_spaces = had_sp; return 1; }
-        if (v == LAPLACE_UCD_SB_STERM) { *out_is_aterm = 0; *out_had_spaces = had_sp; return 1; }
+        if (v == LAPLACE_SB_ATERM) { *out_is_aterm = 1; *out_had_spaces = had_sp; return 1; }
+        if (v == LAPLACE_SB_STERM) { *out_is_aterm = 0; *out_had_spaces = had_sp; return 1; }
         return 0;
     }
     return 0;
@@ -79,16 +79,16 @@ static int sb8_lookahead_finds_lower(const uint32_t* cps, size_t n, size_t i) {
     for (size_t k = i; k < n; ++k) {
         uint8_t v = sb(cps[k]);
         if (is_ignored(v)) continue;
-        if (v == LAPLACE_UCD_SB_OLETTER
-         || v == LAPLACE_UCD_SB_UPPER
-         || v == LAPLACE_UCD_SB_SEP
-         || v == LAPLACE_UCD_SB_CR
-         || v == LAPLACE_UCD_SB_LF
-         || v == LAPLACE_UCD_SB_STERM
-         || v == LAPLACE_UCD_SB_ATERM) {
-            return v == LAPLACE_UCD_SB_LOWER ? 1 : 0;  /* Lower means rule fires */
+        if (v == LAPLACE_SB_OLETTER
+         || v == LAPLACE_SB_UPPER
+         || v == LAPLACE_SB_SEP
+         || v == LAPLACE_SB_CR
+         || v == LAPLACE_SB_LF
+         || v == LAPLACE_SB_STERM
+         || v == LAPLACE_SB_ATERM) {
+            return v == LAPLACE_SB_LOWER ? 1 : 0;  /* Lower means rule fires */
         }
-        if (v == LAPLACE_UCD_SB_LOWER) return 1;
+        if (v == LAPLACE_SB_LOWER) return 1;
         /* else: any other property, keep scanning */
     }
     return 0;
@@ -97,9 +97,9 @@ static int sb8_lookahead_finds_lower(const uint32_t* cps, size_t n, size_t i) {
 /* SB7 helper: the codepoint two positions before sig-prev was Upper|Lower,
  * the next was ATerm, and curr (already known) is Upper. */
 static int sb7_matches(const uint32_t* cps, size_t prev_sig_idx, uint8_t c) {
-    if (c != LAPLACE_UCD_SB_UPPER) return 0;
+    if (c != LAPLACE_SB_UPPER) return 0;
     if (prev_sig_idx == SIZE_MAX) return 0;
-    if (sb(cps[prev_sig_idx]) != LAPLACE_UCD_SB_ATERM) return 0;
+    if (sb(cps[prev_sig_idx]) != LAPLACE_SB_ATERM) return 0;
     if (prev_sig_idx == 0) return 0;
     /* walk back one significant codepoint */
     size_t k = prev_sig_idx;
@@ -107,7 +107,7 @@ static int sb7_matches(const uint32_t* cps, size_t prev_sig_idx, uint8_t c) {
         k -= 1;
         uint8_t v = sb(cps[k]);
         if (is_ignored(v)) continue;
-        return v == LAPLACE_UCD_SB_UPPER || v == LAPLACE_UCD_SB_LOWER;
+        return v == LAPLACE_SB_UPPER || v == LAPLACE_SB_LOWER;
     }
     return 0;
 }
@@ -124,15 +124,15 @@ size_t laplace_sentence_break_next(const uint32_t* codepoints, size_t n, size_t 
         uint8_t c     = sb(curr);
 
         /* SB3: CR × LF (literal) */
-        if (p_lit == LAPLACE_UCD_SB_CR && c == LAPLACE_UCD_SB_LF) { i += 1; continue; }
+        if (p_lit == LAPLACE_SB_CR && c == LAPLACE_SB_LF) { i += 1; continue; }
 
         /* SB4: (Sep | CR | LF) ÷ (literal) */
-        if (p_lit == LAPLACE_UCD_SB_SEP || p_lit == LAPLACE_UCD_SB_CR || p_lit == LAPLACE_UCD_SB_LF) {
+        if (p_lit == LAPLACE_SB_SEP || p_lit == LAPLACE_SB_CR || p_lit == LAPLACE_SB_LF) {
             return i;
         }
 
         /* SB5: × (Extend|Format) */
-        if (c == LAPLACE_UCD_SB_EXTEND || c == LAPLACE_UCD_SB_FORMAT) { i += 1; continue; }
+        if (c == LAPLACE_SB_EXTEND || c == LAPLACE_SB_FORMAT) { i += 1; continue; }
 
         /* From here, use the previous significant property. */
         uint8_t p = 0xFF;
@@ -148,7 +148,7 @@ size_t laplace_sentence_break_next(const uint32_t* codepoints, size_t n, size_t 
         }
 
         /* SB6: ATerm × Numeric */
-        if (p == LAPLACE_UCD_SB_ATERM && c == LAPLACE_UCD_SB_NUMERIC) { i += 1; continue; }
+        if (p == LAPLACE_SB_ATERM && c == LAPLACE_SB_NUMERIC) { i += 1; continue; }
 
         /* SB7: (Upper|Lower) ATerm × Upper */
         if (sb7_matches(codepoints, prev_sig_idx, c)) { i += 1; continue; }
@@ -163,24 +163,24 @@ size_t laplace_sentence_break_next(const uint32_t* codepoints, size_t n, size_t 
                 i += 1; continue;
             }
             /* SB8a: (STerm|ATerm) Close* Sp* × (SContinue|STerm|ATerm) */
-            if (c == LAPLACE_UCD_SB_SCONTINUE
-             || c == LAPLACE_UCD_SB_STERM
-             || c == LAPLACE_UCD_SB_ATERM) { i += 1; continue; }
+            if (c == LAPLACE_SB_SCONTINUE
+             || c == LAPLACE_SB_STERM
+             || c == LAPLACE_SB_ATERM) { i += 1; continue; }
             /* SB9: (STerm|ATerm) Close* × (Close|Sp|Sep|CR|LF)
              *     — applies only if Sp* was empty. */
             if (!had_sp
-                && (c == LAPLACE_UCD_SB_CLOSE
-                 || c == LAPLACE_UCD_SB_SP
-                 || c == LAPLACE_UCD_SB_SEP
-                 || c == LAPLACE_UCD_SB_CR
-                 || c == LAPLACE_UCD_SB_LF)) {
+                && (c == LAPLACE_SB_CLOSE
+                 || c == LAPLACE_SB_SP
+                 || c == LAPLACE_SB_SEP
+                 || c == LAPLACE_SB_CR
+                 || c == LAPLACE_SB_LF)) {
                 i += 1; continue;
             }
             /* SB10: (STerm|ATerm) Close* Sp* × (Sp|Sep|CR|LF) */
-            if (c == LAPLACE_UCD_SB_SP
-             || c == LAPLACE_UCD_SB_SEP
-             || c == LAPLACE_UCD_SB_CR
-             || c == LAPLACE_UCD_SB_LF) {
+            if (c == LAPLACE_SB_SP
+             || c == LAPLACE_SB_SEP
+             || c == LAPLACE_SB_CR
+             || c == LAPLACE_SB_LF) {
                 i += 1; continue;
             }
             /* SB11: (STerm|ATerm) Close* Sp* (Sep|CR|LF)? ÷

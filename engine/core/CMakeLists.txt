@@ -55,45 +55,51 @@ set(LAPLACE_CORE_SOURCES
     src/text_decomposer.c
 )
 
-# === Generated UCD property tables (per ADR 0047 + ADR 0053) ===
-# Codegen step: at build time, unzip ucd.nounihan.flat.zip + run
-# laplace_ucd_tables_emit against the resulting XML to produce
-# ucd_tables.generated.{h,c}. UCDXML is the substrate's canonical UCD
-# parse path (GLOSSARY: "Primary parse path: UCDXML"); never .txt.
+# === T0 codepoint perf-cache (ADR 0006 + ADR 0053) ===
+# liblaplace_core is DECOUPLED from UCD source: it compiles NO generated
+# tables and has no UCD/UCA build dependency. The runtime codepoint_table
+# loader mmaps a perf-cache BINARY blob at startup; the UAX#29/UAX#15
+# state machines read their property lookups from that mapping.
+#
+# The blob is produced out-of-band by laplace_ucd_tables_emit from UCDXML
+# (UAX#42) + DUCET (UCA allkeys.txt) — the sole UCD/UCA reader in the
+# tree. It is a standalone artifact: consumed by the conformance tests,
+# installed for the app/runtime to load, and deployable to mobile/embedded
+# (ADR 0054). It is NOT linked into the .so.
 
-set(LAPLACE_UCD_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
-set(LAPLACE_UCD_GEN_HEADER "${LAPLACE_UCD_GEN_DIR}/ucd_tables.generated.h")
-set(LAPLACE_UCD_GEN_SOURCE "${LAPLACE_UCD_GEN_DIR}/ucd_tables.generated.c")
-set(LAPLACE_UCDXML_FILE "${LAPLACE_UCD_GEN_DIR}/ucd.nounihan.flat.xml")
+add_library(laplace_core SHARED ${LAPLACE_CORE_SOURCES})
 
-# Extract the UCDXML zip at build time. The .xml is ~67 MB; stamp-cached
-# via the .zip's mtime + this rule's output.
+set(LAPLACE_PERFCACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/perfcache")
+set(LAPLACE_PERFCACHE_XML "${LAPLACE_PERFCACHE_DIR}/ucd.nounihan.flat.xml")
+set(LAPLACE_PERFCACHE_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_t0_perfcache.bin"
+    CACHE FILEPATH "Built T0 codepoint perf-cache blob (consumed by tests + installed)" FORCE)
+
+# Extract the UCDXML zip (~67 MB uncompressed) once; stamp-cached on the
+# .zip mtime.
 add_custom_command(
-    OUTPUT ${LAPLACE_UCDXML_FILE}
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${LAPLACE_UCD_GEN_DIR}
+    OUTPUT ${LAPLACE_PERFCACHE_XML}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${LAPLACE_PERFCACHE_DIR}
     COMMAND ${CMAKE_COMMAND} -E tar xf "${LAPLACE_UCDXML_ZIP}"
-            WORKING_DIRECTORY ${LAPLACE_UCD_GEN_DIR}
+            WORKING_DIRECTORY ${LAPLACE_PERFCACHE_DIR}
     DEPENDS "${LAPLACE_UCDXML_ZIP}"
     COMMENT "Extracting UCDXML ${LAPLACE_UNICODE_VERSION} (${LAPLACE_UCDXML_ZIP})"
     VERBATIM
 )
 
 add_custom_command(
-    OUTPUT  ${LAPLACE_UCD_GEN_HEADER} ${LAPLACE_UCD_GEN_SOURCE}
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${LAPLACE_UCD_GEN_DIR}
+    OUTPUT ${LAPLACE_PERFCACHE_BIN}
     COMMAND $<TARGET_FILE:laplace_ucd_tables_emit>
-            --ucdxml       "${LAPLACE_UCDXML_FILE}"
-            --out-header   ${LAPLACE_UCD_GEN_HEADER}
-            --out-source   ${LAPLACE_UCD_GEN_SOURCE}
-            --version      ${LAPLACE_UNICODE_VERSION}
-    DEPENDS laplace_ucd_tables_emit ${LAPLACE_UCDXML_FILE}
-    COMMENT "Emitting UCD tables from UCDXML ${LAPLACE_UCDXML_FILE}"
+            --ucdxml      "${LAPLACE_PERFCACHE_XML}"
+            --ducet       "${LAPLACE_DUCET_FILE}"
+            --ucd-version "${LAPLACE_UNICODE_VERSION}"
+            --uca-version "${LAPLACE_UCA_VERSION}"
+            --output      ${LAPLACE_PERFCACHE_BIN}
+    DEPENDS laplace_ucd_tables_emit ${LAPLACE_PERFCACHE_XML} "${LAPLACE_DUCET_FILE}"
+    COMMENT "Emitting T0 perf-cache blob (UCD ${LAPLACE_UNICODE_VERSION} / UCA ${LAPLACE_UCA_VERSION})"
     VERBATIM
 )
 
-list(APPEND LAPLACE_CORE_SOURCES ${LAPLACE_UCD_GEN_SOURCE})
-
-add_library(laplace_core SHARED ${LAPLACE_CORE_SOURCES})
+add_custom_target(laplace_t0_perfcache ALL DEPENDS ${LAPLACE_PERFCACHE_BIN})
 
 set_target_properties(laplace_core PROPERTIES
     VERSION ${PROJECT_VERSION}
@@ -106,8 +112,6 @@ target_include_directories(laplace_core
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
-    PRIVATE
-        $<BUILD_INTERFACE:${LAPLACE_UCD_GEN_DIR}>
 )
 
 target_link_libraries(laplace_core
@@ -126,4 +130,13 @@ install(TARGETS laplace_core
     PUBLIC_HEADER
         DESTINATION include/laplace/core
         PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
+)
+
+# The T0 perf-cache blob ships alongside the library — the runtime loads
+# it at startup (codepoint_table_load_perfcache). Versioned filename so a
+# UCD bump is a side-by-side artifact, never an in-place overwrite.
+install(FILES ${LAPLACE_PERFCACHE_BIN}
+    DESTINATION share/laplace
+    RENAME "laplace_t0_perfcache_${LAPLACE_UNICODE_VERSION}.bin"
+    PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )

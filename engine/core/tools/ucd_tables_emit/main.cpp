@@ -400,7 +400,7 @@ int main(int argc, char** argv) {
     put_u64(blob, comps.size());
     put_u64(blob, off_compose_r);
     { hash128_t z; hash128_zero(&z); put_h128(blob, z); }  // ucd_hash (fingerprint TODO; zero for now)
-    for (int i=0;i<8;++i) blob.push_back(0);                // reserved
+    for (int i=0;i<16;++i) blob.push_back(0);               // reserved[16] -> 128 B header
     // sections
     blob.insert(blob.end(), records.begin(), records.end());
     blob.insert(blob.end(), decomp_recs.begin(), decomp_recs.end());

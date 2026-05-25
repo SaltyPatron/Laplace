@@ -1,6 +1,6 @@
 #include "laplace/core/word_break.h"
 
-#include "ucd_tables.generated.h"
+#include "laplace/core/codepoint_table.h"
 
 /* === UAX#29 word boundary state machine ===
  *
@@ -47,47 +47,47 @@
  *   WB999: any ÷ any
  */
 
-static uint8_t wb(uint32_t cp) { return laplace_ucd_wb_lookup(cp); }
-static uint8_t gb(uint32_t cp) { return laplace_ucd_gb_lookup(cp); }
+static uint8_t wb(uint32_t cp) { return codepoint_table_wb(cp); }
+static uint8_t gb(uint32_t cp) { return codepoint_table_gb(cp); }
 
 /* True iff this property should be SKIPPED for the "previous" lookup
  * in rules WB5+ (the WB4 "Ignore" set: Extend, Format, ZWJ). */
 static int is_ignored_for_prev(uint8_t p) {
-    return p == LAPLACE_UCD_WB_EXTEND
-        || p == LAPLACE_UCD_WB_FORMAT
-        || p == LAPLACE_UCD_WB_ZWJ;
+    return p == LAPLACE_WB_EXTEND
+        || p == LAPLACE_WB_FORMAT
+        || p == LAPLACE_WB_ZWJ;
 }
 
 /* AHLetter helper: ALetter or Hebrew_Letter */
 static int is_ahletter(uint8_t p) {
-    return p == LAPLACE_UCD_WB_ALETTER || p == LAPLACE_UCD_WB_HEBREW_LETTER;
+    return p == LAPLACE_WB_ALETTER || p == LAPLACE_WB_HEBREW_LETTER;
 }
 
 /* MidLetterOrSingleQuote: MidLetter | MidNumLet | Single_Quote */
 static int is_midletter_or_sq(uint8_t p) {
-    return p == LAPLACE_UCD_WB_MIDLETTER
-        || p == LAPLACE_UCD_WB_MIDNUMLET
-        || p == LAPLACE_UCD_WB_SINGLE_QUOTE;
+    return p == LAPLACE_WB_MIDLETTER
+        || p == LAPLACE_WB_MIDNUMLET
+        || p == LAPLACE_WB_SINGLE_QUOTE;
 }
 
 /* MidNumOrSingleQuote: MidNum | MidNumLet | Single_Quote */
 static int is_midnum_or_sq(uint8_t p) {
-    return p == LAPLACE_UCD_WB_MIDNUM
-        || p == LAPLACE_UCD_WB_MIDNUMLET
-        || p == LAPLACE_UCD_WB_SINGLE_QUOTE;
+    return p == LAPLACE_WB_MIDNUM
+        || p == LAPLACE_WB_MIDNUMLET
+        || p == LAPLACE_WB_SINGLE_QUOTE;
 }
 
 /* AHLetter | Numeric | Katakana | ExtendNumLet */
 static int is_wb13a_left(uint8_t p) {
     return is_ahletter(p)
-        || p == LAPLACE_UCD_WB_NUMERIC
-        || p == LAPLACE_UCD_WB_KATAKANA
-        || p == LAPLACE_UCD_WB_EXTENDNUMLET;
+        || p == LAPLACE_WB_NUMERIC
+        || p == LAPLACE_WB_KATAKANA
+        || p == LAPLACE_WB_EXTENDNUMLET;
 }
 static int is_wb13b_right(uint8_t p) {
     return is_ahletter(p)
-        || p == LAPLACE_UCD_WB_NUMERIC
-        || p == LAPLACE_UCD_WB_KATAKANA;
+        || p == LAPLACE_WB_NUMERIC
+        || p == LAPLACE_WB_KATAKANA;
 }
 
 /* Find the index of the most-recent "significant" codepoint at or before
@@ -122,8 +122,8 @@ size_t laplace_word_break_next(const uint32_t* codepoints, size_t n, size_t from
     {
         size_t k = from;
         while (1) {
-            if (wb(codepoints[k]) == LAPLACE_UCD_WB_REGIONAL_INDICATOR) ri_run_len += 1;
-            else { ri_run_len = (wb(codepoints[from]) == LAPLACE_UCD_WB_REGIONAL_INDICATOR) ? 1 : 0; break; }
+            if (wb(codepoints[k]) == LAPLACE_WB_REGIONAL_INDICATOR) ri_run_len += 1;
+            else { ri_run_len = (wb(codepoints[from]) == LAPLACE_WB_REGIONAL_INDICATOR) ? 1 : 0; break; }
             if (k == 0) break;
             k -= 1;
         }
@@ -137,32 +137,32 @@ size_t laplace_word_break_next(const uint32_t* codepoints, size_t n, size_t from
         uint8_t c     = wb(curr);
 
         /* WB3: CR × LF (literal — Extend|Format|ZWJ NOT skipped here). */
-        if (p_lit == LAPLACE_UCD_WB_CR && c == LAPLACE_UCD_WB_LF) {
+        if (p_lit == LAPLACE_WB_CR && c == LAPLACE_WB_LF) {
             /* no break — fall through to advance */
             goto advance_no_break;
         }
 
         /* WB3a: (Newline | CR | LF) ÷  */
-        if (p_lit == LAPLACE_UCD_WB_NEWLINE || p_lit == LAPLACE_UCD_WB_CR || p_lit == LAPLACE_UCD_WB_LF) {
+        if (p_lit == LAPLACE_WB_NEWLINE || p_lit == LAPLACE_WB_CR || p_lit == LAPLACE_WB_LF) {
             return i;
         }
         /* WB3b: ÷ (Newline | CR | LF) */
-        if (c == LAPLACE_UCD_WB_NEWLINE || c == LAPLACE_UCD_WB_CR || c == LAPLACE_UCD_WB_LF) {
+        if (c == LAPLACE_WB_NEWLINE || c == LAPLACE_WB_CR || c == LAPLACE_WB_LF) {
             return i;
         }
 
         /* WB3c: ZWJ × \p{Extended_Pictographic} */
-        if (p_lit == LAPLACE_UCD_WB_ZWJ && gb(curr) == LAPLACE_UCD_GB_EXTENDED_PICTOGRAPHIC) {
+        if (p_lit == LAPLACE_WB_ZWJ && gb(curr) == LAPLACE_GB_EXTENDED_PICTOGRAPHIC) {
             goto advance_no_break;
         }
 
         /* WB3d: WSegSpace × WSegSpace */
-        if (p_lit == LAPLACE_UCD_WB_WSEGSPACE && c == LAPLACE_UCD_WB_WSEGSPACE) {
+        if (p_lit == LAPLACE_WB_WSEGSPACE && c == LAPLACE_WB_WSEGSPACE) {
             goto advance_no_break;
         }
 
         /* WB4: × (Extend | Format | ZWJ) — never break before these. */
-        if (c == LAPLACE_UCD_WB_EXTEND || c == LAPLACE_UCD_WB_FORMAT || c == LAPLACE_UCD_WB_ZWJ) {
+        if (c == LAPLACE_WB_EXTEND || c == LAPLACE_WB_FORMAT || c == LAPLACE_WB_ZWJ) {
             goto advance_no_break;
         }
 
@@ -196,57 +196,57 @@ size_t laplace_word_break_next(const uint32_t* codepoints, size_t n, size_t from
         }
 
         /* WB7a: Hebrew_Letter × Single_Quote */
-        if (p == LAPLACE_UCD_WB_HEBREW_LETTER && c == LAPLACE_UCD_WB_SINGLE_QUOTE) goto advance_no_break;
+        if (p == LAPLACE_WB_HEBREW_LETTER && c == LAPLACE_WB_SINGLE_QUOTE) goto advance_no_break;
 
         /* WB7b: Hebrew_Letter × Double_Quote Hebrew_Letter */
-        if (p == LAPLACE_UCD_WB_HEBREW_LETTER && c == LAPLACE_UCD_WB_DOUBLE_QUOTE) {
+        if (p == LAPLACE_WB_HEBREW_LETTER && c == LAPLACE_WB_DOUBLE_QUOTE) {
             size_t j = i + 1;
             while (j < n && is_ignored_for_prev(wb(codepoints[j]))) j += 1;
-            if (j < n && wb(codepoints[j]) == LAPLACE_UCD_WB_HEBREW_LETTER) goto advance_no_break;
+            if (j < n && wb(codepoints[j]) == LAPLACE_WB_HEBREW_LETTER) goto advance_no_break;
         }
 
         /* WB7c: Hebrew_Letter Double_Quote × Hebrew_Letter */
-        if (p == LAPLACE_UCD_WB_DOUBLE_QUOTE && c == LAPLACE_UCD_WB_HEBREW_LETTER) {
+        if (p == LAPLACE_WB_DOUBLE_QUOTE && c == LAPLACE_WB_HEBREW_LETTER) {
             size_t pp_idx = (prev_sig_idx == 0) ? SIZE_MAX
                           : prev_significant_idx(codepoints, prev_sig_idx - 1);
-            if (pp_idx != SIZE_MAX && wb(codepoints[pp_idx]) == LAPLACE_UCD_WB_HEBREW_LETTER) goto advance_no_break;
+            if (pp_idx != SIZE_MAX && wb(codepoints[pp_idx]) == LAPLACE_WB_HEBREW_LETTER) goto advance_no_break;
         }
 
         /* WB8: Numeric × Numeric */
-        if (p == LAPLACE_UCD_WB_NUMERIC && c == LAPLACE_UCD_WB_NUMERIC) goto advance_no_break;
+        if (p == LAPLACE_WB_NUMERIC && c == LAPLACE_WB_NUMERIC) goto advance_no_break;
 
         /* WB9: AHLetter × Numeric */
-        if (is_ahletter(p) && c == LAPLACE_UCD_WB_NUMERIC) goto advance_no_break;
+        if (is_ahletter(p) && c == LAPLACE_WB_NUMERIC) goto advance_no_break;
 
         /* WB10: Numeric × AHLetter */
-        if (p == LAPLACE_UCD_WB_NUMERIC && is_ahletter(c)) goto advance_no_break;
+        if (p == LAPLACE_WB_NUMERIC && is_ahletter(c)) goto advance_no_break;
 
         /* WB11: Numeric (MidNum|MidNumLet|Single_Quote) × Numeric */
-        if (is_midnum_or_sq(p) && c == LAPLACE_UCD_WB_NUMERIC) {
+        if (is_midnum_or_sq(p) && c == LAPLACE_WB_NUMERIC) {
             size_t pp_idx = (prev_sig_idx == 0) ? SIZE_MAX
                           : prev_significant_idx(codepoints, prev_sig_idx - 1);
-            if (pp_idx != SIZE_MAX && wb(codepoints[pp_idx]) == LAPLACE_UCD_WB_NUMERIC) goto advance_no_break;
+            if (pp_idx != SIZE_MAX && wb(codepoints[pp_idx]) == LAPLACE_WB_NUMERIC) goto advance_no_break;
         }
 
         /* WB12: Numeric × (MidNum|MidNumLet|Single_Quote) Numeric */
-        if (p == LAPLACE_UCD_WB_NUMERIC && is_midnum_or_sq(c)) {
+        if (p == LAPLACE_WB_NUMERIC && is_midnum_or_sq(c)) {
             size_t j = i + 1;
             while (j < n && is_ignored_for_prev(wb(codepoints[j]))) j += 1;
-            if (j < n && wb(codepoints[j]) == LAPLACE_UCD_WB_NUMERIC) goto advance_no_break;
+            if (j < n && wb(codepoints[j]) == LAPLACE_WB_NUMERIC) goto advance_no_break;
         }
 
         /* WB13: Katakana × Katakana */
-        if (p == LAPLACE_UCD_WB_KATAKANA && c == LAPLACE_UCD_WB_KATAKANA) goto advance_no_break;
+        if (p == LAPLACE_WB_KATAKANA && c == LAPLACE_WB_KATAKANA) goto advance_no_break;
 
         /* WB13a: (AHLetter|Numeric|Katakana|ExtendNumLet) × ExtendNumLet */
-        if (is_wb13a_left(p) && c == LAPLACE_UCD_WB_EXTENDNUMLET) goto advance_no_break;
+        if (is_wb13a_left(p) && c == LAPLACE_WB_EXTENDNUMLET) goto advance_no_break;
 
         /* WB13b: ExtendNumLet × (AHLetter|Numeric|Katakana) */
-        if (p == LAPLACE_UCD_WB_EXTENDNUMLET && is_wb13b_right(c)) goto advance_no_break;
+        if (p == LAPLACE_WB_EXTENDNUMLET && is_wb13b_right(c)) goto advance_no_break;
 
         /* WB15 + WB16: RI × RI when prev RI run is odd. */
-        if (p == LAPLACE_UCD_WB_REGIONAL_INDICATOR
-            && c == LAPLACE_UCD_WB_REGIONAL_INDICATOR
+        if (p == LAPLACE_WB_REGIONAL_INDICATOR
+            && c == LAPLACE_WB_REGIONAL_INDICATOR
             && (ri_run_len % 2) == 1) {
             goto advance_no_break;
         }
@@ -260,7 +260,7 @@ advance_no_break:
          * non-RI codepoint. WB4-ignored codepoints (Extend|Format|ZWJ)
          * do NOT reset the RI counter (so e.g. RI + Extend + RI still
          * pairs the RIs). */
-        if (c == LAPLACE_UCD_WB_REGIONAL_INDICATOR) {
+        if (c == LAPLACE_WB_REGIONAL_INDICATOR) {
             ri_run_len += 1;
         } else if (!is_ignored_for_prev(c)) {
             ri_run_len = 0;

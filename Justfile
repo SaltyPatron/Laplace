@@ -127,8 +127,11 @@ build-app:
 build-migrations:
     cd app && dotnet build Laplace.Migrations/Laplace.Migrations.csproj -c Release
 
+# Build just the T0 perf-cache blob (UCDXML + DUCET -> binary). Part of the
+# normal engine build; this target iterates it standalone. Requires `just
+# build` to have configured build/ first.
 build-perfcache:
-    scripts/build-perfcache.sh
+    cmake --build build --target laplace_t0_perfcache
 
 # Wipe build/ (idempotent re-run preserves /opt/laplace/* dep installs).
 clean:

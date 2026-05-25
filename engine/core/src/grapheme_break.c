@@ -1,6 +1,6 @@
 #include "laplace/core/grapheme_break.h"
 
-#include "ucd_tables.generated.h"
+#include "laplace/core/codepoint_table.h"
 
 /* === UAX#29 grapheme cluster break state machine ===
  *
@@ -18,7 +18,7 @@
  * We track minimal state across each two-codepoint boundary decision +
  * a tiny lookback that captures the above two cases. */
 
-static uint8_t gb(uint32_t cp) { return laplace_ucd_gb_lookup(cp); }
+static uint8_t gb(uint32_t cp) { return codepoint_table_gb(cp); }
 
 /* True iff the boundary between `prev` and `curr` should NOT break,
  * given the running state (parity of preceding RI run + presence of an
@@ -38,50 +38,50 @@ static int no_break(uint32_t prev, uint32_t curr, gb_state_t* st) {
     const uint8_t c = gb(curr);
 
     /* GB3: CR × LF */
-    if (p == LAPLACE_UCD_GB_CR && c == LAPLACE_UCD_GB_LF) return 1;
+    if (p == LAPLACE_GB_CR && c == LAPLACE_GB_LF) return 1;
 
     /* GB4: (Control | CR | LF) ÷  */
-    if (p == LAPLACE_UCD_GB_CONTROL || p == LAPLACE_UCD_GB_CR || p == LAPLACE_UCD_GB_LF) return 0;
+    if (p == LAPLACE_GB_CONTROL || p == LAPLACE_GB_CR || p == LAPLACE_GB_LF) return 0;
 
     /* GB5: ÷ (Control | CR | LF) */
-    if (c == LAPLACE_UCD_GB_CONTROL || c == LAPLACE_UCD_GB_CR || c == LAPLACE_UCD_GB_LF) return 0;
+    if (c == LAPLACE_GB_CONTROL || c == LAPLACE_GB_CR || c == LAPLACE_GB_LF) return 0;
 
     /* GB6: L × (L | V | LV | LVT) */
-    if (p == LAPLACE_UCD_GB_L
-        && (c == LAPLACE_UCD_GB_L || c == LAPLACE_UCD_GB_V
-            || c == LAPLACE_UCD_GB_LV || c == LAPLACE_UCD_GB_LVT)) return 1;
+    if (p == LAPLACE_GB_L
+        && (c == LAPLACE_GB_L || c == LAPLACE_GB_V
+            || c == LAPLACE_GB_LV || c == LAPLACE_GB_LVT)) return 1;
 
     /* GB7: (LV | V) × (V | T) */
-    if ((p == LAPLACE_UCD_GB_LV || p == LAPLACE_UCD_GB_V)
-        && (c == LAPLACE_UCD_GB_V || c == LAPLACE_UCD_GB_T)) return 1;
+    if ((p == LAPLACE_GB_LV || p == LAPLACE_GB_V)
+        && (c == LAPLACE_GB_V || c == LAPLACE_GB_T)) return 1;
 
     /* GB8: (LVT | T) × T */
-    if ((p == LAPLACE_UCD_GB_LVT || p == LAPLACE_UCD_GB_T)
-        && c == LAPLACE_UCD_GB_T) return 1;
+    if ((p == LAPLACE_GB_LVT || p == LAPLACE_GB_T)
+        && c == LAPLACE_GB_T) return 1;
 
     /* GB9: × (Extend | ZWJ) */
-    if (c == LAPLACE_UCD_GB_EXTEND || c == LAPLACE_UCD_GB_ZWJ) return 1;
+    if (c == LAPLACE_GB_EXTEND || c == LAPLACE_GB_ZWJ) return 1;
 
     /* GB9a: × SpacingMark */
-    if (c == LAPLACE_UCD_GB_SPACINGMARK) return 1;
+    if (c == LAPLACE_GB_SPACINGMARK) return 1;
 
     /* GB9b: Prepend × */
-    if (p == LAPLACE_UCD_GB_PREPEND) return 1;
+    if (p == LAPLACE_GB_PREPEND) return 1;
 
     /* GB11: \p{Extended_Pictographic} Extend* ZWJ × \p{Extended_Pictographic}
      * State: in_emoji_zwj_seq is true when prev == ZWJ AND we're inside
      * the Extended_Pictographic-Extend*-ZWJ run. */
     if (st->in_emoji_zwj_seq
-        && p == LAPLACE_UCD_GB_ZWJ
-        && c == LAPLACE_UCD_GB_EXTENDED_PICTOGRAPHIC) {
+        && p == LAPLACE_GB_ZWJ
+        && c == LAPLACE_GB_EXTENDED_PICTOGRAPHIC) {
         return 1;
     }
 
     /* GB12 + GB13: RI × RI iff the count of contiguous RIs ending at
      * `prev` is ODD (i.e. `prev` starts a new pair). If it's EVEN,
      * `prev` closes a pair and we break before `curr`. */
-    if (p == LAPLACE_UCD_GB_REGIONAL_INDICATOR
-        && c == LAPLACE_UCD_GB_REGIONAL_INDICATOR
+    if (p == LAPLACE_GB_REGIONAL_INDICATOR
+        && c == LAPLACE_GB_REGIONAL_INDICATOR
         && (st->ri_run_len % 2) == 1) {
         return 1;
     }
@@ -99,8 +99,8 @@ static void update_state(uint32_t prev, uint32_t curr, gb_state_t* st) {
     /* Regional-indicator run length: increments when curr is RI AND
      * (prev is also RI AND continuing); resets to 1 when curr is RI but
      * prev was not (start of new run); resets to 0 otherwise. */
-    if (c == LAPLACE_UCD_GB_REGIONAL_INDICATOR) {
-        if (p == LAPLACE_UCD_GB_REGIONAL_INDICATOR) st->ri_run_len += 1;
+    if (c == LAPLACE_GB_REGIONAL_INDICATOR) {
+        if (p == LAPLACE_GB_REGIONAL_INDICATOR) st->ri_run_len += 1;
         else st->ri_run_len = 1;
     } else {
         st->ri_run_len = 0;
@@ -111,27 +111,27 @@ static void update_state(uint32_t prev, uint32_t curr, gb_state_t* st) {
      * Stays in the state while consuming the trailing ZWJ. Falls out as
      * soon as something other than (Extend | ZWJ) follows the
      * Extended_Pictographic chain. */
-    if (c == LAPLACE_UCD_GB_EXTENDED_PICTOGRAPHIC) {
+    if (c == LAPLACE_GB_EXTENDED_PICTOGRAPHIC) {
         /* New emoji starts; tracking pending sequence starts at the next ZWJ */
         st->in_emoji_zwj_seq = 0;  /* will set true if Extend*-ZWJ chain develops */
         /* Special: if prev WAS in_emoji_zwj_seq and we joined via GB11,
          * we're still in an emoji chain — set true so a further ZWJ
          * continues the join. */
     }
-    if (c == LAPLACE_UCD_GB_EXTEND) {
+    if (c == LAPLACE_GB_EXTEND) {
         /* Extends preserve a pending emoji-zwj state if we were tracking
          * one (an Extended_Pictographic earlier, with no break between).
          * If prev was Extended_Pictographic or already in the seq, stay in. */
-        if (p == LAPLACE_UCD_GB_EXTENDED_PICTOGRAPHIC || st->in_emoji_zwj_seq) {
+        if (p == LAPLACE_GB_EXTENDED_PICTOGRAPHIC || st->in_emoji_zwj_seq) {
             /* still inside the pictograph cluster; pending ZWJ check */
         }
     }
-    if (c == LAPLACE_UCD_GB_ZWJ) {
+    if (c == LAPLACE_GB_ZWJ) {
         /* ZWJ following a pictograph (possibly via Extends) enters the
          * GB11 join state. */
-        if (p == LAPLACE_UCD_GB_EXTENDED_PICTOGRAPHIC
-            || (p == LAPLACE_UCD_GB_EXTEND && st->in_emoji_zwj_seq)
-            || (p == LAPLACE_UCD_GB_EXTEND && /* extend after pictograph anywhere in cluster */ 1)) {
+        if (p == LAPLACE_GB_EXTENDED_PICTOGRAPHIC
+            || (p == LAPLACE_GB_EXTEND && st->in_emoji_zwj_seq)
+            || (p == LAPLACE_GB_EXTEND && /* extend after pictograph anywhere in cluster */ 1)) {
             /* The cluster has been holding a pictograph; promote */
         }
         /* Simpler + correct: we are in_emoji_zwj_seq iff the most recent
@@ -157,7 +157,7 @@ static void update_state(uint32_t prev, uint32_t curr, gb_state_t* st) {
  * update_state's emoji-zwj logic; left as a comment for clarity). */
 
 /* Helper: read InCB property */
-static uint8_t incb(uint32_t cp) { return laplace_ucd_incb_lookup(cp); }
+static uint8_t incb(uint32_t cp) { return codepoint_table_incb(cp); }
 
 size_t laplace_grapheme_break_next(const uint32_t* codepoints, size_t n, size_t from) {
     if (from >= n) return n;
@@ -189,7 +189,7 @@ size_t laplace_grapheme_break_next(const uint32_t* codepoints, size_t n, size_t 
      * non-RI or at `from` itself. */
     if (from > 0) {
         size_t k = from;
-        while (k > 0 && gb(codepoints[k - 1]) == LAPLACE_UCD_GB_REGIONAL_INDICATOR) {
+        while (k > 0 && gb(codepoints[k - 1]) == LAPLACE_GB_REGIONAL_INDICATOR) {
             st.ri_run_len += 1;
             k -= 1;
         }
@@ -202,11 +202,11 @@ size_t laplace_grapheme_break_next(const uint32_t* codepoints, size_t n, size_t 
         size_t k = from;
         while (k > 0) {
             uint8_t pp = gb(codepoints[k - 1]);
-            if (pp == LAPLACE_UCD_GB_EXTENDED_PICTOGRAPHIC) {
+            if (pp == LAPLACE_GB_EXTENDED_PICTOGRAPHIC) {
                 saw_pictograph_in_cluster = 1;
                 break;
             }
-            if (pp == LAPLACE_UCD_GB_EXTEND || pp == LAPLACE_UCD_GB_ZWJ) {
+            if (pp == LAPLACE_GB_EXTEND || pp == LAPLACE_GB_ZWJ) {
                 k -= 1;
                 continue;
             }
@@ -222,9 +222,9 @@ size_t laplace_grapheme_break_next(const uint32_t* codepoints, size_t n, size_t 
         int seen_linker = 0;
         while (k > 0) {
             uint8_t ip = incb(codepoints[k - 1]);
-            if (ip == LAPLACE_UCD_INCB_LINKER) { seen_linker = 1; k -= 1; continue; }
-            if (ip == LAPLACE_UCD_INCB_EXTEND) { k -= 1; continue; }
-            if (ip == LAPLACE_UCD_INCB_CONSONANT) {
+            if (ip == LAPLACE_INCB_LINKER) { seen_linker = 1; k -= 1; continue; }
+            if (ip == LAPLACE_INCB_EXTEND) { k -= 1; continue; }
+            if (ip == LAPLACE_INCB_CONSONANT) {
                 saw_indic_consonant = 1;
                 saw_indic_linker_after_consonant = seen_linker;
             }
@@ -238,13 +238,13 @@ size_t laplace_grapheme_break_next(const uint32_t* codepoints, size_t n, size_t 
     {
         uint8_t cp0_gb = gb(codepoints[from]);
         uint8_t cp0_incb = incb(codepoints[from]);
-        if (cp0_gb == LAPLACE_UCD_GB_EXTENDED_PICTOGRAPHIC) saw_pictograph_in_cluster = 1;
-        if (cp0_gb == LAPLACE_UCD_GB_REGIONAL_INDICATOR) {
+        if (cp0_gb == LAPLACE_GB_EXTENDED_PICTOGRAPHIC) saw_pictograph_in_cluster = 1;
+        if (cp0_gb == LAPLACE_GB_REGIONAL_INDICATOR) {
             /* Backward walk counted RIs strictly BEFORE from; add this one. */
             st.ri_run_len += 1;
             if (from == 0) st.ri_run_len = 1;  /* exact at sot */
         }
-        if (cp0_incb == LAPLACE_UCD_INCB_CONSONANT) {
+        if (cp0_incb == LAPLACE_INCB_CONSONANT) {
             saw_indic_consonant = 1;
             saw_indic_linker_after_consonant = 0;
         }
@@ -257,21 +257,21 @@ size_t laplace_grapheme_break_next(const uint32_t* codepoints, size_t n, size_t 
         uint8_t c = gb(curr);
 
         /* Compose the boolean GB11 state from the running flag. */
-        st.in_emoji_zwj_seq = (saw_pictograph_in_cluster && p == LAPLACE_UCD_GB_ZWJ) ? 1 : 0;
+        st.in_emoji_zwj_seq = (saw_pictograph_in_cluster && p == LAPLACE_GB_ZWJ) ? 1 : 0;
 
         /* GB9c: × InCB=Consonant if we have a preceding
          * Consonant-(Extend|Linker)*-Linker-(Extend|Linker)* chain. */
         int gb9c_fires = (saw_indic_consonant
                           && saw_indic_linker_after_consonant
-                          && incb(curr) == LAPLACE_UCD_INCB_CONSONANT);
+                          && incb(curr) == LAPLACE_INCB_CONSONANT);
 
         if (!gb9c_fires && !no_break(prev, curr, &st)) {
             return i;
         }
 
         /* Update RI run for the next iteration. */
-        if (c == LAPLACE_UCD_GB_REGIONAL_INDICATOR) {
-            if (p == LAPLACE_UCD_GB_REGIONAL_INDICATOR) st.ri_run_len += 1;
+        if (c == LAPLACE_GB_REGIONAL_INDICATOR) {
+            if (p == LAPLACE_GB_REGIONAL_INDICATOR) st.ri_run_len += 1;
             else st.ri_run_len = 1;
         } else {
             st.ri_run_len = 0;
@@ -281,9 +281,9 @@ size_t laplace_grapheme_break_next(const uint32_t* codepoints, size_t n, size_t 
          *  - if curr is Extended_Pictographic, set true
          *  - if curr is Extend|ZWJ, preserve the flag
          *  - otherwise clear */
-        if (c == LAPLACE_UCD_GB_EXTENDED_PICTOGRAPHIC) {
+        if (c == LAPLACE_GB_EXTENDED_PICTOGRAPHIC) {
             saw_pictograph_in_cluster = 1;
-        } else if (c == LAPLACE_UCD_GB_EXTEND || c == LAPLACE_UCD_GB_ZWJ) {
+        } else if (c == LAPLACE_GB_EXTEND || c == LAPLACE_GB_ZWJ) {
             /* preserve */
         } else {
             saw_pictograph_in_cluster = 0;
@@ -291,12 +291,12 @@ size_t laplace_grapheme_break_next(const uint32_t* codepoints, size_t n, size_t 
 
         /* Update InCB history for the next iteration. */
         uint8_t curr_incb = incb(curr);
-        if (curr_incb == LAPLACE_UCD_INCB_CONSONANT) {
+        if (curr_incb == LAPLACE_INCB_CONSONANT) {
             saw_indic_consonant = 1;
             saw_indic_linker_after_consonant = 0;
-        } else if (curr_incb == LAPLACE_UCD_INCB_LINKER) {
+        } else if (curr_incb == LAPLACE_INCB_LINKER) {
             if (saw_indic_consonant) saw_indic_linker_after_consonant = 1;
-        } else if (curr_incb == LAPLACE_UCD_INCB_EXTEND) {
+        } else if (curr_incb == LAPLACE_INCB_EXTEND) {
             /* preserve */
         } else {
             saw_indic_consonant = 0;

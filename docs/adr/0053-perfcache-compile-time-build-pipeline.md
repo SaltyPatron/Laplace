@@ -2,8 +2,61 @@
 
 ## Status
 
-**Proposed** — 2026-05-24
+**Accepted** — 2026-05-24 (amended 2026-05-25 with as-built deltas; see Amendment below)
 **Authors:** Anthony Hart
+
+> **Amendment (2026-05-25) — as-built.** The pipeline landed with the shape
+> below, but several specifics in the original Decision drifted during
+> implementation. The authoritative format contract is now
+> `engine/core/include/laplace/core/perfcache_format.h` (with `_Static_assert`
+> guards on struct sizes); this ADR records the deltas:
+>
+> - **Magic** is `0x4652504Cu` (`"LPRF"` little-endian), not the originally
+>   stated `0x4654504C` — that hex spelled `"LPTF"` (a transposition bug).
+> - **Format version is 2**, not 1. v2 adds a **section directory** to the
+>   header for the NFC canonical-decomposition + composition side-tables the
+>   runtime NFC path needs (variable-length, so they don't fit a fixed-width
+>   record).
+> - **Record is 80 bytes**, not 64. `coord[4]` f64 (32) + hilbert128 (16) +
+>   hash128 (16) is already 64 before `codepoint`/`uca_order`/`flags`/`_pad`;
+>   the original 64 was arithmetically impossible. The `flags` u32 packs
+>   GB/WB/SB/InCB/CCC (the scalar UAX#29/UAX#15 properties the state machines
+>   consult); fixed value-ids live in `ucd_property_values.h`.
+> - **Header is 128 bytes** (two cache lines), not 64 — it carries the
+>   section directory (records / decomp-records / decomp-data / compose-records
+>   offsets + counts) plus `ucd_hash` and reserved padding.
+> - **Emit tool is `laplace_ucd_tables_emit`** (CLI: `--ucdxml --ducet
+>   --ucd-version --uca-version --output`), reading **UCDXML (UAX#42) via
+>   libxml2 SAX** + **DUCET (`allkeys.txt`) for UCA collation rank** — not the
+>   `--ucd-path/--uca-path` form, and not a `laplace_core_internal` static
+>   library. To break the build-graph cycle the tool compiles the pure math
+>   kernels (`super_fibonacci.c` / `hilbert4d.c` / `hash128.c`) directly as
+>   source instead of linking a core variant.
+> - **`uca_order` is the DUCET collation rank**: the emitter ranks all
+>   1,114,112 codepoints by their DUCET sort key (UCA §10.1.3 implicit weights
+>   for codepoints absent from `allkeys.txt`), then assigns super-Fibonacci S³
+>   coordinates **by that rank** — so collation-adjacent codepoints land near
+>   each other on the glome.
+> - **liblaplace_core is fully decoupled from UCD source**: it compiles **no**
+>   generated tables and has no UCD/UCA build dependency. The runtime
+>   `codepoint_table` loader mmaps the blob; the UAX#29/UAX#15 state machines
+>   read every property through `codepoint_table_*(cp)`. (The earlier
+>   `ucd_tables.generated.{h,c}` codegen that compiled tables *into* the .so is
+>   retired.) Verified: `ldd liblaplace_core.so` shows no MKL/TBB/xml/blake3
+>   runtime dep, and `nm -D` shows no `laplace_ucd_*` symbols.
+> - **Deployment-profile embedding (`.rodata` via objcopy, `LAPLACE_PERFCACHE_
+>   DEPLOYMENT` modes) is not yet wired.** The blob currently installs
+>   side-by-side at `share/laplace/laplace_t0_perfcache_<ver>.bin` and is
+>   consumed by the conformance test suite (a GoogleTest global environment
+>   mmaps it before any test runs). `codepoint_table_load_perfcache(NULL)`
+>   reserves the future embedded-section path (returns -1 until wired).
+> - **Justfile target is `laplace_t0_perfcache`** (`just build-perfcache` runs
+>   `cmake --build build --target laplace_t0_perfcache`). The
+>   `laplace_verify_perfcache_vs_db` cross-verify target is still future work
+>   (needs the DB-seed half of UnicodeDecomposer).
+> - **Pinned version is UCD/UCA 17.0.0** (latest stable), not the 16.0.0 shown
+>   in the original Justfile snippet — per RULES R7, the pin MUST be a stable
+>   release (18.0.0 is alpha until ~2026-09).
 
 ## Context
 

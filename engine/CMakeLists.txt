@@ -69,7 +69,26 @@ if(NOT EXISTS "${LAPLACE_UCD_CONFORMANCE_DIR}/auxiliary/GraphemeBreakTest.txt")
         "  ${LAPLACE_UCD_CONFORMANCE_DIR}\n"
         "Override -DLAPLACE_UCD_CONFORMANCE_DIR=... to the ucd/ subdir.")
 endif()
+
+# === UCA / DUCET (collation ordering for the super-Fibonacci index) ===
+# The perf-cache emitter ranks every codepoint by its DUCET collation key
+# (allkeys.txt) and assigns super-Fibonacci S^3 coords by that rank, so
+# collation-adjacent codepoints land near each other on the glome. UCA
+# version tracks the Unicode version (same release train) and is pinned to
+# stable for the same RULES R7 determinism reason as LAPLACE_UNICODE_VERSION.
+set(LAPLACE_UCA_VERSION "${LAPLACE_UNICODE_VERSION}"
+    CACHE STRING "UCA (collation) version. Defaults to the Unicode version; MUST be stable.")
+set(LAPLACE_DUCET_FILE "${LAPLACE_UCD_PATH}/uca/allkeys.txt"
+    CACHE FILEPATH "DUCET allkeys.txt for the pinned UCA version.")
+if(NOT EXISTS "${LAPLACE_DUCET_FILE}")
+    message(FATAL_ERROR
+        "LAPLACE_DUCET_FILE not found:\n"
+        "  ${LAPLACE_DUCET_FILE}\n"
+        "Override -DLAPLACE_DUCET_FILE=... to allkeys.txt\n"
+        "(download from https://www.unicode.org/Public/UCA/${LAPLACE_UCA_VERSION}/allkeys.txt).")
+endif()
 message(STATUS "Laplace UCD: version=${LAPLACE_UNICODE_VERSION} xml=${LAPLACE_UCDXML_ZIP}")
+message(STATUS "Laplace UCA: version=${LAPLACE_UCA_VERSION} ducet=${LAPLACE_DUCET_FILE}")
 
 if(NOT EXISTS "${LAPLACE_EXTERNAL}/eigen/Eigen/Dense")
     message(FATAL_ERROR

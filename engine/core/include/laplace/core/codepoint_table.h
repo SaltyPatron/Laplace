@@ -5,6 +5,7 @@
 #include "laplace/core/hash128.h"
 #include "laplace/core/hilbert4d.h"
 #include "laplace/core/perfcache_format.h"
+#include "laplace/core/ucd_property_values.h"
 
 #ifdef __cplusplus
 extern "C" {

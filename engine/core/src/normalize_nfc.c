@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ucd_tables.generated.h"
+#include "laplace/core/codepoint_table.h"
 
 /* Hangul syllable constants per Unicode standard §3.12 + UAX #15. */
 #define HANGUL_S_BASE  0xAC00u
@@ -66,11 +66,14 @@ static void decompose_into(uint32_t cp, uint32_t** buf, size_t* len, size_t* cap
         for (size_t i = 0; i < hg_len; ++i) decompose_into(hg[i], buf, len, cap);
         return;
     }
-    /* Generated table lookup */
-    uint32_t start_idx = 0, length = 0;
-    if (laplace_ucd_decomp_lookup(cp, &start_idx, &length) && length > 0) {
+    /* Perf-cache canonical decomposition. The blob stores the FULL
+     * recursive decomposition already; recursing here on terminal
+     * codepoints simply appends them (each has no further mapping). */
+    const uint32_t* seq = NULL;
+    uint32_t length = 0;
+    if (codepoint_table_decompose(cp, &seq, &length) && length > 0) {
         for (uint32_t i = 0; i < length; ++i) {
-            decompose_into(laplace_ucd_decomp_data[start_idx + i], buf, len, cap);
+            decompose_into(seq[i], buf, len, cap);
         }
         return;
     }
@@ -93,15 +96,15 @@ static void canonical_reorder(uint32_t* buf, size_t len) {
     /* Walk and find runs where all CCCs > 0; sort each run. */
     size_t i = 0;
     while (i < len) {
-        if (laplace_ucd_ccc_lookup(buf[i]) == 0) { i += 1; continue; }
+        if (codepoint_table_ccc(buf[i]) == 0) { i += 1; continue; }
         size_t j = i;
-        while (j < len && laplace_ucd_ccc_lookup(buf[j]) != 0) j += 1;
+        while (j < len && codepoint_table_ccc(buf[j]) != 0) j += 1;
         /* sort buf[i..j) by CCC */
         for (size_t k = i + 1; k < j; ++k) {
             uint32_t kv = buf[k];
-            uint8_t  kc = laplace_ucd_ccc_lookup(kv);
+            uint8_t  kc = codepoint_table_ccc(kv);
             size_t   m = k;
-            while (m > i && laplace_ucd_ccc_lookup(buf[m - 1]) > kc) {
+            while (m > i && codepoint_table_ccc(buf[m - 1]) > kc) {
                 buf[m] = buf[m - 1];
                 m -= 1;
             }
@@ -136,7 +139,7 @@ static size_t canonical_compose(uint32_t* buf, size_t len) {
     size_t read = 0;
     while (read < len) {
         uint32_t cp = buf[read];
-        uint8_t  cc = laplace_ucd_ccc_lookup(cp);
+        uint8_t  cc = codepoint_table_ccc(cp);
 
         if (!has_starter) {
             /* No starter yet (we may be in leading non-starters). Output cp as-is. */
@@ -162,7 +165,7 @@ static size_t canonical_compose(uint32_t* buf, size_t len) {
         int composed_ok = 0;
         if (!blocked) {
             if (hangul_compose(starter, cp, &composed)) composed_ok = 1;
-            else if (laplace_ucd_compose_lookup(starter, cp, &composed)) composed_ok = 1;
+            else if (codepoint_table_compose(starter, cp, &composed)) composed_ok = 1;
         }
 
         if (composed_ok) {
