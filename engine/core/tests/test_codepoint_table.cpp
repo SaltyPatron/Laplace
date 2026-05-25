@@ -70,6 +70,18 @@ TEST(LaplaceCoreCodepointTable, CanonicalComposition) {
     EXPECT_EQ(codepoint_table_compose(0x41u, 0x42u, &composed), 0);
 }
 
+TEST(LaplaceCoreCodepointTable, BulkRecordsExposesWholeArray) {
+    const codepoint_entry_t* recs = nullptr;
+    uint64_t count = 0;
+    ASSERT_EQ(codepoint_table_records(&recs, &count), 0);
+    ASSERT_NE(recs, nullptr);
+    EXPECT_EQ(count, 1114112u);
+    /* Same region direct-index lookup sees: record i is codepoint i. */
+    EXPECT_EQ(recs[0x41].codepoint, 0x41u);
+    EXPECT_EQ(&recs[0x41], codepoint_table_lookup(0x41u));
+    EXPECT_EQ(recs[count - 1].codepoint, 0x10FFFFu);
+}
+
 TEST(LaplaceCoreCodepointTable, RejectsBadPath) {
     /* Loading a non-existent path fails without disturbing the live table. */
     EXPECT_EQ(codepoint_table_load_perfcache("/nonexistent/perfcache.bin"), -1);

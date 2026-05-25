@@ -47,6 +47,13 @@ int codepoint_table_is_loaded(void);
  * Returned pointer valid until unload/reload. */
 const codepoint_entry_t* codepoint_table_lookup(uint32_t codepoint);
 
+/* Bulk access to the whole records array — the T0 DB-seed / ETL path
+ * iterates all 1,114,112 records with zero per-record interop. Writes the
+ * base pointer + count; returns 0 on success, -1 if no table is loaded.
+ * The pointer is the same mmap'd region codepoint_table_lookup indexes and
+ * is valid until unload/reload. Record i is codepoint i. */
+int codepoint_table_records(const codepoint_entry_t** out_records, uint64_t* out_count);
+
 /* Property accessors (unpack flags). Return the value id, or DEFAULT (0)
  * when no table loaded / cp out of range. Ids per ucd_property_values.h. */
 uint8_t codepoint_table_gb(uint32_t codepoint);

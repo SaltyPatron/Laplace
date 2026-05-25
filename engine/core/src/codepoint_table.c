@@ -100,6 +100,13 @@ const codepoint_entry_t* codepoint_table_lookup(uint32_t cp) {
     return &g_pc.records[cp];   /* direct index: record i is codepoint i */
 }
 
+int codepoint_table_records(const codepoint_entry_t** out_records, uint64_t* out_count) {
+    if (g_pc.records == NULL) return -1;
+    if (out_records) *out_records = g_pc.records;
+    if (out_count)   *out_count = g_pc.record_count;
+    return 0;
+}
+
 uint8_t codepoint_table_gb(uint32_t cp) {
     const codepoint_entry_t* e = codepoint_table_lookup(cp);
     return e ? laplace_pc_gb(e->flags) : 0;
