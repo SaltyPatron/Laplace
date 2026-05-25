@@ -56,6 +56,20 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "hilbert128_compare")]
     internal static partial int Hilbert128Compare(Hilbert128* a, Hilbert128* b);
 
+    // === codepoint_table (engine/core/include/laplace/core/codepoint_table.h) ===
+
+    [LibraryImport(Library, EntryPoint = "codepoint_table_load_perfcache", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int CodepointTableLoadPerfcache(string path);
+
+    [LibraryImport(Library, EntryPoint = "codepoint_table_unload")]
+    internal static partial void CodepointTableUnload();
+
+    [LibraryImport(Library, EntryPoint = "codepoint_table_is_loaded")]
+    internal static partial int CodepointTableIsLoaded();
+
+    [LibraryImport(Library, EntryPoint = "codepoint_table_records")]
+    internal static partial int CodepointTableRecords(CodepointRecord** outRecords, ulong* outCount);
+
     // === tier_tree (engine/core/include/laplace/core/tier_tree.h) ===
 
     [LibraryImport(Library, EntryPoint = "tier_tree_new")]
