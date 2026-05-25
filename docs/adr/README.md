@@ -76,6 +76,19 @@ Never renumber existing ADRs. If an ADR is superseded, the new one gets the next
 | 0044 | [Attestation-kind priors + source-trust-class taxonomy](0044-attestation-kind-priors-and-source-trust-taxonomy.md) | Accepted |
 | 0045 | [`laplace_admin` is a SUPERUSER; supersedes the `laplace_priv` SECURITY DEFINER wrapper pattern](0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md) | Accepted (supersedes wrapper architecture; affects Epic B + Epic B′) |
 | 0046 | [`/opt/laplace/external/` as the canonical source for dependency checkouts](0046-persistent-submodule-cache.md) | Accepted (amends 0033 + 0038) |
+| 0047 | [TextDecomposer — pure text-decomposition primitive (NFC + UAX#29 → TierTree)](0047-text-decomposer-pure-primitive.md) | Proposed |
+| 0048 | [HashComposer — leaf-to-trunk content-addressing primitive](0048-hash-composer-leaf-to-trunk.md) | Proposed |
+| 0049 | [SubstrateChange — the unified intent type between decomposers and SubstrateCRUD](0049-substrate-change-intent-type.md) | Proposed |
+| 0050 | [SubstrateCRUD — the shared substrate write surface](0050-substrate-crud-write-surface.md) | Proposed |
+| 0051 | [IDecomposer C# plugin contract — the per-source decomposer interface](0051-idecomposer-csharp-plugin-contract.md) | Proposed |
+| 0052 | [Ingest pipeline orchestration — IngestRunner composes the three stages](0052-ingest-pipeline-orchestration.md) | Proposed |
+| 0053 | [Perfcache compile-time build pipeline — CMake stage producing the binary as a deployment artifact](0053-perfcache-compile-time-build-pipeline.md) | Proposed |
+| 0054 | [Selective deployment profiles — embedded / read-only-server / full-server](0054-selective-deployment-profiles.md) | Proposed |
+| 0055 | [Static structural parse / exploded view — universal container dissection (substrate never loads files)](0055-static-structural-parse-exploded-view.md) | Proposed |
+| 0056 | [Weight-tensor static ETL as arena-matchup observation — universal model-ingest extraction pattern](0056-weight-tensor-etl-as-arena-matchup-observation.md) | Proposed |
+| 0057 | [Substrate emission discipline — product yes, packaging no (universal Food principle at the emission boundary)](0057-substrate-emission-discipline-product-not-packaging.md) | Proposed |
+| 0058 | [Canonicality criterion for ingestible sources — substrate ingests canonical; derived/lossy is emit-only](0058-canonicality-criterion-for-ingestible-sources.md) | Proposed |
+| 0059 | [Format-writer emission matrix + IFormatWriter C# plugin contract](0059-format-writer-emission-matrix-and-ifw-contract.md) | Proposed |
 
 ## Workflow
 

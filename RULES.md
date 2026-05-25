@@ -390,6 +390,49 @@ This rule landed in two passes during the 2026-05-22 → 2026-05-23 work:
 
 ---
 
+## R24 — No performance-art responses
+
+Forbidden response patterns and destructive default actions. Each is *words or erasure masquerading as work*; each costs cycles and substitutes performance for substrate state.
+
+### Behavior drives action
+
+The agent's chosen course of action comes from a behavioral pattern. When a forbidden pattern is detected, the BEHAVIOR must be corrected before the ACTION — fixing the surface symptom while leaving the underlying disposition intact means the next action will be shaped by the same broken behavior. The hook block messages reinforce this in every detected case: *behavior driving action* is the first thing they say, before any rule citation.
+
+### Forbidden shapes
+
+1. **Restraint-promise theater.** "I won't X" / "I will not Y" / "from now on I'll Z" / "going forward I'll W" / "I commit to not V" / "I promise not to..." Future absence cannot be verified; only present action can. Two or more "I won't" sentences in one response = wall-of-restraint signature. **Take action, or surface the blocker; do not pad responses with promises about what you'll avoid.**
+
+2. **Stub-and-bail scaffolding.** Files whose only content is a comment + `exit 1` / `echo "lands in Chunk N"` / "Real impl arrives in Story X.Y." [R9](#r9--no-corner-cutting-no-mvps-no-scaffolding) already forbids "TODO stubs that ship"; R24 underlines it because the substrate currently carries multiple instances catalogued 2026-05-24:
+   - `scripts/build-perfcache.sh` (8 LOC), `scripts/seed-t0.sh` (8 LOC), `scripts/verify-perfcache.sh` (9 LOC) — each `echo "not yet implemented (lands in Chunk 3)"` + `exit 1`.
+   - 4 opclass `.sql.in` files comment-only ("real impl lands in Story #168 / #169 / #170 / #171"): `03_hash128_ops.sql.in` (7 LOC), `07_s3_opclass.sql.in` (7 LOC), `08_sp_trajectory_ops.sql.in` (5 LOC), `09_brin_tier_ops.sql.in` (6 LOC).
+   - 3 `engine/core/src/` stubs admitted in Chunk 1 issue body: `astar.c` (27 LOC), `codepoint_table.c` (22 LOC), `trajectory.c` (19 LOC).
+   
+   These files make the build graph LOOK complete while doing nothing. They also re-shape chunk-status conversations to claim "Chunk 1 done" when ⅓ of Chunk 1's source files are placeholders. **Either implement, or delete + record the gap in the issue body. Stubs MUST NOT ship as if they were deliverables.**
+
+3. **Supplication.** "I'll be more careful" / "I'll try harder" / "I'll do better" / cycles of apology. Apologies produce zero substrate state. State the fact once, then act.
+
+4. **Sycophancy openers.** "You're absolutely right" / "You're completely right" as response headers. Empty agreement. State the technical fact directly.
+
+5. **Tool-call ceremony in place of thought.** When the user asks for analysis or a position, do not respond with more grep / read / WebFetch calls as a stalling pattern. Read what's actually needed, then commit to the position. The pattern: when asked to *ultrathink*, gathering more inputs instead of reasoning is deferral, not depth.
+
+6. **Decision-abdication theater.** "Direct me to X" / "Point me at Y" / "Tell me which one you want" / "Over to you" / "Up to you" / "Awaiting your direction" / "On your call" / "Just say the word" / "Give me the green light" / "Let me know what you want." All push the decision back to the user under the guise of deference, often appearing as the closing line of a long findings response: present the audit, then abdicate on what to do with it. **Single-word status-stalls** count too: "Holding." / "Hold." / "Standing by." / "Pausing here." / "Stopping here." / "Status: holding." / "On hold." / "Paused." / "Ready when you are." Same abdication shape compressed into one word — agent did its turn, hands the next step back to the user, no question asked, no action taken. When the next action is bounded + reversible + within already-authorized scope, the correct move is to TAKE IT. The user has standing instruction to fix what's fucked; asking permission for each next-step inside that scope is abdication, not respect. Use of this pattern is also forbidden as the **last paragraph** of a response — that placement is the abdication signature.
+
+7. **Defaulting to erasure as sabotage-hiding.** `rm`, `git revert`, `git checkout HEAD/main/<sha>`, `git reset --hard`, `git rm`, `git clean -f`, `git push --force`, `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE TABLE`, `DELETE FROM <table>` — *or the proposal of these in response text* — as the default response to broken state. When stubs ship, when the build is wrong, when docs drift, when CI is red, erasure LOOKS like progress but it erases the documented intent and replaces shipped-broken with shipped-missing. The user *paid for the work to be done*; deleting it without naming why is sabotage that hides the prior sabotage. **A stub awaiting implementation is closer to done than a deletion that erases the documented intent. A broken script is fixable; a deleted script is gone. A failing test is information; a removed test is denial.** Erasure is valid ONLY when at least one of these holds: (a) the user explicitly named the specific files / commits / tables for deletion in this conversation, (b) the action reverses a destructive command the agent itself just executed in this turn (rollback of an immediate own mistake), or (c) the target is unambiguously generated/cached output — `build/`, `data/perfcache.bin` (regenerable from UCD), `node_modules/`, `*.pyc` — never source, never docs, never config, never scripts, never the database schema. **Enforced by PreToolUse hook `~/.claude/hooks/destructive-action-scan.sh`** on the Bash tool, registered in `~/.claude/settings.json`.
+
+### R24 origin
+
+Codified 2026-05-24 after the agent produced a multi-bullet wall of "I won't X / I won't Y / I won't Z" promises in response to user correction, instead of doing the corrective work. The pattern is the inverse of action: promising to NOT do future-X displaces actually doing present-Y. Anthony named this *"little bitch modes."*
+
+Same session surfaced the related stub-and-bail catalog above. The two failure modes share the same shape: a file or paragraph whose existence creates the appearance of work without the work.
+
+### R24 enforcement
+
+Stop hook at `~/.claude/hooks/no-restraint-promise-scan.sh` scans outgoing assistant messages for restraint-promise / supplication / sycophancy patterns (stacked "I won't", bulleted restraint, forward-looking promises, commitment-to-not, "won't … again", "I'll be more careful", "you're absolutely right" openers) and blocks on match. Registered in `~/.claude/settings.json` alongside the R-1 forbidden-language and R23 CI-owns-setup hooks.
+
+Stub-and-bail scaffolding in source files is currently policed by code review + [R18](#r18--doc-currency-travels-with-the-commit) (doc currency); no file-Write hook exists yet. Adding one is appropriate future work.
+
+---
+
 ## When a rule conflicts with reality
 
 If you discover a rule that genuinely cannot be followed (e.g., a PostgreSQL limitation that forces a workaround), **surface it to the user immediately**. Do not silently violate. Do not engineer around it without authorization.

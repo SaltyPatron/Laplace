@@ -1,28 +1,28 @@
 // engine/core/tools/ucd_tables_emit/main.cpp
 //
-// Build-time codegen: reads UCDXML (UAX #42 schema) via libxml2 SAX and
-// emits compact C lookup tables for UAX#29 (Grapheme / Word / Sentence
-// break) + UAX #15 (NFC: CCC + canonical decomposition + composition
-// exclusion).
+// Perf-cache emitter (ADR 0006 + ADR 0053). Reads UCDXML (UAX#42) +
+// DUCET (UCA allkeys.txt) and writes the T0 codepoint perf-cache BINARY
+// blob: per-codepoint { hash, uca_order, coord (super-Fibonacci on S^3),
+// hilbert, packed GB/WB/SB/InCB/CCC } + canonical decomposition +
+// composition side-tables.
 //
-// UCDXML is the substrate's canonical UCD parse path (GLOSSARY:
-// "Primary parse path: UCDXML"). One XML pass replaces parsing 5+
-// separate .txt files. The same XML feeds both this engine codegen
-// (subset of properties) and the future UnicodeDecomposer #183
-// (full property surface + Unihan via the all-flat variant).
+// This is UnicodeDecomposer's build-time half. The blob is APP/reference
+// data — the runtime (TextDecomposer + HashComposer) mmaps it to compute
+// T>0 without the DB, and it deploys standalone to mobile/embedded. The
+// sibling install-time half (1.1M codepoint entity + physicality DB seed,
+// no complex attestations) reads the same derivation via SubstrateChange.
+//
+// Determinism (RULES R7): same UCDXML + same DUCET + same emit source ->
+// byte-identical blob.
 //
 // Usage:
 //   laplace_ucd_tables_emit \
 //       --ucdxml      .../ucd.nounihan.flat.xml \
-//       --out-header  .../ucd_tables.generated.h \
-//       --out-source  .../ucd_tables.generated.c \
-//       --version     17.0.0
-//
-// Determinism (RULES R7): same UCDXML + same emit-tool source ->
-// byte-identical generated files.
+//       --ducet       .../allkeys.txt \
+//       --ucd-version 17.0.0 --uca-version 17.0.0 \
+//       --output      .../perfcache.bin
 
 #include <algorithm>
-#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -30,467 +30,397 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
-#include <iostream>
-#include <map>
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 #include <libxml/parser.h>
 #include <libxml/SAX2.h>
 
+#include "laplace/core/hash128.h"
+#include "laplace/core/hilbert4d.h"
+#include "laplace/core/super_fibonacci.h"
+#include "laplace/core/perfcache_format.h"
+#include "laplace/core/ucd_property_values.h"
+
 namespace fs = std::filesystem;
 
+static const uint32_t CP_COUNT = LAPLACE_PERFCACHE_RECORD_COUNT;  // 0x110000
+
 // ===== CLI =====
-
-struct Cli {
-    fs::path ucdxml;
-    fs::path out_header;
-    fs::path out_source;
-    std::string version;
-};
-
+struct Cli { fs::path ucdxml, ducet, output; std::string ucd_version, uca_version; };
 static Cli parse_cli(int argc, char** argv) {
-    Cli cli;
+    Cli c;
     for (int i = 1; i < argc; ++i) {
         std::string_view a = argv[i];
-        auto next = [&]() -> std::string {
-            if (i + 1 >= argc) { std::fprintf(stderr, "%s needs a value\n", argv[i]); std::exit(2); }
+        auto nx = [&]() -> std::string {
+            if (i + 1 >= argc) { std::fprintf(stderr, "%s needs value\n", argv[i]); std::exit(2); }
             return argv[++i];
         };
-        if      (a == "--ucdxml")     cli.ucdxml     = next();
-        else if (a == "--out-header") cli.out_header = next();
-        else if (a == "--out-source") cli.out_source = next();
-        else if (a == "--version")    cli.version    = next();
+        if      (a == "--ucdxml")      c.ucdxml = nx();
+        else if (a == "--ducet")       c.ducet = nx();
+        else if (a == "--output")      c.output = nx();
+        else if (a == "--ucd-version") c.ucd_version = nx();
+        else if (a == "--uca-version") c.uca_version = nx();
         else { std::fprintf(stderr, "unknown arg %s\n", argv[i]); std::exit(2); }
     }
-    if (cli.ucdxml.empty() || cli.out_header.empty() || cli.out_source.empty()) {
-        std::fprintf(stderr, "required: --ucdxml --out-header --out-source\n");
-        std::exit(2);
+    if (c.ucdxml.empty() || c.ducet.empty() || c.output.empty()) {
+        std::fprintf(stderr, "required: --ucdxml --ducet --output\n"); std::exit(2);
     }
-    return cli;
+    return c;
 }
 
-// ===== Property value alias maps (UCDXML short -> long) =====
-
-static const std::unordered_map<std::string, std::string>& gcb_map() {
-    static const std::unordered_map<std::string, std::string> m = {
-        {"XX", "Other"}, {"PP", "Prepend"}, {"CR", "CR"}, {"LF", "LF"},
-        {"CN", "Control"}, {"EX", "Extend"}, {"RI", "Regional_Indicator"},
-        {"SM", "SpacingMark"}, {"L", "L"}, {"V", "V"}, {"T", "T"},
-        {"LV", "LV"}, {"LVT", "LVT"}, {"ZWJ", "ZWJ"},
+// ===== short-code -> fixed id maps =====
+static uint8_t map_gb(const char* s) {
+    static const std::unordered_map<std::string, uint8_t> m = {
+        {"XX",LAPLACE_GB_OTHER},{"CR",LAPLACE_GB_CR},{"LF",LAPLACE_GB_LF},
+        {"CN",LAPLACE_GB_CONTROL},{"EX",LAPLACE_GB_EXTEND},{"ZWJ",LAPLACE_GB_ZWJ},
+        {"RI",LAPLACE_GB_REGIONAL_INDICATOR},{"PP",LAPLACE_GB_PREPEND},
+        {"SM",LAPLACE_GB_SPACINGMARK},{"L",LAPLACE_GB_L},{"V",LAPLACE_GB_V},
+        {"T",LAPLACE_GB_T},{"LV",LAPLACE_GB_LV},{"LVT",LAPLACE_GB_LVT},
     };
-    return m;
+    auto it = m.find(s); return it == m.end() ? (uint8_t)LAPLACE_GB_OTHER : it->second;
 }
-static const std::unordered_map<std::string, std::string>& wb_map() {
-    static const std::unordered_map<std::string, std::string> m = {
-        {"XX", "Other"}, {"DQ", "Double_Quote"}, {"SQ", "Single_Quote"},
-        {"HL", "Hebrew_Letter"}, {"LE", "ALetter"}, {"NU", "Numeric"},
-        {"EX", "ExtendNumLet"}, {"ML", "MidLetter"}, {"MB", "MidNumLet"},
-        {"MN", "MidNum"}, {"KA", "Katakana"}, {"RI", "Regional_Indicator"},
-        {"CR", "CR"}, {"LF", "LF"}, {"NL", "Newline"}, {"ZWJ", "ZWJ"},
-        {"FO", "Format"}, {"Extend", "Extend"}, {"WSegSpace", "WSegSpace"},
+static uint8_t map_wb(const char* s) {
+    static const std::unordered_map<std::string, uint8_t> m = {
+        {"XX",LAPLACE_WB_OTHER},{"CR",LAPLACE_WB_CR},{"LF",LAPLACE_WB_LF},
+        {"NL",LAPLACE_WB_NEWLINE},{"Extend",LAPLACE_WB_EXTEND},{"ZWJ",LAPLACE_WB_ZWJ},
+        {"RI",LAPLACE_WB_REGIONAL_INDICATOR},{"FO",LAPLACE_WB_FORMAT},
+        {"KA",LAPLACE_WB_KATAKANA},{"HL",LAPLACE_WB_HEBREW_LETTER},{"LE",LAPLACE_WB_ALETTER},
+        {"SQ",LAPLACE_WB_SINGLE_QUOTE},{"DQ",LAPLACE_WB_DOUBLE_QUOTE},
+        {"MB",LAPLACE_WB_MIDNUMLET},{"ML",LAPLACE_WB_MIDLETTER},{"MN",LAPLACE_WB_MIDNUM},
+        {"NU",LAPLACE_WB_NUMERIC},{"EX",LAPLACE_WB_EXTENDNUMLET},{"WSegSpace",LAPLACE_WB_WSEGSPACE},
     };
-    return m;
+    auto it = m.find(s); return it == m.end() ? (uint8_t)LAPLACE_WB_OTHER : it->second;
 }
-static const std::unordered_map<std::string, std::string>& sb_map() {
-    static const std::unordered_map<std::string, std::string> m = {
-        {"XX", "Other"}, {"EX", "Extend"}, {"FO", "Format"}, {"SP", "Sp"},
-        {"LO", "Lower"}, {"UP", "Upper"}, {"LE", "OLetter"}, {"NU", "Numeric"},
-        {"AT", "ATerm"}, {"ST", "STerm"}, {"CL", "Close"}, {"SC", "SContinue"},
-        {"SE", "Sep"}, {"CR", "CR"}, {"LF", "LF"},
+static uint8_t map_sb(const char* s) {
+    static const std::unordered_map<std::string, uint8_t> m = {
+        {"XX",LAPLACE_SB_OTHER},{"CR",LAPLACE_SB_CR},{"LF",LAPLACE_SB_LF},
+        {"EX",LAPLACE_SB_EXTEND},{"SE",LAPLACE_SB_SEP},{"FO",LAPLACE_SB_FORMAT},
+        {"SP",LAPLACE_SB_SP},{"LO",LAPLACE_SB_LOWER},{"UP",LAPLACE_SB_UPPER},
+        {"LE",LAPLACE_SB_OLETTER},{"NU",LAPLACE_SB_NUMERIC},{"AT",LAPLACE_SB_ATERM},
+        {"SC",LAPLACE_SB_SCONTINUE},{"ST",LAPLACE_SB_STERM},{"CL",LAPLACE_SB_CLOSE},
     };
-    return m;
+    auto it = m.find(s); return it == m.end() ? (uint8_t)LAPLACE_SB_OTHER : it->second;
+}
+static uint8_t map_incb(const char* s) {
+    if (std::strcmp(s, "Consonant") == 0) return LAPLACE_INCB_CONSONANT;
+    if (std::strcmp(s, "Linker") == 0)    return LAPLACE_INCB_LINKER;
+    if (std::strcmp(s, "Extend") == 0)    return LAPLACE_INCB_EXTEND;
+    return LAPLACE_INCB_NONE;
 }
 
-static std::string translate(const std::unordered_map<std::string, std::string>& m,
-                             const std::string& short_val) {
-    auto it = m.find(short_val);
-    if (it != m.end()) return it->second;
-    return short_val;  // InCB values are already long form
-}
-
-// ===== Table representation =====
-
-struct RangeRecord { uint32_t start, end; uint8_t prop_id; };
-
-struct PropTable {
-    std::string              name;
-    std::vector<std::string> labels;
-    std::vector<RangeRecord> records;
-    uint8_t                  default_id;
+// ===== per-codepoint property arrays (direct-indexed) =====
+struct UcdData {
+    std::vector<uint8_t> gb, wb, sb, incb, ccc;
+    std::vector<uint8_t> ext_pict;
+    std::unordered_map<uint32_t, std::vector<uint32_t>> decomp;  // canonical (dt=can) only
+    std::vector<uint8_t> comp_ex;  // 1 if Comp_Ex=Y
+    UcdData() {
+        gb.assign(CP_COUNT, LAPLACE_GB_OTHER);
+        wb.assign(CP_COUNT, LAPLACE_WB_OTHER);
+        sb.assign(CP_COUNT, LAPLACE_SB_OTHER);
+        incb.assign(CP_COUNT, LAPLACE_INCB_NONE);
+        ccc.assign(CP_COUNT, 0);
+        ext_pict.assign(CP_COUNT, 0);
+        comp_ex.assign(CP_COUNT, 0);
+    }
 };
 
-static uint8_t intern_label(PropTable& t, const std::string& label) {
-    for (size_t i = 0; i < t.labels.size(); ++i)
-        if (t.labels[i] == label) return (uint8_t)i;
-    if (t.labels.size() >= 255) {
-        std::fprintf(stderr, "table %s exceeds 255 labels\n", t.name.c_str());
-        std::exit(4);
-    }
-    t.labels.push_back(label);
-    return (uint8_t)(t.labels.size() - 1);
-}
-
-static void coalesce(std::vector<RangeRecord>& rs) {
-    if (rs.empty()) return;
-    std::sort(rs.begin(), rs.end(),
-              [](const auto& a, const auto& b) { return a.start < b.start; });
-    std::vector<RangeRecord> out;
-    out.reserve(rs.size());
-    out.push_back(rs[0]);
-    for (size_t i = 1; i < rs.size(); ++i) {
-        auto& last = out.back();
-        if (rs[i].start == last.end + 1 && rs[i].prop_id == last.prop_id) last.end = rs[i].end;
-        else out.push_back(rs[i]);
-    }
-    rs = std::move(out);
-}
-
-struct NfcDecomp { uint32_t codepoint; std::vector<uint32_t> decomp; };
-struct NfcCompose { uint32_t first, second, composed; };
-
-// ===== SAX state =====
-
-struct SaxState {
-    PropTable gb, wb, sb, incb;
-    std::vector<std::pair<uint32_t, uint8_t>> ccc_pairs;
-    std::unordered_map<uint32_t, std::vector<uint32_t>> base_decomp;
-    std::vector<uint32_t> excluded;
-    bool in_repertoire = false;
-};
-
-static const xmlChar* get_attr(const xmlChar** attrs, const char* name) {
-    if (!attrs) return nullptr;
-    for (int i = 0; attrs[i]; i += 2)
-        if (std::strcmp((const char*)attrs[i], name) == 0) return attrs[i + 1];
+static const xmlChar* attr(const xmlChar** a, const char* n) {
+    if (!a) return nullptr;
+    for (int i = 0; a[i]; i += 2) if (std::strcmp((const char*)a[i], n) == 0) return a[i+1];
     return nullptr;
 }
 
-static std::pair<uint32_t, uint32_t> get_cp_range(const xmlChar** attrs) {
-    auto cp = get_attr(attrs, "cp");
-    if (cp) {
-        uint32_t v = (uint32_t)std::stoul((const char*)cp, nullptr, 16);
-        return {v, v};
+struct SaxCtx { UcdData* d; bool in_rep = false; };
+
+extern "C" void on_start(void* u, const xmlChar* name, const xmlChar** a) {
+    auto* ctx = (SaxCtx*)u;
+    if (std::strcmp((const char*)name, "repertoire") == 0) { ctx->in_rep = true; return; }
+    if (!ctx->in_rep) return;
+    const char* nm = (const char*)name;
+    if (std::strcmp(nm,"char") && std::strcmp(nm,"reserved")
+     && std::strcmp(nm,"noncharacter") && std::strcmp(nm,"surrogate")) return;
+
+    uint32_t first, last;
+    auto cp = attr(a, "cp");
+    if (cp) { first = last = (uint32_t)std::stoul((const char*)cp, nullptr, 16); }
+    else {
+        auto f = attr(a, "first-cp"); auto l = attr(a, "last-cp");
+        if (!f || !l) return;
+        first = (uint32_t)std::stoul((const char*)f, nullptr, 16);
+        last  = (uint32_t)std::stoul((const char*)l, nullptr, 16);
     }
-    auto first = get_attr(attrs, "first-cp");
-    auto last  = get_attr(attrs, "last-cp");
-    if (first && last)
-        return { (uint32_t)std::stoul((const char*)first, nullptr, 16),
-                 (uint32_t)std::stoul((const char*)last, nullptr, 16) };
-    return {0xFFFFFFFFu, 0xFFFFFFFFu};
+    if (last >= CP_COUNT) return;
+
+    UcdData* d = ctx->d;
+    auto gcb = attr(a,"GCB"); auto wbv = attr(a,"WB"); auto sbv = attr(a,"SB");
+    auto inc = attr(a,"InCB"); auto cccv = attr(a,"ccc");
+    auto ep = attr(a,"ExtPict"); auto dt = attr(a,"dt"); auto dm = attr(a,"dm");
+    auto cex = attr(a,"Comp_Ex");
+
+    uint8_t gbid = gcb ? map_gb((const char*)gcb) : LAPLACE_GB_OTHER;
+    if (ep && std::strcmp((const char*)ep,"Y")==0) gbid = LAPLACE_GB_EXTENDED_PICTOGRAPHIC;
+    uint8_t wbid = wbv ? map_wb((const char*)wbv) : LAPLACE_WB_OTHER;
+    uint8_t sbid = sbv ? map_sb((const char*)sbv) : LAPLACE_SB_OTHER;
+    uint8_t inid = inc ? map_incb((const char*)inc) : LAPLACE_INCB_NONE;
+    uint8_t ccv  = cccv ? (uint8_t)std::stoul((const char*)cccv, nullptr, 10) : 0;
+    uint8_t epv  = (ep && std::strcmp((const char*)ep,"Y")==0) ? 1 : 0;
+    uint8_t cxv  = (cex && std::strcmp((const char*)cex,"Y")==0) ? 1 : 0;
+
+    for (uint32_t c = first; c <= last; ++c) {
+        d->gb[c]=gbid; d->wb[c]=wbid; d->sb[c]=sbid; d->incb[c]=inid;
+        d->ccc[c]=ccv; d->ext_pict[c]=epv; d->comp_ex[c]=cxv;
+    }
+    // Canonical decomposition (single cp only; dt=can)
+    if (first == last && dt && dm && std::strcmp((const char*)dt,"can")==0
+        && std::strcmp((const char*)dm,"#")!=0) {
+        std::vector<uint32_t> seq;
+        const char* p = (const char*)dm; char* e;
+        while (*p) { uint32_t v=(uint32_t)std::strtoul(p,&e,16); if(e==p)break; seq.push_back(v); p=e; while(*p==' ')++p; }
+        if (!seq.empty()) d->decomp[first] = seq;
+    }
+}
+extern "C" void on_end(void* u, const xmlChar* name) {
+    auto* ctx = (SaxCtx*)u;
+    if (std::strcmp((const char*)name,"repertoire")==0) ctx->in_rep = false;
 }
 
-static void handle_char_element(SaxState* st, const xmlChar** attrs) {
-    auto [first, last] = get_cp_range(attrs);
-    if (first == 0xFFFFFFFFu) return;
+// ===== DUCET → per-codepoint collation sort key =====
+// Sort key per cp: 64-bit (primary<<48 | secondary<<32 | tertiary<<16 | 0),
+// with codepoint as final tiebreak. Single-cp explicit entries read their
+// first CE's weights. Codepoints absent from allkeys get UCA §10.1.3
+// implicit weights (Han/Tangut/Nushu/Khitan/other bases).
+struct DucetKeys {
+    std::vector<uint64_t> key;       // collation sort key per cp
+    std::vector<uint8_t>  explicit_; // 1 if from allkeys, 0 if implicit
+    DucetKeys() { key.assign(CP_COUNT, 0); explicit_.assign(CP_COUNT, 0); }
+};
 
-    auto gcb_v  = get_attr(attrs, "GCB");
-    auto wb_v   = get_attr(attrs, "WB");
-    auto sb_v   = get_attr(attrs, "SB");
-    auto incb_v = get_attr(attrs, "InCB");
-    auto ccc_v  = get_attr(attrs, "ccc");
-    auto dt_v   = get_attr(attrs, "dt");
-    auto dm_v   = get_attr(attrs, "dm");
-    auto cex_v  = get_attr(attrs, "Comp_Ex");
-    auto ep_v   = get_attr(attrs, "ExtPict");
+struct ImplicitRange { uint32_t first, last; uint32_t base; };
 
-    if (gcb_v) {
-        std::string gcb = translate(gcb_map(), (const char*)gcb_v);
-        if (ep_v && std::strcmp((const char*)ep_v, "Y") == 0) gcb = "Extended_Pictographic";
-        st->gb.records.push_back({first, last, intern_label(st->gb, gcb)});
-    }
-    if (wb_v) {
-        std::string wb = translate(wb_map(), (const char*)wb_v);
-        st->wb.records.push_back({first, last, intern_label(st->wb, wb)});
-    }
-    if (sb_v) {
-        std::string sb = translate(sb_map(), (const char*)sb_v);
-        st->sb.records.push_back({first, last, intern_label(st->sb, sb)});
-    }
-    if (incb_v) {
-        std::string incb = (const char*)incb_v;
-        st->incb.records.push_back({first, last, intern_label(st->incb, incb)});
-    }
-    if (ccc_v && first == last) {
-        uint8_t cc = (uint8_t)std::stoul((const char*)ccc_v, nullptr, 10);
-        if (cc != 0) st->ccc_pairs.emplace_back(first, cc);
-    }
-    if (dt_v && dm_v && first == last) {
-        std::string dt = (const char*)dt_v;
-        std::string dm = (const char*)dm_v;
-        if (dt == "can" && dm != "#") {
-            std::vector<uint32_t> d;
-            const char* p = dm.c_str();
-            char* endp;
-            while (*p) {
-                uint32_t v = (uint32_t)std::strtoul(p, &endp, 16);
-                if (endp == p) break;
-                d.push_back(v);
-                p = endp;
-                while (*p == ' ') p += 1;
+static void parse_ducet(const fs::path& path, DucetKeys& dk) {
+    std::ifstream f(path);
+    if (!f) { std::fprintf(stderr, "cannot open DUCET %s\n", path.string().c_str()); std::exit(3); }
+    std::vector<ImplicitRange> implicit;
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.empty()) continue;
+        if (line[0] == '@') {
+            // @implicitweights FIRST..LAST; BASE
+            if (line.rfind("@implicitweights", 0) == 0) {
+                const char* p = line.c_str() + 16;
+                char* e;
+                uint32_t lo = (uint32_t)std::strtoul(p, &e, 16); p = e;
+                while (*p == '.' ) ++p;
+                uint32_t hi = (uint32_t)std::strtoul(p, &e, 16); p = e;
+                while (*p && *p != ';') ++p; if (*p==';') ++p;
+                uint32_t base = (uint32_t)std::strtoul(p, &e, 16);
+                implicit.push_back({lo, hi, base});
             }
-            if (!d.empty()) st->base_decomp[first] = d;
+            continue;
         }
+        if (line[0] == '#') continue;
+        // strip comment
+        size_t h = line.find('#'); if (h != std::string::npos) line = line.substr(0, h);
+        size_t semi = line.find(';'); if (semi == std::string::npos) continue;
+        // left of ; = codepoints; we only handle single-cp entries
+        std::string lhs = line.substr(0, semi);
+        // count tokens in lhs
+        const char* p = lhs.c_str(); char* e;
+        uint32_t cps[4]; int ncp = 0;
+        while (*p && ncp < 4) {
+            while (*p==' '||*p=='\t') ++p;
+            if (!*p) break;
+            uint32_t v = (uint32_t)std::strtoul(p, &e, 16);
+            if (e == p) break;
+            cps[ncp++] = v; p = e;
+        }
+        if (ncp != 1) continue;          // skip contractions
+        uint32_t cp = cps[0];
+        if (cp >= CP_COUNT) continue;
+        // first CE on rhs: [.PPPP.SSSS.TTTT] or [*PPPP....]
+        std::string rhs = line.substr(semi + 1);
+        size_t b = rhs.find('[');
+        if (b == std::string::npos) continue;
+        const char* q = rhs.c_str() + b + 1;
+        if (*q=='.'||*q=='*') ++q;
+        uint32_t pw = (uint32_t)std::strtoul(q, &e, 16); q = e; if (*q=='.') ++q;
+        uint32_t sw = (uint32_t)std::strtoul(q, &e, 16); q = e; if (*q=='.') ++q;
+        uint32_t tw = (uint32_t)std::strtoul(q, &e, 16);
+        dk.key[cp] = ((uint64_t)pw << 48) | ((uint64_t)sw << 32) | ((uint64_t)tw << 16);
+        dk.explicit_[cp] = 1;
     }
-    if (cex_v && std::strcmp((const char*)cex_v, "Y") == 0 && first == last)
-        st->excluded.push_back(first);
+    // Implicit weights for codepoints not explicitly listed (UCA §10.1.3).
+    auto base_for = [&](uint32_t cp) -> uint32_t {
+        for (const auto& r : implicit) if (cp >= r.first && cp <= r.last) return r.base;
+        // Core Han Unified + compat
+        if ((cp>=0x4E00&&cp<=0x9FFF)||(cp>=0xF900&&cp<=0xFAFF)) return 0xFB40;
+        // CJK extensions (A,B,...) + other ideographs
+        if ((cp>=0x3400&&cp<=0x4DBF)||(cp>=0x20000&&cp<=0x3FFFF)) return 0xFB80;
+        return 0xFBC0;  // all other unassigned
+    };
+    for (uint32_t cp = 0; cp < CP_COUNT; ++cp) {
+        if (dk.explicit_[cp]) continue;
+        uint32_t base = base_for(cp);
+        uint32_t AAAA = base + (cp >> 15);
+        uint32_t BBBB = (cp & 0x7FFF) | 0x8000;
+        dk.key[cp] = ((uint64_t)AAAA << 48) | ((uint64_t)BBBB << 16);
+    }
 }
 
-extern "C" void sax_start_element(void* user, const xmlChar* name, const xmlChar** attrs) {
-    auto* st = (SaxState*)user;
-    if (std::strcmp((const char*)name, "repertoire") == 0) { st->in_repertoire = true; return; }
-    if (!st->in_repertoire) return;
-    if (std::strcmp((const char*)name, "char") == 0
-     || std::strcmp((const char*)name, "reserved") == 0
-     || std::strcmp((const char*)name, "noncharacter") == 0
-     || std::strcmp((const char*)name, "surrogate") == 0)
-        handle_char_element(st, attrs);
+// ===== binary write helpers (little-endian) =====
+static void put_u32(std::vector<uint8_t>& b, uint32_t v) { for(int i=0;i<4;++i) b.push_back((uint8_t)(v>>(i*8))); }
+static void put_u64(std::vector<uint8_t>& b, uint64_t v) { for(int i=0;i<8;++i) b.push_back((uint8_t)(v>>(i*8))); }
+static void put_f64(std::vector<uint8_t>& b, double d) { uint64_t v; std::memcpy(&v,&d,8); put_u64(b,v); }
+static void put_h128(std::vector<uint8_t>& b, const hash128_t& h) {
+    const uint8_t* p = (const uint8_t*)&h; for (int i=0;i<16;++i) b.push_back(p[i]);
+}
+static void put_hb128(std::vector<uint8_t>& b, const hilbert128_t& h) {
+    for (int i=0;i<16;++i) b.push_back(h.bytes[i]);
 }
 
-extern "C" void sax_end_element(void* user, const xmlChar* name) {
-    auto* st = (SaxState*)user;
-    if (std::strcmp((const char*)name, "repertoire") == 0) st->in_repertoire = false;
-}
-
-// ===== Emission =====
-
-static std::string sanitize(const std::string& s) {
-    std::string out;
-    out.reserve(s.size());
-    for (char c : s)
-        out.push_back(std::isalnum((unsigned char)c) || c == '_'
-                      ? (char)std::toupper((unsigned char)c) : '_');
-    return out;
-}
-
-static void emit_table_header(std::ostream& h, const PropTable& t) {
-    h << "/* " << t.name << " property labels */\n";
-    for (size_t i = 0; i < t.labels.size(); ++i)
-        h << "#define LAPLACE_UCD_" << sanitize(t.name) << "_"
-          << sanitize(t.labels[i]) << " " << i << "u\n";
-    h << "#define LAPLACE_UCD_" << sanitize(t.name) << "_DEFAULT "
-      << (unsigned)t.default_id << "u\n\n";
-    h << "extern const laplace_ucd_range_t laplace_ucd_" << t.name << "_ranges[];\n";
-    h << "extern const size_t              laplace_ucd_" << t.name << "_count;\n";
-    h << "uint8_t laplace_ucd_" << t.name << "_lookup(uint32_t codepoint);\n\n";
-}
-
-static void emit_table_source(std::ostream& c, const PropTable& t) {
-    c << "const laplace_ucd_range_t laplace_ucd_" << t.name << "_ranges[] = {\n";
-    for (const auto& r : t.records)
-        c << "    { 0x" << std::hex << r.start << ", 0x" << r.end
-          << ", " << std::dec << (unsigned)r.prop_id << " },\n";
-    c << "};\n";
-    c << "const size_t laplace_ucd_" << t.name << "_count = " << t.records.size() << ";\n\n";
-    c << "uint8_t laplace_ucd_" << t.name << "_lookup(uint32_t cp) {\n"
-      << "    size_t lo = 0, hi = " << t.records.size() << ";\n"
-      << "    while (lo < hi) {\n"
-      << "        size_t mid = lo + ((hi - lo) >> 1);\n"
-      << "        const laplace_ucd_range_t* r = &laplace_ucd_" << t.name << "_ranges[mid];\n"
-      << "        if (cp < r->start) hi = mid;\n"
-      << "        else if (cp > r->end) lo = mid + 1;\n"
-      << "        else return r->prop_id;\n"
-      << "    }\n"
-      << "    return " << (unsigned)t.default_id << ";\n"
-      << "}\n\n";
+static size_t utf8_encode(uint32_t cp, uint8_t o[4]) {
+    if (cp < 0x80) { o[0]=(uint8_t)cp; return 1; }
+    if (cp < 0x800) { o[0]=0xC0|(cp>>6); o[1]=0x80|(cp&0x3F); return 2; }
+    if (cp < 0x10000) { o[0]=0xE0|(cp>>12); o[1]=0x80|((cp>>6)&0x3F); o[2]=0x80|(cp&0x3F); return 3; }
+    o[0]=0xF0|(cp>>18); o[1]=0x80|((cp>>12)&0x3F); o[2]=0x80|((cp>>6)&0x3F); o[3]=0x80|(cp&0x3F); return 4;
 }
 
 int main(int argc, char** argv) {
     Cli cli = parse_cli(argc, argv);
 
-    if (!fs::exists(cli.ucdxml)) {
-        std::fprintf(stderr, "UCDXML file not found: %s\n", cli.ucdxml.string().c_str());
-        return 3;
-    }
-
-    SaxState st;
-    st.gb.name = "gb";     st.gb.default_id   = intern_label(st.gb, "Other");
-    st.wb.name = "wb";     st.wb.default_id   = intern_label(st.wb, "Other");
-    st.sb.name = "sb";     st.sb.default_id   = intern_label(st.sb, "Other");
-    st.incb.name = "incb"; st.incb.default_id = intern_label(st.incb, "None");
-
-    xmlSAXHandler sax{};
-    sax.initialized  = XML_SAX2_MAGIC;
-    sax.startElement = sax_start_element;
-    sax.endElement   = sax_end_element;
-
+    // --- parse UCDXML ---
+    UcdData d;
+    SaxCtx ctx{&d, false};
+    xmlSAXHandler sax{}; sax.initialized = XML_SAX2_MAGIC;
+    sax.startElement = on_start; sax.endElement = on_end;
     LIBXML_TEST_VERSION
-    int rc = xmlSAXUserParseFile(&sax, &st, cli.ucdxml.string().c_str());
-    if (rc != 0) {
-        std::fprintf(stderr, "libxml2 SAX parse failed (rc=%d) on %s\n", rc, cli.ucdxml.string().c_str());
-        return 4;
+    if (xmlSAXUserParseFile(&sax, &ctx, cli.ucdxml.string().c_str()) != 0) {
+        std::fprintf(stderr, "UCDXML parse failed\n"); return 4;
     }
     xmlCleanupParser();
 
-    coalesce(st.gb.records);
-    coalesce(st.wb.records);
-    coalesce(st.sb.records);
-    coalesce(st.incb.records);
+    // --- parse DUCET → collation keys ---
+    DucetKeys dk;
+    parse_ducet(cli.ducet, dk);
 
-    std::sort(st.ccc_pairs.begin(), st.ccc_pairs.end());
-    st.ccc_pairs.erase(std::unique(st.ccc_pairs.begin(), st.ccc_pairs.end()), st.ccc_pairs.end());
-    std::sort(st.excluded.begin(), st.excluded.end());
-    st.excluded.erase(std::unique(st.excluded.begin(), st.excluded.end()), st.excluded.end());
+    // --- UCA order: stable sort all codepoints by (key, cp) ---
+    std::vector<uint32_t> order(CP_COUNT);
+    for (uint32_t i = 0; i < CP_COUNT; ++i) order[i] = i;
+    std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b){
+        if (dk.key[a] != dk.key[b]) return dk.key[a] < dk.key[b];
+        return a < b;
+    });
+    std::vector<uint32_t> uca_rank(CP_COUNT);
+    for (uint32_t r = 0; r < CP_COUNT; ++r) uca_rank[order[r]] = r;
 
-    auto is_excluded = [&](uint32_t cp) {
-        return std::binary_search(st.excluded.begin(), st.excluded.end(), cp);
+    // --- super-Fibonacci coords on S^3, indexed by uca_rank ---
+    std::vector<double> sf(4ull * CP_COUNT);
+    super_fibonacci(CP_COUNT, sf.data());
+
+    // --- build records ---
+    std::vector<uint8_t> records; records.reserve((size_t)CP_COUNT * 80);
+    for (uint32_t cp = 0; cp < CP_COUNT; ++cp) {
+        uint32_t rank = uca_rank[cp];
+        double coord[4] = { sf[4ull*rank+0], sf[4ull*rank+1], sf[4ull*rank+2], sf[4ull*rank+3] };
+        hilbert128_t hb; hilbert4d_encode(coord, &hb);
+        uint8_t u8[4]; size_t n = utf8_encode(cp, u8);
+        hash128_t h; hash128_blake3(u8, n, &h);
+        uint32_t flags = laplace_pc_pack_flags(d.gb[cp], d.wb[cp], d.sb[cp], d.incb[cp], d.ccc[cp]);
+        put_u32(records, cp);
+        put_u32(records, rank);
+        for (int k=0;k<4;++k) put_f64(records, coord[k]);
+        put_hb128(records, hb);
+        put_h128(records, h);
+        put_u32(records, flags);
+        put_u32(records, 0);  // _pad
+    }
+
+    // --- decomposition side-table (full canonical decomposition, recursive) ---
+    std::function<void(uint32_t, std::vector<uint32_t>&)> full;
+    full = [&](uint32_t cp, std::vector<uint32_t>& out){
+        auto it = d.decomp.find(cp);
+        if (it == d.decomp.end()) { out.push_back(cp); return; }
+        for (uint32_t c : it->second) full(c, out);
     };
-    auto find_ccc = [&](uint32_t cp) -> uint8_t {
-        auto it = std::lower_bound(st.ccc_pairs.begin(), st.ccc_pairs.end(),
-                                    std::make_pair(cp, (uint8_t)0));
-        return (it != st.ccc_pairs.end() && it->first == cp) ? it->second : 0;
-    };
+    std::vector<std::pair<uint32_t, std::vector<uint32_t>>> decomps;
+    for (auto& kv : d.decomp) { std::vector<uint32_t> seq; full(kv.first, seq); decomps.emplace_back(kv.first, std::move(seq)); }
+    std::sort(decomps.begin(), decomps.end(), [](auto&a, auto&b){ return a.first < b.first; });
 
-    std::vector<NfcDecomp> decomps;
-    decomps.reserve(st.base_decomp.size());
-    std::function<void(uint32_t, std::vector<uint32_t>&)> full_decompose;
-    full_decompose = [&](uint32_t cp, std::vector<uint32_t>& out) {
-        auto it = st.base_decomp.find(cp);
-        if (it == st.base_decomp.end() || it->second.empty()) { out.push_back(cp); return; }
-        for (uint32_t c : it->second) full_decompose(c, out);
-    };
-    for (const auto& kv : st.base_decomp) {
-        NfcDecomp d; d.codepoint = kv.first;
-        full_decompose(kv.first, d.decomp);
-        decomps.push_back(std::move(d));
-    }
-    std::sort(decomps.begin(), decomps.end(),
-              [](const auto& a, const auto& b) { return a.codepoint < b.codepoint; });
-
-    std::vector<uint32_t> flat_decomp;
-    std::vector<std::pair<uint32_t, uint32_t>> rec_offsets;
-    for (const auto& d : decomps) {
-        rec_offsets.emplace_back((uint32_t)flat_decomp.size(), (uint32_t)d.decomp.size());
-        for (uint32_t c : d.decomp) flat_decomp.push_back(c);
+    std::vector<uint8_t> decomp_recs, decomp_data;
+    uint32_t data_idx = 0;
+    for (auto& dd : decomps) {
+        put_u32(decomp_recs, dd.first);
+        put_u32(decomp_recs, data_idx);
+        put_u32(decomp_recs, (uint32_t)dd.second.size());
+        for (uint32_t c : dd.second) { put_u32(decomp_data, c); ++data_idx; }
     }
 
-    std::vector<NfcCompose> composes;
-    for (const auto& kv : st.base_decomp) {
-        const uint32_t cp = kv.first;
-        const auto& decomp = kv.second;
-        if (decomp.size() != 2) continue;
-        if (is_excluded(cp)) continue;
-        if (find_ccc(decomp[0]) != 0) continue;
-        if (find_ccc(cp) != 0) continue;
-        composes.push_back({decomp[0], decomp[1], cp});
+    // --- composition side-table (pairwise, exclusions filtered) ---
+    auto ccc_of = [&](uint32_t cp){ return cp < CP_COUNT ? d.ccc[cp] : 0; };
+    std::vector<std::array<uint32_t,3>> comps;
+    for (auto& kv : d.decomp) {
+        uint32_t cp = kv.first; const auto& seq = kv.second;
+        if (seq.size() != 2) continue;
+        if (d.comp_ex[cp]) continue;
+        if (ccc_of(seq[0]) != 0) continue;   // non-starter decomposition (singleton excl)
+        if (ccc_of(cp) != 0) continue;        // script-specific excl
+        comps.push_back({seq[0], seq[1], cp});
     }
-    std::sort(composes.begin(), composes.end(),
-              [](const auto& a, const auto& b) {
-                  return a.first != b.first ? a.first < b.first : a.second < b.second;
-              });
+    std::sort(comps.begin(), comps.end(), [](auto&a, auto&b){
+        return a[0]!=b[0] ? a[0]<b[0] : a[1]<b[1];
+    });
+    std::vector<uint8_t> compose_recs;
+    for (auto& c : comps) { put_u32(compose_recs, c[0]); put_u32(compose_recs, c[1]); put_u32(compose_recs, c[2]); }
 
-    fs::create_directories(cli.out_header.parent_path());
-    fs::create_directories(cli.out_source.parent_path());
-    std::ofstream h(cli.out_header);
-    std::ofstream c(cli.out_source);
-    if (!h || !c) { std::fprintf(stderr, "cannot write outputs\n"); return 5; }
+    // --- assemble blob: header(128) + records + decomp_recs + decomp_data + compose_recs + trailer(16) ---
+    const uint64_t HDR = 128;
+    uint64_t off_records   = HDR;
+    uint64_t off_decomp_r  = off_records  + records.size();
+    uint64_t off_decomp_d  = off_decomp_r + decomp_recs.size();
+    uint64_t off_compose_r = off_decomp_d + decomp_data.size();
 
-    h << "/* ucd_tables.generated.h - DO NOT EDIT.\n";
-    h << " * Generated by laplace_ucd_tables_emit from UCDXML " << cli.version << ".\n";
-    h << " * Input: " << cli.ucdxml.filename().string() << "\n";
-    h << " * Per ADR 0047 + ADR 0053; deterministic per LAPLACE_UNICODE_VERSION.\n */\n";
-    h << "#pragma once\n#include <stdint.h>\n#include <stddef.h>\n\n";
-    h << "#define LAPLACE_UNICODE_VERSION_STRING \"" << cli.version << "\"\n\n";
-    h << "#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n";
-    h << "typedef struct { uint32_t start; uint32_t end; uint8_t prop_id; } laplace_ucd_range_t;\n\n";
-    for (const auto* t : {&st.gb, &st.wb, &st.sb, &st.incb}) emit_table_header(h, *t);
-    h << "/* === NFC tables === */\n";
-    h << "typedef struct { uint32_t cp; uint8_t ccc; } laplace_ucd_ccc_record_t;\n";
-    h << "extern const laplace_ucd_ccc_record_t laplace_ucd_ccc_records[];\n";
-    h << "extern const size_t laplace_ucd_ccc_count;\n";
-    h << "uint8_t laplace_ucd_ccc_lookup(uint32_t cp);\n\n";
-    h << "typedef struct { uint32_t cp; uint32_t start_idx; uint32_t length; } laplace_ucd_decomp_record_t;\n";
-    h << "extern const laplace_ucd_decomp_record_t laplace_ucd_decomp_records[];\n";
-    h << "extern const size_t laplace_ucd_decomp_count;\n";
-    h << "extern const uint32_t laplace_ucd_decomp_data[];\n";
-    h << "extern const size_t laplace_ucd_decomp_data_count;\n";
-    h << "int laplace_ucd_decomp_lookup(uint32_t cp, uint32_t* out_start_idx, uint32_t* out_length);\n\n";
-    h << "typedef struct { uint32_t first; uint32_t second; uint32_t composed; } laplace_ucd_compose_record_t;\n";
-    h << "extern const laplace_ucd_compose_record_t laplace_ucd_compose_records[];\n";
-    h << "extern const size_t laplace_ucd_compose_count;\n";
-    h << "int laplace_ucd_compose_lookup(uint32_t first, uint32_t second, uint32_t* out_composed);\n\n";
-    h << "#ifdef __cplusplus\n} /* extern \"C\" */\n#endif\n";
+    std::vector<uint8_t> blob;
+    blob.reserve(off_compose_r + compose_recs.size() + 16);
+    // header
+    put_u32(blob, LAPLACE_PERFCACHE_MAGIC);
+    put_u32(blob, LAPLACE_PERFCACHE_VERSION);
+    { char v[8]={0}; std::strncpy(v, cli.ucd_version.c_str(), 8); for(int i=0;i<8;++i) blob.push_back((uint8_t)v[i]); }
+    { char v[8]={0}; std::strncpy(v, cli.uca_version.c_str(), 8); for(int i=0;i<8;++i) blob.push_back((uint8_t)v[i]); }
+    put_u64(blob, CP_COUNT);
+    put_u64(blob, 80);
+    put_u64(blob, off_records);
+    put_u64(blob, decomps.size());
+    put_u64(blob, off_decomp_r);
+    put_u64(blob, data_idx);
+    put_u64(blob, off_decomp_d);
+    put_u64(blob, comps.size());
+    put_u64(blob, off_compose_r);
+    { hash128_t z; hash128_zero(&z); put_h128(blob, z); }  // ucd_hash (fingerprint TODO; zero for now)
+    for (int i=0;i<8;++i) blob.push_back(0);                // reserved
+    // sections
+    blob.insert(blob.end(), records.begin(), records.end());
+    blob.insert(blob.end(), decomp_recs.begin(), decomp_recs.end());
+    blob.insert(blob.end(), decomp_data.begin(), decomp_data.end());
+    blob.insert(blob.end(), compose_recs.begin(), compose_recs.end());
+    // trailer: BLAKE3-128 of everything so far
+    hash128_t crc; hash128_blake3(blob.data(), blob.size(), &crc);
+    put_h128(blob, crc);
 
-    c << "/* ucd_tables.generated.c - DO NOT EDIT.\n";
-    c << " * Generated by laplace_ucd_tables_emit from UCDXML " << cli.version << ".\n */\n";
-    c << "#include \"" << cli.out_header.filename().string() << "\"\n\n";
-    for (const auto* t : {&st.gb, &st.wb, &st.sb, &st.incb}) emit_table_source(c, *t);
-
-    c << "const laplace_ucd_ccc_record_t laplace_ucd_ccc_records[] = {\n";
-    for (auto [cp, v] : st.ccc_pairs)
-        c << "    { 0x" << std::hex << cp << ", " << std::dec << (unsigned)v << " },\n";
-    c << "};\n";
-    c << "const size_t laplace_ucd_ccc_count = " << st.ccc_pairs.size() << ";\n\n";
-    c << "uint8_t laplace_ucd_ccc_lookup(uint32_t cp) {\n"
-      << "    size_t lo = 0, hi = " << st.ccc_pairs.size() << ";\n"
-      << "    while (lo < hi) {\n"
-      << "        size_t mid = lo + ((hi - lo) >> 1);\n"
-      << "        const laplace_ucd_ccc_record_t* r = &laplace_ucd_ccc_records[mid];\n"
-      << "        if (cp < r->cp) hi = mid;\n"
-      << "        else if (cp > r->cp) lo = mid + 1;\n"
-      << "        else return r->ccc;\n"
-      << "    }\n    return 0;\n}\n\n";
-
-    c << "const uint32_t laplace_ucd_decomp_data[] = {\n";
-    for (size_t i = 0; i < flat_decomp.size(); i += 8) {
-        c << "    ";
-        for (size_t j = i; j < std::min(i + 8, flat_decomp.size()); ++j)
-            c << "0x" << std::hex << flat_decomp[j] << ", ";
-        c << "\n";
-    }
-    c << std::dec << "};\n";
-    c << "const size_t laplace_ucd_decomp_data_count = " << flat_decomp.size() << ";\n\n";
-    c << "const laplace_ucd_decomp_record_t laplace_ucd_decomp_records[] = {\n";
-    for (size_t i = 0; i < decomps.size(); ++i)
-        c << "    { 0x" << std::hex << decomps[i].codepoint << ", "
-          << std::dec << rec_offsets[i].first << ", " << rec_offsets[i].second << " },\n";
-    c << "};\n";
-    c << "const size_t laplace_ucd_decomp_count = " << decomps.size() << ";\n\n";
-    c << "int laplace_ucd_decomp_lookup(uint32_t cp, uint32_t* out_start_idx, uint32_t* out_length) {\n"
-      << "    size_t lo = 0, hi = " << decomps.size() << ";\n"
-      << "    while (lo < hi) {\n"
-      << "        size_t mid = lo + ((hi - lo) >> 1);\n"
-      << "        const laplace_ucd_decomp_record_t* r = &laplace_ucd_decomp_records[mid];\n"
-      << "        if (cp < r->cp) hi = mid;\n"
-      << "        else if (cp > r->cp) lo = mid + 1;\n"
-      << "        else { *out_start_idx = r->start_idx; *out_length = r->length; return 1; }\n"
-      << "    }\n    return 0;\n}\n\n";
-
-    c << "const laplace_ucd_compose_record_t laplace_ucd_compose_records[] = {\n";
-    for (const auto& m : composes)
-        c << "    { 0x" << std::hex << m.first << ", 0x" << m.second
-          << ", 0x" << m.composed << " },\n";
-    c << std::dec << "};\n";
-    c << "const size_t laplace_ucd_compose_count = " << composes.size() << ";\n\n";
-    c << "int laplace_ucd_compose_lookup(uint32_t first, uint32_t second, uint32_t* out_composed) {\n"
-      << "    size_t lo = 0, hi = " << composes.size() << ";\n"
-      << "    while (lo < hi) {\n"
-      << "        size_t mid = lo + ((hi - lo) >> 1);\n"
-      << "        const laplace_ucd_compose_record_t* r = &laplace_ucd_compose_records[mid];\n"
-      << "        if (first < r->first || (first == r->first && second < r->second)) hi = mid;\n"
-      << "        else if (first > r->first || (first == r->first && second > r->second)) lo = mid + 1;\n"
-      << "        else { *out_composed = r->composed; return 1; }\n"
-      << "    }\n    return 0;\n}\n\n";
+    // write
+    std::ofstream out(cli.output, std::ios::binary);
+    if (!out) { std::fprintf(stderr, "cannot write %s\n", cli.output.string().c_str()); return 5; }
+    out.write((const char*)blob.data(), (std::streamsize)blob.size());
+    out.close();
 
     std::fprintf(stderr,
-        "laplace_ucd_tables_emit: ucdxml=%s ver=%s\n"
-        "  gb:   %zu labels, %zu ranges\n"
-        "  wb:   %zu labels, %zu ranges\n"
-        "  sb:   %zu labels, %zu ranges\n"
-        "  incb: %zu labels, %zu ranges\n"
-        "  ccc:  %zu records\n"
-        "  decomp: %zu records (%zu codepoints in flat data)\n"
-        "  compose: %zu records\n",
-        cli.ucdxml.string().c_str(), cli.version.c_str(),
-        st.gb.labels.size(), st.gb.records.size(),
-        st.wb.labels.size(), st.wb.records.size(),
-        st.sb.labels.size(), st.sb.records.size(),
-        st.incb.labels.size(), st.incb.records.size(),
-        st.ccc_pairs.size(),
-        decomps.size(), flat_decomp.size(),
-        composes.size());
+        "perfcache: ucd=%s uca=%s -> %s\n"
+        "  records=%u (%.1f MiB) decomp=%zu (data=%u) compose=%zu  total=%.1f MiB\n",
+        cli.ucd_version.c_str(), cli.uca_version.c_str(), cli.output.string().c_str(),
+        CP_COUNT, records.size()/1048576.0, decomps.size(), data_idx, comps.size(),
+        blob.size()/1048576.0);
     return 0;
 }

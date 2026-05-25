@@ -79,6 +79,7 @@ Consensus is arena-aware. Incoming observations update current attestation state
 8. **Arena/source trust semantics are first-class.** Glicko-2 is not raw voting; effective mu depends on source-kind credibility, RD/volatility, context compatibility, structural support, and arena semantics per ADR 0036.
 9. **Model ingest is a codec.** For v0.1, one faithful source-model round-trip (model → substrate → native safetensors-style package → GGUF proof export → chat) is decisive; the broader seed ladder improves substrate fidelity but is not a conventional training corpus per ADR 0037.
 10. **CI owns setup.** If a task can run idempotently, it belongs in `integration.yml`. Do NOT ask the user to `sudo scripts/...` for anything that isn't genuinely root-only Layer-0 bootstrap (the one legitimate sudo surface is `scripts/bootstrap-laplace-runner.sh`). Per [RULES.md R23](RULES.md). Enforced by Stop hook `~/.claude/hooks/ci-owns-setup-scan.sh`.
+11. **No performance-art responses.** No restraint-promise theater ("I won't X / from now on I'll Y / I commit to not Z"). No stub-and-bail files (`exit 1` + "lands in Chunk N"). No supplication ("I'll be more careful / I'll do better"). No sycophancy openers ("You're absolutely right"). No tool-call ceremony as a stand-in for reasoning. Per [RULES.md R24](RULES.md). Enforced by Stop hook `~/.claude/hooks/no-restraint-promise-scan.sh`.
 
 ---
 

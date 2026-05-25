@@ -17,7 +17,7 @@ Per [ADR 0033](docs/adr/0033-all-deps-as-submodules.md), all direct C/C++ deps a
 | OS | Ubuntu 22.04 LTS | — |
 | CPU | x86_64 with AVX2 (AVX-512 on deployment targets) | verified via `lscpu` + `grep -o 'avx[a-z0-9_]*' /proc/cpuinfo` |
 | Intel oneAPI | 2026.0.0 | `/opt/intel/oneapi/`; sourced automatically by the build via `cmake/toolchains/intel-oneapi.cmake` |
-| PostgreSQL 18 + PostGIS 3 | stock apt | `postgresql-18` + `postgresql-18-postgis-3`; runtime cluster the substrate connects to (per [ADR 0045](docs/adr/0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md)) |
+| **PostgreSQL 18 + PostGIS 3.6.3** | **custom-built from `/opt/laplace/external/{postgresql,postgis}/`** | The substrate is the product; PG + PostGIS are substrate-controlled components built with the Intel toolchain per [ADR 0028](docs/adr/0028-custom-built-pg-postgis-intel.md) + [ADR 0033](docs/adr/0033-all-deps-as-submodules.md) and deployed to `/opt/laplace/pgsql-18/`. The system `postgresql-18` apt package is NOT the runtime — substrate runs against the custom-built cluster at `/opt/laplace/pgsql-18/`. **Updated 2026-05-24:** OPERATIONS.md previously described system-PG-with-staged-extensions per the interim [ADR 0045](docs/adr/0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md) framing; that framing is superseded by the substrate-owned-runtime architecture per user direction. ADR 0045 needs corresponding amendment. |
 | .NET SDK | 10.0.107 | `/usr/lib/dotnet/` |
 | GCC | 11.4 | dep-chain toolchain (per [ADR 0038](docs/adr/0038-unified-deps-cmake-pipeline-gcc-toolchain.md)) |
 | CMake | 3.22+ | top-level build orchestrator (ADR 0032) |
@@ -112,17 +112,18 @@ Per [ADR 0032](docs/adr/0032-unified-cmake-build-pipeline.md): one top-level CMa
 | `just build-perfcache` | Build perf-cache from UCD (one-time). |
 | `just clean` | Wipe `build/`. Preserves `/opt/laplace/*` dep installs. |
 
-#### Custom PG build (optional path)
+#### Custom-built PG runtime (the actual runtime path)
 
-The substrate normally runs against the system PG (`/usr/lib/postgresql/18`) with extensions staged at `/opt/laplace/{lib,share}/postgresql/18` per [ADR 0045](docs/adr/0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md). For benchmarking against an Intel-toolchain custom PG build:
+**The substrate runs against the custom-built PG cluster at `/opt/laplace/pgsql-18/`.** PostgreSQL 18 + PostGIS 3.6.3 are external dependencies under `/opt/laplace/external/{postgresql,postgis}/` per [ADR 0028](docs/adr/0028-custom-built-pg-postgis-intel.md) + [ADR 0033](docs/adr/0033-all-deps-as-submodules.md), built with the Intel toolchain via `just build-deps` (per [ADR 0038](docs/adr/0038-unified-deps-cmake-pipeline-gcc-toolchain.md)), and deployed to `/opt/laplace/pgsql-18/`. The substrate is the product; PG is a substrate-controlled component, not an outside dependency the substrate happens to live inside.
 
 ```sh
 just build-deps                                  # builds /opt/laplace/pgsql-18/
 LAPLACE_PG_PREFIX=/opt/laplace/pgsql-18 just build install
-# (then point a separately-managed cluster at the custom binaries)
 ```
 
-The custom-PG cluster path is not the runtime the substrate depends on — it remains available as a build target for future hermetic-cluster work.
+The cluster at `/opt/laplace/pgsql-18/` is the runtime the substrate depends on for v0.1 onward. The stock `postgresql-18` apt package may be present on the host for unrelated reasons, but the substrate does not use it.
+
+**Section history**: OPERATIONS.md previously described the substrate as running against the system PG with extensions staged under `/opt/laplace/{lib,share}/postgresql/18` per the interim [ADR 0045](docs/adr/0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md) framing. That framing has been superseded by the substrate-owned-runtime architecture; ADR 0045 needs corresponding amendment. The bootstrap commit history (notably `67c3808 feat(bootstrap): substrate runs against /opt/laplace/pgsql-18 cluster — system PG retired`) reflects the current direction.
 
 ### Layer 1 — extension lifecycle (DbUp)
 
@@ -206,9 +207,9 @@ The C# app projects link the engine libraries via P/Invoke (`[DllImport("laplace
 
 ### Launch internals
 
-The substrate runs against the **system PG cluster** (`/usr/lib/postgresql/18`) per ADR 0045. The PG `postgresql.conf` is amended by `bootstrap_pg_extension_paths` to add `/opt/laplace/{lib,share}/postgresql/18` to `dynamic_library_path` and `extension_control_path`, so `CREATE EXTENSION laplace_geom` finds the staged files immediately after `just install`.
+The substrate runs against the **custom-built PG cluster** at `/opt/laplace/pgsql-18/` per [ADR 0028](docs/adr/0028-custom-built-pg-postgis-intel.md). The extensions (`laplace_geom`, `laplace_substrate`) install under that prefix's `lib/postgresql/` + `share/postgresql/extension/` so `CREATE EXTENSION laplace_geom` finds them through the cluster's stock `dynamic_library_path` + `extension_control_path` resolution.
 
-`laplace_admin` is a SUPERUSER role (per ADR 0045); DbUp connects as `laplace_admin` via peer auth and runs `CREATE EXTENSION` directly — no SECURITY DEFINER wrapper, no parallel cluster, no custom systemd unit.
+`laplace_admin` is a SUPERUSER role (per [ADR 0045](docs/adr/0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md)); DbUp connects as `laplace_admin` via peer auth and runs `CREATE EXTENSION` directly — no SECURITY DEFINER wrapper.
 
 ### Ingest
 
