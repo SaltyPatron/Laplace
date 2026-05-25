@@ -3,7 +3,7 @@
 ## Status
 
 **Accepted** — 2026-05-21
-**Amended** — 2026-05-24: `STATE.md` / `decisions.md` cadence files retired. They were tried, degraded into conversation logs, and re-introduced exactly the drift this ADR was written to prevent. Durable state lives in (a) GitHub Issues (chunk/story progress + acceptance), (b) ADRs (decisions that shape invariants), (c) `CHANGELOG.md` (release-please-driven from Conventional Commits per [ADR 0020](0020-conventional-commits-and-release-please.md)). [OPERATIONS.md](../../OPERATIONS.md) line ~314 is the authoritative position; [CLAUDE.md](../../CLAUDE.md) cadence section is aligned to it.
+**Amended** — 2026-05-24: `STATE.md` / `decisions.md` cadence files retired. They were tried, degraded into conversation logs, and re-introduced exactly the drift this ADR was written to prevent. Durable state lives in (a) GitHub Issues (chunk/story progress + acceptance) and (b) ADRs (decisions that shape invariants). (Release-please / `CHANGELOG.md` was removed 2026-05-25 per [ADR 0020](0020-conventional-commits-and-release-please.md); Conventional Commits remain the commit-message standard.) [OPERATIONS.md](../../OPERATIONS.md) line ~314 is the authoritative position; [CLAUDE.md](../../CLAUDE.md) cadence section is aligned to it.
 
 ## Context
 

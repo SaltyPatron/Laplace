@@ -49,7 +49,7 @@ Never renumber existing ADRs. If an ADR is superseded, the new one gets the next
 | 0017 | [Agent operating cadence — proactive issue + status maintenance](0017-agent-operating-cadence.md) | Accepted |
 | 0018 | [Three-layer architecture: bootstrap / CI / local dev](0018-three-layer-architecture.md) | Accepted |
 | 0019 | [Dedicated `laplace-runner` system account for the CI runner](0019-laplace-runner-system-account.md) | Accepted |
-| 0020 | [Conventional Commits + release-please + SemVer](0020-conventional-commits-and-release-please.md) | Accepted |
+| 0020 | [Conventional Commits + SemVer (release-please removed)](0020-conventional-commits-and-release-please.md) | Accepted (amended) |
 | 0021 | [DbUp + Npgsql for migrations](0021-dbup-for-migrations.md) | Accepted |
 | 0022 | [ADRs as decision-record format](0022-adrs-as-decision-format.md) | Accepted |
 | 0023 | [Laplace extension owns its schema; DbUp orchestrates extension lifecycle](0023-extension-owns-schema-dbup-orchestrates.md) | Accepted (narrows ADR 0021) |

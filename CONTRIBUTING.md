@@ -64,8 +64,6 @@ A chunk is **Done** only when *every* item below is checked. No partials. No "I'
 
 ### Documentation
 
-- [ ] [`CHANGELOG.md`](CHANGELOG.md) `[Unreleased]` updated with one line per user-visible change.
-
 - [ ] If the chunk changes a project-wide invariant: explicit user approval, then update `RULES.md` / `STANDARDS.md` / `DESIGN.md` / `GLOSSARY.md` as appropriate.
 - [ ] No comments narrating WHAT the code does (well-named identifiers do that). Comments only for non-obvious WHY: subtle invariants, workarounds for specific PG quirks, references to ADRs.
 
@@ -89,7 +87,7 @@ A chunk is **Done** only when *every* item below is checked. No partials. No "I'
 
 ## Commit conventions — Conventional Commits
 
-Per [ADR 0020](docs/adr/0020-conventional-commits-and-release-please.md), all commits follow the [Conventional Commits](https://www.conventionalcommits.org/) specification so that [`release-please`](https://github.com/googleapis/release-please-action) can generate the changelog + version bumps automatically.
+Per [ADR 0020](docs/adr/0020-conventional-commits-and-release-please.md), all commits follow the [Conventional Commits](https://www.conventionalcommits.org/) specification — commits stay searchable/categorizable and each `<type>` carries the SemVer bump intent for whenever automated versioning is reintroduced.
 
 ### Format
 
@@ -103,7 +101,7 @@ Per [ADR 0020](docs/adr/0020-conventional-commits-and-release-please.md), all co
 
 ### Types
 
-| Type | When | SemVer impact (via release-please) |
+| Type | When | SemVer impact |
 |---|---|---|
 | `feat` | New user-visible capability | minor bump |
 | `fix` | Bug fix | patch bump |
@@ -261,8 +259,6 @@ Two workflows, both required:
 - **[`integration.yml`](.github/workflows/integration.yml)** (self-hosted `hart-server`) — runs on push-to-main + `workflow_dispatch` ONLY. Build engine + extension + app + migrations → install extension → `db-up` → smoke test the substrate.
 
 Self-hosted workflows **never** run on `pull_request` events from forks — that's the security boundary.
-
-The third workflow, [`release-please.yml`](.github/workflows/release-please.yml), watches `main` for Conventional Commits and opens release PRs that bump the version + update `CHANGELOG.md`.
 
 ---
 

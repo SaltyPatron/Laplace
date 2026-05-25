@@ -69,7 +69,7 @@ repos:
         entry: bash -c '
           BANNED="HNSWLib|hnswlib|FAISS|ScaNN|Milvus|Pinecone|oneDNN|cuDNN";
           FILES=$(echo "$@" | tr " " "\n" |
-                  grep -vE "^(GLOSSARY|RULES|STANDARDS|DESIGN|CHANGELOG)\.md$" |
+                  grep -vE "^(GLOSSARY|RULES|STANDARDS|DESIGN)\.md$" |
                   grep -vE "^(\.claude/agents/conventional-ai-skeptic|\.github/workflows/ci|\.github/copilot-instructions|\.pre-commit-config|CONTRIBUTING)" |
                   grep -vE "^docs/adr/");
           [ -z "$FILES" ] && exit 0;
