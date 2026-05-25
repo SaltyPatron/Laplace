@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
@@ -31,6 +32,7 @@ internal static class Program
             {
                 "seed-unicode" => await SeedUnicodeAsync(),
                 "decompose"    => Decompose(string.Join(' ', args[1..])),
+                "roundtrip"    => Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
                 "stats"        => await StatsAsync(),
                 _ => Fail($"unknown command '{args[0]}'"),
             };
@@ -141,6 +143,53 @@ internal static class Program
         uint root = (uint)tree.NodeCount - 1;
         PrintNode(tree, root, 0);
         return 0;
+    }
+
+    // === roundtrip: ingest a text file through the engine + export it byte-perfect ===
+    private static int Roundtrip(string path, string? outPath)
+    {
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            return Fail($"usage: laplace roundtrip <file> [out]  (not found: {path})");
+        CodepointPerfcache.Load(ResolveBlob());
+
+        byte[] original = File.ReadAllBytes(path);
+
+        // Ingest: UTF-8 → NFC → tier tree (codepoint → grapheme → word → sentence → document).
+        var swIn = Stopwatch.StartNew();
+        using var tree = TextDecomposer.Run(original);
+        swIn.Stop();
+
+        // Export: re-encode the tier-0 codepoint leaves (the contiguous prefix,
+        // in document order) back to UTF-8.
+        var swOut = Stopwatch.StartNew();
+        int total = tree.NodeCount;
+        int leaves = 0;
+        var sb = new StringBuilder(original.Length);
+        for (uint i = 0; i < total; i++)
+        {
+            var v = tree.GetNode(i);
+            if (v.Tier != 0) break;
+            sb.Append(char.ConvertFromUtf32((int)v.Atom));
+            leaves++;
+        }
+        byte[] exported = Encoding.UTF8.GetBytes(sb.ToString());
+        swOut.Stop();
+
+        if (!string.IsNullOrEmpty(outPath)) File.WriteAllBytes(outPath, exported);
+
+        string hIn = Convert.ToHexString(SHA256.HashData(original)).ToLowerInvariant();
+        string hOut = Convert.ToHexString(SHA256.HashData(exported)).ToLowerInvariant();
+        bool match = hIn == hOut;
+
+        double mbIn = original.Length / 1048576.0;
+        Console.WriteLine($"ingest  : {original.Length,10:N0} bytes  →  {total:N0} tier-tree nodes ({leaves:N0} codepoints)  in {swIn.Elapsed.TotalMilliseconds:F0} ms  ({mbIn / swIn.Elapsed.TotalSeconds:F1} MB/s)");
+        Console.WriteLine($"export  : {exported.Length,10:N0} bytes  in {swOut.Elapsed.TotalMilliseconds:F0} ms");
+        Console.WriteLine($"sha256 in  : {hIn}");
+        Console.WriteLine($"sha256 out : {hOut}");
+        Console.WriteLine(match
+            ? "BIT-PERFECT — export is byte-for-byte identical to the original."
+            : "MISMATCH — export differs from the original.");
+        return match ? 0 : 1;
     }
 
     private static readonly string[] TierName = { "CP", "GRAPHEME", "WORD", "SENTENCE", "DOC" };
