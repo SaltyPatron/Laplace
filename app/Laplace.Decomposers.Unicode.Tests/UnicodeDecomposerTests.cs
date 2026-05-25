@@ -43,6 +43,34 @@ public sealed class UnicodeDecomposerTests
         new FakeContext(writer);
 
     [Fact]
+    public void UcdReader_Yields_Full_Property_Set_From_Source()
+    {
+        const string zip = "/vault/Data/Unicode/Public/17.0.0/ucdxml/ucd.nounihan.flat.zip";
+        if (!File.Exists(zip)) throw new FileNotFoundException("UCD source missing", zip);
+        var reader = new UcdRepertoireReader(zip);
+
+        UcdRepertoireReader.CodepointProps? a = null;
+        long count = 0;
+        foreach (var r in reader.Read())
+        {
+            count++;
+            if (r.Codepoint == 0x41) a = r;
+        }
+
+        // Full repertoire is read (≈ full codespace incl. reserved).
+        Assert.True(count > 1_000_000, $"only read {count} codepoints");
+        // U+0041 'A' carries its COMPLETE property set, not a 7-property subset.
+        Assert.NotNull(a);
+        Assert.Equal("Lu", a!.Value.Get("gc"));     // general category
+        Assert.Equal("Latn", a.Value.Get("sc"));    // script
+        Assert.Equal("L", a.Value.Get("bc"));       // bidi class
+        Assert.Equal("AL", a.Value.Get("lb"));      // line break
+        Assert.Equal("0061", a.Value.Get("slc"));   // simple lowercase mapping
+        Assert.Equal("1.1", a.Value.Get("age"));    // age
+        Assert.True(a.Value.Props.Count > 40, $"only {a.Value.Props.Count} props captured");
+    }
+
+    [Fact]
     public async Task Emits_All_Codepoints_As_T0_Entities_With_Content_Physicalities()
     {
         var dec = NewDecomposer();

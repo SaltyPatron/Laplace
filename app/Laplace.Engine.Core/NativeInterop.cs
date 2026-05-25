@@ -45,6 +45,11 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "hash128_zero")]
     internal static partial void Hash128Zero(Hash128* outHash);
 
+    // === super_fibonacci (engine/core/include/laplace/core/super_fibonacci.h) ===
+
+    [LibraryImport(Library, EntryPoint = "super_fibonacci")]
+    internal static partial void SuperFibonacci(nuint n, double* outQuats);
+
     // === hilbert4d (engine/core/include/laplace/core/hilbert4d.h) ===
 
     [LibraryImport(Library, EntryPoint = "hilbert4d_encode")]
