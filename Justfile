@@ -187,8 +187,10 @@ migrate-new name:
 
 # === Seed ===
 
-seed-t0: build-perfcache
-    scripts/seed-t0.sh
+# T0 DB seed: UnicodeDecomposer → NpgsqlSubstrateWriter (ADR 0006 sibling of
+# build-perfcache). Replaces deleted scripts/seed-t0.sh per ADR 0053.
+seed-t0: build-perfcache build-app
+    cd app && dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- seed-unicode
 
 # === Setup (full convenience composite) ===
 
@@ -197,7 +199,7 @@ setup: launch-db db-up seed-t0
 
 # === Ingest ===
 
-ingest source path="":
+ingest source path="": build-app
     scripts/ingest-source.sh {{source}} {{path}}
 
 # === Query / Cascade ===
