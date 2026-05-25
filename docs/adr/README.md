@@ -89,6 +89,7 @@ Never renumber existing ADRs. If an ADR is superseded, the new one gets the next
 | 0057 | [Substrate emission discipline — product yes, packaging no (universal Food principle at the emission boundary)](0057-substrate-emission-discipline-product-not-packaging.md) | Proposed |
 | 0058 | [Canonicality criterion for ingestible sources — substrate ingests canonical; derived/lossy is emit-only](0058-canonicality-criterion-for-ingestible-sources.md) | Proposed |
 | 0059 | [Format-writer emission matrix + IFormatWriter C# plugin contract](0059-format-writer-emission-matrix-and-ifw-contract.md) | Proposed |
+| 0060 | [Retire chunk-sequence roadmap — v0.1 milestone + component cadence](0060-retire-chunk-sequence-v0.1-milestone-cadence.md) | Accepted |
 
 ## Workflow
 
