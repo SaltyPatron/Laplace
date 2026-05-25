@@ -4,7 +4,6 @@
 #include <string.h>
 
 #include "laplace/core/grapheme_break.h"
-#include "laplace/core/normalize_nfc.h"
 #include "laplace/core/sentence_break.h"
 #include "laplace/core/tier_tree.h"
 #include "laplace/core/word_break.h"
@@ -109,42 +108,45 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
         off += consumed;
     }
 
-    /* === Stage 2: NFC normalize === */
-    size_t need = laplace_normalize_nfc(raw_cps, raw_n, NULL, 0);
-    uint32_t* nfc_cps = (uint32_t*)malloc((need + 1) * sizeof(uint32_t));
-    if (!nfc_cps) { free(raw_cps); return -3; }
-    size_t nfc_n = laplace_normalize_nfc(raw_cps, raw_n, nfc_cps, need);
-    free(raw_cps);
+    /* === No normalization at ingest === *
+     * The substrate records the RAW observed codepoint sequence. Canonical /
+     * compatibility equivalence (NFC, NFKC) and variant relationships
+     * ("café" precomposed vs "cafe"+combining-acute; "cafe" vs "café") are
+     * typed attestations BETWEEN the distinct content-addressed forms — never
+     * a destructive transform applied at the door. Each distinct form is its
+     * own entity; the UnicodeDecomposer's canonical-equivalence data links
+     * them. Preserving the raw sequence is also what makes export bit-perfect
+     * for EVERY input, not just NFC-stable text. */
+    uint32_t* cps = raw_cps;   /* raw, exactly as observed */
+    size_t cp_n = raw_n;
 
-    /* === Stage 3: Build the tier tree === */
-    tier_tree_t* tree = tier_tree_new(nfc_n * 2 + 16);
-    if (!tree) { free(nfc_cps); return -3; }
+    /* === Build the tier tree === */
+    tier_tree_t* tree = tier_tree_new(cp_n * 2 + 16);
+    if (!tree) { free(cps); return -3; }
 
-    /* Compute byte offset of each codepoint in the NFC form (so leaf
-     * text_range_off refers into the NORMALIZED utf8 byte stream, not
-     * the original). We don't actually store the NFC byte buffer; we
-     * just need offsets for downstream consumers that might want them. */
+    /* Byte offsets of each codepoint into the ORIGINAL utf8 stream, for
+     * downstream consumers that want source spans. */
     uint8_t enc[4];
-    uint32_t* leaf_text_off = (uint32_t*)malloc(nfc_n * sizeof(uint32_t));
-    uint32_t* leaf_text_len = (uint32_t*)malloc(nfc_n * sizeof(uint32_t));
+    uint32_t* leaf_text_off = (uint32_t*)malloc(cp_n * sizeof(uint32_t));
+    uint32_t* leaf_text_len = (uint32_t*)malloc(cp_n * sizeof(uint32_t));
     if (!leaf_text_off || !leaf_text_len) {
         free(leaf_text_off); free(leaf_text_len);
-        free(nfc_cps); tier_tree_free(tree); return -3;
+        free(cps); tier_tree_free(tree); return -3;
     }
     uint32_t running = 0;
-    for (size_t i = 0; i < nfc_n; ++i) {
-        size_t bytes = utf8_encode(nfc_cps[i], enc);
+    for (size_t i = 0; i < cp_n; ++i) {
+        size_t bytes = utf8_encode(cps[i], enc);
         leaf_text_off[i] = running;
         leaf_text_len[i] = (uint32_t)bytes;
         running += (uint32_t)bytes;
     }
 
     /* Tier 0 — codepoint leaves */
-    for (size_t i = 0; i < nfc_n; ++i) {
-        uint32_t idx = tier_tree_add_leaf(tree, /*tier=*/0, nfc_cps[i],
+    for (size_t i = 0; i < cp_n; ++i) {
+        uint32_t idx = tier_tree_add_leaf(tree, /*tier=*/0, cps[i],
                                            leaf_text_off[i], leaf_text_len[i]);
         if (idx == TIER_TREE_INVALID) {
-            free(leaf_text_off); free(leaf_text_len); free(nfc_cps);
+            free(leaf_text_off); free(leaf_text_len); free(cps);
             tier_tree_free(tree); return -3;
         }
     }
@@ -155,8 +157,8 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
     {
         graph_first_idx_in_tree = tier_tree_node_count(tree);
         size_t prev_boundary = 0;
-        while (prev_boundary < nfc_n) {
-            size_t next_boundary = laplace_grapheme_break_next(nfc_cps, nfc_n, prev_boundary);
+        while (prev_boundary < cp_n) {
+            size_t next_boundary = laplace_grapheme_break_next(cps, cp_n, prev_boundary);
             uint32_t child_count = (uint32_t)(next_boundary - prev_boundary);
             uint32_t off_start = leaf_text_off[prev_boundary];
             uint32_t off_end   = (next_boundary > 0)
@@ -166,7 +168,7 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
                                                (uint32_t)prev_boundary, child_count,
                                                off_start, off_end - off_start);
             if (idx == TIER_TREE_INVALID) {
-                free(leaf_text_off); free(leaf_text_len); free(nfc_cps);
+                free(leaf_text_off); free(leaf_text_len); free(cps);
                 tier_tree_free(tree); return -3;
             }
             graph_count++;
@@ -182,9 +184,9 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
     {
         /* Build codepoint→grapheme-index map. Grapheme indices into the
          * TIER-1 node positions (offset by graph_first_idx_in_tree). */
-        uint32_t* cp_to_graph = (uint32_t*)malloc(nfc_n * sizeof(uint32_t));
+        uint32_t* cp_to_graph = (uint32_t*)malloc(cp_n * sizeof(uint32_t));
         if (!cp_to_graph) {
-            free(leaf_text_off); free(leaf_text_len); free(nfc_cps);
+            free(leaf_text_off); free(leaf_text_len); free(cps);
             tier_tree_free(tree); return -3;
         }
         for (size_t g = 0; g < graph_count; ++g) {
@@ -197,8 +199,8 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
 
         word_first_idx_in_tree = tier_tree_node_count(tree);
         size_t prev_boundary = 0;
-        while (prev_boundary < nfc_n) {
-            size_t next_boundary = laplace_word_break_next(nfc_cps, nfc_n, prev_boundary);
+        while (prev_boundary < cp_n) {
+            size_t next_boundary = laplace_word_break_next(cps, cp_n, prev_boundary);
             /* Snap [prev_boundary, next_boundary) to grapheme indices. */
             uint32_t g_start = cp_to_graph[prev_boundary];
             uint32_t g_end   = (next_boundary > 0)
@@ -215,7 +217,7 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
                                                off_start, off_end - off_start);
             if (idx == TIER_TREE_INVALID) {
                 free(cp_to_graph); free(leaf_text_off); free(leaf_text_len);
-                free(nfc_cps); tier_tree_free(tree); return -3;
+                free(cps); tier_tree_free(tree); return -3;
             }
             word_count++;
             prev_boundary = next_boundary;
@@ -228,9 +230,9 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
     size_t sent_first_idx_in_tree;
     size_t sent_count = 0;
     {
-        uint32_t* cp_to_word = (uint32_t*)malloc(nfc_n * sizeof(uint32_t));
+        uint32_t* cp_to_word = (uint32_t*)malloc(cp_n * sizeof(uint32_t));
         if (!cp_to_word) {
-            free(leaf_text_off); free(leaf_text_len); free(nfc_cps);
+            free(leaf_text_off); free(leaf_text_len); free(cps);
             tier_tree_free(tree); return -3;
         }
         for (size_t w = 0; w < word_count; ++w) {
@@ -250,8 +252,8 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
 
         sent_first_idx_in_tree = tier_tree_node_count(tree);
         size_t prev_boundary = 0;
-        while (prev_boundary < nfc_n) {
-            size_t next_boundary = laplace_sentence_break_next(nfc_cps, nfc_n, prev_boundary);
+        while (prev_boundary < cp_n) {
+            size_t next_boundary = laplace_sentence_break_next(cps, cp_n, prev_boundary);
             uint32_t w_start = cp_to_word[prev_boundary];
             uint32_t w_end   = (next_boundary > 0)
                                ? cp_to_word[next_boundary - 1] + 1
@@ -267,7 +269,7 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
                                                off_start, off_end - off_start);
             if (idx == TIER_TREE_INVALID) {
                 free(cp_to_word); free(leaf_text_off); free(leaf_text_len);
-                free(nfc_cps); tier_tree_free(tree); return -3;
+                free(cps); tier_tree_free(tree); return -3;
             }
             sent_count++;
             prev_boundary = next_boundary;
@@ -278,15 +280,15 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
     /* Tier 4 — document root: all sentences. */
     {
         uint32_t off_start = 0;
-        uint32_t off_end = (nfc_n > 0)
-                           ? leaf_text_off[nfc_n - 1] + leaf_text_len[nfc_n - 1]
+        uint32_t off_end = (cp_n > 0)
+                           ? leaf_text_off[cp_n - 1] + leaf_text_len[cp_n - 1]
                            : 0;
         uint32_t root_idx = tier_tree_add_node(tree, /*tier=*/4,
                                                 (uint32_t)sent_first_idx_in_tree,
                                                 (uint32_t)sent_count,
                                                 off_start, off_end - off_start);
         if (root_idx == TIER_TREE_INVALID) {
-            free(leaf_text_off); free(leaf_text_len); free(nfc_cps);
+            free(leaf_text_off); free(leaf_text_len); free(cps);
             tier_tree_free(tree); return -3;
         }
     }
@@ -295,7 +297,7 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
 
     free(leaf_text_off);
     free(leaf_text_len);
-    free(nfc_cps);
+    free(cps);
     *out_tree = tree;
     return 0;
 }

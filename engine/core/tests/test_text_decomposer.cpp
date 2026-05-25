@@ -73,26 +73,26 @@ TEST(LaplaceCoreTextDecomposer, ASCIIHelloWorldTopology) {
     tier_tree_free(t);
 }
 
-TEST(LaplaceCoreTextDecomposer, NFCEquivalentInputsProduceIdenticalTree) {
-    // Same character expressed two ways:
-    //   precomposed: U+00E9 (é) — one codepoint
-    //   decomposed:  U+0065 U+0301 (e + combining acute) — two codepoints
-    // After NFC normalization both become U+00E9.
+TEST(LaplaceCoreTextDecomposer, DistinctNormalizationFormsStayDistinct) {
+    // No NFC at ingest: the same abstract character expressed two ways —
+    //   precomposed: U+00E9 (é)          — one codepoint
+    //   decomposed:  U+0065 U+0301 (e+´) — two codepoints
+    // are DIFFERENT observed forms → different codepoint leaves → distinct
+    // content-addressed entities, linked later by a canonical-equivalence
+    // attestation, never collapsed by a destructive transform at ingest.
     tier_tree_t* a = nullptr;
     tier_tree_t* b = nullptr;
     const uint8_t pre[] = {0xC3, 0xA9};                 // U+00E9 in UTF-8
     const uint8_t dec[] = {0x65, 0xCC, 0x81};            // U+0065 U+0301 in UTF-8
     ASSERT_EQ(0, laplace_text_decomposer_run(pre, sizeof(pre), &a));
     ASSERT_EQ(0, laplace_text_decomposer_run(dec, sizeof(dec), &b));
-    ASSERT_EQ(tier_tree_node_count(a), tier_tree_node_count(b));
-    for (size_t i = 0; i < tier_tree_node_count(a); ++i) {
-        tier_node_view_t va, vb;
-        tier_tree_get_node(a, (uint32_t)i, &va);
-        tier_tree_get_node(b, (uint32_t)i, &vb);
-        EXPECT_EQ(va.tier, vb.tier) << "idx=" << i;
-        EXPECT_EQ(va.atom, vb.atom) << "idx=" << i;
-        EXPECT_EQ(va.child_count, vb.child_count) << "idx=" << i;
-    }
+    // Distinct codepoint-leaf counts (1 vs 2) ⇒ distinct trees — NOT merged.
+    EXPECT_NE(tier_tree_node_count(a), tier_tree_node_count(b));
+    tier_node_view_t la, lb;
+    tier_tree_get_node(a, 0, &la);
+    tier_tree_get_node(b, 0, &lb);
+    EXPECT_EQ(0u, la.tier); EXPECT_EQ(0x00E9u, la.atom);   // precomposed é
+    EXPECT_EQ(0u, lb.tier); EXPECT_EQ(0x0065u, lb.atom);   // 'e' (acute follows separately)
     tier_tree_free(a);
     tier_tree_free(b);
 }
