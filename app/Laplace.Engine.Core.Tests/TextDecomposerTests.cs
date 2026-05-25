@@ -80,16 +80,17 @@ public class TextDecomposerTests
     }
 
     [Fact]
-    public void NfcEquivalentInputs_ProduceIdenticalTrees()
+    public void DistinctNormalizationForms_StayDistinct()
     {
-        // Precomposed é vs e + combining acute
+        // No NFC at ingest: precomposed é (U+00E9, one codepoint) and decomposed
+        // e + combining acute (U+0065 U+0301, two codepoints) are different
+        // observed forms → distinct content-addressed entities, linked later by
+        // a canonical-equivalence attestation, never collapsed at the door.
         using var pre = TextDecomposer.Run(new byte[] { 0xC3, 0xA9 });
         using var dec = TextDecomposer.Run(new byte[] { 0x65, 0xCC, 0x81 });
-        Assert.Equal(pre.NodeCount, dec.NodeCount);
-        for (uint i = 0; i < (uint)pre.NodeCount; i++)
-        {
-            Assert.Equal(pre.GetNode(i).Atom, dec.GetNode(i).Atom);
-        }
+        Assert.NotEqual(pre.NodeCount, dec.NodeCount);   // 1 vs 2 codepoint leaves
+        Assert.Equal(0x00E9u, pre.GetNode(0).Atom);      // precomposed é
+        Assert.Equal(0x0065u, dec.GetNode(0).Atom);      // 'e', acute follows separately
     }
 
     [Fact]
