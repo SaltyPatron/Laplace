@@ -7,6 +7,7 @@ using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Unicode;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -23,7 +24,7 @@ internal static class Program
     {
         if (args.Length == 0)
         {
-            Console.Error.WriteLine("usage: laplace <seed-unicode | decompose <text> | stats>");
+            Console.Error.WriteLine("usage: laplace <seed-unicode | ingest <source> | decompose <text> | roundtrip <file> | stats>");
             return 2;
         }
         try
@@ -31,20 +32,102 @@ internal static class Program
             return args[0] switch
             {
                 "seed-unicode" => await SeedUnicodeAsync(),
+                "ingest"       => await IngestAsync(args.Length > 1 ? args[1] : ""),
                 "decompose"    => Decompose(string.Join(' ', args[1..])),
                 "roundtrip"    => Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
+                "db-roundtrip" => await DbRoundtripAsync(args.Length > 1 ? args[1] : ""),
                 "stats"        => await StatsAsync(),
                 _ => Fail($"unknown command '{args[0]}'"),
             };
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"error: {ex.Message}");
+            Console.Error.WriteLine($"error: {ex.GetType().Name}: {ex.Message}");
+            for (var inner = ex.InnerException; inner is not null; inner = inner.InnerException)
+                Console.Error.WriteLine($"  inner: {inner.GetType().Name}: {inner.Message}");
+            Console.Error.WriteLine(ex.StackTrace);
             return 1;
         }
     }
 
     private static int Fail(string m) { Console.Error.WriteLine(m); return 2; }
+
+    // === db-roundtrip: store content in the substrate, reconstruct FROM the DB ===
+    private static async Task<int> DbRoundtripAsync(string path)
+    {
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            return Fail($"usage: laplace db-roundtrip <file>  (not found: {path})");
+        CodepointPerfcache.Load(ResolveBlob());
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        var writer = new NpgsqlSubstrateWriter(ds);
+
+        byte[] original = File.ReadAllBytes(path);
+
+        var swR = Stopwatch.StartNew();
+        await ContentRoundtrip.BootstrapAsync(writer);
+        Hash128 docId = await ContentRoundtrip.RecordAsync(writer, original);
+        swR.Stop();
+        Console.WriteLine($"recorded : {original.Length,10:N0} bytes → document {docId.Hi:x16}{docId.Lo:x16}  in {swR.Elapsed.TotalSeconds:F1}s");
+
+        var swX = Stopwatch.StartNew();
+        byte[] rebuilt = await ContentRoundtrip.ReconstructAsync(ds, docId);
+        swX.Stop();
+
+        string hIn = Convert.ToHexString(SHA256.HashData(original)).ToLowerInvariant();
+        string hOut = Convert.ToHexString(SHA256.HashData(rebuilt)).ToLowerInvariant();
+        bool match = hIn == hOut;
+        Console.WriteLine($"rebuilt  : {rebuilt.Length,10:N0} bytes read back FROM the database in {swX.Elapsed.TotalSeconds:F1}s");
+        Console.WriteLine($"sha256 in  : {hIn}");
+        Console.WriteLine($"sha256 out : {hOut}");
+        Console.WriteLine(match
+            ? "BIT-PERFECT FROM DATABASE — reconstruction equals the original."
+            : "MISMATCH — reconstruction differs.");
+        return match ? 0 : 1;
+    }
+
+    // === ingest: IngestRunner + per-source decomposer (ADR 0052) ===
+    private static async Task<int> IngestAsync(string source)
+    {
+        if (string.IsNullOrEmpty(source))
+            return Fail("usage: laplace ingest <source>  (supported: unicode)");
+
+        return source.ToLowerInvariant() switch
+        {
+            "unicode" => await IngestUnicodeViaRunnerAsync(),
+            _ => Fail($"unknown ingest source '{source}' (supported: unicode)"),
+        };
+    }
+
+    private static async Task<int> IngestUnicodeViaRunnerAsync()
+    {
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        var writer = new NpgsqlSubstrateWriter(ds);
+        var reader = new NpgsqlSubstrateReader(ds);
+        var runner = new IngestRunner(writer, reader);
+        var dec = new UnicodeDecomposer(ResolveBlob());
+
+        Console.WriteLine($"ingest unicode via IngestRunner → {ConnString} ...");
+        var sw = Stopwatch.StartNew();
+        var result = await runner.RunAsync(
+            dec,
+            IngestRunOptions.Default with { SkipLayerOrderingCheck = true },
+            CancellationToken.None);
+        sw.Stop();
+
+        Console.WriteLine(
+            $"done: {result.UnitsApplied:N0} intents applied, "
+            + $"{result.EntitiesInserted:N0} novel entities, "
+            + $"{result.PhysicalitiesInserted:N0} physicalities, "
+            + $"{result.TotalRoundTrips:N0} round-trips, "
+            + $"{sw.Elapsed.TotalSeconds:F1}s");
+        if (result.Failures.Count > 0)
+        {
+            Console.Error.WriteLine($"failures: {result.Failures.Count}");
+            return 1;
+        }
+        await PrintCountsAsync(ds);
+        return 0;
+    }
 
     // === seed-unicode: stream the T0 codepoint seed into the substrate ===
     private static async Task<int> SeedUnicodeAsync()
