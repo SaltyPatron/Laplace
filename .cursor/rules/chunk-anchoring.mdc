@@ -1,0 +1,33 @@
+---
+description: Anchor work to GitHub issues — durable state lives outside the chat window
+alwaysApply: true
+---
+
+# Chunk anchoring
+
+Chat context is volatile. **Issues + ADRs + git** are the durable record (no `STATE.md`).
+
+## Session start (when user names a chunk or issue)
+
+1. `just anchor <N>` (or `just issue N`) — issue body, git head, hard stops, prereq summary.
+2. If `.laplace-session` exists, hooks also seed `.cursor/anchor.md` on sessionStart.
+3. After **context compaction**, read `.cursor/anchor.md` first, then re-run `just anchor <N>`.
+4. Post a **3-line anchor** before coding:
+   - Issue # and title
+   - This turn’s single subtask
+   - Verification command you will run when done
+
+## During work
+
+- Tick issue subtasks via `gh issue edit` when the user’s cadence expects it (see `CLAUDE.md` → Cadence).
+- If scope expands, **stop** and surface the decision — do not silently absorb new requirements.
+
+## User prompt patterns that reduce error rate
+
+Ask the user (or they can lead with):
+
+- `Issue #N — subtask: <exact checkbox text>`
+- `Verify only` vs `Implement` vs `Explain only`
+- `Do not touch: <paths>`
+
+When the user says “continue”, assume **same issue #** until they change it; re-fetch the issue if the thread is long.

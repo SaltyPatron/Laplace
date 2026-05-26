@@ -1,0 +1,31 @@
+---
+description: Reduce errors under hard context limits — evidence before claims
+alwaysApply: true
+---
+
+# Context discipline
+
+Compressed context is the default. Treat memory of prior turns as unreliable; re-read sources each chunk.
+
+## Before editing
+
+1. **Read** the file (or the exact region) you will change. Do not edit from recall.
+2. **Grep** for symbols you will call, types you will implement, or patterns you will mirror. Do not invent APIs.
+3. **Scope** one coherent slice per turn (one function, one module, one issue subtask). Stop when the slice is done.
+
+## Before stating facts
+
+- File paths, line numbers, schema columns, ADR numbers → must come from a tool read in **this** session.
+- If you have not read it this session, say so and read it — do not guess.
+
+## When context is thin
+
+1. Re-open the GitHub issue body (`gh issue view N`) or the user’s stated acceptance criteria.
+2. Re-read only the **minimum** canon: `RULES.md` hard stops + the relevant `DESIGN.md` section — not the whole repo.
+3. Delegate broad codebase search to an `explore` subagent; keep the parent thread anchored to issue # and criteria.
+
+## Forbidden shortcuts (drive most user-visible errors)
+
+- Implementing from pattern-matched “conventional AI” habits — invoke `conventional-ai-skeptic` when tempted.
+- Marking work complete without command output from the relevant `just` target.
+- Editing user-authored docs (`DESIGN.md`, `GLOSSARY.md`, `RULES.md`, `STANDARDS.md`, `OPERATIONS.md`, `README.md`) without explicit user instruction.

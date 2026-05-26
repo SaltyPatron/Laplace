@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": ".cursor/hooks/laplace-session-start.sh"
+      }
+    ],
+    "preCompact": [
+      {
+        "command": ".cursor/hooks/laplace-pre-compact.sh"
+      }
+    ],
+    "stop": [
+      {
+        "command": ".cursor/hooks/laplace-stop-verify.sh",
+        "loop_limit": 1
+      }
+    ]
+  }
+}

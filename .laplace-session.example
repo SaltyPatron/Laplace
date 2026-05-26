@@ -1,0 +1,3 @@
+# Copy to .laplace-session (gitignored) for sessionStart / preCompact hooks.
+ISSUE=196
+MODE=implement

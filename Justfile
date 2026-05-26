@@ -250,6 +250,17 @@ verify-perfcache:
 status:
     @git log --oneline -10
 
+# === Agent context (SSH / compressed-context workflows) ===
+#
+# Compact briefing: issue body, git head, hard stops, prereq summary.
+# Issue defaults to ISSUE= in .laplace-session (see .laplace-session.example).
+
+anchor issue="":
+    @scripts/agent-anchor.sh {{issue}}
+
+issue n:
+    @scripts/agent-anchor.sh {{n}}
+
 
 # === Test ===
 #
@@ -261,6 +272,9 @@ status:
 #                  against a postgis/postgis:18 container)
 
 test: test-engine regress test-app
+
+# Engine + pg_regress only — no Testcontainers / Docker (for agents when docker is off).
+test-no-docker: test-engine regress
 
 # ctest runs everything discovered by gtest_discover_tests in each engine
 # subdir. Excludes pg_regress tests (those are `just regress`). Requires

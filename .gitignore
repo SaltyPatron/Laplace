@@ -483,6 +483,10 @@ Thumbs.db
 *.swo
 *~
 
+# Agent session state (local; see .laplace-session.example)
+.laplace-session
+.cursor/anchor.md
+
 # Python (build scripts only — no Python in main codebase)
 __pycache__/
 *.pyc
