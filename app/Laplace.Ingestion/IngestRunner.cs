@@ -157,7 +157,11 @@ public sealed class IngestRunner
         attestationsInserted  = counters.AttestationsInserted;
         totalRoundTrips       = counters.RoundTrips;
 
-        // 6. Final flush + summary.
+        // 6. Layer completion marker (ADR 0037) when the run finished clean.
+        if (counters.UnitsFailed == 0 && failures.Count == 0)
+            await _writer.ApplyAsync(LayerCompletion.BuildMarker(decomposer), ct);
+
+        // 7. Final flush + summary.
         await checkpoint.FlushAsync(CancellationToken.None);
         sw.Stop();
 

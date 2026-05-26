@@ -101,7 +101,7 @@ internal static class Program
         string path   = args.Length > 1 ? args[1] : "";
 
         if (string.IsNullOrEmpty(source))
-            return Fail("usage: laplace ingest <source> [path]  (supported: unicode, model)");
+            return Fail("usage: laplace ingest <source> [path]  (unicode | iso639 | wordnet | omw | ud | model)");
 
         return source.ToLowerInvariant() switch
         {

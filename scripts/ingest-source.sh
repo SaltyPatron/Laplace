@@ -3,7 +3,7 @@
 # Dispatch ingestion to the right IDecomposer via Laplace.Cli + IngestRunner (ADR 0052).
 # Usage: scripts/ingest-source.sh <source-name> [path]
 #
-# path is reserved for sources that read from a filesystem root (wordnet, model, …).
+# path is required only for: model <model-dir>
 
 set -euo pipefail
 source="${1:-}"
@@ -11,25 +11,33 @@ path="${2:-}"
 
 if [[ -z "$source" ]]; then
     echo "Usage: $0 <source-name> [path]" >&2
-    echo "Implemented: unicode, model" >&2
-    echo "Planned: wordnet, ud, wiktionary, tatoeba, conceptnet, atomic2020, text-corpus" >&2
+    echo "Sources: unicode, iso639, wordnet, omw, ud, model" >&2
     exit 2
 fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CLI=(dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release --)
 
 case "$source" in
     unicode)
         cd "$ROOT/app"
-        dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- ingest unicode
+        "${CLI[@]}" ingest unicode
         ;;
-    wordnet|ud|wiktionary|tatoeba|conceptnet|atomic2020)
-        echo "Source '$source' plugin not yet implemented." >&2
-        exit 1
+    iso639)
+        cd "$ROOT/app"
+        "${CLI[@]}" ingest iso639
         ;;
-    text-corpus)
-        echo "TextCorpusSource not yet implemented." >&2
-        exit 1
+    wordnet)
+        cd "$ROOT/app"
+        "${CLI[@]}" ingest wordnet
+        ;;
+    omw)
+        cd "$ROOT/app"
+        "${CLI[@]}" ingest omw
+        ;;
+    ud)
+        cd "$ROOT/app"
+        "${CLI[@]}" ingest ud
         ;;
     model)
         if [[ -z "$path" ]]; then
@@ -37,7 +45,11 @@ case "$source" in
             exit 2
         fi
         cd "$ROOT/app"
-        dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- ingest model "$path"
+        "${CLI[@]}" ingest model "$path"
+        ;;
+    wiktionary|tatoeba|conceptnet|atomic2020|text-corpus)
+        echo "Source '$source' has no decomposer implementation yet." >&2
+        exit 1
         ;;
     *)
         echo "Unknown source: $source" >&2

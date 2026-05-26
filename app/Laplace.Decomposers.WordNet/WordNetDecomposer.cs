@@ -133,8 +133,9 @@ public sealed class WordNetDecomposer : IDecomposer
         {
             string filePath = Path.Combine(dictDir, posFile);
             if (!File.Exists(filePath)) continue;
+            char pos = PosFromDataFile(posFile);
 
-            await foreach (var syn in ParseFileAsync(filePath, ct))
+            await foreach (var syn in ParseFileAsync(filePath, pos, ct))
             {
                 ct.ThrowIfCancellationRequested();
 
@@ -235,10 +236,21 @@ public sealed class WordNetDecomposer : IDecomposer
         _ => PosNounId,
     };
 
+    /// <summary>WordNet data-file POS tag (n/v/a/r), not field-2 ss_type (1–5).</summary>
+    private static char PosFromDataFile(string posFile) => posFile switch
+    {
+        "data.noun" => 'n',
+        "data.verb" => 'v',
+        "data.adj"  => 'a',
+        "data.adv"  => 'r',
+        _           => 'n',
+    };
+
     // ── parser ──────────────────────────────────────────────────────────────
 
     private static async IAsyncEnumerable<WnSynset> ParseFileAsync(
         string path,
+        char pos,
         [EnumeratorCancellation] CancellationToken ct)
     {
         await foreach (var line in File.ReadLinesAsync(path, ct))
@@ -255,7 +267,7 @@ public sealed class WordNetDecomposer : IDecomposer
             int idx = 0;
             if (!long.TryParse(parts[idx++], out long offset)) continue;  // field 0: offset
             idx++;                                                          // field 1: lex_filenum (skip)
-            char ssType = parts[idx++][0];                                  // field 2: ss_type
+            idx++;                                                          // field 2: ss_type (skip — not POS)
             if (!int.TryParse(parts[idx++],                                 // field 3: w_cnt (hex)
                     System.Globalization.NumberStyles.HexNumber, null, out int wCnt))
                 continue;
@@ -283,8 +295,8 @@ public sealed class WordNetDecomposer : IDecomposer
                 pointers.Add(new WnPointer(sym, tgtOffset, tgtPos));
             }
 
-            Hash128 synId = SourceEntityIdConventions.WordNetSynset(offset, ssType);
-            yield return new WnSynset(synId, ssType, lemmas, pointers);
+            Hash128 synId = SourceEntityIdConventions.WordNetSynset(offset, pos);
+            yield return new WnSynset(synId, pos, lemmas, pointers);
         }
     }
 

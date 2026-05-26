@@ -1,0 +1,29 @@
+using Laplace.Decomposers.Abstractions;
+using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD;
+
+namespace Laplace.Ingestion;
+
+/// <summary>
+/// Records ADR 0037 layer completion via a <c>HasLayerCompleted/{n}</c>
+/// attestation so <see cref="NpgsqlSubstrateReader.HasSourceEverCompletedAsync"/>
+/// can gate later layers.
+/// </summary>
+internal static class LayerCompletion
+{
+    public static Hash128 KindId(int layerOrder) =>
+        Hash128.OfCanonical($"substrate/kind/HasLayerCompleted/{layerOrder}/v1");
+
+    public static SubstrateChange BuildMarker(IDecomposer decomposer) =>
+        new SubstrateChangeBuilder(decomposer.SourceId, $"layer-complete/{decomposer.LayerOrder}", null,
+                entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 1)
+            .AddAttestation(AttestationFactory.Create(
+                decomposer.SourceId,
+                KindId(decomposer.LayerOrder),
+                decomposer.SourceId,
+                decomposer.SourceId,
+                contextId: null,
+                KindValueTier.T1,
+                TrustClass.SubstrateMandateTier1))
+            .Build();
+}
