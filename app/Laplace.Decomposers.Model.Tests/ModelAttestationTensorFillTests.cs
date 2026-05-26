@@ -1,5 +1,6 @@
 using Laplace.Decomposers.Model;
 using Laplace.Engine.Core;
+using Xunit;
 
 namespace Laplace.Decomposers.Model.Tests;
 

@@ -233,7 +233,8 @@ roundtrip model_path:
     scripts/roundtrip.sh {{model_path}}
 
 # Chunk 8 partial — same gate as integration.yml model-codec job.
-model-codec-ci: build-app
+# Local model codec gate — build engine + full solution first, then one script.
+model-codec-ci: build build-app
     @chmod +x scripts/model-codec-ci.sh
     scripts/model-codec-ci.sh
 
