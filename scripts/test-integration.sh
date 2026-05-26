@@ -1,7 +1,4 @@
-#!/bin/bash
-# scripts/test-integration.sh
-# End-to-end integration tests crossing engine + extension + app boundaries.
-# Real implementation grows with each chunk.
-
-echo "Integration tests not yet implemented (grow per chunk)" >&2
-exit 1
+#!/usr/bin/env bash
+# Cross-boundary integration entry — same gate as integration.yml model-codec job.
+set -euo pipefail
+exec "$(cd "$(dirname "$0")" && pwd)/model-codec-ci.sh"

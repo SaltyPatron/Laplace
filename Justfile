@@ -232,18 +232,25 @@ synthesize-tinyllama output="/tmp/tinyllama-substrate.gguf": build-app
 roundtrip model_path:
     scripts/roundtrip.sh {{model_path}}
 
+# Chunk 8 partial — same gate as integration.yml model-codec job.
+model-codec-ci: build-app
+    @chmod +x scripts/model-codec-ci.sh
+    scripts/model-codec-ci.sh
+
 # === Verify ===
 
 verify: verify-determinism verify-fk verify-perfcache
 
-verify-determinism:
-    scripts/verify-determinism.sh
+verify-determinism: build
+    cmake --build build --target laplace_verify_perfcache_determinism
 
 verify-fk:
     psql -d laplace -U laplace_admin -f scripts/verify-fk.sql
 
-verify-perfcache:
-    scripts/verify-perfcache.sh
+verify-perfcache: build
+    cmake --build build --target laplace_t0_perfcache
+    cd build && LD_LIBRARY_PATH="$(realpath engine/core):$(realpath engine/dynamics):$(realpath engine/synthesis):${LD_LIBRARY_PATH:-}" \
+        ctest -R '^LaplaceCoreCodepointTable' --output-on-failure
 
 # === Status ===
 

@@ -421,7 +421,8 @@ jobs:
             Laplace.Decomposers.Containers.Abstractions.Tests \
             Laplace.SubstrateCRUD.Tests \
             Laplace.Ingestion.Tests \
-            Laplace.Decomposers.Unicode.Tests; do
+            Laplace.Decomposers.Unicode.Tests \
+            Laplace.Decomposers.Model.Tests; do
             echo "::group::dotnet test $proj"
             dotnet test "$proj/$proj.csproj" -c Release
             echo "::endgroup::"
@@ -463,5 +464,30 @@ jobs:
             echo "::endgroup::"
           done
 
+  # ------------------------------------------------------------------
+  # model-codec — Chunk 8 partial: idempotent ingest + substrate synthesize.
+  # Same entry point as scripts/model-codec-ci.sh (roundtrip.sh delegates).
+  # ------------------------------------------------------------------
+  model-codec:
+    name: Model codec — idempotent ingest + substrate GGUF (Chunk 8 partial)
+    needs: [db-deploy, engine, dotnet]
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+
+      - name: Source oneAPI env (synthesize P/Invoke + MKL)
+        run: |
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|LD_LIBRARY_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+
+      - name: Model codec CI (ingest idempotent + interior kinds + GGUF)
+        run: |
+          chmod +x scripts/model-codec-ci.sh
+          scripts/model-codec-ci.sh
+
   # - verify-determinism, verify-fk, verify-perfcache (Chunk 3+)
-  # - round-trip end-to-end test (Chunk 8)
+  # - llama.cpp behavioral chat verification (Chunk 8 remainder)

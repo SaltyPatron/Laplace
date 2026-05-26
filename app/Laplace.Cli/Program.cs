@@ -952,6 +952,43 @@ internal static class Program
         {
             Console.WriteLine("  (no CONTENT physicality for U+0041 yet — run seed-unicode)");
         }
+
+        long modelAtts = await Scalar(
+            "SELECT count(*) FROM laplace.attestations WHERE source_id = @p",
+            ModelDecomposer.Source.ToBytes());
+        if (modelAtts == 0)
+        {
+            Console.WriteLine("  model attestations    : (none — ingest model)");
+            return;
+        }
+
+        Console.WriteLine($"  model attestations    : {modelAtts,9:N0}  (source TinyLlama)");
+        async Task<long> KindCount(Hash128 kind)
+        {
+            await using var c = conn.CreateCommand();
+            c.CommandText =
+                "SELECT count(*) FROM laplace.attestations WHERE source_id = @s AND kind_id = @k";
+            c.Parameters.AddWithValue("s", ModelDecomposer.Source.ToBytes());
+            c.Parameters.AddWithValue("k", kind.ToBytes());
+            return (long)(await c.ExecuteScalarAsync())!;
+        }
+
+        (string label, Hash128 kind)[] modelKinds =
+        [
+            ("EMBEDS",          ModelDecomposer.EmbedsKind),
+            ("Q_PROJECTS",      ModelDecomposer.QProjectsKind),
+            ("V_PROJECTS",      ModelDecomposer.VProjectsKind),
+            ("O_PROJECTS",      ModelDecomposer.OProjectsKind),
+            ("GATES",           ModelDecomposer.GatesKind),
+            ("UP_PROJECTS",     ModelDecomposer.UpProjectsKind),
+            ("DOWN_PROJECTS",   ModelDecomposer.DownProjectsKind),
+            ("OUTPUT_PROJECTS", ModelDecomposer.OutputProjectsKind),
+        ];
+        foreach (var (label, kind) in modelKinds)
+        {
+            long n = await KindCount(kind);
+            Console.WriteLine($"  └ {label,-16}: {n,9:N0}");
+        }
     }
 
     // === decompose: run the engine text decomposer + hash composer live ===

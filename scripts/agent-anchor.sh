@@ -75,11 +75,12 @@ else
 fi
 echo
 
-echo "=== Verify commands (when touching code) ==="
-echo "  engine/extension → just build; SQL/C changes → just regress"
-echo "  app/migrations   → just build; db/migrations → just db-up"
-echo "  hot-path claims  → just verify"
-echo "  docker off       → just test-no-docker  (engine + regress only)"
+echo "=== Build / verify (support claims — not the deliverable) ==="
+echo "  engine/extension/src → just build; extension sql → just regress"
+echo "  app / migrations     → just build-app / just db-up as needed"
+echo "  integrity claims     → just verify (after substantive hot-path change)"
+echo "  docker off           → just test-no-docker"
+echo "  Stop hook requires: gap + evidence + next implementation — not verify-only replies"
 echo
 echo "=== After context compaction ==="
 echo "  1. Read .cursor/anchor.md"

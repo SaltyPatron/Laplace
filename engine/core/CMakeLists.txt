@@ -103,6 +103,24 @@ add_custom_command(
 
 add_custom_target(laplace_t0_perfcache ALL DEPENDS ${LAPLACE_PERFCACHE_BIN})
 
+# Re-emit the T0 perf-cache and byte-compare to the stamp-built artifact.
+# RULES R7 / ADR 0053: same UCD + UCA + emit tool → identical bytes.
+set(LAPLACE_PERFCACHE_REFERENCE_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_t0_perfcache.reference.bin")
+add_custom_target(laplace_verify_perfcache_determinism
+    COMMAND ${CMAKE_COMMAND} -E copy ${LAPLACE_PERFCACHE_BIN} ${LAPLACE_PERFCACHE_REFERENCE_BIN}
+    COMMAND ${CMAKE_COMMAND} -E remove ${LAPLACE_PERFCACHE_BIN}
+    COMMAND $<TARGET_FILE:laplace_ucd_tables_emit>
+            --ucdxml      "${LAPLACE_PERFCACHE_XML}"
+            --ducet       "${LAPLACE_DUCET_FILE}"
+            --ucd-version "${LAPLACE_UNICODE_VERSION}"
+            --uca-version "${LAPLACE_UCA_VERSION}"
+            --output      ${LAPLACE_PERFCACHE_BIN}
+    COMMAND ${CMAKE_COMMAND} -E compare_files ${LAPLACE_PERFCACHE_BIN} ${LAPLACE_PERFCACHE_REFERENCE_BIN}
+    DEPENDS laplace_t0_perfcache laplace_ucd_tables_emit ${LAPLACE_PERFCACHE_XML} "${LAPLACE_DUCET_FILE}"
+    COMMENT "Verify T0 perf-cache emit is byte-deterministic (RULES R7)"
+    VERBATIM
+)
+
 set_target_properties(laplace_core PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}

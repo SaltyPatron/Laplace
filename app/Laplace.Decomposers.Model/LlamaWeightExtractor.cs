@@ -329,7 +329,7 @@ public sealed class LlamaWeightExtractor
     /* Model_Feature type (hidden/feature-dim entities) + deterministic per-(axis,dim) id. */
     private static readonly Hash128 ModelFeatureTypeId = Hash128.OfCanonical("substrate/type/Model_Feature/v1");
     private static Hash128 FeatureId(string axis, int dim) =>
-        Hash128.OfCanonical($"substrate/feature/{axis}/{dim}/v1");
+        ModelFeatureEntityId.For(axis, dim);
 
     /* Phase 0 (ADR 0056): the feature/hidden-dim entities the interior roles attest against.
      * axes: "d" = dModel hidden dims (EMBEDS/O/OUTPUT), "kv" = v_proj value dims,
