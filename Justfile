@@ -208,6 +208,9 @@ setup: launch-db db-up seed-t0
 ingest source path="": build-app
     scripts/ingest-source.sh {{source}} {{path}}
 
+ingest-tinyllama: build-app
+    scripts/ingest-source.sh model /vault/models/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0/snapshots/fe8a4ea1ffedaf415f4da2f062534de366a451e6
+
 # === Query / Cascade ===
 
 query sql:
@@ -218,8 +221,12 @@ cascade prompt:
 
 # === Synthesis ===
 
-synthesize recipe:
-    app/Laplace.Cli/bin/Release/net10.0/laplace-cli synthesize --recipe {{recipe}}
+synthesize target output="/tmp/tinyllama-substrate.gguf": build-app
+    cd app && LD_LIBRARY_PATH="$(pwd)/../build/engine/synthesis:$(pwd)/../build/engine/dynamics:$(pwd)/../build/engine/core:${LD_LIBRARY_PATH:-}" \
+        dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- synthesize {{target}} {{output}}
+
+synthesize-tinyllama output="/tmp/tinyllama-substrate.gguf": build-app
+    just synthesize tinyllama {{output}}
 
 roundtrip model_path:
     scripts/roundtrip.sh {{model_path}}

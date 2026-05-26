@@ -27,6 +27,21 @@ gguf_writer_t* gguf_writer_create(const char* output_path);
 /* Add a metadata key-value pair (architecture name, vocab, etc.). */
 int gguf_writer_add_metadata_str(gguf_writer_t* w, const char* key, const char* value);
 int gguf_writer_add_metadata_u32(gguf_writer_t* w, const char* key, uint32_t value);
+int gguf_writer_add_metadata_f32(gguf_writer_t* w, const char* key, float value);
+
+/* Array metadata.
+ * str_array_packed: packed_data = `count` strings in GGUF wire format
+ *   (each: uint64_le byte-length + raw bytes, no null terminator).
+ *   total_bytes = total size of packed_data buffer in bytes.
+ * f32_array / i32_array: plain element arrays, `count` elements each. */
+int gguf_writer_add_metadata_str_array_packed(gguf_writer_t* w, const char* key,
+                                              const uint8_t* packed_data,
+                                              size_t         total_bytes,
+                                              size_t         count);
+int gguf_writer_add_metadata_f32_array(gguf_writer_t* w, const char* key,
+                                       const float*   values, size_t count);
+int gguf_writer_add_metadata_i32_array(gguf_writer_t* w, const char* key,
+                                       const int32_t* values, size_t count);
 
 /* Add a tensor. `data` is `n_elements * elem_size_bytes(dtype)` bytes.
  * Sparse-by-construction: zero entries are encoded according to the

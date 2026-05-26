@@ -11,8 +11,8 @@ path="${2:-}"
 
 if [[ -z "$source" ]]; then
     echo "Usage: $0 <source-name> [path]" >&2
-    echo "Implemented: unicode" >&2
-    echo "Planned: wordnet, ud, wiktionary, tatoeba, conceptnet, atomic2020, text-corpus, model" >&2
+    echo "Implemented: unicode, model" >&2
+    echo "Planned: wordnet, ud, wiktionary, tatoeba, conceptnet, atomic2020, text-corpus" >&2
     exit 2
 fi
 
@@ -32,11 +32,12 @@ case "$source" in
         exit 1
         ;;
     model)
-        echo "TransformerModelSource not yet implemented." >&2
-        if [[ -n "$path" ]]; then
-            echo "  (model path argument ignored until implemented: $path)" >&2
+        if [[ -z "$path" ]]; then
+            echo "Usage: $0 model <model-dir-path>" >&2
+            exit 2
         fi
-        exit 1
+        cd "$ROOT/app"
+        dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- ingest model "$path"
         ;;
     *)
         echo "Unknown source: $source" >&2

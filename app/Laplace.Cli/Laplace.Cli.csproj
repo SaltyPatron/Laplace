@@ -18,8 +18,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Laplace.Decomposers.Unicode\Laplace.Decomposers.Unicode.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.Model\Laplace.Decomposers.Model.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.Abstractions\Laplace.Decomposers.Abstractions.csproj" />
     <ProjectReference Include="..\Laplace.Engine.Core\Laplace.Engine.Core.csproj" />
+    <ProjectReference Include="..\Laplace.Engine.Dynamics\Laplace.Engine.Dynamics.csproj" />
+    <ProjectReference Include="..\Laplace.Engine.Synthesis\Laplace.Engine.Synthesis.csproj" />
     <ProjectReference Include="..\Laplace.SubstrateCRUD\Laplace.SubstrateCRUD.csproj" />
     <ProjectReference Include="..\Laplace.Ingestion\Laplace.Ingestion.csproj" />
   </ItemGroup>

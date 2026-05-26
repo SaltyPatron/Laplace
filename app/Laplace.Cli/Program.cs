@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -5,12 +6,15 @@ using System.Security.Cryptography;
 using System.Text;
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.Model;
 using Laplace.Decomposers.Unicode;
 using Laplace.Engine.Core;
+using Laplace.Engine.Synthesis;
 using Laplace.Ingestion;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Logging.Abstractions;
+using SynthInterop = Laplace.Engine.Synthesis.NativeInterop;
 
 namespace Laplace.Cli;
 
@@ -24,7 +28,7 @@ internal static class Program
     {
         if (args.Length == 0)
         {
-            Console.Error.WriteLine("usage: laplace <seed-unicode | ingest <source> | decompose <text> | roundtrip <file> | stats>");
+            Console.Error.WriteLine("usage: laplace <seed-unicode | ingest <source> [path] | synthesize tinyllama [output.gguf] | decompose <text> | roundtrip <file> | stats>");
             return 2;
         }
         try
@@ -32,7 +36,8 @@ internal static class Program
             return args[0] switch
             {
                 "seed-unicode" => await SeedUnicodeAsync(),
-                "ingest"       => await IngestAsync(args.Length > 1 ? args[1] : ""),
+                "ingest"       => await IngestAsync(args[1..]),
+                "synthesize"   => await SynthesizeAsync(args[1..]),
                 "decompose"    => Decompose(string.Join(' ', args[1..])),
                 "roundtrip"    => Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
                 "db-roundtrip" => await DbRoundtripAsync(args.Length > 1 ? args[1] : ""),
@@ -86,16 +91,364 @@ internal static class Program
     }
 
     // === ingest: IngestRunner + per-source decomposer (ADR 0052) ===
-    private static async Task<int> IngestAsync(string source)
+    private static async Task<int> IngestAsync(string[] args)
     {
+        string source = args.Length > 0 ? args[0] : "";
+        string path   = args.Length > 1 ? args[1] : "";
+
         if (string.IsNullOrEmpty(source))
-            return Fail("usage: laplace ingest <source>  (supported: unicode)");
+            return Fail("usage: laplace ingest <source> [path]  (supported: unicode, model)");
 
         return source.ToLowerInvariant() switch
         {
             "unicode" => await IngestUnicodeViaRunnerAsync(),
-            _ => Fail($"unknown ingest source '{source}' (supported: unicode)"),
+            "model"   => await IngestModelAsync(path),
+            _ => Fail($"unknown ingest source '{source}' (supported: unicode, model)"),
         };
+    }
+
+    private static async Task<int> IngestModelAsync(string modelDir)
+    {
+        if (string.IsNullOrEmpty(modelDir) || !Directory.Exists(modelDir))
+            return Fail($"usage: laplace ingest model <model-dir>  (not found: {modelDir})");
+
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        var writer = new NpgsqlSubstrateWriter(ds);
+        var reader = new NpgsqlSubstrateReader(ds);
+        var runner = new IngestRunner(writer, reader);
+        var dec    = new ModelDecomposer(modelDir);
+
+        Console.WriteLine($"ingest model {modelDir} via IngestRunner → {ConnString} ...");
+        var sw = Stopwatch.StartNew();
+        var result = await runner.RunAsync(
+            dec,
+            IngestRunOptions.Default with { SkipLayerOrderingCheck = true },
+            CancellationToken.None);
+        sw.Stop();
+
+        Console.WriteLine(
+            $"done: {result.UnitsApplied:N0} intents applied, "
+            + $"{result.EntitiesInserted:N0} novel entities, "
+            + $"{result.AttestationsInserted:N0} attestations, "
+            + $"{result.TotalRoundTrips:N0} round-trips, "
+            + $"{sw.Elapsed.TotalSeconds:F1}s");
+        if (result.Failures.Count > 0)
+        {
+            Console.Error.WriteLine($"failures: {result.Failures.Count}");
+            foreach (var f in result.Failures.Take(5))
+                Console.Error.WriteLine($"  {f}");
+            return 1;
+        }
+        return 0;
+    }
+
+    // === synthesize: substrate attestations → GGUF ===
+    private static async Task<int> SynthesizeAsync(string[] args)
+    {
+        string target = args.Length > 0 ? args[0].ToLowerInvariant() : "";
+        if (target == "tinyllama")
+            return await SynthesizeTinyLlamaAsync(args.Length > 1 ? args[1] : "/tmp/tinyllama-substrate.gguf");
+        return Fail("usage: laplace synthesize tinyllama [output.gguf]");
+    }
+
+    private const string TinyLlamaDir =
+        "/vault/models/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0/snapshots/fe8a4ea1ffedaf415f4da2f062534de366a451e6";
+
+    private static async Task<int> SynthesizeTinyLlamaAsync(string outputPath)
+    {
+        Console.WriteLine($"synthesize tinyllama → {outputPath}");
+
+        // 1. Parse tokenizer and recipe from the vault (same files used at ingest time)
+        string configPath    = Path.Combine(TinyLlamaDir, "config.json");
+        string tokenizerPath = Path.Combine(TinyLlamaDir, "tokenizer.json");
+        if (!File.Exists(configPath) || !File.Exists(tokenizerPath))
+            return Fail($"model files not found under {TinyLlamaDir}");
+
+        var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
+        var recipe = LlamaRecipeExtractor.Parse(configPath);
+
+        // entity_id → first token_id with that entity (handles canonical collision)
+        var entityToToken = new Dictionary<Hash128, int>(tokens.Count);
+        foreach (var t in tokens.OrderBy(t => t.TokenId))
+            entityToToken.TryAdd(t.EntityId, t.TokenId);
+
+        // 2. Get arch template tensor manifest
+        byte[] configJson = File.ReadAllBytes(configPath);
+        IntPtr recipeHandle;
+        IntPtr tmplHandle;
+        var specs = new TensorSpec[300];
+        int tensorCount;
+        unsafe
+        {
+            fixed (byte* jsonPtr = configJson)
+                recipeHandle = SynthInterop.RecipeParse(jsonPtr, (nuint)configJson.Length);
+            if (recipeHandle == IntPtr.Zero)
+                return Fail("recipe_parse returned null");
+            tmplHandle = SynthInterop.ArchTemplateLoad("llama");
+            if (tmplHandle == IntPtr.Zero)
+                return Fail("arch_template_load returned null");
+            fixed (TensorSpec* specsPtr = specs)
+                tensorCount = SynthInterop.ArchTemplateRequiredTensors(
+                    tmplHandle, recipeHandle, specsPtr, (nuint)specs.Length);
+        }
+        if (tensorCount <= 0)
+            return Fail($"arch_template_required_tensors returned {tensorCount}");
+        Console.WriteLine($"  arch template: {tensorCount} tensor slots");
+
+        // 3. Query attestations from substrate
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+
+        // 4. Create GGUF writer and add metadata
+        var gguf = SynthInterop.GgufWriterCreate(outputPath);
+        if (gguf == IntPtr.Zero)
+            return Fail($"gguf_writer_create failed for {outputPath}");
+        WriteGgufMetadata(gguf, recipe, tokens);
+
+        // 5. Fill and write each tensor
+        var sw = Stopwatch.StartNew();
+        int tensorsDone = 0;
+        for (int i = 0; i < tensorCount; i++)
+        {
+            string name;
+            ulong rows, cols;
+            int   dtype;
+            unsafe
+            {
+                var spec = specs[i];
+                name  = Marshal.PtrToStringUTF8((IntPtr)spec.Name) ?? "";
+                rows  = spec.Rank >= 1 ? spec.Shape[0] : 1;
+                cols  = spec.Rank >= 2 ? spec.Shape[1] : 1;
+                dtype = spec.Dtype;
+            }
+
+            Hash128? kindId = TensorNameToKind(name);
+            if (kindId is null)
+            {
+                Console.WriteLine($"  skip {name} (no kind mapping)");
+                continue;
+            }
+
+            // Allocate zero-filled tensor
+            byte[] tensorBytes = new byte[rows * cols * (dtype == 0 ? 4UL : 2UL)];
+
+            // Fill from attestations (async PG query — cannot be inside unsafe block)
+            int attCount = await FillTensorFromAttestationsAsync(
+                ds, kindId.Value, ModelDecomposer.Source,
+                entityToToken, tensorBytes, (int)rows, (int)cols, dtype);
+
+            // Write to GGUF — dims in column-major order (inner first)
+            nuint[] ggufDims = cols > 1
+                ? [(nuint)cols, (nuint)rows]
+                : [(nuint)rows];
+
+            unsafe
+            {
+                fixed (nuint* dimsPtr = ggufDims)
+                fixed (byte*  dataPtr = tensorBytes)
+                    SynthInterop.GgufWriterAddTensor(gguf, name, dtype, dimsPtr, (nuint)ggufDims.Length, dataPtr);
+            }
+
+            tensorsDone++;
+            if (tensorsDone % 10 == 0 || tensorsDone == 1)
+                Console.WriteLine($"  [{tensorsDone}/{tensorCount}] {name} rows={rows} cols={cols} att={attCount} {sw.Elapsed.TotalSeconds:F1}s");
+        }
+
+        int rc = SynthInterop.GgufWriterFinalize(gguf);
+        SynthInterop.GgufWriterFree(gguf);
+        SynthInterop.ArchTemplateFree(tmplHandle);
+        SynthInterop.RecipeFree(recipeHandle);
+
+        if (rc != 0)
+            return Fail($"gguf_writer_finalize failed (rc={rc})");
+
+        long fileSize = new FileInfo(outputPath).Length;
+        Console.WriteLine($"synthesis complete: {outputPath} ({fileSize / 1048576.0:F0} MB) in {sw.Elapsed.TotalSeconds:F1}s");
+        return 0;
+    }
+
+    // Map tensor name → attestation kind.
+    // k_proj uses the same aggregated Q_PROJECTS attestations as q_proj.
+    private static Hash128? TensorNameToKind(string name)
+    {
+        if (name == "model.embed_tokens.weight")          return ModelDecomposer.EmbedsKind;
+        if (name.Contains(".self_attn.q_proj.weight"))    return ModelDecomposer.QProjectsKind;
+        if (name.Contains(".self_attn.k_proj.weight"))    return ModelDecomposer.QProjectsKind;
+        if (name.Contains(".self_attn.v_proj.weight"))    return ModelDecomposer.VProjectsKind;
+        if (name.Contains(".self_attn.o_proj.weight"))    return ModelDecomposer.OProjectsKind;
+        if (name.Contains(".mlp.gate_proj.weight"))        return ModelDecomposer.GatesKind;
+        if (name.Contains(".mlp.up_proj.weight"))          return ModelDecomposer.UpProjectsKind;
+        if (name.Contains(".mlp.down_proj.weight"))        return ModelDecomposer.DownProjectsKind;
+        if (name.Contains("layernorm.weight") || name == "model.norm.weight") return ModelDecomposer.NormalizesKind;
+        if (name == "lm_head.weight")                     return ModelDecomposer.OutputProjectsKind;
+        return null;
+    }
+
+    // Query attestations for (kind, source) and fill the flat tensor byte array.
+    // dtype=0→f32 (norm weights), dtype=2→bf16 (everything else).
+    private static async Task<int> FillTensorFromAttestationsAsync(
+        NpgsqlDataSource ds,
+        Hash128 kindId,
+        Hash128 sourceId,
+        Dictionary<Hash128, int> entityToToken,
+        byte[] tensorBytes,
+        int rows, int cols, int dtype)
+    {
+        int attCount = 0;
+
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd  = conn.CreateCommand();
+        cmd.CommandText =
+            """
+            SELECT subject_id, object_id, rating
+            FROM laplace.attestations
+            WHERE kind_id = $1 AND source_id = $2
+            """;
+        cmd.Parameters.AddWithValue(kindId.ToBytes());
+        cmd.Parameters.AddWithValue(sourceId.ToBytes());
+
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        while (await rdr.ReadAsync())
+        {
+            var subjBytes = (byte[])rdr[0];
+            var objBytes  = (byte[])rdr[1];
+            long rating   = rdr.GetInt64(2);
+
+            var subjId = Hash128FromBytes(subjBytes);
+            var objId  = Hash128FromBytes(objBytes);
+
+            if (!entityToToken.TryGetValue(subjId, out int row)) continue;
+            if (!entityToToken.TryGetValue(objId,  out int col)) continue;
+            if (row >= rows || col >= cols) continue;
+
+            double weight = InverseScale(rating);
+
+            if (dtype == 0)
+            {
+                // f32: 4 bytes per element
+                float  fv   = (float)weight;
+                uint   bits = BitConverter.SingleToUInt32Bits(fv);
+                int    off  = (row * cols + col) * 4;
+                tensorBytes[off + 0] = (byte)(bits & 0xFF);
+                tensorBytes[off + 1] = (byte)((bits >> 8)  & 0xFF);
+                tensorBytes[off + 2] = (byte)((bits >> 16) & 0xFF);
+                tensorBytes[off + 3] = (byte)((bits >> 24) & 0xFF);
+            }
+            else
+            {
+                // bf16: upper 16 bits of float32
+                ushort bf16 = DoubleToBF16(weight);
+                int    off  = (row * cols + col) * 2;
+                tensorBytes[off + 0] = (byte)(bf16 & 0xFF);
+                tensorBytes[off + 1] = (byte)(bf16 >> 8);
+            }
+            attCount++;
+        }
+        return attCount;
+    }
+
+    // Inverse of LlamaWeightExtractor.ScaleToRating:
+    //   rating = 1000 + 800 * (1 - 1/(1 + |w|*10))  [1000..1800], stored as fp×1e9
+    //   |w| = (1/(1 - x) - 1) / 10  where x = (r - 1000) / 800
+    private static double InverseScale(long ratingFp1e9)
+    {
+        double r = ratingFp1e9 / 1e9;
+        double x = Math.Clamp((r - 1000.0) / 800.0, 0.0, 0.9999);
+        return (1.0 / (1.0 - x) - 1.0) / 10.0;
+    }
+
+    private static ushort DoubleToBF16(double v)
+    {
+        float  f    = (float)v;
+        uint   bits = BitConverter.SingleToUInt32Bits(f);
+        return (ushort)(bits >> 16);
+    }
+
+    private static unsafe Hash128 Hash128FromBytes(byte[] b)
+    {
+        if (b.Length < 16) return Hash128.Zero;
+        fixed (byte* p = b) return *(Hash128*)p;
+    }
+
+    // Write all GGUF metadata: architecture params + tokenizer vocab.
+    private static void WriteGgufMetadata(
+        IntPtr gguf,
+        LlamaRecipeExtractor.RecipeInfo recipe,
+        IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens)
+    {
+        SynthInterop.GgufWriterAddMetadataStr(gguf, "general.architecture", "llama");
+        SynthInterop.GgufWriterAddMetadataStr(gguf, "general.name", "TinyLlama Substrate Synthesis v0.1");
+
+        SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.context_length",          2048);
+        SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.embedding_length",         (uint)recipe.HiddenSize);
+        SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.block_count",              (uint)recipe.NumLayers);
+        SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.feed_forward_length",      (uint)recipe.IntermediateSize);
+        SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.attention.head_count",     (uint)recipe.NumHeads);
+        SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.attention.head_count_kv",  (uint)recipe.NumKvHeads);
+        SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.vocab_size",               (uint)recipe.VocabSize);
+        SynthInterop.GgufWriterAddMetadataF32(gguf, "llama.attention.layer_norm_rms_epsilon", 1e-5f);
+        SynthInterop.GgufWriterAddMetadataF32(gguf, "llama.rope.freq_base",           (float)recipe.RopeTheta);
+
+        // Tokenizer
+        SynthInterop.GgufWriterAddMetadataStr(gguf, "tokenizer.ggml.model", "llama");
+        SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.bos_token_id",     1);
+        SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.eos_token_id",     2);
+        SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.unknown_token_id", 0);
+
+        // Build sorted-by-id token arrays
+        var sorted = tokens.OrderBy(t => t.TokenId).ToArray();
+        int n = sorted.Length;
+
+        // Packed string array: each token's raw string (with BPE markers preserved — the
+        // raw surface is what llama.cpp uses for display; canonical is for substrate IDs)
+        byte[] packed = PackTokenStrings(sorted);
+        unsafe
+        {
+            fixed (byte* p = packed)
+                SynthInterop.GgufWriterAddMetadataStrArrayPacked(
+                    gguf, "tokenizer.ggml.tokens", p, (nuint)packed.Length, (nuint)n);
+        }
+
+        // Scores: all 0.0 (unused in BPE inference; SentencePiece only)
+        var scores = new float[n];
+        unsafe
+        {
+            fixed (float* p = scores)
+                SynthInterop.GgufWriterAddMetadataF32Array(gguf, "tokenizer.ggml.scores", p, (nuint)n);
+        }
+
+        // Token types: NORMAL=0, UNKNOWN=1, CONTROL=2, BYTE=5
+        var types = new int[n];
+        for (int i = 0; i < n; i++)
+            types[i] = ClassifyTokenType(sorted[i].RawToken);
+        unsafe
+        {
+            fixed (int* p = types)
+                SynthInterop.GgufWriterAddMetadataI32Array(gguf, "tokenizer.ggml.token_type", p, (nuint)n);
+        }
+    }
+
+    // Pack token raw strings in GGUF wire format: uint64_le byte-length + UTF-8 bytes per token.
+    private static byte[] PackTokenStrings(LlamaTokenizerParser.TokenRecord[] tokens)
+    {
+        using var ms = new System.IO.MemoryStream();
+        Span<byte> lenBuf = stackalloc byte[8];
+        foreach (var t in tokens)
+        {
+            byte[] b = Encoding.UTF8.GetBytes(t.RawToken);
+            BinaryPrimitives.WriteUInt64LittleEndian(lenBuf, (ulong)b.Length);
+            ms.Write(lenBuf);
+            ms.Write(b);
+        }
+        return ms.ToArray();
+    }
+
+    // GGUF token type: 0=NORMAL, 1=UNKNOWN, 2=CONTROL, 5=BYTE
+    private static int ClassifyTokenType(string raw)
+    {
+        if (raw is "<unk>" or "<UNK>" or "<unknown>") return 1;
+        if (raw is "<s>" or "</s>" or "<pad>" or "<bos>" or "<eos>") return 2;
+        if (raw.Length == 6 && raw.StartsWith("<0x", StringComparison.Ordinal) && raw.EndsWith('>')) return 5;
+        return 0;
     }
 
     private static async Task<int> IngestUnicodeViaRunnerAsync()
@@ -237,7 +590,7 @@ internal static class Program
 
         byte[] original = File.ReadAllBytes(path);
 
-        // Ingest: UTF-8 → NFC → tier tree (codepoint → grapheme → word → sentence → document).
+        // Ingest: UTF-8 → observed codepoints → UAX#29 tier tree (no NFC at ingest).
         var swIn = Stopwatch.StartNew();
         using var tree = TextDecomposer.Run(original);
         swIn.Stop();

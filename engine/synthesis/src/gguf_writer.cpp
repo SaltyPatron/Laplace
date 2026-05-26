@@ -26,10 +26,13 @@
 
 namespace {
 
-/* GGUF value type tags (subset used here). */
+/* GGUF metadata value type tags. */
 enum GgufType : uint32_t {
+    GGUF_TYPE_INT32   = 5,
+    GGUF_TYPE_FLOAT32 = 6,
     GGUF_TYPE_UINT32  = 4,
     GGUF_TYPE_STRING  = 8,
+    GGUF_TYPE_ARRAY   = 9,
 };
 
 /* GGUF tensor element type tags. */
@@ -61,18 +64,36 @@ inline size_t align_up(size_t v, size_t align) {
     return (v + align - 1) & ~(size_t)(align - 1);
 }
 
+enum MetaKind {
+    META_STR,
+    META_U32,
+    META_F32,
+    META_STR_ARRAY_PACKED, /* pre-packed GGUF-format strings */
+    META_F32_ARRAY,
+    META_I32_ARRAY,
+};
+
 struct MetaKV {
     std::string key;
-    bool        is_string;
+    MetaKind kind = META_STR;
+
+    /* Scalar fields */
     std::string str_val;
     uint32_t    u32_val = 0;
+    float       f32_val = 0.0f;
+
+    /* Array fields */
+    size_t               array_count = 0;  /* element count for all array kinds */
+    std::vector<uint8_t> packed_data;      /* for META_STR_ARRAY_PACKED */
+    std::vector<float>   f32_array;        /* for META_F32_ARRAY */
+    std::vector<int32_t> i32_array;        /* for META_I32_ARRAY */
 };
 
 struct TensorEntry {
-    std::string          name;
-    uint32_t             dtype;    /* GGUF tensor type tag */
-    std::vector<uint64_t> dims;    /* shape dimensions */
-    std::vector<uint8_t> data;     /* raw bytes */
+    std::string           name;
+    uint32_t              dtype;    /* GGUF tensor type tag */
+    std::vector<uint64_t> dims;     /* shape dimensions (GGUF / ggml column-major order) */
+    std::vector<uint8_t>  data;     /* raw bytes */
 };
 
 size_t gguf_dtype_element_size(uint32_t dtype) {
@@ -113,7 +134,7 @@ extern "C" int gguf_writer_add_metadata_str(gguf_writer_t* w, const char* key, c
     if (!w || !key || !value) return -1;
     MetaKV kv;
     kv.key = key;
-    kv.is_string = true;
+    kv.kind = META_STR;
     kv.str_val = value;
     w->metadata.push_back(std::move(kv));
     return 0;
@@ -123,8 +144,57 @@ extern "C" int gguf_writer_add_metadata_u32(gguf_writer_t* w, const char* key, u
     if (!w || !key) return -1;
     MetaKV kv;
     kv.key = key;
-    kv.is_string = false;
+    kv.kind = META_U32;
     kv.u32_val = value;
+    w->metadata.push_back(std::move(kv));
+    return 0;
+}
+
+extern "C" int gguf_writer_add_metadata_f32(gguf_writer_t* w, const char* key, float value) {
+    if (!w || !key) return -1;
+    MetaKV kv;
+    kv.key = key;
+    kv.kind = META_F32;
+    kv.f32_val = value;
+    w->metadata.push_back(std::move(kv));
+    return 0;
+}
+
+extern "C" int gguf_writer_add_metadata_str_array_packed(gguf_writer_t* w,
+                                                          const char*    key,
+                                                          const uint8_t* packed_data,
+                                                          size_t         total_bytes,
+                                                          size_t         count) {
+    if (!w || !key || !packed_data) return -1;
+    MetaKV kv;
+    kv.key = key;
+    kv.kind = META_STR_ARRAY_PACKED;
+    kv.array_count = count;
+    kv.packed_data.assign(packed_data, packed_data + total_bytes);
+    w->metadata.push_back(std::move(kv));
+    return 0;
+}
+
+extern "C" int gguf_writer_add_metadata_f32_array(gguf_writer_t* w, const char* key,
+                                                   const float*   values, size_t count) {
+    if (!w || !key || !values) return -1;
+    MetaKV kv;
+    kv.key = key;
+    kv.kind = META_F32_ARRAY;
+    kv.array_count = count;
+    kv.f32_array.assign(values, values + count);
+    w->metadata.push_back(std::move(kv));
+    return 0;
+}
+
+extern "C" int gguf_writer_add_metadata_i32_array(gguf_writer_t* w, const char*    key,
+                                                   const int32_t* values, size_t count) {
+    if (!w || !key || !values) return -1;
+    MetaKV kv;
+    kv.key = key;
+    kv.kind = META_I32_ARRAY;
+    kv.array_count = count;
+    kv.i32_array.assign(values, values + count);
     w->metadata.push_back(std::move(kv));
     return 0;
 }
@@ -173,30 +243,59 @@ extern "C" int gguf_writer_finalize(gguf_writer_t* w) {
     /* Version = 3 */
     write_u32(header, 3);
 
-    /* n_tensors and n_kv (placeholder — we'll write the file in order) */
+    /* n_tensors and n_kv */
     write_u64(header, (uint64_t)w->tensors.size());
     write_u64(header, (uint64_t)w->metadata.size());
 
     /* KV pairs */
     for (const MetaKV& kv : w->metadata) {
         write_string(header, kv.key);
-        if (kv.is_string) {
+        switch (kv.kind) {
+        case META_STR:
             write_u32(header, (uint32_t)GGUF_TYPE_STRING);
             write_string(header, kv.str_val);
-        } else {
+            break;
+        case META_U32:
             write_u32(header, (uint32_t)GGUF_TYPE_UINT32);
             write_u32(header, kv.u32_val);
+            break;
+        case META_F32: {
+            write_u32(header, (uint32_t)GGUF_TYPE_FLOAT32);
+            uint32_t bits = 0;
+            std::memcpy(&bits, &kv.f32_val, 4);
+            write_u32(header, bits);
+            break;
+        }
+        case META_STR_ARRAY_PACKED:
+            /* GGUF array: type=ARRAY(9) | elem_type=STRING(8) | count(u64) | packed strings */
+            write_u32(header, (uint32_t)GGUF_TYPE_ARRAY);
+            write_u32(header, (uint32_t)GGUF_TYPE_STRING);
+            write_u64(header, (uint64_t)kv.array_count);
+            header.insert(header.end(), kv.packed_data.begin(), kv.packed_data.end());
+            break;
+        case META_F32_ARRAY:
+            write_u32(header, (uint32_t)GGUF_TYPE_ARRAY);
+            write_u32(header, (uint32_t)GGUF_TYPE_FLOAT32);
+            write_u64(header, (uint64_t)kv.array_count);
+            for (float v : kv.f32_array) {
+                uint32_t bits = 0;
+                std::memcpy(&bits, &v, 4);
+                write_u32(header, bits);
+            }
+            break;
+        case META_I32_ARRAY:
+            write_u32(header, (uint32_t)GGUF_TYPE_ARRAY);
+            write_u32(header, (uint32_t)GGUF_TYPE_INT32);
+            write_u64(header, (uint64_t)kv.array_count);
+            for (int32_t v : kv.i32_array)
+                write_u32(header, (uint32_t)v);
+            break;
         }
     }
 
     /* Compute tensor data offsets (each tensor data section is 32B-aligned) */
     std::vector<uint64_t> tensor_offsets(w->tensors.size());
     {
-        /* We need the full tensor_info section size first to know where data starts,
-         * but tensor_info references offsets within the data section — so we do two
-         * passes: first compute tensor_info byte size, then compute offsets. */
-
-        /* Compute tensor_info section size */
         size_t tensor_info_bytes = 0;
         for (const TensorEntry& te : w->tensors) {
             /* name (uint64 + bytes) + n_dims (uint32) + dims (n_dims × uint64)
@@ -208,13 +307,11 @@ extern "C" int gguf_writer_finalize(gguf_writer_t* w) {
             tensor_info_bytes += 8;
         }
 
-        /* Data starts at: header.size() + tensor_info_bytes, aligned to 32 */
         const size_t header_kv_end = header.size();
         const size_t data_section_start =
             align_up(header_kv_end + tensor_info_bytes, 32);
-        (void)data_section_start; /* used below */
+        (void)data_section_start;
 
-        /* Assign offsets within data section */
         uint64_t cur_offset = 0;
         for (size_t i = 0; i < w->tensors.size(); ++i) {
             tensor_offsets[i] = cur_offset;
@@ -253,7 +350,6 @@ extern "C" int gguf_writer_finalize(gguf_writer_t* w) {
             std::fclose(f);
             return -1;
         }
-        /* Pad to next 32B boundary */
         const size_t written = te.data.size();
         const size_t pad_bytes = align_up(written, 32) - written;
         if (pad_bytes > 0) {

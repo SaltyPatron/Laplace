@@ -36,27 +36,27 @@ public static partial class NativeInterop
     // === Recipe ===
 
     [LibraryImport(Library, EntryPoint = "recipe_parse")]
-    internal static unsafe partial IntPtr RecipeParse(byte* jsonText, nuint len);
+    public static unsafe partial IntPtr RecipeParse(byte* jsonText, nuint len);
 
     [LibraryImport(Library, EntryPoint = "recipe_get_field",
         StringMarshalling = StringMarshalling.Utf8)]
-    internal static unsafe partial IntPtr RecipeGetField(IntPtr recipe, string fieldName);
+    public static unsafe partial IntPtr RecipeGetField(IntPtr recipe, string fieldName);
 
     [LibraryImport(Library, EntryPoint = "recipe_free")]
-    internal static partial void RecipeFree(IntPtr recipe);
+    public static partial void RecipeFree(IntPtr recipe);
 
     // === Architecture template ===
 
     [LibraryImport(Library, EntryPoint = "arch_template_load",
         StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial IntPtr ArchTemplateLoad(string templateName);
+    public static partial IntPtr ArchTemplateLoad(string templateName);
 
     [LibraryImport(Library, EntryPoint = "arch_template_required_tensors")]
-    internal static unsafe partial int ArchTemplateRequiredTensors(
+    public static unsafe partial int ArchTemplateRequiredTensors(
         IntPtr tmpl, IntPtr recipe, TensorSpec* outSpecs, nuint cap);
 
     [LibraryImport(Library, EntryPoint = "arch_template_free")]
-    internal static partial void ArchTemplateFree(IntPtr tmpl);
+    public static partial void ArchTemplateFree(IntPtr tmpl);
 
     // === Static QK attention scorer ===
 
@@ -77,27 +77,46 @@ public static partial class NativeInterop
 
     [LibraryImport(Library, EntryPoint = "gguf_writer_create",
         StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial IntPtr GgufWriterCreate(string outputPath);
+    public static partial IntPtr GgufWriterCreate(string outputPath);
 
     [LibraryImport(Library, EntryPoint = "gguf_writer_add_metadata_str",
         StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial int GgufWriterAddMetadataStr(IntPtr w, string key, string value);
+    public static partial int GgufWriterAddMetadataStr(IntPtr w, string key, string value);
 
     [LibraryImport(Library, EntryPoint = "gguf_writer_add_metadata_u32",
         StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial int GgufWriterAddMetadataU32(IntPtr w, string key, uint value);
+    public static partial int GgufWriterAddMetadataU32(IntPtr w, string key, uint value);
+
+    [LibraryImport(Library, EntryPoint = "gguf_writer_add_metadata_f32",
+        StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int GgufWriterAddMetadataF32(IntPtr w, string key, float value);
+
+    [LibraryImport(Library, EntryPoint = "gguf_writer_add_metadata_str_array_packed",
+        StringMarshalling = StringMarshalling.Utf8)]
+    public static unsafe partial int GgufWriterAddMetadataStrArrayPacked(
+        IntPtr w, string key, byte* packedData, nuint totalBytes, nuint count);
+
+    [LibraryImport(Library, EntryPoint = "gguf_writer_add_metadata_f32_array",
+        StringMarshalling = StringMarshalling.Utf8)]
+    public static unsafe partial int GgufWriterAddMetadataF32Array(
+        IntPtr w, string key, float* values, nuint count);
+
+    [LibraryImport(Library, EntryPoint = "gguf_writer_add_metadata_i32_array",
+        StringMarshalling = StringMarshalling.Utf8)]
+    public static unsafe partial int GgufWriterAddMetadataI32Array(
+        IntPtr w, string key, int* values, nuint count);
 
     [LibraryImport(Library, EntryPoint = "gguf_writer_add_tensor",
         StringMarshalling = StringMarshalling.Utf8)]
-    internal static unsafe partial int GgufWriterAddTensor(
+    public static unsafe partial int GgufWriterAddTensor(
         IntPtr w, string name, int dtype,
         nuint* shape, nuint rank, void* data);
 
     [LibraryImport(Library, EntryPoint = "gguf_writer_finalize")]
-    internal static partial int GgufWriterFinalize(IntPtr w);
+    public static partial int GgufWriterFinalize(IntPtr w);
 
     [LibraryImport(Library, EntryPoint = "gguf_writer_free")]
-    internal static partial void GgufWriterFree(IntPtr w);
+    public static partial void GgufWriterFree(IntPtr w);
 
     // === Format writer ===
 
