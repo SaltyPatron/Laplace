@@ -21,7 +21,7 @@ namespace Laplace.Decomposers.Abstractions;
 /// <list type="bullet">
 ///   <item>Type entity id = <c>BLAKE3("substrate/type/&lt;Name&gt;/v1")</c></item>
 ///   <item>Kind entity id = <c>BLAKE3("substrate/kind/&lt;Name&gt;/v1")</c></item>
-///   <item>Trust-class entity id = <c>BLAKE3("substrate/trust/&lt;ClassName&gt;/v1")</c></item>
+///   <item>Trust-class entity id = <c>BLAKE3("substrate/trust_class/&lt;ClassName&gt;/v1")</c></item>
 ///   <item>Source entity id = <c>BLAKE3("substrate/source/&lt;DecomposerName&gt;/v1")</c></item>
 /// </list>
 /// </para>

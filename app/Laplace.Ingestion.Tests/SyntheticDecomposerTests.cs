@@ -53,7 +53,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         public string SourceName => "SyntheticTest";
         public int LayerOrder => 0; // probe layer
         public Hash128 TrustClassId =>
-            Hash128.OfCanonical("substrate/trust/SubstrateMandate/v1");
+            Hash128.OfCanonical("substrate/trust_class/SubstrateMandate/v1");
 
         public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         {

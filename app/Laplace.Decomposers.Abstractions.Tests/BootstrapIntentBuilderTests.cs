@@ -10,7 +10,7 @@ public class BootstrapIntentBuilderTests
     private static readonly Hash128 SourceId =
         Hash128.OfCanonical("substrate/source/UnicodeDecomposer/v1");
     private static readonly Hash128 TrustClassId =
-        Hash128.OfCanonical("substrate/trust/SubstrateMandate/v1");
+        Hash128.OfCanonical("substrate/trust_class/SubstrateMandate/v1");
 
     [Fact]
     public void Build_RegistersSourceEntity()
