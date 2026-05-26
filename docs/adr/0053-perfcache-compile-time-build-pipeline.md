@@ -60,7 +60,7 @@
 
 ## Context
 
-Per [ADR 0006](0006-perfcache-and-db-seed-siblings.md): the T0 codepoint perfcache + the DB seed are sibling artifacts of `UnicodeDecomposer`'s ingest, derived independently from UCD. Per [RULES.md R7](../../RULES.md): same UCD + UCA version → byte-identical perfcache on every machine.
+Per [ADR 0006](0006-perfcache-and-db-seed-siblings.md): the T0 perf-cache + the DB seed are sibling artifacts, both derived from UCD/DUCET via `laplace_unicode_seed_compute` — neither feeds the other. `UnicodeDecomposer` seeds the DB; the emit tool builds the blob. Per [RULES.md R7](../../RULES.md): same UCD + UCA version → byte-identical perfcache on every machine.
 
 Per the 2026-05-24 conversation: **the perfcache is a compile-time artifact, not an install-time one.** *"The unicode perf-cache generation is a one-time build and then compile (because we modularize and make it selectively deployable (think embedded devices like a raspberry pi with limited ROM))."*
 

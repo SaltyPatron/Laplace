@@ -433,7 +433,8 @@ Add a debug-only `laplace_id_to_hex(bytea) → text` if it helps inspection, but
 
 Entity IDs are BLAKE3-128 of **canonical content bytes**, where canonical is defined per entity type and is **lossless** — every input that decodes to the same canonical bytes hashes to the same ID. Examples:
 
-- Text: NFC-normalized Unicode codepoint sequence (UTF-8 vs UTF-16 of identical codepoints → same ID).
+- **Text (observed UTF-8):** BLAKE3-128 of the **observed** Unicode scalar sequence as UTF-8 bytes at each tier (T0 = one scalar; T2+ = Merkle of child entity ids per type rule). UTF-8 vs UTF-16 of the **same** scalar sequence → same ID. **Different** scalar sequences → different IDs even when canonically equivalent (e.g. U+00E9 vs U+0065 U+0301; `King` vs `king`). Canonical/compatibility equivalence and lemma relations are **attestations** (UnicodeDecomposer, WordNet, Wiktionary, UD, …), **not** NFC/NFD at the TextDecomposer door. See amended [ADR 0047](docs/adr/0047-text-decomposer-pure-primitive.md).
+- **Model vocabulary token:** canonical token **surface string** as published by that model's tokenizer (including model-specific prefix markers until stripped for *mapping* attestations). Distinct from the substrate **text** entity for the inner linguistic form; link via `TOKEN_FOR` / `EMBEDS` / probe attestations, not by collapsing ids via embedding distance.
 - Pixel (RGB type): canonical `(r, g, b)` triple bytes (per-channel uint8). RGBA, CMYK, HSV are *different types*, related by attestations, not by ID equivalence.
 - Lossless image container: canonical pixel grid bytes (PNG vs lossless WebP of identical pixels → same ID).
 - Audio frame (PCM): canonical PCM sample bytes at canonical sample rate/bit depth.

@@ -153,14 +153,16 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         using var stage = IntentStage.New(
             Math.Max(novelEntities.Count, change.Physicalities.Length));
 
+        var seenEntityIds = new HashSet<Hash128>(novelEntities.Count);
         foreach (var e in novelEntities)
         {
+            if (!seenEntityIds.Add(e.Id)) continue;   // within-batch dedup
             stage.AddEntity(e.Id, e.Tier, e.TypeId, e.FirstObservedBy);
         }
         Span<double> coord = stackalloc double[4];
         foreach (var p in change.Physicalities)
         {
-            if (existingPhys.Contains(p.Id)) continue;   // novel only
+            if (!existingPhys.Add(p.Id)) continue;   // skip if in DB or already queued this batch
             coord[0] = p.CoordX; coord[1] = p.CoordY; coord[2] = p.CoordZ; coord[3] = p.CoordM;
             stage.AddPhysicality(
                 p.Id, p.EntityId, p.SourceId, (short)p.Kind,
@@ -173,7 +175,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         }
         foreach (var a in change.Attestations)
         {
-            if (existingAtt.Contains(a.Id)) continue;   // novel only (identity dedup)
+            if (!existingAtt.Add(a.Id)) continue;   // skip if in DB or already queued this batch
             stage.AddAttestation(
                 a.Id, a.SubjectId, a.KindId, a.ObjectId, a.SourceId, a.ContextId,
                 a.RatingFp1e9, a.RdFp1e9, a.VolatilityFp1e9,

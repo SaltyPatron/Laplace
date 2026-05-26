@@ -9,23 +9,21 @@
 extern "C" {
 #endif
 
-/* Pure NFC + UAX#29 text decomposition primitive per ADR 0047.
+/* Observed UTF-8 + UAX#29 text decomposition primitive per ADR 0047 (amended).
  *
  * Input: UTF-8 bytes. Output: a populated tier_tree_t* with the tier
  * topology:
- *   tier 0 = Codepoint (leaves; atom = codepoint value; text_range_off =
- *            byte offset in the (decomposed-then-recomposed NFC form;
- *            see note below)
+ *   tier 0 = Codepoint (leaves; atom = observed scalar value)
  *   tier 1 = Grapheme cluster (UAX#29 grapheme break)
  *   tier 2 = Word (UAX#29 word break; snapped to grapheme boundaries)
  *   tier 3 = Sentence (UAX#29 sentence break; snapped to word boundaries)
  *   tier 4 = Document root (children = all sentences)
  *
- * The input bytes are first normalized to NFC; subsequent segmentation
- * operates on the normalized codepoint stream. This means
- * text_range_off/len on the leaves refer to byte offsets within the
- * NORMALIZED form, not the original input. Same input → same NFC form →
- * same TierTree → same content-addressed hashes (RULES R7).
+ * No NFC/NFD at ingest: the codepoint stream is exactly as observed in
+ * the input UTF-8. Canonical/compatibility equivalence (e.g. U+00E9 vs
+ * U+0065 U+0301) is recorded as Unicode attestations, not a destructive
+ * normalize step. Bit-perfect round-trip requires this. Segmentation
+ * uses GB/WB/SB properties from the mmap'd perf-cache (client-side T0).
  *
  * Deterministic per LAPLACE_UNICODE_VERSION (compile-time constant baked
  * into the UCD tables). The tier_tree returned is finalized

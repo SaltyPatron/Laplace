@@ -88,24 +88,26 @@ public sealed class LlamaWeightExtractor
         int nKvHeads  = _recipe.NumKvHeads;
         int headDim   = dModel / nHeads;
 
-        /* --- Load embedding matrix E [vocabSize × dModel] (once; reused by Q/K) --- */
-        double[] E = LoadAndDecodeF64(refMap, "model.embed_tokens.weight",
-                                      (long)vocabSize * dModel);
+        /* --- Load embedding matrix E [vocabSize × dModel] as raw BF16 (2 bytes/element).
+         * Never decoded to f64 — the C scorer decodes to f32 on demand per head.
+         * This keeps peak memory at n_vocab × dModel × 2 bytes (256 MB for TinyLlama)
+         * instead of × 8 bytes (1 GB f64). For a 200K-vocab model: 3.2 GB vs 13 GB. */
+        ushort[] E_bf16 = LoadRawBF16(refMap, "model.embed_tokens.weight",
+                                       (long)vocabSize * dModel);
 
         /* --- EMBEDS: token proximity via rank-EmbedProjectDim identity projection ---
-         * Wq = Wk = I[:EmbedProjectDim, :dModel] so scores = E[:,:64]·E[:,:64]^T / sqrt(64).
-         * Treated as one synthetic head (nHeads=1, nKvHeads=1). MKL DGEMM inside. */
+         * Wq = Wk = I[:projDim, :dModel] (f32); treated as one synthetic head. */
         int projDim = Math.Min(EmbedProjectDim, dModel);
-        double[] wqIdentity = new double[(long)projDim * dModel];
-        for (int h = 0; h < projDim; h++) wqIdentity[(long)h * dModel + h] = 1.0;
+        float[] wqIdentityF32 = new float[(long)projDim * dModel];
+        for (int h = 0; h < projDim; h++) wqIdentityF32[(long)h * dModel + h] = 1.0f;
 
         var qkAccumEmbed = new Dictionary<(uint q, uint k), (double sum, int count)>(1 << 20);
-        AccumulateQkScores(E, wqIdentity, wqIdentity,
-                           vocabSize, dModel, 1, 1, projDim, qkAccumEmbed);
+        AccumulateQkScoresBatch(E_bf16, wqIdentityF32, wqIdentityF32,
+                                vocabSize, dModel, 1, 1, projDim, qkAccumEmbed);
         yield return BuildQkAttestations(qkAccumEmbed, vocabSize, _kinds.Embeds, "embed_tokens");
         await Task.Yield();
 
-        /* --- Q_PROJECTS: aggregate QK scores across all layers and heads --- */
+        /* --- Q_PROJECTS: aggregate QK scores across all layers, all heads --- */
         var qkAccum = new Dictionary<(uint q, uint k), (double sum, int count)>(1 << 20);
 
         for (int layer = 0; layer < _recipe.NumLayers; layer++)
@@ -115,9 +117,12 @@ public sealed class LlamaWeightExtractor
             string kName = $"model.layers.{layer}.self_attn.k_proj.weight";
             if (!refMap.ContainsKey(qName) || !refMap.ContainsKey(kName)) continue;
 
-            double[] qWeight = LoadAndDecodeF64(refMap, qName, (long)dModel * dModel);
-            double[] kWeight = LoadAndDecodeF64(refMap, kName, (long)nKvHeads * headDim * dModel);
-            AccumulateQkScores(E, qWeight, kWeight, vocabSize, dModel, nHeads, nKvHeads, headDim, qkAccum);
+            /* Load all Q heads ([nHeads × headDim × dModel]) and all KV heads stacked.
+             * The batch C function handles GQA grouping internally via queriesPerKv. */
+            float[] qWeightF32 = LoadRawBF16AsF32(refMap, qName, (long)nHeads * headDim * dModel);
+            float[] kWeightF32 = LoadRawBF16AsF32(refMap, kName, (long)nKvHeads * headDim * dModel);
+            AccumulateQkScoresBatch(E_bf16, qWeightF32, kWeightF32,
+                                    vocabSize, dModel, nHeads, nKvHeads, headDim, qkAccum);
             await Task.Yield();
         }
 
@@ -141,59 +146,72 @@ public sealed class LlamaWeightExtractor
 
     /* ------------------------------------------------------------------ */
 
-    private void AccumulateQkScores(
-        double[] E, double[] qWeight, double[] kWeight,
+    /* Batch QK score accumulator.  Calls the TBB-parallel C batch function,
+     * which processes all nHeads heads simultaneously with one BF16→f32 decode
+     * of E.  All heads share the same E_f32 buffer read-only inside C.
+     *
+     * For the EMBEDS case, nHeads=1, nKvHeads=1, and wqAll/wkAll each hold
+     * a single [headDim × dModel] identity projection block. */
+    private void AccumulateQkScoresBatch(
+        ushort[] E_bf16, float[] wqAll, float[] wkAll,
         int vocabSize, int dModel, int nHeads, int nKvHeads, int headDim,
         Dictionary<(uint q, uint k), (double sum, int count)> accum)
     {
-        int queriesPerKvHead = nHeads / nKvHeads;
-        var pairsBuf = new QkPair[(long)vocabSize * TopkPerRow];
+        int queriesPerKv = nHeads / nKvHeads;
 
-        GCHandle eHandle     = GCHandle.Alloc(E, GCHandleType.Pinned);
-        GCHandle pairsHandle = GCHandle.Alloc(pairsBuf, GCHandleType.Pinned);
+        /* Pre-allocate output: [nHeads × vocabSize × TopkPerRow] QkPairs.
+         * Each head writes at offset h * capPerHead into the flat array. */
+        long capPerHead = (long)vocabSize * TopkPerRow;
+        var  pairsFlat  = new QkPair[nHeads * capPerHead];
+        var  counts     = new int[nHeads];
+
+        GCHandle eHandle     = GCHandle.Alloc(E_bf16, GCHandleType.Pinned);
+        GCHandle wqHandle    = GCHandle.Alloc(wqAll,  GCHandleType.Pinned);
+        GCHandle wkHandle    = GCHandle.Alloc(wkAll,  GCHandleType.Pinned);
+        GCHandle pairsHandle = GCHandle.Alloc(pairsFlat, GCHandleType.Pinned);
+        GCHandle cntHandle   = GCHandle.Alloc(counts,    GCHandleType.Pinned);
         try
         {
             unsafe
             {
-                double*               ePtr     = (double*)eHandle.AddrOfPinnedObject();
-                QkPair* pairsPtr  = (QkPair*)pairsHandle.AddrOfPinnedObject();
+                ushort* ePtr    = (ushort*)eHandle.AddrOfPinnedObject();
+                float*  wqPtr   = (float*) wqHandle.AddrOfPinnedObject();
+                float*  wkPtr   = (float*) wkHandle.AddrOfPinnedObject();
+                QkPair* pairsPtr = (QkPair*)pairsHandle.AddrOfPinnedObject();
+                int*    cntPtr   = (int*)   cntHandle.AddrOfPinnedObject();
 
+                int rc = SynthInterop.ComputeStaticQkScoresBatch(
+                    ePtr, (nuint)vocabSize, (nuint)dModel,
+                    wqPtr, wkPtr,
+                    (nuint)nHeads, (nuint)nKvHeads, (nuint)headDim,
+                    (nuint)queriesPerKv, (nuint)TopkPerRow,
+                    pairsPtr, cntPtr, (nuint)capPerHead);
+
+                if (rc != 0)
+                    throw new InvalidOperationException($"compute_static_qk_scores_batch returned {rc}");
+
+                /* Merge all heads' results into accum dictionary. */
                 for (int h = 0; h < nHeads; h++)
                 {
-                    int kvHead = h / queriesPerKvHead;
-
-                    double[] wqH = new double[(long)headDim * dModel];
-                    Array.Copy(qWeight, (long)h * headDim * dModel, wqH, 0, headDim * dModel);
-
-                    double[] wkH = new double[(long)headDim * dModel];
-                    Array.Copy(kWeight, (long)kvHead * headDim * dModel, wkH, 0, headDim * dModel);
-
-                    GCHandle wqH_h = GCHandle.Alloc(wqH, GCHandleType.Pinned);
-                    GCHandle wkH_h = GCHandle.Alloc(wkH, GCHandleType.Pinned);
-                    try
+                    long offset = (long)h * capPerHead;
+                    int  n      = counts[h];
+                    for (int pi = 0; pi < n; pi++)
                     {
-                        int n = SynthInterop.ComputeStaticQkScores(
-                            ePtr, (nuint)vocabSize, (nuint)dModel,
-                            (double*)wqH_h.AddrOfPinnedObject(),
-                            (double*)wkH_h.AddrOfPinnedObject(),
-                            (nuint)headDim, (nuint)TopkPerRow,
-                            pairsPtr, (nuint)pairsBuf.Length);
-
-                        for (int pi = 0; pi < n; pi++)
-                        {
-                            var p   = pairsBuf[pi];
-                            var key = (p.QueryIdx, p.KeyIdx);
-                            if (accum.TryGetValue(key, out var existing))
-                                accum[key] = (existing.sum + p.Score, existing.count + 1);
-                            else
-                                accum[key] = (p.Score, 1);
-                        }
+                        var p   = pairsFlat[offset + pi];
+                        var key = (p.QueryIdx, p.KeyIdx);
+                        if (accum.TryGetValue(key, out var existing))
+                            accum[key] = (existing.sum + p.Score, existing.count + 1);
+                        else
+                            accum[key] = (p.Score, 1);
                     }
-                    finally { wqH_h.Free(); wkH_h.Free(); }
                 }
             }
         }
-        finally { eHandle.Free(); pairsHandle.Free(); }
+        finally
+        {
+            eHandle.Free(); wqHandle.Free(); wkHandle.Free();
+            pairsHandle.Free(); cntHandle.Free();
+        }
     }
 
     private SubstrateChange BuildQkAttestations(
@@ -363,13 +381,13 @@ public sealed class LlamaWeightExtractor
         return b.Build();
     }
 
-    private double[] LoadAndDecodeF64(
+    /* Load the raw tensor bytes from the safetensors file. */
+    private byte[] LoadRawBytes(
         Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
-        string name, long expectedElements)
+        string name)
     {
         var tref = refMap[name];
         byte[] rawBytes = new byte[tref.DataLength];
-
         using var fs = new FileStream(_safetensorsPath, FileMode.Open, FileAccess.Read,
                                       FileShare.Read, 1 << 16, useAsync: false);
         fs.Seek(tref.AbsoluteDataStart, SeekOrigin.Begin);
@@ -380,7 +398,66 @@ public sealed class LlamaWeightExtractor
             if (n == 0) throw new IOException($"safetensors: truncated data for {name}");
             total += n;
         }
+        return rawBytes;
+    }
 
+    /* Load a BF16 tensor as raw ushort[] without decoding.
+     * The C scorer expects the native BF16 bytes — no intermediate f64. */
+    private ushort[] LoadRawBF16(
+        Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
+        string name, long expectedElements)
+    {
+        byte[] raw = LoadRawBytes(refMap, name);
+        if (raw.Length != expectedElements * 2)
+            throw new InvalidOperationException(
+                $"BF16 size mismatch for {name}: got {raw.Length} bytes, expected {expectedElements * 2}");
+        return System.Runtime.InteropServices.MemoryMarshal
+               .Cast<byte, ushort>(raw).ToArray();
+    }
+
+    /* Load a BF16 or F32 tensor, decode to f32[], for Wq/Wk weight arrays.
+     * These are small per-head (≤ d_model × head_dim × 4 bytes) so f32 is fine. */
+    private float[] LoadRawBF16AsF32(
+        Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
+        string name, long expectedElements)
+    {
+        var tref = refMap[name];
+        byte[] raw = LoadRawBytes(refMap, name);
+        float[] result = new float[expectedElements];
+        unsafe
+        {
+            fixed (byte*  rawPtr = raw)
+            fixed (float* outPtr = result)
+            {
+                if (tref.Dtype == "BF16")
+                {
+                    ushort* src = (ushort*)rawPtr;
+                    for (long i = 0; i < expectedElements; i++)
+                    {
+                        uint bits = (uint)src[i] << 16;
+                        float f;
+                        Buffer.MemoryCopy(&bits, &f, 4, 4);
+                        outPtr[i] = f;
+                    }
+                }
+                else if (tref.Dtype == "F32")
+                {
+                    Buffer.MemoryCopy(rawPtr, outPtr, expectedElements * 4, raw.Length);
+                }
+                /* Other dtypes → zero-filled (R4) */
+            }
+        }
+        return result;
+    }
+
+    /* Load a tensor as f64[] — used for non-QK roles (v_proj, gate, etc.)
+     * where the full row-major weight is needed for sparsity filtering. */
+    private double[] LoadAndDecodeF64(
+        Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
+        string name, long expectedElements)
+    {
+        var tref = refMap[name];
+        byte[] rawBytes = LoadRawBytes(refMap, name);
         double[] decoded = new double[expectedElements];
         unsafe
         {
@@ -394,7 +471,7 @@ public sealed class LlamaWeightExtractor
                     float* f32 = (float*)rawPtr;
                     for (long i = 0; i < expectedElements; i++) outPtr[i] = f32[i];
                 }
-                /* Other dtypes → zero-filled (explicit zeros per R4) */
+                /* Other dtypes → zero-filled (R4) */
             }
         }
         return decoded;

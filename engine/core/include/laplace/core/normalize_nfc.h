@@ -7,7 +7,9 @@
 extern "C" {
 #endif
 
-/* NFC normalization (UAX #15) per ADR 0047. Input + output are
+/* NFC normalization (UAX #15). NOT called from TextDecomposer ingest
+ * (see amended ADR 0047). Used for conformance tests and optional
+ * tooling; Unicode equivalence at ingest is via attestations. Input + output are
  * codepoint arrays (caller decodes UTF-8 first).
  *
  * Algorithm:

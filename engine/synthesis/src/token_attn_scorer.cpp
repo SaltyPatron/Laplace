@@ -4,197 +4,358 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <numeric>
 #include <vector>
 
 #ifdef LAPLACE_HAS_MKL
 #  include <mkl_cblas.h>
+#  include <mkl_lapacke.h>
+#  include <mkl.h>
 #  include <oneapi/tbb/parallel_for.h>
 #  include <oneapi/tbb/blocked_range.h>
-#  include <oneapi/tbb/enumerable_thread_specific.h>
 #endif
 
-/* Static token-to-token QK attention scorer.
+/* SVD-based static token-to-token QK attention scorer.
  *
- * Computes token-to-token attention scores for one attention head from
- * the vocabulary embedding matrix and the head's Q/K projection weights.
- * The score for (query_token i, key_token j) is:
+ * Key insight: score[i,j] = Q[i]·K[j]/sqrt(d) where Q=E·Wq^T, K=E·Wk^T.
+ * The score matrix is rank ≤ head_dim.  Instead of materialising the full
+ * [n_vocab × n_vocab] score matrix (O(n_vocab²)), thin-SVD K to find the
+ * principal key directions, project queries into those directions, pre-select
+ * candidate key tokens from the dominant singular modes, then evaluate exact
+ * scores via SGEMM only against the candidate set.
  *
- *   score[i,j] = (E[i] · Wq) · (E[j] · Wk)^T / sqrt(head_dim)
- *
- * Processing in query-row blocks avoids materializing the full n_vocab×n_vocab
- * score matrix (which would be ~8 GB for a 32K vocab). Each row block is
- * processed with DGEMM, top-k applied immediately, and only survivors emitted.
- *
- * MKL path: two bulk DGEMMs for Q/K, then per-block DGEMM for scores.
- * Scalar path: naive loops with the same semantics. */
+ * Complexity: O(n_vocab × d_model × head_dim) for Q/K DGEMMs +
+ *             O(n_vocab × head_dim²)            for SVD of K +
+ *             O(n_vocab × head_dim × n_cands)   for candidate score SGEMM
+ * vs. the old O(n_vocab² × head_dim) block-DGEMM approach. */
 
 namespace {
 
-constexpr size_t kQueryBlockSize = 256;
+/* ---------- BF16 decode -------------------------------------------------- */
 
-/* nth_element-based per-row top-k. scratch must be at least row_size floats.
- * Fills out_k_indices[0..k-1] with the column indices of the top-k values. */
-void topk_row(const float* row, size_t row_size, size_t k,
-              size_t* out_k_indices, float* scratch) {
-    if (k == 0 || row_size == 0) return;
-    if (k >= row_size) {
-        for (size_t j = 0; j < row_size; ++j) out_k_indices[j] = j;
-        return;
+static void bf16_to_f32(const uint16_t* src, float* dst, size_t n) {
+    /* BF16 = top 16 bits of IEEE-754 float32.  Shift into the upper half of
+     * a uint32, then bit-reinterpret as float. */
+    for (size_t i = 0; i < n; i++) {
+        const uint32_t bits = (uint32_t)src[i] << 16;
+        memcpy(&dst[i], &bits, sizeof(float));
     }
-
-    /* Copy absolute values to scratch alongside original indices via an
-     * index array sorted by value magnitude. Using nth_element on a
-     * float[row_size] copy is simplest — O(row_size) expected time. */
-    for (size_t j = 0; j < row_size; ++j) scratch[j] = std::fabs(row[j]);
-
-    /* Partial sort: scratch after this has the k-th largest at index k-1. */
-    std::vector<size_t> idx(row_size);
-    for (size_t j = 0; j < row_size; ++j) idx[j] = j;
-    std::nth_element(idx.begin(), idx.begin() + (k - 1), idx.end(),
-                     [&](size_t a, size_t b) {
-                         return scratch[a] > scratch[b];
-                     });
-    for (size_t j = 0; j < k; ++j) out_k_indices[j] = idx[j];
 }
 
-} /* namespace */
+/* ---------- Thin SVD helper ---------------------------------------------- */
 
-extern "C"
-int compute_static_qk_scores(
-    const double* E,
-    size_t        n_vocab,
-    size_t        d_model,
-    const double* Wq,
-    const double* Wk,
-    size_t        head_dim,
-    size_t        topk_per_row,
-    qk_pair_t*    out_pairs,
-    size_t        out_cap) {
+/* Thin SVD of A [m × n] (m ≥ n) using LAPACK sgesdd (divide-and-conquer,
+ * fastest path). A is overwritten on return.
+ * Outputs: U [m × n], s [n], Vt [n × n].  Row-major throughout.
+ * Returns 0 on success. */
+static int thin_svd(float* A, int m, int n,
+                    float* U, float* s, float* Vt) {
+    if (m < n) return -1;
+#ifdef LAPLACE_HAS_MKL
+    return LAPACKE_sgesdd(LAPACK_ROW_MAJOR, 'S',
+                          m, n, A, n, s, U, n, Vt, n);
+#else
+    (void)A; (void)m; (void)n; (void)U; (void)s; (void)Vt;
+    return -1;
+#endif
+}
 
-    if (!E || !Wq || !Wk || !out_pairs) return -1;
-    if (n_vocab == 0 || d_model == 0 || head_dim == 0 || topk_per_row == 0) return -1;
+/* ---------- Per-head scorer ---------------------------------------------- */
 
-    const size_t max_pairs = n_vocab * topk_per_row;
-    if (out_cap < max_pairs) return -1;
+/* Tuning knobs. */
+constexpr size_t kModesUsed       = 8;   /* top singular modes to sample */
+constexpr size_t kCandsPerSign    = 256; /* tokens per sign bucket per mode */
 
-    const double inv_sqrt_hd = 1.0 / std::sqrt((double)head_dim);
+/* Score one attention head.  E_f32 is shared read-only (decoded once outside).
+ * out_pairs must hold at least n_vocab*topk_per_row entries.
+ * Returns the number of pairs written, or -1 on error. */
+static int score_head(
+    const float* E_f32,     /* [n_vocab × d_model] */
+    const float* Wq,        /* [head_dim × d_model] */
+    const float* Wk,        /* [head_dim × d_model] */
+    size_t n_vocab, size_t d_model, size_t head_dim,
+    size_t topk_per_row,
+    qk_pair_t* out_pairs)
+{
+    if (!E_f32 || !Wq || !Wk || !out_pairs) return -1;
+    if (n_vocab == 0 || d_model == 0 || head_dim == 0) return -1;
+    if ((int)n_vocab < (int)head_dim) return -1;  /* thin_svd requires m ≥ n */
 
-    /* Allocate Q = E × Wq and K = E × Wk, each [n_vocab × head_dim]. */
-    std::vector<double> Q(n_vocab * head_dim, 0.0);
-    std::vector<double> K(n_vocab * head_dim, 0.0);
+    const float scale = 1.0f / std::sqrt((float)head_dim);
+
+    /* --- 1. Q = E × Wq^T,  K = E × Wk^T  [n_vocab × head_dim] ----------- */
+    std::vector<float> Q(n_vocab * head_dim, 0.0f);
+    std::vector<float> K(n_vocab * head_dim, 0.0f);
 
 #ifdef LAPLACE_HAS_MKL
-    /* Wq/Wk stored [head_dim × d_model] (HuggingFace output×input convention).
-     * Q = E × Wq^T: (n_vocab×d_model) × (d_model×head_dim) → (n_vocab×head_dim).
-     * CblasTrans on Wq so DGEMM reads it column-major (= row-major transposed). */
-    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
+    /* Tell MKL to use 1 thread so TBB-level parallelism across heads is clean. */
+    mkl_set_num_threads_local(1);
+
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
                 (MKL_INT)n_vocab, (MKL_INT)head_dim, (MKL_INT)d_model,
-                1.0, E, (MKL_INT)d_model,
+                1.0f, E_f32, (MKL_INT)d_model,
                 Wq, (MKL_INT)d_model,
-                0.0, Q.data(), (MKL_INT)head_dim);
+                0.0f, Q.data(), (MKL_INT)head_dim);
 
-    /* K = E × Wk^T */
-    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
                 (MKL_INT)n_vocab, (MKL_INT)head_dim, (MKL_INT)d_model,
-                1.0, E, (MKL_INT)d_model,
+                1.0f, E_f32, (MKL_INT)d_model,
                 Wk, (MKL_INT)d_model,
-                0.0, K.data(), (MKL_INT)head_dim);
+                0.0f, K.data(), (MKL_INT)head_dim);
 #else
-    /* Scalar fallback: naive matrix multiply.
-     * Wq stored [head_dim × d_model]: Wq[h, d] at Wq[h*d_model + d]. */
-    for (size_t i = 0; i < n_vocab; ++i) {
-        for (size_t h = 0; h < head_dim; ++h) {
-            double qval = 0.0, kval = 0.0;
-            for (size_t d = 0; d < d_model; ++d) {
-                qval += E[i * d_model + d] * Wq[h * d_model + d];
-                kval += E[i * d_model + d] * Wk[h * d_model + d];
+    for (size_t i = 0; i < n_vocab; i++)
+        for (size_t h = 0; h < head_dim; h++) {
+            float qv = 0.0f, kv = 0.0f;
+            for (size_t d = 0; d < d_model; d++) {
+                const float e = E_f32[i * d_model + d];
+                qv += e * Wq[h * d_model + d];
+                kv += e * Wk[h * d_model + d];
             }
-            Q[i * head_dim + h] = qval;
-            K[i * head_dim + h] = kval;
+            Q[i * head_dim + h] = qv;
+            K[i * head_dim + h] = kv;
         }
+#endif
+
+    /* --- 2. Thin SVD of K: K = U_K × diag(s_K) × Vt_K  ------------------- */
+    std::vector<float> K_svd(K);  /* sgesdd overwrites; keep K for exact scores */
+    std::vector<float> U_K(n_vocab * head_dim);
+    std::vector<float> s_K(head_dim);
+    std::vector<float> Vt_K(head_dim * head_dim);
+
+    if (thin_svd(K_svd.data(), (int)n_vocab, (int)head_dim,
+                 U_K.data(), s_K.data(), Vt_K.data()) != 0)
+        return -1;
+
+    /* --- 3. Q_modes = Q × Vt_K^T  [n_vocab × head_dim]  ------------------- */
+    /* Q_modes[i,r] = Q[i] projected onto K's r-th principal direction (Vt_K[r,:]). */
+    std::vector<float> Q_modes(n_vocab * head_dim, 0.0f);
+#ifdef LAPLACE_HAS_MKL
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
+                (MKL_INT)n_vocab, (MKL_INT)head_dim, (MKL_INT)head_dim,
+                1.0f, Q.data(), (MKL_INT)head_dim,
+                Vt_K.data(), (MKL_INT)head_dim,
+                0.0f, Q_modes.data(), (MKL_INT)head_dim);
+#else
+    for (size_t i = 0; i < n_vocab; i++)
+        for (size_t r = 0; r < head_dim; r++) {
+            float v = 0.0f;
+            for (size_t c = 0; c < head_dim; c++)
+                v += Q[i * head_dim + c] * Vt_K[r * head_dim + c];
+            Q_modes[i * head_dim + r] = v;
+        }
+#endif
+
+    /* --- 4. Candidate selection from K's principal directions -------------- */
+    /* Sort modes by singular value magnitude (s_K already non-increasing from
+     * sgesdd, but be defensive). */
+    const size_t n_modes = std::min(kModesUsed, head_dim);
+    const size_t n_cands_per_sign = std::min(kCandsPerSign, n_vocab / 2);
+
+    std::vector<bool> is_cand(n_vocab, false);
+    std::vector<size_t> idx(n_vocab);
+    std::iota(idx.begin(), idx.end(), 0U);
+
+    for (size_t mi = 0; mi < n_modes; mi++) {
+        /* Top-n_cands_per_sign tokens where U_K[:,mi] is most positive. */
+        std::nth_element(idx.begin(),
+                         idx.begin() + (ptrdiff_t)(n_cands_per_sign - 1),
+                         idx.end(),
+                         [&](size_t a, size_t b) {
+                             return U_K[a * head_dim + mi] > U_K[b * head_dim + mi];
+                         });
+        for (size_t ci = 0; ci < n_cands_per_sign; ci++)
+            is_cand[idx[ci]] = true;
+
+        /* Top-n_cands_per_sign tokens where U_K[:,mi] is most negative. */
+        std::nth_element(idx.begin(),
+                         idx.begin() + (ptrdiff_t)(n_cands_per_sign - 1),
+                         idx.end(),
+                         [&](size_t a, size_t b) {
+                             return U_K[a * head_dim + mi] < U_K[b * head_dim + mi];
+                         });
+        for (size_t ci = 0; ci < n_cands_per_sign; ci++)
+            is_cand[idx[ci]] = true;
+
+        /* Re-seed idx for next mode. */
+        std::iota(idx.begin(), idx.end(), 0U);
     }
-#endif
 
-    /* Process query tokens in blocks to avoid n_vocab×n_vocab materialization. */
-    const size_t block_size = (n_vocab < kQueryBlockSize) ? n_vocab : kQueryBlockSize;
-    const size_t n_blocks   = (n_vocab + block_size - 1) / block_size;
+    /* Compact candidate list and build K_cands [n_cands × head_dim]. */
+    std::vector<size_t> cands;
+    cands.reserve(n_modes * n_cands_per_sign * 2);
+    for (size_t j = 0; j < n_vocab; j++)
+        if (is_cand[j]) cands.push_back(j);
+    const size_t n_cands = cands.size();
+    if (n_cands == 0) return 0;
 
-    size_t pair_count = 0;
+    std::vector<float> K_cands(n_cands * head_dim);
+    for (size_t ci = 0; ci < n_cands; ci++)
+        std::copy(K.data() + cands[ci] * head_dim,
+                  K.data() + cands[ci] * head_dim + head_dim,
+                  K_cands.data() + ci * head_dim);
 
-    /* Thread-local scratch buffers: score_row[n_vocab] and topk_indices[topk_per_row]. */
-    struct ThreadLocal {
-        std::vector<double> score_block;
-        std::vector<float>  score_row_f;
-        std::vector<float>  scratch;
-        std::vector<size_t> top_indices;
-    };
-
+    /* --- 5. SCORES = Q × K_cands^T / sqrt(head_dim)  [n_vocab × n_cands] -- */
+    std::vector<float> SCORES(n_vocab * n_cands);
 #ifdef LAPLACE_HAS_MKL
-    oneapi::tbb::enumerable_thread_specific<ThreadLocal> tls;
-    /* Accumulate results from each block into a per-thread portion of out_pairs.
-     * To keep output order deterministic we process blocks serially here and
-     * use TBB only for the DGEMM within each block (MKL already parallelises
-     * large DGEMMs via its own thread pool). */
-    (void)tls;
-#endif
-
-    std::vector<double> score_block(block_size * n_vocab);
-    std::vector<float>  score_row_f(n_vocab);
-    std::vector<float>  scratch(n_vocab);
-    std::vector<size_t> top_indices(topk_per_row);
-
-    for (size_t blk = 0; blk < n_blocks; ++blk) {
-        const size_t q_start = blk * block_size;
-        const size_t q_end   = std::min(q_start + block_size, n_vocab);
-        const size_t rows    = q_end - q_start;
-
-        /* score_block = Q_block × K^T: [rows × n_vocab]
-         * Q_block: [rows × head_dim] starting at Q[q_start*head_dim]
-         * K:       [n_vocab × head_dim] (treat as transposed) */
-#ifdef LAPLACE_HAS_MKL
-        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
-                    (MKL_INT)rows, (MKL_INT)n_vocab, (MKL_INT)head_dim,
-                    inv_sqrt_hd,
-                    Q.data() + q_start * head_dim, (MKL_INT)head_dim,
-                    K.data(), (MKL_INT)head_dim,
-                    0.0,
-                    score_block.data(), (MKL_INT)n_vocab);
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
+                (MKL_INT)n_vocab, (MKL_INT)n_cands, (MKL_INT)head_dim,
+                scale,
+                Q.data(), (MKL_INT)head_dim,
+                K_cands.data(), (MKL_INT)head_dim,
+                0.0f, SCORES.data(), (MKL_INT)n_cands);
 #else
-        for (size_t qi = 0; qi < rows; ++qi) {
-            const double* q_row = Q.data() + (q_start + qi) * head_dim;
-            for (size_t kj = 0; kj < n_vocab; ++kj) {
-                const double* k_row = K.data() + kj * head_dim;
-                double s = 0.0;
-                for (size_t h = 0; h < head_dim; ++h)
-                    s += q_row[h] * k_row[h];
-                score_block[qi * n_vocab + kj] = s * inv_sqrt_hd;
-            }
+    for (size_t i = 0; i < n_vocab; i++)
+        for (size_t ci = 0; ci < n_cands; ci++) {
+            float s = 0.0f;
+            for (size_t h = 0; h < head_dim; h++)
+                s += Q[i * head_dim + h] * K_cands[ci * head_dim + h];
+            SCORES[i * n_cands + ci] = s * scale;
         }
 #endif
 
-        /* Apply per-row top-k and emit survivors. */
-        for (size_t qi = 0; qi < rows; ++qi) {
-            const size_t query_idx = q_start + qi;
-            const double* score_row = score_block.data() + qi * n_vocab;
+    /* --- 6. Top-topk_per_row per query row (TBB-parallel) ----------------- */
+    const size_t k = std::min(topk_per_row, n_cands);
+    std::atomic<size_t> pair_count{0};
 
-            /* Downcast to float for the topk kernel (sufficient for ranking). */
-            for (size_t j = 0; j < n_vocab; ++j)
-                score_row_f[j] = (float)score_row[j];
-
-            const size_t k = std::min(topk_per_row, n_vocab);
-            topk_row(score_row_f.data(), n_vocab, k,
-                     top_indices.data(), scratch.data());
-
-            for (size_t ki = 0; ki < k; ++ki) {
-                const size_t key_idx = top_indices[ki];
-                out_pairs[pair_count++] = {
-                    (uint32_t)query_idx,
-                    (uint32_t)key_idx,
-                    score_row_f[key_idx]
+#ifdef LAPLACE_HAS_MKL
+    oneapi::tbb::parallel_for(
+        oneapi::tbb::blocked_range<size_t>(0, n_vocab, 256),
+        [&](const oneapi::tbb::blocked_range<size_t>& rng) {
+            std::vector<size_t> local_idx(n_cands);
+            for (size_t i = rng.begin(); i != rng.end(); i++) {
+                const float* row = SCORES.data() + i * n_cands;
+                std::iota(local_idx.begin(), local_idx.end(), 0U);
+                std::nth_element(local_idx.begin(),
+                                 local_idx.begin() + (ptrdiff_t)(k - 1),
+                                 local_idx.begin() + (ptrdiff_t)n_cands,
+                                 [&](size_t a, size_t b) {
+                                     return std::fabs(row[a]) > std::fabs(row[b]);
+                                 });
+                const size_t base = pair_count.fetch_add(k, std::memory_order_relaxed);
+                for (size_t ki = 0; ki < k; ki++) {
+                    const size_t ci = local_idx[ki];
+                    out_pairs[base + ki] = {
+                        (uint32_t)i,
+                        (uint32_t)cands[ci],
+                        row[ci]
+                    };
+                }
+            }
+        });
+#else
+    {
+        std::vector<size_t> local_idx(n_cands);
+        for (size_t i = 0; i < n_vocab; i++) {
+            const float* row = SCORES.data() + i * n_cands;
+            std::iota(local_idx.begin(), local_idx.end(), 0U);
+            std::nth_element(local_idx.begin(),
+                             local_idx.begin() + (ptrdiff_t)(k - 1),
+                             local_idx.begin() + (ptrdiff_t)n_cands,
+                             [&](size_t a, size_t b) {
+                                 return std::fabs(row[a]) > std::fabs(row[b]);
+                             });
+            const size_t base = pair_count.fetch_add(k, std::memory_order_relaxed);
+            for (size_t ki = 0; ki < k; ki++) {
+                const size_t ci = local_idx[ki];
+                out_pairs[base + ki] = {
+                    (uint32_t)i,
+                    (uint32_t)cands[ci],
+                    row[ci]
                 };
             }
         }
     }
+#endif
 
-    return (int)pair_count;
+    return (int)pair_count.load();
+}
+
+} /* namespace */
+
+/* =========================================================================
+ * Public C API
+ * ========================================================================= */
+
+extern "C"
+int compute_static_qk_scores(
+    const uint16_t* E_bf16,
+    size_t          n_vocab,
+    size_t          d_model,
+    const float*    Wq,
+    const float*    Wk,
+    size_t          head_dim,
+    size_t          topk_per_row,
+    qk_pair_t*      out_pairs,
+    size_t          out_cap)
+{
+    if (!E_bf16 || !Wq || !Wk || !out_pairs) return -1;
+    if (out_cap < n_vocab * topk_per_row) return -1;
+
+    /* Decode BF16 → f32 once for this call. */
+    std::vector<float> E_f32(n_vocab * d_model);
+    bf16_to_f32(E_bf16, E_f32.data(), n_vocab * d_model);
+
+    return score_head(E_f32.data(), Wq, Wk,
+                      n_vocab, d_model, head_dim,
+                      topk_per_row, out_pairs);
+}
+
+extern "C"
+int compute_static_qk_scores_batch(
+    const uint16_t* E_bf16,
+    size_t          n_vocab,
+    size_t          d_model,
+    const float*    Wq_all,
+    const float*    Wk_all,
+    size_t          n_heads,
+    size_t          n_kv_heads,
+    size_t          head_dim,
+    size_t          queries_per_kv,
+    size_t          topk_per_row,
+    qk_pair_t*      out_pairs,
+    int*            out_counts,
+    size_t          out_cap_per_head)
+{
+    if (!E_bf16 || !Wq_all || !Wk_all || !out_pairs || !out_counts) return -1;
+    if (out_cap_per_head < n_vocab * topk_per_row) return -1;
+    if (queries_per_kv == 0 || n_kv_heads == 0) return -1;
+
+    /* Decode E once; all TBB tasks share it read-only. */
+    std::vector<float> E_f32(n_vocab * d_model);
+    bf16_to_f32(E_bf16, E_f32.data(), n_vocab * d_model);
+
+    const size_t wq_stride = head_dim * d_model;   /* bytes per query head   */
+    const size_t wk_stride = head_dim * d_model;   /* bytes per KV head      */
+
+#ifdef LAPLACE_HAS_MKL
+    /* Process all heads in parallel via TBB.  MKL is set to 1 thread inside
+     * score_head so TBB can drive all cores without over-subscription. */
+    oneapi::tbb::parallel_for(
+        oneapi::tbb::blocked_range<size_t>(0, n_heads, 1),
+        [&](const oneapi::tbb::blocked_range<size_t>& rng) {
+            for (size_t h = rng.begin(); h != rng.end(); h++) {
+                const size_t kv_head = h / queries_per_kv;
+                const float* Wq_h   = Wq_all + h * wq_stride;
+                const float* Wk_h   = Wk_all + kv_head * wk_stride;
+                qk_pair_t*   out_h  = out_pairs + h * out_cap_per_head;
+
+                out_counts[h] = score_head(E_f32.data(), Wq_h, Wk_h,
+                                           n_vocab, d_model, head_dim,
+                                           topk_per_row, out_h);
+            }
+        });
+#else
+    for (size_t h = 0; h < n_heads; h++) {
+        const size_t kv_head = h / queries_per_kv;
+        const float* Wq_h   = Wq_all + h * wq_stride;
+        const float* Wk_h   = Wk_all + kv_head * wk_stride;
+        qk_pair_t*   out_h  = out_pairs + h * out_cap_per_head;
+
+        out_counts[h] = score_head(E_f32.data(), Wq_h, Wk_h,
+                                   n_vocab, d_model, head_dim,
+                                   topk_per_row, out_h);
+    }
+#endif
+
+    return 0;
 }

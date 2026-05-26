@@ -8,11 +8,10 @@ namespace Laplace.Engine.Core;
 /// engine state machines (per CLAUDE.md "one source of math truth").
 ///
 /// <para>
-/// The T0 DB seed (UnicodeDecomposer) calls <see cref="Load"/> then iterates
-/// <see cref="Records"/> to emit 1,114,112 codepoint entities + their
-/// substrate-canonical CONTENT physicalities. Process-wide + not
-/// thread-safe to load/unload concurrently; reads are lock-free against the
-/// immutable mapping.
+/// T0 DB seed uses <c>UnicodeSeed.Compute</c> on UCD/DUCET (sibling of this
+/// blob per ADR 0006) — seed does <b>not</b> call <see cref="Load"/>.
+/// Runtime clients (TextDecomposer segmentation flags, <see cref="HashComposer"/>
+/// call <see cref="Load"/> to avoid per-codepoint DB round-trips.
 /// </para>
 /// </summary>
 public static unsafe class CodepointPerfcache

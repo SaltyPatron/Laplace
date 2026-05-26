@@ -8,7 +8,7 @@ namespace Laplace.Engine.Core.Tests;
 /// text-decomposition path. After the build decoupled liblaplace_core from
 /// the UCD source (the UAX#29/UAX#15 state machines read properties from the
 /// runtime-loaded perf-cache, not compiled-in tables), any consumer of
-/// <see cref="TextDecomposer"/> / NFC must load the blob first — this fixture
+/// <see cref="TextDecomposer"/> / HashComposer must load the blob first — this fixture
 /// is the test-side of that contract.
 ///
 /// Locates the blob via (1) <c>LAPLACE_PERFCACHE_BIN</c>, (2) the installed

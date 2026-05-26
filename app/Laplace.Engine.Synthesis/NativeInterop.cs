@@ -61,17 +61,34 @@ public static partial class NativeInterop
     // === Static QK attention scorer ===
 
     /// <summary>
-    /// Compute per-row top-k token-to-token static QK scores for one attention head.
-    /// Wq and Wk are [head_dim × d_model] row-major (HuggingFace output×input convention).
-    /// outPairs: caller-allocated array of at least n_vocab*topkPerRow entries.
+    /// SVD-based per-row top-k token-to-token static QK scores for one attention head.
+    /// E_bf16: [n_vocab × d_model] in BF16; Wq/Wk: [head_dim × d_model] in f32.
+    /// outPairs: caller-allocated; must hold at least nVocab*topkPerRow entries.
     /// Returns number of pairs written, or -1 on error.
     /// </summary>
     [LibraryImport(Library, EntryPoint = "compute_static_qk_scores")]
     public static unsafe partial int ComputeStaticQkScores(
-        double* E, nuint nVocab, nuint dModel,
-        double* Wq, double* Wk, nuint headDim,
+        ushort* E_bf16, nuint nVocab, nuint dModel,
+        float* Wq, float* Wk, nuint headDim,
         nuint topkPerRow,
         QkPair* outPairs, nuint outCap);
+
+    /// <summary>
+    /// Batch SVD-based QK scorer: all attention heads for one layer, TBB-parallel.
+    /// WqAll: [n_heads × head_dim × d_model] f32 (all query heads stacked).
+    /// WkAll: [n_kv_heads × head_dim × d_model] f32 (all KV heads stacked).
+    /// outPairs: flat [n_heads × outCapPerHead] — head h at outPairs + h*outCapPerHead.
+    /// outCounts: [n_heads] — number of pairs written per head.
+    /// outCapPerHead must be ≥ nVocab * topkPerRow.
+    /// Returns 0 on success, -1 on error.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "compute_static_qk_scores_batch")]
+    public static unsafe partial int ComputeStaticQkScoresBatch(
+        ushort* E_bf16, nuint nVocab, nuint dModel,
+        float* WqAll, float* WkAll,
+        nuint nHeads, nuint nKvHeads, nuint headDim,
+        nuint queriesPerKv, nuint topkPerRow,
+        QkPair* outPairs, int* outCounts, nuint outCapPerHead);
 
     // === GGUF writer ===
 

@@ -65,7 +65,7 @@ flowchart LR
   end
 ```
 
-**Unicode T0 seed is an exception:** it skips phases 1–2 in C# — entity hash + coord + Hilbert are **precomputed in the perf-cache blob** (`FLOW-BUILD-001`), then copied in `UnicodeDecomposer.BuildBatch`.
+**Unicode T0 DB seed:** skips TextDecomposer/HashComposer — `UnicodeDecomposer` calls `laplace_unicode_seed_compute` on UCD/DUCET ([ADR 0006](docs/adr/0006-perfcache-and-db-seed-siblings.md) sibling of perf-cache; **does not** read the mmap blob to seed). **Text/corpus/prompt** paths use perf-cache only for **client-side T0 lookup** during `HashComposer`.
 
 ---
 
@@ -383,23 +383,22 @@ This flow is **flat** (1.11M sibling leaves, no parent Merkle nodes in the seed)
 
 | Step | Action | Code |
 |------|--------|------|
-| A1 | Load perf-cache mmap (validate magic, CRC, 1,114,112 records) | `CodepointPerfcache.Load` |
-| A2 | Build bootstrap `SubstrateChange`: register source entity | `BootstrapIntentBuilder(Source, …)` |
-| A3 | Register `Codepoint` type entity (`type_id` → meta-`Type`) | `boot.AddType("Codepoint")` |
-| A4 | Emit `HAS_TRUST_CLASS → StandardsDerived` for source | Bootstrap attestations in builder |
-| A5 | `ApplyAsync` bootstrap intent | `IDecomposerContext.Writer` — one write |
+| A1 | Build bootstrap `SubstrateChange`: register source entity | `BootstrapIntentBuilder(Source, …)` |
+| A2 | Register `Codepoint` type entity (`type_id` → meta-`Type`) | `boot.AddType("Codepoint")` |
+| A3 | Emit `HAS_TRUST_CLASS → StandardsDerived` for source | Bootstrap attestations in builder |
+| A4 | `ApplyAsync` bootstrap intent | `IDecomposerContext.Writer` — one write |
 
 #### Phase B — Stream codepoint batches (default 8192)
 
 | Step | Action | Code |
 |------|--------|------|
-| B1 | `for start in 0..1_114_112 step batch` | `DecomposeAsync` |
-| B2 | For each codepoint index `cp`: read `CodepointRecord` from mmap | `CodepointPerfcache.Records` |
-| B3 | Entity: `id = r.Hash` (precomputed in blob), `tier = 0`, `type_id = CodepointType`, `first_observed_by = Source` | `BuildBatch` |
-| B4 | Physicality: `CONTENT`, coords + Hilbert from blob, `alignment_residual = 0` | `PhysicalityId.Compute` + `AddPhysicality` |
-| B5 | `observed_at = 0` (timeless seed; DB `now()` on insert) | `PhysicalityRow` |
-| B6 | Yield `SubstrateChange` (entities + phys, **zero** attestations) | `yield return` |
-| B7 | Optional: wrap with [FLOW-XCUT-004](#flow-xcut-004-ingestrunner-orchestration) | Tests use `IngestRunner`; CLI may call `ApplyAsync` directly |
+| B1 | `EnsureComputed`: `UnicodeSeed.Compute(ucdxml, ducet)` → `CodepointRecord[]` (same C function as perf-cache emit) | `UnicodeDecomposer.cs`, `unicode_seed.cpp` |
+| B2 | `for start in 0..1_114_112 step batch` | `DecomposeAsync` |
+| B3 | Entity: `id = r.Hash`, `tier = 0`, `type_id = CodepointType`, `first_observed_by = Source` | `BuildBatch` |
+| B4 | Physicality: `CONTENT`, coords + Hilbert from record, `alignment_residual = 0` | `PhysicalityId.Compute` + `AddPhysicality` |
+| B5 | `observed_at = 0` (timeless seed) | `PhysicalityRow` |
+| B6 | Yield `SubstrateChange` (entities + phys, **zero** attestations in bounded seed) | `yield return` |
+| B7 | Optional: [FLOW-XCUT-004](#flow-xcut-004-ingestrunner-orchestration) | `IngestRunner` / CLI `seed-unicode` |
 | B8 | Per batch: [FLOW-XCUT-003](#flow-xcut-003-substratecrud-apply) | `NpgsqlSubstrateWriter` |
 
 #### Phase C — Re-run behavior (idempotency)
@@ -421,18 +420,16 @@ This flow is **flat** (1.11M sibling leaves, no parent Merkle nodes in the seed)
 sequenceDiagram
   participant CLI as laplace-cli seed-unicode
   participant UD as UnicodeDecomposer
-  participant PC as CodepointPerfcache
+  participant UCD as laplace_unicode_seed_compute
   participant W as NpgsqlSubstrateWriter
   participant PG as PostgreSQL
   CLI->>UD: InitializeAsync
-  UD->>PC: Load(blob)
   UD->>W: bootstrap ApplyAsync
+  UD->>UCD: Compute(UCDXML, DUCET)
   loop each batch 8192
-    UD->>UD: BuildBatch
+    UD->>UD: BuildBatch(records)
     UD->>W: ApplyAsync
-    W->>PG: entities_exist_bitmap
-    W->>W: filter_novel
-    W->>PG: COPY entities + physicalities
+    W->>PG: entities_exist_bitmap + COPY
   end
 ```
 
@@ -449,8 +446,8 @@ sequenceDiagram
 | Step | Action | Code |
 |------|--------|------|
 | 1 | Input UTF-8 text (file or string) | CLI `decompose` / tests |
-| 2 | **NFC normalization** (UAX #15) before segmentation — per ADR 0047 + `text_decomposer.h` | `engine/core/src/normalize_nfc.c`, called from `text_decomposer.c` |
-| 3 | UAX#29 segmentation → grapheme/word/sentence/document tiers | `engine/core/src/text_decomposer.c`, `TextDecomposer.cs` |
+| 2 | Decode UTF-8 → **observed** codepoints (**no** NFC/NFD at ingest — [ADR 0047](docs/adr/0047-text-decomposer-pure-primitive.md)) | `text_decomposer.c` |
+| 3 | UAX#29 segmentation → grapheme/word/sentence/document tiers (GB/WB/SB from perf-cache flags) | `grapheme_break.c`, `word_break.c`, `sentence_break.c` |
 | 4 | Build `TierTree` with parent indices (topological order) | `tier_tree` |
 | 5 | Leaves: codepoint tier; link to T0 hash via perf-cache resolver | `HashComposer` + `CodepointPerfcache` |
 | 6 | Internal nodes: [FLOW-XCUT-001](#flow-xcut-001-hash128--merkle-parent-id) bottom-up | `HashComposer.Run` |
@@ -607,7 +604,7 @@ sequenceDiagram
 | Step | Action | Code |
 |------|--------|------|
 | 1 | Read UTF-8 file | `Program.cs` `Roundtrip` |
-| 2 | `TextDecomposer.Run` → tier tree (NFC inside decomposer) | Same |
+| 2 | `TextDecomposer.Run` → tier tree (observed bytes; no NFC) | Same |
 | 3 | Re-encode T0 leaves in document order → UTF-8 | Same |
 | 4 | Compare SHA-256 in vs out | Same — `laplace roundtrip <file>` |
 
@@ -667,8 +664,9 @@ Each row: ADR decision/requirement → flow ID → implementation or gap.
 | ADR step | Flow | Code / status |
 |----------|------|----------------|
 | Caller strips source-specific markup first | Per-source ingest (not TextDecomposer) | — in each future `Laplace.Decomposers.*` |
-| NFC normalization (UAX #15) | FLOW-INGEST-TEXT-001 §2 | `engine/core/src/normalize_nfc.c` → `text_decomposer.c` |
+| Observed UTF-8 (no NFC at ingest) | FLOW-INGEST-TEXT-001 §2 | `text_decomposer.c`; `normalize_nfc.c` is **not** called on ingest path |
 | UAX#29 grapheme / word / sentence tiers | FLOW-INGEST-TEXT-001 §3 | `grapheme_break.c`, `word_break.c`, `sentence_break.c` |
+| Unicode equivalence (NFC/NFD facts) | UnicodeDecomposer / UCD | Attestations between distinct T0 entities — not ingest merge |
 | Caller-supplied T4+ boundaries | FLOW-INGEST-TEXT-002 | `text_decomposer.h` — partial in engine |
 | Output: TierTree, no IDs/coords | FLOW-INGEST-TEXT-001 | `tier_tree.c`, `TierTree.cs` |
 | C ABI `text_decomposer_decompose` | FLOW-INGEST-TEXT-001 | `text_decomposer.h` / `TextDecomposer.Run` |
@@ -693,7 +691,7 @@ Each row: ADR decision/requirement → flow ID → implementation or gap.
 | FK order: entities → phys → attest | FLOW-XCUT-003 | `NpgsqlSubstrateWriter` transaction + `IntentStage` emit order |
 | `SubstrateChangeMetadata` + intent id chain | FLOW-XCUT-004 | `SubstrateChangeBuilder.cs`, `CheckpointJournal.cs` |
 | Serializable checkpoint wire format | FLOW-XCUT-004 | **PARTIAL** — journal exists; format TBD in ADR |
-| IDs computed by decomposer, not writer | FLOW-INGEST-UNICODE-001 | `BuildBatch` uses precomputed `r.Hash` from blob |
+| IDs computed by decomposer, not writer | FLOW-INGEST-UNICODE-001 | `BuildBatch` uses `r.Hash` from `UnicodeSeed.Compute` (UCD sibling of blob) |
 
 ### ADR 0050 — SubstrateCRUD
 
@@ -749,7 +747,8 @@ Each row: ADR decision/requirement → flow ID → implementation or gap.
 |----------|------|----------------|
 | Independent derivation from UCD+UCA | FLOW-BUILD-001 + FLOW-INGEST-UNICODE-001 | Same versions pinned in CMake |
 | Byte-identical across machines | FLOW-VERIFY-001 | Determinism tests in engine; full gate incomplete |
-| UnicodeDecomposer reads blob for DB half | FLOW-INGEST-UNICODE-001 | `CodepointPerfcache.Load` |
+| UnicodeDecomposer seeds DB from UCD (sibling of blob) | FLOW-INGEST-UNICODE-001 | `UnicodeSeed.Compute` — not `CodepointPerfcache` |
+| Perf-cache for T0 lookup only | FLOW-INGEST-TEXT-001, HashComposer | `CodepointPerfcache.Load` at runtime |
 
 ### ADR 0042 — Extension install bootstrap
 
@@ -809,7 +808,7 @@ Each row: ADR decision/requirement → flow ID → implementation or gap.
 | `just seed-t0` | OPERATIONS.md §Seed | **Fixed:** `Justfile` → `dotnet run … Laplace.Cli seed-unicode` (ADR 0053) |
 | Writer dedup | ADR 0050 / writer XML doc: `MerkleDedup.FilterNovel` | `NpgsqlSubstrateWriter.cs` uses inline bitmap loop |
 | Unicode layer # | ADR 0037 table: layer **1** | `UnicodeDecomposer.LayerOrder` = **0** |
-| Text NFC | Earlier draft of this file said "no NFC" | ADR 0047 + `text_decomposer.c` apply NFC |
+| Text NFC at ingest | Stale ADR 0047 draft / `text_decomposer.h` header | **Code:** no NFC — amended [ADR 0047](docs/adr/0047-text-decomposer-pure-primitive.md) |
 | `laplace roundtrip` | Often conflated with model round-trip | CLI = text file SHA check; model = `scripts/roundtrip.sh` stub |
 | ADR 0050 / 0052 status | **Proposed** | `Laplace.SubstrateCRUD` + `IngestRunner` exist and have tests |
 | Layer gate loop | ADR 0052: `for layer in 1..N-1` | `IngestRunner`: `for (layer = 0; layer < LayerOrder; layer++)` |

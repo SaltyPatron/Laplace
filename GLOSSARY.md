@@ -33,7 +33,13 @@ A column on `entities` (`type_id` FK referencing another entity that names the t
 
 ### Canonicalization
 
-The type-specific, **lossless** normalization applied to raw input bytes before hashing. Different encodings that decode to the same canonical content yield the same entity ID — UTF-8 vs UTF-16 of identical codepoint sequences; PNG vs lossless WebP of identical pixel grids; FLAC vs WAV of identical PCM samples. **Lossy conversions are NOT equivalent under canonicalization** — a JPEG is a different entity from the PNG it was derived from (different pixel values after decode); an MP3 is a different entity from a FLAC of "the same audio" (different PCM); a quantized GGUF is a different entity from the safetensors it was derived from (different tensor values). Cross-format equivalence between lossy variants is an **attestation** (e.g., `IS_LOSSY_ENCODING_OF`), not an identity collapse.
+The type-specific, **lossless** rule for how raw input bytes become the byte image that is hashed into an entity id. **Same canonical bytes → same id.** Different encodings of the **same** canonical bytes count as the same id (UTF-8 vs UTF-16 of an identical scalar sequence; lossless PNG vs lossless WebP of the same pixels).
+
+**Text ingest (amended [ADR 0047](docs/adr/0047-text-decomposer-pure-primitive.md)):** canonical means the **observed** UTF-8 codepoint sequence — **not** NFC- or NFD-rewritten at the door. Precomposed `é` (U+00E9) and decomposed `e`+combining acute are **different** T0 entities. `King` and `king` are **different** entities. Canonical/compatibility equivalence (UAX#15 relationships) and lexical relations (`cafe` / `café`, lemmas, translations) are **typed attestations** from UnicodeDecomposer and linguistic sources — not silent merges and **not** geometric proximity on S³ (Fréchet distance, Hilbert nearness, etc. do not collapse identity).
+
+**Lossy conversions are NOT equivalent under canonicalization** — JPEG vs lossless PNG, MP3 vs FLAC, quantized GGUF vs safetensors are different entities, cross-linked by attestations such as `IS_LOSSY_ENCODING_OF`, not id collapse.
+
+**Model vocabulary tokens** are canonicalized as the model's **token surface string** (per checkpoint/source). `"ĠKing"` and `"King"` are different token entities if both appear in vocab; each maps to substrate text through attestations. Ingesting 100 models yields 100 **`PROJECTION`** physicalities (Procrustes-aligned) on the same substrate text entity — not one embedding row and not Fréchet-based identity.
 
 ### Universal T0
 
@@ -117,11 +123,11 @@ Physicality kinds:
 
 - **CONTENT** — the bottom-up, decomposition-bearing view. `trajectory` populated; `coord` = aggregate of constituent positions.
 - **BUILDING_BLOCK** — the top-down, used-as-constituent view. Coord aggregates over parents that reference this entity; trajectory typically NULL.
-- **PROJECTION** — the source's embedding-space view, procrustes-aligned to substrate 4D. Trajectory optional (NULL for vampire-mode AI ingestion).
+- **PROJECTION** — a source's embedding-space view, Procrustes-aligned (Laplacian eigenmaps + Gram–Schmidt + Procrustes per model ingest) onto the entity's substrate-canonical CONTENT coord. **One row per (entity, source, kind)** — ingesting 100 text models yields up to 100 PROJECTION physicalities on the same text entity (e.g. `King`), not identity collapse and not Fréchet/Hilbert "nearest = same entity."
 
-A pixel entity may have a CONTENT physicality from the substrate-canonical source + PROJECTION physicalities from each AI vision model that has been probed on images containing it. A text word entity may have CONTENT (substrate-canonical UAX#29 decomposition), BUILDING_BLOCK (how it's used across the corpus), and PROJECTION physicalities from every linguistic resource and AI model that has observed it.
+A pixel entity may have substrate-canonical CONTENT + PROJECTION physicalities from each vision model that observed it. A text word entity may have CONTENT (observed UAX#29 decomposition), BUILDING_BLOCK (corpus usage), and PROJECTION from each model that embedded it. **`King` and `king` remain distinct entities**; each may have its own PROJECTION rows per model.
 
-Physicality is a projection/access layer, not belief or knowledge. It is how Laplace creates inspectable embedding-like surfaces, fuzzy candidate lookups, alignment views, and visualizable structure while keeping semantics separate. The semantic layer is the typed attestation graph with arena policy and Glicko-2 state. A close physicality may propose a candidate; it does not decide meaning, truth, or traversal priority by itself.
+Physicality is a projection/access layer, not belief or knowledge. Semantic truth lives in the typed attestation graph (Glicko-2, arena policy). Proximity in S³ proposes candidates; it does not merge identities or override attestations.
 
 ### Source
 
@@ -455,11 +461,11 @@ Thin wrappers around engine functions, exposed via `PG_FUNCTION_INFO_V1`. Add cu
 
 ### Perf-cache
 
-Memory-mapped binary file containing precomputed T0 codepoint data: IDs, 4D canonical coords, Hilbert indices, UCA orders, flags. Built once at deploy time from Unicode UCD. ~67 MiB; fits in CPU L2/L3 cache.
+Memory-mapped binary file containing precomputed T0 codepoint data: IDs, 4D canonical coords, Hilbert indices, UCA orders, GB/WB/SB/InCB/CCC flags, plus NFC decomp/compose side tables. Built at compile/install time from UCD via `laplace_unicode_seed_compute` + emit tool ([ADR 0053](docs/adr/0053-perfcache-compile-time-build-pipeline.md)). ~67 MiB. **Runtime use:** client-side T0 lookup for `HashComposer` and UAX#29 state machines — **not** the DB seed path ([ADR 0006](docs/adr/0006-perfcache-and-db-seed-siblings.md)).
 
-### Build pipeline (UnicodeDecomposer → perf-cache + DB seed sibling artifacts)
+### Build pipeline (perf-cache + DB seed sibling artifacts)
 
-Per [ADR 0006](docs/adr/0006-perfcache-and-db-seed-siblings.md), [UnicodeDecomposer](#unicodedecomposer-layer-1)'s install-time run produces TWO sibling artifacts from its Unicode-ecosystem ingest (UCDXML + UCA DUCET + Unihan + emoji + auxiliary segmentation + CLDR-unicode): (1) the perf-cache binary (≈67 MiB, mmap'd at runtime), (2) the DB seed of T0 codepoint rows + their substrate-canonical CONTENT physicalities + the rich attestation cloud per codepoint. Neither feeds the other; both trace to Unicode itself as the canonical source. Same UCD + UCA version + same UnicodeDecomposer build → byte-identical artifacts on every machine.
+Per [ADR 0006](docs/adr/0006-perfcache-and-db-seed-siblings.md), two **sibling** artifacts from the **same** UCD + DUCET inputs via `laplace_unicode_seed_compute`: (1) perf-cache `.bin` (mmap at runtime), (2) T0 `entities` + substrate-canonical CONTENT physicalities via `UnicodeDecomposer` / `UnicodeSeed.Compute`. **Neither feeds the other.** Full Unicode-ecosystem attestations (Unihan, emoji, `DECOMPOSES_TO`, …) are UnicodeDecomposer scope beyond the bounded T0 flat seed.
 
 ### Three-phase architecture
 
@@ -499,7 +505,7 @@ Each Decomposer ingests its **domain's full data ecosystem** (not a single file)
 - **Attestation kinds emitted**: `HAS_GENERAL_CATEGORY`, `IS_IN_BLOCK`, `HAS_SCRIPT`, `HAS_SCRIPT_EXTENSION`, `HAS_BIDI_CLASS`, `HAS_CANONICAL_COMBINING_CLASS`, `HAS_LINE_BREAK_CLASS`, `HAS_GRAPHEME_BREAK_PROP`, `HAS_WORD_BREAK_PROP`, `HAS_SENTENCE_BREAK_PROP`, `HAS_EAST_ASIAN_WIDTH`, `HAS_AGE`, `HAS_UPPERCASE_MAPPING`, `HAS_LOWERCASE_MAPPING`, `HAS_TITLECASE_MAPPING`, `HAS_CASE_FOLDING`, `DECOMPOSES_TO`, `HAS_NFD_DECOMPOSITION`, `HAS_NFKC_DECOMPOSITION`, `HAS_NUMERIC_VALUE`, `IS_EMOJI`, `IS_EMOJI_PRESENTATION`, `IS_EMOJI_MODIFIER`, `IS_EMOJI_COMPONENT`, `HAS_UCA_PRIMARY_WEIGHT`, `HAS_UCA_SECONDARY_WEIGHT`, `HAS_UCA_TERTIARY_WEIGHT`, `HAS_UCA_COLLATION_ORDER`, `HAS_RADICAL`, `HAS_STROKE_COUNT`, `HAS_PINYIN`, `HAS_JYUTPING`, `HAS_ON_READING`, `HAS_KUN_READING`, `HAS_VARIANT_OF`, ...
 - **Physicalities**: substrate-canonical CONTENT physicality on every Codepoint (coord via super-Fibonacci(UCA collation order); trajectory = NULL for T0). Sequences (Named/ZWJ/Variation) get CONTENT physicalities with codepoint-constituent trajectories.
 - **Trust class**: foundational constants (highest).
-- **Build artifact siblings (per ADR 0006)**: perf-cache binary (≈67 MiB, mmap'd at runtime) + DB seed rows. Both derive from UnicodeDecomposer's canonicalized output; neither feeds the other.
+- **Build artifact siblings (per ADR 0006)**: perf-cache binary + DB seed rows — both from UCD/DUCET via `laplace_unicode_seed_compute`; neither feeds the other.
 
 ### ISODecomposer (Layer 2)
 

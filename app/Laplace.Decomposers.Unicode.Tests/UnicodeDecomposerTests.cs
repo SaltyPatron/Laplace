@@ -8,9 +8,9 @@ using Xunit;
 namespace Laplace.Decomposers.Unicode.Tests;
 
 /// <summary>
-/// Verifies the T0 codepoint seed against the engine-built perf-cache blob.
-/// Needs liblaplace_core.so on the load path + the blob (located the same way
-/// the engine tests do); fails loud if absent.
+/// Verifies the T0 codepoint seed via <see cref="UnicodeSeed.Compute"/> on UCD/DUCET
+/// (sibling of the perf-cache blob per ADR 0006 — seed does not mmap the blob).
+/// Needs liblaplace_core.so + <c>/vault/Data/Unicode</c> paths on the test host.
 /// </summary>
 public sealed class UnicodeDecomposerTests
 {
@@ -31,9 +31,6 @@ public sealed class UnicodeDecomposerTests
         var dec = NewDecomposer();
         var ctx = Context(new NullWriter());
 
-        // Ensure the perf-cache is loaded, then snapshot the expected 'A'
-        // (U+0041) values into plain locals — a ref into the span cannot
-        // cross the await boundary below.
         await dec.EstimateUnitCountAsync(ctx);
         // 'A' = U+0041, entity id = BLAKE3-128 of single byte 0x41.
         Hash128 aHash = Hash128.Blake3(new byte[] { 0x41 });

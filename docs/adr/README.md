@@ -76,7 +76,7 @@ Never renumber existing ADRs. If an ADR is superseded, the new one gets the next
 | 0044 | [Attestation-kind priors + source-trust-class taxonomy](0044-attestation-kind-priors-and-source-trust-taxonomy.md) | Accepted |
 | 0045 | [`laplace_admin` is a SUPERUSER; supersedes the `laplace_priv` SECURITY DEFINER wrapper pattern](0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md) | Accepted (supersedes wrapper architecture; affects Epic B + Epic B′) |
 | 0046 | [`/opt/laplace/external/` as the canonical source for dependency checkouts](0046-persistent-submodule-cache.md) | Accepted (amends 0033 + 0038) |
-| 0047 | [TextDecomposer — pure text-decomposition primitive (NFC + UAX#29 → TierTree)](0047-text-decomposer-pure-primitive.md) | Proposed |
+| 0047 | [TextDecomposer — observed UTF-8 + UAX#29 → TierTree (no NFC at ingest)](0047-text-decomposer-pure-primitive.md) | Accepted (amended 2026-05-25) |
 | 0048 | [HashComposer — leaf-to-trunk content-addressing primitive](0048-hash-composer-leaf-to-trunk.md) | Proposed |
 | 0049 | [SubstrateChange — the unified intent type between decomposers and SubstrateCRUD](0049-substrate-change-intent-type.md) | Proposed |
 | 0050 | [SubstrateCRUD — the shared substrate write surface](0050-substrate-crud-write-surface.md) | Proposed |
