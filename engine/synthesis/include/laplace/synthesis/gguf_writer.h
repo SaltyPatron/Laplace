@@ -28,6 +28,7 @@ gguf_writer_t* gguf_writer_create(const char* output_path);
 int gguf_writer_add_metadata_str(gguf_writer_t* w, const char* key, const char* value);
 int gguf_writer_add_metadata_u32(gguf_writer_t* w, const char* key, uint32_t value);
 int gguf_writer_add_metadata_f32(gguf_writer_t* w, const char* key, float value);
+int gguf_writer_add_metadata_bool(gguf_writer_t* w, const char* key, int value);
 
 /* Array metadata.
  * str_array_packed: packed_data = `count` strings in GGUF wire format

@@ -36,6 +36,15 @@ int trajectory_build(const hash128_t* entity_hashes,
                      size_t           n,
                      double*          out_xyzm);
 
+/* RLE variant: collapses consecutive identical hashes into a single vertex
+ * with run_length > 1 in the M channel (per ADR 0012). out_xyzm must have
+ * capacity for 4*n doubles (worst-case no compression). *out_vertex_count
+ * receives the actual number of vertices emitted (≤ n). */
+int trajectory_build_rle(const hash128_t* constituents,
+                         size_t           n,
+                         double*          out_xyzm,
+                         size_t*          out_vertex_count);
+
 /* Unpack a mantissa-packed XYZM buffer back to entity-hash references.
  * `trajectory_xyzm` is `n_points * 4` doubles. */
 int trajectory_constituents(const double* trajectory_xyzm,

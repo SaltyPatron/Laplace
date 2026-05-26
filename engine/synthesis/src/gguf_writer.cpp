@@ -28,18 +28,19 @@ namespace {
 
 /* GGUF metadata value type tags. */
 enum GgufType : uint32_t {
+    GGUF_TYPE_UINT32  = 4,
     GGUF_TYPE_INT32   = 5,
     GGUF_TYPE_FLOAT32 = 6,
-    GGUF_TYPE_UINT32  = 4,
+    GGUF_TYPE_BOOL    = 7,
     GGUF_TYPE_STRING  = 8,
     GGUF_TYPE_ARRAY   = 9,
 };
 
-/* GGUF tensor element type tags. */
+/* GGUF tensor element type tags (must match GGML's ggml_type enum). */
 enum GgufTensorType : uint32_t {
     GGUF_TENSOR_F32  = 0,
     GGUF_TENSOR_F16  = 1,
-    GGUF_TENSOR_BF16 = 32,
+    GGUF_TENSOR_BF16 = 30,   /* GGML_TYPE_BF16 = 30, NOT 32 */
 };
 
 inline void write_u32(std::vector<uint8_t>& buf, uint32_t v) {
@@ -68,6 +69,7 @@ enum MetaKind {
     META_STR,
     META_U32,
     META_F32,
+    META_BOOL,
     META_STR_ARRAY_PACKED, /* pre-packed GGUF-format strings */
     META_F32_ARRAY,
     META_I32_ARRAY,
@@ -156,6 +158,16 @@ extern "C" int gguf_writer_add_metadata_f32(gguf_writer_t* w, const char* key, f
     kv.key = key;
     kv.kind = META_F32;
     kv.f32_val = value;
+    w->metadata.push_back(std::move(kv));
+    return 0;
+}
+
+extern "C" int gguf_writer_add_metadata_bool(gguf_writer_t* w, const char* key, int value) {
+    if (!w || !key) return -1;
+    MetaKV kv;
+    kv.key = key;
+    kv.kind = META_BOOL;
+    kv.u32_val = value ? 1u : 0u;
     w->metadata.push_back(std::move(kv));
     return 0;
 }
@@ -266,6 +278,10 @@ extern "C" int gguf_writer_finalize(gguf_writer_t* w) {
             write_u32(header, bits);
             break;
         }
+        case META_BOOL:
+            write_u32(header, (uint32_t)GGUF_TYPE_BOOL);
+            header.push_back((uint8_t)(kv.u32_val ? 1 : 0));
+            break;
         case META_STR_ARRAY_PACKED:
             /* GGUF array: type=ARRAY(9) | elem_type=STRING(8) | count(u64) | packed strings */
             write_u32(header, (uint32_t)GGUF_TYPE_ARRAY);

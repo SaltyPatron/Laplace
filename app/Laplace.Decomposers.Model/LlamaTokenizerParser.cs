@@ -71,6 +71,10 @@ public sealed class LlamaTokenizerParser
             });
         }
 
+        /* Sort by token_id so _tokens[(int)vocabIndex] == entity for token vocabIndex.
+         * The QK scorer returns vocab indices, not JSON property order positions. */
+        records.Sort((a, b) => a.TokenId.CompareTo(b.TokenId));
+
         return records;
     }
 
@@ -108,12 +112,22 @@ public sealed class LlamaTokenizerParser
     }
 
     /// <summary>
-    /// Yield SubstrateChange batches for all token entities.
+    /// Yield SubstrateChange batches for all token entities + TOKEN_MAPS_TO attestations.
+    /// Records MUST be sorted by TokenId (Parse() does this) so that
+    /// _tokens[(int)vocabIndex].EntityId is correct for the QK scorer's vocab-index output.
+    ///
+    /// TOKEN_MAPS_TO attestation: (tokenizerEntityId → textEntityId, rating = token_id).
+    /// Rating encodes the vocabulary position — positional kind by design, not Glicko-2.
+    /// Synthesis queries these to recover the token_id → entity mapping.
+    ///
+    /// tokenizerEntityId MUST already be in the DB before these batches are applied.
     /// </summary>
     public static IEnumerable<SubstrateChange> BuildBatches(
         IReadOnlyList<TokenRecord> records,
         Hash128 sourceId,
         Hash128 textTypeId,
+        Hash128 tokenizerEntityId,
+        Hash128 tokenMapsToKindId,
         int batchSize = 512)
     {
         int total = records.Count;
@@ -125,12 +139,38 @@ public sealed class LlamaTokenizerParser
             var b = new SubstrateChangeBuilder(
                 sourceId,
                 $"tokenizer/vocab/{start}..{end - 1}",
-                entityCapacity: n, physicalityCapacity: 0, attestationCapacity: 0);
+                entityCapacity: n, physicalityCapacity: 0, attestationCapacity: n);
+
+            /* Attestation ID buffer reused per token to avoid per-iteration stackalloc. */
+            byte[] attBufArr = new byte[80];
+            tokenizerEntityId.WriteBytes(attBufArr.AsSpan(0, 16));
+            tokenMapsToKindId.WriteBytes(attBufArr.AsSpan(16, 16));
+            sourceId.WriteBytes(attBufArr.AsSpan(48, 16));
+            /* context = zero, already default-initialized */
 
             for (int i = start; i < end; i++)
             {
                 var rec = records[i];
                 b.AddEntity(rec.EntityId, rec.Tier, textTypeId, firstObservedBy: sourceId);
+
+                /* TOKEN_MAPS_TO: tokenizer entity → text entity, rating = vocab position.
+                 * Synthesis uses this to reconstruct the token_id → entity mapping
+                 * without needing the original tokenizer.json file. */
+                rec.EntityId.WriteBytes(attBufArr.AsSpan(32, 16));
+                var attId = Hash128.Blake3(attBufArr);
+
+                b.AddAttestation(new AttestationRow(
+                    Id:               attId,
+                    SubjectId:        tokenizerEntityId,
+                    KindId:           tokenMapsToKindId,
+                    ObjectId:         rec.EntityId,
+                    SourceId:         sourceId,
+                    ContextId:        null,
+                    RatingFp1e9:      (long)rec.TokenId,
+                    RdFp1e9:          1L,
+                    VolatilityFp1e9:  1L,
+                    LastObservedAtUnixUs: 0,
+                    ObservationCount: 1));
             }
 
             yield return b.Build();

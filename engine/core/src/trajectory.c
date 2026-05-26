@@ -30,6 +30,36 @@ int trajectory_build(const hash128_t* entity_hashes,
     return 0;
 }
 
+int trajectory_build_rle(const hash128_t* constituents,
+                         size_t           n,
+                         double*          out_xyzm,
+                         size_t*          out_vertex_count) {
+    if (out_xyzm == NULL || out_vertex_count == NULL) return -1;
+    if (constituents == NULL && n > 0) return -1;
+    if (n > 0xFFFFu) return -1;
+
+    size_t v = 0;
+    size_t i = 0;
+    while (i < n) {
+        size_t run = 1;
+        while (i + run < n &&
+               constituents[i + run].hi == constituents[i].hi &&
+               constituents[i + run].lo == constituents[i].lo) {
+            ++run;
+        }
+        mantissa_payload_t p;
+        p.entity_id  = constituents[i];
+        p.ordinal    = (uint16_t)(i + 1);
+        p.run_length = (uint16_t)run;
+        p.flags      = 0;
+        mantissa_pack(&out_xyzm[v * 4], &p);
+        ++v;
+        i += run;
+    }
+    *out_vertex_count = v;
+    return 0;
+}
+
 int trajectory_constituents(const double* trajectory_xyzm,
                             size_t        n_points,
                             hash128_t*    out_hashes,

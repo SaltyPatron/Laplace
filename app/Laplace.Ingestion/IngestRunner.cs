@@ -273,9 +273,10 @@ public sealed class IngestRunner
     }
 
     private static string ResolveEcosystemPath(IDecomposer decomposer, IngestRunOptions options)
-        => options.CheckpointPathOverride is not null
-           ? Path.GetDirectoryName(options.CheckpointPathOverride) ?? "."
-           : Path.Combine(Path.GetTempPath(), "laplace-ingest", decomposer.SourceName);
+        => options.EcosystemPath
+           ?? (options.CheckpointPathOverride is not null
+               ? Path.GetDirectoryName(options.CheckpointPathOverride) ?? "."
+               : Path.Combine(Path.GetTempPath(), "laplace-ingest", decomposer.SourceName));
 
     private static IngestProgress MakeProgress(RunCounters c) =>
         new(c.UnitsAttempted, c.UnitsApplied, c.UnitsSkipped, c.UnitsFailed,

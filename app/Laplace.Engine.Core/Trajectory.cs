@@ -30,6 +30,33 @@ public static unsafe class Trajectory
         return xyzm;
     }
 
+    /// <summary>RLE-compressed variant: packs constituent ids into a trajectory
+    /// XYZM buffer, collapsing consecutive identical ids into a single vertex
+    /// with <c>run_length &gt; 1</c> in the M channel per ADR 0012. Returns a
+    /// buffer of length <c>vertexCount * 4</c> (≤ <c>constituents.Length * 4</c>).
+    /// The original constituent count (for <c>NConstituents</c> in the
+    /// physicality row) is <c>constituents.Length</c>.</summary>
+    public static double[] BuildRle(ReadOnlySpan<Hash128> constituents)
+    {
+        if (constituents.Length == 0) return [];
+        var xyzm = new double[constituents.Length * 4];
+        nuint vertexCount;
+        fixed (Hash128* h = constituents)
+        fixed (double*  o = xyzm)
+        {
+            int rc = NativeInterop.TrajectoryBuildRle(h, (nuint)constituents.Length, o, &vertexCount);
+            if (rc != 0) throw new InvalidOperationException($"trajectory_build_rle returned {rc}");
+        }
+        int vc = checked((int)vertexCount);
+        if (vc < constituents.Length)
+        {
+            var trimmed = new double[vc * 4];
+            Array.Copy(xyzm, trimmed, vc * 4);
+            return trimmed;
+        }
+        return xyzm;
+    }
+
     /// <summary>Unpack a trajectory XYZM buffer back to its ordered constituent
     /// ids (the vertex order is the sequence).</summary>
     public static Hash128[] Constituents(ReadOnlySpan<double> xyzm)

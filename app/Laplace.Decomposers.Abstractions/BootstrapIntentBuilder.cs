@@ -82,15 +82,70 @@ public sealed class BootstrapIntentBuilder
         return id;
     }
 
-    /// <summary>Register an attestation-kind entity (e.g. IS_LEMMA_OF,
-    /// HAS_POS, IS_HYPERNYM_OF). Same content-addressing convergence as
-    /// types.</summary>
+    /// <summary>Register an attestation-kind entity. Same content-addressing
+    /// convergence as types — duplicate calls from different decomposers are
+    /// no-ops via ON CONFLICT.</summary>
     public Hash128 AddKind(string canonicalKindName)
     {
         var id = Hash128.OfCanonical($"substrate/kind/{canonicalKindName}/v1");
         _inner.AddEntity(id, /*tier*/ 0, KindMetaTypeId, _sourceId);
         return id;
     }
+
+    /// <summary>Register an attestation-kind entity with ADR 0044 kind-
+    /// value-tier + source-trust-class meta-attestations on the kind entity
+    /// itself. The <see cref="AttestationFactory"/> uses these priors to
+    /// initialise Glicko-2 state for each attestation of this kind.</summary>
+    public Hash128 AddKind(string canonicalKindName, KindValueTier tier, TrustClass trust)
+    {
+        var id = AddKind(canonicalKindName);
+
+        // HAS_VALUE_TIER meta-attestation (kind → tier entity).
+        // Tier entity IDs must match 10_bootstrap.sql.in Stage 3 seeds exactly.
+        var tierEntityId = TierEntityId(tier);
+        _inner.AddEntity(tierEntityId, /*tier*/ 0, KindMetaTypeId, _sourceId);
+        _inner.AddAttestation(AttestationFactory.Create(
+            subject:    id,
+            kindId:     HAS_VALUE_TIER_KindId,
+            obj:        tierEntityId,
+            sourceId:   _sourceId,
+            contextId:  null,
+            tier:       KindValueTier.T1,   // meta-attestation is substrate mandate
+            trust:      TrustClass.SubstrateMandateTier1));
+
+        // HAS_TRUST_CLASS meta-attestation (kind → trust-class entity)
+        _inner.AddAttestation(AttestationFactory.Create(
+            subject:    id,
+            kindId:     HasTrustClassKindId,
+            obj:        _trustClassId,
+            sourceId:   _sourceId,
+            contextId:  null,
+            tier:       KindValueTier.T1,
+            trust:      TrustClass.SubstrateMandateTier1));
+
+        return id;
+    }
+
+    // Must match 10_bootstrap.sql.in Stage 3 canonical name exactly.
+    private static readonly Hash128 HAS_VALUE_TIER_KindId =
+        Hash128.OfCanonical("substrate/kind/HAS_KIND_VALUE_TIER/v1");
+
+    // Canonical names must match 10_bootstrap.sql.in Stage 3 tier entities exactly.
+    private static Hash128 TierEntityId(KindValueTier tier) => tier switch
+    {
+        KindValueTier.T1  => Hash128.OfCanonical("substrate/kind_tier/T1_Mandate/v1"),
+        KindValueTier.T2  => Hash128.OfCanonical("substrate/kind_tier/T2_StandardsStructural/v1"),
+        KindValueTier.T3  => Hash128.OfCanonical("substrate/kind_tier/T3_Taxonomic/v1"),
+        KindValueTier.T4  => Hash128.OfCanonical("substrate/kind_tier/T4_Partitive/v1"),
+        KindValueTier.T5  => Hash128.OfCanonical("substrate/kind_tier/T5_Causal/v1"),
+        KindValueTier.T6  => Hash128.OfCanonical("substrate/kind_tier/T6_Equivalence/v1"),
+        KindValueTier.T7  => Hash128.OfCanonical("substrate/kind_tier/T7_Oppositional/v1"),
+        KindValueTier.T8  => Hash128.OfCanonical("substrate/kind_tier/T8_Associative/v1"),
+        KindValueTier.T9  => Hash128.OfCanonical("substrate/kind_tier/T9_TensorCalculation/v1"),
+        KindValueTier.T10 => Hash128.OfCanonical("substrate/kind_tier/T10_ScalarValued/v1"),
+        KindValueTier.T11 => Hash128.OfCanonical("substrate/kind_tier/T11_Probationary/v1"),
+        _                 => Hash128.OfCanonical("substrate/kind_tier/T11_Probationary/v1"),
+    };
 
     /// <summary>Attest that <see cref="_sourceId"/> belongs to
     /// <see cref="_trustClassId"/>. Called once at the end of

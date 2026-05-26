@@ -97,6 +97,7 @@ public sealed class ModelDecomposer : IDecomposer
         boot.AddType("Model_Tokenizer");
         boot.AddType("Scalar");
         boot.AddType("Architecture");
+        boot.AddType("Model_Feature");   // hidden/feature-dim entities — object axis for interior weight roles (ADR 0056)
 
         boot.AddKind("EMBEDS");
         boot.AddKind("Q_PROJECTS");
@@ -136,23 +137,31 @@ public sealed class ModelDecomposer : IDecomposer
             HasIntermSizeKind, HasVocabSizeKind,
             IsAKind, LlamaArchitectureId);
 
-        /* 2. Token vocab entities */
-        var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
-        int batchSz = options.BatchSize > 0 ? options.BatchSize : 512;
-        foreach (var batch in LlamaTokenizerParser.BuildBatches(tokens, Source, TextTypeId, batchSz))
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return batch;
-            await Task.Yield();
-        }
-
-        /* 3. Tokenizer meta-entity */
+        /* 2. Tokenizer meta-entity — MUST come before vocab batches.
+         * BuildBatches emits TOKEN_MAPS_TO attestations that reference tokEntityId
+         * as subject_id; the entity must be in DB before those COPYs run. */
         byte[] tokBytes = File.ReadAllBytes(tokenizerPath);
         var tokEntityId = Hash128.Blake3(tokBytes);
         var tokChange = new SubstrateChangeBuilder(Source, "tokenizer/entity",
             entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 0);
         tokChange.AddEntity(tokEntityId, tier: 0, ModelTokenizerTypeId, firstObservedBy: Source);
         yield return tokChange.Build();
+
+        /* 3. Token vocab entities + TOKEN_MAPS_TO attestations.
+         * Records are sorted by token_id in Parse() — _tokens[(int)vocabIndex].EntityId
+         * is correct for the QK scorer's vocab-index output. */
+        var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
+        /* Model vocab is always large (32K+); the DecomposerOptions default BatchSize=1
+         * would emit one micro-intent per token (32K transactions, round-trip-bound).
+         * Floor the vocab/weight batch at 8192 regardless of the tiny per-unit default. */
+        int batchSz = Math.Max(options.BatchSize, 8192);
+        foreach (var batch in LlamaTokenizerParser.BuildBatches(
+            tokens, Source, TextTypeId, tokEntityId, TokenMapsToKind, batchSz))
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return batch;
+            await Task.Yield();
+        }
 
         /* 4. Weight attestations */
         var extractor = new LlamaWeightExtractor(_modelDir, recipe, tokens, Source, ExtractorKinds);

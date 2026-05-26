@@ -15,6 +15,8 @@ set(LAPLACE_SYNTHESIS_HEADERS
     include/laplace/synthesis/gguf_writer.h
     include/laplace/synthesis/bf16_decoder.h
     include/laplace/synthesis/token_attn_scorer.h
+    include/laplace/synthesis/tensor_decompose.h
+    include/laplace/synthesis/weight_projection.h
     include/laplace/synthesis/format_writer.h
 )
 
@@ -26,6 +28,8 @@ set(LAPLACE_SYNTHESIS_SOURCES
     src/gguf_writer.cpp
     src/bf16_decoder.c
     src/token_attn_scorer.cpp
+    src/tensor_decompose.cpp
+    src/weight_projection.cpp
     src/format_writer.cpp
 )
 

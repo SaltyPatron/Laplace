@@ -10,6 +10,8 @@ set(LAPLACE_SYNTHESIS_TEST_SOURCES
     test_gguf_writer.cpp
     test_bf16_decoder.cpp
     test_token_attn_scorer.cpp
+    test_tensor_decompose.cpp
+    test_weight_projection.cpp
 )
 
 add_executable(laplace_synthesis_tests ${LAPLACE_SYNTHESIS_TEST_SOURCES})

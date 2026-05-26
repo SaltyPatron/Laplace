@@ -18,6 +18,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Laplace.Decomposers.Unicode\Laplace.Decomposers.Unicode.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.ISO\Laplace.Decomposers.ISO.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.WordNet\Laplace.Decomposers.WordNet.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.OMW\Laplace.Decomposers.OMW.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.UD\Laplace.Decomposers.UD.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.Model\Laplace.Decomposers.Model.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.Abstractions\Laplace.Decomposers.Abstractions.csproj" />
     <ProjectReference Include="..\Laplace.Engine.Core\Laplace.Engine.Core.csproj" />

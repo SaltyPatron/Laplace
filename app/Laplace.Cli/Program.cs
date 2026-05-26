@@ -6,8 +6,12 @@ using System.Security.Cryptography;
 using System.Text;
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.ISO;
 using Laplace.Decomposers.Model;
+using Laplace.Decomposers.OMW;
+using Laplace.Decomposers.UD;
 using Laplace.Decomposers.Unicode;
+using Laplace.Decomposers.WordNet;
 using Laplace.Engine.Core;
 using Laplace.Engine.Synthesis;
 using Laplace.Ingestion;
@@ -101,9 +105,13 @@ internal static class Program
 
         return source.ToLowerInvariant() switch
         {
-            "unicode" => await IngestUnicodeViaRunnerAsync(),
-            "model"   => await IngestModelAsync(path),
-            _ => Fail($"unknown ingest source '{source}' (supported: unicode, model)"),
+            "unicode"  => await IngestUnicodeViaRunnerAsync(),
+            "iso639"   => await IngestISO639Async(),
+            "wordnet"  => await IngestViaRunnerAsync(new WordNetDecomposer(), "/vault/Data/Wordnet", skipLayerCheck: false),
+            "omw"      => await IngestViaRunnerAsync(new OMWDecomposer(), "/vault/Data/omw", skipLayerCheck: false),
+            "ud"       => await IngestViaRunnerAsync(new UDDecomposer(), "/vault/Data/UD-Treebanks", skipLayerCheck: false),
+            "model"    => await IngestModelAsync(path),
+            _ => Fail($"unknown ingest source '{source}' (supported: unicode, iso639, wordnet, omw, ud, model)"),
         };
     }
 
@@ -113,6 +121,28 @@ internal static class Program
             return Fail($"usage: laplace ingest model <model-dir>  (not found: {modelDir})");
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+
+        /* Check if this model source is already ingested — Q_PROJECTS attestations
+         * only exist after the weight extraction phase completes successfully.
+         * Same attestation ID = same content = ON CONFLICT DO NOTHING, so re-running
+         * is safe but wasteful. Short-circuit here for the common re-run case. */
+        await using (var chkConn = await ds.OpenConnectionAsync())
+        {
+            await using var chkCmd = chkConn.CreateCommand();
+            chkCmd.CommandText =
+                "SELECT EXISTS(SELECT 1 FROM laplace.attestations " +
+                "WHERE source_id = $1 AND kind_id = $2 LIMIT 1)";
+            chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = ModelDecomposer.Source.ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
+            chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = ModelDecomposer.QProjectsKind.ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
+            bool alreadyIngested = (bool)(await chkCmd.ExecuteScalarAsync() ?? false);
+            if (alreadyIngested)
+            {
+                Console.WriteLine($"Model already ingested — source entity: {ModelDecomposer.Source}");
+                Console.WriteLine("(use 'just db-nuke && just seed-t0 && just ingest-tinyllama' to re-ingest from scratch)");
+                return 0;
+            }
+        }
+
         var writer = new NpgsqlSubstrateWriter(ds);
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader);
@@ -148,7 +178,18 @@ internal static class Program
         string target = args.Length > 0 ? args[0].ToLowerInvariant() : "";
         if (target == "tinyllama")
             return await SynthesizeTinyLlamaAsync(args.Length > 1 ? args[1] : "/tmp/tinyllama-substrate.gguf");
-        return Fail("usage: laplace synthesize tinyllama [output.gguf]");
+        if (target == "tinyllama-passthrough")
+            return await SynthesizeTinyLlamaPassthroughAsync(args.Length > 1 ? args[1] : "/tmp/tinyllama-passthrough.gguf");
+        if (target == "tinyllama-passthrough-f32")
+            return await SynthesizeTinyLlamaPassthroughAsync(args.Length > 1 ? args[1] : "/tmp/tinyllama-passthrough-f32.gguf", allF32: true);
+        if (target == "tinyllama-sparse")
+        {
+            double tol = args.Length > 1 && double.TryParse(args[1], out var t) ? t : 0.10;
+            string outp = args.Length > 2 ? args[2] : $"/tmp/tinyllama-sparse-{tol:0.00}.gguf";
+            // BF16 output (half the F32 size) — run with `-dev CUDA0` to pin the 4060 (native BF16).
+            return await SynthesizeTinyLlamaPassthroughAsync(outp, allF32: false, sparseTol: tol);
+        }
+        return Fail("usage: laplace synthesize <tinyllama | tinyllama-passthrough | tinyllama-passthrough-f32 | tinyllama-sparse [tol]> [output.gguf]");
     }
 
     private const string TinyLlamaDir =
@@ -245,7 +286,7 @@ internal static class Program
             {
                 fixed (nuint* dimsPtr = ggufDims)
                 fixed (byte*  dataPtr = tensorBytes)
-                    SynthInterop.GgufWriterAddTensor(gguf, name, dtype, dimsPtr, (nuint)ggufDims.Length, dataPtr);
+                    SynthInterop.GgufWriterAddTensor(gguf, HfToGgmlName(name), dtype, dimsPtr, (nuint)ggufDims.Length, dataPtr);
             }
 
             tensorsDone++;
@@ -264,6 +305,266 @@ internal static class Program
         long fileSize = new FileInfo(outputPath).Length;
         Console.WriteLine($"synthesis complete: {outputPath} ({fileSize / 1048576.0:F0} MB) in {sw.Elapsed.TotalSeconds:F1}s");
         return 0;
+    }
+
+    // === synthesize tinyllama-passthrough: REAL weights → our GGUF writer (no substrate) ===
+    // Isolates format/metadata/arch_template correctness from substrate data quality.
+    // Each tensor is transcoded to the arch_template's declared dtype (norms bf16→f32,
+    // weights bf16 passthrough) to match llama.cpp's GGUF conventions.
+    private static async Task<int> SynthesizeTinyLlamaPassthroughAsync(string outputPath, bool allF32 = false, double sparseTol = 0.0)
+    {
+        Console.WriteLine($"synthesize tinyllama {(sparseTol > 0 ? $"SPARSE(tol={sparseTol:0.000})" : "PASSTHROUGH")} (real weights → GGUF{(allF32 || sparseTol > 0 ? ", F32" : "")}) → {outputPath}");
+        string configPath      = Path.Combine(TinyLlamaDir, "config.json");
+        string tokenizerPath   = Path.Combine(TinyLlamaDir, "tokenizer.json");
+        string safetensorsPath = Path.Combine(TinyLlamaDir, "model.safetensors");
+        if (!File.Exists(configPath) || !File.Exists(tokenizerPath) || !File.Exists(safetensorsPath))
+            return Fail($"model files not found under {TinyLlamaDir}");
+
+        var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
+        var recipe = LlamaRecipeExtractor.Parse(configPath);
+
+        byte[] configJson = File.ReadAllBytes(configPath);
+        IntPtr recipeHandle, tmplHandle;
+        var specs = new TensorSpec[400];
+        int tensorCount;
+        unsafe
+        {
+            fixed (byte* jsonPtr = configJson)
+                recipeHandle = SynthInterop.RecipeParse(jsonPtr, (nuint)configJson.Length);
+            if (recipeHandle == IntPtr.Zero) return Fail("recipe_parse returned null");
+            tmplHandle = SynthInterop.ArchTemplateLoad("llama");
+            if (tmplHandle == IntPtr.Zero) return Fail("arch_template_load returned null");
+            fixed (TensorSpec* specsPtr = specs)
+                tensorCount = SynthInterop.ArchTemplateRequiredTensors(
+                    tmplHandle, recipeHandle, specsPtr, (nuint)specs.Length);
+        }
+        if (tensorCount <= 0) return Fail($"arch_template_required_tensors returned {tensorCount}");
+        Console.WriteLine($"  arch template: {tensorCount} tensor slots");
+
+        var refs = SafetensorsContainerParser.ParseHeader(safetensorsPath);
+        var refMap = new Dictionary<string, SafetensorsContainerParser.TensorReference>(refs.Count, StringComparer.Ordinal);
+        foreach (var r in refs) refMap[r.Name] = r;
+
+        var gguf = SynthInterop.GgufWriterCreate(outputPath);
+        if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
+        WriteGgufMetadata(gguf, recipe, tokens);
+
+        using var fs = new FileStream(safetensorsPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, useAsync: false);
+        var sw = Stopwatch.StartNew();
+        int done = 0, missing = 0;
+        long keptTotal = 0, sparsedElems = 0;   // sparsity accounting (interior tensors only)
+        for (int i = 0; i < tensorCount; i++)
+        {
+            string name; ulong rows, cols; int dtype;
+            unsafe
+            {
+                var spec = specs[i];
+                name  = Marshal.PtrToStringUTF8((IntPtr)spec.Name) ?? "";
+                rows  = spec.Rank >= 1 ? spec.Shape[0] : 1;
+                cols  = spec.Rank >= 2 ? spec.Shape[1] : 1;
+                dtype = spec.Dtype;
+            }
+            long nElem = (long)rows * (long)cols;
+            int outDtype = allF32 ? 0 : dtype;   // arch_template dtype (bf16 weights / f32 norms) unless allF32
+            // Interior weight tensors (attention + MLP projections) are the sparsity target;
+            // the embedding frame, lm_head, and norms stay dense (cheap + critical).
+            bool interior = name.Contains(".self_attn.") || name.Contains(".mlp.");
+
+            byte[] outBytes;
+            if (refMap.TryGetValue(name, out var tref))
+            {
+                byte[] raw = ReadTensorBytes(fs, tref);
+                if (sparseTol > 0 && interior)
+                {
+                    float[] fv = BytesToF32(raw, tref.Dtype, nElem);
+                    long kept = Sparsify(fv, sparseTol);
+                    keptTotal += kept; sparsedElems += nElem;
+                    outBytes = outDtype == 2 ? F32ToBf16Bytes(fv) : F32ToBytes(fv);
+                }
+                else
+                {
+                    outBytes = TranscodeToDtype(raw, tref.Dtype, outDtype, nElem);
+                }
+            }
+            else
+            {
+                missing++;
+                outBytes = new byte[nElem * (outDtype == 0 ? 4L : 2L)];
+                Console.WriteLine($"  MISSING in safetensors: {name} → zero-filled");
+            }
+
+            nuint[] ggufDims = cols > 1 ? [(nuint)cols, (nuint)rows] : [(nuint)rows];
+            unsafe
+            {
+                fixed (nuint* dimsPtr = ggufDims)
+                fixed (byte*  dataPtr = outBytes)
+                    SynthInterop.GgufWriterAddTensor(gguf, HfToGgmlName(name), outDtype, dimsPtr, (nuint)ggufDims.Length, dataPtr);
+            }
+
+            done++;
+            if (done == 1 || done % 50 == 0)
+                Console.WriteLine($"  [{done}/{tensorCount}] {name} rows={rows} cols={cols} dt={dtype} {sw.Elapsed.TotalSeconds:F1}s");
+        }
+
+        int rc = SynthInterop.GgufWriterFinalize(gguf);
+        SynthInterop.GgufWriterFree(gguf);
+        SynthInterop.ArchTemplateFree(tmplHandle);
+        SynthInterop.RecipeFree(recipeHandle);
+        if (rc != 0) return Fail($"gguf_writer_finalize failed (rc={rc})");
+
+        long fileSize = new FileInfo(outputPath).Length;
+        Console.WriteLine($"{(sparseTol > 0 ? "sparse" : "passthrough")} complete: {outputPath} ({fileSize / 1048576.0:F0} MB), "
+            + $"{done} tensors, {missing} missing, {sw.Elapsed.TotalSeconds:F1}s");
+        if (sparseTol > 0 && sparsedElems > 0)
+            Console.WriteLine($"  SPARSITY (interior weights @ tol={sparseTol:0.000}): kept {keptTotal:N0} / {sparsedElems:N0} "
+                + $"= {100.0 * keptTotal / sparsedElems:F1}% nonzero (dropped {100.0 * (1.0 - (double)keptTotal / sparsedElems):F1}%)");
+        await Task.CompletedTask;
+        return 0;
+    }
+
+    // Zero the smallest-magnitude entries that together carry <= tol^2 of the tensor's
+    // Frobenius energy (energy-based, not a flat threshold). Returns the kept (nonzero) count.
+    private static long Sparsify(float[] data, double tol)
+    {
+        int n = data.Length;
+        double total = 0; for (int i = 0; i < n; i++) { double v = data[i]; total += v * v; }
+        if (total <= 0) return n;
+        double budget = tol * tol * total;
+        var mag = new float[n];
+        for (int i = 0; i < n; i++) mag[i] = MathF.Abs(data[i]);
+        Array.Sort(mag);
+        double acc = 0; float cutoff = -1f;
+        for (int i = 0; i < n; i++) { double v = mag[i]; if (acc + v * v > budget) break; acc += v * v; cutoff = mag[i]; }
+        if (cutoff < 0) return n;            // nothing droppable within budget
+        long kept = 0;
+        for (int i = 0; i < n; i++) { if (MathF.Abs(data[i]) <= cutoff) data[i] = 0f; else kept++; }
+        return kept;
+    }
+
+    // Decode raw tensor bytes (BF16 or F32) to a float[] of nElem values.
+    private static float[] BytesToF32(byte[] raw, string srcDtype, long nElem)
+    {
+        var o = new float[nElem];
+        if (srcDtype == "F32") { Buffer.BlockCopy(raw, 0, o, 0, (int)(nElem * 4)); return o; }
+        for (long i = 0; i < nElem; i++)
+        {
+            ushort bf = (ushort)(raw[i * 2] | (raw[i * 2 + 1] << 8));
+            o[i] = BitConverter.UInt32BitsToSingle((uint)bf << 16);
+        }
+        return o;
+    }
+
+    private static byte[] F32ToBytes(float[] data)
+    {
+        var o = new byte[(long)data.Length * 4];
+        Buffer.BlockCopy(data, 0, o, 0, o.Length);
+        return o;
+    }
+
+    // Encode a float[] as BF16 bytes (truncate to the upper 16 bits of each f32).
+    private static byte[] F32ToBf16Bytes(float[] data)
+    {
+        var o = new byte[(long)data.Length * 2];
+        for (long i = 0; i < data.Length; i++)
+        {
+            uint b = BitConverter.SingleToUInt32Bits(data[i]);
+            ushort bf = (ushort)(b >> 16);
+            o[i * 2] = (byte)(bf & 0xFF);
+            o[i * 2 + 1] = (byte)(bf >> 8);
+        }
+        return o;
+    }
+
+    private static byte[] ReadTensorBytes(FileStream fs, SafetensorsContainerParser.TensorReference tref)
+    {
+        byte[] buf = new byte[tref.DataLength];
+        fs.Seek(tref.AbsoluteDataStart, SeekOrigin.Begin);
+        int total = 0;
+        while (total < buf.Length)
+        {
+            int n = fs.Read(buf, total, buf.Length - total);
+            if (n == 0) throw new IOException($"safetensors: truncated data for {tref.Name}");
+            total += n;
+        }
+        return buf;
+    }
+
+    // Transcode raw tensor bytes from a safetensors dtype to the target GGUF dtype (0=f32, 2=bf16).
+    private static byte[] TranscodeToDtype(byte[] raw, string srcDtype, int dstDtype, long nElem)
+    {
+        bool srcBf16 = srcDtype == "BF16";
+        bool srcF32  = srcDtype == "F32";
+
+        if (dstDtype == 2) // target bf16
+        {
+            if (srcBf16) return raw;
+            if (srcF32)
+            {
+                var o = new byte[nElem * 2];
+                for (long i = 0; i < nElem; i++)
+                {
+                    uint b = (uint)(raw[i*4] | (raw[i*4+1] << 8) | (raw[i*4+2] << 16) | (raw[i*4+3] << 24));
+                    ushort bf = (ushort)(b >> 16);
+                    o[i*2] = (byte)(bf & 0xFF); o[i*2+1] = (byte)(bf >> 8);
+                }
+                return o;
+            }
+        }
+        else if (dstDtype == 0) // target f32
+        {
+            if (srcF32) return raw;
+            if (srcBf16)
+            {
+                var o = new byte[nElem * 4];
+                for (long i = 0; i < nElem; i++)
+                {
+                    ushort bf = (ushort)(raw[i*2] | (raw[i*2+1] << 8));
+                    uint b = (uint)bf << 16;
+                    o[i*4]   = (byte)(b & 0xFF);
+                    o[i*4+1] = (byte)((b >> 8)  & 0xFF);
+                    o[i*4+2] = (byte)((b >> 16) & 0xFF);
+                    o[i*4+3] = (byte)((b >> 24) & 0xFF);
+                }
+                return o;
+            }
+        }
+        throw new NotSupportedException($"transcode {srcDtype} → dtype {dstDtype} unsupported");
+    }
+
+    // Map HuggingFace safetensors tensor names → GGML/llama.cpp names.
+    // arch_template emits HF names (to match the source safetensors during ingest);
+    // llama.cpp's loader requires the GGML naming scheme, so we rename at GGUF-write time.
+    private static string HfToGgmlName(string hf)
+    {
+        if (hf == "model.embed_tokens.weight") return "token_embd.weight";
+        if (hf == "model.norm.weight")         return "output_norm.weight";
+        if (hf == "lm_head.weight")            return "output.weight";
+
+        const string prefix = "model.layers.";
+        if (hf.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            int dot = hf.IndexOf('.', prefix.Length);
+            if (dot > 0)
+            {
+                string idx  = hf.Substring(prefix.Length, dot - prefix.Length);
+                string rest = hf.Substring(dot + 1);
+                string g = rest switch
+                {
+                    "self_attn.q_proj.weight"          => "attn_q.weight",
+                    "self_attn.k_proj.weight"          => "attn_k.weight",
+                    "self_attn.v_proj.weight"          => "attn_v.weight",
+                    "self_attn.o_proj.weight"          => "attn_output.weight",
+                    "mlp.gate_proj.weight"             => "ffn_gate.weight",
+                    "mlp.up_proj.weight"               => "ffn_up.weight",
+                    "mlp.down_proj.weight"             => "ffn_down.weight",
+                    "input_layernorm.weight"           => "attn_norm.weight",
+                    "post_attention_layernorm.weight"  => "ffn_norm.weight",
+                    _                                  => rest,
+                };
+                return $"blk.{idx}.{g}";
+            }
+        }
+        return hf; // unknown — pass through unchanged
     }
 
     // Map tensor name → attestation kind.
@@ -346,15 +647,8 @@ internal static class Program
         return attCount;
     }
 
-    // Inverse of LlamaWeightExtractor.ScaleToRating:
-    //   rating = 1000 + 800 * (1 - 1/(1 + |w|*10))  [1000..1800], stored as fp×1e9
-    //   |w| = (1/(1 - x) - 1) / 10  where x = (r - 1000) / 800
-    private static double InverseScale(long ratingFp1e9)
-    {
-        double r = ratingFp1e9 / 1e9;
-        double x = Math.Clamp((r - 1000.0) / 800.0, 0.0, 0.9999);
-        return (1.0 / (1.0 - x) - 1.0) / 10.0;
-    }
+    // Inverse of LlamaWeightExtractor.ScaleToRating: signed fixed-point ×1e9.
+    private static double InverseScale(long ratingFp1e9) => ratingFp1e9 / 1e9;
 
     private static ushort DoubleToBF16(double v)
     {
@@ -393,48 +687,132 @@ internal static class Program
         SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.bos_token_id",     1);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.eos_token_id",     2);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.unknown_token_id", 0);
+        // Tokenizer control flags a real Llama conversion always writes — without these
+        // llama.cpp doesn't prepend BOS (model degenerates) and mishandles the SPM
+        // leading-space prefix (output loses spaces). LlamaTokenizer defaults.
+        SynthInterop.GgufWriterAddMetadataBool(gguf, "tokenizer.ggml.add_bos_token",    1);
+        SynthInterop.GgufWriterAddMetadataBool(gguf, "tokenizer.ggml.add_eos_token",    0);
+        SynthInterop.GgufWriterAddMetadataBool(gguf, "tokenizer.ggml.add_space_prefix", 1);
 
-        // Build sorted-by-id token arrays
-        var sorted = tokens.OrderBy(t => t.TokenId).ToArray();
-        int n = sorted.Length;
+        int n = tokens.Count;
 
-        // Packed string array: each token's raw string (with BPE markers preserved — the
-        // raw surface is what llama.cpp uses for display; canonical is for substrate IDs)
-        byte[] packed = PackTokenStrings(sorted);
+        // Authoritative tokenizer vocab from the SentencePiece model (real pieces +
+        // scores + types). The HF tokenizer.json is BPE-format with no scores; emitting
+        // zero scores under vocab type=SPM breaks tokenization in llama.cpp.
+        string spPath = Path.Combine(TinyLlamaDir, "tokenizer.model");
+        SpPiece[]? sp = File.Exists(spPath) ? ParseSentencePieceModel(spPath) : null;
+
+        string[] pieces = new string[n];
+        float[]  scores = new float[n];
+        int[]    types  = new int[n];
+
+        if (sp is not null && sp.Length == n)
+        {
+            for (int i = 0; i < n; i++) { pieces[i] = sp[i].Piece; scores[i] = sp[i].Score; types[i] = sp[i].Type; }
+        }
+        else
+        {
+            Console.WriteLine($"  WARN: tokenizer.model {(sp is null ? "missing" : $"has {sp.Length} pieces ≠ vocab {n}")} — "
+                + "falling back to tokenizer.json strings + zero scores (tokenization will be degraded)");
+            var sorted = tokens.OrderBy(t => t.TokenId).ToArray();
+            for (int i = 0; i < n; i++) { pieces[i] = sorted[i].RawToken; scores[i] = 0f; types[i] = ClassifyTokenType(sorted[i].RawToken); }
+        }
+
+        byte[] packed = PackStrings(pieces);
         unsafe
         {
             fixed (byte* p = packed)
                 SynthInterop.GgufWriterAddMetadataStrArrayPacked(
                     gguf, "tokenizer.ggml.tokens", p, (nuint)packed.Length, (nuint)n);
-        }
-
-        // Scores: all 0.0 (unused in BPE inference; SentencePiece only)
-        var scores = new float[n];
-        unsafe
-        {
             fixed (float* p = scores)
                 SynthInterop.GgufWriterAddMetadataF32Array(gguf, "tokenizer.ggml.scores", p, (nuint)n);
-        }
-
-        // Token types: NORMAL=0, UNKNOWN=1, CONTROL=2, BYTE=5
-        var types = new int[n];
-        for (int i = 0; i < n; i++)
-            types[i] = ClassifyTokenType(sorted[i].RawToken);
-        unsafe
-        {
             fixed (int* p = types)
                 SynthInterop.GgufWriterAddMetadataI32Array(gguf, "tokenizer.ggml.token_type", p, (nuint)n);
         }
+
+        // Real chat template (so the server's chat endpoint uses TinyLlama's template,
+        // not a generic ChatML fallback).
+        string cfgPath = Path.Combine(TinyLlamaDir, "tokenizer_config.json");
+        if (File.Exists(cfgPath))
+        {
+            using var cfg = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(cfgPath));
+            if (cfg.RootElement.TryGetProperty("chat_template", out var ct)
+                && ct.ValueKind == System.Text.Json.JsonValueKind.String)
+                SynthInterop.GgufWriterAddMetadataStr(gguf, "tokenizer.chat_template", ct.GetString()!);
+        }
     }
 
-    // Pack token raw strings in GGUF wire format: uint64_le byte-length + UTF-8 bytes per token.
-    private static byte[] PackTokenStrings(LlamaTokenizerParser.TokenRecord[] tokens)
+    // === SentencePiece model (.model protobuf) reader — extracts (piece, score, type)
+    // per token id, dependency-free. ModelProto field 1 = repeated SentencePiece
+    // { string piece=1; float score=2; Type type=3 (default NORMAL=1) }.
+    // SP Type enum values mirror llama.cpp's token types (NORMAL=1, UNKNOWN=2,
+    // CONTROL=3, USER_DEFINED=4, UNUSED=5, BYTE=6), so the type passes through directly.
+    private sealed record SpPiece(string Piece, float Score, int Type);
+
+    private static SpPiece[] ParseSentencePieceModel(string path)
+    {
+        byte[] d = File.ReadAllBytes(path);
+        var pieces = new List<SpPiece>(32000);
+        int pos = 0;
+        while (pos < d.Length)
+        {
+            ulong key = ReadVarint(d, ref pos);
+            int field = (int)(key >> 3), wt = (int)(key & 7);
+            if (field == 1 && wt == 2)
+            {
+                int len = (int)ReadVarint(d, ref pos);
+                int end = pos + len;
+                string piece = ""; float score = 0f; int type = 1; /* NORMAL */
+                while (pos < end)
+                {
+                    ulong k2 = ReadVarint(d, ref pos);
+                    int f2 = (int)(k2 >> 3), w2 = (int)(k2 & 7);
+                    if      (f2 == 1 && w2 == 2) { int l = (int)ReadVarint(d, ref pos); piece = Encoding.UTF8.GetString(d, pos, l); pos += l; }
+                    else if (f2 == 2 && w2 == 5) { score = BitConverter.ToSingle(d, pos); pos += 4; }
+                    else if (f2 == 3 && w2 == 0) { type = (int)ReadVarint(d, ref pos); }
+                    else SkipField(d, ref pos, w2);
+                }
+                pieces.Add(new SpPiece(piece, score, type));
+                pos = end;
+            }
+            else SkipField(d, ref pos, wt);
+        }
+        return pieces.ToArray();
+    }
+
+    private static ulong ReadVarint(byte[] d, ref int pos)
+    {
+        ulong v = 0; int shift = 0;
+        while (pos < d.Length)
+        {
+            byte b = d[pos++];
+            v |= (ulong)(b & 0x7F) << shift;
+            if ((b & 0x80) == 0) break;
+            shift += 7;
+        }
+        return v;
+    }
+
+    private static void SkipField(byte[] d, ref int pos, int wireType)
+    {
+        switch (wireType)
+        {
+            case 0: ReadVarint(d, ref pos); break;
+            case 1: pos += 8; break;
+            case 2: { int l = (int)ReadVarint(d, ref pos); pos += l; break; }
+            case 5: pos += 4; break;
+            default: throw new InvalidDataException($"SP proto: unsupported wire type {wireType}");
+        }
+    }
+
+    // Pack strings in GGUF wire format: uint64_le byte-length + UTF-8 bytes per string.
+    private static byte[] PackStrings(IReadOnlyList<string> strings)
     {
         using var ms = new System.IO.MemoryStream();
         Span<byte> lenBuf = stackalloc byte[8];
-        foreach (var t in tokens)
+        foreach (var s in strings)
         {
-            byte[] b = Encoding.UTF8.GetBytes(t.RawToken);
+            byte[] b = Encoding.UTF8.GetBytes(s);
             BinaryPrimitives.WriteUInt64LittleEndian(lenBuf, (ulong)b.Length);
             ms.Write(lenBuf);
             ms.Write(b);
@@ -452,18 +830,28 @@ internal static class Program
     }
 
     private static async Task<int> IngestUnicodeViaRunnerAsync()
+        => await IngestViaRunnerAsync(new UnicodeDecomposer(), "/vault/Data/Unicode", skipLayerCheck: true);
+
+    private static async Task<int> IngestISO639Async()
+        => await IngestViaRunnerAsync(new ISODecomposer(), "/vault/Data/ISO639", skipLayerCheck: false);
+
+    private static async Task<int> IngestViaRunnerAsync(
+        IDecomposer dec, string ecosystemPath, bool skipLayerCheck)
     {
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         var writer = new NpgsqlSubstrateWriter(ds);
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader);
-        var dec = new UnicodeDecomposer();
 
-        Console.WriteLine($"ingest unicode via IngestRunner → {ConnString} ...");
+        Console.WriteLine($"ingest {dec.SourceName} via IngestRunner → {ConnString} ...");
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(
             dec,
-            IngestRunOptions.Default with { SkipLayerOrderingCheck = true },
+            IngestRunOptions.Default with
+            {
+                SkipLayerOrderingCheck = skipLayerCheck,
+                EcosystemPath = ecosystemPath,
+            },
             CancellationToken.None);
         sw.Stop();
 

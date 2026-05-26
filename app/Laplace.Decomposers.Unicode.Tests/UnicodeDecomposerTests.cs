@@ -89,7 +89,8 @@ public sealed class UnicodeDecomposerTests
         var writer = new CapturingWriter();
         await dec.InitializeAsync(Context(writer));
 
-        Assert.Single(writer.Captured);
+        // Two intents: (1) type/kind bootstrap, (2) classifier entities
+        Assert.Equal(2, writer.Captured.Count);
         var boot = writer.Captured[0];
 
         // Source entity declared as a Source-typed entity.

@@ -55,6 +55,9 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "trajectory_build")]
     internal static partial int TrajectoryBuild(Hash128* entityHashes, nuint n, double* outXyzm);
 
+    [LibraryImport(Library, EntryPoint = "trajectory_build_rle")]
+    internal static partial int TrajectoryBuildRle(Hash128* constituents, nuint n, double* outXyzm, nuint* outVertexCount);
+
     [LibraryImport(Library, EntryPoint = "trajectory_constituents")]
     internal static partial int TrajectoryConstituents(double* trajectoryXyzm, nuint nPoints, Hash128* outHashes, nuint outCap);
 

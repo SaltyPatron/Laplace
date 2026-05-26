@@ -14,7 +14,8 @@ public sealed record IngestRunOptions(
     IProgress<IngestProgress>? Progress,
     string?                    CheckpointPathOverride = null,
     bool                       AbortOnTransientExhaustion = false,
-    bool                       SkipLayerOrderingCheck = false)
+    bool                       SkipLayerOrderingCheck = false,
+    string?                    EcosystemPath = null)
 {
     public static IngestRunOptions Default { get; } = new(
         DecomposerOptions:        DecomposerOptions.Default,

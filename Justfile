@@ -167,6 +167,7 @@ db-reset:
 # Loses ALL substrate data. Run 'just db-up' afterward to rebuild.
 db-nuke:
     cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- nuke
+    rm -rf /tmp/laplace-ingest
 
 # Generate a new timestamped migration file in db/migrations/
 migrate-new name:

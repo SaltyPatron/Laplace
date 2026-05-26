@@ -90,6 +90,38 @@ public static partial class NativeInterop
         nuint queriesPerKv, nuint topkPerRow,
         QkPair* outPairs, int* outCounts, nuint outCapPerHead);
 
+    // === Tensor decomposition ===
+
+    /// <summary>
+    /// Energy-truncated thin SVD of a row-major f32 matrix A [m × n].
+    /// Keeps the minimal rank r such that ‖A − Aᵣ‖_F ≤ relErrTol·‖A‖_F
+    /// (Eckart-Young). relErrTol=0 ⇒ full rank. The substrate's no-flat-threshold
+    /// significance selector: retained rank adapts per tensor to its own spectrum.
+    /// U: [m × kmax] row-major (first r cols), S: [kmax] (first r), Vt: [kmax × n]
+    /// (first r rows). kmax must be ≥ min(m,n). Returns 0 ok, -1 bad args,
+    /// -2 if LAPACK/MKL unavailable, or a positive LAPACK info on failure.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "tensor_svd_truncate")]
+    public static unsafe partial int TensorSvdTruncate(
+        float* A, nuint m, nuint n,
+        double relErrTol,
+        nuint* outRank,
+        float* U, float* S, float* Vt, nuint kmax);
+
+    /// <summary>
+    /// E·Wᵀ token→feature projection scorer (ADR 0056 interior-role math_function:
+    /// V/O/GATES/UP/DOWN). For each token, top-k feature dims by |（E·Wᵀ)[token,dim]|.
+    /// E_bf16: [nVocab × dModel] BF16; W: [nOut × dModel] f32 (output×input).
+    /// outPairs: QueryIdx=token, KeyIdx=feature dim, Score=projection value.
+    /// Returns pairs written, -1 bad args, -2 if MKL unavailable.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "compute_static_projection_scores")]
+    public static unsafe partial int ComputeStaticProjectionScores(
+        ushort* E_bf16, nuint nVocab, nuint dModel,
+        float* W, nuint nOut,
+        nuint topkPerRow,
+        QkPair* outPairs, nuint outCap);
+
     // === GGUF writer ===
 
     [LibraryImport(Library, EntryPoint = "gguf_writer_create",
@@ -107,6 +139,10 @@ public static partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "gguf_writer_add_metadata_f32",
         StringMarshalling = StringMarshalling.Utf8)]
     public static partial int GgufWriterAddMetadataF32(IntPtr w, string key, float value);
+
+    [LibraryImport(Library, EntryPoint = "gguf_writer_add_metadata_bool",
+        StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int GgufWriterAddMetadataBool(IntPtr w, string key, int value);
 
     [LibraryImport(Library, EntryPoint = "gguf_writer_add_metadata_str_array_packed",
         StringMarshalling = StringMarshalling.Utf8)]
