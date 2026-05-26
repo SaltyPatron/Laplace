@@ -7,27 +7,25 @@ alwaysApply: true
 
 Chat context is volatile. **Issues + ADRs + git** are the durable record (no `STATE.md`).
 
-## Session start (when user names a chunk or issue)
+## Agent obligations (not the user’s job)
 
-1. `just anchor <N>` (or `just issue N`) — issue body, git head, hard stops, prereq summary.
-2. If `.laplace-session` exists, hooks also seed `.cursor/anchor.md` on sessionStart.
-3. After **context compaction**, read `.cursor/anchor.md` first, then re-run `just anchor <N>`.
-4. Post a **3-line anchor** before coding:
-   - Issue # and title
-   - This turn’s single subtask
-   - Verification command you will run when done
+When the user names an issue (#N), says “continue #N”, or scope clearly implies a chunk:
+
+1. **You** run `just anchor N` (or `just issue N`) as the first action — never ask the user to run it.
+2. Post a **3-line anchor** before coding: issue + title, this turn’s subtask, verify command you will run.
+3. After **context compaction**, read `.cursor/anchor.md`, re-run `just anchor N`, then continue — user does not re-brief you.
+
+`.laplace-session` is optional convenience for hooks; if missing, take issue # from the user’s message.
 
 ## During work
 
-- Tick issue subtasks via `gh issue edit` when the user’s cadence expects it (see `CLAUDE.md` → Cadence).
+- Tick issue subtasks via `gh issue edit` when cadence expects it (see `CLAUDE.md` → Cadence).
 - If scope expands, **stop** and surface the decision — do not silently absorb new requirements.
 
-## User prompt patterns that reduce error rate
+## What the user provides
 
-Ask the user (or they can lead with):
+- Issue # and subtask (or “continue #N”)
+- Mode when relevant: implement / verify-only / explain-only
+- `Do not touch: <paths>` when needed
 
-- `Issue #N — subtask: <exact checkbox text>`
-- `Verify only` vs `Implement` vs `Explain only`
-- `Do not touch: <paths>`
-
-When the user says “continue”, assume **same issue #** until they change it; re-fetch the issue if the thread is long.
+When the user says “continue”, assume **same issue #** until they change it.

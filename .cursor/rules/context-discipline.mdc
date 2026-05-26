@@ -20,9 +20,9 @@ Compressed context is the default. Treat memory of prior turns as unreliable; re
 
 ## When context is thin
 
-1. Re-open the GitHub issue body (`gh issue view N`) or the user’s stated acceptance criteria.
-2. Re-read only the **minimum** canon: `RULES.md` hard stops + the relevant `DESIGN.md` section — not the whole repo.
-3. Delegate broad codebase search to an `explore` subagent; keep the parent thread anchored to issue # and criteria.
+1. Run `just anchor N` (do not ask the user to).
+2. Re-read `.cursor/anchor.md` if compaction may have occurred.
+3. Delegate broad codebase search to an `explore` subagent; keep the parent thread on issue # and criteria.
 
 ## Forbidden shortcuts (drive most user-visible errors)
 

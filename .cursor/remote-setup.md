@@ -21,14 +21,9 @@ Do **not** enable Docker Desktop MCP / `MCP_DOCKER` — it merges many tool pack
 | DB | `just query '...'` |
 | Session anchor | `just anchor <issue#>` |
 
-## Session file
+## Session file (optional)
 
-```bash
-cp .laplace-session.example .laplace-session
-# edit ISSUE= and MODE=
-```
-
-Hooks read `.laplace-session` on **sessionStart** and **preCompact**.
+Agents take issue # from your message and run `just anchor N` themselves. `.laplace-session` only helps hooks if you want a default issue before you type.
 
 ## Terminal auto-approve (optional)
 
