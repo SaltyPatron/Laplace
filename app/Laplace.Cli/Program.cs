@@ -825,27 +825,32 @@ internal static class Program
         Console.WriteLine($"  physicalities total   : {phys,9:N0}");
         Console.WriteLine($"  └ UnicodeDecomposer CONTENT : {content,9:N0}");
 
-        // Show a concrete row: U+0041 'A'.
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"SELECT encode(p.entity_id,'hex'), e.tier,
-                                   ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord),
-                                   encode(p.hilbert_index,'hex')
-                            FROM laplace.physicalities p JOIN laplace.entities e ON e.id = p.entity_id
-                            WHERE p.source_id = @s AND p.kind = 1 AND p.entity_id = @e";
-        cmd.Parameters.AddWithValue("s", UnicodeDecomposer.Source.ToBytes());
-        // entity id of 'A' = BLAKE3-128 of UTF-8 "A"
-        cmd.Parameters.AddWithValue("e", Hash128.Blake3(new byte[] { 0x41 }).ToBytes());
-        await using var rdr = await cmd.ExecuteReaderAsync();
-        if (await rdr.ReadAsync())
+        // Show a concrete row: U+0041 'A'. Scoped block so cmd + rdr dispose
+        // before the next conn-using Scalar call (a leaked reader on the shared
+        // conn surfaces as NpgsqlOperationInProgressException — sees as commit
+        // be99495's CI failure).
         {
-            Console.WriteLine("  sample U+0041 'A':");
-            Console.WriteLine($"    entity id : {rdr.GetString(0)}  tier={rdr.GetInt16(1)}");
-            Console.WriteLine($"    coord     : ({rdr.GetDouble(2):F6}, {rdr.GetDouble(3):F6}, {rdr.GetDouble(4):F6}, {rdr.GetDouble(5):F6})");
-            Console.WriteLine($"    hilbert   : {rdr.GetString(6)}");
-        }
-        else
-        {
-            Console.WriteLine("  (no CONTENT physicality for U+0041 yet — run seed-unicode)");
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"SELECT encode(p.entity_id,'hex'), e.tier,
+                                       ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord),
+                                       encode(p.hilbert_index,'hex')
+                                FROM laplace.physicalities p JOIN laplace.entities e ON e.id = p.entity_id
+                                WHERE p.source_id = @s AND p.kind = 1 AND p.entity_id = @e";
+            cmd.Parameters.AddWithValue("s", UnicodeDecomposer.Source.ToBytes());
+            // entity id of 'A' = BLAKE3-128 of UTF-8 "A"
+            cmd.Parameters.AddWithValue("e", Hash128.Blake3(new byte[] { 0x41 }).ToBytes());
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            if (await rdr.ReadAsync())
+            {
+                Console.WriteLine("  sample U+0041 'A':");
+                Console.WriteLine($"    entity id : {rdr.GetString(0)}  tier={rdr.GetInt16(1)}");
+                Console.WriteLine($"    coord     : ({rdr.GetDouble(2):F6}, {rdr.GetDouble(3):F6}, {rdr.GetDouble(4):F6}, {rdr.GetDouble(5):F6})");
+                Console.WriteLine($"    hilbert   : {rdr.GetString(6)}");
+            }
+            else
+            {
+                Console.WriteLine("  (no CONTENT physicality for U+0041 yet — run seed-unicode)");
+            }
         }
 
         long modelAtts = await Scalar(
