@@ -54,6 +54,7 @@ set(EXT_SQL_MODULES
     sql/07_cascade.sql.in
     sql/08_sp_trajectory_ops.sql.in
     sql/09_brin_tier_ops.sql.in
+    sql/10_bootstrap.sql.in
     sql/11_entities_exist_bitmap.sql.in
 )
 

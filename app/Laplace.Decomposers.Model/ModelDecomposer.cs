@@ -36,17 +36,17 @@ public sealed class ModelDecomposer : IDecomposer
     public static readonly Hash128 ScalarTypeId =
         Hash128.OfCanonical("substrate/type/Scalar/v1");
 
-    /* Transformer-family attestation kinds */
-    public static readonly Hash128 EmbedsKind        = Hash128.OfCanonical("substrate/kind/EMBEDS/v1");
+    /* Transformer-family attestation kinds emitted by the v0.1 codec.
+     * EMBEDS / OUTPUT_PROJECTS removed — embed_tokens / lm_head are
+     * PROJECTION-class physicalities. K_PROJECTS removed — substrate
+     * aggregates joint Q+K via Q_PROJECTS. NORMALIZES removed —
+     * per-(layer, role, dim) is recipe content per ADR 0056 Phase 2. */
     public static readonly Hash128 QProjectsKind     = Hash128.OfCanonical("substrate/kind/Q_PROJECTS/v1");
-    public static readonly Hash128 KProjectsKind     = Hash128.OfCanonical("substrate/kind/K_PROJECTS/v1");
     public static readonly Hash128 VProjectsKind     = Hash128.OfCanonical("substrate/kind/V_PROJECTS/v1");
     public static readonly Hash128 OProjectsKind     = Hash128.OfCanonical("substrate/kind/O_PROJECTS/v1");
     public static readonly Hash128 GatesKind         = Hash128.OfCanonical("substrate/kind/GATES/v1");
     public static readonly Hash128 UpProjectsKind    = Hash128.OfCanonical("substrate/kind/UP_PROJECTS/v1");
     public static readonly Hash128 DownProjectsKind  = Hash128.OfCanonical("substrate/kind/DOWN_PROJECTS/v1");
-    public static readonly Hash128 NormalizesKind    = Hash128.OfCanonical("substrate/kind/NORMALIZES/v1");
-    public static readonly Hash128 OutputProjectsKind= Hash128.OfCanonical("substrate/kind/OUTPUT_PROJECTS/v1");
     public static readonly Hash128 TokenMapsToKind   = Hash128.OfCanonical("substrate/kind/TOKEN_MAPS_TO/v1");
 
     /* Recipe attestation kinds */
@@ -64,16 +64,12 @@ public sealed class ModelDecomposer : IDecomposer
 
     private static readonly LlamaWeightExtractor.KindIds ExtractorKinds = new()
     {
-        Embeds        = EmbedsKind,
         QProjects     = QProjectsKind,
-        KProjects     = KProjectsKind,
         VProjects     = VProjectsKind,
         OProjects     = OProjectsKind,
         Gates         = GatesKind,
         UpProjects    = UpProjectsKind,
         DownProjects  = DownProjectsKind,
-        Normalizes    = NormalizesKind,
-        OutputProjects= OutputProjectsKind,
     };
 
     private readonly string _modelDir;
@@ -92,27 +88,43 @@ public sealed class ModelDecomposer : IDecomposer
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
 
-        boot.AddType("Text");
         boot.AddType("Model_Recipe");
         boot.AddType("Model_Tokenizer");
         boot.AddType("Scalar");
         boot.AddType("Architecture");
+
+        /* Codepoint / Grapheme / Word / Sentence / Document type entities are
+         * substrate-canonical text-tier types used by TextEntityBuilder for any
+         * text decomposition (TextDecomposer + HashComposer). They're seeded
+         * by 10_bootstrap.sql.in at install — every text-using decomposer
+         * (UnicodeDecomposer, this one, future WordNet/UD/Wiktionary/etc.)
+         * references the same type IDs.
+         *
+         * Text type alias kept for the canonical name `substrate/type/Text/v1`
+         * used by tokenizer entity rows (separate from the tier-typed entities
+         * TextEntityBuilder emits; matches LlamaTokenizerParser's existing
+         * `textTypeId` parameter). */
+        boot.AddType("Text");
+
         /* Model_Feature type removed — feature-dim entities were conventional-AI
          * smuggling; the corrected codec uses PROJECTION physicalities for the
          * token-axis tensors (embed_tokens, lm_head) and token×token typed
          * attestations for interior tensors via self-bilinear E·W·Wᵀ·Eᵀ. */
 
-        /* EMBEDS kind removed — embed_tokens is now a per-token PROJECTION
-         * physicality, not a per-cell token×feature attestation. */
+        /* Kinds emitted as token×token attestations by the v0.1 codec:
+         *   EMBEDS removed — embed_tokens is a PROJECTION physicality.
+         *   OUTPUT_PROJECTS removed — lm_head is a PROJECTION_OUTPUT physicality.
+         *   K_PROJECTS removed — substrate aggregates joint Q+K via Q_PROJECTS.
+         *   NORMALIZES removed — per-(layer, role, dim) is recipe content per
+         *                        ADR 0056 Phase 2; the substrate-canonical
+         *                        carrying mechanism is recipe-entity text
+         *                        content (M-next). */
         boot.AddKind("Q_PROJECTS");
-        boot.AddKind("K_PROJECTS");
         boot.AddKind("V_PROJECTS");
         boot.AddKind("O_PROJECTS");
         boot.AddKind("GATES");
         boot.AddKind("UP_PROJECTS");
         boot.AddKind("DOWN_PROJECTS");
-        boot.AddKind("NORMALIZES");
-        boot.AddKind("OUTPUT_PROJECTS");
         boot.AddKind("TOKEN_MAPS_TO");
         boot.AddKind("HAS_HIDDEN_SIZE");
         boot.AddKind("HAS_NUM_LAYERS");

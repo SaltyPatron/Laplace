@@ -63,16 +63,12 @@ public sealed class LlamaWeightExtractor
 
     public sealed class KindIds
     {
-        public required Hash128 Embeds         { get; init; }
         public required Hash128 QProjects      { get; init; }
-        public required Hash128 KProjects      { get; init; }
         public required Hash128 VProjects      { get; init; }
         public required Hash128 OProjects      { get; init; }
         public required Hash128 Gates          { get; init; }
         public required Hash128 UpProjects     { get; init; }
         public required Hash128 DownProjects   { get; init; }
-        public required Hash128 Normalizes     { get; init; }
-        public required Hash128 OutputProjects { get; init; }
     }
 
     public LlamaWeightExtractor(
@@ -231,21 +227,17 @@ public sealed class LlamaWeightExtractor
         foreach (var c in BuildQkAttestationBatches(uAccum,  vocabSize, _kinds.UpProjects,   "up_projects"))   { yield return c; await Task.Yield(); }
         foreach (var c in BuildQkAttestationBatches(dnAccum, vocabSize, _kinds.DownProjects, "down_projects")) { yield return c; await Task.Yield(); }
 
-        /* NORMALIZES per-(layer, role, dim) attestations. Per layer we have
-         * input_layernorm.weight and post_attention_layernorm.weight, each a
-         * [dModel] f32 vector of per-dim scale factors. Plus a final
-         * model.norm.weight. For each dim emit ONE attestation with subject =
-         * model entity, kind = NORMALIZES, object = canonical scalar-value
-         * entity (Blake3 of the IEEE-754 f32 bits' string representation
-         * decomposed via codepoints — same value ⇒ same entity across
-         * sources, Universal T0), context = canonical context entity per
-         * (layer, role, dim). Rating = the f32 value scaled to fp1e9
-         * (T10 Scalar-Valued per ADR 0044 — rating IS the value). */
-        foreach (var c in BuildNormalizesAttestationBatches(refMap, dModel))
-        {
-            yield return c;
-            await Task.Yield();
-        }
+        /* NORMALIZES per-(layer, role, dim) is NOT a substrate attestation in
+         * v0.1. Per ADR 0056 Phase 2: per-position attribution (which layer /
+         * role / dim) is RECIPE CONTENT — carried in the model recipe entity's
+         * text/JSON content, not as per-attestation context_id. The earlier
+         * NORMALIZES emission with context_id = (layer, role, dim) was
+         * conventional pattern-matching, explicitly rejected by the ADR.
+         *
+         * v0.1 synthesis fills norm tensors with identity 1.0 (RMSNorm acts
+         * as pass-through). Proper NORMALIZES carrying via recipe content is
+         * an M-next design once the recipe-content-as-substrate-knowledge
+         * surface is fleshed out. */
 
         /* NORMALIZES (per-dim layernorm scale) deferred — recipe-level metadata, not
          * a token-pair claim. Future emission would attach to the recipe entity. */
@@ -603,104 +595,6 @@ public sealed class LlamaWeightExtractor
             }
         }
         return result;
-    }
-
-    /* Canonical (layer, role, dim) context entity for NORMALIZES — same
-     * naming on both sides of the codec (ingest emits, synthesis queries). */
-    public static Hash128 LayerNormContextId(int layer, string role, int dim) =>
-        Hash128.OfCanonical($"substrate/context/layer_norm/{layer}/{role}/dim_{dim}/v1");
-
-    /* Canonical scalar-value entity from an IEEE-754 f32 bit pattern. Two
-     * sources emitting the same value reference the same entity (Universal
-     * T0: the bit-pattern string decomposes through codepoints; this
-     * canonical naming makes the cross-source dedup explicit). */
-    public static Hash128 ScalarValueEntityId(float value) =>
-        Hash128.OfCanonical($"substrate/scalar/f32_bits/{BitConverter.SingleToUInt32Bits(value):x8}/v1");
-
-    /* NORMALIZES emission for v0.1 codec: per-(layer, role, dim) f32 scale
-     * value as one attestation. (22 layers × 2 roles + 1 final) × 2048 dims
-     * = 92,160 attestations per TinyLlama-class ingest. */
-    private IEnumerable<SubstrateChange> BuildNormalizesAttestationBatches(
-        Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
-        int dModel,
-        int batchSize = 4096)
-    {
-        var slots = new List<(int layer, string role, string tensorName)>(_recipe.NumLayers * 2 + 1);
-        for (int L = 0; L < _recipe.NumLayers; L++)
-        {
-            slots.Add((L, "input_layernorm",         $"model.layers.{L}.input_layernorm.weight"));
-            slots.Add((L, "post_attention_layernorm", $"model.layers.{L}.post_attention_layernorm.weight"));
-        }
-        slots.Add((-1, "model_norm", "model.norm.weight"));
-
-        /* Heap-allocate the attestation-id buffer once; Span overlay reused
-         * per row. stackalloc inside the per-dim loop would trip CA2014 and
-         * doesn't survive yield boundaries in this iterator. */
-        byte[] idBufArr = new byte[16 * 5];
-        SubstrateChangeBuilder? b = null;
-        int inBatch = 0;
-        int slotIdx = 0;
-        foreach (var (layer, role, tensorName) in slots)
-        {
-            slotIdx++;
-            if (!refMap.ContainsKey(tensorName)) continue;
-            float[] scale = LoadNormScaleVector(refMap, tensorName, dModel);
-            for (int d = 0; d < dModel; d++)
-            {
-                var ctxId = LayerNormContextId(layer, role, d);
-                var valEntityId = ScalarValueEntityId(scale[d]);
-                /* Rating = the scalar value at fp1e9 (T10 Scalar-Valued).
-                 * Bypass AttestationFactory because the factory derives rating
-                 * from tier priors; for T10 the rating IS the value. */
-                long ratingFp1e9 = (long)Math.Round((double)scale[d] * 1e9);
-
-                Span<byte> idBuf = idBufArr.AsSpan();
-                _sourceId.WriteBytes(idBuf.Slice(0, 16));           // (model entity as subject)
-                _kinds.Normalizes.WriteBytes(idBuf.Slice(16, 16));
-                valEntityId.WriteBytes(idBuf.Slice(32, 16));
-                _sourceId.WriteBytes(idBuf.Slice(48, 16));
-                ctxId.WriteBytes(idBuf.Slice(64, 16));
-                var attId = Hash128.Blake3(idBuf);
-
-                if (b is null)
-                {
-                    b = new SubstrateChangeBuilder(_sourceId,
-                        $"normalizes/slot_{slotIdx}/batch_{inBatch / batchSize}",
-                        entityCapacity: 0, physicalityCapacity: 0,
-                        attestationCapacity: batchSize);
-                }
-
-                b.AddAttestation(new AttestationRow(
-                    Id: attId,
-                    SubjectId: _sourceId,
-                    KindId: _kinds.Normalizes,
-                    ObjectId: valEntityId,
-                    SourceId: _sourceId,
-                    ContextId: ctxId,
-                    RatingFp1e9: ratingFp1e9,
-                    RdFp1e9: 1L,                  // T10: rating-is-the-value; RD is measurement uncertainty
-                    VolatilityFp1e9: 1L,
-                    LastObservedAtUnixUs: 0,
-                    ObservationCount: 1));
-
-                if (++inBatch >= batchSize)
-                {
-                    yield return b.Build();
-                    b = null;
-                    inBatch = 0;
-                }
-            }
-        }
-        if (b != null) yield return b.Build();
-    }
-
-    private float[] LoadNormScaleVector(
-        Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
-        string tensorName, int dModel)
-    {
-        /* RMSNorm scale tensors are f32 in source; some are bf16. LoadRawBF16AsF32
-         * handles both by reading the dtype tag and converting if needed. */
-        return LoadRawBF16AsF32(refMap, tensorName, dModel);
     }
 
 }

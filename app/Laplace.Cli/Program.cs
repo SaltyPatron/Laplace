@@ -319,10 +319,12 @@ internal static class Program
         /* WdnT is [interm × dModel]; HF down_proj is [dModel × interm] — transpose at write. */
         Console.WriteLine($"    interior reconstruction in {swPre.Elapsed.TotalSeconds:F1}s");
 
-        Console.WriteLine($"  loading NORMALIZES per-(layer, role, dim) scales...");
-        var normVecs = await QueryNormalizesPerDimAsync(
-            ds, ModelDecomposer.Source, recipe.NumLayers, dModel);
-        Console.WriteLine($"    {normVecs.Count} norm vectors recovered");
+        /* Norms default to identity 1.0 — per ADR 0056 Phase 2, per-(layer,
+         * role, dim) norm scales are recipe content, not per-attestation
+         * context. The substrate-native carrying mechanism for recipe-tier
+         * model parameters (configs, hyperparameters, per-layer scalars) is
+         * recipe-entity text content. M-next once that surface is fleshed
+         * out; v0.1 synthesis uses identity 1.0 (RMSNorm pass-through). */
 
         // 5. Create GGUF writer and add metadata
         var gguf = SynthInterop.GgufWriterCreate(outputPath);
@@ -365,26 +367,11 @@ internal static class Program
             }
             else if (ggmlName.EndsWith("_norm.weight", StringComparison.Ordinal))
             {
-                /* Identify (layer, role) from the GGML name:
-                 *   blk.{L}.attn_norm.weight  → (L, "input_layernorm")
-                 *   blk.{L}.ffn_norm.weight   → (L, "post_attention_layernorm")
-                 *   output_norm.weight        → (-1, "model_norm") */
-                (int layer, string role)? slot = null;
-                if (ggmlName == "output_norm.weight") slot = (-1, "model_norm");
-                else if (ggmlName.StartsWith("blk.", StringComparison.Ordinal))
-                {
-                    int dotIdx = ggmlName.IndexOf('.', 4);
-                    if (dotIdx > 4 && int.TryParse(ggmlName.AsSpan(4, dotIdx - 4), out int L))
-                    {
-                        string rest = ggmlName.Substring(dotIdx + 1);
-                        if (rest == "attn_norm.weight")     slot = (L, "input_layernorm");
-                        else if (rest == "ffn_norm.weight") slot = (L, "post_attention_layernorm");
-                    }
-                }
-                float[]? scaleVec = (slot is { } s
-                    && normVecs.TryGetValue(s, out var v)) ? v : null;
-                FillPerDimNorm(tensorBytes, scaleVec, (int)Math.Max(rows, cols), dtype);
-                label = scaleVec != null ? $"norm ← NORMALIZES{slot}" : "norm ← identity 1.0";
+                /* Identity 1.0 (RMSNorm pass-through). Per-(layer, role, dim)
+                 * norm scales are recipe content per ADR 0056 Phase 2;
+                 * carrying them via recipe entity is M-next. */
+                FillPerDimNorm(tensorBytes, scale: null, (int)Math.Max(rows, cols), dtype);
+                label = "norm ← identity 1.0";
             }
             else if (ggmlName.StartsWith("blk.", StringComparison.Ordinal))
             {
@@ -1004,65 +991,6 @@ internal static class Program
     }
 
     /// <summary>
-    /// Query NORMALIZES attestations for this model source and return per-
-    /// (layer, role) full dModel-length scale vectors. Layer = -1 represents
-    /// the final `model.norm`. Maps the context-id back to (layer, role, dim)
-    /// by reconstructing the canonical context entity ids.
-    /// </summary>
-    private static async Task<Dictionary<(int layer, string role), float[]>>
-        QueryNormalizesPerDimAsync(NpgsqlDataSource ds, Hash128 modelSourceId,
-                                    int numLayers, int dModel)
-    {
-        var result = new Dictionary<(int layer, string role), float[]>();
-        var ctxToSlot = new Dictionary<Hash128, (int layer, string role, int dim)>();
-        var roles = new[] { "input_layernorm", "post_attention_layernorm" };
-        for (int L = 0; L < numLayers; L++)
-        {
-            foreach (var role in roles)
-            {
-                for (int d = 0; d < dModel; d++)
-                {
-                    var ctxId = LlamaWeightExtractor.LayerNormContextId(L, role, d);
-                    ctxToSlot[ctxId] = (L, role, d);
-                }
-            }
-        }
-        for (int d = 0; d < dModel; d++)
-        {
-            var ctxId = LlamaWeightExtractor.LayerNormContextId(-1, "model_norm", d);
-            ctxToSlot[ctxId] = (-1, "model_norm", d);
-        }
-
-        await using var conn = await ds.OpenConnectionAsync();
-        await using var cmd  = conn.CreateCommand();
-        cmd.CommandText =
-            """
-            SELECT context_id, rating
-            FROM laplace.attestations
-            WHERE source_id = $1 AND kind_id = $2 AND context_id IS NOT NULL
-            """;
-        cmd.Parameters.AddWithValue(modelSourceId.ToBytes());
-        cmd.Parameters.AddWithValue(ModelDecomposer.NormalizesKind.ToBytes());
-
-        await using var rdr = await cmd.ExecuteReaderAsync();
-        while (await rdr.ReadAsync())
-        {
-            var ctxBytes = (byte[])rdr[0];
-            long rating  = rdr.GetInt64(1);
-            var ctxId = Hash128FromBytes(ctxBytes);
-            if (!ctxToSlot.TryGetValue(ctxId, out var slot)) continue;
-
-            var key = (slot.layer, slot.role);
-            if (!result.TryGetValue(key, out var vec))
-            {
-                vec = new float[dModel];
-                result[key] = vec;
-            }
-            vec[slot.dim] = (float)(rating / 1e9);
-        }
-        return result;
-    }
-
     /// <summary>Write a row-major double[rows × cols] matrix to tensorBytes at
     /// the GGUF dtype (0=f32, 2=bf16).</summary>
     private static void WriteDoubleMatrixToTensorBytes(
@@ -1507,14 +1435,12 @@ internal static class Program
 
         (string label, Hash128 kind)[] modelKinds =
         [
-            ("EMBEDS",          ModelDecomposer.EmbedsKind),
             ("Q_PROJECTS",      ModelDecomposer.QProjectsKind),
             ("V_PROJECTS",      ModelDecomposer.VProjectsKind),
             ("O_PROJECTS",      ModelDecomposer.OProjectsKind),
             ("GATES",           ModelDecomposer.GatesKind),
             ("UP_PROJECTS",     ModelDecomposer.UpProjectsKind),
             ("DOWN_PROJECTS",   ModelDecomposer.DownProjectsKind),
-            ("OUTPUT_PROJECTS", ModelDecomposer.OutputProjectsKind),
         ];
         foreach (var (label, kind) in modelKinds)
         {

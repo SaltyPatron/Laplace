@@ -33,6 +33,16 @@ DECLARE
     pk_content_id        bytea;
     pk_buildblock_id     bytea;
     pk_projection_id     bytea;
+    pk_projection_out_id bytea;
+
+    /* Universal text-tier type entities (used by TextEntityBuilder from ANY
+     * text-using decomposer — Unicode T0 seed, this codec's tokenizer pass,
+     * future ladder sources). Substrate-canonical: same id everywhere. */
+    type_codepoint_id    bytea;
+    type_grapheme_id     bytea;
+    type_word_id         bytea;
+    type_sentence_id     bytea;
+    type_document_id     bytea;
 
     /* Kind-value-tier entity ids (ADR 0044 Part A; T1..T11). */
     tier_t1_id  bytea;  tier_t2_id  bytea;  tier_t3_id  bytea;
@@ -110,10 +120,41 @@ BEGIN
     pk_buildblock_id := public.laplace_hash128_blake3('substrate/physicality_kind/BUILDING_BLOCK/v1'::bytea);
     pk_projection_id := public.laplace_hash128_blake3('substrate/physicality_kind/PROJECTION/v1'::bytea);
 
+    pk_projection_out_id := public.laplace_hash128_blake3('substrate/physicality_kind/PROJECTION_OUTPUT/v1'::bytea);
+
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
-        (pk_content_id,    META_TIER, physicality_kind_id, subscan_id),
-        (pk_buildblock_id, META_TIER, physicality_kind_id, subscan_id),
-        (pk_projection_id, META_TIER, physicality_kind_id, subscan_id);
+        (pk_content_id,        META_TIER, physicality_kind_id, subscan_id),
+        (pk_buildblock_id,     META_TIER, physicality_kind_id, subscan_id),
+        (pk_projection_id,     META_TIER, physicality_kind_id, subscan_id),
+        (pk_projection_out_id, META_TIER, physicality_kind_id, subscan_id);
+
+    /* === Stage 2.5: substrate-canonical text-tier type entities ===========
+     *
+     * Per GLOSSARY tier ladder and ADR 0047 TextDecomposer: every
+     * text-using decomposer (UnicodeDecomposer at seed time; the model
+     * codec's tokenizer pass; future linguistic-ladder sources; the prompt
+     * ingest path) emits entities at tiers 0..6 with the per-tier type IDs
+     * resolved by TextEntityBuilder.TierTypeId. The tier-type entities
+     * themselves must exist in `entities` before any tier-N entity
+     * referencing them is inserted (entities_type_fk).
+     *
+     * Codepoint is also emitted at runtime by UnicodeDecomposer's
+     * InitializeAsync (idempotent under ON CONFLICT DO NOTHING). The
+     * higher tiers (Grapheme/Word/Sentence/Document) have no runtime
+     * bootstrap path — they're substrate canon. */
+
+    type_codepoint_id := public.laplace_hash128_blake3('substrate/type/Codepoint/v1'::bytea);
+    type_grapheme_id  := public.laplace_hash128_blake3('substrate/type/Grapheme/v1'::bytea);
+    type_word_id      := public.laplace_hash128_blake3('substrate/type/Word/v1'::bytea);
+    type_sentence_id  := public.laplace_hash128_blake3('substrate/type/Sentence/v1'::bytea);
+    type_document_id  := public.laplace_hash128_blake3('substrate/type/Document/v1'::bytea);
+
+    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+        (type_codepoint_id, META_TIER, type_id, subscan_id),
+        (type_grapheme_id,  META_TIER, type_id, subscan_id),
+        (type_word_id,      META_TIER, type_id, subscan_id),
+        (type_sentence_id,  META_TIER, type_id, subscan_id),
+        (type_document_id,  META_TIER, type_id, subscan_id);
 
     /* === Stage 3.5: source-trust-class entities (ADR 0044 Part B) ====== *
      * We seed these BEFORE attestation kinds because the kind-tier entities
