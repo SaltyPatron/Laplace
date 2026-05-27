@@ -25,9 +25,22 @@ namespace Laplace.Cli;
 
 internal static class Program
 {
-    private static string ConnString =>
-        Environment.GetEnvironmentVariable("LAPLACE_DB")
-        ?? "Host=/var/run/postgresql;Username=laplace_admin;Database=laplace;Include Error Detail=true";
+    private static string ConnString
+    {
+        get
+        {
+            // Always include error detail — without it Npgsql redacts the FK-violating
+            // row's data ("DETAIL: Detail redacted as it may contain sensitive data"),
+            // which makes substrate-debug iteration painful. The substrate's per-row
+            // bytea(16) values are not actually sensitive — they're content-addressed
+            // hashes of public substrate canon.
+            var s = Environment.GetEnvironmentVariable("LAPLACE_DB")
+                ?? "Host=/var/run/postgresql;Username=laplace_admin;Database=laplace";
+            if (!s.Contains("Include Error Detail", StringComparison.OrdinalIgnoreCase))
+                s += ";Include Error Detail=true";
+            return s;
+        }
+    }
 
     private static async Task<int> Main(string[] args)
     {
