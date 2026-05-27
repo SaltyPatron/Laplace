@@ -109,8 +109,16 @@ public sealed class TextEntityBuilder
                 var child = _tree.GetNode(node.FirstChildIdx + ci);
                 childIds[ci] = child.Id;
             }
-            trajectoryXyzm = Trajectory.BuildRle(childIds);
+            var rle = Trajectory.BuildRle(childIds);
             nConstituents  = (int)node.ChildCount;
+            // PostGIS LINESTRING requires ≥ 2 vertices (= 8 doubles, 4 dims × 2 points).
+            // When RLE collapses every child into a single vertex (i.e. one constituent,
+            // or N identical constituents), the result isn't a valid LINESTRING — emit
+            // trajectory NULL. The entity is still reconstructable: its ID is BLAKE3 of
+            // the canonical content, which encodes the single-constituent decomposition
+            // unambiguously. Same convention as T0 atoms (trajectory NULL — no
+            // constituents to walk).
+            trajectoryXyzm = rle.Length >= 8 ? rle : null;
         }
 
         double cx, cy, cz, cm;
