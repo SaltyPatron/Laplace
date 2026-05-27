@@ -383,6 +383,18 @@ jobs:
                    has_schema_privilege('laplace_readonly', 'laplace', 'USAGE');
           " | sed 's/^/  /'
 
+      - name: Seed Unicode T0 (substrate's content-addressing leaf alphabet)
+        # Codepoint entities + CONTENT physicalities are universal substrate
+        # leaves used by every text-using decomposer (model tokenizer ingest,
+        # future ladder sources, the prompt path). Seeded ONCE per CI run as
+        # part of DB deploy so downstream jobs (dotnet-test, model-codec) all
+        # see the same fully-seeded substrate.
+        run: |
+          export LD_LIBRARY_PATH="$(pwd)/build/engine/core:$(pwd)/build/engine/dynamics:$(pwd)/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
+          export LAPLACE_PERFCACHE_BIN="$(pwd)/build/engine/core/perfcache/laplace_t0_perfcache.bin"
+          cd app
+          dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- seed-unicode
+
   # ------------------------------------------------------------------
   # dotnet-test — run the C# test suites (closes #258: CI previously only
   # `dotnet build`, so C# regressions passed silently). Needs db-deploy so
@@ -486,28 +498,6 @@ jobs:
           set -u
           printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|LD_LIBRARY_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
           echo "PATH=$PATH" >> "$GITHUB_ENV"
-
-      - name: Reset DB to clean state (drop laplace + recreate via DbUp)
-        # Every model-codec run starts from a fresh DB. Without this, a
-        # failed run leaves partial substrate state behind and the next
-        # run's idempotency check spuriously short-circuits OR synthesize
-        # operates on half-ingested data. Decoupling makes the model
-        # codec self-contained: drop + recreate + apply migrations on
-        # every invocation.
-        run: |
-          cd app
-          dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- nuke
-          dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- up
-
-      - name: Seed Unicode T0 (substrate's content-addressing leaf alphabet)
-        # Codec needs codepoint entities + CONTENT physicalities as Procrustes
-        # anchors during model ingest. Universal T0 only — no linguistic
-        # ladder; the v0.1 codec is model-only per Anthony's design.
-        run: |
-          export LD_LIBRARY_PATH="$(pwd)/build/engine/core:$(pwd)/build/engine/dynamics:$(pwd)/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
-          export LAPLACE_PERFCACHE_BIN="$(pwd)/build/engine/core/perfcache/laplace_t0_perfcache.bin"
-          cd app
-          dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- seed-unicode
 
       - name: Model codec CI (ingest + substrate synthesize → GGUF)
         run: |
