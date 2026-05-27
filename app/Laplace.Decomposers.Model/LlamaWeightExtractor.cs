@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Engine.Synthesis;    // QkPair
 using Laplace.SubstrateCRUD;
@@ -35,23 +36,12 @@ public sealed class LlamaWeightExtractor
      * exceeds the Npgsql command timeout; stream in bounded batches like the vocab path. */
     private const int AttBatchSize = 4096;
 
-    /* Glicko-2 initial state for T9 model-weight attestation tier per STANDARDS. */
-    private const long kRatingFp1e9     = 1_400_000_000_000L;
-    private const long kRdFp1e9         =   350_000_000_000L;
-    private const long kVolatilityFp1e9 =        60_000_000L;
-
     private readonly string _safetensorsPath;
     private readonly LlamaRecipeExtractor.RecipeInfo _recipe;
     private readonly IReadOnlyList<SafetensorsContainerParser.TensorReference> _refs;
     private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
     private readonly KindIds _kinds;
     private readonly Hash128 _sourceId;
-
-    /* Content-based feature entity IDs, computed from actual weight columns/rows.
-     * Populated at the start of ExtractAsync before first emit. */
-    private Hash128[] _residIds = null!;
-    private Hash128[] _kvIds    = null!;
-    private Hash128[] _ffnIds   = null!;
 
     public sealed class KindIds
     {
@@ -108,34 +98,6 @@ public sealed class LlamaWeightExtractor
         ushort[] E_bf16 = LoadRawBF16(refMap, "model.embed_tokens.weight",
                                        (long)vocabSize * dModel);
 
-        /* Content-based feature entity IDs: Blake3(weight bytes) — no model name, no
-         * axis label, no dim index.  Same weight values → same entity across models.
-         * Load layer-0 v_proj and gate_proj to anchor kv and ffn feature IDs. */
-        ushort[] v0_bf16 = refMap.ContainsKey("model.layers.0.self_attn.v_proj.weight")
-            ? LoadRawBF16(refMap, "model.layers.0.self_attn.v_proj.weight", (long)kvDim * dModel)
-            : new ushort[(long)kvDim * dModel];
-        ushort[] g0_bf16 = refMap.ContainsKey("model.layers.0.mlp.gate_proj.weight")
-            ? LoadRawBF16(refMap, "model.layers.0.mlp.gate_proj.weight", (long)interm * dModel)
-            : new ushort[(long)interm * dModel];
-
-        _residIds = new Hash128[dModel];
-        _kvIds    = new Hash128[kvDim];
-        _ffnIds   = new Hash128[interm];
-        for (int d = 0; d < dModel; d++)  _residIds[d] = ModelFeatureEntityId.FromBF16Column(E_bf16, vocabSize, dModel, d);
-        for (int d = 0; d < kvDim;  d++)  _kvIds[d]    = ModelFeatureEntityId.FromBF16Row(v0_bf16, dModel, d);
-        for (int d = 0; d < interm; d++)  _ffnIds[d]   = ModelFeatureEntityId.FromBF16Row(g0_bf16, dModel, d);
-
-        /* Phase 0 (ADR 0056): feature/hidden-dim entities — the object/subject axis the
-         * interior roles attest against. Emitted FIRST so attestations referencing them
-         * satisfy the FK ordering. */
-        yield return BuildFeatureEntities(dModel, kvDim, interm);
-        await Task.Yield();
-
-        /* Identity [dModel × dModel] — lets the projection scorer read a token-indexed
-         * matrix's per-cell magnitudes directly (M·Iᵀ = M); reused for EMBEDS + OUTPUT. */
-        float[] identity = new float[(long)dModel * dModel];
-        for (int d = 0; d < dModel; d++) identity[(long)d * dModel + d] = 1.0f;
-
         /* embed_tokens → per-token PROJECTION physicality (ADR 0056 corrected codec).
          * The embedding row is the model's per-token address in N-d; we align
          * the N-d source frame onto each token entity's Unicode-canonical
@@ -165,14 +127,18 @@ public sealed class LlamaWeightExtractor
         }
         foreach (var c in BuildQkAttestationBatches(qkAccum, vocabSize, _kinds.QProjects, "q_projects")) { yield return c; await Task.Yield(); }
 
-        /* Interior projection roles: E·Wᵀ token→feature magnitude, aggregated across layers.
-         * V/GATES/UP keep the token as subject; O/DOWN flip (feature is the subject per
-         * ADR 0056's (hidden_dim, text) orientation). */
-        var vAccum  = new Dictionary<(uint t, uint d), (double sum, int count)>(1 << 20);
-        var oAccum  = new Dictionary<(uint t, uint d), (double sum, int count)>(1 << 20);
-        var gAccum  = new Dictionary<(uint t, uint d), (double sum, int count)>(1 << 20);
-        var uAccum  = new Dictionary<(uint t, uint d), (double sum, int count)>(1 << 20);
-        var dnAccum = new Dictionary<(uint t, uint d), (double sum, int count)>(1 << 20);
+        /* Interior tensors V / O / GATES / UP / DOWN — token×token via self-bilinear
+         * E·W·Wᵀ·Eᵀ per ADR 0056 corrected codec (per ADR 0044 Part C: tokens are
+         * substrate entities; non-token "feature dim" entities were conventional-AI
+         * smuggling). Reuses compute_static_qk_scores via AccumulateQkScoresBatch with
+         * Wq = Wk = W (the QK formula collapses to self-similarity in W's projection
+         * space). Within-model aggregated across layers via the shared (uint q, uint k)
+         * → (sum, count) accumulator per ADR 0056 Phase 2. */
+        var vAccum  = new Dictionary<(uint q, uint k), (double sum, int count)>(1 << 20);
+        var oAccum  = new Dictionary<(uint q, uint k), (double sum, int count)>(1 << 20);
+        var gAccum  = new Dictionary<(uint q, uint k), (double sum, int count)>(1 << 20);
+        var uAccum  = new Dictionary<(uint q, uint k), (double sum, int count)>(1 << 20);
+        var dnAccum = new Dictionary<(uint q, uint k), (double sum, int count)>(1 << 20);
 
         for (int layer = 0; layer < _recipe.NumLayers; layer++)
         {
@@ -181,49 +147,61 @@ public sealed class LlamaWeightExtractor
 
             if (refMap.ContainsKey(p + "self_attn.v_proj.weight"))
             {
+                /* v_proj is [kvDim × dModel] — single self-bilinear head over the full
+                 * value-projection space (within-model aggregation collapses kv-head
+                 * structure into the per-(token, kind, token) row anyway). */
                 float[] w = LoadRawBF16AsF32(refMap, p + "self_attn.v_proj.weight", (long)kvDim * dModel);
-                AccumulateProjectionScores(E_bf16, w, vocabSize, dModel, kvDim, vAccum);
+                AccumulateQkScoresBatch(E_bf16, w, w, vocabSize, dModel,
+                    nHeads: 1, nKvHeads: 1, headDim: kvDim, vAccum);
             }
             if (refMap.ContainsKey(p + "self_attn.o_proj.weight"))
             {
-                /* o_proj is [dModel × attnOut]; transpose to [attnOut × dModel] so E·Wᵀ = E·o_proj. */
+                /* o_proj is [dModel × attnOut]; transpose to [attnOut × dModel] for
+                 * the head-structured layout AccumulateQkScoresBatch expects. */
                 float[] w = LoadRawBF16AsF32(refMap, p + "self_attn.o_proj.weight", (long)dModel * attnOut);
-                AccumulateProjectionScores(E_bf16, Transpose(w, dModel, attnOut), vocabSize, dModel, attnOut, oAccum);
+                float[] wT = Transpose(w, dModel, attnOut);
+                AccumulateQkScoresBatch(E_bf16, wT, wT, vocabSize, dModel,
+                    nHeads: 1, nKvHeads: 1, headDim: attnOut, oAccum);
             }
             if (refMap.ContainsKey(p + "mlp.gate_proj.weight"))
             {
                 float[] w = LoadRawBF16AsF32(refMap, p + "mlp.gate_proj.weight", (long)interm * dModel);
-                AccumulateProjectionScores(E_bf16, w, vocabSize, dModel, interm, gAccum);
+                AccumulateQkScoresBatch(E_bf16, w, w, vocabSize, dModel,
+                    nHeads: 1, nKvHeads: 1, headDim: interm, gAccum);
             }
             if (refMap.ContainsKey(p + "mlp.up_proj.weight"))
             {
                 float[] w = LoadRawBF16AsF32(refMap, p + "mlp.up_proj.weight", (long)interm * dModel);
-                AccumulateProjectionScores(E_bf16, w, vocabSize, dModel, interm, uAccum);
+                AccumulateQkScoresBatch(E_bf16, w, w, vocabSize, dModel,
+                    nHeads: 1, nKvHeads: 1, headDim: interm, uAccum);
             }
             if (refMap.ContainsKey(p + "mlp.down_proj.weight"))
             {
-                /* down_proj is [dModel × interm]; transpose to [interm × dModel] so E·Wᵀ = E·down_proj. */
+                /* down_proj is [dModel × interm]; transpose to [interm × dModel]. */
                 float[] w = LoadRawBF16AsF32(refMap, p + "mlp.down_proj.weight", (long)dModel * interm);
-                AccumulateProjectionScores(E_bf16, Transpose(w, dModel, interm), vocabSize, dModel, interm, dnAccum);
+                float[] wT = Transpose(w, dModel, interm);
+                AccumulateQkScoresBatch(E_bf16, wT, wT, vocabSize, dModel,
+                    nHeads: 1, nKvHeads: 1, headDim: interm, dnAccum);
             }
             await Task.Yield();
         }
 
-        foreach (var c in BuildProjectionAttestationBatches(vAccum,  vocabSize, _kinds.VProjects,    "kv",  tokenSubject: true,  "v"))     { yield return c; await Task.Yield(); }
-        foreach (var c in BuildProjectionAttestationBatches(oAccum,  vocabSize, _kinds.OProjects,    "d",   tokenSubject: false, "o"))     { yield return c; await Task.Yield(); }
-        foreach (var c in BuildProjectionAttestationBatches(gAccum,  vocabSize, _kinds.Gates,        "ffn", tokenSubject: true,  "gates")) { yield return c; await Task.Yield(); }
-        foreach (var c in BuildProjectionAttestationBatches(uAccum,  vocabSize, _kinds.UpProjects,   "ffn", tokenSubject: true,  "up"))    { yield return c; await Task.Yield(); }
-        foreach (var c in BuildProjectionAttestationBatches(dnAccum, vocabSize, _kinds.DownProjects, "ffn", tokenSubject: false, "down"))  { yield return c; await Task.Yield(); }
+        foreach (var c in BuildQkAttestationBatches(vAccum,  vocabSize, _kinds.VProjects,    "v_projects"))    { yield return c; await Task.Yield(); }
+        foreach (var c in BuildQkAttestationBatches(oAccum,  vocabSize, _kinds.OProjects,    "o_projects"))    { yield return c; await Task.Yield(); }
+        foreach (var c in BuildQkAttestationBatches(gAccum,  vocabSize, _kinds.Gates,        "gates"))         { yield return c; await Task.Yield(); }
+        foreach (var c in BuildQkAttestationBatches(uAccum,  vocabSize, _kinds.UpProjects,   "up_projects"))   { yield return c; await Task.Yield(); }
+        foreach (var c in BuildQkAttestationBatches(dnAccum, vocabSize, _kinds.DownProjects, "down_projects")) { yield return c; await Task.Yield(); }
 
-        /* OUTPUT_PROJECTS: per-cell magnitude of lm_head → (hidden_dim, token) (feature subject). */
-        if (refMap.ContainsKey("lm_head.weight"))
-        {
-            ushort[] lm = LoadRawBF16(refMap, "lm_head.weight", (long)vocabSize * dModel);
-            var outAccum = new Dictionary<(uint t, uint d), (double sum, int count)>(1 << 20);
-            AccumulateProjectionScores(lm, identity, vocabSize, dModel, dModel, outAccum);
-            foreach (var c in BuildProjectionAttestationBatches(outAccum, vocabSize, _kinds.OutputProjects, "d", tokenSubject: false, "output")) { yield return c; await Task.Yield(); }
-        }
-        /* NORMALIZES (per-dim layernorm scale) deferred — small unary signal, not weight-bearing for the round-trip. */
+        /* OUTPUT_PROJECTS + lm_head: lm_head is [vocab × dModel]; the self-bilinear
+         * E·lm_head·lm_headᵀ·Eᵀ would materialize a vocab×vocab head — too large for
+         * the current primitive's per-head buffer. Deferred to a follow-up that emits
+         * lm_head as a second PROJECTION-class physicality (output-direction) via the
+         * same Procrustes path the embedding row uses. Schema needs a fourth
+         * PhysicalityKind value (or sub-typing convention) to coexist with the
+         * input-direction PROJECTION physicality already emitted above. */
+
+        /* NORMALIZES (per-dim layernorm scale) deferred — recipe-level metadata, not
+         * a token-pair claim. Future emission would attach to the recipe entity. */
     }
 
     /* ------------------------------------------------------------------ */
@@ -296,30 +274,36 @@ public sealed class LlamaWeightExtractor
         }
     }
 
-    /* Q_PROJECTS (token↔token): lottery-ticket → batched attestation changes. */
+    /* Token×token attestation emission via AttestationFactory (ADR 0044 priors).
+     * Drives Q_PROJECTS + the corrected V/O/GATES/UP/DOWN extractions. Routes
+     * Glicko-2 prior derivation through the shared factory — T9 tier ×
+     * AiModelProbeTier7 trust class — instead of the previous raw-weight×1e9
+     * scaling that conflated weight magnitude with rating. */
     private IEnumerable<SubstrateChange> BuildQkAttestationBatches(
         Dictionary<(uint q, uint k), (double sum, int count)> accum,
         int vocabSize, Hash128 kindId, string unitName)
     {
         var survivors = LotteryTicket(accum, vocabSize);
         var seen = new HashSet<Hash128>(survivors.Count);
-        long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
-        SubstrateChangeBuilder? b = null; int inBatch = 0, batchNo = 0;
+        SubstrateChangeBuilder? b = null;
+        int inBatch = 0;
+        int batchStart = 0, batchEnd = 0;
+        int idx = 0;
         foreach (var (qi, kj, score) in survivors)
         {
+            idx++;
             if (qi >= (uint)_tokens.Count || kj >= (uint)_tokens.Count) continue;
             var subj  = _tokens[(int)qi].EntityId;
             var obj   = _tokens[(int)kj].EntityId;
-            var attId = LlamaRecipeExtractor.ComputeAttestationId(subj, kindId, obj, _sourceId);
-            if (!seen.Add(attId)) continue;
-            b ??= new SubstrateChangeBuilder(_sourceId, $"qk/{unitName}/{batchNo}",
+            var row   = AttestationFactory.Create(subj, kindId, obj, _sourceId, null,
+                                                  KindValueTier.T9, TrustClass.AiModelProbeTier7);
+            if (!seen.Add(row.Id)) continue;
+            if (b is null) { batchStart = idx - 1; batchEnd = Math.Min(batchStart + AttBatchSize - 1, survivors.Count - 1); }
+            b ??= new SubstrateChangeBuilder(_sourceId,
+                $"{unitName}/{batchStart}..{batchEnd}",
                 entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: AttBatchSize);
-            b.AddAttestation(new AttestationRow(
-                Id: attId, SubjectId: subj, KindId: kindId, ObjectId: obj,
-                SourceId: _sourceId, ContextId: null,
-                RatingFp1e9: ScaleToRating(score), RdFp1e9: kRdFp1e9, VolatilityFp1e9: kVolatilityFp1e9,
-                LastObservedAtUnixUs: now, ObservationCount: 1));
-            if (++inBatch >= AttBatchSize) { yield return b.Build(); b = null; inBatch = 0; batchNo++; }
+            b.AddAttestation(row);
+            if (++inBatch >= AttBatchSize) { yield return b.Build(); b = null; inBatch = 0; }
         }
         if (b != null) yield return b.Build();
     }
@@ -359,97 +343,13 @@ public sealed class LlamaWeightExtractor
         return survivors;
     }
 
-    /* Model_Feature type (hidden/feature-dim entities) + content-based per-(axis,dim) id. */
-    private static readonly Hash128 ModelFeatureTypeId = Hash128.OfCanonical("substrate/type/Model_Feature/v1");
-    private Hash128 FeatureId(string axis, int dim) => axis switch
-    {
-        "d"   => _residIds[dim],
-        "kv"  => _kvIds[dim],
-        "ffn" => _ffnIds[dim],
-        _     => throw new ArgumentOutOfRangeException(nameof(axis), axis, null),
-    };
-
-    /* Phase 0 (ADR 0056): the feature/hidden-dim entities the interior roles attest against.
-     * axes: "d" = dModel hidden dims (EMBEDS/O/OUTPUT), "kv" = v_proj value dims,
-     * "ffn" = intermediate dims (gate/up/down). */
-    private SubstrateChange BuildFeatureEntities(int dModel, int kvDim, int interm)
-    {
-        int total = dModel + kvDim + interm;
-        var b = new SubstrateChangeBuilder(_sourceId, "feature/entities",
-            entityCapacity: total, physicalityCapacity: 0, attestationCapacity: 0);
-        for (int d = 0; d < dModel; d++) b.AddEntity(FeatureId("d", d),   tier: 0, ModelFeatureTypeId, firstObservedBy: _sourceId);
-        for (int d = 0; d < kvDim;  d++) b.AddEntity(FeatureId("kv", d),  tier: 0, ModelFeatureTypeId, firstObservedBy: _sourceId);
-        for (int d = 0; d < interm; d++) b.AddEntity(FeatureId("ffn", d), tier: 0, ModelFeatureTypeId, firstObservedBy: _sourceId);
-        return b.Build();
-    }
-
-    /* E·Wᵀ token→feature projection accumulator (ADR 0056 interior-role math_function).
-     * Calls the C scorer; accumulates (token, feature_dim) → (Σ value, count) for
-     * within-model aggregation across layers. */
-    private void AccumulateProjectionScores(
-        ushort[] E_bf16, float[] W_f32, int vocabSize, int dModel, int nOut,
-        Dictionary<(uint t, uint d), (double sum, int count)> accum)
-    {
-        long cap = (long)vocabSize * TopkPerRow;
-        var pairs = new QkPair[cap];
-        GCHandle hE = GCHandle.Alloc(E_bf16, GCHandleType.Pinned);
-        GCHandle hW = GCHandle.Alloc(W_f32,  GCHandleType.Pinned);
-        GCHandle hP = GCHandle.Alloc(pairs,  GCHandleType.Pinned);
-        try
-        {
-            unsafe
-            {
-                int n = SynthInterop.ComputeStaticProjectionScores(
-                    (ushort*)hE.AddrOfPinnedObject(), (nuint)vocabSize, (nuint)dModel,
-                    (float*)hW.AddrOfPinnedObject(), (nuint)nOut,
-                    (nuint)TopkPerRow,
-                    (QkPair*)hP.AddrOfPinnedObject(), (nuint)cap);
-                if (n < 0) throw new InvalidOperationException($"compute_static_projection_scores returned {n}");
-                for (int i = 0; i < n; i++)
-                {
-                    var pr  = pairs[i];
-                    var key = (pr.QueryIdx, pr.KeyIdx);
-                    if (accum.TryGetValue(key, out var e)) accum[key] = (e.sum + pr.Score, e.count + 1);
-                    else accum[key] = (pr.Score, 1);
-                }
-            }
-        }
-        finally { hE.Free(); hW.Free(); hP.Free(); }
-    }
-
-    /* Build (token↔feature) attestations from an accumulated projection matchup set.
-     * tokenSubject=true → (token, feature); false → (feature, token) (ADR 0056 axis
-     * orientation for O/DOWN/OUTPUT). The feature endpoint is a Model_Feature entity. */
-    /* Interior role (token↔feature): lottery-ticket → batched attestation changes.
-     * tokenSubject=true → (token, feature); false → (feature, token) per ADR 0056. */
-    private IEnumerable<SubstrateChange> BuildProjectionAttestationBatches(
-        Dictionary<(uint t, uint d), (double sum, int count)> accum,
-        int vocabSize, Hash128 kindId, string axis, bool tokenSubject, string unitName)
-    {
-        var survivors = LotteryTicket(accum, vocabSize);
-        var seen = new HashSet<Hash128>(survivors.Count);
-        long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
-        SubstrateChangeBuilder? b = null; int inBatch = 0, batchNo = 0;
-        foreach (var (t, d, score) in survivors)
-        {
-            if (t >= (uint)_tokens.Count) continue;
-            var tok  = _tokens[(int)t].EntityId;
-            var feat = FeatureId(axis, (int)d);
-            var subj = tokenSubject ? tok : feat;
-            var obj  = tokenSubject ? feat : tok;
-            var attId = LlamaRecipeExtractor.ComputeAttestationId(subj, kindId, obj, _sourceId);
-            if (!seen.Add(attId)) continue;
-            b ??= new SubstrateChangeBuilder(_sourceId, $"proj/{unitName}/{batchNo}",
-                entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: AttBatchSize);
-            b.AddAttestation(new AttestationRow(
-                Id: attId, SubjectId: subj, KindId: kindId, ObjectId: obj,
-                SourceId: _sourceId, ContextId: null,
-                RatingFp1e9: ScaleToRating(score), RdFp1e9: kRdFp1e9, VolatilityFp1e9: kVolatilityFp1e9,
-                LastObservedAtUnixUs: now, ObservationCount: 1));
-            if (++inBatch >= AttBatchSize) { yield return b.Build(); b = null; inBatch = 0; batchNo++; }
-        }
-        if (b != null) yield return b.Build();
-    }
+    /* Model_Feature / FeatureId / BuildFeatureEntities / AccumulateProjectionScores /
+     * BuildProjectionAttestationBatches removed — they implemented the previous
+     * "(token, feature_dim) attestation against fake feature-dim entities" shape that
+     * the ADR 0056 codec correction replaced with (a) PROJECTION physicalities for
+     * embed_tokens / lm_head and (b) self-bilinear E·W·Wᵀ·Eᵀ → token×token
+     * attestations for the interior V/O/GATES/UP/DOWN tensors. The latter flow
+     * through AccumulateQkScoresBatch + BuildQkAttestationBatches above. */
 
     /* embed_tokens → per-token PROJECTION physicality via Procrustes-aligned
      * dynamics pipeline (ADR 0056 corrected codec — replaces the previous
@@ -666,9 +566,4 @@ public sealed class LlamaWeightExtractor
         return result;
     }
 
-    /* Signed fixed-point ×1e9 — preserves sign AND magnitude exactly (BF16-faithful).
-     * The old sigmoid-of-|weight| discarded the sign and saturated the magnitude into
-     * [1000,1800], which alone made faithful reconstruction impossible. Reconstruction
-     * needs the actual value, so store it. (Magnitude for Glicko/A* = |rating|.) */
-    private static long ScaleToRating(double weight) => (long)Math.Round(weight * 1e9);
 }

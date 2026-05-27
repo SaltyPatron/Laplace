@@ -97,9 +97,13 @@ public sealed class ModelDecomposer : IDecomposer
         boot.AddType("Model_Tokenizer");
         boot.AddType("Scalar");
         boot.AddType("Architecture");
-        boot.AddType("Model_Feature");   // hidden/feature-dim entities — object axis for interior weight roles (ADR 0056)
+        /* Model_Feature type removed — feature-dim entities were conventional-AI
+         * smuggling; the corrected codec uses PROJECTION physicalities for the
+         * token-axis tensors (embed_tokens, lm_head) and token×token typed
+         * attestations for interior tensors via self-bilinear E·W·Wᵀ·Eᵀ. */
 
-        boot.AddKind("EMBEDS");
+        /* EMBEDS kind removed — embed_tokens is now a per-token PROJECTION
+         * physicality, not a per-cell token×feature attestation. */
         boot.AddKind("Q_PROJECTS");
         boot.AddKind("K_PROJECTS");
         boot.AddKind("V_PROJECTS");
