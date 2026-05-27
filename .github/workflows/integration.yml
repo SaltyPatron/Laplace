@@ -466,11 +466,14 @@ jobs:
 
   # ------------------------------------------------------------------
   # model-codec — Chunk 8 partial: idempotent ingest + substrate synthesize.
-  # Same entry point as scripts/model-codec-ci.sh (roundtrip.sh delegates).
+  # Dead last in the DAG (after regress + dotnet-test pass) so that
+  # broken substrate state from a failing test doesn't waste a model-
+  # codec run, and so that model-codec's own db-nuke at start gives every
+  # run a clean DB regardless of what prior runs left behind.
   # ------------------------------------------------------------------
   model-codec:
     name: Model codec — idempotent ingest + substrate GGUF (Chunk 8 partial)
-    needs: [db-deploy, engine, dotnet]
+    needs: [regress, dotnet-test]
     runs-on: [self-hosted, laplace]
     steps:
       - uses: actions/checkout@v4
@@ -484,7 +487,29 @@ jobs:
           printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|LD_LIBRARY_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
           echo "PATH=$PATH" >> "$GITHUB_ENV"
 
-      - name: Model codec CI (ingest idempotent + interior kinds + GGUF)
+      - name: Reset DB to clean state (drop laplace + recreate via DbUp)
+        # Every model-codec run starts from a fresh DB. Without this, a
+        # failed run leaves partial substrate state behind and the next
+        # run's idempotency check spuriously short-circuits OR synthesize
+        # operates on half-ingested data. Decoupling makes the model
+        # codec self-contained: drop + recreate + apply migrations on
+        # every invocation.
+        run: |
+          cd app
+          dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- nuke
+          dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- up
+
+      - name: Seed Unicode T0 (substrate's content-addressing leaf alphabet)
+        # Codec needs codepoint entities + CONTENT physicalities as Procrustes
+        # anchors during model ingest. Universal T0 only — no linguistic
+        # ladder; the v0.1 codec is model-only per Anthony's design.
+        run: |
+          export LD_LIBRARY_PATH="$(pwd)/build/engine/core:$(pwd)/build/engine/dynamics:$(pwd)/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
+          export LAPLACE_PERFCACHE_BIN="$(pwd)/build/engine/core/perfcache/laplace_t0_perfcache.bin"
+          cd app
+          dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- seed-unicode
+
+      - name: Model codec CI (ingest + substrate synthesize → GGUF)
         run: |
           chmod +x scripts/model-codec-ci.sh
           scripts/model-codec-ci.sh
