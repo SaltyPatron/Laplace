@@ -13,6 +13,13 @@ public enum PhysicalityKind : short
     /// <summary>Used-as-constituent view; typically no trajectory.</summary>
     BuildingBlock = 2,
 
-    /// <summary>Source-embedding-space view via Procrustes alignment.</summary>
+    /// <summary>Source-embedding-space input-direction view via Procrustes alignment
+    /// (e.g. AI-model embed_tokens row).</summary>
     Projection = 3,
+
+    /// <summary>Source-embedding-space output-direction view via Procrustes alignment
+    /// (e.g. AI-model lm_head row). Coexists with kind=Projection on the same
+    /// (entity, source) tuple under UNIQUE(entity_id, source_id, kind) when input
+    /// and output embeddings are untied (TinyLlama has tie_word_embeddings=false).</summary>
+    ProjectionOutput = 4,
 }

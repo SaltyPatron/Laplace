@@ -68,7 +68,111 @@ double sq_dist(const double* pts, std::size_t a, std::size_t b, std::size_t d) {
     return s;
 }
 
+/* Eigendecomposition core shared by laplacian_eigenmaps (k-NN graph) and
+ * laplacian_eigenmaps_from_sparse_graph (precomputed adjacency). Takes a
+ * symmetric non-negative adjacency `W`, builds the unnormalized
+ * regularized Laplacian, runs Spectra's shift-invert symmetric solver,
+ * drops the constant-function eigenvector, writes `target_dim` coordinates
+ * per node into `low_dim_out` (row-major). */
+int eigendecompose_laplacian(const SpMat& W,
+                             std::size_t  n,
+                             std::size_t  target_dim,
+                             double*      low_dim_out) {
+    /* Degrees + unnormalized Laplacian L = D − W, then regularize. */
+    Eigen::VectorXd degrees(static_cast<int>(n));
+    degrees.setZero();
+    for (int k = 0; k < W.outerSize(); ++k) {
+        double row_sum = 0.0;
+        for (SpMat::InnerIterator it(W, k); it; ++it) row_sum += it.value();
+        degrees[k] = row_sum;
+    }
+
+    std::vector<Triplet> l_triplets;
+    l_triplets.reserve(static_cast<std::size_t>(W.nonZeros()) + n);
+    for (int k = 0; k < W.outerSize(); ++k) {
+        for (SpMat::InnerIterator it(W, k); it; ++it) {
+            l_triplets.emplace_back(it.row(), it.col(), -it.value());
+        }
+    }
+    const double max_deg = degrees.maxCoeff();
+    const double epsilon = (max_deg > 0.0) ? max_deg * 1e-10 : 1e-10;
+    for (int i = 0; i < static_cast<int>(n); ++i) {
+        l_triplets.emplace_back(i, i, degrees[i] + epsilon);
+    }
+
+    SpMat L(static_cast<int>(n), static_cast<int>(n));
+    L.setFromTriplets(l_triplets.begin(), l_triplets.end());
+    L.makeCompressed();
+
+    const int nev = static_cast<int>(target_dim) + 1;
+    const int ncv = std::min(static_cast<int>(n) - 1,
+                             std::max(2 * nev + 1, 20));
+    if (ncv <= nev) return -2;
+
+    Spectra::SparseSymShiftSolve<double> op(L);
+    Spectra::SymEigsShiftSolver<Spectra::SparseSymShiftSolve<double>>
+        eigs(op, nev, ncv, 0.0);
+    eigs.init();
+    const int nconv = eigs.compute(Spectra::SortRule::LargestMagn);
+    if (eigs.info() != Spectra::CompInfo::Successful || nconv < nev) {
+        return -3;
+    }
+
+    Eigen::VectorXd evals = eigs.eigenvalues();
+    Eigen::MatrixXd evecs = eigs.eigenvectors();
+    std::vector<int> idx(static_cast<std::size_t>(evals.size()));
+    std::iota(idx.begin(), idx.end(), 0);
+    std::sort(idx.begin(), idx.end(),
+              [&evals](int a, int b) { return evals[a] < evals[b]; });
+
+    if (idx.size() < target_dim + 1) return -4;
+    for (std::size_t k = 0; k < target_dim; ++k) {
+        const int col = idx[k + 1];
+        for (std::size_t i = 0; i < n; ++i) {
+            low_dim_out[i * target_dim + k] = evecs(static_cast<Eigen::Index>(i), col);
+        }
+    }
+    return 0;
+}
+
 }  // namespace
+
+extern "C"
+int laplacian_eigenmaps_from_sparse_graph(const int*    coo_rows,
+                                          const int*    coo_cols,
+                                          const double* coo_weights,
+                                          std::size_t   nnz,
+                                          std::size_t   n,
+                                          std::size_t   target_dim,
+                                          double*       low_dim_out) {
+    if (!coo_rows || !coo_cols || !coo_weights || !low_dim_out) return -1;
+    if (n == 0 || target_dim == 0) return -2;
+    if (target_dim + 1 >= n) return -2;
+
+    std::vector<Triplet> w_triplets;
+    w_triplets.reserve(nnz);
+    for (std::size_t e = 0; e < nnz; ++e) {
+        if (coo_weights[e] <= 0.0) continue;          /* drop non-positive — substrate noise floor is 0 */
+        const int r = coo_rows[e];
+        const int c = coo_cols[e];
+        if (r < 0 || c < 0) continue;
+        if ((std::size_t)r >= n || (std::size_t)c >= n) continue;
+        w_triplets.emplace_back(r, c, coo_weights[e]);
+    }
+
+    SpMat W(static_cast<int>(n), static_cast<int>(n));
+    W.setFromTriplets(w_triplets.begin(), w_triplets.end(),
+                      [](const double& a, const double& b){ return a + b; });
+
+    /* Symmetrize: W = (W + Wᵀ) / 2 — sources may emit directed edges
+     * (e.g., Q_PROJECTS subject→object), but the Laplacian needs a
+     * symmetric adjacency. */
+    SpMat WT = SpMat(W.transpose());
+    SpMat Wsym = 0.5 * (W + WT);
+    Wsym.makeCompressed();
+
+    return eigendecompose_laplacian(Wsym, n, target_dim, low_dim_out);
+}
 
 extern "C"
 int laplacian_eigenmaps(const double* high_dim_pts,

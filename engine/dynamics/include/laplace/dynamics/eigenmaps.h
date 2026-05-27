@@ -25,6 +25,38 @@ int laplacian_eigenmaps(const double* high_dim_pts,
                         size_t        target_dim,
                         double*       low_dim_out);
 
+/* Same eigendecomposition pipeline as `laplacian_eigenmaps` but takes a
+ * precomputed sparse adjacency in COO triples (substrate's typed-edge
+ * attestation set, weighted by Glicko-2 effective μ per kind × kind-value
+ * tier × source-trust class). Skips the k-NN construction step.
+ *
+ *   coo_rows / coo_cols : length nnz; index range [0, n).
+ *   coo_weights         : length nnz; positive edge weights (Glicko-2
+ *                         effective μ scaled to a meaningful magnitude;
+ *                         negative weights are clipped to zero internally
+ *                         since the Laplacian construction requires
+ *                         non-negative adjacency).
+ *   nnz                  : number of triples (may include duplicate
+ *                         (row,col) pairs — they're summed).
+ *   n                    : number of nodes (vocab size).
+ *   target_dim           : output dimension (top eigenvectors of L,
+ *                         skipping the constant-function eigenvector).
+ *   low_dim_out          : n × target_dim, row-major.
+ *
+ * Returns:
+ *   0   on success.
+ *   -1  null input.
+ *   -2  invalid arguments (n == 0, target_dim + 1 >= n, etc.).
+ *   -3  eigensolver did not converge.
+ *   -4  degenerate input (graph too disconnected). */
+int laplacian_eigenmaps_from_sparse_graph(const int*    coo_rows,
+                                          const int*    coo_cols,
+                                          const double* coo_weights,
+                                          size_t        nnz,
+                                          size_t        n,
+                                          size_t        target_dim,
+                                          double*       low_dim_out);
+
 #ifdef __cplusplus
 }
 #endif

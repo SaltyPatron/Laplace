@@ -24,9 +24,27 @@ namespace Laplace.Decomposers.Model;
 /// </summary>
 public sealed class LlamaWeightExtractor
 {
-    /* Lottery-ticket parameters per plan defaults. */
-    private const double TopkPct    = 0.05;
-    private const int    TopkPerRow = 32;
+    /* Sparsity is substrate-native — but as a noise-floor filter on the
+     * aggregate, not as an arbitrary top-K%. Cells whose aggregated
+     * signal across (layer, head, expert) instances falls below
+     * `AggregateNoiseFloor` are training artifacts / gradient jitter
+     * the model itself would compute as near-zero no-ops. We drop them
+     * at ingest; synthesis emits zero where substrate has no signal
+     * (R4 sparse-by-construction). Conventional-AI top-K% defensive
+     * filter is gone — magnitude vs jitter is the substrate-native
+     * distinction.
+     *
+     * `QkPerRowCap` is a PRE-ALLOCATED MEMORY BOUND on the C
+     * primitive's per-row pair buffer — not a semantic top-K. Without
+     * it the engine would need vocab × vocab × nHeads × 16B = ~16 GB
+     * per batch for TinyLlama (vocab=32K, nHeads=32). With 256 per
+     * row × 32K × 32 heads × 16B = ~4 GB peak, memory fits. The
+     * SVD-based candidate selection in compute_static_qk_scores keeps
+     * the strongest pre-aggregation pairs per (query, layer, head);
+     * within-model aggregation then sums across instances and the
+     * noise-floor filter applies to the aggregate. */
+    private const int    QkPerRowCap         = 256;
+    private const double AggregateNoiseFloor = 1e-4;
 
     /* Rank of the identity projection used for EMBEDS proximity. */
     private const int EmbedProjectDim = 64;
@@ -106,10 +124,31 @@ public sealed class LlamaWeightExtractor
          * emitted by TextDecomposer through LlamaTokenizerParser). Each
          * token gets one PROJECTION physicality row at substrate-canonical
          * 4D — not a per-cell attestation, not a feature-dim relation. */
-        foreach (var c in BuildEmbeddingPhysicalityBatches(E_bf16, vocabSize, dModel))
+        foreach (var c in BuildProjectionPhysicalityBatches(
+                              E_bf16, vocabSize, dModel,
+                              PhysicalityKind.Projection, "embed_tokens"))
         {
             yield return c;
             await Task.Yield();
+        }
+
+        /* lm_head → per-token PROJECTION_OUTPUT physicality (kind=4). Same
+         * Procrustes-aligned pipeline as embed_tokens but output-direction;
+         * coexists with the input-direction PROJECTION row under
+         * UNIQUE(entity_id, source_id, kind). Required because TinyLlama
+         * has tie_word_embeddings=false — untied lm_head needs its own
+         * substrate-native representation. */
+        if (refMap.ContainsKey("lm_head.weight"))
+        {
+            ushort[] lm_bf16 = LoadRawBF16(refMap, "lm_head.weight",
+                                            (long)vocabSize * dModel);
+            foreach (var c in BuildProjectionPhysicalityBatches(
+                                  lm_bf16, vocabSize, dModel,
+                                  PhysicalityKind.ProjectionOutput, "lm_head"))
+            {
+                yield return c;
+                await Task.Yield();
+            }
         }
 
         /* Q_PROJECTS: static QK bilinear E·Wq·Wkᵀ·Eᵀ, aggregated across all layers/heads. */
@@ -192,13 +231,21 @@ public sealed class LlamaWeightExtractor
         foreach (var c in BuildQkAttestationBatches(uAccum,  vocabSize, _kinds.UpProjects,   "up_projects"))   { yield return c; await Task.Yield(); }
         foreach (var c in BuildQkAttestationBatches(dnAccum, vocabSize, _kinds.DownProjects, "down_projects")) { yield return c; await Task.Yield(); }
 
-        /* OUTPUT_PROJECTS + lm_head: lm_head is [vocab × dModel]; the self-bilinear
-         * E·lm_head·lm_headᵀ·Eᵀ would materialize a vocab×vocab head — too large for
-         * the current primitive's per-head buffer. Deferred to a follow-up that emits
-         * lm_head as a second PROJECTION-class physicality (output-direction) via the
-         * same Procrustes path the embedding row uses. Schema needs a fourth
-         * PhysicalityKind value (or sub-typing convention) to coexist with the
-         * input-direction PROJECTION physicality already emitted above. */
+        /* NORMALIZES per-(layer, role, dim) attestations. Per layer we have
+         * input_layernorm.weight and post_attention_layernorm.weight, each a
+         * [dModel] f32 vector of per-dim scale factors. Plus a final
+         * model.norm.weight. For each dim emit ONE attestation with subject =
+         * model entity, kind = NORMALIZES, object = canonical scalar-value
+         * entity (Blake3 of the IEEE-754 f32 bits' string representation
+         * decomposed via codepoints — same value ⇒ same entity across
+         * sources, Universal T0), context = canonical context entity per
+         * (layer, role, dim). Rating = the f32 value scaled to fp1e9
+         * (T10 Scalar-Valued per ADR 0044 — rating IS the value). */
+        foreach (var c in BuildNormalizesAttestationBatches(refMap, dModel))
+        {
+            yield return c;
+            await Task.Yield();
+        }
 
         /* NORMALIZES (per-dim layernorm scale) deferred — recipe-level metadata, not
          * a token-pair claim. Future emission would attach to the recipe entity. */
@@ -219,9 +266,10 @@ public sealed class LlamaWeightExtractor
     {
         int queriesPerKv = nHeads / nKvHeads;
 
-        /* Pre-allocate output: [nHeads × vocabSize × TopkPerRow] QkPairs.
-         * Each head writes at offset h * capPerHead into the flat array. */
-        long capPerHead = (long)vocabSize * TopkPerRow;
+        /* Pre-allocate output: [nHeads × vocabSize × QkPerRowCap] QkPairs.
+         * Each head writes at offset h * capPerHead into the flat array.
+         * QkPerRowCap is a memory bound, not a semantic top-K. */
+        long capPerHead = (long)vocabSize * QkPerRowCap;
         var  pairsFlat  = new QkPair[nHeads * capPerHead];
         var  counts     = new int[nHeads];
 
@@ -240,11 +288,12 @@ public sealed class LlamaWeightExtractor
                 QkPair* pairsPtr = (QkPair*)pairsHandle.AddrOfPinnedObject();
                 int*    cntPtr   = (int*)   cntHandle.AddrOfPinnedObject();
 
+                /* QkPerRowCap is a memory bound, not a semantic top-K. */
                 int rc = SynthInterop.ComputeStaticQkScoresBatch(
                     ePtr, (nuint)vocabSize, (nuint)dModel,
                     wqPtr, wkPtr,
                     (nuint)nHeads, (nuint)nKvHeads, (nuint)headDim,
-                    (nuint)queriesPerKv, (nuint)TopkPerRow,
+                    (nuint)queriesPerKv, (nuint)QkPerRowCap,
                     pairsPtr, cntPtr, (nuint)capPerHead);
 
                 if (rc != 0)
@@ -283,7 +332,7 @@ public sealed class LlamaWeightExtractor
         Dictionary<(uint q, uint k), (double sum, int count)> accum,
         int vocabSize, Hash128 kindId, string unitName)
     {
-        var survivors = LotteryTicket(accum, vocabSize);
+        var survivors = NoiseFloorFlatten(accum);
         var seen = new HashSet<Hash128>(survivors.Count);
         SubstrateChangeBuilder? b = null;
         int inBatch = 0;
@@ -308,37 +357,23 @@ public sealed class LlamaWeightExtractor
         if (b != null) yield return b.Build();
     }
 
-    /* Lottery-ticket sparsity (ADR 0007 / RULES R3): per-tensor top-k% across the whole
-     * matchup set, then per-subject top-k. No flat threshold. Shared by the QK (token↔token)
-     * and projection (token↔feature) builders. Tuple element names differ at call sites but
-     * the underlying (uint,uint) key type is identical, so both accum shapes bind here. */
-    private List<(uint a, uint b, float score)> LotteryTicket(
-        Dictionary<(uint a, uint b), (double sum, int count)> accum, int rowHint)
+    /* Substrate-native noise-floor filter on the AGGREGATE signal.
+     * Within-model aggregation across (layer, head, expert) instances has
+     * already happened in the accumulator dictionary — each entry's
+     * (sum, count) compresses many per-instance observations into one
+     * tuple. Drop entries whose mean magnitude is below jitter
+     * (`AggregateNoiseFloor`) — those are training artifacts the model
+     * itself would output as near-zero. Emit every retained tuple — no
+     * top-K%, no per-row top-K, no rank cutoff. */
+    private List<(uint a, uint b, float score)> NoiseFloorFlatten(
+        Dictionary<(uint a, uint b), (double sum, int count)> accum)
     {
-        var means = new (uint a, uint b, double mean)[accum.Count];
-        int idx = 0;
-        foreach (var (key, (sum, count)) in accum) means[idx++] = (key.a, key.b, sum / count);
-
-        int keepN = Math.Max(1, (int)(means.Length * TopkPct));
-        if (keepN < means.Length)
+        var survivors = new List<(uint a, uint b, float score)>(accum.Count);
+        foreach (var (key, (sum, count)) in accum)
         {
-            Array.Sort(means, (a, b) => Math.Abs(b.mean).CompareTo(Math.Abs(a.mean)));
-            means = means.AsSpan(0, keepN).ToArray();
-        }
-
-        var byRow = new Dictionary<uint, List<(uint b, double mean)>>(rowHint);
-        foreach (var (a, b, mean) in means)
-        {
-            if (!byRow.TryGetValue(a, out var list)) { list = []; byRow[a] = list; }
-            list.Add((b, mean));
-        }
-
-        var survivors = new List<(uint a, uint b, float score)>(byRow.Count * TopkPerRow);
-        foreach (var (a, list) in byRow)
-        {
-            list.Sort((x, y) => Math.Abs(y.mean).CompareTo(Math.Abs(x.mean)));
-            int take = Math.Min(TopkPerRow, list.Count);
-            for (int i = 0; i < take; i++) survivors.Add((a, list[i].b, (float)list[i].mean));
+            double mean = sum / count;
+            if (Math.Abs(mean) < AggregateNoiseFloor) continue;
+            survivors.Add((key.a, key.b, (float)mean));
         }
         return survivors;
     }
@@ -351,14 +386,18 @@ public sealed class LlamaWeightExtractor
      * attestations for the interior V/O/GATES/UP/DOWN tensors. The latter flow
      * through AccumulateQkScoresBatch + BuildQkAttestationBatches above. */
 
-    /* embed_tokens → per-token PROJECTION physicality via Procrustes-aligned
-     * dynamics pipeline (ADR 0056 corrected codec — replaces the previous
-     * per-cell EMBEDS attestation emission). One PROJECTION row per token,
-     * 4D coord = Procrustes(N-d embed row → substrate-canonical S³ frame),
-     * anchored on token entities that already have CONTENT 4D coords from
-     * TextDecomposer's tier-tree composition. */
-    private IEnumerable<SubstrateChange> BuildEmbeddingPhysicalityBatches(
+    /* embed_tokens / lm_head → per-token PROJECTION / PROJECTION_OUTPUT
+     * physicality via Procrustes-aligned dynamics pipeline. One row per
+     * token, 4D coord = Procrustes(N-d row → substrate-canonical S³ frame),
+     * anchored on token entities' CONTENT 4D coords from TextDecomposer's
+     * tier-tree composition. Same procedure for both directions; the kind
+     * parameter selects PROJECTION (kind=3, input direction, embed_tokens)
+     * vs PROJECTION_OUTPUT (kind=4, output direction, lm_head). Both rows
+     * coexist on the same (entity, source) tuple under the schema's
+     * UNIQUE(entity_id, source_id, kind) since the kind values differ. */
+    private IEnumerable<SubstrateChange> BuildProjectionPhysicalityBatches(
         ushort[] E_bf16, int vocabSize, int dModel,
+        PhysicalityKind kind, string tensorLabel,
         int batchSize = 4096)
     {
         /* 1. Collect tokens with CONTENT 4D anchors (set by LlamaTokenizerParser
@@ -450,20 +489,20 @@ public sealed class LlamaWeightExtractor
                 var entityId = _tokens[t].EntityId;
                 var hilbert = Hilbert128.Encode(out4d);
                 var physId = PhysicalityId.Compute(
-                    entityId, _sourceId, PhysicalityKind.Projection,
+                    entityId, _sourceId, kind,
                     out4d[0], out4d[1], out4d[2], out4d[3],
                     ReadOnlySpan<double>.Empty);
 
                 if (b is null) { batchStart = t; }
                 b ??= new SubstrateChangeBuilder(_sourceId,
-                    $"embed_tokens/{batchStart}..{Math.Min(batchStart + batchSize - 1, n - 1)}",
+                    $"{tensorLabel}/{batchStart}..{Math.Min(batchStart + batchSize - 1, n - 1)}",
                     entityCapacity: 0, physicalityCapacity: batchSize, attestationCapacity: 0);
 
                 b.AddPhysicality(new PhysicalityRow(
                     Id: physId,
                     EntityId: entityId,
                     SourceId: _sourceId,
-                    Kind: PhysicalityKind.Projection,
+                    Kind: kind,
                     CoordX: out4d[0], CoordY: out4d[1], CoordZ: out4d[2], CoordM: out4d[3],
                     HilbertIndex: hilbert,
                     TrajectoryXyzm: null, NConstituents: 0,
@@ -564,6 +603,104 @@ public sealed class LlamaWeightExtractor
             }
         }
         return result;
+    }
+
+    /* Canonical (layer, role, dim) context entity for NORMALIZES — same
+     * naming on both sides of the codec (ingest emits, synthesis queries). */
+    public static Hash128 LayerNormContextId(int layer, string role, int dim) =>
+        Hash128.OfCanonical($"substrate/context/layer_norm/{layer}/{role}/dim_{dim}/v1");
+
+    /* Canonical scalar-value entity from an IEEE-754 f32 bit pattern. Two
+     * sources emitting the same value reference the same entity (Universal
+     * T0: the bit-pattern string decomposes through codepoints; this
+     * canonical naming makes the cross-source dedup explicit). */
+    public static Hash128 ScalarValueEntityId(float value) =>
+        Hash128.OfCanonical($"substrate/scalar/f32_bits/{BitConverter.SingleToUInt32Bits(value):x8}/v1");
+
+    /* NORMALIZES emission for v0.1 codec: per-(layer, role, dim) f32 scale
+     * value as one attestation. (22 layers × 2 roles + 1 final) × 2048 dims
+     * = 92,160 attestations per TinyLlama-class ingest. */
+    private IEnumerable<SubstrateChange> BuildNormalizesAttestationBatches(
+        Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
+        int dModel,
+        int batchSize = 4096)
+    {
+        var slots = new List<(int layer, string role, string tensorName)>(_recipe.NumLayers * 2 + 1);
+        for (int L = 0; L < _recipe.NumLayers; L++)
+        {
+            slots.Add((L, "input_layernorm",         $"model.layers.{L}.input_layernorm.weight"));
+            slots.Add((L, "post_attention_layernorm", $"model.layers.{L}.post_attention_layernorm.weight"));
+        }
+        slots.Add((-1, "model_norm", "model.norm.weight"));
+
+        /* Heap-allocate the attestation-id buffer once; Span overlay reused
+         * per row. stackalloc inside the per-dim loop would trip CA2014 and
+         * doesn't survive yield boundaries in this iterator. */
+        byte[] idBufArr = new byte[16 * 5];
+        SubstrateChangeBuilder? b = null;
+        int inBatch = 0;
+        int slotIdx = 0;
+        foreach (var (layer, role, tensorName) in slots)
+        {
+            slotIdx++;
+            if (!refMap.ContainsKey(tensorName)) continue;
+            float[] scale = LoadNormScaleVector(refMap, tensorName, dModel);
+            for (int d = 0; d < dModel; d++)
+            {
+                var ctxId = LayerNormContextId(layer, role, d);
+                var valEntityId = ScalarValueEntityId(scale[d]);
+                /* Rating = the scalar value at fp1e9 (T10 Scalar-Valued).
+                 * Bypass AttestationFactory because the factory derives rating
+                 * from tier priors; for T10 the rating IS the value. */
+                long ratingFp1e9 = (long)Math.Round((double)scale[d] * 1e9);
+
+                Span<byte> idBuf = idBufArr.AsSpan();
+                _sourceId.WriteBytes(idBuf.Slice(0, 16));           // (model entity as subject)
+                _kinds.Normalizes.WriteBytes(idBuf.Slice(16, 16));
+                valEntityId.WriteBytes(idBuf.Slice(32, 16));
+                _sourceId.WriteBytes(idBuf.Slice(48, 16));
+                ctxId.WriteBytes(idBuf.Slice(64, 16));
+                var attId = Hash128.Blake3(idBuf);
+
+                if (b is null)
+                {
+                    b = new SubstrateChangeBuilder(_sourceId,
+                        $"normalizes/slot_{slotIdx}/batch_{inBatch / batchSize}",
+                        entityCapacity: 0, physicalityCapacity: 0,
+                        attestationCapacity: batchSize);
+                }
+
+                b.AddAttestation(new AttestationRow(
+                    Id: attId,
+                    SubjectId: _sourceId,
+                    KindId: _kinds.Normalizes,
+                    ObjectId: valEntityId,
+                    SourceId: _sourceId,
+                    ContextId: ctxId,
+                    RatingFp1e9: ratingFp1e9,
+                    RdFp1e9: 1L,                  // T10: rating-is-the-value; RD is measurement uncertainty
+                    VolatilityFp1e9: 1L,
+                    LastObservedAtUnixUs: 0,
+                    ObservationCount: 1));
+
+                if (++inBatch >= batchSize)
+                {
+                    yield return b.Build();
+                    b = null;
+                    inBatch = 0;
+                }
+            }
+        }
+        if (b != null) yield return b.Build();
+    }
+
+    private float[] LoadNormScaleVector(
+        Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
+        string tensorName, int dModel)
+    {
+        /* RMSNorm scale tensors are f32 in source; some are bf16. LoadRawBF16AsF32
+         * handles both by reading the dtype tag and converting if needed. */
+        return LoadRawBF16AsF32(refMap, tensorName, dModel);
     }
 
 }

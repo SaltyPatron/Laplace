@@ -54,6 +54,21 @@ public static partial class NativeInterop
         nuint kNeighbors, nuint targetDim,
         double* lowDimOut);
 
+    /// <summary>
+    /// Laplacian eigenmaps with a precomputed sparse graph in COO triples
+    /// (substrate's typed-edge attestation set; weights via Glicko-2
+    /// effective μ). Skips the k-NN construction step. Drops non-positive
+    /// weights (substrate noise floor). Symmetrizes internally so directed
+    /// edges (e.g. Q_PROJECTS) yield a symmetric Laplacian. Returns 0 on
+    /// success, -1 null, -2 invalid args, -3 eigensolver failure, -4
+    /// degenerate input.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "laplacian_eigenmaps_from_sparse_graph")]
+    public static unsafe partial int LaplacianEigenmapsFromSparseGraph(
+        int* cooRows, int* cooCols, double* cooWeights,
+        nuint nnz, nuint n, nuint targetDim,
+        double* lowDimOut);
+
     // === Gram-Schmidt ===
 
     /// <summary>

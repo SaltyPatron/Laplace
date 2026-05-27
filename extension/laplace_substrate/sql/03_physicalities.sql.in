@@ -31,12 +31,12 @@ CREATE TABLE physicalities (
 );
 
 COMMENT ON TABLE physicalities IS
-    'Per-source per-kind 4D representations. One-to-many entity -> physicality. Same entity may have many physicalities (one per source x per kind). kind axis: 1=CONTENT (decomposition view; trajectory populated), 2=BUILDING_BLOCK (used-as-constituent view), 3=PROJECTION (source-embedding-space view via Procrustes alignment).';
+    'Per-source per-kind 4D representations. One-to-many entity -> physicality. Same entity may have many physicalities (one per source x per kind). kind axis: 1=CONTENT (decomposition view; trajectory populated), 2=BUILDING_BLOCK (used-as-constituent view), 3=PROJECTION (source-embedding-space input-direction view via Procrustes alignment), 4=PROJECTION_OUTPUT (source-embedding-space output-direction view, e.g. lm_head; allows untied input/output embeddings to coexist on the same entity under UNIQUE(entity_id, source_id, kind)).';
 
 COMMENT ON COLUMN physicalities.id IS
     'Content-addressed BLAKE3-128 of canonical (entity_id, source_id, kind, coord, trajectory) bytes. Lets attestations / higher-tier physicalities reference a specific physicality if needed.';
 COMMENT ON COLUMN physicalities.kind IS
-    'Physicality kind: 1=CONTENT, 2=BUILDING_BLOCK, 3=PROJECTION (extensible). Values mirror substrate-canonical PhysicalityKind entities (bootstrapped per ADR 0042 Stage 2).';
+    'Physicality kind: 1=CONTENT, 2=BUILDING_BLOCK, 3=PROJECTION (input-direction), 4=PROJECTION_OUTPUT (output-direction; lm_head). Extensible. Values mirror substrate-canonical PhysicalityKind entities (bootstrapped per ADR 0042 Stage 2).';
 COMMENT ON COLUMN physicalities.coord IS
     'Content: 4D geometric position of this entity under this source/kind view. PostGIS geometry with Z+M = 4D per RULES R1.';
 COMMENT ON COLUMN physicalities.hilbert_index IS

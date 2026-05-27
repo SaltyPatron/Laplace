@@ -18,6 +18,7 @@ using Laplace.Ingestion;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Logging.Abstractions;
+using DynamicsInterop = Laplace.Engine.Dynamics.NativeInterop;
 using SynthInterop = Laplace.Engine.Synthesis.NativeInterop;
 
 namespace Laplace.Cli;
@@ -248,16 +249,88 @@ internal static class Program
             return Fail($"arch_template_required_tensors returned {tensorCount}");
         Console.WriteLine($"  arch template: {tensorCount} tensor slots");
 
-        // 3. Query attestations from substrate
+        // 3. Open substrate connection
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
 
-        // 4. Create GGUF writer and add metadata
+        // 4. Pre-compute spectral embeddings + interior tensors from substrate.
+        //    The recipe drives the dispatch in the manifest loop below; the
+        //    heavy substrate queries + dynamics-pipeline calls happen ONCE up
+        //    front (one E per direction; one W per kind; broadcast across all
+        //    layers per ADR 0056 within-model aggregation).
+        int vocabSize = recipe.VocabSize;
+        int dModel    = recipe.HiddenSize;
+        int nHeads    = recipe.NumHeads;
+        int nKvHeads  = recipe.NumKvHeads;
+        int headDim   = dModel / nHeads;
+        int interm    = recipe.IntermediateSize;
+        double lambda = 1e-3;
+
+        Console.WriteLine($"  building cross-kind input adjacency from substrate...");
+        var swPre = Stopwatch.StartNew();
+        var crossKindAdj = await BuildSubstrateAdjacencyAsync(
+            ds, ModelDecomposer.Source, entityToToken, kindFilter: null);
+        Console.WriteLine($"    input adjacency: {crossKindAdj.Rows.Length} edges in {swPre.Elapsed.TotalSeconds:F1}s");
+
+        swPre.Restart();
+        Console.WriteLine($"  spectral embedding (token_embd, dim={dModel})...");
+        var EInput = ComputeSpectralEmbedding(crossKindAdj, vocabSize, dModel);
+        Console.WriteLine($"    token_embd spectral embedding in {swPre.Elapsed.TotalSeconds:F1}s");
+
+        swPre.Restart();
+        Console.WriteLine($"  output-direction adjacency from PROJECTION_OUTPUT physicalities...");
+        var outAdj = await BuildOutputDirectionAdjacencyAsync(
+            ds, ModelDecomposer.Source, entityToToken);
+        Console.WriteLine($"    output adjacency: {outAdj.Rows.Length} edges in {swPre.Elapsed.TotalSeconds:F1}s");
+
+        double[] EOutput;
+        if (outAdj.Rows.Length > 0)
+        {
+            swPre.Restart();
+            Console.WriteLine($"  spectral embedding (output.weight, dim={dModel})...");
+            EOutput = ComputeSpectralEmbedding(outAdj, vocabSize, dModel);
+            Console.WriteLine($"    output.weight spectral embedding in {swPre.Elapsed.TotalSeconds:F1}s");
+        }
+        else
+        {
+            /* No lm_head ingest → v0 fallback: copy of input embedding
+             * (tied-weights). Documented limit. */
+            EOutput = EInput;
+            Console.WriteLine($"    (no PROJECTION_OUTPUT data — output.weight tied to token_embd)");
+        }
+
+        swPre.Restart();
+        Console.WriteLine($"  reconstructing interior tensors from per-kind subgraphs...");
+        var qAdj  = await BuildSubstrateAdjacencyAsync(ds, ModelDecomposer.Source, entityToToken, ModelDecomposer.QProjectsKind);
+        var vAdj  = await BuildSubstrateAdjacencyAsync(ds, ModelDecomposer.Source, entityToToken, ModelDecomposer.VProjectsKind);
+        var oAdj  = await BuildSubstrateAdjacencyAsync(ds, ModelDecomposer.Source, entityToToken, ModelDecomposer.OProjectsKind);
+        var gAdj  = await BuildSubstrateAdjacencyAsync(ds, ModelDecomposer.Source, entityToToken, ModelDecomposer.GatesKind);
+        var upAdj = await BuildSubstrateAdjacencyAsync(ds, ModelDecomposer.Source, entityToToken, ModelDecomposer.UpProjectsKind);
+        var dnAdj = await BuildSubstrateAdjacencyAsync(ds, ModelDecomposer.Source, entityToToken, ModelDecomposer.DownProjectsKind);
+
+        var (Wq, Wk) = ReconstructInteriorTensorAsymmetric(
+            EInput, qAdj, vocabSize, dModel,
+            outDimQ: nHeads   * headDim,
+            outDimK: nKvHeads * headDim, lambda);
+        var Wv    = ReconstructInteriorTensorSymmetric(EInput, vAdj,  vocabSize, dModel, nKvHeads * headDim, lambda);
+        var Wo    = ReconstructInteriorTensorSymmetric(EInput, oAdj,  vocabSize, dModel, dModel,             lambda);
+        var Wgate = ReconstructInteriorTensorSymmetric(EInput, gAdj,  vocabSize, dModel, interm,             lambda);
+        var Wup   = ReconstructInteriorTensorSymmetric(EInput, upAdj, vocabSize, dModel, interm,             lambda);
+        var WdnT  = ReconstructInteriorTensorSymmetric(EInput, dnAdj, vocabSize, dModel, interm,             lambda);
+        /* WdnT is [interm × dModel]; HF down_proj is [dModel × interm] — transpose at write. */
+        Console.WriteLine($"    interior reconstruction in {swPre.Elapsed.TotalSeconds:F1}s");
+
+        Console.WriteLine($"  loading NORMALIZES per-(layer, role, dim) scales...");
+        var normVecs = await QueryNormalizesPerDimAsync(
+            ds, ModelDecomposer.Source, recipe.NumLayers, dModel);
+        Console.WriteLine($"    {normVecs.Count} norm vectors recovered");
+
+        // 5. Create GGUF writer and add metadata
         var gguf = SynthInterop.GgufWriterCreate(outputPath);
         if (gguf == IntPtr.Zero)
             return Fail($"gguf_writer_create failed for {outputPath}");
         WriteGgufMetadata(gguf, recipe, tokens);
 
-        // 5. Fill and write each tensor
+        // 6. Walk recipe tensor manifest; dispatch by GGML name → write substrate-derived content.
         var sw = Stopwatch.StartNew();
         int tensorsDone = 0;
         for (int i = 0; i < tensorCount; i++)
@@ -274,55 +347,86 @@ internal static class Program
                 dtype = spec.Dtype;
             }
 
-            // Allocate zero-filled tensor (sparse-by-construction per RULES R4 —
-            // any cell without substrate signal stays exactly zero).
+            /* Allocate zero-filled tensor (R4 sparse-by-construction — any
+             * cell without substrate signal stays exactly zero). */
             byte[] tensorBytes = new byte[rows * cols * (dtype == 0 ? 4UL : 2UL)];
-            int attCount = 0;
-
-            /* Dispatch by tensor role (corrected codec per ADR 0056 + this session's
-             * channel split — embeddings/lm_head are PROJECTION-class physicality
-             * data, interior tensors are token×token typed attestations).
-             *
-             *   token_embd.weight   → PROJECTION physicality (per-token 4D, source=model)
-             *   output.weight       → would be PROJECTION-output physicality, deferred
-             *                         (needs PhysicalityKind enum extension); zero for now
-             *   attn_norm/ffn_norm/output_norm.weight → identity (1.0 per-dim) until
-             *                         NORMALIZES recipe-metadata path lands
-             *   attn_{q,k,v,output}.weight + ffn_{gate,up,down}.weight → would be
-             *                         reconstructed from token×token attestations via
-             *                         SVD-based least-squares (S = E·W·Wᵀ·Eᵀ → recover W);
-             *                         zero-filled for v0, reconstruction is the next
-             *                         scoped chunk of work. The substrate now CARRIES
-             *                         these attestations in the right shape; the
-             *                         reconstruction math is the gap. */
             string ggmlName = HfToGgmlName(name);
+            string label = "(zero)";
+
             if (ggmlName == "token_embd.weight")
             {
-                attCount = await FillEmbedFromProjectionsAsync(
-                    ds, ModelDecomposer.Source, entityToToken,
-                    tensorBytes, (int)rows, (int)cols, dtype);
+                WriteDoubleMatrixToTensorBytes(EInput, (int)rows, (int)cols, dtype, tensorBytes);
+                label = "token_embd ← spectral E_input";
+            }
+            else if (ggmlName == "output.weight")
+            {
+                WriteDoubleMatrixToTensorBytes(EOutput, (int)rows, (int)cols, dtype, tensorBytes);
+                label = "output ← spectral E_output";
             }
             else if (ggmlName.EndsWith("_norm.weight", StringComparison.Ordinal))
             {
-                /* RMSNorm scale defaults to 1.0 (identity) until NORMALIZES is
-                 * carried as recipe metadata. F32-only per llama.cpp convention. */
-                long n = (long)rows * (long)cols;
-                if (dtype == 0)
+                /* Identify (layer, role) from the GGML name:
+                 *   blk.{L}.attn_norm.weight  → (L, "input_layernorm")
+                 *   blk.{L}.ffn_norm.weight   → (L, "post_attention_layernorm")
+                 *   output_norm.weight        → (-1, "model_norm") */
+                (int layer, string role)? slot = null;
+                if (ggmlName == "output_norm.weight") slot = (-1, "model_norm");
+                else if (ggmlName.StartsWith("blk.", StringComparison.Ordinal))
                 {
-                    uint bits = BitConverter.SingleToUInt32Bits(1.0f);
-                    for (long k = 0; k < n; k++)
+                    int dotIdx = ggmlName.IndexOf('.', 4);
+                    if (dotIdx > 4 && int.TryParse(ggmlName.AsSpan(4, dotIdx - 4), out int L))
                     {
-                        int off = (int)(k * 4);
-                        tensorBytes[off + 0] = (byte)(bits & 0xFF);
-                        tensorBytes[off + 1] = (byte)((bits >>  8) & 0xFF);
-                        tensorBytes[off + 2] = (byte)((bits >> 16) & 0xFF);
-                        tensorBytes[off + 3] = (byte)((bits >> 24) & 0xFF);
+                        string rest = ggmlName.Substring(dotIdx + 1);
+                        if (rest == "attn_norm.weight")     slot = (L, "input_layernorm");
+                        else if (rest == "ffn_norm.weight") slot = (L, "post_attention_layernorm");
                     }
                 }
-                attCount = (int)n;
+                float[]? scaleVec = (slot is { } s
+                    && normVecs.TryGetValue(s, out var v)) ? v : null;
+                FillPerDimNorm(tensorBytes, scaleVec, (int)Math.Max(rows, cols), dtype);
+                label = scaleVec != null ? $"norm ← NORMALIZES{slot}" : "norm ← identity 1.0";
             }
-            /* Else: interior weight tensors stay zero-filled. Reconstruction from
-             * token×token attestations is the next chunk. */
+            else if (ggmlName.StartsWith("blk.", StringComparison.Ordinal))
+            {
+                int dotIdx = ggmlName.IndexOf('.', 4);
+                if (dotIdx > 4)
+                {
+                    string suffix = ggmlName.Substring(dotIdx + 1);
+                    switch (suffix)
+                    {
+                        case "attn_q.weight":
+                            WriteFloatMatrixToTensorBytes(Wq, (int)rows, (int)cols, dtype, tensorBytes);
+                            label = "attn_q ← Q_PROJECTS reconstruct (asym)";
+                            break;
+                        case "attn_k.weight":
+                            WriteFloatMatrixToTensorBytes(Wk, (int)rows, (int)cols, dtype, tensorBytes);
+                            label = "attn_k ← Q_PROJECTS reconstruct (asym)";
+                            break;
+                        case "attn_v.weight":
+                            WriteFloatMatrixToTensorBytes(Wv, (int)rows, (int)cols, dtype, tensorBytes);
+                            label = "attn_v ← V_PROJECTS reconstruct";
+                            break;
+                        case "attn_output.weight":
+                            WriteFloatMatrixToTensorBytes(Wo, (int)rows, (int)cols, dtype, tensorBytes);
+                            label = "attn_output ← O_PROJECTS reconstruct";
+                            break;
+                        case "ffn_gate.weight":
+                            WriteFloatMatrixToTensorBytes(Wgate, (int)rows, (int)cols, dtype, tensorBytes);
+                            label = "ffn_gate ← GATES reconstruct";
+                            break;
+                        case "ffn_up.weight":
+                            WriteFloatMatrixToTensorBytes(Wup, (int)rows, (int)cols, dtype, tensorBytes);
+                            label = "ffn_up ← UP_PROJECTS reconstruct";
+                            break;
+                        case "ffn_down.weight":
+                            WriteTransposedFloatMatrixToTensorBytes(
+                                WdnT, srcRows: interm, srcCols: dModel,
+                                dstRows: (int)rows, dstCols: (int)cols, dtype, tensorBytes);
+                            label = "ffn_down ← DOWN_PROJECTS reconstruct (transposed)";
+                            break;
+                    }
+                }
+            }
 
             // Write to GGUF — dims in column-major order (inner first)
             nuint[] ggufDims = cols > 1
@@ -338,7 +442,7 @@ internal static class Program
 
             tensorsDone++;
             if (tensorsDone % 10 == 0 || tensorsDone == 1)
-                Console.WriteLine($"  [{tensorsDone}/{tensorCount}] {name} rows={rows} cols={cols} att={attCount} {sw.Elapsed.TotalSeconds:F1}s");
+                Console.WriteLine($"  [{tensorsDone}/{tensorCount}] {name} rows={rows} cols={cols} {label} {sw.Elapsed.TotalSeconds:F1}s");
         }
 
         int rc = SynthInterop.GgufWriterFinalize(gguf);
@@ -617,56 +721,431 @@ internal static class Program
         return hf; // unknown — pass through unchanged
     }
 
-    /* Query PROJECTION physicalities (kind=3, source=model) and fill an embed_tokens
-     * tensor [vocab × dModel] from them. v0 reconstruction: write the substrate's 4D
-     * coord into the first 4 dims of each token's row; zero-pad the remaining
-     * (dModel - 4) dims (sparse-by-construction R4). Full N-d reconstruction via
-     * dynamics-pipeline expansion (Laplacian eigenmap basis-extension structured by
-     * the typed-edge graph) is the next scoped chunk. */
-    private static async Task<int> FillEmbedFromProjectionsAsync(
+    /* === Substrate → Recipe-Mold Synthesis Helpers ============================
+     *
+     * The substrate codec at synthesis: build a sparse typed-edge graph from
+     * substrate attestations (cross-kind for the input-direction embedding;
+     * per-kind subgraphs for interior reconstruction); spectral-embed via
+     * Laplacian eigenmaps of the graph for embed_tokens / output.weight at
+     * the recipe's target dim; reconstruct interior tensors via least-squares
+     * factorization of `E·Wᵀ·W·Eᵀ ≈ S_kind` (symmetric) or `E·Wqᵀ·Wk·Eᵀ ≈ S_Q`
+     * (asymmetric, for GQA). Norm scales come from NORMALIZES per-dim
+     * attestations.
+     *
+     * The same primitives work for any architecture family / modality — the
+     * recipe is the mold; the primitives are universal. */
+
+    private sealed record SubstrateAdjacencyData(int[] Rows, int[] Cols, double[] Weights);
+
+    /* Token×token attestation kinds the AI-model interior tensors emit. */
+    private static readonly Hash128[] TokenPairAttestationKinds =
+    [
+        ModelDecomposer.QProjectsKind,
+        ModelDecomposer.VProjectsKind,
+        ModelDecomposer.OProjectsKind,
+        ModelDecomposer.GatesKind,
+        ModelDecomposer.UpProjectsKind,
+        ModelDecomposer.DownProjectsKind,
+    ];
+
+    /// <summary>
+    /// Query token-pair attestations from substrate and build a sparse adjacency
+    /// in COO form. Each row's contribution is `effective_mu = max(0, (rating −
+    /// 2*rd) / 1e9)` (the Glicko-2 lower bound per ADR 0036). Multiple rows for
+    /// the same (subject_token, object_token) tuple — from per-kind aggregation
+    /// or cross-source consensus — get summed into one edge weight in C#.
+    ///
+    /// kindFilter == null → all token-pair kinds (cross-kind aggregate for
+    /// input-direction embedding). kindFilter == specific kind → that kind's
+    /// subgraph for interior reconstruction.
+    /// </summary>
+    private static async Task<SubstrateAdjacencyData> BuildSubstrateAdjacencyAsync(
         NpgsqlDataSource ds,
-        Hash128 sourceId,
+        Hash128 modelSourceId,
         Dictionary<Hash128, int> entityToToken,
-        byte[] tensorBytes,
-        int rows, int cols, int dtype)
+        Hash128? kindFilter)
     {
-        int written = 0;
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd  = conn.CreateCommand();
+        if (kindFilter is { } kf)
+        {
+            cmd.CommandText =
+                """
+                SELECT subject_id, object_id, rating, rd
+                FROM laplace.attestations
+                WHERE source_id = $1 AND kind_id = $2
+                """;
+            cmd.Parameters.AddWithValue(modelSourceId.ToBytes());
+            cmd.Parameters.AddWithValue(kf.ToBytes());
+        }
+        else
+        {
+            /* Cross-kind: include all the token-pair kinds. */
+            cmd.CommandText =
+                """
+                SELECT subject_id, object_id, rating, rd
+                FROM laplace.attestations
+                WHERE source_id = $1
+                  AND kind_id = ANY($2)
+                """;
+            cmd.Parameters.AddWithValue(modelSourceId.ToBytes());
+            var kindBytes = TokenPairAttestationKinds.Select(k => k.ToBytes()).ToArray();
+            cmd.Parameters.AddWithValue(kindBytes);
+        }
+
+        var acc = new Dictionary<(int r, int c), double>(1 << 16);
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        while (await rdr.ReadAsync())
+        {
+            var subjBytes = (byte[])rdr[0];
+            var objBytes  = (byte[])rdr[1];
+            long rating   = rdr.GetInt64(2);
+            long rdVal    = rdr.GetInt64(3);
+
+            double effMu = Math.Max(0.0, (rating - 2.0 * rdVal) / 1e9);
+            if (effMu <= 0.0) continue;
+
+            var subjId = Hash128FromBytes(subjBytes);
+            var objId  = Hash128FromBytes(objBytes);
+            if (!entityToToken.TryGetValue(subjId, out int r)) continue;
+            if (!entityToToken.TryGetValue(objId,  out int c)) continue;
+
+            var key = (r, c);
+            if (acc.TryGetValue(key, out double existing))
+                acc[key] = existing + effMu;
+            else
+                acc[key] = effMu;
+        }
+
+        int n = acc.Count;
+        var rows    = new int[n];
+        var cols    = new int[n];
+        var weights = new double[n];
+        int idx = 0;
+        foreach (var ((r, c), w) in acc)
+        {
+            rows[idx] = r; cols[idx] = c; weights[idx] = w; idx++;
+        }
+        return new SubstrateAdjacencyData(rows, cols, weights);
+    }
+
+    /// <summary>
+    /// Build the output-direction adjacency for lm_head synthesis. Edges come
+    /// from PROJECTION_OUTPUT physicality 4D proximity in the substrate
+    /// canonical frame — tokens whose output-direction positions are close
+    /// share an edge. Uses raw Euclidean distance in 4D (PostGIS could
+    /// alternatively serve this via ST_DWithin/GIST, but for vocab=32K the
+    /// pairwise scan is tractable here).
+    /// </summary>
+    private static async Task<SubstrateAdjacencyData> BuildOutputDirectionAdjacencyAsync(
+        NpgsqlDataSource ds,
+        Hash128 modelSourceId,
+        Dictionary<Hash128, int> entityToToken,
+        int kNearest = 32)
+    {
         await using var conn = await ds.OpenConnectionAsync();
         await using var cmd  = conn.CreateCommand();
         cmd.CommandText =
             """
             SELECT entity_id, ST_X(coord), ST_Y(coord), ST_Z(coord), ST_M(coord)
             FROM laplace.physicalities
-            WHERE kind = 3 AND source_id = $1
+            WHERE kind = 4 AND source_id = $1
             """;
-        cmd.Parameters.AddWithValue(sourceId.ToBytes());
+        cmd.Parameters.AddWithValue(modelSourceId.ToBytes());
 
-        double[] coord = new double[4];
+        var tokenIdxToCoord = new Dictionary<int, (double x, double y, double z, double m)>();
         await using var rdr = await cmd.ExecuteReaderAsync();
         while (await rdr.ReadAsync())
         {
-            var entityBytes = (byte[])rdr[0];
-            coord[0] = rdr.GetDouble(1);
-            coord[1] = rdr.GetDouble(2);
-            coord[2] = rdr.GetDouble(3);
-            coord[3] = rdr.GetDouble(4);
+            var entityId = Hash128FromBytes((byte[])rdr[0]);
+            if (!entityToToken.TryGetValue(entityId, out int t)) continue;
+            tokenIdxToCoord[t] = (rdr.GetDouble(1), rdr.GetDouble(2),
+                                  rdr.GetDouble(3), rdr.GetDouble(4));
+        }
+        if (tokenIdxToCoord.Count == 0)
+            return new SubstrateAdjacencyData(Array.Empty<int>(), Array.Empty<int>(), Array.Empty<double>());
 
-            var entityId = Hash128FromBytes(entityBytes);
-            if (!entityToToken.TryGetValue(entityId, out int row)) continue;
-            if (row >= rows) continue;
+        /* For each token, find its kNearest neighbors by 4D Euclidean distance.
+         * O(n²) — for vocab=32K this is ~1B ops, ~few seconds on modern CPU. */
+        var arr = tokenIdxToCoord.Select(kv => (idx: kv.Key, c: kv.Value)).ToArray();
+        int n = arr.Length;
 
-            /* Write 4D substrate-canonical coord into first 4 dims of this token's
-             * embed row. Remaining (cols - 4) dims left at zero. */
-            int writeDims = Math.Min(4, cols);
-            int elemSize = dtype == 0 ? 4 : 2;
-            int rowOff = row * cols * elemSize;
-            for (int d = 0; d < writeDims; d++)
+        var rowsList = new List<int>(n * kNearest);
+        var colsList = new List<int>(n * kNearest);
+        var weightsList = new List<double>(n * kNearest);
+
+        var distBuf = new (double dist, int idx)[n];
+        for (int i = 0; i < n; i++)
+        {
+            for (int j = 0; j < n; j++)
             {
-                float fv = (float)coord[d];
-                int off = rowOff + d * elemSize;
+                if (i == j) { distBuf[j] = (double.PositiveInfinity, j); continue; }
+                double dx = arr[i].c.x - arr[j].c.x;
+                double dy = arr[i].c.y - arr[j].c.y;
+                double dz = arr[i].c.z - arr[j].c.z;
+                double dm = arr[i].c.m - arr[j].c.m;
+                distBuf[j] = (dx*dx + dy*dy + dz*dz + dm*dm, j);
+            }
+            /* nth_element-style partial sort */
+            int k = Math.Min(kNearest, n - 1);
+            Array.Sort(distBuf, 0, n, Comparer<(double dist, int idx)>.Create(
+                (a, b) => a.dist.CompareTo(b.dist)));
+            for (int neighbor = 0; neighbor < k; neighbor++)
+            {
+                var (dist, j) = distBuf[neighbor];
+                if (double.IsInfinity(dist)) break;
+                /* Edge weight: inverse distance (closer = stronger). */
+                double w = 1.0 / (1.0 + dist);
+                rowsList.Add(arr[i].idx);
+                colsList.Add(arr[j].idx);
+                weightsList.Add(w);
+            }
+        }
+
+        return new SubstrateAdjacencyData(
+            rowsList.ToArray(), colsList.ToArray(), weightsList.ToArray());
+    }
+
+    /// <summary>
+    /// Spectral embedding: top-`targetDim` Laplacian eigenvectors of the sparse
+    /// graph. Result is `[n × targetDim]` row-major doubles. Eigenvectors are
+    /// scaled by `sqrt(n) * 0.02` to match typical transformer embedding init
+    /// magnitude (unit-normalized eigenvectors are far smaller than what GGUF
+    /// expects).
+    /// </summary>
+    private static unsafe double[] ComputeSpectralEmbedding(
+        SubstrateAdjacencyData adj, int n, int targetDim)
+    {
+        if (adj.Rows.Length == 0 || n == 0 || targetDim == 0)
+            return new double[(long)n * targetDim];
+
+        var emb = new double[(long)n * targetDim];
+        fixed (int* rowsPtr = adj.Rows)
+        fixed (int* colsPtr = adj.Cols)
+        fixed (double* wPtr = adj.Weights)
+        fixed (double* embPtr = emb)
+        {
+            int rc = DynamicsInterop.LaplacianEigenmapsFromSparseGraph(
+                rowsPtr, colsPtr, wPtr,
+                (nuint)adj.Rows.Length, (nuint)n, (nuint)targetDim,
+                embPtr);
+            if (rc != 0)
+                throw new InvalidOperationException(
+                    $"laplacian_eigenmaps_from_sparse_graph returned {rc}");
+        }
+
+        /* Scale to match transformer embed init magnitude. Spectral
+         * eigenvectors are unit-norm; multiply by sqrt(targetDim) * 0.02
+         * so each row's L2 norm is ~sqrt(targetDim) * 0.02 — the typical
+         * Xavier/He init scale for transformer embedding rows. */
+        double scale = Math.Sqrt(targetDim) * 0.02;
+        for (long i = 0; i < emb.LongLength; i++) emb[i] *= scale;
+        return emb;
+    }
+
+    /// <summary>
+    /// Symmetric interior-tensor reconstruction:
+    /// recover W [outDim × N] such that `E·Wᵀ·W·Eᵀ ≈ S_kind`.
+    /// </summary>
+    private static unsafe float[] ReconstructInteriorTensorSymmetric(
+        double[] E, SubstrateAdjacencyData kindAdj,
+        int vocab, int N, int outDim, double lambda)
+    {
+        var W = new float[(long)outDim * N];
+        if (kindAdj.Rows.Length == 0) return W;  // zero-filled
+
+        fixed (double* ePtr = E)
+        fixed (int* rowsPtr = kindAdj.Rows)
+        fixed (int* colsPtr = kindAdj.Cols)
+        fixed (double* wPtr = kindAdj.Weights)
+        fixed (float* wOutPtr = W)
+        {
+            int rc = SynthInterop.ReconstructWFromTokenPairAttestations(
+                ePtr, (nuint)vocab, (nuint)N,
+                rowsPtr, colsPtr, wPtr, (nuint)kindAdj.Rows.Length,
+                (nuint)outDim, lambda, wOutPtr);
+            if (rc != 0)
+                throw new InvalidOperationException(
+                    $"reconstruct_w_from_token_pair_attestations returned {rc}");
+        }
+        return W;
+    }
+
+    /// <summary>
+    /// Asymmetric (joint-bilinear) reconstruction for Q_PROJECTS:
+    /// recover Wq [outDimQ × N] AND Wk [outDimK × N] such that
+    /// `E·Wqᵀ·Wk·Eᵀ ≈ S_Q`. TinyLlama GQA has Wq=[2048×2048] and
+    /// Wk=[256×2048] — symmetric collapse would destroy behavioral fidelity.
+    /// </summary>
+    private static unsafe (float[] Wq, float[] Wk) ReconstructInteriorTensorAsymmetric(
+        double[] E, SubstrateAdjacencyData kindAdj,
+        int vocab, int N, int outDimQ, int outDimK, double lambda)
+    {
+        var Wq = new float[(long)outDimQ * N];
+        var Wk = new float[(long)outDimK * N];
+        if (kindAdj.Rows.Length == 0) return (Wq, Wk);  // both zero-filled
+
+        fixed (double* ePtr = E)
+        fixed (int* rowsPtr = kindAdj.Rows)
+        fixed (int* colsPtr = kindAdj.Cols)
+        fixed (double* wPtr = kindAdj.Weights)
+        fixed (float* wqPtr = Wq)
+        fixed (float* wkPtr = Wk)
+        {
+            int rc = SynthInterop.ReconstructQkFromTokenPairAttestations(
+                ePtr, (nuint)vocab, (nuint)N,
+                rowsPtr, colsPtr, wPtr, (nuint)kindAdj.Rows.Length,
+                (nuint)outDimQ, (nuint)outDimK, lambda, wqPtr, wkPtr);
+            if (rc != 0)
+                throw new InvalidOperationException(
+                    $"reconstruct_qk_from_token_pair_attestations returned {rc}");
+        }
+        return (Wq, Wk);
+    }
+
+    /// <summary>
+    /// Query NORMALIZES attestations for this model source and return per-
+    /// (layer, role) full dModel-length scale vectors. Layer = -1 represents
+    /// the final `model.norm`. Maps the context-id back to (layer, role, dim)
+    /// by reconstructing the canonical context entity ids.
+    /// </summary>
+    private static async Task<Dictionary<(int layer, string role), float[]>>
+        QueryNormalizesPerDimAsync(NpgsqlDataSource ds, Hash128 modelSourceId,
+                                    int numLayers, int dModel)
+    {
+        var result = new Dictionary<(int layer, string role), float[]>();
+        var ctxToSlot = new Dictionary<Hash128, (int layer, string role, int dim)>();
+        var roles = new[] { "input_layernorm", "post_attention_layernorm" };
+        for (int L = 0; L < numLayers; L++)
+        {
+            foreach (var role in roles)
+            {
+                for (int d = 0; d < dModel; d++)
+                {
+                    var ctxId = LlamaWeightExtractor.LayerNormContextId(L, role, d);
+                    ctxToSlot[ctxId] = (L, role, d);
+                }
+            }
+        }
+        for (int d = 0; d < dModel; d++)
+        {
+            var ctxId = LlamaWeightExtractor.LayerNormContextId(-1, "model_norm", d);
+            ctxToSlot[ctxId] = (-1, "model_norm", d);
+        }
+
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd  = conn.CreateCommand();
+        cmd.CommandText =
+            """
+            SELECT context_id, rating
+            FROM laplace.attestations
+            WHERE source_id = $1 AND kind_id = $2 AND context_id IS NOT NULL
+            """;
+        cmd.Parameters.AddWithValue(modelSourceId.ToBytes());
+        cmd.Parameters.AddWithValue(ModelDecomposer.NormalizesKind.ToBytes());
+
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        while (await rdr.ReadAsync())
+        {
+            var ctxBytes = (byte[])rdr[0];
+            long rating  = rdr.GetInt64(1);
+            var ctxId = Hash128FromBytes(ctxBytes);
+            if (!ctxToSlot.TryGetValue(ctxId, out var slot)) continue;
+
+            var key = (slot.layer, slot.role);
+            if (!result.TryGetValue(key, out var vec))
+            {
+                vec = new float[dModel];
+                result[key] = vec;
+            }
+            vec[slot.dim] = (float)(rating / 1e9);
+        }
+        return result;
+    }
+
+    /// <summary>Write a row-major double[rows × cols] matrix to tensorBytes at
+    /// the GGUF dtype (0=f32, 2=bf16).</summary>
+    private static void WriteDoubleMatrixToTensorBytes(
+        double[] matrix, int rows, int cols, int dtype, byte[] tensorBytes)
+    {
+        long n = (long)rows * cols;
+        if (dtype == 0)
+        {
+            for (long i = 0; i < n; i++)
+            {
+                float fv = (float)matrix[i];
+                uint bits = BitConverter.SingleToUInt32Bits(fv);
+                int off = (int)(i * 4);
+                tensorBytes[off + 0] = (byte)(bits & 0xFF);
+                tensorBytes[off + 1] = (byte)((bits >>  8) & 0xFF);
+                tensorBytes[off + 2] = (byte)((bits >> 16) & 0xFF);
+                tensorBytes[off + 3] = (byte)((bits >> 24) & 0xFF);
+            }
+        }
+        else
+        {
+            for (long i = 0; i < n; i++)
+            {
+                float fv = (float)matrix[i];
+                uint bits = BitConverter.SingleToUInt32Bits(fv);
+                ushort bf16 = (ushort)(bits >> 16);
+                int off = (int)(i * 2);
+                tensorBytes[off + 0] = (byte)(bf16 & 0xFF);
+                tensorBytes[off + 1] = (byte)(bf16 >> 8);
+            }
+        }
+    }
+
+    /// <summary>Write a row-major float[rows × cols] matrix to tensorBytes.</summary>
+    private static void WriteFloatMatrixToTensorBytes(
+        float[] matrix, int rows, int cols, int dtype, byte[] tensorBytes)
+    {
+        long n = (long)rows * cols;
+        if (dtype == 0)
+        {
+            for (long i = 0; i < n; i++)
+            {
+                uint bits = BitConverter.SingleToUInt32Bits(matrix[i]);
+                int off = (int)(i * 4);
+                tensorBytes[off + 0] = (byte)(bits & 0xFF);
+                tensorBytes[off + 1] = (byte)((bits >>  8) & 0xFF);
+                tensorBytes[off + 2] = (byte)((bits >> 16) & 0xFF);
+                tensorBytes[off + 3] = (byte)((bits >> 24) & 0xFF);
+            }
+        }
+        else
+        {
+            for (long i = 0; i < n; i++)
+            {
+                uint bits = BitConverter.SingleToUInt32Bits(matrix[i]);
+                ushort bf16 = (ushort)(bits >> 16);
+                int off = (int)(i * 2);
+                tensorBytes[off + 0] = (byte)(bf16 & 0xFF);
+                tensorBytes[off + 1] = (byte)(bf16 >> 8);
+            }
+        }
+    }
+
+    /// <summary>Write the transpose of source[srcRows × srcCols] into
+    /// tensorBytes shaped as [dstRows × dstCols] = [srcCols × srcRows].</summary>
+    private static void WriteTransposedFloatMatrixToTensorBytes(
+        float[] source, int srcRows, int srcCols,
+        int dstRows, int dstCols, int dtype, byte[] tensorBytes)
+    {
+        if (dstRows != srcCols || dstCols != srcRows)
+            throw new ArgumentException(
+                $"Transpose shape mismatch: src=[{srcRows}×{srcCols}], " +
+                $"dst=[{dstRows}×{dstCols}]");
+        int elemSize = dtype == 0 ? 4 : 2;
+        for (int r = 0; r < dstRows; r++)
+        {
+            for (int c = 0; c < dstCols; c++)
+            {
+                float v = source[c * srcCols + r];   // src row=c, col=r
+                int off = (r * dstCols + c) * elemSize;
                 if (dtype == 0)
                 {
-                    uint bits = BitConverter.SingleToUInt32Bits(fv);
+                    uint bits = BitConverter.SingleToUInt32Bits(v);
                     tensorBytes[off + 0] = (byte)(bits & 0xFF);
                     tensorBytes[off + 1] = (byte)((bits >>  8) & 0xFF);
                     tensorBytes[off + 2] = (byte)((bits >> 16) & 0xFF);
@@ -674,15 +1153,40 @@ internal static class Program
                 }
                 else
                 {
-                    uint bits = BitConverter.SingleToUInt32Bits(fv);
+                    uint bits = BitConverter.SingleToUInt32Bits(v);
                     ushort bf16 = (ushort)(bits >> 16);
                     tensorBytes[off + 0] = (byte)(bf16 & 0xFF);
                     tensorBytes[off + 1] = (byte)(bf16 >> 8);
                 }
             }
-            written++;
         }
-        return written;
+    }
+
+    /// <summary>Write per-dim norm scale vector to tensorBytes. Defaults to
+    /// 1.0 (identity) per dim when `scale` is null. Norms are f32 per the
+    /// arch_template convention.</summary>
+    private static void FillPerDimNorm(byte[] tensorBytes, float[]? scale, int dModel, int dtype)
+    {
+        for (int d = 0; d < dModel; d++)
+        {
+            float v = (scale != null && d < scale.Length && scale[d] != 0.0f) ? scale[d] : 1.0f;
+            uint bits = BitConverter.SingleToUInt32Bits(v);
+            if (dtype == 0)
+            {
+                int off = d * 4;
+                tensorBytes[off + 0] = (byte)(bits & 0xFF);
+                tensorBytes[off + 1] = (byte)((bits >>  8) & 0xFF);
+                tensorBytes[off + 2] = (byte)((bits >> 16) & 0xFF);
+                tensorBytes[off + 3] = (byte)((bits >> 24) & 0xFF);
+            }
+            else
+            {
+                ushort bf16 = (ushort)(bits >> 16);
+                int off = d * 2;
+                tensorBytes[off + 0] = (byte)(bf16 & 0xFF);
+                tensorBytes[off + 1] = (byte)(bf16 >> 8);
+            }
+        }
     }
 
     private static unsafe Hash128 Hash128FromBytes(byte[] b)
