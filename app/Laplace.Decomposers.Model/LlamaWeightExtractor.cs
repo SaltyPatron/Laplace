@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using Laplace.Engine.Core;
 using Laplace.Engine.Synthesis;    // QkPair
 using Laplace.SubstrateCRUD;
+using DynamicsInterop = Laplace.Engine.Dynamics.NativeInterop;
 using SynthInterop = Laplace.Engine.Synthesis.NativeInterop;
 
 namespace Laplace.Decomposers.Model;
@@ -135,10 +136,19 @@ public sealed class LlamaWeightExtractor
         float[] identity = new float[(long)dModel * dModel];
         for (int d = 0; d < dModel; d++) identity[(long)d * dModel + d] = 1.0f;
 
-        /* EMBEDS: per-cell magnitude of embed_tokens → (token, hidden_dim). */
-        var embedAccum = new Dictionary<(uint t, uint d), (double sum, int count)>(1 << 20);
-        AccumulateProjectionScores(E_bf16, identity, vocabSize, dModel, dModel, embedAccum);
-        foreach (var c in BuildProjectionAttestationBatches(embedAccum, vocabSize, _kinds.Embeds, "d", tokenSubject: true, "embeds")) { yield return c; await Task.Yield(); }
+        /* embed_tokens → per-token PROJECTION physicality (ADR 0056 corrected codec).
+         * The embedding row is the model's per-token address in N-d; we align
+         * the N-d source frame onto each token entity's Unicode-canonical
+         * CONTENT 4D anchor via the dynamics pipeline (Procrustes fit on
+         * single/multi-codepoint tokens whose CONTENT physicalities were
+         * emitted by TextDecomposer through LlamaTokenizerParser). Each
+         * token gets one PROJECTION physicality row at substrate-canonical
+         * 4D — not a per-cell attestation, not a feature-dim relation. */
+        foreach (var c in BuildEmbeddingPhysicalityBatches(E_bf16, vocabSize, dModel))
+        {
+            yield return c;
+            await Task.Yield();
+        }
 
         /* Q_PROJECTS: static QK bilinear E·Wq·Wkᵀ·Eᵀ, aggregated across all layers/heads. */
         var qkAccum = new Dictionary<(uint q, uint k), (double sum, int count)>(1 << 20);
@@ -439,6 +449,142 @@ public sealed class LlamaWeightExtractor
             if (++inBatch >= AttBatchSize) { yield return b.Build(); b = null; inBatch = 0; batchNo++; }
         }
         if (b != null) yield return b.Build();
+    }
+
+    /* embed_tokens → per-token PROJECTION physicality via Procrustes-aligned
+     * dynamics pipeline (ADR 0056 corrected codec — replaces the previous
+     * per-cell EMBEDS attestation emission). One PROJECTION row per token,
+     * 4D coord = Procrustes(N-d embed row → substrate-canonical S³ frame),
+     * anchored on token entities that already have CONTENT 4D coords from
+     * TextDecomposer's tier-tree composition. */
+    private IEnumerable<SubstrateChange> BuildEmbeddingPhysicalityBatches(
+        ushort[] E_bf16, int vocabSize, int dModel,
+        int batchSize = 4096)
+    {
+        /* 1. Collect tokens with CONTENT 4D anchors (set by LlamaTokenizerParser
+         *    via TextDecomposer.Run during Parse). Subsample to ~512 anchor
+         *    pairs uniformly to keep Procrustes fit memory bounded. */
+        var anchorIndices = new List<int>(_tokens.Count);
+        for (int t = 0; t < _tokens.Count; t++)
+            if (_tokens[t].HasContentCoord)
+                anchorIndices.Add(t);
+
+        if (anchorIndices.Count < 4)
+            throw new InvalidOperationException(
+                $"LlamaWeightExtractor: only {anchorIndices.Count} token anchors carry " +
+                "CONTENT 4D physicalities; need at least 4. Linguistic-seed ingest " +
+                "(Unicode + TextDecomposer) must precede model ingest.");
+
+        int nAnchors = Math.Min(512, anchorIndices.Count);
+        int stride = Math.Max(1, anchorIndices.Count / nAnchors);
+
+        var anchorSrc = new double[(long)nAnchors * dModel];
+        var anchorTgt = new double[(long)nAnchors * 4];
+        int actualN = 0;
+        for (int k = 0; k < nAnchors; k++)
+        {
+            int tIdx = anchorIndices[k * stride];
+            if (tIdx >= vocabSize) break;
+            var rec = _tokens[tIdx];
+            long rowOff = (long)tIdx * dModel;
+            for (int d = 0; d < dModel; d++)
+            {
+                uint bits = (uint)E_bf16[rowOff + d] << 16;
+                anchorSrc[(long)actualN * dModel + d] =
+                    (double)BitConverter.UInt32BitsToSingle(bits);
+            }
+            anchorTgt[(long)actualN * 4 + 0] = rec.ContentX;
+            anchorTgt[(long)actualN * 4 + 1] = rec.ContentY;
+            anchorTgt[(long)actualN * 4 + 2] = rec.ContentZ;
+            anchorTgt[(long)actualN * 4 + 3] = rec.ContentM;
+            actualN++;
+        }
+
+        /* 2. Fit Procrustes via liblaplace_dynamics (MKL/Eigen-backed). */
+        IntPtr transform;
+        double residual;
+        unsafe
+        {
+            fixed (double* srcPtr = anchorSrc)
+            fixed (double* tgtPtr = anchorTgt)
+            {
+                transform = DynamicsInterop.ProcrustesFit(
+                    srcPtr, (nuint)actualN, (nuint)dModel, tgtPtr);
+            }
+        }
+        if (transform == IntPtr.Zero)
+            throw new InvalidOperationException(
+                "ProcrustesFit returned NULL — alignment failed.");
+        residual = DynamicsInterop.ProcrustesResidual(transform);
+
+        try
+        {
+            /* 3. Apply transform to every token; emit PROJECTION physicality. */
+            long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+            var rowF64 = new double[dModel];
+            var out4d  = new double[4];
+            SubstrateChangeBuilder? b = null;
+            int inBatch = 0;
+            int batchStart = 0;
+            int n = Math.Min(vocabSize, _tokens.Count);
+
+            for (int t = 0; t < n; t++)
+            {
+                long rowOff = (long)t * dModel;
+                for (int d = 0; d < dModel; d++)
+                {
+                    uint bits = (uint)E_bf16[rowOff + d] << 16;
+                    rowF64[d] = (double)BitConverter.UInt32BitsToSingle(bits);
+                }
+
+                unsafe
+                {
+                    fixed (double* rowPtr = rowF64)
+                    fixed (double* outPtr = out4d)
+                    {
+                        DynamicsInterop.ProcrustesApply(
+                            transform, rowPtr, (nuint)dModel, outPtr);
+                    }
+                }
+
+                var entityId = _tokens[t].EntityId;
+                var hilbert = Hilbert128.Encode(out4d);
+                var physId = PhysicalityId.Compute(
+                    entityId, _sourceId, PhysicalityKind.Projection,
+                    out4d[0], out4d[1], out4d[2], out4d[3],
+                    ReadOnlySpan<double>.Empty);
+
+                if (b is null) { batchStart = t; }
+                b ??= new SubstrateChangeBuilder(_sourceId,
+                    $"embed_tokens/{batchStart}..{Math.Min(batchStart + batchSize - 1, n - 1)}",
+                    entityCapacity: 0, physicalityCapacity: batchSize, attestationCapacity: 0);
+
+                b.AddPhysicality(new PhysicalityRow(
+                    Id: physId,
+                    EntityId: entityId,
+                    SourceId: _sourceId,
+                    Kind: PhysicalityKind.Projection,
+                    CoordX: out4d[0], CoordY: out4d[1], CoordZ: out4d[2], CoordM: out4d[3],
+                    HilbertIndex: hilbert,
+                    TrajectoryXyzm: null, NConstituents: 0,
+                    AlignmentResidual: residual,
+                    SourceDim: dModel,
+                    ObservedAtUnixUs: nowUs));
+
+                if (++inBatch >= batchSize)
+                {
+                    yield return b.Build();
+                    b = null;
+                    inBatch = 0;
+                }
+            }
+
+            if (b != null) yield return b.Build();
+        }
+        finally
+        {
+            DynamicsInterop.ProcrustesFree(transform);
+        }
     }
 
     /* Row-major transpose [rows × cols] → [cols × rows]. */
