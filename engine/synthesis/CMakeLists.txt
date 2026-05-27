@@ -18,7 +18,6 @@ set(LAPLACE_SYNTHESIS_HEADERS
     include/laplace/synthesis/tensor_decompose.h
     include/laplace/synthesis/weight_projection.h
     include/laplace/synthesis/format_writer.h
-    include/laplace/synthesis/reconstruct_w.h
 )
 
 set(LAPLACE_SYNTHESIS_SOURCES
@@ -32,7 +31,6 @@ set(LAPLACE_SYNTHESIS_SOURCES
     src/tensor_decompose.cpp
     src/weight_projection.cpp
     src/format_writer.cpp
-    src/reconstruct_w.cpp
 )
 
 add_library(laplace_synthesis SHARED ${LAPLACE_SYNTHESIS_SOURCES})

@@ -58,36 +58,6 @@ public static partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "arch_template_free")]
     public static partial void ArchTemplateFree(IntPtr tmpl);
 
-    // === Interior-tensor reconstruction (substrate-native codec) ===
-
-    /// <summary>
-    /// Symmetric factorization: recover ONE W [out_dim × N] such that
-    /// S ≈ E·Wᵀ·W·Eᵀ for the kind-specific sparse adjacency S. Used for
-    /// V_PROJECTS / O_PROJECTS / GATES / UP_PROJECTS / DOWN_PROJECTS.
-    /// Returns 0 / -1 null / -2 invalid args / -3 eigensolver failure /
-    /// -4 degenerate. Internal: Eigen LDLT + SelfAdjointEigenSolver.
-    /// </summary>
-    [LibraryImport(Library, EntryPoint = "reconstruct_w_from_token_pair_attestations")]
-    public static unsafe partial int ReconstructWFromTokenPairAttestations(
-        double* E, nuint vocab, nuint N,
-        int* sRows, int* sCols, double* sWeights, nuint sNnz,
-        nuint outDim, double lambda,
-        float* WOut);
-
-    /// <summary>
-    /// Asymmetric (joint-bilinear) factorization: recover BOTH Wq
-    /// [out_dim_q × N] AND Wk [out_dim_k × N] such that S ≈ E·Wqᵀ·Wk·Eᵀ.
-    /// Used for Q_PROJECTS — TinyLlama GQA has Wq=[2048×2048] and
-    /// Wk=[256×2048] (different shapes); symmetric collapse would destroy
-    /// behavioral fidelity. Internal: Eigen LDLT + JacobiSVD.
-    /// </summary>
-    [LibraryImport(Library, EntryPoint = "reconstruct_qk_from_token_pair_attestations")]
-    public static unsafe partial int ReconstructQkFromTokenPairAttestations(
-        double* E, nuint vocab, nuint N,
-        int* sRows, int* sCols, double* sWeights, nuint sNnz,
-        nuint outDimQ, nuint outDimK, double lambda,
-        float* WqOut, float* WkOut);
-
     // === Static QK attention scorer ===
 
     /// <summary>

@@ -222,12 +222,24 @@ cascade prompt:
 
 # === Synthesis ===
 
-synthesize target output="/tmp/tinyllama-substrate.gguf": build-app
+# Generic synthesize entrypoint. `subcommand` is `substrate` (recipe-driven, from
+# substrate state) or `passthrough` (diagnostic real-weights transcode).
+# Usage:
+#   just synthesize substrate /path/to/recipe.json /tmp/out.gguf
+#   just synthesize passthrough /vault/models/<model-dir> /tmp/out.gguf
+synthesize subcommand *args: build-app
     cd app && LD_LIBRARY_PATH="$(pwd)/../build/engine/synthesis:$(pwd)/../build/engine/dynamics:$(pwd)/../build/engine/core:${LD_LIBRARY_PATH:-}" \
-        dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- synthesize {{target}} {{output}}
+        dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- synthesize {{subcommand}} {{args}}
 
+# Convenience: substrate-mediated synthesis for the TinyLlama recipe.
+# Currently returns the Stream B pending stub (the pseudoinverse pipeline was
+# removed in Stream A per ~/.claude/plans/replicated-hatching-stream.md).
 synthesize-tinyllama output="/tmp/tinyllama-substrate.gguf": build-app
-    just synthesize tinyllama {{output}}
+    just synthesize substrate /vault/models/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0/snapshots/fe8a4ea1ffedaf415f4da2f062534de366a451e6/config.json {{output}}
+
+# Convenience: diagnostic passthrough for TinyLlama (real-weights GGUF).
+synthesize-tinyllama-passthrough output="/tmp/tinyllama-passthrough.gguf": build-app
+    just synthesize passthrough /vault/models/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0/snapshots/fe8a4ea1ffedaf415f4da2f062534de366a451e6 {{output}}
 
 roundtrip model_path:
     scripts/roundtrip.sh {{model_path}}

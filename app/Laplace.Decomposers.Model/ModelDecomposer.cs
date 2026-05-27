@@ -36,17 +36,36 @@ public sealed class ModelDecomposer : IDecomposer
     public static readonly Hash128 ScalarTypeId =
         Hash128.OfCanonical("substrate/type/Scalar/v1");
 
-    /* Transformer-family attestation kinds emitted by the v0.1 codec.
-     * EMBEDS / OUTPUT_PROJECTS removed — embed_tokens / lm_head are
-     * PROJECTION-class physicalities. K_PROJECTS removed — substrate
-     * aggregates joint Q+K via Q_PROJECTS. NORMALIZES removed —
-     * per-(layer, role, dim) is recipe content per ADR 0056 Phase 2. */
+    /* Transformer-family tensor-calculation attestation kinds per ADR 0056
+     * spec table + ADR 0044 T9 + GLOSSARY:95 + DESIGN.md:731. Fixed
+     * vocabulary, all 10 kinds:
+     *   EMBEDS               — embed_tokens, shape (text_entity, embed_dim), per-cell magnitude, one instance
+     *   Q_PROJECTS           — q_proj × k_proj per (layer, head), q[i,:]·k[j,:]ᵀ, aggregated
+     *   K_PROJECTS           — k_proj per (layer, head), per-cell magnitude (companion to Q in some specs), aggregated
+     *   V_PROJECTS           — v_proj per (layer, head), (text_entity, hidden_dim), per-cell magnitude, aggregated
+     *   O_PROJECTS           — o_proj per (layer, head), (hidden_dim, text_entity), per-cell magnitude, aggregated
+     *   GATES                — gate_proj per layer, SiLU/SwiGLU per recipe, aggregated across layers
+     *   UP_PROJECTS          — up_proj per layer, (text_entity, intermediate_dim), per-cell magnitude, aggregated
+     *   DOWN_PROJECTS        — down_proj per layer, (intermediate_dim, text_entity), per-cell magnitude, aggregated
+     *   NORMALIZES           — *_norm.weight per layer, unary (hidden_dim,), per-cell magnitude, aggregated
+     *   OUTPUT_PROJECTS      — lm_head, (hidden_dim, text_entity), per-cell magnitude, one instance
+     *
+     * Per-(layer, head, expert, dim) attribution is RECIPE CONTENT on the model
+     * recipe entity per the ADR 0056 amendment + GLOSSARY explicit rule, NOT
+     * per-attestation context_id. Restored in Stream A per
+     * /home/ahart/.claude/plans/replicated-hatching-stream.md after a prior
+     * commit wrongly narrowed the vocabulary citing a fabricated ADR 0056
+     * reading. */
+    public static readonly Hash128 EmbedsKind        = Hash128.OfCanonical("substrate/kind/EMBEDS/v1");
     public static readonly Hash128 QProjectsKind     = Hash128.OfCanonical("substrate/kind/Q_PROJECTS/v1");
+    public static readonly Hash128 KProjectsKind     = Hash128.OfCanonical("substrate/kind/K_PROJECTS/v1");
     public static readonly Hash128 VProjectsKind     = Hash128.OfCanonical("substrate/kind/V_PROJECTS/v1");
     public static readonly Hash128 OProjectsKind     = Hash128.OfCanonical("substrate/kind/O_PROJECTS/v1");
     public static readonly Hash128 GatesKind         = Hash128.OfCanonical("substrate/kind/GATES/v1");
     public static readonly Hash128 UpProjectsKind    = Hash128.OfCanonical("substrate/kind/UP_PROJECTS/v1");
     public static readonly Hash128 DownProjectsKind  = Hash128.OfCanonical("substrate/kind/DOWN_PROJECTS/v1");
+    public static readonly Hash128 NormalizesKind    = Hash128.OfCanonical("substrate/kind/NORMALIZES/v1");
+    public static readonly Hash128 OutputProjectsKind = Hash128.OfCanonical("substrate/kind/OUTPUT_PROJECTS/v1");
     public static readonly Hash128 TokenMapsToKind   = Hash128.OfCanonical("substrate/kind/TOKEN_MAPS_TO/v1");
 
     /* Recipe attestation kinds */
@@ -64,12 +83,16 @@ public sealed class ModelDecomposer : IDecomposer
 
     private static readonly LlamaWeightExtractor.KindIds ExtractorKinds = new()
     {
-        QProjects     = QProjectsKind,
-        VProjects     = VProjectsKind,
-        OProjects     = OProjectsKind,
-        Gates         = GatesKind,
-        UpProjects    = UpProjectsKind,
-        DownProjects  = DownProjectsKind,
+        Embeds         = EmbedsKind,
+        QProjects      = QProjectsKind,
+        KProjects      = KProjectsKind,
+        VProjects      = VProjectsKind,
+        OProjects      = OProjectsKind,
+        Gates          = GatesKind,
+        UpProjects     = UpProjectsKind,
+        DownProjects   = DownProjectsKind,
+        Normalizes     = NormalizesKind,
+        OutputProjects = OutputProjectsKind,
     };
 
     private readonly string _modelDir;
@@ -111,20 +134,21 @@ public sealed class ModelDecomposer : IDecomposer
          * token-axis tensors (embed_tokens, lm_head) and token×token typed
          * attestations for interior tensors via self-bilinear E·W·Wᵀ·Eᵀ. */
 
-        /* Kinds emitted as token×token attestations by the v0.1 codec:
-         *   EMBEDS removed — embed_tokens is a PROJECTION physicality.
-         *   OUTPUT_PROJECTS removed — lm_head is a PROJECTION_OUTPUT physicality.
-         *   K_PROJECTS removed — substrate aggregates joint Q+K via Q_PROJECTS.
-         *   NORMALIZES removed — per-(layer, role, dim) is recipe content per
-         *                        ADR 0056 Phase 2; the substrate-canonical
-         *                        carrying mechanism is recipe-entity text
-         *                        content (M-next). */
+        /* Transformer-family tensor-calculation kind vocabulary per ADR 0056
+         * spec table + ADR 0044 T9 + GLOSSARY:95 + DESIGN.md:731. All 10
+         * kinds bootstrapped at first decomposer run; per-position attribution
+         * (layer/head/expert/dim) is recipe content on the model recipe entity
+         * per the ADR 0056 same-day amendment, NOT per-attestation context_id. */
+        boot.AddKind("EMBEDS");
         boot.AddKind("Q_PROJECTS");
+        boot.AddKind("K_PROJECTS");
         boot.AddKind("V_PROJECTS");
         boot.AddKind("O_PROJECTS");
         boot.AddKind("GATES");
         boot.AddKind("UP_PROJECTS");
         boot.AddKind("DOWN_PROJECTS");
+        boot.AddKind("NORMALIZES");
+        boot.AddKind("OUTPUT_PROJECTS");
         boot.AddKind("TOKEN_MAPS_TO");
         boot.AddKind("HAS_HIDDEN_SIZE");
         boot.AddKind("HAS_NUM_LAYERS");

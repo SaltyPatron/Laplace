@@ -33,7 +33,16 @@ internal static class Program
     {
         if (args.Length == 0)
         {
-            Console.Error.WriteLine("usage: laplace <seed-unicode | ingest <source> [path] | synthesize tinyllama [output.gguf] | decompose <text> | roundtrip <file> | stats>");
+            Console.Error.WriteLine(
+                "usage: laplace <command> [args]\n"
+                + "  seed-unicode\n"
+                + "  ingest <source> [path]            (unicode | iso639 | wordnet | omw | ud | model)\n"
+                + "  synthesize substrate <recipe.json> [output.gguf] [--source-scope <ids>] [--format <name>]\n"
+                + "  synthesize passthrough <model-dir> [output.gguf] [--f32] [--sparse-tol <tol>]\n"
+                + "  decompose <text>\n"
+                + "  roundtrip <file> [out]\n"
+                + "  db-roundtrip <file>\n"
+                + "  stats");
             return 2;
         }
         try
@@ -146,7 +155,7 @@ internal static class Program
             if (alreadyIngested)
             {
                 Console.WriteLine($"Model already ingested — source entity: {ModelDecomposer.Source}");
-                Console.WriteLine("(use 'just db-nuke && just seed-t0 && just ingest-tinyllama' to re-ingest from scratch)");
+                Console.WriteLine($"(use 'just db-nuke && just seed-t0 && just ingest model {modelDir}' to re-ingest from scratch)");
                 return 0;
             }
         }
@@ -180,286 +189,120 @@ internal static class Program
         return 0;
     }
 
-    // === synthesize: substrate attestations → GGUF ===
+    // === synthesize: substrate → model package, OR diagnostic passthrough ===
+    //
+    // Two universal subcommands per ADR 0011 (IArchitectureTemplate / IFormatWriter)
+    // + ADR 0043 (composite ModelDecomposer per ContainerFormat × TensorDtypeDecoder
+    // × IArchitectureTemplate × ModalityBinder):
+    //
+    //   synthesize substrate <recipe.json> [out] [--source-scope ...] [--format ...]
+    //     Substrate-mediated. Reads the user-authored recipe (GLOSSARY Recipe +
+    //     DESIGN VIII custom-recipe schema); queries substrate aggregated typed
+    //     attestations under the recipe's source scope; uses the architecture
+    //     template's `materialize_tensor(spec, substrate_view) → TensorValues`
+    //     (DESIGN.md:660) to distribute consensus values into recipe slots;
+    //     emits via the selected IFormatWriter (native safetensors-style per R4;
+    //     GGUF / ONNX / TF / PyTorch as compatibility writers per ADR 0059).
+    //
+    //   synthesize passthrough <model-dir> [out] [--f32] [--sparse-tol <tol>]
+    //     Diagnostic. Real weights → our GGUF writer (no substrate). Isolates
+    //     format/metadata/arch_template correctness from substrate data quality.
     private static async Task<int> SynthesizeAsync(string[] args)
     {
-        string target = args.Length > 0 ? args[0].ToLowerInvariant() : "";
-        if (target == "tinyllama")
-            return await SynthesizeTinyLlamaAsync(args.Length > 1 ? args[1] : "/tmp/tinyllama-substrate.gguf");
-        if (target == "tinyllama-passthrough")
-            return await SynthesizeTinyLlamaPassthroughAsync(args.Length > 1 ? args[1] : "/tmp/tinyllama-passthrough.gguf");
-        if (target == "tinyllama-passthrough-f32")
-            return await SynthesizeTinyLlamaPassthroughAsync(args.Length > 1 ? args[1] : "/tmp/tinyllama-passthrough-f32.gguf", allF32: true);
-        if (target == "tinyllama-sparse")
+        string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "";
+
+        if (sub == "substrate")
         {
-            double tol = args.Length > 1 && double.TryParse(args[1], out var t) ? t : 0.10;
-            string outp = args.Length > 2 ? args[2] : $"/tmp/tinyllama-sparse-{tol:0.00}.gguf";
-            // BF16 output (half the F32 size) — run with `-dev CUDA0` to pin the 4060 (native BF16).
-            return await SynthesizeTinyLlamaPassthroughAsync(outp, allF32: false, sparseTol: tol);
+            string recipePath = args.Length > 1 ? args[1] : "";
+            string outputPath = args.Length > 2 ? args[2] : "/tmp/laplace-substrate-synth.gguf";
+            return await SynthesizeFromSubstrateAsync(recipePath, outputPath);
         }
-        return Fail("usage: laplace synthesize <tinyllama | tinyllama-passthrough | tinyllama-passthrough-f32 | tinyllama-sparse [tol]> [output.gguf]");
+        if (sub == "passthrough")
+        {
+            string modelDir   = args.Length > 1 ? args[1] : "";
+            string outputPath = "/tmp/laplace-passthrough.gguf";
+            bool   allF32     = args.Contains("--f32");
+            double sparseTol  = 0.0;
+            int tolIdx = Array.IndexOf(args, "--sparse-tol");
+            if (tolIdx >= 0 && tolIdx + 1 < args.Length
+                && double.TryParse(args[tolIdx + 1], out var t))
+                sparseTol = t;
+            // Output path = third positional arg if present and not a flag
+            if (args.Length > 2 && !args[2].StartsWith("--"))
+                outputPath = args[2];
+            return await SynthesizePassthroughAsync(modelDir, outputPath, allF32, sparseTol);
+        }
+
+        return Fail(
+            "usage: laplace synthesize <subcommand> [args]\n"
+            + "  substrate <recipe.json> [output.gguf]   substrate-mediated synthesis\n"
+            + "  passthrough <model-dir> [output.gguf] [--f32] [--sparse-tol <tol>]\n"
+            + "                                          diagnostic real-weights transcode\n");
     }
 
-    private const string TinyLlamaDir =
-        "/vault/models/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0/snapshots/fe8a4ea1ffedaf415f4da2f062534de366a451e6";
-
-    private static async Task<int> SynthesizeTinyLlamaAsync(string outputPath)
+    /// <summary>
+    /// Stream A stub. Stream B per /home/ahart/.claude/plans/replicated-hatching-stream.md
+    /// replaces this with a real implementation that:
+    ///   (1) parses the recipe per ADR 0009 + GLOSSARY Recipe,
+    ///   (2) loads the architecture template entity from substrate (per ADR 0011 +
+    ///       ADR 0043) using the recipe's `IS_A Architecture_X` attestation,
+    ///   (3) iterates the template's `required_tensors(SynthesisParams) → TensorSpecs`
+    ///       (DESIGN.md:659),
+    ///   (4) for each TensorSpec, queries the substrate aggregated attestations
+    ///       under the recipe's source scope (the `laplace_glicko2_accumulate`
+    ///       aggregator handles cross-source consensus per ADR 0056:206-215),
+    ///   (5) calls `materialize_tensor(spec, substrate_view) → TensorValues`
+    ///       (DESIGN.md:660) — the architecture template distributes consensus
+    ///       values across the recipe's per-(layer, head, dim) layout (NOT a
+    ///       pseudoinverse — per Memory `project_model_decomposer_attestation_insight.md`
+    ///       and ADR 0056:183 "the inverse of this aggregation" = broadcast per
+    ///       recipe layout, not SVD recovery),
+    ///   (6) writes via the recipe-selected IFormatWriter (native safetensors-style
+    ///       per R4 + GLOSSARY:431; GGUF / ONNX / TF / PyTorch via ADR 0059's
+    ///       format-writer matrix).
+    /// </summary>
+    private static async Task<int> SynthesizeFromSubstrateAsync(string recipePath, string outputPath)
     {
-        Console.WriteLine($"synthesize tinyllama → {outputPath}");
-
-        /* Same perfcache prerequisite as IngestModelAsync — LlamaTokenizerParser
-         * runs TextDecomposer + HashComposer which read codepoint records from
-         * the process-wide T0 perf-cache. */
-        CodepointPerfcache.Load(ResolveBlob());
-
-        // 1. Parse tokenizer and recipe from the vault (same files used at ingest time)
-        string configPath    = Path.Combine(TinyLlamaDir, "config.json");
-        string tokenizerPath = Path.Combine(TinyLlamaDir, "tokenizer.json");
-        if (!File.Exists(configPath) || !File.Exists(tokenizerPath))
-            return Fail($"model files not found under {TinyLlamaDir}");
-
-        var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
-        var recipe = LlamaRecipeExtractor.Parse(configPath);
-
-        // entity_id → first token_id with that entity (handles canonical collision)
-        var entityToToken = new Dictionary<Hash128, int>(tokens.Count);
-        foreach (var t in tokens.OrderBy(t => t.TokenId))
-            entityToToken.TryAdd(t.EntityId, t.TokenId);
-
-        // 2. Get arch template tensor manifest
-        byte[] configJson = File.ReadAllBytes(configPath);
-        IntPtr recipeHandle;
-        IntPtr tmplHandle;
-        var specs = new TensorSpec[300];
-        int tensorCount;
-        unsafe
-        {
-            fixed (byte* jsonPtr = configJson)
-                recipeHandle = SynthInterop.RecipeParse(jsonPtr, (nuint)configJson.Length);
-            if (recipeHandle == IntPtr.Zero)
-                return Fail("recipe_parse returned null");
-            tmplHandle = SynthInterop.ArchTemplateLoad("llama");
-            if (tmplHandle == IntPtr.Zero)
-                return Fail("arch_template_load returned null");
-            fixed (TensorSpec* specsPtr = specs)
-                tensorCount = SynthInterop.ArchTemplateRequiredTensors(
-                    tmplHandle, recipeHandle, specsPtr, (nuint)specs.Length);
-        }
-        if (tensorCount <= 0)
-            return Fail($"arch_template_required_tensors returned {tensorCount}");
-        Console.WriteLine($"  arch template: {tensorCount} tensor slots");
-
-        // 3. Open substrate connection
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
-
-        // 4. Pre-compute spectral embeddings + interior tensors from substrate.
-        //    The recipe drives the dispatch in the manifest loop below; the
-        //    heavy substrate queries + dynamics-pipeline calls happen ONCE up
-        //    front (one E per direction; one W per kind; broadcast across all
-        //    layers per ADR 0056 within-model aggregation).
-        int vocabSize = recipe.VocabSize;
-        int dModel    = recipe.HiddenSize;
-        int nHeads    = recipe.NumHeads;
-        int nKvHeads  = recipe.NumKvHeads;
-        int headDim   = dModel / nHeads;
-        int interm    = recipe.IntermediateSize;
-        double lambda = 1e-3;
-
-        Console.WriteLine($"  building cross-kind input adjacency from substrate...");
-        var swPre = Stopwatch.StartNew();
-        var crossKindAdj = await BuildSubstrateAdjacencyAsync(
-            ds, ModelDecomposer.Source, entityToToken, kindFilter: null);
-        Console.WriteLine($"    input adjacency: {crossKindAdj.Rows.Length} edges in {swPre.Elapsed.TotalSeconds:F1}s");
-
-        swPre.Restart();
-        Console.WriteLine($"  spectral embedding (token_embd, dim={dModel})...");
-        var EInput = ComputeSpectralEmbedding(crossKindAdj, vocabSize, dModel);
-        Console.WriteLine($"    token_embd spectral embedding in {swPre.Elapsed.TotalSeconds:F1}s");
-
-        swPre.Restart();
-        Console.WriteLine($"  output-direction adjacency from PROJECTION_OUTPUT physicalities...");
-        var outAdj = await BuildOutputDirectionAdjacencyAsync(
-            ds, ModelDecomposer.Source, entityToToken);
-        Console.WriteLine($"    output adjacency: {outAdj.Rows.Length} edges in {swPre.Elapsed.TotalSeconds:F1}s");
-
-        double[] EOutput;
-        if (outAdj.Rows.Length > 0)
-        {
-            swPre.Restart();
-            Console.WriteLine($"  spectral embedding (output.weight, dim={dModel})...");
-            EOutput = ComputeSpectralEmbedding(outAdj, vocabSize, dModel);
-            Console.WriteLine($"    output.weight spectral embedding in {swPre.Elapsed.TotalSeconds:F1}s");
-        }
-        else
-        {
-            /* No lm_head ingest → v0 fallback: copy of input embedding
-             * (tied-weights). Documented limit. */
-            EOutput = EInput;
-            Console.WriteLine($"    (no PROJECTION_OUTPUT data — output.weight tied to token_embd)");
-        }
-
-        swPre.Restart();
-        Console.WriteLine($"  reconstructing interior tensors from per-kind subgraphs...");
-        var qAdj  = await BuildSubstrateAdjacencyAsync(ds, ModelDecomposer.Source, entityToToken, ModelDecomposer.QProjectsKind);
-        var vAdj  = await BuildSubstrateAdjacencyAsync(ds, ModelDecomposer.Source, entityToToken, ModelDecomposer.VProjectsKind);
-        var oAdj  = await BuildSubstrateAdjacencyAsync(ds, ModelDecomposer.Source, entityToToken, ModelDecomposer.OProjectsKind);
-        var gAdj  = await BuildSubstrateAdjacencyAsync(ds, ModelDecomposer.Source, entityToToken, ModelDecomposer.GatesKind);
-        var upAdj = await BuildSubstrateAdjacencyAsync(ds, ModelDecomposer.Source, entityToToken, ModelDecomposer.UpProjectsKind);
-        var dnAdj = await BuildSubstrateAdjacencyAsync(ds, ModelDecomposer.Source, entityToToken, ModelDecomposer.DownProjectsKind);
-
-        var (Wq, Wk) = ReconstructInteriorTensorAsymmetric(
-            EInput, qAdj, vocabSize, dModel,
-            outDimQ: nHeads   * headDim,
-            outDimK: nKvHeads * headDim, lambda);
-        var Wv    = ReconstructInteriorTensorSymmetric(EInput, vAdj,  vocabSize, dModel, nKvHeads * headDim, lambda);
-        var Wo    = ReconstructInteriorTensorSymmetric(EInput, oAdj,  vocabSize, dModel, dModel,             lambda);
-        var Wgate = ReconstructInteriorTensorSymmetric(EInput, gAdj,  vocabSize, dModel, interm,             lambda);
-        var Wup   = ReconstructInteriorTensorSymmetric(EInput, upAdj, vocabSize, dModel, interm,             lambda);
-        var WdnT  = ReconstructInteriorTensorSymmetric(EInput, dnAdj, vocabSize, dModel, interm,             lambda);
-        /* WdnT is [interm × dModel]; HF down_proj is [dModel × interm] — transpose at write. */
-        Console.WriteLine($"    interior reconstruction in {swPre.Elapsed.TotalSeconds:F1}s");
-
-        /* Norms default to identity 1.0 — per ADR 0056 Phase 2, per-(layer,
-         * role, dim) norm scales are recipe content, not per-attestation
-         * context. The substrate-native carrying mechanism for recipe-tier
-         * model parameters (configs, hyperparameters, per-layer scalars) is
-         * recipe-entity text content. M-next once that surface is fleshed
-         * out; v0.1 synthesis uses identity 1.0 (RMSNorm pass-through). */
-
-        // 5. Create GGUF writer and add metadata
-        var gguf = SynthInterop.GgufWriterCreate(outputPath);
-        if (gguf == IntPtr.Zero)
-            return Fail($"gguf_writer_create failed for {outputPath}");
-        WriteGgufMetadata(gguf, recipe, tokens);
-
-        // 6. Walk recipe tensor manifest; dispatch by GGML name → write substrate-derived content.
-        var sw = Stopwatch.StartNew();
-        int tensorsDone = 0;
-        for (int i = 0; i < tensorCount; i++)
-        {
-            string name;
-            ulong rows, cols;
-            int   dtype;
-            unsafe
-            {
-                var spec = specs[i];
-                name  = Marshal.PtrToStringUTF8((IntPtr)spec.Name) ?? "";
-                rows  = spec.Rank >= 1 ? spec.Shape[0] : 1;
-                cols  = spec.Rank >= 2 ? spec.Shape[1] : 1;
-                dtype = spec.Dtype;
-            }
-
-            /* Allocate zero-filled tensor (R4 sparse-by-construction — any
-             * cell without substrate signal stays exactly zero). */
-            byte[] tensorBytes = new byte[rows * cols * (dtype == 0 ? 4UL : 2UL)];
-            string ggmlName = HfToGgmlName(name);
-            string label = "(zero)";
-
-            if (ggmlName == "token_embd.weight")
-            {
-                WriteDoubleMatrixToTensorBytes(EInput, (int)rows, (int)cols, dtype, tensorBytes);
-                label = "token_embd ← spectral E_input";
-            }
-            else if (ggmlName == "output.weight")
-            {
-                WriteDoubleMatrixToTensorBytes(EOutput, (int)rows, (int)cols, dtype, tensorBytes);
-                label = "output ← spectral E_output";
-            }
-            else if (ggmlName.EndsWith("_norm.weight", StringComparison.Ordinal))
-            {
-                /* Identity 1.0 (RMSNorm pass-through). Per-(layer, role, dim)
-                 * norm scales are recipe content per ADR 0056 Phase 2;
-                 * carrying them via recipe entity is M-next. */
-                FillPerDimNorm(tensorBytes, scale: null, (int)Math.Max(rows, cols), dtype);
-                label = "norm ← identity 1.0";
-            }
-            else if (ggmlName.StartsWith("blk.", StringComparison.Ordinal))
-            {
-                int dotIdx = ggmlName.IndexOf('.', 4);
-                if (dotIdx > 4)
-                {
-                    string suffix = ggmlName.Substring(dotIdx + 1);
-                    switch (suffix)
-                    {
-                        case "attn_q.weight":
-                            WriteFloatMatrixToTensorBytes(Wq, (int)rows, (int)cols, dtype, tensorBytes);
-                            label = "attn_q ← Q_PROJECTS reconstruct (asym)";
-                            break;
-                        case "attn_k.weight":
-                            WriteFloatMatrixToTensorBytes(Wk, (int)rows, (int)cols, dtype, tensorBytes);
-                            label = "attn_k ← Q_PROJECTS reconstruct (asym)";
-                            break;
-                        case "attn_v.weight":
-                            WriteFloatMatrixToTensorBytes(Wv, (int)rows, (int)cols, dtype, tensorBytes);
-                            label = "attn_v ← V_PROJECTS reconstruct";
-                            break;
-                        case "attn_output.weight":
-                            WriteFloatMatrixToTensorBytes(Wo, (int)rows, (int)cols, dtype, tensorBytes);
-                            label = "attn_output ← O_PROJECTS reconstruct";
-                            break;
-                        case "ffn_gate.weight":
-                            WriteFloatMatrixToTensorBytes(Wgate, (int)rows, (int)cols, dtype, tensorBytes);
-                            label = "ffn_gate ← GATES reconstruct";
-                            break;
-                        case "ffn_up.weight":
-                            WriteFloatMatrixToTensorBytes(Wup, (int)rows, (int)cols, dtype, tensorBytes);
-                            label = "ffn_up ← UP_PROJECTS reconstruct";
-                            break;
-                        case "ffn_down.weight":
-                            WriteTransposedFloatMatrixToTensorBytes(
-                                WdnT, srcRows: interm, srcCols: dModel,
-                                dstRows: (int)rows, dstCols: (int)cols, dtype, tensorBytes);
-                            label = "ffn_down ← DOWN_PROJECTS reconstruct (transposed)";
-                            break;
-                    }
-                }
-            }
-
-            // Write to GGUF — dims in column-major order (inner first)
-            nuint[] ggufDims = cols > 1
-                ? [(nuint)cols, (nuint)rows]
-                : [(nuint)rows];
-
-            unsafe
-            {
-                fixed (nuint* dimsPtr = ggufDims)
-                fixed (byte*  dataPtr = tensorBytes)
-                    SynthInterop.GgufWriterAddTensor(gguf, HfToGgmlName(name), dtype, dimsPtr, (nuint)ggufDims.Length, dataPtr);
-            }
-
-            tensorsDone++;
-            if (tensorsDone % 10 == 0 || tensorsDone == 1)
-                Console.WriteLine($"  [{tensorsDone}/{tensorCount}] {name} rows={rows} cols={cols} {label} {sw.Elapsed.TotalSeconds:F1}s");
-        }
-
-        int rc = SynthInterop.GgufWriterFinalize(gguf);
-        SynthInterop.GgufWriterFree(gguf);
-        SynthInterop.ArchTemplateFree(tmplHandle);
-        SynthInterop.RecipeFree(recipeHandle);
-
-        if (rc != 0)
-            return Fail($"gguf_writer_finalize failed (rc={rc})");
-
-        long fileSize = new FileInfo(outputPath).Length;
-        Console.WriteLine($"synthesis complete: {outputPath} ({fileSize / 1048576.0:F0} MB) in {sw.Elapsed.TotalSeconds:F1}s");
-        return 0;
+        await Task.CompletedTask;
+        if (string.IsNullOrEmpty(recipePath) || !File.Exists(recipePath))
+            return Fail(
+                "usage: laplace synthesize substrate <recipe.json> [output.gguf]\n"
+                + $"  (recipe not found: {recipePath})");
+        return Fail(
+            $"synthesize substrate: pending Stream B implementation. recipe={recipePath} out={outputPath}\n"
+            + "  Stream A removed the pseudoinverse pipeline (Laplacian eigenmaps + reconstruct_w)\n"
+            + "  per /home/ahart/.claude/plans/replicated-hatching-stream.md — that pipeline violated\n"
+            + "  substrate-architect Hard Rule 1 (no GEMM-as-primitive, no vector-NN-in-d-dim) and\n"
+            + "  Memory's explicit 'not pseudoinverse' rule. Stream B implements the correct shape\n"
+            + "  via IArchitectureTemplate::materialize_tensor (DESIGN.md:660).");
     }
 
-    // === synthesize tinyllama-passthrough: REAL weights → our GGUF writer (no substrate) ===
-    // Isolates format/metadata/arch_template correctness from substrate data quality.
-    // Each tensor is transcoded to the arch_template's declared dtype (norms bf16→f32,
-    // weights bf16 passthrough) to match llama.cpp's GGUF conventions.
-    private static async Task<int> SynthesizeTinyLlamaPassthroughAsync(string outputPath, bool allF32 = false, double sparseTol = 0.0)
+
+    // === synthesize passthrough: real weights → our GGUF writer (no substrate) ===
+    // Diagnostic. Isolates format/metadata/arch_template correctness from substrate
+    // data quality. Each tensor is transcoded to the arch_template's declared dtype
+    // (norms bf16→f32, weights bf16 passthrough) to match llama.cpp's GGUF conventions.
+    // Universal across any safetensors-format model dir; not model-family-specific.
+    private static async Task<int> SynthesizePassthroughAsync(
+        string modelDir, string outputPath, bool allF32 = false, double sparseTol = 0.0)
     {
-        Console.WriteLine($"synthesize tinyllama {(sparseTol > 0 ? $"SPARSE(tol={sparseTol:0.000})" : "PASSTHROUGH")} (real weights → GGUF{(allF32 || sparseTol > 0 ? ", F32" : "")}) → {outputPath}");
+        if (string.IsNullOrEmpty(modelDir) || !Directory.Exists(modelDir))
+            return Fail(
+                "usage: laplace synthesize passthrough <model-dir> [output.gguf] [--f32] [--sparse-tol <tol>]\n"
+                + $"  (model dir not found: {modelDir})");
+
+        Console.WriteLine(
+            $"synthesize passthrough {(sparseTol > 0 ? $"SPARSE(tol={sparseTol:0.000})" : "PASSTHROUGH")} "
+            + $"(real weights → GGUF{(allF32 || sparseTol > 0 ? ", F32" : "")}) "
+            + $"src={modelDir} → {outputPath}");
         /* LlamaTokenizerParser now requires the perfcache (TextDecomposer +
          * HashComposer in Parse). */
         CodepointPerfcache.Load(ResolveBlob());
-        string configPath      = Path.Combine(TinyLlamaDir, "config.json");
-        string tokenizerPath   = Path.Combine(TinyLlamaDir, "tokenizer.json");
-        string safetensorsPath = Path.Combine(TinyLlamaDir, "model.safetensors");
+        string configPath      = Path.Combine(modelDir, "config.json");
+        string tokenizerPath   = Path.Combine(modelDir, "tokenizer.json");
+        string safetensorsPath = Path.Combine(modelDir, "model.safetensors");
         if (!File.Exists(configPath) || !File.Exists(tokenizerPath) || !File.Exists(safetensorsPath))
-            return Fail($"model files not found under {TinyLlamaDir}");
+            return Fail($"model files not found under {modelDir}");
 
         var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
         var recipe = LlamaRecipeExtractor.Parse(configPath);
@@ -488,7 +331,7 @@ internal static class Program
 
         var gguf = SynthInterop.GgufWriterCreate(outputPath);
         if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
-        WriteGgufMetadata(gguf, recipe, tokens);
+        WriteGgufMetadata(gguf, recipe, tokens, modelDir);
 
         using var fs = new FileStream(safetensorsPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, useAsync: false);
         var sw = Stopwatch.StartNew();
@@ -708,418 +551,6 @@ internal static class Program
         return hf; // unknown — pass through unchanged
     }
 
-    /* === Substrate → Recipe-Mold Synthesis Helpers ============================
-     *
-     * The substrate codec at synthesis: build a sparse typed-edge graph from
-     * substrate attestations (cross-kind for the input-direction embedding;
-     * per-kind subgraphs for interior reconstruction); spectral-embed via
-     * Laplacian eigenmaps of the graph for embed_tokens / output.weight at
-     * the recipe's target dim; reconstruct interior tensors via least-squares
-     * factorization of `E·Wᵀ·W·Eᵀ ≈ S_kind` (symmetric) or `E·Wqᵀ·Wk·Eᵀ ≈ S_Q`
-     * (asymmetric, for GQA). Norm scales come from NORMALIZES per-dim
-     * attestations.
-     *
-     * The same primitives work for any architecture family / modality — the
-     * recipe is the mold; the primitives are universal. */
-
-    private sealed record SubstrateAdjacencyData(int[] Rows, int[] Cols, double[] Weights);
-
-    /* Token×token attestation kinds the AI-model interior tensors emit. */
-    private static readonly Hash128[] TokenPairAttestationKinds =
-    [
-        ModelDecomposer.QProjectsKind,
-        ModelDecomposer.VProjectsKind,
-        ModelDecomposer.OProjectsKind,
-        ModelDecomposer.GatesKind,
-        ModelDecomposer.UpProjectsKind,
-        ModelDecomposer.DownProjectsKind,
-    ];
-
-    /// <summary>
-    /// Query token-pair attestations from substrate and build a sparse adjacency
-    /// in COO form. Each row's contribution is `effective_mu = max(0, (rating −
-    /// 2*rd) / 1e9)` (the Glicko-2 lower bound per ADR 0036). Multiple rows for
-    /// the same (subject_token, object_token) tuple — from per-kind aggregation
-    /// or cross-source consensus — get summed into one edge weight in C#.
-    ///
-    /// kindFilter == null → all token-pair kinds (cross-kind aggregate for
-    /// input-direction embedding). kindFilter == specific kind → that kind's
-    /// subgraph for interior reconstruction.
-    /// </summary>
-    private static async Task<SubstrateAdjacencyData> BuildSubstrateAdjacencyAsync(
-        NpgsqlDataSource ds,
-        Hash128 modelSourceId,
-        Dictionary<Hash128, int> entityToToken,
-        Hash128? kindFilter)
-    {
-        await using var conn = await ds.OpenConnectionAsync();
-        await using var cmd  = conn.CreateCommand();
-        if (kindFilter is { } kf)
-        {
-            cmd.CommandText =
-                """
-                SELECT subject_id, object_id, rating, rd
-                FROM laplace.attestations
-                WHERE source_id = $1 AND kind_id = $2
-                """;
-            cmd.Parameters.AddWithValue(modelSourceId.ToBytes());
-            cmd.Parameters.AddWithValue(kf.ToBytes());
-        }
-        else
-        {
-            /* Cross-kind: include all the token-pair kinds. */
-            cmd.CommandText =
-                """
-                SELECT subject_id, object_id, rating, rd
-                FROM laplace.attestations
-                WHERE source_id = $1
-                  AND kind_id = ANY($2)
-                """;
-            cmd.Parameters.AddWithValue(modelSourceId.ToBytes());
-            var kindBytes = TokenPairAttestationKinds.Select(k => k.ToBytes()).ToArray();
-            cmd.Parameters.AddWithValue(kindBytes);
-        }
-
-        var acc = new Dictionary<(int r, int c), double>(1 << 16);
-        await using var rdr = await cmd.ExecuteReaderAsync();
-        while (await rdr.ReadAsync())
-        {
-            var subjBytes = (byte[])rdr[0];
-            var objBytes  = (byte[])rdr[1];
-            long rating   = rdr.GetInt64(2);
-            long rdVal    = rdr.GetInt64(3);
-
-            double effMu = Math.Max(0.0, (rating - 2.0 * rdVal) / 1e9);
-            if (effMu <= 0.0) continue;
-
-            var subjId = Hash128FromBytes(subjBytes);
-            var objId  = Hash128FromBytes(objBytes);
-            if (!entityToToken.TryGetValue(subjId, out int r)) continue;
-            if (!entityToToken.TryGetValue(objId,  out int c)) continue;
-
-            var key = (r, c);
-            if (acc.TryGetValue(key, out double existing))
-                acc[key] = existing + effMu;
-            else
-                acc[key] = effMu;
-        }
-
-        int n = acc.Count;
-        var rows    = new int[n];
-        var cols    = new int[n];
-        var weights = new double[n];
-        int idx = 0;
-        foreach (var ((r, c), w) in acc)
-        {
-            rows[idx] = r; cols[idx] = c; weights[idx] = w; idx++;
-        }
-        return new SubstrateAdjacencyData(rows, cols, weights);
-    }
-
-    /// <summary>
-    /// Build the output-direction adjacency for lm_head synthesis. Edges come
-    /// from PROJECTION_OUTPUT physicality 4D proximity in the substrate
-    /// canonical frame — tokens whose output-direction positions are close
-    /// share an edge. Uses raw Euclidean distance in 4D (PostGIS could
-    /// alternatively serve this via ST_DWithin/GIST, but for vocab=32K the
-    /// pairwise scan is tractable here).
-    /// </summary>
-    private static async Task<SubstrateAdjacencyData> BuildOutputDirectionAdjacencyAsync(
-        NpgsqlDataSource ds,
-        Hash128 modelSourceId,
-        Dictionary<Hash128, int> entityToToken,
-        int kNearest = 32)
-    {
-        await using var conn = await ds.OpenConnectionAsync();
-        await using var cmd  = conn.CreateCommand();
-        cmd.CommandText =
-            """
-            SELECT entity_id, ST_X(coord), ST_Y(coord), ST_Z(coord), ST_M(coord)
-            FROM laplace.physicalities
-            WHERE kind = 4 AND source_id = $1
-            """;
-        cmd.Parameters.AddWithValue(modelSourceId.ToBytes());
-
-        var tokenIdxToCoord = new Dictionary<int, (double x, double y, double z, double m)>();
-        await using var rdr = await cmd.ExecuteReaderAsync();
-        while (await rdr.ReadAsync())
-        {
-            var entityId = Hash128FromBytes((byte[])rdr[0]);
-            if (!entityToToken.TryGetValue(entityId, out int t)) continue;
-            tokenIdxToCoord[t] = (rdr.GetDouble(1), rdr.GetDouble(2),
-                                  rdr.GetDouble(3), rdr.GetDouble(4));
-        }
-        if (tokenIdxToCoord.Count == 0)
-            return new SubstrateAdjacencyData(Array.Empty<int>(), Array.Empty<int>(), Array.Empty<double>());
-
-        /* For each token, find its kNearest neighbors by 4D Euclidean distance.
-         * O(n²) — for vocab=32K this is ~1B ops, ~few seconds on modern CPU. */
-        var arr = tokenIdxToCoord.Select(kv => (idx: kv.Key, c: kv.Value)).ToArray();
-        int n = arr.Length;
-
-        var rowsList = new List<int>(n * kNearest);
-        var colsList = new List<int>(n * kNearest);
-        var weightsList = new List<double>(n * kNearest);
-
-        var distBuf = new (double dist, int idx)[n];
-        for (int i = 0; i < n; i++)
-        {
-            for (int j = 0; j < n; j++)
-            {
-                if (i == j) { distBuf[j] = (double.PositiveInfinity, j); continue; }
-                double dx = arr[i].c.x - arr[j].c.x;
-                double dy = arr[i].c.y - arr[j].c.y;
-                double dz = arr[i].c.z - arr[j].c.z;
-                double dm = arr[i].c.m - arr[j].c.m;
-                distBuf[j] = (dx*dx + dy*dy + dz*dz + dm*dm, j);
-            }
-            /* nth_element-style partial sort */
-            int k = Math.Min(kNearest, n - 1);
-            Array.Sort(distBuf, 0, n, Comparer<(double dist, int idx)>.Create(
-                (a, b) => a.dist.CompareTo(b.dist)));
-            for (int neighbor = 0; neighbor < k; neighbor++)
-            {
-                var (dist, j) = distBuf[neighbor];
-                if (double.IsInfinity(dist)) break;
-                /* Edge weight: inverse distance (closer = stronger). */
-                double w = 1.0 / (1.0 + dist);
-                rowsList.Add(arr[i].idx);
-                colsList.Add(arr[j].idx);
-                weightsList.Add(w);
-            }
-        }
-
-        return new SubstrateAdjacencyData(
-            rowsList.ToArray(), colsList.ToArray(), weightsList.ToArray());
-    }
-
-    /// <summary>
-    /// Spectral embedding: top-`targetDim` Laplacian eigenvectors of the sparse
-    /// graph. Result is `[n × targetDim]` row-major doubles. Spectral
-    /// eigenvectors come out unit-normalized; rescaled so each row's L2 norm
-    /// matches the Xavier/Glorot init magnitude for an embedding layer of the
-    /// recipe's hidden_size — `1 / sqrt(targetDim)`. Derived from the recipe,
-    /// not a magic constant.
-    /// </summary>
-    private static unsafe double[] ComputeSpectralEmbedding(
-        SubstrateAdjacencyData adj, int n, int targetDim)
-    {
-        if (adj.Rows.Length == 0 || n == 0 || targetDim == 0)
-            return new double[(long)n * targetDim];
-
-        var emb = new double[(long)n * targetDim];
-        fixed (int* rowsPtr = adj.Rows)
-        fixed (int* colsPtr = adj.Cols)
-        fixed (double* wPtr = adj.Weights)
-        fixed (double* embPtr = emb)
-        {
-            int rc = DynamicsInterop.LaplacianEigenmapsFromSparseGraph(
-                rowsPtr, colsPtr, wPtr,
-                (nuint)adj.Rows.Length, (nuint)n, (nuint)targetDim,
-                embPtr);
-            if (rc != 0)
-                throw new InvalidOperationException(
-                    $"laplacian_eigenmaps_from_sparse_graph returned {rc}");
-        }
-
-        /* Xavier/Glorot init magnitude for an embedding feeding into a layer
-         * of width `targetDim`: variance 1/targetDim → std 1/sqrt(targetDim).
-         * Spectral eigenvectors have unit L2 norm; scaling by
-         * 1/sqrt(targetDim) gives each row that per-element std. Recipe-
-         * derived (targetDim = dModel from arch_template), not a magic
-         * scalar. */
-        double scale = 1.0 / Math.Sqrt(targetDim);
-        for (long i = 0; i < emb.LongLength; i++) emb[i] *= scale;
-        return emb;
-    }
-
-    /// <summary>
-    /// Symmetric interior-tensor reconstruction:
-    /// recover W [outDim × N] such that `E·Wᵀ·W·Eᵀ ≈ S_kind`.
-    /// </summary>
-    private static unsafe float[] ReconstructInteriorTensorSymmetric(
-        double[] E, SubstrateAdjacencyData kindAdj,
-        int vocab, int N, int outDim, double lambda)
-    {
-        var W = new float[(long)outDim * N];
-        if (kindAdj.Rows.Length == 0) return W;  // zero-filled
-
-        fixed (double* ePtr = E)
-        fixed (int* rowsPtr = kindAdj.Rows)
-        fixed (int* colsPtr = kindAdj.Cols)
-        fixed (double* wPtr = kindAdj.Weights)
-        fixed (float* wOutPtr = W)
-        {
-            int rc = SynthInterop.ReconstructWFromTokenPairAttestations(
-                ePtr, (nuint)vocab, (nuint)N,
-                rowsPtr, colsPtr, wPtr, (nuint)kindAdj.Rows.Length,
-                (nuint)outDim, lambda, wOutPtr);
-            if (rc != 0)
-                throw new InvalidOperationException(
-                    $"reconstruct_w_from_token_pair_attestations returned {rc}");
-        }
-        return W;
-    }
-
-    /// <summary>
-    /// Asymmetric (joint-bilinear) reconstruction for Q_PROJECTS:
-    /// recover Wq [outDimQ × N] AND Wk [outDimK × N] such that
-    /// `E·Wqᵀ·Wk·Eᵀ ≈ S_Q`. TinyLlama GQA has Wq=[2048×2048] and
-    /// Wk=[256×2048] — symmetric collapse would destroy behavioral fidelity.
-    /// </summary>
-    private static unsafe (float[] Wq, float[] Wk) ReconstructInteriorTensorAsymmetric(
-        double[] E, SubstrateAdjacencyData kindAdj,
-        int vocab, int N, int outDimQ, int outDimK, double lambda)
-    {
-        var Wq = new float[(long)outDimQ * N];
-        var Wk = new float[(long)outDimK * N];
-        if (kindAdj.Rows.Length == 0) return (Wq, Wk);  // both zero-filled
-
-        fixed (double* ePtr = E)
-        fixed (int* rowsPtr = kindAdj.Rows)
-        fixed (int* colsPtr = kindAdj.Cols)
-        fixed (double* wPtr = kindAdj.Weights)
-        fixed (float* wqPtr = Wq)
-        fixed (float* wkPtr = Wk)
-        {
-            int rc = SynthInterop.ReconstructQkFromTokenPairAttestations(
-                ePtr, (nuint)vocab, (nuint)N,
-                rowsPtr, colsPtr, wPtr, (nuint)kindAdj.Rows.Length,
-                (nuint)outDimQ, (nuint)outDimK, lambda, wqPtr, wkPtr);
-            if (rc != 0)
-                throw new InvalidOperationException(
-                    $"reconstruct_qk_from_token_pair_attestations returned {rc}");
-        }
-        return (Wq, Wk);
-    }
-
-    /// <summary>
-    /// <summary>Write a row-major double[rows × cols] matrix to tensorBytes at
-    /// the GGUF dtype (0=f32, 2=bf16).</summary>
-    private static void WriteDoubleMatrixToTensorBytes(
-        double[] matrix, int rows, int cols, int dtype, byte[] tensorBytes)
-    {
-        long n = (long)rows * cols;
-        if (dtype == 0)
-        {
-            for (long i = 0; i < n; i++)
-            {
-                float fv = (float)matrix[i];
-                uint bits = BitConverter.SingleToUInt32Bits(fv);
-                int off = (int)(i * 4);
-                tensorBytes[off + 0] = (byte)(bits & 0xFF);
-                tensorBytes[off + 1] = (byte)((bits >>  8) & 0xFF);
-                tensorBytes[off + 2] = (byte)((bits >> 16) & 0xFF);
-                tensorBytes[off + 3] = (byte)((bits >> 24) & 0xFF);
-            }
-        }
-        else
-        {
-            for (long i = 0; i < n; i++)
-            {
-                float fv = (float)matrix[i];
-                uint bits = BitConverter.SingleToUInt32Bits(fv);
-                ushort bf16 = (ushort)(bits >> 16);
-                int off = (int)(i * 2);
-                tensorBytes[off + 0] = (byte)(bf16 & 0xFF);
-                tensorBytes[off + 1] = (byte)(bf16 >> 8);
-            }
-        }
-    }
-
-    /// <summary>Write a row-major float[rows × cols] matrix to tensorBytes.</summary>
-    private static void WriteFloatMatrixToTensorBytes(
-        float[] matrix, int rows, int cols, int dtype, byte[] tensorBytes)
-    {
-        long n = (long)rows * cols;
-        if (dtype == 0)
-        {
-            for (long i = 0; i < n; i++)
-            {
-                uint bits = BitConverter.SingleToUInt32Bits(matrix[i]);
-                int off = (int)(i * 4);
-                tensorBytes[off + 0] = (byte)(bits & 0xFF);
-                tensorBytes[off + 1] = (byte)((bits >>  8) & 0xFF);
-                tensorBytes[off + 2] = (byte)((bits >> 16) & 0xFF);
-                tensorBytes[off + 3] = (byte)((bits >> 24) & 0xFF);
-            }
-        }
-        else
-        {
-            for (long i = 0; i < n; i++)
-            {
-                uint bits = BitConverter.SingleToUInt32Bits(matrix[i]);
-                ushort bf16 = (ushort)(bits >> 16);
-                int off = (int)(i * 2);
-                tensorBytes[off + 0] = (byte)(bf16 & 0xFF);
-                tensorBytes[off + 1] = (byte)(bf16 >> 8);
-            }
-        }
-    }
-
-    /// <summary>Write the transpose of source[srcRows × srcCols] into
-    /// tensorBytes shaped as [dstRows × dstCols] = [srcCols × srcRows].</summary>
-    private static void WriteTransposedFloatMatrixToTensorBytes(
-        float[] source, int srcRows, int srcCols,
-        int dstRows, int dstCols, int dtype, byte[] tensorBytes)
-    {
-        if (dstRows != srcCols || dstCols != srcRows)
-            throw new ArgumentException(
-                $"Transpose shape mismatch: src=[{srcRows}×{srcCols}], " +
-                $"dst=[{dstRows}×{dstCols}]");
-        int elemSize = dtype == 0 ? 4 : 2;
-        for (int r = 0; r < dstRows; r++)
-        {
-            for (int c = 0; c < dstCols; c++)
-            {
-                float v = source[c * srcCols + r];   // src row=c, col=r
-                int off = (r * dstCols + c) * elemSize;
-                if (dtype == 0)
-                {
-                    uint bits = BitConverter.SingleToUInt32Bits(v);
-                    tensorBytes[off + 0] = (byte)(bits & 0xFF);
-                    tensorBytes[off + 1] = (byte)((bits >>  8) & 0xFF);
-                    tensorBytes[off + 2] = (byte)((bits >> 16) & 0xFF);
-                    tensorBytes[off + 3] = (byte)((bits >> 24) & 0xFF);
-                }
-                else
-                {
-                    uint bits = BitConverter.SingleToUInt32Bits(v);
-                    ushort bf16 = (ushort)(bits >> 16);
-                    tensorBytes[off + 0] = (byte)(bf16 & 0xFF);
-                    tensorBytes[off + 1] = (byte)(bf16 >> 8);
-                }
-            }
-        }
-    }
-
-    /// <summary>Write per-dim norm scale vector to tensorBytes. Defaults to
-    /// 1.0 (identity) per dim when `scale` is null. Norms are f32 per the
-    /// arch_template convention.</summary>
-    private static void FillPerDimNorm(byte[] tensorBytes, float[]? scale, int dModel, int dtype)
-    {
-        for (int d = 0; d < dModel; d++)
-        {
-            float v = (scale != null && d < scale.Length && scale[d] != 0.0f) ? scale[d] : 1.0f;
-            uint bits = BitConverter.SingleToUInt32Bits(v);
-            if (dtype == 0)
-            {
-                int off = d * 4;
-                tensorBytes[off + 0] = (byte)(bits & 0xFF);
-                tensorBytes[off + 1] = (byte)((bits >>  8) & 0xFF);
-                tensorBytes[off + 2] = (byte)((bits >> 16) & 0xFF);
-                tensorBytes[off + 3] = (byte)((bits >> 24) & 0xFF);
-            }
-            else
-            {
-                ushort bf16 = (ushort)(bits >> 16);
-                int off = d * 2;
-                tensorBytes[off + 0] = (byte)(bf16 & 0xFF);
-                tensorBytes[off + 1] = (byte)(bf16 >> 8);
-            }
-        }
-    }
-
     private static unsafe Hash128 Hash128FromBytes(byte[] b)
     {
         if (b.Length < 16) return Hash128.Zero;
@@ -1130,10 +561,11 @@ internal static class Program
     private static void WriteGgufMetadata(
         IntPtr gguf,
         LlamaRecipeExtractor.RecipeInfo recipe,
-        IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens)
+        IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
+        string modelDir)
     {
         SynthInterop.GgufWriterAddMetadataStr(gguf, "general.architecture", "llama");
-        SynthInterop.GgufWriterAddMetadataStr(gguf, "general.name", "TinyLlama Substrate Synthesis v0.1");
+        SynthInterop.GgufWriterAddMetadataStr(gguf, "general.name", Path.GetFileName(modelDir.TrimEnd('/')));
 
         SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.context_length",          2048);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.embedding_length",         (uint)recipe.HiddenSize);
@@ -1162,7 +594,7 @@ internal static class Program
         // Authoritative tokenizer vocab from the SentencePiece model (real pieces +
         // scores + types). The HF tokenizer.json is BPE-format with no scores; emitting
         // zero scores under vocab type=SPM breaks tokenization in llama.cpp.
-        string spPath = Path.Combine(TinyLlamaDir, "tokenizer.model");
+        string spPath = Path.Combine(modelDir, "tokenizer.model");
         SpPiece[]? sp = File.Exists(spPath) ? ParseSentencePieceModel(spPath) : null;
 
         string[] pieces = new string[n];
@@ -1193,9 +625,9 @@ internal static class Program
                 SynthInterop.GgufWriterAddMetadataI32Array(gguf, "tokenizer.ggml.token_type", p, (nuint)n);
         }
 
-        // Real chat template (so the server's chat endpoint uses TinyLlama's template,
-        // not a generic ChatML fallback).
-        string cfgPath = Path.Combine(TinyLlamaDir, "tokenizer_config.json");
+        // Real chat template from the source model's tokenizer_config (so the server's
+        // chat endpoint uses the model's actual template, not a generic ChatML fallback).
+        string cfgPath = Path.Combine(modelDir, "tokenizer_config.json");
         if (File.Exists(cfgPath))
         {
             using var cfg = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(cfgPath));
@@ -1425,7 +857,7 @@ internal static class Program
             return;
         }
 
-        Console.WriteLine($"  model attestations    : {modelAtts,9:N0}  (source TinyLlama)");
+        Console.WriteLine($"  model attestations    : {modelAtts,9:N0}");
         async Task<long> KindCount(Hash128 kind)
         {
             await using var c = conn.CreateCommand();
@@ -1436,14 +868,19 @@ internal static class Program
             return (long)(await c.ExecuteScalarAsync())!;
         }
 
+        // Full ADR 0056 T9 transformer-family vocabulary (all 10 kinds restored Stream A).
         (string label, Hash128 kind)[] modelKinds =
         [
+            ("EMBEDS",          ModelDecomposer.EmbedsKind),
             ("Q_PROJECTS",      ModelDecomposer.QProjectsKind),
+            ("K_PROJECTS",      ModelDecomposer.KProjectsKind),
             ("V_PROJECTS",      ModelDecomposer.VProjectsKind),
             ("O_PROJECTS",      ModelDecomposer.OProjectsKind),
             ("GATES",           ModelDecomposer.GatesKind),
             ("UP_PROJECTS",     ModelDecomposer.UpProjectsKind),
             ("DOWN_PROJECTS",   ModelDecomposer.DownProjectsKind),
+            ("NORMALIZES",      ModelDecomposer.NormalizesKind),
+            ("OUTPUT_PROJECTS", ModelDecomposer.OutputProjectsKind),
         ];
         foreach (var (label, kind) in modelKinds)
         {
