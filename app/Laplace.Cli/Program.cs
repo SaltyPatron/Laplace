@@ -262,20 +262,55 @@ internal static class Program
                 dtype = spec.Dtype;
             }
 
-            Hash128? kindId = TensorNameToKind(name);
-            if (kindId is null)
-            {
-                Console.WriteLine($"  skip {name} (no kind mapping)");
-                continue;
-            }
-
-            // Allocate zero-filled tensor
+            // Allocate zero-filled tensor (sparse-by-construction per RULES R4 —
+            // any cell without substrate signal stays exactly zero).
             byte[] tensorBytes = new byte[rows * cols * (dtype == 0 ? 4UL : 2UL)];
+            int attCount = 0;
 
-            // Fill from attestations (async PG query — cannot be inside unsafe block)
-            int attCount = await FillTensorFromAttestationsAsync(
-                ds, kindId.Value, ModelDecomposer.Source,
-                entityToToken, tensorBytes, (int)rows, (int)cols, dtype);
+            /* Dispatch by tensor role (corrected codec per ADR 0056 + this session's
+             * channel split — embeddings/lm_head are PROJECTION-class physicality
+             * data, interior tensors are token×token typed attestations).
+             *
+             *   token_embd.weight   → PROJECTION physicality (per-token 4D, source=model)
+             *   output.weight       → would be PROJECTION-output physicality, deferred
+             *                         (needs PhysicalityKind enum extension); zero for now
+             *   attn_norm/ffn_norm/output_norm.weight → identity (1.0 per-dim) until
+             *                         NORMALIZES recipe-metadata path lands
+             *   attn_{q,k,v,output}.weight + ffn_{gate,up,down}.weight → would be
+             *                         reconstructed from token×token attestations via
+             *                         SVD-based least-squares (S = E·W·Wᵀ·Eᵀ → recover W);
+             *                         zero-filled for v0, reconstruction is the next
+             *                         scoped chunk of work. The substrate now CARRIES
+             *                         these attestations in the right shape; the
+             *                         reconstruction math is the gap. */
+            string ggmlName = HfToGgmlName(name);
+            if (ggmlName == "token_embd.weight")
+            {
+                attCount = await FillEmbedFromProjectionsAsync(
+                    ds, ModelDecomposer.Source, entityToToken,
+                    tensorBytes, (int)rows, (int)cols, dtype);
+            }
+            else if (ggmlName.EndsWith("_norm.weight", StringComparison.Ordinal))
+            {
+                /* RMSNorm scale defaults to 1.0 (identity) until NORMALIZES is
+                 * carried as recipe metadata. F32-only per llama.cpp convention. */
+                long n = (long)rows * (long)cols;
+                if (dtype == 0)
+                {
+                    uint bits = BitConverter.SingleToUInt32Bits(1.0f);
+                    for (long k = 0; k < n; k++)
+                    {
+                        int off = (int)(k * 4);
+                        tensorBytes[off + 0] = (byte)(bits & 0xFF);
+                        tensorBytes[off + 1] = (byte)((bits >>  8) & 0xFF);
+                        tensorBytes[off + 2] = (byte)((bits >> 16) & 0xFF);
+                        tensorBytes[off + 3] = (byte)((bits >> 24) & 0xFF);
+                    }
+                }
+                attCount = (int)n;
+            }
+            /* Else: interior weight tensors stay zero-filled. Reconstruction from
+             * token×token attestations is the next chunk. */
 
             // Write to GGUF — dims in column-major order (inner first)
             nuint[] ggufDims = cols > 1
@@ -567,94 +602,72 @@ internal static class Program
         return hf; // unknown — pass through unchanged
     }
 
-    // Map tensor name → attestation kind.
-    // k_proj uses the same aggregated Q_PROJECTS attestations as q_proj.
-    private static Hash128? TensorNameToKind(string name)
-    {
-        if (name == "model.embed_tokens.weight")          return ModelDecomposer.EmbedsKind;
-        if (name.Contains(".self_attn.q_proj.weight"))    return ModelDecomposer.QProjectsKind;
-        if (name.Contains(".self_attn.k_proj.weight"))    return ModelDecomposer.QProjectsKind;
-        if (name.Contains(".self_attn.v_proj.weight"))    return ModelDecomposer.VProjectsKind;
-        if (name.Contains(".self_attn.o_proj.weight"))    return ModelDecomposer.OProjectsKind;
-        if (name.Contains(".mlp.gate_proj.weight"))        return ModelDecomposer.GatesKind;
-        if (name.Contains(".mlp.up_proj.weight"))          return ModelDecomposer.UpProjectsKind;
-        if (name.Contains(".mlp.down_proj.weight"))        return ModelDecomposer.DownProjectsKind;
-        if (name.Contains("layernorm.weight") || name == "model.norm.weight") return ModelDecomposer.NormalizesKind;
-        if (name == "lm_head.weight")                     return ModelDecomposer.OutputProjectsKind;
-        return null;
-    }
-
-    // Query attestations for (kind, source) and fill the flat tensor byte array.
-    // dtype=0→f32 (norm weights), dtype=2→bf16 (everything else).
-    private static async Task<int> FillTensorFromAttestationsAsync(
+    /* Query PROJECTION physicalities (kind=3, source=model) and fill an embed_tokens
+     * tensor [vocab × dModel] from them. v0 reconstruction: write the substrate's 4D
+     * coord into the first 4 dims of each token's row; zero-pad the remaining
+     * (dModel - 4) dims (sparse-by-construction R4). Full N-d reconstruction via
+     * dynamics-pipeline expansion (Laplacian eigenmap basis-extension structured by
+     * the typed-edge graph) is the next scoped chunk. */
+    private static async Task<int> FillEmbedFromProjectionsAsync(
         NpgsqlDataSource ds,
-        Hash128 kindId,
         Hash128 sourceId,
         Dictionary<Hash128, int> entityToToken,
         byte[] tensorBytes,
         int rows, int cols, int dtype)
     {
-        int attCount = 0;
-
+        int written = 0;
         await using var conn = await ds.OpenConnectionAsync();
         await using var cmd  = conn.CreateCommand();
         cmd.CommandText =
             """
-            SELECT subject_id, object_id, rating
-            FROM laplace.attestations
-            WHERE kind_id = $1 AND source_id = $2
+            SELECT entity_id, ST_X(coord), ST_Y(coord), ST_Z(coord), ST_M(coord)
+            FROM laplace.physicalities
+            WHERE kind = 3 AND source_id = $1
             """;
-        cmd.Parameters.AddWithValue(kindId.ToBytes());
         cmd.Parameters.AddWithValue(sourceId.ToBytes());
 
+        double[] coord = new double[4];
         await using var rdr = await cmd.ExecuteReaderAsync();
         while (await rdr.ReadAsync())
         {
-            var subjBytes = (byte[])rdr[0];
-            var objBytes  = (byte[])rdr[1];
-            long rating   = rdr.GetInt64(2);
+            var entityBytes = (byte[])rdr[0];
+            coord[0] = rdr.GetDouble(1);
+            coord[1] = rdr.GetDouble(2);
+            coord[2] = rdr.GetDouble(3);
+            coord[3] = rdr.GetDouble(4);
 
-            var subjId = Hash128FromBytes(subjBytes);
-            var objId  = Hash128FromBytes(objBytes);
+            var entityId = Hash128FromBytes(entityBytes);
+            if (!entityToToken.TryGetValue(entityId, out int row)) continue;
+            if (row >= rows) continue;
 
-            if (!entityToToken.TryGetValue(subjId, out int row)) continue;
-            if (!entityToToken.TryGetValue(objId,  out int col)) continue;
-            if (row >= rows || col >= cols) continue;
-
-            double weight = InverseScale(rating);
-
-            if (dtype == 0)
+            /* Write 4D substrate-canonical coord into first 4 dims of this token's
+             * embed row. Remaining (cols - 4) dims left at zero. */
+            int writeDims = Math.Min(4, cols);
+            int elemSize = dtype == 0 ? 4 : 2;
+            int rowOff = row * cols * elemSize;
+            for (int d = 0; d < writeDims; d++)
             {
-                // f32: 4 bytes per element
-                float  fv   = (float)weight;
-                uint   bits = BitConverter.SingleToUInt32Bits(fv);
-                int    off  = (row * cols + col) * 4;
-                tensorBytes[off + 0] = (byte)(bits & 0xFF);
-                tensorBytes[off + 1] = (byte)((bits >> 8)  & 0xFF);
-                tensorBytes[off + 2] = (byte)((bits >> 16) & 0xFF);
-                tensorBytes[off + 3] = (byte)((bits >> 24) & 0xFF);
+                float fv = (float)coord[d];
+                int off = rowOff + d * elemSize;
+                if (dtype == 0)
+                {
+                    uint bits = BitConverter.SingleToUInt32Bits(fv);
+                    tensorBytes[off + 0] = (byte)(bits & 0xFF);
+                    tensorBytes[off + 1] = (byte)((bits >>  8) & 0xFF);
+                    tensorBytes[off + 2] = (byte)((bits >> 16) & 0xFF);
+                    tensorBytes[off + 3] = (byte)((bits >> 24) & 0xFF);
+                }
+                else
+                {
+                    uint bits = BitConverter.SingleToUInt32Bits(fv);
+                    ushort bf16 = (ushort)(bits >> 16);
+                    tensorBytes[off + 0] = (byte)(bf16 & 0xFF);
+                    tensorBytes[off + 1] = (byte)(bf16 >> 8);
+                }
             }
-            else
-            {
-                // bf16: upper 16 bits of float32
-                ushort bf16 = DoubleToBF16(weight);
-                int    off  = (row * cols + col) * 2;
-                tensorBytes[off + 0] = (byte)(bf16 & 0xFF);
-                tensorBytes[off + 1] = (byte)(bf16 >> 8);
-            }
-            attCount++;
+            written++;
         }
-        return attCount;
-    }
-
-    // Inverse of LlamaWeightExtractor.ScaleToRating: signed fixed-point ×1e9.
-    private static double InverseScale(long ratingFp1e9) => ratingFp1e9 / 1e9;
-
-    private static ushort DoubleToBF16(double v)
-    {
-        float  f    = (float)v;
-        uint   bits = BitConverter.SingleToUInt32Bits(f);
-        return (ushort)(bits >> 16);
+        return written;
     }
 
     private static unsafe Hash128 Hash128FromBytes(byte[] b)
