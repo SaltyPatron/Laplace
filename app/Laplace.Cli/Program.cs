@@ -120,6 +120,13 @@ internal static class Program
         if (string.IsNullOrEmpty(modelDir) || !Directory.Exists(modelDir))
             return Fail($"usage: laplace ingest model <model-dir>  (not found: {modelDir})");
 
+        /* LlamaTokenizerParser.Parse now routes tokens through TextDecomposer +
+         * HashComposer + TextEntityBuilder so token entities are content-addressed
+         * the same as every other text entity (R5). The HashComposer atom resolver
+         * reads from CodepointPerfcache, so the process-wide T0 perf-cache MUST
+         * be loaded before any tokenizer parse runs. */
+        CodepointPerfcache.Load(ResolveBlob());
+
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
 
         /* Check if this model source is already ingested — Q_PROJECTS attestations
@@ -198,6 +205,11 @@ internal static class Program
     private static async Task<int> SynthesizeTinyLlamaAsync(string outputPath)
     {
         Console.WriteLine($"synthesize tinyllama → {outputPath}");
+
+        /* Same perfcache prerequisite as IngestModelAsync — LlamaTokenizerParser
+         * runs TextDecomposer + HashComposer which read codepoint records from
+         * the process-wide T0 perf-cache. */
+        CodepointPerfcache.Load(ResolveBlob());
 
         // 1. Parse tokenizer and recipe from the vault (same files used at ingest time)
         string configPath    = Path.Combine(TinyLlamaDir, "config.json");
@@ -349,6 +361,9 @@ internal static class Program
     private static async Task<int> SynthesizeTinyLlamaPassthroughAsync(string outputPath, bool allF32 = false, double sparseTol = 0.0)
     {
         Console.WriteLine($"synthesize tinyllama {(sparseTol > 0 ? $"SPARSE(tol={sparseTol:0.000})" : "PASSTHROUGH")} (real weights → GGUF{(allF32 || sparseTol > 0 ? ", F32" : "")}) → {outputPath}");
+        /* LlamaTokenizerParser now requires the perfcache (TextDecomposer +
+         * HashComposer in Parse). */
+        CodepointPerfcache.Load(ResolveBlob());
         string configPath      = Path.Combine(TinyLlamaDir, "config.json");
         string tokenizerPath   = Path.Combine(TinyLlamaDir, "tokenizer.json");
         string safetensorsPath = Path.Combine(TinyLlamaDir, "model.safetensors");
