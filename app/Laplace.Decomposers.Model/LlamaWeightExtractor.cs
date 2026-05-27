@@ -46,6 +46,12 @@ public sealed class LlamaWeightExtractor
     private readonly KindIds _kinds;
     private readonly Hash128 _sourceId;
 
+    /* Content-based feature entity IDs, computed from actual weight columns/rows.
+     * Populated at the start of ExtractAsync before first emit. */
+    private Hash128[] _residIds = null!;
+    private Hash128[] _kvIds    = null!;
+    private Hash128[] _ffnIds   = null!;
+
     public sealed class KindIds
     {
         public required Hash128 Embeds         { get; init; }
@@ -100,6 +106,23 @@ public sealed class LlamaWeightExtractor
          * scorer (decoded to f32 once inside each C call). */
         ushort[] E_bf16 = LoadRawBF16(refMap, "model.embed_tokens.weight",
                                        (long)vocabSize * dModel);
+
+        /* Content-based feature entity IDs: Blake3(weight bytes) — no model name, no
+         * axis label, no dim index.  Same weight values → same entity across models.
+         * Load layer-0 v_proj and gate_proj to anchor kv and ffn feature IDs. */
+        ushort[] v0_bf16 = refMap.ContainsKey("model.layers.0.self_attn.v_proj.weight")
+            ? LoadRawBF16(refMap, "model.layers.0.self_attn.v_proj.weight", (long)kvDim * dModel)
+            : new ushort[(long)kvDim * dModel];
+        ushort[] g0_bf16 = refMap.ContainsKey("model.layers.0.mlp.gate_proj.weight")
+            ? LoadRawBF16(refMap, "model.layers.0.mlp.gate_proj.weight", (long)interm * dModel)
+            : new ushort[(long)interm * dModel];
+
+        _residIds = new Hash128[dModel];
+        _kvIds    = new Hash128[kvDim];
+        _ffnIds   = new Hash128[interm];
+        for (int d = 0; d < dModel; d++)  _residIds[d] = ModelFeatureEntityId.FromBF16Column(E_bf16, vocabSize, dModel, d);
+        for (int d = 0; d < kvDim;  d++)  _kvIds[d]    = ModelFeatureEntityId.FromBF16Row(v0_bf16, dModel, d);
+        for (int d = 0; d < interm; d++)  _ffnIds[d]   = ModelFeatureEntityId.FromBF16Row(g0_bf16, dModel, d);
 
         /* Phase 0 (ADR 0056): feature/hidden-dim entities — the object/subject axis the
          * interior roles attest against. Emitted FIRST so attestations referencing them
@@ -326,10 +349,15 @@ public sealed class LlamaWeightExtractor
         return survivors;
     }
 
-    /* Model_Feature type (hidden/feature-dim entities) + deterministic per-(axis,dim) id. */
+    /* Model_Feature type (hidden/feature-dim entities) + content-based per-(axis,dim) id. */
     private static readonly Hash128 ModelFeatureTypeId = Hash128.OfCanonical("substrate/type/Model_Feature/v1");
-    private static Hash128 FeatureId(string axis, int dim) =>
-        ModelFeatureEntityId.For(axis, dim);
+    private Hash128 FeatureId(string axis, int dim) => axis switch
+    {
+        "d"   => _residIds[dim],
+        "kv"  => _kvIds[dim],
+        "ffn" => _ffnIds[dim],
+        _     => throw new ArgumentOutOfRangeException(nameof(axis), axis, null),
+    };
 
     /* Phase 0 (ADR 0056): the feature/hidden-dim entities the interior roles attest against.
      * axes: "d" = dModel hidden dims (EMBEDS/O/OUTPUT), "kv" = v_proj value dims,

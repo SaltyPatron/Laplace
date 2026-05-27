@@ -5,6 +5,10 @@ namespace Laplace.Decomposers.Model;
 /// <summary>
 /// Maps substrate attestation rows onto flat tensor buffers for GGUF/safetensors emission.
 /// Must stay aligned with <see cref="LlamaWeightExtractor"/> subject/object orientation.
+///
+/// Feature entity → dim index maps must be built by the caller from the same source
+/// weight matrices used at ingest time (Blake3 of weight column/row bytes per
+/// <see cref="ModelFeatureEntityId"/>).  This class does not rebuild them internally.
 /// </summary>
 public static class ModelAttestationTensorFill
 {
@@ -19,7 +23,22 @@ public static class ModelAttestationTensorFill
 
     public readonly record struct CellWrite(int Row, int Col, double Weight, FillOutcome Outcome);
 
-    /// <summary>Resolve one attestation edge to matrix coordinates, or why it cannot be placed.</summary>
+    /// <summary>
+    /// Resolve one attestation edge to matrix coordinates.
+    ///
+    /// <paramref name="entityToToken"/>: token entity → vocab index (subject or object depending on kind).
+    /// <paramref name="featureToDim"/>: feature entity → dim index (the non-token endpoint).
+    ///
+    /// Orientation per ADR 0056:
+    ///   EMBEDS         (token, embed_dim)     → row=token, col=dim
+    ///   Q_PROJECTS     (token, token)         → row=query_token, col=key_token
+    ///   V_PROJECTS     (token, kv_dim)        → row=token, col=kv_dim
+    ///   O_PROJECTS     (attn_dim, token)      → row=attn_dim, col=token
+    ///   GATES          (token, ffn_dim)       → row=token, col=ffn_dim
+    ///   UP_PROJECTS    (token, ffn_dim)       → row=token, col=ffn_dim
+    ///   DOWN_PROJECTS  (ffn_dim, token)       → row=ffn_dim, col=token
+    ///   OUTPUT_PROJECTS (embed_dim, token)    → row=dim, col=token  (lm_head layout)
+    /// </summary>
     public static CellWrite MapEdge(
         AttestationEdge edge,
         Hash128 kindId,
@@ -30,50 +49,52 @@ public static class ModelAttestationTensorFill
         int rows,
         int cols)
     {
-        if (kindId == ModelDecomposer.QProjectsKind && (rows != recipe.VocabSize || cols != recipe.VocabSize))
-            return new CellWrite(0, 0, 0, FillOutcome.SkippedShapeMismatch);
-
-        bool tokenFeature = kindId == ModelDecomposer.EmbedsKind;
-        bool featureToken = kindId == ModelDecomposer.OutputProjectsKind;
-        bool featureTokenRowsAreTokens = tensorName == "lm_head.weight" && featureToken;
-
-        if (featureToDim is null && !tokenFeature && !featureToken)
-            return new CellWrite(0, 0, 0, FillOutcome.SkippedNoMapping);
-
-        if (tensorName == "model.embed_tokens.weight" && !tokenFeature)
-            return new CellWrite(0, 0, 0, FillOutcome.SkippedNoMapping);
-
         int row, col;
 
         if (kindId == ModelDecomposer.QProjectsKind)
         {
+            if (rows != recipe.VocabSize || cols != recipe.VocabSize)
+                return new CellWrite(0, 0, 0, FillOutcome.SkippedShapeMismatch);
             if (!entityToToken.TryGetValue(edge.SubjectId, out row)
                 || !entityToToken.TryGetValue(edge.ObjectId, out col))
                 return new CellWrite(0, 0, 0, FillOutcome.SkippedNoMapping);
         }
-        else if (tokenFeature)
+        else if (kindId == ModelDecomposer.EmbedsKind)
         {
+            /* subject=token, object=embed_dim → row=token, col=dim */
             if (featureToDim is null
                 || !entityToToken.TryGetValue(edge.SubjectId, out row)
                 || !featureToDim.TryGetValue(edge.ObjectId, out col))
                 return new CellWrite(0, 0, 0, FillOutcome.SkippedNoMapping);
         }
-        else if (featureTokenRowsAreTokens)
+        else if (kindId == ModelDecomposer.VProjectsKind || kindId == ModelDecomposer.GatesKind || kindId == ModelDecomposer.UpProjectsKind)
         {
+            /* subject=token, object=feature_dim → row=token, col=dim */
             if (featureToDim is null
-                || !entityToToken.TryGetValue(edge.ObjectId, out row)
-                || !featureToDim.TryGetValue(edge.SubjectId, out col))
+                || !entityToToken.TryGetValue(edge.SubjectId, out row)
+                || !featureToDim.TryGetValue(edge.ObjectId, out col))
                 return new CellWrite(0, 0, 0, FillOutcome.SkippedNoMapping);
         }
-        else if (featureToken)
+        else if (kindId == ModelDecomposer.OProjectsKind || kindId == ModelDecomposer.DownProjectsKind)
         {
+            /* subject=feature_dim, object=token → row=dim, col=token */
+            if (featureToDim is null
+                || !featureToDim.TryGetValue(edge.SubjectId, out row)
+                || !entityToToken.TryGetValue(edge.ObjectId, out col))
+                return new CellWrite(0, 0, 0, FillOutcome.SkippedNoMapping);
+        }
+        else if (kindId == ModelDecomposer.OutputProjectsKind)
+        {
+            /* lm_head: subject=embed_dim, object=token → row=dim, col=token */
             if (featureToDim is null
                 || !featureToDim.TryGetValue(edge.SubjectId, out row)
                 || !entityToToken.TryGetValue(edge.ObjectId, out col))
                 return new CellWrite(0, 0, 0, FillOutcome.SkippedNoMapping);
         }
         else
+        {
             return new CellWrite(0, 0, 0, FillOutcome.SkippedNoMapping);
+        }
 
         if (row >= rows || col >= cols)
             return new CellWrite(row, col, 0, FillOutcome.SkippedShapeMismatch);
@@ -81,51 +102,22 @@ public static class ModelAttestationTensorFill
         return new CellWrite(row, col, RatingToWeight(edge.RatingFp1e9), FillOutcome.Filled);
     }
 
-  public static bool TryGetFeatureIndex(
-        Hash128 kindId,
-        string tensorName,
-        LlamaRecipeExtractor.RecipeInfo recipe,
-        out string axis,
-        out int featureCount,
-        out bool featureTokenRowsAreTokens)
-    {
-        axis = "";
-        featureCount = 0;
-        featureTokenRowsAreTokens = false;
-
-        if (kindId == ModelDecomposer.EmbedsKind && tensorName == "model.embed_tokens.weight")
-        {
-            axis = "d";
-            featureCount = recipe.HiddenSize;
-            return true;
-        }
-
-        if (kindId == ModelDecomposer.OutputProjectsKind && tensorName == "lm_head.weight")
-        {
-            axis = "d";
-            featureCount = recipe.HiddenSize;
-            featureTokenRowsAreTokens = true;
-            return true;
-        }
-
-        return false;
-    }
-
+    /// <summary>
+    /// Fill <paramref name="tensorBytes"/> from <paramref name="edges"/>.
+    /// <paramref name="featureToDim"/>: caller-built feature entity → dim index, or null for token-only kinds.
+    /// </summary>
     public static int FillBuffer(
         IEnumerable<AttestationEdge> edges,
         Hash128 kindId,
         string tensorName,
         LlamaRecipeExtractor.RecipeInfo recipe,
         IReadOnlyDictionary<Hash128, int> entityToToken,
+        IReadOnlyDictionary<Hash128, int>? featureToDim,
         byte[] tensorBytes,
         int rows,
         int cols,
         int dtype)
     {
-        IReadOnlyDictionary<Hash128, int>? featureToDim = null;
-        if (TryGetFeatureIndex(kindId, tensorName, recipe, out string axis, out int featureCount, out _))
-            featureToDim = ModelFeatureEntityId.BuildIndex(axis, featureCount);
-
         int filled = 0;
         int shapeMismatch = 0;
 
