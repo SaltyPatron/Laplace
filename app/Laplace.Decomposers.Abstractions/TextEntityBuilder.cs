@@ -1,4 +1,6 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
@@ -144,4 +146,101 @@ public sealed class TextEntityBuilder
         3 => SentenceTypeId,
         _ => DocumentTypeId,
     };
+
+    /* ============================================================
+     * Static composition helpers — TextDecomposer + HashComposer +
+     * (optionally) entity-row build. Single source of the resolver
+     * + decomposition glue used by every text-bearing decomposer.
+     * CodepointPerfcache.Load MUST be called by the host first;
+     * the resolver returns -1 atom-not-found if records are absent.
+     * ============================================================ */
+
+    /// <summary>Perfcache-backed atom resolver for HashComposer (ADR 0048).
+    /// Exposed as an unmanaged function pointer; zero per-call allocation.</summary>
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    public static unsafe int Resolver(
+        uint atom, IntPtr userData,
+        Hash128* outId, double* outCoord, Hilbert128* outHb)
+    {
+        var recs = CodepointPerfcache.Records;
+        if (atom >= (uint)recs.Length) return -1;
+        ref readonly var r = ref recs[(int)atom];
+        *outId = r.Hash;
+        outCoord[0] = r.CoordX; outCoord[1] = r.CoordY;
+        outCoord[2] = r.CoordZ; outCoord[3] = r.CoordM;
+        *outHb = r.Hilbert;
+        return 0;
+    }
+
+    /// <summary>
+    /// Decompose canonical bytes through TextDecomposer + HashComposer and
+    /// return the content-addressed root node (id / tier / 4D coord). Returns
+    /// false if TextDecomposer rejects the input (e.g. invalid UTF-8).
+    /// </summary>
+    public static bool TryDecomposeRoot(
+        byte[] canonical,
+        out Hash128 rootId, out byte rootTier,
+        out double cx, out double cy, out double cz, out double cm)
+    {
+        try
+        {
+            using var tree = TextDecomposer.Run(canonical);
+            unsafe { HashComposer.Run(tree, &Resolver); }
+            int nc = tree.NodeCount;
+            if (nc == 0)
+            {
+                rootId = default; rootTier = 0;
+                cx = cy = cz = cm = double.NaN;
+                return false;
+            }
+            var root = tree.GetNode((uint)(nc - 1));
+            rootId = root.Id; rootTier = root.Tier;
+            unsafe { cx = root.Coord[0]; cy = root.Coord[1]; cz = root.Coord[2]; cm = root.Coord[3]; }
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            rootId = default; rootTier = 0;
+            cx = cy = cz = cm = double.NaN;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Decompose + emit entity and CONTENT-physicality rows for the root and
+    /// every tier-tree ancestor. Returns false if TextDecomposer rejects.
+    /// </summary>
+    public static bool TryBuildRows(
+        byte[] canonical, Hash128 sourceId,
+        out ImmutableArray<EntityRow> entities,
+        out ImmutableArray<PhysicalityRow> physicalities,
+        out Hash128 rootId, out byte rootTier)
+    {
+        try
+        {
+            using var tree = TextDecomposer.Run(canonical);
+            unsafe { HashComposer.Run(tree, &Resolver); }
+            int nc = tree.NodeCount;
+            if (nc == 0)
+            {
+                entities = ImmutableArray<EntityRow>.Empty;
+                physicalities = ImmutableArray<PhysicalityRow>.Empty;
+                rootId = default; rootTier = 0;
+                return false;
+            }
+            var root = tree.GetNode((uint)(nc - 1));
+            rootId = root.Id; rootTier = root.Tier;
+            var (es, ps) = new TextEntityBuilder(tree, sourceId).Build();
+            entities = es;
+            physicalities = ps;
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            entities = ImmutableArray<EntityRow>.Empty;
+            physicalities = ImmutableArray<PhysicalityRow>.Empty;
+            rootId = default; rootTier = 0;
+            return false;
+        }
+    }
 }

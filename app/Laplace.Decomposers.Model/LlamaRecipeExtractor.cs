@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
@@ -78,6 +79,9 @@ public sealed class LlamaRecipeExtractor
 
     /// <summary>
     /// Yield the recipe entity + recipe-parameter attestations as a single SubstrateChange.
+    /// Scalar values content-address through T0 via <see cref="TextEntityBuilder.TryBuildRows"/>;
+    /// HAS_* attestations route through <see cref="AttestationFactory.Create"/> with
+    /// the ADR 0044 T10 Scalar-Valued × AiModelProbeTier7 prior, IS_A with T3 Taxonomic.
     /// </summary>
     public static SubstrateChange BuildChange(
         RecipeInfo recipe,
@@ -93,34 +97,34 @@ public sealed class LlamaRecipeExtractor
         Hash128 architectureEntityId)
     {
         var b = new SubstrateChangeBuilder(sourceId, "recipe/config.json",
-            entityCapacity: 2, physicalityCapacity: 0, attestationCapacity: 8);
+            entityCapacity: 32, physicalityCapacity: 32, attestationCapacity: 16);
 
         b.AddEntity(recipe.RecipeEntityId, tier: 0, modelRecipeTypeId, firstObservedBy: sourceId);
 
-        void AddAttestation(Hash128 kindId, Hash128? objectId, long rating)
-        {
-            var attId = ComputeAttestationId(recipe.RecipeEntityId, kindId, objectId, sourceId);
-            b.AddAttestation(new AttestationRow(
-                Id:               attId,
-                SubjectId:        recipe.RecipeEntityId,
-                KindId:           kindId,
-                ObjectId:         objectId,
-                SourceId:         sourceId,
-                ContextId:        null,
-                RatingFp1e9:      rating,
-                RdFp1e9:          350_000_000_000L,
-                VolatilityFp1e9:  60_000_000L,
-                LastObservedAtUnixUs: 0,
-                ObservationCount: 1));
-        }
-
-        /* Scalar-valued recipe parameters stored as content entities */
+        /* Scalar recipe parameters: each value text decomposes through T0
+         * (codepoints → grapheme clusters → word-form). The root entity is
+         * the substrate-canonical entity for that value; cross-source
+         * consensus naturally collapses any source that mentions "2048". */
         void AddScalar(Hash128 kindId, string value)
         {
-            var valueBytes = Encoding.UTF8.GetBytes(value);
-            var valueId    = Hash128.Blake3(valueBytes);
-            b.AddEntity(valueId, tier: 0, Hash128.OfCanonical("substrate/type/Scalar/v1"), sourceId);
-            AddAttestation(kindId, valueId, 1_500_000_000_000L);
+            byte[] canonical = Encoding.UTF8.GetBytes(value);
+            if (!TextEntityBuilder.TryBuildRows(canonical, sourceId,
+                    out var entities, out var physicalities,
+                    out var valueRoot, out _))
+                throw new InvalidOperationException(
+                    $"TextEntityBuilder rejected recipe scalar value: '{value}'");
+
+            foreach (var e in entities)        b.AddEntity(e);
+            foreach (var p in physicalities)   b.AddPhysicality(p);
+
+            b.AddAttestation(AttestationFactory.Create(
+                subject:   recipe.RecipeEntityId,
+                kindId:    kindId,
+                obj:       valueRoot,
+                sourceId:  sourceId,
+                contextId: null,
+                tier:      KindValueTier.T10,
+                trust:     TrustClass.AiModelProbeTier7));
         }
 
         AddScalar(hasHiddenSizeKindId,  recipe.HiddenSize.ToString());
@@ -130,9 +134,19 @@ public sealed class LlamaRecipeExtractor
         AddScalar(hasIntermSizeKindId,  recipe.IntermediateSize.ToString());
         AddScalar(hasVocabSizeKindId,   recipe.VocabSize.ToString());
 
-        /* IS_A attestation → architecture entity */
-        b.AddEntity(architectureEntityId, tier: 0, Hash128.OfCanonical("substrate/type/Architecture/v1"), sourceId);
-        AddAttestation(isAKindId, architectureEntityId, 1_500_000_000_000L);
+        /* IS_A → architecture entity (a substrate-canonical concept, NOT a
+         * text decomposition — Architecture_Llama is a meta-entity, not the
+         * word "Llama"). T3 Taxonomic per ADR 0044. */
+        b.AddEntity(architectureEntityId, tier: 0,
+            Hash128.OfCanonical("substrate/type/Architecture/v1"), sourceId);
+        b.AddAttestation(AttestationFactory.Create(
+            subject:   recipe.RecipeEntityId,
+            kindId:    isAKindId,
+            obj:       architectureEntityId,
+            sourceId:  sourceId,
+            contextId: null,
+            tier:      KindValueTier.T3,
+            trust:     TrustClass.AiModelProbeTier7));
 
         return b.Build();
     }

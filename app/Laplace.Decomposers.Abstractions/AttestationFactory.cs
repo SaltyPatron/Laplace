@@ -46,11 +46,52 @@ public static class AttestationFactory
             ObjectId:             obj,
             SourceId:             sourceId,
             ContextId:            contextId,
-            RatingFp1e9:          (long)(mu  * trustWeight * 1_000_000_000.0),
-            RdFp1e9:              (long)(rd  * 1_000_000_000.0),
-            VolatilityFp1e9:      (long)(vol * 1_000_000_000.0),
+            RatingFp1e9:          (long)(mu  * trustWeight * Glicko2.FpScale),
+            RdFp1e9:              (long)(rd  * Glicko2.FpScale),
+            VolatilityFp1e9:      (long)(vol * Glicko2.FpScale),
             LastObservedAtUnixUs: nowUs,
             ObservationCount:     observationCount);
+    }
+
+    /// <summary>
+    /// Content-addressed attestation ID — BLAKE3 of the canonical 5-tuple
+    /// (subject, kind, object, source, context). Same hashing used internally
+    /// by <see cref="Create"/>; exposed so per-instance paths (Glicko-2
+    /// matchup-driven attestation builders) can compute IDs without going
+    /// through the factory's prior-derivation arithmetic.
+    /// </summary>
+    public static Hash128 ComputeId(
+        Hash128 subject, Hash128 kindId, Hash128? obj,
+        Hash128 sourceId, Hash128? contextId)
+    {
+        Span<byte> buf = stackalloc byte[16 * 5];
+        subject.WriteBytes(buf.Slice(0, 16));
+        kindId.WriteBytes(buf.Slice(16, 16));
+        (obj ?? Hash128.Zero).WriteBytes(buf.Slice(32, 16));
+        sourceId.WriteBytes(buf.Slice(48, 16));
+        (contextId ?? Hash128.Zero).WriteBytes(buf.Slice(64, 16));
+        return Hash128.Blake3(buf);
+    }
+
+    /// <summary>
+    /// ADR 0044 (Table A × Table B) Glicko-2 prior for a fresh attestation.
+    /// Returns the state shape consumed by <see cref="Glicko2.UpdatePeriod"/>
+    /// — per-instance evidence applies matchups against this prior. Cleanly
+    /// separates "what's the kind-tier baseline" from "how do observations
+    /// move it."
+    /// </summary>
+    public static Glicko2State Prior(KindValueTier tier, TrustClass trust)
+    {
+        var (mu, rd, vol) = TierPrior(tier);
+        double trustWeight = TrustWeight(trust);
+        return new Glicko2State
+        {
+            RatingFp1e9          = (long)(mu  * trustWeight * Glicko2.FpScale),
+            RdFp1e9              = (long)(rd  * Glicko2.FpScale),
+            VolatilityFp1e9      = (long)(vol * Glicko2.FpScale),
+            LastObservedAtUnixNs = 0,
+            ObservationCount     = 0,
+        };
     }
 
     // ADR 0044 Table A: kind value tier priors (mu, RD, volatility)

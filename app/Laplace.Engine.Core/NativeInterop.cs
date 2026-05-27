@@ -207,4 +207,17 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "intent_stage_emit_copy_binary")]
     internal static partial nuint IntentStageEmitCopyBinary(
         IntPtr stage, int table, byte* buf, nuint bufCapacity);
+
+    // === glicko2 (engine/core/include/laplace/core/glicko2.h) ===
+
+    [LibraryImport(Library, EntryPoint = "glicko2_effective_mu")]
+    internal static partial long Glicko2EffectiveMu(Glicko2State* state);
+
+    [LibraryImport(Library, EntryPoint = "glicko2_update_period")]
+    internal static partial void Glicko2UpdatePeriod(
+        Glicko2State* state,
+        Glicko2Observation* obs,
+        nuint n,
+        long tau,
+        long nowNs);
 }

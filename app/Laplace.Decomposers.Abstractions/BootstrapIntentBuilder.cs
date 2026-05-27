@@ -169,9 +169,9 @@ public sealed class BootstrapIntentBuilder
             ObjectId: _trustClassId,
             SourceId: _sourceId,
             ContextId: null,
-            RatingFp1e9: 1_500_000_000_000L,   // Glicko-2 default mu=1500
-            RdFp1e9:     350_000_000_000L,    // default RD=350
-            VolatilityFp1e9: 60_000_000L,     // default vol=0.06
+            RatingFp1e9:     Glicko2.DefaultRatingFp1e9,
+            RdFp1e9:         Glicko2.DefaultRdFp1e9,
+            VolatilityFp1e9: Glicko2.DefaultVolatilityFp1e9,
             LastObservedAtUnixUs: 0,
             ObservationCount: 1));
     }
