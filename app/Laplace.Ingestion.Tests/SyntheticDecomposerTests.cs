@@ -99,6 +99,12 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
             DecomposerOptions options,
             [EnumeratorCancellation] CancellationToken ct = default)
         {
+            // Heap-allocated reusable buffers — stackalloc'd Spans can't survive
+            // across `yield return` / `await` boundaries in an async iterator,
+            // and CA2014 forbids per-iteration stackalloc (potential stack
+            // overflow on large _unitCount).
+            var children = new Hash128[3];
+            var seed     = new byte[12];
             for (int i = 0; i < _unitCount; i++)
             {
                 ct.ThrowIfCancellationRequested();
@@ -106,12 +112,10 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
                 // 3 leaves per unit + 1 composed entity. Seed includes SourceId.Lo
                 // so atoms are unique per source — keeps tests independent of
                 // ordering even when they share the same PG fixture.
-                Span<Hash128> children = stackalloc Hash128[3];
                 for (int k = 0; k < 3; k++)
                 {
-                    Span<byte> seed = stackalloc byte[12];
-                    BitConverter.TryWriteBytes(seed.Slice(0, 8), SourceId.Lo);
-                    BitConverter.TryWriteBytes(seed.Slice(8, 4), i * 100 + k);
+                    BitConverter.TryWriteBytes(seed.AsSpan(0, 8), SourceId.Lo);
+                    BitConverter.TryWriteBytes(seed.AsSpan(8, 4), i * 100 + k);
                     var leaf = Hash128.Blake3(seed);
                     children[k] = leaf;
                     builder.AddEntity(leaf, 0, BootstrapIntentBuilder.SourceTypeId);
