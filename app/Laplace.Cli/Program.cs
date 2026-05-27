@@ -895,10 +895,11 @@ internal static class Program
 
     /// <summary>
     /// Spectral embedding: top-`targetDim` Laplacian eigenvectors of the sparse
-    /// graph. Result is `[n × targetDim]` row-major doubles. Eigenvectors are
-    /// scaled by `sqrt(n) * 0.02` to match typical transformer embedding init
-    /// magnitude (unit-normalized eigenvectors are far smaller than what GGUF
-    /// expects).
+    /// graph. Result is `[n × targetDim]` row-major doubles. Spectral
+    /// eigenvectors come out unit-normalized; rescaled so each row's L2 norm
+    /// matches the Xavier/Glorot init magnitude for an embedding layer of the
+    /// recipe's hidden_size — `1 / sqrt(targetDim)`. Derived from the recipe,
+    /// not a magic constant.
     /// </summary>
     private static unsafe double[] ComputeSpectralEmbedding(
         SubstrateAdjacencyData adj, int n, int targetDim)
@@ -921,11 +922,13 @@ internal static class Program
                     $"laplacian_eigenmaps_from_sparse_graph returned {rc}");
         }
 
-        /* Scale to match transformer embed init magnitude. Spectral
-         * eigenvectors are unit-norm; multiply by sqrt(targetDim) * 0.02
-         * so each row's L2 norm is ~sqrt(targetDim) * 0.02 — the typical
-         * Xavier/He init scale for transformer embedding rows. */
-        double scale = Math.Sqrt(targetDim) * 0.02;
+        /* Xavier/Glorot init magnitude for an embedding feeding into a layer
+         * of width `targetDim`: variance 1/targetDim → std 1/sqrt(targetDim).
+         * Spectral eigenvectors have unit L2 norm; scaling by
+         * 1/sqrt(targetDim) gives each row that per-element std. Recipe-
+         * derived (targetDim = dModel from arch_template), not a magic
+         * scalar. */
+        double scale = 1.0 / Math.Sqrt(targetDim);
         for (long i = 0; i < emb.LongLength; i++) emb[i] *= scale;
         return emb;
     }

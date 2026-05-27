@@ -44,7 +44,14 @@ public sealed class LlamaWeightExtractor
      * within-model aggregation then sums across instances and the
      * noise-floor filter applies to the aggregate. */
     private const int    QkPerRowCap         = 256;
-    private const double AggregateNoiseFloor = 1e-4;
+
+    /* The only floor on emitted aggregates is `aggregate == 0` (substrate-
+     * native: zero at every instance = structurally absent). Use F32 machine
+     * epsilon as the comparison tolerance — anything below this is below
+     * the precision the source tensors carry and is computational noise,
+     * not signal the model itself encoded. No arbitrary top-K%, no
+     * heuristic magnitude cutoff. */
+    private static readonly double AggregateNoiseFloor = (double)float.Epsilon;
 
     /* Rank of the identity projection used for EMBEDS proximity. */
     private const int EmbedProjectDim = 64;
