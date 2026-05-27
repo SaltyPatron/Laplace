@@ -9,9 +9,13 @@ CREATE EXTENSION laplace_substrate;
 -- Substrate tables live in the laplace schema; engine kernels in public.
 SET search_path TO laplace, public;
 
--- After bootstrap there must be 46 substrate-canonical entities:
+-- After bootstrap there must be 52 substrate-canonical entities:
 --   4 meta-types + 1 SubstrateCanonical + 3 PhysicalityKinds
---   + 10 trust classes + 11 kind value tiers + 17 kind entities = 46.
+--   + 10 trust classes + 11 kind value tiers + 17 kind entities
+--   + 5 substrate-canonical text-tier types (Codepoint / Grapheme_Cluster /
+--     Word_Form / Sentence / Document per ADR 0042 Stage 4, commit 0847fd5)
+--   + 1 PhysicalityKind.ProjectionOutput (commit 0847fd5)
+--   = 52.
 SELECT count(*) AS entity_count FROM entities;
 
 -- After bootstrap there must be 2 substrate-canonical meta-attestations:
