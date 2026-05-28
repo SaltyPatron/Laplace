@@ -61,13 +61,35 @@ fi
 #
 # This nuke is local to the model-codec CI invocation. It does NOT affect
 # dotnet-test / regress (those ran first per workflow dependencies).
-log "db-nuke + reseed (Stream A: ensure clean substrate for model-codec invocation)"
+log "db-nuke + reseed + clear-checkpoint (Stream A: ensure clean substrate AND fresh ingest checkpoint)"
 (cd "$ROOT/app" && echo NUKE | dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- nuke) \
   || die "db-nuke failed"
 (cd "$ROOT/app" && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- up) \
   || die "db-up after nuke failed"
 (cd "$ROOT/app" && "${CLI[@]}" seed-unicode) \
   || die "seed-unicode after nuke failed"
+
+# CRITICAL — wipe the IngestRunner checkpoint dir. The checkpoint at
+# /tmp/laplace-ingest/<source-name>/checkpoint.bin is content-addressed by
+# intent id and persists across CI runs. After db-nuke the DB has no
+# entities, but the checkpoint claims certain intents were already applied —
+# IngestRunner.ProcessOneIntentAsync checks `checkpoint.WasApplied(intent_id)`
+# at line 199 and SKIPS those intents. Skipped intents = entities never
+# re-inserted = subsequent intents' attestations fail
+# `attestations_subject_id_fkey` because their subject entities don't exist.
+#
+# This was the bug behind the persistent CI failure on 72ac17c8276fd296d37c6c556251d0e3
+# = BLAKE3(TinyLlama tokenizer.json) — the tokenizer intent was checkpointed
+# from a prior CI run, db-nuke wiped its entity row, the model-codec re-run
+# skipped re-emitting it, and the vocab batch's TOKEN_MAPS_TO attestations
+# (subject = tokenizerEntityId) failed FK.
+#
+# rm -rf the per-decomposer checkpoint dir. /tmp/laplace-ingest itself may
+# be laplace-runner-owned (created by the IngestRunner); use rm with -f to
+# tolerate "no such file" on first run.
+log "clear stale ingest checkpoint at /tmp/laplace-ingest"
+rm -rf /tmp/laplace-ingest 2>/dev/null || true
+mkdir -p /tmp/laplace-ingest
 
 # --- ingest (idempotent: second run must short-circuit on a SUBSEQUENT pass,
 # but Stream A's no-op extractor means the Q_PROJECTS-presence check that
