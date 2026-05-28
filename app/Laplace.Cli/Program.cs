@@ -439,31 +439,8 @@ internal static class Program
             long nElem = (long)rows * (long)Math.Max(1UL, cols);
             byte[] tensorBytes = new byte[nElem * (dtype == 0 ? 4L : 2L)];
 
-            unsafe
-            {
-                fixed (double* ptcPtr = perToken)
-                fixed (int*    qrPtr  = qkRowsArr)
-                fixed (int*    qcPtr  = qkColsArr)
-                fixed (double* qvPtr  = qkValsArr)
-                fixed (byte*   outPtr = tensorBytes)
-                fixed (TensorSpec* specPtr = specs)
-                {
-                    var view = new SubstrateView
-                    {
-                        PerTokenConsensus = ptcPtr,
-                        Vocab             = (nuint)vocab,
-                        PerPairRows       = qrPtr,
-                        PerPairCols       = qcPtr,
-                        PerPairVals       = qvPtr,
-                        PerPairNnz        = (nuint)qkRowsArr.Length,
-                        NormAggregate     = normAgg,
-                        TokenBasis        = null,        // Stream B-complete adds spectral basis
-                        BasisDim          = 0,
-                    };
-                    rcArr = SynthInterop.ArchTemplateMaterializeTensor(
-                        tmplHandle, &specPtr[i], &view, outPtr);
-                }
-            }
+            rcArr = MaterializeOneTensor(tmplHandle, specs, i, perToken, vocab,
+                qkRowsArr, qkColsArr, qkValsArr, normAgg, tensorBytes);
             if (rcArr != 0)
             {
                 Console.Error.WriteLine($"  materialize_tensor({name}) returned {rcArr}; tensor zero-filled");
@@ -491,6 +468,41 @@ internal static class Program
         long fileSize = new FileInfo(outputPath).Length;
         Console.WriteLine($"synthesis complete: {outputPath} ({fileSize / 1048576.0:F0} MB) in {sw.Elapsed.TotalSeconds:F1}s");
         return 0;
+    }
+
+    /// <summary>
+    /// Synchronous helper for SynthesizeFromSubstrateAsync's per-tensor call.
+    /// Extracted from the async method to keep `&view` / `&spec` taken-of-locals
+    /// out of an async state machine (CS9123 — async state may move locals).
+    /// </summary>
+    private static unsafe int MaterializeOneTensor(
+        IntPtr tmplHandle, TensorSpec[] specs, int specIndex,
+        double[] perToken, int vocab,
+        int[] qkRowsArr, int[] qkColsArr, double[] qkValsArr,
+        double normAgg, byte[] outBytes)
+    {
+        fixed (double* ptcPtr = perToken)
+        fixed (int*    qrPtr  = qkRowsArr)
+        fixed (int*    qcPtr  = qkColsArr)
+        fixed (double* qvPtr  = qkValsArr)
+        fixed (byte*   outPtr = outBytes)
+        fixed (TensorSpec* specPtr = specs)
+        {
+            var view = new SubstrateView
+            {
+                PerTokenConsensus = ptcPtr,
+                Vocab             = (nuint)vocab,
+                PerPairRows       = qrPtr,
+                PerPairCols       = qcPtr,
+                PerPairVals       = qvPtr,
+                PerPairNnz        = (nuint)qkRowsArr.Length,
+                NormAggregate     = normAgg,
+                TokenBasis        = null,        // Stream B-complete adds spectral basis
+                BasisDim          = 0,
+            };
+            return SynthInterop.ArchTemplateMaterializeTensor(
+                tmplHandle, &specPtr[specIndex], &view, outPtr);
+        }
     }
 
 
