@@ -23,5 +23,8 @@
   <Project Path="Laplace.Decomposers.UD/Laplace.Decomposers.UD.csproj" />
   <Project Path="Laplace.Decomposers.Model/Laplace.Decomposers.Model.csproj" />
   <Project Path="Laplace.Decomposers.Model.Tests/Laplace.Decomposers.Model.Tests.csproj" />
+  <Project Path="Laplace.Decomposers.Image/Laplace.Decomposers.Image.csproj" />
+  <Project Path="Laplace.Decomposers.Audio/Laplace.Decomposers.Audio.csproj" />
+  <Project Path="Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj" />
   <Project Path="Laplace.Cli/Laplace.Cli.csproj" />
 </Solution>
