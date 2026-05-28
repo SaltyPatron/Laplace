@@ -139,25 +139,25 @@ These behaviors are **automatic**, not waiting to be asked:
 - **Reflect the change** in `STANDARDS.md` / `DESIGN.md` / `GLOSSARY.md` / `RULES.md` if it's a project-wide invariant — but only with explicit user authorization per [RULES.md R12](RULES.md).
 - **Don't wait for explicit instruction** to do this — it's the cadence.
 
-### At the start of each chunk
+### At the start of each issue
 
-- Read the chunk's GitHub Issue (scope + subtasks + acceptance criteria).
+- Read the issue (scope + subtasks + acceptance criteria).
 
 - Confirm preconditions via `just check-prereqs`.
 
-### During a chunk
+### During work
 
 - Tick subtask checkboxes on the issue as work completes (`gh issue edit` with the updated body).
 - Verify locally before commit (`just build`, `just test`, `just verify` where applicable).
 
-### At chunk completion
+### At issue close
 
 - All acceptance-criteria checkboxes on the issue green.
 - Issue closed via commit (`Closes #N` in the commit body).
 - ADR filed in `docs/adr/` if the work shaped an invariant (per [ADR 0022](docs/adr/0022-adrs-as-decision-format.md)).
 - CI green on `hart-server` for the closing commit.
 
-> Issues + ADRs are the durable record. There is intentionally no `STATE.md` / `decisions.md` cadence file (tried in prior iterations; degraded into a conversation log). See [OPERATIONS.md](OPERATIONS.md) → "When in doubt" and [ADR 0017](docs/adr/0017-agent-operating-cadence.md).
+> Issues + ADRs are the durable record. The chunk-N sequence was retired by [ADR 0060](docs/adr/0060-retire-chunk-sequence-v0.1-milestone-cadence.md); forward work tracks the v0.1 milestone. There is intentionally no `STATE.md` / `decisions.md` cadence file (tried in prior iterations; degraded into a conversation log). See [OPERATIONS.md](OPERATIONS.md) → "When in doubt" and [ADR 0017](docs/adr/0017-agent-operating-cadence.md).
 
 ### When a decision is open
 
