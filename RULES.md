@@ -75,7 +75,7 @@ For AI model sources, the noise floor is a **multi-pass relative filter**:
 
 1. **Per-tensor relative top-k%** (e.g., top 5% by importance within each tensor — respects tensor's own scale)
 2. **Per-row top-k for attention / MLP** (preserves load-bearing IO connectivity)
-3. **Probe-validated retention test** (synthesize candidate sparse subgraph; verify behavior preserved on probe set)
+3. **Static-mathematical retention test** (verify spectral preservation / singular-value retention / matchup-distribution agreement between sparse and dense aggregated-attestation subgraphs per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md) — NOT probe-validated; the substrate does not execute models at ingest)
 
 **A flat numeric cutoff (e.g., `|w| < 0.001`) is forbidden.** It destroys content: different tensors have different magnitude regimes; load-bearing weights are sometimes small.
 
@@ -119,11 +119,9 @@ All entity math uses pinned FP regime (or fixed-point integer arithmetic for Gli
 
 ---
 
-## R8 — No GPU at runtime
+## R8 — No GPU at runtime or ingest
 
-The substrate's runtime is CPU-native. Attestation-response cascade + spatial candidate-access lookups + Glicko-2 weighted A* are latency-bound and branchy — wrong workload for GPU.
-
-**The one exception:** probe-time forward-pass of a model being ingested (running a 70B transformer to extract attestations may need GPU). After extraction, the substrate is CPU-only. GPU is the probe driver, NOT a runtime requirement.
+The substrate's runtime is CPU-native. Attestation-response cascade + spatial candidate-access lookups + Glicko-2 weighted A* are latency-bound and branchy — wrong workload for GPU. **Ingest is also CPU-native**: per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md) model ingest is static weight-tensor ETL — no model invocation, no forward pass, no probe driver. The earlier "probe-time GPU exception" was tied to a probe-based ingest path that ADR 0056 retired.
 
 ---
 
@@ -282,7 +280,7 @@ Cascade traversal is a compiled substrate operator exposed via SQL, not SQL-as-c
 
 Every attestation kind that participates in rating composition belongs to an arena with explicit semantics: compatibility, cardinality, context policy, observation update scope, conflict policy, source-trust policy, lineage policy, and effective-score inputs. Glicko-2 updates MUST interpret incoming observations through those arena semantics.
 
-Raw source counts are never consensus. Source credibility is tracked per source per attestation kind, and source trust classes are part of the prior: foundational constants, standards-derived sources, curated academic resources, academically linked user-curated resources, structured corpora, AI-model probe observations, and prompt-local/user content. Correlated source families do not become independent tugs merely by repetition.
+Raw source counts are never consensus. Source credibility is tracked per source per attestation kind, and source trust classes are part of the prior: foundational constants, standards-derived sources, curated academic resources, academically linked user-curated resources, structured corpora, AI-model static-ETL observations (per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)), and prompt-local/user content. Correlated source families do not become independent tugs merely by repetition.
 
 Unsupported or low-trust claims MAY be stored as source-scoped observations, but they do not win strict traversal or synthesis scopes unless their arena-aware effective mu is supported by independent, trusted, structurally adjacent observations.
 
@@ -294,7 +292,7 @@ Prompt-local/user-content observations are allowed to tug traversal immediately 
 
 Early ingestion follows the layered seed order in [ADR 0037](docs/adr/0037-layered-seed-ingestion-and-model-codec-fidelity.md): Unicode/UCD/UCA/UAX, language registries, WordNet, OMW, UD, Wiktionary, Tatoeba/audio, ConceptNet/Atomic2020, tree-sitter/code, corpora, then AI model sources. Each layer adds explicit fidelity channels before later sources arrive.
 
-AI model ingestion is a codec. `TransformerModelSource` records the model recipe, tokenizer content, source physicalities, probe observations, architecture-specific attestation arenas, and lottery-ticket sparse load-bearing structure. If source-scoped ingestion is faithful and synthesis uses the source recipe/scope, missing behavior is an implementation/codec bug, not an accepted architectural gap.
+AI model ingestion is a codec. `ModelDecomposer` (composite per [ADR 0043](docs/adr/0043-composite-decomposer-architecture.md)) records the model recipe, tokenizer content, source physicalities, weight-cell matchup observations (static ETL per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)), architecture-specific attestation arenas, and lottery-ticket sparse load-bearing structure. If source-scoped ingestion is faithful and synthesis uses the source recipe/scope, missing behavior is an implementation/codec bug, not an accepted architectural gap.
 
 The v0.1 proof may be narrow: Unicode-derived T0 + one Qwen-family source model + sparse attestations + native safetensors-style package emission + GGUF proof conversion + chat verification. It does not need the full omniglottal seed stack to prove the AI⇄DB codec.
 

@@ -145,12 +145,12 @@ A 10-tier hierarchy of substrate-canonical entities (per [ADR 0044](docs/adr/004
 | 4 | `TrustClass_AcademicCuratedWithUserInput` | OMW; CLDR community contributions; ConceptNet's WordNet/JMDict sub-sources |
 | 5 | `TrustClass_StructuredCorpus` | Tatoeba; ConceptNet's Wikipedia sub-source; structured public datasets |
 | 6 | `TrustClass_UserCuratedResource` | Wiktionary; Common Crawl tier; OMCS within ConceptNet |
-| 7 | `TrustClass_AIModelProbe` | Single-model probe observations |
+| 7 | `TrustClass_AIModelProbe` | Single-model static-ETL observations (canonical entity name retained per substrate-version stability; per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md) ingest is static weight-tensor ETL, not probe — the "Probe" name is historical) |
 | 8 | `TrustClass_AppDerived` | Runtime logs, internal state, app-side derivations |
 | 9 | `TrustClass_UserPromptContent` | Prompt-local/user-supplied content and assertions; content identity is real, claim truth awaits corroboration |
 | 10 | `TrustClass_AdversarialUntrusted` | Flagged content (spam / prompt-injection / corruption); excluded from cascade |
 
-Trust class is NOT truth by fiat; it weights Glicko-2 agreement/disagreement inside an arena. Cross-source agreement at tiers 2-5 builds high-confidence consensus; lone tier-7 model probes get discounted; tier-10 content doesn't admit to any arena.
+Trust class is NOT truth by fiat; it weights Glicko-2 agreement/disagreement inside an arena. Cross-source agreement at tiers 2-5 builds high-confidence consensus; lone tier-7 single-model observations (static ETL per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)) get discounted; tier-10 content doesn't admit to any arena.
 
 ### Context
 
@@ -160,11 +160,11 @@ An entity representing the context in which an attestation holds. For context-bo
 
 A **source-axis** distinction, not a storage-axis distinction. All three flow into the same `entities` / `physicalities` / `attestations` tables; the difference is which source entity attests what.
 
-- **Substrate data** — entities + attestations sourced from seed/canonical sources (Unicode/UCD, WordNet, OMW, UD, Wiktionary, Tatoeba, ConceptNet, Atomic2020, AI model probes). Carries the substrate's accumulated typed knowledge — attestations of every kind, rich enough to drive cascade inference.
+- **Substrate data** — entities + attestations sourced from seed/canonical sources (Unicode/UCD, WordNet, OMW, UD, Wiktionary, Tatoeba, ConceptNet, Atomic2020, AI-model static-ETL observations per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)). Carries the substrate's accumulated typed knowledge — attestations of every kind, rich enough to drive cascade inference.
 - **App data** — attestations sourced from the running app/runtime (session telemetry, internal app state attestations, derived signals). Trust class: app-specific, generally narrow scope.
 - **User data** — entities arriving from user content (prompts, uploads, queries) **typically WITHOUT prior attestations**. Content dedupes by hash to existing rows: a user prompt containing common words inherits the substrate's full attestation cloud on those rows *for free*. The substrate may also derive its own attestations at ingest (POS tagging, decomposition, structural relations) under the substrate-canonical source. User-supplied attestations (if any) attach with `source_id = <user/session entity>` and prompt-local/user-content trust class. The content occurrence and composition are real; any world-claim made by the user remains prompt-local/source-scoped unless explicitly promoted by policy and corroboration.
 
-Operational implication: a user prompt `"what is a cat?"` decomposes to entities that already exist (the words/graphemes/codepoints), each carrying attestations from WordNet, Wiktionary, ConceptNet, model probes, etc. The cascade has dense substrate-supplied knowledge to walk; the user contributes the *query shape* and prompt-local composition event, not global truth by default.
+Operational implication: a user prompt `"what is a cat?"` decomposes to entities that already exist (the words/graphemes/codepoints), each carrying attestations from WordNet, Wiktionary, ConceptNet, AI-model static-ETL observations, etc. The cascade has dense substrate-supplied knowledge to walk; the user contributes the *query shape* and prompt-local composition event, not global truth by default.
 
 ### Prompt Ingestion
 
@@ -317,7 +317,7 @@ The traversal/synthesis score derived from Glicko-2 rating (`mu`) adjusted by ra
 
 ### Lottery-Ticket-Aware Sparsity
 
-Multi-pass filter for AI model ingestion: (a) per-tensor top-k% by importance; (b) per-row top-k for attention / MLP structure preservation; (c) probe-validated retention test. **NEVER a flat numeric threshold.** Applies to weight-based sources only. Linguistic resources are ingested at full fidelity.
+Multi-pass filter for AI model ingestion: (a) per-tensor top-k% by importance; (b) per-row top-k for attention / MLP structure preservation; (c) static-mathematical retention test (spectral preservation / singular-value retention / matchup-distribution agreement between sparse and dense aggregated-attestation subgraphs per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md) — NOT probe-validated; the substrate does not execute models at ingest). **NEVER a flat numeric threshold.** Applies to weight-based sources only. Linguistic resources are ingested at full fidelity.
 
 The same principle applies to the substrate's attestation set as a whole: most candidate attestations are silent (no source has asserted them, or they're low-effective-μ noise); the load-bearing ones drive cascade traversal. The substrate is sparse-by-construction at the attestation graph level too — most positions in the (subject × kind × object × context) tensor are exact zero, just like most positions in a sparse model's weight tensors.
 
@@ -387,7 +387,7 @@ The reframing of AI operations as database operations. **The substrate's attesta
 
 ### Model-Codec Fidelity
 
-For source-scoped model round-trip, the property that `ModelDecomposer` captures the source model's load-bearing computation as recipe metadata, tokenizer/modality content, physicalities, probe observations, architecture-specific attestations, and lottery-ticket sparse edges. If ingestion and synthesis are faithful under the source's own recipe/scope, the native Synthesis package should land in the source model's behavioral basin; GGUF is an optional proof export for local chat/demo validation, not the native target.
+For source-scoped model round-trip, the property that `ModelDecomposer` captures the source model's load-bearing computation as recipe metadata, tokenizer/modality content, physicalities, weight-cell matchup observations (static ETL per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)), architecture-specific attestations, and lottery-ticket sparse edges. If ingestion and synthesis are faithful under the source's own recipe/scope, the native Synthesis package should land in the source model's behavioral basin; GGUF is an optional proof export for local chat/demo validation, not the native target.
 
 ### Vampire mode
 
@@ -480,9 +480,9 @@ The substrate's lifecycle phases:
 
 The discipline that adding new capability touches ONE plugin, never all layers. Six plugin interfaces: `ISource`, `IDecomposer`, `IArchitectureTemplate`, `IFormatWriter`, `IFeatureExtractor`, `IProtocolEndpoint`.
 
-### Probe (in ingestion context)
+### Probe (in ingestion context) — RETIRED
 
-Running an AI model on input data to observe its outputs/attention/activations, then extracting attestations from significant observations. Required for model ingestion (vs. parse-based ingestion of pre-structured sources). May need GPU at probe time for large models; results stored CPU-native afterward.
+**Superseded by ADR 0056.** Earlier model ingest framing assumed running an AI model on input data to observe outputs/attention/activations. Per [ADR 0056 weight-tensor ETL](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md), model ingest is **static weight-tensor ETL** — typed-arena-matchup observations are computed directly from weight tensors via `WeightTensorETL`; no model invocation, no GPU, no probe set. Cross-references to "probe observations" in older docs/ADRs are historical; the current term is **static-ETL observation** or **weight-cell matchup observation**. The `TrustClass_AIModelProbe` substrate entity retains its canonical name (substrate-version stability per ADR 0044) but its semantic meaning is now "AI-model static-ETL observation".
 
 ### Round-trip
 
@@ -605,10 +605,10 @@ AI models are not a special case. They use the same substrate primitives as ever
   - **No per-position meta-attestations on tensor-calculation attestations.** Per-position structural attribution (which layer / which head / which tensor index a calculation lives at) is **recipe content** — captured in the model's recipe entity (text/JSON describing num_layers, num_heads, per-tensor token vocabularies, layout). The architecture template wires substrate's aggregated typed attestations into the recipe's structural shape at emit time; redundant per-position storage on attestations is not needed.
 - **Physicalities**:
   - **PROJECTION** from the model's embedding space, Procrustes-aligned to substrate 4D via shared codepoint/word anchors.
-  - **CONTENT** physicalities on probe input and output sequence entities, sourced to the model's tokenizer source, with mantissa-packed trajectories carrying the token references in the tokenizer's BPE order (ordinal = position, run_length = repeats, flags = BOS/EOS/continuation). Same mantissa-pack primitive as text trajectories, prompts (R19), and any other sequence content — token sequences are content; no new mechanism.
+  - **CONTENT** physicalities on tokenizer-vocab sequence entities, sourced to the model's tokenizer source, with mantissa-packed trajectories carrying the token references in the tokenizer's BPE order (ordinal = position, run_length = repeats, flags = BOS/EOS/continuation). Same mantissa-pack primitive as text trajectories, prompts (R19), and any other sequence content — token sequences are content; no new mechanism.
   - **CONTENT** physicalities on each tokenizer vocab text entity from the model's tokenizer source, recording this tokenizer's view of how that text decomposes (BPE merges into sub-tokens, etc.).
 - **Cross-references**: `Text` (Unicode), `Language` (ISO).
-- **Trust class**: AI-model probe observation.
+- **Trust class**: AI-model static-ETL observation (canonical entity name `TrustClass_AIModelProbe` retained per substrate-version stability — see Trust Class table).
 
 The substrate's inference engine walks typed attestations between substrate entities directly. Reconstruction (Substrate Synthesis emitting a native package) reads recipe metadata + architecture-family mechanical-role attestations + the architecture template (substrate code, not data) to repopulate the model's output slots. Format-specific writers may then package or convert that native output for external runtimes.
 

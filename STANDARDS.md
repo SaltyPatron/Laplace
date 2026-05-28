@@ -474,7 +474,7 @@ Summary (full per-tier values in [ADR 0044](docs/adr/0044-attestation-kind-prior
 - **T6 Equivalence** — `IS_TRANSLATION_OF`, `IS_SIMILAR_TO`, ... (rating ≈ 1600, weight 0.7×)
 - **T7 Oppositional** — `IS_ANTONYM_OF`, `EXCLUDES`, ... (rating ≈ 1550, weight 0.6×)
 - **T8 Associative** — `CO_OCCURS_WITH`, `FOLLOWS`, `USED_FOR`, ... (rating ≈ 1500, weight 0.5×)
-- **T9 Tensor-Calculation** — `Q_PROJECTS`, ... (rating ≈ 1400, weight 0.4×; single-probe trust; cluster across many models for higher confidence)
+- **T9 Tensor-Calculation** — `Q_PROJECTS`, ... (rating ≈ 1400, weight 0.4×; single-model trust per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md) static-ETL; cluster across many models for higher confidence)
 - **T10 Scalar-Valued** — `HAS_NUMERIC_VALUE`, `HAS_FREQUENCY`, ... (rating IS the value; RD captures measurement uncertainty)
 - **T11 Probationary** — user-prompt-emitted attestations (rating ≈ 1300, weight 0.3×; session-scoped)
 

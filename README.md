@@ -147,10 +147,10 @@ See [STANDARDS.md](STANDARDS.md) for the locked dependency-source table.
 
 | | |
 |---|---|
-| **Current chunk** | Chunk 0 ✅ done → **Chunk 1 in queue** ([#1](https://github.com/SaltyPatron/Laplace/issues/1)) |
+| **Current focus** | [v0.1 milestone](https://github.com/SaltyPatron/Laplace/milestone/1) — TinyLlama round-trip (per [ADR 0060](docs/adr/0060-retire-chunk-sequence-v0.1-milestone-cadence.md), chunks retired as a sequencing mechanism) |
 | **Milestone** | [v0.1.0 — Chattable Qwen3 Roundtrip](https://github.com/SaltyPatron/Laplace/milestone/1) |
 | **Open issues** | [github.com/SaltyPatron/Laplace/issues](https://github.com/SaltyPatron/Laplace/issues) |
-| **All chunks** | [Issues filter: chunk-*](https://github.com/SaltyPatron/Laplace/issues?q=is%3Aopen+label%3A%22type%3Aenhancement%22) |
+| **Open epics** | [Issues filter: epic](https://github.com/SaltyPatron/Laplace/issues?q=is%3Aopen+label%3Aepic) |
 | **Recent CI runs** | [github.com/SaltyPatron/Laplace/actions](https://github.com/SaltyPatron/Laplace/actions) |
 
 ## Getting started
