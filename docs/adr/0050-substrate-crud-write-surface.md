@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** — 2026-05-24
+**Accepted** — 2026-05-24 (status confirmed 2026-05-28: `NpgsqlSubstrateWriter.ApplyAsync` shipped at `app/Laplace.SubstrateCRUD/Npgsql/NpgsqlSubstrateWriter.cs` with test coverage; `entities_exist_bitmap` SRF live in `extension/laplace_substrate/sql/11_entities_exist_bitmap.sql.in`. Outstanding work per FLOWS.md audit: `MerkleDedup.FilterNovel` P/Invoke wiring + trunk-shortcircuit invocation from writer + `ApplyStreamAsync` + LRU/bloom cache.)
 **Authors:** Anthony Hart
 
 ## Context

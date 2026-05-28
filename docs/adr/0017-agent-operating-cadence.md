@@ -20,14 +20,14 @@ When the user surfaces a requirement / decision / change, the agent must **autom
 5. **File an ADR** in `docs/adr/` if the decision shapes invariants.
 6. **Reflect the change** in RULES.md / STANDARDS.md / DESIGN.md / GLOSSARY.md if it's a project-wide invariant — but only with explicit user authorization for those files.
 
-At chunk start: re-read plan.md, RULES.md, STANDARDS.md, DESIGN.md, the chunk's issue. At chunk end: tick acceptance criteria; close issue via commit; update STATE.md.
+At issue start: re-read RULES.md, STANDARDS.md, DESIGN.md, and the issue body. At issue close: tick acceptance criteria; close via commit (`Closes #N`). The durable state lives in the issue and the ADR — there is no `STATE.md` / `decisions.md` / `plan.md` cadence file (the amendment header retires those).
 
 When a decision is open: capture in a GitHub Discussion with tradeoffs; pause if blocking.
 
 ## Consequences
 
 - Project state never drifts from chat conversation.
-- Future agent sessions read STATE.md + decisions.md + ADRs + plan.md and resume exactly where left off.
+- Future agent sessions read open issues + ADRs and resume from where the durable record stands; no transient status files to interpret.
 - The user doesn't have to re-explain past decisions.
 
 ## References

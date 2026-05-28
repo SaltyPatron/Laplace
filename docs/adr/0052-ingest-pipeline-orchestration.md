@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** — 2026-05-24
+**Accepted** — 2026-05-24 (status confirmed 2026-05-28: `IngestRunner` shipped at `app/Laplace.Ingestion/IngestRunner.cs` with `CheckpointJournal` + retry + parallel-worker variant + `Laplace.Ingestion.Tests`. Outstanding work per FLOWS.md audit: layer-gate loop is 0-based in code vs 1-based in this ADR's pseudocode; `HasSourceEverCompletedAsync` is MVP pending Story #183; `just ingest` dispatch is partial (Unicode only).)
 **Authors:** Anthony Hart
 
 ## Context

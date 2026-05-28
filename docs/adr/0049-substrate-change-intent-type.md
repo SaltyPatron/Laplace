@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** — 2026-05-24
+**Accepted** — 2026-05-24 (status confirmed 2026-05-28: `SubstrateChange` shipped at `app/Laplace.SubstrateCRUD/SubstrateChange.cs` with test coverage)
 **Authors:** Anthony Hart
 
 ## Context

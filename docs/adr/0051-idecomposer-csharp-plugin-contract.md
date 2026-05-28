@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** — 2026-05-24
+**Accepted** — 2026-05-24 (status confirmed 2026-05-28: `IDecomposer` shipped at `app/Laplace.Decomposers.Abstractions/IDecomposer.cs`; `UnicodeDecomposer` implements it at `app/Laplace.Decomposers.Unicode/UnicodeDecomposer.cs`; nine further per-source `Laplace.Decomposers.<Source>` projects pending per ADR 0037 layer ladder.)
 **Authors:** Anthony Hart
 
 ## Context

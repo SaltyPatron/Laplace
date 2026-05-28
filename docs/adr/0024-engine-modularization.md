@@ -28,7 +28,7 @@ Split the engine into **three shared libraries**:
 
 The split is enforced at the build system level — `engine/core/CMakeLists.txt` has no oneMKL dependency; `engine/dynamics/CMakeLists.txt` and `engine/synthesis/CMakeLists.txt` do. Verification: `ldd liblaplace_core.so` must show NO oneMKL symbols; if a future PR adds an oneMKL call to `engine/core/`, the build fails before merge.
 
-Each library exposes a strict C ABI surface (per [RULES.md R14](../../RULES.md)) — POD structs, no name-mangled symbols, no exceptions across the boundary. Same `.so` files are linked by the PG extensions (via PGXS) AND loaded by .NET via P/Invoke.
+Each library exposes a strict C ABI surface (per [RULES.md R14](../../RULES.md)) — POD structs, no name-mangled symbols, no exceptions across the boundary. Same `.so` files are linked by the PG extensions (via the unified CMake pipeline per [ADR 0032](0032-unified-cmake-build-pipeline.md); PGXS retired) AND loaded by .NET via P/Invoke.
 
 ## Consequences
 
