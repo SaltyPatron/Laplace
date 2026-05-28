@@ -1,6 +1,9 @@
 #include "laplace/synthesis/arch_template.h"
 #include "laplace/synthesis/recipe.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -159,4 +162,150 @@ int arch_template_required_tensors(const arch_template_t* tmpl,
 
 extern "C" void arch_template_free(arch_template_t* t) {
     delete t;
+}
+
+namespace {
+
+/* Helper: write a float to bytes per dtype (0=f32, 2=bf16). */
+inline void write_dtype(float v, int dtype, uint8_t* dst) {
+    if (dtype == 0) {
+        std::memcpy(dst, &v, 4);
+    } else { // bf16 (truncate to upper 16 bits)
+        uint32_t bits;
+        std::memcpy(&bits, &v, 4);
+        uint16_t bf = (uint16_t)(bits >> 16);
+        std::memcpy(dst, &bf, 2);
+    }
+}
+
+inline size_t dtype_elem_size(int dtype) {
+    return dtype == 0 ? 4 : 2;
+}
+
+/* Materialize a per-token-axis tensor (shape [vocab, hidden]) by broadcasting
+ * per-token consensus through the token basis (spectral embedding). Each
+ * output cell out[t, d] = per_token_consensus[t] * basis[t, d]. If basis is
+ * NULL, falls back to uniform broadcast (per_token_consensus[t] / sqrt(hidden)). */
+void materialize_token_axis(const substrate_view_t* v, int dtype,
+                            size_t vocab, size_t hidden, uint8_t* out) {
+    size_t es = dtype_elem_size(dtype);
+    double inv_sqrt_h = 1.0 / std::sqrt((double)hidden);
+    for (size_t t = 0; t < vocab; ++t) {
+        double tc = (t < v->vocab) ? v->per_token_consensus[t] : 0.0;
+        for (size_t d = 0; d < hidden; ++d) {
+            double b = (v->token_basis && v->basis_dim >= hidden)
+                       ? v->token_basis[t * v->basis_dim + d]
+                       : inv_sqrt_h;
+            write_dtype((float)(tc * b), dtype, out + (t * hidden + d) * es);
+        }
+    }
+}
+
+/* Materialize an interior tensor (shape [out_dim, in_dim]) for a unary-kind
+ * source (V_PROJECTS, GATES, etc.). The per-token consensus distributes per
+ * recipe layout: each cell out[o, i] = sum_t basis[t, o % vocab] * pertoken[t] *
+ * basis[t, i % vocab] / N where N is a normalizer. For Stream B-minimum,
+ * approximate via averaged Frobenius mass — fills uniformly with the per-token
+ * consensus aggregate. Stream B-complete refines per the recipe's per-(layer,
+ * head, dim) layout once that layout is carried on the recipe entity per
+ * ADR 0056 Phase 2 + 0009. */
+void materialize_interior_uniform(const substrate_view_t* v, int dtype,
+                                   size_t out_dim, size_t in_dim, uint8_t* out) {
+    double total = 0.0;
+    for (size_t t = 0; t < v->vocab; ++t) total += v->per_token_consensus[t];
+    double avg = (v->vocab > 0) ? total / (double)v->vocab : 0.0;
+    double per_cell = avg / std::sqrt((double)(out_dim * in_dim));
+    size_t es = dtype_elem_size(dtype);
+    for (size_t cell = 0; cell < out_dim * in_dim; ++cell) {
+        write_dtype((float)per_cell, dtype, out + cell * es);
+    }
+}
+
+/* Materialize a Q_PROJECTS-style binary-kind interior tensor (shape
+ * [out_dim, in_dim]). The sparse consensus per (token_i, token_j) is
+ * distributed across the slot via the spectral basis: each cell
+ * out[o, i] = sum_{(qi, kj) in nnz} basis[qi, o] * val[qi,kj] * basis[kj, i] /
+ * normalizer. Stream B-minimum approximation: per_pair_vals summed and
+ * distributed uniformly (same shape as the unary case for now); recipe
+ * layout-aware distribution lands with Stream B-complete. */
+void materialize_interior_binary_uniform(const substrate_view_t* v, int dtype,
+                                          size_t out_dim, size_t in_dim, uint8_t* out) {
+    double total = 0.0;
+    for (size_t e = 0; e < v->per_pair_nnz; ++e) total += std::abs(v->per_pair_vals[e]);
+    double mass = (v->per_pair_nnz > 0) ? total / (double)v->per_pair_nnz : 0.0;
+    double per_cell = mass / std::sqrt((double)(out_dim * in_dim));
+    size_t es = dtype_elem_size(dtype);
+    for (size_t cell = 0; cell < out_dim * in_dim; ++cell) {
+        write_dtype((float)per_cell, dtype, out + cell * es);
+    }
+}
+
+/* Materialize a norm-weight tensor (shape [hidden]) via the norm_aggregate
+ * value broadcast per-dim. RMSNorm convention: identity 1.0 plus
+ * norm_aggregate-derived perturbation. */
+void materialize_norm(const substrate_view_t* v, int dtype,
+                       size_t hidden, uint8_t* out) {
+    /* Avoid degenerate-zero norm weights; if substrate has no NORMALIZES
+     * data, default to identity 1.0 (RMSNorm pass-through). */
+    double scale = (v->norm_aggregate > 0.0)
+                   ? std::min(2.0, std::max(0.5, v->norm_aggregate))
+                   : 1.0;
+    size_t es = dtype_elem_size(dtype);
+    for (size_t d = 0; d < hidden; ++d) {
+        write_dtype((float)scale, dtype, out + d * es);
+    }
+}
+
+bool name_ends_with(const std::string& s, const std::string& suffix) {
+    return s.size() >= suffix.size()
+        && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+} // namespace
+
+extern "C"
+int arch_template_materialize_tensor(const arch_template_t*  tmpl,
+                                     const tensor_spec_t*    spec,
+                                     const substrate_view_t* view,
+                                     void*                   out_values) {
+    if (!tmpl || !spec || !view || !out_values) return -1;
+    if (spec->rank == 0 || spec->rank > 2) return -2;
+
+    std::string name = spec->name ? std::string(spec->name) : std::string();
+    uint8_t* out = static_cast<uint8_t*>(out_values);
+
+    // Token-axis tensors: shape [vocab, hidden]
+    if (name == "model.embed_tokens.weight" || name == "lm_head.weight") {
+        if (spec->rank != 2) return -2;
+        return materialize_token_axis(view, spec->dtype,
+            spec->shape[0], spec->shape[1], out), 0;
+    }
+
+    // Norm weights: shape [hidden]
+    if (name_ends_with(name, "_norm.weight") || name == "model.norm.weight") {
+        if (spec->rank != 1) return -2;
+        materialize_norm(view, spec->dtype, spec->shape[0], out);
+        return 0;
+    }
+
+    // Layer interior tensors: shape [out_dim, in_dim]
+    if (name.rfind("model.layers.", 0) == 0 && spec->rank == 2) {
+        // Q_PROJECTS uses binary consensus; others use unary.
+        bool is_qk = name_ends_with(name, ".self_attn.q_proj.weight")
+                  || name_ends_with(name, ".self_attn.k_proj.weight");
+        if (is_qk && view->per_pair_nnz > 0) {
+            materialize_interior_binary_uniform(view, spec->dtype,
+                spec->shape[0], spec->shape[1], out);
+        } else {
+            materialize_interior_uniform(view, spec->dtype,
+                spec->shape[0], spec->shape[1], out);
+        }
+        return 0;
+    }
+
+    // Unknown tensor — zero-fill (R4 sparse-by-construction).
+    size_t nelem = 1;
+    for (size_t d = 0; d < spec->rank; ++d) nelem *= spec->shape[d];
+    std::memset(out, 0, nelem * dtype_elem_size(spec->dtype));
+    return 0;
 }

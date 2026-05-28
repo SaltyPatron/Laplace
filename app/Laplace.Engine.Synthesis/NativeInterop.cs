@@ -58,6 +58,19 @@ public static partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "arch_template_free")]
     public static partial void ArchTemplateFree(IntPtr tmpl);
 
+    /// <summary>
+    /// Distribute substrate consensus values into one tensor slot per the
+    /// architecture template's recipe layout (per ADR 0056:183 + DESIGN.md:660).
+    /// NOT a pseudoinverse — broadcast across the recipe's per-(layer, head, dim)
+    /// shape. See engine/synthesis/include/laplace/synthesis/arch_template.h for
+    /// the SubstrateView fields the template consumes.
+    /// Returns 0 success, -1 null input, -2 shape/template mismatch, -3 substrate
+    /// view incompatibility.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "arch_template_materialize_tensor")]
+    public static unsafe partial int ArchTemplateMaterializeTensor(
+        IntPtr tmpl, TensorSpec* spec, SubstrateView* view, void* outValues);
+
     // === Static QK attention scorer ===
 
     /// <summary>
@@ -219,4 +232,25 @@ public unsafe struct TensorSpec
     public ulong  Rank;
     public fixed ulong Shape[8];
     public int    Dtype;      /* 0=f32, 1=f16, 2=bf16 */
+}
+
+/// <summary>
+/// Substrate consensus bundle consumed by
+/// <see cref="NativeInterop.ArchTemplateMaterializeTensor"/>. Must match the
+/// C struct substrate_view_t layout exactly. Per ADR 0056:183 + DESIGN.md:660
+/// the architecture template distributes these values across the recipe's
+/// per-(layer, head, dim) layout — broadcast, NOT pseudoinverse.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct SubstrateView
+{
+    public double* PerTokenConsensus;
+    public nuint   Vocab;
+    public int*    PerPairRows;
+    public int*    PerPairCols;
+    public double* PerPairVals;
+    public nuint   PerPairNnz;
+    public double  NormAggregate;
+    public double* TokenBasis;
+    public nuint   BasisDim;
 }

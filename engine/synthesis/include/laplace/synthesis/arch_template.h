@@ -42,6 +42,73 @@ int arch_template_required_tensors(const arch_template_t* tmpl,
 
 void arch_template_free(arch_template_t* t);
 
+/* Substrate consensus value bundle the template uses to materialize a tensor.
+ * Per ADR 0056:183 + DESIGN.md:660: the architecture template distributes
+ * consensus values across the recipe's per-(layer, head, dim) layout — NOT
+ * a pseudoinverse recovery problem.
+ *
+ * Fields:
+ *   per_token_consensus  — [vocab] doubles, one per token. For unary kinds
+ *                          (EMBEDS / V_PROJECTS / O_PROJECTS / GATES /
+ *                          UP_PROJECTS / DOWN_PROJECTS / OUTPUT_PROJECTS):
+ *                          the per-token aggregated Glicko-2 effective-mu
+ *                          consensus for that kind.
+ *   per_pair_rows/cols/vals/nnz — sparse COO for binary kinds (Q_PROJECTS).
+ *                                  Each (row, col) = (token_i, token_j) and
+ *                                  val = consensus for (token_i, kind, token_j).
+ *   vocab                — vocab size (= per_token_consensus length).
+ *   norm_aggregate       — single scalar for NORMALIZES (unary on model
+ *                          recipe entity).
+ *   token_basis          — [vocab × basis_dim] doubles row-major; the
+ *                          substrate's spectral embedding of tokens per
+ *                          ADR 0056:50 (legitimate substrate-native
+ *                          behavioral-robustness mechanism). Used by the
+ *                          template to project per-token consensus into
+ *                          the recipe's [hidden_dim, hidden_dim] shape.
+ *                          May be NULL if not yet computed.
+ *   basis_dim            — width of token_basis (= hidden_dim per recipe).
+ */
+typedef struct {
+    const double* per_token_consensus;
+    size_t        vocab;
+    const int*    per_pair_rows;
+    const int*    per_pair_cols;
+    const double* per_pair_vals;
+    size_t        per_pair_nnz;
+    double        norm_aggregate;
+    const double* token_basis;
+    size_t        basis_dim;
+} substrate_view_t;
+
+/* Materialize one tensor's values from substrate consensus per the
+ * architecture template's per-tensor distribution policy (per ADR 0056:183
+ * + DESIGN.md:660). The template knows for each tensor: which kind's
+ * consensus feeds it, whether it's a token-axis tensor (embed_tokens,
+ * lm_head, norms) or a [hidden_dim, hidden_dim]-shape interior tensor,
+ * and how the recipe layout distributes consensus across the slot.
+ *
+ * For Llama-family:
+ *   token_embd.weight [vocab × hidden]   ← outer(per_token_consensus, token_basis_row)
+ *   output.weight     [vocab × hidden]   ← per_token_consensus broadcast through basis
+ *   blk.L.attn_q.weight [h*hd × hidden]  ← E^T @ (Q_PROJECTS sparse adj) @ E projected
+ *   blk.L.attn_v.weight [kv*hd × hidden] ← per-token_consensus[V_PROJECTS] broadcast
+ *   blk.L.ffn_gate.weight [interm × hidden] ← per-token consensus[GATES] broadcast
+ *   ... etc.
+ *   *_norm.weight [hidden]               ← norm_aggregate normalized per dim
+ *
+ * The exact broadcast is the recipe-layout distribution per ADR 0056:183
+ * ("the inverse of this aggregation" = broadcast per recipe shape, not SVD
+ * pseudoinverse — see Memory `project_model_decomposer_attestation_insight`).
+ *
+ * out_values is caller-allocated; size = product(spec.shape) * dtype_size(spec.dtype).
+ * Returns 0 on success, -1 on null input, -2 on shape/template mismatch,
+ * -3 on substrate view incompatibility (e.g. basis_dim != hidden_dim).
+ */
+int arch_template_materialize_tensor(const arch_template_t*  tmpl,
+                                     const tensor_spec_t*    spec,
+                                     const substrate_view_t* view,
+                                     void*                   out_values);
+
 #ifdef __cplusplus
 }
 #endif

@@ -203,8 +203,8 @@ public sealed class ModelDecomposer : IDecomposer
             await Task.Yield();
         }
 
-        /* 4. Weight attestations */
-        var extractor = new LlamaWeightExtractor(_modelDir, recipe, tokens, Source, ExtractorKinds);
+        /* 4. Weight attestations via universal WeightTensorETL per ADR 0056. */
+        var extractor = new WeightTensorETL(_modelDir, recipe, tokens, Source, ExtractorKinds);
         await foreach (var change in extractor.ExtractAsync(ct))
         {
             ct.ThrowIfCancellationRequested();

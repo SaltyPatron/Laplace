@@ -276,18 +276,221 @@ internal static class Program
     /// </summary>
     private static async Task<int> SynthesizeFromSubstrateAsync(string recipePath, string outputPath)
     {
-        await Task.CompletedTask;
         if (string.IsNullOrEmpty(recipePath) || !File.Exists(recipePath))
             return Fail(
                 "usage: laplace synthesize substrate <recipe.json> [output.gguf]\n"
                 + $"  (recipe not found: {recipePath})");
-        return Fail(
-            $"synthesize substrate: pending Stream B implementation. recipe={recipePath} out={outputPath}\n"
-            + "  Stream A removed the pseudoinverse pipeline (Laplacian eigenmaps + reconstruct_w)\n"
-            + "  per /home/ahart/.claude/plans/replicated-hatching-stream.md — that pipeline violated\n"
-            + "  substrate-architect Hard Rule 1 (no GEMM-as-primitive, no vector-NN-in-d-dim) and\n"
-            + "  Memory's explicit 'not pseudoinverse' rule. Stream B implements the correct shape\n"
-            + "  via IArchitectureTemplate::materialize_tensor (DESIGN.md:660).");
+
+        Console.WriteLine($"synthesize substrate (Stream B-minimum) → {outputPath}");
+        CodepointPerfcache.Load(ResolveBlob());
+
+        string modelDir = Path.GetDirectoryName(recipePath) ?? ".";
+        string tokenizerPath = Path.Combine(modelDir, "tokenizer.json");
+        if (!File.Exists(tokenizerPath))
+            return Fail($"tokenizer.json not found alongside recipe: {tokenizerPath}");
+
+        var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
+        var recipe = LlamaRecipeExtractor.Parse(recipePath);
+        int vocab = recipe.VocabSize;
+        int dModel = recipe.HiddenSize;
+
+        // entity_id → vocab_index for substrate→token-index lookup
+        var entityToToken = new Dictionary<Hash128, int>(tokens.Count);
+        foreach (var t in tokens.OrderBy(t => t.TokenId))
+            entityToToken.TryAdd(t.EntityId, t.TokenId);
+
+        // Load arch template + recipe handle
+        byte[] configJson = File.ReadAllBytes(recipePath);
+        IntPtr recipeHandle, tmplHandle;
+        var specs = new TensorSpec[300];
+        int tensorCount;
+        unsafe
+        {
+            fixed (byte* jp = configJson) recipeHandle = SynthInterop.RecipeParse(jp, (nuint)configJson.Length);
+            if (recipeHandle == IntPtr.Zero) return Fail("recipe_parse returned null");
+            tmplHandle = SynthInterop.ArchTemplateLoad("llama");
+            if (tmplHandle == IntPtr.Zero) return Fail("arch_template_load returned null");
+            fixed (TensorSpec* sp = specs)
+                tensorCount = SynthInterop.ArchTemplateRequiredTensors(tmplHandle, recipeHandle, sp, (nuint)specs.Length);
+        }
+        if (tensorCount <= 0) return Fail($"arch_template_required_tensors returned {tensorCount}");
+        Console.WriteLine($"  recipe + arch template: {tensorCount} tensor slots, vocab={vocab}, hidden={dModel}");
+
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+
+        // ── Build substrate view ──────────────────────────────────────
+        // Per-token consensus for unary kinds: aggregate effective-mu across
+        // ALL unary tensor-calc kinds (EMBEDS / V / O / G / U / D / OUTPUT) by
+        // token. Stream B-minimum: combine via sum; Stream B-complete picks
+        // per-tensor consensus via the architecture template's per-slot policy.
+        Console.WriteLine($"  querying substrate per-token consensus...");
+        double[] perToken = new double[vocab];
+        await using (var conn = await ds.OpenConnectionAsync())
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText =
+                """
+                SELECT subject_id, rating, rd FROM laplace.attestations
+                WHERE source_id = $1
+                  AND kind_id = ANY($2)
+                  AND object_id IS NULL
+                """;
+            cmd.Parameters.AddWithValue(ModelDecomposer.Source.ToBytes());
+            var unaryKinds = new[] {
+                ModelDecomposer.EmbedsKind, ModelDecomposer.VProjectsKind,
+                ModelDecomposer.OProjectsKind, ModelDecomposer.GatesKind,
+                ModelDecomposer.UpProjectsKind, ModelDecomposer.DownProjectsKind,
+                ModelDecomposer.OutputProjectsKind,
+            }.Select(k => k.ToBytes()).ToArray();
+            cmd.Parameters.AddWithValue(unaryKinds);
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                var subj = Hash128FromBytes((byte[])rdr[0]);
+                long rating = rdr.GetInt64(1);
+                long rdVal  = rdr.GetInt64(2);
+                double effMu = Math.Max(0.0, (rating - 2.0 * rdVal) / 1e9);
+                if (entityToToken.TryGetValue(subj, out int t) && t < vocab)
+                    perToken[t] += effMu;
+            }
+        }
+
+        // Q_PROJECTS sparse adjacency (subject, object, effective-mu)
+        Console.WriteLine($"  querying substrate Q_PROJECTS adjacency...");
+        var qkRows = new List<int>();
+        var qkCols = new List<int>();
+        var qkVals = new List<double>();
+        await using (var conn = await ds.OpenConnectionAsync())
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText =
+                """
+                SELECT subject_id, object_id, rating, rd FROM laplace.attestations
+                WHERE source_id = $1 AND kind_id = $2 AND object_id IS NOT NULL
+                """;
+            cmd.Parameters.AddWithValue(ModelDecomposer.Source.ToBytes());
+            cmd.Parameters.AddWithValue(ModelDecomposer.QProjectsKind.ToBytes());
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                var subj = Hash128FromBytes((byte[])rdr[0]);
+                var obj  = Hash128FromBytes((byte[])rdr[1]);
+                long rating = rdr.GetInt64(2);
+                long rdVal  = rdr.GetInt64(3);
+                double effMu = Math.Max(0.0, (rating - 2.0 * rdVal) / 1e9);
+                if (effMu <= 0) continue;
+                if (entityToToken.TryGetValue(subj, out int qi)
+                  && entityToToken.TryGetValue(obj, out int kj)
+                  && qi < vocab && kj < vocab)
+                {
+                    qkRows.Add(qi); qkCols.Add(kj); qkVals.Add(effMu);
+                }
+            }
+        }
+
+        // NORMALIZES single-aggregate (unary, subject = recipe entity, object = NULL)
+        double normAgg = 0.0;
+        await using (var conn = await ds.OpenConnectionAsync())
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText =
+                """
+                SELECT rating, rd FROM laplace.attestations
+                WHERE source_id = $1 AND kind_id = $2 AND subject_id = $3
+                """;
+            cmd.Parameters.AddWithValue(ModelDecomposer.Source.ToBytes());
+            cmd.Parameters.AddWithValue(ModelDecomposer.NormalizesKind.ToBytes());
+            cmd.Parameters.AddWithValue(recipe.RecipeEntityId.ToBytes());
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            if (await rdr.ReadAsync())
+            {
+                long rating = rdr.GetInt64(0);
+                long rdVal  = rdr.GetInt64(1);
+                normAgg = Math.Max(0.0, (rating - 2.0 * rdVal) / 1e9);
+            }
+        }
+
+        Console.WriteLine($"  consensus: per-token non-zero={perToken.Count(v => v > 0)} / {vocab}, "
+                        + $"Q_PROJECTS pairs={qkRows.Count}, norm_aggregate={normAgg:F3}");
+
+        // ── Write GGUF via materialize_tensor per slot ─────────────────
+        var gguf = SynthInterop.GgufWriterCreate(outputPath);
+        if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
+        WriteGgufMetadata(gguf, recipe, tokens, modelDir);
+
+        var sw = Stopwatch.StartNew();
+        int tensorsDone = 0;
+        int rcArr = 0;
+        var qkRowsArr = qkRows.ToArray();
+        var qkColsArr = qkCols.ToArray();
+        var qkValsArr = qkVals.ToArray();
+
+        for (int i = 0; i < tensorCount; i++)
+        {
+            string name; ulong rows, cols; int dtype;
+            unsafe
+            {
+                var sp = specs[i];
+                name  = Marshal.PtrToStringUTF8((IntPtr)sp.Name) ?? "";
+                rows  = sp.Rank >= 1 ? sp.Shape[0] : 1;
+                cols  = sp.Rank >= 2 ? sp.Shape[1] : 1;
+                dtype = sp.Dtype;
+            }
+            long nElem = (long)rows * (long)Math.Max(1UL, cols);
+            byte[] tensorBytes = new byte[nElem * (dtype == 0 ? 4L : 2L)];
+
+            unsafe
+            {
+                fixed (double* ptcPtr = perToken)
+                fixed (int*    qrPtr  = qkRowsArr)
+                fixed (int*    qcPtr  = qkColsArr)
+                fixed (double* qvPtr  = qkValsArr)
+                fixed (byte*   outPtr = tensorBytes)
+                fixed (TensorSpec* specPtr = specs)
+                {
+                    var view = new SubstrateView
+                    {
+                        PerTokenConsensus = ptcPtr,
+                        Vocab             = (nuint)vocab,
+                        PerPairRows       = qrPtr,
+                        PerPairCols       = qcPtr,
+                        PerPairVals       = qvPtr,
+                        PerPairNnz        = (nuint)qkRowsArr.Length,
+                        NormAggregate     = normAgg,
+                        TokenBasis        = null,        // Stream B-complete adds spectral basis
+                        BasisDim          = 0,
+                    };
+                    rcArr = SynthInterop.ArchTemplateMaterializeTensor(
+                        tmplHandle, &specPtr[i], &view, outPtr);
+                }
+            }
+            if (rcArr != 0)
+            {
+                Console.Error.WriteLine($"  materialize_tensor({name}) returned {rcArr}; tensor zero-filled");
+            }
+
+            nuint[] ggufDims = cols > 1 ? [(nuint)cols, (nuint)rows] : [(nuint)rows];
+            unsafe
+            {
+                fixed (nuint* dimsPtr = ggufDims)
+                fixed (byte*  dataPtr = tensorBytes)
+                    SynthInterop.GgufWriterAddTensor(gguf, HfToGgmlName(name), dtype, dimsPtr, (nuint)ggufDims.Length, dataPtr);
+            }
+
+            tensorsDone++;
+            if (tensorsDone == 1 || tensorsDone % 20 == 0)
+                Console.WriteLine($"  [{tensorsDone}/{tensorCount}] {name} rows={rows} cols={cols} {sw.Elapsed.TotalSeconds:F1}s");
+        }
+
+        int rc = SynthInterop.GgufWriterFinalize(gguf);
+        SynthInterop.GgufWriterFree(gguf);
+        SynthInterop.ArchTemplateFree(tmplHandle);
+        SynthInterop.RecipeFree(recipeHandle);
+        if (rc != 0) return Fail($"gguf_writer_finalize failed (rc={rc})");
+
+        long fileSize = new FileInfo(outputPath).Length;
+        Console.WriteLine($"synthesis complete: {outputPath} ({fileSize / 1048576.0:F0} MB) in {sw.Elapsed.TotalSeconds:F1}s");
+        return 0;
     }
 
 
