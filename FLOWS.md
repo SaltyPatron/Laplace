@@ -810,7 +810,7 @@ Each row: ADR decision/requirement → flow ID → implementation or gap.
 | Unicode layer # | ADR 0037 table: layer **1** | `UnicodeDecomposer.LayerOrder` = **0** |
 | Text NFC at ingest | Stale ADR 0047 draft / `text_decomposer.h` header | **Code:** no NFC — amended [ADR 0047](docs/adr/0047-text-decomposer-pure-primitive.md) |
 | `laplace roundtrip` | Often conflated with model round-trip | CLI = text file SHA check; model = `scripts/roundtrip.sh` stub |
-| ADR 0050 / 0052 status | **Proposed** | `Laplace.SubstrateCRUD` + `IngestRunner` exist and have tests |
+| ADR 0050 / 0052 status | ~~**Proposed**~~ → **Accepted** (status flipped 2026-05-28, commit `7cf2a5d`; ADRs 0049 + 0051 flipped in the same pass) | `Laplace.SubstrateCRUD` + `IngestRunner` exist and have tests |
 | Layer gate loop | ADR 0052: `for layer in 1..N-1` | `IngestRunner`: `for (layer = 0; layer < LayerOrder; layer++)` |
 | `HasLayerCompleted` attestations | ADR 0037 end-of-run | Reader MVP may always return false until **#183** wires completion attestations |
 | Perf-cache vs DB cross-verify | ADR 0006, issue **#49** | Partial: `UnicodeSeedIntegrationTests` checks U+0041 coord; `just verify-perfcache` → missing `scripts/verify-perfcache.sh` |

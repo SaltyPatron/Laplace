@@ -29,11 +29,13 @@ This document is the operating manual for that collaboration — primarily for A
 
 ---
 
-## Chunk lifecycle
+## Issue lifecycle
+
+Per [ADR 0060](docs/adr/0060-retire-chunk-sequence-v0.1-milestone-cadence.md) the chunk-N sequence is retired; forward work tracks against the `v0.1 — model round-trip` milestone, not chunk numbers. The `chunk-N` labels remain only as historical grouping.
 
 The lifecycle:
 
-1. **Open the chunk's issue**, read its scope + deliverables + acceptance criteria.
+1. **Open the issue**, read its scope + deliverables + acceptance criteria.
 
 4. **Implement the deliverables.** Use specialized agents (see [`.claude/agents/`](.claude/agents/)) for their domains.
 5. **Verify locally before commit** — see [Definition of Done](#definition-of-done) below.
@@ -45,11 +47,11 @@ The lifecycle:
 
 ## Definition of Done
 
-A chunk is **Done** only when *every* item below is checked. No partials. No "I'll come back to this." That's how the substrate got 12 months of zero progress in prior iterations.
+An issue is **Done** only when *every* item below is checked. No partials. No "I'll come back to this." That's how the substrate got 12 months of zero progress in prior iterations.
 
 ### Code
 
-- [ ] All chunk acceptance criteria green on the issue.
+- [ ] All issue acceptance criteria green.
 - [ ] `just build` passes (engine + extension + app + migrations).
 - [ ] `just test` passes (engine ctest + extension `installcheck` + app dotnet test).
 - [ ] `just verify` passes (where the chunk introduces verifiable invariants — determinism, FK integrity, perf-cache parity).
@@ -69,8 +71,8 @@ A chunk is **Done** only when *every* item below is checked. No partials. No "I'
 
 ### Migrations & extension
 
-- [ ] If the chunk introduces substrate schema (entities/physicalities/attestations columns, new types, new functions): the change lands in the relevant extension `.sql.in` sources and bumps `default_version` in the matching `.control` file. NOT in `db/migrations/`. (Per [ADR 0023](docs/adr/0023-extension-owns-schema-dbup-orchestrates.md) + [ADR 0034](docs/adr/0034-modular-sql-via-cpp-preprocessor.md).)
-- [ ] If the chunk introduces cross-extension orchestration or non-extension operational tables: that goes in `db/migrations/<timestamp>_<name>.sql` via `just migrate-new <name>`.
+- [ ] If the issue introduces substrate schema (entities/physicalities/attestations columns, new types, new functions): the change lands in the relevant extension `.sql.in` sources and bumps `default_version` in the matching `.control` file. NOT in `db/migrations/`. (Per [ADR 0023](docs/adr/0023-extension-owns-schema-dbup-orchestrates.md) + [ADR 0034](docs/adr/0034-modular-sql-via-cpp-preprocessor.md).)
+- [ ] If the issue introduces cross-extension orchestration or non-extension operational tables: that goes in `db/migrations/<timestamp>_<name>.sql` via `just migrate-new <name>`.
 - [ ] Idempotent SQL only — `CREATE ... IF NOT EXISTS`, `DO $$ ... END $$` for conditional grants, etc.
 - [ ] `just db-up` succeeds on a clean target (`just db-nuke && just db-up`).
 
