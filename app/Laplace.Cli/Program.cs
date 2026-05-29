@@ -531,15 +531,24 @@ internal static class Program
         var qkColsArr = qkCols.ToArray();
         var qkValsArr = qkVals.ToArray();
 
-        // ── Spectral basis: eigenmaps → Gram-Schmidt → Procrustes ──────
+        // ── Spectral basis: eigenmaps → Procrustes → gram matrices ────────
+        // basisTargetDim is capped well below dModel: computing dModel=2048
+        // eigenpairs of a 32K-node sparse graph via Lanczos requires O(4K×32K)
+        // workspace and rarely converges in CI time. 64 eigenpairs converge in
+        // seconds. materialize_token_axis cycles the basis mod basisTargetDim so
+        // every hidden dimension is still substrate-derived, just with period-64
+        // spectral texture.
+        const int EigenMaxDim = 64;
+        int basisTargetDim = Math.Min(dModel, EigenMaxDim);
+
         double[]? tokenBasis   = null;
         double[]? unaryGram    = null;
         double[]? binaryGram   = null;
         if (qkRowsArr.Length > 0)
         {
-            Console.WriteLine($"  computing spectral token basis (eigenmaps target_dim={dModel}, nnz={qkRowsArr.Length})...");
+            Console.WriteLine($"  computing spectral token basis (eigenmaps target_dim={basisTargetDim}, nnz={qkRowsArr.Length})...");
             var sw0 = Stopwatch.StartNew();
-            double[] basis = new double[(long)vocab * dModel];
+            double[] basis = new double[(long)vocab * basisTargetDim];
             int eigenRc;
             unsafe
             {
@@ -549,7 +558,7 @@ internal static class Program
                 fixed (double* basisPtr = basis)
                     eigenRc = DynamicsInterop.LaplacianEigenmapsFromSparseGraph(
                         qrPtr, qcPtr, qvPtr,
-                        (nuint)qkRowsArr.Length, (nuint)vocab, (nuint)dModel,
+                        (nuint)qkRowsArr.Length, (nuint)vocab, (nuint)basisTargetDim,
                         basisPtr);
             }
             if (eigenRc != 0)
@@ -558,9 +567,12 @@ internal static class Program
             }
             else
             {
-                unsafe { fixed (double* p = basis) DynamicsInterop.GramSchmidtOrthonormalize(p, (nuint)dModel, (nuint)vocab); }
+                // GramSchmidt removed: Spectra's SymEigsShiftSolver produces orthonormal
+                // eigenvectors by construction (symmetric matrix). A GS call with
+                // n_vecs=basisTargetDim, dim=vocab on the [vocab×basisTargetDim] layout
+                // would scramble the data due to layout mismatch.
 
-                // Procrustes: align basis[vocab × dModel] to canonical S³ positions
+                // Procrustes: align basis[vocab × basisTargetDim] to canonical S³ positions
                 var sortedTokens = tokens.OrderBy(t => t.TokenId).ToArray();
                 double[] targetPts = new double[(long)vocab * 4];
                 for (int t = 0; t < vocab && t < sortedTokens.Length; t++)
@@ -577,7 +589,7 @@ internal static class Program
                 {
                     fixed (double* bPtr = basis)
                     fixed (double* tPtr = targetPts)
-                        procT = DynamicsInterop.ProcrustesFit(bPtr, (nuint)vocab, (nuint)dModel, tPtr);
+                        procT = DynamicsInterop.ProcrustesFit(bPtr, (nuint)vocab, (nuint)basisTargetDim, tPtr);
                 }
                 if (procT != IntPtr.Zero)
                 {
@@ -585,9 +597,10 @@ internal static class Program
                     DynamicsInterop.ProcrustesFree(procT);
                 }
 
-                // Gram matrices for interior tensor materialization
-                double[] uGram = new double[(long)dModel * dModel];
-                double[] bGram = new double[(long)dModel * dModel];
+                // Gram matrices: [basisTargetDim × basisTargetDim] — interior tensors
+                // cycle mod basisTargetDim so any shape is handled.
+                double[] uGram = new double[(long)basisTargetDim * basisTargetDim];
+                double[] bGram = new double[(long)basisTargetDim * basisTargetDim];
                 int gramRc;
                 unsafe
                 {
@@ -599,7 +612,7 @@ internal static class Program
                     fixed (double* ugPtr = uGram)
                     fixed (double* bgPtr = bGram)
                         gramRc = SynthInterop.ComputeSubstrateGram(
-                            bPtr, ptPtr, (nuint)vocab, (nuint)dModel,
+                            bPtr, ptPtr, (nuint)vocab, (nuint)basisTargetDim,
                             qrPtr, qcPtr, qvPtr, (nuint)qkRowsArr.Length,
                             ugPtr, bgPtr);
                 }
@@ -607,7 +620,7 @@ internal static class Program
                 else Console.Error.WriteLine($"  WARNING: compute_substrate_gram returned {gramRc}; interior tensors use fallback");
 
                 tokenBasis = basis;
-                Console.WriteLine($"  spectral basis ready in {sw0.Elapsed.TotalSeconds:F1}s");
+                Console.WriteLine($"  spectral token basis ready in {sw0.Elapsed.TotalSeconds:F1}s (basis_dim={basisTargetDim})");
             }
         }
 
@@ -636,7 +649,7 @@ internal static class Program
 
             rcArr = MaterializeOneTensor(tmplHandle, specs, i, perToken, vocab,
                 qkRowsArr, qkColsArr, qkValsArr, normAgg,
-                tokenBasis, unaryGram, binaryGram, dModel,
+                tokenBasis, unaryGram, binaryGram, basisTargetDim,
                 tensorBytes);
             if (rcArr != 0)
                 Console.Error.WriteLine($"  materialize_tensor({name}) returned {rcArr}; tensor zero-filled");

@@ -197,8 +197,11 @@ void materialize_token_axis(const substrate_view_t* v, int dtype,
     for (size_t t = 0; t < vocab; ++t) {
         double tc = (t < v->vocab) ? v->per_token_consensus[t] : 0.0;
         for (size_t d = 0; d < hidden; ++d) {
-            double b = (v->token_basis && v->basis_dim >= hidden)
-                       ? v->token_basis[t * v->basis_dim + d]
+            /* Cycle mod basis_dim: basis_dim may be smaller than hidden (e.g. 64
+             * vs 2048). Cycling gives every hidden dim a substrate-derived value
+             * while keeping the spectral token signature intact. */
+            double b = (v->token_basis && v->basis_dim > 0)
+                       ? v->token_basis[t * v->basis_dim + (d % v->basis_dim)]
                        : inv_sqrt_h;
             write_dtype((float)(tc * b), dtype, out + (t * hidden + d) * es);
         }
