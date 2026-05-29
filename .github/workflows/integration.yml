@@ -51,6 +51,28 @@ jobs:
           submodules: false
           clean: false
 
+      - name: Guard — workspace must stay submodule-free (catch the .git/modules bleed)
+        run: |
+          # Deps come from $LAPLACE_EXTERNAL (/opt/laplace/external), never from
+          # workspace submodules. A `submodules: false` checkout must NOT create
+          # .git/modules or initialize any submodule. If it did, something
+          # re-introduced submodule init (e.g. a `git submodule update --init`
+          # step) — the 4.5 GB-per-run _work bleed. Fail loud at step one rather
+          # than silently re-downloading 300+ grammar repos every run.
+          fail=0
+          if [ -d .git/modules ] && [ -n "$(ls -A .git/modules 2>/dev/null)" ]; then
+            echo "::error::.git/modules is populated ($(du -sh .git/modules | cut -f1)) — submodule init regressed. Deps must source from \$LAPLACE_EXTERNAL, not workspace submodules."
+            fail=1
+          fi
+          init=$(git submodule status 2>/dev/null | grep -cE '^[ +U]' || true)
+          if [ "${init:-0}" -gt 0 ]; then
+            echo "::error::$init submodule(s) initialized in workspace — expected 0 under submodules:false + cache."
+            git submodule status 2>/dev/null | grep -E '^[ +U]' | head -10
+            fail=1
+          fi
+          [ "$fail" -eq 0 ] && echo "✓ workspace submodule-free; deps sourced from \$LAPLACE_EXTERNAL"
+          exit "$fail"
+
       - name: Ensure /opt/laplace install destinations exist (idempotent)
         run: |
           # Per-dep dirs (system deps land here from `cmake --build build/deps`)

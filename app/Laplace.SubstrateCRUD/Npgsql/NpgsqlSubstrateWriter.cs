@@ -50,209 +50,258 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
     }
 
     /// <inheritdoc/>
-    public async Task<ApplyResult> ApplyAsync(SubstrateChange change, CancellationToken ct = default)
+    public Task<ApplyResult> ApplyAsync(SubstrateChange change, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(change);
+        return ApplyManyAsync(new[] { change }, ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<ApplyResult> ApplyManyAsync(
+        IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
         var sw = Stopwatch.StartNew();
         int roundTrips = 0;
 
-        // 1. Existence check on entities (engine-backed SRF).
-        var entityIds = new Hash128[change.Entities.Length];
-        for (int i = 0; i < change.Entities.Length; i++)
-            entityIds[i] = change.Entities[i].Id;
-        byte[] existingBitmap = change.Entities.Length == 0
-            ? Array.Empty<byte>()
-            : await _reader.EntitiesExistBitmapAsync(entityIds, ct);
-        if (change.Entities.Length > 0) roundTrips++;
-
-        // 2. Engine compaction: novel = bit clear.
-        var novelEntities = new List<EntityRow>(change.Entities.Length);
-        for (int i = 0; i < change.Entities.Length; i++)
+        int entitiesAttempted = 0, physAttempted = 0, attAttempted = 0;
+        for (int i = 0; i < changes.Count; i++)
         {
-            byte b = (byte)(i >> 3 < existingBitmap.Length ? existingBitmap[i >> 3] : 0);
-            bool present = ((b >> (i & 7)) & 1) != 0;
-            if (!present) novelEntities.Add(change.Entities[i]);
+            entitiesAttempted += changes[i].Entities.Length;
+            physAttempted     += changes[i].Physicalities.Length;
+            attAttempted      += changes[i].Attestations.Length;
         }
+        if (changes.Count == 0)
+            return new ApplyResult(0, 0, 0, 0, 0, 0, 0, sw.Elapsed, false);
 
-        // Trunk-shortcircuit: if every entity is already present AND the intent
-        // has no physicality / attestation rows (or those tables won't insert
-        // because their FKs point at not-yet-present entities), we can return
-        // immediately. Conservative shortcircuit: only when all entities are
-        // present AND there are no physicalities/attestations to insert.
-        // (Physicalities/attestations may still need insert even if their
-        // referenced entities already existed — e.g. new source attesting to
-        // a known entity. So we always emit those rows when present.)
-        bool trunkShortcircuit = novelEntities.Count == 0
-                                && change.Physicalities.Length == 0
-                                && change.Attestations.Length == 0;
-        if (trunkShortcircuit)
-        {
-            sw.Stop();
-            return new ApplyResult(
-                EntitiesAttempted: change.Entities.Length,
-                EntitiesInserted: 0,
-                PhysicalitiesAttempted: 0,
-                PhysicalitiesInserted: 0,
-                AttestationsAttempted: 0,
-                AttestationsInserted: 0,
-                RoundTrips: roundTrips,
-                WallClock: sw.Elapsed,
-                TrunkShortcircuitHit: true);
-        }
-
-        // 2b. Physicality dedup — the same "do you have these ids?" walk as
-        // entities, applied to physicalities. COPY can't ON CONFLICT, so we
-        // filter to novel ids before COPY: re-ingest and content shared across
-        // documents (the same grapheme/word) become no-ops instead of a
-        // physicalities_pkey clash.
-        var existingPhys = new HashSet<Hash128>();
-        if (change.Physicalities.Length > 0)
-        {
-            var pidBytes = new byte[change.Physicalities.Length][];
-            for (int i = 0; i < change.Physicalities.Length; i++)
-                pidBytes[i] = change.Physicalities[i].Id.ToBytes();
-            await using var ec = await _ds.OpenConnectionAsync(ct);
-            await using var eq = ec.CreateCommand();
-            eq.CommandText = "SELECT id FROM laplace.physicalities WHERE id = ANY(@ids)";
-            eq.Parameters.Add(new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea) { Value = pidBytes });
-            await using var er = await eq.ExecuteReaderAsync(ct);
-            while (await er.ReadAsync(ct))
-            {
-                var bts = (byte[])er[0];
-                existingPhys.Add(new Hash128(BitConverter.ToUInt64(bts, 0), BitConverter.ToUInt64(bts, 8)));
-            }
-            roundTrips++;
-        }
-
-        // 2c. Attestation dedup by id (same shape). NOTE: this is the IDENTITY
-        // filter — attestation ids are content-addressed BLAKE3 of
-        // (subject,kind,object,source,context) so the same observation re-emitted
-        // is the same id and must not collide. Glicko-2 matchup updates on
-        // RE-OBSERVATION are a separate, later concern (DO UPDATE with double-
-        // count guards) — distinct from this "already wrote this exact row" check.
-        var existingAtt = new HashSet<Hash128>();
-        if (change.Attestations.Length > 0)
-        {
-            var aidBytes = new byte[change.Attestations.Length][];
-            for (int i = 0; i < change.Attestations.Length; i++)
-                aidBytes[i] = change.Attestations[i].Id.ToBytes();
-            await using var ec = await _ds.OpenConnectionAsync(ct);
-            await using var eq = ec.CreateCommand();
-            eq.CommandText = "SELECT id FROM laplace.attestations WHERE id = ANY(@ids)";
-            eq.Parameters.Add(new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea) { Value = aidBytes });
-            await using var er = await eq.ExecuteReaderAsync(ct);
-            while (await er.ReadAsync(ct))
-            {
-                var bts = (byte[])er[0];
-                existingAtt.Add(new Hash128(BitConverter.ToUInt64(bts, 0), BitConverter.ToUInt64(bts, 8)));
-            }
-            roundTrips++;
-        }
-
-        // 3. Materialize COPY BINARY buffers via engine IntentStage.
-        using var stage = IntentStage.New(
-            Math.Max(novelEntities.Count, change.Physicalities.Length));
-
-        var seenEntityIds = new HashSet<Hash128>(novelEntities.Count);
-        foreach (var e in novelEntities)
-        {
-            if (!seenEntityIds.Add(e.Id)) continue;   // within-batch dedup
-            stage.AddEntity(e.Id, e.Tier, e.TypeId, e.FirstObservedBy);
-        }
-        Span<double> coord = stackalloc double[4];
-        foreach (var p in change.Physicalities)
-        {
-            if (!existingPhys.Add(p.Id)) continue;   // skip if in DB or already queued this batch
-            coord[0] = p.CoordX; coord[1] = p.CoordY; coord[2] = p.CoordZ; coord[3] = p.CoordM;
-            stage.AddPhysicality(
-                p.Id, p.EntityId, p.SourceId, (short)p.Kind,
-                coord, p.HilbertIndex,
-                p.TrajectoryXyzm is null ? ReadOnlySpan<double>.Empty
-                                          : p.TrajectoryXyzm.AsSpan(),
-                p.NConstituents,
-                p.AlignmentResidual, p.SourceDim,
-                p.ObservedAtUnixUs);
-        }
-        foreach (var a in change.Attestations)
-        {
-            if (!existingAtt.Add(a.Id)) continue;   // skip if in DB or already queued this batch
-            stage.AddAttestation(
-                a.Id, a.SubjectId, a.KindId, a.ObjectId, a.SourceId, a.ContextId,
-                a.RatingFp1e9, a.RdFp1e9, a.VolatilityFp1e9,
-                a.LastObservedAtUnixUs, a.ObservationCount);
-        }
-
-        int entitiesInserted = 0;
-        int physicalitiesInserted = 0;
-        int attestationsInserted = 0;
-
+        // One connection for the whole batch — existence reads + all COPYs.
+        // Replaces the old per-intent pattern of up to three OpenConnection
+        // calls and 6 round-trips PER intent.
         await using var conn = await _ds.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
 
-        try
+        // 1. Entity existence — ONE engine-backed SRF for every entity id in
+        //    the batch (deduped). Bitmap bit set => already present.
+        var uniqueEntityIds = new List<Hash128>(entitiesAttempted);
+        var seenEntityArg = new HashSet<Hash128>();
+        foreach (var c in changes)
+            foreach (var e in c.Entities)
+                if (seenEntityArg.Add(e.Id)) uniqueEntityIds.Add(e.Id);
+
+        var existingEntities = new HashSet<Hash128>();
+        if (uniqueEntityIds.Count > 0)
         {
-            if (stage.EntityCount > 0)
+            var arg = new byte[uniqueEntityIds.Count][];
+            for (int i = 0; i < uniqueEntityIds.Count; i++) arg[i] = uniqueEntityIds[i].ToBytes();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT laplace.entities_exist_bitmap(@ids)";
+            cmd.Parameters.Add(new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea) { Value = arg });
+            var res = await cmd.ExecuteScalarAsync(ct);
+            var bitmap = res as byte[] ?? Array.Empty<byte>();
+            for (int i = 0; i < uniqueEntityIds.Count; i++)
             {
-                byte[] buf = stage.EmitCopyBinary(IntentStageTable.Entities);
-                entitiesInserted = await StreamCopyAsync(
-                    conn, $"COPY laplace.entities ({IntentStage.CopyColumnList(IntentStageTable.Entities)}) FROM STDIN (FORMAT BINARY)",
-                    buf, stage.EntityCount, ct);
-                roundTrips++;
+                byte b = (byte)(i >> 3 < bitmap.Length ? bitmap[i >> 3] : 0);
+                if (((b >> (i & 7)) & 1) != 0) existingEntities.Add(uniqueEntityIds[i]);
             }
-            if (stage.PhysicalityCount > 0)
-            {
-                byte[] buf = stage.EmitCopyBinary(IntentStageTable.Physicalities);
-                physicalitiesInserted = await StreamCopyAsync(
-                    conn, $"COPY laplace.physicalities ({IntentStage.CopyColumnList(IntentStageTable.Physicalities)}) FROM STDIN (FORMAT BINARY)",
-                    buf, stage.PhysicalityCount, ct);
-                roundTrips++;
-            }
-            if (stage.AttestationCount > 0)
-            {
-                byte[] buf = stage.EmitCopyBinary(IntentStageTable.Attestations);
-                attestationsInserted = await StreamCopyAsync(
-                    conn, $"COPY laplace.attestations ({IntentStage.CopyColumnList(IntentStageTable.Attestations)}) FROM STDIN (FORMAT BINARY)",
-                    buf, stage.AttestationCount, ct);
-                roundTrips++;
-            }
-
-            await tx.CommitAsync(ct);
+            roundTrips++;
         }
-        catch
+
+        // 2. Physicality identity dedup — ONE query for all phys ids. COPY
+        //    can't ON CONFLICT, so we filter to novel ids before staging:
+        //    content shared across the batch (same grapheme/word/tensor) becomes
+        //    a no-op instead of a physicalities_pkey clash.
+        var existingPhys = await LoadExistingIdsAsync(
+            conn, "physicalities", changes, static c => c.Physicalities, static p => p.Id, ct);
+        if (physAttempted > 0) roundTrips++;
+
+        // 3. Attestation identity dedup — ONE query for all attestation ids.
+        //    Attestation ids are content-addressed BLAKE3 of
+        //    (subject,kind,object,source,context); the same observation
+        //    re-emitted is the same id and must not collide. Glicko-2 matchup
+        //    updates on re-observation are a separate, later concern.
+        var existingAtt = await LoadExistingIdsAsync(
+            conn, "attestations", changes, static c => c.Attestations, static a => a.Id, ct);
+        if (attAttempted > 0) roundTrips++;
+
+        // 4. Stage ALL novel rows across the batch into ONE COPY stream per
+        //    table (FK order: entities, then physicalities, then attestations).
+        using var stage = IntentStage.New(Math.Max(uniqueEntityIds.Count, physAttempted));
+
+        var seenEntity = new HashSet<Hash128>(uniqueEntityIds.Count);
+        var seenPhys   = new HashSet<Hash128>(existingPhys);
+        var seenAtt    = new HashSet<Hash128>(existingAtt);
+        Span<double> coord = stackalloc double[4];
+
+        foreach (var c in changes)
+            foreach (var e in c.Entities)
+            {
+                if (existingEntities.Contains(e.Id)) continue;   // already in DB
+                if (!seenEntity.Add(e.Id)) continue;             // already staged this batch
+                stage.AddEntity(e.Id, e.Tier, e.TypeId, e.FirstObservedBy);
+            }
+        foreach (var c in changes)
+            foreach (var p in c.Physicalities)
+            {
+                if (!seenPhys.Add(p.Id)) continue;   // in DB or already staged this batch
+                coord[0] = p.CoordX; coord[1] = p.CoordY; coord[2] = p.CoordZ; coord[3] = p.CoordM;
+                stage.AddPhysicality(
+                    p.Id, p.EntityId, p.SourceId, (short)p.Kind,
+                    coord, p.HilbertIndex,
+                    p.TrajectoryXyzm is null ? ReadOnlySpan<double>.Empty
+                                              : p.TrajectoryXyzm.AsSpan(),
+                    p.NConstituents, p.AlignmentResidual, p.SourceDim, p.ObservedAtUnixUs);
+            }
+        foreach (var c in changes)
+            foreach (var a in c.Attestations)
+            {
+                if (!seenAtt.Add(a.Id)) continue;   // in DB or already staged this batch
+                stage.AddAttestation(
+                    a.Id, a.SubjectId, a.KindId, a.ObjectId, a.SourceId, a.ContextId,
+                    a.RatingFp1e9, a.RdFp1e9, a.VolatilityFp1e9,
+                    a.LastObservedAtUnixUs, a.ObservationCount);
+            }
+
+        int entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
+        bool anyRows = stage.EntityCount > 0 || stage.PhysicalityCount > 0 || stage.AttestationCount > 0;
+
+        if (anyRows)
         {
-            await tx.RollbackAsync(CancellationToken.None);
-            throw;
+            // Conflict-safe bulk apply: COPY each table's rows into a TEMP
+            // staging table, then INSERT … ON CONFLICT DO NOTHING into the real
+            // table. COPY alone can't ON CONFLICT, so direct COPY of a novel-only
+            // filter is only race-safe single-threaded; the staging + ON CONFLICT
+            // path is correct under concurrent writers of overlapping ids
+            // (RULES R5), which is what unlocks ParallelWorkers > 1. The INSERT's
+            // rows-affected is the TRUE inserted count (≤ staged, under conflict).
+            await using var tx = await conn.BeginTransactionAsync(ct);
+            try
+            {
+                if (stage.EntityCount > 0)
+                {
+                    entitiesInserted = await StageAndInsertAsync(
+                        conn, IntentStageTable.Entities, "entities",
+                        stage.EmitCopyBinary(IntentStageTable.Entities), ct);
+                    roundTrips += 3;
+                }
+                if (stage.PhysicalityCount > 0)
+                {
+                    physicalitiesInserted = await StageAndInsertAsync(
+                        conn, IntentStageTable.Physicalities, "physicalities",
+                        stage.EmitCopyBinary(IntentStageTable.Physicalities), ct);
+                    roundTrips += 3;
+                }
+                if (stage.AttestationCount > 0)
+                {
+                    attestationsInserted = await StageAndInsertAsync(
+                        conn, IntentStageTable.Attestations, "attestations",
+                        stage.EmitCopyBinary(IntentStageTable.Attestations), ct);
+                    roundTrips += 3;
+                }
+                await tx.CommitAsync(ct);
+            }
+            catch
+            {
+                await tx.RollbackAsync(CancellationToken.None);
+                throw;
+            }
         }
 
         sw.Stop();
         return new ApplyResult(
-            EntitiesAttempted: change.Entities.Length,
+            EntitiesAttempted: entitiesAttempted,
             EntitiesInserted: entitiesInserted,
-            PhysicalitiesAttempted: change.Physicalities.Length,
+            PhysicalitiesAttempted: physAttempted,
             PhysicalitiesInserted: physicalitiesInserted,
-            AttestationsAttempted: change.Attestations.Length,
+            AttestationsAttempted: attAttempted,
             AttestationsInserted: attestationsInserted,
             RoundTrips: roundTrips,
             WallClock: sw.Elapsed,
-            TrunkShortcircuitHit: false);
+            // Trunk-shortcircuit: nothing was written — either the intent(s)
+            // were empty, or every presented row deduped away (already present
+            // / duplicated within the batch). Matches the legacy single-intent
+            // contract: a no-op apply reports the shortcircuit.
+            TrunkShortcircuitHit: !anyRows);
     }
 
     /// <summary>
-    /// Stream engine-emitted COPY BINARY bytes directly into the PG wire
-    /// via Npgsql's raw COPY stream — zero per-row managed allocation;
-    /// the bytes go from C arena → unmanaged write → PG socket.
-    /// Returns the row count the engine staged (the actual inserted count
-    /// may be lower under ON CONFLICT, but that path is via INSERT — COPY
-    /// doesn't support ON CONFLICT, so we use a staging-table strategy
-    /// only when re-inserts are likely; for now COPY direct with the
-    /// caller-controlled novel-only filter handles dedup).
+    /// One <c>SELECT id FROM laplace.&lt;table&gt; WHERE id = ANY(@ids)</c> over
+    /// every (deduped) id of the given row kind across the whole batch — the
+    /// COPY-can't-ON-CONFLICT identity filter, hoisted from per-intent to
+    /// per-batch.
     /// </summary>
-    private static async Task<int> StreamCopyAsync(
-        NpgsqlConnection conn, string copyStmt, byte[] data, int rowCount, CancellationToken ct)
+    private static async Task<HashSet<Hash128>> LoadExistingIdsAsync<TRow>(
+        NpgsqlConnection conn,
+        string table,
+        IReadOnlyList<SubstrateChange> changes,
+        Func<SubstrateChange, System.Collections.Immutable.ImmutableArray<TRow>> select,
+        Func<TRow, Hash128> idOf,
+        CancellationToken ct)
     {
-        await using var stream = await conn.BeginRawBinaryCopyAsync(copyStmt, ct);
-        await stream.WriteAsync(data.AsMemory(), ct);
-        await stream.FlushAsync(ct);
-        return rowCount;
+        var seen = new HashSet<Hash128>();
+        var idBytes = new List<byte[]>();
+        foreach (var c in changes)
+            foreach (var row in select(c))
+            {
+                var id = idOf(row);
+                if (seen.Add(id)) idBytes.Add(id.ToBytes());
+            }
+
+        var existing = new HashSet<Hash128>();
+        if (idBytes.Count == 0) return existing;
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT id FROM laplace.{table} WHERE id = ANY(@ids)";
+        cmd.Parameters.Add(new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea) { Value = idBytes.ToArray() });
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            var bts = (byte[])r[0];
+            existing.Add(new Hash128(BitConverter.ToUInt64(bts, 0), BitConverter.ToUInt64(bts, 8)));
+        }
+        return existing;
+    }
+
+    /// <summary>
+    /// Conflict-safe bulk insert for one table: (1) create an <c>ON COMMIT
+    /// DROP</c> TEMP table holding exactly the COPY columns, (2) stream the
+    /// engine-emitted COPY BINARY bytes into it via Npgsql's raw COPY stream
+    /// (zero per-row managed allocation — C arena → unmanaged write → PG
+    /// socket), (3) <c>INSERT … SELECT … ON CONFLICT DO NOTHING</c> into the
+    /// real table. Returns the INSERT's rows-affected — the TRUE inserted count
+    /// (lower than staged when ids already exist or recur). Must run inside an
+    /// open transaction (for the temp table's <c>ON COMMIT DROP</c> scope).
+    /// </summary>
+    private static async Task<int> StageAndInsertAsync(
+        NpgsqlConnection conn, IntentStageTable table, string tableName, byte[] data, CancellationToken ct)
+    {
+        string cols = IntentStage.CopyColumnList(table);
+        string tmp  = $"_lpl_stg_{tableName}";
+
+        // 1. TEMP staging table: exactly the COPY columns + their types, no
+        //    constraints/defaults (so COPY of the column subset never trips a
+        //    NOT NULL on a server-defaulted column).
+        await using (var create = conn.CreateCommand())
+        {
+            create.CommandText =
+                $"CREATE TEMP TABLE {tmp} ON COMMIT DROP AS "
+              + $"SELECT {cols} FROM laplace.{tableName} WITH NO DATA";
+            await create.ExecuteNonQueryAsync(ct);
+        }
+
+        // 2. Raw binary COPY into the staging table.
+        await using (var stream = await conn.BeginRawBinaryCopyAsync(
+            $"COPY {tmp} ({cols}) FROM STDIN (FORMAT BINARY)", ct))
+        {
+            await stream.WriteAsync(data.AsMemory(), ct);
+            await stream.FlushAsync(ct);
+        }
+
+        // 3. Conflict-safe promote into the real table; rows-affected = inserted.
+        await using (var insert = conn.CreateCommand())
+        {
+            insert.CommandText =
+                $"INSERT INTO laplace.{tableName} ({cols}) "
+              + $"SELECT {cols} FROM {tmp} ON CONFLICT DO NOTHING";
+            return await insert.ExecuteNonQueryAsync(ct);
+        }
     }
 }

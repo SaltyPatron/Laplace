@@ -42,6 +42,15 @@ internal static class Program
         }
     }
 
+    /// <summary>Read a positive integer tuning knob from the environment,
+    /// falling back to <paramref name="fallback"/> when unset or unparseable.
+    /// Same env-override convention as <see cref="ConnString"/>.</summary>
+    private static int EnvInt(string name, int fallback, int min)
+    {
+        var raw = Environment.GetEnvironmentVariable(name);
+        return int.TryParse(raw, out var v) && v >= min ? v : fallback;
+    }
+
     private static async Task<int> Main(string[] args)
     {
         if (args.Length == 0)
@@ -281,22 +290,81 @@ internal static class Program
             bool alreadyIngested = (bool)(await chkCmd.ExecuteScalarAsync() ?? false);
             if (alreadyIngested)
             {
+                // Re-ingesting the same model would double-count its votes and
+                // contaminate consensus, so it is refused by design. To re-run
+                // (e.g. testing), reset the DB: `just db-fresh` (nuke + migrate +
+                // seed-t0). There is intentionally no in-place override.
                 Console.WriteLine($"Model already ingested — source entity: {ModelDecomposer.Source}");
-                Console.WriteLine($"(use 'just db-nuke && just seed-t0 && just ingest model {modelDir}' to re-ingest from scratch)");
+                Console.WriteLine($"(re-ingest is refused to prevent consensus contamination; "
+                                  + $"reset with 'just db-fresh' to test from scratch)");
                 return 0;
             }
         }
 
         var writer = new NpgsqlSubstrateWriter(ds);
         var reader = new NpgsqlSubstrateReader(ds);
-        var runner = new IngestRunner(writer, reader);
+        var loggerFactory = ConsoleLoggerProvider.Factory();
+        var runner = new IngestRunner(writer, reader, loggerFactory);
         var dec    = new ModelDecomposer(modelDir);
 
-        Console.WriteLine($"ingest model {modelDir} via IngestRunner → {ConnString} ...");
+        // Model ingestion is mechanical and embarrassingly parallel: thousands
+        // of weight-tensor intents. Two levers, both env-tunable (same
+        // convention as LAPLACE_DB):
+        //   LAPLACE_INGEST_BATCH   — max intents buffered per batched apply
+        //       (default 1024): one existence pass + one staged COPY/INSERT per
+        //       table per batch instead of ~6 round-trips and 3 connection-opens
+        //       PER intent. Acts as the upper cap on buffered intents.
+        //   LAPLACE_INGEST_COMMIT_ROWS — rows (entities+physicalities+attestations)
+        //       per commit (default 100_000). This is the real throughput dial:
+        //       intent fan-out is wildly uneven (a single QK head-intent ≈ thousands
+        //       of attestations), so batching by intent count makes the COPY payload
+        //       swing from KBs to GBs; batching by ROW count pins it (≈ rows × 200 B,
+        //       so 100k ≈ 20 MB) regardless of fan-out. Dial up for fewer/larger
+        //       COPYs (throughput at scale), down (e.g. 512) for finer-grained
+        //       streaming commits + earlier visibility. 0 = batch purely by intent.
+        //   LAPLACE_INGEST_WORKERS — concurrent batch appliers (default 1):
+        //       safe because NpgsqlSubstrateWriter promotes via a TEMP staging
+        //       table + INSERT … ON CONFLICT DO NOTHING, so overlapping novel
+        //       ids across workers converge instead of throwing duplicate-key.
+        int batchSize  = EnvInt("LAPLACE_INGEST_BATCH",       1024,    min: 1);
+        int commitRows = EnvInt("LAPLACE_INGEST_COMMIT_ROWS", 100_000, min: 0);
+        // Serial writers by default: model attestations reference token entities emitted
+        // in EARLIER intents (the vocab phase), so parallel writers can commit a weight
+        // attestation before its subject entity → FK violation. The heavy compute is
+        // already multi-core inside the engine kernels (TBB); workers only parallelize
+        // DB writes. Safe parallel writes need an entity-phase barrier (follow-up);
+        // until then default 1. Override with LAPLACE_INGEST_WORKERS.
+        int workers   = EnvInt("LAPLACE_INGEST_WORKERS", 1, min: 1);
+        Console.WriteLine(
+            $"ingest model {modelDir} via IngestRunner → {ConnString} "
+            + $"(workers={workers}, batch={batchSize}, commitRows={commitRows:N0}) ...");
         var sw = Stopwatch.StartNew();
+
+        // Throttled progress: one counter line per ~2s so a long run shows live
+        // applied-intents + rate without flooding the log.
+        long lastReportMs = 0;
+        var progress = new Progress<Laplace.Ingestion.IngestProgress>(p =>
+        {
+            long now = sw.ElapsedMilliseconds;
+            if (now - lastReportMs < 2000) return;
+            lastReportMs = now;
+            double rate = p.UnitsApplied / Math.Max(0.001, p.Elapsed.TotalSeconds);
+            Console.Error.WriteLine(
+                $"[progress] {p.UnitsApplied:N0} intents applied"
+                + (p.EstimatedTotal is { } tot ? $"/{tot:N0}" : "")
+                + $", {p.UnitsFailed:N0} failed, {rate:F0} intents/s, {p.Elapsed.TotalSeconds:F0}s");
+        });
+
         var result = await runner.RunAsync(
             dec,
-            IngestRunOptions.Default with { SkipLayerOrderingCheck = true },
+            IngestRunOptions.Default with
+            {
+                SkipLayerOrderingCheck = true,
+                BatchSize              = batchSize,
+                CommitRows             = commitRows,
+                ParallelWorkers        = workers,
+                Progress               = progress,
+            },
             CancellationToken.None);
         sw.Stop();
 

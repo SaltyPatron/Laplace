@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.Logging;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -166,11 +167,17 @@ public sealed class ModelDecomposer : IDecomposer
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
+        var log = context.Logger;
+        var phaseSw = System.Diagnostics.Stopwatch.StartNew();
         string configPath    = Path.Combine(_modelDir, "config.json");
         string tokenizerPath = Path.Combine(_modelDir, "tokenizer.json");
 
         /* 1. Recipe */
         var recipe = LlamaRecipeExtractor.Parse(configPath);
+        log.LogInformation("phase=recipe parsed: {Layers} layers, {Heads} heads/{Kv} kv, "
+            + "d_model={DModel}, vocab={Vocab} ({Ms} ms)",
+            recipe.NumLayers, recipe.NumHeads, recipe.NumKvHeads, recipe.HiddenSize,
+            recipe.VocabSize, phaseSw.ElapsedMilliseconds);
         yield return LlamaRecipeExtractor.BuildChange(
             recipe, Source, ModelRecipeTypeId,
             HasHiddenSizeKind, HasNumLayersKind, HasNumHeadsKind, HasNumKvHeadsKind,
@@ -190,21 +197,30 @@ public sealed class ModelDecomposer : IDecomposer
         /* 3. Token vocab entities + TOKEN_MAPS_TO attestations.
          * Records are sorted by token_id in Parse() — _tokens[(int)vocabIndex].EntityId
          * is correct for the QK scorer's vocab-index output. */
+        phaseSw.Restart();
         var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
+        log.LogInformation("phase=vocab parsed: {Count} tokens ({Ms} ms)",
+            tokens.Count, phaseSw.ElapsedMilliseconds);
         /* Model vocab is always large (32K+); the DecomposerOptions default BatchSize=1
          * would emit one micro-intent per token (32K transactions, round-trip-bound).
          * Floor the vocab/weight batch at 8192 regardless of the tiny per-unit default. */
         int batchSz = Math.Max(options.BatchSize, 8192);
+        phaseSw.Restart();
+        int vocabBatches = 0;
         foreach (var batch in LlamaTokenizerParser.BuildBatches(
             tokens, Source, TextTypeId, tokEntityId, TokenMapsToKind, batchSz))
         {
             ct.ThrowIfCancellationRequested();
             yield return batch;
+            vocabBatches++;
             await Task.Yield();
         }
+        log.LogInformation("phase=vocab emitted: {Batches} batches ({Ms} ms)",
+            vocabBatches, phaseSw.ElapsedMilliseconds);
 
         /* 4. Weight attestations via universal WeightTensorETL per ADR 0056. */
-        var extractor = new WeightTensorETL(_modelDir, recipe, tokens, Source, ExtractorKinds);
+        log.LogInformation("phase=weights starting (EMBEDS → OUTPUT → QK → unary)");
+        var extractor = new WeightTensorETL(_modelDir, recipe, tokens, Source, ExtractorKinds, log);
         await foreach (var change in extractor.ExtractAsync(ct))
         {
             ct.ThrowIfCancellationRequested();

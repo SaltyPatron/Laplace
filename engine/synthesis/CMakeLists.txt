@@ -17,6 +17,11 @@ set(LAPLACE_SYNTHESIS_HEADERS
     include/laplace/synthesis/token_attn_scorer.h
     include/laplace/synthesis/tensor_decompose.h
     include/laplace/synthesis/weight_projection.h
+    include/laplace/synthesis/per_token_magnitude.h
+    include/laplace/synthesis/projection_per_token.h
+    include/laplace/synthesis/qk_pairs_threshold.h
+    include/laplace/synthesis/qk_pairs_threshold_pruned.h
+    include/laplace/synthesis/qk_project_cached.h
     include/laplace/synthesis/format_writer.h
 )
 
@@ -30,6 +35,11 @@ set(LAPLACE_SYNTHESIS_SOURCES
     src/token_attn_scorer.cpp
     src/tensor_decompose.cpp
     src/weight_projection.cpp
+    src/per_token_magnitude.cpp
+    src/projection_per_token.cpp
+    src/qk_pairs_threshold.cpp
+    src/qk_pairs_threshold_pruned.cpp
+    src/qk_project_cached.cpp
     src/format_writer.cpp
 )
 

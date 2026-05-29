@@ -146,7 +146,7 @@ clean:
 # === Launch ===
 
 launch-db:
-    sudo systemctl start postgresql 2>/dev/null || pg_ctlcluster 18 main start
+    sudo systemctl start laplace-postgresql.service
 
 # === Layer 1 — extension lifecycle (DbUp) ===
 # Per ADR 0021 (DbUp + Npgsql) + ADR 0023 (extension owns schema).
@@ -198,6 +198,32 @@ migrate-new name:
 # build-perfcache). Replaces deleted scripts/seed-t0.sh per ADR 0053.
 seed-t0: build-perfcache build-app
     cd app && dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- seed-unicode
+
+# Fresh DB for clean testing. Re-ingesting a model is refused by design (it would
+# double-count its votes and contaminate consensus), so any test that re-runs
+# ingestion must reset the whole DB first — never bypass the guard. This drops +
+# recreates the database, reinstalls the current substrate extension (extension-only
+# install, to avoid the perfcache-file perms issue in the full `install` target),
+# re-applies migrations (CREATE EXTENSION loads the current SQL), and re-seeds T0.
+db-fresh: build-perfcache build-app
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Clear the resume checkpoint journal FIRST. It persists on disk independent of
+    # the database; if left behind across a nuke, the runner treats already-journaled
+    # intents as applied and SKIPS re-emitting them into the fresh DB — so their
+    # entities never land and a later intent referencing them violates the subject FK.
+    # (Mirrors `just db-nuke`, which also rm's this.) The journal lives at
+    # Path.GetTempPath()/laplace-ingest/<model> = /tmp/laplace-ingest/<model>;
+    # both CI (laplace-runner) and local dev (ahart, in the laplace-runner group)
+    # use /tmp, so this clears the same dir the ingest will write — no TMPDIR
+    # redirection (that diverged local from CI).
+    rm -rf /tmp/laplace-ingest
+    cmake --install build/extension/laplace_substrate >/dev/null
+    cd app
+    echo NUKE | dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- nuke
+    dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- up
+    dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- seed-unicode
+    echo "✓ db-fresh: empty substrate + current extension + T0 seeded + checkpoint cleared"
 
 # === Setup (full convenience composite) ===
 

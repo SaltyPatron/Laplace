@@ -135,6 +135,95 @@ public static partial class NativeInterop
         nuint topkPerRow,
         QkPair* outPairs, nuint outCap);
 
+    /// <summary>
+    /// Per-token L2 magnitude of a BF16 [rows × cols] row-major tensor — exact,
+    /// deterministic (Neumaier-compensated f64, fixed column order, thread-count
+    /// independent). <c>out[r] = sqrt(Σ_c f32(tensor[r,c])²)</c>. Replaces the
+    /// scalar C# WeightTensorETL.ReducePerCellMagnitude. Returns 0 ok, -1 bad args.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "compute_per_token_l2_magnitude")]
+    public static unsafe partial int ComputePerTokenL2Magnitude(
+        ushort* tensorBf16, nuint rows, nuint cols, double* outRows);
+
+    /// <summary>
+    /// One weight tensor's per-token E·|W| projection — exact, deterministic
+    /// (Neumaier-compensated f64, fixed order). <c>perInDim[i]=Σ_o|W[o,i]|</c>; then
+    /// <c>out[t]=|Σ_i E[t,i]·perInDim[i]|</c> when <paramref name="inDim"/>==<paramref name="dModel"/>,
+    /// else the uniform fallback <c>(Σ_i perInDim[i])/vocab</c>. Replaces the scalar C#
+    /// WeightTensorETL.AggregateLayerThroughEmbed (one-tensor contribution; caller
+    /// accumulates across layers). Returns 0 ok, -1 bad args.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "compute_projection_per_token")]
+    public static unsafe partial int ComputeProjectionPerToken(
+        ushort* eBf16, nuint vocab, nuint dModel,
+        ushort* wBf16, nuint outDim, nuint inDim,
+        double* outRows);
+
+    /// <summary>
+    /// Exact, deterministic, streaming, threshold-based QK token-relation scorer for one
+    /// head: emits every (query,key) pair with |q_t·k_s| &gt; <paramref name="noiseFloor"/>
+    /// (no top-k). f64 Neumaier-compensated, fixed order → bit-identical regardless of
+    /// thread count or windowing. Processes query rows [<paramref name="q0"/>,
+    /// <paramref name="q1"/>) into <paramref name="outPairs"/> (cap <paramref name="outCap"/>);
+    /// sets <paramref name="overflow"/>=1 and keeps the largest whole-row prefix that fits
+    /// (caller retries a smaller window). Returns pairs written, -1 bad args.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "compute_qk_pairs_above_threshold")]
+    public static unsafe partial long ComputeQkPairsAboveThreshold(
+        float* eF32, nuint vocab, nuint dModel,
+        float* wqHead, float* wkHead, nuint headDim,
+        double noiseFloor, nuint q0, nuint q1,
+        QkPairF64* outPairs, nuint outCap, int* overflow);
+
+    /// <summary>
+    /// Sub-quadratic exact variant of <see cref="ComputeQkPairsAboveThreshold"/> — same
+    /// params/result, but Cauchy-Schwarz norm-pruned (|q·k| ≤ ‖q‖·‖k‖) so the vast
+    /// majority of pairs are provably skipped without scoring. Output is bit-identical to
+    /// the all-pairs kernel (verified by ctest parity). Use this for ingestion.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "compute_qk_pairs_above_threshold_pruned")]
+    public static unsafe partial long ComputeQkPairsAboveThresholdPruned(
+        float* eF32, nuint vocab, nuint dModel,
+        float* wqHead, float* wkHead, nuint headDim,
+        double noiseFloor, nuint q0, nuint q1,
+        QkPairF64* outPairs, nuint outCap, int* overflow);
+
+    /// <summary>
+    /// Project a layer's Q and K through the embedding ONCE for ALL heads (streams E a
+    /// single time). q_cache layout [vocab][nHeads][headDim]; k_cache [vocab][nKv][headDim],
+    /// row-major f64. Wq is [nHeads*headDim × dModel], Wk is [nKv*headDim × dModel] f32
+    /// (HF output×input). The per-element compensated (Neumaier) projection in fixed order
+    /// m=0..dModel-1 is identical to <see cref="ComputeQkPairsAboveThresholdPruned"/>, so a
+    /// head scored from this cache is bit-identical to the pruned kernel. TBB-parallel across
+    /// tokens; thread-count independent. Returns 0 ok, -1 bad args.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "project_qk_layer")]
+    public static unsafe partial int ProjectQkLayer(
+        float* eF32, nuint vocab, nuint dModel,
+        float* wq, nuint nHeads,
+        float* wk, nuint nKv,
+        nuint headDim,
+        double* qCacheOut, double* kCacheOut);
+
+    /// <summary>
+    /// Score ONE head purely from the caches built by <see cref="ProjectQkLayer"/> — no E
+    /// re-streaming. Reads qCache[token][head] and kCache[token][kvHead], runs the IDENTICAL
+    /// Cauchy-Schwarz norm-pruned scoring as <see cref="ComputeQkPairsAboveThresholdPruned"/>
+    /// (key-norm sort / binary-search cutoff / ascending-key emit / whole-row overflow prefix).
+    /// For a given (head, kvHead, floor, q0, q1) the emitted pairs, order, f64 score bits,
+    /// count, and overflow are bit-identical to the pruned kernel for that head (verified by
+    /// ctest + C# parity). Processes query rows [q0, q1) into outPairs (cap outCap); sets
+    /// overflow=1 keeping the largest whole-row prefix that fits. Returns pairs written, -1 bad args.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "score_qk_head_cached")]
+    public static unsafe partial long ScoreQkHeadCached(
+        double* qCache, nuint nHeads,
+        double* kCache, nuint nKv,
+        nuint vocab, nuint headDim,
+        nuint head, nuint kvHead,
+        double floor, nuint q0, nuint q1,
+        QkPairF64* outPairs, nuint outCap, int* overflow);
+
     // === Gram matrix precomputation ===
 
     /// <summary>
@@ -232,6 +321,19 @@ public struct QkPair
     public uint  QueryIdx;
     public uint  KeyIdx;
     public float Score;
+}
+
+/// <summary>
+/// Sparse (query, key, score) triplet with an f64 score from
+/// <see cref="NativeInterop.ComputeQkPairsAboveThreshold"/>. Must match the C struct
+/// qk_pair_f64_t layout (uint32, uint32, double — 16 bytes).
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+public struct QkPairF64
+{
+    public uint   QueryIdx;
+    public uint   KeyIdx;
+    public double Score;
 }
 
 /// <summary>

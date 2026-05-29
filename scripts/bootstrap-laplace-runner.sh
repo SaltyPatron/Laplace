@@ -656,7 +656,11 @@ EOF
 
     # /var/run/postgresql needs to be writable by laplace-runner (the systemd
     # unit's User=). Default ownership is postgres:postgres; setgid + group
-    # add laplace-runner so both can write without sudo gymnastics.
+    # add laplace-runner so both can write without sudo gymnastics. NOTE: this
+    # only fixes the CURRENT boot — the dir is tmpfs and reverts to
+    # postgres:postgres on reboot. The durable, per-start re-assertion is the
+    # unit's `ExecStartPre=+install -d` below; this line just makes the dir
+    # correct immediately so the start later in THIS bootstrap run succeeds.
     install -d -m 2775 -o postgres -g "$RUNNER_GROUP" "$LAPLACE_PG_SOCKET_DIR" 2>/dev/null \
         || install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_SOCKET_DIR"
     green "✓ $LAPLACE_PG_SOCKET_DIR writable by $RUNNER_GROUP"
@@ -685,6 +689,15 @@ ConditionPathExists=$LAPLACE_PG_DATA/PG_VERSION
 Type=simple
 User=$RUNNER_USER
 Group=$RUNNER_GROUP
+# $LAPLACE_PG_SOCKET_DIR is on tmpfs — wiped every boot and recreated by
+# /usr/lib/tmpfiles.d/postgresql-common.conf as postgres:postgres, which
+# the User=$RUNNER_USER postmaster cannot write → "FATAL: could not create
+# lock file .s.PGSQL.$LAPLACE_PG_PORT.lock: Permission denied". Re-assert
+# group+setgid as root (the '+' prefix runs ExecStartPre as root regardless
+# of User=) before each start, so the socket dir is correct on every boot
+# WITHOUT re-running bootstrap. install -d is idempotent (chowns/chmods an
+# existing dir too).
+ExecStartPre=+/usr/bin/install -d -m 2775 -o postgres -g $RUNNER_GROUP $LAPLACE_PG_SOCKET_DIR
 ExecStart=$LAPLACE_PG_PREFIX/bin/postgres -D $LAPLACE_PG_DATA
 ExecReload=/bin/kill -HUP \$MAINPID
 KillMode=mixed
@@ -703,11 +716,18 @@ EOF
     systemctl daemon-reload
     green "✓ Installed $unit_file"
 
+    # Enable UNCONDITIONALLY — the unit must come back on every reboot
+    # regardless of whether it happens to be active right now. (The prior
+    # `if active → restart` branch skipped enable, so a unit that was
+    # manually started before bootstrap ran never got its boot symlink.)
+    # reset-failed clears any prior crash-loop latch ("Start request repeated
+    # too quickly") so the start/restart below isn't refused.
+    systemctl enable "$LAPLACE_PG_SERVICE" >/dev/null 2>&1 || true
+    systemctl reset-failed "$LAPLACE_PG_SERVICE" 2>/dev/null || true
     if systemctl is-active --quiet "$LAPLACE_PG_SERVICE" 2>/dev/null; then
         systemctl restart "$LAPLACE_PG_SERVICE"
         green "✓ Restarted $LAPLACE_PG_SERVICE (picks up new conf + ld.so.cache)"
     else
-        systemctl enable "$LAPLACE_PG_SERVICE" >/dev/null 2>&1 || true
         systemctl start "$LAPLACE_PG_SERVICE"
         green "✓ Enabled + started $LAPLACE_PG_SERVICE"
     fi

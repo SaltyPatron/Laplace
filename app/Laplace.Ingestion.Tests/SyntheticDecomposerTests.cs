@@ -212,6 +212,184 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     }
 
     [Fact]
+    public async Task BatchedRun_AppliesEveryIntentAndAllNovelEntities()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var reader = new NpgsqlSubstrateReader(_pg.DataSource);
+        var runner = new IngestRunner(writer, reader);
+        var srcId = Hash128.OfCanonical("substrate/source/SyntheticBatched/v1");
+        var decomposer = new SyntheticDecomposer(unitCount: 10, sourceId: srcId);
+
+        // BatchSize > 1 routes through ApplyManyAsync: one existence pass + one
+        // COPY per table for every 4 intents, instead of per-intent apply.
+        var options = IngestRunOptions.Default with
+        {
+            SkipLayerOrderingCheck = true,
+            BatchSize              = 4,
+            CheckpointPathOverride = Path.Combine(_ckptDir, "batched.bin"),
+        };
+
+        var result = await runner.RunAsync(decomposer, options);
+        Assert.Equal(10, result.UnitsAttempted);
+        Assert.Equal(10, result.UnitsApplied);
+        Assert.Equal(0,  result.UnitsFailed);
+        // 10 units x (3 unique leaves + 1 unique parent) = 40 novel entities,
+        // all inserted via batched COPY — same total as the per-intent run.
+        Assert.True(result.EntitiesInserted >= 40);
+    }
+
+    [Fact]
+    public async Task BatchedRerun_SkipsAllViaCheckpoint()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var reader = new NpgsqlSubstrateReader(_pg.DataSource);
+        var runner = new IngestRunner(writer, reader);
+        var srcId = Hash128.OfCanonical("substrate/source/SyntheticBatchedResume/v1");
+
+        var ckpt = Path.Combine(_ckptDir, "batched-resume.bin");
+        var options = IngestRunOptions.Default with
+        {
+            SkipLayerOrderingCheck = true,
+            BatchSize              = 4,
+            CheckpointPathOverride = ckpt,
+        };
+
+        var first = await runner.RunAsync(new SyntheticDecomposer(7, srcId), options);
+        Assert.Equal(7, first.UnitsApplied);
+        Assert.Equal(0, first.UnitsSkippedFromCheckpoint);
+
+        // Re-run with the same checkpoint: every intent is skipped before it
+        // ever reaches ApplyManyAsync (per-batch checkpoint append from run 1).
+        var second = await runner.RunAsync(new SyntheticDecomposer(7, srcId), options);
+        Assert.Equal(7, second.UnitsAttempted);
+        Assert.Equal(7, second.UnitsSkippedFromCheckpoint);
+        Assert.Equal(0, second.UnitsApplied);
+    }
+
+    [Fact]
+    public async Task BatchedRun_DedupsEntityRepeatedAcrossIntentsInSameBatch()
+    {
+        // The duplicate-key guard: COPY can't ON CONFLICT, so an entity id that
+        // recurs across intents inside ONE batch MUST be collapsed to a single
+        // staged row. If cross-intent dedup regressed, the batched COPY would
+        // throw entities_pkey and the run would fail.
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var reader = new NpgsqlSubstrateReader(_pg.DataSource);
+        var runner = new IngestRunner(writer, reader);
+        var srcId = Hash128.OfCanonical("substrate/source/SyntheticOverlap/v1");
+        var decomposer = new OverlapDecomposer(unitCount: 8, sourceId: srcId);
+
+        var options = IngestRunOptions.Default with
+        {
+            SkipLayerOrderingCheck = true,
+            BatchSize              = 8,   // all 8 intents land in one batch
+            CheckpointPathOverride = Path.Combine(_ckptDir, "overlap.bin"),
+        };
+
+        var result = await runner.RunAsync(decomposer, options);
+        Assert.Equal(8, result.UnitsApplied);
+        Assert.Equal(0, result.UnitsFailed);
+        // 1 shared entity (deduped from 8 occurrences) + 8 unique = 9 inserted.
+        Assert.Equal(9, result.EntitiesInserted);
+    }
+
+    [Fact]
+    public async Task ParallelBatched_ConvergesUnderCrossWorkerIdOverlap()
+    {
+        // The conflict-safe-COPY proof: many concurrent workers, each flushing
+        // its own batch, all racing to insert the SAME shared entity id. With a
+        // direct COPY (no staging) the second worker's COMMIT throws
+        // entities_pkey; with the staging-table + ON CONFLICT DO NOTHING promote
+        // they converge. Must apply all units, zero failures.
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var reader = new NpgsqlSubstrateReader(_pg.DataSource);
+        var runner = new IngestRunner(writer, reader);
+        var srcId = Hash128.OfCanonical("substrate/source/SyntheticParallelOverlap/v1");
+        var decomposer = new OverlapDecomposer(unitCount: 40, sourceId: srcId);
+
+        var options = IngestRunOptions.Default with
+        {
+            SkipLayerOrderingCheck = true,
+            ParallelWorkers        = 4,
+            BatchSize              = 4,   // 10 batches across 4 workers, all sharing one entity id
+            CheckpointPathOverride = Path.Combine(_ckptDir, "parallel-overlap.bin"),
+        };
+
+        var result = await runner.RunAsync(decomposer, options);
+        Assert.Equal(40, result.UnitsApplied);
+        Assert.Equal(0,  result.UnitsFailed);
+        // The shared entity is inserted exactly once across all workers; the 40
+        // unique entities each once → 41 distinct, no duplicate-key abort.
+        Assert.Equal(41, result.EntitiesInserted);
+    }
+
+    /// <summary>Emits intents that each carry one shared entity (same id in
+    /// every intent) plus one unique entity — to exercise cross-intent dedup
+    /// inside a single batch.</summary>
+    private sealed class OverlapDecomposer : IDecomposer
+    {
+        private readonly int _unitCount;
+        private readonly Hash128 _shared;
+
+        public OverlapDecomposer(int unitCount, Hash128 sourceId)
+        {
+            _unitCount = unitCount;
+            SourceId = sourceId;
+            var seed = new byte[12];
+            BitConverter.TryWriteBytes(seed.AsSpan(0, 8), sourceId.Lo);
+            BitConverter.TryWriteBytes(seed.AsSpan(8, 4), -1);
+            _shared = Hash128.Blake3(seed);
+        }
+
+        public Hash128 SourceId { get; }
+        public string SourceName => "SyntheticOverlap";
+        public int LayerOrder => 0;
+        public Hash128 TrustClassId =>
+            Hash128.OfCanonical("substrate/trust_class/SubstrateMandate/v1");
+
+        public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+        {
+            var bitmap = await context.Reader.EntitiesExistBitmapAsync(new[] { SourceId }, ct);
+            if (bitmap.Length > 0 && (bitmap[0] & 1) != 0) return;
+
+            var metaSeed = new SubstrateChangeBuilder(SourceId, "meta-seed")
+                .AddEntity(BootstrapIntentBuilder.SourceTypeId, 0, BootstrapIntentBuilder.SourceTypeId, null)
+                .AddEntity(BootstrapIntentBuilder.TypeMetaTypeId, 0, BootstrapIntentBuilder.SourceTypeId, null)
+                .AddEntity(BootstrapIntentBuilder.KindMetaTypeId, 0, BootstrapIntentBuilder.SourceTypeId, null)
+                .AddEntity(TrustClassId, 0, BootstrapIntentBuilder.SourceTypeId, null)
+                .AddEntity(BootstrapIntentBuilder.HasTrustClassKindId, 0, BootstrapIntentBuilder.KindMetaTypeId, null)
+                .Build();
+            await context.Writer.ApplyAsync(metaSeed, ct);
+            await context.Writer.ApplyAsync(
+                new BootstrapIntentBuilder(SourceId, SourceName, TrustClassId).Build(), ct);
+        }
+
+        public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+            IDecomposerContext context, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct = default)
+        {
+            var seed = new byte[12];
+            for (int i = 0; i < _unitCount; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                BitConverter.TryWriteBytes(seed.AsSpan(0, 8), SourceId.Lo);
+                BitConverter.TryWriteBytes(seed.AsSpan(8, 4), i);
+                var uniq = Hash128.Blake3(seed);
+                var builder = new SubstrateChangeBuilder(SourceId, $"ov-{i}")
+                    .AddEntity(_shared, 0, BootstrapIntentBuilder.SourceTypeId)
+                    .AddEntity(uniq,    0, BootstrapIntentBuilder.SourceTypeId);
+                yield return builder.Build();
+                await Task.Yield();
+            }
+        }
+
+        public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+            => Task.FromResult<long?>(_unitCount);
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    [Fact]
     public async Task LayerOrderingEnforced_RejectsLayerNWithoutPrereq()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);

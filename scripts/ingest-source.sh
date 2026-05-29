@@ -16,6 +16,10 @@ if [[ -z "$source" ]]; then
 fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Resolve the engine native libs (laplace_synthesis + its core/dynamics deps) from
+# the build tree — same LD_LIBRARY_PATH discipline as the `build`/`test` recipes, so
+# ingestion works in a clean shell without relying on an ambient setvars env.
+export LD_LIBRARY_PATH="$ROOT/build/engine/synthesis:$ROOT/build/engine/core:$ROOT/build/engine/dynamics:${LD_LIBRARY_PATH:-}"
 CLI=(dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release --)
 
 case "$source" in

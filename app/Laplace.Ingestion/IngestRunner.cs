@@ -91,19 +91,51 @@ public sealed class IngestRunner
         var rng = new Random(unchecked((int)decomposer.SourceId.Lo));
         var counters = new RunCounters();
 
+        int batchSize  = Math.Max(1, options.BatchSize);
+        int commitRows = Math.Max(0, options.CommitRows);
+
+        // Flush trigger. When CommitRows is set, the COPY payload is pinned by row
+        // count (intent fan-out varies wildly — one QK intent ≈ thousands of rows);
+        // BatchSize still caps buffered intents so a single huge intent can't
+        // overshoot unbounded. Otherwise fall back to pure intent-count batching.
+        static int RowsOf(SubstrateChange c) =>
+            c.Entities.Length + c.Physicalities.Length + c.Attestations.Length;
+        bool ShouldFlush(int intents, int rows) =>
+            commitRows > 0
+                ? (rows >= commitRows || intents >= batchSize)
+                : intents >= batchSize;
+
         if (options.ParallelWorkers <= 1)
         {
+            var batch = new List<SubstrateChange>(batchSize);
+            int batchRows = 0;
             await foreach (var intent in decomposer.DecomposeAsync(ctx, options.DecomposerOptions, ct).WithCancellation(ct))
             {
                 ct.ThrowIfCancellationRequested();
-                await ProcessOneIntentAsync(intent, decomposer, options, checkpoint, rng,
-                                             counters, failures, log, ct);
+                if (batchSize == 1 && commitRows == 0)
+                {
+                    await ProcessOneIntentAsync(intent, decomposer, options, checkpoint, rng,
+                                                 counters, failures, log, ct);
+                    continue;
+                }
+                batch.Add(intent);
+                batchRows += RowsOf(intent);
+                if (ShouldFlush(batch.Count, batchRows))
+                {
+                    await ProcessBatchAsync(batch, decomposer, options, checkpoint, rng,
+                                            counters, failures, log, ct);
+                    batch.Clear();
+                    batchRows = 0;
+                }
             }
+            if (batch.Count > 0)
+                await ProcessBatchAsync(batch, decomposer, options, checkpoint, rng,
+                                        counters, failures, log, ct);
         }
         else
         {
             var channel = Channel.CreateBounded<SubstrateChange>(
-                new BoundedChannelOptions(options.ParallelWorkers * 4)
+                new BoundedChannelOptions(options.ParallelWorkers * batchSize * 4)
                 {
                     SingleWriter = true,
                     SingleReader = false,
@@ -127,21 +159,41 @@ public sealed class IngestRunner
                 }
             }, ct);
 
-            // Consumers: dequeue + apply concurrently
+            // Consumers: dequeue + apply concurrently. Each worker fills and
+            // flushes its OWN batch so N workers issue N concurrent batched
+            // COPYs rather than N concurrent single-row applies.
             var consumers = new Task[options.ParallelWorkers];
             for (int w = 0; w < options.ParallelWorkers; w++)
             {
                 consumers[w] = Task.Run(async () =>
                 {
                     var localRng = new Random(unchecked((int)decomposer.SourceId.Lo) ^ Environment.CurrentManagedThreadId);
+                    var batch = new List<SubstrateChange>(batchSize);
+                    int batchRows = 0;
                     while (await channel.Reader.WaitToReadAsync(ct))
                     {
                         while (channel.Reader.TryRead(out var intent))
                         {
-                            await ProcessOneIntentAsync(intent, decomposer, options, checkpoint,
+                            if (batchSize == 1 && commitRows == 0)
+                            {
+                                await ProcessOneIntentAsync(intent, decomposer, options, checkpoint,
+                                                            localRng, counters, failures, log, ct);
+                                continue;
+                            }
+                            batch.Add(intent);
+                            batchRows += RowsOf(intent);
+                            if (ShouldFlush(batch.Count, batchRows))
+                            {
+                                await ProcessBatchAsync(batch, decomposer, options, checkpoint,
                                                         localRng, counters, failures, log, ct);
+                                batch.Clear();
+                                batchRows = 0;
+                            }
                         }
                     }
+                    if (batch.Count > 0)
+                        await ProcessBatchAsync(batch, decomposer, options, checkpoint,
+                                                localRng, counters, failures, log, ct);
                 }, ct);
             }
             await Task.WhenAll(producer);
@@ -274,6 +326,127 @@ public sealed class IngestRunner
         Interlocked.Increment(ref counters._unitsFailed);
         _obs.OnIntentFailed(decomposer.SourceName, failure);
         if (options.AbortOnTransientExhaustion && lastEx is not null) throw lastEx;
+    }
+
+    /// <summary>
+    /// Apply a coalesced batch of intents through
+    /// <see cref="ISubstrateWriter.ApplyManyAsync"/> — one existence pass and
+    /// one COPY per table for the whole batch. Resume-skip is applied per
+    /// intent first; the batch commits atomically, so on success every
+    /// surviving intent is checkpointed and on a fatal error the whole batch
+    /// rolled back (recorded + aborts, matching per-intent fatal semantics).
+    /// </summary>
+    private async Task ProcessBatchAsync(
+        List<SubstrateChange> batch,
+        IDecomposer decomposer,
+        IngestRunOptions options,
+        CheckpointJournal checkpoint,
+        Random rng,
+        RunCounters counters,
+        List<IngestFailure> failures,
+        ILogger log,
+        CancellationToken ct)
+    {
+        if (batch.Count == 0) return;
+
+        // Resume: drop intents already in the checkpoint, counting them skipped.
+        var pending = new List<SubstrateChange>(batch.Count);
+        foreach (var intent in batch)
+        {
+            Interlocked.Increment(ref counters._unitsAttempted);
+            if (checkpoint.WasApplied(intent.Metadata.IntentId))
+            {
+                Interlocked.Increment(ref counters._unitsSkipped);
+                _obs.OnIntentSkipped(decomposer.SourceName);
+                continue;
+            }
+            pending.Add(intent);
+        }
+        if (pending.Count == 0)
+        {
+            options.Progress?.Report(MakeProgress(counters));
+            return;
+        }
+
+        Exception? lastEx = null;
+        int attempt = 0;
+        for (; attempt < options.RetryPolicy.MaxAttempts; attempt++)
+        {
+            try
+            {
+                if (attempt > 0)
+                {
+                    var delay = options.RetryPolicy.DelayBeforeAttempt(attempt - 1, rng);
+                    if (delay > TimeSpan.Zero) await Task.Delay(delay, ct);
+                }
+                var apply = await _writer.ApplyManyAsync(pending, ct);
+
+                Interlocked.Add(ref counters._unitsApplied,           pending.Count);
+                Interlocked.Add(ref counters._entitiesInserted,       apply.EntitiesInserted);
+                Interlocked.Add(ref counters._physicalitiesInserted,  apply.PhysicalitiesInserted);
+                Interlocked.Add(ref counters._attestationsInserted,   apply.AttestationsInserted);
+                Interlocked.Add(ref counters._roundTrips,             apply.RoundTrips);
+
+                long appliedUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
+                foreach (var intent in pending)
+                    await checkpoint.AppendAsync(intent.Metadata.IntentId, appliedUs, CancellationToken.None);
+
+                _obs.OnIntentApplied(decomposer.SourceName, apply);
+                options.Progress?.Report(MakeProgress(counters));
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                lastEx = ex;
+                if (!options.RetryPolicy.IsTransient(ex))
+                {
+                    RecordBatchFailure(pending, decomposer.SourceName, ex,
+                                       wasTransient: false, attempt, failures, counters);
+                    await checkpoint.FlushAsync(CancellationToken.None);
+                    log.LogError(ex, "Fatal ingest error in batch of {Count} intents "
+                        + "(first unit {Unit}); aborting run.",
+                        pending.Count, pending[0].Metadata.SourceContentUnitName);
+                    throw;
+                }
+                log.LogWarning(ex, "Transient ingest error in batch of {Count} intents "
+                    + "(attempt {Attempt}); will retry whole batch.",
+                    pending.Count, attempt + 1);
+            }
+        }
+
+        // All retries exhausted for the batch.
+        RecordBatchFailure(pending, decomposer.SourceName, lastEx,
+                           wasTransient: true, attempt, failures, counters);
+        if (options.AbortOnTransientExhaustion && lastEx is not null) throw lastEx;
+    }
+
+    private void RecordBatchFailure(
+        List<SubstrateChange> batch,
+        string sourceName,
+        Exception? ex,
+        bool wasTransient,
+        int attempts,
+        List<IngestFailure> failures,
+        RunCounters counters)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var typeName = ex?.GetType().FullName ?? (wasTransient ? "TransientExhaustion" : "Exception");
+        var msg = ex?.Message ?? "transient retry exhausted";
+        var batchFailures = new IngestFailure[batch.Count];
+        for (int i = 0; i < batch.Count; i++)
+            batchFailures[i] = new IngestFailure(
+                batch[i].Metadata.IntentId,
+                batch[i].Metadata.SourceContentUnitName,
+                typeName, msg, wasTransient, attempts, now);
+
+        lock (failures) failures.AddRange(batchFailures);
+        Interlocked.Add(ref counters._unitsFailed, batch.Count);
+        foreach (var f in batchFailures)
+            _obs.OnIntentFailed(sourceName, f);
     }
 
     private static string ResolveEcosystemPath(IDecomposer decomposer, IngestRunOptions options)
