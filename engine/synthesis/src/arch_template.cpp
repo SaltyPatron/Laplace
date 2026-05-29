@@ -10,6 +10,10 @@
 #include <string>
 #include <vector>
 
+#ifdef LAPLACE_HAS_MKL
+#  include <mkl_cblas.h>
+#endif
+
 /* LlamaTemplate: tensor manifest for the Llama architecture family.
  *
  * Handles Llama 2/3, TinyLlama, Qwen-Llama, and other Llama-derived models.
@@ -201,42 +205,63 @@ void materialize_token_axis(const substrate_view_t* v, int dtype,
     }
 }
 
-/* Materialize an interior tensor (shape [out_dim, in_dim]) for a unary-kind
- * source (V_PROJECTS, GATES, etc.). The per-token consensus distributes per
- * recipe layout: each cell out[o, i] = sum_t basis[t, o % vocab] * pertoken[t] *
- * basis[t, i % vocab] / N where N is a normalizer. For Stream B-minimum,
- * approximate via averaged Frobenius mass — fills uniformly with the per-token
- * consensus aggregate. Stream B-complete refines per the recipe's per-(layer,
- * head, dim) layout once that layout is carried on the recipe entity per
- * ADR 0056 Phase 2 + 0009. */
+/* Materialize an interior tensor [out_dim × in_dim] for a unary kind
+ * (V_PROJECTS, O_PROJECTS, GATES, UP_PROJECTS, DOWN_PROJECTS).
+ *
+ * With gram: out[o, i] = unary_gram[o % basis_dim, i % basis_dim] / N
+ *   where N = sqrt(out_dim * in_dim).  The gram is E^T · diag(perToken) · E
+ *   precomputed once; any shape is handled by cycling mod basis_dim.
+ *
+ * Without gram (basis not yet computed): constant fill from aggregate. */
 void materialize_interior_uniform(const substrate_view_t* v, int dtype,
                                    size_t out_dim, size_t in_dim, uint8_t* out) {
-    double total = 0.0;
-    for (size_t t = 0; t < v->vocab; ++t) total += v->per_token_consensus[t];
-    double avg = (v->vocab > 0) ? total / (double)v->vocab : 0.0;
-    double per_cell = avg / std::sqrt((double)(out_dim * in_dim));
     size_t es = dtype_elem_size(dtype);
-    for (size_t cell = 0; cell < out_dim * in_dim; ++cell) {
-        write_dtype((float)per_cell, dtype, out + cell * es);
+    if (v->unary_gram && v->basis_dim > 0) {
+        double N = std::sqrt((double)(out_dim * in_dim));
+        for (size_t o = 0; o < out_dim; ++o) {
+            size_t bo = o % v->basis_dim;
+            for (size_t i = 0; i < in_dim; ++i) {
+                size_t bi = i % v->basis_dim;
+                double val = v->unary_gram[bo * v->basis_dim + bi] / N;
+                write_dtype((float)val, dtype, out + (o * in_dim + i) * es);
+            }
+        }
+    } else {
+        double total = 0.0;
+        for (size_t t = 0; t < v->vocab; ++t) total += v->per_token_consensus[t];
+        double avg = (v->vocab > 0) ? total / (double)v->vocab : 0.0;
+        double per_cell = avg / std::sqrt((double)(out_dim * in_dim));
+        for (size_t cell = 0; cell < out_dim * in_dim; ++cell)
+            write_dtype((float)per_cell, dtype, out + cell * es);
     }
 }
 
-/* Materialize a Q_PROJECTS-style binary-kind interior tensor (shape
- * [out_dim, in_dim]). The sparse consensus per (token_i, token_j) is
- * distributed across the slot via the spectral basis: each cell
- * out[o, i] = sum_{(qi, kj) in nnz} basis[qi, o] * val[qi,kj] * basis[kj, i] /
- * normalizer. Stream B-minimum approximation: per_pair_vals summed and
- * distributed uniformly (same shape as the unary case for now); recipe
- * layout-aware distribution lands with Stream B-complete. */
+/* Materialize a Q/K-style binary interior tensor [out_dim × in_dim].
+ *
+ * With gram: out[o, i] = binary_gram[o % basis_dim, i % basis_dim] / N
+ *   where the gram is E^T · S_qk · E, S_qk = sparse Q_PROJECTS adjacency.
+ *
+ * Without gram: constant fill from mean(|per_pair_vals|). */
 void materialize_interior_binary_uniform(const substrate_view_t* v, int dtype,
                                           size_t out_dim, size_t in_dim, uint8_t* out) {
-    double total = 0.0;
-    for (size_t e = 0; e < v->per_pair_nnz; ++e) total += std::abs(v->per_pair_vals[e]);
-    double mass = (v->per_pair_nnz > 0) ? total / (double)v->per_pair_nnz : 0.0;
-    double per_cell = mass / std::sqrt((double)(out_dim * in_dim));
     size_t es = dtype_elem_size(dtype);
-    for (size_t cell = 0; cell < out_dim * in_dim; ++cell) {
-        write_dtype((float)per_cell, dtype, out + cell * es);
+    if (v->binary_gram && v->basis_dim > 0) {
+        double N = std::sqrt((double)(out_dim * in_dim));
+        for (size_t o = 0; o < out_dim; ++o) {
+            size_t bo = o % v->basis_dim;
+            for (size_t i = 0; i < in_dim; ++i) {
+                size_t bi = i % v->basis_dim;
+                double val = v->binary_gram[bo * v->basis_dim + bi] / N;
+                write_dtype((float)val, dtype, out + (o * in_dim + i) * es);
+            }
+        }
+    } else {
+        double total = 0.0;
+        for (size_t e = 0; e < v->per_pair_nnz; ++e) total += std::abs(v->per_pair_vals[e]);
+        double mass = (v->per_pair_nnz > 0) ? total / (double)v->per_pair_nnz : 0.0;
+        double per_cell = mass / std::sqrt((double)(out_dim * in_dim));
+        for (size_t cell = 0; cell < out_dim * in_dim; ++cell)
+            write_dtype((float)per_cell, dtype, out + cell * es);
     }
 }
 
@@ -308,4 +333,70 @@ int arch_template_materialize_tensor(const arch_template_t*  tmpl,
     for (size_t d = 0; d < spec->rank; ++d) nelem *= spec->shape[d];
     std::memset(out, 0, nelem * dtype_elem_size(spec->dtype));
     return 0;
+}
+
+extern "C"
+int compute_substrate_gram(
+    const double* token_basis,
+    const double* per_token,
+    std::size_t   vocab,
+    std::size_t   basis_dim,
+    const int*    qk_rows,
+    const int*    qk_cols,
+    const double* qk_vals,
+    std::size_t   nnz,
+    double*       unary_gram,
+    double*       binary_gram)
+{
+    if (!token_basis || !per_token || !unary_gram || !binary_gram) return -1;
+
+#ifdef LAPLACE_HAS_MKL
+    const MKL_INT V  = static_cast<MKL_INT>(vocab);
+    const MKL_INT D  = static_cast<MKL_INT>(basis_dim);
+
+    /* ── unary_gram = E^T · diag(perToken) · E ──────────────────────────
+     * Scale each row of E by sqrt(perToken[t]), then DGEMM: E_s^T · E_s.
+     * E_s[t, d] = E[t, d] * sqrt(perToken[t]). */
+    std::vector<double> E_scaled(vocab * basis_dim);
+    for (std::size_t t = 0; t < vocab; ++t) {
+        double s = std::sqrt(std::max(0.0, per_token[t]));
+        for (std::size_t d = 0; d < basis_dim; ++d)
+            E_scaled[t * basis_dim + d] = token_basis[t * basis_dim + d] * s;
+    }
+    /* unary_gram [D×D] = E_s^T [D×V] · E_s [V×D] */
+    cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans,
+                D, D, V,
+                1.0, E_scaled.data(), D,
+                     E_scaled.data(), D,
+                0.0, unary_gram, D);
+
+    /* ── binary_gram = E^T · S_qk · E ───────────────────────────────────
+     * Step 1: SB[t, d] = sum_{j: S[t,j] present} qk_vals[e] * E[j, d]
+     *         (sparse-dense row-scatter, S is the Q_PROJECTS COO adj).
+     * Step 2: binary_gram [D×D] = E^T [D×V] · SB [V×D] via DGEMM. */
+    std::vector<double> SB(vocab * basis_dim, 0.0);
+    if (qk_rows && qk_cols && qk_vals) {
+        for (std::size_t e = 0; e < nnz; ++e) {
+            int r = qk_rows[e], c = qk_cols[e];
+            if (r < 0 || c < 0 || (std::size_t)r >= vocab || (std::size_t)c >= vocab)
+                continue;
+            double w = qk_vals[e];
+            const double* Ec = token_basis + (std::size_t)c * basis_dim;
+            double*       Br = SB.data()   + (std::size_t)r * basis_dim;
+            for (std::size_t d = 0; d < basis_dim; ++d)
+                Br[d] += w * Ec[d];
+        }
+    }
+    cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans,
+                D, D, V,
+                1.0, token_basis, D,
+                     SB.data(),   D,
+                0.0, binary_gram, D);
+
+    return 0;
+#else
+    (void)token_basis; (void)per_token; (void)vocab; (void)basis_dim;
+    (void)qk_rows; (void)qk_cols; (void)qk_vals; (void)nnz;
+    return -2;
+#endif
 }

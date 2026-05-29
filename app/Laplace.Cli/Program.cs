@@ -527,6 +527,90 @@ internal static class Program
         Console.WriteLine($"  consensus: per-token non-zero={perToken.Count(v => v > 0)} / {vocab}, "
                         + $"Q_PROJECTS pairs={qkRows.Count}, norm_aggregate={normAgg:F3}");
 
+        var qkRowsArr = qkRows.ToArray();
+        var qkColsArr = qkCols.ToArray();
+        var qkValsArr = qkVals.ToArray();
+
+        // ── Spectral basis: eigenmaps → Gram-Schmidt → Procrustes ──────
+        double[]? tokenBasis   = null;
+        double[]? unaryGram    = null;
+        double[]? binaryGram   = null;
+        if (qkRowsArr.Length > 0)
+        {
+            Console.WriteLine($"  computing spectral token basis (eigenmaps target_dim={dModel}, nnz={qkRowsArr.Length})...");
+            var sw0 = Stopwatch.StartNew();
+            double[] basis = new double[(long)vocab * dModel];
+            int eigenRc;
+            unsafe
+            {
+                fixed (int*    qrPtr    = qkRowsArr)
+                fixed (int*    qcPtr    = qkColsArr)
+                fixed (double* qvPtr    = qkValsArr)
+                fixed (double* basisPtr = basis)
+                    eigenRc = DynamicsInterop.LaplacianEigenmapsFromSparseGraph(
+                        qrPtr, qcPtr, qvPtr,
+                        (nuint)qkRowsArr.Length, (nuint)vocab, (nuint)dModel,
+                        basisPtr);
+            }
+            if (eigenRc != 0)
+            {
+                Console.Error.WriteLine($"  WARNING: eigenmaps returned {eigenRc}; basis unavailable");
+            }
+            else
+            {
+                unsafe { fixed (double* p = basis) DynamicsInterop.GramSchmidtOrthonormalize(p, (nuint)dModel, (nuint)vocab); }
+
+                // Procrustes: align basis[vocab × dModel] to canonical S³ positions
+                var sortedTokens = tokens.OrderBy(t => t.TokenId).ToArray();
+                double[] targetPts = new double[(long)vocab * 4];
+                for (int t = 0; t < vocab && t < sortedTokens.Length; t++)
+                {
+                    var tok = sortedTokens[t];
+                    if (!tok.HasContentCoord) continue;
+                    targetPts[t * 4 + 0] = tok.ContentX;
+                    targetPts[t * 4 + 1] = tok.ContentY;
+                    targetPts[t * 4 + 2] = tok.ContentZ;
+                    targetPts[t * 4 + 3] = tok.ContentM;
+                }
+                IntPtr procT;
+                unsafe
+                {
+                    fixed (double* bPtr = basis)
+                    fixed (double* tPtr = targetPts)
+                        procT = DynamicsInterop.ProcrustesFit(bPtr, (nuint)vocab, (nuint)dModel, tPtr);
+                }
+                if (procT != IntPtr.Zero)
+                {
+                    Console.WriteLine($"  Procrustes residual: {DynamicsInterop.ProcrustesResidual(procT):F4}");
+                    DynamicsInterop.ProcrustesFree(procT);
+                }
+
+                // Gram matrices for interior tensor materialization
+                double[] uGram = new double[(long)dModel * dModel];
+                double[] bGram = new double[(long)dModel * dModel];
+                int gramRc;
+                unsafe
+                {
+                    fixed (double* bPtr  = basis)
+                    fixed (double* ptPtr = perToken)
+                    fixed (int*    qrPtr = qkRowsArr)
+                    fixed (int*    qcPtr = qkColsArr)
+                    fixed (double* qvPtr = qkValsArr)
+                    fixed (double* ugPtr = uGram)
+                    fixed (double* bgPtr = bGram)
+                        gramRc = SynthInterop.ComputeSubstrateGram(
+                            bPtr, ptPtr, (nuint)vocab, (nuint)dModel,
+                            qrPtr, qcPtr, qvPtr, (nuint)qkRowsArr.Length,
+                            ugPtr, bgPtr);
+                }
+                if (gramRc == 0) { unaryGram = uGram; binaryGram = bGram; }
+                else Console.Error.WriteLine($"  WARNING: compute_substrate_gram returned {gramRc}; interior tensors use fallback");
+
+                tokenBasis = basis;
+                Console.WriteLine($"  spectral basis ready in {sw0.Elapsed.TotalSeconds:F1}s");
+            }
+        }
+
         // ── Write GGUF via materialize_tensor per slot ─────────────────
         var gguf = SynthInterop.GgufWriterCreate(outputPath);
         if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
@@ -535,9 +619,6 @@ internal static class Program
         var sw = Stopwatch.StartNew();
         int tensorsDone = 0;
         int rcArr = 0;
-        var qkRowsArr = qkRows.ToArray();
-        var qkColsArr = qkCols.ToArray();
-        var qkValsArr = qkVals.ToArray();
 
         for (int i = 0; i < tensorCount; i++)
         {
@@ -554,11 +635,11 @@ internal static class Program
             byte[] tensorBytes = new byte[nElem * (dtype == 0 ? 4L : 2L)];
 
             rcArr = MaterializeOneTensor(tmplHandle, specs, i, perToken, vocab,
-                qkRowsArr, qkColsArr, qkValsArr, normAgg, tensorBytes);
+                qkRowsArr, qkColsArr, qkValsArr, normAgg,
+                tokenBasis, unaryGram, binaryGram, dModel,
+                tensorBytes);
             if (rcArr != 0)
-            {
                 Console.Error.WriteLine($"  materialize_tensor({name}) returned {rcArr}; tensor zero-filled");
-            }
 
             nuint[] ggufDims = cols > 1 ? [(nuint)cols, (nuint)rows] : [(nuint)rows];
             unsafe
@@ -593,13 +674,24 @@ internal static class Program
         IntPtr tmplHandle, TensorSpec[] specs, int specIndex,
         double[] perToken, int vocab,
         int[] qkRowsArr, int[] qkColsArr, double[] qkValsArr,
-        double normAgg, byte[] outBytes)
+        double normAgg,
+        double[]? tokenBasis, double[]? unaryGram, double[]? binaryGram, int basisDim,
+        byte[] outBytes)
     {
-        fixed (double* ptcPtr = perToken)
-        fixed (int*    qrPtr  = qkRowsArr)
-        fixed (int*    qcPtr  = qkColsArr)
-        fixed (double* qvPtr  = qkValsArr)
-        fixed (byte*   outPtr = outBytes)
+        // fixed() on a null array is undefined — use 1-element dummies for pinning,
+        // then pass null pointers to C when the optional arrays weren't computed.
+        var basisPin = tokenBasis ?? new double[1];
+        var ugramPin = unaryGram  ?? new double[1];
+        var bgramPin = binaryGram ?? new double[1];
+
+        fixed (double* ptcPtr  = perToken)
+        fixed (int*    qrPtr   = qkRowsArr)
+        fixed (int*    qcPtr   = qkColsArr)
+        fixed (double* qvPtr   = qkValsArr)
+        fixed (double* bPtr    = basisPin)
+        fixed (double* ugPtr   = ugramPin)
+        fixed (double* bgPtr   = bgramPin)
+        fixed (byte*   outPtr  = outBytes)
         fixed (TensorSpec* specPtr = specs)
         {
             var view = new SubstrateView
@@ -611,8 +703,10 @@ internal static class Program
                 PerPairVals       = qvPtr,
                 PerPairNnz        = (nuint)qkRowsArr.Length,
                 NormAggregate     = normAgg,
-                TokenBasis        = null,        // Stream B-complete adds spectral basis
-                BasisDim          = 0,
+                TokenBasis        = tokenBasis != null ? bPtr  : null,
+                BasisDim          = tokenBasis != null ? (nuint)basisDim : 0,
+                UnaryGram         = unaryGram  != null ? ugPtr : null,
+                BinaryGram        = binaryGram != null ? bgPtr : null,
             };
             return SynthInterop.ArchTemplateMaterializeTensor(
                 tmplHandle, &specPtr[specIndex], &view, outPtr);

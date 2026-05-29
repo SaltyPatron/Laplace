@@ -135,6 +135,19 @@ public static partial class NativeInterop
         nuint topkPerRow,
         QkPair* outPairs, nuint outCap);
 
+    // === Gram matrix precomputation ===
+
+    /// <summary>
+    /// Compute unary_gram = E^T·diag(perToken)·E and binary_gram = E^T·S_qk·E.
+    /// Both outputs caller-allocated [basisDim × basisDim doubles].
+    /// Requires MKL. Returns 0 ok, -1 null input, -2 no MKL.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "compute_substrate_gram")]
+    public static unsafe partial int ComputeSubstrateGram(
+        double* tokenBasis, double* perToken, nuint vocab, nuint basisDim,
+        int* qkRows, int* qkCols, double* qkVals, nuint nnz,
+        double* unaryGram, double* binaryGram);
+
     // === GGUF writer ===
 
     [LibraryImport(Library, EntryPoint = "gguf_writer_create",
@@ -253,4 +266,6 @@ public unsafe struct SubstrateView
     public double  NormAggregate;
     public double* TokenBasis;
     public nuint   BasisDim;
+    public double* UnaryGram;    /* [basis_dim × basis_dim] E^T·diag(perToken)·E, or null */
+    public double* BinaryGram;  /* [basis_dim × basis_dim] E^T·S_qk·E, or null */
 }

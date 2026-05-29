@@ -231,9 +231,9 @@ synthesize subcommand *args: build-app
     cd app && LD_LIBRARY_PATH="$(pwd)/../build/engine/synthesis:$(pwd)/../build/engine/dynamics:$(pwd)/../build/engine/core:${LD_LIBRARY_PATH:-}" \
         dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- synthesize {{subcommand}} {{args}}
 
-# Convenience: substrate-mediated synthesis for the TinyLlama recipe.
-# Currently returns the Stream B pending stub (the pseudoinverse pipeline was
-# removed in Stream A per ~/.claude/plans/replicated-hatching-stream.md).
+# Substrate synthesis using the TinyLlama recipe as the mold.
+# Pours substrate attestation data into TinyLlama's shape (hidden=2048, 22 layers, etc).
+# Pass a different recipe.json to export the same substrate data at a different dimension.
 synthesize-tinyllama output="/tmp/tinyllama-substrate.gguf": build-app
     just synthesize substrate /vault/models/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0/snapshots/fe8a4ea1ffedaf415f4da2f062534de366a451e6/config.json {{output}}
 
@@ -244,8 +244,10 @@ synthesize-tinyllama-passthrough output="/tmp/tinyllama-passthrough.gguf": build
 roundtrip model_path:
     scripts/roundtrip.sh {{model_path}}
 
-# Chunk 8 partial — same gate as integration.yml model-codec job.
-# Local model codec gate — build engine + full solution first, then one script.
+# Substrate synthesis CI: ingest model → attestations → synthesize from substrate → GGUF.
+# Tests the full pipeline: WeightTensorETL ingest, eigenmaps spectral basis, Procrustes
+# alignment, gram matrix materialization, GGUF output. Recipe-agnostic — the synthesis
+# target_dim comes from whatever recipe.json is passed, not from the ingested model shape.
 model-codec-ci: build build-app
     @chmod +x scripts/model-codec-ci.sh
     scripts/model-codec-ci.sh

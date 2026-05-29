@@ -78,7 +78,30 @@ typedef struct {
     double        norm_aggregate;
     const double* token_basis;
     size_t        basis_dim;
+    /* Precomputed gram matrices for interior tensor materialization.
+     * unary_gram[basis_dim × basis_dim]  = E^T · diag(per_token_consensus) · E
+     * binary_gram[basis_dim × basis_dim] = E^T · S_qk · E  (S_qk = sparse Q_PROJECTS adj)
+     * NULL when not yet computed; materialize falls back to constant fill. */
+    const double* unary_gram;
+    const double* binary_gram;
 } substrate_view_t;
+
+/* Compute gram matrices for efficient interior tensor materialization.
+ * unary_gram[basis_dim × basis_dim]  = E^T · diag(per_token) · E
+ * binary_gram[basis_dim × basis_dim] = E^T · S_qk · E
+ * Both outputs are caller-allocated (basis_dim * basis_dim doubles each).
+ * Requires MKL (LAPLACE_HAS_MKL). Returns 0 ok, -1 null input, -2 no MKL. */
+int compute_substrate_gram(
+    const double* token_basis,
+    const double* per_token,
+    size_t        vocab,
+    size_t        basis_dim,
+    const int*    qk_rows,
+    const int*    qk_cols,
+    const double* qk_vals,
+    size_t        nnz,
+    double*       unary_gram,
+    double*       binary_gram);
 
 /* Materialize one tensor's values from substrate consensus per the
  * architecture template's per-tensor distribution policy (per ADR 0056:183

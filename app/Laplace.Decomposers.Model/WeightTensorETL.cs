@@ -38,14 +38,16 @@ namespace Laplace.Decomposers.Model;
 /// </summary>
 public sealed class WeightTensorETL
 {
-    private const int QkPerRowCap        = 256;
-    private const int AttBatchSize       = 4096;
+    private const int    QkPerRowCap  = 256;
+    private const int    AttBatchSize = 4096;
 
-    /// <summary>Per-kind retain ratio for Phase 3 top-k sparsity (fraction of
-    /// surviving entries kept, ranked by aggregate magnitude). Conservative
-    /// 0.5% retention — produces ~10⁵-10⁷ rows/model per ADR 0056:240. Stream
-    /// B-complete moves to multi-pass lottery-ticket per R3.</summary>
-    private const double RetainRatio     = 0.005;
+    /* Noise floor: attestations with aggregate magnitude at or below this
+     * value are not real observations — they are gradient jitter or training
+     * artifacts that did not fire. True zeros are faster in every downstream
+     * computation than near-zero floats, and the substrate should not record
+     * non-relationships. The lottery ticket is what survives multi-model
+     * Glicko-2 consensus, not a pre-selected top-k percentage from one model. */
+    private const double NoiseFloor   = 1e-9;
 
     private readonly string _safetensorsPath;
     private readonly LlamaRecipeExtractor.RecipeInfo _recipe;
@@ -291,25 +293,20 @@ public sealed class WeightTensorETL
         }
     }
 
-    /* Emit unary attestations (one per token, object NULL). Phase 3 sparsity:
-     * keep top RetainRatio fraction by perTokenAccum magnitude. */
+    /* Emit unary attestations (one per token, object NULL).
+     * Records every token whose aggregate magnitude clears the noise floor.
+     * Near-zero = no real observation = not recorded (true zero is correct). */
     private IEnumerable<SubstrateChange> EmitUnaryBatches(
         double[] perTokenAccum, Hash128 kindId, string unitName)
     {
-        // Phase 3: rank by magnitude, keep top fraction.
-        int keep = Math.Max(1, (int)(perTokenAccum.Length * RetainRatio));
-        var indexed = new (int idx, double val)[perTokenAccum.Length];
-        for (int i = 0; i < perTokenAccum.Length; i++) indexed[i] = (i, perTokenAccum[i]);
-        Array.Sort(indexed, (a, b) => b.val.CompareTo(a.val));
-
         SubstrateChangeBuilder? b = null;
         int inBatch = 0;
-        int batchStart = 0;
-        var seen = new HashSet<Hash128>(keep);
+        int batchIdx = 0;
+        var seen = new HashSet<Hash128>();
 
-        for (int i = 0; i < keep; i++)
+        for (int tokenIdx = 0; tokenIdx < perTokenAccum.Length; tokenIdx++)
         {
-            var (tokenIdx, _) = indexed[i];
+            if (perTokenAccum[tokenIdx] <= NoiseFloor) continue;
             if (tokenIdx >= _tokens.Count) continue;
             var subj = _tokens[tokenIdx].EntityId;
             var row = AttestationFactory.Create(
@@ -317,42 +314,32 @@ public sealed class WeightTensorETL
                 tier: KindValueTier.T9, trust: TrustClass.AiModelProbeTier7);
             if (!seen.Add(row.Id)) continue;
 
-            if (b is null) { batchStart = i; }
             b ??= new SubstrateChangeBuilder(_sourceId,
-                $"{unitName}/{batchStart}..{Math.Min(batchStart + AttBatchSize - 1, keep - 1)}",
+                $"{unitName}/batch-{batchIdx}",
                 entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: AttBatchSize);
             b.AddAttestation(row);
-            if (++inBatch >= AttBatchSize) { yield return b.Build(); b = null; inBatch = 0; }
+            if (++inBatch >= AttBatchSize) { yield return b.Build(); b = null; inBatch = 0; batchIdx++; }
         }
         if (b != null) yield return b.Build();
     }
 
     /* Emit binary attestations (subject=token_i, object=token_j) for Q_PROJECTS.
-     * Phase 3 sparsity: keep top RetainRatio fraction by aggregate magnitude. */
+     * Records every pair whose aggregate magnitude clears the noise floor —
+     * positive (attends-to) and negative (repels) alike. Near-zero = no real
+     * observation = not recorded. The lottery ticket is what survives
+     * multi-model Glicko-2 consensus when additional models are ingested. */
     private IEnumerable<SubstrateChange> EmitBinaryBatches(
         Dictionary<(uint q, uint k), (double sum, int count)> accum,
         Hash128 kindId, string unitName)
     {
-        // Aggregate magnitude per (i, j).
-        var entries = new List<((uint q, uint k) key, double aggMag, int count)>(accum.Count);
-        foreach (var (key, (sum, count)) in accum)
-        {
-            if (count <= 0) continue;
-            entries.Add((key, Math.Abs(sum), count));
-        }
-
-        int keep = Math.Max(1, (int)(entries.Count * RetainRatio));
-        entries.Sort((a, b) => b.aggMag.CompareTo(a.aggMag));
-
         SubstrateChangeBuilder? bb = null;
         int inBatch = 0;
-        int batchStart = 0;
-        var seen = new HashSet<Hash128>(keep);
+        int batchIdx = 0;
+        var seen = new HashSet<Hash128>();
 
-        for (int i = 0; i < keep && i < entries.Count; i++)
+        foreach (var ((qi, kj), (sum, count)) in accum)
         {
-            var (key, _, count) = entries[i];
-            uint qi = key.q, kj = key.k;
+            if (count <= 0 || Math.Abs(sum) <= NoiseFloor) continue;
             if (qi >= (uint)_tokens.Count || kj >= (uint)_tokens.Count) continue;
             var subj = _tokens[(int)qi].EntityId;
             var obj  = _tokens[(int)kj].EntityId;
@@ -361,12 +348,11 @@ public sealed class WeightTensorETL
                                                   observationCount: count);
             if (!seen.Add(row.Id)) continue;
 
-            if (bb is null) { batchStart = i; }
             bb ??= new SubstrateChangeBuilder(_sourceId,
-                $"{unitName}/{batchStart}..{Math.Min(batchStart + AttBatchSize - 1, keep - 1)}",
+                $"{unitName}/batch-{batchIdx}",
                 entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: AttBatchSize);
             bb.AddAttestation(row);
-            if (++inBatch >= AttBatchSize) { yield return bb.Build(); bb = null; inBatch = 0; }
+            if (++inBatch >= AttBatchSize) { yield return bb.Build(); bb = null; inBatch = 0; batchIdx++; }
         }
         if (bb != null) yield return bb.Build();
     }
