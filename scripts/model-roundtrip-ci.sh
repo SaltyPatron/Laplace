@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/model-codec-ci.sh
+# scripts/model-roundtrip-ci.sh
 # Substrate synthesis CI: ingest a model → attestations → synthesize from substrate.
 #
 # Pipeline under test:

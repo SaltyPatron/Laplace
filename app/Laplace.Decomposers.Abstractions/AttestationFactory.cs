@@ -54,6 +54,58 @@ public static class AttestationFactory
     }
 
     /// <summary>
+    /// Like <see cref="Create"/>, but seeds the Glicko-2 μ from an OBSERVED
+    /// magnitude (|q·k| for a Q_PROJECTS edge, per-token L2 for a unary kind)
+    /// instead of the flat tier prior — "how hard the strand tugs." The tier×trust
+    /// prior sets the μ ceiling + RD/vol; the observation scales μ within the band.
+    /// RD stays wide (one witness) so later corroboration (more heads / models)
+    /// moves it via Glicko accumulation. strength = |mag| / (|mag| + floor) ∈ (0,1):
+    /// monotonic in magnitude, 0.5 at the noise floor, →1 for strong observations;
+    /// no global stats (streaming-safe), deterministic. Interim magnitude→μ mapping
+    /// (ADR 0044/0036 open item #1) — calibrate per-kind once query results inform it.
+    /// </summary>
+    public static AttestationRow CreateWeighted(
+        Hash128        subject,
+        Hash128        kindId,
+        Hash128?       obj,
+        Hash128        sourceId,
+        Hash128?       contextId,
+        KindValueTier  tier,
+        TrustClass     trust,
+        double         magnitude,
+        double         floor,
+        long           observationCount = 1)
+    {
+        Span<byte> buf = stackalloc byte[16 * 5];
+        subject.WriteBytes(buf.Slice(0, 16));
+        kindId.WriteBytes(buf.Slice(16, 16));
+        (obj ?? Hash128.Zero).WriteBytes(buf.Slice(32, 16));
+        sourceId.WriteBytes(buf.Slice(48, 16));
+        (contextId ?? Hash128.Zero).WriteBytes(buf.Slice(64, 16));
+        var id = Hash128.Blake3(buf);
+
+        var (mu, rd, vol) = TierPrior(tier);
+        double trustWeight = TrustWeight(trust);
+        double m        = Math.Abs(magnitude);
+        double strength = (floor > 0 && m > 0) ? m / (m + floor) : 0.0;
+        double muSeed   = mu * strength;
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+
+        return new AttestationRow(
+            Id:                   id,
+            SubjectId:            subject,
+            KindId:               kindId,
+            ObjectId:             obj,
+            SourceId:             sourceId,
+            ContextId:            contextId,
+            RatingFp1e9:          (long)(muSeed * trustWeight * Glicko2.FpScale),
+            RdFp1e9:              (long)(rd  * Glicko2.FpScale),
+            VolatilityFp1e9:      (long)(vol * Glicko2.FpScale),
+            LastObservedAtUnixUs: nowUs,
+            ObservationCount:     observationCount);
+    }
+
+    /// <summary>
     /// Content-addressed attestation ID — BLAKE3 of the canonical 5-tuple
     /// (subject, kind, object, source, context). Same hashing used internally
     /// by <see cref="Create"/>; exposed so per-instance paths (Glicko-2

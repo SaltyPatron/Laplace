@@ -43,12 +43,16 @@ public sealed class LlamaRecipeExtractor
             if (len > 0) arch = archArr[0].GetString() ?? arch;
         }
 
-        int hiddenSize = GetInt(root, "hidden_size", 2048);
-        int numLayers  = GetInt(root, "num_hidden_layers", 22);
-        int numHeads   = GetInt(root, "num_attention_heads", 32);
+        // Required structural dims — refuse to guess. A missing key means the
+        // config isn't the architecture we assume; a silent Llama-shaped default
+        // (2048/22/32/5632/32000) would corrupt the ingest. Faithfulness mandate.
+        int hiddenSize = GetIntRequired(root, "hidden_size");
+        int numLayers  = GetIntRequired(root, "num_hidden_layers");
+        int numHeads   = GetIntRequired(root, "num_attention_heads");
+        // num_key_value_heads legitimately absent on pure-MHA models → = numHeads.
         int numKvHeads = GetInt(root, "num_key_value_heads", numHeads);
-        int intermSize = GetInt(root, "intermediate_size", 5632);
-        int vocabSize  = GetInt(root, "vocab_size", 32000);
+        int intermSize = GetIntRequired(root, "intermediate_size");
+        int vocabSize  = GetIntRequired(root, "vocab_size");
         string dtype   = root.TryGetProperty("torch_dtype",  out var dtProp) ? dtProp.GetString() ?? "bfloat16" : "bfloat16";
         string act     = root.TryGetProperty("hidden_act",   out var actProp) ? actProp.GetString() ?? "silu" : "silu";
         double theta   = root.TryGetProperty("rope_theta",   out var thetaProp) ? thetaProp.GetDouble() : 10000.0;
@@ -141,6 +145,19 @@ public sealed class LlamaRecipeExtractor
     {
         if (root.TryGetProperty(key, out var prop)) return prop.GetInt32();
         return def;
+    }
+
+    // No default — a missing required structural dim throws rather than silently
+    // substituting a (Llama-shaped) guess. Per the exact/faithful mandate: never
+    // invent model geometry. The embed-tensor size check in WeightTensorETL is a
+    // backstop; this fails earlier with a clearer message.
+    private static int GetIntRequired(JsonElement root, string key)
+    {
+        if (root.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.Number)
+            return prop.GetInt32();
+        throw new InvalidOperationException(
+            $"config.json missing required field '{key}' — refusing to assume a default. " +
+            "The model architecture must declare its dimensions explicitly.");
     }
 
     private static byte[] CanonicalizeJson(JsonElement root)

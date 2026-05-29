@@ -274,9 +274,9 @@ roundtrip model_path:
 # Tests the full pipeline: WeightTensorETL ingest, eigenmaps spectral basis, Procrustes
 # alignment, gram matrix materialization, GGUF output. Recipe-agnostic — the synthesis
 # target_dim comes from whatever recipe.json is passed, not from the ingested model shape.
-model-codec-ci: build build-app
-    @chmod +x scripts/model-codec-ci.sh
-    scripts/model-codec-ci.sh
+model-roundtrip-ci: build build-app
+    @chmod +x scripts/model-roundtrip-ci.sh
+    scripts/model-roundtrip-ci.sh
 
 # === Verify ===
 

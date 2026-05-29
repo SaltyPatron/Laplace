@@ -462,10 +462,10 @@ jobs:
           done
 
   # ------------------------------------------------------------------
-  # model-codec — ingest + substrate synthesize → GGUF.
+  # model-roundtrip — ingest → substrate → synthesize → GGUF.
   # ------------------------------------------------------------------
-  model-codec:
-    name: Model codec — idempotent ingest + substrate GGUF (Chunk 8 partial)
+  model-roundtrip:
+    name: Model round-trip — ingest → consensus → synthesize → GGUF (Chunk 8 partial)
     needs: [regress, dotnet-test]
     runs-on: [self-hosted, laplace]
     steps:
@@ -480,7 +480,7 @@ jobs:
           printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|LD_LIBRARY_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
           echo "PATH=$PATH" >> "$GITHUB_ENV"
 
-      - name: Model codec CI (ingest + substrate synthesize → GGUF)
+      - name: Model round-trip CI (ingest → substrate → synthesize → GGUF)
         run: |
-          chmod +x scripts/model-codec-ci.sh
-          scripts/model-codec-ci.sh
+          chmod +x scripts/model-roundtrip-ci.sh
+          scripts/model-roundtrip-ci.sh

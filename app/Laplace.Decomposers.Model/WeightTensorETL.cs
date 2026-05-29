@@ -99,6 +99,19 @@ public sealed class WeightTensorETL
         int kvDim     = nKvHeads * headDim;
         int attnOut   = nHeads * headDim;
 
+        // Validate config dims against the ACTUAL embedding tensor shape — per
+        // dimension, not just the product LoadRawBF16 checks. Catches an under-
+        // specified/mis-parsed config (e.g. vocab & hidden both wrong but product
+        // right) before any reduction runs. Fail-loud, faithfulness mandate.
+        if (refMap.TryGetValue("model.embed_tokens.weight", out var embedRef) &&
+            (embedRef.Shape.Length != 2 || embedRef.Shape[0] != vocabSize || embedRef.Shape[1] != dModel))
+        {
+            throw new InvalidOperationException(
+                $"Recipe dims (vocab={vocabSize}, hidden={dModel}) disagree with " +
+                $"model.embed_tokens.weight shape [{string.Join(",", embedRef.Shape)}]. " +
+                "Refusing to ingest mismatched geometry.");
+        }
+
         var phase = System.Diagnostics.Stopwatch.StartNew();
         ushort[] E_bf16 = LoadRawBF16(refMap, "model.embed_tokens.weight",
                                        (long)vocabSize * dModel);
@@ -368,9 +381,10 @@ public sealed class WeightTensorETL
             if (perTokenAccum[tokenIdx] <= NoiseFloor) continue;
             if (tokenIdx >= _tokens.Count) continue;
             var subj = _tokens[tokenIdx].EntityId;
-            var row = AttestationFactory.Create(
+            var row = AttestationFactory.CreateWeighted(
                 subj, kindId, obj: null, _sourceId, contextId: null,
-                tier: KindValueTier.T9, trust: TrustClass.AiModelProbeTier7);
+                tier: KindValueTier.T9, trust: TrustClass.AiModelProbeTier7,
+                magnitude: perTokenAccum[tokenIdx], floor: NoiseFloor);
             if (!seen.Add(row.Id)) continue;
 
             b ??= new SubstrateChangeBuilder(_sourceId,
@@ -399,10 +413,11 @@ public sealed class WeightTensorETL
         {
             uint qi = buf[i].QueryIdx, kj = buf[i].KeyIdx;
             if (qi >= (uint)tokCount || kj >= (uint)tokCount) continue;
-            var row = AttestationFactory.Create(
+            var row = AttestationFactory.CreateWeighted(
                 _tokens[(int)qi].EntityId, _kinds.QProjects, _tokens[(int)kj].EntityId,
                 _sourceId, contextId: null,
-                tier: KindValueTier.T9, trust: TrustClass.AiModelProbeTier7);
+                tier: KindValueTier.T9, trust: TrustClass.AiModelProbeTier7,
+                magnitude: buf[i].Score, floor: QkNoiseFloor);
 
             bb ??= new SubstrateChangeBuilder(_sourceId, $"q_projects/batch-{batchIdx}",
                 entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: AttBatchSize);

@@ -95,6 +95,13 @@ LAPLACE_PG_DATA="$LAPLACE_PG_PREFIX/data"
 LAPLACE_PG_PORT="5432"
 LAPLACE_PG_SOCKET_DIR="/var/run/postgresql"
 LAPLACE_PG_SERVICE="laplace-postgresql.service"
+# LAN CIDR for remote PG access. Defaults to the dev LAN (192.168.1.0/24) so the
+# workstation can reach the substrate cluster; override LAPLACE_PG_LAN_CIDR= (empty)
+# for localhost-only, or pass another CIDR. When non-empty, listen_addresses
+# becomes '*' and that subnet is trusted in pg_hba. Lives here (not a hand-edited
+# pg_hba) so it survives reboots AND bootstrap re-runs — this script overwrites
+# pg_hba on every run, which is what clobbered the prior manual rule.
+LAPLACE_PG_LAN_CIDR="${LAPLACE_PG_LAN_CIDR:-192.168.1.0/24}"
 # Legacy paths still referenced for the system-PG teardown step; once
 # bootstrap_disable_system_postgresql runs, the substrate stops touching
 # /etc/postgresql/$PG_VERSION/main entirely.
@@ -575,6 +582,10 @@ bootstrap_laplace_pg_cluster() {
     # bootstrap_pg_extension_paths.
     local marker_begin="# >>> laplace-runner managed: cluster config >>>"
     local marker_end="# <<< laplace-runner managed: cluster config <<<"
+    # localhost by default; if a LAN CIDR is configured, listen on all
+    # interfaces so the subnet (scoped in pg_hba below) can reach the cluster.
+    local pg_listen="localhost"
+    [ -n "$LAPLACE_PG_LAN_CIDR" ] && pg_listen="*"
     sudo -u "$RUNNER_USER" sed -i \
         -e "/$marker_begin/,/$marker_end/d" \
         -e '/^[[:space:]]*#\?[[:space:]]*port[[:space:]]*=/d' \
@@ -596,7 +607,7 @@ $marker_begin
 # Owns /var/run/postgresql/.s.PGSQL.$LAPLACE_PG_PORT so existing
 # psql -d laplace -U laplace_admin invocations connect here.
 port = $LAPLACE_PG_PORT
-listen_addresses = 'localhost'
+listen_addresses = '$pg_listen'
 unix_socket_directories = '$LAPLACE_PG_SOCKET_DIR,/tmp'
 # Extension paths — same shape as the prior system-PG bootstrap.
 # PG 18 appends '/extension' to each custom extension_control_path entry,
@@ -637,6 +648,15 @@ local   all             all                                     peer
 host    all             all             127.0.0.1/32            trust
 host    all             all             ::1/128                 trust
 EOF
+    # Optional LAN remote access (e.g. a dev workstation). Trust within the
+    # configured private subnet — same posture as the localhost trust above.
+    # Empty by default (localhost-only). Appended here so it's re-applied on
+    # every bootstrap that rewrites this file (no more hand-edits getting lost).
+    if [ -n "$LAPLACE_PG_LAN_CIDR" ]; then
+        printf 'host    all             all             %-22s trust\n' "$LAPLACE_PG_LAN_CIDR" \
+            | sudo -u "$RUNNER_USER" tee -a "$PG_HBA_FILE" >/dev/null
+        green "✓ pg_hba: remote access enabled for $LAPLACE_PG_LAN_CIDR (trust); listen_addresses=$pg_listen"
+    fi
     sudo -u "$RUNNER_USER" chmod 0600 "$PG_HBA_FILE"
     green "✓ Wrote substrate cluster pg_hba.conf (managed block as full file)"
 

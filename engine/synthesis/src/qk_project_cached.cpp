@@ -181,9 +181,6 @@ long score_qk_head_cached(
         return lo;
     };
 
-    /* Per-row survivor counts (window-bounded metadata, O(n_rows)). */
-    std::vector<size_t> counts(n_rows, 0);
-
     /* Per-query L2 norms (read from the cached q vectors; same proj_l2). */
     std::vector<double> q_norms(n_rows);
 #ifdef LAPLACE_HAS_MKL
@@ -198,76 +195,55 @@ long score_qk_head_cached(
         q_norms[ri] = proj_l2(q_vec(q0 + ri), head_dim);
 #endif
 
-    /* ── Pass 1: count survivors per row (cached q_t, candidate prefix, cached dot
-     * product). IDENTICAL to the pruned kernel. ─────────────────────────────── */
-    auto count_row = [&](size_t ri) {
+    /* ── Single pass: each row scores its candidate prefix ONCE into a
+     * thread-local survivor vector. The prior kernel scored every candidate
+     * TWICE — once in a count pass, once in a write pass — purely to compute
+     * stable parallel output offsets; that doubled the dominant compensated-dot
+     * cost (the inner score_qk_cached over head_dim). Output here is
+     * BIT-IDENTICAL: same survivor set (same |sc|>floor test on the same cached
+     * dot), same per-row ascending-key order, same whole-leading-rows out_cap
+     * overflow policy. Only the redundant second scoring is removed. ───────── */
+    std::vector<std::vector<qk_pair_f64_t>> row_out(n_rows);
+    auto score_row = [&](size_t ri) {
         const double* q_t = q_vec(q0 + ri);
         const size_t n_cand = candidate_prefix_len(q_norms[ri]);
-        size_t n = 0;
+        auto& sv = row_out[ri];
         for (size_t i = 0; i < n_cand; ++i) {
             const uint32_t s = keys_desc[i].key;
             const double sc = score_qk_cached(q_t, k_vec(s), head_dim);
-            if (std::fabs(sc) > noise_floor) ++n;
+            if (std::fabs(sc) > noise_floor)
+                sv.push_back({(uint32_t)(q0 + ri), s, sc});
         }
-        counts[ri] = n;
+        std::sort(sv.begin(), sv.end(),
+                  [](const qk_pair_f64_t& a, const qk_pair_f64_t& b) {
+                      return a.key_idx < b.key_idx;
+                  });
     };
 #ifdef LAPLACE_HAS_MKL
     oneapi::tbb::parallel_for(
         oneapi::tbb::blocked_range<size_t>(0, n_rows, 64),
         [&](const oneapi::tbb::blocked_range<size_t>& rng) {
-            for (size_t ri = rng.begin(); ri != rng.end(); ++ri) count_row(ri);
+            for (size_t ri = rng.begin(); ri != rng.end(); ++ri) score_row(ri);
         });
 #else
-    for (size_t ri = 0; ri < n_rows; ++ri) count_row(ri);
+    for (size_t ri = 0; ri < n_rows; ++ri) score_row(ri);
 #endif
 
-    /* ── Prefix-sum -> stable per-row output offsets. Keep only whole leading rows
-     * that fit in out_cap; the rest overflow. IDENTICAL to the pruned kernel. ── */
-    std::vector<size_t> offsets(n_rows);
+    /* Concatenate whole leading rows that fit out_cap, in row order — same
+     * deterministic layout + overflow semantics as the prior two-pass write. */
     size_t acc = 0;
     size_t rows_fit = n_rows;
     for (size_t ri = 0; ri < n_rows; ++ri) {
-        if (acc + counts[ri] > out_cap) {
+        if (acc + row_out[ri].size() > out_cap) {
             rows_fit = ri;
             *overflow = 1;
             break;
         }
-        offsets[ri] = acc;
-        acc += counts[ri];
+        acc += row_out[ri].size();
     }
-    const size_t total_written = acc;
+    size_t w = 0;
+    for (size_t ri = 0; ri < rows_fit; ++ri)
+        for (const auto& p : row_out[ri]) out[w++] = p;
 
-    /* ── Pass 2: write each kept row's survivors at its stable offset, emitted in
-     * ASCENDING key index. IDENTICAL to the pruned kernel. ──────────────────── */
-    auto write_row = [&](size_t ri) {
-        if (counts[ri] == 0) return;
-        const size_t t = q0 + ri;
-        const double* q_t = q_vec(t);
-        const size_t n_cand = candidate_prefix_len(q_norms[ri]);
-        std::vector<qk_pair_f64_t> survivors;
-        survivors.reserve(counts[ri]);
-        for (size_t i = 0; i < n_cand; ++i) {
-            const uint32_t s = keys_desc[i].key;
-            const double sc = score_qk_cached(q_t, k_vec(s), head_dim);
-            if (std::fabs(sc) > noise_floor)
-                survivors.push_back({(uint32_t)t, s, sc});
-        }
-        std::sort(survivors.begin(), survivors.end(),
-                  [](const qk_pair_f64_t& a, const qk_pair_f64_t& b) {
-                      return a.key_idx < b.key_idx;
-                  });
-        size_t w = offsets[ri];
-        for (const auto& p : survivors) out[w++] = p;
-    };
-#ifdef LAPLACE_HAS_MKL
-    oneapi::tbb::parallel_for(
-        oneapi::tbb::blocked_range<size_t>(0, rows_fit, 64),
-        [&](const oneapi::tbb::blocked_range<size_t>& rng) {
-            for (size_t ri = rng.begin(); ri != rng.end(); ++ri) write_row(ri);
-        });
-#else
-    for (size_t ri = 0; ri < rows_fit; ++ri) write_row(ri);
-#endif
-
-    return (long)total_written;
+    return (long)w;
 }
