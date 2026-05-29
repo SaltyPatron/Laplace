@@ -12,24 +12,68 @@ on:
 permissions:
   contents: read
 
+# /opt/laplace/external/ is the canonical source for dep checkouts:
+# one non-bare working tree per submodule, maintained at the .gitmodules-pinned
+# SHA by scripts/sync-external.sh. CMake reads dep sources from it directly
+# via -DLAPLACE_EXTERNAL=...  No workspace external/, no .git/modules.
+#
+# Caching: self-hosted runner persists _work across runs. clean: false on
+# every actions/checkout keeps build/deps/* stamp files + build/* CMake
+# artifacts intact between workflow runs. ExternalProject stamp-based
+# incremental + Ninja stamp-based incremental + dotnet incremental together
+# make a no-change re-run effectively no-op per dep.
+#
+# Job DAG (one concern per job, one dep per job):
+#
+#   capabilities
+#       ├── proj ────┐
+#       │            ├── gdal ──┐
+#       ├── geos ────┴─────────┤
+#       ├── postgresql ────────┴── postgis ──┐
+#       ├── tree-sitter ──────────────────────┴── engine ──┐
+#       └── dotnet ─────────────────────────────────────────┴── db-deploy ── regress
+env:
+  LAPLACE_EXTERNAL:       ${{ vars.LAPLACE_EXTERNAL       || '/opt/laplace/external' }}
+  LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
+  LAPLACE_PG_PREFIX:      ${{ vars.LAPLACE_PG_PREFIX      || '/usr/lib/postgresql/18' }}
+
 jobs:
+  # ------------------------------------------------------------------
+  # capabilities — host preflight + idempotent setup (no build work).
+  # Ensures /opt/laplace install destinations exist; syncs external/.
+  # ------------------------------------------------------------------
   capabilities:
     name: Verify self-hosted runner capabilities
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Wipe stale workspace (forces fresh clone, avoids recursive fetch on existing checkout)
-        run: rm -rf "$GITHUB_WORKSPACE" && mkdir -p "$GITHUB_WORKSPACE"
       - uses: actions/checkout@v4
         with:
           submodules: false
-      - name: Init submodules (non-recursive — tree-sitter-nqc/examples/nqc has no URL)
-        run: git submodule update --init
+          clean: false
+
+      - name: Ensure /opt/laplace install destinations exist (idempotent)
+        run: |
+          # Per-dep dirs (system deps land here from `cmake --build build/deps`)
+          # + engine dirs (top-level `cmake --install build` lands liblaplace_*.so,
+          # headers, PG extension files here). Created by laplace-runner →
+          # owned by laplace-runner; setgid + group inherit from /opt/laplace/'s
+          # 2775 → mode 2775 group laplace-runner. No sudo, no chown.
+          for d in tree-sitter geos proj gdal pgsql-18 include lib share bin; do
+            if [ ! -d "/opt/laplace/$d" ]; then
+              mkdir -p "/opt/laplace/$d"
+              echo "  created /opt/laplace/$d ($(stat -c '%U:%G mode=%a' /opt/laplace/$d))"
+            else
+              echo "  exists  /opt/laplace/$d ($(stat -c '%U:%G mode=%a' /opt/laplace/$d))"
+            fi
+          done
+
+      - name: Sync /opt/laplace/external/ to .gitmodules pin (no-op when already at pin)
+        run: scripts/sync-external.sh
 
       - name: System info
         run: |
           echo "::group::OS / kernel"
-          uname -a
-          cat /etc/os-release | grep -E '^(NAME|VERSION)='
+          uname -a; cat /etc/os-release | grep -E '^(NAME|VERSION)='
           echo "::endgroup::"
           echo "::group::CPU + AVX support"
           lscpu | grep -E 'Model name|Architecture|^CPU\(s\):'
@@ -41,41 +85,27 @@ jobs:
 
       - name: Intel oneAPI present
         run: |
-          if [ -d /opt/intel/oneapi ]; then
-            echo "✓ oneAPI installed at /opt/intel/oneapi"
-            ls /opt/intel/oneapi/compiler/latest/bin/ | head -10
-          else
-            echo "::error::Intel oneAPI not found at /opt/intel/oneapi"
-            exit 1
-          fi
+          [ -d /opt/intel/oneapi ] || { echo "::error::oneAPI missing"; exit 1; }
+          ls /opt/intel/oneapi/compiler/latest/bin/ | head -10
 
-      - name: PostgreSQL + PostGIS (stock host PG)
+      - name: PostgreSQL host stock pg_config
         run: |
-          if command -v pg_config >/dev/null 2>&1; then
-            pg_config --version
-            pg_config --includedir-server
-          else
-            echo "::error::pg_config not found"
-            exit 1
-          fi
+          command -v pg_config >/dev/null || { echo "::error::pg_config not found"; exit 1; }
+          pg_config --version
 
       - name: .NET SDK
         run: |
-          if command -v dotnet >/dev/null 2>&1; then
-            dotnet --version
-            dotnet --list-sdks
-          else
-            echo "::error::dotnet not found"
-            exit 1
-          fi
+          command -v dotnet >/dev/null || { echo "::error::dotnet not found"; exit 1; }
+          dotnet --version
+          dotnet --list-sdks
 
-      - name: Submodule presence (sanity)
+      - name: External tree present at $LAPLACE_EXTERNAL
         run: |
           for dep in eigen spectra blake3 googletest postgresql postgis proj geos gdal tree-sitter; do
-            if [ -d "external/$dep" ] && [ -n "$(ls external/$dep 2>/dev/null)" ]; then
-              echo "✓ external/$dep present"
+            if [ -d "$LAPLACE_EXTERNAL/$dep/.git" ]; then
+              echo "✓ $LAPLACE_EXTERNAL/$dep (HEAD=$(git -c safe.directory='*' -C "$LAPLACE_EXTERNAL/$dep" rev-parse --short HEAD))"
             else
-              echo "::error::external/$dep submodule missing"
+              echo "::error::$LAPLACE_EXTERNAL/$dep missing — sync-external.sh should have created it"
               exit 1
             fi
           done
@@ -83,91 +113,215 @@ jobs:
       - name: Peer auth (laplace-runner → laplace_admin) per ADR 0019
         run: |
           RESULT=$(psql -d postgres -U laplace_admin -tAc "SELECT current_user || ' on ' || current_database();")
+          [ "$RESULT" = "laplace_admin on postgres" ] || {
+            echo "::error::Expected 'laplace_admin on postgres', got '$RESULT'"; exit 1; }
           echo "Peer-auth probe: $RESULT"
-          if [ "$RESULT" != "laplace_admin on postgres" ]; then
-            echo "::error::Expected 'laplace_admin on postgres', got '$RESULT'"
-            echo "::error::Run: scripts/setup-host.sh   (idempotent; full Layer 0+1 setup)"
-            exit 1
-          fi
 
-  build:
-    name: Build engine + extensions + app (top-level CMake per ADR 0032)
+  # ------------------------------------------------------------------
+  # System dep jobs — one per dep, DAG-ordered. Each job runs
+  # `cmake --build build/deps --target <dep>`. ExternalProject stamps
+  # in build/deps/<dep>-stamp/ persist across runs (clean: false). A
+  # no-change re-run is a no-op for each dep individually.
+  #
+  # External/CMakeLists.txt configure is idempotent — first dep job
+  # configures build/deps; subsequent dep jobs find it configured.
+  # ------------------------------------------------------------------
+  proj:
+    name: Build dep — proj (CMake-based; CRS / coordinate transforms)
     needs: capabilities
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Wipe stale workspace (forces fresh clone, avoids recursive fetch on existing checkout)
-        run: rm -rf "$GITHUB_WORKSPACE" && mkdir -p "$GITHUB_WORKSPACE"
       - uses: actions/checkout@v4
-        with:
-          submodules: false
-      - name: Init submodules (non-recursive — tree-sitter-nqc/examples/nqc has no URL)
-        run: git submodule update --init
-
-      - name: Build system deps (unified ExternalProject pipeline)
+        with: { submodules: false, clean: false }
+      - name: cmake configure build/deps (idempotent)
+        run: cmake -B build/deps -S external -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
+      - name: cmake --build --target proj
+        run: cmake --build build/deps --target proj -j
+      - name: Verify /opt/laplace/proj install
         run: |
-          # Per ADR 0038 — gcc toolchain for the system dep chain.
-          # Stamp-based: re-runs with unchanged submodule SHAs are no-ops.
-          cmake -B build/deps -S external
-          cmake --build build/deps -j
+          test -f /opt/laplace/proj/lib/libproj.so || { echo "::error::libproj.so missing"; exit 1; }
+          test -f /opt/laplace/proj/include/proj.h  || { echo "::error::proj.h missing"; exit 1; }
+          echo "✓ /opt/laplace/proj installed"
 
-      - name: cmake configure (engine + extensions; intel toolchain)
+  geos:
+    name: Build dep — geos (CMake-based; geometry engine)
+    needs: capabilities
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - name: cmake configure build/deps (idempotent)
+        run: cmake -B build/deps -S external -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
+      - name: cmake --build --target geos
+        run: cmake --build build/deps --target geos -j
+      - name: Verify /opt/laplace/geos install
+        run: |
+          test -f /opt/laplace/geos/lib/libgeos_c.so   || { echo "::error::libgeos_c.so missing"; exit 1; }
+          test -f /opt/laplace/geos/include/geos_c.h   || { echo "::error::geos_c.h missing"; exit 1; }
+          echo "✓ /opt/laplace/geos installed"
+
+  gdal:
+    name: Build dep — gdal (CMake-based; geospatial abstraction; needs proj)
+    needs: [capabilities, proj]
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - name: cmake configure build/deps (idempotent)
+        run: cmake -B build/deps -S external -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
+      - name: cmake --build --target gdal
+        run: cmake --build build/deps --target gdal -j
+      - name: Verify /opt/laplace/gdal install
+        run: |
+          test -f /opt/laplace/gdal/lib/libgdal.so      || { echo "::error::libgdal.so missing"; exit 1; }
+          test -f /opt/laplace/gdal/include/gdal.h      || { echo "::error::gdal.h missing"; exit 1; }
+          echo "✓ /opt/laplace/gdal installed"
+
+  postgresql:
+    name: Build dep — postgresql 18 (autoconf VPATH; MAKELEVEL=0 fix for submake)
+    needs: capabilities
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - name: cmake configure build/deps (idempotent)
+        run: cmake -B build/deps -S external -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
+      - name: cmake --build --target postgresql
+        run: cmake --build build/deps --target postgresql -j
+      - name: Verify /opt/laplace/pgsql-18 install
+        run: |
+          test -f /opt/laplace/pgsql-18/bin/postgres                    || { echo "::error::postgres binary missing"; exit 1; }
+          test -f /opt/laplace/pgsql-18/include/server/postgres.h       || { echo "::error::postgres.h missing"; exit 1; }
+          test -f /opt/laplace/pgsql-18/lib/pgxs/src/makefiles/pgxs.mk  || { echo "::error::pgxs.mk missing"; exit 1; }
+          /opt/laplace/pgsql-18/bin/pg_config --version
+          echo "✓ /opt/laplace/pgsql-18 installed"
+
+  postgis:
+    name: Build dep — postgis 3.6.3 (autoconf in-source; needs pg + geos + proj + gdal)
+    needs: [capabilities, postgresql, geos, proj, gdal]
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - name: cmake configure build/deps (idempotent)
+        run: cmake -B build/deps -S external -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
+      - name: cmake --build --target postgis
+        run: cmake --build build/deps --target postgis -j
+      - name: Verify /opt/laplace/pgsql-18/postgis install
+        run: |
+          test -f /opt/laplace/pgsql-18/lib/postgis-3.so                          || { echo "::error::postgis-3.so missing"; exit 1; }
+          test -f /opt/laplace/pgsql-18/share/extension/postgis.control           || { echo "::error::postgis.control missing"; exit 1; }
+          echo "✓ /opt/laplace/pgsql-18 postgis extension installed"
+
+  tree-sitter:
+    name: Build dep — tree-sitter runtime (Make-based; in-source)
+    needs: capabilities
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - name: cmake configure build/deps (idempotent)
+        run: cmake -B build/deps -S external -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
+      - name: cmake --build --target tree-sitter
+        run: cmake --build build/deps --target tree-sitter -j
+      - name: Verify /opt/laplace/tree-sitter install
+        run: |
+          test -f /opt/laplace/tree-sitter/lib/libtree-sitter.a               || { echo "::error::libtree-sitter.a missing"; exit 1; }
+          test -f /opt/laplace/tree-sitter/include/tree_sitter/api.h          || { echo "::error::api.h missing"; exit 1; }
+          echo "✓ /opt/laplace/tree-sitter installed"
+
+  # ------------------------------------------------------------------
+  # engine — C/C++ build of engine libs (core, dynamics, synthesis) +
+  # PG extensions (laplace_geom, laplace_substrate). eigen, spectra are
+  # header-only (consumed via include paths); blake3, googletest are
+  # built as add_subdirectory inside the engine CMakeLists. Intel oneAPI
+  # toolchain (icx/icpx) used here for the dynamics path (MKL/SIMD).
+  # ------------------------------------------------------------------
+  engine:
+    name: Build engine + extensions (intel toolchain; ctest; SQL artifact verify)
+    needs: [postgis, tree-sitter]
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+
+      - name: Source oneAPI env (MKLROOT / TBBROOT / CMPLR_ROOT for build + INSTALL_RPATH)
+        run: |
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          # Persist oneAPI env vars to subsequent steps in this job. GH Actions
+          # runs each step in a fresh shell; without this the intel toolchain
+          # cmake configure errors with "MKLROOT is unset" per CMakeLists.txt
+          # (the env-var-derived CMAKE_INSTALL_RPATH from commit da6810c).
+          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|LD_LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
+          # PATH gets appended (oneAPI bins prepended to existing PATH)
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+
+      - name: cmake configure (intel toolchain; STAGED install for sudo-free /opt/laplace path)
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
-            -DLAPLACE_PG_PREFIX=/usr/lib/postgresql/18
+            -DCMAKE_INSTALL_PREFIX="$LAPLACE_INSTALL_PREFIX" \
+            -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX" \
+            -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL" \
+            -DLAPLACE_INSTALL_STAGED=ON
 
-      - name: cmake build (engine + extensions + SQLPP preprocessing)
-        run: |
-          cmake --build build
+      - name: cmake build (ninja incremental)
+        run: cmake --build build
 
-      - name: ctest (engine C++ unit tests via GoogleTest)
+      - name: ctest (engine C++ unit tests via GoogleTest; excludes pg_regress)
         run: |
-          cd build
-          ctest --output-on-failure
+          ctest --test-dir build --output-on-failure -LE regress
 
       - name: Verify SQL artifacts produced
         run: |
           for ext in laplace_geom laplace_substrate; do
-            sql="build/extension/${ext}/${ext}--0.1.0.sql"
-            ctl="build/extension/${ext}/${ext}.control"
-            so="build/extension/${ext}/${ext}.so"
-            for f in "$sql" "$ctl" "$so"; do
+            for f in "build/extension/${ext}/${ext}--0.1.0.sql" \
+                     "build/extension/${ext}/${ext}.control" \
+                     "build/extension/${ext}/${ext}.so"; do
               [ -f "$f" ] || { echo "::error::Missing build artifact: $f"; exit 1; }
             done
-            echo "✓ $ext artifacts produced (.so, .control, .sql)"
+            echo "✓ $ext artifacts produced"
           done
 
-      - name: Build C# app + tests
+  # ------------------------------------------------------------------
+  # dotnet — C# app + test projects. Independent of engine for compile.
+  # ------------------------------------------------------------------
+  dotnet:
+    name: Build C# app + tests (dotnet build Release)
+    needs: capabilities
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - name: dotnet build (Release, incremental)
         run: |
           cd app
           dotnet build Laplace.slnx -c Release
 
-  # Layer 1 — install extensions, then DbUp orchestrates EnsureDatabase
-  # + CREATE EXTENSION (laplace_geom + laplace_substrate) + role grants.
+  # ------------------------------------------------------------------
+  # db-deploy — install engine .so + .control + .sql; run DbUp; verify.
+  # ------------------------------------------------------------------
   db-deploy:
     name: Install extensions + apply DbUp migrations (Layer 1)
-    needs: build
+    needs: [engine, dotnet]
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Wipe stale workspace (forces fresh clone, avoids recursive fetch on existing checkout)
-        run: rm -rf "$GITHUB_WORKSPACE" && mkdir -p "$GITHUB_WORKSPACE"
       - uses: actions/checkout@v4
-        with:
-          submodules: false
-      - name: Init submodules (non-recursive — tree-sitter-nqc/examples/nqc has no URL)
-        run: git submodule update --init
+        with: { submodules: false, clean: false }
 
-      - name: cmake configure + build (intel toolchain; deps re-used from build job)
+      - name: Source oneAPI env
         run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
-            -DLAPLACE_PG_PREFIX=/usr/lib/postgresql/18
-          cmake --build build
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|LD_LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
 
-      - name: cmake install (bounded sudo, per ADR 0019)
-        run: |
-          sudo cmake --install build
+      - name: cmake --install (no sudo)
+        run: cmake --install build
 
       - name: DbUp — EnsureDatabase('laplace') + apply migrations
         run: |
@@ -178,23 +332,19 @@ jobs:
         run: |
           psql -d laplace -U laplace_admin -c "\dx" -P "footer=off"
           for ext in postgis laplace_geom laplace_substrate; do
-            if ! psql -d laplace -U laplace_admin -tAc \
-                "SELECT 1 FROM pg_extension WHERE extname='$ext';" | grep -q 1; then
-              echo "::error::Extension '$ext' not present"
-              exit 1
-            fi
+            psql -d laplace -U laplace_admin -tAc \
+                "SELECT 1 FROM pg_extension WHERE extname='$ext';" | grep -q 1 \
+              || { echo "::error::Extension '$ext' not present"; exit 1; }
           done
 
       - name: Smoke — version functions report 0.1.0
         run: |
-          GEOM=$(psql -tA -d laplace -U laplace_admin -c "SELECT laplace_geom_version();")
-          SUB=$(psql  -tA -d laplace -U laplace_admin -c "SELECT laplace_substrate_version();")
-          echo "laplace_geom_version()      → '$GEOM'"
-          echo "laplace_substrate_version() → '$SUB'"
-          if [ "$GEOM" != "0.1.0" ] || [ "$SUB" != "0.1.0" ]; then
-            echo "::error::Version mismatch — expected '0.1.0' from both"
-            exit 1
-          fi
+          GEOM=$(psql -tA -d laplace -U laplace_admin -c "SELECT public.laplace_geom_version();")
+          SUB=$(psql  -tA -d laplace -U laplace_admin -c "SELECT laplace.laplace_substrate_version();")
+          echo "public.laplace_geom_version()       → '$GEOM'"
+          echo "laplace.laplace_substrate_version() → '$SUB'"
+          [ "$GEOM" = "0.1.0" ] && [ "$SUB" = "0.1.0" ] || {
+            echo "::error::Version mismatch — expected '0.1.0' from both"; exit 1; }
           echo "::notice::Both substrate extensions report 0.1.0; engine link chain verified"
 
       - name: DbUp status
@@ -209,37 +359,75 @@ jobs:
                    has_schema_privilege('laplace_readonly', 'laplace', 'USAGE');
           " | sed 's/^/  /'
 
-  # Per B′.9 #196 — pg_regress smoke tests for both extensions against
-  # the deployed staged-extension install. Drops + recreates per-extension
-  # test DBs (laplace_regress_geom, laplace_regress_substrate) as
-  # laplace_admin (peer auth — runner is laplace-runner), runs pg_regress,
-  # diffs vs extension/<name>/tests/expected/*.out. Independent of the
-  # production `laplace` DB.
+      - name: Seed Unicode T0
+        run: |
+          export LD_LIBRARY_PATH="$(pwd)/build/engine/core:$(pwd)/build/engine/dynamics:$(pwd)/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
+          export LAPLACE_PERFCACHE_BIN="$(pwd)/build/engine/core/perfcache/laplace_t0_perfcache.bin"
+          cd app
+          dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- seed-unicode
+
+  # ------------------------------------------------------------------
+  # dotnet-test — C# test suites.
+  # ------------------------------------------------------------------
+  dotnet-test:
+    name: dotnet test (engine bindings + substrate integration)
+    needs: db-deploy
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+
+      - name: Source oneAPI env
+        run: |
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|LD_LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+
+      - name: dotnet test
+        run: |
+          export LD_LIBRARY_PATH="$(pwd)/build/engine/core:$(pwd)/build/engine/dynamics:$(pwd)/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
+          export LAPLACE_PERFCACHE_BIN="$(pwd)/build/engine/core/perfcache/laplace_t0_perfcache.bin"
+          cd app
+          for proj in \
+            Laplace.Engine.Core.Tests \
+            Laplace.Engine.Dynamics.Tests \
+            Laplace.Engine.Synthesis.Tests \
+            Laplace.Decomposers.Abstractions.Tests \
+            Laplace.Decomposers.Containers.Abstractions.Tests \
+            Laplace.SubstrateCRUD.Tests \
+            Laplace.Ingestion.Tests \
+            Laplace.Decomposers.Unicode.Tests \
+            Laplace.Decomposers.Model.Tests; do
+            echo "::group::dotnet test $proj"
+            dotnet test "$proj/$proj.csproj" -c Release
+            echo "::endgroup::"
+          done
+
+  # ------------------------------------------------------------------
+  # regress — pg_regress smoke tests.
+  # ------------------------------------------------------------------
   regress:
     name: pg_regress smoke (laplace_geom + laplace_substrate)
     needs: db-deploy
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Wipe stale workspace (forces fresh clone, avoids recursive fetch on existing checkout)
-        run: rm -rf "$GITHUB_WORKSPACE" && mkdir -p "$GITHUB_WORKSPACE"
       - uses: actions/checkout@v4
-        with:
-          submodules: false
-      - name: Init submodules (non-recursive — tree-sitter-nqc/examples/nqc has no URL)
-        run: git submodule update --init
+        with: { submodules: false, clean: false }
 
-      - name: cmake configure + build (re-uses /opt/laplace deps + install)
+      - name: Source oneAPI env
         run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
-            -DLAPLACE_PG_PREFIX=/usr/lib/postgresql/18
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|LD_LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+
+      - name: ctest -L regress
+        run: |
           LD_LIBRARY_PATH="$(pwd)/build/engine/core:$(pwd)/build/engine/dynamics:$(pwd)/build/engine/synthesis:${LD_LIBRARY_PATH:-}" \
-            cmake --build build
-
-      - name: ctest -L regress (pg_regress fixtures + tests)
-        run: |
-          cd build
-          ctest --output-on-failure -L regress
+            ctest --test-dir build --output-on-failure -L regress
 
       - name: Show regress diffs on failure
         if: failure()
@@ -251,7 +439,26 @@ jobs:
             echo "::endgroup::"
           done
 
-  # - test-app (dotnet test with Testcontainers — Chunk 1+; once Docker
-  #   daemon access is granted to laplace-runner)
-  # - verify-determinism, verify-fk, verify-perfcache (Chunk 3+)
-  # - round-trip end-to-end test (Chunk 8)
+  # ------------------------------------------------------------------
+  # model-codec — ingest + substrate synthesize → GGUF.
+  # ------------------------------------------------------------------
+  model-codec:
+    name: Model codec — idempotent ingest + substrate GGUF (Chunk 8 partial)
+    needs: [regress, dotnet-test]
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+
+      - name: Source oneAPI env
+        run: |
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|LD_LIBRARY_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+
+      - name: Model codec CI (ingest + substrate synthesize → GGUF)
+        run: |
+          chmod +x scripts/model-codec-ci.sh
+          scripts/model-codec-ci.sh
