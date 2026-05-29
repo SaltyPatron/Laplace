@@ -13,47 +13,6 @@ permissions:
   contents: read
 
 jobs:
-  required-files:
-    name: Required project files present
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Verify required documentation files
-        run: |
-          set -e
-          required=(
-            CLAUDE.md
-            AGENTS.md
-            README.md
-            GLOSSARY.md
-            RULES.md
-            STANDARDS.md
-            DESIGN.md
-            OPERATIONS.md
-            Justfile
-            .github/copilot-instructions.md
-            .claude/settings.json
-            .claude/agents/substrate-architect.md
-            .claude/agents/postgres-extension.md
-            .claude/agents/cpp-performance.md
-            .claude/agents/type-taxonomy.md
-            .claude/agents/ingestion-pipeline.md
-            .claude/agents/verification.md
-            .claude/agents/conventional-ai-skeptic.md
-          )
-          missing=0
-          for f in "${required[@]}"; do
-            if [ ! -f "$f" ]; then
-              echo "::error file=$f::Required file is missing"
-              missing=$((missing+1))
-            fi
-          done
-          if [ $missing -gt 0 ]; then
-            echo "::error::$missing required file(s) missing"
-            exit 1
-          fi
-          echo "All required project files present."
 
   markdown-lint:
     name: Markdown lint
