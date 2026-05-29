@@ -17,11 +17,13 @@ jobs:
     name: Verify self-hosted runner capabilities
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Disable git submodule.recurse (runner global config may enable it)
-        run: git config --global submodule.recurse false
       - uses: actions/checkout@v4
         with:
           submodules: false
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: 'submodule.recurse'
+          GIT_CONFIG_VALUE_0: 'false'
       - name: Init submodules (non-recursive — tree-sitter-nqc/examples/nqc has no URL)
         run: git submodule update --init
 
@@ -95,11 +97,13 @@ jobs:
     needs: capabilities
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Disable git submodule.recurse (runner global config may enable it)
-        run: git config --global submodule.recurse false
       - uses: actions/checkout@v4
         with:
           submodules: false
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: 'submodule.recurse'
+          GIT_CONFIG_VALUE_0: 'false'
       - name: Init submodules (non-recursive — tree-sitter-nqc/examples/nqc has no URL)
         run: git submodule update --init
 
@@ -150,11 +154,13 @@ jobs:
     needs: build
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Disable git submodule.recurse (runner global config may enable it)
-        run: git config --global submodule.recurse false
       - uses: actions/checkout@v4
         with:
           submodules: false
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: 'submodule.recurse'
+          GIT_CONFIG_VALUE_0: 'false'
       - name: Init submodules (non-recursive — tree-sitter-nqc/examples/nqc has no URL)
         run: git submodule update --init
 
@@ -220,11 +226,13 @@ jobs:
     needs: db-deploy
     runs-on: [self-hosted, laplace]
     steps:
-      - name: Disable git submodule.recurse (runner global config may enable it)
-        run: git config --global submodule.recurse false
       - uses: actions/checkout@v4
         with:
           submodules: false
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: 'submodule.recurse'
+          GIT_CONFIG_VALUE_0: 'false'
       - name: Init submodules (non-recursive — tree-sitter-nqc/examples/nqc has no URL)
         run: git submodule update --init
 
