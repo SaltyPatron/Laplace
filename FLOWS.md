@@ -135,7 +135,7 @@ Emit tool (not linked into `.so`): `engine/core/tools/ucd_tables_emit/` → targ
 | [FLOW-INGEST-PROMPT-001](#flow-ingest-prompt-001-prompt-as-ingestion) | Prompt as ingestion | Ingest | PLANNED |
 | [FLOW-INGEST-CLI-001](#flow-ingest-cli-001-just-ingest-dispatch) | `just ingest` dispatch | Ingest | PARTIAL (unicode only) |
 | [FLOW-INGEST-LAYER-010](#flow-ingest-layer-010-layered-seed-ladder) | Layered seed ladder (1–10) | Ingest | PLANNED |
-| [FLOW-INGEST-MODEL-001](#flow-ingest-model-001-model-codec) | Model codec ingest | Ingest | PLANNED |
+| [FLOW-INGEST-MODEL-001](#flow-ingest-model-001-model-weight-etl) | Model weight-table streaming ETL ingest | Ingest | PLANNED |
 | [FLOW-QUERY-001](#flow-query-001-compiled-cascade) | Compiled cascade inference | Query | PLANNED |
 | [FLOW-QUERY-002](#flow-query-002-glicko-2-period-update) | Glicko-2 period update | Query | PARTIAL |
 | [FLOW-SYNTH-001](#flow-synth-001-substrate-synthesis-export) | Substrate Synthesis export | Emit | PARTIAL |
@@ -305,10 +305,12 @@ flowchart TD
 | 0 | Meta-types: `Type`, `Kind`, `PhysicalityKind`, `Source`, `SubstrateCanonical` | `extension/laplace_substrate/sql/10_bootstrap.sql.in` |
 | 1 | Substrate-canonical `Source` entity | Same |
 | 2 | `CONTENT` / `BUILDING_BLOCK` / `PROJECTION` enum entities | Same |
-| 3 | Modality-agnostic attestation kinds + kind-value tiers | Same |
-| 3.5 | Ten `TrustClass_*` entities + priors | Same |
+| 3 | Modality-agnostic attestation kinds + kind-value "tiers" [†] | Same |
+| 3.5 | Ten `TrustClass_*` entities + priors [†] | Same |
 | 4 | Universal types (`Text`, `Pixel`, `Codepoint`, …) | **PLANNED in SQL** — today `UnicodeDecomposer` registers `Codepoint` at init |
 | 5 | T0 entities + phys | **Not in SQL** — [FLOW-INGEST-UNICODE-001](#flow-ingest-unicode-001-t0-db-seed) |
+
+[†] **Anchor divergence (as-built, but contradicts [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truth 5):** "kind-value tier" and `TrustClass_*` ladders are corruption — trust is a Glicko-2 value self-tuning from cross-source agreement, and "tier" is reserved exclusively for the Merkle stratum (T0 = Unicode codepoints). Rows are reported as what the bootstrap SQL currently inserts (mechanical fact), **not** as ratified design. See [Anchor divergences](#anchor-divergences-substrate-foundationmd).
 | 6+ | Per-source decomposer layers | [FLOW-INGEST-LAYER-010](#flow-ingest-layer-010-layered-seed-ladder) |
 
 ```mermaid
@@ -495,7 +497,7 @@ flowchart TD
 | 3 | Dedup entities against existing substrate (reuse known codepoints/words) | FLOW-XCUT-002 |
 | 4 | Create or reference **context entity** + trajectory | — |
 | 5 | Record prompt-local attestations: `FOLLOWS`, `OCCURS_IN_CONTEXT`, order, session scope | Arena policy ADR 0036 |
-| 6 | Do **not** treat prompt assertions as high-trust global edges | `TrustClass_UserPromptContent` |
+| 6 | Do **not** promote prompt assertions to global truth; they stay session/source-scoped at low Glicko-2 effective-μ until corroborated by independent high-trust sources | as-built: `TrustClass_UserPromptContent` row [†] (anchor: trust is a self-tuning Glicko-2 value, not a class) |
 | 7 | Hand off frontier root ids to [FLOW-QUERY-001](#flow-query-001-compiled-cascade) | — |
 
 ---
@@ -516,24 +518,34 @@ flowchart TD
 | 7 | Atomic2020 + ConceptNet | 6 |
 | 8 | Tree-sitter code | 0 + 1 |
 | 9 | (reserved) | — |
-| 10 | Model codec | 0–9 |
+| 10 | Model weight-table ETL ingest | 0–9 |
 
 Each layer: own `IDecomposer` → [FLOW-XCUT-004](#flow-xcut-004-ingestrunner-orchestration) → domain bootstrap types/kinds at `InitializeAsync`.
 
 ---
 
-### FLOW-INGEST-MODEL-001: Model codec ingest
+### FLOW-INGEST-MODEL-001: Model weight-table streaming ETL ingest
 
 **Status:** PLANNED (ADR 0037, v0.1 milestone)
 
+**Anchor framing (per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truths 1–2, 6, 10):** Model ingest is a **streaming O(params) ETL of weight tables — never a recompute and never a "codec" round-trip.** Each weight tensor is a 2D lookup table flattened to a 1D float array; every cell is an *already-computed* relationship. Stream the tensor (oneTBB-parallel), emit significant cells as **Glicko-2 matchup observations** (weight = outcome; source-model trust = opponent strength); accumulate into consensus ratings; **store only the consensus, never the weight, never bit-perfect.** Must scale linearly to frontier models (Qwen3-480B, Llama4 Maverick, DeepSeek MoE, Flux). **Forbidden:** GEMM at ingest (`E·W·Wᵀ·Eᵀ` over vocab²), materializing a vocab² matchup space, or a flat top-k that discards most of the model.
+
 | Step | Action | Code |
 |------|--------|------|
-| 1 | Load GGUF / safetensors recipe | `TransformerModelDecomposer` (planned) |
-| 2 | Extract architecture template + dims | `engine/synthesis/src/recipe.cpp` (partial) |
-| 3 | Probe tensors → sparse attestations (lottery ticket) | DESIGN §VII |
-| 4 | Procrustes alignment → `PROJECTION` physicalities + residual | `engine/dynamics/src/procrustes.cpp` (not wired to ingest) |
-| 5 | Register model source + `TrustClass_AIModelProbe` | Bootstrap |
-| 6 | [FLOW-XCUT-004](#flow-xcut-004-ingestrunner-orchestration) | — |
+| 1 | Load GGUF / safetensors weight tables + recipe (architecture template + dims) | `engine/synthesis/src/recipe.cpp` (partial) |
+| 2 | Stream each weight tensor as a flat float array (oneTBB-parallel), O(params) | DESIGN §VII (planned) |
+| 3 | Emit significant cells as Glicko-2 matchup observations; accumulate to consensus rating | `engine/core/src/glicko2.c`; [FLOW-QUERY-002](#flow-query-002-glicko-2-period-update) |
+| 4 | Resolve cell axes to token entities — **direct for `embed_tokens` / `lm_head`; OPEN for interior `q/k/v/o/gate/up/down` `d×d` tensors** (see note) | OPEN per docs/SUBSTRATE-FOUNDATION.md |
+| 5 | Morph source frame onto S³ via Procrustes/Laplacian-eigenmaps → `PROJECTION` physicalities + residual | `engine/dynamics/src/procrustes.cpp` (not wired to ingest) |
+| 6 | Register model source; rate via Glicko-2 (source trust is a self-tuning Glicko-2 value, **not** a fixed class) | Bootstrap; see anchor note below |
+| 7 | [FLOW-XCUT-004](#flow-xcut-004-ingestrunner-orchestration) | — |
+
+**OPEN per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) (do not invent an answer):**
+- **Interior `d×d` tensor axis → token-entity resolution** (step 4). `embed_tokens` / `lm_head` are directly token-anchored. How `q/k/v/o/gate/up/down` cells resolve to token entities *without* re-running the GEMM (which is what blows up) is **unsolved — must be pinned with Anthony.**
+- The exact arena/kind assignment per interior tensor role.
+- The synthesis "pour facts into the mold" algorithm at frontier scale.
+
+> **Note on `TrustClass_AIModelProbe`:** the bootstrap SQL currently seeds named `trust_class/*` entities (see [FLOW-BOOT-001](#flow-boot-001-extension-install-bootstrap)). Per anchor truth 5, trust is a Glicko-2 value self-tuning from cross-source agreement, **not** a fixed tier/class ladder — these seeded entities are anchor-divergent priors, flagged below under [Anchor divergences](#anchor-divergences-substrate-foundationmd), not a settled design.
 
 ---
 
@@ -588,6 +600,8 @@ sequenceDiagram
 
 **Status:** PARTIAL — C++ modules tested; no CLI; `just synthesize` **BROKEN** (no `synthesize` in `Program.cs`).
 
+**Anchor framing (per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truths 6, 8):** the recipe is a **fillable mold** — synthesis pours substrate consensus facts into any chosen shape (dim, dense/MoE, layers, vocab, dtype). The export is "the facts you exerted, materialized into a chosen shape," **not** a copy or weight-average of any source model. Same machinery fills the source's own mold (round-trip) or any other (retarget). The **synthesis "pour facts into the mold" algorithm at frontier scale is OPEN per docs/SUBSTRATE-FOUNDATION.md** — do not assert it as settled.
+
 | Step | Action | Code |
 |------|--------|------|
 | 1 | Load recipe JSON (or extract at model ingest) | `recipe.cpp` |
@@ -635,7 +649,7 @@ Does **not** call `HashComposer`, `SubstrateCRUD`, or PostgreSQL.
 | Any DB write | All INGEST-* | — | FLOW-XCUT-003 (+002) |
 | Full source run | INGEST-* | — | FLOW-XCUT-004 (optional) |
 | Prompt → answer | PROMPT-001 | QUERY-001 | Context entity ids; no shared ingest/write doc |
-| Model → chat | MODEL-001 | SYNTH-001 | Recipe + attestations; SYNTH may skip re-ingest |
+| Model → chat | MODEL-001 | SYNTH-001 | Recipe + consensus-rated attestations; SYNTH may skip re-ingest |
 
 ---
 
@@ -774,7 +788,7 @@ Each row: ADR decision/requirement → flow ID → implementation or gap.
 | `TrustClass_StandardsDerived` | `…/StandardsDerived/v1` | L126; `UnicodeDecomposer.TrustClass` matches |
 | … T3–T10 trust classes | `substrate/trust_class/…` | L127–134 |
 | `TrustClass_UserPromptContent` | prompt-local claims | L133 — used by FLOW-INGEST-PROMPT-001 (planned) |
-| `TrustClass_AIModelProbe` | model codec | L131 — FLOW-INGEST-MODEL-001 (planned) |
+| `TrustClass_AIModelProbe` | model weight-table ETL ingest | L131 — FLOW-INGEST-MODEL-001 (planned); trust-class row is anchor-divergent (truth 5) |
 | Kind tiers T1..T11 | `substrate/kind_tier/T*_…/v1` | L150–173 |
 | `HAS_TRUST_CLASS` on SubstrateCanonical | bootstrap meta-edge | L228 area |
 | Decomposer assigns trust to its source | FLOW-INGEST-UNICODE-001 §A4 | `BootstrapIntentBuilder` → `StandardsDerived` |
@@ -798,6 +812,21 @@ Each row: ADR decision/requirement → flow ID → implementation or gap.
 3. Number steps so a single step never belongs to two top-level flows.
 4. Add a Mermaid diagram if the flow has ≥4 steps or async handoffs.
 5. Tag status and link the GitHub issue that closes the gap.
+
+---
+
+## Anchor divergences (SUBSTRATE-FOUNDATION.md)
+
+The ratified conceptual lens is [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md). The following are **as-built mechanical facts** in this repo that **diverge from that anchor on the conceptual core.** They are reported here so the catalog stays honest about what the code currently does, without presenting the divergence as ratified design. Each is a correction target for the substrate, not a flow to build out.
+
+| Divergence | As-built location | Anchor truth violated | Correct lens |
+|------------|-------------------|------------------------|--------------|
+| `TrustClass_*` ladder (10 named classes: SubstrateMandate, StandardsDerived, …, AdversarialUntrusted) | `10_bootstrap.sql.in` L166–175; ADR 0044 | Truth 5 — trust is a Glicko-2 value self-tuning from cross-source agreement, never a tier/fixed class | Source trust emerges as Glicko-2 effective-μ; drop the fixed ladder |
+| `kind_tier/T1..T11` + `HAS_KIND_VALUE_TIER` kind | `10_bootstrap.sql.in` L191–214, L233 | Truth 5 — "tier" is reserved exclusively for the Merkle stratum (T0 = Unicode codepoints) | Re-name; "tier" must mean only Merkle stratum |
+| "Model **codec** ingest" naming | FLOW-INGEST-MODEL-001 (corrected above), ADR 0037 | Truth 10 + 6 — "codec" implies round-trip/bit-perfect preservation, which is worthless | Streaming O(params) weight-table ETL → Glicko-2 matchup observations; store consensus, discard blob |
+| Interior `d×d` tensor → token resolution treated as a designed step | DESIGN §VII, ADR 0037 (referenced by MODEL-001 step 4) | OPEN question, not settled | Marked **OPEN per docs/SUBSTRATE-FOUNDATION.md** in MODEL-001; must be pinned with Anthony |
+
+**Note:** the geometry/physicality flows in this catalog (S³ coords, Hilbert, `PROJECTION` physicalities, Procrustes morph) are consistent with anchor truth 3 — geometry is the canonical shared embedding frame that *seeds candidates*; what pulls back is Glicko-2 effective-μ across typed arenas, **not** nearest-neighbor distance. The cascade flow (FLOW-QUERY-001) already states edge cost from Glicko-2 effective-μ, not raw distance — anchor-consistent.
 
 ---
 

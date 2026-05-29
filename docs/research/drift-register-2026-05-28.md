@@ -40,19 +40,19 @@ Ground truth anchor: ADRs through 0060; memory entries through 2026-05-28; lates
 **Stale references.**
 - `RULES.md:74-78` (R3) — Pass 3 "Probe-validated retention test (synthesize candidate sparse subgraph; verify behavior preserved on probe set)" → should be static-mathematical validation (spectral preservation / singular-value retention / matchup-distribution preservation between sparse + dense subgraphs).
 - `RULES.md:122-126` (R8) — "**The one exception:** probe-time forward-pass of a model being ingested (running a 70B transformer to extract attestations may need GPU). After extraction, the substrate is CPU-only. GPU is the probe driver, NOT a runtime requirement." → The exception is stale; no GPU at ingest under ADR 0056. R8 collapses to: no GPU, period.
-- `STANDARDS.md` Kind value tiers, T9 row: "Tensor-Calculation … single-probe trust; cluster across many models for higher confidence" → s/single-probe/single-model/.
+- `STANDARDS.md` Kind value tiers, T9 row: "Tensor-Calculation … single-probe trust; cluster across many models for higher confidence" → s/single-probe/single-model/. **Anchor flag (truth #5, docs/SUBSTRATE-FOUNDATION.md):** the word "tier" is reserved exclusively for the Merkle stratum (T0 = Unicode codepoints). A "Kind value tiers" table is itself a fixed-class ladder — corruption per truth #5; trust is a Glicko-2 value that self-tunes from cross-source agreement, never a tier or fixed class. This row needs more than an s/probe/model/ scrub; the tier framing itself is on the correction list. Surface with Anthony.
 - `GLOSSARY.md:483-485` — "Probe (in ingestion context)" entry — either delete or move to the Anti-vocabulary section as a forbidden historical pattern.
-- `GLOSSARY.md:147` — Trust class table row 7 "Single-model probe observations" → "Single-model static weight-tensor ETL observations".
+- `GLOSSARY.md:147` — Trust class table row 7 "Single-model probe observations" → "Single-model static weight-tensor ETL observations". **Anchor flag (truth #5):** a "Trust class table" with numbered rows is a fixed-class trust ladder — corruption per truth #5. Trust is a self-tuning Glicko-2 value, not a class/row. The probe→static-ETL scrub is correct but does not address the deeper drift that the trust-class ladder itself contradicts the anchor. Surface with Anthony.
 - `GLOSSARY.md:316-322` — Lottery-Ticket-Aware Sparsity entry pass (c) "probe-validated retention test" → static-mathematical validation.
 - `GLOSSARY.md:486-489` — "ModelDecomposer" / round-trip framing is fine post-amendment, but the "probe" word should be scrubbed everywhere it appears in per-decomposer ecosystem rows. ModelDecomposer Layer-10 row uses "behavioral attestations" — fine; check that "probe observations" isn't smuggled in.
 - `DESIGN.md` §VII Lottery-ticket-aware sparsity bullet "probe observations over prompts/tasks selected for the architecture" → remove or replace with the static-ETL framing.
 - `DESIGN.md` §VII "lottery-ticket sparse edges that survive per-tensor, per-row, and probe validation gates" → "and static-mathematical validation gates".
 - `ADR 0007` — full read pending, but per ADR 0056 the third pass needs the same reframing.
-- `ADR 0036:33` — trust class list "AI model-derived probe observations" → "AI-model static-ETL observations".
+- `ADR 0036:33` — trust class list "AI model-derived probe observations" → "AI-model static-ETL observations". (Same anchor flag as above: the "trust class list" is itself a fixed-class ladder contradicting truth #5; the probe scrub does not resolve that. Surface with Anthony.)
 - `ADR 0037:35` — "probe observations, architecture-specific attestation arenas" → drop "probe observations" or replace.
 - `ADR 0043` — body uses "probe observations" + "ProbeObservation" — replace.
-- `ADR 0044:60-61` Part B row 7 — "TrustClass_AIModelProbe" entity name + "TransformerModelDecomposer probe observations from a single model" → rename to `TrustClass_AIModelStaticETL` (or similar) + body update. **NOTE**: renaming the canonical name changes its BLAKE3, which changes the trust-class entity ID. That's a substrate-mandate change; needs explicit user authorization + a substrate version bump per ADR 0042. Alternative: keep the canonical name, change only the human-readable description + R-side wording. **Recommend** keeping the canonical name (avoid hash churn) + rewriting prose to drop the probe framing. Surface this tradeoff at PR time.
-- `ADR 0044:36` Part A T9 row "single-probe trust" → "single-model trust".
+- `ADR 0044:60-61` Part B row 7 — "TrustClass_AIModelProbe" entity name + "TransformerModelDecomposer probe observations from a single model". **Anchor flag (truth #5):** the entire `TrustClass_*` taxonomy is a fixed-class trust ladder — corruption per truth #5 ("trust is a Glicko-2 value, self-tuning from cross-source agreement — never a tier or fixed class. Any … TrustClass_* ladder … is corruption"). The drift here is NOT "probe vs static-ETL naming" and NOT "rename vs keep canonical hash" — it is that a hardcoded `TrustClass_*` entity ladder should not exist at all; source trust must emerge as a Glicko-2 value. Rewording probe→static-ETL inside a banned ladder leaves the contradiction in place. This is a substrate-conceptual change, not a hash-churn tradeoff. Surface with Anthony — do not auto-resolve by picking a new ladder label.
+- `ADR 0044:36` Part A T9 row "single-probe trust" → "single-model trust". (Anchor flag: if T9 lives in a "kind value tier" / trust-class table, the tier/class framing is itself corruption per truth #5 — see the STANDARDS and ADR 0044 Part B notes above.)
 - Issue #221 ("ADR — Architecture-family vocabulary extensions") and #222 (memory-bounded streaming for matchup computation) — bodies likely use probe framing; check + update.
 
 **Reconciliation.** One PR that:
@@ -61,7 +61,7 @@ Ground truth anchor: ADRs through 0060; memory entries through 2026-05-28; lates
 3. Updates DESIGN §VII (R12-protected — diff first).
 4. Updates STANDARDS T9 row (R12-protected — diff first).
 5. Files a small supersession note on ADR 0007 / 0036 / 0037 / 0043 / 0044 OR amends in place with explicit "Amended 2026-05-28: probe framing superseded by ADR 0056" headers (ADRs are not R12-protected, but amending in place is the project's standing pattern; see ADRs 0017 / 0023 / 0025 / 0027 / 0045 / 0047 / 0053 / 0056 for the convention).
-6. **Open question**: keep TrustClass_AIModelProbe canonical name or rename. Default = keep (no hash churn).
+6. **Anchor flag (truth #5)**: this PR must NOT silently rename or scrub `TrustClass_AIModelProbe` into another `TrustClass_*` label — the whole trust-class ladder contradicts truth #5 (trust is an emergent Glicko-2 value, never a fixed class/tier). The probe→static-ETL prose scrub is fine; the deeper trust-class drift is a substrate-conceptual question for Anthony, tracked under C8. Do not resolve it inside this scrub.
 
 ---
 
@@ -143,9 +143,9 @@ Ground truth anchor: ADRs through 0060; memory entries through 2026-05-28; lates
 
 ---
 
-## C8. ADR 0044 + GLOSSARY trust-class tier 7 name `TrustClass_AIModelProbe` — naming churn vs canonical-name stability
+## C8. ADR 0044 + GLOSSARY `TrustClass_AIModelProbe` — the trust-class ladder itself contradicts the anchor
 
-Captured under C2. Surfacing here so the per-concept PR is bounded: rename **or** keep the canonical name + scrub the human-readable prose. Default = keep canonical, scrub prose (avoid trust-class entity hash churn).
+**Anchor flag (truth #5, docs/SUBSTRATE-FOUNDATION.md).** This is NOT a "naming churn vs canonical-name stability" decision. Truth #5 states: trust is a Glicko-2 value, self-tuning from cross-source agreement — *never a tier or fixed class*; any `TrustClass_*` ladder is corruption; the word "tier" is reserved exclusively for the Merkle stratum (T0 = Unicode codepoints). The real drift is that a hardcoded `TrustClass_*` entity taxonomy (and the "kind value tier" / "trust class table" framing it sits in) should not exist; source trust must emerge as a Glicko-2 value, not be assigned by class. Picking between "rename to TrustClass_AIModelStaticETL" and "keep the canonical name" is choosing between two corrupt forms. This is a substrate-conceptual question for Anthony, not a PR-bounding tradeoff. Do not auto-resolve.
 
 ---
 
@@ -208,7 +208,7 @@ The cleanup epic #259 already opened with #260–#279 as its stories. The storie
 | 4 | C4 PGXS scrub | ADR 0024 + 0025 amend | Nothing |
 | 5 | C5 DESIGN §VI supersession notes | R12-protected — diff first | Nothing |
 | 6 | C2 probe → static-ETL scrub | R12 RULES + GLOSSARY + DESIGN + STANDARDS diffs, ADR amend batch | C8 |
-| 7 | C8 decide on TrustClass_AIModelProbe rename | Decision + scrub | Folded into C2 unless rename chosen |
+| 7 | C8 trust-class ladder contradicts anchor truth #5 | OPEN — surface with Anthony; do not rename or scrub a banned ladder into another banned ladder | — |
 | 8 | C3 custom-PG runtime cleanup | R12 OPERATIONS diff | Nothing |
 | 9 | C1 chunk-sequence retirement language scrub | R12 CLAUDE + CONTRIBUTING + DESIGN + README diffs + issue body edits | Nothing |
 | 10 | C9 verify issue #229 covers intent journal | Read + memory fix or new story | Nothing |

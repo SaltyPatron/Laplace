@@ -40,7 +40,7 @@ CREATE INDEX entities_first_observed ON entities USING btree (first_observed_by)
 
 ### `physicalities` — per-source, per-kind 4D representations
 
-One-to-many entity→physicality. Each row is one **lens** on an entity provided by one **source**: CONTENT (decomposition view), BUILDING_BLOCK (used-as-constituent view), or PROJECTION (source-embedding-space view). Holds all geometry + trajectory + per-source metadata. Physicalities are projection/access structures: they support fuzzy candidate discovery, alignment, visualization, and indexing. They are not the knowledge layer; semantic state lives in typed attestations.
+One-to-many entity→physicality. Each row is one **lens** on an entity provided by one **source**: CONTENT (decomposition view), BUILDING_BLOCK (used-as-constituent view), or PROJECTION (source-embedding-space view). Holds all geometry + trajectory + per-source metadata. The S³ glome these coords live on IS the canonical shared embedding frame every source is morphed into (Procrustes/Laplacian-eigenmaps/Gram-Schmidt onto the Unicode-anchored frame) — the cross-model/dim/vocab consensus moat, not a throwaway index (per docs/SUBSTRATE-FOUNDATION.md truth 3). The geometry carries meaning. What it does **not** do is decide retrieval by distance: it seeds candidates, and the dynamics over it are attestation-based (Glicko-2 effective-μ across typed arenas), not nearest-neighbor.
 
 ```sql
 CREATE TABLE physicalities (
@@ -164,7 +164,7 @@ raw input bytes
 
 **T0 perf-cache** holds codepoint id + substrate-canonical-CONTENT-physicality coord + Hilbert index + UCA order + flags for all 1,114,112 codepoints. Clients and ingestion workers compute atom identity and coordinates locally. T1+ entity math (id, physicality coords/trajectories, Hilbert indices) is computed in the C/C++ engine before INSERT and arrives pre-baked.
 
-**The 4D geometric layer is value-additive enrichment, not the engine**. Physicalities are Laplace's inspectable embedding-like projection/access layer: useful for fuzzy candidate discovery, source alignment, clustering, and visualization, but semantically separated from knowledge. The inference engine is graph A* through the typed attestation graph weighted by Glicko-2 effective-μ. Nearest-neighbor behavior is not spatial closeness; it is arena-conditioned attestation response: tug a query/context strand, then rank what pulls back and how hard under source trust, lineage, RD/volatility, context compatibility, conflict policy, and structural support. Geometric verticals (Hilbert range scan, physicality-coordinate lookups) can seed candidates; semantic decisions follow typed, rated attestations ordered by effective score and constrained by arena semantics.
+**The S³ geometric layer is the canonical shared embedding frame, not a throwaway index** (per docs/SUBSTRATE-FOUNDATION.md truth 3). Every source is morphed onto the same Unicode-anchored glome; that shared frame is the cross-model/dim/vocab consensus moat, and the geometry carries meaning — it is **not** "just an index," and physicalities are **not** "separated from knowledge." What the geometry does not do is decide retrieval by distance. The inference engine is graph A* through the typed attestation graph weighted by Glicko-2 effective-μ. Retrieval is NOT nearest-neighbor: geometry only *seeds candidates*; what pulls back and how hard is arena-conditioned attestation response — tug a query/context strand, then rank what pulls back under source trust, lineage, RD/volatility, context compatibility, conflict policy, and structural support. Geometric verticals (Hilbert range scan, physicality-coordinate lookups) narrow candidates; semantic decisions follow typed, rated attestations ordered by effective score and constrained by arena semantics.
 
 ---
 
@@ -202,7 +202,7 @@ Attestation kinds are substrate entities and may carry meta-attestations declari
 - observation update scope: which tuple slots decide whether an incoming observation updates the same attestation state or a separate state
 - conflict policy: which alternatives within that update scope are incompatible; absent for compatible multi-valued arenas
 - source trust policy: which source classes are authoritative, admissible, discounted, or prompt-local
-- effective-score inputs: rating, RD, volatility, source credibility for kind, trust class, context compatibility, and structural support
+- effective-score inputs: rating, RD, volatility, per-kind source credibility (a Glicko-2 value, self-tuning from cross-source agreement — NOT a fixed trust class/tier per docs/SUBSTRATE-FOUNDATION.md truth 5), context compatibility, and structural support
 
 Examples:
 
@@ -220,7 +220,7 @@ France HAS_CURRENT_CAPITAL Los Angeles
 
 These conflict in the same functional current-capital observation update scope under the same geopolitical/current-time context.
 
-Source trust classes seed priors before per-kind Glicko-2 dynamics refine credibility: foundational constants, standards-derived sources, curated academic resources, academically linked user-curated resources, structured corpora/treebanks, AI-model probe observations, and prompt-local/user content. Repetition inside a correlated source family is not counted as independent consensus.
+Source trust is a Glicko-2 value that self-tunes from cross-source agreement — **not** a fixed trust class/tier ladder (per docs/SUBSTRATE-FOUNDATION.md truth 5; "tier" is reserved for the Merkle stratum). A source may carry an initial Glicko-2 prior (e.g. Unicode/ISO constants, standards-derived and curated academic resources, structured corpora/treebanks, AI-model static-ETL observations per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md), prompt-local/user content), but that prior is just a starting rating with its own RD — it is adjudicated and overridden by cross-source agreement, never a hard credibility class. Repetition inside a correlated source family is not counted as independent consensus.
 
 Operationally: truths cluster across independent, high-trust, structurally adjacent sources; unsupported claims scatter or cluster only inside source-scoped low-trust families. Low-trust claims remain available for analysis as claims-about-sources without winning strict traversal or synthesis scopes.
 
@@ -715,29 +715,47 @@ Each layer adds explicit fidelity channels. AI model sources are late evidence s
 
 **Forbidden:** flat numeric thresholds.
 
-**Required:** multi-pass relative filter.
+**Required:** emergent sparsity, NOT a weight-magnitude filter (per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md) + [RULES.md R3](RULES.md)). A weight is a single Glicko-2 matchup outcome, never stored; significance emerges from cross-source consensus.
 
-```cpp
-// Pass 1: per-tensor relative top-k%
-// Pass 2: per-row top-k (for attention/MLP — preserves IO connectivity)
-// Pass 3: probe-validated retention test
-// Combined gate: weight is "significant" if it survives all three passes
+```text
+// Absent token-pair edge      → no matchup, no observation, exact zero (sparsity origin)
+// Real token-pair interaction → matchup observation → glicko2_update (small outcomes included)
+// Load-bearing vs noise       → emergent: effective-μ / RD / source-trust / cross-source clustering
+//                               (truths cluster → low RD; outliers scatter → high RD, discounted)
+// Ingest shape                → streaming O(params) ETL of weight tables (oneTBB-parallel); each
+//                               significant cell is emitted as a Glicko-2 matchup observation.
+//                               FORBIDDEN: GEMM at ingest (E·W·Wᵀ·Eᵀ bilinear over vocab²),
+//                               materializing a vocab² matchup space, or a flat top-k that
+//                               discards most of the model — that is the disease, not a tuning
+//                               knob (per docs/SUBSTRATE-FOUNDATION.md truth 1).
+// Token-pair resolution       → OPEN per docs/SUBSTRATE-FOUNDATION.md: how interior d×d tensor
+//                               cells (Q/K/V/O/gate/up/down) resolve to token entities WITHOUT
+//                               re-running the GEMM is unsolved and must be pinned with Anthony.
+//                               embed_tokens / lm_head are directly token-anchored (cheap, real).
+// Validation                  → static-mathematical retention test: sparse aggregated-attestation
+//                               subgraph preserves dense matchup-distribution / spectral structure
+//                               (NOT probe-validated; substrate never executes models at ingest)
+// FORBIDDEN                   → per-tensor / per-row top-k% by weight magnitude (conventional
+//                               lottery-ticket / NN pruning; "magnitude = importance" — rejected by ADR 0056)
 ```
 
 **Linguistic resources:** no filter; every entry at full fidelity.
 
-### Model-codec fidelity
+### Model ingestion fidelity
+
+> **⚠ Corrected 2026-05-28 (Anthony, authoritative — overrides the list below where they conflict):** A model's weights are NEVER stored and never bit-perfect — bit-perfect preservation only returns the file you already had (per docs/SUBSTRATE-FOUNDATION.md truth 6). Ingestion is a streaming O(params) ETL of weight tables: each significant cell is one Glicko-2 matchup *outcome* (weight = outcome; the source model's own trust = opponent strength), accumulated into a consensus rating; only the emergent consensus is stored. Synthesis regenerates fresh weights from that consensus per recipe (the recipe is a fillable mold). The embedding and `lm_head` are directly token-anchored (cheap, real). **How interior `d×d` tensor cells (`Q/K/V/O`, `gate/up/down`) resolve to token entities WITHOUT re-running the GEMM is OPEN per docs/SUBSTRATE-FOUNDATION.md — it is genuinely unsolved and must be pinned with Anthony; the prior "every interior tensor maps uniformly to token↔token attestations, no hidden-dim entities" claim asserted that OPEN question as settled and is NOT ratified.** The "probe observations" and per-cell tensor-calculation framing below is likewise superseded. See `docs/research/grounded-model-codec-foundation-2026-05-28.md`.
 
 For AI model sources, fidelity means `TransformerModelSource` captures the source model's load-bearing computation in substrate form:
 
 - recipe metadata from `config.json`, tokenizer files, and auxiliary architecture files
 - tokenizer/content entities and recipe attestations
 - anchor physicalities from the Procrustes/Laplacian/Gram-Schmidt pipeline
-- probe observations over prompts/tasks selected for the architecture
-- fixed-vocabulary tensor-calculation attestation kinds for transformer-family models (`EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`); per-position attribution is recipe content on the model recipe entity, NOT parameterized kind entities or routine per-attestation metadata. Other architecture families register their own fixed mechanical-role vocabularies through their `IArchitectureTemplate`.
-- lottery-ticket sparse edges that survive per-tensor, per-row, and probe validation gates
+- matchup observations emitted by streaming static weight-tensor ETL (per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)) — no model invocation, no probe set, no GEMM at ingest
+- the embedding and `lm_head` are directly token-anchored → GEOMETRY → `PROJECTION` / `ProjectionOutput` physicalities (`EMBEDS` / `OUTPUT_PROJECTS` are NOT attestation kinds)
+- candidate fixed-vocabulary mechanical-role kinds for transformer-family interior tensors (`Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`). **OPEN per docs/SUBSTRATE-FOUNDATION.md: the exact arena/kind assignment per interior tensor role — and how an interior `d×d` cell resolves to token entities at all without re-running the GEMM — is unsolved and must be pinned with Anthony. Do not treat this kind list, or "interior cells map uniformly to token↔token attestations," as ratified.** Per-position attribution is recipe content on the model recipe entity, NOT parameterized kind entities or routine per-attestation metadata. Other architecture families register their own mechanical-role vocabularies through their `IArchitectureTemplate`.
+- lottery-ticket sparse edges that survive per-tensor, per-row, and static-mathematical validation gates
 
-For a source-scoped round-trip, if ingestion is faithful and synthesis uses the source recipe/scope, missing source-model behavior is a codec bug or tuning failure, not an accepted architectural gap. The expected comparison is stock source model vs. native substrate traversal vs. synthesized export under fixed prompts and sampler settings.
+For a source-scoped round-trip, if ingestion is faithful and synthesis uses the source recipe/scope, missing source-model behavior is an ingest-or-synthesis bug or tuning failure, not an accepted architectural gap. The expected comparison is stock source model vs. native substrate traversal vs. synthesized export under fixed prompts and sampler settings.
 
 ---
 
@@ -800,8 +818,8 @@ These are explicit non-decisions. They will be made at execution time with the u
 - **Glicko-2 adaptation formula** for consensus calibration (vs. competitive matches)
 - **A\* heuristic h()** specific formula + admissibility analysis
 - **Effective mu formula** combining rating/RD/volatility/source-kind credibility/context compatibility
-- **Lottery-ticket criteria parameters** (per-tensor k%, per-row k, probe-set design)
-- **Per-architecture probe protocols** (Qwen-family text transformer first codec target; mamba/diffusion/CNN/vision/audio/code model families later)
+- **Lottery-ticket criteria parameters** (per-tensor k%, per-row k, static-mathematical retention criteria)
+- **Per-architecture static-ETL extraction parameters** (Qwen-family text transformer first ingest target; mamba/diffusion/CNN/vision/audio/code model families later)
 - **Feature-extractor dim assignments** for first synthesis (~1500 for Qwen3-1.5B)
 - **Specific modality decomposers** for vision/audio/video (text via UAX + code via tree-sitter are settled)
 

@@ -29,7 +29,8 @@ Closes #
 - [ ] Prompt/cascade work preserves ADR 0035 (prompt ingestion + prompt-local claim scoping + compiled cascade, no RBAR/recursive CTE/cursor/app-loop hot path)
 - [ ] Traversal mode/source scope/evidence traces make abstention, hallucination, and drift inspectable where relevant
 - [ ] Consensus/source work preserves ADR 0036 (arena semantics + source trust/source lineage, no raw repetition as truth)
-- [ ] Model-ingest/synthesis work preserves ADR 0037 (model ingest as codec; exact-zero sparse emission where unsupported)
+- [ ] Model-ingest/synthesis work preserves ADR 0037 (model ingest is a streaming O(params) ETL of weight tables — significant cells emitted as Glicko-2 matchup observations; never GEMM-at-ingest over vocab², never bit-perfect/round-trip preservation, never a flat top-k that discards the model; synthesis pours substrate facts into a chosen recipe mold, sparse-by-construction with exact zeros where no significant attestation exists — per docs/SUBSTRATE-FOUNDATION.md truths 1, 2, 6, 10)
+- [ ] Interior `d×d` tensor axis → token-entity resolution is OPEN per docs/SUBSTRATE-FOUNDATION.md — do not assert a resolution; flag and pin with Anthony
 
 ## Architectural impact
 

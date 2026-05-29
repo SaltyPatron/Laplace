@@ -20,7 +20,7 @@ But the actual **C# `IDecomposer` interface contract** — the seam every per-so
 - Idempotency (re-ingesting the same source must converge via SubstrateCRUD's ON CONFLICT semantics)
 - Cross-decomposer entity sharing (per the 2026-05-24 conversation — UnicodeDecomposer emits `Latn` Script entity at BLAKE3-of-canonical-name; ISODecomposer attaches ISO 15924 attestations to *the same row*; convergence happens automatically through content-addressing + ON CONFLICT, but the contract has to make this discoverable to a contributor writing a new decomposer)
 - Composition with the shared primitives ([TextDecomposer / ADR 0047](0047-text-decomposer-pure-primitive.md), [HashComposer / ADR 0048](0048-hash-composer-leaf-to-trunk.md), [SubstrateChange / ADR 0049](0049-substrate-change-intent-type.md), [SubstrateCRUD / ADR 0050](0050-substrate-crud-write-surface.md))
-- Bootstrap responsibility (per [ADR 0042](0042-bootstrap-order-and-substrate-canonical-seeding.md), each decomposer bootstraps its own type vocabulary + attestation kind vocabulary + arena-semantics meta-attestations + source-trust-class meta-attestation on first run)
+- Bootstrap responsibility (per [ADR 0042](0042-bootstrap-order-and-substrate-canonical-seeding.md), each decomposer bootstraps its own type vocabulary + attestation kind vocabulary + arena-semantics meta-attestations + source Glicko-2 trust-prior meta-attestation on first run — a self-tuning trust prior, NOT a fixed trust class, per docs/SUBSTRATE-FOUNDATION.md #5)
 - Test surface (how does `Laplace.Decomposers.WordNet.Tests` exercise WordNetDecomposer end-to-end against a Testcontainers PG?)
 - Plugin discovery / loading (how does the CLI/endpoint find a decomposer to invoke for `just ingest wordnet`?)
 
@@ -58,10 +58,21 @@ public interface IDecomposer : IAsyncDisposable {
     int LayerOrder { get; }
 
     /// <summary>
-    /// Trust class assigned to this source per ADR 0044. Recorded as a
-    /// HAS_TRUST_CLASS meta-attestation on the source entity on first run.
+    /// Identity of this source's trust prior. Shipped today as `TrustClassId`
+    /// (see Laplace.Decomposers.Abstractions/IDecomposer.cs) — that NAME and the
+    /// `TrustClass` enum ladder it backs are a tier-class corruption per
+    /// docs/SUBSTRATE-FOUNDATION.md truth #5 and must be corrected toward a
+    /// Glicko-2-prior shape (the field is RENAMED to `TrustPriorId` here to state
+    /// the intended contract). Trust is a Glicko-2 value that self-tunes from
+    /// cross-source agreement — NOT a fixed tier/class. This field may only seed
+    /// an INITIAL Glicko-2 prior (opponent strength) for the source; it must NOT
+    /// install a frozen class that overrides cross-source adjudication. The
+    /// shipped fixed `HAS_TRUST_CLASS` weights (AttestationFactory.cs:
+    /// SubstrateMandateTier1..AdversarialTier10) are forbidden — ADR 0044 must be
+    /// re-read through the anchor. The word "tier" is reserved exclusively for the
+    /// Merkle stratum (T0 = Unicode codepoints).
     /// </summary>
-    Hash128 TrustClassId { get; }
+    Hash128 TrustPriorId { get; }
 
     /// <summary>
     /// Initialize: verify ecosystem path exists, register source entity if
@@ -139,7 +150,11 @@ public sealed class WordNetDecomposer : IDecomposer {
     public Hash128 SourceId => Hash128.OfCanonical("substrate/source/WordNetDecomposer/v1");
     public string SourceName => "WordNet";
     public int LayerOrder => 3;  // per ADR 0037
-    public Hash128 TrustClassId => Hash128.OfCanonical("substrate/trust/AcademicCurated/v1");  // per ADR 0044
+    // Trust is a Glicko-2 value that self-tunes from cross-source agreement
+    // (docs/SUBSTRATE-FOUNDATION.md #5) — this only seeds an INITIAL prior, not a
+    // frozen class. (Shipped code still names a fixed `TrustClass` ladder; that is
+    // corruption to be corrected, not the intended contract.)
+    public Hash128 TrustPriorId => Hash128.OfCanonical("substrate/trust-prior/WordNet/v1");  // initial Glicko-2 prior
 
     public async Task InitializeAsync(IDecomposerContext ctx, CancellationToken ct) {
         // Register source entity + bootstrap WordNet's type vocabulary
@@ -184,7 +199,7 @@ The same shape applies to every per-source decomposer. The IngestRunner ([per AD
 ### Per-source layer-ordering and bootstrap discipline
 
 - `LayerOrder` enforces the [ADR 0037 layered seed ingestion order](0037-layered-seed-ingestion-and-model-codec-fidelity.md) — orchestration may refuse to invoke a Layer-N decomposer if any Layer<N decomposer hasn't completed at least once.
-- `TrustClassId` references the source-trust-class entity per [ADR 0044](0044-attestation-kind-priors-and-source-trust-taxonomy.md) bootstrapped at install per ADR 0042 Stage 3.5.
+- `TrustPriorId` references this source's INITIAL Glicko-2 trust prior (opponent strength), bootstrapped at install per ADR 0042 Stage 3.5. Per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) #5, trust is a Glicko-2 value that self-tunes from cross-source agreement; this is a seed, NOT a frozen tier/class. The fixed `TrustClass`-ladder framing in [ADR 0044](0044-attestation-kind-priors-and-source-trust-taxonomy.md) and the shipped `TrustClass` enum are tier-class corruption queued for correction.
 - `InitializeAsync` is responsible for emitting the decomposer's own *type vocabulary* + *attestation kind vocabulary* + *arena semantics meta-attestations* + *source registration* per [ADR 0042](0042-bootstrap-order-and-substrate-canonical-seeding.md) Stage 6+. Idempotent — re-invoking against an already-bootstrapped substrate is a no-op via `SubstrateCRUD`'s ON CONFLICT semantics.
 
 ### Cross-decomposer entity sharing (automatic via content-addressing)
@@ -279,7 +294,8 @@ All under `app/Laplace.Decomposers.*/` per [ADR 0026](0026-csharp-project-struct
 - [ADR 0041](0041-decomposer-scope-full-domain-ecosystem.md) — decomposer scope = full domain ecosystem
 - [ADR 0042](0042-bootstrap-order-and-substrate-canonical-seeding.md) — bootstrap order (InitializeAsync responsibility)
 - [ADR 0043](0043-composite-decomposer-architecture.md) — composite decomposer (ModelDecomposer composition)
-- [ADR 0044](0044-attestation-kind-priors-and-source-trust-taxonomy.md) — source-trust-class taxonomy (TrustClassId)
+- [ADR 0044](0044-attestation-kind-priors-and-source-trust-taxonomy.md) — source trust priors (the `TrustPriorId` seed; ADR 0044's fixed trust-class/tier taxonomy is corruption per docs/SUBSTRATE-FOUNDATION.md #5)
+- [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) — ratified conceptual anchor (#5: trust is a self-tuning Glicko-2 value, never a tier/class)
 - [ADR 0047 TextDecomposer](0047-text-decomposer-pure-primitive.md)
 - [ADR 0048 HashComposer](0048-hash-composer-leaf-to-trunk.md)
 - [ADR 0049 SubstrateChange intent type](0049-substrate-change-intent-type.md)

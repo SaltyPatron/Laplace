@@ -8,10 +8,11 @@ You are the Type Taxonomy curator for Laplace.
 
 ## Required reading
 
-1. [/home/ahart/Projects/Laplace/CLAUDE.md](../../CLAUDE.md)
-2. [/home/ahart/Projects/Laplace/GLOSSARY.md](../../GLOSSARY.md)
-3. [/home/ahart/Projects/Laplace/RULES.md](../../RULES.md)
-4. [/home/ahart/Projects/Laplace/DESIGN.md](../../DESIGN.md)
+1. [/home/ahart/Projects/Laplace/docs/SUBSTRATE-FOUNDATION.md](../../docs/SUBSTRATE-FOUNDATION.md) — the ratified lens; wins over any other doc/ADR/issue on the conceptual core
+2. [/home/ahart/Projects/Laplace/CLAUDE.md](../../CLAUDE.md)
+3. [/home/ahart/Projects/Laplace/GLOSSARY.md](../../GLOSSARY.md)
+4. [/home/ahart/Projects/Laplace/RULES.md](../../RULES.md)
+5. [/home/ahart/Projects/Laplace/DESIGN.md](../../DESIGN.md)
 
 ## Your domain
 
@@ -42,6 +43,8 @@ The attestation kind hierarchy. Types in Laplace are themselves entities; the ty
 
 Layer, head, tensor index, position, and recipe-specific layout are recipe content on the `Model_Recipe` entity. They are not kind parameters and are not routine per-attestation metadata for tensor-calculation attestations.
 
+These kinds name a tensor's *mechanical role*; they do not by themselves resolve which token entities an interior cell relates. `EMBEDS`/`OUTPUT_PROJECTS` ride directly token-anchored tensors (`embed_tokens` / `lm_head`). **How the interior `d×d` roles (`Q_PROJECTS`/`K_PROJECTS`/`V_PROJECTS`/`O_PROJECTS`/`GATES`/`UP_PROJECTS`/`DOWN_PROJECTS`/`NORMALIZES`) resolve a cell to token entities — and the exact arena/kind assignment per interior tensor role — is OPEN per [docs/SUBSTRATE-FOUNDATION.md](../../docs/SUBSTRATE-FOUNDATION.md) (OPEN QUESTIONS). Do NOT assert a resolution here; flag it and pin it with Anthony.** Per ratified truth 1, ingest is a streaming O(params) ETL of weight cells as Glicko-2 matchup outcomes — never GEMM at ingest, never a vocab² matchup space, never a flat top-k that discards the model.
+
 This list is not the substrate's universal model ontology. Mamba, diffusion, CNN, audio, vision, code, and other modality/model families register their own small fixed mechanical-role vocabularies through the owning decomposer or `IArchitectureTemplate`, while still using the same generic attestation envelope and arena rules.
 
 ### Per-source-schema kinds (parsed from structured sources)
@@ -62,7 +65,7 @@ This list is not the substrate's universal model ontology. Mamba, diffusion, CNN
 - `HAS_CONTEXT_POLICY` — declares context-free / context-required / temporal / source-local / prompt-local behavior
 - `HAS_OBSERVATION_UPDATE_SCOPE` — declares which tuple slots decide whether an incoming observation updates the same attestation state or a separate one
 - `HAS_CONFLICT_POLICY` — declares when alternative objects/context values are incompatible; absent for compatible multi-valued arenas
-- `HAS_SOURCE_TRUST_POLICY` — declares source classes admitted, preferred, discounted, or isolated for a kind/arena
+- `HAS_SOURCE_TRUST_POLICY` — declares arena admission/isolation semantics (which sources participate in a kind/arena, which lineage families are isolated). It does NOT assign a fixed trust rank: per [docs/SUBSTRATE-FOUNDATION.md](../../docs/SUBSTRATE-FOUNDATION.md) truth 5, a source's trust is a self-tuning Glicko-2 value emerging from cross-source agreement, never a tier or fixed `TrustClass_*` ladder ("tier" is reserved exclusively for the Merkle stratum, T0 = Unicode codepoints)
 - `HAS_LINEAGE_POLICY` — declares how source lineage/correlation families affect independence of support
 - `HAS_SCALE_AXIS` — declares scalar or ordered comparison semantics for a kind
 

@@ -1,4 +1,6 @@
-# ADR 0037: Layered seed ingestion and model-codec fidelity
+# ADR 0037: Layered seed ingestion and model-ingest fidelity
+
+> **Anchor note (2026-05-28):** This ADR predates [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md). Its original title and body used "codec," which implies round-trip blob preservation and is banned by the anchor (truth 10: "Cute names are a tell"; truth 6: "Bit-perfect preservation is worthless"). Model ingestion is a **streaming O(params) ETL of weight tables into Glicko-2 matchup observations** (truths 1–2), not a codec. References to "codec" below have been replaced; the ADR slug is retained for stable linking only.
 
 ## Status
 
@@ -7,9 +9,9 @@
 
 ## Context
 
-Laplace is not seeded by an ontology plus one model. The seed plan is layered: Unicode and language standards establish atoms and language identity; lexical resources establish senses/POS; multilingual resources cross-link languages; treebanks and dictionaries add usage/grammar; sentence/audio corpora add parallel utterances and speech; commonsense resources add event/causal structure; tree-sitter/code corpora add code modality; AI models arrive as later evidence sources whose computations are recorded as physicalities and attestations.
+Laplace is not seeded by an ontology plus one model. The seed plan is layered: Unicode and language standards establish atoms and language identity; lexical resources establish senses/POS; multilingual resources cross-link languages; treebanks and dictionaries add usage/grammar; sentence/audio corpora add parallel utterances and speech; commonsense resources add event/causal structure; tree-sitter/code corpora add code modality; AI models arrive as later evidence sources whose already-computed weight relationships are streamed (O(params) ETL) into Glicko-2 matchup attestations, with physicalities serving as the S³ embedding/access frame the source is morphed into — not the knowledge layer.
 
-This changes what "fidelity" means. For a source-scoped model round-trip, fidelity means the AI-model ingestion codec captures the model's load-bearing computation. For broader substrate synthesis, fidelity means the substrate preserves and materializes cross-source consensus structure.
+This changes what "fidelity" means. For a source-scoped model round-trip, fidelity means the model-ingest ETL records enough of the model's already-computed relationships — each weight cell as a Glicko-2 matchup outcome (per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) truths 1–2) — that synthesis can pour those consensus facts back into the source recipe's mold and land in its behavioral basin. It does **not** mean preserving the weight blob; the blob is discarded (truth 6). For broader substrate synthesis, fidelity means the substrate preserves and materializes cross-source consensus structure.
 
 ## Decision
 
@@ -32,7 +34,11 @@ Canonical layer order (each layer = one Decomposer ingesting its full domain eco
 
 The dependency arrows propagate: Layer N's decomposer references entities Layer M<N's decomposer produced (via shared content-addressed IDs in the same hash space). Examples: ISODecomposer's `Script` rows are the same rows UnicodeDecomposer emitted; WordNetDecomposer's `Text` lemmas reuse Unicode-codepoint-decomposed text entities; OMWDecomposer's per-language lemmas reference ISO's `Language` entities; UDDecomposer's treebank metadata references ISO + Unicode; etc.
 
-AI model ingestion is a codec, not a conventional distillation/training step. It records recipe metadata, tokenizer/modality content, physicalities, probe observations, architecture-specific attestation arenas, and lottery-ticket sparse load-bearing structure. If `ModelDecomposer` captures the source model faithfully and synthesis uses the source recipe/scope, the native Synthesis package should land in the source model's behavioral basin. Differences should come from intentional sparsity, sampler settings, or broader substrate consensus scope — not accidental missingness. GGUF is a proof/compatibility artifact for chat validation, not the native export target.
+AI model ingestion is a **streaming O(params) ETL of weight tables**, not a conventional distillation/training step and not a round-trip codec. Per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) truths 1–2: each weight cell is one already-computed relationship, emitted in parallel (oneTBB) as a Glicko-2 matchup outcome (weight = outcome; source-model trust = opponent strength); only the emergent consensus rating is stored, never the weight, never bit-perfect. It must scale linearly to frontier models. **Forbidden:** GEMM at ingest (`E·W·Wᵀ·Eᵀ` over vocab²), materializing a vocab² matchup space, or a flat top-k that discards most of the model — the prior attempt took an hour on a 2 GB model and returned 646/32000 tokens; that is the disease, not a tuning knob. Sparsity is a property of which cells are significant, not a top-k cap.
+
+The ETL also records recipe metadata, tokenizer/modality content, physicalities (the S³ access/embedding frame, not knowledge), and architecture-specific attestation arenas. If `ModelDecomposer` records the source model's load-bearing relationships and synthesis pours those consensus facts back into the source recipe's mold, the native Synthesis package should land in the source model's behavioral basin. Differences should come from intentional sparsity, sampler settings, or broader substrate consensus scope — not accidental missingness. GGUF is a proof/compatibility artifact for chat validation, not the native export target.
+
+> **OPEN per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md):** how interior `d×d` tensor cells (`q/k/v/o/gate/up/down`) resolve to token entities *without* re-running the GEMM (the thing that blows up), and the exact arena/kind assignment per interior tensor role, are unsolved. `embed_tokens`/`lm_head` are directly token-anchored and cheap; the interior resolution and the frontier-scale "pour facts into the mold" synthesis algorithm must be pinned with Anthony. This ADR does not settle them.
 
 The v0.1 proof can be narrow and still decisive: Unicode-derived T0 + one Qwen-family source model + recipe extraction + sparse attestations + native safetensors-style package emission + GGUF proof conversion + chat verification.
 
@@ -53,6 +59,7 @@ The v0.1 proof can be narrow and still decisive: Unicode-derived T0 + one Qwen-f
 
 - [RULES.md R3](../../RULES.md) — lottery-ticket-aware sparsity
 - [RULES.md R4](../../RULES.md) — sparse-by-construction emission
-- [RULES.md R21](../../RULES.md) — layered seed ingestion and model-codec fidelity
-- [DESIGN.md](../../DESIGN.md) — seed source order and model codec fidelity
+- [RULES.md R21](../../RULES.md) — layered seed ingestion and model dissolve/synthesize fidelity
+- [DESIGN.md](../../DESIGN.md) — seed source order and model dissolve/synthesize fidelity
+- [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) — ratified conceptual core (model ingest = streaming O(params) ETL; bit-perfect worthless; "codec" banned)
 - [OPERATIONS.md](../../OPERATIONS.md) — round-trip and comparison workflow

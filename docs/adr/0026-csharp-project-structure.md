@@ -6,7 +6,7 @@
 
 ## Context
 
-The C# app layer ([STANDARDS.md](../../STANDARDS.md), [RULES.md R6](../../RULES.md)) is *orchestration only*. All math, hashing, geometry, linalg, sparsity, and codec work lives in the C/C++ engine. C# loads the engine via P/Invoke, drives pipelines, hosts plugins, runs the migrations app, exposes protocol endpoints.
+The C# app layer ([STANDARDS.md](../../STANDARDS.md), [RULES.md R6](../../RULES.md)) is *orchestration only*. All math, hashing, geometry, linalg, sparsity, and model dissolve/synthesis work lives in the C/C++ engine. C# loads the engine via P/Invoke, drives pipelines, hosts plugins, runs the migrations app, exposes protocol endpoints.
 
 The original plan had a small set of C# projects:
 

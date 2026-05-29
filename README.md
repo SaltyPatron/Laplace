@@ -16,11 +16,11 @@ A content-addressable geometric-attestation substrate that replaces the conventi
 
 ## What this is
 
-Models, corpora, and linguistic resources ingest into a single PostgreSQL database via per-source plugins. Semantic content lives as **typed attestations** between **Unicode-anchored entities**. Entities may also carry per-source **physicalities**: 4D CONTENT / BUILDING_BLOCK / PROJECTION lenses used for fuzzy candidate discovery, indexing, alignment, and visualization. The S³ / 4-ball layer is an embedding-like access layer, not the knowledge layer. Inference is **compiled cascading-tier A\*** through the attestation DAG — CPU-native, no GEMM, no GPU at runtime, no context-window buffer, and no app-layer row-by-row graph walk. A prompt is ingested as substrate content, then a single SQL-call surface enters the C/C++ engine to traverse indexed, Glicko-2-rated strands.
+Models, corpora, and linguistic resources ingest into a single PostgreSQL database via per-source plugins. Semantic content lives as **typed attestations** between **Unicode-anchored entities**. Entities also carry per-source **physicalities**: 4D CONTENT / BUILDING_BLOCK / PROJECTION lenses on the S³ glome. The S³ glome IS the canonical shared embedding frame — every source is morphed onto the same Unicode-anchored geometry (Procrustes / Laplacian-eigenmaps / Gram-Schmidt), which is the cross-model/dim/vocab consensus moat. The geometry carries meaning; it is not "just an index." Geometry seeds candidates; what actually pulls back, and how hard, is decided by Glicko-2 effective-μ across typed arenas, not by spatial distance. Inference is **indexed A\*** through the attestation DAG — CPU-native, no GEMM, no GPU at runtime, no context-window buffer, and no app-layer row-by-row graph walk. A prompt is ingested as substrate content, then a single SQL-call surface enters the C/C++ engine to traverse indexed, Glicko-2-rated strands.
 
 Universal T0 is the language-agnostic ground: every digital Merkle DAG, whether ISO registry, WordNet synset, OMW bridge, Wiktionary entry, UD treebank, Tatoeba sentence, prompt, book, image, audio segment, code repository, or model recipe, decomposes down to the same Unicode codepoint atoms. That shared alphabet is how all sources enter one hash space instead of living in private modality silos.
 
-**Substrate Synthesis** emits any model from substrate state: any architecture, any dimensionality, any MoE config, any vocab; sparse-by-construction; consensus-enriched. Protocol-endpoint extensions (OpenAI-compat, ...) make the substrate the served model directly — dissolving llama.cpp / vLLM / TensorRT-LLM from the deployment stack.
+**Substrate Synthesis** pours substrate facts into a fillable mold: emit any model shape from substrate state — any architecture, any dimensionality, any MoE config, any vocab, any dtype; sparse-by-construction; consensus-enriched. The same machinery fills the source's own mold (round-trip) or any other (retarget). Protocol-endpoint extensions (OpenAI-compat, ...) make the substrate the served model directly — dissolving llama.cpp / vLLM / TensorRT-LLM from the deployment stack.
 
 ## Computational model
 
@@ -61,7 +61,7 @@ Tree-sitter / code corpora     → code syntax and structured-code entities
 AI models                      → recipes, physicalities, sparse behavioral attestations
 ```
 
-AI models arrive as evidence sources, not as sacred artifacts. A source-scoped round-trip proves the codec: ingest a model, record its load-bearing computation as substrate state, synthesize a complete native safetensors-style package from the source recipe, optionally convert that package to a GGUF proof artifact, and compare stock model / native substrate traversal / proof export behavior.
+AI models arrive as evidence sources, not as sacred artifacts. Semantic ingest of a model is the mandatory spine; the linguistic seed sources above are **optional enrichment** — independent ground truth for Glicko-2 to adjudicate against. Ingestion is a streaming O(params) ETL of the weight tables (never a GEMM recompute, never bit-perfect preservation — the blob is discarded, only the consensus of facts is kept). A source-scoped round-trip is a *behavioral* proof, not a preservation guarantee: ingest a model, record its load-bearing relationships as Glicko-2-rated substrate state, synthesize a complete native safetensors-style package by pouring those facts into the source recipe's mold, optionally convert that package to a GGUF proof artifact, and compare stock model / native substrate traversal / proof export behavior.
 
 ## What this replaces
 
@@ -185,7 +185,7 @@ just query "SELECT count(*) FROM entities;"  # query the substrate
 just synthesize recipes/qwen3-roundtrip.json # emit a model from substrate state
 just roundtrip /vault/models/qwen3-0.6b      # ingest model → synthesize → load in llama.cpp
 just verify                                  # determinism + FK + perf-cache checks
-just status                                  # current chunk + open blockers
+just status                                  # current milestone progress + open blockers
 ```
 
 See [OPERATIONS.md](OPERATIONS.md) for the full operational reference.

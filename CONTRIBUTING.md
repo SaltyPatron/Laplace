@@ -237,7 +237,7 @@ See [RULES.md](RULES.md). The headline rules:
 5. **DB as dumb columnar store; entity math in C/C++.**
 6. **Prompt is ingestion; cascade is compiled.** Prompt-local content is real structure, prompt claims stay scoped unless promoted and corroborated, and there are no context-window buffers, RBAR, cursors, recursive CTE hot paths, or app-layer traversal loops.
 7. **Arena/source trust semantics are mandatory.** Glicko-2 is not raw vote counting.
-8. **AI model ingest is a codec.** Source-scoped round-trip fidelity is a verification target, not optional behavior.
+8. **AI model ingest is a streaming O(params) ETL of weight tables, not a "codec."** Each significant weight cell is emitted as a Glicko-2 matchup observation; only the emergent consensus rating is stored — never the weight, never bit-perfect (per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truths 1, 2, 6). The word "codec" implies round-trip blob preservation and is banned (truth 10): bit-perfect preservation is worthless — it only returns the file you already had. The recipe is a fillable mold; synthesis pours substrate facts into any chosen shape. Filling the source's own mold (round-trip) is one verification mode of that machinery, but blob-faithful round-trip is NOT the goal. **OPEN per docs/SUBSTRATE-FOUNDATION.md:** how interior `d×d` tensor cells (q/k/v/o/gate/up/down) resolve to token entities without re-running the GEMM is unsolved — do not assert a confident answer.
 
 ---
 

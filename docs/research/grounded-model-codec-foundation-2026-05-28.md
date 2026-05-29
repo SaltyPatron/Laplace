@@ -1,4 +1,10 @@
-# Grounded substrate foundation — model codec + T0 (2026-05-28)
+# Grounded substrate foundation — model ingest + T0 (2026-05-28)
+
+> Note: the word "codec" in this file's path is a banned cute-name per
+> docs/SUBSTRATE-FOUNDATION.md truth 10 (it implies round-trip *preservation*, which is
+> forbidden — see the bit-perfect/Vampire points below). The mechanism is **semantic
+> ingest → consensus → fresh synthesis**, not a codec. Filename retained to avoid breaking
+> references; the framing is corrected.
 
 **Status:** Consolidated from Anthony's direct teaching across the 2026-05-28 session.
 Awaiting his ratification. NOT an edit to user-authored docs beyond what he authorized.
@@ -51,19 +57,28 @@ corrected below.
 - **Synthesis = regenerate fresh weights FROM the consensus per recipe.** Never a copy.
   Sparse-by-construction. The bytes never live in the substrate at any point.
 
-## Everything maps to tokens — embedding + interior tensors **[ratified 2026-05-28]**
+## Everything maps to tokens — embedding settled, interior tensors OPEN
 
 - An embedding is an address book of token positions = **geometry** → a per-`(entity,
   source=model)` **PROJECTION physicality** (Procrustes-aligned onto the entity's canonical
   frame); `lm_head` → ProjectionOutput. Candidate access. `EMBEDS`/`OUTPUT_PROJECTS` are
-  NOT attestation kinds.
-- **There are no hidden-dim or intermediate-dim entities.** The embedding grounds the
-  model's *entire* space in the token vocabulary, so **every interior tensor (`Q/K/V/O`,
-  `GATES/UP/DOWN`) maps to token↔token attestations of its mechanical kind — uniformly,
-  exactly like `Q_PROJECTS`.** Each token-pair is a Glicko-2 matchup observation; consensus
-  forms across sources. Nothing is "unsettled" (that was my hedge, not the invention) — it
-  all shakes out as attestations + Glicko-2 because it all maps to tokens. The family
-  table's "object axis = hidden_dim" was the error.
+  NOT attestation kinds. (`embed_tokens`/`lm_head` are directly token-anchored — cheap,
+  real — per docs/SUBSTRATE-FOUNDATION.md.)
+- **There are no separately-stored hidden-dim or intermediate-dim entities** — there is no
+  blob of opaque dimension rows.
+- **OPEN per docs/SUBSTRATE-FOUNDATION.md:** how the interior `d×d` tensors (`Q/K/V/O`,
+  `GATES/UP/DOWN`) resolve their cells to token entities *without* re-running the GEMM
+  (which is the vocab² blow-up the anchor forbids) is **genuinely unsolved** and must be
+  pinned with Anthony. The earlier claim here — that every interior tensor "uniformly"
+  maps to token↔token attestations exactly like the embedding and that "nothing is
+  unsettled" — overstated an OPEN question as settled. The anchor lists three open items:
+  (1) interior `d×d` tensor axis → token-entity resolution, (2) the exact arena/kind
+  assignment per interior tensor role, (3) the synthesis "pour facts into the mold"
+  algorithm at frontier scale. Do not substitute a confident answer; flag and pin.
+- What IS settled: the embedding grounds the model's token-anchored surface, and whatever
+  interior resolution is pinned, weight cells become Glicko-2 matchup observations (never
+  stored weights). The family table's "object axis = hidden_dim" was an error, but the
+  *resolution mechanism* that replaces it is OPEN, not decided.
 
 ## Cross-model / dim / vocab consensus = the moat **[ratified]**
 

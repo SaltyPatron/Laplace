@@ -47,7 +47,7 @@ Layer order from [ADR 0037](0037-layered-seed-ingestion-and-model-codec-fidelity
 - **Cross-decomposer dependencies are declared.** Issue / story acceptance for any decomposer lists which prior decomposers' entities it references. Implementation order = dependency order.
 - **Content-addressing compounds enrichment.** Same row, many decomposers piling on attestations. Querying any one row reveals the full substrate-wide knowledge cloud accumulated about that entity from every decomposer that touched it.
 - **Single-file decomposer code is a smell.** A `UnicodeDecomposer` that parses only `UnicodeData.txt` and ignores UCA / Unihan / emoji / segmentation auxiliary is broken; same for `WordNetDecomposer` that parses only `data.noun`, etc.
-- **Substrate trust regime depends on full-ecosystem ingest.** [Source Trust Class](../../GLOSSARY.md#source-trust-class) (per ADR 0036) presumes the substrate sees the WHOLE domain at the trust band it claims; partial ingest at the same trust class is dishonest about source coverage.
+- **Substrate trust regime depends on full-ecosystem ingest.** Source trust is a Glicko-2 value that self-tunes from cross-source agreement (per ADR 0036 and `docs/SUBSTRATE-FOUNDATION.md` truth 5) — never a fixed tier or trust class. Full-ecosystem ingest matters because it gives that self-tuning more independent observations to adjudicate against; partial ingest starves the consensus of corroborating signal and misrepresents how much of a source the substrate has actually seen.
 
 ## Alternatives considered
 

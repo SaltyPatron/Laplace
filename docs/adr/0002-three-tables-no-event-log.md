@@ -15,7 +15,7 @@ The substrate has **exactly three** tables: `entities`, `physicalities`, `attest
 - One row per `(subject, kind, object, source, context)` tuple in `attestations`.
 - Repeated assertions from the same source are no-ops (`INSERT ON CONFLICT DO NOTHING`).
 - Provenance is the `source_id` column, which references the source entity.
-- Glicko-2 dynamics live in arena-resolved observation updates, using source-kind credibility, trust class, lineage, context, current state, and structural support.
+- Glicko-2 dynamics live in arena-resolved observation updates. Effective support derives from the Glicko-2 value itself (rating μ, RD, volatility) adjusted by source-kind credibility, lineage, context compatibility, current state, and structural support. Trust is a self-tuning Glicko-2 value emerging from cross-source agreement — **not** a fixed tier or trust-class ladder (per [SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) truth 5; "tier" is reserved exclusively for the Merkle stratum, T0 = Unicode codepoints).
 
 ## Consequences
 

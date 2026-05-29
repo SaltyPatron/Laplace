@@ -4,7 +4,9 @@
 
 **Accepted (as a tracked research spike)** — 2026-05-21
 
-**Not a v0.1.0 commitment.** Scheduled for execution AFTER Chunk 8 lands (chattable Qwen3 round-trip milestone). Tracked here so the option isn't forgotten.
+**Not a v0.1.0 commitment.** Scheduled for execution after the v0.1 milestone lands (chattable model round-trip synthesis — same synthesis machinery filling the source's own mold). Tracked here so the option isn't forgotten.
+
+> Note (2026-05-28): the original "Chunk 8" scheduling reference predates [ADR 0060](0060-retire-chunk-sequence-v0.1-milestone-cadence.md), which retired the chunk sequence in favor of the v0.1 milestone. This spike still gates on v0.1.0 shipping; the chunk label is gone.
 
 ## Context
 
@@ -85,4 +87,4 @@ A failed spike (didn't hit the thresholds) gets documented here as an addendum: 
 - ADR 0024 (engine modularization) — the perf-cache lives in `liblaplace_core`
 - ADR 0029 (custom indexing strategy) — orthogonal axis; opclasses ride on stock storage, AM replaces storage
 - RULES.md R8 (no GPU at runtime) — the AM is CPU-native; consistent with the rest of the substrate
-- `engine/core/codepoint_table.{h,cpp}` — perf-cache implementation, which the AM would wrap
+- `engine/core/include/laplace/core/codepoint_table.h`, `engine/core/src/codepoint_table.c` — perf-cache implementation, which the AM would wrap

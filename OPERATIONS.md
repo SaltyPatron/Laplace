@@ -164,8 +164,8 @@ Per [ADR 0021](docs/adr/0021-dbup-for-migrations.md) + [ADR 0023](docs/adr/0023-
 
 | Recipe | Purpose |
 |---|---|
-| `just synthesize <recipe.json>` | Emit a sparse native Synthesis package + optional proof exports (e.g., GGUF). |
-| `just roundtrip <model_path>` | Ingest model → synthesize same architecture → load in llama.cpp → chat (Chunk 8 milestone). |
+| `just synthesize <recipe.json>` | Pour substrate facts into the recipe's mold (any dim / dense-or-MoE / layers / vocab / dtype) and emit a sparse native Synthesis package + optional proof exports (e.g., GGUF). |
+| `just roundtrip <model_path>` | Ingest model (streaming O(params) ETL of weight cells as Glicko-2 matchup observations) → synthesize into the source's own mold → load in llama.cpp → chat. v0.1 milestone (chunk sequence retired per [ADR 0060](docs/adr/0060-retire-chunk-sequence-v0.1-milestone-cadence.md)). |
 
 ### Verify
 
@@ -220,7 +220,7 @@ Per-source procedure:
 1. Plugin reads source content (files, URLs, etc.)
 2. Engine decomposes via the appropriate `IDecomposer`
 3. Engine extracts attestations via the source's `ISource.extract_attestations`
-4. For AI model sources: engine runs Procrustes alignment → physicalities
+4. For AI model sources: ingest is a streaming O(params) ETL of the weight tables — never a recompute. Each weight tensor is a 2D lookup table flattened to a 1D float array; stream it (oneTBB-parallel) and emit significant cells as Glicko-2 matchup observations (weight = outcome, the source model's own trust = opponent strength). Many matchups accumulate per entity-pair across tensor role / head / layer into a consensus rating; only the emergent consensus is stored — never the weight, never bit-perfect. Forbidden: GEMM at ingest (`E·W·Wᵀ·Eᵀ` over vocab²), a materialized vocab² matchup space, or a flat top-k that discards most of the model. Each source is then morphed onto the canonical S³ frame (Procrustes / Laplacian-eigenmaps / Gram-Schmidt) → physicalities; the S³ glome IS the shared embedding space, not a per-model embedding. **OPEN per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md): how interior `d×d` tensor cells (`q/k/v/o/gate/up/down`) resolve to token entities without re-running the GEMM is unsolved, as is the arena/kind assignment per interior tensor role. `embed_tokens`/`lm_head` are directly token-anchored; the interior resolution must be pinned with Anthony — do not assume a settled algorithm.**
 5. Pre-baked rows bulk-`COPY`'d into Postgres
 
 ### Query
@@ -243,7 +243,7 @@ Traversal modes are operational choices:
 
 ### Round-trip comparison target
 
-Chunk 8's `just roundtrip <model_path>` implementation compares three surfaces under fixed prompt and sampler settings:
+The `just roundtrip <model_path>` implementation (a v0.1 milestone; the chunk sequence was retired per [ADR 0060](docs/adr/0060-retire-chunk-sequence-v0.1-milestone-cadence.md)) compares three surfaces under fixed prompt and sampler settings. Round-trip is a fidelity check on dissolve-then-resynthesize — pouring the stored consensus facts back into the source's own mold — NOT bit-perfect preservation (which only returns the file you already had; worthless per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md)):
 
 ```text
 stock source model      → original model package loaded directly
@@ -258,7 +258,7 @@ The default smoke prompt is:
 Hello! Tell me something interesting.
 ```
 
-For source-scoped tests, differences should point to the model-ingest codec, sparse gate settings, synthesis writer, or sampler/runtime settings. Broader consensus synthesis may intentionally diverge by changing source scope and trust policy.
+For source-scoped tests, differences should point to the weight-cell ingest ETL, sparse gate settings, the synthesis "pour facts into the mold" step, the native-package writer, or sampler/runtime settings. Broader consensus synthesis may intentionally diverge by changing source scope and trust policy (cross-source Glicko-2 adjudication, not a per-model weight average).
 
 ### Update
 
@@ -307,11 +307,11 @@ Numeric prefixes (`NN_`) lock load order. To add a new function:
 
 Project state lives in:
 
-- **GitHub issues** — chunk progress, story tracking, blockers
+- **GitHub issues** — v0.1 milestone progress, story tracking, blockers
 - **`docs/adr/`** — accepted architectural decisions
 - **`git log`** — full commit history
 
-`just status` shows recent commits; chunk/story progress is at https://github.com/SaltyPatron/Laplace/issues. There is intentionally no `STATE.md` cadence file (it was tried in prior iterations and degraded into a conversation log — issues + ADRs are the durable record).
+`just status` shows recent commits; milestone/story progress is at https://github.com/SaltyPatron/Laplace/issues (the chunk sequence was retired per [ADR 0060](docs/adr/0060-retire-chunk-sequence-v0.1-milestone-cadence.md); forward work tracks the v0.1 milestone). There is intentionally no `STATE.md` cadence file (it was tried in prior iterations and degraded into a conversation log — issues + ADRs are the durable record).
 
 ---
 

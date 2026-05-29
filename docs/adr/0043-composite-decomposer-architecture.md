@@ -74,7 +74,9 @@ Cross-vendor consensus is built across the same mechanical-role attestation kind
 - `AudioModality` — mel-spectrogram / discrete-token codec; produces audio frame / sample entities.
 - `MultimodalModality` — composition for multimodal models (LLaVA, CLIP, etc.).
 
-The `ModelDecomposer` itself is a **choreographer**: detect container (T) → enumerate tensors → for each tensor, decode bytes per dtype → route to architecture decomposer for semantic interpretation → emit typed-tensor-calculation attestations between substrate entities supplied by the modality binder, sourced to the model entity.
+The `ModelDecomposer` itself is a **choreographer**: detect container (T) → enumerate tensors → for each tensor, decode bytes per dtype → route to architecture decomposer for semantic interpretation → stream significant cells as Glicko-2 matchup observations between substrate entities supplied by the modality binder, sourced to the model entity. This is a streaming O(params) ETL of the already-computed weight cells (per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) truth 1) — never a GEMM-at-ingest recompute, never a vocab² matchup space, never a flat top-k that discards most of the model. Weights are dissolved into rated relationship facts and the blob is discarded; bit-perfect preservation is a non-goal (truths 2 + 6).
+
+> **OPEN per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md):** for the directly token-anchored tensors (`embed_tokens` / `lm_head`) the cell → token-entity binding is real and cheap. For the **interior `d×d` tensors** (`q/k/v/o/gate/up/down`), *how each cell resolves to token entities without re-running the GEMM* is unsolved — to be pinned with Anthony. The choreography above describes container/dtype/role routing (settled plumbing); it does **not** settle interior cell → token resolution. The "supplies substrate entities to bind tensor calculations against" responsibility of `ModalityBinder` is therefore OPEN for interior tensors, not a closed mechanism. Do not read this ADR as asserting an answer there.
 
 ### Generalization to other domains
 
@@ -115,5 +117,7 @@ For ConceptNet (which has sub-source provenance per assertion), the sub-source p
 - [ADR 0011](0011-polymorphic-plugin-architecture.md) — `IDecomposer` interface
 - [ADR 0041](0041-decomposer-scope-full-domain-ecosystem.md) — Decomposer scope = full domain ecosystem (the top-level principle)
 - [ADR 0037](0037-layered-seed-ingestion-and-model-codec-fidelity.md) — layered decomposer order
+- [ADR 0056](0056-weight-tensor-etl-as-arena-matchup-observation.md) — weight-tensor ETL as streaming arena-matchup observation (the ingest mechanism this composite routes into)
+- [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) — ratified conceptual core (streaming O(params) ETL; no GEMM-at-ingest; no bit-perfect goal; interior d×d cell → token resolution OPEN)
 - [ADR 0040](0040-multi-modal-entity-types-universal-t0.md) — type + kind vocabulary
 - [GLOSSARY.md](../../GLOSSARY.md) — "Decomposer", "Per-decomposer ecosystems", "TransformerModelDecomposer" (to be rewritten as ModelDecomposer<T>)

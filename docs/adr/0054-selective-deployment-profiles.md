@@ -56,7 +56,7 @@ set_property(CACHE LAPLACE_DEPLOYMENT_PROFILE PROPERTY STRINGS
 
 ### Cascade behavior per profile
 
-- **EMBEDDED**: Cascade walks T0 codepoint relationships derivable from perfcache (script / block / general_category co-membership; UCA-collation neighborhood; Hilbert-locality). No T≥1 entities, no DB-stored attestations. Degraded but functional for character-level inference (input method engines, smart-completion at the codepoint tier, language identification, etc.). The substrate becomes a substrate-light: classification + recognition tasks that fit at T0.
+- **EMBEDDED**: The perfcache carries the T0 codepoint entities plus the typed attestations baked into it at compile time (script / block / general_category membership, UCA-collation, Hilbert-locality). Geometry (Hilbert-locality, script/block co-membership) only *seeds candidates*; what the cascade actually pulls back is still decided by Glicko-2 effective-μ over the perfcache-resident attestations — not by spatial nearness (per docs/SUBSTRATE-FOUNDATION.md truths 3–4; retrieval is NOT nearest-neighbor). What EMBEDDED lacks is the *live DB-stored attestation graph and any T≥1 entities*, so the cascade is bounded to whatever facts the perfcache embeds at T0. Degraded but functional for character-level inference (input method engines, smart-completion at the codepoint stratum, language identification, etc.) where the embedded T0 attestation set suffices.
 - **READ_ONLY_SERVER**: Cascade walks the full substrate (T0 from perfcache, T≥1 from PG indexes + DB-stored attestations) but cannot ingest new content. Useful for serving substrate at scale where ingest happens elsewhere.
 - **FULL_SERVER**: Everything. Ingest + read + synthesize.
 

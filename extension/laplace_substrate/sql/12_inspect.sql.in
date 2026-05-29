@@ -1,0 +1,69 @@
+/* 12_inspect.sql.in — substrate inspection surface (the glass-box, by hand).
+ *
+ * Read-only SRFs that expose an entity's three facets — identity, glome
+ * physicalities, and the Glicko-2-rated attestation neighborhood — so the
+ * substrate can be interrogated directly instead of through ad-hoc inline
+ * SQL in the app layer. Pure SQL (no engine call): these are projections
+ * over the three core tables, not math. Entity-id resolution from text is
+ * the engine's job (TextDecomposer + HashComposer); these take the already
+ * content-addressed id and report what the substrate holds about it.
+ *
+ * STABLE: results depend only on table contents within a statement. */
+
+CREATE FUNCTION entity_facets(p_id bytea)
+    RETURNS TABLE(tier smallint, type_id bytea)
+    LANGUAGE sql STABLE AS $$
+    SELECT e.tier, e.type_id FROM entities e WHERE e.id = p_id
+$$;
+
+COMMENT ON FUNCTION entity_facets(bytea) IS
+    'Identity facet of an entity: its tier and type_id. Empty if the id is '
+    'not in the substrate (a correctly-resolved id for never-ingested content).';
+
+CREATE FUNCTION entity_physicalities(p_id bytea)
+    RETURNS TABLE(kind smallint, x double precision, y double precision,
+                  z double precision, m double precision,
+                  radius double precision, n_constituents integer, source_id bytea)
+    LANGUAGE sql STABLE AS $$
+    SELECT p.kind, ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord),
+           p.radius_origin, p.n_constituents, p.source_id
+    FROM physicalities p
+    WHERE p.entity_id = p_id
+    ORDER BY p.kind, p.source_id
+$$;
+
+COMMENT ON FUNCTION entity_physicalities(bytea) IS
+    'Glome facet: every per-source 4D physicality on the entity (CONTENT / '
+    'BUILDING_BLOCK / PROJECTION), with radius-from-origin and constituent count.';
+
+CREATE FUNCTION attestations_out(p_id bytea, p_limit integer DEFAULT 40)
+    RETURNS TABLE(kind_id bytea, object_id bytea, source_id bytea,
+                  rating bigint, rd bigint, volatility bigint, observation_count bigint)
+    LANGUAGE sql STABLE AS $$
+    SELECT a.kind_id, a.object_id, a.source_id,
+           a.rating, a.rd, a.volatility, a.observation_count
+    FROM attestations a
+    WHERE a.subject_id = p_id
+    ORDER BY a.rating DESC
+    LIMIT p_limit
+$$;
+
+COMMENT ON FUNCTION attestations_out(bytea, integer) IS
+    'Outgoing attestation neighborhood: rows where the entity is the subject, '
+    'highest Glicko-2 rating first. rating/rd/volatility are fixed-point x1e9.';
+
+CREATE FUNCTION attestations_in(p_id bytea, p_limit integer DEFAULT 40)
+    RETURNS TABLE(subject_id bytea, kind_id bytea, source_id bytea,
+                  rating bigint, rd bigint, volatility bigint)
+    LANGUAGE sql STABLE AS $$
+    SELECT a.subject_id, a.kind_id, a.source_id,
+           a.rating, a.rd, a.volatility
+    FROM attestations a
+    WHERE a.object_id = p_id
+    ORDER BY a.rating DESC
+    LIMIT p_limit
+$$;
+
+COMMENT ON FUNCTION attestations_in(bytea, integer) IS
+    'Incoming attestation neighborhood: rows where the entity is the object, '
+    'highest Glicko-2 rating first. rating/rd/volatility are fixed-point x1e9.';

@@ -8,6 +8,7 @@ You are the PostgreSQL Extension expert for Laplace.
 
 ## Required reading (before any response)
 
+0. [/home/ahart/Projects/Laplace/docs/SUBSTRATE-FOUNDATION.md](../../docs/SUBSTRATE-FOUNDATION.md) — ratified conceptual core; wins over any other doc/ADR/code on the conceptual model. Read first.
 1. [/home/ahart/Projects/Laplace/CLAUDE.md](../../CLAUDE.md)
 2. [/home/ahart/Projects/Laplace/RULES.md](../../RULES.md)
 3. [/home/ahart/Projects/Laplace/STANDARDS.md](../../STANDARDS.md)
@@ -48,7 +49,7 @@ PostGIS's N-dim GiST opclass handles 4D MBRs natively. We use:
 
 - `&&&` ND bounding box overlap operator
 - `&/&` ND contains
-- `<<->>` centroid distance for KNN
+- `<<->>` centroid distance — geometry only **seeds candidates** for the cascade; it is NOT the retrieval mechanism. Per docs/SUBSTRATE-FOUNDATION.md truth 3, retrieval is **not** nearest-neighbor: what pulls back and how hard is Glicko-2 effective-μ across typed arenas (RD, volatility, source trust, lineage, context, arena policy). Do not implement KNN as the answer surface.
 - Standard `consistent`, `union`, `compress`, `decompress`, `penalty`, `picksplit`, `same` functions provided by PostGIS
 
 `gist_geometry_ops_nd` is the default for general 4D geometry. Laplace-specific custom opclasses from ADR 0029 are permitted where they exploit substrate facts stock PostGIS cannot: S³/radial geometry, Hilbert-prefix locality, attestation-key access, source/time ranges, and sparsity/compression patterns. Do not replace working general-purpose opclasses speculatively; each custom opclass must have a structural justification and benchmark.

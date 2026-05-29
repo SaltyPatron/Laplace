@@ -8,7 +8,7 @@
 
 Across the engine ([ADR 0024](0024-engine-modularization.md)), PG extensions ([ADR 0025](0025-pg-extension-modularization.md)), and C# app layer ([ADR 0026](0026-csharp-project-structure.md)), each layer is meant to do exactly one kind of work:
 
-- C/C++ engine does **math, hashing, geometry, linalg, sparsity, codecs**
+- C/C++ engine does **math, hashing, geometry, linalg, sparsity, container-format read/write** (note: "codec" framing is banned per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) truth #10 — it implies round-trip preservation, which is worthless per truth #6; ingest dissolves to semantic facts and discards the blob, synthesis pours facts into a mold)
 - PG extensions do **PG-binding glue** (PG_FUNCTION_INFO_V1 wrappers, opclass dispatch, schema DDL)
 - C# app does **orchestration** (pipelines, plugin host, protocol adapters, DB connections, CLI)
 - SQL migrations do **declarative DDL only** (CREATE EXTENSION, GRANT, ALTER DEFAULT PRIVILEGES)
@@ -25,7 +25,7 @@ Codify a per-layer **may-do / must-not-do** matrix as a project-wide invariant. 
 
 | Layer | MAY do | MUST NOT do |
 |---|---|---|
-| **C/C++ engine** (`engine/{core,dynamics,synthesis}/`) | All math, linalg, hashing, geometry, sparsity, codec, SIMD, fixed-point, file-format read/write | Pipeline orchestration, plugin loading, network I/O, DB connection management |
+| **C/C++ engine** (`engine/{core,dynamics,synthesis}/`) | All math, linalg, hashing, geometry, sparsity, SIMD, fixed-point, container/file-format read/write (NOT "codec" — round-trip preservation is banned per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) truths #6, #10) | Pipeline orchestration, plugin loading, network I/O, DB connection management |
 | **PG extension (C wrappers)** (`extension/{laplace_geom,laplace_substrate}/src/`) | Datum↔engine-struct marshalling, PG_TRY/PG_CATCH wrapping engine calls, opclass support functions (consistent/union/penalty/picksplit/etc.), schema DDL via `.sql` files | Re-implementing engine math, non-trivial PL/pgSQL business logic, control flow that isn't dispatching to engine |
 | **C# orchestration** (`app/*.csproj`) | Pipeline scheduling, plugin host, protocol endpoint adapters, DB connection (Npgsql), CLI, recipe parsing, source plugin host, network I/O | Math beyond trivial accounting (counts, predicates, comparisons); reimplementing engine functions for "convenience"; any hot-path numerical code |
 | **SQL / DbUp migrations** (`db/migrations/`) | Idempotent DDL; role grants; `CREATE EXTENSION` orchestration (direct, since `laplace_admin` is `SUPERUSER` per [ADR 0045](0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md)); `ALTER DEFAULT PRIVILEGES` | Business logic; procedural transforms; anything non-declarative; substrate schema definition (per [ADR 0023](0023-extension-owns-schema-dbup-orchestrates.md), schema lives in extension upgrade scripts) |

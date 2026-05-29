@@ -26,7 +26,7 @@ Implemented as **one** script: `scripts/bootstrap-laplace-runner.sh`. Idempotent
 
 ### Layer 1 — CI workflow (runs on every push; idempotent; agent-driven)
 - Build engine + extension + app
-- Apply versioned migrations (dbmate up)
+- Apply versioned migrations (DbUp — see ADR 0021)
 - Install / upgrade extension into PG (bounded sudo for `make install`)
 - Run tests
 - Ingest sources (when per-chunk work warrants)
@@ -36,7 +36,7 @@ The runner has bounded NOPASSWD sudo for `make install*` only.
 
 ### Layer 2 — Local dev (Justfile recipes)
 - Mirror Layer 1 ops for local execution
-- `just db-setup`, `just db-reset`, `just migrate`, `just ingest`, ...
+- `just db-up`, `just db-reset`, `just db-nuke`, `just ingest`, ...
 
 Same idempotent logic; same migrations; same tools.
 

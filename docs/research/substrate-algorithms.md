@@ -81,11 +81,11 @@ with the axioms below. The object combines features of several known structures 
 
 **Axiom A4 (Glicko-2 triple).** $\pi(a) = (\mu, \phi, \sigma_{g2})$ is a Glicko-2 state: rating, rating deviation, volatility [Glickman 2013]. Stored as int64 fixed-point at scale $10^9$ per STANDARDS.md. Unlike conventional Glicko (per-player), $\pi$ is **per-attestation**: each typed claim has its own observation-rating dynamics. The semantics of "a game" is replaced by "an observation update" — see §5 ACG.
 
-**Axiom A5 (source-trust mapping).** $\rho: \Sigma \times K \to \mathbb{R}$ assigns per-source, per-kind credibility (ADR 0044 source-trust classes 1–10). This is analogous to source-reliability scores in truth-discovery [Li et al. 2016, Yin et al. 2008] and to copying-aware reliability [Dong/Berti-Equille/Srivastava 2009], but kind-conditioned: a source can be highly credible for one kind (e.g. WordNet for IS_A) and weak for another (e.g. WordNet for cardinal numbers).
+**Axiom A5 (source-trust mapping).** $\rho: \Sigma \times K \to \mathbb{R}$ assigns per-source, per-kind credibility. Per docs/SUBSTRATE-FOUNDATION.md truth 5, $\rho$ is a **self-tuning Glicko-2-derived value emergent from cross-source agreement — never a fixed tier or trust class.** (Any "source-trust class 1–10 / TrustClass ladder" framing — including the form in older ADR 0044 prose — is corruption per the anchor and is being corrected away; the word "tier" is reserved exclusively for the Merkle stratum.) This is analogous to source-reliability scores in truth-discovery [Li et al. 2016, Yin et al. 2008] and to copying-aware reliability [Dong/Berti-Equille/Srivastava 2009], but kind-conditioned and continuously learned: a source can be highly credible for one kind (e.g. WordNet for IS_A) and weak for another (e.g. WordNet for cardinal numbers), with $\rho$ moving as evidence settles (§5 ACG).
 
 **Axiom A6 (context layer).** $\mathcal{C} \subseteq E$ is a designated subset of entities used to scope attestations. Contexts are themselves content-addressed. They function as the unit over which the sheaf-of-evidence (§6 SCD) restricts.
 
-**Axiom A7 (projection layer).** $\Phi: E \to (\mathrm{Geom}_{4D} \times \mathrm{Traj} \times \mathrm{Proj})$ assigns each entity per-source physicalities: 4D geometry (PostGIS standard `geometry` with Z+M, extended per ADR 0001/0025/0029), a child-reference trajectory, and projection state. **Physicalities are an access/index lens, not a knowledge layer.** Semantic responses come from $A$, not from $\Phi$ (RULES.md).
+**Axiom A7 (projection layer).** $\Phi: E \to (\mathrm{Geom}_{4D} \times \mathrm{Traj} \times \mathrm{Proj})$ assigns each entity per-source physicalities: 4D geometry (PostGIS standard `geometry` with Z+M, extended per ADR 0001/0025/0029), a child-reference trajectory, and projection state. Per docs/SUBSTRATE-FOUNDATION.md truth 3, the **S³ glome IS the canonical shared embedding frame** every source is morphed into (the cross-model/dim/vocab consensus moat) — the geometry carries meaning; it is not "just an index" and physicalities are not a non-knowledge layer. What it does *not* do is decide answers by distance: geometry *seeds candidates*, and the dynamics that pull back are attestation-based (Glicko-2 effective-μ across typed arenas via $A$), **not nearest-neighbor**.
 
 **Key contrasts** (used in every family's *Novelty delta*):
 
@@ -258,7 +258,7 @@ What *is* new in ARI:
 
 - ADR 0035 (compiled cascade is the only hot-path traversal surface).
 - ADR 0036 (arena policy; observation-update vs raw vote).
-- ADR 0044 (kind-value tiers T1–T11 and source-trust classes 1–10; user-prompt content is kind-tier T11 "Probationary / User" and source-trust Class 9 "User Prompt / User Content").
+- ADR 0044 (attestation-kind priors and source-trust semantics). NOTE: the anchor (docs/SUBSTRATE-FOUNDATION.md truth 5) forbids fixed "kind-value tiers T1–T11 / source-trust classes 1–10 / TrustClass ladders" — trust is a self-tuning Glicko-2 value, and "tier" is reserved for the Merkle stratum. Prompt-local content is handled by the **scope** filter ($A(\cdot, \mathrm{scope})$), not by a probationary trust class.
 - STANDARDS.md (int64 fixed-point ratings; no floats in hot path).
 - RULES.md R19/R20 (prompt-local content vs claim distinction).
 
@@ -656,10 +656,10 @@ $$
 Then the **source-credibility coupling**:
 
 $$
-\rho'(\sigma_{obs}, k_a) \;=\; \mathrm{clip}\!\Big[\,\rho(\sigma_{obs}, k_a) + \eta_k \cdot L(\sigma_{obs}, A_{-a}) \cdot (\mu' - \bar\mu),\; \rho_{\min}(\text{class}), \rho_{\max}(\text{class})\Big]
+\rho'(\sigma_{obs}, k_a) \;=\; \rho(\sigma_{obs}, k_a) + \eta_k \cdot L(\sigma_{obs}, A_{-a}) \cdot (\mu' - \bar\mu)
 $$
 
-where $\eta_k$ is a per-kind learning rate, $L$ is lineage-independence (\u00a71), and the clip respects the ADR 0044 source-trust-class envelope (a Class 9 "User Prompt" source cannot escape the Class 9 effective-μ multiplier band). This is the "the substrate learns who is reliable from the evidence the same evidence is settling" loop \u2014 dual to the truth-discovery iteration of [Yin/Han/Yu 2008] and [Pasternack & Roth 2010 *Knowing what to believe*], but as a Bayesian-online single-pass update rather than a batch fixed-point iteration.
+where $\eta_k$ is a per-kind learning rate and $L$ is lineage-independence (\u00a71). $\rho$ is itself a self-tuning Glicko-2-derived credibility (its own RD/volatility govern how fast it moves), **not a value clamped into a fixed trust-class envelope** — per docs/SUBSTRATE-FOUNDATION.md truth 5, any "Class 9 effective-μ multiplier band / TrustClass ladder" framing is corruption; trust emerges from cross-source agreement and is bounded only by its own rating dynamics, not by a tier assignment. (Prompt-local content is restrained by the **scope** filter, \u00a71, not by a probationary class.) This is the "the substrate learns who is reliable from the evidence the same evidence is settling" loop \u2014 dual to the truth-discovery iteration of [Yin/Han/Yu 2008] and [Pasternack & Roth 2010 *Knowing what to believe*], but as a Bayesian-online single-pass update rather than a batch fixed-point iteration.
 
 #### Algorithm sketch
 
@@ -671,8 +671,9 @@ acg_update(\u03c0(a), \u03c1(\u03c3_obs,k_a), observation):
   s, W \u2190 score_from_observation(r, c_obs, c_a, k_a)
   (\u03bc', \u03c6', \u03c3_g2') \u2190 glicko2_step(\u03c0(a), bar_mu, bar_phi, s)
   L \u2190 lineage_independence(\u03c3_obs, A_minus_a)
-  \u03c1' \u2190 clip(\u03c1 + \u03b7_k \u00b7 L \u00b7 (\u03bc' - bar_mu),
-              \u03c1_min(trust_class), \u03c1_max(trust_class))
+  \u03c1' \u2190 \u03c1 + \u03b7_k \u00b7 L \u00b7 (\u03bc' - bar_mu)
+              # \u03c1 is self-tuning Glicko-2 credibility; NO fixed trust-class clamp
+              # (anchor truth 5: trust is never a tier/TrustClass envelope)
   return (\u03c0', \u03c1')
 ```
 
@@ -701,14 +702,14 @@ What *is* new in ACG:
 
 1. **Per-attestation Glicko-2 indexed by typed edges of a content-addressed evidence DAG.** Glicko, Glicko-2, Elo, TrueSkill, TrueSkill2 rate *players*; truth-discovery rates *(source, value)* pairs. ACG rates *(subject, kind, object, source, context)* tuples \u2014 a typed-edge object that does not exist in any rating-system or truth-discovery framework.
 2. **Arena-typed virtual opponent.** The "match" is observation-vs-current-effective-answer, scored by kind-policy compatibility, not player-vs-player.
-3. **Source-credibility coupling is online, lineage-shrunk, and trust-class clamped.** Truth-discovery couples source and claim trust iteratively to a batch fixed point; ACG does it online with explicit lineage shrinkage and ADR 0044 trust-class envelopes, making coordinated low-trust adversaries provably bounded by the envelope.
+3. **Source-credibility coupling is online and lineage-shrunk.** Truth-discovery couples source and claim trust iteratively to a batch fixed point; ACG does it online with explicit lineage shrinkage. Per docs/SUBSTRATE-FOUNDATION.md truth 5, credibility is a self-tuning Glicko-2-derived value, **not a trust-class envelope** — bounding coordinated low-trust adversaries is the role of $\rho$'s own rating dynamics + lineage shrinkage + cross-source disagreement, not of a fixed tier band (whose adversary-bound is therefore an OPEN question, see Open problems).
 4. **Observation update scope is a first-class kind property.** Some kinds update globally; others stay scoped to source / session / prompt. No prior system encodes this at the rating-update level (RULES.md R19/R20, ADR 0036).
 5. **SQL-side custom aggregate.** ACG is intentionally the *only* math that crosses the DB boundary, exploiting Postgres' aggregate machinery for parallel-safe combine and a single, auditable update surface.
 
 #### Substrate invariants relied on
 
 - ADR 0036 arena policy (compatibility, cardinality, conflict, observation update scope, structural support).
-- ADR 0044 trust-class envelopes for $\rho$ clipping.
+- ADR 0044 attestation-kind priors / source-trust semantics — used for the *kind* policy hooks only. NOTE (anchor truth 5): no trust-class envelope clips $\rho$; trust is a self-tuning Glicko-2 value.
 - RULES.md R6 (only Glicko update runs SQL-side; the aggregate is the surface).
 - STANDARDS.md (int64 fixed-point at scale $10^9$; deterministic across machines).
 - ADR 0035 (the cascade reads ACG state; it does not embed ACG steps in the hot path).
@@ -716,7 +717,7 @@ What *is* new in ACG:
 #### Open problems
 
 1. **Existence/uniqueness of the coupled attractor.** Given a finite, sealed evidence stream, does $(\pi, \rho)$ converge? Truth-discovery convergence proofs exist for batch iteration [Pasternack & Roth 2010]; ACG's online dynamics need a Lyapunov argument.
-2. **Adversarial robustness bound.** Quantify the worst-case shift in $\mu^*$ for $o^*$ achievable by an attacker constrained to trust class $T_j$. Likely $O(\eta_k \cdot (\rho_{\max}(T_j) - \rho_{\min}(T_j)))$ per attestation, but a real bound is open.
+2. **Adversarial robustness bound.** Quantify the worst-case shift in $\mu^*$ for $o^*$ achievable by an adversarial source. Because trust is a self-tuning Glicko-2 value with no fixed trust-class envelope (anchor truth 5), the bound must come from $\rho$ rating dynamics + lineage shrinkage $L$ + cross-source disagreement, not from a tier band — deriving a real bound under that regime is **OPEN per docs/SUBSTRATE-FOUNDATION.md**.
 3. **Choice of $\eta_k$.** Per-kind learning rate; cross-validation against held-out high-trust observations is the obvious estimator, but circularity with $\rho$ is a concern.
 4. **Lineage shrinkage $L$ operationalization.** Requires a measurable definition; potentially MDS $\Delta\mathrm{SDL}$ on source contribution.
 5. **Through-time smoothing.** A batch recomputation in the spirit of TrueSkill Through Time / Whole-History Rating would help when arena cohorts shift; cost, schedule, and reconciliation with online state are open.
@@ -724,7 +725,7 @@ What *is* new in ACG:
 
 #### Publication framing
 
-One-sentence pitch: *ACG is the first per-typed-edge Bayesian online rating system, coupling Glicko-2 dynamics on attestations to lineage-shrunk, trust-class-clamped source credibility under arena policy.*
+One-sentence pitch: *ACG is the first per-typed-edge Bayesian online rating system, coupling Glicko-2 dynamics on attestations to lineage-shrunk, self-tuning source credibility (no fixed trust class) under arena policy.*
 
 - Workshop: ICML Workshop on Uncertainty & Robustness; NeurIPS Workshop on Bayesian Deep Learning.
 - Conference: AAAI, UAI (uncertain reasoning), SIGMOD (online aggregation angle).
@@ -799,7 +800,7 @@ _Stub._
 _Stub:_ distinguishes content (occurrence/order/composition) from claim; explicit promotion calculus.
 
 #### Substrate invariants relied on
-_Stub:_ ADR 0035 + R19/R20 (prompt-local scoping), ADR 0044 T11 trust class.
+_Stub:_ ADR 0035 + R19/R20 (prompt-local **scoping** — the mechanism that keeps prompt content from being promoted to broader-arena truth; NOT a "T11 trust class," which would violate anchor truth 5). ADR 0044 kind priors.
 
 #### Open problems
 _Stub:_ promotion thresholds; cross-session leakage tests; adversarial prompt-injection bounds.
@@ -885,13 +886,15 @@ _Stub._
 ### §10 DSS — Deterministic Substrate Synthesis
 
 #### Object
-_Stub:_ deterministic map from $(\mathcal{S}, \mathrm{recipe})$ to a sparse tensor package, with exact-zero structural sparsity where $M \le \tau_{\mathrm{lt}}$.
+_Stub:_ deterministic map from $(\mathcal{S}, \mathrm{recipe})$ to a sparse tensor package. Per docs/SUBSTRATE-FOUNDATION.md truth 6 the **recipe is a fillable mold** — synthesis *pours substrate facts into a chosen shape* (dim, dense/MoE, layers, vocab, dtype). Same machinery fills the source's own mold or any other; this is NOT a codec / round-trip preservation (truth 10) and NOT a weight-average (truth 8). Exact-zero structural sparsity where no significant attestation exists ($M \le \tau_{\mathrm{lt}}$).
 
 #### Inputs / state / outputs
 _Stub._
 
 #### Update rule or query equation
-_Stub:_ $W_{ij} = \Psi(M(e_i, k_{ij}, e_j))$ if $M > \tau_{\mathrm{lt}}(i,j)$ else $0$.
+_Stub._ For **directly token-anchored** tensors (`embed_tokens`, `lm_head`) the cell $W_{ij}$ corresponds to an attestation between token entities $e_i, e_j$, so $W_{ij} = \Psi(M(e_i, k_{ij}, e_j))$ if $M > \tau_{\mathrm{lt}}(i,j)$ else $0$ is well-posed.
+
+For **interior `d×d` tensors** (`q/k/v/o/gate/up/down`) the resolution of a cell's axes back to token entities — and therefore the form of the materialization map — is **OPEN per docs/SUBSTRATE-FOUNDATION.md** (the headline open question: how interior axes resolve to token entities *without* re-running the GEMM that blows up). Do NOT treat the token-anchored formula above as covering the interior case; the exact arena/kind assignment per interior tensor role and the frontier-scale "pour facts into the mold" algorithm are likewise OPEN. Must be pinned with Anthony.
 
 #### Algorithm sketch
 _Stub._
@@ -903,10 +906,10 @@ _Stub._
 _Stub:_ compilation, not training; reproducible from state; sparse by construction.
 
 #### Substrate invariants relied on
-_Stub:_ ADR 0037 (codec); lottery-ticket-aware sparsity (RULES.md R3); STANDARDS.md (fixed-point ratings, float64 coords).
+_Stub:_ ADR 0037 (model-ingest-and-synthesis; the "codec" label is banned per anchor truth 10 — synthesis is *pour facts into a chosen mold*, not round-trip preservation); lottery-ticket-aware sparsity (RULES.md R3); STANDARDS.md (fixed-point ratings, float64 coords).
 
 #### Open problems
-_Stub:_ recipe expressiveness; faithfulness metrics vs source model; quantization interaction; GGUF proof export edge cases.
+_Stub:_ recipe (= fillable mold, anchor truth 6) expressiveness; **behavioral** fidelity metrics for re-synthesized output (NOT bit-perfect/round-trip — bit-perfect is worthless per anchor truth 6); quantization interaction; GGUF proof export edge cases. The frontier-scale "pour facts into the mold" synthesis algorithm is itself **OPEN per docs/SUBSTRATE-FOUNDATION.md**.
 
 #### Publication framing
 _Stub._

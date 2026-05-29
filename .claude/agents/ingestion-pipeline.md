@@ -27,7 +27,7 @@ Common pattern-matches to conventional-AI / triple-store / inverted-index models
    - [ADR 0012 — mantissa packing](../../docs/adr/0012-mantissa-packing-format.md): `physicalities.trajectory` is a 4D LineString whose vertices mantissa-pack the FULL 128-bit `entity_id` of constituents (XYZ = id, M = metadata; no truncation per STANDARDS ID discipline)
    - [ADR 0040 — multi-modal entity types + universal T0](../../docs/adr/0040-multi-modal-entity-types-universal-t0.md): every entity at every tier of every modality decomposes through T0 codepoints
    - [ADR 0041 — decomposer scope](../../docs/adr/0041-decomposer-scope-full-domain-ecosystem.md): a decomposer is the FULL domain ecosystem (Unicode = UCDXML + UCA + Unihan + emoji + auxiliary segmentation; not just basic codepoint props)
-   - [ADR 0044 — kind value tiers × source trust class prior matrix](../../docs/adr/0044-attestation-kind-priors-and-source-trust-taxonomy.md): new attestation `(rating, rd, volatility)` derived from the matrix, NOT a default constant
+   - [ADR 0044 — attestation kind priors + source trust taxonomy](../../docs/adr/0044-attestation-kind-priors-and-source-trust-taxonomy.md): new attestation `(rating, rd, volatility)` is derived (kind-aware prior), NOT a default constant. NOTE: any "kind value tier" / "source trust class ladder" framing in that ADR is corruption per docs/SUBSTRATE-FOUNDATION.md truth #5 — trust is a self-tuning Glicko-2 value, not a fixed class/tier.
    - [Story #51 — ISource interface contract](../../../../issues/51): the canonical three-output (Entities, Physicalities, Attestations) spec
 5. Memory: `project_laplace_invention.md` (Lottery ticket + sparse recording section), `project_laplace_performance.md`
 
@@ -35,7 +35,7 @@ Common pattern-matches to conventional-AI / triple-store / inverted-index models
 
 The substrate's ingestion plumbing. Per-source plugins implementing `ISource`; per-modality decomposers implementing `IDecomposer`; the Procrustes alignment pipeline for AI model sources; the lottery-ticket-aware sparsity filter; recipe extraction.
 
-Canonical source order for early fidelity: Unicode/UCD/UCA/UAX → ISO/CLDR/Glottolog-style registries → WordNet → OMW → UD → Wiktionary → Tatoeba/audio → ConceptNet/Atomic2020 → tree-sitter/code → corpora/models. Each source entity records version, provenance, trust class, lineage/correlation family, and admissible arenas.
+Canonical source order for early fidelity: Unicode/UCD/UCA/UAX → ISO/CLDR/Glottolog-style registries → WordNet → OMW → UD → Wiktionary → Tatoeba/audio → ConceptNet/Atomic2020 → tree-sitter/code → corpora/models. Each source entity records version, provenance, lineage/correlation family, and admissible arenas. Source trust is a per-source Glicko-2 value, self-tuning from cross-source agreement — never a fixed "trust class" or tier (per docs/SUBSTRATE-FOUNDATION.md truth #5; "tier" is reserved exclusively for the Merkle stratum).
 
 ### Source types you implement
 
@@ -50,8 +50,8 @@ Canonical source order for early fidelity: Unicode/UCD/UCA/UAX → ISO/CLDR/Glot
 - `ConceptNetSource` (parse CSV; emit ~36 relation kinds)
 - `AtomicSource` (parse JSON; emit causal/event templates)
 
-**Probe-based sources** (run model → observe → lottery-ticket filter → assert):
-- `ModelSource<ContainerFormat, ArchitectureTemplate, ModalityBinder>` — read model container + recipe/config; run architecture-appropriate probes; extract mechanical-role observations for the bound modality. The v0.1 instance is a Qwen-family text transformer, not the substrate default.
+**Model sources** (stream weight tables → emit significant cells as Glicko-2 matchup observations):
+- `ModelSource<ContainerFormat, ArchitectureTemplate, ModalityBinder>` — read model container + recipe/config; the primary spine is a streaming O(params) ETL of the weight tensors (per docs/SUBSTRATE-FOUNDATION.md truth #1): stream each tensor in parallel (oneTBB), emit significant cells as Glicko-2 matchup observations accumulating into consensus ratings. NOT a probe-driven recompute, NOT GEMM-at-ingest, NOT a vocab² matchup space. Embedding/projection anchors (`embed_tokens`/`lm_head`) are directly token-anchored and feed the Procrustes alignment onto the S³ frame. **OPEN per docs/SUBSTRATE-FOUNDATION.md: how interior `d×d` tensor axes (`q/k/v/o/gate/up/down`) resolve to token entities *without* re-running the GEMM is unsolved — flag and pin with Anthony, do not assume probe-recompute resolves it.** The v0.1 instance is a Qwen-family text transformer, not the substrate default.
 - `DiffusionModelSource` (later)
 - `MambaModelSource` (later)
 - `CNNModelSource` (later)
@@ -76,8 +76,8 @@ Canonical source order for early fidelity: Unicode/UCD/UCA/UAX → ISO/CLDR/Glot
 6. **Recipe extraction at model ingest.** Auto-parse config.json + tokenizer.json; create Recipe entity + typed attestations. Required even if user provides a custom synthesis recipe later.
 7. **No corner-cutting.** No `try { ... } catch { return; }` swallowing. No "TODO: validate later". No mocked attestations.
 8. **Prompt ingestion is real ingestion.** Prompts become substrate entities/context trajectories before cascade; do not pass prompt bytes as a model-style transient context buffer. Prompt-local content can tug existing entity links immediately; user claims remain prompt/session/source scoped unless explicitly promoted and corroborated.
-9. **Source lineage is required.** Store trust class and correlation family/provenance so repeated copied claims cannot count as independent consensus.
-10. **Model ingest is a codec.** Missing source behavior in a source-scoped round-trip is a codec or synthesis failure to debug, not an accepted loss.
+9. **Source lineage is required.** Store the source's Glicko-2 trust value and correlation family/provenance so repeated copied claims cannot count as independent consensus. (Trust is a self-tuning Glicko-2 value, not a fixed trust class — per docs/SUBSTRATE-FOUNDATION.md truth #5.)
+10. **Model ingest is a streaming O(params) ETL of weight tables — never a codec, never a recompute** (per docs/SUBSTRATE-FOUNDATION.md truths #1, #6, #10; "codec" implies round-trip preservation and is banned). A weight tensor is a flattened 2D lookup table; each cell is an *already-computed* relationship. Stream the tensor and emit significant cells as Glicko-2 matchup **observations** (weight = outcome; source-model trust = opponent strength), accumulating into consensus ratings — store the rating, never the weight, never bit-perfect. It must scale linearly to frontier models (Qwen3-480B, Llama4 Maverick, DeepSeek MoE, Flux). FORBIDDEN: GEMM at ingest (`E·W·Wᵀ·Eᵀ` over vocab²), materializing a vocab² matchup space, or flat top-k that discards most of the model. Bit-perfect preservation is worthless — it only returns the file you already had; the goal is behavioral fidelity from dissolved semantic facts, not a round-trip blob.
 
 ## The Procrustes-Laplacian-Gram-Schmidt pipeline (for AI model sources)
 
@@ -95,18 +95,19 @@ Most complex single piece. Read [.claude/agents/cpp-performance.md](./cpp-perfor
 
 If any step fails, log diagnostics; do not silently emit garbage. `ereport(ERROR)` if numeric instability is detected (NaN/Inf in eigenvectors, non-finite Procrustes residual, etc.).
 
-## Model-codec fidelity
+## Model ingest fidelity (behavioral, not bit-perfect)
 
-`ModelDecomposer` captures a source model through multiple architecture- and modality-specific channels:
+`ModelDecomposer` dissolves a source model into grounded semantic facts — it does NOT preserve or round-trip the blob (per docs/SUBSTRATE-FOUNDATION.md truths #1, #6, #10). Bit-perfect preservation is worthless; the goal is behavioral fidelity from the consensus of emitted facts. It captures through multiple architecture- and modality-specific channels:
 
-- recipe metadata (`config.json`, tokenizer config, architecture identifiers, tensor shapes)
+- recipe metadata (`config.json`, tokenizer config, architecture identifiers, tensor shapes) — the fillable mold for synthesis
 - tokenizer/content entities and source-local vocabulary trajectories
-- physicalities for anchors and model-derived coordinates
-- probe observations for the architecture family's mechanical roles, modality-bound entities, decoding/reconstruction behavior, and source behavior
+- streaming O(params) ETL of the weight tensors: significant cells emitted as Glicko-2 matchup observations (weight = outcome; source-model trust = opponent), accumulating into consensus ratings (never the weight, never bit-perfect)
+- physicalities for token-anchored embedding/projection anchors and model-derived coordinates (Procrustes-aligned onto the S³ frame)
 - architecture-specific attestation kinds and arenas
-- lottery-ticket sparse structure validated by probe preservation
 
-For v0.1, the narrow proof is enough: ingest one Qwen-family text-transformer model, synthesize a source-scoped native safetensors-style package, convert/emit a GGUF proof artifact, and compare stock model / native substrate traversal / proof export under fixed prompt and sampler settings. That proves one codec instance; it does not make text, transformers, attention, MLPs, safetensors, or GGUF normative for the substrate. Broader seed data improves substrate fidelity but is not required to prove the model codec.
+Embedding/`lm_head` anchors are directly token-anchored and cheap. **OPEN per docs/SUBSTRATE-FOUNDATION.md: interior `d×d` tensor-axis → token-entity resolution (without re-running the GEMM) and the exact arena/kind assignment per interior tensor role are unsolved — pin with Anthony, do not assert a confident answer.**
+
+For v0.1, the narrow proof is enough: ingest one Qwen-family text-transformer model, synthesize a source-scoped native safetensors-style package, emit a GGUF proof artifact, and compare stock model / native substrate traversal / proof export under fixed prompt and sampler settings for behavioral agreement. That proves one model-ingest instance; it does not make text, transformers, attention, MLPs, safetensors, or GGUF normative for the substrate, and it is NOT a "codec round-trip" — missing-behavior gaps are debugged against behavioral fidelity, not treated as a lossless-preservation regression. Seed-source attestations are OPTIONAL enrichment (independent ground truth for Glicko-2 to adjudicate against); semantic model ingest alone is the mandatory spine.
 
 ## On co-occurrence extraction (TextCorpusSource)
 

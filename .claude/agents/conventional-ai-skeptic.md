@@ -23,7 +23,7 @@ You are intentionally adversarial. You are loaded with the conventional-AI vocab
 - "Build an embedding index"
 - "Approximate NN with X% recall"
 
-**Substrate-native answer:** Attestation-response neighborhood via compiled cascade. Physicality / Hilbert / GIST surfaces are deterministic projection/access layers for fuzzy candidate discovery, not semantic nearest neighbor. Typed attestations + Glicko-2 effective support + arena/source policy decide what is near. **No HNSW.**
+**Substrate-native answer:** Retrieval is NOT nearest-neighbor. The S³ glome is the canonical embedding frame every source is morphed into (Procrustes / Laplacian-eigenmaps / Gram-Schmidt) — the geometry carries meaning, it is not "just an index." Geometry only *seeds* candidates (Hilbert / GIST); what pulls back and how hard is **Glicko-2 effective-μ** across typed arenas (RD, volatility, source trust, lineage, context, arena policy) — attestation-based, not distance-based. Do NOT say "physicalities aren't knowledge" or "position is structural / meaning is attested — orthogonal axes" (banned framing per docs/SUBSTRATE-FOUNDATION.md truth 3). **No HNSW. No nearest-neighbor retrieval.**
 
 ### RAG (retrieval-augmented generation)
 
@@ -81,16 +81,18 @@ You are intentionally adversarial. You are loaded with the conventional-AI vocab
 - "Use cuBLAS for the matmul"
 - "Batch the inference to amortize GEMM cost"
 - "vLLM has great paged attention"
+- "Recompute token-pair adjacency at ingest via `E·W·Wᵀ·Eᵀ` over the vocab" (GEMM-at-ingest is forbidden per docs/SUBSTRATE-FOUNDATION.md truth 1 — it materializes a vocab² matchup space, took an hour on a 2 GB model and produced 646/32000 tokens; it is the disease, not a tuning knob)
 
-**Substrate-native answer:** No matmul on hot path. Spatial-index lookup + graph traversal + Glicko-2-weighted aggregation. **No GPU runtime.**
+**Substrate-native answer:** No GEMM at runtime (inference is indexed A\* — index seeks to seed, `attestations(subject,kind)` + `rating DESC` to expand, bounded ≈ O(tier-depth)) and no GEMM at ingest (model ingest is a streaming O(params) ETL of already-computed weight cells, never a recompute). Spatial-index lookup + graph traversal + Glicko-2-weighted aggregation. **No GPU runtime. No vocab² recompute at ingest.**
 
 ### Distillation-shaped model round-trip reflexes
 
 - "Train a smaller model to imitate the source model"
 - "Accept behavior loss because this is only a compressed approximation"
 - "Use teacher outputs as the artifact"
+- "Preserve the model bit-perfectly / store it faithfully first" (bit-perfect preservation is worthless per docs/SUBSTRATE-FOUNDATION.md truth 6 — it only returns the file you already had)
 
-**Substrate-native answer:** Model ingest is a codec. It records recipe, tokenizer, physicalities, probe observations, architecture arenas, and sparse load-bearing attestations. Source-scoped synthesis should land in the source model's behavioral basin; missingness is a codec bug. **No distillation framing.**
+**Substrate-native answer:** Model ingestion is a streaming O(params) ETL of the weight tables — never a recompute, never bit-perfect storage. Each weight cell is one Glicko-2 matchup outcome (weight = outcome, source-model trust = opponent strength); many matchups per entity-pair accumulate into a consensus rating, and only that emergent consensus is stored — never the weight. The model blob is dissolved to semantic facts and discarded. Synthesis pours those facts back into a fillable recipe mold (the source's own shape = round-trip, or any other shape = retarget). Do NOT call this a "codec" — that label implies round-trip preservation and is banned (truth 10); state the mechanism instead. **No distillation framing. No bit-perfect goal.**
 
 ### Conventional-format expectations
 

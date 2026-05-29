@@ -66,11 +66,13 @@ WHERE e.id IS NULL;
 - For every T0 entity in `entities`, perf-cache contains a matching codepoint entry.
 - Counts match (1,114,112 each, modulo Unicode version assigned codepoints).
 
-### Lottery-ticket-aware sparsity validation
+### Model-ingest sparsity validation
 
-- After ingesting an AI model, verify retained attestations are the result of the multi-pass lottery-ticket filter (per-tensor relative top-k, per-row top-k, probe-validated retention), not a flat target percentage.
-- Verify no zero-rated attestations were inserted (zeros are discarded at ingest, not stored).
+- Model ingest is a **streaming O(params) ETL of weight tables** (per `SUBSTRATE-FOUNDATION.md` truth 1), emitting significant cells as Glicko-2 matchup observations in parallel. Verify ingest scales linearly with parameter count and does **not** do GEMM-at-ingest (`E·W·Wᵀ·Eᵀ` over vocab²), materialize a vocab² matchup space, or apply a flat top-k that discards most of the model — those are the disease, not a sparsity knob.
+- Verify each emitted cell is recorded as a Glicko-2 matchup **outcome** (weight = outcome, source-model trust = opponent strength) accumulating into a consensus rating; the weight itself is never stored, never bit-perfect (truths 2, 6).
+- Verify no zero-rated attestations were inserted (zeros are not observations; discarded at ingest, not stored).
 - Verify synthesized tensors contain exact zeros where no significant substrate attestation exists; tiny nonzero jitter in unsupported slots is a failure.
+- The exact retention/significance criterion for **interior `d×d` tensors** (`q/k/v/o/gate/up/down`) — i.e. how those cells resolve to token entities without re-running the GEMM — is **OPEN per docs/SUBSTRATE-FOUNDATION.md** (Interior tensor axis → token-entity resolution). `embed_tokens`/`lm_head` are directly token-anchored and verifiable today; do not assert a settled interior filter mechanism — flag, do not fabricate.
 - Run probe-validation tests: synthesize a sparse subgraph; check inference fidelity on a probe set.
 
 ### Prompt ingestion + compiled cascade validation
@@ -93,7 +95,7 @@ llama-cli -m data/qwen3-roundtrip.gguf -p "Hello! Tell me something interesting.
 # Expected: stock source model / native substrate / GGUF proof export land in the same source-scoped behavioral basin
 ```
 
-This is the headline verification. If it succeeds under fixed prompt and sampler settings, the source-model codec works. Broader consensus synthesis may intentionally diverge by changing source scope and trust policy.
+This is the headline verification. If it succeeds under fixed prompt and sampler settings, the ingest→synthesis round-trip is faithful behaviorally — the recipe is a fillable mold and synthesis poured the consensus of attested facts back into the source's own shape (per `SUBSTRATE-FOUNDATION.md` truths 6, 8). This is **not** bit-perfect preservation and **not** a "codec" round-trip of a stored blob; the weights were dissolved to rated attestations and the blob discarded. Broader consensus synthesis may intentionally diverge by changing source scope and trust policy.
 
 ## Hard rules
 

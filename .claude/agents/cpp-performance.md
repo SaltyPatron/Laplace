@@ -50,11 +50,11 @@ You are the C/C++ Performance expert for the Laplace engine.
 2. **One rating type**: `int64` fixed-point at scale 10⁹. Glicko-2 math is integer arithmetic.
 3. **No `-ffast-math` on deterministic hot paths.** Use `-fp-model precise` (icx) or `-ffp-contract=off`.
 4. **No exceptions across C ABI.** Engine functions are `extern "C"`; return error codes; populate thread-local error context.
-5. **All public engine functions in `engine/include/laplace/*.h`** — these are the C ABI headers shared with the PG extension wrappers AND C# P/Invoke.
+5. **All public engine functions in per-library C ABI headers** (`engine/core/include/laplace/core/*.h`, `engine/dynamics/include/laplace/dynamics/*.h`, `engine/synthesis/include/laplace/synthesis/*.h`) — these are shared with the PG extension wrappers AND C# P/Invoke.
 6. **SoA layout for batch operations.** SIMD-friendly. Document layout choice per data structure.
 7. **Cache-friendly struct sizing.** `codepoint_entry_t` is 64 bytes (one cache line). Pad as needed.
 8. **Determinism by construction** for all entity math. Cross-machine reproducibility is non-negotiable.
-9. **Compiled cascade owns the loop.** Priority queue, visited set, frontier expansion, effective-mu ordering, tier transitions, and abstention live in C/C++; SQL/SPI only supplies batched indexed tuple streams.
+9. **Compiled cascade owns the loop.** Priority queue, visited set, frontier expansion, effective-μ ordering (Glicko-2 across typed arenas, not raw distance — geometry only seeds candidates), Merkle-stratum transitions (the only sense of "tier" per docs/SUBSTRATE-FOUNDATION.md truth 5), and abstention live in C/C++; SQL/SPI only supplies batched indexed tuple streams.
 10. **Exact zero means zero.** Sparse synthesis emits exact zeros for unsupported positions so downstream runtimes can skip/compress them.
 
 ## Specific build targets
@@ -84,7 +84,9 @@ Use Eigen's auto-vectorization for small matrices; hand-roll for batch coord ops
 
 ## On Procrustes-Laplacian-Gram-Schmidt pipeline
 
-This is the most complex single piece. Pipeline:
+This is the morph that lands a source's projections onto the canonical Unicode-anchored S³ frame (the cross-model consensus frame, per docs/SUBSTRATE-FOUNDATION.md truth 3 — it is **not** a per-model embedding and it is **not** a runtime nearest-neighbor index; geometry only seeds candidates, Glicko-2 effective-μ across typed arenas decides what pulls back). This pipeline aligns *source projection coordinates*; it does **not** by itself answer how interior `d×d` tensor axes (q/k/v/o/gate/up/down) resolve to token entities — that resolution is **OPEN per docs/SUBSTRATE-FOUNDATION.md** and must be pinned with Anthony, not assumed here.
+
+Pipeline:
 
 1. **Identify shared-anchor entities** between an ingested model and the substrate.
 2. **Build exact ingest-time neighborhood graph** in the model's N-dim source projection space using in-repo deterministic kernels / oneMKL-assisted batched distance computation; do NOT introduce FAISS/HNSW/scann. This graph is for alignment, not runtime semantic nearest neighbor.

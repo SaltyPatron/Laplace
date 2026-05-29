@@ -6,7 +6,9 @@
 
 ## Context
 
-The substrate places codepoint atoms on the surface of S³ (a 3-sphere in R⁴) and entities at higher tiers have centroids in the 4-ball interior. A Hilbert curve is needed for 1D locality-preserving indexing.
+The substrate places codepoint atoms on the surface of S³ (a 3-sphere in R⁴) and entities at higher Merkle strata have centroids in the 4-ball interior. A Hilbert curve is needed for a 1D locality-preserving **candidate-seeding access vertical** — a range-scannable projection of the geometry.
+
+This is access plumbing, not retrieval. Per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) truth 3/4, retrieval is **not** nearest-neighbor: the geometry only *seeds candidates*; what pulls back and how hard is decided by Glicko-2 effective-μ across typed arenas (RD, volatility, source trust, lineage, context, arena policy), traversed by indexed A\*. The Hilbert curve narrows candidates; it does not rank or decide them by distance.
 
 There are two natural choices:
 

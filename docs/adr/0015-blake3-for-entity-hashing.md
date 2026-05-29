@@ -25,7 +25,7 @@ Stored as `bytea(16)` in PG; `hash128_t = {uint64_t hi, lo}` in C engine; `byte[
 - All Postgres comparisons via `bytea` native byte-comparison (identical to memcmp).
 - C# never uses `string` for hash values; never `BitConverter.ToString`.
 
-Reusable helpers only — `hash128_from_bytes`, `hash128_merkle`, `hash128_equals`, `hash128_zero`, `hash128_compare`. No inlined `blake3_hasher_*` calls outside these helpers.
+Reusable helpers only — `hash128_blake3`, `hash128_merkle`, `hash128_equals`, `hash128_zero`, `hash128_compare` (see `engine/core/include/laplace/core/hash128.h`). No inlined `blake3_hasher_*` calls outside these helpers.
 
 ## Consequences
 

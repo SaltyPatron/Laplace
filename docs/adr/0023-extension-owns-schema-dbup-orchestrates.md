@@ -30,7 +30,7 @@ Doing **both** — extension creates some objects, DbUp creates others — produ
 
 For Laplace specifically:
 
-- The three substrate tables (`entities`, `physicalities`, `attestations`), the custom types they use, the GIST opclasses, the SRFs, and the cascade-tier functions are **the extension**. They're not application-level schema that happens to live in Postgres — they ARE the substrate.
+- The three substrate tables (`entities`, `physicalities`, `attestations`), the custom types they use, the GIST opclasses, the SRFs, and the cascade-traversal functions are **the extension**. They're not application-level schema that happens to live in Postgres — they ARE the substrate.
 - Substrate versions correspond to substrate-binary versions (the `.so` and its SQL evolve together — a function pointer in `laplace.so` must match its declaration in `laplace--X.Y.Z.sql`).
 - This is exactly what `extension--A.B.C.sql` + `extension--A.B.C--D.E.F.sql` is for.
 

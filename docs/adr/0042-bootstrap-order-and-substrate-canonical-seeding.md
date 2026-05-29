@@ -24,6 +24,8 @@ A small fixed set of type entities that describe themselves and each other. Each
 
 Stage-0 set: `Type` (self-typed), `Kind`, `PhysicalityKind`, `Source`, `SubstrateCanonical`.
 
+> Note: the word "tier" appears below in some kind/source names inherited from ADR 0044. Per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) truth 5, **"tier" is reserved exclusively for the Merkle stratum** (T0 = Unicode codepoints). Trust is a self-tuning Glicko-2 value derived from cross-source agreement, **never a fixed tier or class ladder.** The "trust-class" / "kind-value-tier" entities below are flagged as corruption to be reconciled with ADR 0044 once that ADR is itself corrected toward the anchor; they are NOT a ratified part of the bootstrap.
+
 **Stage 1 — substrate-canonical Source entity:**
 
 `<SubstrateCanonical>` is content-addressed at install (name encodes the substrate version). It's the `source_id` of every attestation emitted during bootstrap + by the substrate-canonical layers of UnicodeDecomposer / ISODecomposer / etc.
@@ -32,32 +34,23 @@ Stage-0 set: `Type` (self-typed), `Kind`, `PhysicalityKind`, `Source`, `Substrat
 
 Three rows of `type_id = <PhysicalityKind>`: `CONTENT`, `BUILDING_BLOCK`, `PROJECTION` (extensible). The `physicalities.kind smallint` column values alias to these entities; the entities exist so per-kind meta-attestations can attach.
 
-**Stage 3 — substrate-canonical attestation-kind vocabulary (modality-agnostic) + kind-value tiers:**
+**Stage 3 — substrate-canonical attestation-kind vocabulary (modality-agnostic):**
 
-Modality-agnostic kinds: `IS_A`, `HAS_PART`, `CO_OCCURS_WITH`, `FOLLOWS`, `PRECEDES`, `OCCURS_IN_CONTEXT`, `HAS_LANGUAGE`, `IS_TRANSLATION_OF`, `DEPICTS`, `CAPTIONS`, `TRANSCRIBES_AS`, `IS_LOSSY_ENCODING_OF`, `HAS_VARIANT_OF`, `IS_REPLACED_BY`, `HAS_TRUST_CLASS`, `HAS_KIND_VALUE_TIER`, `IS_ALIAS_OF`, ...
+Modality-agnostic kinds: `IS_A`, `HAS_PART`, `CO_OCCURS_WITH`, `FOLLOWS`, `PRECEDES`, `OCCURS_IN_CONTEXT`, `HAS_LANGUAGE`, `IS_TRANSLATION_OF`, `DEPICTS`, `CAPTIONS`, `TRANSCRIBES_AS`, `HAS_VARIANT_OF`, `IS_REPLACED_BY`, `IS_ALIAS_OF`, ...
+
+> `IS_LOSSY_ENCODING_OF` was removed: it encodes round-trip/preservation framing ("encoding of"), which is corruption per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) truths 6 + 10 — the substrate dissolves artifacts into facts and discards the blob; it does not store one entity as a lossy encoding of another to be decoded back. Relationships between variants/derivations are expressed by attested facts (`HAS_VARIANT_OF`, `IS_REPLACED_BY`), not by an encode/decode pair.
+>
+> `HAS_TRUST_CLASS` and `HAS_KIND_VALUE_TIER` were removed from the canonical kind set: trust is a self-tuning Glicko-2 value, **not** a fixed class, and "tier" is reserved for the Merkle stratum (anchor truth 5). These kinds existed only to wire the trust-class / kind-value-tier ladders, which are flagged below.
 
 Per-modality kinds (`HAS_GENERAL_CATEGORY`, `HAS_VALIDITY`, `IS_HYPERNYM_OF`, `Q_PROJECTS`, ...) are bootstrapped by their owning decomposer at first run, not at install.
 
-Plus the **11 kind-value-tier entities** per [ADR 0044](0044-attestation-kind-priors-and-source-trust-taxonomy.md) (T1 Mandate / T2 Standards Structural / T3 Taxonomic / T4 Partitive / T5 Causal / T6 Equivalence / T7 Oppositional / T8 Associative / T9 Tensor-Calculation / T10 Scalar-Valued / T11 Probationary). Each tier entity carries the Glicko-2 prior (rating, RD, volatility) + cascade-weight multiplier as meta-attestations.
+> **OPEN per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md):** The "11 kind-value-tier entities (T1…T11)" and per-kind Glicko-2 priors / cascade-weight multipliers previously seeded here (per ADR 0044) are NOT ratified. They use "tier" outside the Merkle stratum and pre-bake fixed rating ladders, which contradicts truth 5 (trust/rating is self-tuning from cross-source agreement, never a fixed class or tier). The proper bootstrap content — if any priors are seeded at all — must be reconciled against the anchor with Anthony before re-stating it here. Note that the former "T9 Tensor-Calculation" name additionally implied per-cell weight calculation at ingest, which is the GEMM-at-ingest disease forbidden by truth 1.
 
-**Stage 3.5 — source-trust-class taxonomy (10-tier hierarchy):**
+**Stage 3.5 — source-trust priors:**
 
-Per [ADR 0044](0044-attestation-kind-priors-and-source-trust-taxonomy.md), bootstrap seeds the 10 trust-class entities:
+> **OPEN per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md):** This stage previously seeded a 10-entry `TrustClass_*` ladder (per ADR 0044) with `HAS_PRIOR_WEIGHT` / `HAS_EFF_MU_MULTIPLIER` / `HAS_ARENA_ADMITTANCE_POLICY` / `HAS_RETENTION_POLICY` meta-attestations and assigned the substrate-canonical source `HAS_TRUST_CLASS → TrustClass_SubstrateMandate`. That is corruption per truth 5: **trust is a Glicko-2 value, self-tuning from cross-source agreement — never a tier or fixed class.** A fixed TrustClass ladder pre-decides what cross-source adjudication is meant to discover. How (or whether) source-trust *priors* are bootstrapped — as opposed to letting trust emerge entirely from cross-source agreement — is OPEN and must be pinned with Anthony. Do not re-introduce the ladder.
 
-1. `TrustClass_SubstrateMandate`
-2. `TrustClass_StandardsDerived`
-3. `TrustClass_AcademicCurated`
-4. `TrustClass_AcademicCuratedWithUserInput`
-5. `TrustClass_StructuredCorpus`
-6. `TrustClass_UserCuratedResource`
-7. `TrustClass_AIModelProbe`
-8. `TrustClass_AppDerived`
-9. `TrustClass_UserPromptContent`
-10. `TrustClass_AdversarialUntrusted`
-
-Each entity carries meta-attestations: `HAS_PRIOR_WEIGHT`, `HAS_EFF_MU_MULTIPLIER`, `HAS_ARENA_ADMITTANCE_POLICY`, `HAS_RETENTION_POLICY`. The substrate-canonical source entity gets `HAS_TRUST_CLASS → TrustClass_SubstrateMandate` immediately on bootstrap.
-
-Plus initial **cross-decomposer kind-reconciliation aliases** (per ADR 0044 Part C) — e.g., `IS_ALIAS_OF` meta-attestations linking ConceptNet's `IsA` to canonical `IS_A`, OMW's per-language `IS_LEMMA_OF` variants to the canonical kind, etc.
+Plus initial **cross-decomposer kind-reconciliation aliases** — e.g., `IS_ALIAS_OF` meta-attestations linking ConceptNet's `IsA` to canonical `IS_A`, OMW's per-language `IS_LEMMA_OF` variants to the canonical kind, etc. (This kind-name reconciliation is independent of the flagged trust/tier ladders above and remains valid.)
 
 **Stage 4 — substrate-canonical Entity Type vocabulary:**
 

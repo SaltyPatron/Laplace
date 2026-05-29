@@ -57,7 +57,7 @@ Use standard PostGIS `geometry` type with Z+M = 4D (X, Y, Z spatial + M as fourt
 
 **Custom GIST/SP-GiST/BRIN opclasses ARE permitted** where they exploit substrate-specific structure that general-purpose opclasses can't — per [ADR 0029](docs/adr/0029-custom-indexing-strategy.md). Each custom opclass requires its own ADR documenting the structural fact exploited + measurable acceptance benchmark vs the stock alternative. Speculatively replacing working general-purpose opclasses is still forbidden.
 
-The 4D/S³ physicality layer is a projection/access layer, not the knowledge layer. It can provide fuzzy candidate discovery, alignment, visualization, and embedding-like structure. It does not define semantic nearest neighbor, truth, or answerhood. Semantic response is computed through typed attestations, arena policy, source trust/lineage, and Glicko-2 effective support.
+The S³ glome **IS the canonical shared embedding frame** every source is morphed into (via Procrustes / Laplacian-eigenmaps / Gram-Schmidt onto the Unicode-anchored frame) — the cross-model/dim/vocab consensus moat (per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truth 3). The geometry **carries meaning**; it is not "just an index" and physicalities are not "non-knowledge" — those framings are forbidden by the anchor. What the geometry does NOT do is define answerhood by **distance**: **retrieval is NOT nearest-neighbor.** Geometry only *seeds candidates* (fuzzy discovery, alignment, embedding-like access, visualization); what pulls back and how hard is decided by **Glicko-2 effective-μ** across typed arenas — RD, volatility, source trust, lineage, context, arena policy. The dynamics over the geometry are attestation-based, not distance-based.
 
 ---
 
@@ -65,21 +65,27 @@ The 4D/S³ physicality layer is a projection/access layer, not the knowledge lay
 
 The substrate has **exactly three** core tables: `entities`, `physicalities`, `attestations`. No `observations` table — that was over-engineering. Attestation rows ARE the consensus state; repeated observations from the same source UPSERT-no-op (`ON CONFLICT DO NOTHING`).
 
-Provenance lives in the `source_id` column of attestation rows, NOT in a separate event log. Source version, trust class, and lineage/correlation family live as meta-attestations on the source entity.
+Provenance lives in the `source_id` column of attestation rows, NOT in a separate event log. Source version and lineage/correlation family live as meta-attestations on the source entity. Source trust is a self-tuning Glicko-2 value emergent from cross-source agreement, **never a fixed tier or trust class** (per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truth 5; "tier" is reserved exclusively for the Merkle stratum).
 
 ---
 
-## R3 — Lottery-ticket-aware sparsity, NEVER flat thresholds
+## R3 — Emergent sparsity from matchup consensus, NEVER weight-magnitude pruning
 
-For AI model sources, the noise floor is a **multi-pass relative filter**:
+A model weight is **not a stored value to keep or prune** — it is a single **Glicko-2 matchup outcome** (weight = match result; the model's source-trust = opponent strength; per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md) + Vampire mode). The substrate keeps only the **emergent cross-source consensus**, never the weight. So sparsity is **emergent, not a magnitude filter applied to weights**:
 
-1. **Per-tensor relative top-k%** (e.g., top 5% by importance within each tensor — respects tensor's own scale)
-2. **Per-row top-k for attention / MLP** (preserves load-bearing IO connectivity)
-3. **Static-mathematical retention test** (verify spectral preservation / singular-value retention / matchup-distribution agreement between sparse and dense aggregated-attestation subgraphs per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md) — NOT probe-validated; the substrate does not execute models at ingest)
+1. **Absent token-pair edges are never observed** — no relationship, no matchup, exact zero by construction ("zero is not an observation"). This is the origin of sparsity, not a cutoff.
+2. **Every real token-pair interaction is a matchup observation** fed to `glicko2_update` — *small interactions included*; a weak outcome is real evidence, not noise.
+3. **Load-bearing vs. noise is decided by emergent consensus** — effective-μ, RD, source-trust, structural support, cross-source clustering (truths cluster → low RD; unsupported/outlier matchups scatter → high RD, discounted) — at the consensus/synthesis layer, **never by a per-model magnitude top-k at ingest**.
+4. **Which token-pair matchups become attestations** is a **token-relational** selection — never raw-weight magnitude — validated by the **static-mathematical retention test** (the sparse aggregated-attestation subgraph preserves the dense subgraph's matchup-distribution / spectral structure; **NOT probe-validated** — the substrate never executes models at ingest). **The mechanism by which interior tensor cells resolve to token-pair matchups is OPEN per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md).** Ingest is a streaming O(params) ETL of weight cells (truth 1); it MUST NOT compute the `E·W·Wᵀ·Eᵀ` bilinear over vocab² at ingest, materialize a vocab² matchup space, or apply a flat top-k that discards most of the model — that approach is the disease the anchor explicitly forbids, not a tractability knob. `embed_tokens`/`lm_head` are directly token-anchored; how `q/k/v/o/gate/up/down` cells resolve to token entities without re-running the GEMM is unsolved and must be pinned with Anthony.
 
-**A flat numeric cutoff (e.g., `|w| < 0.001`) is forbidden.** It destroys content: different tensors have different magnitude regimes; load-bearing weights are sometimes small.
+**FORBIDDEN** — the conventional neural-network pruning reflex ("lottery-ticket" magnitude pruning, Frankle/Carlin) smuggled in, and explicitly rejected by [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)'s alternatives-considered:
 
-For **linguistic resources** (WordNet, OMW, UD, Wiktionary, Tatoeba, ConceptNet, Atomic2020) — every entry is curated and deliberate. **No noise floor applies.** Every attestation goes in at full fidelity.
+- Per-tensor **relative top-k% by weight magnitude** ("top 5% by importance") — treats magnitude as importance, but a weight is a match outcome, and load-bearing interactions are sometimes small.
+- **Per-row top-k by weight magnitude.**
+- Any flat **or relative** magnitude threshold on raw weights (`|w| < ε`): significance must *emerge from consensus*, not be decided by a cutoff at the door.
+- Treating a weight as a stored value at all.
+
+For **linguistic resources** (WordNet, OMW, UD, Wiktionary, Tatoeba, ConceptNet, Atomic2020) — every entry is curated and deliberate. No filter; every attestation goes in at full fidelity.
 
 ---
 
@@ -226,7 +232,7 @@ Each layer has exactly one kind of work, per [ADR 0027](docs/adr/0027-separation
 
 | Layer | MAY do | MUST NOT do |
 |---|---|---|
-| C/C++ engine | math, linalg, hashing, geometry, sparsity, codec, SIMD, fixed-point, file I/O | pipeline orchestration, plugin loading, network I/O, DB connection management |
+| C/C++ engine | math, linalg, hashing, geometry, sparsity, dissolve/synthesize transforms, SIMD, fixed-point, file I/O | pipeline orchestration, plugin loading, network I/O, DB connection management |
 | PG extension (C wrappers) | Datum↔engine-struct marshalling, PG_TRY/PG_CATCH, opclass support functions, schema DDL | re-implementing engine math; non-trivial PL/pgSQL; control flow that isn't dispatching |
 | C# orchestration | pipelines, plugin host, protocol endpoints, DB connection, CLI, recipe parsing | math beyond trivial accounting; reimplementing engine functions for "convenience"; hot-path numerical code |
 | SQL / DbUp migrations | idempotent DDL; role grants; direct `CREATE EXTENSION` orchestration (`laplace_admin` is `SUPERUSER` per [ADR 0045](docs/adr/0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md)); `ALTER DEFAULT PRIVILEGES` | business logic; procedural transforms; substrate schema definition (lives in extension upgrade scripts per [ADR 0023](docs/adr/0023-extension-owns-schema-dbup-orchestrates.md)) |
@@ -280,7 +286,7 @@ Cascade traversal is a compiled substrate operator exposed via SQL, not SQL-as-c
 
 Every attestation kind that participates in rating composition belongs to an arena with explicit semantics: compatibility, cardinality, context policy, observation update scope, conflict policy, source-trust policy, lineage policy, and effective-score inputs. Glicko-2 updates MUST interpret incoming observations through those arena semantics.
 
-Raw source counts are never consensus. Source credibility is tracked per source per attestation kind, and source trust classes are part of the prior: foundational constants, standards-derived sources, curated academic resources, academically linked user-curated resources, structured corpora, AI-model static-ETL observations (per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)), and prompt-local/user content. Correlated source families do not become independent tugs merely by repetition.
+Raw source counts are never consensus. Source credibility is tracked per source per attestation kind as a **self-tuning Glicko-2 value emergent from cross-source agreement — never a fixed trust tier or TrustClass ladder** (per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truth 5). A source that consistently agrees with independent sources earns a high effective rating / low RD; a source that scatters or contradicts is discounted — and this is computed, not assigned by a static class. The diversity of sources (foundational constants, standards-derived, curated academic resources, user-curated resources, structured corpora, AI-model static-ETL observations per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md), prompt-local/user content) is real, but it enters as *opponent strength* in the matchup, not as a fixed prior rung on a ladder. Correlated source families do not become independent tugs merely by repetition.
 
 Unsupported or low-trust claims MAY be stored as source-scoped observations, but they do not win strict traversal or synthesis scopes unless their arena-aware effective mu is supported by independent, trusted, structurally adjacent observations.
 
@@ -288,13 +294,13 @@ Prompt-local/user-content observations are allowed to tug traversal immediately 
 
 ---
 
-## R21 — Layered seed ingestion and model-codec fidelity
+## R21 — Layered seed ingestion and model dissolve/synthesize fidelity
 
-Early ingestion follows the layered seed order in [ADR 0037](docs/adr/0037-layered-seed-ingestion-and-model-codec-fidelity.md): Unicode/UCD/UCA/UAX, language registries, WordNet, OMW, UD, Wiktionary, Tatoeba/audio, ConceptNet/Atomic2020, tree-sitter/code, corpora, then AI model sources. Each layer adds explicit fidelity channels before later sources arrive.
+**Seed-source attestations (WordNet/OMW/UD/Wiktionary/Tatoeba/ConceptNet/Atomic2020) are OPTIONAL enrichment** — independent ground truth for Glicko-2 to adjudicate against — **not a mandatory training corpus** (per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truth 6). Semantic ingest of a single model alone is the mandatory spine. Where seed sources are ingested they follow the layered order in [ADR 0037](docs/adr/0037-layered-seed-ingestion-and-model-codec-fidelity.md): Unicode/UCD/UCA/UAX, language registries, WordNet, OMW, UD, Wiktionary, Tatoeba/audio, ConceptNet/Atomic2020, tree-sitter/code, corpora, then AI model sources.
 
-AI model ingestion is a codec. `ModelDecomposer` (composite per [ADR 0043](docs/adr/0043-composite-decomposer-architecture.md)) records the model recipe, tokenizer content, source physicalities, weight-cell matchup observations (static ETL per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)), architecture-specific attestation arenas, and lottery-ticket sparse load-bearing structure. If source-scoped ingestion is faithful and synthesis uses the source recipe/scope, missing behavior is an implementation/codec bug, not an accepted architectural gap.
+AI model ingestion **dissolves the model into grounded semantic facts and discards the blob** — it is **not** a "codec" (the label implies round-trip/bit-perfect preservation, which is worthless and banned; state the mechanism, not the label — anchor truths 6 + 10). `ModelDecomposer` (composite per [ADR 0043](docs/adr/0043-composite-decomposer-architecture.md)) records the model recipe (a fillable mold for synthesis), tokenizer content, source physicalities, weight-cell matchup observations (streaming O(params) static ETL per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)), and architecture-specific attestation arenas. Load-bearing structure is **emergent from matchup consensus per [R3](#r3--emergent-sparsity-from-matchup-consensus-never-weight-magnitude-pruning), never a "lottery-ticket" magnitude prune** (the magnitude-pruning reflex is forbidden — a weight is a match outcome, not a value to keep or discard). If source-scoped ingestion is faithful and synthesis pours those facts into the source recipe/scope, missing behavior is an implementation bug, not an accepted architectural gap.
 
-The v0.1 proof may be narrow: Unicode-derived T0 + one Qwen-family source model + sparse attestations + native safetensors-style package emission + GGUF proof conversion + chat verification. It does not need the full omniglottal seed stack to prove the AI⇄DB codec.
+The v0.1 proof may be narrow: Unicode-derived T0 + one Qwen-family source model + sparse attestations + native safetensors-style package emission + GGUF proof conversion + chat verification. It does not need the full omniglottal seed stack to prove the dissolve-and-synthesize round-trip.
 
 ---
 

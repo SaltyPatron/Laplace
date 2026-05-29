@@ -8,7 +8,7 @@
 
 Glicko-2 gives Laplace rating, RD, and volatility, but the rating update needs substrate-native semantics. Not every observation means the same thing. Shorthand such as `rake HAS_POS NOUN` means a generic observation envelope with `kind_id = HAS_POS`, `subject_id = rake`, and `object_id = NOUN`; `HAS_POS` is the semantic kind entity, not a bespoke function call. Some attestation kinds are multi-valued and compatible (`rake HAS_POS NOUN` and `rake HAS_POS VERB`). Some are functional under a context (`France HAS_CURRENT_CAPITAL Paris` vs. `France HAS_CURRENT_CAPITAL Los Angeles`). Some are scalar, temporal, symmetric, inverse-functional, or context-required.
 
-Laplace must also distinguish independent high-trust convergence from low-trust repetition. Foundational constants, standards, curated academic resources, user-curated linked resources, corpora, model-derived observations, prompts, and ordinary user content are not equal sources. Prompt content identity is a real content fact; prompt/user claims are low-trust source-scoped observations unless promoted. Repetition from one source or a correlated source family must not become fake consensus.
+Laplace must also distinguish independent high-trust convergence from low-trust repetition. Foundational constants, standards, curated academic resources, user-curated linked resources, corpora, model-derived observations, prompts, and ordinary user content behave differently as sources. Their differing trust is **not** a fixed ranking assigned by purpose — trust is a self-tuning Glicko-2 value that emerges from cross-source agreement (per truth 5 of [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md)). Source *kind* (purpose/role: standards artifact vs. corpus vs. model probe vs. prompt) is legitimate context that conditions effective-μ; it is not itself the trust value. Prompt content identity is a real content fact; prompt/user claims stay source-scoped until cross-source agreement and arena policy justify broader scope. Repetition from one source or a correlated source family must not become fake consensus.
 
 ## Decision
 
@@ -19,19 +19,21 @@ Attestation kinds carry arena semantics. At minimum, each arena/kind defines:
 - context policy: context-free, context-required, temporal interval, comparison frame, source-local, prompt-local, fiction/speculation mode, etc.
 - observation update scope: which tuple slots decide whether an incoming observation updates the same current attestation state or a separate state
 - conflict policy: which alternatives within the update scope are incompatible; only functional or mutually exclusive arenas create disagreement pressure
-- source-trust policy: which source classes are allowed, preferred, discounted, or prompt-local
+- source-kind policy: which source kinds are admissible, prompt-local, or otherwise scope-constrained for the arena (source *kind* is purpose/role context, not a trust value)
 - lineage policy: how source lineage/correlation families affect independence of support
-- effective-score formula inputs: rating, RD, volatility, source credibility for kind, context compatibility, lineage independence, and structural support
+- effective-score formula inputs: rating, RD, volatility, source-kind context, context compatibility, lineage independence, and structural support
 
-Source credibility is tracked per source per attestation kind. Source classes are ordered by trust and purpose, including:
+Source trust is tracked per source per attestation kind as a **self-tuning Glicko-2 value** that emerges from cross-source agreement — not a fixed class assigned by purpose. There is no ordered trust ladder; a "Source Trust Class" / ordered-tier ranking is the corruption named in truth 5 of [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) (the word "tier" is reserved for the Merkle stratum). Source *kind* is still meaningful as purpose/role context that conditions effective-μ; the following are kinds of source, enumerated for context, **not a trust ranking**:
 
-1. foundational constants and project-defined invariants
-2. standards bodies / Unicode-derived artifacts
-3. curated academic resources
-4. academically linked user-curated resources
-5. structured corpora and treebanks
-6. AI model-derived probe observations
-7. prompt-local or ordinary user content
+- foundational constants and project-defined invariants
+- standards bodies / Unicode-derived artifacts
+- curated academic resources
+- academically linked user-curated resources
+- structured corpora and treebanks
+- AI model-derived probe observations
+- prompt-local or ordinary user content
+
+Whether any of these earns high effective-μ in a given arena is decided by Glicko-2 cross-source agreement, RD, volatility, lineage independence, and structural support — never by position in this list.
 
 The operational rule is: incoming observations update current attestation state through the relevant arena's policy. Truths cluster across independent, high-trust, structurally adjacent observations; false or unsupported claims may cluster inside correlated low-trust source families but remain source-scoped, low-rated, high-RD, context-bound, disputed, or excluded from strict synthesis scopes.
 
@@ -61,5 +63,7 @@ Prompt-local observations can seed traversal immediately because they bind exist
 
 - [RULES.md R5](../../RULES.md) — attestation is consensus state
 - [RULES.md R20](../../RULES.md) — arena semantics and source trust are mandatory
-- [GLOSSARY.md](../../GLOSSARY.md) — Arena, Source Trust Class, Truths Cluster / Lies Scatter, Honest Abstention
+- [GLOSSARY.md](../../GLOSSARY.md) — Arena, Arena Semantics, Source Trust (self-tuning Glicko-2 value, never a tier/class), Truths Cluster / Lies Scatter, Honest Abstention
+- [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) truth 5 — trust is a self-tuning Glicko-2 value, never a tier/class; the relative ordering of source kinds is a prior, not a frozen ladder
+- [ADR 0044](0044-attestation-kind-priors-and-source-trust-taxonomy.md) — the retired fixed `TrustClass_*` ladder (see GLOSSARY "Source Trust" OPEN note)
 - [DESIGN.md](../../DESIGN.md) — source trust and arena semantics section

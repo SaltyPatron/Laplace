@@ -5,6 +5,8 @@
 **Accepted** — 2026-05-24 (status confirmed 2026-05-28: `IngestRunner` shipped at `app/Laplace.Ingestion/IngestRunner.cs` with `CheckpointJournal` + retry + parallel-worker variant + `Laplace.Ingestion.Tests`. Outstanding work per FLOWS.md audit: layer-gate loop is 0-based in code vs 1-based in this ADR's pseudocode; `HasSourceEverCompletedAsync` is MVP pending Story #183; `just ingest` dispatch is partial (Unicode only).)
 **Authors:** Anthony Hart
 
+> **Anchor note (per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md)):** This ADR is pure orchestration plumbing (the C# outer loop over decompose → CRUD-apply → checkpoint) and makes no conceptual claim about *what* model ingest does. Where it references ADR 0037 by its filename slug, the "model-codec-fidelity" wording in that slug is superseded framing: "codec" implies round-trip/bit-perfect preservation, which the anchor bans (model ingest dissolves weights into Glicko-2 matchup observations and discards the blob; bit-perfect is worthless). Read those references for their layer-ordering content only, not as endorsement of a codec model.
+
 ## Context
 
 The substrate's ingest pipeline factors into three distinct stages with three different traversal directions per the 2026-05-24 conversation:

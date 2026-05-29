@@ -434,7 +434,7 @@ Add a debug-only `laplace_id_to_hex(bytea) → text` if it helps inspection, but
 Entity IDs are BLAKE3-128 of **canonical content bytes**, where canonical is defined per entity type and is **lossless** — every input that decodes to the same canonical bytes hashes to the same ID. Examples:
 
 - **Text (observed UTF-8):** BLAKE3-128 of the **observed** Unicode scalar sequence as UTF-8 bytes at each tier (T0 = one scalar; T2+ = Merkle of child entity ids per type rule). UTF-8 vs UTF-16 of the **same** scalar sequence → same ID. **Different** scalar sequences → different IDs even when canonically equivalent (e.g. U+00E9 vs U+0065 U+0301; `King` vs `king`). Canonical/compatibility equivalence and lemma relations are **attestations** (UnicodeDecomposer, WordNet, Wiktionary, UD, …), **not** NFC/NFD at the TextDecomposer door. See amended [ADR 0047](docs/adr/0047-text-decomposer-pure-primitive.md).
-- **Model vocabulary token:** canonical token **surface string** as published by that model's tokenizer (including model-specific prefix markers until stripped for *mapping* attestations). Distinct from the substrate **text** entity for the inner linguistic form; link via `TOKEN_FOR` / `EMBEDS` / probe attestations, not by collapsing ids via embedding distance.
+- **Model vocabulary token:** canonical token **surface string** as published by that model's tokenizer (including model-specific prefix markers until stripped for *mapping* attestations). Distinct from the substrate **text** entity for the inner linguistic form; link via `TOKEN_FOR` mapping attestations and per-model `PROJECTION` physicalities, not by collapsing ids via embedding distance.
 - Pixel (RGB type): canonical `(r, g, b)` triple bytes (per-channel uint8). RGBA, CMYK, HSV are *different types*, related by attestations, not by ID equivalence.
 - Lossless image container: canonical pixel grid bytes (PNG vs lossless WebP of identical pixels → same ID).
 - Audio frame (PCM): canonical PCM sample bytes at canonical sample rate/bit depth.
@@ -458,33 +458,23 @@ Naming convention for attestation kinds:
 - Modality-specific kinds carry a modality prefix or unambiguous semantic (`EXTRACTS_R_CHANNEL` rather than `EXTRACTS_R` to avoid collision with non-pixel modalities).
 - Cross-modal kinds are first-class: `DEPICTS`, `CAPTIONS`, `TRANSCRIBES_AS`.
 
-Tensor-calculation kinds for transformer-family AI models are a fixed ~10-element architecture-family vocabulary: `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`. Per-position attribution (layer, head, per-tensor vocabulary) is **recipe content** — text/JSON on the model recipe entity, not per-attestation metadata. Attestations aggregate across positions; the architecture template (substrate code, per `IArchitectureTemplate`) distributes the aggregated typed attestations across recipe-shaped tensor slots at emit time. Storing position attribution on attestation rows would be redundant with the recipe. This transformer-family list is not universal; other model architectures and modalities must define their own small fixed role vocabularies under the same generic observation envelope.
+Tensor-calculation kinds for transformer-family AI models are a fixed token↔token vocabulary: `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES` (corrected 2026-05-28). The embedding and `lm_head` are GEOMETRY → `PROJECTION` / `ProjectionOutput` physicalities, **not** `EMBEDS` / `OUTPUT_PROJECTS` attestation kinds; a model's weights are never stored and never bit-perfect (Vampire mode) — each interior token-pair is a Glicko-2 matchup whose cross-source consensus is what's kept. Per-position attribution (layer, head, per-tensor vocabulary) is **recipe content** — text/JSON on the model recipe entity, not per-attestation metadata. Attestations aggregate across positions; the architecture template (substrate code, per `IArchitectureTemplate`) distributes the aggregated typed attestations across recipe-shaped tensor slots at emit time. Storing position attribution on attestation rows would be redundant with the recipe. This transformer-family list is not universal; other model architectures and modalities must define their own small fixed role vocabularies under the same generic observation envelope.
 
-### Kind value tiers + Glicko-2 priors (ADR 0044)
+### Kind Glicko-2 priors
 
-Every attestation kind belongs to one of 11 **value tiers** that determine its Glicko-2 prior (initial rating / RD / volatility) and its cascade-weight multiplier. Tier assignment is a meta-attestation on the kind entity (`HAS_KIND_VALUE_TIER`). Tiers + their priors are bootstrapped at install per [ADR 0042](docs/adr/0042-bootstrap-order-and-substrate-canonical-seeding.md) Stage 3.
+> **CORRECTED per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truth 5.** The word "tier" is reserved **exclusively** for the Merkle stratum (T0 = Unicode codepoints; the `tier` column above). A "kind value tier" ladder (the prior T1–T11 `HAS_KIND_VALUE_TIER` scheme from ADR 0044) is corruption — it re-introduces a fixed-class ladder for what must be a self-tuning Glicko-2 value. Trust and kind-strength are Glicko-2 values that move from cross-source agreement, **not** fixed classes.
 
-Summary (full per-tier values in [ADR 0044](docs/adr/0044-attestation-kind-priors-and-source-trust-taxonomy.md)):
+An attestation kind MAY carry a Glicko-2 **prior** (initial rating / RD / volatility) as a meta-attestation on the kind entity, so a freshly-observed attestation starts somewhere sensible before any corroboration. That prior is a *starting point only*: the rating self-tunes from cross-source agreement (truth 5). It is **not** a tier, not a fixed class, and not a frozen cascade-weight multiplier. There is no ranked T1…Tn ladder; each kind's prior stands on its own and any kind can be re-rated by evidence.
 
-- **T1 Mandate** — substrate invariants (highest prior + 1.0× weight)
-- **T2 Standards Structural** — codified standards-derived (rating ≈ 2300, weight 1.0×)
-- **T3 Taxonomic** — `IS_A`, `IS_HYPERNYM_OF`, ... (rating ≈ 1900, weight 0.9×)
-- **T4 Partitive** — `IS_PART_OF`, `IS_MERONYM_OF`, ... (rating ≈ 1800, weight 0.85×)
-- **T5 Causal** — `CAUSES`, `BECAUSE`, `ENTAILS`, ... (rating ≈ 1700, weight 0.8×)
-- **T6 Equivalence** — `IS_TRANSLATION_OF`, `IS_SIMILAR_TO`, ... (rating ≈ 1600, weight 0.7×)
-- **T7 Oppositional** — `IS_ANTONYM_OF`, `EXCLUDES`, ... (rating ≈ 1550, weight 0.6×)
-- **T8 Associative** — `CO_OCCURS_WITH`, `FOLLOWS`, `USED_FOR`, ... (rating ≈ 1500, weight 0.5×)
-- **T9 Tensor-Calculation** — `Q_PROJECTS`, ... (rating ≈ 1400, weight 0.4×; single-model trust per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md) static-ETL; cluster across many models for higher confidence)
-- **T10 Scalar-Valued** — `HAS_NUMERIC_VALUE`, `HAS_FREQUENCY`, ... (rating IS the value; RD captures measurement uncertainty)
-- **T11 Probationary** — user-prompt-emitted attestations (rating ≈ 1300, weight 0.3×; session-scoped)
+The exact prior values per kind, the cascade weighting of kind-typed walks, and the arena/kind assignment per interior tensor role are **OPEN per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md)** (OPEN-QUESTIONS: "The exact arena/kind assignment per interior tensor role"). Do not encode a confident ladder here.
 
-A kind entity MAY carry per-kind overrides (meta-attestations) to deviate from tier defaults when justified.
+### Source trust is a Glicko-2 value, not a class
 
-### Source trust class discipline (ADR 0044)
+> **CORRECTED per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truth 5.** The prior `HAS_TRUST_CLASS` / 10-bootstrapped-trust-class scheme (ADR 0044) is a fixed-class ladder and is corruption. Trust is a Glicko-2 value, self-tuning from cross-source agreement — never a tier or fixed class.
 
-Sources MUST register a `HAS_TRUST_CLASS` meta-attestation pointing at one of the 10 bootstrapped trust-class entities. Glicko-2 attestation initialization combines the kind's prior tier + the source's trust class weight to compute initial (rating, RD, volatility) — NOT a global default. Trust-class weight + arena admittance policy lives on the trust-class entity (not in plugin code).
+A source's effective trust is the Glicko-2 standing it earns by agreeing or disagreeing with other independent sources (truths require clustering across independent sources; raw repetition cannot manufacture truth). A source MAY carry a Glicko-2 **prior** so a brand-new source isn't trusted from zero, but that prior self-tunes; it is not a frozen class with a fixed weight. Glicko-2 attestation initialization combines the kind's prior with the source's prior to seed (rating, RD, volatility); thereafter the value moves with evidence.
 
-Adding a new attestation kind requires (a) defining its arena semantics as meta-attestations, (b) declaring its source-trust policy, (c) registering it as an entity with the substrate-canonical source attesting its kind-properties. The type-taxonomy agent is the canonical owner.
+Adding a new attestation kind requires (a) defining its arena semantics as meta-attestations, (b) registering it as an entity with the substrate-canonical source attesting its kind-properties. The type-taxonomy agent is the canonical owner.
 
 ## Versioning
 

@@ -66,14 +66,14 @@ Never renumber existing ADRs. If an ADR is superseded, the new one gets the next
 | 0034 | [Modular extension SQL via `.sql.in` + C preprocessor](0034-modular-sql-via-cpp-preprocessor.md) | Accepted |
 | 0035 | [Prompt ingestion and compiled cascade traversal](0035-prompt-ingestion-and-compiled-cascade.md) | Accepted |
 | 0036 | [Arena semantics and source-trust consensus](0036-arena-semantics-and-source-trust.md) | Accepted |
-| 0037 | [Layered seed ingestion and model-codec fidelity](0037-layered-seed-ingestion-and-model-codec-fidelity.md) | Accepted |
+| 0037 | [Layered seed ingestion and model-ingest fidelity](0037-layered-seed-ingestion-and-model-codec-fidelity.md) | Accepted |
 | 0038 | [Unified deps CMake pipeline; gcc toolchain for system deps](0038-unified-deps-cmake-pipeline-gcc-toolchain.md) | Accepted (amends 0028, 0032, 0033) |
 | 0039 | [Schema reorganization — entity is identity, physicality is representation](0039-schema-reorganization-entity-identity-vs-physicality-representation.md) | Accepted |
-| 0040 | [Multi-modal entity types, universal T0, semantic Merkle DAG with lossless canonicalization](0040-multi-modal-entity-types-universal-t0.md) | Accepted |
+| 0040 | [Multi-modal entity types, universal T0, semantic Merkle DAG with deterministic content-addressed canonicalization](0040-multi-modal-entity-types-universal-t0.md) | Accepted |
 | 0041 | [Decomposer scope is the full domain ecosystem, not a single file](0041-decomposer-scope-full-domain-ecosystem.md) | Accepted |
 | 0042 | [Bootstrap order + substrate-canonical seeding](0042-bootstrap-order-and-substrate-canonical-seeding.md) | Accepted |
 | 0043 | [Composite decomposer architecture (ModelDecomposer worked example)](0043-composite-decomposer-architecture.md) | Accepted |
-| 0044 | [Attestation-kind priors + source-trust-class taxonomy](0044-attestation-kind-priors-and-source-trust-taxonomy.md) | Accepted |
+| 0044 | [Attestation-kind priors + source-trust (emergent Glicko-2, not a class ladder)](0044-attestation-kind-priors-and-source-trust-taxonomy.md) | Accepted |
 | 0045 | [`laplace_admin` is a SUPERUSER; supersedes the `laplace_priv` SECURITY DEFINER wrapper pattern](0045-laplace-admin-superuser-supersedes-laplace-priv-wrapper.md) | Accepted (supersedes wrapper architecture; affects Epic B + Epic B′) |
 | 0046 | [`/opt/laplace/external/` as the canonical source for dependency checkouts](0046-persistent-submodule-cache.md) | Accepted (amends 0033 + 0038) |
 | 0047 | [TextDecomposer — observed UTF-8 + UAX#29 → TierTree (no NFC at ingest)](0047-text-decomposer-pure-primitive.md) | Accepted (amended 2026-05-25) |
@@ -86,7 +86,7 @@ Never renumber existing ADRs. If an ADR is superseded, the new one gets the next
 | 0054 | [Selective deployment profiles — embedded / read-only-server / full-server](0054-selective-deployment-profiles.md) | Proposed |
 | 0055 | [Static structural parse / exploded view — universal container dissection (substrate never loads files)](0055-static-structural-parse-exploded-view.md) | Proposed |
 | 0056 | [Weight-tensor static ETL as arena-matchup observation — universal model-ingest extraction pattern](0056-weight-tensor-etl-as-arena-matchup-observation.md) | Proposed |
-| 0057 | [Substrate emission discipline — product yes, packaging no (universal Food principle at the emission boundary)](0057-substrate-emission-discipline-product-not-packaging.md) | Proposed |
+| 0057 | [Substrate emission discipline — product yes, packaging no (universal dissolve-and-resynthesize principle at the emission boundary)](0057-substrate-emission-discipline-product-not-packaging.md) | Proposed |
 | 0058 | [Canonicality criterion for ingestible sources — substrate ingests canonical; derived/lossy is emit-only](0058-canonicality-criterion-for-ingestible-sources.md) | Proposed |
 | 0059 | [Format-writer emission matrix + IFormatWriter C# plugin contract](0059-format-writer-emission-matrix-and-ifw-contract.md) | Proposed |
 | 0060 | [Retire chunk-sequence roadmap — v0.1 milestone + component cadence](0060-retire-chunk-sequence-v0.1-milestone-cadence.md) | Accepted |

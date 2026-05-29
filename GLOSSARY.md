@@ -45,6 +45,12 @@ The type-specific, **lossless** rule for how raw input bytes become the byte ima
 
 Tier 0 atoms are **Unicode codepoints**, universally, across every modality. This is the substrate's language-agnostic semiotic foundation, not merely an engineering convenience. ISO registries, WordNet, OMW, Wiktionary, UD treebanks, Tatoeba, prompts, books, code, images, audio, model recipes, model weights, syntactic dependency labels, and knowledge-graph relations all decompose through type-specific tier ladders until their digital Merkle DAG bottoms at the same 1,114,112-element codepoint alphabet. No modality has its own private T0; pre-seeded once from UCD, used by everyone. Cross-modal reachability is structurally guaranteed because every entity at every tier eventually decomposes to entities in the same T0 hash space.
 
+### Grounded numeric entities
+
+Numbers are **grounded compositional entities**, not opaque tokens — per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truth #7. A number is codepoint digits composing up the tier ladder exactly like any other text: `1` is **one shared entity everywhere** it occurs (in running text, a price, a pixel value, an array index, a model weight's printed form), and a multi-digit/decimal value such as `[3, '.', 1, 4]` is a real higher-tier entity whose constituents are those shared digit + separator entities. There is no private numeric T0 and no per-context renumbering — `255` is the same entity whether it names a byte, a colour channel, or a quantity (cross-modal reachability, same as any T0-grounded content).
+
+This grounding is **why Laplace can do exact math and conventional AI cannot.** Conventional tokenizers shred numbers arbitrarily (`1234` → unpredictable BPE pieces), give them no canonical anchor, and let meaning arise only from attention — "all tug, no ground." A substrate `1` is content-addressed and shared, so `1 + 1 = 2` has stable entities to anchor to and arithmetic relations attach as ordinary typed attestations on real numeric entities rather than being approximated by learned weights. Numeric grounding is a property of T0 composition (see [Universal T0](#universal-t0)), not a special-case numeric type.
+
 ### Tiered Merkle DAG (semantic, not bit-wise)
 
 The content-addressed structure formed by recursively decomposing every entity into lower-tier constituent entities and content-addressing each. T0 = Universal T0 codepoints; T≥1 = type-specific n-grams of lower-tier entities. The Merkle property holds **semantically**: a parent entity's hash is the BLAKE3 of its canonical content (per its type's canonicalization rule), and that content is reproducible by walking the parent's CONTENT-kind physicality trajectory. Different encodings of the same canonical content produce the same hash; lossy transformations produce different entities.
@@ -82,7 +88,7 @@ OBSERVE_ATTESTATION(
 )
 ```
 
-`HAS_POS` is not a bespoke function name; it is the `kind_id` entity inside one universal attestation envelope. Do **not** collapse all relations into a single `HAS_ATTESTATION` kind, because the semantic `kind_id` carries arena semantics, source-trust policy, value tier, and cascade behavior. Do **not** store opaque `params[]`; qualifiers live as context entities, object/value entities, source metadata, recipe content, or meta-attestations so they remain content-addressed, queryable, and arena-resolvable.
+`HAS_POS` is not a bespoke function name; it is the `kind_id` entity inside one universal attestation envelope. Do **not** collapse all relations into a single `HAS_ATTESTATION` kind, because the semantic `kind_id` carries arena semantics, source-trust policy, value semantics, and cascade behavior. Do **not** store opaque `params[]`; qualifiers live as context entities, object/value entities, source metadata, recipe content, or meta-attestations so they remain content-addressed, queryable, and arena-resolvable.
 
 ### Attestation Kind
 
@@ -92,7 +98,7 @@ The `kind_id` of an attestation — itself an entity — naming a **specific typ
 - **Text kinds**: `HAS_POS`, `HAS_LEMMA`, `IS_HYPERNYM_OF`, `IS_LEMMA_OF`, `IS_TRANSLATION_OF`, etc. — drawn from linguistic-resource vocabularies.
 - **Visual kinds**: `EXTRACTS_R_CHANNEL`, `ADJACENT_TO_PIXEL`, `INDICATES_HUE`, etc.
 - **Audio kinds**: `IS_AT_SAMPLE`, `HAS_FREQUENCY_PEAK`, etc.
-- **Tensor-calculation kinds for transformer-family AI models** (a fixed list of ~10): `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`. Each tensor in a transformer-family model is one of these calculation types; ingestion emits attestations of the corresponding kind between substrate entities supplied by the model's `ModalityBinder` (text token entities for text transformers), aggregated across all recipe positions where the source model used that relationship. Per-position attribution is NOT carried on attestations — the **recipe** (text/JSON content on the model entity) is the structural source of truth for layer / head / dimension / per-tensor vocabulary; the architecture template (substrate code, per `IArchitectureTemplate`) distributes substrate's aggregated typed attestations across tensor slots at emit time per the recipe's layout. Storing per-position attribution would be redundant with the recipe. This list is transformer-family-local; other model and modality families register their own small fixed role vocabularies.
+- **Tensor-calculation kinds for transformer-family AI models** (corrected 2026-05-28). **A model's weights are NEVER stored as entities, and never bit-perfect (Vampire mode).** A model contributes two separable things, both grounded in tokens (there are no hidden-dim or intermediate-dim entities — the embedding grounds the model's whole space in the token vocabulary): (a) **GEOMETRY** — token positions as `PROJECTION` / `ProjectionOutput` physicalities (the embedding and `lm_head`; `EMBEDS` and `OUTPUT_PROJECTS` are **NOT** attestation kinds — that was a category error); and (b) **KNOWLEDGE** — every interior tensor (`Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`) carries token-grounded knowledge of its mechanical kind. Each significant cell is a **Glicko-2 matchup observation** — the weight is the match outcome, the model's source-trust is the opponent — and the substrate stores only the **emergent consensus rating** across every source that plays that matchup, never the raw weight. **OPEN per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md):** *how* an interior `d×d` tensor's cells resolve to **which** token entities (the token↔token mapping) *without re-running the GEMM* — `embed_tokens`/`lm_head` are directly token-anchored, but the interior axes are not, and a vocab² bilinear is forbidden (truth #1). Do not treat "every interior cell → a token↔token attestation, uniformly" as a solved mapping; the resolution rule is unsolved and must be pinned with Anthony. Synthesis regenerates fresh weights from the consensus per recipe. Aggregated across recipe positions where the model used that relationship. Per-position attribution is NOT carried on attestations — the **recipe** (text/JSON content on the model entity) is the structural source of truth for layer / head / dimension / per-tensor vocabulary; the architecture template (substrate code, per `IArchitectureTemplate`) distributes substrate's aggregated typed attestations across tensor slots at emit time per the recipe's layout. Storing per-position attribution would be redundant with the recipe. This list is transformer-family-local; other model and modality families register their own small fixed role vocabularies.
 - **Cross-modal kinds**: `DEPICTS`, `CAPTIONS`, `TRANSCRIBES_AS`.
 
 Kinds carry [Arena Semantics](#arena-semantics) (compatibility, cardinality, context policy, observation update scope, conflict policy, source-trust policy, lineage policy, and structural support inputs) as meta-attestations on the kind entity. Cascade composes kind-typed walks, but the substrate's vocabulary is **usage- and structure-shaped**, not transformer-position-shaped.
@@ -127,30 +133,19 @@ Physicality kinds:
 
 A pixel entity may have substrate-canonical CONTENT + PROJECTION physicalities from each vision model that observed it. A text word entity may have CONTENT (observed UAX#29 decomposition), BUILDING_BLOCK (corpus usage), and PROJECTION from each model that embedded it. **`King` and `king` remain distinct entities**; each may have its own PROJECTION rows per model.
 
-Physicality is a projection/access layer, not belief or knowledge. Semantic truth lives in the typed attestation graph (Glicko-2, arena policy). Proximity in S³ proposes candidates; it does not merge identities or override attestations.
+Physicality carries meaning — the S³ frame is the canonical shared embedding space every source is morphed into (the cross-model/dim/vocab consensus moat), per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truth #3. It is **not** "just an index" and physicalities are **not** "not knowledge" (both are forbidden framings). What physicality is *not* is the **decision rule**: retrieval is NOT nearest-neighbor — geometry *seeds candidates*, but what pulls back and how hard is decided by Glicko-2 effective-μ across typed arenas (RD, volatility, source trust, lineage, context, arena policy), not by distance. Proximity in S³ proposes candidates; it does not merge identities or override attestations.
 
 ### Source
 
 An entity that emits attestations and/or physicalities. Linguistic resources (Unicode/UCD, WordNet, OMW, UD, Wiktionary, Tatoeba, ConceptNet, Atomic2020), AI models, knowledge graphs, text corpora, the substrate-canonical placement engine itself, and the running app session are all sources. Sources are substrate entities; their per-kind credibility is tracked via meta-attestations.
 
-### Source Trust Class
+### Source Trust
 
-A 10-tier hierarchy of substrate-canonical entities (per [ADR 0044](docs/adr/0044-attestation-kind-priors-and-source-trust-taxonomy.md)) that classifies each source by its trust band. Adding a new source = picking which tier it falls under + recording a `HAS_TRUST_CLASS` meta-attestation pointing at that tier's entity. Trust class entities carry prior weight, effective-μ multiplier, arena admittance policy, and retention policy as meta-attestations.
+The per-source, per-kind credibility that weights how strongly a source's observations move Glicko-2 inside an arena. **Trust is a Glicko-2 value, self-tuning from cross-source agreement — NOT a fixed tier, band, or `TrustClass_*` ladder.** Per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truth #5, any "trust tier / TrustClass ladder / kind-value tier" is corruption — the word **tier is reserved exclusively for the Merkle stratum** (T0 = Unicode codepoints). A source's credibility is itself attested and rated, not assigned a rung on a fixed ladder; it emerges from how that source's claims cluster with or scatter against independent sources (see [Truths Cluster / Lies Scatter](#truths-cluster--lies-scatter)).
 
-| Tier | Class | Examples |
-|---|---|---|
-| 1 | `TrustClass_SubstrateMandate` | Substrate-canonical source itself; Universal T0 mapping; super-Fibonacci placement |
-| 2 | `TrustClass_StandardsDerived` | Unicode/UCD/UCA/UAX; ISO 639/15924/10646; BCP-47 (IANA); W3C/IETF/RFC |
-| 3 | `TrustClass_AcademicCurated` | Princeton WordNet; UD treebanks; NSF-funded KBs (Atomic2020) |
-| 4 | `TrustClass_AcademicCuratedWithUserInput` | OMW; CLDR community contributions; ConceptNet's WordNet/JMDict sub-sources |
-| 5 | `TrustClass_StructuredCorpus` | Tatoeba; ConceptNet's Wikipedia sub-source; structured public datasets |
-| 6 | `TrustClass_UserCuratedResource` | Wiktionary; Common Crawl tier; OMCS within ConceptNet |
-| 7 | `TrustClass_AIModelProbe` | Single-model static-ETL observations (canonical entity name retained per substrate-version stability; per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md) ingest is static weight-tensor ETL, not probe — the "Probe" name is historical) |
-| 8 | `TrustClass_AppDerived` | Runtime logs, internal state, app-side derivations |
-| 9 | `TrustClass_UserPromptContent` | Prompt-local/user-supplied content and assertions; content identity is real, claim truth awaits corroboration |
-| 10 | `TrustClass_AdversarialUntrusted` | Flagged content (spam / prompt-injection / corruption); excluded from cascade |
+> **OPEN per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md):** [ADR 0044](docs/adr/0044-attestation-kind-priors-and-source-trust-taxonomy.md) previously specified a fixed 10-rung `TrustClass_*` hierarchy with hard-coded effective-μ multipliers and arena-admittance bands. That ladder contradicts the ratified core (trust is a self-tuning Glicko-2 value, never a fixed class). The mechanism by which a *new* source acquires its initial credibility — and how prompt-local vs. adversarial content is admitted to or excluded from arenas without a fixed band — is OPEN and must be pinned with Anthony. Do NOT re-introduce a confident `TrustClass_*` rung table.
 
-Trust class is NOT truth by fiat; it weights Glicko-2 agreement/disagreement inside an arena. Cross-source agreement at tiers 2-5 builds high-confidence consensus; lone tier-7 single-model observations (static ETL per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)) get discounted; tier-10 content doesn't admit to any arena.
+What is settled: the relative ordering intuition is sound as **priors / starting estimates**, not as frozen tiers — Unicode/UCD and ISO standards start more credible than a single AI model's static-ETL observations, which start more credible than uncorroborated user-prompt claims, which still rank above flagged-adversarial content. But each of those is a Glicko-2 estimate that cross-source agreement tunes; cross-source agreement among independent high-credibility sources builds high-confidence consensus, a lone single-model observation (static ETL per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)) gets discounted, and flagged-adversarial content does not admit to truth-seeking arenas.
 
 ### Context
 
@@ -161,8 +156,8 @@ An entity representing the context in which an attestation holds. For context-bo
 A **source-axis** distinction, not a storage-axis distinction. All three flow into the same `entities` / `physicalities` / `attestations` tables; the difference is which source entity attests what.
 
 - **Substrate data** — entities + attestations sourced from seed/canonical sources (Unicode/UCD, WordNet, OMW, UD, Wiktionary, Tatoeba, ConceptNet, Atomic2020, AI-model static-ETL observations per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)). Carries the substrate's accumulated typed knowledge — attestations of every kind, rich enough to drive cascade inference.
-- **App data** — attestations sourced from the running app/runtime (session telemetry, internal app state attestations, derived signals). Trust class: app-specific, generally narrow scope.
-- **User data** — entities arriving from user content (prompts, uploads, queries) **typically WITHOUT prior attestations**. Content dedupes by hash to existing rows: a user prompt containing common words inherits the substrate's full attestation cloud on those rows *for free*. The substrate may also derive its own attestations at ingest (POS tagging, decomposition, structural relations) under the substrate-canonical source. User-supplied attestations (if any) attach with `source_id = <user/session entity>` and prompt-local/user-content trust class. The content occurrence and composition are real; any world-claim made by the user remains prompt-local/source-scoped unless explicitly promoted by policy and corroboration.
+- **App data** — attestations sourced from the running app/runtime (session telemetry, internal app state attestations, derived signals). Trust: app-specific credibility estimate, generally narrow scope (see [Source Trust](#source-trust)).
+- **User data** — entities arriving from user content (prompts, uploads, queries) **typically WITHOUT prior attestations**. Content dedupes by hash to existing rows: a user prompt containing common words inherits the substrate's full attestation cloud on those rows *for free*. The substrate may also derive its own attestations at ingest (POS tagging, decomposition, structural relations) under the substrate-canonical source. User-supplied attestations (if any) attach with `source_id = <user/session entity>` and prompt-local/user-content credibility (a starting estimate, not a fixed class — see [Source Trust](#source-trust)). The content occurrence and composition are real; any world-claim made by the user remains prompt-local/source-scoped unless explicitly promoted by policy and corroboration.
 
 Operational implication: a user prompt `"what is a cat?"` decomposes to entities that already exist (the words/graphemes/codepoints), each carrying attestations from WordNet, Wiktionary, ConceptNet, AI-model static-ETL observations, etc. The cascade has dense substrate-supplied knowledge to walk; the user contributes the *query shape* and prompt-local composition event, not global truth by default.
 
@@ -235,7 +230,7 @@ The seed-layer order (ADR 0037) is the dependency order: each layer's decomposer
 
 ### Glome (S³)
 
-The 3-sphere — surface of the 4-ball. The substrate's atomic layer (Unicode codepoints) lives on S³ via super-Fibonacci spirals + Hopf fibration as the substrate-canonical CONTENT physicality coord for T0 entities. The geometric layer is **value-additive enrichment**, not load-bearing: cascade inference is A* through the attestation graph weighted by Glicko-2 (see [A*](#a-in-laplace-context)); strip S³ and the substrate still functions. S³ accelerates fuzzy candidate discovery via Hilbert range scans and supports visualization + modality clustering. It is not where meaning lives.
+The 3-sphere — surface of the 4-ball. The substrate's atomic layer (Unicode codepoints) lives on S³ via super-Fibonacci spirals + Hopf fibration as the substrate-canonical CONTENT physicality coord for T0 entities. **The S³ glome IS the canonical shared embedding space** every source is morphed into (via Procrustes / Laplacian-eigenmaps / Gram-Schmidt onto the Unicode-anchored frame) — that shared frame is the cross-model/dim/vocab consensus moat, per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truth #3. The geometry **carries meaning**; "geometry is just an index" and "not load-bearing / not where meaning lives" are **forbidden framings**. What geometry is *not* is the *decision rule*: **retrieval is NOT nearest-neighbor** — S³ proximity (Hilbert range scans) only *seeds candidates*; the semantic decision is Glicko-2 effective-μ over typed attestation arenas (see [A*](#a-in-laplace-context), [Attestation-response neighborhood](#attestation-response-neighborhood)). S³ also supports visualization + modality clustering.
 
 ### 4-Ball
 
@@ -303,6 +298,14 @@ QR decomposition producing an orthonormal basis. Used in the alignment pipeline 
 
 A rating system extending Glicko (Mark Glickman). Provides rating + rating-deviation + volatility per rated item, with time decay built in. Used in Laplace to **rate every attestation** — the substrate's analog of weight magnitude in an AI model. The cascade orders typed-edge traversal by Glicko-2-derived [Effective Mu](#effective-mu) the way a forward pass weights activations by trained weight magnitude.
 
+### Weight-table ETL (model ingestion)
+
+The **only** sanctioned model-ingestion mechanism, per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truth #1 + [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md). A weight tensor is a 2D lookup table flattened to a 1D float array; each cell is an **already-computed relationship**, not a value to recompute. Ingestion is a **streaming `O(params)` static ETL**: stream the tensor, emit significant cells as Glicko-2 matchup observations (weight = match outcome, the source model's own trust = opponent strength — see [Source Trust](#source-trust)), in parallel (oneTBB). It must scale linearly to frontier models (Qwen3-480B, Llama4 Maverick, DeepSeek MoE, Flux diffusion). No model invocation, no GPU, no probe set — `WeightTensorETL` reads bytes-on-disk only (see [Probe — RETIRED](#probe-in-ingestion-context--retired)).
+
+**Forbidden** (truth #1 — this is the disease, not a tuning knob): GEMM-at-ingest (an `E·W·Wᵀ·Eᵀ` bilinear over the vocab to score token×token pairs), materializing a vocab² matchup space, or a flat per-tensor top-k that discards most of the model. That approach took an hour on a 2 GB model and produced an empty result (646/32000 tokens). Selection is **never** raw-weight-magnitude top-k; sparsity is emergent (see [Emergent Sparsity](#emergent-sparsity-from-matchup-consensus), [Noise floor](#noise-floor)).
+
+> **OPEN per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md):** *which* token entities an **interior** `d×d` tensor's cells (`q/k/v/o/gate/up/down`) resolve to — the token↔token mapping that does **not** re-run the GEMM — is unsolved. `embed_tokens` / `lm_head` are directly token-anchored (cheap, real); the interior-axis resolution must be pinned with Anthony, not fabricated.
+
 ### Arena
 
 A semantically-coherent subset of attestations whose ratings compose. Defined by the attestation-kind hierarchy: e.g., all `HAS_POS` attestations form one arena; all `Q_PROJECTS` attestations sourced to one model form another. Ratings within an arena are commensurable; ratings across arenas are not.
@@ -313,17 +316,19 @@ The metadata attached to an arena or attestation kind that tells Glicko-2 how in
 
 ### Effective Mu
 
-The traversal/synthesis score derived from Glicko-2 rating (`mu`) adjusted by rating deviation, volatility, source credibility for the attestation kind, context compatibility, source trust class, and structural support. Hot-path selection orders by effective mu, not raw source count. In the forward-pass analogy: this is the substrate's "weight magnitude after activation and gating".
+The traversal/synthesis score derived from Glicko-2 rating (`mu`) adjusted by rating deviation, volatility, source credibility for the attestation kind, context compatibility, source trust (a Glicko-2 estimate, not a fixed class — see [Source Trust](#source-trust)), and structural support. Hot-path selection orders by effective mu, not raw source count. In the forward-pass analogy: this is the substrate's "weight magnitude after activation and gating".
 
-### Lottery-Ticket-Aware Sparsity
+### Emergent Sparsity (from matchup consensus)
 
-Multi-pass filter for AI model ingestion: (a) per-tensor top-k% by importance; (b) per-row top-k for attention / MLP structure preservation; (c) static-mathematical retention test (spectral preservation / singular-value retention / matchup-distribution agreement between sparse and dense aggregated-attestation subgraphs per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md) — NOT probe-validated; the substrate does not execute models at ingest). **NEVER a flat numeric threshold.** Applies to weight-based sources only. Linguistic resources are ingested at full fidelity.
+Sparsity in AI-model ingestion is **emergent, not a magnitude filter applied to weights** (corrected 2026-05-28; supersedes the earlier "lottery-ticket-aware multi-pass top-k" framing, which was conventional NN pruning — Frankle/Carlin — smuggled in). A weight is never a stored value; it is a Glicko-2 matchup outcome (per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)). Sparsity arises from: (a) **absent token-pair edges** — no relationship, no matchup, exact zero by construction ("zero is not an observation"); (b) **emergent consensus discounting** — effective-μ / RD / source-trust / cross-source clustering decide load-bearing vs. noise at the consensus layer, never a per-model magnitude top-k at ingest (truths cluster → low RD; outliers scatter → high RD). **Per-tensor / per-row top-k% by weight magnitude is FORBIDDEN** (see [RULES.md R3](RULES.md)). Linguistic resources are ingested at full fidelity.
+
+> **OPEN per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md):** *which* token-pairs an **interior** `d×d` tensor (`q/k/v/o/gate/up/down`) yields as attestations — i.e. how interior tensor axes resolve to token entities — is an OPEN question, not a settled algorithm. In particular, computing a `E·W·Wᵀ·Eᵀ` bilinear over the vocab to score token×token pairs is **FORBIDDEN** (truth #1): it is GEMM-at-ingest, materializes a vocab² matchup space, and was the disease that took an hour on a 2 GB model and produced an empty result. `embed_tokens` / `lm_head` are directly token-anchored (cheap, real); the interior-tensor → token-entity resolution that does **not** re-run the GEMM is unsolved and must be pinned with Anthony. Do NOT substitute a confident scoring rule here. What IS settled: ingestion is streaming `O(params)` static weight-tensor ETL emitting significant cells as matchup observations (truth #1), and selection is never raw-weight-magnitude top-k.
 
 The same principle applies to the substrate's attestation set as a whole: most candidate attestations are silent (no source has asserted them, or they're low-effective-μ noise); the load-bearing ones drive cascade traversal. The substrate is sparse-by-construction at the attestation graph level too — most positions in the (subject × kind × object × context) tensor are exact zero, just like most positions in a sparse model's weight tensors.
 
 ### Noise floor
 
-The lottery-ticket-aware filter applied during AI model ingestion that discards gradient jitter, init noise, training artifacts. Zero-and-near-zero weights are trash, not data. NOT a flat threshold.
+There is **no magnitude noise-floor filter** (corrected 2026-05-28). The earlier framing — "discard zero-and-near-zero weights as trash" — was conventional pruning and is wrong: a small nonzero weight is a real matchup outcome, not noise, and discarding it by magnitude is the rejected "magnitude = importance" reflex ([ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)). The substrate's "noise floor" is **emergent**: exact-zero / absent edges are simply never observed (no matchup), and weakly-supported matchups surface as high-RD / low-effective-μ and are discounted at the consensus layer — see [Emergent Sparsity](#emergent-sparsity-from-matchup-consensus) + [RULES.md R3](RULES.md). Never a magnitude threshold, flat or relative.
 
 ### Cascade (attestation-response cascade)
 
@@ -371,11 +376,13 @@ The source-rating principle that true claims tend to gather support across indep
 
 ---
 
-## Codec concepts
+## AI-operations-as-DB-operations concepts
 
-### AI⇄DB codec
+> **Label note (per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truth #10):** the word **"codec" is banned** — it implies round-trip *preservation*, which the substrate explicitly does NOT do (it dissolves the artifact to semantic facts and discards the blob; export is fresh synthesis, never a copy — truths #6, #8). The mappings below are real (CRUD over facts replaces gradient descent); the *label* "codec" is a tell, not a concept. State the mechanism, not the label.
 
-The reframing of AI operations as database operations. **The substrate's attestation graph + Glicko-2 + A* cascade IS a forward pass** — same shape of computation as a transformer's matmul + softmax + activation pipeline, evaluated by typed-edge traversal instead of matrix arithmetic:
+### AI operations as DB operations
+
+The reframing of AI operations as database operations (formerly mislabeled "AI⇄DB codec" — see label note above; "codec" is banned). **The substrate's attestation graph + Glicko-2 + A* cascade IS a forward pass** — same shape of computation as a transformer's matmul + softmax + activation pipeline, evaluated by typed-edge traversal instead of matrix arithmetic:
 
 - ingest = INSERT entities + emit attestations of typed kinds
 - train = `WHERE` clause / source scope
@@ -385,11 +392,13 @@ The reframing of AI operations as database operations. **The substrate's attesta
 - combine = ingest multiple sources into the same substrate
 - inference = cascade A* traversal weighted by Glicko-2 effective-μ
 
-### Model-Codec Fidelity
+### Model Synthesis Fidelity
 
-For source-scoped model round-trip, the property that `ModelDecomposer` captures the source model's load-bearing computation as recipe metadata, tokenizer/modality content, physicalities, weight-cell matchup observations (static ETL per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)), architecture-specific attestations, and lottery-ticket sparse edges. If ingestion and synthesis are faithful under the source's own recipe/scope, the native Synthesis package should land in the source model's behavioral basin; GGUF is an optional proof export for local chat/demo validation, not the native target.
+(Formerly "Model-Codec Fidelity"; "codec" is a banned label — see label note above.) For source-scoped model round-trip, the property that `ModelDecomposer` captures the source model's load-bearing computation as recipe metadata, tokenizer/modality content, physicalities, weight-cell matchup observations (static ETL per [ADR 0056](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md)), architecture-specific attestations, and the emergent-sparse edge set (absent matchups + consensus discounting — NOT lottery-ticket / magnitude top-k; see [Emergent Sparsity](#emergent-sparsity-from-matchup-consensus)). If ingestion and synthesis are faithful under the source's own recipe/scope, the native Synthesis package should land in the source model's behavioral basin; GGUF is an optional proof export for local chat/demo validation, not the native target.
 
 ### Vampire mode
+
+> **Label caution (per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truth #10):** "vampire mode" / "food" are cute names; a cute name is a tell, not a concept. The defined mechanism below is anchor-consistent (dissolve to facts, discard the blob, synthesize fresh — truths #6, #8); prefer stating that mechanism over leaning on the label.
 
 The AI-models-specific instance of the universal [Food principle](#food-principle): drain knowledge into attestations; **discard the weight bytes entirely**; synthesize fresh packaging on demand. Model files do NOT become substrate entities at the byte level — the substrate never preserves model weights bit-perfectly. Only the recipe, tokenizer, architecture-template entities and the extracted typed attestations remain. Round-trips emit *fresh* files from current substrate state, not copies.
 
@@ -411,7 +420,7 @@ The attestation facet of an entity: rows in `attestations` whose subject/object/
 
 ### Recipe
 
-The architectural template of a model — a **template-with-parameters**. Auto-extracted at ingest from `config.json` + `tokenizer.json` + auxiliary architecture files; stored as a `Model_Recipe`-typed entity (text/JSON content) with typed attestations (`HAS_HIDDEN_SIZE`, `HAS_NUM_LAYERS`, `HAS_NUM_HEADS`, `HAS_NUM_KV_HEADS`, `HAS_INTERMEDIATE_SIZE`, `HAS_VOCAB_SIZE`, `HAS_DTYPE`, `USES_TOKENIZER`, `USES_ROPE_THETA`, `USES_ACTIVATION`, `IS_A Architecture_<X>`, etc.).
+The architectural template of a model — a **template-with-parameters**, equivalently a **fillable mold** (per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truth #6): synthesis **pours substrate-consensus facts into the chosen shape** (dim, dense/MoE, layer count, vocab subset, dtype, sparsity target, knowledge scope). The same machinery fills the source's own mold (round-trip) or any other mold (retarget) — the recipe decides the shape; the substrate decides the contents. Authoring facts (CRUD over entities) is the training analog; the recipe is never bit-perfect and never a copy of any source (see [Vampire mode](#vampire-mode), [Substrate Synthesis](#substrate-synthesis)). Auto-extracted at ingest from `config.json` + `tokenizer.json` + auxiliary architecture files; stored as a `Model_Recipe`-typed entity (text/JSON content) with typed attestations (`HAS_HIDDEN_SIZE`, `HAS_NUM_LAYERS`, `HAS_NUM_HEADS`, `HAS_NUM_KV_HEADS`, `HAS_INTERMEDIATE_SIZE`, `HAS_VOCAB_SIZE`, `HAS_DTYPE`, `USES_TOKENIZER`, `USES_ROPE_THETA`, `USES_ACTIVATION`, `IS_A Architecture_<X>`, etc.).
 
 A Recipe is **bidirectional** through the [`IArchitectureTemplate`](docs/adr/0011-polymorphic-plugin-architecture.md) plugin (per ADR 0043 ModelDecomposer composition):
 
@@ -425,8 +434,10 @@ Recipe parameters are user-authorable. The substrate can emit custom recipes tha
 Fully parametric model emission from substrate state. Reads three inputs:
 
 1. **Recipe** — text/JSON content on the recipe entity (structural source of truth: num_layers, num_heads, per-tensor token vocabularies, dimensions, layout).
-2. **Cross-source consensus** of the fixed-vocabulary tensor-calculation attestations (`EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`) between substrate token entities. For each (subject, kind, object, context) tuple the recipe needs, the substrate aggregates Glicko-2 effective-μ across every source that has attested that relationship — source-trust weighted, arena-scoped, with cross-source agreement clustering ("Truths Cluster"). Source attribution rides on individual attestation rows for traceability, but the emit-time value is consensus. The recipe's `knowledge_scope` field optionally narrows source scope (e.g., "only Qwen3 sources" or "Qwen3 + Llama union").
+2. **Cross-source consensus** of the token↔token tensor-calculation attestations (`Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`) between substrate token entities — each a Glicko-2 matchup whose consensus across sources is read at emit time. (Embedding geometry is reconstructed from the token entities' `PROJECTION`/`ProjectionOutput` physicalities; `EMBEDS`/`OUTPUT_PROJECTS` are NOT attestation kinds — corrected 2026-05-28.) For each (subject, kind, object, context) tuple the recipe needs, the substrate aggregates Glicko-2 effective-μ across every source that has attested that relationship — source-trust weighted, arena-scoped, with cross-source agreement clustering ("Truths Cluster"). Source attribution rides on individual attestation rows for traceability, but the emit-time value is consensus. The recipe's `knowledge_scope` field optionally narrows source scope (e.g., "only Qwen3 sources" or "Qwen3 + Llama union").
 3. **Architecture template** (substrate code, per `IArchitectureTemplate`) — distributes the consensus values across the recipe's tensor slots per the layout.
+
+> **OPEN per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md):** two pieces of input #2/#3 above are genuinely unsolved and must not be read as settled — (a) how an **interior** `d×d` tensor slot (`q/k/v/o/gate/up/down`) is populated from token↔token consensus *without re-running the GEMM* is the same OPEN interior-resolution question that governs ingest (see [Emergent Sparsity](#emergent-sparsity-from-matchup-consensus)); and (b) the "pour facts into the mold" / distribution algorithm **at frontier scale** is OPEN. `embed_tokens` / `lm_head` slots (reconstructed from `PROJECTION` physicalities) are the directly-anchored, settled part. Do NOT substitute a confident interior-distribution rule here; pin with Anthony.
 
 Output: a complete model package of any architecture family, deterministically materialized from substrate state. The native text-model package is safetensors-style: tensor shards, index/manifest, recipe/config, tokenizer assets, source scope, provenance, sparsity metadata, and conversion metadata. Positions with no significant consensus emit zero (R4 sparse-by-construction). Substrate-consensus weights under the chosen recipe + scope, never bit-perfect copies of any source (Vampire mode). GGUF is a compatibility/proof artifact that can be produced from the native package; it is not the substrate's native export shape. Ingesting more independent high-trust sources strengthens the consensus on agreed relationships and surfaces disputes on the rest — emitted models improve as substrate accumulates observations, without retraining.
 
@@ -446,7 +457,7 @@ The performance consequence of sparse-by-construction emission: exact zero tenso
 
 Three shared C/C++ libraries (per ADR 0024):
 - `liblaplace_core.so` — coord4d, hash128 (BLAKE3), hilbert4d, mantissa, geom4d serde, Glicko-2 fixed-point, A* primitives
-- `liblaplace_dynamics.so` — Procrustes, eigenmaps, Gram-Schmidt, lottery-ticket sparsity (links oneMKL + Spectra + TBB)
+- `liblaplace_dynamics.so` — Procrustes, eigenmaps, Gram-Schmidt, sparsity primitives (links oneMKL + Spectra + TBB)
 - `liblaplace_synthesis.so` — recipe extraction, architecture templates, feature extractors, native package writers, proof/compatibility format writers
 
 The same `.so` files are loaded by the PG extensions AND by the C# app layer via P/Invoke. Single source of math truth.
@@ -482,7 +493,7 @@ The discipline that adding new capability touches ONE plugin, never all layers. 
 
 ### Probe (in ingestion context) — RETIRED
 
-**Superseded by ADR 0056.** Earlier model ingest framing assumed running an AI model on input data to observe outputs/attention/activations. Per [ADR 0056 weight-tensor ETL](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md), model ingest is **static weight-tensor ETL** — typed-arena-matchup observations are computed directly from weight tensors via `WeightTensorETL`; no model invocation, no GPU, no probe set. Cross-references to "probe observations" in older docs/ADRs are historical; the current term is **static-ETL observation** or **weight-cell matchup observation**. The `TrustClass_AIModelProbe` substrate entity retains its canonical name (substrate-version stability per ADR 0044) but its semantic meaning is now "AI-model static-ETL observation".
+**Superseded by ADR 0056.** Earlier model ingest framing assumed running an AI model on input data to observe outputs/attention/activations. Per [ADR 0056 weight-tensor ETL](docs/adr/0056-weight-tensor-etl-as-arena-matchup-observation.md), model ingest is **static weight-tensor ETL** — typed-arena-matchup observations are computed directly from weight tensors via `WeightTensorETL`; no model invocation, no GPU, no probe set. Cross-references to "probe observations" in older docs/ADRs are historical; the current term is **static-ETL observation** or **weight-cell matchup observation**. (Note: the `TrustClass_AIModelProbe` entity name appears in older docs as a rung of the retired fixed `TrustClass_*` ladder; per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) truth #5 source trust is a self-tuning Glicko-2 value, not a fixed class — see [Source Trust](#source-trust). The AI-model-source credibility is a starting estimate, OPEN as to its exact bootstrap.)
 
 ### Round-trip
 
@@ -504,7 +515,7 @@ Each Decomposer ingests its **domain's full data ecosystem** (not a single file)
 - **Entities produced**: `Codepoint` (1,114,112 T0 atoms), `Script`, `Block`, `General_Category`, `BiDi_Class`, `Line_Break_Class`, `Grapheme_Break_Class`, `Word_Break_Class`, `Sentence_Break_Class`, `East_Asian_Width`, `Unicode_Version`, `Named_Sequence`, `Emoji_ZWJ_Sequence`, `Variation_Sequence`.
 - **Attestation kinds emitted**: `HAS_GENERAL_CATEGORY`, `IS_IN_BLOCK`, `HAS_SCRIPT`, `HAS_SCRIPT_EXTENSION`, `HAS_BIDI_CLASS`, `HAS_CANONICAL_COMBINING_CLASS`, `HAS_LINE_BREAK_CLASS`, `HAS_GRAPHEME_BREAK_PROP`, `HAS_WORD_BREAK_PROP`, `HAS_SENTENCE_BREAK_PROP`, `HAS_EAST_ASIAN_WIDTH`, `HAS_AGE`, `HAS_UPPERCASE_MAPPING`, `HAS_LOWERCASE_MAPPING`, `HAS_TITLECASE_MAPPING`, `HAS_CASE_FOLDING`, `DECOMPOSES_TO`, `HAS_NFD_DECOMPOSITION`, `HAS_NFKC_DECOMPOSITION`, `HAS_NUMERIC_VALUE`, `IS_EMOJI`, `IS_EMOJI_PRESENTATION`, `IS_EMOJI_MODIFIER`, `IS_EMOJI_COMPONENT`, `HAS_UCA_PRIMARY_WEIGHT`, `HAS_UCA_SECONDARY_WEIGHT`, `HAS_UCA_TERTIARY_WEIGHT`, `HAS_UCA_COLLATION_ORDER`, `HAS_RADICAL`, `HAS_STROKE_COUNT`, `HAS_PINYIN`, `HAS_JYUTPING`, `HAS_ON_READING`, `HAS_KUN_READING`, `HAS_VARIANT_OF`, ...
 - **Physicalities**: substrate-canonical CONTENT physicality on every Codepoint (coord via super-Fibonacci(UCA collation order); trajectory = NULL for T0). Sequences (Named/ZWJ/Variation) get CONTENT physicalities with codepoint-constituent trajectories.
-- **Trust class**: foundational constants (highest).
+- **Trust prior**: starts highest among ingested sources (foundational standards constants); a Glicko-2 estimate, not a fixed tier (see [Source Trust](#source-trust)).
 - **Build artifact siblings (per ADR 0006)**: perf-cache binary + DB seed rows — both from UCD/DUCET via `laplace_unicode_seed_compute`; neither feeds the other.
 
 ### ISODecomposer (Layer 2)
@@ -513,7 +524,7 @@ Each Decomposer ingests its **domain's full data ecosystem** (not a single file)
 - **Entities produced**: `Language` (~7,800 from ISO 639-3 + macrolanguage chains), `Script` (~200, shared hash space with UnicodeDecomposer — the `Latn` row is one row referenced by both), `Region` (~250 from CLDR validity-region + BCP-47), `Currency` (~200), `Variant`, `Subdivision`, `Unit`.
 - **Attestation kinds emitted**: `HAS_SCOPE`, `HAS_LANGUAGE_TYPE` (Living/Extinct/Ancient/Historical/Constructed), `HAS_ISO_639_1_CODE`, `HAS_ISO_639_2B_CODE`, `HAS_ISO_639_2T_CODE`, `HAS_REFERENCE_NAME`, `HAS_INVERTED_NAME`, `BELONGS_TO_MACROLANGUAGE`, `IS_MACROLANGUAGE_OF`, `IS_RETIRED_AS`, `HAS_VALIDITY` (regular/deprecated/private-use/unknown/macroregion), `HAS_ISO_15924_NUMERIC`, `HAS_ISO_15924_EN_NAME`, `HAS_ISO_15924_FR_NAME`, `HAS_UCD_PVA`, `ADDED_IN_UNICODE_VERSION`, `HAS_LIKELY_SCRIPT`, `HAS_LIKELY_REGION`, `HAS_LIKELY_LANGUAGE`, `HAS_ISO_3166_ALPHA_2`, `HAS_ISO_3166_ALPHA_3`, `HAS_ISO_3166_NUMERIC`, `IS_MACROREGION_OF`, `BELONGS_TO_MACROREGION`, `HAS_ISO_4217_CODE`, `HAS_TERRITORY`, `IS_REPLACED_BY`.
 - **Cross-references**: `Script` rows shared with UnicodeDecomposer; `Language` rows referenced from every subsequent multilingual decomposer.
-- **Trust class**: standards-derived.
+- **Trust prior**: standards-derived starting estimate (high), self-tuning via cross-source agreement (see [Source Trust](#source-trust)).
 
 ### WordNetDecomposer (Layer 3)
 
@@ -522,7 +533,7 @@ Each Decomposer ingests its **domain's full data ecosystem** (not a single file)
 - **Attestation kinds emitted**: `IS_LEMMA_OF`, `HAS_POS`, `HAS_GLOSS`, `HAS_EXAMPLE`, `IS_HYPERNYM_OF`, `IS_HYPONYM_OF`, `IS_MERONYM_OF` (member/part/substance variants), `IS_HOLONYM_OF`, `IS_ANTONYM_OF`, `IS_SIMILAR_TO`, `IS_DERIVATIONALLY_RELATED_TO`, `IS_PERTAINYM_OF`, `HAS_ATTRIBUTE`, `ENTAILS`, `CAUSES`, `IS_VERB_GROUP_OF`, `HAS_DOMAIN_TOPIC`, `HAS_DOMAIN_REGION`, `HAS_DOMAIN_USAGE`.
 - **Cross-references**: `Text` (Unicode), `Language` (ISO — English).
 - **Physicalities**: PROJECTION from Laplacian eigenmaps on the synset relation graph, Procrustes-aligned via shared Unicode-anchored entities.
-- **Trust class**: curated academic.
+- **Trust prior**: curated-academic starting estimate (see [Source Trust](#source-trust)).
 
 ### OMWDecomposer (Layer 4)
 
@@ -530,7 +541,7 @@ Each Decomposer ingests its **domain's full data ecosystem** (not a single file)
 - **Entities produced**: per-language `Text` lemma entities (dedup against existing where the same surface form pre-exists), `OMW_LangPack` metadata entity per language.
 - **Attestation kinds emitted**: `IS_LEMMA_OF` (context = `Language` entity), `HAS_LANGUAGE`, `IS_TRANSLATION_OF` (via shared synset).
 - **Cross-references**: `WordNet_Synset` (WordNet — same row across all languages), `Language` (ISO), `Text` (Unicode).
-- **Trust class**: academically-linked user-curated.
+- **Trust prior**: academically-linked user-curated starting estimate (see [Source Trust](#source-trust)).
 
 ### UDDecomposer (Layer 5)
 
@@ -538,7 +549,7 @@ Each Decomposer ingests its **domain's full data ecosystem** (not a single file)
 - **Entities produced**: `UD_Treebank` (per treebank), `UD_Sentence`, `UD_Token`, reused `Text` for surface forms + lemmas.
 - **Attestation kinds emitted** (mostly context-bound to the sentence entity): `HAS_POS` (UPOS/XPOS scheme carried by source/context metadata), `HAS_LEMMA`, `HAS_MORPH_FEATURE` (feature name/value represented as value entities), `HAS_DEPENDENCY_HEAD` (dependency relation represented as context/value metadata), `HAS_ENHANCED_DEP`.
 - **Cross-references**: `Text` (Unicode), `Language` (ISO), `WordNet_Sense` where annotated.
-- **Trust class**: curated academic.
+- **Trust prior**: curated-academic starting estimate (see [Source Trust](#source-trust)).
 
 ### WiktionaryDecomposer (Layer 6)
 
@@ -546,7 +557,7 @@ Each Decomposer ingests its **domain's full data ecosystem** (not a single file)
 - **Entities produced**: `Wiktionary_Entry` (per word per language), reused `Text` for definitions / etymology / IPA, `Audio_Track` for pronunciation recordings.
 - **Attestation kinds emitted**: `HAS_POS_SECTION`, `HAS_DEFINITION`, `HAS_ETYMOLOGY`, `HAS_IPA_PRONUNCIATION`, `HAS_AUDIO_PRONUNCIATION`, `HAS_INFLECTION_FORM`, `IS_TRANSLATION_OF` (source/target language carried by entities or context), `HAS_USAGE_EXAMPLE`, `HAS_ALTERNATE_FORM`.
 - **Cross-references**: `Text` (Unicode), `Language` (ISO), `WordNet_Synset` / `OMW_LangPack` where mapped.
-- **Trust class**: academically-linked user-curated.
+- **Trust prior**: academically-linked user-curated starting estimate (see [Source Trust](#source-trust)).
 
 ### TatoebaDecomposer (Layer 7)
 
@@ -554,7 +565,7 @@ Each Decomposer ingests its **domain's full data ecosystem** (not a single file)
 - **Entities produced**: `Tatoeba_Sentence`, `Audio_Track`, `Voice` (speaker).
 - **Attestation kinds emitted**: `IS_TRANSLATION_OF` (source/target language carried by entities or context), `HAS_RECORDING`, `HAS_VOICE`, `HAS_LANGUAGE`, `HAS_LICENSE`.
 - **Cross-references**: `Text` (Unicode), `Language` (ISO).
-- **Trust class**: structured corpus.
+- **Trust prior**: structured-corpus starting estimate (see [Source Trust](#source-trust)).
 
 ### Atomic2020Decomposer (Layer 8a)
 
@@ -562,7 +573,7 @@ Each Decomposer ingests its **domain's full data ecosystem** (not a single file)
 - **Entities produced**: `Atomic2020_Event` (event text content).
 - **Attestation kinds emitted**: `BECAUSE`, `INTENDS`, `EFFECT`, `REQUIRES`, `IS_AFTER`, `IS_BEFORE`, `OXEFFECT_ON`, `OXREACT_TO`, `OXATTR`, `XINTENT`, `XEFFECT`, `XREACT`, `XATTR`, `XNEED`, `XWANT`, `HINDERED_BY`, ...
 - **Cross-references**: `Text` (Unicode).
-- **Trust class**: structured corpus.
+- **Trust prior**: structured-corpus starting estimate (see [Source Trust](#source-trust)).
 
 ### ConceptNetDecomposer (Layer 8b)
 
@@ -570,7 +581,7 @@ Each Decomposer ingests its **domain's full data ecosystem** (not a single file)
 - **Entities produced**: `ConceptNet_Concept` (URI-keyed; multilingual via Language context).
 - **Attestation kinds emitted**: `IS_A`, `PART_OF`, `USED_FOR`, `CAPABLE_OF`, `AT_LOCATION`, `HAS_PROPERTY`, `CAUSES`, `MOTIVATED_BY_GOAL`, `HAS_SUBEVENT`, `HAS_FIRST_SUBEVENT`, `HAS_LAST_SUBEVENT`, `RECEIVES_ACTION`, `MADE_OF`, `SIMILAR_TO`, `DERIVED_FROM`, `ENTAILS`, `MANNER_OF`, `LOCATED_NEAR`, `HAS_PREREQUISITE`, ...
 - **Cross-references**: `Text` (Unicode), `Language` (ISO), `WordNet_Synset` / `OMW_LangPack` where mapped, `Wiktionary_Entry` where mapped.
-- **Trust class**: structured corpus (mixed via sub-sources — each sub-source carries its own trust class).
+- **Trust prior**: structured-corpus starting estimate (mixed via sub-sources — each sub-source carries its own credibility estimate, self-tuning per [Source Trust](#source-trust)).
 
 ### TreeSitterDecomposer (Layer 9)
 
@@ -578,7 +589,7 @@ Each Decomposer ingests its **domain's full data ecosystem** (not a single file)
 - **Entities produced**: `Programming_Language` (per grammar — cross-references ISO/IETF language tags where they exist), `Grammar_Rule`, `Highlight_Query`, plus when ingesting code: `Code_Token`, `Code_Span`, `Code_File`, `Code_Repository`.
 - **Attestation kinds emitted**: `HAS_GRAMMAR_RULE`, `HAS_HIGHLIGHT_QUERY`, `IS_KEYWORD_IN`, `IS_OPERATOR_IN`, plus parse-tree attestations when ingesting code: `HAS_PARSE_NODE`, `IS_CHILD_OF`, `MATCHES_QUERY` (grammar rule carried by object/context metadata).
 - **Cross-references**: `Text` (Unicode for source code content), `Language` (ISO/IETF where the programming language has a tag).
-- **Trust class**: structured corpus.
+- **Trust prior**: structured-corpus starting estimate (see [Source Trust](#source-trust)).
 
 ### ModelDecomposer&lt;ContainerFormat&gt; (Layer 10)
 
@@ -601,14 +612,14 @@ AI models are not a special case. They use the same substrate primitives as ever
 - **Attestation kinds emitted**:
   - **Recipe metadata** on the model entity: `HAS_HIDDEN_SIZE`, `HAS_NUM_LAYERS`, `HAS_NUM_HEADS`, `IS_A Architecture_<X>`, `USES_TOKENIZER`, `USES_ROPE_THETA`, `USES_ACTIVATION`, etc.
   - **Tokenizer marker attestations** on the tokenizer entity describing how each vocab text entity gets re-marked at emission (continuation, leading-space, etc.).
-  - **Typed mechanical-role attestations between modality-bound substrate entities**. For transformer-family text models, the initial fixed-vocabulary kinds are `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`. Other architecture families have their own fixed role vocabularies; only lottery-ticket-validated load-bearing positions become attestations.
+  - **Typed mechanical-role token↔token attestations between modality-bound substrate entities**. For transformer-family text models, the fixed-vocabulary kinds are `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES` (corrected 2026-05-28); the embedding and `lm_head` are GEOMETRY → `PROJECTION` / `ProjectionOutput` physicalities, **not** `EMBEDS` / `OUTPUT_PROJECTS` attestation kinds. Other architecture families have their own fixed role vocabularies; the edge set is emergent-sparse (absent matchups + consensus discounting per [Emergent Sparsity](#emergent-sparsity-from-matchup-consensus)), never a magnitude/lottery-ticket top-k. *(Which interior-tensor cells resolve to which token-pair attestations is OPEN per [docs/SUBSTRATE-FOUNDATION.md](docs/SUBSTRATE-FOUNDATION.md) — see [Emergent Sparsity](#emergent-sparsity-from-matchup-consensus).)*
   - **No per-position meta-attestations on tensor-calculation attestations.** Per-position structural attribution (which layer / which head / which tensor index a calculation lives at) is **recipe content** — captured in the model's recipe entity (text/JSON describing num_layers, num_heads, per-tensor token vocabularies, layout). The architecture template wires substrate's aggregated typed attestations into the recipe's structural shape at emit time; redundant per-position storage on attestations is not needed.
 - **Physicalities**:
   - **PROJECTION** from the model's embedding space, Procrustes-aligned to substrate 4D via shared codepoint/word anchors.
   - **CONTENT** physicalities on tokenizer-vocab sequence entities, sourced to the model's tokenizer source, with mantissa-packed trajectories carrying the token references in the tokenizer's BPE order (ordinal = position, run_length = repeats, flags = BOS/EOS/continuation). Same mantissa-pack primitive as text trajectories, prompts (R19), and any other sequence content — token sequences are content; no new mechanism.
   - **CONTENT** physicalities on each tokenizer vocab text entity from the model's tokenizer source, recording this tokenizer's view of how that text decomposes (BPE merges into sub-tokens, etc.).
 - **Cross-references**: `Text` (Unicode), `Language` (ISO).
-- **Trust class**: AI-model static-ETL observation (canonical entity name `TrustClass_AIModelProbe` retained per substrate-version stability — see Trust Class table).
+- **Trust prior**: AI-model static-ETL observation — starts more credible than uncorroborated user content, less than corroborated standards, and is a self-tuning Glicko-2 estimate, not a fixed class (see [Source Trust](#source-trust)).
 
 The substrate's inference engine walks typed attestations between substrate entities directly. Reconstruction (Substrate Synthesis emitting a native package) reads recipe metadata + architecture-family mechanical-role attestations + the architecture template (substrate code, not data) to repopulate the model's output slots. Format-specific writers may then package or convert that native output for external runtimes.
 
@@ -622,11 +633,11 @@ The substrate's inference engine walks typed attestations between substrate enti
 - ~~"Fine-tuning"~~ — Laplace's WHERE-clause specialization replaces fine-tuning
 - ~~"Distillation"~~ — Laplace's Synthesis replaces conventional distillation
 - ~~"Context window"~~ — Laplace has none; prompt is ingestion
-- ~~"Embedding model"~~ — Laplace's typed attestation response plus physicality projection/access layer replaces "an embedding"
+- ~~"Embedding model"~~ — there is no *conventional per-model learned embedding*; instead the S³ glome IS the single canonical shared embedding frame every source is morphed into (truth #3), and the *decision* over it is typed attestation response (Glicko-2 effective-μ), not single-vector cosine nearest-neighbor
 - ~~"Inference server"~~ — Laplace's endpoint extensions over the substrate replace inference servers
 - ~~"Training loop"~~ — Laplace has no gradient descent; ingestion accumulates observations
 - ~~"Catastrophic forgetting"~~ — doesn't happen at substrate level (each emission is a snapshot synthesis)
 - ~~"Hallucination"~~ as opaque — Laplace's hallucinations are addressable (low-rated edge / interior interpolation with no anchor support)
-- ~~"Threshold"~~ as flat number — lottery-ticket-aware sparsity is multi-pass, not a single cutoff
+- ~~"Threshold"~~ / ~~weight-magnitude pruning~~ / ~~"lottery-ticket" top-k~~ — model sparsity is *emergent* (absent matchups + consensus discounting via effective-μ/RD), NOT a magnitude cutoff applied to weights (flat OR relative top-k% is the rejected conventional-NN-pruning reflex; see [RULES.md R3](RULES.md))
 
 If a contributor (human or agent) uses one of these terms without explicit "we reject this convention" framing, that's a red flag for pattern-matching to conventional AI. Re-read [RULES.md](RULES.md).

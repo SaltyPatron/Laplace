@@ -13,7 +13,7 @@ The original [RULES.md R1](../../RULES.md) said: "Do NOT write custom GIST opcla
 Specifically:
 
 1. **BLAKE3-128 entity hashes** are uniform-random `bytea(16)`. The most frequent index probe in the system is "is this hash present?" — and stock B-tree on `bytea` uses generic `memcmp` plus split heuristics that defend against insertion-clustering (irrelevant for uniform data).
-2. **Tier-0 codepoint entities** live on S³ (radius = 1). **Tier 1+ composite entities** populate the 4-ball interior with their *radius* encoding abstraction tier ([GLOSSARY.md](../../GLOSSARY.md) — radial abstraction). The geometric distribution is structured (concentric, fibered), not uniform — so `gist_geometry_ops_nd`'s axis-aligned 4D MBR boxes are wildly loose for S³-surface entities (a point on S³ has a box MBR spanning ~radius-1 in every dimension).
+2. **Tier-0 codepoint entities** (Tier here = the Merkle stratum, T0 = Unicode codepoints) live on S³ (radius = 1). **Tier 1+ composite entities** populate the 4-ball interior with their *radius* encoding abstraction stratum ([GLOSSARY.md](../../GLOSSARY.md) — radial abstraction). The geometric distribution is structured (concentric, fibered), not uniform — so `gist_geometry_ops_nd`'s axis-aligned 4D MBR boxes are wildly loose for S³-surface entities (a point on S³ has a box MBR spanning ~radius-1 in every dimension). NOTE (per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) truth 3): the S³/4-ball geometry is the canonical shared embedding frame and **carries meaning** — these opclasses make geometric access *cheaper*, but they only *seed candidate entities*. They are not the knowledge layer and they are not the retrieval decision: what pulls back and how hard is Glicko-2 effective-μ across typed arenas, never raw distance.
 3. **Trajectories** (entity paths through their constituents) are tier-ordered linestrings; trajectories sharing a prefix are structurally close in the substrate's compositional model. Cascade descent walks are *prefix-extensions of trajectories* — an access pattern that matches SP-GiST's unbalanced k-way partitioning exactly.
 4. **Entities are clustered on disk by tier** (perf-cache build order). Tier is a physically-monotonic column on the heap — a textbook BRIN candidate.
 5. **Cascade A*** uses Glicko-2 ratings as edge weights. Internal GIST nodes that carry per-subtree aggregate Glicko-2 stats (`max(rating)`, `min(rd)`) enable branch-and-bound pruning *at the index level*, before any heap access.
@@ -47,9 +47,11 @@ Land five custom opclasses across Chunks 1–5, distributed across the two PG ex
 - Key type: spherical cap (center direction unit-vector + angular radius) for S³-surface clusters; radial slab + angular cone for interior clusters
 - `union(keys)` = smallest cap containing all child caps
 - `distance(key, query)` = great-circle distance to nearest point in cap, vs Euclidean box-to-point
-- KNN traversal touches far fewer pages
+- Geometric candidate-seeding traversal touches far fewer pages
 
-**Acceptance.** KNN benchmark on 10⁵ S³-distributed entities vs `gist_geometry_ops_nd` shows ≥ 2× reduction in page reads.
+> This opclass makes geometric **candidate-seeding** cheaper; it is not nearest-neighbor retrieval. Distance only orders the seed set the cascade then expands by Glicko-2 effective-μ across typed arenas (per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) truth 3 — retrieval is NOT nearest-neighbor).
+
+**Acceptance.** Candidate-seeding benchmark on 10⁵ S³-distributed entities vs `gist_geometry_ops_nd` shows ≥ 2× reduction in page reads.
 
 **Chunk target.** Chunk 2 (Story 2.15).
 
@@ -104,7 +106,7 @@ Land five custom opclasses across Chunks 1–5, distributed across the two PG ex
 
 ## Consequences
 
-- **Substrate access patterns get substrate-shaped indexes.** Order-of-magnitude wins on the hottest paths (hash probe, KNN, cascade descent) over general-purpose opclasses.
+- **Substrate access patterns get substrate-shaped indexes.** Order-of-magnitude wins on the hottest paths (hash probe, geometric candidate-seeding, cascade descent) over general-purpose opclasses. These indexes accelerate access; the retrieval *decision* remains Glicko-2 effective-μ over typed arenas, not distance ([docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) truth 3).
 - **Custom opclasses live in PG extensions, not in DbUp migrations.** They're part of the extension's `--A.B.C.sql` file (per [ADR 0023](0023-extension-owns-schema-dbup-orchestrates.md)). Versioning is the extension's responsibility.
 - **`laplace_geom` becomes substantively valuable on its own.** The hash128 B-tree opclass and S³-aware GIST opclass are useful to any 4D-PostGIS work, not just the substrate. Increases the reusability case for the extension split ([ADR 0025](0025-pg-extension-modularization.md)).
 - **Each opclass has measurable acceptance.** Not "feels faster" — concrete numbers from `pg_regress` + `pgbench` against stock opclasses on substrate-shape workloads.

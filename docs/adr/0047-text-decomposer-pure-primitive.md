@@ -13,7 +13,7 @@ Every text-bearing source the substrate ingests — WordNetDecomposer, OMWDecomp
 
 That decomposition has exactly one correct **segmentation** algorithm: **UAX#29 grapheme/word/sentence boundaries** on the **observed** UTF-8 codepoint sequence, pinned to the Unicode version that [UnicodeDecomposer](0042-bootstrap-order-and-substrate-canonical-seeding.md) used for the T0 perf-cache + DB seed ([ADR 0006](0006-perfcache-and-db-seed-siblings.md)). If different sources implement segmentation differently, the same bytes hash to different entity IDs and cross-source dedup breaks (see [STANDARDS.md ID discipline](../../STANDARDS.md)).
 
-**Amendment (2026-05-25):** TextDecomposer does **not** apply NFC or NFD at ingest. Precomposed `é` (U+00E9) and decomposed `e` + combining acute (U+0065 U+0301) are **distinct T0 observations** with distinct entity IDs. Canonical and compatibility equivalence are **typed attestations** from UnicodeDecomposer / UCD (and later lexical sources), not a destructive normalize-at-the-door step. Bit-perfect corpus round-trip requires preserving the observed scalar sequence. The `laplace_normalize_nfc` helper and perf-cache decomp/compose side tables exist for conformance tests and Unicode **knowledge** emission — not for rewriting ingest bytes.
+**Amendment (2026-05-25):** TextDecomposer does **not** apply NFC or NFD at ingest. Precomposed `é` (U+00E9) and decomposed `e` + combining acute (U+0065 U+0301) are **distinct T0 observations** with distinct entity IDs. Canonical and compatibility equivalence are **typed attestations** from UnicodeDecomposer / UCD (and later lexical sources), not a destructive normalize-at-the-door step. Normalizing at the door would collapse two distinct observations into one fact and discard the distinction the substrate exists to record — distinct observed scalar sequences are distinct facts. The `laplace_normalize_nfc` helper and perf-cache decomp/compose side tables exist for conformance tests and Unicode **knowledge** emission — not for rewriting ingest bytes.
 
 Without this ADR, each per-source decomposer either:
 
@@ -63,7 +63,7 @@ A `TierTree` — structure only (no IDs, coords, Hilbert, physicalities, attesta
 - C/C++: `engine/core/src/text_decomposer.c`, `engine/core/include/laplace/core/text_decomposer.h`
 - C ABI: `laplace_text_decomposer_run`
 - Tests: `engine/core/tests/test_text_decomposer.cpp` (`DistinctNormalizationFormsStayDistinct`)
-- C#: `Laplace.Engine.Core/TextDecomposer.cs`
+- C#: `app/Laplace.Engine.Core/TextDecomposer.cs`
 
 ## Consequences
 
@@ -72,11 +72,11 @@ A `TierTree` — structure only (no IDs, coords, Hilbert, physicalities, attesta
 - **`King` ≠ `king`:** distinct entities (distinct scalar sequences). Case folding and lemma links are **lexical attestations** (WordNet, OMW, Wiktionary, UD, …), not ingest normalization and not S³/Fréchet identity collapse.
 - **`café` (U+00E9) ≠ `e`+◌́:** distinct T0 entities; Unicode layer attests decomposition / canonical equivalence.
 - **Model vocab:** each tokenizer string (e.g. `"ĠKing"`) is a **model-scoped token entity**; attestations such as `TOKEN_FOR` / `EMBEDS` link to substrate text entity `King`; **N models → N `PROJECTION` physicalities** on the same text entity (Procrustes pipeline), not N merged identities.
-- **Bit-perfect export:** reconstructing CONTENT trajectories emits the **observed** UTF-8 (CLI `db-roundtrip` / `roundtrip`).
+- **Faithful re-emission of observations:** because each distinct scalar sequence is recorded as its own entity, reconstructing CONTENT trajectories emits the **observed** UTF-8 (CLI `db-roundtrip` / `roundtrip`). This is a property of recording observations distinctly — not a bit-perfect-preservation goal. Per [docs/SUBSTRATE-FOUNDATION.md](../SUBSTRATE-FOUNDATION.md) truth 6, bit-perfect preservation of the source blob is worthless; the substrate stores semantic facts, not the file. The round-trip surface here is a determinism/conformance check on observation fidelity, not a preservation contract.
 
 ## Alternatives considered
 
-- **NFC at ingest for "same abstract character".** Rejected — destroys observed bytes; merges forms that must remain distinct for codec fidelity; equivalence belongs in attestations ([GLOSSARY Canonicalization](../../GLOSSARY.md) amended 2026-05-25).
+- **NFC at ingest for "same abstract character".** Rejected — destroys observed bytes; merges two distinct observations into one fact; equivalence belongs in attestations ([GLOSSARY Canonicalization](../../GLOSSARY.md) amended 2026-05-25).
 - **Per-source text decomposers.** Rejected — UAX#29 drift.
 - **TextDecomposer as `IDecomposer`.** Rejected — different abstraction.
 

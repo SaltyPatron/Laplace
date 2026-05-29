@@ -1,4 +1,4 @@
-# ADR 0040: Multi-modal entity types, universal T0, semantic Merkle DAG with lossless canonicalization
+# ADR 0040: Multi-modal entity types, universal T0, semantic Merkle DAG with deterministic content-addressed canonicalization
 
 ## Status
 
@@ -22,7 +22,7 @@ Key design observations from the working sessions:
 
 `entities.type_id` (a FK to another entity declaring the type) names what *kind* of thing the entity is. Type drives:
 
-- **Canonicalization rule** — how raw input becomes the canonical bytes that get hashed. Different per type. Must be **lossless**.
+- **Canonicalization rule** — how raw input becomes the canonical bytes that get hashed. Different per type. Must be **deterministic and reversible at the canonical-content layer** (encoding-invariant, so two encodings of the same content share an id). This is a content-addressing identity discipline, not artifact preservation: the canonical form is hashed for dedup, not stored as a blob to be returned later (bit-perfect preservation of the source artifact is a non-goal per docs/SUBSTRATE-FOUNDATION.md truth 6).
 - **Decomposition rule** — which IDecomposer plugin breaks this entity into lower-tier constituents and produces the CONTENT physicality trajectory.
 - **Reconstruction rule** — how to emit bytes back from a trajectory walk.
 - **Modality-applicable attestation kinds** — which typed transforms apply (e.g., `EXTRACTS_R_CHANNEL` for pixel-type entities; `HAS_POS` for text-type entities).
@@ -63,13 +63,13 @@ T0 atoms are Unicode codepoints, universally. Unicode is the substrate's shared 
 
 This guarantees **cross-modal reachability**: every entity at every tier is reachable from every other entity through their shared T0 descendants. Attestations across languages, modalities, source ecosystems, and model families are first-class because their endpoints live in the same hash space.
 
-### Canonicalization is lossless per type
+### Canonicalization is deterministic and encoding-invariant per type
 
-Each entity type defines a lossless canonical form. The hash is BLAKE3-128 of that canonical form.
+Each entity type defines a deterministic canonical form. The hash is BLAKE3-128 of that canonical form. "Encoding-invariant" here means different encodings of the same content collapse to one id (a dedup / identity property) — it does **not** mean the substrate preserves the source artifact bit-for-bit. Per docs/SUBSTRATE-FOUNDATION.md truth 6, bit-perfect preservation is a non-goal; ingestion dissolves the artifact into semantic facts and discards the blob.
 
 - Different encodings that round-trip to the same canonical form → same entity ID. UTF-8 vs UTF-16 of the same codepoint sequence; PNG vs lossless WebP of the same pixel grid; FLAC vs WAV of the same PCM samples.
 - Lossy encodings produce *different entities*. A JPEG of an image is a different entity from the PNG it was derived from (different pixel values after decode). An MP3 of a FLAC is a different entity. Lossy-to-lossless relationships are captured as attestations (`IS_LOSSY_ENCODING_OF`), not identity collapse.
-- For AI models per Vampire mode: model files are not entities at all. Only the recipe + tokenizer + typed-tensor-calculation attestations remain.
+- For AI models: model files are not entities at all. Ingestion is a streaming O(params) ETL that dissolves weights into Glicko-2 matchup observations (docs/SUBSTRATE-FOUNDATION.md truths 1–2, 6); the weight blob is discarded. Only the recipe + tokenizer + typed-tensor-calculation attestations (the emergent consensus) remain.
 
 ### Cross-format and cross-modal equivalence is attestation, not identity
 
@@ -85,7 +85,7 @@ Fixed vocabularies bootstrapped at install:
 - **Text**: `HAS_POS`, `HAS_LEMMA`, `IS_HYPERNYM_OF`, `IS_LEMMA_OF`, `IS_TRANSLATION_OF`, ... (per linguistic-source taxonomies).
 - **Visual**: `EXTRACTS_R_CHANNEL`, `EXTRACTS_G_CHANNEL`, `EXTRACTS_B_CHANNEL`, `ADJACENT_TO_PIXEL`, `INDICATES_HUE`, ...
 - **Audio**: `IS_AT_SAMPLE`, `HAS_FREQUENCY_PEAK`, ...
-- **AI tensor-calculation kinds** (transformer family, ~10): `EMBEDS`, `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`, `OUTPUT_PROJECTS`. Other architecture and modality families have their own fixed mechanical-role lists.
+- **AI tensor-calculation kinds** (transformer family; corrected 2026-05-28): `Q_PROJECTS`, `K_PROJECTS`, `V_PROJECTS`, `O_PROJECTS`, `GATES`, `UP_PROJECTS`, `DOWN_PROJECTS`, `NORMALIZES`. Each is a **Glicko-2 matchup** — a weight cell is one matchup *outcome* (weight = outcome; source-model trust = opponent strength), accumulated into a consensus rating; weights are never stored as entities and never bit-perfect (docs/SUBSTRATE-FOUNDATION.md truths 1–2). The embedding and `lm_head` are GEOMETRY → `PROJECTION` / `ProjectionOutput` physicalities; `EMBEDS` / `OUTPUT_PROJECTS` are **NOT** attestation kinds. **OPEN per docs/SUBSTRATE-FOUNDATION.md:** for `embed_tokens` / `lm_head` the matchup endpoints are directly token-anchored, but how an interior `d×d` tensor cell (`q/k/v/o/gate/up/down`) resolves to token entities *without* re-running the GEMM (the vocab² blow-up that is forbidden) is unsolved — to be pinned with Anthony; the per-role arena/kind assignment for interior tensors is likewise OPEN. Other architecture and modality families have their own fixed mechanical-role lists.
 - **Cross-modal**: `DEPICTS`, `CAPTIONS`, `TRANSCRIBES_AS`, `IS_LOSSY_ENCODING_OF`.
 
 ### Attestation tuple shapes are a small fixed enumeration

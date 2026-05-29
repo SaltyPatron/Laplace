@@ -16,7 +16,7 @@ Six plugin interfaces; each new capability is one new implementation:
 - `IDecomposer` — adding a new modality (text, code, image, audio, video, ...)
 - `IArchitectureTemplate` — adding a new target model architecture
 - `IFormatWriter` — adding a new emission format (safetensors, GGUF, ONNX, ...)
-- `IFeatureExtractor` — adding a new embedding dimension feature
+- `IFeatureExtractor` — adding a new source-attested contribution to the morph onto the canonical S³ embedding frame (NOT a new orthogonal per-model embedding axis; the S³ glome is the single shared frame every source is morphed into per docs/SUBSTRATE-FOUNDATION.md truth 3)
 - `IProtocolEndpoint` — adding a new served-API protocol (OpenAI-compat, Anthropic, ...)
 
 Adding a new entity in any category = one new class implementing the interface; no schema changes, no query-layer changes.

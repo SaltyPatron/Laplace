@@ -53,6 +53,7 @@ internal static class Program
                 + "  synthesize substrate <recipe.json> [output.gguf] [--source-scope <ids>] [--format <name>]\n"
                 + "  synthesize passthrough <model-dir> [output.gguf] [--f32] [--sparse-tol <tol>]\n"
                 + "  decompose <text>\n"
+                + "  inspect <text>\n"
                 + "  roundtrip <file> [out]\n"
                 + "  db-roundtrip <file>\n"
                 + "  stats");
@@ -66,6 +67,7 @@ internal static class Program
                 "ingest"       => await IngestAsync(args[1..]),
                 "synthesize"   => await SynthesizeAsync(args[1..]),
                 "decompose"    => Decompose(string.Join(' ', args[1..])),
+                "inspect"      => await InspectAsync(string.Join(' ', args[1..])),
                 "roundtrip"    => Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
                 "db-roundtrip" => await DbRoundtripAsync(args.Length > 1 ? args[1] : ""),
                 "stats"        => await StatsAsync(),
@@ -115,6 +117,118 @@ internal static class Program
             ? "BIT-PERFECT FROM DATABASE — reconstruction equals the original."
             : "MISMATCH — reconstruction differs.");
         return match ? 0 : 1;
+    }
+
+    private static string Hex(Hash128 h) => $"{h.Hi:x16}{h.Lo:x16}";
+
+    private static Hash128 ReadHash16(byte[] b) =>
+        new Hash128(BitConverter.ToUInt64(b, 0), BitConverter.ToUInt64(b, 8));
+
+    // === inspect: resolve text -> entity via the engine, read its substrate facets ===
+    // The glass-box, usable by hand: text → correct merkle entity id (engine
+    // TextDecomposer + HashComposer, not SQL), then its glome physicalities and
+    // Glicko-2-rated attestation neighborhood straight from the DB.
+    private static async Task<int> InspectAsync(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return Fail("usage: laplace inspect <text>");
+        CodepointPerfcache.Load(ResolveBlob());
+
+        using var tree = TextDecomposer.Run(text);
+        unsafe { HashComposer.Run(tree, &PerfcacheResolver); }
+
+        // codepoint id -> char, for readable rendering of atomic subjects/objects
+        var idToCp = new Dictionary<Hash128, uint>(1_114_112);
+        var recs = CodepointPerfcache.Records;
+        for (int i = 0; i < recs.Length; i++) idToCp[recs[i].Hash] = recs[i].Codepoint;
+        string Render(Hash128 h) =>
+            idToCp.TryGetValue(h, out var cp) ? $"'{char.ConvertFromUtf32((int)cp)}'(U+{cp:X4})" : Hex(h)[..16] + "…";
+
+        var root = tree.GetNode((uint)tree.NodeCount - 1);
+        Hash128 id = root.Id;
+        Console.WriteLine($"inspect \"{text}\"");
+        Console.WriteLine($"  engine-resolved id : {Hex(id)}");
+        Console.WriteLine($"  tier {root.Tier}, {tree.NodeCount} nodes in the decomposition DAG\n");
+
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var conn = await ds.OpenConnectionAsync();
+
+        // Identity facet — laplace.entity_facets(id)
+        bool exists = false;
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT tier, encode(type_id,'hex') FROM laplace.entity_facets(@id)";
+            cmd.Parameters.AddWithValue("id", id.ToBytes());
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                exists = true;
+                Console.WriteLine($"  ENTITY: present  tier={r.GetInt16(0)}  type_id={r.GetString(1)[..16]}…");
+            }
+        }
+        if (!exists)
+        {
+            Console.WriteLine("  ENTITY: not in substrate (id is correct, but this n-gram was never ingested)");
+            return 0;
+        }
+
+        // Glome facet — laplace.entity_physicalities(id)
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT kind, x, y, z, m, radius, n_constituents, encode(source_id,'hex') "
+                            + "FROM laplace.entity_physicalities(@id)";
+            cmd.Parameters.AddWithValue("id", id.ToBytes());
+            await using var r = await cmd.ExecuteReaderAsync();
+            Console.WriteLine("\n  GLOME (physicalities):");
+            int n = 0;
+            while (await r.ReadAsync())
+            {
+                n++;
+                Console.WriteLine($"    kind={r.GetInt16(0)}  coord=({r.GetDouble(1):F4},{r.GetDouble(2):F4},{r.GetDouble(3):F4},{r.GetDouble(4):F4})"
+                    + $"  r={r.GetDouble(5):F6}  n_constituents={r.GetInt32(6)}  source={r.GetString(7)[..12]}…");
+            }
+            if (n == 0) Console.WriteLine("    (none)");
+        }
+
+        // Attestation neighborhood — laplace.attestations_out(id) / attestations_in(id)
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT kind_id, object_id, source_id, rating, rd, volatility, observation_count "
+                            + "FROM laplace.attestations_out(@id)";
+            cmd.Parameters.AddWithValue("id", id.ToBytes());
+            await using var r = await cmd.ExecuteReaderAsync();
+            Console.WriteLine("\n  OUTGOING attestations (this → object), Glicko-2:");
+            int n = 0;
+            while (await r.ReadAsync())
+            {
+                n++;
+                var kind = ReadHash16((byte[])r[0]);
+                var obj  = r.IsDBNull(1) ? Hash128.Zero : ReadHash16((byte[])r[1]);
+                Console.WriteLine($"    [{Hex(kind)[..12]}…] → {Render(obj),-24}  μ={r.GetInt64(3)/1e9:F3} rd={r.GetInt64(4)/1e9:F3} σ={r.GetInt64(5)/1e9:F4}"
+                    + $"  src={Hex(ReadHash16((byte[])r[2]))[..10]}…  obs={r.GetInt64(6)}");
+            }
+            if (n == 0) Console.WriteLine("    (none)");
+        }
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT subject_id, kind_id, source_id, rating, rd, volatility "
+                            + "FROM laplace.attestations_in(@id)";
+            cmd.Parameters.AddWithValue("id", id.ToBytes());
+            await using var r = await cmd.ExecuteReaderAsync();
+            Console.WriteLine("\n  INCOMING attestations (subject → this), Glicko-2:");
+            int n = 0;
+            while (await r.ReadAsync())
+            {
+                n++;
+                var subj = ReadHash16((byte[])r[0]);
+                var kind = ReadHash16((byte[])r[1]);
+                Console.WriteLine($"    {Render(subj),-24} [{Hex(kind)[..12]}…] → here  μ={r.GetInt64(3)/1e9:F3} rd={r.GetInt64(4)/1e9:F3}"
+                    + $"  src={Hex(ReadHash16((byte[])r[2]))[..10]}…");
+            }
+            if (n == 0) Console.WriteLine("    (none)");
+        }
+
+        return 0;
     }
 
     // === ingest: IngestRunner + per-source decomposer (ADR 0052) ===
