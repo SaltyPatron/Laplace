@@ -92,6 +92,14 @@ public sealed class TextEntityBuilder
     {
         var node = _tree.GetNode(idx);
 
+        // Tier-0 codepoints are the foundational SEEDED atoms — UnicodeDecomposer
+        // seeds them once (with perf-cache-derived coord/Hilbert), independently of
+        // this builder. Content paths REFERENCE them by id inside grapheme/word
+        // trajectories; re-emitting here would create a duplicate per-source codepoint
+        // physicality for every text that uses them. Skip — the trajectory child-ids
+        // still point at the seeded entities.
+        if (node.Tier == 0) return;
+
         // Level 1 dedup: skip if already emitted within this intent
         if (!_emittedIds.Add(node.Id)) return;
 
@@ -109,16 +117,15 @@ public sealed class TextEntityBuilder
                 var child = _tree.GetNode(node.FirstChildIdx + ci);
                 childIds[ci] = child.Id;
             }
-            var rle = Trajectory.BuildRle(childIds);
+            // Non-RLE: ONE vertex per constituent. The trajectory codec's decode
+            // (trajectory_constituents) does NOT expand run_length, so BuildRle is
+            // LOSSY through reconstruction — a repeated child (the 'l's in "hello")
+            // RLE-collapses to one vertex and can't be recovered. Build keeps every
+            // constituent as its own vertex → bit-perfect round-trip. The engine emits
+            // a POINT for a single vertex and a LINESTRING for ≥2 (both valid GEOMETRY
+            // ZM), so a single-constituent node carries an honest trajectory, never NULL.
+            trajectoryXyzm = Trajectory.Build(childIds);
             nConstituents  = (int)node.ChildCount;
-            // PostGIS LINESTRING requires ≥ 2 vertices (= 8 doubles, 4 dims × 2 points).
-            // When RLE collapses every child into a single vertex (i.e. one constituent,
-            // or N identical constituents), the result isn't a valid LINESTRING — emit
-            // trajectory NULL. The entity is still reconstructable: its ID is BLAKE3 of
-            // the canonical content, which encodes the single-constituent decomposition
-            // unambiguously. Same convention as T0 atoms (trajectory NULL — no
-            // constituents to walk).
-            trajectoryXyzm = rle.Length >= 8 ? rle : null;
         }
 
         double cx, cy, cz, cm;

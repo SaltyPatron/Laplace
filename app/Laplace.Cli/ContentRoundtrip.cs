@@ -30,12 +30,6 @@ internal static class ContentRoundtrip
     private static readonly Hash128 TSentence = Hash128.OfCanonical("substrate/type/Sentence/v1");
     private static readonly Hash128 TDocument = Hash128.OfCanonical("substrate/type/Document/v1");
 
-    private static Hash128 TypeForTier(byte tier) => tier switch
-    {
-        1 => TGrapheme, 2 => TWord, 3 => TSentence, 4 => TDocument,
-        _ => TDocument,
-    };
-
     /// <summary>Register the prompt source + the text tier types as plain
     /// entities. NO attestations — content is non-attested; the source's
     /// trust class + any meaning are the deferred attestation path. (Trust
@@ -57,57 +51,20 @@ internal static class ContentRoundtrip
     public static async Task<Hash128> RecordAsync(
         ISubstrateWriter writer, byte[] utf8, CancellationToken ct = default)
     {
-        using var tree = TextDecomposer.Run(utf8);
-        unsafe { HashComposer.Run(tree, &Resolver); }   // fills id/coord/hilbert bottom-up from the perf-cache
+        // Single source of truth: TextEntityBuilder is the ONE decompose→emit path
+        // (tier-0 codepoints referenced not re-emitted, content-addressed dedup, the
+        // canonical lossless Build trajectory + POINT/LINESTRING geometry). The prompt
+        // path adds no emission logic of its own — it just records under PromptSource.
+        if (!TextEntityBuilder.TryBuildRows(utf8, PromptSource,
+                out var entities, out var physicalities, out var rootId, out _))
+            return Hash128.Zero;   // TextDecomposer rejected (empty / invalid UTF-8)
 
-        int total = tree.NodeCount;
-        var b = new SubstrateChangeBuilder(PromptSource, "prompt",
-            parentIntentId: null, entityCapacity: total, physicalityCapacity: total);
-
-        Hash128 documentId = Hash128.Zero;
-        long observedAt = 0;
-        // Content-addressing: the same grapheme/word recurs across the text but
-        // is ONE entity. Emit unique n-grams only — the trajectories still
-        // reference the shared ids (DAG convergence). Without this, one COPY
-        // would present the same id twice → entities_pkey violation.
-        var seen = new HashSet<Hash128>();
-
-        for (uint i = 0; i < total; i++)
-        {
-            var v = tree.GetNode(i);
-            if (v.Tier == 0) continue;   // codepoint entities are seeded; referenced, not re-emitted
-
-            Hash128 id = v.Id;
-            if (v.Tier == 4) documentId = id;   // the document root (unique)
-            if (!seen.Add(id)) continue;        // already emitted this unique n-gram
-
-            b.AddEntity(id, v.Tier, TypeForTier(v.Tier), firstObservedBy: PromptSource);
-
-            // trajectory = ordered child entity ids. PostGIS LINESTRING needs
-            // ≥2 vertices, so a single-constituent node (a 1-codepoint grapheme,
-            // a 1-grapheme word) pads the lone vertex to two; n_constituents
-            // (below) stays the true count and is authoritative on read.
-            var children = new Hash128[v.ChildCount];
-            for (uint c = 0; c < v.ChildCount; c++) children[c] = tree.GetNode(v.FirstChildIdx + c).Id;
-            Hash128[] trajVerts = children.Length == 1 ? new[] { children[0], children[0] } : children;
-            double[] traj = Trajectory.Build(trajVerts);
-
-            double x, y, z, m;
-            unsafe { x = v.Coord[0]; y = v.Coord[1]; z = v.Coord[2]; m = v.Coord[3]; }
-            Hash128 physId = PhysicalityId.Compute(id, PromptSource, PhysicalityKind.Content, x, y, z, m, traj);
-
-            b.AddPhysicality(new PhysicalityRow(
-                Id: physId, EntityId: id, SourceId: PromptSource, Kind: PhysicalityKind.Content,
-                CoordX: x, CoordY: y, CoordZ: z, CoordM: m,
-                HilbertIndex: v.Hilbert, TrajectoryXyzm: traj,
-                NConstituents: (int)v.ChildCount, AlignmentResidual: 0.0, SourceDim: null,
-                ObservedAtUnixUs: observedAt));
-
-            if (v.Tier == 4) documentId = id;   // the document root
-        }
-
+        var b = new SubstrateChangeBuilder(PromptSource, "prompt", parentIntentId: null,
+            entityCapacity: entities.Length, physicalityCapacity: physicalities.Length);
+        foreach (var e in entities)      b.AddEntity(e);
+        foreach (var p in physicalities) b.AddPhysicality(p);
         await writer.ApplyAsync(b.Build(), ct);
-        return documentId;
+        return rootId;
     }
 
     /// <summary>Reconstruct the original bytes from the database. Scales to
@@ -181,17 +138,5 @@ internal static class ContentRoundtrip
     {
         var bytes = (byte[])r[ord];
         return new Hash128(BitConverter.ToUInt64(bytes, 0), BitConverter.ToUInt64(bytes, 8));
-    }
-
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-    private static unsafe int Resolver(uint atom, IntPtr userData, Hash128* outId, double* outCoord, Hilbert128* outHb)
-    {
-        var recs = CodepointPerfcache.Records;
-        if (atom >= (uint)recs.Length) return -1;
-        ref readonly var r = ref recs[(int)atom];
-        *outId = r.Hash;
-        outCoord[0] = r.CoordX; outCoord[1] = r.CoordY; outCoord[2] = r.CoordZ; outCoord[3] = r.CoordM;
-        *outHb = r.Hilbert;
-        return 0;
     }
 }

@@ -13,13 +13,14 @@ CREATE TABLE physicalities (
     entity_id          bytea            NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
     source_id          bytea            NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
     kind               smallint         NOT NULL,
-    coord              geometry         NOT NULL
-                                        CHECK (ST_HasZ(coord) AND ST_HasM(coord)
-                                               AND ST_GeometryType(coord) = 'ST_Point'),
-    hilbert_index      bytea            NOT NULL CHECK (octet_length(hilbert_index) = 16),
-    trajectory         geometry         CHECK (trajectory IS NULL
-                                               OR (ST_HasZ(trajectory) AND ST_HasM(trajectory)
-                                                   AND ST_GeometryType(trajectory) = 'ST_LineString')),
+    -- PostGIS typmod enforces dims + type natively — no CHECK needed. coord is the
+    -- entity's 4D position: always a PointZM (radius_origin reads ST_X/Y/Z/M off it).
+    coord              geometry(PointZM)    NOT NULL,
+    hilbert_index      bytea                NOT NULL CHECK (octet_length(hilbert_index) = 16),
+    -- trajectory is whatever the constituents form — a POINT (one constituent), a
+    -- LINESTRING (>=2), or any other ZM geometry a decomposer needs. GeometryZM =
+    -- "any geometry, Z+M"; reconstruction reads it via type-agnostic ST_DumpPoints.
+    trajectory         geometry(GeometryZM),
     radius_origin      double precision GENERATED ALWAYS AS (
         sqrt(ST_X(coord)^2 + ST_Y(coord)^2 + ST_Z(coord)^2 + ST_M(coord)^2)
     ) STORED,

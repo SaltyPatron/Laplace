@@ -291,6 +291,12 @@ int intent_stage_add_physicality(
     if (buf_append_field_bytes(b, hilbert_index->bytes, 16) != 0) return -1;
     if (trajectory_xyzm == NULL || trajectory_n_vertices == 0) {
         if (buf_append_field_null(b) != 0) return -1;
+    } else if (trajectory_n_vertices == 1) {
+        /* One constituent → an honest POINT ZM (PostGIS rejects a 1-vertex
+         * LINESTRING). The trajectory column is generic GEOMETRY ZM, so a POINT is
+         * valid and ST_DumpPoints reads it identically on reconstruct. Reuses the
+         * existing pointzm builder. */
+        if (buf_append_field_pointzm(b, trajectory_xyzm) != 0) return -1;
     } else {
         if (buf_append_field_linestringzm(b, trajectory_xyzm, trajectory_n_vertices) != 0) return -1;
     }
