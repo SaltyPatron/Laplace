@@ -115,6 +115,7 @@ internal static class Program
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         await using var conn = await ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 0;  // batch Glicko-2 accumulation over all evidence can exceed the 30s default
         cmd.CommandText = "SELECT laplace.rebuild_consensus()";
         var n = (long)(await cmd.ExecuteScalarAsync() ?? 0L);
         Console.WriteLine($"consensus rebuilt: {n:N0} rows");
