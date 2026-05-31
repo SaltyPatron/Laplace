@@ -179,7 +179,7 @@ public sealed class LlamaTokenizerParser
                 cx = cy = cz = cm = double.NaN;
                 return false;
             }
-            var rootNode = tree.GetNode((uint)(nc - 1));
+            var rootNode = tree.GetNode(tree.NaturalUnitIndex());
             entityId = rootNode.Id;
             tier = rootNode.Tier;
             unsafe { cx = rootNode.Coord[0]; cy = rootNode.Coord[1]; cz = rootNode.Coord[2]; cm = rootNode.Coord[3]; }

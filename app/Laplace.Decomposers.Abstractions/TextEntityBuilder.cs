@@ -208,7 +208,7 @@ public sealed class TextEntityBuilder
                 cx = cy = cz = cm = double.NaN;
                 return false;
             }
-            var root = tree.GetNode((uint)(nc - 1));
+            var root = tree.GetNode(tree.NaturalUnitIndex());
             rootId = root.Id; rootTier = root.Tier;
             unsafe { cx = root.Coord[0]; cy = root.Coord[1]; cz = root.Coord[2]; cm = root.Coord[3]; }
             return true;
@@ -243,7 +243,7 @@ public sealed class TextEntityBuilder
                 rootId = default; rootTier = 0;
                 return false;
             }
-            var root = tree.GetNode((uint)(nc - 1));
+            var root = tree.GetNode(tree.NaturalUnitIndex());
             rootId = root.Id; rootTier = root.Tier;
             var (es, ps) = new TextEntityBuilder(tree, sourceId).Build();
             entities = es;

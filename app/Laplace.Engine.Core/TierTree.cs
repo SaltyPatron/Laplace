@@ -127,6 +127,32 @@ public sealed class TierTree : SafeHandle
         return view;
     }
 
+    /// <summary>
+    /// Index of the entity's "natural unit" node. The document root is built
+    /// last (index <see cref="NodeCount"/>−1), but a lone word or sentence is
+    /// wrapped in redundant single-child sentence/document tiers. This descends
+    /// from the document root through single-child wrapper tiers, stopping at the
+    /// word tier (2): a bare word ("cat") binds at its word node — not the
+    /// wrapping sentence/document — while a real multi-word sentence stays a
+    /// sentence and a multi-sentence document stays a document. Returns 0 for an
+    /// empty tree. This is the unit a decomposer content-addresses + attests on
+    /// (fixes the §9.3 "everything binds to the tier-4 document root" defect).
+    /// </summary>
+    public uint NaturalUnitIndex()
+    {
+        ThrowIfDisposed();
+        int nc = NodeCount;
+        if (nc <= 0) return 0;
+        uint idx = (uint)(nc - 1);
+        TierNodeView node = GetNode(idx);
+        while (node.Tier > 2 && node.ChildCount == 1)
+        {
+            idx  = node.FirstChildIdx;
+            node = GetNode(idx);
+        }
+        return idx;
+    }
+
     /// <summary>Set the BLAKE3-128 id of node <paramref name="idx"/>.
     /// Used by <see cref="HashComposer"/> + tests; not normally called by
     /// decomposer code.</summary>

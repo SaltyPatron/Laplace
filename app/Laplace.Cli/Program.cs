@@ -172,7 +172,7 @@ internal static class Program
         string Render(Hash128 h) =>
             idToCp.TryGetValue(h, out var cp) ? $"'{char.ConvertFromUtf32((int)cp)}'(U+{cp:X4})" : Hex(h)[..16] + "…";
 
-        var root = tree.GetNode((uint)tree.NodeCount - 1);
+        var root = tree.GetNode(tree.NaturalUnitIndex());
         Hash128 id = root.Id;
         Console.WriteLine($"inspect \"{text}\"");
         Console.WriteLine($"  engine-resolved id : {Hex(id)}");
