@@ -90,6 +90,7 @@ internal static class Program
                 "roundtrip"    => Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
                 "db-roundtrip" => await DbRoundtripAsync(args.Length > 1 ? args[1] : ""),
                 "stats"        => await StatsAsync(),
+                "rebuild-consensus" => await RebuildConsensusAsync(),
                 "qk-bench"     => QkBenchCmd(args.Length > 1 ? args[1] : ""),
                 _ => Fail($"unknown command '{args[0]}'"),
             };
@@ -105,6 +106,20 @@ internal static class Program
     }
 
     private static int Fail(string m) { Console.Error.WriteLine(m); return 2; }
+
+    // Materialize the consensus layer from the attestations evidence (S2).
+    // Called after ingestion so cross-witness consensus is current before
+    // inference / synthesis reads it. Batch rebuild via laplace.rebuild_consensus().
+    private static async Task<int> RebuildConsensusAsync()
+    {
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT laplace.rebuild_consensus()";
+        var n = (long)(await cmd.ExecuteScalarAsync() ?? 0L);
+        Console.WriteLine($"consensus rebuilt: {n:N0} rows");
+        return 0;
+    }
 
     // === qk-bench: profile the QK kernel on real weights (no DB, no ingest harness) ===
     private static int QkBenchCmd(string modelDir)
