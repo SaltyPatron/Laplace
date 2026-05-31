@@ -10,7 +10,7 @@
  *
  * STABLE: results depend only on table contents within a statement. */
 
-CREATE OR REPLACE FUNCTIONentity_facets(p_id bytea)
+CREATE OR REPLACE FUNCTION entity_facets(p_id bytea)
     RETURNS TABLE(tier smallint, type_id bytea)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
@@ -21,7 +21,7 @@ COMMENT ON FUNCTION entity_facets(bytea) IS
     'Identity facet of an entity: its tier and type_id. Empty if the id is '
     'not in the substrate (a correctly-resolved id for never-ingested content).';
 
-CREATE OR REPLACE FUNCTIONentity_physicalities(p_id bytea)
+CREATE OR REPLACE FUNCTION entity_physicalities(p_id bytea)
     RETURNS TABLE(kind smallint, x double precision, y double precision,
                   z double precision, m double precision,
                   radius double precision, n_constituents integer, source_id bytea)
@@ -38,7 +38,7 @@ COMMENT ON FUNCTION entity_physicalities(bytea) IS
     'Glome facet: every per-source 4D physicality on the entity (CONTENT / '
     'BUILDING_BLOCK / PROJECTION), with radius-from-origin and constituent count.';
 
-CREATE OR REPLACE FUNCTIONattestations_out(p_id bytea, p_limit integer DEFAULT 40)
+CREATE OR REPLACE FUNCTION attestations_out(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(kind_id bytea, object_id bytea, source_id bytea,
                   rating bigint, rd bigint, volatility bigint, observation_count bigint)
     LANGUAGE sql STABLE
@@ -55,7 +55,7 @@ COMMENT ON FUNCTION attestations_out(bytea, integer) IS
     'Outgoing attestation neighborhood: rows where the entity is the subject, '
     'highest Glicko-2 rating first. rating/rd/volatility are fixed-point x1e9.';
 
-CREATE OR REPLACE FUNCTIONattestations_in(p_id bytea, p_limit integer DEFAULT 40)
+CREATE OR REPLACE FUNCTION attestations_in(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(subject_id bytea, kind_id bytea, source_id bytea,
                   rating bigint, rd bigint, volatility bigint)
     LANGUAGE sql STABLE

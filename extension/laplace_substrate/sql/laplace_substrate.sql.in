@@ -16,4 +16,5 @@
 #include "08_sp_trajectory_ops.sql.in"
 #include "09_brin_tier_ops.sql.in"
 #include "11_entities_exist_bitmap.sql.in"
+#include "13_consensus.sql.in"
 #include "12_inspect.sql.in"

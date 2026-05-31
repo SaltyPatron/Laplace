@@ -56,6 +56,8 @@ set(EXT_SQL_MODULES
     sql/09_brin_tier_ops.sql.in
     sql/10_bootstrap.sql.in
     sql/11_entities_exist_bitmap.sql.in
+    sql/13_consensus.sql.in
+    sql/12_inspect.sql.in
 )
 
 set(EXT_BUILT_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}--${EXT_VERSION}.sql)

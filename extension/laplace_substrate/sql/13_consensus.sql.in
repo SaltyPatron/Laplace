@@ -1,0 +1,94 @@
+/* 13_consensus.sql.in — materialized cross-witness consensus (S2; ADR 0036 + ADR 0044).
+ *
+ * `attestations` is the per-witness EVIDENCE layer: one row per
+ * (subject, kind, object, source, context). The CONSENSUS is ONE row per
+ * (subject, kind, object, context) — SOURCE OUT of identity — carrying the
+ * Glicko-2 state accumulated over ALL witnessing sources via the existing
+ * laplace_glicko2_accumulate aggregate. Inference reads this directly (a single
+ * indexed lookup), not by re-aggregating evidence per query ("excessive joins").
+ *
+ * K1 (first cut — tunable once we see behaviour): each witness is one Glicko-2
+ * observation — a "match" the edge plays against a fixed noise-floor opponent,
+ * scored by the witness's normalized strength. More / stronger witnesses ⇒
+ * higher consensus μ and tighter rd; a lone weak witness ⇒ small bump, wide rd.
+ * The score reuses the evidence rating (which already = kind-tier μ × strength ×
+ * source-trust per AttestationFactory); tenant-trust folds in at S5. */
+
+CREATE TABLE consensus (
+    id                bytea       PRIMARY KEY CHECK (octet_length(id) = 16),
+    subject_id        bytea       NOT NULL REFERENCES entities(id),
+    kind_id           bytea       NOT NULL REFERENCES entities(id),
+    object_id         bytea                REFERENCES entities(id),
+    context_id        bytea                REFERENCES entities(id),
+    rating            bigint      NOT NULL,
+    rd                bigint      NOT NULL CHECK (rd > 0),
+    volatility        bigint      NOT NULL CHECK (volatility > 0),
+    witness_count     bigint      NOT NULL DEFAULT 1 CHECK (witness_count >= 0),
+    last_observed_at  timestamptz NOT NULL,
+    UNIQUE NULLS NOT DISTINCT (subject_id, kind_id, object_id, context_id)
+);
+
+COMMENT ON TABLE consensus IS
+    'Materialized cross-witness Glicko-2 consensus: ONE row per (subject, kind, object, context) — source dropped from identity (source is witness, never identity). Accumulated from the attestations EVIDENCE layer via laplace_glicko2_accumulate. This is what inference reads; the per-witness rows live in attestations.';
+
+SELECT pg_extension_config_dump('consensus', '');
+
+CREATE INDEX consensus_subject_btree      ON consensus (subject_id);
+CREATE INDEX consensus_object_btree       ON consensus (object_id) WHERE object_id IS NOT NULL;
+CREATE INDEX consensus_kind_btree         ON consensus (kind_id);
+CREATE INDEX consensus_subject_kind_btree ON consensus (subject_id, kind_id);
+CREATE INDEX consensus_rating_btree       ON consensus (rating DESC, rd ASC);
+
+/* consensus id = BLAKE3-128 of (subject ‖ kind ‖ (object|zero16) ‖ (context|zero16)).
+ * SOURCE OUT — the whole point. NULL object/context fold to 16 zero bytes,
+ * matching the Hash128.Zero convention the C# 5-tuple id uses. */
+CREATE OR REPLACE FUNCTION consensus_id(
+    p_subject bytea, p_kind bytea, p_object bytea, p_context bytea)
+    RETURNS bytea LANGUAGE sql LAPLACE_IMMUTABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT public.laplace_hash128_blake3(
+        p_subject || p_kind
+        || COALESCE(p_object,  '\x00000000000000000000000000000000'::bytea)
+        || COALESCE(p_context, '\x00000000000000000000000000000000'::bytea))
+$$;
+
+/* Rebuild the consensus layer from the evidence (attestations) via Glicko-2
+ * accumulation. Batch (TRUNCATE + reinsert) — correct and simple; incremental
+ * per-write accumulation can replace it once the writer drives it (the cost is
+ * staleness between rebuilds, not correctness). Returns the consensus row count.
+ *
+ * K1 mapping per witness row: opponent at the noise floor (μ=1000, rd=50),
+ * prior neutral (μ=1500, rd=350, σ=0.06), score = normalized evidence strength
+ * in (0, 1] = min(rating / 2500, 1), tau = 0.5. All fixed-point ×1e9. */
+CREATE OR REPLACE FUNCTION rebuild_consensus()
+    RETURNS bigint LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE n bigint;
+BEGIN
+    TRUNCATE consensus;
+    INSERT INTO consensus (id, subject_id, kind_id, object_id, context_id,
+                           rating, rd, volatility, witness_count, last_observed_at)
+    SELECT consensus_id(g.subject_id, g.kind_id, g.object_id, g.context_id),
+           g.subject_id, g.kind_id, g.object_id, g.context_id,
+           (g.acc).rating, (g.acc).rd, (g.acc).volatility,
+           g.witness_count, g.last_observed_at
+    FROM (
+        SELECT a.subject_id, a.kind_id, a.object_id, a.context_id,
+               COUNT(*)                AS witness_count,
+               MAX(a.last_observed_at) AS last_observed_at,
+               laplace_glicko2_accumulate(
+                   1500000000000::bigint, 350000000000::bigint, 60000000::bigint,    -- neutral prior
+                   1000000000000::bigint, 50000000000::bigint,                       -- noise-floor opponent (μ, rd)
+                   LEAST(GREATEST(a.rating, 0) / 2500, 1000000000)::bigint,          -- score ∈ (0,1] = normalized strength
+                   500000000::bigint                                                 -- tau = 0.5
+               )                       AS acc
+        FROM attestations a
+        GROUP BY a.subject_id, a.kind_id, a.object_id, a.context_id
+    ) g;
+    GET DIAGNOSTICS n = ROW_COUNT;
+    RETURN n;
+END;
+$$;
+
+COMMENT ON FUNCTION rebuild_consensus() IS
+    'Materialize the consensus table from the attestations evidence via Glicko-2 accumulation (K1 first-cut mapping). Batch rebuild; returns consensus row count.';
