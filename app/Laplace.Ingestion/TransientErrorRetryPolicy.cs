@@ -22,10 +22,10 @@ public sealed record TransientErrorRetryPolicy(
     /// <see cref="global::Npgsql.PostgresException"/> with a transient
     /// SQLSTATE class (08, 53, 57, 58) as transient.</summary>
     public static TransientErrorRetryPolicy Default { get; } =
-        new(MaxAttempts: 3,
+        new(MaxAttempts: 6,
             InitialDelay: TimeSpan.FromMilliseconds(100),
-            BackoffMultiplier: 10.0,
-            JitterFraction: 0.1,
+            BackoffMultiplier: 3.0,
+            JitterFraction: 0.5,
             IsTransient: DefaultIsTransient);
 
     /// <summary>Policy that disables retry — surfaces every error immediately.
@@ -62,8 +62,13 @@ public sealed record TransientErrorRetryPolicy(
             //   53 — insufficient_resources
             //   57 — operator_intervention (e.g. admin_shutdown)
             //   58 — system_error
+            //   40 — transaction_rollback (40001 serialization_failure,
+            //        40P01 deadlock_detected) — expected under concurrent
+            //        ingestion of shared content; retrying the aborted txn
+            //        succeeds once the other writer commits.
             return pg.SqlState is { Length: >= 2 } s &&
                    (s.StartsWith("08", StringComparison.Ordinal)
+                 || s.StartsWith("40", StringComparison.Ordinal)
                  || s.StartsWith("53", StringComparison.Ordinal)
                  || s.StartsWith("57", StringComparison.Ordinal)
                  || s.StartsWith("58", StringComparison.Ordinal));

@@ -235,8 +235,23 @@ setup: launch-db db-up seed-t0
 ingest source path="": build-app
     scripts/ingest-source.sh {{source}} {{path}}
 
+# Ingest the whole seed/lexical ladder in dependency order:
+#   unicode → iso639 → wordnet → omw → ud → tatoeba → atomic2020 → conceptnet → wiktionary
+# Each source's IngestRunner layer check gates on the lower layers (ADR 0037); the layer-4
+# corpora are independent. Idempotent — re-runs short-circuit via ON CONFLICT + checkpoint.
+ingest-all: build-app
+    scripts/ingest-source.sh all
+
 ingest-tinyllama: build-app
     scripts/ingest-source.sh model /vault/models/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0/snapshots/fe8a4ea1ffedaf415f4da2f062534de366a451e6
+
+# End-to-end decomposer audit: runs the lexical ladder on the current DB, asserts the seed
+# decomposers land CONTENT physicalities (not just attestations — the pre-fix regression),
+# and reports before/after entity/physicality/attestation counts. Flags: --full (also the
+# big tatoeba/conceptnet/wiktionary corpora), --fresh (db-nuke first), --from <src> (resume).
+audit-decomposers *args: build-app
+    @chmod +x scripts/audit-decomposers.sh
+    scripts/audit-decomposers.sh {{args}}
 
 # === Query / Cascade ===
 

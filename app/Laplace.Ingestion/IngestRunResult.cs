@@ -9,7 +9,6 @@ public sealed record IngestRunResult(
     string                    SourceName,
     long                      UnitsAttempted,
     long                      UnitsApplied,
-    long                      UnitsSkippedFromCheckpoint,
     long                      UnitsFailed,
     long                      EntitiesInserted,
     long                      PhysicalitiesInserted,

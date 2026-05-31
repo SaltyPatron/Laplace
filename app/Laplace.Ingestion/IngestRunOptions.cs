@@ -9,10 +9,8 @@ namespace Laplace.Ingestion;
 public sealed record IngestRunOptions(
     DecomposerOptions          DecomposerOptions,
     int                        ParallelWorkers,
-    TimeSpan                   CheckpointFlushInterval,
     TransientErrorRetryPolicy  RetryPolicy,
     IProgress<IngestProgress>? Progress,
-    string?                    CheckpointPathOverride = null,
     bool                       AbortOnTransientExhaustion = false,
     bool                       SkipLayerOrderingCheck = false,
     string?                    EcosystemPath = null,
@@ -37,7 +35,6 @@ public sealed record IngestRunOptions(
     public static IngestRunOptions Default { get; } = new(
         DecomposerOptions:        DecomposerOptions.Default,
         ParallelWorkers:          1,
-        CheckpointFlushInterval:  TimeSpan.FromSeconds(30),
         RetryPolicy:              TransientErrorRetryPolicy.Default,
         Progress:                 null);
 }

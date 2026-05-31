@@ -22,22 +22,11 @@ namespace Laplace.Ingestion.Tests;
 public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLifetime
 {
     private readonly LocalPgFixture _pg;
-    private string _ckptDir = "";
 
     public SyntheticDecomposerTests(LocalPgFixture pg) => _pg = pg;
 
-    public Task InitializeAsync()
-    {
-        _ckptDir = Path.Combine(Path.GetTempPath(), $"laplace-ingest-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_ckptDir);
-        return Task.CompletedTask;
-    }
-
-    public Task DisposeAsync()
-    {
-        try { Directory.Delete(_ckptDir, recursive: true); } catch { }
-        return Task.CompletedTask;
-    }
+    public Task InitializeAsync() => Task.CompletedTask;
+    public Task DisposeAsync() => Task.CompletedTask;
 
     private sealed class SyntheticDecomposer : IDecomposer
     {
@@ -145,7 +134,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var options = IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = true,
-            CheckpointPathOverride = Path.Combine(_ckptDir, "ckpt.bin"),
         };
 
         var result = await runner.RunAsync(decomposer, options);
@@ -161,33 +149,28 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     }
 
     [Fact]
-    public async Task RerunSkipsAlreadyAppliedIntents()
+    public async Task Rerun_IsIdempotent_ZeroNovelRowsSecondPass()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
         var srcId = Hash128.OfCanonical("substrate/source/SyntheticResume/v1");
-        var decomposer = new SyntheticDecomposer(unitCount: 5, sourceId: srcId);
 
-        var ckpt = Path.Combine(_ckptDir, "resume.bin");
-        var options = IngestRunOptions.Default with
-        {
-            SkipLayerOrderingCheck = true,
-            CheckpointPathOverride = ckpt,
-        };
+        var options = IngestRunOptions.Default with { SkipLayerOrderingCheck = true };
 
-        var first = await runner.RunAsync(decomposer, options);
+        var first = await runner.RunAsync(new SyntheticDecomposer(unitCount: 5, sourceId: srcId), options);
         Assert.Equal(5, first.UnitsApplied);
-        Assert.Equal(0, first.UnitsSkippedFromCheckpoint);
+        Assert.Equal(0, first.UnitsFailed);
+        Assert.True(first.EntitiesInserted >= 20);   // 5 * (3 leaves + 1 parent)
 
-        // Re-create decomposer to reset internal state and run again with
-        // same checkpoint file — every intent should be skipped (deterministic
-        // IntentId per unit name + source).
-        var decomposer2 = new SyntheticDecomposer(unitCount: 5, sourceId: srcId);
-        var second = await runner.RunAsync(decomposer2, options);
-        Assert.Equal(5, second.UnitsAttempted);
-        Assert.Equal(5, second.UnitsSkippedFromCheckpoint);
-        Assert.Equal(0, second.UnitsApplied);
+        // Re-run: no checkpoint, no resume state. Content-addressed identity + the
+        // writer's existence-check + INSERT … ON CONFLICT DO NOTHING make every
+        // intent a no-op — all 5 "apply" (idempotent), zero novel rows, zero
+        // failures. Idempotency is the substrate's property, not a side journal's.
+        var second = await runner.RunAsync(new SyntheticDecomposer(unitCount: 5, sourceId: srcId), options);
+        Assert.Equal(5, second.UnitsApplied);
+        Assert.Equal(0, second.UnitsFailed);
+        Assert.Equal(0, second.EntitiesInserted);
     }
 
     [Fact]
@@ -203,7 +186,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         {
             SkipLayerOrderingCheck = true,
             ParallelWorkers = 4,
-            CheckpointPathOverride = Path.Combine(_ckptDir, "parallel.bin"),
         };
 
         var result = await runner.RunAsync(decomposer, options);
@@ -226,7 +208,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         {
             SkipLayerOrderingCheck = true,
             BatchSize              = 4,
-            CheckpointPathOverride = Path.Combine(_ckptDir, "batched.bin"),
         };
 
         var result = await runner.RunAsync(decomposer, options);
@@ -239,31 +220,30 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     }
 
     [Fact]
-    public async Task BatchedRerun_SkipsAllViaCheckpoint()
+    public async Task BatchedRerun_IsIdempotent()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
         var srcId = Hash128.OfCanonical("substrate/source/SyntheticBatchedResume/v1");
 
-        var ckpt = Path.Combine(_ckptDir, "batched-resume.bin");
         var options = IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = true,
             BatchSize              = 4,
-            CheckpointPathOverride = ckpt,
         };
 
         var first = await runner.RunAsync(new SyntheticDecomposer(7, srcId), options);
         Assert.Equal(7, first.UnitsApplied);
-        Assert.Equal(0, first.UnitsSkippedFromCheckpoint);
+        Assert.Equal(0, first.UnitsFailed);
 
-        // Re-run with the same checkpoint: every intent is skipped before it
-        // ever reaches ApplyManyAsync (per-batch checkpoint append from run 1).
+        // Re-run through the batched COPY path: the staging-table + ON CONFLICT
+        // DO NOTHING promote dedups every row, so the second pass inserts nothing
+        // novel and fails none — idempotent with no resume bookkeeping.
         var second = await runner.RunAsync(new SyntheticDecomposer(7, srcId), options);
-        Assert.Equal(7, second.UnitsAttempted);
-        Assert.Equal(7, second.UnitsSkippedFromCheckpoint);
-        Assert.Equal(0, second.UnitsApplied);
+        Assert.Equal(7, second.UnitsApplied);
+        Assert.Equal(0, second.UnitsFailed);
+        Assert.Equal(0, second.EntitiesInserted);
     }
 
     [Fact]
@@ -283,7 +263,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         {
             SkipLayerOrderingCheck = true,
             BatchSize              = 8,   // all 8 intents land in one batch
-            CheckpointPathOverride = Path.Combine(_ckptDir, "overlap.bin"),
         };
 
         var result = await runner.RunAsync(decomposer, options);
@@ -312,7 +291,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
             SkipLayerOrderingCheck = true,
             ParallelWorkers        = 4,
             BatchSize              = 4,   // 10 batches across 4 workers, all sharing one entity id
-            CheckpointPathOverride = Path.Combine(_ckptDir, "parallel-overlap.bin"),
         };
 
         var result = await runner.RunAsync(decomposer, options);
@@ -399,10 +377,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         // Build a fake Layer-5 decomposer that should be refused
         var decomposer = new HighLayerDecomposer(srcId);
 
-        var options = IngestRunOptions.Default with
-        {
-            CheckpointPathOverride = Path.Combine(_ckptDir, "layer.bin"),
-        };
+        var options = IngestRunOptions.Default;
 
         await Assert.ThrowsAsync<LayerOrderingViolationException>(
             () => runner.RunAsync(decomposer, options));

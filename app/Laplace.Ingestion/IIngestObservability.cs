@@ -17,9 +17,6 @@ public interface IIngestObservability
     /// <summary>Called per applied intent (after successful ApplyAsync).</summary>
     void OnIntentApplied(string sourceName, ApplyResult result);
 
-    /// <summary>Called per intent that was skipped via checkpoint resume.</summary>
-    void OnIntentSkipped(string sourceName);
-
     /// <summary>Called per intent that failed after retries exhausted.</summary>
     void OnIntentFailed(string sourceName, IngestFailure failure);
 
@@ -35,7 +32,6 @@ public sealed class NoOpObservability : IIngestObservability
     private NoOpObservability() { }
     public void OnRunStart(string sourceName, int layerOrder, long? estimatedUnitCount) { }
     public void OnIntentApplied(string sourceName, ApplyResult result) { }
-    public void OnIntentSkipped(string sourceName) { }
     public void OnIntentFailed(string sourceName, IngestFailure failure) { }
     public void OnRunFinished(string sourceName, IngestRunResult result) { }
 }

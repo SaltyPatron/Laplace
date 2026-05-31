@@ -5,7 +5,6 @@ namespace Laplace.Ingestion;
 public sealed record IngestProgress(
     long  UnitsAttempted,
     long  UnitsApplied,
-    long  UnitsSkippedFromCheckpoint,
     long  UnitsFailed,
     long? EstimatedTotal,        // null if EstimateUnitCountAsync returned null
     TimeSpan Elapsed);

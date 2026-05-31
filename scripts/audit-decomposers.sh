@@ -4,7 +4,8 @@
 # Logs to ${AUDIT_LOG:-/tmp/laplace-decomposer-audit.log}
 #
 # Usage:
-#   scripts/audit-decomposers.sh              # full ladder on current DB
+#   scripts/audit-decomposers.sh              # lexical ladder (iso639 wordnet omw ud) on current DB
+#   scripts/audit-decomposers.sh --full       # + big corpora (tatoeba atomic2020 conceptnet wiktionary)
 #   scripts/audit-decomposers.sh --fresh      # db-nuke + setup + ladder
 #   scripts/audit-decomposers.sh --from iso639  # resume after T0 already seeded
 #
@@ -19,9 +20,11 @@ TINYLLAMA="${TINYLLAMA_DIR:-/vault/models/models--TinyLlama--TinyLlama-1.1B-Chat
 
 FROM=""
 FRESH=0
+FULL=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --fresh) FRESH=1; shift ;;
+    --full) FULL=1; shift ;;
     --from) FROM="${2:-}"; shift 2 ;;
     -h|--help)
       sed -n '2,12p' "$0"
@@ -51,7 +54,7 @@ layer_done() {
   "${PSQL[@]}" -t -A -c "
     SELECT EXISTS(
       SELECT 1 FROM laplace.attestations
-      WHERE kind_id = laplace.hash128_blake3(convert_to(
+      WHERE kind_id = public.laplace_hash128_blake3(convert_to(
         'substrate/kind/HasLayerCompleted/${n}/v1', 'UTF8'))
     );
   " | tr -d '[:space:]'
@@ -80,8 +83,13 @@ vault_check() {
     "/vault/Data/Unicode/Public/17.0.0/ucdxml/ucd.nounihan.flat.zip" \
     "/vault/Data/ISO639/iso-639-3.tab" \
     "/vault/Data/Wordnet/WordNet-3.0/dict/data.noun" \
+    "/vault/Data/Wordnet/WordNet-3.0/dict/index.sense" \
     "/vault/Data/omw/wns" \
     "/vault/Data/UD-Treebanks/ud-treebanks-v2.17" \
+    "/vault/Data/Tatoeba/sentences.csv" \
+    "/vault/Data/Atomic2020/train.tsv" \
+    "/vault/Data/ConceptNet/assertions.csv" \
+    "/vault/Data/Wiktionary" \
     "$TINYLLAMA/config.json"
   do
     if [[ -e "$f" ]]; then echo "  ok  $f"; else echo "  MISSING  $f"; ok=1; fi
@@ -121,10 +129,14 @@ if should_run "unicode-ingest"; then
 fi
 
 AUDIT_FAIL=0
-for src in iso639 wordnet omw ud; do
+declare -A LAYER=( [iso639]=1 [wordnet]=2 [omw]=3 [ud]=4
+                   [tatoeba]=4 [atomic2020]=4 [conceptnet]=4 [wiktionary]=4 )
+LADDER=(iso639 wordnet omw ud)
+# Big corpora (millions–tens-of-millions of rows) only with --full; layer 4, independent.
+[[ $FULL -eq 1 ]] && LADDER+=(tatoeba atomic2020 conceptnet wiktionary)
+for src in "${LADDER[@]}"; do
   should_run "$src" || continue
-  layer=$({ iso639=1; wordnet=2; omw=3; ud=4; echo "${!src}"; })
-  prev=$((layer - 1))
+  prev=$(( ${LAYER[$src]} - 1 ))
   if [[ "$(layer_done "$prev")" != "t" ]]; then
     fail "ingest $src blocked: HasLayerCompleted/$prev missing (run ingest unicode first or fix seed-t0)"
     AUDIT_FAIL=1
@@ -132,6 +144,27 @@ for src in iso639 wordnet omw ud; do
   fi
   run_just "ingest $src" just ingest "$src" || AUDIT_FAIL=1
 done
+
+# Regression gate: the seed/lexical decomposers MUST emit CONTENT physicalities (kind=1),
+# not just attestations. The pre-fix WordNet emitted ZERO content (only string-keyed
+# entities + attestations); the fix routes lemmas/glosses/examples through ContentEmitter.
+# Count CONTENT physicalities attributed to the WordNet source specifically — 0 before, many
+# after. (Skipped if WordNet wasn't part of this run's ladder.)
+if printf '%s\n' "${LADDER[@]}" | grep -qx wordnet || [[ "$(layer_done 2)" == "t" ]]; then
+  section "CONTENT CHECK (seed = content + attestations, not attestations alone)"
+  wn_content=$("${PSQL[@]}" -t -A -c "
+    SELECT count(*) FROM laplace.physicalities
+    WHERE kind = 1
+      AND source_id = public.laplace_hash128_blake3(convert_to('substrate/source/WordNetDecomposer/v1','UTF8'));
+  " | tr -d '[:space:]')
+  echo "WordNet CONTENT physicalities = ${wn_content:-0}"
+  if [[ "${wn_content:-0}" -gt 0 ]]; then
+    pass "WordNet emits CONTENT physicalities (${wn_content}) — content path live"
+  else
+    fail "WordNet emitted no CONTENT physicalities — regressed to attestations-only / string-keyed entities"
+    AUDIT_FAIL=1
+  fi
+fi
 
 if should_run "model"; then
   if [[ -d "$TINYLLAMA" ]]; then

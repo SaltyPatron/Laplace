@@ -8,6 +8,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      full_ladder:
+        description: "Decomposer ladder: also ingest omw + ud (slower; big corpora still excluded)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -462,11 +467,42 @@ jobs:
           done
 
   # ------------------------------------------------------------------
+  # decomposer-ladder — ingest the bounded lexical layer (unicode → iso639 →
+  # wordnet [→ omw → ud with full_ladder]) and assert the seed decomposers land
+  # CONTENT, not just attestations (the pre-fix string-keyed regression). Runs on
+  # the shared `laplace` DB after the test jobs and before model-roundtrip, which
+  # db-nukes at its start — so the ladder's data is verified then cleanly wiped.
+  # Big corpora (tatoeba/conceptnet/wiktionary) are out of band (multi-hour).
+  # ------------------------------------------------------------------
+  decomposer-ladder:
+    name: Decomposer ladder — seed sources land content (lexical layer)
+    needs: [regress, dotnet-test]
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+
+      - name: Source oneAPI env
+        run: |
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|LD_LIBRARY_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+
+      - name: Decomposer ladder CI (ingest lexical layer → assert content lands)
+        env:
+          LADDER_FULL: ${{ github.event.inputs.full_ladder == 'true' && '1' || '0' }}
+        run: |
+          chmod +x scripts/decomposer-ladder-ci.sh
+          scripts/decomposer-ladder-ci.sh
+
+  # ------------------------------------------------------------------
   # model-roundtrip — ingest → substrate → synthesize → GGUF.
   # ------------------------------------------------------------------
   model-roundtrip:
     name: Model round-trip — ingest → consensus → synthesize → GGUF (Chunk 8 partial)
-    needs: [regress, dotnet-test]
+    needs: [decomposer-ladder]
     runs-on: [self-hosted, laplace]
     steps:
       - uses: actions/checkout@v4

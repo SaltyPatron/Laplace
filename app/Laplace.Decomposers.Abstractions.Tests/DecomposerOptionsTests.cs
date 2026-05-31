@@ -11,8 +11,6 @@ public class DecomposerOptionsTests
         var d = DecomposerOptions.Default;
         Assert.Equal(1, d.BatchSize);
         Assert.False(d.DryRun);
-        Assert.True(d.ResumeFromCheckpoint);
-        Assert.Null(d.CheckpointPath);
         Assert.Null(d.IncludeFilter);
         Assert.Null(d.ExcludeFilter);
     }

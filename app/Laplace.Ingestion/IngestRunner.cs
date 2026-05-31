@@ -16,8 +16,11 @@ namespace Laplace.Ingestion;
 ///
 /// <para>
 /// Cross-cutting concerns owned here: layer-ordering enforcement (ADR
-/// 0037), checkpoint/resume, transient retry, parallel-worker variant,
-/// progress reporting, structured logging, observability emission.
+/// 0037), transient retry, parallel-worker variant, progress reporting,
+/// structured logging, observability emission. Idempotency is the
+/// substrate's own property — content-addressed identity + the writer's
+/// existence-check + INSERT … ON CONFLICT DO NOTHING (RULES R5) — so a
+/// re-run converges with no side journal and no resume state to keep coherent.
 /// </para>
 /// </summary>
 public sealed class IngestRunner
@@ -51,7 +54,7 @@ public sealed class IngestRunner
         var log = _loggerFactory.CreateLogger($"Ingest:{decomposer.SourceName}");
         var sw = Stopwatch.StartNew();
         var failures = new List<IngestFailure>();
-        long unitsAttempted = 0, unitsApplied = 0, unitsSkipped = 0, unitsFailed = 0;
+        long unitsAttempted = 0, unitsApplied = 0, unitsFailed = 0;
         long entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
         long totalRoundTrips = 0;
 
@@ -81,13 +84,7 @@ public sealed class IngestRunner
         long? estimatedTotal = await decomposer.EstimateUnitCountAsync(ctx, ct);
         _obs.OnRunStart(decomposer.SourceName, decomposer.LayerOrder, estimatedTotal);
 
-        // 4. Open / resume checkpoint journal.
-        var checkpointPath = options.DecomposerOptions.CheckpointPath
-                          ?? options.CheckpointPathOverride
-                          ?? Path.Combine(ctx.EcosystemPath, "checkpoint.bin");
-        await using var checkpoint = await CheckpointJournal.OpenOrCreateAsync(checkpointPath, ct);
-
-        // 5. Iterate the decomposer's stream. Serial or parallel.
+        // 4. Iterate the decomposer's stream. Serial or parallel.
         var rng = new Random(unchecked((int)decomposer.SourceId.Lo));
         var counters = new RunCounters();
 
@@ -114,7 +111,7 @@ public sealed class IngestRunner
                 ct.ThrowIfCancellationRequested();
                 if (batchSize == 1 && commitRows == 0)
                 {
-                    await ProcessOneIntentAsync(intent, decomposer, options, checkpoint, rng,
+                    await ProcessOneIntentAsync(intent, decomposer, options, rng,
                                                  counters, failures, log, ct);
                     continue;
                 }
@@ -122,14 +119,14 @@ public sealed class IngestRunner
                 batchRows += RowsOf(intent);
                 if (ShouldFlush(batch.Count, batchRows))
                 {
-                    await ProcessBatchAsync(batch, decomposer, options, checkpoint, rng,
+                    await ProcessBatchAsync(batch, decomposer, options, rng,
                                             counters, failures, log, ct);
                     batch.Clear();
                     batchRows = 0;
                 }
             }
             if (batch.Count > 0)
-                await ProcessBatchAsync(batch, decomposer, options, checkpoint, rng,
+                await ProcessBatchAsync(batch, decomposer, options, rng,
                                         counters, failures, log, ct);
         }
         else
@@ -176,7 +173,7 @@ public sealed class IngestRunner
                         {
                             if (batchSize == 1 && commitRows == 0)
                             {
-                                await ProcessOneIntentAsync(intent, decomposer, options, checkpoint,
+                                await ProcessOneIntentAsync(intent, decomposer, options,
                                                             localRng, counters, failures, log, ct);
                                 continue;
                             }
@@ -184,7 +181,7 @@ public sealed class IngestRunner
                             batchRows += RowsOf(intent);
                             if (ShouldFlush(batch.Count, batchRows))
                             {
-                                await ProcessBatchAsync(batch, decomposer, options, checkpoint,
+                                await ProcessBatchAsync(batch, decomposer, options,
                                                         localRng, counters, failures, log, ct);
                                 batch.Clear();
                                 batchRows = 0;
@@ -192,7 +189,7 @@ public sealed class IngestRunner
                         }
                     }
                     if (batch.Count > 0)
-                        await ProcessBatchAsync(batch, decomposer, options, checkpoint,
+                        await ProcessBatchAsync(batch, decomposer, options,
                                                 localRng, counters, failures, log, ct);
                 }, ct);
             }
@@ -202,19 +199,17 @@ public sealed class IngestRunner
 
         unitsAttempted        = counters.UnitsAttempted;
         unitsApplied          = counters.UnitsApplied;
-        unitsSkipped          = counters.UnitsSkipped;
         unitsFailed           = counters.UnitsFailed;
         entitiesInserted      = counters.EntitiesInserted;
         physicalitiesInserted = counters.PhysicalitiesInserted;
         attestationsInserted  = counters.AttestationsInserted;
         totalRoundTrips       = counters.RoundTrips;
 
-        // 6. Layer completion marker (ADR 0037) when the run finished clean.
+        // 5. Layer completion marker (ADR 0037) when the run finished clean.
         if (counters.UnitsFailed == 0 && failures.Count == 0)
             await _writer.ApplyAsync(LayerCompletion.BuildMarker(decomposer), ct);
 
-        // 7. Final flush + summary.
-        await checkpoint.FlushAsync(CancellationToken.None);
+        // 6. Summary.
         sw.Stop();
 
         var result = new IngestRunResult(
@@ -222,7 +217,6 @@ public sealed class IngestRunner
             SourceName: decomposer.SourceName,
             UnitsAttempted: unitsAttempted,
             UnitsApplied: unitsApplied,
-            UnitsSkippedFromCheckpoint: unitsSkipped,
             UnitsFailed: unitsFailed,
             EntitiesInserted: entitiesInserted,
             PhysicalitiesInserted: physicalitiesInserted,
@@ -238,7 +232,6 @@ public sealed class IngestRunner
         SubstrateChange intent,
         IDecomposer decomposer,
         IngestRunOptions options,
-        CheckpointJournal checkpoint,
         Random rng,
         RunCounters counters,
         List<IngestFailure> failures,
@@ -246,14 +239,6 @@ public sealed class IngestRunner
         CancellationToken ct)
     {
         Interlocked.Increment(ref counters._unitsAttempted);
-
-        if (checkpoint.WasApplied(intent.Metadata.IntentId))
-        {
-            Interlocked.Increment(ref counters._unitsSkipped);
-            _obs.OnIntentSkipped(decomposer.SourceName);
-            options.Progress?.Report(MakeProgress(counters));
-            return;
-        }
 
         Exception? lastEx = null;
         int attempt = 0;
@@ -273,9 +258,6 @@ public sealed class IngestRunner
                 Interlocked.Add(ref counters._physicalitiesInserted, apply.PhysicalitiesInserted);
                 Interlocked.Add(ref counters._attestationsInserted, apply.AttestationsInserted);
                 Interlocked.Add(ref counters._roundTrips, apply.RoundTrips);
-
-                long appliedUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
-                await checkpoint.AppendAsync(intent.Metadata.IntentId, appliedUs, CancellationToken.None);
 
                 _obs.OnIntentApplied(decomposer.SourceName, apply);
                 options.Progress?.Report(MakeProgress(counters));
@@ -302,7 +284,6 @@ public sealed class IngestRunner
                     lock (failures) failures.Add(fatal);
                     Interlocked.Increment(ref counters._unitsFailed);
                     _obs.OnIntentFailed(decomposer.SourceName, fatal);
-                    await checkpoint.FlushAsync(CancellationToken.None);
                     log.LogError(ex, "Fatal ingest error on intent {IntentId} (unit {Unit}); aborting run.",
                         intent.Metadata.IntentId, intent.Metadata.SourceContentUnitName);
                     throw;
@@ -331,16 +312,15 @@ public sealed class IngestRunner
     /// <summary>
     /// Apply a coalesced batch of intents through
     /// <see cref="ISubstrateWriter.ApplyManyAsync"/> — one existence pass and
-    /// one COPY per table for the whole batch. Resume-skip is applied per
-    /// intent first; the batch commits atomically, so on success every
-    /// surviving intent is checkpointed and on a fatal error the whole batch
-    /// rolled back (recorded + aborts, matching per-intent fatal semantics).
+    /// one COPY per table for the whole batch. The batch commits atomically; on
+    /// a fatal error the whole batch rolls back (recorded + aborts, matching
+    /// per-intent fatal semantics). Re-application is idempotent via
+    /// content-addressed identity + INSERT … ON CONFLICT DO NOTHING.
     /// </summary>
     private async Task ProcessBatchAsync(
         List<SubstrateChange> batch,
         IDecomposer decomposer,
         IngestRunOptions options,
-        CheckpointJournal checkpoint,
         Random rng,
         RunCounters counters,
         List<IngestFailure> failures,
@@ -349,24 +329,7 @@ public sealed class IngestRunner
     {
         if (batch.Count == 0) return;
 
-        // Resume: drop intents already in the checkpoint, counting them skipped.
-        var pending = new List<SubstrateChange>(batch.Count);
-        foreach (var intent in batch)
-        {
-            Interlocked.Increment(ref counters._unitsAttempted);
-            if (checkpoint.WasApplied(intent.Metadata.IntentId))
-            {
-                Interlocked.Increment(ref counters._unitsSkipped);
-                _obs.OnIntentSkipped(decomposer.SourceName);
-                continue;
-            }
-            pending.Add(intent);
-        }
-        if (pending.Count == 0)
-        {
-            options.Progress?.Report(MakeProgress(counters));
-            return;
-        }
+        Interlocked.Add(ref counters._unitsAttempted, batch.Count);
 
         Exception? lastEx = null;
         int attempt = 0;
@@ -379,17 +342,13 @@ public sealed class IngestRunner
                     var delay = options.RetryPolicy.DelayBeforeAttempt(attempt - 1, rng);
                     if (delay > TimeSpan.Zero) await Task.Delay(delay, ct);
                 }
-                var apply = await _writer.ApplyManyAsync(pending, ct);
+                var apply = await _writer.ApplyManyAsync(batch, ct);
 
-                Interlocked.Add(ref counters._unitsApplied,           pending.Count);
+                Interlocked.Add(ref counters._unitsApplied,           batch.Count);
                 Interlocked.Add(ref counters._entitiesInserted,       apply.EntitiesInserted);
                 Interlocked.Add(ref counters._physicalitiesInserted,  apply.PhysicalitiesInserted);
                 Interlocked.Add(ref counters._attestationsInserted,   apply.AttestationsInserted);
                 Interlocked.Add(ref counters._roundTrips,             apply.RoundTrips);
-
-                long appliedUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
-                foreach (var intent in pending)
-                    await checkpoint.AppendAsync(intent.Metadata.IntentId, appliedUs, CancellationToken.None);
 
                 _obs.OnIntentApplied(decomposer.SourceName, apply);
                 options.Progress?.Report(MakeProgress(counters));
@@ -404,22 +363,21 @@ public sealed class IngestRunner
                 lastEx = ex;
                 if (!options.RetryPolicy.IsTransient(ex))
                 {
-                    RecordBatchFailure(pending, decomposer.SourceName, ex,
+                    RecordBatchFailure(batch, decomposer.SourceName, ex,
                                        wasTransient: false, attempt, failures, counters);
-                    await checkpoint.FlushAsync(CancellationToken.None);
                     log.LogError(ex, "Fatal ingest error in batch of {Count} intents "
                         + "(first unit {Unit}); aborting run.",
-                        pending.Count, pending[0].Metadata.SourceContentUnitName);
+                        batch.Count, batch[0].Metadata.SourceContentUnitName);
                     throw;
                 }
                 log.LogWarning(ex, "Transient ingest error in batch of {Count} intents "
                     + "(attempt {Attempt}); will retry whole batch.",
-                    pending.Count, attempt + 1);
+                    batch.Count, attempt + 1);
             }
         }
 
         // All retries exhausted for the batch.
-        RecordBatchFailure(pending, decomposer.SourceName, lastEx,
+        RecordBatchFailure(batch, decomposer.SourceName, lastEx,
                            wasTransient: true, attempt, failures, counters);
         if (options.AbortOnTransientExhaustion && lastEx is not null) throw lastEx;
     }
@@ -449,21 +407,20 @@ public sealed class IngestRunner
             _obs.OnIntentFailed(sourceName, f);
     }
 
+    // EcosystemPath is the decomposer's read-only source-data root (e.g.
+    // /vault/Data/Unicode). Decomposers that need it set it explicitly via
+    // options.EcosystemPath; the fallback is the process working directory —
+    // never a shared /tmp path.
     private static string ResolveEcosystemPath(IDecomposer decomposer, IngestRunOptions options)
-        => options.EcosystemPath
-           ?? (options.CheckpointPathOverride is not null
-               ? Path.GetDirectoryName(options.CheckpointPathOverride) ?? "."
-               : Path.Combine(Path.GetTempPath(), "laplace-ingest", decomposer.SourceName));
+        => options.EcosystemPath ?? Directory.GetCurrentDirectory();
 
     private static IngestProgress MakeProgress(RunCounters c) =>
-        new(c.UnitsAttempted, c.UnitsApplied, c.UnitsSkipped, c.UnitsFailed,
-            null, TimeSpan.Zero);
+        new(c.UnitsAttempted, c.UnitsApplied, c.UnitsFailed, null, TimeSpan.Zero);
 
     private sealed class RunCounters
     {
         internal long _unitsAttempted;
         internal long _unitsApplied;
-        internal long _unitsSkipped;
         internal long _unitsFailed;
         internal long _entitiesInserted;
         internal long _physicalitiesInserted;
@@ -471,7 +428,6 @@ public sealed class IngestRunner
         internal long _roundTrips;
         public long UnitsAttempted        => Interlocked.Read(ref _unitsAttempted);
         public long UnitsApplied          => Interlocked.Read(ref _unitsApplied);
-        public long UnitsSkipped          => Interlocked.Read(ref _unitsSkipped);
         public long UnitsFailed           => Interlocked.Read(ref _unitsFailed);
         public long EntitiesInserted      => Interlocked.Read(ref _entitiesInserted);
         public long PhysicalitiesInserted => Interlocked.Read(ref _physicalitiesInserted);

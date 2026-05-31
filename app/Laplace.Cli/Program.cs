@@ -6,10 +6,14 @@ using System.Security.Cryptography;
 using System.Text;
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.Atomic2020;
+using Laplace.Decomposers.ConceptNet;
 using Laplace.Decomposers.ISO;
 using Laplace.Decomposers.Model;
 using Laplace.Decomposers.OMW;
+using Laplace.Decomposers.Tatoeba;
 using Laplace.Decomposers.UD;
+using Laplace.Decomposers.Wiktionary;
 using Laplace.Decomposers.Unicode;
 using Laplace.Decomposers.WordNet;
 using Laplace.Engine.Core;
@@ -65,6 +69,7 @@ internal static class Program
                 + "  inspect <text>\n"
                 + "  roundtrip <file> [out]\n"
                 + "  db-roundtrip <file>\n"
+                + "  qk-bench <model-dir>             (profile the QK kernel on real weights; no DB)\n"
                 + "  stats");
             return 2;
         }
@@ -80,6 +85,7 @@ internal static class Program
                 "roundtrip"    => Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
                 "db-roundtrip" => await DbRoundtripAsync(args.Length > 1 ? args[1] : ""),
                 "stats"        => await StatsAsync(),
+                "qk-bench"     => QkBenchCmd(args.Length > 1 ? args[1] : ""),
                 _ => Fail($"unknown command '{args[0]}'"),
             };
         }
@@ -94,6 +100,15 @@ internal static class Program
     }
 
     private static int Fail(string m) { Console.Error.WriteLine(m); return 2; }
+
+    // === qk-bench: profile the QK kernel on real weights (no DB, no ingest harness) ===
+    private static int QkBenchCmd(string modelDir)
+    {
+        if (string.IsNullOrEmpty(modelDir) || !Directory.Exists(modelDir))
+            return Fail($"usage: laplace qk-bench <model-dir>  (not found: '{modelDir}')");
+        QkBench.Run(modelDir);
+        return 0;
+    }
 
     // === db-roundtrip: store content in the substrate, reconstruct FROM the DB ===
     private static async Task<int> DbRoundtripAsync(string path)
@@ -247,7 +262,7 @@ internal static class Program
         string path   = args.Length > 1 ? args[1] : "";
 
         if (string.IsNullOrEmpty(source))
-            return Fail("usage: laplace ingest <source> [path]  (unicode | iso639 | wordnet | omw | ud | model)");
+            return Fail("usage: laplace ingest <source> [path]  (unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | model)");
 
         return source.ToLowerInvariant() switch
         {
@@ -256,8 +271,12 @@ internal static class Program
             "wordnet"  => await IngestViaRunnerAsync(new WordNetDecomposer(), "/vault/Data/Wordnet", skipLayerCheck: false),
             "omw"      => await IngestViaRunnerAsync(new OMWDecomposer(), "/vault/Data/omw", skipLayerCheck: false),
             "ud"       => await IngestViaRunnerAsync(new UDDecomposer(), "/vault/Data/UD-Treebanks", skipLayerCheck: false),
+            "tatoeba"  => await IngestViaRunnerAsync(new TatoebaDecomposer(), "/vault/Data/Tatoeba", skipLayerCheck: false),
+            "atomic2020" => await IngestViaRunnerAsync(new Atomic2020Decomposer(), "/vault/Data/Atomic2020", skipLayerCheck: false),
+            "conceptnet" => await IngestViaRunnerAsync(new ConceptNetDecomposer(), "/vault/Data/ConceptNet", skipLayerCheck: false),
+            "wiktionary" => await IngestViaRunnerAsync(new WiktionaryDecomposer(), "/vault/Data/Wiktionary", skipLayerCheck: false),
             "model"    => await IngestModelAsync(path),
-            _ => Fail($"unknown ingest source '{source}' (supported: unicode, iso639, wordnet, omw, ud, model)"),
+            _ => Fail($"unknown ingest source '{source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, model)"),
         };
     }
 
@@ -1250,6 +1269,12 @@ internal static class Program
     private static async Task<int> IngestViaRunnerAsync(
         IDecomposer dec, string ecosystemPath, bool skipLayerCheck)
     {
+        // Content-bearing decomposers (WordNet/OMW/UD/Tatoeba/ConceptNet/Atomic2020/
+        // Wiktionary) route lemmas/glosses/examples/sentences through ContentEmitter →
+        // TextDecomposer + HashComposer, whose atom resolver reads the T0 perf-cache. It
+        // MUST be loaded before the run or every decomposition silently yields no content.
+        CodepointPerfcache.Load(ResolveBlob());
+
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         var writer = new NpgsqlSubstrateWriter(ds);
         var reader = new NpgsqlSubstrateReader(ds);

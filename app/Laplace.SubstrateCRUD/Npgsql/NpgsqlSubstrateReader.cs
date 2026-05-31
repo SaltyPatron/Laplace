@@ -30,7 +30,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         await using var cmd = _ds.CreateCommand(
             "SELECT EXISTS(SELECT 1 FROM laplace.attestations a "
           + "JOIN laplace.entities e ON e.id = a.subject_id "
-          + "WHERE a.kind_id = laplace.hash128_blake3($1::bytea))");
+          + "WHERE a.kind_id = public.laplace_hash128_blake3($1::bytea))");
         cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea,
             System.Text.Encoding.UTF8.GetBytes($"substrate/kind/HasLayerCompleted/{layerOrder}/v1"));
         try
