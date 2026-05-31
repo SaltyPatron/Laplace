@@ -42,6 +42,11 @@ internal static class Program
                 ?? "Host=/var/run/postgresql;Username=laplace_admin;Database=laplace";
             if (!s.Contains("Include Error Detail", StringComparison.OrdinalIgnoreCase))
                 s += ";Include Error Detail=true";
+            // The substrate inspection SRFs (laplace.entity_facets, attestations_out, …)
+            // reference their tables unqualified, so the laplace schema must be on the
+            // session search_path for them to resolve.
+            if (!s.Contains("Search Path", StringComparison.OrdinalIgnoreCase))
+                s += ";Search Path=laplace,public";
             return s;
         }
     }
