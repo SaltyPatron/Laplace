@@ -275,4 +275,38 @@ public static class KindRegistry
         foreach (var name in Canon.Keys)
             yield return Resolve(name);
     }
+
+    /// <summary>Seed the static canonical-kind taxonomy into a bootstrap change:
+    /// one Kind-typed entity per canonical kind, plus the <c>is_a</c>-on-kinds
+    /// roll-up edges (ATTENDS is_a RELATED_TO, HAS_XPOS is_a HAS_POS, …) as
+    /// SubstrateMandate refutable attestations. Idempotent (content-addressed +
+    /// ON CONFLICT) so every decomposer's <see cref="BootstrapIntentBuilder"/>
+    /// can call it and only the first run lands rows — this is the FK floor that
+    /// lets registry-routed attestations reference canonical kinds regardless of
+    /// decomposer layer order. Dynamic families (DEP_*, FEAT_*) are NOT seeded
+    /// here — their members are emitted on first sight at ingest, with their own
+    /// is_a edge to a static parent declared here (DEPENDS_ON, HAS_FEATURE).</summary>
+    public static void SeedCanonical(SubstrateChangeBuilder builder, Hash128 sourceId)
+    {
+        var all = new List<KindResolution>(AllCanonical());
+        foreach (var k in all)
+            builder.AddEntity(new EntityRow(k.Id, /*tier*/ 0, BootstrapIntentBuilder.KindMetaTypeId, sourceId));
+        foreach (var k in all)
+            if (k.ParentId is { } parent)
+                builder.AddAttestation(Attest(k.Id, "IS_A", parent, sourceId, SourceTrust.SubstrateMandate));
+    }
+
+    /// <summary>Emit a dynamic-family kind (DEP_*, FEAT_*) and its is_a edge to
+    /// the family parent on first sight at ingest, so its FK and roll-up exist.
+    /// Idempotent. Use for the kinds <see cref="ResolveDeprel"/> /
+    /// <see cref="ResolveFeature"/> mint, which are unbounded and never seeded
+    /// statically. <paramref name="seen"/> de-dups within an ingest run.</summary>
+    public static void SeedDynamic(SubstrateChangeBuilder builder, in KindResolution k, Hash128 sourceId,
+                                   HashSet<Hash128>? seen = null)
+    {
+        if (seen is not null && !seen.Add(k.Id)) return;
+        builder.AddEntity(new EntityRow(k.Id, /*tier*/ 0, BootstrapIntentBuilder.KindMetaTypeId, sourceId));
+        if (k.ParentId is { } parent)
+            builder.AddAttestation(Attest(k.Id, "IS_A", parent, sourceId, SourceTrust.AcademicCurated));
+    }
 }

@@ -117,10 +117,14 @@ public sealed class BootstrapIntentBuilder
             witnessWeight: 1.0));          // a source declaring its own trust class
     }
 
-    /// <summary>Finalize the bootstrap intent.</summary>
+    /// <summary>Finalize the bootstrap intent. Also seeds the canonical-kind
+    /// arena taxonomy (<see cref="KindRegistry.SeedCanonical"/>) so registry-routed
+    /// attestations from any decomposer reference canonical kinds that already
+    /// exist (the kind_id FK floor) — idempotent across decomposers.</summary>
     public SubstrateChange Build()
     {
         AddTrustClassAttestation();
+        KindRegistry.SeedCanonical(_inner, _sourceId);
         return _inner.Build();
     }
 }

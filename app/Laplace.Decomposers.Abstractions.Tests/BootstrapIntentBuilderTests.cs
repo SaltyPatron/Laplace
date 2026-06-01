@@ -53,11 +53,11 @@ public class BootstrapIntentBuilderTests
     {
         var b = new BootstrapIntentBuilder(SourceId, "TestDecomposer", TrustClassId);
         var change = b.Build();
-        // There's exactly one attestation; it's the trust-class one
-        Assert.Single(change.Attestations);
-        var a = change.Attestations[0];
+        // The bootstrap also seeds the canonical-kind taxonomy (is_a-on-kinds);
+        // among those, exactly one trust-class attestation, and it's correct.
+        var a = Assert.Single(change.Attestations,
+            x => x.KindId == BootstrapIntentBuilder.HasTrustClassKindId);
         Assert.Equal(SourceId, a.SubjectId);
-        Assert.Equal(BootstrapIntentBuilder.HasTrustClassKindId, a.KindId);
         Assert.Equal(TrustClassId, a.ObjectId);
         Assert.Equal(SourceId, a.SourceId);
         Assert.Null(a.ContextId);
