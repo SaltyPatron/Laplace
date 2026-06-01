@@ -116,20 +116,19 @@ public sealed class WeightTensorETL
     }
 
     /// <summary>
-    /// ALL interior circuits read as relations through the embedding address book — the
-    /// model's content, per (layer, head), at full granularity. Each circuit is a pair of
-    /// projections; per shared dimension d of a head/neuron:
-    ///   keys_d  = { token t : |A[t,d]| &gt; floor }   — the context n-gram (address-book read of A),
-    ///   vals_d  = { token s : |C[s,d]| &gt; floor }   — the related tokens   (address-book read of C).
-    /// keys compose into ONE content-addressed n-gram trajectory entity (a tier above the
-    /// tokens, exactly as a word composes from graphemes); it attests to each value, weighted
-    /// by magnitude (signed Glicko), with context = the (layer, head) WITNESS so each layer/
-    /// head's evidence is a distinct row (evidence keeps layer/head; consensus drops it).
-    ///   QK : A=E·Wq, C=E·Wk            → ATTENDS      (per query head; key side = its kv head)
-    ///   OV : A=E·Wv, C=E_U·Wo          → OV_RELATES   (V side = kv head; O side = query head)
-    ///   FFN: A=E·Wup, C=E_U·Wdown      → COMPLETES_TO ([context]⇒{completions})
-    /// `A·Cᵀ` read PER (head, dim) — never materialized as the vocab² token×token product.
-    /// Above a per-circuit noise floor, never top-k.
+    /// ALL interior circuits as relations through the embedding ADDRESS BOOK — O(params),
+    /// streamed, GENERIC across architectures (circuits detected by <see cref="ModelGeometry"/>
+    /// from tensor shape, no per-family code).
+    ///
+    /// Address book (read the embedding ONCE): <c>addr[m]</c> = the token dimension m points to
+    /// (argmax_t |E[t,m]|); <c>addrOut</c> likewise from the unembedding. Then each weight CELL
+    /// W[h,m] resolves its d_model axis m → token addr[m] — a LOOKUP, never a vocab projection.
+    /// Per hidden unit h of a detected circuit (encode·decode pair):
+    ///   keys = { addr[m]    : |encode[h,m]| &gt; floor }   (the encode ROW h)     — the context n-gram,
+    ///   vals = { addrOut[m] : |decode[m,h]| &gt; floor }   (the decode COLUMN h)   — the related tokens.
+    /// keys → one content-addressed n-gram trajectory entity; attest the circuit's kind to each
+    /// val (signed Glicko), context = the (layer,head) witness. Cost = O(H·d_model) per circuit
+    /// = O(params); NO E·W projection (that was O(vocab·params) — the slow path), NO vocab² pairs.
     /// </summary>
     public async IAsyncEnumerable<SubstrateChange> EmitCircuitMemoriesAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
@@ -141,16 +140,22 @@ public sealed class WeightTensorETL
         int vocab = _recipe.VocabSize, dModel = _recipe.HiddenSize, interm = _recipe.IntermediateSize;
         int nHeads = _recipe.NumHeads, nKv = _recipe.NumKvHeads, headDim = dModel / nHeads;
         int qPerKv = nHeads / Math.Max(1, nKv);
-        int kvDim = nKv * headDim, attnOut = nHeads * headDim;
 
         var tokById = new LlamaTokenizerParser.TokenRecord?[vocab];
         foreach (var rec in _tokens)
             if (rec.TokenId >= 0 && rec.TokenId < vocab) tokById[rec.TokenId] = rec;
 
-        float[] E   = LoadRawBF16AsF32(refMap, "model.embed_tokens.weight", (long)vocab * dModel);
-        float[] E_U = refMap.ContainsKey("lm_head.weight")
-            ? LoadRawBF16AsF32(refMap, "lm_head.weight", (long)vocab * dModel)
-            : E;   // tied embeddings: unembedding IS the embedding
+        // Address book(s) — ONE pass over the embedding / unembedding. addrIn restricted to
+        // content-anchored tokens (keys become n-gram constituents); addrOut unrestricted.
+        var geo = ModelGeometry.Detect(vocab, dModel, nHeads, nKv, headDim, interm, _recipe.NumLayers,
+            _refs.Select(r => (r.Name, r.Shape)));
+        string embedName  = geo.EmbeddingName  ?? "model.embed_tokens.weight";
+        string unembName  = geo.UnembeddingName ?? embedName;
+        float[] E   = LoadRawBF16AsF32(refMap, embedName, (long)vocab * dModel);
+        float[] E_U = unembName != embedName ? LoadRawBF16AsF32(refMap, unembName, (long)vocab * dModel) : E;
+        int[] addrIn  = BuildAddressBook(E,   vocab, dModel, tokById, requireContentCoord: true);
+        int[] addrOut = ReferenceEquals(E_U, E) ? addrIn
+                      : BuildAddressBook(E_U, vocab, dModel, tokById, requireContentCoord: false);
 
         double surviveFrac = 5e-4;
         if (double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_CIRCUIT_SURVIVE_FRAC"),
@@ -179,125 +184,176 @@ public sealed class WeightTensorETL
             }
             yield return wb.Build();
         }
+        _log.LogInformation("phase=circuits: {N} circuits detected (generic, shape-based); address book built ({Ms} ms)",
+            geo.Circuits.Count, sw.ElapsedMilliseconds);
 
-        // Reusable projection caches (allocated once, refilled per layer).
-        var qC = new double[(long)vocab * nHeads * headDim];
-        var kC = new double[(long)vocab * nKv    * headDim];
-        var vC = new double[(long)vocab * nKv    * headDim];
-        var oC = new double[(long)vocab * nHeads * headDim];
-        var upC = new double[(long)vocab * interm];
-        var dnC = new double[(long)vocab * interm];
+        var keyMap = new Dictionary<Hash128, (LlamaTokenizerParser.TokenRecord rec, double mag)>(128);
+        var valMap = new Dictionary<Hash128, (LlamaTokenizerParser.TokenRecord rec, double mag)>(128);
+        var keys   = new List<(NgramTrajectory.Constituent c, double mag, byte tier)>(128);
 
-        for (int layer = 0; layer < _recipe.NumLayers; layer++)
+        foreach (var circ in geo.Circuits)
         {
             ct.ThrowIfCancellationRequested();
-            string p = $"model.layers.{layer}.";
+            var encRef = refMap[circ.Encode]; var decRef = refMap[circ.Decode];
+            float[] enc = LoadRawBF16AsF32(refMap, circ.Encode, (long)encRef.Shape[0] * encRef.Shape[1]);
+            float[] dec = LoadRawBF16AsF32(refMap, circ.Decode, (long)decRef.Shape[0] * decRef.Shape[1]);
+            double keyFloor = floorOverridden ? ff : CalibrateWeightFloor(enc, surviveFrac);
+            double valFloor = floorOverridden ? ff : CalibrateWeightFloor(dec, surviveFrac);
+            Hash128 kind = circ.Kind switch {
+                ModelGeometry.CircuitKind.QK => _kinds.Attends,
+                ModelGeometry.CircuitKind.OV => _kinds.OvRelates,
+                _                            => _kinds.CompletesTo };
 
-            // ───────────── QK → ATTENDS ─────────────
-            string qN = p + "self_attn.q_proj.weight", kN = p + "self_attn.k_proj.weight";
-            if (refMap.ContainsKey(qN) && refMap.ContainsKey(kN))
+            if (circ.Kind == ModelGeometry.CircuitKind.FFN)
             {
-                ProjectThroughHeads(E, vocab, dModel, LoadRawBF16AsF32(refMap, qN, (long)attnOut * dModel), nHeads, headDim, qC);
-                ProjectThroughHeads(E, vocab, dModel, LoadRawBF16AsF32(refMap, kN, (long)kvDim   * dModel), nKv,    headDim, kC);
-                double kf = floorOverridden ? ff : CalibrateProjectionFloor(qC, vocab, nHeads * headDim, surviveFrac);
-                double vf = floorOverridden ? ff : CalibrateProjectionFloor(kC, vocab, nKv    * headDim, surviveFrac);
+                Hash128 wit = WitnessId(_sourceId, circ.Layer, -1);
+                for (int i = 0; i < interm; i++)
+                {
+                    var chg = EmitUnit(enc, encRef.Shape, i, dec, decRef.Shape, i, addrIn, addrOut,
+                        keyFloor, valFloor, kind, wit, dModel, tokById, keyMap, valMap, keys, nowUs, counters);
+                    if (chg is not null) { yield return chg; await Task.Yield(); }
+                }
+            }
+            else  // attention: iterate (head h, dim d); GQA maps query head ↔ kv head
+            {
                 for (int h = 0; h < nHeads; h++)
-                    foreach (var c in EmitSlotMemories(tokById, qC, nHeads, h, kf, kC, nKv, h / qPerKv, vf,
-                                 headDim, _kinds.Attends, WitnessId(_sourceId, layer, h), nowUs, counters))
-                    { yield return c; await Task.Yield(); }
+                {
+                    Hash128 wit = WitnessId(_sourceId, circ.Layer, h);
+                    int kvHead = h / qPerKv;
+                    for (int d = 0; d < headDim; d++)
+                    {
+                        int encUnit, decUnit;
+                        if (circ.Kind == ModelGeometry.CircuitKind.QK) { encUnit = h * headDim + d; decUnit = kvHead * headDim + d; }
+                        else                                           { encUnit = kvHead * headDim + d; decUnit = h * headDim + d; }
+                        var chg = EmitUnit(enc, encRef.Shape, encUnit, dec, decRef.Shape, decUnit, addrIn, addrOut,
+                            keyFloor, valFloor, kind, wit, dModel, tokById, keyMap, valMap, keys, nowUs, counters);
+                        if (chg is not null) { yield return chg; await Task.Yield(); }
+                    }
+                }
             }
-
-            // ───────────── OV → OV_RELATES ─────────────
-            string vN = p + "self_attn.v_proj.weight", oN = p + "self_attn.o_proj.weight";
-            if (refMap.ContainsKey(vN) && refMap.ContainsKey(oN))
-            {
-                ProjectThroughHeads(E,   vocab, dModel, LoadRawBF16AsF32(refMap, vN, (long)kvDim * dModel), nKv, headDim, vC);
-                float[] oW_T = TransposeOProjToHeads(LoadRawBF16AsF32(refMap, oN, (long)dModel * attnOut), dModel, nHeads, headDim);
-                ProjectThroughHeads(E_U, vocab, dModel, oW_T, nHeads, headDim, oC);
-                double kf = floorOverridden ? ff : CalibrateProjectionFloor(vC, vocab, nKv    * headDim, surviveFrac);
-                double vf = floorOverridden ? ff : CalibrateProjectionFloor(oC, vocab, nHeads * headDim, surviveFrac);
-                for (int h = 0; h < nHeads; h++)
-                    foreach (var c in EmitSlotMemories(tokById, vC, nKv, h / qPerKv, kf, oC, nHeads, h, vf,
-                                 headDim, _kinds.OvRelates, WitnessId(_sourceId, layer, h), nowUs, counters))
-                    { yield return c; await Task.Yield(); }
-            }
-
-            // ───────────── FFN → COMPLETES_TO ─────────────
-            string upN = p + "mlp.up_proj.weight", dnN = p + "mlp.down_proj.weight";
-            if (refMap.ContainsKey(upN) && refMap.ContainsKey(dnN))
-            {
-                ProjectThroughHeads(E,   vocab, dModel, LoadRawBF16AsF32(refMap, upN, (long)interm * dModel), 1, interm, upC);
-                float[] dnW_T = Transpose2D(LoadRawBF16AsF32(refMap, dnN, (long)dModel * interm), dModel, interm);
-                ProjectThroughHeads(E_U, vocab, dModel, dnW_T, 1, interm, dnC);
-                double kf = floorOverridden ? ff : CalibrateProjectionFloor(upC, vocab, interm, surviveFrac);
-                double vf = floorOverridden ? ff : CalibrateProjectionFloor(dnC, vocab, interm, surviveFrac);
-                foreach (var c in EmitSlotMemories(tokById, upC, 1, 0, kf, dnC, 1, 0, vf,
-                             interm, _kinds.CompletesTo, WitnessId(_sourceId, layer, -1), nowUs, counters))
-                { yield return c; await Task.Yield(); }
-            }
-
-            _log.LogInformation("phase=circuits layer {Layer}/{Total}: {Mem:N0} memories, {Rel:N0} relations, wall {Ms} ms",
-                layer + 1, _recipe.NumLayers, counters[0], counters[1], sw.ElapsedMilliseconds);
+            _log.LogInformation("phase=circuits L{Layer} {Kind}: {Mem:N0} memories, {Rel:N0} relations, wall {Ms} ms",
+                circ.Layer, circ.Kind, counters[0], counters[1], sw.ElapsedMilliseconds);
         }
-        _log.LogInformation("phase=circuits done: {Mem:N0} memories (QK+OV+FFN), {Rel:N0} relations, {Ms} ms",
+        _log.LogInformation("phase=circuits done: {Mem:N0} memories, {Rel:N0} relations, {Ms} ms",
             counters[0], counters[1], sw.ElapsedMilliseconds);
     }
 
-    /* Emit one circuit's memories for a fixed head/slot pair, per shared dimension d:
-     *   keys = tokens above keyFloor on A[·,aSlot,d]; vals = tokens above valFloor on C[·,cSlot,d].
-     * keys → one n-gram trajectory entity; attest `kind` to each val with context = witness.
-     * A is [vocab][aSlots][width]; C is [vocab][cSlots][width], both row-major. */
-    private IEnumerable<SubstrateChange> EmitSlotMemories(
+    /* One hidden unit of a circuit → one [n-gram]⇒{tokens} memory, O(d_model). Reads the
+     * encode ROW (or COLUMN, by shape) at encUnit → keys via the address book; the decode at
+     * decUnit → vals. Returns null when the unit has no keys or no vals (sub-floor). keyMap/
+     * valMap/keys are caller-owned scratch (cleared here) to avoid per-unit allocation. */
+    private SubstrateChange? EmitUnit(
+        float[] enc, int[] encShape, int encUnit,
+        float[] dec, int[] decShape, int decUnit,
+        int[] addrIn, int[] addrOut, double keyFloor, double valFloor,
+        Hash128 kind, Hash128 witness, int dModel,
         LlamaTokenizerParser.TokenRecord?[] tokById,
-        double[] aCache, int aSlots, int aSlot, double keyFloor,
-        double[] cCache, int cSlots, int cSlot, double valFloor,
-        int width, Hash128 kind, Hash128 witness, long nowUs, long[] counters)
+        Dictionary<Hash128, (LlamaTokenizerParser.TokenRecord rec, double mag)> keyMap,
+        Dictionary<Hash128, (LlamaTokenizerParser.TokenRecord rec, double mag)> valMap,
+        List<(NgramTrajectory.Constituent c, double mag, byte tier)> keys,
+        long nowUs, long[] counters)
     {
-        var keys = new List<(NgramTrajectory.Constituent c, double mag, byte tier)>(64);
-        var vals = new List<(Hash128 id, double mag)>(64);
-        int vocab = tokById.Length;
-        for (int d = 0; d < width; d++)
+        ReadHalf(enc, encShape, encUnit, dModel, addrIn, addrOut, tokById, keyFloor, keyMap);
+        if (keyMap.Count == 0) return null;
+        keys.Clear();
+        byte maxTier = 0;
+        foreach (var kv in keyMap)
         {
-            keys.Clear();
-            for (int t = 0; t < vocab; t++)
-            {
-                double m = aCache[((long)t * aSlots + aSlot) * width + d];
-                if (Math.Abs(m) <= keyFloor) continue;
-                var rec = tokById[t];
-                if (rec is not { HasContentCoord: true }) continue;
-                keys.Add((new NgramTrajectory.Constituent(
-                    rec.EntityId, rec.ContentX, rec.ContentY, rec.ContentZ, rec.ContentM), m, rec.Tier));
-            }
-            if (keys.Count == 0) continue;
-
-            vals.Clear();
-            for (int s = 0; s < vocab; s++)
-            {
-                double m = cCache[((long)s * cSlots + cSlot) * width + d];
-                if (Math.Abs(m) <= valFloor) continue;
-                var rec = tokById[s];
-                if (rec is null) continue;
-                vals.Add((rec.EntityId, m));
-            }
-            if (vals.Count == 0) continue;
-
-            keys.Sort((a, b) => Math.Abs(b.mag).CompareTo(Math.Abs(a.mag)));
-            byte maxTier = 0;
-            var cons = new NgramTrajectory.Constituent[keys.Count];
-            for (int k = 0; k < keys.Count; k++) { cons[k] = keys[k].c; if (keys[k].tier > maxTier) maxTier = keys[k].tier; }
-            byte ngramTier = (byte)Math.Min(255, maxTier + 1);
-
-            var bb = new SubstrateChangeBuilder(_sourceId, "circuit-mem",
-                entityCapacity: 1, physicalityCapacity: 1, attestationCapacity: vals.Count);
-            Hash128 ngramId = NgramTrajectory.Compose(bb, cons, ngramTier, _kinds.NgramType, _sourceId, nowUs);
-            foreach (var v in vals)
-                bb.AddAttestation(AttestationFactory.CreateWeighted(
-                    ngramId, kind, v.id, _sourceId, contextId: witness,
-                    tier: KindValueTier.T9, trust: TrustClass.AiModelProbeTier7,
-                    magnitude: v.mag, floor: valFloor));
-            counters[0]++; counters[1] += vals.Count;
-            yield return bb.Build();
+            var rec = kv.Value.rec;
+            if (!rec.HasContentCoord) continue;   // keys must be placeable n-gram constituents
+            keys.Add((new NgramTrajectory.Constituent(
+                rec.EntityId, rec.ContentX, rec.ContentY, rec.ContentZ, rec.ContentM), kv.Value.mag, rec.Tier));
+            if (rec.Tier > maxTier) maxTier = rec.Tier;
         }
+        if (keys.Count == 0) return null;
+
+        ReadHalf(dec, decShape, decUnit, dModel, addrIn, addrOut, tokById, valFloor, valMap);
+        if (valMap.Count == 0) return null;
+
+        keys.Sort((a, b) => Math.Abs(b.mag).CompareTo(Math.Abs(a.mag)));   // deterministic order
+        var cons = new NgramTrajectory.Constituent[keys.Count];
+        for (int k = 0; k < keys.Count; k++) cons[k] = keys[k].c;
+        byte ngramTier = (byte)Math.Min(255, maxTier + 1);
+
+        var bb = new SubstrateChangeBuilder(_sourceId, "circuit-mem",
+            entityCapacity: 1, physicalityCapacity: 1, attestationCapacity: valMap.Count);
+        Hash128 ngramId = NgramTrajectory.Compose(bb, cons, ngramTier, _kinds.NgramType, _sourceId, nowUs);
+        foreach (var v in valMap)
+            bb.AddAttestation(AttestationFactory.CreateWeighted(
+                ngramId, kind, v.Key, _sourceId, contextId: witness,
+                tier: KindValueTier.T9, trust: TrustClass.AiModelProbeTier7,
+                magnitude: v.Value.mag, floor: valFloor));
+        counters[0]++; counters[1] += valMap.Count;
+        return bb.Build();
+    }
+
+    /* Read one hidden unit's d_model-axis weights and resolve each to a token via the address
+     * book — the O(d_model) core of the streaming read. shape [H, d_model] ⇒ ROW `unit` (addrIn);
+     * shape [d_model, H] ⇒ COLUMN `unit` stride H (addrOut). Dedup tokens (a dim's argmax token
+     * can repeat) keeping the max-|magnitude| occurrence. Fills `outMap`. */
+    private static void ReadHalf(
+        float[] w, int[] shape, int unit, int dModel, int[] addrIn, int[] addrOut,
+        LlamaTokenizerParser.TokenRecord?[] tokById, double floor,
+        Dictionary<Hash128, (LlamaTokenizerParser.TokenRecord rec, double mag)> outMap)
+    {
+        outMap.Clear();
+        bool encode = shape.Length == 2 && shape[1] == dModel;   // [H, d_model] row; else [d_model, H] col
+        int H = encode ? 0 : shape[1];
+        int[] addr = encode ? addrIn : addrOut;
+        for (int m = 0; m < dModel; m++)
+        {
+            double v = encode ? w[(long)unit * dModel + m] : w[(long)m * H + unit];
+            if (Math.Abs(v) <= floor) continue;
+            int t = addr[m];
+            if (t < 0) continue;
+            var rec = tokById[t];
+            if (rec is null) continue;
+            if (outMap.TryGetValue(rec.EntityId, out var ex))
+            {
+                if (Math.Abs(v) > Math.Abs(ex.mag)) outMap[rec.EntityId] = (rec, v);
+            }
+            else outMap[rec.EntityId] = (rec, v);
+        }
+    }
+
+    /* Address book: per d_model dimension m, the token it points to (argmax_t |E[t,m]|), read in
+     * ONE row-major pass over the embedding (O(vocab·d_model)). requireContentCoord restricts the
+     * key side to placeable tokens. -1 = no token resolves that dimension. */
+    private static int[] BuildAddressBook(
+        float[] E, int vocab, int dModel,
+        LlamaTokenizerParser.TokenRecord?[] tokById, bool requireContentCoord)
+    {
+        var addr = new int[dModel];
+        var best = new double[dModel];
+        for (int m = 0; m < dModel; m++) { addr[m] = -1; best[m] = -1.0; }
+        for (int t = 0; t < vocab; t++)
+        {
+            var rec = tokById[t];
+            if (rec is null) continue;
+            if (requireContentCoord && !rec.HasContentCoord) continue;
+            long off = (long)t * dModel;
+            for (int m = 0; m < dModel; m++)
+            {
+                double a = Math.Abs(E[off + m]);
+                if (a > best[m]) { best[m] = a; addr[m] = t; }
+            }
+        }
+        return addr;
+    }
+
+    /* Noise floor for a weight tensor: the (1-surviveFrac) quantile of |cell| over a sampled
+     * stride. A noise-floor threshold (keeps the surviveFrac strongest cells), NOT top-k. */
+    private static double CalibrateWeightFloor(float[] w, double surviveFrac)
+    {
+        long n = w.LongLength;
+        if (n == 0) return 0.0;
+        int target = (int)Math.Min(1_000_000L, n);
+        long stride = Math.Max(1L, n / target);
+        var mags = new List<double>(target + 16);
+        for (long i = 0; i < n; i += stride) mags.Add(Math.Abs(w[i]));
+        mags.Sort();
+        int idx = (int)((1.0 - surviveFrac) * (mags.Count - 1));
+        return mags[Math.Clamp(idx, 0, mags.Count - 1)];
     }
 
     /* Per-(layer, head) witness id — the model-circuit provenance carried as the attestation
