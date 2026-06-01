@@ -1083,42 +1083,58 @@ public sealed class WeightTensorETL
         var tref = refMap[name];
         byte[] raw = LoadRawBytes(refMap, name);
         float[] result = new float[expectedElements];
+        // Generic dtype → f32 dispatch. The dtype is self-describing (safetensors header),
+        // so handling a new one is just a decoder, never detection. Covers every safetensors
+        // numeric/bool dtype incl. the float8 quant formats; fails loud (never zeros) on
+        // anything else (e.g. GGUF block-quant, which is a different container entirely).
+        long n = expectedElements;
         unsafe
         {
-            fixed (byte*  rawPtr = raw)
-            fixed (float* outPtr = result)
+            fixed (byte* rp = raw)
+            fixed (float* op = result)
             {
-                if (tref.Dtype == "BF16")
+                switch (tref.Dtype)
                 {
-                    ushort* src = (ushort*)rawPtr;
-                    for (long i = 0; i < expectedElements; i++)
-                    {
-                        uint bits = (uint)src[i] << 16;
-                        float f;
-                        Buffer.MemoryCopy(&bits, &f, 4, 4);
-                        outPtr[i] = f;
-                    }
-                }
-                else if (tref.Dtype == "F16")
-                {
-                    // IEEE-754 half → f32 (Phi-2 etc. ship float16; distinct from BF16).
-                    ushort* src = (ushort*)rawPtr;
-                    for (long i = 0; i < expectedElements; i++)
-                        outPtr[i] = (float)BitConverter.UInt16BitsToHalf(src[i]);
-                }
-                else if (tref.Dtype == "F32")
-                {
-                    Buffer.MemoryCopy(rawPtr, outPtr, expectedElements * 4, raw.Length);
-                }
-                else
-                {
-                    // Fail loud — NEVER silently return zeros (that read as an empty model).
-                    throw new NotSupportedException(
-                        $"tensor '{name}' has unsupported dtype '{tref.Dtype}' — add a decoder; " +
-                        "refusing to ingest zeros.");
+                    case "F32":  { float*  s = (float*)rp;  for (long i = 0; i < n; i++) op[i] = s[i]; break; }
+                    case "F64":  { double* s = (double*)rp; for (long i = 0; i < n; i++) op[i] = (float)s[i]; break; }
+                    case "F16":  { ushort* s = (ushort*)rp; for (long i = 0; i < n; i++) op[i] = (float)BitConverter.UInt16BitsToHalf(s[i]); break; }
+                    case "BF16": { ushort* s = (ushort*)rp; for (long i = 0; i < n; i++) { uint b = (uint)s[i] << 16; float f; Buffer.MemoryCopy(&b, &f, 4, 4); op[i] = f; } break; }
+                    case "F8_E5M2": { byte* s = rp; for (long i = 0; i < n; i++) op[i] = DecodeE5M2(s[i]); break; }
+                    case "F8_E4M3": { byte* s = rp; for (long i = 0; i < n; i++) op[i] = DecodeE4M3(s[i]); break; }
+                    case "I64":  { long*  s = (long*)rp;  for (long i = 0; i < n; i++) op[i] = s[i]; break; }
+                    case "I32":  { int*   s = (int*)rp;   for (long i = 0; i < n; i++) op[i] = s[i]; break; }
+                    case "I16":  { short* s = (short*)rp; for (long i = 0; i < n; i++) op[i] = s[i]; break; }
+                    case "I8":   { sbyte* s = (sbyte*)rp; for (long i = 0; i < n; i++) op[i] = s[i]; break; }
+                    case "U8":   for (long i = 0; i < n; i++) op[i] = rp[i]; break;
+                    case "BOOL": for (long i = 0; i < n; i++) op[i] = rp[i] != 0 ? 1f : 0f; break;
+                    default:
+                        throw new NotSupportedException(
+                            $"tensor '{name}' dtype '{tref.Dtype}' has no decoder. safetensors numeric/bool " +
+                            "are covered; GGUF block-quant (Q4_K/Q6_K/…) is a separate container needing its " +
+                            "own dequantizer. Refusing to ingest zeros.");
                 }
             }
         }
         return result;
+    }
+
+    /* float8 E5M2 (1-5-2, bias 15) → f32. Same 5-bit exponent/bias as IEEE half, so widen
+     * the mantissa into a half and let the half decoder handle normals/subnormals/inf/nan. */
+    private static float DecodeE5M2(byte b)
+    {
+        int sign = (b >> 7) & 1, exp = (b >> 2) & 0x1F, mant = b & 0x3;
+        ushort half = (ushort)((sign << 15) | (exp << 10) | (mant << 8));
+        return (float)BitConverter.UInt16BitsToHalf(half);
+    }
+
+    /* float8 E4M3FN (1-4-3, bias 7, no inf; S.1111.111 = NaN; max 448) → f32. */
+    private static float DecodeE4M3(byte b)
+    {
+        int sign = (b >> 7) & 1, exp = (b >> 3) & 0xF, mant = b & 0x7;
+        float v;
+        if (exp == 0)                 v = mant * MathF.ScaleB(1f, -9);          // subnormal: mant/8·2⁻⁶
+        else if (exp == 15 && mant == 7) v = float.NaN;
+        else                          v = (1f + mant * 0.125f) * MathF.ScaleB(1f, exp - 7);
+        return sign != 0 ? -v : v;
     }
 }
