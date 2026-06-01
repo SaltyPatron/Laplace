@@ -176,16 +176,31 @@ public sealed class WeightTensorETL
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var counters = new long[2];   // [0]=memories, [1]=relations
 
-        // Witness entities (per layer × head, + one per-layer FFN witness) — emitted ONCE so
-        // every attestation's context_id FK resolves. head = -1 ⇒ the layer's FFN witness.
+        // Witness entities — emitted ONCE so every attestation's context_id FK resolves.
+        // DRIVEN BY the detected circuits so the witness tuple (source, layer, head, expert)
+        // matches what the attestation loop references exactly: attention (QK/OV) → one witness
+        // per (layer, head) with expert = -1 (attention is shared, not per-expert); FFN → one
+        // witness per (layer, expert) with head = -1 (MoE: a distinct witness per expert; dense:
+        // expert = -1). De-duped because QK and OV of the same head share a witness.
         {
             var wb = new SubstrateChangeBuilder(_sourceId, "model/witnesses",
-                entityCapacity: _recipe.NumLayers * (nHeads + 1), physicalityCapacity: 0, attestationCapacity: 0);
-            for (int layer = 0; layer < _recipe.NumLayers; layer++)
+                entityCapacity: geo.Circuits.Count * (nHeads + 1), physicalityCapacity: 0, attestationCapacity: 0);
+            var seenWit = new HashSet<Hash128>();
+            foreach (var circ in geo.Circuits)
             {
-                for (int h = 0; h < nHeads; h++)
-                    wb.AddEntity(new EntityRow(WitnessId(_sourceId, layer, h), 0, _kinds.WitnessType, _sourceId));
-                wb.AddEntity(new EntityRow(WitnessId(_sourceId, layer, -1), 0, _kinds.WitnessType, _sourceId));
+                if (circ.Kind == ModelGeometry.CircuitKind.FFN)
+                {
+                    var id = WitnessId(_sourceId, circ.Layer, -1, circ.Expert);
+                    if (seenWit.Add(id)) wb.AddEntity(new EntityRow(id, 0, _kinds.WitnessType, _sourceId));
+                }
+                else
+                {
+                    for (int h = 0; h < nHeads; h++)
+                    {
+                        var id = WitnessId(_sourceId, circ.Layer, h, circ.Expert);
+                        if (seenWit.Add(id)) wb.AddEntity(new EntityRow(id, 0, _kinds.WitnessType, _sourceId));
+                    }
+                }
             }
             yield return wb.Build();
         }
@@ -218,7 +233,7 @@ public sealed class WeightTensorETL
 
             if (circ.Kind == ModelGeometry.CircuitKind.FFN)
             {
-                Hash128 wit = WitnessId(_sourceId, circ.Layer, -1);
+                Hash128 wit = WitnessId(_sourceId, circ.Layer, -1, circ.Expert);
                 entMap.Clear(); relMap.Clear();
                 for (int i = 0; i < interm; i++)
                     AccumulateUnit(enc, encRef.Shape, i, dec, decRef.Shape, i, addrIn, addrOut,
@@ -230,7 +245,7 @@ public sealed class WeightTensorETL
             {
                 for (int h = 0; h < nHeads; h++)
                 {
-                    Hash128 wit = WitnessId(_sourceId, circ.Layer, h);
+                    Hash128 wit = WitnessId(_sourceId, circ.Layer, h, circ.Expert);
                     int kvHead = h / qPerKv;
                     entMap.Clear(); relMap.Clear();
                     for (int d = 0; d < headDim; d++)
@@ -423,14 +438,17 @@ public sealed class WeightTensorETL
         return mags[Math.Clamp(idx, 0, mags.Count - 1)];
     }
 
-    /* Per-(layer, head) witness id — the model-circuit provenance carried as the attestation
-     * context_id. head = -1 is the layer's FFN witness. Deterministic per (source, layer, head). */
-    private static Hash128 WitnessId(Hash128 source, int layer, int head)
+    /* Per-(layer, head, expert) witness id — the model-circuit provenance carried as the
+     * attestation context_id. head = -1 is the layer's FFN witness; expert = -1 is dense /
+     * shared attention, expert ≥ 0 is an MoE expert (so two experts in one layer do NOT
+     * collapse to one witness). Deterministic per (source, layer, head, expert). */
+    private static Hash128 WitnessId(Hash128 source, int layer, int head, int expert)
     {
-        Span<byte> b = stackalloc byte[16 + 4 + 4];
+        Span<byte> b = stackalloc byte[16 + 4 + 4 + 4];
         source.WriteBytes(b.Slice(0, 16));
         System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(b.Slice(16, 4), layer);
         System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(b.Slice(20, 4), head);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(b.Slice(24, 4), expert);
         return Hash128.Blake3(b);
     }
 
