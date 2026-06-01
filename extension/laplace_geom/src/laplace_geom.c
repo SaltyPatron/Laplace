@@ -289,6 +289,34 @@ pg_laplace_distance_4d(PG_FUNCTION_ARGS)
 }
 
 /* ================================================================= */
+/* pg_laplace_angular_distance_4d(geometry, geometry) -> double        */
+/* ================================================================= */
+
+PG_FUNCTION_INFO_V1(pg_laplace_angular_distance_4d);
+
+Datum
+pg_laplace_angular_distance_4d(PG_FUNCTION_ARGS)
+{
+    GSERIALIZED *g_a, *g_b;
+    LWGEOM *l_a = lwgeom_from_datum(PG_GETARG_DATUM(0), &g_a);
+    LWGEOM *l_b = lwgeom_from_datum(PG_GETARG_DATUM(1), &g_b);
+
+    POINT4D pa, pb;
+    require_point4d(l_a, "laplace_angular_distance_4d", &pa);
+    require_point4d(l_b, "laplace_angular_distance_4d", &pb);
+
+    const double a[4] = {pa.x, pa.y, pa.z, pa.m};
+    const double b[4] = {pb.x, pb.y, pb.z, pb.m};
+    /* Geodesic distance on S³ = acos(â·b̂); the engine normalizes defensively
+     * and clamps the cosine for FP safety. */
+    const double d = math4d_angular_distance(a, b);
+
+    lwgeom_free(l_a);
+    lwgeom_free(l_b);
+    PG_RETURN_FLOAT8(d);
+}
+
+/* ================================================================= */
 /* pg_laplace_dwithin_4d(geometry, geometry, double) -> boolean       */
 /* ================================================================= */
 
