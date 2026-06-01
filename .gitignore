@@ -497,3 +497,8 @@ __pycache__/
 *.onnx
 *.bin
 !engine/test/fixtures/*.bin
+
+# Agent-local state + transient git worktrees (must never be committed —
+# a worktree gets swept in as a gitlink with no .gitmodules mapping and
+# breaks CI checkout with exit 128).
+.claude/
