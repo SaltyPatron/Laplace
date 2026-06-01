@@ -116,20 +116,22 @@ public sealed class WeightTensorETL
     }
 
     /// <summary>
-    /// FFN as key→value memories (the model's content as relations). Each FFN neuron i,
-    /// read through the embedding address book, is a memory:
-    ///   keys_i   = { token t : |E[t]·Wup[i]|   &gt; floor }  — the CONTEXT n-gram that fires i,
-    ///   values_i = { token s : |E_U[s]·Wdown[:,i]| &gt; floor } — the COMPLETIONS it writes.
-    /// e.g. one neuron ⇒ keys [the, capital, of] ⇒ values {France, California, …}. The keys
-    /// compose into ONE content-addressed n-gram trajectory entity (a tier above the tokens,
-    /// the same composition a word gets from its graphemes); it attests COMPLETES_TO each
-    /// value, weighted by the value's magnitude (signed Glicko).
-    ///
-    /// This is <c>(E·Wup)·(E_U·Wdown)ᵀ</c> "key→value memory" READ PER NEURON — never
-    /// materialized as the vocab² token×token product. Above a noise floor, never top-k.
-    /// Same projections the old bilinear path computed (ffnA/ffnC), read the right way.
+    /// ALL interior circuits read as relations through the embedding address book — the
+    /// model's content, per (layer, head), at full granularity. Each circuit is a pair of
+    /// projections; per shared dimension d of a head/neuron:
+    ///   keys_d  = { token t : |A[t,d]| &gt; floor }   — the context n-gram (address-book read of A),
+    ///   vals_d  = { token s : |C[s,d]| &gt; floor }   — the related tokens   (address-book read of C).
+    /// keys compose into ONE content-addressed n-gram trajectory entity (a tier above the
+    /// tokens, exactly as a word composes from graphemes); it attests to each value, weighted
+    /// by magnitude (signed Glicko), with context = the (layer, head) WITNESS so each layer/
+    /// head's evidence is a distinct row (evidence keeps layer/head; consensus drops it).
+    ///   QK : A=E·Wq, C=E·Wk            → ATTENDS      (per query head; key side = its kv head)
+    ///   OV : A=E·Wv, C=E_U·Wo          → OV_RELATES   (V side = kv head; O side = query head)
+    ///   FFN: A=E·Wup, C=E_U·Wdown      → COMPLETES_TO ([context]⇒{completions})
+    /// `A·Cᵀ` read PER (head, dim) — never materialized as the vocab² token×token product.
+    /// Above a per-circuit noise floor, never top-k.
     /// </summary>
-    public async IAsyncEnumerable<SubstrateChange> EmitFfnMemoriesAsync(
+    public async IAsyncEnumerable<SubstrateChange> EmitCircuitMemoriesAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
         var refMap = new Dictionary<string, SafetensorsContainerParser.TensorReference>(
@@ -137,8 +139,10 @@ public sealed class WeightTensorETL
         foreach (var r in _refs) refMap[r.Name] = r;
 
         int vocab = _recipe.VocabSize, dModel = _recipe.HiddenSize, interm = _recipe.IntermediateSize;
+        int nHeads = _recipe.NumHeads, nKv = _recipe.NumKvHeads, headDim = dModel / nHeads;
+        int qPerKv = nHeads / Math.Max(1, nKv);
+        int kvDim = nKv * headDim, attnOut = nHeads * headDim;
 
-        // token id → record (the address book's token side; TokenId is the embed/cache row).
         var tokById = new LlamaTokenizerParser.TokenRecord?[vocab];
         foreach (var rec in _tokens)
             if (rec.TokenId >= 0 && rec.TokenId < vocab) tokById[rec.TokenId] = rec;
@@ -148,95 +152,163 @@ public sealed class WeightTensorETL
             ? LoadRawBF16AsF32(refMap, "lm_head.weight", (long)vocab * dModel)
             : E;   // tied embeddings: unembedding IS the embedding
 
-        // surviveFrac: fraction of (token,neuron) projection cells kept as a real key/value.
-        // A NOISE FLOOR (quantile of the projection spectrum), NOT a per-neuron top-k.
         double surviveFrac = 5e-4;
-        if (double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_FFN_SURVIVE_FRAC"),
+        if (double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_CIRCUIT_SURVIVE_FRAC"),
                 System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out var sf) && sf > 0 && sf < 1)
             surviveFrac = sf;
         bool floorOverridden = double.TryParse(
-                Environment.GetEnvironmentVariable("LAPLACE_FFN_FLOOR"),
+                Environment.GetEnvironmentVariable("LAPLACE_CIRCUIT_FLOOR"),
                 System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out var ff) && ff >= 0;
 
-        var keyCache = new double[(long)vocab * interm];   // E·Wup     : keys (context)
-        var valCache = new double[(long)vocab * interm];   // E_U·Wdown : values (completions)
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        long neuronsEmitted = 0, attsEmitted = 0;
+        var counters = new long[2];   // [0]=memories, [1]=relations
+
+        // Witness entities (per layer × head, + one per-layer FFN witness) — emitted ONCE so
+        // every attestation's context_id FK resolves. head = -1 ⇒ the layer's FFN witness.
+        {
+            var wb = new SubstrateChangeBuilder(_sourceId, "model/witnesses",
+                entityCapacity: _recipe.NumLayers * (nHeads + 1), physicalityCapacity: 0, attestationCapacity: 0);
+            for (int layer = 0; layer < _recipe.NumLayers; layer++)
+            {
+                for (int h = 0; h < nHeads; h++)
+                    wb.AddEntity(new EntityRow(WitnessId(_sourceId, layer, h), 0, _kinds.WitnessType, _sourceId));
+                wb.AddEntity(new EntityRow(WitnessId(_sourceId, layer, -1), 0, _kinds.WitnessType, _sourceId));
+            }
+            yield return wb.Build();
+        }
+
+        // Reusable projection caches (allocated once, refilled per layer).
+        var qC = new double[(long)vocab * nHeads * headDim];
+        var kC = new double[(long)vocab * nKv    * headDim];
+        var vC = new double[(long)vocab * nKv    * headDim];
+        var oC = new double[(long)vocab * nHeads * headDim];
+        var upC = new double[(long)vocab * interm];
+        var dnC = new double[(long)vocab * interm];
 
         for (int layer = 0; layer < _recipe.NumLayers; layer++)
         {
             ct.ThrowIfCancellationRequested();
             string p = $"model.layers.{layer}.";
-            string upName = p + "mlp.up_proj.weight", downName = p + "mlp.down_proj.weight";
-            if (!refMap.ContainsKey(upName) || !refMap.ContainsKey(downName)) continue;
 
-            float[] upW     = LoadRawBF16AsF32(refMap, upName,   (long)interm * dModel); // [interm × dModel]
-            float[] downW   = LoadRawBF16AsF32(refMap, downName, (long)dModel * interm); // [dModel × interm]
-            float[] downW_T = Transpose2D(downW, dModel, interm);                        // [interm × dModel]
-            ProjectThroughHeads(E,   vocab, dModel, upW,     1, interm, keyCache);       // keyCache[t*interm+i]
-            ProjectThroughHeads(E_U, vocab, dModel, downW_T, 1, interm, valCache);       // valCache[s*interm+i]
-
-            double keyFloor = floorOverridden ? ff : CalibrateProjectionFloor(keyCache, vocab, interm, surviveFrac);
-            double valFloor = floorOverridden ? ff : CalibrateProjectionFloor(valCache, vocab, interm, surviveFrac);
-
-            for (int i = 0; i < interm; i++)
+            // ───────────── QK → ATTENDS ─────────────
+            string qN = p + "self_attn.q_proj.weight", kN = p + "self_attn.k_proj.weight";
+            if (refMap.ContainsKey(qN) && refMap.ContainsKey(kN))
             {
-                // KEYS: tokens whose embedding fires neuron i (the context n-gram).
-                var keys = new List<(NgramTrajectory.Constituent c, double mag, byte tier)>();
-                for (int t = 0; t < vocab; t++)
-                {
-                    double m = keyCache[(long)t * interm + i];
-                    if (Math.Abs(m) <= keyFloor) continue;
-                    var rec = tokById[t];
-                    if (rec is not { HasContentCoord: true }) continue;   // need a placed constituent
-                    keys.Add((new NgramTrajectory.Constituent(
-                        rec.EntityId, rec.ContentX, rec.ContentY, rec.ContentZ, rec.ContentM), m, rec.Tier));
-                }
-                if (keys.Count == 0) continue;
-
-                // VALUES: tokens neuron i writes toward (the completions).
-                var vals = new List<(Hash128 id, double mag)>();
-                for (int s = 0; s < vocab; s++)
-                {
-                    double m = valCache[(long)s * interm + i];
-                    if (Math.Abs(m) <= valFloor) continue;
-                    var rec = tokById[s];
-                    if (rec is null) continue;
-                    vals.Add((rec.EntityId, m));
-                }
-                if (vals.Count == 0) continue;
-
-                // Deterministic constituent order: strongest key first (content-addressing
-                // is order-sensitive, so the order must be a function of the content).
-                keys.Sort((a, b) => Math.Abs(b.mag).CompareTo(Math.Abs(a.mag)));
-                byte maxTier = 0;
-                var cons = new NgramTrajectory.Constituent[keys.Count];
-                for (int k = 0; k < keys.Count; k++) { cons[k] = keys[k].c; if (keys[k].tier > maxTier) maxTier = keys[k].tier; }
-                byte ngramTier = (byte)Math.Min(255, maxTier + 1);
-
-                var bb = new SubstrateChangeBuilder(_sourceId, $"ffn-mem/L{layer}/n{i}",
-                    entityCapacity: 1, physicalityCapacity: 1, attestationCapacity: vals.Count);
-                Hash128 ngramId = NgramTrajectory.Compose(bb, cons, ngramTier, _kinds.NgramType, _sourceId, nowUs);
-                foreach (var v in vals)
-                    bb.AddAttestation(AttestationFactory.CreateWeighted(
-                        ngramId, _kinds.CompletesTo, v.id, _sourceId, contextId: null,
-                        tier: KindValueTier.T9, trust: TrustClass.AiModelProbeTier7,
-                        magnitude: v.mag, floor: valFloor));
-                neuronsEmitted++; attsEmitted += vals.Count;
-                yield return bb.Build();
-                await Task.Yield();
+                ProjectThroughHeads(E, vocab, dModel, LoadRawBF16AsF32(refMap, qN, (long)attnOut * dModel), nHeads, headDim, qC);
+                ProjectThroughHeads(E, vocab, dModel, LoadRawBF16AsF32(refMap, kN, (long)kvDim   * dModel), nKv,    headDim, kC);
+                double kf = floorOverridden ? ff : CalibrateProjectionFloor(qC, vocab, nHeads * headDim, surviveFrac);
+                double vf = floorOverridden ? ff : CalibrateProjectionFloor(kC, vocab, nKv    * headDim, surviveFrac);
+                for (int h = 0; h < nHeads; h++)
+                    foreach (var c in EmitSlotMemories(tokById, qC, nHeads, h, kf, kC, nKv, h / qPerKv, vf,
+                                 headDim, _kinds.Attends, WitnessId(_sourceId, layer, h), nowUs, counters))
+                    { yield return c; await Task.Yield(); }
             }
-            _log.LogInformation(
-                "phase=FFN-memories layer {Layer}/{Total}: keyFloor={Kf:E2} valFloor={Vf:E2}, "
-                + "{Neurons:N0} neuron-memories, {Atts:N0} completions, wall {Ms} ms",
-                layer + 1, _recipe.NumLayers, keyFloor, valFloor, neuronsEmitted, attsEmitted,
-                sw.ElapsedMilliseconds);
+
+            // ───────────── OV → OV_RELATES ─────────────
+            string vN = p + "self_attn.v_proj.weight", oN = p + "self_attn.o_proj.weight";
+            if (refMap.ContainsKey(vN) && refMap.ContainsKey(oN))
+            {
+                ProjectThroughHeads(E,   vocab, dModel, LoadRawBF16AsF32(refMap, vN, (long)kvDim * dModel), nKv, headDim, vC);
+                float[] oW_T = TransposeOProjToHeads(LoadRawBF16AsF32(refMap, oN, (long)dModel * attnOut), dModel, nHeads, headDim);
+                ProjectThroughHeads(E_U, vocab, dModel, oW_T, nHeads, headDim, oC);
+                double kf = floorOverridden ? ff : CalibrateProjectionFloor(vC, vocab, nKv    * headDim, surviveFrac);
+                double vf = floorOverridden ? ff : CalibrateProjectionFloor(oC, vocab, nHeads * headDim, surviveFrac);
+                for (int h = 0; h < nHeads; h++)
+                    foreach (var c in EmitSlotMemories(tokById, vC, nKv, h / qPerKv, kf, oC, nHeads, h, vf,
+                                 headDim, _kinds.OvRelates, WitnessId(_sourceId, layer, h), nowUs, counters))
+                    { yield return c; await Task.Yield(); }
+            }
+
+            // ───────────── FFN → COMPLETES_TO ─────────────
+            string upN = p + "mlp.up_proj.weight", dnN = p + "mlp.down_proj.weight";
+            if (refMap.ContainsKey(upN) && refMap.ContainsKey(dnN))
+            {
+                ProjectThroughHeads(E,   vocab, dModel, LoadRawBF16AsF32(refMap, upN, (long)interm * dModel), 1, interm, upC);
+                float[] dnW_T = Transpose2D(LoadRawBF16AsF32(refMap, dnN, (long)dModel * interm), dModel, interm);
+                ProjectThroughHeads(E_U, vocab, dModel, dnW_T, 1, interm, dnC);
+                double kf = floorOverridden ? ff : CalibrateProjectionFloor(upC, vocab, interm, surviveFrac);
+                double vf = floorOverridden ? ff : CalibrateProjectionFloor(dnC, vocab, interm, surviveFrac);
+                foreach (var c in EmitSlotMemories(tokById, upC, 1, 0, kf, dnC, 1, 0, vf,
+                             interm, _kinds.CompletesTo, WitnessId(_sourceId, layer, -1), nowUs, counters))
+                { yield return c; await Task.Yield(); }
+            }
+
+            _log.LogInformation("phase=circuits layer {Layer}/{Total}: {Mem:N0} memories, {Rel:N0} relations, wall {Ms} ms",
+                layer + 1, _recipe.NumLayers, counters[0], counters[1], sw.ElapsedMilliseconds);
         }
-        _log.LogInformation("phase=FFN-memories done: {Neurons:N0} neuron-memories, {Atts:N0} completions, {Ms} ms",
-            neuronsEmitted, attsEmitted, sw.ElapsedMilliseconds);
+        _log.LogInformation("phase=circuits done: {Mem:N0} memories (QK+OV+FFN), {Rel:N0} relations, {Ms} ms",
+            counters[0], counters[1], sw.ElapsedMilliseconds);
+    }
+
+    /* Emit one circuit's memories for a fixed head/slot pair, per shared dimension d:
+     *   keys = tokens above keyFloor on A[·,aSlot,d]; vals = tokens above valFloor on C[·,cSlot,d].
+     * keys → one n-gram trajectory entity; attest `kind` to each val with context = witness.
+     * A is [vocab][aSlots][width]; C is [vocab][cSlots][width], both row-major. */
+    private IEnumerable<SubstrateChange> EmitSlotMemories(
+        LlamaTokenizerParser.TokenRecord?[] tokById,
+        double[] aCache, int aSlots, int aSlot, double keyFloor,
+        double[] cCache, int cSlots, int cSlot, double valFloor,
+        int width, Hash128 kind, Hash128 witness, long nowUs, long[] counters)
+    {
+        var keys = new List<(NgramTrajectory.Constituent c, double mag, byte tier)>(64);
+        var vals = new List<(Hash128 id, double mag)>(64);
+        int vocab = tokById.Length;
+        for (int d = 0; d < width; d++)
+        {
+            keys.Clear();
+            for (int t = 0; t < vocab; t++)
+            {
+                double m = aCache[((long)t * aSlots + aSlot) * width + d];
+                if (Math.Abs(m) <= keyFloor) continue;
+                var rec = tokById[t];
+                if (rec is not { HasContentCoord: true }) continue;
+                keys.Add((new NgramTrajectory.Constituent(
+                    rec.EntityId, rec.ContentX, rec.ContentY, rec.ContentZ, rec.ContentM), m, rec.Tier));
+            }
+            if (keys.Count == 0) continue;
+
+            vals.Clear();
+            for (int s = 0; s < vocab; s++)
+            {
+                double m = cCache[((long)s * cSlots + cSlot) * width + d];
+                if (Math.Abs(m) <= valFloor) continue;
+                var rec = tokById[s];
+                if (rec is null) continue;
+                vals.Add((rec.EntityId, m));
+            }
+            if (vals.Count == 0) continue;
+
+            keys.Sort((a, b) => Math.Abs(b.mag).CompareTo(Math.Abs(a.mag)));
+            byte maxTier = 0;
+            var cons = new NgramTrajectory.Constituent[keys.Count];
+            for (int k = 0; k < keys.Count; k++) { cons[k] = keys[k].c; if (keys[k].tier > maxTier) maxTier = keys[k].tier; }
+            byte ngramTier = (byte)Math.Min(255, maxTier + 1);
+
+            var bb = new SubstrateChangeBuilder(_sourceId, "circuit-mem",
+                entityCapacity: 1, physicalityCapacity: 1, attestationCapacity: vals.Count);
+            Hash128 ngramId = NgramTrajectory.Compose(bb, cons, ngramTier, _kinds.NgramType, _sourceId, nowUs);
+            foreach (var v in vals)
+                bb.AddAttestation(AttestationFactory.CreateWeighted(
+                    ngramId, kind, v.id, _sourceId, contextId: witness,
+                    tier: KindValueTier.T9, trust: TrustClass.AiModelProbeTier7,
+                    magnitude: v.mag, floor: valFloor));
+            counters[0]++; counters[1] += vals.Count;
+            yield return bb.Build();
+        }
+    }
+
+    /* Per-(layer, head) witness id — the model-circuit provenance carried as the attestation
+     * context_id. head = -1 is the layer's FFN witness. Deterministic per (source, layer, head). */
+    private static Hash128 WitnessId(Hash128 source, int layer, int head)
+    {
+        Span<byte> b = stackalloc byte[16 + 4 + 4];
+        source.WriteBytes(b.Slice(0, 16));
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(b.Slice(16, 4), layer);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(b.Slice(20, 4), head);
+        return Hash128.Blake3(b);
     }
 
     /* Noise floor for a projection cache [vocab × width]: the (1-surviveFrac) quantile of

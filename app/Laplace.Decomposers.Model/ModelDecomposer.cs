@@ -40,6 +40,12 @@ public sealed class ModelDecomposer : IDecomposer
     // content-addressed entity, a tier above its constituents).
     public static readonly Hash128 NgramTypeId =
         Hash128.OfCanonical("substrate/type/Ngram/v1");
+    // Witness entities: per (layer, head) model provenance. Set as the attestation
+    // context_id so each layer/head's evidence is a distinct row (evidence keeps
+    // layer/head; consensus drops it). The model itself is the source; the witness
+    // is which circuit instance inside it observed the relation.
+    public static readonly Hash128 WitnessTypeId =
+        Hash128.OfCanonical("substrate/type/Witness/v1");
 
     /* Transformer-family tensor-calculation attestation kinds per ADR 0056
      * spec table + ADR 0044 T9 + GLOSSARY:95 + DESIGN.md:731. Fixed
@@ -76,8 +82,12 @@ public sealed class ModelDecomposer : IDecomposer
      * corrected ingest axis (same kind the lexical decomposers emit, so model + dataset
      * witnesses dedup onto one consensus edge). */
     public static readonly Hash128 SimilarToKind     = Hash128.OfCanonical("substrate/kind/SIMILAR_TO/v1");
-    // [n-gram context] ⇒ {completions}: an FFN/OV key→value memory, read per neuron
-    // through the embedding address book. The model's actual content as a relation.
+    // Per-circuit relations, each read per (head/neuron) through the embedding address book:
+    //   ATTENDS      — QK: [query n-gram] attends [key tokens]
+    //   OV_RELATES   — OV: [value n-gram] relates [output tokens]
+    //   COMPLETES_TO — FFN: [context n-gram] ⇒ {completion tokens}
+    public static readonly Hash128 AttendsKind       = Hash128.OfCanonical("substrate/kind/ATTENDS/v1");
+    public static readonly Hash128 OvRelatesKind     = Hash128.OfCanonical("substrate/kind/OV_RELATES/v1");
     public static readonly Hash128 CompletesToKind   = Hash128.OfCanonical("substrate/kind/COMPLETES_TO/v1");
 
     /* Recipe attestation kinds */
@@ -105,8 +115,11 @@ public sealed class ModelDecomposer : IDecomposer
         DownProjects   = DownProjectsKind,
         Normalizes     = NormalizesKind,
         OutputProjects = OutputProjectsKind,
+        Attends        = AttendsKind,
+        OvRelates      = OvRelatesKind,
         CompletesTo    = CompletesToKind,
         NgramType      = NgramTypeId,
+        WitnessType    = WitnessTypeId,
     };
 
     private readonly string _modelDir;
@@ -130,6 +143,7 @@ public sealed class ModelDecomposer : IDecomposer
         boot.AddType("Scalar");
         boot.AddType("Architecture");
         boot.AddType("Ngram");
+        boot.AddType("Witness");
 
         /* Codepoint / Grapheme / Word / Sentence / Document type entities are
          * substrate-canonical text-tier types used by TextEntityBuilder for any
@@ -164,6 +178,8 @@ public sealed class ModelDecomposer : IDecomposer
         boot.AddKind("DOWN_PROJECTS");
         boot.AddKind("NORMALIZES");
         boot.AddKind("OUTPUT_PROJECTS");
+        boot.AddKind("ATTENDS");
+        boot.AddKind("OV_RELATES");
         boot.AddKind("COMPLETES_TO");
         boot.AddKind("TOKEN_MAPS_TO");
         boot.AddKind("HAS_HIDDEN_SIZE");
@@ -241,11 +257,12 @@ public sealed class ModelDecomposer : IDecomposer
          *    path (extractor.ExtractAsync) is retained for reference but bypassed. */
         var extractor = new WeightTensorETL(_modelDir, recipe, tokens, Source, ExtractorKinds, log);
 
-        // 4a. The records: FFN neurons read through the embedding address book as
-        //     [context n-gram] ⇒ {completions} key→value memories — the model's content
-        //     as content-addressed n-gram trajectory entities + COMPLETES_TO attestations.
-        log.LogInformation("phase=FFN-memories starting (neuron key→value: [n-gram] ⇒ {{completions}})");
-        await foreach (var change in extractor.EmitFfnMemoriesAsync(ct))
+        // 4a. The records: ALL interior circuits (QK→ATTENDS, OV→OV_RELATES, FFN→COMPLETES_TO)
+        //     read per (layer, head) through the embedding address book as [n-gram] ⇒ {tokens}
+        //     memories — content-addressed n-gram trajectory entities + typed attestations,
+        //     each carrying its (layer, head) witness as context (evidence keeps provenance).
+        log.LogInformation("phase=circuits starting (QK/OV/FFN per layer,head → [n-gram] ⇒ {{tokens}})");
+        await foreach (var change in extractor.EmitCircuitMemoriesAsync(ct))
         {
             ct.ThrowIfCancellationRequested();
             yield return change;

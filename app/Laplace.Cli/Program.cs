@@ -1453,6 +1453,8 @@ internal static class Program
         // read 0 on a corrected ingest, which is the point.
         (string label, Hash128 kind)[] modelKinds =
         [
+            ("ATTENDS",         ModelDecomposer.AttendsKind),
+            ("OV_RELATES",      ModelDecomposer.OvRelatesKind),
             ("COMPLETES_TO",    ModelDecomposer.CompletesToKind),
             ("EMBEDS",          ModelDecomposer.EmbedsKind),
             ("Q_PROJECTS",      ModelDecomposer.QProjectsKind),
