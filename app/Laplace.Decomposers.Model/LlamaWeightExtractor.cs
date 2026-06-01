@@ -61,6 +61,13 @@ public sealed class LlamaWeightExtractor
         public required Hash128 DownProjects   { get; init; }
         public required Hash128 Normalizes     { get; init; }
         public required Hash128 OutputProjects { get; init; }
+        /* Content x content relatedness from trajectory geometry (corrected ingest).
+         * Non-required so existing KindIds initializers compile; ModelDecomposer sets it. */
+        public Hash128 SimilarTo { get; init; }
+        /* [n-gram context] ⇒ {completion} (FFN/OV key→value memory read per neuron)
+         * + the n-gram trajectory entity type. Non-required; ModelDecomposer sets them. */
+        public Hash128 CompletesTo { get; init; }
+        public Hash128 NgramType   { get; init; }
     }
 
     private readonly string _safetensorsPath;

@@ -36,6 +36,10 @@ public sealed class ModelDecomposer : IDecomposer
         Hash128.OfCanonical("substrate/type/Architecture/v1");
     public static readonly Hash128 ScalarTypeId =
         Hash128.OfCanonical("substrate/type/Scalar/v1");
+    // N-gram trajectory entities (a path of tokens — [the, capital, of] — as one
+    // content-addressed entity, a tier above its constituents).
+    public static readonly Hash128 NgramTypeId =
+        Hash128.OfCanonical("substrate/type/Ngram/v1");
 
     /* Transformer-family tensor-calculation attestation kinds per ADR 0056
      * spec table + ADR 0044 T9 + GLOSSARY:95 + DESIGN.md:731. Fixed
@@ -68,6 +72,13 @@ public sealed class ModelDecomposer : IDecomposer
     public static readonly Hash128 NormalizesKind    = Hash128.OfCanonical("substrate/kind/NORMALIZES/v1");
     public static readonly Hash128 OutputProjectsKind = Hash128.OfCanonical("substrate/kind/OUTPUT_PROJECTS/v1");
     public static readonly Hash128 TokenMapsToKind   = Hash128.OfCanonical("substrate/kind/TOKEN_MAPS_TO/v1");
+    /* Content x content relatedness witnessed from model trajectory geometry — the
+     * corrected ingest axis (same kind the lexical decomposers emit, so model + dataset
+     * witnesses dedup onto one consensus edge). */
+    public static readonly Hash128 SimilarToKind     = Hash128.OfCanonical("substrate/kind/SIMILAR_TO/v1");
+    // [n-gram context] ⇒ {completions}: an FFN/OV key→value memory, read per neuron
+    // through the embedding address book. The model's actual content as a relation.
+    public static readonly Hash128 CompletesToKind   = Hash128.OfCanonical("substrate/kind/COMPLETES_TO/v1");
 
     /* Recipe attestation kinds */
     public static readonly Hash128 HasHiddenSizeKind  = Hash128.OfCanonical("substrate/kind/HAS_HIDDEN_SIZE/v1");
@@ -94,6 +105,8 @@ public sealed class ModelDecomposer : IDecomposer
         DownProjects   = DownProjectsKind,
         Normalizes     = NormalizesKind,
         OutputProjects = OutputProjectsKind,
+        CompletesTo    = CompletesToKind,
+        NgramType      = NgramTypeId,
     };
 
     private readonly string _modelDir;
@@ -116,6 +129,7 @@ public sealed class ModelDecomposer : IDecomposer
         boot.AddType("Model_Tokenizer");
         boot.AddType("Scalar");
         boot.AddType("Architecture");
+        boot.AddType("Ngram");
 
         /* Codepoint / Grapheme / Word / Sentence / Document type entities are
          * substrate-canonical text-tier types used by TextEntityBuilder for any
@@ -150,6 +164,7 @@ public sealed class ModelDecomposer : IDecomposer
         boot.AddKind("DOWN_PROJECTS");
         boot.AddKind("NORMALIZES");
         boot.AddKind("OUTPUT_PROJECTS");
+        boot.AddKind("COMPLETES_TO");
         boot.AddKind("TOKEN_MAPS_TO");
         boot.AddKind("HAS_HIDDEN_SIZE");
         boot.AddKind("HAS_NUM_LAYERS");
@@ -218,10 +233,28 @@ public sealed class ModelDecomposer : IDecomposer
         log.LogInformation("phase=vocab emitted: {Batches} batches ({Ms} ms)",
             vocabBatches, phaseSw.ElapsedMilliseconds);
 
-        /* 4. Weight attestations via universal WeightTensorETL per ADR 0056. */
-        log.LogInformation("phase=weights starting (EMBEDS → OUTPUT → QK → unary)");
+        /* 4. Weights: morph embed_tokens onto the shared Unicode S³ frame
+         *    (SUBSTRATE-FOUNDATION truth #3). The model is a witness — its embedding
+         *    is placed on the canonical frame as Projection physicalities, NOT a
+         *    per-model embedding. Interior q/k/v/o/gate/up/down is OPEN (foundation
+         *    doc) and intentionally not emitted; the prior per-circuit Score(t,s)
+         *    path (extractor.ExtractAsync) is retained for reference but bypassed. */
         var extractor = new WeightTensorETL(_modelDir, recipe, tokens, Source, ExtractorKinds, log);
-        await foreach (var change in extractor.ExtractAsync(ct))
+
+        // 4a. The records: FFN neurons read through the embedding address book as
+        //     [context n-gram] ⇒ {completions} key→value memories — the model's content
+        //     as content-addressed n-gram trajectory entities + COMPLETES_TO attestations.
+        log.LogInformation("phase=FFN-memories starting (neuron key→value: [n-gram] ⇒ {{completions}})");
+        await foreach (var change in extractor.EmitFfnMemoriesAsync(ct))
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return change;
+        }
+
+        // 4b. Placement (separate axis): morph embed_tokens onto the shared Unicode S³
+        //     frame (eigenmaps → Gram-Schmidt → Procrustes) as Projection physicalities.
+        log.LogInformation("phase=S3-morph starting (embed_tokens → Unicode S³ frame)");
+        await foreach (var change in extractor.EmitS3MorphAsync(ct))
         {
             ct.ThrowIfCancellationRequested();
             yield return change;

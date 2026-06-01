@@ -50,6 +50,11 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "super_fibonacci")]
     internal static partial void SuperFibonacci(nuint n, double* outQuats);
 
+    // === math4d (engine/core/include/laplace/core/math4d.h) ===
+
+    [LibraryImport(Library, EntryPoint = "math4d_centroid")]
+    internal static partial void Math4dCentroid(double* points, nuint nPoints, double* out4);
+
     // === trajectory (engine/core/include/laplace/core/trajectory.h) ===
 
     [LibraryImport(Library, EntryPoint = "trajectory_build")]

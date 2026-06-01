@@ -26,6 +26,7 @@ public sealed class LlamaRecipeExtractor
         public required string  TorchDtype     { get; init; }
         public required string  HiddenAct      { get; init; }
         public required double  RopeTheta      { get; init; }
+        public required double  RmsNormEps     { get; init; }
         public required string  ModelType      { get; init; }
         public required byte[]  CanonicalJson  { get; init; }
     }
@@ -56,6 +57,7 @@ public sealed class LlamaRecipeExtractor
         string dtype   = root.TryGetProperty("torch_dtype",  out var dtProp) ? dtProp.GetString() ?? "bfloat16" : "bfloat16";
         string act     = root.TryGetProperty("hidden_act",   out var actProp) ? actProp.GetString() ?? "silu" : "silu";
         double theta   = root.TryGetProperty("rope_theta",   out var thetaProp) ? thetaProp.GetDouble() : 10000.0;
+        double rmsEps  = root.TryGetProperty("rms_norm_eps", out var epsProp) ? epsProp.GetDouble() : 1e-5;
         string mtype   = root.TryGetProperty("model_type",   out var mtProp) ? mtProp.GetString() ?? "llama" : "llama";
 
         /* Canonical bytes = deterministic JSON re-serialisation (sorted keys). */
@@ -75,6 +77,7 @@ public sealed class LlamaRecipeExtractor
             TorchDtype       = dtype,
             HiddenAct        = act,
             RopeTheta        = theta,
+            RmsNormEps       = rmsEps,
             ModelType        = mtype,
             CanonicalJson    = canonical,
         };
