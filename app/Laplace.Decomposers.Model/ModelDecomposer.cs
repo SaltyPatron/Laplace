@@ -24,15 +24,22 @@ public sealed class ModelDecomposer : IDecomposer
         Hash128.OfCanonical("substrate/trust_class/AIModelProbe/v1");
 
     /// <summary>
-    /// Derive the source identity from the model DIRECTORY — per-model, never hardcoded to a
-    /// family. HF cache "…/models--ORG--NAME/snapshots/SHA" → "ORG/NAME"; otherwise the model/
-    /// snapshot dir name (a bare SHA tail is skipped). Used by the decomposer AND by callers
-    /// that only have the dir (the re-ingest guard, synthesis), so they agree on the id.
+    /// Source identity for a model is its CONTENT, not its directory name (truth #5):
+    /// chunk-Merkle of config.json + the weight shards (<see cref="SourceEntityIdConventions.ModelContentSourceId"/>).
+    /// Two byte-identical copies — renamed, moved, re-downloaded — are ONE witness (no
+    /// double-counting; cross-model consensus accumulates correctly); a fine-tune or
+    /// re-quantization is a DISTINCT witness. The display NAME is still derived from the
+    /// directory (HF "…/models--ORG--NAME/snapshots/SHA" → "ORG/NAME", else the dir name).
+    /// Falls back to the name-based id only when no weight files are present (fixtures).
+    /// Used by the decomposer AND callers that only have the dir (re-ingest guard, synthesis),
+    /// so they agree on the id.
     /// </summary>
     public static (Hash128 Id, string Name) SourceForModel(string modelDir)
     {
         string name = DeriveModelName(modelDir);
-        return (Hash128.OfCanonical($"substrate/source/{name}/v1"), name);
+        Hash128 id = SourceEntityIdConventions.ModelContentSourceId(modelDir)
+                     ?? Hash128.OfCanonical($"substrate/source/{name}/v1");
+        return (id, name);
     }
 
     private static string DeriveModelName(string modelDir)

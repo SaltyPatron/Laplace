@@ -1,0 +1,161 @@
+using System.Text;
+using Xunit;
+using Laplace.Decomposers.Abstractions;
+using Laplace.Engine.Core;
+
+namespace Laplace.Decomposers.Abstractions.Tests;
+
+/// <summary>
+/// Source identity is CONTENT, not name (truth #5): byte-identical sources are
+/// ONE witness regardless of file/dir name; any content difference is a DISTINCT
+/// witness. Proves the convergence + distinction invariants the consensus layer
+/// depends on (no double-counting a renamed model; a fine-tune does not collide).
+/// </summary>
+public class SourceEntityIdConventionsTests
+{
+    private static string NewTempDir()
+    {
+        string d = Path.Combine(Path.GetTempPath(),
+            "laplace-srcid-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(d);
+        return d;
+    }
+
+    private static string WriteModel(string dir, byte[] weights, string config)
+    {
+        File.WriteAllBytes(Path.Combine(dir, "model.safetensors"), weights);
+        File.WriteAllText(Path.Combine(dir, "config.json"), config);
+        return dir;
+    }
+
+    [Fact]
+    public void Model_IdenticalContent_DifferentDirName_SameId()
+    {
+        var a = NewTempDir();
+        var b = NewTempDir();
+        try
+        {
+            var bytes = Encoding.ASCII.GetBytes(new string('W', 4096));
+            WriteModel(a, bytes, "{\"hidden\":8}");
+            WriteModel(b, bytes, "{\"hidden\":8}");
+
+            Hash128? ida = SourceEntityIdConventions.ModelContentSourceId(a);
+            Hash128? idb = SourceEntityIdConventions.ModelContentSourceId(b);
+
+            Assert.NotNull(ida);
+            Assert.Equal(ida, idb);   // renamed/moved-identical → one witness
+        }
+        finally { Directory.Delete(a, true); Directory.Delete(b, true); }
+    }
+
+    [Fact]
+    public void Model_OneByteDifferent_DistinctId()
+    {
+        var a = NewTempDir();
+        var b = NewTempDir();
+        try
+        {
+            var bytes = Encoding.ASCII.GetBytes(new string('W', 4096));
+            WriteModel(a, bytes, "{\"hidden\":8}");
+            var flipped = (byte[])bytes.Clone();
+            flipped[2048] ^= 0x01;    // a single weight byte → a fine-tune
+            WriteModel(b, flipped, "{\"hidden\":8}");
+
+            Assert.NotEqual(SourceEntityIdConventions.ModelContentSourceId(a),
+                            SourceEntityIdConventions.ModelContentSourceId(b));
+        }
+        finally { Directory.Delete(a, true); Directory.Delete(b, true); }
+    }
+
+    [Fact]
+    public void Model_DifferentConfigSameWeights_DistinctId()
+    {
+        // Same weights, different architecture interpretation = different math = distinct witness.
+        var a = NewTempDir();
+        var b = NewTempDir();
+        try
+        {
+            var bytes = Encoding.ASCII.GetBytes(new string('W', 4096));
+            WriteModel(a, bytes, "{\"rope_theta\":10000}");
+            WriteModel(b, bytes, "{\"rope_theta\":500000}");
+
+            Assert.NotEqual(SourceEntityIdConventions.ModelContentSourceId(a),
+                            SourceEntityIdConventions.ModelContentSourceId(b));
+        }
+        finally { Directory.Delete(a, true); Directory.Delete(b, true); }
+    }
+
+    [Fact]
+    public void Model_NoWeightFiles_ReturnsNull()
+    {
+        var d = NewTempDir();
+        try
+        {
+            File.WriteAllText(Path.Combine(d, "config.json"), "{\"hidden\":8}");  // config only
+            Assert.Null(SourceEntityIdConventions.ModelContentSourceId(d));        // caller falls back
+        }
+        finally { Directory.Delete(d, true); }
+    }
+
+    [Fact]
+    public void Model_ChunkBoundary_DeterministicAcrossSizes()
+    {
+        // A payload spanning >1 chunk must hash identically when re-read; proves the
+        // fixed-chunk Merkle is allocator-independent (no rented-buffer length leak).
+        var a = NewTempDir();
+        var b = NewTempDir();
+        try
+        {
+            var bytes = new byte[70 * 1024 * 1024 + 12345];   // >64 MiB → 2 chunks
+            for (int i = 0; i < bytes.Length; i++) bytes[i] = (byte)(i * 31 + 7);
+            WriteModel(a, bytes, "{\"hidden\":8}");
+            WriteModel(b, bytes, "{\"hidden\":8}");
+            Assert.Equal(SourceEntityIdConventions.ModelContentSourceId(a),
+                         SourceEntityIdConventions.ModelContentSourceId(b));
+        }
+        finally { Directory.Delete(a, true); Directory.Delete(b, true); }
+    }
+
+    [Fact]
+    public void Text_BomAndCrlfVariant_SameId()
+    {
+        var a = NewTempDir();
+        var b = NewTempDir();
+        try
+        {
+            // plain UTF-8, LF endings
+            File.WriteAllBytes(Path.Combine(a, "corpus.txt"),
+                Encoding.UTF8.GetBytes("alpha\nbeta\ngamma\n"));
+            // UTF-8 BOM + CRLF endings, same logical content
+            var withBomCrlf = new List<byte> { 0xEF, 0xBB, 0xBF };
+            withBomCrlf.AddRange(Encoding.UTF8.GetBytes("alpha\r\nbeta\r\ngamma\r\n"));
+            File.WriteAllBytes(Path.Combine(b, "corpus.txt"), withBomCrlf.ToArray());
+
+            Hash128 ida = SourceEntityIdConventions.NormalizedTextSourceId(
+                "substrate/source/test-text/v1", new[] { Path.Combine(a, "corpus.txt") });
+            Hash128 idb = SourceEntityIdConventions.NormalizedTextSourceId(
+                "substrate/source/test-text/v1", new[] { Path.Combine(b, "corpus.txt") });
+
+            Assert.Equal(ida, idb);
+        }
+        finally { Directory.Delete(a, true); Directory.Delete(b, true); }
+    }
+
+    [Fact]
+    public void Text_DifferentContent_DistinctId()
+    {
+        var a = NewTempDir();
+        var b = NewTempDir();
+        try
+        {
+            File.WriteAllText(Path.Combine(a, "corpus.txt"), "alpha\nbeta\n");
+            File.WriteAllText(Path.Combine(b, "corpus.txt"), "alpha\ndelta\n");
+            Assert.NotEqual(
+                SourceEntityIdConventions.NormalizedTextSourceId(
+                    "substrate/source/test-text/v1", new[] { Path.Combine(a, "corpus.txt") }),
+                SourceEntityIdConventions.NormalizedTextSourceId(
+                    "substrate/source/test-text/v1", new[] { Path.Combine(b, "corpus.txt") }));
+        }
+        finally { Directory.Delete(a, true); Directory.Delete(b, true); }
+    }
+}
