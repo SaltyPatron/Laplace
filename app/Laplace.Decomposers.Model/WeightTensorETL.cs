@@ -1099,9 +1099,23 @@ public sealed class WeightTensorETL
                         outPtr[i] = f;
                     }
                 }
+                else if (tref.Dtype == "F16")
+                {
+                    // IEEE-754 half → f32 (Phi-2 etc. ship float16; distinct from BF16).
+                    ushort* src = (ushort*)rawPtr;
+                    for (long i = 0; i < expectedElements; i++)
+                        outPtr[i] = (float)BitConverter.UInt16BitsToHalf(src[i]);
+                }
                 else if (tref.Dtype == "F32")
                 {
                     Buffer.MemoryCopy(rawPtr, outPtr, expectedElements * 4, raw.Length);
+                }
+                else
+                {
+                    // Fail loud — NEVER silently return zeros (that read as an empty model).
+                    throw new NotSupportedException(
+                        $"tensor '{name}' has unsupported dtype '{tref.Dtype}' — add a decoder; " +
+                        "refusing to ingest zeros.");
                 }
             }
         }

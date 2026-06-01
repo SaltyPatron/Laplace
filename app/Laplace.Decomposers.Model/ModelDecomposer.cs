@@ -302,11 +302,23 @@ public sealed class ModelDecomposer : IDecomposer
 
         // 4b. Placement (separate axis): morph embed_tokens onto the shared Unicode S³
         //     frame (eigenmaps → Gram-Schmidt → Procrustes) as Projection physicalities.
+        //     NOTE: the dense Laplacian-eigenmaps affinity is O(n²·d_model) — it does NOT
+        //     share the O(params) budget of the circuit read; its affinity should come from
+        //     the streamed relation graph (sparse), the same redesign the circuits got.
+        //     LAPLACE_SKIP_MORPH=1 omits this placement so the O(params) circuit ingest can
+        //     be measured/run on its own until the morph affinity is made sparse.
+        if (Environment.GetEnvironmentVariable("LAPLACE_SKIP_MORPH") == "1")
+        {
+            log.LogInformation("phase=S3-morph SKIPPED (LAPLACE_SKIP_MORPH=1)");
+        }
+        else
+        {
         log.LogInformation("phase=S3-morph starting (embed_tokens → Unicode S³ frame)");
         await foreach (var change in extractor.EmitS3MorphAsync(ct))
         {
             ct.ThrowIfCancellationRequested();
             yield return change;
+        }
         }
     }
 
