@@ -53,7 +53,10 @@ public sealed class UDDecomposer : IDecomposer
     public Hash128 TrustClassId => TrustClass;
 
     private static Hash128 UposId(string t)  => Hash128.OfCanonical($"upos:{t}");
-    private static Hash128 XposId(string t)  => Hash128.OfCanonical($"xpos:{t}");
+    // XPOS is treebank/language-specific (Penn "NN" ≠ another tagset's "NN"):
+    // namespace by language so genuinely-different tags are distinct content.
+    // UPOS is the universal tagset → stays unnamespaced (same content cross-lang).
+    private static Hash128 XposId(string lang, string t) => Hash128.OfCanonical($"xpos:{lang}:{t}");
     private static Hash128 FeatId(string kv) => Hash128.OfCanonical($"feat:{kv}");
     private static Hash128 DeprelId(string d)=> Hash128.OfCanonical($"deprel:{d}");
 
@@ -100,7 +103,7 @@ public sealed class UDDecomposer : IDecomposer
             await foreach (var sentence in ParseSentencesAsync(conllu, ct))
             {
                 ct.ThrowIfCancellationRequested();
-                EmitSentence(b, sentence, langId);
+                EmitSentence(b, sentence, langId, langCode);
 
                 if (++sentCount >= batchSentences)
                 {
@@ -127,7 +130,7 @@ public sealed class UDDecomposer : IDecomposer
 
     // ── emit ───────────────────────────────────────────────────────────────
 
-    private static void EmitSentence(SubstrateChangeBuilder b, UdSentence s, Hash128 langId)
+    private static void EmitSentence(SubstrateChangeBuilder b, UdSentence s, Hash128 langId, string langCode)
     {
         // Language entity (idempotent with ISO layer) so HAS_LANGUAGE FK is satisfied.
         b.AddEntity(new EntityRow(langId, /*tier*/ 2, LanguageTypeId, Source));
@@ -156,9 +159,9 @@ public sealed class UDDecomposer : IDecomposer
 
             if (!string.IsNullOrEmpty(tok.Xpos) && tok.Xpos != "_")
             {
-                b.AddEntity(new EntityRow(XposId(tok.Xpos), 0, XposTypeId, Source));
+                b.AddEntity(new EntityRow(XposId(langCode, tok.Xpos), 0, XposTypeId, Source));
                 b.AddAttestation(AttestationFactory.Create(
-                    form, KindHasXpos, XposId(tok.Xpos), Source, null,
+                    form, KindHasXpos, XposId(langCode, tok.Xpos), Source, null,
                     KindRank.Partitive, SourceTrust.AcademicCurated));
             }
 
