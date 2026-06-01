@@ -156,15 +156,14 @@ public sealed class WeightTensorETL
         int[] addrOut = ReferenceEquals(E_U, E) ? addrIn
                       : BuildAddressBook(E_U, vocab, dModel, tokById, requireContentCoord: false);
 
-        double surviveFrac = 5e-4;
-        if (double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_CIRCUIT_SURVIVE_FRAC"),
+        // Absolute noise floor — keep every weight cell with |value| > floor; default 0 keeps
+        // ALL real (non-zero) cells (full extraction, not a percentile). Magnitude lives in the
+        // attestation μ, so selectivity is ORDER BY μ at query time, never dropped at ingest.
+        double floor = 0.0;
+        if (double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_CIRCUIT_FLOOR"),
                 System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var sf) && sf > 0 && sf < 1)
-            surviveFrac = sf;
-        bool floorOverridden = double.TryParse(
-                Environment.GetEnvironmentVariable("LAPLACE_CIRCUIT_FLOOR"),
-                System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var ff) && ff >= 0;
+                System.Globalization.CultureInfo.InvariantCulture, out var ff) && ff >= 0)
+            floor = ff;
 
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -196,8 +195,7 @@ public sealed class WeightTensorETL
             var encRef = refMap[circ.Encode]; var decRef = refMap[circ.Decode];
             float[] enc = LoadRawBF16AsF32(refMap, circ.Encode, (long)encRef.Shape[0] * encRef.Shape[1]);
             float[] dec = LoadRawBF16AsF32(refMap, circ.Decode, (long)decRef.Shape[0] * decRef.Shape[1]);
-            double keyFloor = floorOverridden ? ff : CalibrateWeightFloor(enc, surviveFrac);
-            double valFloor = floorOverridden ? ff : CalibrateWeightFloor(dec, surviveFrac);
+            double keyFloor = floor, valFloor = floor;
             Hash128 kind = circ.Kind switch {
                 ModelGeometry.CircuitKind.QK => _kinds.Attends,
                 ModelGeometry.CircuitKind.OV => _kinds.OvRelates,
