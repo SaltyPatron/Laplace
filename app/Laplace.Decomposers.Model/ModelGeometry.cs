@@ -116,16 +116,18 @@ public sealed class ModelGeometry
         if (a == interm && b == dModel) return RoleToken(lname) == Role.Gate ? Role.Gate : Role.Up;
         if (a == dModel && b == interm) return Role.Down;
 
-        // Attention: encode [qW|kvW, D], decode [D, qW]. Disambiguate q/k/v/o by universal token,
-        // validated by which width the shape carries.
-        if (b == dModel && (a == qW || a == kvW))
+        // Attention: encode [qW|kvW, D] (q/k/v) or decode [D, qW|kvW] (o/dense). When
+        // n_heads·head_dim == D both shapes are square [D,D], so the universal role token is
+        // AUTHORITATIVE for q/k/v/o; shape is only the fallback for an unnamed tensor.
+        bool encodeShape = b == dModel && (a == qW || a == kvW);
+        bool decodeShape = a == dModel && (b == qW || b == kvW);
+        if (encodeShape || decodeShape)
         {
             Role rt = RoleToken(lname);
-            if (rt is Role.Q or Role.K or Role.V) return rt;
-            return a == kvW ? Role.V : Role.Q;   // fallback by width when no token matched
+            if (rt is Role.Q or Role.K or Role.V or Role.O) return rt;
+            if (encodeShape) return a == kvW ? Role.V : Role.Q;   // unnamed encode → by width
+            return Role.O;                                         // unnamed decode → output
         }
-        if (a == dModel && b == qW)
-            return Role.O;   // attention output / dense
 
         return Role.Unknown;
     }
