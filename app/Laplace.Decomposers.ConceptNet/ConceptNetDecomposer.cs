@@ -112,8 +112,8 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
             var endId   = ContentEmitter.Emit(b, endTerm, Source);
             if (startId is null || endId is null) continue;
 
-            Hash128 startLangId = LanguageEntityId.FromIso639_3(startLang);
-            Hash128 endLangId   = LanguageEntityId.FromIso639_3(endLang);
+            Hash128 startLangId = LanguageReference.Resolve(startLang);
+            Hash128 endLangId   = LanguageReference.Resolve(endLang);
             b.AddEntity(new EntityRow(startLangId, 2, LanguageTypeId, Source));
             b.AddEntity(new EntityRow(endLangId, 2, LanguageTypeId, Source));
 

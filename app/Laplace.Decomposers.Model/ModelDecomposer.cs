@@ -131,7 +131,7 @@ public sealed class ModelDecomposer : IDecomposer
         boot.AddType("Text");
 
         /* Model_Feature type removed — feature-dim entities were conventional-AI
-         * smuggling; the corrected codec uses PROJECTION physicalities for the
+         * smuggling; the corrected decomposition emits PROJECTION physicalities for the
          * token-axis tensors (embed_tokens, lm_head) and token×token typed
          * attestations for interior tensors via self-bilinear E·W·Wᵀ·Eᵀ. */
 

@@ -29,6 +29,15 @@ public sealed class ISODecomposer : IDecomposer
         Hash128.OfCanonical("substrate/kind/IS_LANGUAGE_CODE/v1");
     private static readonly Hash128 KindHasIso6391Code =
         Hash128.OfCanonical("substrate/kind/HAS_ISO639_1_CODE/v1");
+    // Language reference GRAPH (see LanguageGraph): the hub that makes language
+    // filterable/focusable structurally instead of via a HAS_LANGUAGE join.
+    private static readonly Hash128 KindUsesScript =
+        Hash128.OfCanonical("substrate/kind/USES_SCRIPT/v1");
+    private static readonly Hash128 KindMemberOfMacrolanguage =
+        Hash128.OfCanonical("substrate/kind/MEMBER_OF_MACROLANGUAGE/v1");
+    // UnicodeDecomposer's classifier type — script entities the graph links to.
+    private static readonly Hash128 UcdClassifierTypeId =
+        Hash128.OfCanonical("substrate/type/UcdClassifier/v1");
 
     public Hash128 SourceId    => Source;
     public string  SourceName  => "ISO639Decomposer";
@@ -42,6 +51,8 @@ public sealed class ISODecomposer : IDecomposer
         boot.AddType("ISO639Code");
         boot.AddKind("IS_LANGUAGE_CODE",   KindValueTier.T4, TC.StandardsDerivedTier2);
         boot.AddKind("HAS_ISO639_1_CODE",  KindValueTier.T4, TC.StandardsDerivedTier2);
+        boot.AddKind("USES_SCRIPT",              KindValueTier.T2, TC.StandardsDerivedTier2);
+        boot.AddKind("MEMBER_OF_MACROLANGUAGE",  KindValueTier.T3, TC.StandardsDerivedTier2);
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -52,10 +63,10 @@ public sealed class ISODecomposer : IDecomposer
     {
         string dataPath = Path.Combine(context.EcosystemPath, "iso-639-3.tab");
 
-        // All 7929 language records fit comfortably in one change.
+        // Language records + the reference graph fit comfortably in one change.
         var b = new SubstrateChangeBuilder(
             Source, "iso639-3/all", null,
-            entityCapacity: 16_000, physicalityCapacity: 0, attestationCapacity: 16_000);
+            entityCapacity: 24_000, physicalityCapacity: 0, attestationCapacity: 48_000);
 
         await foreach (var rec in ParseAsync(dataPath, ct))
         {
@@ -72,6 +83,45 @@ public sealed class ISODecomposer : IDecomposer
                 b.AddAttestation(AttestationFactory.Create(
                     langId, KindHasIso6391Code, iso1Id, Source, null,
                     KindValueTier.T4, TC.StandardsDerivedTier2));
+            }
+        }
+
+        // ── language reference GRAPH ── make each language a navigable hub so the
+        // substrate can FILTER/FOCUS by language/script/macrolanguage structurally
+        // (codepoint→script[Unicode]→language→macrolanguage) instead of a HAS_LANGUAGE
+        // join. Every edge converges on entities the Unicode layer / 639-3 pass created.
+        var undId = LanguageEntityId.FromIso639_3("und");
+
+        // individual → macrolanguage (e.g. cmn/yue/… → zho): groups the 639-3 individuals.
+        foreach (var (indiv, macro) in LanguageGraph.Macrolanguages(context.EcosystemPath))
+        {
+            var indivId = LanguageEntityId.FromIso639_3(indiv);
+            var macroId = LanguageEntityId.FromIso639_3(macro);
+            b.AddEntity(indivId, /*tier*/ 2, LanguageTypeId, Source);
+            b.AddEntity(macroId, /*tier*/ 2, LanguageTypeId, Source);
+            b.AddAttestation(AttestationFactory.Create(
+                indivId, KindMemberOfMacrolanguage, macroId, Source, null,
+                KindValueTier.T3, TC.StandardsDerivedTier2));
+        }
+
+        // language → script, converging on the Unicode script entities via the ISO
+        // 15924 code→UCD-name alias. UCD lives beside ISO639 under /vault/Data.
+        string unidata = Path.GetFullPath(
+            Path.Combine(context.EcosystemPath, "..", "Unicode", "Public", "UNIDATA"));
+        var scriptName = LanguageGraph.LoadScriptCodeToUcdName(unidata);
+        foreach (var (subtag, scriptCodes) in LanguageGraph.LanguageScripts(context.EcosystemPath))
+        {
+            var langId = LanguageReference.Resolve(subtag);
+            if (langId.Equals(undId)) continue;       // unresolvable subtag → skip, don't pollute und
+            b.AddEntity(langId, /*tier*/ 2, LanguageTypeId, Source);
+            foreach (var code in scriptCodes)
+            {
+                if (!scriptName.TryGetValue(code, out var name)) continue;  // unknown 15924 code
+                var scriptId = LanguageGraph.ScriptEntityId(name);
+                b.AddEntity(scriptId, /*tier*/ 0, UcdClassifierTypeId, Source);  // idempotent w/ Unicode
+                b.AddAttestation(AttestationFactory.Create(
+                    langId, KindUsesScript, scriptId, Source, null,
+                    KindValueTier.T2, TC.StandardsDerivedTier2));
             }
         }
 

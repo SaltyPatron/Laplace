@@ -77,7 +77,7 @@ public sealed class TatoebaDecomposer : IDecomposer
                 if (text.Length == 0) continue;
 
                 Hash128 extId = SourceEntityIdConventions.TatoebaSentence(sid);
-                Hash128 langId = LanguageEntityId.FromIso639_3(lang);
+                Hash128 langId = LanguageReference.Resolve(lang);
                 b.AddEntity(new EntityRow(extId, /*tier*/ 3, SentenceRefTypeId, Source));
                 b.AddEntity(new EntityRow(langId, /*tier*/ 2, LanguageTypeId, Source));
 

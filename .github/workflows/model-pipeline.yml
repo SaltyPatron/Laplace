@@ -1,0 +1,95 @@
+name: Model pipeline (reusable)
+
+# The model run as individual, visible phases on the SAME `laplace` DB the seed
+# ladder populated (no nuke): ingest token×token bilinear circuits → verify kinds →
+# rebuild Glicko-2 consensus over seed+model evidence → ranked-μ SQL query (no GPU)
+# → synthesize a GGUF from the substrate → verify the GGUF. The OV/FFN emit floor is
+# the LAPLACE_OVFFN_FLOOR knob (QK keeps its own pre-softmax floor). Called by
+# integration.yml.
+on:
+  workflow_call:
+    inputs:
+      model_dir:
+        description: "Model directory to ingest + synthesize from"
+        type: string
+        default: "/vault/models/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0/snapshots/fe8a4ea1ffedaf415f4da2f062534de366a451e6"
+      ovffn_floor:
+        description: "OV/FFN circuit emit floor (|score| threshold)"
+        type: string
+        default: "5e-3"
+
+permissions:
+  contents: read
+
+jobs:
+  model-pipeline:
+    name: ingest → consensus → query → synthesize → GGUF
+    runs-on: [self-hosted, laplace]
+    env:
+      MODEL_DIR: ${{ inputs.model_dir }}
+      GGUF_OUT: /tmp/tinyllama-substrate-ci.gguf
+      LAPLACE_OVFFN_FLOOR: ${{ inputs.ovffn_floor }}
+      CLI: "dotnet run --project app/Laplace.Cli/Laplace.Cli.csproj -c Release --no-build --"
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: "ingest — TinyLlama token×token bilinear circuits (onto the seeded DB; NO nuke)"
+        run: scripts/ingest-source.sh model "$MODEL_DIR"
+
+      - name: "verify — idempotent re-ingest short-circuits (no double-counting)"
+        run: |
+          out="$(scripts/ingest-source.sh model "$MODEL_DIR" 2>&1)"; echo "$out"
+          echo "$out" | grep -qi "already ingested" || { echo "::error::re-ingest did not short-circuit — idempotency broken"; exit 1; }
+
+      - name: "verify — model attestation kinds present above floor"
+        run: |
+          $CLI stats | tee /tmp/laplace-stats-ci.txt
+          gate() {  # $1 kind  $2 min
+            line=$(grep "└ $1" /tmp/laplace-stats-ci.txt || true)
+            [ -n "$line" ] || { echo "::error::kind $1 missing from stats"; exit 1; }
+            n=$(echo "$line" | grep -oE '[0-9,]+$' | tr -d ','); n=${n:-0}
+            [ "$n" -ge "$2" ] || { echo "::error::kind $1 has $n (need >= $2)"; exit 1; }
+            echo "  ✓ $1 = $n"
+          }
+          # Circuits the bilinear ETL emits: QK→Q_PROJECTS, OV→O_PROJECTS, FFN→DOWN_PROJECTS,
+          # plus token EMBEDS and per-layer NORMALIZES. O/DOWN must be >0 at the chosen floor —
+          # the 0.05 QK floor emits ~0 OV/FFN, which is exactly the regression this gate catches.
+          gate EMBEDS        10000
+          gate Q_PROJECTS    100000
+          gate O_PROJECTS    1
+          gate DOWN_PROJECTS 1
+          gate NORMALIZES    1
+
+      - name: "consensus — rebuild materialized Glicko-2 consensus over seed + model evidence"
+        run: $CLI rebuild-consensus
+
+      - name: "query — ranked-μ SQL inference over consensus (no GPU)"
+        run: |
+          PSQL=(psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -tAc)
+          cn=$("${PSQL[@]}" "SELECT count(*) FROM laplace.consensus;")
+          echo "consensus rows = $cn"
+          [ "${cn:-0}" -gt 0 ] || { echo "::error::consensus empty after rebuild"; exit 1; }
+          # Top-μ neighbours of the busiest (subject,kind) — relatedness as a sorted index scan.
+          q="WITH busiest AS (SELECT subject_id,kind_id FROM laplace.consensus WHERE object_id IS NOT NULL GROUP BY subject_id,kind_id ORDER BY count(*) DESC LIMIT 1) SELECT encode(c.object_id,'hex') AS object, round(((c.rating-2*c.rd)/1e9)::numeric,3) AS eff_mu, c.witness_count FROM laplace.consensus c JOIN busiest b USING (subject_id,kind_id) WHERE c.object_id IS NOT NULL ORDER BY eff_mu DESC LIMIT 10"
+          psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -c "$q"
+          rows=$("${PSQL[@]}" "SELECT count(*) FROM ($q) s;")
+          [ "${rows:-0}" -gt 0 ] || { echo "::error::ranked-μ query returned no rows"; exit 1; }
+          echo "::notice::ranked-μ query OK — $rows ranked objects for the busiest relation"
+
+      - name: "synthesize — substrate → GGUF (TinyLlama recipe)"
+        run: |
+          rm -f "$GGUF_OUT"
+          out="$($CLI synthesize substrate "$MODEL_DIR/config.json" "$GGUF_OUT" 2>&1)"; echo "$out"
+          echo "$out" | grep -qiE 'synthesis complete' || { echo "::error::synthesize did not complete"; exit 1; }
+          echo "$out" | grep -qi  'spectral token basis' || { echo "::error::eigenmaps did not run (TokenBasis null)"; exit 1; }
+          echo "$out" | grep -qi  'procrustes residual'  || { echo "::error::Procrustes alignment did not run"; exit 1; }
+
+      - name: "verify — GGUF valid + non-trivial"
+        run: |
+          [ -f "$GGUF_OUT" ] || { echo "::error::GGUF missing: $GGUF_OUT"; exit 1; }
+          sz=$(stat -c%s "$GGUF_OUT")
+          [ "$sz" -gt 50000000 ] || { echo "::error::GGUF too small ($sz bytes) — synthesis produced trivial output"; exit 1; }
+          echo "::notice::GGUF OK — $((sz/1048576)) MB at $GGUF_OUT"

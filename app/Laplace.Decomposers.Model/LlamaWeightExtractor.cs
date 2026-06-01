@@ -86,7 +86,7 @@ public sealed class LlamaWeightExtractor
     }
 
     /// <summary>
-    /// Stream A stub. Yields no model-codec attestations. Stream B replaces this with
+    /// Stream A stub. Yields no model-derived attestations. Stream B replaces this with
     /// `WeightTensorETL.extract` per ADR 0056 (5-phase universal algorithm; per-family
     /// math registered as data on architecture-template entities; not a Llama-specific
     /// extractor). See /home/ahart/.claude/plans/replicated-hatching-stream.md.

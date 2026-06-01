@@ -28,6 +28,12 @@ permissions:
 # incremental + Ninja stamp-based incremental + dotnet incremental together
 # make a no-change re-run effectively no-op per dep.
 #
+# Repeated logic is modularized out of this orchestrator:
+#   .github/actions/setup-laplace-env  — source oneAPI + export build/runtime env
+#   .github/actions/build-dep          — configure + build one dep target + verify
+#   .github/workflows/seed-ladder.yml  — reusable: ingest each seed source, one step each
+#   .github/workflows/model-pipeline.yml — reusable: ingest → consensus → query → synth → GGUF
+#
 # Job DAG (one concern per job, one dep per job):
 #
 #   capabilities
@@ -36,7 +42,9 @@ permissions:
 #       ├── geos ────┴─────────┤
 #       ├── postgresql ────────┴── postgis ──┐
 #       ├── tree-sitter ──────────────────────┴── engine ──┐
-#       └── dotnet ─────────────────────────────────────────┴── db-deploy ── regress
+#       └── dotnet ──────────────────────────────┴── db-deploy ──┬── dotnet-test ──┐
+#                              (db-nuke: ONE clean slate here)    └── regress ──────┴── seed-ladder ── model-pipeline
+#                                                                        (each stage = a visible step in its module)
 env:
   LAPLACE_EXTERNAL:       ${{ vars.LAPLACE_EXTERNAL       || '/opt/laplace/external' }}
   LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
@@ -154,108 +162,89 @@ jobs:
   # configures build/deps; subsequent dep jobs find it configured.
   # ------------------------------------------------------------------
   proj:
-    name: Build dep — proj (CMake-based; CRS / coordinate transforms)
+    name: dep — proj (CRS / coordinate transforms)
     needs: capabilities
     runs-on: [self-hosted, laplace]
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
-      - name: cmake configure build/deps (idempotent)
-        run: cmake -B build/deps -S external -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
-      - name: cmake --build --target proj
-        run: cmake --build build/deps --target proj -j
-      - name: Verify /opt/laplace/proj install
-        run: |
-          test -f /opt/laplace/proj/lib/libproj.so || { echo "::error::libproj.so missing"; exit 1; }
-          test -f /opt/laplace/proj/include/proj.h  || { echo "::error::proj.h missing"; exit 1; }
-          echo "✓ /opt/laplace/proj installed"
+      - uses: ./.github/actions/build-dep
+        with:
+          target: proj
+          verify: |
+            /opt/laplace/proj/lib/libproj.so
+            /opt/laplace/proj/include/proj.h
 
   geos:
-    name: Build dep — geos (CMake-based; geometry engine)
+    name: dep — geos (geometry engine)
     needs: capabilities
     runs-on: [self-hosted, laplace]
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
-      - name: cmake configure build/deps (idempotent)
-        run: cmake -B build/deps -S external -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
-      - name: cmake --build --target geos
-        run: cmake --build build/deps --target geos -j
-      - name: Verify /opt/laplace/geos install
-        run: |
-          test -f /opt/laplace/geos/lib/libgeos_c.so   || { echo "::error::libgeos_c.so missing"; exit 1; }
-          test -f /opt/laplace/geos/include/geos_c.h   || { echo "::error::geos_c.h missing"; exit 1; }
-          echo "✓ /opt/laplace/geos installed"
+      - uses: ./.github/actions/build-dep
+        with:
+          target: geos
+          verify: |
+            /opt/laplace/geos/lib/libgeos_c.so
+            /opt/laplace/geos/include/geos_c.h
 
   gdal:
-    name: Build dep — gdal (CMake-based; geospatial abstraction; needs proj)
+    name: dep — gdal (geospatial abstraction; needs proj)
     needs: [capabilities, proj]
     runs-on: [self-hosted, laplace]
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
-      - name: cmake configure build/deps (idempotent)
-        run: cmake -B build/deps -S external -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
-      - name: cmake --build --target gdal
-        run: cmake --build build/deps --target gdal -j
-      - name: Verify /opt/laplace/gdal install
-        run: |
-          test -f /opt/laplace/gdal/lib/libgdal.so      || { echo "::error::libgdal.so missing"; exit 1; }
-          test -f /opt/laplace/gdal/include/gdal.h      || { echo "::error::gdal.h missing"; exit 1; }
-          echo "✓ /opt/laplace/gdal installed"
+      - uses: ./.github/actions/build-dep
+        with:
+          target: gdal
+          verify: |
+            /opt/laplace/gdal/lib/libgdal.so
+            /opt/laplace/gdal/include/gdal.h
 
   postgresql:
-    name: Build dep — postgresql 18 (autoconf VPATH; MAKELEVEL=0 fix for submake)
+    name: dep — postgresql 18
     needs: capabilities
     runs-on: [self-hosted, laplace]
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
-      - name: cmake configure build/deps (idempotent)
-        run: cmake -B build/deps -S external -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
-      - name: cmake --build --target postgresql
-        run: cmake --build build/deps --target postgresql -j
-      - name: Verify /opt/laplace/pgsql-18 install
-        run: |
-          test -f /opt/laplace/pgsql-18/bin/postgres                    || { echo "::error::postgres binary missing"; exit 1; }
-          test -f /opt/laplace/pgsql-18/include/server/postgres.h       || { echo "::error::postgres.h missing"; exit 1; }
-          test -f /opt/laplace/pgsql-18/lib/pgxs/src/makefiles/pgxs.mk  || { echo "::error::pgxs.mk missing"; exit 1; }
-          /opt/laplace/pgsql-18/bin/pg_config --version
-          echo "✓ /opt/laplace/pgsql-18 installed"
+      - uses: ./.github/actions/build-dep
+        with:
+          target: postgresql
+          verify: |
+            /opt/laplace/pgsql-18/bin/postgres
+            /opt/laplace/pgsql-18/include/server/postgres.h
+            /opt/laplace/pgsql-18/lib/pgxs/src/makefiles/pgxs.mk
 
   postgis:
-    name: Build dep — postgis 3.6.3 (autoconf in-source; needs pg + geos + proj + gdal)
+    name: dep — postgis 3.6.3 (needs pg + geos + proj + gdal)
     needs: [capabilities, postgresql, geos, proj, gdal]
     runs-on: [self-hosted, laplace]
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
-      - name: cmake configure build/deps (idempotent)
-        run: cmake -B build/deps -S external -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
-      - name: cmake --build --target postgis
-        run: cmake --build build/deps --target postgis -j
-      - name: Verify /opt/laplace/pgsql-18/postgis install
-        run: |
-          test -f /opt/laplace/pgsql-18/lib/postgis-3.so                          || { echo "::error::postgis-3.so missing"; exit 1; }
-          test -f /opt/laplace/pgsql-18/share/extension/postgis.control           || { echo "::error::postgis.control missing"; exit 1; }
-          echo "✓ /opt/laplace/pgsql-18 postgis extension installed"
+      - uses: ./.github/actions/build-dep
+        with:
+          target: postgis
+          verify: |
+            /opt/laplace/pgsql-18/lib/postgis-3.so
+            /opt/laplace/pgsql-18/share/extension/postgis.control
 
   tree-sitter:
-    name: Build dep — tree-sitter runtime (Make-based; in-source)
+    name: dep — tree-sitter runtime
     needs: capabilities
     runs-on: [self-hosted, laplace]
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
-      - name: cmake configure build/deps (idempotent)
-        run: cmake -B build/deps -S external -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
-      - name: cmake --build --target tree-sitter
-        run: cmake --build build/deps --target tree-sitter -j
-      - name: Verify /opt/laplace/tree-sitter install
-        run: |
-          test -f /opt/laplace/tree-sitter/lib/libtree-sitter.a               || { echo "::error::libtree-sitter.a missing"; exit 1; }
-          test -f /opt/laplace/tree-sitter/include/tree_sitter/api.h          || { echo "::error::api.h missing"; exit 1; }
-          echo "✓ /opt/laplace/tree-sitter installed"
+      - uses: ./.github/actions/build-dep
+        with:
+          target: tree-sitter
+          verify: |
+            /opt/laplace/tree-sitter/lib/libtree-sitter.a
+            /opt/laplace/tree-sitter/include/tree_sitter/api.h
 
   # ------------------------------------------------------------------
   # engine — C/C++ build of engine libs (core, dynamics, synthesis) +
@@ -272,18 +261,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
 
-      - name: Source oneAPI env (MKLROOT / TBBROOT / CMPLR_ROOT for build + INSTALL_RPATH)
-        run: |
-          set +u
-          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
-          set -u
-          # Persist oneAPI env vars to subsequent steps in this job. GH Actions
-          # runs each step in a fresh shell; without this the intel toolchain
-          # cmake configure errors with "MKLROOT is unset" per CMakeLists.txt
-          # (the env-var-derived CMAKE_INSTALL_RPATH from commit da6810c).
-          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|LD_LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
-          # PATH gets appended (oneAPI bins prepended to existing PATH)
-          echo "PATH=$PATH" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/setup-laplace-env
 
       - name: cmake configure (intel toolchain; STAGED install for sudo-free /opt/laplace path)
         run: |
@@ -339,16 +317,15 @@ jobs:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
 
-      - name: Source oneAPI env
-        run: |
-          set +u
-          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
-          set -u
-          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|LD_LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
-          echo "PATH=$PATH" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/setup-laplace-env
 
       - name: cmake --install (no sudo)
         run: cmake --install build
+
+      - name: Clean slate — db-nuke (ONE per-run reset; seed + model then accrete onto the SAME DB)
+        run: |
+          cd app
+          echo NUKE | dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- nuke
 
       - name: DbUp — EnsureDatabase('laplace') + apply migrations
         run: |
@@ -386,10 +363,11 @@ jobs:
                    has_schema_privilege('laplace_readonly', 'laplace', 'USAGE');
           " | sed 's/^/  /'
 
+      - name: Clear stale ingest checkpoint (survives DB nuke)
+        run: rm -rf /tmp/laplace-ingest && mkdir -p /tmp/laplace-ingest
+
       - name: Seed Unicode T0
         run: |
-          export LD_LIBRARY_PATH="$(pwd)/build/engine/core:$(pwd)/build/engine/dynamics:$(pwd)/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
-          export LAPLACE_PERFCACHE_BIN="$(pwd)/build/engine/core/perfcache/laplace_t0_perfcache.bin"
           cd app
           dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- seed-unicode
 
@@ -404,18 +382,10 @@ jobs:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
 
-      - name: Source oneAPI env
-        run: |
-          set +u
-          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
-          set -u
-          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|LD_LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
-          echo "PATH=$PATH" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/setup-laplace-env
 
       - name: dotnet test
         run: |
-          export LD_LIBRARY_PATH="$(pwd)/build/engine/core:$(pwd)/build/engine/dynamics:$(pwd)/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
-          export LAPLACE_PERFCACHE_BIN="$(pwd)/build/engine/core/perfcache/laplace_t0_perfcache.bin"
           cd app
           for proj in \
             Laplace.Engine.Core.Tests \
@@ -443,18 +413,10 @@ jobs:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
 
-      - name: Source oneAPI env
-        run: |
-          set +u
-          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
-          set -u
-          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|LD_LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
-          echo "PATH=$PATH" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/setup-laplace-env
 
       - name: ctest -L regress
-        run: |
-          LD_LIBRARY_PATH="$(pwd)/build/engine/core:$(pwd)/build/engine/dynamics:$(pwd)/build/engine/synthesis:${LD_LIBRARY_PATH:-}" \
-            ctest --test-dir build --output-on-failure -L regress
+        run: ctest --test-dir build --output-on-failure -L regress
 
       - name: Show regress diffs on failure
         if: failure()
@@ -467,56 +429,19 @@ jobs:
           done
 
   # ------------------------------------------------------------------
-  # decomposer-ladder — ingest the bounded lexical layer (unicode → iso639 →
-  # wordnet [→ omw → ud with full_ladder]) and assert the seed decomposers land
-  # CONTENT, not just attestations (the pre-fix string-keyed regression). Runs on
-  # the shared `laplace` DB after the test jobs and before model-roundtrip, which
-  # db-nukes at its start — so the ladder's data is verified then cleanly wiped.
-  # Big corpora (tatoeba/conceptnet/wiktionary) are out of band (multi-hour).
+  # Data pipeline — modular reusable workflows so THIS orchestrator stays small.
+  # Each stage is an individually-visible step inside its module file:
+  #   .github/workflows/seed-ladder.yml     (one step per source ingest)
+  #   .github/workflows/model-pipeline.yml  (ingest → consensus → query → synth → GGUF)
   # ------------------------------------------------------------------
-  decomposer-ladder:
-    name: Decomposer ladder — seed sources land content (lexical layer)
+  seed-ladder:
+    name: Seed ladder
     needs: [regress, dotnet-test]
-    runs-on: [self-hosted, laplace]
-    steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
+    uses: ./.github/workflows/seed-ladder.yml
+    with:
+      full_ladder: ${{ inputs.full_ladder || false }}
 
-      - name: Source oneAPI env
-        run: |
-          set +u
-          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
-          set -u
-          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|LD_LIBRARY_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
-          echo "PATH=$PATH" >> "$GITHUB_ENV"
-
-      - name: Decomposer ladder CI (ingest lexical layer → assert content lands)
-        env:
-          LADDER_FULL: ${{ github.event.inputs.full_ladder == 'true' && '1' || '0' }}
-        run: |
-          chmod +x scripts/decomposer-ladder-ci.sh
-          scripts/decomposer-ladder-ci.sh
-
-  # ------------------------------------------------------------------
-  # model-roundtrip — ingest → substrate → synthesize → GGUF.
-  # ------------------------------------------------------------------
-  model-roundtrip:
-    name: Model round-trip — ingest → consensus → synthesize → GGUF (Chunk 8 partial)
-    needs: [decomposer-ladder]
-    runs-on: [self-hosted, laplace]
-    steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
-
-      - name: Source oneAPI env
-        run: |
-          set +u
-          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
-          set -u
-          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|LD_LIBRARY_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
-          echo "PATH=$PATH" >> "$GITHUB_ENV"
-
-      - name: Model round-trip CI (ingest → substrate → synthesize → GGUF)
-        run: |
-          chmod +x scripts/model-roundtrip-ci.sh
-          scripts/model-roundtrip-ci.sh
+  model-pipeline:
+    name: Model pipeline
+    needs: [seed-ladder]
+    uses: ./.github/workflows/model-pipeline.yml

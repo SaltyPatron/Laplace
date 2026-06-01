@@ -10,20 +10,19 @@
 # Dependency layers (ADR 0037 — each source's IngestRunner refuses to start until every lower
 # layer has a HasLayerCompleted marker):
 #   0 unicode → 1 iso639 → 2 { wordnet ud tatoeba atomic2020 conceptnet wiktionary } → 3 omw
-# The layer-2 corpora are independent (each needs only unicode+iso), so `all` runs them with
-# bounded concurrency (INGEST_JOBS, default 3); omw runs last because it needs WordNet synsets.
-# Concurrency is safe + fast because ContentEmitter skips the universally-seeded T0 codepoints,
-# so parallel writers don't contend on them.
+# `all` runs the stages STRICTLY ONE AT A TIME, in this order — NEVER in parallel. A single
+# source gets the whole machine and finishes as fast as possible; running several at once only
+# splits CPU + DB and makes every stage slower. Each stage is idempotent + checkpoint-resumable,
+# so a re-run short-circuits completed work; INGEST_FROM=<source> resumes the ladder at a stage.
 
 set -euo pipefail
 
 source="${1:-}"
 path="${2:-}"
-JOBS="${INGEST_JOBS:-3}"
 LOGDIR="${INGEST_LOGDIR:-/tmp}"
 
-# Layer-2 independent corpora (parallelizable); unicode/iso639 are serial prerequisites and
-# omw (layer 3) runs after wordnet.
+# Layer-2 corpora (each needs only unicode+iso639); unicode/iso639 are the prerequisites and
+# omw (layer 3) runs after wordnet. The `all` ladder walks these ONE AT A TIME — see below.
 LAYER2=(wordnet ud tatoeba atomic2020 conceptnet wiktionary)
 
 if [[ -z "$source" ]]; then
@@ -46,17 +45,23 @@ ingest()    { ( cd "$ROOT/app" && dotnet "$DLL" ingest "$@" ); }
 case "$source" in
     all)
         build_cli
-        # Serial prerequisites (fast; idempotent skip if already done).
-        ingest unicode
-        ingest iso639
-        # Independent layer-2 group — bounded-concurrency parallel. A failure in one does not
-        # stop the others (xargs continues); each source's exit code is echoed.
-        printf '%s\n' "${LAYER2[@]}" \
-          | xargs -P "$JOBS" -I{} bash -c \
-              'cd "$0/app" && dotnet "$1" ingest "$2" > "$3/laplace-ingest-$2.log" 2>&1; echo "$(date -u +%H:%M:%S) $2 exit=$?"' \
-              "$ROOT" "$DLL" {} "$LOGDIR"
-        # omw needs WordNet synsets → runs after the layer-2 group (which includes wordnet).
-        ingest omw
+        # STRICTLY ONE AT A TIME, in dependency order (ADR 0037). Each stage runs to completion
+        # before the next starts — never in parallel. Fail-fast (set -e aborts the ladder on the
+        # first stage that errors). Each stage is idempotent + checkpoint-resumable, so a re-run
+        # short-circuits finished work; INGEST_FROM=<source> resumes the ladder at that stage.
+        STAGES=(unicode iso639 "${LAYER2[@]}" omw)
+        from="${INGEST_FROM:-}"
+        skip=0; [[ -n "$from" ]] && skip=1
+        for src in "${STAGES[@]}"; do
+            if [[ "$skip" == 1 ]]; then
+                if [[ "$src" == "$from" ]]; then skip=0; else echo ">>> skip $src (before INGEST_FROM=$from)"; continue; fi
+            fi
+            echo ">>> stage $src — start $(date -u +%H:%M:%S)"
+            t0=$SECONDS
+            # tee to a per-stage log; pipefail (set above) propagates the ingest exit, not tee's.
+            ingest "$src" 2>&1 | tee "$LOGDIR/laplace-ingest-$src.log"
+            echo ">>> stage $src — done in $((SECONDS - t0))s"
+        done
         ;;
     model)
         [[ -n "$path" ]] || { echo "Usage: $0 model <model-dir-path>" >&2; exit 2; }

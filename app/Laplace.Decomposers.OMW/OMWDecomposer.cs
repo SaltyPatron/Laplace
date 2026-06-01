@@ -94,7 +94,7 @@ public sealed class OMWDecomposer : IDecomposer
         var contentId = ContentEmitter.Emit(b, row.Value, Source);
         if (contentId is null) return;
 
-        Hash128 langId = LanguageEntityId.FromIso639_3(row.Lang);
+        Hash128 langId = LanguageReference.Resolve(row.Lang);
         b.AddEntity(new EntityRow(langId, /*tier*/ 2, LanguageTypeId, Source));
         // Defensive: the referenced WN synset normally exists from the WordNet layer; emit it
         // here too (ON CONFLICT keeps WordNet's row) so a synset OMW references but WordNet

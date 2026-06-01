@@ -36,7 +36,7 @@ DECLARE
     pk_projection_out_id bytea;
 
     /* Universal text-tier type entities (used by TextEntityBuilder from ANY
-     * text-using decomposer — Unicode T0 seed, this codec's tokenizer pass,
+     * text-using decomposer — Unicode T0 seed, the model decomposer's tokenizer pass,
      * future ladder sources). Substrate-canonical: same id everywhere. */
     type_codepoint_id    bytea;
     type_grapheme_id     bytea;
@@ -132,7 +132,7 @@ BEGIN
      *
      * Per GLOSSARY tier ladder and ADR 0047 TextDecomposer: every
      * text-using decomposer (UnicodeDecomposer at seed time; the model
-     * codec's tokenizer pass; future linguistic-ladder sources; the prompt
+     * decomposer's tokenizer pass; future linguistic-ladder sources; the prompt
      * ingest path) emits entities at tiers 0..6 with the per-tier type IDs
      * resolved by TextEntityBuilder.TierTypeId. The tier-type entities
      * themselves must exist in `entities` before any tier-N entity

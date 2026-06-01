@@ -39,10 +39,29 @@ inline void project_token(const float* E_row, const float* W, size_t d_model,
                           size_t head_dim, double* proj /*[head_dim]*/) {
     for (size_t d = 0; d < head_dim; ++d) {
         const float* w = W + d * d_model;
-        double sum = 0.0, c = 0.0;
-        for (size_t m = 0; m < d_model; ++m)
-            neumaier_add(sum, c, (double)E_row[m] * (double)w[m]);
-        proj[d] = sum + c;
+        /* Fixed-order 8-lane reduction (lane l accumulates m ≡ l mod 8), combined in
+         * a fixed tree, tail in fixed order. The lane assignment and combine order
+         * are pinned in source, so proj[d] is bit-identical regardless of thread
+         * count — reproducibility is structural, not a setting. The 8 independent
+         * lanes break the serial dependency the Neumaier chain imposed, so the
+         * compiler vectorizes this where it could not before. f64 accumulate is
+         * witness precision (the magnitude becomes a Glicko match), not lossless
+         * reconstruction. */
+        double a0=0,a1=0,a2=0,a3=0,a4=0,a5=0,a6=0,a7=0;
+        size_t m = 0;
+        for (; m + 8 <= d_model; m += 8) {
+            a0 += (double)E_row[m+0] * (double)w[m+0];
+            a1 += (double)E_row[m+1] * (double)w[m+1];
+            a2 += (double)E_row[m+2] * (double)w[m+2];
+            a3 += (double)E_row[m+3] * (double)w[m+3];
+            a4 += (double)E_row[m+4] * (double)w[m+4];
+            a5 += (double)E_row[m+5] * (double)w[m+5];
+            a6 += (double)E_row[m+6] * (double)w[m+6];
+            a7 += (double)E_row[m+7] * (double)w[m+7];
+        }
+        double tail = 0.0;
+        for (; m < d_model; ++m) tail += (double)E_row[m] * (double)w[m];
+        proj[d] = (((a0 + a1) + (a2 + a3)) + ((a4 + a5) + (a6 + a7))) + tail;
     }
 }
 
@@ -86,11 +105,12 @@ int project_qk_layer(
     if (vocab == 0 || d_model == 0 || n_heads == 0 || n_kv == 0 || head_dim == 0)
         return -1;
 
-    /* One pass over E (streamed exactly once), parallel across tokens. For each
-     * token project ALL query heads into q_cache and ALL kv heads into k_cache,
-     * using the SAME compensated projection (fixed order m=0..d_model-1) as the
-     * pruned kernel. Each output element is an independent fixed-order compensated
-     * sum, so the cache is thread-count independent. */
+    /* ETL transform: each (token, head, dim) projection is an independent output
+     * record. Parallelize across tokens; each record is computed wholly by one
+     * thread via project_token's fixed-order reduction. Determinism is structural —
+     * thread count distributes records, never splits a record's math — so the cache
+     * is bit-identical run-to-run regardless of thread count, with no library
+     * reproducibility flag. */
     auto project_row = [&](size_t t) {
         const float* E_row = E_f32 + t * d_model;
         double* q_tok = q_cache_out + t * n_heads * head_dim;

@@ -132,7 +132,7 @@ public sealed class WiktionaryDecomposer : IDecomposer
         string? langCode = Str(rec, "lang_code") ?? Str(rec, "lang");
         if (!string.IsNullOrEmpty(langCode))
         {
-            Hash128 langId = LanguageEntityId.FromIso639_3(langCode!);
+            Hash128 langId = LanguageReference.Resolve(langCode!);
             b.AddEntity(new EntityRow(langId, 2, LanguageTypeId, Source));
             b.AddAttestation(AttestationFactory.Create(
                 w, KHasLanguage, langId, Source, null, KindValueTier.T4, TC.AcademicCuratedUserInputTier4));

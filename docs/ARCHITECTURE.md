@@ -1,37 +1,22 @@
 # Laplace — How the Invention Works
 
-> **Status of this document.** Reconstructed from the inventor's direct corrections plus
-> verification against the live substrate (DB queries + `laplace inspect` + code reads),
-> May 2026. The original `DESIGN.md` / `GLOSSARY` / ADRs that the code comments reference
-> were deleted and are not in the repo; **this document is the design-of-record now.** It
-> deliberately separates **INTENDED** architecture (how it must work)
-> from **CURRENT** state (what the code/DB actually do today, each tagged *verified* when it
-> was confirmed by query, not by reading code).
->
-> **Polarity — read this.** INTENDED is the **inventor's specification**: authoritative, not a
-> hypothesis under evaluation. CURRENT is *this implementation's* progress toward that spec.
-> "Verify" here means "does the code match the spec," **never** "does the design work." The §9 items
-> are unbuilt implementation work, not doubts about the invention — built to spec, it produces the
-> working model.
+> **This document is the specification of how Laplace works** — the design-of-record, reconstructed
+> from the inventor's direct corrections (the original `DESIGN.md` / `GLOSSARY` / ADRs were deleted).
+> It is **authoritative**: it describes the invention, not a hypothesis under evaluation, and it carries
+> **no build-status, "verified," or live-DB counts** — those rot the instant the code or DB changes,
+> and progress belongs in the task list, never in the spec.
 
 ---
 
-## 0. Methodology (binding — learned the hard way in this repo)
+## 0. Reading this (binding)
 
-- **Trust but verify against the live system.** Reading code gives you *intent*, not reality.
-  "Verified" means: queried the live DB (`psql`), ran `laplace inspect <text>`, or executed the
-  path and read the rows. An audit that says "I read the source, did not query the DB" is **not**
-  verification. (One `inspect cat` overturned a 17-agent code-reading audit — see §9.) The converse
-  also holds: live-DB statistics reflect what is *currently recorded*, defects included — e.g. the
-  §9.3 mis-tiering corrupts the `tier` column — so a number "verified from the DB" describes the
-  present (buggy) state, not necessarily the intended design. Read structural statistics with the
-  active defects in mind.
 - **Never pattern-match to conventional AI.** The reflexes — "embeddings give nearest neighbor,"
-  "geometry = similarity," "store the model," "inference needs a GPU" — are the *wrong frame* and
-  have been the source of every misread here. Everything below is a deliberate inversion of
-  conventional AI; hold the inversion, do not translate it back.
-- **Understand the whole.** Every layer couples to the others; a local read yields a wrong global
-  conclusion. The defects in §9 are not separate bugs — they are one missing primitive.
+  "geometry = similarity," "store the model," "inference needs a GPU" — are the *wrong frame* and the
+  source of every misread here. Every section is a deliberate inversion of conventional AI; hold the
+  inversion, do not translate it back.
+- **Understand the whole.** Every layer couples to the others — content = relation = trajectory, the
+  signed consensus, the geometry, and the cognition layer are one mechanism; a local read yields a
+  wrong global conclusion.
 
 ---
 
@@ -116,16 +101,7 @@ substrate you have a *battery* of orthogonal, exact, indexed signals, each a che
 
 So inference does not merely *replicate* the forward pass cheaply; each step can draw on many exact,
 typed, auditable signals the original model never had and cannot expose. The substrate can
-**supersede** the model it was seeded from, not just imitate it. (CURRENT: the query primitives
-exist; the richest depend on the missing primitive — materialized consensus, typed-tier NN over it,
-and relation trajectories — being built; see §6, §9.)
-
-**CURRENT (verified):** the kernel — ranked-μ neighborhood of a concept — **works** (`inspect`,
-returns immediately). The geometric predicates exist as SQL functions. NOT wired: multi-hop
-traversal / generation (the cascade/A\* SRF `07_cascade.sql.in` + `engine/core/src/astar.c` are
-commented-out stubs); and the `GROUP BY` interpretability is blocked because the evidence layer
-currently **drops** per-(layer,head) provenance (§6). The primitives are real; the compositions and
-the provenance they need are not yet built.
+**supersede** the model it was seeded from, not just imitate it.
 
 ---
 
@@ -142,9 +118,7 @@ is gauge; the content-addressed consensus is the invariant. This single law has 
   grapheme → word → sentence → document); the *identical* machinery models pixels → patches → regions
   → image, samples → frames → track, moves → positions → game, bases → codons → genes → genome. A
   modality — or a chess game, or a DNA sequence — is a *region* of one substrate, not a separate
-  embedding space stitched by contrastive training. (CURRENT: verified for text — tiers 0–4 are live;
-  the non-text decomposers are stubs and chess/DNA/etc. are intended, so this is demonstrated for text
-  and designed for the rest.)
+  embedding space stitched by contrastive training.
 - **Omni-model** — invariant across model. Any model is a witness; the substrate is the consensus
   of all models + all human knowledge.
 - **Omni-temporal** — invariant across time. Glicko-2 volatility / RD-decay weights recency; the
@@ -175,22 +149,13 @@ There is **one** kind of object: a content-addressed entity (BLAKE3-128 Merkle i
 - **Composites** (graphemes → words → sentences → documents) are **trajectories** through their
   constituents' points: `physicalities.trajectory` (GeometryZM), where each vertex packs a
   constituent's entity_id; `id = merkle(tier, [child_ids])`; `coord = centroid(child coords)`;
-  `radius_origin` = ‖coord‖ = the norm of the centroid of the children. **Caveat on the live numbers:**
-  the `tier` column is corrupted by the mis-tiering defect (§9.3 — single words are recorded as tier-4
-  *documents*), so any "radius by tier" statistic measures the *current buggy recording*, not the
-  intended hierarchy. As recorded (mean [5th–95th pct]): T0 = 1.000 (atoms, exact — codepoints are
-  correctly tier-0), T1 = 0.86 [0.24–1.00], T2 = 0.40 [0.13–0.74], T3 = 0.49 [0.15–0.73], T4 = 0.49
-  [0.15–0.73]. The only reading that survives the defect: **atoms sit exactly on the sphere (1.0);
-  composites fall inside (<1.0).** That tiers 2–4 look nearly identical is itself an artifact of the
-  mis-tiering — per-tier radius is not a meaningful measurement until tiering is fixed.
+  `radius_origin` = ‖coord‖ = the norm of the centroid of the children. **Atoms sit exactly on the
+  sphere (radius 1.0); composites fall inside it (< 1.0)** — a composite's coord is the average of its
+  constituents' points, which pulls toward the interior.
 - **A relation is the same object.** `[King, Q_PROJ, Queen]` is a content-addressed entity whose
   trajectory runs subject → predicate → object — a higher-tier composite built by the *identical*
   cascade. "Edge" and "content" were never two categories: an edge is content whose constituents
   are `(subject, kind, object)`.
-
-**CURRENT (verified):** content trajectories are recorded (kind=1 physicalities). Relations are
-**not** yet trajectory entities — they are rows in `attestations` with no geometry column. This is
-part of the central divergence (§9).
 
 ---
 
@@ -200,7 +165,7 @@ part of the central divergence (§9).
   its **DUCET collation rank** (`engine/core/src/unicode_seed.cpp`, `super_fibonacci.c`). Coordinates
   are **structural, not semantic**: position encodes form/composition, not meaning. **Point-proximity
   is NOT relatedness** — two synonyms can sit far apart; two structurally-similar-but-unrelated
-  strings can sit close. (verified: live coords; `coordinate-cascade` memory.)
+  strings can sit close.
 - **Trajectory shape, however, is relational.** Spatial operators over trajectories relate A to B —
   a *different axis* from relatedness ranking:
   - `laplace_frechet_4d` / `ST_FrechetDistance` → **analogy**: `[King,Q_PROJ,Queen]` ∥
@@ -212,33 +177,29 @@ part of the central divergence (§9).
 - The machinery exists and runs: PostGIS on the geometry columns + `laplace_geom`'s 4D
   Fréchet/Hausdorff (`06_st_4d.sql.in`; the functions are installed in the `public` schema).
 
-**CURRENT (verified) — operative on content; the only gap is relations.** A *content* trajectory IS a
-real shape: a path walking across its constituents (each vertex = a constituent entity-id, in
-sequence). A shared constituent produces an *identical* vertex (packing is a pure function of the id),
-so `ST_Intersects` detects "shares a building block" and `laplace_frechet_4d` over the stored
-trajectory measures **constituent-sequence similarity** — both run live today. The id-vs-coordinate
-distinction is **not** a limitation: the **perf-cache resolves any codepoint id → its S³ coordinate in
-O(1) (microseconds)**, and composite ids → their `physicalities.coord` by index — so the *coordinate*
-trajectory is reconstructable from the id trajectory on demand, and you can compare either the
-structural shape (ids) or the geometric S³ shape (resolved coords). Storing the id is the compact
-lossless truth ("pack = truth, coord = the recoverable view") — which is exactly what the perf-cache
-is for. The only genuine gap: **relations have no trajectory yet** (§4), so analogy *across relations*
-(`[King,Q_PROJ,Queen] ∥ [Man,Q_PROJ,Woman]`) is INTENDED until relations are carried as trajectory
-entities.
+A *content* trajectory is a real shape: a path walking across its constituents (each vertex = a
+constituent entity-id, in sequence). A shared constituent produces an *identical* vertex (packing is a
+pure function of the id), so `ST_Intersects` detects "shares a building block" and `laplace_frechet_4d`
+over the trajectory measures **constituent-sequence similarity**. The id-vs-coordinate distinction is
+not a limitation: the **perf-cache resolves any codepoint id → its S³ coordinate in O(1)**, and
+composite ids → their `physicalities.coord` by index — so the *coordinate* trajectory is reconstructable
+from the id trajectory on demand, and you can compare either the structural shape (ids) or the geometric
+S³ shape (resolved coords). Storing the id is the compact lossless truth ("pack = truth, coord = the
+recoverable view") — which is exactly what the perf-cache is for. Analogy *across relations*
+(`[King,Q_PROJ,Queen] ∥ [Man,Q_PROJ,Woman]`) follows the same way once relations carry their
+trajectory (§4).
 
 ---
 
 ## 6. Two layers: evidence vs. attestations (the consensus)
 
-This distinction is foundational, and the current code conflates it.
+Evidence and consensus are two layers, not one.
 
 - **Evidence** — the individual observations. Each is a single witness asserting a relation, with
   **full provenance**: which source, which model **layer / head / position**, what magnitude, when.
   (WordNet asserting `dog is_a noun`; Llama's layer-1-head-5 observing `King → Queen` at strength s.)
   Evidence is provenance-rich and powers interpretability (§2), auditing, and the embed species (§8).
-  *Intended:* it is deduplicated / run-length-encoded — not stored naively N times — while
-  **retaining** provenance. (CURRENT: no such evidence layer runs — re-observations are discarded by
-  `ON CONFLICT DO NOTHING` and `observation_count` never increments.)
+  It is deduplicated / run-length-encoded — not stored naively N times — while **retaining** provenance.
 - **Attestation = consensus.** An attestation is the **materialized** Glicko-2 consensus over all
   evidence for a given `(subject, kind, object[, context])` — **one row**, with source / layer / head
   **out** of the identity. This is what inference reads — directly, no joins.
@@ -249,24 +210,75 @@ This distinction is foundational, and the current code conflates it.
   consensus relations sorted by μ — an exact, single-table index scan. Conventional AI *derives*
   neighbors from an embedding via approximate vector search; Laplace precomputes and ranks. "The same
   thing, easier."
+- **"Nearest-neighbor" is plural — several co-equal axes, not one.** Relatedness (ranked μ) is one
+  axis. **Structural shape** is a second, fully independent one: Fréchet/Hausdorff over content
+  *trajectories* answers "what is shaped like this" — compare *Moby Dick* to the *Bible* as whole
+  trajectories; μ has nothing to do with it, and it cascades across tiers (document, sentence,
+  word-grapheme shape). **Proximity / containment** (`dwithin`, `ST_Intersects`) is a third. All are
+  modality-blind and therefore **cross-modal** — a pixel building-block is content like any wordform:
+  it can be a prompt, Fréchet-compared to a text trajectory, or related by μ (prompt with a patch,
+  traverse into text; prompt with text, traverse into pixels; an image model ingests the same way).
+  Pick the axis — or combine them — for the question; never crown one as "the" mechanism.
 - **Decoupling.** A conventional embedding fuses identity/position and similarity into one vector
   (proximity = meaning). Laplace splits them: **structure → S³ geometry, relatedness → consensus μ.**
   Using geometric proximity *as* relatedness re-fuses what the design separates — the conventional-AI
   error.
-- *Intended:* consensus accumulates from **heterogeneous** witnesses — neural (Q/K/V/O, gate,
-  up/down) **and** symbolic (`is_a`, `has_a`, `derived_from`, `acronym_of`, …) converging on the same
-  relation — and is **materialized** from the evidence (one attestation per relation) so it reads
-  directly, not by joins. (Today neither the accumulation nor the materialization runs — see CURRENT.)
+- Consensus accumulates from **heterogeneous** witnesses — neural (Q/K/V/O, gate, up/down) **and**
+  symbolic (`is_a`, `has_a`, `derived_from`, `acronym_of`, …) converging on the same relation — and is
+  **materialized** from the evidence (one row per relation) so inference reads it directly, not by joins.
 
-**CURRENT (verified) — the conflation:** the `attestations` table today holds per-witness
-**evidence**, not consensus — `source_id` is *in* the identity (`AttestationFactory.cs:34`,
-`UNIQUE(subject,kind,object,source,context)`), `obs=1` everywhere, and `glicko2_accumulate` (which
-would produce the consensus) is **never called**. So there is **no materialized consensus** — it is
-reachable only by excessive query-time joins. The evidence is also lossy for the model path: per-(layer,head)
-provenance is dropped (Q_PROJECTS `context_id=NULL`, first-witness-wins) — exactly the provenance
-§2's interpretability needs. (Substrate-wide, context_id is NULL for ~89% of attestations [45.4M of
-51.0M]; ~11% do set it, e.g. UD's deprel — so provenance is dropped for *most* witnesses, not all.) Fix: retain evidence *with* layer/head provenance, and materialize the consensus attestation
-via `glicko2_accumulate`.
+### Signed consensus — confirm = win, refute / repel = loss, dissent folded in
+
+Consensus μ is **signed** (native Glicko-2 win/loss against a neutral baseline), not a positive-only
+accumulator:
+
+- A witness that **confirms / attracts** a relation is a **win** → μ up.
+- A witness that **refutes / repels** it (a model's negative QK score; a source asserting it does not
+  hold; the Gödel Engine proving it false, §11) is a **loss** → μ down.
+- μ ≫ neutral = confirmed; μ ≈ neutral with high **volatility** = contested / unknown; μ ≪ neutral =
+  refuted. `ORDER BY μ DESC` ranks confirmed at the top, refuted at the bottom. The sign *is* the
+  truth-state — QK attends/repels, is/is-not, confirmed/refuted all collapse into one signed μ.
+
+**Dissent is folded in and weighted — never discarded.** A minority / repelling witness is not
+steamrolled by the majority: it casts its weighted loss, so μ settles at the **balance of all
+witnesses** and **volatility rises** to record the disagreement — "some sources disagree," not "ignore
+the dissenters." The evidence layer retains *who* dissented (which model / layer / head repelled, with
+provenance), so the minority view stays visible and auditable, and high-volatility relations are
+exactly what the Gödel Engine (§11) queues to investigate. The engine's own refutation is **one more
+weighted vote** into that balance (heavy — high-trust, carries a proof), not an erasure of the crowd.
+
+**The matchup (DERIVED — it is Glicko-2 with two mappings, not a new system).** The relation is the
+player; each witness observation is a match against a neutral baseline opponent (μ₀ = 0, the 1500
+line).
+
+1. **Outcome** `s_j = ½(1 + tanh(m_j / M)) ∈ (0,1)`, from the witness's **signed** strength `m_j`:
+   `+|q·k|` attracts → `s→1` (win); `−|q·k|` or a categorical refutation → `s→0` (loss); neutral → ½;
+   a categorical confirm (`is_a`) is `m_j→+∞ ⇒ s=1`. `M` = the per-arena magnitude scale (same family
+   of calibration as the noise floor).
+2. **Weight = opponent precision, NOT a bolted-on multiplier.** The witness weight
+   `w_j = kind_rank × source_trust × tenant_trust ∈ (0,1]` maps to the opponent's rating deviation
+   `φ_j` (high trust → low φ → `g(φ_j)≈1`; crank → high φ → `g(φ_j)≈0`). Glicko's own
+   `g(φ)=1/√(1+3φ²/π²)` then weights the update sums `Σ_j g(φ_j)(s_j−E_j)` and `v⁻¹=Σ_j g(φ_j)²E_j(1−E_j)`.
+   The rating-deviation machinery already in `glicko2.c` **is** the trust weighting — no new term.
+
+Then it is stock Glicko-2 (the paper-pinned kernel). The headline behaviours are **native, not tuned**:
+- **One high-trust proof out-votes N cranks** — cranks have `g≈0`, so their terms vanish from both
+  sums; the proof (`g≈1, s=0`) dominates. (Not a multiplier I pick; the trust→φ→g map does it.)
+- **Saturation** — confirming an already-high-μ relation gives `s−E≈0` (tiny move); refuting it gives
+  `s−E≈−1` (big drop). Established truths are stable; refuting one bites hard.
+- **Dissent → volatility** — mixed wins/losses pull μ to the weighted balance and raise σ (contested),
+  recorded not discarded.
+- **Incremental / sublinear** — each model ingest is one rating period folded in via
+  `laplace_glicko2_accumulate`; a re-witness is another (saturating) match, a novel relation is a new
+  player.
+
+The **only calibration** (empirical, tune-once like the QK floor — NOT design choices): `M`, the
+trust→φ map shape (e.g. `φ_j = φ_min + (φ_max−φ_min)(1−w_j)`), and φ₀. A per-"arena"/type difference is
+one line: what `m_j` it emits and its `kind_rank`; the framework is uniform.
+
+Passive witnessing is positive-accumulating — a falsehood with few witnesses (flat earth) stays feeble
+by sparsity, no refutation needed — but active refutation and signed sources make μ genuinely signed: a
+contradiction lowers μ **as a Glicko loss, not a subtraction**.
 
 ---
 
@@ -274,8 +286,12 @@ via `glicko2_accumulate`.
 
 An observation's influence on a relation's consensus is a product of three ranks:
 
-1. **Kind rank** — kinds carry epistemic superiority: `is_a` ≫ `acronym_of`. Maps to
-   `KindValueTier` T1–T11 (`AttestationFactory.cs:150-164,184-197`).
+1. **Kind rank** — kinds carry epistemic significance/importance: `is_a` ≫ `acronym_of`, and
+   synonym ≠ hyponym ≠ meronym ≠ antonym (equivalence vs hierarchical vs partitive vs oppositional
+   are *different* weights, some same-direction, some opposing). This is a **real significance
+   ranking, NOT the `KindValueTier` T1–T11 axis** — those tiers are a coarse placeholder; the genuine
+   kind-significance scale that feeds the matchup weight is left to set (§10). The many trust /
+   significance levels exist precisely so each (kind, source) weights its matchup differently.
 2. **Source trust** — each source has a trust rating. Maps to `TrustClass` TC1–TC10
    (SubstrateMandate 1.00 … AiModelProbe 0.50 … Adversarial 0.00; `AttestationFactory.cs:167-180`).
 3. **User / tenant trust** — the user/tenant ingesting content has a trust rating.
@@ -288,143 +304,211 @@ tenant dimension is absent.
 
 ---
 
-## 8. Models are seeds, not artifacts
+## 8. Models are seeds, ingested as token×token bilinear circuits (NOT a codec)
 
-- A model is a **seed datasource**, not normal user content, and is **not stored bit-perfectly**.
-  You harvest two extractions and discard the bytes; *non-invertibility is by design, not a defect.*
-  - **Semantic extraction → relation evidence** (the model's Q/K/V/O, gate, up/down as witnesses to
-    King↔Queen-type relations, accumulating into the §6 consensus).
-  - **Physical extraction → embeddings as per-model physicality points.** "King" has **one** content
-    identity but a **species** of embeds: King-from-Llama, King-from-Qwen, King-from-DeepSeek — each a
-    distinct **Projection** physicality (kind 3/4), source-tagged, embed-typed. **Voronoi cells** over
-    the species (stored in physicality records) are the geometric/distributional consensus — the
-    "additional semantic value."
-  - Content physicality (kind 1) = singular, source-independent, structural. Projection physicality
-    (kind 3/4) = plural, per-source, the model embeddings.
-- **Re-export = fill the mold.** Take a target architecture's recipe (its *mold* — shapes/layout) and
-  pour the substrate's consensus (consensus relations + embed-species/Voronoi) into its slots. The
-  output is the **consensus of all ingested models** in the target shape — not a reconstruction of
-  any one of them.
-- **Ingestion is sublinear in model count (dedup + consensus).** The *first* model balloons the
-  substrate — almost everything it asserts is novel. Each subsequent model (even a far larger one like
-  Llama-4 Maverick) mostly **re-witnesses relations that already exist**: content deduplicates and
-  relations converge to consensus, so the marginal cost is its *novel* relations plus witness updates
-  (`glicko2_accumulate`) to existing consensus — not a fresh copy. The substrate is the deduplicated
-  *union* of all models' knowledge; adding models sharpens consensus rather than multiplying storage.
+A model is a **witness/seed**, not stored content, and there is **no codec — no encode/decode, no
+round-trip**. "codec"/"roundtrip" is the conventional-AI frame and is banned for model ingestion,
+query, and export. A model is *decomposed* into the substrate (witness → consensus), the substrate is
+*queried*, and a model of any chosen shape is *synthesized* from consensus. The input model is not
+kept as itself; it dissolves into the deduplicated union.
 
-**CURRENT (verified):** the Model decomposer writes **no** physicalities (`physicalityCapacity:0`)
-and collapses each embedding to an L2-magnitude scalar seeded into a Glicko μ on a *unary*
-(node-attached, `object_id=NULL`) attestation — not the embedding vector as a point. (Only Q_PROJECTS
-is a true binary edge; EMBEDS / V/O/G/U/D / OUTPUT_PROJECTS are unary.) DB has only kind=1 physicalities; **kind 3/4 = zero.** So the
-embed-species / Voronoi layer that feeds mold-filling does not exist, and synthesis can only
-broadcast magnitude texture (the "Stream B-minimum" stub). The right fix is to record embeddings as
-Projection physicality points, not to "make synthesis reconstruct the model."
+**Characterize a model by the math it performs, never by a label it never advertises.** Each
+tensor/layer runs a fixed, finite set of operations, and that set is **modality-blind** — the same
+matmuls / softmax / norm whether the tokens are text, pixels, audio, DNA, or chess moves; modality
+enters only at the input embedding and the output unembedding. A tensor *is* the operation it
+performs, and that operation, read back through the embedding, *is* a relationship between content.
+
+### Every interior tensor is a token×token bilinear circuit through the embedding
+
+The weights encode relationships between content (tokens), recovered by reading each tensor's fixed
+bilinear form back into token space via the embedding `E` (and unembedding `E_U`). This is the
+QK/OV-circuit + FFN-as-key-value-memory decomposition:
+
+- **QK circuit** (Wq, Wk): `score(i,j) = E·Wq·Wkᵀ·Eᵀ` — token *i* attends to token *j*. A token×token
+  relation (pre-softmax compatibility).
+- **OV circuit** (Wv, Wo): `E·Wv·Wo·E_Uᵀ` — attending to token *i* shifts the prediction toward token
+  *j*. **One** token×token relation from V and O together — not two per-token scalars.
+- **FFN memory** (up/gate = keys, down = values): `(E·Wup)·(E_U·Wdown)ᵀ` — an input token fires the
+  neurons that write toward an output token.
+- **embed_tokens / lm_head** = `E` and `E_U` themselves → **Projection physicalities** (per-token
+  *placements*), not relations; they are the sandwich the bilinears are read through.
+- **norms** → recipe scaling.
+
+**Nonlinearities are runtime, never attested.** Softmax, SiLU/GELU, and the SwiGLU gate (`gate ⊙ up`)
+are *data-dependent* — they depend on the actual input at inference — so ingest records only the
+**static** bilinear structure each weight imposes; the gating/normalization is applied at
+query/generation time. Collapsing a tensor to a **per-token magnitude scalar** (the prior code)
+destroys the relation by reducing the dim axis to one number — that is the thing this replaces, and
+it is non-negotiable: never magnitude.
+
+### A model says nothing the seed corpora can't
+
+Because every tensor is a token×token relationship, a model's attestations are the **same kind of
+object** as a corpus's relations: `[dog, contextually-relates, bark]` recovered from a model's QK
+circuit and the same edge from a text corpus are *one consensus relation, different witnesses*. So
+**datasets-only, models-only, or both** reconstruct the same substrate (§3). A model adds witness
+strength, statistical coverage, and per-(layer,head) provenance — not a new *kind* of thing. This is
+`HAS_POS`≡`HAS_UPOS` at the tensor level.
+
+### Physical extraction — the embed species
+
+"King" has one content identity but a **species** of embeds: King-from-Llama, King-from-Qwen, … each a
+distinct **Projection** physicality (kind 3/4), source-tagged. Voronoi cells over the species are the
+geometric/distributional consensus. Content physicality (kind 1) = singular, structural; Projection
+(kind 3/4) = plural, per-source.
+
+### Re-export = fill the mold = the ingestion run backward
+
+Synthesis is the **exact inverse** of ingestion, computed at runtime from consensus: take a target
+recipe (any dim / layers / routing / rope / lora — the *mold*) and **factor each consensus circuit
+back into that mold's weight tensors at the recipe's rank**, via SVD (Eigen/oneMKL) through the
+spectral token basis — QK→q/k, OV→v/o, FFN→up/down. Whatever the forward pass computed token×token
+*from* the weights, export reconstructs weights *from* the consensus token×token. The output is the
+**consensus of all ingested models** in the chosen shape — never a reconstruction of any one, never
+bit-perfect. Fill the mold.
+
+### Ingestion is sublinear in model count (dedup + consensus)
+
+The *first* model balloons the substrate — almost everything it asserts is novel. Each subsequent
+model (even a far larger one) mostly **re-witnesses relations that already exist**: content
+deduplicates and relations converge to consensus, so the marginal cost is its *novel* relations plus
+witness updates (`glicko2_accumulate`) to existing consensus — not a fresh copy. Stronger still: even
+the *first* model mostly re-witnesses relations the **seed corpora** already established. The
+substrate is the deduplicated *union* of all witnesses; adding models sharpens consensus rather than
+multiplying storage.
 
 ---
 
-## 9. Current state — one missing primitive, many symptoms (verified against the live DB)
+## 8a. The decomposer contract — how any source becomes substrate
 
-Every defect below traces to **one** primitive not being built: *relations recorded as
-content-addressed trajectory entities, with a two-layer evidence/consensus model — evidence retaining
-full provenance, consensus materialized via Glicko-2 — and their geometry exposed.*
+A decomposer turns a source (a corpus, a standard, a model) into **content-addressed entities +
+attestations** — witnesses, never identities (§3). One contract binds every decomposer, seed corpus
+and model alike:
 
-1. **Evidence and consensus are conflated** — the `attestations` table holds per-witness *evidence*
-   (`source_id` in the identity, `obs=1`), but there is **no materialized *consensus* attestation**;
-   consensus is reachable only by excessive query-time joins. Fix: two layers (§6).
-2. **`glicko2_accumulate` is never called** — it is implemented + pg_regress-pinned; the writer does
-   `ON CONFLICT DO NOTHING`, so no consensus is ever produced. Per-(layer,head) provenance is
-   dropped for the model path (Q_PROJECTS `context_id=NULL`; ~89% of all attestations have NULL
-   context, ~11% use it), which blocks the `GROUP BY` interpretability (§2).
-3. **Attestations attach to tier-4 document roots, not the right-tier entity** — *verified:* a bare
-   word "cat" resolves to a **tier-4 document** (9 nodes: 3 codepoints + 3 graphemes + 1 word + 1
-   sentence + 1 document), and **~96%** of sampled attestation subjects are tier 4. Lexical facts
-   land on document blobs, not word entities — the ~3.41M tier-2 *word* entities exist as DAG
-   children, but are not what content-addressing returns or what attestations bind to. (Root cause:
-   `text_decomposer.c:286` builds the tier-4 document root unconditionally; `ContentEmitter` returns
-   that root.)
-4. **Relations have no geometry** — the `attestations` table has no geometry column; relations are
-   not trajectory entities (§4).
-5. **Only Content physicalities exist** — *verified DB:* kind=1 = 20,957,504; **kind 2/3/4 = 0.**
-   The embed-species / physical-embedding layer is absent (§8).
-6. **Model embeddings collapse to magnitude scalars** — no embedding points → no species → no
-   Voronoi (§8).
-7. **Synthesis is a magnitude-broadcast stub** ("Stream B-minimum") — tiles a ≤64-dim spectral basis
-   across recipe slots; cannot fill the mold because the structured material (consensus relations +
-   embed points) was never recorded.
-8. **Convergence breakers** — language entities split `language:en` (ISO 639-1, from
-   UD/Wiktionary/ConceptNet) vs `language:eng` (ISO 639-3, from ISO/OMW/Tatoeba): the shared
-   `LanguageEntityId.FromIso639_3` helper does **no** conversion — it only lowercases + prefixes
-   `language:` — so 2- vs 3-letter inputs fracture *despite the common helper*. And the same assertion
-   under different kinds (`HAS_POS` vs `HAS_UPOS`) won't merge. Both fracture omni-glottal / consensus
-   convergence.
-
-**Build the one primitive** and convergence, geometric analogy, the embed species, mold-filling
-re-export, `GROUP BY` interpretability, and SQL traversal/generation all come online together — they
-were always the same mechanism.
+- **Content-address everything.** Identity is `merkle(tier, [child_ids])` over the content, computed
+  identically for every source, so the *same* word / sentence / relation from two sources is the
+  *same entity* — convergence is automatic at the identity layer.
+- **Bind at the natural tier.** A lone word attests on its word entity, not a wrapping document
+  (content used to bind to the wrapping document instead of the word; now fixed).
+- **Normalize source kinds into Laplace's internal modalities.** Corpora are *seeds*, never
+  bit-perfectly preserved. `HAS_POS` (WordNet) and `HAS_UPOS` (UD) mean the same thing → one internal
+  part-of-speech kind; `HAS_DEPREL` and friends likewise map to internal kinds; a model's QK/OV/FFN
+  circuits map into the same relatedness modalities the corpora populate. Antipodal/opposite kinds
+  stay distinct. This is what makes witnesses **co-assert** — without it, every relation is a
+  singleton and there is no consensus.
+- **Resolve reference data through the substrate's own seeded reference, AT INGEST — never hardcode,
+  never join at runtime.** Omni-glottal example: any language reference — any ISO 639 code form
+  (`en` / `eng` / 639-2B / 639-2T), any BCP-47 tag (`en-US`), any name in any language (`English`,
+  `français`) — resolves to the **one** canonical 639-3 language entity through an app-side resolution
+  index built from the *attested* ISO + Unicode reference (the "perf-cache" principle: load the
+  reference once, resolve at ingest). Entries **unify at write time**, so inference reads need **no
+  runtime joins**. *That is why ISO and Unicode are seeded* — they are the reference layers the
+  substrate normalizes itself against, not loose files to look up. (`LanguageReference` does this for
+  languages today: code-precedence over names, 639-1/2B/2T → 639-3, retirements + IANA Preferred-Value;
+  the codepoint→script→language→family graph is the next layer.)
+- **app vs AI separation.** The resolution index, the perf-cache, code/normalization tables are
+  *internal app functionality* (non-attested plumbing). The consensus substrate is the *AI* (attested
+  knowledge). Never conflate them — a runtime join to resolve `en`→`eng` is the app failing to unify
+  at ingest, not the AI.
+- **Incremental + idempotent — never nuke-to-re-ingest.** The writer is content-addressed
+  (`ON CONFLICT DO NOTHING`), so re-ingesting identical content is a **no-op** and cannot double-count.
+  Seed the reference layers **once** into a persistent base; layer each model/source on top
+  incrementally; to re-run a single source after a code change, **evict only that source's evidence**
+  (`DELETE … WHERE source_id = X` + clear its `/tmp/laplace-ingest` checkpoint), never reset the whole
+  DB. Consensus is rebuilt from evidence. This is what makes ingestion sublinear (§8).
+- **Exact, on the perf stack.** Compensated f64, fixed reduction order, MKL/TBB/AVX2 + Eigen/Spectra —
+  never a managed scalar GEMM, never top-k truncation, never an approximation.
 
 ---
 
-## 10. The actual schema (for grounding — verified)
+## 9. The data model
 
 - **`laplace.entities`** — identity only. `id` (BLAKE3-128 PK), `tier`, `type_id`,
-  `first_observed_by`, `created_at`. No geometry. Live tier counts: 0≈1.12M, 1≈30k, 2≈3.41M, 3≈9.42M,
-  4≈7.11M (+ ~52 at reserved high tiers 247/248/250 for bootstrap/sentinel nodes; the 0–4 scheme is
-  not exhaustive). **These tier labels are as-recorded and corrupted by the mis-tiering defect
-  (§9.3)** — single words are wrapped to tier-4 documents — so the counts are not a clean census of
-  words / sentences / documents.
+  `first_observed_by`, `created_at`. No geometry — geometry lives in `physicalities`.
 - **`laplace.physicalities`** — geometry. `id`, `entity_id`, `source_id`, `kind`
-  (1=Content, 2=BuildingBlock, 3=Projection, 4=ProjectionOutput), `coord` + `trajectory` (both
-  untyped PostGIS `geometry`; PointZM / GeometryZM enforced by CHECK constraints, not column typmod),
-  `hilbert_index`, `radius_origin` (generated), plus `n_constituents`, `alignment_residual`,
-  `source_dim`, `observed_at`. `UNIQUE(entity_id, source_id, kind)`. Live: 20,957,504 rows, **all
-  kind=1**.
-- **`laplace.attestations`** — typed relations + Glicko-2 state. `id` (BLAKE3 of the 5-tuple),
-  `subject_id`, `kind_id`, `object_id?`, `source_id`, `context_id?`, `rating`/`rd`/`volatility`
-  (int64 fixed-point ×1e9), `last_observed_at`, `observation_count`.
-  `UNIQUE NULLS NOT DISTINCT (subject,kind,object,source,context)`. Live: 51,004,929 (~51.0M) rows.
-  **This table is currently the *evidence* layer** (per-witness, source in identity, obs=1); the
-  *consensus* layer (§6) is not materialized, and per-(layer,head) provenance is not recorded.
-- **Glicko-2 kernel** — full Glickman-2013 implementation in `engine/core/src/glicko2.c`, pinned to
-  the paper's worked example; exposed as the `laplace_glicko2_accumulate` SQL aggregate (unused by
-  the live write path).
-- **Geometry** — `laplace_geom` extension (functions installed in the `public` schema):
-  `laplace_distance_4d`, `laplace_dwithin_4d`, `laplace_frechet_4d`, `laplace_hausdorff_4d`,
-  `laplace_centroid_4d`, `laplace_radius_origin`.
+  (1=Content, 2=BuildingBlock, 3=Projection, 4=ProjectionOutput), `coord` + `trajectory` (PostGIS
+  PointZM / GeometryZM via CHECK), `hilbert_index`, `radius_origin` (generated), `n_constituents`,
+  `alignment_residual`, `source_dim`, `observed_at`. `UNIQUE(entity_id, source_id, kind)`. Content
+  physicality (kind 1) is singular/structural; Projection (kind 3/4) is the per-model embed species
+  (§8).
+- **`laplace.attestations`** — the per-witness **evidence** layer: typed relations + Glicko-2 state.
+  `id` (BLAKE3 of the 5-tuple), `subject_id`, `kind_id`, `object_id?`, `source_id`, `context_id?`,
+  `rating`/`rd`/`volatility` (int64 fixed-point ×1e9), `last_observed_at`, `observation_count`.
+  `UNIQUE NULLS NOT DISTINCT (subject,kind,object,source,context)` — **source IN the identity**, full
+  provenance retained (model layer/head in `context_id`).
+- **`laplace.consensus`** — the materialized **consensus** layer (§6): one signed Glicko-2 row per
+  `(subject, kind, object, context)`, **source OUT of identity**. `id` (BLAKE3 of the 4-tuple),
+  `subject/kind/object/context`, `rating`/`rd`/`volatility`, `witness_count`, `last_observed_at`;
+  `UNIQUE NULLS NOT DISTINCT (subject,kind,object,context)`. Built by `rebuild_consensus()` via the
+  `laplace_glicko2_accumulate` aggregate. **Inference reads this** — a sorted index scan on `rating`,
+  not joins over evidence.
+- **Glicko-2 kernel** — full Glickman-2013 implementation in `engine/core/src/glicko2.c`, exposed as
+  the `laplace_glicko2_accumulate` SQL aggregate; computes the signed win/loss consensus update of §6.
+- **Geometry** — `laplace_geom` (in the `public` schema): `laplace_distance_4d`, `laplace_dwithin_4d`,
+  `laplace_frechet_4d`, `laplace_hausdorff_4d`, `laplace_centroid_4d`, `laplace_radius_origin`, plus
+  PostGIS `ST_Intersects` / `ST_Overlaps` / `ST_VoronoiPolygons` on the geometry columns.
 - **Perf-cache** — `CodepointPerfcache`: a memory-resident map of all 1,114,112 codepoints → (S³
-  `coord`, hilbert, hash), the single source shared by the engine + PG extension. Resolves leaf ids →
-  coordinates in O(1) (microseconds) — the leaf resolver for the trajectory cascade, and what makes
-  id → coordinate reconstruction cheap (§5).
-- **Query entry point** — `laplace inspect <text>` (`Program.cs:160-261`) over the
-  `entity_facets` / `entity_physicalities` / `attestations_out` / `attestations_in` SRFs.
-  *Verification gotcha:* `inspect` prints ids big-endian (`Hi||Lo`) while the stored `bytea` is
-  little-endian struct bytes — pasting a printed id into `psql` as `decode(...,'hex')` finds 0 rows.
-  Resolve through the SRFs, not the printed hex.
+  `coord`, hilbert, hash), shared by the engine + PG extension. Resolves leaf ids → coordinates in
+  O(1) — the leaf resolver for the trajectory cascade (§5), the same app-side resolution-index
+  principle the language reference uses (§8a).
+- **Query entry point** — `laplace inspect <text>` resolves text → entity (engine TextDecomposer +
+  HashComposer) and reads its facets via the `entity_facets` / `entity_physicalities` /
+  `attestations_out` / `attestations_in` SRFs.
 
 ---
 
-## 11. Open design questions (mechanisms named but not yet specified)
+## 10. Calibration & open parameters
 
-The documentation audit flagged that several headline capabilities are *motivated* but their
-mechanism/math is not written down. These are the real design work — listed so they are not mistaken
-for solved:
+Values the spec leaves to **set** (calibration constants — tune-once, like the QK floor) and a few
+**design choices**. These are knobs, not gaps in how the invention works:
 
-- **Consensus update math (the keystone).** §7 gives the *factors* (kind rank × source trust × tenant
-  trust × magnitude `strength`) but not how a weighted witness observation maps into a Glicko-2
-  update — does weight scale the observation's RD, act as a pseudo-observation count, or set the
-  opponent? This is the actual definition of "consensus" and is unspecified.
-- **Tenant/user trust.** Not built (no id), and the form of its combination with kind/source rank is
-  undefined.
-- **Evidence-layer schema.** §6 prescribes "retain evidence *with* layer/head provenance, RLE'd" but
-  gives no schema — a separate table? a provenance array on the consensus row? a repurposed
-  `context_id`? RLE and per-(layer,head) retention pull in opposite directions and must be reconciled.
-- **Voronoi query semantics.** §8 stores embed-species Voronoi cells as "distributional consensus" but
-  never says what a query *does* with a cell (nearest-cell assignment? consensus centroid? cell volume
-  = cross-model disagreement?).
-- **Mold-filling synthesis.** §8 describes re-export by metaphor; the actual map from a consensus
-  relation / embed-species cell back to a concrete weight-tensor value is unspecified (the current
-  path is the magnitude-broadcast stub, §9.7).
-- **Generation termination & distribution-equivalence.** §2 generation needs a stop rule (EOS as a
-  relation? a μ threshold? a depth bound) and an argument for *why* a ranked-μ walk reproduces the
-  model's conditional distribution rather than a different ranking.
-- **Omni-modality ingestion path (INTENDED).** The pixel/audio → integer → codepoint reduction is
-  asserted but has no decomposer (Image/Audio are stubs). Treat as intended until built.
+- **Consensus calibration (§6).** The magnitude scale `M` (per arena), the trust→φ map shape (e.g.
+  `φ_j = φ_min + (φ_max−φ_min)(1−w_j)`), and the baseline φ₀. The matchup math itself is fixed (§6).
+- **Tenant/user trust (§7).** The third trust factor — its id and how it combines with kind-rank ×
+  source-trust — set when the app/auth layer lands.
+- **Evidence-layer provenance retention.** How per-(layer,head) provenance is carried on the evidence
+  layer — a provenance array, a repurposed `context_id`, or a side table — reconciled with
+  run-length dedup of re-observations.
+- **Voronoi query semantics (§8).** What a query does with an embed-species cell: nearest-cell
+  assignment, consensus centroid, or cell volume as cross-model disagreement.
+- **FFN rank strategy (§8).** The FFN circuit's dot dimension is the intermediate width (≫ head_dim),
+  which does not fit the 64-dim eigenmaps basis — both FFN ingest scoring and FFN export need a rank
+  choice.
+- **Generation termination (§2).** The stop rule for the ranked-μ walk (EOS as a relation, a μ
+  threshold, a depth bound) and the distribution it reproduces.
+- **The Gödel Engine's policy (§11).** Refutation-weight scaling, task generators, the
+  self-improvement rule — set when the cognition layer is built.
+- **Non-text modalities (§3).** The pixel/audio/DNA/chess decomposers — the same cascade, applied to
+  each modality's atoms.
+
+---
+
+## 11. The Gödel Engine — the cognition layer (how this becomes AGI)
+
+The substrate (§1–§9) is **knowledge**: content, relations, signed consensus. The **Gödel Engine** is
+the layer above it that **thinks** — it queues and queries tasks, researches, infers, proves and
+refutes, and acts. The substrate is its memory; the engine is its cognition. It is what turns a
+queryable knowledge base into a reasoning agent.
+
+- **It needs genuine `false`.** Reasoning is not just believing the weighted crowd — it forms
+  hypotheses, tests them, and **refutes** the wrong ones. "this relation is false" is a first-class
+  act: the engine casts a weighted **loss** (§6 signed consensus) that drives the relation's μ
+  negative, carrying its derivation / proof as provenance. Without `false` the engine cannot prune,
+  cannot conclude, and re-explores dead ends forever. (This is *why* μ must be signed — §6.)
+- **It runs on the same substrate — self-reference, the "Gödel."** A relation is content (§4), so a
+  verdict is a relation *about* a relation; tasks, hypotheses, and the engine's own reasoning state are
+  *also* content. The engine reasons over a substrate that **includes itself** — it attests verdicts on
+  its own conclusions and can improve by reasoning about its own relations.
+- **The thinking loop, driven by the signed consensus:**
+  - **Prune** — skip relations whose μ is refuted (negative).
+  - **Detect contradiction** — a relation pulled hard both ways (near-neutral μ + high volatility, or
+    both a proven-true and a proven-false verdict) → queue a **resolve** task.
+  - **Research the gaps** — `unknown` / unprovable relations are where it queues **research** tasks;
+    incompleteness drives curiosity.
+  - **Gate inference / generation** — queries respect verdicts: even a high-witness-μ relation is
+    skipped / down-ranked once the engine has proven it false (proof beats popularity by **out-voting it
+    with weight**, §6 — never by erasing the crowd; dissent stays recorded).
+
+It sits above the knowledge substrate and is the layer that makes Laplace a reasoning agent rather than
+a queryable knowledge base; its policy knobs (refutation-weight scaling, task generators, the
+self-improvement rule) are in §10.

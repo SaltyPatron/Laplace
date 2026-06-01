@@ -95,7 +95,7 @@ public sealed class UDDecomposer : IDecomposer
         {
             ct.ThrowIfCancellationRequested();
             string langCode = ExtractLangCode(Path.GetFileName(conllu));
-            Hash128 langId = LanguageEntityId.FromIso639_3(langCode);
+            Hash128 langId = LanguageReference.Resolve(langCode);
 
             await foreach (var sentence in ParseSentencesAsync(conllu, ct))
             {

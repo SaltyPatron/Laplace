@@ -1296,6 +1296,13 @@ internal static class Program
         // MUST be loaded before the run or every decomposition silently yields no content.
         CodepointPerfcache.Load(ResolveBlob());
 
+        // Omni-glottal language resolution index (the "language perf-cache"): every
+        // 639-1-code source (UD/OMW/Wiktionary/Tatoeba/ConceptNet) resolves its raw
+        // codes/names through this to the ONE canonical 639-3 language entity, so the
+        // substrate unifies languages at ingest (no runtime joins). Built from the same
+        // attested ISO 639 reference the ISODecomposer seeds. Idempotent + fail-loud.
+        LanguageReference.EnsureLoaded();
+
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         var writer = new NpgsqlSubstrateWriter(ds);
         var reader = new NpgsqlSubstrateReader(ds);

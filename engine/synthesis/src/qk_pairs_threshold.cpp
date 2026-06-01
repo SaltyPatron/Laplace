@@ -61,13 +61,15 @@ inline void project_token(const float* E_row, const float* W, size_t d_model,
     }
 }
 
-/* score(t,s) = Σ_d q_t[d]*k_s[d], compensated, fixed order over d. */
-inline double score_qk(const double* q_t, const float* E_s, const float* Wk,
-                       size_t d_model, size_t head_dim, double* k_scratch) {
-    project_token(E_s, Wk, d_model, head_dim, k_scratch);
+/* score(t,s) = Σ_d q_t[d]*k_s[d], compensated, fixed order over d. k_s is the
+ * PRECOMPUTED projection of key s (built once per head, see K_cache below) —
+ * bit-identical values to projecting in-loop, but computed a single time instead
+ * of once per query row. Determinism unchanged: same fixed-order compensated
+ * projection upstream, same fixed-order dot here. */
+inline double score_cached(const double* q_t, const double* k_s, size_t head_dim) {
     double sum = 0.0, c = 0.0;
     for (size_t d = 0; d < head_dim; ++d)
-        neumaier_add(sum, c, q_t[d] * k_scratch[d]);
+        neumaier_add(sum, c, q_t[d] * k_s[d]);
     return sum + c;
 }
 
@@ -89,6 +91,32 @@ long compute_qk_pairs_above_threshold(
     const size_t n_rows = q1 - q0;
     if (n_rows == 0) return 0;
 
+    /* ── Precompute ALL key projections ONCE per head ───────────────────────────
+     * The old path re-projected every key s (a head_dim×d_model compensated
+     * reduction) inside the inner score loop — i.e. once per (query row, key)
+     * pair, so each key was projected `vocab` times over the full row sweep, in
+     * BOTH passes. That redundant re-projection, not the head_dim dot products,
+     * was the dominant cost (≈99.95% of per-pair work). Project each key exactly
+     * once here and reuse the cache. Values are bit-identical (same project_token,
+     * same fixed order) so determinism is preserved. Memory: vocab*head_dim
+     * doubles (e.g. 32000*64*8 = 16 MB/head). */
+    std::vector<double> K_cache(vocab * head_dim);
+    {
+        auto project_key = [&](size_t s) {
+            project_token(E_f32 + s * d_model, Wk_head, d_model, head_dim,
+                          K_cache.data() + s * head_dim);
+        };
+#ifdef LAPLACE_HAS_MKL
+        oneapi::tbb::parallel_for(
+            oneapi::tbb::blocked_range<size_t>(0, vocab, 256),
+            [&](const oneapi::tbb::blocked_range<size_t>& rng) {
+                for (size_t s = rng.begin(); s != rng.end(); ++s) project_key(s);
+            });
+#else
+        for (size_t s = 0; s < vocab; ++s) project_key(s);
+#endif
+    }
+
     /* Per-row above-threshold counts (window-bounded metadata, O(n_rows)). */
     std::vector<size_t> counts(n_rows, 0);
 
@@ -96,12 +124,11 @@ long compute_qk_pairs_above_threshold(
     auto count_row = [&](size_t ri) {
         const size_t t = q0 + ri;
         std::vector<double> q_t(head_dim);
-        std::vector<double> k_scratch(head_dim);
         project_token(E_f32 + t * d_model, Wq_head, d_model, head_dim, q_t.data());
         size_t n = 0;
         for (size_t s = 0; s < vocab; ++s) {
-            const double sc = score_qk(q_t.data(), E_f32 + s * d_model, Wk_head,
-                                       d_model, head_dim, k_scratch.data());
+            const double sc = score_cached(q_t.data(), K_cache.data() + s * head_dim,
+                                           head_dim);
             if (std::fabs(sc) > noise_floor) ++n;
         }
         counts[ri] = n;
@@ -140,12 +167,11 @@ long compute_qk_pairs_above_threshold(
         if (counts[ri] == 0) return;
         const size_t t = q0 + ri;
         std::vector<double> q_t(head_dim);
-        std::vector<double> k_scratch(head_dim);
         project_token(E_f32 + t * d_model, Wq_head, d_model, head_dim, q_t.data());
         size_t w = offsets[ri];
         for (size_t s = 0; s < vocab; ++s) {
-            const double sc = score_qk(q_t.data(), E_f32 + s * d_model, Wk_head,
-                                       d_model, head_dim, k_scratch.data());
+            const double sc = score_cached(q_t.data(), K_cache.data() + s * head_dim,
+                                           head_dim);
             if (std::fabs(sc) > noise_floor) {
                 out[w].query_idx = (uint32_t)t;
                 out[w].key_idx   = (uint32_t)s;

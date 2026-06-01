@@ -1,0 +1,88 @@
+name: Seed ladder (reusable)
+
+# Ingest the seed sources ONE AT A TIME, each its own visible step, in dependency
+# order (ADR 0037). OMW lands right after WordNet (the synset scaffold it maps onto)
+# and BEFORE ud/the big corpora, so those witness onto OMW's multilingual lexemes
+# instead of racing to create them. Runs on the SAME `laplace` DB the model pipeline
+# then extends — NO nuke between stages (the one clean slate is db-deploy), so seed +
+# model witnesses coexist for consensus. Bounded set always; multi-hour corpora only
+# when full_ladder=true. Called by integration.yml.
+on:
+  workflow_call:
+    inputs:
+      full_ladder:
+        description: "Also ingest the multi-hour corpora (tatoeba/conceptnet/wiktionary/atomic2020)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  seed-ladder:
+    name: sources ingested one at a time
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Clear stale ingest checkpoint (survives DB nuke)
+        run: rm -rf /tmp/laplace-ingest && mkdir -p /tmp/laplace-ingest
+
+      # --- one source per step, dependency order. unicode re-ingest sets the
+      #     HasLayerCompleted/0 marker that unblocks iso639 (db-deploy's seed does not). ---
+      - name: "ingest — unicode (layer 0 · sets layer marker)"
+        run: scripts/ingest-source.sh unicode
+      - name: "ingest — iso639 (layer 1 · languages/scripts reference + graph)"
+        run: scripts/ingest-source.sh iso639
+      - name: "verify — language graph navigable (filter/focus by script & macrolanguage)"
+        run: |
+          P(){ psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -tAc "$1"; }
+          H=public.laplace_hash128_blake3
+          K(){ echo "$H(convert_to('substrate/kind/$1/v1','UTF8'))"; }
+          us=$(P "SELECT count(*) FROM laplace.attestations WHERE kind_id=$(K USES_SCRIPT);")
+          mm=$(P "SELECT count(*) FROM laplace.attestations WHERE kind_id=$(K MEMBER_OF_MACROLANGUAGE);")
+          latin=$(P "SELECT count(*) FROM laplace.attestations WHERE kind_id=$(K USES_SCRIPT) AND object_id=$H(convert_to('unicode/script/Latin/v1','UTF8'));")
+          echo "USES_SCRIPT=$us  MEMBER_OF_MACROLANGUAGE=$mm  languages→Latin=$latin"
+          [ "${us:-0}" -gt 0 ]      || { echo "::error::no USES_SCRIPT edges — language↔script graph missing"; exit 1; }
+          [ "${mm:-0}" -gt 0 ]      || { echo "::error::no MEMBER_OF_MACROLANGUAGE edges — macrolanguage graph missing"; exit 1; }
+          [ "${latin:-0}" -gt 50 ]  || { echo "::error::only $latin languages link to Latin — codepoint→script→language convergence broken"; exit 1; }
+          echo "::notice::language graph navigable — $latin languages use Latin; codepoint→script→language→macrolanguage chained, no runtime join"
+      - name: "ingest — wordnet (layer 2 · English synset scaffold)"
+        run: scripts/ingest-source.sh wordnet
+      - name: "ingest — omw (layer 3 · multilingual lexemes onto the synsets)"
+        run: scripts/ingest-source.sh omw
+      - name: "ingest — ud (layer 2 · syntax / UPOS)"
+        run: scripts/ingest-source.sh ud
+
+      # --- big corpora (multi-hour): on demand only, still one visible step each ---
+      - name: "ingest — tatoeba (full ladder · parallel sentences)"
+        if: ${{ inputs.full_ladder }}
+        run: scripts/ingest-source.sh tatoeba
+      - name: "ingest — conceptnet (full ladder · commonsense relations)"
+        if: ${{ inputs.full_ladder }}
+        run: scripts/ingest-source.sh conceptnet
+      - name: "ingest — wiktionary (full ladder · dictionary)"
+        if: ${{ inputs.full_ladder }}
+        run: scripts/ingest-source.sh wiktionary
+      - name: "ingest — atomic2020 (full ladder · inferential)"
+        if: ${{ inputs.full_ladder }}
+        run: scripts/ingest-source.sh atomic2020
+
+      - name: "verify — WordNet landed CONTENT (kind=1 physicalities), not just attestations"
+        run: |
+          WN="public.laplace_hash128_blake3(convert_to('substrate/source/WordNetDecomposer/v1','UTF8'))"
+          PSQL=(psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -tAc)
+          c=$("${PSQL[@]}" "SELECT count(*) FROM laplace.physicalities WHERE kind=1 AND source_id=$WN;")
+          a=$("${PSQL[@]}" "SELECT count(*) FROM laplace.attestations  WHERE source_id=$WN;")
+          echo "WordNet: CONTENT physicalities=$c  attestations=$a"
+          [ "${c:-0}" -gt 0 ] || { echo "::error::WordNet emitted no CONTENT physicalities — content path regressed"; exit 1; }
+          [ "${a:-0}" -gt 0 ] || { echo "::error::WordNet emitted no attestations"; exit 1; }
+
+      - name: "report — cross-source convergence (entities witnessed by >1 source)"
+        run: |
+          m=$(psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -tAc \
+            "SELECT count(*) FROM (SELECT entity_id FROM laplace.physicalities GROUP BY entity_id HAVING count(DISTINCT source_id)>1) t;")
+          echo "::notice::multi-source entities=$m"

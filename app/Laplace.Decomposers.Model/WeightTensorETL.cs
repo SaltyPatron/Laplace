@@ -47,8 +47,15 @@ public sealed class WeightTensorETL
      * gap. Attention is sparse in EFFECT (softmax concentrates on few keys), so low scores
      * are genuine non-relationships. 0.05 keeps the meaningful attention tail. This floor
      * (B) makes QK storable; the spatial-indexed kernel (A) finds these survivors
-     * sub-quadratically instead of scanning all pairs. */
-    private const double QkNoiseFloor = 0.05;
+     * sub-quadratically instead of scanning all pairs. 0.05 is the default; raising it
+     * (LAPLACE_QK_FLOOR) keeps only the strongest attention edges — a noise-floor
+     * threshold (NOT top-k) that cuts pair volume so ingest finishes fast and the
+     * substrate stays tractable. Tunable without a rebuild, like LAPLACE_OVFFN_FLOOR. */
+    private static readonly double QkNoiseFloor =
+        double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_QK_FLOOR"),
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var _qkf) && _qkf > 0.0
+            ? _qkf : 0.05;
 
     /* Noise floor: attestations with aggregate magnitude at or below this
      * value are not real observations — they are gradient jitter or training
@@ -226,47 +233,206 @@ public sealed class WeightTensorETL
         } // end QK isolation gate (LAPLACE_SKIP_QK)
         phase.Restart();
 
-        // ─── V / O / GATES / UP / DOWN — unary per token via per-row magnitude ───
-        // ADR 0056:158-162 spec table: object axis is hidden_dim (V), hidden_dim (O),
-        // hidden_dim (GATES), intermediate_dim (UP), intermediate_dim (DOWN); reduction
-        // is per-cell magnitude. Per the corrected understanding the per-(layer, head,
-        // dim) is recipe content (not substrate entities), so the substrate emission is
-        // unary per token (object NULL) with per-instance L2 sums aggregated across
-        // layers. Object axis ≠ token, so we reduce ALONG the dim axis to one value
-        // per token.
-        var perTokenAccum = new (Hash128 kindId, double[] perToken, string label)[5];
-        perTokenAccum[0] = (_kinds.VProjects,    new double[vocabSize], "v_projects");
-        perTokenAccum[1] = (_kinds.OProjects,    new double[vocabSize], "o_projects");
-        perTokenAccum[2] = (_kinds.Gates,        new double[vocabSize], "gates");
-        perTokenAccum[3] = (_kinds.UpProjects,   new double[vocabSize], "up_projects");
-        perTokenAccum[4] = (_kinds.DownProjects, new double[vocabSize], "down_projects");
+        // ─── OV + FFN circuits — exact token×token BILINEAR through the embedding ───
+        // Every interior weight tensor is a token×token bilinear via the embedding; QK
+        // is done that way above, OV and FFN are done the same way here, REUSING the QK
+        // projection + cached-scoring kernels (no new native kernel). The former per-token
+        // MAGNITUDE reduction of v/o/gate/up/down is GONE — it collapsed the dim axis to a
+        // scalar (destroying the relation structure). Now:
+        //
+        //   OV (per layer L, per attention head h):
+        //     A_h[t,:] = E[t,:]·Wv_h        (E    through v_proj head h → [vocab × headDim])
+        //     C_h[s,:] = E_U[s,:]·Wo_h      (E_U  through o_proj head h → [vocab × headDim])
+        //     Score(t,s) = Σ_d A_h[t,d]·C_h[s,d]  over headDim;  emit pairs > floor.
+        //   GQA: head h's V side uses kv head g = h/(nHeads/nKvHeads); the O side is per
+        //   query head h. So A is projected once per kv head (nKvHeads slices) and scored
+        //   as the QUERY side at slice g; C is projected per query head (nHeads slices) and
+        //   scored as the KEY side at slice h. Both caches are reused across all layers.
+        //
+        //   FFN (per layer L):
+        //     A[t,:] = E[t,:]·Wup           (E    through up_proj   → [vocab × interm])
+        //     C[s,:] = E_U[s,:]·Wdown       (E_U  through down_proj → [vocab × interm])
+        //     Score over interm; emit pairs > floor. interm (~5632) >> headDim (64) ⇒ caches
+        //   are large and scoring is heavier, so the same bounded q0..q1 windowing the QK
+        //   path uses (overflow → shrink) is applied. The SiLU/GELU gate is data-dependent
+        //   (runtime), so it is NOT attested — only the static up→down skeleton is.
+        //   gate_proj is therefore not projected here.
+        //
+        // KIND VOCABULARY: one kind per math circuit. OV pairs emit under O_PROJECTS (the
+        // OV output); FFN pairs emit under DOWN_PROJECTS (the FFN output). V_PROJECTS,
+        // GATES and UP_PROJECTS remain bootstrapped (ModelDecomposer) but are NO LONGER
+        // EMITTED — they are sub-parts of the OV / FFN circuits, not standalone relations.
+        //
+        // E_U = lm_head.weight as f32; if absent (tied embeddings) E_U = E (the embedding).
+        //
+        // FLOOR — MEASURED, ESCALATED: the OV/FFN bilinear has a DIFFERENT magnitude scale
+        // than QK. On TinyLlama L0, OV head-0 |score| max ≈ 8.2e-4 / mean ≈ 9.1e-5 (64×64
+        // probe), FFN similar — vs the QkNoiseFloor 0.05 calibrated for pre-softmax q·k
+        // (median 2e-3, max 0.14). At 0.05 the OV/FFN circuits emit ~zero pairs (the floor
+        // sits ~60× above their max). The circuits are CORRECT (projections + bilinear are
+        // real, nonzero, structured); only the floor is mis-scaled for them. Per-circuit
+        // floor calibration is a substrate-policy decision for the user, NOT for this code
+        // to guess — so the default stays QkNoiseFloor and LAPLACE_OVFFN_FLOOR overrides it
+        // (e.g. 1e-4) for empirical calibration without a rebuild. Set it before declaring
+        // OV/FFN ingest "done".
+        if (Environment.GetEnvironmentVariable("LAPLACE_SKIP_OVFFN") != "1")
+        {
+        // Per-circuit noise floor. QK |score| peaks ~0.14, OV/FFN ~8e-4 — a single
+        // global floor either floods or emits ~zero (see note above). Default: calibrate
+        // the floor to each circuit's OWN magnitude spectrum (sampled once per circuit
+        // type) so significance adapts per tensor. An explicit LAPLACE_OVFFN_FLOOR still
+        // overrides (skips calibration). LAPLACE_SURVIVE_FRAC is the one policy knob:
+        // fraction of sampled pairs kept (default 5e-4).
+        bool floorOverridden = double.TryParse(
+                Environment.GetEnvironmentVariable("LAPLACE_OVFFN_FLOOR"),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var f) && f >= 0.0;
+        double ovffnFloor = floorOverridden ? f : QkNoiseFloor;
+        double surviveFrac = 5e-4;
+        if (double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_SURVIVE_FRAC"),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var sf) && sf > 0.0 && sf < 1.0)
+            surviveFrac = sf;
+        double ovFloorCal = double.NaN, ffnFloorCal = double.NaN;
+
+        float[] E_f32_circuit = LoadRawBF16AsF32(refMap, "model.embed_tokens.weight",
+                                                  (long)vocabSize * dModel);
+        float[] E_U = refMap.ContainsKey("lm_head.weight")
+            ? LoadRawBF16AsF32(refMap, "lm_head.weight", (long)vocabSize * dModel)
+            : E_f32_circuit;   // tied embeddings: unembedding IS the embedding
+
+        int queriesPerKvOv = nHeads / Math.Max(1, nKvHeads);
+        var circBuf = new QkPairF64[1 << 20];   // 16 MB bounded scratch, reused
+
+        bool ovffnBench = Environment.GetEnvironmentVariable("LAPLACE_QK_BENCH") == "1";
+        var circSw = new System.Diagnostics.Stopwatch();
+        long circPairsOv = 0, circPairsFfn = 0;
+
+        // ── OV caches (reused across all layers) ──
+        // A side: E   through v_proj's nKvHeads slices → [vocab][nKvHeads][headDim].
+        // C side: E_U through o_proj's nHeads   slices → [vocab][nHeads][headDim].
+        var ovA = new double[(long)vocabSize * nKvHeads * headDim];   // ~64 MB
+        var ovC = new double[(long)vocabSize * nHeads   * headDim];   // ~512 MB
+        // ── FFN caches (reused across all layers), single "head" of width interm ──
+        var ffnA = new double[(long)vocabSize * interm];             // ~1.4 GB
+        var ffnC = new double[(long)vocabSize * interm];             // ~1.4 GB
 
         for (int layer = 0; layer < _recipe.NumLayers; layer++)
         {
             ct.ThrowIfCancellationRequested();
             string p = $"model.layers.{layer}.";
 
-            AggregateLayerThroughEmbed(refMap, p + "self_attn.v_proj.weight",
-                kvDim, dModel, E_bf16, dModel, vocabSize, perTokenAccum[0].perToken);
-            AggregateLayerThroughEmbed(refMap, p + "self_attn.o_proj.weight",
-                dModel, attnOut, E_bf16, dModel, vocabSize, perTokenAccum[1].perToken);
-            AggregateLayerThroughEmbed(refMap, p + "mlp.gate_proj.weight",
-                interm, dModel, E_bf16, dModel, vocabSize, perTokenAccum[2].perToken);
-            AggregateLayerThroughEmbed(refMap, p + "mlp.up_proj.weight",
-                interm, dModel, E_bf16, dModel, vocabSize, perTokenAccum[3].perToken);
-            AggregateLayerThroughEmbed(refMap, p + "mlp.down_proj.weight",
-                dModel, interm, E_bf16, dModel, vocabSize, perTokenAccum[4].perToken);
-            await Task.Yield();
-        }
+            // ───────────── OV circuit ─────────────
+            string vName = p + "self_attn.v_proj.weight";
+            string oName = p + "self_attn.o_proj.weight";
+            if (refMap.ContainsKey(vName) && refMap.ContainsKey(oName))
+            {
+                // Wv: [nKvHeads*headDim × dModel] (HF output×input) — head g's slice is
+                // rows [g*headDim:(g+1)*headDim], already [headDim × dModel]: project_token
+                // wants proj[d]=Σ_m E[m]·W[d,m] over m∈dModel → NO transpose.
+                float[] vW = LoadRawBF16AsF32(refMap, vName, (long)kvDim * dModel);
+                // Wo: [dModel × nHeads*headDim] (HF output×input). The OV circuit needs
+                // C_h[s,d] = Σ_{m'} E_U[s,m']·Wo[m', h*headDim+d] (m'∈dModel). project_token
+                // wants Wslice[d, m'] = Wo[m', h*headDim+d] → TRANSPOSE the per-head column
+                // block of Wo into [headDim × dModel] per head, stacked over nHeads.
+                float[] oW   = LoadRawBF16AsF32(refMap, oName, (long)dModel * attnOut);
+                float[] oW_T = TransposeOProjToHeads(oW, dModel, nHeads, headDim);
 
-        for (int i = 0; i < perTokenAccum.Length; i++)
-        {
-            var (kindId, perToken, label) = perTokenAccum[i];
-            foreach (var c in EmitUnaryBatches(perToken, kindId, label))
-            { yield return c; await Task.Yield(); }
+                circSw.Start();
+                ProjectThroughHeads(E_f32_circuit, vocabSize, dModel, vW,   nKvHeads, headDim, ovA);
+                ProjectThroughHeads(E_U,           vocabSize, dModel, oW_T, nHeads,   headDim, ovC);
+                circSw.Stop();
+
+                if (!floorOverridden)
+                    ovffnFloor = double.IsNaN(ovFloorCal)
+                        ? (ovFloorCal = CalibrateFloor(ovA, nKvHeads, 0, ovC, nHeads, 0, vocabSize, headDim, surviveFrac))
+                        : ovFloorCal;
+
+                for (int h = 0; h < nHeads; h++)
+                {
+                    int kvHead = h / queriesPerKvOv;   // GQA: V side uses the kv head
+                    int q0 = 0;
+                    while (q0 < vocabSize)
+                    {
+                        int win = vocabSize - q0;
+                        long n; int overflow;
+                        while (true)
+                        {
+                            circSw.Start();
+                            // QUERY side = A (nKvHeads, slice kvHead); KEY side = C (nHeads, slice h).
+                            n = QkWindowCached(ovA, nKvHeads, ovC, nHeads, vocabSize, headDim,
+                                               kvHead, h, ovffnFloor, q0, q0 + win, circBuf, out overflow);
+                            circSw.Stop();
+                            if (overflow == 0) break;
+                            win = Math.Max(1, win / 2);
+                        }
+                        circPairsOv += n;
+                        if (!ovffnBench)
+                            foreach (var c in EmitPairBatches(circBuf, (int)n, _kinds.OProjects, "o_projects", ovffnFloor))
+                                yield return c;
+                        await Task.Yield();
+                        q0 += win;
+                    }
+                }
+            }
+
+            // ───────────── FFN circuit ─────────────
+            string upName   = p + "mlp.up_proj.weight";
+            string downName = p + "mlp.down_proj.weight";
+            if (refMap.ContainsKey(upName) && refMap.ContainsKey(downName))
+            {
+                // Wup: [interm × dModel] (HF output×input) — already [interm × dModel]:
+                // A[t,i]=Σ_m E[t,m]·Wup[i,m] → NO transpose. One "head" of width interm.
+                float[] upW = LoadRawBF16AsF32(refMap, upName, (long)interm * dModel);
+                // Wdown: [dModel × interm] (HF output×input). C[s,i]=Σ_{m'} E_U[s,m']·Wdown[m',i]
+                // → Wslice[i,m']=Wdown[m',i]: TRANSPOSE [dModel × interm] → [interm × dModel].
+                float[] downW   = LoadRawBF16AsF32(refMap, downName, (long)dModel * interm);
+                float[] downW_T = Transpose2D(downW, dModel, interm);
+
+                circSw.Start();
+                ProjectThroughHeads(E_f32_circuit, vocabSize, dModel, upW,     1, interm, ffnA);
+                ProjectThroughHeads(E_U,           vocabSize, dModel, downW_T, 1, interm, ffnC);
+                circSw.Stop();
+
+                if (!floorOverridden)
+                    ovffnFloor = double.IsNaN(ffnFloorCal)
+                        ? (ffnFloorCal = CalibrateFloor(ffnA, 1, 0, ffnC, 1, 0, vocabSize, interm, surviveFrac))
+                        : ffnFloorCal;
+
+                int q0 = 0;
+                while (q0 < vocabSize)
+                {
+                    int win = vocabSize - q0;
+                    long n; int overflow;
+                    while (true)
+                    {
+                        circSw.Start();
+                        n = QkWindowCached(ffnA, 1, ffnC, 1, vocabSize, interm,
+                                           0, 0, ovffnFloor, q0, q0 + win, circBuf, out overflow);
+                        circSw.Stop();
+                        if (overflow == 0) break;
+                        win = Math.Max(1, win / 2);
+                    }
+                    circPairsFfn += n;
+                    if (!ovffnBench)
+                        foreach (var c in EmitPairBatches(circBuf, (int)n, _kinds.DownProjects, "down_projects", ovffnFloor))
+                            yield return c;
+                    await Task.Yield();
+                    q0 += win;
+                }
+            }
+
+            _log.LogInformation(
+                "phase=OV+FFN layer {Layer}/{Total} (floor={Floor}): kernel {KMs} ms cumulative, "
+                + "OV {Ov:N0} / FFN {Ffn:N0} pairs above floor, wall {WallMs} ms{Bench}",
+                layer + 1, _recipe.NumLayers, ovffnFloor, circSw.ElapsedMilliseconds,
+                circPairsOv, circPairsFfn, phase.ElapsedMilliseconds,
+                ovffnBench ? " [BENCH: emit skipped]" : "");
         }
-        _log.LogInformation("phase=unary V/O/GATES/UP/DOWN done: {Layers} layers × 5 tensors ({Ms} ms)",
-            _recipe.NumLayers, phase.ElapsedMilliseconds);
+        _log.LogInformation(
+            "phase=OV+FFN done (floor={Floor}): {KMs} ms kernel, OV {Ov:N0} / FFN {Ffn:N0} pairs above floor, {WallMs} ms wall",
+            ovffnFloor, circSw.ElapsedMilliseconds, circPairsOv, circPairsFfn, phase.ElapsedMilliseconds);
+        } // end OV+FFN gate (LAPLACE_SKIP_OVFFN)
 
         // ─── NORMALIZES — unary on model recipe entity ──────────────────
         // ADR 0056:165 — unary (hidden_dim,), per-cell magnitude across layers.
@@ -337,34 +503,6 @@ public sealed class WeightTensorETL
         return result;
     }
 
-    /* Aggregate one V/O/G/U/D-style layer through the embedding into a
-     * per-token contribution: project E @ |W| → per-token magnitude (sum
-     * across the hidden/intermediate axis). Add to the per-token accumulator.
-     * Memory-bounded — bf16 tensor + accumulator both small relative to model. */
-    private unsafe void AggregateLayerThroughEmbed(
-        Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
-        string tensorName, int outDim, int inDim,
-        ushort[] E_bf16, int dModel, int vocab, double[] perTokenAccum)
-    {
-        if (!refMap.ContainsKey(tensorName)) return;
-        // Exact, deterministic, TBB+SIMD engine kernel — perInDim[i]=Σ_o|W[o,i]| then
-        // projection E·perInDim (inDim==dModel) or uniform fallback. Bit-parity verified
-        // against this former scalar path. (bf16-only tensors for now; F16/F32 dtype
-        // generality lands with the TensorDtypeDecoder chunk for Phi-2.)
-        ushort[] w = LoadRawBF16(refMap, tensorName, (long)outDim * inDim);
-        var outv = new double[vocab];
-        fixed (ushort* ep = E_bf16)
-        fixed (ushort* wp = w)
-        fixed (double* op = outv)
-        {
-            int rc = SynthInterop.ComputeProjectionPerToken(
-                ep, (nuint)vocab, (nuint)dModel, wp, (nuint)outDim, (nuint)inDim, op);
-            if (rc != 0)
-                throw new InvalidOperationException($"compute_projection_per_token returned {rc}");
-        }
-        for (int t = 0; t < vocab; t++) perTokenAccum[t] += outv[t];
-    }
-
     /* Emit unary attestations (one per token, object NULL).
      * Records every token whose aggregate magnitude clears the noise floor.
      * Near-zero = no real observation = not recorded (true zero is correct). */
@@ -427,6 +565,35 @@ public sealed class WeightTensorETL
         if (bb != null) yield return bb.Build();
     }
 
+    /* Stream above-threshold token×token pairs (from a cached-scorer window) as
+     * attestation batches under an arbitrary binary kind — the OV (O_PROJECTS) and FFN
+     * (DOWN_PROJECTS) circuit emitters. Identical contract to EmitQkBatches (no C# dedup;
+     * content-addressed dedup / Glicko consensus is the writer's job), parameterized by
+     * kind + label + floor so one math circuit ⇒ one kind. */
+    private IEnumerable<SubstrateChange> EmitPairBatches(
+        QkPairF64[] buf, int n, Hash128 kindId, string label, double floor)
+    {
+        SubstrateChangeBuilder? bb = null;
+        int inBatch = 0, batchIdx = 0;
+        int tokCount = _tokens.Count;
+        for (int i = 0; i < n; i++)
+        {
+            uint qi = buf[i].QueryIdx, kj = buf[i].KeyIdx;
+            if (qi >= (uint)tokCount || kj >= (uint)tokCount) continue;
+            var row = AttestationFactory.CreateWeighted(
+                _tokens[(int)qi].EntityId, kindId, _tokens[(int)kj].EntityId,
+                _sourceId, contextId: null,
+                tier: KindValueTier.T9, trust: TrustClass.AiModelProbeTier7,
+                magnitude: buf[i].Score, floor: floor);
+
+            bb ??= new SubstrateChangeBuilder(_sourceId, $"{label}/batch-{batchIdx}",
+                entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: AttBatchSize);
+            bb.AddAttestation(row);
+            if (++inBatch >= AttBatchSize) { yield return bb.Build(); bb = null; inBatch = 0; batchIdx++; }
+        }
+        if (bb != null) yield return bb.Build();
+    }
+
     /* Project a layer's Q + K through the embedding ONCE for ALL heads, streaming E a
      * single time, into the reusable f64 caches. qCache [vocab][nHeads][headDim],
      * kCache [vocab][nKvHeads][headDim], row-major. The per-element compensated projection
@@ -448,6 +615,114 @@ public sealed class WeightTensorETL
                 (nuint)headDim, qc, kc);
         }
         if (rc != 0) throw new InvalidOperationException($"project_qk_layer returned {rc}");
+    }
+
+    /* Project a SINGLE source matrix `src` [vocab × dModel] through `nProj` stacked head
+     * weights `wStacked` ([nProj*headWidth × dModel], project_token row-major: out[d]=Σ_m
+     * src[m]·W[d,m]) into `cacheOut` [vocab][nProj][headWidth], REUSING the existing
+     * project_qk_layer kernel. That kernel projects two weight sets through ONE source;
+     * here only one side is wanted (OV / FFN use DIFFERENT sources for the A and C sides),
+     * so the k-slot is fed a 1-head dummy (the same weight's first headWidth rows, valid
+     * memory) into a tiny throwaway cache. The compensated f64 projection in the q-slot is
+     * therefore IDENTICAL to the QK path (no new kernel). */
+    private static unsafe void ProjectThroughHeads(
+        float[] src, int vocab, int dModel, float[] wStacked, int nProj, int headWidth,
+        double[] cacheOut)
+    {
+        if ((long)nProj * headWidth * dModel != wStacked.LongLength)
+            throw new InvalidOperationException(
+                $"ProjectThroughHeads: weight length {wStacked.LongLength} != nProj({nProj})*headWidth({headWidth})*dModel({dModel})");
+        if ((long)vocab * nProj * headWidth != cacheOut.LongLength)
+            throw new InvalidOperationException(
+                $"ProjectThroughHeads: cache length {cacheOut.LongLength} != vocab({vocab})*nProj({nProj})*headWidth({headWidth})");
+        // 1-head throwaway k-slot — project_qk_layer rejects null Wk / zero n_kv (qk_project_cached.cpp:85-86).
+        var kDummy = new double[(long)vocab * headWidth];
+        int rc;
+        fixed (float* ep = src)
+        fixed (float* wp = wStacked)
+        fixed (double* qc = cacheOut)
+        fixed (double* kc = kDummy)
+        {
+            rc = SynthInterop.ProjectQkLayer(
+                ep, (nuint)vocab, (nuint)dModel, wp, (nuint)nProj, wp, 1u,
+                (nuint)headWidth, qc, kc);
+        }
+        if (rc != 0) throw new InvalidOperationException($"project_qk_layer (single-source) returned {rc}");
+    }
+
+    /* Transpose a row-major [rows × cols] f32 matrix to [cols × rows]. Used to turn HF
+     * down_proj [dModel × interm] into the [interm × dModel] layout project_token wants
+     * (Wslice[i,m']=Wdown[m',i]) for the FFN C side. */
+    private static float[] Transpose2D(float[] a, int rows, int cols)
+    {
+        if ((long)rows * cols != a.LongLength)
+            throw new InvalidOperationException(
+                $"Transpose2D: length {a.LongLength} != rows({rows})*cols({cols})");
+        var t = new float[(long)cols * rows];
+        for (int r = 0; r < rows; r++)
+        {
+            long ro = (long)r * cols;
+            for (int c = 0; c < cols; c++)
+                t[(long)c * rows + r] = a[ro + c];
+        }
+        return t;
+    }
+
+    /* Per-circuit noise-floor calibration. The bilinear magnitude scale differs per
+     * circuit (QK |q·k| peaks ~0.14, OV/FFN ~8e-4), so a single global floor cannot fit
+     * all three. Sample a stride of query rows, score each against ALL keys over the
+     * SAME cached dot the production kernel uses, collect |score|, and return the
+     * magnitude at the (1-surviveFrac) quantile — the floor that keeps ~surviveFrac of
+     * pairs for THIS circuit's spectrum. Calibration samples; production scoring stays
+     * exact. aSlot/cSlot pick the head slice within an interleaved [vocab][slots][width]
+     * cache. */
+    private static double CalibrateFloor(
+        double[] aCache, int aSlots, int aSlot,
+        double[] cCache, int cSlots, int cSlot,
+        int vocab, int width, double surviveFrac)
+    {
+        int sampleQ = Math.Min(256, vocab);
+        int stride  = Math.Max(1, vocab / sampleQ);
+        int rows = 0;
+        for (int t = 0; t < vocab; t += stride) rows++;
+        var mags = new double[(long)rows * vocab];
+        long w = 0;
+        for (int t = 0; t < vocab; t += stride)
+        {
+            long aOff = ((long)t * aSlots + aSlot) * width;
+            for (int s = 0; s < vocab; s++)
+            {
+                long cOff = ((long)s * cSlots + cSlot) * width;
+                double dot = 0.0;
+                for (int d = 0; d < width; d++) dot += aCache[aOff + d] * cCache[cOff + d];
+                mags[w++] = Math.Abs(dot);
+            }
+        }
+        if (mags.Length == 0) return 0.0;
+        Array.Sort(mags);
+        long idx = (long)((1.0 - surviveFrac) * (mags.LongLength - 1));
+        return mags[Math.Clamp(idx, 0L, mags.LongLength - 1)];
+    }
+
+    /* Build the OV C-side weight stack from HF o_proj. o_proj is [dModel × nHeads*headDim]
+     * (output×input). The OV circuit needs, per head h, Wslice_h[d, m'] = Wo[m', h*headDim+d]
+     * (m'∈dModel, d∈headDim) so project_token gives C_h[s,d]=Σ_{m'} E_U[s,m']·Wo[m',h*headDim+d].
+     * Output: [nHeads*headDim × dModel], head h's [headDim × dModel] block at h*headDim*dModel,
+     * row d = column (h*headDim+d) of Wo over all dModel output rows. */
+    private static float[] TransposeOProjToHeads(float[] oW, int dModel, int nHeads, int headDim)
+    {
+        int attnOut = nHeads * headDim;
+        if ((long)dModel * attnOut != oW.LongLength)
+            throw new InvalidOperationException(
+                $"TransposeOProjToHeads: length {oW.LongLength} != dModel({dModel})*nHeads*headDim({attnOut})");
+        var t = new float[(long)attnOut * dModel];   // [nHeads*headDim × dModel]
+        for (int mp = 0; mp < dModel; mp++)            // Wo output row m'
+        {
+            long woRow = (long)mp * attnOut;
+            for (int col = 0; col < attnOut; col++)    // col = h*headDim + d
+                t[(long)col * dModel + mp] = oW[woRow + col];
+        }
+        return t;
     }
 
     /* One (layer, head) query-row window scored from the pre-projected caches (no E touch).

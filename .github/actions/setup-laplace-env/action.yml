@@ -1,0 +1,24 @@
+name: Set up Laplace build/runtime env
+description: >
+  Source the Intel oneAPI toolchain and export the oneAPI vars + Laplace runtime
+  env (LD_LIBRARY_PATH for the engine .so, T0 perf-cache path) into $GITHUB_ENV so
+  every subsequent step in the job inherits them. Replaces the per-job copy-pasted
+  "Source oneAPI env" block.
+
+runs:
+  using: composite
+  steps:
+    - name: Source oneAPI + export build/runtime env
+      shell: bash
+      run: |
+        # oneAPI setvars trips unset-var checks — relax `-u` only across the source.
+        set +u
+        source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+        set -u
+        # GH Actions runs each step in a fresh shell; persist what the toolchain set.
+        printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
+        echo "PATH=$PATH" >> "$GITHUB_ENV"
+        # Engine libs (core/dynamics/synthesis) ahead of the oneAPI libs, + the T0
+        # perf-cache the CLI/migrations/tests mmap. $PWD is the repo root post-checkout.
+        echo "LD_LIBRARY_PATH=$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+        echo "LAPLACE_PERFCACHE_BIN=$PWD/build/engine/core/perfcache/laplace_t0_perfcache.bin" >> "$GITHUB_ENV"
