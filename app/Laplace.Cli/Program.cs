@@ -315,10 +315,13 @@ internal static class Program
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
 
-        /* Check if this model source is already ingested — Q_PROJECTS attestations
-         * only exist after the weight extraction phase completes successfully.
-         * Same attestation ID = same content = ON CONFLICT DO NOTHING, so re-running
-         * is safe but wasteful. Short-circuit here for the common re-run case. */
+        /* Check if this model source is already ingested — COMPLETES_TO attestations
+         * (the FFN/OV key→value memories) only exist after the weight phase completes.
+         * MUST be a kind the current ingest actually emits: the corrected path emits
+         * COMPLETES_TO (not Q_PROJECTS — the old per-circuit bilinear kind), so the
+         * guard keys on COMPLETES_TO. This is what makes re-ingest short-circuit instead
+         * of hammering the DB with a second full ingest. Same attestation ID = same
+         * content = ON CONFLICT DO NOTHING, so re-running is safe but wasteful. */
         await using (var chkConn = await ds.OpenConnectionAsync())
         {
             await using var chkCmd = chkConn.CreateCommand();
@@ -326,7 +329,7 @@ internal static class Program
                 "SELECT EXISTS(SELECT 1 FROM laplace.attestations " +
                 "WHERE source_id = $1 AND kind_id = $2 LIMIT 1)";
             chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = ModelDecomposer.Source.ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
-            chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = ModelDecomposer.QProjectsKind.ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
+            chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = ModelDecomposer.CompletesToKind.ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
             bool alreadyIngested = (bool)(await chkCmd.ExecuteScalarAsync() ?? false);
             if (alreadyIngested)
             {
@@ -1443,9 +1446,14 @@ internal static class Program
             return (long)(await c.ExecuteScalarAsync())!;
         }
 
-        // Full ADR 0056 T9 transformer-family vocabulary (all 10 kinds restored Stream A).
+        // Corrected ingest emits content records, not the per-circuit bilinear kinds:
+        // COMPLETES_TO = the FFN/OV [context n-gram] ⇒ {completion} key→value memories.
+        // The old Q_PROJECTS/O_PROJECTS/EMBEDS/… per-circuit kinds are no longer emitted
+        // (the token×token-bilinear "disease"); kept here at the tail for visibility — they
+        // read 0 on a corrected ingest, which is the point.
         (string label, Hash128 kind)[] modelKinds =
         [
+            ("COMPLETES_TO",    ModelDecomposer.CompletesToKind),
             ("EMBEDS",          ModelDecomposer.EmbedsKind),
             ("Q_PROJECTS",      ModelDecomposer.QProjectsKind),
             ("K_PROJECTS",      ModelDecomposer.KProjectsKind),

@@ -54,14 +54,11 @@ jobs:
             [ "$n" -ge "$2" ] || { echo "::error::kind $1 has $n (need >= $2)"; exit 1; }
             echo "  ✓ $1 = $n"
           }
-          # Circuits the bilinear ETL emits: QK→Q_PROJECTS, OV→O_PROJECTS, FFN→DOWN_PROJECTS,
-          # plus token EMBEDS and per-layer NORMALIZES. O/DOWN must be >0 at the chosen floor —
-          # the 0.05 QK floor emits ~0 OV/FFN, which is exactly the regression this gate catches.
-          gate EMBEDS        10000
-          gate Q_PROJECTS    100000
-          gate O_PROJECTS    1
-          gate DOWN_PROJECTS 1
-          gate NORMALIZES    1
+          # Corrected ingest emits CONTENT records, not per-circuit bilinear kinds:
+          # COMPLETES_TO = the FFN/OV [context n-gram] ⇒ {completion} key→value memories.
+          # (The old Q_PROJECTS/O_PROJECTS/DOWN_PROJECTS/EMBEDS/NORMALIZES kinds are the
+          # token×token-bilinear disease and are intentionally NOT emitted — they read 0.)
+          gate COMPLETES_TO  1000
 
       - name: "consensus — rebuild materialized Glicko-2 consensus over seed + model evidence"
         run: $CLI rebuild-consensus
