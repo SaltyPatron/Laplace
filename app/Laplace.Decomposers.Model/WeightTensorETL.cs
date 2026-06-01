@@ -322,9 +322,12 @@ public sealed class WeightTensorETL
 
         foreach (var v in valMap)
         {
-            var row = AttestationFactory.CreateWeighted(
+            // Seed as a neutral Glicko match from the magnitude — NO tier, NO trust-class
+            // (tier is for the entity Merkle stratum only; trust is a Glicko value). The
+            // (layer,head) witness is the context; kind-rank × source-trust weighting is the
+            // consensus accumulate's φ, not a tier here.
+            var row = AttestationFactory.CreateFromMatch(
                 ngramId, kind, v.Key, _sourceId, contextId: witness,
-                tier: KindValueTier.T9, trust: TrustClass.AiModelProbeTier7,
                 magnitude: v.Value.mag, floor: valFloor);
             if (relMap.TryGetValue(row.Id, out var acc)) relMap[row.Id] = (acc.row, acc.count + 1);
             else { relMap[row.Id] = (row, 1); counters[1]++; }   // distinct relation; count = games

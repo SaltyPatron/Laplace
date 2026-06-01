@@ -50,6 +50,20 @@ lens). Updated 2026-06-01. The point of this file: stop re-breaking things that 
 - **Queries were ad-hoc** — ranked-μ / completions / dedup-stats were hand-run each session. FIX: permanent
   substrate functions (`top_relations`, `completions`, `consensus_stats`) in the extension SQL.
 
+## Tier / trust corruption (truth #5 — "tier" is the entity Merkle stratum ONLY)
+
+- **`KindValueTier` (a tier on KINDS) and `TrustClass` (a tier/class ladder on TRUST) are
+  corruption.** Tier is reserved for the entity Merkle depth (T0 codepoint → up). Trust is a
+  Glicko-2 value (rating/rd/vol), never a class/tier. Kind significance is a kind RANK, not a tier.
+- **Model path FIXED:** `AttestationFactory.CreateFromMatch` seeds an evidence attestation as a
+  neutral Glicko match from the magnitude — no tier, no trust-class; `WeightTensorETL` uses it
+  (dropped the hardcoded `T9` / `AiModelProbeTier7`). Kind-rank × source-trust × tenant-trust
+  weighting belongs at the consensus accumulate as Glicko φ, not a tier in the evidence.
+- **STILL TO PURGE:** `KindValueTier` + `TrustClass` enums and their use across ~18 other files
+  (the seed decomposers — WordNet/OMW/UD/ConceptNet/Tatoeba/Atomic2020/Unicode/ISO/Image/Audio,
+  `AttestationFactory.CreateWeighted`/`Create`/`TierPrior`/`TrustWeight`, `BootstrapIntentBuilder`,
+  the dead `ExtractAsync` path). Same corruption; replace with rank/Glicko-trust, delete the enums.
+
 ## Still open (next)
 
 - **Morph (LE→GSO→Procrustes)** gated off (`LAPLACE_SKIP_MORPH`): dense eigenmaps is O(n²·d). It gives the

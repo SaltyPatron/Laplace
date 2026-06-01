@@ -106,6 +106,51 @@ public static class AttestationFactory
     }
 
     /// <summary>
+    /// Seed an evidence attestation as a single Glicko-2 MATCH from a witness magnitude — NO
+    /// tier, NO trust-class. "Tier" is reserved exclusively for the entity Merkle stratum; a
+    /// KindValueTier on a kind or a TrustClass ladder on trust is corruption (truth #5). The
+    /// rating encodes the match outcome: strength = |m|/(|m|+floor) ∈ (0,1], scaled to the
+    /// consensus score range (×<see cref="MatchMaxMu"/>, the same 2500 cap consensus reads as
+    /// LEAST(rating/2500,1)). rd/vol start neutral (one witness, wide). The kind-rank ×
+    /// source-trust × tenant-trust WEIGHTING is applied at the consensus accumulate as Glicko
+    /// opponent precision φ — never baked into the evidence id or a tier here. observation_count
+    /// = occurrences (games) folded into this witness.
+    /// </summary>
+    public static AttestationRow CreateFromMatch(
+        Hash128 subject, Hash128 kindId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
+        double magnitude, double floor, long observationCount = 1)
+    {
+        Span<byte> buf = stackalloc byte[16 * 5];
+        subject.WriteBytes(buf.Slice(0, 16));
+        kindId.WriteBytes(buf.Slice(16, 16));
+        (obj ?? Hash128.Zero).WriteBytes(buf.Slice(32, 16));
+        sourceId.WriteBytes(buf.Slice(48, 16));
+        (contextId ?? Hash128.Zero).WriteBytes(buf.Slice(64, 16));
+        var id = Hash128.Blake3(buf);
+
+        double m        = Math.Abs(magnitude);
+        double strength = (floor > 0 && m > 0) ? m / (m + floor) : (m > 0 ? 1.0 : 0.0);
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+
+        return new AttestationRow(
+            Id:                   id,
+            SubjectId:            subject,
+            KindId:               kindId,
+            ObjectId:             obj,
+            SourceId:             sourceId,
+            ContextId:            contextId,
+            RatingFp1e9:          (long)(strength * MatchMaxMu * Glicko2.FpScale),
+            RdFp1e9:              (long)(NeutralRd  * Glicko2.FpScale),
+            VolatilityFp1e9:      (long)(NeutralVol * Glicko2.FpScale),
+            LastObservedAtUnixUs: nowUs,
+            ObservationCount:     observationCount);
+    }
+
+    private const double MatchMaxMu = 2500.0;   // consensus score scale (LEAST(rating/2500, 1))
+    private const double NeutralRd  = 350.0;    // one witness → wide rd (Glicko-2 default band)
+    private const double NeutralVol = 0.06;     // Glicko-2 default volatility
+
+    /// <summary>
     /// Content-addressed attestation ID — BLAKE3 of the canonical 5-tuple
     /// (subject, kind, object, source, context). Same hashing used internally
     /// by <see cref="Create"/>; exposed so per-instance paths (Glicko-2
