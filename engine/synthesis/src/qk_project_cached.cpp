@@ -39,29 +39,19 @@ inline void project_token(const float* E_row, const float* W, size_t d_model,
                           size_t head_dim, double* proj /*[head_dim]*/) {
     for (size_t d = 0; d < head_dim; ++d) {
         const float* w = W + d * d_model;
-        /* Fixed-order 8-lane reduction (lane l accumulates m ≡ l mod 8), combined in
-         * a fixed tree, tail in fixed order. The lane assignment and combine order
-         * are pinned in source, so proj[d] is bit-identical regardless of thread
-         * count — reproducibility is structural, not a setting. The 8 independent
-         * lanes break the serial dependency the Neumaier chain imposed, so the
-         * compiler vectorizes this where it could not before. f64 accumulate is
-         * witness precision (the magnitude becomes a Glicko match), not lossless
-         * reconstruction. */
-        double a0=0,a1=0,a2=0,a3=0,a4=0,a5=0,a6=0,a7=0;
-        size_t m = 0;
-        for (; m + 8 <= d_model; m += 8) {
-            a0 += (double)E_row[m+0] * (double)w[m+0];
-            a1 += (double)E_row[m+1] * (double)w[m+1];
-            a2 += (double)E_row[m+2] * (double)w[m+2];
-            a3 += (double)E_row[m+3] * (double)w[m+3];
-            a4 += (double)E_row[m+4] * (double)w[m+4];
-            a5 += (double)E_row[m+5] * (double)w[m+5];
-            a6 += (double)E_row[m+6] * (double)w[m+6];
-            a7 += (double)E_row[m+7] * (double)w[m+7];
-        }
-        double tail = 0.0;
-        for (; m < d_model; ++m) tail += (double)E_row[m] * (double)w[m];
-        proj[d] = (((a0 + a1) + (a2 + a3)) + ((a4 + a5) + (a6 + a7))) + tail;
+        /* Serial Neumaier compensated sum over m, fixed order — BIT-IDENTICAL to
+         * qk_pairs_threshold.cpp's project_token (the all-pairs reference) and to the
+         * C# Neumaier reference. The substrate is exact and deterministic (no ANN, no
+         * approximation): the project-once cache and the all-pairs kernel MUST agree
+         * bit-for-bit, so both use the same compensated chain. (A prior 8-lane plain
+         * reduction here vectorized faster but dropped compensation, diverging by 1 ULP
+         * — that broke determinism parity and was less exact; reverted.) Determinism is
+         * structural: each (token,head,dim) record is computed wholly by one thread in
+         * this fixed order, so the cache is identical run-to-run regardless of threads. */
+        double sum = 0.0, c = 0.0;
+        for (size_t m = 0; m < d_model; ++m)
+            neumaier_add(sum, c, (double)E_row[m] * (double)w[m]);
+        proj[d] = sum + c;
     }
 }
 
