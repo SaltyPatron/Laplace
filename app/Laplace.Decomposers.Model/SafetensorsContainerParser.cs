@@ -17,6 +17,10 @@ public sealed class SafetensorsContainerParser
         public required long     DataStart   { get; init; }  // byte offset from data section start
         public required long     DataEnd     { get; init; }
         public required long     HeaderBytes { get; init; }  // 8 + header_json_len, for absolute seek
+        /// <summary>Absolute path of the shard file this tensor lives in. Set by
+        /// <see cref="ParseHeader(string)"/> / <see cref="ParseModel"/>; empty on the stream
+        /// overload. Sharded models place different tensors in different files.</summary>
+        public string FilePath { get; set; } = "";
 
         public long AbsoluteDataStart => HeaderBytes + DataStart;
         public long AbsoluteDataEnd   => HeaderBytes + DataEnd;
@@ -24,14 +28,40 @@ public sealed class SafetensorsContainerParser
     }
 
     /// <summary>
+    /// Enumerate ALL tensors of a model directory — single-file OR sharded — by parsing
+    /// every <c>*.safetensors</c> shard's header and stamping each tensor with its shard
+    /// <see cref="TensorReference.FilePath"/>. No model.safetensors.index.json needed: each
+    /// shard's own header carries its tensors + offsets; the union is the whole model.
+    /// Generic across architectures and shard counts (TinyLlama 1 file, Phi-2 2 files, …).
+    /// </summary>
+    public static IReadOnlyList<TensorReference> ParseModel(string modelDir)
+    {
+        var files = Directory.GetFiles(modelDir, "*.safetensors")
+                             .OrderBy(f => f, StringComparer.Ordinal).ToArray();
+        if (files.Length == 0)
+            throw new FileNotFoundException($"no .safetensors found in model dir: {modelDir}");
+        var all = new List<TensorReference>();
+        foreach (var f in files) all.AddRange(ParseHeader(f));   // FilePath stamped per shard
+        all.Sort((a, b) =>
+        {
+            int c = string.CompareOrdinal(a.FilePath, b.FilePath);
+            return c != 0 ? c : a.DataStart.CompareTo(b.DataStart);
+        });
+        return all;
+    }
+
+    /// <summary>
     /// Parse the safetensors header from <paramref name="path"/>.
-    /// Returns tensor references ordered by data_offsets[0] (file order).
+    /// Returns tensor references ordered by data_offsets[0] (file order), each stamped with
+    /// <see cref="TensorReference.FilePath"/> = <paramref name="path"/>.
     /// </summary>
     public static IReadOnlyList<TensorReference> ParseHeader(string path)
     {
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
                                       bufferSize: 4096, useAsync: false);
-        return ParseHeader(fs);
+        var refs = ParseHeader(fs);
+        foreach (var r in refs) r.FilePath = path;
+        return refs;
     }
 
     public static IReadOnlyList<TensorReference> ParseHeader(Stream stream)

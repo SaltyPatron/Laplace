@@ -20,10 +20,37 @@ namespace Laplace.Decomposers.Model;
 public sealed class ModelDecomposer : IDecomposer
 {
     /* Well-known substrate IDs */
-    public static readonly Hash128 Source =
-        Hash128.OfCanonical("substrate/source/TinyLlama-1.1B-Chat-v1.0/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AIModelProbe/v1");
+
+    /// <summary>
+    /// Derive the source identity from the model DIRECTORY — per-model, never hardcoded to a
+    /// family. HF cache "…/models--ORG--NAME/snapshots/SHA" → "ORG/NAME"; otherwise the model/
+    /// snapshot dir name (a bare SHA tail is skipped). Used by the decomposer AND by callers
+    /// that only have the dir (the re-ingest guard, synthesis), so they agree on the id.
+    /// </summary>
+    public static (Hash128 Id, string Name) SourceForModel(string modelDir)
+    {
+        string name = DeriveModelName(modelDir);
+        return (Hash128.OfCanonical($"substrate/source/{name}/v1"), name);
+    }
+
+    private static string DeriveModelName(string modelDir)
+    {
+        string norm = (modelDir ?? "").Replace('\\', '/').TrimEnd('/');
+        var segs = norm.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var seg in segs)
+            if (seg.StartsWith("models--", StringComparison.Ordinal))
+                return string.Join("/", seg.Substring("models--".Length).Split("--"));
+        for (int i = segs.Length - 1; i >= 0; i--)
+        {
+            string s = segs[i];
+            if (s == "snapshots") continue;
+            if (s.Length >= 32 && s.All(Uri.IsHexDigit)) continue;   // skip a snapshot SHA
+            return s;
+        }
+        return "model";
+    }
 
     /* Type IDs */
     public static readonly Hash128 TextTypeId =
@@ -123,14 +150,19 @@ public sealed class ModelDecomposer : IDecomposer
     };
 
     private readonly string _modelDir;
+    private readonly Hash128 _source;
+    private readonly string  _sourceName;
 
     public ModelDecomposer(string modelDir)
     {
         _modelDir = modelDir ?? throw new ArgumentNullException(nameof(modelDir));
+        (_source, _sourceName) = SourceForModel(modelDir);   // per-model identity, not hardcoded
     }
 
-    public Hash128 SourceId     => Source;
-    public string  SourceName   => "TinyLlama-1.1B-Chat-v1.0";
+    /// <summary>This model's source identity, derived from its directory.</summary>
+    public Hash128 Source       => _source;
+    public Hash128 SourceId     => _source;
+    public string  SourceName   => _sourceName;
     public int     LayerOrder   => 10;
     public Hash128 TrustClassId => TrustClass;
 

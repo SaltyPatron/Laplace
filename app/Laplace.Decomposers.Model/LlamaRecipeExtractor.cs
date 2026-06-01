@@ -56,8 +56,11 @@ public sealed class LlamaRecipeExtractor
         int vocabSize  = GetIntRequired(root, "vocab_size");
         string dtype   = root.TryGetProperty("torch_dtype",  out var dtProp) ? dtProp.GetString() ?? "bfloat16" : "bfloat16";
         string act     = root.TryGetProperty("hidden_act",   out var actProp) ? actProp.GetString() ?? "silu" : "silu";
-        double theta   = root.TryGetProperty("rope_theta",   out var thetaProp) ? thetaProp.GetDouble() : 10000.0;
-        double rmsEps  = root.TryGetProperty("rms_norm_eps", out var epsProp) ? epsProp.GetDouble() : 1e-5;
+        double theta   = GetDoubleOr(root, "rope_theta", 10000.0);
+        // Phi (and others) carry rms_norm_eps:null and use layer_norm_eps instead; GetDouble()
+        // on a JSON null throws. Take rms_norm_eps if it's a real number, else layer_norm_eps,
+        // else 1e-5 — generic across norm conventions, never crashes on a null.
+        double rmsEps  = GetDoubleOr(root, "rms_norm_eps", GetDoubleOr(root, "layer_norm_eps", 1e-5));
         string mtype   = root.TryGetProperty("model_type",   out var mtProp) ? mtProp.GetString() ?? "llama" : "llama";
 
         /* Canonical bytes = deterministic JSON re-serialisation (sorted keys). */
@@ -146,7 +149,18 @@ public sealed class LlamaRecipeExtractor
 
     private static int GetInt(JsonElement root, string key, int def)
     {
-        if (root.TryGetProperty(key, out var prop)) return prop.GetInt32();
+        if (root.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.Number)
+            return prop.GetInt32();
+        return def;   // absent OR null (e.g. num_key_value_heads:null) → default
+    }
+
+    // Double-or-default that tolerates absent AND null (JSON null is ValueKind.Null, not
+    // Number → GetDouble() would throw). Generic across configs that null out a key they
+    // don't use (Phi: rms_norm_eps:null).
+    private static double GetDoubleOr(JsonElement root, string key, double def)
+    {
+        if (root.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.Number)
+            return prop.GetDouble();
         return def;
     }
 

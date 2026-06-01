@@ -65,7 +65,6 @@ public sealed class WeightTensorETL
      * Glicko-2 consensus, not a pre-selected top-k percentage from one model. */
     private const double NoiseFloor   = 1e-9;
 
-    private readonly string _safetensorsPath;
     private readonly LlamaRecipeExtractor.RecipeInfo _recipe;
     private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
     private readonly LlamaWeightExtractor.KindIds _kinds;
@@ -86,8 +85,8 @@ public sealed class WeightTensorETL
         _sourceId        = sourceId;
         _kinds           = kinds;
         _log             = log ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
-        _safetensorsPath = Path.Combine(modelDir, "model.safetensors");
-        _refs            = SafetensorsContainerParser.ParseHeader(_safetensorsPath);
+        // Sharded-aware: union of every *.safetensors shard; each tensor carries its FilePath.
+        _refs            = SafetensorsContainerParser.ParseModel(modelDir);
     }
 
     /// <summary>
@@ -1052,7 +1051,8 @@ public sealed class WeightTensorETL
     {
         var tref = refMap[name];
         byte[] rawBytes = new byte[tref.DataLength];
-        using var fs = new FileStream(_safetensorsPath, FileMode.Open, FileAccess.Read,
+        // Open the SHARD this tensor lives in (sharded-aware); FilePath is set by ParseModel.
+        using var fs = new FileStream(tref.FilePath, FileMode.Open, FileAccess.Read,
                                       FileShare.Read, 1 << 16, useAsync: false);
         fs.Seek(tref.AbsoluteDataStart, SeekOrigin.Begin);
         int total = 0;

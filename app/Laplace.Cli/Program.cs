@@ -322,13 +322,14 @@ internal static class Program
          * guard keys on COMPLETES_TO. This is what makes re-ingest short-circuit instead
          * of hammering the DB with a second full ingest. Same attestation ID = same
          * content = ON CONFLICT DO NOTHING, so re-running is safe but wasteful. */
+        var (modelSource, modelName) = ModelDecomposer.SourceForModel(modelDir);
         await using (var chkConn = await ds.OpenConnectionAsync())
         {
             await using var chkCmd = chkConn.CreateCommand();
             chkCmd.CommandText =
                 "SELECT EXISTS(SELECT 1 FROM laplace.attestations " +
                 "WHERE source_id = $1 AND kind_id = $2 LIMIT 1)";
-            chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = ModelDecomposer.Source.ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
+            chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = modelSource.ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
             chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = ModelDecomposer.CompletesToKind.ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
             bool alreadyIngested = (bool)(await chkCmd.ExecuteScalarAsync() ?? false);
             if (alreadyIngested)
@@ -337,7 +338,7 @@ internal static class Program
                 // contaminate consensus, so it is refused by design. To re-run
                 // (e.g. testing), reset the DB: `just db-fresh` (nuke + migrate +
                 // seed-t0). There is intentionally no in-place override.
-                Console.WriteLine($"Model already ingested — source entity: {ModelDecomposer.Source}");
+                Console.WriteLine($"Model already ingested — source {modelName}: {modelSource}");
                 Console.WriteLine($"(re-ingest is refused to prevent consensus contamination; "
                                   + $"reset with 'just db-fresh' to test from scratch)");
                 return 0;
@@ -516,6 +517,7 @@ internal static class Program
 
         var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
         var recipe = LlamaRecipeExtractor.Parse(recipePath);
+        var synthSource = ModelDecomposer.SourceForModel(modelDir).Id;   // per-model identity
         int vocab = recipe.VocabSize;
         int dModel = recipe.HiddenSize;
 
@@ -560,7 +562,7 @@ internal static class Program
                   AND kind_id = ANY($2)
                   AND object_id IS NULL
                 """;
-            cmd.Parameters.AddWithValue(ModelDecomposer.Source.ToBytes());
+            cmd.Parameters.AddWithValue(synthSource.ToBytes());
             var unaryKinds = new[] {
                 ModelDecomposer.EmbedsKind, ModelDecomposer.VProjectsKind,
                 ModelDecomposer.OProjectsKind, ModelDecomposer.GatesKind,
@@ -593,7 +595,7 @@ internal static class Program
                 SELECT subject_id, object_id, rating, rd FROM laplace.attestations
                 WHERE source_id = $1 AND kind_id = $2 AND object_id IS NOT NULL
                 """;
-            cmd.Parameters.AddWithValue(ModelDecomposer.Source.ToBytes());
+            cmd.Parameters.AddWithValue(synthSource.ToBytes());
             cmd.Parameters.AddWithValue(ModelDecomposer.QProjectsKind.ToBytes());
             await using var rdr = await cmd.ExecuteReaderAsync();
             while (await rdr.ReadAsync())
@@ -623,7 +625,7 @@ internal static class Program
                 SELECT rating, rd FROM laplace.attestations
                 WHERE source_id = $1 AND kind_id = $2 AND subject_id = $3
                 """;
-            cmd.Parameters.AddWithValue(ModelDecomposer.Source.ToBytes());
+            cmd.Parameters.AddWithValue(synthSource.ToBytes());
             cmd.Parameters.AddWithValue(ModelDecomposer.NormalizesKind.ToBytes());
             cmd.Parameters.AddWithValue(recipe.RecipeEntityId.ToBytes());
             await using var rdr = await cmd.ExecuteReaderAsync();
@@ -1426,9 +1428,20 @@ internal static class Program
             }
         }
 
-        long modelAtts = await Scalar(
-            "SELECT count(*) FROM laplace.attestations WHERE source_id = @p",
-            ModelDecomposer.Source.ToBytes());
+        // Multi-model: count the model relation kinds GLOBALLY (across every model source),
+        // not for a single hardcoded source — stats must not assume one model.
+        async Task<long> KindCount(Hash128 kind)
+        {
+            await using var c = conn.CreateCommand();
+            c.CommandText =
+                "SELECT count(*) FROM laplace.attestations WHERE kind_id = @k";
+            c.Parameters.AddWithValue("k", kind.ToBytes());
+            return (long)(await c.ExecuteScalarAsync())!;
+        }
+
+        long modelAtts = await KindCount(ModelDecomposer.AttendsKind)
+                       + await KindCount(ModelDecomposer.OvRelatesKind)
+                       + await KindCount(ModelDecomposer.CompletesToKind);
         if (modelAtts == 0)
         {
             Console.WriteLine("  model attestations    : (none — ingest model)");
@@ -1436,15 +1449,6 @@ internal static class Program
         }
 
         Console.WriteLine($"  model attestations    : {modelAtts,9:N0}");
-        async Task<long> KindCount(Hash128 kind)
-        {
-            await using var c = conn.CreateCommand();
-            c.CommandText =
-                "SELECT count(*) FROM laplace.attestations WHERE source_id = @s AND kind_id = @k";
-            c.Parameters.AddWithValue("s", ModelDecomposer.Source.ToBytes());
-            c.Parameters.AddWithValue("k", kind.ToBytes());
-            return (long)(await c.ExecuteScalarAsync())!;
-        }
 
         // Corrected ingest emits content records, not the per-circuit bilinear kinds:
         // COMPLETES_TO = the FFN/OV [context n-gram] ⇒ {completion} key→value memories.
