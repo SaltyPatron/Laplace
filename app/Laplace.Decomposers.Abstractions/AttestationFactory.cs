@@ -14,17 +14,16 @@ namespace Laplace.Decomposers.Abstractions;
 /// DERIVED, not tuned:
 /// <list type="bullet">
 ///   <item><c>score   = ½(1 + tanh(signed_m / M))</c> ∈ (0,1) — the SIGNED
-///   magnitude's outcome: + → win (confirm/attract), − → loss (refute/repel),
-///   0 → ½ (draw). Sign is preserved; dissent is a weighted loss, never abs'd away.</item>
+///   magnitude's outcome (+ win/confirm, − loss/refute, 0 draw).</item>
 ///   <item><c>opponent_rd = φ(weight)</c> — the witness weight
-///   (kind_rank × source_trust × tenant_trust) mapped to opponent precision.
-///   Trusted → low φ (g(φ)≈1, full weight); crank → high φ (g(φ)≈0, discounted).
-///   Glicko's own g(φ) does the weighting — never a μ multiplier.</item>
+///   (kind_rank × source_trust × tenant_trust) mapped to opponent precision φ.
+///   Glicko's own g(φ) does the weighting; never a μ multiplier.</item>
 ///   <item><c>arena_m = M</c> — the per-arena magnitude scale used (audit).</item>
 /// </list>
 /// The accumulated rating/rd/volatility live on the consensus table, NOT here.
-/// There are no tiers and no trust classes in evidence — kind significance and
-/// source trust enter ONLY as the numeric witness weight folded into φ.
+/// No tiers and no trust classes in evidence — kind significance and source
+/// trust enter ONLY as the numeric witness weight folded into opponent φ
+/// (see <see cref="KindRank"/> / <see cref="SourceTrust"/>).
 /// </para>
 /// </summary>
 public static class AttestationFactory
@@ -73,35 +72,29 @@ public static class AttestationFactory
         double score, double witnessWeight, double arenaScale = 0.0, long observationCount = 1)
         => Build(subject, kindId, obj, sourceId, contextId, score, witnessWeight, arenaScale, observationCount);
 
-    // ── Compatibility shims for the seed decomposers (categorical + weighted).
-    //    Kind significance + source trust still arrive as the (KindValueTier,
-    //    TrustClass) pair, but they are now PURELY a numeric lookup into
-    //    kind_rank × source_trust → witness weight → opponent φ. NO tier prior
-    //    on μ, NO tier/trust stored in the evidence. (The enum NAMES are a
-    //    pending rename to KindRank/SourceTrust; the behaviour is already the
-    //    rank/trust the law specifies.)
+    // ── Categorical / magnitude-weighted builders for the seed decomposers.
+    //    Significance is a numeric kind_rank (KindRank) × source_trust (SourceTrust),
+    //    folded into the Glicko opponent φ — no tier on the kind, no trust class, no
+    //    μ prior, nothing tier/trust stored in the evidence (truth #5).
 
-    /// <summary>Categorical confirm from a kind-rank × source-trust pair.</summary>
+    /// <summary>Categorical confirm weighted by a kind-rank × source-trust pair
+    /// (see <see cref="KindRank"/> / <see cref="SourceTrust"/>).</summary>
     public static AttestationRow Create(
         Hash128 subject, Hash128 kindId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
-        KindValueTier tier, TrustClass trust, long observationCount = 1)
+        double kindRank, double sourceTrust, long observationCount = 1)
         => CreateCategorical(subject, kindId, obj, sourceId, contextId,
-                             confirm: true, witnessWeight: Weight(tier, trust),
+                             confirm: true, witnessWeight: kindRank * sourceTrust,
                              observationCount: observationCount);
 
-    /// <summary>Magnitude-weighted observation from a kind-rank × source-trust
-    /// pair. The magnitude is the arena's SIGNED strength; <paramref name="floor"/>
-    /// is the per-arena scale M (tanh(m/M)).</summary>
+    /// <summary>Magnitude-weighted observation. The magnitude is the arena's SIGNED
+    /// strength; <paramref name="floor"/> is the per-arena scale M (tanh(m/M)); the
+    /// witness weight is kind_rank × source_trust (× tenant_trust = 1 until S5).</summary>
     public static AttestationRow CreateWeighted(
         Hash128 subject, Hash128 kindId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
-        KindValueTier tier, TrustClass trust, double magnitude, double floor, long observationCount = 1)
+        double kindRank, double sourceTrust, double magnitude, double floor, long observationCount = 1)
         => CreateObservation(subject, kindId, obj, sourceId, contextId,
                              signedMagnitude: magnitude, arenaScale: floor,
-                             witnessWeight: Weight(tier, trust), observationCount: observationCount);
-
-    /// <summary>Witness weight = kind_rank × source_trust (× tenant_trust = 1 until S5).</summary>
-    public static double Weight(KindValueTier tier, TrustClass trust)
-        => KindRank(tier) * SourceTrust(trust);
+                             witnessWeight: kindRank * sourceTrust, observationCount: observationCount);
 
     private static AttestationRow Build(
         Hash128 subject, Hash128 kindId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
@@ -139,64 +132,44 @@ public static class AttestationFactory
         (contextId ?? Hash128.Zero).WriteBytes(buf.Slice(64, 16));
         return Hash128.Blake3(buf);
     }
-
-    // ── Numeric kind RANK ∈ (0,1] — significance scale (is_a ≫ acronym_of),
-    //    NOT a tier ladder, NOT a μ prior. Derived from the kind's significance
-    //    ordinal: rank = (12 − ordinal) / 11, so the most significant kind = 1.0.
-    private static double KindRank(KindValueTier tier) => (12.0 - (int)tier) / 11.0;
-
-    // ── Numeric source TRUST ∈ [0,1] — a Glicko input, never a class/tier.
-    private static double SourceTrust(TrustClass trust) => trust switch
-    {
-        TrustClass.SubstrateMandateTier1         => 1.00,
-        TrustClass.StandardsDerivedTier2         => 0.95,
-        TrustClass.AcademicCuratedTier3          => 0.85,
-        TrustClass.AcademicCuratedUserInputTier4 => 0.78,
-        TrustClass.StructuredCorpusTier5         => 0.70,
-        TrustClass.UserCuratedResourceTier6      => 0.60,
-        TrustClass.AiModelProbeTier7             => 0.50,
-        TrustClass.AppDerivedTier8               => 0.40,
-        TrustClass.UserPromptTier9               => 0.30,
-        TrustClass.AdversarialTier10             => 0.00,
-        _                                        => 0.30,
-    };
 }
 
 /// <summary>
-/// Kind significance ordinal — feeds the numeric kind_rank ∈ (0,1] used to
-/// weight a witness (NOT a tier on the kind, NOT a μ prior, NOT an entity).
-/// Pending rename to a KindRank significance scale; the ordinal is the rank.
+/// Kind significance RANK ∈ (0,1] — a real significance scale (is_a ≫ acronym_of;
+/// synonym ≠ hyponym ≠ meronym ≠ antonym), NOT a tier ladder, NOT a μ prior, NOT an
+/// entity. Feeds the witness weight = kind_rank × source_trust × tenant_trust →
+/// Glicko opponent φ. (Replaces the corrupt KindValueTier tier-on-kinds.)
 /// </summary>
-public enum KindValueTier
+public static class KindRank
 {
-    T1  = 1,  // Substrate-asserted invariant     (rank 1.00)
-    T2  = 2,  // Standards-derived structural
-    T3  = 3,  // Taxonomic
-    T4  = 4,  // Partitive / compositional
-    T5  = 5,  // Causal / implicational
-    T6  = 6,  // Equivalence / translation
-    T7  = 7,  // Oppositional / constraining
-    T8  = 8,  // Associative / co-occurrence
-    T9  = 9,  // Tensor-calculation (model-derived)
-    T10 = 10, // Scalar-valued numeric attribute
-    T11 = 11, // Probationary / user-supplied      (rank 0.09)
+    public const double Mandate             = 1.00; // substrate-asserted invariant
+    public const double StandardsStructural = 0.91; // standards-derived structural
+    public const double Taxonomic           = 0.82; // is_a / hypernymy / instance
+    public const double Partitive           = 0.73; // part / member / substance
+    public const double Causal              = 0.64; // causal / implicational
+    public const double Equivalence         = 0.55; // synonymy / translation
+    public const double Oppositional        = 0.45; // antonymy / constraint
+    public const double Associative         = 0.36; // co-occurrence / relatedness
+    public const double TensorCalculation   = 0.27; // model-derived circuit
+    public const double ScalarValued        = 0.18; // numeric attribute
+    public const double Probationary        = 0.09; // user-supplied / unvetted
 }
 
 /// <summary>
-/// Source trust ordinal — feeds the numeric source_trust ∈ [0,1] used to weight
-/// a witness (a Glicko input, NEVER a class/tier ladder on trust). Pending
-/// rename to a SourceTrust scale.
+/// Source TRUST ∈ [0,1] — a Glicko input, NEVER a class/tier ladder on trust.
+/// Feeds the witness weight = kind_rank × source_trust × tenant_trust → opponent φ.
+/// (Replaces the corrupt TrustClass tier ladder.)
 /// </summary>
-public enum TrustClass
+public static class SourceTrust
 {
-    SubstrateMandateTier1         = 1,
-    StandardsDerivedTier2         = 2,
-    AcademicCuratedTier3          = 3,
-    AcademicCuratedUserInputTier4 = 4,
-    StructuredCorpusTier5         = 5,
-    UserCuratedResourceTier6      = 6,
-    AiModelProbeTier7             = 7,
-    AppDerivedTier8               = 8,
-    UserPromptTier9               = 9,
-    AdversarialTier10             = 10,
+    public const double SubstrateMandate         = 1.00;
+    public const double StandardsDerived         = 0.95;
+    public const double AcademicCurated          = 0.85;
+    public const double AcademicCuratedUserInput = 0.78;
+    public const double StructuredCorpus         = 0.70;
+    public const double UserCuratedResource      = 0.60;
+    public const double AiModelProbe             = 0.50;
+    public const double AppDerived               = 0.40;
+    public const double UserPrompt               = 0.30;
+    public const double Adversarial              = 0.00;
 }

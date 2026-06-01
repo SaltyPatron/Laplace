@@ -99,7 +99,7 @@ public sealed class BootstrapIntentBuilder
     /// this kind as the numeric witness weight folded into the Glicko opponent φ
     /// (see <see cref="AttestationFactory"/>). No tier entity, no HAS_VALUE_TIER
     /// meta-attestation is minted.</summary>
-    public Hash128 AddKind(string canonicalKindName, KindValueTier tier, TrustClass trust)
+    public Hash128 AddKind(string canonicalKindName, double kindRank, double sourceTrust)
         => AddKind(canonicalKindName);
 
     /// <summary>Attest that <see cref="_sourceId"/> belongs to

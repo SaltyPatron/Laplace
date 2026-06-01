@@ -2,7 +2,7 @@ using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using TC = Laplace.Decomposers.Abstractions.TrustClass;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Tatoeba;
 
@@ -47,8 +47,8 @@ public sealed class TatoebaDecomposer : IDecomposer
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("Tatoeba_Sentence");
-        boot.AddKind("HAS_EXTERNAL_ID",  KindValueTier.T2, TC.StructuredCorpusTier5);
-        boot.AddKind("IS_TRANSLATION_OF", KindValueTier.T6, TC.StructuredCorpusTier5);
+        boot.AddKind("HAS_EXTERNAL_ID",  KindRank.StandardsStructural, SourceTrust.StructuredCorpus);
+        boot.AddKind("IS_TRANSLATION_OF", KindRank.Equivalence, SourceTrust.StructuredCorpus);
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -86,10 +86,10 @@ public sealed class TatoebaDecomposer : IDecomposer
                 {
                     b.AddAttestation(AttestationFactory.Create(
                         contentId.Value, KindHasExternalId, extId, Source, null,
-                        KindValueTier.T2, TC.StructuredCorpusTier5));
+                        KindRank.StandardsStructural, SourceTrust.StructuredCorpus));
                     b.AddAttestation(AttestationFactory.Create(
                         contentId.Value, KindHasLanguage, langId, Source, null,
-                        KindValueTier.T4, TC.StructuredCorpusTier5));
+                        KindRank.Partitive, SourceTrust.StructuredCorpus));
                 }
 
                 if (++n >= batch)
@@ -121,7 +121,7 @@ public sealed class TatoebaDecomposer : IDecomposer
                 b.AddEntity(new EntityRow(eb, /*tier*/ 3, SentenceRefTypeId, Source));
                 b.AddAttestation(AttestationFactory.Create(
                     ea, KindIsTranslationOf, eb, Source, null,
-                    KindValueTier.T6, TC.StructuredCorpusTier5));
+                    KindRank.Equivalence, SourceTrust.StructuredCorpus));
 
                 if (++n >= batch)
                 {

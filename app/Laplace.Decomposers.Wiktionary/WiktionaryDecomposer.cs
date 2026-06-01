@@ -3,7 +3,7 @@ using System.Text.Json;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using TC = Laplace.Decomposers.Abstractions.TrustClass;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Wiktionary;
 
@@ -43,18 +43,18 @@ public sealed class WiktionaryDecomposer : IDecomposer
     private static readonly Hash128 KEtymology     = Kind("HAS_ETYMOLOGY");
 
     // Sense-relation property → (kind, tier).
-    private static readonly (string Prop, string Kind, KindValueTier Tier)[] RelProps =
+    private static readonly (string Prop, string Kind, double Tier)[] RelProps =
     {
-        ("synonyms",         "IS_SYNONYM_OF",          KindValueTier.T6),
-        ("antonyms",         "IS_ANTONYM_OF",          KindValueTier.T7),
-        ("hypernyms",        "HAS_HYPERNYM",           KindValueTier.T3),
-        ("hyponyms",         "HAS_HYPONYM",            KindValueTier.T3),
-        ("meronyms",         "HAS_PART",               KindValueTier.T4),
-        ("holonyms",         "IS_PART_OF",             KindValueTier.T4),
-        ("derived",          "DERIVATIONALLY_RELATED", KindValueTier.T6),
-        ("related",          "RELATED_TO",             KindValueTier.T8),
+        ("synonyms",         "IS_SYNONYM_OF",          KindRank.Equivalence),
+        ("antonyms",         "IS_ANTONYM_OF",          KindRank.Oppositional),
+        ("hypernyms",        "HAS_HYPERNYM",           KindRank.Taxonomic),
+        ("hyponyms",         "HAS_HYPONYM",            KindRank.Taxonomic),
+        ("meronyms",         "HAS_PART",               KindRank.Partitive),
+        ("holonyms",         "IS_PART_OF",             KindRank.Partitive),
+        ("derived",          "DERIVATIONALLY_RELATED", KindRank.Equivalence),
+        ("related",          "RELATED_TO",             KindRank.Associative),
     };
-    private static readonly Dictionary<string, (Hash128 Kind, KindValueTier Tier)> RelMap =
+    private static readonly Dictionary<string, (Hash128 Kind, double Tier)> RelMap =
         RelProps.ToDictionary(r => r.Prop, r => (Kind(r.Kind), r.Tier));
 
     public Hash128 SourceId     => Source;
@@ -68,17 +68,17 @@ public sealed class WiktionaryDecomposer : IDecomposer
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("Wiktionary_POS");
-        boot.AddKind("HAS_POS",                 KindValueTier.T4, TC.AcademicCuratedUserInputTier4);
-        boot.AddKind("DEFINES",                 KindValueTier.T3, TC.AcademicCuratedUserInputTier4);
-        boot.AddKind("HAS_EXAMPLE",             KindValueTier.T4, TC.AcademicCuratedUserInputTier4);
-        boot.AddKind("HAS_ETYMOLOGY",           KindValueTier.T6, TC.AcademicCuratedUserInputTier4);
-        boot.AddKind("HAS_HYPERNYM",            KindValueTier.T3, TC.AcademicCuratedUserInputTier4);
-        boot.AddKind("HAS_HYPONYM",             KindValueTier.T3, TC.AcademicCuratedUserInputTier4);
-        boot.AddKind("IS_PART_OF",              KindValueTier.T4, TC.AcademicCuratedUserInputTier4);
-        boot.AddKind("IS_SYNONYM_OF",           KindValueTier.T6, TC.AcademicCuratedUserInputTier4);
-        boot.AddKind("IS_ANTONYM_OF",           KindValueTier.T7, TC.AcademicCuratedUserInputTier4);
-        boot.AddKind("DERIVATIONALLY_RELATED",  KindValueTier.T6, TC.AcademicCuratedUserInputTier4);
-        boot.AddKind("RELATED_TO",              KindValueTier.T8, TC.AcademicCuratedUserInputTier4);
+        boot.AddKind("HAS_POS",                 KindRank.Partitive, SourceTrust.AcademicCuratedUserInput);
+        boot.AddKind("DEFINES",                 KindRank.Taxonomic, SourceTrust.AcademicCuratedUserInput);
+        boot.AddKind("HAS_EXAMPLE",             KindRank.Partitive, SourceTrust.AcademicCuratedUserInput);
+        boot.AddKind("HAS_ETYMOLOGY",           KindRank.Equivalence, SourceTrust.AcademicCuratedUserInput);
+        boot.AddKind("HAS_HYPERNYM",            KindRank.Taxonomic, SourceTrust.AcademicCuratedUserInput);
+        boot.AddKind("HAS_HYPONYM",             KindRank.Taxonomic, SourceTrust.AcademicCuratedUserInput);
+        boot.AddKind("IS_PART_OF",              KindRank.Partitive, SourceTrust.AcademicCuratedUserInput);
+        boot.AddKind("IS_SYNONYM_OF",           KindRank.Equivalence, SourceTrust.AcademicCuratedUserInput);
+        boot.AddKind("IS_ANTONYM_OF",           KindRank.Oppositional, SourceTrust.AcademicCuratedUserInput);
+        boot.AddKind("DERIVATIONALLY_RELATED",  KindRank.Equivalence, SourceTrust.AcademicCuratedUserInput);
+        boot.AddKind("RELATED_TO",              KindRank.Associative, SourceTrust.AcademicCuratedUserInput);
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -135,7 +135,7 @@ public sealed class WiktionaryDecomposer : IDecomposer
             Hash128 langId = LanguageReference.Resolve(langCode!);
             b.AddEntity(new EntityRow(langId, 2, LanguageTypeId, Source));
             b.AddAttestation(AttestationFactory.Create(
-                w, KHasLanguage, langId, Source, null, KindValueTier.T4, TC.AcademicCuratedUserInputTier4));
+                w, KHasLanguage, langId, Source, null, KindRank.Partitive, SourceTrust.AcademicCuratedUserInput));
         }
 
         // POS
@@ -147,7 +147,7 @@ public sealed class WiktionaryDecomposer : IDecomposer
             posCtx = posId;
             b.AddEntity(new EntityRow(posId, 0, PosTypeId, Source));
             b.AddAttestation(AttestationFactory.Create(
-                w, KHasPos, posId, Source, null, KindValueTier.T4, TC.AcademicCuratedUserInputTier4));
+                w, KHasPos, posId, Source, null, KindRank.Partitive, SourceTrust.AcademicCuratedUserInput));
         }
 
         // Senses → glosses (DEFINES, context=pos) + examples (HAS_EXAMPLE)
@@ -157,13 +157,13 @@ public sealed class WiktionaryDecomposer : IDecomposer
             {
                 if (sense.TryGetProperty("glosses", out var gl) && gl.ValueKind == JsonValueKind.Array)
                     foreach (var g in gl.EnumerateArray())
-                        AttestText(b, w, KDefines, g.GetString(), KindValueTier.T3, posCtx);
+                        AttestText(b, w, KDefines, g.GetString(), KindRank.Taxonomic, posCtx);
 
                 if (sense.TryGetProperty("examples", out var ex) && ex.ValueKind == JsonValueKind.Array)
                     foreach (var e in ex.EnumerateArray())
                     {
                         string? txt = e.ValueKind == JsonValueKind.String ? e.GetString() : Str(e, "text");
-                        AttestText(b, w, KHasExample, txt, KindValueTier.T4, null);
+                        AttestText(b, w, KHasExample, txt, KindRank.Partitive, null);
                     }
             }
         }
@@ -171,12 +171,12 @@ public sealed class WiktionaryDecomposer : IDecomposer
         // IPA pronunciations
         if (rec.TryGetProperty("sounds", out var sounds) && sounds.ValueKind == JsonValueKind.Array)
             foreach (var s in sounds.EnumerateArray())
-                AttestText(b, w, KTranscribesAs, Str(s, "ipa"), KindValueTier.T6, null);
+                AttestText(b, w, KTranscribesAs, Str(s, "ipa"), KindRank.Equivalence, null);
 
         // Translations
         if (rec.TryGetProperty("translations", out var tr) && tr.ValueKind == JsonValueKind.Array)
             foreach (var t in tr.EnumerateArray())
-                AttestText(b, w, KTranslation, Str(t, "word"), KindValueTier.T6, null);
+                AttestText(b, w, KTranslation, Str(t, "word"), KindRank.Equivalence, null);
 
         // Sense relations (synonyms / antonyms / hypernyms / …)
         foreach (var (prop, rk) in RelMap)
@@ -187,10 +187,10 @@ public sealed class WiktionaryDecomposer : IDecomposer
         // Inflected forms → variants
         if (rec.TryGetProperty("forms", out var forms) && forms.ValueKind == JsonValueKind.Array)
             foreach (var f in forms.EnumerateArray())
-                AttestText(b, w, KVariantOf, Str(f, "form"), KindValueTier.T4, null);
+                AttestText(b, w, KVariantOf, Str(f, "form"), KindRank.Partitive, null);
 
         // Etymology prose
-        AttestText(b, w, KEtymology, Str(rec, "etymology_text"), KindValueTier.T6, null);
+        AttestText(b, w, KEtymology, Str(rec, "etymology_text"), KindRank.Equivalence, null);
 
         return true;
     }
@@ -198,13 +198,13 @@ public sealed class WiktionaryDecomposer : IDecomposer
     /// <summary>Emit <paramref name="text"/> as content and attest (subject)→(kind)→(content).</summary>
     private static void AttestText(
         SubstrateChangeBuilder b, Hash128 subject, Hash128 kind, string? text,
-        KindValueTier tier, Hash128? context)
+        double tier, Hash128? context)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
         var id = ContentEmitter.Emit(b, text!, Source);
         if (id is null) return;
         b.AddAttestation(AttestationFactory.Create(
-            subject, kind, id.Value, Source, context, tier, TC.AcademicCuratedUserInputTier4));
+            subject, kind, id.Value, Source, context, tier, SourceTrust.AcademicCuratedUserInput));
     }
 
     private static string? Str(JsonElement el, string prop) =>

@@ -2,7 +2,7 @@ using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using TC = Laplace.Decomposers.Abstractions.TrustClass;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Atomic2020;
 
@@ -64,7 +64,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
         boot.AddType("Atomic_Marker");
         boot.AddType("Atomic_Split");
         foreach (var name in Relations.Select(r => r.Kind).Distinct())
-            boot.AddKind(name, KindValueTier.T5, TC.StructuredCorpusTier5);
+            boot.AddKind(name, KindRank.Causal, SourceTrust.StructuredCorpus);
         await context.Writer.ApplyAsync(boot.Build(), ct);
 
         var seed = new SubstrateChangeBuilder(Source, "bootstrap/atomic-vocab", null,
@@ -116,7 +116,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
 
                 b.AddAttestation(AttestationFactory.Create(
                     headId.Value, kindId, tailId, Source, splitId,
-                    KindValueTier.T5, TC.StructuredCorpusTier5));
+                    KindRank.Causal, SourceTrust.StructuredCorpus));
 
                 if (++n >= batch)
                 {

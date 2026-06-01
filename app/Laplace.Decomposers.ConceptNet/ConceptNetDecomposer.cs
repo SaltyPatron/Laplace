@@ -3,7 +3,7 @@ using System.Text.Json;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using TC = Laplace.Decomposers.Abstractions.TrustClass;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.ConceptNet;
 
@@ -33,35 +33,35 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
     private static readonly Hash128 KindHasExample  = Kind("HAS_EXAMPLE");
 
     // ConceptNet /r/Relation → (kind name, value tier).
-    private static readonly (string Cn, string Kind, KindValueTier Tier)[] RelDefs =
+    private static readonly (string Cn, string Kind, double Tier)[] RelDefs =
     {
-        ("RelatedTo", "RELATED_TO", KindValueTier.T8), ("FormOf", "FORM_OF", KindValueTier.T6),
-        ("IsA", "IS_A", KindValueTier.T3), ("PartOf", "IS_PART_OF", KindValueTier.T4),
-        ("HasA", "HAS_A", KindValueTier.T4), ("UsedFor", "USED_FOR", KindValueTier.T8),
-        ("CapableOf", "CAPABLE_OF", KindValueTier.T8), ("AtLocation", "AT_LOCATION", KindValueTier.T8),
-        ("Causes", "CAUSES", KindValueTier.T5), ("HasSubevent", "HAS_SUBEVENT", KindValueTier.T5),
-        ("HasFirstSubevent", "HAS_FIRST_SUBEVENT", KindValueTier.T5),
-        ("HasLastSubevent", "HAS_LAST_SUBEVENT", KindValueTier.T5),
-        ("HasPrerequisite", "HAS_PREREQUISITE", KindValueTier.T5),
-        ("HasProperty", "HAS_PROPERTY", KindValueTier.T8),
-        ("MotivatedByGoal", "MOTIVATED_BY_GOAL", KindValueTier.T5),
-        ("ObstructedBy", "OBSTRUCTED_BY", KindValueTier.T5), ("Desires", "DESIRES", KindValueTier.T5),
-        ("CreatedBy", "CREATED_BY", KindValueTier.T5), ("Synonym", "IS_SYNONYM_OF", KindValueTier.T6),
-        ("Antonym", "IS_ANTONYM_OF", KindValueTier.T7), ("DistinctFrom", "DISTINCT_FROM", KindValueTier.T7),
-        ("DerivedFrom", "DERIVED_FROM", KindValueTier.T6), ("SymbolOf", "SYMBOL_OF", KindValueTier.T8),
-        ("DefinedAs", "DEFINED_AS", KindValueTier.T6), ("MannerOf", "MANNER_OF", KindValueTier.T4),
-        ("LocatedNear", "LOCATED_NEAR", KindValueTier.T8), ("HasContext", "HAS_CONTEXT", KindValueTier.T8),
-        ("SimilarTo", "SIMILAR_TO", KindValueTier.T6),
-        ("EtymologicallyRelatedTo", "ETYMOLOGICALLY_RELATED_TO", KindValueTier.T6),
-        ("EtymologicallyDerivedFrom", "ETYMOLOGICALLY_DERIVED_FROM", KindValueTier.T6),
-        ("CausesDesire", "CAUSES_DESIRE", KindValueTier.T5), ("MadeOf", "MADE_OF", KindValueTier.T4),
-        ("ReceivesAction", "RECEIVES_ACTION", KindValueTier.T8), ("InstanceOf", "IS_INSTANCE_OF", KindValueTier.T3),
-        ("NotDesires", "NOT_DESIRES", KindValueTier.T7), ("NotUsedFor", "NOT_USED_FOR", KindValueTier.T7),
-        ("NotCapableOf", "NOT_CAPABLE_OF", KindValueTier.T7), ("NotHasProperty", "NOT_HAS_PROPERTY", KindValueTier.T7),
-        ("Entails", "ENTAILS", KindValueTier.T5),
+        ("RelatedTo", "RELATED_TO", KindRank.Associative), ("FormOf", "FORM_OF", KindRank.Equivalence),
+        ("IsA", "IS_A", KindRank.Taxonomic), ("PartOf", "IS_PART_OF", KindRank.Partitive),
+        ("HasA", "HAS_A", KindRank.Partitive), ("UsedFor", "USED_FOR", KindRank.Associative),
+        ("CapableOf", "CAPABLE_OF", KindRank.Associative), ("AtLocation", "AT_LOCATION", KindRank.Associative),
+        ("Causes", "CAUSES", KindRank.Causal), ("HasSubevent", "HAS_SUBEVENT", KindRank.Causal),
+        ("HasFirstSubevent", "HAS_FIRST_SUBEVENT", KindRank.Causal),
+        ("HasLastSubevent", "HAS_LAST_SUBEVENT", KindRank.Causal),
+        ("HasPrerequisite", "HAS_PREREQUISITE", KindRank.Causal),
+        ("HasProperty", "HAS_PROPERTY", KindRank.Associative),
+        ("MotivatedByGoal", "MOTIVATED_BY_GOAL", KindRank.Causal),
+        ("ObstructedBy", "OBSTRUCTED_BY", KindRank.Causal), ("Desires", "DESIRES", KindRank.Causal),
+        ("CreatedBy", "CREATED_BY", KindRank.Causal), ("Synonym", "IS_SYNONYM_OF", KindRank.Equivalence),
+        ("Antonym", "IS_ANTONYM_OF", KindRank.Oppositional), ("DistinctFrom", "DISTINCT_FROM", KindRank.Oppositional),
+        ("DerivedFrom", "DERIVED_FROM", KindRank.Equivalence), ("SymbolOf", "SYMBOL_OF", KindRank.Associative),
+        ("DefinedAs", "DEFINED_AS", KindRank.Equivalence), ("MannerOf", "MANNER_OF", KindRank.Partitive),
+        ("LocatedNear", "LOCATED_NEAR", KindRank.Associative), ("HasContext", "HAS_CONTEXT", KindRank.Associative),
+        ("SimilarTo", "SIMILAR_TO", KindRank.Equivalence),
+        ("EtymologicallyRelatedTo", "ETYMOLOGICALLY_RELATED_TO", KindRank.Equivalence),
+        ("EtymologicallyDerivedFrom", "ETYMOLOGICALLY_DERIVED_FROM", KindRank.Equivalence),
+        ("CausesDesire", "CAUSES_DESIRE", KindRank.Causal), ("MadeOf", "MADE_OF", KindRank.Partitive),
+        ("ReceivesAction", "RECEIVES_ACTION", KindRank.Associative), ("InstanceOf", "IS_INSTANCE_OF", KindRank.Taxonomic),
+        ("NotDesires", "NOT_DESIRES", KindRank.Oppositional), ("NotUsedFor", "NOT_USED_FOR", KindRank.Oppositional),
+        ("NotCapableOf", "NOT_CAPABLE_OF", KindRank.Oppositional), ("NotHasProperty", "NOT_HAS_PROPERTY", KindRank.Oppositional),
+        ("Entails", "ENTAILS", KindRank.Causal),
     };
 
-    private static readonly Dictionary<string, (Hash128 Kind, KindValueTier Tier)> RelMap =
+    private static readonly Dictionary<string, (Hash128 Kind, double Tier)> RelMap =
         RelDefs.ToDictionary(r => r.Cn, r => (Kind(r.Kind), r.Tier));
 
     public override Hash128 SourceId     => Source;
@@ -74,9 +74,9 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddKind("HAS_EXAMPLE", KindValueTier.T4, TC.UserCuratedResourceTier6);
+        boot.AddKind("HAS_EXAMPLE", KindRank.Partitive, SourceTrust.UserCuratedResource);
         foreach (var (_, kindName, tier) in RelDefs)
-            boot.AddKind(kindName, tier, TC.UserCuratedResourceTier6);
+            boot.AddKind(kindName, tier, SourceTrust.UserCuratedResource);
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -121,20 +121,20 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
 
             b.AddAttestation(AttestationFactory.CreateWeighted(
                 startId.Value, rk.Kind, endId.Value, Source, null,
-                rk.Tier, TC.UserCuratedResourceTier6, magnitude: weight, floor: 1.0));
+                rk.Tier, SourceTrust.UserCuratedResource, magnitude: weight, floor: 1.0));
             b.AddAttestation(AttestationFactory.Create(
                 startId.Value, KindHasLanguage, startLangId, Source, null,
-                KindValueTier.T4, TC.UserCuratedResourceTier6));
+                KindRank.Partitive, SourceTrust.UserCuratedResource));
             b.AddAttestation(AttestationFactory.Create(
                 endId.Value, KindHasLanguage, endLangId, Source, null,
-                KindValueTier.T4, TC.UserCuratedResourceTier6));
+                KindRank.Partitive, SourceTrust.UserCuratedResource));
             if (surface is not null)
             {
                 var sId = ContentEmitter.Emit(b, surface, Source);
                 if (sId is not null)
                     b.AddAttestation(AttestationFactory.Create(
                         startId.Value, KindHasExample, sId.Value, Source, endId.Value,
-                        KindValueTier.T4, TC.UserCuratedResourceTier6));
+                        KindRank.Partitive, SourceTrust.UserCuratedResource));
             }
 
             if (++n >= batch)

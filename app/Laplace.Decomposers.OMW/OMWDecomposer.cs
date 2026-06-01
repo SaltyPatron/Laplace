@@ -2,7 +2,7 @@ using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using TC = Laplace.Decomposers.Abstractions.TrustClass;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.OMW;
 
@@ -45,8 +45,8 @@ public sealed class OMWDecomposer : IDecomposer
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         // IS_TRANSLATION_OF / HAS_LANGUAGE are substrate-canonical (bootstrap); DEFINES /
         // HAS_EXAMPLE are registered here (idempotent — content-addressed by name).
-        boot.AddKind("DEFINES",     KindValueTier.T3, TC.AcademicCuratedTier3);
-        boot.AddKind("HAS_EXAMPLE", KindValueTier.T4, TC.AcademicCuratedTier3);
+        boot.AddKind("DEFINES",     KindRank.Taxonomic, SourceTrust.AcademicCurated);
+        boot.AddKind("HAS_EXAMPLE", KindRank.Partitive, SourceTrust.AcademicCurated);
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -106,21 +106,21 @@ public sealed class OMWDecomposer : IDecomposer
             case OmwType.Lemma:
                 b.AddAttestation(AttestationFactory.Create(
                     contentId.Value, KindIsTranslationOf, row.SynsetId, Source, null,
-                    KindValueTier.T4, TC.AcademicCuratedTier3));
+                    KindRank.Partitive, SourceTrust.AcademicCurated));
                 b.AddAttestation(AttestationFactory.Create(
                     contentId.Value, KindHasLanguage, langId, Source, null,
-                    KindValueTier.T4, TC.AcademicCuratedTier3));
+                    KindRank.Partitive, SourceTrust.AcademicCurated));
                 break;
             case OmwType.Def:
                 // context_id = language → per-language glosses are distinct attestations.
                 b.AddAttestation(AttestationFactory.Create(
                     row.SynsetId, KindDefines, contentId.Value, Source, langId,
-                    KindValueTier.T3, TC.AcademicCuratedTier3));
+                    KindRank.Taxonomic, SourceTrust.AcademicCurated));
                 break;
             case OmwType.Exe:
                 b.AddAttestation(AttestationFactory.Create(
                     row.SynsetId, KindHasExample, contentId.Value, Source, langId,
-                    KindValueTier.T4, TC.AcademicCuratedTier3));
+                    KindRank.Partitive, SourceTrust.AcademicCurated));
                 break;
         }
     }

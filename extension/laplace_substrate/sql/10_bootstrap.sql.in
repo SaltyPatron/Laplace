@@ -7,8 +7,7 @@
  *   Stage 0  -- meta-types: Type, Kind, PhysicalityKind, Source, SubstrateCanonical.
  *   Stage 1  -- SubstrateCanonical source entity.
  *   Stage 2  -- PhysicalityKind enum entities: CONTENT, BUILDING_BLOCK, PROJECTION.
- *   Stage 3  -- modality-agnostic attestation-kind vocabulary
- *               + kind-value-tier entities (T1..T11 per ADR 0044 Part A).
+ *   Stage 3  -- modality-agnostic attestation-kind vocabulary.
  *   Stage 3.5 -- 10 source-trust-class entities (per ADR 0044 Part B).
  *
  * All bootstrap rows are content-addressed by BLAKE3-128 of a canonical
@@ -44,12 +43,6 @@ DECLARE
     type_sentence_id     bytea;
     type_document_id     bytea;
 
-    /* Kind-value-tier entity ids (ADR 0044 Part A; T1..T11). */
-    tier_t1_id  bytea;  tier_t2_id  bytea;  tier_t3_id  bytea;
-    tier_t4_id  bytea;  tier_t5_id  bytea;  tier_t6_id  bytea;
-    tier_t7_id  bytea;  tier_t8_id  bytea;  tier_t9_id  bytea;
-    tier_t10_id bytea;  tier_t11_id bytea;
-
     /* Source-trust-class entity ids (ADR 0044 Part B; 10 tiers). */
     tc_mandate_id        bytea;
     tc_standards_id      bytea;
@@ -79,7 +72,6 @@ DECLARE
     kind_has_variant_of_id    bytea;
     kind_is_replaced_by_id    bytea;
     kind_has_trust_class_id   bytea;
-    kind_has_kind_tier_id     bytea;
     kind_is_alias_of_id       bytea;
 
     /* High tier reserved for abstract meta-entities so they don't collide
@@ -186,34 +178,11 @@ BEGIN
         (tc_user_prompt_id,   TRUST_TIER, type_id, subscan_id),
         (tc_adversarial_id,   TRUST_TIER, type_id, subscan_id);
 
-    /* === Stage 3: kind-value-tier entities (ADR 0044 Part A) =========== */
-
-    tier_t1_id  := public.laplace_hash128_blake3('substrate/kind_tier/T1_Mandate/v1'::bytea);
-    tier_t2_id  := public.laplace_hash128_blake3('substrate/kind_tier/T2_StandardsStructural/v1'::bytea);
-    tier_t3_id  := public.laplace_hash128_blake3('substrate/kind_tier/T3_Taxonomic/v1'::bytea);
-    tier_t4_id  := public.laplace_hash128_blake3('substrate/kind_tier/T4_Partitive/v1'::bytea);
-    tier_t5_id  := public.laplace_hash128_blake3('substrate/kind_tier/T5_Causal/v1'::bytea);
-    tier_t6_id  := public.laplace_hash128_blake3('substrate/kind_tier/T6_Equivalence/v1'::bytea);
-    tier_t7_id  := public.laplace_hash128_blake3('substrate/kind_tier/T7_Oppositional/v1'::bytea);
-    tier_t8_id  := public.laplace_hash128_blake3('substrate/kind_tier/T8_Associative/v1'::bytea);
-    tier_t9_id  := public.laplace_hash128_blake3('substrate/kind_tier/T9_TensorCalculation/v1'::bytea);
-    tier_t10_id := public.laplace_hash128_blake3('substrate/kind_tier/T10_ScalarValued/v1'::bytea);
-    tier_t11_id := public.laplace_hash128_blake3('substrate/kind_tier/T11_Probationary/v1'::bytea);
-
-    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
-        (tier_t1_id,  KIND_TIER, type_id, subscan_id),
-        (tier_t2_id,  KIND_TIER, type_id, subscan_id),
-        (tier_t3_id,  KIND_TIER, type_id, subscan_id),
-        (tier_t4_id,  KIND_TIER, type_id, subscan_id),
-        (tier_t5_id,  KIND_TIER, type_id, subscan_id),
-        (tier_t6_id,  KIND_TIER, type_id, subscan_id),
-        (tier_t7_id,  KIND_TIER, type_id, subscan_id),
-        (tier_t8_id,  KIND_TIER, type_id, subscan_id),
-        (tier_t9_id,  KIND_TIER, type_id, subscan_id),
-        (tier_t10_id, KIND_TIER, type_id, subscan_id),
-        (tier_t11_id, KIND_TIER, type_id, subscan_id);
-
-    /* === Stage 3: modality-agnostic attestation kinds ================== */
+    /* === Stage 3: modality-agnostic attestation kinds ================== *
+     * (Kind-value-tier entities are GONE — truth #5: tier is the entity Merkle
+     * stratum only, never a tier-on-kinds entity. Kind significance is now the
+     * numeric kind_rank folded into the Glicko opponent φ at ingest, never a
+     * seeded tier entity nobody reads.) */
 
     kind_is_a_id              := public.laplace_hash128_blake3('substrate/kind/IS_A/v1'::bytea);
     kind_has_part_id          := public.laplace_hash128_blake3('substrate/kind/HAS_PART/v1'::bytea);
@@ -230,7 +199,6 @@ BEGIN
     kind_has_variant_of_id    := public.laplace_hash128_blake3('substrate/kind/HAS_VARIANT_OF/v1'::bytea);
     kind_is_replaced_by_id    := public.laplace_hash128_blake3('substrate/kind/IS_REPLACED_BY/v1'::bytea);
     kind_has_trust_class_id   := public.laplace_hash128_blake3('substrate/kind/HAS_TRUST_CLASS/v1'::bytea);
-    kind_has_kind_tier_id     := public.laplace_hash128_blake3('substrate/kind/HAS_KIND_VALUE_TIER/v1'::bytea);
     kind_is_alias_of_id       := public.laplace_hash128_blake3('substrate/kind/IS_ALIAS_OF/v1'::bytea);
 
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
@@ -249,7 +217,6 @@ BEGIN
         (kind_has_variant_of_id,    KIND_TIER, kind_id, subscan_id),
         (kind_is_replaced_by_id,    KIND_TIER, kind_id, subscan_id),
         (kind_has_trust_class_id,   KIND_TIER, kind_id, subscan_id),
-        (kind_has_kind_tier_id,     KIND_TIER, kind_id, subscan_id),
         (kind_is_alias_of_id,       KIND_TIER, kind_id, subscan_id);
 
     /* === Meta-attestations binding it all together ===================== *
@@ -257,9 +224,9 @@ BEGIN
      *
      * Evidence rows are OBSERVATIONS now (ARCHITECTURE.md §10): categorical
      * confirms (score=1.0 ×1e9) at full trust (opponent_rd=30 ×1e9 → g(φ)≈1),
-     * arena_m=0. No tier prior on μ. (The HAS_KIND_VALUE_TIER row + kind_tier
-     * entities below are vestigial — nothing reads tiers now that trust enters
-     * as opponent φ; flagged for removal.)
+     * arena_m=0. No tier prior on μ. (Kind-value-tier entities + the
+     * HAS_KIND_VALUE_TIER row are GONE — truth #5; kind significance is the
+     * numeric kind_rank folded into opponent φ at ingest, never a tier entity.)
      *
      * Attestation ids are computed via the laplace_hash128_merkle wrapper
      * over (subject_id, kind_id, object_id, source_id, context_id) so the
@@ -276,26 +243,6 @@ BEGIN
             subscan_id, kind_has_trust_class_id, tc_mandate_id, subscan_id, '\x00000000000000000000000000000000'::bytea
         ]),
         subscan_id, kind_has_trust_class_id, tc_mandate_id, subscan_id, NULL,
-        1000000000, 30000000000, 0, now(), 1
-    );
-
-    /* Each tier entity carries its own substrate-mandate attestation
-     * declaring "HAS_KIND_VALUE_TIER IS_A T1_Mandate" (self-classifying
-     * the tier-T1 vocabulary as mandate-class itself). Done as part of
-     * the install bootstrap; queried at runtime by Glicko-2 initialization
-     * to derive priors. */
-
-    /* HAS_KIND_VALUE_TIER kind entity declares itself T2_StandardsStructural
-     * (it's substrate-asserted but not invariant -- decomposers may add
-     * domain-specific tiers as overrides). */
-    INSERT INTO attestations (
-        id, subject_id, kind_id, object_id, source_id, context_id,
-        score, opponent_rd, arena_m, last_observed_at, observation_count
-    ) VALUES (
-        public.laplace_hash128_merkle(0::smallint, ARRAY[
-            kind_has_kind_tier_id, kind_is_a_id, tier_t2_id, subscan_id, '\x00000000000000000000000000000000'::bytea
-        ]),
-        kind_has_kind_tier_id, kind_is_a_id, tier_t2_id, subscan_id, NULL,
         1000000000, 30000000000, 0, now(), 1
     );
 

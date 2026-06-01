@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using TC = Laplace.Decomposers.Abstractions.TrustClass;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.WordNet;
 
@@ -51,34 +51,34 @@ public sealed class WordNetDecomposer : IDecomposer
 
     // Pointer symbol → (kind name, value tier). Subject = the synset bearing the pointer,
     // object = the target synset. WordNet pointer inventory per wninput(5).
-    private static readonly Dictionary<string, (string Name, KindValueTier Tier)> PointerKinds = new()
+    private static readonly Dictionary<string, (string Name, double Tier)> PointerKinds = new()
     {
-        ["!"]  = ("IS_ANTONYM_OF",           KindValueTier.T7),
-        ["@"]  = ("HAS_HYPERNYM",            KindValueTier.T3),
-        ["@i"] = ("IS_INSTANCE_OF",          KindValueTier.T3),
-        ["~"]  = ("HAS_HYPONYM",             KindValueTier.T3),
-        ["~i"] = ("HAS_INSTANCE",            KindValueTier.T3),
-        ["#m"] = ("IS_MEMBER_OF",            KindValueTier.T4),
-        ["#s"] = ("IS_SUBSTANCE_OF",         KindValueTier.T4),
-        ["#p"] = ("IS_PART_OF",              KindValueTier.T4),
-        ["%m"] = ("HAS_MEMBER",              KindValueTier.T4),
-        ["%s"] = ("HAS_SUBSTANCE",           KindValueTier.T4),
-        ["%p"] = ("HAS_PART",                KindValueTier.T4),
-        ["="]  = ("HAS_ATTRIBUTE",           KindValueTier.T4),
-        ["+"]  = ("DERIVATIONALLY_RELATED",  KindValueTier.T6),
-        [";c"] = ("HAS_DOMAIN_TOPIC",        KindValueTier.T8),
-        ["-c"] = ("IS_DOMAIN_TOPIC_MEMBER",  KindValueTier.T8),
-        [";r"] = ("HAS_DOMAIN_REGION",       KindValueTier.T8),
-        ["-r"] = ("IS_DOMAIN_REGION_MEMBER", KindValueTier.T8),
-        [";u"] = ("HAS_DOMAIN_USAGE",        KindValueTier.T8),
-        ["-u"] = ("IS_DOMAIN_USAGE_MEMBER",  KindValueTier.T8),
-        ["*"]  = ("ENTAILS",                 KindValueTier.T5),
-        [">"]  = ("CAUSES",                  KindValueTier.T5),
-        ["^"]  = ("ALSO_SEE",                KindValueTier.T8),
-        ["$"]  = ("IN_VERB_GROUP_WITH",      KindValueTier.T8),
-        ["&"]  = ("IS_SIMILAR_TO",           KindValueTier.T6),
-        ["<"]  = ("IS_PARTICIPLE_OF",        KindValueTier.T6),
-        ["\\"] = ("PERTAINS_TO",             KindValueTier.T6),
+        ["!"]  = ("IS_ANTONYM_OF",           KindRank.Oppositional),
+        ["@"]  = ("HAS_HYPERNYM",            KindRank.Taxonomic),
+        ["@i"] = ("IS_INSTANCE_OF",          KindRank.Taxonomic),
+        ["~"]  = ("HAS_HYPONYM",             KindRank.Taxonomic),
+        ["~i"] = ("HAS_INSTANCE",            KindRank.Taxonomic),
+        ["#m"] = ("IS_MEMBER_OF",            KindRank.Partitive),
+        ["#s"] = ("IS_SUBSTANCE_OF",         KindRank.Partitive),
+        ["#p"] = ("IS_PART_OF",              KindRank.Partitive),
+        ["%m"] = ("HAS_MEMBER",              KindRank.Partitive),
+        ["%s"] = ("HAS_SUBSTANCE",           KindRank.Partitive),
+        ["%p"] = ("HAS_PART",                KindRank.Partitive),
+        ["="]  = ("HAS_ATTRIBUTE",           KindRank.Partitive),
+        ["+"]  = ("DERIVATIONALLY_RELATED",  KindRank.Equivalence),
+        [";c"] = ("HAS_DOMAIN_TOPIC",        KindRank.Associative),
+        ["-c"] = ("IS_DOMAIN_TOPIC_MEMBER",  KindRank.Associative),
+        [";r"] = ("HAS_DOMAIN_REGION",       KindRank.Associative),
+        ["-r"] = ("IS_DOMAIN_REGION_MEMBER", KindRank.Associative),
+        [";u"] = ("HAS_DOMAIN_USAGE",        KindRank.Associative),
+        ["-u"] = ("IS_DOMAIN_USAGE_MEMBER",  KindRank.Associative),
+        ["*"]  = ("ENTAILS",                 KindRank.Causal),
+        [">"]  = ("CAUSES",                  KindRank.Causal),
+        ["^"]  = ("ALSO_SEE",                KindRank.Associative),
+        ["$"]  = ("IN_VERB_GROUP_WITH",      KindRank.Associative),
+        ["&"]  = ("IS_SIMILAR_TO",           KindRank.Equivalence),
+        ["<"]  = ("IS_PARTICIPLE_OF",        KindRank.Equivalence),
+        ["\\"] = ("PERTAINS_TO",             KindRank.Equivalence),
     };
 
     // Precomputed kind ids for pointer symbols (avoid re-hashing per pointer).
@@ -121,17 +121,17 @@ public sealed class WordNetDecomposer : IDecomposer
         boot.AddType("WordNet_LexCategory");
 
         // Non-pointer kinds
-        boot.AddKind("IS_SYNONYM_OF",    KindValueTier.T4, TC.StandardsDerivedTier2);
-        boot.AddKind("HAS_POS",          KindValueTier.T4, TC.StandardsDerivedTier2);
-        boot.AddKind("DEFINES",          KindValueTier.T3, TC.StandardsDerivedTier2);
-        boot.AddKind("HAS_EXAMPLE",      KindValueTier.T4, TC.StandardsDerivedTier2);
-        boot.AddKind("HAS_LEX_CATEGORY", KindValueTier.T3, TC.StandardsDerivedTier2);
-        boot.AddKind("HAS_SENSE",        KindValueTier.T3, TC.StandardsDerivedTier2);
-        boot.AddKind("IS_SENSE_OF",      KindValueTier.T3, TC.StandardsDerivedTier2);
+        boot.AddKind("IS_SYNONYM_OF",    KindRank.Partitive, SourceTrust.StandardsDerived);
+        boot.AddKind("HAS_POS",          KindRank.Partitive, SourceTrust.StandardsDerived);
+        boot.AddKind("DEFINES",          KindRank.Taxonomic, SourceTrust.StandardsDerived);
+        boot.AddKind("HAS_EXAMPLE",      KindRank.Partitive, SourceTrust.StandardsDerived);
+        boot.AddKind("HAS_LEX_CATEGORY", KindRank.Taxonomic, SourceTrust.StandardsDerived);
+        boot.AddKind("HAS_SENSE",        KindRank.Taxonomic, SourceTrust.StandardsDerived);
+        boot.AddKind("IS_SENSE_OF",      KindRank.Taxonomic, SourceTrust.StandardsDerived);
 
         // All pointer-relation kinds
         foreach (var (_, (name, tier)) in PointerKinds)
-            boot.AddKind(name, tier, TC.StandardsDerivedTier2);
+            boot.AddKind(name, tier, SourceTrust.StandardsDerived);
 
         await context.Writer.ApplyAsync(boot.Build(), ct);
 
@@ -225,10 +225,10 @@ public sealed class WordNetDecomposer : IDecomposer
             if (lemmaId is null) continue;
             b.AddAttestation(AttestationFactory.Create(
                 lemmaId.Value, KindIsSynonymOf, syn.SynsetId, Source, null,
-                KindValueTier.T4, TC.StandardsDerivedTier2));
+                KindRank.Partitive, SourceTrust.StandardsDerived));
             b.AddAttestation(AttestationFactory.Create(
                 lemmaId.Value, KindHasPos, posId, Source, null,
-                KindValueTier.T4, TC.StandardsDerivedTier2));
+                KindRank.Partitive, SourceTrust.StandardsDerived));
         }
 
         var (def, examples) = ParseGloss(syn.Gloss);
@@ -238,7 +238,7 @@ public sealed class WordNetDecomposer : IDecomposer
             if (defId is not null)
                 b.AddAttestation(AttestationFactory.Create(
                     syn.SynsetId, KindDefines, defId.Value, Source, null,
-                    KindValueTier.T3, TC.StandardsDerivedTier2));
+                    KindRank.Taxonomic, SourceTrust.StandardsDerived));
         }
         foreach (var ex in examples)
         {
@@ -246,13 +246,13 @@ public sealed class WordNetDecomposer : IDecomposer
             if (exId is not null)
                 b.AddAttestation(AttestationFactory.Create(
                     syn.SynsetId, KindHasExample, exId.Value, Source, null,
-                    KindValueTier.T4, TC.StandardsDerivedTier2));
+                    KindRank.Partitive, SourceTrust.StandardsDerived));
         }
 
         if (syn.LexFilenum >= 0 && syn.LexFilenum < Lexnames.Length)
             b.AddAttestation(AttestationFactory.Create(
                 syn.SynsetId, KindHasLexCat, LexCatId(Lexnames[syn.LexFilenum]), Source, null,
-                KindValueTier.T3, TC.StandardsDerivedTier2));
+                KindRank.Taxonomic, SourceTrust.StandardsDerived));
 
         foreach (var ptr in syn.Pointers)
         {
@@ -260,7 +260,7 @@ public sealed class WordNetDecomposer : IDecomposer
             Hash128 tgt = SourceEntityIdConventions.WordNetSynset(ptr.TargetOffset, NormPos(ptr.TargetPos));
             b.AddAttestation(AttestationFactory.Create(
                 syn.SynsetId, PointerKindId[ptr.Symbol], tgt, Source, null,
-                pk.Tier, TC.StandardsDerivedTier2));
+                pk.Tier, SourceTrust.StandardsDerived));
         }
     }
 
@@ -296,11 +296,11 @@ public sealed class WordNetDecomposer : IDecomposer
                     // SemCor tag-count seeds μ: a more-frequently-tagged sense gets a higher prior.
                     b.AddAttestation(AttestationFactory.CreateWeighted(
                         lemmaId.Value, KindHasSense, s.SenseId, Source, null,
-                        KindValueTier.T3, TC.StandardsDerivedTier2,
+                        KindRank.Taxonomic, SourceTrust.StandardsDerived,
                         magnitude: s.TagCount, floor: 1.0));
                     b.AddAttestation(AttestationFactory.Create(
                         s.SenseId, KindIsSenseOf, s.SynsetId, Source, null,
-                        KindValueTier.T3, TC.StandardsDerivedTier2));
+                        KindRank.Taxonomic, SourceTrust.StandardsDerived));
                 }
             }
 

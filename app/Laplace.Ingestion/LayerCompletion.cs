@@ -29,8 +29,8 @@ internal static class LayerCompletion
                 decomposer.SourceId,
                 decomposer.SourceId,
                 contextId: null,
-                KindValueTier.T1,
-                TrustClass.SubstrateMandateTier1))
+                KindRank.Mandate,
+                SourceTrust.SubstrateMandate))
             .Build();
     }
 }

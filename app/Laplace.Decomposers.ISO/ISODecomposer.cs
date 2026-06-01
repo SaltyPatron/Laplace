@@ -2,7 +2,7 @@ using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using TC = Laplace.Decomposers.Abstractions.TrustClass;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.ISO;
 
@@ -49,10 +49,10 @@ public sealed class ISODecomposer : IDecomposer
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("Language");
         boot.AddType("ISO639Code");
-        boot.AddKind("IS_LANGUAGE_CODE",   KindValueTier.T4, TC.StandardsDerivedTier2);
-        boot.AddKind("HAS_ISO639_1_CODE",  KindValueTier.T4, TC.StandardsDerivedTier2);
-        boot.AddKind("USES_SCRIPT",              KindValueTier.T2, TC.StandardsDerivedTier2);
-        boot.AddKind("MEMBER_OF_MACROLANGUAGE",  KindValueTier.T3, TC.StandardsDerivedTier2);
+        boot.AddKind("IS_LANGUAGE_CODE",   KindRank.Partitive, SourceTrust.StandardsDerived);
+        boot.AddKind("HAS_ISO639_1_CODE",  KindRank.Partitive, SourceTrust.StandardsDerived);
+        boot.AddKind("USES_SCRIPT",              KindRank.StandardsStructural, SourceTrust.StandardsDerived);
+        boot.AddKind("MEMBER_OF_MACROLANGUAGE",  KindRank.Taxonomic, SourceTrust.StandardsDerived);
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -74,7 +74,7 @@ public sealed class ISODecomposer : IDecomposer
             b.AddEntity(langId, /*tier*/ 2, LanguageTypeId, Source);
             b.AddAttestation(AttestationFactory.Create(
                 langId, KindIsLanguageCode, null, Source, null,
-                KindValueTier.T4, TC.StandardsDerivedTier2));
+                KindRank.Partitive, SourceTrust.StandardsDerived));
 
             if (rec.Part1.Length > 0)
             {
@@ -82,7 +82,7 @@ public sealed class ISODecomposer : IDecomposer
                 b.AddEntity(iso1Id, /*tier*/ 2, Iso639CodeTypeId, Source);
                 b.AddAttestation(AttestationFactory.Create(
                     langId, KindHasIso6391Code, iso1Id, Source, null,
-                    KindValueTier.T4, TC.StandardsDerivedTier2));
+                    KindRank.Partitive, SourceTrust.StandardsDerived));
             }
         }
 
@@ -101,7 +101,7 @@ public sealed class ISODecomposer : IDecomposer
             b.AddEntity(macroId, /*tier*/ 2, LanguageTypeId, Source);
             b.AddAttestation(AttestationFactory.Create(
                 indivId, KindMemberOfMacrolanguage, macroId, Source, null,
-                KindValueTier.T3, TC.StandardsDerivedTier2));
+                KindRank.Taxonomic, SourceTrust.StandardsDerived));
         }
 
         // language → script, converging on the Unicode script entities via the ISO
@@ -121,7 +121,7 @@ public sealed class ISODecomposer : IDecomposer
                 b.AddEntity(scriptId, /*tier*/ 0, UcdClassifierTypeId, Source);  // idempotent w/ Unicode
                 b.AddAttestation(AttestationFactory.Create(
                     langId, KindUsesScript, scriptId, Source, null,
-                    KindValueTier.T2, TC.StandardsDerivedTier2));
+                    KindRank.StandardsStructural, SourceTrust.StandardsDerived));
             }
         }
 

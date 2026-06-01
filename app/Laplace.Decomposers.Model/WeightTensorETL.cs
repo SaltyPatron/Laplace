@@ -23,8 +23,8 @@ namespace Laplace.Decomposers.Model;
 ///          → one accumulator entry per (subject, kind, object).
 /// Phase 3: lottery-ticket sparsity — per-kind top-k by aggregate magnitude.
 /// Phase 5: emit one AttestationRow per (subject, kind, object, source) tuple
-///          via AttestationFactory.Create with KindValueTier.T9 +
-///          TrustClass.AiModelProbeTier7 priors. context = NULL per the ADR 0056
+///          via AttestationFactory.Create with KindRank.TensorCalculation +
+///          SourceTrust.AiModelProbe priors. context = NULL per the ADR 0056
 ///          amendment + GLOSSARY explicit rule (per-position is recipe content).
 ///
 /// Phase 4 (static-mathematical retention validator) is deferred; the per-kind
@@ -833,8 +833,8 @@ public sealed class WeightTensorETL
                 obj:       null,
                 sourceId:  _sourceId,
                 contextId: null,
-                tier:      KindValueTier.T9,
-                trust:     TrustClass.AiModelProbeTier7,
+                kindRank:    KindRank.TensorCalculation,
+                sourceTrust: SourceTrust.AiModelProbe,
                 observationCount: normCount));
             yield return b.Build();
         }
@@ -884,7 +884,7 @@ public sealed class WeightTensorETL
             var subj = _tokens[tokenIdx].EntityId;
             var row = AttestationFactory.CreateWeighted(
                 subj, kindId, obj: null, _sourceId, contextId: null,
-                tier: KindValueTier.T9, trust: TrustClass.AiModelProbeTier7,
+                kindRank: KindRank.TensorCalculation, sourceTrust: SourceTrust.AiModelProbe,
                 magnitude: perTokenAccum[tokenIdx], floor: NoiseFloor);
             if (!seen.Add(row.Id)) continue;
 
@@ -917,7 +917,7 @@ public sealed class WeightTensorETL
             var row = AttestationFactory.CreateWeighted(
                 _tokens[(int)qi].EntityId, _kinds.QProjects, _tokens[(int)kj].EntityId,
                 _sourceId, contextId: null,
-                tier: KindValueTier.T9, trust: TrustClass.AiModelProbeTier7,
+                kindRank: KindRank.TensorCalculation, sourceTrust: SourceTrust.AiModelProbe,
                 magnitude: buf[i].Score, floor: QkNoiseFloor);
 
             bb ??= new SubstrateChangeBuilder(_sourceId, $"q_projects/batch-{batchIdx}",
@@ -946,7 +946,7 @@ public sealed class WeightTensorETL
             var row = AttestationFactory.CreateWeighted(
                 _tokens[(int)qi].EntityId, kindId, _tokens[(int)kj].EntityId,
                 _sourceId, contextId: null,
-                tier: KindValueTier.T9, trust: TrustClass.AiModelProbeTier7,
+                kindRank: KindRank.TensorCalculation, sourceTrust: SourceTrust.AiModelProbe,
                 magnitude: buf[i].Score, floor: floor);
 
             bb ??= new SubstrateChangeBuilder(_sourceId, $"{label}/batch-{batchIdx}",

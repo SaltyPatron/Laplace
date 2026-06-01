@@ -2,7 +2,7 @@ using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using TC = Laplace.Decomposers.Abstractions.TrustClass;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.UD;
 
@@ -64,11 +64,11 @@ public sealed class UDDecomposer : IDecomposer
         boot.AddType("UD_XPOS");
         boot.AddType("UD_Feature");
         boot.AddType("UD_Deprel");
-        boot.AddKind("HAS_UPOS",    KindValueTier.T4, TC.AcademicCuratedTier3);
-        boot.AddKind("HAS_XPOS",    KindValueTier.T4, TC.AcademicCuratedTier3);
-        boot.AddKind("HAS_FEATURE", KindValueTier.T4, TC.AcademicCuratedTier3);
-        boot.AddKind("IS_LEMMA_OF", KindValueTier.T4, TC.AcademicCuratedTier3);
-        boot.AddKind("DEPENDS_ON",  KindValueTier.T3, TC.AcademicCuratedTier3);
+        boot.AddKind("HAS_UPOS",    KindRank.Partitive, SourceTrust.AcademicCurated);
+        boot.AddKind("HAS_XPOS",    KindRank.Partitive, SourceTrust.AcademicCurated);
+        boot.AddKind("HAS_FEATURE", KindRank.Partitive, SourceTrust.AcademicCurated);
+        boot.AddKind("IS_LEMMA_OF", KindRank.Partitive, SourceTrust.AcademicCurated);
+        boot.AddKind("DEPENDS_ON",  KindRank.Taxonomic, SourceTrust.AcademicCurated);
         await context.Writer.ApplyAsync(boot.Build(), ct);
 
         var upos = new SubstrateChangeBuilder(
@@ -152,14 +152,14 @@ public sealed class UDDecomposer : IDecomposer
             if (!string.IsNullOrEmpty(tok.Upos) && tok.Upos != "_")
                 b.AddAttestation(AttestationFactory.Create(
                     form, KindHasUpos, UposId(tok.Upos), Source, null,
-                    KindValueTier.T4, TC.AcademicCuratedTier3));
+                    KindRank.Partitive, SourceTrust.AcademicCurated));
 
             if (!string.IsNullOrEmpty(tok.Xpos) && tok.Xpos != "_")
             {
                 b.AddEntity(new EntityRow(XposId(tok.Xpos), 0, XposTypeId, Source));
                 b.AddAttestation(AttestationFactory.Create(
                     form, KindHasXpos, XposId(tok.Xpos), Source, null,
-                    KindValueTier.T4, TC.AcademicCuratedTier3));
+                    KindRank.Partitive, SourceTrust.AcademicCurated));
             }
 
             foreach (var feat in tok.Feats)
@@ -167,12 +167,12 @@ public sealed class UDDecomposer : IDecomposer
                 b.AddEntity(new EntityRow(FeatId(feat), 0, FeatureTypeId, Source));
                 b.AddAttestation(AttestationFactory.Create(
                     form, KindHasFeature, FeatId(feat), Source, null,
-                    KindValueTier.T4, TC.AcademicCuratedTier3));
+                    KindRank.Partitive, SourceTrust.AcademicCurated));
             }
 
             b.AddAttestation(AttestationFactory.Create(
                 form, KindHasLanguage, langId, Source, null,
-                KindValueTier.T4, TC.AcademicCuratedTier3));
+                KindRank.Partitive, SourceTrust.AcademicCurated));
 
             if (tok.Lemma != tok.Form)
             {
@@ -180,7 +180,7 @@ public sealed class UDDecomposer : IDecomposer
                 if (lemmaId is not null)
                     b.AddAttestation(AttestationFactory.Create(
                         lemmaId.Value, KindIsLemmaOf, form, Source, null,
-                        KindValueTier.T4, TC.AcademicCuratedTier3));
+                        KindRank.Partitive, SourceTrust.AcademicCurated));
             }
 
             // Labelled dependency: form DEPENDS_ON head, context_id = deprel entity.
@@ -190,7 +190,7 @@ public sealed class UDDecomposer : IDecomposer
                 b.AddEntity(new EntityRow(DeprelId(tok.Deprel), 0, DeprelTypeId, Source));
                 b.AddAttestation(AttestationFactory.Create(
                     form, KindDependsOn, headId, Source, DeprelId(tok.Deprel),
-                    KindValueTier.T3, TC.AcademicCuratedTier3));
+                    KindRank.Taxonomic, SourceTrust.AcademicCurated));
             }
         }
 
@@ -203,7 +203,7 @@ public sealed class UDDecomposer : IDecomposer
                 if (formId[id] is { } partId)
                     b.AddAttestation(AttestationFactory.Create(
                         surfaceId.Value, KindHasPart, partId, Source, null,
-                        KindValueTier.T4, TC.AcademicCuratedTier3));
+                        KindRank.Partitive, SourceTrust.AcademicCurated));
         }
     }
 
