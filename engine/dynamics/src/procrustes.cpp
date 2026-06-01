@@ -21,8 +21,12 @@
  *   5. s = Σ_ii summed / ||P_c||_F²  (Umeyama optimal scale).
  *   6. Residual ε = ||s · P_c · R − Q_c||_F.
  *
- * SVD is computed via Eigen's JacobiSVD, which routes through Intel oneMKL
- * dgesdd when EIGEN_USE_MKL_ALL is defined at compile time (per ADR 0030).
+ * SVD is computed via Eigen's JacobiSVD — a NATIVE Eigen kernel. JacobiSVD and
+ * BDCSVD have no LAPACKE backend, so EIGEN_USE_MKL_ALL does NOT dispatch them to
+ * MKL (unlike Eigen's MKL-backed dense GEMM/LU). The cross-covariance H is small
+ * (source_dim × 4), so native Jacobi is exact and single-threaded deterministic —
+ * the fit is reproducible independent of the MKL_CBWR lock (which governs the
+ * MKL-dispatched paths elsewhere in the engine).
  *
  * Reflection correction: not applied. For the substrate, source-embedding
  * spaces and the 4D target are both used as inner-product Euclidean

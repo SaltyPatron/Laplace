@@ -10,9 +10,11 @@
  * Backed by Eigen's `HouseholderQR`, which is the numerically-stable
  * Householder reflections approach to QR (classical and modified
  * Gram-Schmidt both lose orthogonality on ill-conditioned input bases;
- * Householder QR is backward-stable). Routes through Intel oneMKL's
- * dgeqrf/dorgqr when EIGEN_USE_MKL_ALL is set at compile time (per ADR
- * 0030).
+ * Householder QR is backward-stable). This is Eigen's QR; it is single-threaded
+ * deterministic, so the orthonormal basis is reproducible regardless of the
+ * MKL_CBWR lock. (We do not claim a specific LAPACKE dispatch — Eigen's MKL
+ * backend coverage for HouseholderQR is version-dependent; correctness and
+ * determinism hold either way.)
  *
  * Input layout: `vectors` is (n_vecs * dim) doubles, row-major — row i
  * is the i-th vector at offset (i * dim). After successful return, the

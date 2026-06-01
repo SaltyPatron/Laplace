@@ -98,63 +98,71 @@ TEST(LaplaceDynamicsEigenmaps, RecoversRingManifold) {
         << "ring structure not recovered in 2D embedding";
 }
 
-TEST(LaplaceDynamicsEigenmaps, EmbeddingHasZeroMeanPerDim) {
-    /* Laplacian eigenvectors are orthogonal to the constant eigenvector,
-     * so each output coordinate column should have mean ≈ 0. */
-    constexpr std::size_t N = 80;
-    constexpr std::size_t HIGH_DIM = 5;
-    constexpr std::size_t K = 5;
+/* Build a symmetric path graph 0-1-...-(N-1) as COO (both directions, unit
+ * weight) + its degrees. Non-uniform degrees (ends=1, interior=2) so the
+ * D-weighting is actually exercised. */
+static void make_path_graph(int N, std::vector<int>& rows, std::vector<int>& cols,
+                            std::vector<double>& w, std::vector<double>& deg) {
+    rows.clear(); cols.clear(); w.clear(); deg.assign(static_cast<std::size_t>(N), 0.0);
+    for (int i = 0; i + 1 < N; ++i) {
+        rows.push_back(i);     cols.push_back(i + 1); w.push_back(1.0);
+        rows.push_back(i + 1); cols.push_back(i);     w.push_back(1.0);
+    }
+    for (std::size_t e = 0; e < rows.size(); ++e) deg[static_cast<std::size_t>(rows[e])] += w[e];
+}
+
+TEST(LaplaceDynamicsEigenmaps, EmbeddingIsDWeightedZeroMean) {
+    /* CANONICAL (Belkin-Niyogi generalized) eigenvectors are D-orthogonal to
+     * the constant eigenvector, so each output column has DEGREE-WEIGHTED mean
+     * zero: Σ_i d_i f_i[k] = 0 (NOT the plain mean). Use the sparse-graph entry
+     * point so the test controls the graph and knows the degrees. */
+    constexpr int N = 40;
     constexpr std::size_t TARGET = 3;
+    std::vector<int> rows, cols; std::vector<double> w, deg;
+    make_path_graph(N, rows, cols, w, deg);
 
-    std::mt19937_64 rng(0x123ULL);
-    std::uniform_real_distribution<double> u(-1.0, 1.0);
-    std::vector<double> pts(N * HIGH_DIM);
-    for (std::size_t i = 0; i < N * HIGH_DIM; ++i) pts[i] = u(rng);
-
-    std::vector<double> emb(N * TARGET);
-    ASSERT_EQ(0, laplacian_eigenmaps(pts.data(), N, HIGH_DIM, K, TARGET, emb.data()));
+    std::vector<double> emb(static_cast<std::size_t>(N) * TARGET);
+    ASSERT_EQ(0, laplacian_eigenmaps_from_sparse_graph(
+        rows.data(), cols.data(), w.data(), rows.size(),
+        static_cast<std::size_t>(N), TARGET, emb.data()));
 
     for (std::size_t k = 0; k < TARGET; ++k) {
-        double mean = 0.0;
-        for (std::size_t i = 0; i < N; ++i) mean += emb[i * TARGET + k];
-        mean /= static_cast<double>(N);
-        EXPECT_NEAR(mean, 0.0, 1e-9)
-            << "embedding dim " << k << " not zero-mean (mean=" << mean << ")";
+        double wmean = 0.0;
+        for (int i = 0; i < N; ++i) wmean += deg[static_cast<std::size_t>(i)] * emb[i * TARGET + k];
+        EXPECT_NEAR(wmean, 0.0, 1e-7)
+            << "dim " << k << " not degree-weighted zero-mean (Σ d_i f_i = " << wmean << ")";
     }
 }
 
-TEST(LaplaceDynamicsEigenmaps, EmbeddingColumnsAreOrthonormal) {
-    /* Spectra returns unit-normalized eigenvectors; the embedding
-     * columns inherit this orthonormality. */
-    constexpr std::size_t N = 100;
-    constexpr std::size_t HIGH_DIM = 8;
-    constexpr std::size_t K = 6;
+TEST(LaplaceDynamicsEigenmaps, EmbeddingColumnsAreDOrthonormal) {
+    /* CANONICAL generalized eigenvectors are D-ORTHONORMAL:
+     * Σ_i d_i f_i[a] f_i[b] = δ_ab. (Equivalently the underlying L_sym
+     * eigenvectors u = D^{1/2} f are plain-orthonormal, which Spectra
+     * returns to ~1e-12; the D-form is the embedding's invariant.) */
+    constexpr int N = 50;
     constexpr std::size_t TARGET = 4;
+    std::vector<int> rows, cols; std::vector<double> w, deg;
+    make_path_graph(N, rows, cols, w, deg);
 
-    std::mt19937_64 rng(0xDEADBEEFULL);
-    std::uniform_real_distribution<double> u(-1.0, 1.0);
-    std::vector<double> pts(N * HIGH_DIM);
-    for (std::size_t i = 0; i < N * HIGH_DIM; ++i) pts[i] = u(rng);
-
-    std::vector<double> emb(N * TARGET);
-    ASSERT_EQ(0, laplacian_eigenmaps(pts.data(), N, HIGH_DIM, K, TARGET, emb.data()));
+    std::vector<double> emb(static_cast<std::size_t>(N) * TARGET);
+    ASSERT_EQ(0, laplacian_eigenmaps_from_sparse_graph(
+        rows.data(), cols.data(), w.data(), rows.size(),
+        static_cast<std::size_t>(N), TARGET, emb.data()));
 
     for (std::size_t a = 0; a < TARGET; ++a) {
-        double norm_sq_a = 0.0;
-        for (std::size_t i = 0; i < N; ++i) {
-            const double v = emb[i * TARGET + a];
-            norm_sq_a += v * v;
+        double naa = 0.0;
+        for (int i = 0; i < N; ++i) {
+            const double f = emb[i * TARGET + a];
+            naa += deg[static_cast<std::size_t>(i)] * f * f;
         }
-        EXPECT_NEAR(norm_sq_a, 1.0, 1e-9)
-            << "embedding column " << a << " norm² = " << norm_sq_a;
+        EXPECT_NEAR(naa, 1.0, 1e-7) << "column " << a << " D-norm² = " << naa;
 
         for (std::size_t b = a + 1; b < TARGET; ++b) {
-            double dot = 0.0;
-            for (std::size_t i = 0; i < N; ++i) {
-                dot += emb[i * TARGET + a] * emb[i * TARGET + b];
-            }
-            EXPECT_NEAR(dot, 0.0, 1e-9)
-                << "columns " << a << " and " << b << " not orthogonal (dot=" << dot << ")";
+            double nab = 0.0;
+            for (int i = 0; i < N; ++i)
+                nab += deg[static_cast<std::size_t>(i)] * emb[i * TARGET + a] * emb[i * TARGET + b];
+            EXPECT_NEAR(nab, 0.0, 1e-7)
+                << "columns " << a << " and " << b << " not D-orthogonal (D-dot=" << nab << ")";
         }
     }
 }

@@ -7,6 +7,7 @@
 #include <Spectra/Util/SelectionRule.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <limits>
@@ -16,41 +17,45 @@
 
 /* Laplacian eigenmaps (Belkin & Niyogi, "Laplacian Eigenmaps for
  * Dimensionality Reduction and Data Representation", Neural Computation
- * 15:1373–1396, 2003). Nonlinear dimensionality reduction via the spectrum
- * of the graph Laplacian — preserves local neighborhood structure.
+ * 15:1373-1396, 2003). Nonlinear dimensionality reduction via the spectrum
+ * of the graph Laplacian - preserves local neighborhood structure.
+ *
+ * CANONICAL FORM. Belkin & Niyogi minimize  fᵀ L f / fᵀ D f, i.e. solve the
+ * GENERALIZED eigenproblem  L f = λ D f  (NOT the unnormalized  L f = λ f).
+ * We solve it through the symmetric normalized Laplacian
+ *   L_sym = D^{-1/2} (D - W) D^{-1/2} = I - D^{-1/2} W D^{-1/2},
+ * find its smallest eigenvectors u, and map back to the generalized
+ * eigenvectors  f = D^{-1/2} u  (the embedding coordinates). This is the form
+ * that converges to the Laplace-Beltrami operator of the underlying manifold;
+ * the unnormalized variant is a different embedding (von Luxburg 2007).
  *
  * Pipeline:
- *   1. Build k-NN graph on high-dim points (binary weights — heat-kernel
+ *   1. Build k-NN graph on high-dim points (binary weights - heat-kernel
  *      weights are a per-source tuning extension, not in v0.1).
- *   2. Symmetrize via W = max(W, Wᵀ) (an edge is kept if it's in either
- *      direction's top-k).
- *   3. Build degree matrix D and unnormalized Laplacian L = D − W as a
- *      sparse symmetric matrix.
- *   4. Regularize: L_reg = L + ε·I where ε ≪ smallest meaningful
- *      eigenvalue. This avoids singularity (L has a zero eigenvalue on
- *      every connected component — the constant function) so the
- *      shift-invert factorization is non-singular.
- *   5. Find smallest (target_dim + 1) eigenpairs of L_reg via Spectra's
- *      `SymEigsShiftSolver` with shift σ = 0 (uses sparse LU on L_reg).
- *      In ascending-eigenvalue order: drop the smallest (the regularized
- *      zero-eigenvalue eigenvector, which is constant up to numerical
- *      noise) and take the next `target_dim` eigenvectors as the
- *      coordinates of the low-dim embedding.
+ *   2. Symmetrize.
+ *   3. Build the symmetric normalized Laplacian L_sym, regularized by ε·I so
+ *      the zero eigenvalue (eigenvector D^{1/2}·1) lifts off singularity for
+ *      the shift-invert factorization. L_sym's spectrum is in [0, 2], so a
+ *      fixed ε is scale-correct (no degree scaling, unlike unnormalized L).
+ *   4. Find the smallest (target_dim + 1) eigenpairs of L_sym via Spectra's
+ *      `SymEigsShiftSolver` with shift σ = 0 (sparse LU on L_sym). Spectra's
+ *      init() uses a fixed-seed residual, so the iteration is deterministic.
+ *   5. In ascending-eigenvalue order: drop the smallest (the constant
+ *      generalized eigenvector) and take the next `target_dim`, mapped back
+ *      via f = D^{-1/2} u as the low-dim coordinates.
  *
- * Sparse symmetric eigensolver: Spectra's `SymEigsShiftSolver` over
- * `SparseSymShiftSolve` factorizes `L_reg − σ·I = L_reg` once via Eigen's
- * sparse LU, then applies it implicitly through Lanczos iteration. This is
- * the ARPACK-equivalent path for sparse symmetric eigenproblems.
- *
- * Output: `low_dim_out` (n × target_dim, row-major) — row i is the
- * target_dim coordinate of the i-th point in the low-dim embedding.
+ * Output: `low_dim_out` (n × target_dim, row-major) - row i is the
+ * target_dim coordinate of the i-th point in the low-dim embedding. The
+ * columns are D-orthonormal (Σ_i d_i f_i[a] f_i[b] = δ_ab) and D-weighted
+ * zero-mean (Σ_i d_i f_i[k] = 0), the canonical generalized-eigenvector
+ * normalization.
  *
  * Returns:
  *   0       on success.
  *   -1      null input.
  *   -2      invalid arguments (k_neighbors ≥ n, target_dim ≥ n, etc.).
  *   -3      eigensolver did not converge.
- *   -4      degenerate input (graph is too disconnected — fewer than
+ *   -4      degenerate input (graph is too disconnected - fewer than
  *           target_dim non-trivial eigenvectors). */
 
 namespace {
@@ -70,43 +75,53 @@ double sq_dist(const double* pts, std::size_t a, std::size_t b, std::size_t d) {
 
 /* Eigendecomposition core shared by laplacian_eigenmaps (k-NN graph) and
  * laplacian_eigenmaps_from_sparse_graph (precomputed adjacency). Takes a
- * symmetric non-negative adjacency `W`, builds the unnormalized
- * regularized Laplacian, runs Spectra's shift-invert symmetric solver,
- * drops the constant-function eigenvector, writes `target_dim` coordinates
- * per node into `low_dim_out` (row-major). */
+ * symmetric non-negative adjacency `W`, builds the symmetric normalized
+ * regularized Laplacian, runs Spectra's shift-invert symmetric solver, drops
+ * the constant generalized eigenvector, writes `target_dim` coordinates per
+ * node (f = D^{-1/2} u) into `low_dim_out` (row-major). */
 int eigendecompose_laplacian(const SpMat& W,
                              std::size_t  n,
                              std::size_t  target_dim,
                              double*      low_dim_out) {
-    /* Degrees + unnormalized Laplacian L = D − W, then regularize. */
-    Eigen::VectorXd degrees(static_cast<int>(n));
+    const int ni = static_cast<int>(n);
+
+    /* Degrees and D^{-1/2}. Isolated nodes (degree 0) get inverse-sqrt 0 -
+     * they contribute no normalized coupling and land at the origin. */
+    Eigen::VectorXd degrees(ni);
     degrees.setZero();
     for (int k = 0; k < W.outerSize(); ++k) {
         double row_sum = 0.0;
         for (SpMat::InnerIterator it(W, k); it; ++it) row_sum += it.value();
         degrees[k] = row_sum;
     }
+    Eigen::VectorXd dinv_sqrt(ni);
+    for (int i = 0; i < ni; ++i)
+        dinv_sqrt[i] = (degrees[i] > 0.0) ? 1.0 / std::sqrt(degrees[i]) : 0.0;
 
+    /* L_sym = I - D^{-1/2} W D^{-1/2} + ε·I. Off-diagonal (i,j) =
+     * -W[i,j] / sqrt(d_i d_j); diagonal = 1 (for d_i>0) + ε. */
     std::vector<Triplet> l_triplets;
     l_triplets.reserve(static_cast<std::size_t>(W.nonZeros()) + n);
     for (int k = 0; k < W.outerSize(); ++k) {
         for (SpMat::InnerIterator it(W, k); it; ++it) {
-            l_triplets.emplace_back(it.row(), it.col(), -it.value());
+            const int i = it.row(), j = it.col();
+            const double v = -it.value() * dinv_sqrt[i] * dinv_sqrt[j];
+            if (v != 0.0) l_triplets.emplace_back(i, j, v);
         }
     }
-    const double max_deg = degrees.maxCoeff();
-    const double epsilon = (max_deg > 0.0) ? max_deg * 1e-10 : 1e-10;
-    for (int i = 0; i < static_cast<int>(n); ++i) {
-        l_triplets.emplace_back(i, i, degrees[i] + epsilon);
+    const double epsilon = 1e-10;
+    for (int i = 0; i < ni; ++i) {
+        const double diag = (degrees[i] > 0.0 ? 1.0 : 0.0) + epsilon;
+        l_triplets.emplace_back(i, i, diag);
     }
 
-    SpMat L(static_cast<int>(n), static_cast<int>(n));
-    L.setFromTriplets(l_triplets.begin(), l_triplets.end());
+    SpMat L(ni, ni);
+    L.setFromTriplets(l_triplets.begin(), l_triplets.end(),
+                      [](const double& a, const double& b) { return a + b; });
     L.makeCompressed();
 
     const int nev = static_cast<int>(target_dim) + 1;
-    const int ncv = std::min(static_cast<int>(n) - 1,
-                             std::max(2 * nev + 1, 20));
+    const int ncv = std::min(ni - 1, std::max(2 * nev + 1, 20));
     if (ncv <= nev) return -2;
 
     Spectra::SparseSymShiftSolve<double> op(L);
@@ -126,10 +141,13 @@ int eigendecompose_laplacian(const SpMat& W,
               [&evals](int a, int b) { return evals[a] < evals[b]; });
 
     if (idx.size() < target_dim + 1) return -4;
+    /* Drop idx[0] (constant generalized eigenvector); embedding f = D^{-1/2} u. */
     for (std::size_t k = 0; k < target_dim; ++k) {
         const int col = idx[k + 1];
         for (std::size_t i = 0; i < n; ++i) {
-            low_dim_out[i * target_dim + k] = evecs(static_cast<Eigen::Index>(i), col);
+            low_dim_out[i * target_dim + k] =
+                evecs(static_cast<Eigen::Index>(i), col)
+                * dinv_sqrt[static_cast<Eigen::Index>(i)];
         }
     }
     return 0;
@@ -152,7 +170,7 @@ int laplacian_eigenmaps_from_sparse_graph(const int*    coo_rows,
     std::vector<Triplet> w_triplets;
     w_triplets.reserve(nnz);
     for (std::size_t e = 0; e < nnz; ++e) {
-        if (coo_weights[e] <= 0.0) continue;          /* drop non-positive — substrate noise floor is 0 */
+        if (coo_weights[e] <= 0.0) continue;          /* drop non-positive - substrate noise floor is 0 */
         const int r = coo_rows[e];
         const int c = coo_cols[e];
         if (r < 0 || c < 0) continue;
@@ -164,9 +182,8 @@ int laplacian_eigenmaps_from_sparse_graph(const int*    coo_rows,
     W.setFromTriplets(w_triplets.begin(), w_triplets.end(),
                       [](const double& a, const double& b){ return a + b; });
 
-    /* Symmetrize: W = (W + Wᵀ) / 2 — sources may emit directed edges
-     * (e.g., Q_PROJECTS subject→object), but the Laplacian needs a
-     * symmetric adjacency. */
+    /* Symmetrize: W = (W + Wᵀ) / 2 - sources may emit directed edges
+     * (e.g., subject→object), but the Laplacian needs a symmetric adjacency. */
     SpMat WT = SpMat(W.transpose());
     SpMat Wsym = 0.5 * (W + WT);
     Wsym.makeCompressed();
@@ -212,85 +229,17 @@ int laplacian_eigenmaps(const double* high_dim_pts,
                           [](const double& a, const double& b) { (void)b; return a; });
 
     /* --- 2. Symmetrize: W[i,j] = max(W_raw[i,j], W_raw[j,i]). Binary,
-     * so element-wise max is OR. ---------------------------------------- */
+     * so element-wise max is OR (an edge is kept if it's in either
+     * direction's top-k). ---------------------------------------------- */
     SpMat W = W_raw + Eigen::SparseMatrix<double>(W_raw.transpose());
-    /* +0 then divide by ≥1 fixes the case where edge appears in both
-     * directions (counted twice → 2; divide by max to get 1). */
     for (int k = 0; k < W.outerSize(); ++k) {
         for (SpMat::InnerIterator it(W, k); it; ++it) {
             it.valueRef() = (it.value() > 0.0) ? 1.0 : 0.0;
         }
     }
+    W.makeCompressed();
 
-    /* --- 3. Unnormalized Laplacian L = D − W. ------------------------- */
-    Eigen::VectorXd degrees(static_cast<int>(n));
-    degrees.setZero();
-    for (int k = 0; k < W.outerSize(); ++k) {
-        double row_sum = 0.0;
-        for (SpMat::InnerIterator it(W, k); it; ++it) row_sum += it.value();
-        degrees[k] = row_sum;
-    }
-
-    std::vector<Triplet> l_triplets;
-    l_triplets.reserve(static_cast<std::size_t>(W.nonZeros()) + n);
-    for (int k = 0; k < W.outerSize(); ++k) {
-        for (SpMat::InnerIterator it(W, k); it; ++it) {
-            l_triplets.emplace_back(it.row(), it.col(), -it.value());
-        }
-    }
-    /* --- 4. Add diagonal D + ε·I regularization. ε scaled to the
-     * largest degree so it's negligible vs the non-trivial spectrum but
-     * large enough to lift the zero eigenvalue away from singularity. - */
-    const double max_deg = degrees.maxCoeff();
-    const double epsilon = (max_deg > 0.0)
-        ? max_deg * 1e-10
-        : 1e-10;
-    for (int i = 0; i < static_cast<int>(n); ++i) {
-        l_triplets.emplace_back(i, i, degrees[i] + epsilon);
-    }
-
-    SpMat L(static_cast<int>(n), static_cast<int>(n));
-    L.setFromTriplets(l_triplets.begin(), l_triplets.end());
-    L.makeCompressed();
-
-    /* --- 5. Spectra smallest-eigenvalues via shift-invert at σ = 0. ---
-     * Number of eigenvalues to compute: target_dim + 1 (we'll drop the
-     * smallest one, which corresponds to the regularized zero
-     * eigenvalue). The Krylov subspace size `ncv` must satisfy
-     * 2*nev ≤ ncv ≤ n; pick the recommended max(2*nev + 1, 20). */
-    const int nev = static_cast<int>(target_dim) + 1;
-    const int ncv = std::min(static_cast<int>(n) - 1,
-                             std::max(2 * nev + 1, 20));
-    if (ncv <= nev) return -2;
-
-    Spectra::SparseSymShiftSolve<double> op(L);
-    Spectra::SymEigsShiftSolver<Spectra::SparseSymShiftSolve<double>>
-        eigs(op, nev, ncv, 0.0);
-    eigs.init();
-    const int nconv = eigs.compute(Spectra::SortRule::LargestMagn);
-    if (eigs.info() != Spectra::CompInfo::Successful || nconv < nev) {
-        return -3;
-    }
-
-    /* Eigenvalues are returned sorted by the sort rule, but the natural
-     * order we want is ascending in the ORIGINAL Laplacian's spectrum.
-     * Sort by eigenvalue ascending. */
-    Eigen::VectorXd evals = eigs.eigenvalues();
-    Eigen::MatrixXd evecs = eigs.eigenvectors();
-    std::vector<int> idx(static_cast<std::size_t>(evals.size()));
-    std::iota(idx.begin(), idx.end(), 0);
-    std::sort(idx.begin(), idx.end(),
-              [&evals](int a, int b) { return evals[a] < evals[b]; });
-
-    /* Drop idx[0] (the regularized constant-function eigenvector), take
-     * next target_dim. Each eigenvector has length n; place coord k of
-     * each point i into low_dim_out[i*target_dim + k]. */
-    if (idx.size() < target_dim + 1) return -4;
-    for (std::size_t k = 0; k < target_dim; ++k) {
-        const int col = idx[k + 1];
-        for (std::size_t i = 0; i < n; ++i) {
-            low_dim_out[i * target_dim + k] = evecs(static_cast<Eigen::Index>(i), col);
-        }
-    }
-    return 0;
+    /* --- 3-5. Symmetric normalized Laplacian eigendecomposition (shared
+     * with the sparse-graph entry point - one canonical implementation). */
+    return eigendecompose_laplacian(W, n, target_dim, low_dim_out);
 }
