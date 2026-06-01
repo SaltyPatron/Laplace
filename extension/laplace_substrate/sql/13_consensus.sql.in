@@ -144,6 +144,37 @@ $$;
 COMMENT ON FUNCTION completions(bytea, integer) IS
     'Completions of a subject ranked by consensus effective μ — [subject] ⇒ {objects} ORDER BY μ.';
 
+/* Consensus NEIGHBORHOOD of an entity — the materialized Glicko-2 state (μ/rd/σ + witness
+ * fan-in) per relation, ranked by effective μ. This is the inspect/inference read surface for
+ * one entity: it reads `consensus` (source + context already dropped — ONE row per relation),
+ * NOT the per-witness evidence. The raw rating/rd/volatility are returned (×1e9) so callers
+ * render μ/rd/σ directly. */
+CREATE OR REPLACE FUNCTION consensus_out(p_id bytea, p_limit integer DEFAULT 40)
+    RETURNS TABLE(kind_id bytea, object_id bytea, rating bigint, rd bigint,
+                  volatility bigint, witness_count bigint)
+    LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+    SELECT c.kind_id, c.object_id, c.rating, c.rd, c.volatility, c.witness_count
+    FROM consensus c
+    WHERE c.subject_id = p_id
+    ORDER BY (c.rating - 2*c.rd) DESC
+    LIMIT p_limit
+$$;
+COMMENT ON FUNCTION consensus_out(bytea, integer) IS
+    'Outgoing CONSENSUS neighborhood: accumulated Glicko-2 (rating/rd/volatility ×1e9) + witness_count per (this→object) relation, ranked by effective μ. Source/context out of identity.';
+
+CREATE OR REPLACE FUNCTION consensus_in(p_id bytea, p_limit integer DEFAULT 40)
+    RETURNS TABLE(subject_id bytea, kind_id bytea, rating bigint, rd bigint,
+                  volatility bigint, witness_count bigint)
+    LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+    SELECT c.subject_id, c.kind_id, c.rating, c.rd, c.volatility, c.witness_count
+    FROM consensus c
+    WHERE c.object_id = p_id
+    ORDER BY (c.rating - 2*c.rd) DESC
+    LIMIT p_limit
+$$;
+COMMENT ON FUNCTION consensus_in(bytea, integer) IS
+    'Incoming CONSENSUS neighborhood: accumulated Glicko-2 + witness_count per (subject→this) relation, ranked by effective μ.';
+
 /* Consensus / dedup health: evidence vs consensus row counts + witness fan-in. dedup_ratio =
  * evidence/consensus (how much the per-witness evidence collapsed — the "~params - dupes"). */
 CREATE OR REPLACE FUNCTION consensus_stats()

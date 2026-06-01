@@ -234,21 +234,62 @@ internal static class Program
             if (n == 0) Console.WriteLine("    (none)");
         }
 
-        // Attestation neighborhood — laplace.attestations_out(id) / attestations_in(id)
+        // Consensus neighborhood — laplace.consensus_out/_in(id): the ranked-μ read surface
+        // (accumulated Glicko-2 across all witnesses; source/context out of identity).
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT kind_id, object_id, source_id, rating, rd, volatility, observation_count "
-                            + "FROM laplace.attestations_out(@id)";
+            cmd.CommandText = "SELECT kind_id, object_id, rating, rd, volatility, witness_count "
+                            + "FROM laplace.consensus_out(@id)";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
             await using var r = await cmd.ExecuteReaderAsync();
-            Console.WriteLine("\n  OUTGOING attestations (this → object), Glicko-2:");
+            Console.WriteLine("\n  OUTGOING consensus (this → object), Glicko-2 μ over all witnesses:");
             int n = 0;
             while (await r.ReadAsync())
             {
                 n++;
                 var kind = ReadHash16((byte[])r[0]);
                 var obj  = r.IsDBNull(1) ? Hash128.Zero : ReadHash16((byte[])r[1]);
-                Console.WriteLine($"    [{Hex(kind)[..12]}…] → {Render(obj),-24}  μ={r.GetInt64(3)/1e9:F3} rd={r.GetInt64(4)/1e9:F3} σ={r.GetInt64(5)/1e9:F4}"
+                Console.WriteLine($"    [{Hex(kind)[..12]}…] → {Render(obj),-24}  μ={r.GetInt64(2)/1e9:F3} rd={r.GetInt64(3)/1e9:F3} σ={r.GetInt64(4)/1e9:F4}"
+                    + $"  witnesses={r.GetInt64(5)}");
+            }
+            if (n == 0) Console.WriteLine("    (none)");
+        }
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT subject_id, kind_id, rating, rd, volatility, witness_count "
+                            + "FROM laplace.consensus_in(@id)";
+            cmd.Parameters.AddWithValue("id", id.ToBytes());
+            await using var r = await cmd.ExecuteReaderAsync();
+            Console.WriteLine("\n  INCOMING consensus (subject → this), Glicko-2 μ over all witnesses:");
+            int n = 0;
+            while (await r.ReadAsync())
+            {
+                n++;
+                var subj = ReadHash16((byte[])r[0]);
+                var kind = ReadHash16((byte[])r[1]);
+                Console.WriteLine($"    {Render(subj),-24} [{Hex(kind)[..12]}…] → here  μ={r.GetInt64(2)/1e9:F3} rd={r.GetInt64(3)/1e9:F3} σ={r.GetInt64(4)/1e9:F4}"
+                    + $"  witnesses={r.GetInt64(5)}");
+            }
+            if (n == 0) Console.WriteLine("    (none)");
+        }
+
+        // Raw EVIDENCE neighborhood — laplace.attestations_out/_in(id): per-witness observations
+        // (score = ½(1+tanh(m/M)), opponent_rd = trust→φ, arena_m = M), with source provenance.
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT kind_id, object_id, source_id, score, opponent_rd, arena_m, observation_count "
+                            + "FROM laplace.attestations_out(@id)";
+            cmd.Parameters.AddWithValue("id", id.ToBytes());
+            await using var r = await cmd.ExecuteReaderAsync();
+            Console.WriteLine("\n  OUTGOING evidence (per-witness observations):");
+            int n = 0;
+            while (await r.ReadAsync())
+            {
+                n++;
+                var kind = ReadHash16((byte[])r[0]);
+                var obj  = r.IsDBNull(1) ? Hash128.Zero : ReadHash16((byte[])r[1]);
+                Console.WriteLine($"    [{Hex(kind)[..12]}…] → {Render(obj),-24}  score={r.GetInt64(3)/1e9:F3} oppRd={r.GetInt64(4)/1e9:F1} M={r.GetInt64(5)/1e9:F4}"
                     + $"  src={Hex(ReadHash16((byte[])r[2]))[..10]}…  obs={r.GetInt64(6)}");
             }
             if (n == 0) Console.WriteLine("    (none)");
@@ -256,18 +297,18 @@ internal static class Program
 
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT subject_id, kind_id, source_id, rating, rd, volatility "
+            cmd.CommandText = "SELECT subject_id, kind_id, source_id, score, opponent_rd, arena_m "
                             + "FROM laplace.attestations_in(@id)";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
             await using var r = await cmd.ExecuteReaderAsync();
-            Console.WriteLine("\n  INCOMING attestations (subject → this), Glicko-2:");
+            Console.WriteLine("\n  INCOMING evidence (per-witness observations):");
             int n = 0;
             while (await r.ReadAsync())
             {
                 n++;
                 var subj = ReadHash16((byte[])r[0]);
                 var kind = ReadHash16((byte[])r[1]);
-                Console.WriteLine($"    {Render(subj),-24} [{Hex(kind)[..12]}…] → here  μ={r.GetInt64(3)/1e9:F3} rd={r.GetInt64(4)/1e9:F3}"
+                Console.WriteLine($"    {Render(subj),-24} [{Hex(kind)[..12]}…] → here  score={r.GetInt64(3)/1e9:F3} oppRd={r.GetInt64(4)/1e9:F1} M={r.GetInt64(5)/1e9:F4}"
                     + $"  src={Hex(ReadHash16((byte[])r[2]))[..10]}…");
             }
             if (n == 0) Console.WriteLine("    (none)");
