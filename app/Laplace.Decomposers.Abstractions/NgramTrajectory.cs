@@ -36,8 +36,10 @@ public static class NgramTrajectory
     /// </summary>
     /// <param name="tier">The n-gram's tier — strictly above its constituents' tier.</param>
     /// <param name="typeId">The substrate type entity for this n-gram tier.</param>
-    public static Hash128 Compose(
-        SubstrateChangeBuilder b,
+    /// <returns>The content-addressed entity id + its EntityRow + Content PhysicalityRow. The
+    /// caller dedups by id and folds — Compose does NOT touch a builder, so identical n-grams
+    /// from different witnesses collapse to one entity client-side (no duplicate writes).</returns>
+    public static (Hash128 Id, EntityRow Entity, PhysicalityRow Physicality) Compose(
         IReadOnlyList<Constituent> constituents,
         byte tier, Hash128 typeId, Hash128 sourceId, long nowUs)
     {
@@ -61,8 +63,8 @@ public static class NgramTrajectory
         Hash128    physId = PhysicalityId.Compute(
             id, sourceId, PhysicalityKind.Content, cen[0], cen[1], cen[2], cen[3], traj);
 
-        b.AddEntity(new EntityRow(id, tier, typeId, sourceId));
-        b.AddPhysicality(new PhysicalityRow(
+        var entity = new EntityRow(id, tier, typeId, sourceId);
+        var phys = new PhysicalityRow(
             Id:                physId,
             EntityId:          id,
             SourceId:          sourceId,
@@ -73,7 +75,7 @@ public static class NgramTrajectory
             NConstituents:     n,
             AlignmentResidual: null,
             SourceDim:         null,
-            ObservedAtUnixUs:  nowUs));
-        return id;
+            ObservedAtUnixUs:  nowUs);
+        return (id, entity, phys);
     }
 }

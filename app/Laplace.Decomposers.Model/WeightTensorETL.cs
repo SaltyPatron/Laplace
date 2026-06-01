@@ -5,6 +5,7 @@ using Laplace.Engine.Core;
 using Laplace.Engine.Synthesis;    // QkPair, NativeInterop
 using Laplace.SubstrateCRUD;
 using SynthInterop = Laplace.Engine.Synthesis.NativeInterop;
+using DynInterop = Laplace.Engine.Dynamics.NativeInterop;
 
 namespace Laplace.Decomposers.Model;
 
@@ -156,14 +157,20 @@ public sealed class WeightTensorETL
         int[] addrOut = ReferenceEquals(E_U, E) ? addrIn
                       : BuildAddressBook(E_U, vocab, dModel, tokById, requireContentCoord: false);
 
-        // Absolute noise floor — keep every weight cell with |value| > floor; default 0 keeps
-        // ALL real (non-zero) cells (full extraction, not a percentile). Magnitude lives in the
-        // attestation μ, so selectivity is ORDER BY μ at query time, never dropped at ingest.
-        double floor = 0.0;
-        if (double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_CIRCUIT_FLOOR"),
+        // Floor is detected PER TENSOR by the model inspector (engine detect_energy_floor):
+        // the energy-retention floor from each tensor's OWN magnitude distribution — keep the
+        // high-energy (lottery-ticket) subnetwork, drop the noise tail; model-agnostic, no
+        // hardcoded value. LAPLACE_CIRCUIT_ENERGY (default 0.99) = retain target;
+        // LAPLACE_CIRCUIT_FLOOR, if set, is an absolute override (0 = keep all). Above the
+        // floor everything is ranked by μ, never pre-judged.
+        double energy = 0.99;
+        if (double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_CIRCUIT_ENERGY"),
                 System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var ff) && ff >= 0)
-            floor = ff;
+                System.Globalization.CultureInfo.InvariantCulture, out var en) && en > 0 && en <= 1)
+            energy = en;
+        bool floorOverride = double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_CIRCUIT_FLOOR"),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var ff) && ff >= 0;
 
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -188,6 +195,12 @@ public sealed class WeightTensorETL
         var keyMap = new Dictionary<Hash128, (LlamaTokenizerParser.TokenRecord rec, double mag)>(128);
         var valMap = new Dictionary<Hash128, (LlamaTokenizerParser.TokenRecord rec, double mag)>(128);
         var keys   = new List<(NgramTrajectory.Constituent c, double mag, byte tier)>(128);
+        // Per-WITNESS client-side fold: distinct n-gram entities + relations folded by identity,
+        // counting occurrences as Glicko games (observation_count). One folded change per witness
+        // → no duplicate rows written, the DB never parses a dup flood. Cross-witness fold is the
+        // consensus layer's job.
+        var entMap = new Dictionary<Hash128, (EntityRow e, PhysicalityRow p)>(512);
+        var relMap = new Dictionary<Hash128, (AttestationRow row, long count)>(2048);
 
         foreach (var circ in geo.Circuits)
         {
@@ -195,7 +208,8 @@ public sealed class WeightTensorETL
             var encRef = refMap[circ.Encode]; var decRef = refMap[circ.Decode];
             float[] enc = LoadRawBF16AsF32(refMap, circ.Encode, (long)encRef.Shape[0] * encRef.Shape[1]);
             float[] dec = LoadRawBF16AsF32(refMap, circ.Decode, (long)decRef.Shape[0] * decRef.Shape[1]);
-            double keyFloor = floor, valFloor = floor;
+            double keyFloor = floorOverride ? ff : DetectFloor(enc, energy);
+            double valFloor = floorOverride ? ff : DetectFloor(dec, energy);
             Hash128 kind = circ.Kind switch {
                 ModelGeometry.CircuitKind.QK => _kinds.Attends,
                 ModelGeometry.CircuitKind.OV => _kinds.OvRelates,
@@ -204,42 +218,69 @@ public sealed class WeightTensorETL
             if (circ.Kind == ModelGeometry.CircuitKind.FFN)
             {
                 Hash128 wit = WitnessId(_sourceId, circ.Layer, -1);
+                entMap.Clear(); relMap.Clear();
                 for (int i = 0; i < interm; i++)
-                {
-                    var chg = EmitUnit(enc, encRef.Shape, i, dec, decRef.Shape, i, addrIn, addrOut,
-                        keyFloor, valFloor, kind, wit, dModel, tokById, keyMap, valMap, keys, nowUs, counters);
-                    if (chg is not null) { yield return chg; await Task.Yield(); }
-                }
+                    AccumulateUnit(enc, encRef.Shape, i, dec, decRef.Shape, i, addrIn, addrOut,
+                        keyFloor, valFloor, kind, wit, dModel, tokById, keyMap, valMap, keys, entMap, relMap, nowUs, counters);
+                var chg = BuildWitnessChange(entMap, relMap);
+                if (chg is not null) { yield return chg; await Task.Yield(); }
             }
-            else  // attention: iterate (head h, dim d); GQA maps query head ↔ kv head
+            else  // attention: one witness per (layer, head); fold its headDim units
             {
                 for (int h = 0; h < nHeads; h++)
                 {
                     Hash128 wit = WitnessId(_sourceId, circ.Layer, h);
                     int kvHead = h / qPerKv;
+                    entMap.Clear(); relMap.Clear();
                     for (int d = 0; d < headDim; d++)
                     {
                         int encUnit, decUnit;
                         if (circ.Kind == ModelGeometry.CircuitKind.QK) { encUnit = h * headDim + d; decUnit = kvHead * headDim + d; }
                         else                                           { encUnit = kvHead * headDim + d; decUnit = h * headDim + d; }
-                        var chg = EmitUnit(enc, encRef.Shape, encUnit, dec, decRef.Shape, decUnit, addrIn, addrOut,
-                            keyFloor, valFloor, kind, wit, dModel, tokById, keyMap, valMap, keys, nowUs, counters);
-                        if (chg is not null) { yield return chg; await Task.Yield(); }
+                        AccumulateUnit(enc, encRef.Shape, encUnit, dec, decRef.Shape, decUnit, addrIn, addrOut,
+                            keyFloor, valFloor, kind, wit, dModel, tokById, keyMap, valMap, keys, entMap, relMap, nowUs, counters);
                     }
+                    var chg = BuildWitnessChange(entMap, relMap);
+                    if (chg is not null) { yield return chg; await Task.Yield(); }
                 }
             }
-            _log.LogInformation("phase=circuits L{Layer} {Kind}: {Mem:N0} memories, {Rel:N0} relations, wall {Ms} ms",
-                circ.Layer, circ.Kind, counters[0], counters[1], sw.ElapsedMilliseconds);
+            _log.LogInformation("phase=circuits L{Layer} {Kind} (keyFloor={Kf:E2} valFloor={Vf:E2}): "
+                + "{Mem:N0} memories, {Rel:N0} relations, wall {Ms} ms",
+                circ.Layer, circ.Kind, keyFloor, valFloor, counters[0], counters[1], sw.ElapsedMilliseconds);
         }
         _log.LogInformation("phase=circuits done: {Mem:N0} memories, {Rel:N0} relations, {Ms} ms",
             counters[0], counters[1], sw.ElapsedMilliseconds);
     }
 
-    /* One hidden unit of a circuit → one [n-gram]⇒{tokens} memory, O(d_model). Reads the
-     * encode ROW (or COLUMN, by shape) at encUnit → keys via the address book; the decode at
-     * decUnit → vals. Returns null when the unit has no keys or no vals (sub-floor). keyMap/
-     * valMap/keys are caller-owned scratch (cleared here) to avoid per-unit allocation. */
-    private SubstrateChange? EmitUnit(
+    /* Per-tensor model-inspector floor: the engine's energy-retention detector over this tensor's
+     * own magnitude distribution. Model-agnostic — no hardcoded value. */
+    private static unsafe double DetectFloor(float[] w, double energy)
+    {
+        fixed (float* p = w) return DynInterop.DetectEnergyFloor(p, (nuint)w.LongLength, energy);
+    }
+
+    /* Build one folded SubstrateChange for a witness: distinct n-gram entities + relations
+     * folded by identity with their occurrence/game count as observation_count. */
+    private SubstrateChange? BuildWitnessChange(
+        Dictionary<Hash128, (EntityRow e, PhysicalityRow p)> entMap,
+        Dictionary<Hash128, (AttestationRow row, long count)> relMap)
+    {
+        if (relMap.Count == 0) return null;
+        var bb = new SubstrateChangeBuilder(_sourceId, "circuit-mem",
+            entityCapacity: entMap.Count, physicalityCapacity: entMap.Count, attestationCapacity: relMap.Count);
+        foreach (var kv in entMap) { bb.AddEntity(kv.Value.e); bb.AddPhysicality(kv.Value.p); }
+        foreach (var kv in relMap)
+            bb.AddAttestation(kv.Value.count == 1 ? kv.Value.row
+                                                  : kv.Value.row with { ObservationCount = kv.Value.count });
+        return bb.Build();
+    }
+
+    /* One hidden unit of a circuit → its [n-gram]⇒{tokens} memory, FOLDED into the witness maps
+     * (not emitted standalone). Reads the encode ROW (or COLUMN, by shape) at encUnit → keys via
+     * the address book; the decode at decUnit → vals. The n-gram entity dedups by content id;
+     * each completion folds by attestation id, incrementing the occurrence/game count. No-op when
+     * the unit has no keys or vals. keyMap/valMap/keys are caller-owned scratch (cleared here). */
+    private void AccumulateUnit(
         float[] enc, int[] encShape, int encUnit,
         float[] dec, int[] decShape, int decUnit,
         int[] addrIn, int[] addrOut, double keyFloor, double valFloor,
@@ -248,10 +289,12 @@ public sealed class WeightTensorETL
         Dictionary<Hash128, (LlamaTokenizerParser.TokenRecord rec, double mag)> keyMap,
         Dictionary<Hash128, (LlamaTokenizerParser.TokenRecord rec, double mag)> valMap,
         List<(NgramTrajectory.Constituent c, double mag, byte tier)> keys,
+        Dictionary<Hash128, (EntityRow e, PhysicalityRow p)> entMap,
+        Dictionary<Hash128, (AttestationRow row, long count)> relMap,
         long nowUs, long[] counters)
     {
         ReadHalf(enc, encShape, encUnit, dModel, addrIn, addrOut, tokById, keyFloor, keyMap);
-        if (keyMap.Count == 0) return null;
+        if (keyMap.Count == 0) return;
         keys.Clear();
         byte maxTier = 0;
         foreach (var kv in keyMap)
@@ -262,31 +305,30 @@ public sealed class WeightTensorETL
                 rec.EntityId, rec.ContentX, rec.ContentY, rec.ContentZ, rec.ContentM), kv.Value.mag, rec.Tier));
             if (rec.Tier > maxTier) maxTier = rec.Tier;
         }
-        if (keys.Count == 0) return null;
+        if (keys.Count == 0) return;
 
         ReadHalf(dec, decShape, decUnit, dModel, addrIn, addrOut, tokById, valFloor, valMap);
-        if (valMap.Count == 0) return null;
+        if (valMap.Count == 0) return;
 
-        // CONTENT order — the n-gram's identity is its token set, NEVER the source's weight
-        // magnitudes. Ordering by |mag| (source/position) gave the same content a different
-        // Merkle id per witness and destroyed dedup. Sort by the constituent's content id so
-        // the same token set yields the same entity for every model/layer/head; magnitude
-        // survives only as the completion's Glicko-2 μ.
+        // CONTENT order — identity is the token set, NEVER the source's weight magnitudes (that
+        // poisoned the id and destroyed dedup). Magnitude survives only as the completion's μ.
         keys.Sort((a, b) => a.c.Id.CompareToBytewise(b.c.Id));
         var cons = new NgramTrajectory.Constituent[keys.Count];
         for (int k = 0; k < keys.Count; k++) cons[k] = keys[k].c;
         byte ngramTier = (byte)Math.Min(255, maxTier + 1);
 
-        var bb = new SubstrateChangeBuilder(_sourceId, "circuit-mem",
-            entityCapacity: 1, physicalityCapacity: 1, attestationCapacity: valMap.Count);
-        Hash128 ngramId = NgramTrajectory.Compose(bb, cons, ngramTier, _kinds.NgramType, _sourceId, nowUs);
+        var (ngramId, entity, phys) = NgramTrajectory.Compose(cons, ngramTier, _kinds.NgramType, _sourceId, nowUs);
+        if (entMap.TryAdd(ngramId, (entity, phys))) counters[0]++;   // new distinct n-gram memory
+
         foreach (var v in valMap)
-            bb.AddAttestation(AttestationFactory.CreateWeighted(
+        {
+            var row = AttestationFactory.CreateWeighted(
                 ngramId, kind, v.Key, _sourceId, contextId: witness,
                 tier: KindValueTier.T9, trust: TrustClass.AiModelProbeTier7,
-                magnitude: v.Value.mag, floor: valFloor));
-        counters[0]++; counters[1] += valMap.Count;
-        return bb.Build();
+                magnitude: v.Value.mag, floor: valFloor);
+            if (relMap.TryGetValue(row.Id, out var acc)) relMap[row.Id] = (acc.row, acc.count + 1);
+            else { relMap[row.Id] = (row, 1); counters[1]++; }   // distinct relation; count = games
+        }
     }
 
     /* Read one hidden unit's d_model-axis weights and resolve each to a token via the address

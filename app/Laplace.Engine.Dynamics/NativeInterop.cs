@@ -122,4 +122,32 @@ public static partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "sparsity_per_row_topk_streaming")]
     public static unsafe partial int SparsityPerRowTopkStreaming(
         double* rows, nuint rowCount, nuint rowSize, nuint k, byte* outMasks);
+
+    // === Circuit extraction (O(params) address-book read; TBB-parallel, exact) ===
+    // The hot loop of model ingestion, moved off the managed scalar path into the engine.
+
+    /// <summary>One surviving (unit, token, signed value) cell from resolve_matrix.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CircuitCell { public uint Unit; public int Token; public float Value; }
+
+    /// <summary>Model inspector: detect a viable noise floor for a weight tensor from its own
+    /// magnitude distribution so kept cells retain targetEnergy of Σw² (the lottery-ticket
+    /// subnetwork). Model-agnostic, TBB-histogrammed. targetEnergy 1.0 ⇒ 0 (keep all).</summary>
+    [LibraryImport(Library, EntryPoint = "detect_energy_floor")]
+    public static unsafe partial double DetectEnergyFloor(float* w, nuint n, double targetEnergy);
+
+    /// <summary>addr[m] = argmax_{t : valid[t]} |E[t,m]| over vocab (or -1). E is [vocab × d_model]
+    /// row-major. valid may be null. TBB-parallel over dims. 0 ok, -1 bad args.</summary>
+    [LibraryImport(Library, EntryPoint = "build_address_book")]
+    public static unsafe partial int BuildAddressBook(
+        float* e, nuint vocab, nuint dModel, byte* valid, int* addrOut);
+
+    /// <summary>Resolve rows [u0,u1) of a row-major [n_units × d_model] matrix against addr,
+    /// emitting every |value|&gt;floor (addr&gt;=0) cell as (unit, token, signed value). TBB-parallel,
+    /// dense+deterministic. *overflow=1 (and nothing emitted) if the window exceeds cap — shrink +
+    /// retry. 0 ok, negative bad args.</summary>
+    [LibraryImport(Library, EntryPoint = "resolve_matrix")]
+    public static unsafe partial int ResolveMatrix(
+        float* w, nuint nUnits, nuint dModel, int* addr, double floor,
+        nuint u0, nuint u1, CircuitCell* outBuf, nuint cap, nuint* outCount, int* overflow);
 }

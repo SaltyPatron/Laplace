@@ -75,10 +75,13 @@ BEGIN
     FROM (
         -- One group per RELATION IDENTITY (subject, kind, object); source AND context (layer/head)
         -- collapse here — every witnessing source+layer+head is a Glicko-2 match for the same
-        -- relation. witness_count = how many witnessed it. THIS is the dedup ("~params - dupes").
+        -- relation. witness_count = SUM(observation_count) = total OCCURRENCES/GAMES across all
+        -- witnesses (each evidence row already folded its within-witness occurrences client-side),
+        -- not a distinct-row count. THIS is the dedup ("~params - dupes"): one consensus row,
+        -- game count = how many times the relation was actually observed.
         SELECT a.subject_id, a.kind_id, a.object_id,
-               COUNT(*)                AS witness_count,
-               MAX(a.last_observed_at) AS last_observed_at,
+               SUM(a.observation_count) AS witness_count,
+               MAX(a.last_observed_at)  AS last_observed_at,
                laplace_glicko2_accumulate(
                    1500000000000::bigint, 350000000000::bigint, 60000000::bigint,    -- neutral prior
                    1000000000000::bigint, 50000000000::bigint,                       -- noise-floor opponent (μ, rd)
