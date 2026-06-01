@@ -267,7 +267,12 @@ public sealed class WeightTensorETL
         ReadHalf(dec, decShape, decUnit, dModel, addrIn, addrOut, tokById, valFloor, valMap);
         if (valMap.Count == 0) return null;
 
-        keys.Sort((a, b) => Math.Abs(b.mag).CompareTo(Math.Abs(a.mag)));   // deterministic order
+        // CONTENT order — the n-gram's identity is its token set, NEVER the source's weight
+        // magnitudes. Ordering by |mag| (source/position) gave the same content a different
+        // Merkle id per witness and destroyed dedup. Sort by the constituent's content id so
+        // the same token set yields the same entity for every model/layer/head; magnitude
+        // survives only as the completion's Glicko-2 μ.
+        keys.Sort((a, b) => a.c.Id.CompareToBytewise(b.c.Id));
         var cons = new NgramTrajectory.Constituent[keys.Count];
         for (int k = 0; k < keys.Count; k++) cons[k] = keys[k].c;
         byte ngramTier = (byte)Math.Min(255, maxTier + 1);
