@@ -156,7 +156,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 if (!seenAtt.Add(a.Id)) continue;   // in DB or already staged this batch
                 stage.AddAttestation(
                     a.Id, a.SubjectId, a.KindId, a.ObjectId, a.SourceId, a.ContextId,
-                    a.RatingFp1e9, a.RdFp1e9, a.VolatilityFp1e9,
+                    a.ScoreFp1e9, a.OpponentRdFp1e9, a.ArenaMFp1e9,
                     a.LastObservedAtUnixUs, a.ObservationCount);
             }
 

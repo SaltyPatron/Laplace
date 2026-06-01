@@ -50,19 +50,49 @@ lens). Updated 2026-06-01. The point of this file: stop re-breaking things that 
 - **Queries were ad-hoc** — ranked-μ / completions / dedup-stats were hand-run each session. FIX: permanent
   substrate functions (`top_relations`, `completions`, `consensus_stats`) in the extension SQL.
 
+## Signed-observation consensus (ARCHITECTURE.md §10) — LANDED + verified
+
+The evidence/consensus split is now real and the Glicko math is DERIVED, not knobbed:
+
+- **Evidence = OBSERVATION, not state.** `attestations` columns are now
+  `(score, opponent_rd, arena_m)` — one Glicko-2 match per witness. `rating/rd/volatility`
+  live ONLY on `consensus`. (engine `intent_stage.c` column list + binary, `AttestationRow`,
+  `04_attestations.sql.in`, the writer.)
+- **Signed magnitude → score** `s = ½(1+tanh(signed_m/M))`. + = win (confirm/attract), − = loss
+  (refute/repel), 0 = ½. The model path passes the SIGNED coupling — `abs()` is gone, so a
+  negative weight is a real Glicko loss, never folded to a win. (`AttestationFactory.Score`,
+  `WeightTensorETL` `CreateObservation`.)
+- **M is measured, not a knob** — per-arena RMS of the tensor (`WeightTensorETL.MeasureRms`);
+  stored in `arena_m` for audit. The energy-`0.99` floor knob is no longer the score source.
+- **Trust → opponent φ, never a μ multiplier.** witness weight (kind_rank × source_trust ×
+  tenant_trust) → `opponent_rd` via `WitnessPhi`; Glicko's own `g(φ)` does the weighting.
+  (`AttestationFactory.WitnessPhi`.)
+- **Neutral opponent (1500), not the old sub-neutral 1000;** `rebuild_consensus` feeds the C
+  aggregate the stored `score`/`opponent_rd` and replays each row `observation_count` times
+  (occurrences = games) via `generate_series`. (`13_consensus.sql.in`.)
+- **VERIFIED end-to-end** (`tests/sql/consensus_signed.sql`, live DB): confirm μ=1640e9 >
+  neutral 1500e9 > refute μ=1359e9 (symmetric); draw = exactly neutral; trusted (1640) > crank
+  (1629) at identical score; 8-games (1748) > 1-game (1640). Engine 37/37 tests, 28/28 factory
+  tests pass; `CREATE EXTENSION` loads all edited SQL.
+- The math kernel (`glicko2.c`, paper-pinned) was already the authority via the C aggregate —
+  the fix was the per-row arguments, not the math.
+
 ## Tier / trust corruption (truth #5 — "tier" is the entity Merkle stratum ONLY)
 
 - **`KindValueTier` (a tier on KINDS) and `TrustClass` (a tier/class ladder on TRUST) are
   corruption.** Tier is reserved for the entity Merkle depth (T0 codepoint → up). Trust is a
   Glicko-2 value (rating/rd/vol), never a class/tier. Kind significance is a kind RANK, not a tier.
-- **Model path FIXED:** `AttestationFactory.CreateFromMatch` seeds an evidence attestation as a
-  neutral Glicko match from the magnitude — no tier, no trust-class; `WeightTensorETL` uses it
-  (dropped the hardcoded `T9` / `AiModelProbeTier7`). Kind-rank × source-trust × tenant-trust
-  weighting belongs at the consensus accumulate as Glicko φ, not a tier in the evidence.
-- **STILL TO PURGE:** `KindValueTier` + `TrustClass` enums and their use across ~18 other files
-  (the seed decomposers — WordNet/OMW/UD/ConceptNet/Tatoeba/Atomic2020/Unicode/ISO/Image/Audio,
-  `AttestationFactory.CreateWeighted`/`Create`/`TierPrior`/`TrustWeight`, `BootstrapIntentBuilder`,
-  the dead `ExtractAsync` path). Same corruption; replace with rank/Glicko-trust, delete the enums.
+- **DONE in the §10 landing:** tier PRIORS on μ are gone (`TierPrior` deleted, no μ seeded from a
+  tier); tier is OUT of evidence (rows are score/opponent_rd/arena_m); `BootstrapIntentBuilder`
+  no longer mints tier entities or HAS_VALUE_TIER meta-attestations; the model path carries no
+  `T9`. Kind significance + source trust are now numeric (`KindRank`/`SourceTrust` ∈(0,1]) folded
+  into opponent φ.
+- **STILL TO PURGE (cosmetic / vestigial):** the `KindValueTier`/`TrustClass` enum NAMES remain as
+  a numeric rank/trust LOOKUP feeding `AttestationFactory.Weight` (behaviour is the law's
+  rank×trust; only the names are tier-flavored — rename to `KindRank`/`SourceTrust`). The
+  `substrate/kind_tier/T*` entities + HAS_KIND_VALUE_TIER kind seeded in `10_bootstrap.sql.in`
+  Stage 3 are now vestigial (nothing reads them) — remove. The dead `ExtractAsync`/QK-bilinear
+  path in `WeightTensorETL` still references the enums via the compat shims — delete the dead path.
 
 ## Still open (next)
 

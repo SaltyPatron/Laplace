@@ -210,6 +210,7 @@ public sealed class WeightTensorETL
             float[] dec = LoadRawBF16AsF32(refMap, circ.Decode, (long)decRef.Shape[0] * decRef.Shape[1]);
             double keyFloor = floorOverride ? ff : DetectFloor(enc, energy);
             double valFloor = floorOverride ? ff : DetectFloor(dec, energy);
+            double mScale   = MeasureRms(dec);   // measured arena scale M for ½(1+tanh(signed_m/M))
             Hash128 kind = circ.Kind switch {
                 ModelGeometry.CircuitKind.QK => _kinds.Attends,
                 ModelGeometry.CircuitKind.OV => _kinds.OvRelates,
@@ -221,7 +222,7 @@ public sealed class WeightTensorETL
                 entMap.Clear(); relMap.Clear();
                 for (int i = 0; i < interm; i++)
                     AccumulateUnit(enc, encRef.Shape, i, dec, decRef.Shape, i, addrIn, addrOut,
-                        keyFloor, valFloor, kind, wit, dModel, tokById, keyMap, valMap, keys, entMap, relMap, nowUs, counters);
+                        keyFloor, valFloor, mScale, kind, wit, dModel, tokById, keyMap, valMap, keys, entMap, relMap, nowUs, counters);
                 var chg = BuildWitnessChange(entMap, relMap);
                 if (chg is not null) { yield return chg; await Task.Yield(); }
             }
@@ -238,7 +239,7 @@ public sealed class WeightTensorETL
                         if (circ.Kind == ModelGeometry.CircuitKind.QK) { encUnit = h * headDim + d; decUnit = kvHead * headDim + d; }
                         else                                           { encUnit = kvHead * headDim + d; decUnit = h * headDim + d; }
                         AccumulateUnit(enc, encRef.Shape, encUnit, dec, decRef.Shape, decUnit, addrIn, addrOut,
-                            keyFloor, valFloor, kind, wit, dModel, tokById, keyMap, valMap, keys, entMap, relMap, nowUs, counters);
+                            keyFloor, valFloor, mScale, kind, wit, dModel, tokById, keyMap, valMap, keys, entMap, relMap, nowUs, counters);
                     }
                     var chg = BuildWitnessChange(entMap, relMap);
                     if (chg is not null) { yield return chg; await Task.Yield(); }
@@ -257,6 +258,25 @@ public sealed class WeightTensorETL
     private static unsafe double DetectFloor(float[] w, double energy)
     {
         fixed (float* p = w) return DynInterop.DetectEnergyFloor(p, (nuint)w.LongLength, energy);
+    }
+
+    /* Witness weight for a model circuit = kind_rank (tensor-calculation ≈ 0.27)
+     * × source_trust (AI-model probe 0.50). A model is a low-trust, high-volume
+     * witness; consensus accumulates many of them. A NUMBER folded into Glicko
+     * opponent φ — never a tier, never a μ multiplier (ARCHITECTURE.md §10). */
+    private const double ModelWitnessWeight = 0.27 * 0.50;
+
+    /* Measured per-arena magnitude scale M for the signed Glicko outcome
+     * ½(1+tanh(m/M)): the RMS (≈ σ for zero-mean weights) of the tensor's own
+     * cells. DERIVED from the arena's distribution at ingest — never a knob. */
+    private static double MeasureRms(float[] w)
+    {
+        long n = w.LongLength;
+        if (n == 0) return 1.0;
+        double s = 0.0;
+        for (long i = 0; i < n; i++) { double v = w[i]; s += v * v; }
+        double rms = Math.Sqrt(s / n);
+        return rms > 0.0 ? rms : 1.0;
     }
 
     /* Build one folded SubstrateChange for a witness: distinct n-gram entities + relations
@@ -283,7 +303,7 @@ public sealed class WeightTensorETL
     private void AccumulateUnit(
         float[] enc, int[] encShape, int encUnit,
         float[] dec, int[] decShape, int decUnit,
-        int[] addrIn, int[] addrOut, double keyFloor, double valFloor,
+        int[] addrIn, int[] addrOut, double keyFloor, double valFloor, double mScale,
         Hash128 kind, Hash128 witness, int dModel,
         LlamaTokenizerParser.TokenRecord?[] tokById,
         Dictionary<Hash128, (LlamaTokenizerParser.TokenRecord rec, double mag)> keyMap,
@@ -322,13 +342,13 @@ public sealed class WeightTensorETL
 
         foreach (var v in valMap)
         {
-            // Seed as a neutral Glicko match from the magnitude — NO tier, NO trust-class
-            // (tier is for the entity Merkle stratum only; trust is a Glicko value). The
-            // (layer,head) witness is the context; kind-rank × source-trust weighting is the
-            // consensus accumulate's φ, not a tier here.
-            var row = AttestationFactory.CreateFromMatch(
+            // One Glicko OBSERVATION (ARCHITECTURE.md §10): score = ½(1+tanh(signed_m/M))
+            // from the SIGNED coupling (a negative decode weight is a refute → loss → score<½,
+            // never abs'd away), M = the measured arena scale; witness weight (kind_rank ×
+            // source_trust) → opponent φ at consensus. NO tier, NO μ seeded from magnitude.
+            var row = AttestationFactory.CreateObservation(
                 ngramId, kind, v.Key, _sourceId, contextId: witness,
-                magnitude: v.Value.mag, floor: valFloor);
+                signedMagnitude: v.Value.mag, arenaScale: mScale, witnessWeight: ModelWitnessWeight);
             if (relMap.TryGetValue(row.Id, out var acc)) relMap[row.Id] = (acc.row, acc.count + 1);
             else { relMap[row.Id] = (row, 1); counters[1]++; }   // distinct relation; count = games
         }

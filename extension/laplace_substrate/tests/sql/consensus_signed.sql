@@ -1,0 +1,82 @@
+-- consensus_signed.sql — ARCHITECTURE.md §10 signed-observation → consensus.
+--
+-- Guards the exact regressions Cursor flagged:
+--   • a CONFIRM witness (score > ½) raises consensus μ ABOVE neutral (1500)
+--   • a REFUTE witness (score < ½) lowers consensus μ BELOW neutral
+--   • a DRAW (score = ½) leaves μ ≈ neutral
+--   • trust enters as opponent φ: a trusted witness (low opponent_rd) moves μ
+--     MORE than a crank (high opponent_rd) at the SAME score — not via the score
+--   • observation_count plays as games: more occurrences ⇒ larger move
+--
+-- Run inside a transaction and ROLLBACK — leaves no rows. RAISE EXCEPTION on any
+-- failed assertion (non-zero psql exit).
+
+BEGIN;
+SET search_path = laplace, public;
+
+DO $$
+DECLARE
+    type_t   bytea := laplace_hash128_blake3('substrate/type/Type/v1');   -- bootstrapped meta-type
+    src      bytea := laplace_hash128_blake3('test/s10/source');
+    kind     bytea := laplace_hash128_blake3('test/s10/kind');
+    subj     bytea := laplace_hash128_blake3('test/s10/subject');
+    o_conf   bytea := laplace_hash128_blake3('test/s10/obj_confirm');
+    o_ref    bytea := laplace_hash128_blake3('test/s10/obj_refute');
+    o_draw   bytea := laplace_hash128_blake3('test/s10/obj_draw');
+    o_trust  bytea := laplace_hash128_blake3('test/s10/obj_trusted');
+    o_crank  bytea := laplace_hash128_blake3('test/s10/obj_crank');
+    o_games  bytea := laplace_hash128_blake3('test/s10/obj_manygames');
+    o_one    bytea := laplace_hash128_blake3('test/s10/obj_onegame');
+    phi_trust bigint := 30000000000;    -- trusted witness opponent φ (30 ×1e9)
+    phi_crank bigint := 350000000000;   -- crank witness opponent φ   (350 ×1e9)
+    s_conf   bigint := 900000000;       -- score 0.90 (confirm)
+    s_ref    bigint := 100000000;       -- score 0.10 (refute)
+    s_draw   bigint := 500000000;       -- score 0.50 (draw)
+    mu_conf bigint; mu_ref bigint; mu_draw bigint;
+    mu_trust bigint; mu_crank bigint; mu_many bigint; mu_one bigint;
+    neutral bigint := 1500000000000;    -- 1500 ×1e9
+BEGIN
+    -- entities (self-consistent FKs)
+    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+        (src,    0, type_t, NULL),
+        (kind,   0, type_t, src), (subj, 0, type_t, src),
+        (o_conf, 0, type_t, src), (o_ref, 0, type_t, src), (o_draw, 0, type_t, src),
+        (o_trust,0, type_t, src), (o_crank,0, type_t, src),
+        (o_games,0, type_t, src), (o_one, 0, type_t, src);
+
+    -- evidence observations (score, opponent_rd, arena_m, observed_at, count)
+    INSERT INTO attestations
+        (id, subject_id, kind_id, object_id, source_id, context_id,
+         score, opponent_rd, arena_m, last_observed_at, observation_count)
+    VALUES
+        (laplace_hash128_blake3('a/confirm'), subj, kind, o_conf,  src, NULL, s_conf, phi_trust, 0, now(), 1),
+        (laplace_hash128_blake3('a/refute'),  subj, kind, o_ref,   src, NULL, s_ref,  phi_trust, 0, now(), 1),
+        (laplace_hash128_blake3('a/draw'),    subj, kind, o_draw,  src, NULL, s_draw, phi_trust, 0, now(), 1),
+        (laplace_hash128_blake3('a/trusted'), subj, kind, o_trust, src, NULL, s_conf, phi_trust, 0, now(), 1),
+        (laplace_hash128_blake3('a/crank'),   subj, kind, o_crank, src, NULL, s_conf, phi_crank, 0, now(), 1),
+        (laplace_hash128_blake3('a/many'),    subj, kind, o_games, src, NULL, s_conf, phi_trust, 0, now(), 8),
+        (laplace_hash128_blake3('a/one'),     subj, kind, o_one,   src, NULL, s_conf, phi_trust, 0, now(), 1);
+
+    PERFORM rebuild_consensus();
+
+    SELECT rating INTO mu_conf  FROM consensus WHERE object_id = o_conf;
+    SELECT rating INTO mu_ref   FROM consensus WHERE object_id = o_ref;
+    SELECT rating INTO mu_draw  FROM consensus WHERE object_id = o_draw;
+    SELECT rating INTO mu_trust FROM consensus WHERE object_id = o_trust;
+    SELECT rating INTO mu_crank FROM consensus WHERE object_id = o_crank;
+    SELECT rating INTO mu_many  FROM consensus WHERE object_id = o_games;
+    SELECT rating INTO mu_one   FROM consensus WHERE object_id = o_one;
+
+    RAISE NOTICE 'confirm μ=% refute μ=% draw μ=% (neutral=%)', mu_conf, mu_ref, mu_draw, neutral;
+    RAISE NOTICE 'trusted μ=% crank μ=% | 8-games μ=% 1-game μ=%', mu_trust, mu_crank, mu_many, mu_one;
+
+    IF mu_conf <= neutral THEN RAISE EXCEPTION 'FAIL: confirm did not raise μ above neutral (% <= %)', mu_conf, neutral; END IF;
+    IF mu_ref  >= neutral THEN RAISE EXCEPTION 'FAIL: refute did not lower μ below neutral (% >= %)', mu_ref, neutral; END IF;
+    IF abs(mu_draw - neutral) > 5000000000 THEN RAISE EXCEPTION 'FAIL: draw moved μ off neutral (% vs %)', mu_draw, neutral; END IF;
+    IF mu_trust <= mu_crank THEN RAISE EXCEPTION 'FAIL: trusted witness did not move μ more than crank (% <= %)', mu_trust, mu_crank; END IF;
+    IF mu_many  <= mu_one   THEN RAISE EXCEPTION 'FAIL: more occurrences did not move μ more (% <= %)', mu_many, mu_one; END IF;
+
+    RAISE NOTICE '✓ consensus_signed: confirm>neutral>refute, draw≈neutral, trust→φ moves more, games accumulate';
+END $$;
+
+ROLLBACK;

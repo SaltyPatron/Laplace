@@ -23,7 +23,8 @@ public class SubstrateChangeTests
             null, 0, null, null, 0));
         b.AddAttestation(new AttestationRow(
             H(4), H(1), H(50), H(2), src, null,
-            1500_000_000_000L, 350_000_000_000L, 60_000_000L, 0L, 1L));
+            // score (1.0), opponent_rd, arena_m, last_observed, observation_count
+            1_000_000_000L, 30_000_000_000L, 0L, 0L, 1L));
 
         var change = b.Build();
         Assert.Equal(2, change.Entities.Length);

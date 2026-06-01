@@ -57,9 +57,18 @@ $$;
  * per-write accumulation can replace it once the writer drives it (the cost is
  * staleness between rebuilds, not correctness). Returns the consensus row count.
  *
- * K1 mapping per witness row: opponent at the noise floor (μ=1000, rd=50),
- * prior neutral (μ=1500, rd=350, σ=0.06), score = normalized evidence strength
- * in (0, 1] = min(rating / 2500, 1), tau = 0.5. All fixed-point ×1e9. */
+ * ARCHITECTURE.md §10 — DERIVED, no knobs beyond M / the trust→φ shape / φ₀:
+ *   prior     = neutral (μ=1500, rd=350, σ=0.06)
+ *   opponent  = NEUTRAL baseline (μ=1500 — the same line as the prior, so a score
+ *               of ½ is "as expected" → μ unchanged, rd tightens; >½ raises μ,
+ *               <½ lowers it). Opponent RD = the witness's own opponent_rd (trust
+ *               → φ); g(φ) does the weighting natively.
+ *   score     = the witness's stored tanh outcome a.score (signed magnitude → win/
+ *               loss), used directly — NOT re-derived from a rating.
+ *   games     = observation_count: each occurrence is one match, replayed via
+ *               generate_series so N occurrences accumulate as N Glicko games
+ *               (Glicko-2 within a period is order-invariant, so this is exact).
+ *   tau = 0.5. All fixed-point ×1e9. */
 CREATE OR REPLACE FUNCTION rebuild_consensus()
     RETURNS bigint LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public AS $$
@@ -73,22 +82,24 @@ BEGIN
            (g.acc).rating, (g.acc).rd, (g.acc).volatility,
            g.witness_count, g.last_observed_at
     FROM (
-        -- One group per RELATION IDENTITY (subject, kind, object); source AND context (layer/head)
-        -- collapse here — every witnessing source+layer+head is a Glicko-2 match for the same
-        -- relation. witness_count = SUM(observation_count) = total OCCURRENCES/GAMES across all
-        -- witnesses (each evidence row already folded its within-witness occurrences client-side),
-        -- not a distinct-row count. THIS is the dedup ("~params - dupes"): one consensus row,
-        -- game count = how many times the relation was actually observed.
+        -- One group per RELATION IDENTITY (subject, kind, object); source AND context
+        -- (layer/head) collapse here — every witnessing source+layer+head is a Glicko-2
+        -- match for the same relation. witness_count = total GAMES (Σ observation_count)
+        -- across all witnesses — the dedup ("~params − dupes"): one consensus row, game
+        -- count = how many times the relation was actually observed.
         SELECT a.subject_id, a.kind_id, a.object_id,
                SUM(a.observation_count) AS witness_count,
                MAX(a.last_observed_at)  AS last_observed_at,
                laplace_glicko2_accumulate(
-                   1500000000000::bigint, 350000000000::bigint, 60000000::bigint,    -- neutral prior
-                   1000000000000::bigint, 50000000000::bigint,                       -- noise-floor opponent (μ, rd)
-                   LEAST(GREATEST(a.rating, 0) / 2500, 1000000000)::bigint,          -- score ∈ (0,1] = normalized strength
+                   1500000000000::bigint, 350000000000::bigint, 60000000::bigint,    -- neutral prior (μ, rd, σ)
+                   1500000000000::bigint,                                            -- NEUTRAL opponent μ (the 1500 line)
+                   a.opponent_rd,                                                    -- opponent φ from witness trust
+                   a.score,                                                          -- stored tanh outcome ∈ (0,1)
                    500000000::bigint                                                 -- tau = 0.5
                )                       AS acc
         FROM attestations a
+        -- replay each observation observation_count times: N occurrences = N games
+        CROSS JOIN LATERAL generate_series(1, a.observation_count) AS occ
         GROUP BY a.subject_id, a.kind_id, a.object_id
     ) g;
     GET DIAGNOSTICS n = ROW_COUNT;

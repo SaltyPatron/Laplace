@@ -90,7 +90,7 @@ public class IntentStageTests
         using var s = IntentStage.New(1);
         var h = Hash128.Zero;
         s.AddAttestation(h, h, h, /*object*/null, h, /*context*/null,
-            ratingFp1e9: 0, rdFp1e9: 1, volatilityFp1e9: 1,
+            scoreFp1e9: 0, opponentRdFp1e9: 1, arenaMFp1e9: 1,
             lastObservedAtUnixUs: 0, observationCount: 1);
         Assert.Equal(1, s.AttestationCount);
         var bytes = s.EmitCopyBinary(IntentStageTable.Attestations);

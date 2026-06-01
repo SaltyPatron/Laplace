@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
@@ -107,22 +108,12 @@ public sealed class LlamaRecipeExtractor
 
         b.AddEntity(recipe.RecipeEntityId, tier: 0, modelRecipeTypeId, firstObservedBy: sourceId);
 
-        void AddAttestation(Hash128 kindId, Hash128? objectId, long rating)
-        {
-            var attId = ComputeAttestationId(recipe.RecipeEntityId, kindId, objectId, sourceId);
-            b.AddAttestation(new AttestationRow(
-                Id:               attId,
-                SubjectId:        recipe.RecipeEntityId,
-                KindId:           kindId,
-                ObjectId:         objectId,
-                SourceId:         sourceId,
-                ContextId:        null,
-                RatingFp1e9:      rating,
-                RdFp1e9:          350_000_000_000L,
-                VolatilityFp1e9:  60_000_000L,
-                LastObservedAtUnixUs: 0,
-                ObservationCount: 1));
-        }
+        // Recipe attestations are categorical config facts (HAS_*; the value lives in
+        // the object entity, not the score). A confirm observation, full trust.
+        void AddAttestation(Hash128 kindId, Hash128? objectId)
+            => b.AddAttestation(AttestationFactory.CreateCategorical(
+                recipe.RecipeEntityId, kindId, objectId, sourceId, contextId: null,
+                confirm: true, witnessWeight: 1.0));
 
         /* Scalar-valued recipe parameters stored as content entities */
         void AddScalar(Hash128 kindId, string value)
@@ -130,7 +121,7 @@ public sealed class LlamaRecipeExtractor
             var valueBytes = Encoding.UTF8.GetBytes(value);
             var valueId    = Hash128.Blake3(valueBytes);
             b.AddEntity(valueId, tier: 0, Hash128.OfCanonical("substrate/type/Scalar/v1"), sourceId);
-            AddAttestation(kindId, valueId, 1_500_000_000_000L);
+            AddAttestation(kindId, valueId);
         }
 
         AddScalar(hasHiddenSizeKindId,  recipe.HiddenSize.ToString());
@@ -142,7 +133,7 @@ public sealed class LlamaRecipeExtractor
 
         /* IS_A attestation → architecture entity */
         b.AddEntity(architectureEntityId, tier: 0, Hash128.OfCanonical("substrate/type/Architecture/v1"), sourceId);
-        AddAttestation(isAKindId, architectureEntityId, 1_500_000_000_000L);
+        AddAttestation(isAKindId, architectureEntityId);
 
         return b.Build();
     }

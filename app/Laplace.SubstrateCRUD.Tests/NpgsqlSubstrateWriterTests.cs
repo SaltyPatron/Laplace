@@ -137,9 +137,9 @@ public class NpgsqlSubstrateWriterTests : IClassFixture<LocalPgFixture>
             .AddAttestation(new AttestationRow(
                 Id: H(4003), SubjectId: subjId, KindId: kindId,
                 ObjectId: null, SourceId: src, ContextId: null,
-                RatingFp1e9: 1_500_000_000_000L,
-                RdFp1e9: 350_000_000_000L,
-                VolatilityFp1e9: 60_000_000L,
+                ScoreFp1e9: 1_000_000_000L,        // 1.0 (categorical confirm)
+                OpponentRdFp1e9: 30_000_000_000L,  // φ for full trust
+                ArenaMFp1e9: 0L,
                 LastObservedAtUnixUs: IntentStage.PgEpochUnixUs,
                 ObservationCount: 1L))
             .Build();
@@ -177,7 +177,7 @@ public class NpgsqlSubstrateWriterTests : IClassFixture<LocalPgFixture>
             .AddEntity(goodEntity, 0, typeId)
             .AddAttestation(new AttestationRow(
                 H(5002), missingSubject, kindId, null, src, null,
-                1_500_000_000_000L, 350_000_000_000L, 60_000_000L,
+                1_000_000_000L, 30_000_000_000L, 0L,
                 IntentStage.PgEpochUnixUs, 1))
             .Build();
 

@@ -371,9 +371,10 @@ public sealed class LlamaTokenizerParser
                     b.AddEntity(rec.EntityId, rec.Tier, textTypeId, firstObservedBy: sourceId);
                 }
 
-                /* TOKEN_MAPS_TO: tokenizer entity → text entity, rating = vocab position.
-                 * Synthesis uses this to reconstruct the token_id → entity mapping
-                 * without needing the original tokenizer.json file. */
+                /* TOKEN_MAPS_TO: tokenizer entity → text entity. A categorical confirm
+                 * (score = 1) at full trust. The vocab position is positional METADATA
+                 * (synthesis reconstructs token_id → entity from it) — it rides in the
+                 * free audit column arena_m, never in score (which is a Glicko outcome). */
                 rec.EntityId.WriteBytes(attBufArr.AsSpan(32, 16));
                 var attId = Hash128.Blake3(attBufArr);
 
@@ -384,9 +385,9 @@ public sealed class LlamaTokenizerParser
                     ObjectId:         rec.EntityId,
                     SourceId:         sourceId,
                     ContextId:        null,
-                    RatingFp1e9:      (long)rec.TokenId,
-                    RdFp1e9:          1L,
-                    VolatilityFp1e9:  1L,
+                    ScoreFp1e9:       Glicko2.FpScale,          // categorical confirm (1.0)
+                    OpponentRdFp1e9:  30L * Glicko2.FpScale,    // full trust → tight opponent φ
+                    ArenaMFp1e9:      (long)rec.TokenId,        // vocab position (metadata)
                     LastObservedAtUnixUs: 0,
                     ObservationCount: 1));
             }

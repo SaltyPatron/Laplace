@@ -253,29 +253,30 @@ BEGIN
         (kind_is_alias_of_id,       KIND_TIER, kind_id, subscan_id);
 
     /* === Meta-attestations binding it all together ===================== *
-     * SubstrateCanonical HAS_TRUST_CLASS SubstrateMandate.
-     * Each kind entity HAS_KIND_VALUE_TIER <its tier entity>.
+     * SubstrateCanonical HAS_TRUST_CLASS SubstrateMandate (source provenance).
      *
-     * Attestation rating/rd/volatility uses T1 prior x SubstrateMandate
-     * weight (per ADR 0044): rating=2500e9, rd=30e9, volatility=1e6
-     * (T1 Mandate: rating 2500, RD 30, volatility 0.001 * 1e9 = 1e6;
-     * trust class SubstrateMandate weight 1.0). int64 fixed-point at
-     * scale 1e9 per ADR 0004.
+     * Evidence rows are OBSERVATIONS now (ARCHITECTURE.md §10): categorical
+     * confirms (score=1.0 ×1e9) at full trust (opponent_rd=30 ×1e9 → g(φ)≈1),
+     * arena_m=0. No tier prior on μ. (The HAS_KIND_VALUE_TIER row + kind_tier
+     * entities below are vestigial — nothing reads tiers now that trust enters
+     * as opponent φ; flagged for removal.)
      *
      * Attestation ids are computed via the laplace_hash128_merkle wrapper
      * over (subject_id, kind_id, object_id, source_id, context_id) so the
      * id IS the content. */
 
-    /* SubstrateCanonical HAS_TRUST_CLASS TrustClass_SubstrateMandate */
+    /* SubstrateCanonical HAS_TRUST_CLASS TrustClass_SubstrateMandate.
+     * Evidence is an OBSERVATION now (ARCHITECTURE.md §10): a categorical confirm
+     * (score=1.0) at full trust (opponent_rd=30 → g(φ)≈1). No tier prior on μ. */
     INSERT INTO attestations (
         id, subject_id, kind_id, object_id, source_id, context_id,
-        rating, rd, volatility, last_observed_at, observation_count
+        score, opponent_rd, arena_m, last_observed_at, observation_count
     ) VALUES (
         public.laplace_hash128_merkle(0::smallint, ARRAY[
             subscan_id, kind_has_trust_class_id, tc_mandate_id, subscan_id, '\x00000000000000000000000000000000'::bytea
         ]),
         subscan_id, kind_has_trust_class_id, tc_mandate_id, subscan_id, NULL,
-        2500000000000, 30000000000, 1000000, now(), 1
+        1000000000, 30000000000, 0, now(), 1
     );
 
     /* Each tier entity carries its own substrate-mandate attestation
@@ -289,13 +290,13 @@ BEGIN
      * domain-specific tiers as overrides). */
     INSERT INTO attestations (
         id, subject_id, kind_id, object_id, source_id, context_id,
-        rating, rd, volatility, last_observed_at, observation_count
+        score, opponent_rd, arena_m, last_observed_at, observation_count
     ) VALUES (
         public.laplace_hash128_merkle(0::smallint, ARRAY[
             kind_has_kind_tier_id, kind_is_a_id, tier_t2_id, subscan_id, '\x00000000000000000000000000000000'::bytea
         ]),
         kind_has_kind_tier_id, kind_is_a_id, tier_t2_id, subscan_id, NULL,
-        2300000000000, 60000000000, 5000000, now(), 1
+        1000000000, 30000000000, 0, now(), 1
     );
 
     /* === Deferred FK constraints (added now that bootstrap rows exist) = */

@@ -134,8 +134,10 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
-    /// <summary>Add one <c>attestations</c> row. Glicko-2 rating / rd /
-    /// volatility are int64 fixed-point ×1e9 per RULES.md datatype standards.</summary>
+    /// <summary>Add one <c>attestations</c> (EVIDENCE) row — a Glicko-2 observation:
+    /// score = ½(1+tanh(signed_m/M)), opponent_rd = witness trust→φ, arena_m = the
+    /// per-arena scale M (audit). All int64 fixed-point ×1e9. The accumulated
+    /// rating/rd/volatility live on consensus, not here (ARCHITECTURE.md §10).</summary>
     public void AddAttestation(
         Hash128  id,
         Hash128  subjectId,
@@ -143,9 +145,9 @@ public sealed class IntentStage : SafeHandle
         Hash128? objectId,
         Hash128  sourceId,
         Hash128? contextId,
-        long     ratingFp1e9,
-        long     rdFp1e9,
-        long     volatilityFp1e9,
+        long     scoreFp1e9,
+        long     opponentRdFp1e9,
+        long     arenaMFp1e9,
         long     lastObservedAtUnixUs,
         long     observationCount)
     {
@@ -160,7 +162,7 @@ public sealed class IntentStage : SafeHandle
             Hash128* ctxPtr = contextId is null ? null : &ctx;
             rc = NativeInterop.IntentStageAddAttestation(
                 handle, &id, &subjectId, &kindId, objPtr, &sourceId, ctxPtr,
-                ratingFp1e9, rdFp1e9, volatilityFp1e9,
+                scoreFp1e9, opponentRdFp1e9, arenaMFp1e9,
                 lastObservedAtUnixUs, observationCount);
             if (rc != 0) throw new InvalidOperationException("intent_stage_add_attestation failed");
         }

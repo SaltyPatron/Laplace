@@ -113,12 +113,15 @@ int intent_stage_add_physicality(
     int32_t             source_dim,
     int64_t             observed_at_unix_us);
 
-/* Add one attestations row.
+/* Add one attestations (EVIDENCE) row — one Glicko-2 observation.
  *   id, subject_id, kind_id, source_id — 16-byte hash128 (NOT NULL)
  *   object_id, context_id              — nullable; pass NULL to emit SQL NULL
- *   rating, rd, volatility             — Glicko-2 int64 fixed-point ×1e9
+ *   score        — ½(1+tanh(signed_m/M)) ∈ (0,1), int64 fixed-point ×1e9
+ *   opponent_rd  — witness trust → Glicko φ (opponent precision), ×1e9
+ *   arena_m      — per-arena magnitude scale M (audit/interpretability), ×1e9
  *   last_observed_at_unix_us           — microseconds since Unix epoch
- *   observation_count                  — non-negative
+ *   observation_count                  — non-negative (occurrences = games)
+ * The accumulated rating/rd/volatility live on consensus, not here.
  * Returns 0 on success, non-zero on OOM or invalid args. */
 int intent_stage_add_attestation(
     intent_stage_t*  stage,
@@ -128,9 +131,9 @@ int intent_stage_add_attestation(
     const hash128_t* object_id,
     const hash128_t* source_id,
     const hash128_t* context_id,
-    int64_t          rating,
-    int64_t          rd,
-    int64_t          volatility,
+    int64_t          score,
+    int64_t          opponent_rd,
+    int64_t          arena_m,
     int64_t          last_observed_at_unix_us,
     int64_t          observation_count);
 

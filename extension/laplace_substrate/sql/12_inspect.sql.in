@@ -40,34 +40,35 @@ COMMENT ON FUNCTION entity_physicalities(bytea) IS
 
 CREATE OR REPLACE FUNCTION attestations_out(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(kind_id bytea, object_id bytea, source_id bytea,
-                  rating bigint, rd bigint, volatility bigint, observation_count bigint)
+                  score bigint, opponent_rd bigint, arena_m bigint, observation_count bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     SELECT a.kind_id, a.object_id, a.source_id,
-           a.rating, a.rd, a.volatility, a.observation_count
+           a.score, a.opponent_rd, a.arena_m, a.observation_count
     FROM attestations a
     WHERE a.subject_id = p_id
-    ORDER BY a.rating DESC
+    ORDER BY a.score DESC, a.observation_count DESC
     LIMIT p_limit
 $$;
 
 COMMENT ON FUNCTION attestations_out(bytea, integer) IS
-    'Outgoing attestation neighborhood: rows where the entity is the subject, '
-    'highest Glicko-2 rating first. rating/rd/volatility are fixed-point x1e9.';
+    'Outgoing EVIDENCE neighborhood: per-witness observations where the entity is the subject, '
+    'strongest match (score) first. score/opponent_rd/arena_m are fixed-point x1e9. For accumulated '
+    'consensus μ use completions()/top_relations().';
 
 CREATE OR REPLACE FUNCTION attestations_in(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(subject_id bytea, kind_id bytea, source_id bytea,
-                  rating bigint, rd bigint, volatility bigint)
+                  score bigint, opponent_rd bigint, arena_m bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     SELECT a.subject_id, a.kind_id, a.source_id,
-           a.rating, a.rd, a.volatility
+           a.score, a.opponent_rd, a.arena_m
     FROM attestations a
     WHERE a.object_id = p_id
-    ORDER BY a.rating DESC
+    ORDER BY a.score DESC
     LIMIT p_limit
 $$;
 
 COMMENT ON FUNCTION attestations_in(bytea, integer) IS
-    'Incoming attestation neighborhood: rows where the entity is the object, '
-    'highest Glicko-2 rating first. rating/rd/volatility are fixed-point x1e9.';
+    'Incoming EVIDENCE neighborhood: per-witness observations where the entity is the object, '
+    'strongest match (score) first. score/opponent_rd/arena_m are fixed-point x1e9.';

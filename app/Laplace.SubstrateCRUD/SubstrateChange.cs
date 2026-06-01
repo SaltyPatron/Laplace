@@ -74,13 +74,17 @@ public sealed record PhysicalityRow(
     long            ObservedAtUnixUs);
 
 /// <summary>
-/// One row of the <c>laplace.attestations</c> table (typed knowledge edge
-/// with Glicko-2 current state per RULES R5 + ADR 0036 + ADR 0044).
+/// One row of the <c>laplace.attestations</c> table — the EVIDENCE layer: a
+/// single Glicko-2 OBSERVATION (a match the relation plays vs a neutral
+/// baseline opponent), per RULES R5 + ADR 0036 + ARCHITECTURE.md §10.
 ///
 /// <para>
-/// Glicko-2 rating/rd/volatility are int64 fixed-point ×1e9 per the substrate
-/// datatype standards. Initial values come from the kind-value-tier × source-
-/// trust-class prior matrix per ADR 0044, not from a global default.
+/// <c>ScoreFp1e9</c> = ½(1+tanh(signed_m/M)) ∈ (0,1) — the signed-magnitude
+/// outcome (+ win/confirm, − loss/refute, 0 draw). <c>OpponentRdFp1e9</c> =
+/// the witness weight (kind_rank × source_trust × tenant_trust) mapped to
+/// opponent precision φ. <c>ArenaMFp1e9</c> = the per-arena scale M used (audit).
+/// All int64 fixed-point ×1e9. The accumulated rating/rd/volatility live on the
+/// consensus table — NOT here. No tiers, no trust classes in evidence.
 /// </para>
 /// </summary>
 public sealed record AttestationRow(
@@ -90,8 +94,8 @@ public sealed record AttestationRow(
     Hash128? ObjectId,
     Hash128  SourceId,
     Hash128? ContextId,
-    long     RatingFp1e9,
-    long     RdFp1e9,
-    long     VolatilityFp1e9,
+    long     ScoreFp1e9,
+    long     OpponentRdFp1e9,
+    long     ArenaMFp1e9,
     long     LastObservedAtUnixUs,
     long     ObservationCount);
