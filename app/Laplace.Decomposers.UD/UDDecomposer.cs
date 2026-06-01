@@ -31,17 +31,10 @@ public sealed class UDDecomposer : IDecomposer
     private static readonly Hash128 UposTypeId     = Hash128.OfCanonical("substrate/type/UD_UPOS/v1");
     private static readonly Hash128 XposTypeId     = Hash128.OfCanonical("substrate/type/UD_XPOS/v1");
     private static readonly Hash128 FeatureTypeId  = Hash128.OfCanonical("substrate/type/UD_Feature/v1");
-    private static readonly Hash128 DeprelTypeId   = Hash128.OfCanonical("substrate/type/UD_Deprel/v1");
     private static readonly Hash128 LanguageTypeId = Hash128.OfCanonical("substrate/type/Language/v1");
 
-    private static Hash128 Kind(string n) => Hash128.OfCanonical($"substrate/kind/{n}/v1");
-    private static readonly Hash128 KindHasUpos     = Kind("HAS_UPOS");
-    private static readonly Hash128 KindHasXpos     = Kind("HAS_XPOS");
-    private static readonly Hash128 KindHasFeature  = Kind("HAS_FEATURE");
-    private static readonly Hash128 KindIsLemmaOf   = Kind("IS_LEMMA_OF");
-    private static readonly Hash128 KindDependsOn   = Kind("DEPENDS_ON");
-    private static readonly Hash128 KindHasLanguage = Kind("HAS_LANGUAGE");
-    private static readonly Hash128 KindHasPart     = Kind("HAS_PART");
+    // POS value object id. UPOS is universal → unnamespaced; HAS_UPOS (the kind)
+    // normalizes to HAS_POS via the registry so it co-asserts with other sources.
 
     private static readonly string[] UposTags =
         ["ADJ","ADP","ADV","AUX","CCONJ","DET","INTJ","NOUN","NUM",
@@ -57,8 +50,10 @@ public sealed class UDDecomposer : IDecomposer
     // namespace by language so genuinely-different tags are distinct content.
     // UPOS is the universal tagset → stays unnamespaced (same content cross-lang).
     private static Hash128 XposId(string lang, string t) => Hash128.OfCanonical($"xpos:{lang}:{t}");
-    private static Hash128 FeatId(string kv) => Hash128.OfCanonical($"feat:{kv}");
-    private static Hash128 DeprelId(string d)=> Hash128.OfCanonical($"deprel:{d}");
+    // Feature VALUE object, namespaced by feature name (cross-language shared:
+    // Number=Sing is one value entity). The feature TYPE (Number) is the kind.
+    private static Hash128 FeatValueId(string name, string value) =>
+        Hash128.OfCanonical($"featval:{name}:{value}");
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
@@ -66,12 +61,10 @@ public sealed class UDDecomposer : IDecomposer
         boot.AddType("UD_UPOS");
         boot.AddType("UD_XPOS");
         boot.AddType("UD_Feature");
-        boot.AddType("UD_Deprel");
-        boot.AddKind("HAS_UPOS",    KindRank.Partitive, SourceTrust.AcademicCurated);
-        boot.AddKind("HAS_XPOS",    KindRank.Partitive, SourceTrust.AcademicCurated);
-        boot.AddKind("HAS_FEATURE", KindRank.Partitive, SourceTrust.AcademicCurated);
-        boot.AddKind("IS_LEMMA_OF", KindRank.Partitive, SourceTrust.AcademicCurated);
-        boot.AddKind("DEPENDS_ON",  KindRank.Taxonomic, SourceTrust.AcademicCurated);
+        // Kinds are seeded by the registry in BootstrapIntentBuilder.Build (the
+        // canonical arena taxonomy: HAS_POS, HAS_XPOS, HAS_FEATURE, IS_LEMMA_OF,
+        // DEPENDS_ON, …). Per-deprel / per-feature arenas (DEP_*, FEAT_*) are
+        // dynamic, seeded on first sight in DecomposeAsync.
         await context.Writer.ApplyAsync(boot.Build(), ct);
 
         var upos = new SubstrateChangeBuilder(
@@ -93,6 +86,9 @@ public sealed class UDDecomposer : IDecomposer
 
         var b = NewBuilder("ud/batch-0", batchSentences);
         int sentCount = 0, batchNum = 0;
+        // Per-run dedup for dynamic DEP_*/FEAT_* kind seeding (seeded once on first
+        // sight; earlier batches commit before later ones reference the kind).
+        var seenKinds = new HashSet<Hash128>();
 
         foreach (string conllu in Directory.EnumerateFiles(treebanksDir, "*.conllu", SearchOption.AllDirectories))
         {
@@ -103,7 +99,7 @@ public sealed class UDDecomposer : IDecomposer
             await foreach (var sentence in ParseSentencesAsync(conllu, ct))
             {
                 ct.ThrowIfCancellationRequested();
-                EmitSentence(b, sentence, langId, langCode);
+                EmitSentence(b, sentence, langId, langCode, seenKinds);
 
                 if (++sentCount >= batchSentences)
                 {
@@ -130,7 +126,8 @@ public sealed class UDDecomposer : IDecomposer
 
     // ── emit ───────────────────────────────────────────────────────────────
 
-    private static void EmitSentence(SubstrateChangeBuilder b, UdSentence s, Hash128 langId, string langCode)
+    private static void EmitSentence(SubstrateChangeBuilder b, UdSentence s, Hash128 langId, string langCode,
+                                     HashSet<Hash128> seen)
     {
         // Language entity (idempotent with ISO layer) so HAS_LANGUAGE FK is satisfied.
         b.AddEntity(new EntityRow(langId, /*tier*/ 2, LanguageTypeId, Source));
@@ -152,48 +149,52 @@ public sealed class UDDecomposer : IDecomposer
             if (fid is null) continue;
             Hash128 form = fid.Value;
 
+            // HAS_UPOS normalizes to the canonical HAS_POS arena (co-asserts with
+            // WordNet/Wiktionary part-of-speech); the value object stays the UPOS tag.
             if (!string.IsNullOrEmpty(tok.Upos) && tok.Upos != "_")
-                b.AddAttestation(AttestationFactory.Create(
-                    form, KindHasUpos, UposId(tok.Upos), Source, null,
-                    KindRank.Partitive, SourceTrust.AcademicCurated));
+                b.AddAttestation(KindRegistry.Attest(
+                    form, "HAS_UPOS", UposId(tok.Upos), Source, SourceTrust.AcademicCurated));
 
+            // HAS_XPOS is the finer, language-specific child arena (is_a HAS_POS).
             if (!string.IsNullOrEmpty(tok.Xpos) && tok.Xpos != "_")
             {
                 b.AddEntity(new EntityRow(XposId(langCode, tok.Xpos), 0, XposTypeId, Source));
-                b.AddAttestation(AttestationFactory.Create(
-                    form, KindHasXpos, XposId(langCode, tok.Xpos), Source, null,
-                    KindRank.Partitive, SourceTrust.AcademicCurated));
+                b.AddAttestation(KindRegistry.Attest(
+                    form, "HAS_XPOS", XposId(langCode, tok.Xpos), Source, SourceTrust.AcademicCurated));
             }
 
+            // Each morphological feature TYPE is its own arena: Number=Sing →
+            // FEAT_NUMBER(form, Sing), is_a HAS_FEATURE. Value object shared cross-language.
             foreach (var feat in tok.Feats)
             {
-                b.AddEntity(new EntityRow(FeatId(feat), 0, FeatureTypeId, Source));
-                b.AddAttestation(AttestationFactory.Create(
-                    form, KindHasFeature, FeatId(feat), Source, null,
-                    KindRank.Partitive, SourceTrust.AcademicCurated));
+                if (!KindRegistry.ParseFeature(feat, out var fName, out var fVal)) continue;
+                Hash128 valId = FeatValueId(fName, fVal);
+                b.AddEntity(new EntityRow(valId, 0, FeatureTypeId, Source));
+                KindRegistry.SeedDynamic(b, KindRegistry.ResolveFeature(fName), Source, seen);
+                b.AddAttestation(KindRegistry.AttestFeature(
+                    form, fName, valId, Source, SourceTrust.AcademicCurated));
             }
 
-            b.AddAttestation(AttestationFactory.Create(
-                form, KindHasLanguage, langId, Source, null,
-                KindRank.Partitive, SourceTrust.AcademicCurated));
+            b.AddAttestation(KindRegistry.Attest(
+                form, "HAS_LANGUAGE", langId, Source, SourceTrust.AcademicCurated));
 
             if (tok.Lemma != tok.Form)
             {
                 var lemmaId = ContentEmitter.RootId(tok.Lemma);
                 if (lemmaId is not null)
-                    b.AddAttestation(AttestationFactory.Create(
-                        lemmaId.Value, KindIsLemmaOf, form, Source, null,
-                        KindRank.Partitive, SourceTrust.AcademicCurated));
+                    b.AddAttestation(KindRegistry.Attest(
+                        lemmaId.Value, "IS_LEMMA_OF", form, Source, SourceTrust.AcademicCurated));
             }
 
-            // Labelled dependency: form DEPENDS_ON head, context_id = deprel entity.
+            // Labelled dependency: the deprel IS the kind/arena (nsubj ≠ obj — each
+            // its own embedding), form <DEP_*> head — NOT erased into context_id.
+            // Seed the DEP_* kind + its is_a chain to DEPENDS_ON on first sight.
             if (tok.Head > 0 && tok.Head <= s.MaxId && formId[tok.Head] is { } headId
                 && !string.IsNullOrEmpty(tok.Deprel) && tok.Deprel != "_")
             {
-                b.AddEntity(new EntityRow(DeprelId(tok.Deprel), 0, DeprelTypeId, Source));
-                b.AddAttestation(AttestationFactory.Create(
-                    form, KindDependsOn, headId, Source, DeprelId(tok.Deprel),
-                    KindRank.Taxonomic, SourceTrust.AcademicCurated));
+                KindRegistry.SeedDeprel(b, tok.Deprel, Source, seen);
+                b.AddAttestation(KindRegistry.AttestDeprel(
+                    form, tok.Deprel, headId, Source, SourceTrust.AcademicCurated));
             }
         }
 
@@ -204,9 +205,8 @@ public sealed class UDDecomposer : IDecomposer
             if (surfaceId is null) continue;
             for (int id = mwt.Start; id <= mwt.End && id <= s.MaxId; id++)
                 if (formId[id] is { } partId)
-                    b.AddAttestation(AttestationFactory.Create(
-                        surfaceId.Value, KindHasPart, partId, Source, null,
-                        KindRank.Partitive, SourceTrust.AcademicCurated));
+                    b.AddAttestation(KindRegistry.Attest(
+                        surfaceId.Value, "HAS_PART", partId, Source, SourceTrust.AcademicCurated));
         }
     }
 

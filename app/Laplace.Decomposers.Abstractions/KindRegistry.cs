@@ -309,4 +309,16 @@ public static class KindRegistry
         if (k.ParentId is { } parent)
             builder.AddAttestation(Attest(k.Id, "IS_A", parent, sourceId, SourceTrust.AcademicCurated));
     }
+
+    /// <summary>Seed a dependency relation's full kind chain (subtype → base →
+    /// DEPENDS_ON) so every level's entity + is_a edge exists before the
+    /// dependency attestation references it. <c>nsubj:pass</c> seeds DEP_NSUBJ
+    /// (is_a DEPENDS_ON) then DEP_NSUBJ_PASS (is_a DEP_NSUBJ).</summary>
+    public static void SeedDeprel(SubstrateChangeBuilder builder, string deprel, Hash128 sourceId,
+                                  HashSet<Hash128>? seen = null)
+    {
+        int colon = deprel.IndexOf(':');
+        if (colon > 0) SeedDynamic(builder, ResolveDeprel(deprel[..colon]), sourceId, seen);
+        SeedDynamic(builder, ResolveDeprel(deprel), sourceId, seen);
+    }
 }
