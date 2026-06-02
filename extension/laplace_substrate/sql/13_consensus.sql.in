@@ -108,7 +108,83 @@ END;
 $$;
 
 COMMENT ON FUNCTION rebuild_consensus() IS
-    'Materialize the consensus table from the attestations evidence via Glicko-2 accumulation (K1 first-cut mapping). Batch rebuild; returns consensus row count.';
+    'Materialize the consensus table from the attestations evidence via Glicko-2 accumulation (K1 first-cut mapping). Batch rebuild (TRUNCATE + replay ALL evidence) — full / disaster-recovery ONLY. Per-ingest the law requires incremental_consensus(p_since); never TRUNCATE on the ingest path. Returns consensus row count.';
+
+/* INCREMENTAL consensus (L3) — the per-ingest-period path. NO TRUNCATE, so
+ * cross-model / cross-witness accumulation is preserved: a later ingest that
+ * re-witnesses an existing relation accumulates onto the SAME consensus row.
+ *
+ * Touched set: every RELATION IDENTITY (subject, kind, object) whose evidence
+ * has last_observed_at > p_since — i.e. observed in this ingest period. For EACH
+ * touched relation we RE-ACCUMULATE its consensus from that relation's FULL
+ * evidence (every witness, all sources/contexts), using the SAME mapping as
+ * rebuild_consensus: neutral prior + neutral opponent μ + per-witness opponent_rd
+ * (trust → φ) + stored score + observation_count replay (generate_series).
+ *
+ * Why recompute-touched (not prior=current-consensus + only-new-observations):
+ * per-relation full re-accumulation is IDEMPOTENT and ORDER-INVARIANT (Glicko-2
+ * within a rating period is commutative — pinned in glicko2_aggregate.sql Vector
+ * 3). Re-ingesting an identical tuple is an UPSERT-no-op on attestations (R5),
+ * so the evidence set is unchanged → the re-accumulation yields the SAME rating
+ * → 0 net games, no double-count. A second source witnessing the relation adds an
+ * evidence row → it joins the same group → consensus accumulates it and
+ * witness_count rises, on the SAME consensus row. (The true "prior = current
+ * consensus, add only the period's new observations" delta is a later
+ * optimization; recompute-touched is the L3 deliverable.)
+ *
+ * p_since NULL ⇒ touch everything (equivalent extent to a rebuild, but WITHOUT
+ * TRUNCATE — upserts every relation in place). Returns rows touched. */
+CREATE OR REPLACE FUNCTION incremental_consensus(p_since timestamptz DEFAULT NULL)
+    RETURNS bigint LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE n bigint;
+BEGIN
+    INSERT INTO consensus (id, subject_id, kind_id, object_id, context_id,
+                           rating, rd, volatility, witness_count, last_observed_at)
+    SELECT consensus_id(g.subject_id, g.kind_id, g.object_id),
+           g.subject_id, g.kind_id, g.object_id, NULL::bytea,
+           (g.acc).rating, (g.acc).rd, (g.acc).volatility,
+           g.witness_count, g.last_observed_at
+    FROM (
+        -- One group per TOUCHED relation identity (subject, kind, object). The
+        -- group spans the relation's FULL evidence (every witnessing source +
+        -- context), not just the rows newer than p_since — full re-accumulation
+        -- is what makes this idempotent + order-invariant. source AND context
+        -- collapse here (both are witnesses, never identity).
+        SELECT a.subject_id, a.kind_id, a.object_id,
+               SUM(a.observation_count) AS witness_count,
+               MAX(a.last_observed_at)  AS last_observed_at,
+               laplace_glicko2_accumulate(
+                   1500000000000::bigint, 350000000000::bigint, 60000000::bigint,    -- neutral prior (μ, rd, σ)
+                   1500000000000::bigint,                                            -- NEUTRAL opponent μ (the 1500 line)
+                   a.opponent_rd,                                                    -- opponent φ from witness trust
+                   a.score,                                                          -- stored tanh outcome ∈ (0,1)
+                   500000000::bigint                                                 -- tau = 0.5
+               )                       AS acc
+        FROM attestations a
+        -- replay each observation observation_count times: N occurrences = N games
+        CROSS JOIN LATERAL generate_series(1, a.observation_count) AS occ
+        -- restrict to relations TOUCHED this period: any witness newer than p_since.
+        WHERE (a.subject_id, a.kind_id, a.object_id) IN (
+            SELECT t.subject_id, t.kind_id, t.object_id
+            FROM attestations t
+            WHERE p_since IS NULL OR t.last_observed_at > p_since
+        )
+        GROUP BY a.subject_id, a.kind_id, a.object_id
+    ) g
+    ON CONFLICT (id) DO UPDATE SET
+        rating           = EXCLUDED.rating,
+        rd               = EXCLUDED.rd,
+        volatility       = EXCLUDED.volatility,
+        witness_count    = EXCLUDED.witness_count,
+        last_observed_at = EXCLUDED.last_observed_at;
+    GET DIAGNOSTICS n = ROW_COUNT;
+    RETURN n;
+END;
+$$;
+
+COMMENT ON FUNCTION incremental_consensus(timestamptz) IS
+    'INCREMENTAL consensus materialization (L3): re-accumulate consensus ONLY for relations touched since p_since (evidence last_observed_at > p_since), each from its FULL evidence, then INSERT … ON CONFLICT (id) DO UPDATE. NO TRUNCATE → cross-model/cross-witness accumulation preserved on the same consensus row. Per-relation full re-accumulation is idempotent + order-invariant (Glicko-2 is commutative within a period), so re-ingest of an identical tuple is a 0-net-game no-op and a new source raises witness_count on the same row. p_since NULL ⇒ touch all. Returns rows touched. rebuild_consensus() stays as the full/disaster-recovery batch path.';
 
 /* ── Permanent inference queries — part of the substrate, not regenerated per session ──────
  * Relatedness/inference is a sorted index scan over consensus effective μ (μ - 2·rd). These
