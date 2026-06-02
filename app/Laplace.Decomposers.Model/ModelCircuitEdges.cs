@@ -78,6 +78,61 @@ public static class ModelCircuitEdges
         return emitted;
     }
 
+    /// <summary>Circuit factorization form — which embedding each side reads through.</summary>
+    public enum CircuitForm { Qk, Ov, Ffn }
+
+    /// <summary>
+    /// Project a circuit's two sides to the operands of M = encProj·decProjᵀ:
+    ///   QK  : encProj = E·Wqᵀ, decProj = E·Wkᵀ          (both through E; q,k are [out×dModel])
+    ///   OV  : encProj = E·Wvᵀ, decProj = E_U·Wo          (v is [out×dModel]; o is [dModel×out] → transpose)
+    ///   FFN : encProj = E·Wupᵀ, decProj = E_U·Wdown      (up is [interm×dModel]; down [dModel×interm] → transpose)
+    /// enc is always [out×dModel] read through E. dec is read through E (QK) or E_U with a
+    /// transpose (OV/FFN), since project_embedding computes pts·Wᵀ and those sides need pts·W.
+    /// Returns the projected operands and their inner ranks.
+    /// </summary>
+    public static (double[] encProj, int rEnc, double[] decProj, int rDec) ProjectCircuit(
+        CircuitForm form, float[] enc, int encOut, float[] dec, int decRows, int decCols,
+        float[] E, float[] EU, int vocab, int dModel)
+    {
+        int rEnc = encOut;
+        double[] encProj = Project(E, vocab, dModel, enc, rEnc);
+        int rDec; double[] decProj;
+        if (form == CircuitForm.Qk) { rDec = decRows; decProj = Project(E, vocab, dModel, dec, rDec); }
+        else { rDec = decCols; decProj = Project(EU, vocab, dModel, Transpose(dec, decRows, decCols), rDec); }
+        return (encProj, rEnc, decProj, rDec);
+    }
+
+    /// <summary>Extract head <paramref name="headIndex"/>'s contiguous [vocab × headDim] slice
+    /// from a projected [vocab × R] matrix (GQA: a side may have fewer heads than the other).</summary>
+    public static double[] SliceHead(double[] proj, int vocab, int R, int headIndex, int headDim)
+    {
+        var s = new double[(long)vocab * headDim];
+        long off = (long)headIndex * headDim;
+        for (int v = 0; v < vocab; v++) Array.Copy(proj, (long)v * R + off, s, (long)v * headDim, headDim);
+        return s;
+    }
+
+    private static double[] Project(float[] pts, int n, int d, float[] W, int r)
+    {
+        var outp = new double[(long)n * r];
+        unsafe
+        {
+            fixed (float* p = pts) fixed (float* w = W) fixed (double* o = outp)
+                if (DynInterop.ProjectEmbedding(p, (nuint)n, (nuint)d, w, (nuint)r, o) != 0)
+                    throw new InvalidOperationException("project_embedding failed");
+        }
+        return outp;
+    }
+
+    private static float[] Transpose(float[] w, int rows, int cols)
+    {
+        var t = new float[(long)cols * rows];
+        for (int r = 0; r < rows; r++)
+            for (int c = 0; c < cols; c++)
+                t[(long)c * rows + r] = w[(long)r * cols + c];
+        return t;
+    }
+
     /// <summary>RMS of the contracted operator magnitudes over a row sample — the
     /// §10 arena scale M used both for the score (tanh(m/M)) and to set θ = β·M.
     /// Computed from the same engine contraction, so it is exact and deterministic.</summary>
