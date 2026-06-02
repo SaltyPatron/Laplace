@@ -69,6 +69,26 @@ public static partial class NativeInterop
         nuint nnz, nuint n, nuint targetDim,
         double* lowDimOut);
 
+    // === Faithful contracted-operator edges (model evidence core) ===
+
+    /// <summary>
+    /// Materialize the contracted bilinear operator M = Left·Rightᵀ for the row
+    /// range [rowBegin, rowEnd) and emit every (i, j) whose SIGNED value exceeds
+    /// the coherence threshold <paramref name="theta"/>. Left/Right are the
+    /// projected embeddings (E·Wq / E_U·Wk etc.); the only cut is theta — never
+    /// argmax, never top-k, never an a-priori floor. f64 dgemm, deterministic.
+    /// Caller tiles row ranges (M is never dense over the full vocab) and drains
+    /// outRows/outCols/outVals (length ≥ cap) each call; overflow → 1 if cap hit.
+    /// Returns 0 ok, -1 bad args, -2 no MKL.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "bilinear_edges_tile")]
+    public static unsafe partial int BilinearEdgesTile(
+        double* left, nuint rowBegin, nuint rowEnd,
+        double* right, nuint nRight,
+        nuint r, double theta,
+        int* outRows, int* outCols, double* outVals,
+        nuint cap, nuint* outCount, int* overflow);
+
     // === Gram-Schmidt ===
 
     /// <summary>
