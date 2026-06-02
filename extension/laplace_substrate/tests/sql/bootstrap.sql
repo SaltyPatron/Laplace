@@ -9,19 +9,31 @@ CREATE EXTENSION laplace_substrate;
 -- Substrate tables live in the laplace schema; engine kernels in public.
 SET search_path TO laplace, public;
 
--- After bootstrap there must be 52 substrate-canonical entities:
---   4 meta-types + 1 SubstrateCanonical + 3 PhysicalityKinds
---   + 10 trust classes + 11 kind value tiers + 17 kind entities
---   + 5 substrate-canonical text-tier types (Codepoint / Grapheme_Cluster /
---     Word_Form / Sentence / Document per ADR 0042 Stage 4, commit 0847fd5)
---   + 1 PhysicalityKind.ProjectionOutput (commit 0847fd5)
---   = 52.
-SELECT count(*) AS entity_count FROM entities;
-
--- After bootstrap there must be 2 substrate-canonical meta-attestations:
---   SubstrateCanonical HAS_TRUST_CLASS SubstrateMandate
---   HAS_KIND_VALUE_TIER IS_A T2_StandardsStructural
-SELECT count(*) AS attestation_count FROM attestations;
+-- The 16 canonical kind arenas must be seeded — checked by content-addressed
+-- id (a semantic contract, not a brittle total-row count: adding a new kind or
+-- text-tier later must NOT break bootstrap). Kind significance is the numeric
+-- kind_rank, not a tier-on-kinds (truth #5); the vestigial kind-value-tier
+-- entities are purged (asserted below). Provenance (HAS_TRUST_CLASS) is asserted
+-- by the EXISTS check below, not by a total attestation count.
+SELECT count(*) AS canonical_kind_count FROM entities
+WHERE id IN (
+    laplace_hash128_blake3('substrate/kind/IS_A/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind/HAS_PART/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind/CO_OCCURS_WITH/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind/FOLLOWS/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind/PRECEDES/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind/OCCURS_IN_CONTEXT/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind/HAS_LANGUAGE/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind/IS_TRANSLATION_OF/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind/DEPICTS/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind/CAPTIONS/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind/TRANSCRIBES_AS/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind/IS_LOSSY_ENCODING_OF/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind/HAS_VARIANT_OF/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind/IS_REPLACED_BY/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind/HAS_TRUST_CLASS/v1'::bytea),
+    laplace_hash128_blake3('substrate/kind/IS_ALIAS_OF/v1'::bytea)
+);
 
 -- SubstrateCanonical source entity must exist at the expected canonical id.
 SELECT EXISTS(
@@ -29,7 +41,9 @@ SELECT EXISTS(
     WHERE id = laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
 ) AS substrate_canonical_present;
 
--- All 11 kind value tiers must exist.
+-- The 11 vestigial kind-value-tier entities must NOT exist — purged in the L0
+-- identity pass (kind significance is the numeric kind_rank, truth #5). This
+-- guards against accidental re-seeding; expected count is 0.
 SELECT count(*) AS tier_count FROM entities
 WHERE id IN (
     laplace_hash128_blake3('substrate/kind_tier/T1_Mandate/v1'::bytea),

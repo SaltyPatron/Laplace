@@ -22,10 +22,10 @@ public sealed record TransientErrorRetryPolicy(
     /// <see cref="global::Npgsql.PostgresException"/> with a transient
     /// SQLSTATE class (08, 53, 57, 58) as transient.</summary>
     public static TransientErrorRetryPolicy Default { get; } =
-        new(MaxAttempts: 6,
+        new(MaxAttempts: 3,
             InitialDelay: TimeSpan.FromMilliseconds(100),
-            BackoffMultiplier: 3.0,
-            JitterFraction: 0.5,
+            BackoffMultiplier: 10.0,
+            JitterFraction: 0.1,
             IsTransient: DefaultIsTransient);
 
     /// <summary>Policy that disables retry — surfaces every error immediately.

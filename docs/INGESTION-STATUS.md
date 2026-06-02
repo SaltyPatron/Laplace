@@ -87,12 +87,15 @@ The evidence/consensus split is now real and the Glicko math is DERIVED, not kno
   no longer mints tier entities or HAS_VALUE_TIER meta-attestations; the model path carries no
   `T9`. Kind significance + source trust are now numeric (`KindRank`/`SourceTrust` ∈(0,1]) folded
   into opponent φ.
-- **STILL TO PURGE (cosmetic / vestigial):** the `KindValueTier`/`TrustClass` enum NAMES remain as
-  a numeric rank/trust LOOKUP feeding `AttestationFactory.Weight` (behaviour is the law's
-  rank×trust; only the names are tier-flavored — rename to `KindRank`/`SourceTrust`). The
-  `substrate/kind_tier/T*` entities + HAS_KIND_VALUE_TIER kind seeded in `10_bootstrap.sql.in`
-  Stage 3 are now vestigial (nothing reads them) — remove. The dead `ExtractAsync`/QK-bilinear
-  path in `WeightTensorETL` still references the enums via the compat shims — delete the dead path.
+- **PURGED (verified live):** the `KindValueTier`/`TrustClass` enums are deleted; significance +
+  source trust are numeric (`KindRank`/`SourceTrust` ∈(0,1]) folded into opponent φ. (`TrustClass`
+  survives only as a per-decomposer `Hash128` id of its seeded `substrate/trust_class/*` entity —
+  correct; the trust-class *entities* are not purged.) The `substrate/kind_tier/T*` entities +
+  `HAS_KIND_VALUE_TIER` attestation are no longer seeded in `10_bootstrap.sql.in` — the bootstrap
+  regress now asserts they stay gone (purge-guard) and that the 16 canonical kind arenas are present.
+- **STILL TO DELETE (G2.3):** the dead `ExtractAsync` / `BuildAddressBook` / `DetectEnergyFloor`
+  argmax-address-book path in `WeightTensorETL` — removed once the faithful contracted-operator
+  path carries all three circuit kinds (ATTENDS / OV_RELATES / COMPLETES_TO).
 
 ## Still open (next)
 
