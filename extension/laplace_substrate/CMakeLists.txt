@@ -57,6 +57,7 @@ set(EXT_SQL_MODULES
     sql/10_bootstrap.sql.in
     sql/11_entities_exist_bitmap.sql.in
     sql/13_consensus.sql.in
+    sql/14_geometry_consensus.sql.in
     sql/12_inspect.sql.in
 )
 
