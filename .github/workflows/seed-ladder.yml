@@ -28,9 +28,6 @@ jobs:
 
       - uses: ./.github/actions/setup-laplace-env
 
-      - name: Clear stale ingest checkpoint (survives DB nuke)
-        run: rm -rf /tmp/laplace-ingest && mkdir -p /tmp/laplace-ingest
-
       # --- one source per step, dependency order. unicode re-ingest sets the
       #     HasLayerCompleted/0 marker that unblocks iso639 (db-deploy's seed does not). ---
       - name: "ingest — unicode (layer 0 · sets layer marker)"

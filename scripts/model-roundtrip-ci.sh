@@ -57,12 +57,8 @@ log "db-nuke + reseed"
 (cd "$ROOT/app" && "${CLI[@]}" seed-unicode) \
   || die "seed-unicode failed"
 
-# Clear stale ingest checkpoint — after db-nuke the DB has no entities but the
-# checkpoint claims intents were applied. Without clearing it, IngestRunner
-# skips re-emitting those intents and subsequent attestation FKs fail.
-log "clear stale ingest checkpoint"
-rm -rf /tmp/laplace-ingest 2>/dev/null || true
-mkdir -p /tmp/laplace-ingest
+# No checkpoint to clear: ingestion is idempotent (content-addressing + ON CONFLICT
+# DO NOTHING) — IngestRunner keeps no side journal, so a re-run after db-nuke converges.
 
 # --- ingest ---
 log "ingest model (pass 1)"

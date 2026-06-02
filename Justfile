@@ -167,7 +167,6 @@ db-reset:
 # Loses ALL substrate data. Run 'just db-up' afterward to rebuild.
 db-nuke:
     cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- nuke
-    rm -rf /tmp/laplace-ingest
 
 # Generate a new timestamped migration file in db/migrations/
 migrate-new name:
@@ -208,22 +207,18 @@ seed-t0: build-perfcache build-app
 db-fresh: build-perfcache build-app
     #!/usr/bin/env bash
     set -euo pipefail
-    # Clear the resume checkpoint journal FIRST. It persists on disk independent of
-    # the database; if left behind across a nuke, the runner treats already-journaled
-    # intents as applied and SKIPS re-emitting them into the fresh DB — so their
-    # entities never land and a later intent referencing them violates the subject FK.
-    # (Mirrors `just db-nuke`, which also rm's this.) The journal lives at
-    # Path.GetTempPath()/laplace-ingest/<model> = /tmp/laplace-ingest/<model>;
-    # both CI (laplace-runner) and local dev (ahart, in the laplace-runner group)
-    # use /tmp, so this clears the same dir the ingest will write — no TMPDIR
-    # redirection (that diverged local from CI).
-    rm -rf /tmp/laplace-ingest
+    # No checkpoint to clear: ingestion is idempotent by the substrate's own law
+    # (content-addressing + ON CONFLICT DO NOTHING), so a re-run converges with no
+    # side journal (IngestRunner). Drop + recreate the DB, reinstall the current
+    # substrate extension (extension-only install, to avoid the perfcache-file perms
+    # issue in the full `install` target), re-apply migrations (CREATE EXTENSION loads
+    # the current SQL), and re-seed T0.
     cmake --install build/extension/laplace_substrate >/dev/null
     cd app
     echo NUKE | dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- nuke
     dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- up
     dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- seed-unicode
-    echo "✓ db-fresh: empty substrate + current extension + T0 seeded + checkpoint cleared"
+    echo "✓ db-fresh: empty substrate + current extension + T0 seeded"
 
 # === Setup (full convenience composite) ===
 

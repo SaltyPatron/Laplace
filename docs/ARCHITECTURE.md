@@ -414,8 +414,9 @@ and model alike:
   (`ON CONFLICT DO NOTHING`), so re-ingesting identical content is a **no-op** and cannot double-count.
   Seed the reference layers **once** into a persistent base; layer each model/source on top
   incrementally; to re-run a single source after a code change, **evict only that source's evidence**
-  (`DELETE … WHERE source_id = X` + clear its `/tmp/laplace-ingest` checkpoint), never reset the whole
-  DB. Consensus is rebuilt from evidence. This is what makes ingestion sublinear (§8).
+  (`DELETE … WHERE source_id = X`), never reset the whole DB. No resume journal exists — re-ingestion
+  is idempotent by content-addressing alone. Consensus is rebuilt from evidence. This is what makes
+  ingestion sublinear (§8).
 - **Exact, on the perf stack.** Compensated f64, fixed reduction order, MKL/TBB/AVX2 + Eigen/Spectra —
   never a managed scalar GEMM, never top-k truncation, never an approximation.
 

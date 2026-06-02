@@ -125,6 +125,21 @@ internal static class Program
         return 0;
     }
 
+    // Incrementally materialize consensus for relations TOUCHED this ingest period
+    // (decision #3 / L3): re-accumulate Glicko-2 for every relation whose evidence
+    // landed since `since`, in place (INSERT … ON CONFLICT DO UPDATE, no TRUNCATE).
+    // This is the per-ingest-period path the law requires — consensus accumulates AT
+    // INGEST, never via the batch rebuild_consensus (disaster-recovery only).
+    private static async Task<long> MaterializeConsensusSinceAsync(NpgsqlDataSource ds, DateTimeOffset since)
+    {
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 0;  // Glicko-2 accumulation over touched relations can exceed the 30s default
+        cmd.CommandText = "SELECT laplace.incremental_consensus($1)";
+        cmd.Parameters.AddWithValue(since);
+        return (long)(await cmd.ExecuteScalarAsync() ?? 0L);
+    }
+
     // === qk-bench: profile the QK kernel on real weights (no DB, no ingest harness) ===
     private static int QkBenchCmd(string modelDir)
     {
@@ -482,6 +497,7 @@ internal static class Program
         Console.WriteLine(
             $"ingest model {modelDir} via IngestRunner → {ConnString} "
             + $"(workers={workers}, batch={batchSize}, commitRows={commitRows:N0}) ...");
+        var since = DateTimeOffset.UtcNow;   // per-ingest-period window for incremental consensus
         var sw = Stopwatch.StartNew();
 
         // Throttled progress: one counter line per ~2s so a long run shows live
@@ -525,6 +541,8 @@ internal static class Program
                 Console.Error.WriteLine($"  {f}");
             return 1;
         }
+        var touched = await MaterializeConsensusSinceAsync(ds, since);
+        Console.WriteLine($"consensus: {touched:N0} relations materialized (incremental, per-ingest-period)");
         return 0;
     }
 
@@ -1414,6 +1432,7 @@ internal static class Program
         var runner = new IngestRunner(writer, reader);
 
         Console.WriteLine($"ingest {dec.SourceName} via IngestRunner → {ConnString} ...");
+        var since = DateTimeOffset.UtcNow;   // per-ingest-period window for incremental consensus
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(
             dec,
@@ -1436,6 +1455,8 @@ internal static class Program
             Console.Error.WriteLine($"failures: {result.Failures.Count}");
             return 1;
         }
+        var touched = await MaterializeConsensusSinceAsync(ds, since);
+        Console.WriteLine($"consensus: {touched:N0} relations materialized (incremental, per-ingest-period)");
         await PrintCountsAsync(ds);
         return 0;
     }

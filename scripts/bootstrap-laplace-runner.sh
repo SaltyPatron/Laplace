@@ -626,6 +626,38 @@ log_file_mode = 0640
 # laplace-runner group can read+edit them without sudo.
 hba_file = '$PG_HBA_FILE'
 ident_file = '$PG_IDENT_FILE'
+
+# --- Performance tuning — substrate bulk-ingest + PostGIS (125 GB RAM, 6 cores, NVMe).
+# In the managed block so it is reproduced idempotently on every bootstrap; tune the
+# values here (source of truth), never via ALTER SYSTEM on the live cluster.
+# Memory
+shared_buffers = 32GB
+effective_cache_size = 96GB
+maintenance_work_mem = 8GB          # fast CREATE INDEX — the bulk index-build lever
+work_mem = 256MB
+# WAL + checkpoints: bulk ingest emits heavy WAL; widen the ceiling, stretch checkpoints
+wal_compression = on
+max_wal_size = 32GB
+min_wal_size = 2GB
+checkpoint_timeout = 30min
+checkpoint_completion_target = 0.9
+wal_buffers = 64MB
+# fsync stays ON (no corruption). synchronous_commit=off only defers the WAL flush —
+# at most the last <1s of committed txns are lost on a crash, never corruption — and
+# ingestion is content-addressed + idempotent (re-runnable), so this is free throughput.
+synchronous_commit = off
+# Planner + IO for NVMe
+random_page_cost = 1.1
+effective_io_concurrency = 200
+maintenance_io_concurrency = 200
+default_statistics_target = 200
+# Parallelism (6 cores), incl. parallel CREATE INDEX
+max_worker_processes = 8
+max_parallel_workers = 6
+max_parallel_maintenance_workers = 4
+max_parallel_workers_per_gather = 4
+# Huge pages if the OS has them, else fall back (safe)
+huge_pages = try
 $marker_end
 EOF
     green "✓ Wrote substrate cluster config to $PG_POSTGRESQL_CONF"

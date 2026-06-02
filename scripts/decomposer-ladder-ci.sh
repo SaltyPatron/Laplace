@@ -21,13 +21,8 @@ PSQL=(psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -tAc)
 log() { echo "[ladder] $*"; }
 die() { echo "::error::$*"; exit 1; }
 
-# Clear any stale resume checkpoint — it persists on disk across DB resets (the shared
-# `laplace` DB is nuked by the prior run's model-roundtrip job), and a stale journal makes
-# the runner treat already-journaled intents as applied and SKIP re-emitting them → their
-# entities never land in the fresh DB and the content assertion fails. Same hazard
-# model-roundtrip-ci.sh + `just db-fresh` guard against (see [[checkpoint-survives-db-nuke]]).
-rm -rf /tmp/laplace-ingest 2>/dev/null || true
-mkdir -p /tmp/laplace-ingest
+# No checkpoint to clear: ingestion is idempotent (content-addressing + ON CONFLICT
+# DO NOTHING), so a re-run after the prior job's DB nuke converges with no side journal.
 
 # `ingest unicode` sets HasLayerCompleted/0 (the db-deploy seed-unicode step does NOT), which
 # unblocks iso639 (layer 1). The re-seed is idempotent (ON CONFLICT). Then the lexical layer.
