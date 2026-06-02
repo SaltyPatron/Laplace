@@ -228,7 +228,10 @@ public sealed class WeightTensorETL
                 {
                     Hash128 wit = WitnessId(_sourceId, circ.Layer, -1, circ.Expert);
                     var bldr = new SubstrateChangeBuilder(_sourceId, $"circuit/L{circ.Layer}/ffn", null,
-                        entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 1 << 16);
+                        entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1 << 16);
+                    // Witness entity in the SAME change as the edges that reference it as
+                    // context_id — otherwise the attestations_context_id_fkey FK fails.
+                    bldr.AddEntity(new EntityRow(wit, 0, _kinds.WitnessType, _sourceId));
                     counters[1] += ModelCircuitEdges.Emit(encProj, decProj, vocab, rEnc, kindName,
                         m, beta * m, modelTrust, tokEnt, _sourceId, wit, bldr);
                     var chg = bldr.Build();
@@ -249,7 +252,9 @@ public sealed class WeightTensorETL
                     if (m <= 0.0) continue;
                     Hash128 wit = WitnessId(_sourceId, circ.Layer, h, circ.Expert);
                     var bldr = new SubstrateChangeBuilder(_sourceId, $"circuit/L{circ.Layer}/{kindName}/h{h}", null,
-                        entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 1 << 16);
+                        entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1 << 16);
+                    // Witness entity in the SAME change as its edges (context_id FK).
+                    bldr.AddEntity(new EntityRow(wit, 0, _kinds.WitnessType, _sourceId));
                     counters[1] += ModelCircuitEdges.Emit(left, right, vocab, headDim, kindName,
                         m, beta * m, modelTrust, tokEnt, _sourceId, wit, bldr);
                     var chg = bldr.Build();
