@@ -89,6 +89,15 @@ public static partial class NativeInterop
         int* outRows, int* outCols, double* outVals,
         nuint cap, nuint* outCount, int* overflow);
 
+    /// <summary>
+    /// Project an embedding through a circuit weight: out [n × r] = pts [n × d] · Wᵀ
+    /// (W is [r × d] row-major, safetensors out×in). Forms the Left/Right operands
+    /// for <see cref="BilinearEdgesTile"/>. f32 in → exact f64 dgemm → f64 out.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "project_embedding")]
+    public static unsafe partial int ProjectEmbedding(
+        float* pts, nuint n, nuint d, float* w, nuint r, double* outp);
+
     // === Gram-Schmidt ===
 
     /// <summary>

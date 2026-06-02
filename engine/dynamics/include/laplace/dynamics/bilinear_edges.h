@@ -51,6 +51,14 @@ int bilinear_edges_tile(
     int* out_rows, int* out_cols, double* out_vals,
     size_t cap, size_t* out_count, int* overflow);
 
+/* Project an embedding through a circuit weight: out [n × r] = pts [n × d] · Wᵀ,
+ * where W [r × d] row-major (safetensors out_features × in_features). This forms
+ * the Left/Right operands the bilinear contraction consumes (E·Wq, E·Wv, E·Wup,
+ * E_U·Wdownᵀ, …). f32 in → exact f64 dgemm → f64 out (the projection is cached
+ * once per circuit, then reused across row tiles). Returns 0, -1 bad args, -2 no MKL. */
+int project_embedding(const float* pts, size_t n, size_t d,
+                      const float* W, size_t r, double* out);
+
 #ifdef __cplusplus
 }
 #endif

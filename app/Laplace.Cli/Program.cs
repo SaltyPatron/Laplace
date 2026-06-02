@@ -155,13 +155,14 @@ internal static class Program
     // === beta-probe: measure coherence-floor cardinality vs retrieval fidelity (G2.0, no DB) ===
     private static int BetaProbeCmd(string[] rest)
     {
-        string modelDir = rest.Length > 0 && !string.IsNullOrEmpty(rest[0]) ? rest[0] : ResolveTinyLlamaDir();
+        string circuit  = rest.Length > 0 && !string.IsNullOrEmpty(rest[0]) ? rest[0] : "qk";
+        string modelDir = ResolveTinyLlamaDir();
         if (string.IsNullOrEmpty(modelDir) || !Directory.Exists(modelDir))
-            return Fail("usage: laplace beta-probe [model-dir] [sampleRows] [topK]\n" +
-                        "  set $LAPLACE_TINYLLAMA_DIR or pass a model dir; none resolved.");
+            return Fail("usage: laplace beta-probe [qk|ffn] [sampleRows] [topK]\n" +
+                        "  set $LAPLACE_TINYLLAMA_DIR; none resolved.");
         int sampleRows = rest.Length > 1 && int.TryParse(rest[1], out var s) ? s : 256;
         int topK       = rest.Length > 2 && int.TryParse(rest[2], out var k) ? k : 32;
-        BetaProbe.Run(modelDir, sampleRows, topK);
+        BetaProbe.Run(modelDir, circuit, sampleRows, topK);
         return 0;
     }
 

@@ -64,3 +64,27 @@ int bilinear_edges_tile(
     return -2;   /* MKL required for the exact dgemm contraction */
 #endif
 }
+
+extern "C"
+int project_embedding(const float* pts, std::size_t n, std::size_t d,
+                      const float* W, std::size_t r, double* out)
+{
+    if (!pts || !W || !out || n == 0 || d == 0 || r == 0) return -1;
+#ifdef LAPLACE_HAS_MKL
+    /* Promote to f64 for an exact contraction (f32 weights carry no more). */
+    std::vector<double> P((std::size_t)n * d), Wd((std::size_t)r * d);
+    for (std::size_t i = 0; i < (std::size_t)n * d; ++i) P[i]  = (double)pts[i];
+    for (std::size_t i = 0; i < (std::size_t)r * d; ++i) Wd[i] = (double)W[i];
+
+    /* out [n × r] = P [n × d] · Wdᵀ [d × r]. */
+    cblas_dgemm(
+        CblasRowMajor, CblasNoTrans, CblasTrans,
+        (MKL_INT)n, (MKL_INT)r, (MKL_INT)d,
+        1.0, P.data(), (MKL_INT)d, Wd.data(), (MKL_INT)d,
+        0.0, out, (MKL_INT)r);
+    return 0;
+#else
+    (void)pts; (void)W; (void)out;
+    return -2;
+#endif
+}
