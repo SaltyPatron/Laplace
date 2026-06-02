@@ -153,26 +153,16 @@ public sealed class WeightTensorETL
         string unembName  = geo.UnembeddingName ?? embedName;
         float[] E   = LoadRawBF16AsF32(refMap, embedName, (long)vocab * dModel);
         float[] E_U = unembName != embedName ? LoadRawBF16AsF32(refMap, unembName, (long)vocab * dModel) : E;
-        int[] addrIn  = BuildAddressBook(E,   vocab, dModel, tokById, requireContentCoord: true);
-        int[] addrOut = ReferenceEquals(E_U, E) ? addrIn
-                      : BuildAddressBook(E_U, vocab, dModel, tokById, requireContentCoord: false);
-
-        // Floor is detected PER TENSOR by the model inspector (engine detect_energy_floor):
-        // the energy-retention floor from each tensor's OWN magnitude distribution — keep the
-        // high-energy (lottery-ticket) subnetwork, drop the noise tail; model-agnostic, no
-        // hardcoded value. LAPLACE_CIRCUIT_ENERGY (default 0.99) = retain target;
-        // LAPLACE_CIRCUIT_FLOOR, if set, is an absolute override (0 = keep all). Above the
-        // floor everything is ranked by μ, never pre-judged.
-        double energy = 0.99;
-        if (double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_CIRCUIT_ENERGY"),
+        // β — the ONE coherence-floor calibration (× the per-circuit arena scale M).
+        // θ = β·M is the materialize cut: |m| > θ is SIGNAL (a win/loss that moves consensus μ);
+        // |m| ≲ θ is a DRAW, skipped natively (no win/loss). NOT energy %, NOT top-k, NOT argmax.
+        double beta = 1.0;
+        if (double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_CIRCUIT_BETA"),
                 System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var en) && en > 0 && en <= 1)
-            energy = en;
-        bool floorOverride = double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_CIRCUIT_FLOOR"),
-                System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var ff) && ff >= 0;
+                System.Globalization.CultureInfo.InvariantCulture, out var bv) && bv > 0)
+            beta = bv;
+        Func<int, Hash128?> tokEnt = i => tokById[i]?.EntityId;
 
-        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var counters = new long[2];   // [0]=memories, [1]=relations
 
@@ -204,18 +194,10 @@ public sealed class WeightTensorETL
             }
             yield return wb.Build();
         }
-        _log.LogInformation("phase=circuits: {N} circuits detected (generic, shape-based); address book built ({Ms} ms)",
-            geo.Circuits.Count, sw.ElapsedMilliseconds);
+        _log.LogInformation("phase=circuits: {N} circuits detected (generic, shape-based); β={Beta} ({Ms} ms)",
+            geo.Circuits.Count, beta, sw.ElapsedMilliseconds);
 
-        var keyMap = new Dictionary<Hash128, (LlamaTokenizerParser.TokenRecord rec, double mag)>(128);
-        var valMap = new Dictionary<Hash128, (LlamaTokenizerParser.TokenRecord rec, double mag)>(128);
-        var keys   = new List<(NgramTrajectory.Constituent c, double mag, byte tier)>(128);
-        // Per-WITNESS client-side fold: distinct n-gram entities + relations folded by identity,
-        // counting occurrences as Glicko games (observation_count). One folded change per witness
-        // → no duplicate rows written, the DB never parses a dup flood. Cross-witness fold is the
-        // consensus layer's job.
-        var entMap = new Dictionary<Hash128, (EntityRow e, PhysicalityRow p)>(512);
-        var relMap = new Dictionary<Hash128, (AttestationRow row, long count)>(2048);
+        const double modelTrust = 0.50;   // SourceTrust.AiModelProbe; kind_rank from the registry
 
         foreach (var circ in geo.Circuits)
         {
@@ -223,49 +205,61 @@ public sealed class WeightTensorETL
             var encRef = refMap[circ.Encode]; var decRef = refMap[circ.Decode];
             float[] enc = LoadRawBF16AsF32(refMap, circ.Encode, (long)encRef.Shape[0] * encRef.Shape[1]);
             float[] dec = LoadRawBF16AsF32(refMap, circ.Decode, (long)decRef.Shape[0] * decRef.Shape[1]);
-            double keyFloor = floorOverride ? ff : DetectFloor(enc, energy);
-            double valFloor = floorOverride ? ff : DetectFloor(dec, energy);
-            double mScale   = MeasureRms(dec);   // measured arena scale M for ½(1+tanh(signed_m/M))
-            Hash128 kind = circ.Kind switch {
-                ModelGeometry.CircuitKind.QK => _kinds.Attends,
-                ModelGeometry.CircuitKind.OV => _kinds.OvRelates,
-                _                            => _kinds.CompletesTo };
+
+            var form = circ.Kind switch {
+                ModelGeometry.CircuitKind.QK => ModelCircuitEdges.CircuitForm.Qk,
+                ModelGeometry.CircuitKind.OV => ModelCircuitEdges.CircuitForm.Ov,
+                _                            => ModelCircuitEdges.CircuitForm.Ffn };
+            string kindName = circ.Kind switch {
+                ModelGeometry.CircuitKind.QK => "ATTENDS",
+                ModelGeometry.CircuitKind.OV => "OV_RELATES",
+                _                            => "COMPLETES_TO" };
+
+            // Factor the circuit to its low-rank operands (the projections). The only magnitude
+            // cut so far is the bf16 the weights already carry; M = encProj·decProjᵀ is contracted
+            // per row tile, never materialized dense over the vocab.
+            var (encProj, rEnc, decProj, rDec) = ModelCircuitEdges.ProjectCircuit(
+                form, enc, encRef.Shape[0], dec, decRef.Shape[0], decRef.Shape[1], E, E_U, vocab, dModel);
 
             if (circ.Kind == ModelGeometry.CircuitKind.FFN)
             {
-                Hash128 wit = WitnessId(_sourceId, circ.Layer, -1, circ.Expert);
-                entMap.Clear(); relMap.Clear();
-                for (int i = 0; i < interm; i++)
-                    AccumulateUnit(enc, encRef.Shape, i, dec, decRef.Shape, i, addrIn, addrOut,
-                        keyFloor, valFloor, mScale, kind, wit, dModel, tokById, keyMap, valMap, keys, entMap, relMap, nowUs, counters);
-                var chg = BuildWitnessChange(entMap, relMap);
-                if (chg is not null) { yield return chg; await Task.Yield(); }
+                double m = ModelCircuitEdges.ArenaScale(encProj, decProj, vocab, rEnc);
+                if (m > 0.0)
+                {
+                    Hash128 wit = WitnessId(_sourceId, circ.Layer, -1, circ.Expert);
+                    var bldr = new SubstrateChangeBuilder(_sourceId, $"circuit/L{circ.Layer}/ffn", null,
+                        entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 1 << 16);
+                    counters[1] += ModelCircuitEdges.Emit(encProj, decProj, vocab, rEnc, kindName,
+                        m, beta * m, modelTrust, tokEnt, _sourceId, wit, bldr);
+                    var chg = bldr.Build();
+                    if (chg.Attestations.Length > 0) { yield return chg; await Task.Yield(); }
+                }
             }
-            else  // attention: one witness per (layer, head); fold its headDim units
+            else  // attention: one witness per (layer, head); contract that head's [V×headDim] operator
             {
                 for (int h = 0; h < nHeads; h++)
                 {
-                    Hash128 wit = WitnessId(_sourceId, circ.Layer, h, circ.Expert);
+                    ct.ThrowIfCancellationRequested();
                     int kvHead = h / qPerKv;
-                    entMap.Clear(); relMap.Clear();
-                    for (int d = 0; d < headDim; d++)
-                    {
-                        int encUnit, decUnit;
-                        if (circ.Kind == ModelGeometry.CircuitKind.QK) { encUnit = h * headDim + d; decUnit = kvHead * headDim + d; }
-                        else                                           { encUnit = kvHead * headDim + d; decUnit = h * headDim + d; }
-                        AccumulateUnit(enc, encRef.Shape, encUnit, dec, decRef.Shape, decUnit, addrIn, addrOut,
-                            keyFloor, valFloor, mScale, kind, wit, dModel, tokById, keyMap, valMap, keys, entMap, relMap, nowUs, counters);
-                    }
-                    var chg = BuildWitnessChange(entMap, relMap);
-                    if (chg is not null) { yield return chg; await Task.Yield(); }
+                    int encHead = circ.Kind == ModelGeometry.CircuitKind.QK ? h : kvHead;  // QK: Q has nHeads; OV: V has nKv
+                    int decHead = circ.Kind == ModelGeometry.CircuitKind.QK ? kvHead : h;  // QK: K has nKv; OV: O has nHeads
+                    double[] left  = ModelCircuitEdges.SliceHead(encProj, vocab, rEnc, encHead, headDim);
+                    double[] right = ModelCircuitEdges.SliceHead(decProj, vocab, rDec, decHead, headDim);
+                    double m = ModelCircuitEdges.ArenaScale(left, right, vocab, headDim);
+                    if (m <= 0.0) continue;
+                    Hash128 wit = WitnessId(_sourceId, circ.Layer, h, circ.Expert);
+                    var bldr = new SubstrateChangeBuilder(_sourceId, $"circuit/L{circ.Layer}/{kindName}/h{h}", null,
+                        entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 1 << 16);
+                    counters[1] += ModelCircuitEdges.Emit(left, right, vocab, headDim, kindName,
+                        m, beta * m, modelTrust, tokEnt, _sourceId, wit, bldr);
+                    var chg = bldr.Build();
+                    if (chg.Attestations.Length > 0) { yield return chg; await Task.Yield(); }
                 }
             }
-            _log.LogInformation("phase=circuits L{Layer} {Kind} (keyFloor={Kf:E2} valFloor={Vf:E2}): "
-                + "{Mem:N0} memories, {Rel:N0} relations, wall {Ms} ms",
-                circ.Layer, circ.Kind, keyFloor, valFloor, counters[0], counters[1], sw.ElapsedMilliseconds);
+            _log.LogInformation("phase=circuits L{Layer} {Kind}: {Rel:N0} edges (cum), wall {Ms} ms",
+                circ.Layer, circ.Kind, counters[1], sw.ElapsedMilliseconds);
         }
-        _log.LogInformation("phase=circuits done: {Mem:N0} memories, {Rel:N0} relations, {Ms} ms",
-            counters[0], counters[1], sw.ElapsedMilliseconds);
+        _log.LogInformation("phase=circuits done: {Rel:N0} edges, {Ms} ms", counters[1], sw.ElapsedMilliseconds);
     }
 
     /* Per-tensor model-inspector floor: the engine's energy-retention detector over this tensor's
