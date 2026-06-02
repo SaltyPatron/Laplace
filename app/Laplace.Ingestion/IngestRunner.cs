@@ -350,6 +350,17 @@ public sealed class IngestRunner
                 Interlocked.Add(ref counters._attestationsInserted,   apply.AttestationsInserted);
                 Interlocked.Add(ref counters._roundTrips,             apply.RoundTrips);
 
+                // Per-batch observability: where the time actually goes (write vs decompose).
+                // Slow batches ⇒ write-bound (existence/COPY/INSERT); fast batches with gaps
+                // between them ⇒ decompose-bound. Uses what ApplyManyAsync already returns.
+                long batchRows = (long)apply.EntitiesAttempted + apply.PhysicalitiesAttempted + apply.AttestationsAttempted;
+                double secs = Math.Max(1e-3, apply.WallClock.TotalSeconds);
+                log.LogInformation(
+                    "batch: {Intents} intents / {Rows} rows → {Ent}e+{Phys}p+{Att}a new in {Ms:N0}ms "
+                    + "({Rps:N0} rows/s, {RT} round-trips)",
+                    batch.Count, batchRows, apply.EntitiesInserted, apply.PhysicalitiesInserted,
+                    apply.AttestationsInserted, apply.WallClock.TotalMilliseconds, batchRows / secs, apply.RoundTrips);
+
                 _obs.OnIntentApplied(decomposer.SourceName, apply);
                 options.Progress?.Report(MakeProgress(counters));
                 return;

@@ -790,13 +790,68 @@ EOF
     while [ $tries -lt 30 ]; do
         if [ -S "$LAPLACE_PG_SOCKET_DIR/.s.PGSQL.$LAPLACE_PG_PORT" ]; then
             green "✓ Substrate cluster accepting connections on $LAPLACE_PG_SOCKET_DIR/.s.PGSQL.$LAPLACE_PG_PORT"
-            return 0
+            validate_pg_tuning
+            return $?
         fi
         sleep 1
         tries=$((tries + 1))
     done
     red "✗ Substrate cluster failed to come up — check journalctl -u $LAPLACE_PG_SERVICE"
     return 1
+}
+
+# Assert the managed performance tuning is actually LIVE after the (re)start, so bootstrap
+# never reports success on an untuned cluster. Catches exactly what bit us: config edited
+# but never applied (no restart), a stale postgresql.auto.conf overriding postgresql.conf,
+# or the wrong cluster. Memory values are compared by BYTES so unit formatting (32GB vs
+# 32768MB) can't false-fail; the catch-all asserts nothing is left pending_restart.
+validate_pg_tuning() {
+    say "Validate cluster tuning is live (post-restart)"
+    local vbad=0 nm live ok pend
+    while IFS='|' read -r nm live ok pend; do
+        [ -z "$nm" ] && continue
+        if [ "$ok" != "t" ]; then
+            red "  ✗ $nm = '$live' (not the expected tuned value)"; vbad=1
+        elif [ "$pend" = "t" ]; then
+            red "  ✗ $nm pending_restart — the cluster was not fully restarted"; vbad=1
+        else
+            green "  ✓ $nm = $live"
+        fi
+    done < <(sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
+        -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" -d postgres -U laplace_admin -tAF'|' 2>/dev/null <<'PG_EOF'
+WITH want(name, expected, mode) AS (VALUES
+  ('shared_buffers','32GB','mem'), ('effective_cache_size','96GB','mem'),
+  ('maintenance_work_mem','8GB','mem'), ('work_mem','256MB','mem'),
+  ('max_wal_size','32GB','mem'), ('min_wal_size','2GB','mem'), ('wal_buffers','64MB','mem'),
+  ('synchronous_commit','off','eq'), ('checkpoint_timeout','30min','eq'),
+  ('wal_compression','on','enabled'), ('max_parallel_maintenance_workers','4','eq'),
+  ('effective_io_concurrency','200','eq'), ('huge_pages','try','eq'))
+-- 'mem' compares by bytes (unit formatting can't false-fail); 'enabled' = any non-off
+-- value (wal_compression 'on' resolves to the default method 'pglz'); 'eq' = literal.
+SELECT w.name, current_setting(w.name),
+       CASE w.mode
+         WHEN 'mem'     THEN pg_size_bytes(current_setting(w.name)) = pg_size_bytes(w.expected)
+         WHEN 'enabled' THEN current_setting(w.name) <> 'off'
+         ELSE current_setting(w.name) = w.expected END,
+       s.pending_restart
+FROM want w JOIN pg_settings s ON s.name = w.name
+ORDER BY w.name;
+PG_EOF
+)
+    local npend
+    npend=$(sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
+        -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" -d postgres -U laplace_admin -tAc \
+        "SELECT count(*) FROM pg_settings WHERE pending_restart" 2>/dev/null)
+    if [ "${npend:-1}" != "0" ]; then
+        red "  ✗ ${npend:-?} setting(s) pending_restart — cluster not fully restarted"; vbad=1
+    fi
+    if [ "$vbad" -ne 0 ]; then
+        red "✗ Tuning NOT fully live — likely a stale postgresql.auto.conf override or no restart."
+        red "   Inspect: psql -d postgres -U laplace_admin -c \"SELECT name,setting,source,pending_restart FROM pg_settings WHERE source NOT IN ('default','override')\""
+        return 1
+    fi
+    green "✓ Cluster tuning validated live (expected values applied; nothing pending_restart)"
+    return 0
 }
 
 bootstrap_pg_roles() {

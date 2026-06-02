@@ -1429,9 +1429,21 @@ internal static class Program
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         var writer = new NpgsqlSubstrateWriter(ds);
         var reader = new NpgsqlSubstrateReader(ds);
-        var runner = new IngestRunner(writer, reader);
+        var runner = new IngestRunner(writer, reader, ConsoleLoggerProvider.Factory());
 
-        Console.WriteLine($"ingest {dec.SourceName} via IngestRunner → {ConnString} ...");
+        // Batched-COPY throughput path — the SAME knobs `ingest model` already uses.
+        // The legacy default (BatchSize=1, CommitRows=0) made IngestRunner run
+        // ProcessOneIntentAsync per intent: a connection-open + CREATE TEMP + COPY +
+        // INSERT + commit for EVERY intent. That per-transaction round-trip — NOT index
+        // maintenance (Postgres inserts ~40k rows/s WITH the GIST) — is the row-by-row
+        // floor. CommitRows coalesces intents into ~100k-row transactions: one bulk COPY
+        // per table per batch. Serial (workers=1) keeps the entity→attestation FK order.
+        int batchSize  = EnvInt("LAPLACE_INGEST_BATCH",       1024,    min: 1);
+        int commitRows = EnvInt("LAPLACE_INGEST_COMMIT_ROWS", 100_000, min: 0);
+        int workers    = EnvInt("LAPLACE_INGEST_WORKERS",     1,       min: 1);
+        Console.WriteLine(
+            $"ingest {dec.SourceName} via IngestRunner → {ConnString} "
+            + $"(workers={workers}, batch={batchSize}, commitRows={commitRows:N0}) ...");
         var since = DateTimeOffset.UtcNow;   // per-ingest-period window for incremental consensus
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(
@@ -1440,6 +1452,9 @@ internal static class Program
             {
                 SkipLayerOrderingCheck = skipLayerCheck,
                 EcosystemPath = ecosystemPath,
+                BatchSize = batchSize,
+                CommitRows = commitRows,
+                ParallelWorkers = workers,
             },
             CancellationToken.None);
         sw.Stop();
