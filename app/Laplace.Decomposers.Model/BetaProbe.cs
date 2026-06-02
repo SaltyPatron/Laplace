@@ -153,33 +153,41 @@ public static class BetaProbe
             }
         }
 
-        var flat = new double[count];
-        for (long i = 0; i < count; i++) flat[i] = Math.Abs(vals[i]);
-        Array.Sort(flat);
-        double Pct(double p) => flat[Math.Clamp((long)(p / 100.0 * (count - 1)), 0, count - 1)];
-        double[] thetas = { 0.0, Pct(50), Pct(90), Pct(99), Pct(99.9), Pct(99.99) };
-        double[] pctLbl = { 0, 50, 90, 99, 99.9, 99.99 };
-
-        Console.WriteLine($"  |M| range: min>0≈{flat[0]:E3}  p50={Pct(50):E3}  p99={Pct(99):E3}  max={flat[count-1]:E3}");
-        Console.WriteLine("  θ(|M| pct) │ edges/subj p50 │ p99 │ max │ recall@K");
-        for (int ti = 0; ti < thetas.Length; ti++)
+        // Arena scale M = RMS of |M| over the sample (the §10 tanh scale): an edge is
+        // SIGNAL (a win/loss that moves μ) when |m| ≳ M, a DRAW (no win/loss, skip — not
+        // an a-priori amount) when |m| ≪ M. The materialize cut is θ relative to M.
+        double sumsq = 0.0;
+        for (long i = 0; i < count; i++) { double a = Math.Abs(vals[i]); sumsq += a * a; }
+        double mRms = Math.Sqrt(sumsq / count);
+        Console.WriteLine($"  arena scale M (RMS|M|) = {mRms:E3}");
+        Console.WriteLine("  θ      │ edges/subj p50 │ p99 │ max │ strong-subj │ recall@K (strong subjects only)");
+        double[] mult = { 0.0, 1.0, 2.0, 3.0 };
+        string[] lbl  = { "0", "M", "2M", "3M" };
+        for (int ti = 0; ti < mult.Length; ti++)
         {
-            double theta = thetas[ti];
+            double theta = mult[ti] * mRms;
             var kept = new int[S];
-            double recallSum = 0.0;
+            int strongSubjects = 0; double recallStrongSum = 0.0;
             for (int rr = 0; rr < S; rr++)
             {
                 double[] a = perRowAbs[rr];
                 int nAbove = UpperCountAbove(a, theta);
                 kept[rr] = nAbove;
-                int k = Math.Min(topK, a.Length);
-                recallSum += k == 0 ? 1.0 : (double)Math.Min(k, nAbove) / k;
+                // A subject has real (non-draw) retrieval iff its TOP neighbour is signal.
+                if (a.Length > 0 && a[0] > theta)
+                {
+                    strongSubjects++;
+                    int k = Math.Min(topK, a.Length);
+                    recallStrongSum += (double)Math.Min(k, nAbove) / k;
+                }
             }
             Array.Sort(kept);
             int p50 = kept[(int)(0.50 * (S - 1))], p99 = kept[(int)(0.99 * (S - 1))], mx = kept[S - 1];
-            Console.WriteLine($"  {pctLbl[ti],6:0.##}%   │ {p50,12:N0} │ {p99,6:N0} │ {mx,6:N0} │ {recallSum / S:P2}");
+            string recall = strongSubjects > 0 ? (recallStrongSum / strongSubjects).ToString("P2") : "n/a";
+            Console.WriteLine($"  {lbl[ti],-5} │ {p50,12:N0} │ {p99,6:N0} │ {mx,6:N0} │ {strongSubjects,5}/{S} │ {recall}");
         }
-        Console.WriteLine("  → SPARSE iff a θ holds recall@K ≥ β at a bounded edges/subject; else DIFFUSE (factored-operator surface).");
+        Console.WriteLine("  → MATERIALIZE the strong tail: signal edges (|m| ≳ M) per subject are bounded;");
+        Console.WriteLine("    draws (|m| ≪ M) are skipped natively (no win/loss). Diffuse = large-but-bounded balloon, not infeasible.");
     }
 
     private static int UpperCountAbove(double[] descSorted, double theta)
