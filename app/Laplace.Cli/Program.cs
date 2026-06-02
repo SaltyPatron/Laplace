@@ -75,6 +75,7 @@ internal static class Program
                 + "  roundtrip <file> [out]\n"
                 + "  db-roundtrip <file>\n"
                 + "  qk-bench <model-dir>             (profile the QK kernel on real weights; no DB)\n"
+                + "  svd-exact-bench [model-dir] [tensor]  (prove tensor_svd_truncate is fp-exact on a real tensor; no DB)\n"
                 + "  stats");
             return 2;
         }
@@ -92,6 +93,7 @@ internal static class Program
                 "stats"        => await StatsAsync(),
                 "rebuild-consensus" => await RebuildConsensusAsync(),
                 "qk-bench"     => QkBenchCmd(args.Length > 1 ? args[1] : ""),
+                "svd-exact-bench" => SvdExactBenchCmd(args[1..]),
                 _ => Fail($"unknown command '{args[0]}'"),
             };
         }
@@ -129,6 +131,48 @@ internal static class Program
             return Fail($"usage: laplace qk-bench <model-dir>  (not found: '{modelDir}')");
         QkBench.Run(modelDir);
         return 0;
+    }
+
+    // === svd-exact-bench: prove tensor_svd_truncate factors a REAL tensor fp-exactly (no DB) ===
+    // Plan gate G2.1. Model dir resolves by convention when omitted: $LAPLACE_TINYLLAMA_DIR,
+    // else the newest models--TinyLlama--* snapshot under /vault/models.
+    private static int SvdExactBenchCmd(string[] rest)
+    {
+        string modelDir = rest.Length > 0 && !string.IsNullOrEmpty(rest[0])
+            ? rest[0]
+            : ResolveTinyLlamaDir();
+        string? tensor = rest.Length > 1 ? rest[1] : null;
+
+        if (string.IsNullOrEmpty(modelDir) || !Directory.Exists(modelDir))
+            return Fail("usage: laplace svd-exact-bench [model-dir] [tensor]\n" +
+                        "  set $LAPLACE_TINYLLAMA_DIR or pass a model dir; none resolved.");
+
+        bool pass = SvdExactBench.Run(modelDir, tensor);
+        return pass ? 0 : 1;
+    }
+
+    // Discover a TinyLlama model dir by convention (no hardcoded snapshot SHA):
+    // $LAPLACE_TINYLLAMA_DIR if set, else the newest models--TinyLlama--*/snapshots/* under /vault/models.
+    private static string ResolveTinyLlamaDir()
+    {
+        var env = Environment.GetEnvironmentVariable("LAPLACE_TINYLLAMA_DIR");
+        if (!string.IsNullOrEmpty(env)) return env;
+
+        const string root = "/vault/models";
+        if (!Directory.Exists(root)) return "";
+        var families = Directory.GetDirectories(root, "models--TinyLlama--*");
+        foreach (var fam in families.OrderBy(f => f, StringComparer.Ordinal))
+        {
+            var snapsDir = Path.Combine(fam, "snapshots");
+            if (!Directory.Exists(snapsDir)) continue;
+            // Newest snapshot by write time; must contain a safetensors shard.
+            foreach (var snap in Directory.GetDirectories(snapsDir)
+                                          .OrderByDescending(Directory.GetLastWriteTimeUtc))
+            {
+                if (Directory.GetFiles(snap, "*.safetensors").Length > 0) return snap;
+            }
+        }
+        return "";
     }
 
     // === db-roundtrip: store content in the substrate, reconstruct FROM the DB ===
