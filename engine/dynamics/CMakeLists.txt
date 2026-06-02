@@ -16,6 +16,7 @@ set(LAPLACE_DYNAMICS_HEADERS
     include/laplace/dynamics/gram_schmidt.h
     include/laplace/dynamics/sparsity.h
     include/laplace/dynamics/circuit_extract.h
+    include/laplace/dynamics/bilinear_edges.h
 )
 
 set(LAPLACE_DYNAMICS_SOURCES
@@ -25,6 +26,7 @@ set(LAPLACE_DYNAMICS_SOURCES
     src/gram_schmidt.cpp
     src/sparsity.cpp
     src/circuit_extract.cpp
+    src/bilinear_edges.cpp
 )
 
 add_library(laplace_dynamics SHARED ${LAPLACE_DYNAMICS_SOURCES})

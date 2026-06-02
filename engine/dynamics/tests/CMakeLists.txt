@@ -9,6 +9,7 @@ set(LAPLACE_DYNAMICS_TEST_SOURCES
     test_eigenmaps.cpp
     test_gram_schmidt.cpp
     test_sparsity.cpp
+    test_bilinear_edges.cpp
 )
 
 add_executable(laplace_dynamics_tests ${LAPLACE_DYNAMICS_TEST_SOURCES})
