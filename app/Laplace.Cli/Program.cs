@@ -94,6 +94,7 @@ internal static class Program
                 "rebuild-consensus" => await RebuildConsensusAsync(),
                 "qk-bench"     => QkBenchCmd(args.Length > 1 ? args[1] : ""),
                 "svd-exact-bench" => SvdExactBenchCmd(args[1..]),
+                "beta-probe"   => BetaProbeCmd(args[1..]),
                 _ => Fail($"unknown command '{args[0]}'"),
             };
         }
@@ -149,6 +150,19 @@ internal static class Program
 
         bool pass = SvdExactBench.Run(modelDir, tensor);
         return pass ? 0 : 1;
+    }
+
+    // === beta-probe: measure coherence-floor cardinality vs retrieval fidelity (G2.0, no DB) ===
+    private static int BetaProbeCmd(string[] rest)
+    {
+        string modelDir = rest.Length > 0 && !string.IsNullOrEmpty(rest[0]) ? rest[0] : ResolveTinyLlamaDir();
+        if (string.IsNullOrEmpty(modelDir) || !Directory.Exists(modelDir))
+            return Fail("usage: laplace beta-probe [model-dir] [sampleRows] [topK]\n" +
+                        "  set $LAPLACE_TINYLLAMA_DIR or pass a model dir; none resolved.");
+        int sampleRows = rest.Length > 1 && int.TryParse(rest[1], out var s) ? s : 256;
+        int topK       = rest.Length > 2 && int.TryParse(rest[2], out var k) ? k : 32;
+        BetaProbe.Run(modelDir, sampleRows, topK);
+        return 0;
     }
 
     // Discover a TinyLlama model dir by convention (no hardcoded snapshot SHA):
