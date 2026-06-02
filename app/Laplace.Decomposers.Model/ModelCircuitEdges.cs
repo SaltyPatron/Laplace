@@ -13,13 +13,14 @@ namespace Laplace.Decomposers.Model;
 /// emits one Glicko observation per SIGNAL edge — a content×content relation
 /// token_i →(kind) token_j with the SIGNED coupling m.
 ///
-/// The contraction already sums the hidden units, so this is token→token
-/// directly (no per-unit n-gram, no address book). The ONLY cut is the coherence
-/// threshold θ = β·M (M = the §10 arena scale): |m| &gt; θ is SIGNAL (a win/loss
-/// that moves consensus μ); |m| ≲ θ is a DRAW (tanh(m/M) ≈ ½, no win/loss) and is
-/// skipped natively — never argmax, never top-k, never an a-priori amount. Score =
-/// ½(1 + tanh(m/M)) via <see cref="KindRegistry.AttestWeighted"/> (canonical kind
-/// id + kind_rank × source_trust → opponent φ). Self-edges (i = j) are skipped.
+/// The contraction already sums the hidden units, so this is token→token directly
+/// (no per-unit n-gram, no address book). The ONLY cut is the coherence threshold θ
+/// (≥ M = the §10 arena scale), derived per circuit by <see cref="DeriveTheta"/> from
+/// one global retrieval-fidelity budget: |m| &gt; θ is SIGNAL (a win/loss that moves
+/// consensus μ); |m| ≲ M is a DRAW (tanh(m/M) ≈ ½, no win/loss) skipped natively —
+/// never argmax, never top-k, never an a-priori amount. Score = ½(1 + tanh(m/M)) via
+/// <see cref="KindRegistry.AttestWeighted"/> (canonical kind id + kind_rank ×
+/// source_trust → opponent φ). Self-edges (i = j) are skipped.
 /// </summary>
 public static class ModelCircuitEdges
 {
@@ -133,29 +134,104 @@ public static class ModelCircuitEdges
         return t;
     }
 
-    /// <summary>RMS of the contracted operator magnitudes over a row sample — the
-    /// §10 arena scale M used both for the score (tanh(m/M)) and to set θ = β·M.
-    /// Computed from the same engine contraction, so it is exact and deterministic.</summary>
-    public static double ArenaScale(double[] left, double[] right, int vocab, int r, int sampleRows = 256)
+    /// <summary>
+    /// Calibrate ONE arena (kind) — its magnitude scale M and coherence floor θ — pooled
+    /// across a bounded sample of the arena's witness sub-operators. An arena is a KIND
+    /// (ATTENDS / OV_RELATES / COMPLETES_TO), not a circuit: every head/layer/expert is a
+    /// WITNESS into the same arena, so they must share ONE scale. Scoring each witness by
+    /// its OWN scale would self-normalize it (the banned per-witness magnitude reduction)
+    /// and collapse cross-witness consensus. M and θ are therefore frozen per arena and
+    /// reused for every edge of the kind (frame-invariant; <see cref="AttestationFactory"/>
+    /// scores ½(1+tanh(m/M)) and the doc names M "the per-arena scale").
+    ///
+    /// M = RMS|m| over the pooled (θ=0) contraction of the samples. θ (settled decision
+    /// #1(b)) = the LARGEST floor ≥ M whose kept edges still reproduce each signal subject's
+    /// top-K ranked retrieval at mean recall ≥ <paramref name="recallBudget"/> over the
+    /// pooled sample — you fix the fidelity KEPT, the data fixes the cut (never energy %,
+    /// surviveFrac, or top-k). |m| &lt; M is a DRAW (tanh≈½), skipped natively. Returns
+    /// (M, θ, achieved recall); recall &lt; budget ⇒ the arena is diffuse and fell back to
+    /// the M floor. Calibration only: bounded sample, never a per-cell loop over the vocab.
+    /// </summary>
+    public static (double arenaScale, double theta, double recall) CalibrateArena(
+        IReadOnlyList<(double[] left, double[] right, int r)> samples, int vocab,
+        double recallBudget, int topK = 32, int sampleRows = 256, int maxMultiple = 8, int stepsPerM = 4)
     {
+        if (recallBudget <= 0.0 || recallBudget > 1.0)
+            throw new ArgumentOutOfRangeException(nameof(recallBudget), "fidelity budget must be in (0,1]");
+        if (samples is null || samples.Count == 0 || vocab <= 0) return (0.0, 0.0, 1.0);
+
         int S = Math.Min(sampleRows, vocab);
+        var pooledRows = new List<double[]>(samples.Count * S);   // per-subject descending |m|, pooled across witnesses
+        double sumsq = 0.0; long total = 0;
+
         long cap = (long)S * vocab;
         var rows = new int[cap]; var cols = new int[cap]; var vals = new double[cap];
-        long cnt;
-        unsafe
+        foreach (var (left, right, r) in samples)
         {
-            fixed (double* lp = left) fixed (double* rp = right)
-            fixed (int* orr = rows) fixed (int* occ = cols) fixed (double* ovv = vals)
+            if (left is null || right is null || r <= 0) continue;
+            long cnt;
+            unsafe
             {
-                nuint c; int ov;
-                int rc = DynInterop.BilinearEdgesTile(lp, 0, (nuint)S, rp, (nuint)vocab, (nuint)r, 0.0,
-                                                      orr, occ, ovv, (nuint)cap, &c, &ov);
-                if (rc != 0) throw new InvalidOperationException($"bilinear_edges_tile rc={rc}");
-                cnt = (long)c;
+                fixed (double* lp = left) fixed (double* rp = right)
+                fixed (int* orr = rows) fixed (int* occ = cols) fixed (double* ovv = vals)
+                {
+                    nuint c; int ov;
+                    int rc = DynInterop.BilinearEdgesTile(lp, 0, (nuint)S, rp, (nuint)vocab, (nuint)r, 0.0,
+                                                          orr, occ, ovv, (nuint)cap, &c, &ov);
+                    if (rc != 0) throw new InvalidOperationException($"bilinear_edges_tile rc={rc}");
+                    cnt = (long)c;
+                }
+            }
+            for (long e = 0; e < cnt; e++) { double a = Math.Abs(vals[e]); sumsq += a * a; }
+            total += cnt;
+            long ee = 0;
+            for (int rr = 0; rr < S; rr++)
+            {
+                long start = ee;
+                while (ee < cnt && rows[ee] == rr) ee++;
+                var a = new double[ee - start];
+                for (long i = start; i < ee; i++) a[i - start] = Math.Abs(vals[i]);
+                Array.Sort(a); Array.Reverse(a);
+                pooledRows.Add(a);
             }
         }
-        double sumsq = 0.0;
-        for (long e = 0; e < cnt; e++) sumsq += vals[e] * vals[e];
-        return cnt > 0 ? Math.Sqrt(sumsq / cnt) : 0.0;
+        if (total == 0) return (0.0, 0.0, 1.0);
+        double M = Math.Sqrt(sumsq / total);
+        if (M <= 0.0) return (0.0, 0.0, 1.0);
+
+        // Signal subjects: top coupling exceeds the arena scale (real retrieval, not all-draws).
+        bool anySignal = false;
+        foreach (var a in pooledRows) if (a.Length > 0 && a[0] > M) { anySignal = true; break; }
+        if (!anySignal) return (M, M, 1.0);   // nothing above the arena scale; floor at M
+
+        // Largest θ = c·M (c from maxMultiple down to 1) whose pooled recall meets the budget.
+        double recallAtM = 1.0;
+        for (int s = maxMultiple * stepsPerM; s >= stepsPerM; s--)
+        {
+            double c = (double)s / stepsPerM;
+            double theta = c * M;
+            double recSum = 0.0; int seen = 0;
+            foreach (var a in pooledRows)
+            {
+                if (a.Length == 0 || a[0] <= M) continue;       // not a signal subject
+                seen++;
+                int k = Math.Min(topK, a.Length);
+                int nAbove = CountAbove(a, theta);
+                recSum += (double)Math.Min(k, nAbove) / k;
+            }
+            double recall = seen > 0 ? recSum / seen : 0.0;
+            if (Math.Abs(c - 1.0) < 1e-12) recallAtM = recall;
+            if (recall >= recallBudget) return (M, theta, recall);
+        }
+        return (M, M, recallAtM);   // even the arena-scale floor misses the budget → floor at M
+    }
+
+    /// <summary>Count entries strictly greater than <paramref name="theta"/> in a
+    /// descending-sorted array (binary search for the boundary).</summary>
+    private static int CountAbove(double[] descSorted, double theta)
+    {
+        int lo = 0, hi = descSorted.Length;
+        while (lo < hi) { int mid = (lo + hi) >> 1; if (descSorted[mid] > theta) lo = mid + 1; else hi = mid; }
+        return lo;
     }
 }

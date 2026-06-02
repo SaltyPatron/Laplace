@@ -140,6 +140,40 @@ public class ModelCircuitEdgesTests
     }
 
     [Fact]
+    public void CalibrateArena_SharpFloatsAboveArena_DiffuseFloorsAtM_FidelityHeld()
+    {
+        // r=1 rank-1 operands: M[i,j] = left[i]·right[j]. left = all ones → every
+        // subject row equals |right|, so the retrieval structure is right's profile.
+        const int V = 64, r = 1, S = 8, K = 4;
+        var left = new double[S];
+        for (int i = 0; i < S; i++) left[i] = 1.0;
+
+        // SHARP: a graded strong top-K (10,8,6,4) over a tiny floor → a high θ still
+        // holds the top-K, so the budget lets θ float well above the arena scale M.
+        var sharp = new double[V];
+        for (int j = 0; j < V; j++) sharp[j] = j < K ? 10.0 - 2.0 * j : 0.01;
+        var sharpSamples = new (double[], double[], int)[] { (left, sharp, r) };
+        var shp = ModelCircuitEdges.CalibrateArena(sharpSamples, V, recallBudget: 0.9, topK: K, sampleRows: S);
+        Assert.True(shp.arenaScale > 0);
+        Assert.True(shp.theta >= shp.arenaScale, "θ must never floor below the arena scale M");
+        Assert.True(shp.theta > shp.arenaScale, $"a sharp arena must float θ above M, got θ={shp.theta} M={shp.arenaScale}");
+        Assert.True(shp.recall >= 0.9, $"the fidelity budget must be held, got {shp.recall:P1}");
+
+        // DIFFUSE: all couplings equal → nothing stands above the arena scale → floor at M
+        // (every cell is a draw at θ=M; none materializes a win/loss).
+        var diffuse = new double[V];
+        for (int j = 0; j < V; j++) diffuse[j] = 1.0;
+        var difSamples = new (double[], double[], int)[] { (left, diffuse, r) };
+        var dif = ModelCircuitEdges.CalibrateArena(difSamples, V, recallBudget: 0.9, topK: K, sampleRows: S);
+        Assert.Equal(dif.arenaScale, dif.theta, 12);               // floors exactly at the arena scale
+
+        // Monotone in the budget: a STRICTER fidelity keeps MORE → θ no higher than a looser one.
+        var loose  = ModelCircuitEdges.CalibrateArena(sharpSamples, V, 0.50, K, S);
+        var strict = ModelCircuitEdges.CalibrateArena(sharpSamples, V, 0.99, K, S);
+        Assert.True(strict.theta <= loose.theta, "stricter fidelity → lower-or-equal θ (keeps more)");
+    }
+
+    [Fact]
     public void Emit_HigherTheta_KeepsOnlyStronger()
     {
         double[] left  = { 2, 0,   0, 2,   1, 1 };
