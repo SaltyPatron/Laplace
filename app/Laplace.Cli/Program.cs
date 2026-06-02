@@ -485,46 +485,14 @@ internal static class Program
         //       safe because NpgsqlSubstrateWriter promotes via a TEMP staging
         //       table + INSERT … ON CONFLICT DO NOTHING, so overlapping novel
         //       ids across workers converge instead of throwing duplicate-key.
-        int batchSize  = EnvInt("LAPLACE_INGEST_BATCH",       1024,    min: 1);
-        int commitRows = EnvInt("LAPLACE_INGEST_COMMIT_ROWS", 100_000, min: 0);
-        // Serial writers by default: model attestations reference token entities emitted
-        // in EARLIER intents (the vocab phase), so parallel writers can commit a weight
-        // attestation before its subject entity → FK violation. The heavy compute is
-        // already multi-core inside the engine kernels (TBB); workers only parallelize
-        // DB writes. Safe parallel writes need an entity-phase barrier (follow-up);
-        // until then default 1. Override with LAPLACE_INGEST_WORKERS.
-        int workers   = EnvInt("LAPLACE_INGEST_WORKERS", 1, min: 1);
-        Console.WriteLine(
-            $"ingest model {modelDir} via IngestRunner → {ConnString} "
-            + $"(workers={workers}, batch={batchSize}, commitRows={commitRows:N0}) ...");
+        // Throughput knobs (env-tunable, documented above) + human-valued progress are
+        // built once in BuildIngestOptions — the SAME path the corpus decomposers use.
+        Console.WriteLine($"ingest model {modelDir} via IngestRunner → {ConnString} ...");
         var since = DateTimeOffset.UtcNow;   // per-ingest-period window for incremental consensus
         var sw = Stopwatch.StartNew();
-
-        // Throttled progress: one counter line per ~2s so a long run shows live
-        // applied-intents + rate without flooding the log.
-        long lastReportMs = 0;
-        var progress = new Progress<Laplace.Ingestion.IngestProgress>(p =>
-        {
-            long now = sw.ElapsedMilliseconds;
-            if (now - lastReportMs < 2000) return;
-            lastReportMs = now;
-            double rate = p.UnitsApplied / Math.Max(0.001, p.Elapsed.TotalSeconds);
-            Console.Error.WriteLine(
-                $"[progress] {p.UnitsApplied:N0} intents applied"
-                + (p.EstimatedTotal is { } tot ? $"/{tot:N0}" : "")
-                + $", {p.UnitsFailed:N0} failed, {rate:F0} intents/s, {p.Elapsed.TotalSeconds:F0}s");
-        });
-
         var result = await runner.RunAsync(
             dec,
-            IngestRunOptions.Default with
-            {
-                SkipLayerOrderingCheck = true,
-                BatchSize              = batchSize,
-                CommitRows             = commitRows,
-                ParallelWorkers        = workers,
-                Progress               = progress,
-            },
+            BuildIngestOptions(sw, dec.SourceName, skipLayerCheck: true, ecosystemPath: null),
             CancellationToken.None);
         sw.Stop();
 
@@ -1410,6 +1378,41 @@ internal static class Program
     private static async Task<int> IngestISO639Async()
         => await IngestViaRunnerAsync(new ISODecomposer(), "/vault/Data/ISO639", skipLayerCheck: false);
 
+    // ── one ingest path for EVERY decomposer ─────────────────────────────────
+    // A model is a witness/decomposer like UD or OMW (§3 omni-source), so there is no
+    // separate "model path": this builds the throughput knobs (env-tunable) + human-valued
+    // progress once, used by BOTH the corpus and model ingests. Progress reports what was
+    // actually RECORDED — entities/physicalities/attestations + rows/s — never "intents/s".
+    private static IngestRunOptions BuildIngestOptions(
+        Stopwatch sw, string sourceName, bool skipLayerCheck, string? ecosystemPath)
+    {
+        long lastMs = -10_000;
+        var progress = new Progress<Laplace.Ingestion.IngestProgress>(p =>
+        {
+            long now = sw.ElapsedMilliseconds;
+            if (now - lastMs < 2000) return;
+            lastMs = now;
+            double secs = Math.Max(0.001, p.Elapsed.TotalSeconds);
+            long rows = p.EntitiesInserted + p.PhysicalitiesInserted + p.AttestationsInserted;
+            Console.Error.WriteLine(
+                $"[{sourceName}] recorded {rows:N0} rows = {p.EntitiesInserted:N0} ent + "
+                + $"{p.PhysicalitiesInserted:N0} phys + {p.AttestationsInserted:N0} att "
+                + $"@ {rows / secs:N0} rows/s; {p.UnitsApplied:N0} intents"
+                + (p.EstimatedTotal is { } t && t > 0 ? $" (~{100.0 * p.UnitsApplied / t:F0}% of {t:N0})" : "")
+                + $"; {p.Elapsed.TotalSeconds:F0}s"
+                + (p.UnitsFailed > 0 ? $"; {p.UnitsFailed:N0} FAILED" : ""));
+        });
+        return IngestRunOptions.Default with
+        {
+            SkipLayerOrderingCheck = skipLayerCheck,
+            EcosystemPath          = ecosystemPath,
+            BatchSize              = EnvInt("LAPLACE_INGEST_BATCH",       1024,    min: 1),
+            CommitRows             = EnvInt("LAPLACE_INGEST_COMMIT_ROWS", 100_000, min: 0),
+            ParallelWorkers        = EnvInt("LAPLACE_INGEST_WORKERS",     1,       min: 1),
+            Progress               = progress,
+        };
+    }
+
     private static async Task<int> IngestViaRunnerAsync(
         IDecomposer dec, string ecosystemPath, bool skipLayerCheck)
     {
@@ -1431,31 +1434,17 @@ internal static class Program
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader, ConsoleLoggerProvider.Factory());
 
-        // Batched-COPY throughput path — the SAME knobs `ingest model` already uses.
-        // The legacy default (BatchSize=1, CommitRows=0) made IngestRunner run
-        // ProcessOneIntentAsync per intent: a connection-open + CREATE TEMP + COPY +
-        // INSERT + commit for EVERY intent. That per-transaction round-trip — NOT index
-        // maintenance (Postgres inserts ~40k rows/s WITH the GIST) — is the row-by-row
-        // floor. CommitRows coalesces intents into ~100k-row transactions: one bulk COPY
-        // per table per batch. Serial (workers=1) keeps the entity→attestation FK order.
-        int batchSize  = EnvInt("LAPLACE_INGEST_BATCH",       1024,    min: 1);
-        int commitRows = EnvInt("LAPLACE_INGEST_COMMIT_ROWS", 100_000, min: 0);
-        int workers    = EnvInt("LAPLACE_INGEST_WORKERS",     1,       min: 1);
-        Console.WriteLine(
-            $"ingest {dec.SourceName} via IngestRunner → {ConnString} "
-            + $"(workers={workers}, batch={batchSize}, commitRows={commitRows:N0}) ...");
+        // Throughput knobs + human-valued progress via the ONE shared builder (same as the
+        // model ingest — no separate path). The legacy default (BatchSize=1, CommitRows=0)
+        // ran a transaction (connection + CREATE TEMP + COPY + INSERT + commit) PER intent —
+        // the row-by-row floor, NOT index maintenance; BuildIngestOptions sets CommitRows so
+        // intents coalesce into ~100k-row bulk-COPY transactions.
+        Console.WriteLine($"ingest {dec.SourceName} via IngestRunner → {ConnString} ...");
         var since = DateTimeOffset.UtcNow;   // per-ingest-period window for incremental consensus
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(
             dec,
-            IngestRunOptions.Default with
-            {
-                SkipLayerOrderingCheck = skipLayerCheck,
-                EcosystemPath = ecosystemPath,
-                BatchSize = batchSize,
-                CommitRows = commitRows,
-                ParallelWorkers = workers,
-            },
+            BuildIngestOptions(sw, dec.SourceName, skipLayerCheck, ecosystemPath),
             CancellationToken.None);
         sw.Stop();
 

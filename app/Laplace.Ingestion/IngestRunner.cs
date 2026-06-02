@@ -86,7 +86,7 @@ public sealed class IngestRunner
 
         // 4. Iterate the decomposer's stream. Serial or parallel.
         var rng = new Random(unchecked((int)decomposer.SourceId.Lo));
-        var counters = new RunCounters();
+        var counters = new RunCounters { Sw = sw, EstimatedTotal = estimatedTotal };
 
         int batchSize  = Math.Max(1, options.BatchSize);
         int commitRows = Math.Max(0, options.CommitRows);
@@ -426,7 +426,9 @@ public sealed class IngestRunner
         => options.EcosystemPath ?? Directory.GetCurrentDirectory();
 
     private static IngestProgress MakeProgress(RunCounters c) =>
-        new(c.UnitsAttempted, c.UnitsApplied, c.UnitsFailed, null, TimeSpan.Zero);
+        new(c.UnitsAttempted, c.UnitsApplied, c.UnitsFailed,
+            c.EstimatedTotal, c.Sw?.Elapsed ?? TimeSpan.Zero,
+            c.EntitiesInserted, c.PhysicalitiesInserted, c.AttestationsInserted);
 
     private sealed class RunCounters
     {
@@ -437,6 +439,10 @@ public sealed class IngestRunner
         internal long _physicalitiesInserted;
         internal long _attestationsInserted;
         internal long _roundTrips;
+        // Run clock + estimate so MakeProgress reports rows/s + % without threading
+        // these through the per-intent/per-batch apply methods.
+        internal Stopwatch? Sw;
+        internal long? EstimatedTotal;
         public long UnitsAttempted        => Interlocked.Read(ref _unitsAttempted);
         public long UnitsApplied          => Interlocked.Read(ref _unitsApplied);
         public long UnitsFailed           => Interlocked.Read(ref _unitsFailed);
