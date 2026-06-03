@@ -76,12 +76,13 @@ public class Hash128Tests
     }
 
     [Fact]
-    public void Merkle_TierIsDomainSeparating()
+    public void Merkle_TierIsNotIdentity()
     {
+        // Same content = same hash; tier is metadata, never identity.
         var a = Hash128.Blake3("x"u8);
         var t1 = Hash128.Merkle(1, new[] { a });
         var t2 = Hash128.Merkle(2, new[] { a });
-        Assert.NotEqual(t1, t2);
+        Assert.Equal(t1, t2);
     }
 
     [Fact]

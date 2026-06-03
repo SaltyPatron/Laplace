@@ -8,7 +8,7 @@ extern "C" {
 
 /* Laplacian eigenmaps — non-linear dimensionality reduction via the
  * spectrum of the graph Laplacian. Used during AI-model ingestion to
- * project high-dim source embeddings into the 4D substrate (DESIGN.md
+ * project high-dim source embeddings into the 4D substrate (
  * IV; Chunk 6).
  *
  * Internally uses Spectra (header-only, on Eigen) for sparse symmetric

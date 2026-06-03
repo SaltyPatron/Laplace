@@ -170,7 +170,7 @@ public sealed class TextEntityBuilder
      * the resolver returns -1 atom-not-found if records are absent.
      * ============================================================ */
 
-    /// <summary>Perfcache-backed atom resolver for HashComposer (ADR 0048).
+    /// <summary>Perfcache-backed atom resolver for HashComposer.
     /// Exposed as an unmanaged function pointer; zero per-call allocation.</summary>
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     public static unsafe int Resolver(

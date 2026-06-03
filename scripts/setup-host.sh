@@ -167,7 +167,7 @@ layer1_nuke() {
 # ---------------------------------------------------------------------------
 layer1_build_install_extensions() {
     say "Layer 1 — Build + install laplace_geom + laplace_substrate extensions"
-    # Per ADR 0032 (Path B): top-level CMake drives engine + extensions
+    # (Path B): top-level CMake drives engine + extensions
     # from one tree. PGXS retired. Produces engine .sos + extension .sos +
     # preprocessed SQL install scripts in build/.
     (cd "$REPO_DIR" && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -179,7 +179,7 @@ layer1_build_install_extensions() {
     # ahart:laplace-runner setgid 2775). PG's extension_control_path +
     # dynamic_library_path already point there via bootstrap_pg_extension_paths,
     # so CREATE EXTENSION finds the install — no sudo, no NOPASSWD entry.
-    # Per ADR 0019 amendment (2026-05-23).
+    # amendment (2026-05-23).
     (cd "$REPO_DIR" && cmake --install build --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" | tail -3)
     green "✓ laplace_geom + laplace_substrate .so/.control/.sql installed at ${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 }

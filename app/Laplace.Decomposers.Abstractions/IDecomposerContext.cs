@@ -5,7 +5,7 @@ namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
 /// Per-decomposer context handed in at <see cref="IDecomposer.InitializeAsync"/>
-/// + <see cref="IDecomposer.DecomposeAsync"/>. Per ADR 0051 lines 101–121.
+/// + <see cref="IDecomposer.DecomposeAsync"/>. lines 101–121.
 /// </summary>
 public interface IDecomposerContext
 {
@@ -14,7 +14,7 @@ public interface IDecomposerContext
     string EcosystemPath { get; }
 
     /// <summary>Substrate write surface — every decomposer routes intents
-    /// through this one writer. Per ADR 0050.</summary>
+    /// through this one writer..</summary>
     ISubstrateWriter Writer { get; }
 
     /// <summary>Read access for verifying existing substrate state during
@@ -27,6 +27,6 @@ public interface IDecomposerContext
 
     /// <summary>Substrate-version tag — informs deterministic content-addressed
     /// IDs for bootstrap entities (whose name includes substrate-version per
-    /// ADR 0042).</summary>
+ ///).</summary>
     string SubstrateVersion { get; }
 }

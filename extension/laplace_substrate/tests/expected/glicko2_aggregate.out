@@ -140,7 +140,7 @@ FROM one_draw, five_draws;
 -- =====================================================================
 -- Vector 5 — Multi-observation consensus. Five wins against the same
 -- weaker opponent drive the rating UP more AND tighten RD MORE than a
--- single win. Per ADR 0036, the substrate-side arena resolver is what
+-- single win., the substrate-side arena resolver is what
 -- decides whether five rows reach this aggregate (independent sources)
 -- or get pre-collapsed (correlated repetition from one source); given
 -- that the resolver delivers N rows, the math is sum-proportional.

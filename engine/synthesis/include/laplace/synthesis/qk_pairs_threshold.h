@@ -25,7 +25,7 @@ typedef struct {
  * pair whose score magnitude strictly exceeds noise_floor, and never allocates
  * a vocab×vocab or vocab×k buffer.
  *
- * Semantics (one attention head; per ADR 0056:157, q_proj·k_proj):
+ * Semantics (one attention head;:157, q_proj·k_proj):
  *
  *   q_t[d] = Σ_{m=0..d_model-1} f64(E_f32[t*d_model + m]) * f64(Wq_head[d*d_model + m])
  *   k_s[d] = Σ_{m=0..d_model-1} f64(E_f32[s*d_model + m]) * f64(Wk_head[d*d_model + m])

@@ -3,12 +3,12 @@
  * Story 5.6 / #68. Engine math (Glickman 2013, "Example of the Glicko-2
  * system") lives in liblaplace_core; this is the SQL-side wrapper that
  * exposes the engine through CREATE AGGREGATE so per-attestation rating
- * updates flow through the C kernel without DB-side math (RULES.md R6).
+ * updates flow through the C kernel without DB-side math.
  *
- * Per ADR 0004 + 0030: int64 fixed-point at scale 1e9 throughout. SFUNC
+ *: int64 fixed-point at scale 1e9 throughout. SFUNC
  * accumulates observations into aggcontext-allocated state; FINALFUNC
  * invokes glicko2_update_period (Illinois iteration on log-volatility +
- * batched mu/phi update). Per ADR 0036: arena/source-trust resolution
+ * batched mu/phi update).: arena/source-trust resolution
  * happens BEFORE the aggregate is invoked — by the time observations
  * reach the SFUNC, they are the resolver's evidence batch. The aggregate
  * does not vote-count and does not weight by raw source repetition.

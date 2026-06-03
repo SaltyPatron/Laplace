@@ -8,7 +8,7 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// The one substrate write surface per ADR 0050. Implements
+/// The one substrate write surface. Implements
 /// <see cref="ISubstrateWriter.ApplyAsync"/> via engine-materialized
 /// PG COPY BINARY byte streams; C# is the I/O transport only.
 ///
@@ -23,7 +23,7 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 ///   <item>Materialize PG COPY BINARY byte streams via
 ///         <see cref="IntentStage"/> (Story A.5 #243), one buffer per
 ///         table, filtered to NOVEL rows only (existence check + in-batch
-///         dedup; idempotency per RULES R5 is the content-addressed id).</item>
+///         dedup; idempotency is the content-addressed id).</item>
 ///   <item>Prove referential integrity SET-BASED: every entity id referenced
 ///         by a staged row resolves (staged this batch, or proven present via
 ///         one more <c>entities_exist_bitmap</c> round-trip). Any miss throws
@@ -216,7 +216,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             // table. COPY alone can't ON CONFLICT, so direct COPY of a novel-only
             // filter is only race-safe single-threaded; the staging + ON CONFLICT
             // path is correct under concurrent writers of overlapping ids
-            // (RULES R5), which is what unlocks ParallelWorkers > 1. The INSERT's
+            //, which is what unlocks ParallelWorkers > 1. The INSERT's
             // rows-affected is the TRUE inserted count (≤ staged, under conflict).
             await using var tx = await conn.BeginTransactionAsync(ct);
             try

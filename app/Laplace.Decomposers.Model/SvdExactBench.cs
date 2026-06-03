@@ -12,9 +12,9 @@ namespace Laplace.Decomposers.Model;
 ///
 /// Loads ONE real weight tensor from a model directory (default
 /// model.layers.0.self_attn.q_proj.weight — a genuine interior QK circuit weight),
-/// converts BF16→f32 with the identical decode <see cref="QkBench"/> uses, calls the
-/// native kernel at tol=0, reconstructs U·diag(S)·Vᵀ in f64, and measures both the max
-/// absolute and the relative-Frobenius reconstruction residual against the source tensor.
+/// converts BF16→f32, calls the native kernel at tol=0, reconstructs U·diag(S)·Vᵀ in
+/// f64, and measures both the max absolute and the relative-Frobenius reconstruction
+/// residual against the source tensor.
 ///
 /// PRECISION NOTE: <c>tensor_svd_truncate</c> is SINGLE-PRECISION — it calls
 /// <c>LAPACKE_sgesdd</c> on <c>float</c> buffers (engine/synthesis/src/tensor_decompose.cpp:37,
@@ -70,7 +70,7 @@ public static class SvdExactBench
         Console.WriteLine($"  tensor : {name}");
         Console.WriteLine($"  dtype  : {tref.Dtype}   shape: [{m} x {n}]   min(m,n)={k}");
 
-        // Load the REAL tensor as f32 (identical BF16 decode to QkBench.LoadBF16AsF32).
+        // Load the REAL tensor as f32.
         float[] A = LoadBF16AsF32(tref);
 
         // Native kernel I/O buffers. U:[m x kmax], S:[kmax], Vt:[kmax x n], kmax=k.
@@ -168,8 +168,7 @@ public static class SvdExactBench
         return rc;
     }
 
-    // BF16/F32 → f32, byte-for-byte identical to QkBench.LoadBF16AsF32
-    // (app/Laplace.Decomposers.Model/QkBench.cs:113).
+    // BF16/F32 → f32.
     static unsafe float[] LoadBF16AsF32(SafetensorsContainerParser.TensorReference tref)
     {
         long n = 1;

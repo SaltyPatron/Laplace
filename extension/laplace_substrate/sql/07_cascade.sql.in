@@ -1,6 +1,6 @@
 /* 07_cascade.sql.in — compiled cascade traversal SRF.
  *
- * Per ADR 0035 + RULES.md R19: cascade is a single SQL-call surface
+ * + : cascade is a single SQL-call surface
  * implemented as a set-returning C function. The C/C++ engine owns
  * the frontier queue, visited set, A* heuristic, tier transitions,
  * arena-aware effective-score ranking, and honest abstention.

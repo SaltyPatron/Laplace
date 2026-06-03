@@ -3,8 +3,9 @@
 
 /* A trajectory is a mantissa-packed 4D LINESTRING: one vertex per constituent,
  * each vertex carrying the constituent entity's full 128-bit id + ordinal via
- * mantissa_pack (ADR 0012). build/constituents are the per-tier-node loop over
- * that lossless per-vertex primitive — the substrate's content-storage codec.
+ * mantissa_pack. build/constituents are the per-tier-node loop over
+ * that lossless per-vertex primitive — the substrate's content-trajectory
+ * packing ("pack = truth, coord = the recoverable view").
  *
  * Ordinal is uint16, so a single trajectory holds at most 65535 direct
  * constituents. That is by design: trajectories store ONE tier's direct
@@ -22,7 +23,7 @@ int trajectory_build(const hash128_t* entity_hashes,
     for (size_t i = 0; i < n; ++i) {
         mantissa_payload_t p;
         p.entity_id  = entity_hashes[i];
-        p.ordinal    = (uint16_t)(i + 1);   /* 1-indexed per ADR 0012 */
+        p.ordinal    = (uint16_t)(i + 1);   /* 1-indexed */
         p.run_length = 1;
         p.flags      = 0;
         mantissa_pack(&out_xyzm[i * 4], &p);

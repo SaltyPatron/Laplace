@@ -12,7 +12,7 @@ extern "C" {
 
 /* merkle_dedup — SubstrateCRUD hot-loop primitives.
  *
- * Per ADR 0050: every decomposer routes through one shared write surface.
+ *: every decomposer routes through one shared write surface.
  * The write surface's hot path is:
  *   1. Send the full ID list to a PG SRF that returns a packed
  *      existing-bitmap (bit i set iff candidate[i].id is already in
@@ -35,7 +35,7 @@ extern "C" {
  *
  * Both functions are scalar-first with auto-vectorization-friendly inner
  * loops; an explicit AVX2/AVX-512 SIMD path can be added later without
- * breaking the C ABI. POD only at the boundary per RULES R14. */
+ * breaking the C ABI. POD only at the boundary. */
 
 /* Filter a candidate ID array into novel-only output via the existing-bitmap.
  *

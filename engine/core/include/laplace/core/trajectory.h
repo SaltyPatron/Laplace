@@ -12,9 +12,9 @@ extern "C" {
  * whose vertices reference entities (each playing a constituent role at
  * its vertex position). Each vertex's XYZ encodes the referenced entity's
  * full BLAKE3-128 hash; M encodes per-vertex metadata (ordinal, run_length,
- * flags). Per ADR 0012.
+ * flags)..
  *
- * No custom geometry struct: per RULES.md R22, the geometry is an
+ * No custom geometry struct:, the geometry is an
  * `LWLINE` (from liblwgeom) at the PG-wrapper layer. Engine kernels
  * operate on raw XYZM-packed double buffers (matches POINT4D layout).
  *
@@ -37,7 +37,7 @@ int trajectory_build(const hash128_t* entity_hashes,
                      double*          out_xyzm);
 
 /* RLE variant: collapses consecutive identical hashes into a single vertex
- * with run_length > 1 in the M channel (per ADR 0012). out_xyzm must have
+ * with run_length > 1 in the M channel. out_xyzm must have
  * capacity for 4*n doubles (worst-case no compression). *out_vertex_count
  * receives the actual number of vertices emitted (≤ n). */
 int trajectory_build_rle(const hash128_t* constituents,

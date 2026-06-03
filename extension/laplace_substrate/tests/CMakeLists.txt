@@ -1,6 +1,6 @@
 # extension/laplace_substrate/tests/CMakeLists.txt
 #
-# pg_regress wiring for laplace_substrate (per B′.9 #196 + ADR 0042).
+# pg_regress wiring for laplace_substrate (per B′.9 #196).
 # Same pattern as extension/laplace_geom/tests/CMakeLists.txt — see that
 # file for the fixture rationale (per-extension test DB avoids ctest -j
 # races; --use-existing against the running system PG keeps the user's

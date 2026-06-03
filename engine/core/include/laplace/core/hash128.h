@@ -8,11 +8,11 @@ extern "C" {
 #endif
 
 /* BLAKE3 truncated to 128 bits — content-addressable entity identifier
- * (per ADR 0015 + STANDARDS.md). Stored as bytea(16) in Postgres; byte[16]
+ * (the standards). Stored as bytea(16) in Postgres; byte[16]
  * in C# via [StructLayout(Sequential)].
  *
  * Read patterns that justify the {hi, lo} split (NOT a vanity wrapper):
- *   - Mantissa pack (ADR 0012): hi and lo go into DIFFERENT coordinate
+ *   - Mantissa pack: hi and lo go into DIFFERENT coordinate
  *     mantissas at write time; unpack reverses that at every cascade read.
  *     A `uint8_t[16]` layout would force byte-reconstruction at every
  *     read/write site — `{uint64_t hi, lo}` is one field access per half.

@@ -69,12 +69,10 @@ internal static class Program
                 + "  seed-unicode\n"
                 + "  ingest <source> [path]            (unicode | iso639 | wordnet | omw | ud | model)\n"
                 + "  synthesize substrate <recipe.json> [output.gguf] [--source-scope <ids>] [--format <name>]\n"
-                + "  synthesize passthrough <model-dir> [output.gguf] [--f32] [--sparse-tol <tol>]\n"
                 + "  decompose <text>\n"
                 + "  inspect <text>\n"
                 + "  roundtrip <file> [out]\n"
                 + "  db-roundtrip <file>\n"
-                + "  qk-bench <model-dir>             (profile the QK kernel on real weights; no DB)\n"
                 + "  svd-exact-bench [model-dir] [tensor]  (prove tensor_svd_truncate is fp-exact on a real tensor; no DB)\n"
                 + "  stats");
             return 2;
@@ -91,9 +89,7 @@ internal static class Program
                 "roundtrip"    => Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
                 "db-roundtrip" => await DbRoundtripAsync(args.Length > 1 ? args[1] : ""),
                 "stats"        => await StatsAsync(),
-                "qk-bench"     => QkBenchCmd(args.Length > 1 ? args[1] : ""),
                 "svd-exact-bench" => SvdExactBenchCmd(args[1..]),
-                "beta-probe"   => BetaProbeCmd(args[1..]),
                 _ => Fail($"unknown command '{args[0]}'"),
             };
         }
@@ -132,15 +128,6 @@ internal static class Program
         return (long)(await cmd.ExecuteScalarAsync() ?? 0L);
     }
 
-    // === qk-bench: profile the QK kernel on real weights (no DB, no ingest harness) ===
-    private static int QkBenchCmd(string modelDir)
-    {
-        if (string.IsNullOrEmpty(modelDir) || !Directory.Exists(modelDir))
-            return Fail($"usage: laplace qk-bench <model-dir>  (not found: '{modelDir}')");
-        QkBench.Run(modelDir);
-        return 0;
-    }
-
     // === svd-exact-bench: prove tensor_svd_truncate factors a REAL tensor fp-exactly (no DB) ===
     // Plan gate G2.1. Model dir resolves by convention when omitted: $LAPLACE_TINYLLAMA_DIR,
     // else the newest models--TinyLlama--* snapshot under /vault/models.
@@ -157,20 +144,6 @@ internal static class Program
 
         bool pass = SvdExactBench.Run(modelDir, tensor);
         return pass ? 0 : 1;
-    }
-
-    // === beta-probe: measure coherence-floor cardinality vs retrieval fidelity (G2.0, no DB) ===
-    private static int BetaProbeCmd(string[] rest)
-    {
-        string circuit  = rest.Length > 0 && !string.IsNullOrEmpty(rest[0]) ? rest[0] : "qk";
-        string modelDir = ResolveTinyLlamaDir();
-        if (string.IsNullOrEmpty(modelDir) || !Directory.Exists(modelDir))
-            return Fail("usage: laplace beta-probe [qk|ffn] [sampleRows] [topK]\n" +
-                        "  set $LAPLACE_TINYLLAMA_DIR; none resolved.");
-        int sampleRows = rest.Length > 1 && int.TryParse(rest[1], out var s) ? s : 256;
-        int topK       = rest.Length > 2 && int.TryParse(rest[2], out var k) ? k : 32;
-        BetaProbe.Run(modelDir, circuit, sampleRows, topK);
-        return 0;
     }
 
     // Discover a TinyLlama model dir by convention (no hardcoded snapshot SHA):
@@ -383,7 +356,7 @@ internal static class Program
         return 0;
     }
 
-    // === ingest: IngestRunner + per-source decomposer (ADR 0052) ===
+    // === ingest: IngestRunner + per-source decomposer ===
     private static async Task<int> IngestAsync(string[] args)
     {
         string source = args.Length > 0 ? args[0] : "";
@@ -458,10 +431,25 @@ internal static class Program
             }
         }
 
-        var writer = new NpgsqlSubstrateWriter(ds);
+        /* PRODUCTION DEFAULT: consensus accumulates AT INGEST — evidence
+         * recording DISABLED. The per-witness Glicko-2 matches (neutral
+         * opponent, trust→φ, per-arena M already in each score) accumulate per
+         * relation and the period materializes into consensus at the clean end
+         * of the run; ZERO evidence rows are written. Research instances that
+         * want the per-witness receipts for interpretability/audit run with
+         * LAPLACE_EVIDENCE=record. */
+        bool recordEvidence = string.Equals(
+            Environment.GetEnvironmentVariable("LAPLACE_EVIDENCE"), "record",
+            StringComparison.OrdinalIgnoreCase);
+        var inner = new NpgsqlSubstrateWriter(ds);
+        ConsensusAccumulatingWriter? accumulator = recordEvidence ? null : new ConsensusAccumulatingWriter(inner, ds);
+        ISubstrateWriter writer = (ISubstrateWriter?)accumulator ?? inner;
         var reader = new NpgsqlSubstrateReader(ds);
         var loggerFactory = ConsoleLoggerProvider.Factory();
         var runner = new IngestRunner(writer, reader, loggerFactory);
+        Console.WriteLine(recordEvidence
+            ? "mode: RESEARCH (LAPLACE_EVIDENCE=record) — per-witness evidence recorded"
+            : "mode: PRODUCTION — consensus accumulates at ingest; evidence recording disabled");
 
         // Model ingestion is mechanical and embarrassingly parallel: thousands
         // of weight-tensor intents. Two levers, both env-tunable (same
@@ -505,29 +493,33 @@ internal static class Program
                 Console.Error.WriteLine($"  {f}");
             return 1;
         }
-        var touched = await MaterializeConsensusPeriodAsync(ds);
-        Console.WriteLine($"consensus: {touched:N0} relations materialized (incremental, per-ingest-period)");
+        if (accumulator is not null)
+        {
+            // Materialize the period: ONE set-based upsert of every accumulated
+            // relation, prior = current consensus row. Runs only here — after a
+            // clean period — so a killed run materializes nothing (crash-safe).
+            var matSw = Stopwatch.StartNew();
+            var materialized = await accumulator.MaterializeConsensusAsync();
+            matSw.Stop();
+            Console.WriteLine(
+                $"consensus: {materialized:N0} relations materialized from "
+                + $"{accumulator.ObservationsAccumulated:N0} matches in {matSw.Elapsed.TotalSeconds:F1}s "
+                + $"(accumulated at ingest; 0 evidence rows)");
+        }
+        else
+        {
+            var touched = await MaterializeConsensusPeriodAsync(ds);
+            Console.WriteLine($"consensus: {touched:N0} relations materialized (incremental, per-ingest-period)");
+        }
         return 0;
     }
 
-    // === synthesize: substrate → model package, OR diagnostic passthrough ===
-    //
-    // Two universal subcommands per ADR 0011 (IArchitectureTemplate / IFormatWriter)
-    // + ADR 0043 (composite ModelDecomposer per ContainerFormat × TensorDtypeDecoder
-    // × IArchitectureTemplate × ModalityBinder):
+    // === synthesize: substrate → model package (re-export = fill the mold) ===
     //
     //   synthesize substrate <recipe.json> [out] [--source-scope ...] [--format ...]
-    //     Substrate-mediated. Reads the user-authored recipe (GLOSSARY Recipe +
-    //     DESIGN VIII custom-recipe schema); queries substrate aggregated typed
-    //     attestations under the recipe's source scope; uses the architecture
-    //     template's `materialize_tensor(spec, substrate_view) → TensorValues`
-    //     (DESIGN.md:660) to distribute consensus values into recipe slots;
-    //     emits via the selected IFormatWriter (native safetensors-style per R4;
-    //     GGUF / ONNX / TF / PyTorch as compatibility writers per ADR 0059).
-    //
-    //   synthesize passthrough <model-dir> [out] [--f32] [--sparse-tol <tol>]
-    //     Diagnostic. Real weights → our GGUF writer (no substrate). Isolates
-    //     format/metadata/arch_template correctness from substrate data quality.
+    //     Substrate-mediated. Reads the user-authored recipe (the mold); queries the
+    //     substrate's CONSENSUS; factors each consensus circuit back into the mold's
+    //     weight tensors; emits via the selected IFormatWriter (GGUF today).
     private static async Task<int> SynthesizeAsync(string[] args)
     {
         string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "";
@@ -538,48 +530,30 @@ internal static class Program
             string outputPath = args.Length > 2 ? args[2] : "/tmp/laplace-substrate-synth.gguf";
             return await SynthesizeFromSubstrateAsync(recipePath, outputPath);
         }
-        if (sub == "passthrough")
-        {
-            string modelDir   = args.Length > 1 ? args[1] : "";
-            string outputPath = "/tmp/laplace-passthrough.gguf";
-            bool   allF32     = args.Contains("--f32");
-            double sparseTol  = 0.0;
-            int tolIdx = Array.IndexOf(args, "--sparse-tol");
-            if (tolIdx >= 0 && tolIdx + 1 < args.Length
-                && double.TryParse(args[tolIdx + 1], out var t))
-                sparseTol = t;
-            // Output path = third positional arg if present and not a flag
-            if (args.Length > 2 && !args[2].StartsWith("--"))
-                outputPath = args[2];
-            return await SynthesizePassthroughAsync(modelDir, outputPath, allF32, sparseTol);
-        }
 
         return Fail(
             "usage: laplace synthesize <subcommand> [args]\n"
-            + "  substrate <recipe.json> [output.gguf]   substrate-mediated synthesis\n"
-            + "  passthrough <model-dir> [output.gguf] [--f32] [--sparse-tol <tol>]\n"
-            + "                                          diagnostic real-weights transcode\n");
+            + "  substrate <recipe.json> [output.gguf]   substrate-mediated synthesis\n");
     }
 
     /// <summary>
     /// Stream A stub. Stream B per /home/ahart/.claude/plans/replicated-hatching-stream.md
     /// replaces this with a real implementation that:
-    ///   (1) parses the recipe per ADR 0009 + GLOSSARY Recipe,
-    ///   (2) loads the architecture template entity from substrate (per ADR 0011 +
-    ///       ADR 0043) using the recipe's `IS_A Architecture_X` attestation,
+ /// (1) parses the recipe + the Recipe definition,
+    ///   (2) loads the architecture template entity from substrate ( +
+ ///) using the recipe's `IS_A Architecture_X` attestation,
     ///   (3) iterates the template's `required_tensors(SynthesisParams) → TensorSpecs`
-    ///       (DESIGN.md:659),
+ ///,
     ///   (4) for each TensorSpec, queries the substrate aggregated attestations
     ///       under the recipe's source scope (the `laplace_glicko2_accumulate`
-    ///       aggregator handles cross-source consensus per ADR 0056:206-215),
+    ///       aggregator handles cross-source consensus:206-215),
     ///   (5) calls `materialize_tensor(spec, substrate_view) → TensorValues`
-    ///       (DESIGN.md:660) — the architecture template distributes consensus
+ /// — the architecture template distributes consensus
     ///       values across the recipe's per-(layer, head, dim) layout (NOT a
     ///       pseudoinverse — per Memory `project_model_decomposer_attestation_insight.md`
-    ///       and ADR 0056:183 "the inverse of this aggregation" = broadcast per
-    ///       recipe layout, not SVD recovery),
+ /// and "the inverse of this aggregation" = broadcast     ///       recipe layout, not SVD recovery),
     ///   (6) writes via the recipe-selected IFormatWriter (native safetensors-style
-    ///       per R4 + GLOSSARY:431; GGUF / ONNX / TF / PyTorch via ADR 0059's
+ /// per R4 +; GGUF / ONNX / TF / PyTorch via 
     ///       format-writer matrix).
     /// </summary>
     private static async Task<int> SynthesizeFromSubstrateAsync(string recipePath, string outputPath)
@@ -921,243 +895,6 @@ internal static class Program
         }
     }
 
-
-    // === synthesize passthrough: real weights → our GGUF writer (no substrate) ===
-    // Diagnostic. Isolates format/metadata/arch_template correctness from substrate
-    // data quality. Each tensor is transcoded to the arch_template's declared dtype
-    // (norms bf16→f32, weights bf16 passthrough) to match llama.cpp's GGUF conventions.
-    // Universal across any safetensors-format model dir; not model-family-specific.
-    private static async Task<int> SynthesizePassthroughAsync(
-        string modelDir, string outputPath, bool allF32 = false, double sparseTol = 0.0)
-    {
-        if (string.IsNullOrEmpty(modelDir) || !Directory.Exists(modelDir))
-            return Fail(
-                "usage: laplace synthesize passthrough <model-dir> [output.gguf] [--f32] [--sparse-tol <tol>]\n"
-                + $"  (model dir not found: {modelDir})");
-
-        Console.WriteLine(
-            $"synthesize passthrough {(sparseTol > 0 ? $"SPARSE(tol={sparseTol:0.000})" : "PASSTHROUGH")} "
-            + $"(real weights → GGUF{(allF32 || sparseTol > 0 ? ", F32" : "")}) "
-            + $"src={modelDir} → {outputPath}");
-        /* LlamaTokenizerParser now requires the perfcache (TextDecomposer +
-         * HashComposer in Parse). */
-        CodepointPerfcache.Load(ResolveBlob());
-        string configPath      = Path.Combine(modelDir, "config.json");
-        string tokenizerPath   = Path.Combine(modelDir, "tokenizer.json");
-        string safetensorsPath = Path.Combine(modelDir, "model.safetensors");
-        if (!File.Exists(configPath) || !File.Exists(tokenizerPath) || !File.Exists(safetensorsPath))
-            return Fail($"model files not found under {modelDir}");
-
-        var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
-        var recipe = LlamaRecipeExtractor.Parse(configPath);
-
-        byte[] configJson = File.ReadAllBytes(configPath);
-        IntPtr recipeHandle, tmplHandle;
-        var specs = new TensorSpec[400];
-        int tensorCount;
-        unsafe
-        {
-            fixed (byte* jsonPtr = configJson)
-                recipeHandle = SynthInterop.RecipeParse(jsonPtr, (nuint)configJson.Length);
-            if (recipeHandle == IntPtr.Zero) return Fail("recipe_parse returned null");
-            tmplHandle = SynthInterop.ArchTemplateLoad("llama");
-            if (tmplHandle == IntPtr.Zero) return Fail("arch_template_load returned null");
-            fixed (TensorSpec* specsPtr = specs)
-                tensorCount = SynthInterop.ArchTemplateRequiredTensors(
-                    tmplHandle, recipeHandle, specsPtr, (nuint)specs.Length);
-        }
-        if (tensorCount <= 0) return Fail($"arch_template_required_tensors returned {tensorCount}");
-        Console.WriteLine($"  arch template: {tensorCount} tensor slots");
-
-        var refs = SafetensorsContainerParser.ParseHeader(safetensorsPath);
-        var refMap = new Dictionary<string, SafetensorsContainerParser.TensorReference>(refs.Count, StringComparer.Ordinal);
-        foreach (var r in refs) refMap[r.Name] = r;
-
-        var gguf = SynthInterop.GgufWriterCreate(outputPath);
-        if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
-        WriteGgufMetadata(gguf, recipe, tokens, modelDir);
-
-        using var fs = new FileStream(safetensorsPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, useAsync: false);
-        var sw = Stopwatch.StartNew();
-        int done = 0, missing = 0;
-        long keptTotal = 0, sparsedElems = 0;   // sparsity accounting (interior tensors only)
-        for (int i = 0; i < tensorCount; i++)
-        {
-            string name; ulong rows, cols; int dtype;
-            unsafe
-            {
-                var spec = specs[i];
-                name  = Marshal.PtrToStringUTF8((IntPtr)spec.Name) ?? "";
-                rows  = spec.Rank >= 1 ? spec.Shape[0] : 1;
-                cols  = spec.Rank >= 2 ? spec.Shape[1] : 1;
-                dtype = spec.Dtype;
-            }
-            long nElem = (long)rows * (long)cols;
-            int outDtype = allF32 ? 0 : dtype;   // arch_template dtype (bf16 weights / f32 norms) unless allF32
-            // Interior weight tensors (attention + MLP projections) are the sparsity target;
-            // the embedding frame, lm_head, and norms stay dense (cheap + critical).
-            bool interior = name.Contains(".self_attn.") || name.Contains(".mlp.");
-
-            byte[] outBytes;
-            if (refMap.TryGetValue(name, out var tref))
-            {
-                byte[] raw = ReadTensorBytes(fs, tref);
-                if (sparseTol > 0 && interior)
-                {
-                    float[] fv = BytesToF32(raw, tref.Dtype, nElem);
-                    long kept = Sparsify(fv, sparseTol);
-                    keptTotal += kept; sparsedElems += nElem;
-                    outBytes = outDtype == 2 ? F32ToBf16Bytes(fv) : F32ToBytes(fv);
-                }
-                else
-                {
-                    outBytes = TranscodeToDtype(raw, tref.Dtype, outDtype, nElem);
-                }
-            }
-            else
-            {
-                missing++;
-                outBytes = new byte[nElem * (outDtype == 0 ? 4L : 2L)];
-                Console.WriteLine($"  MISSING in safetensors: {name} → zero-filled");
-            }
-
-            nuint[] ggufDims = cols > 1 ? [(nuint)cols, (nuint)rows] : [(nuint)rows];
-            unsafe
-            {
-                fixed (nuint* dimsPtr = ggufDims)
-                fixed (byte*  dataPtr = outBytes)
-                    SynthInterop.GgufWriterAddTensor(gguf, HfToGgmlName(name), outDtype, dimsPtr, (nuint)ggufDims.Length, dataPtr);
-            }
-
-            done++;
-            if (done == 1 || done % 50 == 0)
-                Console.WriteLine($"  [{done}/{tensorCount}] {name} rows={rows} cols={cols} dt={dtype} {sw.Elapsed.TotalSeconds:F1}s");
-        }
-
-        int rc = SynthInterop.GgufWriterFinalize(gguf);
-        SynthInterop.GgufWriterFree(gguf);
-        SynthInterop.ArchTemplateFree(tmplHandle);
-        SynthInterop.RecipeFree(recipeHandle);
-        if (rc != 0) return Fail($"gguf_writer_finalize failed (rc={rc})");
-
-        long fileSize = new FileInfo(outputPath).Length;
-        Console.WriteLine($"{(sparseTol > 0 ? "sparse" : "passthrough")} complete: {outputPath} ({fileSize / 1048576.0:F0} MB), "
-            + $"{done} tensors, {missing} missing, {sw.Elapsed.TotalSeconds:F1}s");
-        if (sparseTol > 0 && sparsedElems > 0)
-            Console.WriteLine($"  SPARSITY (interior weights @ tol={sparseTol:0.000}): kept {keptTotal:N0} / {sparsedElems:N0} "
-                + $"= {100.0 * keptTotal / sparsedElems:F1}% nonzero (dropped {100.0 * (1.0 - (double)keptTotal / sparsedElems):F1}%)");
-        await Task.CompletedTask;
-        return 0;
-    }
-
-    // Zero the smallest-magnitude entries that together carry <= tol^2 of the tensor's
-    // Frobenius energy (energy-based, not a flat threshold). Returns the kept (nonzero) count.
-    private static long Sparsify(float[] data, double tol)
-    {
-        int n = data.Length;
-        double total = 0; for (int i = 0; i < n; i++) { double v = data[i]; total += v * v; }
-        if (total <= 0) return n;
-        double budget = tol * tol * total;
-        var mag = new float[n];
-        for (int i = 0; i < n; i++) mag[i] = MathF.Abs(data[i]);
-        Array.Sort(mag);
-        double acc = 0; float cutoff = -1f;
-        for (int i = 0; i < n; i++) { double v = mag[i]; if (acc + v * v > budget) break; acc += v * v; cutoff = mag[i]; }
-        if (cutoff < 0) return n;            // nothing droppable within budget
-        long kept = 0;
-        for (int i = 0; i < n; i++) { if (MathF.Abs(data[i]) <= cutoff) data[i] = 0f; else kept++; }
-        return kept;
-    }
-
-    // Decode raw tensor bytes (BF16 or F32) to a float[] of nElem values.
-    private static float[] BytesToF32(byte[] raw, string srcDtype, long nElem)
-    {
-        var o = new float[nElem];
-        if (srcDtype == "F32") { Buffer.BlockCopy(raw, 0, o, 0, (int)(nElem * 4)); return o; }
-        for (long i = 0; i < nElem; i++)
-        {
-            ushort bf = (ushort)(raw[i * 2] | (raw[i * 2 + 1] << 8));
-            o[i] = BitConverter.UInt32BitsToSingle((uint)bf << 16);
-        }
-        return o;
-    }
-
-    private static byte[] F32ToBytes(float[] data)
-    {
-        var o = new byte[(long)data.Length * 4];
-        Buffer.BlockCopy(data, 0, o, 0, o.Length);
-        return o;
-    }
-
-    // Encode a float[] as BF16 bytes (truncate to the upper 16 bits of each f32).
-    private static byte[] F32ToBf16Bytes(float[] data)
-    {
-        var o = new byte[(long)data.Length * 2];
-        for (long i = 0; i < data.Length; i++)
-        {
-            uint b = BitConverter.SingleToUInt32Bits(data[i]);
-            ushort bf = (ushort)(b >> 16);
-            o[i * 2] = (byte)(bf & 0xFF);
-            o[i * 2 + 1] = (byte)(bf >> 8);
-        }
-        return o;
-    }
-
-    private static byte[] ReadTensorBytes(FileStream fs, SafetensorsContainerParser.TensorReference tref)
-    {
-        byte[] buf = new byte[tref.DataLength];
-        fs.Seek(tref.AbsoluteDataStart, SeekOrigin.Begin);
-        int total = 0;
-        while (total < buf.Length)
-        {
-            int n = fs.Read(buf, total, buf.Length - total);
-            if (n == 0) throw new IOException($"safetensors: truncated data for {tref.Name}");
-            total += n;
-        }
-        return buf;
-    }
-
-    // Transcode raw tensor bytes from a safetensors dtype to the target GGUF dtype (0=f32, 2=bf16).
-    private static byte[] TranscodeToDtype(byte[] raw, string srcDtype, int dstDtype, long nElem)
-    {
-        bool srcBf16 = srcDtype == "BF16";
-        bool srcF32  = srcDtype == "F32";
-
-        if (dstDtype == 2) // target bf16
-        {
-            if (srcBf16) return raw;
-            if (srcF32)
-            {
-                var o = new byte[nElem * 2];
-                for (long i = 0; i < nElem; i++)
-                {
-                    uint b = (uint)(raw[i*4] | (raw[i*4+1] << 8) | (raw[i*4+2] << 16) | (raw[i*4+3] << 24));
-                    ushort bf = (ushort)(b >> 16);
-                    o[i*2] = (byte)(bf & 0xFF); o[i*2+1] = (byte)(bf >> 8);
-                }
-                return o;
-            }
-        }
-        else if (dstDtype == 0) // target f32
-        {
-            if (srcF32) return raw;
-            if (srcBf16)
-            {
-                var o = new byte[nElem * 4];
-                for (long i = 0; i < nElem; i++)
-                {
-                    ushort bf = (ushort)(raw[i*2] | (raw[i*2+1] << 8));
-                    uint b = (uint)bf << 16;
-                    o[i*4]   = (byte)(b & 0xFF);
-                    o[i*4+1] = (byte)((b >> 8)  & 0xFF);
-                    o[i*4+2] = (byte)((b >> 16) & 0xFF);
-                    o[i*4+3] = (byte)((b >> 24) & 0xFF);
-                }
-                return o;
-            }
-        }
-        throw new NotSupportedException($"transcode {srcDtype} → dtype {dstDtype} unsupported");
-    }
 
     // Map HuggingFace safetensors tensor names → GGML/llama.cpp names.
     // arch_template emits HF names (to match the source safetensors during ingest);

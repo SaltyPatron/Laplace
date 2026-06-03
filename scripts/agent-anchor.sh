@@ -55,7 +55,7 @@ else
 fi
 echo
 
-echo "=== Hard stops (see RULES.md R0 + .cursorrules) ==="
+echo "=== Hard stops (see .cursorrules) ==="
 cat <<'EOF'
 - No conventional-AI pattern-matching (HNSW/FAISS/RAG/fine-tuning/vector-DB/GEMM hot path)
 - Exactly three tables: entities, physicalities, attestations
@@ -63,7 +63,7 @@ cat <<'EOF'
 - float64 coords; Glicko-2 int64 fixed-point; BLAKE3 hash128 — no float32, no libxxhash
 - No flat noise thresholds; lottery-ticket sparsity for model sources
 - Compiled cascade SRF only — no recursive SQL / cursor / app-loop graph traversal
-- Do not edit DESIGN/GLOSSARY/RULES/STANDARDS/OPERATIONS/README without explicit user OK
+- Do not edit docs/ARCHITECTURE.md / docs/SUBSTRATE-FOUNDATION.md / docs/INGESTION-STATUS.md / README without explicit user OK
 EOF
 echo
 

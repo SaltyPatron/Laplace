@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace Laplace.Decomposers.Model;
 
 /// <summary>
-/// Static dissection of the safetensors container format per ADR 0055.
+/// Static dissection of the safetensors container format.
 /// Reads ONLY the header (first 8 + header_len bytes); never loads tensor data.
 /// </summary>
 public sealed class SafetensorsContainerParser

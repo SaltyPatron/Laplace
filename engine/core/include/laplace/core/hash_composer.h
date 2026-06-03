@@ -12,8 +12,8 @@ extern "C" {
 #endif
 
 /* hash_composer — pure leaf-to-trunk content-addressing primitive per
- * ADR 0048. Consumes a topology-only TierTree (produced by TextDecomposer
- * per ADR 0047, or any analogous per-modality decomposer) and populates
+ * . Consumes a topology-only TierTree (produced by TextDecomposer
+ *, or any analogous per-modality decomposer) and populates
  * every node with `id` (BLAKE3-128), `coord` (4D), and `hilbert_index`.
  *
  * Walk is bottom-up by node index — guaranteed correct because tier_tree's
@@ -31,7 +31,7 @@ extern "C" {
  *   hilbert = hilbert4d_encode(coord)
  *
  * Zero DB. Zero global state (modulo whatever the caller's resolver does).
- * Deterministic by construction per RULES R7 — same TierTree topology
+ * Deterministic by construction — same TierTree topology
  * plus same resolver outputs → byte-identical populated tree. */
 
 /* Resolver callback. Called once per leaf (tier_tree_first_child_idx ==

@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-/* UAX#29 sentence boundary per ADR 0047. Same iterator contract as
+/* UAX#29 sentence boundary. Same iterator contract as
  * laplace_grapheme_break_next + laplace_word_break_next. */
 size_t laplace_sentence_break_next(
     const uint32_t* codepoints,

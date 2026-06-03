@@ -9,14 +9,14 @@ extern "C" {
 
 /* GGUF proof/compatibility writer — emits a GGUF artifact from a native
  * Synthesis package so llama.cpp can validate chat behavior. GGUF is not
- * the substrate's native export shape. Per RULES.md R4 (sparse-by-
+ * the substrate's native export shape. (sparse-by-
  * construction emission): positions with no significant substrate
  * attestation emit exact zero.
  *
  * The GGUF spec is documented at github.com/ggerganov/ggml. We
  * implement the writer directly (substrate-specific emission logic
  * around the format spec) rather than linking llama.cpp/ggml (per
- * RULES.md R15: llama.cpp is banned as a runtime).
+ * : llama.cpp is banned as a runtime).
  *
  * Real impl lands Chunk 7 Story 7.15. */
 typedef struct gguf_writer gguf_writer_t;

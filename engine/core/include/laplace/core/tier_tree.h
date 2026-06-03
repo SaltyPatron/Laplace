@@ -12,7 +12,7 @@ extern "C" {
 
 /* tier_tree — generic cross-modal tree structure used by every decomposer
  * (text, pixel, audio, code-token, tensor-cell) + the prompt-ingest path
- * (per ADR 0047, ADR 0048, ADR 0040).
+ *.
  *
  * Topology invariant: nodes are added in TOPOLOGICAL ORDER — every child's
  * index is strictly less than its parent's index. This is the natural
@@ -22,15 +22,15 @@ extern "C" {
  *
  * Storage is a single SoA arena with parallel arrays for cache locality.
  * The dominant access patterns:
- *   - hash_composer leaf-to-trunk walk (ADR 0048): iterate indices 0..N-1
+ *   - hash_composer leaf-to-trunk walk: iterate indices 0..N-1
  *     in order, computing id[i] = merkle(tier[i], [id[j] for j in children]).
- *   - merkle_dedup top-down walk (ADR 0050 hot loop): iterate indices N-1..0,
+ * - merkle_dedup top-down walk (hot loop): iterate indices N-1..0,
  *     skipping subtrees whose root id is already in the substrate.
  *   - tier_tree_get_node random access: one cache miss per field per node.
  * SoA wins for the two walks (sequential per array); AoS would win for the
  * random-access pattern but that pattern is rare relative to the walks.
  *
- * No C++ types cross this header — POD only per RULES R14. C# binds via
+ * No C++ types cross this header — POD only. C# binds via
  * P/Invoke with SafeHandle over tier_tree_t*. */
 
 typedef struct tier_tree tier_tree_t;

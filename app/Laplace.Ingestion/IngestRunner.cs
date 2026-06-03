@@ -9,17 +9,17 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Ingestion;
 
 /// <summary>
-/// The shared orchestration loop per ADR 0052 — composes
+/// The shared orchestration loop — composes
 /// <see cref="IDecomposer"/> + <see cref="ISubstrateWriter"/> into the
 /// canonical per-source ingest recipe. Every per-source decomposer
 /// (Unicode, ISO, WordNet, ...) ingests through this same RunAsync.
 ///
 /// <para>
-/// Cross-cutting concerns owned here: layer-ordering enforcement (ADR
-/// 0037), transient retry, parallel-worker variant, progress reporting,
+/// Cross-cutting concerns owned here: layer-ordering enforcement,
+/// transient retry, parallel-worker variant, progress reporting,
 /// structured logging, observability emission. Idempotency is the
 /// substrate's own property — content-addressed identity + the writer's
-/// existence-check + INSERT … ON CONFLICT DO NOTHING (RULES R5) — so a
+/// existence-check + INSERT … ON CONFLICT DO NOTHING — so a
 /// re-run converges with no side journal and no resume state to keep coherent.
 /// </para>
 /// </summary>
@@ -42,7 +42,7 @@ public sealed class IngestRunner
         _obs           = observability ?? NoOpObservability.Instance;
     }
 
-    /// <summary>Run a decomposer end-to-end per ADR 0052.</summary>
+    /// <summary>Run a decomposer end-to-end.</summary>
     public async Task<IngestRunResult> RunAsync(
         IDecomposer decomposer,
         IngestRunOptions options,
@@ -58,7 +58,7 @@ public sealed class IngestRunner
         long entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
         long totalRoundTrips = 0;
 
-        // 1. Layer-ordering prerequisite check (per ADR 0037).
+        // 1. Layer-ordering prerequisite check.
         if (!options.SkipLayerOrderingCheck)
         {
             for (int layer = 0; layer < decomposer.LayerOrder; layer++)
@@ -205,7 +205,7 @@ public sealed class IngestRunner
         attestationsInserted  = counters.AttestationsInserted;
         totalRoundTrips       = counters.RoundTrips;
 
-        // 5. Layer completion marker (ADR 0037) when the run finished clean.
+        // 5. Layer completion marker when the run finished clean.
         if (counters.UnitsFailed == 0 && failures.Count == 0)
             await _writer.ApplyAsync(LayerCompletion.BuildMarker(decomposer), ct);
 
@@ -469,7 +469,7 @@ public sealed class LayerOrderingViolationException : Exception
     public int MissingLayer { get; }
     public LayerOrderingViolationException(int decomposerLayer, int missingLayer)
         : base($"Layer {decomposerLayer} decomposer requires Layer {missingLayer} "
-             + "to have completed at least once per ADR 0037.")
+             + "to have completed at least once.")
     {
         DecomposerLayer = decomposerLayer;
         MissingLayer = missingLayer;

@@ -3,16 +3,16 @@ using System.Runtime.InteropServices;
 namespace Laplace.Engine.Dynamics;
 
 /// <summary>
-/// P/Invoke bindings to liblaplace_dynamics (per ADR 0024 + 0026 + 0030).
+/// P/Invoke bindings to liblaplace_dynamics.
 ///
 /// The static constructor calls LaplaceDynamicsInit() which locks MKL's
-/// threading layer to TBB and sets MKL_CBWR for substrate determinism
-/// (per RULES.md R7). Per ADR 0030 + the dynamics build CMakeLists,
+/// threading layer to TBB and sets MKL_CBWR for substrate determinism.
 /// MKL/TBB integration is conditional on the lib being built with
 /// LAPLACE_REQUIRE_MKL=ON (or auto-detected at configure time).
 ///
-/// Real bindings (procrustes_fit, laplacian_eigenmaps,
-/// gram_schmidt_orthonormalize, sparsity filters) land Chunk 6.
+/// Bindings: Procrustes alignment, Laplacian eigenmaps, Gram-Schmidt,
+/// and the faithful contracted-operator circuit kernels
+/// (project_embedding + bilinear_edges_tile).
 /// </summary>
 public static partial class NativeInterop
 {
@@ -34,7 +34,7 @@ public static partial class NativeInterop
 
     static NativeInterop()
     {
-        // Per ADR 0030: init MKL once at C# binding load. Return code !=0
+        //: init MKL once at C# binding load. Return code !=0
         // means MKL_CBWR couldn't be locked — caller (test harness or app
         // startup) is responsible for surfacing if substrate determinism
         // is required. In the Eigen-only fallback build, returns 0.
@@ -136,47 +136,4 @@ public static partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "procrustes_free")]
     public static partial void ProcrustesFree(IntPtr transform);
 
-    // TODO Chunk 6.10-6.12: sparsity_per_tensor_topk / sparsity_per_row_topk / sparsity_probe_validate
-    //   (multi-pass lottery-ticket filter — distinct from streaming variants below)
-
-    // === Streaming sparsity (Framework Epic #232 / Stories B.1 + B.2) ===
-    // Single-pass per-tensor + per-row top-k variants used by WeightTensorETL
-    // (ADR 0056). Deterministic per MKL_CBWR mode lock above. TBB-parallel
-    // for large inputs (n >= 65536 per-tensor; row_count >= 4 per-row).
-
-    [LibraryImport(Library, EntryPoint = "sparsity_per_tensor_topk_streaming")]
-    public static unsafe partial int SparsityPerTensorTopkStreaming(
-        double* values, nuint n, double topkPct, byte* outMask);
-
-    [LibraryImport(Library, EntryPoint = "sparsity_per_row_topk_streaming")]
-    public static unsafe partial int SparsityPerRowTopkStreaming(
-        double* rows, nuint rowCount, nuint rowSize, nuint k, byte* outMasks);
-
-    // === Circuit extraction (O(params) address-book read; TBB-parallel, exact) ===
-    // The hot loop of model ingestion, moved off the managed scalar path into the engine.
-
-    /// <summary>One surviving (unit, token, signed value) cell from resolve_matrix.</summary>
-    [StructLayout(LayoutKind.Sequential)]
-    public struct CircuitCell { public uint Unit; public int Token; public float Value; }
-
-    /// <summary>Model inspector: detect a viable noise floor for a weight tensor from its own
-    /// magnitude distribution so kept cells retain targetEnergy of Σw² (the lottery-ticket
-    /// subnetwork). Model-agnostic, TBB-histogrammed. targetEnergy 1.0 ⇒ 0 (keep all).</summary>
-    [LibraryImport(Library, EntryPoint = "detect_energy_floor")]
-    public static unsafe partial double DetectEnergyFloor(float* w, nuint n, double targetEnergy);
-
-    /// <summary>addr[m] = argmax_{t : valid[t]} |E[t,m]| over vocab (or -1). E is [vocab × d_model]
-    /// row-major. valid may be null. TBB-parallel over dims. 0 ok, -1 bad args.</summary>
-    [LibraryImport(Library, EntryPoint = "build_address_book")]
-    public static unsafe partial int BuildAddressBook(
-        float* e, nuint vocab, nuint dModel, byte* valid, int* addrOut);
-
-    /// <summary>Resolve rows [u0,u1) of a row-major [n_units × d_model] matrix against addr,
-    /// emitting every |value|&gt;floor (addr&gt;=0) cell as (unit, token, signed value). TBB-parallel,
-    /// dense+deterministic. *overflow=1 (and nothing emitted) if the window exceeds cap — shrink +
-    /// retry. 0 ok, negative bad args.</summary>
-    [LibraryImport(Library, EntryPoint = "resolve_matrix")]
-    public static unsafe partial int ResolveMatrix(
-        float* w, nuint nUnits, nuint dModel, int* addr, double floor,
-        nuint u0, nuint u1, CircuitCell* outBuf, nuint cap, nuint* outCount, int* overflow);
 }

@@ -50,12 +50,12 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
             // substrate, bootstrap already ran — skip re-emission so the
             // re-run doesn't trip duplicate-pkey on the HAS_TRUST_CLASS
             // attestation. (Production decomposers use the same pattern;
-            // ADR 0042 install-time bootstrap is idempotent by design.)
+ // install-time bootstrap is idempotent by design.)
             var bitmap = await context.Reader.EntitiesExistBitmapAsync(new[] { SourceId }, ct);
             if (bitmap.Length > 0 && (bitmap[0] & 1) != 0) return;
 
             // Pre-bootstrap: in production these meta-entities land at
-            // ADR 0042 Stages 0 + 3.5 (Type/Kind/Source meta-types + trust
+ // Stages 0 + 3.5 (Type/Kind/Source meta-types + trust
             // classes) before any decomposer runs. The synthetic test
             // stands in for that install-time seeding so the
             // BootstrapIntentBuilder's FKs resolve.

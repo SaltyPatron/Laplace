@@ -1,5 +1,5 @@
 /* extension/laplace_substrate/sql/sqldefines.h.in
- * Shared macros for laplace_substrate .sql.in modules (per ADR 0034). */
+ * Shared macros for laplace_substrate .sql.in modules. */
 
 #define LAPLACE_SUBSTRATE_VERSION  '@PROJECT_VERSION@'
 

@@ -14,7 +14,7 @@
  * significant figures).
  *
  * Fixed-point primitives (laplace_fp_*) are also tested against double-
- * precision references to ADR 0004's committed 1e-6 relative error.
+ * precision references to committed 1e-6 relative error.
  */
 
 #include <gtest/gtest.h>
@@ -48,7 +48,7 @@ inline double from_fp(int64_t v) {
 }  // namespace
 
 /* ===================================================================== */
-/* Fixed-point primitives (ADR 0004: 1e-6 relative vs double).            */
+/* Fixed-point primitives (: 1e-6 relative vs double). */
 /* ===================================================================== */
 
 TEST(LaplaceCoreGlicko2Fp, MulAccurate) {
@@ -308,7 +308,7 @@ TEST(LaplaceCoreGlicko2, EffectiveMuDiscountsByTwoRd) {
 }
 
 /* ===================================================================== */
-/* Determinism (ADR 0004: cross-machine bit-identical)                   */
+/* Determinism (: cross-machine bit-identical) */
 /* ===================================================================== */
 
 TEST(LaplaceCoreGlicko2, DeterministicAcrossRuns) {

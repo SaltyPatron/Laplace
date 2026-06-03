@@ -1,10 +1,10 @@
 # engine/core/CMakeLists.txt
 #
-# liblaplace_core.so — substrate primitives (per ADR 0024).
+# liblaplace_core.so — substrate primitives.
 # coord4d, hash128 (BLAKE3), hilbert4d, mantissa, geometry serde,
 # Glicko-2 fixed-point, A* primitives.
 #
-# Per ADR 0030: this lib MUST NOT link MKL. Verified at build time by
+#: this lib MUST NOT link MKL. Verified at build time by
 # ldd check (lands in Epic D).
 
 set(LAPLACE_CORE_HEADERS
@@ -32,7 +32,7 @@ set(LAPLACE_CORE_HEADERS
 
 # No coord4d_t / geometry4d_t custom datatypes — POINT4D, LWPOINT, LWLINE,
 # LWPOLY (from external/postgis/liblwgeom) are the canonical types; engine
-# math kernels operate on raw XYZM-packed double buffers (per RULES.md R1
+# math kernels operate on raw XYZM-packed double buffers (
 # + R22).
 set(LAPLACE_CORE_SOURCES
     src/version.c
@@ -57,7 +57,7 @@ set(LAPLACE_CORE_SOURCES
     src/unicode_seed.cpp
 )
 
-# === T0 codepoint perf-cache (ADR 0006 + ADR 0053) ===
+# === T0 codepoint perf-cache ===
 # liblaplace_core is DECOUPLED from UCD source: it compiles NO generated
 # tables and has no UCD/UCA build dependency. The runtime codepoint_table
 # loader mmaps a perf-cache BINARY blob at startup; the UAX#29/UAX#15
@@ -67,7 +67,7 @@ set(LAPLACE_CORE_SOURCES
 # (UAX#42) + DUCET (UCA allkeys.txt) — the sole UCD/UCA reader in the
 # tree. It is a standalone artifact: consumed by the conformance tests,
 # installed for the app/runtime to load, and deployable to mobile/embedded
-# (ADR 0054). It is NOT linked into the .so.
+#. It is NOT linked into the .so.
 
 add_library(laplace_core SHARED ${LAPLACE_CORE_SOURCES})
 
@@ -104,7 +104,7 @@ add_custom_command(
 add_custom_target(laplace_t0_perfcache ALL DEPENDS ${LAPLACE_PERFCACHE_BIN})
 
 # Re-emit the T0 perf-cache and byte-compare to the stamp-built artifact.
-# RULES R7 / ADR 0053: same UCD + UCA + emit tool → identical bytes.
+# / : same UCD + UCA + emit tool → identical bytes.
 set(LAPLACE_PERFCACHE_REFERENCE_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_t0_perfcache.reference.bin")
 add_custom_target(laplace_verify_perfcache_determinism
     COMMAND ${CMAKE_COMMAND} -E copy ${LAPLACE_PERFCACHE_BIN} ${LAPLACE_PERFCACHE_REFERENCE_BIN}
@@ -117,7 +117,7 @@ add_custom_target(laplace_verify_perfcache_determinism
             --output      ${LAPLACE_PERFCACHE_BIN}
     COMMAND ${CMAKE_COMMAND} -E compare_files ${LAPLACE_PERFCACHE_BIN} ${LAPLACE_PERFCACHE_REFERENCE_BIN}
     DEPENDS laplace_t0_perfcache laplace_ucd_tables_emit ${LAPLACE_PERFCACHE_XML} "${LAPLACE_DUCET_FILE}"
-    COMMENT "Verify T0 perf-cache emit is byte-deterministic (RULES R7)"
+    COMMENT "Verify T0 perf-cache emit is byte-deterministic"
     VERBATIM
 )
 

@@ -10,8 +10,10 @@ lens). Updated 2026-06-01. The point of this file: stop re-breaking things that 
   Putting *anything* source-derived into an entity id (e.g. ordering an n-gram's constituents by weight
   magnitude) breaks dedup and is the cardinal sin.
 - **Ingestion is O(params) streaming, never a recompute / GEMM / vocab² bilinear.**
-- **No top-k / lottery-ticket truncation.** Noise floor only (drop genuine ~0 jitter); magnitude lives
-  in the Glicko-2 μ, so selectivity is `ORDER BY μ` at query time, never discarded at ingest.
+- **No top-k / floors / budgets — ever.** Zero is the only non-event; a tiny |m| is a Glicko DRAW by
+  the math (tanh(m/M) ≈ ½), played, never dropped. Magnitude lives in the Glicko-2 μ, so selectivity
+  is `ORDER BY μ` at query time, never discarded at ingest. Write volume is answered by the set→set
+  Merkle attestation (dedup by construction), never by a cut.
 - **Evidence keeps provenance (source, layer, head, time); consensus drops it** (one row per
   (subject, kind, object), Glicko-2-accumulated over all witnesses).
 
@@ -20,10 +22,11 @@ lens). Updated 2026-06-01. The point of this file: stop re-breaking things that 
 - **Generic shape-based circuit detection** — `ModelGeometry.Detect` finds QK/OV/FFN from tensor SHAPE +
   universal HF config dims, NO per-family code. Cross-model test passes on TinyLlama (GQA) and Phi-2
   (MHA, `dense`/`fc1`/`fc2`). `ModelGeometryTests`.
-- **O(params) address-book ingest** — `WeightTensorETL.EmitCircuitMemoriesAsync`: build `addr[m]`
-  (dim→token) once from the embedding, then stream each weight CELL and resolve via `addr`. NO E·W vocab
-  projection (that was O(vocab·params)), no vocab² pairs. Verified: TinyLlama ~31s, Phi-2 ~90s; unicode +
-  both models ~5 min total; ~1.9 GB DB at the (now-removed) 0.05% floor.
+- **Contracted-bilinear circuit ingest** — `WeightTensorETL.EmitCircuitMemoriesAsync` →
+  `ModelCircuitEdges.Emit`: project each circuit's two sides through E / E_U once, contract
+  M = Left·Rightᵀ tile-by-tile (engine `bilinear_edges_tile`, exact f64), emit SIGNED token×token
+  observations. The earlier argmax address-book emit — and the perf numbers measured on it
+  (TinyLlama ~31s, Phi-2 ~90s) — is superseded; it is the dead path queued for deletion below.
 - **Cross-dtype decoder** — `LoadRawBF16AsF32`: F32/F64, F16, BF16, F8_E4M3, F8_E5M2, I8/16/32/64, U8,
   BOOL; fail-loud on unknown (GGUF block-quant is a separate container — not handled).
 - **Sharded safetensors** — `SafetensorsContainerParser.ParseModel` unions all `*.safetensors`; each
@@ -37,14 +40,16 @@ lens). Updated 2026-06-01. The point of this file: stop re-breaking things that 
 - **All circuits emitted** — QK→ATTENDS, OV→OV_RELATES, FFN→COMPLETES_TO, each with its (layer,head)
   Witness as `attestations.context_id` (evidence provenance).
 - **Re-ingest guard** keys on COMPLETES_TO (idempotent; no second DB hammer).
-- **Top-k floor removed** — absolute noise floor `LAPLACE_CIRCUIT_FLOOR`, default 0 (keep all real cells).
+- **Top-k removed; the floor env knob is gone** — `LAPLACE_CIRCUIT_FLOOR` no longer exists in code.
+  The surviving cut is `ModelCircuitEdges.CalibrateArena`'s θ (recall-budget-derived) — still a
+  floor/budget, an OPEN violation of "no floors / budgets ever" (see Still open).
 
 ## Broken / being unfucked (in this pass)
 
 - **[CARDINAL] n-gram id was source-tainted** — constituents were ordered by weight |magnitude|
   (source/position) → same token-set → different Merkle id per witness → NO dedup. FIX: order by content
   (`Hash128.CompareToBytewise`), magnitude only in μ. (`WeightTensorETL.EmitUnit`.)
-- **Consensus kept context** — `rebuild_consensus` GROUP BY included `context_id`, and layer/head is in
+- **Consensus kept context** — the then-extant `rebuild_consensus` (since removed by design) GROUP BY included `context_id`, and layer/head is in
   context → witnesses never collapsed (consensus rows == evidence rows; zero dedup). FIX: key consensus on
   (subject, kind, object) only; drop source AND context. (`13_consensus.sql.in`.)
 - **Queries were ad-hoc** — ranked-μ / completions / dedup-stats were hand-run each session. FIX: permanent
@@ -67,9 +72,10 @@ The evidence/consensus split is now real and the Glicko math is DERIVED, not kno
 - **Trust → opponent φ, never a μ multiplier.** witness weight (kind_rank × source_trust ×
   tenant_trust) → `opponent_rd` via `WitnessPhi`; Glicko's own `g(φ)` does the weighting.
   (`AttestationFactory.WitnessPhi`.)
-- **Neutral opponent (1500), not the old sub-neutral 1000;** `rebuild_consensus` feeds the C
+- **Neutral opponent (1500), not the old sub-neutral 1000;** `incremental_consensus` feeds the C
   aggregate the stored `score`/`opponent_rd` and replays each row `observation_count` times
-  (occurrences = games) via `generate_series`. (`13_consensus.sql.in`.)
+  (occurrences = games) via `generate_series`. (`13_consensus.sql.in`; the batch `rebuild_consensus`
+  was removed by design — consensus accumulates at ingest only.)
 - **VERIFIED end-to-end** (`tests/sql/consensus_signed.sql`, live DB): confirm μ=1640e9 >
   neutral 1500e9 > refute μ=1359e9 (symmetric); draw = exactly neutral; trusted (1640) > crank
   (1629) at identical score; 8-games (1748) > 1-game (1640). Engine 37/37 tests, 28/28 factory
@@ -104,11 +110,16 @@ The evidence/consensus split is now real and the Glicko math is DERIVED, not kno
   is lossy. Either drop it (relations carry the content) or make its affinity the streamed sparse graph.
 - **Dedup magnitude vs granularity** — per-neuron n-grams may be too specific to recur; token→token recurs
   most. Measure `consensus_stats` after the cardinal fix; decide granularity.
-- **Semantic validation** — decode relations to surfaces; verify a known fact (e.g. capital-of-France).
+- **Semantic validation** — resolve relations to surface text; verify a known fact (e.g. capital-of-France).
 - **Synthesis / GGUF re-export** reads the OLD Q_PROJECTS (`Program.cs` SynthesizeAsync) → broken; needs
   rework to read the new records + placements.
 - **Breadth** — GGUF block-quant (Flux, `gguf/`), MoE (Qwen3/DeepSeek; detector groups by expert but
   untested), non-text modalities (the n-gram trajectory entity is already the modality-blind unit; only the
   front-end atom extractor is modality-specific).
 - **Granular test suite** — have ModelGeometry cross-model + QK parity; owe NgramTrajectory (content-id
-  stability/dedup), Math4d.Centroid, address-book, run-to-run determinism, recipe, tokenizer.
+  stability/dedup), Math4d.Centroid, run-to-run determinism, recipe, tokenizer.
+- **θ / recall-budget calibration is an OPEN violation** — `ModelCircuitEdges.CalibrateArena` derives
+  θ from a top-K retrieval-fidelity budget and SKIPS sub-θ couplings instead of playing them as draws;
+  "no floors / budgets ever" stands. Likewise the per-(i,j) edge emit (10⁸+ rows per circuit) is the
+  per-cell dump the set→set Merkle-hyperedge attestation exists to replace — dedup by construction is
+  the write-volume answer, not a cut. Both need the set→set emitter.

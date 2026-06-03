@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-/* UAX#29 grapheme cluster break per ADR 0047. Operates on a buffer of
+/* UAX#29 grapheme cluster break. Operates on a buffer of
  * Unicode codepoints (NOT UTF-8 bytes — caller decodes UTF-8 first via
  * laplace_utf8_decode_next or equivalent). Returns the codepoint index
  * of the next grapheme cluster boundary AFTER position `from`, or `n`
@@ -23,12 +23,9 @@ extern "C" {
  * compiled-in UCD tables.
  *
  * Compliance scope: rules GB1, GB2, GB3, GB4, GB5, GB6, GB7, GB8, GB9,
- * GB9a, GB9b, GB11 (extended-pictographic ZWJ sequence), GB12, GB13
- * (regional indicator pairing), GB999.
- *
- * GB9c (Indic conjunct break) lands in a follow-up pass — requires
- * InCB property from DerivedCoreProperties.txt which the codegen tool
- * will start emitting alongside this story. */
+ * GB9a, GB9b, GB9c (Indic conjunct break, via the InCB property tables),
+ * GB11 (extended-pictographic ZWJ sequence), GB12, GB13 (regional
+ * indicator pairing), GB999. */
 
 /* Returns the codepoint index of the next grapheme cluster boundary
  * AFTER `from`. If `from >= n`, returns n. */

@@ -7,7 +7,7 @@
  * machines + codepoint_table accessors resolve every property from this
  * mapping, so without it the conformance suites would see DEFAULT (0) for
  * every codepoint. LAPLACE_PERFCACHE_PATH_FOR_TESTS is the blob the build
- * emits from the pinned UCD/UCA (RULES R7). */
+ * emits from the pinned UCD/UCA. */
 
 namespace {
 

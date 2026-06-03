@@ -16,7 +16,7 @@ namespace Laplace.Decomposers.Abstractions;
 ///   <item><c>coord   = Math4d.Centroid([child coord …])</c></item>
 ///   <item><c>hilbert = Hilbert128.Encode(coord)</c></item>
 ///   <item>the Content physicality stores the ordered constituents as the trajectory
-///         (<c>Trajectory.Build</c>, ADR 0012) — the path itself, not just the centroid.</item>
+/// (<c>Trajectory.Build</c>,) — the path itself, not just the centroid.</item>
 /// </list>
 ///
 /// Because the id is the Merkle of the constituents, the SAME n-gram minted by any source

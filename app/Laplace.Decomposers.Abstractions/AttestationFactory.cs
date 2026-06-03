@@ -6,7 +6,7 @@ namespace Laplace.Decomposers.Abstractions;
 /// <summary>
 /// Centralised factory for <see cref="AttestationRow"/> (the EVIDENCE layer).
 /// Every per-source decomposer routes attestation construction through here
-/// (ADR 0016 — no per-source reinvention).
+/// (no per-source reinvention).
 ///
 /// <para>
 /// An attestation is ONE Glicko-2 OBSERVATION — a match the relation (the

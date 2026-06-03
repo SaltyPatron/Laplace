@@ -11,7 +11,7 @@ namespace Laplace.Decomposers.Abstractions;
 ///
 /// <para>External-reference ids (WordNet synset offset, Tatoeba sentence id):
 /// stable cross-session join keys for a source-specific record that is NOT
-/// derived from text content alone (ADR 0016).</para>
+/// derived from text content alone.</para>
 ///
 /// <para>Source identity (truth #5 — identity is content, not name): a source
 /// is identified by the CONTENT it carries, not its file/dir name, so two

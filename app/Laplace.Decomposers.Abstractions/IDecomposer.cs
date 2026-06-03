@@ -5,14 +5,14 @@ namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
 /// Canonical C# plugin contract every per-source decomposer implements per
-/// ADR 0051. Examples: UnicodeDecomposer (Layer 0, #183), ISODecomposer (#193),
-/// WordNetDecomposer (#184), OMWDecomposer (#185), UDDecomposer (#186),
-/// WiktionaryDecomposer (#187), TatoebaDecomposer (#188), ConceptNetDecomposer
-/// (#190), Atomic2020Decomposer (#189), TreeSitterDecomposer (#194),
-/// the composite ModelDecomposer (#191) per ADR 0043.
+/// . Examples: UnicodeDecomposer (Layer 0, #183), ISODecomposer,
+/// WordNetDecomposer, OMWDecomposer, UDDecomposer,
+/// WiktionaryDecomposer, TatoebaDecomposer, ConceptNetDecomposer
+///, Atomic2020Decomposer, TreeSitterDecomposer,
+/// the composite ModelDecomposer.
 ///
 /// <para>
-/// Lifecycle: caller (typically <see cref="IngestRunner"/> per ADR 0052)
+/// Lifecycle: caller (typically <see cref="IngestRunner"/>)
 /// calls <see cref="InitializeAsync"/> exactly once, then iterates
 /// <see cref="DecomposeAsync"/>'s yielded intents, then disposes.
 /// <see cref="DisposeAsync"/> releases any file handles / readers /
@@ -31,7 +31,7 @@ namespace Laplace.Decomposers.Abstractions;
 /// Cross-decomposer entity sharing is automatic via content-addressing —
 /// when two decomposers emit the same canonical content, they produce the
 /// same BLAKE3-128 entity id and SubstrateCRUD's <c>ON CONFLICT DO NOTHING</c>
-/// (per RULES R5) converges them transparently. No coordination logic
+/// converges them transparently. No coordination logic
 /// required in either decomposer.
 /// </para>
 /// </summary>
@@ -48,13 +48,13 @@ public interface IDecomposer : IAsyncDisposable
     /// <summary>Human-readable name for logs / observability / CLI.</summary>
     string SourceName { get; }
 
-    /// <summary>Per ADR 0037 layer order (0/1 = Unicode atoms; ~10 = Model).
+    /// <summary> layer order (0/1 = Unicode atoms; ~10 = Model).
     /// Used by orchestration to enforce layer ordering for fresh-substrate
     /// bootstrap: Layer N's decomposer requires Layer 0..N-1 to have completed.
     /// </summary>
     int LayerOrder { get; }
 
-    /// <summary>Trust class assigned to this source per ADR 0044. Recorded
+    /// <summary>Trust class assigned to this source. Recorded
     /// as a HAS_TRUST_CLASS meta-attestation on the source entity on first run.
     /// </summary>
     Hash128 TrustClassId { get; }
@@ -62,16 +62,16 @@ public interface IDecomposer : IAsyncDisposable
     /// <summary>Initialize — verify ecosystem path exists, register source
     /// entity if not in substrate, bootstrap the decomposer's own type
     /// vocabulary + attestation kind vocabulary + arena-semantics
-    /// meta-attestations per ADR 0042. Idempotent: re-init on an already-
+    /// meta-attestations. Idempotent: re-init on an already-
     /// bootstrapped substrate is a no-op (via SubstrateCRUD ON CONFLICT
-    /// per RULES R5).</summary>
+    ///).</summary>
     Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default);
 
     /// <summary>Decompose the source's full domain ecosystem into a STREAM
-    /// of <see cref="SubstrateChange"/> intents per ADR 0049. Each yielded
+    /// of <see cref="SubstrateChange"/> intents. Each yielded
     /// intent is one source-content-unit (one WordNet synset; one Wiktionary
     /// entry; one model tokenizer vocab batch; etc.). The caller hands each
-    /// intent to <see cref="ISubstrateWriter.ApplyAsync"/> per ADR 0050.
+    /// intent to <see cref="ISubstrateWriter.ApplyAsync"/>.
     /// </summary>
     IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,

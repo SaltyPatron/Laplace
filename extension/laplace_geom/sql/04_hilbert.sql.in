@@ -1,6 +1,6 @@
 /* 04_hilbert.sql.in — 4D Hilbert curve encoder/decoder.
  *
- * Per ADR 0005: single 4D Hilbert curve over the [-1,1]^4 bounding
+ *: single 4D Hilbert curve over the [-1,1]^4 bounding
  * hyperbox, indexing both S³ surface entities and 4-ball interior
  * centroids with consistent 1D locality.
  *

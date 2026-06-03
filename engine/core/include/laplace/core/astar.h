@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-/* A* cascade traversal primitives (per RULES.md R19 — compiled cascade
+/* A* cascade traversal primitives ( — compiled cascade
  * is a substrate-native operator, NOT recursive SQL or app-layer loops).
  *
  * `astar_query_t` is an opaque handle — type-erased per R14 because the
@@ -31,7 +31,7 @@ typedef struct {
 } astar_step_t;
 
 /* Implementations land in Chunk 5+ — full cascade traversal with
- * Glicko-2-weighted edge costs (per ADR 0036 arena semantics). */
+ * Glicko-2-weighted edge costs ( arena semantics). */
 astar_query_t* astar_open(const hash128_t* start,
                           const hash128_t* goal_region,
                           size_t max_depth,

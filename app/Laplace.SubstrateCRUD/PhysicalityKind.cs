@@ -2,7 +2,7 @@ namespace Laplace.SubstrateCRUD;
 
 /// <summary>
 /// Per-source per-entity representation kind — matches the substrate-canonical
-/// PhysicalityKind entities bootstrapped at install time per ADR 0042 Stage 2.
+/// PhysicalityKind entities bootstrapped at install time Stage 2.
 /// Stored as <c>smallint</c> in <c>physicalities.kind</c>.
 /// </summary>
 public enum PhysicalityKind : short

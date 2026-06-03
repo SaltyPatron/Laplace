@@ -1,5 +1,5 @@
 /* 01_meta.sql.in — extension identity + version check.
- * Per ADR 0034. Real wrapper SQL for laplace_geom_version() lives here. */
+ *. Real wrapper SQL for laplace_geom_version() lives here. */
 
 CREATE FUNCTION laplace_geom_version()
     RETURNS text

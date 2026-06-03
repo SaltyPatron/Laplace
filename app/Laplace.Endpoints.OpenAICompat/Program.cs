@@ -1,13 +1,13 @@
 // Stream F scaffold per /home/ahart/.claude/plans/replicated-hatching-stream.md.
 //
-// Per ADR 0011 IProtocolEndpoint + DESIGN.md:679-684 + GLOSSARY "Endpoint extension":
+// IProtocolEndpoint + + the "Endpoint extension" definition:
 // translates OpenAI-compatible HTTP requests (chat completions, completions,
 // embeddings) into substrate cascade queries; translates substrate responses
 // back into OpenAI-shape JSON. Dissolves conventional inference runtimes —
-// the substrate IS the serving layer (GLOSSARY:493).
+// the substrate IS the serving layer.
 //
 // Stream F-complete implements:
-//   - POST /v1/chat/completions       → cascade A* per ADR 0035 with chat template
+//   - POST /v1/chat/completions       → cascade A* with chat template
 //   - POST /v1/completions            → cascade A* completion mode
 //   - POST /v1/embeddings             → physicality lookup (PROJECTION coord)
 //   - GET  /v1/models                 → list of synthesized model recipes
@@ -30,7 +30,7 @@ app.MapGet("/v1/models", () => Results.Json(new
 }));
 
 app.MapPost("/v1/chat/completions", (HttpContext ctx) => Results.StatusCode(501)
-    /* Stream F-complete: cascade A* through typed attestation graph per ADR 0035
+    /* Stream F-complete: cascade A* through typed attestation graph
        weighted by Glicko-2 effective-mu, prompt decomposed per R19. Until Stream
        E's compiled cascade SRF lands, this endpoint returns 501. */);
 

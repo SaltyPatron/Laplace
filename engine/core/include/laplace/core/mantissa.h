@@ -12,7 +12,7 @@ extern "C" {
  * components. Each vertex of an entity's `trajectory` column references
  * another entity (the one playing the constituent role at this vertex's
  * position). Same hash space as `entities.hash` — one identity, two roles
- * (per GLOSSARY "Entity": content AND building block, simultaneously).
+ * (per the "Entity" definition: content AND building block, simultaneously).
  *
  * Per-vertex 212-bit budget = 4 × (1 sign + 52 mantissa) per FP64 component,
  * with the biased exponent pinned to 0x3FF so every coord is a finite, normal
@@ -28,7 +28,7 @@ extern "C" {
  *
  * Consequences of the layout:
  *   - The 128-bit BLAKE3 entity ID round-trips exactly through XYZ
- *     (no truncation — STANDARDS.md hash discipline).
+ * (no truncation — the hash discipline).
  *   - Same entity → same XYZ bit pattern → same 3D scatter position across
  *     every trajectory that references it. Directly visualizable.
  *   - M is a scalar metadata channel (ordinal, run_length, plus 21 free flag

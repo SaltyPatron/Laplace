@@ -1,7 +1,7 @@
 /* engine/core/src/glicko2.c
  *
  * Glicko-2 update equations (Glickman 2013, "Example of the Glicko-2
- * System") implemented in int64 fixed-point at scale 1e9 per ADR 0004.
+ * System") implemented in int64 fixed-point at scale 1e9.
  * Cross-machine determinism by construction: no double intermediates, no
  * machine-dependent rounding. All math goes through __int128 to avoid
  * overflow when multiplying scaled values.

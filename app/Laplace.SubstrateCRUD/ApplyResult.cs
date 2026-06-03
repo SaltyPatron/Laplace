@@ -3,7 +3,7 @@ namespace Laplace.SubstrateCRUD;
 /// <summary>
 /// Result of <see cref="ISubstrateWriter.ApplyAsync"/> — per-intent
 /// observability data emitted to <c>laplace_crud_*</c> Prometheus metrics
-/// at the orchestration layer (IngestRunner per ADR 0052).
+/// at the orchestration layer (IngestRunner).
 /// </summary>
 public sealed record ApplyResult(
     /// <summary>Total entity rows the intent presented (pre-dedup).</summary>

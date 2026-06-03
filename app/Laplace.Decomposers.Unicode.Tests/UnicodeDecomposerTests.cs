@@ -9,7 +9,7 @@ namespace Laplace.Decomposers.Unicode.Tests;
 
 /// <summary>
 /// Verifies the T0 codepoint seed via <see cref="UnicodeSeed.Compute"/> on UCD/DUCET
-/// (sibling of the perf-cache blob per ADR 0006 — seed does not mmap the blob).
+/// (sibling of the perf-cache blob — seed does not mmap the blob).
 /// Needs liblaplace_core.so + <c>/vault/Data/Unicode</c> paths on the test host.
 /// </summary>
 public sealed class UnicodeDecomposerTests

@@ -8,7 +8,7 @@ namespace Laplace.Decomposers.Model;
 
 /// <summary>
 /// IDecomposer for transformer model families (Llama, Qwen, etc.).
-/// LayerOrder = 10 — ingests after all linguistic seed layers (ADR 0037).
+/// LayerOrder = 10 — ingests after all linguistic seed layers.
 ///
 /// Decomposition order (FK-dependency safe):
 ///   1. Bootstrap types + attestation kinds
@@ -81,26 +81,20 @@ public sealed class ModelDecomposer : IDecomposer
     public static readonly Hash128 WitnessTypeId =
         Hash128.OfCanonical("substrate/type/Witness/v1");
 
-    /* Transformer-family tensor-calculation attestation kinds per ADR 0056
-     * spec table + ADR 0044 T9 + GLOSSARY:95 + DESIGN.md:731. Fixed
-     * vocabulary, all 10 kinds:
-     *   EMBEDS               — embed_tokens, shape (text_entity, embed_dim), per-cell magnitude, one instance
-     *   Q_PROJECTS           — q_proj × k_proj per (layer, head), q[i,:]·k[j,:]ᵀ, aggregated
-     *   K_PROJECTS           — k_proj per (layer, head), per-cell magnitude (companion to Q in some specs), aggregated
-     *   V_PROJECTS           — v_proj per (layer, head), (text_entity, hidden_dim), per-cell magnitude, aggregated
-     *   O_PROJECTS           — o_proj per (layer, head), (hidden_dim, text_entity), per-cell magnitude, aggregated
-     *   GATES                — gate_proj per layer, SiLU/SwiGLU per recipe, aggregated across layers
-     *   UP_PROJECTS          — up_proj per layer, (text_entity, intermediate_dim), per-cell magnitude, aggregated
-     *   DOWN_PROJECTS        — down_proj per layer, (intermediate_dim, text_entity), per-cell magnitude, aggregated
-     *   NORMALIZES           — *_norm.weight per layer, unary (hidden_dim,), per-cell magnitude, aggregated
-     *   OUTPUT_PROJECTS      — lm_head, (hidden_dim, text_entity), per-cell magnitude, one instance
+    /* Attestation-kind vocabulary.
      *
-     * Per-(layer, head, expert, dim) attribution is RECIPE CONTENT on the model
-     * recipe entity per the ADR 0056 amendment + GLOSSARY explicit rule, NOT
-     * per-attestation context_id. Restored in Stream A per
-     * /home/ahart/.claude/plans/replicated-hatching-stream.md after a prior
-     * commit wrongly narrowed the vocabulary citing a fabricated ADR 0056
-     * reading. */
+     * LIVE circuit kinds (emitted by EmitCircuitMemoriesAsync → ModelCircuitEdges):
+     *   ATTENDS / OV_RELATES / COMPLETES_TO — signed token×token bilinear-circuit
+     *   relations (QK / OV / FFN read through the embedding), each observation
+     *   carrying its (layer, head) Witness entity as context_id (evidence keeps
+     *   provenance; consensus drops it).
+     *
+     * LEGACY per-tensor kinds (EMBEDS … OUTPUT_PROJECTS): the vocabulary of the
+     * dead per-cell-magnitude ExtractAsync path. Per-token magnitude reduction is
+     * banned — it destroys the relation by collapsing the dim axis to one number.
+     * They are bootstrapped only so existing rows keep resolving; they go when
+     * the dead path is deleted. Nonlinearities (softmax, SiLU/SwiGLU gating) are
+     * runtime, never attested. */
     public static readonly Hash128 EmbedsKind        = Hash128.OfCanonical("substrate/kind/EMBEDS/v1");
     public static readonly Hash128 QProjectsKind     = Hash128.OfCanonical("substrate/kind/Q_PROJECTS/v1");
     public static readonly Hash128 KProjectsKind     = Hash128.OfCanonical("substrate/kind/K_PROJECTS/v1");
@@ -136,25 +130,6 @@ public sealed class ModelDecomposer : IDecomposer
     /* Well-known entity */
     public static readonly Hash128 LlamaArchitectureId =
         Hash128.OfCanonical("substrate/entity/Architecture_Llama/v1");
-
-    private static readonly LlamaWeightExtractor.KindIds ExtractorKinds = new()
-    {
-        Embeds         = EmbedsKind,
-        QProjects      = QProjectsKind,
-        KProjects      = KProjectsKind,
-        VProjects      = VProjectsKind,
-        OProjects      = OProjectsKind,
-        Gates          = GatesKind,
-        UpProjects     = UpProjectsKind,
-        DownProjects   = DownProjectsKind,
-        Normalizes     = NormalizesKind,
-        OutputProjects = OutputProjectsKind,
-        Attends        = AttendsKind,
-        OvRelates      = OvRelatesKind,
-        CompletesTo    = CompletesToKind,
-        NgramType      = NgramTypeId,
-        WitnessType    = WitnessTypeId,
-    };
 
     private readonly string _modelDir;
     private readonly Hash128 _source;
@@ -200,13 +175,12 @@ public sealed class ModelDecomposer : IDecomposer
         /* Model_Feature type removed — feature-dim entities were conventional-AI
          * smuggling; the corrected decomposition emits PROJECTION physicalities for the
          * token-axis tensors (embed_tokens, lm_head) and token×token typed
-         * attestations for interior tensors via self-bilinear E·W·Wᵀ·Eᵀ. */
+         * attestations for interior tensors via the bilinear circuits. */
 
-        /* Transformer-family tensor-calculation kind vocabulary per ADR 0056
-         * spec table + ADR 0044 T9 + GLOSSARY:95 + DESIGN.md:731. All 10
-         * kinds bootstrapped at first decomposer run; per-position attribution
-         * (layer/head/expert/dim) is recipe content on the model recipe entity
-         * per the ADR 0056 same-day amendment, NOT per-attestation context_id. */
+        /* Kind vocabulary bootstrapped at first decomposer run. Live: the circuit
+         * kinds (ATTENDS / OV_RELATES / COMPLETES_TO) + TOKEN_MAPS_TO + the recipe
+         * kinds. Legacy per-tensor kinds (EMBEDS … OUTPUT_PROJECTS) belong to the
+         * dead per-cell-magnitude path and are kept only until it is deleted. */
         boot.AddKind("EMBEDS");
         boot.AddKind("Q_PROJECTS");
         boot.AddKind("K_PROJECTS");
@@ -288,18 +262,16 @@ public sealed class ModelDecomposer : IDecomposer
         log.LogInformation("phase=vocab emitted: {Batches} batches ({Ms} ms)",
             vocabBatches, phaseSw.ElapsedMilliseconds);
 
-        /* 4. Weights: morph embed_tokens onto the shared Unicode S³ frame
-         *    (SUBSTRATE-FOUNDATION truth #3). The model is a witness — its embedding
-         *    is placed on the canonical frame as Projection physicalities, NOT a
-         *    per-model embedding. Interior q/k/v/o/gate/up/down is OPEN (foundation
-         *    doc) and intentionally not emitted; the prior per-circuit Score(t,s)
-         *    path (extractor.ExtractAsync) is retained for reference but bypassed. */
-        var extractor = new WeightTensorETL(_modelDir, recipe, tokens, Source, ExtractorKinds, log);
+        /* 4. Weights. The model is a witness — interior circuits become signed
+         *    token×token attestations; the embedding becomes Projection physicality
+         *    placements on the shared Unicode S³ frame. */
+        var extractor = new WeightTensorETL(_modelDir, recipe, tokens, Source, WitnessTypeId, log);
 
-        // 4a. The records: ALL interior circuits (QK→ATTENDS, OV→OV_RELATES, FFN→COMPLETES_TO)
-        //     read per (layer, head) through the embedding address book as [n-gram] ⇒ {tokens}
-        //     memories — content-addressed n-gram trajectory entities + typed attestations,
-        //     each carrying its (layer, head) witness as context (evidence keeps provenance).
+        // 4a. The records: ALL interior circuits (QK→ATTENDS, OV→OV_RELATES, FFN→COMPLETES_TO),
+        //     each side projected through E / E_U once, contracted tile-by-tile
+        //     (ModelCircuitEdges → engine bilinear_edges_tile, exact f64) into signed
+        //     token×token observations, each carrying its (layer, head) witness as
+        //     context (evidence keeps provenance; consensus drops it).
         log.LogInformation("phase=circuits starting (QK/OV/FFN per layer,head → [n-gram] ⇒ {{tokens}})");
         await foreach (var change in extractor.EmitCircuitMemoriesAsync(ct))
         {

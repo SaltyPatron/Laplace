@@ -3,10 +3,10 @@ using System.Runtime.InteropServices;
 namespace Laplace.Engine.Core;
 
 /// <summary>
-/// P/Invoke bindings to liblaplace_core (per ADR 0024 + 0026).
+/// P/Invoke bindings to liblaplace_core ().
 ///
-/// Per RULES.md R14: engine-boundary types are POD; no exceptions cross
-/// the C ABI. Per RULES.md R22: this project does NOT define parallel
+///: engine-boundary types are POD; no exceptions cross
+/// the C ABI.: this project does NOT define parallel
 /// C# types for liblwgeom's POINT4D — geometry round-trips PG ↔ C# via
 /// Npgsql.NetTopologySuite (NTS Coordinate with Ordinates.XYZM).
 ///

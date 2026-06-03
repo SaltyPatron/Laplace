@@ -5,10 +5,10 @@ namespace Laplace.Engine.Core;
 /// <summary>
 /// Managed wrapper over the engine <c>laplace_text_decomposer_run</c>
 /// (engine/core/include/laplace/core/text_decomposer.h). Observed UTF-8 +
-/// UAX#29 segmentation per ADR 0047 (no NFC/NFD at ingest).
+/// UAX#29 segmentation (no NFC/NFD at ingest).
 ///
 /// <para>Same input bytes -> identical TierTree -> identical content-
-/// addressed hashes (RULES R7). Determinism is pinned by the compiled-in
+/// addressed hashes. Determinism is pinned by the compiled-in
 /// UCD tables from <c>LAPLACE_UCD_PATH</c> at the version
 /// <c>LAPLACE_UNICODE_VERSION</c>.</para>
 /// </summary>

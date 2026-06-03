@@ -8,9 +8,9 @@ namespace Laplace.Decomposers.Audio;
 /// <summary>
 /// Stream D scaffold per /home/ahart/.claude/plans/replicated-hatching-stream.md.
 ///
-/// Per ADR 0040 Universal T0 + ADR 0043 composite decomposer pattern:
+/// Universal T0 + composite decomposer pattern:
 /// AudioDecomposer = ContainerFormat&lt;WAV/FLAC/MP3/Ogg/Opus/...&gt; × CodecDecoder
-/// × ModalityBinder&lt;Sample/Frame/Track&gt;. Per GLOSSARY:44-46 every modality bottoms
+/// × ModalityBinder&lt;Sample/Frame/Track&gt;. Per every modality bottoms
 /// at the same 1,114,112 Unicode codepoints — audio sample magnitudes content-address
 /// through their integer values, sharing hash space with text mentions of those integers.
 ///
@@ -33,19 +33,18 @@ public sealed class AudioDecomposer : IDecomposer
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "AudioDecomposer";
-    public int     LayerOrder   => 12;  // After image (11) per ADR 0037 generalization
+    public int     LayerOrder   => 12;  // After image (11) generalization
     public Hash128 TrustClassId => TrustClass;
 
     public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        // Audio-tier types per ADR 0040 + GLOSSARY:62
+ // Audio-tier types + 
         boot.AddType("Audio_Sample");
         boot.AddType("Audio_Frame");
         boot.AddType("Audio_Track");
         boot.AddType("Voice");
-        // Audio-modality kinds per GLOSSARY:96
-        boot.AddKind("IS_AT_SAMPLE");
+ // Audio-modality kinds         boot.AddKind("IS_AT_SAMPLE");
         boot.AddKind("HAS_FREQUENCY_PEAK");
         boot.AddKind("HAS_VOICE");
         boot.AddKind("TRANSCRIBES_AS");

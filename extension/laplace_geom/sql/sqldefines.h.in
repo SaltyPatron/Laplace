@@ -1,6 +1,6 @@
 /* extension/laplace_geom/sql/sqldefines.h.in
  *
- * Shared macros for laplace_geom .sql.in modules (per ADR 0034). This
+ * Shared macros for laplace_geom .sql.in modules. This
  * file is preprocessed via cpp -traditional-cpp + configure_file()
  * substitution into sqldefines.h in the build tree, then #included by
  * each .sql.in module.

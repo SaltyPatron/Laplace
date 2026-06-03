@@ -2,8 +2,8 @@
 
 #include <stddef.h>
 
-/* Real implementations land Chunk 5+ — compiled cascade per RULES.md R19,
- * Glicko-2-weighted edge costs per RULES.md R20. Stubs satisfy linkage. */
+/* Real implementations land Chunk 5+ — compiled cascade,
+ * Glicko-2-weighted edge costs. Stubs satisfy linkage. */
 
 struct astar_query {
     int _placeholder;  /* opaque type body */

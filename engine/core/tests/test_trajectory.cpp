@@ -6,10 +6,10 @@
 #include "laplace/core/trajectory.h"
 #include "laplace/core/hash128.h"
 
-/* Round-trip lossless: N constituent hashes → mantissa-packed XYZM buffer →
+/* Lossless both ways: N constituent hashes → mantissa-packed XYZM buffer →
  * N hashes back, byte-identical, in order. This is the substrate's
- * content-storage codec (ADR 0012); it must be exactly reversible or
- * reconstruction-from-DB cannot be bit-perfect. */
+ * content-trajectory packing; it must be exactly reversible or content
+ * reconstruction from the DB cannot be bit-perfect. */
 
 TEST(LaplaceCoreTrajectory, BuildThenConstituentsRoundTrips) {
     std::vector<hash128_t> in(5);
@@ -30,7 +30,7 @@ TEST(LaplaceCoreTrajectory, BuildThenConstituentsRoundTrips) {
 }
 
 TEST(LaplaceCoreTrajectory, EveryVertexIsGeometryValidDouble) {
-    // ADR 0012: each packed component must be a finite normal double in
+ // : each packed component must be a finite normal double in
     // [1,2)∪(-2,-1] so PG geometry accepts it (no NaN/inf).
     std::vector<hash128_t> in(3);
     for (auto& h : in) { h.hi = ~0ull; h.lo = ~0ull; }   // all-ones: worst case

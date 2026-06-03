@@ -155,7 +155,7 @@ TEST(LaplaceCoreHashComposer, RootCoordIsCentroidOfInteriorCentroids) {
 }
 
 TEST(LaplaceCoreHashComposer, IsDeterministicAcrossRuns) {
-    /* RULES R7: same input → byte-identical populated tree. Run twice on
+ /* : same input → byte-identical populated tree. Run twice on
      * separately-built sample trees and compare the populated state. */
     tier_tree_t* a = sample_tree();
     tier_tree_t* b = sample_tree();

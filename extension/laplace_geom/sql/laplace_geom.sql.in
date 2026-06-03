@@ -1,6 +1,6 @@
 /* extension/laplace_geom/sql/laplace_geom.sql.in
  *
- * Entry point for the laplace_geom extension install script. Per ADR 0034,
+ * Entry point for the laplace_geom extension install script.,
  * #includes the numbered module files (NN_ prefix locks load order; SQL
  * runs in a single transaction so DDL dependencies must resolve in order).
  *

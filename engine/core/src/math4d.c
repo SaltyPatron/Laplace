@@ -68,7 +68,7 @@ void math4d_centroid(const double* points, size_t n_points, double out[4]) {
     out[3] = 0.0;
     if (n_points == 0) return;
     /* Sequential sum in input order — deterministic across thread counts because
-     * single-threaded by construction (TBB schedules above this kernel per ADR 0030). */
+     * single-threaded by construction (TBB schedules above this kernel). */
     for (size_t i = 0; i < n_points; ++i) {
         const double* p = points + i * 4;
         out[0] += p[0];
@@ -248,7 +248,7 @@ void math4d_karcher_mean(const double* points, size_t n_points,
  *
  * Deterministic: sequential scans in fixed order; no parallelism; no FP
  * non-associative reductions. Same input always same output bit-for-bit
- * across thread counts (per RULES.md R7 + ADR 0030 CBWR alignment). */
+ * across thread counts ( CBWR alignment). */
 double math4d_frechet(const double* p, size_t np, const double* q, size_t nq) {
     if (np == 0 || nq == 0) return NAN;
 

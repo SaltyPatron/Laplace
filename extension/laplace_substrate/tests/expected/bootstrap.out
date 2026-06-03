@@ -1,4 +1,4 @@
--- Smoke test for laplace_substrate bootstrap (ADR 0042 + ADR 0044).
+-- Smoke test for laplace_substrate bootstrap.
 -- Verifies the install-time seeding ran cleanly and produced the expected
 -- substrate-canonical entities + meta-attestations.
 CREATE EXTENSION IF NOT EXISTS postgis;

@@ -8,7 +8,7 @@ extern "C" {
 
 /* 4D math kernels — operate on raw XYZM-packed double buffers.
  *
- * Per RULES.md R1: no parallel datatypes. PostGIS's POINT4D
+ *: no parallel datatypes. PostGIS's POINT4D
  * (liblwgeom) is the canonical XYZM coordinate struct
  * ({double x, y, z, m}); these kernels match its memory layout so
  * PG-extension wrappers can cast POINT4D* directly. C# side packs

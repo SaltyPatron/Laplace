@@ -7,7 +7,7 @@ namespace Laplace.SubstrateCRUD;
 /// Fluent helper for constructing a <see cref="SubstrateChange"/> from a
 /// populated <see cref="TierTree"/> + per-source attestations. Centralises
 /// the slot-filling that every per-source decomposer would otherwise
-/// reinvent (forbidden by ADR 0016).
+/// reinvent (forbidden by).
 ///
 /// FK-ordering invariant: entities → physicalities → attestations. The
 /// builder appends to ordered lists; the apply path validates that
@@ -65,7 +65,7 @@ public sealed class SubstrateChangeBuilder
     /// <summary>Build the immutable intent. <see cref="SubstrateChangeMetadata.IntentId"/>
     /// is derived deterministically from the row IDs so re-running the
     /// same decomposer on the same input produces the same intent ID —
-    /// the IngestRunner's checkpoint journal relies on this.</summary>
+    /// idempotent re-ingest (content-addressing + ON CONFLICT) relies on this.</summary>
     public SubstrateChange Build()
     {
         var entities      = _entities.ToImmutable();

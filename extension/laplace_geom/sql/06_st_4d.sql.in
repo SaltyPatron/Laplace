@@ -1,12 +1,12 @@
 /* 06_st_4d.sql.in — ST_*_4d function family.
  *
- * Per RULES.md R1: extend PostGIS, never replace. Standard PostGIS
+ *: extend PostGIS, never replace. Standard PostGIS
  * `geometry` with Z+M flags = 4D. Custom functions ONLY where PostGIS
  * is 2D/3D-only (centroid, distance, dwithin, Fréchet, Hausdorff,
  * radius-from-origin).
  *
  * Engine kernels in liblaplace_core operate on POINT4D / POINTARRAY
- * raw double buffers (per RULES.md R22 — POINT4D from liblwgeom IS the
+ * raw double buffers ( — POINT4D from liblwgeom IS the
  * canonical type; the engine sees raw `double*` since liblaplace_core
  * stays free of liblwgeom dependency).
  */

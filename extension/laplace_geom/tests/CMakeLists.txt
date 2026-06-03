@@ -1,6 +1,6 @@
 # extension/laplace_geom/tests/CMakeLists.txt
 #
-# pg_regress wiring for laplace_geom (per B′.9 #196 + ADR 0042 / 0034).
+# pg_regress wiring for laplace_geom (per B′.9 #196).
 #
 # Drives the SQL smoke tests under `tests/sql/<name>.sql` against an
 # isolated per-extension test database (`laplace_regress_geom`) so the

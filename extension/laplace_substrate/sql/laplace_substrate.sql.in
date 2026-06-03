@@ -1,7 +1,7 @@
 /* extension/laplace_substrate/sql/laplace_substrate.sql.in
  *
  * Entry point for the laplace_substrate extension install script.
- * Per ADR 0034 — #includes the numbered modules in load order. */
+ * — #includes the numbered modules in load order. */
 
 #include "sqldefines.h"
 

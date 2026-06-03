@@ -2,7 +2,7 @@
 # scripts/bootstrap-laplace-runner.sh
 #
 # Layer 0 — one-time root setup (idempotent + reversible) for the Laplace
-# CI runner identity. Per ADR 0018 (three-layer architecture), this script
+# CI runner identity. (three-layer architecture), this script
 # does ONLY what requires root and only what is independent of substrate
 # schema. Database creation, extension install, schema, and seed data are
 # Layer 1 concerns owned by `app/Laplace.Migrations/` (DbUp) and `just`
@@ -39,7 +39,7 @@
 #      NOPASSWD-for-cmake-install workaround). With CMAKE_INSTALL_PREFIX
 #      = /opt/laplace (laplace-runner-group writable, setgid) plus PG's
 #      extension_control_path / dynamic_library_path pointing there,
-#      the install is sudo-free per ADR 0019 amendment 2026-05-23.
+#      the install is sudo-free amendment 2026-05-23.
 #  11. Cleanup of legacy state (ahart-as-superuser, ahart DB, old runner
 #      under /home/ahart/actions-runner)
 #  12. /opt/laplace/external/ — empty cache directory with the right perms
@@ -224,7 +224,6 @@ bootstrap_build_environment() {
     # System packages + /opt/laplace prefix for the custom-built dependency
     # chain (Epic B: PostgreSQL + PostGIS + PROJ + GEOS + GDAL + Eigen +
     # Spectra + BLAKE3 as git submodules, built with Intel icx/icpx per
-    # ADRs 0028 + 0032).
     #
     # Idempotent — apt install is a no-op when packages are present;
     # mkdir -p + chown are safe to re-run.
@@ -1039,7 +1038,7 @@ bootstrap_engine_lib_path() {
     # keeps this entry stable across oneAPI version bumps.
     #
     # /opt/laplace/{geos,proj,gdal}/lib host the from-source dep libraries
-    # built via `just build-deps` (per ADR 0033 + 0038). Registering them
+    # built via `just build-deps` (). Registering them
     # here, with laplace.conf processed BEFORE libc.conf and
     # x86_64-linux-gnu.conf (alphabetical .d order), makes ld.so.cache
     # prefer our libgeos.so.3.12.2 / libgeos_c.so.1.18.2 / libproj.so.25
@@ -1131,7 +1130,7 @@ bootstrap_cleanup_stale_installs() {
     done
 
     # Stale extension .so left in system PG pkglibdir by a prior
-    # `sudo cmake --install`. Includes the pre-ADR-0025 monolithic
+ # `sudo cmake --install`. Includes the pre- monolithic
     # `laplace.so` AND the split `laplace_{geom,substrate}.so`. New ones
     # live at /opt/laplace/lib/postgresql/$PG_VERSION via dynamic_library_path.
     for f in /usr/lib/postgresql/$PG_VERSION/lib/laplace.so \
@@ -1154,7 +1153,7 @@ bootstrap_cleanup_stale_installs() {
     done
 
     # Hartonomous-* leftovers from the previous-iteration project (per
-    # CLAUDE.md R-4 / RULES R11 — Hartonomous-001 is the predecessor and
+ # / — Hartonomous-001 is the predecessor and
     # must not bleed into this host). Removes the library, extension
     # files, and any extension-aux subdirs (e.g. /usr/share/postgresql/
     # $PG_VERSION/extension/hartonomous-ucd is a directory, not a file —

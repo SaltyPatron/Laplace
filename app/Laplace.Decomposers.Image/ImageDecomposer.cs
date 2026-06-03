@@ -8,9 +8,9 @@ namespace Laplace.Decomposers.Image;
 /// <summary>
 /// Stream D scaffold per /home/ahart/.claude/plans/replicated-hatching-stream.md.
 ///
-/// Per ADR 0040 Universal T0 + ADR 0043 composite decomposer pattern:
+/// Universal T0 + composite decomposer pattern:
 /// ImageDecomposer = ContainerFormat&lt;PNG/JPEG/WebP/...&gt; × ColorSpaceDecoder&lt;sRGB/AdobeRGB/...&gt;
-/// × ModalityBinder&lt;Pixel/Patch/Region&gt;. Per GLOSSARY:44-46 every modality bottoms at
+/// × ModalityBinder&lt;Pixel/Patch/Region&gt;. Per every modality bottoms at
 /// the same 1,114,112 Unicode codepoints — pixels content-address through their RGB
 /// integer values (which decompose through T0 as text "(R, G, B)" strings, sharing
 /// hash space with every other text mention of those exact integers in the substrate).
@@ -34,20 +34,19 @@ public sealed class ImageDecomposer : IDecomposer
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "ImageDecomposer";
-    public int     LayerOrder   => 11;  // After model layer (10) per ADR 0037 generalization
+    public int     LayerOrder   => 11;  // After model layer (10) generalization
     public Hash128 TrustClassId => TrustClass;
 
     public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        // Image-tier types per ADR 0040 multi-modal T0 + GLOSSARY:62 (visual tier ladder)
+ // Image-tier types multi-modal T0 + (visual tier ladder)
         boot.AddType("Pixel");
         boot.AddType("Patch");
         boot.AddType("Region");
         boot.AddType("Image");
         boot.AddType("Image_Collection");
-        // Cross-modal kinds per GLOSSARY:96
-        boot.AddKind("DEPICTS");
+ // Cross-modal kinds         boot.AddKind("DEPICTS");
         boot.AddKind("CAPTIONS");
         boot.AddKind("IS_PIXEL_OF");
         boot.AddKind("HAS_COLOR");

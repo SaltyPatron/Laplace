@@ -21,7 +21,8 @@ runs:
 
     - name: cmake --build --target ${{ inputs.target }}
       shell: bash
-      run: cmake --build build/deps --target ${{ inputs.target }} -j
+      # umask 0002: dep install trees under /opt/laplace are born group-writable.
+      run: umask 0002 && cmake --build build/deps --target ${{ inputs.target }} -j
 
     - name: Verify ${{ inputs.target }} install
       shell: bash

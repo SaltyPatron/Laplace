@@ -8,7 +8,7 @@ extern "C" {
 
 /* Procrustes alignment — finds the rigid rotation + uniform scale +
  * translation that best aligns source-embedding points to target
- * physicality points in 4D (per DESIGN.md IV).
+ * physicality points in 4D.
  *
  * `procrustes_transform_t` is an opaque type-erased handle (per RULES.md
  * R14 + R22) — internally holds Eigen matrices that don't cross the

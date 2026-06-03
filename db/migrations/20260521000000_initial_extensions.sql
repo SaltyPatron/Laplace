@@ -1,8 +1,8 @@
 -- Migration 20260521000000_initial_extensions
 --
--- Layer-1 extension lifecycle orchestration. Per ADR 0021 (DbUp + Npgsql),
--- ADR 0023 (extension owns substrate schema; DbUp orchestrates), and
--- ADR 0025 (two extensions: laplace_geom + laplace_substrate).
+-- Layer-1 extension lifecycle orchestration. (DbUp + Npgsql),
+-- (extension owns substrate schema; DbUp orchestrates), and
+-- (two extensions: laplace_geom + laplace_substrate).
 --
 -- laplace_admin is a SUPERUSER (set by bootstrap_pg_roles). That means we
 -- can `CREATE EXTENSION` directly here — no SECURITY DEFINER wrapper, no

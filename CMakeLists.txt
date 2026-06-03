@@ -5,9 +5,9 @@ project(laplace
     LANGUAGES C CXX
 )
 
-# Top-level orchestrator per ADR 0032 (unified CMake build pipeline,
+# Top-level orchestrator (unified CMake build pipeline,
 # Path B — PGXS retired). Drives engine + extension builds from one
-# CMake tree, reads dep sources from external/ submodules per ADR 0033.
+# CMake tree, reads dep sources from external/ submodules.
 
 # Top-level CTest enables `ctest` from build/ to discover all engine
 # tests (per-module GoogleTest registrations via gtest_discover_tests).
@@ -149,12 +149,12 @@ message(STATUS "  install prefix:   ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "  ext libdir:       ${LAPLACE_EXT_LIBDIR}")
 message(STATUS "  ext sharedir:     ${LAPLACE_EXT_SHAREDIR}")
 
-# === SQL preprocessor (per ADR 0034 — PostGIS-pattern .sql.in → .sql) ===
+# === SQL preprocessor ( — PostGIS-pattern .sql.in → .sql) ===
 find_program(LAPLACE_SQLPP NAMES cpp gpp_
     DOC "C preprocessor used to expand extension .sql.in modules into the built .sql artifact")
 if(NOT LAPLACE_SQLPP)
     message(FATAL_ERROR
-        "cpp (or gpp_) not found — required for .sql.in preprocessing per ADR 0034. "
+        "cpp (or gpp_) not found — required for .sql.in preprocessing. "
         "Install via 'apt install build-essential' (already in bootstrap_build_environment).")
 endif()
 message(STATUS "Laplace SQLPP: ${LAPLACE_SQLPP}")
@@ -265,10 +265,10 @@ install(CODE "
   endif()
 ")
 
-# === Engine (3 shared libs per ADR 0024) ===
+# === Engine (3 shared libs) ===
 add_subdirectory(engine)
 
-# === PG extensions (2 per ADR 0025) ===
+# === PG extensions (2) ===
 add_subdirectory(extension)
 
 # === Post-install permission-invariant enforcement (declared LAST → runs last) ===

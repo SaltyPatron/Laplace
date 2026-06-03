@@ -154,7 +154,7 @@ jobs:
             fi
           done
 
-      - name: Peer auth (laplace-runner → laplace_admin) per ADR 0019
+      - name: Peer auth (laplace-runner → laplace_admin)
         run: |
           RESULT=$(psql -d postgres -U laplace_admin -tAc "SELECT current_user || ' on ' || current_database();")
           [ "$RESULT" = "laplace_admin on postgres" ] || {
@@ -329,7 +329,9 @@ jobs:
       - uses: ./.github/actions/setup-laplace-env
 
       - name: cmake --install (no sudo)
-        run: cmake --install build
+        # umask 0002: dirs born group-writable so the developer identity can
+        # always pre-wipe/overwrite what CI creates (and vice versa).
+        run: umask 0002 && cmake --install build
 
       - name: Clean slate — db-nuke (ONE per-run reset; seed + model then accrete onto the SAME DB)
         run: |

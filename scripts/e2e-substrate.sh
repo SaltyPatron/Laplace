@@ -3,10 +3,10 @@
 # repo script (no session-local runbooks):
 #
 #   db-fresh (drop + recreate + migrate + T0 seed)
-#   → unicode via IngestRunner (idempotent re-pass; writes the ADR-0037 layer-0
+#   → unicode via IngestRunner (idempotent re-pass; writes the layer-0
 #     marker that the bulk T0 seed does not)
 #   → iso639
-#   → each model dir given on the command line, one at a time (ADR 0037 / the
+# → each model dir given on the command line, one at a time (the
 #     one-at-a-time law). Each completed ingest period folds consensus at its
 #     end (watermark window) — consensus exists WITHOUT any batch pass.
 #   → audit: verify-fk + table counts + consensus_stats + DB size.
@@ -25,7 +25,7 @@
 # orphaned window at the clean end. Re-running THIS script starts from zero by
 # design.
 
-set -uo pipefail
+set -o pipefail
 cd "$(cd "$(dirname "$0")/.." && pwd)"
 T_START=$SECONDS
 
@@ -33,10 +33,11 @@ DB="${LAPLACE_E2E_DB:-laplace-dev}"
 export PGDATABASE="$DB"
 export LAPLACE_DB="Host=/var/run/postgresql;Username=laplace_admin;Database=$DB;Search Path=laplace,public"
 export LAPLACE_SKIP_MORPH="${LAPLACE_SKIP_MORPH:-1}"
-# Intel setvars trips set -e (nonzero when already initialized) and set -u
-# (unset-var refs) — source it BEFORE enabling -e, with -u relaxed.
+# Intel setvars trips set -e (nonzero when already initialized) AND set -u
+# (its unbound-var references are shell-FATAL under -u; `|| true` cannot catch
+# them) — so ALL strict flags come AFTER the source.
 source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1 || true
-set -e
+set -eu
 export LD_LIBRARY_PATH="$PWD/build/engine/synthesis:$PWD/build/engine/core:$PWD/build/engine/dynamics:${LD_LIBRARY_PATH:-}"
 # T0 perf-cache needs no env: the CLI discovers it (env → /opt/laplace/share →
 # build tree). LD_LIBRARY_PATH above is the workspace-relative engine path.
@@ -54,7 +55,7 @@ phase() { echo ""; echo "############ PHASE $1 — $2 — t+$((SECONDS-T_START))
 phase 1 "db-fresh: drop $DB, recreate, migrate, seed T0 unicode"
 just db-fresh
 
-phase 1b "unicode via IngestRunner — idempotent re-pass; writes the ADR-0037 layer-0 marker"
+phase 1b "unicode via IngestRunner — idempotent re-pass; writes the layer-0 marker"
 scripts/ingest-source.sh unicode
 
 phase 2 "seed iso639"

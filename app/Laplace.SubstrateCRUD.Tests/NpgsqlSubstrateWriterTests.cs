@@ -18,7 +18,8 @@ namespace Laplace.SubstrateCRUD.Tests;
 /// runtime — by design, since the bare-engine + bare-types unit tests
 /// already give core coverage.
 /// </summary>
-public class NpgsqlSubstrateWriterTests : IClassFixture<LocalPgFixture>
+[Collection("substrate-pg")]
+public class NpgsqlSubstrateWriterTests
 {
     private readonly LocalPgFixture _pg;
 

@@ -63,8 +63,18 @@ int hash_composer_run(
         /* All children have strictly smaller idx than i (topological add
          * invariant), so their ids/coords are already populated. */
 
-        /* id = merkle(tier, child_ids contiguous). */
-        hash128_merkle(tiers[i], &ids[first], (size_t)cnt, &ids[i]);
+        /* Same content = same hash; tier is metadata, not identity. A
+         * single-constituent composite IS its constituent (the John 3:16
+         * collapse): it inherits the child id rather than minting a new
+         * tier-tagged hash, so a lone codepoint resolved as grapheme/word/
+         * sentence/document is the one already-seeded codepoint entity.
+         * Only a genuine combination of >= 2 constituents composes a new
+         * identity. */
+        if (cnt == 1) {
+            ids[i] = ids[first];
+        } else {
+            hash128_merkle(tiers[i], &ids[first], (size_t)cnt, &ids[i]);
+        }
 
         /* coord = centroid(child_coords flat n*4). */
         double centroid[4];

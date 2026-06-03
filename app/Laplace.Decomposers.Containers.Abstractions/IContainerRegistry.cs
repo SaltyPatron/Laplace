@@ -1,7 +1,7 @@
 namespace Laplace.Decomposers.Containers.Abstractions;
 
 /// <summary>
-/// Magic-byte → parser lookup per ADR 0055. The model-ingest path peeks
+/// Magic-byte → parser lookup. The model-ingest path peeks
 /// at a file's leading bytes and asks the registry which parser handles
 /// the format; if no parser matches the file is logged + skipped (never
 /// loaded).

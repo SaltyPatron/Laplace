@@ -4,7 +4,7 @@
 # Bulk-import 303 tree-sitter grammar repos as git submodules under
 # external/tree-sitter-grammars/<lang>/. Reads each grammar's upstream
 # URL from /vault/Data/TreeSitter/<lang>/.git/config (origin remote).
-# Per ADR 0033 (all-deps-as-submodules).
+# (all-deps-as-submodules).
 #
 # Usage:
 #   scripts/import-tree-sitter-grammars.sh                  # do the work
@@ -83,7 +83,7 @@ for grammar_dir in "$VAULT"/tree-sitter-*; do
     # Clone fresh from upstream — `--reference <local-shallow>` doesn't work
     # because /vault clones are shallow (git refuses shallow refs as
     # backstop for full history). Each grammar is small (a few MB); 303
-    # of them takes ~5-15 min one-time. Per ADR 0033: tree-sitter grammars
+    # of them takes ~5-15 min one-time.: tree-sitter grammars
     # are C source deps that compile to .so parsers via tree-sitter CLI;
     # the same submodule policy applies as for PostgreSQL/BLAKE3/etc.
     # `if` consumes the exit code so `set -e` doesn't kill us on first failure.

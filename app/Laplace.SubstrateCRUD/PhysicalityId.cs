@@ -3,10 +3,10 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD;
 
 /// <summary>
-/// Computes a physicality's content-addressed id per DESIGN.md (physicalities
+/// Computes a physicality's content-addressed id per (physicalities
 /// table, <c>id</c> column): <c>BLAKE3-128</c> of the canonical byte image of
 /// <c>(entity_id, source_id, kind, coord, trajectory)</c>. Centralised here so
-/// every decomposer derives it identically (ADR 0016 — no per-source
+/// every decomposer derives it identically (no per-source
 /// reinvention).
 ///
 /// <para>
@@ -19,7 +19,7 @@ namespace Laplace.SubstrateCRUD;
 ///   trajectory   N bytes   (4 × f64 per vertex, in order; empty for T0 atoms)
 /// </code>
 /// Two physicalities with the same entity/source/kind/coord/trajectory hash
-/// identically and converge via <c>ON CONFLICT DO NOTHING</c> (RULES R5).
+/// identically and converge via <c>ON CONFLICT DO NOTHING</c>.
 /// </para>
 /// </summary>
 public static class PhysicalityId

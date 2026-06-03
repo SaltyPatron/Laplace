@@ -12,5 +12,5 @@ CREATE FUNCTION laplace_substrate_version()
 COMMENT ON FUNCTION laplace_substrate_version() IS
     'Returns the laplace_substrate version (linked against laplace_core + laplace_dynamics).';
 
-/* Grants on the schema land in DbUp migration 20260521000000 (per ADR 0023).
+/* Grants on the schema land in DbUp migration 20260521000000.
  * The schema itself is created/owned by laplace_admin via trusted=true. */

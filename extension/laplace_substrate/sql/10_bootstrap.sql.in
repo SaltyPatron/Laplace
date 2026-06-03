@@ -1,14 +1,13 @@
-/* 10_bootstrap.sql.in -- substrate-canonical seeding (per ADR 0042 + ADR 0044).
+/* 10_bootstrap.sql.in -- substrate-canonical seeding.
  *
  * Runs at extension install AFTER tables exist (modules 02-05) but BEFORE any
- * decomposer runs. Seeds the substrate's built-in entities required by ADR
- * 0042 stages 0-3.5:
+ * decomposer runs. Seeds the substrate's built-in entities, stages 0-3.5:
  *
  *   Stage 0  -- meta-types: Type, Kind, PhysicalityKind, Source, SubstrateCanonical.
  *   Stage 1  -- SubstrateCanonical source entity.
  *   Stage 2  -- PhysicalityKind enum entities: CONTENT, BUILDING_BLOCK, PROJECTION.
  *   Stage 3  -- modality-agnostic attestation-kind vocabulary.
- *   Stage 3.5 -- 10 source-trust-class entities (per ADR 0044 Part B).
+ *   Stage 3.5 -- 10 source-trust-class entities ( Part B).
  *
  * All bootstrap rows are content-addressed by BLAKE3-128 of a canonical
  * name string of the form "substrate/<category>/<Name>/v1". Same substrate
@@ -43,7 +42,7 @@ DECLARE
     type_sentence_id     bytea;
     type_document_id     bytea;
 
-    /* Source-trust-class entity ids (ADR 0044 Part B; 10 tiers). */
+ /* Source-trust-class entity ids (Part B; 10 tiers). */
     tc_mandate_id        bytea;
     tc_standards_id      bytea;
     tc_academic_id       bytea;
@@ -122,7 +121,7 @@ BEGIN
 
     /* === Stage 2.5: substrate-canonical text-tier type entities ===========
      *
-     * Per GLOSSARY tier ladder and ADR 0047 TextDecomposer: every
+ * Per the tier ladder and TextDecomposer: every
      * text-using decomposer (UnicodeDecomposer at seed time; the model
      * decomposer's tokenizer pass; future linguistic-ladder sources; the prompt
      * ingest path) emits entities at tiers 0..6 with the per-tier type IDs
@@ -148,7 +147,7 @@ BEGIN
         (type_sentence_id,  META_TIER, type_id, subscan_id),
         (type_document_id,  META_TIER, type_id, subscan_id);
 
-    /* === Stage 3.5: source-trust-class entities (ADR 0044 Part B) ====== *
+ /* === Stage 3.5: source-trust-class entities (Part B) ====== *
      * We seed these BEFORE attestation kinds because the kind-tier entities
      * carry meta-attestations sourced to SubstrateCanonical, which itself
      * needs HAS_TRUST_CLASS pointing at TrustClass_SubstrateMandate. Stage

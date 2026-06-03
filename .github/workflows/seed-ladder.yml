@@ -1,13 +1,13 @@
 name: Seed ladder (reusable)
 
-# Ingest the seed sources ONE AT A TIME, in dependency order (ADR 0037) — each
+# Ingest the seed sources ONE AT A TIME, in dependency order — each
 # source is its OWN JOB chained by `needs:`, not a step inside one monolith:
 #   - per-source pass/fail status at the job level (one stage dying does not
 #     paint every other source red);
 #   - "Re-run failed jobs" RESUMES the ladder at the failed source — completed
 #     sources are not replayed (their jobs already succeeded);
 #   - the strict one-at-a-time order is enforced by the dependency graph (and
-#     defended in depth by the substrate's own ADR-0037 layer gate), not by
+# defended in depth by the substrate's own layer gate), not by
 #     step position inside a script.
 # OMW lands right after WordNet (the synset scaffold it maps onto) and BEFORE
 # ud/the big corpora, so those witness onto OMW's multilingual lexemes instead

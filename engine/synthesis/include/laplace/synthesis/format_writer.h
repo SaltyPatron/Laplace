@@ -16,7 +16,7 @@ extern "C" {
  *   tokenizer.json            — from substrate tokenizer entity
  *   provenance.json           — substrate source lineage metadata
  *
- * Sparse-by-construction per RULES.md R4: tensor positions with no
+ * Sparse-by-construction: tensor positions with no
  * supporting attestation emit exact zero. The writer does not verify
  * this — the caller is responsible for zeroing unsupported positions.
  *

@@ -1,25 +1,25 @@
 namespace Laplace.Decomposers.Model;
 
 /// <summary>
-/// Architecture profile — the ingestion-side <c>IArchitectureTemplate</c> axis per ADR 0043
+/// Architecture profile — the ingestion-side <c>IArchitectureTemplate</c> axis
 /// (<c>ContainerFormat × TensorDtypeDecoder × IArchitectureTemplate × ModalityBinder</c>).
 /// Maps per-family tensor <b>roles</b> to safetensors name templates + structural flags, so
 /// the universal <see cref="WeightTensorETL"/> ingests by role rather than hardcoded Llama
-/// names (its prior shape, called out as wrong in <see cref="LlamaWeightExtractor"/>'s header).
+/// names.
 ///
 /// <para>
-/// INTERIM: families are hardcoded here for <c>llama</c> + <c>phi</c>. ADR 0056's end state
+/// INTERIM: families are hardcoded here for <c>llama</c> + <c>phi</c>. end state
 /// migrates this to per-family math registered as <b>data on architecture-template substrate
 /// entities</b> (looked up at ingest); the seam (role-driven ETL) is unchanged by that move —
 /// only where the role/name/math data lives.
 /// </para>
 ///
 /// <para>
-/// Role→kind is fixed across families (q/k→Q_PROJECTS joint, v→V, o→O, gate→GATES, up→UP,
-/// down→DOWN, norm→NORMALIZES, embed→EMBEDS, lm_head→OUTPUT_PROJECTS); families differ in
-/// (a) which roles exist (Phi has no gate), (b) tensor names (Phi o=<c>dense</c>,
-/// up=<c>fc1</c>, down=<c>fc2</c>), (c) biases present, (d) norm type, (e) per-layer norm count.
-/// <c>{L}</c> in a template is the layer index.
+/// Role→circuit is fixed across families (q+k→QK→ATTENDS, v+o→OV→OV_RELATES,
+/// up+down→FFN→COMPLETES_TO; norms and gates are runtime nonlinearities, never attested);
+/// families differ in (a) which roles exist (Phi has no gate), (b) tensor names (Phi
+/// o=<c>dense</c>, up=<c>fc1</c>, down=<c>fc2</c>), (c) biases present, (d) norm type,
+/// (e) per-layer norm count. <c>{L}</c> in a template is the layer index.
 /// </para>
 /// </summary>
 public sealed class ArchitectureProfile
@@ -60,7 +60,7 @@ public sealed class ArchitectureProfile
         "llama" => Llama,
         "phi"   => Phi,
         _ => throw new NotSupportedException(
-            $"no ArchitectureProfile for model_type '{modelType}' — add it (ADR 0043/0056)"),
+            $"no ArchitectureProfile for model_type '{modelType}' — add it"),
     };
 
     /// <summary>Llama family (TinyLlama, Llama 2/3, Qwen-Llama): SwiGLU gated MLP, RMSNorm,

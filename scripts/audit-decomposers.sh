@@ -9,7 +9,7 @@
 #   scripts/audit-decomposers.sh --fresh      # db-nuke + setup + ladder
 #   scripts/audit-decomposers.sh --from iso639  # resume after T0 already seeded
 #
-# Does NOT interpret GLOSSARY scope — only runs what exists in CLI + ingest-source.sh.
+# Does NOT interpret modality scope — only runs what exists in CLI + ingest-source.sh.
 
 set -euo pipefail
 

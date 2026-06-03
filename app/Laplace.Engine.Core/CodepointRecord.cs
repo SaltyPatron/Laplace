@@ -13,7 +13,7 @@ namespace Laplace.Engine.Core;
 /// entity id (BLAKE3-128 of its UTF-8 bytes), and
 /// <see cref="CoordX"/>..<see cref="CoordM"/> + <see cref="Hilbert"/> are the
 /// substrate-canonical CONTENT physicality for that codepoint (coords placed
-/// by super-Fibonacci over DUCET collation rank per ADR 0006 + ADR 0053).
+/// by super-Fibonacci over DUCET collation rank).
 /// </para>
 ///
 /// Explicit offsets match the C struct field-by-field so a layout drift on

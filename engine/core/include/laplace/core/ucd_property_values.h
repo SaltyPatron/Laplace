@@ -10,7 +10,7 @@ extern "C" {
  * perf-cache emitter packs into laplace_perfcache_record_t.flags and the
  * runtime state machines compare against. FIXED (not discovery-order
  * interned) so emitter + loader + state machines agree byte-for-byte
- * regardless of build (RULES R7).
+ * regardless of build.
  *
  * Ranges chosen to fit the flags bitfield widths in perfcache_format.h:
  *   GB  4 bits (0..15)   WB 5 bits (0..31)   SB 4 bits (0..15)

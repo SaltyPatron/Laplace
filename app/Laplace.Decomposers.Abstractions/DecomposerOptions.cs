@@ -1,7 +1,7 @@
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Per-run options for an <see cref="IDecomposer"/>. Per ADR 0051 lines 123–130.
+/// Per-run options for an <see cref="IDecomposer"/>. lines 123–130.
 /// </summary>
 /// <param name="BatchSize">Soft cap on source-content-units per intent batch.
 /// Decomposers MAY ignore (e.g. small sources yielding one big intent).</param>

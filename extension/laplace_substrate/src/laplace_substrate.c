@@ -2,7 +2,7 @@
  * extension/laplace_substrate/src/laplace_substrate.c
  *
  * Thin PG_FUNCTION_INFO_V1 wrappers for the laplace_substrate extension
- * per RULES.md R6 — DB calls engine, no DB-side math beyond aggregate
+ * — DB calls engine, no DB-side math beyond aggregate
  * accumulation. The aggregate state is an int64 fixed-point glicko2_state_t
  * + a growing observation buffer; FINALFUNC delegates to glicko2_update_period
  * for the full Glickman 2013 rating-period algorithm.
@@ -37,7 +37,7 @@ pg_laplace_substrate_version(PG_FUNCTION_ARGS)
 }
 
 /* ------------------------------------------------------------------------- */
-/* Glicko-2 aggregate (Story 5.6 / #68).                                     */
+/* Glicko-2 aggregate.                                     */
 /*                                                                           */
 /* Aggregate signature (per CREATE AGGREGATE in sql/06_glicko2.sql.in):      */
 /*                                                                           */
@@ -51,7 +51,7 @@ pg_laplace_substrate_version(PG_FUNCTION_ARGS)
 /*       tau              bigint   -- system constant ×1e9                   */
 /*   ) RETURNS laplace_glicko2_result                                        */
 /*                                                                           */
-/* Per ADR 0036 arena semantics, prior_* + tau are constant for a given      */
+/* arena semantics, prior_* + tau are constant for a given      */
 /* attestation update — supplied per row but only read from the FIRST row    */
 /* (initialized flag short-circuits subsequent rows). The aggregate is       */
 /* commutative within a rating period per Glickman §"Step 7".                */
@@ -287,7 +287,7 @@ pg_laplace_entities_exist_bitmap(PG_FUNCTION_ARGS)
 
 /*
  * _PG_init — called when the extension is loaded.
- * Per ADR 0030: laplace_dynamics_init() locks MKL threading layer to TBB
+ *: laplace_dynamics_init() locks MKL threading layer to TBB
  * and sets MKL_CBWR for substrate determinism. Idempotent.
  */
 void _PG_init(void);

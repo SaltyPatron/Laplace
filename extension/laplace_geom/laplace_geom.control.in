@@ -1,5 +1,5 @@
 # laplace_geom extension control file (configured at build time).
-# Per ADR 0025 — general-purpose 4D PostGIS additions.
+# — general-purpose 4D PostGIS additions.
 comment = 'Laplace 4D PostGIS additions: ST_*_4d, hash128, Hilbert encoder, custom opclasses'
 default_version = '@PROJECT_VERSION@'
 module_pathname = '$libdir/laplace_geom'

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(laplace_engine
     VERSION 0.1.0
-    DESCRIPTION "Laplace substrate engine — three shared C ABI libraries (ADR 0024)"
+    DESCRIPTION "Laplace substrate engine — three shared C ABI libraries"
     LANGUAGES C CXX
 )
 
@@ -12,7 +12,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# === Determinism discipline (RULES.md R7) ===
+# === Determinism discipline ===
 # NO -ffast-math, NO fp-contract fusion on hot paths.
 add_compile_options(
     -Wall -Wextra -Wpedantic
@@ -20,7 +20,7 @@ add_compile_options(
     -ffp-contract=off
 )
 
-# === ISA targeting (per ADR 0030) ===
+# === ISA targeting ===
 set(LAPLACE_TARGET_ISA "AVX2" CACHE STRING "AVX2 (default dev) | AVX512 (deploy)")
 set_property(CACHE LAPLACE_TARGET_ISA PROPERTY STRINGS AVX2 AVX512)
 if(LAPLACE_TARGET_ISA STREQUAL "AVX2")
@@ -29,25 +29,25 @@ elseif(LAPLACE_TARGET_ISA STREQUAL "AVX512")
     add_compile_options(-march=sapphirerapids)
 endif()
 
-# === Submodule external/ tree (per ADR 0033) ===
+# === Submodule external/ tree ===
 set(LAPLACE_EXTERNAL "${CMAKE_CURRENT_SOURCE_DIR}/../external"
     CACHE PATH "Path to external/ submodule tree")
 
-# === UCD path + version (per ADR 0047 + ADR 0053) ===
+# === UCD path + version ===
 # Pinned to latest STABLE Unicode (17.0.0, released 2025-09-09). Do NOT
 # bump to 18.0.0 until it goes stable (planned 2026-09-15) — per Unicode
 # stability policy, property values can change during alpha/beta review,
-# which would shift every substrate hash and break RULES R7 cross-machine
+# which would shift every substrate hash and break cross-machine
 # determinism.
 #
-# UCDXML is the substrate's canonical UCD parse path (GLOSSARY: "Primary
+# UCDXML is the substrate's canonical UCD parse path (: "Primary
 # parse path: UCDXML"). The codegen tool extracts ucd.nounihan.flat.zip
 # at build time and reads the resulting XML via libxml2 SAX. Unihan is
 # excluded here because the engine codegen only consumes 7 properties
 # (GBP/WBP/SBP/InCB/CCC/decomposition/composition_exclusion); the full
-# all-flat.zip is reserved for UnicodeDecomposer (#183) ingestion.
+# all-flat.zip is reserved for UnicodeDecomposer ingestion.
 set(LAPLACE_UNICODE_VERSION "17.0.0"
-    CACHE STRING "Unicode version pinned for substrate determinism (RULES R7). MUST be a stable release; never alpha/beta.")
+    CACHE STRING "Unicode version pinned for substrate determinism. MUST be a stable release; never alpha/beta.")
 set(LAPLACE_UCD_PATH "/vault/Data/Unicode/Public/${LAPLACE_UNICODE_VERSION}"
     CACHE PATH "Path to the Public/<ver>/ tree of the pinned Unicode version (contains ucd/, ucdxml/, etc.)")
 set(LAPLACE_UCDXML_ZIP "${LAPLACE_UCD_PATH}/ucdxml/ucd.nounihan.flat.zip"
@@ -75,7 +75,7 @@ endif()
 # (allkeys.txt) and assigns super-Fibonacci S^3 coords by that rank, so
 # collation-adjacent codepoints land near each other on the glome. UCA
 # version tracks the Unicode version (same release train) and is pinned to
-# stable for the same RULES R7 determinism reason as LAPLACE_UNICODE_VERSION.
+# stable for the same determinism reason as LAPLACE_UNICODE_VERSION.
 set(LAPLACE_UCA_VERSION "${LAPLACE_UNICODE_VERSION}"
     CACHE STRING "UCA (collation) version. Defaults to the Unicode version; MUST be stable.")
 set(LAPLACE_DUCET_FILE "${LAPLACE_UCD_PATH}/uca/allkeys.txt"
@@ -96,7 +96,7 @@ if(NOT EXISTS "${LAPLACE_EXTERNAL}/eigen/Eigen/Dense")
         "    git submodule update --init external/eigen external/spectra external/blake3 external/googletest\n")
 endif()
 
-# === Header-only deps via INTERFACE libraries (per ADR 0030 amended by 0033) ===
+# === Header-only deps via INTERFACE libraries ( amended by 0033) ===
 
 # Eigen 3.4.0 — header-only template linalg
 add_library(laplace_eigen INTERFACE)
@@ -111,7 +111,7 @@ add_library(laplace_spectra INTERFACE)
 target_include_directories(laplace_spectra INTERFACE "${LAPLACE_EXTERNAL}/spectra/include")
 target_link_libraries(laplace_spectra INTERFACE laplace_eigen)
 
-# BLAKE3 1.5.4 — content hashing (per ADR 0015).
+# BLAKE3 1.5.4 — content hashing.
 #
 # BLAKE3's upstream CMakeLists only populates BLAKE3_AMD64_ASM_SOURCES +
 # BLAKE3_CFLAGS_* when CMAKE_C_COMPILER_ID is GNU / Clang / AppleClang.
@@ -151,7 +151,7 @@ endif()
 add_subdirectory("${LAPLACE_EXTERNAL}/blake3/c"
     "${CMAKE_BINARY_DIR}/_deps/blake3" EXCLUDE_FROM_ALL)
 
-# === Testing (GoogleTest via submodule per ADR 0033 + STANDARDS.md) ===
+# === Testing (GoogleTest via submodule + the standards) ===
 enable_testing()
 include(CTest)
 
@@ -171,7 +171,7 @@ if(BUILD_TESTING)
     endif()
 endif()
 
-# === Engine module split (per ADR 0024) ===
+# === Engine module split ===
 # Three shared libraries; each subdir owns its own CMakeLists.
 
 add_subdirectory(core)

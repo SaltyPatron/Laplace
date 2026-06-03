@@ -1,12 +1,12 @@
 /* 02_hash128.sql.in -- BLAKE3-128-truncated content-addressed identifier helpers.
  *
- * Per ADR 0015 + STANDARDS "ID discipline": IDs are bytea(16) end-to-end;
- * never hex, never text. Per RULES R22, no parallel `hash128` PG type --
+ * + the ID discipline: IDs are bytea(16) end-to-end;
+ * never hex, never text., no parallel `hash128` PG type --
  * bytea with CHECK (octet_length = 16) is the canonical storage.
  * Substrate-specific comparison semantics live in 03_hash128_ops (custom
- * laplace_btree_hash128_ops opclass per ADR 0029).
+ * laplace_btree_hash128_ops opclass).
  *
- * Wrappers thread through to liblaplace_core kernels per RULES R6 (DB as
+ * Wrappers thread through to liblaplace_core kernels (DB as
  * dumb store; math in C). */
 
 CREATE FUNCTION laplace_hash128_blake3(data bytea)
@@ -15,7 +15,7 @@ CREATE FUNCTION laplace_hash128_blake3(data bytea)
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
 
 COMMENT ON FUNCTION laplace_hash128_blake3(bytea) IS
-    'BLAKE3-128 (truncated to 16 bytes) of the input. Used to compute entity / physicality / attestation ids from their canonical content bytes (per STANDARDS ID discipline).';
+    'BLAKE3-128 (truncated to 16 bytes) of the input. Used to compute entity / physicality / attestation ids from their canonical content bytes.';
 
 CREATE FUNCTION laplace_hash128_merkle(tier smallint, child_hashes bytea[])
     RETURNS bytea

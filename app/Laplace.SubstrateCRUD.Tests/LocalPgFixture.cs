@@ -6,7 +6,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 
 /// <summary>
 /// xUnit shared fixture that provisions a dedicated PG database against
-/// the LIVE local PostgreSQL (per STANDARDS.md Testing — Testcontainers
+/// the LIVE local PostgreSQL (per the testing standard — Testcontainers
 /// only covers DbUp/postgis-image layer; substrate-level integration
 /// tests with the laplace extensions run against the deployed cluster
 /// because the laplace extensions aren't in the postgis Docker image).
@@ -36,7 +36,7 @@ public sealed class LocalPgFixture : IAsyncLifetime
     public async Task InitializeAsync()
     {
         // dropdb + createdb (idempotent re-run; cannot run in a transaction).
-        await RunPsqlAdminAsync("dropdb", $"-U {PgUser} --if-exists {DatabaseName}");
+        await RunPsqlAdminAsync("dropdb", $"-U {PgUser} --force --if-exists {DatabaseName}");
         await RunPsqlAdminAsync("createdb", $"-U {PgUser} -O {PgUser} {DatabaseName}");
 
         var dsb = new NpgsqlDataSourceBuilder(ConnectionString);
@@ -60,7 +60,7 @@ public sealed class LocalPgFixture : IAsyncLifetime
             await _ds.DisposeAsync();
             _ds = null;
         }
-        await RunPsqlAdminAsync("dropdb", $"-U {PgUser} --if-exists {DatabaseName}");
+        await RunPsqlAdminAsync("dropdb", $"-U {PgUser} --force --if-exists {DatabaseName}");
     }
 
     private static async Task RunPsqlAdminAsync(string program, string args)

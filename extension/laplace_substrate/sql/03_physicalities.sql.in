@@ -1,5 +1,5 @@
 /* 03_physicalities.sql.in — per-source per-kind 4D representations of entities
- * (per DESIGN.md §I + ADR 0039).
+ *.
  *
  * One-to-many entity -> physicality. Each row is one lens on an entity from
  * one source: CONTENT (decomposition-bearing view; trajectory populated),
@@ -37,13 +37,13 @@ COMMENT ON TABLE physicalities IS
 COMMENT ON COLUMN physicalities.id IS
     'Content-addressed BLAKE3-128 of canonical (entity_id, source_id, kind, coord, trajectory) bytes. Lets attestations / higher-tier physicalities reference a specific physicality if needed.';
 COMMENT ON COLUMN physicalities.kind IS
-    'Physicality kind: 1=CONTENT, 2=BUILDING_BLOCK, 3=PROJECTION (input-direction), 4=PROJECTION_OUTPUT (output-direction; lm_head). Extensible. Values mirror substrate-canonical PhysicalityKind entities (bootstrapped per ADR 0042 Stage 2).';
+    'Physicality kind: 1=CONTENT, 2=BUILDING_BLOCK, 3=PROJECTION (input-direction), 4=PROJECTION_OUTPUT (output-direction; lm_head). Extensible. Values mirror substrate-canonical PhysicalityKind entities (bootstrapped Stage 2).';
 COMMENT ON COLUMN physicalities.coord IS
-    'Content: 4D geometric position of this entity under this source/kind view. PostGIS geometry with Z+M = 4D per RULES R1.';
+    'Content: 4D geometric position of this entity under this source/kind view. PostGIS geometry with Z+M = 4D.';
 COMMENT ON COLUMN physicalities.hilbert_index IS
     'Index-derived value stored as a column: Skilling-2004 4D Hilbert encoding of coord. 16 raw bytes; supports B-tree range scans for 1D spatial locality.';
 COMMENT ON COLUMN physicalities.trajectory IS
-    'Content: mantissa-packed LINESTRING per ADR 0012 (XYZ = entity_id of the constituent; M = ordinal/run_length/flags). NULL for T0 atoms (no constituents); typically NULL for BUILDING_BLOCK; NULL for Vampire-mode PROJECTION on AI weights.';
+    'Content: mantissa-packed LINESTRING (XYZ = entity_id of the constituent; M = ordinal/run_length/flags). NULL for T0 atoms (no constituents); typically NULL for BUILDING_BLOCK; NULL for Vampire-mode PROJECTION on AI weights.';
 COMMENT ON COLUMN physicalities.alignment_residual IS
     'Metadata: per-source alignment quality. NULL for substrate-canonical CONTENT physicalities (no projection -- value is 0 by construction); Procrustes-fit residual for PROJECTION physicalities.';
 

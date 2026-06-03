@@ -47,17 +47,18 @@ auditing it are all *querying* it:
 
 - **Retrieve** — "everything whale-related the model knows," ranked, as a single indexed read
   (latency not yet benchmarked; `inspect` returns interactively):
-  *(illustrative; grounded in the real `attestations` table + the `attestations_out` SRF that
-  `inspect` uses)*
+  *(grounded in the real `consensus` table + its `consensus_out` / `completions` / `top_relations`
+  SRFs — the consensus layer is what inference reads; `attestations` is per-witness evidence)*
   ```sql
   SELECT object_id, rating          -- consensus μ
-  FROM   laplace.attestations
+  FROM   laplace.consensus
   WHERE  subject_id = :whale
   ORDER  BY rating DESC, rd ASC;     -- index: (rating DESC, rd)
   ```
-  A B-tree scan, not a forward pass. `laplace inspect <text>` (`app/Laplace.Cli/Program.cs:160-261`)
-  already does this today: resolve text → entity → `entity_facets` + `entity_physicalities` +
-  `attestations_out/in ORDER BY rating DESC`.
+  A B-tree scan, not a forward pass. `laplace inspect <text>` already does this today: resolve
+  text → entity (engine TextDecomposer + HashComposer) → `entity_facets` + `entity_physicalities` +
+  `consensus_out/in` (the ranked-μ consensus read) + `attestations_out/in` (the per-witness
+  evidence audit).
 - **Traverse / reason** — multi-hop is the same primitive composed (`WITH RECURSIVE` over highest-μ
   edges), optionally pruned by geometry (`laplace_frechet_4d`, `ST_Intersects`, `dwithin` on the
   trajectory/coord geometries with the GIST + Hilbert indexes).
@@ -253,8 +254,9 @@ line).
 
 1. **Outcome** `s_j = ½(1 + tanh(m_j / M)) ∈ (0,1)`, from the witness's **signed** strength `m_j`:
    `+|q·k|` attracts → `s→1` (win); `−|q·k|` or a categorical refutation → `s→0` (loss); neutral → ½;
-   a categorical confirm (`is_a`) is `m_j→+∞ ⇒ s=1`. `M` = the per-arena magnitude scale (same family
-   of calibration as the noise floor).
+   a categorical confirm (`is_a`) is `m_j→+∞ ⇒ s=1`. `M` = the per-arena magnitude scale, measured
+   from the arena's own magnitude distribution at ingest (stored in `arena_m` for audit), never
+   hand-set.
 2. **Weight = opponent precision, NOT a bolted-on multiplier.** The witness weight
    `w_j = kind_rank × source_trust × tenant_trust ∈ (0,1]` maps to the opponent's rating deviation
    `φ_j` (high trust → low φ → `g(φ_j)≈1`; crank → high φ → `g(φ_j)≈0`). Glicko's own
@@ -272,7 +274,7 @@ Then it is stock Glicko-2 (the paper-pinned kernel). The headline behaviours are
   `laplace_glicko2_accumulate`; a re-witness is another (saturating) match, a novel relation is a new
   player.
 
-The **only calibration** (empirical, tune-once like the QK floor — NOT design choices): `M`, the
+The **only calibration** (empirical, tune-once — NOT design choices): `M`, the
 trust→φ map shape (e.g. `φ_j = φ_min + (φ_max−φ_min)(1−w_j)`), and φ₀. A per-"arena"/type difference is
 one line: what `m_j` it emits and its `kind_rank`; the framework is uniform.
 
@@ -415,8 +417,9 @@ and model alike:
   Seed the reference layers **once** into a persistent base; layer each model/source on top
   incrementally; to re-run a single source after a code change, **evict only that source's evidence**
   (`DELETE … WHERE source_id = X`), never reset the whole DB. No resume journal exists — re-ingestion
-  is idempotent by content-addressing alone. Consensus is rebuilt from evidence. This is what makes
-  ingestion sublinear (§8).
+  is idempotent by content-addressing alone. Consensus for the touched relations re-accumulates at
+  the next ingest period (watermark-windowed), never by a batch pass. This is what makes ingestion
+  sublinear (§8).
 - **Exact, on the perf stack.** Compensated f64, fixed reduction order, MKL/TBB/AVX2 + Eigen/Spectra —
   never a managed scalar GEMM, never top-k truncation, never an approximation.
 
@@ -432,17 +435,22 @@ and model alike:
   `alignment_residual`, `source_dim`, `observed_at`. `UNIQUE(entity_id, source_id, kind)`. Content
   physicality (kind 1) is singular/structural; Projection (kind 3/4) is the per-model embed species
   (§8).
-- **`laplace.attestations`** — the per-witness **evidence** layer: typed relations + Glicko-2 state.
-  `id` (BLAKE3 of the 5-tuple), `subject_id`, `kind_id`, `object_id?`, `source_id`, `context_id?`,
-  `rating`/`rd`/`volatility` (int64 fixed-point ×1e9), `last_observed_at`, `observation_count`.
+- **`laplace.attestations`** — the per-witness **evidence** layer: one Glicko-2 OBSERVATION per
+  witness, never accumulated state. `id` (BLAKE3 of the 5-tuple), `subject_id`, `kind_id`,
+  `object_id?`, `source_id`, `context_id?`, `score` (the ½(1+tanh(m/M)) outcome), `opponent_rd`
+  (witness weight → opponent φ), `arena_m` (the per-arena M actually used — audit),
+  `last_observed_at`, `observation_count` (int64 fixed-point ×1e9).
   `UNIQUE NULLS NOT DISTINCT (subject,kind,object,source,context)` — **source IN the identity**, full
-  provenance retained (model layer/head in `context_id`).
+  provenance retained (model layer/head in `context_id`). The accumulated `rating`/`rd`/`volatility`
+  live ONLY on `consensus`.
 - **`laplace.consensus`** — the materialized **consensus** layer (§6): one signed Glicko-2 row per
-  `(subject, kind, object, context)`, **source OUT of identity**. `id` (BLAKE3 of the 4-tuple),
-  `subject/kind/object/context`, `rating`/`rd`/`volatility`, `witness_count`, `last_observed_at`;
-  `UNIQUE NULLS NOT DISTINCT (subject,kind,object,context)`. Built by `rebuild_consensus()` via the
-  `laplace_glicko2_accumulate` aggregate. **Inference reads this** — a sorted index scan on `rating`,
-  not joins over evidence.
+  `(subject, kind, object)`, **source AND context (model layer/head) OUT of identity** — both are
+  witnesses, never identity. `id` (BLAKE3 of the 3-tuple), `rating`/`rd`/`volatility`,
+  `witness_count`, `last_observed_at`; `UNIQUE NULLS NOT DISTINCT (subject,kind,object)`.
+  Accumulated **at ingest** via the `laplace_glicko2_accumulate` aggregate (`incremental_consensus`
+  per ingest period; `materialize_period_consensus` for the production writer) — there is **no batch
+  rebuild**; that pattern is forbidden by design. **Inference reads this** — a sorted index scan on
+  `rating`, not joins over evidence.
 - **Glicko-2 kernel** — full Glickman-2013 implementation in `engine/core/src/glicko2.c`, exposed as
   the `laplace_glicko2_accumulate` SQL aggregate; computes the signed win/loss consensus update of §6.
 - **Geometry** — `laplace_geom` (in the `public` schema): `laplace_distance_4d`, `laplace_dwithin_4d`,
@@ -460,7 +468,7 @@ and model alike:
 
 ## 10. Calibration & open parameters
 
-Values the spec leaves to **set** (calibration constants — tune-once, like the QK floor) and a few
+Values the spec leaves to **set** (calibration constants — tune-once) and a few
 **design choices**. These are knobs, not gaps in how the invention works:
 
 - **Consensus calibration (§6).** The magnitude scale `M` (per arena), the trust→φ map shape (e.g.

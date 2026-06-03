@@ -8,7 +8,7 @@ namespace Laplace.Migrations.Tests;
 /// exposes its connection string, and tears down on dispose. xUnit's
 /// IAsyncLifetime semantics handle container startup/shutdown.
 ///
-/// Per STANDARDS.md Testing — Testcontainers covers the DbUp + extension
+/// Per the testing standard — Testcontainers covers the DbUp + extension
 /// install layer at unit-test grain. Substrate-level integration tests
 /// (laplace extension functions, opclasses) run via pg_regress against
 /// the deployed cluster, not Testcontainers (the laplace_geom +

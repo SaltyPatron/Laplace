@@ -3,11 +3,11 @@ using System.Runtime.InteropServices;
 namespace Laplace.Engine.Synthesis;
 
 /// <summary>
-/// P/Invoke bindings to liblaplace_synthesis (per ADR 0024 + 0026).
+/// P/Invoke bindings to liblaplace_synthesis.
 ///
 /// Recipe parsing, architecture-template materialization, BF16 decoding,
-/// static QK attention scoring, native package emission, and GGUF proof
-/// export live here. Per ADR 0027: math in C/C++, orchestration in C#.
+/// the exact QK pair/projection kernels, export-only SVD factoring, and the
+/// GGUF/format writers live here. Math in C/C++, orchestration in C#.
 /// </summary>
 public static partial class NativeInterop
 {
@@ -60,7 +60,7 @@ public static partial class NativeInterop
 
     /// <summary>
     /// Distribute substrate consensus values into one tensor slot per the
-    /// architecture template's recipe layout (per ADR 0056:183 + DESIGN.md:660).
+ /// architecture template's recipe layout.
     /// NOT a pseudoinverse — broadcast across the recipe's per-(layer, head, dim)
     /// shape. See engine/synthesis/include/laplace/synthesis/arch_template.h for
     /// the SubstrateView fields the template consumes.
@@ -71,39 +71,8 @@ public static partial class NativeInterop
     public static unsafe partial int ArchTemplateMaterializeTensor(
         IntPtr tmpl, TensorSpec* spec, SubstrateView* view, void* outValues);
 
-    // === Static QK attention scorer ===
-
-    /// <summary>
-    /// SVD-based per-row top-k token-to-token static QK scores for one attention head.
-    /// E_bf16: [n_vocab × d_model] in BF16; Wq/Wk: [head_dim × d_model] in f32.
-    /// outPairs: caller-allocated; must hold at least nVocab*topkPerRow entries.
-    /// Returns number of pairs written, or -1 on error.
-    /// </summary>
-    [LibraryImport(Library, EntryPoint = "compute_static_qk_scores")]
-    public static unsafe partial int ComputeStaticQkScores(
-        ushort* E_bf16, nuint nVocab, nuint dModel,
-        float* Wq, float* Wk, nuint headDim,
-        nuint topkPerRow,
-        QkPair* outPairs, nuint outCap);
-
-    /// <summary>
-    /// Batch SVD-based QK scorer: all attention heads for one layer, TBB-parallel.
-    /// WqAll: [n_heads × head_dim × d_model] f32 (all query heads stacked).
-    /// WkAll: [n_kv_heads × head_dim × d_model] f32 (all KV heads stacked).
-    /// outPairs: flat [n_heads × outCapPerHead] — head h at outPairs + h*outCapPerHead.
-    /// outCounts: [n_heads] — number of pairs written per head.
-    /// outCapPerHead must be ≥ nVocab * topkPerRow.
-    /// Returns 0 on success, -1 on error.
-    /// </summary>
-    [LibraryImport(Library, EntryPoint = "compute_static_qk_scores_batch")]
-    public static unsafe partial int ComputeStaticQkScoresBatch(
-        ushort* E_bf16, nuint nVocab, nuint dModel,
-        float* WqAll, float* WkAll,
-        nuint nHeads, nuint nKvHeads, nuint headDim,
-        nuint queriesPerKv, nuint topkPerRow,
-        QkPair* outPairs, int* outCounts, nuint outCapPerHead);
-
-    // === Tensor decomposition ===
+    // === Tensor decomposition (EXPORT-ONLY: re-export = SVD-factor consensus circuits
+    //     into the target mold at the recipe rank; never used at ingest) ===
 
     /// <summary>
     /// Energy-truncated thin SVD of a row-major f32 matrix A [m × n].
@@ -120,44 +89,6 @@ public static partial class NativeInterop
         double relErrTol,
         nuint* outRank,
         float* U, float* S, float* Vt, nuint kmax);
-
-    /// <summary>
-    /// E·Wᵀ token→feature projection scorer (ADR 0056 interior-role math_function:
-    /// V/O/GATES/UP/DOWN). For each token, top-k feature dims by |（E·Wᵀ)[token,dim]|.
-    /// E_bf16: [nVocab × dModel] BF16; W: [nOut × dModel] f32 (output×input).
-    /// outPairs: QueryIdx=token, KeyIdx=feature dim, Score=projection value.
-    /// Returns pairs written, -1 bad args, -2 if MKL unavailable.
-    /// </summary>
-    [LibraryImport(Library, EntryPoint = "compute_static_projection_scores")]
-    public static unsafe partial int ComputeStaticProjectionScores(
-        ushort* E_bf16, nuint nVocab, nuint dModel,
-        float* W, nuint nOut,
-        nuint topkPerRow,
-        QkPair* outPairs, nuint outCap);
-
-    /// <summary>
-    /// Per-token L2 magnitude of a BF16 [rows × cols] row-major tensor — exact,
-    /// deterministic (Neumaier-compensated f64, fixed column order, thread-count
-    /// independent). <c>out[r] = sqrt(Σ_c f32(tensor[r,c])²)</c>. Replaces the
-    /// scalar C# WeightTensorETL.ReducePerCellMagnitude. Returns 0 ok, -1 bad args.
-    /// </summary>
-    [LibraryImport(Library, EntryPoint = "compute_per_token_l2_magnitude")]
-    public static unsafe partial int ComputePerTokenL2Magnitude(
-        ushort* tensorBf16, nuint rows, nuint cols, double* outRows);
-
-    /// <summary>
-    /// One weight tensor's per-token E·|W| projection — exact, deterministic
-    /// (Neumaier-compensated f64, fixed order). <c>perInDim[i]=Σ_o|W[o,i]|</c>; then
-    /// <c>out[t]=|Σ_i E[t,i]·perInDim[i]|</c> when <paramref name="inDim"/>==<paramref name="dModel"/>,
-    /// else the uniform fallback <c>(Σ_i perInDim[i])/vocab</c>. Replaces the scalar C#
-    /// WeightTensorETL.AggregateLayerThroughEmbed (one-tensor contribution; caller
-    /// accumulates across layers). Returns 0 ok, -1 bad args.
-    /// </summary>
-    [LibraryImport(Library, EntryPoint = "compute_projection_per_token")]
-    public static unsafe partial int ComputeProjectionPerToken(
-        ushort* eBf16, nuint vocab, nuint dModel,
-        ushort* wBf16, nuint outDim, nuint inDim,
-        double* outRows);
 
     /// <summary>
     /// Exact, deterministic, streaming, threshold-based QK token-relation scorer for one
@@ -312,18 +243,6 @@ public static partial class NativeInterop
 }
 
 /// <summary>
-/// Sparse (query, key, score) triplet from <see cref="NativeInterop.ComputeStaticQkScores"/>.
-/// Must match the C struct qk_pair_t layout.
-/// </summary>
-[StructLayout(LayoutKind.Sequential)]
-public struct QkPair
-{
-    public uint  QueryIdx;
-    public uint  KeyIdx;
-    public float Score;
-}
-
-/// <summary>
 /// Sparse (query, key, score) triplet with an f64 score from
 /// <see cref="NativeInterop.ComputeQkPairsAboveThreshold"/>. Must match the C struct
 /// qk_pair_f64_t layout (uint32, uint32, double — 16 bytes).
@@ -352,7 +271,7 @@ public unsafe struct TensorSpec
 /// <summary>
 /// Substrate consensus bundle consumed by
 /// <see cref="NativeInterop.ArchTemplateMaterializeTensor"/>. Must match the
-/// C struct substrate_view_t layout exactly. Per ADR 0056:183 + DESIGN.md:660
+/// C struct substrate_view_t layout exactly.
 /// the architecture template distributes these values across the recipe's
 /// per-(layer, head, dim) layout — broadcast, NOT pseudoinverse.
 /// </summary>

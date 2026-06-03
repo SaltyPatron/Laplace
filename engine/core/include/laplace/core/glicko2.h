@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-/* Glicko-2 fixed-point state (per ADR 0004 — scale 1e9, int64 throughout).
+/* Glicko-2 fixed-point state ( — scale 1e9, int64 throughout).
  *
  * Field semantics (all at scale 1e9):
  *   rating      = Glicko-1 rating r (e.g. 1500.0 -> 1_500_000_000_000)
@@ -87,7 +87,7 @@ void glicko2_update(glicko2_state_t* st,
 void glicko2_decay_rd_in_place(glicko2_state_t* st, int64_t now_ns);
 
 /* Effective mu for cascade scoring: rating discounted by RD-driven
- * uncertainty. Per ADR 0036 arena/source-trust semantics: cascade A*
+ * uncertainty. arena/source-trust semantics: cascade A*
  * weights edges by a high-confidence quantile of the rating distribution,
  * not raw mu. Returns r - 2*RD at scale 1e9 (the ~95% lower bound). */
 int64_t glicko2_effective_mu(const glicko2_state_t* st);

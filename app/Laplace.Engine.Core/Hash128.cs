@@ -12,7 +12,7 @@ namespace Laplace.Engine.Core;
 /// Used as substrate entity / physicality / attestation primary key and
 /// throughout the IDecomposer / SubstrateChange / SubstrateCRUD surfaces.
 /// Wire bytes match <c>bytea(16)</c> in PostgreSQL via Npgsql binary COPY —
-/// no hex round-trip per STANDARDS.md ID discipline.
+/// no hex round-trip per the ID discipline.
 ///
 /// <c>readonly record struct</c> with <see cref="LayoutKind.Sequential"/>
 /// produces a 16-byte blittable POD that crosses the C ABI with zero
@@ -43,8 +43,8 @@ public readonly record struct Hash128(ulong Hi, ulong Lo)
 
     /// <summary>BLAKE3-128 of the UTF-8 encoding of <paramref name="canonical"/>.
     /// The conventional way to derive a substrate source / type / kind
-    /// entity ID from a canonical name string (per ADR 0042 bootstrap
-    /// + ADR 0051 IDecomposer.SourceId).</summary>
+    /// entity ID from a canonical name string ( bootstrap
+ /// + IDecomposer.SourceId).</summary>
     public static Hash128 OfCanonical(string canonical)
     {
         ArgumentNullException.ThrowIfNull(canonical);

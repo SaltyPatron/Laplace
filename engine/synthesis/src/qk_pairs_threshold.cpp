@@ -11,7 +11,7 @@
 /* Exact, deterministic, streaming threshold-based QK token-relation scorer.
  *
  * For one attention head: project each token through the head's Q and K weights
- * (q_proj·k_proj per ADR 0056:157), score query×key by dot product, and emit
+ * (q_proj·k_proj:157), score query×key by dot product, and emit
  * every pair whose |score| strictly exceeds noise_floor. No top-k, no scale, no
  * vocab×vocab / vocab×k staging buffer.
  *

@@ -1,4 +1,4 @@
-/* 13_consensus.sql.in — materialized cross-witness consensus (S2; ADR 0036 + ADR 0044).
+/* 13_consensus.sql.in — materialized cross-witness consensus.
  *
  * `attestations` is the per-witness EVIDENCE layer: one row per
  * (subject, kind, object, source, context). The CONSENSUS is ONE row per
@@ -113,7 +113,11 @@ BEGIN
         -- is what makes this idempotent + order-invariant. source AND context
         -- collapse here (both are witnesses, never identity).
         SELECT a.subject_id, a.kind_id, a.object_id,
-               SUM(a.observation_count) AS witness_count,
+               -- count(*) over the generate_series-EXPANDED rows = Σ observation_count
+               -- (total games). SUM(observation_count) here would be Σn² — each row
+               -- appears n times post-expansion — quadratically inflating multi-game
+               -- witnesses (caught by ConsensusAccumulatingWriterTests equivalence).
+               count(*)                 AS witness_count,
                MAX(a.last_observed_at)  AS last_observed_at,
                laplace_glicko2_accumulate(
                    1500000000000::bigint, 350000000000::bigint, 60000000::bigint,    -- neutral prior (μ, rd, σ)
@@ -126,10 +130,16 @@ BEGIN
         -- replay each observation observation_count times: N occurrences = N games
         CROSS JOIN LATERAL generate_series(1, a.observation_count) AS occ
         -- restrict to relations TOUCHED this period: any witness newer than p_since.
-        WHERE (a.subject_id, a.kind_id, a.object_id) IN (
-            SELECT t.subject_id, t.kind_id, t.object_id
-            FROM attestations t
-            WHERE p_since IS NULL OR t.last_observed_at > p_since
+        -- IS NOT DISTINCT FROM, not a row-IN: (subj, kind, NULL) IN (...) is
+        -- UNKNOWN under SQL NULL semantics, which silently excluded every
+        -- NULL-object relation from every period materialization (caught by
+        -- ConsensusAccumulatingWriterTests equivalence).
+        WHERE EXISTS (
+            SELECT 1 FROM attestations t
+            WHERE (p_since IS NULL OR t.last_observed_at > p_since)
+              AND t.subject_id = a.subject_id
+              AND t.kind_id    = a.kind_id
+              AND t.object_id IS NOT DISTINCT FROM a.object_id
         )
         GROUP BY a.subject_id, a.kind_id, a.object_id
     ) g
@@ -146,6 +156,117 @@ $$;
 
 COMMENT ON FUNCTION incremental_consensus(timestamptz) IS
     'INCREMENTAL consensus materialization (L3): re-accumulate consensus ONLY for relations touched since p_since (evidence last_observed_at > p_since), each from its FULL evidence, then INSERT … ON CONFLICT (id) DO UPDATE. NO TRUNCATE → cross-model/cross-witness accumulation preserved on the same consensus row. Per-relation full re-accumulation is idempotent + order-invariant (Glicko-2 is commutative within a period), so re-ingest of an identical tuple is a 0-net-game no-op and a new source raises witness_count on the same row. p_since NULL ⇒ touch all. Returns rows touched. There is NO batch rebuild — consensus accumulates at ingest only.';
+
+/* ── PRODUCTION-MODE period accumulation (consensus-direct; no evidence rows) ──────────────
+ *
+ * The production writer accumulates per-relation partial aggregates (n games,
+ * Σ score — exact for one period because φ is constant per relation per
+ * period) and spills them into a session-scoped staging heap. These two
+ * functions own that surface IN THE SUBSTRATE — the application layer calls
+ * them and COPYs; it hand-writes no SQL and duplicates no §10 constants. */
+
+/* Session-scoped staging heap for one ingest period's partial aggregates.
+ * TEMP ⇒ a crashed run drops it with the session and materializes nothing. */
+CREATE OR REPLACE FUNCTION create_period_staging()
+    RETURNS void LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+BEGIN
+    CREATE TEMP TABLE consensus_period_staging (
+        subject_id bytea  NOT NULL,
+        kind_id    bytea  NOT NULL,
+        object_id  bytea,
+        phi        bigint NOT NULL,
+        games      bigint NOT NULL,
+        sum_score  bigint NOT NULL,
+        last_ts    timestamptz NOT NULL
+    );   -- no indexes: append-only heap, grouped exactly once at materialization
+END;
+$$;
+
+COMMENT ON FUNCTION create_period_staging() IS
+    'Create the session-scoped TEMP staging heap for one ingest period''s partial (n, Σs) aggregates. Crash drops it with the session — nothing materializes from a dead period.';
+
+/* Materialize the period: merge partials per relation (Σ of Σ — exact),
+ * verify φ-uniformity (fail loud, never average), then upsert consensus via
+ * the SAME §10 mapping as incremental_consensus: prior = current row (neutral
+ * when new), neutral opponent, per-witness φ, replay n games whose scores sum
+ * EXACTLY to Σs (n−1 at ⌊Σs/n⌋ + one remainder game; v is score-independent
+ * and Δ ∝ Σs, so this equals the true multiset's period update).
+ *
+ * SET session_replication_role = replica: per-row RI triggers are redundant
+ * here — every staged relation id entered through the writer's set-based
+ * referential proof when its entities landed this period (or pre-existed).
+ * Function-level SET ⇒ scoped to this call, self-reverting, never leaks. */
+CREATE OR REPLACE FUNCTION materialize_period_consensus()
+    RETURNS bigint LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public
+    SET session_replication_role = replica AS $$
+DECLARE
+    n_bad bigint;
+    n_materialized bigint;
+BEGIN
+    SELECT count(*) INTO n_bad FROM (
+        SELECT 1 FROM consensus_period_staging
+        GROUP BY subject_id, kind_id, object_id
+        HAVING min(phi) <> max(phi)) bad;
+    IF n_bad > 0 THEN
+        RAISE EXCEPTION 'accumulation invariant violated: % relation(s) observed with mixed φ within one period', n_bad;
+    END IF;
+
+    WITH merged AS (
+        SELECT s.subject_id, s.kind_id, s.object_id,
+               min(s.phi)               AS phi,
+               -- sum(bigint) returns NUMERIC in PG — cast back so the score
+               -- expression stays bigint and the aggregate signature resolves.
+               sum(s.games)::bigint     AS games,
+               sum(s.sum_score)::bigint AS sum_score,
+               max(s.last_ts)           AS last_ts
+        FROM consensus_period_staging s
+        GROUP BY s.subject_id, s.kind_id, s.object_id
+    )
+    INSERT INTO consensus (id, subject_id, kind_id, object_id, context_id,
+                           rating, rd, volatility, witness_count, last_observed_at)
+    SELECT consensus_id(f.subject_id, f.kind_id, f.object_id),
+           f.subject_id, f.kind_id, f.object_id, NULL::bytea,
+           (f.acc).rating, (f.acc).rd, (f.acc).volatility,
+           COALESCE(c0.witness_count, 0) + f.games,
+           f.last_ts
+    FROM (
+        SELECT m.subject_id, m.kind_id, m.object_id, m.games, m.last_ts,
+               laplace_glicko2_accumulate(
+                   COALESCE(c.rating,     1500000000000::bigint),   -- prior = current consensus,
+                   COALESCE(c.rd,          350000000000::bigint),   -- neutral when the relation is new
+                   COALESCE(c.volatility,     60000000::bigint),
+                   1500000000000::bigint,                            -- NEUTRAL opponent μ (the 1500 line)
+                   m.phi,                                            -- opponent φ from witness trust
+                   CASE WHEN g.i < m.games THEN m.sum_score / m.games
+                        ELSE m.sum_score - (m.sum_score / m.games) * (m.games - 1) END,
+                   500000000::bigint                                 -- τ = 0.5
+               ) AS acc
+        FROM merged m
+        LEFT JOIN consensus c
+               ON c.id = consensus_id(m.subject_id, m.kind_id, m.object_id)
+        CROSS JOIN LATERAL generate_series(1, m.games) AS g(i)
+        GROUP BY m.subject_id, m.kind_id, m.object_id, m.games, m.last_ts,
+                 c.rating, c.rd, c.volatility
+    ) f
+    LEFT JOIN consensus c0
+           ON c0.id = consensus_id(f.subject_id, f.kind_id, f.object_id)
+    ON CONFLICT (id) DO UPDATE SET
+        rating           = EXCLUDED.rating,
+        rd               = EXCLUDED.rd,
+        volatility       = EXCLUDED.volatility,
+        witness_count    = EXCLUDED.witness_count,
+        last_observed_at = EXCLUDED.last_observed_at;
+    GET DIAGNOSTICS n_materialized = ROW_COUNT;
+
+    DROP TABLE consensus_period_staging;
+    RETURN n_materialized;
+END;
+$$;
+
+COMMENT ON FUNCTION materialize_period_consensus() IS
+    'Materialize one ingest period from the session''s staging heap into consensus: merge partial (n, Σs) aggregates per relation (exact — φ constant per period), verify φ-uniformity (fail loud), accumulate via laplace_glicko2_accumulate against the current row as prior, upsert, drop the staging. RI triggers skipped via function-scoped replica role: referential validity was proven set-based at write time.';
 
 /* ── Permanent inference queries — part of the substrate, not regenerated per session ──────
  * Relatedness/inference is a sorted index scan over consensus effective μ (μ - 2·rd). These
@@ -211,6 +332,87 @@ CREATE OR REPLACE FUNCTION consensus_in(p_id bytea, p_limit integer DEFAULT 40)
 $$;
 COMMENT ON FUNCTION consensus_in(bytea, integer) IS
     'Incoming CONSENSUS neighborhood: accumulated Glicko-2 + witness_count per (subject→this) relation, ranked by effective μ.';
+
+/* ── THE FORWARD PASS: generation as a recursive ranked-μ traversal ────────────────────────
+ *
+ * The model's forward pass was precomputed at ingest into ranked, trust-rated
+ * consensus relations. Generation does NOT run the model: it WALKS the arena.
+ * From a prompt entity, expand the top-p_beam completions by effective μ
+ * (μ − 2·rd), recurse to p_depth — reconstructing the model's lexical OUTPUT
+ * TREE for the prompt: every branch is a response the model could produce,
+ * ranked by consensus strength, with path_mu the cumulative trust of the
+ * branch. One indexed scan per node; no GPU, no softmax-over-vocab, no model
+ * executed. */
+CREATE OR REPLACE FUNCTION generate_tree(
+    p_prompt bytea,                 -- prompt entity (token / n-gram id)
+    p_kind   bytea  DEFAULT NULL,   -- arena to walk (e.g. COMPLETES_TO); NULL = all arenas
+    p_depth  int    DEFAULT 4,      -- tree depth (response length in steps)
+    p_beam   int    DEFAULT 5)      -- branches per node (ranked-μ beam)
+    RETURNS TABLE(depth int, path bytea[], entity_id bytea,
+                  eff_mu numeric, path_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+    WITH RECURSIVE walk(depth, path, entity_id, eff_mu, path_mu, witnesses) AS (
+        SELECT 0, ARRAY[p_prompt], p_prompt, NULL::numeric, 0::numeric, NULL::bigint
+        UNION ALL
+        SELECT w.depth + 1,
+               w.path || nxt.object_id,
+               nxt.object_id,
+               nxt.eff_mu,
+               w.path_mu + nxt.eff_mu,
+               nxt.witness_count
+        FROM walk w
+        CROSS JOIN LATERAL (
+            SELECT c.object_id,
+                   round(((c.rating - 2*c.rd) / 1e9)::numeric, 3) AS eff_mu,
+                   c.witness_count
+            FROM consensus c
+            WHERE c.subject_id = w.entity_id
+              AND c.object_id IS NOT NULL
+              AND (p_kind IS NULL OR c.kind_id = p_kind)
+              AND NOT (c.object_id = ANY (w.path))   -- no cycles in a response branch
+            ORDER BY (c.rating - 2*c.rd) DESC
+            LIMIT p_beam
+        ) nxt
+        WHERE w.depth < p_depth
+    )
+    SELECT depth, path, entity_id, eff_mu, path_mu, witnesses
+    FROM walk
+    WHERE depth > 0
+    ORDER BY depth, path_mu DESC
+$$;
+COMMENT ON FUNCTION generate_tree(bytea, bytea, int, int) IS
+    'THE FORWARD PASS AS SQL: reconstruct the model''s lexical output tree for a prompt entity by recursive ranked-μ traversal of the consensus arena (beam-bounded, depth-bounded, cycle-free). Each row is one node of the response tree; path is the generated entity sequence; path_mu the branch''s cumulative consensus strength. No model is executed.';
+
+/* Greedy decode: the single highest-μ branch — "the response the model would
+ * most likely produce" — as one path. */
+CREATE OR REPLACE FUNCTION generate_greedy(
+    p_prompt bytea, p_kind bytea DEFAULT NULL, p_depth int DEFAULT 8)
+    RETURNS TABLE(step int, entity_id bytea, eff_mu numeric)
+    LANGUAGE plpgsql STABLE SET search_path = @extschema@, public AS $$
+DECLARE
+    cur  bytea := p_prompt;
+    nxt  record;
+    seen bytea[] := ARRAY[p_prompt];
+BEGIN
+    FOR i IN 1..p_depth LOOP
+        SELECT c.object_id, round(((c.rating - 2*c.rd) / 1e9)::numeric, 3) AS mu
+        INTO nxt
+        FROM consensus c
+        WHERE c.subject_id = cur AND c.object_id IS NOT NULL
+          AND (p_kind IS NULL OR c.kind_id = p_kind)
+          AND NOT (c.object_id = ANY (seen))
+        ORDER BY (c.rating - 2*c.rd) DESC
+        LIMIT 1;
+        EXIT WHEN nxt IS NULL OR nxt.object_id IS NULL;
+        step := i; entity_id := nxt.object_id; eff_mu := nxt.mu;
+        RETURN NEXT;
+        seen := seen || nxt.object_id;
+        cur  := nxt.object_id;
+    END LOOP;
+END;
+$$;
+COMMENT ON FUNCTION generate_greedy(bytea, bytea, int) IS
+    'Greedy decode over consensus: follow the single highest effective-μ completion from the prompt entity for p_depth steps — the model''s most-likely response path, produced without running the model.';
 
 /* Consensus / dedup health: evidence vs consensus row counts + witness fan-in. dedup_ratio =
  * evidence/consensus (how much the per-witness evidence collapsed — the "~params - dupes"). */

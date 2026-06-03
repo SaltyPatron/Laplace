@@ -6,7 +6,7 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
 /// Npgsql-backed <see cref="ISubstrateReader"/> implementation. Read-only
-/// view used by IngestRunner (per ADR 0052) for layer-ordering checks +
+/// view used by IngestRunner for layer-ordering checks +
 /// by IDecomposer.InitializeAsync for bootstrap verification.
 /// </summary>
 public sealed class NpgsqlSubstrateReader : ISubstrateReader
@@ -18,12 +18,9 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
     /// <inheritdoc/>
     /// <remarks>
-    /// MVP impl uses an "any entities of the substrate-canonical Source
-    /// type exist with a recorded layer-order meta-attestation" probe.
-    /// The full ADR 0037 layer-completion semantics (per-source HAS_LAYER
-    /// meta-attestation set at end of decomposer run) lands with the
-    /// concrete decomposer story (#183 Unicode first); for now a thin
-    /// probe satisfies the interface so IngestRunner can compile.
+    /// Probes for the layer's HasLayerCompleted marker attestation — the
+    /// completion marker each decomposer run records at end of layer, which
+    /// the IngestRunner's layer gate reads.
     /// </remarks>
     public async Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
     {
@@ -41,8 +38,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         catch (PostgresException)
         {
             // Function or kind not yet present (pre-bootstrap or test DB) — treat
-            // as "not completed" rather than throwing. Concrete bootstrap lands
-            // in #183.
+            // as "not completed" rather than throwing.
             return false;
         }
     }

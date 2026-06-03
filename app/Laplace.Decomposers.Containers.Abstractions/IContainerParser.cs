@@ -1,7 +1,7 @@
 namespace Laplace.Decomposers.Containers.Abstractions;
 
 /// <summary>
-/// Static structural parse contract per ADR 0055. Implementations dissect
+/// Static structural parse contract. Implementations dissect
 /// a container format into a stream of <see cref="ExplodedViewItem"/>s
 /// WITHOUT executing any code in the container (no pickle unpickling, no
 /// framework loaders, no <c>__reduce__</c> dispatch, no callbacks).
@@ -11,7 +11,7 @@ namespace Laplace.Decomposers.Containers.Abstractions;
 /// PyTorchPickleContainerParser, OnnxProtobufContainerParser,
 /// TfSavedModelContainerParser, Hdf5ContainerParser,
 /// JupyterContainerParser, etc.) alongside the ModelDecomposer
-/// (#191 / ADR 0043) — outside the scope of this abstractions project.
+/// — outside the scope of this abstractions project.
 /// </para>
 /// </summary>
 public interface IContainerParser
@@ -28,6 +28,6 @@ public interface IContainerParser
     /// <summary>Dissect <paramref name="content"/> into a stream of
     /// exploded-view items. Yield-as-you-go — large containers don't
     /// have to fit in memory. The stream MUST NOT invoke any code from
-    /// inside the container (per ADR 0055).</summary>
+    /// inside the container.</summary>
     IAsyncEnumerable<ExplodedViewItem> DissectAsync(Stream content, CancellationToken ct = default);
 }

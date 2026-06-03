@@ -5,7 +5,7 @@ namespace Laplace.Engine.Core;
 /// <summary>
 /// Managed wrapper over the engine <c>hash_composer_run</c>
 /// (engine/core/include/laplace/core/hash_composer.h). Pure leaf-to-trunk
-/// content-addressing primitive per ADR 0048.
+/// content-addressing primitive.
 ///
 /// The atom resolver is supplied by the caller as a static
 /// <c>[UnmanagedCallersOnly]</c> method (typically for text decomposers:

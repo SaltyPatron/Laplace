@@ -7,7 +7,7 @@ extern "C" {
 #endif
 
 /* 4D Hilbert curve index — a single 1D sortable value with locality
- * preserved across the [-1, 1]^4 bounding hyperbox (per ADR 0005).
+ * preserved across the [-1, 1]^4 bounding hyperbox.
  *
  * One Hilbert curve indexes both S³ surface entities and 4-ball
  * interior centroids, giving B-tree range scans consistent spatial

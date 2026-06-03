@@ -3,7 +3,7 @@ using Laplace.Decomposers.Abstractions;
 namespace Laplace.Ingestion;
 
 /// <summary>
-/// Per-<see cref="IngestRunner.RunAsync"/> configuration. Per ADR 0052
+/// Per-<see cref="IngestRunner.RunAsync"/> configuration.
 /// lines 67–72 plus the fatal-error abort policy.
 /// </summary>
 public sealed record IngestRunOptions(

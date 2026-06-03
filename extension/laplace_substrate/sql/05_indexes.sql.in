@@ -1,16 +1,16 @@
-/* 05_indexes.sql.in — substrate indexes (per DESIGN.md §V + ADR 0029 + ADR 0039).
+/* 05_indexes.sql.in — substrate indexes.
  *
- * Index strategy split by storage class (per STANDARDS storage-class discipline):
+ * Index strategy split by storage class:
  * - LOOKUP indexes: PK btree on id, FK btrees on entity_id/source_id/subject_id/
  *   kind_id/object_id/context_id (custom laplace_btree_hash128_ops opclass per
- *   ADR 0029 lands later as Story 1.14 / 2.15; stock bytea btree until then).
+ * lands later as Story 1.14 / 2.15; stock bytea btree until then).
  * - METADATA indexes: btree on tier/type_id/kind/observed_at-class columns.
- * - CONTENT indexes: GIST on physicalities.coord (gist_geometry_ops_nd; ADR
- *   0029's laplace_gist_s3_ops lands as Story 2.15 / 5.12);
+ * - CONTENT indexes: GIST on physicalities.coord (gist_geometry_ops_nd;
+ *   laplace_gist_s3_ops lands later);
  *   structural opclass on physicalities.trajectory (laplace_sp_trajectory_ops
- *   per ADR 0029; lands as Story 2.16 -- stock gist_geometry_ops_nd is
+ *  ; lands as Story 2.16 -- stock gist_geometry_ops_nd is
  *   useless on mantissa-packed trajectories since all collapse to the same
- *   bounding box per ADR 0012).
+ *   bounding box).
  * - ATTESTATION (evidence) indexes: btree on (subject_id, kind_id, object_id)
  *   for the per-period consensus fold's GROUP BY; composite btree on (subject_id, kind_id)
  *   for cascade frontier expansion. Ranked-μ scans live on consensus, not here.
@@ -35,7 +35,7 @@ CREATE INDEX physicalities_radius_btree    ON physicalities USING btree (radius_
 CREATE INDEX physicalities_residual_btree  ON physicalities USING btree (alignment_residual) WHERE alignment_residual IS NOT NULL;
 CREATE INDEX physicalities_observed_brin   ON physicalities USING brin  (observed_at);
 
-/* --- attestations (typed knowledge edges + Glicko-2 state) --- */
+/* --- attestations (per-witness EVIDENCE observations; accumulated Glicko-2 state lives on consensus) --- */
 
 CREATE INDEX attestations_subject_btree       ON attestations USING btree (subject_id);
 CREATE INDEX attestations_kind_btree          ON attestations USING btree (kind_id);

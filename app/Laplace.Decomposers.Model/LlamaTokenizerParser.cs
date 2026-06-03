@@ -169,7 +169,7 @@ public sealed class LlamaTokenizerParser
             using var tree = TextDecomposer.Run(canonical);
             /* TextDecomposer returns tree topology only — IDs/coords/Hilbert are
              * UNPOPULATED until HashComposer.Run walks the tree leaf-to-trunk
-             * via the perfcache resolver (ADR 0048). */
+             * via the perfcache resolver. */
             unsafe { HashComposer.Run(tree, &PerfcacheResolver); }
 
             int nc = tree.NodeCount;
@@ -223,7 +223,7 @@ public sealed class LlamaTokenizerParser
             }
             /* TextDecomposer returns tree topology only; HashComposer fills
              * IDs / coords / Hilbert leaf-to-trunk via the perfcache resolver
-             * (ADR 0048). TextEntityBuilder REQUIRES this before Build(). */
+             *. TextEntityBuilder REQUIRES this before Build(). */
             unsafe { HashComposer.Run(tree, &PerfcacheResolver); }
             var (es, ps) = new TextEntityBuilder(tree, sourceId).Build();
             entities = es;
@@ -238,7 +238,7 @@ public sealed class LlamaTokenizerParser
         }
     }
 
-    /* Perfcache-backed atom resolver for HashComposer (ADR 0048). Mirrors
+    /* Perfcache-backed atom resolver for HashComposer. Mirrors
      * ContentRoundtrip.Resolver — reads codepoint hash/coord/Hilbert from the
      * process-wide T0 perf-cache. Caller MUST have invoked
      * CodepointPerfcache.Load(path) before any decomposer that triggers
@@ -307,9 +307,10 @@ public sealed class LlamaTokenizerParser
     /// Records MUST be sorted by TokenId (Parse() does this) so that
     /// _tokens[(int)vocabIndex].EntityId is correct for the QK scorer's vocab-index output.
     ///
-    /// TOKEN_MAPS_TO attestation: (tokenizerEntityId → textEntityId, rating = token_id).
-    /// Rating encodes the vocabulary position — positional kind by design, not Glicko-2.
-    /// Synthesis queries these to recover the token_id → entity mapping.
+    /// TOKEN_MAPS_TO attestation: (tokenizerEntityId → textEntityId) with the
+    /// token_id carried in the free audit column arena_m — positional metadata by
+    /// design, never in score (which is a Glicko-2 outcome).
+    /// Re-export queries these to recover the token_id → entity mapping.
     ///
     /// tokenizerEntityId MUST already be in the DB before these batches are applied.
     /// </summary>

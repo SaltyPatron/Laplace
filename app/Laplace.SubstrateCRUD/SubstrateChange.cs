@@ -6,13 +6,12 @@ namespace Laplace.SubstrateCRUD;
 /// <summary>
 /// Canonical unified intent type carrying entities + physicalities +
 /// attestations + metadata from a per-source decomposer to the shared
-/// SubstrateCRUD write surface — per ADR 0049.
+/// SubstrateCRUD write surface.
 ///
-/// Serializable for checkpoint / resume on multi-hour ingest runs.
 /// FK-dependency ordering invariant: entities must precede physicalities
 /// which must precede attestations (enforced at apply time, not at
 /// construction). Race-tolerant via content-addressing + ON CONFLICT DO
-/// NOTHING at the DDL level (per RULES R5).
+/// NOTHING at the DDL level.
 ///
 /// All IDs are computed client-side via <see cref="Hash128.Blake3"/> /
 /// <see cref="Hash128.Merkle"/> in the decomposer; SubstrateCRUD never
@@ -28,7 +27,7 @@ public sealed record SubstrateChange(
 
 /// <summary>
 /// Header that travels with every <see cref="SubstrateChange"/> — identifies
-/// the intent for the checkpoint journal + per-intent observability emission.
+/// the intent for per-intent observability emission.
 /// </summary>
 public sealed record SubstrateChangeMetadata(
     Hash128         IntentId,
@@ -38,7 +37,7 @@ public sealed record SubstrateChangeMetadata(
     Hash128?        ParentIntentId);
 
 /// <summary>
-/// One row of the <c>laplace.entities</c> table (identity layer per ADR 0039).
+/// One row of the <c>laplace.entities</c> table (identity layer).
 /// All fields populated by the decomposer.
 /// </summary>
 public sealed record EntityRow(
@@ -49,10 +48,10 @@ public sealed record EntityRow(
 
 /// <summary>
 /// One row of the <c>laplace.physicalities</c> table (per-source per-kind
-/// view per ADR 0039).
+/// view).
 ///
 /// <para>
-/// Trajectory is a mantissa-packed LINESTRINGZM per ADR 0012 when populated;
+/// Trajectory is a mantissa-packed LINESTRINGZM when populated;
 /// pass <c>null</c> + 0 vertices for T0 atoms or any case where no trajectory
 /// applies.
 /// </para>
@@ -76,7 +75,7 @@ public sealed record PhysicalityRow(
 /// <summary>
 /// One row of the <c>laplace.attestations</c> table — the EVIDENCE layer: a
 /// single Glicko-2 OBSERVATION (a match the relation plays vs a neutral
-/// baseline opponent), per RULES R5 + ADR 0036 + ARCHITECTURE.md §10.
+/// baseline opponent) + ARCHITECTURE.md §10.
 ///
 /// <para>
 /// <c>ScoreFp1e9</c> = ½(1+tanh(signed_m/M)) ∈ (0,1) — the signed-magnitude

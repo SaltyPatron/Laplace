@@ -2,7 +2,7 @@
 --
 -- Cleanup migration: drop the orphan 'laplace' extension left behind by the
 -- pre-modularization layout (single-extension era, before PR #182 landed
--- the laplace_geom + laplace_substrate split per ADR 0025).
+-- the laplace_geom + laplace_substrate split).
 --
 -- On hart-server's 'laplace' database, the OLD 'laplace' extension is still
 -- in pg_extension from earlier sessions. The PR #182 migration installs
@@ -12,7 +12,7 @@
 -- stale state visible in \dx and a foot-gun if any client calls the old
 -- laplace_version() function.
 --
--- Per RULES.md R9: clean
+--: clean
 -- cutover, no backwards-compat layer. DROP CASCADE removes the orphan's
 -- functions; the 'laplace' schema (declared by both old and new extensions
 -- via schema='laplace') is owned by laplace_admin and survives the drop —

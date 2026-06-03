@@ -2,7 +2,7 @@ namespace Laplace.Decomposers.Containers.Abstractions;
 
 /// <summary>
 /// Base record for items produced by a static structural container parse
-/// per ADR 0055 — "we're literally semantically dissecting them to an
+/// — "we're literally semantically dissecting them to an
 /// exploded view". A container's bytes never get loaded by a framework
 /// runtime; the parser walks the format's static structure and emits one
 /// of these per discovered element.
@@ -34,7 +34,7 @@ public sealed record TensorReference(
 
 /// <summary>A reference to a Python class encountered in a pickle stream —
 /// resolved STATICALLY from the GLOBAL opcode (module + qualname) per
-/// ADR 0055. Never invoked. The downstream TreeSitterDecomposer resolves
+/// . Never invoked. The downstream TreeSitterDecomposer resolves
 /// the actual class definition from the Python source corpus.</summary>
 public sealed record PythonClassReference(string Path, string Module, string Qualname)
     : ExplodedViewItem(Path);

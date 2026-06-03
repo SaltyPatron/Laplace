@@ -20,10 +20,8 @@
  *   WB3:  CR × LF
  *   WB3a: (Newline | CR | LF) ÷
  *   WB3b: ÷ (Newline | CR | LF)
- *   WB3c: ZWJ × \p{Extended_Pictographic}  (deferred — needs ExtPict;
- *         the grapheme-break codegen carries it; we can wire it in here
- *         but emoji boundaries within words are rare for word-segment
- *         purposes)
+ *   WB3c: ZWJ × \p{Extended_Pictographic}  (implemented below via the
+ *         ExtPict table the grapheme-break codegen carries)
  *   WB3d: WSegSpace × WSegSpace
  *   WB4:  × (Extend | Format | ZWJ)  (already-walked context)
  *   WB5:  (ALetter|Hebrew_Letter) × (ALetter|Hebrew_Letter)

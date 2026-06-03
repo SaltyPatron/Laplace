@@ -19,7 +19,7 @@ public enum IntentStageTable
 /// (engine/core/include/laplace/core/intent_stage.h). RAII via
 /// <see cref="SafeHandle"/>.
 ///
-/// Used by <c>Laplace.SubstrateCRUD.NpgsqlSubstrateWriter</c> (per ADR 0050)
+/// Used by <c>Laplace.SubstrateCRUD.NpgsqlSubstrateWriter</c>
 /// to materialize PG COPY BINARY byte streams in-engine — the C# layer is a
 /// thin transport over engine-emitted bytes. Zero per-row managed
 /// allocations. One COPY round-trip per table.
@@ -93,7 +93,7 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
-    /// <summary>Add one <c>physicalities</c> row. See ADR 0049 schema
+ /// <summary>Add one <c>physicalities</c> row. See schema
     /// shape; pass <paramref name="trajectoryXyzm"/>=<c>null</c> for SQL
     /// NULL trajectory.</summary>
     public void AddPhysicality(

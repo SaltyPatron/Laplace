@@ -8,7 +8,7 @@ namespace Laplace.Migrations;
 
 /// <summary>
 /// DbUp-based migration runner for Laplace's Layer 1 — extension lifecycle
-/// orchestration. Per ADR 0021 (DbUp + Npgsql) + ADR 0023 (extension owns
+/// orchestration. (DbUp + Npgsql) + (extension owns
 /// schema; DbUp orchestrates).
 ///
 /// Scope: ensure the 'laplace' database exists, CREATE EXTENSION postgis +
@@ -73,7 +73,7 @@ internal static class Program
         // create the target DB if missing. laplace_admin is SUPERUSER per
         // bootstrap_pg_roles, so the migration's CREATE EXTENSION postgis
         // works against the empty DB without any template-DB or
-        // laplace_priv wrapper machinery. Per ADR 0023, the database
+        // laplace_priv wrapper machinery., the database
         // itself is a Layer-1 concern.
         EnsureDatabase.For.PostgresqlDatabase(connectionString);
 
@@ -323,7 +323,7 @@ internal static class Program
               PG_* env vars (PGHOST, PGUSER, PGDATABASE, PGPORT, PGPASSWORD)
               Default: peer auth → laplace_admin on /var/run/postgresql, db=laplace
 
-            See ADR 0021 (DbUp + Npgsql) + ADR 0023 (extension owns schema).
+            See (DbUp + Npgsql) + (extension owns schema).
             """);
         return 64;
     }

@@ -1,7 +1,7 @@
 -- Migration 20260528060000_attestation_response_read_primitive
 --
 -- One-hop typed-edge read primitive: "what does subject X attest about kind Y
--- (optionally scoped to sources/context), top K". Cascade A* SRF (ADR 0035) calls
+-- (optionally scoped to sources/context), top K". Cascade A* SRF calls
 -- this as its inner per-hop step.
 --
 -- EVIDENCE vs CONSENSUS (ARCHITECTURE.md §10): source AND context (model
@@ -12,9 +12,9 @@
 --     (a sorted index scan over consensus_rating_btree — μs, no re-aggregation).
 --   • source-/context-scoped   → accumulate Glicko-2 over the EVIDENCE rows in
 --     that scope, with the SAME neutral prior + neutral opponent + per-witness
---     opponent_rd(trust→φ) + stored tanh score that rebuild_consensus uses,
+--     opponent_rd(trust→φ) + stored tanh score that incremental_consensus uses,
 --     replaying observation_count games (order-invariant within a period).
--- Effective μ = max(0, (rating − 2·rd)/1e9) — the 95% lower bound (ADR 0036).
+-- Effective μ = max(0, (rating − 2·rd)/1e9) — the 95% lower bound.
 
 CREATE OR REPLACE FUNCTION laplace.attestation_response(
     p_subject_id   bytea,
@@ -50,7 +50,7 @@ BEGIN
             LIMIT GREATEST(1, p_top_k);
     ELSE
         -- Scoped: per-(source-set, context) consensus accumulated on the fly from
-        -- evidence (source + context live here). Same kernel as rebuild_consensus.
+        -- evidence (source + context live here). Same kernel as incremental_consensus.
         RETURN QUERY
             SELECT g.object_id,
                    GREATEST(0.0, ((g.acc).rating - 2.0 * (g.acc).rd) / 1e9)::double precision,
@@ -86,10 +86,10 @@ COMMENT ON FUNCTION laplace.attestation_response IS
     'One-hop typed-edge expansion: top-K objects by effective μ (max(0, rating − 2·RD)) '
     'for (subject, kind). NULL source_scope AND NULL context → reads the materialized '
     'consensus (cross-source/context). Either set → accumulates Glicko-2 over the evidence '
-    'in that scope (source + context live in evidence). Pre-cascade read primitive (ADR 0035).';
+    'in that scope (source + context live in evidence). Pre-cascade read primitive.';
 
 -- Companion: unary-attestation lookup (object_id IS NULL — for kinds like
--- EMBEDS / V_PROJECTS / O_PROJECTS that emit per-subject scalars per ADR 0056).
+-- EMBEDS / V_PROJECTS / O_PROJECTS that emit per-subject scalars).
 CREATE OR REPLACE FUNCTION laplace.attestation_unary_response(
     p_subject_id   bytea,
     p_kind_id      bytea,
@@ -142,7 +142,7 @@ $$;
 
 COMMENT ON FUNCTION laplace.attestation_unary_response IS
     'Unary-kind subject lookup (object_id IS NULL — EMBEDS / *_PROJECTS / GATES / NORMALIZES '
-    'per ADR 0056). NULL scope+context → consensus; scoped → Glicko-2 over the evidence in '
+    '). NULL scope+context → consensus; scoped → Glicko-2 over the evidence in '
     'that scope. Effective μ + witness count for (subject, kind).';
 
 GRANT EXECUTE ON FUNCTION laplace.attestation_response       TO PUBLIC;

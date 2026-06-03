@@ -1,7 +1,7 @@
 /* 07_s3_opclass.sql.in — laplace_gist_s3_ops GIST opclass.
  *
- * Per ADR 0029: substrate-specific GIST opclass for 4D geometry
+ *: substrate-specific GIST opclass for 4D geometry
  * exploiting S³-surface vs 4-ball-interior structural split. Non-
  * default — opted into via index DDL.
  *
- * Real opclass + support functions land Chunk 2 Story 2.15 (#169). */
+ * Real opclass + support functions land Chunk 2 Story 2.15. */

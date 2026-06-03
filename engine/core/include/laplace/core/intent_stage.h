@@ -14,7 +14,7 @@ extern "C" {
  * streams for the three substrate tables (entities, physicalities,
  * attestations).
  *
- * Per ADR 0050 SubstrateCRUD + the locked invariant that the C# layer is an
+ * SubstrateCRUD + the locked invariant that the C# layer is an
  * I/O transport only: the C# writer constructs an intent_stage, adds rows
  * via the per-table add_* functions (each row is one tight C path that
  * appends pre-byteswapped field bytes to an internal arena), then calls
@@ -42,7 +42,7 @@ extern "C" {
  * Timestamp columns are emitted as int64 microseconds since 2000-01-01
  * UTC — PG's internal timestamptz binary format.
  *
- * POD args only at the C ABI surface; no C++ types. Per RULES R14. */
+ * POD args only at the C ABI surface; no C++ types.. */
 
 typedef struct intent_stage intent_stage_t;
 

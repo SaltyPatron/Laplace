@@ -5,7 +5,7 @@ namespace Laplace.Engine.Core;
 /// <summary>
 /// Glicko-2 fixed-point state — sequential layout matches C
 /// <c>glicko2_state_t</c> in engine/core/include/laplace/core/glicko2.h.
-/// All fields at scale 1e9 (ADR 0004). One source of math truth for
+/// All fields at scale 1e9. One source of math truth for
 /// Glicko-2 across SQL, C, and C#.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
@@ -40,7 +40,7 @@ public struct Glicko2Observation
 /// </summary>
 public static unsafe class Glicko2
 {
-    /// <summary>Fixed-point scale (1e9) per ADR 0004. The encoding constant
+    /// <summary>Fixed-point scale (1e9). The encoding constant
     /// shared by C, SQL (laplace_substrate Glicko-2 aggregate), and C#.</summary>
     public const long FpScale = 1_000_000_000L;
 
@@ -64,7 +64,7 @@ public static unsafe class Glicko2
 
     /// <summary>
     /// Effective mu for cascade scoring: <c>rating − 2·RD</c> at scale 1e9
-    /// (the ~95% lower bound per ADR 0036). Delegates to the C engine
+    /// (the ~95% lower bound). Delegates to the C engine
     /// primitive — do NOT inline <c>rating - 2*rd</c> in C# call sites.
     /// </summary>
     public static long EffectiveMuFp1e9(long ratingFp1e9, long rdFp1e9)
@@ -80,7 +80,7 @@ public static unsafe class Glicko2
     /// <summary>
     /// Apply a rating period of N matchup observations to <paramref name="state"/>.
     /// Delegates to the C engine <c>glicko2_update_period</c> — single source of
-    /// math truth. Per ADR 0036, the substrate aggregates per-instance evidence
+    /// math truth., the substrate aggregates per-instance evidence
     /// through proper Glicko-2 update math (not raw averaging).
     /// </summary>
     public static void UpdatePeriod(

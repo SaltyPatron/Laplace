@@ -17,7 +17,7 @@ namespace Laplace.Decomposers.Abstractions;
 /// attestations": attest onto the returned content-addressed id, never onto a
 /// per-source string key.
 ///
-/// <para>Observed bytes — NO lowercasing / NFC (ADR 0047): "The" and "the" are distinct
+/// <para>Observed bytes — NO lowercasing / NFC: "The" and "the" are distinct
 /// content. Callers pass the surface as-is (WordNet/OMW lemmas use '_' for spaces — the
 /// caller replaces '_' with ' ' before calling so the phrase decomposes naturally).</para>
 ///

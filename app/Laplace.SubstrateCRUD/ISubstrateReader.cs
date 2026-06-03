@@ -5,14 +5,14 @@ namespace Laplace.SubstrateCRUD;
 /// <summary>
 /// Read-only substrate access used by IngestRunner for layer-ordering
 /// enforcement + by IDecomposer.InitializeAsync for bootstrap verification.
-/// Distinct from the cascade read surface (separate ADR — #226 tracking).
+/// Distinct from the cascade read surface (#226 tracking).
 /// </summary>
 public interface ISubstrateReader
 {
     /// <summary>Returns true iff at least one decomposer with
     /// <see cref="Laplace.Engine.Core.Hash128"/>-encoded source ID has
     /// completed an ingest run at the given layer order. Used by
-    /// IngestRunner to enforce ADR 0037 layer-ordering prerequisites.
+ /// IngestRunner to enforce layer-ordering prerequisites.
     /// </summary>
     Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default);
 

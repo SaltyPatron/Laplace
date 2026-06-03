@@ -6,7 +6,7 @@ namespace Laplace.Decomposers.Abstractions;
 /// Canonical formula for ISO 639-3 language entity IDs. Every decomposer
 /// that references a language entity MUST derive the ID through this class
 /// so that cross-decomposer language entity convergence is guaranteed —
-/// per ADR 0016 + content-addressing invariant (RULES R5).
+/// + content-addressing invariant.
 /// </summary>
 public static class LanguageEntityId
 {

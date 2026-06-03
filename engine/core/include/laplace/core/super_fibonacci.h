@@ -27,7 +27,7 @@ extern "C" {
  * quaternion as (x, y, z, w) where (x, y, z) are the imaginary components
  * and w is the scalar component. The 4-tuple is also a point on S^3 in R^4.
  *
- * Substrate use (per ADR 0006): produces the substrate-canonical CONTENT
+ * Substrate use: produces the substrate-canonical CONTENT
  * physicality coord for T0 Unicode codepoint entities, with `n =
  * 1,114,112` (the Unicode codepoint space) and `i` = the codepoint's UCA
  * collation order. */

@@ -6,8 +6,8 @@ extern "C" {
 
 /* Process-startup initialization for liblaplace_dynamics.
  *
- * Per ADR 0030: locks MKL's threading layer to TBB (unified scheduler)
- * and sets MKL_CBWR mode for substrate determinism (RULES.md R7).
+ *: locks MKL's threading layer to TBB (unified scheduler)
+ * and sets MKL_CBWR mode for substrate determinism.
  *
  * Called once at C# app startup via the static constructor of the
  * Laplace.Engine.Dynamics binding. PG-side use: called from extension

@@ -6,17 +6,16 @@
 extern "C" {
 #endif
 
-/* Recipe — parsed synthesis configuration (per ADR 0009 + DESIGN.md VIII).
+/* Recipe — parsed synthesis configuration.
  *
  * Two paths:
  *   1. Auto-extracted at model ingest (config.json → Recipe entity with
  *      typed attestations: HAS_HIDDEN_SIZE, HAS_NUM_LAYERS, USES_TOKENIZER,
- *      IS_A Architecture_<X>, ...). The default export round-trip uses
- *      this Recipe as the template.
- *   2. User custom-recipe JSON for parametric variants (overrides any
- *      field; example in DESIGN.md VIII).
+ *      IS_A Architecture_<X>, ...). The default re-export (fill the source's
+ *      own mold) uses this Recipe as the template.
+ *   2. User custom-recipe JSON for parametric variants (overrides any field).
  *
- * Opaque type-erased handle per RULES.md R22 — internally holds a parsed
+ * Opaque type-erased handle — internally holds a parsed
  * config struct + override map. */
 typedef struct recipe recipe_t;
 

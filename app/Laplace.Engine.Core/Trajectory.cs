@@ -1,12 +1,12 @@
 namespace Laplace.Engine.Core;
 
 /// <summary>
-/// The substrate's content-storage codec (ADR 0012): an entity's CONTENT
+/// The substrate's content-trajectory packing: an entity's CONTENT
 /// physicality records its ordered constituents as a mantissa-packed
 /// LINESTRING — one vertex per constituent, each packing the constituent
 /// entity's full 128-bit id + ordinal. <see cref="Build"/> packs ids → XYZM
 /// doubles (the physicality trajectory) on the way in; <see cref="Constituents"/>
-/// unpacks them on the way out. Round-trip lossless; every component is a
+/// unpacks them on the way out. Lossless both ways; every component is a
 /// finite normal double (PG-geometry-valid).
 ///
 /// One trajectory holds ONE tier's direct children (a word's graphemes, a
@@ -32,7 +32,7 @@ public static unsafe class Trajectory
 
     /// <summary>RLE-compressed variant: packs constituent ids into a trajectory
     /// XYZM buffer, collapsing consecutive identical ids into a single vertex
-    /// with <c>run_length &gt; 1</c> in the M channel per ADR 0012. Returns a
+    /// with <c>run_length &gt; 1</c> in the M channel. Returns a
     /// buffer of length <c>vertexCount * 4</c> (≤ <c>constituents.Length * 4</c>).
     /// The original constituent count (for <c>NConstituents</c> in the
     /// physicality row) is <c>constituents.Length</c>.</summary>

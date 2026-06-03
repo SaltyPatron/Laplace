@@ -219,7 +219,7 @@ int laplacian_eigenmaps(const double* high_dim_pts,
      * thread, and the per-i partial_sort is unchanged. The `dists` scratch is
      * per-i (thread-local), never shared. This replaces the O(n²·d) SINGLE-
      * THREADED k-NN that made a large-vocab embedding morph effectively never
-     * finish; determinism (RULES.md R7) is preserved because no cross-thread
+     * finish; determinism is preserved because no cross-thread
      * reduction is introduced — the distance sums and the eigensolver are
      * untouched. A serial fallback covers the Eigen-only (no-TBB) build. */
     std::vector<Triplet> w_triplets(n * k_neighbors);

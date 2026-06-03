@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 /* perfcache_format — on-disk layout of the T0 codepoint perf-cache
- * (ADR 0006 sibling artifact, ADR 0053 build pipeline). APP DATA: a
+ * (sibling artifact, build pipeline). APP DATA: a
  * derived hot-path index over the substrate's canonical Unicode graph,
  * NOT the authoritative record. The authoritative Unicode record is the
  * referential entity/attestation graph UnicodeDecomposer seeds into PG
@@ -23,18 +23,18 @@ extern "C" {
  * codepoint_table loader reads it. Same struct definitions on both
  * sides, byte-for-byte.
  *
- * Determinism (RULES R7): same UCD + UCA version + same emit-tool source
+ * Determinism: same UCD + UCA version + same emit-tool source
  * → byte-identical perfcache on every machine.
  *
- * This extends ADR 0053's locked format (format_version 1, header-only
+ * This extends locked format (format_version 1, header-only
  * + fixed records) to format_version 2 — adds a section directory in the
  * header for the NFC decomposition + composition side-tables, which the
  * runtime NFC path needs and which don't fit a fixed-width record. The
- * record itself grows to 80 bytes (the 64 in ADR 0053 was aspirational;
+ * record itself grows to 80 bytes (the 64 in was aspirational;
  * coord[4]f64 + hilbert128 + hash128 = 64 alone, before codepoint /
- * uca_order / flags / pad). ADR 0053 amended to match. */
+ * uca_order / flags / pad). amended to match. */
 
-#define LAPLACE_PERFCACHE_MAGIC   0x4652504Cu   /* 'L','P','R','F' little-endian (ADR 0053's stated hex was wrong) */
+#define LAPLACE_PERFCACHE_MAGIC 0x4652504Cu /* 'L','P','R','F' little-endian (stated hex was wrong) */
 #define LAPLACE_PERFCACHE_VERSION 2u
 #define LAPLACE_PERFCACHE_RECORD_COUNT 1114112u /* full Unicode codespace 0..0x10FFFF */
 

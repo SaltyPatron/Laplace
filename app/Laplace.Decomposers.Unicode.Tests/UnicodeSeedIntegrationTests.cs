@@ -12,7 +12,7 @@ namespace Laplace.Decomposers.Unicode.Tests;
 /// <summary>
 /// End-to-end: UnicodeDecomposer → real NpgsqlSubstrateWriter → live PG with
 /// the laplace extensions, then verify the seeded rows match the perf-cache
-/// (the DB half of ADR 0006; the cross-verify of #49). Runs against the
+/// (the DB half of; the cross-verify of #49). Runs against the
 /// deployed cluster as <c>laplace_admin</c> (the laplace extensions aren't in
 /// the postgis Docker image, so Testcontainers can't host this — same pattern
 /// as LocalPgFixture in SubstrateCRUD.Tests).

@@ -1,6 +1,6 @@
 #include "laplace/dynamics/init.h"
 
-/* Process-startup init for liblaplace_dynamics. Per ADR 0030 + RULES.md R7
+/* Process-startup init for liblaplace_dynamics. + 
  * (substrate determinism): lock MKL Conditional Bitwise Reproducibility so every
  * MKL computational routine (Eigen's MKL-dispatched dense ops via EIGEN_USE_MKL_ALL,
  * LAPACKE SVD, CBLAS GEMM) produces bit-identical results regardless of thread

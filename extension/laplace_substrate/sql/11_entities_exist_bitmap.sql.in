@@ -1,7 +1,7 @@
 /* 11_entities_exist_bitmap.sql.in — engine-backed batch existence SRF
  * for the SubstrateCRUD apply path (Framework Epic #232 / Story D.3 / #250).
  *
- * Per ADR 0050: SubstrateCRUD's hot loop sends a candidate ID array, gets
+ *: SubstrateCRUD's hot loop sends a candidate ID array, gets
  * back a packed bitmap (bit i set iff candidates[i] is already in the
  * entities table), and uses merkle_dedup_filter_novel C-side to compact
  * the candidate list to novel-only before bulk-COPY.
@@ -22,4 +22,4 @@ COMMENT ON FUNCTION entities_exist_bitmap(bytea[]) IS
     'Batch existence check over candidate entity IDs. Returns a packed '
     'bitmap (LSB-first per byte) where bit i is set iff candidates[i] is '
     'already in entities. Used by Laplace.SubstrateCRUD.NpgsqlSubstrateWriter '
-    'per ADR 0050 to drive merkle-dedup filtering before bulk COPY.';
+    ' to drive merkle-dedup filtering before bulk COPY.';

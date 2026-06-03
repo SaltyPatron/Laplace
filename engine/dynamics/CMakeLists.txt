@@ -1,21 +1,20 @@
 # engine/dynamics/CMakeLists.txt
 #
-# liblaplace_dynamics.so — Procrustes / Laplacian eigenmaps /
-# Gram-Schmidt / lottery-ticket sparsity. Per ADR 0024 + 0030, this lib
-# pulls in oneMKL + oneTBB + Spectra; liblaplace_core MUST NOT.
+# liblaplace_dynamics.so — Procrustes / Laplacian eigenmaps / Gram-Schmidt /
+# the contracted-operator circuit kernels (project_embedding +
+# bilinear_edges_tile). This lib pulls in oneMKL + oneTBB + Spectra;
+# liblaplace_core MUST NOT.
 #
-# MKL/TBB integration follows ADR 0030: EIGEN_USE_MKL_ALL dispatches
+# MKL/TBB integration: EIGEN_USE_MKL_ALL dispatches
 # Eigen's dense ops to MKL; MKL_THREADING_TBB unifies the scheduler;
 # MKL_CBWR set at process init (laplace_dynamics_init) locks reduction
-# order for substrate determinism per RULES.md R7.
+# order for substrate determinism.
 
 set(LAPLACE_DYNAMICS_HEADERS
     include/laplace/dynamics/init.h
     include/laplace/dynamics/procrustes.h
     include/laplace/dynamics/eigenmaps.h
     include/laplace/dynamics/gram_schmidt.h
-    include/laplace/dynamics/sparsity.h
-    include/laplace/dynamics/circuit_extract.h
     include/laplace/dynamics/bilinear_edges.h
 )
 
@@ -24,8 +23,6 @@ set(LAPLACE_DYNAMICS_SOURCES
     src/procrustes.cpp
     src/eigenmaps.cpp
     src/gram_schmidt.cpp
-    src/sparsity.cpp
-    src/circuit_extract.cpp
     src/bilinear_edges.cpp
 )
 
@@ -47,14 +44,14 @@ target_link_libraries(laplace_dynamics
     PUBLIC  laplace_core laplace_spectra
 )
 
-# === oneMKL + oneTBB integration (per ADR 0030) ===
+# === oneMKL + oneTBB integration ===
 #
 # find_package looks at oneAPI's MKLConfig.cmake / TBBConfig.cmake, which
 # are installed under /opt/intel/oneapi/<mkl|tbb>/latest/lib/cmake/.
 # Sourcing /opt/intel/oneapi/setvars.sh sets the env vars find_package
 # needs (MKLROOT, TBBROOT, CMAKE_PREFIX_PATH).
 #
-# Per RULES.md R9 (no silent failures): if MKL/TBB are not findable,
+# (no silent failures): if MKL/TBB are not findable,
 # configure prints a clear actionable message but allows the build to
 # proceed with Eigen-only fallback during local dev. Production builds
 # (and Epic D Story D.4+) require strict MKL — flip LAPLACE_REQUIRE_MKL

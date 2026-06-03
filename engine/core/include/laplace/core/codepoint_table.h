@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-/* T0 codepoint perf-cache runtime accessor (per ADR 0006 + ADR 0053).
+/* T0 codepoint perf-cache runtime accessor.
  *
  * The perf-cache is APP/reference data: a derived hot-path projection of
  * the substrate's canonical Unicode T0 layer, produced at build time by
@@ -20,7 +20,7 @@ extern "C" {
  * HashComposer + the UAX#29/NFC state machines) resolves codepoint
  * id / coord / hilbert / segmentation+NFC properties without touching
  * the database — the substrate's T>0 composition is computable
- * in-process. The 1.1M-entity + physicality DB seed is the ADR-0006
+ * in-process. The 1.1M-entity + physicality DB seed is the 
  * sibling, derived independently; no complex attestations for T0.
  *
  * The record IS laplace_perfcache_record_t (perfcache_format.h), 80 B. */
@@ -33,7 +33,7 @@ typedef laplace_perfcache_record_t codepoint_entry_t;
  *   -3 record_count / record_size mismatch
  *   -4 body-CRC mismatch (corruption)
  * A second successful load replaces the first (prior mapping unmapped).
- * NULL path is reserved for the embedded-.rodata variant (ADR 0054) —
+ * NULL path is reserved for the embedded-.rodata variant —
  * not yet wired; returns -1. */
 int codepoint_table_load_perfcache(const char* path);
 

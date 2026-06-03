@@ -1,6 +1,6 @@
 -- Smoke test for laplace_hash128_blake3 + laplace_hash128_merkle PG wrappers.
 -- Verifies the engine kernels are reachable from SQL and produce byte-
--- identical output to the C ABI (cross-language consistency per ADR 0030).
+-- identical output to the C ABI (cross-language consistency).
 
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION laplace_geom;

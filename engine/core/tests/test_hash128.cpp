@@ -91,14 +91,16 @@ TEST(LaplaceCoreHash128, MerkleComposesChildrenDeterministically) {
     EXPECT_TRUE(hash128_equals(&out1, &out2));
 }
 
-TEST(LaplaceCoreHash128, MerkleTierIsDomainSeparating) {
+TEST(LaplaceCoreHash128, MerkleTierIsNotIdentity) {
+    /* Same content = same hash; tier is metadata, never identity. The same
+     * ordered constituent set composed "at" two different strata is ONE entity. */
     const uint8_t a_in[] = "child_a";
     hash128_t a;
     hash128_blake3(a_in, sizeof(a_in) - 1, &a);
     hash128_t tier1, tier2;
     hash128_merkle(1, &a, 1, &tier1);
     hash128_merkle(2, &a, 1, &tier2);
-    EXPECT_FALSE(hash128_equals(&tier1, &tier2));
+    EXPECT_TRUE(hash128_equals(&tier1, &tier2));
 }
 
 TEST(LaplaceCoreHash128, MerkleChildOrderMatters) {
@@ -115,11 +117,12 @@ TEST(LaplaceCoreHash128, MerkleChildOrderMatters) {
     EXPECT_FALSE(hash128_equals(&out_ab, &out_ba));
 }
 
-TEST(LaplaceCoreHash128, MerkleEmptyChildSetIsDistinctPerTier) {
+TEST(LaplaceCoreHash128, MerkleEmptyChildSetIsTierIndependent) {
+    /* Tier is metadata, not identity: the empty composition is one value. */
     hash128_t t0, t1;
     hash128_merkle(0, nullptr, 0, &t0);
     hash128_merkle(1, nullptr, 0, &t1);
-    EXPECT_FALSE(hash128_equals(&t0, &t1));
+    EXPECT_TRUE(hash128_equals(&t0, &t1));
 }
 
 TEST(LaplaceCoreHash128, StructLayoutIs16BytesPod) {

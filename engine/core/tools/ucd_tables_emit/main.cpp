@@ -1,6 +1,6 @@
 // engine/core/tools/ucd_tables_emit/main.cpp
 //
-// Perf-cache emitter (ADR 0006 + ADR 0053). Reads UCDXML (UAX#42) +
+// Perf-cache emitter. Reads UCDXML (UAX#42) +
 // DUCET (UCA allkeys.txt) and writes the T0 codepoint perf-cache BINARY
 // blob: per-codepoint { hash, uca_order, coord (super-Fibonacci on S^3),
 // hilbert, packed GB/WB/SB/InCB/CCC } + canonical decomposition +
@@ -12,7 +12,7 @@
 // sibling install-time half (1.1M codepoint entity + physicality DB seed,
 // no complex attestations) reads the same derivation via SubstrateChange.
 //
-// Determinism (RULES R7): same UCDXML + same DUCET + same emit source ->
+// Determinism: same UCDXML + same DUCET + same emit source ->
 // byte-identical blob.
 //
 // Usage:

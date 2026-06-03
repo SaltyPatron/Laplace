@@ -37,7 +37,7 @@ public class Glicko2Tests
     [Fact]
     public void EffectiveMu_AtPrior_Is1500Minus2x350Equal800()
     {
-        // ADR 0036 effective_mu = rating - 2 * rd (95% lower bound).
+ // effective_mu = rating - 2 * rd (95% lower bound).
         // At the default prior (1500, 350), effective_mu = 800.
         long effMu = Glicko2.EffectiveMuFp1e9(
             Glicko2.DefaultRatingFp1e9, Glicko2.DefaultRdFp1e9);
@@ -49,7 +49,7 @@ public class Glicko2Tests
     {
         // rating=1000, rd=600 → 1000 - 1200 = -200. The C primitive does
         // NOT clamp; the cascade's effective-score combiner applies any
-        // policy clamps per ADR 0036 arena semantics. Verify the raw
+        // policy clamps arena semantics. Verify the raw
         // value passes through.
         long effMu = Glicko2.EffectiveMuFp1e9(
             1_000L * Glicko2.FpScale, 600L * Glicko2.FpScale);

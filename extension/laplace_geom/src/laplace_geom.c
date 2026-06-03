@@ -1,9 +1,9 @@
 /*
  * extension/laplace_geom/src/laplace_geom.c
  *
- * PG_FUNCTION_INFO_V1 wrappers for laplace_geom. Per RULES.md R6, this
+ * PG_FUNCTION_INFO_V1 wrappers for laplace_geom., this
  * file is thin marshalling code only -- no math. Engine kernels in
- * liblaplace_core do the work; liblwgeom (static-linked per ADR 0046)
+ * liblaplace_core do the work; liblwgeom (static-linked)
  * does the gserialized -> POINT4D extraction.
  *
  * Functions exposed:
@@ -544,7 +544,7 @@ pg_laplace_mantissa_pack(PG_FUNCTION_ARGS)
         ereport(ERROR,
                 (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                  errmsg("laplace_mantissa_pack: run_length %d out of uint16 range", run_length)));
-    /* Per ADR 0012: only low 52 bits of flags are usable; high 12 must be zero. */
+    /*: only low 52 bits of flags are usable; high 12 must be zero. */
     if ((uint64_t) flags_arg & 0xFFF0000000000000ULL)
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),

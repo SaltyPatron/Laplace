@@ -4,7 +4,7 @@ namespace Laplace.SubstrateCRUD;
 
 /// <summary>
 /// The single substrate write surface every decomposer routes through —
-/// per ADR 0050 + RULES R5/R6/R16. There is exactly one implementation
+////R6/R16. There is exactly one implementation
 /// (<see cref="Npgsql.NpgsqlSubstrateWriter"/>); per-source bespoke insert
 /// code is forbidden.
 /// </summary>

@@ -1,19 +1,20 @@
 #!/bin/bash
 # scripts/ingest-source.sh
-# Dispatch ingestion to the right IDecomposer via Laplace.Cli + IngestRunner (ADR 0052).
+# Dispatch ingestion to the right IDecomposer via Laplace.Cli + IngestRunner.
 #
 # Usage:
 #   scripts/ingest-source.sh <source>            # one source
 #   scripts/ingest-source.sh all                 # full ladder; layer-2 sources run in parallel
 #   scripts/ingest-source.sh model <model-dir>   # model (path required)
 #
-# Dependency layers (ADR 0037 — each source's IngestRunner refuses to start until every lower
+# Dependency layers (— each source's IngestRunner refuses to start until every lower
 # layer has a HasLayerCompleted marker):
 #   0 unicode → 1 iso639 → 2 { wordnet ud tatoeba atomic2020 conceptnet wiktionary } → 3 omw
 # `all` runs the stages STRICTLY ONE AT A TIME, in this order — NEVER in parallel. A single
 # source gets the whole machine and finishes as fast as possible; running several at once only
-# splits CPU + DB and makes every stage slower. Each stage is idempotent + checkpoint-resumable,
-# so a re-run short-circuits completed work; INGEST_FROM=<source> resumes the ladder at a stage.
+# splits CPU + DB and makes every stage slower. Each stage is idempotent (content-addressing +
+# ON CONFLICT — there is no checkpoint apparatus), so a re-run short-circuits completed work;
+# INGEST_FROM=<source> skips the ladder forward to a stage (a manual skip, not a resume journal).
 
 set -euo pipefail
 
@@ -45,10 +46,10 @@ ingest()    { ( cd "$ROOT/app" && dotnet "$DLL" ingest "$@" ); }
 case "$source" in
     all)
         build_cli
-        # STRICTLY ONE AT A TIME, in dependency order (ADR 0037). Each stage runs to completion
+        # STRICTLY ONE AT A TIME, in dependency order. Each stage runs to completion
         # before the next starts — never in parallel. Fail-fast (set -e aborts the ladder on the
-        # first stage that errors). Each stage is idempotent + checkpoint-resumable, so a re-run
-        # short-circuits finished work; INGEST_FROM=<source> resumes the ladder at that stage.
+        # first stage that errors). Each stage is idempotent (content-addressing + ON CONFLICT),
+        # so a re-run short-circuits finished work; INGEST_FROM=<source> skips forward to a stage.
         STAGES=(unicode iso639 "${LAYER2[@]}" omw)
         from="${INGEST_FROM:-}"
         skip=0; [[ -n "$from" ]] && skip=1

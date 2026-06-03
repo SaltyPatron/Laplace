@@ -20,8 +20,8 @@
  *   <pad to 32B>
  *   tensor_data[]   = concatenated tensor bytes (each aligned to 32B)
  *
- * Per RULES.md R15: we implement the format directly rather than linking
- * llama.cpp/ggml. Per RULES.md R4: sparse-by-construction — the caller
+ *: we implement the format directly rather than linking
+ * llama.cpp/ggml.: sparse-by-construction — the caller
  * is responsible for zeroing unsupported tensor positions. */
 
 namespace {

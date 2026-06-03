@@ -1,10 +1,7 @@
 # engine/core/tests/CMakeLists.txt
 #
-# GoogleTest-based unit tests for liblaplace_core. Real test bodies land
-# in Chunk 1 (coord4d/hash128/hilbert4d/mantissa). For now these are
-# scaffolding: one TEST() per module proving the C ABI links and a
-# placeholder assertion passes. gtest_discover_tests registers each
-# TEST() with CTest automatically.
+# GoogleTest-based unit tests for liblaplace_core.
+# gtest_discover_tests registers each TEST() with CTest automatically.
 
 set(LAPLACE_CORE_TEST_SOURCES
     perfcache_env.cpp
@@ -35,7 +32,7 @@ add_compile_definitions(LAPLACE_UCD_PATH_FOR_TESTS="${LAPLACE_UCD_CONFORMANCE_DI
 
 # The state machines + codepoint_table now read from a runtime-loaded
 # perf-cache. perfcache_env.cpp registers a GoogleTest global environment
-# that mmaps this blob before any test runs (RULES R7: the same blob the
+# that mmaps this blob before any test runs (: the same blob the
 # emitter produces from the pinned UCD/UCA drives every conformance test).
 add_compile_definitions(LAPLACE_PERFCACHE_PATH_FOR_TESTS="${LAPLACE_PERFCACHE_BIN}")
 

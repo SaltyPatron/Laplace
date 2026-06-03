@@ -20,7 +20,7 @@
  *   tokenizer.json                — from substrate tokenizer entity (caller-supplied)
  *   provenance.json               — substrate lineage metadata
  *
- * Sparse-by-construction per RULES.md R4: the caller must zero-fill any
+ * Sparse-by-construction: the caller must zero-fill any
  * tensor positions not backed by substrate attestations before calling
  * format_writer_add_tensor. */
 

@@ -6,7 +6,7 @@
 
 /* Skilling (2004) 4D Hilbert curve over the [-1, 1]^4 bounding hyperbox.
  *
- * Per ADR 0005: 32 bits per dimension, 4 dimensions → 128-bit index.
+ *: 32 bits per dimension, 4 dimensions → 128-bit index.
  * Pure integer bit-twiddling once coordinates are quantized — no FP in the
  * algorithm proper.
  *
@@ -26,7 +26,7 @@
 
 static uint32_t laplace_quantize_coord(double c) {
     /* Map [-1, 1] → [0, 2^32). Clamp out-of-range inputs to the edges so callers
-     * don't silently wrap. Per ADR 0005, ~20% of the hyperbox is the corners
+     * don't silently wrap., ~20% of the hyperbox is the corners
      * outside the unit 4-ball — those are legitimate query points (interior
      * centroids can be slightly inside, but never outside [-1,1] by construction). */
     if (c <= -1.0) return 0u;

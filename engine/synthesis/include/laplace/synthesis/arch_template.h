@@ -7,14 +7,14 @@ extern "C" {
 #endif
 
 /* Architecture template — per-architecture knowledge of how to
- * materialize tensors from substrate state (per ADR 0011 plugin
- * interface IArchitectureTemplate + DESIGN.md VI).
+ * materialize tensors from substrate state ( plugin
+ * interface IArchitectureTemplate).
  *
  * Substrate-specific invention (no upstream provides this) — opaque
  * handle, internal C++ implementation per template. Initial templates:
  *   - LlamaTemplate (Chunk 7 Story 7.2; handles Llama / Qwen family)
  *
- * Per RULES.md R10: adding a new architecture = one new template
+ *: adding a new architecture = one new template
  * plugin; never touches schema/query/synthesis core. */
 typedef struct arch_template arch_template_t;
 
@@ -43,7 +43,7 @@ int arch_template_required_tensors(const arch_template_t* tmpl,
 void arch_template_free(arch_template_t* t);
 
 /* Substrate consensus value bundle the template uses to materialize a tensor.
- * Per ADR 0056:183 + DESIGN.md:660: the architecture template distributes
+ *:183 + : the architecture template distributes
  * consensus values across the recipe's per-(layer, head, dim) layout — NOT
  * a pseudoinverse recovery problem.
  *
@@ -61,7 +61,7 @@ void arch_template_free(arch_template_t* t);
  *                          recipe entity).
  *   token_basis          — [vocab × basis_dim] doubles row-major; the
  *                          substrate's spectral embedding of tokens per
- *                          ADR 0056:50 (legitimate substrate-native
+ * (legitimate substrate-native
  *                          behavioral-robustness mechanism). Used by the
  *                          template to project per-token consensus into
  *                          the recipe's [hidden_dim, hidden_dim] shape.
@@ -104,8 +104,8 @@ int compute_substrate_gram(
     double*       binary_gram);
 
 /* Materialize one tensor's values from substrate consensus per the
- * architecture template's per-tensor distribution policy (per ADR 0056:183
- * + DESIGN.md:660). The template knows for each tensor: which kind's
+ * architecture template's per-tensor distribution policy (:183
+ *). The template knows for each tensor: which kind's
  * consensus feeds it, whether it's a token-axis tensor (embed_tokens,
  * lm_head, norms) or a [hidden_dim, hidden_dim]-shape interior tensor,
  * and how the recipe layout distributes consensus across the slot.
@@ -119,7 +119,7 @@ int compute_substrate_gram(
  *   ... etc.
  *   *_norm.weight [hidden]               ← norm_aggregate normalized per dim
  *
- * The exact broadcast is the recipe-layout distribution per ADR 0056:183
+ * The exact broadcast is the recipe-layout distribution:183
  * ("the inverse of this aggregation" = broadcast per recipe shape, not SVD
  * pseudoinverse — see Memory `project_model_decomposer_attestation_insight`).
  *

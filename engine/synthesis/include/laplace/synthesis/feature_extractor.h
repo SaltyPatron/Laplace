@@ -6,7 +6,7 @@
 extern "C" {
 #endif
 
-/* Feature extractor — per RULES.md R10 plugin (IFeatureExtractor).
+/* Feature extractor — plugin (IFeatureExtractor).
  *
  * Extracts a fixed-dim feature vector from an entity + attestation cloud.
  * Used during Substrate Synthesis to populate hidden-state embeddings.

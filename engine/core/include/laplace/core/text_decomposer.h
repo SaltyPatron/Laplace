@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-/* Observed UTF-8 + UAX#29 text decomposition primitive per ADR 0047 (amended).
+/* Observed UTF-8 + UAX#29 text decomposition primitive (amended).
  *
  * Input: UTF-8 bytes. Output: a populated tier_tree_t* with the tier
  * topology:

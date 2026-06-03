@@ -5,7 +5,7 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Ingestion;
 
 /// <summary>
-/// Records ADR 0037 layer completion via a <c>HasLayerCompleted/{n}</c>
+/// Records layer completion via a <c>HasLayerCompleted/{n}</c>
 /// attestation so <see cref="NpgsqlSubstrateReader.HasSourceEverCompletedAsync"/>
 /// can gate later layers. Written ONLY on a clean run (zero failures), so it is
 /// also the COMPLETION marker re-ingest guards key on: marker present = source

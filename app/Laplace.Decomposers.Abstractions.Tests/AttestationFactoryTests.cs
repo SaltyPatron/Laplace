@@ -6,7 +6,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
 /// AttestationFactory: ID hashing + the §10 signed-observation mechanism.
-/// Every per-source decomposer routes through this factory (ADR 0016); these
+/// Every per-source decomposer routes through this factory; these
 /// tests fix the contract: signed magnitude → Glicko score, trust → opponent φ
 /// (NOT a μ multiplier), no tiers in evidence.
 /// </summary>

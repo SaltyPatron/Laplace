@@ -1,6 +1,6 @@
 /* 05_mantissa.sql.in — mantissa-packed payload pack/unpack.
  *
- * Per ADR 0012: each LINESTRING vertex of an entity's `trajectory` column
+ *: each LINESTRING vertex of an entity's `trajectory` column
  * carries a 212-bit payload split across the 4 × FP64 coord components:
  *   XYZ encode the referenced entity's full BLAKE3-128 entity_id;
  *   M encodes per-vertex metadata (ordinal, run_length, 52 reserved flag bits).
@@ -16,7 +16,7 @@ CREATE FUNCTION @extschema@.laplace_mantissa_pack(
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
 
 COMMENT ON FUNCTION @extschema@.laplace_mantissa_pack(bytea, integer, integer, bigint) IS
-'Pack (entity_id, ordinal, run_length, flags) into a POINT4D mantissa-payload vertex per ADR 0012.';
+'Pack (entity_id, ordinal, run_length, flags) into a POINT4D mantissa-payload vertex.';
 
 CREATE FUNCTION @extschema@.laplace_mantissa_unpack(vertex geometry,
         OUT entity_id  bytea,

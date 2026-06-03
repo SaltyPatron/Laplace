@@ -14,7 +14,7 @@ check-prereqs:
     @scripts/check-prereqs.sh
 
 # === Layer 0 — root bootstrap (system account, runner, PG roles, peer auth) ===
-# Per ADR 0018 (three-layer architecture) + ADR 0019 (laplace-runner).
+# (three-layer architecture) + (laplace-runner).
 # These wrap scripts/bootstrap-laplace-runner.sh, which is the only place
 # privileged setup lives.
 
@@ -44,7 +44,7 @@ setup-host-reset:
 
 # === Build ===
 #
-# Top-level CMake (per ADR 0032 Path B) drives engine + extension from
+# Top-level CMake ( Path B) drives engine + extension from
 # one tree. `just build` is the canonical entry point. PG_PREFIX defaults
 # to /usr/lib/postgresql/18 (stock); override via LAPLACE_PG_PREFIX env
 # var to point at the custom build at /opt/laplace/pgsql-18.
@@ -60,7 +60,7 @@ submodule-sanity:
 
 # Build deps from external/ submodules (PROJ, GEOS, GDAL, PG, PostGIS,
 # tree-sitter runtime) via the unified ExternalProject_Add pipeline at
-# external/CMakeLists.txt per ADR 0038. gcc toolchain for the dep chain
+# external/CMakeLists.txt. gcc toolchain for the dep chain
 # (icpx is reserved for the engine — gcc avoids PROJ's IntelLLVM-gated
 # upstream bug and builds ~2-3x faster). Idempotent — stamp-based; re-runs
 # with the same submodule SHAs are no-ops. One-time ~10-12 min on a clean
@@ -70,7 +70,7 @@ submodule-sanity:
 # before any build artifact gets pinned to dirty source state.
 build-deps: submodule-sanity
     cmake -B build/deps -S external
-    cmake --build build/deps -j
+    umask 0002 && cmake --build build/deps -j
 
 # Verify /opt/laplace/pgsql-18 + PostGIS extension artifacts (and SQL smoke
 # when the substrate cluster is up). Run after build-deps or bootstrap.
@@ -121,6 +121,13 @@ build:
 # That means CREATE EXTENSION laplace_geom and CREATE EXTENSION
 # laplace_substrate find everything immediately after this completes.
 install: build
+    #!/usr/bin/env bash
+    # umask 0002: every dir this install creates under the shared prefix is
+    # born group-writable (g+w; setgid inherits from /opt/laplace's 2775), so
+    # the OTHER identity (CI laplace-runner vs developer) can always pre-wipe
+    # and overwrite. Component installs bypass the root pre-wipe/enforcer, so
+    # creation-time correctness is the only shape that covers every path.
+    umask 0002
     cmake --install build
 
 # Legacy alias — both targets now do the same sudo-free install. Kept so
@@ -149,7 +156,7 @@ launch-db:
     sudo systemctl start laplace-postgresql.service
 
 # === Layer 1 — extension lifecycle (DbUp) ===
-# Per ADR 0021 (DbUp + Npgsql) + ADR 0023 (extension owns schema).
+# (DbUp + Npgsql) + (extension owns schema).
 # These wrap dotnet run --project app/Laplace.Migrations.
 
 db-up: install
@@ -182,7 +189,7 @@ migrate-new name:
     -- Migration ${stamp}_{{name}}
     --
     -- TODO: describe the orchestration concern this migration addresses.
-    -- Per ADR 0023, DbUp migrations orchestrate extension lifecycle and
+    --, DbUp migrations orchestrate extension lifecycle and
     -- cross-extension setup — they do NOT define substrate schema. If you
     -- find yourself writing CREATE TABLE for laplace.* objects here, STOP
     -- and put it in extension/laplace--A.B.C--D.E.F.sql instead.
@@ -193,8 +200,8 @@ migrate-new name:
 
 # === Seed ===
 
-# T0 DB seed: UnicodeDecomposer → NpgsqlSubstrateWriter (ADR 0006 sibling of
-# build-perfcache). Replaces deleted scripts/seed-t0.sh per ADR 0053.
+# T0 DB seed: UnicodeDecomposer → NpgsqlSubstrateWriter (sibling of
+# build-perfcache). Replaces deleted scripts/seed-t0.sh.
 seed-t0: build-perfcache build-app
     cd app && dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- seed-unicode
 
@@ -219,6 +226,7 @@ db-fresh: build-perfcache build-app
     # the install recreates them fresh, owned by this installer.
     rm -f "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"/lib/postgresql/*/laplace_substrate.so \
           "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"/share/postgresql/*/extension/laplace_substrate*
+    umask 0002    # dirs born g+w — see the `install` recipe
     cmake --install build/extension/laplace_substrate >/dev/null
     cd app
     echo NUKE | dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- nuke
@@ -245,8 +253,8 @@ e2e *models: build-app
 
 # Ingest the whole seed/lexical ladder in dependency order:
 #   unicode → iso639 → wordnet → omw → ud → tatoeba → atomic2020 → conceptnet → wiktionary
-# Each source's IngestRunner layer check gates on the lower layers (ADR 0037); the layer-4
-# corpora are independent. Idempotent — re-runs short-circuit via ON CONFLICT + checkpoint.
+# Each source's IngestRunner layer check gates on the lower layers; the layer-4
+# corpora are independent. Idempotent — re-runs short-circuit via content-addressing + ON CONFLICT.
 ingest-all: build-app
     scripts/ingest-source.sh all
 
@@ -264,7 +272,7 @@ audit-decomposers *args: build-app
 # === Query / Cascade ===
 
 query sql:
-    psql -d laplace -c "{{sql}}"
+    psql -h /var/run/postgresql -U laplace_admin -d "${LAPLACE_QUERY_DB:-laplace}" -c "{{sql}}"
 
 cascade prompt:
     app/Laplace.Cli/bin/Release/net10.0/laplace-cli cascade --prompt "{{prompt}}"
@@ -335,7 +343,7 @@ issue n:
 
 # === Test ===
 #
-# Three test surfaces per STANDARDS.md Testing:
+# Three test surfaces per the testing standard:
 #   ctest        → engine C++ unit tests (GoogleTest, gtest_discover_tests)
 #   pg_regress   → extension SQL tests (lands per-Chunk with the first real
 #                  function under extension/{laplace_geom,laplace_substrate}/tests/)

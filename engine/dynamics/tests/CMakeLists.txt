@@ -1,14 +1,12 @@
 # engine/dynamics/tests/CMakeLists.txt
 #
-# GoogleTest-based unit tests for liblaplace_dynamics. Real test bodies
-# land Chunk 6 (Procrustes/eigenmaps/Gram-Schmidt/sparsity). Stubs for now.
+# GoogleTest-based unit tests for liblaplace_dynamics.
 
 set(LAPLACE_DYNAMICS_TEST_SOURCES
     test_init.cpp
     test_procrustes.cpp
     test_eigenmaps.cpp
     test_gram_schmidt.cpp
-    test_sparsity.cpp
     test_bilinear_edges.cpp
 )
 

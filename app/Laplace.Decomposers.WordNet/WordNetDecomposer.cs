@@ -323,7 +323,7 @@ public sealed class WordNetDecomposer : IDecomposer
             attestationCapacity: entitiesOnly ? 0 : batch * 8);
 
     /// <summary>WordNet lemma surface: '_' marks a space in multi-word lemmas. Observed
-    /// case — NO lowercasing (the content path is case-sensitive per ADR 0047).</summary>
+    /// case — NO lowercasing (the content path is case-sensitive).</summary>
     private static string Surface(string lemma) => lemma.Replace('_', ' ');
 
     /// <summary>Adjective satellites ('s') share the adjective synset-id space ('a') so

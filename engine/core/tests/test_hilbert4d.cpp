@@ -12,7 +12,7 @@
 
 /* Covers Chunk 1 Stories 1.6 (encoder), 1.7 (decoder), 1.8 (locality
  * verification), 1.9 (comparison). Skilling (2004) 4D Hilbert curve over the
- * [-1, 1]^4 bounding hyperbox per ADR 0005. */
+ * [-1, 1]^4 bounding hyperbox. */
 
 namespace {
 
@@ -67,7 +67,7 @@ TEST(LaplaceCoreHilbert4d, OriginEncodesIntoLowHalfOfIndexSpace) {
 
 TEST(LaplaceCoreHilbert4d, DecodeIsInverseOfEncodeWithinQuantization) {
     /* Round-trip — Story 1.7 acceptance: decode(encode(c)) ≈ c within 2^-32
-     * cell precision per ADR 0005. */
+     * cell precision. */
     std::mt19937_64 rng(0xC0FFEEULL);
     std::uniform_real_distribution<double> u(-0.999, 0.999);
 

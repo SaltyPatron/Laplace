@@ -1,8 +1,8 @@
 # extension/laplace_geom/CMakeLists.txt
 #
 # laplace_geom extension — general-purpose 4D PostGIS additions per
-# ADR 0025. CMake-driven build (no PGXS per ADR 0032). Modular SQL via
-# cpp preprocessor (per ADR 0034).
+# . CMake-driven build (no PGXS). Modular SQL via
+# cpp preprocessor.
 
 set(EXT_NAME    laplace_geom)
 set(EXT_VERSION ${PROJECT_VERSION})
@@ -124,7 +124,7 @@ target_link_options(${EXT_NAME} PRIVATE
     "-Wl,-rpath,$<TARGET_FILE_DIR:laplace_core>"
 )
 
-# Per RULES.md R6: the extension is THIN wrappers. Heavy lifting is in
+#: the extension is THIN wrappers. Heavy lifting is in
 # liblaplace_core; the .c file here is just PG_FUNCTION_INFO_V1 wrappers.
 
 # === .control file (built from .control.in via configure_file) ===
@@ -141,7 +141,7 @@ configure_file(
     @ONLY
 )
 
-# === Modular SQL via cpp preprocessor (per ADR 0034) ===
+# === Modular SQL via cpp preprocessor ===
 #
 # Entry: sql/laplace_geom.sql.in (which #includes the numbered modules).
 # Build: cpp -traditional-cpp -w -P -Upixel -Ubool  →  grep -v ^#  →

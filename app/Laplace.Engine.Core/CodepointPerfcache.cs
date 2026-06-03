@@ -9,7 +9,7 @@ namespace Laplace.Engine.Core;
 ///
 /// <para>
 /// T0 DB seed uses <c>UnicodeSeed.Compute</c> on UCD/DUCET (sibling of this
-/// blob per ADR 0006) — seed does <b>not</b> call <see cref="Load"/>.
+/// blob) — seed does <b>not</b> call <see cref="Load"/>.
 /// Runtime clients (TextDecomposer segmentation flags, <see cref="HashComposer"/>
 /// call <see cref="Load"/> to avoid per-codepoint DB round-trips.
 /// </para>

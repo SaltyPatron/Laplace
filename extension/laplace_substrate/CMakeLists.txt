@@ -1,8 +1,8 @@
 # extension/laplace_substrate/CMakeLists.txt
 #
-# laplace_substrate extension — substrate domain per ADR 0025.
-# CMake-driven build (no PGXS per ADR 0032). Modular SQL via cpp
-# preprocessor (per ADR 0034). Same pattern as laplace_geom.
+# laplace_substrate extension — substrate domain.
+# CMake-driven build (no PGXS). Modular SQL via cpp
+# preprocessor. Same pattern as laplace_geom.
 
 set(EXT_NAME    laplace_substrate)
 set(EXT_VERSION ${PROJECT_VERSION})

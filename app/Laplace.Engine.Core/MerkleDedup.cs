@@ -5,7 +5,7 @@ namespace Laplace.Engine.Core;
 /// <summary>
 /// Managed wrappers over the engine merkle_dedup primitives
 /// (engine/core/include/laplace/core/merkle_dedup.h). Hot-loop helpers for
-/// <c>Laplace.SubstrateCRUD.NpgsqlSubstrateWriter</c> per ADR 0050.
+/// <c>Laplace.SubstrateCRUD.NpgsqlSubstrateWriter</c>.
 ///
 /// Bitmap convention: packed LSB-first within each byte; bit i is at
 /// <c>(bitmap[i >> 3] >> (i &amp; 7)) &amp; 1u</c>. Caller is responsible
@@ -57,7 +57,7 @@ public static unsafe class MerkleDedup
     /// Caller must have called <see cref="TierTree.FinalizeParents"/> on
     /// the tree first (parent_idx must be populated). Assumes the SubstrateCRUD
     /// invariant "parent in substrate ⇒ all named descendants in substrate"
-    /// per ADR 0050 + the header documentation.</summary>
+    /// + the header documentation.</summary>
     public static int TrunkShortcircuit(
         TierTree           tree,
         ReadOnlySpan<byte> existingBitmap,

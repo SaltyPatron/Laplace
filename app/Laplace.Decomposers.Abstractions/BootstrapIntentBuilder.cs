@@ -7,13 +7,13 @@ namespace Laplace.Decomposers.Abstractions;
 /// Helper for <see cref="IDecomposer.InitializeAsync"/> to build the bootstrap
 /// <see cref="SubstrateChange"/> that registers the source entity + the
 /// decomposer's type vocabulary + the decomposer's attestation-kind vocabulary
-/// + the source-trust-class meta-attestation. Per ADR 0042 + ADR 0044 + ADR 0051.
+/// + the source-trust-class meta-attestation..
 ///
 /// <para>
 /// Centralises a shape every IDecomposer.InitializeAsync would otherwise
-/// reinvent (forbidden by ADR 0016). Idempotent — re-running InitializeAsync
+/// reinvent (forbidden by). Idempotent — re-running InitializeAsync
 /// against an already-bootstrapped substrate is a no-op via SubstrateCRUD
-/// ON CONFLICT (RULES R5).
+/// ON CONFLICT.
 /// </para>
 ///
 /// <para>

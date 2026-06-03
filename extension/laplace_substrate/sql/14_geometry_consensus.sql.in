@@ -1,5 +1,5 @@
 /* 14_geometry_consensus.sql.in — the GEOMETRY axis of the consensus layer
- * (S³ structural placements; mirrors 13_consensus.sql.in / ADR 0036 + ADR 0039).
+ * (S³ structural placements; mirrors 13_consensus.sql.in /).
  *
  * Two layers, exactly as the relation side (attestations → consensus):
  *
@@ -51,7 +51,7 @@ CREATE TABLE geometry_placement_evidence (
 COMMENT ON TABLE geometry_placement_evidence IS
     'EVIDENCE layer for the GEOMETRY axis: per-witness S³ placements, one row per (entity, projection_kind, source, layer, head, expert). source/layer/head/expert are PROVENANCE / GROUP-BY columns, NEVER identity. coord is a unit PointZM on S³. weight carries the witness''s pull into the Karcher consensus. Full provenance retained for interpretability/audit/embed-species (mirrors attestations).';
 COMMENT ON COLUMN geometry_placement_evidence.id IS
-    'Content-addressed BLAKE3-128 of canonical (entity_id, projection_kind, source_id, layer, head, expert, coord) bytes. Stable across re-observation; idempotent upsert (RULES R5).';
+    'Content-addressed BLAKE3-128 of canonical (entity_id, projection_kind, source_id, layer, head, expert, coord) bytes. Stable across re-observation; idempotent upsert.';
 COMMENT ON COLUMN geometry_placement_evidence.projection_kind IS
     'Which placement view: mirrors physicalities.kind (1=CONTENT, 3=PROJECTION input-direction, 4=PROJECTION_OUTPUT lm_head, ...). Part of identity — distinct projection views consense separately.';
 COMMENT ON COLUMN geometry_placement_evidence.layer IS
@@ -61,7 +61,7 @@ COMMENT ON COLUMN geometry_placement_evidence.head IS
 COMMENT ON COLUMN geometry_placement_evidence.expert IS
     'Provenance: MoE expert index (NULL when not applicable). GROUP-BY column — NEVER identity.';
 COMMENT ON COLUMN geometry_placement_evidence.coord IS
-    'The witness''s S³ placement of the entity: a unit 4-vector as a PointZM (per RULES R1). Structural, not semantic.';
+    'The witness''s S³ placement of the entity: a unit 4-vector as a PointZM. Structural, not semantic.';
 COMMENT ON COLUMN geometry_placement_evidence.weight IS
     'Witness weight (kind_rank × source_trust × tenant_trust), int64 fixed-point ×1e9 — the pull this placement exerts in the weighted Karcher mean.';
 

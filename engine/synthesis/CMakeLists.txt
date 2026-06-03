@@ -2,10 +2,11 @@
 #
 # liblaplace_synthesis.so — Substrate Synthesis: parse a recipe JSON,
 # materialize tensors from substrate state, emit a model file.
-# Per ADR 0024, this lib inherits dynamics' MKL/TBB/Spectra footprint.
+#, this lib inherits dynamics' MKL/TBB/Spectra footprint.
 #
 # MKL/TBB sourced directly here (not assumed transitive from dynamics)
-# because synthesis DGEMM calls (token_attn_scorer) need MKL at link time.
+# because the export-only SVD factoring (tensor_decompose) needs
+# LAPACK/MKL at link time.
 
 set(LAPLACE_SYNTHESIS_HEADERS
     include/laplace/synthesis/version.h
@@ -14,11 +15,7 @@ set(LAPLACE_SYNTHESIS_HEADERS
     include/laplace/synthesis/feature_extractor.h
     include/laplace/synthesis/gguf_writer.h
     include/laplace/synthesis/bf16_decoder.h
-    include/laplace/synthesis/token_attn_scorer.h
     include/laplace/synthesis/tensor_decompose.h
-    include/laplace/synthesis/weight_projection.h
-    include/laplace/synthesis/per_token_magnitude.h
-    include/laplace/synthesis/projection_per_token.h
     include/laplace/synthesis/qk_pairs_threshold.h
     include/laplace/synthesis/qk_pairs_threshold_pruned.h
     include/laplace/synthesis/qk_project_cached.h
@@ -32,11 +29,7 @@ set(LAPLACE_SYNTHESIS_SOURCES
     src/feature_extractor.cpp
     src/gguf_writer.cpp
     src/bf16_decoder.c
-    src/token_attn_scorer.cpp
     src/tensor_decompose.cpp
-    src/weight_projection.cpp
-    src/per_token_magnitude.cpp
-    src/projection_per_token.cpp
     src/qk_pairs_threshold.cpp
     src/qk_pairs_threshold_pruned.cpp
     src/qk_project_cached.cpp
@@ -61,7 +54,7 @@ target_link_libraries(laplace_synthesis
     PUBLIC  laplace_core laplace_dynamics
 )
 
-# === oneMKL + oneTBB (same detection as dynamics — needed for token_attn_scorer DGEMM) ===
+# === oneMKL + oneTBB (same detection as dynamics — needed for the export-only SVD) ===
 
 option(LAPLACE_SYNTHESIS_REQUIRE_MKL
     "Fail configure if MKL/TBB not found for synthesis (production)"
