@@ -278,15 +278,15 @@ public sealed class WeightTensorETL
             if (circ.Kind == ModelGeometry.CircuitKind.FFN)
             {
                 Hash128 wit = WitnessId(_sourceId, circ.Layer, -1, circ.Expert);
-                var bldr = new SubstrateChangeBuilder(_sourceId, $"circuit/L{circ.Layer}/ffn", null,
-                    entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1 << 16);
-                // Witness entity in the SAME change as the edges that reference it as
-                // context_id — otherwise the attestations_context_id_fkey FK fails.
-                bldr.AddEntity(new EntityRow(wit, 0, _kinds.WitnessType, _sourceId));
-                counters[1] += ModelCircuitEdges.Emit(encProj, decProj, vocab, rEnc, kindName,
-                    M, theta, modelTrust, tokEnt, _sourceId, wit, bldr);
-                var chg = bldr.Build();
-                if (chg.Attestations.Length > 0) { yield return chg; await Task.Yield(); }
+                // STREAM bounded changes — the emitter flushes the COPY in chunks so a circuit
+                // never becomes one multi-GB intent; the witness entity rides every chunk (FK).
+                foreach (var chg in ModelCircuitEdges.Emit(encProj, decProj, vocab, rEnc, kindName,
+                             M, theta, modelTrust, tokEnt, _sourceId, wit, _kinds.WitnessType,
+                             $"circuit/L{circ.Layer}/ffn"))
+                {
+                    counters[1] += chg.Attestations.Length;
+                    yield return chg; await Task.Yield();
+                }
             }
             else  // attention: one witness per (layer, head), all scored against the arena scale
             {
@@ -299,14 +299,13 @@ public sealed class WeightTensorETL
                     double[] left  = ModelCircuitEdges.SliceHead(encProj, vocab, rEnc, encHead, headDim);
                     double[] right = ModelCircuitEdges.SliceHead(decProj, vocab, rDec, decHead, headDim);
                     Hash128 wit = WitnessId(_sourceId, circ.Layer, h, circ.Expert);
-                    var bldr = new SubstrateChangeBuilder(_sourceId, $"circuit/L{circ.Layer}/{kindName}/h{h}", null,
-                        entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1 << 16);
-                    // Witness entity in the SAME change as its edges (context_id FK).
-                    bldr.AddEntity(new EntityRow(wit, 0, _kinds.WitnessType, _sourceId));
-                    counters[1] += ModelCircuitEdges.Emit(left, right, vocab, headDim, kindName,
-                        M, theta, modelTrust, tokEnt, _sourceId, wit, bldr);
-                    var chg = bldr.Build();
-                    if (chg.Attestations.Length > 0) { yield return chg; await Task.Yield(); }
+                    foreach (var chg in ModelCircuitEdges.Emit(left, right, vocab, headDim, kindName,
+                                 M, theta, modelTrust, tokEnt, _sourceId, wit, _kinds.WitnessType,
+                                 $"circuit/L{circ.Layer}/{kindName}/h{h}"))
+                    {
+                        counters[1] += chg.Attestations.Length;
+                        yield return chg; await Task.Yield();
+                    }
                 }
             }
             _log.LogInformation("phase=circuits L{Layer} {Kind}: {Rel:N0} edges (cum), wall {Ms} ms",

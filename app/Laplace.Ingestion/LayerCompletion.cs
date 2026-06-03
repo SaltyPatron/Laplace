@@ -7,9 +7,14 @@ namespace Laplace.Ingestion;
 /// <summary>
 /// Records ADR 0037 layer completion via a <c>HasLayerCompleted/{n}</c>
 /// attestation so <see cref="NpgsqlSubstrateReader.HasSourceEverCompletedAsync"/>
-/// can gate later layers.
+/// can gate later layers. Written ONLY on a clean run (zero failures), so it is
+/// also the COMPLETION marker re-ingest guards key on: marker present = source
+/// fully ingested (re-run refused — double-count); marker absent with partial
+/// evidence = a killed run, and a re-run is lawful idempotent CONTINUATION
+/// (dedup skims what landed, novel work proceeds, the period fold covers all).
+/// Public so the CLI guard uses THIS kind id — never a re-derived string.
 /// </summary>
-internal static class LayerCompletion
+public static class LayerCompletion
 {
     public static Hash128 KindId(int layerOrder) =>
         Hash128.OfCanonical($"substrate/kind/HasLayerCompleted/{layerOrder}/v1");

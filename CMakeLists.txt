@@ -231,7 +231,7 @@ install(CODE "
   execute_process(
     COMMAND sh -c \"
       set -u
-      paths='\${CMAKE_INSTALL_PREFIX}/include/laplace'
+      paths='\${CMAKE_INSTALL_PREFIX}/include/laplace \${CMAKE_INSTALL_PREFIX}/share/laplace'
       for p in \$paths; do
         [ -e \\\"\$p\\\" ] || continue
         # Phase 1: chmod what we own (no-op for others); makes own-dirs g+w
@@ -240,9 +240,14 @@ install(CODE "
         find \\\"\$p\\\" -type f -exec chmod 0664 {} + 2>/dev/null || true
       done
       # Phase 2: nuke from orbit. -f swallows ENOENT; permission failures
-      # surface as non-zero rc which set -e propagates.
+      # surface as non-zero rc which set -e propagates. EVERY destination this
+      # project installs files into must be wiped here: cmake file(INSTALL)
+      # always chmod()s after copy and chmod is owner-only, so overwriting a
+      # file the OTHER identity owns is EPERM unless the file was removed
+      # first (that exact gap — share/laplace missing from this list — is what
+      # kept resurrecting the manual-sudo wall on the perfcache).
       set -e
-      rm -rf \\\"\${CMAKE_INSTALL_PREFIX}/include/laplace\\\"
+      rm -rf \$paths
       rm -f \${CMAKE_INSTALL_PREFIX}/lib/liblaplace_*.so* 2>/dev/null || true
       rm -f \${CMAKE_INSTALL_PREFIX}/lib/postgresql/${LAPLACE_PG_MAJOR}/laplace_*.so 2>/dev/null || true
       rm -f \${CMAKE_INSTALL_PREFIX}/share/postgresql/${LAPLACE_PG_MAJOR}/extension/laplace_* 2>/dev/null || true
@@ -254,8 +259,9 @@ install(CODE "
       \"Laplace pre-install cleanup failed under \${CMAKE_INSTALL_PREFIX}.\"
       \"\\nLikely a pre-fix cross-user g-w directory from a previous install.\"
       \"\\nOne-time recovery (run once, never again under the structural fix):\"
-      \"\\n    sudo rm -rf \${CMAKE_INSTALL_PREFIX}/include/laplace\"
-      \"\\nThen re-run cmake --install. Forward installs cannot reach this state.\")
+      \"\\n    sudo rm -rf \${CMAKE_INSTALL_PREFIX}/include/laplace \${CMAKE_INSTALL_PREFIX}/share/laplace\"
+      \"\\nThen re-run cmake --install. The post-install invariant (end of the\"
+      \"\\nroot CMakeLists) prevents forward installs from recreating the state.\")
   endif()
 ")
 
@@ -264,3 +270,51 @@ add_subdirectory(engine)
 
 # === PG extensions (2 per ADR 0025) ===
 add_subdirectory(extension)
+
+# === Post-install permission-invariant enforcement (declared LAST → runs last) ===
+#
+# CMAKE_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS does NOT survive the installer's
+# umask for implicitly-created directories: the requested 2775 lands as 2755
+# under the default 022 umask (empirical — see /opt/laplace/include/laplace
+# created drwxr-sr-x on 2026-06-03 despite the var). A g-w dir under the shared
+# prefix IS the cross-user wall: the other identity (CI laplace-runner vs the
+# developer) can neither chmod it (chmod is owner-only) nor pre-wipe through it
+# (unlink needs parent-dir write) — the state that demanded a manual
+# `sudo rm -rf` before every cross-identity install.
+#
+# So enforce the invariant HERE, at creation time, while this installer still
+# owns everything this install just created: normalize every dir under the
+# laplace destinations to 2775 (a no-op on dirs another identity owns — those
+# are caught by the verify), then VERIFY the whole tree and FAIL THE INSTALL
+# if any group-unwritable dir remains. Drift dies in the run that creates it,
+# for the identity that can still fix it — never as the NEXT identity's wall.
+# Scope: include/ lib/ share/ ONLY — never the dep trees (geos/tree-sitter/…,
+# their own lifecycle) and never pgsql-18/ (live cluster; PG refuses a
+# group-writable data directory by design).
+install(CODE "
+  message(STATUS \"Laplace post-install permission invariant under \${CMAKE_INSTALL_PREFIX}\")
+  execute_process(
+    COMMAND sh -c \"
+      set -u
+      cd \\\"\${CMAKE_INSTALL_PREFIX}\\\" || exit 1
+      for p in include lib share; do
+        [ -e \\\"\$p\\\" ] || continue
+        find \\\"\$p\\\" -type d -exec chmod 2775 {} + 2>/dev/null || true
+      done
+      bad=\$(find include lib share -type d ! -perm -020 2>/dev/null || true)
+      if [ -n \\\"\$bad\\\" ]; then
+        echo 'laplace post-install invariant violated (group-unwritable dirs):' >&2
+        echo \\\"\$bad\\\" >&2
+        exit 1
+      fi
+    \"
+    RESULT_VARIABLE _laplace_inv_rc
+  )
+  if(NOT _laplace_inv_rc EQUAL 0)
+    message(FATAL_ERROR
+      \"Laplace post-install invariant FAILED: group-unwritable dir(s) under the \"
+      \"shared prefix (paths on stderr above). They were created or left by an \"
+      \"identity other than this installer. Fix once — chmod -R 2775 (as owner) or \"
+      \"remove the listed dirs — and re-install; the invariant then self-maintains.\")
+  endif()
+")

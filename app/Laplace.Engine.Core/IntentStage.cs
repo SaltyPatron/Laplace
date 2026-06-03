@@ -188,6 +188,18 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
+    /// <summary>The raw COPY-binary TUPLE bytes for <paramref name="table"/> (no header/
+    /// trailer) and their length, owned by the engine stage — for STREAMING the native
+    /// serialization straight into a COPY socket instead of materializing a managed array.
+    /// Valid until the next add / dispose.</summary>
+    public unsafe (IntPtr Ptr, long Len) TupleBuffer(IntentStageTable table)
+    {
+        ThrowIfDisposed();
+        nuint len;
+        byte* p = NativeInterop.IntentStageTuplePtr(handle, (int)table, &len);
+        return ((IntPtr)p, checked((long)len));
+    }
+
     /// <summary>Emit into the caller-allocated <paramref name="dest"/>.
     /// Returns the number of bytes required (also written if dest was
     /// large enough; nothing written otherwise).</summary>

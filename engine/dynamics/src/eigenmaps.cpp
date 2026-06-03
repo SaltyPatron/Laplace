@@ -15,6 +15,11 @@
 #include <utility>
 #include <vector>
 
+#ifdef LAPLACE_HAS_MKL
+#include <tbb/blocked_range.h>
+#include <tbb/parallel_for.h>
+#endif
+
 /* Laplacian eigenmaps (Belkin & Niyogi, "Laplacian Eigenmaps for
  * Dimensionality Reduction and Data Representation", Neural Computation
  * 15:1373-1396, 2003). Nonlinear dimensionality reduction via the spectrum
@@ -203,26 +208,49 @@ int laplacian_eigenmaps(const double* high_dim_pts,
     if (k_neighbors >= n) return -2;
     if (target_dim + 1 >= n) return -2;  /* need at least (target_dim + 1) eigenpairs distinct from n */
 
-    /* --- 1. Build k-NN graph (binary weights). For each point i, find
-     * the k_neighbors smallest squared distances to other points. ----- */
-    std::vector<Triplet> w_triplets;
-    w_triplets.reserve(n * k_neighbors * 2);  /* upper bound for symmetrization */
+    /* --- 1. Build k-NN graph (binary weights). For each point i, find the
+     * k_neighbors smallest squared distances to the other points.
+     *
+     * Each point i is independent: it reads the shared const point buffer and
+     * writes EXACTLY k_neighbors triplets to a fixed slot [i*k, (i+1)*k). So the
+     * outer loop parallelizes with oneTBB (when linked) with no contention, and
+     * the result is BIT-IDENTICAL to the serial build — the triplet vector ends
+     * up in the same order, every sq_dist sums in the same order regardless of
+     * thread, and the per-i partial_sort is unchanged. The `dists` scratch is
+     * per-i (thread-local), never shared. This replaces the O(n²·d) SINGLE-
+     * THREADED k-NN that made a large-vocab embedding morph effectively never
+     * finish; determinism (RULES.md R7) is preserved because no cross-thread
+     * reduction is introduced — the distance sums and the eigensolver are
+     * untouched. A serial fallback covers the Eigen-only (no-TBB) build. */
+    std::vector<Triplet> w_triplets(n * k_neighbors);
 
-    std::vector<std::pair<double, std::size_t>> dists(n);
-    for (std::size_t i = 0; i < n; ++i) {
+    auto build_knn_row = [&](std::size_t i) {
+        std::vector<std::pair<double, std::size_t>> dists(n);
         for (std::size_t j = 0; j < n; ++j) {
             dists[j] = {(i == j) ? std::numeric_limits<double>::infinity()
                                  : sq_dist(high_dim_pts, i, j, high_dim),
                         j};
         }
-        std::partial_sort(dists.begin(), dists.begin() + static_cast<std::ptrdiff_t>(k_neighbors),
+        std::partial_sort(dists.begin(),
+                          dists.begin() + static_cast<std::ptrdiff_t>(k_neighbors),
                           dists.end(),
                           [](const auto& a, const auto& b) { return a.first < b.first; });
         for (std::size_t k = 0; k < k_neighbors; ++k) {
-            w_triplets.emplace_back(static_cast<int>(i),
-                                    static_cast<int>(dists[k].second), 1.0);
+            w_triplets[i * k_neighbors + k] =
+                Triplet(static_cast<int>(i),
+                        static_cast<int>(dists[k].second), 1.0);
         }
-    }
+    };
+
+#ifdef LAPLACE_HAS_MKL
+    tbb::parallel_for(tbb::blocked_range<std::size_t>(0, n),
+                      [&](const tbb::blocked_range<std::size_t>& range) {
+                          for (std::size_t i = range.begin(); i != range.end(); ++i)
+                              build_knn_row(i);
+                      });
+#else
+    for (std::size_t i = 0; i < n; ++i) build_knn_row(i);
+#endif
 
     SpMat W_raw(static_cast<int>(n), static_cast<int>(n));
     W_raw.setFromTriplets(w_triplets.begin(), w_triplets.end(),

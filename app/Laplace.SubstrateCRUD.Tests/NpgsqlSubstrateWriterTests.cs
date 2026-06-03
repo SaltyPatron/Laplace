@@ -160,11 +160,12 @@ public class NpgsqlSubstrateWriterTests : IClassFixture<LocalPgFixture>
     }
 
     [Fact]
-    public async Task ApplyAsync_RollsBackOnFatalError()
+    public async Task ApplyAsync_FailsClosedOnMissingReference()
     {
-        // Trigger a constraint violation: emit an attestation whose subject_id
-        // is missing from entities. PG raises FK violation; the COPY pipeline
-        // must roll back the entire intent (no partial writes).
+        // Emit an attestation whose subject_id is missing from entities. The
+        // writer's SET-BASED referential proof (the bulk-path replacement for
+        // per-row FK triggers) must detect the miss and throw BEFORE the first
+        // COPY byte — fail-closed, no partial writes at all.
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var src = Hash128.OfCanonical("substrate/source/test/rollback");
         var typeId = await EnsureTestTypeAsync(src);
@@ -181,10 +182,11 @@ public class NpgsqlSubstrateWriterTests : IClassFixture<LocalPgFixture>
                 IntentStage.PgEpochUnixUs, 1))
             .Build();
 
-        await Assert.ThrowsAsync<global::Npgsql.PostgresException>(
+        var ex = await Assert.ThrowsAsync<SubstrateReferentialIntegrityException>(
             () => writer.ApplyAsync(change));
+        Assert.Equal(1, ex.MissingCount);
 
-        // After rollback, the good entity must NOT be in the DB
+        // Fail-closed: the good entity must NOT have been written either.
         await using var cmd = _pg.DataSource.CreateCommand(
             "SELECT count(*) FROM laplace.entities WHERE id = $1");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, goodEntity.ToBytes());

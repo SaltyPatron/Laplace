@@ -25,44 +25,36 @@ namespace Laplace.Decomposers.Model;
 public static class ModelCircuitEdges
 {
     /// <summary>
-    /// Emit the circuit's signal edges into <paramref name="builder"/>. Returns the
-    /// number emitted. <paramref name="tokenEntity"/> maps a vocab index to its
-    /// content entity id (null ⇒ skip that token — e.g. a special / unanchored id).
+    /// STREAM the circuit's signal edges as a sequence of BOUNDED <see cref="SubstrateChange"/>s
+    /// — an ETL load, not a blob. A single QK/OV/FFN circuit content-addresses into 10⁸+ edges;
+    /// accumulating them into one intent forced a multi-GB COPY buffer (and the int32 overflow in
+    /// <c>IntentStage.EmitCopyBinary</c>). Instead, edges flush every <paramref name="maxAttPerChange"/>
+    /// into a fresh change, so the COPY streams in bounded chunks and Postgres does the dedup via
+    /// <c>ON CONFLICT</c> — nothing ever holds a whole circuit. Each yielded change carries the
+    /// witness entity so its edges' <c>context_id</c> FK resolves in the same change.
+    /// <paramref name="tokenEntity"/> maps a vocab index to its content entity id (null ⇒ skip).
     /// </summary>
-    public static int Emit(
+    public static System.Collections.Generic.IEnumerable<SubstrateChange> Emit(
         double[] left, double[] right, int vocab, int r,
         string kindName, double arenaScale, double theta, double sourceTrust,
         Func<int, Hash128?> tokenEntity, Hash128 sourceId, Hash128 witness,
-        SubstrateChangeBuilder builder, int tileRows = 256)
+        Hash128 witnessType, string label, int maxAttPerChange = 500_000, int tileRows = 256)
     {
-        if (left is null || right is null || builder is null) throw new ArgumentNullException();
-        if (vocab <= 0 || r <= 0) return 0;
+        if (left is null || right is null) throw new ArgumentNullException();
+        if (vocab <= 0 || r <= 0) yield break;
 
-        long cap = (long)tileRows * vocab;        // worst case: every column above θ
+        long cap = (long)tileRows * vocab;        // worst case: every column above θ in a tile
         var rows = new int[cap];
         var cols = new int[cap];
         var vals = new double[cap];
-        int emitted = 0;
+
+        var bldr = NewWitnessBuilder(sourceId, label, witness, witnessType);
+        int inChange = 0;
 
         for (int b0 = 0; b0 < vocab; b0 += tileRows)
         {
             int b1 = Math.Min(b0 + tileRows, vocab);
-            long cnt; int overflow;
-            unsafe
-            {
-                fixed (double* lp = left) fixed (double* rp = right)
-                fixed (int* orr = rows) fixed (int* occ = cols) fixed (double* ovv = vals)
-                {
-                    nuint c; int ov;
-                    int rc = DynInterop.BilinearEdgesTile(
-                        lp, (nuint)b0, (nuint)b1, rp, (nuint)vocab, (nuint)r, theta,
-                        orr, occ, ovv, (nuint)cap, &c, &ov);
-                    if (rc != 0) throw new InvalidOperationException($"bilinear_edges_tile rc={rc}");
-                    cnt = (long)c; overflow = ov;
-                }
-            }
-            if (overflow != 0)   // cap is the exact worst case, so this is a real invariant break
-                throw new InvalidOperationException("bilinear_edges_tile overflow — tile buffer undersized");
+            long cnt = ContractTile(left, right, b0, b1, vocab, r, theta, rows, cols, vals, cap);
 
             for (long e = 0; e < cnt; e++)
             {
@@ -70,13 +62,51 @@ public static class ModelCircuitEdges
                 if (i == j) continue;                       // skip self-edges
                 var si = tokenEntity(i); var oj = tokenEntity(j);
                 if (si is null || oj is null) continue;
-                builder.AddAttestation(KindRegistry.AttestWeighted(
+                bldr.AddAttestation(KindRegistry.AttestWeighted(
                     si.Value, kindName, oj.Value, sourceId, sourceTrust,
                     magnitude: vals[e], floor: arenaScale, contextId: witness));
-                emitted++;
+                if (++inChange >= maxAttPerChange)
+                {
+                    yield return bldr.Build();
+                    bldr = NewWitnessBuilder(sourceId, label, witness, witnessType);
+                    inChange = 0;
+                }
             }
         }
-        return emitted;
+        if (inChange > 0) yield return bldr.Build();
+    }
+
+    /// <summary>One COPY-tile contraction M = Left·Rightᵀ over rows [b0,b1) via the engine
+    /// (<c>bilinear_edges_tile</c>). Separate from the streaming <see cref="Emit"/> iterator
+    /// because C# iterators may not contain unsafe/fixed blocks (CS1629).</summary>
+    private static long ContractTile(double[] left, double[] right, int b0, int b1,
+        int vocab, int r, double theta, int[] rows, int[] cols, double[] vals, long cap)
+    {
+        unsafe
+        {
+            fixed (double* lp = left) fixed (double* rp = right)
+            fixed (int* orr = rows) fixed (int* occ = cols) fixed (double* ovv = vals)
+            {
+                nuint c; int ov;
+                int rc = DynInterop.BilinearEdgesTile(
+                    lp, (nuint)b0, (nuint)b1, rp, (nuint)vocab, (nuint)r, theta,
+                    orr, occ, ovv, (nuint)cap, &c, &ov);
+                if (rc != 0) throw new InvalidOperationException($"bilinear_edges_tile rc={rc}");
+                if (ov != 0) throw new InvalidOperationException("bilinear_edges_tile overflow — tile buffer undersized");
+                return (long)c;
+            }
+        }
+    }
+
+    /// <summary>A fresh change builder carrying the (layer,head) witness entity — every
+    /// streamed chunk needs it so its edges' context_id FK resolves in the same change.</summary>
+    private static SubstrateChangeBuilder NewWitnessBuilder(
+        Hash128 sourceId, string label, Hash128 witness, Hash128 witnessType)
+    {
+        var b = new SubstrateChangeBuilder(sourceId, label, null,
+            entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1 << 16);
+        b.AddEntity(new EntityRow(witness, 0, witnessType, sourceId));
+        return b;
     }
 
     /// <summary>Circuit factorization form — which embedding each side reads through.</summary>

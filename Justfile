@@ -213,6 +213,12 @@ db-fresh: build-perfcache build-app
     # substrate extension (extension-only install, to avoid the perfcache-file perms
     # issue in the full `install` target), re-apply migrations (CREATE EXTENSION loads
     # the current SQL), and re-seed T0.
+    # Component installs skip the root pre-wipe; a leftover .so from a prior
+    # install state makes cmake's file(RPATH_CHANGE) bail (half-rewritten
+    # RUNPATH). Clear the artifacts first — same remedy as the root pre-wipe;
+    # the install recreates them fresh, owned by this installer.
+    rm -f "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"/lib/postgresql/*/laplace_substrate.so \
+          "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"/share/postgresql/*/extension/laplace_substrate*
     cmake --install build/extension/laplace_substrate >/dev/null
     cd app
     echo NUKE | dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- nuke
@@ -229,6 +235,13 @@ setup: launch-db db-up seed-t0
 
 ingest source path="": build-app
     scripts/ingest-source.sh {{source}} {{path}}
+
+# End-to-end substrate rebuild on laplace-dev (DESTRUCTIVE: db-fresh first):
+# seeds (unicode + iso639) then each model one at a time, consensus folding at
+# every period end, audit last. Models default to TinyLlama + Phi-2; pass
+# explicit model dirs to override. LAPLACE_E2E_DB overrides the target DB.
+e2e *models: build-app
+    scripts/e2e-substrate.sh {{models}}
 
 # Ingest the whole seed/lexical ladder in dependency order:
 #   unicode → iso639 → wordnet → omw → ud → tatoeba → atomic2020 → conceptnet → wiktionary

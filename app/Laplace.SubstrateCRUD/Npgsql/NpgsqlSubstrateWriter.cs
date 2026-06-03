@@ -22,16 +22,27 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 ///         entity list to novel-only.</item>
 ///   <item>Materialize PG COPY BINARY byte streams via
 ///         <see cref="IntentStage"/> (Story A.5 #243), one buffer per
-///         table. Entities are pre-filtered to novel-only;
-///         physicalities + attestations always emit and rely on
-///         <c>ON CONFLICT DO NOTHING</c> for idempotency (RULES R5).</item>
-///   <item>Stream each buffer over Npgsql's raw binary COPY.</item>
+///         table, filtered to NOVEL rows only (existence check + in-batch
+///         dedup; idempotency per RULES R5 is the content-addressed id).</item>
+///   <item>Prove referential integrity SET-BASED: every entity id referenced
+///         by a staged row resolves (staged this batch, or proven present via
+///         one more <c>entities_exist_bitmap</c> round-trip). Any miss throws
+///         <see cref="SubstrateReferentialIntegrityException"/> BEFORE
+///         anything is written.</item>
+///   <item>Stream each buffer over Npgsql's raw binary COPY inside one
+///         transaction running <c>SET LOCAL session_replication_role =
+///         replica</c>: the per-row RI triggers are skipped because the same
+///         invariant was just proven set-based (measured warm on the live
+///         substrate: per-row FK machinery ≈ 30s per 500k attestations —
+///         2.5M trigger firings + KEY SHARE locks — vs ~ms for the set
+///         proof). FK constraints REMAIN in the schema for every non-bulk
+///         writer; <c>scripts/verify-fk.sql</c> is the independent audit.</item>
 /// </list>
 ///
 /// <para>
 /// Best case (intent fully duplicate at the entity level): 1 round-trip
 /// (the existence SRF; no COPYs issued because all 3 buffers are empty).
-/// Novel intent: 4 round-trips (1 SRF + 3 COPYs).
+/// Novel intent: 6 round-trips (2 SRF + SET LOCAL + 3 COPYs).
 /// </para>
 /// </summary>
 public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
@@ -87,23 +98,10 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             foreach (var e in c.Entities)
                 if (seenEntityArg.Add(e.Id)) uniqueEntityIds.Add(e.Id);
 
-        var existingEntities = new HashSet<Hash128>();
-        if (uniqueEntityIds.Count > 0)
-        {
-            var arg = new byte[uniqueEntityIds.Count][];
-            for (int i = 0; i < uniqueEntityIds.Count; i++) arg[i] = uniqueEntityIds[i].ToBytes();
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT laplace.entities_exist_bitmap(@ids)";
-            cmd.Parameters.Add(new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea) { Value = arg });
-            var res = await cmd.ExecuteScalarAsync(ct);
-            var bitmap = res as byte[] ?? Array.Empty<byte>();
-            for (int i = 0; i < uniqueEntityIds.Count; i++)
-            {
-                byte b = (byte)(i >> 3 < bitmap.Length ? bitmap[i >> 3] : 0);
-                if (((b >> (i & 7)) & 1) != 0) existingEntities.Add(uniqueEntityIds[i]);
-            }
-            roundTrips++;
-        }
+        var existingEntities = uniqueEntityIds.Count > 0
+            ? await EntitiesExistAsync(conn, uniqueEntityIds, ct)
+            : new HashSet<Hash128>();
+        if (uniqueEntityIds.Count > 0) roundTrips++;
 
         // 2. Physicality identity dedup — ONE query for all phys ids. COPY
         //    can't ON CONFLICT, so we filter to novel ids before staging:
@@ -131,12 +129,22 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         var seenAtt    = new HashSet<Hash128>(existingAtt);
         Span<double> coord = stackalloc double[4];
 
+        // Referenced-entity collection for the SET-BASED referential proof
+        // below: every entity id a STAGED row points at. Ids presented as batch
+        // entities (seenEntityArg) are excluded — they are either already in the
+        // DB (existingEntities) or staged in this same transaction, so they
+        // resolve by commit either way.
+        var referenced = new HashSet<Hash128>();
+        void Reference(Hash128 id) { if (!seenEntityArg.Contains(id)) referenced.Add(id); }
+
         foreach (var c in changes)
             foreach (var e in c.Entities)
             {
                 if (existingEntities.Contains(e.Id)) continue;   // already in DB
                 if (!seenEntity.Add(e.Id)) continue;             // already staged this batch
                 stage.AddEntity(e.Id, e.Tier, e.TypeId, e.FirstObservedBy);
+                Reference(e.TypeId);
+                if (e.FirstObservedBy is Hash128 fob) Reference(fob);
             }
         foreach (var c in changes)
             foreach (var p in c.Physicalities)
@@ -149,6 +157,8 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                     p.TrajectoryXyzm is null ? ReadOnlySpan<double>.Empty
                                               : p.TrajectoryXyzm.AsSpan(),
                     p.NConstituents, p.AlignmentResidual, p.SourceDim, p.ObservedAtUnixUs);
+                Reference(p.EntityId);
+                Reference(p.SourceId);
             }
         foreach (var c in changes)
             foreach (var a in c.Attestations)
@@ -158,7 +168,43 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                     a.Id, a.SubjectId, a.KindId, a.ObjectId, a.SourceId, a.ContextId,
                     a.ScoreFp1e9, a.OpponentRdFp1e9, a.ArenaMFp1e9,
                     a.LastObservedAtUnixUs, a.ObservationCount);
+                Reference(a.SubjectId);
+                Reference(a.KindId);
+                Reference(a.SourceId);
+                if (a.ObjectId  is Hash128 aObj) Reference(aObj);
+                if (a.ContextId is Hash128 aCtx) Reference(aCtx);
             }
+
+        // Referential proof — the SET-BASED replacement for the per-row FK
+        // triggers on the bulk path. ONE bitmap round-trip proves every
+        // referenced id resolves; any miss aborts BEFORE the first COPY byte
+        // (fail-closed: nothing written, vs FK which fails after the work).
+        // Measured on the live 140M-row substrate, fully warm: PG's per-row RI
+        // machinery (one trigger firing + FOR KEY SHARE lock per row per FK;
+        // 5 FKs ⇒ 2.5M firings per 500k attestations) costs ~30s; this proof
+        // is one indexed probe per DISTINCT referenced id (~ms). Same
+        // invariant, proven once per batch. The FK constraints REMAIN in the
+        // schema enforcing every non-bulk write; scripts/verify-fk.sql remains
+        // the independent audit.
+        if (referenced.Count > 0)
+        {
+            var refList = new List<Hash128>(referenced);
+            var present = await EntitiesExistAsync(conn, refList, ct);
+            roundTrips++;
+            if (present.Count != refList.Count)
+            {
+                Hash128 firstMissing = default;
+                int missingCount = 0;
+                foreach (var id in refList)
+                    if (!present.Contains(id))
+                    {
+                        if (missingCount == 0) firstMissing = id;
+                        missingCount++;
+                    }
+                throw new SubstrateReferentialIntegrityException(
+                    missingCount, Convert.ToHexString(firstMissing.ToBytes()));
+            }
+        }
 
         int entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
         bool anyRows = stage.EntityCount > 0 || stage.PhysicalityCount > 0 || stage.AttestationCount > 0;
@@ -175,32 +221,55 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             await using var tx = await conn.BeginTransactionAsync(ct);
             try
             {
+                // Referential integrity was proven set-based above, so the
+                // per-row RI triggers are pure redundant cost on this bulk
+                // transaction — skip them HERE ONLY. SET LOCAL is txn-scoped
+                // (reverts at commit/rollback); the FK constraints stay live
+                // for every other writer. PK/UNIQUE/CHECK are index/executor
+                // enforced, not triggers — still active during the COPY.
+                // Requires SET privilege on the GUC (laplace_admin is
+                // superuser; a denial throws 42501 = fail-loud, no silent
+                // downgrade). Single-writer assumption (the ingest default):
+                // a concurrent per-source eviction between proof and commit
+                // is the one race PG's KEY SHARE locks covered — do not run
+                // evictions under a live ingest.
+                await using (var guc = conn.CreateCommand())
+                {
+                    guc.CommandText = "SET LOCAL session_replication_role = replica";
+                    await guc.ExecuteNonQueryAsync(ct);
+                }
+                roundTrips++;
+
                 if (stage.EntityCount > 0)
                 {
                     entitiesInserted = await StageAndInsertAsync(
-                        conn, IntentStageTable.Entities, "entities",
-                        stage.EmitCopyBinary(IntentStageTable.Entities), ct);
+                        conn, stage, IntentStageTable.Entities, "entities", ct);
                     roundTrips += 3;
                 }
                 if (stage.PhysicalityCount > 0)
                 {
                     physicalitiesInserted = await StageAndInsertAsync(
-                        conn, IntentStageTable.Physicalities, "physicalities",
-                        stage.EmitCopyBinary(IntentStageTable.Physicalities), ct);
+                        conn, stage, IntentStageTable.Physicalities, "physicalities", ct);
                     roundTrips += 3;
                 }
                 if (stage.AttestationCount > 0)
                 {
                     attestationsInserted = await StageAndInsertAsync(
-                        conn, IntentStageTable.Attestations, "attestations",
-                        stage.EmitCopyBinary(IntentStageTable.Attestations), ct);
+                        conn, stage, IntentStageTable.Attestations, "attestations", ct);
                     roundTrips += 3;
                 }
                 await tx.CommitAsync(ct);
             }
             catch
             {
-                await tx.RollbackAsync(CancellationToken.None);
+                // Best-effort rollback. If the connection was already torn down mid-
+                // transaction (e.g. 57P01 admin_shutdown when the cluster is restarted
+                // under the ingest), RollbackAsync itself throws ObjectDisposedException.
+                // That MUST NOT mask the original exception — otherwise the retry
+                // classifier (TransientErrorRetryPolicy) never sees the real transient
+                // SQLSTATE and the whole run aborts on a recoverable blip.
+                try { await tx.RollbackAsync(CancellationToken.None); }
+                catch { /* connection already dead; the original exception is authoritative */ }
                 throw;
             }
         }
@@ -220,6 +289,39 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             // / duplicated within the batch). Matches the legacy single-intent
             // contract: a no-op apply reports the shortcircuit.
             TrunkShortcircuitHit: !anyRows);
+    }
+
+    /// <summary>
+    /// One <c>laplace.entities_exist_bitmap</c> round-trip (chunked at 100k ids
+    /// per call, same bound as <see cref="LoadExistingIdsAsync"/>) returning the
+    /// subset of <paramref name="ids"/> present in <c>laplace.entities</c>.
+    /// Serves both the novel-entity filter (step 1) and the set-based
+    /// referential proof.
+    /// </summary>
+    private static async Task<HashSet<Hash128>> EntitiesExistAsync(
+        NpgsqlConnection conn, IReadOnlyList<Hash128> ids, CancellationToken ct)
+    {
+        var existing = new HashSet<Hash128>();
+        const int ChunkSize = 100_000;
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT laplace.entities_exist_bitmap(@ids)";
+        var idsParam = cmd.Parameters.Add(
+            new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea));
+        for (int off = 0; off < ids.Count; off += ChunkSize)
+        {
+            int len = Math.Min(ChunkSize, ids.Count - off);
+            var arg = new byte[len][];
+            for (int i = 0; i < len; i++) arg[i] = ids[off + i].ToBytes();
+            idsParam.Value = arg;
+            var res = await cmd.ExecuteScalarAsync(ct);
+            var bitmap = res as byte[] ?? Array.Empty<byte>();
+            for (int i = 0; i < len; i++)
+            {
+                byte b = (byte)(i >> 3 < bitmap.Length ? bitmap[i >> 3] : 0);
+                if (((b >> (i & 7)) & 1) != 0) existing.Add(ids[off + i]);
+            }
+        }
+        return existing;
     }
 
     /// <summary>
@@ -248,17 +350,39 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         var existing = new HashSet<Hash128>();
         if (idBytes.Count == 0) return existing;
 
+        // Chunk the existence check. A single `= ANY(@ids)` over an unbounded id array
+        // overflows Npgsql's int32 parameter-size computation once a circuit intent
+        // content-addresses into ~100M+ edges (one QK head over a large vocab). Dedup is
+        // by id regardless; this only bounds how many ids ride one round-trip.
+        const int ChunkSize = 100_000;
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = $"SELECT id FROM laplace.{table} WHERE id = ANY(@ids)";
-        cmd.Parameters.Add(new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea) { Value = idBytes.ToArray() });
-        await using var r = await cmd.ExecuteReaderAsync(ct);
-        while (await r.ReadAsync(ct))
+        var idsParam = cmd.Parameters.Add(
+            new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea));
+        for (int off = 0; off < idBytes.Count; off += ChunkSize)
         {
-            var bts = (byte[])r[0];
-            existing.Add(new Hash128(BitConverter.ToUInt64(bts, 0), BitConverter.ToUInt64(bts, 8)));
+            int len = Math.Min(ChunkSize, idBytes.Count - off);
+            var chunk = new byte[len][];
+            idBytes.CopyTo(off, chunk, 0, len);
+            idsParam.Value = chunk;
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                var bts = (byte[])r[0];
+                existing.Add(new Hash128(BitConverter.ToUInt64(bts, 0), BitConverter.ToUInt64(bts, 8)));
+            }
         }
         return existing;
     }
+
+    // PostgreSQL COPY BINARY framing (constant): "PGCOPY\n\377\r\n\0" + int32 flags(0)
+    // + int32 header-extension-length(0); trailer = int16 -1. These 19+2 bytes are the
+    // ONLY managed bytes in the load path now — the tuples stream from the engine buffer.
+    private static readonly byte[] CopyBinaryHeader =
+        { 0x50, 0x47, 0x43, 0x4F, 0x50, 0x59, 0x0A, 0xFF, 0x0D, 0x0A, 0x00,
+          0, 0, 0, 0,  0, 0, 0, 0 };
+    private static readonly byte[] CopyBinaryTrailer = { 0xFF, 0xFF };
+    private const long CopyChunkBytes = 1L << 22;   // 4 MB socket-write window over the engine buffer
 
     /// <summary>
     /// Conflict-safe bulk insert for one table: (1) create an <c>ON COMMIT
@@ -271,37 +395,43 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
     /// open transaction (for the temp table's <c>ON COMMIT DROP</c> scope).
     /// </summary>
     private static async Task<int> StageAndInsertAsync(
-        NpgsqlConnection conn, IntentStageTable table, string tableName, byte[] data, CancellationToken ct)
+        NpgsqlConnection conn, IntentStage stage, IntentStageTable table, string tableName, CancellationToken ct)
     {
+        (IntPtr ptr, long len) = stage.TupleBuffer(table);
         string cols = IntentStage.CopyColumnList(table);
-        string tmp  = $"_lpl_stg_{tableName}";
-
-        // 1. TEMP staging table: exactly the COPY columns + their types, no
-        //    constraints/defaults (so COPY of the column subset never trips a
-        //    NOT NULL on a server-defaulted column).
-        await using (var create = conn.CreateCommand())
+        int rowCount = table switch
         {
-            create.CommandText =
-                $"CREATE TEMP TABLE {tmp} ON COMMIT DROP AS "
-              + $"SELECT {cols} FROM laplace.{tableName} WITH NO DATA";
-            await create.ExecuteNonQueryAsync(ct);
-        }
+            IntentStageTable.Entities      => stage.EntityCount,
+            IntentStageTable.Physicalities => stage.PhysicalityCount,
+            _                              => stage.AttestationCount,
+        };
 
-        // 2. Raw binary COPY into the staging table.
+        // The rows are already deduped to NOVEL-only client-side (the existence check +
+        // in-batch dedup above), so they have NO conflicts — COPY them STRAIGHT into the
+        // real table. No temp staging, no `INSERT … ON CONFLICT` re-check: that promote
+        // (row-by-row conflict checking + a second pass over the rows) was the ~20× cost
+        // vs COPY's bulk index build. The engine's native tuple serialization streams into
+        // the socket: header(19) + tuples(piped through a fixed O(1) window) + trailer(2);
+        // no managed array ever holds the intent. Correct for a single writer (the ingest
+        // default); concurrent writers across connections would need the ON-CONFLICT
+        // promote restored for cross-connection race safety.
         await using (var stream = await conn.BeginRawBinaryCopyAsync(
-            $"COPY {tmp} ({cols}) FROM STDIN (FORMAT BINARY)", ct))
+            $"COPY laplace.{tableName} ({cols}) FROM STDIN (FORMAT BINARY)", ct))
         {
-            await stream.WriteAsync(data.AsMemory(), ct);
+            await stream.WriteAsync(CopyBinaryHeader, ct);
+            if (len > 0)
+            {
+                var window = new byte[(int)Math.Min(CopyChunkBytes, len)];
+                for (long off = 0; off < len; off += window.Length)
+                {
+                    int n = (int)Math.Min(window.Length, len - off);
+                    System.Runtime.InteropServices.Marshal.Copy(ptr + (nint)off, window, 0, n);
+                    await stream.WriteAsync(window.AsMemory(0, n), ct);
+                }
+            }
+            await stream.WriteAsync(CopyBinaryTrailer, ct);
             await stream.FlushAsync(ct);
         }
-
-        // 3. Conflict-safe promote into the real table; rows-affected = inserted.
-        await using (var insert = conn.CreateCommand())
-        {
-            insert.CommandText =
-                $"INSERT INTO laplace.{tableName} ({cols}) "
-              + $"SELECT {cols} FROM {tmp} ON CONFLICT DO NOTHING";
-            return await insert.ExecuteNonQueryAsync(ct);
-        }
+        return rowCount;
     }
 }

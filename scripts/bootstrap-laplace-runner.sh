@@ -442,6 +442,42 @@ bootstrap_runner_register() {
     green "✓ Registered runner as 'hart-server'"
 }
 
+bootstrap_runner_job_env() {
+    # Machine-static job environment → the runner's .env file. The GH runner
+    # loads KEY=VALUE lines from $RUNNER_DIR/.env into EVERY job it executes —
+    # the idiomatic home for machine truth (oneAPI toolchain roots + runtime
+    # lib paths). Workflows then stop re-sourcing setvars.sh per job;
+    # .github/actions/setup-laplace-env keeps a conditional fallback for
+    # runners bootstrapped before this block, and continues to own the
+    # WORKSPACE-relative env (build-tree LD_LIBRARY_PATH prepend) which a
+    # machine-level file cannot express. PATH is deliberately NOT written
+    # here (the runner manages its own PATH; toolchain compilers resolve via
+    # the cmake toolchain file / setvars fallback in the build job).
+    # Idempotent — same begin/end marker pattern as the cluster config.
+    say "Runner job env: oneAPI machine-static vars → $RUNNER_DIR/.env"
+    if [ ! -d "$RUNNER_DIR" ] || [ ! -d /opt/intel/oneapi ]; then
+        yellow "runner dir or oneAPI missing — skipping .env block"
+        return 0
+    fi
+    local marker_begin="# >>> laplace-runner managed: oneapi job env >>>"
+    local marker_end="# <<< laplace-runner managed: oneapi job env <<<"
+    local envfile="$RUNNER_DIR/.env"
+    touch "$envfile"
+    sed -i -e "/$marker_begin/,/$marker_end/d" "$envfile"
+    {
+        echo "$marker_begin"
+        # Clean subshell (env -i): the captured values are purely what
+        # setvars.sh sets, uncontaminated by the bootstrap caller's env.
+        env -i bash -c 'source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1; printenv' \
+          | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|PKG_CONFIG_PATH|LD_LIBRARY_PATH)='
+        echo "$marker_end"
+    } >> "$envfile"
+    chown "$RUNNER_USER:$RUNNER_GROUP" "$envfile"
+    # The runner reads .env at service start — restart to apply.
+    systemctl restart "$RUNNER_SERVICE" 2>/dev/null || true
+    green "✓ runner .env oneAPI block written (service restarted to load it)"
+}
+
 bootstrap_runner_service() {
     say "Install + start systemd service ($RUNNER_USER)"
     local unit_file="/etc/systemd/system/$RUNNER_SERVICE"
@@ -1411,6 +1447,7 @@ do_bootstrap() {
     bootstrap_runner_install
     bootstrap_runner_register
     bootstrap_runner_service
+    bootstrap_runner_job_env
 
     # ld.so.cache must list /opt/laplace/{geos,proj,gdal}/lib BEFORE our
     # substrate cluster starts — otherwise the postgres binary forks

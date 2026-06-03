@@ -6,7 +6,8 @@
  * opponent. It is NOT accumulated state: the relation is the player, the witness
  * is the match. The accumulated Glicko-2 state (rating/rd/volatility) lives on
  * the `consensus` table (one row per (subject, kind, object), source + context
- * out), materialized by rebuild_consensus over THIS evidence.
+ * out), materialized incrementally per ingest period (incremental_consensus,
+ * driven by the writer at period end — never a batch rebuild) over THIS evidence.
  *
  * The observation (ARCHITECTURE.md §10, DERIVED — no tiers, no trust classes):
  *   score       = ½(1 + tanh(signed_m / M)) ∈ (0,1)  — signed magnitude → outcome
@@ -35,7 +36,7 @@ CREATE TABLE attestations (
 );
 
 COMMENT ON TABLE attestations IS
-    'EVIDENCE layer: per-witness Glicko-2 OBSERVATIONS, one row per (subject, kind, object, source, context). NOT accumulated state — each row is one match (score vs a neutral baseline opponent, weighted by opponent precision from witness trust). The accumulated rating/rd/volatility live on the consensus table, materialized by rebuild_consensus over these observations (ARCHITECTURE.md §10). Repeated assertions are UPSERT-no-op idempotent (RULES R5).';
+    'EVIDENCE layer: per-witness Glicko-2 OBSERVATIONS, one row per (subject, kind, object, source, context). NOT accumulated state — each row is one match (score vs a neutral baseline opponent, weighted by opponent precision from witness trust). The accumulated rating/rd/volatility live on the consensus table, materialized incrementally per ingest period (incremental_consensus) over these observations (ARCHITECTURE.md §10). Repeated assertions are UPSERT-no-op idempotent (RULES R5).';
 
 COMMENT ON COLUMN attestations.id IS
     'Content-addressed BLAKE3-128 of canonical (subject_id, kind_id, object_id, source_id, context_id) bytes. Stable across re-observation; same tuple -> same id regardless of insertion order.';

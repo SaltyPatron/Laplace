@@ -400,3 +400,16 @@ size_t intent_stage_emit_copy_binary(
     buf[off++] = 0xff;
     return required;
 }
+
+/* Stream accessor: the raw tuple bytes (no header/trailer) + their length, so the
+ * caller can pipe the engine's native serialization straight into a COPY socket
+ * without materializing the whole stage into one array. */
+const uint8_t* intent_stage_tuple_ptr(
+    const intent_stage_t* stage,
+    intent_stage_table_t  table,
+    size_t*               out_len) {
+    const byte_buf_t* src = stage_buf(stage, table);
+    if (!src) { if (out_len) *out_len = 0; return NULL; }
+    if (out_len) *out_len = src->len;
+    return src->data;
+}

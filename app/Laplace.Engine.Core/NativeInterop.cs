@@ -213,6 +213,10 @@ public static unsafe partial class NativeInterop
     internal static partial nuint IntentStageEmitCopyBinary(
         IntPtr stage, int table, byte* buf, nuint bufCapacity);
 
+    [LibraryImport(Library, EntryPoint = "intent_stage_tuple_ptr")]
+    internal static partial byte* IntentStageTuplePtr(
+        IntPtr stage, int table, nuint* outLen);
+
     // === glicko2 (engine/core/include/laplace/core/glicko2.h) ===
 
     [LibraryImport(Library, EntryPoint = "glicko2_effective_mu")]

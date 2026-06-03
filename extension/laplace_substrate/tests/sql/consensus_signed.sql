@@ -57,7 +57,9 @@ BEGIN
         (laplace_hash128_blake3('a/many'),    subj, kind, o_games, src, NULL, s_conf, phi_trust, 0, now(), 8),
         (laplace_hash128_blake3('a/one'),     subj, kind, o_one,   src, NULL, s_conf, phi_trust, 0, now(), 1);
 
-    PERFORM rebuild_consensus();
+    -- the per-ingest-period fold (the only materialization path; the batch
+    -- TRUNCATE-rebuild is removed by design). NULL = fold all touched relations.
+    PERFORM incremental_consensus(NULL);
 
     SELECT rating INTO mu_conf  FROM consensus WHERE object_id = o_conf;
     SELECT rating INTO mu_ref   FROM consensus WHERE object_id = o_ref;

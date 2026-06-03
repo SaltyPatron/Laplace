@@ -91,7 +91,6 @@ internal static class Program
                 "roundtrip"    => Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
                 "db-roundtrip" => await DbRoundtripAsync(args.Length > 1 ? args[1] : ""),
                 "stats"        => await StatsAsync(),
-                "rebuild-consensus" => await RebuildConsensusAsync(),
                 "qk-bench"     => QkBenchCmd(args.Length > 1 ? args[1] : ""),
                 "svd-exact-bench" => SvdExactBenchCmd(args[1..]),
                 "beta-probe"   => BetaProbeCmd(args[1..]),
@@ -110,33 +109,26 @@ internal static class Program
 
     private static int Fail(string m) { Console.Error.WriteLine(m); return 2; }
 
-    // Materialize the consensus layer from the attestations evidence (S2).
-    // Called after ingestion so cross-witness consensus is current before
-    // inference / synthesis reads it. Batch rebuild via laplace.rebuild_consensus().
-    private static async Task<int> RebuildConsensusAsync()
-    {
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
-        await using var conn = await ds.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 0;  // batch Glicko-2 accumulation over all evidence can exceed the 30s default
-        cmd.CommandText = "SELECT laplace.rebuild_consensus()";
-        var n = (long)(await cmd.ExecuteScalarAsync() ?? 0L);
-        Console.WriteLine($"consensus rebuilt: {n:N0} rows");
-        return 0;
-    }
-
     // Incrementally materialize consensus for relations TOUCHED this ingest period
     // (decision #3 / L3): re-accumulate Glicko-2 for every relation whose evidence
-    // landed since `since`, in place (INSERT … ON CONFLICT DO UPDATE, no TRUNCATE).
-    // This is the per-ingest-period path the law requires — consensus accumulates AT
-    // INGEST, never via the batch rebuild_consensus (disaster-recovery only).
-    private static async Task<long> MaterializeConsensusSinceAsync(NpgsqlDataSource ds, DateTimeOffset since)
+    // landed since the WATERMARK, in place (INSERT … ON CONFLICT DO UPDATE, no
+    // TRUNCATE). The period boundary is the substrate's own watermark —
+    // max(consensus.last_observed_at), the newest evidence ever folded — NOT the
+    // current run's start time: a killed run leaves evidence older than any later
+    // run's start, and a start-time window would orphan it forever. The watermark
+    // window self-heals: the next completed period folds everything unfolded.
+    // Empty consensus → NULL → fold all touched relations (correct first fold).
+    // This is the per-ingest-period path the law requires — consensus accumulates
+    // AT INGEST, never via a batch pass. (The TRUNCATE-and-replay
+    // rebuild_consensus and its CLI command were removed by design; backfill/
+    // drain over the evidence set is forbidden on this substrate.)
+    private static async Task<long> MaterializeConsensusPeriodAsync(NpgsqlDataSource ds)
     {
         await using var conn = await ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 0;  // Glicko-2 accumulation over touched relations can exceed the 30s default
-        cmd.CommandText = "SELECT laplace.incremental_consensus($1)";
-        cmd.Parameters.AddWithValue(since);
+        cmd.CommandText = "SELECT laplace.incremental_consensus("
+                        + "(SELECT max(last_observed_at) FROM laplace.consensus))";
         return (long)(await cmd.ExecuteScalarAsync() ?? 0L);
     }
 
@@ -430,13 +422,19 @@ internal static class Program
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
 
-        /* Check if this model source is already ingested — COMPLETES_TO attestations
-         * (the FFN/OV key→value memories) only exist after the weight phase completes.
-         * MUST be a kind the current ingest actually emits: the corrected path emits
-         * COMPLETES_TO (not Q_PROJECTS — the old per-circuit bilinear kind), so the
-         * guard keys on COMPLETES_TO. This is what makes re-ingest short-circuit instead
-         * of hammering the DB with a second full ingest. Same attestation ID = same
-         * content = ON CONFLICT DO NOTHING, so re-running is safe but wasteful. */
+        var dec = new ModelDecomposer(modelDir);
+
+        /* Re-ingest guard — keys on the COMPLETION MARKER (the HasLayerCompleted
+         * attestation IngestRunner writes ONLY when a run finishes with zero
+         * failures), NOT on partial evidence presence. Marker present = the model
+         * fully ingested → a re-run is refused (it would double-count its votes
+         * and contaminate consensus). Marker ABSENT with partial evidence = a
+         * killed/crashed run → the re-run proceeds as lawful idempotent
+         * CONTINUATION: landed rows dedup away (content-addressed ids), novel
+         * work continues, and the period fold at the end covers everything since
+         * the consensus watermark — including the killed run's window. The old
+         * COMPLETES_TO-presence guard locked a crashed ingest out permanently,
+         * leaving nuke-to-reingest (forbidden) as the only exit. */
         var (modelSource, modelName) = ModelDecomposer.SourceForModel(modelDir);
         await using (var chkConn = await ds.OpenConnectionAsync())
         {
@@ -445,11 +443,11 @@ internal static class Program
                 "SELECT EXISTS(SELECT 1 FROM laplace.attestations " +
                 "WHERE source_id = $1 AND kind_id = $2 LIMIT 1)";
             chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = modelSource.ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
-            chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = ModelDecomposer.CompletesToKind.ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
+            chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = Laplace.Ingestion.LayerCompletion.KindId(dec.LayerOrder).ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
             bool alreadyIngested = (bool)(await chkCmd.ExecuteScalarAsync() ?? false);
             if (alreadyIngested)
             {
-                // Re-ingesting the same model would double-count its votes and
+                // Completed model: re-ingesting would double-count its votes and
                 // contaminate consensus, so it is refused by design. To re-run
                 // (e.g. testing), reset the DB: `just db-fresh` (nuke + migrate +
                 // seed-t0). There is intentionally no in-place override.
@@ -464,7 +462,6 @@ internal static class Program
         var reader = new NpgsqlSubstrateReader(ds);
         var loggerFactory = ConsoleLoggerProvider.Factory();
         var runner = new IngestRunner(writer, reader, loggerFactory);
-        var dec    = new ModelDecomposer(modelDir);
 
         // Model ingestion is mechanical and embarrassingly parallel: thousands
         // of weight-tensor intents. Two levers, both env-tunable (same
@@ -488,7 +485,6 @@ internal static class Program
         // Throughput knobs (env-tunable, documented above) + human-valued progress are
         // built once in BuildIngestOptions — the SAME path the corpus decomposers use.
         Console.WriteLine($"ingest model {modelDir} via IngestRunner → {ConnString} ...");
-        var since = DateTimeOffset.UtcNow;   // per-ingest-period window for incremental consensus
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(
             dec,
@@ -509,7 +505,7 @@ internal static class Program
                 Console.Error.WriteLine($"  {f}");
             return 1;
         }
-        var touched = await MaterializeConsensusSinceAsync(ds, since);
+        var touched = await MaterializeConsensusPeriodAsync(ds);
         Console.WriteLine($"consensus: {touched:N0} relations materialized (incremental, per-ingest-period)");
         return 0;
     }
@@ -1440,7 +1436,6 @@ internal static class Program
         // the row-by-row floor, NOT index maintenance; BuildIngestOptions sets CommitRows so
         // intents coalesce into ~100k-row bulk-COPY transactions.
         Console.WriteLine($"ingest {dec.SourceName} via IngestRunner → {ConnString} ...");
-        var since = DateTimeOffset.UtcNow;   // per-ingest-period window for incremental consensus
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(
             dec,
@@ -1459,7 +1454,7 @@ internal static class Program
             Console.Error.WriteLine($"failures: {result.Failures.Count}");
             return 1;
         }
-        var touched = await MaterializeConsensusSinceAsync(ds, since);
+        var touched = await MaterializeConsensusPeriodAsync(ds);
         Console.WriteLine($"consensus: {touched:N0} relations materialized (incremental, per-ingest-period)");
         await PrintCountsAsync(ds);
         return 0;

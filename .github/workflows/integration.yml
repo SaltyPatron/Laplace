@@ -14,6 +14,15 @@ on:
         type: boolean
         default: false
 
+# Serialize integration runs and cancel superseded ones: a new push to main cancels any
+# in-flight integration run instead of stacking another ~1.5h run behind it on the single
+# self-hosted runner + shared cluster (the force-push pile-up). Safe to cancel — db-deploy
+# nukes + re-seeds at the start of every run and ingestion is idempotent by content-
+# addressing, so a cancelled half-run leaves nothing a fresh run can't redo.
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

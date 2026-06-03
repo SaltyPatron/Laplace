@@ -1,24 +1,34 @@
 name: Set up Laplace build/runtime env
 description: >
-  Source the Intel oneAPI toolchain and export the oneAPI vars + Laplace runtime
-  env (LD_LIBRARY_PATH for the engine .so, T0 perf-cache path) into $GITHUB_ENV so
-  every subsequent step in the job inherits them. Replaces the per-job copy-pasted
-  "Source oneAPI env" block.
+  Export the WORKSPACE-relative runtime env (build-tree LD_LIBRARY_PATH prepend
+  for the engine .so) into $GITHUB_ENV. The MACHINE-static oneAPI environment
+  (MKLROOT/TBBROOT/CPATH/… + the oneAPI LD_LIBRARY_PATH) is injected into every
+  job by the runner's own .env file — written once by the bootstrap managed
+  block (scripts/bootstrap-laplace-runner.sh: bootstrap_runner_job_env) — so
+  jobs do NOT re-source setvars.sh. A conditional fallback below covers runners
+  bootstrapped before that block existed. The T0 perf-cache needs no env at
+  all: the CLI discovers it (env override → /opt/laplace/share/laplace →
+  build-tree walk-up; Laplace.Cli ResolveBlob).
 
 runs:
   using: composite
   steps:
-    - name: Source oneAPI + export build/runtime env
+    - name: Export workspace env (+ oneAPI fallback for pre-.env runners)
       shell: bash
       run: |
-        # oneAPI setvars trips unset-var checks — relax `-u` only across the source.
-        set +u
-        source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
-        set -u
-        # GH Actions runs each step in a fresh shell; persist what the toolchain set.
-        printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
-        echo "PATH=$PATH" >> "$GITHUB_ENV"
-        # Engine libs (core/dynamics/synthesis) ahead of the oneAPI libs, + the T0
-        # perf-cache the CLI/migrations/tests mmap. $PWD is the repo root post-checkout.
-        echo "LD_LIBRARY_PATH=$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
-        echo "LAPLACE_PERFCACHE_BIN=$PWD/build/engine/core/perfcache/laplace_t0_perfcache.bin" >> "$GITHUB_ENV"
+        # Fallback ONLY: if the runner's .env managed block hasn't provided
+        # the toolchain env (pre-managed-block runner), source setvars here.
+        # setvars trips unset-var checks — relax `-u` only across the source.
+        if [ -z "${MKLROOT:-}" ]; then
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+        else
+          # Workspace-relative prepend: engine libs (core/dynamics/synthesis)
+          # ahead of the oneAPI libs the runner .env provided. $PWD is the
+          # repo root post-checkout.
+          echo "LD_LIBRARY_PATH=$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+        fi

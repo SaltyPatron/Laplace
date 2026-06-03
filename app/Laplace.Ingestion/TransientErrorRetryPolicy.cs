@@ -54,28 +54,33 @@ public sealed record TransientErrorRetryPolicy(
 
     private static bool DefaultIsTransient(Exception ex)
     {
-        if (ex is TimeoutException) return true;
-        if (ex is global::Npgsql.PostgresException pg)
+        // Walk the inner-exception chain. A transient DB fault can arrive WRAPPED:
+        // e.g. the cluster is restarted mid-transaction, the backend connection is
+        // killed (57P01), and the best-effort rollback on the now-dead connection
+        // throws ObjectDisposedException carrying the real PostgresException as
+        // InnerException. Classifying only the outermost exception (the old behaviour)
+        // missed it → the purpose-built class-57 retry never fired and the run aborted.
+        // Treat the error as transient if ANY link in the chain is transient.
+        for (Exception? e = ex; e is not null; e = e.InnerException)
         {
-            // SQLSTATE class: first 2 chars
-            //   08 — connection_exception
-            //   53 — insufficient_resources
-            //   57 — operator_intervention (e.g. admin_shutdown)
-            //   58 — system_error
-            //   40 — transaction_rollback (40001 serialization_failure,
-            //        40P01 deadlock_detected) — expected under concurrent
-            //        ingestion of shared content; retrying the aborted txn
-            //        succeeds once the other writer commits.
-            return pg.SqlState is { Length: >= 2 } s &&
-                   (s.StartsWith("08", StringComparison.Ordinal)
+            if (e is TimeoutException) return true;
+            // PostgresException with a transient SQLSTATE class (first 2 chars):
+            //   08 connection_exception · 53 insufficient_resources
+            //   57 operator_intervention (e.g. admin_shutdown / cluster restart)
+            //   58 system_error · 40 transaction_rollback (40001 serialization,
+            //   40P01 deadlock — expected under concurrent ingestion of shared content).
+            if (e is global::Npgsql.PostgresException pg
+                && pg.SqlState is { Length: >= 2 } s
+                && (s.StartsWith("08", StringComparison.Ordinal)
                  || s.StartsWith("40", StringComparison.Ordinal)
                  || s.StartsWith("53", StringComparison.Ordinal)
                  || s.StartsWith("57", StringComparison.Ordinal)
-                 || s.StartsWith("58", StringComparison.Ordinal));
+                 || s.StartsWith("58", StringComparison.Ordinal)))
+                return true;
+            // Connection-level Npgsql faults (not Postgres SQLSTATE errors) are transient.
+            if (e is global::Npgsql.NpgsqlException && e is not global::Npgsql.PostgresException)
+                return true;
         }
-        // Connection-level Npgsql exceptions surface as NpgsqlException
-        if (ex is global::Npgsql.NpgsqlException && ex is not global::Npgsql.PostgresException)
-            return true;
         return false;
     }
 }

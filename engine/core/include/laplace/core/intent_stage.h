@@ -151,6 +151,18 @@ size_t intent_stage_emit_copy_binary(
     uint8_t*              buf,
     size_t                buf_capacity);
 
+/* Direct pointer to a table's accumulated COPY-binary TUPLE bytes (the rows as
+ * serialized by the engine, WITHOUT the 19-byte header or 2-byte trailer — those
+ * are constant and framed by the caller). Lets the caller STREAM the engine's
+ * native serialization straight into a COPY socket instead of materializing the
+ * whole stage into one managed array. Sets *out_len to the tuple byte count;
+ * returns NULL (and *out_len = 0) for an empty/invalid table. The pointer is
+ * owned by the stage and stays valid until the next add / clear / free. */
+const uint8_t* intent_stage_tuple_ptr(
+    const intent_stage_t* stage,
+    intent_stage_table_t  table,
+    size_t*               out_len);
+
 #ifdef __cplusplus
 }
 #endif

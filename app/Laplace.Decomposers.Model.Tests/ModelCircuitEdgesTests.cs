@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Xunit;
 using Laplace.Decomposers.Model;
 using Laplace.Decomposers.Abstractions;
@@ -39,22 +40,22 @@ public class ModelCircuitEdgesTests
 
         var src = Hash128.OfCanonical("src/model");
         var witness = Hash128.OfCanonical("witness/l0h0");
-        var builder = new SubstrateChangeBuilder(src, "test/circuit", null, 0, 0, 16);
+        var witnessType = Hash128.OfCanonical("substrate/type/Witness/v1");
 
         // Left has 3 rows; emit over subjects 0..2 (pass vocab=3 for the left side via tileRows).
-        int n = ModelCircuitEdges.Emit(
+        // Emit now STREAMS bounded changes; aggregate their attestations for the assertions.
+        var atts = ModelCircuitEdges.Emit(
             left, right, /*vocab(objects)*/ V, r,
             "COMPLETES_TO", arenaScale: M, theta: theta, sourceTrust: 0.5,
-            tokenEntity: i => Tok(i), sourceId: src, witness: witness, builder, tileRows: 3);
+            tokenEntity: i => Tok(i), sourceId: src, witness: witness,
+            witnessType: witnessType, label: "test/circuit", tileRows: 3)
+            .SelectMany(c => c.Attestations).ToList();
 
-        Assert.Equal(expected.Count, n);
-
-        var change = builder.Build();
-        Assert.Equal(expected.Count, change.Attestations.Length);
+        Assert.Equal(expected.Count, atts.Count);
 
         Hash128 kind = KindRegistry.KindId("COMPLETES_TO");
         var seen = new HashSet<(int, int)>();
-        foreach (var a in change.Attestations)
+        foreach (var a in atts)
         {
             Assert.Equal(kind, a.KindId);
             Assert.Equal(witness, a.ContextId);
@@ -179,13 +180,14 @@ public class ModelCircuitEdgesTests
         double[] left  = { 2, 0,   0, 2,   1, 1 };
         double[] right = { 3, 0,   0, 1,  -2, 0,   1, 1 };
         var src = Hash128.OfCanonical("src/model");
-        var b1 = new SubstrateChangeBuilder(src, "t", null, 0, 0, 16);
-        var b2 = new SubstrateChangeBuilder(src, "t", null, 0, 0, 16);
+        var witnessType = Hash128.OfCanonical("substrate/type/Witness/v1");
 
         int lo = ModelCircuitEdges.Emit(left, right, 4, 2, "COMPLETES_TO", 2.0, 1.5, 0.5,
-                                        i => Tok(i), src, Hash128.Zero, b1, 3);
+                                        i => Tok(i), src, Hash128.Zero, witnessType, "t", tileRows: 3)
+                                  .Sum(c => c.Attestations.Length);
         int hi = ModelCircuitEdges.Emit(left, right, 4, 2, "COMPLETES_TO", 2.0, 2.5, 0.5,
-                                        i => Tok(i), src, Hash128.Zero, b2, 3);
+                                        i => Tok(i), src, Hash128.Zero, witnessType, "t", tileRows: 3)
+                                  .Sum(c => c.Attestations.Length);
         // θ=2.5 keeps only |m|>2.5: (0,2,-4) (2,0,3) → 2; θ=1.5 keeps 5. Monotone.
         Assert.Equal(5, lo);
         Assert.Equal(2, hi);
