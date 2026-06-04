@@ -477,6 +477,56 @@ bootstrap_runner_job_env() {
     green "✓ runner .env oneAPI block written (service restarted to load it)"
 }
 
+bootstrap_runner_model_env() {
+    # Machine-static model snapshot dirs → the runner's .env (same channel as
+    # the oneAPI block above). model-pipeline.yml resolves its model dir as
+    # ${MODEL_DIR_INPUT:-$LAPLACE_TINYLLAMA_DIR} — workflow input wins, else
+    # THIS convention; with neither set the ingest rung dies on a missing
+    # argument (run 26965821821, 2026-06-04: exit 2 at 18:57:21Z). Paths are
+    # RESOLVED HERE at bootstrap time — newest snapshot that actually carries
+    # weights, same rule as scripts/e2e-substrate.sh newest_snapshot — never
+    # a hardcoded snapshot SHA in source. Re-run the bootstrap after pulling
+    # a new snapshot to refresh the values.
+    # Idempotent — same begin/end marker pattern as the oneAPI block.
+    say "Runner job env: model snapshot dirs → $RUNNER_DIR/.env"
+    if [ ! -d "$RUNNER_DIR" ]; then
+        yellow "runner dir missing — skipping model dirs .env block"
+        return 0
+    fi
+    newest_weighted_snapshot() { # <models--ORG--NAME glob under /vault/models>
+        local fam snap
+        for fam in /vault/models/$1; do
+            [ -d "$fam/snapshots" ] || continue
+            for snap in $(ls -t "$fam/snapshots" 2>/dev/null); do
+                if ls "$fam/snapshots/$snap"/*.safetensors >/dev/null 2>&1; then
+                    echo "$fam/snapshots/$snap"; return 0
+                fi
+            done
+        done
+        return 1
+    }
+    local tiny phi
+    tiny="$(newest_weighted_snapshot 'models--TinyLlama--TinyLlama-1.1B-Chat-v1.0' || true)"
+    phi="$(newest_weighted_snapshot 'models--microsoft--phi-2' || true)"
+    [ -n "$tiny" ] || yellow "  no TinyLlama snapshot with weights under /vault/models — LAPLACE_TINYLLAMA_DIR not written"
+    [ -n "$phi" ]  || yellow "  no phi-2 snapshot with weights under /vault/models — LAPLACE_PHI2_DIR not written"
+    local marker_begin="# >>> laplace-runner managed: model dirs job env >>>"
+    local marker_end="# <<< laplace-runner managed: model dirs job env <<<"
+    local envfile="$RUNNER_DIR/.env"
+    touch "$envfile"
+    sed -i -e "/$marker_begin/,/$marker_end/d" "$envfile"
+    {
+        echo "$marker_begin"
+        [ -n "$tiny" ] && echo "LAPLACE_TINYLLAMA_DIR=$tiny"
+        [ -n "$phi" ]  && echo "LAPLACE_PHI2_DIR=$phi"
+        echo "$marker_end"
+    } >> "$envfile"
+    chown "$RUNNER_USER:$RUNNER_GROUP" "$envfile"
+    # The runner reads .env at service start — restart to apply.
+    systemctl restart "$RUNNER_SERVICE" 2>/dev/null || true
+    green "✓ runner .env model dirs block written (service restarted to load it)"
+}
+
 bootstrap_runner_service() {
     say "Install + start systemd service ($RUNNER_USER)"
     local unit_file="/etc/systemd/system/$RUNNER_SERVICE"
@@ -1447,6 +1497,7 @@ do_bootstrap() {
     bootstrap_runner_register
     bootstrap_runner_service
     bootstrap_runner_job_env
+    bootstrap_runner_model_env
 
     # ld.so.cache must list /opt/laplace/{geos,proj,gdal}/lib BEFORE our
     # substrate cluster starts — otherwise the postgres binary forks
