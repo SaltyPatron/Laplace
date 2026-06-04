@@ -149,7 +149,9 @@ There is **one** kind of object: a content-addressed entity (BLAKE3-128 Merkle i
 - **Atoms** (codepoints) are points on S³.
 - **Composites** (graphemes → words → sentences → documents) are **trajectories** through their
   constituents' points: `physicalities.trajectory` (GeometryZM), where each vertex packs a
-  constituent's entity_id; `id = merkle(tier, [child_ids])`; `coord = centroid(child coords)`;
+  constituent's entity_id; `id = merkle([child_ids])` — **tier is decomposition metadata, never
+  identity** (the same ordered constituent set at two strata is ONE entity);
+  `coord = centroid(child coords)`;
   `radius_origin` = ‖coord‖ = the norm of the centroid of the children. **Atoms sit exactly on the
   sphere (radius 1.0); composites fall inside it (< 1.0)** — a composite's coord is the average of its
   constituents' points, which pulls toward the interior.
@@ -196,11 +198,15 @@ trajectory (§4).
 
 Evidence and consensus are two layers, not one.
 
-- **Evidence** — the individual observations. Each is a single witness asserting a relation, with
-  **full provenance**: which source, which model **layer / head / position**, what magnitude, when.
-  (WordNet asserting `dog is_a noun`; Llama's layer-1-head-5 observing `King → Queen` at strength s.)
-  Evidence is provenance-rich and powers interpretability (§2), auditing, and the embed species (§8).
-  It is deduplicated / run-length-encoded — not stored naively N times — while **retaining** provenance.
+- **Evidence IS provenance** — the record of WHO witnessed: which source, which model
+  **layer / head**, when, how many games, and whether it confirmed or refuted (the outcome CLASS).
+  It is **never a value channel**: the witness's magnitude is testimony, consumed into the consensus
+  match AT INGEST and not persisted — storing a per-witness score that is invertible to the weight
+  is recording raw weights wearing the evidence layer as a costume. (WordNet asserting
+  `dog is_a noun`; Llama's layer-1-head-5 having witnessed `King → Queen`, confirming.) Evidence
+  powers interpretability (§2 — GROUP BY over *which relations* a head witnessed), auditing of *who
+  dissented*, and the embed species (§8). It is deduplicated / run-length-encoded — not stored
+  naively N times — while **retaining** provenance.
 - **Attestation = consensus.** An attestation is the **materialized** Glicko-2 consensus over all
   evidence for a given `(subject, kind, object[, context])` — **one row**, with source / layer / head
   **out** of the identity. This is what inference reads — directly, no joins.
@@ -320,28 +326,43 @@ matmuls / softmax / norm whether the tokens are text, pixels, audio, DNA, or che
 enters only at the input embedding and the output unembedding. A tensor *is* the operation it
 performs, and that operation, read back through the embedding, *is* a relationship between content.
 
-### Every interior tensor is a token×token bilinear circuit through the embedding
+### Ingest is the ETL of the model's own lookup tables ("ETL on conventional AI, for AI")
 
-The weights encode relationships between content (tokens), recovered by reading each tensor's fixed
-bilinear form back into token space via the embedding `E` (and unembedding `E_U`). This is the
-QK/OV-circuit + FFN-as-key-value-memory decomposition:
+A weight tensor IS a table: a flattened 2D lookup whose every cell was already computed by
+training. Ingest reads the source system's tables AT REST — it never runs the source's
+application logic (no forward pass, no probes, no GEMM):
 
-- **QK circuit** (Wq, Wk): `score(i,j) = E·Wq·Wkᵀ·Eᵀ` — token *i* attends to token *j*. A token×token
-  relation (pre-softmax compatibility).
-- **OV circuit** (Wv, Wo): `E·Wv·Wo·E_Uᵀ` — attending to token *i* shifts the prediction toward token
-  *j*. **One** token×token relation from V and O together — not two per-token scalars.
-- **FFN memory** (up/gate = keys, down = values): `(E·Wup)·(E_U·Wdown)ᵀ` — an input token fires the
-  neurons that write toward an output token.
-- **embed_tokens / lm_head** = `E` and `E_U` themselves → **Projection physicalities** (per-token
-  *placements*), not relations; they are the sandwich the bilinears are read through.
-- **norms** → recipe scaling.
+- **EXTRACT** — stream the cells, O(params), exact and deterministic.
+- **TRANSFORM** — key resolution only. The hidden dims are the source's **surrogate keys**;
+  `embed_tokens`/`lm_head` are the source's own **key-mapping tables** to the natural keys
+  (tokens/content). "Running through the embedding" (dots/cosine) is the resolution join —
+  bounded, never a vocab² materialization. Token-anchored axes are literal lookups.
+- **LOAD** — adjudication: each cell is one signed Glicko match under its **tensor-role kind**
+  (the fixed vocabulary: `EMBEDS, Q_PROJECTS, K_PROJECTS, V_PROJECTS, O_PROJECTS, GATES,
+  UP_PROJECTS, DOWN_PROJECTS, NORMALIZES, OUTPUT_PROJECTS`). Value consumed into μ; zero = the
+  only non-event; tiny = a draw by math; negative = a loss.
+- **POSITIONS AGGREGATE.** Layers/heads are *positions* of the same logical table: relation
+  identity excludes position; each position is another **witness** (games / circuit instance in
+  evidence context). Per-position attribution is **recipe content**, never per-attestation
+  schema; no synthetic per-position entities. Consequence — **records are bounded by the SCHEMA
+  SHAPE** (vocab×d_model, d_model², d_model×interm: ~10 logical tables), never by depth or
+  parameter count: a deeper model adds games on the same rows. Records < parameters, always.
+- **embed_tokens / lm_head** additionally → **Projection physicalities** (per-token *placements*,
+  the embed species); **norms** → recipe scaling.
 
-**Nonlinearities are runtime, never attested.** Softmax, SiLU/GELU, and the SwiGLU gate (`gate ⊙ up`)
-are *data-dependent* — they depend on the actual input at inference — so ingest records only the
-**static** bilinear structure each weight imposes; the gating/normalization is applied at
-query/generation time. Collapsing a tensor to a **per-token magnitude scalar** (the prior code)
-destroys the relation by reducing the dim axis to one number — that is the thing this replaces, and
-it is non-negotiable: never magnitude.
+**The token×token bilinear is the READ, composed at query time.** What a chain of cells *means* —
+**QK** `E·Wq·Wkᵀ·Eᵀ` (token *i* attends to token *j*), **OV** `E·Wv·Wo·E_Uᵀ` (one relation from V
+and O together), **FFN** `(E·Wup)·(E_U·Wdown)ᵀ` (key→value memory) — is recovered by **μ-ranked
+multi-hop joins** over the loaded tables (`EMBEDS → interior kinds → OUTPUT_PROJECTS`; the §2
+traversal). Conventional AI re-computes this as matmul on every query; the substrate looks it up.
+Materializing the bilinear at ingest is **pre-joining the star schema** — the ETL anti-pattern
+that produced a 21-billion-row write from a 1.1-billion-parameter model, and it is banned.
+
+**Nonlinearities are the source's runtime, never attested and never run at ingest.** Softmax,
+SiLU/GELU, the SwiGLU gate are data-dependent application logic; at the substrate's own runtime
+the ranked-μ traversal policy plays their role. Collapsing a tensor row to a **per-token
+magnitude scalar** destroys the relation by reducing the dim axis to one number — the cardinal
+sin: never magnitude.
 
 ### A model says nothing the seed corpora can't
 
@@ -387,7 +408,8 @@ A decomposer turns a source (a corpus, a standard, a model) into **content-addre
 attestations** — witnesses, never identities (§3). One contract binds every decomposer, seed corpus
 and model alike:
 
-- **Content-address everything.** Identity is `merkle(tier, [child_ids])` over the content, computed
+- **Content-address everything.** Identity is `merkle([child_ids])` over the content (tier is
+  decomposition metadata, never identity), computed
   identically for every source, so the *same* word / sentence / relation from two sources is the
   *same entity* — convergence is automatic at the identity layer.
 - **Bind at the natural tier.** A lone word attests on its word entity, not a wrapping document
@@ -435,14 +457,13 @@ and model alike:
   `alignment_residual`, `source_dim`, `observed_at`. `UNIQUE(entity_id, source_id, kind)`. Content
   physicality (kind 1) is singular/structural; Projection (kind 3/4) is the per-model embed species
   (§8).
-- **`laplace.attestations`** — the per-witness **evidence** layer: one Glicko-2 OBSERVATION per
-  witness, never accumulated state. `id` (BLAKE3 of the 5-tuple), `subject_id`, `kind_id`,
-  `object_id?`, `source_id`, `context_id?`, `score` (the ½(1+tanh(m/M)) outcome), `opponent_rd`
-  (witness weight → opponent φ), `arena_m` (the per-arena M actually used — audit),
-  `last_observed_at`, `observation_count` (int64 fixed-point ×1e9).
-  `UNIQUE NULLS NOT DISTINCT (subject,kind,object,source,context)` — **source IN the identity**, full
-  provenance retained (model layer/head in `context_id`). The accumulated `rating`/`rd`/`volatility`
-  live ONLY on `consensus`.
+- **`laplace.attestations`** — the per-witness **evidence** layer: PROVENANCE, never values.
+  `id` (BLAKE3 of the 5-tuple), `subject_id`, `kind_id`, `object_id?`, `source_id`, `context_id?`
+  (model layer/head witness), `outcome` (confirm / draw / refute — the dissent record, a class,
+  never a magnitude), `last_observed_at`, `observation_count`.
+  `UNIQUE NULLS NOT DISTINCT (subject,kind,object,source,context)` — **source IN the identity**.
+  The witness's magnitude is consumed into the consensus accumulation AT INGEST (§6 matchup) and
+  is not persisted; the accumulated `rating`/`rd`/`volatility` live ONLY on `consensus`.
 - **`laplace.consensus`** — the materialized **consensus** layer (§6): one signed Glicko-2 row per
   `(subject, kind, object)`, **source AND context (model layer/head) OUT of identity** — both are
   witnesses, never identity. `id` (BLAKE3 of the 3-tuple), `rating`/`rd`/`volatility`,

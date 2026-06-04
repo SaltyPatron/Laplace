@@ -36,12 +36,12 @@ static const char* const kPhysicalityColumns =
     "n_constituents, alignment_residual, source_dim, observed_at";
 static const char* const kAttestationColumns =
     "id, subject_id, kind_id, object_id, source_id, context_id, "
-    "score, opponent_rd, arena_m, last_observed_at, observation_count";
+    "outcome, last_observed_at, observation_count";
 
 /* Per-table column count (matches the field_count int16 prefix in each tuple). */
 #define ENTITY_COL_COUNT       4
 #define PHYSICALITY_COL_COUNT 11
-#define ATTESTATION_COL_COUNT 11
+#define ATTESTATION_COL_COUNT  9
 
 /* === Growable byte buffer === */
 
@@ -324,17 +324,16 @@ int intent_stage_add_attestation(
     const hash128_t* object_id,
     const hash128_t* source_id,
     const hash128_t* context_id,
-    int64_t          score,
-    int64_t          opponent_rd,
-    int64_t          arena_m,
+    int16_t          outcome,
     int64_t          last_observed_at_unix_us,
     int64_t          observation_count) {
     if (!stage || !id || !subject_id || !kind_id || !source_id) return -1;
     if (observation_count < 0) return -1;
-    /* Evidence row = one Glicko-2 OBSERVATION (a match the relation plays vs a
-     * neutral baseline): score ∈ (0,1) from ½(1+tanh(signed_m/M)), opponent_rd
-     * from witness trust→φ, arena_m = the per-arena scale M (audit). rating/rd/
-     * volatility (the accumulated state) live on consensus, not here. */
+    if (outcome < 0 || outcome > 2) return -1;
+    /* Evidence row = PROVENANCE: who witnessed which relation, when, how many
+     * games, and the dissent record as a CLASS (0=refute, 1=draw, 2=confirm) —
+     * never a magnitude. The witness's value is testimony, consumed into the
+     * consensus match at ingest; rating/rd/volatility live on consensus. */
     byte_buf_t* b = &stage->attestations;
 
     if (buf_append_be16(b, ATTESTATION_COL_COUNT) != 0) return -1;
@@ -352,9 +351,7 @@ int intent_stage_add_attestation(
     } else {
         if (buf_append_field_null(b) != 0) return -1;
     }
-    if (buf_append_field_int8(b, score) != 0) return -1;
-    if (buf_append_field_int8(b, opponent_rd) != 0) return -1;
-    if (buf_append_field_int8(b, arena_m) != 0) return -1;
+    if (buf_append_field_int2(b, outcome) != 0) return -1;
     if (buf_append_field_timestamptz(b, last_observed_at_unix_us) != 0) return -1;
     if (buf_append_field_int8(b, observation_count) != 0) return -1;
     b->row_count++;

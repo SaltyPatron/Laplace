@@ -90,11 +90,10 @@ public class IntentStageTests
         using var s = IntentStage.New(1);
         var h = Hash128.Zero;
         s.AddAttestation(h, h, h, /*object*/null, h, /*context*/null,
-            scoreFp1e9: 0, opponentRdFp1e9: 1, arenaMFp1e9: 1,
-            lastObservedAtUnixUs: 0, observationCount: 1);
+            outcome: 2, lastObservedAtUnixUs: 0, observationCount: 1);
         Assert.Equal(1, s.AttestationCount);
         var bytes = s.EmitCopyBinary(IntentStageTable.Attestations);
-        // After 19 header + 2 (field_count=11) + 3*(4+16) (id, subject, kind) = 81 bytes
+        // After 19 header + 2 (field_count=9) + 3*(4+16) (id, subject, kind) = 81 bytes
         // → next int32 BE should be -1 (object NULL)
         Assert.Equal(unchecked((uint)-1), ReadBe32(bytes.AsSpan(81, 4)));
     }

@@ -175,12 +175,17 @@ int laplacian_eigenmaps_from_sparse_graph(const int*    coo_rows,
     std::vector<Triplet> w_triplets;
     w_triplets.reserve(nnz);
     for (std::size_t e = 0; e < nnz; ++e) {
-        if (coo_weights[e] <= 0.0) continue;          /* drop non-positive - substrate noise floor is 0 */
+        /* Signed consensus folds in as |w|: a repel/refute edge is still a
+         * STRUCTURAL relation (the relation exists; its sign is the
+         * truth-state, which lives on the relation, not in the affinity).
+         * Dissent is never discarded — zero is the only non-event. */
+        const double w = std::fabs(coo_weights[e]);
+        if (w == 0.0) continue;
         const int r = coo_rows[e];
         const int c = coo_cols[e];
         if (r < 0 || c < 0) continue;
         if ((std::size_t)r >= n || (std::size_t)c >= n) continue;
-        w_triplets.emplace_back(r, c, coo_weights[e]);
+        w_triplets.emplace_back(r, c, w);
     }
 
     SpMat W(static_cast<int>(n), static_cast<int>(n));

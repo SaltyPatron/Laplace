@@ -138,11 +138,11 @@ public class NpgsqlSubstrateWriterTests
             .AddAttestation(new AttestationRow(
                 Id: H(4003), SubjectId: subjId, KindId: kindId,
                 ObjectId: null, SourceId: src, ContextId: null,
-                ScoreFp1e9: 1_000_000_000L,        // 1.0 (categorical confirm)
-                OpponentRdFp1e9: 30_000_000_000L,  // φ for full trust
-                ArenaMFp1e9: 0L,
+                Outcome: AttestationOutcome.Confirm,
                 LastObservedAtUnixUs: IntentStage.PgEpochUnixUs,
-                ObservationCount: 1L))
+                ObservationCount: 1L,
+                ScoreFp1e9: 1_000_000_000L,         // in-flight testimony (never persisted)
+                OpponentRdFp1e9: 30_000_000_000L))  // in-flight trust→φ (never persisted)
             .Build();
 
         var result = await writer.ApplyAsync(change);
@@ -179,8 +179,8 @@ public class NpgsqlSubstrateWriterTests
             .AddEntity(goodEntity, 0, typeId)
             .AddAttestation(new AttestationRow(
                 H(5002), missingSubject, kindId, null, src, null,
-                1_000_000_000L, 30_000_000_000L, 0L,
-                IntentStage.PgEpochUnixUs, 1))
+                AttestationOutcome.Confirm, IntentStage.PgEpochUnixUs, 1,
+                1_000_000_000L, 30_000_000_000L))
             .Build();
 
         var ex = await Assert.ThrowsAsync<SubstrateReferentialIntegrityException>(

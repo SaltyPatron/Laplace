@@ -258,8 +258,9 @@ e2e *models: build-app
 ingest-all: build-app
     scripts/ingest-source.sh all
 
+# Model dir by convention: $LAPLACE_TINYLLAMA_DIR (never a hardcoded snapshot SHA).
 ingest-tinyllama: build-app
-    scripts/ingest-source.sh model /vault/models/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0/snapshots/fe8a4ea1ffedaf415f4da2f062534de366a451e6
+    scripts/ingest-source.sh model "${LAPLACE_TINYLLAMA_DIR:?set LAPLACE_TINYLLAMA_DIR to the model snapshot dir}"
 
 # End-to-end decomposer audit: runs the lexical ladder on the current DB, asserts the seed
 # decomposers land CONTENT physicalities (not just attestations — the pre-fix regression),
@@ -279,35 +280,29 @@ cascade prompt:
 
 # === Synthesis ===
 
-# Generic synthesize entrypoint. `subcommand` is `substrate` (recipe-driven, from
-# substrate state) or `passthrough` (diagnostic real-weights transcode).
+# Generic synthesize entrypoint (`substrate` — re-export = fill the mold from
+# substrate consensus).
 # Usage:
 #   just synthesize substrate /path/to/recipe.json /tmp/out.gguf
-#   just synthesize passthrough /vault/models/<model-dir> /tmp/out.gguf
 synthesize subcommand *args: build-app
     cd app && LD_LIBRARY_PATH="$(pwd)/../build/engine/synthesis:$(pwd)/../build/engine/dynamics:$(pwd)/../build/engine/core:${LD_LIBRARY_PATH:-}" \
         dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- synthesize {{subcommand}} {{args}}
 
-# Substrate synthesis using the TinyLlama recipe as the mold.
-# Pours substrate attestation data into TinyLlama's shape (hidden=2048, 22 layers, etc).
+# Substrate synthesis using the TinyLlama recipe as the mold (model dir by
+# convention: $LAPLACE_TINYLLAMA_DIR — never a hardcoded snapshot SHA).
 # Pass a different recipe.json to export the same substrate data at a different dimension.
 synthesize-tinyllama output="/tmp/tinyllama-substrate.gguf": build-app
-    just synthesize substrate /vault/models/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0/snapshots/fe8a4ea1ffedaf415f4da2f062534de366a451e6/config.json {{output}}
+    just synthesize substrate "${LAPLACE_TINYLLAMA_DIR:?set LAPLACE_TINYLLAMA_DIR}/config.json" {{output}}
 
-# Convenience: diagnostic passthrough for TinyLlama (real-weights GGUF).
-synthesize-tinyllama-passthrough output="/tmp/tinyllama-passthrough.gguf": build-app
-    just synthesize passthrough /vault/models/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0/snapshots/fe8a4ea1ffedaf415f4da2f062534de366a451e6 {{output}}
+model-synthesize model_path:
+    scripts/model-synthesize.sh {{model_path}}
 
-roundtrip model_path:
-    scripts/roundtrip.sh {{model_path}}
-
-# Substrate synthesis CI: ingest model → attestations → synthesize from substrate → GGUF.
-# Tests the full pipeline: WeightTensorETL ingest, eigenmaps spectral basis, Procrustes
-# alignment, gram matrix materialization, GGUF output. Recipe-agnostic — the synthesis
-# target_dim comes from whatever recipe.json is passed, not from the ingested model shape.
-model-roundtrip-ci: build build-app
-    @chmod +x scripts/model-roundtrip-ci.sh
-    scripts/model-roundtrip-ci.sh
+# Substrate model CI: ingest model → evidence/consensus → synthesize from substrate → GGUF.
+# Recipe-agnostic — the synthesis target_dim comes from whatever recipe.json is passed,
+# not from the ingested model shape.
+model-synthesize-ci: build build-app
+    @chmod +x scripts/model-synthesize-ci.sh
+    scripts/model-synthesize-ci.sh
 
 # === Verify ===
 

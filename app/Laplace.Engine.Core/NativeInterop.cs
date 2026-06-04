@@ -201,12 +201,15 @@ public static unsafe partial class NativeInterop
         int sourceDimIsNull,         int    sourceDim,
         long observedAtUnixUs);
 
+    // Evidence is PROVENANCE: outcome is the dissent class (0=refute, 1=draw,
+    // 2=confirm), never a magnitude — the witness's value is consumed into the
+    // consensus accumulation at ingest and never persisted.
     [LibraryImport(Library, EntryPoint = "intent_stage_add_attestation")]
     internal static partial int IntentStageAddAttestation(
         IntPtr stage,
         Hash128* id, Hash128* subjectId, Hash128* kindId,
         Hash128* objectId, Hash128* sourceId, Hash128* contextId,
-        long rating, long rd, long volatility,
+        short outcome,
         long lastObservedAtUnixUs, long observationCount);
 
     [LibraryImport(Library, EntryPoint = "intent_stage_emit_copy_binary")]

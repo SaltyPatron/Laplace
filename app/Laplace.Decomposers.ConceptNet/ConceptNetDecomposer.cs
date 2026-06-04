@@ -28,41 +28,39 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
 
     private static readonly Hash128 LanguageTypeId = Hash128.OfCanonical("substrate/type/Language/v1");
 
-    private static Hash128 Kind(string n) => Hash128.OfCanonical($"substrate/kind/{n}/v1");
-    private static readonly Hash128 KindHasLanguage = Kind("HAS_LANGUAGE");
-    private static readonly Hash128 KindHasExample  = Kind("HAS_EXAMPLE");
-
-    // ConceptNet /r/Relation → (kind name, value tier).
-    private static readonly (string Cn, string Kind, double Tier)[] RelDefs =
+    // ConceptNet /r/Relation → kind NAME only. Rank / symmetry / direction-flip
+    // resolve through KindRegistry (the single source of truth for arena
+    // significance) at attest time — never locally. Names that are the same
+    // assertion as an existing arena are registry ALIASES (SIMILAR_TO →
+    // IS_SIMILAR_OF? no — IS_SIMILAR_TO; MADE_OF → HAS_SUBSTANCE; PartOf →
+    // IS_PART_OF → HAS_PART flipped).
+    private static readonly Dictionary<string, string> RelMap = new(StringComparer.Ordinal)
     {
-        ("RelatedTo", "RELATED_TO", KindRank.Associative), ("FormOf", "FORM_OF", KindRank.Equivalence),
-        ("IsA", "IS_A", KindRank.Taxonomic), ("PartOf", "IS_PART_OF", KindRank.Partitive),
-        ("HasA", "HAS_A", KindRank.Partitive), ("UsedFor", "USED_FOR", KindRank.Associative),
-        ("CapableOf", "CAPABLE_OF", KindRank.Associative), ("AtLocation", "AT_LOCATION", KindRank.Associative),
-        ("Causes", "CAUSES", KindRank.Causal), ("HasSubevent", "HAS_SUBEVENT", KindRank.Causal),
-        ("HasFirstSubevent", "HAS_FIRST_SUBEVENT", KindRank.Causal),
-        ("HasLastSubevent", "HAS_LAST_SUBEVENT", KindRank.Causal),
-        ("HasPrerequisite", "HAS_PREREQUISITE", KindRank.Causal),
-        ("HasProperty", "HAS_PROPERTY", KindRank.Associative),
-        ("MotivatedByGoal", "MOTIVATED_BY_GOAL", KindRank.Causal),
-        ("ObstructedBy", "OBSTRUCTED_BY", KindRank.Causal), ("Desires", "DESIRES", KindRank.Causal),
-        ("CreatedBy", "CREATED_BY", KindRank.Causal), ("Synonym", "IS_SYNONYM_OF", KindRank.Equivalence),
-        ("Antonym", "IS_ANTONYM_OF", KindRank.Oppositional), ("DistinctFrom", "DISTINCT_FROM", KindRank.Oppositional),
-        ("DerivedFrom", "DERIVED_FROM", KindRank.Equivalence), ("SymbolOf", "SYMBOL_OF", KindRank.Associative),
-        ("DefinedAs", "DEFINED_AS", KindRank.Equivalence), ("MannerOf", "MANNER_OF", KindRank.Partitive),
-        ("LocatedNear", "LOCATED_NEAR", KindRank.Associative), ("HasContext", "HAS_CONTEXT", KindRank.Associative),
-        ("SimilarTo", "SIMILAR_TO", KindRank.Equivalence),
-        ("EtymologicallyRelatedTo", "ETYMOLOGICALLY_RELATED_TO", KindRank.Equivalence),
-        ("EtymologicallyDerivedFrom", "ETYMOLOGICALLY_DERIVED_FROM", KindRank.Equivalence),
-        ("CausesDesire", "CAUSES_DESIRE", KindRank.Causal), ("MadeOf", "MADE_OF", KindRank.Partitive),
-        ("ReceivesAction", "RECEIVES_ACTION", KindRank.Associative), ("InstanceOf", "IS_INSTANCE_OF", KindRank.Taxonomic),
-        ("NotDesires", "NOT_DESIRES", KindRank.Oppositional), ("NotUsedFor", "NOT_USED_FOR", KindRank.Oppositional),
-        ("NotCapableOf", "NOT_CAPABLE_OF", KindRank.Oppositional), ("NotHasProperty", "NOT_HAS_PROPERTY", KindRank.Oppositional),
-        ("Entails", "ENTAILS", KindRank.Causal),
+        ["RelatedTo"] = "RELATED_TO",      ["FormOf"] = "FORM_OF",
+        ["IsA"] = "IS_A",                  ["PartOf"] = "IS_PART_OF",
+        ["HasA"] = "HAS_A",                ["UsedFor"] = "USED_FOR",
+        ["CapableOf"] = "CAPABLE_OF",      ["AtLocation"] = "AT_LOCATION",
+        ["Causes"] = "CAUSES",             ["HasSubevent"] = "HAS_SUBEVENT",
+        ["HasFirstSubevent"] = "HAS_FIRST_SUBEVENT",
+        ["HasLastSubevent"]  = "HAS_LAST_SUBEVENT",
+        ["HasPrerequisite"]  = "HAS_PREREQUISITE",
+        ["HasProperty"]      = "HAS_PROPERTY",
+        ["MotivatedByGoal"]  = "MOTIVATED_BY_GOAL",
+        ["ObstructedBy"] = "OBSTRUCTED_BY", ["Desires"] = "DESIRES",
+        ["CreatedBy"] = "CREATED_BY",       ["Synonym"] = "IS_SYNONYM_OF",
+        ["Antonym"] = "IS_ANTONYM_OF",      ["DistinctFrom"] = "DISTINCT_FROM",
+        ["DerivedFrom"] = "DERIVED_FROM",   ["SymbolOf"] = "SYMBOL_OF",
+        ["DefinedAs"] = "DEFINED_AS",       ["MannerOf"] = "MANNER_OF",
+        ["LocatedNear"] = "LOCATED_NEAR",   ["HasContext"] = "HAS_CONTEXT",
+        ["SimilarTo"] = "SIMILAR_TO",
+        ["EtymologicallyRelatedTo"]   = "ETYMOLOGICALLY_RELATED_TO",
+        ["EtymologicallyDerivedFrom"] = "ETYMOLOGICALLY_DERIVED_FROM",
+        ["CausesDesire"] = "CAUSES_DESIRE", ["MadeOf"] = "MADE_OF",
+        ["ReceivesAction"] = "RECEIVES_ACTION", ["InstanceOf"] = "IS_INSTANCE_OF",
+        ["NotDesires"] = "NOT_DESIRES",     ["NotUsedFor"] = "NOT_USED_FOR",
+        ["NotCapableOf"] = "NOT_CAPABLE_OF", ["NotHasProperty"] = "NOT_HAS_PROPERTY",
+        ["Entails"] = "ENTAILS",
     };
-
-    private static readonly Dictionary<string, (Hash128 Kind, double Tier)> RelMap =
-        RelDefs.ToDictionary(r => r.Cn, r => (Kind(r.Kind), r.Tier));
 
     public override Hash128 SourceId     => Source;
     public override string  SourceName   => "ConceptNetDecomposer";
@@ -74,9 +72,9 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddKind("HAS_EXAMPLE", KindRank.Partitive, SourceTrust.UserCuratedResource);
-        foreach (var (_, kindName, tier) in RelDefs)
-            boot.AddKind(kindName, tier, SourceTrust.UserCuratedResource);
+        boot.AddKind("HAS_EXAMPLE");
+        foreach (var kindName in RelMap.Values)
+            boot.AddKind(KindRegistry.Resolve(kindName).Canonical);
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -101,7 +99,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
             if (c.Length < 5) continue;
 
             string rel = c[1].StartsWith("/r/", StringComparison.Ordinal) ? c[1][3..] : c[1];
-            if (!RelMap.TryGetValue(rel, out var rk)) continue;
+            if (!RelMap.TryGetValue(rel, out var kindName)) continue;
             if (!ParseConcept(c[2], out string startTerm, out string startLang)) continue;
             if (!ParseConcept(c[3], out string endTerm, out string endLang)) continue;
 
@@ -119,22 +117,22 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
 
             (double weight, string? surface) = ParseMeta(c[4]);
 
-            b.AddAttestation(AttestationFactory.CreateWeighted(
-                startId.Value, rk.Kind, endId.Value, Source, null,
-                rk.Tier, SourceTrust.UserCuratedResource, magnitude: weight, floor: 1.0));
-            b.AddAttestation(AttestationFactory.Create(
-                startId.Value, KindHasLanguage, startLangId, Source, null,
-                KindRank.Partitive, SourceTrust.UserCuratedResource));
-            b.AddAttestation(AttestationFactory.Create(
-                endId.Value, KindHasLanguage, endLangId, Source, null,
-                KindRank.Partitive, SourceTrust.UserCuratedResource));
+            // ConceptNet edge weight is the signed magnitude (score ½(1+tanh(w/1)));
+            // rank / symmetry / direction resolve through the registry canon.
+            b.AddAttestation(KindRegistry.AttestWeighted(
+                startId.Value, kindName, endId.Value, Source, SourceTrust.UserCuratedResource,
+                magnitude: weight, arenaScale: 1.0));
+            b.AddAttestation(KindRegistry.Attest(
+                startId.Value, "HAS_LANGUAGE", startLangId, Source, SourceTrust.UserCuratedResource));
+            b.AddAttestation(KindRegistry.Attest(
+                endId.Value, "HAS_LANGUAGE", endLangId, Source, SourceTrust.UserCuratedResource));
             if (surface is not null)
             {
                 var sId = ContentEmitter.Emit(b, surface, Source);
                 if (sId is not null)
-                    b.AddAttestation(AttestationFactory.Create(
-                        startId.Value, KindHasExample, sId.Value, Source, endId.Value,
-                        KindRank.Partitive, SourceTrust.UserCuratedResource));
+                    b.AddAttestation(KindRegistry.Attest(
+                        startId.Value, "HAS_EXAMPLE", sId.Value, Source,
+                        SourceTrust.UserCuratedResource, contextId: endId.Value));
             }
 
             if (++n >= batch)

@@ -13,9 +13,10 @@ namespace Laplace.Decomposers.Model;
 /// Decomposition order (FK-dependency safe):
 ///   1. Bootstrap types + attestation kinds
 ///   2. Recipe entity + recipe-parameter attestations
-///   3. Token vocab entities (32K in batches)
-///   4. Tokenizer meta-entity
-///   5. Weight attestations: EMBEDS, Q_PROJECTS, then per-layer roles
+///   3. Tokenizer meta-entity, then token vocab entities (batched)
+///   4. Weight tables: the cell ETL (<see cref="ModelTableETL"/> — every
+///      non-zero cell = one adjudicated match under its tensor-role kind;
+///      positions aggregate as witnesses) + S³ placements (separate axis)
 /// </summary>
 public sealed class ModelDecomposer : IDecomposer
 {
@@ -74,27 +75,38 @@ public sealed class ModelDecomposer : IDecomposer
     // content-addressed entity, a tier above its constituents).
     public static readonly Hash128 NgramTypeId =
         Hash128.OfCanonical("substrate/type/Ngram/v1");
-    // Witness entities: per (layer, head) model provenance. Set as the attestation
-    // context_id so each layer/head's evidence is a distinct row (evidence keeps
-    // layer/head; consensus drops it). The model itself is the source; the witness
-    // is which circuit instance inside it observed the relation.
+    // Witness entities: per-position model provenance (role instance × layer).
+    // Set as the attestation context_id so each position's evidence is a distinct
+    // row (evidence keeps the position; consensus folds it). The model itself is
+    // the source; the witness is WHICH position inside it testified.
     public static readonly Hash128 WitnessTypeId =
         Hash128.OfCanonical("substrate/type/Witness/v1");
+    // Model-axis entities: the source's SURROGATE KEYS (residual channels,
+    // attention dims, kv dims, FFN neurons) — first-class join nodes of the
+    // cell ETL (SourceEntityIdConventions.ModelAxisEntity). Source-scoped;
+    // aligned cross-model by placements, never by index identity.
+    public static readonly Hash128 ModelAxisTypeId =
+        Hash128.OfCanonical("substrate/type/Model_Axis/v1");
 
     /* Attestation-kind vocabulary.
      *
-     * LIVE circuit kinds (emitted by EmitCircuitMemoriesAsync → ModelCircuitEdges):
-     *   ATTENDS / OV_RELATES / COMPLETES_TO — signed token×token bilinear-circuit
-     *   relations (QK / OV / FFN read through the embedding), each observation
-     *   carrying its (layer, head) Witness entity as context_id (evidence keeps
-     *   provenance; consensus drops it).
+     * THE TENSOR-ROLE KINDS (EMBEDS … OUTPUT_PROJECTS) are the LIVE arenas of
+     * the model ETL — the inventor's original fixed vocabulary (discussion #192
+     * §6, reconfirmed 2026-06-04: "ETL on conventional AI for AI"). One kind per
+     * logical table role; each cell loads as one signed Glicko match between its
+     * own endpoints; LAYERS/HEADS ARE POSITIONS of the same table and aggregate
+     * as witnesses (per-position attribution = recipe content). The token×token
+     * bilinear (QK/OV/FFN) is the QUERY-TIME read — μ-ranked joins across these
+     * arenas — never an ingest materialization. A prior session's smear of these
+     * kinds as "the disease" was the corruption vector; never re-bury them.
      *
-     * LEGACY per-tensor kinds (EMBEDS … OUTPUT_PROJECTS): the vocabulary of the
-     * dead per-cell-magnitude ExtractAsync path. Per-token magnitude reduction is
-     * banned — it destroys the relation by collapsing the dim axis to one number.
-     * They are bootstrapped only so existing rows keep resolving; they go when
-     * the dead path is deleted. Nonlinearities (softmax, SiLU/SwiGLU gating) are
-     * runtime, never attested. */
+     * ATTENDS / OV_RELATES / COMPLETES_TO are READ vocabulary — names for the
+     * query-time bilinear compositions — never ingest-written; the per-(i,j)
+     * pre-join emitter that wrote them (ModelCircuitEdges) is deleted.
+     *
+     * Per-token magnitude reduction (row → one scalar) stays the cardinal sin.
+     * Nonlinearities (softmax, SiLU/SwiGLU gating) are the source's runtime —
+     * never attested, never run at ingest. */
     public static readonly Hash128 EmbedsKind        = Hash128.OfCanonical("substrate/kind/EMBEDS/v1");
     public static readonly Hash128 QProjectsKind     = Hash128.OfCanonical("substrate/kind/Q_PROJECTS/v1");
     public static readonly Hash128 KProjectsKind     = Hash128.OfCanonical("substrate/kind/K_PROJECTS/v1");
@@ -158,6 +170,7 @@ public sealed class ModelDecomposer : IDecomposer
         boot.AddType("Architecture");
         boot.AddType("Ngram");
         boot.AddType("Witness");
+        boot.AddType("Model_Axis");
 
         /* Codepoint / Grapheme / Word / Sentence / Document type entities are
          * substrate-canonical text-tier types used by TextEntityBuilder for any
@@ -172,15 +185,11 @@ public sealed class ModelDecomposer : IDecomposer
          * `textTypeId` parameter). */
         boot.AddType("Text");
 
-        /* Model_Feature type removed — feature-dim entities were conventional-AI
-         * smuggling; the corrected decomposition emits PROJECTION physicalities for the
-         * token-axis tensors (embed_tokens, lm_head) and token×token typed
-         * attestations for interior tensors via the bilinear circuits. */
-
-        /* Kind vocabulary bootstrapped at first decomposer run. Live: the circuit
-         * kinds (ATTENDS / OV_RELATES / COMPLETES_TO) + TOKEN_MAPS_TO + the recipe
-         * kinds. Legacy per-tensor kinds (EMBEDS … OUTPUT_PROJECTS) belong to the
-         * dead per-cell-magnitude path and are kept only until it is deleted. */
+        /* Kind vocabulary bootstrapped at first decomposer run. LIVE arenas: the
+         * ten tensor-role kinds (EMBEDS … OUTPUT_PROJECTS — the cell ETL's load
+         * targets) + TOKEN_MAPS_TO + the recipe kinds. ATTENDS / OV_RELATES /
+         * COMPLETES_TO are read-side vocabulary for the query-time bilinear
+         * compositions — registered, never ingest-written. */
         boot.AddKind("EMBEDS");
         boot.AddKind("Q_PROJECTS");
         boot.AddKind("K_PROJECTS");
@@ -262,18 +271,22 @@ public sealed class ModelDecomposer : IDecomposer
         log.LogInformation("phase=vocab emitted: {Batches} batches ({Ms} ms)",
             vocabBatches, phaseSw.ElapsedMilliseconds);
 
-        /* 4. Weights. The model is a witness — interior circuits become signed
-         *    token×token attestations; the embedding becomes Projection physicality
-         *    placements on the shared Unicode S³ frame. */
-        var extractor = new WeightTensorETL(_modelDir, recipe, tokens, Source, WitnessTypeId, log);
+        /* 4. Weights — "ETL on conventional AI, for AI". The model is a witness;
+         *    its weight tables load as adjudicated matches under the ten
+         *    tensor-role kinds; the embedding additionally becomes Projection
+         *    physicality placements on the shared Unicode S³ frame. */
 
-        // 4a. The records: ALL interior circuits (QK→ATTENDS, OV→OV_RELATES, FFN→COMPLETES_TO),
-        //     each side projected through E / E_U once, contracted tile-by-tile
-        //     (ModelCircuitEdges → engine bilinear_edges_tile, exact f64) into signed
-        //     token×token observations, each carrying its (layer, head) witness as
-        //     context (evidence keeps provenance; consensus drops it).
-        log.LogInformation("phase=circuits starting (QK/OV/FFN per layer,head → [n-gram] ⇒ {{tokens}})");
-        await foreach (var change in extractor.EmitCircuitMemoriesAsync(ct))
+        // 4a. The records: stream every table's cells AT REST (O(params), exact —
+        //     no forward pass, no probe, no GEMM pre-join). Token axes resolve
+        //     through the model's own embed/lm_head key-mapping tables; hidden
+        //     axes are its surrogate keys (Model_Axis join nodes); positions
+        //     (layer instances) aggregate as witnesses in context_id. The
+        //     token×token bilinear (QK/OV/FFN) is the QUERY-TIME read across
+        //     these arenas — never materialized at ingest.
+        log.LogInformation("phase=etl starting (weight tables → adjudicated matches under tensor-role kinds)");
+        var etl = new ModelTableETL(_modelDir, recipe, tokens, Source,
+                                    WitnessTypeId, ModelAxisTypeId, log);
+        await foreach (var change in etl.EmitAsync(ct))
         {
             ct.ThrowIfCancellationRequested();
             yield return change;
@@ -293,7 +306,8 @@ public sealed class ModelDecomposer : IDecomposer
         else
         {
         log.LogInformation("phase=S3-morph starting (embed_tokens → Unicode S³ frame)");
-        await foreach (var change in extractor.EmitS3MorphAsync(ct))
+        var morph = new WeightTensorETL(_modelDir, recipe, tokens, Source, log);
+        await foreach (var change in morph.EmitS3MorphAsync(ct))
         {
             ct.ThrowIfCancellationRequested();
             yield return change;
@@ -302,7 +316,26 @@ public sealed class ModelDecomposer : IDecomposer
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(32000L + 22 * 9 + 4);
+    {
+        // Best-effort row estimate from the recipe's schema shapes — an upper
+        // bound (zero cells are non-events and emit nothing). Never hardcoded.
+        string configPath = Path.Combine(_modelDir, "config.json");
+        if (!File.Exists(configPath)) return Task.FromResult<long?>(null);
+        var r = LlamaRecipeExtractor.Parse(configPath);
+        var p = ArchitectureProfile.For(r.ModelType);
+        long d = r.HiddenSize, vocab = r.VocabSize, interm = r.IntermediateSize, L = r.NumLayers;
+        long headDim = d / r.NumHeads;
+        long attnOut = r.NumHeads * headDim, kvDim = (long)r.NumKvHeads * headDim;
+        long cells =
+              vocab * d                                   // EMBEDS
+            + vocab * d                                   // OUTPUT_PROJECTS (own table or tied)
+            + L * (2 * d * attnOut                        // Q + O
+                   + 2 * d * kvDim                        // K + V
+                   + (p.HasGate ? d * interm : 0)         // GATES
+                   + 2 * d * interm)                      // UP + DOWN
+            + (p.PerLayerNorms.Count * L + 1) * d;        // NORMALIZES
+        return Task.FromResult<long?>(vocab + cells);
+    }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

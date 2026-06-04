@@ -113,15 +113,17 @@ int intent_stage_add_physicality(
     int32_t             source_dim,
     int64_t             observed_at_unix_us);
 
-/* Add one attestations (EVIDENCE) row — one Glicko-2 observation.
+/* Add one attestations (EVIDENCE) row — PROVENANCE, never values.
  *   id, subject_id, kind_id, source_id — 16-byte hash128 (NOT NULL)
  *   object_id, context_id              — nullable; pass NULL to emit SQL NULL
- *   score        — ½(1+tanh(signed_m/M)) ∈ (0,1), int64 fixed-point ×1e9
- *   opponent_rd  — witness trust → Glicko φ (opponent precision), ×1e9
- *   arena_m      — per-arena magnitude scale M (audit/interpretability), ×1e9
+ *   outcome      — the dissent record as a CLASS, never a magnitude:
+ *                  0 = refute, 1 = draw, 2 = confirm
  *   last_observed_at_unix_us           — microseconds since Unix epoch
  *   observation_count                  — non-negative (occurrences = games)
- * The accumulated rating/rd/volatility live on consensus, not here.
+ * The witness's magnitude is testimony, CONSUMED into the consensus match at
+ * ingest and never persisted (a stored per-witness score is invertible to the
+ * weight — recording raw weights). The accumulated rating/rd/volatility live
+ * on consensus, not here.
  * Returns 0 on success, non-zero on OOM or invalid args. */
 int intent_stage_add_attestation(
     intent_stage_t*  stage,
@@ -131,9 +133,7 @@ int intent_stage_add_attestation(
     const hash128_t* object_id,
     const hash128_t* source_id,
     const hash128_t* context_id,
-    int64_t          score,
-    int64_t          opponent_rd,
-    int64_t          arena_m,
+    int16_t          outcome,
     int64_t          last_observed_at_unix_us,
     int64_t          observation_count);
 

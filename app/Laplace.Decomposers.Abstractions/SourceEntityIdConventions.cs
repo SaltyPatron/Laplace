@@ -32,6 +32,20 @@ public static class SourceEntityIdConventions
         Hash128.OfCanonical($"wordnet/synset/{pos}/{byteOffset}");
 
     /// <summary>
+    /// Canonical ID for one index of a model's internal axis — the source
+    /// system's SURROGATE KEYS (residual channels, attention dims, kv dims,
+    /// FFN neurons), first-class join nodes of the model ETL. Source-scoped by
+    /// convention (like WordNet synsets): the axis belongs to the model's
+    /// schema; cross-model alignment happens through placements (geometric
+    /// consensus), never by index identity. Positions (layers/heads) are NOT
+    /// part of the id — they aggregate as witnesses.
+    /// Formula: <c>BLAKE3("model/{sourceHex}/{space}/{index}")</c>,
+    /// space ∈ {channel, attn_dim, kv_dim, neuron}.
+    /// </summary>
+    public static Hash128 ModelAxisEntity(Hash128 modelSource, string space, int index) =>
+        Hash128.OfCanonical($"model/{modelSource.Hi:x16}{modelSource.Lo:x16}/{space}/{index}");
+
+    /// <summary>
     /// Canonical ID for a Tatoeba sentence. Formula:
     /// <c>BLAKE3("tatoeba/sentence/{sentenceId}")</c>.
     ///

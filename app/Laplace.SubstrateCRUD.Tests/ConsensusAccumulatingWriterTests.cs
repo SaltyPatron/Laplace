@@ -53,8 +53,12 @@ public class ConsensusAccumulatingWriterTests
     private static AttestationRow Obs(
         Hash128 id, Hash128 subj, Hash128 kind, Hash128? obj, Hash128 src,
         long score, long phi = PhiTrust, long games = 1, Hash128? ctx = null) =>
-        new(id, subj, kind, obj, src, ctx, score, phi, 0L,
-            LastObservedAtUnixUs: 1_770_000_000_000_000L, ObservationCount: games);
+        new(id, subj, kind, obj, src, ctx,
+            Outcome: score > 500_000_000L ? AttestationOutcome.Confirm
+                   : score < 500_000_000L ? AttestationOutcome.Refute
+                                          : AttestationOutcome.Draw,
+            LastObservedAtUnixUs: 1_770_000_000_000_000L, ObservationCount: games,
+            ScoreFp1e9: score, OpponentRdFp1e9: phi);
 
     private static SubstrateChange Change(Hash128 src, string unit, params AttestationRow[] rows) =>
         new(ImmutableArray<EntityRow>.Empty,
@@ -97,76 +101,82 @@ public class ConsensusAccumulatingWriterTests
         => Assert.InRange(actual, expected - KernelToleranceFp, expected + KernelToleranceFp);
 
     [Fact]
-    public async Task Production_MatchesResearchPathWithinKernelTolerance()
+    public async Task Accumulation_FoldsSignedMultisetIntoConsensus()
     {
-        var src = H(100); var kindA = H(101); var kindB = H(102);
+        var src = H(100); var kind = H(102);
         var s1 = H(110); var s2 = H(111);
         var o1 = H(120); var o2 = H(121);
         var c1 = H(130); var c2 = H(131); var c3 = H(132);   // witness contexts (layer/head)
-        await EnsureScaffoldAsync(src, kindA, kindB, s1, s2, o1, o2, c1, c2, c3);
+        await EnsureScaffoldAsync(src, kind, s1, s2, o1, o2, c1, c2, c3);
 
-        // The same match MULTISET per relation, expressed twice (kindA for the
-        // research path, kindB for the production path): varied scores, a
-        // multi-game witness, a refutation (loss), and a NULL-object relation.
-        // Distinct witnesses of ONE relation differ by context_id — the witness
-        // axis — per the evidence UNIQUE (subject,kind,object,source,context).
-        AttestationRow[] Rows(Hash128 kind, ulong idBase) => new[]
+        // A signed match multiset: varied scores, a multi-game witness, a
+        // refutation (loss), and a NULL-object relation. Distinct witnesses of
+        // ONE relation differ by context_id — the witness axis — per the
+        // evidence UNIQUE (subject,kind,object,source,context).
+        var rows = new[]
         {
-            Obs(H(idBase + 0), s1, kind, o1, src, score: 900_000_000, ctx: c1),
-            Obs(H(idBase + 1), s1, kind, o1, src, score: 731_058_578, ctx: c2),
-            Obs(H(idBase + 2), s1, kind, o1, src, score: 500_000_000, games: 5, ctx: c3),
-            Obs(H(idBase + 3), s2, kind, o1, src, score: 100_000_000, ctx: c1),  // refute → loss
-            Obs(H(idBase + 4), s2, kind, o2, src, score: 999_999_999, ctx: c1),
-            Obs(H(idBase + 5), s1, kind, null, src, score: 800_000_001, games: 3, ctx: c2),
+            Obs(H(2000), s1, kind, o1, src, score: 900_000_000, ctx: c1),
+            Obs(H(2001), s1, kind, o1, src, score: 731_058_578, ctx: c2),
+            Obs(H(2002), s1, kind, o1, src, score: 500_000_000, games: 5, ctx: c3),
+            Obs(H(2003), s2, kind, o1, src, score: 100_000_000, ctx: c1),  // refute → loss
+            Obs(H(2004), s2, kind, o2, src, score: 999_999_999, ctx: c1),
+            Obs(H(2005), s1, kind, null, src, score: 800_000_001, games: 3, ctx: c2),
         };
 
-        // Path A — research mode: evidence rows + the per-period SQL fold.
-        var inner = new NpgsqlSubstrateWriter(_pg.DataSource);
-        await inner.ApplyManyAsync(new[] { Change(src, "acc-eq/evidence", Rows(kindA, 1000)) });
-        await using (var fold = _pg.DataSource.CreateCommand(
-            "SELECT laplace.incremental_consensus(NULL)"))
-            await fold.ExecuteScalarAsync();
-
-        // Path B — production mode: fold-only, zero evidence rows.
         await using var accumulator = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
-        await accumulator.ApplyManyAsync(new[] { Change(src, "acc-eq/production", Rows(kindB, 2000)) });
+        await accumulator.ApplyManyAsync(new[] { Change(src, "acc-fold", rows) });
         var materialized = await accumulator.MaterializeConsensusAsync();
         Assert.Equal(4, materialized);   // (s1,o1) (s2,o1) (s2,o2) (s1,NULL)
 
-        foreach (var (subj, obj) in new (Hash128, Hash128?)[] { (s1, o1), (s2, o1), (s2, o2), (s1, null) })
-        {
-            var a = await ConsensusRowAsync(subj, kindA, obj);
-            var b = await ConsensusRowAsync(subj, kindB, obj);
-            Assert.NotNull(a);
-            Assert.NotNull(b);
-            AssertWithinKernelTolerance(a!.Value.rating, b!.Value.rating);   // μ
-            AssertWithinKernelTolerance(a.Value.rd,     b.Value.rd);         // rd
-            AssertWithinKernelTolerance(a.Value.vol,    b.Value.vol);        // σ
-            Assert.Equal(a.Value.wc, b.Value.wc);   // game count is EXACT
-        }
+        const long Neutral = 1_500_000_000_000L;
+        var confirmed = await ConsensusRowAsync(s1, kind, o1);
+        Assert.NotNull(confirmed);
+        Assert.Equal(7L, confirmed!.Value.wc);                    // 1+1+5 games, EXACT
+        Assert.True(confirmed.Value.rating > Neutral);            // net-confirm → μ above neutral
+
+        var refuted = await ConsensusRowAsync(s2, kind, o1);
+        Assert.NotNull(refuted);
+        Assert.Equal(1L, refuted!.Value.wc);
+        Assert.True(refuted.Value.rating < Neutral);              // refute → μ BELOW neutral (signed)
+
+        var strong = await ConsensusRowAsync(s2, kind, o2);
+        Assert.NotNull(strong);
+        Assert.True(strong!.Value.rating > confirmed.Value.rating - 500_000_000_000L);
+
+        var unary = await ConsensusRowAsync(s1, kind, null);      // NULL-object relation folds too
+        Assert.NotNull(unary);
+        Assert.Equal(3L, unary!.Value.wc);
     }
 
-    // === T2: production mode writes ZERO evidence rows ===
+    // === T2: evidence persists as PROVENANCE-ONLY rows (values consumed) ===
 
     [Fact]
-    public async Task Production_WritesZeroEvidenceRows()
+    public async Task Accumulation_PersistsProvenanceOnlyEvidence()
     {
         var src = H(200); var kind = H(201); var subj = H(210); var obj = H(220);
         await EnsureScaffoldAsync(src, kind, subj, obj);
 
         await using var accumulator = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
         var r = await accumulator.ApplyManyAsync(new[]
-            { Change(src, "acc-zero", Obs(H(230), subj, kind, obj, src, 900_000_000)) });
-        Assert.Equal(1, r.AttestationsAttempted);
-        Assert.Equal(0, r.AttestationsInserted);
+            { Change(src, "acc-prov",
+                Obs(H(230), subj, kind, obj, src, 900_000_000),            // confirm
+                Obs(H(231), subj, kind, null, src, 100_000_000)) });       // refute
+        Assert.Equal(2, r.AttestationsInserted);   // provenance rows LAND
         await accumulator.MaterializeConsensusAsync();
 
+        // The persisted rows are provenance: outcome CLASS + games — no values.
         await using var cmd = _pg.DataSource.CreateCommand(
-            "SELECT count(*) FROM laplace.attestations WHERE kind_id = $1");
+            "SELECT outcome, observation_count FROM laplace.attestations "
+          + "WHERE kind_id = $1 ORDER BY outcome DESC");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, kind.ToBytes());
-        Assert.Equal(0L, (long)(await cmd.ExecuteScalarAsync())!);
+        await using var rd = await cmd.ExecuteReaderAsync();
+        Assert.True(await rd.ReadAsync());
+        Assert.Equal((short)2, rd.GetInt16(0));    // confirm
+        Assert.True(await rd.ReadAsync());
+        Assert.Equal((short)0, rd.GetInt16(0));    // refute — dissent visible, magnitude consumed
+        Assert.False(await rd.ReadAsync());
 
-        Assert.NotNull(await ConsensusRowAsync(subj, kind, obj));   // knowledge landed anyway
+        Assert.NotNull(await ConsensusRowAsync(subj, kind, obj));   // knowledge landed in consensus
     }
 
     // === T3: the layer-completion marker passes through WHOLE ===

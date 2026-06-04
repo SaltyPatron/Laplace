@@ -42,12 +42,28 @@ export LD_LIBRARY_PATH="$PWD/build/engine/synthesis:$PWD/build/engine/core:$PWD/
 # T0 perf-cache needs no env: the CLI discovers it (env → /opt/laplace/share →
 # build tree). LD_LIBRARY_PATH above is the workspace-relative engine path.
 
+# Model dirs by CONVENTION (never hardcoded snapshot SHAs): explicit args, else
+# $LAPLACE_TINYLLAMA_DIR / $LAPLACE_PHI2_DIR, else the newest snapshot with
+# weights under each family's HF cache dir.
+newest_snapshot() { # newest_snapshot <models--ORG--NAME glob>
+    local fam snap
+    for fam in /vault/models/$1; do
+        [ -d "$fam/snapshots" ] || continue
+        for snap in $(ls -t "$fam/snapshots" 2>/dev/null); do
+            if ls "$fam/snapshots/$snap"/*.safetensors >/dev/null 2>&1; then
+                echo "$fam/snapshots/$snap"; return 0
+            fi
+        done
+    done
+    return 1
+}
 MODELS=("$@")
 if [ ${#MODELS[@]} -eq 0 ]; then
-    MODELS=(
-        /vault/models/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0/snapshots/fe8a4ea1ffedaf415f4da2f062534de366a451e6
-        /vault/models/models--microsoft--phi-2/snapshots/810d367871c1d460086d9f82db8696f2e0a0fcd0
-    )
+    TINY="${LAPLACE_TINYLLAMA_DIR:-$(newest_snapshot 'models--TinyLlama--*' || true)}"
+    PHI2="${LAPLACE_PHI2_DIR:-$(newest_snapshot 'models--microsoft--phi-2' || true)}"
+    [ -n "$TINY" ] || { echo "no TinyLlama model resolved (set LAPLACE_TINYLLAMA_DIR)"; exit 2; }
+    MODELS=("$TINY")
+    [ -n "$PHI2" ] && MODELS+=("$PHI2")
 fi
 
 phase() { echo ""; echo "############ PHASE $1 — $2 — t+$((SECONDS-T_START))s $(date -u +%H:%M:%S) ############"; }

@@ -20,13 +20,21 @@ void hash128_blake3(const uint8_t* data, size_t len, hash128_t* out) {
 }
 
 void hash128_merkle(uint8_t tier, const hash128_t* children, size_t n, hash128_t* out) {
-    /* Domain-separated Merkle composition: tier byte || children in given order.
-     * Order is preserved (children of an entity have meaningful position — e.g.,
-     * trajectory vertex order); we do not sort. The tier prefix prevents collision
-     * between tier-N compositions and lower-tier raw hashes. */
+    /* Domain-separated Merkle composition: a CONSTANT composition-domain byte ||
+     * children in given order. Order is preserved (children of an entity have
+     * meaningful position — e.g., trajectory vertex order); we do not sort.
+     *
+     * TIER IS METADATA, NEVER IDENTITY: the same ordered constituent set
+     * composed "at" two different strata is ONE entity (content is identity;
+     * tier records decomposition depth and lives on the entity row, not in the
+     * hash). The `tier` parameter is retained at call sites as that metadata
+     * but contributes NOTHING to the id. The constant domain byte keeps
+     * compositions collision-separated from raw leaf hashes. */
+    static const uint8_t MERKLE_DOMAIN = 0x01;
+    (void)tier;
     blake3_hasher h;
     blake3_hasher_init(&h);
-    blake3_hasher_update(&h, &tier, sizeof(tier));
+    blake3_hasher_update(&h, &MERKLE_DOMAIN, sizeof(MERKLE_DOMAIN));
     if (children && n > 0) {
         blake3_hasher_update(&h, children, n * sizeof(hash128_t));
     }

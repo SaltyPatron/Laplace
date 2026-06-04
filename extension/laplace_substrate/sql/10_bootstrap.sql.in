@@ -221,28 +221,27 @@ BEGIN
     /* === Meta-attestations binding it all together ===================== *
      * SubstrateCanonical HAS_TRUST_CLASS SubstrateMandate (source provenance).
      *
-     * Evidence rows are OBSERVATIONS now (ARCHITECTURE.md §10): categorical
-     * confirms (score=1.0 ×1e9) at full trust (opponent_rd=30 ×1e9 → g(φ)≈1),
-     * arena_m=0. No tier prior on μ. (Kind-value-tier entities + the
-     * HAS_KIND_VALUE_TIER row are GONE — truth #5; kind significance is the
-     * numeric kind_rank folded into opponent φ at ingest, never a tier entity.)
+     * Evidence rows are PROVENANCE now: who witnessed (source, context), when,
+     * how many games, and the outcome CLASS (0=refute/1=draw/2=confirm) — never
+     * a value. (Kind-value-tier entities + the HAS_KIND_VALUE_TIER row are
+     * GONE — truth #5; kind significance is the numeric kind_rank folded into
+     * the consensus match at ingest, never a tier entity and never persisted.)
      *
      * Attestation ids are computed via the laplace_hash128_merkle wrapper
      * over (subject_id, kind_id, object_id, source_id, context_id) so the
      * id IS the content. */
 
-    /* SubstrateCanonical HAS_TRUST_CLASS TrustClass_SubstrateMandate.
-     * Evidence is an OBSERVATION now (ARCHITECTURE.md §10): a categorical confirm
-     * (score=1.0) at full trust (opponent_rd=30 → g(φ)≈1). No tier prior on μ. */
+    /* SubstrateCanonical HAS_TRUST_CLASS TrustClass_SubstrateMandate —
+     * a categorical confirm (outcome = 2). */
     INSERT INTO attestations (
         id, subject_id, kind_id, object_id, source_id, context_id,
-        score, opponent_rd, arena_m, last_observed_at, observation_count
+        outcome, last_observed_at, observation_count
     ) VALUES (
         public.laplace_hash128_merkle(0::smallint, ARRAY[
             subscan_id, kind_has_trust_class_id, tc_mandate_id, subscan_id, '\x00000000000000000000000000000000'::bytea
         ]),
         subscan_id, kind_has_trust_class_id, tc_mandate_id, subscan_id, NULL,
-        1000000000, 30000000000, 0, now(), 1
+        2, now(), 1
     );
 
     /* === Deferred FK constraints (added now that bootstrap rows exist) = */

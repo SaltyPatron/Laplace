@@ -38,13 +38,14 @@ public sealed class UnicodeDecomposer : IDecomposer
         boot.AddType("Codepoint");
         boot.AddType("UcdClassifier");
         boot.AddType("OrdinalContext");
-        boot.AddKind("HAS_GENERAL_CATEGORY",    KindRank.StandardsStructural, SourceTrust.StandardsDerived);
-        boot.AddKind("HAS_COMBINING_CLASS",      KindRank.StandardsStructural, SourceTrust.StandardsDerived);
-        boot.AddKind("HAS_SCRIPT",               KindRank.StandardsStructural, SourceTrust.StandardsDerived);
-        boot.AddKind("HAS_BLOCK",                KindRank.Causal, SourceTrust.StandardsDerived);
-        boot.AddKind("HAS_UPPERCASE_MAPPING",    KindRank.Equivalence, SourceTrust.StandardsDerived);
-        boot.AddKind("HAS_LOWERCASE_MAPPING",    KindRank.Equivalence, SourceTrust.StandardsDerived);
-        boot.AddKind("CANONICAL_DECOMPOSES_TO",  KindRank.Taxonomic, SourceTrust.StandardsDerived);
+        // Rank lives ONLY in KindRegistry (all UCD kinds are StandardsStructural).
+        boot.AddKind("HAS_GENERAL_CATEGORY");
+        boot.AddKind("HAS_COMBINING_CLASS");
+        boot.AddKind("HAS_SCRIPT");
+        boot.AddKind("HAS_BLOCK");
+        boot.AddKind("HAS_UPPERCASE_MAPPING");
+        boot.AddKind("HAS_LOWERCASE_MAPPING");
+        boot.AddKind("CANONICAL_DECOMPOSES_TO");
         await context.Writer.ApplyAsync(boot.Build(), ct);
 
         // ── seed classifier entities (category/script/block + ordinal contexts + combining class values) ──
@@ -169,7 +170,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                 string? block = ucd.BlockForCodepoint(ucp);
                 if (block != null && ucd.BlockEntityIds.TryGetValue(block, out var blockId))
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasBlock,
-                        blockId, Source, null, KindRank.Causal, SourceTrust.StandardsDerived));
+                        blockId, Source, null, KindRank.StandardsStructural, SourceTrust.StandardsDerived));
 
                 // HAS_UPPERCASE_MAPPING
                 if (ucd.UppercaseMapping[cp] != 0)
@@ -177,7 +178,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                     uint targetCp = ucd.UppercaseMapping[cp];
                     if (targetCp < (uint)recs.Length)
                         b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasUppercaseMapping,
-                            recs[targetCp].Hash, Source, null, KindRank.Equivalence, SourceTrust.StandardsDerived));
+                            recs[targetCp].Hash, Source, null, KindRank.StandardsStructural, SourceTrust.StandardsDerived));
                 }
 
                 // HAS_LOWERCASE_MAPPING
@@ -186,7 +187,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                     uint targetCp = ucd.LowercaseMapping[cp];
                     if (targetCp < (uint)recs.Length)
                         b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasLowercaseMapping,
-                            recs[targetCp].Hash, Source, null, KindRank.Equivalence, SourceTrust.StandardsDerived));
+                            recs[targetCp].Hash, Source, null, KindRank.StandardsStructural, SourceTrust.StandardsDerived));
                 }
 
                 // CANONICAL_DECOMPOSES_TO
@@ -202,7 +203,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                             b.AddAttestation(AttestationFactory.Create(entityId,
                                 UcdProperties.KindCanonDecomposesTo,
                                 recs[targetCp].Hash, Source, ctx,
-                                KindRank.Taxonomic, SourceTrust.StandardsDerived));
+                                KindRank.StandardsStructural, SourceTrust.StandardsDerived));
                         }
                     }
                 }

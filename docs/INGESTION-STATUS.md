@@ -111,8 +111,12 @@ The evidence/consensus split is now real and the Glicko math is DERIVED, not kno
 - **Dedup magnitude vs granularity** — per-neuron n-grams may be too specific to recur; token→token recurs
   most. Measure `consensus_stats` after the cardinal fix; decide granularity.
 - **Semantic validation** — resolve relations to surface text; verify a known fact (e.g. capital-of-France).
-- **Synthesis / GGUF re-export** reads the OLD Q_PROJECTS (`Program.cs` SynthesizeAsync) → broken; needs
-  rework to read the new records + placements.
+- **Synthesis / GGUF re-export REWRITTEN (2026-06-03)** — `synthesize substrate` now reads the
+  CONSENSUS circuit arenas (ATTENDS / OV_RELATES / COMPLETES_TO), inverts the signed score map
+  (`ConsensusReExport.SignedStrength`), builds the spectral token basis over the union graph,
+  SVD-factors each arena through the basis (`tensor_svd_truncate` — export-only) and fills the
+  mold's q/k, v/o, up/down at the recipe rank. Compiles + unit-suite green; END-TO-END RUN AGAINST
+  AN INGESTED MODEL STILL OWED (DBs were dropped mid-session; restore + re-ingest first).
 - **Breadth** — GGUF block-quant (Flux, `gguf/`), MoE (Qwen3/DeepSeek; detector groups by expert but
   untested), non-text modalities (the n-gram trajectory entity is already the modality-blind unit; only the
   front-end atom extractor is modality-specific).
@@ -123,3 +127,24 @@ The evidence/consensus split is now real and the Glicko math is DERIVED, not kno
   "no floors / budgets ever" stands. Likewise the per-(i,j) edge emit (10⁸+ rows per circuit) is the
   per-cell dump the set→set Merkle-hyperedge attestation exists to replace — dedup by construction is
   the write-volume answer, not a cut. Both need the set→set emitter.
+- **Per-cell cost MEASURED (2026-06-04):** TinyLlama via the per-(i,j) emit ran at ~3.9M evidence
+  rows/min with ~29M edges per (layer,head) witness — projecting ≈21 BILLION rows / multiple days
+  for one 1.1B model. Killed at 88M rows / 3 of 726 witnesses. The billion-edge overflow is the
+  emit ignoring the DAG, exactly as the correction records. Partial evidence awaits per-source
+  eviction (`DELETE FROM laplace.attestations WHERE source_id = <model content id>`).
+- **THE MODEL-INGEST DESIGN — "ETL on conventional AI, for AI" (user, 2026-06-04; full record
+  in the model-ingest-is-etl memory):** EXTRACT the model's own lookup-table cells at rest
+  (O(params), no forward pass, no probes, no GEMM); TRANSFORM = surrogate-key resolution — hidden
+  dims are the source's surrogate keys, embed/lm_head its key-mapping tables, dots/cosine the
+  resolution join; LOAD = one signed Glicko match per cell under its tensor-role kind (the TEN
+  fixed kinds, restored — the "disease" smear on them was the corruption). POSITIONS AGGREGATE
+  (#192 §7): layers/heads are positions of the same schema-bounded table → witnesses on the SAME
+  rows; per-position attribution is recipe content. **Records are bounded by the SCHEMA SHAPE
+  (~10 logical tables: vocab×d_model, d_model², d_model×interm), never by depth or params** —
+  a deeper model adds games, not rows. The token×token bilinear is the QUERY-TIME read (μ-ranked
+  joins EMBEDS → interior → OUTPUT_PROJECTS); materializing it at ingest = pre-joining the star
+  schema = the 21B-row failure. Nonlinearities = the source's runtime: never attested, never run
+  at ingest. Cross-model: channel arenas align via placements (Procrustes/Karcher geometric
+  consensus) → sublinear re-witnessing. (Every prior construction in this file's history —
+  per-(i,j) pre-join, θ/recall budgets, argmax address books, sign-split/Voronoi/knee set
+  emitters, adjudicate-only, probe-the-runtime — is superseded by this and must not return.)

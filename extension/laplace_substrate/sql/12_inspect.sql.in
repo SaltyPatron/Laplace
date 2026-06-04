@@ -39,36 +39,38 @@ COMMENT ON FUNCTION entity_physicalities(bytea) IS
     'BUILDING_BLOCK / PROJECTION), with radius-from-origin and constituent count.';
 
 CREATE OR REPLACE FUNCTION attestations_out(p_id bytea, p_limit integer DEFAULT 40)
-    RETURNS TABLE(kind_id bytea, object_id bytea, source_id bytea,
-                  score bigint, opponent_rd bigint, arena_m bigint, observation_count bigint)
+    RETURNS TABLE(kind_id bytea, object_id bytea, source_id bytea, context_id bytea,
+                  outcome smallint, observation_count bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    SELECT a.kind_id, a.object_id, a.source_id,
-           a.score, a.opponent_rd, a.arena_m, a.observation_count
+    SELECT a.kind_id, a.object_id, a.source_id, a.context_id,
+           a.outcome, a.observation_count
     FROM attestations a
     WHERE a.subject_id = p_id
-    ORDER BY a.score DESC, a.observation_count DESC
+    ORDER BY a.observation_count DESC, a.outcome DESC
     LIMIT p_limit
 $$;
 
 COMMENT ON FUNCTION attestations_out(bytea, integer) IS
-    'Outgoing EVIDENCE neighborhood: per-witness observations where the entity is the subject, '
-    'strongest match (score) first. score/opponent_rd/arena_m are fixed-point x1e9. For accumulated '
-    'consensus μ use completions()/top_relations().';
+    'Outgoing EVIDENCE (provenance) neighborhood: who witnessed relations where the entity is the '
+    'subject — source, circuit context (layer/head), outcome class (0=refute/1=draw/2=confirm), '
+    'games. Evidence carries no values; for relation STRENGTH use the consensus reads '
+    '(consensus_out/completions/top_relations).';
 
 CREATE OR REPLACE FUNCTION attestations_in(p_id bytea, p_limit integer DEFAULT 40)
-    RETURNS TABLE(subject_id bytea, kind_id bytea, source_id bytea,
-                  score bigint, opponent_rd bigint, arena_m bigint)
+    RETURNS TABLE(subject_id bytea, kind_id bytea, source_id bytea, context_id bytea,
+                  outcome smallint, observation_count bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    SELECT a.subject_id, a.kind_id, a.source_id,
-           a.score, a.opponent_rd, a.arena_m
+    SELECT a.subject_id, a.kind_id, a.source_id, a.context_id,
+           a.outcome, a.observation_count
     FROM attestations a
     WHERE a.object_id = p_id
-    ORDER BY a.score DESC
+    ORDER BY a.observation_count DESC, a.outcome DESC
     LIMIT p_limit
 $$;
 
 COMMENT ON FUNCTION attestations_in(bytea, integer) IS
-    'Incoming EVIDENCE neighborhood: per-witness observations where the entity is the object, '
-    'strongest match (score) first. score/opponent_rd/arena_m are fixed-point x1e9.';
+    'Incoming EVIDENCE (provenance) neighborhood: who witnessed relations where the entity is the '
+    'object — source, circuit context, outcome class, games. Evidence carries no values; for '
+    'strength use the consensus reads.';

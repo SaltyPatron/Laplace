@@ -134,10 +134,12 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
-    /// <summary>Add one <c>attestations</c> (EVIDENCE) row — a Glicko-2 observation:
-    /// score = ½(1+tanh(signed_m/M)), opponent_rd = witness trust→φ, arena_m = the
-    /// per-arena scale M (audit). All int64 fixed-point ×1e9. The accumulated
-    /// rating/rd/volatility live on consensus, not here (ARCHITECTURE.md §10).</summary>
+    /// <summary>Add one <c>attestations</c> (EVIDENCE) row — PROVENANCE, never
+    /// values: who witnessed which relation, when, how many games, and the
+    /// dissent record as a CLASS (<paramref name="outcome"/>: 0=refute, 1=draw,
+    /// 2=confirm — never a magnitude). The witness's value is testimony,
+    /// consumed into the consensus accumulation at ingest and not persisted;
+    /// the accumulated rating/rd/volatility live on consensus.</summary>
     public void AddAttestation(
         Hash128  id,
         Hash128  subjectId,
@@ -145,14 +147,13 @@ public sealed class IntentStage : SafeHandle
         Hash128? objectId,
         Hash128  sourceId,
         Hash128? contextId,
-        long     scoreFp1e9,
-        long     opponentRdFp1e9,
-        long     arenaMFp1e9,
+        short    outcome,
         long     lastObservedAtUnixUs,
         long     observationCount)
     {
         ThrowIfDisposed();
         if (observationCount < 0) throw new ArgumentOutOfRangeException(nameof(observationCount));
+        if (outcome is < 0 or > 2) throw new ArgumentOutOfRangeException(nameof(outcome));
         unsafe
         {
             int rc;
@@ -162,8 +163,7 @@ public sealed class IntentStage : SafeHandle
             Hash128* ctxPtr = contextId is null ? null : &ctx;
             rc = NativeInterop.IntentStageAddAttestation(
                 handle, &id, &subjectId, &kindId, objPtr, &sourceId, ctxPtr,
-                scoreFp1e9, opponentRdFp1e9, arenaMFp1e9,
-                lastObservedAtUnixUs, observationCount);
+                outcome, lastObservedAtUnixUs, observationCount);
             if (rc != 0) throw new InvalidOperationException("intent_stage_add_attestation failed");
         }
     }

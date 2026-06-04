@@ -33,16 +33,17 @@ SELECT octet_length(
     )
 ) AS merkle_len;
 
--- Tier byte is domain-separating: tier 0 vs tier 1 over the same children
--- produces distinct outputs.
+-- TIER IS METADATA, NEVER IDENTITY: the same ordered constituent set composed
+-- "at" two different strata is ONE entity (content is identity; tier records
+-- decomposition depth on the entity row, never in the hash).
 SELECT laplace_hash128_merkle(
         0::smallint,
         ARRAY[laplace_hash128_blake3('x'::bytea)]
     )
-    <> laplace_hash128_merkle(
+    = laplace_hash128_merkle(
         1::smallint,
         ARRAY[laplace_hash128_blake3('x'::bytea)]
-    ) AS tier_prefix_domain_separates;
+    ) AS tier_is_not_identity;
 
 -- Child order matters: (a, b) != (b, a).
 SELECT laplace_hash128_merkle(

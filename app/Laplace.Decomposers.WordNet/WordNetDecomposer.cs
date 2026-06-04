@@ -40,50 +40,39 @@ public sealed class WordNetDecomposer : IDecomposer
 
     private static Hash128 Kind(string name) => Hash128.OfCanonical($"substrate/kind/{name}/v1");
 
-    // Non-pointer kinds
-    private static readonly Hash128 KindIsSynonymOf   = Kind("IS_SYNONYM_OF");
-    private static readonly Hash128 KindHasPos        = Kind("HAS_POS");
-    private static readonly Hash128 KindDefines       = Kind("DEFINES");
-    private static readonly Hash128 KindHasExample    = Kind("HAS_EXAMPLE");
-    private static readonly Hash128 KindHasLexCat     = Kind("HAS_LEX_CATEGORY");
-    private static readonly Hash128 KindHasSense      = Kind("HAS_SENSE");
-    private static readonly Hash128 KindIsSenseOf     = Kind("IS_SENSE_OF");
-
-    // Pointer symbol → (kind name, value tier). Subject = the synset bearing the pointer,
+    // Pointer symbol → kind NAME only. Subject = the synset bearing the pointer,
     // object = the target synset. WordNet pointer inventory per wninput(5).
-    private static readonly Dictionary<string, (string Name, double Tier)> PointerKinds = new()
+    // Rank / symmetry / direction-flip resolve through KindRegistry (the single
+    // source of truth for arena significance) at attest time — never locally.
+    private static readonly Dictionary<string, string> PointerKinds = new()
     {
-        ["!"]  = ("IS_ANTONYM_OF",           KindRank.Oppositional),
-        ["@"]  = ("HAS_HYPERNYM",            KindRank.Taxonomic),
-        ["@i"] = ("IS_INSTANCE_OF",          KindRank.Taxonomic),
-        ["~"]  = ("HAS_HYPONYM",             KindRank.Taxonomic),
-        ["~i"] = ("HAS_INSTANCE",            KindRank.Taxonomic),
-        ["#m"] = ("IS_MEMBER_OF",            KindRank.Partitive),
-        ["#s"] = ("IS_SUBSTANCE_OF",         KindRank.Partitive),
-        ["#p"] = ("IS_PART_OF",              KindRank.Partitive),
-        ["%m"] = ("HAS_MEMBER",              KindRank.Partitive),
-        ["%s"] = ("HAS_SUBSTANCE",           KindRank.Partitive),
-        ["%p"] = ("HAS_PART",                KindRank.Partitive),
-        ["="]  = ("HAS_ATTRIBUTE",           KindRank.Partitive),
-        ["+"]  = ("DERIVATIONALLY_RELATED",  KindRank.Equivalence),
-        [";c"] = ("HAS_DOMAIN_TOPIC",        KindRank.Associative),
-        ["-c"] = ("IS_DOMAIN_TOPIC_MEMBER",  KindRank.Associative),
-        [";r"] = ("HAS_DOMAIN_REGION",       KindRank.Associative),
-        ["-r"] = ("IS_DOMAIN_REGION_MEMBER", KindRank.Associative),
-        [";u"] = ("HAS_DOMAIN_USAGE",        KindRank.Associative),
-        ["-u"] = ("IS_DOMAIN_USAGE_MEMBER",  KindRank.Associative),
-        ["*"]  = ("ENTAILS",                 KindRank.Causal),
-        [">"]  = ("CAUSES",                  KindRank.Causal),
-        ["^"]  = ("ALSO_SEE",                KindRank.Associative),
-        ["$"]  = ("IN_VERB_GROUP_WITH",      KindRank.Associative),
-        ["&"]  = ("IS_SIMILAR_TO",           KindRank.Equivalence),
-        ["<"]  = ("IS_PARTICIPLE_OF",        KindRank.Equivalence),
-        ["\\"] = ("PERTAINS_TO",             KindRank.Equivalence),
+        ["!"]  = "IS_ANTONYM_OF",
+        ["@"]  = "HAS_HYPERNYM",
+        ["@i"] = "IS_INSTANCE_OF",
+        ["~"]  = "HAS_HYPONYM",
+        ["~i"] = "HAS_INSTANCE",
+        ["#m"] = "IS_MEMBER_OF",
+        ["#s"] = "IS_SUBSTANCE_OF",
+        ["#p"] = "IS_PART_OF",
+        ["%m"] = "HAS_MEMBER",
+        ["%s"] = "HAS_SUBSTANCE",
+        ["%p"] = "HAS_PART",
+        ["="]  = "HAS_ATTRIBUTE",
+        ["+"]  = "DERIVATIONALLY_RELATED",
+        [";c"] = "HAS_DOMAIN_TOPIC",
+        ["-c"] = "IS_DOMAIN_TOPIC_MEMBER",
+        [";r"] = "HAS_DOMAIN_REGION",
+        ["-r"] = "IS_DOMAIN_REGION_MEMBER",
+        [";u"] = "HAS_DOMAIN_USAGE",
+        ["-u"] = "IS_DOMAIN_USAGE_MEMBER",
+        ["*"]  = "ENTAILS",
+        [">"]  = "CAUSES",
+        ["^"]  = "ALSO_SEE",
+        ["$"]  = "IN_VERB_GROUP_WITH",
+        ["&"]  = "IS_SIMILAR_TO",
+        ["<"]  = "IS_PARTICIPLE_OF",
+        ["\\"] = "PERTAINS_TO",
     };
-
-    // Precomputed kind ids for pointer symbols (avoid re-hashing per pointer).
-    private static readonly Dictionary<string, Hash128> PointerKindId =
-        PointerKinds.ToDictionary(kv => kv.Key, kv => Kind(kv.Value.Name));
 
     // lex_filenum (0..44) → lexicographer-file name, per WordNet lexnames.
     private static readonly string[] Lexnames =
@@ -120,18 +109,21 @@ public sealed class WordNetDecomposer : IDecomposer
         boot.AddType("WordNet_POS");
         boot.AddType("WordNet_LexCategory");
 
-        // Non-pointer kinds
-        boot.AddKind("IS_SYNONYM_OF",    KindRank.Partitive, SourceTrust.StandardsDerived);
-        boot.AddKind("HAS_POS",          KindRank.Partitive, SourceTrust.StandardsDerived);
-        boot.AddKind("DEFINES",          KindRank.Taxonomic, SourceTrust.StandardsDerived);
-        boot.AddKind("HAS_EXAMPLE",      KindRank.Partitive, SourceTrust.StandardsDerived);
-        boot.AddKind("HAS_LEX_CATEGORY", KindRank.Taxonomic, SourceTrust.StandardsDerived);
-        boot.AddKind("HAS_SENSE",        KindRank.Taxonomic, SourceTrust.StandardsDerived);
-        boot.AddKind("IS_SENSE_OF",      KindRank.Taxonomic, SourceTrust.StandardsDerived);
+        // Non-pointer kinds. Rank/symmetry live ONLY in KindRegistry; bootstrap
+        // just guarantees the kind entities exist (SeedCanonical in Build() seeds
+        // every canonical arena anyway — these cover source-named aliases).
+        boot.AddKind("IS_SYNONYM_OF");
+        boot.AddKind("HAS_POS");
+        boot.AddKind("DEFINES");
+        boot.AddKind("HAS_EXAMPLE");
+        boot.AddKind("HAS_LEX_CATEGORY");
+        boot.AddKind("HAS_SENSE");
+        boot.AddKind("IS_SENSE_OF");
 
-        // All pointer-relation kinds
-        foreach (var (_, (name, tier)) in PointerKinds)
-            boot.AddKind(name, tier, SourceTrust.StandardsDerived);
+        // All pointer-relation kinds (registry aliases resolve to canonical ids;
+        // seeding the canonical entity is what matters for the FK floor).
+        foreach (var name in PointerKinds.Values)
+            boot.AddKind(KindRegistry.Resolve(name).Canonical);
 
         await context.Writer.ApplyAsync(boot.Build(), ct);
 
@@ -223,12 +215,10 @@ public sealed class WordNetDecomposer : IDecomposer
         {
             var lemmaId = ContentEmitter.RootId(Surface(lemma));
             if (lemmaId is null) continue;
-            b.AddAttestation(AttestationFactory.Create(
-                lemmaId.Value, KindIsSynonymOf, syn.SynsetId, Source, null,
-                KindRank.Partitive, SourceTrust.StandardsDerived));
-            b.AddAttestation(AttestationFactory.Create(
-                lemmaId.Value, KindHasPos, posId, Source, null,
-                KindRank.Partitive, SourceTrust.StandardsDerived));
+            b.AddAttestation(KindRegistry.Attest(
+                lemmaId.Value, "IS_SYNONYM_OF", syn.SynsetId, Source, SourceTrust.StandardsDerived));
+            b.AddAttestation(KindRegistry.Attest(
+                lemmaId.Value, "HAS_POS", posId, Source, SourceTrust.StandardsDerived));
         }
 
         var (def, examples) = ParseGloss(syn.Gloss);
@@ -236,31 +226,31 @@ public sealed class WordNetDecomposer : IDecomposer
         {
             var defId = ContentEmitter.RootId(def);
             if (defId is not null)
-                b.AddAttestation(AttestationFactory.Create(
-                    syn.SynsetId, KindDefines, defId.Value, Source, null,
-                    KindRank.Taxonomic, SourceTrust.StandardsDerived));
+                b.AddAttestation(KindRegistry.Attest(
+                    syn.SynsetId, "DEFINES", defId.Value, Source, SourceTrust.StandardsDerived));
         }
         foreach (var ex in examples)
         {
             var exId = ContentEmitter.RootId(ex);
             if (exId is not null)
-                b.AddAttestation(AttestationFactory.Create(
-                    syn.SynsetId, KindHasExample, exId.Value, Source, null,
-                    KindRank.Partitive, SourceTrust.StandardsDerived));
+                b.AddAttestation(KindRegistry.Attest(
+                    syn.SynsetId, "HAS_EXAMPLE", exId.Value, Source, SourceTrust.StandardsDerived));
         }
 
         if (syn.LexFilenum >= 0 && syn.LexFilenum < Lexnames.Length)
-            b.AddAttestation(AttestationFactory.Create(
-                syn.SynsetId, KindHasLexCat, LexCatId(Lexnames[syn.LexFilenum]), Source, null,
-                KindRank.Taxonomic, SourceTrust.StandardsDerived));
+            b.AddAttestation(KindRegistry.Attest(
+                syn.SynsetId, "HAS_LEX_CATEGORY", LexCatId(Lexnames[syn.LexFilenum]),
+                Source, SourceTrust.StandardsDerived));
 
         foreach (var ptr in syn.Pointers)
         {
-            if (!PointerKinds.TryGetValue(ptr.Symbol, out var pk)) continue;
+            if (!PointerKinds.TryGetValue(ptr.Symbol, out var kindName)) continue;
             Hash128 tgt = SourceEntityIdConventions.WordNetSynset(ptr.TargetOffset, NormPos(ptr.TargetPos));
-            b.AddAttestation(AttestationFactory.Create(
-                syn.SynsetId, PointerKindId[ptr.Symbol], tgt, Source, null,
-                pk.Tier, SourceTrust.StandardsDerived));
+            // Registry resolves alias → canonical arena, applies the direction
+            // flip (HAS_HYPONYM ⇒ IS_A with endpoints swapped) and symmetric
+            // endpoint ordering, and supplies the canonical rank.
+            b.AddAttestation(KindRegistry.Attest(
+                syn.SynsetId, kindName, tgt, Source, SourceTrust.StandardsDerived));
         }
     }
 
@@ -293,14 +283,13 @@ public sealed class WordNetDecomposer : IDecomposer
                 var lemmaId = ContentEmitter.RootId(s.Lemma);
                 if (lemmaId is not null)
                 {
-                    // SemCor tag-count seeds μ: a more-frequently-tagged sense gets a higher prior.
-                    b.AddAttestation(AttestationFactory.CreateWeighted(
-                        lemmaId.Value, KindHasSense, s.SenseId, Source, null,
-                        KindRank.Taxonomic, SourceTrust.StandardsDerived,
-                        magnitude: s.TagCount, floor: 1.0));
-                    b.AddAttestation(AttestationFactory.Create(
-                        s.SenseId, KindIsSenseOf, s.SynsetId, Source, null,
-                        KindRank.Taxonomic, SourceTrust.StandardsDerived));
+                    // SemCor tag-count is the signed magnitude: a more-frequently-
+                    // tagged sense wins harder (score = ½(1+tanh(count/M)), M = 1).
+                    b.AddAttestation(KindRegistry.AttestWeighted(
+                        lemmaId.Value, "HAS_SENSE", s.SenseId, Source, SourceTrust.StandardsDerived,
+                        magnitude: s.TagCount, arenaScale: 1.0));
+                    b.AddAttestation(KindRegistry.Attest(
+                        s.SenseId, "IS_SENSE_OF", s.SynsetId, Source, SourceTrust.StandardsDerived));
                 }
             }
 

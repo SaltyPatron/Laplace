@@ -29,12 +29,6 @@ public sealed class OMWDecomposer : IDecomposer
     private static readonly Hash128 LanguageTypeId = Hash128.OfCanonical("substrate/type/Language/v1");
     private static readonly Hash128 SynsetTypeId   = Hash128.OfCanonical("substrate/type/WordNet_Synset/v1");
 
-    private static Hash128 Kind(string n) => Hash128.OfCanonical($"substrate/kind/{n}/v1");
-    private static readonly Hash128 KindHasLanguage     = Kind("HAS_LANGUAGE");
-    private static readonly Hash128 KindIsTranslationOf = Kind("IS_TRANSLATION_OF");
-    private static readonly Hash128 KindDefines         = Kind("DEFINES");
-    private static readonly Hash128 KindHasExample      = Kind("HAS_EXAMPLE");
-
     public Hash128 SourceId     => Source;
     public string  SourceName   => "OMWDecomposer";
     public int     LayerOrder   => 3;
@@ -43,10 +37,10 @@ public sealed class OMWDecomposer : IDecomposer
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        // IS_TRANSLATION_OF / HAS_LANGUAGE are substrate-canonical (bootstrap); DEFINES /
-        // HAS_EXAMPLE are registered here (idempotent — content-addressed by name).
-        boot.AddKind("DEFINES",     KindRank.Taxonomic, SourceTrust.AcademicCurated);
-        boot.AddKind("HAS_EXAMPLE", KindRank.Partitive, SourceTrust.AcademicCurated);
+        // Kind entities seed via KindRegistry.SeedCanonical in Build(); rank /
+        // symmetry live ONLY in the registry.
+        boot.AddKind("DEFINES");
+        boot.AddKind("HAS_EXAMPLE");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -101,26 +95,26 @@ public sealed class OMWDecomposer : IDecomposer
         // lacks can't FK-crash the batch.
         b.AddEntity(new EntityRow(row.SynsetId, /*tier*/ 3, SynsetTypeId, Source));
 
+        // Rank / symmetry resolve through KindRegistry — the single source of truth
+        // (IS_TRANSLATION_OF is Equivalence/Symmetric in the canon, never Partitive).
         switch (row.Type)
         {
             case OmwType.Lemma:
-                b.AddAttestation(AttestationFactory.Create(
-                    contentId.Value, KindIsTranslationOf, row.SynsetId, Source, null,
-                    KindRank.Partitive, SourceTrust.AcademicCurated));
-                b.AddAttestation(AttestationFactory.Create(
-                    contentId.Value, KindHasLanguage, langId, Source, null,
-                    KindRank.Partitive, SourceTrust.AcademicCurated));
+                b.AddAttestation(KindRegistry.Attest(
+                    contentId.Value, "IS_TRANSLATION_OF", row.SynsetId, Source, SourceTrust.AcademicCurated));
+                b.AddAttestation(KindRegistry.Attest(
+                    contentId.Value, "HAS_LANGUAGE", langId, Source, SourceTrust.AcademicCurated));
                 break;
             case OmwType.Def:
                 // context_id = language → per-language glosses are distinct attestations.
-                b.AddAttestation(AttestationFactory.Create(
-                    row.SynsetId, KindDefines, contentId.Value, Source, langId,
-                    KindRank.Taxonomic, SourceTrust.AcademicCurated));
+                b.AddAttestation(KindRegistry.Attest(
+                    row.SynsetId, "DEFINES", contentId.Value, Source, SourceTrust.AcademicCurated,
+                    contextId: langId));
                 break;
             case OmwType.Exe:
-                b.AddAttestation(AttestationFactory.Create(
-                    row.SynsetId, KindHasExample, contentId.Value, Source, langId,
-                    KindRank.Partitive, SourceTrust.AcademicCurated));
+                b.AddAttestation(KindRegistry.Attest(
+                    row.SynsetId, "HAS_EXAMPLE", contentId.Value, Source, SourceTrust.AcademicCurated,
+                    contextId: langId));
                 break;
         }
     }

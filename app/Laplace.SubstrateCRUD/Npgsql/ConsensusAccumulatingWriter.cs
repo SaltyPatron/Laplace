@@ -7,19 +7,20 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// PRODUCTION write surface: consensus accumulates AT INGEST; evidence
-/// recording is DISABLED.
+/// THE write surface: consensus accumulates AT INGEST; evidence persists as
+/// PROVENANCE-ONLY rows.
 ///
 /// Decorates the one substrate writer (not a second insert path: entities,
 /// physicalities and layer-completion markers still flow through it
-/// unchanged). Attestation rows — the per-witness Glicko-2 MATCHES against the
-/// neutral baseline — are NOT written to the evidence table; they ACCUMULATE
-/// per RELATION IDENTITY (subject, kind, object) and the period MATERIALIZES
-/// into <c>consensus</c> in ONE set-based upsert when
-/// <see cref="MaterializeConsensusAsync"/> runs at the clean end of the ingest
-/// period — the same per-period semantics as <c>incremental_consensus</c>,
-/// through the same C aggregate. Evidence is provenance, not knowledge:
-/// research instances record the per-witness receipts (LAPLACE_EVIDENCE=record).
+/// unchanged). Each attestation row carries the witness's TESTIMONY IN FLIGHT
+/// (score, trust→φ): the testimony is CONSUMED here — accumulated per RELATION
+/// IDENTITY (subject, kind, object) and materialized into <c>consensus</c> in
+/// ONE set-based upsert when <see cref="MaterializeConsensusAsync"/> runs at
+/// the clean end of the ingest period, through the same C aggregate. The rows
+/// then flow to the inner writer WHOLE, whose COPY layout persists exactly the
+/// PROVENANCE columns (identity 5-tuple, outcome class, games, time) — the
+/// values never reach the wire. EVIDENCE IS PROVENANCE: a stored per-witness
+/// score is invertible to the weight — recording raw weights — and is banned.
 ///
 /// <para><b>Exactness.</b> Within one ingest period a relation's opponent φ is
 /// CONSTANT (φ = kind_rank × source_trust × tenant_trust — one kind, one
@@ -99,31 +100,23 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     {
         ArgumentNullException.ThrowIfNull(changes);
 
-        var passthrough = new List<SubstrateChange>(changes.Count);
-        int observationsAttempted = 0;
         foreach (var c in changes)
         {
             // Layer-completion markers are bookkeeping rows the completion
-            // guard + layer gates read — they pass through WHOLE.
+            // guard + layer gates read — no testimony to consume.
             if (c.Metadata.SourceContentUnitName.StartsWith("layer-complete/", StringComparison.Ordinal))
-            {
-                passthrough.Add(c);
                 continue;
-            }
-            observationsAttempted += c.Attestations.Length;
+            // CONSUME the testimony (score, φ) into the period accumulation.
             foreach (var a in c.Attestations) Accumulate(a);
-            passthrough.Add(c.Attestations.IsEmpty
-                ? c
-                : c with { Attestations = ImmutableArray<AttestationRow>.Empty });
         }
 
         if (_accumulation.Count >= _stagingThreshold)
             await StagePartialsAsync(ct);
 
-        var r = await _inner.ApplyManyAsync(passthrough, ct);
-        // Report the matches as ATTEMPTED (presented and accumulated) with 0
-        // INSERTED (no evidence row exists — that is the point).
-        return r with { AttestationsAttempted = r.AttestationsAttempted + observationsAttempted };
+        // The rows flow to the inner writer WHOLE: its COPY layout persists
+        // only the PROVENANCE columns (identity, outcome class, games, time) —
+        // the consumed values never reach the wire.
+        return await _inner.ApplyManyAsync(changes, ct);
     }
 
     private void Accumulate(AttestationRow a)

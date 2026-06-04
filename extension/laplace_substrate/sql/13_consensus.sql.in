@@ -1,25 +1,23 @@
 /* 13_consensus.sql.in — materialized cross-witness consensus.
  *
- * `attestations` is the per-witness EVIDENCE layer: one row per
- * (subject, kind, object, source, context). The CONSENSUS is ONE row per
- * (subject, kind, object, context) — SOURCE OUT of identity — carrying the
- * Glicko-2 state accumulated over ALL witnessing sources via the existing
- * laplace_glicko2_accumulate aggregate. Inference reads this directly (a single
- * indexed lookup), not by re-aggregating evidence per query ("excessive joins").
+ * `attestations` is the per-witness EVIDENCE layer — PROVENANCE only (who
+ * witnessed, outcome class, games, time; never a value). The CONSENSUS is ONE
+ * row per (subject, kind, object) — SOURCE AND CONTEXT OUT of identity —
+ * carrying the Glicko-2 state accumulated over ALL witnesses via the
+ * laplace_glicko2_accumulate aggregate. Inference reads this directly (a
+ * single indexed lookup), never by re-aggregating evidence per query.
  *
- * K1 (first cut — tunable once we see behaviour): each witness is one Glicko-2
- * observation — a "match" the edge plays against a fixed noise-floor opponent,
- * scored by the witness's normalized strength. More / stronger witnesses ⇒
- * higher consensus μ and tighter rd; a lone weak witness ⇒ small bump, wide rd.
- * The score reuses the evidence rating (which already = kind-tier μ × strength ×
- * source-trust per AttestationFactory); tenant-trust folds in at S5. */
+ * Consensus accumulates AT INGEST: the writer consumes each witness's
+ * testimony (score s = ½(1+tanh(m/M)), trust→φ) into per-relation period
+ * partials and the period materializes here (create_period_staging →
+ * materialize_period_consensus, prior = the current row). There is NO
+ * evidence-replay fold — evidence carries no values to replay, by design. */
 
 CREATE TABLE consensus (
     id                bytea       PRIMARY KEY CHECK (octet_length(id) = 16),
     subject_id        bytea       NOT NULL REFERENCES entities(id),
     kind_id           bytea       NOT NULL REFERENCES entities(id),
     object_id         bytea                REFERENCES entities(id),
-    context_id        bytea                REFERENCES entities(id),
     rating            bigint      NOT NULL,
     rd                bigint      NOT NULL CHECK (rd > 0),
     volatility        bigint      NOT NULL CHECK (volatility > 0),
@@ -52,114 +50,29 @@ CREATE OR REPLACE FUNCTION consensus_id(
         || COALESCE(p_object, '\x00000000000000000000000000000000'::bytea))
 $$;
 
-/* There is deliberately NO batch "rebuild" (TRUNCATE + replay) function. That
- * pattern — backfill/drain over the whole evidence set — is forbidden on this
- * substrate: consensus accumulates AT INGEST (the writer drives
- * incremental_consensus per ingest period), never by a post-hoc batch pass.
- * A removed-by-design rebuild_consensus() once lived here; do not reintroduce it.
+/* There is deliberately NO batch "rebuild" and NO evidence-replay fold.
+ * Backfill/drain over the whole evidence set is forbidden on this substrate —
+ * and impossible by construction: evidence is PROVENANCE-only and carries no
+ * values to replay. A removed-by-design rebuild_consensus() and an
+ * evidence-replaying incremental_consensus() once lived here; do not
+ * reintroduce either. Consensus accumulates AT INGEST through the period
+ * staging below.
  *
  * ARCHITECTURE.md §10 — DERIVED, no knobs beyond M / the trust→φ shape / φ₀:
- *   prior     = neutral (μ=1500, rd=350, σ=0.06)
- *   opponent  = NEUTRAL baseline (μ=1500 — the same line as the prior, so a score
- *               of ½ is "as expected" → μ unchanged, rd tightens; >½ raises μ,
- *               <½ lowers it). Opponent RD = the witness's own opponent_rd (trust
- *               → φ); g(φ) does the weighting natively.
- *   score     = the witness's stored tanh outcome a.score (signed magnitude → win/
- *               loss), used directly — NOT re-derived from a rating.
- *   games     = observation_count: each occurrence is one match, replayed via
- *               generate_series so N occurrences accumulate as N Glicko games
- *               (Glicko-2 within a period is order-invariant, so this is exact).
+ *   prior     = the relation's CURRENT consensus row (neutral μ=1500, rd=350,
+ *               σ=0.06 when new).
+ *   opponent  = NEUTRAL baseline (μ=1500 — a score of ½ is "as expected" → μ
+ *               unchanged, rd tightens; >½ raises μ, <½ lowers it). Opponent RD
+ *               = the witness's trust→φ; g(φ) does the weighting natively.
+ *   score     = the witness's tanh outcome ½(1+tanh(m/M)), consumed in flight —
+ *               never persisted, never re-derived from a rating.
+ *   games     = observation_count: each occurrence is one match (Glicko-2
+ *               within a period is order-invariant, so partials are exact).
  *   tau = 0.5. All fixed-point ×1e9. */
 
-/* INCREMENTAL consensus (L3) — the per-ingest-period path. NO TRUNCATE, so
- * cross-model / cross-witness accumulation is preserved: a later ingest that
- * re-witnesses an existing relation accumulates onto the SAME consensus row.
+/* ── THE period accumulation (the one fold; evidence persists as provenance-only rows) ──
  *
- * Touched set: every RELATION IDENTITY (subject, kind, object) whose evidence
- * has last_observed_at > p_since — i.e. observed in this ingest period. For EACH
- * touched relation we RE-ACCUMULATE its consensus from that relation's FULL
- * evidence (every witness, all sources/contexts), using the §10 mapping above:
- * neutral prior + neutral opponent μ + per-witness opponent_rd
- * (trust → φ) + stored score + observation_count replay (generate_series).
- *
- * Why recompute-touched (not prior=current-consensus + only-new-observations):
- * per-relation full re-accumulation is IDEMPOTENT and ORDER-INVARIANT (Glicko-2
- * within a rating period is commutative — pinned in glicko2_aggregate.sql Vector
- * 3). Re-ingesting an identical tuple is an UPSERT-no-op on attestations (R5),
- * so the evidence set is unchanged → the re-accumulation yields the SAME rating
- * → 0 net games, no double-count. A second source witnessing the relation adds an
- * evidence row → it joins the same group → consensus accumulates it and
- * witness_count rises, on the SAME consensus row. (The true "prior = current
- * consensus, add only the period's new observations" delta is a later
- * optimization; recompute-touched is the L3 deliverable.)
- *
- * p_since NULL ⇒ touch everything (equivalent extent to a rebuild, but WITHOUT
- * TRUNCATE — upserts every relation in place). Returns rows touched. */
-CREATE OR REPLACE FUNCTION incremental_consensus(p_since timestamptz DEFAULT NULL)
-    RETURNS bigint LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public AS $$
-DECLARE n bigint;
-BEGIN
-    INSERT INTO consensus (id, subject_id, kind_id, object_id, context_id,
-                           rating, rd, volatility, witness_count, last_observed_at)
-    SELECT consensus_id(g.subject_id, g.kind_id, g.object_id),
-           g.subject_id, g.kind_id, g.object_id, NULL::bytea,
-           (g.acc).rating, (g.acc).rd, (g.acc).volatility,
-           g.witness_count, g.last_observed_at
-    FROM (
-        -- One group per TOUCHED relation identity (subject, kind, object). The
-        -- group spans the relation's FULL evidence (every witnessing source +
-        -- context), not just the rows newer than p_since — full re-accumulation
-        -- is what makes this idempotent + order-invariant. source AND context
-        -- collapse here (both are witnesses, never identity).
-        SELECT a.subject_id, a.kind_id, a.object_id,
-               -- count(*) over the generate_series-EXPANDED rows = Σ observation_count
-               -- (total games). SUM(observation_count) here would be Σn² — each row
-               -- appears n times post-expansion — quadratically inflating multi-game
-               -- witnesses (caught by ConsensusAccumulatingWriterTests equivalence).
-               count(*)                 AS witness_count,
-               MAX(a.last_observed_at)  AS last_observed_at,
-               laplace_glicko2_accumulate(
-                   1500000000000::bigint, 350000000000::bigint, 60000000::bigint,    -- neutral prior (μ, rd, σ)
-                   1500000000000::bigint,                                            -- NEUTRAL opponent μ (the 1500 line)
-                   a.opponent_rd,                                                    -- opponent φ from witness trust
-                   a.score,                                                          -- stored tanh outcome ∈ (0,1)
-                   500000000::bigint                                                 -- tau = 0.5
-               )                       AS acc
-        FROM attestations a
-        -- replay each observation observation_count times: N occurrences = N games
-        CROSS JOIN LATERAL generate_series(1, a.observation_count) AS occ
-        -- restrict to relations TOUCHED this period: any witness newer than p_since.
-        -- IS NOT DISTINCT FROM, not a row-IN: (subj, kind, NULL) IN (...) is
-        -- UNKNOWN under SQL NULL semantics, which silently excluded every
-        -- NULL-object relation from every period materialization (caught by
-        -- ConsensusAccumulatingWriterTests equivalence).
-        WHERE EXISTS (
-            SELECT 1 FROM attestations t
-            WHERE (p_since IS NULL OR t.last_observed_at > p_since)
-              AND t.subject_id = a.subject_id
-              AND t.kind_id    = a.kind_id
-              AND t.object_id IS NOT DISTINCT FROM a.object_id
-        )
-        GROUP BY a.subject_id, a.kind_id, a.object_id
-    ) g
-    ON CONFLICT (id) DO UPDATE SET
-        rating           = EXCLUDED.rating,
-        rd               = EXCLUDED.rd,
-        volatility       = EXCLUDED.volatility,
-        witness_count    = EXCLUDED.witness_count,
-        last_observed_at = EXCLUDED.last_observed_at;
-    GET DIAGNOSTICS n = ROW_COUNT;
-    RETURN n;
-END;
-$$;
-
-COMMENT ON FUNCTION incremental_consensus(timestamptz) IS
-    'INCREMENTAL consensus materialization (L3): re-accumulate consensus ONLY for relations touched since p_since (evidence last_observed_at > p_since), each from its FULL evidence, then INSERT … ON CONFLICT (id) DO UPDATE. NO TRUNCATE → cross-model/cross-witness accumulation preserved on the same consensus row. Per-relation full re-accumulation is idempotent + order-invariant (Glicko-2 is commutative within a period), so re-ingest of an identical tuple is a 0-net-game no-op and a new source raises witness_count on the same row. p_since NULL ⇒ touch all. Returns rows touched. There is NO batch rebuild — consensus accumulates at ingest only.';
-
-/* ── PRODUCTION-MODE period accumulation (consensus-direct; no evidence rows) ──────────────
- *
- * The production writer accumulates per-relation partial aggregates (n games,
+ * The writer accumulates per-relation partial aggregates (n games,
  * Σ score — exact for one period because φ is constant per relation per
  * period) and spills them into a session-scoped staging heap. These two
  * functions own that surface IN THE SUBSTRATE — the application layer calls
@@ -188,10 +101,10 @@ COMMENT ON FUNCTION create_period_staging() IS
 
 /* Materialize the period: merge partials per relation (Σ of Σ — exact),
  * verify φ-uniformity (fail loud, never average), then upsert consensus via
- * the SAME §10 mapping as incremental_consensus: prior = current row (neutral
- * when new), neutral opponent, per-witness φ, replay n games whose scores sum
- * EXACTLY to Σs (n−1 at ⌊Σs/n⌋ + one remainder game; v is score-independent
- * and Δ ∝ Σs, so this equals the true multiset's period update).
+ * the §10 mapping: prior = current row (neutral when new), neutral opponent,
+ * per-witness φ, replay n games whose scores sum EXACTLY to Σs (n−1 at ⌊Σs/n⌋
+ * + one remainder game; v is score-independent and Δ ∝ Σs, so this equals the
+ * true multiset's period update).
  *
  * SET session_replication_role = replica: per-row RI triggers are redundant
  * here — every staged relation id entered through the writer's set-based
@@ -224,10 +137,10 @@ BEGIN
         FROM consensus_period_staging s
         GROUP BY s.subject_id, s.kind_id, s.object_id
     )
-    INSERT INTO consensus (id, subject_id, kind_id, object_id, context_id,
+    INSERT INTO consensus (id, subject_id, kind_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)
     SELECT consensus_id(f.subject_id, f.kind_id, f.object_id),
-           f.subject_id, f.kind_id, f.object_id, NULL::bytea,
+           f.subject_id, f.kind_id, f.object_id,
            (f.acc).rating, (f.acc).rd, (f.acc).volatility,
            COALESCE(c0.witness_count, 0) + f.games,
            f.last_ts

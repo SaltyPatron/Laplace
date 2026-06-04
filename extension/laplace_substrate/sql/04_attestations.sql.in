@@ -1,21 +1,17 @@
-/* 04_attestations.sql.in — the EVIDENCE layer: per-witness Glicko-2 OBSERVATIONS
- * (per + + ARCHITECTURE.md §10).
+/* 04_attestations.sql.in — the EVIDENCE layer. EVIDENCE IS PROVENANCE.
  *
- * Each row is ONE witness observation per (subject, kind, object, source,
- * context) tuple — a match the relation plays against a neutral baseline
- * opponent. It is NOT accumulated state: the relation is the player, the witness
- * is the match. The accumulated Glicko-2 state (rating/rd/volatility) lives on
- * the `consensus` table (one row per (subject, kind, object), source + context
- * out), materialized incrementally per ingest period (incremental_consensus,
- * driven by the writer at period end — never a batch rebuild) over THIS evidence.
+ * Each row records THAT a witness witnessed: which relation (subject, kind,
+ * object), which source, which circuit instance (context = the model
+ * layer/head witness entity), when, how many games, and whether it confirmed
+ * or refuted (outcome — a CLASS, never a magnitude).
  *
- * The observation (ARCHITECTURE.md §10, DERIVED — no tiers, no trust classes):
- *   score       = ½(1 + tanh(signed_m / M)) ∈ (0,1)  — signed magnitude → outcome
- *                 (+ → win/confirm/attract, − → loss/refute/repel, 0 → ½ draw)
- *   opponent_rd = witness weight (kind_rank × source_trust × tenant_trust) mapped
- *                 to opponent precision φ (trusted → low φ → g(φ)≈1; crank → high
- *                 φ → g(φ)≈0). Glicko's own g(φ) does the weighting — no multiplier.
- *   arena_m     = the per-arena scale M actually used (audit / interpretability).
+ * It is NEVER a value channel: the witness's magnitude is testimony, consumed
+ * into the consensus accumulation AT INGEST (the writer's period partials →
+ * materialize_period_consensus) and not persisted. A stored per-witness score
+ * is mathematically invertible to the weight — recording raw weights wearing
+ * the evidence layer as a costume — and is banned. The accumulated Glicko-2
+ * state (rating/rd/volatility) lives on the `consensus` table (one row per
+ * (subject, kind, object), source + context out of identity).
  *
  * id is content-addressed BLAKE3-128 of the 5-tuple — stable across re-
  * observation; repeated assertions are UPSERT-no-op idempotent (R5). */
@@ -27,26 +23,20 @@ CREATE TABLE attestations (
     object_id         bytea                  REFERENCES entities(id),
     source_id         bytea         NOT NULL REFERENCES entities(id),
     context_id        bytea                  REFERENCES entities(id),
-    score             bigint        NOT NULL CHECK (score >= 0 AND score <= 1000000000),
-    opponent_rd       bigint        NOT NULL CHECK (opponent_rd > 0),
-    arena_m           bigint        NOT NULL DEFAULT 0 CHECK (arena_m >= 0),
+    outcome           smallint      NOT NULL CHECK (outcome IN (0, 1, 2)),
     last_observed_at  timestamptz   NOT NULL,
     observation_count bigint        NOT NULL DEFAULT 1 CHECK (observation_count >= 0),
     UNIQUE NULLS NOT DISTINCT (subject_id, kind_id, object_id, source_id, context_id)
 );
 
 COMMENT ON TABLE attestations IS
-    'EVIDENCE layer: per-witness Glicko-2 OBSERVATIONS, one row per (subject, kind, object, source, context). NOT accumulated state — each row is one match (score vs a neutral baseline opponent, weighted by opponent precision from witness trust). The accumulated rating/rd/volatility live on the consensus table, materialized incrementally per ingest period (incremental_consensus) over these observations (ARCHITECTURE.md §10). Repeated assertions are UPSERT-no-op idempotent.';
+    'EVIDENCE layer = PROVENANCE: one row per (subject, kind, object, source, context) recording WHO witnessed the relation (model layer/head in context_id), when, how many games, and the dissent record (outcome class). Never a value channel — the witness''s magnitude is consumed into the consensus accumulation at ingest and not persisted. The accumulated rating/rd/volatility live on the consensus table. Repeated assertions are UPSERT-no-op idempotent.';
 
 COMMENT ON COLUMN attestations.id IS
     'Content-addressed BLAKE3-128 of canonical (subject_id, kind_id, object_id, source_id, context_id) bytes. Stable across re-observation; same tuple -> same id regardless of insertion order.';
 COMMENT ON COLUMN attestations.kind_id IS
-    'FK to entities(id) -- the kind entity (typed transform vocabulary). Kind significance enters the observation as kind_rank inside opponent_rd, NOT as a tier on the kind.';
-COMMENT ON COLUMN attestations.score IS
-    'Glicko-2 match outcome ½(1+tanh(signed_m/M)) ∈ (0,1], int64 fixed-point ×1e9. +magnitude → win (confirm/attract), −magnitude → loss (refute/repel), 0 → ½ (draw). Signed: dissent is a weighted loss, never discarded.';
-COMMENT ON COLUMN attestations.opponent_rd IS
-    'Opponent rating deviation (Glicko φ), int64 fixed-point ×1e9, derived from witness weight = kind_rank × source_trust × tenant_trust. Trusted witness → low φ (g(φ)≈1, full weight); crank → high φ (g(φ)≈0, discounted). The g(φ) machinery IS the trust weighting.';
-COMMENT ON COLUMN attestations.arena_m IS
-    'Per-arena magnitude scale M used to compute score, int64 fixed-point ×1e9. Audit/interpretability only — measured from the arena''s own magnitude distribution at ingest, not a hand-set constant. 0 for categorical (tanh-free) observations.';
+    'FK to entities(id) -- the kind entity (typed transform vocabulary). Kind significance enters the consensus match as kind_rank inside the witness weight, NOT as a tier on the kind and NOT as a persisted value here.';
+COMMENT ON COLUMN attestations.outcome IS
+    'The dissent record as a CLASS, never a magnitude: 0 = refute (the witness''s testimony was a loss), 1 = draw, 2 = confirm (a win). Derived from the sign of the testimony; the magnitude itself is consumed into consensus at ingest and never persisted.';
 
 SELECT pg_extension_config_dump('attestations', '');

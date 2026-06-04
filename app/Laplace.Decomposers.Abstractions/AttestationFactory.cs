@@ -87,21 +87,25 @@ public static class AttestationFactory
                              observationCount: observationCount);
 
     /// <summary>Magnitude-weighted observation. The magnitude is the arena's SIGNED
-    /// strength; <paramref name="floor"/> is the per-arena scale M (tanh(m/M)); the
-    /// witness weight is kind_rank × source_trust (× tenant_trust = 1 until S5).</summary>
+    /// strength; <paramref name="arenaScale"/> is the per-arena scale M (tanh(m/M))
+    /// — a scale, never a value-dropping floor; the witness weight is
+    /// kind_rank × source_trust (× tenant_trust = 1 until S5).</summary>
     public static AttestationRow CreateWeighted(
         Hash128 subject, Hash128 kindId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
-        double kindRank, double sourceTrust, double magnitude, double floor, long observationCount = 1)
+        double kindRank, double sourceTrust, double magnitude, double arenaScale, long observationCount = 1)
         => CreateObservation(subject, kindId, obj, sourceId, contextId,
-                             signedMagnitude: magnitude, arenaScale: floor,
+                             signedMagnitude: magnitude, arenaScale: arenaScale,
                              witnessWeight: kindRank * sourceTrust, observationCount: observationCount);
 
     private static AttestationRow Build(
         Hash128 subject, Hash128 kindId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
         double score, double witnessWeight, double arenaScale, long observationCount)
     {
+        _ = arenaScale;   // consumed into the score upstream; never persisted (values are testimony)
         double s = score < 0.0 ? 0.0 : (score > 1.0 ? 1.0 : score);
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        long scoreFp = (long)(s * Glicko2.FpScale);
+        const long half = 500_000_000L;   // ½ in fixed-point ×1e9
         return new AttestationRow(
             Id:                   ComputeId(subject, kindId, obj, sourceId, contextId),
             SubjectId:            subject,
@@ -109,11 +113,17 @@ public static class AttestationFactory
             ObjectId:             obj,
             SourceId:             sourceId,
             ContextId:            contextId,
-            ScoreFp1e9:           (long)(s * Glicko2.FpScale),
-            OpponentRdFp1e9:      (long)(WitnessPhi(witnessWeight) * Glicko2.FpScale),
-            ArenaMFp1e9:          (long)(Math.Max(0.0, arenaScale) * Glicko2.FpScale),
+            // The persisted dissent record — a CLASS from the testimony's
+            // direction, never its magnitude (sign decides; magnitude consumed).
+            Outcome:              scoreFp > half ? AttestationOutcome.Confirm
+                                : scoreFp < half ? AttestationOutcome.Refute
+                                                 : AttestationOutcome.Draw,
             LastObservedAtUnixUs: nowUs,
-            ObservationCount:     observationCount);
+            ObservationCount:     observationCount,
+            // In-flight testimony — consumed by the consensus accumulation at
+            // ingest; the writer's COPY layout never persists these.
+            ScoreFp1e9:           scoreFp,
+            OpponentRdFp1e9:      (long)(WitnessPhi(witnessWeight) * Glicko2.FpScale));
     }
 
     /// <summary>

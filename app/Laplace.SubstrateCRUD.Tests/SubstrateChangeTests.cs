@@ -23,8 +23,8 @@ public class SubstrateChangeTests
             null, 0, null, null, 0));
         b.AddAttestation(new AttestationRow(
             H(4), H(1), H(50), H(2), src, null,
-            // score (1.0), opponent_rd, arena_m, last_observed, observation_count
-            1_000_000_000L, 30_000_000_000L, 0L, 0L, 1L));
+            // outcome, last_observed, observation_count, in-flight score + φ
+            AttestationOutcome.Confirm, 0L, 1L, 1_000_000_000L, 30_000_000_000L));
 
         var change = b.Build();
         Assert.Equal(2, change.Entities.Length);
@@ -116,7 +116,7 @@ public class SubstrateChangeTests
     public void AttestationRow_ObjectAndContextNullable()
     {
         var a = new AttestationRow(H(1), H(2), H(3), null, H(4), null,
-            0, 1, 1, 0, 1);
+            AttestationOutcome.Draw, 0, 1, 500_000_000L, 30_000_000_000L);
         Assert.Null(a.ObjectId);
         Assert.Null(a.ContextId);
     }

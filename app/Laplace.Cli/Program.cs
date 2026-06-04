@@ -105,28 +105,12 @@ internal static class Program
 
     private static int Fail(string m) { Console.Error.WriteLine(m); return 2; }
 
-    // Incrementally materialize consensus for relations TOUCHED this ingest period
-    // (decision #3 / L3): re-accumulate Glicko-2 for every relation whose evidence
-    // landed since the WATERMARK, in place (INSERT … ON CONFLICT DO UPDATE, no
-    // TRUNCATE). The period boundary is the substrate's own watermark —
-    // max(consensus.last_observed_at), the newest evidence ever folded — NOT the
-    // current run's start time: a killed run leaves evidence older than any later
-    // run's start, and a start-time window would orphan it forever. The watermark
-    // window self-heals: the next completed period folds everything unfolded.
-    // Empty consensus → NULL → fold all touched relations (correct first fold).
-    // This is the per-ingest-period path the law requires — consensus accumulates
-    // AT INGEST, never via a batch pass. (The TRUNCATE-and-replay
-    // rebuild_consensus and its CLI command were removed by design; backfill/
-    // drain over the evidence set is forbidden on this substrate.)
-    private static async Task<long> MaterializeConsensusPeriodAsync(NpgsqlDataSource ds)
-    {
-        await using var conn = await ds.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 0;  // Glicko-2 accumulation over touched relations can exceed the 30s default
-        cmd.CommandText = "SELECT laplace.incremental_consensus("
-                        + "(SELECT max(last_observed_at) FROM laplace.consensus))";
-        return (long)(await cmd.ExecuteScalarAsync() ?? 0L);
-    }
+    // Consensus accumulates AT INGEST through ConsensusAccumulatingWriter (the
+    // testimony is consumed into period partials; the period materializes via
+    // laplace.materialize_period_consensus with prior = the current row). There
+    // is NO evidence-replay fold: evidence is PROVENANCE-only (no values), so
+    // re-accumulating consensus from evidence is impossible by construction —
+    // and was the forbidden backfill class anyway.
 
     // === svd-exact-bench: prove tensor_svd_truncate factors a REAL tensor fp-exactly (no DB) ===
     // Plan gate G2.1. Model dir resolves by convention when omitted: $LAPLACE_TINYLLAMA_DIR,
@@ -313,42 +297,46 @@ internal static class Program
             if (n == 0) Console.WriteLine("    (none)");
         }
 
-        // Raw EVIDENCE neighborhood — laplace.attestations_out/_in(id): per-witness observations
-        // (score = ½(1+tanh(m/M)), opponent_rd = trust→φ, arena_m = M), with source provenance.
+        // Raw EVIDENCE neighborhood — laplace.attestations_out/_in(id): PROVENANCE —
+        // who witnessed (source, circuit context), outcome class, games. No values;
+        // strength is the consensus reads above.
+        static string Outc(short o) => o switch { 0 => "refute", 1 => "draw", _ => "confirm" };
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT kind_id, object_id, source_id, score, opponent_rd, arena_m, observation_count "
+            cmd.CommandText = "SELECT kind_id, object_id, source_id, context_id, outcome, observation_count "
                             + "FROM laplace.attestations_out(@id)";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
             await using var r = await cmd.ExecuteReaderAsync();
-            Console.WriteLine("\n  OUTGOING evidence (per-witness observations):");
+            Console.WriteLine("\n  OUTGOING evidence (provenance — who witnessed):");
             int n = 0;
             while (await r.ReadAsync())
             {
                 n++;
                 var kind = ReadHash16((byte[])r[0]);
                 var obj  = r.IsDBNull(1) ? Hash128.Zero : ReadHash16((byte[])r[1]);
-                Console.WriteLine($"    [{Hex(kind)[..12]}…] → {Render(obj),-24}  score={r.GetInt64(3)/1e9:F3} oppRd={r.GetInt64(4)/1e9:F1} M={r.GetInt64(5)/1e9:F4}"
-                    + $"  src={Hex(ReadHash16((byte[])r[2]))[..10]}…  obs={r.GetInt64(6)}");
+                string ctx = r.IsDBNull(3) ? "-" : Hex(ReadHash16((byte[])r[3]))[..10] + "…";
+                Console.WriteLine($"    [{Hex(kind)[..12]}…] → {Render(obj),-24}  {Outc(r.GetInt16(4))}"
+                    + $"  src={Hex(ReadHash16((byte[])r[2]))[..10]}…  ctx={ctx}  games={r.GetInt64(5)}");
             }
             if (n == 0) Console.WriteLine("    (none)");
         }
 
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT subject_id, kind_id, source_id, score, opponent_rd, arena_m "
+            cmd.CommandText = "SELECT subject_id, kind_id, source_id, context_id, outcome, observation_count "
                             + "FROM laplace.attestations_in(@id)";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
             await using var r = await cmd.ExecuteReaderAsync();
-            Console.WriteLine("\n  INCOMING evidence (per-witness observations):");
+            Console.WriteLine("\n  INCOMING evidence (provenance — who witnessed):");
             int n = 0;
             while (await r.ReadAsync())
             {
                 n++;
                 var subj = ReadHash16((byte[])r[0]);
                 var kind = ReadHash16((byte[])r[1]);
-                Console.WriteLine($"    {Render(subj),-24} [{Hex(kind)[..12]}…] → here  score={r.GetInt64(3)/1e9:F3} oppRd={r.GetInt64(4)/1e9:F1} M={r.GetInt64(5)/1e9:F4}"
-                    + $"  src={Hex(ReadHash16((byte[])r[2]))[..10]}…");
+                string ctx = r.IsDBNull(3) ? "-" : Hex(ReadHash16((byte[])r[3]))[..10] + "…";
+                Console.WriteLine($"    {Render(subj),-24} [{Hex(kind)[..12]}…] → here  {Outc(r.GetInt16(4))}"
+                    + $"  src={Hex(ReadHash16((byte[])r[2]))[..10]}…  ctx={ctx}  games={r.GetInt64(5)}");
             }
             if (n == 0) Console.WriteLine("    (none)");
         }
@@ -431,25 +419,18 @@ internal static class Program
             }
         }
 
-        /* PRODUCTION DEFAULT: consensus accumulates AT INGEST — evidence
-         * recording DISABLED. The per-witness Glicko-2 matches (neutral
-         * opponent, trust→φ, per-arena M already in each score) accumulate per
-         * relation and the period materializes into consensus at the clean end
-         * of the run; ZERO evidence rows are written. Research instances that
-         * want the per-witness receipts for interpretability/audit run with
-         * LAPLACE_EVIDENCE=record. */
-        bool recordEvidence = string.Equals(
-            Environment.GetEnvironmentVariable("LAPLACE_EVIDENCE"), "record",
-            StringComparison.OrdinalIgnoreCase);
+        /* THE ONE MODE: consensus accumulates AT INGEST (the testimony — score,
+         * trust→φ — is consumed into the period accumulation) and evidence
+         * persists as PROVENANCE-ONLY rows (identity 5-tuple, outcome class,
+         * games, time — never a value). No mode knob: evidence is provenance,
+         * always recorded; values, never. */
         var inner = new NpgsqlSubstrateWriter(ds);
-        ConsensusAccumulatingWriter? accumulator = recordEvidence ? null : new ConsensusAccumulatingWriter(inner, ds);
-        ISubstrateWriter writer = (ISubstrateWriter?)accumulator ?? inner;
+        var accumulator = new ConsensusAccumulatingWriter(inner, ds);
+        ISubstrateWriter writer = accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
         var loggerFactory = ConsoleLoggerProvider.Factory();
         var runner = new IngestRunner(writer, reader, loggerFactory);
-        Console.WriteLine(recordEvidence
-            ? "mode: RESEARCH (LAPLACE_EVIDENCE=record) — per-witness evidence recorded"
-            : "mode: PRODUCTION — consensus accumulates at ingest; evidence recording disabled");
+        Console.WriteLine("mode: consensus accumulates at ingest; evidence = provenance-only rows");
 
         // Model ingestion is mechanical and embarrassingly parallel: thousands
         // of weight-tensor intents. Two levers, both env-tunable (same
@@ -493,7 +474,6 @@ internal static class Program
                 Console.Error.WriteLine($"  {f}");
             return 1;
         }
-        if (accumulator is not null)
         {
             // Materialize the period: ONE set-based upsert of every accumulated
             // relation, prior = current consensus row. Runs only here — after a
@@ -504,12 +484,7 @@ internal static class Program
             Console.WriteLine(
                 $"consensus: {materialized:N0} relations materialized from "
                 + $"{accumulator.ObservationsAccumulated:N0} matches in {matSw.Elapsed.TotalSeconds:F1}s "
-                + $"(accumulated at ingest; 0 evidence rows)");
-        }
-        else
-        {
-            var touched = await MaterializeConsensusPeriodAsync(ds);
-            Console.WriteLine($"consensus: {touched:N0} relations materialized (incremental, per-ingest-period)");
+                + $"(accumulated at ingest; evidence = provenance-only)");
         }
         return 0;
     }
@@ -573,7 +548,6 @@ internal static class Program
 
         var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
         var recipe = LlamaRecipeExtractor.Parse(recipePath);
-        var synthSource = ModelDecomposer.SourceForModel(modelDir).Id;   // per-model identity
         int vocab = recipe.VocabSize;
         int dModel = recipe.HiddenSize;
 
@@ -601,206 +575,84 @@ internal static class Program
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
 
-        // ── Build substrate view ──────────────────────────────────────
-        // Per-token consensus for unary kinds: aggregate effective-mu across
-        // ALL unary tensor-calc kinds (EMBEDS / V / O / G / U / D / OUTPUT) by
-        // token. Stream B-minimum: combine via sum; Stream B-complete picks
-        // per-tensor consensus via the architecture template's per-slot policy.
-        Console.WriteLine($"  querying substrate per-token consensus...");
-        double[] perToken = new double[vocab];
-        await using (var conn = await ds.OpenConnectionAsync())
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText =
-                """
-                SELECT subject_id, rating, rd FROM laplace.attestations
-                WHERE source_id = $1
-                  AND kind_id = ANY($2)
-                  AND object_id IS NULL
-                """;
-            cmd.Parameters.AddWithValue(synthSource.ToBytes());
-            var unaryKinds = new[] {
-                ModelDecomposer.EmbedsKind, ModelDecomposer.VProjectsKind,
-                ModelDecomposer.OProjectsKind, ModelDecomposer.GatesKind,
-                ModelDecomposer.UpProjectsKind, ModelDecomposer.DownProjectsKind,
-                ModelDecomposer.OutputProjectsKind,
-            }.Select(k => k.ToBytes()).ToArray();
-            cmd.Parameters.AddWithValue(unaryKinds);
-            await using var rdr = await cmd.ExecuteReaderAsync();
-            while (await rdr.ReadAsync())
-            {
-                var subj = Hash128FromBytes((byte[])rdr[0]);
-                long rating = rdr.GetInt64(1);
-                long rdVal  = rdr.GetInt64(2);
-                double effMu = Math.Max(0.0, (rating - 2.0 * rdVal) / 1e9);
-                if (entityToToken.TryGetValue(subj, out int t) && t < vocab)
-                    perToken[t] += effMu;
-            }
-        }
+        // ── Read the CONSENSUS circuit arenas (re-export reads consensus —
+        //    one signed row per relation, source AND layer/head out of identity
+        //    — never the per-witness evidence). The signed score map inverts to
+        //    a signed strength m̂ per relation (ConsensusReExport.SignedStrength).
+        Console.WriteLine("  querying consensus circuit arenas...");
+        var attends   = await ConsensusReExport.ReadArenaAsync(ds, ModelDecomposer.AttendsKind,     entityToToken, vocab);
+        var ovRelates = await ConsensusReExport.ReadArenaAsync(ds, ModelDecomposer.OvRelatesKind,   entityToToken, vocab);
+        var completes = await ConsensusReExport.ReadArenaAsync(ds, ModelDecomposer.CompletesToKind, entityToToken, vocab);
+        Console.WriteLine($"  consensus arenas: ATTENDS={attends.Count:N0} OV_RELATES={ovRelates.Count:N0} "
+                        + $"COMPLETES_TO={completes.Count:N0}");
+        if (attends.Count + ovRelates.Count + completes.Count == 0)
+            return Fail("no circuit consensus in the substrate — ingest a model first");
 
-        // Q_PROJECTS sparse adjacency (subject, object, effective-mu)
-        Console.WriteLine($"  querying substrate Q_PROJECTS adjacency...");
-        var qkRows = new List<int>();
-        var qkCols = new List<int>();
-        var qkVals = new List<double>();
-        await using (var conn = await ds.OpenConnectionAsync())
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText =
-                """
-                SELECT subject_id, object_id, rating, rd FROM laplace.attestations
-                WHERE source_id = $1 AND kind_id = $2 AND object_id IS NOT NULL
-                """;
-            cmd.Parameters.AddWithValue(synthSource.ToBytes());
-            cmd.Parameters.AddWithValue(ModelDecomposer.QProjectsKind.ToBytes());
-            await using var rdr = await cmd.ExecuteReaderAsync();
-            while (await rdr.ReadAsync())
-            {
-                var subj = Hash128FromBytes((byte[])rdr[0]);
-                var obj  = Hash128FromBytes((byte[])rdr[1]);
-                long rating = rdr.GetInt64(2);
-                long rdVal  = rdr.GetInt64(3);
-                double effMu = Math.Max(0.0, (rating - 2.0 * rdVal) / 1e9);
-                if (effMu <= 0) continue;
-                if (entityToToken.TryGetValue(subj, out int qi)
-                  && entityToToken.TryGetValue(obj, out int kj)
-                  && qi < vocab && kj < vocab)
-                {
-                    qkRows.Add(qi); qkCols.Add(kj); qkVals.Add(effMu);
-                }
-            }
-        }
-
-        // NORMALIZES single-aggregate (unary, subject = recipe entity, object = NULL)
-        double normAgg = 0.0;
-        await using (var conn = await ds.OpenConnectionAsync())
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText =
-                """
-                SELECT rating, rd FROM laplace.attestations
-                WHERE source_id = $1 AND kind_id = $2 AND subject_id = $3
-                """;
-            cmd.Parameters.AddWithValue(synthSource.ToBytes());
-            cmd.Parameters.AddWithValue(ModelDecomposer.NormalizesKind.ToBytes());
-            cmd.Parameters.AddWithValue(recipe.RecipeEntityId.ToBytes());
-            await using var rdr = await cmd.ExecuteReaderAsync();
-            if (await rdr.ReadAsync())
-            {
-                long rating = rdr.GetInt64(0);
-                long rdVal  = rdr.GetInt64(1);
-                normAgg = Math.Max(0.0, (rating - 2.0 * rdVal) / 1e9);
-            }
-        }
-
-        Console.WriteLine($"  consensus: per-token non-zero={perToken.Count(v => v > 0)} / {vocab}, "
-                        + $"Q_PROJECTS pairs={qkRows.Count}, norm_aggregate={normAgg:F3}");
-
-        var qkRowsArr = qkRows.ToArray();
-        var qkColsArr = qkCols.ToArray();
-        var qkValsArr = qkVals.ToArray();
-
-        // ── Spectral basis: eigenmaps → Procrustes → gram matrices ────────
-        // basisTargetDim is capped well below dModel: computing dModel=2048
-        // eigenpairs of a 32K-node sparse graph via Lanczos requires O(4K×32K)
-        // workspace and rarely converges in CI time. 64 eigenpairs converge in
-        // seconds. materialize_token_axis cycles the basis mod basisTargetDim so
-        // every hidden dimension is still substrate-derived, just with period-64
-        // spectral texture.
+        // ── Spectral token basis over the union of all arenas ─────────────
+        // basisDim is capped well below dModel: computing dModel=2048 eigenpairs
+        // of a 32K-node sparse graph via Lanczos requires O(4K×32K) workspace and
+        // rarely converges in CI time; 64 eigenpairs converge in seconds. The
+        // basis cycles mod basisDim into d_model, so every hidden dimension is
+        // substrate-derived. (Calibration constant — §10.)
         const int EigenMaxDim = 64;
-        int basisTargetDim = Math.Min(dModel, EigenMaxDim);
+        int basisDim = Math.Min(dModel, EigenMaxDim);
+        Console.WriteLine($"  computing spectral token basis (eigenmaps target_dim={basisDim})...");
+        var sw0 = Stopwatch.StartNew();
+        double[]? basis = ConsensusReExport.BuildBasis(vocab, basisDim, attends, ovRelates, completes);
+        if (basis is null)
+            return Fail("spectral token basis unavailable (eigenmaps failed or empty consensus graph)");
+        Console.WriteLine($"  spectral token basis ready in {sw0.Elapsed.TotalSeconds:F1}s (basis_dim={basisDim})");
 
-        double[]? tokenBasis   = null;
-        double[]? unaryGram    = null;
-        double[]? binaryGram   = null;
-        if (qkRowsArr.Length > 0)
+        // Procrustes alignment diagnostic: the basis vs the canonical S³ token
+        // placements — verifies the spectral frame carries the placement geometry.
         {
-            Console.WriteLine($"  computing spectral token basis (eigenmaps target_dim={basisTargetDim}, nnz={qkRowsArr.Length})...");
-            var sw0 = Stopwatch.StartNew();
-            double[] basis = new double[(long)vocab * basisTargetDim];
-            int eigenRc;
+            var sortedTokens = tokens.OrderBy(t => t.TokenId).ToArray();
+            double[] targetPts = new double[(long)vocab * 4];
+            for (int t = 0; t < vocab && t < sortedTokens.Length; t++)
+            {
+                var tok = sortedTokens[t];
+                if (!tok.HasContentCoord) continue;
+                targetPts[t * 4 + 0] = tok.ContentX;
+                targetPts[t * 4 + 1] = tok.ContentY;
+                targetPts[t * 4 + 2] = tok.ContentZ;
+                targetPts[t * 4 + 3] = tok.ContentM;
+            }
+            IntPtr procT;
             unsafe
             {
-                fixed (int*    qrPtr    = qkRowsArr)
-                fixed (int*    qcPtr    = qkColsArr)
-                fixed (double* qvPtr    = qkValsArr)
-                fixed (double* basisPtr = basis)
-                    eigenRc = DynamicsInterop.LaplacianEigenmapsFromSparseGraph(
-                        qrPtr, qcPtr, qvPtr,
-                        (nuint)qkRowsArr.Length, (nuint)vocab, (nuint)basisTargetDim,
-                        basisPtr);
+                fixed (double* bPtr = basis)
+                fixed (double* tPtr = targetPts)
+                    procT = DynamicsInterop.ProcrustesFit(bPtr, (nuint)vocab, (nuint)basisDim, tPtr);
             }
-            if (eigenRc != 0)
+            if (procT != IntPtr.Zero)
             {
-                Console.Error.WriteLine($"  WARNING: eigenmaps returned {eigenRc}; basis unavailable");
-            }
-            else
-            {
-                // GramSchmidt removed: Spectra's SymEigsShiftSolver produces orthonormal
-                // eigenvectors by construction (symmetric matrix). A GS call with
-                // n_vecs=basisTargetDim, dim=vocab on the [vocab×basisTargetDim] layout
-                // would scramble the data due to layout mismatch.
-
-                // Procrustes: align basis[vocab × basisTargetDim] to canonical S³ positions
-                var sortedTokens = tokens.OrderBy(t => t.TokenId).ToArray();
-                double[] targetPts = new double[(long)vocab * 4];
-                for (int t = 0; t < vocab && t < sortedTokens.Length; t++)
-                {
-                    var tok = sortedTokens[t];
-                    if (!tok.HasContentCoord) continue;
-                    targetPts[t * 4 + 0] = tok.ContentX;
-                    targetPts[t * 4 + 1] = tok.ContentY;
-                    targetPts[t * 4 + 2] = tok.ContentZ;
-                    targetPts[t * 4 + 3] = tok.ContentM;
-                }
-                IntPtr procT;
-                unsafe
-                {
-                    fixed (double* bPtr = basis)
-                    fixed (double* tPtr = targetPts)
-                        procT = DynamicsInterop.ProcrustesFit(bPtr, (nuint)vocab, (nuint)basisTargetDim, tPtr);
-                }
-                if (procT != IntPtr.Zero)
-                {
-                    Console.WriteLine($"  Procrustes residual: {DynamicsInterop.ProcrustesResidual(procT):F4}");
-                    DynamicsInterop.ProcrustesFree(procT);
-                }
-
-                // Gram matrices: [basisTargetDim × basisTargetDim] — interior tensors
-                // cycle mod basisTargetDim so any shape is handled.
-                double[] uGram = new double[(long)basisTargetDim * basisTargetDim];
-                double[] bGram = new double[(long)basisTargetDim * basisTargetDim];
-                int gramRc;
-                unsafe
-                {
-                    fixed (double* bPtr  = basis)
-                    fixed (double* ptPtr = perToken)
-                    fixed (int*    qrPtr = qkRowsArr)
-                    fixed (int*    qcPtr = qkColsArr)
-                    fixed (double* qvPtr = qkValsArr)
-                    fixed (double* ugPtr = uGram)
-                    fixed (double* bgPtr = bGram)
-                        gramRc = SynthInterop.ComputeSubstrateGram(
-                            bPtr, ptPtr, (nuint)vocab, (nuint)basisTargetDim,
-                            qrPtr, qcPtr, qvPtr, (nuint)qkRowsArr.Length,
-                            ugPtr, bgPtr);
-                }
-                if (gramRc == 0) { unaryGram = uGram; binaryGram = bGram; }
-                else Console.Error.WriteLine($"  WARNING: compute_substrate_gram returned {gramRc}; interior tensors use fallback");
-
-                tokenBasis = basis;
-                Console.WriteLine($"  spectral token basis ready in {sw0.Elapsed.TotalSeconds:F1}s (basis_dim={basisTargetDim})");
+                Console.WriteLine($"  Procrustes residual: {DynamicsInterop.ProcrustesResidual(procT):F4}");
+                DynamicsInterop.ProcrustesFree(procT);
             }
         }
 
-        // ── Write GGUF via materialize_tensor per slot ─────────────────
+        // ── Factor each arena: B = Eᵀ·M·E, thin SVD (EXPORT-ONLY kernel) ──
+        // Re-export = the ingestion run backward: each consensus circuit is
+        // SVD-factored through the spectral token basis; the mold's slots are
+        // filled from the singular components at the recipe rank.
+        var fQk  = ConsensusReExport.FactorArena(basis, vocab, basisDim, attends);
+        var fOv  = ConsensusReExport.FactorArena(basis, vocab, basisDim, ovRelates);
+        var fFfn = ConsensusReExport.FactorArena(basis, vocab, basisDim, completes);
+        Console.WriteLine($"  arena factors: ATTENDS rank={fQk?.Rank ?? 0}, OV_RELATES rank={fOv?.Rank ?? 0}, "
+                        + $"COMPLETES_TO rank={fFfn?.Rank ?? 0}");
+
+        // ── Write GGUF: fill each mold slot from the arena factors ─────────
         var gguf = SynthInterop.GgufWriterCreate(outputPath);
         if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
         WriteGgufMetadata(gguf, recipe, tokens, modelDir);
 
         var sw = Stopwatch.StartNew();
         int tensorsDone = 0;
-        int rcArr = 0;
+
+        int nHeads = recipe.NumHeads, nKv = recipe.NumKvHeads;
+        int headDim = dModel / Math.Max(1, nHeads);
+        int qPerKv  = nHeads / Math.Max(1, nKv);
+        int interm  = recipe.IntermediateSize;
 
         for (int i = 0; i < tensorCount; i++)
         {
@@ -814,14 +666,15 @@ internal static class Program
                 dtype = sp.Dtype;
             }
             long nElem = (long)rows * (long)Math.Max(1UL, cols);
-            byte[] tensorBytes = new byte[nElem * (dtype == 0 ? 4L : 2L)];
+            var vals = new float[nElem];
 
-            rcArr = MaterializeOneTensor(tmplHandle, specs, i, perToken, vocab,
-                qkRowsArr, qkColsArr, qkValsArr, normAgg,
-                tokenBasis, unaryGram, binaryGram, basisTargetDim,
-                tensorBytes);
-            if (rcArr != 0)
-                Console.Error.WriteLine($"  materialize_tensor({name}) returned {rcArr}; tensor zero-filled");
+            FillMoldTensor(vals, name, (int)rows, (int)Math.Max(1UL, cols),
+                basis, vocab, basisDim, dModel, nHeads, nKv, headDim, qPerKv, interm,
+                fQk, fOv, fFfn);
+
+            byte[] tensorBytes = dtype == 0
+                ? ConsensusReExport.ToF32Bytes(vals)
+                : ConsensusReExport.ToBf16Bytes(vals);
 
             nuint[] ggufDims = cols > 1 ? [(nuint)cols, (nuint)rows] : [(nuint)rows];
             unsafe
@@ -848,51 +701,94 @@ internal static class Program
     }
 
     /// <summary>
-    /// Synchronous helper for SynthesizeFromSubstrateAsync's per-tensor call.
-    /// Extracted from the async method to keep `&view` / `&spec` taken-of-locals
-    /// out of an async state machine (CS9123 — async state may move locals).
+    /// Fill ONE mold tensor slot from the arena factors — the recipe-rank block
+    /// policy: each (layer, kv-group) takes its singular-component block from
+    /// the arena's SVD; q/k (v/o, up/down) share the block so the contracted
+    /// pair reproduces that block's share of the consensus operator. Norms fill
+    /// at 1.0 (runtime scaling); the SwiGLU gate fills with the up factor
+    /// (gating is runtime, never attested — recipe policy, §10).
     /// </summary>
-    private static unsafe int MaterializeOneTensor(
-        IntPtr tmplHandle, TensorSpec[] specs, int specIndex,
-        double[] perToken, int vocab,
-        int[] qkRowsArr, int[] qkColsArr, double[] qkValsArr,
-        double normAgg,
-        double[]? tokenBasis, double[]? unaryGram, double[]? binaryGram, int basisDim,
-        byte[] outBytes)
+    private static void FillMoldTensor(
+        float[] vals, string name, int rows, int cols,
+        double[] basis, int vocab, int basisDim, int dModel,
+        int nHeads, int nKv, int headDim, int qPerKv, int interm,
+        ConsensusReExport.ArenaFactor? fQk, ConsensusReExport.ArenaFactor? fOv,
+        ConsensusReExport.ArenaFactor? fFfn)
     {
-        // fixed() on a null array is undefined — use 1-element dummies for pinning,
-        // then pass null pointers to C when the optional arrays weren't computed.
-        var basisPin = tokenBasis ?? new double[1];
-        var ugramPin = unaryGram  ?? new double[1];
-        var bgramPin = binaryGram ?? new double[1];
+        int layer = LayerOf(name);
 
-        fixed (double* ptcPtr  = perToken)
-        fixed (int*    qrPtr   = qkRowsArr)
-        fixed (int*    qcPtr   = qkColsArr)
-        fixed (double* qvPtr   = qkValsArr)
-        fixed (double* bPtr    = basisPin)
-        fixed (double* ugPtr   = ugramPin)
-        fixed (double* bgPtr   = bgramPin)
-        fixed (byte*   outPtr  = outBytes)
-        fixed (TensorSpec* specPtr = specs)
+        if (name is "model.embed_tokens.weight" or "lm_head.weight")
         {
-            var view = new SubstrateView
-            {
-                PerTokenConsensus = ptcPtr,
-                Vocab             = (nuint)vocab,
-                PerPairRows       = qrPtr,
-                PerPairCols       = qcPtr,
-                PerPairVals       = qvPtr,
-                PerPairNnz        = (nuint)qkRowsArr.Length,
-                NormAggregate     = normAgg,
-                TokenBasis        = tokenBasis != null ? bPtr  : null,
-                BasisDim          = tokenBasis != null ? (nuint)basisDim : 0,
-                UnaryGram         = unaryGram  != null ? ugPtr : null,
-                BinaryGram        = binaryGram != null ? bgPtr : null,
-            };
-            return SynthInterop.ArchTemplateMaterializeTensor(
-                tmplHandle, &specPtr[specIndex], &view, outPtr);
+            ConsensusReExport.FillEmbedding(vals, basis, vocab, basisDim, dModel);
+            return;
         }
+        if (name.EndsWith("norm.weight", StringComparison.Ordinal))
+        {
+            Array.Fill(vals, 1.0f);   // nonlinearity scaling is runtime, never attested
+            return;
+        }
+        if (layer < 0) return;        // unknown slot — stays zero (absence is signal)
+
+        // Component block per (layer, kv-group): q and k of the same group share
+        // a block (their contraction reproduces it); likewise v/o and up/down.
+        int BlockOf(int kvHead, ConsensusReExport.ArenaFactor f) =>
+            ((layer * nKv + kvHead) * headDim) % f.Rank;
+
+        if (name.EndsWith(".self_attn.q_proj.weight", StringComparison.Ordinal) && fQk is not null)
+        {
+            for (int h = 0; h < nHeads; h++)
+                ConsensusReExport.FillFactorRows(vals, (long)h * headDim * dModel, headDim, dModel,
+                    fQk, BlockOf(h / qPerKv, fQk), useVt: false);
+        }
+        else if (name.EndsWith(".self_attn.k_proj.weight", StringComparison.Ordinal) && fQk is not null)
+        {
+            for (int kv = 0; kv < nKv; kv++)
+                ConsensusReExport.FillFactorRows(vals, (long)kv * headDim * dModel, headDim, dModel,
+                    fQk, BlockOf(kv, fQk), useVt: true);
+        }
+        else if (name.EndsWith(".self_attn.v_proj.weight", StringComparison.Ordinal) && fOv is not null)
+        {
+            for (int kv = 0; kv < nKv; kv++)
+                ConsensusReExport.FillFactorRows(vals, (long)kv * headDim * dModel, headDim, dModel,
+                    fOv, BlockOf(kv, fOv), useVt: false);
+        }
+        else if (name.EndsWith(".self_attn.o_proj.weight", StringComparison.Ordinal) && fOv is not null)
+        {
+            // o_proj is [dModel × nHeads·headDim]: build the row-major transpose
+            // [attnOut × dModel] from the V side, then transpose into the slot.
+            int attnOut = nHeads * headDim;
+            var oT = new float[(long)attnOut * dModel];
+            for (int h = 0; h < nHeads; h++)
+                ConsensusReExport.FillFactorRows(oT, (long)h * headDim * dModel, headDim, dModel,
+                    fOv, BlockOf(h / qPerKv, fOv), useVt: true);
+            for (int r = 0; r < attnOut; r++)
+                for (int d = 0; d < dModel; d++)
+                    vals[(long)d * attnOut + r] = oT[(long)r * dModel + d];
+        }
+        else if ((name.EndsWith(".mlp.up_proj.weight", StringComparison.Ordinal)
+               || name.EndsWith(".mlp.gate_proj.weight", StringComparison.Ordinal)) && fFfn is not null)
+        {
+            ConsensusReExport.FillFactorRows(vals, 0, interm, dModel,
+                fFfn, (layer * headDim) % fFfn.Rank, useVt: false);
+        }
+        else if (name.EndsWith(".mlp.down_proj.weight", StringComparison.Ordinal) && fFfn is not null)
+        {
+            var dT = new float[(long)interm * dModel];
+            ConsensusReExport.FillFactorRows(dT, 0, interm, dModel,
+                fFfn, (layer * headDim) % fFfn.Rank, useVt: true);
+            for (int r = 0; r < interm; r++)
+                for (int d = 0; d < dModel; d++)
+                    vals[(long)d * interm + r] = dT[(long)r * dModel + d];
+        }
+    }
+
+    /// <summary>Layer index from a model.layers.{L}.… tensor name, or -1.</summary>
+    private static int LayerOf(string name)
+    {
+        const string prefix = "model.layers.";
+        if (!name.StartsWith(prefix, StringComparison.Ordinal)) return -1;
+        int dot = name.IndexOf('.', prefix.Length);
+        return dot > 0 && int.TryParse(name.AsSpan(prefix.Length, dot - prefix.Length), out int l) ? l : -1;
     }
 
 
@@ -1163,7 +1059,11 @@ internal static class Program
         LanguageReference.EnsureLoaded();
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
-        var writer = new NpgsqlSubstrateWriter(ds);
+        // THE ONE MODE (same as model ingest): testimony consumed into the
+        // period accumulation; evidence persists as provenance-only rows.
+        var innerWriter = new NpgsqlSubstrateWriter(ds);
+        await using var accumulator = new ConsensusAccumulatingWriter(innerWriter, ds);
+        var writer = (ISubstrateWriter)accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader, ConsoleLoggerProvider.Factory());
 
@@ -1191,8 +1091,9 @@ internal static class Program
             Console.Error.WriteLine($"failures: {result.Failures.Count}");
             return 1;
         }
-        var touched = await MaterializeConsensusPeriodAsync(ds);
-        Console.WriteLine($"consensus: {touched:N0} relations materialized (incremental, per-ingest-period)");
+        var materialized = await accumulator.MaterializeConsensusAsync();
+        Console.WriteLine($"consensus: {materialized:N0} relations materialized "
+                        + $"(accumulated at ingest; evidence = provenance-only)");
         await PrintCountsAsync(ds);
         return 0;
     }

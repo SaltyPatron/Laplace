@@ -1,12 +1,14 @@
--- consensus_signed.sql — ARCHITECTURE.md §10 signed-observation → consensus.
+-- consensus_signed.sql — ARCHITECTURE.md §10 signed-observation → consensus,
+-- through THE fold: period staging → materialize_period_consensus.
 --
--- Guards the exact regressions Cursor flagged:
---   • a CONFIRM witness (score > ½) raises consensus μ ABOVE neutral (1500)
---   • a REFUTE witness (score < ½) lowers consensus μ BELOW neutral
---   • a DRAW (score = ½) leaves μ ≈ neutral
---   • trust enters as opponent φ: a trusted witness (low opponent_rd) moves μ
---     MORE than a crank (high opponent_rd) at the SAME score — not via the score
+-- Guards the signed-consensus law:
+--   • a CONFIRM witness (s > ½) raises consensus μ ABOVE neutral (1500)
+--   • a REFUTE witness (s < ½) lowers consensus μ BELOW neutral
+--   • a DRAW (s = ½) leaves μ ≈ neutral
+--   • trust enters as opponent φ: a trusted witness (low φ) moves μ MORE than
+--     a crank (high φ) at the SAME score — not via the score
 --   • observation_count plays as games: more occurrences ⇒ larger move
+--   • evidence persists as PROVENANCE-ONLY rows (outcome class — no values)
 --
 -- Run inside a transaction and ROLLBACK — leaves no rows. RAISE EXCEPTION on any
 -- failed assertion (non-zero psql exit).
@@ -29,11 +31,12 @@ DECLARE
     o_one    bytea := laplace_hash128_blake3('test/s10/obj_onegame');
     phi_trust bigint := 30000000000;    -- trusted witness opponent φ (30 ×1e9)
     phi_crank bigint := 350000000000;   -- crank witness opponent φ   (350 ×1e9)
-    s_conf   bigint := 900000000;       -- score 0.90 (confirm)
+    s_conf   bigint := 900000000;       -- score 0.90 (confirm) — testimony, staged only
     s_ref    bigint := 100000000;       -- score 0.10 (refute)
     s_draw   bigint := 500000000;       -- score 0.50 (draw)
     mu_conf bigint; mu_ref bigint; mu_draw bigint;
     mu_trust bigint; mu_crank bigint; mu_many bigint; mu_one bigint;
+    n_prov   bigint;
     neutral bigint := 1500000000000;    -- 1500 ×1e9
 BEGIN
     -- entities (self-consistent FKs)
@@ -44,22 +47,36 @@ BEGIN
         (o_trust,0, type_t, src), (o_crank,0, type_t, src),
         (o_games,0, type_t, src), (o_one, 0, type_t, src);
 
-    -- evidence observations (score, opponent_rd, arena_m, observed_at, count)
+    -- EVIDENCE = PROVENANCE: who witnessed, outcome CLASS, games — no values.
     INSERT INTO attestations
         (id, subject_id, kind_id, object_id, source_id, context_id,
-         score, opponent_rd, arena_m, last_observed_at, observation_count)
+         outcome, last_observed_at, observation_count)
     VALUES
-        (laplace_hash128_blake3('a/confirm'), subj, kind, o_conf,  src, NULL, s_conf, phi_trust, 0, now(), 1),
-        (laplace_hash128_blake3('a/refute'),  subj, kind, o_ref,   src, NULL, s_ref,  phi_trust, 0, now(), 1),
-        (laplace_hash128_blake3('a/draw'),    subj, kind, o_draw,  src, NULL, s_draw, phi_trust, 0, now(), 1),
-        (laplace_hash128_blake3('a/trusted'), subj, kind, o_trust, src, NULL, s_conf, phi_trust, 0, now(), 1),
-        (laplace_hash128_blake3('a/crank'),   subj, kind, o_crank, src, NULL, s_conf, phi_crank, 0, now(), 1),
-        (laplace_hash128_blake3('a/many'),    subj, kind, o_games, src, NULL, s_conf, phi_trust, 0, now(), 8),
-        (laplace_hash128_blake3('a/one'),     subj, kind, o_one,   src, NULL, s_conf, phi_trust, 0, now(), 1);
+        (laplace_hash128_blake3('a/confirm'), subj, kind, o_conf,  src, NULL, 2, now(), 1),
+        (laplace_hash128_blake3('a/refute'),  subj, kind, o_ref,   src, NULL, 0, now(), 1),
+        (laplace_hash128_blake3('a/draw'),    subj, kind, o_draw,  src, NULL, 1, now(), 1),
+        (laplace_hash128_blake3('a/trusted'), subj, kind, o_trust, src, NULL, 2, now(), 1),
+        (laplace_hash128_blake3('a/crank'),   subj, kind, o_crank, src, NULL, 2, now(), 1),
+        (laplace_hash128_blake3('a/many'),    subj, kind, o_games, src, NULL, 2, now(), 8),
+        (laplace_hash128_blake3('a/one'),     subj, kind, o_one,   src, NULL, 2, now(), 1);
 
-    -- the per-ingest-period materialization (the only path; the batch
-    -- TRUNCATE-rebuild is removed by design). NULL = all touched relations.
-    PERFORM incremental_consensus(NULL);
+    SELECT count(*) INTO n_prov FROM attestations WHERE kind_id = kind;
+    IF n_prov <> 7 THEN RAISE EXCEPTION 'FAIL: expected 7 provenance rows, got %', n_prov; END IF;
+
+    -- THE fold: the testimony (score, φ) is consumed via the period staging —
+    -- (n games, Σ score) partials per relation — then ONE set-based upsert.
+    PERFORM create_period_staging();
+    INSERT INTO consensus_period_staging
+        (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
+    VALUES
+        (subj, kind, o_conf,  phi_trust, 1, s_conf,     now()),
+        (subj, kind, o_ref,   phi_trust, 1, s_ref,      now()),
+        (subj, kind, o_draw,  phi_trust, 1, s_draw,     now()),
+        (subj, kind, o_trust, phi_trust, 1, s_conf,     now()),
+        (subj, kind, o_crank, phi_crank, 1, s_conf,     now()),
+        (subj, kind, o_games, phi_trust, 8, s_conf * 8, now()),
+        (subj, kind, o_one,   phi_trust, 1, s_conf,     now());
+    PERFORM materialize_period_consensus();
 
     SELECT rating INTO mu_conf  FROM consensus WHERE object_id = o_conf;
     SELECT rating INTO mu_ref   FROM consensus WHERE object_id = o_ref;
@@ -78,7 +95,7 @@ BEGIN
     IF mu_trust <= mu_crank THEN RAISE EXCEPTION 'FAIL: trusted witness did not move μ more than crank (% <= %)', mu_trust, mu_crank; END IF;
     IF mu_many  <= mu_one   THEN RAISE EXCEPTION 'FAIL: more occurrences did not move μ more (% <= %)', mu_many, mu_one; END IF;
 
-    RAISE NOTICE '✓ consensus_signed: confirm>neutral>refute, draw≈neutral, trust→φ moves more, games accumulate';
+    RAISE NOTICE '✓ consensus_signed: confirm>neutral>refute, draw≈neutral, trust→φ moves more, games accumulate, evidence=provenance';
 END $$;
 
 ROLLBACK;

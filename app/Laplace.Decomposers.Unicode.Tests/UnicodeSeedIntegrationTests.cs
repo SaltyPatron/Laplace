@@ -12,14 +12,17 @@ namespace Laplace.Decomposers.Unicode.Tests;
 /// <summary>
 /// End-to-end: UnicodeDecomposer → real NpgsqlSubstrateWriter → live PG with
 /// the laplace extensions, then verify the seeded rows match the perf-cache
-/// (the DB half of; the cross-verify of #49). Runs against the
-/// deployed cluster as <c>laplace_admin</c> (the laplace extensions aren't in
-/// the postgis Docker image, so Testcontainers can't host this — same pattern
-/// as LocalPgFixture in SubstrateCRUD.Tests).
+/// (the DB half of; the cross-verify of #49). Runs against the SHARED dev
+/// database (laplace-dev; LAPLACE_TEST_DB overrides) as <c>laplace_admin</c> —
+/// two databases only (laplace-dev + laplace), never a per-run DB. The seed is
+/// content-addressed and idempotent (ON CONFLICT), so re-running against an
+/// already-seeded substrate converges to the same rows; every assertion is
+/// source-/type-scoped, never a global count.
 /// </summary>
 public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
 {
-    private const string DatabaseName = "laplace_unicode_seed_test";
+    private static readonly string DatabaseName =
+        Environment.GetEnvironmentVariable("LAPLACE_TEST_DB") ?? "laplace-dev";
     private const string PgUser = "laplace_admin";
     private const int TotalCodepoints = 1_114_112;
 
@@ -27,8 +30,6 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        await RunAdmin("dropdb", $"-U {PgUser} --if-exists {DatabaseName}");
-        await RunAdmin("createdb", $"-U {PgUser} -O {PgUser} {DatabaseName}");
         _ds = new NpgsqlDataSourceBuilder($"Host=/var/run/postgresql;Username={PgUser};Database={DatabaseName}").Build();
         await using var conn = await _ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
@@ -42,7 +43,6 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         if (_ds is not null) await _ds.DisposeAsync();
-        await RunAdmin("dropdb", $"-U {PgUser} --if-exists {DatabaseName}");
     }
 
     [Fact]
@@ -98,18 +98,6 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         cmd.CommandText = sql;
         foreach (var (n, v) in ps) cmd.Parameters.AddWithValue(n, v);
         return (long)(await cmd.ExecuteScalarAsync())!;
-    }
-
-    private static async Task RunAdmin(string program, string args)
-    {
-        using var p = Process.Start(new ProcessStartInfo
-        {
-            FileName = program, Arguments = args,
-            RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false,
-        })!;
-        await p.WaitForExitAsync();
-        if (p.ExitCode != 0)
-            throw new InvalidOperationException($"{program} {args} exited {p.ExitCode}: {await p.StandardError.ReadToEndAsync()}");
     }
 
     private sealed class SeedContext(ISubstrateWriter writer, ISubstrateReader reader) : IDecomposerContext

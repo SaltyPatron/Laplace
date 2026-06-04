@@ -166,7 +166,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 if (!seenAtt.Add(a.Id)) continue;   // in DB or already staged this batch
                 stage.AddAttestation(
                     a.Id, a.SubjectId, a.KindId, a.ObjectId, a.SourceId, a.ContextId,
-                    a.ScoreFp1e9, a.OpponentRdFp1e9, a.ArenaMFp1e9,
+                    (short)a.Outcome,
                     a.LastObservedAtUnixUs, a.ObservationCount);
                 Reference(a.SubjectId);
                 Reference(a.KindId);
@@ -406,17 +406,29 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             _                              => stage.AttestationCount,
         };
 
-        // The rows are already deduped to NOVEL-only client-side (the existence check +
-        // in-batch dedup above), so they have NO conflicts — COPY them STRAIGHT into the
-        // real table. No temp staging, no `INSERT … ON CONFLICT` re-check: that promote
-        // (row-by-row conflict checking + a second pass over the rows) was the ~20× cost
-        // vs COPY's bulk index build. The engine's native tuple serialization streams into
-        // the socket: header(19) + tuples(piped through a fixed O(1) window) + trailer(2);
-        // no managed array ever holds the intent. Correct for a single writer (the ingest
-        // default); concurrent writers across connections would need the ON-CONFLICT
-        // promote restored for cross-connection race safety.
+        if (rowCount == 0) return 0;
+
+        // The writer's contract is `ON CONFLICT DO NOTHING` (R5) — idempotent AND
+        // race-tolerant under concurrent writers. The client-side existence check +
+        // in-batch dedup above already shrink the staged set to (believed-)novel rows,
+        // so the set-based promote below sees few-to-zero conflicts in the common case;
+        // it exists to make convergence a property of the WRITE, not an assumption
+        // about who else is writing. COPY streams the engine-emitted tuples into an
+        // ON COMMIT DROP temp table (header(19) + tuples through a fixed O(1) window +
+        // trailer(2); no managed array ever holds the intent), then ONE set-based
+        // `INSERT … SELECT … ON CONFLICT DO NOTHING` promotes into the real table.
+        string stageName = $"_laplace_stage_{tableName}";
+        await using (var ddl = conn.CreateCommand())
+        {
+            ddl.CommandText =
+                $"CREATE TEMP TABLE IF NOT EXISTS {stageName} " +
+                $"(LIKE laplace.{tableName} INCLUDING DEFAULTS) ON COMMIT DROP; " +
+                $"TRUNCATE {stageName};";
+            await ddl.ExecuteNonQueryAsync(ct);
+        }
+
         await using (var stream = await conn.BeginRawBinaryCopyAsync(
-            $"COPY laplace.{tableName} ({cols}) FROM STDIN (FORMAT BINARY)", ct))
+            $"COPY {stageName} ({cols}) FROM STDIN (FORMAT BINARY)", ct))
         {
             await stream.WriteAsync(CopyBinaryHeader, ct);
             if (len > 0)
@@ -432,6 +444,13 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             await stream.WriteAsync(CopyBinaryTrailer, ct);
             await stream.FlushAsync(ct);
         }
-        return rowCount;
+
+        await using (var promote = conn.CreateCommand())
+        {
+            promote.CommandText =
+                $"INSERT INTO laplace.{tableName} ({cols}) " +
+                $"SELECT {cols} FROM {stageName} ON CONFLICT DO NOTHING";
+            return await promote.ExecuteNonQueryAsync(ct);
+        }
     }
 }

@@ -51,7 +51,7 @@ jobs:
       - name: Scan for unflagged banned terms
         # CLAUDE.md and the skeptic agent ARE allowed to mention banned terms.
         # Other files should not mention them except as explicit rejection.
-        # This is advisory for now — refine the allowlist mechanism as needed.
+        # ENFORCING: a gate that never fails is a fake gate.
         run: |
           set +e
           banned_terms=(
@@ -77,4 +77,4 @@ jobs:
             done < <(grep -nH "$term" $files_to_scan 2>/dev/null)
           done
           echo "Total unflagged banned-term occurrences: $violations"
-          # Advisory for now — flip to `exit $violations` once allowlist is mature
+          exit "$violations"

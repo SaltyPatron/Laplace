@@ -62,9 +62,11 @@ public readonly record struct Hash128(ulong Hi, ulong Lo)
         return Blake3(heap);
     }
 
-    /// <summary>Merkle composition: <c>BLAKE3(tier_byte ‖ child_id_bytes)</c>
-    /// over child IDs in given order. Wraps the engine
-    /// <c>hash128_merkle</c>.</summary>
+    /// <summary>Merkle composition: <c>BLAKE3(domain_byte ‖ child_id_bytes)</c>
+    /// over child IDs in given order. TIER IS METADATA, NEVER IDENTITY — the
+    /// <paramref name="tier"/> parameter carries decomposition depth at call
+    /// sites but contributes nothing to the id (same constituents at two strata
+    /// = one entity). Wraps the engine <c>hash128_merkle</c>.</summary>
     public static Hash128 Merkle(byte tier, ReadOnlySpan<Hash128> children)
     {
         Hash128 result;

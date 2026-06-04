@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
-# Cross-boundary integration entry — same gate as integration.yml model-roundtrip job.
+# Cross-boundary integration entry — same gate as integration.yml model-synthesize job.
 set -euo pipefail
-exec "$(cd "$(dirname "$0")" && pwd)/model-roundtrip-ci.sh"
+exec "$(cd "$(dirname "$0")" && pwd)/model-synthesize-ci.sh"

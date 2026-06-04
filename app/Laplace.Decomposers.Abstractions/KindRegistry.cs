@@ -82,17 +82,37 @@ public static class KindRegistry
         ["HAS_LANGUAGE"]            = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
 
         // Taxonomic.
-        ["IS_A"]        = new(KindRank.Taxonomic, Symmetry.Asymmetric, null),
-        ["IS_SENSE_OF"] = new(KindRank.Taxonomic, Symmetry.Asymmetric, null),
+        ["IS_A"]           = new(KindRank.Taxonomic, Symmetry.Asymmetric, null),
+        ["IS_INSTANCE_OF"] = new(KindRank.Taxonomic, Symmetry.Asymmetric, "IS_A"),
+        ["MANNER_OF"]      = new(KindRank.Taxonomic, Symmetry.Asymmetric, "IS_A"),
+        ["IS_SENSE_OF"]    = new(KindRank.Taxonomic, Symmetry.Asymmetric, null),
 
-        // Partitive / attributive.
-        ["HAS_PART"]    = new(KindRank.Partitive, Symmetry.Asymmetric, null),
-        ["HAS_POS"]     = new(KindRank.Partitive, Symmetry.Asymmetric, null),
-        ["HAS_XPOS"]    = new(KindRank.Partitive, Symmetry.Asymmetric, "HAS_POS"),
-        ["HAS_FEATURE"] = new(KindRank.Partitive, Symmetry.Asymmetric, null),
-        ["HAS_SENSE"]   = new(KindRank.Partitive, Symmetry.Asymmetric, null),
-        ["IS_PIXEL_OF"] = new(KindRank.Partitive, Symmetry.Asymmetric, null),
-        ["IS_AT_SAMPLE"]= new(KindRank.Partitive, Symmetry.Asymmetric, null),
+        // Partitive / attributive. Member/substance meronymy are DISTINCT arenas
+        // (preserve distinctions) rolled up to HAS_PART.
+        ["HAS_PART"]      = new(KindRank.Partitive, Symmetry.Asymmetric, null),
+        ["HAS_MEMBER"]    = new(KindRank.Partitive, Symmetry.Asymmetric, "HAS_PART"),
+        ["HAS_SUBSTANCE"] = new(KindRank.Partitive, Symmetry.Asymmetric, "HAS_PART"),
+        ["HAS_ATTRIBUTE"] = new(KindRank.Partitive, Symmetry.Asymmetric, null),
+        ["HAS_PROPERTY"]  = new(KindRank.Partitive, Symmetry.Asymmetric, "HAS_ATTRIBUTE"),
+        ["HAS_A"]         = new(KindRank.Partitive, Symmetry.Asymmetric, "HAS_PART"),
+        ["HAS_POS"]       = new(KindRank.Partitive, Symmetry.Asymmetric, null),
+        ["HAS_XPOS"]      = new(KindRank.Partitive, Symmetry.Asymmetric, "HAS_POS"),
+        ["HAS_FEATURE"]   = new(KindRank.Partitive, Symmetry.Asymmetric, null),
+        ["HAS_SENSE"]     = new(KindRank.Partitive, Symmetry.Asymmetric, null),
+        ["IS_PIXEL_OF"]   = new(KindRank.Partitive, Symmetry.Asymmetric, null),
+        ["IS_AT_SAMPLE"]  = new(KindRank.Partitive, Symmetry.Asymmetric, null),
+
+        // Causal / implicational.
+        ["ENTAILS"]            = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["CAUSES"]             = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["CAUSES_DESIRE"]      = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["HAS_SUBEVENT"]       = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["HAS_FIRST_SUBEVENT"] = new(KindRank.Causal, Symmetry.Asymmetric, "HAS_SUBEVENT"),
+        ["HAS_LAST_SUBEVENT"]  = new(KindRank.Causal, Symmetry.Asymmetric, "HAS_SUBEVENT"),
+        ["HAS_PREREQUISITE"]   = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["MOTIVATED_BY_GOAL"]  = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["OBSTRUCTED_BY"]      = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["CREATED_BY"]         = new(KindRank.Causal, Symmetry.Asymmetric, null),
 
         // Syntactic dependency (parent of the dynamic DEP_* family).
         ["DEPENDS_ON"]  = new(KindRank.Partitive, Symmetry.Asymmetric, null),
@@ -101,10 +121,20 @@ public static class KindRegistry
         ["IS_SYNONYM_OF"]     = new(KindRank.Equivalence, Symmetry.Symmetric, "RELATED_TO"),
         ["IS_TRANSLATION_OF"] = new(KindRank.Equivalence, Symmetry.Symmetric, "RELATED_TO"),
         ["HAS_VARIANT_OF"]    = new(KindRank.Equivalence, Symmetry.Symmetric, "RELATED_TO"),
+        ["IS_SIMILAR_TO"]     = new(KindRank.Equivalence, Symmetry.Symmetric, "RELATED_TO"),
         ["IS_LEMMA_OF"]       = new(KindRank.Equivalence, Symmetry.Asymmetric, null),
+        ["IS_PARTICIPLE_OF"]  = new(KindRank.Equivalence, Symmetry.Asymmetric, null),
+        ["FORM_OF"]           = new(KindRank.Equivalence, Symmetry.Asymmetric, "RELATED_TO"),
+        ["DEFINED_AS"]        = new(KindRank.Equivalence, Symmetry.Asymmetric, "RELATED_TO"),
 
-        // Oppositional — antonym is a CONFIRM in its own arena (not a refute).
-        ["IS_ANTONYM_OF"] = new(KindRank.Oppositional, Symmetry.Symmetric, null),
+        // Oppositional — antonym / negative assertions are CONFIRMS in their own
+        // arenas (not refutes; the refute pole is active refutation).
+        ["IS_ANTONYM_OF"]    = new(KindRank.Oppositional, Symmetry.Symmetric, null),
+        ["DISTINCT_FROM"]    = new(KindRank.Oppositional, Symmetry.Symmetric, null),
+        ["NOT_DESIRES"]      = new(KindRank.Oppositional, Symmetry.Asymmetric, null),
+        ["NOT_USED_FOR"]     = new(KindRank.Oppositional, Symmetry.Asymmetric, null),
+        ["NOT_CAPABLE_OF"]   = new(KindRank.Oppositional, Symmetry.Asymmetric, null),
+        ["NOT_HAS_PROPERTY"] = new(KindRank.Oppositional, Symmetry.Asymmetric, null),
 
         // Associative — RELATED_TO is the roll-up parent for the relatedness family.
         ["RELATED_TO"]             = new(KindRank.Associative, Symmetry.Symmetric, null),
@@ -115,6 +145,23 @@ public static class KindRegistry
         ["DEPICTS"]                = new(KindRank.Associative, Symmetry.Asymmetric, null),
         ["CAPTIONS"]               = new(KindRank.Associative, Symmetry.Asymmetric, null),
         ["ADJACENT_TO_PIXEL"]      = new(KindRank.Associative, Symmetry.Symmetric, null),
+        ["PERTAINS_TO"]            = new(KindRank.Associative, Symmetry.Asymmetric, "RELATED_TO"),
+        ["ALSO_SEE"]               = new(KindRank.Associative, Symmetry.Asymmetric, "RELATED_TO"),
+        ["IN_VERB_GROUP_WITH"]     = new(KindRank.Associative, Symmetry.Symmetric, "RELATED_TO"),
+        ["HAS_DOMAIN_TOPIC"]       = new(KindRank.Associative, Symmetry.Asymmetric, null),
+        ["HAS_DOMAIN_REGION"]      = new(KindRank.Associative, Symmetry.Asymmetric, null),
+        ["HAS_DOMAIN_USAGE"]       = new(KindRank.Associative, Symmetry.Asymmetric, null),
+        ["USED_FOR"]               = new(KindRank.Associative, Symmetry.Asymmetric, null),
+        ["CAPABLE_OF"]             = new(KindRank.Associative, Symmetry.Asymmetric, null),
+        ["AT_LOCATION"]            = new(KindRank.Associative, Symmetry.Asymmetric, null),
+        ["LOCATED_NEAR"]           = new(KindRank.Associative, Symmetry.Symmetric, null),
+        ["HAS_CONTEXT"]            = new(KindRank.Associative, Symmetry.Asymmetric, null),
+        ["DESIRES"]                = new(KindRank.Associative, Symmetry.Asymmetric, null),
+        ["RECEIVES_ACTION"]        = new(KindRank.Associative, Symmetry.Asymmetric, null),
+        ["SYMBOL_OF"]              = new(KindRank.Associative, Symmetry.Asymmetric, null),
+        ["DERIVED_FROM"]           = new(KindRank.Associative, Symmetry.Asymmetric, "DERIVATIONALLY_RELATED"),
+        ["ETYMOLOGICALLY_RELATED_TO"]   = new(KindRank.Associative, Symmetry.Symmetric, "HAS_ETYMOLOGY"),
+        ["ETYMOLOGICALLY_DERIVED_FROM"] = new(KindRank.Associative, Symmetry.Asymmetric, "HAS_ETYMOLOGY"),
 
         // Model circuit arenas — witnesses, roll up to relatedness. COMPLETES_TO
         // is shared directly with corpora (n-gram continuation), so it has no parent.
@@ -139,12 +186,24 @@ public static class KindRegistry
         ["IS_HYPERNYM_OF"] = ("IS_A", true),    // x is hypernym of y ⇒ y is_a x
         ["HAS_HYPONYM"]    = ("IS_A", true),    // x's hyponym is y   ⇒ y is_a x
         ["IS_HYPONYM_OF"]  = ("IS_A", false),
+        ["HAS_INSTANCE"]   = ("IS_INSTANCE_OF", true),   // x has instance y ⇒ y is_instance_of x
 
-        // Meronymy — canonical HAS_PART is "whole has_part part".
-        ["IS_PART_OF"] = ("HAS_PART", true),
+        // Meronymy — canonical HAS_PART/HAS_MEMBER/HAS_SUBSTANCE is "whole has_* part".
+        ["IS_PART_OF"]      = ("HAS_PART", true),
+        ["IS_MEMBER_OF"]    = ("HAS_MEMBER", true),
+        ["IS_SUBSTANCE_OF"] = ("HAS_SUBSTANCE", true),
+
+        // WordNet domain pointers — canonical is "member HAS_DOMAIN_* domain".
+        ["IS_DOMAIN_TOPIC_MEMBER"]  = ("HAS_DOMAIN_TOPIC", true),
+        ["IS_DOMAIN_REGION_MEMBER"] = ("HAS_DOMAIN_REGION", true),
+        ["IS_DOMAIN_USAGE_MEMBER"]  = ("HAS_DOMAIN_USAGE", true),
 
         // Sense — canonical IS_SENSE_OF is "sense is_sense_of word".
         ["HAS_SENSE_OF"] = ("IS_SENSE_OF", false),
+
+        // ConceptNet names that are the SAME assertion as a canonical arena.
+        ["SIMILAR_TO"] = ("IS_SIMILAR_TO", false),
+        ["MADE_OF"]    = ("HAS_SUBSTANCE", false),   // whole MadeOf material ⇒ whole has_substance material
     };
 
     /// <summary>Resolve a kind name (canonical OR a source alias) to its arena.
@@ -207,16 +266,18 @@ public static class KindRegistry
     }
 
     /// <summary>Build a magnitude-weighted attestation routed through the registry
-    /// (model circuits, PMI, …): signed magnitude scored via tanh(m/floor), weight
-    /// = registry rank × source trust, endpoints oriented as in <see cref="Attest"/>.</summary>
+    /// (model circuits, PMI, …): signed magnitude scored via tanh(m/M) where M is
+    /// the measured per-arena scale (<paramref name="arenaScale"/> — a scale, never
+    /// a value-dropping floor), weight = registry rank × source trust, endpoints
+    /// oriented as in <see cref="Attest"/>.</summary>
     public static AttestationRow AttestWeighted(
         Hash128 subject, string kindName, Hash128? obj, Hash128 sourceId, double sourceTrust,
-        double magnitude, double floor, Hash128? contextId = null, long observationCount = 1)
+        double magnitude, double arenaScale, Hash128? contextId = null, long observationCount = 1)
     {
         var r = Resolve(kindName);
         var (s, o) = Orient(r, subject, obj);
         return AttestationFactory.CreateWeighted(
-            s, r.Id, o, sourceId, contextId, r.Rank, sourceTrust, magnitude, floor, observationCount);
+            s, r.Id, o, sourceId, contextId, r.Rank, sourceTrust, magnitude, arenaScale, observationCount);
     }
 
     /// <summary>Resolve a dependency relation and build its attestation in one

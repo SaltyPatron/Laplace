@@ -23,7 +23,7 @@ Laplace is a universal, content-addressed, CPU-native knowledge substrate that *
 
 ## The ratified core truths (the lens)
 
-1. **Model ingestion is a streaming O(params) ETL of weight tables — never a recompute.** A weight tensor is a 2D lookup table flattened to a 1D float array; each cell is an *already-computed* relationship. Stream the tensor, emit significant cells as Glicko-2 matchup observations, in parallel (oneTBB). It must scale linearly to frontier models (Qwen3-480B, Llama4 Maverick, DeepSeek MoE, Flux diffusion). **Forbidden:** materializing a vocab² matchup space as a per-cell dump, or a flat top-k that discards most of the model. That approach took an hour on a 2 GB model and produced an empty result (646/32000 tokens) — it is the disease, not a tuning knob. *(Superseded in part — CLAUDE.md, current: the token×token bilinear circuits `E·Wq·Wkᵀ·Eᵀ` / OV / FFN **are** the ingest math, computed exactly on the perf stack; what remains forbidden is the per-cell vocab² dump and any top-k/floor/budget cut. The write is the set→set content-addressed Merkle hyperedge — dedup by construction is the volume answer.)*
+1. **Model ingestion is a streaming O(params) ETL of weight tables — never a recompute.** A weight tensor is a 2D lookup table flattened to a 1D float array; each cell is an *already-computed* relationship. Stream the tensor, emit significant cells as Glicko-2 matchup observations, in parallel (oneTBB). It must scale linearly to frontier models (Qwen3-480B, Llama4 Maverick, DeepSeek MoE, Flux diffusion). **Forbidden:** doing GEMM at ingest (`E·W·Wᵀ·Eᵀ` bilinear over vocab²), materializing a vocab² matchup space, or a flat top-k that discards most of the model. That approach took an hour on a 2 GB model and produced an empty result (646/32000 tokens) — it is the disease, not a tuning knob. *(The earlier "superseded" note here was itself the misreading: CLAUDE.md's "every interior tensor is a token×token bilinear through the embedding" is the READ SEMANTICS — what a stored cell means when composed through the embedding at QUERY time, by μ-ranked joins — never an instruction to materialize the product at ingest. This truth stands exactly as ratified: ETL on conventional AI for AI — stream the cells at rest, resolve the hidden-dim surrogate keys through the source's own embed/lm_head mapping tables, load as adjudicated matches under the ten tensor-role kinds, POSITIONS AGGREGATE as witnesses. Records are bounded by the schema shape — never by depth, never by parameter count.)*
 
 2. **Each weight cell is one Glicko-2 matchup *outcome*; there are many matchups per entity-pair** (across tensor role, head, layer). They accumulate into a consensus rating (consistent → low RD). Weight = outcome; the source model's own trust = opponent strength; store only the emergent consensus, never the weight, never bit-perfect.
 
@@ -49,7 +49,12 @@ Laplace is a universal, content-addressed, CPU-native knowledge substrate that *
 
 These are genuinely unsolved. Any doc/ADR that asserts a confident answer here is hallucinated and must be marked OPEN, not "corrected" into a different guess:
 
-- **Interior `d×d` tensor axis → token-entity resolution.** `embed_tokens`/`lm_head` are directly token-anchored (cheap, real). How `q/k/v/o/gate/up/down` cells resolve to token entities *without* re-running the GEMM (which is what blows up) is unsolved. Must be pinned with Anthony.
+- **Interior `d×d` tensor axis → token-entity resolution.** *(SUPERSEDED — answered by the
+  set→set correction in CLAUDE.md; this entry must never again be cited as open.)* A hidden
+  unit's direction is PLACED on the shared S³ frame by the same morph as tokens; membership in
+  the unit's sets is geometric (Voronoi assignment over token placements — never argmax, never
+  a magnitude floor, never operand blobs); the unit is one set→set hyperedge observation with
+  its signed aggregate strength as magnitude and (layer, head) as witness.
 - The exact arena/kind assignment per interior tensor role.
 - The synthesis "pour facts into the mold" algorithm at frontier scale.
 

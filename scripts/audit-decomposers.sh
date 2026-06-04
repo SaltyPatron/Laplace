@@ -124,7 +124,9 @@ if should_run "unicode-ingest"; then
   if [[ "$(layer_done 0)" == "t" ]]; then
     skip "ingest unicode (layer 0 already marked)"
   else
-    run_just "ingest unicode" just ingest unicode || true
+    # Layer 0 is the floor everything gates on — a failed unicode ingest must
+    # fail the audit loudly, never be swallowed.
+    run_just "ingest unicode" just ingest unicode || { echo "FATAL: unicode ingest failed"; exit 1; }
   fi
 fi
 
@@ -169,8 +171,8 @@ fi
 if should_run "model"; then
   if [[ -d "$TINYLLAMA" ]]; then
     run_just "ingest model" just ingest model "$TINYLLAMA" || AUDIT_FAIL=1
-    if [[ -x "$ROOT/scripts/roundtrip.sh" ]]; then
-      run_just "roundtrip" "$ROOT/scripts/roundtrip.sh" "$TINYLLAMA" || AUDIT_FAIL=1
+    if [[ -x "$ROOT/scripts/model-synthesize.sh" ]]; then
+      run_just "model-synthesize" "$ROOT/scripts/model-synthesize.sh" "$TINYLLAMA" || AUDIT_FAIL=1
     fi
   else
     skip "ingest model (TINYLLAMA_DIR missing)"

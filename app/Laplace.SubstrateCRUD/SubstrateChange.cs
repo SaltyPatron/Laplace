@@ -72,29 +72,40 @@ public sealed record PhysicalityRow(
     int?            SourceDim,
     long            ObservedAtUnixUs);
 
+/// <summary>The dissent record on an evidence row — a CLASS, never a magnitude.</summary>
+public enum AttestationOutcome : short
+{
+    Refute  = 0,
+    Draw    = 1,
+    Confirm = 2,
+}
+
 /// <summary>
-/// One row of the <c>laplace.attestations</c> table — the EVIDENCE layer: a
-/// single Glicko-2 OBSERVATION (a match the relation plays vs a neutral
-/// baseline opponent) + ARCHITECTURE.md §10.
+/// One row of the <c>laplace.attestations</c> table — the EVIDENCE layer.
+/// EVIDENCE IS PROVENANCE: who witnessed which relation (source; model
+/// layer/head in context), when, how many games, and whether it confirmed or
+/// refuted (<see cref="Outcome"/> — a class, never a magnitude).
 ///
 /// <para>
-/// <c>ScoreFp1e9</c> = ½(1+tanh(signed_m/M)) ∈ (0,1) — the signed-magnitude
-/// outcome (+ win/confirm, − loss/refute, 0 draw). <c>OpponentRdFp1e9</c> =
-/// the witness weight (kind_rank × source_trust × tenant_trust) mapped to
-/// opponent precision φ. <c>ArenaMFp1e9</c> = the per-arena scale M used (audit).
-/// All int64 fixed-point ×1e9. The accumulated rating/rd/volatility live on the
+/// <c>ScoreFp1e9</c> / <c>OpponentRdFp1e9</c> are the witness's TESTIMONY IN
+/// FLIGHT — the ½(1+tanh(signed_m/M)) match outcome and the trust→φ opponent
+/// precision the consensus accumulation consumes AT INGEST. They are NEVER
+/// persisted (a stored per-witness score is invertible to the weight —
+/// recording raw weights). The persisted columns are exactly: id, subject,
+/// kind, object, source, context, outcome, last_observed_at,
+/// observation_count. The accumulated rating/rd/volatility live on the
 /// consensus table — NOT here. No tiers, no trust classes in evidence.
 /// </para>
 /// </summary>
 public sealed record AttestationRow(
-    Hash128  Id,
-    Hash128  SubjectId,
-    Hash128  KindId,
-    Hash128? ObjectId,
-    Hash128  SourceId,
-    Hash128? ContextId,
-    long     ScoreFp1e9,
-    long     OpponentRdFp1e9,
-    long     ArenaMFp1e9,
-    long     LastObservedAtUnixUs,
-    long     ObservationCount);
+    Hash128            Id,
+    Hash128            SubjectId,
+    Hash128            KindId,
+    Hash128?           ObjectId,
+    Hash128            SourceId,
+    Hash128?           ContextId,
+    AttestationOutcome Outcome,
+    long               LastObservedAtUnixUs,
+    long               ObservationCount,
+    long               ScoreFp1e9,        // in-flight testimony — consumed at ingest, never persisted
+    long               OpponentRdFp1e9);  // in-flight trust→φ   — consumed at ingest, never persisted
