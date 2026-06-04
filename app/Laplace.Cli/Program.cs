@@ -66,7 +66,6 @@ internal static class Program
         {
             Console.Error.WriteLine(
                 "usage: laplace <command> [args]\n"
-                + "  seed-unicode\n"
                 + "  ingest <source> [path]            (unicode | iso639 | wordnet | omw | ud | model)\n"
                 + "  synthesize substrate <recipe.json> [output.gguf] [--source-scope <ids>] [--format <name>]\n"
                 + "  decompose <text>\n"
@@ -81,7 +80,6 @@ internal static class Program
         {
             return args[0] switch
             {
-                "seed-unicode" => await SeedUnicodeAsync(),
                 "ingest"       => await IngestAsync(args[1..]),
                 "synthesize"   => await SynthesizeAsync(args[1..]),
                 "decompose"    => Decompose(string.Join(' ', args[1..])),
@@ -502,7 +500,15 @@ internal static class Program
         if (sub == "substrate")
         {
             string recipePath = args.Length > 1 ? args[1] : "";
-            string outputPath = args.Length > 2 ? args[2] : "/tmp/laplace-substrate-synth.gguf";
+            // Output is a DELIVERABLE: explicit path or the LAPLACE_GGUF_OUT
+            // convention — never a silent temp default that loses a 2 GB export.
+            string? outEnv = Environment.GetEnvironmentVariable("LAPLACE_GGUF_OUT");
+            string outputPath = args.Length > 2 ? args[2]
+                : !string.IsNullOrEmpty(outEnv) ? outEnv
+                : "";
+            if (string.IsNullOrEmpty(outputPath))
+                return Fail("usage: laplace synthesize substrate <recipe.json> <output.gguf>\n"
+                          + "  (or set LAPLACE_GGUF_OUT; no temp-dir default)");
             return await SynthesizeFromSubstrateAsync(recipePath, outputPath);
         }
 
@@ -512,24 +518,15 @@ internal static class Program
     }
 
     /// <summary>
-    /// Stream A stub. Stream B per /home/ahart/.claude/plans/replicated-hatching-stream.md
-    /// replaces this with a real implementation that:
- /// (1) parses the recipe + the Recipe definition,
-    ///   (2) loads the architecture template entity from substrate ( +
- ///) using the recipe's `IS_A Architecture_X` attestation,
-    ///   (3) iterates the template's `required_tensors(SynthesisParams) → TensorSpecs`
- ///,
-    ///   (4) for each TensorSpec, queries the substrate aggregated attestations
-    ///       under the recipe's source scope (the `laplace_glicko2_accumulate`
-    ///       aggregator handles cross-source consensus:206-215),
-    ///   (5) calls `materialize_tensor(spec, substrate_view) → TensorValues`
- /// — the architecture template distributes consensus
-    ///       values across the recipe's per-(layer, head, dim) layout (NOT a
-    ///       pseudoinverse — per Memory `project_model_decomposer_attestation_insight.md`
- /// and "the inverse of this aggregation" = broadcast     ///       recipe layout, not SVD recovery),
-    ///   (6) writes via the recipe-selected IFormatWriter (native safetensors-style
- /// per R4 +; GGUF / ONNX / TF / PyTorch via 
-    ///       format-writer matrix).
+    /// Re-export = the ingestion run backward (ARCHITECTURE.md §8): parse the
+    /// user-authored recipe (the MOLD), read each tensor-role arena's CONSENSUS
+    /// (μ → SignedStrength per relation; source and position out of identity),
+    /// resolve endpoints back to tensor indices (tokens through the tokenizer's
+    /// key-mapping, hidden axes through the source-scoped Model_Axis ids), pour
+    /// each role's table into every mold slot of that role, and write via the
+    /// recipe-selected format writer (GGUF). The output is the consensus of all
+    /// ingested witnesses in the chosen shape — never a reconstruction of any
+    /// one model, never bit-perfect. See <see cref="ConsensusReExport"/>.
     /// </summary>
     private static async Task<int> SynthesizeFromSubstrateAsync(string recipePath, string outputPath)
     {
@@ -551,10 +548,40 @@ internal static class Program
         int vocab = recipe.VocabSize;
         int dModel = recipe.HiddenSize;
 
-        // entity_id → vocab_index for substrate→token-index lookup
-        var entityToToken = new Dictionary<Hash128, int>(tokens.Count);
-        foreach (var t in tokens.OrderBy(t => t.TokenId))
-            entityToToken.TryAdd(t.EntityId, t.TokenId);
+        // ── The TRANSFORM run backward: entity → tensor indices ──
+        // Token content entity → EVERY vocab slot that carries it (duplicate-
+        // content slots folded at ingest; each receives the consensus back).
+        var tokenSlots = new Dictionary<Hash128, List<int>>(tokens.Count);
+        foreach (var t in tokens)
+        {
+            if (t.TokenId < 0 || t.TokenId >= vocab) continue;
+            if (!tokenSlots.TryGetValue(t.EntityId, out var slots))
+                tokenSlots[t.EntityId] = slots = new List<int>(1);
+            slots.Add(t.TokenId);
+        }
+        // Axis entities are source-scoped surrogate keys: resolved through the
+        // recipe's source (cross-model alignment via placements is not built —
+        // one model's axes per mold for now).
+        var (moldSource, moldSourceName) = ModelDecomposer.SourceForModel(modelDir);
+        Console.WriteLine($"  mold source: {moldSourceName} ({moldSource})");
+        int nHeadsR = recipe.NumHeads, nKvR = recipe.NumKvHeads;
+        int headDimR = dModel / Math.Max(1, nHeadsR);
+        int attnOutR = nHeadsR * headDimR, kvDimR = nKvR * headDimR;
+        int intermR  = recipe.IntermediateSize;
+        Dictionary<Hash128, int[]> AxisMap(string space, int dim)
+        {
+            var m = new Dictionary<Hash128, int[]>(dim);
+            for (int i = 0; i < dim; i++)
+                m[SourceEntityIdConventions.ModelAxisEntity(moldSource, space, i)] = [i];
+            return m;
+        }
+        var chanMap   = AxisMap("channel",  dModel);
+        var attnMap   = AxisMap("attn_dim", attnOutR);
+        var kvMap     = AxisMap("kv_dim",   kvDimR);
+        var neuronMap = AxisMap("neuron",   intermR);
+        Func<Hash128, IReadOnlyList<int>?> Tok   = e => tokenSlots.TryGetValue(e, out var s) ? s : null;
+        Func<Hash128, IReadOnlyList<int>?> Of(Dictionary<Hash128, int[]> m) =>
+            e => m.TryGetValue(e, out var s) ? s : null;
 
         // Load arch template + recipe handle
         byte[] configJson = File.ReadAllBytes(recipePath);
@@ -575,71 +602,68 @@ internal static class Program
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
 
-        // ── Read the CONSENSUS circuit arenas (re-export reads consensus —
-        //    one signed row per relation, source AND layer/head out of identity
-        //    — never the per-witness evidence). The signed score map inverts to
-        //    a signed strength m̂ per relation (ConsensusReExport.SignedStrength).
-        Console.WriteLine("  querying consensus circuit arenas...");
-        var attends   = await ConsensusReExport.ReadArenaAsync(ds, ModelDecomposer.AttendsKind,     entityToToken, vocab);
-        var ovRelates = await ConsensusReExport.ReadArenaAsync(ds, ModelDecomposer.OvRelatesKind,   entityToToken, vocab);
-        var completes = await ConsensusReExport.ReadArenaAsync(ds, ModelDecomposer.CompletesToKind, entityToToken, vocab);
-        Console.WriteLine($"  consensus arenas: ATTENDS={attends.Count:N0} OV_RELATES={ovRelates.Count:N0} "
-                        + $"COMPLETES_TO={completes.Count:N0}");
-        if (attends.Count + ovRelates.Count + completes.Count == 0)
-            return Fail("no circuit consensus in the substrate — ingest a model first");
-
-        // ── Spectral token basis over the union of all arenas ─────────────
-        // basisDim is capped well below dModel: computing dModel=2048 eigenpairs
-        // of a 32K-node sparse graph via Lanczos requires O(4K×32K) workspace and
-        // rarely converges in CI time; 64 eigenpairs converge in seconds. The
-        // basis cycles mod basisDim into d_model, so every hidden dimension is
-        // substrate-derived. (Calibration constant — §10.)
-        const int EigenMaxDim = 64;
-        int basisDim = Math.Min(dModel, EigenMaxDim);
-        Console.WriteLine($"  computing spectral token basis (eigenmaps target_dim={basisDim})...");
-        var sw0 = Stopwatch.StartNew();
-        double[]? basis = ConsensusReExport.BuildBasis(vocab, basisDim, attends, ovRelates, completes);
-        if (basis is null)
-            return Fail("spectral token basis unavailable (eigenmaps failed or empty consensus graph)");
-        Console.WriteLine($"  spectral token basis ready in {sw0.Elapsed.TotalSeconds:F1}s (basis_dim={basisDim})");
-
-        // Procrustes alignment diagnostic: the basis vs the canonical S³ token
-        // placements — verifies the spectral frame carries the placement geometry.
+        // ── The mold's per-role scale M (absolute scale is the MOLD's, not the
+        //    substrate's): measured from the mold dir's reference tensors when
+        //    present, else 1.0 (relative structure only).
+        Dictionary<string, SafetensorsContainerParser.TensorReference>? refMap = null;
+        try
         {
-            var sortedTokens = tokens.OrderBy(t => t.TokenId).ToArray();
-            double[] targetPts = new double[(long)vocab * 4];
-            for (int t = 0; t < vocab && t < sortedTokens.Length; t++)
+            var refs = SafetensorsContainerParser.ParseModel(modelDir);
+            if (refs.Count > 0)
             {
-                var tok = sortedTokens[t];
-                if (!tok.HasContentCoord) continue;
-                targetPts[t * 4 + 0] = tok.ContentX;
-                targetPts[t * 4 + 1] = tok.ContentY;
-                targetPts[t * 4 + 2] = tok.ContentZ;
-                targetPts[t * 4 + 3] = tok.ContentM;
-            }
-            IntPtr procT;
-            unsafe
-            {
-                fixed (double* bPtr = basis)
-                fixed (double* tPtr = targetPts)
-                    procT = DynamicsInterop.ProcrustesFit(bPtr, (nuint)vocab, (nuint)basisDim, tPtr);
-            }
-            if (procT != IntPtr.Zero)
-            {
-                Console.WriteLine($"  Procrustes residual: {DynamicsInterop.ProcrustesResidual(procT):F4}");
-                DynamicsInterop.ProcrustesFree(procT);
+                refMap = new Dictionary<string, SafetensorsContainerParser.TensorReference>(
+                    refs.Count, StringComparer.Ordinal);
+                foreach (var r in refs) refMap[r.Name] = r;
             }
         }
+        catch { /* no shards alongside the recipe — relative scale */ }
+        if (refMap is null)
+            Console.WriteLine("  (no reference tensors alongside the recipe — per-role scale M = 1.0)");
 
-        // ── Factor each arena: B = Eᵀ·M·E, thin SVD (EXPORT-ONLY kernel) ──
-        // Re-export = the ingestion run backward: each consensus circuit is
-        // SVD-factored through the spectral token basis; the mold's slots are
-        // filled from the singular components at the recipe rank.
-        var fQk  = ConsensusReExport.FactorArena(basis, vocab, basisDim, attends);
-        var fOv  = ConsensusReExport.FactorArena(basis, vocab, basisDim, ovRelates);
-        var fFfn = ConsensusReExport.FactorArena(basis, vocab, basisDim, completes);
-        Console.WriteLine($"  arena factors: ATTENDS rank={fQk?.Rank ?? 0}, OV_RELATES rank={fOv?.Rank ?? 0}, "
-                        + $"COMPLETES_TO rank={fFfn?.Rank ?? 0}");
+        var prof = ArchitectureProfile.For(recipe.ModelType);
+        IEnumerable<string> Layers(string tpl) =>
+            Enumerable.Range(0, recipe.NumLayers).Select(l => ArchitectureProfile.Layer(tpl, l));
+        double MOf(params IEnumerable<string>[] groups) =>
+            ConsensusReExport.MoldArenaScale(refMap, groups.SelectMany(g => g));
+
+        // ── Read the tensor-role CONSENSUS arenas (re-export reads consensus —
+        //    one signed row per relation, source and position out of identity —
+        //    never the per-witness evidence) straight into tensor layout. The
+        //    ingestion run backward: μ → SignedStrength → cell; every mold
+        //    position receives its relation's one consensus value.
+        Console.WriteLine("  pouring consensus arenas into the mold's tensor layouts...");
+        var swArena = Stopwatch.StartNew();
+        var chan = Of(chanMap); var attn = Of(attnMap); var kv = Of(kvMap); var neuron = Of(neuronMap);
+        var embedA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.EmbedsKind,
+            vocab, dModel, rowsAreOut: false, Tok, chan, MOf([prof.EmbedTokens]));
+        var lmHeadA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.OutputProjectsKind,
+            vocab, dModel, rowsAreOut: true, chan, Tok, MOf([prof.LmHead ?? prof.EmbedTokens]));
+        var qA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.QProjectsKind,
+            attnOutR, dModel, rowsAreOut: true, chan, attn, MOf(Layers(prof.QProj)));
+        var kA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.KProjectsKind,
+            kvDimR, dModel, rowsAreOut: true, chan, kv, MOf(Layers(prof.KProj)));
+        var vA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.VProjectsKind,
+            kvDimR, dModel, rowsAreOut: true, chan, kv, MOf(Layers(prof.VProj)));
+        var oA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.OProjectsKind,
+            dModel, attnOutR, rowsAreOut: true, attn, chan, MOf(Layers(prof.OProj)));
+        var gateA = prof.GateProj is null ? null
+            : await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.GatesKind,
+                intermR, dModel, rowsAreOut: true, chan, neuron, MOf(Layers(prof.GateProj)));
+        var upA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.UpProjectsKind,
+            intermR, dModel, rowsAreOut: true, chan, neuron, MOf(Layers(prof.UpProj)));
+        var downA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.DownProjectsKind,
+            dModel, intermR, rowsAreOut: true, neuron, chan, MOf(Layers(prof.DownProj)));
+        var normV = await ConsensusReExport.ReadNormVectorAsync(ds, ModelDecomposer.NormalizesKind,
+            dModel, chan, MOf(Layers(prof.PerLayerNorms[0]), [prof.FinalNorm]));
+
+        long totalRelations = embedA.Relations + lmHeadA.Relations + qA.Relations + kA.Relations
+            + vA.Relations + oA.Relations + (gateA?.Relations ?? 0) + upA.Relations + downA.Relations;
+        Console.WriteLine(
+            $"  consensus arenas poured in {swArena.Elapsed.TotalSeconds:F1}s: EMBEDS={embedA.Relations:N0} "
+            + $"OUTPUT_PROJECTS={lmHeadA.Relations:N0} Q={qA.Relations:N0} K={kA.Relations:N0} V={vA.Relations:N0} "
+            + $"O={oA.Relations:N0} GATES={gateA?.Relations ?? 0:N0} UP={upA.Relations:N0} DOWN={downA.Relations:N0}");
+        if (totalRelations == 0)
+            return Fail("no model consensus in the substrate — ingest a model first");
 
         // ── Write GGUF: fill each mold slot from the arena factors ─────────
         var gguf = SynthInterop.GgufWriterCreate(outputPath);
@@ -648,11 +672,6 @@ internal static class Program
 
         var sw = Stopwatch.StartNew();
         int tensorsDone = 0;
-
-        int nHeads = recipe.NumHeads, nKv = recipe.NumKvHeads;
-        int headDim = dModel / Math.Max(1, nHeads);
-        int qPerKv  = nHeads / Math.Max(1, nKv);
-        int interm  = recipe.IntermediateSize;
 
         for (int i = 0; i < tensorCount; i++)
         {
@@ -668,9 +687,8 @@ internal static class Program
             long nElem = (long)rows * (long)Math.Max(1UL, cols);
             var vals = new float[nElem];
 
-            FillMoldTensor(vals, name, (int)rows, (int)Math.Max(1UL, cols),
-                basis, vocab, basisDim, dModel, nHeads, nKv, headDim, qPerKv, interm,
-                fQk, fOv, fFfn);
+            FillMoldTensor(vals, name,
+                embedA, lmHeadA, qA, kA, vA, oA, gateA, upA, downA, normV);
 
             byte[] tensorBytes = dtype == 0
                 ? ConsensusReExport.ToF32Bytes(vals)
@@ -701,94 +719,55 @@ internal static class Program
     }
 
     /// <summary>
-    /// Fill ONE mold tensor slot from the arena factors — the recipe-rank block
-    /// policy: each (layer, kv-group) takes its singular-component block from
-    /// the arena's SVD; q/k (v/o, up/down) share the block so the contracted
-    /// pair reproduces that block's share of the consensus operator. Norms fill
-    /// at 1.0 (runtime scaling); the SwiGLU gate fills with the up factor
-    /// (gating is runtime, never attested — recipe policy, §10).
+    /// Fill ONE mold tensor slot DIRECTLY from its tensor-role arena — the
+    /// ingestion run backward. Every layer instance of a role receives the SAME
+    /// poured table (positions folded at ingest; a deeper mold receives the
+    /// consensus at every position — consensus-of-all in the chosen shape,
+    /// never bit-perfect). Norm slots pour the per-channel NORMALIZES
+    /// consensus; the SwiGLU gating nonlinearity itself is runtime, never
+    /// attested — its WEIGHT table (GATES) pours like any other. A mold whose
+    /// slot shape differs from the arena's schema shape fails loud — shape/rank
+    /// retargeting is the export-only SVD path, not built.
     /// </summary>
     private static void FillMoldTensor(
-        float[] vals, string name, int rows, int cols,
-        double[] basis, int vocab, int basisDim, int dModel,
-        int nHeads, int nKv, int headDim, int qPerKv, int interm,
-        ConsensusReExport.ArenaFactor? fQk, ConsensusReExport.ArenaFactor? fOv,
-        ConsensusReExport.ArenaFactor? fFfn)
+        float[] vals, string name,
+        ConsensusReExport.TableArena embedA, ConsensusReExport.TableArena lmHeadA,
+        ConsensusReExport.TableArena qA, ConsensusReExport.TableArena kA,
+        ConsensusReExport.TableArena vA, ConsensusReExport.TableArena oA,
+        ConsensusReExport.TableArena? gateA, ConsensusReExport.TableArena upA,
+        ConsensusReExport.TableArena downA, float[] normV)
     {
-        int layer = LayerOf(name);
+        ConsensusReExport.TableArena? arena =
+              name == "model.embed_tokens.weight" ? embedA
+            : name == "lm_head.weight"            ? lmHeadA
+            : name.EndsWith(".self_attn.q_proj.weight", StringComparison.Ordinal) ? qA
+            : name.EndsWith(".self_attn.k_proj.weight", StringComparison.Ordinal) ? kA
+            : name.EndsWith(".self_attn.v_proj.weight", StringComparison.Ordinal) ? vA
+            : name.EndsWith(".self_attn.o_proj.weight", StringComparison.Ordinal) ? oA
+            : name.EndsWith(".mlp.gate_proj.weight",    StringComparison.Ordinal) ? gateA
+            : name.EndsWith(".mlp.up_proj.weight",      StringComparison.Ordinal) ? upA
+            : name.EndsWith(".mlp.down_proj.weight",    StringComparison.Ordinal) ? downA
+            : null;
 
-        if (name is "model.embed_tokens.weight" or "lm_head.weight")
+        if (arena is not null)
         {
-            ConsensusReExport.FillEmbedding(vals, basis, vocab, basisDim, dModel);
+            if (arena.Cells.LongLength != vals.LongLength)
+                throw new InvalidOperationException(
+                    $"mold slot {name} has {vals.LongLength:N0} cells but the arena's schema shape is "
+                    + $"[{arena.Rows}×{arena.Cols}] = {arena.Cells.LongLength:N0} — shape/rank retargeting "
+                    + "(export-only SVD) is not built; the mold must match the substrate's schema shape");
+            Array.Copy(arena.Cells, vals, vals.Length);
             return;
         }
         if (name.EndsWith("norm.weight", StringComparison.Ordinal))
         {
-            Array.Fill(vals, 1.0f);   // nonlinearity scaling is runtime, never attested
+            if (normV.Length != vals.Length)
+                throw new InvalidOperationException(
+                    $"mold norm slot {name} has {vals.Length:N0} channels but NORMALIZES carries {normV.Length:N0}");
+            Array.Copy(normV, vals, vals.Length);
             return;
         }
-        if (layer < 0) return;        // unknown slot — stays zero (absence is signal)
-
-        // Component block per (layer, kv-group): q and k of the same group share
-        // a block (their contraction reproduces it); likewise v/o and up/down.
-        int BlockOf(int kvHead, ConsensusReExport.ArenaFactor f) =>
-            ((layer * nKv + kvHead) * headDim) % f.Rank;
-
-        if (name.EndsWith(".self_attn.q_proj.weight", StringComparison.Ordinal) && fQk is not null)
-        {
-            for (int h = 0; h < nHeads; h++)
-                ConsensusReExport.FillFactorRows(vals, (long)h * headDim * dModel, headDim, dModel,
-                    fQk, BlockOf(h / qPerKv, fQk), useVt: false);
-        }
-        else if (name.EndsWith(".self_attn.k_proj.weight", StringComparison.Ordinal) && fQk is not null)
-        {
-            for (int kv = 0; kv < nKv; kv++)
-                ConsensusReExport.FillFactorRows(vals, (long)kv * headDim * dModel, headDim, dModel,
-                    fQk, BlockOf(kv, fQk), useVt: true);
-        }
-        else if (name.EndsWith(".self_attn.v_proj.weight", StringComparison.Ordinal) && fOv is not null)
-        {
-            for (int kv = 0; kv < nKv; kv++)
-                ConsensusReExport.FillFactorRows(vals, (long)kv * headDim * dModel, headDim, dModel,
-                    fOv, BlockOf(kv, fOv), useVt: false);
-        }
-        else if (name.EndsWith(".self_attn.o_proj.weight", StringComparison.Ordinal) && fOv is not null)
-        {
-            // o_proj is [dModel × nHeads·headDim]: build the row-major transpose
-            // [attnOut × dModel] from the V side, then transpose into the slot.
-            int attnOut = nHeads * headDim;
-            var oT = new float[(long)attnOut * dModel];
-            for (int h = 0; h < nHeads; h++)
-                ConsensusReExport.FillFactorRows(oT, (long)h * headDim * dModel, headDim, dModel,
-                    fOv, BlockOf(h / qPerKv, fOv), useVt: true);
-            for (int r = 0; r < attnOut; r++)
-                for (int d = 0; d < dModel; d++)
-                    vals[(long)d * attnOut + r] = oT[(long)r * dModel + d];
-        }
-        else if ((name.EndsWith(".mlp.up_proj.weight", StringComparison.Ordinal)
-               || name.EndsWith(".mlp.gate_proj.weight", StringComparison.Ordinal)) && fFfn is not null)
-        {
-            ConsensusReExport.FillFactorRows(vals, 0, interm, dModel,
-                fFfn, (layer * headDim) % fFfn.Rank, useVt: false);
-        }
-        else if (name.EndsWith(".mlp.down_proj.weight", StringComparison.Ordinal) && fFfn is not null)
-        {
-            var dT = new float[(long)interm * dModel];
-            ConsensusReExport.FillFactorRows(dT, 0, interm, dModel,
-                fFfn, (layer * headDim) % fFfn.Rank, useVt: true);
-            for (int r = 0; r < interm; r++)
-                for (int d = 0; d < dModel; d++)
-                    vals[(long)d * interm + r] = dT[(long)r * dModel + d];
-        }
-    }
-
-    /// <summary>Layer index from a model.layers.{L}.… tensor name, or -1.</summary>
-    private static int LayerOf(string name)
-    {
-        const string prefix = "model.layers.";
-        if (!name.StartsWith(prefix, StringComparison.Ordinal)) return -1;
-        int dot = name.IndexOf('.', prefix.Length);
-        return dot > 0 && int.TryParse(name.AsSpan(prefix.Length, dot - prefix.Length), out int l) ? l : -1;
+        // unknown slot — stays zero (absence is signal)
     }
 
 
@@ -1027,7 +1006,8 @@ internal static class Program
                 $"[{sourceName}] recorded {rows:N0} rows = {p.EntitiesInserted:N0} ent + "
                 + $"{p.PhysicalitiesInserted:N0} phys + {p.AttestationsInserted:N0} att "
                 + $"@ {rows / secs:N0} rows/s; {p.UnitsApplied:N0} intents"
-                + (p.EstimatedTotal is { } t && t > 0 ? $" (~{100.0 * p.UnitsApplied / t:F0}% of {t:N0})" : "")
+                // EstimatedTotal is a ROW estimate (EstimateUnitCountAsync) — compare rows, not intents.
+                + (p.EstimatedTotal is { } t && t > 0 ? $" (~{100.0 * rows / t:F0}% of {t:N0} rows)" : "")
                 + $"; {p.Elapsed.TotalSeconds:F0}s"
                 + (p.UnitsFailed > 0 ? $"; {p.UnitsFailed:N0} FAILED" : ""));
         });
@@ -1098,35 +1078,11 @@ internal static class Program
         return 0;
     }
 
-    // === seed-unicode: stream the T0 codepoint seed into the substrate ===
-    private static async Task<int> SeedUnicodeAsync()
-    {
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
-        var writer = new NpgsqlSubstrateWriter(ds);
-        var reader = new NpgsqlSubstrateReader(ds);
-        var dec = new UnicodeDecomposer();
-        var ctx = new CliContext(writer, reader);
-
-        Console.WriteLine($"seeding T0 codepoints into {ConnString} ...");
-        var sw = Stopwatch.StartNew();
-
-        await dec.InitializeAsync(ctx);
-        long entities = 0, inserted = 0;
-        int batches = 0;
-        await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
-        {
-            var r = await writer.ApplyAsync(change);
-            entities += change.Entities.Length;
-            inserted += r.EntitiesInserted;
-            if (++batches % 16 == 0)
-                Console.WriteLine($"  {entities,9:N0} codepoints applied ({sw.Elapsed.TotalSeconds:F0}s)");
-        }
-        sw.Stop();
-        Console.WriteLine($"done: {entities:N0} codepoints presented, {inserted:N0} novel entities inserted in {sw.Elapsed.TotalSeconds:F1}s");
-
-        await PrintCountsAsync(ds);
-        return 0;
-    }
+    /* seed-unicode (legacy) DELETED: it streamed the T0 seed through a bare
+     * NpgsqlSubstrateWriter — no consensus fold, no HasLayerCompleted marker —
+     * so every script had to work around it ("seed-t0 alone does NOT set the
+     * marker"). The T0 seed is `ingest unicode`: THE ONE ingest path
+     * (IngestRunner + ConsensusAccumulatingWriter), same as every source. */
 
     // === stats: current substrate row counts ===
     private static async Task<int> StatsAsync()
@@ -1182,7 +1138,7 @@ internal static class Program
             }
             else
             {
-                Console.WriteLine("  (no CONTENT physicality for U+0041 yet — run seed-unicode)");
+                Console.WriteLine("  (no CONTENT physicality for U+0041 yet — run: laplace ingest unicode)");
             }
         }
 
@@ -1197,27 +1153,11 @@ internal static class Program
             return (long)(await c.ExecuteScalarAsync())!;
         }
 
-        long modelAtts = await KindCount(ModelDecomposer.AttendsKind)
-                       + await KindCount(ModelDecomposer.OvRelatesKind)
-                       + await KindCount(ModelDecomposer.CompletesToKind);
-        if (modelAtts == 0)
-        {
-            Console.WriteLine("  model attestations    : (none — ingest model)");
-            return;
-        }
-
-        Console.WriteLine($"  model attestations    : {modelAtts,9:N0}");
-
-        // Corrected ingest emits content records, not the per-circuit bilinear kinds:
-        // COMPLETES_TO = the FFN/OV [context n-gram] ⇒ {completion} key→value memories.
-        // The old Q_PROJECTS/O_PROJECTS/EMBEDS/… per-circuit kinds are no longer emitted
-        // (the token×token-bilinear "disease"); kept here at the tail for visibility — they
-        // read 0 on a corrected ingest, which is the point.
+        // The cell ETL's LIVE arenas — the ten tensor-role kinds. ATTENDS /
+        // OV_RELATES / COMPLETES_TO are query-time read vocabulary (the bilinear
+        // compositions), never ingest-written — they are intentionally absent.
         (string label, Hash128 kind)[] modelKinds =
         [
-            ("ATTENDS",         ModelDecomposer.AttendsKind),
-            ("OV_RELATES",      ModelDecomposer.OvRelatesKind),
-            ("COMPLETES_TO",    ModelDecomposer.CompletesToKind),
             ("EMBEDS",          ModelDecomposer.EmbedsKind),
             ("Q_PROJECTS",      ModelDecomposer.QProjectsKind),
             ("K_PROJECTS",      ModelDecomposer.KProjectsKind),
@@ -1229,11 +1169,19 @@ internal static class Program
             ("NORMALIZES",      ModelDecomposer.NormalizesKind),
             ("OUTPUT_PROJECTS", ModelDecomposer.OutputProjectsKind),
         ];
-        foreach (var (label, kind) in modelKinds)
+        long modelAtts = 0;
+        var kindCounts = new long[modelKinds.Length];
+        for (int i = 0; i < modelKinds.Length; i++)
+            modelAtts += kindCounts[i] = await KindCount(modelKinds[i].kind);
+        if (modelAtts == 0)
         {
-            long n = await KindCount(kind);
-            Console.WriteLine($"  └ {label,-16}: {n,9:N0}");
+            Console.WriteLine("  model attestations    : (none — ingest model)");
+            return;
         }
+
+        Console.WriteLine($"  model attestations    : {modelAtts,9:N0}");
+        for (int i = 0; i < modelKinds.Length; i++)
+            Console.WriteLine($"  └ {modelKinds[i].label,-16}: {kindCounts[i],9:N0}");
     }
 
     // === decompose: run the engine text decomposer + hash composer live ===

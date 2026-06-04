@@ -75,16 +75,17 @@ public sealed class ModelDecomposer : IDecomposer
     // content-addressed entity, a tier above its constituents).
     public static readonly Hash128 NgramTypeId =
         Hash128.OfCanonical("substrate/type/Ngram/v1");
-    // Witness entities: per-position model provenance (role instance × layer).
-    // Set as the attestation context_id so each position's evidence is a distinct
-    // row (evidence keeps the position; consensus folds it). The model itself is
-    // the source; the witness is WHICH position inside it testified.
-    public static readonly Hash128 WitnessTypeId =
-        Hash128.OfCanonical("substrate/type/Witness/v1");
     // Model-axis entities: the source's SURROGATE KEYS (residual channels,
     // attention dims, kv dims, FFN neurons) — first-class join nodes of the
     // cell ETL (SourceEntityIdConventions.ModelAxisEntity). Source-scoped;
     // aligned cross-model by placements, never by index identity.
+    //
+    // There is NO per-position witness entity: positions (layers, norm slots)
+    // are NOT identity anywhere — relation identity excludes them and evidence
+    // identity excludes them too (context_id NULL; "no synthetic per-position
+    // entities", #192 §7). Positions aggregate ON the relation's one evidence
+    // row as observation_count games; the witness is the SOURCE itself;
+    // per-position attribution is recipe content.
     public static readonly Hash128 ModelAxisTypeId =
         Hash128.OfCanonical("substrate/type/Model_Axis/v1");
 
@@ -169,7 +170,6 @@ public sealed class ModelDecomposer : IDecomposer
         boot.AddType("Scalar");
         boot.AddType("Architecture");
         boot.AddType("Ngram");
-        boot.AddType("Witness");
         boot.AddType("Model_Axis");
 
         /* Codepoint / Grapheme / Word / Sentence / Document type entities are
@@ -280,12 +280,13 @@ public sealed class ModelDecomposer : IDecomposer
         //     no forward pass, no probe, no GEMM pre-join). Token axes resolve
         //     through the model's own embed/lm_head key-mapping tables; hidden
         //     axes are its surrogate keys (Model_Axis join nodes); positions
-        //     (layer instances) aggregate as witnesses in context_id. The
-        //     token×token bilinear (QK/OV/FFN) is the QUERY-TIME read across
-        //     these arenas — never materialized at ingest.
+        //     (layer instances) FOLD onto one evidence row per relation
+        //     (observation_count = games; exact score sums into consensus;
+        //     context_id NULL — records bounded by SCHEMA SHAPE, never by
+        //     depth or params). The token×token bilinear (QK/OV/FFN) is the
+        //     QUERY-TIME read across these arenas — never materialized at ingest.
         log.LogInformation("phase=etl starting (weight tables → adjudicated matches under tensor-role kinds)");
-        var etl = new ModelTableETL(_modelDir, recipe, tokens, Source,
-                                    WitnessTypeId, ModelAxisTypeId, log);
+        var etl = new ModelTableETL(_modelDir, recipe, tokens, Source, ModelAxisTypeId, log);
         await foreach (var change in etl.EmitAsync(ct))
         {
             ct.ThrowIfCancellationRequested();
@@ -317,24 +318,26 @@ public sealed class ModelDecomposer : IDecomposer
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        // Best-effort row estimate from the recipe's schema shapes — an upper
-        // bound (zero cells are non-events and emit nothing). Never hardcoded.
+        // Best-effort row estimate from the recipe's SCHEMA SHAPES — records are
+        // bounded by the shape (one evidence row per relation; positions fold as
+        // games), never by depth or params. Upper bound: an all-zero relation
+        // emits nothing. Never hardcoded.
         string configPath = Path.Combine(_modelDir, "config.json");
         if (!File.Exists(configPath)) return Task.FromResult<long?>(null);
         var r = LlamaRecipeExtractor.Parse(configPath);
         var p = ArchitectureProfile.For(r.ModelType);
-        long d = r.HiddenSize, vocab = r.VocabSize, interm = r.IntermediateSize, L = r.NumLayers;
+        long d = r.HiddenSize, vocab = r.VocabSize, interm = r.IntermediateSize;
         long headDim = d / r.NumHeads;
         long attnOut = r.NumHeads * headDim, kvDim = (long)r.NumKvHeads * headDim;
-        long cells =
+        long relations =
               vocab * d                                   // EMBEDS
             + vocab * d                                   // OUTPUT_PROJECTS (own table or tied)
-            + L * (2 * d * attnOut                        // Q + O
-                   + 2 * d * kvDim                        // K + V
-                   + (p.HasGate ? d * interm : 0)         // GATES
-                   + 2 * d * interm)                      // UP + DOWN
-            + (p.PerLayerNorms.Count * L + 1) * d;        // NORMALIZES
-        return Task.FromResult<long?>(vocab + cells);
+            + 2 * d * attnOut                             // Q + O
+            + 2 * d * kvDim                               // K + V
+            + (p.HasGate ? d * interm : 0)                // GATES
+            + 2 * d * interm                              // UP + DOWN
+            + d;                                          // NORMALIZES (per channel)
+        return Task.FromResult<long?>(vocab + relations);
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

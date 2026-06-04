@@ -35,16 +35,29 @@ CREATE INDEX physicalities_radius_btree    ON physicalities USING btree (radius_
 CREATE INDEX physicalities_residual_btree  ON physicalities USING btree (alignment_residual) WHERE alignment_residual IS NOT NULL;
 CREATE INDEX physicalities_observed_brin   ON physicalities USING brin  (observed_at);
 
-/* --- attestations (per-witness EVIDENCE observations; accumulated Glicko-2 state lives on consensus) --- */
+/* --- attestations (per-witness EVIDENCE observations; accumulated Glicko-2 state lives on consensus) ---
+ *
+ * Evidence is the LARGEST table (one row per witness observation — a model
+ * load is ~params rows), so every index here is paid per ingested cell.
+ * The set below is the MINIMAL audit/interpretability surface, measured:
+ *   relation_btree (s,k,o)  — evidence-of-a-relation lookups; its leading
+ *                             columns also serve subject-only and
+ *                             subject+kind scans (prefix indexes on
+ *                             (subject) and (subject,kind) were pure
+ *                             duplicates and were removed).
+ *   kind/object/source/context — arena scans, reverse lookups, per-source
+ *                             eviction (DELETE … WHERE source_id), and the
+ *                             interpretability GROUP BY context_id.
+ * Uniqueness is enforced ONCE, by the content-addressed PK: id IS
+ * BLAKE3(subject,kind,object,source,context) — identity is content (the
+ * one law). A second UNIQUE over the same 5-tuple measured 144 B/row of
+ * pure duplication and was removed with it.
+ * Evidence is NOT ranked by μ — that is the consensus layer
+ * (consensus_rating_btree). */
 
-CREATE INDEX attestations_subject_btree       ON attestations USING btree (subject_id);
 CREATE INDEX attestations_kind_btree          ON attestations USING btree (kind_id);
 CREATE INDEX attestations_object_btree        ON attestations USING btree (object_id) WHERE object_id IS NOT NULL;
 CREATE INDEX attestations_source_btree        ON attestations USING btree (source_id);
 CREATE INDEX attestations_context_btree       ON attestations USING btree (context_id) WHERE context_id IS NOT NULL;
-/* Evidence is NOT ranked by μ — that is the consensus layer (consensus_rating_btree).
- * The hot evidence scan is the per-period consensus fold's GROUP BY (subject, kind, object), so
- * index that grouping directly. */
 CREATE INDEX attestations_relation_btree      ON attestations USING btree (subject_id, kind_id, object_id);
-CREATE INDEX attestations_subject_kind_btree  ON attestations USING btree (subject_id, kind_id);
 CREATE INDEX attestations_last_observed_brin  ON attestations USING brin  (last_observed_at);

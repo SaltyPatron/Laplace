@@ -119,7 +119,8 @@ should_run() {
   return 1
 }
 
-# Layer 0 must complete via IngestRunner (seed-t0 alone does NOT set HasLayerCompleted/0).
+# Layer 0 must complete via IngestRunner (seed-t0 routes through `ingest unicode` now,
+# so it sets HasLayerCompleted/0; this check stays as the gate, not a workaround).
 if should_run "unicode-ingest"; then
   if [[ "$(layer_done 0)" == "t" ]]; then
     skip "ingest unicode (layer 0 already marked)"
@@ -140,7 +141,7 @@ for src in "${LADDER[@]}"; do
   should_run "$src" || continue
   prev=$(( ${LAYER[$src]} - 1 ))
   if [[ "$(layer_done "$prev")" != "t" ]]; then
-    fail "ingest $src blocked: HasLayerCompleted/$prev missing (run ingest unicode first or fix seed-t0)"
+    fail "ingest $src blocked: HasLayerCompleted/$prev missing (run the lower ladder layers first)"
     AUDIT_FAIL=1
     continue
   fi

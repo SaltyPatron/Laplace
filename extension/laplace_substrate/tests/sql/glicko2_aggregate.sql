@@ -152,3 +152,79 @@ SELECT
     (five_wins.r).rating > (one_win.r).rating AS multi_obs_higher_rating,
     (five_wins.r).rd     < (one_win.r).rd     AS multi_obs_tighter_rd
 FROM one_win, five_wins;
+
+-- =====================================================================
+-- Vector 6 — Batch entry ≡ per-game replay, BIT-IDENTICAL. The period
+-- fold's laplace_glicko2_accumulate_games(n, Σs) builds the same
+-- observation multiset the per-game replay built ((n−1) games at ⌊Σs/n⌋
+-- + one remainder game, same order) inside the kernel; outputs must be
+-- byte-equal, including a non-zero remainder and the n=1 degenerate.
+-- =====================================================================
+
+-- (a) n=5 identical draws (Σs divisible by n; remainder game = q).
+WITH replay AS (
+    SELECT laplace_glicko2_accumulate(
+        1500000000000, 350000000000, 60000000,
+        1500000000000,  80000000000,  500000000, 500000000
+    ) AS r
+    FROM generate_series(1, 5)
+),
+batch AS (
+    SELECT laplace_glicko2_accumulate_games(
+        1500000000000, 350000000000, 60000000,
+        1500000000000,  80000000000, 5, 2500000000, 500000000
+    ) AS r
+)
+SELECT
+    (batch.r).rating     = (replay.r).rating     AS rating_bit_equal,
+    (batch.r).rd         = (replay.r).rd         AS rd_bit_equal,
+    (batch.r).volatility = (replay.r).volatility AS volatility_bit_equal
+FROM replay, batch;
+
+-- (b) n=3 with a non-zero remainder: Σs = 1_000_000_001 → q = 333333333,
+--     remainder game = 333333335 (q, q, rem in that order — the replay's
+--     CASE emitted exactly this multiset).
+WITH replay AS (
+    SELECT laplace_glicko2_accumulate(
+        1480000000000, 200000000000, 60000000,
+        1500000000000, 120000000000, s.score, 500000000
+    ) AS r
+    FROM (VALUES (1, 333333333::bigint), (2, 333333333::bigint),
+                 (3, 333333335::bigint)) AS s(ord, score)
+),
+batch AS (
+    SELECT laplace_glicko2_accumulate_games(
+        1480000000000, 200000000000, 60000000,
+        1500000000000, 120000000000, 3, 1000000001, 500000000
+    ) AS r
+)
+SELECT
+    (batch.r).rating     = (replay.r).rating     AS rem_rating_bit_equal,
+    (batch.r).rd         = (replay.r).rd         AS rem_rd_bit_equal,
+    (batch.r).volatility = (replay.r).volatility AS rem_volatility_bit_equal
+FROM replay, batch;
+
+-- (c) n=1 degenerate: one game carrying the whole Σs.
+WITH replay AS (
+    SELECT laplace_glicko2_accumulate(
+        1520000000000, 180000000000, 60000000,
+        1500000000000,  90000000000, 700000000, 500000000
+    ) AS r
+    FROM generate_series(1, 1)
+),
+batch AS (
+    SELECT laplace_glicko2_accumulate_games(
+        1520000000000, 180000000000, 60000000,
+        1500000000000,  90000000000, 1, 700000000, 500000000
+    ) AS r
+)
+SELECT
+    (batch.r).rating     = (replay.r).rating     AS one_rating_bit_equal,
+    (batch.r).rd         = (replay.r).rd         AS one_rd_bit_equal,
+    (batch.r).volatility = (replay.r).volatility AS one_volatility_bit_equal
+FROM replay, batch;
+
+-- (d) games must be positive — fail loud, never a silent no-op.
+SELECT laplace_glicko2_accumulate_games(
+    1500000000000, 350000000000, 60000000,
+    1500000000000,  80000000000, 0, 0, 500000000);

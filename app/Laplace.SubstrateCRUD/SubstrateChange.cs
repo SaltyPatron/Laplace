@@ -108,4 +108,9 @@ public sealed record AttestationRow(
     long               LastObservedAtUnixUs,
     long               ObservationCount,
     long               ScoreFp1e9,        // in-flight testimony — consumed at ingest, never persisted
-    long               OpponentRdFp1e9);  // in-flight trust→φ   — consumed at ingest, never persisted
+    long               OpponentRdFp1e9,   // in-flight trust→φ   — consumed at ingest, never persisted
+    // In-flight EXACT score sum for a pre-aggregated row (ObservationCount
+    // games whose individual scores summed to this — positions aggregating on
+    // ONE evidence row). null ⇒ uniform games (ScoreFp1e9 × ObservationCount).
+    // Consumed by the consensus accumulation at ingest, never persisted.
+    long?              SumScoreFp1e9 = null);

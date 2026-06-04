@@ -198,15 +198,16 @@ trajectory (§4).
 
 Evidence and consensus are two layers, not one.
 
-- **Evidence IS provenance** — the record of WHO witnessed: which source, which model
-  **layer / head**, when, how many games, and whether it confirmed or refuted (the outcome CLASS).
+- **Evidence IS provenance** — the record of WHO witnessed: which source, when, how many games
+  (positions of a model's logical tables fold onto the relation's ONE row as `observation_count`
+  — §8), and whether the net testimony confirmed or refuted (the outcome CLASS).
   It is **never a value channel**: the witness's magnitude is testimony, consumed into the consensus
   match AT INGEST and not persisted — storing a per-witness score that is invertible to the weight
   is recording raw weights wearing the evidence layer as a costume. (WordNet asserting
-  `dog is_a noun`; Llama's layer-1-head-5 having witnessed `King → Queen`, confirming.) Evidence
-  powers interpretability (§2 — GROUP BY over *which relations* a head witnessed), auditing of *who
-  dissented*, and the embed species (§8). It is deduplicated / run-length-encoded — not stored
-  naively N times — while **retaining** provenance.
+  `dog is_a noun`; Llama having witnessed `King → Queen` over 22 layer-games, confirming.) Evidence
+  powers interpretability (§2 — head attribution via the attn/kv axis index ranges; per-relation
+  who-witnessed via source), auditing of *who dissented*, and the embed species (§8). It is
+  deduplicated by construction — bounded by schema shape, never stored per position.
 - **Attestation = consensus.** An attestation is the **materialized** Glicko-2 consensus over all
   evidence for a given `(subject, kind, object[, context])` — **one row**, with source / layer / head
   **out** of the identity. This is what inference reads — directly, no joins.
@@ -341,12 +342,17 @@ application logic (no forward pass, no probes, no GEMM):
   (the fixed vocabulary: `EMBEDS, Q_PROJECTS, K_PROJECTS, V_PROJECTS, O_PROJECTS, GATES,
   UP_PROJECTS, DOWN_PROJECTS, NORMALIZES, OUTPUT_PROJECTS`). Value consumed into μ; zero = the
   only non-event; tiny = a draw by math; negative = a loss.
-- **POSITIONS AGGREGATE.** Layers/heads are *positions* of the same logical table: relation
-  identity excludes position; each position is another **witness** (games / circuit instance in
-  evidence context). Per-position attribution is **recipe content**, never per-attestation
-  schema; no synthetic per-position entities. Consequence — **records are bounded by the SCHEMA
-  SHAPE** (vocab×d_model, d_model², d_model×interm: ~10 logical tables), never by depth or
-  parameter count: a deeper model adds games on the same rows. Records < parameters, always.
+- **POSITIONS AGGREGATE.** Layers/heads/norm-slots are *positions* of the same logical table:
+  relation identity excludes position — and so does **evidence identity**: ONE evidence row per
+  `(subject, kind, object, source)` with `context_id` **NULL**; every position's match lands ON
+  that row (`observation_count` = games; the exact score sum rides in-flight into the consensus
+  accumulation, never persisted). Per-position attribution is **recipe content**, never
+  per-attestation schema; **no synthetic per-position entities** (no Witness(layer) zoo — head
+  attribution stays queryable through the attn/kv axis index ranges). Consequence — **records are
+  bounded by the SCHEMA SHAPE** (vocab×d_model, d_model², d_model×interm: ~10 logical tables),
+  never by depth or parameter count: a deeper model adds games on the same rows. Records <
+  parameters, always — a flat per-(cell, position) evidence dump is the same overflow as the
+  pre-join, one layer down (~500 GB from a 2 GB model), and is banned.
 - **embed_tokens / lm_head** additionally → **Projection physicalities** (per-token *placements*,
   the embed species); **norms** → recipe scaling.
 

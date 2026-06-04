@@ -16,6 +16,12 @@
  * id is content-addressed BLAKE3-128 of the 5-tuple — stable across re-
  * observation; repeated assertions are UPSERT-no-op idempotent (R5). */
 
+/* Uniqueness = the content-addressed id ALONE. id IS the canonical hash of
+ * the 5-tuple (every writer routes through AttestationFactory.ComputeId), so
+ * a second UNIQUE over (subject, kind, object, source, context) restated the
+ * same invariant at a measured 144 B/row — at model-evidence scale (~params
+ * rows) that is hundreds of GB of duplication. Identity is content; the PK
+ * is the law. */
 CREATE TABLE attestations (
     id                bytea         PRIMARY KEY CHECK (octet_length(id) = 16),
     subject_id        bytea         NOT NULL REFERENCES entities(id),
@@ -25,8 +31,7 @@ CREATE TABLE attestations (
     context_id        bytea                  REFERENCES entities(id),
     outcome           smallint      NOT NULL CHECK (outcome IN (0, 1, 2)),
     last_observed_at  timestamptz   NOT NULL,
-    observation_count bigint        NOT NULL DEFAULT 1 CHECK (observation_count >= 0),
-    UNIQUE NULLS NOT DISTINCT (subject_id, kind_id, object_id, source_id, context_id)
+    observation_count bigint        NOT NULL DEFAULT 1 CHECK (observation_count >= 0)
 );
 
 COMMENT ON TABLE attestations IS

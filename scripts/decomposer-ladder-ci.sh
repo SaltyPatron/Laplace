@@ -24,8 +24,9 @@ die() { echo "::error::$*"; exit 1; }
 # No checkpoint to clear: ingestion is idempotent (content-addressing + ON CONFLICT
 # DO NOTHING), so a re-run after the prior job's DB nuke converges with no side journal.
 
-# `ingest unicode` sets HasLayerCompleted/0 (the db-deploy seed-unicode step does NOT), which
-# unblocks iso639 (layer 1). The re-seed is idempotent (ON CONFLICT). Then the lexical layer.
+# `ingest unicode` is layer 0: idempotent (ON CONFLICT) and sets HasLayerCompleted/0, which
+# unblocks iso639 (layer 1). Then the lexical layer. (seed-t0/db-fresh route through the
+# same command now — the marker-less legacy seed is deleted.)
 LADDER=(unicode iso639 wordnet)
 [[ "${LADDER_FULL:-0}" == "1" ]] && LADDER+=(omw ud)
 

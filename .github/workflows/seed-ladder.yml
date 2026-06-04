@@ -34,8 +34,9 @@ jobs:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
-      # unicode re-ingest sets the HasLayerCompleted/0 marker that unblocks
-      # iso639 (db-deploy's seed-unicode seeds T0 content but not the marker).
+      # Layer 0. Idempotent re-ingest (content-addressing + ON CONFLICT);
+      # sets the HasLayerCompleted/0 marker that unblocks iso639. (The legacy
+      # marker-less seed-unicode command is deleted — every T0 seed is this.)
       - name: ingest
         run: scripts/ingest-source.sh unicode
 

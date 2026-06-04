@@ -66,7 +66,7 @@ public sealed class WeightTensorETL
 
     /* ── The one exact tensor-cell loader ─────────────────────────────────── */
 
-    internal static byte[] LoadRawBytes(
+    public static byte[] LoadRawBytes(
         Dictionary<string, SafetensorsContainerParser.TensorReference> refMap, string name)
     {
         var tref = refMap[name];
@@ -85,7 +85,7 @@ public sealed class WeightTensorETL
         return rawBytes;
     }
 
-    internal static float[] LoadTensorF32(
+    public static float[] LoadTensorF32(
         Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
         string name, long expectedElements)
     {

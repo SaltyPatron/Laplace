@@ -176,6 +176,99 @@ pg_laplace_glicko2_finalfunc(PG_FUNCTION_ARGS)
 }
 
 /* ------------------------------------------------------------------------- */
+/* laplace_glicko2_accumulate_games — the period fold's batch entry.         */
+/*                                                                           */
+/* One relation's period = n games against ONE opponent (the neutral line at */
+/* the witness's trust→φ) whose individual scores summed EXACTLY to Σs. The  */
+/* period update depends on the multiset only through what the kernel sums,  */
+/* so this builds the SAME observation array the SQL replay built —          */
+/* (n−1) games at q = ⌊Σs/n⌋ followed by one remainder game so the scores    */
+/* sum exactly to Σs — and runs the SAME glicko2_update_period once.         */
+/* Bit-identical to the aggregate over a generate_series replay BY           */
+/* CONSTRUCTION (same array, same order, same kernel), without pushing       */
+/* games×relations rows through the executor: the TinyLlama fold replayed    */
+/* 1.1e9 rows for 153e6 relations through the lateral; this is one call per  */
+/* relation.                                                                 */
+/*                                                                           */
+/* SQL signature:                                                            */
+/*   laplace_glicko2_accumulate_games(prior_rating, prior_rd, prior_vol,     */
+/*       opponent_rating, opponent_rd, games, sum_score, tau)                */
+/*     RETURNS laplace_glicko2_result                                        */
+/* ------------------------------------------------------------------------- */
+PG_FUNCTION_INFO_V1(pg_laplace_glicko2_accumulate_games);
+
+Datum
+pg_laplace_glicko2_accumulate_games(PG_FUNCTION_ARGS)
+{
+    glicko2_state_t         st;
+    glicko2_observation_t*  obs;
+    int64_t                 games;
+    int64_t                 sum_score;
+    int64_t                 opp_rating, opp_rd, tau;
+    int64_t                 q, rem;
+    int64_t                 i;
+    TupleDesc               tupdesc;
+    Datum                   values[3];
+    bool                    nulls[3] = { false, false, false };
+    HeapTuple               tuple;
+
+    glicko2_init(&st,
+                 PG_GETARG_INT64(0),    /* prior rating     */
+                 PG_GETARG_INT64(1),    /* prior rd         */
+                 PG_GETARG_INT64(2));   /* prior volatility */
+    opp_rating = PG_GETARG_INT64(3);
+    opp_rd     = PG_GETARG_INT64(4);
+    games      = PG_GETARG_INT64(5);
+    sum_score  = PG_GETARG_INT64(6);
+    tau        = PG_ARGISNULL(7) ? LAPLACE_GLICKO2_DEFAULT_TAU
+                                 : PG_GETARG_INT64(7);
+
+    if (games <= 0)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+             errmsg("laplace_glicko2_accumulate_games: games must be > 0 (got %ld)",
+                    (long) games)));
+    /* Fail-loud memory bound: 2^27 games ≈ 3 GB of observations per relation
+     * would mean a single relation witnessed 134M times in ONE period —
+     * far beyond any source; a real period that large is a caller bug. */
+    if (games > (INT64CONST(1) << 27))
+        ereport(ERROR,
+            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+             errmsg("laplace_glicko2_accumulate_games: %ld games in one period "
+                    "exceeds the per-relation bound", (long) games)));
+
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("function returning record called in context "
+                    "that cannot accept type record")));
+    BlessTupleDesc(tupdesc);
+
+    obs = (glicko2_observation_t*)
+        palloc(sizeof(glicko2_observation_t) * (Size) games);
+    q   = sum_score / games;
+    rem = sum_score - q * (games - 1);
+    for (i = 0; i < games - 1; i++) {
+        obs[i].opponent_rating = opp_rating;
+        obs[i].opponent_rd     = opp_rd;
+        obs[i].score           = q;
+    }
+    obs[games - 1].opponent_rating = opp_rating;
+    obs[games - 1].opponent_rd     = opp_rd;
+    obs[games - 1].score           = rem;     /* Σ scores == sum_score, exactly */
+
+    glicko2_update_period(&st, obs, (size_t) games, tau, /* now_ns */ 0);
+    pfree(obs);
+
+    values[0] = Int64GetDatum(st.rating);
+    values[1] = Int64GetDatum(st.rd);
+    values[2] = Int64GetDatum(st.volatility);
+
+    tuple = heap_form_tuple(tupdesc, values, nulls);
+    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
+/* ------------------------------------------------------------------------- */
 /* entities_exist_bitmap (Story D.3 / #250 / Framework Epic #232).           */
 /*                                                                           */
 /* SQL signature:                                                            */

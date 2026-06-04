@@ -200,10 +200,13 @@ migrate-new name:
 
 # === Seed ===
 
-# T0 DB seed: UnicodeDecomposer → NpgsqlSubstrateWriter (sibling of
-# build-perfcache). Replaces deleted scripts/seed-t0.sh.
+# T0 DB seed: UnicodeDecomposer through THE ONE ingest path (IngestRunner +
+# ConsensusAccumulatingWriter) — consensus folds at ingest and the layer-0
+# HasLayerCompleted marker is written, so the ladder can proceed. The legacy
+# `seed-unicode` plain-writer command (no consensus fold, no marker — every
+# script had to work around it) is deleted.
 seed-t0: build-perfcache build-app
-    cd app && dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- seed-unicode
+    cd app && dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- ingest unicode
 
 # Fresh DB for clean testing. Re-ingesting a model is refused by design (it would
 # double-count its votes and contaminate consensus), so any test that re-runs
@@ -231,8 +234,8 @@ db-fresh: build-perfcache build-app
     cd app
     echo NUKE | dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- nuke
     dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- up
-    dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- seed-unicode
-    echo "✓ db-fresh: empty substrate + current extension + T0 seeded"
+    dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- ingest unicode
+    echo "✓ db-fresh: empty substrate + current extension + T0 seeded (consensus folded, layer-0 marker set)"
 
 # === Setup (full convenience composite) ===
 

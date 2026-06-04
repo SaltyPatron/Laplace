@@ -61,3 +61,25 @@ CREATE AGGREGATE laplace_glicko2_accumulate(
     STYPE     = internal,
     FINALFUNC = laplace_glicko2_finalfunc
 );
+
+/* The period fold's BATCH entry: one relation's period = n games against one
+ * opponent whose scores summed EXACTLY to sum_score. Builds the identical
+ * observation multiset ((n−1) at ⌊Σs/n⌋ + one remainder game, same order) and
+ * runs the SAME glicko2_update_period — bit-identical to the aggregate over a
+ * generate_series replay, without pushing games×relations rows through the
+ * executor (the TinyLlama fold replayed 1.1e9 rows for 153e6 relations). */
+CREATE FUNCTION laplace_glicko2_accumulate_games(
+    prior_rating     bigint,
+    prior_rd         bigint,
+    prior_volatility bigint,
+    opponent_rating  bigint,
+    opponent_rd      bigint,
+    games            bigint,
+    sum_score        bigint,
+    tau              bigint
+) RETURNS laplace_glicko2_result
+    AS 'MODULE_PATHNAME', 'pg_laplace_glicko2_accumulate_games'
+    LANGUAGE C IMMUTABLE;
+
+COMMENT ON FUNCTION laplace_glicko2_accumulate_games(bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint) IS
+    'Batch Glicko-2 period update from (games, sum_score) against one opponent: identical observation multiset, identical kernel, one call per relation instead of one aggregate row per game.';

@@ -374,10 +374,10 @@ jobs:
                    has_schema_privilege('laplace_readonly', 'laplace', 'USAGE');
           " | sed 's/^/  /'
 
-      - name: Seed Unicode T0
+      - name: Seed Unicode T0 (THE ONE ingest path — consensus folds, layer-0 marker set)
         run: |
           cd app
-          dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- seed-unicode
+          dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- ingest unicode
 
   # ------------------------------------------------------------------
   # dotnet-test — C# test suites.

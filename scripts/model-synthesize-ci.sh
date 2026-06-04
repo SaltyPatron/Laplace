@@ -53,11 +53,11 @@ if [ ! -f "$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll" ]; then
 fi
 
 # --- migrations + T0 seed (idempotent; never nuke-to-reingest) ---
-log "migrations up + seed-unicode (idempotent)"
+log "migrations up + ingest unicode (idempotent; consensus folds, layer-0 marker set)"
 (cd "$ROOT/app" && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- up) \
   || die "db-up failed"
-(cd "$ROOT/app" && "${CLI[@]}" seed-unicode) \
-  || die "seed-unicode failed"
+(cd "$ROOT/app" && "${CLI[@]}" ingest unicode) \
+  || die "ingest unicode failed"
 
 # --- ingest ---
 log "ingest model (pass 1)"

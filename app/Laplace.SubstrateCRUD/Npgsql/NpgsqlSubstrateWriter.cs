@@ -304,6 +304,11 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         var existing = new HashSet<Hash128>();
         const int ChunkSize = 100_000;
         await using var cmd = conn.CreateCommand();
+        // Bulk-path commands are UNBOUNDED (CommandTimeout 0): under a heavy
+        // checkpoint an indexed probe over a 10⁸-row table can exceed Npgsql's
+        // 30 s default, whose client-side cancel surfaces as "canceling
+        // statement due to user request" + a dead connection mid-batch.
+        cmd.CommandTimeout = 0;
         cmd.CommandText = "SELECT laplace.entities_exist_bitmap(@ids)";
         var idsParam = cmd.Parameters.Add(
             new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea));
@@ -356,6 +361,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         // by id regardless; this only bounds how many ids ride one round-trip.
         const int ChunkSize = 100_000;
         await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 0;   // bulk path — never client-cancel mid-batch
         cmd.CommandText = $"SELECT id FROM laplace.{table} WHERE id = ANY(@ids)";
         var idsParam = cmd.Parameters.Add(
             new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea));
@@ -420,6 +426,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         string stageName = $"_laplace_stage_{tableName}";
         await using (var ddl = conn.CreateCommand())
         {
+            ddl.CommandTimeout = 0;   // bulk path — never client-cancel mid-batch
             ddl.CommandText =
                 $"CREATE TEMP TABLE IF NOT EXISTS {stageName} " +
                 $"(LIKE laplace.{tableName} INCLUDING DEFAULTS) ON COMMIT DROP; " +
@@ -447,6 +454,10 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
 
         await using (var promote = conn.CreateCommand())
         {
+            // UNBOUNDED: a 500k-row promote under a heavy checkpoint can exceed
+            // the 30 s default; Npgsql's cancel kills the batch ("canceling
+            // statement due to user request") and the retry hits the same wall.
+            promote.CommandTimeout = 0;
             promote.CommandText =
                 $"INSERT INTO laplace.{tableName} ({cols}) " +
                 $"SELECT {cols} FROM {stageName} ON CONFLICT DO NOTHING";

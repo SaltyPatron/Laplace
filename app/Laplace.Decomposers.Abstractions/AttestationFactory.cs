@@ -97,6 +97,41 @@ public static class AttestationFactory
                              signedMagnitude: magnitude, arenaScale: arenaScale,
                              witnessWeight: kindRank * sourceTrust, observationCount: observationCount);
 
+    /// <summary>
+    /// One PRE-AGGREGATED evidence row: <paramref name="games"/> observations of
+    /// the SAME relation by the SAME source whose individual fixed-point scores
+    /// summed EXACTLY to <paramref name="sumScoreFp1e9"/> — positions of a
+    /// logical table (model layers, norm slots) aggregating on ONE row
+    /// (relation identity and evidence identity EXCLUDE position; per-position
+    /// attribution is recipe content). All integer math — no double round-trip,
+    /// the consensus accumulation consumes the exact (n, Σs). Outcome = the NET
+    /// class: Σs vs n·½ exactly.
+    /// </summary>
+    public static AttestationRow CreateAggregated(
+        Hash128 subject, Hash128 kindId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
+        long games, long sumScoreFp1e9, double witnessWeight)
+    {
+        if (games <= 0) throw new ArgumentOutOfRangeException(nameof(games));
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        const long half = 500_000_000L;          // ½ in fixed-point ×1e9
+        long netHalf = checked(games * half);
+        return new AttestationRow(
+            Id:                   ComputeId(subject, kindId, obj, sourceId, contextId),
+            SubjectId:            subject,
+            KindId:               kindId,
+            ObjectId:             obj,
+            SourceId:             sourceId,
+            ContextId:            contextId,
+            Outcome:              sumScoreFp1e9 > netHalf ? AttestationOutcome.Confirm
+                                : sumScoreFp1e9 < netHalf ? AttestationOutcome.Refute
+                                                          : AttestationOutcome.Draw,
+            LastObservedAtUnixUs: nowUs,
+            ObservationCount:     games,
+            ScoreFp1e9:           sumScoreFp1e9 / games,   // display/fallback; the exact sum rides below
+            OpponentRdFp1e9:      (long)(WitnessPhi(witnessWeight) * Glicko2.FpScale),
+            SumScoreFp1e9:        sumScoreFp1e9);
+    }
+
     private static AttestationRow Build(
         Hash128 subject, Hash128 kindId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
         double score, double witnessWeight, double arenaScale, long observationCount)

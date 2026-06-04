@@ -137,7 +137,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                     $"accumulation invariant violated: relation observed with φ={a.OpponentRdFp1e9} after φ={acc.PhiFp1e9} in the same period");
             }
             acc.Games        += a.ObservationCount;
-            acc.SumScoreFp1e9 = checked(acc.SumScoreFp1e9 + a.ScoreFp1e9 * a.ObservationCount);
+            // Pre-aggregated rows carry their EXACT score sum (positions folded
+            // onto one row); uniform rows contribute score × occurrences.
+            acc.SumScoreFp1e9 = checked(acc.SumScoreFp1e9
+                + (a.SumScoreFp1e9 ?? checked(a.ScoreFp1e9 * a.ObservationCount)));
             if (a.LastObservedAtUnixUs > acc.MaxTsUnixUs) acc.MaxTsUnixUs = a.LastObservedAtUnixUs;
         }
         Interlocked.Add(ref _observationsAccumulated, a.ObservationCount);

@@ -137,8 +137,10 @@ jobs:
           rm -f "$GGUF_OUT"
           out="$($CLI synthesize substrate "${MODEL_DIR_INPUT:-$LAPLACE_TINYLLAMA_DIR}/config.json" "$GGUF_OUT" 2>&1)"; echo "$out"
           echo "$out" | grep -qiE 'synthesis complete' || { echo "::error::synthesize did not complete"; exit 1; }
-          echo "$out" | grep -qi  'spectral token basis' || { echo "::error::eigenmaps did not run (TokenBasis null)"; exit 1; }
-          echo "$out" | grep -qi  'procrustes residual'  || { echo "::error::Procrustes alignment did not run"; exit 1; }
+          # Re-export = the ingestion run backward: every tensor-role arena pours
+          # its consensus into the mold (no spectral basis, no Procrustes — the
+          # arenas ARE the tables; positions receive the consensus directly).
+          echo "$out" | grep -qi 'consensus arenas poured' || { echo "::error::arena pour did not run"; exit 1; }
 
   gguf-verify:
     name: "verify — GGUF valid + non-trivial"

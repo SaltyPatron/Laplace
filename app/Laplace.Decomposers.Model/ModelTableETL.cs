@@ -26,12 +26,17 @@ namespace Laplace.Decomposers.Model;
 /// score = ½(1+tanh(w/M)), M = the role's pooled RMS (measured, never a knob).
 /// Zero = the only non-event; tiny = a draw by math; negative = a loss.
 ///
-/// POSITIONS AGGREGATE — layers are positions of the same logical table:
-/// relation identity EXCLUDES the layer; each (layer, role) instance is a
-/// WITNESS entity carried in context_id (evidence = provenance of which
-/// positions testified; consensus folds them). Records are bounded by the
-/// SCHEMA SHAPE (vocab×d_model, d_model×attnOut, d_model×interm, …), never by
-/// depth and never by parameter count.
+/// POSITIONS AGGREGATE — layers (and norm slots) are positions of the same
+/// logical table. Relation identity EXCLUDES position, and so does EVIDENCE
+/// identity: one evidence row per (subject, kind, object, source) with
+/// context_id NULL ("Q_PROJECTS context_id=NULL is correct"); every position's
+/// match lands ON THAT ROW — observation_count = the games played, the exact
+/// score sum rides in-flight into the consensus accumulation. NO synthetic
+/// per-position entities (#192 §7); per-position attribution is RECIPE
+/// content. RECORDS ARE BOUNDED BY THE SCHEMA SHAPE (vocab×d_model,
+/// d_model×attnOut, d_model×interm, …) — never by depth, never by parameter
+/// count. A flat per-(cell, position) dump is the named failure: "a
+/// billion-edge write overflow = the emit ignoring the DAG."
 ///
 /// The token×token bilinear (QK/OV/FFN) is the QUERY-TIME read — μ-ranked
 /// joins EMBEDS → interior kinds → OUTPUT_PROJECTS — never materialized here.
@@ -39,7 +44,8 @@ namespace Laplace.Decomposers.Model;
 public sealed class ModelTableETL
 {
     private const int RowsPerChange = 500_000;
-    private const double ModelTrust = 0.50;   // SourceTrust.AiModelProbe; kind_rank via registry rank of the role kinds
+    // Witness weight = kind_rank × source_trust (× tenant_trust = 1 until S5).
+    private const double ModelWeight = KindRank.TensorCalculation * SourceTrust.AiModelProbe;
 
     /// <summary>One logical table role of the transformer-family schema.</summary>
     private sealed record Role(
@@ -55,7 +61,6 @@ public sealed class ModelTableETL
     private readonly LlamaRecipeExtractor.RecipeInfo _recipe;
     private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
     private readonly Hash128 _source;
-    private readonly Hash128 _witnessType;
     private readonly Hash128 _axisType;
     private readonly ILogger _log;
     private readonly IReadOnlyList<SafetensorsContainerParser.TensorReference> _refs;
@@ -65,18 +70,17 @@ public sealed class ModelTableETL
         string modelDir,
         LlamaRecipeExtractor.RecipeInfo recipe,
         IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
-        Hash128 sourceId, Hash128 witnessType, Hash128 axisType,
+        Hash128 sourceId, Hash128 axisType,
         ILogger? log = null)
     {
-        _modelDir    = modelDir;
-        _recipe      = recipe;
-        _tokens      = tokens;
-        _source      = sourceId;
-        _witnessType = witnessType;
-        _axisType    = axisType;
-        _log         = log ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
-        _refs        = SafetensorsContainerParser.ParseModel(modelDir);
-        _refMap      = new Dictionary<string, SafetensorsContainerParser.TensorReference>(
+        _modelDir = modelDir;
+        _recipe   = recipe;
+        _tokens   = tokens;
+        _source   = sourceId;
+        _axisType = axisType;
+        _log      = log ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+        _refs     = SafetensorsContainerParser.ParseModel(modelDir);
+        _refMap   = new Dictionary<string, SafetensorsContainerParser.TensorReference>(
             _refs.Count, StringComparer.Ordinal);
         foreach (var r in _refs) _refMap[r.Name] = r;
     }
@@ -104,8 +108,9 @@ public sealed class ModelTableETL
     // Parse() defaults model_type to "llama"; ArchitectureProfile.For throws for unmapped.
     private string ModelTypeOf() => _recipe.ModelType;
 
-    /// <summary>Stream the whole model as substrate changes: axis entities +
-    /// witnesses first, then every table's cells as adjudicated matches.</summary>
+    /// <summary>Stream the whole model as substrate changes: axis join-node
+    /// entities first, then every logical table folded into ONE evidence row
+    /// per relation (positions aggregated, exact score sums into consensus).</summary>
     public async IAsyncEnumerable<SubstrateChange> EmitAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
@@ -114,11 +119,33 @@ public sealed class ModelTableETL
         int kvDim   = _recipe.NumKvHeads * (dModel / _recipe.NumHeads);
         int vocab   = _recipe.VocabSize;
 
-        var tokById = new Hash128?[vocab];
-        foreach (var rec in _tokens)
-            if (rec.TokenId >= 0 && rec.TokenId < vocab) tokById[rec.TokenId] = rec.EntityId;
+        // Token axis → DISTINCT CONTENT ENTITIES, not vocab slots. Content is
+        // identity: a byte-fallback token and a text token with the same content
+        // are ONE entity, so their slots' matches FOLD onto the same relation
+        // here (otherwise the second slot's games die on the writer's
+        // ON CONFLICT and evidence undercounts what consensus accumulated).
+        var idxToOrd = new int[vocab];
+        Array.Fill(idxToOrd, -1);
+        var ordToEntity = new List<Hash128>();
+        {
+            var seen = new Dictionary<Hash128, int>();
+            foreach (var rec in _tokens)
+            {
+                if (rec.TokenId < 0 || rec.TokenId >= vocab) continue;
+                if (!seen.TryGetValue(rec.EntityId, out int ord))
+                {
+                    ord = ordToEntity.Count;
+                    seen[rec.EntityId] = ord;
+                    ordToEntity.Add(rec.EntityId);
+                }
+                idxToOrd[rec.TokenId] = ord;
+            }
+        }
+        int distinctTokens = ordToEntity.Count;
+        _log.LogInformation("phase=etl tokens: {Distinct:N0} distinct content entities over {Vocab:N0} vocab slots",
+            distinctTokens, vocab);
 
-        // ── Axis join-node entities (the source's surrogate keys) + witnesses ──
+        // ── Axis join-node entities (the source's surrogate keys) ──
         var axisIds = new Dictionary<(string Space, int Index), Hash128>();
         Hash128 Axis(string space, int i)
         {
@@ -132,21 +159,13 @@ public sealed class ModelTableETL
 
         var roles = Roles();
         {
-            var b = new SubstrateChangeBuilder(_source, "model/axes+witnesses",
-                entityCapacity: dModel + attnOut + kvDim + interm + roles.Count * (_recipe.NumLayers + 1),
+            var b = new SubstrateChangeBuilder(_source, "model/axes",
+                entityCapacity: dModel + attnOut + kvDim + interm,
                 physicalityCapacity: 0, attestationCapacity: 0);
             for (int i = 0; i < dModel; i++)  b.AddEntity(new EntityRow(Axis("channel", i),  0, _axisType, _source));
             for (int i = 0; i < attnOut; i++) b.AddEntity(new EntityRow(Axis("attn_dim", i), 0, _axisType, _source));
             for (int i = 0; i < kvDim; i++)   b.AddEntity(new EntityRow(Axis("kv_dim", i),   0, _axisType, _source));
             for (int i = 0; i < interm; i++)  b.AddEntity(new EntityRow(Axis("neuron", i),   0, _axisType, _source));
-            for (int r = 0; r < roles.Count; r++)
-            {
-                if (roles[r].GlobalName is not null)
-                    b.AddEntity(new EntityRow(Witness(r, -1), 0, _witnessType, _source));
-                else
-                    for (int l = 0; l < _recipe.NumLayers; l++)
-                        b.AddEntity(new EntityRow(Witness(r, l), 0, _witnessType, _source));
-            }
             yield return b.Build();
         }
 
@@ -169,23 +188,49 @@ public sealed class ModelTableETL
                 roles[r].Name, arenaM[r], n);
         }
 
-        // ── PASS 2 — stream every cell as one adjudicated match ──
+        // ── PASS 2 — fold every position's matches onto the relation, then emit
+        //    ONE evidence row per relation: (games, exact Σscore), context NULL ──
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        long emitted = 0, zeros = 0;
+        long relationsEmitted = 0, gamesPlayed = 0, zeros = 0;
         for (int r = 0; r < roles.Count; r++)
         {
             var role = roles[r];
             double M = arenaM[r];
-            foreach (var (name, layer) in Instances(role))
+
+            // The role's relation space = its SCHEMA SHAPE (one logical table,
+            // however many layer instances). Fail loud on a shape mismatch.
+            int rows = -1, cols = -1;
+            var instances = new List<(string Name, int Layer)>();
+            foreach (var inst in Instances(role))
+            {
+                if (!_refMap.TryGetValue(inst.Name, out var tref)) continue;
+                int tr = tref.Shape[0], tc = tref.Shape.Length > 1 ? tref.Shape[1] : 1;
+                if (rows < 0) { rows = tr; cols = tc; }
+                else if (tr != rows || tc != cols)
+                    throw new InvalidOperationException(
+                        $"{role.Name}: instance {inst.Name} shape [{tr}×{tc}] differs from the role shape [{rows}×{cols}] — one logical table per role");
+                instances.Add(inst);
+            }
+            if (instances.Count == 0) continue;
+
+            // Relation space = the role's SCHEMA SHAPE with token axes folded to
+            // DISTINCT ENTITIES (key resolution happens AT FOLD TIME: vocab slot →
+            // content entity ordinal; a padded slot past the vocab has no key).
+            bool inTok  = role.InSpace  == "TOKEN";
+            bool outTok = role.OutSpace == "TOKEN";
+            int tRows = role.RowsAreOut ? cols : rows;   // tensor extent of the in-axis
+            int tCols = role.RowsAreOut ? rows : cols;   // tensor extent of the out-axis
+            int inSize  = inTok  ? distinctTokens : tRows;
+            int outSize = outTok ? distinctTokens : tCols;
+            long space = (long)inSize * outSize;
+            var sumFp = new long[space];
+            var games = new int[space];
+            long unresolved = 0;
+
+            foreach (var (name, layer) in instances)
             {
                 ct.ThrowIfCancellationRequested();
-                if (!_refMap.TryGetValue(name, out var tref)) continue;
-                int rows = tref.Shape[0], cols = tref.Shape.Length > 1 ? tref.Shape[1] : 1;
                 var w = WeightTensorETL.LoadTensorF32(_refMap, name, (long)rows * cols);
-                Hash128 wit = Witness(r, layer);
-
-                var b = NewChunk(role.Name, layer, wit);
-                int inChunk = 0;
                 for (int row = 0; row < rows; row++)
                 {
                     long off = (long)row * cols;
@@ -193,81 +238,99 @@ public sealed class ModelTableETL
                     {
                         float v = w[off + col];
                         if (v == 0f) { zeros++; continue; }       // zero = the only non-event
-
-                        int outIdx = role.RowsAreOut ? row : col;
                         int inIdx  = role.RowsAreOut ? col : row;
-                        // Token axes resolve through the source's own key-mapping table;
-                        // a padded row past the vocab has no key — nothing to resolve.
-                        Hash128? subj = role.InSpace  == "TOKEN"
-                            ? (inIdx  < vocab ? tokById[inIdx]  : null) : Axis(role.InSpace, inIdx);
-                        Hash128? obj  = role.OutSpace == "TOKEN"
-                            ? (outIdx < vocab ? tokById[outIdx] : null) : Axis(role.OutSpace, outIdx);
-                        if (subj is null || obj is null) continue;  // unresolvable token id
-
-                        b.AddAttestation(AttestationFactory.CreateWeighted(
-                            subj.Value, role.KindId, obj.Value, _source, contextId: wit,
-                            kindRank: KindRank.TensorCalculation, sourceTrust: ModelTrust,
-                            magnitude: v, arenaScale: M));
-                        emitted++;
-                        if (++inChunk >= RowsPerChange)
-                        {
-                            yield return b.Build();
-                            b = NewChunk(role.Name, layer, wit);
-                            inChunk = 0;
-                        }
+                        int outIdx = role.RowsAreOut ? row : col;
+                        if (inTok)  { inIdx  = inIdx  < vocab ? idxToOrd[inIdx]  : -1; }
+                        if (outTok) { outIdx = outIdx < vocab ? idxToOrd[outIdx] : -1; }
+                        if (inIdx < 0 || outIdx < 0) { unresolved++; continue; }
+                        long flat = (long)inIdx * outSize + outIdx;
+                        sumFp[flat] += (long)(AttestationFactory.Score(v, M) * Glicko2.FpScale);
+                        games[flat]++;
                     }
                 }
-                if (inChunk > 0) yield return b.Build();
-                _log.LogInformation("phase=etl {Role} L{Layer}: {Cells:N0} cells loaded (cum {Cum:N0}, zeros {Z:N0}), {S:F0}s",
-                    role.Name, layer, (long)rows * cols, emitted, zeros, sw.Elapsed.TotalSeconds);
+                _log.LogInformation("phase=etl {Role} L{Layer}: folded ({S:F0}s)",
+                    role.Name, layer, sw.Elapsed.TotalSeconds);
                 await Task.Yield();
             }
+
+            // Emit the folded table — one row per relation that played ≥1 game.
+            long roleStart = relationsEmitted;
+            var b = NewChunk(role.Name);
+            int inChunk = 0;
+            for (long flat = 0; flat < space; flat++)
+            {
+                if (games[flat] == 0) continue;
+                int inIdx  = (int)(flat / outSize);
+                int outIdx = (int)(flat % outSize);
+                Hash128 subj = inTok  ? ordToEntity[inIdx]  : Axis(role.InSpace, inIdx);
+                Hash128 obj  = outTok ? ordToEntity[outIdx] : Axis(role.OutSpace, outIdx);
+
+                b.AddAttestation(AttestationFactory.CreateAggregated(
+                    subj, role.KindId, obj, _source, contextId: null,
+                    games: games[flat], sumScoreFp1e9: sumFp[flat], witnessWeight: ModelWeight));
+                relationsEmitted++;
+                gamesPlayed += games[flat];
+                if (++inChunk >= RowsPerChange)
+                {
+                    yield return b.Build();
+                    b = NewChunk(role.Name);
+                    inChunk = 0;
+                    await Task.Yield();
+                }
+            }
+            if (inChunk > 0) yield return b.Build();
+            _log.LogInformation(
+                "phase=etl {Role}: {Rel:N0} relations from {Pos} positions (cum relations {Cum:N0}, games {Games:N0}, zeros {Z:N0}, unresolved {U:N0}), {S:F0}s",
+                role.Name, relationsEmitted - roleStart, instances.Count, relationsEmitted, gamesPlayed, zeros, unresolved, sw.Elapsed.TotalSeconds);
         }
 
-        // ── NORMALIZES — per-channel scale rows (unary; one logical table).
-        //    Llama has TWO positions per layer (input + post-attn norm) plus the
-        //    final norm — each is a DISTINCT witness slot (roles.Count + slot),
-        //    never collapsed: same channel, same kind, different position. ──
+        // ── NORMALIZES — per-channel scale rows (unary; one logical table whose
+        //    positions are every norm instance: per-layer slots + final) ──
         {
             var prof = ArchitectureProfile.For(ModelTypeOf());
-            double sumsq = 0; long n = 0;
-            var normNames = NormInstances(prof).ToList();
-            foreach (var (name, _, _) in normNames)
-                if (_refMap.TryGetValue(name, out _))
+            var normNames = NormInstances(prof).Where(t => _refMap.ContainsKey(t.Name)).ToList();
+            if (normNames.Count > 0)
+            {
+                double sumsq = 0; long n = 0;
+                foreach (var (name, _) in normNames)
                 {
                     var w = WeightTensorETL.LoadTensorF32(_refMap, name, dModel);
                     for (int i = 0; i < dModel; i++) { double v = w[i]; sumsq += v * v; }
                     n += dModel;
                 }
-            double M = n > 0 && sumsq > 0 ? Math.Sqrt(sumsq / n) : 1.0;
+                double M = n > 0 && sumsq > 0 ? Math.Sqrt(sumsq / n) : 1.0;
 
-            var wb = new SubstrateChangeBuilder(_source, "model/norm-witnesses",
-                entityCapacity: normNames.Count, physicalityCapacity: 0, attestationCapacity: 0);
-            foreach (var (_, layer, slot) in normNames)
-                wb.AddEntity(new EntityRow(Witness(roles.Count + slot, layer), 0, _witnessType, _source));
-            yield return wb.Build();
+                var sumFp = new long[dModel];
+                var games = new int[dModel];
+                foreach (var (name, _) in normNames)
+                {
+                    var w = WeightTensorETL.LoadTensorF32(_refMap, name, dModel);
+                    for (int i = 0; i < dModel; i++)
+                    {
+                        if (w[i] == 0f) { zeros++; continue; }
+                        sumFp[i] += (long)(AttestationFactory.Score(w[i], M) * Glicko2.FpScale);
+                        games[i]++;
+                    }
+                }
 
-            foreach (var (name, layer, slot) in normNames)
-            {
-                if (!_refMap.TryGetValue(name, out _)) continue;
-                var w = WeightTensorETL.LoadTensorF32(_refMap, name, dModel);
-                Hash128 wit = Witness(roles.Count + slot, layer);
-                var b = NewChunk("NORMALIZES", layer, wit);
+                var b = NewChunk("NORMALIZES");
                 for (int i = 0; i < dModel; i++)
                 {
-                    if (w[i] == 0f) continue;
-                    b.AddAttestation(AttestationFactory.CreateWeighted(
+                    if (games[i] == 0) continue;
+                    b.AddAttestation(AttestationFactory.CreateAggregated(
                         Axis("channel", i), ModelDecomposer.NormalizesKind, obj: null, _source,
-                        contextId: wit, kindRank: KindRank.TensorCalculation,
-                        sourceTrust: ModelTrust, magnitude: w[i], arenaScale: M));
-                    emitted++;
+                        contextId: null, games: games[i], sumScoreFp1e9: sumFp[i],
+                        witnessWeight: ModelWeight));
+                    relationsEmitted++;
+                    gamesPlayed += games[i];
                 }
                 yield return b.Build();
             }
         }
 
-        _log.LogInformation("phase=etl done: {N:N0} matches loaded ({Z:N0} zero non-events) in {S:F0}s",
-            emitted, zeros, sw.Elapsed.TotalSeconds);
+        _log.LogInformation(
+            "phase=etl done: {Rel:N0} relations (schema-shape bounded) carrying {Games:N0} matches ({Z:N0} zero non-events) in {S:F0}s",
+            relationsEmitted, gamesPlayed, zeros, sw.Elapsed.TotalSeconds);
     }
 
     /// <summary>The role's tensor instances: (name, layer). Layer = -1 for the
@@ -279,33 +342,17 @@ public sealed class ModelTableETL
             yield return (ArchitectureProfile.Layer(role.PerLayerTemplate!, l), l);
     }
 
-    /// <summary>Norm positions: (name, layer, slot). Slot = which norm template
-    /// within the layer (Llama: 0 = input, 1 = post-attn; final norm = next slot)
-    /// — distinct positions get distinct witnesses (slot offsets past roles.Count).</summary>
-    private IEnumerable<(string Name, int Layer, int Slot)> NormInstances(ArchitectureProfile p)
+    /// <summary>Norm positions: every per-layer slot of every layer, plus the
+    /// final norm. All fold onto the same per-channel NORMALIZES relations.</summary>
+    private IEnumerable<(string Name, int Layer)> NormInstances(ArchitectureProfile p)
     {
         for (int l = 0; l < _recipe.NumLayers; l++)
-            for (int t = 0; t < p.PerLayerNorms.Count; t++)
-                yield return (ArchitectureProfile.Layer(p.PerLayerNorms[t], l), l, t);
-        yield return (p.FinalNorm, -1, p.PerLayerNorms.Count);
+            foreach (var t in p.PerLayerNorms)
+                yield return (ArchitectureProfile.Layer(t, l), l);
+        yield return (p.FinalNorm, -1);
     }
 
-    /// <summary>Witness id per (role-ordinal, layer position) — provenance of
-    /// WHICH position testified; never part of relation identity.</summary>
-    private Hash128 Witness(int roleOrdinal, int layer)
-    {
-        Span<byte> b = stackalloc byte[16 + 4 + 4];
-        _source.WriteBytes(b.Slice(0, 16));
-        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(b.Slice(16, 4), roleOrdinal);
-        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(b.Slice(20, 4), layer);
-        return Hash128.Blake3(b);
-    }
-
-    private SubstrateChangeBuilder NewChunk(string roleName, int layer, Hash128 witness)
-    {
-        var b = new SubstrateChangeBuilder(_source, $"etl/{roleName}/L{layer}", null,
-            entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: RowsPerChange);
-        b.AddEntity(new EntityRow(witness, 0, _witnessType, _source));
-        return b;
-    }
+    private SubstrateChangeBuilder NewChunk(string roleName) =>
+        new(_source, $"etl/{roleName}", null,
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: RowsPerChange);
 }

@@ -13,6 +13,12 @@
  * materialize_period_consensus, prior = the current row). There is NO
  * evidence-replay fold — evidence carries no values to replay, by design. */
 
+/* Uniqueness = the content-addressed id ALONE: id IS BLAKE3(subject ‖ kind ‖
+ * object|zero16) (consensus_id() below) — identity is content, the PK is the
+ * law. A second UNIQUE over (subject, kind, object) restated the same
+ * invariant at ~144 B/row (same correction as attestations, 2026-06-04); at
+ * model scale (~153M relations per 1B-param model) it was ~20 GB of duplicate
+ * structure maintained on every period-fold upsert, and was removed. */
 CREATE TABLE consensus (
     id                bytea       PRIMARY KEY CHECK (octet_length(id) = 16),
     subject_id        bytea       NOT NULL REFERENCES entities(id),
@@ -22,8 +28,7 @@ CREATE TABLE consensus (
     rd                bigint      NOT NULL CHECK (rd > 0),
     volatility        bigint      NOT NULL CHECK (volatility > 0),
     witness_count     bigint      NOT NULL DEFAULT 1 CHECK (witness_count >= 0),
-    last_observed_at  timestamptz NOT NULL,
-    UNIQUE NULLS NOT DISTINCT (subject_id, kind_id, object_id)
+    last_observed_at  timestamptz NOT NULL
 );
 
 COMMENT ON TABLE consensus IS
@@ -31,7 +36,8 @@ COMMENT ON TABLE consensus IS
 
 SELECT pg_extension_config_dump('consensus', '');
 
-CREATE INDEX consensus_subject_btree      ON consensus (subject_id);
+/* subject-only scans are served by subject_kind_btree's leading column — a
+ * separate (subject_id) index was a pure prefix duplicate and was removed. */
 CREATE INDEX consensus_object_btree       ON consensus (object_id) WHERE object_id IS NOT NULL;
 CREATE INDEX consensus_kind_btree         ON consensus (kind_id);
 CREATE INDEX consensus_subject_kind_btree ON consensus (subject_id, kind_id);
@@ -102,9 +108,12 @@ COMMENT ON FUNCTION create_period_staging() IS
 /* Materialize the period: merge partials per relation (Σ of Σ — exact),
  * verify φ-uniformity (fail loud, never average), then upsert consensus via
  * the §10 mapping: prior = current row (neutral when new), neutral opponent,
- * per-witness φ, replay n games whose scores sum EXACTLY to Σs (n−1 at ⌊Σs/n⌋
- * + one remainder game; v is score-independent and Δ ∝ Σs, so this equals the
- * true multiset's period update).
+ * per-witness φ, n games whose scores sum EXACTLY to Σs — applied through
+ * laplace_glicko2_accumulate_games, the batch entry that builds the identical
+ * observation multiset ((n−1) at ⌊Σs/n⌋ + one remainder game) inside the C
+ * kernel: bit-identical to the per-game replay, ONE call per relation (the
+ * generate_series replay pushed games×relations rows — 1.1e9 for TinyLlama —
+ * through the executor and took 182 min; the work is one kernel period).
  *
  * SET session_replication_role = replica: per-row RI triggers are redundant
  * here — every staged relation id entered through the writer's set-based
@@ -139,32 +148,31 @@ BEGIN
     )
     INSERT INTO consensus (id, subject_id, kind_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)
-    SELECT consensus_id(f.subject_id, f.kind_id, f.object_id),
+    SELECT f.cid,
            f.subject_id, f.kind_id, f.object_id,
            (f.acc).rating, (f.acc).rd, (f.acc).volatility,
-           COALESCE(c0.witness_count, 0) + f.games,
+           f.prior_witnesses + f.games,
            f.last_ts
     FROM (
+        -- ONE prior lookup per relation (rating/rd/volatility AND witness_count
+        -- ride the same join), ONE consensus_id evaluation, ONE kernel call —
+        -- no per-game row explosion, no re-GROUP BY (merged is already grouped).
         SELECT m.subject_id, m.kind_id, m.object_id, m.games, m.last_ts,
-               laplace_glicko2_accumulate(
+               m.cid, COALESCE(c.witness_count, 0) AS prior_witnesses,
+               laplace_glicko2_accumulate_games(
                    COALESCE(c.rating,     1500000000000::bigint),   -- prior = current consensus,
                    COALESCE(c.rd,          350000000000::bigint),   -- neutral when the relation is new
                    COALESCE(c.volatility,     60000000::bigint),
                    1500000000000::bigint,                            -- NEUTRAL opponent μ (the 1500 line)
                    m.phi,                                            -- opponent φ from witness trust
-                   CASE WHEN g.i < m.games THEN m.sum_score / m.games
-                        ELSE m.sum_score - (m.sum_score / m.games) * (m.games - 1) END,
+                   m.games,
+                   m.sum_score,
                    500000000::bigint                                 -- τ = 0.5
                ) AS acc
-        FROM merged m
-        LEFT JOIN consensus c
-               ON c.id = consensus_id(m.subject_id, m.kind_id, m.object_id)
-        CROSS JOIN LATERAL generate_series(1, m.games) AS g(i)
-        GROUP BY m.subject_id, m.kind_id, m.object_id, m.games, m.last_ts,
-                 c.rating, c.rd, c.volatility
+        FROM (SELECT mm.*, consensus_id(mm.subject_id, mm.kind_id, mm.object_id) AS cid
+              FROM merged mm) m
+        LEFT JOIN consensus c ON c.id = m.cid
     ) f
-    LEFT JOIN consensus c0
-           ON c0.id = consensus_id(f.subject_id, f.kind_id, f.object_id)
     ON CONFLICT (id) DO UPDATE SET
         rating           = EXCLUDED.rating,
         rd               = EXCLUDED.rd,
