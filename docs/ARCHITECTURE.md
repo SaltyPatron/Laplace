@@ -483,8 +483,14 @@ and model alike:
   Accumulated **at ingest** via the `laplace_glicko2_accumulate` aggregate in the period fold
   `materialize_period_consensus` at each period's clean end (the earlier `incremental_consensus`
   evidence-replay form was itself removed by design — docs/INGESTION-STATUS.md) — there is **no batch
-  rebuild**; that pattern is forbidden by design. **Inference reads this** — a sorted index scan on
-  `rating`, not joins over evidence.
+  rebuild**; that pattern is forbidden by design. The fold is **partitioned**: the writer stages
+  partial (n, Σs) aggregates into K UNLOGGED partitions routed by relation identity, and K sessions
+  fold them concurrently — disjoint consensus rows, exact Σ-of-Σ, φ-uniformity guarded inside the
+  merge pass; a killed run materializes NOTHING (fold-only-at-clean-end + UNLOGGED crash truncation
+  + sweep-at-create; the single-session TEMP form was the 2026-06-05 one-core wall and was replaced).
+  **Inference reads this** — a sorted index scan on signed effective μ (`laplace.eff_mu(rating, rd)`
+  = rating − 2·rd, planner-inlined onto the consensus expression indexes; THE one μ definition —
+  callers never hand-write the expression), not joins over evidence.
 - **Glicko-2 kernel** — full Glickman-2013 implementation in `engine/core/src/glicko2.c`, exposed as
   the `laplace_glicko2_accumulate` SQL aggregate; computes the signed win/loss consensus update of §6.
 - **Geometry** — `laplace_geom` (in the `public` schema): `laplace_distance_4d`, `laplace_dwithin_4d`,

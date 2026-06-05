@@ -23,6 +23,7 @@ public sealed class WeightTensorETL
     private readonly LlamaRecipeExtractor.RecipeInfo _recipe;
     private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
     private readonly Hash128 _sourceId;
+    private readonly Hash128 _tokenizerEntityId;
     private readonly IReadOnlyList<SafetensorsContainerParser.TensorReference> _refs;
     private readonly ILogger _log;
 
@@ -31,11 +32,13 @@ public sealed class WeightTensorETL
         LlamaRecipeExtractor.RecipeInfo recipe,
         IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
         Hash128 sourceId,
+        Hash128 tokenizerEntityId,
         ILogger? log = null)
     {
         _recipe   = recipe;
         _tokens   = tokens;
         _sourceId = sourceId;
+        _tokenizerEntityId = tokenizerEntityId;
         _log      = log ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
         // Sharded-aware: union of every *.safetensors shard; each tensor carries its FilePath.
         _refs     = SafetensorsContainerParser.ParseModel(modelDir);
@@ -55,7 +58,7 @@ public sealed class WeightTensorETL
         int vocabSize = _recipe.VocabSize, dModel = _recipe.HiddenSize;
         float[] embed = LoadTensorF32(refMap, "model.embed_tokens.weight",
             (long)vocabSize * dModel);
-        var morph = new TokenS3Morph(embed, vocabSize, dModel, _tokens, _sourceId, _log);
+        var morph = new TokenS3Morph(embed, vocabSize, dModel, _tokens, _sourceId, _tokenizerEntityId, _log);
         foreach (var change in morph.Emit())
         {
             ct.ThrowIfCancellationRequested();

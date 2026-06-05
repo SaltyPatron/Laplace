@@ -30,7 +30,6 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
     private static readonly Hash128 SplitTypeId  = Hash128.OfCanonical("substrate/type/Atomic_Split/v1");
     private static readonly Hash128 NoneId       = Hash128.OfCanonical("substrate/atomic/none/v1");
 
-    private static Hash128 Kind(string n) => Hash128.OfCanonical($"substrate/kind/{n}/v1");
     private static Hash128 SplitId(string s) => Hash128.OfCanonical($"atomic/split/{s}");
 
     // ATOMIC 2020 relation → canonical kind name.
@@ -39,15 +38,18 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
         ("oEffect", "O_EFFECT"), ("oReact", "O_REACT"), ("oWant", "O_WANT"),
         ("xAttr", "X_ATTR"), ("xEffect", "X_EFFECT"), ("xIntent", "X_INTENT"),
         ("xNeed", "X_NEED"), ("xReact", "X_REACT"), ("xWant", "X_WANT"), ("xReason", "X_REASON"),
-        ("HinderedBy", "HINDERED_BY"), ("isAfter", "IS_AFTER"), ("isBefore", "IS_BEFORE"),
-        ("isFilledBy", "IS_FILLED_BY"), ("Causes", "CAUSES"), ("ObjectUse", "OBJECT_USE"),
+        ("HinderedBy", "OBSTRUCTED_BY"), ("isAfter", "IS_AFTER"), ("isBefore", "IS_BEFORE"),
+        ("isFilledBy", "X_FILLED_BY"), ("Causes", "CAUSES"), ("ObjectUse", "OBJECT_USE"),
+        // BOTH TSV spellings of HasSubEvent occur in the data — one arena.
         ("AtLocation", "AT_LOCATION"), ("HasSubEvent", "HAS_SUBEVENT"), ("HasSubevent", "HAS_SUBEVENT"),
         ("CapableOf", "CAPABLE_OF"), ("Desires", "DESIRES"), ("HasProperty", "HAS_PROPERTY"),
         ("MadeUpOf", "MADE_UP_OF"), ("NotDesires", "NOT_DESIRES"),
     };
 
-    private static readonly Dictionary<string, Hash128> RelKind =
-        Relations.ToDictionary(r => r.Rel, r => Kind(r.Kind));
+    // Relation string → canonical kind NAME; the registry owns id + rank +
+    // orientation at attest time (no per-source id constructor).
+    private static readonly Dictionary<string, string> RelKind =
+        Relations.ToDictionary(r => r.Rel, r => r.Kind);
 
     private static readonly string[] Splits = ["train", "dev", "test"];
 
@@ -63,8 +65,9 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("Atomic_Marker");
         boot.AddType("Atomic_Split");
+        // Rank/trust live in the REGISTRY at attest time — AddKind(name) only.
         foreach (var name in Relations.Select(r => r.Kind).Distinct())
-            boot.AddKind(name, KindRank.Causal, SourceTrust.StructuredCorpus);
+            boot.AddKind(KindRegistry.Resolve(name).Canonical);
         await context.Writer.ApplyAsync(boot.Build(), ct);
 
         var seed = new SubstrateChangeBuilder(Source, "bootstrap/atomic-vocab", null,
@@ -76,6 +79,14 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(1_331_113L);
+
+    /// <summary>The data-derived marker / split canonical names this source mints
+    /// — the split provenance contexts (<c>atomic/split/{train,dev,test}</c>) and
+    /// the NONE marker (<c>substrate/atomic/none/v1</c>) — built from the SAME
+    /// <see cref="SplitId"/> / <see cref="NoneId"/> templates so render() resolves
+    /// the same ids. Static set; the relation kinds are already in the seed.</summary>
+    public IReadOnlyCollection<string> CanonicalNamesForReadback =>
+        [.. Splits.Select(s => $"atomic/split/{s}"), "substrate/atomic/none/v1"];
 
     protected override async IAsyncEnumerable<SubstrateChange> StreamTriplesAsync(
         string ecosystemPath, TriplePass pass, DecomposerOptions options,
@@ -97,7 +108,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
                 var c = line.Split('\t');
                 if (c.Length < 3) continue;
                 string head = c[0].Trim(), rel = c[1].Trim(), tail = c[2].Trim();
-                if (head.Length == 0 || !RelKind.TryGetValue(rel, out var kindId)) continue;
+                if (head.Length == 0 || !RelKind.TryGetValue(rel, out var kindName)) continue;
 
                 var headId = ContentEmitter.Emit(b, head, Source);
                 if (headId is null) continue;
@@ -114,9 +125,9 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
                     tailId = t.Value;
                 }
 
-                b.AddAttestation(AttestationFactory.Create(
-                    headId.Value, kindId, tailId, Source, splitId,
-                    KindRank.Causal, SourceTrust.StructuredCorpus));
+                b.AddAttestation(KindRegistry.Attest(
+                    headId.Value, kindName, tailId, Source, SourceTrust.StructuredCorpus,
+                    contextId: splitId));
 
                 if (++n >= batch)
                 {

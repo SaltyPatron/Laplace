@@ -21,12 +21,17 @@ namespace Laplace.Decomposers.WordNet;
 /// once per pass.
 ///
 /// Coverage: lemma↔synset membership; HAS_POS (n/v/a/s/r — adjective satellites kept
-/// distinct); DEFINES (synset→gloss) + HAS_EXAMPLE (synset→quoted usage); HAS_LEX_CATEGORY
-/// (synset→one of 45 lexnames); all ~25 pointer-symbol relations; senses from index.sense
+/// distinct); DEFINES (synset→gloss) + HAS_EXAMPLE (synset→quoted usage); HAS_DOMAIN_TOPIC
+/// (synset→lexname DOMAIN wordform; the POS half rides HAS_POS — lexnames split); all ~25 pointer-symbol relations; senses from index.sense
 /// with SemCor tag-count seeding the Glicko μ via <see cref="AttestationFactory.CreateWeighted"/>.
 /// </summary>
 public sealed class WordNetDecomposer : IDecomposer
 {
+    /// <summary>Meta-entity canonical names minted during parse — registered
+    /// post-ingest so render() answers "wordnet/synset/n/1740", never hex
+    /// (the Type:hex label fallback, 2026-06-05).</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> MetaNames = new();
+
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/WordNetDecomposer/v1");
     public static readonly Hash128 TrustClass =
@@ -35,8 +40,6 @@ public sealed class WordNetDecomposer : IDecomposer
     // Entity type IDs (synset / sense / POS / lexname are abstract — not text content)
     private static readonly Hash128 SynsetTypeId      = Hash128.OfCanonical("substrate/type/WordNet_Synset/v1");
     private static readonly Hash128 SenseTypeId       = Hash128.OfCanonical("substrate/type/WordNet_Sense/v1");
-    private static readonly Hash128 PosTypeId         = Hash128.OfCanonical("substrate/type/WordNet_POS/v1");
-    private static readonly Hash128 LexCategoryTypeId = Hash128.OfCanonical("substrate/type/WordNet_LexCategory/v1");
 
     private static Hash128 Kind(string name) => Hash128.OfCanonical($"substrate/kind/{name}/v1");
 
@@ -89,8 +92,9 @@ public sealed class WordNetDecomposer : IDecomposer
         "adj.ppl",
     };
 
-    private static Hash128 PosId(char p)       => Hash128.OfCanonical($"wordnet/pos/{p}");
-    private static Hash128 LexCatId(string nm) => Hash128.OfCanonical($"wordnet/lexname/{nm}");
+    /* ss_type → THE canonical POS value (PosReference): n→NOUN v→VERB a/s→ADJ
+     * r→ADV — satellite-ness stays on the synset id, never the POS value. */
+    private static Hash128 PosId(char p) => PosReference.Resolve(p.ToString(), PosReference.PosTagset.WordNet);
 
     private const long EstimatedSynsets = 117_700L;
 
@@ -114,9 +118,11 @@ public sealed class WordNetDecomposer : IDecomposer
         // every canonical arena anyway — these cover source-named aliases).
         boot.AddKind("IS_SYNONYM_OF");
         boot.AddKind("HAS_POS");
-        boot.AddKind("DEFINES");
+        boot.AddKind("HAS_DEFINITION");
         boot.AddKind("HAS_EXAMPLE");
-        boot.AddKind("HAS_LEX_CATEGORY");
+        boot.AddKind("HAS_DOMAIN_TOPIC");
+        boot.AddKind("HAS_VERB_FRAME");
+        boot.AddKind("IS_LEMMA_OF");
         boot.AddKind("HAS_SENSE");
         boot.AddKind("IS_SENSE_OF");
 
@@ -127,14 +133,12 @@ public sealed class WordNetDecomposer : IDecomposer
 
         await context.Writer.ApplyAsync(boot.Build(), ct);
 
-        // Seed the 5 POS entities (n/v/a/s/r — satellites distinct) + 45 lexname categories.
+        // Seed THE canonical POS inventory (PosReference) + 45 lexname categories.
         var seed = new SubstrateChangeBuilder(
             Source, "bootstrap/wordnet-vocab", null,
-            entityCapacity: 5 + Lexnames.Length, physicalityCapacity: 0, attestationCapacity: 0);
-        foreach (char p in new[] { 'n', 'v', 'a', 's', 'r' })
-            seed.AddEntity(new EntityRow(PosId(p), (byte)MetaTier.Meta, PosTypeId, Source));
-        foreach (var nm in Lexnames)
-            seed.AddEntity(new EntityRow(LexCatId(nm), (byte)MetaTier.Meta, LexCategoryTypeId, Source));
+            entityCapacity: PosReference.Canonical.Length + 1,
+            physicalityCapacity: 0, attestationCapacity: 0);
+        PosReference.SeedCanonical(seed, Source);
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 
@@ -157,10 +161,16 @@ public sealed class WordNetDecomposer : IDecomposer
         { if (!options.DryRun) yield return change; await Task.Yield(); }
         await foreach (var change in StreamSensesAsync(dictDir, batch, entitiesOnly: false, ct))
         { if (!options.DryRun) yield return change; await Task.Yield(); }
+
+        // Irregular inflections (.exc) — content + IS_LEMMA_OF, self-contained.
+        await foreach (var change in StreamExceptionsAsync(dictDir, batch, ct))
+        { if (!options.DryRun) yield return change; await Task.Yield(); }
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(EstimatedSynsets);
+
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => MetaNames.Keys.ToList();
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
@@ -173,6 +183,7 @@ public sealed class WordNetDecomposer : IDecomposer
         string suffix = entitiesOnly ? "entities" : "attestations";
         var b = NewBuilder($"wordnet/data-0/{suffix}", entitiesOnly, batch);
         int count = 0, batchNum = 0;
+        var frameTemplates = LoadVerbFrames(dictDir);   // [1..35] templates; [0] unused
 
         foreach (var posFile in PosFiles)
         {
@@ -182,8 +193,8 @@ public sealed class WordNetDecomposer : IDecomposer
             await foreach (var syn in ParseDataAsync(filePath, ct))
             {
                 ct.ThrowIfCancellationRequested();
-                if (entitiesOnly) EmitSynsetEntities(b, syn);
-                else              EmitSynsetAttestations(b, syn);
+                if (entitiesOnly) EmitSynsetEntities(b, syn, frameTemplates);
+                else              EmitSynsetAttestations(b, syn, frameTemplates);
 
                 if (++count >= batch)
                 {
@@ -196,7 +207,7 @@ public sealed class WordNetDecomposer : IDecomposer
         if (count > 0) yield return b.Build();
     }
 
-    private static void EmitSynsetEntities(SubstrateChangeBuilder b, WnSynset syn)
+    private static void EmitSynsetEntities(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)
     {
         b.AddEntity(syn.SynsetId, (byte)MetaTier.Meta, SynsetTypeId, Source);
         foreach (var lemma in syn.Lemmas)
@@ -205,9 +216,29 @@ public sealed class WordNetDecomposer : IDecomposer
         var (def, examples) = ParseGloss(syn.Gloss);
         if (def.Length > 0) ContentEmitter.Emit(b, def, Source);
         foreach (var ex in examples) ContentEmitter.Emit(b, ex, Source);
+
+        // Lexname DOMAIN half ("animal" of noun.animal) as a wordform CONTENT
+        // entity — the omni-glottal tie: the domain converges with every other
+        // source that mentions the word (2026-06-05 lexname-split ruling).
+        if (syn.LexFilenum >= 0 && syn.LexFilenum < Lexnames.Length)
+            ContentEmitter.Emit(b, LexDomain(Lexnames[syn.LexFilenum]), Source);
+
+        // Verb frame templates referenced by this synset, as content (FK for
+        // the HAS_VERB_FRAME attestations in pass 2).
+        foreach (var (frame, _) in syn.Frames)
+            if (frame > 0 && frame < frameTemplates.Length && frameTemplates[frame] is { } tpl)
+                ContentEmitter.Emit(b, tpl, Source);
     }
 
-    private static void EmitSynsetAttestations(SubstrateChangeBuilder b, WnSynset syn)
+    /// <summary>The domain suffix of a lexname: noun.animal → "animal";
+    /// noun.Tops → "Tops" (content is case-sensitive, emitted as-is).</summary>
+    private static string LexDomain(string lexname)
+    {
+        int dot = lexname.IndexOf('.');
+        return dot >= 0 ? lexname[(dot + 1)..] : lexname;
+    }
+
+    private static void EmitSynsetAttestations(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)
     {
         Hash128 posId = PosId(syn.SsType);
 
@@ -227,7 +258,7 @@ public sealed class WordNetDecomposer : IDecomposer
             var defId = ContentEmitter.RootId(def);
             if (defId is not null)
                 b.AddAttestation(KindRegistry.Attest(
-                    syn.SynsetId, "DEFINES", defId.Value, Source, SourceTrust.StandardsDerived));
+                    syn.SynsetId, "HAS_DEFINITION", defId.Value, Source, SourceTrust.StandardsDerived));
         }
         foreach (var ex in examples)
         {
@@ -237,10 +268,36 @@ public sealed class WordNetDecomposer : IDecomposer
                     syn.SynsetId, "HAS_EXAMPLE", exId.Value, Source, SourceTrust.StandardsDerived));
         }
 
+        // Lexname SPLIT (2026-06-05): the POS half is already asserted per-lemma
+        // via PosReference above; the DOMAIN half lands in the shared
+        // HAS_DOMAIN_TOPIC arena (converges with Wiktionary categories) with
+        // the domain WORDFORM as the value. HAS_LEX_CATEGORY (POS×domain
+        // compound) is retired from emission.
         if (syn.LexFilenum >= 0 && syn.LexFilenum < Lexnames.Length)
+        {
+            var domainId = ContentEmitter.RootId(LexDomain(Lexnames[syn.LexFilenum]));
+            if (domainId is not null)
+                b.AddAttestation(KindRegistry.Attest(
+                    syn.SynsetId, "HAS_DOMAIN_TOPIC", domainId.Value,
+                    Source, SourceTrust.StandardsDerived));
+        }
+
+        // Verb sentence frames (frames.vrb templates): w_num 00 → the synset
+        // plays the frame; w_num k → that specific lemma's wordform does.
+        foreach (var (frame, wordNum) in syn.Frames)
+        {
+            if (frame <= 0 || frame >= frameTemplates.Length || frameTemplates[frame] is not { } tpl) continue;
+            var tplId = ContentEmitter.RootId(tpl);
+            if (tplId is null) continue;
+            Hash128 subject = syn.SynsetId;
+            if (wordNum > 0 && wordNum <= syn.Lemmas.Count)
+            {
+                var lemmaId = ContentEmitter.RootId(Surface(syn.Lemmas[wordNum - 1]));
+                if (lemmaId is { } lid) subject = lid;
+            }
             b.AddAttestation(KindRegistry.Attest(
-                syn.SynsetId, "HAS_LEX_CATEGORY", LexCatId(Lexnames[syn.LexFilenum]),
-                Source, SourceTrust.StandardsDerived));
+                subject, "HAS_VERB_FRAME", tplId.Value, Source, SourceTrust.StandardsDerived));
+        }
 
         foreach (var ptr in syn.Pointers)
         {
@@ -322,6 +379,64 @@ public sealed class WordNetDecomposer : IDecomposer
 
     /// <summary>Split a WordNet gloss into its definition text and quoted example
     /// sentences. Examples are double-quoted spans; the definition is the remainder.</summary>
+    /// <summary>frames.vrb: "N  Template text" — the 35 verb sentence frames.</summary>
+    private static string?[] LoadVerbFrames(string dictDir)
+    {
+        var templates = new string?[40];
+        string path = Path.Combine(dictDir, "frames.vrb");
+        if (!File.Exists(path)) return templates;
+        foreach (var line in File.ReadLines(path))
+        {
+            var t = line.Trim();
+            int sp = t.IndexOf(' ');
+            if (sp <= 0 || !int.TryParse(t[..sp], out int num)) continue;
+            if (num > 0 && num < templates.Length) templates[num] = t[sp..].Trim();
+        }
+        return templates;
+    }
+
+    /// <summary>{noun,verb,adj,adv}.exc — irregular inflections ("went go"):
+    /// base IS_LEMMA_OF inflected, the SAME direction UD emits, so the two
+    /// sources co-assert on one lemma arena (2026-06-05 completeness).
+    /// Self-contained batches: both wordforms + the attestation ride one
+    /// intent (the writer orders entities before attestations).</summary>
+    private static async IAsyncEnumerable<SubstrateChange> StreamExceptionsAsync(
+        string dictDir, int batch,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var b = NewBuilder("wordnet/exc-0", entitiesOnly: false, batch);
+        int count = 0, batchNum = 0;
+        foreach (var excFile in new[] { "noun.exc", "verb.exc", "adj.exc", "adv.exc" })
+        {
+            string path = Path.Combine(dictDir, excFile);
+            if (!File.Exists(path)) continue;
+            await foreach (var line in File.ReadLinesAsync(path, ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 2) continue;
+                string inflected = parts[0].Replace('_', ' ');
+                var infId = ContentEmitter.Emit(b, inflected, Source);
+                if (infId is null) continue;
+                for (int i = 1; i < parts.Length; i++)
+                {
+                    string baseForm = parts[i].Replace('_', ' ');
+                    var baseId = ContentEmitter.Emit(b, baseForm, Source);
+                    if (baseId is null) continue;
+                    b.AddAttestation(KindRegistry.Attest(
+                        baseId.Value, "IS_LEMMA_OF", infId.Value, Source, SourceTrust.StandardsDerived));
+                }
+                if (++count >= batch)
+                {
+                    yield return b.Build();
+                    b = NewBuilder($"wordnet/exc-{++batchNum}", entitiesOnly: false, batch);
+                    count = 0;
+                }
+            }
+        }
+        if (count > 0) yield return b.Build();
+    }
+
     private static (string Def, List<string> Examples) ParseGloss(string gloss)
     {
         var examples = new List<string>();
@@ -383,8 +498,27 @@ public sealed class WordNetDecomposer : IDecomposer
                 pointers.Add(new WnPointer(sym, tgtOffset, tgtPos));
             }
 
+            // Verb sentence frames (data.verb only): "f_cnt  + f_num w_num"
+            // repeated — the 35 syntactic templates of frames.vrb, previously
+            // unparsed (2026-06-05 completeness). w_num 00 = every word in the
+            // synset; >0 = that specific lemma (1-based).
+            var frames = new List<(int Frame, int WordNum)>();
+            if (idx < parts.Length && int.TryParse(parts[idx], out int fCnt) && fCnt > 0)
+            {
+                idx++;
+                for (int f = 0; f < fCnt && idx + 2 < parts.Length + 1; f++)
+                {
+                    if (idx + 2 > parts.Length || parts[idx] != "+") break;
+                    idx++;
+                    if (!int.TryParse(parts[idx++], out int fNum)) break;
+                    if (!int.TryParse(parts[idx++], NumberStyles.HexNumber, null, out int wNum)) break;
+                    frames.Add((fNum, wNum));
+                }
+            }
+
             Hash128 synId = SourceEntityIdConventions.WordNetSynset(offset, NormPos(ssType));
-            yield return new WnSynset(synId, ssType, lexFilenum, lemmas, pointers, gloss);
+            MetaNames.TryAdd($"wordnet/synset/{NormPos(ssType)}/{offset}", 0);
+            yield return new WnSynset(synId, ssType, lexFilenum, lemmas, pointers, gloss, frames);
         }
     }
 
@@ -411,13 +545,15 @@ public sealed class WordNetDecomposer : IDecomposer
 
             Hash128 synId   = SourceEntityIdConventions.WordNetSynset(offset, NormPos(pos));
             Hash128 senseId = Hash128.OfCanonical($"wordnet/sense/{senseKey}");
+            MetaNames.TryAdd($"wordnet/sense/{senseKey}", 0);
             yield return new WnSense(senseId, synId, lemma, tagCount);
         }
     }
 
     private sealed record WnSynset(
         Hash128 SynsetId, char SsType, int LexFilenum,
-        List<string> Lemmas, List<WnPointer> Pointers, string Gloss);
+        List<string> Lemmas, List<WnPointer> Pointers, string Gloss,
+        List<(int Frame, int WordNum)> Frames);
 
     private readonly record struct WnPointer(string Symbol, long TargetOffset, char TargetPos);
 

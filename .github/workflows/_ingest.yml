@@ -1,0 +1,76 @@
+name: _ingest (reusable)
+
+# THE one implementation of "ingest one source and gate it" (2026-06-05
+# modular re-architecture). Every per-source workflow (unicode.yml,
+# wordnet.yml, …) is a thin caller carrying only its name, timeout, and
+# signature gates. Modularity rules:
+#   - per-source workflows are dispatchable alone AND composable by
+#     orchestrators (seed-ladder.yml) — one box per source in the UI;
+#   - gates are "KIND MIN" lines checked against the INSTALLED substrate
+#     surface (laplace.consensus_count/kind_id — never inline SQL);
+#   - worker knobs live HERE, once (measured 2026-06-05: 2+2+4 on the 6-core
+#     runner; 4+4 oversubscribes and runs slower — re-tune only with a profile).
+
+on:
+  workflow_call:
+    inputs:
+      source:
+        description: "ingest-source.sh source name"
+        type: string
+        required: true
+      timeout-minutes:
+        description: "explicit job timeout — never the silent 360 default"
+        type: number
+        required: true
+      gate:
+        description: "newline 'KIND MIN_CONSENSUS' pairs gated post-ingest"
+        type: string
+        default: ""
+      path-arg:
+        description: "optional positional arg (model dir)"
+        type: string
+        default: ""
+      database:
+        description: "target database (two-DB law: laplace = CI, laplace-dev = manual)"
+        type: string
+        default: "laplace"
+
+permissions:
+  contents: read
+
+env:
+  LAPLACE_INGEST_WORKERS: 2
+  LAPLACE_DECOMPOSE_WORKERS: 2
+  LAPLACE_FOLD_WORKERS: 4
+
+jobs:
+  ingest:
+    name: "${{ inputs.source }} → ${{ inputs.database }}"
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: ${{ fromJSON(inputs.timeout-minutes) }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: ingest ${{ inputs.source }}
+        env:
+          LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
+        run: |
+          if [ -n "${{ inputs.path-arg }}" ]; then
+            scripts/ingest-source.sh "${{ inputs.source }}" "${{ inputs.path-arg }}"
+          else
+            scripts/ingest-source.sh "${{ inputs.source }}"
+          fi
+      - name: gate signature arenas
+        if: ${{ inputs.gate != '' }}
+        env:
+          GATE_SPEC: ${{ inputs.gate }}
+        run: |
+          gate() {
+            n=$(psql -d "${{ inputs.database }}" -U laplace_admin -v ON_ERROR_STOP=1 -tAc "SELECT laplace.consensus_count(laplace.kind_id('$1'));")
+            echo "gate $1: consensus=$n (min $2)"
+            [ "$n" -ge "$2" ] || { echo "::error::gate failed: $1 consensus $n < $2"; exit 1; }
+          }
+          printf '%s\n' "$GATE_SPEC" | while read -r kind min; do
+            [ -n "$kind" ] && gate "$kind" "$min"
+          done

@@ -73,6 +73,9 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddKind("HAS_EXAMPLE");
+        // Parent of the dynamic DBPEDIA_* family: SeedDynamic attests
+        // DBPEDIA_X is_a HAS_DBPEDIA_RELATION — the parent entity must exist.
+        boot.AddKind("HAS_DBPEDIA_RELATION");
         foreach (var kindName in RelMap.Values)
             boot.AddKind(KindRegistry.Resolve(kindName).Canonical);
         await context.Writer.ApplyAsync(boot.Build(), ct);
@@ -89,6 +92,36 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
         if (!File.Exists(file)) yield break;
         int batch = options.BatchSize > 1 ? options.BatchSize : 8192;
 
+        // ── MEASURE pass (the two-pass ETL shape, same as ModelTableETL's
+        // arena-scale calibration): per-ARENA M = RMS of the edge weights that
+        // arena will fold — measured exactly from the file, never a knob, never
+        // the old `arenaScale: 1.0` literal (weights span ~[0, 2.5]). Both
+        // passes live inside this one ingest run — no deferred sweep.
+        var arenaSumSq = new Dictionary<string, double>(StringComparer.Ordinal);
+        var arenaN     = new Dictionary<string, long>(StringComparer.Ordinal);
+        await foreach (var line in File.ReadLinesAsync(file, ct))
+        {
+            ct.ThrowIfCancellationRequested();
+            var c = line.Split('\t');
+            if (c.Length < 5) continue;
+            string rel = c[1].StartsWith("/r/", StringComparison.Ordinal) ? c[1][3..] : c[1];
+            string? kindName =
+                RelMap.TryGetValue(rel, out var mapped) ? mapped
+                : rel.StartsWith("dbpedia/", StringComparison.OrdinalIgnoreCase)
+                    ? KindRegistry.ResolveDbpedia(rel).Canonical
+                    : null;
+            if (kindName is null) continue;
+            (double w, _) = ParseMeta(c[4]);
+            arenaSumSq[kindName] = arenaSumSq.GetValueOrDefault(kindName) + w * w;
+            arenaN[kindName]     = arenaN.GetValueOrDefault(kindName) + 1;
+        }
+        var arenaM = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (var (k, sq) in arenaSumSq)
+            arenaM[k] = arenaN[k] > 0 ? Math.Sqrt(sq / arenaN[k]) : 0.0;
+
+        // ── EMIT pass ──
+        var seenEntBatch = new HashSet<Hash128>();
+        var seenAttRun = new ConcurrentIdSet();
         var b = NewBuilder("conceptnet/batch-0", batch);
         int n = 0, bn = 0;
 
@@ -99,7 +132,16 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
             if (c.Length < 5) continue;
 
             string rel = c[1].StartsWith("/r/", StringComparison.Ordinal) ? c[1][3..] : c[1];
-            if (!RelMap.TryGetValue(rel, out var kindName)) continue;
+            // /r/dbpedia/* → the dynamic DBPEDIA_* family (each its own arena
+            // under HAS_DBPEDIA_RELATION — preserved, not silently dropped as
+            // before 2026-06-05); everything else through RelMap as ever.
+            KindRegistry.KindResolution? dbp = null;
+            if (!RelMap.TryGetValue(rel, out var kindName))
+            {
+                if (!rel.StartsWith("dbpedia/", StringComparison.OrdinalIgnoreCase)) continue;
+                var r = KindRegistry.ResolveDbpedia(rel);
+                dbp = r; kindName = r.Canonical;
+            }
             if (!ParseConcept(c[2], out string startTerm, out string startLang)) continue;
             if (!ParseConcept(c[3], out string endTerm, out string endLang)) continue;
 
@@ -117,11 +159,17 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
 
             (double weight, string? surface) = ParseMeta(c[4]);
 
-            // ConceptNet edge weight is the signed magnitude (score ½(1+tanh(w/1)));
+            // Dynamic DBPEDIA_* arenas seed their kind entity per batch + IS_A
+            // once per run (the DEP_*/FEAT_* gates — self-contained batches).
+            if (dbp is { } dyn)
+                KindRegistry.SeedDynamic(b, dyn, Source, seenEntBatch, seenAttRun);
+
+            // ConceptNet edge weight is the signed magnitude; M is the arena's
+            // MEASURED RMS from the measure pass (score ½(1+tanh(w/M)));
             // rank / symmetry / direction resolve through the registry canon.
             b.AddAttestation(KindRegistry.AttestWeighted(
                 startId.Value, kindName, endId.Value, Source, SourceTrust.UserCuratedResource,
-                magnitude: weight, arenaScale: 1.0));
+                magnitude: weight, arenaScale: arenaM.GetValueOrDefault(kindName)));
             b.AddAttestation(KindRegistry.Attest(
                 startId.Value, "HAS_LANGUAGE", startLangId, Source, SourceTrust.UserCuratedResource));
             b.AddAttestation(KindRegistry.Attest(
@@ -138,6 +186,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
             if (++n >= batch)
             {
                 yield return b.Build();
+                seenEntBatch.Clear();
                 b = NewBuilder($"conceptnet/batch-{++bn}", batch);
                 n = 0; await Task.Yield();
             }

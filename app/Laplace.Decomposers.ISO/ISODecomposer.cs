@@ -44,15 +44,31 @@ public sealed class ISODecomposer : IDecomposer
     public int     LayerOrder  => 1;
     public Hash128 TrustClassId => TrustClass;
 
+    // Data-derived per-code entity canonical names minted during DecomposeAsync
+    // (iso639-1:xx / iso639-2:xxx). The scope/type/kind vocabulary is already in
+    // the extension seed; only these data-derived names need post-ingest
+    // registration so render() answers them in names. Collected as we emit.
+    private readonly HashSet<string> _codeNames = new(StringComparer.Ordinal);
+
+    /// <summary>The data-derived ISO 639 code entity canonical names
+    /// (iso639-1:xx / iso639-2:xxx) collected during <see cref="DecomposeAsync"/>.
+    /// Empty before DecomposeAsync runs.</summary>
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => _codeNames;
+
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("Language");
         boot.AddType("ISO639Code");
-        boot.AddKind("IS_LANGUAGE_CODE",   KindRank.Partitive, SourceTrust.StandardsDerived);
-        boot.AddKind("HAS_ISO639_1_CODE",  KindRank.Partitive, SourceTrust.StandardsDerived);
-        boot.AddKind("USES_SCRIPT",              KindRank.StandardsStructural, SourceTrust.StandardsDerived);
-        boot.AddKind("MEMBER_OF_MACROLANGUAGE",  KindRank.Taxonomic, SourceTrust.StandardsDerived);
+        boot.AddKind("IS_LANGUAGE_CODE");
+        boot.AddKind("HAS_ISO639_1_CODE");
+        boot.AddKind("USES_SCRIPT");
+        boot.AddKind("MEMBER_OF_MACROLANGUAGE");
+        boot.AddKind("HAS_ISO639_2_CODE");
+        boot.AddKind("HAS_LANGUAGE_SCOPE");
+        boot.AddKind("HAS_LANGUAGE_TYPE");
+        boot.AddKind("HAS_VARIANT_OF");
+        boot.AddKind("HAS_DEFINITION");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -78,11 +94,39 @@ public sealed class ISODecomposer : IDecomposer
 
             if (rec.Part1.Length > 0)
             {
-                var iso1Id = Hash128.OfCanonical($"iso639-1:{rec.Part1}");
+                var iso1Name = $"iso639-1:{rec.Part1}";
+                _codeNames.Add(iso1Name);
+                var iso1Id = Hash128.OfCanonical(iso1Name);
                 b.AddEntity(iso1Id, (byte)MetaTier.Meta, Iso639CodeTypeId, Source);
                 b.AddAttestation(AttestationFactory.Create(
                     langId, KindHasIso6391Code, iso1Id, Source, null,
                     KindRank.Partitive, SourceTrust.StandardsDerived));
+            }
+
+            // ── 2026-06-05 completeness: 639-2 codes, scope, vitality type ──
+            foreach (var p2 in new[] { rec.Part2b, rec.Part2t }.Distinct())
+            {
+                if (p2.Length == 0) continue;
+                var iso2Name = $"iso639-2:{p2}";
+                _codeNames.Add(iso2Name);
+                var iso2Id = Hash128.OfCanonical(iso2Name);
+                b.AddEntity(iso2Id, (byte)MetaTier.Meta, Iso639CodeTypeId, Source);
+                b.AddAttestation(KindRegistry.Attest(
+                    langId, "HAS_ISO639_2_CODE", iso2Id, Source, SourceTrust.StandardsDerived));
+            }
+            if (rec.Scope.Length > 0)   // I=Individual, M=Macrolanguage, S=Special
+            {
+                var scopeId = Hash128.OfCanonical($"substrate/iso639/scope/{rec.Scope}/v1");
+                b.AddEntity(scopeId, (byte)MetaTier.Meta, Iso639CodeTypeId, Source);
+                b.AddAttestation(KindRegistry.Attest(
+                    langId, "HAS_LANGUAGE_SCOPE", scopeId, Source, SourceTrust.StandardsDerived));
+            }
+            if (rec.Type.Length > 0)    // L=Living, E=Extinct, A=Ancient, H=Historical, C=Constructed, S=Special
+            {
+                var typeId = Hash128.OfCanonical($"substrate/iso639/type/{rec.Type}/v1");
+                b.AddEntity(typeId, (byte)MetaTier.Meta, Iso639CodeTypeId, Source);
+                b.AddAttestation(KindRegistry.Attest(
+                    langId, "HAS_LANGUAGE_TYPE", typeId, Source, SourceTrust.StandardsDerived));
             }
         }
 
@@ -125,9 +169,67 @@ public sealed class ISODecomposer : IDecomposer
             }
         }
 
+        // ── Retirements: retired code → successor (the SAME variant arena
+        // other sources use, so retired-code references converge). ──
+        string retPath = Path.Combine(context.EcosystemPath, "iso-639-3_Retirements.tab");
+        if (File.Exists(retPath))
+        {
+            bool hdr = false;
+            foreach (var line in File.ReadLines(retPath))
+            {
+                if (!hdr) { hdr = true; continue; }
+                var c = line.Split('\t');
+                if (c.Length < 4) continue;
+                string retired = c[0].Trim(), changeTo = c[3].Trim();
+                if (retired.Length != 3 || changeTo.Length != 3) continue;
+                var retId = LanguageEntityId.FromIso639_3(retired);
+                var sucId = LanguageEntityId.FromIso639_3(changeTo);
+                b.AddEntity(retId, (byte)MetaTier.Meta, LanguageTypeId, Source);
+                b.AddEntity(sucId, (byte)MetaTier.Meta, LanguageTypeId, Source);
+                b.AddAttestation(KindRegistry.Attest(
+                    retId, "HAS_VARIANT_OF", sucId, Source, SourceTrust.StandardsDerived));
+            }
+        }
+
         if (!options.DryRun)
             yield return b.Build();
         await Task.Yield();
+
+        // ── Name_Index: language NAMES as content (HAS_DEFINITION — the
+        // name describes the language entity; converges with every source
+        // that mentions the wordform). Self-contained batches. ──
+        string namePath = Path.Combine(context.EcosystemPath, "iso-639-3_Name_Index.tab");
+        if (File.Exists(namePath))
+        {
+            var nb = new SubstrateChangeBuilder(Source, "iso639/names-0", null,
+                entityCapacity: 4096, physicalityCapacity: 4096, attestationCapacity: 4096);
+            int n = 0, bn = 0;
+            bool hdr = false;
+            foreach (var line in File.ReadLines(namePath))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!hdr) { hdr = true; continue; }
+                var c = line.Split('\t');
+                if (c.Length < 2) continue;
+                string id = c[0].Trim(), printName = c[1].Trim();
+                if (id.Length != 3 || printName.Length == 0) continue;
+                var lid = LanguageEntityId.FromIso639_3(id);
+                nb.AddEntity(lid, (byte)MetaTier.Meta, LanguageTypeId, Source);
+                var nameId = ContentEmitter.Emit(nb, printName, Source);
+                if (nameId is { } nid)
+                    nb.AddAttestation(KindRegistry.Attest(
+                        lid, "HAS_DEFINITION", nid, Source, SourceTrust.StandardsDerived));
+                if (++n >= 2048)
+                {
+                    if (!options.DryRun) yield return nb.Build();
+                    nb = new SubstrateChangeBuilder(Source, $"iso639/names-{++bn}", null,
+                        entityCapacity: 4096, physicalityCapacity: 4096, attestationCapacity: 4096);
+                    n = 0;
+                    await Task.Yield();
+                }
+            }
+            if (n > 0 && !options.DryRun) yield return nb.Build();
+        }
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -149,13 +251,19 @@ public sealed class ISODecomposer : IDecomposer
             if (parts.Length < 7) continue;
 
             string id     = parts[0].Trim();
+            string part2b = parts[1].Trim();
+            string part2t = parts[2].Trim();
             string part1  = parts[3].Trim();
+            string scope  = parts[4].Trim();
+            string type   = parts[5].Trim();
             string refName = parts[6].Trim();
             if (id.Length != 3) continue;
 
-            yield return new IsoRecord(id, part1, refName);
+            yield return new IsoRecord(id, part2b, part2t, part1, scope, type, refName);
         }
     }
 
-    private readonly record struct IsoRecord(string Id, string Part1, string RefName);
+    private readonly record struct IsoRecord(
+        string Id, string Part2b, string Part2t, string Part1,
+        string Scope, string Type, string RefName);
 }

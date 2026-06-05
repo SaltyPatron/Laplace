@@ -170,7 +170,11 @@ layer1_build_install_extensions() {
     # (Path B): top-level CMake drives engine + extensions
     # from one tree. PGXS retired. Produces engine .sos + extension .sos +
     # preprocessed SQL install scripts in build/.
+    # SAME configure flags as `just install` — a fresh build/ dir configured
+    # without LAPLACE_INSTALL_STAGED=ON would default to the SYSTEM PG tree
+    # (sudo wall + shadow-copy divergence; the 2026-06-05 pipeline audit).
     (cd "$REPO_DIR" && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+        -DLAPLACE_INSTALL_STAGED=ON \
         -DCMAKE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" \
         -DLAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/usr/lib/postgresql/18}" | tail -3)
     (cd "$REPO_DIR" && cmake --build build | tail -3)
@@ -271,7 +275,7 @@ EOF
         sudo -u "$RUNNER_USER" -H \
             PATH="$PATH" \
             DOTNET_NOLOGO=1 \
-            bash -c "cd '$REPO_DIR/app' && echo 'NUKE' | dotnet run --project '$MIGRATIONS_PROJ' -c Release -- nuke" \
+            bash -c "cd '$REPO_DIR/app' && dotnet run --project '$MIGRATIONS_PROJ' -c Release -- nuke --yes" \
             || yellow "Layer 1 nuke skipped (database absent or unreachable)"
     fi
 

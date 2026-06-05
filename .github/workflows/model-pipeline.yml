@@ -90,7 +90,7 @@ jobs:
           gate GATES            1000
           gate UP_PROJECTS      1000
           gate DOWN_PROJECTS    1000
-          gate NORMALIZES       1000
+          gate NORM_SCALES      1000
           gate OUTPUT_PROJECTS  1000
 
   consensus:

@@ -124,13 +124,25 @@ internal static class Program
         return 0;
     }
 
+    /// <summary>Destructive-command gate. Non-interactive callers (Justfile,
+    /// CI, scripts) pass <c>--yes</c> or set <c>LAPLACE_CONFIRM=&lt;token&gt;</c> —
+    /// piping the token through `dotnet run`'s stdin is NOT reliable (MSBuild
+    /// can consume the pipe before the app reads it; bit db-fresh 2026-06-05).
+    /// Interactive callers still type the token.</summary>
+    private static bool Confirmed(string token)
+    {
+        if (Environment.GetCommandLineArgs().Contains("--yes")) return true;
+        if (Environment.GetEnvironmentVariable("LAPLACE_CONFIRM") == token) return true;
+        Console.Write($"Type '{token}' to confirm: ");
+        return Console.ReadLine() == token;
+    }
+
     private static int RunReset(string connectionString)
     {
         Console.WriteLine("[migrate reset] DROPs the SchemaVersions table — DbUp will re-apply ALL migrations on next 'up'.");
         Console.WriteLine("This does NOT drop the database, extensions, or substrate data.");
         Console.WriteLine("For a full Layer-1 wipe, use 'nuke' instead.");
-        Console.Write("Type 'RESET' to confirm: ");
-        if (Console.ReadLine() != "RESET")
+        if (!Confirmed("RESET"))
         {
             Console.WriteLine("Aborted.");
             return 1;
@@ -161,8 +173,7 @@ internal static class Program
         Console.WriteLine($"[migrate nuke] DROP DATABASE \"{targetDb}\" + re-create empty.");
         Console.WriteLine("Loses ALL substrate data: entities, physicalities, attestations.");
         Console.WriteLine("Loses the extensions (CREATE EXTENSION must run again on next 'up').");
-        Console.Write("Type 'NUKE' to confirm: ");
-        if (Console.ReadLine() != "NUKE")
+        if (!Confirmed("NUKE"))
         {
             Console.WriteLine("Aborted.");
             return 1;

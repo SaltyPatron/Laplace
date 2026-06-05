@@ -9,6 +9,7 @@ set(EXT_VERSION ${PROJECT_VERSION})
 
 set(EXT_C_SOURCES
     src/laplace_substrate.c
+    src/generate_walk.c
 )
 
 add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})
@@ -56,10 +57,16 @@ set(EXT_SQL_MODULES
     sql/09_brin_tier_ops.sql.in
     sql/10_bootstrap.sql.in
     sql/11_entities_exist_bitmap.sql.in
-    sql/13_consensus.sql.in
-    sql/14_geometry_consensus.sql.in
-    sql/12_inspect.sql.in
-    sql/15_converse.sql.in
+    sql/12_consensus_schema.sql.in
+    sql/13_mu_law.sql.in
+    sql/14_period_fold.sql.in
+    sql/15_readback.sql.in
+    sql/16_inspect.sql.in
+    sql/17_consensus_reads.sql.in
+    sql/18_ops_surface.sql.in
+    sql/19_geometry_consensus.sql.in
+    sql/20_converse.sql.in
+    sql/21_seed.sql.in
 )
 
 set(EXT_BUILT_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}--${EXT_VERSION}.sql)

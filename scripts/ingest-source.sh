@@ -24,7 +24,7 @@ LOGDIR="${INGEST_LOGDIR:-/tmp}"
 
 # Layer-2 corpora (each needs only unicode+iso639); unicode/iso639 are the prerequisites and
 # omw (layer 3) runs after wordnet. The `all` ladder walks these ONE AT A TIME — see below.
-LAYER2=(wordnet ud tatoeba atomic2020 conceptnet wiktionary)
+LAYER2=(wordnet ud tatoeba atomic2020 conceptnet wiktionary opensubtitles verbnet propbank)
 
 if [[ -z "$source" ]]; then
     echo "Usage: $0 <source> [path] | all | model <model-dir>" >&2

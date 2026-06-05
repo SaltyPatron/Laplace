@@ -1,0 +1,197 @@
+/* 12_inspect.sql.in — substrate inspection surface (the glass-box, by hand).
+ *
+ * Read-only SRFs that expose an entity's three facets — identity, glome
+ * physicalities, and the Glicko-2-rated attestation neighborhood — so the
+ * substrate can be interrogated directly instead of through ad-hoc inline
+ * SQL in the app layer. Pure SQL (no engine call): these are projections
+ * over the three core tables, not math. Entity-id resolution from text is
+ * the engine's job (TextDecomposer + HashComposer); these take the already
+ * content-addressed id and report what the substrate holds about it.
+ *
+ * STABLE: results depend only on table contents within a statement. */
+
+CREATE OR REPLACE FUNCTION entity_facets(p_id bytea)
+    RETURNS TABLE(tier smallint, type_id bytea)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT e.tier, e.type_id FROM entities e WHERE e.id = p_id
+$$;
+
+COMMENT ON FUNCTION entity_facets(bytea) IS
+    'Identity facet of an entity: its tier and type_id. Empty if the id is '
+    'not in the substrate (a correctly-resolved id for never-ingested content).';
+
+CREATE OR REPLACE FUNCTION entity_physicalities(p_id bytea)
+    RETURNS TABLE(kind smallint, x double precision, y double precision,
+                  z double precision, m double precision,
+                  radius double precision, n_constituents integer, source_id bytea,
+                  hilbert_index bytea)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT p.kind, ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord),
+           p.radius_origin, p.n_constituents, p.source_id, p.hilbert_index
+    FROM physicalities p
+    WHERE p.entity_id = p_id
+    ORDER BY p.kind, p.source_id
+$$;
+
+COMMENT ON FUNCTION entity_physicalities(bytea) IS
+    'Glome facet: every per-source 4D physicality on the entity (CONTENT / '
+    'BUILDING_BLOCK / PROJECTION), with radius-from-origin, constituent count '
+    'and Hilbert locality index.';
+
+CREATE OR REPLACE FUNCTION attestations_out(p_id bytea, p_limit integer DEFAULT 40)
+    RETURNS TABLE(kind_id bytea, object_id bytea, source_id bytea, context_id bytea,
+                  outcome smallint, observation_count bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT a.kind_id, a.object_id, a.source_id, a.context_id,
+           a.outcome, a.observation_count
+    FROM attestations a
+    WHERE a.subject_id = p_id
+    ORDER BY a.observation_count DESC, a.outcome DESC
+    LIMIT p_limit
+$$;
+
+COMMENT ON FUNCTION attestations_out(bytea, integer) IS
+    'Outgoing EVIDENCE (provenance) neighborhood: who witnessed relations where the entity is the '
+    'subject — source, circuit context (layer/head), outcome class (0=refute/1=draw/2=confirm), '
+    'games. Evidence carries no values; for relation STRENGTH use the consensus reads '
+    '(consensus_out/completions/top_relations).';
+
+CREATE OR REPLACE FUNCTION attestations_in(p_id bytea, p_limit integer DEFAULT 40)
+    RETURNS TABLE(subject_id bytea, kind_id bytea, source_id bytea, context_id bytea,
+                  outcome smallint, observation_count bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT a.subject_id, a.kind_id, a.source_id, a.context_id,
+           a.outcome, a.observation_count
+    FROM attestations a
+    WHERE a.object_id = p_id
+    ORDER BY a.observation_count DESC, a.outcome DESC
+    LIMIT p_limit
+$$;
+
+COMMENT ON FUNCTION attestations_in(bytea, integer) IS
+    'Incoming EVIDENCE (provenance) neighborhood: who witnessed relations where the entity is the '
+    'object — source, circuit context, outcome class, games. Evidence carries no values; for '
+    'strength use the consensus reads.';
+
+/* Readable consensus read — the inference surface in the substrate's own voice. */
+CREATE FUNCTION consensus_out_readable(p_id bytea, p_limit integer DEFAULT 40)
+    RETURNS TABLE(kind text, object text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT render(c.kind_id), render(c.object_id),
+           eff_mu_display(c.rating, c.rd), c.witness_count
+    FROM consensus c
+    WHERE c.subject_id = p_id
+    ORDER BY eff_mu(c.rating, c.rd) DESC
+    LIMIT p_limit
+$$;
+COMMENT ON FUNCTION consensus_out_readable(bytea, integer) IS
+    'consensus_out with every id rendered readable: [kind] → object, signed effective μ, witnesses.';
+
+/* Global readable ranked-μ read — top_relations in the substrate's own voice. */
+CREATE FUNCTION top_relations_readable(p_limit integer DEFAULT 10, p_kind bytea DEFAULT NULL)
+    RETURNS TABLE(subject text, kind text, object text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT render(t.subject_id), render(t.kind_id), render(t.object_id),
+           t.eff_mu, t.witnesses
+    FROM top_relations(p_limit, p_kind) t
+$$;
+COMMENT ON FUNCTION top_relations_readable(integer, bytea) IS
+    'top_relations with every id rendered readable — the one-call proof that ranked-μ inference reads work.';
+
+/* ── Pre-cascade read primitives (ported from the retired migration chain,
+ * 2026-06-05 migrations refactor; now eff_mu-routed so the ORDER BY rides the
+ * consensus expression indexes — the old inline 2.0*rd double math never did).
+ * EVIDENCE IS PROVENANCE: source_scope/context are provenance FILTERS ("who
+ * witnessed it"); strength is always the global consensus μ. ────────────── */
+
+CREATE FUNCTION attestation_response(
+    p_subject_id   bytea,
+    p_kind_id      bytea,
+    p_source_scope bytea[]    DEFAULT NULL,
+    p_context_id   bytea      DEFAULT NULL,
+    p_top_k        integer    DEFAULT 32
+)
+RETURNS TABLE(
+    object_id        bytea,
+    combined_eff_mu  double precision,
+    source_count     integer,
+    rating_fp1e9     bigint,
+    rd_fp1e9         bigint
+)
+LANGUAGE sql STABLE
+SET search_path = @extschema@, public
+AS $$
+    SELECT c.object_id,
+           (eff_mu(c.rating, c.rd) / 1e9)::double precision,
+           c.witness_count::integer,
+           c.rating,
+           c.rd
+    FROM consensus c
+    WHERE c.subject_id = p_subject_id
+      AND c.kind_id    = p_kind_id
+      AND c.object_id IS NOT NULL
+      AND (
+            (p_source_scope IS NULL AND p_context_id IS NULL)
+         OR EXISTS (             -- provenance filter: the scope witnessed it
+                SELECT 1 FROM attestations a
+                WHERE a.subject_id = c.subject_id
+                  AND a.kind_id    = c.kind_id
+                  AND a.object_id IS NOT DISTINCT FROM c.object_id
+                  AND (p_source_scope IS NULL OR a.source_id = ANY(p_source_scope))
+                  AND (p_context_id   IS NULL OR a.context_id IS NOT DISTINCT FROM p_context_id)
+            )
+          )
+    ORDER BY eff_mu(c.rating, c.rd) DESC
+    LIMIT GREATEST(1, p_top_k)
+$$;
+
+COMMENT ON FUNCTION attestation_response(bytea, bytea, bytea[], bytea, integer) IS
+    'One-hop typed-edge expansion: top-K objects by SIGNED effective μ (eff_mu, never clamped — '
+    'refuted ranks at the bottom) for (subject, kind). source_scope/context are PROVENANCE '
+    'FILTERS (evidence = who witnessed); strength is always the global consensus.';
+
+CREATE FUNCTION attestation_unary_response(
+    p_subject_id   bytea,
+    p_kind_id      bytea,
+    p_source_scope bytea[]    DEFAULT NULL,
+    p_context_id   bytea      DEFAULT NULL
+)
+RETURNS TABLE(
+    combined_eff_mu  double precision,
+    source_count     integer,
+    rating_fp1e9     bigint,
+    rd_fp1e9         bigint
+)
+LANGUAGE sql STABLE
+SET search_path = @extschema@, public
+AS $$
+    SELECT (eff_mu(c.rating, c.rd) / 1e9)::double precision,
+           c.witness_count::integer,
+           c.rating,
+           c.rd
+    FROM consensus c
+    WHERE c.subject_id = p_subject_id
+      AND c.kind_id    = p_kind_id
+      AND c.object_id IS NULL
+      AND (
+            (p_source_scope IS NULL AND p_context_id IS NULL)
+         OR EXISTS (
+                SELECT 1 FROM attestations a
+                WHERE a.subject_id = c.subject_id
+                  AND a.kind_id    = c.kind_id
+                  AND a.object_id IS NULL
+                  AND (p_source_scope IS NULL OR a.source_id = ANY(p_source_scope))
+                  AND (p_context_id   IS NULL OR a.context_id IS NOT DISTINCT FROM p_context_id)
+            )
+          )
+$$;
+
+COMMENT ON FUNCTION attestation_unary_response(bytea, bytea, bytea[], bytea) IS
+    'Unary-kind subject lookup (object_id IS NULL). SIGNED effective μ (eff_mu) from consensus; '
+    'source_scope/context are provenance filters over the evidence.';

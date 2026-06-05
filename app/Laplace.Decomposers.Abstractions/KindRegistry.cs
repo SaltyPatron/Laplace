@@ -4,12 +4,14 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// The canonical KIND registry — the single source of truth that turns each
-/// relation kind into an ARENA. A kind is an arena: relations of that kind
-/// compete for Glicko-2 μ against the neutral baseline, so the consensus μ over
-/// a kind is a μ-ranked relational embedding over the shared content nodes. N
-/// kinds ⇒ N co-equal embeddings of one identity set (ARCHITECTURE.md — NN is
-/// plural; never crown one).
+/// The canonical KIND registry — the single source of truth for the substrate's
+/// COMPLETE kind vocabulary across every modality: linguistic (POS, dependency,
+/// feature, sense, lexical relations), structural-standards (Unicode / ISO),
+/// TENSOR-ROLE (the model modality — see below), and geometric. A kind is an
+/// ARENA: relations of that kind compete for Glicko-2 μ against the neutral
+/// baseline, so the consensus μ over a kind is a μ-ranked relational embedding
+/// over the shared content nodes. N kinds ⇒ N co-equal embeddings of one
+/// identity set (ARCHITECTURE.md — NN is plural; never crown one).
 ///
 /// <para>The registry enforces the ONE canonicalization rule so witnesses
 /// co-assert on the LITERAL same consensus pk instead of forking into parallel
@@ -18,7 +20,7 @@ namespace Laplace.Decomposers.Abstractions;
 ///   <item>Two genuinely different relations → two arenas (PRESERVE):
 ///   <c>nsubj≠obj</c>, <c>synonym≠translation≠antonym</c>, <c>is_a≠part_of</c>.</item>
 ///   <item>One relation under two NAMES → one arena (NORMALIZE):
-///   <c>HAS_UPOS, HAS_LEX_CATEGORY → HAS_POS</c>.</item>
+///   <c>HAS_UPOS → HAS_POS</c>; <c>DEFINED_AS, DEFINES → HAS_DEFINITION</c>.</item>
 ///   <item>One relation in two DIRECTIONS → one arena, flip endpoints (lossless;
 ///   the inverse is the reverse query): <c>HAS_HYPONYM, IS_HYPERNYM_OF → IS_A</c>;
 ///   <c>IS_PART_OF → HAS_PART</c>.</item>
@@ -27,10 +29,37 @@ namespace Laplace.Decomposers.Abstractions;
 ///   <c>HAS_XPOS is_a HAS_POS</c>; <c>ATTENDS / OV_RELATES is_a RELATED_TO</c>.</item>
 /// </list>
 ///
-/// <para>A model is case (4), not a separate category: its circuit arenas are
-/// real (cross-model co-assertion is direct) and roll up to the seed arenas;
-/// the model is type-blind, so the type of a seed edge it corroborates stays the
-/// seed's. SYMMETRIC kinds canonicalize endpoint order so <c>(a,b)</c> and
+/// <para><b>Naming convention (2026-06-05 ruling — professional, unambiguous):</b>
+/// (1) a kind name reads left-to-right as the assertion: "subject KIND object"
+/// must parse as a sentence; (2) directional transforms end in <c>_TO</c>,
+/// attribute-bearing kinds read <c>HAS_X</c>, identity/correspondence kinds read
+/// <c>IS_X_OF</c>; (3) no name may be readable as two different assertions —
+/// the NORMALIZES failure class: one id carried "codepoint normalizes-to form"
+/// AND "model norm scales channel"; both renamed (<c>NORMALIZES_TO</c> /
+/// <c>NORM_SCALES</c>); (4) source-native vocabularies keep their family prefix
+/// (<c>DEP_*</c>, <c>FEAT_*</c>, ATOMIC's <c>X_*</c>/<c>O_*</c>, the tensor
+/// roles). Rename table of record:
+///   NORMALIZES (unicode-reserved) → NORMALIZES_TO;
+///   NORMALIZES (model)            → NORM_SCALES;
+///   DEFINES / DEFINED_AS          → HAS_DEFINITION (one arena — same assertion,
+///                                   and "synset DEFINES gloss" read backwards);
+/// kept after review: HAS_SCRIPT (codepoint property) vs USES_SCRIPT (language
+/// practice) — two real assertions; HAS_A (ConceptNet-native possession/part
+/// arena, fine-vs-coarse under HAS_PART); TRANSCRIBES_AS; HAS_EXAMPLE.</para>
+///
+/// <para><b>The TENSOR-ROLE family is first-class</b> (2026-06-05 ruling): the
+/// ten weight-table arenas (EMBEDS, Q/K/V/O_PROJECTS, GATES, UP/DOWN_PROJECTS,
+/// NORM_SCALES, OUTPUT_PROJECTS) plus TOKEN_MAPS_TO and MERGES_WITH are the
+/// substrate's own MODEL modality — what a model witnesses at ingest AND the
+/// mold-filling map at export (ConsensusReExport reads exactly these arenas
+/// back into weight tensors). They are placement/structure arenas (no roll-up
+/// parent); the model's RELATEDNESS reads (ATTENDS / OV_RELATES / COMPLETES_TO)
+/// are the query-time vocabulary and roll up to the seed arenas. A model is
+/// case (4), not a separate category: cross-model co-assertion is direct, and
+/// the model is type-blind — the type of a seed edge it corroborates stays the
+/// seed's.</para>
+///
+/// <para>SYMMETRIC kinds canonicalize endpoint order so <c>(a,b)</c> and
 /// <c>(b,a)</c> hit one row. ANTONYM is a confirm in its own Oppositional arena,
 /// not a refute (the refute/repel pole is anti-correlation magnitude or the
 /// Gödel engine's active refutation).</para>
@@ -74,8 +103,36 @@ public static class KindRegistry
         ["HAS_UPPERCASE_MAPPING"]   = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
         ["HAS_LOWERCASE_MAPPING"]   = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
         ["CANONICAL_DECOMPOSES_TO"] = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
-        ["NORMALIZES"]              = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
+        // Renamed from NORMALIZES (the one-name-two-assertions failure class —
+        // see header rename table): codepoint → normalized form. Reserved for
+        // the Unicode normalization emitter; the model's per-channel norm is
+        // NORM_SCALES in the tensor-role family below.
+        ["NORMALIZES_TO"]           = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
         ["TRANSCRIBES_AS"]          = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
+        // BYTE TIER (2026-06-05): which character a byte means is a property
+        // of the ENCODING, never of the byte — DECODES_TO carries the encoding
+        // as context (Latin-1 / CP1252 seeded; byte 0x80 → U+0080 vs € vs a
+        // UTF-8 fragment are three RELATIONS, one atom). HAS_UTF8_ROLE = the
+        // standard's own byte classification (continuation / lead-N / invalid).
+        ["DECODES_TO"]    = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
+        ["HAS_UTF8_ROLE"] = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
+
+        // Unicode completeness (2026-06-05): the UCD properties the seed left
+        // unextracted. Compatibility decomposition is DISTINCT from canonical
+        // (a <tag>-form weak equivalence, never folded into the canonical arena).
+        ["HAS_TITLECASE_MAPPING"]      = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
+        ["COMPATIBILITY_DECOMPOSES_TO"] = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
+        ["HAS_BIDI_CLASS"]             = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
+        ["HAS_MIRROR"]                 = new(KindRank.StandardsStructural, Symmetry.Symmetric, null),
+        ["HAS_AGE"]                    = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
+        ["HAS_NAME_ALIAS"]             = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
+        ["CONFUSABLE_WITH"]            = new(KindRank.StandardsStructural, Symmetry.Symmetric, null),
+        ["HAS_EMOJI_PROPERTY"]         = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
+        ["HAS_NUMERIC_VALUE"]          = new(KindRank.ScalarValued, Symmetry.Asymmetric, null),
+        // ISO 639 completeness: code aliases + classification.
+        ["HAS_ISO639_2_CODE"]          = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
+        ["HAS_LANGUAGE_SCOPE"]         = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
+        ["HAS_LANGUAGE_TYPE"]          = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
         ["IS_LANGUAGE_CODE"]        = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
         ["HAS_ISO639_1_CODE"]       = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
         ["MEMBER_OF_MACROLANGUAGE"] = new(KindRank.StandardsStructural, Symmetry.Asymmetric, null),
@@ -114,8 +171,47 @@ public static class KindRegistry
         ["OBSTRUCTED_BY"]      = new(KindRank.Causal, Symmetry.Asymmetric, null),
         ["CREATED_BY"]         = new(KindRank.Causal, Symmetry.Asymmetric, null),
 
-        // Syntactic dependency (parent of the dynamic DEP_* family).
-        ["DEPENDS_ON"]  = new(KindRank.Partitive, Symmetry.Asymmetric, null),
+        // Predicate semantics (FrameNet / VerbNet / PropBank / SemLink,
+        // 2026-06-05). EVOKES_FRAME = the frame-semantic binding (LU → frame);
+        // frame elements / thematic roles / numbered args are the schema's
+        // PARTS; CORRESPONDS_TO = SemLink's cross-resource alignments
+        // (VN class ↔ FN frame, VN role ↔ FN FE, PB arg ↔ VN role) — one
+        // symmetric equivalence arena, NEVER welded into IS_A.
+        ["EVOKES_FRAME"]      = new(KindRank.Taxonomic,  Symmetry.Asymmetric, null),
+        ["HAS_FRAME_ELEMENT"] = new(KindRank.Partitive,  Symmetry.Asymmetric, null),
+        ["HAS_THEMATIC_ROLE"] = new(KindRank.Partitive,  Symmetry.Asymmetric, null),
+        ["HAS_SEMANTIC_ROLE"] = new(KindRank.Partitive,  Symmetry.Asymmetric, null),
+        ["FRAME_USES"]        = new(KindRank.Associative, Symmetry.Asymmetric, "RELATED_TO"),
+        ["PERSPECTIVE_ON"]    = new(KindRank.Associative, Symmetry.Asymmetric, "RELATED_TO"),
+        ["CAUSATIVE_OF"]      = new(KindRank.Causal,     Symmetry.Asymmetric, null),
+        ["INCHOATIVE_OF"]     = new(KindRank.Causal,     Symmetry.Asymmetric, null),
+        ["CORRESPONDS_TO"]    = new(KindRank.Equivalence, Symmetry.Symmetric, null),
+
+        // ATOMIC2020 commonsense — Causal family, source-native X_*/O_* prefixes
+        // (naming convention rule 4). Names preserved where they predate the
+        // registry move (ids stable); IS_FILLED_BY → X_FILLED_BY per the
+        // convention sweep (family prefix; greenfield rebuild covers the id).
+        ["X_INTENT"]    = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["X_NEED"]      = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["X_WANT"]      = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["X_EFFECT"]    = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["X_REACT"]     = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["X_ATTR"]      = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["X_REASON"]    = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["X_FILLED_BY"] = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["O_EFFECT"]    = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["O_REACT"]     = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["O_WANT"]      = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["IS_AFTER"]    = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["IS_BEFORE"]   = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["OBJECT_USE"]  = new(KindRank.Causal, Symmetry.Asymmetric, null),
+        ["MADE_UP_OF"]  = new(KindRank.Partitive, Symmetry.Asymmetric, "HAS_PART"),
+
+        // Syntactic dependency (parent of the dynamic DEP_* family). Enhanced
+        // dependencies (CoNLL-U DEPS col) are a DIFFERENT annotation graph —
+        // their EDEP_* family rolls up to its own parent, never merged.
+        ["DEPENDS_ON"]           = new(KindRank.Partitive, Symmetry.Asymmetric, null),
+        ["ENHANCED_DEPENDS_ON"]  = new(KindRank.Partitive, Symmetry.Asymmetric, null),
 
         // Equivalence (kept DISTINCT — same-language synonymy ≠ cross-language translation).
         ["IS_SYNONYM_OF"]     = new(KindRank.Equivalence, Symmetry.Symmetric, "RELATED_TO"),
@@ -125,7 +221,6 @@ public static class KindRegistry
         ["IS_LEMMA_OF"]       = new(KindRank.Equivalence, Symmetry.Asymmetric, null),
         ["IS_PARTICIPLE_OF"]  = new(KindRank.Equivalence, Symmetry.Asymmetric, null),
         ["FORM_OF"]           = new(KindRank.Equivalence, Symmetry.Asymmetric, "RELATED_TO"),
-        ["DEFINED_AS"]        = new(KindRank.Equivalence, Symmetry.Asymmetric, "RELATED_TO"),
 
         // Oppositional — antonym / negative assertions are CONFIRMS in their own
         // arenas (not refutes; the refute pole is active refutation).
@@ -138,8 +233,17 @@ public static class KindRegistry
 
         // Associative — RELATED_TO is the roll-up parent for the relatedness family.
         ["RELATED_TO"]             = new(KindRank.Associative, Symmetry.Symmetric, null),
+        // Corpus adjacency: "A PRECEDES B" — per-occurrence games via the
+        // aggregated factory path (TextEntityBuilder). FOLLOWS is the same
+        // assertion read backwards (rule 3: one arena, flip; the inverse is
+        // the reverse query) — it was emitted as a SECOND arena with doubled
+        // testimony until 2026-06-05.
+        ["PRECEDES"]               = new(KindRank.Associative, Symmetry.Asymmetric, null),
         ["DERIVATIONALLY_RELATED"] = new(KindRank.Associative, Symmetry.Symmetric, "RELATED_TO"),
-        ["DEFINES"]                = new(KindRank.Associative, Symmetry.Asymmetric, null),
+        // Renamed from DEFINES ("synset DEFINES gloss" read backwards — the
+        // gloss defines the word; HAS_X is the attribute-bearing convention).
+        // DEFINED_AS (ConceptNet) folds in via alias — same assertion.
+        ["HAS_DEFINITION"]         = new(KindRank.Associative, Symmetry.Asymmetric, null),
         ["HAS_EXAMPLE"]            = new(KindRank.Associative, Symmetry.Asymmetric, null),
         ["HAS_ETYMOLOGY"]          = new(KindRank.Associative, Symmetry.Asymmetric, null),
         ["DEPICTS"]                = new(KindRank.Associative, Symmetry.Asymmetric, null),
@@ -149,6 +253,16 @@ public static class KindRegistry
         ["ALSO_SEE"]               = new(KindRank.Associative, Symmetry.Asymmetric, "RELATED_TO"),
         ["IN_VERB_GROUP_WITH"]     = new(KindRank.Associative, Symmetry.Symmetric, "RELATED_TO"),
         ["HAS_DOMAIN_TOPIC"]       = new(KindRank.Associative, Symmetry.Asymmetric, null),
+        // Wiktionary completeness (2026-06-05): co-hyponyms are a distinct
+        // relation (not similarity); registers (slang/archaic/technical) are
+        // usage classification with the register WORDFORM as the value.
+        ["IS_COORDINATE_TERM_WITH"] = new(KindRank.Associative, Symmetry.Symmetric, "RELATED_TO"),
+        ["HAS_USAGE_REGISTER"]      = new(KindRank.Associative, Symmetry.Asymmetric, null),
+        // WordNet verb frames: synset → frame template content (frames.vrb).
+        ["HAS_VERB_FRAME"]          = new(KindRank.Associative, Symmetry.Asymmetric, null),
+        // ConceptNet /r/dbpedia/* — parent of the dynamic DBPEDIA_* family
+        // (the DEP_*/FEAT_* precedent: ~30 source-defined arenas, preserved).
+        ["HAS_DBPEDIA_RELATION"]    = new(KindRank.Associative, Symmetry.Asymmetric, null),
         ["HAS_DOMAIN_REGION"]      = new(KindRank.Associative, Symmetry.Asymmetric, null),
         ["HAS_DOMAIN_USAGE"]       = new(KindRank.Associative, Symmetry.Asymmetric, null),
         ["USED_FOR"]               = new(KindRank.Associative, Symmetry.Asymmetric, null),
@@ -162,6 +276,27 @@ public static class KindRegistry
         ["DERIVED_FROM"]           = new(KindRank.Associative, Symmetry.Asymmetric, "DERIVATIONALLY_RELATED"),
         ["ETYMOLOGICALLY_RELATED_TO"]   = new(KindRank.Associative, Symmetry.Symmetric, "HAS_ETYMOLOGY"),
         ["ETYMOLOGICALLY_DERIVED_FROM"] = new(KindRank.Associative, Symmetry.Asymmetric, "HAS_ETYMOLOGY"),
+
+        // ── TENSOR-ROLE family — the substrate's MODEL modality (header doc).
+        // The ten weight-table arenas the cell ETL loads at ingest AND the
+        // mold-filling map ConsensusReExport reads at export. Placement /
+        // structure arenas: no roll-up parent (they are not relatedness —
+        // ATTENDS/OV_RELATES/COMPLETES_TO below are the query-time reads).
+        ["EMBEDS"]          = new(KindRank.TensorCalculation, Symmetry.Asymmetric, null),
+        ["Q_PROJECTS"]      = new(KindRank.TensorCalculation, Symmetry.Asymmetric, null),
+        ["K_PROJECTS"]      = new(KindRank.TensorCalculation, Symmetry.Asymmetric, null),
+        ["V_PROJECTS"]      = new(KindRank.TensorCalculation, Symmetry.Asymmetric, null),
+        ["O_PROJECTS"]      = new(KindRank.TensorCalculation, Symmetry.Asymmetric, null),
+        ["GATES"]           = new(KindRank.TensorCalculation, Symmetry.Asymmetric, null),
+        ["UP_PROJECTS"]     = new(KindRank.TensorCalculation, Symmetry.Asymmetric, null),
+        ["DOWN_PROJECTS"]   = new(KindRank.TensorCalculation, Symmetry.Asymmetric, null),
+        // Renamed from NORMALIZES (model side of the split — header rename table).
+        ["NORM_SCALES"]     = new(KindRank.TensorCalculation, Symmetry.Asymmetric, null),
+        ["OUTPUT_PROJECTS"] = new(KindRank.TensorCalculation, Symmetry.Asymmetric, null),
+        // Tokenizer structure: slot → wordform mapping (scored by the morph's
+        // geometric residual where anchored) and the BPE merge lattice.
+        ["TOKEN_MAPS_TO"]   = new(KindRank.TensorCalculation, Symmetry.Asymmetric, null),
+        ["MERGES_WITH"]     = new(KindRank.TensorCalculation, Symmetry.Asymmetric, null),
 
         // Model circuit arenas — witnesses, roll up to relatedness. COMPLETES_TO
         // is shared directly with corpora (n-gram continuation), so it has no parent.
@@ -177,9 +312,14 @@ public static class KindRegistry
     //    kind, optionally with endpoints FLIPPED to reach canonical direction.
     private static readonly Dictionary<string, (string Canon, bool Flip)> Alias = new(StringComparer.Ordinal)
     {
-        // POS family — one assertion, several names.
+        // POS family — one assertion, several names. (HAS_LEX_CATEGORY was
+        // wrongly aliased here — a lexname is POS×domain, split at ingest by
+        // the WordNet decomposer since 2026-06-05; alias removed.)
         ["HAS_UPOS"]         = ("HAS_POS", false),
-        ["HAS_LEX_CATEGORY"] = ("HAS_POS", false),
+
+        // Definition family — one assertion, several names (header rename table).
+        ["DEFINES"]    = ("HAS_DEFINITION", false),
+        ["DEFINED_AS"] = ("HAS_DEFINITION", false),
 
         // Taxonomy — canonical IS_A is "subject (specific) is_a object (general)".
         ["HAS_HYPERNYM"]   = ("IS_A", false),   // x's hypernym is y  ⇒ x is_a y
@@ -201,9 +341,23 @@ public static class KindRegistry
         // Sense — canonical IS_SENSE_OF is "sense is_sense_of word".
         ["HAS_SENSE_OF"] = ("IS_SENSE_OF", false),
 
+        // Adjacency read backwards — one arena, flipped (rule 3).
+        ["FOLLOWS"] = ("PRECEDES", true),
+
         // ConceptNet names that are the SAME assertion as a canonical arena.
         ["SIMILAR_TO"] = ("IS_SIMILAR_TO", false),
         ["MADE_OF"]    = ("HAS_SUBSTANCE", false),   // whole MadeOf material ⇒ whole has_substance material
+
+        // FrameNet relation names that are the SAME assertion as a canonical
+        // arena: frame inheritance IS the taxonomic assertion; a subframe is a
+        // component scene (the HAS_SUBEVENT assertion, stated child-first).
+        ["INHERITS_FROM"] = ("IS_A", false),
+        ["SUBFRAME_OF"]   = ("HAS_SUBEVENT", true),
+        ["IS_INHERITED_BY"] = ("IS_A", true),
+
+        // ATOMIC names that are the SAME assertion as a canonical arena.
+        ["HINDERED_BY"]  = ("OBSTRUCTED_BY", false),   // co-asserts with ConceptNet ObstructedBy
+        ["IS_FILLED_BY"] = ("X_FILLED_BY", false),     // convention sweep: family prefix
     };
 
     /// <summary>Resolve a kind name (canonical OR a source alias) to its arena.
@@ -236,6 +390,47 @@ public static class KindRegistry
         int colon = norm.IndexOf(':');
         string parent = colon > 0 ? "DEP_" + norm[..colon].ToUpperInvariant() : "DEPENDS_ON";
         return new KindResolution(KindId(canon), KindRank.Partitive, Symmetry.Asymmetric, false, KindId(parent), canon);
+    }
+
+    /// <summary>Attest one ENHANCED dependency edge (CoNLL-U DEPS col):
+    /// dependent —EDEP_*→ head, kind resolved via
+    /// <see cref="ResolveEnhancedDeprel"/>. Same shape as
+    /// <see cref="AttestDeprel"/> — a different annotation graph, own family.</summary>
+    public static AttestationRow AttestEnhancedDeprel(
+        Hash128 dependent, string deprel, Hash128 head, Hash128 sourceId, double sourceTrust,
+        long observationCount = 1)
+    {
+        var r = ResolveEnhancedDeprel(deprel);
+        return AttestationFactory.CreateCategorical(
+            dependent, r.Id, head, sourceId, /*context*/ null, confirm: true,
+            witnessWeight: r.Rank * sourceTrust, observationCount: observationCount);
+    }
+
+    /// <summary>Resolve an ENHANCED dependency relation (CoNLL-U DEPS col) to
+    /// its own arena under ENHANCED_DEPENDS_ON: <c>nsubj → EDEP_NSUBJ</c>;
+    /// <c>nsubj:xsubj → EDEP_NSUBJ_XSUBJ is_a EDEP_NSUBJ</c>. A different
+    /// annotation graph from the basic DEP_* family — never merged.</summary>
+    public static KindResolution ResolveEnhancedDeprel(string deprel)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(deprel);
+        string norm = deprel.Trim().ToLowerInvariant();
+        string canon = "EDEP_" + norm.Replace(':', '_').ToUpperInvariant();
+        int colon = norm.IndexOf(':');
+        string parent = colon > 0 ? "EDEP_" + norm[..colon].ToUpperInvariant() : "ENHANCED_DEPENDS_ON";
+        return new KindResolution(KindId(canon), KindRank.Partitive, Symmetry.Asymmetric, false, KindId(parent), canon);
+    }
+
+    /// <summary>Resolve a ConceptNet <c>/r/dbpedia/*</c> relation to its own
+    /// arena under HAS_DBPEDIA_RELATION (dynamic family — the DEP_*/FEAT_*
+    /// precedent): <c>dbpedia/genre → DBPEDIA_GENRE is_a HAS_DBPEDIA_RELATION</c>.</summary>
+    public static KindResolution ResolveDbpedia(string rel)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(rel);
+        string norm = rel.Trim();
+        if (norm.StartsWith("dbpedia/", StringComparison.OrdinalIgnoreCase)) norm = norm[8..];
+        string canon = "DBPEDIA_" + norm.Replace('/', '_').ToUpperInvariant();
+        return new KindResolution(KindId(canon), KindRank.Associative, Symmetry.Asymmetric, false,
+                                  KindId("HAS_DBPEDIA_RELATION"), canon);
     }
 
     // ── Endpoint orientation: flip to canonical direction, then for symmetric
@@ -396,5 +591,19 @@ public static class KindRegistry
         int colon = deprel.IndexOf(':');
         if (colon > 0) SeedDynamic(builder, ResolveDeprel(deprel[..colon]), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun);
         SeedDynamic(builder, ResolveDeprel(deprel), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun);
+    }
+
+    /// <summary>Seed an ENHANCED deprel kind + its roll-up chain — the
+    /// EDEP_* mirror of <see cref="SeedDeprel"/>. A subtyped rel
+    /// (advcl:cond) attests is_a EDEP_ADVCL, so the PARENT kind entity must
+    /// stage too (the 2026-06-05 ar_padt referential-proof lesson: a file may
+    /// contain only subtyped forms, never the bare rel).</summary>
+    public static void SeedEnhancedDeprel(SubstrateChangeBuilder builder, string deprel, Hash128 sourceId,
+                                          ISet<Hash128> seenEntitiesThisBatch,
+                                          ConcurrentIdSet seenAttestationsThisRun)
+    {
+        int colon = deprel.IndexOf(':');
+        if (colon > 0) SeedDynamic(builder, ResolveEnhancedDeprel(deprel[..colon]), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun);
+        SeedDynamic(builder, ResolveEnhancedDeprel(deprel), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun);
     }
 }

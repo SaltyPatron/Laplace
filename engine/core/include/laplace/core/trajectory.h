@@ -32,6 +32,13 @@ extern "C" {
 /* Pack N entity-hash references into a mantissa-packed XYZM buffer.
  * Caller-side ordinal/run_length/flags threading lands with the real impl;
  * this stub signature is hash-only and will widen when implemented. */
+/* Flagged build: per-constituent flags carry in-band type/atom (see
+ * mantissa.h vertex flag layout). flags may be NULL (all-zero = legacy). */
+int trajectory_build_flagged(const hash128_t* entity_hashes,
+                             const uint64_t*  flags,
+                             size_t           n,
+                             double*          out_xyzm);
+
 int trajectory_build(const hash128_t* entity_hashes,
                      size_t           n,
                      double*          out_xyzm);

@@ -13,9 +13,10 @@
  * never a flattened leaf list — fan-out per node stays small. A caller that
  * needs more must tier deeper, not widen a single trajectory. */
 
-int trajectory_build(const hash128_t* entity_hashes,
-                     size_t           n,
-                     double*          out_xyzm) {
+int trajectory_build_flagged(const hash128_t* entity_hashes,
+                             const uint64_t*  flags,
+                             size_t           n,
+                             double*          out_xyzm) {
     if (out_xyzm == NULL) return -1;
     if (entity_hashes == NULL && n > 0) return -1;
     if (n > 0xFFFFu) return -1;   /* ordinal is uint16; tier deeper instead */
@@ -25,10 +26,16 @@ int trajectory_build(const hash128_t* entity_hashes,
         p.entity_id  = entity_hashes[i];
         p.ordinal    = (uint16_t)(i + 1);   /* 1-indexed */
         p.run_length = 1;
-        p.flags      = 0;
+        p.flags      = flags ? flags[i] : 0;
         mantissa_pack(&out_xyzm[i * 4], &p);
     }
     return 0;
+}
+
+int trajectory_build(const hash128_t* entity_hashes,
+                     size_t           n,
+                     double*          out_xyzm) {
+    return trajectory_build_flagged(entity_hashes, NULL, n, out_xyzm);
 }
 
 int trajectory_build_rle(const hash128_t* constituents,

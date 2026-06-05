@@ -26,6 +26,11 @@
     <ProjectReference Include="..\Laplace.Decomposers.Atomic2020\Laplace.Decomposers.Atomic2020.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.ConceptNet\Laplace.Decomposers.ConceptNet.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.Wiktionary\Laplace.Decomposers.Wiktionary.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.FrameNet\Laplace.Decomposers.FrameNet.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.OpenSubtitles\Laplace.Decomposers.OpenSubtitles.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.VerbNet\Laplace.Decomposers.VerbNet.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.PropBank\Laplace.Decomposers.PropBank.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.SemLink\Laplace.Decomposers.SemLink.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.Model\Laplace.Decomposers.Model.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.Abstractions\Laplace.Decomposers.Abstractions.csproj" />
     <ProjectReference Include="..\Laplace.Engine.Core\Laplace.Engine.Core.csproj" />

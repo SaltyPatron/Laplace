@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
@@ -28,7 +29,6 @@ public sealed class UDDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    private static readonly Hash128 UposTypeId     = Hash128.OfCanonical("substrate/type/UD_UPOS/v1");
     private static readonly Hash128 XposTypeId     = Hash128.OfCanonical("substrate/type/UD_XPOS/v1");
     private static readonly Hash128 FeatureTypeId  = Hash128.OfCanonical("substrate/type/UD_Feature/v1");
     private static readonly Hash128 LanguageTypeId = Hash128.OfCanonical("substrate/type/Language/v1");
@@ -45,21 +45,38 @@ public sealed class UDDecomposer : IDecomposer
     public int     LayerOrder   => 2;   // needs only unicode(0)+iso(1) — independent of wordnet/omw
     public Hash128 TrustClassId => TrustClass;
 
-    private static Hash128 UposId(string t)  => Hash128.OfCanonical($"upos:{t}");
+    // Per-key id memos (the perf-cache discipline). XPOS tagsets and the feature
+    // inventory are small, closed, low-cardinality sets, but XposId / FeatValueId
+    // are on every token's hot path — without the memo each token re-formats +
+    // UTF8-encodes + BLAKE3s the same string. Compute once per distinct key,
+    // dictionary hit per token. Content-addressed ⇒ a hit is bit-identical.
+    private static readonly ConcurrentDictionary<(string Lang, string Tag), Hash128> _xposIdMemo =
+        new();
+    private static readonly ConcurrentDictionary<(string Name, string Value), Hash128> _featValueIdMemo =
+        new();
+
+    /* UPOS value → THE canonical POS value entity (PosReference — the
+     * omni-glottal POS resolution; same law as LanguageReference). The old
+     * per-source `upos:{t}` ids forked the value layer three ways.
+     * PosReference.Resolve memoizes its own id (CanonicalId memo). */
+    private static Hash128 UposId(string t) => PosReference.Resolve(t, PosReference.PosTagset.Upos);
     // XPOS is treebank/language-specific (Penn "NN" ≠ another tagset's "NN"):
     // namespace by language so genuinely-different tags are distinct content.
     // UPOS is the universal tagset → stays unnamespaced (same content cross-lang).
-    private static Hash128 XposId(string lang, string t) => Hash128.OfCanonical($"xpos:{lang}:{t}");
+    private static Hash128 XposId(string lang, string t) =>
+        _xposIdMemo.GetOrAdd((lang, t), static k => Hash128.OfCanonical($"xpos:{k.Lang}:{k.Tag}"));
     // Feature VALUE object, namespaced by feature name (cross-language shared:
     // Number=Sing is one value entity). The feature TYPE (Number) is the kind.
     private static Hash128 FeatValueId(string name, string value) =>
-        Hash128.OfCanonical($"featval:{name}:{value}");
+        _featValueIdMemo.GetOrAdd((name, value), static k => Hash128.OfCanonical($"featval:{k.Name}:{k.Value}"));
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("UD_UPOS");
         boot.AddType("UD_XPOS");
+        boot.AddKind("HAS_DEFINITION");     // MISC Gloss=
+        boot.AddKind("TRANSCRIBES_AS");     // MISC Translit=
+        boot.AddKind("ENHANCED_DEPENDS_ON");
         boot.AddType("UD_Feature");
         // Kinds are seeded by the registry in BootstrapIntentBuilder.Build (the
         // canonical arena taxonomy: HAS_POS, HAS_XPOS, HAS_FEATURE, IS_LEMMA_OF,
@@ -69,9 +86,8 @@ public sealed class UDDecomposer : IDecomposer
 
         var upos = new SubstrateChangeBuilder(
             Source, "bootstrap/ud-upos", null,
-            entityCapacity: UposTags.Length, physicalityCapacity: 0, attestationCapacity: 0);
-        foreach (var tag in UposTags)
-            upos.AddEntity(new EntityRow(UposId(tag), (byte)MetaTier.Meta, UposTypeId, Source));
+            entityCapacity: PosReference.Canonical.Length + 1, physicalityCapacity: 0, attestationCapacity: 0);
+        PosReference.SeedCanonical(upos, Source);
         await context.Writer.ApplyAsync(upos.Build(), ct);
     }
 
@@ -192,7 +208,7 @@ public sealed class UDDecomposer : IDecomposer
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(2_600_000L);
+        => Task.FromResult<long?>(30_000_000L);   // rows post-completeness (EDEP/MISC/empty nodes; 25.4M measured mid-run 2026-06-05)
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
@@ -213,19 +229,22 @@ public sealed class UDDecomposer : IDecomposer
         // The full sentence as content (the big win: 2.6M sentences become real content).
         if (!string.IsNullOrEmpty(s.Text)) ContentEmitter.Emit(b, s.Text!, Source);
 
-        // Forms/lemmas as content; capture form content ids by token id for DEPENDS_ON.
+        // Forms/lemmas as content; capture form content ids by token id for
+        // DEPENDS_ON and by RAW ref ("8" / "8.1") for the ENHANCED graph,
+        // which references empty nodes the basic graph never sees.
         var formId = new Hash128?[s.MaxId + 1];
+        var refToForm = new Dictionary<string, Hash128>(s.Tokens.Count, StringComparer.Ordinal);
         foreach (var tok in s.Tokens)
         {
-            formId[tok.Id] = ContentEmitter.Emit(b, tok.Form, Source);
+            var fid = ContentEmitter.Emit(b, tok.Form, Source);
+            if (tok.Id >= 0) formId[tok.Id] = fid;
+            if (fid is { } f) refToForm[tok.Ref] = f;
             if (tok.Lemma != tok.Form) ContentEmitter.Emit(b, tok.Lemma, Source);
         }
 
         foreach (var tok in s.Tokens)
         {
-            var fid = formId[tok.Id];
-            if (fid is null) continue;
-            Hash128 form = fid.Value;
+            if (!refToForm.TryGetValue(tok.Ref, out var form)) continue;
 
             // HAS_UPOS normalizes to the canonical HAS_POS arena (co-asserts with
             // WordNet/Wiktionary part-of-speech); the value object stays the UPOS tag.
@@ -273,6 +292,53 @@ public sealed class UDDecomposer : IDecomposer
                 KindRegistry.SeedDeprel(b, tok.Deprel, Source, seenEntBatch, seenAttRun);
                 b.AddAttestation(KindRegistry.AttestDeprel(
                     form, tok.Deprel, headId, Source, SourceTrust.AcademicCurated));
+            }
+
+            // ENHANCED dependencies (DEPS col 9 — "head:rel|head:rel", heads may
+            // be empty nodes "8.1"): the EDEP_* family under ENHANCED_DEPENDS_ON —
+            // a different annotation graph, never merged into DEP_* (2026-06-05).
+            if (tok.Deps.Length > 0 && tok.Deps != "_")
+            {
+                foreach (var edge in tok.Deps.Split('|', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    int colon = edge.IndexOf(':');
+                    if (colon <= 0) continue;
+                    string headRef = edge[..colon];
+                    string erel = edge[(colon + 1)..].Trim();
+                    if (erel.Length == 0 || headRef == "0") continue;
+                    if (!refToForm.TryGetValue(headRef, out var eHead)) continue;
+                    KindRegistry.SeedEnhancedDeprel(b, erel, Source, seenEntBatch, seenAttRun);
+                    b.AddAttestation(KindRegistry.AttestEnhancedDeprel(
+                        form, erel, eHead, Source, SourceTrust.AcademicCurated));
+                }
+            }
+
+            // MISC col 10: Gloss= (the token's gloss/translation — a definition
+            // witness) and Translit= (romanization — a transcription witness).
+            if (tok.Misc.Length > 0 && tok.Misc != "_")
+            {
+                foreach (var kv in tok.Misc.Split('|', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    int eq = kv.IndexOf('=');
+                    if (eq <= 0) continue;
+                    string key = kv[..eq];
+                    string val = kv[(eq + 1)..].Trim();
+                    if (val.Length == 0) continue;
+                    if (key.Equals("Gloss", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var g = ContentEmitter.Emit(b, val, Source);
+                        if (g is { } gid)
+                            b.AddAttestation(KindRegistry.Attest(
+                                form, "HAS_DEFINITION", gid, Source, SourceTrust.AcademicCurated));
+                    }
+                    else if (key.Equals("Translit", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var t = ContentEmitter.Emit(b, val, Source);
+                        if (t is { } tid)
+                            b.AddAttestation(KindRegistry.Attest(
+                                form, "TRANSCRIBES_AS", tid, Source, SourceTrust.AcademicCurated));
+                    }
+                }
             }
         }
 
@@ -332,8 +398,13 @@ public sealed class UDDecomposer : IDecomposer
                     mwts.Add(new UdMwt(st, en, c[1].Trim()));
                 continue;
             }
-            if (id0.Contains('.')) continue;            // empty node — skip
-            if (!int.TryParse(id0, out int id)) continue;
+            // Empty nodes (id "8.1") are PARSED, not skipped (2026-06-05
+            // completeness): they carry real morphology and are referenced as
+            // heads by the ENHANCED dependency graph (DEPS col). They never
+            // join the basic DEP graph (their HEAD col is "_" → 0 → skipped).
+            bool isEmptyNode = id0.Contains('.');
+            int id = 0;
+            if (!isEmptyNode && !int.TryParse(id0, out id)) continue;
 
             string form = c[1].Trim();
             if (form.Length == 0 || form == "_") continue;
@@ -346,9 +417,11 @@ public sealed class UDDecomposer : IDecomposer
                 : c[5].Split('|', StringSplitOptions.RemoveEmptyEntries);
             int head = int.TryParse(c[6], out int h) ? h : 0;
             string deprel = c[7].Trim();
+            string deps = c.Length > 8 ? c[8].Trim() : "_";
+            string misc = c.Length > 9 ? c[9].Trim() : "_";
 
-            if (id > maxId) maxId = id;
-            tokens.Add(new UdToken(id, form, lemma, upos, xpos, feats, head, deprel));
+            if (!isEmptyNode && id > maxId) maxId = id;
+            tokens.Add(new UdToken(isEmptyNode ? -1 : id, id0, form, lemma, upos, xpos, feats, head, deprel, deps, misc));
         }
         if (tokens.Count > 0)
             yield return new UdSentence(text, tokens.ToList(), mwts.ToList(), maxId);
@@ -357,7 +430,8 @@ public sealed class UDDecomposer : IDecomposer
     private sealed record UdSentence(string? Text, List<UdToken> Tokens, List<UdMwt> Mwts, int MaxId);
 
     private readonly record struct UdToken(
-        int Id, string Form, string Lemma, string Upos, string Xpos, string[] Feats, int Head, string Deprel);
+        int Id, string Ref, string Form, string Lemma, string Upos, string Xpos, string[] Feats,
+        int Head, string Deprel, string Deps, string Misc);
 
     private readonly record struct UdMwt(int Start, int End, string Form);
 }

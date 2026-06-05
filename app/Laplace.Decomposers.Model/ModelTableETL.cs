@@ -21,7 +21,7 @@ namespace Laplace.Decomposers.Model;
 ///
 /// LOAD — adjudication. Each non-zero cell is ONE signed Glicko match under
 /// its TENSOR-ROLE kind (the fixed ten: EMBEDS, Q_PROJECTS, K_PROJECTS,
-/// V_PROJECTS, O_PROJECTS, GATES, UP_PROJECTS, DOWN_PROJECTS, NORMALIZES,
+/// V_PROJECTS, O_PROJECTS, GATES, UP_PROJECTS, DOWN_PROJECTS, NORM_SCALES,
 /// OUTPUT_PROJECTS), oriented along the dataflow (in-axis → out-axis).
 /// score = ½(1+tanh(w/M)), M = the role's pooled RMS (measured, never a knob).
 /// Zero = the only non-event; tiny = a draw by math; negative = a loss.
@@ -45,7 +45,11 @@ public sealed class ModelTableETL
 {
     private const int RowsPerChange = 500_000;
     // Witness weight = kind_rank × source_trust (× tenant_trust = 1 until S5).
-    private const double ModelWeight = KindRank.TensorCalculation * SourceTrust.AiModelProbe;
+    // Witness weight for the tensor-role arenas: rank from THE registry (the
+    // tensor-role family is first-class Canon — all ten share TensorCalculation)
+    // × the model source trust. Never a call-site literal.
+    private static readonly double ModelWeight =
+        KindRegistry.Resolve("EMBEDS").Rank * SourceTrust.AiModelProbe;
 
     /// <summary>One logical table role of the transformer-family schema.</summary>
     private sealed record Role(
@@ -284,7 +288,7 @@ public sealed class ModelTableETL
                 role.Name, relationsEmitted - roleStart, instances.Count, relationsEmitted, gamesPlayed, zeros, unresolved, sw.Elapsed.TotalSeconds);
         }
 
-        // ── NORMALIZES — per-channel scale rows (unary; one logical table whose
+        // ── NORM_SCALES — per-channel scale rows (unary; one logical table whose
         //    positions are every norm instance: per-layer slots + final) ──
         {
             var prof = ArchitectureProfile.For(ModelTypeOf());
@@ -313,12 +317,12 @@ public sealed class ModelTableETL
                     }
                 }
 
-                var b = NewChunk("NORMALIZES");
+                var b = NewChunk("NORM_SCALES");
                 for (int i = 0; i < dModel; i++)
                 {
                     if (games[i] == 0) continue;
                     b.AddAttestation(AttestationFactory.CreateAggregated(
-                        Axis("channel", i), ModelDecomposer.NormalizesKind, obj: null, _source,
+                        Axis("channel", i), ModelDecomposer.NormScalesKind, obj: null, _source,
                         contextId: null, games: games[i], sumScoreFp1e9: sumFp[i],
                         witnessWeight: ModelWeight));
                     relationsEmitted++;
@@ -343,7 +347,7 @@ public sealed class ModelTableETL
     }
 
     /// <summary>Norm positions: every per-layer slot of every layer, plus the
-    /// final norm. All fold onto the same per-channel NORMALIZES relations.</summary>
+    /// final norm. All fold onto the same per-channel NORM_SCALES relations.</summary>
     private IEnumerable<(string Name, int Layer)> NormInstances(ArchitectureProfile p)
     {
         for (int l = 0; l < _recipe.NumLayers; l++)

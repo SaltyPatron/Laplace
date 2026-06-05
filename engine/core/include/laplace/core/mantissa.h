@@ -48,6 +48,34 @@ typedef struct {
     uint64_t  flags;         /* low 52 bits used; high 12 MUST be zero */
 } mantissa_payload_t;
 
+/* Vertex flag layout (the 52 free bits; 2026-06-05 — in-band constituent
+ * TYPE + ATOM so trajectory walks never join entities/codepoint_render to
+ * know what a constituent IS):
+ *
+ *   bit  0       HAS_ATOM — bits 31..51 carry the constituent's atom scalar
+ *   bits 1..5    constituent TIER (0=atom, 1=grapheme, 2=word, …; 31 max)
+ *   bits 6..30   reserved (modality, indexing, visualization — zero)
+ *   bits 31..51  atom scalar when HAS_ATOM (21 bits = a full Unicode
+ *                codepoint U+0000..U+10FFFF; byte atoms / pixels use the
+ *                same channel under their own tier)
+ *
+ * flags == 0 (legacy trajectories) means "no in-band info" — readers fall
+ * back to id resolution. Renderers MUST honor HAS_ATOM before trusting the
+ * atom channel. */
+#define LAPLACE_VFLAG_HAS_ATOM      (1ULL << 0)
+#define LAPLACE_VFLAG_TIER_SHIFT    1u
+#define LAPLACE_VFLAG_TIER_MASK     0x1FULL
+#define LAPLACE_VFLAG_ATOM_SHIFT    31u
+#define LAPLACE_VFLAG_ATOM_MASK     0x1FFFFFULL
+
+static inline uint64_t laplace_vertex_flags(uint8_t tier, int has_atom, uint32_t atom) {
+    uint64_t f = ((uint64_t)(tier & LAPLACE_VFLAG_TIER_MASK)) << LAPLACE_VFLAG_TIER_SHIFT;
+    if (has_atom)
+        f |= LAPLACE_VFLAG_HAS_ATOM
+          |  ((uint64_t)(atom & LAPLACE_VFLAG_ATOM_MASK)) << LAPLACE_VFLAG_ATOM_SHIFT;
+    return f;
+}
+
 /* Round-trip lossless on all 212 payload bits. */
 void mantissa_pack(double vertex[4], const mantissa_payload_t* p);
 void mantissa_unpack(const double vertex[4], mantissa_payload_t* out);

@@ -108,37 +108,37 @@ public sealed class ModelDecomposer : IDecomposer
      * Per-token magnitude reduction (row → one scalar) stays the cardinal sin.
      * Nonlinearities (softmax, SiLU/SwiGLU gating) are the source's runtime —
      * never attested, never run at ingest. */
-    public static readonly Hash128 EmbedsKind        = Hash128.OfCanonical("substrate/kind/EMBEDS/v1");
-    public static readonly Hash128 QProjectsKind     = Hash128.OfCanonical("substrate/kind/Q_PROJECTS/v1");
-    public static readonly Hash128 KProjectsKind     = Hash128.OfCanonical("substrate/kind/K_PROJECTS/v1");
-    public static readonly Hash128 VProjectsKind     = Hash128.OfCanonical("substrate/kind/V_PROJECTS/v1");
-    public static readonly Hash128 OProjectsKind     = Hash128.OfCanonical("substrate/kind/O_PROJECTS/v1");
-    public static readonly Hash128 GatesKind         = Hash128.OfCanonical("substrate/kind/GATES/v1");
-    public static readonly Hash128 UpProjectsKind    = Hash128.OfCanonical("substrate/kind/UP_PROJECTS/v1");
-    public static readonly Hash128 DownProjectsKind  = Hash128.OfCanonical("substrate/kind/DOWN_PROJECTS/v1");
-    public static readonly Hash128 NormalizesKind    = Hash128.OfCanonical("substrate/kind/NORMALIZES/v1");
-    public static readonly Hash128 OutputProjectsKind = Hash128.OfCanonical("substrate/kind/OUTPUT_PROJECTS/v1");
-    public static readonly Hash128 TokenMapsToKind   = Hash128.OfCanonical("substrate/kind/TOKEN_MAPS_TO/v1");
+    public static readonly Hash128 EmbedsKind        = KindRegistry.KindId("EMBEDS");
+    public static readonly Hash128 QProjectsKind     = KindRegistry.KindId("Q_PROJECTS");
+    public static readonly Hash128 KProjectsKind     = KindRegistry.KindId("K_PROJECTS");
+    public static readonly Hash128 VProjectsKind     = KindRegistry.KindId("V_PROJECTS");
+    public static readonly Hash128 OProjectsKind     = KindRegistry.KindId("O_PROJECTS");
+    public static readonly Hash128 GatesKind         = KindRegistry.KindId("GATES");
+    public static readonly Hash128 UpProjectsKind    = KindRegistry.KindId("UP_PROJECTS");
+    public static readonly Hash128 DownProjectsKind  = KindRegistry.KindId("DOWN_PROJECTS");
+    public static readonly Hash128 NormScalesKind    = KindRegistry.KindId("NORM_SCALES");
+    public static readonly Hash128 OutputProjectsKind = KindRegistry.KindId("OUTPUT_PROJECTS");
+    public static readonly Hash128 TokenMapsToKind   = KindRegistry.KindId("TOKEN_MAPS_TO");
     /* Content x content relatedness witnessed from model trajectory geometry — the
      * corrected ingest axis (same kind the lexical decomposers emit, so model + dataset
      * witnesses dedup onto one consensus edge). */
-    public static readonly Hash128 SimilarToKind     = Hash128.OfCanonical("substrate/kind/SIMILAR_TO/v1");
+    public static readonly Hash128 SimilarToKind     = KindRegistry.KindId("SIMILAR_TO");
     // Per-circuit relations, each read per (head/neuron) through the embedding address book:
     //   ATTENDS      — QK: [query n-gram] attends [key tokens]
     //   OV_RELATES   — OV: [value n-gram] relates [output tokens]
     //   COMPLETES_TO — FFN: [context n-gram] ⇒ {completion tokens}
-    public static readonly Hash128 AttendsKind       = Hash128.OfCanonical("substrate/kind/ATTENDS/v1");
-    public static readonly Hash128 OvRelatesKind     = Hash128.OfCanonical("substrate/kind/OV_RELATES/v1");
-    public static readonly Hash128 CompletesToKind   = Hash128.OfCanonical("substrate/kind/COMPLETES_TO/v1");
+    public static readonly Hash128 AttendsKind       = KindRegistry.KindId("ATTENDS");
+    public static readonly Hash128 OvRelatesKind     = KindRegistry.KindId("OV_RELATES");
+    public static readonly Hash128 CompletesToKind   = KindRegistry.KindId("COMPLETES_TO");
 
     /* Recipe attestation kinds */
-    public static readonly Hash128 HasHiddenSizeKind  = Hash128.OfCanonical("substrate/kind/HAS_HIDDEN_SIZE/v1");
-    public static readonly Hash128 HasNumLayersKind   = Hash128.OfCanonical("substrate/kind/HAS_NUM_LAYERS/v1");
-    public static readonly Hash128 HasNumHeadsKind    = Hash128.OfCanonical("substrate/kind/HAS_NUM_HEADS/v1");
-    public static readonly Hash128 HasNumKvHeadsKind  = Hash128.OfCanonical("substrate/kind/HAS_NUM_KV_HEADS/v1");
-    public static readonly Hash128 HasIntermSizeKind  = Hash128.OfCanonical("substrate/kind/HAS_INTERMEDIATE_SIZE/v1");
-    public static readonly Hash128 HasVocabSizeKind   = Hash128.OfCanonical("substrate/kind/HAS_VOCAB_SIZE/v1");
-    public static readonly Hash128 IsAKind            = Hash128.OfCanonical("substrate/kind/IS_A/v1");
+    public static readonly Hash128 HasHiddenSizeKind  = KindRegistry.KindId("HAS_HIDDEN_SIZE");
+    public static readonly Hash128 HasNumLayersKind   = KindRegistry.KindId("HAS_NUM_LAYERS");
+    public static readonly Hash128 HasNumHeadsKind    = KindRegistry.KindId("HAS_NUM_HEADS");
+    public static readonly Hash128 HasNumKvHeadsKind  = KindRegistry.KindId("HAS_NUM_KV_HEADS");
+    public static readonly Hash128 HasIntermSizeKind  = KindRegistry.KindId("HAS_INTERMEDIATE_SIZE");
+    public static readonly Hash128 HasVocabSizeKind   = KindRegistry.KindId("HAS_VOCAB_SIZE");
+    public static readonly Hash128 IsAKind            = KindRegistry.KindId("IS_A");
 
     /* Well-known entity */
     public static readonly Hash128 LlamaArchitectureId =
@@ -198,7 +198,8 @@ public sealed class ModelDecomposer : IDecomposer
         boot.AddKind("GATES");
         boot.AddKind("UP_PROJECTS");
         boot.AddKind("DOWN_PROJECTS");
-        boot.AddKind("NORMALIZES");
+        boot.AddKind("NORM_SCALES");
+        boot.AddKind("MERGES_WITH");
         boot.AddKind("OUTPUT_PROJECTS");
         boot.AddKind("ATTENDS");
         boot.AddKind("OV_RELATES");
@@ -237,9 +238,9 @@ public sealed class ModelDecomposer : IDecomposer
             HasIntermSizeKind, HasVocabSizeKind,
             IsAKind, LlamaArchitectureId);
 
-        /* 2. Tokenizer meta-entity — MUST come before vocab batches.
-         * BuildBatches emits TOKEN_MAPS_TO attestations that reference tokEntityId
-         * as subject_id; the entity must be in DB before those COPYs run. */
+        /* 2. Tokenizer meta-entity — MUST come before the TOKEN_MAPS_TO
+         * attestations (emitted by the morph phase, residual-scored; or the
+         * categorical fallback below) that reference tokEntityId as subject. */
         byte[] tokBytes = File.ReadAllBytes(tokenizerPath);
         var tokEntityId = Hash128.Blake3(tokBytes);
         var tokChange = new SubstrateChangeBuilder(Source, "tokenizer/entity",
@@ -247,7 +248,10 @@ public sealed class ModelDecomposer : IDecomposer
         tokChange.AddEntity(tokEntityId, (byte)MetaTier.Meta, ModelTokenizerTypeId, firstObservedBy: Source);
         yield return tokChange.Build();
 
-        /* 3. Token vocab entities + TOKEN_MAPS_TO attestations.
+        /* 3. Token vocab ENTITIES (+ tier-tree content). TOKEN_MAPS_TO is a
+         * MAGNITUDE matchup scored by the morph's per-token residual, so the
+         * attestations are emitted in phase 4b where the residuals exist
+         * (categorical fallback when the morph is skipped/degenerate).
          * Records are sorted by token_id in Parse() — _tokens[(int)vocabIndex].EntityId
          * is correct for the QK scorer's vocab-index output. */
         phaseSw.Restart();
@@ -261,7 +265,7 @@ public sealed class ModelDecomposer : IDecomposer
         phaseSw.Restart();
         int vocabBatches = 0;
         foreach (var batch in LlamaTokenizerParser.BuildBatches(
-            tokens, Source, TextTypeId, tokEntityId, TokenMapsToKind, batchSz))
+            tokens, Source, TextTypeId, batchSz))
         {
             ct.ThrowIfCancellationRequested();
             yield return batch;
@@ -270,6 +274,22 @@ public sealed class ModelDecomposer : IDecomposer
         }
         log.LogInformation("phase=vocab emitted: {Batches} batches ({Ms} ms)",
             vocabBatches, phaseSw.ElapsedMilliseconds);
+
+        /* 3b. BPE merge lattice (model.merges) — the tokenizer's LEARNED
+         * structure, rank-ordered: MERGES_WITH matchups, magnitude from rank
+         * position against the measured RMS scale (2026-06-05 completeness). */
+        phaseSw.Restart();
+        var merges = LlamaTokenizerParser.ParseMerges(tokenizerPath);
+        int mergeBatches = 0;
+        foreach (var batch in LlamaTokenizerParser.BuildMergesBatches(merges, Source, TextTypeId, batchSz))
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return batch;
+            mergeBatches++;
+            await Task.Yield();
+        }
+        log.LogInformation("phase=merges emitted: {Count} merges, {Batches} batches ({Ms} ms)",
+            merges.Count, mergeBatches, phaseSw.ElapsedMilliseconds);
 
         /* 4. Weights — "ETL on conventional AI, for AI". The model is a witness;
          *    its weight tables load as adjudicated matches under the ten
@@ -300,6 +320,12 @@ public sealed class ModelDecomposer : IDecomposer
         //     the streamed relation graph (sparse), the same redesign the circuits got.
         //     LAPLACE_SKIP_MORPH=1 omits this placement so the O(params) circuit ingest can
         //     be measured/run on its own until the morph affinity is made sparse.
+        // The morph emits the residual-scored TOKEN_MAPS_TO matchups alongside
+        // the Projection placements. If it is SKIPPED (env) or DEGENERATE
+        // (kernel failure / too few anchors → zero changes yielded), the
+        // mapping arena must still exist: categorical fallback at registry
+        // rank — never an empty arena, never a hand-coded φ.
+        bool morphEmitted = false;
         if (Environment.GetEnvironmentVariable("LAPLACE_SKIP_MORPH") == "1")
         {
             log.LogInformation("phase=S3-morph SKIPPED (LAPLACE_SKIP_MORPH=1)");
@@ -307,12 +333,24 @@ public sealed class ModelDecomposer : IDecomposer
         else
         {
         log.LogInformation("phase=S3-morph starting (embed_tokens → Unicode S³ frame)");
-        var morph = new WeightTensorETL(_modelDir, recipe, tokens, Source, log);
+        var morph = new WeightTensorETL(_modelDir, recipe, tokens, Source, tokEntityId, log);
         await foreach (var change in morph.EmitS3MorphAsync(ct))
         {
             ct.ThrowIfCancellationRequested();
+            morphEmitted = true;
             yield return change;
         }
+        }
+        if (!morphEmitted)
+        {
+            log.LogInformation("phase=token-maps-to: categorical fallback (morph skipped/degenerate)");
+            foreach (var batch in LlamaTokenizerParser.BuildTokenMapsToCategorical(
+                tokens, Source, tokEntityId, batchSz))
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return batch;
+                await Task.Yield();
+            }
         }
     }
 
@@ -363,7 +401,7 @@ public sealed class ModelDecomposer : IDecomposer
             + 2 * d * kvDim                               // K + V
             + (p.HasGate ? d * interm : 0)                // GATES
             + 2 * d * interm                              // UP + DOWN
-            + d;                                          // NORMALIZES (per channel)
+            + d;                                          // NORM_SCALES (per channel)
         // + one TOKEN_MAPS_TO identity per distinct token entity
         return Task.FromResult<long?>(distinctVocab + relations);
     }

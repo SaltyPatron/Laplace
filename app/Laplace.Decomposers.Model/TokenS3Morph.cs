@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using DynInterop = Laplace.Engine.Dynamics.NativeInterop;
@@ -51,53 +52,67 @@ public sealed class TokenS3Morph
     private readonly int _dModel;
     private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
     private readonly Hash128 _sourceId;
+    private readonly Hash128 _tokenizerEntityId;
     private readonly ILogger _log;
 
     public TokenS3Morph(
         float[] embed, int vocab, int dModel,
         IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
-        Hash128 sourceId, ILogger log)
+        Hash128 sourceId, Hash128 tokenizerEntityId, ILogger log)
     {
         _embed = embed; _vocab = vocab; _dModel = dModel;
-        _tokens = tokens; _sourceId = sourceId; _log = log;
+        _tokens = tokens; _sourceId = sourceId; _tokenizerEntityId = tokenizerEntityId;
+        _log = log;
     }
 
     public IEnumerable<SubstrateChange> Emit()
     {
-        // 1. The tokens in question: anchorable vocab with a precomputed Unicode-anchored
-        //    S³ content coord (LlamaTokenizerParser.Parse → TokenRecord.Content*, the
-        //    documented Procrustes target). rec.EntityId is the exact entity the vocab
-        //    phase emitted (FK-safe); rec.TokenId is the embed-table row. Specials and
-        //    invalid-UTF-8 byte-level tokens have no content anchor and are skipped.
-        var rowIdx  = new List<int>(_vocab);       // embed row index (= TokenId)
-        var rootIds = new List<Hash128>(_vocab);
-        var anchors = new List<double[]>(_vocab);  // S³ targets B, [n × 4]
+        // 1. TWO different sets, deliberately (the 2026-06-05 correction —
+        //    "fit on anchors, place ALL"):
+        //    - The FIT set: anchorable vocab with a precomputed Unicode-anchored
+        //      S³ content coord (LlamaTokenizerParser.Parse → TokenRecord.Content*,
+        //      the documented Procrustes target). Alignment ground truth exists
+        //      only here (TinyLlama: 31,869 of 32,000).
+        //    - The PLACEMENT set: EVERY vocab row. The model witnesses geometry
+        //      for specials and invalid-UTF-8 byte-level tokens too — their
+        //      embedding rows exist — so the fitted transform APPLIES to all of
+        //      them; they are placed without an alignment residual (NULL: no
+        //      anchor to measure against). rec.EntityId is the exact entity the
+        //      vocab phase emitted (FK-safe); rec.TokenId is the embed-table row.
+        var fitIdx     = new List<int>(_vocab);       // index INTO the full eigenmap rows
+        var anchors    = new List<double[]>(_vocab);  // S³ targets B, [nFit × 4]
+        var rows       = new List<LlamaTokenizerParser.TokenRecord>(_vocab);
         foreach (var rec in _tokens)
         {
-            if (!rec.HasContentCoord) continue;
             if (rec.TokenId < 0 || rec.TokenId >= _vocab) continue;
-            rowIdx.Add(rec.TokenId);
-            rootIds.Add(rec.EntityId);
+            rows.Add(rec);
+        }
+        int n = rows.Count;                            // full placement set
+        for (int i = 0; i < n; i++)
+        {
+            var rec = rows[i];
+            if (!rec.HasContentCoord) continue;
+            fitIdx.Add(i);
             anchors.Add(new[] { rec.ContentX, rec.ContentY, rec.ContentZ, rec.ContentM });
         }
-        int n = rowIdx.Count;
+        int nFit = fitIdx.Count;
         int targetDim = Math.Min(EigTargetDim, Math.Min(_dModel, n - 2));
         int k = Math.Min(KNeighbors, n - 1);
-        if (n < S3 + 2 || targetDim < S3 || k < 1)
+        if (nFit < S3 + 2 || targetDim < S3 || k < 1)
         {
-            _log.LogWarning("S3-morph: only {N} anchorable tokens (need ≥{Min}); skipping morph", n, S3 + 2);
+            _log.LogWarning("S3-morph: only {N} anchorable tokens (need ≥{Min}); skipping morph", nFit, S3 + 2);
             return Array.Empty<SubstrateChange>();
         }
 
-        // 2. Gather the embedding rows for the anchorable tokens (f32 → f64).
+        // 2. Gather the embedding rows for the FULL vocab (f32 → f64).
         var src = new double[(long)n * _dModel];
         for (int i = 0; i < n; i++)
         {
-            long s = (long)rowIdx[i] * _dModel;
+            long s = (long)rows[i].TokenId * _dModel;
             for (int j = 0; j < _dModel; j++) src[(long)i * _dModel + j] = _embed[s + j];
         }
 
-        // 3. Laplacian eigenmaps: embedding manifold → targetDim coords [n × targetDim].
+        // 3. Laplacian eigenmaps over the FULL vocab manifold → [n × targetDim].
         var Y = new double[(long)n * targetDim];
         int rc;
         unsafe
@@ -129,24 +144,30 @@ public sealed class TokenS3Morph
         else
             _log.LogWarning("S3-morph: gram_schmidt_orthonormalize rc={Rc}; using raw eigenmap basis", gsRc);
 
-        // 5. Procrustes: fit the orthonormal eigenmap basis [n × targetDim] onto the tokens'
-        //    S³ content coords [n × 4], then apply per token. (Schönemann + Umeyama, engine SVD.)
-        var B = new double[(long)n * S3];
-        for (int i = 0; i < n; i++)
+        // 5. Procrustes: FIT on the anchored correspondences only (the eigenmap
+        //    rows of the anchorable tokens [nFit × targetDim] onto their S³
+        //    content coords [nFit × 4] — you can only align where ground truth
+        //    exists), then APPLY the fitted transform to every vocab row.
+        //    (Schönemann + Umeyama, engine SVD.)
+        var Yfit = new double[(long)nFit * targetDim];
+        for (int f = 0; f < nFit; f++)
+            Array.Copy(Y, (long)fitIdx[f] * targetDim, Yfit, (long)f * targetDim, targetDim);
+        var B = new double[(long)nFit * S3];
+        for (int f = 0; f < nFit; f++)
         {
-            double[] b = anchors[i];
-            B[(long)i * S3 + 0] = b[0]; B[(long)i * S3 + 1] = b[1];
-            B[(long)i * S3 + 2] = b[2]; B[(long)i * S3 + 3] = b[3];
+            double[] b = anchors[f];
+            B[(long)f * S3 + 0] = b[0]; B[(long)f * S3 + 1] = b[1];
+            B[(long)f * S3 + 2] = b[2]; B[(long)f * S3 + 3] = b[3];
         }
         IntPtr T;
         unsafe
         {
-            fixed (double* py = Y) fixed (double* pb = B)
-                T = DynInterop.ProcrustesFit(py, (nuint)n, (nuint)targetDim, pb);
+            fixed (double* py = Yfit) fixed (double* pb = B)
+                T = DynInterop.ProcrustesFit(py, (nuint)nFit, (nuint)targetDim, pb);
         }
         if (T == IntPtr.Zero)
         {
-            _log.LogWarning("S3-morph: procrustes_fit failed (n={N},source_dim={T}); skipping morph", n, targetDim);
+            _log.LogWarning("S3-morph: procrustes_fit failed (n={N},source_dim={T}); skipping morph", nFit, targetDim);
             return Array.Empty<SubstrateChange>();
         }
 
@@ -154,16 +175,22 @@ public sealed class TokenS3Morph
         {
             double globalResid = DynInterop.ProcrustesResidual(T);
             _log.LogInformation(
-                "phase=S3-morph: eigenmaps(target_dim={Td},k={K}) → gram-schmidt → procrustes "
-                + "(residual={R:F4}) over {N} anchored tokens", targetDim, k, globalResid, n);
+                "phase=S3-morph: eigenmaps(target_dim={Td},k={K}) over {N} vocab rows → gram-schmidt → "
+                + "procrustes fit on {NFit} anchored (residual={R:F4})", targetDim, k, n, nFit, globalResid);
 
-            // 6. Apply the transform per token, re-normalize onto S³, emit one Projection
-            //    physicality per token (with the per-token alignment residual + source dim).
+            // 6. APPLY pass: transform every vocab row, re-normalize onto S³,
+            //    record per-token residuals where an anchor exists. The residual
+            //    is then THE metric of the TOKEN_MAPS_TO matchup ("the distance
+            //    becomes a metric in the Glicko-2 match" — 2026-06-05 ruling),
+            //    so the arena scale M = RMS(resid) over the anchored set is
+            //    measured BEFORE any score is assigned — never a knob.
             long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
-            var bb = new SubstrateChangeBuilder(_sourceId, "model/embed-s3-morph",
-                entityCapacity: 0, physicalityCapacity: n, attestationCapacity: 0);
             var outv = new double[S3];
-            int emitted = 0;
+            var px = new double[n]; var pyv = new double[n];
+            var pz = new double[n]; var pm = new double[n];
+            var resids = new double?[n];
+            var placed = new bool[n];
+            double sumSq = 0; int nResid = 0;
             for (int i = 0; i < n; i++)
             {
                 unsafe
@@ -174,34 +201,77 @@ public sealed class TokenS3Morph
                 double x = outv[0], y = outv[1], z = outv[2], m = outv[3];
                 double norm = Math.Sqrt(x * x + y * y + z * z + m * m);
                 if (norm < 1e-12 || double.IsNaN(norm)) continue;   // degenerate; cannot place on S³
-                x /= norm; y /= norm; z /= norm; m /= norm;
+                px[i] = x / norm; pyv[i] = y / norm; pz[i] = z / norm; pm[i] = m / norm;
+                placed[i] = true;
 
-                double[] b = anchors[i];
-                double resid = Math.Sqrt((x - b[0]) * (x - b[0]) + (y - b[1]) * (y - b[1])
-                                       + (z - b[2]) * (z - b[2]) + (m - b[3]) * (m - b[3]));
+                var rec = rows[i];
+                if (rec.HasContentCoord)
+                {
+                    double r = Math.Sqrt((px[i] - rec.ContentX) * (px[i] - rec.ContentX)
+                                       + (pyv[i] - rec.ContentY) * (pyv[i] - rec.ContentY)
+                                       + (pz[i] - rec.ContentZ) * (pz[i] - rec.ContentZ)
+                                       + (pm[i] - rec.ContentM) * (pm[i] - rec.ContentM));
+                    resids[i] = r;
+                    sumSq += r * r; nResid++;
+                }
+            }
+            double arenaM = nResid > 0 ? Math.Sqrt(sumSq / nResid) : 0.0;
 
-                Hash128 entityId = rootIds[i];
-                Hilbert128 hb = Hilbert128.Encode(new[] { x, y, z, m });
+            // 7. EMIT pass: one Projection physicality per placed token
+            //    (alignment_residual NULL where unanchored) + one TOKEN_MAPS_TO
+            //    matchup per placed token:
+            //      anchored  → magnitude m = (M − resid), arena scale M: a token
+            //                  landing on its content coordinate is a strong win
+            //                  (~0.76), the typical distance is a draw, far
+            //                  outliers are losses — ONE measured quantity is
+            //                  both center and scale;
+            //      unanchored (specials / non-UTF-8 bytes) or degenerate M →
+            //                  categorical confirm at registry rank.
+            var bb = new SubstrateChangeBuilder(_sourceId, "model/embed-s3-morph",
+                entityCapacity: 0, physicalityCapacity: n, attestationCapacity: n);
+            int emitted = 0, emittedAnchored = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (!placed[i]) continue;
+                var rec = rows[i];
+                Hash128 entityId = rec.EntityId;
+                Hilbert128 hb = Hilbert128.Encode(new[] { px[i], pyv[i], pz[i], pm[i] });
                 Hash128 physId = PhysicalityId.Compute(
                     entityId, _sourceId, PhysicalityKind.Projection,
-                    x, y, z, m, ReadOnlySpan<double>.Empty);
+                    px[i], pyv[i], pz[i], pm[i], ReadOnlySpan<double>.Empty);
 
                 bb.AddPhysicality(new PhysicalityRow(
                     Id:                physId,
                     EntityId:          entityId,
                     SourceId:          _sourceId,
                     Kind:              PhysicalityKind.Projection,
-                    CoordX:            x, CoordY: y, CoordZ: z, CoordM: m,
+                    CoordX:            px[i], CoordY: pyv[i], CoordZ: pz[i], CoordM: pm[i],
                     HilbertIndex:      hb,
                     TrajectoryXyzm:    null,
                     NConstituents:     0,
-                    AlignmentResidual: resid,
+                    AlignmentResidual: resids[i],
                     SourceDim:         _dModel,
                     ObservedAtUnixUs:  nowUs));
                 emitted++;
+
+                if (resids[i] is double resid && arenaM > 0)
+                {
+                    bb.AddAttestation(KindRegistry.AttestWeighted(
+                        _tokenizerEntityId, "TOKEN_MAPS_TO", entityId, _sourceId,
+                        SourceTrust.AiModelProbe,
+                        magnitude: arenaM - resid, arenaScale: arenaM));
+                    emittedAnchored++;
+                }
+                else
+                {
+                    bb.AddAttestation(KindRegistry.Attest(
+                        _tokenizerEntityId, "TOKEN_MAPS_TO", entityId, _sourceId,
+                        SourceTrust.AiModelProbe));
+                }
             }
-            _log.LogInformation("phase=S3-morph: {Emitted} Projection physicalities placed "
-                + "({N} anchored / {Vocab} vocab)", emitted, n, _vocab);
+            _log.LogInformation("phase=S3-morph: {Emitted} Projection placements + TOKEN_MAPS_TO matchups "
+                + "({Anchored} residual-scored at M={M:F6} / {Vocab} vocab — specials + byte tokens categorical)",
+                emitted, emittedAnchored, arenaM, _vocab);
             return new[] { bb.Build() };
         }
         finally

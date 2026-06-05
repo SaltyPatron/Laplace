@@ -83,4 +83,14 @@ public interface IDecomposer : IAsyncDisposable
     /// (typically a file count or index lookup). Return null if estimation
     /// is expensive or impossible.</summary>
     Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default);
+
+    /// <summary>The dynamic classifier / value canonical names this source
+    /// mints — the names that are data-derived (not in the extension's static
+    /// seed vocabulary), so <c>laplace.render()</c> cannot answer them in names
+    /// until they are registered. Read AFTER <see cref="DecomposeAsync"/> by the
+    /// ingest driver and registered post-ingest (via
+    /// <c>laplace.register_canonicals</c>) so render() answers in names instead
+    /// of hex. Static vocabulary ships in the extension seed and is NOT included
+    /// here. Default: none.</summary>
+    IReadOnlyCollection<string> CanonicalNamesForReadback => Array.Empty<string>();
 }

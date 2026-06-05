@@ -127,6 +127,16 @@ public sealed class LlamaTokenizerParser
             {
                 entityId = Hash128.Blake3(canonical);
                 tier = (byte)(canonical.Length <= 1 ? 0 : canonical.Length <= 4 ? 1 : 2);
+                if (canonical.Length == 1 && canonical[0] >= ByteAtoms.First)
+                {
+                    /* BYTE TIER (2026-06-05): a high-byte token IS the byte atom
+                     * (same content, same id as the seeded entity) — anchor at
+                     * its canonical placement so the morph residual-scores it
+                     * like any codepoint. The floor is no longer unanchored. */
+                    var bc = ByteAtoms.Coord(canonical[0]);
+                    cx = bc[0]; cy = bc[1]; cz = bc[2]; cm = bc[3];
+                    hasContent = true;
+                }
             }
 
             records.Add(new TokenRecord
@@ -303,23 +313,23 @@ public sealed class LlamaTokenizerParser
     }
 
     /// <summary>
-    /// Yield SubstrateChange batches for all token entities + TOKEN_MAPS_TO attestations.
-    /// Records MUST be sorted by TokenId (Parse() does this) so that
-    /// _tokens[(int)vocabIndex].EntityId is correct for the QK scorer's vocab-index output.
+    /// Yield SubstrateChange batches for all token ENTITIES (+ their tier-tree
+    /// content). Records MUST be sorted by TokenId (Parse() does this) so that
+    /// _tokens[(int)vocabIndex].EntityId is correct for the QK scorer's
+    /// vocab-index output.
     ///
-    /// TOKEN_MAPS_TO attestation: (tokenizerEntityId → textEntityId) with the
-    /// token_id carried in the free audit column arena_m — positional metadata by
-    /// design, never in score (which is a Glicko-2 outcome).
-    /// Re-export queries these to recover the token_id → entity mapping.
-    ///
-    /// tokenizerEntityId MUST already be in the DB before these batches are applied.
+    /// TOKEN_MAPS_TO is NOT emitted here (2026-06-05 ruling): the mapping is a
+    /// MAGNITUDE matchup scored by the S³-morph's per-token alignment residual
+    /// ("the distance becomes a metric in the Glicko-2 match"), so the
+    /// attestations are emitted by <see cref="TokenS3Morph.Emit"/> where the
+    /// residuals exist — strictly after these entities land (FK-safe). The
+    /// categorical fallback (morph skipped/degenerate) is
+    /// <see cref="BuildTokenMapsToCategorical"/>.
     /// </summary>
     public static IEnumerable<SubstrateChange> BuildBatches(
         IReadOnlyList<TokenRecord> records,
         Hash128 sourceId,
         Hash128 textTypeId,
-        Hash128 tokenizerEntityId,
-        Hash128 tokenMapsToKindId,
         int batchSize = 512)
     {
         int total = records.Count;
@@ -336,14 +346,7 @@ public sealed class LlamaTokenizerParser
                 $"tokenizer/vocab/{start}..{end - 1}",
                 entityCapacity: n * 5,
                 physicalityCapacity: n * 5,
-                attestationCapacity: n);
-
-            /* Attestation ID buffer reused per token to avoid per-iteration stackalloc. */
-            byte[] attBufArr = new byte[80];
-            tokenizerEntityId.WriteBytes(attBufArr.AsSpan(0, 16));
-            tokenMapsToKindId.WriteBytes(attBufArr.AsSpan(16, 16));
-            sourceId.WriteBytes(attBufArr.AsSpan(48, 16));
-            /* context = zero, already default-initialized */
+                attestationCapacity: 0);
 
             for (int i = start; i < end; i++)
             {
@@ -372,28 +375,127 @@ public sealed class LlamaTokenizerParser
                     b.AddEntity(rec.EntityId, (byte)MetaTier.Meta, textTypeId, firstObservedBy: sourceId);
                 }
 
-                /* TOKEN_MAPS_TO: tokenizer entity → text entity. A categorical confirm
-                 * at full trust — PROVENANCE of the mapping relation. The vocab
-                 * position (token_id) is tokenizer-layout app-metadata and is NOT
-                 * persisted on evidence (evidence is provenance, never a value
-                 * channel); re-export parses tokenizer.json for the mapping. */
-                rec.EntityId.WriteBytes(attBufArr.AsSpan(32, 16));
-                var attId = Hash128.Blake3(attBufArr);
-
-                b.AddAttestation(new AttestationRow(
-                    Id:               attId,
-                    SubjectId:        tokenizerEntityId,
-                    KindId:           tokenMapsToKindId,
-                    ObjectId:         rec.EntityId,
-                    SourceId:         sourceId,
-                    ContextId:        null,
-                    Outcome:          AttestationOutcome.Confirm,
-                    LastObservedAtUnixUs: 0,
-                    ObservationCount: 1,
-                    ScoreFp1e9:       Glicko2.FpScale,          // in-flight: categorical confirm (1.0)
-                    OpponentRdFp1e9:  30L * Glicko2.FpScale));  // in-flight: full trust → tight φ
             }
 
+            yield return b.Build();
+        }
+    }
+
+    /// <summary>
+    /// Parse <c>model.merges</c> — the tokenizer's LEARNED merge lattice
+    /// ("a b" pairs, ordered by rank; earlier = more fundamental), previously
+    /// unextracted (2026-06-05 completeness). Pair parts canonicalize through
+    /// the SAME rule as vocab entries.
+    /// </summary>
+    public static List<(byte[] Left, byte[] Right)> ParseMerges(string tokenizerJsonPath)
+    {
+        var merges = new List<(byte[], byte[])>();
+        byte[] jsonBytes = File.ReadAllBytes(tokenizerJsonPath);
+        using var doc = JsonDocument.Parse(jsonBytes);
+        if (!doc.RootElement.TryGetProperty("model", out var model) ||
+            !model.TryGetProperty("merges", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return merges;
+        foreach (var el in arr.EnumerateArray())
+        {
+            string? pair = el.ValueKind == JsonValueKind.String ? el.GetString() : null;
+            if (string.IsNullOrEmpty(pair)) continue;
+            int sp = pair!.IndexOf(' ');
+            if (sp <= 0 || sp + 1 >= pair.Length) continue;
+            (byte[] l, _) = Canonicalize(pair[..sp]);
+            (byte[] r, _) = Canonicalize(pair[(sp + 1)..]);
+            merges.Add((l, r));
+        }
+        return merges;
+    }
+
+    /// <summary>
+    /// MERGES_WITH matchups from the ordered merge lattice: magnitude
+    /// <c>m = M − rank</c> with <c>M = RMS(rank)</c> over the list — earlier
+    /// merges (more fundamental) win, the typical rank draws, late ranks lose;
+    /// MEASURED from the list, never a knob (the same shape as the
+    /// TOKEN_MAPS_TO residual scoring). Self-contained batches: both pair
+    /// sides' content entities ride the intent (idempotent with vocab).
+    /// </summary>
+    public static IEnumerable<SubstrateChange> BuildMergesBatches(
+        List<(byte[] Left, byte[] Right)> merges,
+        Hash128 sourceId,
+        Hash128 textTypeId,
+        int batchSize = 8192)
+    {
+        if (merges.Count == 0) yield break;
+        double sumSq = 0;
+        for (int i = 0; i < merges.Count; i++) sumSq += (double)i * i;
+        double m = Math.Sqrt(sumSq / merges.Count);   // RMS of the rank positions
+        if (m <= 0) yield break;
+
+        for (int start = 0; start < merges.Count; start += batchSize)
+        {
+            int end = Math.Min(start + batchSize, merges.Count);
+            var b = new SubstrateChangeBuilder(
+                sourceId, $"tokenizer/merges/{start}..{end - 1}",
+                entityCapacity: (end - start) * 6,
+                physicalityCapacity: (end - start) * 6,
+                attestationCapacity: end - start);
+            for (int i = start; i < end; i++)
+            {
+                var (l, r) = merges[i];
+                Hash128 lid = ResolveMergeSide(b, l, sourceId, textTypeId);
+                Hash128 rid = ResolveMergeSide(b, r, sourceId, textTypeId);
+                b.AddAttestation(Laplace.Decomposers.Abstractions.KindRegistry.AttestWeighted(
+                    lid, "MERGES_WITH", rid, sourceId,
+                    Laplace.Decomposers.Abstractions.SourceTrust.AiModelProbe,
+                    magnitude: m - i, arenaScale: m));
+            }
+            yield return b.Build();
+        }
+    }
+
+    /// <summary>One merge-pair side → its content entity, self-contained in the
+    /// batch (tier-tree rows when decomposable, Blake3 fallback otherwise —
+    /// the EXACT vocab-entry rule, so merge sides converge with token entities).</summary>
+    private static Hash128 ResolveMergeSide(
+        SubstrateChangeBuilder b, byte[] canonical, Hash128 sourceId, Hash128 textTypeId)
+    {
+        if (TryBuildTreeRows(canonical, sourceId, out var entities, out var physicalities))
+        {
+            foreach (var e in entities) b.AddEntity(e);
+            foreach (var ph in physicalities) b.AddPhysicality(ph);
+            if (TryDecomposeRoot(canonical, out var rootId, out _, out _, out _, out _, out _))
+                return rootId;
+        }
+        var id = Hash128.Blake3(canonical);
+        b.AddEntity(id, (byte)MetaTier.Meta, textTypeId, firstObservedBy: sourceId);
+        return id;
+    }
+
+    /// <summary>
+    /// Categorical TOKEN_MAPS_TO fallback — used ONLY when the S³-morph is
+    /// skipped (<c>LAPLACE_SKIP_MORPH=1</c>) or degenerate (no anchored tokens /
+    /// kernel failure), so the mapping arena is never empty. Routed through the
+    /// registry (rank × source trust → φ — never a hand-coded constant). When
+    /// the morph runs, it emits the magnitude-scored form instead
+    /// (<see cref="TokenS3Morph.Emit"/>).
+    /// </summary>
+    public static IEnumerable<SubstrateChange> BuildTokenMapsToCategorical(
+        IReadOnlyList<TokenRecord> records,
+        Hash128 sourceId,
+        Hash128 tokenizerEntityId,
+        int batchSize = 8192)
+    {
+        int total = records.Count;
+        for (int start = 0; start < total; start += batchSize)
+        {
+            int end = Math.Min(start + batchSize, total);
+            var b = new SubstrateChangeBuilder(
+                sourceId, $"tokenizer/maps-to/{start}..{end - 1}",
+                entityCapacity: 0, physicalityCapacity: 0,
+                attestationCapacity: end - start);
+            for (int i = start; i < end; i++)
+            {
+                b.AddAttestation(Laplace.Decomposers.Abstractions.KindRegistry.Attest(
+                    tokenizerEntityId, "TOKEN_MAPS_TO", records[i].EntityId, sourceId,
+                    Laplace.Decomposers.Abstractions.SourceTrust.AiModelProbe));
+            }
             yield return b.Build();
         }
     }

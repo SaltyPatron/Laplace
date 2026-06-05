@@ -27,7 +27,7 @@ namespace Laplace.Cli;
 ///     measured from the mold dir's own reference tensors when present
 ///     (the recipe names them), else 1.0 (relative structure only).
 ///
-/// Nonlinearities are runtime: NORMALIZES pours per-channel consensus into the
+/// Nonlinearities are runtime: NORM_SCALES pours per-channel consensus into the
 /// norm vectors (fallback 1.0); the SwiGLU gating itself is never attested.
 /// Rank/shape retargeting (mold ≠ source schema shape) is the export-only SVD
 /// path — not built; a mismatched mold fails loud, never silently mis-fills.
@@ -41,7 +41,11 @@ internal static class ConsensusReExport
     // Witness weight for a model arena = kind_rank(TensorCalculation 0.27) ×
     // source_trust(AiModelProbe 0.50); → opponent φ via the same shape the
     // factory uses (WitnessPhi). Constant across every model cell.
-    private const double ModelWeight = 0.27 * 0.50;
+    // MUST equal ModelTableETL.ModelWeight exactly (the calibrated inverse needs
+    // the same φ the ETL folded with) — both derive from the registry.
+    private static readonly double ModelWeight =
+        Laplace.Decomposers.Abstractions.KindRegistry.Resolve("EMBEDS").Rank
+        * Laplace.Decomposers.Abstractions.SourceTrust.AiModelProbe;
     private static long PhiFp() => (long)((350.0 + (30.0 - 350.0) * ModelWeight) * 1e9);
 
     /// <summary>
@@ -161,7 +165,7 @@ internal static class ConsensusReExport
         return new TableArena(cells, rows, cols, relations);
     }
 
-    /// <summary>Per-channel NORMALIZES consensus → a norm vector (unary arena:
+    /// <summary>Per-channel NORM_SCALES consensus → a norm vector (unary arena:
     /// object NULL; subject = the channel). Fallback 1.0 for unwitnessed
     /// channels (runtime scaling is the recipe's, never invented).</summary>
     internal static async Task<float[]> ReadNormVectorAsync(

@@ -14,6 +14,11 @@ using Laplace.Decomposers.OMW;
 using Laplace.Decomposers.Tatoeba;
 using Laplace.Decomposers.UD;
 using Laplace.Decomposers.Wiktionary;
+using Laplace.Decomposers.FrameNet;
+using Laplace.Decomposers.OpenSubtitles;
+using Laplace.Decomposers.VerbNet;
+using Laplace.Decomposers.PropBank;
+using Laplace.Decomposers.SemLink;
 using Laplace.Decomposers.Unicode;
 using Laplace.Decomposers.WordNet;
 using Laplace.Engine.Core;
@@ -61,6 +66,12 @@ internal static class Program
         return int.TryParse(raw, out var v) && v >= min ? v : fallback;
     }
 
+    private static double EnvDouble(string name, double fallback)
+    {
+        var raw = Environment.GetEnvironmentVariable(name);
+        return double.TryParse(raw, out var v) && v >= 0 ? v : fallback;
+    }
+
     private static async Task<int> Main(string[] args)
     {
         if (args.Length == 0)
@@ -71,7 +82,9 @@ internal static class Program
                 + "  synthesize substrate <recipe.json> [output.gguf] [--source-scope <ids>] [--format <name>]\n"
                 + "  decompose <text>\n"
                 + "  inspect <text>\n"
-                + "  converse <prompt>\n"
+                + "  converse [prompt]                 (no prompt: REPL — one connection, one session)\n"
+                + "  nn <word>                         (plural NN: structural geodesic + shape Fréchet + semantic μ)\n"
+                + "  generate [prompt]                 (forward pass: ranked-μ walk over witnessed sequence; no prompt: REPL)\n"
                 + "  roundtrip <file> [out]\n"
                 + "  db-roundtrip <file>\n"
                 + "  svd-exact-bench [model-dir] [tensor]  (prove tensor_svd_truncate is fp-exact on a real tensor; no DB)\n"
@@ -87,6 +100,8 @@ internal static class Program
                 "decompose"    => Decompose(string.Join(' ', args[1..])),
                 "inspect"      => await InspectAsync(string.Join(' ', args[1..])),
                 "converse"     => await ConverseAsync(string.Join(' ', args[1..])),
+                "nn"           => await NearestNeighborsAsync(string.Join(' ', args[1..])),
+                "generate"     => await GenerateAsync(args[1..]),
                 "roundtrip"    => Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
                 "db-roundtrip" => await DbRoundtripAsync(args.Length > 1 ? args[1] : ""),
                 "stats"        => await StatsAsync(),
@@ -162,7 +177,18 @@ internal static class Program
             return Fail($"usage: laplace db-roundtrip <file>  (not found: {path})");
         CodepointPerfcache.Load(ResolveBlob());
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
-        var writer = new NpgsqlSubstrateWriter(ds);
+        // Content now carries the DISTRIBUTIONAL witness (within-sentence
+        // PRECEDES bigrams; "follows" is the reverse query, not a second
+        // arena), so the text path is a real witnessing ingest: it must
+        // accumulate into CONSENSUS like any other source, or the edges land in
+        // evidence only and inference (which reads consensus) stays blind to them.
+        // create_period_staging DROPs any existing staging — so this must NOT run
+        // concurrent with another ingest's period (one source/period at a time).
+        var loggerFactory = ConsoleLoggerProvider.Factory();
+        var inner = new NpgsqlSubstrateWriter(ds);
+        await using var accumulator = new ConsensusAccumulatingWriter(inner, ds,
+            logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
+        ISubstrateWriter writer = accumulator;
 
         byte[] original = File.ReadAllBytes(path);
 
@@ -171,6 +197,12 @@ internal static class Program
         Hash128 docId = await ContentRoundtrip.RecordAsync(writer, original);
         swR.Stop();
         Console.WriteLine($"recorded : {original.Length,10:N0} bytes → document {Hex(docId)}  in {swR.Elapsed.TotalSeconds:F1}s");
+
+        // Fold the distributional witness into consensus (period completed cleanly).
+        var swC = Stopwatch.StartNew();
+        long materialized = await accumulator.MaterializeConsensusAsync();
+        swC.Stop();
+        Console.WriteLine($"consensus: {materialized,10:N0} relations from {accumulator.ObservationsAccumulated:N0} bigram matches in {swC.Elapsed.TotalSeconds:F1}s");
 
         var swX = Stopwatch.StartNew();
         byte[] rebuilt = await ContentRoundtrip.ReconstructAsync(ds, docId);
@@ -201,24 +233,42 @@ internal static class Program
     // The glass-box, usable by hand: text → correct merkle entity id (engine
     // TextDecomposer + HashComposer, not SQL), then its glome physicalities and
     // Glicko-2-rated attestation neighborhood straight from the DB.
-    // === converse: the conversational read — ONE round-trip, no engine call ===
+    // === converse: the conversation loop — ONE round-trip per turn, no engine call ===
     // Text→id resolution happens IN the substrate (laplace.word_id /
     // prompt_words ride the seeded codepoint perf-cache + blake3 kernel
     // DB-side), so the CLI neither loads the perfcache blob nor hashes
-    // locally: one SELECT per prompt. laplace.respond routes the question
-    // shape to the matching ranked-μ consensus read.
+    // locally: one SELECT per turn. laplace.converse routes the question
+    // shape to the matching ranked-μ consensus read and keeps the session's
+    // turn state (anaphora: "what about its synonyms?"). With a prompt:
+    // one-shot. Without: a REPL on ONE connection — the connection IS the
+    // session (converse() defaults the session id to the backend pid).
     private static async Task<int> ConverseAsync(string prompt)
     {
-        if (string.IsNullOrWhiteSpace(prompt)) return Fail("usage: laplace converse <prompt>");
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         await using var conn = await ds.OpenConnectionAsync();
 
+        if (!string.IsNullOrWhiteSpace(prompt))
+            return await ConverseTurnAsync(conn, prompt);
+
+        Console.WriteLine("laplace converse — one turn per line, empty line or Ctrl+D to leave.");
+        while (true)
+        {
+            Console.Write("you      : ");
+            var line = Console.ReadLine();
+            if (string.IsNullOrWhiteSpace(line)) break;
+            await ConverseTurnAsync(conn, line, echoPrompt: false);
+        }
+        return 0;
+    }
+
+    private static async Task<int> ConverseTurnAsync(NpgsqlConnection conn, string prompt, bool echoPrompt = true)
+    {
         var sw = Stopwatch.StartNew();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT reply, eff_mu, witnesses FROM laplace.respond(@p)";
+        cmd.CommandText = "SELECT reply, eff_mu, witnesses FROM laplace.converse(@p)";
         cmd.Parameters.AddWithValue("p", prompt);
         await using var r = await cmd.ExecuteReaderAsync();
-        Console.WriteLine($"you      : {prompt}");
+        if (echoPrompt) Console.WriteLine($"you      : {prompt}");
         bool any = false;
         while (await r.ReadAsync())
         {
@@ -231,6 +281,235 @@ internal static class Program
         sw.Stop();
         if (!any) Console.WriteLine("substrate: (no reply rows)");
         Console.WriteLine($"           [{sw.Elapsed.TotalMilliseconds:F1} ms, one round-trip]");
+        return 0;
+    }
+
+    // === nn: plural nearest-neighbor — the two co-equal axes for a word ===
+    // STRUCTURAL (glome geodesic NN, nd-GiST KNN prune → native laplace_angular_distance_4d
+    // refine, + native discrete Fréchet shape) and SEMANTIC (consensus μ) via laplace.describe.
+    // The canonical home of the structural read is laplace.structural_neighbors
+    // (20_converse.sql.in) — but it isn't installed on the running substrate yet (hand-applying
+    // function DDL to the live DB is blocked by the no-manual-mutation rule, and a db-fresh
+    // would wipe the populated substrate), so the CLI inlines that exact body here as a bridge
+    // until the extension rebuild installs it; then this collapses to a single function call.
+    // Read-only; no GPU.
+    private static async Task<int> NearestNeighborsAsync(string word)
+    {
+        if (string.IsNullOrWhiteSpace(word)) return Fail("usage: laplace nn <word>");
+        int k = EnvInt("LAPLACE_NN_K", 10, 1);
+
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var conn = await ds.OpenConnectionAsync();
+        var sw = Stopwatch.StartNew();
+
+        // Resolve the word to its entity id + glome placement (coord) + trajectory,
+        // the coord/traj as hex-EWKB so they ride back as geometry literals (a
+        // variable/constant is what lets the planner use the GiST KNN index).
+        byte[]? id = null; string? coordHex = null, trajHex = null;
+        await using (var res = conn.CreateCommand())
+        {
+            res.CommandText = @"
+                SELECT p.entity_id, encode(ST_AsEWKB(p.coord),'hex'),
+                       CASE WHEN p.trajectory IS NOT NULL THEN encode(ST_AsEWKB(p.trajectory),'hex') END
+                FROM laplace.physicalities p
+                JOIN laplace.prompt_state(@w) s ON p.entity_id = s.id
+                WHERE p.kind = 1 AND p.coord IS NOT NULL
+                LIMIT 1";
+            res.Parameters.AddWithValue("w", word);
+            await using var r = await res.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                id = (byte[])r[0];
+                coordHex = r.GetString(1);
+                trajHex = r.IsDBNull(2) ? null : r.GetString(2);
+            }
+        }
+        if (id is null || coordHex is null)
+        {
+            Console.WriteLine($"  ('{word}' is not a placed content entity in this substrate)");
+            return 1;
+        }
+
+        // ── STRUCTURAL axis: glome geodesic + Fréchet shape ──
+        Console.WriteLine($"\n  '{word}' — STRUCTURAL (glome geodesic) + SHAPE (Fréchet)");
+        Console.WriteLine($"  {"neighbor",-26} {"geodesic",10} {"frechet",10}");
+        Console.WriteLine($"  {new string('-', 26)} {new string('-', 10)} {new string('-', 10)}");
+        bool anyStructural = false;
+        await using (var st = conn.CreateCommand())
+        {
+            // Exact body of laplace.structural_neighbors, inlined as a bridge: nd-GiST
+            // KNN prune (<<->>) → native geodesic refine + dedup → take k → Fréchet on k.
+            st.CommandText = @"
+                WITH knn AS (
+                    SELECT entity_id, coord, trajectory FROM laplace.physicalities
+                    WHERE kind = 1 ORDER BY coord <<->> @coord::geometry LIMIT GREATEST(@k*20, 200)),
+                nearest AS (
+                    SELECT DISTINCT ON (entity_id) entity_id, trajectory,
+                           public.laplace_angular_distance_4d(coord, @coord::geometry) AS geo
+                    FROM knn ORDER BY entity_id, public.laplace_angular_distance_4d(coord, @coord::geometry)),
+                topk AS (
+                    SELECT entity_id, trajectory, geo FROM nearest
+                    WHERE entity_id <> @id ORDER BY geo LIMIT @k)
+                SELECT laplace.render_text(entity_id, 24), geo,
+                       CASE WHEN trajectory IS NOT NULL AND @traj <> ''
+                            THEN public.laplace_frechet_4d(trajectory, @traj::geometry) END
+                FROM topk ORDER BY geo";
+            st.Parameters.AddWithValue("coord", coordHex);
+            st.Parameters.AddWithValue("traj", (object?)trajHex ?? "");
+            st.Parameters.AddWithValue("id", id);
+            st.Parameters.AddWithValue("k", k);
+            await using var r = await st.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                anyStructural = true;
+                string nb = r.IsDBNull(0) ? "" : r.GetString(0);
+                if (nb.Length > 26) nb = nb[..25] + "…";
+                string g = r.IsDBNull(1) ? "" : r.GetDouble(1).ToString("F6");
+                string f = r.IsDBNull(2) ? "—" : r.GetDouble(2).ToString("F4");
+                Console.WriteLine($"  {nb,-26} {g,10} {f,10}");
+            }
+        }
+        if (!anyStructural)
+            Console.WriteLine($"  (‘{word}’ is not a placed content entity in this substrate)");
+
+        // ── SEMANTIC axis: consensus μ (the orthogonal axis) ──
+        if (id is not null)
+        {
+            Console.WriteLine($"\n  '{word}' — SEMANTIC (consensus μ via describe)");
+            Console.WriteLine($"  {"kind",-22} {"fact",-28} {"eff_mu",10} {"wit",4}");
+            Console.WriteLine($"  {new string('-', 22)} {new string('-', 28)} {new string('-', 10)} {new string('-', 4)}");
+            await using var se = conn.CreateCommand();
+            se.CommandText =
+                "SELECT kind, fact, round(eff_mu,0)::bigint, witnesses "
+                + "FROM laplace.describe(@id) ORDER BY eff_mu DESC LIMIT @k";
+            se.Parameters.AddWithValue("id", id);
+            se.Parameters.AddWithValue("k", k);
+            await using var r = await se.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                string kind = r.IsDBNull(0) ? "" : r.GetString(0);
+                string fact = r.IsDBNull(1) ? "" : r.GetString(1);
+                if (fact.Length > 28) fact = fact[..27] + "…";
+                string mu = r.IsDBNull(2) ? "" : r.GetInt64(2).ToString("N0");
+                string wit = r.IsDBNull(3) ? "" : r.GetInt64(3).ToString();
+                Console.WriteLine($"  {kind,-22} {fact,-28} {mu,10} {wit,4}");
+            }
+        }
+
+        sw.Stop();
+        Console.WriteLine($"\n  [{sw.Elapsed.TotalMilliseconds:F1} ms — two co-equal axes, read-only, no GPU]\n");
+        return 0;
+    }
+
+    // === generate: the forward pass — a ranked-μ walk over witnessed sequence ===
+    // No model, no GPU. Each step's next-token distribution is READ from consensus μ
+    // over the last N tokens (context = attention), shaped by a deterministic recipe
+    // (content mask via HAS_POS, stop-set, top-k, temperature; 0 = greedy), refuted
+    // edges pruned (epistemic), per-step μ available (glass-box — you see WHY each
+    // token). Canonical home is laplace.generate (20_converse.sql.in); inlined here
+    // as the run-today bridge until the extension rebuild installs it. Knobs via env:
+    // LAPLACE_GEN_STEPS / _WINDOW / _TOPK / _TEMP / _VERBOSE.
+    private static readonly string[] GenStop =
+    {
+        "the","a","an","and","or","but","of","to","in","on","at","by","for","with","as",
+        "is","was","are","were","be","been","have","has","had","do","did","will","would",
+        "can","could","may","might","must","i","you","he","she","it","we","they","not",
+        "no","so","this","that","which","who","what","all","one","him","her","them","its","his",
+    };
+
+    private const string GenerateSql = @"
+        WITH RECURSIVE
+        stops AS (SELECT DISTINCT p.id FROM unnest(@stop::text[]) w(t)
+                  CROSS JOIN LATERAL laplace.prompt_state(w.t) p WHERE p.id IS NOT NULL),
+        topic AS (SELECT id FROM laplace.prompt_state(@prompt) WHERE id IS NOT NULL),
+        -- topic field resolved ONCE (@boost>0): prompt tokens + corpus associations
+        -- (PRECEDES both ways) + synonyms. The walk biases toward it to stay on-subject.
+        field AS (
+            SELECT id FROM topic
+            UNION SELECT c.object_id FROM laplace.consensus c JOIN topic t ON c.subject_id=t.id
+                  WHERE c.kind_id=laplace.kind_id('PRECEDES') AND NOT laplace.refuted(c.rating,c.rd)
+            UNION SELECT c.subject_id FROM laplace.consensus c JOIN topic t ON c.object_id=t.id
+                  WHERE c.kind_id=laplace.kind_id('PRECEDES') AND NOT laplace.refuted(c.rating,c.rd)
+            UNION SELECT c.object_id FROM laplace.consensus c JOIN topic t ON c.subject_id=t.id
+                  WHERE c.kind_id=laplace.kind_id('IS_SYNONYM_OF')),
+        seed AS (SELECT array_agg(id ORDER BY ord) ctx FROM laplace.prompt_state(@prompt) WHERE id IS NOT NULL),
+        walk AS (
+            SELECT s.ctx AS ctx, NULL::bytea oid, NULL::numeric mu, 0 AS step FROM seed s WHERE s.ctx IS NOT NULL
+            UNION ALL
+            SELECT w.ctx || nx.oid, nx.oid, nx.mu, w.step + 1
+            FROM walk w CROSS JOIN LATERAL (
+                SELECT oid, mu FROM (
+                    SELECT c.object_id oid, laplace.eff_mu_display(max(c.rating),max(c.rd)) mu,
+                           sum(laplace.eff_mu(c.rating,c.rd))/1e9
+                             * (CASE WHEN @boost>0 AND c.object_id IN (SELECT id FROM field) THEN 1+@boost ELSE 1 END) AS sc
+                    FROM laplace.consensus c
+                    WHERE c.kind_id = laplace.kind_id('PRECEDES')
+                      AND c.subject_id = ANY (w.ctx[GREATEST(1,array_length(w.ctx,1)-@window+1):array_length(w.ctx,1)])
+                      AND c.object_id IS NOT NULL AND NOT laplace.refuted(c.rating,c.rd)
+                      AND c.object_id <> ALL (w.ctx) AND c.object_id NOT IN (SELECT id FROM stops)
+                      AND EXISTS (SELECT 1 FROM laplace.consensus h
+                                  WHERE h.subject_id=c.object_id AND h.kind_id=laplace.kind_id('HAS_POS'))
+                    GROUP BY c.object_id ORDER BY sc DESC LIMIT @topk
+                ) cand
+                ORDER BY CASE WHEN @temp<=0 THEN sc
+                              ELSE power(random(),1.0/GREATEST(power(sc,1.0/@temp),1e-9)) END DESC
+                LIMIT 1
+            ) nx WHERE w.step < @steps
+        )
+        SELECT step, laplace.render_text(oid,24) AS token, mu FROM walk WHERE step>0 ORDER BY step";
+
+    private static async Task<int> GenerateAsync(string[] args)
+    {
+        int steps  = EnvInt("LAPLACE_GEN_STEPS", 20, 1);
+        int window = EnvInt("LAPLACE_GEN_WINDOW", 3, 1);
+        int topk   = EnvInt("LAPLACE_GEN_TOPK", 8, 1);
+        double temp = EnvDouble("LAPLACE_GEN_TEMP", 0.6);
+        double steer = EnvDouble("LAPLACE_GEN_STEER", 0.0);   // topic-field boost; 0 = off
+        bool verbose = Environment.GetEnvironmentVariable("LAPLACE_GEN_VERBOSE") == "1";
+
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var conn = await ds.OpenConnectionAsync();
+
+        string prompt = string.Join(' ', args).Trim();
+        if (!string.IsNullOrWhiteSpace(prompt))
+            return await GenerateOnceAsync(conn, prompt, steps, window, temp, topk, steer, verbose);
+
+        Console.WriteLine("laplace generate — type a prompt, Enter. Blank line or Ctrl-D quits.");
+        while (true)
+        {
+            Console.Write("\nprompt> ");
+            var line = Console.ReadLine();
+            if (string.IsNullOrWhiteSpace(line)) break;
+            await GenerateOnceAsync(conn, line, steps, window, temp, topk, steer, verbose);
+        }
+        return 0;
+    }
+
+    private static async Task<int> GenerateOnceAsync(
+        NpgsqlConnection conn, string prompt, int steps, int window, double temp, int topk, double boost, bool verbose)
+    {
+        var sw = Stopwatch.StartNew();
+        var toks = new List<(string tok, decimal mu)>();
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = GenerateSql;
+            cmd.Parameters.AddWithValue("prompt", prompt);
+            cmd.Parameters.AddWithValue("stop", GenStop);
+            cmd.Parameters.AddWithValue("steps", steps);
+            cmd.Parameters.AddWithValue("window", window);
+            cmd.Parameters.AddWithValue("temp", temp);
+            cmd.Parameters.AddWithValue("topk", topk);
+            cmd.Parameters.AddWithValue("boost", boost);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                toks.Add((r.IsDBNull(1) ? "" : r.GetString(1), r.IsDBNull(2) ? 0m : r.GetDecimal(2)));
+        }
+        sw.Stop();
+        Console.WriteLine(prompt + " " + string.Join(' ', toks.Select(t => t.tok)));
+        if (verbose)
+            for (int i = 0; i < toks.Count; i++)
+                Console.WriteLine($"    {i + 1,2}. {toks[i].tok,-22} μ={toks[i].mu:F1}");
+        Console.WriteLine($"    [{toks.Count} tokens, {sw.Elapsed.TotalMilliseconds:F0} ms — ranked-μ walk, no GPU]");
         return 0;
     }
 
@@ -420,7 +699,7 @@ internal static class Program
         string path   = args.Length > 1 ? args[1] : "";
 
         if (string.IsNullOrEmpty(source))
-            return Fail("usage: laplace ingest <source> [path]  (unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | model)");
+            return Fail("usage: laplace ingest <source> [path]  (unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | model)");
 
         return source.ToLowerInvariant() switch
         {
@@ -433,8 +712,13 @@ internal static class Program
             "atomic2020" => await IngestViaRunnerAsync(new Atomic2020Decomposer(), "/vault/Data/Atomic2020", skipLayerCheck: false),
             "conceptnet" => await IngestViaRunnerAsync(new ConceptNetDecomposer(), "/vault/Data/ConceptNet", skipLayerCheck: false),
             "wiktionary" => await IngestViaRunnerAsync(new WiktionaryDecomposer(), "/vault/Data/Wiktionary", skipLayerCheck: false),
+            "framenet" => await IngestViaRunnerAsync(new FrameNetDecomposer(), "/vault/Data/FrameNet/framenet_v17", skipLayerCheck: false),
+            "opensubtitles" => await IngestViaRunnerAsync(new OpenSubtitlesDecomposer(), "/vault/Data/OpenSubtitles", skipLayerCheck: false),
+            "verbnet"  => await IngestViaRunnerAsync(new VerbNetDecomposer(),  "/vault/Data/VerbNet",  skipLayerCheck: false),
+            "propbank" => await IngestViaRunnerAsync(new PropBankDecomposer(), "/vault/Data/PropBank", skipLayerCheck: false),
+            "semlink"  => await IngestViaRunnerAsync(new SemLinkDecomposer(),  "/vault/Data/SemLink",  skipLayerCheck: false),
             "model"    => await IngestModelAsync(path),
-            _ => Fail($"unknown ingest source '{source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, model)"),
+            _ => Fail($"unknown ingest source '{source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, model)"),
         };
     }
 
@@ -561,6 +845,7 @@ internal static class Program
                 + $"{accumulator.ObservationsAccumulated:N0} matches in {matSw.Elapsed.TotalSeconds:F1}s "
                 + $"(accumulated at ingest; evidence = provenance-only)");
         }
+        await RegisterDynamicCanonicalsAsync(ds, ((IDecomposer)dec).CanonicalNamesForReadback);
         return 0;
     }
 
@@ -730,7 +1015,7 @@ internal static class Program
             intermR, dModel, rowsAreOut: true, chan, neuron, MOf(Layers(prof.UpProj)));
         var downA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.DownProjectsKind,
             dModel, intermR, rowsAreOut: true, neuron, chan, MOf(Layers(prof.DownProj)));
-        var normV = await ConsensusReExport.ReadNormVectorAsync(ds, ModelDecomposer.NormalizesKind,
+        var normV = await ConsensusReExport.ReadNormVectorAsync(ds, ModelDecomposer.NormScalesKind,
             dModel, chan, MOf(Layers(prof.PerLayerNorms[0]), [prof.FinalNorm]));
 
         long totalRelations = embedA.Relations + lmHeadA.Relations + qA.Relations + kA.Relations
@@ -800,7 +1085,7 @@ internal static class Program
     /// ingestion run backward. Every layer instance of a role receives the SAME
     /// poured table (positions folded at ingest; a deeper mold receives the
     /// consensus at every position — consensus-of-all in the chosen shape,
-    /// never bit-perfect). Norm slots pour the per-channel NORMALIZES
+    /// never bit-perfect). Norm slots pour the per-channel NORM_SCALES
     /// consensus; the SwiGLU gating nonlinearity itself is runtime, never
     /// attested — its WEIGHT table (GATES) pours like any other. A mold whose
     /// slot shape differs from the arena's schema shape fails loud — shape/rank
@@ -840,7 +1125,7 @@ internal static class Program
         {
             if (normV.Length != vals.Length)
                 throw new InvalidOperationException(
-                    $"mold norm slot {name} has {vals.Length:N0} channels but NORMALIZES carries {normV.Length:N0}");
+                    $"mold norm slot {name} has {vals.Length:N0} channels but NORM_SCALES carries {normV.Length:N0}");
             Array.Copy(normV, vals, vals.Length);
             return;
         }
@@ -1156,6 +1441,7 @@ internal static class Program
         var materialized = await accumulator.MaterializeConsensusAsync();
         Console.WriteLine($"consensus: {materialized:N0} relations materialized "
                         + $"(accumulated at ingest; evidence = provenance-only)");
+        await RegisterDynamicCanonicalsAsync(ds, dec.CanonicalNamesForReadback);
         await PrintCountsAsync(ds);
         return 0;
     }
@@ -1172,6 +1458,29 @@ internal static class Program
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         await PrintCountsAsync(ds);
         return 0;
+    }
+
+    // Register the dynamic classifier/value canonical names a decomposer minted
+    // (data-derived names absent from the extension's static seed) so
+    // laplace.render() answers them in NAMES instead of falling back to hex.
+    // laplace.register_canonicals is an idempotent batch insert (ON CONFLICT DO
+    // NOTHING). Runs post-ingest, AFTER the consensus fold — once the names'
+    // entities are committed. No-op when the set is empty.
+    private static async Task RegisterDynamicCanonicalsAsync(
+        NpgsqlDataSource ds, IReadOnlyCollection<string> names)
+    {
+        if (names is null || names.Count == 0) return;
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT laplace.register_canonicals(@names)";
+        cmd.Parameters.Add(new global::Npgsql.NpgsqlParameter
+        {
+            ParameterName = "names",
+            Value = names as string[] ?? names.ToArray(),
+            NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Text,
+        });
+        await cmd.ExecuteNonQueryAsync();
+        Console.WriteLine($"registered {names.Count:N0} canonical names");
     }
 
     private static async Task PrintCountsAsync(NpgsqlDataSource ds)
@@ -1234,7 +1543,7 @@ internal static class Program
         string[] modelKinds =
         [
             "EMBEDS", "Q_PROJECTS", "K_PROJECTS", "V_PROJECTS", "O_PROJECTS",
-            "GATES", "UP_PROJECTS", "DOWN_PROJECTS", "NORMALIZES", "OUTPUT_PROJECTS",
+            "GATES", "UP_PROJECTS", "DOWN_PROJECTS", "NORM_SCALES", "OUTPUT_PROJECTS",
         ];
         long modelAtts = 0;
         var kindCounts = new long[modelKinds.Length];

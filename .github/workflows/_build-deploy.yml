@@ -1,0 +1,36 @@
+name: _build-deploy (reusable)
+
+# Bring the runner current for a standalone per-source run: engine + extension
+# build/install, app build, Layer-1 migration up (CREATE EXTENSION self-seeds —
+# the extension is the deployment unit). NO nuke here — destructive resets are
+# integration.yml's explicit db-deploy step only.
+
+on:
+  workflow_call:
+    inputs:
+      database:
+        type: string
+        default: "laplace"
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: "build + install + migrate (${{ inputs.database }})"
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: build + install engine/extensions
+        run: |
+          just build
+          just install
+      - name: build app
+        run: dotnet build app/Laplace.slnx -c Release
+      - name: migrate up
+        env:
+          PGDATABASE: ${{ inputs.database }}
+        run: dotnet app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll up

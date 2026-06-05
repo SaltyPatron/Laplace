@@ -14,6 +14,28 @@ namespace Laplace.Decomposers.Unicode.Tests;
 /// </summary>
 public sealed class UnicodeDecomposerTests
 {
+    static UnicodeDecomposerTests()
+    {
+        // Pass 3 (name aliases / confusables, 2026-06-05 completeness) routes
+        // text through ContentEmitter — the documented host precondition is a
+        // loaded T0 perf-cache (same as every content-bearing decomposer).
+        CodepointPerfcache.Load(ResolvePerfcacheBlob());
+    }
+
+    private static string ResolvePerfcacheBlob()
+    {
+        var env = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
+        if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+            foreach (var build in dir.EnumerateDirectories("build*"))
+            {
+                var hit = Directory.EnumerateFiles(build.FullName, "laplace_t0_perfcache.bin",
+                                                   SearchOption.AllDirectories).FirstOrDefault();
+                if (hit is not null) return hit;
+            }
+        throw new InvalidOperationException("perf-cache blob not found; build the engine or set LAPLACE_PERFCACHE_BIN.");
+    }
+
     private const int TotalCodepoints = 1_114_112;
 
     // Use the same path discipline as production: the decomposer reads source
@@ -35,36 +57,46 @@ public sealed class UnicodeDecomposerTests
         // 'A' = U+0041, entity id = BLAKE3-128 of single byte 0x41.
         Hash128 aHash = Hash128.Blake3(new byte[] { 0x41 });
 
-        long entities = 0, physicalities = 0;
-        bool allTier0 = true, allCodepointType = true, allFirstObserved = true, countsMatch = true;
+        // Pass 1+2 emit the 1,114,112 codepoints; pass 3 (2026-06-05
+        // completeness) adds name-alias / confusable-sequence CONTENT — so the
+        // CODEPOINT-typed count is exact and the extras are pinned > 0.
+        long codepointEntities = 0, codepointPhysicalities = 0, passThreeEntities = 0;
+        bool allTier0 = true, allFirstObserved = true;
         EntityRow? aEntity = null;
         PhysicalityRow? aPhys = null;
 
         await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
         {
-            entities += change.Entities.Length;
-            physicalities += change.Physicalities.Length;
-            if (change.Entities.Length != change.Physicalities.Length) countsMatch = false;
-
             for (int i = 0; i < change.Entities.Length; i++)
             {
                 var e = change.Entities[i];
-                if (e.Tier != 0) allTier0 = false;
-                if (e.TypeId != UnicodeDecomposer.CodepointType) allCodepointType = false;
-                if (e.FirstObservedBy != UnicodeDecomposer.Source) allFirstObserved = false;
-                if (aEntity is null && e.Id == aHash)
+                if (e.TypeId == UnicodeDecomposer.CodepointType)
                 {
-                    aEntity = e;
-                    aPhys = change.Physicalities[i];
+                    codepointEntities++;
+                    if (e.Tier != 0) allTier0 = false;
+                    if (e.FirstObservedBy != UnicodeDecomposer.Source) allFirstObserved = false;
+                    if (aEntity is null && e.Id == aHash && change.Physicalities.Length > i)
+                    {
+                        aEntity = e;
+                        aPhys = change.Physicalities[i];
+                    }
+                }
+                else
+                {
+                    passThreeEntities++;
                 }
             }
+            foreach (var ph in change.Physicalities)
+                if (ph.Kind == PhysicalityKind.Content && ph.TrajectoryXyzm is null)
+                    codepointPhysicalities++;
         }
 
-        Assert.Equal(TotalCodepoints, entities);
-        Assert.Equal(TotalCodepoints, physicalities);
-        Assert.True(countsMatch, "every intent must carry one CONTENT physicality per entity");
+        Assert.Equal(TotalCodepoints, codepointEntities);
+        Assert.True(codepointPhysicalities >= TotalCodepoints,
+            "one CONTENT physicality per codepoint (pass-3 content adds more)");
+        Assert.True(passThreeEntities > 0,
+            "pass 3 must witness name aliases / confusable sequences as content");
         Assert.True(allTier0, "all codepoint entities are tier 0");
-        Assert.True(allCodepointType, "all codepoint entities are typed Codepoint");
         Assert.True(allFirstObserved, "all codepoint entities first_observed_by UnicodeDecomposer");
 
         // 'A' is emitted as a tier-0 Codepoint entity with one CONTENT physicality

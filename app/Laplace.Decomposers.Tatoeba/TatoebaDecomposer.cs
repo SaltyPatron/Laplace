@@ -33,10 +33,6 @@ public sealed class TatoebaDecomposer : IDecomposer
     private static readonly Hash128 LanguageTypeId =
         Hash128.OfCanonical("substrate/type/Language/v1");
 
-    private static Hash128 Kind(string n) => Hash128.OfCanonical($"substrate/kind/{n}/v1");
-    private static readonly Hash128 KindHasExternalId   = Kind("HAS_EXTERNAL_ID");
-    private static readonly Hash128 KindHasLanguage     = Kind("HAS_LANGUAGE");
-    private static readonly Hash128 KindIsTranslationOf = Kind("IS_TRANSLATION_OF");
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "TatoebaDecomposer";
@@ -47,8 +43,9 @@ public sealed class TatoebaDecomposer : IDecomposer
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("Tatoeba_Sentence");
-        boot.AddKind("HAS_EXTERNAL_ID",  KindRank.StandardsStructural, SourceTrust.StructuredCorpus);
-        boot.AddKind("IS_TRANSLATION_OF", KindRank.Equivalence, SourceTrust.StructuredCorpus);
+        // Rank/trust live in the REGISTRY at attest time — AddKind(name) only.
+        boot.AddKind("HAS_EXTERNAL_ID");
+        boot.AddKind("IS_TRANSLATION_OF");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -84,12 +81,10 @@ public sealed class TatoebaDecomposer : IDecomposer
                 var contentId = ContentEmitter.Emit(b, text, Source);
                 if (contentId is not null)
                 {
-                    b.AddAttestation(AttestationFactory.Create(
-                        contentId.Value, KindHasExternalId, extId, Source, null,
-                        KindRank.StandardsStructural, SourceTrust.StructuredCorpus));
-                    b.AddAttestation(AttestationFactory.Create(
-                        contentId.Value, KindHasLanguage, langId, Source, null,
-                        KindRank.Partitive, SourceTrust.StructuredCorpus));
+                    b.AddAttestation(KindRegistry.Attest(
+                        contentId.Value, "HAS_EXTERNAL_ID", extId, Source, SourceTrust.StructuredCorpus));
+                    b.AddAttestation(KindRegistry.Attest(
+                        contentId.Value, "HAS_LANGUAGE", langId, Source, SourceTrust.StructuredCorpus));
                 }
 
                 if (++n >= batch)
@@ -119,9 +114,12 @@ public sealed class TatoebaDecomposer : IDecomposer
                 // references an id absent from sentences.csv.
                 b.AddEntity(new EntityRow(ea, (byte)MetaTier.Meta, SentenceRefTypeId, Source));
                 b.AddEntity(new EntityRow(eb, (byte)MetaTier.Meta, SentenceRefTypeId, Source));
-                b.AddAttestation(AttestationFactory.Create(
-                    ea, KindIsTranslationOf, eb, Source, null,
-                    KindRank.Equivalence, SourceTrust.StructuredCorpus));
+                // Registry-routed: IS_TRANSLATION_OF is SYMMETRIC — Orient
+                // canonicalizes endpoint order so (a,b) and (b,a) land on ONE
+                // consensus row. The old factory bypass skipped this and forked
+                // the whole translation arena (2026-06-05 audit).
+                b.AddAttestation(KindRegistry.Attest(
+                    ea, "IS_TRANSLATION_OF", eb, Source, SourceTrust.StructuredCorpus));
 
                 if (++n >= batch)
                 {

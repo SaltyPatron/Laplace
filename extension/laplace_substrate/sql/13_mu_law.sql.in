@@ -1,0 +1,60 @@
+/* ── THE effective-μ definition — ONE place ────────────────────────────────
+ * eff_mu = rating − 2·rd (the ~95% lower bound), SIGNED, fixed-point ×1e9 —
+ * the same formula as the C engine's glicko2_effective_mu (one source of math
+ * truth; C# delegates to the C primitive and is forbidden from inlining it —
+ * Glicko2.cs — and SQL callers are now under the same law). LANGUAGE sql,
+ * single expression, non-STRICT ⇒ the planner INLINES every call to the
+ * literal expression (rating - 2*rd), so the two expression indexes above
+ * serve eff_mu() reads with no rebuild and no plan change. NEVER hand-write
+ * rating − 2·rd in a query — call eff_mu; this body and the index
+ * expressions change TOGETHER or not at all.
+ * NO SET clause on either function: any proconfig disables SQL-function
+ * inlining (the whole point); both bodies are search-path-independent. */
+CREATE OR REPLACE FUNCTION eff_mu(p_rating bigint, p_rd bigint)
+    RETURNS bigint LANGUAGE sql LAPLACE_IMMUTABLE AS $$
+    SELECT p_rating - 2 * p_rd
+$$;
+COMMENT ON FUNCTION eff_mu(bigint, bigint) IS
+    'Effective μ = rating − 2·rd (×1e9, SIGNED). THE one definition — planner-inlined, matches the consensus eff-μ expression indexes. Never hand-write the expression.';
+
+/* Human-valued μ (rating units, 3 dp) — the one display scaling. */
+CREATE OR REPLACE FUNCTION eff_mu_display(p_rating bigint, p_rd bigint)
+    RETURNS numeric LANGUAGE sql LAPLACE_IMMUTABLE AS $$
+    SELECT round((@extschema@.eff_mu(p_rating, p_rd) / 1e9)::numeric, 3)
+$$;
+COMMENT ON FUNCTION eff_mu_display(bigint, bigint) IS
+    'eff_mu rendered in rating units (÷1e9, 3 dp) — the one display scaling for μ.';
+
+/* Refuted = the ~95% UPPER bound (rating + 2·rd) sits BELOW the neutral
+ * baseline (1500 ×1e9): even read optimistically, the witnesses net-refuted
+ * the relation (ARCHITECTURE §11 "Prune — skip relations whose μ is
+ * refuted"). Walks and realized reads skip refuted edges — continuing across
+ * one would assert what the consensus denies. Dissent below this bound is
+ * NOT hidden from ranked reads (ORDER BY μ still surfaces it, bottom-ranked);
+ * only TRAVERSAL and realization prune. Same inlining law as eff_mu: single
+ * expression, no SET clause, so the planner inlines every call. */
+CREATE OR REPLACE FUNCTION refuted(p_rating bigint, p_rd bigint)
+    RETURNS boolean LANGUAGE sql LAPLACE_IMMUTABLE AS $$
+    SELECT p_rating + 2 * p_rd < @extschema@.glicko2_neutral_mu()
+$$;
+COMMENT ON FUNCTION refuted(bigint, bigint) IS
+    'TRUE when the ~95% upper bound (rating + 2·rd) is below the neutral baseline (glicko2_neutral_mu(), 1500×1e9) — the consensus confidently refutes the relation. The §11 prune predicate for walks/realization; planner-inlined.';
+
+/* ── §10 priors — THE one place the Glicko-2 constants live in SQL (the C
+ * kernel owns the math; these are the agreed prior/neutral/τ values —
+ * ARCHITECTURE §10). Single-literal LANGUAGE sql + no SET clause ⇒ the
+ * planner folds each call to its constant. Never hand-write these numbers
+ * in a query or function body. */
+CREATE FUNCTION glicko2_neutral_mu() RETURNS bigint
+    LANGUAGE sql LAPLACE_IMMUTABLE AS $$ SELECT 1500000000000::bigint $$;
+COMMENT ON FUNCTION glicko2_neutral_mu() IS
+    'Neutral/prior Glicko-1 rating (1500 ×1e9) — the baseline opponent μ and the new-relation prior.';
+CREATE FUNCTION glicko2_initial_rd() RETURNS bigint
+    LANGUAGE sql LAPLACE_IMMUTABLE AS $$ SELECT 350000000000::bigint $$;
+COMMENT ON FUNCTION glicko2_initial_rd() IS 'Initial rating deviation (350 ×1e9) for a new relation.';
+CREATE FUNCTION glicko2_initial_volatility() RETURNS bigint
+    LANGUAGE sql LAPLACE_IMMUTABLE AS $$ SELECT 60000000::bigint $$;
+COMMENT ON FUNCTION glicko2_initial_volatility() IS 'Initial volatility (0.06 ×1e9) for a new relation.';
+CREATE FUNCTION glicko2_tau() RETURNS bigint
+    LANGUAGE sql LAPLACE_IMMUTABLE AS $$ SELECT 500000000::bigint $$;
+COMMENT ON FUNCTION glicko2_tau() IS 'System constant τ (0.5 ×1e9).';

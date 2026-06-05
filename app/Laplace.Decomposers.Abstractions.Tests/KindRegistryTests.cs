@@ -1,6 +1,7 @@
 using Xunit;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
@@ -20,8 +21,101 @@ public class KindRegistryTests
     public void NameNormalize_PosFamily_OneArena()
     {
         Assert.Equal(Kid("HAS_POS"), KindRegistry.Resolve("HAS_UPOS").Id);
-        Assert.Equal(Kid("HAS_POS"), KindRegistry.Resolve("HAS_LEX_CATEGORY").Id);
         Assert.Equal(Kid("HAS_POS"), KindRegistry.Resolve("HAS_POS").Id);
+        // HAS_LEX_CATEGORY is NOT an alias anymore (2026-06-05): a lexname is
+        // POS×domain — the WordNet decomposer splits it at ingest. Unregistered
+        // name ⇒ probationary self-named arena, never silently folded into POS.
+        Assert.NotEqual(Kid("HAS_POS"), KindRegistry.Resolve("HAS_LEX_CATEGORY").Id);
+        Assert.Equal(KindRank.Probationary, KindRegistry.Resolve("HAS_LEX_CATEGORY").Rank);
+    }
+
+    [Fact]
+    public void NameNormalize_DefinitionFamily_OneArena()
+    {
+        // One assertion, several names (rename table 2026-06-05): the gloss
+        // defines the word — HAS_DEFINITION is the canonical attribute form.
+        Assert.Equal(Kid("HAS_DEFINITION"), KindRegistry.Resolve("DEFINES").Id);
+        Assert.Equal(Kid("HAS_DEFINITION"), KindRegistry.Resolve("DEFINED_AS").Id);
+        Assert.Equal(Kid("HAS_DEFINITION"), KindRegistry.Resolve("HAS_DEFINITION").Id);
+    }
+
+    [Fact]
+    public void NormalizesSplit_TwoAssertions_TwoArenas()
+    {
+        // The one-name-two-assertions failure class, split 2026-06-05:
+        // codepoint→normalized form vs model per-channel norm scale.
+        Assert.NotEqual(Kid("NORMALIZES_TO"), Kid("NORM_SCALES"));
+        Assert.Equal(KindRank.StandardsStructural, KindRegistry.Resolve("NORMALIZES_TO").Rank);
+        Assert.Equal(KindRank.TensorCalculation, KindRegistry.Resolve("NORM_SCALES").Rank);
+        // The retired name resolves probationary — nothing may silently emit it.
+        Assert.Equal(KindRank.Probationary, KindRegistry.Resolve("NORMALIZES").Rank);
+    }
+
+    [Fact]
+    public void SymmetricTranslation_BothDirections_OneAttestationId()
+    {
+        // The Tatoeba fork fix: registry Orient canonicalizes symmetric
+        // endpoint order, so (a,b) and (b,a) produce the IDENTICAL evidence id
+        // and land on ONE consensus row.
+        var src = Hash128.OfCanonical("substrate/test/reg/source");
+        var a = Hash128.OfCanonical("substrate/test/reg/a");
+        var b = Hash128.OfCanonical("substrate/test/reg/b");
+        var ab = KindRegistry.Attest(a, "IS_TRANSLATION_OF", b, src, SourceTrust.StructuredCorpus);
+        var ba = KindRegistry.Attest(b, "IS_TRANSLATION_OF", a, src, SourceTrust.StructuredCorpus);
+        Assert.Equal(ab.Id, ba.Id);
+        Assert.Equal(ab.SubjectId, ba.SubjectId);
+        Assert.Equal(ab.ObjectId, ba.ObjectId);
+    }
+
+    [Fact]
+    public void AtomicFamily_RegistryRouted()
+    {
+        Assert.Equal(KindRank.Causal, KindRegistry.Resolve("X_INTENT").Rank);
+        // HinderedBy is the SAME assertion as ConceptNet's ObstructedBy (rule 2).
+        Assert.Equal(Kid("OBSTRUCTED_BY"), KindRegistry.Resolve("HINDERED_BY").Id);
+        // Convention sweep: family prefix.
+        Assert.Equal(Kid("X_FILLED_BY"), KindRegistry.Resolve("IS_FILLED_BY").Id);
+        // MadeUpOf is partitive, rolled up.
+        Assert.Equal(Kid("HAS_PART"), KindRegistry.Resolve("MADE_UP_OF").ParentId);
+    }
+
+    [Fact]
+    public void Adjacency_OneArena_FollowsIsTheFlip()
+    {
+        var r = KindRegistry.Resolve("FOLLOWS");
+        Assert.Equal(Kid("PRECEDES"), r.Id);
+        Assert.True(r.Flip);
+    }
+
+    [Fact]
+    public void SeedEnhancedDeprel_SubtypedRel_StagesParentChain()
+    {
+        // ar_padt lesson (2026-06-05): a treebank may contain advcl:cond and
+        // never bare advcl — the parent kind ENTITY must stage with the child
+        // or the writer's referential proof fails the batch.
+        var b = new SubstrateChangeBuilder(Hash128.OfCanonical("src"), "test/edep", null,
+            entityCapacity: 8, physicalityCapacity: 0, attestationCapacity: 8);
+        KindRegistry.SeedEnhancedDeprel(b, "advcl:cond", Hash128.OfCanonical("src"),
+            new HashSet<Hash128>(), new ConcurrentIdSet());
+        var change = b.Build();
+        Assert.Contains(change.Entities, e => e.Id == Kid("EDEP_ADVCL_COND"));
+        Assert.Contains(change.Entities, e => e.Id == Kid("EDEP_ADVCL"));
+    }
+
+    [Fact]
+    public void TensorRoleFamily_FirstClass_NoParent()
+    {
+        // The model modality is first-class Canon (2026-06-05 ruling): ingest
+        // arenas AND the export mold-filling map. Placement arenas — no parent.
+        foreach (var role in new[] { "EMBEDS", "Q_PROJECTS", "K_PROJECTS", "V_PROJECTS",
+                                     "O_PROJECTS", "GATES", "UP_PROJECTS", "DOWN_PROJECTS",
+                                     "NORM_SCALES", "OUTPUT_PROJECTS", "TOKEN_MAPS_TO", "MERGES_WITH" })
+        {
+            var r = KindRegistry.Resolve(role);
+            Assert.Equal(KindRank.TensorCalculation, r.Rank);
+            Assert.Null(r.ParentId);
+            Assert.Equal(KindRegistry.KindId(role), r.Id);   // id stability
+        }
     }
 
     [Fact]

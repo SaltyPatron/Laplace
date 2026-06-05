@@ -16,7 +16,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG="${AUDIT_LOG:-/tmp/laplace-decomposer-audit.log}"
 PSQL=(psql -h /var/run/postgresql -U laplace_admin -d laplace -v ON_ERROR_STOP=1)
-TINYLLAMA="${TINYLLAMA_DIR:-/vault/models/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0/snapshots/fe8a4ea1ffedaf415f4da2f062534de366a451e6}"
+TINYLLAMA="${LAPLACE_TINYLLAMA_DIR:-${TINYLLAMA_DIR:-}}"
 
 FROM=""
 FRESH=0
@@ -98,7 +98,7 @@ vault_check || true
 counts
 
 if [[ $FRESH -eq 1 ]]; then
-  run_just "db-nuke + setup" just db-nuke setup || exit 1
+  run_just "db-fresh" just db-fresh || exit 1
 elif [[ -z "$FROM" ]]; then
   run_just "seed-t0 (if needed)" bash -c '
     n=$('"${PSQL[@]}"' -t -A -c "SELECT count(*) FROM laplace.entities" | tr -d "[:space:]")

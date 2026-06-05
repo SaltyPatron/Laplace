@@ -1,6 +1,5 @@
 # Justfile — canonical command runner for Laplace
 # Run `just` with no arguments to list all commands.
-# See OPERATIONS.md for full operational reference.
 
 set shell := ["bash", "-uc"]
 
@@ -160,20 +159,20 @@ launch-db:
 # These wrap dotnet run --project app/Laplace.Migrations.
 
 db-up: install
-    cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- up
+    cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- up
 
 db-status:
-    cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- status
+    cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- status
 
 # Drop SchemaVersions only — DbUp will re-apply migrations on next 'db-up'.
 # Preserves the database, extensions, and substrate data.
 db-reset:
-    cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- reset
+    cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- reset
 
 # Full Layer-1 wipe — DROP DATABASE laplace + re-create empty.
 # Loses ALL substrate data. Run 'just db-up' afterward to rebuild.
 db-nuke:
-    cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- nuke
+    cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- nuke
 
 # Generate a new timestamped migration file in db/migrations/
 migrate-new name:
@@ -188,15 +187,18 @@ migrate-new name:
     cat > "$file" <<EOF
     -- Migration ${stamp}_{{name}}
     --
-    -- TODO: describe the orchestration concern this migration addresses.
-    --, DbUp migrations orchestrate extension lifecycle and
-    -- cross-extension setup — they do NOT define substrate schema. If you
-    -- find yourself writing CREATE TABLE for laplace.* objects here, STOP
-    -- and put it in extension/laplace--A.B.C--D.E.F.sql instead.
+    -- LAYER-1 ONLY (extension lifecycle / roles / grants). THE LAW
+    -- (2026-06-05, extension/laplace_substrate/sql/README.md): the extension
+    -- is the deployment unit — it ships the substrate schema, every function,
+    -- and the readback seed. If you are writing CREATE TABLE / CREATE FUNCTION
+    -- / INSERT for laplace.* objects here, STOP: put it in the matching
+    -- extension/laplace_substrate/sql/NN_*.sql.in module (+ a regress pin)
+    -- and rebuild. A second DbUp script should almost never need to exist.
     --
     -- Write idempotent SQL (IF NOT EXISTS / DO \$\$ blocks).
     EOF
     echo "✓ Created $file"
+    echo "⚠ Layer-1 only — substrate objects belong in extension/laplace_substrate/sql/ (see its README.md)"
 
 # === Seed ===
 
@@ -232,8 +234,8 @@ db-fresh: build-perfcache build-app
     umask 0002    # dirs born g+w — see the `install` recipe
     cmake --install build/extension/laplace_substrate >/dev/null
     cd app
-    echo NUKE | dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- nuke
-    dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- up
+    dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- nuke --yes
+    dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- up
     dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- ingest unicode
     echo "✓ db-fresh: empty substrate + current extension + T0 seeded (consensus folded, layer-0 marker set)"
 

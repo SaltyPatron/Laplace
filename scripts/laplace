@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# laplace — run the Laplace CLI from anywhere.
+#
+# Symlinked onto PATH (e.g. ~/.local/bin/laplace). Resolves the repo from the
+# script's real location, prefers the Release build, defaults the connection to
+# laplace-dev (override with $LAPLACE_DB), and execs the CLI with your args.
+#
+#   laplace generate "the whale"     # one-shot continuation
+#   laplace generate                  # REPL — type a prompt, Enter
+#   laplace nn whale                  # plural nearest-neighbor (structural + semantic)
+#   laplace converse "what is a dog"  # the conversation surface
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+DLL="$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll"
+[[ -f "$DLL" ]] || DLL="$ROOT/app/Laplace.Cli/bin/Debug/net10.0/Laplace.Cli.dll"
+[[ -f "$DLL" ]] || { echo "laplace: CLI not built — run: dotnet build $ROOT/app/Laplace.Cli" >&2; exit 1; }
+
+export LAPLACE_DB="${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=laplace-dev}"
+exec dotnet "$DLL" "$@"

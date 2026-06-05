@@ -166,3 +166,76 @@ ORDER BY p.proname;
  eff_mu_display | i           | t            | sql
 (2 rows)
 
+-- ── ported read primitives + §10 constants: presence + value pins ──
+-- The read surfaces (attestation_response / attestation_unary_response), the
+-- post-ingest name registrar (register_canonicals), and the four Glicko-2
+-- calibration constants are catalog-pinned: a presence list (ordered) and exact
+-- value pins for each constant. Fails the diff if any drifts or vanishes.
+SELECT p.proname
+FROM pg_proc p
+WHERE p.pronamespace = 'laplace'::regnamespace
+  AND p.proname IN (
+        'attestation_response', 'attestation_unary_response', 'register_canonicals',
+        'glicko2_neutral_mu', 'glicko2_initial_rd', 'glicko2_initial_volatility', 'glicko2_tau')
+GROUP BY p.proname
+ORDER BY p.proname;
+          proname           
+----------------------------
+ attestation_response
+ attestation_unary_response
+ glicko2_initial_rd
+ glicko2_initial_volatility
+ glicko2_neutral_mu
+ glicko2_tau
+ register_canonicals
+(7 rows)
+
+SELECT laplace.glicko2_neutral_mu()         = 1500000000000::bigint AS neutral_ok,
+       laplace.glicko2_initial_rd()         =  350000000000::bigint AS initial_rd_ok,
+       laplace.glicko2_initial_volatility() =      60000000::bigint AS initial_volatility_ok,
+       laplace.glicko2_tau()                =     500000000::bigint AS tau_ok;
+ neutral_ok | initial_rd_ok | initial_volatility_ok | tau_ok 
+------------+---------------+-----------------------+--------
+ t          | t             | t                     | t
+(1 row)
+
+-- ── in-band trajectory render: leaves resolve from vertex flags, never the
+-- id→codepoint map (2026-06-05). Pack "hi" as a flagged 2-vertex trajectory
+-- whose child ids are DELIBERATELY absent from codepoint_render-joinable
+-- space (random test ids) — only the in-band atoms can render it.
+BEGIN;
+SET search_path = laplace, public;
+DO $$
+DECLARE
+    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    src    bytea := laplace_hash128_blake3('test/inband/source');
+    word   bytea := laplace_hash128_blake3('test/inband/word');
+    chH    bytea := laplace_hash128_blake3('test/inband/child-h');
+    chI    bytea := laplace_hash128_blake3('test/inband/child-i');
+    traj   geometry;
+    rendered text;
+BEGIN
+    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+        (src, 0, type_t, NULL), (word, 2, type_t, src),
+        (chH, 0, type_t, src), (chI, 0, type_t, src);
+    -- flags: HAS_ATOM | tier 0 | atom<<31  (h=U+0068, i=U+0069)
+    traj := public.ST_MakeLine(ARRAY[
+        public.laplace_mantissa_pack(chH, 1, 1, (1 + (104::bigint << 31))),
+        public.laplace_mantissa_pack(chI, 2, 1, (1 + (105::bigint << 31)))]);
+    INSERT INTO physicalities (id, entity_id, source_id, kind, coord, hilbert_index,
+                               trajectory, n_constituents, observed_at)
+    VALUES (laplace_hash128_blake3('test/inband/phys'), word, src, 1,
+            public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
+            decode('00000000000000000000000000000000','hex'), traj, 2, now());
+    rendered := render_text(word);
+    IF rendered IS DISTINCT FROM 'hi' THEN
+        RAISE EXCEPTION 'FAIL: in-band render returned % (want hi)', COALESCE(rendered, 'NULL');
+    END IF;
+    -- the accessors agree with the layout
+    IF vertex_atom(1 + (104::bigint << 31)) <> 104 OR vertex_tier((2::bigint << 1)) <> 2 THEN
+        RAISE EXCEPTION 'FAIL: vertex flag accessors disagree with mantissa.h layout';
+    END IF;
+    RAISE NOTICE '✓ in-band render: leaves decoded from vertex flags, no map join';
+END $$;
+NOTICE:  ✓ in-band render: leaves decoded from vertex flags, no map join
+ROLLBACK;

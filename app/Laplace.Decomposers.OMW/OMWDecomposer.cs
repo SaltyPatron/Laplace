@@ -39,7 +39,7 @@ public sealed class OMWDecomposer : IDecomposer
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         // Kind entities seed via KindRegistry.SeedCanonical in Build(); rank /
         // symmetry live ONLY in the registry.
-        boot.AddKind("DEFINES");
+        boot.AddKind("HAS_DEFINITION");
         boot.AddKind("HAS_EXAMPLE");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
@@ -108,7 +108,7 @@ public sealed class OMWDecomposer : IDecomposer
             case OmwType.Def:
                 // context_id = language → per-language glosses are distinct attestations.
                 b.AddAttestation(KindRegistry.Attest(
-                    row.SynsetId, "DEFINES", contentId.Value, Source, SourceTrust.AcademicCurated,
+                    row.SynsetId, "HAS_DEFINITION", contentId.Value, Source, SourceTrust.AcademicCurated,
                     contextId: langId));
                 break;
             case OmwType.Exe:

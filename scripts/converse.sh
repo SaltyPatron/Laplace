@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/converse.sh — conversation with the substrate.
 #
-# Loads the converse read surface (15_converse.sql.in) SESSION-LOCALLY into
+# Loads the converse read surface (20_converse.sql.in) SESSION-LOCALLY into
 # pg_temp — zero schema footprint on the target DB, gone at disconnect. The
 # schema-of-record path for these functions is the extension itself (db-fresh
 # / db-deploy); this wrapper exists so a data-rich DB whose installed
@@ -45,23 +45,59 @@ CREATE OR REPLACE FUNCTION pg_temp.eff_mu_display(p_rating bigint, p_rd bigint) 
     LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
     SELECT round(((p_rating - 2 * p_rd) / 1e9)::numeric, 3)
 $$;
+CREATE OR REPLACE FUNCTION pg_temp.refuted(p_rating bigint, p_rd bigint) RETURNS boolean
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+    SELECT p_rating + 2 * p_rd < 1500000000000
+$$;
+-- generate_greedy in its kind-emitting, refuted-pruning shape (the installed
+-- extension may still carry the old signature).
+CREATE OR REPLACE FUNCTION pg_temp.generate_greedy(
+    p_prompt bytea, p_kind bytea DEFAULT NULL, p_depth int DEFAULT 8)
+    RETURNS TABLE(step int, kind_id bytea, entity_id bytea, eff_mu numeric)
+    LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    cur  bytea := p_prompt;
+    nxt  record;
+    seen bytea[] := ARRAY[p_prompt];
+BEGIN
+    FOR i IN 1..p_depth LOOP
+        SELECT c.object_id, c.kind_id AS step_kind, pg_temp.eff_mu_display(c.rating, c.rd) AS mu
+        INTO nxt
+        FROM laplace.consensus c
+        WHERE c.subject_id = cur AND c.object_id IS NOT NULL
+          AND (p_kind IS NULL OR c.kind_id = p_kind)
+          AND NOT pg_temp.refuted(c.rating, c.rd)
+          AND NOT (c.object_id = ANY (seen))
+        ORDER BY pg_temp.eff_mu(c.rating, c.rd) DESC
+        LIMIT 1;
+        EXIT WHEN nxt IS NULL OR nxt.object_id IS NULL;
+        step := i; kind_id := nxt.step_kind; entity_id := nxt.object_id; eff_mu := nxt.mu;
+        RETURN NEXT;
+        seen := seen || nxt.object_id;
+        cur  := nxt.object_id;
+    END LOOP;
+END;
+$$;
 SHIMS
 
     # The converse module from the BUILT extension SQL, retargeted at pg_temp.
     # pg_temp functions are only callable schema-qualified (PG searches the
     # temp schema for relations, never for functions), so every cross-
-    # reference gets qualified.
+    # reference gets qualified. The converse_turns session table becomes a
+    # TEMP table — the session-local loader must never create real tables.
     awk '/^CREATE OR REPLACE FUNCTION word_id/,0' "$BUILT" \
       | sed -e 's/^CREATE OR REPLACE FUNCTION /CREATE OR REPLACE FUNCTION pg_temp./' \
+            -e 's/^CREATE UNLOGGED TABLE converse_turns/CREATE TEMP TABLE converse_turns/' \
             -e 's/SET search_path = @extschema@, public/SET search_path = pg_temp, laplace, public/' \
-      | grep -v '^COMMENT ON FUNCTION' | grep -v "^    '" \
-      | sed -E 's/\b(word_id|label|prompt_words|word_language|senses|define|synonyms|translations|hypernyms|examples|resolve_last_word|kind_id|eff_mu|eff_mu_display)\(/pg_temp.\1(/g; s/pg_temp\.pg_temp\./pg_temp./g'
+      | grep -v '^COMMENT ON' | grep -v "^    '" | grep -v '^SELECT pg_extension_config_dump' \
+      | sed -E 's/\b(word_id|label|prompt_words|word_language|senses|define|synonyms|translations|hypernyms|examples|resolve_last_word|prompt_state|expansion|kind_label|realize_path|realize|related_in|related|describe|isa_path|route_prompt|resolve_topic|respond|converse|generate_greedy|generate_tree|refuted|kind_id|eff_mu|eff_mu_display)\(/pg_temp.\1(/g; s/pg_temp\.pg_temp\./pg_temp./g'
 
-    # Convenience alias. (Loader stays QUIET — only answers print.)
+    # Convenience alias — ask() IS the loop (session = this psql connection,
+    # turns in the TEMP table, anaphora works: "what about its synonyms?").
     cat <<'ASK'
 CREATE OR REPLACE FUNCTION pg_temp.ask(p text)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE AS $$ SELECT * FROM pg_temp.respond(p) $$;
+    LANGUAGE sql VOLATILE AS $$ SELECT * FROM pg_temp.converse(p) $$;
 \timing on
 ASK
 } > "$TMP"

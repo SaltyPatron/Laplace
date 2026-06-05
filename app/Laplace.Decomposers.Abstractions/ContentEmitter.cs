@@ -43,7 +43,15 @@ public static class ContentEmitter
     // content-addressing keeps every entry valid for the life of the process. Bounded to
     // cap memory on the multi-hour corpora: once full, hits still serve — only new inserts
     // stop, and the high-frequency repeats are already resident.
-    private const int MemoCap = 1 << 21; // ~2.1M distinct surfaces
+    private const int MemoCap = 1 << 20; // ~1M distinct SMALL surfaces
+
+    /// <summary>Row-memo eligibility: only content short enough to REPEAT.
+    /// Words/tags/lemmas (≤64 canonical bytes) hit constantly and cost bytes;
+    /// sentences are near-unique — caching their full row sets at corpus scale
+    /// is pure ballast (the 2026-06-05 OOM: UD's 2.6M unique sentences drove
+    /// the ingest process to 110 GB anon-RSS before the kernel killed it).
+    /// Long content still memoizes its ROOT id (16 bytes) in _rootMemo.</summary>
+    private const int MemoMaxContentBytes = 64;
 
     // (source, content-hash) → the rows actually added (T0 already filtered) + root id.
     private static readonly ConcurrentDictionary<(Hash128 Src, Hash128 Content),
@@ -99,7 +107,7 @@ public static class ContentEmitter
         foreach (var e in ents) b.AddEntity(e);
         foreach (var p in phys) b.AddPhysicality(p);
 
-        if (_emitMemo.Count < MemoCap)
+        if (canonical.Length <= MemoMaxContentBytes && _emitMemo.Count < MemoCap)
             _emitMemo.TryAdd(key, (rootId, ents, phys));
         _rootMemo.TryAdd(contentHash, rootId);
         return rootId;

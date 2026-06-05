@@ -105,7 +105,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         _log = logger ?? NullLogger<NpgsqlSubstrateWriter>.Instance;
         bool cacheOn = Environment.GetEnvironmentVariable("LAPLACE_PROVEN_CACHE") != "0";
         int cacheMax = int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_PROVEN_CACHE_MAX"), out var m) && m > 0
-            ? m : 256_000_000;
+            ? m : 32_000_000;   // bounded: the 2026-06-05 OOM autopsy — never default a cache to effectively-infinite
         _provenEntities = new ProvenIdCache(cacheOn, cacheMax);
         _provenPhys     = new ProvenIdCache(cacheOn, cacheMax);
         _provenAtt      = new ProvenIdCache(cacheOn, cacheMax);

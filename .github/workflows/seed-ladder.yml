@@ -34,7 +34,11 @@ permissions:
 #   LAPLACE_FOLD_WORKERS   — staging partitions = concurrent period-fold
 #       sessions (disjoint by relation identity)
 env:
-  LAPLACE_INGEST_WORKERS: 4
+  # Measured 2026-06-05 (6-core runner, UD): 4 appliers + 4 producers + PG
+  # backends oversubscribe the box and run SLOWER than serial; 2+2 keeps
+  # thread demand ≈ cores. Re-tune only with a profile (task #20), never up.
+  LAPLACE_INGEST_WORKERS: 2
+  LAPLACE_DECOMPOSE_WORKERS: 2
   LAPLACE_FOLD_WORKERS: 4
 
 jobs:
@@ -172,11 +176,76 @@ jobs:
       - name: ingest
         run: scripts/ingest-source.sh atomic2020
 
+  verbnet:
+    name: "verbnet (full ladder · predicate semantics)"
+    needs: atomic2020
+    if: ${{ inputs.full_ladder }}
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 60    # 329 class XMLs — minutes, explicit anyway
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: ingest
+        run: scripts/ingest-source.sh verbnet
+
+  propbank:
+    name: "propbank (full ladder · predicate semantics)"
+    needs: verbnet
+    if: ${{ inputs.full_ladder }}
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 60    # 7,566 frameset XMLs — minutes, explicit anyway
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: ingest
+        run: scripts/ingest-source.sh propbank
+
+  framenet:
+    name: "framenet (full ladder · frame semantics, layer 3)"
+    needs: propbank
+    if: ${{ inputs.full_ladder }}
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: ingest
+        run: scripts/ingest-source.sh framenet
+
+  semlink:
+    name: "semlink (full ladder · cross-resource alignment, layer 3)"
+    needs: framenet
+    if: ${{ inputs.full_ladder }}
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: ingest
+        run: scripts/ingest-source.sh semlink
+
+  opensubtitles:
+    name: "opensubtitles (full ladder · 601M aligned pairs — the giant, runs LAST)"
+    needs: semlink
+    if: ${{ inputs.full_ladder }}
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 2880  # 2 days explicit — 601M pairs; never the silent default
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: ingest
+        run: scripts/ingest-source.sh opensubtitles
+
   convergence:
     name: "report — cross-source convergence (entities witnessed by >1 source)"
     # Tail report in BOTH modes: bounded (atomic2020 skipped) and full ladder.
-    needs: [ud, atomic2020]
-    if: ${{ !cancelled() && needs.ud.result == 'success' && (needs.atomic2020.result == 'success' || needs.atomic2020.result == 'skipped') }}
+    needs: [ud, atomic2020, semlink]
+    if: ${{ !cancelled() && needs.ud.result == 'success' && (needs.atomic2020.result == 'success' || needs.atomic2020.result == 'skipped') && (needs.semlink.result == 'success' || needs.semlink.result == 'skipped') }}
     runs-on: [self-hosted, laplace]
     steps:
       - uses: actions/checkout@v4

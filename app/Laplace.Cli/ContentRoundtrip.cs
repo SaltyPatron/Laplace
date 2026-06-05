@@ -46,23 +46,33 @@ internal static class ContentRoundtrip
     }
 
     /// <summary>Decompose + compose the text, store the composed tiers (entities +
-    /// CONTENT physicalities with trajectories) through the writer, and return the
-    /// document entity id (the reconstruction handle).</summary>
+    /// CONTENT physicalities with trajectories) AND the honest DISTRIBUTIONAL
+    /// witness (adjacent within-sentence word bigrams as PRECEDES evidence; the inverse is the reverse query)
+    /// through the writer, and return the document entity id (the reconstruction
+    /// handle). The bigrams are the ONLY thing prose can honestly attest beyond its
+    /// mechanical decomposition — usage/sequence, never meaning; semantics come from
+    /// curated sources and models. Witnessed at UserPrompt trust (kind_rank ×
+    /// source_trust), so a prose witness nudges co-occurrence μ but never out-votes
+    /// a curated relation.</summary>
     public static async Task<Hash128> RecordAsync(
         ISubstrateWriter writer, byte[] utf8, CancellationToken ct = default)
     {
         // Single source of truth: TextEntityBuilder is the ONE decompose→emit path
         // (tier-0 codepoints referenced not re-emitted, content-addressed dedup, the
-        // canonical lossless Build trajectory + POINT/LINESTRING geometry). The prompt
-        // path adds no emission logic of its own — it just records under PromptSource.
-        if (!TextEntityBuilder.TryBuildRows(utf8, PromptSource,
-                out var entities, out var physicalities, out var rootId, out _))
+        // canonical lossless Build trajectory + POINT/LINESTRING geometry, and the
+        // distributional bigram witness). The prompt path adds no emission logic of
+        // its own — it just records under PromptSource at UserPrompt trust.
+        double witnessWeight = KindRank.Associative * SourceTrust.UserPrompt;
+        if (!TextEntityBuilder.TryBuildContentWitness(utf8, PromptSource, witnessWeight,
+                out var entities, out var physicalities, out var attestations, out var rootId, out _))
             return Hash128.Zero;   // TextDecomposer rejected (empty / invalid UTF-8)
 
         var b = new SubstrateChangeBuilder(PromptSource, "prompt", parentIntentId: null,
-            entityCapacity: entities.Length, physicalityCapacity: physicalities.Length);
+            entityCapacity: entities.Length, physicalityCapacity: physicalities.Length,
+            attestationCapacity: attestations.Length);
         foreach (var e in entities)      b.AddEntity(e);
         foreach (var p in physicalities) b.AddPhysicality(p);
+        foreach (var a in attestations)  b.AddAttestation(a);
         await writer.ApplyAsync(b.Build(), ct);
         return rootId;
     }

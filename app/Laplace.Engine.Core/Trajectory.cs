@@ -36,6 +36,35 @@ public static unsafe class Trajectory
     /// buffer of length <c>vertexCount * 4</c> (≤ <c>constituents.Length * 4</c>).
     /// The original constituent count (for <c>NConstituents</c> in the
     /// physicality row) is <c>constituents.Length</c>.</summary>
+    /// <summary>Vertex flag layout (mantissa.h, 2026-06-05): bit 0 HAS_ATOM,
+    /// bits 1..5 constituent tier, bits 31..51 atom scalar (codepoint). In-band
+    /// type/atom — renderers stop joining entities/codepoint_render per leaf.</summary>
+    public const ulong VFlagHasAtom = 1UL;
+    public const int VFlagTierShift = 1, VFlagAtomShift = 31;
+
+    public static ulong VertexFlags(byte tier, bool hasAtom, uint atom)
+    {
+        ulong f = ((ulong)(tier & 0x1F)) << VFlagTierShift;
+        if (hasAtom) f |= VFlagHasAtom | ((ulong)(atom & 0x1FFFFF)) << VFlagAtomShift;
+        return f;
+    }
+
+    /// <summary>Build with per-constituent in-band flags (same order as ids).</summary>
+    public static unsafe double[] Build(ReadOnlySpan<Hash128> constituents, ReadOnlySpan<ulong> flags)
+    {
+        if (flags.Length != constituents.Length)
+            throw new ArgumentException("flags length must match constituents length");
+        var xyzm = new double[constituents.Length * 4];
+        fixed (Hash128* h = constituents)
+        fixed (ulong* fl = flags)
+        fixed (double* o = xyzm)
+        {
+            int rc = NativeInterop.TrajectoryBuildFlagged(h, fl, (nuint)constituents.Length, o);
+            if (rc != 0) throw new InvalidOperationException($"trajectory_build_flagged returned {rc}");
+        }
+        return xyzm;
+    }
+
     public static double[] BuildRle(ReadOnlySpan<Hash128> constituents)
     {
         if (constituents.Length == 0) return [];
