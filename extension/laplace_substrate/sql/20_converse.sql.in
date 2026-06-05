@@ -217,15 +217,10 @@ CREATE OR REPLACE FUNCTION hypernyms(p_word bytea, p_depth int DEFAULT 8)
         WHERE u.depth < p_depth
     )
     SELECT u.depth,
-           (SELECT render_text(m.object_id)
-            FROM consensus m
-            LEFT JOIN consensus lang ON lang.subject_id = m.object_id
-                                    AND lang.kind_id = kind_id('HAS_LANGUAGE')
-                                    AND lang.object_id = word_language(p_word)
-            WHERE m.subject_id = u.syn
-              AND m.kind_id = kind_id('IS_TRANSLATION_OF')
-            ORDER BY (lang.object_id IS NOT NULL) DESC, eff_mu(m.rating, m.rd) DESC
-            LIMIT 1),
+           -- realize() resolves the synset to its top-μ member word via the sense
+           -- chain (same-language preferred), instead of the old IS_TRANSLATION_OF-only
+           -- path that surfaced foreign-language members (individu/causa).
+           realize(u.syn, word_language(p_word)),
            (SELECT render_text(g.object_id)
             FROM consensus g
             WHERE g.subject_id = u.syn
