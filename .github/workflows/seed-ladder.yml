@@ -26,6 +26,17 @@ on:
 permissions:
   contents: read
 
+# Throughput knobs (read by BuildIngestOptions / ConsensusAccumulatingWriter —
+# the same env conventions as LAPLACE_DB). Defaults are sized for a dev box;
+# CI owns the whole 6-core runner, so say so explicitly:
+#   LAPLACE_INGEST_WORKERS — concurrent batch appliers (safe: TEMP-staged
+#       COPY + ON CONFLICT converge overlapping novel ids)
+#   LAPLACE_FOLD_WORKERS   — staging partitions = concurrent period-fold
+#       sessions (disjoint by relation identity)
+env:
+  LAPLACE_INGEST_WORKERS: 4
+  LAPLACE_FOLD_WORKERS: 4
+
 jobs:
   unicode:
     name: "unicode (layer 0 · sets layer marker)"
@@ -52,12 +63,11 @@ jobs:
         run: scripts/ingest-source.sh iso639
       - name: "verify — language graph navigable (filter/focus by script & macrolanguage)"
         run: |
+          # Substrate operating surface only — no hand-built hash expressions.
           P(){ psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -tAc "$1"; }
-          H=public.laplace_hash128_blake3
-          K(){ echo "$H(convert_to('substrate/kind/$1/v1','UTF8'))"; }
-          us=$(P "SELECT count(*) FROM laplace.attestations WHERE kind_id=$(K USES_SCRIPT);")
-          mm=$(P "SELECT count(*) FROM laplace.attestations WHERE kind_id=$(K MEMBER_OF_MACROLANGUAGE);")
-          latin=$(P "SELECT count(*) FROM laplace.attestations WHERE kind_id=$(K USES_SCRIPT) AND object_id=$H(convert_to('unicode/script/Latin/v1','UTF8'));")
+          us=$(P "SELECT laplace.evidence_count(p_kind => laplace.kind_id('USES_SCRIPT'));")
+          mm=$(P "SELECT laplace.evidence_count(p_kind => laplace.kind_id('MEMBER_OF_MACROLANGUAGE'));")
+          latin=$(P "SELECT laplace.evidence_count(p_kind => laplace.kind_id('USES_SCRIPT'), p_object => laplace.canonical_id('unicode/script/Latin/v1'));")
           echo "USES_SCRIPT=$us  MEMBER_OF_MACROLANGUAGE=$mm  languages→Latin=$latin"
           [ "${us:-0}" -gt 0 ]      || { echo "::error::no USES_SCRIPT edges — language↔script graph missing"; exit 1; }
           [ "${mm:-0}" -gt 0 ]      || { echo "::error::no MEMBER_OF_MACROLANGUAGE edges — macrolanguage graph missing"; exit 1; }
@@ -78,10 +88,9 @@ jobs:
       # content regression should fail THIS job, not surface three stages later).
       - name: "verify — WordNet landed CONTENT (kind=1 physicalities), not just attestations"
         run: |
-          WN="public.laplace_hash128_blake3(convert_to('substrate/source/WordNetDecomposer/v1','UTF8'))"
           PSQL=(psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -tAc)
-          c=$("${PSQL[@]}" "SELECT count(*) FROM laplace.physicalities WHERE kind=1 AND source_id=$WN;")
-          a=$("${PSQL[@]}" "SELECT count(*) FROM laplace.attestations  WHERE source_id=$WN;")
+          c=$("${PSQL[@]}" "SELECT laplace.content_count(laplace.source_id('WordNetDecomposer'));")
+          a=$("${PSQL[@]}" "SELECT laplace.evidence_count(p_source => laplace.source_id('WordNetDecomposer'));")
           echo "WordNet: CONTENT physicalities=$c  attestations=$a"
           [ "${c:-0}" -gt 0 ] || { echo "::error::WordNet emitted no CONTENT physicalities — content path regressed"; exit 1; }
           [ "${a:-0}" -gt 0 ] || { echo "::error::WordNet emitted no attestations"; exit 1; }
@@ -90,6 +99,7 @@ jobs:
     name: "omw (layer 3 · multilingual lexemes onto the synsets)"
     needs: wordnet
     runs-on: [self-hosted, laplace]
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
@@ -101,6 +111,7 @@ jobs:
     name: "ud (layer 2 · syntax / UPOS)"
     needs: omw
     runs-on: [self-hosted, laplace]
+    timeout-minutes: 240   # measured 1h56m at WORKERS=1 (2026-06-04 run); explicit > the silent 360 default
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
@@ -114,6 +125,7 @@ jobs:
     needs: ud
     if: ${{ inputs.full_ladder }}
     runs-on: [self-hosted, laplace]
+    timeout-minutes: 720   # multi-hour corpus; explicit, not the silent 360 default
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
@@ -126,6 +138,7 @@ jobs:
     needs: tatoeba
     if: ${{ inputs.full_ladder }}
     runs-on: [self-hosted, laplace]
+    timeout-minutes: 720   # multi-hour corpus; explicit, not the silent 360 default
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
@@ -138,6 +151,7 @@ jobs:
     needs: conceptnet
     if: ${{ inputs.full_ladder }}
     runs-on: [self-hosted, laplace]
+    timeout-minutes: 720   # multi-hour corpus; explicit, not the silent 360 default
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
@@ -150,6 +164,7 @@ jobs:
     needs: wiktionary
     if: ${{ inputs.full_ladder }}
     runs-on: [self-hosted, laplace]
+    timeout-minutes: 720   # multi-hour corpus; explicit, not the silent 360 default
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
@@ -169,5 +184,5 @@ jobs:
       - name: report
         run: |
           m=$(psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -tAc \
-            "SELECT count(*) FROM (SELECT entity_id FROM laplace.physicalities GROUP BY entity_id HAVING count(DISTINCT source_id)>1) t;")
+            "SELECT laplace.multi_source_entity_count();")
           echo "::notice::multi-source entities=$m"

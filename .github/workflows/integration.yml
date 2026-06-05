@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       full_ladder:
-        description: "Decomposer ladder: also ingest omw + ud (slower; big corpora still excluded)"
+        description: "Decomposer ladder: also ingest the multi-hour corpora (tatoeba/conceptnet/wiktionary/atomic2020); omw + ud always run"
         type: boolean
         default: false
 

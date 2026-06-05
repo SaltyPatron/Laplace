@@ -358,16 +358,30 @@ public static class KindRegistry
     }
 
     /// <summary>Emit a dynamic-family kind (DEP_*, FEAT_*) and its is_a edge to
-    /// the family parent on first sight at ingest, so its FK and roll-up exist.
-    /// Idempotent. Use for the kinds <see cref="ResolveDeprel"/> /
-    /// <see cref="ResolveFeature"/> mint, which are unbounded and never seeded
-    /// statically. <paramref name="seen"/> de-dups within an ingest run.</summary>
+    /// the family parent at ingest, so its FK and roll-up exist. TWO gates with
+    /// DIFFERENT scopes, deliberately:
+    /// <list type="bullet">
+    ///   <item><paramref name="seenEntitiesThisBatch"/> — PER BATCH. The kind
+    ///   ENTITY row rides EVERY batch that references the kind, so each batch
+    ///   is referentially SELF-CONTAINED and batches commit in any order
+    ///   (ParallelWorkers &gt; 1, parallel producers). A run-scoped gate here
+    ///   was the ordering bug: only the first-sight batch carried the entity,
+    ///   and a later batch applied concurrently could reference it before it
+    ///   committed. Re-presented entity rows dedup at the writer (and its
+    ///   run-scoped proven-id cache makes the re-presentation free).</item>
+    ///   <item><paramref name="seenAttestationsThisRun"/> — PER RUN (concurrent
+    ///   set under parallel producers). The IS_A edge is TESTIMONY: one run =
+    ///   ONE witness statement on the taxonomy edge, regardless of how many
+    ///   batches mention the kind — the accumulating writer consumes scores
+    ///   per presented row, so re-emitting per batch would multiply games.</item>
+    /// </list></summary>
     public static void SeedDynamic(SubstrateChangeBuilder builder, in KindResolution k, Hash128 sourceId,
-                                   HashSet<Hash128>? seen = null)
+                                   ISet<Hash128> seenEntitiesThisBatch,
+                                   ConcurrentIdSet seenAttestationsThisRun)
     {
-        if (seen is not null && !seen.Add(k.Id)) return;
-        builder.AddEntity(new EntityRow(k.Id, (byte)MetaTier.Kind, BootstrapIntentBuilder.KindMetaTypeId, sourceId));
-        if (k.ParentId is { } parent)
+        if (seenEntitiesThisBatch.Add(k.Id))
+            builder.AddEntity(new EntityRow(k.Id, (byte)MetaTier.Kind, BootstrapIntentBuilder.KindMetaTypeId, sourceId));
+        if (k.ParentId is { } parent && seenAttestationsThisRun.Add(k.Id))
             builder.AddAttestation(Attest(k.Id, "IS_A", parent, sourceId, SourceTrust.AcademicCurated));
     }
 
@@ -376,10 +390,11 @@ public static class KindRegistry
     /// dependency attestation references it. <c>nsubj:pass</c> seeds DEP_NSUBJ
     /// (is_a DEPENDS_ON) then DEP_NSUBJ_PASS (is_a DEP_NSUBJ).</summary>
     public static void SeedDeprel(SubstrateChangeBuilder builder, string deprel, Hash128 sourceId,
-                                  HashSet<Hash128>? seen = null)
+                                  ISet<Hash128> seenEntitiesThisBatch,
+                                  ConcurrentIdSet seenAttestationsThisRun)
     {
         int colon = deprel.IndexOf(':');
-        if (colon > 0) SeedDynamic(builder, ResolveDeprel(deprel[..colon]), sourceId, seen);
-        SeedDynamic(builder, ResolveDeprel(deprel), sourceId, seen);
+        if (colon > 0) SeedDynamic(builder, ResolveDeprel(deprel[..colon]), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun);
+        SeedDynamic(builder, ResolveDeprel(deprel), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun);
     }
 }

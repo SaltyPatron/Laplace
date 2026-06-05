@@ -24,12 +24,12 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     /// </remarks>
     public async Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
     {
+        // Marker kind id resolved by the substrate's own canonical_id — the
+        // app layer never hand-builds a blake3/convert_to expression.
         await using var cmd = _ds.CreateCommand(
-            "SELECT EXISTS(SELECT 1 FROM laplace.attestations a "
-          + "JOIN laplace.entities e ON e.id = a.subject_id "
-          + "WHERE a.kind_id = public.laplace_hash128_blake3($1::bytea))");
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea,
-            System.Text.Encoding.UTF8.GetBytes($"substrate/kind/HasLayerCompleted/{layerOrder}/v1"));
+            "SELECT laplace.evidence_count(p_kind => laplace.canonical_id($1)) > 0");
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Text,
+            $"substrate/kind/HasLayerCompleted/{layerOrder}/v1");
         try
         {
             var result = await cmd.ExecuteScalarAsync(ct);
@@ -39,6 +39,26 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         {
             // Function or kind not yet present (pre-bootstrap or test DB) — treat
             // as "not completed" rather than throwing.
+            return false;
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default)
+    {
+        await using var cmd = _ds.CreateCommand(
+            "SELECT laplace.evidence_count(p_kind => laplace.canonical_id($1), p_source => $2) > 0");
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Text,
+            $"substrate/kind/HasLayerCompleted/{layerOrder}/v1");
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
+        try
+        {
+            var result = await cmd.ExecuteScalarAsync(ct);
+            return result is bool b && b;
+        }
+        catch (PostgresException)
+        {
+            // Pre-bootstrap / test DB without the surface — treat as "not completed".
             return false;
         }
     }

@@ -21,6 +21,7 @@ using Laplace.Engine.Synthesis;
 using Laplace.Ingestion;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using DynamicsInterop = Laplace.Engine.Dynamics.NativeInterop;
 using SynthInterop = Laplace.Engine.Synthesis.NativeInterop;
@@ -70,6 +71,7 @@ internal static class Program
                 + "  synthesize substrate <recipe.json> [output.gguf] [--source-scope <ids>] [--format <name>]\n"
                 + "  decompose <text>\n"
                 + "  inspect <text>\n"
+                + "  converse <prompt>\n"
                 + "  roundtrip <file> [out]\n"
                 + "  db-roundtrip <file>\n"
                 + "  svd-exact-bench [model-dir] [tensor]  (prove tensor_svd_truncate is fp-exact on a real tensor; no DB)\n"
@@ -84,6 +86,7 @@ internal static class Program
                 "synthesize"   => await SynthesizeAsync(args[1..]),
                 "decompose"    => Decompose(string.Join(' ', args[1..])),
                 "inspect"      => await InspectAsync(string.Join(' ', args[1..])),
+                "converse"     => await ConverseAsync(string.Join(' ', args[1..])),
                 "roundtrip"    => Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
                 "db-roundtrip" => await DbRoundtripAsync(args.Length > 1 ? args[1] : ""),
                 "stats"        => await StatsAsync(),
@@ -167,7 +170,7 @@ internal static class Program
         await ContentRoundtrip.BootstrapAsync(writer);
         Hash128 docId = await ContentRoundtrip.RecordAsync(writer, original);
         swR.Stop();
-        Console.WriteLine($"recorded : {original.Length,10:N0} bytes → document {docId.Hi:x16}{docId.Lo:x16}  in {swR.Elapsed.TotalSeconds:F1}s");
+        Console.WriteLine($"recorded : {original.Length,10:N0} bytes → document {Hex(docId)}  in {swR.Elapsed.TotalSeconds:F1}s");
 
         var swX = Stopwatch.StartNew();
         byte[] rebuilt = await ContentRoundtrip.ReconstructAsync(ds, docId);
@@ -185,7 +188,11 @@ internal static class Program
         return match ? 0 : 1;
     }
 
-    private static string Hex(Hash128 h) => $"{h.Hi:x16}{h.Lo:x16}";
+    /// <summary>Wire-order hex — matches encode(id,'hex') in SQL byte for byte.
+    /// The old "{Hi:x16}{Lo:x16}" form printed each ulong half big-endian while
+    /// the bytea wire bytes are the struct's little-endian memory — every id it
+    /// displayed was half-wise byte-reversed against the database.</summary>
+    private static string Hex(Hash128 h) => Convert.ToHexString(h.ToBytes()).ToLowerInvariant();
 
     private static Hash128 ReadHash16(byte[] b) =>
         new Hash128(BitConverter.ToUInt64(b, 0), BitConverter.ToUInt64(b, 8));
@@ -194,6 +201,39 @@ internal static class Program
     // The glass-box, usable by hand: text → correct merkle entity id (engine
     // TextDecomposer + HashComposer, not SQL), then its glome physicalities and
     // Glicko-2-rated attestation neighborhood straight from the DB.
+    // === converse: the conversational read — ONE round-trip, no engine call ===
+    // Text→id resolution happens IN the substrate (laplace.word_id /
+    // prompt_words ride the seeded codepoint perf-cache + blake3 kernel
+    // DB-side), so the CLI neither loads the perfcache blob nor hashes
+    // locally: one SELECT per prompt. laplace.respond routes the question
+    // shape to the matching ranked-μ consensus read.
+    private static async Task<int> ConverseAsync(string prompt)
+    {
+        if (string.IsNullOrWhiteSpace(prompt)) return Fail("usage: laplace converse <prompt>");
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var conn = await ds.OpenConnectionAsync();
+
+        var sw = Stopwatch.StartNew();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT reply, eff_mu, witnesses FROM laplace.respond(@p)";
+        cmd.Parameters.AddWithValue("p", prompt);
+        await using var r = await cmd.ExecuteReaderAsync();
+        Console.WriteLine($"you      : {prompt}");
+        bool any = false;
+        while (await r.ReadAsync())
+        {
+            any = true;
+            string reply = r.IsDBNull(0) ? "" : r.GetString(0);
+            string mu = r.IsDBNull(1) ? "" : $"  μ={r.GetDecimal(1):F1}";
+            string w = r.IsDBNull(2) ? "" : $" witnesses={r.GetInt64(2)}";
+            Console.WriteLine($"substrate: {reply}{mu}{w}");
+        }
+        sw.Stop();
+        if (!any) Console.WriteLine("substrate: (no reply rows)");
+        Console.WriteLine($"           [{sw.Elapsed.TotalMilliseconds:F1} ms, one round-trip]");
+        return 0;
+    }
+
     private static async Task<int> InspectAsync(string text)
     {
         if (string.IsNullOrEmpty(text)) return Fail("usage: laplace inspect <text>");
@@ -272,8 +312,8 @@ internal static class Program
         // Glome facet — laplace.entity_physicalities(id)
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT kind, x, y, z, m, radius, n_constituents, encode(source_id,'hex') "
-                            + "FROM laplace.entity_physicalities(@id)";
+            cmd.CommandText = "SELECT p.kind, p.x, p.y, p.z, p.m, p.radius, p.n_constituents, laplace.render(p.source_id) "
+                            + "FROM laplace.entity_physicalities(@id) p";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
             await using var r = await cmd.ExecuteReaderAsync();
             Console.WriteLine("\n  GLOME (physicalities):");
@@ -282,7 +322,7 @@ internal static class Program
             {
                 n++;
                 Console.WriteLine($"    kind={r.GetInt16(0)}  coord=({r.GetDouble(1):F4},{r.GetDouble(2):F4},{r.GetDouble(3):F4},{r.GetDouble(4):F4})"
-                    + $"  r={r.GetDouble(5):F6}  n_constituents={r.GetInt32(6)}  source={r.GetString(7)[..12]}…");
+                    + $"  r={r.GetDouble(5):F6}  n_constituents={r.GetInt32(6)}  source={r.GetString(7)}");
             }
             if (n == 0) Console.WriteLine("    (none)");
         }
@@ -428,10 +468,11 @@ internal static class Program
         var (modelSource, modelName) = ModelDecomposer.SourceForModel(modelDir);
         await using (var chkConn = await ds.OpenConnectionAsync())
         {
+            // Substrate operating surface — the same probe the IngestRunner
+            // guard uses (evidence_count over the completion-marker kind).
             await using var chkCmd = chkConn.CreateCommand();
             chkCmd.CommandText =
-                "SELECT EXISTS(SELECT 1 FROM laplace.attestations " +
-                "WHERE source_id = $1 AND kind_id = $2 LIMIT 1)";
+                "SELECT laplace.evidence_count(p_kind => $2, p_source => $1) > 0";
             chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = modelSource.ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
             chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = Laplace.Ingestion.LayerCompletion.KindId(dec.LayerOrder).ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
             bool alreadyIngested = (bool)(await chkCmd.ExecuteScalarAsync() ?? false);
@@ -453,11 +494,12 @@ internal static class Program
          * persists as PROVENANCE-ONLY rows (identity 5-tuple, outcome class,
          * games, time — never a value). No mode knob: evidence is provenance,
          * always recorded; values, never. */
+        var loggerFactory = ConsoleLoggerProvider.Factory();
         var inner = new NpgsqlSubstrateWriter(ds);
-        var accumulator = new ConsensusAccumulatingWriter(inner, ds);
+        var accumulator = new ConsensusAccumulatingWriter(inner, ds,
+            logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
         ISubstrateWriter writer = accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
-        var loggerFactory = ConsoleLoggerProvider.Factory();
         var runner = new IngestRunner(writer, reader, loggerFactory);
         Console.WriteLine("mode: consensus accumulates at ingest; evidence = provenance-only rows");
 
@@ -504,9 +546,13 @@ internal static class Program
             return 1;
         }
         {
-            // Materialize the period: ONE set-based upsert of every accumulated
-            // relation, prior = current consensus row. Runs only here — after a
-            // clean period — so a killed run materializes nothing (crash-safe).
+            // Materialize the period: K disjoint partition folds run
+            // concurrently (prior = current consensus row). Runs only here —
+            // after a clean period — so a killed run materializes nothing
+            // (crash-safe). Per-partition progress arrives as fold NOTICEs.
+            Console.WriteLine(
+                $"consensus: folding {accumulator.ObservationsAccumulated:N0} matches "
+                + $"across {accumulator.FoldWorkers} partition(s) ...");
             var matSw = Stopwatch.StartNew();
             var materialized = await accumulator.MaterializeConsensusAsync();
             matSw.Stop();
@@ -1072,11 +1118,13 @@ internal static class Program
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         // THE ONE MODE (same as model ingest): testimony consumed into the
         // period accumulation; evidence persists as provenance-only rows.
+        var loggerFactory = ConsoleLoggerProvider.Factory();
         var innerWriter = new NpgsqlSubstrateWriter(ds);
-        await using var accumulator = new ConsensusAccumulatingWriter(innerWriter, ds);
+        await using var accumulator = new ConsensusAccumulatingWriter(innerWriter, ds,
+            logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
         var writer = (ISubstrateWriter)accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
-        var runner = new IngestRunner(writer, reader, ConsoleLoggerProvider.Factory());
+        var runner = new IngestRunner(writer, reader, loggerFactory);
 
         // Throughput knobs + human-valued progress via the ONE shared builder (same as the
         // model ingest — no separate path). The legacy default (BatchSize=1, CommitRows=0)
@@ -1102,6 +1150,9 @@ internal static class Program
             Console.Error.WriteLine($"failures: {result.Failures.Count}");
             return 1;
         }
+        Console.WriteLine(
+            $"consensus: folding {accumulator.ObservationsAccumulated:N0} matches "
+            + $"across {accumulator.FoldWorkers} partition(s) ...");
         var materialized = await accumulator.MaterializeConsensusAsync();
         Console.WriteLine($"consensus: {materialized:N0} relations materialized "
                         + $"(accumulated at ingest; evidence = provenance-only)");
@@ -1126,44 +1177,36 @@ internal static class Program
     private static async Task PrintCountsAsync(NpgsqlDataSource ds)
     {
         await using var conn = await ds.OpenConnectionAsync();
-        async Task<long> Scalar(string sql, byte[]? p = null)
-        {
-            await using var c = conn.CreateCommand();
-            c.CommandText = sql;
-            if (p is not null) c.Parameters.AddWithValue("p", p);
-            return (long)(await c.ExecuteScalarAsync())!;
-        }
-        long entities = await Scalar("SELECT count(*) FROM laplace.entities");
-        long codepoints = await Scalar("SELECT count(*) FROM laplace.entities WHERE type_id = @p",
-                                       UnicodeDecomposer.CodepointType.ToBytes());
-        long phys = await Scalar("SELECT count(*) FROM laplace.physicalities");
-        long content = await Scalar("SELECT count(*) FROM laplace.physicalities WHERE source_id = @p AND kind = 1",
-                                    UnicodeDecomposer.Source.ToBytes());
-        Console.WriteLine("substrate counts:");
-        Console.WriteLine($"  entities total        : {entities,9:N0}");
-        Console.WriteLine($"  └ Codepoint (T0)      : {codepoints,9:N0}");
-        Console.WriteLine($"  physicalities total   : {phys,9:N0}");
-        Console.WriteLine($"  └ UnicodeDecomposer CONTENT : {content,9:N0}");
 
-        // Show a concrete row: U+0041 'A'. Scoped block so cmd + rdr dispose
-        // before the next conn-using Scalar call (a leaked reader on the shared
-        // conn surfaces as NpgsqlOperationInProgressException — sees as commit
-        // be99495's CI failure).
+        // The substrate's own accounting surface — no hand-written counts.
+        Console.WriteLine("substrate counts:");
+        {
+            await using var counts = conn.CreateCommand();
+            counts.CommandText = "SELECT metric, value FROM laplace.substrate_counts()";
+            await using var rdr = await counts.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+                Console.WriteLine($"  {rdr.GetString(0),-24}: {rdr.GetInt64(1),12:N0}");
+        }
+
+        // Show a concrete row: U+0041 'A' — entirely through the substrate's
+        // glass-box surface (canonical_id resolves, entity_facets/
+        // entity_physicalities report, render reads back). Scoped block so cmd
+        // + rdr dispose before the next conn-using command (a leaked reader on
+        // the shared conn surfaces as NpgsqlOperationInProgressException — see
+        // commit be99495's CI failure).
         {
             await using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"SELECT encode(p.entity_id,'hex'), e.tier,
-                                       ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord),
-                                       encode(p.hilbert_index,'hex')
-                                FROM laplace.physicalities p JOIN laplace.entities e ON e.id = p.entity_id
-                                WHERE p.source_id = @s AND p.kind = 1 AND p.entity_id = @e";
-            cmd.Parameters.AddWithValue("s", UnicodeDecomposer.Source.ToBytes());
-            // entity id of 'A' = BLAKE3-128 of UTF-8 "A"
-            cmd.Parameters.AddWithValue("e", Hash128.Blake3(new byte[] { 0x41 }).ToBytes());
+            cmd.CommandText = @"SELECT laplace.render(laplace.canonical_id('A')), f.tier,
+                                       p.x, p.y, p.z, p.m, encode(p.hilbert_index, 'hex')
+                                FROM laplace.entity_facets(laplace.canonical_id('A')) f
+                                CROSS JOIN laplace.entity_physicalities(laplace.canonical_id('A')) p
+                                WHERE p.kind = 1
+                                  AND p.source_id = laplace.source_id('UnicodeDecomposer')";
             await using var rdr = await cmd.ExecuteReaderAsync();
             if (await rdr.ReadAsync())
             {
                 Console.WriteLine("  sample U+0041 'A':");
-                Console.WriteLine($"    entity id : {rdr.GetString(0)}  tier={rdr.GetInt16(1)}");
+                Console.WriteLine($"    render    : {rdr.GetString(0)}  tier={rdr.GetInt16(1)}");
                 Console.WriteLine($"    coord     : ({rdr.GetDouble(2):F6}, {rdr.GetDouble(3):F6}, {rdr.GetDouble(4):F6}, {rdr.GetDouble(5):F6})");
                 Console.WriteLine($"    hilbert   : {rdr.GetString(6)}");
             }
@@ -1173,37 +1216,30 @@ internal static class Program
             }
         }
 
-        // Multi-model: count the model relation kinds GLOBALLY (across every model source),
-        // not for a single hardcoded source — stats must not assume one model.
-        async Task<long> KindCount(Hash128 kind)
+        // Multi-model: count the model relation kinds GLOBALLY (across every model
+        // source) via the substrate's evidence accounting — kind names resolve
+        // through laplace.kind_id (the one canonicalization rule), so no hash
+        // constants and no inline SQL here.
+        async Task<long> KindCount(string kindName)
         {
             await using var c = conn.CreateCommand();
-            c.CommandText =
-                "SELECT count(*) FROM laplace.attestations WHERE kind_id = @k";
-            c.Parameters.AddWithValue("k", kind.ToBytes());
+            c.CommandText = "SELECT laplace.evidence_count(p_kind => laplace.kind_id($1))";
+            c.Parameters.AddWithValue(kindName);
             return (long)(await c.ExecuteScalarAsync())!;
         }
 
         // The cell ETL's LIVE arenas — the ten tensor-role kinds. ATTENDS /
         // OV_RELATES / COMPLETES_TO are query-time read vocabulary (the bilinear
         // compositions), never ingest-written — they are intentionally absent.
-        (string label, Hash128 kind)[] modelKinds =
+        string[] modelKinds =
         [
-            ("EMBEDS",          ModelDecomposer.EmbedsKind),
-            ("Q_PROJECTS",      ModelDecomposer.QProjectsKind),
-            ("K_PROJECTS",      ModelDecomposer.KProjectsKind),
-            ("V_PROJECTS",      ModelDecomposer.VProjectsKind),
-            ("O_PROJECTS",      ModelDecomposer.OProjectsKind),
-            ("GATES",           ModelDecomposer.GatesKind),
-            ("UP_PROJECTS",     ModelDecomposer.UpProjectsKind),
-            ("DOWN_PROJECTS",   ModelDecomposer.DownProjectsKind),
-            ("NORMALIZES",      ModelDecomposer.NormalizesKind),
-            ("OUTPUT_PROJECTS", ModelDecomposer.OutputProjectsKind),
+            "EMBEDS", "Q_PROJECTS", "K_PROJECTS", "V_PROJECTS", "O_PROJECTS",
+            "GATES", "UP_PROJECTS", "DOWN_PROJECTS", "NORMALIZES", "OUTPUT_PROJECTS",
         ];
         long modelAtts = 0;
         var kindCounts = new long[modelKinds.Length];
         for (int i = 0; i < modelKinds.Length; i++)
-            modelAtts += kindCounts[i] = await KindCount(modelKinds[i].kind);
+            modelAtts += kindCounts[i] = await KindCount(modelKinds[i]);
         if (modelAtts == 0)
         {
             Console.WriteLine("  model attestations    : (none — ingest model)");
@@ -1212,7 +1248,7 @@ internal static class Program
 
         Console.WriteLine($"  model attestations    : {modelAtts,9:N0}");
         for (int i = 0; i < modelKinds.Length; i++)
-            Console.WriteLine($"  └ {modelKinds[i].label,-16}: {kindCounts[i],9:N0}");
+            Console.WriteLine($"  └ {modelKinds[i],-16}: {kindCounts[i],9:N0}");
     }
 
     // === decompose: run the engine text decomposer + hash composer live ===
@@ -1283,8 +1319,7 @@ internal static class Program
     {
         var v = tree.GetNode(idx);
         string label = v.Tier < TierName.Length ? TierName[v.Tier] : $"T{v.Tier}";
-        string idHex;
-        unsafe { idHex = $"{v.Id.Hi:x16}".Substring(0, 8); }
+        string idHex = Hex(v.Id).Substring(0, 8);
         string text = RenderLeaves(tree, idx).Replace("\n", "\\n");
         Console.WriteLine($"{new string(' ', depth * 2)}{label,-9} [{idHex}] \"{text}\"");
         if (v.Tier == 0) return;

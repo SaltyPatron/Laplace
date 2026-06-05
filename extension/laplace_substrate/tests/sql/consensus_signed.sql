@@ -66,7 +66,7 @@ BEGIN
     -- THE fold: the testimony (score, φ) is consumed via the period staging —
     -- (n games, Σ score) partials per relation — then ONE set-based upsert.
     PERFORM create_period_staging();
-    INSERT INTO consensus_period_staging
+    INSERT INTO consensus_period_staging_0
         (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
     VALUES
         (subj, kind, o_conf,  phi_trust, 1, s_conf,     now()),

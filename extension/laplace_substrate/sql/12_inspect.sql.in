@@ -24,11 +24,12 @@ COMMENT ON FUNCTION entity_facets(bytea) IS
 CREATE OR REPLACE FUNCTION entity_physicalities(p_id bytea)
     RETURNS TABLE(kind smallint, x double precision, y double precision,
                   z double precision, m double precision,
-                  radius double precision, n_constituents integer, source_id bytea)
+                  radius double precision, n_constituents integer, source_id bytea,
+                  hilbert_index bytea)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     SELECT p.kind, ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord),
-           p.radius_origin, p.n_constituents, p.source_id
+           p.radius_origin, p.n_constituents, p.source_id, p.hilbert_index
     FROM physicalities p
     WHERE p.entity_id = p_id
     ORDER BY p.kind, p.source_id
@@ -36,7 +37,8 @@ $$;
 
 COMMENT ON FUNCTION entity_physicalities(bytea) IS
     'Glome facet: every per-source 4D physicality on the entity (CONTENT / '
-    'BUILDING_BLOCK / PROJECTION), with radius-from-origin and constituent count.';
+    'BUILDING_BLOCK / PROJECTION), with radius-from-origin, constituent count '
+    'and Hilbert locality index.';
 
 CREATE OR REPLACE FUNCTION attestations_out(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(kind_id bytea, object_id bytea, source_id bytea, context_id bytea,
@@ -211,11 +213,119 @@ CREATE FUNCTION consensus_out_readable(p_id bytea, p_limit integer DEFAULT 40)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     SELECT render(c.kind_id), render(c.object_id),
-           round(((c.rating - 2*c.rd) / 1e9)::numeric, 3), c.witness_count
+           eff_mu_display(c.rating, c.rd), c.witness_count
     FROM consensus c
     WHERE c.subject_id = p_id
-    ORDER BY (c.rating - 2*c.rd) DESC
+    ORDER BY eff_mu(c.rating, c.rd) DESC
     LIMIT p_limit
 $$;
 COMMENT ON FUNCTION consensus_out_readable(bytea, integer) IS
     'consensus_out with every id rendered readable: [kind] → object, signed effective μ, witnesses.';
+
+/* Global readable ranked-μ read — top_relations in the substrate's own voice. */
+CREATE FUNCTION top_relations_readable(p_limit integer DEFAULT 10, p_kind bytea DEFAULT NULL)
+    RETURNS TABLE(subject text, kind text, object text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT render(t.subject_id), render(t.kind_id), render(t.object_id),
+           t.eff_mu, t.witnesses
+    FROM top_relations(p_limit, p_kind) t
+$$;
+COMMENT ON FUNCTION top_relations_readable(integer, bytea) IS
+    'top_relations with every id rendered readable — the one-call proof that ranked-μ inference reads work.';
+
+/* ── OPERATING SURFACE: canonical-family ids + substrate accounting ────────
+ *
+ * The id-builders own the canonicalization rules ('substrate/kind/<NAME>/v1',
+ * 'substrate/source/<Name>/v1') so NO caller — workflow, script, C#, psql —
+ * ever hand-writes a blake3/convert_to expression or juggles hex. The count
+ * functions are the audit/verify surface the CI gates and scripts call
+ * instead of hand-written inline SQL. */
+
+/* Kind name → kind entity id. THE one place the kind family rule lives. */
+CREATE FUNCTION kind_id(p_name text) RETURNS bytea
+    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
+    SELECT @extschema@.canonical_id('substrate/kind/' || p_name || '/v1')
+$$;
+COMMENT ON FUNCTION kind_id(text) IS
+    'Kind NAME → kind entity id via the one canonicalization rule substrate/kind/<NAME>/v1. Callers never hand-build the canonical string.';
+
+/* Source (decomposer) name → source entity id. */
+CREATE FUNCTION source_id(p_name text) RETURNS bytea
+    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
+    SELECT @extschema@.canonical_id('substrate/source/' || p_name || '/v1')
+$$;
+COMMENT ON FUNCTION source_id(text) IS
+    'Source NAME → source entity id via the rule substrate/source/<Name>/v1.';
+
+/* EVIDENCE accounting: attestation rows by kind / source / object (all optional). */
+CREATE FUNCTION evidence_count(
+    p_kind bytea DEFAULT NULL, p_source bytea DEFAULT NULL, p_object bytea DEFAULT NULL)
+    RETURNS bigint
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT count(*)
+    FROM attestations a
+    WHERE (p_kind   IS NULL OR a.kind_id   = p_kind)
+      AND (p_source IS NULL OR a.source_id = p_source)
+      AND (p_object IS NULL OR a.object_id = p_object)
+$$;
+COMMENT ON FUNCTION evidence_count(bytea, bytea, bytea) IS
+    'Count EVIDENCE (attestation) rows, optionally filtered by kind/source/object id (compose with kind_id/source_id/canonical_id). The verify-gate primitive.';
+
+/* CONSENSUS accounting: relation rows by kind (optional). */
+CREATE FUNCTION consensus_count(p_kind bytea DEFAULT NULL)
+    RETURNS bigint
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT count(*) FROM consensus c
+    WHERE (p_kind IS NULL OR c.kind_id = p_kind)
+$$;
+COMMENT ON FUNCTION consensus_count(bytea) IS
+    'Count CONSENSUS relations, optionally by kind id (compose with kind_id). The substance inference reads — the CI kind gates call this.';
+
+/* CONTENT accounting: Content physicalities (kind=1) by source (optional). */
+CREATE FUNCTION content_count(p_source bytea DEFAULT NULL)
+    RETURNS bigint
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT count(*) FROM physicalities p
+    WHERE p.kind = 1
+      AND (p_source IS NULL OR p.source_id = p_source)
+$$;
+COMMENT ON FUNCTION content_count(bytea) IS
+    'Count CONTENT physicalities (kind=1), optionally by source id — "did this decomposer land content, not just attestations".';
+
+/* Cross-source convergence: entities witnessed by more than one source. */
+CREATE FUNCTION multi_source_entity_count()
+    RETURNS bigint
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT count(*) FROM (
+        SELECT p.entity_id FROM physicalities p
+        GROUP BY p.entity_id
+        HAVING count(DISTINCT p.source_id) > 1) t
+$$;
+COMMENT ON FUNCTION multi_source_entity_count() IS
+    'Entities carrying physicalities from >1 source — the omni-source convergence metric (content is identity; sources are witnesses).';
+
+/* The substrate's own row accounting — one call, labeled. */
+CREATE FUNCTION substrate_counts()
+    RETURNS TABLE(metric text, value bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT 'entities',                 count(*) FROM entities
+    UNION ALL
+    SELECT 'entities/codepoint (T0)',  count(*) FROM entities
+        WHERE type_id = canonical_id('substrate/type/Codepoint/v1')
+    UNION ALL
+    SELECT 'physicalities',            count(*) FROM physicalities
+    UNION ALL
+    SELECT 'physicalities/content',    count(*) FROM physicalities WHERE kind = 1
+    UNION ALL
+    SELECT 'attestations (evidence)',  count(*) FROM attestations
+    UNION ALL
+    SELECT 'consensus (relations)',    count(*) FROM consensus
+$$;
+COMMENT ON FUNCTION substrate_counts() IS
+    'Labeled row accounting across the substrate''s core tables — the stats surface (CLI stats, e2e scripts) instead of hand-written counts.';

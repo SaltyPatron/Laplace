@@ -216,6 +216,11 @@ internal static class Program
             // PostgreSQL's unquoted-identifier case-folding. Matches what
             // DbUp produces by default; RunReset() drops by this same name.
             .JournalToPostgresqlTable("public", "schemaversions")
+            // Migrations are plain PostgreSQL DDL — none uses DbUp's $var$
+            // substitution, and leaving it on makes DbUp misparse PG
+            // dollar-quote tags as variables ("Variable f has no value
+            // defined" on $f$…$f$ in 20260605050000).
+            .WithVariablesDisabled()
             // Substrate-scale DDL (index builds over 10⁸-row consensus/evidence
             // tables) outlives Npgsql's 30 s default CommandTimeout — the
             // 20260604220000 index build timed out client-side mid-CREATE.

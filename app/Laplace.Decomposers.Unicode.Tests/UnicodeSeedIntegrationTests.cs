@@ -70,19 +70,20 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
             ("t", UnicodeDecomposer.CodepointType.ToBytes()));
         Assert.Equal(TotalCodepoints, entityCount);
 
-        // ... each with exactly one CONTENT physicality from UnicodeDecomposer.
+        // ... each with exactly one CONTENT physicality from UnicodeDecomposer —
+        // counted through the substrate's own accounting surface.
         long physCount = await ScalarLong(
-            "SELECT count(*) FROM laplace.physicalities WHERE source_id = @s AND kind = 1",
+            "SELECT laplace.content_count(@s)",
             ("s", UnicodeDecomposer.Source.ToBytes()));
         Assert.Equal(TotalCodepoints, physCount);
 
-        // 'A' (U+0041) — BLAKE3-128 of single byte 0x41, present in the DB.
+        // 'A' (U+0041) — resolved + read back via the substrate operating
+        // surface (canonical_id / entity_physicalities), no hand-written join.
         await using var conn = await _ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"SELECT ST_X(coord), ST_Y(coord), ST_Z(coord), ST_M(coord)
-                            FROM laplace.physicalities
-                            WHERE entity_id = @e AND source_id = @s AND kind = 1";
-        cmd.Parameters.AddWithValue("e", Hash128.Blake3(new byte[] { 0x41 }).ToBytes());
+        cmd.CommandText = @"SELECT p.x, p.y, p.z, p.m
+                            FROM laplace.entity_physicalities(laplace.canonical_id('A')) p
+                            WHERE p.source_id = @s AND p.kind = 1";
         cmd.Parameters.AddWithValue("s", UnicodeDecomposer.Source.ToBytes());
         await using var r = await cmd.ExecuteReaderAsync();
         Assert.True(await r.ReadAsync(), "no CONTENT physicality for U+0041");

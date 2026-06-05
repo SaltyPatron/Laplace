@@ -59,6 +59,7 @@ set(EXT_SQL_MODULES
     sql/13_consensus.sql.in
     sql/14_geometry_consensus.sql.in
     sql/12_inspect.sql.in
+    sql/15_converse.sql.in
 )
 
 set(EXT_BUILT_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}--${EXT_VERSION}.sql)

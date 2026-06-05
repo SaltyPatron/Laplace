@@ -36,18 +36,17 @@ for s in "${LADDER[@]}"; do
   echo "::endgroup::"
 done
 
-WN_SRC="public.laplace_hash128_blake3(convert_to('substrate/source/WordNetDecomposer/v1','UTF8'))"
-
+# Substrate operating surface only — no hand-built hash expressions.
 # Regression gate: WordNet must emit CONTENT physicalities (kind=1). Zero before the fix.
-wn_content=$("${PSQL[@]}" "SELECT count(*) FROM laplace.physicalities WHERE kind = 1 AND source_id = ${WN_SRC};")
+wn_content=$("${PSQL[@]}" "SELECT laplace.content_count(laplace.source_id('WordNetDecomposer'));")
 log "WordNet CONTENT physicalities = ${wn_content}"
 [[ "${wn_content:-0}" -gt 0 ]] || die "WordNet emitted no CONTENT physicalities — content path regressed (string-keyed / attestations-only)"
 
-wn_att=$("${PSQL[@]}" "SELECT count(*) FROM laplace.attestations WHERE source_id = ${WN_SRC};")
+wn_att=$("${PSQL[@]}" "SELECT laplace.evidence_count(p_source => laplace.source_id('WordNetDecomposer'));")
 log "WordNet attestations = ${wn_att}"
 [[ "${wn_att:-0}" -gt 0 ]] || die "WordNet emitted no attestations"
 
 # Informational: entities witnessed by >1 source (cross-source convergence) — grows once a
 # 2nd content source (omw/ud/model) lands; not a hard gate in the bounded ladder.
-multi=$("${PSQL[@]}" "SELECT count(*) FROM (SELECT entity_id FROM laplace.physicalities GROUP BY entity_id HAVING count(DISTINCT source_id) > 1) t;")
+multi=$("${PSQL[@]}" "SELECT laplace.multi_source_entity_count();")
 echo "::notice::decomposer ladder OK — WordNet content=${wn_content}, attestations=${wn_att}, multi-source entities=${multi}"

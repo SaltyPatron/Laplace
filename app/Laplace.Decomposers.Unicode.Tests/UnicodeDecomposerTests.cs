@@ -165,6 +165,8 @@ public sealed class UnicodeDecomposerTests
     {
         public Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
             => Task.FromResult(false);
+        public Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default)
+            => Task.FromResult(false);
         public Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default)
             => Task.FromResult(0L);
         public Task<byte[]> EntitiesExistBitmapAsync(IReadOnlyList<Hash128> candidates, CancellationToken ct = default)

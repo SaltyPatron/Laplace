@@ -163,12 +163,14 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         Assert.Equal(0, first.UnitsFailed);
         Assert.True(first.EntitiesInserted >= 20);   // 5 * (3 leaves + 1 parent)
 
-        // Re-run: no checkpoint, no resume state. Content-addressed identity + the
-        // writer's existence-check + INSERT … ON CONFLICT DO NOTHING make every
-        // intent a no-op — all 5 "apply" (idempotent), zero novel rows, zero
-        // failures. Idempotency is the substrate's property, not a side journal's.
+        // Re-run of a COMPLETED source: the runner's re-ingest guard
+        // short-circuits on the completion marker BEFORE decomposition — rows
+        // are idempotent but testimony is not (the accumulating writer consumes
+        // scores in flight; a re-run would fold the source's games into
+        // consensus a second time). Nothing attempted, nothing inserted.
         var second = await runner.RunAsync(new SyntheticDecomposer(unitCount: 5, sourceId: srcId), options);
-        Assert.Equal(5, second.UnitsApplied);
+        Assert.Equal(0, second.UnitsAttempted);
+        Assert.Equal(0, second.UnitsApplied);
         Assert.Equal(0, second.UnitsFailed);
         Assert.Equal(0, second.EntitiesInserted);
     }
@@ -237,11 +239,13 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         Assert.Equal(7, first.UnitsApplied);
         Assert.Equal(0, first.UnitsFailed);
 
-        // Re-run through the batched COPY path: the staging-table + ON CONFLICT
-        // DO NOTHING promote dedups every row, so the second pass inserts nothing
-        // novel and fails none — idempotent with no resume bookkeeping.
+        // Re-run of a COMPLETED source short-circuits at the re-ingest guard
+        // (completion marker) before the batched path is ever reached — same
+        // contract as the per-intent path: re-running a clean source would
+        // double-count its testimony into consensus.
         var second = await runner.RunAsync(new SyntheticDecomposer(7, srcId), options);
-        Assert.Equal(7, second.UnitsApplied);
+        Assert.Equal(0, second.UnitsAttempted);
+        Assert.Equal(0, second.UnitsApplied);
         Assert.Equal(0, second.UnitsFailed);
         Assert.Equal(0, second.EntitiesInserted);
     }

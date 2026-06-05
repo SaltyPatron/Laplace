@@ -71,6 +71,33 @@ CREATE OR REPLACE FUNCTION consensus_id(
         || COALESCE(p_object, '\x00000000000000000000000000000000'::bytea))
 $$;
 
+/* ── THE effective-μ definition — ONE place ────────────────────────────────
+ * eff_mu = rating − 2·rd (the ~95% lower bound), SIGNED, fixed-point ×1e9 —
+ * the same formula as the C engine's glicko2_effective_mu (one source of math
+ * truth; C# delegates to the C primitive and is forbidden from inlining it —
+ * Glicko2.cs — and SQL callers are now under the same law). LANGUAGE sql,
+ * single expression, non-STRICT ⇒ the planner INLINES every call to the
+ * literal expression (rating - 2*rd), so the two expression indexes above
+ * serve eff_mu() reads with no rebuild and no plan change. NEVER hand-write
+ * rating − 2·rd in a query — call eff_mu; this body and the index
+ * expressions change TOGETHER or not at all.
+ * NO SET clause on either function: any proconfig disables SQL-function
+ * inlining (the whole point); both bodies are search-path-independent. */
+CREATE OR REPLACE FUNCTION eff_mu(p_rating bigint, p_rd bigint)
+    RETURNS bigint LANGUAGE sql LAPLACE_IMMUTABLE AS $$
+    SELECT p_rating - 2 * p_rd
+$$;
+COMMENT ON FUNCTION eff_mu(bigint, bigint) IS
+    'Effective μ = rating − 2·rd (×1e9, SIGNED). THE one definition — planner-inlined, matches the consensus eff-μ expression indexes. Never hand-write the expression.';
+
+/* Human-valued μ (rating units, 3 dp) — the one display scaling. */
+CREATE OR REPLACE FUNCTION eff_mu_display(p_rating bigint, p_rd bigint)
+    RETURNS numeric LANGUAGE sql LAPLACE_IMMUTABLE AS $$
+    SELECT round((@extschema@.eff_mu(p_rating, p_rd) / 1e9)::numeric, 3)
+$$;
+COMMENT ON FUNCTION eff_mu_display(bigint, bigint) IS
+    'eff_mu rendered in rating units (÷1e9, 3 dp) — the one display scaling for μ.';
+
 /* There is deliberately NO batch "rebuild" and NO evidence-replay fold.
  * Backfill/drain over the whole evidence set is forbidden on this substrate —
  * and impossible by construction: evidence is PROVENANCE-only and carries no
@@ -95,114 +122,222 @@ $$;
  *
  * The writer accumulates per-relation partial aggregates (n games,
  * Σ score — exact for one period because φ is constant per relation per
- * period) and spills them into a session-scoped staging heap. These two
- * functions own that surface IN THE SUBSTRATE — the application layer calls
- * them and COPYs; it hand-writes no SQL and duplicates no §10 constants. */
+ * period) and spills them into K per-period staging PARTITIONS, routed by
+ * relation identity: ALL partials of one relation land in ONE partition, so
+ * Σ-of-Σ merging stays exact per partition, φ-uniformity is checkable per
+ * partition, and the K folds touch DISJOINT consensus rows — they run
+ * concurrently with no coordination. These functions own that surface IN THE
+ * SUBSTRATE — the application layer calls them and COPYs; it hand-writes no
+ * SQL and duplicates no §10 constants.
+ *
+ * UNLOGGED, not TEMP. TEMP staging pinned the whole period to ONE session and
+ * therefore ONE backend — one CPU core folding a model-scale period (the
+ * 2026-06-05 CI autopsy: 153M staged relations, >4h14m in a single backend,
+ * killed by the job timeout with nothing materialized). UNLOGGED partitions
+ * keep the staging COPY off WAL and let K sessions stage and fold
+ * concurrently. Crash-safety is preserved by construction, not session scope:
+ *   - consensus is touched ONLY by the fold, which the caller runs ONLY at
+ *     the clean end of an ingest period — a killed run materializes NOTHING;
+ *   - a PG crash truncates UNLOGGED staging (WAL-less by definition);
+ *   - a killed APP leaves dead staging behind; create_period_staging sweeps
+ *     every consensus_period_staging_% table before creating the new period
+ *     (the per-source-eviction discipline — had the dead period completed,
+ *     its fold would have dropped them). One ingest at a time per DB is the
+ *     ladder's own law, so the staging names carry no session token. */
 
-/* Session-scoped staging heap for one ingest period's partial aggregates.
- * TEMP ⇒ a crashed run drops it with the session and materializes nothing. */
-CREATE OR REPLACE FUNCTION create_period_staging()
+/* Sweep ALL period staging partitions (dead-period eviction + clean-abort). */
+CREATE OR REPLACE FUNCTION drop_period_staging()
     RETURNS void LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public AS $$
+DECLARE
+    stale text;
 BEGIN
-    CREATE TEMP TABLE consensus_period_staging (
-        subject_id bytea  NOT NULL,
-        kind_id    bytea  NOT NULL,
-        object_id  bytea,
-        phi        bigint NOT NULL,
-        games      bigint NOT NULL,
-        sum_score  bigint NOT NULL,
-        last_ts    timestamptz NOT NULL
-    );   -- no indexes: append-only heap, grouped exactly once at materialization
+    FOR stale IN
+        SELECT c.relname FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = current_schema() AND c.relkind = 'r'
+          AND c.relname LIKE 'consensus\_period\_staging\_%'
+    LOOP
+        EXECUTE format('DROP TABLE %I', stale);
+    END LOOP;
 END;
 $$;
 
-COMMENT ON FUNCTION create_period_staging() IS
-    'Create the session-scoped TEMP staging heap for one ingest period''s partial (n, Σs) aggregates. Crash drops it with the session — nothing materializes from a dead period.';
+COMMENT ON FUNCTION drop_period_staging() IS
+    'Drop every consensus_period_staging_<k> partition: dead-period sweep (create_period_staging calls it first) and the writer''s clean-abort path.';
 
-/* Materialize the period: merge partials per relation (Σ of Σ — exact),
- * verify φ-uniformity (fail loud, never average), then upsert consensus via
- * the §10 mapping: prior = current row (neutral when new), neutral opponent,
- * per-witness φ, n games whose scores sum EXACTLY to Σs — applied through
- * laplace_glicko2_accumulate_games, the batch entry that builds the identical
- * observation multiset ((n−1) at ⌊Σs/n⌋ + one remainder game) inside the C
- * kernel: bit-identical to the per-game replay, ONE call per relation (the
- * generate_series replay pushed games×relations rows — 1.1e9 for TinyLlama —
- * through the executor and took 182 min; the work is one kernel period).
- *
- * SET session_replication_role = replica: per-row RI triggers are redundant
- * here — every staged relation id entered through the writer's set-based
- * referential proof when its entities landed this period (or pre-existed).
- * Function-level SET ⇒ scoped to this call, self-reverting, never leaks. */
-CREATE OR REPLACE FUNCTION materialize_period_consensus()
-    RETURNS bigint LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public
-    SET session_replication_role = replica AS $$
+/* Create the K UNLOGGED staging partitions for one ingest period. The writer
+ * routes each relation to partition (hash of relation identity) mod K and
+ * later folds each partition from its own session. */
+CREATE OR REPLACE FUNCTION create_period_staging(p_partitions integer DEFAULT 1)
+    RETURNS void LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
 DECLARE
-    n_bad bigint;
-    n_materialized bigint;
+    k integer;
 BEGIN
-    SELECT count(*) INTO n_bad FROM (
-        SELECT 1 FROM consensus_period_staging
-        GROUP BY subject_id, kind_id, object_id
-        HAVING min(phi) <> max(phi)) bad;
-    IF n_bad > 0 THEN
-        RAISE EXCEPTION 'accumulation invariant violated: % relation(s) observed with mixed φ within one period', n_bad;
+    IF p_partitions < 1 OR p_partitions > 64 THEN
+        RAISE EXCEPTION 'create_period_staging: % partitions out of range 1..64', p_partitions;
     END IF;
+    PERFORM drop_period_staging();
+    FOR k IN 0 .. p_partitions - 1 LOOP
+        EXECUTE format(
+            'CREATE UNLOGGED TABLE %I (
+                 subject_id bytea  NOT NULL,
+                 kind_id    bytea  NOT NULL,
+                 object_id  bytea,
+                 phi        bigint NOT NULL,
+                 games      bigint NOT NULL,
+                 sum_score  bigint NOT NULL,
+                 last_ts    timestamptz NOT NULL
+             )',   -- no indexes: append-only heap, grouped exactly once at the fold
+            'consensus_period_staging_' || k);
+    END LOOP;
+END;
+$$;
 
-    WITH merged AS (
-        SELECT s.subject_id, s.kind_id, s.object_id,
-               min(s.phi)               AS phi,
-               -- sum(bigint) returns NUMERIC in PG — cast back so the score
-               -- expression stays bigint and the aggregate signature resolves.
-               sum(s.games)::bigint     AS games,
-               sum(s.sum_score)::bigint AS sum_score,
-               max(s.last_ts)           AS last_ts
-        FROM consensus_period_staging s
-        GROUP BY s.subject_id, s.kind_id, s.object_id
-    )
-    INSERT INTO consensus (id, subject_id, kind_id, object_id,
-                           rating, rd, volatility, witness_count, last_observed_at)
-    SELECT f.cid,
-           f.subject_id, f.kind_id, f.object_id,
-           (f.acc).rating, (f.acc).rd, (f.acc).volatility,
-           f.prior_witnesses + f.games,
-           f.last_ts
-    FROM (
-        -- ONE prior lookup per relation (rating/rd/volatility AND witness_count
-        -- ride the same join), ONE consensus_id evaluation, ONE kernel call —
-        -- no per-game row explosion, no re-GROUP BY (merged is already grouped).
-        SELECT m.subject_id, m.kind_id, m.object_id, m.games, m.last_ts,
-               m.cid, COALESCE(c.witness_count, 0) AS prior_witnesses,
-               laplace_glicko2_accumulate_games(
-                   COALESCE(c.rating,     1500000000000::bigint),   -- prior = current consensus,
-                   COALESCE(c.rd,          350000000000::bigint),   -- neutral when the relation is new
-                   COALESCE(c.volatility,     60000000::bigint),
-                   1500000000000::bigint,                            -- NEUTRAL opponent μ (the 1500 line)
-                   m.phi,                                            -- opponent φ from witness trust
-                   m.games,
-                   m.sum_score,
-                   500000000::bigint                                 -- τ = 0.5
-               ) AS acc
-        FROM (SELECT mm.*, consensus_id(mm.subject_id, mm.kind_id, mm.object_id) AS cid
-              FROM merged mm) m
-        LEFT JOIN consensus c ON c.id = m.cid
-    ) f
-    ON CONFLICT (id) DO UPDATE SET
-        rating           = EXCLUDED.rating,
-        rd               = EXCLUDED.rd,
-        volatility       = EXCLUDED.volatility,
-        witness_count    = EXCLUDED.witness_count,
-        last_observed_at = EXCLUDED.last_observed_at;
+COMMENT ON FUNCTION create_period_staging(integer) IS
+    'Create K UNLOGGED staging partitions (consensus_period_staging_0..K−1) for one ingest period''s partial (n, Σs) aggregates, sweeping any dead period first. Partitioned by relation identity ⇒ the K folds are disjoint and run concurrently.';
+
+/* Raised ONLY from the violation arm of the fold's CASE — the good path pays
+ * nothing. Mixed φ for one relation within one period is a decomposer bug:
+ * fail loud, never average. */
+CREATE OR REPLACE FUNCTION period_phi_mixed(p_subject bytea, p_kind bytea, p_object bytea)
+    RETURNS bigint LANGUAGE plpgsql STABLE
+    SET search_path = @extschema@, public AS $$
+BEGIN
+    RAISE EXCEPTION 'accumulation invariant violated: relation (% —[%]→ %) observed with mixed φ within one period',
+        render(p_subject), render(p_kind), COALESCE(render(p_object), '∅');
+END;
+$$;
+
+COMMENT ON FUNCTION period_phi_mixed(bytea, bytea, bytea) IS
+    'φ-uniformity violation: always raises, naming the relation in the substrate''s own voice (render). Called only from the fold''s CASE violation arm.';
+
+/* Fold ONE staging partition: merge partials per relation (Σ of Σ — exact),
+ * φ-uniformity guarded IN the same pass (min(phi)/max(phi) ride the merge
+ * GROUP BY; the CASE arm raises via period_phi_mixed — the old separate
+ * verification pass re-grouped the whole staging heap a second time), then
+ * upsert consensus via the §10 mapping: prior = current row (neutral when
+ * new), neutral opponent, per-witness φ, n games whose scores sum EXACTLY to
+ * Σs — applied through laplace_glicko2_accumulate_games, the batch entry that
+ * builds the identical observation multiset ((n−1) at ⌊Σs/n⌋ + one remainder
+ * game) inside the C kernel: bit-identical to the per-game replay, ONE call
+ * per relation (the generate_series replay pushed games×relations rows —
+ * 1.1e9 for TinyLlama — through the executor and took 182 min; the work is
+ * one kernel period). Drops its partition when done and RAISE NOTICEs its
+ * count + wall-clock so the caller's log shows fold progress per partition. */
+CREATE OR REPLACE FUNCTION materialize_period_partition(p_table text)
+    RETURNS bigint LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    n_materialized bigint;
+    t0 timestamptz := clock_timestamp();
+BEGIN
+    IF to_regclass(p_table) IS NULL THEN
+        RAISE EXCEPTION 'materialize_period_partition: staging % does not exist', p_table;
+    END IF;
+    EXECUTE format($f$
+        WITH merged AS (
+            SELECT s.subject_id, s.kind_id, s.object_id,
+                   min(s.phi)               AS phi_min,
+                   max(s.phi)               AS phi_max,
+                   -- sum(bigint) returns NUMERIC in PG — cast back so the score
+                   -- expression stays bigint and the aggregate signature resolves.
+                   sum(s.games)::bigint     AS games,
+                   sum(s.sum_score)::bigint AS sum_score,
+                   max(s.last_ts)           AS last_ts
+            FROM %I s
+            GROUP BY s.subject_id, s.kind_id, s.object_id
+        )
+        INSERT INTO consensus (id, subject_id, kind_id, object_id,
+                               rating, rd, volatility, witness_count, last_observed_at)
+        SELECT f.cid,
+               f.subject_id, f.kind_id, f.object_id,
+               (f.acc).rating, (f.acc).rd, (f.acc).volatility,
+               f.prior_witnesses + f.games,
+               f.last_ts
+        FROM (
+            -- ONE prior lookup per relation (rating/rd/volatility AND witness_count
+            -- ride the same join), ONE consensus_id evaluation, ONE kernel call —
+            -- no per-game row explosion, no re-GROUP BY (merged is already grouped).
+            SELECT m.subject_id, m.kind_id, m.object_id, m.games, m.last_ts,
+                   m.cid, COALESCE(c.witness_count, 0) AS prior_witnesses,
+                   laplace_glicko2_accumulate_games(
+                       COALESCE(c.rating,     1500000000000::bigint),   -- prior = current consensus,
+                       COALESCE(c.rd,          350000000000::bigint),   -- neutral when the relation is new
+                       COALESCE(c.volatility,     60000000::bigint),
+                       1500000000000::bigint,                            -- NEUTRAL opponent μ (the 1500 line)
+                       CASE WHEN m.phi_min <> m.phi_max                  -- φ-uniformity, same pass
+                            THEN period_phi_mixed(m.subject_id, m.kind_id, m.object_id)
+                            ELSE m.phi_min END,                          -- opponent φ from witness trust
+                       m.games,
+                       m.sum_score,
+                       500000000::bigint                                 -- τ = 0.5
+                   ) AS acc
+            FROM (SELECT mm.*, consensus_id(mm.subject_id, mm.kind_id, mm.object_id) AS cid
+                  FROM merged mm) m
+            LEFT JOIN consensus c ON c.id = m.cid
+        ) f
+        ON CONFLICT (id) DO UPDATE SET
+            rating           = EXCLUDED.rating,
+            rd               = EXCLUDED.rd,
+            volatility       = EXCLUDED.volatility,
+            witness_count    = EXCLUDED.witness_count,
+            last_observed_at = EXCLUDED.last_observed_at
+    $f$, p_table);
     GET DIAGNOSTICS n_materialized = ROW_COUNT;
 
-    DROP TABLE consensus_period_staging;
+    EXECUTE format('DROP TABLE %I', p_table);
+    -- LOG, not NOTICE: the writer's fold sessions opt in with
+    -- client_min_messages='log' and surface this as live progress; psql
+    -- regress (default NOTICE) stays deterministic — the message carries
+    -- wall-clock.
+    RAISE LOG 'period fold %: % relations materialized in %',
+        p_table, n_materialized, clock_timestamp() - t0;
     RETURN n_materialized;
 END;
 $$;
 
-COMMENT ON FUNCTION materialize_period_consensus() IS
-    'Materialize one ingest period from the session''s staging heap into consensus: merge partial (n, Σs) aggregates per relation (exact — φ constant per period), verify φ-uniformity (fail loud), accumulate via laplace_glicko2_accumulate against the current row as prior, upsert, drop the staging. RI triggers skipped via function-scoped replica role: referential validity was proven set-based at write time.';
+COMMENT ON FUNCTION materialize_period_partition(text) IS
+    'Fold ONE staging partition into consensus: single-pass merge (φ-guard rides the GROUP BY), prior = current row, laplace_glicko2_accumulate_games kernel, upsert, drop the partition. Partitions are disjoint by relation identity — K of these run concurrently from K sessions.';
+
+/* Materialize the period. p_partition = k folds exactly partition k (the
+ * parallel callers — one session per partition); NULL folds every existing
+ * partition sequentially (the single-session path; regress + small periods).
+ *
+ * SET session_replication_role = replica: per-row RI triggers are redundant
+ * here — every staged relation id entered through the writer's set-based
+ * referential proof when its entities landed this period (or pre-existed).
+ * SET work_mem: the merge GROUP BY hash-aggregates the partition; the global
+ * work_mem (sized for OLTP reads) spills a model-scale partition to disk.
+ * Function-level SETs ⇒ scoped to this call, self-reverting, never leak. */
+CREATE OR REPLACE FUNCTION materialize_period_consensus(p_partition integer DEFAULT NULL)
+    RETURNS bigint LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public
+    SET session_replication_role = replica
+    SET work_mem = '4GB' AS $$
+DECLARE
+    t text;
+    total bigint := 0;
+BEGIN
+    IF p_partition IS NOT NULL THEN
+        RETURN materialize_period_partition('consensus_period_staging_' || p_partition);
+    END IF;
+    FOR t IN
+        SELECT c.relname FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = current_schema() AND c.relkind = 'r'
+          AND c.relname LIKE 'consensus\_period\_staging\_%'
+        ORDER BY c.relname
+    LOOP
+        total := total + materialize_period_partition(t);
+    END LOOP;
+    RETURN total;
+END;
+$$;
+
+COMMENT ON FUNCTION materialize_period_consensus(integer) IS
+    'Materialize one ingest period from the staging partitions into consensus. p_partition=k folds partition k (K parallel sessions = K cores); NULL folds all sequentially. Single-pass per partition; RI triggers skipped via function-scoped replica role (validity proven set-based at write time).';
 
 /* ── Permanent inference queries — part of the substrate, not regenerated per session ──────
  * Relatedness/inference is a sorted index scan over consensus effective μ (μ - 2·rd). These
@@ -214,10 +349,10 @@ CREATE OR REPLACE FUNCTION top_relations(p_limit integer DEFAULT 50, p_kind byte
     RETURNS TABLE(subject_id bytea, kind_id bytea, object_id bytea, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
     SELECT c.subject_id, c.kind_id, c.object_id,
-           round(((c.rating - 2*c.rd) / 1e9)::numeric, 3), c.witness_count
+           eff_mu_display(c.rating, c.rd), c.witness_count
     FROM consensus c
     WHERE c.object_id IS NOT NULL AND (p_kind IS NULL OR c.kind_id = p_kind)
-    ORDER BY (c.rating - 2*c.rd) DESC
+    ORDER BY eff_mu(c.rating, c.rd) DESC
     LIMIT p_limit
 $$;
 COMMENT ON FUNCTION top_relations(integer, bytea) IS
@@ -229,10 +364,10 @@ COMMENT ON FUNCTION top_relations(integer, bytea) IS
 CREATE OR REPLACE FUNCTION completions(p_subject bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(object_id bytea, kind_id bytea, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
-    SELECT c.object_id, c.kind_id, round(((c.rating - 2*c.rd) / 1e9)::numeric, 3), c.witness_count
+    SELECT c.object_id, c.kind_id, eff_mu_display(c.rating, c.rd), c.witness_count
     FROM consensus c
     WHERE c.subject_id = p_subject AND c.object_id IS NOT NULL
-    ORDER BY (c.rating - 2*c.rd) DESC
+    ORDER BY eff_mu(c.rating, c.rd) DESC
     LIMIT p_limit
 $$;
 COMMENT ON FUNCTION completions(bytea, integer) IS
@@ -250,7 +385,7 @@ CREATE OR REPLACE FUNCTION consensus_out(p_id bytea, p_limit integer DEFAULT 40)
     SELECT c.kind_id, c.object_id, c.rating, c.rd, c.volatility, c.witness_count
     FROM consensus c
     WHERE c.subject_id = p_id
-    ORDER BY (c.rating - 2*c.rd) DESC
+    ORDER BY eff_mu(c.rating, c.rd) DESC
     LIMIT p_limit
 $$;
 COMMENT ON FUNCTION consensus_out(bytea, integer) IS
@@ -263,7 +398,7 @@ CREATE OR REPLACE FUNCTION consensus_in(p_id bytea, p_limit integer DEFAULT 40)
     SELECT c.subject_id, c.kind_id, c.rating, c.rd, c.volatility, c.witness_count
     FROM consensus c
     WHERE c.object_id = p_id
-    ORDER BY (c.rating - 2*c.rd) DESC
+    ORDER BY eff_mu(c.rating, c.rd) DESC
     LIMIT p_limit
 $$;
 COMMENT ON FUNCTION consensus_in(bytea, integer) IS
@@ -299,14 +434,14 @@ CREATE OR REPLACE FUNCTION generate_tree(
         FROM walk w
         CROSS JOIN LATERAL (
             SELECT c.object_id,
-                   round(((c.rating - 2*c.rd) / 1e9)::numeric, 3) AS eff_mu,
+                   eff_mu_display(c.rating, c.rd) AS eff_mu,
                    c.witness_count
             FROM consensus c
             WHERE c.subject_id = w.entity_id
               AND c.object_id IS NOT NULL
               AND (p_kind IS NULL OR c.kind_id = p_kind)
               AND NOT (c.object_id = ANY (w.path))   -- no cycles in a response branch
-            ORDER BY (c.rating - 2*c.rd) DESC
+            ORDER BY eff_mu(c.rating, c.rd) DESC
             LIMIT p_beam
         ) nxt
         WHERE w.depth < p_depth
@@ -331,13 +466,13 @@ DECLARE
     seen bytea[] := ARRAY[p_prompt];
 BEGIN
     FOR i IN 1..p_depth LOOP
-        SELECT c.object_id, round(((c.rating - 2*c.rd) / 1e9)::numeric, 3) AS mu
+        SELECT c.object_id, eff_mu_display(c.rating, c.rd) AS mu
         INTO nxt
         FROM consensus c
         WHERE c.subject_id = cur AND c.object_id IS NOT NULL
           AND (p_kind IS NULL OR c.kind_id = p_kind)
           AND NOT (c.object_id = ANY (seen))
-        ORDER BY (c.rating - 2*c.rd) DESC
+        ORDER BY eff_mu(c.rating, c.rd) DESC
         LIMIT 1;
         EXIT WHEN nxt IS NULL OR nxt.object_id IS NULL;
         step := i; entity_id := nxt.object_id; eff_mu := nxt.mu;

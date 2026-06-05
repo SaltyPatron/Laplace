@@ -318,26 +318,54 @@ public sealed class ModelDecomposer : IDecomposer
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        // Best-effort row estimate from the recipe's SCHEMA SHAPES — records are
-        // bounded by the shape (one evidence row per relation; positions fold as
-        // games), never by depth or params. Upper bound: an all-zero relation
-        // emits nothing. Never hardcoded.
+        // EXACT row estimate from the recipe's SCHEMA SHAPES — records are
+        // bounded by the shape (one evidence row per relation; positions fold
+        // as games), never by depth or params. Content folding is DETERMINISTIC
+        // from the tokenizer (vocab slots that canonicalize to the same
+        // wordform — ▁the/the — are ONE entity, so their EMBEDS/OUTPUT_PROJECTS
+        // relations are ONE relation identity), so the estimate counts DISTINCT
+        // token entities, not slots: TinyLlama's 32,000 slots fold to ~26.6k
+        // entities and the old slot-based figure (175,146,240) overshot the
+        // recorded 153.2M rows by 12.5% — progress topped out at ~87.5%
+        // forever. Remaining upper-bound caveat: an all-zero relation emits
+        // nothing. Never hardcoded.
         string configPath = Path.Combine(_modelDir, "config.json");
         if (!File.Exists(configPath)) return Task.FromResult<long?>(null);
         var r = LlamaRecipeExtractor.Parse(configPath);
         var p = ArchitectureProfile.For(r.ModelType);
-        long d = r.HiddenSize, vocab = r.VocabSize, interm = r.IntermediateSize;
+        long d = r.HiddenSize, interm = r.IntermediateSize;
         long headDim = d / r.NumHeads;
         long attnOut = r.NumHeads * headDim, kvDim = (long)r.NumKvHeads * headDim;
+
+        // Distinct token entities via the SAME parse the vocab phase uses (the
+        // T0 perf-cache is loaded by the CLI before any ingest). Falls back to
+        // the slot-count upper bound only if the tokenizer is unreadable here.
+        long distinctVocab = r.VocabSize;
+        string tokenizerPath = Path.Combine(_modelDir, "tokenizer.json");
+        if (File.Exists(tokenizerPath))
+        {
+            try
+            {
+                var ids = new HashSet<Hash128>();
+                foreach (var t in LlamaTokenizerParser.Parse(tokenizerPath)) ids.Add(t.EntityId);
+                distinctVocab = ids.Count;
+            }
+            catch (Exception)
+            {
+                // unreadable tokenizer / perf-cache not loaded — keep the slot bound
+            }
+        }
+
         long relations =
-              vocab * d                                   // EMBEDS
-            + vocab * d                                   // OUTPUT_PROJECTS (own table or tied)
+              distinctVocab * d                           // EMBEDS (content-folded)
+            + distinctVocab * d                           // OUTPUT_PROJECTS (own table or tied)
             + 2 * d * attnOut                             // Q + O
             + 2 * d * kvDim                               // K + V
             + (p.HasGate ? d * interm : 0)                // GATES
             + 2 * d * interm                              // UP + DOWN
             + d;                                          // NORMALIZES (per channel)
-        return Task.FromResult<long?>(vocab + relations);
+        // + one TOKEN_MAPS_TO identity per distinct token entity
+        return Task.FromResult<long?>(distinctVocab + relations);
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

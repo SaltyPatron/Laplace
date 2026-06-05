@@ -41,15 +41,60 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 ///
 /// <para>
 /// Best case (intent fully duplicate at the entity level): 1 round-trip
-/// (the existence SRF; no COPYs issued because all 3 buffers are empty).
-/// Novel intent: 6 round-trips (2 SRF + SET LOCAL + 3 COPYs).
+/// (the existence SRF; no COPYs issued because all 3 buffers are empty) —
+/// and ZERO round-trips when every presented id is in the run-scoped
+/// proven-id cache. Novel intent: 6 round-trips (2 SRF + SET LOCAL + 3 COPYs).
 /// </para>
+///
+/// <para><b>Run-scoped proven-id cache.</b> Ids are content-addressed, so an
+/// id once proven THIS RUN — found existing, or staged and committed — never
+/// needs presenting again: corpus decomposers re-present the same wordform
+/// trees and attestation identities for every occurrence (measured on run
+/// 27001038623: UD presented 985M rows for 55M novel, 17.8:1; OMW 10.1:1),
+/// and without the cache every re-occurrence re-ships its ids for an
+/// existence re-proof. The cache filters presented ids BEFORE the wire.
+/// Correctness: purely advisory — a miss only costs the old behavior; adds
+/// happen for DB-found ids immediately (true regardless of this txn) and for
+/// staged ids only AFTER COMMIT (a rolled-back batch never poisons it).
+/// Consensus testimony is unaffected: the accumulating writer consumes
+/// scores/games BEFORE rows reach this class. Caveat (pre-existing law, see
+/// the GUC comment below): never run per-source evictions under a live
+/// ingest — eviction invalidates "proven present". Env:
+/// <c>LAPLACE_PROVEN_CACHE=0</c> disables; <c>LAPLACE_PROVEN_CACHE_MAX</c>
+/// caps entries per table (default 256M ≈ 14 GB worst-case; past the cap the
+/// cache stops growing and extra ids just take the uncached path).</para>
 /// </summary>
 public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
 {
     private readonly NpgsqlDataSource _ds;
     private readonly NpgsqlSubstrateReader _reader;
     private readonly ILogger<NpgsqlSubstrateWriter> _log;
+    private readonly ProvenIdCache _provenEntities;
+    private readonly ProvenIdCache _provenPhys;
+    private readonly ProvenIdCache _provenAtt;
+
+    /// <summary>Concurrent advisory set of ids proven present (DB-found or
+    /// committed by this run). Thread-safe for ParallelWorkers &gt; 1.</summary>
+    private sealed class ProvenIdCache
+    {
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>? _set;
+        private readonly int _cap;
+        public ProvenIdCache(bool enabled, int cap)
+        {
+            _set = enabled ? new() : null;
+            _cap = cap;
+        }
+        public bool Contains(Hash128 id) => _set is { } s && s.ContainsKey(id);
+        public void Add(Hash128 id)
+        {
+            if (_set is { } s && s.Count < _cap) s.TryAdd(id, 0);
+        }
+        public void AddRange(IEnumerable<Hash128> ids)
+        {
+            if (_set is null) return;
+            foreach (var id in ids) Add(id);
+        }
+    }
 
     public NpgsqlSubstrateWriter(
         NpgsqlDataSource dataSource,
@@ -58,6 +103,12 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         _reader = new NpgsqlSubstrateReader(dataSource);
         _log = logger ?? NullLogger<NpgsqlSubstrateWriter>.Instance;
+        bool cacheOn = Environment.GetEnvironmentVariable("LAPLACE_PROVEN_CACHE") != "0";
+        int cacheMax = int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_PROVEN_CACHE_MAX"), out var m) && m > 0
+            ? m : 256_000_000;
+        _provenEntities = new ProvenIdCache(cacheOn, cacheMax);
+        _provenPhys     = new ProvenIdCache(cacheOn, cacheMax);
+        _provenAtt      = new ProvenIdCache(cacheOn, cacheMax);
     }
 
     /// <inheritdoc/>
@@ -91,34 +142,42 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         await using var conn = await _ds.OpenConnectionAsync(ct);
 
         // 1. Entity existence — ONE engine-backed SRF for every entity id in
-        //    the batch (deduped). Bitmap bit set => already present.
+        //    the batch (deduped), PRE-FILTERED by the run-scoped proven-id
+        //    cache: ids proven this run never re-ship for an existence proof.
         var uniqueEntityIds = new List<Hash128>(entitiesAttempted);
         var seenEntityArg = new HashSet<Hash128>();
         foreach (var c in changes)
             foreach (var e in c.Entities)
                 if (seenEntityArg.Add(e.Id)) uniqueEntityIds.Add(e.Id);
 
-        var existingEntities = uniqueEntityIds.Count > 0
-            ? await EntitiesExistAsync(conn, uniqueEntityIds, ct)
+        var entToCheck = new List<Hash128>(uniqueEntityIds.Count);
+        foreach (var id in uniqueEntityIds)
+            if (!_provenEntities.Contains(id)) entToCheck.Add(id);
+
+        var existingEntities = entToCheck.Count > 0
+            ? await EntitiesExistAsync(conn, entToCheck, ct)
             : new HashSet<Hash128>();
-        if (uniqueEntityIds.Count > 0) roundTrips++;
+        if (entToCheck.Count > 0) roundTrips++;
+        _provenEntities.AddRange(existingEntities);   // DB-found: true regardless of this txn
 
-        // 2. Physicality identity dedup — ONE query for all phys ids. COPY
-        //    can't ON CONFLICT, so we filter to novel ids before staging:
-        //    content shared across the batch (same grapheme/word/tensor) becomes
-        //    a no-op instead of a physicalities_pkey clash.
-        var existingPhys = await LoadExistingIdsAsync(
-            conn, "physicalities", changes, static c => c.Physicalities, static p => p.Id, ct);
-        if (physAttempted > 0) roundTrips++;
+        // 2. Physicality identity dedup — ONE query for the cache-filtered phys
+        //    ids. COPY can't ON CONFLICT, so we filter to novel ids before
+        //    staging: content shared across the batch (same grapheme/word/
+        //    tensor) becomes a no-op instead of a physicalities_pkey clash.
+        var physToCheck = CollectUnprovenIds(changes, static c => c.Physicalities, static p => p.Id, _provenPhys);
+        var existingPhys = await LoadExistingIdsAsync(conn, "physicalities", physToCheck, ct);
+        if (physToCheck.Count > 0) roundTrips++;
+        _provenPhys.AddRange(existingPhys);
 
-        // 3. Attestation identity dedup — ONE query for all attestation ids.
-        //    Attestation ids are content-addressed BLAKE3 of
+        // 3. Attestation identity dedup — ONE query for the cache-filtered
+        //    attestation ids. Attestation ids are content-addressed BLAKE3 of
         //    (subject,kind,object,source,context); the same observation
         //    re-emitted is the same id and must not collide. Glicko-2 matchup
         //    updates on re-observation are a separate, later concern.
-        var existingAtt = await LoadExistingIdsAsync(
-            conn, "attestations", changes, static c => c.Attestations, static a => a.Id, ct);
-        if (attAttempted > 0) roundTrips++;
+        var attToCheck = CollectUnprovenIds(changes, static c => c.Attestations, static a => a.Id, _provenAtt);
+        var existingAtt = await LoadExistingIdsAsync(conn, "attestations", attToCheck, ct);
+        if (attToCheck.Count > 0) roundTrips++;
+        _provenAtt.AddRange(existingAtt);
 
         // 4. Stage ALL novel rows across the batch into ONE COPY stream per
         //    table (FK order: entities, then physicalities, then attestations).
@@ -127,21 +186,28 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         var seenEntity = new HashSet<Hash128>(uniqueEntityIds.Count);
         var seenPhys   = new HashSet<Hash128>(existingPhys);
         var seenAtt    = new HashSet<Hash128>(existingAtt);
+        var stagedPhysIds = new List<Hash128>();
+        var stagedAttIds  = new List<Hash128>();
         Span<double> coord = stackalloc double[4];
 
         // Referenced-entity collection for the SET-BASED referential proof
         // below: every entity id a STAGED row points at. Ids presented as batch
         // entities (seenEntityArg) are excluded — they are either already in the
         // DB (existingEntities) or staged in this same transaction, so they
-        // resolve by commit either way.
+        // resolve by commit either way. Ids already PROVEN this run are
+        // excluded too — their existence proof already happened.
         var referenced = new HashSet<Hash128>();
-        void Reference(Hash128 id) { if (!seenEntityArg.Contains(id)) referenced.Add(id); }
+        void Reference(Hash128 id)
+        {
+            if (!seenEntityArg.Contains(id) && !_provenEntities.Contains(id)) referenced.Add(id);
+        }
 
         foreach (var c in changes)
             foreach (var e in c.Entities)
             {
-                if (existingEntities.Contains(e.Id)) continue;   // already in DB
-                if (!seenEntity.Add(e.Id)) continue;             // already staged this batch
+                if (existingEntities.Contains(e.Id)) continue;     // already in DB
+                if (_provenEntities.Contains(e.Id)) continue;      // proven earlier this run
+                if (!seenEntity.Add(e.Id)) continue;               // already staged this batch
                 stage.AddEntity(e.Id, e.Tier, e.TypeId, e.FirstObservedBy);
                 Reference(e.TypeId);
                 if (e.FirstObservedBy is Hash128 fob) Reference(fob);
@@ -149,7 +215,8 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         foreach (var c in changes)
             foreach (var p in c.Physicalities)
             {
-                if (!seenPhys.Add(p.Id)) continue;   // in DB or already staged this batch
+                if (_provenPhys.Contains(p.Id)) continue;   // proven earlier this run
+                if (!seenPhys.Add(p.Id)) continue;          // in DB or already staged this batch
                 coord[0] = p.CoordX; coord[1] = p.CoordY; coord[2] = p.CoordZ; coord[3] = p.CoordM;
                 stage.AddPhysicality(
                     p.Id, p.EntityId, p.SourceId, (short)p.Kind,
@@ -157,17 +224,20 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                     p.TrajectoryXyzm is null ? ReadOnlySpan<double>.Empty
                                               : p.TrajectoryXyzm.AsSpan(),
                     p.NConstituents, p.AlignmentResidual, p.SourceDim, p.ObservedAtUnixUs);
+                stagedPhysIds.Add(p.Id);
                 Reference(p.EntityId);
                 Reference(p.SourceId);
             }
         foreach (var c in changes)
             foreach (var a in c.Attestations)
             {
-                if (!seenAtt.Add(a.Id)) continue;   // in DB or already staged this batch
+                if (_provenAtt.Contains(a.Id)) continue;    // proven earlier this run
+                if (!seenAtt.Add(a.Id)) continue;           // in DB or already staged this batch
                 stage.AddAttestation(
                     a.Id, a.SubjectId, a.KindId, a.ObjectId, a.SourceId, a.ContextId,
                     (short)a.Outcome,
                     a.LastObservedAtUnixUs, a.ObservationCount);
+                stagedAttIds.Add(a.Id);
                 Reference(a.SubjectId);
                 Reference(a.KindId);
                 Reference(a.SourceId);
@@ -204,6 +274,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 throw new SubstrateReferentialIntegrityException(
                     missingCount, Convert.ToHexString(firstMissing.ToBytes()));
             }
+            _provenEntities.AddRange(present);   // referential proof = existence proof
         }
 
         int entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
@@ -259,6 +330,13 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                     roundTrips += 3;
                 }
                 await tx.CommitAsync(ct);
+
+                // COMMITTED: every staged id is now durably present — feed the
+                // run-scoped proven cache so no later batch re-presents them.
+                // (On rollback/exception these adds never happen.)
+                _provenEntities.AddRange(seenEntity);
+                _provenPhys.AddRange(stagedPhysIds);
+                _provenAtt.AddRange(stagedAttIds);
             }
             catch
             {
@@ -329,31 +407,41 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         return existing;
     }
 
-    /// <summary>
-    /// One <c>SELECT id FROM laplace.&lt;table&gt; WHERE id = ANY(@ids)</c> over
-    /// every (deduped) id of the given row kind across the whole batch — the
-    /// COPY-can't-ON-CONFLICT identity filter, hoisted from per-intent to
-    /// per-batch.
-    /// </summary>
-    private static async Task<HashSet<Hash128>> LoadExistingIdsAsync<TRow>(
-        NpgsqlConnection conn,
-        string table,
+    /// <summary>Deduped ids of the given row kind across the batch, minus the
+    /// ones the run-scoped cache already proved — the only ids worth shipping
+    /// for an existence check.</summary>
+    private static List<Hash128> CollectUnprovenIds<TRow>(
         IReadOnlyList<SubstrateChange> changes,
         Func<SubstrateChange, System.Collections.Immutable.ImmutableArray<TRow>> select,
         Func<TRow, Hash128> idOf,
-        CancellationToken ct)
+        ProvenIdCache proven)
     {
         var seen = new HashSet<Hash128>();
-        var idBytes = new List<byte[]>();
+        var ids = new List<Hash128>();
         foreach (var c in changes)
             foreach (var row in select(c))
             {
                 var id = idOf(row);
-                if (seen.Add(id)) idBytes.Add(id.ToBytes());
+                if (!proven.Contains(id) && seen.Add(id)) ids.Add(id);
             }
+        return ids;
+    }
 
+    /// <summary>
+    /// One <c>SELECT id FROM laplace.&lt;table&gt; WHERE id = ANY(@ids)</c> over
+    /// the (deduped, cache-filtered) ids — the COPY-can't-ON-CONFLICT identity
+    /// filter, hoisted from per-intent to per-batch.
+    /// </summary>
+    private static async Task<HashSet<Hash128>> LoadExistingIdsAsync(
+        NpgsqlConnection conn,
+        string table,
+        IReadOnlyList<Hash128> ids,
+        CancellationToken ct)
+    {
         var existing = new HashSet<Hash128>();
-        if (idBytes.Count == 0) return existing;
+        if (ids.Count == 0) return existing;
+        var idBytes = new List<byte[]>(ids.Count);
+        foreach (var id in ids) idBytes.Add(id.ToBytes());
 
         // Chunk the existence check. A single `= ANY(@ids)` over an unbounded id array
         // overflows Npgsql's int32 parameter-size computation once a circuit intent

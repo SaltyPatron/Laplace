@@ -16,6 +16,13 @@ public interface ISubstrateReader
     /// </summary>
     Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default);
 
+    /// <summary>Returns true iff THIS source has completed an ingest run at
+    /// the given layer order (its completion marker is present). Used by
+    /// IngestRunner's re-ingest guard: rows are idempotent, testimony is not —
+    /// a completed source must not fold its games into consensus twice.
+    /// </summary>
+    Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default);
+
     /// <summary>Count of entity rows whose <c>type_id</c> equals
     /// <paramref name="typeId"/>. Used in bootstrap idempotency tests.
     /// </summary>

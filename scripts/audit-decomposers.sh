@@ -42,21 +42,15 @@ fail() { echo "FAIL  $*"; }
 skip() { echo "SKIP  $*"; }
 
 counts() {
-  "${PSQL[@]}" -t -A -c "
-    SELECT 'entities=' || count(*)::text FROM laplace.entities;
-    SELECT 'physicalities=' || count(*)::text FROM laplace.physicalities;
-    SELECT 'attestations=' || count(*)::text FROM laplace.attestations;
-  "
+  "${PSQL[@]}" -t -A -c \
+    "SELECT metric || '=' || value::text FROM laplace.substrate_counts();"
 }
 
 layer_done() {
   local n="$1"
   "${PSQL[@]}" -t -A -c "
-    SELECT EXISTS(
-      SELECT 1 FROM laplace.attestations
-      WHERE kind_id = public.laplace_hash128_blake3(convert_to(
-        'substrate/kind/HasLayerCompleted/${n}/v1', 'UTF8'))
-    );
+    SELECT laplace.evidence_count(
+      p_kind => laplace.canonical_id('substrate/kind/HasLayerCompleted/${n}/v1')) > 0;
   " | tr -d '[:space:]'
 }
 
@@ -155,11 +149,8 @@ done
 # after. (Skipped if WordNet wasn't part of this run's ladder.)
 if printf '%s\n' "${LADDER[@]}" | grep -qx wordnet || [[ "$(layer_done 2)" == "t" ]]; then
   section "CONTENT CHECK (seed = content + attestations, not attestations alone)"
-  wn_content=$("${PSQL[@]}" -t -A -c "
-    SELECT count(*) FROM laplace.physicalities
-    WHERE kind = 1
-      AND source_id = public.laplace_hash128_blake3(convert_to('substrate/source/WordNetDecomposer/v1','UTF8'));
-  " | tr -d '[:space:]')
+  wn_content=$("${PSQL[@]}" -t -A -c \
+    "SELECT laplace.content_count(laplace.source_id('WordNetDecomposer'));" | tr -d '[:space:]')
   echo "WordNet CONTENT physicalities = ${wn_content:-0}"
   if [[ "${wn_content:-0}" -gt 0 ]]; then
     pass "WordNet emits CONTENT physicalities (${wn_content}) — content path live"

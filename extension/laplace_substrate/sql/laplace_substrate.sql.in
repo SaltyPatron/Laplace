@@ -19,3 +19,4 @@
 #include "13_consensus.sql.in"
 #include "14_geometry_consensus.sql.in"
 #include "12_inspect.sql.in"
+#include "15_converse.sql.in"

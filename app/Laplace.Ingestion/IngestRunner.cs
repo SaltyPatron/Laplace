@@ -70,6 +70,32 @@ public sealed class IngestRunner
             }
         }
 
+        // 1b. Re-ingest guard — keyed on THIS SOURCE's completion marker (the
+        // same semantics the model path enforces in the CLI). Rows are
+        // idempotent (content-addressing + ON CONFLICT) but TESTIMONY is not:
+        // the accumulating writer consumes scores in flight, so re-running a
+        // COMPLETED source folds its games into consensus a second time —
+        // double-witnessing (measured live 2026-06-05: a wordnet re-run
+        // re-materialized 1,251,591 relations onto already-folded consensus).
+        // Marker ABSENT (crashed/killed run) ⇒ lawful idempotent continuation.
+        // To re-run a source by intent: per-source eviction first (eviction
+        // removes the marker with the rest of the source's rows).
+        if (await _reader.HasSourceCompletedAsync(decomposer.SourceId, decomposer.LayerOrder, ct))
+        {
+            log.LogInformation(
+                "{Source}: already ingested (completion marker present) — short-circuiting; "
+                + "a re-ingest would double-count testimony into consensus. "
+                + "To re-run: per-source eviction first.",
+                decomposer.SourceName);
+            sw.Stop();
+            return new IngestRunResult(
+                decomposer.SourceId, decomposer.SourceName,
+                UnitsAttempted: 0, UnitsApplied: 0, UnitsFailed: 0,
+                EntitiesInserted: 0, PhysicalitiesInserted: 0, AttestationsInserted: 0,
+                TotalRoundTrips: 0, WallClock: sw.Elapsed,
+                Failures: Array.Empty<IngestFailure>());
+        }
+
         // 2. Build context + bootstrap.
         var ctx = new InternalContext(
             EcosystemPath: ResolveEcosystemPath(decomposer, options),

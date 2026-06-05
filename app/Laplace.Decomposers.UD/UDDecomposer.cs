@@ -84,33 +84,111 @@ public sealed class UDDecomposer : IDecomposer
         if (!Directory.Exists(treebanksDir)) yield break;
         int batchSentences = options.BatchSize > 1 ? options.BatchSize : 256;
 
-        var b = NewBuilder("ud/batch-0", batchSentences);
-        int sentCount = 0, batchNum = 0;
-        // Per-run dedup for dynamic DEP_*/FEAT_* kind seeding (seeded once on first
-        // sight; earlier batches commit before later ones reference the kind).
-        var seenKinds = new HashSet<Hash128>();
+        // PARALLEL PRODUCER. UD is 200+ independent .conllu files and the
+        // per-sentence decomposition (ContentEmitter → TextDecomposer +
+        // HashComposer, all thread-safe: per-call native trees, concurrent
+        // memos, read-only perf-cache) was the single-threaded floor of the
+        // 2h CI job (measured 2,011s producer vs 2,597s apply on run
+        // 27001038623). K workers each decompose whole files into their OWN
+        // batches; intents merge through a bounded channel. Order-free by
+        // construction: content-addressing makes intent order irrelevant, and
+        // every batch is referentially SELF-CONTAINED (per-batch entity
+        // seeding — see KindRegistry.SeedDynamic), so batches commit in any
+        // order under parallel appliers too. Run-scoped taxonomy testimony
+        // (IS_A, one witness statement per run) is gated by ONE shared
+        // concurrent set across workers. LAPLACE_DECOMPOSE_WORKERS overrides;
+        // 1 = the serial path below.
+        int workers = int.TryParse(
+            Environment.GetEnvironmentVariable("LAPLACE_DECOMPOSE_WORKERS"), out var w) && w > 0
+            ? w : Math.Clamp(Environment.ProcessorCount - 2, 1, 4);
 
-        foreach (string conllu in Directory.EnumerateFiles(treebanksDir, "*.conllu", SearchOption.AllDirectories))
+        var files = Directory.EnumerateFiles(treebanksDir, "*.conllu", SearchOption.AllDirectories).ToList();
+        if (files.Count == 0) yield break;
+
+        var seenAttRun = new ConcurrentIdSet();
+
+        if (workers <= 1 || files.Count == 1)
         {
-            ct.ThrowIfCancellationRequested();
-            string langCode = ExtractLangCode(Path.GetFileName(conllu));
-            Hash128 langId = LanguageReference.Resolve(langCode);
-
-            await foreach (var sentence in ParseSentencesAsync(conllu, ct))
+            var b = NewBuilder("ud/batch-0", batchSentences);
+            var seenEntBatch = new HashSet<Hash128>();
+            int sentCount = 0, batchNum = 0;
+            foreach (string conllu in files)
             {
                 ct.ThrowIfCancellationRequested();
-                EmitSentence(b, sentence, langId, langCode, seenKinds);
+                string langCode = ExtractLangCode(Path.GetFileName(conllu));
+                Hash128 langId = LanguageReference.Resolve(langCode);
 
-                if (++sentCount >= batchSentences)
+                await foreach (var sentence in ParseSentencesAsync(conllu, ct))
                 {
-                    if (!options.DryRun) yield return b.Build();
-                    b = NewBuilder($"ud/batch-{++batchNum}", batchSentences);
-                    sentCount = 0;
-                    await Task.Yield();
+                    ct.ThrowIfCancellationRequested();
+                    EmitSentence(b, sentence, langId, langCode, seenEntBatch, seenAttRun);
+
+                    if (++sentCount >= batchSentences)
+                    {
+                        if (!options.DryRun) yield return b.Build();
+                        b = NewBuilder($"ud/batch-{++batchNum}", batchSentences);
+                        seenEntBatch.Clear();
+                        sentCount = 0;
+                        await Task.Yield();
+                    }
                 }
             }
+            if (sentCount > 0 && !options.DryRun) yield return b.Build();
+            yield break;
         }
-        if (sentCount > 0 && !options.DryRun) yield return b.Build();
+
+        var fileQueue = new System.Collections.Concurrent.ConcurrentQueue<string>(files);
+        var channel = System.Threading.Channels.Channel.CreateBounded<SubstrateChange>(
+            new System.Threading.Channels.BoundedChannelOptions(workers * 4)
+            {
+                SingleWriter = false,
+                SingleReader = true,
+                FullMode = System.Threading.Channels.BoundedChannelFullMode.Wait,
+            });
+
+        var producers = new Task[workers];
+        for (int wi = 0; wi < workers; wi++)
+        {
+            int worker = wi;
+            producers[wi] = Task.Run(async () =>
+            {
+                while (fileQueue.TryDequeue(out var conllu))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    string langCode = ExtractLangCode(Path.GetFileName(conllu));
+                    Hash128 langId = LanguageReference.Resolve(langCode);
+                    string stem = Path.GetFileNameWithoutExtension(conllu);
+
+                    var b = NewBuilder($"ud/w{worker}/{stem}/0", batchSentences);
+                    var seenEntBatch = new HashSet<Hash128>();
+                    int sentCount = 0, batchNum = 0;
+                    await foreach (var sentence in ParseSentencesAsync(conllu, ct))
+                    {
+                        EmitSentence(b, sentence, langId, langCode, seenEntBatch, seenAttRun);
+                        if (++sentCount >= batchSentences)
+                        {
+                            if (!options.DryRun) await channel.Writer.WriteAsync(b.Build(), ct);
+                            b = NewBuilder($"ud/w{worker}/{stem}/{++batchNum}", batchSentences);
+                            seenEntBatch.Clear();
+                            sentCount = 0;
+                        }
+                    }
+                    if (sentCount > 0 && !options.DryRun)
+                        await channel.Writer.WriteAsync(b.Build(), ct);
+                }
+            }, ct);
+        }
+
+        // Completion propagates worker faults to the reader (no silent partial run).
+        _ = Task.WhenAll(producers).ContinueWith(
+            t => channel.Writer.TryComplete(t.Exception),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        await foreach (var change in channel.Reader.ReadAllAsync(ct))
+            yield return change;
+        await Task.WhenAll(producers);   // surface any worker exception
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -127,7 +205,7 @@ public sealed class UDDecomposer : IDecomposer
     // ── emit ───────────────────────────────────────────────────────────────
 
     private static void EmitSentence(SubstrateChangeBuilder b, UdSentence s, Hash128 langId, string langCode,
-                                     HashSet<Hash128> seen)
+                                     HashSet<Hash128> seenEntBatch, ConcurrentIdSet seenAttRun)
     {
         // Language entity (idempotent with ISO layer) so HAS_LANGUAGE FK is satisfied.
         b.AddEntity(new EntityRow(langId, (byte)MetaTier.Meta, LanguageTypeId, Source));
@@ -170,7 +248,7 @@ public sealed class UDDecomposer : IDecomposer
                 if (!KindRegistry.ParseFeature(feat, out var fName, out var fVal)) continue;
                 Hash128 valId = FeatValueId(fName, fVal);
                 b.AddEntity(new EntityRow(valId, (byte)MetaTier.Meta, FeatureTypeId, Source));
-                KindRegistry.SeedDynamic(b, KindRegistry.ResolveFeature(fName), Source, seen);
+                KindRegistry.SeedDynamic(b, KindRegistry.ResolveFeature(fName), Source, seenEntBatch, seenAttRun);
                 b.AddAttestation(KindRegistry.AttestFeature(
                     form, fName, valId, Source, SourceTrust.AcademicCurated));
             }
@@ -192,7 +270,7 @@ public sealed class UDDecomposer : IDecomposer
             if (tok.Head > 0 && tok.Head <= s.MaxId && formId[tok.Head] is { } headId
                 && !string.IsNullOrEmpty(tok.Deprel) && tok.Deprel != "_")
             {
-                KindRegistry.SeedDeprel(b, tok.Deprel, Source, seen);
+                KindRegistry.SeedDeprel(b, tok.Deprel, Source, seenEntBatch, seenAttRun);
                 b.AddAttestation(KindRegistry.AttestDeprel(
                     form, tok.Deprel, headId, Source, SourceTrust.AcademicCurated));
             }

@@ -57,7 +57,7 @@ BEGIN
 
     -- (a) ORDER-INVARIANCE: stage A,B then materialize; compare against B,A.
     PERFORM create_period_staging();
-    INSERT INTO consensus_period_staging (subject_id, kind_id, object_id, phi, games, sum_score, last_ts) VALUES
+    INSERT INTO consensus_period_staging_0 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts) VALUES
         (subjA, kind, objA, phi, 2, s_conf * 2, now()),
         (subjB, kind, objB, phi, 3, s_ref  * 3, now());
     PERFORM materialize_period_consensus();
@@ -67,7 +67,7 @@ BEGIN
     DELETE FROM consensus WHERE subject_id IN (subjA, subjB);
 
     PERFORM create_period_staging();
-    INSERT INTO consensus_period_staging (subject_id, kind_id, object_id, phi, games, sum_score, last_ts) VALUES
+    INSERT INTO consensus_period_staging_0 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts) VALUES
         (subjB, kind, objB, phi, 3, s_ref  * 3, now()),
         (subjA, kind, objA, phi, 2, s_conf * 2, now());
     PERFORM materialize_period_consensus();
@@ -82,13 +82,13 @@ BEGIN
     -- (b) CROSS-PERIOD: period 1 folds 2 confirm games for C; period 2 folds 3
     -- more onto the SAME row (prior = current row).
     PERFORM create_period_staging();
-    INSERT INTO consensus_period_staging (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
+    INSERT INTO consensus_period_staging_0 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
         VALUES (subjC, kind, objC, phi, 2, s_conf * 2, now());
     PERFORM materialize_period_consensus();
     SELECT rating, rd, witness_count INTO c1_r, c1_rd, c1_wc FROM consensus WHERE subject_id = subjC;
 
     PERFORM create_period_staging();
-    INSERT INTO consensus_period_staging (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
+    INSERT INTO consensus_period_staging_0 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
         VALUES (subjC, kind, objC, phi, 3, s_conf * 3, now());
     PERFORM materialize_period_consensus();
     SELECT count(*) INTO c_rows FROM consensus WHERE subject_id = subjC;
@@ -101,7 +101,7 @@ BEGIN
 
     -- (c) φ-UNIFORMITY: mixed φ for one relation within one period fails loud.
     PERFORM create_period_staging();
-    INSERT INTO consensus_period_staging (subject_id, kind_id, object_id, phi, games, sum_score, last_ts) VALUES
+    INSERT INTO consensus_period_staging_0 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts) VALUES
         (subjA, kind, objA, phi,  1, s_conf, now()),
         (subjA, kind, objA, phi2, 1, s_conf, now());
     BEGIN
@@ -113,7 +113,51 @@ BEGIN
         RAISE EXCEPTION 'FAIL: mixed φ within one period did not raise';
     END IF;
 
-    RAISE NOTICE '✓ consensus_period: order-invariant, cross-period accumulates on one row, mixed φ fails loud';
+    -- (e) PARTITIONED STAGING: K=2 partitions; the NULL fold covers BOTH and
+    -- the stale-period sweep precedes creation (the mixed-φ staging left
+    -- behind by (c) must vanish, not fold).
+    PERFORM create_period_staging(2);
+    DELETE FROM consensus WHERE subject_id IN (subjA, subjB);
+    INSERT INTO consensus_period_staging_0 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
+        VALUES (subjA, kind, objA, phi, 2, s_conf * 2, now());
+    INSERT INTO consensus_period_staging_1 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
+        VALUES (subjB, kind, objB, phi, 3, s_ref * 3, now());
+    IF materialize_period_consensus() <> 2 THEN
+        RAISE EXCEPTION 'FAIL: NULL fold did not cover both partitions';
+    END IF;
+    SELECT rating, rd, volatility INTO rA_r, rA_rd, rA_v FROM consensus WHERE subject_id = subjA;
+    SELECT rating, rd, volatility INTO rB_r, rB_rd, rB_v FROM consensus WHERE subject_id = subjB;
+    IF fA_r <> rA_r OR fA_rd <> rA_rd OR fA_v <> rA_v
+    OR fB_r <> rB_r OR fB_rd <> rB_rd OR fB_v <> rB_v THEN
+        RAISE EXCEPTION 'FAIL: partitioned fold diverged from the single-partition fold';
+    END IF;
+
+    -- (f) PER-PARTITION fold (the K parallel sessions' call shape): a
+    -- partition arg folds exactly its partition; both partitions drop after.
+    PERFORM create_period_staging(2);
+    INSERT INTO consensus_period_staging_0 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
+        VALUES (subjC, kind, objC, phi, 1, s_conf, now());
+    INSERT INTO consensus_period_staging_1 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
+        VALUES (subjA, kind, objB, phi, 1, s_conf, now());
+    IF materialize_period_consensus(0) <> 1 OR materialize_period_consensus(1) <> 1 THEN
+        RAISE EXCEPTION 'FAIL: per-partition fold did not materialize exactly its partition';
+    END IF;
+    IF to_regclass('consensus_period_staging_0') IS NOT NULL
+    OR to_regclass('consensus_period_staging_1') IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL: fold did not drop its staging partition';
+    END IF;
+
+    RAISE NOTICE '✓ consensus_period: order-invariant, cross-period accumulates on one row, mixed φ fails loud, partitioned fold exact';
 END $$;
 
 ROLLBACK;
+
+-- eff_mu / eff_mu_display MUST stay planner-inlinable: LANGUAGE sql, IMMUTABLE,
+-- NO proconfig — a SET clause (or volatility downgrade) disables SQL-function
+-- inlining and silently de-indexes every ranked-μ read (the expression indexes
+-- match only the inlined body). Catalog pin; fails the diff if either drifts.
+SELECT p.proname, p.provolatile, p.proconfig IS NULL AS no_proconfig, l.lanname
+FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang
+WHERE p.pronamespace = 'laplace'::regnamespace
+  AND p.proname IN ('eff_mu', 'eff_mu_display')
+ORDER BY p.proname;
