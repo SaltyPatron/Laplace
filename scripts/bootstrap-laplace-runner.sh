@@ -441,6 +441,29 @@ bootstrap_runner_register() {
     green "✓ Registered runner as 'hart-server'"
 }
 
+bootstrap_runner_oom_guard() {
+    # The runner listener must survive job OOMs: on 2026-06-05 the kernel
+    # picked the runner cgroup's listener during a job's memory spike and the
+    # runner stayed dead for 8h with the queue stranded. Drop-in sets the
+    # SERVICE (listener) to a protected score; job processes keep default 0,
+    # so the kernel kills the job, not the runner.
+    say "Runner OOM guard: OOMScoreAdjust drop-in for $RUNNER_SERVICE"
+    local dropin_dir="/etc/systemd/system/$RUNNER_SERVICE.d"
+    mkdir -p "$dropin_dir"
+    cat > "$dropin_dir/10-oom-guard.conf" <<'EOF'
+# Managed by bootstrap-laplace-runner.sh (bootstrap_runner_oom_guard).
+[Service]
+OOMScoreAdjust=-800
+Restart=always
+RestartSec=10
+EOF
+    systemctl daemon-reload
+    green "✓ OOM guard + auto-restart drop-in installed"
+}
+
+bootstrap_runner_oom_guard
+
+
 bootstrap_runner_job_env() {
     # Machine-static job environment → the runner's .env file. The GH runner
     # loads KEY=VALUE lines from $RUNNER_DIR/.env into EVERY job it executes —
@@ -453,6 +476,11 @@ bootstrap_runner_job_env() {
     # here (the runner manages its own PATH; toolchain compilers resolve via
     # the cmake toolchain file / setvars fallback in the build job).
     # Idempotent — same begin/end marker pattern as the cluster config.
+    # Two-DB law: CI-box test runs target the CI database, never laplace-dev
+    # (2026-06-05: UnicodeSeedIntegrationTests defaulted to laplace-dev and CI
+    # wrote the unicode seed into the DEV db every run — caught when another
+    # agent dropped laplace-dev mid-run).
+    grep -q '^LAPLACE_TEST_DB=' "$RUNNER_DIR/.env" 2>/dev/null || echo 'LAPLACE_TEST_DB=laplace' >> "$RUNNER_DIR/.env"
     say "Runner job env: oneAPI machine-static vars → $RUNNER_DIR/.env"
     if [ ! -d "$RUNNER_DIR" ] || [ ! -d /opt/intel/oneapi ]; then
         yellow "runner dir or oneAPI missing — skipping .env block"
@@ -1567,12 +1595,13 @@ do_bootstrap() {
     # would attempt to authorize a specific command and fail under pipefail
     # if the command doesn't match the sudoers pattern — that's a probe bug,
     # not a real failure.
+    # The rule was DELIBERATELY removed (step 10: staged /opt/laplace install,
+    # group-writable 2775 — no sudo needed). Verify ABSENCE; the old check
+    # expected the rule active and printed a permanent false ✗ (2026-06-05).
     if sudo -u "$RUNNER_USER" -H sudo -ln 2>&1 | grep -qE 'NOPASSWD.*(cmake --install|make install)'; then
-        sudo -u "$RUNNER_USER" -H sudo -ln 2>&1 | grep -E 'NOPASSWD.*make' \
-            | sed 's/^/  → /'
-        green "✓ Sudoers rule active"
+        red "✗ Legacy sudoers rule still active for laplace-runner (should be removed; see step 10)"
     else
-        red "✗ Sudoers rule NOT active for laplace-runner"
+        green "✓ No legacy sudoers rule (staged /opt/laplace install needs none)"
     fi
 
     echo

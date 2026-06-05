@@ -1,7 +1,36 @@
 # Model-ingestion status — what's fixed, what's still broken
 
 **Status of record for AI-model ingestion.** Read with `docs/SUBSTRATE-FOUNDATION.md` (the ratified
-lens). Updated 2026-06-04. The point of this file: stop re-breaking things that were already corrected.
+lens). Updated 2026-06-05. The point of this file: stop re-breaking things that were already corrected.
+
+## 2026-06-05 — the normalization + completeness day (summary of record)
+
+- **Attestation pipeline unified**: every emitter routes KindRegistry.Attest*/AttestationFactory
+  (zero raw rows); kinds renamed under the naming convention (NORMALIZES_TO / NORM_SCALES split,
+  HAS_DEFINITION family, PRECEDES one-arena); tensor-role family first-class Canon (the export
+  mold-map). POS values normalized to one language-generic canon (PosReference, 17 UPOS values,
+  probationary misses logged) — WordNet/Wiktionary/UD co-assert on ONE HAS_POS arena.
+- **TOKEN_MAPS_TO is a magnitude matchup**: morph residual scored s=½(1+tanh((M−resid)/M)),
+  M = RMS over anchored — measured, never a knob. Byte tokens anchor at the BYTE TIER's canonical
+  placements (ByteAtoms; bytes = the modality-blind floor; DECODES_TO carries the encoding as
+  context). Specials stay categorical.
+- **Completeness sweep**: ConceptNet per-arena measured M + DBPEDIA_* family; Wiktionary per-sense
+  relations/categories/registers/dialect-context/etym templates; UD enhanced deps (EDEP_*) +
+  MISC Gloss/Translit + empty nodes; WordNet verb frames + .exc inflections + lexname split;
+  Unicode 9 UCD property families + aliases + confusables; ISO 639-2/scope/type/retirements/names;
+  BPE merge lattice (MERGES_WITH, rank-measured).
+- **Five new decomposers**: FrameNet, VerbNet, PropBank, SemLink (CORRESPONDS_TO cross-resource
+  alignment), OpenSubtitles (601M pairs, streaming; PRECEDES skipped — Moses format has no document
+  structure, never invent it). All wired: sln, CLI, ladder, per-source CI workflows.
+- **Extension = the deployment unit** (one Layer-1 DbUp script; modules 01–21; self-seeding;
+  ops/gate surface installed; generation walk + render_text in C via SPI per the layer law).
+- **Failure classes fixed with their measurements**: ContentEmitter row-memo OOM (110GB anon-RSS,
+  kernel killed ladder AND the GH runner) → repeat-class memo bound; runner OOMScoreAdjust guard;
+  ar_padt EDEP parent-chain seeding; SPI result-lifetime bug in render_text; CI tests pointed at
+  the CI database (runner .env LAPLACE_TEST_DB).
+- **Substrate state**: laplace-dev handed to the parallel agent (stable: unicode+iso complete,
+  wordnet partial, no staging residue). The FINAL 14-source rebuild + gates re-queues after; the
+  CI `laplace` run is the standing build proof.
 
 ## The law (never violate)
 

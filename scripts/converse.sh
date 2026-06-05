@@ -24,7 +24,7 @@ BUILT="$ROOT/build/extension/laplace_substrate/laplace_substrate--0.1.0.sql"
     exit 1
 }
 
-DB="${LAPLACE_QUERY_DB:-laplace}"
+DB="${LAPLACE_QUERY_DB:-laplace-dev}"
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 

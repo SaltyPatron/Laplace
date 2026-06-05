@@ -278,7 +278,7 @@ audit-decomposers *args: build-app
 # === Query / Cascade ===
 
 query sql:
-    psql -h /var/run/postgresql -U laplace_admin -d "${LAPLACE_QUERY_DB:-laplace}" -c "{{sql}}"
+    psql -h /var/run/postgresql -U laplace_admin -d "${LAPLACE_QUERY_DB:-laplace-dev}" -c "{{sql}}"
 
 cascade prompt:
     app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli cascade --prompt "{{prompt}}"

@@ -29,7 +29,7 @@ CREATE FUNCTION evidence_count(
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     SELECT count(*)
-    FROM attestations a
+    FROM @extschema@.attestations a
     WHERE (p_kind   IS NULL OR a.kind_id   = p_kind)
       AND (p_source IS NULL OR a.source_id = p_source)
       AND (p_object IS NULL OR a.object_id = p_object)
@@ -42,7 +42,7 @@ CREATE FUNCTION consensus_count(p_kind bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    SELECT count(*) FROM consensus c
+    SELECT count(*) FROM @extschema@.consensus c
     WHERE (p_kind IS NULL OR c.kind_id = p_kind)
 $$;
 COMMENT ON FUNCTION consensus_count(bytea) IS
@@ -53,7 +53,7 @@ CREATE FUNCTION content_count(p_source bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    SELECT count(*) FROM physicalities p
+    SELECT count(*) FROM @extschema@.physicalities p
     WHERE p.kind = 1
       AND (p_source IS NULL OR p.source_id = p_source)
 $$;
@@ -66,7 +66,7 @@ CREATE FUNCTION multi_source_entity_count()
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     SELECT count(*) FROM (
-        SELECT p.entity_id FROM physicalities p
+        SELECT p.entity_id FROM @extschema@.physicalities p
         GROUP BY p.entity_id
         HAVING count(DISTINCT p.source_id) > 1) t
 $$;
@@ -78,18 +78,18 @@ CREATE FUNCTION substrate_counts()
     RETURNS TABLE(metric text, value bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    SELECT 'entities',                 count(*) FROM entities
+    SELECT 'entities',                 count(*) FROM @extschema@.entities
     UNION ALL
-    SELECT 'entities/codepoint (T0)',  count(*) FROM entities
-        WHERE type_id = canonical_id('substrate/type/Codepoint/v1')
+    SELECT 'entities/codepoint (T0)',  count(*) FROM @extschema@.entities
+        WHERE type_id = @extschema@.canonical_id('substrate/type/Codepoint/v1')
     UNION ALL
-    SELECT 'physicalities',            count(*) FROM physicalities
+    SELECT 'physicalities',            count(*) FROM @extschema@.physicalities
     UNION ALL
-    SELECT 'physicalities/content',    count(*) FROM physicalities WHERE kind = 1
+    SELECT 'physicalities/content',    count(*) FROM @extschema@.physicalities WHERE kind = 1
     UNION ALL
-    SELECT 'attestations (evidence)',  count(*) FROM attestations
+    SELECT 'attestations (evidence)',  count(*) FROM @extschema@.attestations
     UNION ALL
-    SELECT 'consensus (relations)',    count(*) FROM consensus
+    SELECT 'consensus (relations)',    count(*) FROM @extschema@.consensus
 $$;
 COMMENT ON FUNCTION substrate_counts() IS
     'Labeled row accounting across the substrate''s core tables — the stats surface (CLI stats, e2e scripts) instead of hand-written counts.';
@@ -105,9 +105,9 @@ CREATE FUNCTION arena_counts()
                   top_eff_mu numeric)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    SELECT render(c.kind_id), c.kind_id, count(*), sum(c.witness_count),
-           max(eff_mu_display(c.rating, c.rd))
-    FROM consensus c
+    SELECT @extschema@.render(c.kind_id), c.kind_id, count(*), sum(c.witness_count),
+           max(@extschema@.eff_mu_display(c.rating, c.rd))
+    FROM @extschema@.consensus c
     GROUP BY c.kind_id
     ORDER BY count(*) DESC
 $$;
@@ -119,10 +119,10 @@ CREATE FUNCTION source_counts()
     RETURNS TABLE(source text, source_id bytea, evidence bigint, content bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    SELECT render(s.sid), s.sid,
-           (SELECT count(*) FROM attestations a WHERE a.source_id = s.sid),
-           (SELECT count(*) FROM physicalities p WHERE p.source_id = s.sid AND p.kind = 1)
-    FROM (SELECT DISTINCT a.source_id AS sid FROM attestations a) s
+    SELECT @extschema@.render(s.sid), s.sid,
+           (SELECT count(*) FROM @extschema@.attestations a WHERE a.source_id = s.sid),
+           (SELECT count(*) FROM @extschema@.physicalities p WHERE p.source_id = s.sid AND p.kind = 1)
+    FROM (SELECT DISTINCT a.source_id AS sid FROM @extschema@.attestations a) s
     ORDER BY 3 DESC
 $$;
 COMMENT ON FUNCTION source_counts() IS
@@ -133,8 +133,8 @@ CREATE FUNCTION entity_type_counts()
     RETURNS TABLE(type text, type_id bytea, tier smallint, entities bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    SELECT render(e.type_id), e.type_id, e.tier, count(*)
-    FROM entities e
+    SELECT @extschema@.render(e.type_id), e.type_id, e.tier, count(*)
+    FROM @extschema@.entities e
     GROUP BY e.type_id, e.tier
     ORDER BY count(*) DESC
 $$;
@@ -148,7 +148,7 @@ CREATE FUNCTION consensus_tier_distribution()
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     SELECT e.tier, count(*)
-    FROM consensus c JOIN entities e ON e.id = c.subject_id
+    FROM @extschema@.consensus c JOIN @extschema@.entities e ON e.id = c.subject_id
     WHERE c.object_id IS NOT NULL
     GROUP BY e.tier ORDER BY e.tier
 $$;
@@ -156,7 +156,7 @@ COMMENT ON FUNCTION consensus_tier_distribution() IS
     'Relations by subject tier — shows which tiers of the content web actually carry consensus edges.';
 
 /* The hex-render gap detector: distinct consensus-referenced ids whose
- * render() falls back to hex (no canonical name, no codepoint, no
+ * @extschema@.render() falls back to hex (no canonical name, no codepoint, no
  * reconstructable content) — the readback-coverage gate. The no-hex P10
  * gate is: every row here is a known dynamic family awaiting registration. */
 CREATE FUNCTION render_gaps(p_limit integer DEFAULT 50)
@@ -164,11 +164,11 @@ CREATE FUNCTION render_gaps(p_limit integer DEFAULT 50)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     WITH refs AS (
-        SELECT c.kind_id AS id, 'kind' AS role FROM consensus c
+        SELECT c.kind_id AS id, 'kind' AS role FROM @extschema@.consensus c
         UNION ALL
-        SELECT c.object_id, 'object' FROM consensus c WHERE c.object_id IS NOT NULL
+        SELECT c.object_id, 'object' FROM @extschema@.consensus c WHERE c.object_id IS NOT NULL
         UNION ALL
-        SELECT c.subject_id, 'subject' FROM consensus c
+        SELECT c.subject_id, 'subject' FROM @extschema@.consensus c
     ),
     agg AS (
         SELECT r.id, string_agg(DISTINCT r.role, ',' ORDER BY r.role) AS roles, count(*) AS refs
@@ -176,9 +176,9 @@ CREATE FUNCTION render_gaps(p_limit integer DEFAULT 50)
     )
     SELECT a.id, a.roles, a.refs
     FROM agg a
-    WHERE NOT EXISTS (SELECT 1 FROM canonical_names n WHERE n.id = a.id)
-      AND NOT EXISTS (SELECT 1 FROM codepoint_render cr WHERE cr.id = a.id)
-      AND NOT EXISTS (SELECT 1 FROM physicalities p
+    WHERE NOT EXISTS (SELECT 1 FROM @extschema@.canonical_names n WHERE n.id = a.id)
+      AND NOT EXISTS (SELECT 1 FROM @extschema@.codepoint_render cr WHERE cr.id = a.id)
+      AND NOT EXISTS (SELECT 1 FROM @extschema@.physicalities p
                       WHERE p.entity_id = a.id AND p.kind = 1 AND p.trajectory IS NOT NULL)
     ORDER BY a.refs DESC
     LIMIT p_limit

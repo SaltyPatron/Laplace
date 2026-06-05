@@ -44,8 +44,12 @@ internal static class Program
             // which makes substrate-debug iteration painful. The substrate's per-row
             // bytea(16) values are not actually sensitive — they're content-addressed
             // hashes of public substrate canon.
+            // Dev-default: an unset LAPLACE_DB targets laplace-dev (safe, recoverable),
+            // NEVER the prod/CI `laplace`. Prod/CI sets LAPLACE_DB (or PGDATABASE via
+            // setup-laplace-env) to override. The worst case of a missed override is
+            // hitting the dev DB, not damaging prod.
             var s = Environment.GetEnvironmentVariable("LAPLACE_DB")
-                ?? "Host=/var/run/postgresql;Username=laplace_admin;Database=laplace";
+                ?? "Host=/var/run/postgresql;Username=laplace_admin;Database=laplace-dev";
             if (!s.Contains("Include Error Detail", StringComparison.OrdinalIgnoreCase))
                 s += ";Include Error Detail=true";
             // The substrate inspection SRFs (laplace.entity_facets, attestations_out, …)

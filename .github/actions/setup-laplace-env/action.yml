@@ -32,3 +32,12 @@ runs:
           # repo root post-checkout.
           echo "LD_LIBRARY_PATH=$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
         fi
+        # DB targeting. The CODE defaults to laplace-dev (an unset env is the safe
+        # dev DB, never prod). CI is the prod run: supply `laplace` here so every
+        # job's dotnet tools (migrations/CLI) and psql helpers hit prod — but
+        # RESPECT a value a workflow already set (job-level env, _build-deploy's
+        # per-step PGDATABASE, or a laplace-dev workflow_dispatch). ${VAR:-laplace}
+        # reads whatever is present when this step runs, so it only fills the default.
+        echo "PGDATABASE=${PGDATABASE:-laplace}" >> "$GITHUB_ENV"
+        echo "LAPLACE_QUERY_DB=${LAPLACE_QUERY_DB:-laplace}" >> "$GITHUB_ENV"
+        echo "LAPLACE_DB=${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=laplace}" >> "$GITHUB_ENV"

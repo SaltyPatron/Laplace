@@ -377,9 +377,26 @@ CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     SELECT COALESCE(
-        (SELECT regexp_replace(n.name, '^substrate/[a-z_]+/(.+)/v1$', '\1')
-         FROM canonical_names n WHERE n.id = p_id),
-        render_text(p_id),
+        -- content entities: reconstructed text
+        NULLIF(render_text(p_id), ''),
+        -- member-bearing entities (synsets): top-μ member word via the SENSE CHAIN
+        -- synset ← IS_SENSE_OF ← sense ← HAS_SENSE ← word, asker's language preferred.
+        -- (This is the path same-language members live on; IS_TRANSLATION_OF below
+        -- only catches cross-lingual members, so synsets fell through to hex.)
+        (SELECT render_text(hs.subject_id)
+         FROM consensus io
+         JOIN consensus hs ON hs.object_id = io.subject_id
+                          AND hs.kind_id = kind_id('HAS_SENSE')
+         LEFT JOIN consensus lang ON lang.subject_id = hs.subject_id
+                                 AND lang.kind_id = kind_id('HAS_LANGUAGE')
+                                 AND lang.object_id = p_lang
+         WHERE io.object_id = p_id
+           AND io.kind_id = kind_id('IS_SENSE_OF')
+           AND NOT refuted(io.rating, io.rd)
+           AND NULLIF(render_text(hs.subject_id), '') IS NOT NULL
+         ORDER BY (lang.object_id IS NOT NULL) DESC, eff_mu(hs.rating, hs.rd) DESC
+         LIMIT 1),
+        -- cross-lingual members (OMW): top-μ translation that reconstructs
         (SELECT render_text(m.object_id)
          FROM consensus m
          LEFT JOIN consensus lang ON lang.subject_id = m.object_id
@@ -388,8 +405,21 @@ CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
          WHERE m.subject_id = p_id
            AND m.kind_id = kind_id('IS_TRANSLATION_OF')
            AND NOT refuted(m.rating, m.rd)
-           AND render_text(m.object_id) IS NOT NULL   -- only members that reconstruct
+           AND NULLIF(render_text(m.object_id), '') IS NOT NULL
          ORDER BY (lang.object_id IS NOT NULL) DESC, eff_mu(m.rating, m.rd) DESC
+         LIMIT 1),
+        -- reference entities with no members (POS, language, kind): canonical name,
+        -- frame-stripped (substrate/pos/NOUN/v1 → NOUN). BELOW the member branches so
+        -- a synset's ugly wordnet/synset/n/123 name can never beat its member word;
+        -- the LIKE-guard keeps non-substrate canonical names (synsets) out of here.
+        (SELECT regexp_replace(n.name, '^substrate/[a-z_]+/(.+)/v1$', '\1')
+         FROM canonical_names n WHERE n.id = p_id AND n.name LIKE 'substrate/%'),
+        -- last semantic resort: the synset's own gloss
+        (SELECT render_text(g.object_id)
+         FROM consensus g
+         WHERE g.subject_id = p_id AND g.kind_id = kind_id('DEFINES')
+           AND NOT refuted(g.rating, g.rd)
+         ORDER BY eff_mu(g.rating, g.rd) DESC
          LIMIT 1),
         label(p_id))
 $$;

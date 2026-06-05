@@ -34,9 +34,9 @@ COMMENT ON TABLE canonical_names IS
 CREATE FUNCTION register_canonical(p_name text) RETURNS bytea
     LANGUAGE sql AS $$
     INSERT INTO canonical_names (id, name)
-    VALUES (canonical_id(p_name), p_name)
+    VALUES (@extschema@.canonical_id(p_name), p_name)
     ON CONFLICT (id) DO NOTHING;
-    SELECT canonical_id(p_name)
+    SELECT @extschema@.canonical_id(p_name)
 $$;
 COMMENT ON FUNCTION register_canonical(text) IS
     'Idempotently record name→id in canonical_names and return the id. Called by writers for '
@@ -57,15 +57,15 @@ COMMENT ON TABLE codepoint_render IS
 CREATE FUNCTION build_codepoint_render() RETURNS bigint
     LANGUAGE sql AS $$
     INSERT INTO codepoint_render (id, cp)
-    SELECT canonical_id(chr(g.cp)), g.cp
+    SELECT @extschema@.canonical_id(chr(g.cp)), g.cp
     FROM generate_series(1, 1114111) AS g(cp)
     WHERE g.cp NOT BETWEEN 55296 AND 57343
     ON CONFLICT (id) DO NOTHING;
-    SELECT count(*) FROM codepoint_render
+    SELECT count(*) FROM @extschema@.codepoint_render
 $$;
 COMMENT ON FUNCTION build_codepoint_render() IS
     'Idempotently derive the full codepoint render map (~1.11M rows) in SQL. chr() encodes '
-    'UTF-8 in a UTF8 database, so canonical_id(chr(cp)) IS the engine''s codepoint id.';
+    'UTF-8 in a UTF8 database, so @extschema@.canonical_id(chr(cp)) IS the engine''s codepoint id.';
 
 /* Ordered constituent ids of an entity, decoded from its Content physicality trajectory. */
 CREATE FUNCTION constituents(p_id bytea)
@@ -130,8 +130,8 @@ CREATE FUNCTION render(p_id bytea) RETURNS text
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     SELECT COALESCE(
-        (SELECT n.name FROM canonical_names n WHERE n.id = p_id),
-        (SELECT chr(r.cp) FROM codepoint_render r WHERE r.id = p_id),
+        (SELECT n.name FROM @extschema@.canonical_names n WHERE n.id = p_id),
+        (SELECT chr(r.cp) FROM @extschema@.codepoint_render r WHERE r.id = p_id),
         render_text(p_id),
         encode(p_id, 'hex') || '…')
 $$;
@@ -145,7 +145,7 @@ COMMENT ON FUNCTION render(bytea) IS
 CREATE FUNCTION register_canonicals(p_names text[]) RETURNS bigint
     LANGUAGE sql AS $$
     INSERT INTO canonical_names (id, name)
-    SELECT canonical_id(n), n FROM unnest(p_names) AS n
+    SELECT @extschema@.canonical_id(n), n FROM unnest(p_names) AS n
     ON CONFLICT (id) DO NOTHING;
     SELECT count(*)::bigint FROM unnest(p_names)
 $$;

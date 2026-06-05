@@ -283,7 +283,10 @@ internal static class Program
         {
             Host = config["PGHOST"] ?? "/var/run/postgresql",
             Username = config["PGUSER"] ?? "laplace_admin",
-            Database = config["PGDATABASE"] ?? "laplace",
+            // Dev-default: unset PGDATABASE → laplace-dev (safe). CI/prod sets
+            // PGDATABASE=laplace (via setup-laplace-env) to override. A missed
+            // override targets the dev DB, never nukes prod.
+            Database = config["PGDATABASE"] ?? "laplace-dev",
         };
         if (int.TryParse(config["PGPORT"], out var port)) builder.Port = port;
         if (!string.IsNullOrWhiteSpace(config["PGPASSWORD"])) builder.Password = config["PGPASSWORD"];

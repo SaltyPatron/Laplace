@@ -5,12 +5,12 @@
  * Glicko2.cs — and SQL callers are now under the same law). LANGUAGE sql,
  * single expression, non-STRICT ⇒ the planner INLINES every call to the
  * literal expression (rating - 2*rd), so the two expression indexes above
- * serve eff_mu() reads with no rebuild and no plan change. NEVER hand-write
+ * serve @extschema@.eff_mu() reads with no rebuild and no plan change. NEVER hand-write
  * rating − 2·rd in a query — call eff_mu; this body and the index
  * expressions change TOGETHER or not at all.
  * NO SET clause on either function: any proconfig disables SQL-function
  * inlining (the whole point); both bodies are search-path-independent. */
-CREATE OR REPLACE FUNCTION eff_mu(p_rating bigint, p_rd bigint)
+CREATE OR REPLACE FUNCTION @extschema@.eff_mu(p_rating bigint, p_rd bigint)
     RETURNS bigint LANGUAGE sql LAPLACE_IMMUTABLE AS $$
     SELECT p_rating - 2 * p_rd
 $$;

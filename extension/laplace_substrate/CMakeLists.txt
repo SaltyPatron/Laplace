@@ -84,7 +84,6 @@ add_custom_command(
             > ${EXT_TMP_SQL}
     COMMAND bash -c "grep -v '^#' ${EXT_TMP_SQL} \
             | perl -lpe \"s'MODULE_PATHNAME'\\\$libdir/${EXT_NAME}'g\" \
-            | perl -lpe \"s'\@extschema\@\\\\.''g\" \
             > ${EXT_BUILT_SQL}"
     COMMAND ${CMAKE_COMMAND} -E remove ${EXT_TMP_SQL}
     COMMENT "Preprocessing ${EXT_NAME} .sql.in modules → ${EXT_NAME}--${EXT_VERSION}.sql"

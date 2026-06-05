@@ -40,7 +40,7 @@ inverts each property:
 
 ---
 
-## 2. The payoff: inference, generation, AND interpretability are SQL queries
+## 2. The payoff: inference, generation, AND interpretability are substrate reads (SQL + C kernels)
 
 This is the point of the whole system. Once a model is ingested (§8), running, understanding, and
 auditing it are all *querying* it:
@@ -159,6 +159,25 @@ There is **one** kind of object: a content-addressed entity (BLAKE3-128 Merkle i
   trajectory runs subject → predicate → object — a higher-tier composite built by the *identical*
   cascade. "Edge" and "content" were never two categories: an edge is content whose constituents
   are `(subject, kind, object)`.
+- **Vertices carry their constituent IN BAND** (2026-06-05). Each trajectory vertex's four FP64s
+  are fixed-exponent payload carriers — 212 bits: the constituent's full 128-bit id, ordinal,
+  RLE run-length, and 52 flag bits (bit 0 `HAS_ATOM`, bits 1–5 the constituent's **tier**, bits
+  31–51 the **atom scalar** — 21 bits, exactly one Unicode codepoint). A walk therefore knows what
+  every constituent IS without touching `entities`, and leaves decode without the id→codepoint map.
+- **Reconstruction is O(tier)** — read one row's one trajectory column per node, one set-step per
+  tier, each DISTINCT constituent resolved ONCE (memoized; "the" in the Bible costs one
+  resolution). `render_text` executes this walk in C (`generate_walk.c`); SQL keeps the set
+  primitive (`constituents()` = one indexed fetch + mantissa unpack).
+- **The byte tier is the modality-blind floor** (2026-06-05). Bytes ≤0x7F ARE their ASCII
+  codepoint entities (identical content bytes ⇒ identical id — the content law, not a special
+  case); the 128 high bytes are atoms BELOW the codepoint tier with canonical super-Fibonacci
+  placements (`ByteAtoms`, the one implementation seed and anchorers share). Which character a
+  byte means is a property of the ENCODING, never of the byte: `DECODES_TO` carries the encoding
+  as context (Latin-1: 0x80→U+0080; CP1252: 0x80→€; under UTF-8 the same byte is a continuation
+  fragment — `HAS_UTF8_ROLE`). Every binary modality bottoms out here: binary is authored content
+  (compiler/codec/serializer output), a decomposer IS the format grammar run backward
+  (Ghidra-shaped; the Model decomposer is the in-repo proof), and self-describing formats (schema
+  in-band: GGUF, game saves) vs spec-described formats (ELF, UTF-8) both land on the same floor.
 
 ---
 
@@ -412,6 +431,19 @@ multiplying storage.
 
 ## 8a. The decomposer contract — how any source becomes substrate
 
+**The source roster (2026-06-05).** Fourteen seed sources, one contract, layer-ordered:
+Unicode (T0 atoms + UCD + the byte tier) → ISO 639 (language/script reference graph) →
+the layer-2 corpora — WordNet, UD treebanks, Tatoeba, ATOMIC2020, ConceptNet, Wiktionary,
+OpenSubtitles (601M aligned pairs → IS_TRANSLATION_OF at corpus scale), VerbNet, PropBank →
+layer-3 — OMW, FrameNet (frames/FEs/LUs: `EVOKES_FRAME`, `HAS_FRAME_ELEMENT`), SemLink
+(`CORRESPONDS_TO`: the cross-resource alignment that makes VerbNet classes, PropBank rolesets,
+FrameNet frames, and WordNet senses CO-ASSERT instead of sitting parallel) → the model.
+Predicate-argument semantics, thematic roles, sense-specific structure, and conversational
+translation pairs all land in their own arenas under the one factory; verb frames deliberately
+share ONE arena across WordNet and VerbNet (same assertion, two witnesses). Meta entities
+(synsets, classes, rolesets, frames) register their canonical names at ingest
+(`register_canonicals`) so `render()` answers in names, never hex.
+
 A decomposer turns a source (a corpus, a standard, a model) into **content-addressed entities +
 attestations** — witnesses, never identities (§3). One contract binds every decomposer, seed corpus
 and model alike:
@@ -459,7 +491,9 @@ and model alike:
 
 - **`laplace.entities`** — identity only. `id` (BLAKE3-128 PK), `tier`, `type_id`,
   `first_observed_by`, `created_at`. No geometry — geometry lives in `physicalities`.
-- **`laplace.physicalities`** — geometry. `id`, `entity_id`, `source_id`, `kind`
+- **`laplace.physicalities`** — geometry. `id`, `entity_id`, `source_id`, `kind` (renaming to
+  `type` under the 2026-06-05 type-system unification: attestations/consensus `kind_id`→`type_id`,
+  physicalities `kind`→`type` — one type system, one name)
   (1=Content, 2=BuildingBlock, 3=Projection, 4=ProjectionOutput), `coord` + `trajectory` (PostGIS
   PointZM / GeometryZM via CHECK), `hilbert_index`, `radius_origin` (generated), `n_constituents`,
   `alignment_residual`, `source_dim`, `observed_at`. `UNIQUE(entity_id, source_id, kind)`. Content
