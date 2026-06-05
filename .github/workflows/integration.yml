@@ -316,6 +316,21 @@ jobs:
           dotnet build Laplace.slnx -c Release
 
   # ------------------------------------------------------------------
+  # endpoint-build — OpenAI-compatible endpoint and its tests.
+  # ------------------------------------------------------------------
+  endpoint-build:
+    name: Build endpoint + endpoint tests
+    needs: dotnet
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - name: dotnet build endpoint
+        run: dotnet build app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj -c Release
+      - name: dotnet build endpoint tests
+        run: dotnet build app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release
+
+  # ------------------------------------------------------------------
   # db-deploy — install engine .so + .control + .sql; run DbUp; verify.
   # ------------------------------------------------------------------
   db-deploy:
@@ -406,7 +421,7 @@ jobs:
             Laplace.Decomposers.Unicode.Tests \
             Laplace.Decomposers.Model.Tests; do
             echo "::group::dotnet test $proj"
-            dotnet test "$proj/$proj.csproj" -c Release
+            dotnet test "$proj/$proj.csproj" -c Release --no-build --nologo --verbosity minimal
             echo "::endgroup::"
           done
 
@@ -437,6 +452,59 @@ jobs:
           done
 
   # ------------------------------------------------------------------
+  # endpoint-health — hard gate for endpoint process/route liveliness.
+  # ------------------------------------------------------------------
+  endpoint-health:
+    name: Endpoint health probe (hard gate)
+    needs: [endpoint-build, db-deploy]
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+
+      - name: Start endpoint
+        env:
+          ASPNETCORE_URLS: http://127.0.0.1:5187
+        run: |
+          dotnet run --project app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj -c Release > endpoint.log 2>&1 &
+          echo $! > endpoint.pid
+
+      - name: Probe /health
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS http://127.0.0.1:5187/health > health.json; then
+              break
+            fi
+            sleep 1
+          done
+          test -s health.json
+          grep -q '"status":"ok"' health.json
+
+      - name: Probe /v1/capabilities
+        run: |
+          curl -fsS http://127.0.0.1:5187/v1/capabilities > capabilities.json
+          grep -q '"chat_completions"' capabilities.json
+
+      - name: Cleanup endpoint process
+        if: always()
+        run: |
+          test -f endpoint.pid && kill "$(cat endpoint.pid)" 2>/dev/null || true
+
+  # ------------------------------------------------------------------
+  # endpoint-test — advisory while endpoint features stabilize.
+  # ------------------------------------------------------------------
+  endpoint-test:
+    name: Endpoint tests (advisory)
+    continue-on-error: true
+    needs: endpoint-build
+    runs-on: [self-hosted, laplace]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - name: dotnet test endpoint
+        run: dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release
+
+  # ------------------------------------------------------------------
   # Data pipeline — modular reusable workflows so THIS orchestrator stays small.
   # Each stage is an individually-visible step inside its module file:
   #   .github/workflows/seed-ladder.yml     (one step per source ingest)
@@ -444,7 +512,7 @@ jobs:
   # ------------------------------------------------------------------
   seed-ladder:
     name: Seed ladder
-    needs: [regress, dotnet-test]
+    needs: [regress, dotnet-test, endpoint-health]
     uses: ./.github/workflows/seed-ladder.yml
     with:
       full_ladder: ${{ inputs.full_ladder || false }}

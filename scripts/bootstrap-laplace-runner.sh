@@ -61,6 +61,7 @@
 #
 # Usage:
 #   sudo scripts/bootstrap-laplace-runner.sh bootstrap   (default — idempotent set-up)
+#   sudo scripts/bootstrap-laplace-runner.sh stripe      (Stripe sandbox env block only)
 #   sudo scripts/bootstrap-laplace-runner.sh status      (show current state)
 #   sudo scripts/bootstrap-laplace-runner.sh reset       (full tear-down)
 #
@@ -126,6 +127,9 @@ RUNNER_SERVICE="actions.runner.SaltyPatron-Laplace.hart-server.service"
 
 GH_SUDO_USER="${SUDO_USER:-ahart}"
 MODE="${1:-bootstrap}"
+LAPLACE_STRIPE_SUCCESS_URL_DEFAULT="${LAPLACE_STRIPE_SUCCESS_URL:-http://127.0.0.1:5187/billing/success}"
+LAPLACE_STRIPE_CANCEL_URL_DEFAULT="${LAPLACE_STRIPE_CANCEL_URL:-http://127.0.0.1:5187/billing/cancel}"
+LAPLACE_BILLING_CURRENCY_DEFAULT="${LAPLACE_BILLING_CURRENCY:-usd}"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -151,6 +155,13 @@ Modes:
               - Creates system account, runner, PG roles, peer auth, sudoers
               - Safe to re-run; only adds what's missing
   status      Print current state (no changes)
+
+    stripe      Write Stripe sandbox env block into runner .env
+                            - Writes LAPLACE_STRIPE_SUCCESS_URL / LAPLACE_STRIPE_CANCEL_URL /
+                                LAPLACE_BILLING_CURRENCY
+                            - Writes LAPLACE_STRIPE_API_KEY only if exported when invoking this script
+                                (example: sudo LAPLACE_STRIPE_API_KEY=sk_test_xxx $0 stripe)
+                            - Safe to re-run (managed begin/end block)
   reset       Tear down everything this script created
               - Deregisters + removes runner
               - Drops PG roles (and DBs they own)
@@ -553,6 +564,41 @@ bootstrap_runner_model_env() {
     # The runner reads .env at service start — restart to apply.
     systemctl restart "$RUNNER_SERVICE" 2>/dev/null || true
     green "✓ runner .env model dirs block written (service restarted to load it)"
+}
+
+bootstrap_runner_stripe_env() {
+    # Machine-static Stripe sandbox env for runner jobs and service startup.
+    # Writes a managed block into $RUNNER_DIR/.env. If LAPLACE_STRIPE_API_KEY is
+    # provided at invocation time, it is written; otherwise only non-secret vars
+    # are managed and key injection is left to local user env bootstrap.
+    say "Runner job env: Stripe sandbox vars → $RUNNER_DIR/.env"
+    if [ ! -d "$RUNNER_DIR" ]; then
+        yellow "runner dir missing — skipping Stripe .env block"
+        return 0
+    fi
+
+    local marker_begin="# >>> laplace-runner managed: stripe sandbox env >>>"
+    local marker_end="# <<< laplace-runner managed: stripe sandbox env <<<"
+    local envfile="$RUNNER_DIR/.env"
+    touch "$envfile"
+    sed -i -e "/$marker_begin/,/$marker_end/d" "$envfile"
+    {
+        echo "$marker_begin"
+        echo "LAPLACE_STRIPE_SUCCESS_URL=$LAPLACE_STRIPE_SUCCESS_URL_DEFAULT"
+        echo "LAPLACE_STRIPE_CANCEL_URL=$LAPLACE_STRIPE_CANCEL_URL_DEFAULT"
+        echo "LAPLACE_BILLING_CURRENCY=$LAPLACE_BILLING_CURRENCY_DEFAULT"
+        if [ -n "${LAPLACE_STRIPE_API_KEY:-}" ]; then
+            echo "LAPLACE_STRIPE_API_KEY=${LAPLACE_STRIPE_API_KEY}"
+        fi
+        echo "$marker_end"
+    } >> "$envfile"
+    chown "$RUNNER_USER:$RUNNER_GROUP" "$envfile"
+    systemctl restart "$RUNNER_SERVICE" 2>/dev/null || true
+    if [ -n "${LAPLACE_STRIPE_API_KEY:-}" ]; then
+        green "✓ runner .env Stripe sandbox block written with API key (service restarted)"
+    else
+        yellow "✓ runner .env Stripe sandbox block written without API key; set LAPLACE_STRIPE_API_KEY when ready"
+    fi
 }
 
 bootstrap_runner_service() {
@@ -1391,6 +1437,19 @@ do_status() {
         -d postgres -U laplace_admin -tAc \
         "SELECT datname FROM pg_database WHERE datname IN ('laplace','ahart');" \
         2>/dev/null || echo "  (substrate cluster unavailable)"
+
+    say "Stripe sandbox env block (runner .env)"
+    if [ -f "$RUNNER_DIR/.env" ] && grep -q "laplace-runner managed: stripe sandbox env" "$RUNNER_DIR/.env"; then
+        grep -E '^(LAPLACE_STRIPE_SUCCESS_URL|LAPLACE_STRIPE_CANCEL_URL|LAPLACE_BILLING_CURRENCY)=' "$RUNNER_DIR/.env" \
+            | sed 's/^/  /'
+        if grep -q '^LAPLACE_STRIPE_API_KEY=' "$RUNNER_DIR/.env"; then
+            echo "  LAPLACE_STRIPE_API_KEY=***set***"
+        else
+            echo "  LAPLACE_STRIPE_API_KEY=(not set)"
+        fi
+    else
+        echo "  (no managed Stripe sandbox block in $RUNNER_DIR/.env)"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1526,6 +1585,7 @@ do_bootstrap() {
     bootstrap_runner_service
     bootstrap_runner_job_env
     bootstrap_runner_model_env
+    bootstrap_runner_stripe_env
 
     # ld.so.cache must list /opt/laplace/{geos,proj,gdal}/lib BEFORE our
     # substrate cluster starts — otherwise the postgres binary forks
@@ -1624,6 +1684,14 @@ do_bootstrap() {
     echo "  sudo $0 reset"
 }
 
+do_stripe() {
+    require_root
+    bootstrap_runner_stripe_env
+    green "===== STRIPE SANDBOX ENV BOOTSTRAP COMPLETE ====="
+    echo "Tip: to write key non-interactively:"
+    echo "  sudo LAPLACE_STRIPE_API_KEY=sk_test_xxx $0 stripe"
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1638,6 +1706,9 @@ case "$MODE" in
         ;;
     status)
         do_status
+        ;;
+    stripe)
+        do_stripe
         ;;
     -h|--help|help)
         usage

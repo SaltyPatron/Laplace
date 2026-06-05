@@ -1,3 +1,5 @@
+using Laplace.Endpoints.OpenAICompat;
+
 // Stream F scaffold per /home/ahart/.claude/plans/replicated-hatching-stream.md.
 //
 // IProtocolEndpoint + + the "Endpoint extension" definition:
@@ -18,23 +20,16 @@
 // stub message.
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddOpenAiCompatServices();
+
 var app = builder.Build();
+app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseMiddleware<ExceptionEnvelopeMiddleware>();
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok", stream = "F-scaffold" }));
-
-app.MapGet("/v1/models", () => Results.Json(new
-{
-    @object = "list",
-    data    = Array.Empty<object>(),
-    note    = "Stream F-complete will list synthesized model recipes from substrate"
-}));
-
-app.MapPost("/v1/chat/completions", (HttpContext ctx) => Results.StatusCode(501)
-    /* Stream F-complete: cascade A* through typed attestation graph
-       weighted by Glicko-2 effective-mu, prompt decomposed per R19. Until Stream
-       E's compiled cascade SRF lands, this endpoint returns 501. */);
-
-app.MapPost("/v1/completions", (HttpContext ctx) => Results.StatusCode(501));
-app.MapPost("/v1/embeddings",   (HttpContext ctx) => Results.StatusCode(501));
+app.MapCoreEndpoints();
+app.MapOpenAiCompatEndpoints();
+app.MapBillingEndpoints();
 
 app.Run();
+
+public partial class Program;

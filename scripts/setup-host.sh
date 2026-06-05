@@ -14,6 +14,7 @@
 #                                          Requires typing 'RESET' to confirm.
 #   scripts/setup-host.sh layer0           Layer-0 only (system + runner + PG roles + auth)
 #   scripts/setup-host.sh layer1           Layer-1 only (DbUp: EnsureDatabase + migrations)
+#   scripts/setup-host.sh stripe           Stripe sandbox setup (local env + runner env)
 #
 # Idempotency:
 #   - Layer 0 is idempotent (per scripts/bootstrap-laplace-runner.sh).
@@ -37,6 +38,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BOOTSTRAP="$SCRIPT_DIR/bootstrap-laplace-runner.sh"
+STRIPE_BOOTSTRAP="$SCRIPT_DIR/bootstrap-stripe-dev.sh"
 MIGRATIONS_PROJ="$REPO_DIR/app/Laplace.Migrations/Laplace.Migrations.csproj"
 RUNNER_USER="laplace-runner"
 
@@ -75,6 +77,9 @@ Modes:
   layer0    Layer-0 only (system + runner + PG roles + auth + paths).
   deps      Layer-0.5 only (build vendor deps into /opt/laplace).
   layer1    Layer-1 only (cmake --install + DbUp).
+    stripe    Stripe sandbox setup:
+                        - run scripts/bootstrap-stripe-dev.sh for local user env
+                        - run sudo bootstrap-laplace-runner.sh stripe for runner .env
 
 After 'setup' completes the host is ready. Trigger CI:
   gh workflow run integration.yml
@@ -190,8 +195,10 @@ layer1_build_install_extensions() {
 
 layer0_5_build_deps() {
     say "Layer 0.5 — Build vendor deps (proj/geos/gdal/pg/postgis/tree-sitter) into /opt/laplace"
-    # Runs as the invoking user (typically ahart). /opt/laplace is owned by
-    # that user (per bootstrap_build_environment) so the install is sudo-free.
+    # Run as laplace-runner because /opt/laplace install destinations are
+    # owned by that account. CMake install may chmod existing directories,
+    # which is owner-only and fails under a different user even with group
+    # write permission.
     # Idempotent — ExternalProject_Add's stamp-based tracking skips deps that
     # are already built at the current submodule SHA. One-time cost on a
     # fresh tree is ~10-15 min; re-runs are seconds.
@@ -201,8 +208,14 @@ layer0_5_build_deps() {
     # PG produced here) when LAPLACE_PG_PREFIX points there; otherwise it
     # falls back to the stock system PG (Layer 0 already configured the
     # running system PG with the /opt/laplace extension paths regardless).
-    (cd "$REPO_DIR" && cmake -B build/deps -S external 2>&1 | tail -5)
-    (cd "$REPO_DIR" && cmake --build build/deps -j 2>&1 | tail -10)
+    local deps_build_dir="/opt/laplace/build/deps"
+    sudo install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 2775 /opt/laplace/build "$deps_build_dir"
+    sudo -u "$RUNNER_USER" -H \
+        PATH="$PATH" \
+        bash -c "cd '$REPO_DIR' && cmake -B '$deps_build_dir' -S external" 2>&1 | tail -5
+    sudo -u "$RUNNER_USER" -H \
+        PATH="$PATH" \
+        bash -c "cd '$REPO_DIR' && cmake --build '$deps_build_dir' -j" 2>&1 | tail -10
     green "✓ Vendor deps built into /opt/laplace"
 }
 
@@ -286,6 +299,19 @@ EOF
     green "===== HOST RESET COMPLETE ====="
 }
 
+do_stripe() {
+    say "Stripe sandbox bootstrap (local user + runner)"
+
+    if [ ! -x "$STRIPE_BOOTSTRAP" ]; then
+        red "Missing executable script: $STRIPE_BOOTSTRAP"
+        exit 1
+    fi
+
+    "$STRIPE_BOOTSTRAP" --persist-zsh
+    sudo "$BOOTSTRAP" stripe
+    green "✓ Stripe sandbox setup complete"
+}
+
 case "$MODE" in
     setup)
         do_setup
@@ -306,6 +332,9 @@ case "$MODE" in
         ensure_dotnet_present
         layer1_build_install_extensions
         layer1_up
+        ;;
+    stripe)
+        do_stripe
         ;;
     -h|--help|help)
         usage
