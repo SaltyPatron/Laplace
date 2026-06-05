@@ -37,11 +37,11 @@ internal static class ContentRoundtrip
     public static async Task BootstrapAsync(ISubstrateWriter writer, CancellationToken ct = default)
     {
         var b = new SubstrateChangeBuilder(PromptSource, "bootstrap/UserPrompt", parentIntentId: null);
-        b.AddEntity(PromptSource, /*tier*/ 0, BootstrapIntentBuilder.SourceTypeId, firstObservedBy: PromptSource);
-        b.AddEntity(TGrapheme, 0, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
-        b.AddEntity(TWord,     0, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
-        b.AddEntity(TSentence, 0, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
-        b.AddEntity(TDocument, 0, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
+        b.AddEntity(PromptSource, (byte)MetaTier.Meta, BootstrapIntentBuilder.SourceTypeId, firstObservedBy: PromptSource);
+        b.AddEntity(TGrapheme, (byte)MetaTier.Meta, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
+        b.AddEntity(TWord,     (byte)MetaTier.Meta, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
+        b.AddEntity(TSentence, (byte)MetaTier.Meta, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
+        b.AddEntity(TDocument, (byte)MetaTier.Meta, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
         await writer.ApplyAsync(b.Build(), ct);   // entities only — nothing attested
     }
 

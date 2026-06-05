@@ -351,7 +351,7 @@ public static class KindRegistry
     {
         var all = new List<KindResolution>(AllCanonical());
         foreach (var k in all)
-            builder.AddEntity(new EntityRow(k.Id, /*tier*/ 0, BootstrapIntentBuilder.KindMetaTypeId, sourceId));
+            builder.AddEntity(new EntityRow(k.Id, (byte)MetaTier.Kind, BootstrapIntentBuilder.KindMetaTypeId, sourceId));
         foreach (var k in all)
             if (k.ParentId is { } parent)
                 builder.AddAttestation(Attest(k.Id, "IS_A", parent, sourceId, SourceTrust.SubstrateMandate));
@@ -366,7 +366,7 @@ public static class KindRegistry
                                    HashSet<Hash128>? seen = null)
     {
         if (seen is not null && !seen.Add(k.Id)) return;
-        builder.AddEntity(new EntityRow(k.Id, /*tier*/ 0, BootstrapIntentBuilder.KindMetaTypeId, sourceId));
+        builder.AddEntity(new EntityRow(k.Id, (byte)MetaTier.Kind, BootstrapIntentBuilder.KindMetaTypeId, sourceId));
         if (k.ParentId is { } parent)
             builder.AddAttestation(Attest(k.Id, "IS_A", parent, sourceId, SourceTrust.AcademicCurated));
     }

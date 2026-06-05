@@ -112,8 +112,8 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
 
             Hash128 startLangId = LanguageReference.Resolve(startLang);
             Hash128 endLangId   = LanguageReference.Resolve(endLang);
-            b.AddEntity(new EntityRow(startLangId, 2, LanguageTypeId, Source));
-            b.AddEntity(new EntityRow(endLangId, 2, LanguageTypeId, Source));
+            b.AddEntity(new EntityRow(startLangId, (byte)MetaTier.Meta, LanguageTypeId, Source));
+            b.AddEntity(new EntityRow(endLangId, (byte)MetaTier.Meta, LanguageTypeId, Source));
 
             (double weight, string? surface) = ParseMeta(c[4]);
 

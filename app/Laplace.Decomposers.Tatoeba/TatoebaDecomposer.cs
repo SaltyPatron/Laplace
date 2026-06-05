@@ -78,8 +78,8 @@ public sealed class TatoebaDecomposer : IDecomposer
 
                 Hash128 extId = SourceEntityIdConventions.TatoebaSentence(sid);
                 Hash128 langId = LanguageReference.Resolve(lang);
-                b.AddEntity(new EntityRow(extId, /*tier*/ 3, SentenceRefTypeId, Source));
-                b.AddEntity(new EntityRow(langId, /*tier*/ 2, LanguageTypeId, Source));
+                b.AddEntity(new EntityRow(extId, (byte)MetaTier.Meta, SentenceRefTypeId, Source));
+                b.AddEntity(new EntityRow(langId, (byte)MetaTier.Meta, LanguageTypeId, Source));
 
                 var contentId = ContentEmitter.Emit(b, text, Source);
                 if (contentId is not null)
@@ -117,8 +117,8 @@ public sealed class TatoebaDecomposer : IDecomposer
                 Hash128 eb = SourceEntityIdConventions.TatoebaSentence(bId);
                 // Emit endpoints inline (idempotent) so the FK holds even if a link
                 // references an id absent from sentences.csv.
-                b.AddEntity(new EntityRow(ea, /*tier*/ 3, SentenceRefTypeId, Source));
-                b.AddEntity(new EntityRow(eb, /*tier*/ 3, SentenceRefTypeId, Source));
+                b.AddEntity(new EntityRow(ea, (byte)MetaTier.Meta, SentenceRefTypeId, Source));
+                b.AddEntity(new EntityRow(eb, (byte)MetaTier.Meta, SentenceRefTypeId, Source));
                 b.AddAttestation(AttestationFactory.Create(
                     ea, KindIsTranslationOf, eb, Source, null,
                     KindRank.Equivalence, SourceTrust.StructuredCorpus));

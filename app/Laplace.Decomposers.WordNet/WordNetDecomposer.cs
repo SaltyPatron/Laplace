@@ -132,9 +132,9 @@ public sealed class WordNetDecomposer : IDecomposer
             Source, "bootstrap/wordnet-vocab", null,
             entityCapacity: 5 + Lexnames.Length, physicalityCapacity: 0, attestationCapacity: 0);
         foreach (char p in new[] { 'n', 'v', 'a', 's', 'r' })
-            seed.AddEntity(new EntityRow(PosId(p), 0, PosTypeId, Source));
+            seed.AddEntity(new EntityRow(PosId(p), (byte)MetaTier.Meta, PosTypeId, Source));
         foreach (var nm in Lexnames)
-            seed.AddEntity(new EntityRow(LexCatId(nm), 0, LexCategoryTypeId, Source));
+            seed.AddEntity(new EntityRow(LexCatId(nm), (byte)MetaTier.Meta, LexCategoryTypeId, Source));
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 
@@ -198,7 +198,7 @@ public sealed class WordNetDecomposer : IDecomposer
 
     private static void EmitSynsetEntities(SubstrateChangeBuilder b, WnSynset syn)
     {
-        b.AddEntity(syn.SynsetId, /*tier*/ 3, SynsetTypeId, Source);
+        b.AddEntity(syn.SynsetId, (byte)MetaTier.Meta, SynsetTypeId, Source);
         foreach (var lemma in syn.Lemmas)
             ContentEmitter.Emit(b, Surface(lemma), Source);
 

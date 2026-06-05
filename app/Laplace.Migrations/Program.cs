@@ -216,6 +216,11 @@ internal static class Program
             // PostgreSQL's unquoted-identifier case-folding. Matches what
             // DbUp produces by default; RunReset() drops by this same name.
             .JournalToPostgresqlTable("public", "schemaversions")
+            // Substrate-scale DDL (index builds over 10⁸-row consensus/evidence
+            // tables) outlives Npgsql's 30 s default CommandTimeout — the
+            // 20260604220000 index build timed out client-side mid-CREATE.
+            // Migrations are deliberate, supervised runs; give them four hours.
+            .WithExecutionTimeout(TimeSpan.FromHours(4))
             .LogToConsole()
             .Build();
     }

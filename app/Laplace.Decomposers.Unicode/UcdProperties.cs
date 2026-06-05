@@ -120,11 +120,11 @@ internal sealed class UcdProperties
     {
         var typeId = Hash128.OfCanonical("substrate/type/UcdClassifier/v1");
         foreach (var (_, id) in CategoryEntityIds)
-            yield return new EntityRow(id, 0, typeId, sourceId);
+            yield return new EntityRow(id, (byte)MetaTier.Meta, typeId, sourceId);
         foreach (var (_, id) in ScriptEntityIds)
-            yield return new EntityRow(id, 0, typeId, sourceId);
+            yield return new EntityRow(id, (byte)MetaTier.Meta, typeId, sourceId);
         foreach (var (_, id) in BlockEntityIds)
-            yield return new EntityRow(id, 0, typeId, sourceId);
+            yield return new EntityRow(id, (byte)MetaTier.Meta, typeId, sourceId);
     }
 
     // ── factory ──

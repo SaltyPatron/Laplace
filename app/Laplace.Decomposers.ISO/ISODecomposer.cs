@@ -71,7 +71,7 @@ public sealed class ISODecomposer : IDecomposer
         await foreach (var rec in ParseAsync(dataPath, ct))
         {
             var langId = LanguageEntityId.FromIso639_3(rec.Id);
-            b.AddEntity(langId, /*tier*/ 2, LanguageTypeId, Source);
+            b.AddEntity(langId, (byte)MetaTier.Meta, LanguageTypeId, Source);
             b.AddAttestation(AttestationFactory.Create(
                 langId, KindIsLanguageCode, null, Source, null,
                 KindRank.Partitive, SourceTrust.StandardsDerived));
@@ -79,7 +79,7 @@ public sealed class ISODecomposer : IDecomposer
             if (rec.Part1.Length > 0)
             {
                 var iso1Id = Hash128.OfCanonical($"iso639-1:{rec.Part1}");
-                b.AddEntity(iso1Id, /*tier*/ 2, Iso639CodeTypeId, Source);
+                b.AddEntity(iso1Id, (byte)MetaTier.Meta, Iso639CodeTypeId, Source);
                 b.AddAttestation(AttestationFactory.Create(
                     langId, KindHasIso6391Code, iso1Id, Source, null,
                     KindRank.Partitive, SourceTrust.StandardsDerived));
@@ -97,8 +97,8 @@ public sealed class ISODecomposer : IDecomposer
         {
             var indivId = LanguageEntityId.FromIso639_3(indiv);
             var macroId = LanguageEntityId.FromIso639_3(macro);
-            b.AddEntity(indivId, /*tier*/ 2, LanguageTypeId, Source);
-            b.AddEntity(macroId, /*tier*/ 2, LanguageTypeId, Source);
+            b.AddEntity(indivId, (byte)MetaTier.Meta, LanguageTypeId, Source);
+            b.AddEntity(macroId, (byte)MetaTier.Meta, LanguageTypeId, Source);
             b.AddAttestation(AttestationFactory.Create(
                 indivId, KindMemberOfMacrolanguage, macroId, Source, null,
                 KindRank.Taxonomic, SourceTrust.StandardsDerived));
@@ -113,12 +113,12 @@ public sealed class ISODecomposer : IDecomposer
         {
             var langId = LanguageReference.Resolve(subtag);
             if (langId.Equals(undId)) continue;       // unresolvable subtag → skip, don't pollute und
-            b.AddEntity(langId, /*tier*/ 2, LanguageTypeId, Source);
+            b.AddEntity(langId, (byte)MetaTier.Meta, LanguageTypeId, Source);
             foreach (var code in scriptCodes)
             {
                 if (!scriptName.TryGetValue(code, out var name)) continue;  // unknown 15924 code
                 var scriptId = LanguageGraph.ScriptEntityId(name);
-                b.AddEntity(scriptId, /*tier*/ 0, UcdClassifierTypeId, Source);  // idempotent w/ Unicode
+                b.AddEntity(scriptId, (byte)MetaTier.Meta, UcdClassifierTypeId, Source);  // idempotent w/ Unicode
                 b.AddAttestation(AttestationFactory.Create(
                     langId, KindUsesScript, scriptId, Source, null,
                     KindRank.StandardsStructural, SourceTrust.StandardsDerived));

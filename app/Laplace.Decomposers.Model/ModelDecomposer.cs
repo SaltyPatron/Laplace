@@ -244,7 +244,7 @@ public sealed class ModelDecomposer : IDecomposer
         var tokEntityId = Hash128.Blake3(tokBytes);
         var tokChange = new SubstrateChangeBuilder(Source, "tokenizer/entity",
             entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 0);
-        tokChange.AddEntity(tokEntityId, tier: 0, ModelTokenizerTypeId, firstObservedBy: Source);
+        tokChange.AddEntity(tokEntityId, (byte)MetaTier.Meta, ModelTokenizerTypeId, firstObservedBy: Source);
         yield return tokChange.Build();
 
         /* 3. Token vocab entities + TOKEN_MAPS_TO attestations.

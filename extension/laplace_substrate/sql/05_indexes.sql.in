@@ -53,7 +53,7 @@ CREATE INDEX physicalities_observed_brin   ON physicalities USING brin  (observe
  * one law). A second UNIQUE over the same 5-tuple measured 144 B/row of
  * pure duplication and was removed with it.
  * Evidence is NOT ranked by μ — that is the consensus layer
- * (consensus_rating_btree). */
+ * (consensus_eff_mu_btree). */
 
 CREATE INDEX attestations_kind_btree          ON attestations USING btree (kind_id);
 CREATE INDEX attestations_object_btree        ON attestations USING btree (object_id) WHERE object_id IS NOT NULL;

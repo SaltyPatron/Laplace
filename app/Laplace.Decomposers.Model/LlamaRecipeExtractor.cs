@@ -106,7 +106,7 @@ public sealed class LlamaRecipeExtractor
         var b = new SubstrateChangeBuilder(sourceId, "recipe/config.json",
             entityCapacity: 2, physicalityCapacity: 0, attestationCapacity: 8);
 
-        b.AddEntity(recipe.RecipeEntityId, tier: 0, modelRecipeTypeId, firstObservedBy: sourceId);
+        b.AddEntity(recipe.RecipeEntityId, (byte)MetaTier.Meta, modelRecipeTypeId, firstObservedBy: sourceId);
 
         // Recipe attestations are categorical config facts (HAS_*; the value lives in
         // the object entity, not the score). A confirm observation, full trust.
@@ -120,7 +120,7 @@ public sealed class LlamaRecipeExtractor
         {
             var valueBytes = Encoding.UTF8.GetBytes(value);
             var valueId    = Hash128.Blake3(valueBytes);
-            b.AddEntity(valueId, tier: 0, Hash128.OfCanonical("substrate/type/Scalar/v1"), sourceId);
+            b.AddEntity(valueId, (byte)MetaTier.Meta, Hash128.OfCanonical("substrate/type/Scalar/v1"), sourceId);
             AddAttestation(kindId, valueId);
         }
 
@@ -132,7 +132,7 @@ public sealed class LlamaRecipeExtractor
         AddScalar(hasVocabSizeKindId,   recipe.VocabSize.ToString());
 
         /* IS_A attestation → architecture entity */
-        b.AddEntity(architectureEntityId, tier: 0, Hash128.OfCanonical("substrate/type/Architecture/v1"), sourceId);
+        b.AddEntity(architectureEntityId, (byte)MetaTier.Meta, Hash128.OfCanonical("substrate/type/Architecture/v1"), sourceId);
         AddAttestation(isAKindId, architectureEntityId);
 
         return b.Build();

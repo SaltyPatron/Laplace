@@ -67,7 +67,7 @@ public sealed class BootstrapIntentBuilder
 
         // Register the source entity itself. Declared as a Source-typed
         // entity, first_observed_by self (the source bootstraps itself).
-        _inner.AddEntity(sourceId, /*tier*/ 0, SourceTypeId, sourceId);
+        _inner.AddEntity(sourceId, (byte)MetaTier.Meta, SourceTypeId, sourceId);
     }
 
     /// <summary>Register a Type entity the decomposer uses (e.g.
@@ -78,7 +78,7 @@ public sealed class BootstrapIntentBuilder
     public Hash128 AddType(string canonicalTypeName)
     {
         var id = Hash128.OfCanonical($"substrate/type/{canonicalTypeName}/v1");
-        _inner.AddEntity(id, /*tier*/ 0, TypeMetaTypeId, _sourceId);
+        _inner.AddEntity(id, (byte)MetaTier.Meta, TypeMetaTypeId, _sourceId);
         return id;
     }
 
@@ -88,7 +88,7 @@ public sealed class BootstrapIntentBuilder
     public Hash128 AddKind(string canonicalKindName)
     {
         var id = Hash128.OfCanonical($"substrate/kind/{canonicalKindName}/v1");
-        _inner.AddEntity(id, /*tier*/ 0, KindMetaTypeId, _sourceId);
+        _inner.AddEntity(id, (byte)MetaTier.Kind, KindMetaTypeId, _sourceId);
         return id;
     }
 

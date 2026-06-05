@@ -301,15 +301,17 @@ An observation's influence on a relation's consensus is a product of three ranks
    ranking, NOT the `KindValueTier` T1–T11 axis** — those tiers are a coarse placeholder; the genuine
    kind-significance scale that feeds the matchup weight is left to set (§10). The many trust /
    significance levels exist precisely so each (kind, source) weights its matchup differently.
-2. **Source trust** — each source has a trust rating. Maps to `TrustClass` TC1–TC10
-   (SubstrateMandate 1.00 … AiModelProbe 0.50 … Adversarial 0.00; `AttestationFactory.cs:167-180`).
+2. **Source trust** — each source has a trust rating, a numeric `SourceTrust` ∈ (0,1].
+   (The earlier `TrustClass` TC1–TC10 enum named here was PURGED — verified live,
+   docs/INGESTION-STATUS.md "Tier / trust corruption"; trust is a value, never a class/tier.)
 3. **User / tenant trust** — the user/tenant ingesting content has a trust rating.
    **NOT YET IMPLEMENTED — there is no tenant/user id.** This dimension must be added and folded
    into the consensus weight alongside kind rank and source trust.
 
-Effective seed/accumulation weight ≈ f(kind rank, source trust, tenant trust). Today
-`AttestationFactory.CreateWeighted` computes `μ = kindTierμ × strength × sourceTrustWeight`; the
-tenant dimension is absent.
+Effective accumulation weight = kind_rank × source_trust × tenant_trust → opponent precision φ,
+weighted natively by Glicko's `g(φ)` (§6 — the landed mechanism; measured live, no tier-band seeds,
+no μ multipliers). The earlier "`CreateWeighted` computes `μ = kindTierμ × strength ×
+sourceTrustWeight`" description was the purged tier-prior path. The tenant dimension is absent.
 
 ---
 
@@ -465,17 +467,22 @@ and model alike:
   (§8).
 - **`laplace.attestations`** — the per-witness **evidence** layer: PROVENANCE, never values.
   `id` (BLAKE3 of the 5-tuple), `subject_id`, `kind_id`, `object_id?`, `source_id`, `context_id?`
-  (model layer/head witness), `outcome` (confirm / draw / refute — the dissent record, a class,
-  never a magnitude), `last_observed_at`, `observation_count`.
-  `UNIQUE NULLS NOT DISTINCT (subject,kind,object,source,context)` — **source IN the identity**.
+  (NULL for model sources — positions FOLD onto the one row, `observation_count` = games; layer/head
+  attribution recovered through the attn/kv axis index ranges, never per-row context), `outcome`
+  (confirm / draw / refute — the dissent record, a class, never a magnitude), `last_observed_at`,
+  `observation_count`. Uniqueness = the content-addressed `id` alone — **source IN the identity**;
+  the composite `UNIQUE NULLS NOT DISTINCT (subject,kind,object,source,context)` restating the PK
+  was measured redundant (~160 B/row) and removed (migration 20260604070000; verified live \d 2026-06-04).
   The witness's magnitude is consumed into the consensus accumulation AT INGEST (§6 matchup) and
   is not persisted; the accumulated `rating`/`rd`/`volatility` live ONLY on `consensus`.
 - **`laplace.consensus`** — the materialized **consensus** layer (§6): one signed Glicko-2 row per
   `(subject, kind, object)`, **source AND context (model layer/head) OUT of identity** — both are
   witnesses, never identity. `id` (BLAKE3 of the 3-tuple), `rating`/`rd`/`volatility`,
-  `witness_count`, `last_observed_at`; `UNIQUE NULLS NOT DISTINCT (subject,kind,object)`.
-  Accumulated **at ingest** via the `laplace_glicko2_accumulate` aggregate (`incremental_consensus`
-  per ingest period; `materialize_period_consensus` for the production writer) — there is **no batch
+  `witness_count`, `last_observed_at`; uniqueness = the content-addressed `id` alone (the composite
+  `UNIQUE` was removed with the evidence one — migration 20260604160000; verified live \d 2026-06-04).
+  Accumulated **at ingest** via the `laplace_glicko2_accumulate` aggregate in the period fold
+  `materialize_period_consensus` at each period's clean end (the earlier `incremental_consensus`
+  evidence-replay form was itself removed by design — docs/INGESTION-STATUS.md) — there is **no batch
   rebuild**; that pattern is forbidden by design. **Inference reads this** — a sorted index scan on
   `rating`, not joins over evidence.
 - **Glicko-2 kernel** — full Glickman-2013 implementation in `engine/core/src/glicko2.c`, exposed as

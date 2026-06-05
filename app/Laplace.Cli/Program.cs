@@ -202,13 +202,9 @@ internal static class Program
         using var tree = TextDecomposer.Run(text);
         unsafe { HashComposer.Run(tree, &PerfcacheResolver); }
 
-        // codepoint id -> char, for readable rendering of atomic subjects/objects
-        var idToCp = new Dictionary<Hash128, uint>(1_114_112);
-        var recs = CodepointPerfcache.Records;
-        for (int i = 0; i < recs.Length; i++) idToCp[recs[i].Hash] = recs[i].Codepoint;
-        string Render(Hash128 h) =>
-            idToCp.TryGetValue(h, out var cp) ? $"'{char.ConvertFromUtf32((int)cp)}'(U+{cp:X4})" : Hex(h)[..16] + "…";
-
+        // Rendering is the SUBSTRATE's job (laplace.render: canonical name |
+        // codepoint | reconstructed content text | hex fallback) — no managed
+        // per-call dictionary, no app-side reverse map.
         var root = tree.GetNode(tree.NaturalUnitIndex());
         Hash128 id = root.Id;
         Console.WriteLine($"inspect \"{text}\"");
@@ -222,20 +218,56 @@ internal static class Program
         bool exists = false;
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT tier, encode(type_id,'hex') FROM laplace.entity_facets(@id)";
+            cmd.CommandText = "SELECT f.tier, laplace.render(f.type_id) FROM laplace.entity_facets(@id) f";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
             {
                 exists = true;
-                Console.WriteLine($"  ENTITY: present  tier={r.GetInt16(0)}  type_id={r.GetString(1)[..16]}…");
+                Console.WriteLine($"  ENTITY: present  tier={r.GetInt16(0)}  type={r.GetString(1)}");
             }
         }
-        if (!exists)
+        // CONSTITUENT KNOWLEDGE — composed content answers through its parts.
+        // A novel composite is not a dead end: its word-tier constituents are
+        // content-addressed against the SAME ids every source attested onto, so
+        // the substrate answers the sentence through what it knows of its words.
+        var utf8Input = Encoding.UTF8.GetBytes(text);
+        var wordSeen  = new HashSet<Hash128>();
+        var words     = new List<(Hash128 Id, string Label)>();
+        for (uint i = 0; i < (uint)tree.NodeCount; i++)
         {
-            Console.WriteLine("  ENTITY: not in substrate (id is correct, but this n-gram was never ingested)");
-            return 0;
+            var v = tree.GetNode(i);
+            if (v.Tier != 2) continue;
+            if (!wordSeen.Add(v.Id)) continue;
+            words.Add((v.Id, Encoding.UTF8.GetString(utf8Input, (int)v.TextRangeOff, (int)v.TextRangeLen)));
         }
+
+        if (!exists)
+            Console.WriteLine("  ENTITY: novel composite — correct id, not yet ingested (a prompt ingest binds it)");
+
+        if (words.Count > 1 || !exists)
+        {
+            Console.WriteLine("\n  CONSTITUENT KNOWLEDGE (the substrate answering through the parts it knows):");
+            foreach (var (wid, label) in words)
+            {
+                await using var wc = conn.CreateCommand();
+                wc.CommandText = "SELECT kind, object, eff_mu, witnesses "
+                               + "FROM laplace.consensus_out_readable(@id, 2)";
+                wc.Parameters.AddWithValue("id", wid.ToBytes());
+                await using var wr = await wc.ExecuteReaderAsync();
+                bool any = false;
+                while (await wr.ReadAsync())
+                {
+                    if (!any) Console.WriteLine($"    \"{label}\"");
+                    any = true;
+                    string obj = wr.IsDBNull(1) ? "(unary)" : wr.GetString(1);
+                    Console.WriteLine($"        [{wr.GetString(0)}] → {obj}  μ={wr.GetDecimal(2):F3}  witnesses={wr.GetInt64(3)}");
+                }
+                if (!any) Console.WriteLine($"    \"{label}\"  (no consensus yet)");
+            }
+        }
+
+        if (!exists) return 0;
 
         // Glome facet — laplace.entity_physicalities(id)
         await using (var cmd = conn.CreateCommand())
@@ -259,8 +291,9 @@ internal static class Program
         // (accumulated Glicko-2 across all witnesses; source/context out of identity).
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT kind_id, object_id, rating, rd, volatility, witness_count "
-                            + "FROM laplace.consensus_out(@id)";
+            cmd.CommandText = "SELECT laplace.render(c.kind_id), laplace.render(c.object_id), "
+                            + "c.rating, c.rd, c.volatility, c.witness_count "
+                            + "FROM laplace.consensus_out(@id) c";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
             await using var r = await cmd.ExecuteReaderAsync();
             Console.WriteLine("\n  OUTGOING consensus (this → object), Glicko-2 μ over all witnesses:");
@@ -268,9 +301,9 @@ internal static class Program
             while (await r.ReadAsync())
             {
                 n++;
-                var kind = ReadHash16((byte[])r[0]);
-                var obj  = r.IsDBNull(1) ? Hash128.Zero : ReadHash16((byte[])r[1]);
-                Console.WriteLine($"    [{Hex(kind)[..12]}…] → {Render(obj),-24}  μ={r.GetInt64(2)/1e9:F3} rd={r.GetInt64(3)/1e9:F3} σ={r.GetInt64(4)/1e9:F4}"
+                string kind = r.GetString(0);
+                string obj  = r.IsDBNull(1) ? "(unary)" : r.GetString(1);
+                Console.WriteLine($"    [{kind}] → {obj,-28}  μ={r.GetInt64(2)/1e9:F3} rd={r.GetInt64(3)/1e9:F3} σ={r.GetInt64(4)/1e9:F4}"
                     + $"  witnesses={r.GetInt64(5)}");
             }
             if (n == 0) Console.WriteLine("    (none)");
@@ -278,8 +311,9 @@ internal static class Program
 
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT subject_id, kind_id, rating, rd, volatility, witness_count "
-                            + "FROM laplace.consensus_in(@id)";
+            cmd.CommandText = "SELECT laplace.render(c.subject_id), laplace.render(c.kind_id), "
+                            + "c.rating, c.rd, c.volatility, c.witness_count "
+                            + "FROM laplace.consensus_in(@id) c";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
             await using var r = await cmd.ExecuteReaderAsync();
             Console.WriteLine("\n  INCOMING consensus (subject → this), Glicko-2 μ over all witnesses:");
@@ -287,9 +321,7 @@ internal static class Program
             while (await r.ReadAsync())
             {
                 n++;
-                var subj = ReadHash16((byte[])r[0]);
-                var kind = ReadHash16((byte[])r[1]);
-                Console.WriteLine($"    {Render(subj),-24} [{Hex(kind)[..12]}…] → here  μ={r.GetInt64(2)/1e9:F3} rd={r.GetInt64(3)/1e9:F3} σ={r.GetInt64(4)/1e9:F4}"
+                Console.WriteLine($"    {r.GetString(0),-28} [{r.GetString(1)}] → here  μ={r.GetInt64(2)/1e9:F3} rd={r.GetInt64(3)/1e9:F3} σ={r.GetInt64(4)/1e9:F4}"
                     + $"  witnesses={r.GetInt64(5)}");
             }
             if (n == 0) Console.WriteLine("    (none)");
@@ -301,8 +333,9 @@ internal static class Program
         static string Outc(short o) => o switch { 0 => "refute", 1 => "draw", _ => "confirm" };
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT kind_id, object_id, source_id, context_id, outcome, observation_count "
-                            + "FROM laplace.attestations_out(@id)";
+            cmd.CommandText = "SELECT laplace.render(a.kind_id), laplace.render(a.object_id), "
+                            + "laplace.render(a.source_id), a.context_id, a.outcome, a.observation_count "
+                            + "FROM laplace.attestations_out(@id) a";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
             await using var r = await cmd.ExecuteReaderAsync();
             Console.WriteLine("\n  OUTGOING evidence (provenance — who witnessed):");
@@ -310,19 +343,19 @@ internal static class Program
             while (await r.ReadAsync())
             {
                 n++;
-                var kind = ReadHash16((byte[])r[0]);
-                var obj  = r.IsDBNull(1) ? Hash128.Zero : ReadHash16((byte[])r[1]);
+                string obj = r.IsDBNull(1) ? "(unary)" : r.GetString(1);
                 string ctx = r.IsDBNull(3) ? "-" : Hex(ReadHash16((byte[])r[3]))[..10] + "…";
-                Console.WriteLine($"    [{Hex(kind)[..12]}…] → {Render(obj),-24}  {Outc(r.GetInt16(4))}"
-                    + $"  src={Hex(ReadHash16((byte[])r[2]))[..10]}…  ctx={ctx}  games={r.GetInt64(5)}");
+                Console.WriteLine($"    [{r.GetString(0)}] → {obj,-28}  {Outc(r.GetInt16(4))}"
+                    + $"  src={r.GetString(2)}  ctx={ctx}  games={r.GetInt64(5)}");
             }
             if (n == 0) Console.WriteLine("    (none)");
         }
 
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT subject_id, kind_id, source_id, context_id, outcome, observation_count "
-                            + "FROM laplace.attestations_in(@id)";
+            cmd.CommandText = "SELECT laplace.render(a.subject_id), laplace.render(a.kind_id), "
+                            + "laplace.render(a.source_id), a.context_id, a.outcome, a.observation_count "
+                            + "FROM laplace.attestations_in(@id) a";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
             await using var r = await cmd.ExecuteReaderAsync();
             Console.WriteLine("\n  INCOMING evidence (provenance — who witnessed):");
@@ -330,11 +363,9 @@ internal static class Program
             while (await r.ReadAsync())
             {
                 n++;
-                var subj = ReadHash16((byte[])r[0]);
-                var kind = ReadHash16((byte[])r[1]);
                 string ctx = r.IsDBNull(3) ? "-" : Hex(ReadHash16((byte[])r[3]))[..10] + "…";
-                Console.WriteLine($"    {Render(subj),-24} [{Hex(kind)[..12]}…] → here  {Outc(r.GetInt16(4))}"
-                    + $"  src={Hex(ReadHash16((byte[])r[2]))[..10]}…  ctx={ctx}  games={r.GetInt64(5)}");
+                Console.WriteLine($"    {r.GetString(0),-28} [{r.GetString(1)}] → here  {Outc(r.GetInt16(4))}"
+                    + $"  src={r.GetString(2)}  ctx={ctx}  games={r.GetInt64(5)}");
             }
             if (n == 0) Console.WriteLine("    (none)");
         }

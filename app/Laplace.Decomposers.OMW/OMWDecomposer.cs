@@ -89,11 +89,11 @@ public sealed class OMWDecomposer : IDecomposer
         if (contentId is null) return;
 
         Hash128 langId = LanguageReference.Resolve(row.Lang);
-        b.AddEntity(new EntityRow(langId, /*tier*/ 2, LanguageTypeId, Source));
+        b.AddEntity(new EntityRow(langId, (byte)MetaTier.Meta, LanguageTypeId, Source));
         // Defensive: the referenced WN synset normally exists from the WordNet layer; emit it
         // here too (ON CONFLICT keeps WordNet's row) so a synset OMW references but WordNet
         // lacks can't FK-crash the batch.
-        b.AddEntity(new EntityRow(row.SynsetId, /*tier*/ 3, SynsetTypeId, Source));
+        b.AddEntity(new EntityRow(row.SynsetId, (byte)MetaTier.Meta, SynsetTypeId, Source));
 
         // Rank / symmetry resolve through KindRegistry — the single source of truth
         // (IS_TRANSLATION_OF is Equivalence/Symmetric in the canon, never Partitive).

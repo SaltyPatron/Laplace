@@ -71,7 +71,7 @@ public sealed class UDDecomposer : IDecomposer
             Source, "bootstrap/ud-upos", null,
             entityCapacity: UposTags.Length, physicalityCapacity: 0, attestationCapacity: 0);
         foreach (var tag in UposTags)
-            upos.AddEntity(new EntityRow(UposId(tag), 0, UposTypeId, Source));
+            upos.AddEntity(new EntityRow(UposId(tag), (byte)MetaTier.Meta, UposTypeId, Source));
         await context.Writer.ApplyAsync(upos.Build(), ct);
     }
 
@@ -130,7 +130,7 @@ public sealed class UDDecomposer : IDecomposer
                                      HashSet<Hash128> seen)
     {
         // Language entity (idempotent with ISO layer) so HAS_LANGUAGE FK is satisfied.
-        b.AddEntity(new EntityRow(langId, /*tier*/ 2, LanguageTypeId, Source));
+        b.AddEntity(new EntityRow(langId, (byte)MetaTier.Meta, LanguageTypeId, Source));
 
         // The full sentence as content (the big win: 2.6M sentences become real content).
         if (!string.IsNullOrEmpty(s.Text)) ContentEmitter.Emit(b, s.Text!, Source);
@@ -158,7 +158,7 @@ public sealed class UDDecomposer : IDecomposer
             // HAS_XPOS is the finer, language-specific child arena (is_a HAS_POS).
             if (!string.IsNullOrEmpty(tok.Xpos) && tok.Xpos != "_")
             {
-                b.AddEntity(new EntityRow(XposId(langCode, tok.Xpos), 0, XposTypeId, Source));
+                b.AddEntity(new EntityRow(XposId(langCode, tok.Xpos), (byte)MetaTier.Meta, XposTypeId, Source));
                 b.AddAttestation(KindRegistry.Attest(
                     form, "HAS_XPOS", XposId(langCode, tok.Xpos), Source, SourceTrust.AcademicCurated));
             }
@@ -169,7 +169,7 @@ public sealed class UDDecomposer : IDecomposer
             {
                 if (!KindRegistry.ParseFeature(feat, out var fName, out var fVal)) continue;
                 Hash128 valId = FeatValueId(fName, fVal);
-                b.AddEntity(new EntityRow(valId, 0, FeatureTypeId, Source));
+                b.AddEntity(new EntityRow(valId, (byte)MetaTier.Meta, FeatureTypeId, Source));
                 KindRegistry.SeedDynamic(b, KindRegistry.ResolveFeature(fName), Source, seen);
                 b.AddAttestation(KindRegistry.AttestFeature(
                     form, fName, valId, Source, SourceTrust.AcademicCurated));

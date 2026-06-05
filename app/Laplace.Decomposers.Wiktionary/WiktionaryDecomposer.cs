@@ -122,7 +122,7 @@ public sealed class WiktionaryDecomposer : IDecomposer
         if (!string.IsNullOrEmpty(langCode))
         {
             Hash128 langId = LanguageReference.Resolve(langCode!);
-            b.AddEntity(new EntityRow(langId, 2, LanguageTypeId, Source));
+            b.AddEntity(new EntityRow(langId, (byte)MetaTier.Meta, LanguageTypeId, Source));
             b.AddAttestation(KindRegistry.Attest(
                 w, "HAS_LANGUAGE", langId, Source, SourceTrust.AcademicCuratedUserInput));
         }
@@ -134,7 +134,7 @@ public sealed class WiktionaryDecomposer : IDecomposer
         {
             Hash128 posId = PosId(pos!);
             posCtx = posId;
-            b.AddEntity(new EntityRow(posId, 0, PosTypeId, Source));
+            b.AddEntity(new EntityRow(posId, (byte)MetaTier.Meta, PosTypeId, Source));
             b.AddAttestation(KindRegistry.Attest(
                 w, "HAS_POS", posId, Source, SourceTrust.AcademicCuratedUserInput));
         }

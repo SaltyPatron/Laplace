@@ -59,13 +59,13 @@ public sealed class UnicodeDecomposer : IDecomposer
         foreach (var row in _ucd!.ClassificationEntities(Source))
             classifiers.AddEntity(row);
         // Ordinal context entities used as context_id on CANONICAL_DECOMPOSES_TO attestations
-        classifiers.AddEntity(new EntityRow(UcdProperties.OrdinalCtx0, 0, ordinalContextTypeId, Source));
-        classifiers.AddEntity(new EntityRow(UcdProperties.OrdinalCtx1, 0, ordinalContextTypeId, Source));
+        classifiers.AddEntity(new EntityRow(UcdProperties.OrdinalCtx0, (byte)MetaTier.Meta, ordinalContextTypeId, Source));
+        classifiers.AddEntity(new EntityRow(UcdProperties.OrdinalCtx1, (byte)MetaTier.Meta, ordinalContextTypeId, Source));
         // Combining class value entities used as object_id on HAS_COMBINING_CLASS attestations (1-254)
         for (int cc = 1; cc <= 254; cc++)
         {
             var ccId = Hash128.OfCanonical($"unicode/combining_class/{cc}/v1");
-            classifiers.AddEntity(new EntityRow(ccId, 0, ucdClassifierTypeId, Source));
+            classifiers.AddEntity(new EntityRow(ccId, (byte)MetaTier.Meta, ucdClassifierTypeId, Source));
         }
         await context.Writer.ApplyAsync(classifiers.Build(), ct);
     }

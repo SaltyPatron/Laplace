@@ -162,10 +162,10 @@ public sealed class ModelTableETL
             var b = new SubstrateChangeBuilder(_source, "model/axes",
                 entityCapacity: dModel + attnOut + kvDim + interm,
                 physicalityCapacity: 0, attestationCapacity: 0);
-            for (int i = 0; i < dModel; i++)  b.AddEntity(new EntityRow(Axis("channel", i),  0, _axisType, _source));
-            for (int i = 0; i < attnOut; i++) b.AddEntity(new EntityRow(Axis("attn_dim", i), 0, _axisType, _source));
-            for (int i = 0; i < kvDim; i++)   b.AddEntity(new EntityRow(Axis("kv_dim", i),   0, _axisType, _source));
-            for (int i = 0; i < interm; i++)  b.AddEntity(new EntityRow(Axis("neuron", i),   0, _axisType, _source));
+            for (int i = 0; i < dModel; i++)  b.AddEntity(new EntityRow(Axis("channel", i),  (byte)MetaTier.Meta, _axisType, _source));
+            for (int i = 0; i < attnOut; i++) b.AddEntity(new EntityRow(Axis("attn_dim", i), (byte)MetaTier.Meta, _axisType, _source));
+            for (int i = 0; i < kvDim; i++)   b.AddEntity(new EntityRow(Axis("kv_dim", i),   (byte)MetaTier.Meta, _axisType, _source));
+            for (int i = 0; i < interm; i++)  b.AddEntity(new EntityRow(Axis("neuron", i),   (byte)MetaTier.Meta, _axisType, _source));
             yield return b.Build();
         }
 

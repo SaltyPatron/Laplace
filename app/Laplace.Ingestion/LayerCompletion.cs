@@ -27,7 +27,7 @@ public static class LayerCompletion
         return new SubstrateChangeBuilder(
                 decomposer.SourceId, $"layer-complete/{decomposer.LayerOrder}", null,
                 entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1)
-            .AddEntity(kindId, tier: 0, BootstrapIntentBuilder.KindMetaTypeId, decomposer.SourceId)
+            .AddEntity(kindId, (byte)MetaTier.Kind, BootstrapIntentBuilder.KindMetaTypeId, decomposer.SourceId)
             .AddAttestation(AttestationFactory.Create(
                 decomposer.SourceId,
                 kindId,

@@ -369,7 +369,7 @@ public sealed class LlamaTokenizerParser
                 {
                     /* No CONTENT physicality for specials / non-UTF-8 byte-level tokens —
                      * entity exists but lacks a substrate-canonical 4D anchor. */
-                    b.AddEntity(rec.EntityId, rec.Tier, textTypeId, firstObservedBy: sourceId);
+                    b.AddEntity(rec.EntityId, (byte)MetaTier.Meta, textTypeId, firstObservedBy: sourceId);
                 }
 
                 /* TOKEN_MAPS_TO: tokenizer entity → text entity. A categorical confirm
