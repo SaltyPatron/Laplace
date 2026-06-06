@@ -10,7 +10,7 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 // Host with a configured Stripe webhook signing secret. Tests sign their webhook
 // payloads with the same secret so the verified path runs identically in dev and
 // CI (the "act like prod" path) without ever embedding a real production secret.
-internal sealed class SignedWebhookFactory : WebApplicationFactory<Program>
+public sealed class SignedWebhookFactory : WebApplicationFactory<Program>
 {
     public const string WebhookSecret = "whsec_laplace_ci_test_secret";
 

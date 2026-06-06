@@ -18,11 +18,11 @@ CREATE OR REPLACE FUNCTION astar_path(
     SET search_path = @extschema@, public AS $$
     SELECT * FROM astar_path_raw(p_start, p_goals,
         COALESCE(p_types, ARRAY[
-            type_id('IS_A'), type_id('IS_INSTANCE_OF'), type_id('IS_SYNONYM_OF'),
-            type_id('IS_SIMILAR_TO'), type_id('HAS_PART'), type_id('HAS_MEMBER'),
-            type_id('HAS_SUBSTANCE'), type_id('DERIVATIONALLY_RELATED'),
-            type_id('PERTAINS_TO'), type_id('ALSO_SEE'), type_id('IS_ANTONYM_OF'),
-            type_id('HAS_ATTRIBUTE'), type_id('IN_VERB_GROUP_WITH')]),
+            relation_type_id('IS_A'), relation_type_id('IS_INSTANCE_OF'), relation_type_id('IS_SYNONYM_OF'),
+            relation_type_id('IS_SIMILAR_TO'), relation_type_id('HAS_PART'), relation_type_id('HAS_MEMBER'),
+            relation_type_id('HAS_SUBSTANCE'), relation_type_id('DERIVATIONALLY_RELATED'),
+            relation_type_id('PERTAINS_TO'), relation_type_id('ALSO_SEE'), relation_type_id('IS_ANTONYM_OF'),
+            relation_type_id('HAS_ATTRIBUTE'), relation_type_id('IN_VERB_GROUP_WITH')]),
         p_max_depth, p_directed)
 $$;
 COMMENT ON FUNCTION astar_path(bytea, bytea[], int, bytea[], bool) IS

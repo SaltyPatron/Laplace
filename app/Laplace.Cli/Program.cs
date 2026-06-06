@@ -1506,7 +1506,12 @@ internal static class Program
         Console.WriteLine($"consensus: {materialized:N0} relations materialized "
                         + $"(accumulated at ingest; evidence = provenance-only)");
         await RegisterDynamicCanonicalsAsync(ds, dec.CanonicalNamesForReadback);
-        await PrintCountsAsync(ds);
+        // Diagnostics must NEVER fail a completed ingest: the data + fold + marker
+        // are already durable; a counts query timing out on a hot 50M-row substrate
+        // exit-coded two whole ladder runs (2026-06-06) before this guard.
+        try { await PrintCountsAsync(ds); }
+        catch (Exception ex)
+        { Console.Error.WriteLine($"warn: substrate counts diagnostic failed (ingest itself is complete): {ex.Message}"); }
         return 0;
     }
 
@@ -1555,6 +1560,7 @@ internal static class Program
         Console.WriteLine("substrate counts:");
         {
             await using var counts = conn.CreateCommand();
+            counts.CommandTimeout = 0;   // diagnostic over 10^7-row tables on a hot system
             counts.CommandText = "SELECT metric, value FROM laplace.substrate_counts()";
             await using var rdr = await counts.ExecuteReaderAsync();
             while (await rdr.ReadAsync())
