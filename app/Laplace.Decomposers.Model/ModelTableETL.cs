@@ -49,7 +49,7 @@ public sealed class ModelTableETL
     // tensor-role family is first-class Canon — all ten share TensorCalculation)
     // × the model source trust. Never a call-site literal.
     private static readonly double ModelWeight =
-        KindRegistry.Resolve("EMBEDS").Rank * SourceTrust.AiModelProbe;
+        RelationTypeRegistry.Resolve("EMBEDS").Rank * SourceTrust.AiModelProbe;
 
     /// <summary>One logical table role of the transformer-family schema.</summary>
     private sealed record Role(
@@ -97,15 +97,15 @@ public sealed class ModelTableETL
         // [token × channel] with token OUT.
         return new[]
         {
-            new Role("EMBEDS",          ModelDecomposer.EmbedsKind,        null, p.EmbedTokens, "TOKEN",   "channel", RowsAreOut: false),
-            new Role("OUTPUT_PROJECTS", ModelDecomposer.OutputProjectsKind, null, p.LmHead ?? p.EmbedTokens, "channel", "TOKEN", RowsAreOut: true),
-            new Role("Q_PROJECTS",      ModelDecomposer.QProjectsKind,     p.QProj,    null, "channel", "attn_dim", RowsAreOut: true),
-            new Role("K_PROJECTS",      ModelDecomposer.KProjectsKind,     p.KProj,    null, "channel", "kv_dim",   RowsAreOut: true),
-            new Role("V_PROJECTS",      ModelDecomposer.VProjectsKind,     p.VProj,    null, "channel", "kv_dim",   RowsAreOut: true),
-            new Role("O_PROJECTS",      ModelDecomposer.OProjectsKind,     p.OProj,    null, "attn_dim", "channel", RowsAreOut: true),
-            new Role("GATES",           ModelDecomposer.GatesKind,         p.GateProj, null, "channel", "neuron",   RowsAreOut: true),
-            new Role("UP_PROJECTS",     ModelDecomposer.UpProjectsKind,    p.UpProj,   null, "channel", "neuron",   RowsAreOut: true),
-            new Role("DOWN_PROJECTS",   ModelDecomposer.DownProjectsKind,  p.DownProj, null, "neuron",  "channel",  RowsAreOut: true),
+            new Role("EMBEDS",          ModelDecomposer.EmbedsTypeId,        null, p.EmbedTokens, "TOKEN",   "channel", RowsAreOut: false),
+            new Role("OUTPUT_PROJECTS", ModelDecomposer.OutputProjectsTypeId, null, p.LmHead ?? p.EmbedTokens, "channel", "TOKEN", RowsAreOut: true),
+            new Role("Q_PROJECTS",      ModelDecomposer.QProjectsTypeId,     p.QProj,    null, "channel", "attn_dim", RowsAreOut: true),
+            new Role("K_PROJECTS",      ModelDecomposer.KProjectsTypeId,     p.KProj,    null, "channel", "kv_dim",   RowsAreOut: true),
+            new Role("V_PROJECTS",      ModelDecomposer.VProjectsTypeId,     p.VProj,    null, "channel", "kv_dim",   RowsAreOut: true),
+            new Role("O_PROJECTS",      ModelDecomposer.OProjectsTypeId,     p.OProj,    null, "attn_dim", "channel", RowsAreOut: true),
+            new Role("GATES",           ModelDecomposer.GatesTypeId,         p.GateProj, null, "channel", "neuron",   RowsAreOut: true),
+            new Role("UP_PROJECTS",     ModelDecomposer.UpProjectsTypeId,    p.UpProj,   null, "channel", "neuron",   RowsAreOut: true),
+            new Role("DOWN_PROJECTS",   ModelDecomposer.DownProjectsTypeId,  p.DownProj, null, "neuron",  "channel",  RowsAreOut: true),
         }.Where(r => r.PerLayerTemplate is not null || r.GlobalName is not null).ToArray();
     }
 
@@ -270,7 +270,7 @@ public sealed class ModelTableETL
                 Hash128 obj  = outTok ? ordToEntity[outIdx] : Axis(role.OutSpace, outIdx);
 
                 b.AddAttestation(AttestationFactory.CreateAggregated(
-                    subj, role.KindId, obj, _source, contextId: null,
+                    subj, role.TypeId, obj, _source, contextId: null,
                     games: games[flat], sumScoreFp1e9: sumFp[flat], witnessWeight: ModelWeight));
                 relationsEmitted++;
                 gamesPlayed += games[flat];
@@ -322,7 +322,7 @@ public sealed class ModelTableETL
                 {
                     if (games[i] == 0) continue;
                     b.AddAttestation(AttestationFactory.CreateAggregated(
-                        Axis("channel", i), ModelDecomposer.NormScalesKind, obj: null, _source,
+                        Axis("channel", i), ModelDecomposer.NormScalesTypeId, obj: null, _source,
                         contextId: null, games: games[i], sumScoreFp1e9: sumFp[i],
                         witnessWeight: ModelWeight));
                     relationsEmitted++;

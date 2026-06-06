@@ -23,7 +23,7 @@ namespace Laplace.Decomposers.Abstractions;
 /// The accumulated rating/rd/volatility live on the consensus table, NOT here.
 /// No tiers and no trust classes in evidence — kind significance and source
 /// trust enter ONLY as the numeric witness weight folded into opponent φ
-/// (see <see cref="KindRank"/> / <see cref="SourceTrust"/>).
+/// (see <see cref="RelationTypeRank"/> / <see cref="SourceTrust"/>).
 /// </para>
 /// </summary>
 public static class AttestationFactory
@@ -52,37 +52,37 @@ public static class AttestationFactory
     /// <summary>One witness OBSERVATION from a SIGNED magnitude + measured arena
     /// scale M + witness weight. Score via tanh, opponent φ via the trust shape.</summary>
     public static AttestationRow CreateObservation(
-        Hash128 subject, Hash128 kindId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
+        Hash128 subject, Hash128 typeId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
         double signedMagnitude, double arenaScale, double witnessWeight, long observationCount = 1)
-        => Build(subject, kindId, obj, sourceId, contextId,
+        => Build(subject, typeId, obj, sourceId, contextId,
                  Score(signedMagnitude, arenaScale), witnessWeight, arenaScale, observationCount);
 
     /// <summary>One CATEGORICAL observation: a confirm is a win (score=1), a
     /// refute is a loss (score=0). For structural / lexical assertions (is_a,
     /// synonym = confirm; antonym = refute). No magnitude arena (arena_m = 0).</summary>
     public static AttestationRow CreateCategorical(
-        Hash128 subject, Hash128 kindId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
+        Hash128 subject, Hash128 typeId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
         bool confirm, double witnessWeight, long observationCount = 1)
-        => Build(subject, kindId, obj, sourceId, contextId,
+        => Build(subject, typeId, obj, sourceId, contextId,
                  confirm ? 1.0 : 0.0, witnessWeight, 0.0, observationCount);
 
     /// <summary>Observation from an already-computed score ∈ [0,1].</summary>
     public static AttestationRow CreateScored(
-        Hash128 subject, Hash128 kindId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
+        Hash128 subject, Hash128 typeId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
         double score, double witnessWeight, double arenaScale = 0.0, long observationCount = 1)
-        => Build(subject, kindId, obj, sourceId, contextId, score, witnessWeight, arenaScale, observationCount);
+        => Build(subject, typeId, obj, sourceId, contextId, score, witnessWeight, arenaScale, observationCount);
 
     // ── Categorical / magnitude-weighted builders for the seed decomposers.
-    //    Significance is a numeric kind_rank (KindRank) × source_trust (SourceTrust),
+    //    Significance is a numeric kind_rank (RelationTypeRank) × source_trust (SourceTrust),
     //    folded into the Glicko opponent φ — no tier on the kind, no trust class, no
     //    μ prior, nothing tier/trust stored in the evidence (truth #5).
 
     /// <summary>Categorical confirm weighted by a kind-rank × source-trust pair
-    /// (see <see cref="KindRank"/> / <see cref="SourceTrust"/>).</summary>
+    /// (see <see cref="RelationTypeRank"/> / <see cref="SourceTrust"/>).</summary>
     public static AttestationRow Create(
-        Hash128 subject, Hash128 kindId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
+        Hash128 subject, Hash128 typeId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
         double kindRank, double sourceTrust, long observationCount = 1)
-        => CreateCategorical(subject, kindId, obj, sourceId, contextId,
+        => CreateCategorical(subject, typeId, obj, sourceId, contextId,
                              confirm: true, witnessWeight: kindRank * sourceTrust,
                              observationCount: observationCount);
 
@@ -91,9 +91,9 @@ public static class AttestationFactory
     /// — a scale, never a value-dropping floor; the witness weight is
     /// kind_rank × source_trust (× tenant_trust = 1 until S5).</summary>
     public static AttestationRow CreateWeighted(
-        Hash128 subject, Hash128 kindId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
+        Hash128 subject, Hash128 typeId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
         double kindRank, double sourceTrust, double magnitude, double arenaScale, long observationCount = 1)
-        => CreateObservation(subject, kindId, obj, sourceId, contextId,
+        => CreateObservation(subject, typeId, obj, sourceId, contextId,
                              signedMagnitude: magnitude, arenaScale: arenaScale,
                              witnessWeight: kindRank * sourceTrust, observationCount: observationCount);
 
@@ -108,7 +108,7 @@ public static class AttestationFactory
     /// class: Σs vs n·½ exactly.
     /// </summary>
     public static AttestationRow CreateAggregated(
-        Hash128 subject, Hash128 kindId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
+        Hash128 subject, Hash128 typeId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
         long games, long sumScoreFp1e9, double witnessWeight)
     {
         if (games <= 0) throw new ArgumentOutOfRangeException(nameof(games));
@@ -116,9 +116,9 @@ public static class AttestationFactory
         const long half = 500_000_000L;          // ½ in fixed-point ×1e9
         long netHalf = checked(games * half);
         return new AttestationRow(
-            Id:                   ComputeId(subject, kindId, obj, sourceId, contextId),
+            Id:                   ComputeId(subject, typeId, obj, sourceId, contextId),
             SubjectId:            subject,
-            KindId:               kindId,
+            KindId:               typeId,
             ObjectId:             obj,
             SourceId:             sourceId,
             ContextId:            contextId,
@@ -133,7 +133,7 @@ public static class AttestationFactory
     }
 
     private static AttestationRow Build(
-        Hash128 subject, Hash128 kindId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
+        Hash128 subject, Hash128 typeId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
         double score, double witnessWeight, double arenaScale, long observationCount)
     {
         _ = arenaScale;   // consumed into the score upstream; never persisted (values are testimony)
@@ -142,9 +142,9 @@ public static class AttestationFactory
         long scoreFp = (long)(s * Glicko2.FpScale);
         const long half = 500_000_000L;   // ½ in fixed-point ×1e9
         return new AttestationRow(
-            Id:                   ComputeId(subject, kindId, obj, sourceId, contextId),
+            Id:                   ComputeId(subject, typeId, obj, sourceId, contextId),
             SubjectId:            subject,
-            KindId:               kindId,
+            KindId:               typeId,
             ObjectId:             obj,
             SourceId:             sourceId,
             ContextId:            contextId,
@@ -166,12 +166,12 @@ public static class AttestationFactory
     /// (subject, kind, object, source, context).
     /// </summary>
     public static Hash128 ComputeId(
-        Hash128 subject, Hash128 kindId, Hash128? obj,
+        Hash128 subject, Hash128 typeId, Hash128? obj,
         Hash128 sourceId, Hash128? contextId)
     {
         Span<byte> buf = stackalloc byte[16 * 5];
         subject.WriteBytes(buf.Slice(0, 16));
-        kindId.WriteBytes(buf.Slice(16, 16));
+        typeId.WriteBytes(buf.Slice(16, 16));
         (obj ?? Hash128.Zero).WriteBytes(buf.Slice(32, 16));
         sourceId.WriteBytes(buf.Slice(48, 16));
         (contextId ?? Hash128.Zero).WriteBytes(buf.Slice(64, 16));
@@ -185,7 +185,7 @@ public static class AttestationFactory
 /// entity. Feeds the witness weight = kind_rank × source_trust × tenant_trust →
 /// Glicko opponent φ. (Replaces the corrupt KindValueTier tier-on-kinds.)
 /// </summary>
-public static class KindRank
+public static class RelationTypeRank
 {
     public const double Mandate             = 1.00; // substrate-asserted invariant
     public const double StandardsStructural = 0.91; // standards-derived structural

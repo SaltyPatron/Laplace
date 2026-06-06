@@ -29,7 +29,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
     private static readonly Hash128 LanguageTypeId = Hash128.OfCanonical("substrate/type/Language/v1");
 
     // ConceptNet /r/Relation → kind NAME only. Rank / symmetry / direction-flip
-    // resolve through KindRegistry (the single source of truth for arena
+    // resolve through RelationTypeRegistry (the single source of truth for arena
     // significance) at attest time — never locally. Names that are the same
     // assertion as an existing arena are registry ALIASES (SIMILAR_TO →
     // IS_SIMILAR_OF? no — IS_SIMILAR_TO; MADE_OF → HAS_SUBSTANCE; PartOf →
@@ -72,12 +72,12 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddKind("HAS_EXAMPLE");
+        boot.AddRelationType("HAS_EXAMPLE");
         // Parent of the dynamic DBPEDIA_* family: SeedDynamic attests
         // DBPEDIA_X is_a HAS_DBPEDIA_RELATION — the parent entity must exist.
-        boot.AddKind("HAS_DBPEDIA_RELATION");
-        foreach (var kindName in RelMap.Values)
-            boot.AddKind(KindRegistry.Resolve(kindName).Canonical);
+        boot.AddRelationType("HAS_DBPEDIA_RELATION");
+        foreach (var typeName in RelMap.Values)
+            boot.AddRelationType(RelationTypeRegistry.Resolve(typeName).Canonical);
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -105,15 +105,15 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
             var c = line.Split('\t');
             if (c.Length < 5) continue;
             string rel = c[1].StartsWith("/r/", StringComparison.Ordinal) ? c[1][3..] : c[1];
-            string? kindName =
+            string? typeName =
                 RelMap.TryGetValue(rel, out var mapped) ? mapped
                 : rel.StartsWith("dbpedia/", StringComparison.OrdinalIgnoreCase)
-                    ? KindRegistry.ResolveDbpedia(rel).Canonical
+                    ? RelationTypeRegistry.ResolveDbpedia(rel).Canonical
                     : null;
-            if (kindName is null) continue;
+            if (typeName is null) continue;
             (double w, _) = ParseMeta(c[4]);
-            arenaSumSq[kindName] = arenaSumSq.GetValueOrDefault(kindName) + w * w;
-            arenaN[kindName]     = arenaN.GetValueOrDefault(kindName) + 1;
+            arenaSumSq[typeName] = arenaSumSq.GetValueOrDefault(typeName) + w * w;
+            arenaN[typeName]     = arenaN.GetValueOrDefault(typeName) + 1;
         }
         var arenaM = new Dictionary<string, double>(StringComparer.Ordinal);
         foreach (var (k, sq) in arenaSumSq)
@@ -135,12 +135,12 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
             // /r/dbpedia/* → the dynamic DBPEDIA_* family (each its own arena
             // under HAS_DBPEDIA_RELATION — preserved, not silently dropped as
             // before 2026-06-05); everything else through RelMap as ever.
-            KindRegistry.KindResolution? dbp = null;
-            if (!RelMap.TryGetValue(rel, out var kindName))
+            RelationTypeRegistry.RelationTypeResolution? dbp = null;
+            if (!RelMap.TryGetValue(rel, out var typeName))
             {
                 if (!rel.StartsWith("dbpedia/", StringComparison.OrdinalIgnoreCase)) continue;
-                var r = KindRegistry.ResolveDbpedia(rel);
-                dbp = r; kindName = r.Canonical;
+                var r = RelationTypeRegistry.ResolveDbpedia(rel);
+                dbp = r; typeName = r.Canonical;
             }
             if (!ParseConcept(c[2], out string startTerm, out string startLang)) continue;
             if (!ParseConcept(c[3], out string endTerm, out string endLang)) continue;
@@ -162,23 +162,23 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
             // Dynamic DBPEDIA_* arenas seed their kind entity per batch + IS_A
             // once per run (the DEP_*/FEAT_* gates — self-contained batches).
             if (dbp is { } dyn)
-                KindRegistry.SeedDynamic(b, dyn, Source, seenEntBatch, seenAttRun);
+                RelationTypeRegistry.SeedDynamic(b, dyn, Source, seenEntBatch, seenAttRun);
 
             // ConceptNet edge weight is the signed magnitude; M is the arena's
             // MEASURED RMS from the measure pass (score ½(1+tanh(w/M)));
             // rank / symmetry / direction resolve through the registry canon.
-            b.AddAttestation(KindRegistry.AttestWeighted(
-                startId.Value, kindName, endId.Value, Source, SourceTrust.UserCuratedResource,
-                magnitude: weight, arenaScale: arenaM.GetValueOrDefault(kindName)));
-            b.AddAttestation(KindRegistry.Attest(
+            b.AddAttestation(RelationTypeRegistry.AttestWeighted(
+                startId.Value, typeName, endId.Value, Source, SourceTrust.UserCuratedResource,
+                magnitude: weight, arenaScale: arenaM.GetValueOrDefault(typeName)));
+            b.AddAttestation(RelationTypeRegistry.Attest(
                 startId.Value, "HAS_LANGUAGE", startLangId, Source, SourceTrust.UserCuratedResource));
-            b.AddAttestation(KindRegistry.Attest(
+            b.AddAttestation(RelationTypeRegistry.Attest(
                 endId.Value, "HAS_LANGUAGE", endLangId, Source, SourceTrust.UserCuratedResource));
             if (surface is not null)
             {
                 var sId = ContentEmitter.Emit(b, surface, Source);
                 if (sId is not null)
-                    b.AddAttestation(KindRegistry.Attest(
+                    b.AddAttestation(RelationTypeRegistry.Attest(
                         startId.Value, "HAS_EXAMPLE", sId.Value, Source,
                         SourceTrust.UserCuratedResource, contextId: endId.Value));
             }
@@ -218,9 +218,9 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            if (root.TryGetProperty("weight", out var w) && w.ValueKind == JsonValueKind.Number)
+            if (root.TryGetProperty("weight", out var w) && w.ValueTypeId == JsonValueTypeId.Number)
                 weight = w.GetDouble();
-            if (root.TryGetProperty("surfaceText", out var s) && s.ValueKind == JsonValueKind.String)
+            if (root.TryGetProperty("surfaceText", out var s) && s.ValueTypeId == JsonValueTypeId.String)
             {
                 var txt = s.GetString();
                 if (!string.IsNullOrWhiteSpace(txt))

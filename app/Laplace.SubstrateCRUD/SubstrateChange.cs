@@ -60,7 +60,7 @@ public sealed record PhysicalityRow(
     Hash128         Id,
     Hash128         EntityId,
     Hash128         SourceId,
-    PhysicalityKind Kind,
+    PhysicalityType Kind,
     double          CoordX,
     double          CoordY,
     double          CoordZ,

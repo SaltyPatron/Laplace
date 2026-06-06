@@ -17,7 +17,7 @@ public class SubstrateChangeTests
         b.AddEntity(H(1), 0, H(99));
         b.AddEntity(H(2), 0, H(99));
         b.AddPhysicality(new PhysicalityRow(
-            H(3), H(1), src, PhysicalityKind.Content,
+            H(3), H(1), src, PhysicalityType.Content,
             0.1, 0.2, 0.3, 0.4,
             Hilbert128.Encode(stackalloc double[] { 0.1, 0.2, 0.3, 0.4 }),
             null, 0, null, null, 0));
@@ -96,11 +96,11 @@ public class SubstrateChangeTests
     }
 
     [Fact]
-    public void PhysicalityKind_NumericValuesMatchSchemaContract()
+    public void PhysicalityType_NumericValuesMatchSchemaContract()
     {
-        Assert.Equal((short)1, (short)PhysicalityKind.Content);
-        Assert.Equal((short)2, (short)PhysicalityKind.BuildingBlock);
-        Assert.Equal((short)3, (short)PhysicalityKind.Projection);
+        Assert.Equal((short)1, (short)PhysicalityType.Content);
+        Assert.Equal((short)2, (short)PhysicalityType.BuildingBlock);
+        Assert.Equal((short)3, (short)PhysicalityType.Projection);
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public class SubstrateChangeTests
     public void PhysicalityRow_TrajectoryNullable()
     {
         var hb = new Hilbert128();
-        var p = new PhysicalityRow(H(1), H(2), H(3), PhysicalityKind.Content,
+        var p = new PhysicalityRow(H(1), H(2), H(3), PhysicalityType.Content,
             0, 0, 0, 0, hb, null, 0, null, null, 0);
         Assert.Null(p.TrajectoryXyzm);
     }

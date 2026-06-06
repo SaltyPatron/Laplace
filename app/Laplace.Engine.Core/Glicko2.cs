@@ -8,7 +8,7 @@ namespace Laplace.Engine.Core;
 /// All fields at scale 1e9. One source of math truth for
 /// Glicko-2 across SQL, C, and C#.
 /// </summary>
-[StructLayout(LayoutKind.Sequential)]
+[StructLayout(LayoutTypeId.Sequential)]
 public struct Glicko2State
 {
     public long RatingFp1e9;
@@ -22,7 +22,7 @@ public struct Glicko2State
 /// Glicko-2 single-matchup observation — sequential layout matches C
 /// <c>glicko2_observation_t</c>. All fields at scale 1e9.
 /// </summary>
-[StructLayout(LayoutKind.Sequential)]
+[StructLayout(LayoutTypeId.Sequential)]
 public struct Glicko2Observation
 {
     /// <summary>Opponent's Glicko-1 rating (fp1e9).</summary>

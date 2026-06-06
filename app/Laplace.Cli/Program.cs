@@ -491,11 +491,11 @@ internal static class Program
         field AS (
             SELECT id FROM topic
             UNION SELECT c.object_id FROM laplace.consensus c JOIN topic t ON c.subject_id=t.id
-                  WHERE c.kind_id=laplace.kind_id('PRECEDES') AND NOT laplace.refuted(c.rating,c.rd)
+                  WHERE c.type_id=laplace.relation_type_id('PRECEDES') AND NOT laplace.refuted(c.rating,c.rd)
             UNION SELECT c.subject_id FROM laplace.consensus c JOIN topic t ON c.object_id=t.id
-                  WHERE c.kind_id=laplace.kind_id('PRECEDES') AND NOT laplace.refuted(c.rating,c.rd)
+                  WHERE c.type_id=laplace.relation_type_id('PRECEDES') AND NOT laplace.refuted(c.rating,c.rd)
             UNION SELECT c.object_id FROM laplace.consensus c JOIN topic t ON c.subject_id=t.id
-                  WHERE c.kind_id=laplace.kind_id('IS_SYNONYM_OF')),
+                  WHERE c.type_id=laplace.relation_type_id('IS_SYNONYM_OF')),
         seed AS (SELECT array_agg(id ORDER BY ord) ctx FROM laplace.prompt_state(@prompt) WHERE id IS NOT NULL),
         walk AS (
             SELECT s.ctx AS ctx, NULL::bytea oid, NULL::numeric mu, 0 AS step FROM seed s WHERE s.ctx IS NOT NULL
@@ -507,12 +507,12 @@ internal static class Program
                            sum(laplace.eff_mu(c.rating,c.rd))/1e9
                              * (CASE WHEN @boost>0 AND c.object_id IN (SELECT id FROM field) THEN 1+@boost ELSE 1 END) AS sc
                     FROM laplace.consensus c
-                    WHERE c.kind_id = laplace.kind_id('PRECEDES')
+                    WHERE c.type_id = laplace.relation_type_id('PRECEDES')
                       AND c.subject_id = ANY (w.ctx[GREATEST(1,array_length(w.ctx,1)-@window+1):array_length(w.ctx,1)])
                       AND c.object_id IS NOT NULL AND NOT laplace.refuted(c.rating,c.rd)
                       AND c.object_id <> ALL (w.ctx) AND c.object_id NOT IN (SELECT id FROM stops)
                       AND EXISTS (SELECT 1 FROM laplace.consensus h
-                                  WHERE h.subject_id=c.object_id AND h.kind_id=laplace.kind_id('HAS_POS'))
+                                  WHERE h.subject_id=c.object_id AND h.type_id=laplace.relation_type_id('HAS_POS'))
                     GROUP BY c.object_id ORDER BY sc DESC LIMIT @topk
                 ) cand
                 ORDER BY CASE WHEN @temp<=0 THEN sc
@@ -674,7 +674,7 @@ internal static class Program
         // (accumulated Glicko-2 across all witnesses; source/context out of identity).
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT laplace.render(c.kind_id), laplace.render(c.object_id), "
+            cmd.CommandText = "SELECT laplace.render(c.type_id), laplace.render(c.object_id), "
                             + "c.rating, c.rd, c.volatility, c.witness_count "
                             + "FROM laplace.consensus_out(@id) c";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
@@ -694,7 +694,7 @@ internal static class Program
 
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT laplace.render(c.subject_id), laplace.render(c.kind_id), "
+            cmd.CommandText = "SELECT laplace.render(c.subject_id), laplace.render(c.type_id), "
                             + "c.rating, c.rd, c.volatility, c.witness_count "
                             + "FROM laplace.consensus_in(@id) c";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
@@ -822,7 +822,7 @@ internal static class Program
             chkCmd.CommandText =
                 "SELECT laplace.evidence_count(p_type => $2, p_source => $1) > 0";
             chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = modelSource.ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
-            chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = Laplace.Ingestion.LayerCompletion.KindId(dec.LayerOrder).ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
+            chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = Laplace.Ingestion.LayerCompletion.RelationTypeId(dec.LayerOrder).ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
             bool alreadyIngested = (bool)(await chkCmd.ExecuteScalarAsync() ?? false);
             if (alreadyIngested)
             {
@@ -1060,26 +1060,26 @@ internal static class Program
         Console.WriteLine("  pouring consensus arenas into the mold's tensor layouts...");
         var swArena = Stopwatch.StartNew();
         var chan = Of(chanMap); var attn = Of(attnMap); var kv = Of(kvMap); var neuron = Of(neuronMap);
-        var embedA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.EmbedsKind,
+        var embedA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.EmbedsTypeId,
             vocab, dModel, rowsAreOut: false, Tok, chan, MOf([prof.EmbedTokens]));
-        var lmHeadA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.OutputProjectsKind,
+        var lmHeadA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.OutputProjectsTypeId,
             vocab, dModel, rowsAreOut: true, chan, Tok, MOf([prof.LmHead ?? prof.EmbedTokens]));
-        var qA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.QProjectsKind,
+        var qA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.QProjectsTypeId,
             attnOutR, dModel, rowsAreOut: true, chan, attn, MOf(Layers(prof.QProj)));
-        var kA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.KProjectsKind,
+        var kA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.KProjectsTypeId,
             kvDimR, dModel, rowsAreOut: true, chan, kv, MOf(Layers(prof.KProj)));
-        var vA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.VProjectsKind,
+        var vA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.VProjectsTypeId,
             kvDimR, dModel, rowsAreOut: true, chan, kv, MOf(Layers(prof.VProj)));
-        var oA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.OProjectsKind,
+        var oA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.OProjectsTypeId,
             dModel, attnOutR, rowsAreOut: true, attn, chan, MOf(Layers(prof.OProj)));
         var gateA = prof.GateProj is null ? null
-            : await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.GatesKind,
+            : await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.GatesTypeId,
                 intermR, dModel, rowsAreOut: true, chan, neuron, MOf(Layers(prof.GateProj)));
-        var upA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.UpProjectsKind,
+        var upA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.UpProjectsTypeId,
             intermR, dModel, rowsAreOut: true, chan, neuron, MOf(Layers(prof.UpProj)));
-        var downA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.DownProjectsKind,
+        var downA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.DownProjectsTypeId,
             dModel, intermR, rowsAreOut: true, neuron, chan, MOf(Layers(prof.DownProj)));
-        var normV = await ConsensusReExport.ReadNormVectorAsync(ds, ModelDecomposer.NormScalesKind,
+        var normV = await ConsensusReExport.ReadNormVectorAsync(ds, ModelDecomposer.NormScalesTypeId,
             dModel, chan, MOf(Layers(prof.PerLayerNorms[0]), [prof.FinalNorm]));
 
         long totalRelations = embedA.Relations + lmHeadA.Relations + qA.Relations + kA.Relations
@@ -1314,7 +1314,7 @@ internal static class Program
         {
             using var cfg = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(cfgPath));
             if (cfg.RootElement.TryGetProperty("chat_template", out var ct)
-                && ct.ValueKind == System.Text.Json.JsonValueKind.String)
+                && ct.ValueTypeId == System.Text.Json.JsonValueTypeId.String)
                 SynthInterop.GgufWriterAddMetadataStr(gguf, "tokenizer.chat_template", ct.GetString()!);
         }
     }
@@ -1593,11 +1593,11 @@ internal static class Program
         // source) via the substrate's evidence accounting — kind names resolve
         // through laplace.kind_id (the one canonicalization rule), so no hash
         // constants and no inline SQL here.
-        async Task<long> KindCount(string kindName)
+        async Task<long> KindCount(string typeName)
         {
             await using var c = conn.CreateCommand();
             c.CommandText = "SELECT laplace.evidence_count(p_type => laplace.relation_type_id($1))";
-            c.Parameters.AddWithValue(kindName);
+            c.Parameters.AddWithValue(typeName);
             return (long)(await c.ExecuteScalarAsync())!;
         }
 

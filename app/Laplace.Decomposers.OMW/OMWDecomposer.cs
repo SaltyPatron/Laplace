@@ -37,10 +37,10 @@ public sealed class OMWDecomposer : IDecomposer
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        // Kind entities seed via KindRegistry.SeedCanonical in Build(); rank /
+        // Kind entities seed via RelationTypeRegistry.SeedCanonical in Build(); rank /
         // symmetry live ONLY in the registry.
-        boot.AddKind("HAS_DEFINITION");
-        boot.AddKind("HAS_EXAMPLE");
+        boot.AddRelationType("HAS_DEFINITION");
+        boot.AddRelationType("HAS_EXAMPLE");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -95,24 +95,24 @@ public sealed class OMWDecomposer : IDecomposer
         // lacks can't FK-crash the batch.
         b.AddEntity(new EntityRow(row.SynsetId, (byte)MetaTier.Meta, SynsetTypeId, Source));
 
-        // Rank / symmetry resolve through KindRegistry — the single source of truth
+        // Rank / symmetry resolve through RelationTypeRegistry — the single source of truth
         // (IS_TRANSLATION_OF is Equivalence/Symmetric in the canon, never Partitive).
         switch (row.Type)
         {
             case OmwType.Lemma:
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     contentId.Value, "IS_TRANSLATION_OF", row.SynsetId, Source, SourceTrust.AcademicCurated));
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     contentId.Value, "HAS_LANGUAGE", langId, Source, SourceTrust.AcademicCurated));
                 break;
             case OmwType.Def:
                 // context_id = language → per-language glosses are distinct attestations.
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     row.SynsetId, "HAS_DEFINITION", contentId.Value, Source, SourceTrust.AcademicCurated,
                     contextId: langId));
                 break;
             case OmwType.Exe:
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     row.SynsetId, "HAS_EXAMPLE", contentId.Value, Source, SourceTrust.AcademicCurated,
                     contextId: langId));
                 break;

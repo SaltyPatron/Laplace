@@ -163,12 +163,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         _swapLock.EnterReadLock();
         try
         {
-            var acc = _accumulation.GetOrAdd((a.SubjectId, a.KindId, a.ObjectId), static _ => new Acc());
+            var acc = _accumulation.GetOrAdd((a.SubjectId, a.TypeId, a.ObjectId), static _ => new Acc());
             lock (acc)
             {
                 if (acc.Games == 0)
                 {
-                    acc.Subject = a.SubjectId; acc.Kind = a.KindId; acc.Object = a.ObjectId;
+                    acc.Subject = a.SubjectId; acc.Kind = a.TypeId; acc.Object = a.ObjectId;
                     acc.PhiFp1e9 = a.OpponentRdFp1e9;
                 }
                 else if (acc.PhiFp1e9 != a.OpponentRdFp1e9)

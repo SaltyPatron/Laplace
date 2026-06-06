@@ -143,7 +143,7 @@ public sealed class IntentStage : SafeHandle
     public void AddAttestation(
         Hash128  id,
         Hash128  subjectId,
-        Hash128  kindId,
+        Hash128  typeId,
         Hash128? objectId,
         Hash128  sourceId,
         Hash128? contextId,
@@ -162,7 +162,7 @@ public sealed class IntentStage : SafeHandle
             Hash128* objPtr = objectId is null ? null : &obj;
             Hash128* ctxPtr = contextId is null ? null : &ctx;
             rc = NativeInterop.IntentStageAddAttestation(
-                handle, &id, &subjectId, &kindId, objPtr, &sourceId, ctxPtr,
+                handle, &id, &subjectId, &typeId, objPtr, &sourceId, ctxPtr,
                 outcome, lastObservedAtUnixUs, observationCount);
             if (rc != 0) throw new InvalidOperationException("intent_stage_add_attestation failed");
         }

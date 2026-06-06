@@ -50,7 +50,7 @@ layer_done() {
   local n="$1"
   "${PSQL[@]}" -t -A -c "
     SELECT laplace.evidence_count(
-      p_kind => laplace.canonical_id('substrate/kind/HasLayerCompleted/${n}/v1')) > 0;
+      p_type => laplace.canonical_id('substrate/kind/HasLayerCompleted/${n}/v1')) > 0;
   " | tr -d '[:space:]'
 }
 

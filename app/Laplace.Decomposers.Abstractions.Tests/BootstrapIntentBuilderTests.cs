@@ -42,10 +42,10 @@ public class BootstrapIntentBuilderTests
     public void Build_AddKindRegistersKindEntityWithStableId()
     {
         var b = new BootstrapIntentBuilder(SourceId, "WordNetDecomposer", TrustClassId);
-        var kindId = b.AddKind("IS_HYPERNYM_OF");
+        var typeId = b.AddRelationType("IS_HYPERNYM_OF");
         var change = b.Build();
-        Assert.Equal(Hash128.OfCanonical("substrate/kind/IS_HYPERNYM_OF/v1"), kindId);
-        Assert.Contains(change.Entities, e => e.Id == kindId);
+        Assert.Equal(Hash128.OfCanonical("substrate/kind/IS_HYPERNYM_OF/v1"), typeId);
+        Assert.Contains(change.Entities, e => e.Id == typeId);
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public class BootstrapIntentBuilderTests
         // The bootstrap also seeds the canonical-kind taxonomy (is_a-on-kinds);
         // among those, exactly one trust-class attestation, and it's correct.
         var a = Assert.Single(change.Attestations,
-            x => x.KindId == BootstrapIntentBuilder.HasTrustClassKindId);
+            x => x.TypeId == BootstrapIntentBuilder.HasTrustClassTypeId);
         Assert.Equal(SourceId, a.SubjectId);
         Assert.Equal(TrustClassId, a.ObjectId);
         Assert.Equal(SourceId, a.SourceId);
@@ -69,7 +69,7 @@ public class BootstrapIntentBuilderTests
         BootstrapIntentBuilder Make() {
             var b = new BootstrapIntentBuilder(SourceId, "DetTest", TrustClassId);
             b.AddType("DetTest_Foo");
-            b.AddKind("DET_TEST_KIND");
+            b.AddRelationType("DET_TEST_KIND");
             return b;
         }
         var a = Make().Build();
@@ -91,8 +91,8 @@ public class BootstrapIntentBuilderTests
         Assert.Equal(Hash128.OfCanonical("substrate/type/Type/v1"),
                      BootstrapIntentBuilder.TypeMetaTypeId);
         Assert.Equal(Hash128.OfCanonical("substrate/type/Kind/v1"),
-                     BootstrapIntentBuilder.KindMetaTypeId);
+                     BootstrapIntentBuilder.RelationTypeMetaTypeId);
         Assert.Equal(Hash128.OfCanonical("substrate/kind/HAS_TRUST_CLASS/v1"),
-                     BootstrapIntentBuilder.HasTrustClassKindId);
+                     BootstrapIntentBuilder.HasTrustClassTypeId);
     }
 }

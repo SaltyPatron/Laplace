@@ -66,14 +66,14 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
                 .AddEntity(BootstrapIntentBuilder.TypeMetaTypeId, 0,
                            BootstrapIntentBuilder.SourceTypeId,
                            firstObservedBy: null)
-                .AddEntity(BootstrapIntentBuilder.KindMetaTypeId, 0,
+                .AddEntity(BootstrapIntentBuilder.RelationTypeMetaTypeId, 0,
                            BootstrapIntentBuilder.SourceTypeId,
                            firstObservedBy: null)
                 .AddEntity(TrustClassId, 0,
                            BootstrapIntentBuilder.SourceTypeId,
                            firstObservedBy: null)
-                .AddEntity(BootstrapIntentBuilder.HasTrustClassKindId, 0,
-                           BootstrapIntentBuilder.KindMetaTypeId,
+                .AddEntity(BootstrapIntentBuilder.HasTrustClassTypeId, 0,
+                           BootstrapIntentBuilder.RelationTypeMetaTypeId,
                            firstObservedBy: null)
                 .Build();
             await context.Writer.ApplyAsync(metaSeed, ct);
@@ -337,9 +337,9 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
             var metaSeed = new SubstrateChangeBuilder(SourceId, "meta-seed")
                 .AddEntity(BootstrapIntentBuilder.SourceTypeId, 0, BootstrapIntentBuilder.SourceTypeId, null)
                 .AddEntity(BootstrapIntentBuilder.TypeMetaTypeId, 0, BootstrapIntentBuilder.SourceTypeId, null)
-                .AddEntity(BootstrapIntentBuilder.KindMetaTypeId, 0, BootstrapIntentBuilder.SourceTypeId, null)
+                .AddEntity(BootstrapIntentBuilder.RelationTypeMetaTypeId, 0, BootstrapIntentBuilder.SourceTypeId, null)
                 .AddEntity(TrustClassId, 0, BootstrapIntentBuilder.SourceTypeId, null)
-                .AddEntity(BootstrapIntentBuilder.HasTrustClassKindId, 0, BootstrapIntentBuilder.KindMetaTypeId, null)
+                .AddEntity(BootstrapIntentBuilder.HasTrustClassTypeId, 0, BootstrapIntentBuilder.RelationTypeMetaTypeId, null)
                 .Build();
             await context.Writer.ApplyAsync(metaSeed, ct);
             await context.Writer.ApplyAsync(

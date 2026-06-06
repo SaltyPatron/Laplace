@@ -78,18 +78,18 @@ public sealed class OpenSubtitlesDecomposerTests
             var entities = new HashSet<Hash128>();
             int translationEdges = 0, languageEdges = 0;
             var langObjects = new HashSet<Hash128>();
-            Hash128 translationKind = KindRegistry.Resolve("IS_TRANSLATION_OF").Id;
-            Hash128 languageKind     = KindRegistry.Resolve("HAS_LANGUAGE").Id;
+            Hash128 translationKind = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
+            Hash128 languageKind     = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
 
             await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
             {
                 foreach (var e in change.Entities) entities.Add(e.Id);
                 foreach (var a in change.Attestations)
                 {
-                    if (a.KindId == translationKind) translationEdges++;
-                    else if (a.KindId == languageKind) { languageEdges++; if (a.ObjectId is { } o) langObjects.Add(o); }
+                    if (a.TypeId == translationKind) translationEdges++;
+                    else if (a.TypeId == languageKind) { languageEdges++; if (a.ObjectId is { } o) langObjects.Add(o); }
                     // Every attestation is routed through the registry (a known canonical kind).
-                    Assert.True(a.KindId == translationKind || a.KindId == languageKind,
+                    Assert.True(a.TypeId == translationKind || a.TypeId == languageKind,
                         "only registry-routed IS_TRANSLATION_OF / HAS_LANGUAGE kinds are emitted");
                 }
             }
@@ -138,7 +138,7 @@ public sealed class OpenSubtitlesDecomposerTests
         Assert.Contains(boot.Entities, e =>
             e.Id == OpenSubtitlesDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
         // IS_TRANSLATION_OF kind entity is seeded.
-        Hash128 translationKind = KindRegistry.Resolve("IS_TRANSLATION_OF").Id;
+        Hash128 translationKind = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
         Assert.Contains(boot.Entities, e => e.Id == translationKind);
     }
 

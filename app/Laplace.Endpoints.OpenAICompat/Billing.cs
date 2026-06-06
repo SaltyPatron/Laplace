@@ -8,6 +8,7 @@ namespace Laplace.Endpoints.OpenAICompat;
 internal sealed class StripeBillingOptions
 {
     public string? ApiKey { get; set; }
+    public string? WebhookSecret { get; set; }
     public string Currency { get; set; } = "usd";
     public string SuccessUrl { get; set; } = "http://localhost:5187/billing/success";
     public string CancelUrl { get; set; } = "http://localhost:5187/billing/cancel";
@@ -580,6 +581,17 @@ internal sealed class StripeCheckoutGateway : IStripeCheckoutGateway
                     ["tenant"] = quote.Tenant,
                     ["service_id"] = quote.ServiceId
                 },
+                SubscriptionData = price.RecurringInterval is null
+                    ? null
+                    : new SessionSubscriptionDataOptions
+                    {
+                        Metadata = new Dictionary<string, string>
+                        {
+                            ["quote_id"] = quote.QuoteId,
+                            ["tenant"] = quote.Tenant,
+                            ["service_id"] = quote.ServiceId
+                        }
+                    },
                 LineItems = new List<SessionLineItemOptions> { lineItem }
             };
 
@@ -619,6 +631,7 @@ internal interface IBillingOrchestrator
 {
     Task<BillingQuote> CreatePreflightQuoteAsync(string tenant, string serviceId, int units, CancellationToken ct);
     Task<QuoteExecutionGate> EnsureExecutableAsync(string quoteId, string serviceId, CancellationToken ct);
+    bool TryApproveQuote(string quoteId, out BillingQuote quote);
     void MarkConsumedAndRecord(BillingQuote quote);
     bool TryGetQuote(string quoteId, out BillingQuote quote);
     IReadOnlyList<ServicePrice> ListCatalog();
@@ -652,6 +665,18 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
     public IReadOnlyList<BillingUsageRecord> GetUsage(string tenant) => _ledger.GetByTenant(tenant);
 
     public bool TryGetQuote(string quoteId, out BillingQuote quote) => _store.TryGet(quoteId, out quote!);
+
+    public bool TryApproveQuote(string quoteId, out BillingQuote quote)
+    {
+        if (!_store.TryGet(quoteId, out var existing))
+        {
+            quote = default!;
+            return false;
+        }
+
+        quote = _store.Update(existing with { Status = "approved" });
+        return true;
+    }
 
     public async Task<BillingQuote> CreatePreflightQuoteAsync(string tenant, string serviceId, int units, CancellationToken ct)
     {

@@ -47,12 +47,12 @@ public sealed class BootstrapIntentBuilder
 
     /// <summary>The canonical "Kind" meta-type entity. Hash of
     /// <c>"substrate/type/Kind/v1"</c>.</summary>
-    public static readonly Hash128 KindMetaTypeId =
+    public static readonly Hash128 RelationTypeMetaTypeId =
         Hash128.OfCanonical("substrate/type/Kind/v1");
 
     /// <summary>The HAS_TRUST_CLASS kind attesting source ↔ trust-class.
     /// Hash of <c>"substrate/kind/HAS_TRUST_CLASS/v1"</c>.</summary>
-    public static readonly Hash128 HasTrustClassKindId =
+    public static readonly Hash128 HasTrustClassTypeId =
         Hash128.OfCanonical("substrate/kind/HAS_TRUST_CLASS/v1");
 
     public BootstrapIntentBuilder(Hash128 sourceId, string sourceName, Hash128 trustClassId)
@@ -85,10 +85,10 @@ public sealed class BootstrapIntentBuilder
     /// <summary>Register an attestation-kind entity. Same content-addressing
     /// convergence as types — duplicate calls from different decomposers are
     /// no-ops via ON CONFLICT.</summary>
-    public Hash128 AddKind(string canonicalKindName)
+    public Hash128 AddRelationType(string canonicalKindName)
     {
         var id = Hash128.OfCanonical($"substrate/kind/{canonicalKindName}/v1");
-        _inner.AddEntity(id, (byte)MetaTier.Kind, KindMetaTypeId, _sourceId);
+        _inner.AddEntity(id, (byte)MetaTier.RelationType, RelationTypeMetaTypeId, _sourceId);
         return id;
     }
 
@@ -99,8 +99,8 @@ public sealed class BootstrapIntentBuilder
     /// this kind as the numeric witness weight folded into the Glicko opponent φ
     /// (see <see cref="AttestationFactory"/>). No tier entity, no HAS_VALUE_TIER
     /// meta-attestation is minted.</summary>
-    public Hash128 AddKind(string canonicalKindName, double kindRank, double sourceTrust)
-        => AddKind(canonicalKindName);
+    public Hash128 AddRelationType(string canonicalKindName, double kindRank, double sourceTrust)
+        => AddRelationType(canonicalKindName);
 
     /// <summary>Attest that <see cref="_sourceId"/> belongs to
     /// <see cref="_trustClassId"/> — source provenance (a categorical confirm).
@@ -109,7 +109,7 @@ public sealed class BootstrapIntentBuilder
     {
         _inner.AddAttestation(AttestationFactory.CreateCategorical(
             subject:    _sourceId,
-            kindId:     HasTrustClassKindId,
+            typeId:     HasTrustClassTypeId,
             obj:        _trustClassId,
             sourceId:   _sourceId,        // self-attested
             contextId:  null,
@@ -118,13 +118,13 @@ public sealed class BootstrapIntentBuilder
     }
 
     /// <summary>Finalize the bootstrap intent. Also seeds the canonical-kind
-    /// arena taxonomy (<see cref="KindRegistry.SeedCanonical"/>) so registry-routed
+    /// arena taxonomy (<see cref="RelationTypeRegistry.SeedCanonical"/>) so registry-routed
     /// attestations from any decomposer reference canonical kinds that already
     /// exist (the kind_id FK floor) — idempotent across decomposers.</summary>
     public SubstrateChange Build()
     {
         AddTrustClassAttestation();
-        KindRegistry.SeedCanonical(_inner, _sourceId);
+        RelationTypeRegistry.SeedCanonical(_inner, _sourceId);
         return _inner.Build();
     }
 }

@@ -108,37 +108,37 @@ public sealed class ModelDecomposer : IDecomposer
      * Per-token magnitude reduction (row → one scalar) stays the cardinal sin.
      * Nonlinearities (softmax, SiLU/SwiGLU gating) are the source's runtime —
      * never attested, never run at ingest. */
-    public static readonly Hash128 EmbedsKind        = KindRegistry.KindId("EMBEDS");
-    public static readonly Hash128 QProjectsKind     = KindRegistry.KindId("Q_PROJECTS");
-    public static readonly Hash128 KProjectsKind     = KindRegistry.KindId("K_PROJECTS");
-    public static readonly Hash128 VProjectsKind     = KindRegistry.KindId("V_PROJECTS");
-    public static readonly Hash128 OProjectsKind     = KindRegistry.KindId("O_PROJECTS");
-    public static readonly Hash128 GatesKind         = KindRegistry.KindId("GATES");
-    public static readonly Hash128 UpProjectsKind    = KindRegistry.KindId("UP_PROJECTS");
-    public static readonly Hash128 DownProjectsKind  = KindRegistry.KindId("DOWN_PROJECTS");
-    public static readonly Hash128 NormScalesKind    = KindRegistry.KindId("NORM_SCALES");
-    public static readonly Hash128 OutputProjectsKind = KindRegistry.KindId("OUTPUT_PROJECTS");
-    public static readonly Hash128 TokenMapsToKind   = KindRegistry.KindId("TOKEN_MAPS_TO");
+    public static readonly Hash128 EmbedsTypeId        = RelationTypeRegistry.RelationTypeId("EMBEDS");
+    public static readonly Hash128 QProjectsTypeId     = RelationTypeRegistry.RelationTypeId("Q_PROJECTS");
+    public static readonly Hash128 KProjectsTypeId     = RelationTypeRegistry.RelationTypeId("K_PROJECTS");
+    public static readonly Hash128 VProjectsTypeId     = RelationTypeRegistry.RelationTypeId("V_PROJECTS");
+    public static readonly Hash128 OProjectsTypeId     = RelationTypeRegistry.RelationTypeId("O_PROJECTS");
+    public static readonly Hash128 GatesTypeId         = RelationTypeRegistry.RelationTypeId("GATES");
+    public static readonly Hash128 UpProjectsTypeId    = RelationTypeRegistry.RelationTypeId("UP_PROJECTS");
+    public static readonly Hash128 DownProjectsTypeId  = RelationTypeRegistry.RelationTypeId("DOWN_PROJECTS");
+    public static readonly Hash128 NormScalesTypeId    = RelationTypeRegistry.RelationTypeId("NORM_SCALES");
+    public static readonly Hash128 OutputProjectsTypeId = RelationTypeRegistry.RelationTypeId("OUTPUT_PROJECTS");
+    public static readonly Hash128 TokenMapsToTypeId   = RelationTypeRegistry.RelationTypeId("TOKEN_MAPS_TO");
     /* Content x content relatedness witnessed from model trajectory geometry — the
      * corrected ingest axis (same kind the lexical decomposers emit, so model + dataset
      * witnesses dedup onto one consensus edge). */
-    public static readonly Hash128 SimilarToKind     = KindRegistry.KindId("SIMILAR_TO");
+    public static readonly Hash128 SimilarToTypeId     = RelationTypeRegistry.RelationTypeId("SIMILAR_TO");
     // Per-circuit relations, each read per (head/neuron) through the embedding address book:
     //   ATTENDS      — QK: [query n-gram] attends [key tokens]
     //   OV_RELATES   — OV: [value n-gram] relates [output tokens]
     //   COMPLETES_TO — FFN: [context n-gram] ⇒ {completion tokens}
-    public static readonly Hash128 AttendsKind       = KindRegistry.KindId("ATTENDS");
-    public static readonly Hash128 OvRelatesKind     = KindRegistry.KindId("OV_RELATES");
-    public static readonly Hash128 CompletesToKind   = KindRegistry.KindId("COMPLETES_TO");
+    public static readonly Hash128 AttendsTypeId       = RelationTypeRegistry.RelationTypeId("ATTENDS");
+    public static readonly Hash128 OvRelatesTypeId     = RelationTypeRegistry.RelationTypeId("OV_RELATES");
+    public static readonly Hash128 CompletesToTypeId   = RelationTypeRegistry.RelationTypeId("COMPLETES_TO");
 
     /* Recipe attestation kinds */
-    public static readonly Hash128 HasHiddenSizeKind  = KindRegistry.KindId("HAS_HIDDEN_SIZE");
-    public static readonly Hash128 HasNumLayersKind   = KindRegistry.KindId("HAS_NUM_LAYERS");
-    public static readonly Hash128 HasNumHeadsKind    = KindRegistry.KindId("HAS_NUM_HEADS");
-    public static readonly Hash128 HasNumKvHeadsKind  = KindRegistry.KindId("HAS_NUM_KV_HEADS");
-    public static readonly Hash128 HasIntermSizeKind  = KindRegistry.KindId("HAS_INTERMEDIATE_SIZE");
-    public static readonly Hash128 HasVocabSizeKind   = KindRegistry.KindId("HAS_VOCAB_SIZE");
-    public static readonly Hash128 IsAKind            = KindRegistry.KindId("IS_A");
+    public static readonly Hash128 HasHiddenSizeTypeId  = RelationTypeRegistry.RelationTypeId("HAS_HIDDEN_SIZE");
+    public static readonly Hash128 HasNumLayersTypeId   = RelationTypeRegistry.RelationTypeId("HAS_NUM_LAYERS");
+    public static readonly Hash128 HasNumHeadsTypeId    = RelationTypeRegistry.RelationTypeId("HAS_NUM_HEADS");
+    public static readonly Hash128 HasNumKvHeadsTypeId  = RelationTypeRegistry.RelationTypeId("HAS_NUM_KV_HEADS");
+    public static readonly Hash128 HasIntermSizeTypeId  = RelationTypeRegistry.RelationTypeId("HAS_INTERMEDIATE_SIZE");
+    public static readonly Hash128 HasVocabSizeTypeId   = RelationTypeRegistry.RelationTypeId("HAS_VOCAB_SIZE");
+    public static readonly Hash128 IsATypeId            = RelationTypeRegistry.RelationTypeId("IS_A");
 
     /* Well-known entity */
     public static readonly Hash128 LlamaArchitectureId =
@@ -190,28 +190,28 @@ public sealed class ModelDecomposer : IDecomposer
          * targets) + TOKEN_MAPS_TO + the recipe kinds. ATTENDS / OV_RELATES /
          * COMPLETES_TO are read-side vocabulary for the query-time bilinear
          * compositions — registered, never ingest-written. */
-        boot.AddKind("EMBEDS");
-        boot.AddKind("Q_PROJECTS");
-        boot.AddKind("K_PROJECTS");
-        boot.AddKind("V_PROJECTS");
-        boot.AddKind("O_PROJECTS");
-        boot.AddKind("GATES");
-        boot.AddKind("UP_PROJECTS");
-        boot.AddKind("DOWN_PROJECTS");
-        boot.AddKind("NORM_SCALES");
-        boot.AddKind("MERGES_WITH");
-        boot.AddKind("OUTPUT_PROJECTS");
-        boot.AddKind("ATTENDS");
-        boot.AddKind("OV_RELATES");
-        boot.AddKind("COMPLETES_TO");
-        boot.AddKind("TOKEN_MAPS_TO");
-        boot.AddKind("HAS_HIDDEN_SIZE");
-        boot.AddKind("HAS_NUM_LAYERS");
-        boot.AddKind("HAS_NUM_HEADS");
-        boot.AddKind("HAS_NUM_KV_HEADS");
-        boot.AddKind("HAS_INTERMEDIATE_SIZE");
-        boot.AddKind("HAS_VOCAB_SIZE");
-        boot.AddKind("IS_A");
+        boot.AddRelationType("EMBEDS");
+        boot.AddRelationType("Q_PROJECTS");
+        boot.AddRelationType("K_PROJECTS");
+        boot.AddRelationType("V_PROJECTS");
+        boot.AddRelationType("O_PROJECTS");
+        boot.AddRelationType("GATES");
+        boot.AddRelationType("UP_PROJECTS");
+        boot.AddRelationType("DOWN_PROJECTS");
+        boot.AddRelationType("NORM_SCALES");
+        boot.AddRelationType("MERGES_WITH");
+        boot.AddRelationType("OUTPUT_PROJECTS");
+        boot.AddRelationType("ATTENDS");
+        boot.AddRelationType("OV_RELATES");
+        boot.AddRelationType("COMPLETES_TO");
+        boot.AddRelationType("TOKEN_MAPS_TO");
+        boot.AddRelationType("HAS_HIDDEN_SIZE");
+        boot.AddRelationType("HAS_NUM_LAYERS");
+        boot.AddRelationType("HAS_NUM_HEADS");
+        boot.AddRelationType("HAS_NUM_KV_HEADS");
+        boot.AddRelationType("HAS_INTERMEDIATE_SIZE");
+        boot.AddRelationType("HAS_VOCAB_SIZE");
+        boot.AddRelationType("IS_A");
 
         return context.Writer.ApplyAsync(boot.Build(), ct);
     }
@@ -234,9 +234,9 @@ public sealed class ModelDecomposer : IDecomposer
             recipe.VocabSize, phaseSw.ElapsedMilliseconds);
         yield return LlamaRecipeExtractor.BuildChange(
             recipe, Source, ModelRecipeTypeId,
-            HasHiddenSizeKind, HasNumLayersKind, HasNumHeadsKind, HasNumKvHeadsKind,
-            HasIntermSizeKind, HasVocabSizeKind,
-            IsAKind, LlamaArchitectureId);
+            HasHiddenSizeTypeId, HasNumLayersTypeId, HasNumHeadsTypeId, HasNumKvHeadsTypeId,
+            HasIntermSizeTypeId, HasVocabSizeTypeId,
+            IsATypeId, LlamaArchitectureId);
 
         /* 2. Tokenizer meta-entity — MUST come before the TOKEN_MAPS_TO
          * attestations (emitted by the morph phase, residual-scored; or the

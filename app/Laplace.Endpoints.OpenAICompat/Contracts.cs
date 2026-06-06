@@ -58,6 +58,14 @@ internal sealed record BillingPreflightRequest(
     [property: JsonPropertyName("units")] int Units,
     [property: JsonPropertyName("tenant")] string? Tenant);
 
+internal sealed record PlanSubscribeRequest(
+    [property: JsonPropertyName("tenant")] string? Tenant);
+
+internal sealed record CreditConsumeRequest(
+    [property: JsonPropertyName("tenant")] string? Tenant,
+    [property: JsonPropertyName("service_id")] string? ServiceId,
+    [property: JsonPropertyName("units")] int Units = 1);
+
 // Build-a-model synthesis quote: the recipe dimensions drive a metered price
 // (base job fee + per-million-parameter rate). Mirrors the recipe.json shape
 // consumed by `laplace synthesize substrate`.
@@ -112,6 +120,26 @@ internal sealed record RecipeQuoteRequest(
     [property: JsonPropertyName("commercial")] bool Commercial = false,
     [property: JsonPropertyName("private_export")] bool PrivateExport = false);
 
+// Paid execution requests for the report/visualization SKUs above.
+internal sealed record AuditReportRequest(
+    [property: JsonPropertyName("scope")] string? Scope = null,
+    [property: JsonPropertyName("include_evidence")] bool IncludeEvidence = true,
+    [property: JsonPropertyName("include_consensus")] bool IncludeConsensus = true,
+    [property: JsonPropertyName("include_convergence")] bool IncludeConvergence = true,
+    [property: JsonPropertyName("academic")] bool Academic = false);
+
+internal sealed record VisualizationExecuteRequest(
+    [property: JsonPropertyName("limit")] int? Limit = null,
+    [property: JsonPropertyName("include_geometry")] bool IncludeGeometry = true,
+    [property: JsonPropertyName("include_evidence")] bool IncludeEvidence = false,
+    [property: JsonPropertyName("format")] string? Format = null);
+
+internal sealed record ExplainReportRequest(
+    [property: JsonPropertyName("prompt")] string? Prompt,
+    [property: JsonPropertyName("depth")] int Depth,
+    [property: JsonPropertyName("beam")] int Beam,
+    [property: JsonPropertyName("academic")] bool Academic = false);
+
 // ── substrate row projections ─────────────────────────────────────────────
 internal sealed record ConverseRow(string Reply, decimal EffectiveMu, long Witnesses);
 
@@ -127,3 +155,55 @@ internal sealed record GenerateToken(int Step, string Token, decimal Mu);
 internal sealed record EmbeddingVector(bool Resolved, IReadOnlyList<double> Values);
 
 internal sealed record StructuralNeighbor(string Neighbor, double Geodesic, double? Frechet);
+
+internal sealed record SubstrateCount(string Metric, long Value);
+
+internal sealed record ConsensusHealth(long EvidenceRows, long ConsensusRows, decimal? DedupRatio, decimal? AvgWitnesses, long? MaxWitnesses);
+
+internal sealed record SubstrateAuditReport(
+    IReadOnlyList<SubstrateCount> Counts,
+    ConsensusHealth? Consensus,
+    long? MultiSourceEntityCount,
+    IReadOnlyList<VisualizationEdge> TopRelations);
+
+internal sealed record VisualizationNode(
+    string IdHex,
+    string Label,
+    double? X,
+    double? Y,
+    double? Z,
+    double? M,
+    double? Radius,
+    int? Constituents,
+    long? EvidenceRows);
+
+internal sealed record VisualizationEdge(
+    string SubjectIdHex,
+    string Subject,
+    string TypeIdHex,
+    string Type,
+    string ObjectIdHex,
+    string Object,
+    decimal EffectiveMu,
+    long Witnesses);
+
+internal sealed record SubstrateVisualizationGraph(IReadOnlyList<VisualizationNode> Nodes, IReadOnlyList<VisualizationEdge> Edges);
+
+internal sealed record EvidenceSample(
+    string TypeIdHex,
+    string ObjectIdHex,
+    string SourceIdHex,
+    string? ContextIdHex,
+    short Outcome,
+    long ObservationCount);
+
+internal sealed record ExplainTraceStep(
+    int Depth,
+    IReadOnlyList<string> PathHex,
+    IReadOnlyList<string> KindPathHex,
+    string EntityIdHex,
+    string EntityLabel,
+    decimal EffectiveMu,
+    decimal PathMu,
+    long Witnesses,
+    IReadOnlyList<EvidenceSample> Evidence);

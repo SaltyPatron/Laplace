@@ -234,12 +234,12 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 if (_provenAtt.Contains(a.Id)) continue;    // proven earlier this run
                 if (!seenAtt.Add(a.Id)) continue;           // in DB or already staged this batch
                 stage.AddAttestation(
-                    a.Id, a.SubjectId, a.KindId, a.ObjectId, a.SourceId, a.ContextId,
+                    a.Id, a.SubjectId, a.TypeId, a.ObjectId, a.SourceId, a.ContextId,
                     (short)a.Outcome,
                     a.LastObservedAtUnixUs, a.ObservationCount);
                 stagedAttIds.Add(a.Id);
                 Reference(a.SubjectId);
-                Reference(a.KindId);
+                Reference(a.TypeId);
                 Reference(a.SourceId);
                 if (a.ObjectId  is Hash128 aObj) Reference(aObj);
                 if (a.ContextId is Hash128 aCtx) Reference(aCtx);

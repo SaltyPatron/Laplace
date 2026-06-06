@@ -62,7 +62,7 @@ internal static class ContentRoundtrip
         // canonical lossless Build trajectory + POINT/LINESTRING geometry, and the
         // distributional bigram witness). The prompt path adds no emission logic of
         // its own — it just records under PromptSource at UserPrompt trust.
-        double witnessWeight = KindRank.Associative * SourceTrust.UserPrompt;
+        double witnessWeight = RelationTypeRank.Associative * SourceTrust.UserPrompt;
         if (!TextEntityBuilder.TryBuildContentWitness(utf8, PromptSource, witnessWeight,
                 out var entities, out var physicalities, out var attestations, out var rootId, out _))
             return Hash128.Zero;   // TextDecomposer rejected (empty / invalid UTF-8)

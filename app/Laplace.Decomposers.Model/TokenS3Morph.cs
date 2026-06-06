@@ -237,14 +237,14 @@ public sealed class TokenS3Morph
                 Hash128 entityId = rec.EntityId;
                 Hilbert128 hb = Hilbert128.Encode(new[] { px[i], pyv[i], pz[i], pm[i] });
                 Hash128 physId = PhysicalityId.Compute(
-                    entityId, _sourceId, PhysicalityKind.Projection,
+                    entityId, _sourceId, PhysicalityType.Projection,
                     px[i], pyv[i], pz[i], pm[i], ReadOnlySpan<double>.Empty);
 
                 bb.AddPhysicality(new PhysicalityRow(
                     Id:                physId,
                     EntityId:          entityId,
                     SourceId:          _sourceId,
-                    Kind:              PhysicalityKind.Projection,
+                    Kind:              PhysicalityType.Projection,
                     CoordX:            px[i], CoordY: pyv[i], CoordZ: pz[i], CoordM: pm[i],
                     HilbertIndex:      hb,
                     TrajectoryXyzm:    null,
@@ -256,7 +256,7 @@ public sealed class TokenS3Morph
 
                 if (resids[i] is double resid && arenaM > 0)
                 {
-                    bb.AddAttestation(KindRegistry.AttestWeighted(
+                    bb.AddAttestation(RelationTypeRegistry.AttestWeighted(
                         _tokenizerEntityId, "TOKEN_MAPS_TO", entityId, _sourceId,
                         SourceTrust.AiModelProbe,
                         magnitude: arenaM - resid, arenaScale: arenaM));
@@ -264,7 +264,7 @@ public sealed class TokenS3Morph
                 }
                 else
                 {
-                    bb.AddAttestation(KindRegistry.Attest(
+                    bb.AddAttestation(RelationTypeRegistry.Attest(
                         _tokenizerEntityId, "TOKEN_MAPS_TO", entityId, _sourceId,
                         SourceTrust.AiModelProbe));
                 }

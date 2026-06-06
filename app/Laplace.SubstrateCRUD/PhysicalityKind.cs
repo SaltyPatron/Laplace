@@ -2,10 +2,10 @@ namespace Laplace.SubstrateCRUD;
 
 /// <summary>
 /// Per-source per-entity representation kind — matches the substrate-canonical
-/// PhysicalityKind entities bootstrapped at install time Stage 2.
+/// PhysicalityType entities bootstrapped at install time Stage 2.
 /// Stored as <c>smallint</c> in <c>physicalities.kind</c>.
 /// </summary>
-public enum PhysicalityKind : short
+public enum PhysicalityType : short
 {
     /// <summary>Decomposition-bearing view (trajectory populated).</summary>
     Content = 1,

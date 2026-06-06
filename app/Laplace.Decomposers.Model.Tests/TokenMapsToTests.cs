@@ -22,7 +22,7 @@ public class TokenMapsToTests
     /// computed through the SAME factory surface the emitters use.</summary>
     private static long RegistryPhiFp() =>
         (long)(AttestationFactory.WitnessPhi(
-            KindRegistry.Resolve("TOKEN_MAPS_TO").Rank * SourceTrust.AiModelProbe) * Glicko2.FpScale);
+            RelationTypeRegistry.Resolve("TOKEN_MAPS_TO").Rank * SourceTrust.AiModelProbe) * Glicko2.FpScale);
 
     private static LlamaTokenizerParser.TokenRecord Rec(
         int id, string raw, bool anchored, double x = 0, double y = 0, double z = 0, double m = 1)
@@ -79,7 +79,7 @@ public class TokenMapsToTests
         Assert.NotEmpty(changes);
 
         var atts = changes.SelectMany(c => c.Attestations)
-            .Where(a => a.KindId == KindRegistry.KindId("TOKEN_MAPS_TO")).ToList();
+            .Where(a => a.TypeId == RelationTypeRegistry.RelationTypeId("TOKEN_MAPS_TO")).ToList();
         Assert.Equal(n, atts.Count);   // EVERY placed token gets a matchup
 
         long phi = RegistryPhiFp();
@@ -114,7 +114,7 @@ public class TokenMapsToTests
         long phi = RegistryPhiFp();
         Assert.All(atts, a =>
         {
-            Assert.Equal(KindRegistry.KindId("TOKEN_MAPS_TO"), a.KindId);
+            Assert.Equal(RelationTypeRegistry.RelationTypeId("TOKEN_MAPS_TO"), a.TypeId);
             Assert.Equal(TokenizerId, a.SubjectId);
             Assert.Equal(Glicko2.FpScale, a.ScoreFp1e9);   // categorical confirm
             Assert.Equal(phi, a.OpponentRdFp1e9);

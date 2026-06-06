@@ -85,7 +85,7 @@ public sealed class SemLinkDecomposer : IDecomposer
         boot.AddType("VerbNet_Class");
         boot.AddType("PropBank_Roleset");
         boot.AddType("FrameNet_Frame");
-        boot.AddKind("CORRESPONDS_TO");
+        boot.AddRelationType("CORRESPONDS_TO");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -122,7 +122,7 @@ public sealed class SemLinkDecomposer : IDecomposer
         {
             ct.ThrowIfCancellationRequested();
             string rolesetKey = rolesetProp.Name.Trim();
-            if (rolesetKey.Length == 0 || rolesetProp.Value.ValueKind != JsonValueKind.Object) continue;
+            if (rolesetKey.Length == 0 || rolesetProp.Value.ValueTypeId != JsonValueTypeId.Object) continue;
             Hash128 rsEntity = RolesetId(rolesetKey);
             b.AddEntity(new EntityRow(rsEntity, (byte)MetaTier.Meta, PropBankRolesetTypeId, Source));
 
@@ -134,22 +134,22 @@ public sealed class SemLinkDecomposer : IDecomposer
                 b.AddEntity(new EntityRow(vnEntity, (byte)MetaTier.Meta, VerbNetClassTypeId, Source));
 
                 // roleset ↔ VN class (symmetric equivalence).
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     rsEntity, "CORRESPONDS_TO", vnEntity, Source, TC.AcademicCurated));
 
                 // Role-level: PB arg name (content) ↔ VN theta role (content), with
                 // the VN class as provenance context.
-                if (classProp.Value.ValueKind == JsonValueKind.Object)
+                if (classProp.Value.ValueTypeId == JsonValueTypeId.Object)
                     foreach (var roleProp in classProp.Value.EnumerateObject())
                     {
                         string arg = roleProp.Name.Trim();
-                        string theta = roleProp.Value.ValueKind == JsonValueKind.String
+                        string theta = roleProp.Value.ValueTypeId == JsonValueTypeId.String
                             ? (roleProp.Value.GetString() ?? "").Trim() : "";
                         if (arg.Length == 0 || theta.Length == 0) continue;
                         var argId   = ContentEmitter.Emit(b, arg, Source);
                         var thetaId = ContentEmitter.Emit(b, theta, Source);
                         if (argId is null || thetaId is null) continue;
-                        b.AddAttestation(KindRegistry.Attest(
+                        b.AddAttestation(RelationTypeRegistry.Attest(
                             argId.Value, "CORRESPONDS_TO", thetaId.Value, Source, TC.AcademicCurated,
                             contextId: vnEntity));
                     }
@@ -178,17 +178,17 @@ public sealed class SemLinkDecomposer : IDecomposer
             Hash128 vnEntity = VnClassId(vnClass);
             b.AddEntity(new EntityRow(vnEntity, (byte)MetaTier.Meta, VerbNetClassTypeId, Source));
 
-            if (keyProp.Value.ValueKind != JsonValueKind.Array) continue;
+            if (keyProp.Value.ValueTypeId != JsonValueTypeId.Array) continue;
             foreach (var frameElem in keyProp.Value.EnumerateArray())
             {
-                if (frameElem.ValueKind != JsonValueKind.String) continue;
+                if (frameElem.ValueTypeId != JsonValueTypeId.String) continue;
                 string frame = (frameElem.GetString() ?? "").Trim();
                 if (frame.Length == 0) continue;
                 Hash128 fnEntity = FrameId(frame);
                 b.AddEntity(new EntityRow(fnEntity, (byte)MetaTier.Meta, FrameNetFrameTypeId, Source));
                 // VN class ↔ FN frame (symmetric equivalence; FrameNet agent owns
                 // framenet/frame/<name> — this co-asserts onto it).
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     vnEntity, "CORRESPONDS_TO", fnEntity, Source, TC.AcademicCurated));
             }
         }

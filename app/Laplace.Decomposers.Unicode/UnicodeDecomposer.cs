@@ -54,27 +54,27 @@ public sealed class UnicodeDecomposer : IDecomposer
         boot.AddType("Codepoint");
         boot.AddType("UcdClassifier");
         boot.AddType("OrdinalContext");
-        // Rank lives ONLY in KindRegistry (all UCD kinds are StandardsStructural).
-        boot.AddKind("HAS_GENERAL_CATEGORY");
-        boot.AddKind("HAS_COMBINING_CLASS");
-        boot.AddKind("HAS_SCRIPT");
-        boot.AddKind("HAS_BLOCK");
-        boot.AddKind("HAS_UPPERCASE_MAPPING");
-        boot.AddKind("HAS_LOWERCASE_MAPPING");
-        boot.AddKind("CANONICAL_DECOMPOSES_TO");
+        // Rank lives ONLY in RelationTypeRegistry (all UCD kinds are StandardsStructural).
+        boot.AddRelationType("HAS_GENERAL_CATEGORY");
+        boot.AddRelationType("HAS_COMBINING_CLASS");
+        boot.AddRelationType("HAS_SCRIPT");
+        boot.AddRelationType("HAS_BLOCK");
+        boot.AddRelationType("HAS_UPPERCASE_MAPPING");
+        boot.AddRelationType("HAS_LOWERCASE_MAPPING");
+        boot.AddRelationType("CANONICAL_DECOMPOSES_TO");
         // 2026-06-05 completeness sweep — the UCD properties the seed left out.
-        boot.AddKind("HAS_TITLECASE_MAPPING");
-        boot.AddKind("COMPATIBILITY_DECOMPOSES_TO");
-        boot.AddKind("HAS_NUMERIC_VALUE");
-        boot.AddKind("HAS_BIDI_CLASS");
-        boot.AddKind("HAS_MIRROR");
-        boot.AddKind("HAS_AGE");
-        boot.AddKind("HAS_NAME_ALIAS");
-        boot.AddKind("CONFUSABLE_WITH");
-        boot.AddKind("HAS_EMOJI_PROPERTY");
+        boot.AddRelationType("HAS_TITLECASE_MAPPING");
+        boot.AddRelationType("COMPATIBILITY_DECOMPOSES_TO");
+        boot.AddRelationType("HAS_NUMERIC_VALUE");
+        boot.AddRelationType("HAS_BIDI_CLASS");
+        boot.AddRelationType("HAS_MIRROR");
+        boot.AddRelationType("HAS_AGE");
+        boot.AddRelationType("HAS_NAME_ALIAS");
+        boot.AddRelationType("CONFUSABLE_WITH");
+        boot.AddRelationType("HAS_EMOJI_PROPERTY");
         // Byte tier (2026-06-05): encoding relations of the 128 high-byte atoms.
-        boot.AddKind("DECODES_TO");
-        boot.AddKind("HAS_UTF8_ROLE");
+        boot.AddRelationType("DECODES_TO");
+        boot.AddRelationType("HAS_UTF8_ROLE");
         boot.AddType("Byte");
         boot.AddType("Utf8Role");
         boot.AddType("CharacterEncoding");
@@ -150,7 +150,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                 {
                     var aliasId = ContentEmitter.Emit(b, alias, Source);
                     if (aliasId is { } aid)
-                        b.AddAttestation(KindRegistry.Attest(
+                        b.AddAttestation(RelationTypeRegistry.Attest(
                             recs[cp].Hash, "HAS_NAME_ALIAS", aid, Source, SourceTrust.StandardsDerived));
                     count++;
                 }
@@ -176,7 +176,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                     ? recs[(uint)first].Hash
                     : ContentEmitter.Emit(b, target, Source);
                 if (targetId is { } tid)
-                    b.AddAttestation(KindRegistry.Attest(
+                    b.AddAttestation(RelationTypeRegistry.Attest(
                         recs[src].Hash, "CONFUSABLE_WITH", tid, Source, SourceTrust.StandardsDerived));
                 if (++count >= batch)
                 {
@@ -228,23 +228,23 @@ public sealed class UnicodeDecomposer : IDecomposer
 
                 var coord = ByteAtoms.Coord(bv);
                 Hash128 physId = PhysicalityId.Compute(
-                    byteId, Source, PhysicalityKind.Content,
+                    byteId, Source, PhysicalityType.Content,
                     coord[0], coord[1], coord[2], coord[3], ReadOnlySpan<double>.Empty);
                 bb.AddPhysicality(new PhysicalityRow(
                     Id: physId, EntityId: byteId, SourceId: Source,
-                    Kind: PhysicalityKind.Content,
+                    Kind: PhysicalityType.Content,
                     CoordX: coord[0], CoordY: coord[1], CoordZ: coord[2], CoordM: coord[3],
                     HilbertIndex: ByteAtoms.Hilbert(bv),
                     TrajectoryXyzm: null, NConstituents: 0,
                     AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
 
-                bb.AddAttestation(KindRegistry.Attest(
+                bb.AddAttestation(RelationTypeRegistry.Attest(
                     byteId, "HAS_UTF8_ROLE", roleIds[ByteAtoms.Utf8Role(bv)],
                     Source, SourceTrust.StandardsDerived));
 
                 // Latin-1: byte value IS the codepoint index (the alignment
                 // Unicode chose for its first 256 codepoints).
-                bb.AddAttestation(KindRegistry.Attest(
+                bb.AddAttestation(RelationTypeRegistry.Attest(
                     byteId, "DECODES_TO", recs[v].Hash, Source,
                     SourceTrust.StandardsDerived, contextId: latin1));
 
@@ -254,7 +254,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                     ? ByteAtoms.Cp1252High[bv - 0x80]
                     : (uint)bv;
                 if (cp1252Target != 0)
-                    bb.AddAttestation(KindRegistry.Attest(
+                    bb.AddAttestation(RelationTypeRegistry.Attest(
                         byteId, "DECODES_TO", recs[cp1252Target].Hash, Source,
                         SourceTrust.StandardsDerived, contextId: cp1252));
             }
@@ -324,13 +324,13 @@ public sealed class UnicodeDecomposer : IDecomposer
                 b.AddEntity(entityId, tier: 0, CodepointType, firstObservedBy: Source);
 
                 Hash128 physId = PhysicalityId.Compute(
-                    entityId, Source, PhysicalityKind.Content,
+                    entityId, Source, PhysicalityType.Content,
                     r.CoordX, r.CoordY, r.CoordZ, r.CoordM,
                     ReadOnlySpan<double>.Empty);
 
                 b.AddPhysicality(new PhysicalityRow(
                     Id: physId, EntityId: entityId, SourceId: Source,
-                    Kind: PhysicalityKind.Content,
+                    Kind: PhysicalityType.Content,
                     CoordX: r.CoordX, CoordY: r.CoordY, CoordZ: r.CoordZ, CoordM: r.CoordM,
                     HilbertIndex: r.Hilbert,
                     TrajectoryXyzm: null, NConstituents: 0,
@@ -344,25 +344,25 @@ public sealed class UnicodeDecomposer : IDecomposer
                 string? cat = ucd.GeneralCategory[cp];
                 if (cat != null && ucd.CategoryEntityIds.TryGetValue(cat, out var catId))
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasGeneralCategory,
-                        catId, Source, null, KindRank.StandardsStructural, SourceTrust.StandardsDerived));
+                        catId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
 
                 // HAS_COMBINING_CLASS (only for non-zero — zero is the default)
                 if (ucd.CombiningClass[cp] > 0)
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasCombiningClass,
                         CombiningClassIds[ucd.CombiningClass[cp]], Source, null,
-                        KindRank.StandardsStructural, SourceTrust.StandardsDerived));
+                        RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
 
                 // HAS_SCRIPT
                 string? script = ucd.ScriptForCodepoint(ucp);
                 if (script != null && ucd.ScriptEntityIds.TryGetValue(script, out var scriptId))
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasScript,
-                        scriptId, Source, null, KindRank.StandardsStructural, SourceTrust.StandardsDerived));
+                        scriptId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
 
                 // HAS_BLOCK
                 string? block = ucd.BlockForCodepoint(ucp);
                 if (block != null && ucd.BlockEntityIds.TryGetValue(block, out var blockId))
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasBlock,
-                        blockId, Source, null, KindRank.StandardsStructural, SourceTrust.StandardsDerived));
+                        blockId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
 
                 // HAS_UPPERCASE_MAPPING
                 if (ucd.UppercaseMapping[cp] != 0)
@@ -370,7 +370,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                     uint targetCp = ucd.UppercaseMapping[cp];
                     if (targetCp < (uint)recs.Length)
                         b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasUppercaseMapping,
-                            recs[targetCp].Hash, Source, null, KindRank.StandardsStructural, SourceTrust.StandardsDerived));
+                            recs[targetCp].Hash, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
                 }
 
                 // HAS_LOWERCASE_MAPPING
@@ -379,7 +379,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                     uint targetCp = ucd.LowercaseMapping[cp];
                     if (targetCp < (uint)recs.Length)
                         b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasLowercaseMapping,
-                            recs[targetCp].Hash, Source, null, KindRank.StandardsStructural, SourceTrust.StandardsDerived));
+                            recs[targetCp].Hash, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
                 }
 
                 // CANONICAL_DECOMPOSES_TO
@@ -395,7 +395,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                             b.AddAttestation(AttestationFactory.Create(entityId,
                                 UcdProperties.KindCanonDecomposesTo,
                                 recs[targetCp].Hash, Source, ctx,
-                                KindRank.StandardsStructural, SourceTrust.StandardsDerived));
+                                RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
                         }
                     }
                 }
@@ -406,7 +406,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                 if (ucd.TitlecaseMapping[cp] != 0 && ucd.TitlecaseMapping[cp] < (uint)recs.Length)
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasTitlecaseMapping,
                         recs[ucd.TitlecaseMapping[cp]].Hash, Source, null,
-                        KindRank.StandardsStructural, SourceTrust.StandardsDerived));
+                        RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
 
                 // COMPATIBILITY_DECOMPOSES_TO — the <tag> forms, DISTINCT arena.
                 uint[]? compat = ucd.CompatDecomp[cp];
@@ -421,7 +421,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                             b.AddAttestation(AttestationFactory.Create(entityId,
                                 UcdProperties.KindCompatDecomposesTo,
                                 recs[targetCp].Hash, Source, ctx,
-                                KindRank.StandardsStructural, SourceTrust.StandardsDerived));
+                                RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
                         }
                     }
                 }
@@ -430,26 +430,26 @@ public sealed class UnicodeDecomposer : IDecomposer
                 string? num = ucd.NumericValue[cp];
                 if (num != null && ucd.NumericEntityIds.TryGetValue(num, out var numId))
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasNumericValue,
-                        numId, Source, null, KindRank.ScalarValued, SourceTrust.StandardsDerived));
+                        numId, Source, null, RelationTypeRank.ScalarValued, SourceTrust.StandardsDerived));
 
                 // HAS_BIDI_CLASS
                 string? bidi = ucd.BidiClass[cp];
                 if (bidi != null && ucd.BidiClassEntityIds.TryGetValue(bidi, out var bidiId))
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasBidiClass,
-                        bidiId, Source, null, KindRank.StandardsStructural, SourceTrust.StandardsDerived));
+                        bidiId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
 
                 // HAS_MIRROR (symmetric — emit once from the lower codepoint;
                 // the registry would orient anyway, this avoids the duplicate)
                 uint mir = ucd.BidiMirror[cp];
                 if (mir != 0 && mir < (uint)recs.Length && cp <= mir)
-                    b.AddAttestation(KindRegistry.Attest(
+                    b.AddAttestation(RelationTypeRegistry.Attest(
                         entityId, "HAS_MIRROR", recs[mir].Hash, Source, SourceTrust.StandardsDerived));
 
                 // HAS_AGE (the Unicode version that introduced the codepoint)
                 string? age = ucd.AgeForCodepoint(ucp);
                 if (age != null && ucd.AgeEntityIds.TryGetValue(age, out var ageId))
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasAge,
-                        ageId, Source, null, KindRank.StandardsStructural, SourceTrust.StandardsDerived));
+                        ageId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
 
                 // HAS_EMOJI_PROPERTY (overlapping booleans → one arena, classifier values)
                 byte eprops = ucd.EmojiProps[cp];
@@ -458,7 +458,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                         if ((eprops & (1 << bit)) != 0
                             && ucd.EmojiPropEntityIds.TryGetValue(UcdProperties.EmojiPropNames[bit], out var epId))
                             b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasEmojiProperty,
-                                epId, Source, null, KindRank.StandardsStructural, SourceTrust.StandardsDerived));
+                                epId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
             }
         }
         return b.Build();

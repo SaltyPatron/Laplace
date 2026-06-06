@@ -51,7 +51,7 @@ public sealed class TextEntityBuilder
      * ("B follows A") is the reverse query (consensus_in on this arena), never
      * a second arena — the FOLLOWS twin doubled the testimony and was retired
      * 2026-06-05 (FOLLOWS is now a flip-alias in the registry). */
-    public static readonly Hash128 PrecedesKind = KindRegistry.KindId("PRECEDES");
+    public static readonly Hash128 PrecedesTypeId = RelationTypeRegistry.RelationTypeId("PRECEDES");
 
     // The text tiers (match TierTypeId / the histogram): 2=Word, 3=Sentence.
     private const byte WordTier     = 2;
@@ -152,7 +152,7 @@ public sealed class TextEntityBuilder
         unsafe { cx = node.Coord[0]; cy = node.Coord[1]; cz = node.Coord[2]; cm = node.Coord[3]; }
 
         var physId = PhysicalityId.Compute(
-            node.Id, _sourceId, PhysicalityKind.Content,
+            node.Id, _sourceId, PhysicalityType.Content,
             cx, cy, cz, cm,
             trajectoryXyzm ?? ReadOnlySpan<double>.Empty);
 
@@ -160,7 +160,7 @@ public sealed class TextEntityBuilder
             Id:                physId,
             EntityId:          node.Id,
             SourceId:          _sourceId,
-            Kind:              PhysicalityKind.Content,
+            Kind:              PhysicalityType.Content,
             CoordX:            cx,
             CoordY:            cy,
             CoordZ:            cz,
@@ -380,7 +380,7 @@ public sealed class TextEntityBuilder
             // Each occurrence is a confirm (score 1.0 ⇒ 1e9 fixed-point).
             long sumScore = checked(count * Glicko2.FpScale);
             rows.Add(AttestationFactory.CreateAggregated(
-                pair.A, PrecedesKind, pair.B, sourceId, contextId: null,
+                pair.A, PrecedesTypeId, pair.B, sourceId, contextId: null,
                 games: count, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
         }
         return rows.ToImmutable();

@@ -75,9 +75,9 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        // Rank/trust live in the REGISTRY at attest time — AddKind(name) only.
-        boot.AddKind("IS_TRANSLATION_OF");
-        boot.AddKind("HAS_LANGUAGE");
+        // Rank/trust live in the REGISTRY at attest time — AddRelationType(name) only.
+        boot.AddRelationType("IS_TRANSLATION_OF");
+        boot.AddRelationType("HAS_LANGUAGE");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -142,11 +142,11 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer
                 b.AddEntity(new EntityRow(langB, (byte)MetaTier.Meta, LanguageTypeId, Source));
 
                 // SYMMETRIC: Orient canonicalizes (A,B)/(B,A) onto one consensus row.
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     idA.Value, "IS_TRANSLATION_OF", idB.Value, Source, SourceTrust.StructuredCorpus));
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     idA.Value, "HAS_LANGUAGE", langA, Source, SourceTrust.StructuredCorpus));
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     idB.Value, "HAS_LANGUAGE", langB, Source, SourceTrust.StructuredCorpus));
 
                 if (++n >= batch)

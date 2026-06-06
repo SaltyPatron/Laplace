@@ -74,9 +74,9 @@ public sealed class UDDecomposer : IDecomposer
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("UD_XPOS");
-        boot.AddKind("HAS_DEFINITION");     // MISC Gloss=
-        boot.AddKind("TRANSCRIBES_AS");     // MISC Translit=
-        boot.AddKind("ENHANCED_DEPENDS_ON");
+        boot.AddRelationType("HAS_DEFINITION");     // MISC Gloss=
+        boot.AddRelationType("TRANSCRIBES_AS");     // MISC Translit=
+        boot.AddRelationType("ENHANCED_DEPENDS_ON");
         boot.AddType("UD_Feature");
         // Kinds are seeded by the registry in BootstrapIntentBuilder.Build (the
         // canonical arena taxonomy: HAS_POS, HAS_XPOS, HAS_FEATURE, IS_LEMMA_OF,
@@ -109,7 +109,7 @@ public sealed class UDDecomposer : IDecomposer
         // batches; intents merge through a bounded channel. Order-free by
         // construction: content-addressing makes intent order irrelevant, and
         // every batch is referentially SELF-CONTAINED (per-batch entity
-        // seeding — see KindRegistry.SeedDynamic), so batches commit in any
+        // seeding — see RelationTypeRegistry.SeedDynamic), so batches commit in any
         // order under parallel appliers too. Run-scoped taxonomy testimony
         // (IS_A, one witness statement per run) is gated by ONE shared
         // concurrent set across workers. LAPLACE_DECOMPOSE_WORKERS overrides;
@@ -249,14 +249,14 @@ public sealed class UDDecomposer : IDecomposer
             // HAS_UPOS normalizes to the canonical HAS_POS arena (co-asserts with
             // WordNet/Wiktionary part-of-speech); the value object stays the UPOS tag.
             if (!string.IsNullOrEmpty(tok.Upos) && tok.Upos != "_")
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     form, "HAS_UPOS", UposId(tok.Upos), Source, SourceTrust.AcademicCurated));
 
             // HAS_XPOS is the finer, language-specific child arena (is_a HAS_POS).
             if (!string.IsNullOrEmpty(tok.Xpos) && tok.Xpos != "_")
             {
                 b.AddEntity(new EntityRow(XposId(langCode, tok.Xpos), (byte)MetaTier.Meta, XposTypeId, Source));
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     form, "HAS_XPOS", XposId(langCode, tok.Xpos), Source, SourceTrust.AcademicCurated));
             }
 
@@ -264,22 +264,22 @@ public sealed class UDDecomposer : IDecomposer
             // FEAT_NUMBER(form, Sing), is_a HAS_FEATURE. Value object shared cross-language.
             foreach (var feat in tok.Feats)
             {
-                if (!KindRegistry.ParseFeature(feat, out var fName, out var fVal)) continue;
+                if (!RelationTypeRegistry.ParseFeature(feat, out var fName, out var fVal)) continue;
                 Hash128 valId = FeatValueId(fName, fVal);
                 b.AddEntity(new EntityRow(valId, (byte)MetaTier.Meta, FeatureTypeId, Source));
-                KindRegistry.SeedDynamic(b, KindRegistry.ResolveFeature(fName), Source, seenEntBatch, seenAttRun);
-                b.AddAttestation(KindRegistry.AttestFeature(
+                RelationTypeRegistry.SeedDynamic(b, RelationTypeRegistry.ResolveFeature(fName), Source, seenEntBatch, seenAttRun);
+                b.AddAttestation(RelationTypeRegistry.AttestFeature(
                     form, fName, valId, Source, SourceTrust.AcademicCurated));
             }
 
-            b.AddAttestation(KindRegistry.Attest(
+            b.AddAttestation(RelationTypeRegistry.Attest(
                 form, "HAS_LANGUAGE", langId, Source, SourceTrust.AcademicCurated));
 
             if (tok.Lemma != tok.Form)
             {
                 var lemmaId = ContentEmitter.RootId(tok.Lemma);
                 if (lemmaId is not null)
-                    b.AddAttestation(KindRegistry.Attest(
+                    b.AddAttestation(RelationTypeRegistry.Attest(
                         lemmaId.Value, "IS_LEMMA_OF", form, Source, SourceTrust.AcademicCurated));
             }
 
@@ -289,8 +289,8 @@ public sealed class UDDecomposer : IDecomposer
             if (tok.Head > 0 && tok.Head <= s.MaxId && formId[tok.Head] is { } headId
                 && !string.IsNullOrEmpty(tok.Deprel) && tok.Deprel != "_")
             {
-                KindRegistry.SeedDeprel(b, tok.Deprel, Source, seenEntBatch, seenAttRun);
-                b.AddAttestation(KindRegistry.AttestDeprel(
+                RelationTypeRegistry.SeedDeprel(b, tok.Deprel, Source, seenEntBatch, seenAttRun);
+                b.AddAttestation(RelationTypeRegistry.AttestDeprel(
                     form, tok.Deprel, headId, Source, SourceTrust.AcademicCurated));
             }
 
@@ -307,8 +307,8 @@ public sealed class UDDecomposer : IDecomposer
                     string erel = edge[(colon + 1)..].Trim();
                     if (erel.Length == 0 || headRef == "0") continue;
                     if (!refToForm.TryGetValue(headRef, out var eHead)) continue;
-                    KindRegistry.SeedEnhancedDeprel(b, erel, Source, seenEntBatch, seenAttRun);
-                    b.AddAttestation(KindRegistry.AttestEnhancedDeprel(
+                    RelationTypeRegistry.SeedEnhancedDeprel(b, erel, Source, seenEntBatch, seenAttRun);
+                    b.AddAttestation(RelationTypeRegistry.AttestEnhancedDeprel(
                         form, erel, eHead, Source, SourceTrust.AcademicCurated));
                 }
             }
@@ -328,14 +328,14 @@ public sealed class UDDecomposer : IDecomposer
                     {
                         var g = ContentEmitter.Emit(b, val, Source);
                         if (g is { } gid)
-                            b.AddAttestation(KindRegistry.Attest(
+                            b.AddAttestation(RelationTypeRegistry.Attest(
                                 form, "HAS_DEFINITION", gid, Source, SourceTrust.AcademicCurated));
                     }
                     else if (key.Equals("Translit", StringComparison.OrdinalIgnoreCase))
                     {
                         var t = ContentEmitter.Emit(b, val, Source);
                         if (t is { } tid)
-                            b.AddAttestation(KindRegistry.Attest(
+                            b.AddAttestation(RelationTypeRegistry.Attest(
                                 form, "TRANSCRIBES_AS", tid, Source, SourceTrust.AcademicCurated));
                     }
                 }
@@ -349,7 +349,7 @@ public sealed class UDDecomposer : IDecomposer
             if (surfaceId is null) continue;
             for (int id = mwt.Start; id <= mwt.End && id <= s.MaxId; id++)
                 if (formId[id] is { } partId)
-                    b.AddAttestation(KindRegistry.Attest(
+                    b.AddAttestation(RelationTypeRegistry.Attest(
                         surfaceId.Value, "HAS_PART", partId, Source, SourceTrust.AcademicCurated));
         }
     }

@@ -45,7 +45,7 @@ public sealed class WordNetDecomposer : IDecomposer
 
     // Pointer symbol → kind NAME only. Subject = the synset bearing the pointer,
     // object = the target synset. WordNet pointer inventory per wninput(5).
-    // Rank / symmetry / direction-flip resolve through KindRegistry (the single
+    // Rank / symmetry / direction-flip resolve through RelationTypeRegistry (the single
     // source of truth for arena significance) at attest time — never locally.
     private static readonly Dictionary<string, string> PointerKinds = new()
     {
@@ -113,23 +113,23 @@ public sealed class WordNetDecomposer : IDecomposer
         boot.AddType("WordNet_POS");
         boot.AddType("WordNet_LexCategory");
 
-        // Non-pointer kinds. Rank/symmetry live ONLY in KindRegistry; bootstrap
+        // Non-pointer kinds. Rank/symmetry live ONLY in RelationTypeRegistry; bootstrap
         // just guarantees the kind entities exist (SeedCanonical in Build() seeds
         // every canonical arena anyway — these cover source-named aliases).
-        boot.AddKind("IS_SYNONYM_OF");
-        boot.AddKind("HAS_POS");
-        boot.AddKind("HAS_DEFINITION");
-        boot.AddKind("HAS_EXAMPLE");
-        boot.AddKind("HAS_DOMAIN_TOPIC");
-        boot.AddKind("HAS_VERB_FRAME");
-        boot.AddKind("IS_LEMMA_OF");
-        boot.AddKind("HAS_SENSE");
-        boot.AddKind("IS_SENSE_OF");
+        boot.AddRelationType("IS_SYNONYM_OF");
+        boot.AddRelationType("HAS_POS");
+        boot.AddRelationType("HAS_DEFINITION");
+        boot.AddRelationType("HAS_EXAMPLE");
+        boot.AddRelationType("HAS_DOMAIN_TOPIC");
+        boot.AddRelationType("HAS_VERB_FRAME");
+        boot.AddRelationType("IS_LEMMA_OF");
+        boot.AddRelationType("HAS_SENSE");
+        boot.AddRelationType("IS_SENSE_OF");
 
         // All pointer-relation kinds (registry aliases resolve to canonical ids;
         // seeding the canonical entity is what matters for the FK floor).
         foreach (var name in PointerKinds.Values)
-            boot.AddKind(KindRegistry.Resolve(name).Canonical);
+            boot.AddRelationType(RelationTypeRegistry.Resolve(name).Canonical);
 
         await context.Writer.ApplyAsync(boot.Build(), ct);
 
@@ -246,9 +246,9 @@ public sealed class WordNetDecomposer : IDecomposer
         {
             var lemmaId = ContentEmitter.RootId(Surface(lemma));
             if (lemmaId is null) continue;
-            b.AddAttestation(KindRegistry.Attest(
+            b.AddAttestation(RelationTypeRegistry.Attest(
                 lemmaId.Value, "IS_SYNONYM_OF", syn.SynsetId, Source, SourceTrust.StandardsDerived));
-            b.AddAttestation(KindRegistry.Attest(
+            b.AddAttestation(RelationTypeRegistry.Attest(
                 lemmaId.Value, "HAS_POS", posId, Source, SourceTrust.StandardsDerived));
         }
 
@@ -257,14 +257,14 @@ public sealed class WordNetDecomposer : IDecomposer
         {
             var defId = ContentEmitter.RootId(def);
             if (defId is not null)
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     syn.SynsetId, "HAS_DEFINITION", defId.Value, Source, SourceTrust.StandardsDerived));
         }
         foreach (var ex in examples)
         {
             var exId = ContentEmitter.RootId(ex);
             if (exId is not null)
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     syn.SynsetId, "HAS_EXAMPLE", exId.Value, Source, SourceTrust.StandardsDerived));
         }
 
@@ -277,7 +277,7 @@ public sealed class WordNetDecomposer : IDecomposer
         {
             var domainId = ContentEmitter.RootId(LexDomain(Lexnames[syn.LexFilenum]));
             if (domainId is not null)
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     syn.SynsetId, "HAS_DOMAIN_TOPIC", domainId.Value,
                     Source, SourceTrust.StandardsDerived));
         }
@@ -295,19 +295,19 @@ public sealed class WordNetDecomposer : IDecomposer
                 var lemmaId = ContentEmitter.RootId(Surface(syn.Lemmas[wordNum - 1]));
                 if (lemmaId is { } lid) subject = lid;
             }
-            b.AddAttestation(KindRegistry.Attest(
+            b.AddAttestation(RelationTypeRegistry.Attest(
                 subject, "HAS_VERB_FRAME", tplId.Value, Source, SourceTrust.StandardsDerived));
         }
 
         foreach (var ptr in syn.Pointers)
         {
-            if (!PointerKinds.TryGetValue(ptr.Symbol, out var kindName)) continue;
+            if (!PointerKinds.TryGetValue(ptr.Symbol, out var typeName)) continue;
             Hash128 tgt = SourceEntityIdConventions.WordNetSynset(ptr.TargetOffset, NormPos(ptr.TargetPos));
             // Registry resolves alias → canonical arena, applies the direction
             // flip (HAS_HYPONYM ⇒ IS_A with endpoints swapped) and symmetric
             // endpoint ordering, and supplies the canonical rank.
-            b.AddAttestation(KindRegistry.Attest(
-                syn.SynsetId, kindName, tgt, Source, SourceTrust.StandardsDerived));
+            b.AddAttestation(RelationTypeRegistry.Attest(
+                syn.SynsetId, typeName, tgt, Source, SourceTrust.StandardsDerived));
         }
     }
 
@@ -342,10 +342,10 @@ public sealed class WordNetDecomposer : IDecomposer
                 {
                     // SemCor tag-count is the signed magnitude: a more-frequently-
                     // tagged sense wins harder (score = ½(1+tanh(count/M)), M = 1).
-                    b.AddAttestation(KindRegistry.AttestWeighted(
+                    b.AddAttestation(RelationTypeRegistry.AttestWeighted(
                         lemmaId.Value, "HAS_SENSE", s.SenseId, Source, SourceTrust.StandardsDerived,
                         magnitude: s.TagCount, arenaScale: 1.0));
-                    b.AddAttestation(KindRegistry.Attest(
+                    b.AddAttestation(RelationTypeRegistry.Attest(
                         s.SenseId, "IS_SENSE_OF", s.SynsetId, Source, SourceTrust.StandardsDerived));
                 }
             }
@@ -423,7 +423,7 @@ public sealed class WordNetDecomposer : IDecomposer
                     string baseForm = parts[i].Replace('_', ' ');
                     var baseId = ContentEmitter.Emit(b, baseForm, Source);
                     if (baseId is null) continue;
-                    b.AddAttestation(KindRegistry.Attest(
+                    b.AddAttestation(RelationTypeRegistry.Attest(
                         baseId.Value, "IS_LEMMA_OF", infId.Value, Source, SourceTrust.StandardsDerived));
                 }
                 if (++count >= batch)

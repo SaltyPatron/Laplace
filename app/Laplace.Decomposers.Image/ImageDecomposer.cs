@@ -46,11 +46,11 @@ public sealed class ImageDecomposer : IDecomposer
         boot.AddType("Region");
         boot.AddType("Image");
         boot.AddType("Image_Collection");
- // Cross-modal kinds         boot.AddKind("DEPICTS");
-        boot.AddKind("CAPTIONS");
-        boot.AddKind("IS_PIXEL_OF");
-        boot.AddKind("HAS_COLOR");
-        boot.AddKind("ADJACENT_TO_PIXEL");
+ // Cross-modal kinds         boot.AddRelationType("DEPICTS");
+        boot.AddRelationType("CAPTIONS");
+        boot.AddRelationType("IS_PIXEL_OF");
+        boot.AddRelationType("HAS_COLOR");
+        boot.AddRelationType("ADJACENT_TO_PIXEL");
         return context.Writer.ApplyAsync(boot.Build(), ct);
     }
 

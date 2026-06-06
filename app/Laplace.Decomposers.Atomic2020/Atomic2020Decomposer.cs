@@ -48,7 +48,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
 
     // Relation string → canonical kind NAME; the registry owns id + rank +
     // orientation at attest time (no per-source id constructor).
-    private static readonly Dictionary<string, string> RelKind =
+    private static readonly Dictionary<string, string> RelTypeId =
         Relations.ToDictionary(r => r.Rel, r => r.Kind);
 
     private static readonly string[] Splits = ["train", "dev", "test"];
@@ -65,9 +65,9 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("Atomic_Marker");
         boot.AddType("Atomic_Split");
-        // Rank/trust live in the REGISTRY at attest time — AddKind(name) only.
+        // Rank/trust live in the REGISTRY at attest time — AddRelationType(name) only.
         foreach (var name in Relations.Select(r => r.Kind).Distinct())
-            boot.AddKind(KindRegistry.Resolve(name).Canonical);
+            boot.AddRelationType(RelationTypeRegistry.Resolve(name).Canonical);
         await context.Writer.ApplyAsync(boot.Build(), ct);
 
         var seed = new SubstrateChangeBuilder(Source, "bootstrap/atomic-vocab", null,
@@ -108,7 +108,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
                 var c = line.Split('\t');
                 if (c.Length < 3) continue;
                 string head = c[0].Trim(), rel = c[1].Trim(), tail = c[2].Trim();
-                if (head.Length == 0 || !RelKind.TryGetValue(rel, out var kindName)) continue;
+                if (head.Length == 0 || !RelTypeId.TryGetValue(rel, out var typeName)) continue;
 
                 var headId = ContentEmitter.Emit(b, head, Source);
                 if (headId is null) continue;
@@ -125,8 +125,8 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
                     tailId = t.Value;
                 }
 
-                b.AddAttestation(KindRegistry.Attest(
-                    headId.Value, kindName, tailId, Source, SourceTrust.StructuredCorpus,
+                b.AddAttestation(RelationTypeRegistry.Attest(
+                    headId.Value, typeName, tailId, Source, SourceTrust.StructuredCorpus,
                     contextId: splitId));
 
                 if (++n >= batch)

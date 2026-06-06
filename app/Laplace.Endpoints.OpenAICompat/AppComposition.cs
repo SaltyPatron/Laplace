@@ -13,6 +13,9 @@ internal static class AppComposition
         services.AddSingleton<ISynthesisQuoteCalculator, SynthesisQuoteCalculator>();
         services.AddSingleton<ITraceQuoteCalculator, TraceQuoteCalculator>();
         services.AddSingleton<IReportQuoteCalculator, ReportQuoteCalculator>();
+        services.AddSingleton<IBillingEntitlementStore, InMemoryBillingEntitlementStore>();
+        services.AddSingleton<IBillingWebhookEventStore, InMemoryBillingWebhookEventStore>();
+        services.AddSingleton<IBillingWebhookHandler, BillingWebhookHandler>();
         services.AddSingleton<IBillingLedger, InMemoryBillingLedger>();
         services.AddSingleton<IBillingQuoteStore, InMemoryBillingQuoteStore>();
         services.AddSingleton<IStripeCheckoutGateway, StripeCheckoutGateway>();
@@ -21,6 +24,7 @@ internal static class AppComposition
         services.AddOptions<StripeBillingOptions>().Configure(options =>
         {
             options.ApiKey = Environment.GetEnvironmentVariable("LAPLACE_STRIPE_API_KEY");
+            options.WebhookSecret = Environment.GetEnvironmentVariable("LAPLACE_STRIPE_WEBHOOK_SECRET");
             options.SuccessUrl = Environment.GetEnvironmentVariable("LAPLACE_STRIPE_SUCCESS_URL") ?? "http://localhost:5187/billing/success";
             options.CancelUrl = Environment.GetEnvironmentVariable("LAPLACE_STRIPE_CANCEL_URL") ?? "http://localhost:5187/billing/cancel";
             options.Currency = Environment.GetEnvironmentVariable("LAPLACE_BILLING_CURRENCY") ?? "usd";

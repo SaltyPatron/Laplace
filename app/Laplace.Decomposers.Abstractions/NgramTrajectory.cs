@@ -61,14 +61,14 @@ public static class NgramTrajectory
         Hilbert128 hb    = Hilbert128.Encode(cen);
         double[]   traj  = Trajectory.Build(childIds);             // the path = ordered constituents
         Hash128    physId = PhysicalityId.Compute(
-            id, sourceId, PhysicalityKind.Content, cen[0], cen[1], cen[2], cen[3], traj);
+            id, sourceId, PhysicalityType.Content, cen[0], cen[1], cen[2], cen[3], traj);
 
         var entity = new EntityRow(id, tier, typeId, sourceId);
         var phys = new PhysicalityRow(
             Id:                physId,
             EntityId:          id,
             SourceId:          sourceId,
-            Kind:              PhysicalityKind.Content,
+            Kind:              PhysicalityType.Content,
             CoordX:            cen[0], CoordY: cen[1], CoordZ: cen[2], CoordM: cen[3],
             HilbertIndex:      hb,
             TrajectoryXyzm:    traj,

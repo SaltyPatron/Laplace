@@ -80,7 +80,7 @@ check_kind_evidence() {
   local kind="$1" min="$2"
   local count
   count=$(psql -d laplace -U laplace_admin -tAc \
-    "SELECT laplace.evidence_count(p_kind => laplace.kind_id('$kind'))")
+    "SELECT laplace.evidence_count(p_type => laplace.relation_type_id('$kind'))")
   [ "${count:-0}" -ge "$min" ] || die "kind $kind has $count evidence rows (need >= $min) — ingest broken"
   log "  $kind: $count evidence rows OK"
 }

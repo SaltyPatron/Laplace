@@ -23,23 +23,23 @@ internal sealed class UcdProperties
 {
     // ── attestation-kind IDs (content-addressed, stable) ──
 
-    // (ids via KindRegistry.KindId — the ONE kind-id constructor.)
-    public static readonly Hash128 KindHasGeneralCategory  = KindRegistry.KindId("HAS_GENERAL_CATEGORY");
-    public static readonly Hash128 KindHasCombiningClass   = KindRegistry.KindId("HAS_COMBINING_CLASS");
-    public static readonly Hash128 KindHasScript           = KindRegistry.KindId("HAS_SCRIPT");
-    public static readonly Hash128 KindHasBlock            = KindRegistry.KindId("HAS_BLOCK");
-    public static readonly Hash128 KindHasUppercaseMapping = KindRegistry.KindId("HAS_UPPERCASE_MAPPING");
-    public static readonly Hash128 KindHasLowercaseMapping = KindRegistry.KindId("HAS_LOWERCASE_MAPPING");
-    public static readonly Hash128 KindHasTitlecaseMapping = KindRegistry.KindId("HAS_TITLECASE_MAPPING");
-    public static readonly Hash128 KindCanonDecomposesTo   = KindRegistry.KindId("CANONICAL_DECOMPOSES_TO");
-    public static readonly Hash128 KindCompatDecomposesTo  = KindRegistry.KindId("COMPATIBILITY_DECOMPOSES_TO");
-    public static readonly Hash128 KindHasNumericValue     = KindRegistry.KindId("HAS_NUMERIC_VALUE");
-    public static readonly Hash128 KindHasBidiClass        = KindRegistry.KindId("HAS_BIDI_CLASS");
-    public static readonly Hash128 KindHasMirror           = KindRegistry.KindId("HAS_MIRROR");
-    public static readonly Hash128 KindHasAge               = KindRegistry.KindId("HAS_AGE");
-    public static readonly Hash128 KindHasNameAlias         = KindRegistry.KindId("HAS_NAME_ALIAS");
-    public static readonly Hash128 KindConfusableWith       = KindRegistry.KindId("CONFUSABLE_WITH");
-    public static readonly Hash128 KindHasEmojiProperty     = KindRegistry.KindId("HAS_EMOJI_PROPERTY");
+    // (ids via RelationTypeRegistry.TypeId — the ONE kind-id constructor.)
+    public static readonly Hash128 KindHasGeneralCategory  = RelationTypeRegistry.RelationTypeId("HAS_GENERAL_CATEGORY");
+    public static readonly Hash128 KindHasCombiningClass   = RelationTypeRegistry.RelationTypeId("HAS_COMBINING_CLASS");
+    public static readonly Hash128 KindHasScript           = RelationTypeRegistry.RelationTypeId("HAS_SCRIPT");
+    public static readonly Hash128 KindHasBlock            = RelationTypeRegistry.RelationTypeId("HAS_BLOCK");
+    public static readonly Hash128 KindHasUppercaseMapping = RelationTypeRegistry.RelationTypeId("HAS_UPPERCASE_MAPPING");
+    public static readonly Hash128 KindHasLowercaseMapping = RelationTypeRegistry.RelationTypeId("HAS_LOWERCASE_MAPPING");
+    public static readonly Hash128 KindHasTitlecaseMapping = RelationTypeRegistry.RelationTypeId("HAS_TITLECASE_MAPPING");
+    public static readonly Hash128 KindCanonDecomposesTo   = RelationTypeRegistry.RelationTypeId("CANONICAL_DECOMPOSES_TO");
+    public static readonly Hash128 KindCompatDecomposesTo  = RelationTypeRegistry.RelationTypeId("COMPATIBILITY_DECOMPOSES_TO");
+    public static readonly Hash128 KindHasNumericValue     = RelationTypeRegistry.RelationTypeId("HAS_NUMERIC_VALUE");
+    public static readonly Hash128 KindHasBidiClass        = RelationTypeRegistry.RelationTypeId("HAS_BIDI_CLASS");
+    public static readonly Hash128 KindHasMirror           = RelationTypeRegistry.RelationTypeId("HAS_MIRROR");
+    public static readonly Hash128 KindHasAge               = RelationTypeRegistry.RelationTypeId("HAS_AGE");
+    public static readonly Hash128 KindHasNameAlias         = RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS");
+    public static readonly Hash128 KindConfusableWith       = RelationTypeRegistry.RelationTypeId("CONFUSABLE_WITH");
+    public static readonly Hash128 KindHasEmojiProperty     = RelationTypeRegistry.RelationTypeId("HAS_EMOJI_PROPERTY");
 
     // ── per-codepoint arrays (length = 0x110000) ──
 

@@ -87,10 +87,10 @@ public sealed class LlamaTokenizerParser
          * and given a distinct content-addressed entity, never a text decomposition. */
         var specialIds = new HashSet<int>();
         if (doc.RootElement.TryGetProperty("added_tokens", out var added) &&
-            added.ValueKind == JsonValueKind.Array)
+            added.ValueTypeId == JsonValueTypeId.Array)
         {
             foreach (var at in added.EnumerateArray())
-                if (at.TryGetProperty("special", out var sp) && sp.ValueKind == JsonValueKind.True &&
+                if (at.TryGetProperty("special", out var sp) && sp.ValueTypeId == JsonValueTypeId.True &&
                     at.TryGetProperty("id", out var idEl) && idEl.TryGetInt32(out int sid))
                     specialIds.Add(sid);
         }
@@ -393,11 +393,11 @@ public sealed class LlamaTokenizerParser
         byte[] jsonBytes = File.ReadAllBytes(tokenizerJsonPath);
         using var doc = JsonDocument.Parse(jsonBytes);
         if (!doc.RootElement.TryGetProperty("model", out var model) ||
-            !model.TryGetProperty("merges", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            !model.TryGetProperty("merges", out var arr) || arr.ValueTypeId != JsonValueTypeId.Array)
             return merges;
         foreach (var el in arr.EnumerateArray())
         {
-            string? pair = el.ValueKind == JsonValueKind.String ? el.GetString() : null;
+            string? pair = el.ValueTypeId == JsonValueTypeId.String ? el.GetString() : null;
             if (string.IsNullOrEmpty(pair)) continue;
             int sp = pair!.IndexOf(' ');
             if (sp <= 0 || sp + 1 >= pair.Length) continue;
@@ -441,7 +441,7 @@ public sealed class LlamaTokenizerParser
                 var (l, r) = merges[i];
                 Hash128 lid = ResolveMergeSide(b, l, sourceId, textTypeId);
                 Hash128 rid = ResolveMergeSide(b, r, sourceId, textTypeId);
-                b.AddAttestation(Laplace.Decomposers.Abstractions.KindRegistry.AttestWeighted(
+                b.AddAttestation(Laplace.Decomposers.Abstractions.RelationTypeRegistry.AttestWeighted(
                     lid, "MERGES_WITH", rid, sourceId,
                     Laplace.Decomposers.Abstractions.SourceTrust.AiModelProbe,
                     magnitude: m - i, arenaScale: m));
@@ -492,7 +492,7 @@ public sealed class LlamaTokenizerParser
                 attestationCapacity: end - start);
             for (int i = start; i < end; i++)
             {
-                b.AddAttestation(Laplace.Decomposers.Abstractions.KindRegistry.Attest(
+                b.AddAttestation(Laplace.Decomposers.Abstractions.RelationTypeRegistry.Attest(
                     tokenizerEntityId, "TOKEN_MAPS_TO", records[i].EntityId, sourceId,
                     Laplace.Decomposers.Abstractions.SourceTrust.AiModelProbe));
             }

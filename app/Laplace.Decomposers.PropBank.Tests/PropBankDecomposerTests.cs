@@ -62,14 +62,14 @@ public sealed class PropBankDecomposerTests
     public async Task Attestations_Use_RegistryRouted_Canonical_Kind_Ids()
     {
         var atts = await CollectAttestationsAsync();
-        var canonical = new HashSet<Hash128>(KindRegistry.AllCanonical().Select(k => k.Id));
-        Assert.All(atts, a => Assert.Contains(a.KindId, canonical));
+        var canonical = new HashSet<Hash128>(RelationTypeRegistry.AllCanonical().Select(k => k.Id));
+        Assert.All(atts, a => Assert.Contains(a.TypeId, canonical));
 
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("HAS_SENSE"));
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("HAS_DEFINITION"));
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("HAS_SEMANTIC_ROLE"));
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("HAS_EXAMPLE"));
-        Assert.Contains(atts, a => a.KindId == KindRegistry.KindId("CORRESPONDS_TO"));
+        Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SENSE"));
+        Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_DEFINITION"));
+        Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SEMANTIC_ROLE"));
+        Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_EXAMPLE"));
+        Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO"));
     }
 
     [Fact]
@@ -84,7 +84,7 @@ public sealed class PropBankDecomposerTests
 
         // lemma —HAS_SENSE→ roleset (the WordNet lemma→sense arena + direction).
         Assert.Contains(atts, a =>
-            a.KindId == KindRegistry.KindId("HAS_SENSE")
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SENSE")
             && a.SubjectId == giveId!.Value && a.ObjectId == rsId);
     }
 
@@ -101,7 +101,7 @@ public sealed class PropBankDecomposerTests
         Assert.Equal(Hash128.OfCanonical("ordinal/0/v1"), ord0);
         Assert.NotNull(giverId);
         Assert.Contains(atts, a =>
-            a.KindId == KindRegistry.KindId("HAS_SEMANTIC_ROLE")
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SEMANTIC_ROLE")
             && a.SubjectId == rsId && a.ObjectId == giverId!.Value && a.ContextId == ord0);
     }
 
@@ -116,7 +116,7 @@ public sealed class PropBankDecomposerTests
         var vnId = PropBankDecomposer.VnClassId("give-13.1-1");
         Assert.Equal(Hash128.OfCanonical("verbnet/class/13.1-1"), vnId);
         Assert.Contains(atts, a =>
-            a.KindId == KindRegistry.KindId("CORRESPONDS_TO")
+            a.TypeId == RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO")
             && (a.SubjectId == rsId || a.ObjectId == rsId)
             && (a.SubjectId == vnId || a.ObjectId == vnId));
 
@@ -126,7 +126,7 @@ public sealed class PropBankDecomposerTests
         Assert.NotNull(giverId);
         Assert.NotNull(agentId);
         Assert.Contains(atts, a =>
-            a.KindId == KindRegistry.KindId("CORRESPONDS_TO")
+            a.TypeId == RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO")
             && a.ContextId == vnId
             && (a.SubjectId == giverId!.Value || a.ObjectId == giverId!.Value)
             && (a.SubjectId == agentId!.Value || a.ObjectId == agentId!.Value));
@@ -153,10 +153,10 @@ public sealed class PropBankDecomposerTests
             e.Id == PropBankDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
         Assert.Contains(boot.Entities, e =>
             e.Id == Hash128.OfCanonical("substrate/type/PropBank_Roleset/v1"));
-        Assert.Contains(boot.Entities, e => e.Id == KindRegistry.KindId("HAS_SEMANTIC_ROLE"));
+        Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_SEMANTIC_ROLE"));
         Assert.Contains(boot.Attestations, a =>
             a.SubjectId == PropBankDecomposer.Source
-            && a.KindId == BootstrapIntentBuilder.HasTrustClassKindId
+            && a.TypeId == BootstrapIntentBuilder.HasTrustClassTypeId
             && a.ObjectId == PropBankDecomposer.TrustClass);
     }
 

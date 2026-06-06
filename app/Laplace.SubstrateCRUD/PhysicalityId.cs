@@ -27,7 +27,7 @@ public static class PhysicalityId
     public static Hash128 Compute(
         Hash128 entityId,
         Hash128 sourceId,
-        PhysicalityKind kind,
+        PhysicalityType kind,
         double coordX, double coordY, double coordZ, double coordM,
         ReadOnlySpan<double> trajectory)
     {

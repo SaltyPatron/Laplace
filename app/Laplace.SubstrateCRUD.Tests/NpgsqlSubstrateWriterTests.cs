@@ -120,14 +120,14 @@ public class NpgsqlSubstrateWriterTests
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var src = Hash128.OfCanonical("substrate/source/test/full-row");
         var typeId = await EnsureTestTypeAsync(src);
-        var kindId = await EnsureTestKindAsync(src, "HAS_TEST");
+        var typeId = await EnsureTestKindAsync(src, "HAS_TEST");
 
         var subjId = H(4001);
         var change = new SubstrateChangeBuilder(src, "full-unit")
             .AddEntity(subjId, 0, typeId)
             .AddPhysicality(new PhysicalityRow(
                 Id: H(4002), EntityId: subjId, SourceId: src,
-                Kind: PhysicalityKind.Content,
+                Kind: PhysicalityType.Content,
                 CoordX: 0.1, CoordY: 0.2, CoordZ: 0.3, CoordM: 0.4,
                 HilbertIndex: Hilbert128.Encode(stackalloc double[] { 0.1, 0.2, 0.3, 0.4 }),
                 TrajectoryXyzm: null,
@@ -136,7 +136,7 @@ public class NpgsqlSubstrateWriterTests
                 SourceDim: null,
                 ObservedAtUnixUs: IntentStage.PgEpochUnixUs))
             .AddAttestation(new AttestationRow(
-                Id: H(4003), SubjectId: subjId, KindId: kindId,
+                Id: H(4003), SubjectId: subjId, KindId: typeId,
                 ObjectId: null, SourceId: src, ContextId: null,
                 Outcome: AttestationOutcome.Confirm,
                 LastObservedAtUnixUs: IntentStage.PgEpochUnixUs,
@@ -174,11 +174,11 @@ public class NpgsqlSubstrateWriterTests
         // Add an entity, then an attestation that references a missing subject.
         var goodEntity = H(5001);
         var missingSubject = H(5099);
-        var kindId = await EnsureTestKindAsync(src, "HAS_TEST_ROLLBACK");
+        var typeId = await EnsureTestKindAsync(src, "HAS_TEST_ROLLBACK");
         var change = new SubstrateChangeBuilder(src, "rollback-unit")
             .AddEntity(goodEntity, 0, typeId)
             .AddAttestation(new AttestationRow(
-                H(5002), missingSubject, kindId, null, src, null,
+                H(5002), missingSubject, typeId, null, src, null,
                 AttestationOutcome.Confirm, IntentStage.PgEpochUnixUs, 1,
                 1_000_000_000L, 30_000_000_000L))
             .Build();
@@ -246,14 +246,14 @@ public class NpgsqlSubstrateWriterTests
     /// <summary>Ensures a Kind entity exists; returns its id.</summary>
     private async Task<Hash128> EnsureTestKindAsync(Hash128 source, string name)
     {
-        var kindId = Hash128.OfCanonical($"substrate/kind/{name}/v1");
+        var typeId = Hash128.OfCanonical($"substrate/kind/{name}/v1");
         var typeId = Hash128.OfCanonical("substrate/type/TestFixture/v1");
         await using var cmd = _pg.DataSource.CreateCommand(
             "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) "
           + "VALUES ($1, 0::smallint, $2, NULL) ON CONFLICT (id) DO NOTHING");
-        cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, kindId.ToBytes());
+        cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, typeId.ToBytes());
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, typeId.ToBytes());
         await cmd.ExecuteNonQueryAsync();
-        return kindId;
+        return typeId;
     }
 }

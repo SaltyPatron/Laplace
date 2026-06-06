@@ -22,19 +22,19 @@ public static class LayerCompletion
     public static SubstrateChange BuildMarker(IDecomposer decomposer)
     {
         // type_id FK: every attestation kind must exist as an entity row first
-        // (same rule as BootstrapIntentBuilder.AddKind / 10_bootstrap.sql.in).
-        var kindId = KindId(decomposer.LayerOrder);
+        // (same rule as BootstrapIntentBuilder.AddTypeId / 10_bootstrap.sql.in).
+        var typeId = KindId(decomposer.LayerOrder);
         return new SubstrateChangeBuilder(
                 decomposer.SourceId, $"layer-complete/{decomposer.LayerOrder}", null,
                 entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1)
-            .AddEntity(kindId, (byte)MetaTier.Kind, BootstrapIntentBuilder.KindMetaTypeId, decomposer.SourceId)
+            .AddEntity(typeId, (byte)MetaTier.RelationType, BootstrapIntentBuilder.RelationTypeMetaTypeId, decomposer.SourceId)
             .AddAttestation(AttestationFactory.Create(
                 decomposer.SourceId,
-                kindId,
+                typeId,
                 decomposer.SourceId,
                 decomposer.SourceId,
                 contextId: null,
-                KindRank.Mandate,
+                RelationTypeRank.Mandate,
                 SourceTrust.SubstrateMandate))
             .Build();
     }

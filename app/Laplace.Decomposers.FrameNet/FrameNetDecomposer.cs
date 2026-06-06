@@ -128,22 +128,22 @@ public sealed class FrameNetDecomposer : IDecomposer
         boot.AddType("FrameNet_LU");
         boot.AddType("FrameNet_Coreness");
 
-        // Every kind name this source Attests. Rank/trust live in KindRegistry — AddKind(name)
+        // Every kind name this source Attests. Rank/trust live in RelationTypeRegistry — AddRelationType(name)
         // only. Canonical names (registry resolves the source aliases INHERITS_FROM / SUBFRAME_OF
         // to their arenas; seeding the canonical entity is what satisfies the kind_id FK floor).
-        boot.AddKind("EVOKES_FRAME");
-        boot.AddKind("HAS_FRAME_ELEMENT");
-        boot.AddKind("HAS_DEFINITION");
-        boot.AddKind("HAS_POS");
-        boot.AddKind("HAS_EXAMPLE");
-        boot.AddKind("FRAME_USES");
-        boot.AddKind("PERSPECTIVE_ON");
-        boot.AddKind("CAUSATIVE_OF");
-        boot.AddKind("INCHOATIVE_OF");
-        boot.AddKind("PRECEDES");
-        boot.AddKind("IS_A");          // INHERITS_FROM resolves here
-        boot.AddKind("HAS_SUBEVENT");  // SUBFRAME_OF resolves here
-        boot.AddKind("RELATED_TO");    // See also
+        boot.AddRelationType("EVOKES_FRAME");
+        boot.AddRelationType("HAS_FRAME_ELEMENT");
+        boot.AddRelationType("HAS_DEFINITION");
+        boot.AddRelationType("HAS_POS");
+        boot.AddRelationType("HAS_EXAMPLE");
+        boot.AddRelationType("FRAME_USES");
+        boot.AddRelationType("PERSPECTIVE_ON");
+        boot.AddRelationType("CAUSATIVE_OF");
+        boot.AddRelationType("INCHOATIVE_OF");
+        boot.AddRelationType("PRECEDES");
+        boot.AddRelationType("IS_A");          // INHERITS_FROM resolves here
+        boot.AddRelationType("HAS_SUBEVENT");  // SUBFRAME_OF resolves here
+        boot.AddRelationType("RELATED_TO");    // See also
 
         await context.Writer.ApplyAsync(boot.Build(), ct);
 
@@ -275,14 +275,14 @@ public sealed class FrameNetDecomposer : IDecomposer
         {
             var defId = ContentEmitter.RootId(frame.Definition);
             if (defId is not null)
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     frameId, "HAS_DEFINITION", defId.Value, Source, SourceTrust.AcademicCurated));
         }
         foreach (var ex in frame.Examples)
         {
             var exId = ContentEmitter.RootId(ex);
             if (exId is not null)
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     frameId, "HAS_EXAMPLE", exId.Value, Source, SourceTrust.AcademicCurated));
         }
 
@@ -293,7 +293,7 @@ public sealed class FrameNetDecomposer : IDecomposer
             var feNameId = ContentEmitter.RootId(fe.Name);
             if (feNameId is null) continue;
             Hash128? coreCtx = CorenessValues.Contains(fe.CoreType) ? CorenessId(fe.CoreType) : null;
-            b.AddAttestation(KindRegistry.Attest(
+            b.AddAttestation(RelationTypeRegistry.Attest(
                 frameId, "HAS_FRAME_ELEMENT", feNameId.Value, Source, SourceTrust.AcademicCurated,
                 contextId: coreCtx));
 
@@ -301,7 +301,7 @@ public sealed class FrameNetDecomposer : IDecomposer
             {
                 var feDefId = ContentEmitter.RootId(fe.Definition);
                 if (feDefId is not null)
-                    b.AddAttestation(KindRegistry.Attest(
+                    b.AddAttestation(RelationTypeRegistry.Attest(
                         FeId(frame.Name, fe.Name), "HAS_DEFINITION", feDefId.Value,
                         Source, SourceTrust.AcademicCurated));
             }
@@ -316,9 +316,9 @@ public sealed class FrameNetDecomposer : IDecomposer
             if (lemmaId is null) continue;
 
             Hash128 posId = ResolvePos(lu.Pos);
-            b.AddAttestation(KindRegistry.Attest(
+            b.AddAttestation(RelationTypeRegistry.Attest(
                 lemmaId.Value, "HAS_POS", posId, Source, SourceTrust.AcademicCurated));
-            b.AddAttestation(KindRegistry.Attest(
+            b.AddAttestation(RelationTypeRegistry.Attest(
                 lemmaId.Value, "EVOKES_FRAME", frameId, Source, SourceTrust.AcademicCurated));
         }
 
@@ -326,10 +326,10 @@ public sealed class FrameNetDecomposer : IDecomposer
         // direction flip (SUBFRAME_OF ⇒ HAS_SUBEVENT swapped) and supplies the rank.
         foreach (var rel in frame.Relations)
         {
-            if (!RelationKinds.TryGetValue(rel.Type, out var kindName)) continue;
+            if (!RelationKinds.TryGetValue(rel.Type, out var typeName)) continue;
             Hash128 tgt = FrameId(rel.TargetFrame);
-            b.AddAttestation(KindRegistry.Attest(
-                frameId, kindName, tgt, Source, SourceTrust.AcademicCurated));
+            b.AddAttestation(RelationTypeRegistry.Attest(
+                frameId, typeName, tgt, Source, SourceTrust.AcademicCurated));
         }
     }
 
@@ -353,7 +353,7 @@ public sealed class FrameNetDecomposer : IDecomposer
                 var sentId = ContentEmitter.Emit(b, ann.Sentence, Source);
                 var targetId = ContentEmitter.Emit(b, ann.TargetText, Source);
                 if (sentId is not null && targetId is not null)
-                    b.AddAttestation(KindRegistry.Attest(
+                    b.AddAttestation(RelationTypeRegistry.Attest(
                         targetId.Value, "EVOKES_FRAME", FrameId(ann.FrameName),
                         Source, SourceTrust.AcademicCurated, contextId: sentId.Value));
 

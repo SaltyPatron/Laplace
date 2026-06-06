@@ -43,9 +43,9 @@ public sealed class TatoebaDecomposer : IDecomposer
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("Tatoeba_Sentence");
-        // Rank/trust live in the REGISTRY at attest time — AddKind(name) only.
-        boot.AddKind("HAS_EXTERNAL_ID");
-        boot.AddKind("IS_TRANSLATION_OF");
+        // Rank/trust live in the REGISTRY at attest time — AddRelationType(name) only.
+        boot.AddRelationType("HAS_EXTERNAL_ID");
+        boot.AddRelationType("IS_TRANSLATION_OF");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -81,9 +81,9 @@ public sealed class TatoebaDecomposer : IDecomposer
                 var contentId = ContentEmitter.Emit(b, text, Source);
                 if (contentId is not null)
                 {
-                    b.AddAttestation(KindRegistry.Attest(
+                    b.AddAttestation(RelationTypeRegistry.Attest(
                         contentId.Value, "HAS_EXTERNAL_ID", extId, Source, SourceTrust.StructuredCorpus));
-                    b.AddAttestation(KindRegistry.Attest(
+                    b.AddAttestation(RelationTypeRegistry.Attest(
                         contentId.Value, "HAS_LANGUAGE", langId, Source, SourceTrust.StructuredCorpus));
                 }
 
@@ -118,7 +118,7 @@ public sealed class TatoebaDecomposer : IDecomposer
                 // canonicalizes endpoint order so (a,b) and (b,a) land on ONE
                 // consensus row. The old factory bypass skipped this and forked
                 // the whole translation arena (2026-06-05 audit).
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     ea, "IS_TRANSLATION_OF", eb, Source, SourceTrust.StructuredCorpus));
 
                 if (++n >= batch)

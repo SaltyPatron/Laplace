@@ -60,15 +60,15 @@ public sealed class ISODecomposer : IDecomposer
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("Language");
         boot.AddType("ISO639Code");
-        boot.AddKind("IS_LANGUAGE_CODE");
-        boot.AddKind("HAS_ISO639_1_CODE");
-        boot.AddKind("USES_SCRIPT");
-        boot.AddKind("MEMBER_OF_MACROLANGUAGE");
-        boot.AddKind("HAS_ISO639_2_CODE");
-        boot.AddKind("HAS_LANGUAGE_SCOPE");
-        boot.AddKind("HAS_LANGUAGE_TYPE");
-        boot.AddKind("HAS_VARIANT_OF");
-        boot.AddKind("HAS_DEFINITION");
+        boot.AddRelationType("IS_LANGUAGE_CODE");
+        boot.AddRelationType("HAS_ISO639_1_CODE");
+        boot.AddRelationType("USES_SCRIPT");
+        boot.AddRelationType("MEMBER_OF_MACROLANGUAGE");
+        boot.AddRelationType("HAS_ISO639_2_CODE");
+        boot.AddRelationType("HAS_LANGUAGE_SCOPE");
+        boot.AddRelationType("HAS_LANGUAGE_TYPE");
+        boot.AddRelationType("HAS_VARIANT_OF");
+        boot.AddRelationType("HAS_DEFINITION");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -90,7 +90,7 @@ public sealed class ISODecomposer : IDecomposer
             b.AddEntity(langId, (byte)MetaTier.Meta, LanguageTypeId, Source);
             b.AddAttestation(AttestationFactory.Create(
                 langId, KindIsLanguageCode, null, Source, null,
-                KindRank.Partitive, SourceTrust.StandardsDerived));
+                RelationTypeRank.Partitive, SourceTrust.StandardsDerived));
 
             if (rec.Part1.Length > 0)
             {
@@ -100,7 +100,7 @@ public sealed class ISODecomposer : IDecomposer
                 b.AddEntity(iso1Id, (byte)MetaTier.Meta, Iso639CodeTypeId, Source);
                 b.AddAttestation(AttestationFactory.Create(
                     langId, KindHasIso6391Code, iso1Id, Source, null,
-                    KindRank.Partitive, SourceTrust.StandardsDerived));
+                    RelationTypeRank.Partitive, SourceTrust.StandardsDerived));
             }
 
             // ── 2026-06-05 completeness: 639-2 codes, scope, vitality type ──
@@ -111,21 +111,21 @@ public sealed class ISODecomposer : IDecomposer
                 _codeNames.Add(iso2Name);
                 var iso2Id = Hash128.OfCanonical(iso2Name);
                 b.AddEntity(iso2Id, (byte)MetaTier.Meta, Iso639CodeTypeId, Source);
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     langId, "HAS_ISO639_2_CODE", iso2Id, Source, SourceTrust.StandardsDerived));
             }
             if (rec.Scope.Length > 0)   // I=Individual, M=Macrolanguage, S=Special
             {
                 var scopeId = Hash128.OfCanonical($"substrate/iso639/scope/{rec.Scope}/v1");
                 b.AddEntity(scopeId, (byte)MetaTier.Meta, Iso639CodeTypeId, Source);
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     langId, "HAS_LANGUAGE_SCOPE", scopeId, Source, SourceTrust.StandardsDerived));
             }
             if (rec.Type.Length > 0)    // L=Living, E=Extinct, A=Ancient, H=Historical, C=Constructed, S=Special
             {
                 var typeId = Hash128.OfCanonical($"substrate/iso639/type/{rec.Type}/v1");
                 b.AddEntity(typeId, (byte)MetaTier.Meta, Iso639CodeTypeId, Source);
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     langId, "HAS_LANGUAGE_TYPE", typeId, Source, SourceTrust.StandardsDerived));
             }
         }
@@ -145,7 +145,7 @@ public sealed class ISODecomposer : IDecomposer
             b.AddEntity(macroId, (byte)MetaTier.Meta, LanguageTypeId, Source);
             b.AddAttestation(AttestationFactory.Create(
                 indivId, KindMemberOfMacrolanguage, macroId, Source, null,
-                KindRank.Taxonomic, SourceTrust.StandardsDerived));
+                RelationTypeRank.Taxonomic, SourceTrust.StandardsDerived));
         }
 
         // language → script, converging on the Unicode script entities via the ISO
@@ -165,7 +165,7 @@ public sealed class ISODecomposer : IDecomposer
                 b.AddEntity(scriptId, (byte)MetaTier.Meta, UcdClassifierTypeId, Source);  // idempotent w/ Unicode
                 b.AddAttestation(AttestationFactory.Create(
                     langId, KindUsesScript, scriptId, Source, null,
-                    KindRank.StandardsStructural, SourceTrust.StandardsDerived));
+                    RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
             }
         }
 
@@ -186,7 +186,7 @@ public sealed class ISODecomposer : IDecomposer
                 var sucId = LanguageEntityId.FromIso639_3(changeTo);
                 b.AddEntity(retId, (byte)MetaTier.Meta, LanguageTypeId, Source);
                 b.AddEntity(sucId, (byte)MetaTier.Meta, LanguageTypeId, Source);
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     retId, "HAS_VARIANT_OF", sucId, Source, SourceTrust.StandardsDerived));
             }
         }
@@ -217,7 +217,7 @@ public sealed class ISODecomposer : IDecomposer
                 nb.AddEntity(lid, (byte)MetaTier.Meta, LanguageTypeId, Source);
                 var nameId = ContentEmitter.Emit(nb, printName, Source);
                 if (nameId is { } nid)
-                    nb.AddAttestation(KindRegistry.Attest(
+                    nb.AddAttestation(RelationTypeRegistry.Attest(
                         lid, "HAS_DEFINITION", nid, Source, SourceTrust.StandardsDerived));
                 if (++n >= 2048)
                 {

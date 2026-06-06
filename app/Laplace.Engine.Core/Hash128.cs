@@ -14,12 +14,12 @@ namespace Laplace.Engine.Core;
 /// Wire bytes match <c>bytea(16)</c> in PostgreSQL via Npgsql binary COPY —
 /// no hex round-trip per the ID discipline.
 ///
-/// <c>readonly record struct</c> with <see cref="LayoutKind.Sequential"/>
+/// <c>readonly record struct</c> with <see cref="LayoutTypeId.Sequential"/>
 /// produces a 16-byte blittable POD that crosses the C ABI with zero
 /// marshalling — direct memory-equivalent passing for <c>[LibraryImport]</c>
 /// signatures expecting <c>hash128_t*</c> or by-value <c>hash128_t</c>.
 /// </summary>
-[StructLayout(LayoutKind.Sequential, Pack = 8, Size = 16)]
+[StructLayout(LayoutTypeId.Sequential, Pack = 8, Size = 16)]
 public readonly record struct Hash128(ulong Hi, ulong Lo)
 {
     /// <summary>Zero hash. Useful as a "no value" sentinel and as the

@@ -99,11 +99,11 @@ public sealed class PropBankDecomposer : IDecomposer
         boot.AddType("PropBank_Roleset");
         boot.AddType("VerbNet_Class");        // matches VerbNetDecomposer's class-entity type
         boot.AddType("Ordinal");
-        boot.AddKind("HAS_SENSE");            // lemma → roleset, SAME arena/direction as WordNet
-        boot.AddKind("HAS_DEFINITION");
-        boot.AddKind("HAS_SEMANTIC_ROLE");
-        boot.AddKind("HAS_EXAMPLE");
-        boot.AddKind("CORRESPONDS_TO");
+        boot.AddRelationType("HAS_SENSE");            // lemma → roleset, SAME arena/direction as WordNet
+        boot.AddRelationType("HAS_DEFINITION");
+        boot.AddRelationType("HAS_SEMANTIC_ROLE");
+        boot.AddRelationType("HAS_EXAMPLE");
+        boot.AddRelationType("CORRESPONDS_TO");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -165,7 +165,7 @@ public sealed class PropBankDecomposer : IDecomposer
             b.AddEntity(new EntityRow(rsEntity, (byte)MetaTier.Meta, RolesetTypeId, Source));
 
             // predicate lemma —HAS_SENSE→ roleset (lemma→sense, the WordNet arena/direction).
-            b.AddAttestation(KindRegistry.Attest(
+            b.AddAttestation(RelationTypeRegistry.Attest(
                 lemmaId.Value, "HAS_SENSE", rsEntity, Source, TC.AcademicCurated));
 
             // roleset —HAS_DEFINITION→ its name/descr text (the gloss of this sense).
@@ -174,7 +174,7 @@ public sealed class PropBankDecomposer : IDecomposer
             {
                 var defId = ContentEmitter.Emit(b, name, Source);
                 if (defId is not null)
-                    b.AddAttestation(KindRegistry.Attest(
+                    b.AddAttestation(RelationTypeRegistry.Attest(
                         rsEntity, "HAS_DEFINITION", defId.Value, Source, TC.AcademicCurated));
             }
 
@@ -204,7 +204,7 @@ public sealed class PropBankDecomposer : IDecomposer
                 ctx = ordEntity;
             }
 
-            b.AddAttestation(KindRegistry.Attest(
+            b.AddAttestation(RelationTypeRegistry.Attest(
                 rsEntity, "HAS_SEMANTIC_ROLE", roleId.Value, Source, TC.AcademicCurated,
                 contextId: ctx));
 
@@ -220,7 +220,7 @@ public sealed class PropBankDecomposer : IDecomposer
                 Hash128 vnEntity = VnClassId(vnClass);
                 b.AddEntity(new EntityRow(vnEntity, (byte)MetaTier.Meta, VerbNetClassTypeId, Source));
                 // roleset ↔ VN class (symmetric equivalence arena).
-                b.AddAttestation(KindRegistry.Attest(
+                b.AddAttestation(RelationTypeRegistry.Attest(
                     rsEntity, "CORRESPONDS_TO", vnEntity, Source, TC.AcademicCurated));
 
                 // PB arg role text ↔ VN theta-role text (both CONTENT), with the
@@ -229,7 +229,7 @@ public sealed class PropBankDecomposer : IDecomposer
                 {
                     var thetaId = ContentEmitter.Emit(b, theta, Source);
                     if (thetaId is not null)
-                        b.AddAttestation(KindRegistry.Attest(
+                        b.AddAttestation(RelationTypeRegistry.Attest(
                             roleId.Value, "CORRESPONDS_TO", thetaId.Value, Source, TC.AcademicCurated,
                             contextId: vnEntity));
                 }
@@ -246,7 +246,7 @@ public sealed class PropBankDecomposer : IDecomposer
                 if (ex.Length == 0) continue;
                 var exId = ContentEmitter.Emit(b, ex, Source);
                 if (exId is not null)
-                    b.AddAttestation(KindRegistry.Attest(
+                    b.AddAttestation(RelationTypeRegistry.Attest(
                         rsEntity, "HAS_EXAMPLE", exId.Value, Source, TC.AcademicCurated,
                         contextId: rsEntity));
             }

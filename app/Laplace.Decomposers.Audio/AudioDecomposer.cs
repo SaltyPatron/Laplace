@@ -44,10 +44,10 @@ public sealed class AudioDecomposer : IDecomposer
         boot.AddType("Audio_Frame");
         boot.AddType("Audio_Track");
         boot.AddType("Voice");
- // Audio-modality kinds         boot.AddKind("IS_AT_SAMPLE");
-        boot.AddKind("HAS_FREQUENCY_PEAK");
-        boot.AddKind("HAS_VOICE");
-        boot.AddKind("TRANSCRIBES_AS");
+ // Audio-modality kinds         boot.AddRelationType("IS_AT_SAMPLE");
+        boot.AddRelationType("HAS_FREQUENCY_PEAK");
+        boot.AddRelationType("HAS_VOICE");
+        boot.AddRelationType("TRANSCRIBES_AS");
         return context.Writer.ApplyAsync(boot.Build(), ct);
     }
 

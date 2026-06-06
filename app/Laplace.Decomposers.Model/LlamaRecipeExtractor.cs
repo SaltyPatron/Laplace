@@ -94,12 +94,12 @@ public sealed class LlamaRecipeExtractor
         RecipeInfo recipe,
         Hash128 sourceId,
         Hash128 modelRecipeTypeId,
-        Hash128 hasHiddenSizeKindId,
-        Hash128 hasNumLayersKindId,
-        Hash128 hasNumHeadsKindId,
-        Hash128 hasNumKvHeadsKindId,
-        Hash128 hasIntermSizeKindId,
-        Hash128 hasVocabSizeKindId,
+        Hash128 hasHiddenSizeTypeId,
+        Hash128 hasNumLayersTypeId,
+        Hash128 hasNumHeadsTypeId,
+        Hash128 hasNumKvHeadsTypeId,
+        Hash128 hasIntermSizeTypeId,
+        Hash128 hasVocabSizeTypeId,
         Hash128 isAKindId,
         Hash128 architectureEntityId)
     {
@@ -110,26 +110,26 @@ public sealed class LlamaRecipeExtractor
 
         // Recipe attestations are categorical config facts (HAS_*; the value lives in
         // the object entity, not the score). A confirm observation, full trust.
-        void AddAttestation(Hash128 kindId, Hash128? objectId)
+        void AddAttestation(Hash128 typeId, Hash128? objectId)
             => b.AddAttestation(AttestationFactory.CreateCategorical(
-                recipe.RecipeEntityId, kindId, objectId, sourceId, contextId: null,
+                recipe.RecipeEntityId, typeId, objectId, sourceId, contextId: null,
                 confirm: true, witnessWeight: 1.0));
 
         /* Scalar-valued recipe parameters stored as content entities */
-        void AddScalar(Hash128 kindId, string value)
+        void AddScalar(Hash128 typeId, string value)
         {
             var valueBytes = Encoding.UTF8.GetBytes(value);
             var valueId    = Hash128.Blake3(valueBytes);
             b.AddEntity(valueId, (byte)MetaTier.Meta, Hash128.OfCanonical("substrate/type/Scalar/v1"), sourceId);
-            AddAttestation(kindId, valueId);
+            AddAttestation(typeId, valueId);
         }
 
-        AddScalar(hasHiddenSizeKindId,  recipe.HiddenSize.ToString());
-        AddScalar(hasNumLayersKindId,   recipe.NumLayers.ToString());
-        AddScalar(hasNumHeadsKindId,    recipe.NumHeads.ToString());
-        AddScalar(hasNumKvHeadsKindId,  recipe.NumKvHeads.ToString());
-        AddScalar(hasIntermSizeKindId,  recipe.IntermediateSize.ToString());
-        AddScalar(hasVocabSizeKindId,   recipe.VocabSize.ToString());
+        AddScalar(hasHiddenSizeTypeId,  recipe.HiddenSize.ToString());
+        AddScalar(hasNumLayersTypeId,   recipe.NumLayers.ToString());
+        AddScalar(hasNumHeadsTypeId,    recipe.NumHeads.ToString());
+        AddScalar(hasNumKvHeadsTypeId,  recipe.NumKvHeads.ToString());
+        AddScalar(hasIntermSizeTypeId,  recipe.IntermediateSize.ToString());
+        AddScalar(hasVocabSizeTypeId,   recipe.VocabSize.ToString());
 
         /* IS_A attestation → architecture entity */
         b.AddEntity(architectureEntityId, (byte)MetaTier.Meta, Hash128.OfCanonical("substrate/type/Architecture/v1"), sourceId);
@@ -140,17 +140,17 @@ public sealed class LlamaRecipeExtractor
 
     private static int GetInt(JsonElement root, string key, int def)
     {
-        if (root.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.Number)
+        if (root.TryGetProperty(key, out var prop) && prop.ValueTypeId == JsonValueTypeId.Number)
             return prop.GetInt32();
         return def;   // absent OR null (e.g. num_key_value_heads:null) → default
     }
 
-    // Double-or-default that tolerates absent AND null (JSON null is ValueKind.Null, not
+    // Double-or-default that tolerates absent AND null (JSON null is ValueTypeId.Null, not
     // Number → GetDouble() would throw). Generic across configs that null out a key they
     // don't use (Phi: rms_norm_eps:null).
     private static double GetDoubleOr(JsonElement root, string key, double def)
     {
-        if (root.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.Number)
+        if (root.TryGetProperty(key, out var prop) && prop.ValueTypeId == JsonValueTypeId.Number)
             return prop.GetDouble();
         return def;
     }
@@ -161,7 +161,7 @@ public sealed class LlamaRecipeExtractor
     // backstop; this fails earlier with a clearer message.
     private static int GetIntRequired(JsonElement root, string key)
     {
-        if (root.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.Number)
+        if (root.TryGetProperty(key, out var prop) && prop.ValueTypeId == JsonValueTypeId.Number)
             return prop.GetInt32();
         throw new InvalidOperationException(
             $"config.json missing required field '{key}' — refusing to assume a default. " +

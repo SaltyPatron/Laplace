@@ -12,7 +12,7 @@ namespace Laplace.Engine.Core;
 /// caller-supplied output buffer; the C# struct accepts that directly via
 /// ref param.
 /// </summary>
-[StructLayout(LayoutKind.Sequential, Pack = 1)]
+[StructLayout(LayoutTypeId.Sequential, Pack = 1)]
 public unsafe struct TierNodeView
 {
     /// <summary>0 = atom (codepoint / pixel / ...), 1+ = composed.</summary>

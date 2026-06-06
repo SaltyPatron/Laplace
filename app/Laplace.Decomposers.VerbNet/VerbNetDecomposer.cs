@@ -24,7 +24,7 @@ namespace Laplace.Decomposers.VerbNet;
 /// <para>Coverage: member lemma —IS_A→ class; class —IS_A→ parent class (subclass nesting);
 /// class —HAS_THEMATIC_ROLE→ role name (selectional restriction set carried as a named-skip,
 /// see below); frame description —HAS_VERB_FRAME→ class (the SAME arena WordNet's verb frames
-/// use — deliberate co-assertion; KindRegistry orients subject=class, object=frame content via
+/// use — deliberate co-assertion; RelationTypeRegistry orients subject=class, object=frame content via
 /// the registry's direction handling — emitted class→frame, asymmetric); frame example
 /// —HAS_EXAMPLE→ class (context = class); member <c>wn=</c> sense keys —CORRESPONDS_TO→ the
 /// WordNet sense entity (<c>wordnet/sense/&lt;key&gt;</c>, the WordNetDecomposer convention).</para>
@@ -94,13 +94,13 @@ public sealed class VerbNetDecomposer : IDecomposer
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("VerbNet_Class");
         boot.AddType("WordNet_Sense");        // matches WordNetDecomposer's sense-entity type
-        // Rank/trust live ONLY in KindRegistry; AddKind(name) just guarantees the
+        // Rank/trust live ONLY in RelationTypeRegistry; AddRelationType(name) just guarantees the
         // kind entity exists (SeedCanonical in Build() seeds every canonical arena).
-        boot.AddKind("IS_A");
-        boot.AddKind("HAS_THEMATIC_ROLE");
-        boot.AddKind("HAS_VERB_FRAME");
-        boot.AddKind("HAS_EXAMPLE");
-        boot.AddKind("CORRESPONDS_TO");
+        boot.AddRelationType("IS_A");
+        boot.AddRelationType("HAS_THEMATIC_ROLE");
+        boot.AddRelationType("HAS_VERB_FRAME");
+        boot.AddRelationType("HAS_EXAMPLE");
+        boot.AddRelationType("CORRESPONDS_TO");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -160,7 +160,7 @@ public sealed class VerbNetDecomposer : IDecomposer
         {
             Hash128 parentEntity = ClassId(parentClassId);
             b.AddEntity(new EntityRow(parentEntity, (byte)MetaTier.Meta, ClassTypeId, Source));
-            b.AddAttestation(KindRegistry.Attest(
+            b.AddAttestation(RelationTypeRegistry.Attest(
                 classEntity, "IS_A", parentEntity, Source, TC.AcademicCurated));
         }
 
@@ -171,7 +171,7 @@ public sealed class VerbNetDecomposer : IDecomposer
             if (name.Length == 0) continue;
             var lemmaId = ContentEmitter.Emit(b, name, Source);
             if (lemmaId is null) continue;
-            b.AddAttestation(KindRegistry.Attest(
+            b.AddAttestation(RelationTypeRegistry.Attest(
                 lemmaId.Value, "IS_A", classEntity, Source, TC.AcademicCurated));
 
             // wn="give%2:40:03 give%2:40:00 …" — WordNet sense keys. Normalize to the
@@ -185,7 +185,7 @@ public sealed class VerbNetDecomposer : IDecomposer
                     if (key is null) continue;
                     Hash128 senseEntity = SenseId(key);
                     b.AddEntity(new EntityRow(senseEntity, /*tier*/ 2, WordNetSenseTypeId, Source));
-                    b.AddAttestation(KindRegistry.Attest(
+                    b.AddAttestation(RelationTypeRegistry.Attest(
                         lemmaId.Value, "CORRESPONDS_TO", senseEntity, Source, TC.AcademicCurated));
                 }
         }
@@ -201,7 +201,7 @@ public sealed class VerbNetDecomposer : IDecomposer
             if (type.Length == 0) continue;
             var roleId = ContentEmitter.Emit(b, type, Source);
             if (roleId is null) continue;
-            b.AddAttestation(KindRegistry.Attest(
+            b.AddAttestation(RelationTypeRegistry.Attest(
                 classEntity, "HAS_THEMATIC_ROLE", roleId.Value, Source, TC.AcademicCurated));
         }
 
@@ -221,7 +221,7 @@ public sealed class VerbNetDecomposer : IDecomposer
                 if (frameId is not null)
                     // SAME arena as WordNet verb frames; registry orients subject=class,
                     // object=frame content (HAS_VERB_FRAME is asymmetric, no flip).
-                    b.AddAttestation(KindRegistry.Attest(
+                    b.AddAttestation(RelationTypeRegistry.Attest(
                         classEntity, "HAS_VERB_FRAME", frameId.Value, Source, TC.AcademicCurated));
             }
 
@@ -231,7 +231,7 @@ public sealed class VerbNetDecomposer : IDecomposer
                 if (ex.Length == 0) continue;
                 var exId = ContentEmitter.Emit(b, ex, Source);
                 if (exId is not null)
-                    b.AddAttestation(KindRegistry.Attest(
+                    b.AddAttestation(RelationTypeRegistry.Attest(
                         classEntity, "HAS_EXAMPLE", exId.Value, Source, TC.AcademicCurated,
                         contextId: classEntity));
             }
