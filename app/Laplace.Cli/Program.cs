@@ -377,7 +377,7 @@ internal static class Program
                        CASE WHEN p.trajectory IS NOT NULL THEN encode(ST_AsEWKB(p.trajectory),'hex') END
                 FROM laplace.physicalities p
                 JOIN laplace.prompt_state(@w) s ON p.entity_id = s.id
-                WHERE p.kind = 1 AND p.coord IS NOT NULL
+                WHERE p.type = 1 AND p.coord IS NOT NULL
                 LIMIT 1";
             res.Parameters.AddWithValue("w", word);
             await using var r = await res.ExecuteReaderAsync();
@@ -406,7 +406,7 @@ internal static class Program
             st.CommandText = @"
                 WITH knn AS (
                     SELECT entity_id, coord, trajectory FROM laplace.physicalities
-                    WHERE kind = 1 ORDER BY coord <<->> @coord::geometry LIMIT GREATEST(@k*20, 200)),
+                    WHERE type = 1 ORDER BY coord <<->> @coord::geometry LIMIT GREATEST(@k*20, 200)),
                 nearest AS (
                     SELECT DISTINCT ON (entity_id) entity_id, trajectory,
                            public.laplace_angular_distance_4d(coord, @coord::geometry) AS geo
@@ -440,11 +440,11 @@ internal static class Program
         if (id is not null)
         {
             Console.WriteLine($"\n  '{word}' — SEMANTIC (consensus μ via describe)");
-            Console.WriteLine($"  {"kind",-22} {"fact",-28} {"eff_mu",10} {"wit",4}");
+            Console.WriteLine($"  {"type",-22} {"fact",-28} {"eff_mu",10} {"wit",4}");
             Console.WriteLine($"  {new string('-', 22)} {new string('-', 28)} {new string('-', 10)} {new string('-', 4)}");
             await using var se = conn.CreateCommand();
             se.CommandText =
-                "SELECT kind, fact, round(eff_mu,0)::bigint, witnesses "
+                "SELECT type, fact, round(eff_mu,0)::bigint, witnesses "
                 + "FROM laplace.describe(@id) ORDER BY eff_mu DESC LIMIT @k";
             se.Parameters.AddWithValue("id", id);
             se.Parameters.AddWithValue("k", k);
@@ -634,7 +634,7 @@ internal static class Program
             foreach (var (wid, label) in words)
             {
                 await using var wc = conn.CreateCommand();
-                wc.CommandText = "SELECT kind, object, eff_mu, witnesses "
+                wc.CommandText = "SELECT type, object, eff_mu, witnesses "
                                + "FROM laplace.consensus_out_readable(@id, 2)";
                 wc.Parameters.AddWithValue("id", wid.ToBytes());
                 await using var wr = await wc.ExecuteReaderAsync();
@@ -655,7 +655,7 @@ internal static class Program
         // Glome facet — laplace.entity_physicalities(id)
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT p.kind, p.x, p.y, p.z, p.m, p.radius, p.n_constituents, laplace.render(p.source_id) "
+            cmd.CommandText = "SELECT p.type, p.x, p.y, p.z, p.m, p.radius, p.n_constituents, laplace.render(p.source_id) "
                             + "FROM laplace.entity_physicalities(@id) p";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
             await using var r = await cmd.ExecuteReaderAsync();
@@ -716,7 +716,7 @@ internal static class Program
         static string Outc(short o) => o switch { 0 => "refute", 1 => "draw", _ => "confirm" };
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT laplace.render(a.kind_id), laplace.render(a.object_id), "
+            cmd.CommandText = "SELECT laplace.render(a.type_id), laplace.render(a.object_id), "
                             + "laplace.render(a.source_id), a.context_id, a.outcome, a.observation_count "
                             + "FROM laplace.attestations_out(@id) a";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
@@ -736,7 +736,7 @@ internal static class Program
 
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT laplace.render(a.subject_id), laplace.render(a.kind_id), "
+            cmd.CommandText = "SELECT laplace.render(a.subject_id), laplace.render(a.type_id), "
                             + "laplace.render(a.source_id), a.context_id, a.outcome, a.observation_count "
                             + "FROM laplace.attestations_in(@id) a";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
@@ -1314,7 +1314,7 @@ internal static class Program
         {
             using var cfg = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(cfgPath));
             if (cfg.RootElement.TryGetProperty("chat_template", out var ct)
-                && ct.ValueTypeId == System.Text.Json.JsonValueTypeId.String)
+                && ct.ValueKind == System.Text.Json.JsonValueKind.String)
                 SynthInterop.GgufWriterAddMetadataStr(gguf, "tokenizer.chat_template", ct.GetString()!);
         }
     }
@@ -1573,7 +1573,7 @@ internal static class Program
                                        p.x, p.y, p.z, p.m, encode(p.hilbert_index, 'hex')
                                 FROM laplace.entity_facets(laplace.canonical_id('A')) f
                                 CROSS JOIN laplace.entity_physicalities(laplace.canonical_id('A')) p
-                                WHERE p.kind = 1
+                                WHERE p.type = 1
                                   AND p.source_id = laplace.source_id('UnicodeDecomposer')";
             await using var rdr = await cmd.ExecuteReaderAsync();
             if (await rdr.ReadAsync())

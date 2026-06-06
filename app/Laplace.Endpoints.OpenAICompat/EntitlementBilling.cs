@@ -369,12 +369,12 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
 
     private static JsonElement MetadataContainer(JsonElement obj)
     {
-        if (obj.TryGetProperty("metadata", out var metadata) && metadata.ValueTypeId == JsonValueTypeId.Object)
+        if (obj.TryGetProperty("metadata", out var metadata) && metadata.ValueKind == JsonValueKind.Object)
             return metadata;
 
         if (obj.TryGetProperty("subscription_details", out var subscriptionDetails) &&
             subscriptionDetails.TryGetProperty("metadata", out var subscriptionMetadata) &&
-            subscriptionMetadata.ValueTypeId == JsonValueTypeId.Object)
+            subscriptionMetadata.ValueKind == JsonValueKind.Object)
             return subscriptionMetadata;
 
         return default;
@@ -382,7 +382,7 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
 
     private static string? Metadata(JsonElement metadata, string name)
     {
-        if (metadata.ValueTypeId != JsonValueTypeId.Object)
+        if (metadata.ValueKind != JsonValueKind.Object)
             return null;
         return metadata.TryGetProperty(name, out var value) ? value.GetString() : null;
     }
@@ -391,10 +391,10 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
     {
         if (!obj.TryGetProperty(name, out var value))
             return null;
-        return value.ValueTypeId switch
+        return value.ValueKind switch
         {
-            JsonValueTypeId.String => value.GetString(),
-            JsonValueTypeId.Null => null,
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Null => null,
             _ => value.ToString()
         };
     }

@@ -169,58 +169,58 @@ public sealed class WiktionaryDecomposer : IDecomposer
         // the sense-specificity is the point of a dictionary. The sense's POS
         // rides as context on the relation (the sense disambiguator available
         // at this tier; wordform-level identity is the subject as ever).
-        if (rec.TryGetProperty("senses", out var senses) && senses.ValueTypeId == JsonValueTypeId.Array)
+        if (rec.TryGetProperty("senses", out var senses) && senses.ValueKind == JsonValueKind.Array)
         {
             foreach (var sense in senses.EnumerateArray())
             {
-                if (sense.TryGetProperty("glosses", out var gl) && gl.ValueTypeId == JsonValueTypeId.Array)
+                if (sense.TryGetProperty("glosses", out var gl) && gl.ValueKind == JsonValueKind.Array)
                     foreach (var g in gl.EnumerateArray())
                         AttestText(b, w, "HAS_DEFINITION", g.GetString(), posCtx);
 
-                if (sense.TryGetProperty("examples", out var ex) && ex.ValueTypeId == JsonValueTypeId.Array)
+                if (sense.TryGetProperty("examples", out var ex) && ex.ValueKind == JsonValueKind.Array)
                     foreach (var e in ex.EnumerateArray())
                     {
-                        string? txt = e.ValueTypeId == JsonValueTypeId.String ? e.GetString() : Str(e, "text");
+                        string? txt = e.ValueKind == JsonValueKind.String ? e.GetString() : Str(e, "text");
                         AttestText(b, w, "HAS_EXAMPLE", txt, null);
                     }
 
                 // Per-sense lexical relations (synonyms/antonyms/hypernyms/…
                 // + coordinate_terms — co-hyponyms, their own symmetric arena).
                 foreach (var (prop, typeName) in RelMap)
-                    if (sense.TryGetProperty(prop, out var sarr) && sarr.ValueTypeId == JsonValueTypeId.Array)
+                    if (sense.TryGetProperty(prop, out var sarr) && sarr.ValueKind == JsonValueKind.Array)
                         foreach (var el in sarr.EnumerateArray())
                             AttestText(b, w, typeName, Str(el, "word"), posCtx);
-                if (sense.TryGetProperty("coordinate_terms", out var coord) && coord.ValueTypeId == JsonValueTypeId.Array)
+                if (sense.TryGetProperty("coordinate_terms", out var coord) && coord.ValueKind == JsonValueKind.Array)
                     foreach (var el in coord.EnumerateArray())
                         AttestText(b, w, "IS_COORDINATE_TERM_WITH", Str(el, "word"), posCtx);
 
                 // Sense categories → the SHARED domain arena (converges with
                 // WordNet lexname domains); register tags (slang/archaic/…) →
                 // HAS_USAGE_REGISTER with the register wordform as value.
-                if (sense.TryGetProperty("categories", out var cats) && cats.ValueTypeId == JsonValueTypeId.Array)
+                if (sense.TryGetProperty("categories", out var cats) && cats.ValueKind == JsonValueKind.Array)
                     foreach (var cEl in cats.EnumerateArray())
                     {
-                        string? cat = cEl.ValueTypeId == JsonValueTypeId.String ? cEl.GetString() : Str(cEl, "name");
+                        string? cat = cEl.ValueKind == JsonValueKind.String ? cEl.GetString() : Str(cEl, "name");
                         AttestText(b, w, "HAS_DOMAIN_TOPIC", cat, posCtx);
                     }
-                if (sense.TryGetProperty("tags", out var tags) && tags.ValueTypeId == JsonValueTypeId.Array)
+                if (sense.TryGetProperty("tags", out var tags) && tags.ValueKind == JsonValueKind.Array)
                     foreach (var tEl in tags.EnumerateArray())
-                        if (tEl.ValueTypeId == JsonValueTypeId.String && RegisterTags.Contains(tEl.GetString()!))
+                        if (tEl.ValueKind == JsonValueKind.String && RegisterTags.Contains(tEl.GetString()!))
                             AttestText(b, w, "HAS_USAGE_REGISTER", tEl.GetString(), posCtx);
             }
         }
 
         // IPA pronunciations — the dialect tag (US/UK/RP/…) rides as context
         // on the transcription (which variety says it this way), as content.
-        if (rec.TryGetProperty("sounds", out var sounds) && sounds.ValueTypeId == JsonValueTypeId.Array)
+        if (rec.TryGetProperty("sounds", out var sounds) && sounds.ValueKind == JsonValueKind.Array)
             foreach (var snd in sounds.EnumerateArray())
             {
                 string? ipa = Str(snd, "ipa");
                 if (string.IsNullOrWhiteSpace(ipa)) continue;
                 Hash128? dialectCtx = null;
-                if (snd.TryGetProperty("tags", out var stags) && stags.ValueTypeId == JsonValueTypeId.Array)
+                if (snd.TryGetProperty("tags", out var stags) && stags.ValueKind == JsonValueKind.Array)
                     foreach (var tg in stags.EnumerateArray())
-                        if (tg.ValueTypeId == JsonValueTypeId.String)
+                        if (tg.ValueKind == JsonValueKind.String)
                         {
                             dialectCtx = ContentEmitter.Emit(b, tg.GetString()!, Source);
                             break;   // first tag = the variety label
@@ -229,21 +229,21 @@ public sealed class WiktionaryDecomposer : IDecomposer
             }
 
         // Translations
-        if (rec.TryGetProperty("translations", out var tr) && tr.ValueTypeId == JsonValueTypeId.Array)
+        if (rec.TryGetProperty("translations", out var tr) && tr.ValueKind == JsonValueKind.Array)
             foreach (var t in tr.EnumerateArray())
                 AttestText(b, w, "IS_TRANSLATION_OF", Str(t, "word"), null);
 
         // Root-level relations (synonyms / antonyms / hypernyms / … + coordinate terms)
         foreach (var (prop, typeName) in RelMap)
-            if (rec.TryGetProperty(prop, out var arr) && arr.ValueTypeId == JsonValueTypeId.Array)
+            if (rec.TryGetProperty(prop, out var arr) && arr.ValueKind == JsonValueKind.Array)
                 foreach (var el in arr.EnumerateArray())
                     AttestText(b, w, typeName, Str(el, "word"), null);
-        if (rec.TryGetProperty("coordinate_terms", out var rootCoord) && rootCoord.ValueTypeId == JsonValueTypeId.Array)
+        if (rec.TryGetProperty("coordinate_terms", out var rootCoord) && rootCoord.ValueKind == JsonValueKind.Array)
             foreach (var el in rootCoord.EnumerateArray())
                 AttestText(b, w, "IS_COORDINATE_TERM_WITH", Str(el, "word"), null);
 
         // Inflected forms → variants
-        if (rec.TryGetProperty("forms", out var forms) && forms.ValueTypeId == JsonValueTypeId.Array)
+        if (rec.TryGetProperty("forms", out var forms) && forms.ValueKind == JsonValueKind.Array)
             foreach (var f in forms.EnumerateArray())
                 AttestText(b, w, "HAS_VARIANT_OF", Str(f, "form"), null);
 
@@ -253,14 +253,14 @@ public sealed class WiktionaryDecomposer : IDecomposer
         // Structured etymology templates (minimal lawful slice): borrowed /
         // derived / inherited carry a source-language term → the cognate
         // wordform, in the existing etymological arenas.
-        if (rec.TryGetProperty("etymology_templates", out var etys) && etys.ValueTypeId == JsonValueTypeId.Array)
+        if (rec.TryGetProperty("etymology_templates", out var etys) && etys.ValueKind == JsonValueKind.Array)
             foreach (var et in etys.EnumerateArray())
             {
                 string? name = Str(et, "name");
                 if (name is not ("bor" or "borrowed" or "der" or "derived" or "inh" or "inherited")) continue;
-                if (!et.TryGetProperty("args", out var args) || args.ValueTypeId != JsonValueTypeId.Object) continue;
+                if (!et.TryGetProperty("args", out var args) || args.ValueKind != JsonValueKind.Object) continue;
                 // wiktextract template args: "2" = source language, "3" = the term.
-                string? term = args.TryGetProperty("3", out var a3) && a3.ValueTypeId == JsonValueTypeId.String
+                string? term = args.TryGetProperty("3", out var a3) && a3.ValueKind == JsonValueKind.String
                     ? a3.GetString() : null;
                 if (string.IsNullOrWhiteSpace(term) || term == "-") continue;
                 AttestText(b, w, "ETYMOLOGICALLY_DERIVED_FROM", term, null);
@@ -285,7 +285,7 @@ public sealed class WiktionaryDecomposer : IDecomposer
     }
 
     private static string? Str(JsonElement el, string prop) =>
-        el.ValueTypeId == JsonValueTypeId.Object && el.TryGetProperty(prop, out var v) && v.ValueTypeId == JsonValueTypeId.String
+        el.ValueKind == JsonValueKind.Object && el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String
             ? v.GetString() : null;
 
     private static string? ResolveInput(string dir)

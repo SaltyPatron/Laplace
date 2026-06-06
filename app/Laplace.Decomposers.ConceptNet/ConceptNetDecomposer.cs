@@ -218,9 +218,9 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            if (root.TryGetProperty("weight", out var w) && w.ValueTypeId == JsonValueTypeId.Number)
+            if (root.TryGetProperty("weight", out var w) && w.ValueKind == JsonValueKind.Number)
                 weight = w.GetDouble();
-            if (root.TryGetProperty("surfaceText", out var s) && s.ValueTypeId == JsonValueTypeId.String)
+            if (root.TryGetProperty("surfaceText", out var s) && s.ValueKind == JsonValueKind.String)
             {
                 var txt = s.GetString();
                 if (!string.IsNullOrWhiteSpace(txt))

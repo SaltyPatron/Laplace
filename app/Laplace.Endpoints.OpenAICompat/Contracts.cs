@@ -145,7 +145,7 @@ internal sealed record ConverseRow(string Reply, decimal EffectiveMu, long Witne
 
 internal sealed record CompletionRow(
     string ObjectIdHex,
-    string KindIdHex,
+    string TypeIdHex,
     decimal EffectiveMu,
     long Witnesses,
     string ObjectLabel);

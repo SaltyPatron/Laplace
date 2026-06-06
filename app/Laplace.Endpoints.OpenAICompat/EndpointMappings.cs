@@ -296,10 +296,10 @@ internal static class EndpointMappings
     {
         if (input is not { } element)
             return false;
-        return element.ValueTypeId switch
+        return element.ValueKind switch
         {
-            JsonValueTypeId.String => !string.IsNullOrWhiteSpace(element.GetString()),
-            JsonValueTypeId.Array => element.GetArrayLength() > 0,
+            JsonValueKind.String => !string.IsNullOrWhiteSpace(element.GetString()),
+            JsonValueKind.Array => element.GetArrayLength() > 0,
             _ => false
         };
     }

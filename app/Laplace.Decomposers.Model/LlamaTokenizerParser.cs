@@ -87,10 +87,10 @@ public sealed class LlamaTokenizerParser
          * and given a distinct content-addressed entity, never a text decomposition. */
         var specialIds = new HashSet<int>();
         if (doc.RootElement.TryGetProperty("added_tokens", out var added) &&
-            added.ValueTypeId == JsonValueTypeId.Array)
+            added.ValueKind == JsonValueKind.Array)
         {
             foreach (var at in added.EnumerateArray())
-                if (at.TryGetProperty("special", out var sp) && sp.ValueTypeId == JsonValueTypeId.True &&
+                if (at.TryGetProperty("special", out var sp) && sp.ValueKind == JsonValueKind.True &&
                     at.TryGetProperty("id", out var idEl) && idEl.TryGetInt32(out int sid))
                     specialIds.Add(sid);
         }
@@ -393,11 +393,11 @@ public sealed class LlamaTokenizerParser
         byte[] jsonBytes = File.ReadAllBytes(tokenizerJsonPath);
         using var doc = JsonDocument.Parse(jsonBytes);
         if (!doc.RootElement.TryGetProperty("model", out var model) ||
-            !model.TryGetProperty("merges", out var arr) || arr.ValueTypeId != JsonValueTypeId.Array)
+            !model.TryGetProperty("merges", out var arr) || arr.ValueKind != JsonValueKind.Array)
             return merges;
         foreach (var el in arr.EnumerateArray())
         {
-            string? pair = el.ValueTypeId == JsonValueTypeId.String ? el.GetString() : null;
+            string? pair = el.ValueKind == JsonValueKind.String ? el.GetString() : null;
             if (string.IsNullOrEmpty(pair)) continue;
             int sp = pair!.IndexOf(' ');
             if (sp <= 0 || sp + 1 >= pair.Length) continue;

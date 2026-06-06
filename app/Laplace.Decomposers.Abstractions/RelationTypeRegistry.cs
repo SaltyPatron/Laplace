@@ -86,7 +86,7 @@ public static class RelationTypeRegistry
 
     /// <summary>Content-addressed kind id from a canonical name — the convention
     /// shared with <see cref="BootstrapIntentBuilder"/>.</summary>
-    public static Hash128 KindId(string canonicalName) =>
+    public static Hash128 RelationTypeId(string canonicalName) =>
         Hash128.OfCanonical($"substrate/kind/{canonicalName}/v1");
 
     // ── Canonical arenas (relation kinds). Scalar config (HAS_*_SIZE), geometry
@@ -371,11 +371,11 @@ public static class RelationTypeRegistry
 
         if (Canon.TryGetValue(name, out var def))
             return new RelationTypeResolution(
-                KindId(name), def.Rank, def.Symmetry, flip,
-                def.Parent is null ? null : KindId(def.Parent), name);
+                RelationTypeId(name), def.Rank, def.Symmetry, flip,
+                def.Parent is null ? null : RelationTypeId(def.Parent), name);
 
         // Unregistered kind: keep it usable, mark it probationary, no parent.
-        return new RelationTypeResolution(KindId(name), RelationTypeRank.Probationary, Symmetry.Asymmetric, flip, null, name);
+        return new RelationTypeResolution(RelationTypeId(name), RelationTypeRank.Probationary, Symmetry.Asymmetric, flip, null, name);
     }
 
     /// <summary>Resolve a UD dependency relation to its own arena under the
@@ -389,7 +389,7 @@ public static class RelationTypeRegistry
         string canon = "DEP_" + norm.Replace(':', '_').ToUpperInvariant();
         int colon = norm.IndexOf(':');
         string parent = colon > 0 ? "DEP_" + norm[..colon].ToUpperInvariant() : "DEPENDS_ON";
-        return new RelationTypeResolution(KindId(canon), RelationTypeRank.Partitive, Symmetry.Asymmetric, false, KindId(parent), canon);
+        return new RelationTypeResolution(RelationTypeId(canon), RelationTypeRank.Partitive, Symmetry.Asymmetric, false, RelationTypeId(parent), canon);
     }
 
     /// <summary>Attest one ENHANCED dependency edge (CoNLL-U DEPS col):
@@ -417,7 +417,7 @@ public static class RelationTypeRegistry
         string canon = "EDEP_" + norm.Replace(':', '_').ToUpperInvariant();
         int colon = norm.IndexOf(':');
         string parent = colon > 0 ? "EDEP_" + norm[..colon].ToUpperInvariant() : "ENHANCED_DEPENDS_ON";
-        return new RelationTypeResolution(KindId(canon), RelationTypeRank.Partitive, Symmetry.Asymmetric, false, KindId(parent), canon);
+        return new RelationTypeResolution(RelationTypeId(canon), RelationTypeRank.Partitive, Symmetry.Asymmetric, false, RelationTypeId(parent), canon);
     }
 
     /// <summary>Resolve a ConceptNet <c>/r/dbpedia/*</c> relation to its own
@@ -429,8 +429,8 @@ public static class RelationTypeRegistry
         string norm = rel.Trim();
         if (norm.StartsWith("dbpedia/", StringComparison.OrdinalIgnoreCase)) norm = norm[8..];
         string canon = "DBPEDIA_" + norm.Replace('/', '_').ToUpperInvariant();
-        return new RelationTypeResolution(KindId(canon), RelationTypeRank.Associative, Symmetry.Asymmetric, false,
-                                  KindId("HAS_DBPEDIA_RELATION"), canon);
+        return new RelationTypeResolution(RelationTypeId(canon), RelationTypeRank.Associative, Symmetry.Asymmetric, false,
+                                  RelationTypeId("HAS_DBPEDIA_RELATION"), canon);
     }
 
     // ── Endpoint orientation: flip to canonical direction, then for symmetric
@@ -508,8 +508,8 @@ public static class RelationTypeRegistry
     {
         ArgumentException.ThrowIfNullOrEmpty(featureName);
         string canon = "FEAT_" + featureName.Trim().ToUpperInvariant();
-        return new RelationTypeResolution(KindId(canon), RelationTypeRank.Partitive, Symmetry.Asymmetric, false,
-                                  KindId("HAS_FEATURE"), canon);
+        return new RelationTypeResolution(RelationTypeId(canon), RelationTypeRank.Partitive, Symmetry.Asymmetric, false,
+                                  RelationTypeId("HAS_FEATURE"), canon);
     }
 
     /// <summary>Resolve a <c>"Name=Value"</c> feature and build its attestation:

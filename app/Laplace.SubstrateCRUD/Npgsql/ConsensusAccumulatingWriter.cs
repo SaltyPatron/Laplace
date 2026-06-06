@@ -75,7 +75,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private sealed class Acc
     {
         public Hash128  Subject;
-        public Hash128  Kind;
+        public Hash128  Type;
         public Hash128? Object;
         public long     PhiFp1e9;       // invariant: constant per relation per period
         public long     Games;
@@ -168,7 +168,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             {
                 if (acc.Games == 0)
                 {
-                    acc.Subject = a.SubjectId; acc.Kind = a.TypeId; acc.Object = a.ObjectId;
+                    acc.Subject = a.SubjectId; acc.Type = a.TypeId; acc.Object = a.ObjectId;
                     acc.PhiFp1e9 = a.OpponentRdFp1e9;
                 }
                 else if (acc.PhiFp1e9 != a.OpponentRdFp1e9)
@@ -197,7 +197,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     /// uniform; identity-determined routing keeps every partial of a relation
     /// in ONE partition (exact Σ of Σ, disjoint parallel folds).</summary>
     private int PartitionOf(Acc acc)
-        => (int)((acc.Subject.Lo ^ acc.Kind.Lo ^ (acc.Object?.Lo ?? 0UL)) % (ulong)_partitions);
+        => (int)((acc.Subject.Lo ^ acc.Type.Lo ^ (acc.Object?.Lo ?? 0UL)) % (ulong)_partitions);
 
     /// <summary>Create the period's staging partitions once (substrate-owned DDL).</summary>
     private async Task EnsureStagingAsync(CancellationToken ct)
@@ -285,7 +285,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     {
         BinaryPrimitives.WriteInt16BigEndian(dst[o..], 7); o += 2;
         o = WriteHash(dst, o, acc.Subject);
-        o = WriteHash(dst, o, acc.Kind);
+        o = WriteHash(dst, o, acc.Type);
         if (acc.Object is Hash128 obj) o = WriteHash(dst, o, obj);
         else { BinaryPrimitives.WriteInt32BigEndian(dst[o..], -1); o += 4; }
         o = WriteInt64Field(dst, o, acc.PhiFp1e9);

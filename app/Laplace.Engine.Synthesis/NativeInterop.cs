@@ -247,7 +247,7 @@ public static partial class NativeInterop
 /// <see cref="NativeInterop.ComputeQkPairsAboveThreshold"/>. Must match the C struct
 /// qk_pair_f64_t layout (uint32, uint32, double — 16 bytes).
 /// </summary>
-[StructLayout(LayoutTypeId.Sequential)]
+[StructLayout(LayoutKind.Sequential)]
 public struct QkPairF64
 {
     public uint   QueryIdx;
@@ -259,7 +259,7 @@ public struct QkPairF64
 /// Tensor specification from <see cref="NativeInterop.ArchTemplateRequiredTensors"/>.
 /// Must match the C struct tensor_spec_t layout.
 /// </summary>
-[StructLayout(LayoutTypeId.Sequential)]
+[StructLayout(LayoutKind.Sequential)]
 public unsafe struct TensorSpec
 {
     public byte*  Name;       /* points into arch_template_t internal storage */
@@ -275,7 +275,7 @@ public unsafe struct TensorSpec
 /// the architecture template distributes these values across the recipe's
 /// per-(layer, head, dim) layout — broadcast, NOT pseudoinverse.
 /// </summary>
-[StructLayout(LayoutTypeId.Sequential)]
+[StructLayout(LayoutKind.Sequential)]
 public unsafe struct SubstrateView
 {
     public double* PerTokenConsensus;

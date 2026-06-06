@@ -160,7 +160,7 @@ public sealed class TextEntityBuilder
             Id:                physId,
             EntityId:          node.Id,
             SourceId:          _sourceId,
-            Kind:              PhysicalityType.Content,
+            Type:              PhysicalityType.Content,
             CoordX:            cx,
             CoordY:            cy,
             CoordZ:            cz,

@@ -219,7 +219,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 if (!seenPhys.Add(p.Id)) continue;          // in DB or already staged this batch
                 coord[0] = p.CoordX; coord[1] = p.CoordY; coord[2] = p.CoordZ; coord[3] = p.CoordM;
                 stage.AddPhysicality(
-                    p.Id, p.EntityId, p.SourceId, (short)p.Kind,
+                    p.Id, p.EntityId, p.SourceId, (short)p.Type,
                     coord, p.HilbertIndex,
                     p.TrajectoryXyzm is null ? ReadOnlySpan<double>.Empty
                                               : p.TrajectoryXyzm.AsSpan(),

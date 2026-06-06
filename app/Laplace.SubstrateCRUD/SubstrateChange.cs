@@ -60,7 +60,7 @@ public sealed record PhysicalityRow(
     Hash128         Id,
     Hash128         EntityId,
     Hash128         SourceId,
-    PhysicalityType Kind,
+    PhysicalityType Type,
     double          CoordX,
     double          CoordY,
     double          CoordZ,
@@ -100,7 +100,7 @@ public enum AttestationOutcome : short
 public sealed record AttestationRow(
     Hash128            Id,
     Hash128            SubjectId,
-    Hash128            KindId,
+    Hash128            TypeId,
     Hash128?           ObjectId,
     Hash128            SourceId,
     Hash128?           ContextId,

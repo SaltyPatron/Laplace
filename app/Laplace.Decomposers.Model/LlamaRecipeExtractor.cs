@@ -140,7 +140,7 @@ public sealed class LlamaRecipeExtractor
 
     private static int GetInt(JsonElement root, string key, int def)
     {
-        if (root.TryGetProperty(key, out var prop) && prop.ValueTypeId == JsonValueTypeId.Number)
+        if (root.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.Number)
             return prop.GetInt32();
         return def;   // absent OR null (e.g. num_key_value_heads:null) → default
     }
@@ -150,7 +150,7 @@ public sealed class LlamaRecipeExtractor
     // don't use (Phi: rms_norm_eps:null).
     private static double GetDoubleOr(JsonElement root, string key, double def)
     {
-        if (root.TryGetProperty(key, out var prop) && prop.ValueTypeId == JsonValueTypeId.Number)
+        if (root.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.Number)
             return prop.GetDouble();
         return def;
     }
@@ -161,7 +161,7 @@ public sealed class LlamaRecipeExtractor
     // backstop; this fails earlier with a clearer message.
     private static int GetIntRequired(JsonElement root, string key)
     {
-        if (root.TryGetProperty(key, out var prop) && prop.ValueTypeId == JsonValueTypeId.Number)
+        if (root.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.Number)
             return prop.GetInt32();
         throw new InvalidOperationException(
             $"config.json missing required field '{key}' — refusing to assume a default. " +

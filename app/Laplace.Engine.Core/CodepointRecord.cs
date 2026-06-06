@@ -20,7 +20,7 @@ namespace Laplace.Engine.Core;
 /// either side is a compile/contract break, not silent corruption (the C
 /// side is guarded by <c>_Static_assert(sizeof == 80)</c>).
 /// </summary>
-[StructLayout(LayoutTypeId.Explicit, Size = 80)]
+[StructLayout(LayoutKind.Explicit, Size = 80)]
 public readonly struct CodepointRecord
 {
     [FieldOffset(0)]  public readonly uint Codepoint;

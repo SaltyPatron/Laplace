@@ -5,7 +5,7 @@ lens). Updated 2026-06-05. The point of this file: stop re-breaking things that 
 
 ## 2026-06-05 — the normalization + completeness day (summary of record)
 
-- **Attestation pipeline unified**: every emitter routes KindRegistry.Attest*/AttestationFactory
+- **Attestation pipeline unified**: every emitter routes RelationTypeRegistry.Attest*/AttestationFactory
   (zero raw rows); kinds renamed under the naming convention (NORMALIZES_TO / NORM_SCALES split,
   HAS_DEFINITION family, PRECEDES one-arena); tensor-role family first-class Canon (the export
   mold-map). POS values normalized to one language-generic canon (PosReference, 17 UPOS values,
@@ -141,10 +141,10 @@ The evidence/consensus split is now real and the Glicko math is DERIVED, not kno
 - **DONE in the §10 landing:** tier PRIORS on μ are gone (`TierPrior` deleted, no μ seeded from a
   tier); tier is OUT of evidence (rows are score/opponent_rd/arena_m); `BootstrapIntentBuilder`
   no longer mints tier entities or HAS_VALUE_TIER meta-attestations; the model path carries no
-  `T9`. Kind significance + source trust are now numeric (`KindRank`/`SourceTrust` ∈(0,1]) folded
+  `T9`. Kind significance + source trust are now numeric (`RelationTypeRank`/`SourceTrust` ∈(0,1]) folded
   into opponent φ.
 - **PURGED (verified live):** the `KindValueTier`/`TrustClass` enums are deleted; significance +
-  source trust are numeric (`KindRank`/`SourceTrust` ∈(0,1]) folded into opponent φ. (`TrustClass`
+  source trust are numeric (`RelationTypeRank`/`SourceTrust` ∈(0,1]) folded into opponent φ. (`TrustClass`
   survives only as a per-decomposer `Hash128` id of its seeded `substrate/trust_class/*` entity —
   correct; the trust-class *entities* are not purged.) The `substrate/kind_tier/T*` entities +
   `HAS_KIND_VALUE_TIER` attestation are no longer seeded in `10_bootstrap.sql.in` — the bootstrap

@@ -40,7 +40,7 @@ internal sealed class SubstrateClient : IAsyncDisposable
         const string sql = """
             SELECT
                 encode(c.object_id, 'hex') AS object_id_hex,
-                encode(c.type_id, 'hex') AS kind_id_hex,
+                encode(c.type_id, 'hex') AS type_id_hex,
                 c.eff_mu,
                 c.witnesses,
                 COALESCE(laplace.label(c.object_id), encode(c.object_id, 'hex')) AS object_label
@@ -60,7 +60,7 @@ internal sealed class SubstrateClient : IAsyncDisposable
             {
                 rows.Add(new CompletionRow(
                     ObjectIdHex: reader.GetString(0),
-                    KindIdHex: reader.GetString(1),
+                    TypeIdHex: reader.GetString(1),
                     EffectiveMu: reader.GetDecimal(2),
                     Witnesses: reader.GetInt64(3),
                     ObjectLabel: reader.GetString(4)));

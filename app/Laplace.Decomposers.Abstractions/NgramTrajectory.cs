@@ -68,7 +68,7 @@ public static class NgramTrajectory
             Id:                physId,
             EntityId:          id,
             SourceId:          sourceId,
-            Kind:              PhysicalityType.Content,
+            Type:              PhysicalityType.Content,
             CoordX:            cen[0], CoordY: cen[1], CoordZ: cen[2], CoordM: cen[3],
             HilbertIndex:      hb,
             TrajectoryXyzm:    traj,

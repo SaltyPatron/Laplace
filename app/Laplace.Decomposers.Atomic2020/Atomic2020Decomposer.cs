@@ -33,7 +33,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
     private static Hash128 SplitId(string s) => Hash128.OfCanonical($"atomic/split/{s}");
 
     // ATOMIC 2020 relation → canonical kind name.
-    private static readonly (string Rel, string Kind)[] Relations =
+    private static readonly (string Rel, string Type)[] Relations =
     {
         ("oEffect", "O_EFFECT"), ("oReact", "O_REACT"), ("oWant", "O_WANT"),
         ("xAttr", "X_ATTR"), ("xEffect", "X_EFFECT"), ("xIntent", "X_INTENT"),
@@ -49,7 +49,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
     // Relation string → canonical kind NAME; the registry owns id + rank +
     // orientation at attest time (no per-source id constructor).
     private static readonly Dictionary<string, string> RelTypeId =
-        Relations.ToDictionary(r => r.Rel, r => r.Kind);
+        Relations.ToDictionary(r => r.Rel, r => r.Type);
 
     private static readonly string[] Splits = ["train", "dev", "test"];
 
@@ -66,7 +66,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
         boot.AddType("Atomic_Marker");
         boot.AddType("Atomic_Split");
         // Rank/trust live in the REGISTRY at attest time — AddRelationType(name) only.
-        foreach (var name in Relations.Select(r => r.Kind).Distinct())
+        foreach (var name in Relations.Select(r => r.Type).Distinct())
             boot.AddRelationType(RelationTypeRegistry.Resolve(name).Canonical);
         await context.Writer.ApplyAsync(boot.Build(), ct);
 

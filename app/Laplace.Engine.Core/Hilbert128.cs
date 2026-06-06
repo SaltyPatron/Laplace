@@ -12,7 +12,7 @@ namespace Laplace.Engine.Core;
 /// <c>hilbert128_compare</c>, so PG B-tree on <c>hilbert_index</c> orders
 /// identically to engine-side comparisons.
 /// </summary>
-[StructLayout(LayoutTypeId.Sequential, Pack = 1, Size = 16)]
+[StructLayout(LayoutKind.Sequential, Pack = 1, Size = 16)]
 public unsafe struct Hilbert128
 {
     /// <summary>The 16 raw bytes.</summary>

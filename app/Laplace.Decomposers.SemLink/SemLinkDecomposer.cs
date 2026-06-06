@@ -122,7 +122,7 @@ public sealed class SemLinkDecomposer : IDecomposer
         {
             ct.ThrowIfCancellationRequested();
             string rolesetKey = rolesetProp.Name.Trim();
-            if (rolesetKey.Length == 0 || rolesetProp.Value.ValueTypeId != JsonValueTypeId.Object) continue;
+            if (rolesetKey.Length == 0 || rolesetProp.Value.ValueKind != JsonValueKind.Object) continue;
             Hash128 rsEntity = RolesetId(rolesetKey);
             b.AddEntity(new EntityRow(rsEntity, (byte)MetaTier.Meta, PropBankRolesetTypeId, Source));
 
@@ -139,11 +139,11 @@ public sealed class SemLinkDecomposer : IDecomposer
 
                 // Role-level: PB arg name (content) ↔ VN theta role (content), with
                 // the VN class as provenance context.
-                if (classProp.Value.ValueTypeId == JsonValueTypeId.Object)
+                if (classProp.Value.ValueKind == JsonValueKind.Object)
                     foreach (var roleProp in classProp.Value.EnumerateObject())
                     {
                         string arg = roleProp.Name.Trim();
-                        string theta = roleProp.Value.ValueTypeId == JsonValueTypeId.String
+                        string theta = roleProp.Value.ValueKind == JsonValueKind.String
                             ? (roleProp.Value.GetString() ?? "").Trim() : "";
                         if (arg.Length == 0 || theta.Length == 0) continue;
                         var argId   = ContentEmitter.Emit(b, arg, Source);
@@ -178,10 +178,10 @@ public sealed class SemLinkDecomposer : IDecomposer
             Hash128 vnEntity = VnClassId(vnClass);
             b.AddEntity(new EntityRow(vnEntity, (byte)MetaTier.Meta, VerbNetClassTypeId, Source));
 
-            if (keyProp.Value.ValueTypeId != JsonValueTypeId.Array) continue;
+            if (keyProp.Value.ValueKind != JsonValueKind.Array) continue;
             foreach (var frameElem in keyProp.Value.EnumerateArray())
             {
-                if (frameElem.ValueTypeId != JsonValueTypeId.String) continue;
+                if (frameElem.ValueKind != JsonValueKind.String) continue;
                 string frame = (frameElem.GetString() ?? "").Trim();
                 if (frame.Length == 0) continue;
                 Hash128 fnEntity = FrameId(frame);

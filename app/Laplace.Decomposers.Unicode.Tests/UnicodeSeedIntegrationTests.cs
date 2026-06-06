@@ -95,7 +95,7 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT p.x, p.y, p.z, p.m
                             FROM laplace.entity_physicalities(laplace.canonical_id('A')) p
-                            WHERE p.source_id = @s AND p.kind = 1";
+                            WHERE p.source_id = @s AND p.type = 1";
         cmd.Parameters.AddWithValue("s", UnicodeDecomposer.Source.ToBytes());
         await using var r = await cmd.ExecuteReaderAsync();
         Assert.True(await r.ReadAsync(), "no CONTENT physicality for U+0041");

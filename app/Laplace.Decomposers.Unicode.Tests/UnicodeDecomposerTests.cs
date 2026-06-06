@@ -87,7 +87,7 @@ public sealed class UnicodeDecomposerTests
                 }
             }
             foreach (var ph in change.Physicalities)
-                if (ph.Kind == PhysicalityType.Content && ph.TrajectoryXyzm is null)
+                if (ph.Type == PhysicalityType.Content && ph.TrajectoryXyzm is null)
                     codepointPhysicalities++;
         }
 
@@ -103,7 +103,7 @@ public sealed class UnicodeDecomposerTests
         // on the unit glome (super-Fibonacci ⇒ x²+y²+z²+m² = 1).
         Assert.NotNull(aEntity);
         Assert.NotNull(aPhys);
-        Assert.Equal(PhysicalityType.Content, aPhys!.Kind);
+        Assert.Equal(PhysicalityType.Content, aPhys!.Type);
         double r2 = aPhys.CoordX * aPhys.CoordX + aPhys.CoordY * aPhys.CoordY
                   + aPhys.CoordZ * aPhys.CoordZ + aPhys.CoordM * aPhys.CoordM;
         Assert.InRange(Math.Sqrt(r2), 1.0 - 1e-9, 1.0 + 1e-9);

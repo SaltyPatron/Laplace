@@ -232,7 +232,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                     coord[0], coord[1], coord[2], coord[3], ReadOnlySpan<double>.Empty);
                 bb.AddPhysicality(new PhysicalityRow(
                     Id: physId, EntityId: byteId, SourceId: Source,
-                    Kind: PhysicalityType.Content,
+                    Type: PhysicalityType.Content,
                     CoordX: coord[0], CoordY: coord[1], CoordZ: coord[2], CoordM: coord[3],
                     HilbertIndex: ByteAtoms.Hilbert(bv),
                     TrajectoryXyzm: null, NConstituents: 0,
@@ -330,7 +330,7 @@ public sealed class UnicodeDecomposer : IDecomposer
 
                 b.AddPhysicality(new PhysicalityRow(
                     Id: physId, EntityId: entityId, SourceId: Source,
-                    Kind: PhysicalityType.Content,
+                    Type: PhysicalityType.Content,
                     CoordX: r.CoordX, CoordY: r.CoordY, CoordZ: r.CoordZ, CoordM: r.CoordM,
                     HilbertIndex: r.Hilbert,
                     TrajectoryXyzm: null, NConstituents: 0,

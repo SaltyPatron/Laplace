@@ -118,7 +118,7 @@ public static class AttestationFactory
         return new AttestationRow(
             Id:                   ComputeId(subject, typeId, obj, sourceId, contextId),
             SubjectId:            subject,
-            KindId:               typeId,
+            TypeId:               typeId,
             ObjectId:             obj,
             SourceId:             sourceId,
             ContextId:            contextId,
@@ -144,7 +144,7 @@ public static class AttestationFactory
         return new AttestationRow(
             Id:                   ComputeId(subject, typeId, obj, sourceId, contextId),
             SubjectId:            subject,
-            KindId:               typeId,
+            TypeId:               typeId,
             ObjectId:             obj,
             SourceId:             sourceId,
             ContextId:            contextId,

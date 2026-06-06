@@ -16,14 +16,14 @@ namespace Laplace.Ingestion;
 /// </summary>
 public static class LayerCompletion
 {
-    public static Hash128 KindId(int layerOrder) =>
+    public static Hash128 RelationTypeId(int layerOrder) =>
         Hash128.OfCanonical($"substrate/kind/HasLayerCompleted/{layerOrder}/v1");
 
     public static SubstrateChange BuildMarker(IDecomposer decomposer)
     {
         // type_id FK: every attestation kind must exist as an entity row first
         // (same rule as BootstrapIntentBuilder.AddTypeId / 10_bootstrap.sql.in).
-        var typeId = KindId(decomposer.LayerOrder);
+        var typeId = RelationTypeId(decomposer.LayerOrder);
         return new SubstrateChangeBuilder(
                 decomposer.SourceId, $"layer-complete/{decomposer.LayerOrder}", null,
                 entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1)

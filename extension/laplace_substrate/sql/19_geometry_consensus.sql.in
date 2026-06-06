@@ -4,14 +4,14 @@
  * Two layers, exactly as the relation side (attestations → consensus):
  *
  *   geometry_placement_evidence  — EVIDENCE. One row per
- *       (entity, projection_kind, source, layer, head, expert): a single
+ *       (entity, projection_type, source, layer, head, expert): a single
  *       per-model placement of the entity on S³ (a unit PointZM), with FULL
  *       provenance (which model, which layer/head/expert produced it) and the
  *       per-placement weight + observation count. Retained for interpretability
  *       / audit / embed-species (GROUP BY layer/head characterizes a circuit).
  *
  *   geometry_consensus           — ATTESTATION. ONE row per
- *       (entity, projection_kind). source / layer / head / expert are
+ *       (entity, projection_type). source / layer / head / expert are
  *       PROVENANCE, NEVER identity — they are dropped from the id and the
  *       UNIQUE key, exactly as 13_consensus.sql.in drops source + context.
  *       The consensus coord is the WEIGHTED KARCHER (Fréchet) MEAN on S³ over
@@ -28,11 +28,11 @@
 CREATE TABLE geometry_placement_evidence (
     id                bytea            PRIMARY KEY CHECK (octet_length(id) = 16),
     entity_id         bytea            NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-    projection_kind   smallint         NOT NULL,
+    projection_type   smallint         NOT NULL,
     -- Provenance (GROUP-BY columns) — which witness produced this placement.
     -- NEVER part of identity: a placement is identified by its content, and the
     -- consensus collapses every (source, layer, head, expert) for one
-    -- (entity, projection_kind) into a single geodesic mean.
+    -- (entity, projection_type) into a single geodesic mean.
     source_id         bytea            NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
     layer             integer,
     head              integer,
@@ -45,14 +45,14 @@ CREATE TABLE geometry_placement_evidence (
     weight            bigint           NOT NULL DEFAULT 1000000000 CHECK (weight >= 0),
     observation_count bigint           NOT NULL DEFAULT 1 CHECK (observation_count >= 0),
     observed_at       timestamptz      NOT NULL DEFAULT now(),
-    UNIQUE NULLS NOT DISTINCT (entity_id, projection_kind, source_id, layer, head, expert)
+    UNIQUE NULLS NOT DISTINCT (entity_id, projection_type, source_id, layer, head, expert)
 );
 
 COMMENT ON TABLE geometry_placement_evidence IS
-    'EVIDENCE layer for the GEOMETRY axis: per-witness S³ placements, one row per (entity, projection_kind, source, layer, head, expert). source/layer/head/expert are PROVENANCE / GROUP-BY columns, NEVER identity. coord is a unit PointZM on S³. weight carries the witness''s pull into the Karcher consensus. Full provenance retained for interpretability/audit/embed-species (mirrors attestations).';
+    'EVIDENCE layer for the GEOMETRY axis: per-witness S³ placements, one row per (entity, projection_type, source, layer, head, expert). source/layer/head/expert are PROVENANCE / GROUP-BY columns, NEVER identity. coord is a unit PointZM on S³. weight carries the witness''s pull into the Karcher consensus. Full provenance retained for interpretability/audit/embed-species (mirrors attestations).';
 COMMENT ON COLUMN geometry_placement_evidence.id IS
-    'Content-addressed BLAKE3-128 of canonical (entity_id, projection_kind, source_id, layer, head, expert, coord) bytes. Stable across re-observation; idempotent upsert.';
-COMMENT ON COLUMN geometry_placement_evidence.projection_kind IS
+    'Content-addressed BLAKE3-128 of canonical (entity_id, projection_type, source_id, layer, head, expert, coord) bytes. Stable across re-observation; idempotent upsert.';
+COMMENT ON COLUMN geometry_placement_evidence.projection_type IS
     'Which placement view: mirrors physicalities.kind (1=CONTENT, 3=PROJECTION input-direction, 4=PROJECTION_OUTPUT lm_head, ...). Part of identity — distinct projection views consense separately.';
 COMMENT ON COLUMN geometry_placement_evidence.layer IS
     'Provenance: model layer that produced this placement (NULL for non-model / single-view sources). GROUP-BY column for interpretability — NEVER identity.';
@@ -70,7 +70,7 @@ SELECT pg_extension_config_dump('geometry_placement_evidence', '');
 CREATE INDEX geometry_placement_evidence_entity_btree
     ON geometry_placement_evidence (entity_id);
 CREATE INDEX geometry_placement_evidence_entity_kind_btree
-    ON geometry_placement_evidence (entity_id, projection_kind);
+    ON geometry_placement_evidence (entity_id, projection_type);
 CREATE INDEX geometry_placement_evidence_source_btree
     ON geometry_placement_evidence (source_id);
 
@@ -79,9 +79,9 @@ CREATE INDEX geometry_placement_evidence_source_btree
 CREATE TABLE geometry_consensus (
     id                bytea            PRIMARY KEY CHECK (octet_length(id) = 16),
     entity_id         bytea            NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-    projection_kind   smallint         NOT NULL,
+    projection_type   smallint         NOT NULL,
     -- The consensus placement: the WEIGHTED KARCHER (Fréchet) MEAN on S³ over
-    -- all geometry_placement_evidence for this (entity, projection_kind) —
+    -- all geometry_placement_evidence for this (entity, projection_type) —
     -- geodesic, NOT the Euclidean centroid. Always a unit PointZM.
     coord             geometry(PointZM) NOT NULL,
     radius_origin     double precision GENERATED ALWAYS AS (
@@ -93,13 +93,13 @@ CREATE TABLE geometry_consensus (
     dispersion        bigint           CHECK (dispersion IS NULL OR dispersion >= 0),
     witness_count     bigint           NOT NULL DEFAULT 1 CHECK (witness_count >= 0),
     last_observed_at  timestamptz      NOT NULL,
-    UNIQUE (entity_id, projection_kind)
+    UNIQUE (entity_id, projection_type)
 );
 
 COMMENT ON TABLE geometry_consensus IS
-    'ATTESTATION layer for the GEOMETRY axis: ONE row per (entity, projection_kind). source/layer/head/expert DROPPED from identity (all witnesses, never identity) — exactly as 13_consensus drops source+context. coord is the WEIGHTED KARCHER (Fréchet) MEAN on S³ over geometry_placement_evidence (geodesic, NOT the Euclidean centroid). This is the frame-invariant structural placement inference reads; per-witness provenance lives in the evidence table.';
+    'ATTESTATION layer for the GEOMETRY axis: ONE row per (entity, projection_type). source/layer/head/expert DROPPED from identity (all witnesses, never identity) — exactly as 13_consensus drops source+context. coord is the WEIGHTED KARCHER (Fréchet) MEAN on S³ over geometry_placement_evidence (geodesic, NOT the Euclidean centroid). This is the frame-invariant structural placement inference reads; per-witness provenance lives in the evidence table.';
 COMMENT ON COLUMN geometry_consensus.id IS
-    'Content-addressed BLAKE3-128 of (entity_id ‖ projection_kind). Source/layer/head/expert OUT — all are witnesses, never identity. ONE row per (entity, projection_kind) regardless of how many models placed it.';
+    'Content-addressed BLAKE3-128 of (entity_id ‖ projection_type). Source/layer/head/expert OUT — all are witnesses, never identity. ONE row per (entity, projection_type) regardless of how many models placed it.';
 COMMENT ON COLUMN geometry_consensus.coord IS
     'Consensus S³ placement: the weighted Karcher (geodesic/Fréchet) mean of all witness placements. Structural, not semantic. Unit PointZM.';
 COMMENT ON COLUMN geometry_consensus.dispersion IS
@@ -110,18 +110,18 @@ COMMENT ON COLUMN geometry_consensus.witness_count IS
 SELECT pg_extension_config_dump('geometry_consensus', '');
 
 CREATE INDEX geometry_consensus_entity_btree   ON geometry_consensus (entity_id);
-CREATE INDEX geometry_consensus_kind_btree     ON geometry_consensus (projection_kind);
+CREATE INDEX geometry_consensus_kind_btree     ON geometry_consensus (projection_type);
 CREATE INDEX geometry_consensus_coord_gist     ON geometry_consensus USING gist (coord);
 
-/* geometry_consensus id = BLAKE3-128 of (entity_id ‖ projection_kind).
+/* geometry_consensus id = BLAKE3-128 of (entity_id ‖ projection_type).
  * SOURCE / LAYER / HEAD / EXPERT OUT — all are witnesses, never identity.
- * ONE consensus placement per (entity, projection_kind). */
+ * ONE consensus placement per (entity, projection_type). */
 CREATE OR REPLACE FUNCTION geometry_consensus_id(
-    p_entity bytea, p_projection_kind smallint)
+    p_entity bytea, p_projection_type smallint)
     RETURNS bytea LANGUAGE sql LAPLACE_IMMUTABLE
     SET search_path = @extschema@, public AS $$
     SELECT public.laplace_hash128_blake3(
-        p_entity || int2send(p_projection_kind))
+        p_entity || int2send(p_projection_type))
 $$;
 COMMENT ON FUNCTION geometry_consensus_id(bytea, smallint) IS
-    'Geometry-consensus identity: BLAKE3-128 of (entity_id ‖ projection_kind). Provenance (source/layer/head/expert) is NOT in the id — all are witnesses.';
+    'Geometry-consensus identity: BLAKE3-128 of (entity_id ‖ projection_type). Provenance (source/layer/head/expert) is NOT in the id — all are witnesses.';

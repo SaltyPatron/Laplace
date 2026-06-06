@@ -33,6 +33,6 @@ a comment (e.g. `DEP_*/FEAT_*` — write `DEP_* / FEAT_*`).
 | 20_converse | the conversational read surface + loop |
 | 21_seed | readback seed shipped WITH the extension: build_codepoint_render() + the static canonical vocabulary. Dynamic families register at ingest (`register_canonicals`). |
 
-New relation kinds: `KindRegistry.Canon` (C#) is the single source of truth for
+New relation kinds: `RelationTypeRegistry.Canon` (C#) is the single source of truth for
 rank/symmetry/roll-up; the SQL side needs no per-kind DDL (kinds are entities).
 New verification/gate queries: add to 18_ops_surface + a regress pin.

@@ -54,7 +54,7 @@ public sealed class ModelTableETL
     /// <summary>One logical table role of the transformer-family schema.</summary>
     private sealed record Role(
         string Name,            // canonical kind name (arena)
-        Hash128 KindId,
+        Hash128 TypeId,
         string? PerLayerTemplate, // tensor name template with {L}, or null for global tensors
         string? GlobalName,       // global tensor name (embed/lm_head), or null
         string InSpace,           // axis space of the INPUT side (subject)
