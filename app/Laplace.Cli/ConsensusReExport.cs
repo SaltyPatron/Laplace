@@ -140,7 +140,7 @@ internal static class ConsensusReExport
         cmd.CommandText =
             """
             SELECT subject_id, object_id, rating, witness_count FROM laplace.consensus
-            WHERE kind_id = $1 AND object_id IS NOT NULL
+            WHERE type_id = $1 AND object_id IS NOT NULL
             """;
         cmd.Parameters.AddWithValue(typeId.ToBytes());
         await using var rdr = await cmd.ExecuteReaderAsync();
@@ -180,7 +180,7 @@ internal static class ConsensusReExport
         cmd.CommandText =
             """
             SELECT subject_id, rating, witness_count FROM laplace.consensus
-            WHERE kind_id = $1 AND object_id IS NULL
+            WHERE type_id = $1 AND object_id IS NULL
             """;
         cmd.Parameters.AddWithValue(typeId.ToBytes());
         await using var rdr = await cmd.ExecuteReaderAsync();
