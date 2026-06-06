@@ -23,6 +23,21 @@ public sealed class SubstrateChangeBuilder
     private readonly string _sourceContentUnitName;
     private readonly Hash128? _parentIntentId;
 
+    // ── O(tier) dedup-by-construction, AT THE BUILDER (2026-06-06) ──────────
+    // Identity rows (entities/physicalities) are content-addressed: the same id
+    // re-added within an intent is the SAME row — append once, skip repeats.
+    // Testimony (attestations) is NOT idempotent: every occurrence is a Glicko
+    // GAME. Repeats of one relation id FOLD onto its single evidence row —
+    // observation_count = Σ games, SumScoreFp1e9 = exact Σ score (int64,
+    // checked; bit-identical to per-occurrence accumulation), net outcome
+    // CLASS, max timestamp. Before this, every occurrence shipped its own row:
+    // ~95% of the wire/staging traffic was discarded by ON CONFLICT and the
+    // evidence observation_count stayed 1 forever (measured 33.5M rows,
+    // games_per_row = 1.000 — the fold law unhonored).
+    private readonly HashSet<Hash128> _seenEntities = new();
+    private readonly HashSet<Hash128> _seenPhysicalities = new();
+    private readonly Dictionary<Hash128, int> _attestationIndex = new();
+
     public SubstrateChangeBuilder(
         Hash128 sourceId,
         string sourceContentUnitName,
@@ -42,7 +57,8 @@ public sealed class SubstrateChangeBuilder
 
     public SubstrateChangeBuilder AddEntity(EntityRow row)
     {
-        _entities.Add(row ?? throw new ArgumentNullException(nameof(row)));
+        ArgumentNullException.ThrowIfNull(row);
+        if (_seenEntities.Add(row.Id)) _entities.Add(row);
         return this;
     }
 
@@ -52,13 +68,47 @@ public sealed class SubstrateChangeBuilder
 
     public SubstrateChangeBuilder AddPhysicality(PhysicalityRow row)
     {
-        _physicalities.Add(row ?? throw new ArgumentNullException(nameof(row)));
+        ArgumentNullException.ThrowIfNull(row);
+        if (_seenPhysicalities.Add(row.Id)) _physicalities.Add(row);
         return this;
     }
 
     public SubstrateChangeBuilder AddAttestation(AttestationRow row)
     {
-        _attestations.Add(row ?? throw new ArgumentNullException(nameof(row)));
+        ArgumentNullException.ThrowIfNull(row);
+        if (_attestationIndex.TryGetValue(row.Id, out int at))
+        {
+            var prior = _attestations[at];
+            // One relation × one source × one period ⇒ one φ. Mixed φ inside a
+            // single intent is a decomposer bug — same invariant the consensus
+            // accumulation enforces; fail loud, never average.
+            if (prior.OpponentRdFp1e9 != row.OpponentRdFp1e9)
+                throw new InvalidOperationException(
+                    $"attestation fold invariant violated: relation observed with φ={row.OpponentRdFp1e9} after φ={prior.OpponentRdFp1e9} in one intent");
+
+            long games = checked(prior.ObservationCount + row.ObservationCount);
+            long sum   = checked(
+                (prior.SumScoreFp1e9 ?? checked(prior.ScoreFp1e9 * prior.ObservationCount))
+                + (row.SumScoreFp1e9 ?? checked(row.ScoreFp1e9 * row.ObservationCount)));
+            // Net outcome CLASS over the folded games (evidence law: outcome is
+            // a class, never a magnitude): Σscore vs the all-draws baseline.
+            long draws = checked(games * 500_000_000L);
+            var net = sum > draws ? AttestationOutcome.Confirm
+                    : sum < draws ? AttestationOutcome.Refute
+                                  : AttestationOutcome.Draw;
+            _attestations[at] = prior with
+            {
+                Outcome              = net,
+                LastObservedAtUnixUs = Math.Max(prior.LastObservedAtUnixUs, row.LastObservedAtUnixUs),
+                ObservationCount     = games,
+                SumScoreFp1e9        = sum,
+            };
+        }
+        else
+        {
+            _attestationIndex[row.Id] = _attestations.Count;
+            _attestations.Add(row);
+        }
         return this;
     }
 

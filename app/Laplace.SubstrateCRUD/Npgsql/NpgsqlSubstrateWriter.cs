@@ -228,11 +228,24 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 Reference(p.EntityId);
                 Reference(p.SourceId);
             }
+        // Re-observed evidence: the row exists (in DB or staged earlier), but its
+        // GAMES still count — the fold law (evidence observation_count = Σ games).
+        // Collected here, applied as ONE set-based UPDATE after the promote. This
+        // implements the "Glicko-2 matchup updates on re-observation" that was
+        // previously dropped on the floor (measured: 33.5M evidence rows, every
+        // observation_count = 1). Double-count protection is the same as the
+        // consensus stream's: the IngestRunner completed-source marker guard.
+        var attGamesDelta = new Dictionary<Hash128, (long Games, long MaxTsUs)>();
         foreach (var c in changes)
             foreach (var a in c.Attestations)
             {
-                if (_provenAtt.Contains(a.Id)) continue;    // proven earlier this run
-                if (!seenAtt.Add(a.Id)) continue;           // in DB or already staged this batch
+                if (_provenAtt.Contains(a.Id) || !seenAtt.Add(a.Id))
+                {
+                    var d = attGamesDelta.TryGetValue(a.Id, out var cur) ? cur : (0L, 0L);
+                    attGamesDelta[a.Id] = (checked(d.Item1 + a.ObservationCount),
+                                           Math.Max(d.Item2, a.LastObservedAtUnixUs));
+                    continue;
+                }
                 stage.AddAttestation(
                     a.Id, a.SubjectId, a.TypeId, a.ObjectId, a.SourceId, a.ContextId,
                     (short)a.Outcome,
@@ -278,7 +291,8 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         }
 
         int entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
-        bool anyRows = stage.EntityCount > 0 || stage.PhysicalityCount > 0 || stage.AttestationCount > 0;
+        bool anyRows = stage.EntityCount > 0 || stage.PhysicalityCount > 0 || stage.AttestationCount > 0
+                       || attGamesDelta.Count > 0;   // deltas-only batch: all rows re-observed, games still land
 
         if (anyRows)
         {
@@ -328,6 +342,37 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                     attestationsInserted = await StageAndInsertAsync(
                         conn, stage, IntentStageTable.Attestations, "attestations", ct);
                     roundTrips += 3;
+                }
+                if (attGamesDelta.Count > 0)
+                {
+                    // Evidence games accumulation (the fold law, cross-intent):
+                    // one set-based UPDATE adds the re-observed games to the
+                    // existing evidence rows. Runs inside the same tx, after the
+                    // promote, so a row first staged THIS batch is updatable too.
+                    var ids   = new byte[attGamesDelta.Count][];
+                    var games = new long[attGamesDelta.Count];
+                    var tsUs  = new long[attGamesDelta.Count];
+                    int di = 0;
+                    foreach (var kv in attGamesDelta)
+                    {
+                        ids[di]   = kv.Key.ToBytes();
+                        games[di] = kv.Value.Games;
+                        tsUs[di]  = kv.Value.MaxTsUs;
+                        di++;
+                    }
+                    await using var upd = conn.CreateCommand();
+                    upd.CommandTimeout = 0;
+                    upd.CommandText =
+                        "UPDATE laplace.attestations a SET " +
+                        "  observation_count = a.observation_count + d.games, " +
+                        "  last_observed_at  = GREATEST(a.last_observed_at, to_timestamp(d.ts_us / 1e6)) " +
+                        "FROM (SELECT unnest(@ids) AS id, unnest(@games) AS games, unnest(@ts) AS ts_us) d " +
+                        "WHERE a.id = d.id";
+                    upd.Parameters.AddWithValue("ids",   ids);
+                    upd.Parameters.AddWithValue("games", games);
+                    upd.Parameters.AddWithValue("ts",    tsUs);
+                    await upd.ExecuteNonQueryAsync(ct);
+                    roundTrips++;
                 }
                 await tx.CommitAsync(ct);
 
