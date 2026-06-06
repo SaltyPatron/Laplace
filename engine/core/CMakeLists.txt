@@ -43,7 +43,7 @@ set(LAPLACE_CORE_SOURCES
     src/super_fibonacci.c
     src/glicko2.c
     src/codepoint_table.c
-    src/astar.c
+    src/astar.cpp
     src/trajectory.c
     src/tier_tree.c
     src/intent_stage.c

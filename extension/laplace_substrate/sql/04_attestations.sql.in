@@ -25,7 +25,7 @@
 CREATE TABLE attestations (
     id                bytea         PRIMARY KEY CHECK (octet_length(id) = 16),
     subject_id        bytea         NOT NULL REFERENCES entities(id),
-    kind_id           bytea         NOT NULL REFERENCES entities(id),
+    type_id           bytea         NOT NULL REFERENCES entities(id),
     object_id         bytea                  REFERENCES entities(id),
     source_id         bytea         NOT NULL REFERENCES entities(id),
     context_id        bytea                  REFERENCES entities(id),
@@ -38,8 +38,8 @@ COMMENT ON TABLE attestations IS
     'EVIDENCE layer = PROVENANCE: one row per (subject, kind, object, source, context) recording WHO witnessed the relation (model layer/head in context_id), when, how many games, and the dissent record (outcome class). Never a value channel — the witness''s magnitude is consumed into the consensus accumulation at ingest and not persisted. The accumulated rating/rd/volatility live on the consensus table. Repeated assertions are UPSERT-no-op idempotent.';
 
 COMMENT ON COLUMN attestations.id IS
-    'Content-addressed BLAKE3-128 of canonical (subject_id, kind_id, object_id, source_id, context_id) bytes. Stable across re-observation; same tuple -> same id regardless of insertion order.';
-COMMENT ON COLUMN attestations.kind_id IS
+    'Content-addressed BLAKE3-128 of canonical (subject_id, type_id, object_id, source_id, context_id) bytes. Stable across re-observation; same tuple -> same id regardless of insertion order.';
+COMMENT ON COLUMN attestations.type_id IS
     'FK to entities(id) -- the kind entity (typed transform vocabulary). Kind significance enters the consensus match as kind_rank inside the witness weight, NOT as a tier on the kind and NOT as a persisted value here.';
 COMMENT ON COLUMN attestations.outcome IS
     'The dissent record as a CLASS, never a magnitude: 0 = refute (the witness''s testimony was a loss), 1 = draw, 2 = confirm (a win). Derived from the sign of the testimony; the magnitude itself is consumed into consensus at ingest and never persisted.';

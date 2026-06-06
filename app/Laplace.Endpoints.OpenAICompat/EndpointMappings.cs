@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Laplace.Endpoints.OpenAICompat;
 
 internal static class EndpointMappings
@@ -150,27 +152,109 @@ internal static class EndpointMappings
                 return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
             if (string.IsNullOrWhiteSpace(payload.Model))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'model' is required.");
-            if (string.IsNullOrWhiteSpace(payload.Input))
-                return EndpointJson.BadRequest("invalid_request_error", "Field 'input' is required.");
+            if (!EmbeddingsInputPresent(payload.Input))
+                return EndpointJson.BadRequest("invalid_request_error", "Field 'input' must be a non-empty string or array of strings.");
             return EndpointJson.NotImplemented("embeddings", "Pending Stream E physicality lookup path.");
         });
     }
 
+    // input may be a string or a (non-empty) array of strings per the OpenAI shape.
+    private static bool EmbeddingsInputPresent(JsonElement? input)
+    {
+        if (input is not { } element)
+            return false;
+        return element.ValueKind switch
+        {
+            JsonValueKind.String => !string.IsNullOrWhiteSpace(element.GetString()),
+            JsonValueKind.Array => element.GetArrayLength() > 0,
+            _ => false
+        };
+    }
+
     public static void MapBillingEndpoints(this WebApplication app)
     {
-        app.MapGet("/v1/billing/catalog", (IBillingOrchestrator billing) =>
+        app.MapGet("/v1/billing/catalog", (IBillingCatalog catalog, IStripePriceMap priceMap) =>
             Results.Json(new
             {
                 @object = "list",
-                data = billing.ListCatalog().Select(s => new
+                data = catalog.List().Select(s => new
                 {
                     service_id = s.ServiceId,
+                    product_id = s.ProductId,
                     display_name = s.DisplayName,
                     unit = s.UnitName,
                     unit_price_cents = s.UnitPriceCents,
-                    currency = "usd"
+                    base_fee_cents = s.BaseFeeCents,
+                    currency = s.Currency,
+                    lookup_key = s.LookupKey,
+                    active = s.Active,
+                    metered = s.Metered,
+                    recurring_interval = s.RecurringInterval,
+                    stripe_price_id = priceMap.TryGet(s.LookupKey, out var pid) ? pid : null
                 })
             }));
+
+        app.MapGet("/v1/billing/products", (IBillingCatalog catalog) =>
+            Results.Json(new
+            {
+                @object = "list",
+                data = catalog.ListProducts().Select(p => new
+                {
+                    product_id = p.ProductId,
+                    name = p.Name,
+                    description = p.Description,
+                    category = p.Category,
+                    prices = catalog.List()
+                        .Where(s => string.Equals(s.ProductId, p.ProductId, StringComparison.OrdinalIgnoreCase))
+                        .Select(s => new
+                        {
+                            service_id = s.ServiceId,
+                            unit = s.UnitName,
+                            unit_price_cents = s.UnitPriceCents,
+                            base_fee_cents = s.BaseFeeCents,
+                            currency = s.Currency,
+                            lookup_key = s.LookupKey,
+                            metered = s.Metered,
+                            recurring_interval = s.RecurringInterval
+                        })
+                })
+            }));
+
+        app.MapGet("/v1/billing/plans", (IBillingCatalog catalog) =>
+            Results.Json(new
+            {
+                @object = "list",
+                data = catalog.ListPlans().Select(p => new
+                {
+                    plan_id = p.PlanId,
+                    service_id = p.ServiceId,
+                    name = p.Name,
+                    description = p.Description,
+                    monthly_price_cents = p.MonthlyPriceCents,
+                    currency = p.Currency,
+                    monthly_credits = p.MonthlyCredits,
+                    included_product_ids = p.IncludedProductIds,
+                    support_tier = p.SupportTier,
+                    active = p.Active
+                })
+            }));
+
+        app.MapPost("/v1/billing/catalog/sync", async (IStripeCatalogSync sync, CancellationToken ct) =>
+        {
+            var result = await sync.EnsureAllAsync(ct);
+            return Results.Json(new
+            {
+                stripe_configured = result.StripeConfigured,
+                entries = result.Entries.Select(e => new
+                {
+                    service_id = e.ServiceId,
+                    lookup_key = e.LookupKey,
+                    stripe_price_id = e.StripePriceId,
+                    stripe_product_id = e.StripeProductId,
+                    status = e.Status
+                })
+            });
+        });
 
         app.MapPost("/v1/billing/preflight", async (HttpRequest request, IBillingOrchestrator billing, CancellationToken ct) =>
         {
@@ -211,6 +295,277 @@ internal static class EndpointMappings
                 {
                     execute_header = new { name = "X-Laplace-Quote-Id", value = quote.QuoteId },
                     note = "Execution endpoints require an approved quote before execution."
+                }
+            });
+        });
+
+        app.MapPost("/v1/billing/synthesis/quote", async (HttpRequest request, IBillingOrchestrator billing, ISynthesisQuoteCalculator calc, CancellationToken ct) =>
+        {
+            var payload = await EndpointJson.ReadJsonAsync<SynthesisQuoteRequest>(request, ct);
+            if (payload is null)
+                return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
+            if (payload.VocabSize < 1 || payload.HiddenSize < 1 || payload.NumLayers < 1 || payload.NumHeads < 1)
+                return EndpointJson.BadRequest(
+                    "invalid_request_error",
+                    "Fields 'vocab_size', 'hidden_size', 'num_layers', and 'num_heads' must each be >= 1.");
+
+            var dims = new SynthesisRecipeDimensions(
+                VocabSize: payload.VocabSize,
+                HiddenSize: payload.HiddenSize,
+                NumLayers: payload.NumLayers,
+                NumHeads: payload.NumHeads,
+                NumKvHeads: payload.NumKvHeads is > 0 ? payload.NumKvHeads.Value : payload.NumHeads,
+                IntermediateSize: payload.IntermediateSize > 0 ? payload.IntermediateSize : payload.HiddenSize * 4,
+                TiedEmbeddings: payload.TiedEmbeddings);
+
+            var estimate = calc.Estimate(dims);
+            var tenant = string.IsNullOrWhiteSpace(payload.Tenant)
+                ? AppComposition.ResolveTenant(request)
+                : payload.Tenant.Trim();
+
+            BillingQuote quote;
+            try
+            {
+                var units = (int)Math.Min(int.MaxValue, estimate.BillableUnits);
+                quote = await billing.CreatePreflightQuoteAsync(tenant, "synthesis", units, ct);
+            }
+            catch (ArgumentException ex)
+            {
+                return EndpointJson.BadRequest("invalid_request_error", ex.Message);
+            }
+
+            return Results.Json(new
+            {
+                quote_id = quote.QuoteId,
+                tenant = quote.Tenant,
+                service_id = quote.ServiceId,
+                estimated_parameters = estimate.Parameters,
+                billable_units = quote.Units,
+                unit = "param_million",
+                amount_cents = quote.AmountCents,
+                currency = quote.Currency,
+                status = quote.Status,
+                expires_at = quote.ExpiresAt,
+                stripe_checkout_url = quote.StripeCheckoutUrl,
+                format = string.IsNullOrWhiteSpace(payload.Format) ? "gguf" : payload.Format.Trim(),
+                next = new
+                {
+                    execute_header = new { name = "X-Laplace-Quote-Id", value = quote.QuoteId },
+                    note = "Synthesis is dimensionality-metered: amount = base job fee + per-million-parameter rate."
+                }
+            });
+        });
+
+        app.MapPost("/v1/billing/explain/quote", async (HttpRequest request, IBillingOrchestrator billing, ITraceQuoteCalculator calc, CancellationToken ct) =>
+        {
+            var payload = await EndpointJson.ReadJsonAsync<ExplainQuoteRequest>(request, ct);
+            if (payload is null)
+                return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
+            if (payload.Depth < 1 || payload.Beam < 1)
+                return EndpointJson.BadRequest(
+                    "invalid_request_error",
+                    "Fields 'depth' and 'beam' must each be >= 1.");
+
+            var estimate = calc.Estimate(new TraceReportRequest(payload.Depth, payload.Beam, payload.Academic));
+            var tenant = string.IsNullOrWhiteSpace(payload.Tenant)
+                ? AppComposition.ResolveTenant(request)
+                : payload.Tenant.Trim();
+
+            BillingQuote quote;
+            try
+            {
+                var units = (int)Math.Min(int.MaxValue, estimate.BillableUnits);
+                quote = await billing.CreatePreflightQuoteAsync(tenant, "explain.trace", units, ct);
+            }
+            catch (ArgumentException ex)
+            {
+                return EndpointJson.BadRequest("invalid_request_error", ex.Message);
+            }
+
+            return Results.Json(new
+            {
+                quote_id = quote.QuoteId,
+                tenant = quote.Tenant,
+                service_id = quote.ServiceId,
+                depth = payload.Depth,
+                beam = payload.Beam,
+                academic = payload.Academic,
+                estimated_trace_nodes = estimate.TraceNodes,
+                billable_units = quote.Units,
+                unit = "trace_unit",
+                amount_cents = quote.AmountCents,
+                currency = quote.Currency,
+                status = quote.Status,
+                expires_at = quote.ExpiresAt,
+                stripe_checkout_url = quote.StripeCheckoutUrl,
+                next = new
+                {
+                    execute_header = new { name = "X-Laplace-Quote-Id", value = quote.QuoteId },
+                    note = "Step-by-step explainability is metered by trace size (depth x beam); the academic tier expands each node with evidence provenance / citations."
+                }
+            });
+        });
+
+        app.MapPost("/v1/billing/audit/quote", async (HttpRequest request, IBillingOrchestrator billing, IReportQuoteCalculator calc, CancellationToken ct) =>
+        {
+            var payload = await EndpointJson.ReadJsonAsync<AuditQuoteRequest>(request, ct);
+            if (payload is null)
+                return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
+
+            var estimate = calc.EstimateAudit(new AuditReportSpec(
+                Scope: string.IsNullOrWhiteSpace(payload.Scope) ? "summary" : payload.Scope.Trim(),
+                IncludeEvidence: payload.IncludeEvidence,
+                IncludeConsensus: payload.IncludeConsensus,
+                IncludeConvergence: payload.IncludeConvergence,
+                Academic: payload.Academic));
+            var tenant = string.IsNullOrWhiteSpace(payload.Tenant)
+                ? AppComposition.ResolveTenant(request)
+                : payload.Tenant.Trim();
+
+            BillingQuote quote;
+            try
+            {
+                var units = (int)Math.Min(int.MaxValue, estimate.BillableUnits);
+                quote = await billing.CreatePreflightQuoteAsync(tenant, estimate.ServiceId, units, ct);
+            }
+            catch (ArgumentException ex)
+            {
+                return EndpointJson.BadRequest("invalid_request_error", ex.Message);
+            }
+
+            return Results.Json(new
+            {
+                quote_id = quote.QuoteId,
+                tenant = quote.Tenant,
+                service_id = quote.ServiceId,
+                scope = string.IsNullOrWhiteSpace(payload.Scope) ? "summary" : payload.Scope.Trim(),
+                academic = payload.Academic,
+                metered_items = estimate.MeteredItems,
+                billable_units = quote.Units,
+                unit = estimate.UnitName,
+                items_per_unit = estimate.ItemsPerUnit,
+                amount_cents = quote.AmountCents,
+                currency = quote.Currency,
+                status = quote.Status,
+                expires_at = quote.ExpiresAt,
+                stripe_checkout_url = quote.StripeCheckoutUrl,
+                next = new
+                {
+                    execute_header = new { name = "X-Laplace-Quote-Id", value = quote.QuoteId },
+                    note = "Audit reports are metered by selected sections, scope breadth, and academic provenance expansion."
+                }
+            });
+        });
+
+        app.MapPost("/v1/billing/visualization/quote", async (HttpRequest request, IBillingOrchestrator billing, IReportQuoteCalculator calc, CancellationToken ct) =>
+        {
+            var payload = await EndpointJson.ReadJsonAsync<VisualizationQuoteRequest>(request, ct);
+            if (payload is null)
+                return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
+            if (payload.Nodes < 1 || payload.Edges < 0)
+                return EndpointJson.BadRequest("invalid_request_error", "Field 'nodes' must be >= 1 and 'edges' must be >= 0.");
+
+            var estimate = calc.EstimateVisualization(new VisualizationExportSpec(
+                Nodes: payload.Nodes,
+                Edges: payload.Edges,
+                IncludeGeometry: payload.IncludeGeometry,
+                IncludeEvidence: payload.IncludeEvidence,
+                Interactive: payload.Interactive));
+            var tenant = string.IsNullOrWhiteSpace(payload.Tenant)
+                ? AppComposition.ResolveTenant(request)
+                : payload.Tenant.Trim();
+
+            BillingQuote quote;
+            try
+            {
+                var units = (int)Math.Min(int.MaxValue, estimate.BillableUnits);
+                quote = await billing.CreatePreflightQuoteAsync(tenant, estimate.ServiceId, units, ct);
+            }
+            catch (ArgumentException ex)
+            {
+                return EndpointJson.BadRequest("invalid_request_error", ex.Message);
+            }
+
+            return Results.Json(new
+            {
+                quote_id = quote.QuoteId,
+                tenant = quote.Tenant,
+                service_id = quote.ServiceId,
+                nodes = payload.Nodes,
+                edges = payload.Edges,
+                include_geometry = payload.IncludeGeometry,
+                include_evidence = payload.IncludeEvidence,
+                interactive = payload.Interactive,
+                format = string.IsNullOrWhiteSpace(payload.Format) ? "json" : payload.Format.Trim(),
+                metered_items = estimate.MeteredItems,
+                billable_units = quote.Units,
+                unit = estimate.UnitName,
+                items_per_unit = estimate.ItemsPerUnit,
+                amount_cents = quote.AmountCents,
+                currency = quote.Currency,
+                status = quote.Status,
+                expires_at = quote.ExpiresAt,
+                stripe_checkout_url = quote.StripeCheckoutUrl,
+                next = new
+                {
+                    execute_header = new { name = "X-Laplace-Quote-Id", value = quote.QuoteId },
+                    note = "Visualization exports are metered by graph size, geometry inclusion, evidence overlays, and interactive output."
+                }
+            });
+        });
+
+        app.MapPost("/v1/billing/recipe/quote", async (HttpRequest request, IBillingOrchestrator billing, IReportQuoteCalculator calc, CancellationToken ct) =>
+        {
+            var payload = await EndpointJson.ReadJsonAsync<RecipeQuoteRequest>(request, ct);
+            if (payload is null)
+                return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
+            if (string.IsNullOrWhiteSpace(payload.Action))
+                return EndpointJson.BadRequest("invalid_request_error", "Field 'action' is required.");
+            if (payload.ContentItems < 0)
+                return EndpointJson.BadRequest("invalid_request_error", "Field 'content_items' must be >= 0.");
+
+            var estimate = calc.EstimateRecipe(new RecipeWorkSpec(
+                Action: payload.Action,
+                ContentItems: payload.ContentItems,
+                Commercial: payload.Commercial,
+                PrivateExport: payload.PrivateExport));
+            var tenant = string.IsNullOrWhiteSpace(payload.Tenant)
+                ? AppComposition.ResolveTenant(request)
+                : payload.Tenant.Trim();
+
+            BillingQuote quote;
+            try
+            {
+                var units = (int)Math.Min(int.MaxValue, estimate.BillableUnits);
+                quote = await billing.CreatePreflightQuoteAsync(tenant, estimate.ServiceId, units, ct);
+            }
+            catch (ArgumentException ex)
+            {
+                return EndpointJson.BadRequest("invalid_request_error", ex.Message);
+            }
+
+            return Results.Json(new
+            {
+                quote_id = quote.QuoteId,
+                tenant = quote.Tenant,
+                service_id = quote.ServiceId,
+                action = payload.Action.Trim(),
+                content_items = payload.ContentItems,
+                commercial = payload.Commercial,
+                private_export = payload.PrivateExport,
+                metered_items = estimate.MeteredItems,
+                billable_units = quote.Units,
+                unit = estimate.UnitName,
+                items_per_unit = estimate.ItemsPerUnit,
+                amount_cents = quote.AmountCents,
+                currency = quote.Currency,
+                status = quote.Status,
+                expires_at = quote.ExpiresAt,
+                stripe_checkout_url = quote.StripeCheckoutUrl,
+                next = new
+                {
+                    execute_header = new { name = "X-Laplace-Quote-Id", value = quote.QuoteId },
+                    note = "Recipe quotes cover publishing, access, compilation, commercial use, and private content export."
                 }
             });
         });

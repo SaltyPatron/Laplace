@@ -57,7 +57,7 @@ BEGIN
 
     -- (a) ORDER-INVARIANCE: stage A,B then materialize; compare against B,A.
     PERFORM create_period_staging();
-    INSERT INTO consensus_period_staging_0 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts) VALUES
+    INSERT INTO consensus_period_staging_0 (subject_id, type_id, object_id, phi, games, sum_score, last_ts) VALUES
         (subjA, kind, objA, phi, 2, s_conf * 2, now()),
         (subjB, kind, objB, phi, 3, s_ref  * 3, now());
     PERFORM materialize_period_consensus();
@@ -67,7 +67,7 @@ BEGIN
     DELETE FROM consensus WHERE subject_id IN (subjA, subjB);
 
     PERFORM create_period_staging();
-    INSERT INTO consensus_period_staging_0 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts) VALUES
+    INSERT INTO consensus_period_staging_0 (subject_id, type_id, object_id, phi, games, sum_score, last_ts) VALUES
         (subjB, kind, objB, phi, 3, s_ref  * 3, now()),
         (subjA, kind, objA, phi, 2, s_conf * 2, now());
     PERFORM materialize_period_consensus();
@@ -82,13 +82,13 @@ BEGIN
     -- (b) CROSS-PERIOD: period 1 folds 2 confirm games for C; period 2 folds 3
     -- more onto the SAME row (prior = current row).
     PERFORM create_period_staging();
-    INSERT INTO consensus_period_staging_0 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
+    INSERT INTO consensus_period_staging_0 (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
         VALUES (subjC, kind, objC, phi, 2, s_conf * 2, now());
     PERFORM materialize_period_consensus();
     SELECT rating, rd, witness_count INTO c1_r, c1_rd, c1_wc FROM consensus WHERE subject_id = subjC;
 
     PERFORM create_period_staging();
-    INSERT INTO consensus_period_staging_0 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
+    INSERT INTO consensus_period_staging_0 (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
         VALUES (subjC, kind, objC, phi, 3, s_conf * 3, now());
     PERFORM materialize_period_consensus();
     SELECT count(*) INTO c_rows FROM consensus WHERE subject_id = subjC;
@@ -101,7 +101,7 @@ BEGIN
 
     -- (c) φ-UNIFORMITY: mixed φ for one relation within one period fails loud.
     PERFORM create_period_staging();
-    INSERT INTO consensus_period_staging_0 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts) VALUES
+    INSERT INTO consensus_period_staging_0 (subject_id, type_id, object_id, phi, games, sum_score, last_ts) VALUES
         (subjA, kind, objA, phi,  1, s_conf, now()),
         (subjA, kind, objA, phi2, 1, s_conf, now());
     BEGIN
@@ -118,9 +118,9 @@ BEGIN
     -- behind by (c) must vanish, not fold).
     PERFORM create_period_staging(2);
     DELETE FROM consensus WHERE subject_id IN (subjA, subjB);
-    INSERT INTO consensus_period_staging_0 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
+    INSERT INTO consensus_period_staging_0 (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
         VALUES (subjA, kind, objA, phi, 2, s_conf * 2, now());
-    INSERT INTO consensus_period_staging_1 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
+    INSERT INTO consensus_period_staging_1 (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
         VALUES (subjB, kind, objB, phi, 3, s_ref * 3, now());
     IF materialize_period_consensus() <> 2 THEN
         RAISE EXCEPTION 'FAIL: NULL fold did not cover both partitions';
@@ -135,9 +135,9 @@ BEGIN
     -- (f) PER-PARTITION fold (the K parallel sessions' call shape): a
     -- partition arg folds exactly its partition; both partitions drop after.
     PERFORM create_period_staging(2);
-    INSERT INTO consensus_period_staging_0 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
+    INSERT INTO consensus_period_staging_0 (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
         VALUES (subjC, kind, objC, phi, 1, s_conf, now());
-    INSERT INTO consensus_period_staging_1 (subject_id, kind_id, object_id, phi, games, sum_score, last_ts)
+    INSERT INTO consensus_period_staging_1 (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
         VALUES (subjA, kind, objB, phi, 1, s_conf, now());
     IF materialize_period_consensus(0) <> 1 OR materialize_period_consensus(1) <> 1 THEN
         RAISE EXCEPTION 'FAIL: per-partition fold did not materialize exactly its partition';
@@ -204,7 +204,7 @@ BEGIN
     traj := public.ST_MakeLine(ARRAY[
         public.laplace_mantissa_pack(chH, 1, 1, (1 + (104::bigint << 31))),
         public.laplace_mantissa_pack(chI, 2, 1, (1 + (105::bigint << 31)))]);
-    INSERT INTO physicalities (id, entity_id, source_id, kind, coord, hilbert_index,
+    INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
     VALUES (laplace_hash128_blake3('test/inband/phys'), word, src, 1,
             public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),

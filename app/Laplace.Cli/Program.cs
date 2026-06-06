@@ -104,6 +104,7 @@ internal static class Program
                 "decompose"    => Decompose(string.Join(' ', args[1..])),
                 "inspect"      => await InspectAsync(string.Join(' ', args[1..])),
                 "converse"     => await ConverseAsync(string.Join(' ', args[1..])),
+                "cognize"      => await CognizeAsync(string.Join(' ', args[1..])),
                 "nn"           => await NearestNeighborsAsync(string.Join(' ', args[1..])),
                 "generate"     => await GenerateAsync(args[1..]),
                 "roundtrip"    => Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
@@ -285,6 +286,65 @@ internal static class Program
         sw.Stop();
         if (!any) Console.WriteLine("substrate: (no reply rows)");
         Console.WriteLine($"           [{sw.Elapsed.TotalMilliseconds:F1} ms, one round-trip]");
+        return 0;
+    }
+
+    // === cognize: the Gödel cognition loop (phase 1 — answer-with-proof-and-gaps) ===
+    // C# orchestration ONLY (the layer law): it SEQUENCES the substrate's reads — the
+    // answer (respond(), which routes to reason/relatedness/define/… ranked-μ reads) and
+    // then the GAPS (gaps(): the conceptual arenas the substrate holds NO consensus for —
+    // the `unknown`, the engine's research agenda). What conventional inference can't do:
+    // separate "no" from "not witnessed", and say so. Phase 2 adds the native cascade for
+    // multi-hop goals, verdicts written back as content, and self-tasking on the gaps.
+    private static async Task<int> CognizeAsync(string goal)
+    {
+        if (string.IsNullOrWhiteSpace(goal))
+        {
+            Console.Error.WriteLine("usage: laplace cognize \"<goal>\"  (e.g. \"what is a dog\", \"how are whale and dolphin related\")");
+            return 2;
+        }
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var conn = await ds.OpenConnectionAsync();
+        var sw = Stopwatch.StartNew();
+
+        Console.WriteLine($"goal     : {goal}");
+
+        // 1. the answer + proof path + confidence — the reads, sequenced.
+        Console.WriteLine("── answer ─────────────────────────────────────────");
+        bool any = false;
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT reply, eff_mu, witnesses FROM laplace.respond(@p)";
+            cmd.Parameters.AddWithValue("p", goal);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                any = true;
+                string reply = r.IsDBNull(0) ? "" : r.GetString(0);
+                string mu = r.IsDBNull(1) ? "" : $"  μ={r.GetDecimal(1):F1}";
+                string w = r.IsDBNull(2) ? "" : $" witnesses={r.GetInt64(2)}";
+                Console.WriteLine($"  {reply}{mu}{w}");
+            }
+        }
+        if (!any) Console.WriteLine("  (the substrate holds no answer to this yet)");
+
+        // 2. the GAPS — what the substrate does NOT hold about the topic: the
+        //    research agenda, named honestly rather than confabulated.
+        Console.WriteLine("── gaps (unwitnessed arenas — the research agenda) ──");
+        var gaps = new List<string>();
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT missing_arena FROM laplace.gaps(laplace.resolve_last_word(@p))";
+            cmd.Parameters.AddWithValue("p", goal);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) if (!r.IsDBNull(0)) gaps.Add(r.GetString(0));
+        }
+        Console.WriteLine(gaps.Count > 0
+            ? $"  {string.Join(", ", gaps)}"
+            : "  (none — every conceptual arena is witnessed)");
+
+        sw.Stop();
+        Console.WriteLine($"           [{sw.Elapsed.TotalMilliseconds:F1} ms, cognition over consensus reads]");
         return 0;
     }
 
@@ -760,7 +820,7 @@ internal static class Program
             // guard uses (evidence_count over the completion-marker kind).
             await using var chkCmd = chkConn.CreateCommand();
             chkCmd.CommandText =
-                "SELECT laplace.evidence_count(p_kind => $2, p_source => $1) > 0";
+                "SELECT laplace.evidence_count(p_type => $2, p_source => $1) > 0";
             chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = modelSource.ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
             chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = Laplace.Ingestion.LayerCompletion.KindId(dec.LayerOrder).ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
             bool alreadyIngested = (bool)(await chkCmd.ExecuteScalarAsync() ?? false);
@@ -1536,7 +1596,7 @@ internal static class Program
         async Task<long> KindCount(string kindName)
         {
             await using var c = conn.CreateCommand();
-            c.CommandText = "SELECT laplace.evidence_count(p_kind => laplace.kind_id($1))";
+            c.CommandText = "SELECT laplace.evidence_count(p_type => laplace.relation_type_id($1))";
             c.Parameters.AddWithValue(kindName);
             return (long)(await c.ExecuteScalarAsync())!;
         }

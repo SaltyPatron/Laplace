@@ -234,7 +234,7 @@ BEGIN
     /* SubstrateCanonical HAS_TRUST_CLASS TrustClass_SubstrateMandate —
      * a categorical confirm (outcome = 2). */
     INSERT INTO attestations (
-        id, subject_id, kind_id, object_id, source_id, context_id,
+        id, subject_id, type_id, object_id, source_id, context_id,
         outcome, last_observed_at, observation_count
     ) VALUES (
         public.laplace_hash128_merkle(0::smallint, ARRAY[

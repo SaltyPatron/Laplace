@@ -34,10 +34,10 @@ PG_FUNCTION_INFO_V1(pg_laplace_generate_greedy);
 #define GENERATE_NODE_BUDGET 1000000
 
 static const char *EDGE_QUERY =
-    "SELECT c.object_id, c.kind_id, c.rating, c.rd, c.witness_count "
+    "SELECT c.object_id, c.type_id, c.rating, c.rd, c.witness_count "
     "FROM laplace.consensus c "
     "WHERE c.subject_id = $1 AND c.object_id IS NOT NULL "
-    "  AND ($2::bytea IS NULL OR c.kind_id = $2) "
+    "  AND ($2::bytea IS NULL OR c.type_id = $2) "
     "  AND NOT laplace.refuted(c.rating, c.rd) "
     "  AND NOT (c.object_id = ANY ($4::bytea[])) "
     "ORDER BY laplace.eff_mu(c.rating, c.rd) DESC "

@@ -79,7 +79,7 @@ CREATE FUNCTION constituents(p_id bytea)
         SELECT p.trajectory AS traj
         FROM physicalities p
         WHERE p.entity_id = p_id
-          AND p.kind = 1                 -- Content (PhysicalityKind.Content)
+          AND p.type = 1                 -- Content (PhysicalityKind.Content)
           AND p.trajectory IS NOT NULL
         ORDER BY p.source_id             -- deterministic; content law: identical across sources
         LIMIT 1

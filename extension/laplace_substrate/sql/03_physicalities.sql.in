@@ -5,14 +5,14 @@
  * one source: CONTENT (decomposition-bearing view; trajectory populated),
  * BUILDING_BLOCK (used-as-constituent view), or PROJECTION (source-embedding
  * space view). PK is the physicality's own id (content-addressed BLAKE3 of
- * the row's canonical-form bytes). UNIQUE (entity_id, source_id, kind) enforces
- * one physicality per (entity, source, kind) tuple. */
+ * the row's canonical-form bytes). UNIQUE (entity_id, source_id, type) enforces
+ * one physicality per (entity, source, type) tuple. */
 
 CREATE TABLE physicalities (
     id                 bytea            PRIMARY KEY CHECK (octet_length(id) = 16),
     entity_id          bytea            NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
     source_id          bytea            NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-    kind               smallint         NOT NULL,
+    type               smallint         NOT NULL,
     -- PostGIS typmod enforces dims + type natively — no CHECK needed. coord is the
     -- entity's 4D position: always a PointZM (radius_origin reads ST_X/Y/Z/M off it).
     coord              geometry(PointZM)    NOT NULL,
@@ -28,15 +28,15 @@ CREATE TABLE physicalities (
     alignment_residual double precision,
     source_dim         integer          CHECK (source_dim IS NULL OR source_dim > 0),
     observed_at        timestamptz      NOT NULL DEFAULT now(),
-    UNIQUE (entity_id, source_id, kind)
+    UNIQUE (entity_id, source_id, type)
 );
 
 COMMENT ON TABLE physicalities IS
-    'Per-source per-kind 4D representations. One-to-many entity -> physicality. Same entity may have many physicalities (one per source x per kind). kind axis: 1=CONTENT (decomposition view; trajectory populated), 2=BUILDING_BLOCK (used-as-constituent view), 3=PROJECTION (source-embedding-space input-direction view via Procrustes alignment), 4=PROJECTION_OUTPUT (source-embedding-space output-direction view, e.g. lm_head; allows untied input/output embeddings to coexist on the same entity under UNIQUE(entity_id, source_id, kind)).';
+    'Per-source per-kind 4D representations. One-to-many entity -> physicality. Same entity may have many physicalities (one per source x per kind). type axis: 1=CONTENT (decomposition view; trajectory populated), 2=BUILDING_BLOCK (used-as-constituent view), 3=PROJECTION (source-embedding-space input-direction view via Procrustes alignment), 4=PROJECTION_OUTPUT (source-embedding-space output-direction view, e.g. lm_head; allows untied input/output embeddings to coexist on the same entity under UNIQUE(entity_id, source_id, type)).';
 
 COMMENT ON COLUMN physicalities.id IS
     'Content-addressed BLAKE3-128 of canonical (entity_id, source_id, kind, coord, trajectory) bytes. Lets attestations / higher-tier physicalities reference a specific physicality if needed.';
-COMMENT ON COLUMN physicalities.kind IS
+COMMENT ON COLUMN physicalities.type IS
     'Physicality kind: 1=CONTENT, 2=BUILDING_BLOCK, 3=PROJECTION (input-direction), 4=PROJECTION_OUTPUT (output-direction; lm_head). Extensible. Values mirror substrate-canonical PhysicalityKind entities (bootstrapped Stage 2).';
 COMMENT ON COLUMN physicalities.coord IS
     'Content: 4D geometric position of this entity under this source/kind view. PostGIS geometry with Z+M = 4D.';

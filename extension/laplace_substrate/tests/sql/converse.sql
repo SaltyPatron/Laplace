@@ -45,14 +45,14 @@ DECLARE
     gloss1   bytea := word_id('G');     -- codepoint leaf gloss: renders 'G'
     lang_en  bytea := laplace_hash128_blake3('test/converse/lang_en');
     lang_de  bytea := laplace_hash128_blake3('test/converse/lang_de');
-    k_sense  bytea := kind_id('HAS_SENSE');
-    k_senseof bytea := kind_id('IS_SENSE_OF');
-    k_def    bytea := kind_id('DEFINES');
-    k_member bytea := kind_id('IS_TRANSLATION_OF');
-    k_lang   bytea := kind_id('HAS_LANGUAGE');
-    k_isa    bytea := kind_id('IS_A');
-    k_causes bytea := kind_id('CAUSES');
-    k_anto   bytea := kind_id('IS_ANTONYM_OF');
+    k_sense  bytea := relation_type_id('HAS_SENSE');
+    k_senseof bytea := relation_type_id('IS_SENSE_OF');
+    k_def    bytea := relation_type_id('DEFINES');
+    k_member bytea := relation_type_id('IS_TRANSLATION_OF');
+    k_lang   bytea := relation_type_id('HAS_LANGUAGE');
+    k_isa    bytea := relation_type_id('IS_A');
+    k_causes bytea := relation_type_id('CAUSES');
+    k_anto   bytea := relation_type_id('IS_ANTONYM_OF');
     neutral  bigint := 1500000000000;
     sharp_rd bigint := 30000000000;
 BEGIN
@@ -90,7 +90,7 @@ BEGIN
     --   synset1 —IS_TRANSLATION_OF→ {dog, p, h};  synset1 —IS_A→ synset2 —IS_A→ syn_bad(REFUTED)
     --   synset2 —IS_TRANSLATION_OF→ {c};  dog —CAUSES→ h;  h —CAUSES→ synset1 (context support)
     --   synset1 —IS_ANTONYM_OF→ h;  dog/p/c —HAS_LANGUAGE→ en ; h —HAS_LANGUAGE→ de
-    INSERT INTO consensus (id, subject_id, kind_id, object_id,
+    INSERT INTO consensus (id, subject_id, type_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)
     VALUES
       (consensus_id(w_dog,  k_sense,   sense1),  w_dog,  k_sense,   sense1,  neutral + 200000000000, sharp_rd, 60000000, 3, now()),
@@ -156,17 +156,17 @@ SELECT (SELECT sn.synset_id FROM senses(word_id('dog'), ARRAY[word_id('h')]) sn 
 SELECT realize(word_id('p'), NULL) AS leaf_realizes;
 SELECT realize(laplace_hash128_blake3('test/converse/synset1'),
                laplace_hash128_blake3('test/converse/lang_en')) AS synset_realizes_member;
-SELECT kind_label(kind_id('IS_A')) AS isa_label;
+SELECT kind_label(relation_type_id('IS_A')) AS isa_label;
 SELECT realize_path(ARRAY[laplace_hash128_blake3('test/converse/synset1'),
                           laplace_hash128_blake3('test/converse/synset2')],
-                    ARRAY[kind_id('IS_A')],
+                    ARRAY[relation_type_id('IS_A')],
                     laplace_hash128_blake3('test/converse/lang_en')) AS realized_path;
 
 -- ── 8. arena reads: describe + related(_in) ──────────────────────────────────
-SELECT kind, fact, witnesses FROM describe(word_id('dog'));
+SELECT type, fact, witnesses FROM describe(word_id('dog'));
 SELECT reply FROM respond('antonyms of dog');
 -- incoming arena: what causes synset1 ⇒ h (h —CAUSES→ synset1)
-SELECT fact FROM related_in(laplace_hash128_blake3('test/converse/synset1'), kind_id('CAUSES'));
+SELECT fact FROM related_in(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('CAUSES'));
 
 -- ── 9. taxonomy check: is X a Y ──────────────────────────────────────────────
 SELECT reply FROM respond('is a dog a c?');
@@ -175,11 +175,11 @@ SELECT reply FROM respond('is h a c?');
 -- ── 10. walks: kind emission + refuted-edge pruning ─────────────────────────
 -- synset1 —IS_A→ synset2 —IS_A→ syn_bad: the second edge is REFUTED
 -- (rating + 2·rd < neutral) so the walk stops after one step.
-SELECT g.step, kind_label(g.kind_id) AS kind,
+SELECT g.step, kind_label(g.type_id) AS kind,
        g.entity_id = laplace_hash128_blake3('test/converse/synset2') AS is_synset2
-FROM generate_greedy(laplace_hash128_blake3('test/converse/synset1'), kind_id('IS_A')) g;
+FROM generate_greedy(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A')) g;
 SELECT count(*) AS tree_nodes
-FROM generate_tree(laplace_hash128_blake3('test/converse/synset1'), kind_id('IS_A'), 4, 5);
+FROM generate_tree(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A'), 4, 5);
 SELECT reply, eff_mu FROM respond('walk p');
 
 -- ── 11. the loop: converse() turns + anaphora ────────────────────────────────
@@ -188,5 +188,30 @@ SELECT reply FROM converse('what about its synonyms?', convert_to('s1', 'UTF8'))
 SELECT reply, witnesses FROM converse('and its causes?', convert_to('s1', 'UTF8'));
 SELECT ord, prompt, resolved_id = word_id('dog') AS topic_is_dog
 FROM converse_turns WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
+
+-- ── 12. reasoning engine: reason() / relatedness / gaps / epistemic_status ────
+-- reason(dog, h): the antonym arena links dog's sense to h (synset1 —IS_ANTONYM_OF→ h),
+-- a 1-hop lateral edge — the cross-arena generalization of isa_path off the IS_A plane.
+SELECT plane AS reason_plane FROM reason(word_id('dog'), word_id('h'));
+
+-- gaps: the conceptual arenas holding no non-refuted consensus for dog (the `unknown`)
+SELECT array_agg(missing_arena ORDER BY missing_arena) AS dog_gaps FROM gaps(word_id('dog'));
+
+-- epistemic_status: dog's IS_A edge is well-witnessed ⇒ confirmed (signed-μ classification)
+SELECT bool_and(status = 'confirmed') AS isa_confirmed
+FROM epistemic_status(word_id('dog')) WHERE type = 'is a';
+
+-- relatedness: the fused read names the antonym arena; no PRECEDES seeded ⇒ usage 0
+SELECT plane AS rel_plane, usage AS rel_usage FROM relatedness(word_id('dog'), word_id('h'));
+
+-- respond() routes "how are X and Y related" through the engine
+SELECT reply LIKE '%antonym%' AS related_reply_mentions_antonym
+FROM respond('how are dog and h related');
+
+-- contrast: the attestation set-difference. dog's sense holds an IS_A ancestor
+-- (synset2, realized 'c'), a CAUSES and an IS_ANTONYM_OF edge (both → h); the bare
+-- word 'c' holds no comparable attestations ⇒ every row is distinctive to dog (x-only).
+SELECT holder, type, fact FROM contrast(word_id('dog'), word_id('c'))
+ORDER BY holder, type, fact;
 
 ROLLBACK;

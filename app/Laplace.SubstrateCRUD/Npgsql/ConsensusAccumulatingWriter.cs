@@ -301,7 +301,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         await using var conn = await _ds.OpenConnectionAsync(ct);
         await using var stream = await conn.BeginRawBinaryCopyAsync(
             $"COPY laplace.consensus_period_staging_{partition} "
-          + "(subject_id, kind_id, object_id, phi, games, sum_score, last_ts) "
+          + "(subject_id, type_id, object_id, phi, games, sum_score, last_ts) "
           + "FROM STDIN (FORMAT BINARY)", ct);
 
         var buffer = new byte[4 * 1024 * 1024];

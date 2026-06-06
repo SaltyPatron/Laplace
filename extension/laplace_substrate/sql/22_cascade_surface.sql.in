@@ -1,0 +1,75 @@
+/* 22_cascade_surface.sql.in — the consumer surface over the native cascade SRF.
+ *
+ * astar_path(): defaults the conceptual arenas (the relation planes) so callers
+ *   pass entities + a goal region, not type-id arrays.
+ * cascade(): text in, rendered chain out — the least-cost path between two words
+ *   via the compiled kernel. This is the native-kernel counterpart of reason()'s
+ *   recursive-SQL stopgap; the cleanup pass repoints reason()/respond() onto it.
+ *
+ * Loads after 18 (type_id resolver) and 20 (resolve_last_word / senses / realize),
+ * which it references. */
+
+-- arena-defaulted cascade: the conceptual relation planes, Glicko-μ-weighted.
+CREATE OR REPLACE FUNCTION astar_path(
+    p_start bytea, p_goals bytea[], p_max_depth int DEFAULT 7,
+    p_types bytea[] DEFAULT NULL, p_directed bool DEFAULT false)
+    RETURNS TABLE(step int, entity_id bytea, g double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT * FROM astar_path_raw(p_start, p_goals,
+        COALESCE(p_types, ARRAY[
+            type_id('IS_A'), type_id('IS_INSTANCE_OF'), type_id('IS_SYNONYM_OF'),
+            type_id('IS_SIMILAR_TO'), type_id('HAS_PART'), type_id('HAS_MEMBER'),
+            type_id('HAS_SUBSTANCE'), type_id('DERIVATIONALLY_RELATED'),
+            type_id('PERTAINS_TO'), type_id('ALSO_SEE'), type_id('IS_ANTONYM_OF'),
+            type_id('HAS_ATTRIBUTE'), type_id('IN_VERB_GROUP_WITH')]),
+        p_max_depth, p_directed)
+$$;
+COMMENT ON FUNCTION astar_path(bytea, bytea[], int, bytea[], bool) IS
+    'Cascade with the conceptual arenas defaulted (IS_A / part / member / synonym / antonym / …): '
+    'least-cost path from p_start into p_goals via the native astar kernel. p_types overrides the set.';
+
+-- text in, rendered chain out: "the least-cost route from X to Y", direction-aware.
+-- The kernel returns the entity path; the edge type + orientation per hop are
+-- re-derived here (set logic — the cheapest edge between adjacent nodes) for the
+-- realize_path render. Empty = a witnessed GAP (no route within p_max_depth).
+CREATE OR REPLACE FUNCTION cascade(p_x text, p_y text, p_max_depth int DEFAULT 7)
+    RETURNS TABLE(chain text, cost double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH x AS (SELECT resolve_last_word(p_x) AS id),
+         goals AS (
+            SELECT array_agg(g) AS ids
+            FROM (SELECT resolve_last_word(p_y) AS g
+                  UNION
+                  SELECT sn.synset_id FROM senses(resolve_last_word(p_y)) sn) s),
+         p AS (
+            SELECT ap.step, ap.entity_id, ap.g,
+                   lag(ap.entity_id) OVER (ORDER BY ap.step) AS prev
+            FROM astar_path((SELECT id FROM x), (SELECT ids FROM goals), p_max_depth) ap),
+         hop AS (        -- the cheapest edge bridging each adjacent pair, with orientation
+            SELECT p.step, p.entity_id, p.g,
+                   e.type_id AS via_type,
+                   CASE WHEN e.subject_id = p.prev THEN 1 ELSE -1 END AS via_dir
+            FROM p
+            LEFT JOIN LATERAL (
+                SELECT c.type_id, c.subject_id
+                FROM consensus c
+                WHERE ((c.subject_id = p.prev AND c.object_id = p.entity_id)
+                    OR (c.subject_id = p.entity_id AND c.object_id = p.prev))
+                  AND NOT refuted(c.rating, c.rd)
+                ORDER BY eff_mu(c.rating, c.rd) DESC
+                LIMIT 1) e ON p.prev IS NOT NULL)
+    SELECT realize_path(
+               array_agg(hop.entity_id ORDER BY hop.step),
+               (array_agg(hop.via_type ORDER BY hop.step))[2:],
+               (array_agg(hop.via_dir  ORDER BY hop.step))[2:],
+               word_language((SELECT id FROM x))),
+           max(hop.g)
+    FROM hop
+    HAVING count(*) > 1
+$$;
+COMMENT ON FUNCTION cascade(text, text, int) IS
+    'Consumer cascade: the least-cost path between two words via the compiled kernel, rendered '
+    'direction-aware ("whale ←is a— toothed whale ←is a— dolphin"); cost = accumulated μ-weighted '
+    'hop cost. The native-kernel path read; empty = a witnessed gap.';

@@ -67,10 +67,13 @@ jobs:
           GATE_SPEC: ${{ inputs.gate }}
         run: |
           gate() {
-            n=$(psql -d "${{ inputs.database }}" -U laplace_admin -v ON_ERROR_STOP=1 -tAc "SELECT laplace.consensus_count(laplace.kind_id('$1'));")
+            n=$(psql -d "${{ inputs.database }}" -U laplace_admin -v ON_ERROR_STOP=1 -tAc "SELECT laplace.consensus_count(laplace.relation_type_id('$1'));")
             echo "gate $1: consensus=$n (min $2)"
             [ "$n" -ge "$2" ] || { echo "::error::gate failed: $1 consensus $n < $2"; exit 1; }
           }
+          # NB: `[ -n "$kind" ] && gate ...` poisons the exit code when the
+          # block scalar's trailing newline yields a final empty read (the
+          # 2026-06-05 first-exercise failure: all gates passed, step exited 1).
           printf '%s\n' "$GATE_SPEC" | while read -r kind min; do
-            [ -n "$kind" ] && gate "$kind" "$min"
+            if [ -n "$kind" ]; then gate "$kind" "$min"; fi
           done

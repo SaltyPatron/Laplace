@@ -32,10 +32,10 @@ static const uint8_t kCopyBinarySignature[11] = {
 static const char* const kEntityColumns =
     "id, tier, type_id, first_observed_by";
 static const char* const kPhysicalityColumns =
-    "id, entity_id, source_id, kind, coord, hilbert_index, trajectory, "
+    "id, entity_id, source_id, type, coord, hilbert_index, trajectory, "
     "n_constituents, alignment_residual, source_dim, observed_at";
 static const char* const kAttestationColumns =
-    "id, subject_id, kind_id, object_id, source_id, context_id, "
+    "id, subject_id, type_id, object_id, source_id, context_id, "
     "outcome, last_observed_at, observation_count";
 
 /* Per-table column count (matches the field_count int16 prefix in each tuple). */
@@ -266,7 +266,7 @@ int intent_stage_add_physicality(
     const hash128_t*    id,
     const hash128_t*    entity_id,
     const hash128_t*    source_id,
-    int16_t             kind,
+    int16_t             type,
     const double        coord[4],
     const hilbert128_t* hilbert_index,
     const double*       trajectory_xyzm,
@@ -286,7 +286,7 @@ int intent_stage_add_physicality(
     if (buf_append_field_hash128(b, id) != 0) return -1;
     if (buf_append_field_hash128(b, entity_id) != 0) return -1;
     if (buf_append_field_hash128(b, source_id) != 0) return -1;
-    if (buf_append_field_int2(b, kind) != 0) return -1;
+    if (buf_append_field_int2(b, type) != 0) return -1;
     if (buf_append_field_pointzm(b, coord) != 0) return -1;
     if (buf_append_field_bytes(b, hilbert_index->bytes, 16) != 0) return -1;
     if (trajectory_xyzm == NULL || trajectory_n_vertices == 0) {
@@ -320,14 +320,14 @@ int intent_stage_add_attestation(
     intent_stage_t*  stage,
     const hash128_t* id,
     const hash128_t* subject_id,
-    const hash128_t* kind_id,
+    const hash128_t* type_id,
     const hash128_t* object_id,
     const hash128_t* source_id,
     const hash128_t* context_id,
     int16_t          outcome,
     int64_t          last_observed_at_unix_us,
     int64_t          observation_count) {
-    if (!stage || !id || !subject_id || !kind_id || !source_id) return -1;
+    if (!stage || !id || !subject_id || !type_id || !source_id) return -1;
     if (observation_count < 0) return -1;
     if (outcome < 0 || outcome > 2) return -1;
     /* Evidence row = PROVENANCE: who witnessed which relation, when, how many
@@ -339,7 +339,7 @@ int intent_stage_add_attestation(
     if (buf_append_be16(b, ATTESTATION_COL_COUNT) != 0) return -1;
     if (buf_append_field_hash128(b, id) != 0) return -1;
     if (buf_append_field_hash128(b, subject_id) != 0) return -1;
-    if (buf_append_field_hash128(b, kind_id) != 0) return -1;
+    if (buf_append_field_hash128(b, type_id) != 0) return -1;
     if (object_id) {
         if (buf_append_field_hash128(b, object_id) != 0) return -1;
     } else {

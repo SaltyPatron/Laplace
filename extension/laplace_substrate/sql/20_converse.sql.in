@@ -99,7 +99,7 @@ CREATE OR REPLACE FUNCTION word_language(p_word bytea)
     SELECT c.object_id
     FROM consensus c
     WHERE c.subject_id = p_word
-      AND c.kind_id = kind_id('HAS_LANGUAGE')
+      AND c.type_id = relation_type_id('HAS_LANGUAGE')
       AND c.object_id IS NOT NULL
     ORDER BY eff_mu(c.rating, c.rd) DESC
     LIMIT 1
@@ -119,9 +119,9 @@ CREATE OR REPLACE FUNCTION senses(p_word bytea)
            s.witness_count + ss.witness_count
     FROM consensus s
     JOIN consensus ss ON ss.subject_id = s.object_id
-                     AND ss.kind_id = kind_id('IS_SENSE_OF')
+                     AND ss.type_id = relation_type_id('IS_SENSE_OF')
     WHERE s.subject_id = p_word
-      AND s.kind_id = kind_id('HAS_SENSE')
+      AND s.type_id = relation_type_id('HAS_SENSE')
     ORDER BY eff_mu(s.rating, s.rd) + eff_mu(ss.rating, ss.rd) DESC
 $$;
 COMMENT ON FUNCTION senses(bytea) IS
@@ -139,7 +139,7 @@ CREATE OR REPLACE FUNCTION define(p_word bytea, p_limit int DEFAULT 5)
            g.witness_count
     FROM senses(p_word) sn
     JOIN consensus g ON g.subject_id = sn.synset_id
-                    AND g.kind_id = kind_id('DEFINES')
+                    AND g.type_id = relation_type_id('DEFINES')
     ORDER BY sn.eff_mu + eff_mu_display(g.rating, g.rd) DESC
     LIMIT p_limit
 $$;
@@ -159,10 +159,10 @@ CREATE OR REPLACE FUNCTION synonyms(p_word bytea, p_limit int DEFAULT 10)
                m.witness_count AS witnesses
         FROM senses(p_word) sn
         JOIN consensus m ON m.subject_id = sn.synset_id
-                        AND m.kind_id = kind_id('IS_TRANSLATION_OF')
+                        AND m.type_id = relation_type_id('IS_TRANSLATION_OF')
                         AND m.object_id <> p_word
         JOIN consensus lang ON lang.subject_id = m.object_id
-                           AND lang.kind_id = kind_id('HAS_LANGUAGE')
+                           AND lang.type_id = relation_type_id('HAS_LANGUAGE')
                            AND lang.object_id = word_language(p_word)
         ORDER BY m.object_id, eff_mu(m.rating, m.rd) DESC
     ) s
@@ -187,7 +187,7 @@ CREATE OR REPLACE FUNCTION translations(p_word bytea, p_limit int DEFAULT 24)
                m.witness_count AS witnesses
         FROM senses(p_word) sn
         JOIN consensus m ON m.subject_id = sn.synset_id
-                        AND m.kind_id = kind_id('IS_TRANSLATION_OF')
+                        AND m.type_id = relation_type_id('IS_TRANSLATION_OF')
                         AND m.object_id <> p_word
         ORDER BY m.object_id, eff_mu(m.rating, m.rd) DESC
     ) t
@@ -212,7 +212,7 @@ CREATE OR REPLACE FUNCTION hypernyms(p_word bytea, p_depth int DEFAULT 8)
         SELECT u.depth + 1, c.object_id, u.path || c.object_id
         FROM up u
         JOIN consensus c ON c.subject_id = u.syn
-                        AND c.kind_id = kind_id('IS_A')
+                        AND c.type_id = relation_type_id('IS_A')
                         AND NOT (c.object_id = ANY (u.path))
         WHERE u.depth < p_depth
     )
@@ -224,7 +224,7 @@ CREATE OR REPLACE FUNCTION hypernyms(p_word bytea, p_depth int DEFAULT 8)
            (SELECT render_text(g.object_id)
             FROM consensus g
             WHERE g.subject_id = u.syn
-              AND g.kind_id = kind_id('DEFINES')
+              AND g.type_id = relation_type_id('DEFINES')
             ORDER BY eff_mu(g.rating, g.rd) DESC
             LIMIT 1)
     FROM up u
@@ -245,7 +245,7 @@ CREATE OR REPLACE FUNCTION examples(p_word bytea, p_limit int DEFAULT 5)
            g.witness_count
     FROM senses(p_word) sn
     JOIN consensus g ON g.subject_id = sn.synset_id
-                    AND g.kind_id = kind_id('HAS_EXAMPLE')
+                    AND g.type_id = relation_type_id('HAS_EXAMPLE')
     ORDER BY sn.eff_mu + eff_mu_display(g.rating, g.rd) DESC
     LIMIT p_limit
 $$;
@@ -284,7 +284,7 @@ COMMENT ON FUNCTION prompt_state(text) IS
 
 /* ── multi-subject expansion: candidates supported by the whole state ─────── */
 
-CREATE OR REPLACE FUNCTION expansion(p_subjects bytea[], p_kind bytea DEFAULT NULL,
+CREATE OR REPLACE FUNCTION expansion(p_subjects bytea[], p_type bytea DEFAULT NULL,
                                      p_limit int DEFAULT 40)
     RETURNS TABLE(object_id bytea, support int, total_mu numeric)
     LANGUAGE sql STABLE PARALLEL SAFE
@@ -296,7 +296,7 @@ CREATE OR REPLACE FUNCTION expansion(p_subjects bytea[], p_kind bytea DEFAULT NU
     WHERE c.subject_id = ANY (p_subjects)
       AND c.object_id IS NOT NULL
       AND NOT refuted(c.rating, c.rd)
-      AND (p_kind IS NULL OR c.kind_id = p_kind)
+      AND (p_type IS NULL OR c.type_id = p_type)
     GROUP BY c.object_id
     ORDER BY count(DISTINCT c.subject_id) DESC, sum(eff_mu(c.rating, c.rd)) DESC
     LIMIT p_limit
@@ -326,9 +326,9 @@ CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
                            AND NOT refuted(c.rating, c.rd)), 0)) / 1e9)::numeric, 3)
     FROM consensus s
     JOIN consensus ss ON ss.subject_id = s.object_id
-                     AND ss.kind_id = kind_id('IS_SENSE_OF')
+                     AND ss.type_id = relation_type_id('IS_SENSE_OF')
     WHERE s.subject_id = p_word
-      AND s.kind_id = kind_id('HAS_SENSE')
+      AND s.type_id = relation_type_id('HAS_SENSE')
     ORDER BY 5 DESC
 $$;
 COMMENT ON FUNCTION senses(bytea, bytea[]) IS
@@ -346,7 +346,7 @@ CREATE OR REPLACE FUNCTION define(p_word bytea, p_context bytea[], p_limit int D
            g.witness_count
     FROM senses(p_word, p_context) sn
     JOIN consensus g ON g.subject_id = sn.synset_id
-                    AND g.kind_id = kind_id('DEFINES')
+                    AND g.type_id = relation_type_id('DEFINES')
     ORDER BY sn.score + eff_mu_display(g.rating, g.rd) DESC
     LIMIT p_limit
 $$;
@@ -356,11 +356,11 @@ COMMENT ON FUNCTION define(bytea, bytea[], int) IS
 
 /* ── realization: entity → text, in the asker''s witnessed language ────────── */
 
-CREATE OR REPLACE FUNCTION kind_label(p_kind bytea)
+CREATE OR REPLACE FUNCTION kind_label(p_type bytea)
     RETURNS text
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
-    SELECT lower(replace(regexp_replace(render(p_kind), '^substrate/kind/(.+)/v1$', '\1'),
+    SELECT lower(replace(regexp_replace(render(p_type), '^substrate/kind/(.+)/v1$', '\1'),
                          '_', ' '))
 $$;
 COMMENT ON FUNCTION kind_label(bytea) IS
@@ -381,12 +381,12 @@ CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
         (SELECT render_text(hs.subject_id)
          FROM consensus io
          JOIN consensus hs ON hs.object_id = io.subject_id
-                          AND hs.kind_id = kind_id('HAS_SENSE')
+                          AND hs.type_id = relation_type_id('HAS_SENSE')
          LEFT JOIN consensus lang ON lang.subject_id = hs.subject_id
-                                 AND lang.kind_id = kind_id('HAS_LANGUAGE')
+                                 AND lang.type_id = relation_type_id('HAS_LANGUAGE')
                                  AND lang.object_id = p_lang
          WHERE io.object_id = p_id
-           AND io.kind_id = kind_id('IS_SENSE_OF')
+           AND io.type_id = relation_type_id('IS_SENSE_OF')
            AND NOT refuted(io.rating, io.rd)
            AND NULLIF(render_text(hs.subject_id), '') IS NOT NULL
          ORDER BY (lang.object_id IS NOT NULL) DESC, eff_mu(hs.rating, hs.rd) DESC
@@ -395,10 +395,10 @@ CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
         (SELECT render_text(m.object_id)
          FROM consensus m
          LEFT JOIN consensus lang ON lang.subject_id = m.object_id
-                                 AND lang.kind_id = kind_id('HAS_LANGUAGE')
+                                 AND lang.type_id = relation_type_id('HAS_LANGUAGE')
                                  AND lang.object_id = p_lang
          WHERE m.subject_id = p_id
-           AND m.kind_id = kind_id('IS_TRANSLATION_OF')
+           AND m.type_id = relation_type_id('IS_TRANSLATION_OF')
            AND NOT refuted(m.rating, m.rd)
            AND NULLIF(render_text(m.object_id), '') IS NOT NULL
          ORDER BY (lang.object_id IS NOT NULL) DESC, eff_mu(m.rating, m.rd) DESC
@@ -412,7 +412,7 @@ CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
         -- last semantic resort: the synset's own gloss
         (SELECT render_text(g.object_id)
          FROM consensus g
-         WHERE g.subject_id = p_id AND g.kind_id = kind_id('DEFINES')
+         WHERE g.subject_id = p_id AND g.type_id = relation_type_id('DEFINES')
            AND NOT refuted(g.rating, g.rd)
          ORDER BY eff_mu(g.rating, g.rd) DESC
          LIMIT 1),
@@ -441,9 +441,31 @@ COMMENT ON FUNCTION realize_path(bytea[], bytea[], bytea) IS
     '"dog —is a→ canine —is a→ carnivore". p_kinds[i] is the edge that led to p_path[i+1] '
     '(generate_tree/generate_greedy emit exactly this shape).';
 
+-- Direction-aware variant: a reason() walk is UNDIRECTED (relatedness is
+-- symmetric), but each edge carries an orientation so the chain reads truthfully.
+-- p_dirs[i] = +1 forward (subject→object, "—kind→"), -1 reverse (object→subject,
+-- "←kind—"). "dog —is a→ canid ←is a— wolf" = dog is a canid, wolf is a canid.
+CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_kinds bytea[], p_dirs int[],
+                                        p_lang bytea DEFAULT NULL)
+    RETURNS text
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT string_agg(
+               CASE WHEN i = 1 THEN COALESCE(realize(p_path[i], p_lang), '?')
+                    ELSE CASE WHEN p_dirs[i-1] = -1
+                              THEN ' ←' || COALESCE(kind_label(p_kinds[i-1]), '?') || '— '
+                              ELSE ' —' || COALESCE(kind_label(p_kinds[i-1]), '?') || '→ '
+                         END || COALESCE(realize(p_path[i], p_lang), '?')
+               END, '' ORDER BY i)
+    FROM generate_subscripts(p_path, 1) AS i
+$$;
+COMMENT ON FUNCTION realize_path(bytea[], bytea[], int[], bytea) IS
+    'Direction-aware path render (reason()''s renderer): like realize_path/3 but p_dirs[i] '
+    'orients edge i — +1 "—kind→", -1 "←kind—" — so an undirected relatedness walk reads true.';
+
 /* ── arena reads: what every witness, of every kind, says about X ─────────── */
 
-CREATE OR REPLACE FUNCTION related(p_word bytea, p_kind bytea, p_lang bytea DEFAULT NULL,
+CREATE OR REPLACE FUNCTION related(p_word bytea, p_type bytea, p_lang bytea DEFAULT NULL,
                                    p_limit int DEFAULT 10)
     RETURNS TABLE(fact text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
@@ -459,7 +481,7 @@ CREATE OR REPLACE FUNCTION related(p_word bytea, p_kind bytea, p_lang bytea DEFA
             SELECT c.object_id, c.rating, c.rd, c.witness_count
             FROM consensus c
             WHERE c.subject_id = s.id
-              AND c.kind_id = p_kind
+              AND c.type_id = p_type
               AND c.object_id IS NOT NULL
               AND NOT refuted(c.rating, c.rd)
             ORDER BY eff_mu(c.rating, c.rd) DESC
@@ -476,7 +498,7 @@ COMMENT ON FUNCTION related(bytea, bytea, bytea, int) IS
     'One arena of X, realized: non-refuted consensus objects of the given kind from X or its '
     'synsets, ranked by μ — antonyms, parts, causes, uses … one read, any kind.';
 
-CREATE OR REPLACE FUNCTION related_in(p_word bytea, p_kind bytea, p_lang bytea DEFAULT NULL,
+CREATE OR REPLACE FUNCTION related_in(p_word bytea, p_type bytea, p_lang bytea DEFAULT NULL,
                                       p_limit int DEFAULT 10)
     RETURNS TABLE(fact text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
@@ -492,7 +514,7 @@ CREATE OR REPLACE FUNCTION related_in(p_word bytea, p_kind bytea, p_lang bytea D
             SELECT c.subject_id, c.rating, c.rd, c.witness_count
             FROM consensus c
             WHERE c.object_id = s.id
-              AND c.kind_id = p_kind
+              AND c.type_id = p_type
               AND NOT refuted(c.rating, c.rd)
             ORDER BY eff_mu(c.rating, c.rd) DESC
             LIMIT p_limit          -- per-object bound via consensus_object_btree
@@ -511,7 +533,7 @@ COMMENT ON FUNCTION related_in(bytea, bytea, bytea, int) IS
 
 CREATE OR REPLACE FUNCTION describe(p_word bytea, p_lang bytea DEFAULT NULL,
                                     p_limit int DEFAULT 24)
-    RETURNS TABLE(kind text, fact text, eff_mu numeric, witnesses bigint)
+    RETURNS TABLE(type text, fact text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     WITH subj(id) AS (
@@ -519,21 +541,21 @@ CREATE OR REPLACE FUNCTION describe(p_word bytea, p_lang bytea DEFAULT NULL,
         UNION
         SELECT sn.synset_id FROM senses(p_word) sn
     ), top AS (
-        SELECT cc.kind_id, cc.object_id, cc.rating, cc.rd, cc.witness_count
+        SELECT cc.type_id, cc.object_id, cc.rating, cc.rd, cc.witness_count
         FROM subj s
         CROSS JOIN LATERAL (
-            SELECT c.kind_id, c.object_id, c.rating, c.rd, c.witness_count
+            SELECT c.type_id, c.object_id, c.rating, c.rd, c.witness_count
             FROM consensus c
             WHERE c.subject_id = s.id
               AND c.object_id IS NOT NULL
               AND NOT refuted(c.rating, c.rd)
-              AND c.kind_id NOT IN (kind_id('HAS_SENSE'), kind_id('IS_SENSE_OF'),
-                                    kind_id('HAS_LANGUAGE'))
+              AND c.type_id NOT IN (relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
+                                    relation_type_id('HAS_LANGUAGE'))
             ORDER BY eff_mu(c.rating, c.rd) DESC
             LIMIT p_limit          -- per-subject bound ⇒ consensus_subject_eff_mu_btree
         ) cc
     )
-    SELECT kind_label(t.kind_id),
+    SELECT kind_label(t.type_id),
            realize(t.object_id, COALESCE(p_lang, word_language(p_word))),
            eff_mu_display(t.rating, t.rd), t.witness_count
     FROM top t
@@ -558,7 +580,7 @@ CREATE OR REPLACE FUNCTION isa_path(p_x bytea, p_y bytea, p_depth int DEFAULT 8)
         SELECT sn.synset_id FROM senses(p_y) sn
         UNION
         SELECT c.subject_id FROM consensus c
-        WHERE c.kind_id = kind_id('IS_TRANSLATION_OF') AND c.object_id = p_y
+        WHERE c.type_id = relation_type_id('IS_TRANSLATION_OF') AND c.object_id = p_y
           AND NOT refuted(c.rating, c.rd)
     ), start(id) AS (
         SELECT p_x
@@ -567,13 +589,13 @@ CREATE OR REPLACE FUNCTION isa_path(p_x bytea, p_y bytea, p_depth int DEFAULT 8)
     ), up(node, path, kinds, path_mu, d) AS (
         SELECT s.id, ARRAY[s.id], ARRAY[]::bytea[], NULL::numeric, 0 FROM start s
         UNION ALL
-        SELECT c.object_id, u.path || c.object_id, u.kinds || c.kind_id,
+        SELECT c.object_id, u.path || c.object_id, u.kinds || c.type_id,
                LEAST(COALESCE(u.path_mu, eff_mu_display(c.rating, c.rd)),
                      eff_mu_display(c.rating, c.rd)),
                u.d + 1
         FROM up u
         JOIN consensus c ON c.subject_id = u.node
-                        AND c.kind_id = kind_id('IS_A')
+                        AND c.type_id = relation_type_id('IS_A')
                         AND c.object_id IS NOT NULL
                         AND NOT refuted(c.rating, c.rd)
                         AND NOT (c.object_id = ANY (u.path))
@@ -589,6 +611,286 @@ COMMENT ON FUNCTION isa_path(bytea, bytea, int) IS
     '"is X a Y": shortest non-refuted IS_A walk from X (word or its synsets) to Y (word, its '
     'synsets, or synsets Y is a member of); path_mu = the weakest edge''s μ (the claim is only '
     'as strong as its weakest witness consensus). Empty = no witnessed path.';
+
+/* ── the distributional axis: shared usage context (PRECEDES neighborhood) ──────
+ * Relatedness from the corpus, not the taxonomy: how many bigram-adjacency
+ * neighbors X and Y share. A single indexed set-intersection — no graph walk.
+ * Independent of spelling and taxonomy (coffee/tea share ~20 even though they sit
+ * far apart on the glome and meet only at "drink"). One co-equal NN axis. */
+CREATE OR REPLACE FUNCTION usage_overlap(p_x bytea, p_y bytea)
+    RETURNS bigint
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH xn(n) AS (
+        SELECT object_id  FROM consensus WHERE subject_id = p_x AND type_id = relation_type_id('PRECEDES')
+        UNION
+        SELECT subject_id FROM consensus WHERE object_id  = p_x AND type_id = relation_type_id('PRECEDES')),
+         yn(n) AS (
+        SELECT object_id  FROM consensus WHERE subject_id = p_y AND type_id = relation_type_id('PRECEDES')
+        UNION
+        SELECT subject_id FROM consensus WHERE object_id  = p_y AND type_id = relation_type_id('PRECEDES'))
+    SELECT count(*) FROM xn JOIN yn USING (n)
+$$;
+COMMENT ON FUNCTION usage_overlap(bytea, bytea) IS
+    'Distributional relatedness (the corpus axis): size of the shared PRECEDES neighborhood — '
+    'how often X and Y occur in the same bigram contexts. High = used together, independent of '
+    'taxonomy or spelling. One of the co-equal NN axes (relatedness/structure/usage), never crowned.';
+
+/* ── general reasoning: how are X and Y related, across EVERY arena? ─────────────
+ * isa_path generalized off the single IS_A plane onto every conceptual arena at
+ * once — the "3D chess" move: each edge picks its own plane. Two fast, indexed
+ * primitives, never a blind graph crawl (the old single-frontier walk had to
+ * descend INTO Y through hub nodes — canid's hundreds of hyponyms — and took
+ * minutes):
+ *   • a 1-hop LATERAL check (synonym/antonym/part/similar/derivational …) for the
+ *     direct relation — king —is antonym of→ queen;
+ *   • a lowest-common-ancestor UP-walk — both sides climb IS_A/IS_INSTANCE_OF
+ *     toward the roots (LOW fanout) and meet — dog —is a→ canid ←is a— wolf.
+ * Refuted edges pruned (signed μ); path_mu = the weakest edge (a chain is only as
+ * strong as its least-corroborated link); shortest then highest-μ wins. Empty =
+ * a GAP: no witnessed conceptual path within p_depth — the Gödel engine''s `unknown`. */
+CREATE OR REPLACE FUNCTION reason(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
+    RETURNS TABLE(chain text, path_mu numeric, plane text)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH RECURSIVE
+    lat(k) AS (SELECT relation_type_id(n) FROM unnest(ARRAY[
+        'IS_SYNONYM_OF','IS_SIMILAR_TO','IS_ANTONYM_OF','HAS_PART','HAS_MEMBER',
+        'HAS_SUBSTANCE','DERIVATIONALLY_RELATED','PERTAINS_TO','ALSO_SEE',
+        'IN_VERB_GROUP_WITH','HAS_ATTRIBUTE']) n),
+    up_k(k) AS (SELECT relation_type_id(n) FROM unnest(ARRAY['IS_A','IS_INSTANCE_OF']) n),
+    xset(id) AS (SELECT p_x UNION SELECT sn.synset_id FROM senses(p_x) sn),
+    yset(id) AS (SELECT p_y UNION SELECT sn.synset_id FROM senses(p_y) sn),
+    -- the direct relation: a single lateral edge, either orientation (1 hop)
+    direct AS (
+        SELECT realize_path(ARRAY[x.id, c.object_id], ARRAY[c.type_id], ARRAY[1],
+                            COALESCE(word_language(p_x), word_language(p_y))) AS chain,
+               eff_mu_display(c.rating, c.rd) AS mu, 1 AS len, kind_label(c.type_id) AS plane
+        FROM xset x JOIN consensus c ON c.subject_id = x.id
+            AND c.object_id IN (SELECT id FROM yset)
+            AND c.type_id IN (SELECT k FROM lat) AND NOT refuted(c.rating, c.rd)
+        UNION ALL
+        SELECT realize_path(ARRAY[x.id, c.subject_id], ARRAY[c.type_id], ARRAY[-1],
+                            COALESCE(word_language(p_x), word_language(p_y))),
+               eff_mu_display(c.rating, c.rd), 1, kind_label(c.type_id)
+        FROM xset x JOIN consensus c ON c.object_id = x.id
+            AND c.subject_id IN (SELECT id FROM yset)
+            AND c.type_id IN (SELECT k FROM lat) AND NOT refuted(c.rating, c.rd)),
+    -- both sides climb toward the roots (low fanout); the LCA is where they meet
+    ux(node, path, kinds, mu, d) AS (
+        SELECT id, ARRAY[id], ARRAY[]::bytea[], NULL::numeric, 0 FROM xset
+        UNION ALL
+        SELECT c.object_id, u.path || c.object_id, u.kinds || c.type_id,
+               LEAST(COALESCE(u.mu, eff_mu_display(c.rating, c.rd)), eff_mu_display(c.rating, c.rd)), u.d + 1
+        FROM ux u JOIN consensus c ON c.subject_id = u.node AND c.type_id IN (SELECT k FROM up_k)
+            AND c.object_id IS NOT NULL AND NOT refuted(c.rating, c.rd) AND NOT (c.object_id = ANY (u.path))
+        WHERE u.d < p_depth),
+    uy(node, path, kinds, mu, d) AS (
+        SELECT id, ARRAY[id], ARRAY[]::bytea[], NULL::numeric, 0 FROM yset
+        UNION ALL
+        SELECT c.object_id, u.path || c.object_id, u.kinds || c.type_id,
+               LEAST(COALESCE(u.mu, eff_mu_display(c.rating, c.rd)), eff_mu_display(c.rating, c.rd)), u.d + 1
+        FROM uy u JOIN consensus c ON c.subject_id = u.node AND c.type_id IN (SELECT k FROM up_k)
+            AND c.object_id IS NOT NULL AND NOT refuted(c.rating, c.rd) AND NOT (c.object_id = ANY (u.path))
+        WHERE u.d < p_depth),
+    -- the meeting point: among common ancestors, prefer the shortest, then the MOST
+    -- SPECIFIC (lowest IS_A in-degree = highest information content — "carnivore"
+    -- out-informs "male"), then the best-corroborated. The specificity tiebreak is
+    -- a substrate-native disambiguator: it steers ties away from generic person/root
+    -- senses toward the meaningful one (cat/dog meet at carnivore, not at "male").
+    lca_pick AS (
+        SELECT ux.path AS xp, ux.kinds AS xk, uy.path AS yp, uy.kinds AS yk,
+               LEAST(ux.mu, uy.mu) AS mu, ux.d + uy.d AS len
+        FROM ux JOIN uy ON ux.node = uy.node
+        WHERE ux.d > 0 OR uy.d > 0
+        ORDER BY ux.d + uy.d,
+                 (SELECT count(*) FROM consensus c
+                  WHERE c.object_id = ux.node AND c.type_id = relation_type_id('IS_A')
+                    AND NOT refuted(c.rating, c.rd)) ASC,
+                 LEAST(ux.mu, uy.mu) DESC NULLS LAST
+        LIMIT 1),
+    lca AS (
+        SELECT realize_path(
+                   xp || array_reverse(yp[1:cardinality(yp)-1]),
+                   xk || array_reverse(yk),
+                   (SELECT COALESCE(array_agg(1),  ARRAY[]::int[]) FROM generate_subscripts(xk, 1))
+                       || (SELECT COALESCE(array_agg(-1), ARRAY[]::int[]) FROM generate_subscripts(yk, 1)),
+                   COALESCE(word_language(p_x), word_language(p_y))) AS chain,
+               mu, len, 'taxonomy'::text AS plane
+        FROM lca_pick)
+    SELECT a.chain, a.mu, a.plane
+    FROM (SELECT chain, mu, len, plane FROM direct
+          UNION ALL SELECT chain, mu, len, plane FROM lca) a
+    ORDER BY a.len, a.mu DESC NULLS LAST
+    LIMIT 1
+$$;
+COMMENT ON FUNCTION reason(bytea, bytea, int) IS
+    '"how are X and Y related": the best conceptual path across every arena — a 1-hop lateral '
+    'edge (antonym/part/synonym/…) or a lowest-common-ancestor IS_A up-walk — direction-rendered, '
+    'refuted-pruned, path_mu = weakest edge. Empty = a witnessed GAP (the Gödel engine''s unknown).';
+
+/* ── fused relatedness: the co-equal axes, and whether they AGREE ───────────────
+ * Meaning is the planes'' agreement, never one crowned. relatedness() reads them
+ * for a pair and reports each plus a verdict naming which concur:
+ *   • relation/plane/μ — the best conceptual path (reason(): taxonomy or a lateral arena);
+ *   • usage            — distributional overlap (shared PRECEDES context, the corpus axis);
+ *   • geodesic         — structural proximity on the S³ glome (content shape, NOT meaning:
+ *                        far for coffee/tea — different spelling — even as they co-occur).
+ * dog/wolf: all three concur → unambiguously related. coffee/tea: usage high, glome far →
+ * "used together, written differently". whale/computer: all weak → barely related. */
+CREATE OR REPLACE FUNCTION relatedness(p_x bytea, p_y bytea)
+    RETURNS TABLE(relation text, plane text, mu numeric, usage bigint,
+                  geodesic double precision, verdict text)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT r.chain, r.plane, r.path_mu, COALESCE(u.n, 0), g.geo,
+        concat_ws('',
+            CASE WHEN r.chain IS NOT NULL THEN 'related via ' || r.plane
+                 ELSE 'no witnessed conceptual path' END,
+            CASE WHEN COALESCE(u.n, 0) >= 10 THEN '; strong shared usage (' || u.n || ')'
+                 WHEN COALESCE(u.n, 0) >  0  THEN '; some shared usage ('   || u.n || ')'
+                 ELSE '' END,
+            CASE WHEN g.geo IS NOT NULL AND g.geo < 0.4 THEN '; structurally near'
+                 ELSE '' END)
+    FROM (SELECT 1) one
+    LEFT JOIN LATERAL (SELECT * FROM reason(p_x, p_y) LIMIT 1) r ON true
+    LEFT JOIN LATERAL (SELECT usage_overlap(p_x, p_y) AS n) u ON true
+    LEFT JOIN LATERAL (
+        SELECT public.laplace_angular_distance_4d(
+                   (SELECT coord FROM physicalities WHERE entity_id = p_x AND type = 1 AND coord IS NOT NULL LIMIT 1),
+                   (SELECT coord FROM physicalities WHERE entity_id = p_y AND type = 1 AND coord IS NOT NULL LIMIT 1)
+               ) AS geo) g ON true
+$$;
+COMMENT ON FUNCTION relatedness(bytea, bytea) IS
+    'Fused relatedness across the co-equal axes — relational (reason()), distributional '
+    '(usage_overlap), geometric (glome geodesic) — with a verdict naming which concur. The '
+    'invention''s thesis in one read: meaning is the planes'' agreement, no single axis crowned.';
+
+/* ── the epistemic axis: the Gödel engine''s perception ─────────────────────────
+ * The plane conventional AI has no equivalent of. Signed μ (Glicko win=confirm /
+ * loss=refute) plus volatility (witness disagreement) classify every relation:
+ *   • confirmed — μ clearly above neutral (well-witnessed, corroborated);
+ *   • refuted   — μ clearly below neutral (an active loss carried its proof — the
+ *                 Gödel engine writes these; absent until verdicts exist);
+ *   • contested — μ near neutral with ELEVATED volatility (witnesses disagreed —
+ *                 the "resolve" trigger);
+ *   • thin      — μ near neutral at baseline volatility (just low evidence — a soft gap).
+ * Dissent is folded IN and weighted (volatility = the disagreement), never discarded. */
+CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT NULL,
+                                            p_limit int DEFAULT 30)
+    RETURNS TABLE(type text, fact text, status text, mu numeric,
+                  volatility numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH subj(id) AS (SELECT p_word UNION SELECT sn.synset_id FROM senses(p_word) sn),
+         rels AS (
+            SELECT c.type_id, c.object_id, c.rating, c.rd, c.volatility, c.witness_count
+            FROM consensus c JOIN subj s ON c.subject_id = s.id
+            WHERE c.object_id IS NOT NULL
+              AND c.type_id NOT IN (relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
+                                    relation_type_id('HAS_LANGUAGE'))
+            ORDER BY eff_mu(c.rating, c.rd) DESC
+            LIMIT p_limit)
+    SELECT kind_label(r.type_id),
+           realize(r.object_id, COALESCE(p_lang, word_language(p_word))),
+           CASE WHEN r.rating + 2 * r.rd < glicko2_neutral_mu() THEN 'refuted'
+                WHEN r.rating - 2 * r.rd > glicko2_neutral_mu() THEN 'confirmed'
+                WHEN r.volatility::numeric > glicko2_initial_volatility() * 1.5 THEN 'contested'
+                ELSE 'thin' END,
+           eff_mu_display(r.rating, r.rd),
+           round(r.volatility / 1e9, 4), r.witness_count
+    FROM rels r
+$$;
+COMMENT ON FUNCTION epistemic_status(bytea, bytea, int) IS
+    'The epistemic plane as a read: each relation of X classified confirmed / refuted / contested '
+    '/ thin by signed μ + volatility. The Gödel engine''s perception — confirmed gates inference, '
+    'contested raises a resolve task, refuted is pruned. (1.5× the initial volatility = the '
+    'contested floor — §10 calibration.)';
+
+/* ── gaps: the `unknown` — the Gödel engine''s research agenda ───────────────────
+ * The arenas a subject COULD be witnessed in but is NOT. Conventional AI cannot
+ * tell "I don''t know" from "no"; the substrate names the absence explicitly, and
+ * each gap is a `research` task the cognition loop can queue. */
+CREATE OR REPLACE FUNCTION gaps(p_word bytea)
+    RETURNS TABLE(missing_arena text)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH subj(id) AS (SELECT p_word UNION SELECT sn.synset_id FROM senses(p_word) sn),
+         expected(name) AS (SELECT unnest(ARRAY[
+            'IS_A','HAS_PART','HAS_MEMBER','CAUSES','USED_FOR','IS_ANTONYM_OF',
+            'IS_SIMILAR_TO','HAS_ATTRIBUTE','DERIVATIONALLY_RELATED']))
+    SELECT e.name
+    FROM expected e
+    WHERE NOT EXISTS (
+        SELECT 1 FROM consensus c JOIN subj s ON c.subject_id = s.id
+        WHERE c.type_id = relation_type_id(e.name) AND NOT refuted(c.rating, c.rd))
+$$;
+COMMENT ON FUNCTION gaps(bytea) IS
+    'The `unknown`: which conceptual arenas hold no non-refuted consensus for X — the difference '
+    'between "no" and "not witnessed". Each row is a research task for the Gödel cognition loop.';
+
+/* ── contrast: the "bit-bang" attestation set-difference ─────────────────────────
+ * relatedness()''s complement — not "how are X and Y alike" but "how do they
+ * DIFFER". Each comparable attestation (a transitive IS_A ancestor, or a direct
+ * structural feature — part/cause/use/attribute/antonym/…) is set-compared between
+ * the two subjects: shared (both), distinctive to X (x-only), distinctive to Y
+ * (y-only). Exact set ops over the consensus rows — what one holds that the other
+ * does not — a contrastive read conventional models only approximate. (Cross-sense
+ * collisions in the shared set are the open WSD limit; comparable-arena whitelist
+ * keeps per-sense gloss noise out.) */
+CREATE OR REPLACE FUNCTION contrast(p_x bytea, p_y bytea, p_lang bytea DEFAULT NULL,
+                                    p_limit int DEFAULT 80)
+    RETURNS TABLE(holder text, type text, fact text, mu numeric)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH RECURSIVE
+    up_k(k) AS (SELECT relation_type_id(n) FROM unnest(ARRAY['IS_A','IS_INSTANCE_OF']) n),
+    feat(k) AS (SELECT relation_type_id(n) FROM unnest(ARRAY[
+        'HAS_PART','HAS_MEMBER','HAS_SUBSTANCE','HAS_ATTRIBUTE','CAUSES','USED_FOR',
+        'IS_ANTONYM_OF','IS_SIMILAR_TO','PERTAINS_TO','HAS_POS']) n),
+    xs(id) AS (SELECT p_x UNION SELECT sn.synset_id FROM senses(p_x) sn),
+    ys(id) AS (SELECT p_y UNION SELECT sn.synset_id FROM senses(p_y) sn),
+    ax(node, d) AS (
+        SELECT id, 0 FROM xs
+        UNION ALL
+        SELECT c.object_id, a.d + 1 FROM ax a
+        JOIN consensus c ON c.subject_id = a.node AND c.type_id IN (SELECT k FROM up_k)
+            AND c.object_id IS NOT NULL AND NOT refuted(c.rating, c.rd)
+        WHERE a.d < 7),
+    ay(node, d) AS (
+        SELECT id, 0 FROM ys
+        UNION ALL
+        SELECT c.object_id, a.d + 1 FROM ay a
+        JOIN consensus c ON c.subject_id = a.node AND c.type_id IN (SELECT k FROM up_k)
+            AND c.object_id IS NOT NULL AND NOT refuted(c.rating, c.rd)
+        WHERE a.d < 7),
+    xr(type_id, object_id, mu) AS (
+        SELECT relation_type_id('IS_A'), node, NULL::numeric FROM ax WHERE d > 0
+        UNION
+        SELECT c.type_id, c.object_id, max(eff_mu_display(c.rating, c.rd))
+        FROM consensus c JOIN xs ON c.subject_id = xs.id
+        WHERE c.object_id IS NOT NULL AND NOT refuted(c.rating, c.rd)
+          AND c.type_id IN (SELECT k FROM feat) GROUP BY 1, 2),
+    yr(type_id, object_id, mu) AS (
+        SELECT relation_type_id('IS_A'), node, NULL::numeric FROM ay WHERE d > 0
+        UNION
+        SELECT c.type_id, c.object_id, max(eff_mu_display(c.rating, c.rd))
+        FROM consensus c JOIN ys ON c.subject_id = ys.id
+        WHERE c.object_id IS NOT NULL AND NOT refuted(c.rating, c.rd)
+          AND c.type_id IN (SELECT k FROM feat) GROUP BY 1, 2)
+    SELECT CASE WHEN xr.object_id IS NOT NULL AND yr.object_id IS NOT NULL THEN 'both'
+                WHEN xr.object_id IS NOT NULL THEN 'x-only' ELSE 'y-only' END,
+           kind_label(COALESCE(xr.type_id, yr.type_id)),
+           realize(COALESCE(xr.object_id, yr.object_id), p_lang),
+           COALESCE(xr.mu, yr.mu)
+    FROM xr FULL JOIN yr ON xr.type_id = yr.type_id AND xr.object_id = yr.object_id
+    ORDER BY 1, 2, 4 DESC NULLS LAST
+    LIMIT p_limit
+$$;
+COMMENT ON FUNCTION contrast(bytea, bytea, bytea, int) IS
+    'relatedness()''s complement: the attestation set-difference — shared (both) vs distinctive '
+    '(x-only / y-only) comparable attestations (transitive IS_A ancestors + direct structural '
+    'arenas). "What one holds that the other does not", exact over consensus rows.';
 
 /* ── routing: question shape → intent, in plain SQL ────────────────────────── */
 
@@ -610,6 +912,13 @@ BEGIN
     m := regexp_match(p, '^what\s+(?:is|are)\s+(?:(?:a|an|the)\s+)?(.+?)\s+used\s+for\??$');
     IF m IS NULL THEN m := regexp_match(p, '^uses?\s+of\s+(.+?)\??$'); END IF;
     IF m IS NOT NULL THEN intent := 'related'; kind_name := 'USED_FOR'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
+
+    /* relatedness across arenas: "how are X and Y related" / "X vs Y" / "relate X and Y" */
+    m := regexp_match(p, '^how\s+(?:are|is)\s+(.+?)\s+(?:and|&)\s+(.+?)\s+related\??$');
+    IF m IS NULL THEN m := regexp_match(p, '^how\s+(?:is|are)\s+(.+?)\s+related\s+to\s+(.+?)\??$'); END IF;
+    IF m IS NULL THEN m := regexp_match(p, '^(?:relate|relation\s+(?:between|of))\s+(.+?)\s+(?:and|to|&)\s+(.+?)\??$'); END IF;
+    IF m IS NULL THEN m := regexp_match(p, '^(.+?)\s+vs\.?\s+(.+?)\??$'); END IF;
+    IF m IS NOT NULL THEN intent := 'reason'; phrase := m[1]; phrase2 := m[2]; RETURN NEXT; RETURN; END IF;
 
     m := regexp_match(p, '^(?:is|are)\s+(?:(?:a|an|the)\s+)?(.+?)\s+(?:a|an|the)\s+(.+?)\??$');
     IF m IS NOT NULL THEN intent := 'is_a'; phrase := m[1]; phrase2 := m[2]; RETURN NEXT; RETURN; END IF;
@@ -801,7 +1110,7 @@ BEGIN
     ELSIF r.intent = 'related' THEN
         RETURN QUERY
             SELECT f.fact, f.eff_mu, f.witnesses
-            FROM related(v_topic, kind_id(r.kind_name), v_lang) f;
+            FROM related(v_topic, relation_type_id(r.kind_name), v_lang) f;
         IF NOT FOUND THEN
             RETURN QUERY SELECT 'I hold "' || label(v_topic) || '" but no '
                                 || lower(replace(r.kind_name, '_', ' ')) || ' consensus yet.',
@@ -811,7 +1120,7 @@ BEGIN
     ELSIF r.intent = 'related_in' THEN
         RETURN QUERY
             SELECT f.fact, f.eff_mu, f.witnesses
-            FROM related_in(v_topic, kind_id(r.kind_name), v_lang) f;
+            FROM related_in(v_topic, relation_type_id(r.kind_name), v_lang) f;
         IF NOT FOUND THEN
             RETURN QUERY SELECT 'I hold "' || label(v_topic) || '" but no incoming '
                                 || lower(replace(r.kind_name, '_', ' ')) || ' consensus yet.',
@@ -836,15 +1145,30 @@ BEGIN
                                 NULL::numeric, NULL::bigint;
         END IF;
 
+    ELSIF r.intent = 'reason' THEN
+        v_topic2 := resolve_topic(r.phrase2, NULL);
+        IF v_topic2 IS NULL THEN
+            RETURN QUERY SELECT 'I hold no consensus about "' || r.phrase2 || '" yet.',
+                                NULL::numeric, NULL::bigint;
+            RETURN;
+        END IF;
+        /* fused relatedness: the best conceptual path, glossed by the axes that concur */
+        RETURN QUERY
+            SELECT CASE WHEN rs.relation IS NOT NULL
+                        THEN rs.relation || '  [' || rs.verdict || ']'
+                        ELSE rs.verdict END,
+                   rs.mu, rs.usage
+            FROM relatedness(v_topic, v_topic2) rs;
+
     ELSIF r.intent IN ('walk', 'complete') THEN
         RETURN QUERY
             SELECT COALESCE(realize(v_topic, v_lang), label(v_topic))
-                   || string_agg(' —' || COALESCE(kind_label(g.kind_id), '?') || '→ '
+                   || string_agg(' —' || COALESCE(kind_label(g.type_id), '?') || '→ '
                                  || COALESCE(realize(g.entity_id, v_lang), label(g.entity_id)),
                                  '' ORDER BY g.step),
                    min(g.eff_mu), NULL::bigint
             FROM generate_greedy(v_topic,
-                                 CASE WHEN r.intent = 'complete' THEN kind_id('COMPLETES_TO') END,
+                                 CASE WHEN r.intent = 'complete' THEN relation_type_id('COMPLETES_TO') END,
                                  8) g
             HAVING count(*) > 0;
         IF NOT FOUND THEN
@@ -953,7 +1277,7 @@ BEGIN
       INTO v_id, v_coord, v_traj
     FROM physicalities p
     JOIN prompt_state(p_word) s ON p.entity_id = s.id
-    WHERE p.kind = 1 AND p.coord IS NOT NULL
+    WHERE p.type = 1 AND p.coord IS NOT NULL
     LIMIT 1;
     IF v_id IS NULL THEN RETURN; END IF;
 
@@ -961,7 +1285,7 @@ BEGIN
     WITH knn AS (                                   -- nd-GiST KNN prune (chord)
         SELECT p.entity_id, p.coord, p.trajectory
         FROM physicalities p
-        WHERE p.kind = 1
+        WHERE p.type = 1
         ORDER BY p.coord <<->> v_coord
         LIMIT GREATEST(p_k * 20, 200)),
     nearest AS (                                    -- geodesic refine + dedup per entity (cheap, O(1)/row)
@@ -1010,7 +1334,7 @@ BEGIN
     SELECT p.entity_id, p.coord INTO v_id, v_coord
     FROM physicalities p
     JOIN prompt_state(p_word) s ON p.entity_id = s.id
-    WHERE p.kind = 1 AND p.coord IS NOT NULL
+    WHERE p.type = 1 AND p.coord IS NOT NULL
     LIMIT 1;
     IF v_id IS NULL THEN RETURN; END IF;
 
@@ -1018,7 +1342,7 @@ BEGIN
     WITH cand AS (                                  -- nd-GiST KNN prune
         SELECT p.entity_id, p.coord
         FROM physicalities p
-        WHERE p.kind = 1
+        WHERE p.type = 1
         ORDER BY p.coord <<->> v_coord
         LIMIT 3000),
     g AS (                                          -- geodesic, dedup per entity, drop self
@@ -1072,11 +1396,11 @@ topic AS (SELECT id FROM prompt_state(p_prompt) WHERE id IS NOT NULL),
 field AS (
     SELECT id FROM topic
     UNION SELECT c.object_id FROM consensus c JOIN topic t ON c.subject_id=t.id
-          WHERE c.kind_id=kind_id('PRECEDES') AND NOT refuted(c.rating,c.rd)
+          WHERE c.type_id=relation_type_id('PRECEDES') AND NOT refuted(c.rating,c.rd)
     UNION SELECT c.subject_id FROM consensus c JOIN topic t ON c.object_id=t.id
-          WHERE c.kind_id=kind_id('PRECEDES') AND NOT refuted(c.rating,c.rd)
+          WHERE c.type_id=relation_type_id('PRECEDES') AND NOT refuted(c.rating,c.rd)
     UNION SELECT c.object_id FROM consensus c JOIN topic t ON c.subject_id=t.id
-          WHERE c.kind_id=kind_id('IS_SYNONYM_OF')),
+          WHERE c.type_id=relation_type_id('IS_SYNONYM_OF')),
 seed AS (
     SELECT array_agg(id ORDER BY ord) ctx FROM prompt_state(p_prompt) WHERE id IS NOT NULL),
 walk AS (
@@ -1090,7 +1414,7 @@ walk AS (
                    eff_mu_display(max(c.rating), max(c.rd)) mu,
                    sum(eff_mu(c.rating, c.rd)) / 1e9 AS sc
             FROM consensus c
-            WHERE c.kind_id = kind_id('PRECEDES')
+            WHERE c.type_id = relation_type_id('PRECEDES')
               AND c.subject_id = ANY (
                   w.ctx[GREATEST(1, array_length(w.ctx,1) - p_window + 1) : array_length(w.ctx,1)])
               AND c.object_id IS NOT NULL
@@ -1098,7 +1422,7 @@ walk AS (
               AND c.object_id <> ALL (w.ctx)
               AND c.object_id NOT IN (SELECT id FROM stops)
               AND EXISTS (SELECT 1 FROM consensus h
-                          WHERE h.subject_id = c.object_id AND h.kind_id = kind_id('HAS_POS'))
+                          WHERE h.subject_id = c.object_id AND h.type_id = relation_type_id('HAS_POS'))
             GROUP BY c.object_id
             ORDER BY sum(eff_mu(c.rating, c.rd)) DESC
             LIMIT p_topk

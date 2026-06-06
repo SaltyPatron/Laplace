@@ -10,6 +10,7 @@ set(EXT_VERSION ${PROJECT_VERSION})
 set(EXT_C_SOURCES
     src/laplace_substrate.c
     src/generate_walk.c
+    src/astar_path.c
 )
 
 add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})
@@ -67,6 +68,7 @@ set(EXT_SQL_MODULES
     sql/19_geometry_consensus.sql.in
     sql/20_converse.sql.in
     sql/21_seed.sql.in
+    sql/22_cascade_surface.sql.in
 )
 
 set(EXT_BUILT_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}--${EXT_VERSION}.sql)

@@ -8,6 +8,11 @@ internal static class AppComposition
     {
         services.AddSingleton<SubstrateClient>();
         services.AddSingleton<IBillingCatalog, StaticBillingCatalog>();
+        services.AddSingleton<IStripePriceMap, InMemoryStripePriceMap>();
+        services.AddSingleton<IStripeCatalogSync, StripeCatalogSync>();
+        services.AddSingleton<ISynthesisQuoteCalculator, SynthesisQuoteCalculator>();
+        services.AddSingleton<ITraceQuoteCalculator, TraceQuoteCalculator>();
+        services.AddSingleton<IReportQuoteCalculator, ReportQuoteCalculator>();
         services.AddSingleton<IBillingLedger, InMemoryBillingLedger>();
         services.AddSingleton<IBillingQuoteStore, InMemoryBillingQuoteStore>();
         services.AddSingleton<IStripeCheckoutGateway, StripeCheckoutGateway>();

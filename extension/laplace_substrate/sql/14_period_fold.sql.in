@@ -83,7 +83,7 @@ BEGIN
         EXECUTE format(
             'CREATE UNLOGGED TABLE %I (
                  subject_id bytea  NOT NULL,
-                 kind_id    bytea  NOT NULL,
+                 type_id    bytea  NOT NULL,
                  object_id  bytea,
                  phi        bigint NOT NULL,
                  games      bigint NOT NULL,
@@ -101,12 +101,12 @@ COMMENT ON FUNCTION create_period_staging(integer) IS
 /* Raised ONLY from the violation arm of the fold's CASE — the good path pays
  * nothing. Mixed φ for one relation within one period is a decomposer bug:
  * fail loud, never average. */
-CREATE OR REPLACE FUNCTION period_phi_mixed(p_subject bytea, p_kind bytea, p_object bytea)
+CREATE OR REPLACE FUNCTION period_phi_mixed(p_subject bytea, p_type bytea, p_object bytea)
     RETURNS bigint LANGUAGE plpgsql STABLE
     SET search_path = @extschema@, public AS $$
 BEGIN
     RAISE EXCEPTION 'accumulation invariant violated: relation (% —[%]→ %) observed with mixed φ within one period',
-        render(p_subject), render(p_kind), COALESCE(render(p_object), '∅');
+        render(p_subject), render(p_type), COALESCE(render(p_object), '∅');
 END;
 $$;
 
@@ -138,7 +138,7 @@ BEGIN
     END IF;
     EXECUTE format($f$
         WITH merged AS (
-            SELECT s.subject_id, s.kind_id, s.object_id,
+            SELECT s.subject_id, s.type_id, s.object_id,
                    min(s.phi)               AS phi_min,
                    max(s.phi)               AS phi_max,
                    -- sum(bigint) returns NUMERIC in PG — cast back so the score
@@ -147,12 +147,12 @@ BEGIN
                    sum(s.sum_score)::bigint AS sum_score,
                    max(s.last_ts)           AS last_ts
             FROM %I s
-            GROUP BY s.subject_id, s.kind_id, s.object_id
+            GROUP BY s.subject_id, s.type_id, s.object_id
         )
-        INSERT INTO consensus (id, subject_id, kind_id, object_id,
+        INSERT INTO consensus (id, subject_id, type_id, object_id,
                                rating, rd, volatility, witness_count, last_observed_at)
         SELECT f.cid,
-               f.subject_id, f.kind_id, f.object_id,
+               f.subject_id, f.type_id, f.object_id,
                (f.acc).rating, (f.acc).rd, (f.acc).volatility,
                f.prior_witnesses + f.games,
                f.last_ts
@@ -160,7 +160,7 @@ BEGIN
             -- ONE prior lookup per relation (rating/rd/volatility AND witness_count
             -- ride the same join), ONE consensus_id evaluation, ONE kernel call —
             -- no per-game row explosion, no re-GROUP BY (merged is already grouped).
-            SELECT m.subject_id, m.kind_id, m.object_id, m.games, m.last_ts,
+            SELECT m.subject_id, m.type_id, m.object_id, m.games, m.last_ts,
                    m.cid, COALESCE(c.witness_count, 0) AS prior_witnesses,
                    laplace_glicko2_accumulate_games(
                        COALESCE(c.rating,     glicko2_neutral_mu()),   -- prior = current consensus,
@@ -168,13 +168,13 @@ BEGIN
                        COALESCE(c.volatility,     glicko2_initial_volatility()),
                        glicko2_neutral_mu(),                            -- NEUTRAL opponent μ (the 1500 line)
                        CASE WHEN m.phi_min <> m.phi_max                  -- φ-uniformity, same pass
-                            THEN period_phi_mixed(m.subject_id, m.kind_id, m.object_id)
+                            THEN period_phi_mixed(m.subject_id, m.type_id, m.object_id)
                             ELSE m.phi_min END,                          -- opponent φ from witness trust
                        m.games,
                        m.sum_score,
                        glicko2_tau()                                 -- τ = 0.5
                    ) AS acc
-            FROM (SELECT mm.*, consensus_id(mm.subject_id, mm.kind_id, mm.object_id) AS cid
+            FROM (SELECT mm.*, consensus_id(mm.subject_id, mm.type_id, mm.object_id) AS cid
                   FROM merged mm) m
             LEFT JOIN consensus c ON c.id = m.cid
         ) f

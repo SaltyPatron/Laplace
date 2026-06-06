@@ -28,7 +28,7 @@ a comment (e.g. `DEP_*/FEAT_*` — write `DEP_* / FEAT_*`).
 | 15_readback | canonical_id / canonical_names / codepoint_render / constituents / render_text / render / register_canonical(s) — id→content, the substrate's own voice |
 | 16_inspect | glass-box SRFs (facets, physicalities, evidence in/out, readable consensus, attestation_response primitives) |
 | 17_consensus_reads | ranked-μ inference reads (top_relations, completions, consensus_in/out, generate_tree/greedy, consensus_stats) |
-| 18_ops_surface | the operating + GATE surface: kind_id/source_id, evidence/consensus/content counts, arena_counts, source_counts, entity_type_counts, consensus_tier_distribution, render_gaps, period_staging_status. **Every verification query becomes a function here — never hand-written at a call site.** |
+| 18_ops_surface | the operating + GATE surface: relation_type_id (deprecated kind_id wrapper)/source_id, evidence/consensus/content counts, arena_counts, source_counts, entity_type_counts, consensus_tier_distribution, render_gaps, period_staging_status. **Every verification query becomes a function here — never hand-written at a call site.** |
 | 19_geometry_consensus | the geometric consensus axis |
 | 20_converse | the conversational read surface + loop |
 | 21_seed | readback seed shipped WITH the extension: build_codepoint_render() + the static canonical vocabulary. Dynamic families register at ingest (`register_canonicals`). |

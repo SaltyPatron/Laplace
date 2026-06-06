@@ -72,7 +72,7 @@ public class ConsensusAccumulatingWriterTests
     {
         await using var cmd = _pg.DataSource.CreateCommand(
             "SELECT rating, rd, volatility, witness_count FROM laplace.consensus "
-          + "WHERE subject_id = $1 AND kind_id = $2 AND object_id IS NOT DISTINCT FROM $3");
+          + "WHERE subject_id = $1 AND type_id = $2 AND object_id IS NOT DISTINCT FROM $3");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, subj.ToBytes());
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, kind.ToBytes());
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea,
@@ -167,7 +167,7 @@ public class ConsensusAccumulatingWriterTests
         // The persisted rows are provenance: outcome CLASS + games — no values.
         await using var cmd = _pg.DataSource.CreateCommand(
             "SELECT outcome, observation_count FROM laplace.attestations "
-          + "WHERE kind_id = $1 ORDER BY outcome DESC");
+          + "WHERE type_id = $1 ORDER BY outcome DESC");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, kind.ToBytes());
         await using var rd = await cmd.ExecuteReaderAsync();
         Assert.True(await rd.ReadAsync());
@@ -193,7 +193,7 @@ public class ConsensusAccumulatingWriterTests
 
         Assert.Equal(0, accumulator.RelationCount);   // not accumulated as a match —
         await using var cmd = _pg.DataSource.CreateCommand(
-            "SELECT count(*) FROM laplace.attestations WHERE kind_id = $1");
+            "SELECT count(*) FROM laplace.attestations WHERE type_id = $1");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, kind.ToBytes());
         Assert.Equal(1L, (long)(await cmd.ExecuteScalarAsync())!);   // — recorded as a row
     }

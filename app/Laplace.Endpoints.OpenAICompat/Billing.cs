@@ -13,7 +13,42 @@ internal sealed class StripeBillingOptions
     public string CancelUrl { get; set; } = "http://localhost:5187/billing/cancel";
 }
 
-internal sealed record ServicePrice(string ServiceId, string UnitName, long UnitPriceCents, string DisplayName);
+// A logical billable capability. Maps 1:1 to a Stripe Product.
+internal sealed record BillingProduct(
+    string ProductId,
+    string Name,
+    string Description,
+    string Category);
+
+internal sealed record BillingPlan(
+    string PlanId,
+    string ServiceId,
+    string Name,
+    string Description,
+    long MonthlyPriceCents,
+    string Currency,
+    IReadOnlyDictionary<string, int> MonthlyCredits,
+    IReadOnlyList<string> IncludedProductIds,
+    string SupportTier,
+    bool Active);
+
+// A concrete price for a routing key (service_id), bound to a product.
+// LookupKey is the stable Stripe price lookup_key used for idempotent sync.
+// Metered services (e.g. synthesis) bill BaseFeeCents + UnitPriceCents * units,
+// where units is a usage meter (millions of parameters for synthesis); flat
+// services leave BaseFeeCents = 0 and Metered = false.
+internal sealed record ServicePrice(
+    string ServiceId,
+    string ProductId,
+    string UnitName,
+    long UnitPriceCents,
+    string Currency,
+    string LookupKey,
+    string DisplayName,
+    bool Active,
+    long BaseFeeCents = 0,
+    bool Metered = false,
+    string? RecurringInterval = null);
 
 internal sealed record BillingQuote(
     string QuoteId,
@@ -39,22 +74,376 @@ internal sealed record BillingUsageRecord(
 
 internal interface IBillingCatalog
 {
+    IReadOnlyList<BillingProduct> ListProducts();
+    IReadOnlyList<BillingPlan> ListPlans();
     IReadOnlyList<ServicePrice> List();
     bool TryGet(string serviceId, out ServicePrice price);
+    bool TryGetProduct(string productId, out BillingProduct product);
 }
 
+// Code-defined catalog. Prices are flat per-request defaults — adjust the cents
+// values here to set the business pricing model. Currency follows the configured
+// LAPLACE_BILLING_CURRENCY so the Stripe price currency stays consistent.
 internal sealed class StaticBillingCatalog : IBillingCatalog
 {
-    private readonly Dictionary<string, ServicePrice> _prices = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["chat.completions"] = new("chat.completions", "request", 3, "Laplace Chat Completion"),
-        ["completions"] = new("completions", "request", 2, "Laplace Text Completion"),
-        ["embeddings"] = new("embeddings", "request", 1, "Laplace Embeddings (pending)")
-    };
+    private readonly Dictionary<string, BillingProduct> _products;
+    private readonly Dictionary<string, ServicePrice> _prices;
+    private readonly IReadOnlyList<BillingPlan> _plans;
 
-    public IReadOnlyList<ServicePrice> List() => _prices.Values.OrderBy(x => x.ServiceId, StringComparer.Ordinal).ToArray();
+    public StaticBillingCatalog(IOptions<StripeBillingOptions> options)
+    {
+        var currency = string.IsNullOrWhiteSpace(options.Value.Currency)
+            ? "usd"
+            : options.Value.Currency.Trim().ToLowerInvariant();
+
+        _products = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["laplace.inference.chat"] = new(
+                "laplace.inference.chat", "Laplace Chat Inference",
+                "Single-shot conversational answer synthesized from consensus reads over the substrate.",
+                "inference"),
+            ["laplace.inference.completion"] = new(
+                "laplace.inference.completion", "Laplace Text Completion",
+                "Ranked-consensus continuation for a prompt.", "inference"),
+            ["laplace.generation"] = new(
+                "laplace.generation", "Laplace Token Generation",
+                "Token-by-token generative traversal of the consensus output tree.", "generation"),
+            ["laplace.embedding"] = new(
+                "laplace.embedding", "Laplace Structural Embedding",
+                "Native 4-D S^3 structural coordinate for content (structural, not a learned semantic vector).",
+                "embedding"),
+            ["laplace.search"] = new(
+                "laplace.search", "Laplace Web Search",
+                "Server-side web retrieval used for ephemeral prompt augmentation.", "search"),
+            ["laplace.synthesis"] = new(
+                "laplace.synthesis", "Laplace Substrate Synthesis",
+                "Build-a-model re-export: pour the consensus substrate into a recipe's tensor mold (your choice of vocabulary, dimensionality, heads, layers) and download the model. Metered by parameter count.",
+                "synthesis"),
+            ["laplace.recipe"] = new(
+                "laplace.recipe", "Laplace Synthesis Recipes",
+                "Author, publish, and access reusable build-a-model recipes (the mold that defines content scope, shape, and output format).",
+                "recipe"),
+            ["laplace.audit"] = new(
+                "laplace.audit", "Laplace Substrate Audit",
+                "Substrate accounting and dedup-health reports: entity/consensus/evidence counts, omni-source convergence, witness fan-in.",
+                "audit"),
+            ["laplace.inspection"] = new(
+                "laplace.inspection", "Laplace Glass-Box Inspection",
+                "Per-entity interpretability read: identity tier/type, S^3 physicalities, ranked-consensus neighborhood, and evidence provenance.",
+                "inspection"),
+            ["laplace.visualization"] = new(
+                "laplace.visualization", "Laplace Substrate Visualization",
+                "Rendered structural exports of a substrate neighborhood (geometry + ranked-consensus graph) for review and reporting.",
+                "visualization"),
+            ["laplace.neighbors"] = new(
+                "laplace.neighbors", "Laplace Nearest Neighbors",
+                "Plural nearest-neighbor query across the three independent axes: ranked-consensus relatedness, structural Fréchet shape, and PostGIS proximity.",
+                "inference"),
+            ["laplace.explainability"] = new(
+                "laplace.explainability", "Laplace Explainability Trace",
+                "Step-by-step 'how the answer formed' report: the token-by-token, path-by-path generation traversal with per-path consensus μ and witness fan-in. The academic tier expands every node with its evidence provenance and citations. Metered by trace size.",
+                "explainability"),
+            ["laplace.platform"] = new(
+                "laplace.platform", "Laplace Platform Plans",
+                "Monthly access bundles for teams building on Laplace: included credits across inference, synthesis, audit, visualization, recipe, and explainability services.",
+                "plan"),
+        };
+
+        ServicePrice Price(string serviceId, string productId, long cents, string unit, string display,
+            long baseFeeCents = 0, bool metered = false, string? recurringInterval = null) =>
+            new(
+                ServiceId: serviceId,
+                ProductId: productId,
+                UnitName: unit,
+                UnitPriceCents: cents,
+                Currency: currency,
+                LookupKey: $"laplace_{serviceId.Replace('.', '_')}_{unit}_{currency}",
+                DisplayName: display,
+                Active: true,
+                BaseFeeCents: baseFeeCents,
+                Metered: metered,
+                RecurringInterval: recurringInterval);
+
+        // Cents values below are business defaults — adjust to set the pricing model.
+        // Synthesis is the dimensionality-metered money-maker: a flat job fee plus a
+        // per-million-parameter rate, so a bigger recipe (more vocab/hidden/layers)
+        // costs proportionally more.
+        _prices = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chat.completions"] = Price("chat.completions", "laplace.inference.chat", 3, "request", "Laplace Chat Completion"),
+            ["completions"] = Price("completions", "laplace.inference.completion", 2, "request", "Laplace Text Completion"),
+            ["generate"] = Price("generate", "laplace.generation", 4, "request", "Laplace Token Generation"),
+            ["embeddings"] = Price("embeddings", "laplace.embedding", 1, "request", "Laplace Embeddings"),
+            ["search"] = Price("search", "laplace.search", 2, "request", "Laplace Web Search"),
+            ["synthesis"] = Price("synthesis", "laplace.synthesis", 5, "param_million", "Laplace Substrate Synthesis", baseFeeCents: 250, metered: true),
+            ["recipe.publish"] = Price("recipe.publish", "laplace.recipe", 100, "recipe", "Publish Synthesis Recipe"),
+            ["recipe.access"] = Price("recipe.access", "laplace.recipe", 25, "use", "Access Synthesis Recipe"),
+            ["audit.report"] = Price("audit.report", "laplace.audit", 50, "report", "Substrate Audit Report"),
+            ["audit.deep_report"] = Price("audit.deep_report", "laplace.audit", 20, "audit_unit", "Deep Substrate Audit Report", baseFeeCents: 150, metered: true),
+            ["inspect"] = Price("inspect", "laplace.inspection", 1, "entity", "Glass-Box Entity Inspection"),
+            ["visualization.export"] = Price("visualization.export", "laplace.visualization", 10, "export", "Substrate Visualization Export"),
+            ["visualization.deep_export"] = Price("visualization.deep_export", "laplace.visualization", 5, "visual_unit", "Deep Substrate Visualization Export", baseFeeCents: 75, metered: true),
+            ["nn"] = Price("nn", "laplace.neighbors", 1, "query", "Nearest-Neighbor Query"),
+            ["explain.trace"] = Price("explain.trace", "laplace.explainability", 8, "trace_unit", "Explainability Trace Report", baseFeeCents: 100, metered: true),
+            ["explain.report"] = Price("explain.report", "laplace.explainability", 200, "report", "Academic Explainability Report"),
+            ["recipe.compile"] = Price("recipe.compile", "laplace.recipe", 5, "recipe_unit", "Compile Synthesis Recipe", baseFeeCents: 25, metered: true),
+            ["recipe.export"] = Price("recipe.export", "laplace.recipe", 10, "content_thousand", "Private Recipe Content Export", baseFeeCents: 100, metered: true),
+            ["plan.developer"] = Price("plan.developer", "laplace.platform", 2900, "month", "Developer Plan", recurringInterval: "month"),
+            ["plan.studio"] = Price("plan.studio", "laplace.platform", 9900, "month", "Studio Plan", recurringInterval: "month"),
+            ["plan.enterprise"] = Price("plan.enterprise", "laplace.platform", 49900, "month", "Enterprise Plan", recurringInterval: "month"),
+        };
+
+        _plans = new[]
+        {
+            Plan(
+                "developer", "plan.developer", "Developer", "Individual builder access with enough credits to prototype paid quote-gated workflows.", 2900,
+                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["chat.completions"] = 1000,
+                    ["completions"] = 1000,
+                    ["generate"] = 500,
+                    ["embeddings"] = 5000,
+                    ["inspect"] = 250,
+                    ["explain.trace"] = 25
+                },
+                "community"),
+            Plan(
+                "studio", "plan.studio", "Studio", "Team bundle for heavier research, reporting, visualization, and model-building workloads.", 9900,
+                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["chat.completions"] = 10000,
+                    ["completions"] = 10000,
+                    ["generate"] = 5000,
+                    ["embeddings"] = 50000,
+                    ["inspect"] = 2500,
+                    ["audit.deep_report"] = 50,
+                    ["visualization.deep_export"] = 50,
+                    ["explain.trace"] = 250,
+                    ["synthesis"] = 500
+                },
+                "priority"),
+            Plan(
+                "enterprise", "plan.enterprise", "Enterprise", "High-throughput substrate access with large synthesis/export meters and account-level support.", 49900,
+                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["chat.completions"] = 100000,
+                    ["completions"] = 100000,
+                    ["generate"] = 50000,
+                    ["embeddings"] = 500000,
+                    ["inspect"] = 25000,
+                    ["audit.deep_report"] = 500,
+                    ["visualization.deep_export"] = 500,
+                    ["explain.trace"] = 2500,
+                    ["synthesis"] = 10000,
+                    ["recipe.export"] = 1000
+                },
+                "account")
+        };
+
+        BillingPlan Plan(string planId, string serviceId, string name, string description, long monthlyPriceCents,
+            IReadOnlyDictionary<string, int> credits, string supportTier) =>
+            new(
+                PlanId: planId,
+                ServiceId: serviceId,
+                Name: name,
+                Description: description,
+                MonthlyPriceCents: monthlyPriceCents,
+                Currency: currency,
+                MonthlyCredits: credits,
+                IncludedProductIds: _products.Keys
+                    .Where(id => !string.Equals(id, "laplace.platform", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(id => id, StringComparer.Ordinal)
+                    .ToArray(),
+                SupportTier: supportTier,
+                Active: true);
+    }
+
+    public IReadOnlyList<BillingProduct> ListProducts() =>
+        _products.Values.OrderBy(p => p.ProductId, StringComparer.Ordinal).ToArray();
+
+    public IReadOnlyList<BillingPlan> ListPlans() => _plans;
+
+    public IReadOnlyList<ServicePrice> List() =>
+        _prices.Values.OrderBy(x => x.ServiceId, StringComparer.Ordinal).ToArray();
 
     public bool TryGet(string serviceId, out ServicePrice price) => _prices.TryGetValue(serviceId, out price!);
+
+    public bool TryGetProduct(string productId, out BillingProduct product) => _products.TryGetValue(productId, out product!);
+}
+
+// Caches resolved Stripe price ids keyed by lookup_key so checkout can reuse
+// real Stripe Price objects instead of recreating ad-hoc inline prices.
+internal interface IStripePriceMap
+{
+    bool TryGet(string lookupKey, out string stripePriceId);
+    void Set(string lookupKey, string stripePriceId);
+}
+
+internal sealed class InMemoryStripePriceMap : IStripePriceMap
+{
+    private readonly ConcurrentDictionary<string, string> _map = new(StringComparer.Ordinal);
+
+    public bool TryGet(string lookupKey, out string stripePriceId) => _map.TryGetValue(lookupKey, out stripePriceId!);
+
+    public void Set(string lookupKey, string stripePriceId) => _map[lookupKey] = stripePriceId;
+}
+
+internal sealed record StripeCatalogEntryResult(
+    string ServiceId,
+    string LookupKey,
+    string? StripePriceId,
+    string? StripeProductId,
+    string Status);
+
+internal sealed record StripeCatalogSyncResult(bool StripeConfigured, IReadOnlyList<StripeCatalogEntryResult> Entries);
+
+// Idempotently provisions Stripe Product + Price objects for the catalog.
+// Price idempotency is pinned on lookup_key; product idempotency on a metadata tag.
+// With no API key configured every call degrades to a no-op (test/dev safe).
+internal interface IStripeCatalogSync
+{
+    Task<StripeCatalogSyncResult> EnsureAllAsync(CancellationToken ct);
+    Task<string?> EnsurePriceAsync(ServicePrice price, CancellationToken ct);
+}
+
+internal sealed class StripeCatalogSync : IStripeCatalogSync
+{
+    private readonly IBillingCatalog _catalog;
+    private readonly IStripePriceMap _map;
+    private readonly StripeBillingOptions _options;
+
+    public StripeCatalogSync(IBillingCatalog catalog, IStripePriceMap map, IOptions<StripeBillingOptions> options)
+    {
+        _catalog = catalog;
+        _map = map;
+        _options = options.Value;
+    }
+
+    public async Task<StripeCatalogSyncResult> EnsureAllAsync(CancellationToken ct)
+    {
+        var configured = !string.IsNullOrWhiteSpace(_options.ApiKey);
+        var entries = new List<StripeCatalogEntryResult>();
+
+        foreach (var price in _catalog.List())
+        {
+            if (!configured)
+            {
+                entries.Add(new(price.ServiceId, price.LookupKey, null, null, "stripe_not_configured"));
+                continue;
+            }
+
+            try
+            {
+                var (priceId, productId, status) = await EnsurePriceInternalAsync(price, ct);
+                entries.Add(new(price.ServiceId, price.LookupKey, priceId, productId, status));
+            }
+            catch (StripeException ex)
+            {
+                entries.Add(new(price.ServiceId, price.LookupKey, null, null, $"error:{ex.StripeError?.Code ?? "stripe_error"}"));
+            }
+        }
+
+        return new StripeCatalogSyncResult(configured, entries);
+    }
+
+    public async Task<string?> EnsurePriceAsync(ServicePrice price, CancellationToken ct)
+    {
+        if (_map.TryGet(price.LookupKey, out var cached))
+            return cached;
+        if (string.IsNullOrWhiteSpace(_options.ApiKey))
+            return null;
+
+        try
+        {
+            var (priceId, _, _) = await EnsurePriceInternalAsync(price, ct);
+            return priceId;
+        }
+        catch (StripeException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<(string priceId, string productId, string status)> EnsurePriceInternalAsync(ServicePrice price, CancellationToken ct)
+    {
+        StripeConfiguration.ApiKey = _options.ApiKey;
+
+        // 1) Reuse an existing price pinned to this lookup_key.
+        var priceService = new PriceService();
+        var existing = await priceService.ListAsync(new PriceListOptions
+        {
+            LookupKeys = new List<string> { price.LookupKey },
+            Active = true,
+            Limit = 1
+        }, cancellationToken: ct);
+
+        if (existing.Data.Count > 0)
+        {
+            var found = existing.Data[0];
+            _map.Set(price.LookupKey, found.Id);
+            return (found.Id, found.ProductId, "exists");
+        }
+
+        // 2) Ensure the product exists.
+        var productId = await EnsureProductAsync(price.ProductId, ct);
+
+        // 3) Create the price bound to the product, claiming the lookup_key.
+        var created = await priceService.CreateAsync(new PriceCreateOptions
+        {
+            Product = productId,
+            Currency = price.Currency,
+            UnitAmount = price.UnitPriceCents,
+            Nickname = price.DisplayName,
+            LookupKey = price.LookupKey,
+            TransferLookupKey = true,
+            Recurring = price.RecurringInterval is null
+                ? null
+                : new PriceRecurringOptions { Interval = price.RecurringInterval },
+            Metadata = new Dictionary<string, string>
+            {
+                ["laplace_service_id"] = price.ServiceId,
+                ["laplace_unit"] = price.UnitName
+            }
+        }, cancellationToken: ct);
+
+        _map.Set(price.LookupKey, created.Id);
+        return (created.Id, productId, "created");
+    }
+
+    private async Task<string> EnsureProductAsync(string productKey, CancellationToken ct)
+    {
+        _catalog.TryGetProduct(productKey, out var product);
+        var productService = new ProductService();
+
+        // Reuse a product tagged with our internal id, if the Search API is available.
+        try
+        {
+            var search = await productService.SearchAsync(new ProductSearchOptions
+            {
+                Query = $"metadata['laplace_product_id']:'{productKey}'",
+                Limit = 1
+            }, cancellationToken: ct);
+            if (search.Data.Count > 0)
+                return search.Data[0].Id;
+        }
+        catch (StripeException)
+        {
+            // Search API not enabled — fall through and create.
+        }
+
+        var createdProduct = await productService.CreateAsync(new ProductCreateOptions
+        {
+            Name = product?.Name ?? productKey,
+            Description = product?.Description,
+            Metadata = new Dictionary<string, string>
+            {
+                ["laplace_product_id"] = productKey,
+                ["laplace_category"] = product?.Category ?? "inference"
+            }
+        }, cancellationToken: ct);
+
+        return createdProduct.Id;
+    }
 }
 
 internal interface IBillingQuoteStore
@@ -118,10 +507,12 @@ internal interface IStripeCheckoutGateway
 internal sealed class StripeCheckoutGateway : IStripeCheckoutGateway
 {
     private readonly StripeBillingOptions _options;
+    private readonly IStripeCatalogSync _catalogSync;
 
-    public StripeCheckoutGateway(IOptions<StripeBillingOptions> options)
+    public StripeCheckoutGateway(IOptions<StripeBillingOptions> options, IStripeCatalogSync catalogSync)
     {
         _options = options.Value;
+        _catalogSync = catalogSync;
     }
 
     public async Task<StripeCheckoutSessionResult> CreateCheckoutSessionAsync(BillingQuote quote, ServicePrice price, CancellationToken ct)
@@ -130,39 +521,77 @@ internal sealed class StripeCheckoutGateway : IStripeCheckoutGateway
             return new StripeCheckoutSessionResult(false, null, null, "stripe_not_configured");
 
         StripeConfiguration.ApiKey = _options.ApiKey;
-        var service = new SessionService();
-        var options = new SessionCreateOptions
+
+        try
         {
-            Mode = "payment",
-            SuccessUrl = _options.SuccessUrl,
-            CancelUrl = _options.CancelUrl,
-            Metadata = new Dictionary<string, string>
+            SessionLineItemOptions lineItem;
+            if (price.Metered || price.BaseFeeCents > 0)
             {
-                ["quote_id"] = quote.QuoteId,
-                ["tenant"] = quote.Tenant,
-                ["service_id"] = quote.ServiceId
-            },
-            LineItems = new List<SessionLineItemOptions>
-            {
-                new()
+                // Metered/base-fee services bill the authoritative quote total as a
+                // single computed line item (a per-unit Stripe Price cannot express
+                // base fee + dimensionality-scaled meter).
+                lineItem = new SessionLineItemOptions
                 {
-                    Quantity = quote.Units,
+                    Quantity = 1,
                     PriceData = new SessionLineItemPriceDataOptions
                     {
                         Currency = quote.Currency,
-                        UnitAmount = price.UnitPriceCents,
+                        UnitAmount = quote.AmountCents,
                         ProductData = new SessionLineItemPriceDataProductDataOptions
                         {
                             Name = price.DisplayName,
-                            Description = $"{price.ServiceId} billed per {price.UnitName}"
+                            Description = $"{price.ServiceId}: {quote.Units} {price.UnitName}"
                         }
                     }
-                }
+                };
             }
-        };
+            else
+            {
+                // Flat per-unit service: prefer a real, provisioned Stripe Price; fall
+                // back to inline price data if catalog sync could not resolve one.
+                var stripePriceId = await _catalogSync.EnsurePriceAsync(price, ct);
+                lineItem = stripePriceId is not null
+                    ? new SessionLineItemOptions { Quantity = quote.Units, Price = stripePriceId }
+                    : new SessionLineItemOptions
+                    {
+                        Quantity = quote.Units,
+                        PriceData = new SessionLineItemPriceDataOptions
+                        {
+                            Currency = quote.Currency,
+                            UnitAmount = price.UnitPriceCents,
+                            ProductData = new SessionLineItemPriceDataProductDataOptions
+                            {
+                                Name = price.DisplayName,
+                                Description = $"{price.ServiceId} billed per {price.UnitName}"
+                            }
+                        }
+                    };
+            }
 
-        var session = await service.CreateAsync(options, cancellationToken: ct);
-        return new StripeCheckoutSessionResult(true, session.Id, session.Url, null);
+            var service = new SessionService();
+            var options = new SessionCreateOptions
+            {
+                Mode = price.RecurringInterval is null ? "payment" : "subscription",
+                SuccessUrl = _options.SuccessUrl,
+                CancelUrl = _options.CancelUrl,
+                Metadata = new Dictionary<string, string>
+                {
+                    ["quote_id"] = quote.QuoteId,
+                    ["tenant"] = quote.Tenant,
+                    ["service_id"] = quote.ServiceId
+                },
+                LineItems = new List<SessionLineItemOptions> { lineItem }
+            };
+
+            var session = await service.CreateAsync(options, cancellationToken: ct);
+            return new StripeCheckoutSessionResult(true, session.Id, session.Url, null);
+        }
+        catch (StripeException ex)
+        {
+            // Stripe is configured but unreachable/misconfigured — fall back to manual
+            // approval rather than failing the caller's preflight.
+            return new StripeCheckoutSessionResult(false, null, null, $"stripe_error:{ex.StripeError?.Code ?? "stripe_error"}");
+        }
     }
 
     public async Task<bool> IsSessionPaidAsync(string sessionId, CancellationToken ct)
@@ -171,9 +600,16 @@ internal sealed class StripeCheckoutGateway : IStripeCheckoutGateway
             return false;
 
         StripeConfiguration.ApiKey = _options.ApiKey;
-        var service = new SessionService();
-        var session = await service.GetAsync(sessionId, cancellationToken: ct);
-        return string.Equals(session.PaymentStatus, "paid", StringComparison.OrdinalIgnoreCase);
+        try
+        {
+            var service = new SessionService();
+            var session = await service.GetAsync(sessionId, cancellationToken: ct);
+            return string.Equals(session.PaymentStatus, "paid", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (StripeException)
+        {
+            return false;
+        }
     }
 }
 
@@ -229,8 +665,8 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
             Tenant: tenant,
             ServiceId: serviceId,
             Units: units,
-            AmountCents: checked(price.UnitPriceCents * units),
-            Currency: _options.Currency,
+            AmountCents: checked(price.BaseFeeCents + price.UnitPriceCents * units),
+            Currency: price.Currency,
             Status: "pending_payment",
             StripeSessionId: null,
             StripeCheckoutUrl: null,
