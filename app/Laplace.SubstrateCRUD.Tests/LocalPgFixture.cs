@@ -7,7 +7,18 @@ namespace Laplace.SubstrateCRUD.Tests;
 public sealed class LocalPgFixture : IAsyncLifetime
 {
     public const string DatabaseName = "laplace_substratecrud_test";
-    public const string PgUser = "laplace_admin";
+
+    public static readonly string PgHost =
+        Environment.GetEnvironmentVariable("LAPLACE_TEST_PGHOST")
+        ?? (OperatingSystem.IsWindows() ? "localhost" : "/var/run/postgresql");
+
+    public static readonly string PgUser =
+        Environment.GetEnvironmentVariable("LAPLACE_TEST_PGUSER")
+        ?? (OperatingSystem.IsWindows() ? "postgres" : "laplace_admin");
+
+    public static readonly string? PgPassword =
+        Environment.GetEnvironmentVariable("LAPLACE_TEST_PGPASSWORD")
+        ?? (OperatingSystem.IsWindows() ? "postgres" : null);
 
     private NpgsqlDataSource? _ds;
 
@@ -15,12 +26,13 @@ public sealed class LocalPgFixture : IAsyncLifetime
         _ds ?? throw new InvalidOperationException("Fixture not initialized");
 
     public string ConnectionString =>
-        $"Host=/var/run/postgresql;Username={PgUser};Database={DatabaseName}";
+        $"Host={PgHost};Username={PgUser};Database={DatabaseName}"
+        + (PgPassword is null ? "" : $";Password={PgPassword}");
 
     public async Task InitializeAsync()
     {
-        await RunPsqlAdminAsync("dropdb", $"-U {PgUser} --force --if-exists {DatabaseName}");
-        await RunPsqlAdminAsync("createdb", $"-U {PgUser} -O {PgUser} {DatabaseName}");
+        await RunPsqlAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
+        await RunPsqlAdminAsync("createdb", $"-h {PgHost} -U {PgUser} -O {PgUser} {DatabaseName}");
 
         var dsb = new NpgsqlDataSourceBuilder(ConnectionString);
         _ds = dsb.Build();
@@ -43,19 +55,20 @@ public sealed class LocalPgFixture : IAsyncLifetime
             await _ds.DisposeAsync();
             _ds = null;
         }
-        await RunPsqlAdminAsync("dropdb", $"-U {PgUser} --force --if-exists {DatabaseName}");
+        await RunPsqlAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
     }
 
     private static async Task RunPsqlAdminAsync(string program, string args)
     {
         var psi = new ProcessStartInfo
         {
-            FileName = program,
+            FileName = ResolvePgTool(program),
             Arguments = args,
             RedirectStandardError = true,
             RedirectStandardOutput = true,
             UseShellExecute = false,
         };
+        if (PgPassword is not null) psi.Environment["PGPASSWORD"] = PgPassword;
         using var p = Process.Start(psi)!;
         await p.WaitForExitAsync();
         if (p.ExitCode != 0)
@@ -64,5 +77,14 @@ public sealed class LocalPgFixture : IAsyncLifetime
             throw new InvalidOperationException(
                 $"{program} {args} exited {p.ExitCode}: {stderr}");
         }
+    }
+
+    private static string ResolvePgTool(string program)
+    {
+        if (!OperatingSystem.IsWindows()) return program;
+        string exe = Path.Combine(
+            Environment.GetEnvironmentVariable("PGBIN") ?? @"C:\Program Files\PostgreSQL\18\bin",
+            program + ".exe");
+        return File.Exists(exe) ? exe : program;
     }
 }

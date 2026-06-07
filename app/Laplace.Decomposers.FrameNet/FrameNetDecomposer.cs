@@ -110,9 +110,7 @@ public sealed class FrameNetDecomposer : IDecomposer
         string fulltextDir = Path.Combine(context.EcosystemPath, "fulltext");
         int batch = options.BatchSize > 1 ? options.BatchSize : 256;
 
-        await foreach (var change in StreamFramesAsync(frameDir, batch, entitiesOnly: true, ct))
-        { if (!options.DryRun) yield return change; await Task.Yield(); }
-        await foreach (var change in StreamFramesAsync(frameDir, batch, entitiesOnly: false, ct))
+        await foreach (var change in StreamFramesAsync(frameDir, batch, ct))
         { if (!options.DryRun) yield return change; await Task.Yield(); }
 
         await foreach (var change in StreamFulltextAsync(fulltextDir, batch, ct))
@@ -137,12 +135,11 @@ public sealed class FrameNetDecomposer : IDecomposer
         [.. CorenessValues.Select(c => $"framenet/coreness/{c}"), .. MetaNames.Keys];
 
     private static async IAsyncEnumerable<SubstrateChange> StreamFramesAsync(
-        string frameDir, int batch, bool entitiesOnly,
+        string frameDir, int batch,
         [EnumeratorCancellation] CancellationToken ct)
     {
         if (!Directory.Exists(frameDir)) yield break;
-        string suffix = entitiesOnly ? "entities" : "attestations";
-        var b = NewBuilder($"framenet/frame-0/{suffix}", entitiesOnly, batch);
+        var b = NewBuilder("framenet/frame-0", batch);
         int count = 0, batchNum = 0;
 
         foreach (var path in Directory.EnumerateFiles(frameDir, "*.xml").OrderBy(p => p, StringComparer.Ordinal))
@@ -151,13 +148,13 @@ public sealed class FrameNetDecomposer : IDecomposer
             Frame? frame = ParseFrame(path);
             if (frame is null) continue;
 
-            if (entitiesOnly) EmitFrameEntities(b, frame);
-            else              EmitFrameAttestations(b, frame);
+            EmitFrameEntities(b, frame);
+            EmitFrameAttestations(b, frame);
 
             if (++count >= batch)
             {
                 yield return b.Build();
-                b = NewBuilder($"framenet/frame-{++batchNum}/{suffix}", entitiesOnly, batch);
+                b = NewBuilder($"framenet/frame-{++batchNum}", batch);
                 count = 0;
                 await Task.Yield();
             }
@@ -186,7 +183,10 @@ public sealed class FrameNetDecomposer : IDecomposer
         }
 
         foreach (var rel in frame.Relations)
+        {
+            b.AddEntity(new EntityRow(FrameId(rel.TargetFrame), (byte)MetaTier.Meta, FrameTypeId, Source));
             ContentEmitter.Emit(b, rel.TargetFrame, Source);
+        }
     }
 
     private static void EmitFrameAttestations(SubstrateChangeBuilder b, Frame frame)
@@ -233,6 +233,7 @@ public sealed class FrameNetDecomposer : IDecomposer
             if (lemmaId is null) continue;
 
             Hash128 posId = ResolvePos(lu.Pos);
+            b.AddEntity(new EntityRow(posId, (byte)MetaTier.Meta, PosReference.PosTypeId, Source));
             b.AddAttestation(RelationTypeRegistry.Attest(
                 lemmaId.Value, "HAS_POS", posId, Source, SourceTrust.AcademicCurated));
             b.AddAttestation(RelationTypeRegistry.Attest(
@@ -253,7 +254,7 @@ public sealed class FrameNetDecomposer : IDecomposer
         [EnumeratorCancellation] CancellationToken ct)
     {
         if (!Directory.Exists(fulltextDir)) yield break;
-        var b = NewBuilder("framenet/fulltext-0", entitiesOnly: false, batch);
+        var b = NewBuilder("framenet/fulltext-0", batch);
         int count = 0, batchNum = 0;
 
         foreach (var path in Directory.EnumerateFiles(fulltextDir, "*.xml").OrderBy(p => p, StringComparer.Ordinal))
@@ -264,14 +265,17 @@ public sealed class FrameNetDecomposer : IDecomposer
                 var sentId = ContentEmitter.Emit(b, ann.Sentence, Source);
                 var targetId = ContentEmitter.Emit(b, ann.TargetText, Source);
                 if (sentId is not null && targetId is not null)
+                {
+                    b.AddEntity(new EntityRow(FrameId(ann.FrameName), (byte)MetaTier.Meta, FrameTypeId, Source));
                     b.AddAttestation(RelationTypeRegistry.Attest(
                         targetId.Value, "EVOKES_FRAME", FrameId(ann.FrameName),
                         Source, SourceTrust.AcademicCurated, contextId: sentId.Value));
+                }
 
                 if (++count >= batch)
                 {
                     yield return b.Build();
-                    b = NewBuilder($"framenet/fulltext-{++batchNum}", entitiesOnly: false, batch);
+                    b = NewBuilder($"framenet/fulltext-{++batchNum}", batch);
                     count = 0;
                     await Task.Yield();
                 }
@@ -280,11 +284,11 @@ public sealed class FrameNetDecomposer : IDecomposer
         if (count > 0) yield return b.Build();
     }
 
-    private static SubstrateChangeBuilder NewBuilder(string unit, bool entitiesOnly, int batch) =>
+    private static SubstrateChangeBuilder NewBuilder(string unit, int batch) =>
         new(Source, unit, null,
-            entityCapacity:      entitiesOnly ? batch * 32 : batch * 4,
-            physicalityCapacity: entitiesOnly ? batch * 32 : batch * 4,
-            attestationCapacity: entitiesOnly ? 0          : batch * 32);
+            entityCapacity:      batch * 32,
+            physicalityCapacity: batch * 32,
+            attestationCapacity: batch * 32);
 
     private static Hash128 ResolvePos(string fnPos)
     {

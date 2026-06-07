@@ -40,6 +40,7 @@ public sealed class FrameNetDecomposerTests
     </FE>
     <lexUnit status="Finished_Initial" POS="V" name="give.v" ID="4344"/>
     <lexUnit status="Finished_Initial" POS="N" name="donation.n" ID="5345"/>
+    <lexUnit status="Finished_Initial" POS="IDIO" name="give away.idio" ID="9999"/>
     <frameRelation type="Inherits from">
         <relatedFrame ID="206">Transfer</relatedFrame>
     </frameRelation>
@@ -74,9 +75,10 @@ public sealed class FrameNetDecomposerTests
         Assert.Contains(f.Elements, fe => fe.Name == "Place" && fe.CoreType == "Peripheral");
         Assert.Contains(f.Elements, fe => fe.Name == "Donor" && fe.Definition.Contains("person that gives"));
 
-        Assert.Equal(2, f.LexUnits.Count);
+        Assert.Equal(3, f.LexUnits.Count);
         Assert.Contains(f.LexUnits, lu => lu.Lemma == "give" && lu.Pos == "V");
         Assert.Contains(f.LexUnits, lu => lu.Lemma == "donation" && lu.Pos == "N");
+        Assert.Contains(f.LexUnits, lu => lu.Lemma == "give away" && lu.Pos == "IDIO");
 
         Assert.Equal(3, f.Relations.Count);
         Assert.Contains(f.Relations, r => r.Type == "Inherits from" && r.TargetFrame == "Transfer");
@@ -145,6 +147,46 @@ public sealed class FrameNetDecomposerTests
 
         Assert.Contains(writer.Captured[1].Entities, e =>
             e.Id == Hash128.OfCanonical("framenet/coreness/Core"));
+    }
+
+    [Fact]
+    public async Task Dangling_Relation_Targets_Are_Staged_As_Entities()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "fn-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "frame"));
+        await File.WriteAllTextAsync(Path.Combine(dir, "frame", "Giving.xml"), FrameXml);
+        try
+        {
+            var dec = new FrameNetDecomposer();
+            var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
+            var entityIds = new HashSet<Hash128>();
+            var referenced = new HashSet<Hash128>();
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            {
+                foreach (var e in change.Entities) entityIds.Add(e.Id);
+                foreach (var a in change.Attestations)
+                {
+                    referenced.Add(a.SubjectId);
+                    if (a.ObjectId is { } o) referenced.Add(o);
+                }
+            }
+
+            Assert.Contains(Hash128.OfCanonical("framenet/frame/Giving"), entityIds);
+            foreach (var target in new[] { "Transfer", "Intentionally_act", "Commerce_scenario" })
+            {
+                var targetId = Hash128.OfCanonical($"framenet/frame/{target}");
+                Assert.Contains(targetId, referenced);
+                Assert.Contains(targetId, entityIds);
+            }
+
+            var idioPos = Hash128.OfCanonical("substrate/pos/probationary/upos/IDIO/v1");
+            Assert.Contains(idioPos, referenced);
+            Assert.Contains(idioPos, entityIds);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
     }
 
     private static async Task<List<AttestationRow>> CollectAttestationsAsync()

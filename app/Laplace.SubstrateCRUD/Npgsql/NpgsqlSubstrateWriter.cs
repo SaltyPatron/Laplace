@@ -238,11 +238,17 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                     await using var upd = conn.CreateCommand();
                     upd.CommandTimeout = 0;
                     upd.CommandText =
+                        "WITH d AS MATERIALIZED (" +
+                        "  SELECT unnest(@ids) AS id, unnest(@games) AS games, unnest(@ts) AS ts_us" +
+                        "), locked AS MATERIALIZED (" +
+                        "  SELECT a.id FROM laplace.attestations a " +
+                        "  WHERE a.id IN (SELECT id FROM d) ORDER BY a.id FOR UPDATE" +
+                        ") " +
                         "UPDATE laplace.attestations a SET " +
                         "  observation_count = a.observation_count + d.games, " +
                         "  last_observed_at  = GREATEST(a.last_observed_at, to_timestamp(d.ts_us / 1e6)) " +
-                        "FROM (SELECT unnest(@ids) AS id, unnest(@games) AS games, unnest(@ts) AS ts_us) d " +
-                        "WHERE a.id = d.id";
+                        "FROM d " +
+                        "WHERE a.id = d.id AND a.id IN (SELECT id FROM locked)";
                     upd.Parameters.AddWithValue("ids",   ids);
                     upd.Parameters.AddWithValue("games", games);
                     upd.Parameters.AddWithValue("ts",    tsUs);
@@ -407,7 +413,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             promote.CommandTimeout = 0;
             promote.CommandText =
                 $"INSERT INTO laplace.{tableName} ({cols}) " +
-                $"SELECT {cols} FROM {stageName} ON CONFLICT DO NOTHING";
+                $"SELECT {cols} FROM {stageName} ORDER BY id ON CONFLICT DO NOTHING";
             return await promote.ExecuteNonQueryAsync(ct);
         }
     }
