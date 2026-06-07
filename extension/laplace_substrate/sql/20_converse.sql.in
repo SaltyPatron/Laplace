@@ -654,85 +654,85 @@ CREATE OR REPLACE FUNCTION route_prompt(p_prompt text)
     LANGUAGE plpgsql STABLE STRICT
     SET search_path = @extschema@, public AS $route$
 DECLARE
-    p text := lower(trim(p_prompt));
+    p text := trim(p_prompt);
     m text[];
 BEGIN
     intent := NULL; phrase := NULL; phrase2 := NULL; kind_name := NULL;
 
-    m := regexp_match(p, '^what\s+does\s+(.+?)\s+mean\y');
-    IF m IS NULL THEN m := regexp_match(p, '^(?:define|meaning\s+of)\s+(.+)$'); END IF;
+    m := regexp_match(p, '^what\s+does\s+(.+?)\s+mean\y', 'i');
+    IF m IS NULL THEN m := regexp_match(p, '^(?:define|meaning\s+of)\s+(.+)$', 'i'); END IF;
     IF m IS NOT NULL THEN intent := 'define'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, '^what\s+(?:is|are)\s+(?:(?:a|an|the)\s+)?(.+?)\s+used\s+for\??$');
-    IF m IS NULL THEN m := regexp_match(p, '^uses?\s+of\s+(.+?)\??$'); END IF;
+    m := regexp_match(p, '^what\s+(?:is|are)\s+(?:(?:a|an|the)\s+)?(.+?)\s+used\s+for\??$', 'i');
+    IF m IS NULL THEN m := regexp_match(p, '^uses?\s+of\s+(.+?)\??$', 'i'); END IF;
     IF m IS NOT NULL THEN intent := 'related'; kind_name := 'USED_FOR'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, '^how\s+(?:are|is)\s+(.+?)\s+(?:and|&)\s+(.+?)\s+related\??$');
-    IF m IS NULL THEN m := regexp_match(p, '^how\s+(?:is|are)\s+(.+?)\s+related\s+to\s+(.+?)\??$'); END IF;
-    IF m IS NULL THEN m := regexp_match(p, '^(?:relate|relation\s+(?:between|of))\s+(.+?)\s+(?:and|to|&)\s+(.+?)\??$'); END IF;
-    IF m IS NULL THEN m := regexp_match(p, '^(.+?)\s+vs\.?\s+(.+?)\??$'); END IF;
+    m := regexp_match(p, '^how\s+(?:are|is)\s+(.+?)\s+(?:and|&)\s+(.+?)\s+related\??$', 'i');
+    IF m IS NULL THEN m := regexp_match(p, '^how\s+(?:is|are)\s+(.+?)\s+related\s+to\s+(.+?)\??$', 'i'); END IF;
+    IF m IS NULL THEN m := regexp_match(p, '^(?:relate|relation\s+(?:between|of))\s+(.+?)\s+(?:and|to|&)\s+(.+?)\??$', 'i'); END IF;
+    IF m IS NULL THEN m := regexp_match(p, '^(.+?)\s+vs\.?\s+(.+?)\??$', 'i'); END IF;
     IF m IS NOT NULL THEN intent := 'reason'; phrase := m[1]; phrase2 := m[2]; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, '^(?:is|are)\s+(?:(?:a|an|the)\s+)?(.+?)\s+(?:a|an|the)\s+(.+?)\??$');
+    m := regexp_match(p, '^(?:is|are)\s+(?:(?:a|an|the)\s+)?(.+?)\s+(?:a|an|the)\s+(.+?)\??$', 'i');
     IF m IS NOT NULL THEN intent := 'is_a'; phrase := m[1]; phrase2 := m[2]; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, '^what(?:''s|\s+is|\s+are)\s+(?:(?:a|an|the)\s+)?(.+?)\??$');
+    m := regexp_match(p, '^what(?:''s|\s+is|\s+are)\s+(?:(?:a|an|the)\s+)?(.+?)\??$', 'i');
     IF m IS NOT NULL THEN intent := 'what_is'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, '^(?:tell\s+me\s+about|describe|about)\s+(.+?)\??$');
+    m := regexp_match(p, '^(?:tell\s+me\s+about|describe|about)\s+(.+?)\??$', 'i');
     IF m IS NOT NULL THEN intent := 'describe'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, '^translate\s+(.+?)(?:\s+(?:in|to|into)\s+.+)?$');
+    m := regexp_match(p, '^translate\s+(.+?)(?:\s+(?:in|to|into)\s+.+)?$', 'i');
     IF m IS NOT NULL THEN intent := 'translate'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, '^(?:walk|continue|free[- ]?associate(?:\s+from)?)\s+(.+?)\??$');
+    m := regexp_match(p, '^(?:walk|continue|free[- ]?associate(?:\s+from)?)\s+(.+?)\??$', 'i');
     IF m IS NOT NULL THEN intent := 'walk'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, '^complete\s+(.+?)\??$');
+    m := regexp_match(p, '^complete\s+(.+?)\??$', 'i');
     IF m IS NOT NULL THEN intent := 'complete'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, '^(?:what\s+(?:word\s+|comes?\s+)?(?:comes?\s+)?after|what\s+follows?|after|follows?)\s+(.+?)\??$');
+    m := regexp_match(p, '^(?:what\s+(?:word\s+|comes?\s+)?(?:comes?\s+)?after|what\s+follows?|after|follows?)\s+(.+?)\??$', 'i');
     IF m IS NOT NULL THEN intent := 'related'; kind_name := 'PRECEDES'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, '^(?:what\s+(?:word\s+|comes?\s+)?(?:comes?\s+)?before|what\s+precedes?|before|precedes?)\s+(.+?)\??$');
+    m := regexp_match(p, '^(?:what\s+(?:word\s+|comes?\s+)?(?:comes?\s+)?before|what\s+precedes?|before|precedes?)\s+(.+?)\??$', 'i');
     IF m IS NOT NULL THEN intent := 'related'; kind_name := 'FOLLOWS'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, '^(?:(?:and|what\s+about)\s+)?(?:its|their|his|her)\s+(definition|meaning|synonyms?|antonyms?|translations?|examples?|parts?|causes?|uses?)\??$');
+    m := regexp_match(p, '^(?:(?:and|what\s+about)\s+)?(?:its|their|his|her)\s+(definition|meaning|synonyms?|antonyms?|translations?|examples?|parts?|causes?|uses?)\??$', 'i');
     IF m IS NOT NULL THEN
         intent := CASE
-            WHEN m[1] IN ('definition', 'meaning') THEN 'define'
-            WHEN m[1] LIKE 'synonym%'              THEN 'synonyms'
-            WHEN m[1] LIKE 'translation%'          THEN 'translate'
-            WHEN m[1] LIKE 'example%'              THEN 'examples'
-            WHEN m[1] LIKE 'cause%'                THEN 'related_in'
+            WHEN lower(m[1]) IN ('definition', 'meaning') THEN 'define'
+            WHEN lower(m[1]) LIKE 'synonym%'              THEN 'synonyms'
+            WHEN lower(m[1]) LIKE 'translation%'          THEN 'translate'
+            WHEN lower(m[1]) LIKE 'example%'              THEN 'examples'
+            WHEN lower(m[1]) LIKE 'cause%'                THEN 'related_in'
             ELSE 'related' END;
         kind_name := CASE
-            WHEN m[1] LIKE 'antonym%' THEN 'IS_ANTONYM_OF'
-            WHEN m[1] LIKE 'part%'    THEN 'HAS_PART'
-            WHEN m[1] LIKE 'cause%'   THEN 'CAUSES'
-            WHEN m[1] LIKE 'use%'     THEN 'USED_FOR' END;
+            WHEN lower(m[1]) LIKE 'antonym%' THEN 'IS_ANTONYM_OF'
+            WHEN lower(m[1]) LIKE 'part%'    THEN 'HAS_PART'
+            WHEN lower(m[1]) LIKE 'cause%'   THEN 'CAUSES'
+            WHEN lower(m[1]) LIKE 'use%'     THEN 'USED_FOR' END;
         RETURN NEXT; RETURN;
     END IF;
 
-    m := regexp_match(p, '^(?:what\s+about|and)\s+(?:it|that|this|them|those)\??$');
+    m := regexp_match(p, '^(?:what\s+about|and)\s+(?:it|that|this|them|those)\??$', 'i');
     IF m IS NOT NULL THEN intent := 'describe'; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, '^antonyms?\s+(?:of|for)?\s*(.+?)\??$');
+    m := regexp_match(p, '^antonyms?\s+(?:of|for)?\s*(.+?)\??$', 'i');
     IF m IS NOT NULL THEN intent := 'related'; kind_name := 'IS_ANTONYM_OF'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, '^parts?\s+of\s+(.+?)\??$');
+    m := regexp_match(p, '^parts?\s+of\s+(.+?)\??$', 'i');
     IF m IS NOT NULL THEN intent := 'related'; kind_name := 'HAS_PART'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, '^(?:what\s+causes|causes?\s+of)\s+(.+?)\??$');
+    m := regexp_match(p, '^(?:what\s+causes|causes?\s+of)\s+(.+?)\??$', 'i');
     IF m IS NOT NULL THEN intent := 'related_in'; kind_name := 'CAUSES'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, '^what\s+does\s+(.+?)\s+cause\??$');
+    m := regexp_match(p, '^what\s+does\s+(.+?)\s+cause\??$', 'i');
     IF m IS NOT NULL THEN intent := 'related'; kind_name := 'CAUSES'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, 'synonyms?\s+(?:of|for)?\s*(.+)$');
+    m := regexp_match(p, 'synonyms?\s+(?:of|for)?\s*(.+)$', 'i');
     IF m IS NOT NULL THEN intent := 'synonyms'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    m := regexp_match(p, 'examples?\s+(?:of|for)?\s*(.+)$');
+    m := regexp_match(p, 'examples?\s+(?:of|for)?\s*(.+)$', 'i');
     IF m IS NOT NULL THEN intent := 'examples'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
     intent := 'fallback'; phrase := p;
