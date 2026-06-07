@@ -110,7 +110,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             _provenAtt.AddRange(existingAtt);
         }
 
-        using var stage = IntentStage.New(Math.Max(uniqueEntityIds.Count, physAttempted));
+        using var stage = IntentStage.New(Math.Max(Math.Max(uniqueEntityIds.Count, physAttempted), attAttempted));
 
         var seenEntity = new HashSet<Hash128>(uniqueEntityIds.Count);
         var seenPhys   = new HashSet<Hash128>(existingPhys);

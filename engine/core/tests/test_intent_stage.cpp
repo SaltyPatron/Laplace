@@ -356,3 +356,39 @@ TEST(LaplaceCoreIntentStage, EachTableHasIndependentRowCount) {
 TEST(LaplaceCoreIntentStage, PGEpochOffsetConstantIsCorrect) {
     EXPECT_EQ(INT64_C(946684800000000), INTENT_STAGE_PG_EPOCH_UNIX_US);
 }
+
+// Reproduces the WordNet ingest crash path: a stage created with a zero
+// capacity hint (pure-attestation batch — no entities/physicalities), then
+// grown through hundreds of thousands of attestations via the realloc path,
+// emitted, freed, and repeated across many "batches". Exercises buf_reserve's
+// doubling under load with object_id + context_id populated.
+TEST(LaplaceCoreIntentStage, AttestationGrowthFromZeroHintLargeBatchesNoCorruption) {
+    for (int batch = 0; batch < 4; ++batch) {
+        intent_stage_t* s = intent_stage_new(0);
+        ASSERT_NE(nullptr, s);
+        const size_t kRows = 250000;
+        for (size_t i = 0; i < kRows; ++i) {
+            hash128_t id  = make_hash((uint8_t)(i));
+            hash128_t sub = make_hash((uint8_t)(i >> 8));
+            hash128_t kid = make_hash((uint8_t)(i >> 16));
+            hash128_t obj = make_hash((uint8_t)(i + 1));
+            hash128_t src = make_hash(0x5A);
+            hash128_t ctx = make_hash((uint8_t)(i + 2));
+            ASSERT_EQ(0, intent_stage_add_attestation(
+                s, &id, &sub, &kid, &obj, &src, &ctx,
+                (int16_t)(i % 3), INTENT_STAGE_PG_EPOCH_UNIX_US + (int64_t)i,
+                (int64_t)(i % 100)));
+        }
+        ASSERT_EQ(kRows, intent_stage_attestation_count(s));
+        const size_t need = intent_stage_emit_copy_binary(
+            s, INTENT_STAGE_TABLE_ATTESTATIONS, nullptr, 0);
+        ASSERT_GT(need, kHeader + kTrailer);
+        std::vector<uint8_t> buf(need);
+        ASSERT_EQ(need, intent_stage_emit_copy_binary(
+            s, INTENT_STAGE_TABLE_ATTESTATIONS, buf.data(), buf.size()));
+        EXPECT_EQ(0xff, buf[buf.size() - 2]);
+        EXPECT_EQ(0xff, buf[buf.size() - 1]);
+        intent_stage_free(s);
+    }
+    SUCCEED();
+}
