@@ -148,18 +148,18 @@ public sealed class ModelDecomposer : IDecomposer
             + "d_model={DModel}, vocab={Vocab} ({Ms} ms)",
             recipe.NumLayers, recipe.NumHeads, recipe.NumKvHeads, recipe.HiddenSize,
             recipe.VocabSize, phaseSw.ElapsedMilliseconds);
-        yield return LlamaRecipeExtractor.BuildChange(
+        await context.Writer.ApplyAsync(LlamaRecipeExtractor.BuildChange(
             recipe, Source, ModelRecipeTypeId,
             HasHiddenSizeTypeId, HasNumLayersTypeId, HasNumHeadsTypeId, HasNumKvHeadsTypeId,
             HasIntermSizeTypeId, HasVocabSizeTypeId,
-            IsATypeId, LlamaArchitectureId);
+            IsATypeId, LlamaArchitectureId), ct);
 
         byte[] tokBytes = File.ReadAllBytes(tokenizerPath);
         var tokEntityId = Hash128.Blake3(tokBytes);
         var tokChange = new SubstrateChangeBuilder(Source, "tokenizer/entity",
             entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 0);
         tokChange.AddEntity(tokEntityId, (byte)MetaTier.Meta, ModelTokenizerTypeId, firstObservedBy: Source);
-        yield return tokChange.Build();
+        await context.Writer.ApplyAsync(tokChange.Build(), ct);
 
         phaseSw.Restart();
         var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
@@ -172,9 +172,8 @@ public sealed class ModelDecomposer : IDecomposer
             tokens, Source, TextTypeId, batchSz))
         {
             ct.ThrowIfCancellationRequested();
-            yield return batch;
+            await context.Writer.ApplyAsync(batch, ct);
             vocabBatches++;
-            await Task.Yield();
         }
         log.LogInformation("phase=vocab emitted: {Batches} batches ({Ms} ms)",
             vocabBatches, phaseSw.ElapsedMilliseconds);
@@ -185,9 +184,8 @@ public sealed class ModelDecomposer : IDecomposer
         foreach (var batch in LlamaTokenizerParser.BuildMergesBatches(merges, Source, TextTypeId, batchSz))
         {
             ct.ThrowIfCancellationRequested();
-            yield return batch;
+            await context.Writer.ApplyAsync(batch, ct);
             mergeBatches++;
-            await Task.Yield();
         }
         log.LogInformation("phase=merges emitted: {Count} merges, {Batches} batches ({Ms} ms)",
             merges.Count, mergeBatches, phaseSw.ElapsedMilliseconds);
@@ -197,6 +195,11 @@ public sealed class ModelDecomposer : IDecomposer
         await foreach (var change in etl.EmitAsync(ct))
         {
             ct.ThrowIfCancellationRequested();
+            if (change.Metadata.SourceContentUnitName == "model/axes")
+            {
+                await context.Writer.ApplyAsync(change, ct);
+                continue;
+            }
             yield return change;
         }
 

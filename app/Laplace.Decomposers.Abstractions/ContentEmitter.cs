@@ -18,6 +18,9 @@ public static class ContentEmitter
 
     private static readonly ConcurrentDictionary<Hash128, Hash128?> _rootMemo = new();
 
+    private static int _emitMemoCount;
+    private static int _rootMemoCount;
+
     public static Hash128? Emit(SubstrateChangeBuilder b, string surface, Hash128 sourceId)
     {
         if (string.IsNullOrEmpty(surface)) return null;
@@ -41,7 +44,7 @@ public static class ContentEmitter
         if (!TextEntityBuilder.TryBuildRows(canonical, sourceId,
                 out var entities, out var physicalities, out var rootId, out _))
         {
-            _rootMemo.TryAdd(contentHash, null);
+            MemoRoot(contentHash, null);
             return null;
         }
 
@@ -53,10 +56,20 @@ public static class ContentEmitter
         foreach (var e in ents) b.AddEntity(e);
         foreach (var p in phys) b.AddPhysicality(p);
 
-        if (canonical.Length <= MemoMaxContentBytes && _emitMemo.Count < MemoCap)
-            _emitMemo.TryAdd(key, (rootId, ents, phys));
-        _rootMemo.TryAdd(contentHash, rootId);
+        if (canonical.Length <= MemoMaxContentBytes
+            && Volatile.Read(ref _emitMemoCount) < MemoCap
+            && _emitMemo.TryAdd(key, (rootId, ents, phys)))
+        {
+            Interlocked.Increment(ref _emitMemoCount);
+        }
+        MemoRoot(contentHash, rootId);
         return rootId;
+    }
+
+    private static void MemoRoot(Hash128 contentHash, Hash128? rootId)
+    {
+        if (Volatile.Read(ref _rootMemoCount) < MemoCap && _rootMemo.TryAdd(contentHash, rootId))
+            Interlocked.Increment(ref _rootMemoCount);
     }
 
     public static Hash128? RootId(string surface)
@@ -70,7 +83,7 @@ public static class ContentEmitter
         Hash128? result = TextEntityBuilder.TryDecomposeRoot(bytes,
                 out var rootId, out _, out _, out _, out _, out _)
             ? rootId : (Hash128?)null;
-        _rootMemo.TryAdd(contentHash, result);
+        MemoRoot(contentHash, result);
         return result;
     }
 }

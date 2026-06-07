@@ -355,7 +355,11 @@ public static class RelationTypeRegistry
         if (seenEntitiesThisBatch.Add(k.Id))
             builder.AddEntity(new EntityRow(k.Id, (byte)MetaTier.RelationType, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
         if (k.ParentId is { } parent && seenAttestationsThisRun.Add(k.Id))
+        {
+            builder.AddEntity(new EntityRow(k.Id, (byte)MetaTier.RelationType, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
+            builder.AddEntity(new EntityRow(parent, (byte)MetaTier.RelationType, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
             builder.AddAttestation(Attest(k.Id, "IS_A", parent, sourceId, SourceTrust.AcademicCurated));
+        }
     }
 
     public static void SeedDeprel(SubstrateChangeBuilder builder, string deprel, Hash128 sourceId,
