@@ -36,6 +36,22 @@ int laplace_grapheme_floor_build(const uint8_t* utf8, size_t len,
 
 void laplace_grapheme_floor_free(laplace_grapheme_floor_t* f);
 
+/* Owned-handle variant for cross-language consumers (the floor struct holds heap
+ * pointers, awkward to marshal). Heap-allocates and owns the floor; the caller owns
+ * the returned tree (free via tier_tree_free) and the floor (free via
+ * laplace_grapheme_floor_free_owned). Returns NULL on bad args / invalid UTF-8 / OOM. */
+laplace_grapheme_floor_t* laplace_grapheme_floor_build_owned(
+    const uint8_t* utf8, size_t len, tier_tree_t** out_tree);
+
+size_t          laplace_grapheme_floor_cp_n(const laplace_grapheme_floor_t* f);
+size_t          laplace_grapheme_floor_graph_first_idx(const laplace_grapheme_floor_t* f);
+size_t          laplace_grapheme_floor_graph_count(const laplace_grapheme_floor_t* f);
+const uint32_t* laplace_grapheme_floor_leaf_text_off(const laplace_grapheme_floor_t* f);
+const uint32_t* laplace_grapheme_floor_leaf_text_len(const laplace_grapheme_floor_t* f);
+const uint32_t* laplace_grapheme_floor_cp_to_graph(const laplace_grapheme_floor_t* f);
+
+void laplace_grapheme_floor_free_owned(laplace_grapheme_floor_t* f);
+
 #ifdef __cplusplus
 }
 #endif

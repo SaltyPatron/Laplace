@@ -177,3 +177,40 @@ void laplace_grapheme_floor_free(laplace_grapheme_floor_t* f) {
     free(f->cp_to_graph);
     memset(f, 0, sizeof(*f));
 }
+
+laplace_grapheme_floor_t* laplace_grapheme_floor_build_owned(
+    const uint8_t* utf8, size_t len, tier_tree_t** out_tree) {
+    laplace_grapheme_floor_t* f =
+        (laplace_grapheme_floor_t*)malloc(sizeof(laplace_grapheme_floor_t));
+    if (!f) { if (out_tree) *out_tree = NULL; return NULL; }
+    if (laplace_grapheme_floor_build(utf8, len, out_tree, f) != 0) {
+        free(f);
+        return NULL;
+    }
+    return f;
+}
+
+size_t laplace_grapheme_floor_cp_n(const laplace_grapheme_floor_t* f) {
+    return f ? f->cp_n : 0;
+}
+size_t laplace_grapheme_floor_graph_first_idx(const laplace_grapheme_floor_t* f) {
+    return f ? f->graph_first_idx : 0;
+}
+size_t laplace_grapheme_floor_graph_count(const laplace_grapheme_floor_t* f) {
+    return f ? f->graph_count : 0;
+}
+const uint32_t* laplace_grapheme_floor_leaf_text_off(const laplace_grapheme_floor_t* f) {
+    return f ? f->leaf_text_off : NULL;
+}
+const uint32_t* laplace_grapheme_floor_leaf_text_len(const laplace_grapheme_floor_t* f) {
+    return f ? f->leaf_text_len : NULL;
+}
+const uint32_t* laplace_grapheme_floor_cp_to_graph(const laplace_grapheme_floor_t* f) {
+    return f ? f->cp_to_graph : NULL;
+}
+
+void laplace_grapheme_floor_free_owned(laplace_grapheme_floor_t* f) {
+    if (!f) return;
+    laplace_grapheme_floor_free(f);  /* frees the inner arrays + zeroes */
+    free(f);
+}

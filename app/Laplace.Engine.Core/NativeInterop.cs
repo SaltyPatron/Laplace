@@ -229,4 +229,30 @@ public static unsafe partial class NativeInterop
     internal static partial void HashComposerComposeNode(
         byte tier, Hash128* childIds, double* childCoords, nuint n,
         Hash128* outId, double* outCoord, Hilbert128* outHb);
+
+    // --- grapheme floor (owned handle; shared by text and every grammar) ---
+
+    [LibraryImport(Library, EntryPoint = "laplace_grapheme_floor_build_owned")]
+    internal static partial IntPtr GraphemeFloorBuildOwned(byte* utf8, nuint len, IntPtr* outTree);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grapheme_floor_cp_n")]
+    internal static partial nuint GraphemeFloorCpN(IntPtr floor);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grapheme_floor_graph_first_idx")]
+    internal static partial nuint GraphemeFloorGraphFirstIdx(IntPtr floor);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grapheme_floor_graph_count")]
+    internal static partial nuint GraphemeFloorGraphCount(IntPtr floor);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grapheme_floor_leaf_text_off")]
+    internal static partial uint* GraphemeFloorLeafTextOff(IntPtr floor);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grapheme_floor_leaf_text_len")]
+    internal static partial uint* GraphemeFloorLeafTextLen(IntPtr floor);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grapheme_floor_cp_to_graph")]
+    internal static partial uint* GraphemeFloorCpToGraph(IntPtr floor);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grapheme_floor_free_owned")]
+    internal static partial void GraphemeFloorFreeOwned(IntPtr floor);
 }
