@@ -86,6 +86,7 @@ internal static class Program
             {
                 "ingest"       => await IngestAsync(args[1..]),
                 "synthesize"   => await SynthesizeAsync(args[1..]),
+                "audit-export" => await ExportAudit.RunAsync(args.Length > 1 ? args[1] : "", ConnString, ResolveBlob()),
                 "decompose"    => Decompose(string.Join(' ', args[1..])),
                 "inspect"      => await InspectAsync(string.Join(' ', args[1..])),
                 "converse"     => await ConverseAsync(string.Join(' ', args[1..])),

@@ -6,6 +6,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/mantissa.h
     include/laplace/core/super_fibonacci.h
     include/laplace/core/glicko2.h
+    include/laplace/core/score.h
     include/laplace/core/codepoint_table.h
     include/laplace/core/astar.h
     include/laplace/core/trajectory.h
@@ -29,6 +30,7 @@ set(LAPLACE_CORE_SOURCES
     src/mantissa.c
     src/super_fibonacci.c
     src/glicko2.c
+    src/score.c
     src/codepoint_table.c
     src/astar.cpp
     src/trajectory.c

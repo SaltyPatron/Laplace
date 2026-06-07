@@ -7,6 +7,7 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_mantissa.cpp
     test_super_fibonacci.cpp
     test_glicko2.cpp
+    test_score.cpp
     test_codepoint_table.cpp
     test_astar.cpp
     test_trajectory.cpp
