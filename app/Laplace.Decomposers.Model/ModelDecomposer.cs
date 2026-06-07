@@ -98,6 +98,9 @@ public sealed class ModelDecomposer : IDecomposer
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
 
+        var recipe = LlamaRecipeExtractor.Parse(Path.Combine(_modelDir, "config.json"));
+        var prof = ArchitectureProfile.For(recipe.ModelType);
+
         boot.AddType("Model_Recipe");
         boot.AddType("Model_Tokenizer");
         boot.AddType("Scalar");
@@ -129,6 +132,20 @@ public sealed class ModelDecomposer : IDecomposer
         boot.AddRelationType("HAS_INTERMEDIATE_SIZE");
         boot.AddRelationType("HAS_VOCAB_SIZE");
         boot.AddRelationType("IS_A");
+
+        var seededKinds = new HashSet<Hash128>();
+        foreach (var slot in ModelArenaPlan.Slots(recipe, prof))
+        {
+            if (!seededKinds.Add(slot.KindId)) continue;
+            boot.AddEntity(new EntityRow(slot.KindId, (byte)MetaTier.RelationType,
+                BootstrapIntentBuilder.RelationTypeMetaTypeId, Source));
+            string baseRole = slot.Role.StartsWith("NORM_SCALES", StringComparison.Ordinal)
+                ? "NORM_SCALES" : slot.Role;
+            Hash128 baseId = ModelArenaPlan.BaseKindId(baseRole);
+            if (baseId != slot.KindId)
+                boot.AddAttestation(RelationTypeRegistry.Attest(
+                    slot.KindId, "IS_A", baseId, Source, SourceTrust.AiModelProbe));
+        }
 
         return context.Writer.ApplyAsync(boot.Build(), ct);
     }

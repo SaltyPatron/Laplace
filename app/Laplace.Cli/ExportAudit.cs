@@ -67,118 +67,109 @@ internal static class ExportAudit
         var neuron = Of(AxisMap("neuron", interm));
 
         var prof = ArchitectureProfile.For(recipe.ModelType);
-        IEnumerable<string> Layers(string tpl) =>
-            Enumerable.Range(0, recipe.NumLayers).Select(l => ArchitectureProfile.Layer(tpl, l));
 
         await using var ds = new NpgsqlDataSourceBuilder(connString).Build();
 
         Console.WriteLine();
-        Console.WriteLine($"  {"role",-16} {"coverage",9} {"cos:law",8} {"rmse/M:law",11} {"cos:orig",9} {"rmse/M:orig",12} {"cos:fold",9} {"outliers>6M",12} {"survival",9}");
+        Console.WriteLine($"  {"slot",-28} {"coverage",9} {"cos:law",8} {"rmse/M:law",11} {"cos:orig",9} {"rmse/M:orig",12} {"outliers>6M",12} {"survival",9}");
 
-        async Task AuditRole(string role, Hash128 typeId, int rows, int cols, bool rowsAreOut,
-            Func<Hash128, IReadOnlyList<int>?> inIdx, Func<Hash128, IReadOnlyList<int>?> outIdx,
-            IReadOnlyList<string> instances)
+        int SpaceDim(string space) => space switch
         {
-            double m = ConsensusReExport.MoldArenaScale(refMap, instances);
-            var poured = await ConsensusReExport.ReadTableArenaAsync(ds, typeId, rows, cols, rowsAreOut, inIdx, outIdx, m);
+            "TOKEN"    => vocab,
+            "channel"  => dModel,
+            "attn_dim" => attnOut,
+            "kv_dim"   => kvDim,
+            "neuron"   => interm,
+            _ => throw new InvalidOperationException($"no dimension for space '{space}'"),
+        };
+        Func<Hash128, IReadOnlyList<int>?> SpaceIndex(string space) => space switch
+        {
+            "TOKEN"    => tok,
+            "channel"  => chan,
+            "attn_dim" => attn,
+            "kv_dim"   => kv,
+            "neuron"   => neuron,
+            _ => throw new InvalidOperationException($"no index map for space '{space}'"),
+        };
+
+        async Task AuditTableSlot(ArenaSlot slot)
+        {
+            int inDim = SpaceDim(slot.InSpace), outDim = SpaceDim(slot.OutSpace);
+            int rows = slot.RowsAreOut ? outDim : inDim;
+            int cols = slot.RowsAreOut ? inDim : outDim;
+            double m = ConsensusReExport.MoldArenaScale(refMap, [slot.TensorName]);
+            var poured = await ConsensusReExport.ReadTableArenaAsync(
+                ds, slot.KindId, rows, cols, slot.RowsAreOut,
+                SpaceIndex(slot.InSpace), SpaceIndex(slot.OutSpace), m);
             long total = poured.Cells.LongLength;
 
             long covered = 0;
             foreach (var c in poured.Cells) if (c != 0f) covered++;
 
-            int n = instances.Count;
-            var tm = new double[total];
-            foreach (var name in instances)
-            {
-                var o = WeightTensorETL.LoadTensorF32(refMap, name, total);
-                for (long i = 0; i < total; i++) tm[i] += Math.Tanh(o[i] / m);
-            }
             double clampW = 6.0;
+            var o = WeightTensorETL.LoadTensorF32(refMap, slot.TensorName, total);
+            var tm = new double[total];
             for (long i = 0; i < total; i++)
             {
-                double s = Math.Clamp(tm[i] / n, -(1.0 - 1e-12), 1.0 - 1e-12);
+                double s = Math.Clamp(Math.Tanh(o[i] / m), -(1.0 - 1e-12), 1.0 - 1e-12);
                 tm[i] = Math.Clamp(MathAtanh(s), -clampW, clampW) * m;
             }
 
             double dotLaw = 0, nA = 0, nT = 0, seLaw = 0;
+            double dotO = 0, nO = 0, seO = 0;
+            long outCells = 0; double survSum = 0; long survN = 0;
             for (long i = 0; i < total; i++)
             {
-                double a = poured.Cells[i], b = tm[i];
-                dotLaw += a * b; nA += a * a; nT += b * b;
-                double d = a - b; seLaw += d * d;
+                double a = poured.Cells[i], b = o[i], t = tm[i];
+                dotLaw += a * t; nA += a * a; nT += t * t;
+                double dl = a - t; seLaw += dl * dl;
+                dotO += a * b; nO += b * b;
+                double d = a - b; seO += d * d;
+                if (Math.Abs(b) > clampW * m)
+                {
+                    outCells++;
+                    survSum += Math.Abs(a) / Math.Abs(b);
+                    survN++;
+                }
             }
             double cosLaw = dotLaw / (Math.Sqrt(nA) * Math.Sqrt(nT) + 1e-30);
             double rmseLaw = Math.Sqrt(seLaw / total) / m;
-
-            double cosOrigSum = 0, rmseOrigSum = 0, cosFoldSum = 0;
-            long outCells = 0; double survSum = 0; long survN = 0;
-            foreach (var name in instances)
-            {
-                var o = WeightTensorETL.LoadTensorF32(refMap, name, total);
-                double dotO = 0, nO = 0, seO = 0, dotF = 0, nF = 0;
-                for (long i = 0; i < total; i++)
-                {
-                    double a = poured.Cells[i], b = o[i], t = tm[i];
-                    dotO += a * b; nO += b * b;
-                    double d = a - b; seO += d * d;
-                    dotF += t * b; nF += t * t;
-                    if (Math.Abs(b) > clampW * m)
-                    {
-                        outCells++;
-                        survSum += Math.Abs(a) / Math.Abs(b);
-                        survN++;
-                    }
-                }
-                cosOrigSum += dotO / (Math.Sqrt(nA) * Math.Sqrt(nO) + 1e-30);
-                rmseOrigSum += Math.Sqrt(seO / total) / m;
-                cosFoldSum += dotF / (Math.Sqrt(nF) * Math.Sqrt(nO) + 1e-30);
-            }
+            double cosOrig = dotO / (Math.Sqrt(nA) * Math.Sqrt(nO) + 1e-30);
+            double rmseOrig = Math.Sqrt(seO / total) / m;
             double survival = survN > 0 ? survSum / survN : 1.0;
+            string label = slot.Layer >= 0 ? $"{slot.Role}/L{slot.Layer}" : slot.Role;
             Console.WriteLine(
-                $"  {role,-16} {100.0 * covered / total,8:F2}% {cosLaw,8:F4} {rmseLaw,11:F4} {cosOrigSum / n,9:F4} {rmseOrigSum / n,12:F4} {cosFoldSum / n,9:F4} {outCells,12:N0} {100.0 * survival,8:F1}%  rel={poured.Relations:N0} nz={covered:N0}/{total:N0}");
+                $"  {label,-28} {100.0 * covered / total,8:F2}% {cosLaw,8:F4} {rmseLaw,11:F4} {cosOrig,9:F4} {rmseOrig,12:F4} {outCells,12:N0} {100.0 * survival,8:F1}%  rel={poured.Relations:N0} nz={covered:N0}/{total:N0}");
         }
 
-        await AuditRole("EMBEDS", ModelDecomposer.EmbedsTypeId, vocab, dModel, false, tok, chan, [prof.EmbedTokens]);
-        await AuditRole("OUTPUT_PROJECTS", ModelDecomposer.OutputProjectsTypeId, vocab, dModel, true, chan, tok, [prof.LmHead ?? prof.EmbedTokens]);
-        await AuditRole("Q_PROJECTS", ModelDecomposer.QProjectsTypeId, attnOut, dModel, true, chan, attn, [.. Layers(prof.QProj)]);
-        await AuditRole("K_PROJECTS", ModelDecomposer.KProjectsTypeId, kvDim, dModel, true, chan, kv, [.. Layers(prof.KProj)]);
-        await AuditRole("V_PROJECTS", ModelDecomposer.VProjectsTypeId, kvDim, dModel, true, chan, kv, [.. Layers(prof.VProj)]);
-        await AuditRole("O_PROJECTS", ModelDecomposer.OProjectsTypeId, dModel, attnOut, true, attn, chan, [.. Layers(prof.OProj)]);
-        if (prof.GateProj is not null)
-            await AuditRole("GATES", ModelDecomposer.GatesTypeId, interm, dModel, true, chan, neuron, [.. Layers(prof.GateProj)]);
-        await AuditRole("UP_PROJECTS", ModelDecomposer.UpProjectsTypeId, interm, dModel, true, chan, neuron, [.. Layers(prof.UpProj)]);
-        await AuditRole("DOWN_PROJECTS", ModelDecomposer.DownProjectsTypeId, dModel, interm, true, neuron, chan, [.. Layers(prof.DownProj)]);
-
-        var normNames = Enumerable.Range(0, recipe.NumLayers)
-            .SelectMany(l => prof.PerLayerNorms.Select(t => ArchitectureProfile.Layer(t, l)))
-            .Append(prof.FinalNorm)
-            .Where(refMap.ContainsKey)
-            .ToList();
-        if (normNames.Count > 0)
+        async Task AuditNormSlot(ArenaSlot slot)
         {
-            double mN = ConsensusReExport.MoldArenaScale(refMap, normNames);
-            var normV = await ConsensusReExport.ReadNormVectorAsync(ds, ModelDecomposer.NormScalesTypeId, dModel, chan, mN);
-            double cosSum = 0, rmseSum = 0;
-            foreach (var name in normNames)
+            double m = ConsensusReExport.MoldArenaScale(refMap, [slot.TensorName]);
+            var normV = await ConsensusReExport.ReadNormVectorAsync(ds, slot.KindId, dModel, SpaceIndex(slot.InSpace), m);
+            var o = WeightTensorETL.LoadTensorF32(refMap, slot.TensorName, dModel);
+            double dot = 0, nO = 0, nP = 0, se = 0;
+            for (int i = 0; i < dModel; i++)
             {
-                var o = WeightTensorETL.LoadTensorF32(refMap, name, dModel);
-                double dot = 0, nO = 0, nP = 0, se = 0;
-                for (int i = 0; i < dModel; i++)
-                {
-                    dot += normV[i] * o[i]; nO += o[i] * o[i]; nP += normV[i] * normV[i];
-                    double d = normV[i] - o[i]; se += d * d;
-                }
-                cosSum += dot / (Math.Sqrt(nP) * Math.Sqrt(nO) + 1e-30);
-                rmseSum += Math.Sqrt(se / dModel) / mN;
+                dot += normV[i] * o[i]; nO += o[i] * o[i]; nP += normV[i] * normV[i];
+                double d = normV[i] - o[i]; se += d * d;
             }
+            double cos = dot / (Math.Sqrt(nP) * Math.Sqrt(nO) + 1e-30);
+            double rmse = Math.Sqrt(se / dModel) / m;
+            string label = slot.Layer >= 0 ? $"{slot.Role}/L{slot.Layer}" : slot.Role;
             Console.WriteLine(
-                $"  {"NORM_SCALES",-16} {"",9} {"",8} {"",11} {cosSum / normNames.Count,9:F4} {rmseSum / normNames.Count,12:F4} {"",9} {"",12} {"",9}  ({normNames.Count} norm tensors vs one folded vector)");
+                $"  {label,-28} {"",9} {"",8} {"",11} {cos,9:F4} {rmse,12:F4} {"",12} {"",9}");
+        }
+
+        foreach (var slot in ModelArenaPlan.Slots(recipe, prof))
+        {
+            if (!refMap.ContainsKey(slot.TensorName)) continue;
+            if (slot.IsNorm) await AuditNormSlot(slot);
+            else await AuditTableSlot(slot);
         }
 
         Console.WriteLine();
-        Console.WriteLine("  cos:law / rmse/M:law  = poured vs the law's reachable image (tanh-mean clamped to 6M); deviation = coverage holes + collision averaging");
-        Console.WriteLine("  cos:orig / rmse/M:orig = poured vs each original layer tensor (total reconstruction error)");
-        Console.WriteLine("  cos:fold              = law image vs originals (pure depth-fold cost, pipeline excluded)");
+        Console.WriteLine("  cos:law / rmse/M:law  = poured vs the law's reachable image (tanh clamped to 6M); deviation = coverage holes + collision averaging");
+        Console.WriteLine("  cos:orig / rmse/M:orig = poured vs the slot's one original tensor (total reconstruction error)");
         return 0;
     }
 

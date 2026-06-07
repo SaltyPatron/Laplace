@@ -15,6 +15,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
     private readonly ProvenIdCache _provenEntities;
     private readonly ProvenIdCache _provenPhys;
     private readonly ProvenIdCache _provenAtt;
+    private readonly bool _bulkFreshSource;
 
     private sealed class ProvenIdCache
     {
@@ -39,11 +40,13 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
 
     public NpgsqlSubstrateWriter(
         NpgsqlDataSource dataSource,
-        ILogger<NpgsqlSubstrateWriter>? logger = null)
+        ILogger<NpgsqlSubstrateWriter>? logger = null,
+        bool bulkFreshSource = false)
     {
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         _reader = new NpgsqlSubstrateReader(dataSource);
         _log = logger ?? NullLogger<NpgsqlSubstrateWriter>.Instance;
+        _bulkFreshSource = bulkFreshSource;
         bool cacheOn = Environment.GetEnvironmentVariable("LAPLACE_PROVEN_CACHE") != "0";
         int cacheMax = int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_PROVEN_CACHE_MAX"), out var m) && m > 0
             ? m : 32_000_000;
@@ -98,10 +101,14 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         if (physToCheck.Count > 0) roundTrips++;
         _provenPhys.AddRange(existingPhys);
 
-        var attToCheck = CollectUnprovenIds(changes, static c => c.Attestations, static a => a.Id, _provenAtt);
-        var existingAtt = await LoadExistingIdsAsync(conn, "attestations", attToCheck, ct);
-        if (attToCheck.Count > 0) roundTrips++;
-        _provenAtt.AddRange(existingAtt);
+        var existingAtt = new HashSet<Hash128>();
+        if (!_bulkFreshSource)
+        {
+            var attToCheck = CollectUnprovenIds(changes, static c => c.Attestations, static a => a.Id, _provenAtt);
+            existingAtt = await LoadExistingIdsAsync(conn, "attestations", attToCheck, ct);
+            if (attToCheck.Count > 0) roundTrips++;
+            _provenAtt.AddRange(existingAtt);
+        }
 
         using var stage = IntentStage.New(Math.Max(uniqueEntityIds.Count, physAttempted));
 

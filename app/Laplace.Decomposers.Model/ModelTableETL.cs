@@ -12,15 +12,6 @@ public sealed class ModelTableETL
     private static readonly double ModelWeight =
         RelationTypeRegistry.Resolve("EMBEDS").Rank * SourceTrust.AiModelProbe;
 
-    private sealed record Role(
-        string Name,
-        Hash128 TypeId,
-        string? PerLayerTemplate,
-        string? GlobalName,
-        string InSpace,
-        string OutSpace,
-        bool RowsAreOut);
-
     private readonly string _modelDir;
     private readonly LlamaRecipeExtractor.RecipeInfo _recipe;
     private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
@@ -57,28 +48,12 @@ public sealed class ModelTableETL
         foreach (var r in _refs) _refMap[r.Name] = r;
     }
 
-    private IReadOnlyList<Role> Roles()
-    {
-        var p = ArchitectureProfile.For(ModelTypeOf());
-        return new[]
-        {
-            new Role("EMBEDS",          ModelDecomposer.EmbedsTypeId,        null, p.EmbedTokens, "TOKEN",   "channel", RowsAreOut: false),
-            new Role("OUTPUT_PROJECTS", ModelDecomposer.OutputProjectsTypeId, null, p.LmHead ?? p.EmbedTokens, "channel", "TOKEN", RowsAreOut: true),
-            new Role("Q_PROJECTS",      ModelDecomposer.QProjectsTypeId,     p.QProj,    null, "channel", "attn_dim", RowsAreOut: true),
-            new Role("K_PROJECTS",      ModelDecomposer.KProjectsTypeId,     p.KProj,    null, "channel", "kv_dim",   RowsAreOut: true),
-            new Role("V_PROJECTS",      ModelDecomposer.VProjectsTypeId,     p.VProj,    null, "channel", "kv_dim",   RowsAreOut: true),
-            new Role("O_PROJECTS",      ModelDecomposer.OProjectsTypeId,     p.OProj,    null, "attn_dim", "channel", RowsAreOut: true),
-            new Role("GATES",           ModelDecomposer.GatesTypeId,         p.GateProj, null, "channel", "neuron",   RowsAreOut: true),
-            new Role("UP_PROJECTS",     ModelDecomposer.UpProjectsTypeId,    p.UpProj,   null, "channel", "neuron",   RowsAreOut: true),
-            new Role("DOWN_PROJECTS",   ModelDecomposer.DownProjectsTypeId,  p.DownProj, null, "neuron",  "channel",  RowsAreOut: true),
-        }.Where(r => r.PerLayerTemplate is not null || r.GlobalName is not null).ToArray();
-    }
-
     private string ModelTypeOf() => _recipe.ModelType;
 
     public async IAsyncEnumerable<SubstrateChange> EmitAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
+        var prof = ArchitectureProfile.For(ModelTypeOf());
         int dModel = _recipe.HiddenSize, interm = _recipe.IntermediateSize;
         int attnOut = _recipe.NumHeads * (dModel / _recipe.NumHeads);
         int kvDim   = _recipe.NumKvHeads * (dModel / _recipe.NumHeads);
@@ -107,17 +82,20 @@ public sealed class ModelTableETL
 
         var axisIds = new Dictionary<(string Space, int Index), Hash128>(
             dModel + attnOut + kvDim + interm);
+        var axisLock = new object();
         Hash128 Axis(string space, int i)
         {
-            if (!axisIds.TryGetValue((space, i), out var id))
+            lock (axisLock)
             {
-                id = SourceEntityIdConventions.ModelAxisEntity(_source, space, i);
-                axisIds[(space, i)] = id;
+                if (!axisIds.TryGetValue((space, i), out var id))
+                {
+                    id = SourceEntityIdConventions.ModelAxisEntity(_source, space, i);
+                    axisIds[(space, i)] = id;
+                }
+                return id;
             }
-            return id;
         }
 
-        var roles = Roles();
         {
             var b = new SubstrateChangeBuilder(_source, "model/axes",
                 entityCapacity: dModel + attnOut + kvDim + interm,
@@ -129,10 +107,14 @@ public sealed class ModelTableETL
             yield return b.Build();
         }
 
+        var slots = ModelArenaPlan.Slots(_recipe, prof)
+            .Where(s => _refMap.ContainsKey(s.TensorName))
+            .ToList();
+
         int foldWorkers = int.TryParse(
             Environment.GetEnvironmentVariable("LAPLACE_DECOMPOSE_WORKERS"), out var dw) && dw > 0
-            ? Math.Min(dw, roles.Count + 1)
-            : Math.Clamp(Environment.ProcessorCount - 4, 2, roles.Count + 1);
+            ? Math.Min(dw, slots.Count)
+            : Math.Clamp(Environment.ProcessorCount - 4, 2, Math.Max(2, slots.Count));
 
         var chan = Channel.CreateBounded<SubstrateChange>(new BoundedChannelOptions(foldWorkers * 2)
         {
@@ -142,26 +124,20 @@ public sealed class ModelTableETL
         });
         var gate = new SemaphoreSlim(foldWorkers);
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        _log.LogInformation("phase=etl folding {Roles} roles + norms across {Workers} parallel workers",
-            roles.Count, foldWorkers);
+        _log.LogInformation("phase=etl folding {Slots} per-layer arena slots across {Workers} parallel workers",
+            slots.Count, foldWorkers);
 
-        var producers = new List<Task>(roles.Count + 1);
-        foreach (var role in roles)
+        var producers = new List<Task>(slots.Count);
+        foreach (var slot in slots)
         {
-            var r = role;
+            var s = slot;
             producers.Add(Task.Run(async () =>
             {
                 await gate.WaitAsync(ct);
-                try { await FoldRoleAsync(r, vocab, distinctTokens, idxToOrd, ordToEntity, Axis, chan.Writer, sw, ct); }
+                try { await FoldSlotAsync(s, vocab, distinctTokens, idxToOrd, ordToEntity, dModel, Axis, chan.Writer, sw, ct); }
                 finally { gate.Release(); }
             }, ct));
         }
-        producers.Add(Task.Run(async () =>
-        {
-            await gate.WaitAsync(ct);
-            try { await FoldNormsAsync(dModel, Axis, chan.Writer, ct); }
-            finally { gate.Release(); }
-        }, ct));
 
         var completion = Task.WhenAll(producers).ContinueWith(
             t => chan.Writer.TryComplete(t.Exception?.GetBaseException()),
@@ -177,42 +153,33 @@ public sealed class ModelTableETL
             Interlocked.Read(ref _zeros), Interlocked.Read(ref _subEpsilon), ScoreEpsilon, sw.Elapsed.TotalSeconds);
     }
 
-    private async Task FoldRoleAsync(
-        Role role, int vocab, int distinctTokens, int[] idxToOrd, List<Hash128> ordToEntity,
-        Func<string, int, Hash128> axis, ChannelWriter<SubstrateChange> output,
+    private async Task FoldSlotAsync(
+        ArenaSlot slot, int vocab, int distinctTokens, int[] idxToOrd, List<Hash128> ordToEntity,
+        int dModel, Func<string, int, Hash128> axis, ChannelWriter<SubstrateChange> output,
         System.Diagnostics.Stopwatch sw, CancellationToken ct)
     {
-        int rows = -1, cols = -1;
-        var instances = new List<(string Name, int Layer)>();
-        foreach (var inst in Instances(role))
+        if (slot.IsNorm)
         {
-            if (!_refMap.TryGetValue(inst.Name, out var tref)) continue;
-            int tr = tref.Shape[0], tc = tref.Shape.Length > 1 ? tref.Shape[1] : 1;
-            if (rows < 0) { rows = tr; cols = tc; }
-            else if (tr != rows || tc != cols)
-                throw new InvalidOperationException(
-                    $"{role.Name}: instance {inst.Name} shape [{tr}×{tc}] differs from the role shape [{rows}×{cols}] — one logical table per role");
-            instances.Add(inst);
+            await FoldNormSlotAsync(slot, dModel, axis, output, sw, ct);
+            return;
         }
-        if (instances.Count == 0) return;
 
-        double sumsq = 0; long n = 0;
-        foreach (var (name, _) in instances)
-        {
-            ct.ThrowIfCancellationRequested();
-            var w = WeightTensorETL.LoadTensorF32(_refMap, name, (long)rows * cols);
-            for (long i = 0; i < w.LongLength; i++) { double v = w[i]; sumsq += v * v; }
-            n += w.LongLength;
-        }
-        double M = n > 0 && sumsq > 0 ? Math.Sqrt(sumsq / n) : 1.0;
+        var tref = _refMap[slot.TensorName];
+        int rows = tref.Shape[0], cols = tref.Shape.Length > 1 ? tref.Shape[1] : 1;
+
+        ct.ThrowIfCancellationRequested();
+        var w = WeightTensorETL.LoadTensorF32(_refMap, slot.TensorName, (long)rows * cols);
+        double sumsq = 0;
+        for (long i = 0; i < w.LongLength; i++) { double v = w[i]; sumsq += v * v; }
+        double M = w.LongLength > 0 && sumsq > 0 ? Math.Sqrt(sumsq / w.LongLength) : 1.0;
         float epsM = (float)(ScoreEpsilon * M);
-        _log.LogInformation("phase=etl-calibrate {Role}: arena M={M:E3} over {N:N0} cells, non-event threshold |w|<{Eps:E3} ({S:F0}s)",
-            role.Name, M, n, epsM, sw.Elapsed.TotalSeconds);
+        _log.LogInformation("phase=etl-calibrate {Role} L{Layer}: arena M={M:E3} over {N:N0} cells, non-event threshold |w|<{Eps:E3} ({S:F0}s)",
+            slot.Role, slot.Layer, M, w.LongLength, epsM, sw.Elapsed.TotalSeconds);
 
-        bool inTok  = role.InSpace  == "TOKEN";
-        bool outTok = role.OutSpace == "TOKEN";
-        int tRows = role.RowsAreOut ? cols : rows;
-        int tCols = role.RowsAreOut ? rows : cols;
+        bool inTok  = slot.InSpace  == "TOKEN";
+        bool outTok = slot.OutSpace == "TOKEN";
+        int tRows = slot.RowsAreOut ? cols : rows;
+        int tCols = slot.RowsAreOut ? rows : cols;
         int inSize  = inTok  ? distinctTokens : tRows;
         int outSize = outTok ? distinctTokens : tCols;
         long space = (long)inSize * outSize;
@@ -220,54 +187,47 @@ public sealed class ModelTableETL
         var games = new int[space];
         long unresolved = 0, zeros = 0, subEps = 0;
 
-        foreach (var (name, layer) in instances)
+        for (int row = 0; row < rows; row++)
         {
-            ct.ThrowIfCancellationRequested();
-            var w = WeightTensorETL.LoadTensorF32(_refMap, name, (long)rows * cols);
-            for (int row = 0; row < rows; row++)
+            long off = (long)row * cols;
+            for (int col = 0; col < cols; col++)
             {
-                long off = (long)row * cols;
-                for (int col = 0; col < cols; col++)
-                {
-                    float v = w[off + col];
-                    if (v == 0f) { zeros++; continue; }
-                    if (epsM > 0f && Math.Abs(v) < epsM) { subEps++; continue; }
-                    int inIdx  = role.RowsAreOut ? col : row;
-                    int outIdx = role.RowsAreOut ? row : col;
-                    if (inTok)  { inIdx  = inIdx  < vocab ? idxToOrd[inIdx]  : -1; }
-                    if (outTok) { outIdx = outIdx < vocab ? idxToOrd[outIdx] : -1; }
-                    if (inIdx < 0 || outIdx < 0) { unresolved++; continue; }
-                    long flat = (long)inIdx * outSize + outIdx;
-                    sumFp[flat] += (long)(AttestationFactory.Score(v, M) * Glicko2.FpScale);
-                    games[flat]++;
-                }
+                float v = w[off + col];
+                if (v == 0f) { zeros++; continue; }
+                if (epsM > 0f && Math.Abs(v) < epsM) { subEps++; continue; }
+                int inIdx  = slot.RowsAreOut ? col : row;
+                int outIdx = slot.RowsAreOut ? row : col;
+                if (inTok)  { inIdx  = inIdx  < vocab ? idxToOrd[inIdx]  : -1; }
+                if (outTok) { outIdx = outIdx < vocab ? idxToOrd[outIdx] : -1; }
+                if (inIdx < 0 || outIdx < 0) { unresolved++; continue; }
+                long flat = (long)inIdx * outSize + outIdx;
+                sumFp[flat] += (long)(AttestationFactory.Score(v, M) * Glicko2.FpScale);
+                games[flat]++;
             }
-            _log.LogInformation("phase=etl {Role} L{Layer}: folded ({S:F0}s)",
-                role.Name, layer, sw.Elapsed.TotalSeconds);
         }
         Interlocked.Add(ref _zeros, zeros);
         Interlocked.Add(ref _subEpsilon, subEps);
 
         long emitted = 0, gamesOut = 0;
-        var b = NewChunk(role.Name);
+        var b = NewChunk(slot.Role);
         int inChunk = 0;
         for (long flat = 0; flat < space; flat++)
         {
             if (games[flat] == 0) continue;
             int inIdx  = (int)(flat / outSize);
             int outIdx = (int)(flat % outSize);
-            Hash128 subj = inTok  ? ordToEntity[inIdx]  : axis(role.InSpace, inIdx);
-            Hash128 obj  = outTok ? ordToEntity[outIdx] : axis(role.OutSpace, outIdx);
+            Hash128 subj = inTok  ? ordToEntity[inIdx]  : axis(slot.InSpace, inIdx);
+            Hash128 obj  = outTok ? ordToEntity[outIdx] : axis(slot.OutSpace, outIdx);
 
             b.AddAttestation(AttestationFactory.CreateAggregated(
-                subj, role.TypeId, obj, _source, contextId: null,
+                subj, slot.KindId, obj, _source, contextId: null,
                 games: games[flat], sumScoreFp1e9: sumFp[flat], witnessWeight: ModelWeight));
             emitted++;
             gamesOut += games[flat];
             if (++inChunk >= RowsPerChange)
             {
                 await output.WriteAsync(b.Build(), ct);
-                b = NewChunk(role.Name);
+                b = NewChunk(slot.Role);
                 inChunk = 0;
             }
         }
@@ -276,74 +236,48 @@ public sealed class ModelTableETL
         long cum = Interlocked.Add(ref _relationsEmitted, emitted);
         long cumGames = Interlocked.Add(ref _gamesPlayed, gamesOut);
         _log.LogInformation(
-            "phase=etl {Role}: {Rel:N0} relations from {Pos} positions (cum relations {Cum:N0}, games {Games:N0}, unresolved {U:N0}, sub-ε non-events {Eps:N0}), {S:F0}s",
-            role.Name, emitted, instances.Count, cum, cumGames, unresolved, subEps, sw.Elapsed.TotalSeconds);
+            "phase=etl {Role} L{Layer}: {Rel:N0} relations (cum relations {Cum:N0}, games {Games:N0}, unresolved {U:N0}, sub-ε non-events {Eps:N0}), {S:F0}s",
+            slot.Role, slot.Layer, emitted, cum, cumGames, unresolved, subEps, sw.Elapsed.TotalSeconds);
     }
 
-    private async Task FoldNormsAsync(
-        int dModel, Func<string, int, Hash128> axis,
-        ChannelWriter<SubstrateChange> output, CancellationToken ct)
+    private async Task FoldNormSlotAsync(
+        ArenaSlot slot, int dModel, Func<string, int, Hash128> axis,
+        ChannelWriter<SubstrateChange> output, System.Diagnostics.Stopwatch sw, CancellationToken ct)
     {
-        var prof = ArchitectureProfile.For(ModelTypeOf());
-        var normNames = NormInstances(prof).Where(t => _refMap.ContainsKey(t.Name)).ToList();
-        if (normNames.Count == 0) return;
-
-        double sumsq = 0; long n = 0;
-        foreach (var (name, _) in normNames)
-        {
-            ct.ThrowIfCancellationRequested();
-            var w = WeightTensorETL.LoadTensorF32(_refMap, name, dModel);
-            for (int i = 0; i < dModel; i++) { double v = w[i]; sumsq += v * v; }
-            n += dModel;
-        }
-        double M = n > 0 && sumsq > 0 ? Math.Sqrt(sumsq / n) : 1.0;
+        ct.ThrowIfCancellationRequested();
+        var w = WeightTensorETL.LoadTensorF32(_refMap, slot.TensorName, dModel);
+        double sumsq = 0;
+        for (int i = 0; i < dModel; i++) { double v = w[i]; sumsq += v * v; }
+        double M = sumsq > 0 ? Math.Sqrt(sumsq / dModel) : 1.0;
 
         var sumFp = new long[dModel];
         var games = new int[dModel];
         long zeros = 0;
-        foreach (var (name, _) in normNames)
+        for (int i = 0; i < dModel; i++)
         {
-            ct.ThrowIfCancellationRequested();
-            var w = WeightTensorETL.LoadTensorF32(_refMap, name, dModel);
-            for (int i = 0; i < dModel; i++)
-            {
-                if (w[i] == 0f) { zeros++; continue; }
-                sumFp[i] += (long)(AttestationFactory.Score(w[i], M) * Glicko2.FpScale);
-                games[i]++;
-            }
+            if (w[i] == 0f) { zeros++; continue; }
+            sumFp[i] += (long)(AttestationFactory.Score(w[i], M) * Glicko2.FpScale);
+            games[i]++;
         }
         Interlocked.Add(ref _zeros, zeros);
 
         long emitted = 0, gamesOut = 0;
-        var b = NewChunk("NORM_SCALES");
+        var b = NewChunk(slot.Role);
         for (int i = 0; i < dModel; i++)
         {
             if (games[i] == 0) continue;
             b.AddAttestation(AttestationFactory.CreateAggregated(
-                axis("channel", i), ModelDecomposer.NormScalesTypeId, obj: null, _source,
+                axis("channel", i), slot.KindId, obj: null, _source,
                 contextId: null, games: games[i], sumScoreFp1e9: sumFp[i],
                 witnessWeight: ModelWeight));
             emitted++;
             gamesOut += games[i];
         }
         await output.WriteAsync(b.Build(), ct);
-        Interlocked.Add(ref _relationsEmitted, emitted);
+        long cum = Interlocked.Add(ref _relationsEmitted, emitted);
         Interlocked.Add(ref _gamesPlayed, gamesOut);
-    }
-
-    private IEnumerable<(string Name, int Layer)> Instances(Role role)
-    {
-        if (role.GlobalName is not null) { yield return (role.GlobalName, -1); yield break; }
-        for (int l = 0; l < _recipe.NumLayers; l++)
-            yield return (ArchitectureProfile.Layer(role.PerLayerTemplate!, l), l);
-    }
-
-    private IEnumerable<(string Name, int Layer)> NormInstances(ArchitectureProfile p)
-    {
-        for (int l = 0; l < _recipe.NumLayers; l++)
-            foreach (var t in p.PerLayerNorms)
-                yield return (ArchitectureProfile.Layer(t, l), l);
-        yield return (p.FinalNorm, -1);
+        _log.LogInformation("phase=etl {Role} L{Layer}: {Rel:N0} relations (cum relations {Cum:N0}), {S:F0}s",
+            slot.Role, slot.Layer, emitted, cum, sw.Elapsed.TotalSeconds);
     }
 
     private SubstrateChangeBuilder NewChunk(string roleName) =>

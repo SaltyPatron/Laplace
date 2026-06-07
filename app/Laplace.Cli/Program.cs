@@ -712,13 +712,15 @@ internal static class Program
         }
 
         var loggerFactory = ConsoleLoggerProvider.Factory();
-        var inner = new NpgsqlSubstrateWriter(ds);
+        var inner = new NpgsqlSubstrateWriter(ds,
+            logger: loggerFactory.CreateLogger<NpgsqlSubstrateWriter>(),
+            bulkFreshSource: true);
         var accumulator = new ConsensusAccumulatingWriter(inner, ds,
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
         ISubstrateWriter writer = accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader, loggerFactory);
-        Console.WriteLine("mode: consensus accumulates at ingest; evidence = provenance-only rows");
+        Console.WriteLine("mode: bulk fresh-source apply (attestation existence check skipped — IngestModelAsync proved the source is uningested); consensus accumulates at ingest");
 
         Console.WriteLine($"ingest model {modelDir} via IngestRunner → {ConnString} ...");
         var sw = Stopwatch.StartNew();
@@ -862,57 +864,69 @@ internal static class Program
             Console.WriteLine("  (no reference tensors alongside the recipe — per-role scale M = 1.0)");
 
         var prof = ArchitectureProfile.For(recipe.ModelType);
-        IEnumerable<string> Layers(string tpl) =>
-            Enumerable.Range(0, recipe.NumLayers).Select(l => ArchitectureProfile.Layer(tpl, l));
-        double MOf(params IEnumerable<string>[] groups) =>
-            ConsensusReExport.MoldArenaScale(refMap, groups.SelectMany(g => g));
 
         string arenaSelRaw = (Environment.GetEnvironmentVariable("LAPLACE_SYNTH_ARENAS") ?? "ALL").Trim();
         HashSet<string>? arenaSel = arenaSelRaw.Equals("ALL", StringComparison.OrdinalIgnoreCase)
             ? null
             : new HashSet<string>(arenaSelRaw.ToUpperInvariant()
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-        bool Pour(string key) => arenaSel is null || arenaSel.Contains(key);
+        static string AblationKey(string role) =>
+            role.StartsWith("NORM_SCALES", StringComparison.Ordinal) ? "NORMS" : role.Split('_', '.', '/')[0];
+        bool Pour(ArenaSlot s) => arenaSel is null || arenaSel.Contains(AblationKey(s.Role));
         if (arenaSel is not null)
         {
             if (refMap is null)
                 return Fail("LAPLACE_SYNTH_ARENAS ablation needs the mold's original tensors alongside the recipe");
             Console.WriteLine($"  ablation: pour {{{string.Join(",", arenaSel)}}} from substrate; all other arenas copied from the mold");
         }
-        static ConsensusReExport.TableArena Zero(int rows, int cols) =>
-            new(new float[(long)rows * cols], rows, cols, 0);
 
-        Console.WriteLine("  pouring consensus arenas into the mold's tensor layouts...");
+        Func<Hash128, IReadOnlyList<int>?> SpaceIndex(string space) => space switch
+        {
+            "TOKEN"    => Tok,
+            "channel"  => Of(chanMap),
+            "attn_dim" => Of(attnMap),
+            "kv_dim"   => Of(kvMap),
+            "neuron"   => Of(neuronMap),
+            _ => throw new InvalidOperationException($"no index map for space '{space}'"),
+        };
+        int SpaceDim(string space) => space switch
+        {
+            "TOKEN"    => vocab,
+            "channel"  => dModel,
+            "attn_dim" => attnOutR,
+            "kv_dim"   => kvDimR,
+            "neuron"   => intermR,
+            _ => throw new InvalidOperationException($"no dimension for space '{space}'"),
+        };
+
+        Console.WriteLine("  pouring per-layer consensus arenas into the mold's tensor layouts...");
         var swArena = Stopwatch.StartNew();
-        var chan = Of(chanMap); var attn = Of(attnMap); var kv = Of(kvMap); var neuron = Of(neuronMap);
-        var embedA = Pour("EMBEDS") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.EmbedsTypeId,
-            vocab, dModel, rowsAreOut: false, Tok, chan, MOf([prof.EmbedTokens])) : Zero(vocab, dModel);
-        var lmHeadA = Pour("OUTPUT") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.OutputProjectsTypeId,
-            vocab, dModel, rowsAreOut: true, chan, Tok, MOf([prof.LmHead ?? prof.EmbedTokens])) : Zero(vocab, dModel);
-        var qA = Pour("Q") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.QProjectsTypeId,
-            attnOutR, dModel, rowsAreOut: true, chan, attn, MOf(Layers(prof.QProj))) : Zero(attnOutR, dModel);
-        var kA = Pour("K") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.KProjectsTypeId,
-            kvDimR, dModel, rowsAreOut: true, chan, kv, MOf(Layers(prof.KProj))) : Zero(kvDimR, dModel);
-        var vA = Pour("V") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.VProjectsTypeId,
-            kvDimR, dModel, rowsAreOut: true, chan, kv, MOf(Layers(prof.VProj))) : Zero(kvDimR, dModel);
-        var oA = Pour("O") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.OProjectsTypeId,
-            dModel, attnOutR, rowsAreOut: true, attn, chan, MOf(Layers(prof.OProj))) : Zero(dModel, attnOutR);
-        var gateA = prof.GateProj is null ? null
-            : Pour("GATES") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.GatesTypeId,
-                intermR, dModel, rowsAreOut: true, chan, neuron, MOf(Layers(prof.GateProj))) : Zero(intermR, dModel);
-        var upA = Pour("UP") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.UpProjectsTypeId,
-            intermR, dModel, rowsAreOut: true, chan, neuron, MOf(Layers(prof.UpProj))) : Zero(intermR, dModel);
-        var downA = Pour("DOWN") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.DownProjectsTypeId,
-            dModel, intermR, rowsAreOut: true, neuron, chan, MOf(Layers(prof.DownProj))) : Zero(dModel, intermR);
-        var normV = Pour("NORMS") ? await ConsensusReExport.ReadNormVectorAsync(ds, ModelDecomposer.NormScalesTypeId,
-            dModel, chan, MOf(Layers(prof.PerLayerNorms[0]), [prof.FinalNorm])) : new float[dModel];
-
-        long totalRelations = embedA.Relations + lmHeadA.Relations + qA.Relations + kA.Relations
-            + vA.Relations + oA.Relations + (gateA?.Relations ?? 0) + upA.Relations + downA.Relations;
+        var arenaByTensor = new Dictionary<string, ConsensusReExport.TableArena>(StringComparer.Ordinal);
+        var normByTensor  = new Dictionary<string, float[]>(StringComparer.Ordinal);
+        long totalRelations = 0;
+        foreach (var slot in ModelArenaPlan.Slots(recipe, prof))
+        {
+            if (refMap is not null && !refMap.ContainsKey(slot.TensorName)) continue;
+            if (!Pour(slot)) continue;
+            double m = ConsensusReExport.MoldArenaScale(refMap, [slot.TensorName]);
+            if (slot.IsNorm)
+            {
+                normByTensor[slot.TensorName] = await ConsensusReExport.ReadNormVectorAsync(
+                    ds, slot.KindId, dModel, SpaceIndex(slot.InSpace), m);
+                continue;
+            }
+            int inDim = SpaceDim(slot.InSpace), outDim = SpaceDim(slot.OutSpace);
+            int tr = slot.RowsAreOut ? outDim : inDim;
+            int tc = slot.RowsAreOut ? inDim : outDim;
+            var arena = await ConsensusReExport.ReadTableArenaAsync(
+                ds, slot.KindId, tr, tc, slot.RowsAreOut,
+                SpaceIndex(slot.InSpace), SpaceIndex(slot.OutSpace), m);
+            arenaByTensor[slot.TensorName] = arena;
+            totalRelations += arena.Relations;
+        }
         Console.WriteLine(
-            $"  consensus arenas poured in {swArena.Elapsed.TotalSeconds:F1}s: EMBEDS={embedA.Relations:N0} "
-            + $"OUTPUT_PROJECTS={lmHeadA.Relations:N0} Q={qA.Relations:N0} K={kA.Relations:N0} V={vA.Relations:N0} "
-            + $"O={oA.Relations:N0} GATES={gateA?.Relations ?? 0:N0} UP={upA.Relations:N0} DOWN={downA.Relations:N0}");
+            $"  consensus arenas poured in {swArena.Elapsed.TotalSeconds:F1}s: "
+            + $"{arenaByTensor.Count} table slots + {normByTensor.Count} norm slots, {totalRelations:N0} relations");
         if (totalRelations == 0)
             return Fail("no model consensus in the substrate — ingest a model first");
 
@@ -937,28 +951,14 @@ internal static class Program
             long nElem = (long)rows * (long)Math.Max(1UL, cols);
             var vals = new float[nElem];
 
-            string arenaKey =
-                  name == "model.embed_tokens.weight" ? "EMBEDS"
-                : name == "lm_head.weight"            ? "OUTPUT"
-                : name.EndsWith(".self_attn.q_proj.weight", StringComparison.Ordinal) ? "Q"
-                : name.EndsWith(".self_attn.k_proj.weight", StringComparison.Ordinal) ? "K"
-                : name.EndsWith(".self_attn.v_proj.weight", StringComparison.Ordinal) ? "V"
-                : name.EndsWith(".self_attn.o_proj.weight", StringComparison.Ordinal) ? "O"
-                : name.EndsWith(".mlp.gate_proj.weight",    StringComparison.Ordinal) ? "GATES"
-                : name.EndsWith(".mlp.up_proj.weight",      StringComparison.Ordinal) ? "UP"
-                : name.EndsWith(".mlp.down_proj.weight",    StringComparison.Ordinal) ? "DOWN"
-                : name.EndsWith("norm.weight", StringComparison.Ordinal) ? "NORMS"
-                : "";
-
-            if (arenaKey.Length > 0 && !Pour(arenaKey))
+            if (arenaByTensor.TryGetValue(name, out var arena))
+                FillMoldTensor(vals, name, arena, null);
+            else if (normByTensor.TryGetValue(name, out var normV))
+                FillMoldTensor(vals, name, null, normV);
+            else if (refMap is not null && refMap.ContainsKey(name))
             {
-                var orig = WeightTensorETL.LoadTensorF32(refMap!, name, nElem);
+                var orig = WeightTensorETL.LoadTensorF32(refMap, name, nElem);
                 Array.Copy(orig, vals, vals.Length);
-            }
-            else
-            {
-                FillMoldTensor(vals, name,
-                    embedA, lmHeadA, qA, kA, vA, oA, gateA, upA, downA, normV);
             }
 
             byte[] tensorBytes = dtype == 0
@@ -991,24 +991,8 @@ internal static class Program
 
     private static void FillMoldTensor(
         float[] vals, string name,
-        ConsensusReExport.TableArena embedA, ConsensusReExport.TableArena lmHeadA,
-        ConsensusReExport.TableArena qA, ConsensusReExport.TableArena kA,
-        ConsensusReExport.TableArena vA, ConsensusReExport.TableArena oA,
-        ConsensusReExport.TableArena? gateA, ConsensusReExport.TableArena upA,
-        ConsensusReExport.TableArena downA, float[] normV)
+        ConsensusReExport.TableArena? arena, float[]? normV)
     {
-        ConsensusReExport.TableArena? arena =
-              name == "model.embed_tokens.weight" ? embedA
-            : name == "lm_head.weight"            ? lmHeadA
-            : name.EndsWith(".self_attn.q_proj.weight", StringComparison.Ordinal) ? qA
-            : name.EndsWith(".self_attn.k_proj.weight", StringComparison.Ordinal) ? kA
-            : name.EndsWith(".self_attn.v_proj.weight", StringComparison.Ordinal) ? vA
-            : name.EndsWith(".self_attn.o_proj.weight", StringComparison.Ordinal) ? oA
-            : name.EndsWith(".mlp.gate_proj.weight",    StringComparison.Ordinal) ? gateA
-            : name.EndsWith(".mlp.up_proj.weight",      StringComparison.Ordinal) ? upA
-            : name.EndsWith(".mlp.down_proj.weight",    StringComparison.Ordinal) ? downA
-            : null;
-
         if (arena is not null)
         {
             if (arena.Cells.LongLength != vals.LongLength)
@@ -1019,11 +1003,11 @@ internal static class Program
             Array.Copy(arena.Cells, vals, vals.Length);
             return;
         }
-        if (name.EndsWith("norm.weight", StringComparison.Ordinal))
+        if (normV is not null)
         {
             if (normV.Length != vals.Length)
                 throw new InvalidOperationException(
-                    $"mold norm slot {name} has {vals.Length:N0} channels but NORM_SCALES carries {normV.Length:N0}");
+                    $"mold norm slot {name} has {vals.Length:N0} channels but its norm slot carries {normV.Length:N0}");
             Array.Copy(normV, vals, vals.Length);
             return;
         }

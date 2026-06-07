@@ -54,6 +54,10 @@ public sealed class BootstrapIntentBuilder
     public Hash128 AddRelationType(string canonicalKindName, double kindRank, double sourceTrust)
         => AddRelationType(canonicalKindName);
 
+    public void AddEntity(EntityRow row) => _inner.AddEntity(row);
+
+    public void AddAttestation(AttestationRow row) => _inner.AddAttestation(row);
+
     private void AddTrustClassAttestation()
     {
         _inner.AddAttestation(AttestationFactory.CreateCategorical(
