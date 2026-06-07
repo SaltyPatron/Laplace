@@ -119,9 +119,12 @@ public sealed class CodeDecomposer : IDecomposer
             yield break;
         }
         if (!Directory.Exists(root)) yield break;
+        char sep = Path.DirectorySeparatorChar;
+        string objSeg = $"{sep}obj{sep}", binSeg = $"{sep}bin{sep}", gitSeg = $"{sep}.git{sep}";
         foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
                                       .OrderBy(p => p, StringComparer.Ordinal))
         {
+            if (file.Contains(objSeg) || file.Contains(binSeg) || file.Contains(gitSeg)) continue;
             var m = ModalityOf(file);
             if (m is not null) yield return (file, m);
         }
