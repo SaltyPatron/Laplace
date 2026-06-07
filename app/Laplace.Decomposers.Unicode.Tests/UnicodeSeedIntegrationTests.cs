@@ -11,28 +11,52 @@ namespace Laplace.Decomposers.Unicode.Tests;
 
 public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
 {
-    private static readonly string DatabaseName =
-        Environment.GetEnvironmentVariable("LAPLACE_TEST_DB") ?? "laplace-dev";
-    private const string PgUser = "laplace_admin";
+    public const string DatabaseName = "laplace_unicode_seed_test";
+
+    public static readonly string PgHost =
+        Environment.GetEnvironmentVariable("LAPLACE_TEST_PGHOST")
+        ?? (OperatingSystem.IsWindows() ? "localhost" : "/var/run/postgresql");
+
+    public static readonly string PgUser =
+        Environment.GetEnvironmentVariable("LAPLACE_TEST_PGUSER")
+        ?? (OperatingSystem.IsWindows() ? "postgres" : "laplace_admin");
+
+    public static readonly string? PgPassword =
+        Environment.GetEnvironmentVariable("LAPLACE_TEST_PGPASSWORD")
+        ?? (OperatingSystem.IsWindows() ? "postgres" : null);
+
+    public static readonly string EcosystemPath =
+        Environment.GetEnvironmentVariable("LAPLACE_TEST_UCD")
+        ?? (OperatingSystem.IsWindows() ? @"D:\Data\Ingest\Unicode" : "/vault/Data/Unicode");
+
     private const int TotalCodepoints = 1_114_112;
 
     private NpgsqlDataSource _ds = null!;
 
+    public string ConnectionString =>
+        $"Host={PgHost};Username={PgUser};Database={DatabaseName}"
+        + (PgPassword is null ? "" : $";Password={PgPassword}");
+
     public async Task InitializeAsync()
     {
-        _ds = new NpgsqlDataSourceBuilder($"Host=/var/run/postgresql;Username={PgUser};Database={DatabaseName}").Build();
+        await RunPsqlAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
+        await RunPsqlAdminAsync("createdb", $"-h {PgHost} -U {PgUser} -O {PgUser} {DatabaseName}");
+
+        _ds = new NpgsqlDataSourceBuilder(ConnectionString).Build();
         await using var conn = await _ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
             CREATE EXTENSION IF NOT EXISTS postgis;
             CREATE EXTENSION IF NOT EXISTS laplace_geom;
-            CREATE EXTENSION IF NOT EXISTS laplace_substrate;";
+            CREATE EXTENSION IF NOT EXISTS laplace_substrate;
+            SET search_path TO laplace, public;";
         await cmd.ExecuteNonQueryAsync();
     }
 
     public async Task DisposeAsync()
     {
         if (_ds is not null) await _ds.DisposeAsync();
+        await RunPsqlAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
     }
 
     [Fact]
@@ -41,7 +65,7 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         var writer = new NpgsqlSubstrateWriter(_ds);
         var reader = new NpgsqlSubstrateReader(_ds);
         var dec = new UnicodeDecomposer();
-        var ctx = new SeedContext(writer, reader);
+        var ctx = new SeedContext(writer, reader, EcosystemPath);
 
         await dec.InitializeAsync(ctx);
         long applied = 0;
@@ -86,9 +110,40 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         return (long)(await cmd.ExecuteScalarAsync())!;
     }
 
-    private sealed class SeedContext(ISubstrateWriter writer, ISubstrateReader reader) : IDecomposerContext
+    private static async Task RunPsqlAdminAsync(string program, string args)
     {
-        public string EcosystemPath => "/vault/Data/Unicode";
+        var psi = new ProcessStartInfo
+        {
+            FileName = ResolvePgTool(program),
+            Arguments = args,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+        if (PgPassword is not null) psi.Environment["PGPASSWORD"] = PgPassword;
+        using var p = Process.Start(psi)!;
+        await p.WaitForExitAsync();
+        if (p.ExitCode != 0)
+        {
+            var stderr = await p.StandardError.ReadToEndAsync();
+            throw new InvalidOperationException(
+                $"{program} {args} exited {p.ExitCode}: {stderr}");
+        }
+    }
+
+    private static string ResolvePgTool(string program)
+    {
+        if (!OperatingSystem.IsWindows()) return program;
+        string exe = Path.Combine(
+            Environment.GetEnvironmentVariable("PGBIN") ?? @"C:\Program Files\PostgreSQL\18\bin",
+            program + ".exe");
+        return File.Exists(exe) ? exe : program;
+    }
+
+    private sealed class SeedContext(ISubstrateWriter writer, ISubstrateReader reader, string ecosystemPath)
+        : IDecomposerContext
+    {
+        public string EcosystemPath { get; } = ecosystemPath;
         public ISubstrateWriter Writer { get; } = writer;
         public ISubstrateReader Reader { get; } = reader;
         public Microsoft.Extensions.Logging.ILogger Logger { get; } = NullLogger.Instance;

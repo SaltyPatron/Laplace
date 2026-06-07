@@ -45,7 +45,8 @@ public sealed class UnicodeDecomposerTests
         await dec.EstimateUnitCountAsync(ctx);
         Hash128 aHash = Hash128.Blake3(new byte[] { 0x41 });
 
-        long codepointEntities = 0, codepointPhysicalities = 0, passThreeEntities = 0;
+        var codepointEntities = new HashSet<Hash128>();
+        long codepointPhysicalities = 0, passThreeEntities = 0;
         bool allTier0 = true, allFirstObserved = true;
         EntityRow? aEntity = null;
         PhysicalityRow? aPhys = null;
@@ -57,13 +58,14 @@ public sealed class UnicodeDecomposerTests
                 var e = change.Entities[i];
                 if (e.TypeId == UnicodeDecomposer.CodepointType)
                 {
-                    codepointEntities++;
+                    codepointEntities.Add(e.Id);
                     if (e.Tier != 0) allTier0 = false;
                     if (e.FirstObservedBy != UnicodeDecomposer.Source) allFirstObserved = false;
-                    if (aEntity is null && e.Id == aHash && change.Physicalities.Length > i)
+                    if (aEntity is null && e.Id == aHash)
                     {
                         aEntity = e;
-                        aPhys = change.Physicalities[i];
+                        foreach (var ph in change.Physicalities)
+                            if (ph.EntityId == aHash) { aPhys = ph; break; }
                     }
                 }
                 else
@@ -76,7 +78,7 @@ public sealed class UnicodeDecomposerTests
                     codepointPhysicalities++;
         }
 
-        Assert.Equal(TotalCodepoints, codepointEntities);
+        Assert.Equal(TotalCodepoints, codepointEntities.Count);
         Assert.True(codepointPhysicalities >= TotalCodepoints,
             "one CONTENT physicality per codepoint (pass-3 content adds more)");
         Assert.True(passThreeEntities > 0,

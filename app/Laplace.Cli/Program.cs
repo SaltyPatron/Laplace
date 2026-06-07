@@ -1212,9 +1212,9 @@ internal static class Program
         {
             SkipLayerOrderingCheck = skipLayerCheck,
             EcosystemPath          = ecosystemPath,
-            BatchSize              = EnvInt("LAPLACE_INGEST_BATCH",       1024,    min: 1),
-            CommitRows             = EnvInt("LAPLACE_INGEST_COMMIT_ROWS", 100_000, min: 0),
-            ParallelWorkers        = EnvInt("LAPLACE_INGEST_WORKERS",     1,       min: 1),
+            BatchSize              = EnvInt("LAPLACE_INGEST_BATCH",       2048,    min: 1),
+            CommitRows             = EnvInt("LAPLACE_INGEST_COMMIT_ROWS", 250_000, min: 0),
+            ParallelWorkers        = EnvInt("LAPLACE_INGEST_WORKERS",     4,       min: 1),
             Progress               = progress,
         };
     }

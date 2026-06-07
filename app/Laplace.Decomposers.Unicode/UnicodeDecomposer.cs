@@ -99,15 +99,7 @@ public sealed class UnicodeDecomposer : IDecomposer
         {
             ct.ThrowIfCancellationRequested();
             int end = Math.Min(start + batch, total);
-            yield return BuildBatch(start, end, entitiesOnly: true);
-            await Task.Yield();
-        }
-
-        for (int start = 0; start < total; start += batch)
-        {
-            ct.ThrowIfCancellationRequested();
-            int end = Math.Min(start + batch, total);
-            yield return BuildBatch(start, end, entitiesOnly: false);
+            yield return BuildBatch(start, end);
             await Task.Yield();
         }
 
@@ -127,7 +119,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                     var aliasId = ContentEmitter.Emit(b, alias, Source);
                     if (aliasId is { } aid)
                         b.AddAttestation(RelationTypeRegistry.Attest(
-                            recs[cp].Hash, "HAS_NAME_ALIAS", aid, Source, SourceTrust.StandardsDerived));
+                            StageCodepointTarget(b, recs, cp), "HAS_NAME_ALIAS", aid, Source, SourceTrust.StandardsDerived));
                     count++;
                 }
                 if (count >= batch)
@@ -147,11 +139,11 @@ public sealed class UnicodeDecomposer : IDecomposer
                 int first = char.ConvertToUtf32(target, 0);
                 int firstLen = char.IsSurrogatePair(target, 0) ? 2 : 1;
                 Hash128? targetId = target.Length == firstLen
-                    ? recs[(uint)first].Hash
+                    ? StageCodepointTarget(b, recs, (uint)first)
                     : ContentEmitter.Emit(b, target, Source);
                 if (targetId is { } tid)
                     b.AddAttestation(RelationTypeRegistry.Attest(
-                        recs[src].Hash, "CONFUSABLE_WITH", tid, Source, SourceTrust.StandardsDerived));
+                        StageCodepointTarget(b, recs, src), "CONFUSABLE_WITH", tid, Source, SourceTrust.StandardsDerived));
                 if (++count >= batch)
                 {
                     yield return b.Build();
@@ -167,7 +159,7 @@ public sealed class UnicodeDecomposer : IDecomposer
         {
             var recs = _records!;
             var bb = new SubstrateChangeBuilder(Source, "bytes/atoms-and-encodings", null,
-                entityCapacity: 160, physicalityCapacity: 128, attestationCapacity: 512);
+                entityCapacity: 512, physicalityCapacity: 128, attestationCapacity: 512);
 
             var latin1 = Hash128.OfCanonical("substrate/encoding/ISO-8859-1/v1");
             var cp1252 = Hash128.OfCanonical("substrate/encoding/windows-1252/v1");
@@ -206,7 +198,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                     Source, SourceTrust.StandardsDerived));
 
                 bb.AddAttestation(RelationTypeRegistry.Attest(
-                    byteId, "DECODES_TO", recs[v].Hash, Source,
+                    byteId, "DECODES_TO", StageCodepointTarget(bb, recs, (uint)v), Source,
                     SourceTrust.StandardsDerived, contextId: latin1));
 
                 uint cp1252Target = bv <= 0x9F
@@ -214,7 +206,7 @@ public sealed class UnicodeDecomposer : IDecomposer
                     : (uint)bv;
                 if (cp1252Target != 0)
                     bb.AddAttestation(RelationTypeRegistry.Attest(
-                        byteId, "DECODES_TO", recs[cp1252Target].Hash, Source,
+                        byteId, "DECODES_TO", StageCodepointTarget(bb, recs, cp1252Target), Source,
                         SourceTrust.StandardsDerived, contextId: cp1252));
             }
             yield return bb.Build();
@@ -250,15 +242,14 @@ public sealed class UnicodeDecomposer : IDecomposer
 
     public ValueTask DisposeAsync() { _records = null; _ucd = null; return ValueTask.CompletedTask; }
 
-    private SubstrateChange BuildBatch(int start, int end, bool entitiesOnly)
+    private SubstrateChange BuildBatch(int start, int end)
     {
         int n = end - start;
-        string suffix = entitiesOnly ? "/entities" : "/attestations";
         var b = new SubstrateChangeBuilder(
-            Source, $"codepoints/U+{start:X4}..U+{(end - 1):X4}{suffix}", null,
-            entityCapacity:      entitiesOnly ? n : 0,
-            physicalityCapacity: entitiesOnly ? n : 0,
-            attestationCapacity: entitiesOnly ? 0 : n * 12);
+            Source, $"codepoints/U+{start:X4}..U+{(end - 1):X4}", null,
+            entityCapacity:      n * 4,
+            physicalityCapacity: n,
+            attestationCapacity: n * 12);
 
         CodepointRecord[] recs = _records!;
         UcdProperties ucd = _ucd!;
@@ -268,132 +259,134 @@ public sealed class UnicodeDecomposer : IDecomposer
             ref readonly CodepointRecord r = ref recs[cp];
             Hash128 entityId = r.Hash;
 
-            if (entitiesOnly)
+            b.AddEntity(entityId, tier: 0, CodepointType, firstObservedBy: Source);
+
+            Hash128 physId = PhysicalityId.Compute(
+                entityId, Source, PhysicalityType.Content,
+                r.CoordX, r.CoordY, r.CoordZ, r.CoordM,
+                ReadOnlySpan<double>.Empty);
+
+            b.AddPhysicality(new PhysicalityRow(
+                Id: physId, EntityId: entityId, SourceId: Source,
+                Type: PhysicalityType.Content,
+                CoordX: r.CoordX, CoordY: r.CoordY, CoordZ: r.CoordZ, CoordM: r.CoordM,
+                HilbertIndex: r.Hilbert,
+                TrajectoryXyzm: null, NConstituents: 0,
+                AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
+
+            uint ucp = (uint)cp;
+
+            string? cat = ucd.GeneralCategory[cp];
+            if (cat != null && ucd.CategoryEntityIds.TryGetValue(cat, out var catId))
+                b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasGeneralCategory,
+                    catId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+
+            if (ucd.CombiningClass[cp] > 0)
+                b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasCombiningClass,
+                    CombiningClassIds[ucd.CombiningClass[cp]], Source, null,
+                    RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+
+            string? script = ucd.ScriptForCodepoint(ucp);
+            if (script != null && ucd.ScriptEntityIds.TryGetValue(script, out var scriptId))
+                b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasScript,
+                    scriptId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+
+            string? block = ucd.BlockForCodepoint(ucp);
+            if (block != null && ucd.BlockEntityIds.TryGetValue(block, out var blockId))
+                b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasBlock,
+                    blockId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+
+            if (ucd.UppercaseMapping[cp] != 0)
             {
-                b.AddEntity(entityId, tier: 0, CodepointType, firstObservedBy: Source);
-
-                Hash128 physId = PhysicalityId.Compute(
-                    entityId, Source, PhysicalityType.Content,
-                    r.CoordX, r.CoordY, r.CoordZ, r.CoordM,
-                    ReadOnlySpan<double>.Empty);
-
-                b.AddPhysicality(new PhysicalityRow(
-                    Id: physId, EntityId: entityId, SourceId: Source,
-                    Type: PhysicalityType.Content,
-                    CoordX: r.CoordX, CoordY: r.CoordY, CoordZ: r.CoordZ, CoordM: r.CoordM,
-                    HilbertIndex: r.Hilbert,
-                    TrajectoryXyzm: null, NConstituents: 0,
-                    AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
+                uint targetCp = ucd.UppercaseMapping[cp];
+                if (targetCp < (uint)recs.Length)
+                    b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasUppercaseMapping,
+                        StageCodepointTarget(b, recs, targetCp), Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
             }
-            else
+
+            if (ucd.LowercaseMapping[cp] != 0)
             {
-                uint ucp = (uint)cp;
+                uint targetCp = ucd.LowercaseMapping[cp];
+                if (targetCp < (uint)recs.Length)
+                    b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasLowercaseMapping,
+                        StageCodepointTarget(b, recs, targetCp), Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+            }
 
-                string? cat = ucd.GeneralCategory[cp];
-                if (cat != null && ucd.CategoryEntityIds.TryGetValue(cat, out var catId))
-                    b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasGeneralCategory,
-                        catId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
-
-                if (ucd.CombiningClass[cp] > 0)
-                    b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasCombiningClass,
-                        CombiningClassIds[ucd.CombiningClass[cp]], Source, null,
-                        RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
-
-                string? script = ucd.ScriptForCodepoint(ucp);
-                if (script != null && ucd.ScriptEntityIds.TryGetValue(script, out var scriptId))
-                    b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasScript,
-                        scriptId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
-
-                string? block = ucd.BlockForCodepoint(ucp);
-                if (block != null && ucd.BlockEntityIds.TryGetValue(block, out var blockId))
-                    b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasBlock,
-                        blockId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
-
-                if (ucd.UppercaseMapping[cp] != 0)
+            uint[]? decomp = ucd.CanonDecomp[cp];
+            if (decomp != null)
+            {
+                for (int di = 0; di < decomp.Length; di++)
                 {
-                    uint targetCp = ucd.UppercaseMapping[cp];
+                    uint targetCp = decomp[di];
                     if (targetCp < (uint)recs.Length)
-                        b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasUppercaseMapping,
-                            recs[targetCp].Hash, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
-                }
-
-                if (ucd.LowercaseMapping[cp] != 0)
-                {
-                    uint targetCp = ucd.LowercaseMapping[cp];
-                    if (targetCp < (uint)recs.Length)
-                        b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasLowercaseMapping,
-                            recs[targetCp].Hash, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
-                }
-
-                uint[]? decomp = ucd.CanonDecomp[cp];
-                if (decomp != null)
-                {
-                    for (int di = 0; di < decomp.Length; di++)
                     {
-                        uint targetCp = decomp[di];
-                        if (targetCp < (uint)recs.Length)
-                        {
-                            Hash128 ctx = di == 0 ? UcdProperties.OrdinalCtx0 : UcdProperties.OrdinalCtx1;
-                            b.AddAttestation(AttestationFactory.Create(entityId,
-                                UcdProperties.KindCanonDecomposesTo,
-                                recs[targetCp].Hash, Source, ctx,
-                                RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
-                        }
+                        Hash128 ctx = di == 0 ? UcdProperties.OrdinalCtx0 : UcdProperties.OrdinalCtx1;
+                        b.AddAttestation(AttestationFactory.Create(entityId,
+                            UcdProperties.KindCanonDecomposesTo,
+                            StageCodepointTarget(b, recs, targetCp), Source, ctx,
+                            RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
                     }
                 }
+            }
 
-                if (ucd.TitlecaseMapping[cp] != 0 && ucd.TitlecaseMapping[cp] < (uint)recs.Length)
-                    b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasTitlecaseMapping,
-                        recs[ucd.TitlecaseMapping[cp]].Hash, Source, null,
-                        RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+            if (ucd.TitlecaseMapping[cp] != 0 && ucd.TitlecaseMapping[cp] < (uint)recs.Length)
+                b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasTitlecaseMapping,
+                    StageCodepointTarget(b, recs, ucd.TitlecaseMapping[cp]), Source, null,
+                    RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
 
-                uint[]? compat = ucd.CompatDecomp[cp];
-                if (compat != null)
+            uint[]? compat = ucd.CompatDecomp[cp];
+            if (compat != null)
+            {
+                for (int di = 0; di < compat.Length; di++)
                 {
-                    for (int di = 0; di < compat.Length; di++)
+                    uint targetCp = compat[di];
+                    if (targetCp < (uint)recs.Length)
                     {
-                        uint targetCp = compat[di];
-                        if (targetCp < (uint)recs.Length)
-                        {
-                            Hash128 ctx = di == 0 ? UcdProperties.OrdinalCtx0 : UcdProperties.OrdinalCtx1;
-                            b.AddAttestation(AttestationFactory.Create(entityId,
-                                UcdProperties.KindCompatDecomposesTo,
-                                recs[targetCp].Hash, Source, ctx,
-                                RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
-                        }
+                        Hash128 ctx = di == 0 ? UcdProperties.OrdinalCtx0 : UcdProperties.OrdinalCtx1;
+                        b.AddAttestation(AttestationFactory.Create(entityId,
+                            UcdProperties.KindCompatDecomposesTo,
+                            StageCodepointTarget(b, recs, targetCp), Source, ctx,
+                            RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
                     }
                 }
-
-                string? num = ucd.NumericValue[cp];
-                if (num != null && ucd.NumericEntityIds.TryGetValue(num, out var numId))
-                    b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasNumericValue,
-                        numId, Source, null, RelationTypeRank.ScalarValued, SourceTrust.StandardsDerived));
-
-                string? bidi = ucd.BidiClass[cp];
-                if (bidi != null && ucd.BidiClassEntityIds.TryGetValue(bidi, out var bidiId))
-                    b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasBidiClass,
-                        bidiId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
-
-                uint mir = ucd.BidiMirror[cp];
-                if (mir != 0 && mir < (uint)recs.Length && cp <= mir)
-                    b.AddAttestation(RelationTypeRegistry.Attest(
-                        entityId, "HAS_MIRROR", recs[mir].Hash, Source, SourceTrust.StandardsDerived));
-
-                string? age = ucd.AgeForCodepoint(ucp);
-                if (age != null && ucd.AgeEntityIds.TryGetValue(age, out var ageId))
-                    b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasAge,
-                        ageId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
-
-                byte eprops = ucd.EmojiProps[cp];
-                if (eprops != 0)
-                    for (int bit = 0; bit < UcdProperties.EmojiPropNames.Length; bit++)
-                        if ((eprops & (1 << bit)) != 0
-                            && ucd.EmojiPropEntityIds.TryGetValue(UcdProperties.EmojiPropNames[bit], out var epId))
-                            b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasEmojiProperty,
-                                epId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
             }
+
+            string? num = ucd.NumericValue[cp];
+            if (num != null && ucd.NumericEntityIds.TryGetValue(num, out var numId))
+                b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasNumericValue,
+                    numId, Source, null, RelationTypeRank.ScalarValued, SourceTrust.StandardsDerived));
+
+            string? bidi = ucd.BidiClass[cp];
+            if (bidi != null && ucd.BidiClassEntityIds.TryGetValue(bidi, out var bidiId))
+                b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasBidiClass,
+                    bidiId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+
+            uint mir = ucd.BidiMirror[cp];
+            if (mir != 0 && mir < (uint)recs.Length && cp <= mir)
+                b.AddAttestation(RelationTypeRegistry.Attest(
+                    entityId, "HAS_MIRROR", StageCodepointTarget(b, recs, mir), Source, SourceTrust.StandardsDerived));
+
+            string? age = ucd.AgeForCodepoint(ucp);
+            if (age != null && ucd.AgeEntityIds.TryGetValue(age, out var ageId))
+                b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasAge,
+                    ageId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+
+            byte eprops = ucd.EmojiProps[cp];
+            if (eprops != 0)
+                for (int bit = 0; bit < UcdProperties.EmojiPropNames.Length; bit++)
+                    if ((eprops & (1 << bit)) != 0
+                        && ucd.EmojiPropEntityIds.TryGetValue(UcdProperties.EmojiPropNames[bit], out var epId))
+                        b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasEmojiProperty,
+                            epId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
         }
         return b.Build();
+    }
+
+    private Hash128 StageCodepointTarget(SubstrateChangeBuilder b, CodepointRecord[] recs, uint targetCp)
+    {
+        Hash128 targetId = recs[targetCp].Hash;
+        b.AddEntity(targetId, tier: 0, CodepointType, firstObservedBy: Source);
+        return targetId;
     }
 
     private void EnsureComputed(IDecomposerContext context)

@@ -286,7 +286,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         NpgsqlConnection conn, IReadOnlyList<Hash128> ids, CancellationToken ct)
     {
         var existing = new HashSet<Hash128>();
-        const int ChunkSize = 100_000;
+        const int ChunkSize = 250_000;
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 0;
         cmd.CommandText = "SELECT laplace.entities_exist_bitmap(@ids)";
@@ -337,7 +337,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         var idBytes = new List<byte[]>(ids.Count);
         foreach (var id in ids) idBytes.Add(id.ToBytes());
 
-        const int ChunkSize = 100_000;
+        const int ChunkSize = 250_000;
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 0;
         cmd.CommandText = $"SELECT id FROM laplace.{table} WHERE id = ANY(@ids)";
@@ -363,7 +363,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         { 0x50, 0x47, 0x43, 0x4F, 0x50, 0x59, 0x0A, 0xFF, 0x0D, 0x0A, 0x00,
           0, 0, 0, 0,  0, 0, 0, 0 };
     private static readonly byte[] CopyBinaryTrailer = { 0xFF, 0xFF };
-    private const long CopyChunkBytes = 1L << 22;
+    private const long CopyChunkBytes = 1L << 23;
 
     private static async Task<int> StageAndInsertAsync(
         NpgsqlConnection conn, IntentStage stage, IntentStageTable table, string tableName, CancellationToken ct)
