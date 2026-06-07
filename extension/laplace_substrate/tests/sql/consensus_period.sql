@@ -147,6 +147,70 @@ BEGIN;
 SET search_path = laplace, public;
 DO $$
 DECLARE
+    type_t  bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    src     bytea := laplace_hash128_blake3('test/epoch/source');
+    kind    bytea := laplace_hash128_blake3('test/epoch/kind');
+    subjD   bytea := laplace_hash128_blake3('test/epoch/subjectD');
+    objD    bytea := laplace_hash128_blake3('test/epoch/objectD');
+    phi     bigint := 30000000000;
+    s_conf  bigint := 900000000;
+    e1_r bigint; e1_rd bigint; e1_wc bigint;
+    e2_r bigint; e2_rd bigint; e2_wc bigint; e_rows bigint;
+BEGIN
+    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+        (src,   0, type_t, NULL),
+        (kind,  0, type_t, src),
+        (subjD, 0, type_t, src), (objD, 0, type_t, src);
+
+    PERFORM create_period_staging(2, 1);
+    EXECUTE format('INSERT INTO %I (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
+        VALUES ($1, $2, $3, $4, 2, $5 * 2, now())', period_staging_table(1, 0))
+        USING subjD, kind, objD, phi, s_conf;
+
+    PERFORM create_period_staging(2, 2);
+    IF to_regclass(period_staging_table(1, 0)) IS NULL THEN
+        RAISE EXCEPTION 'FAIL: epoch create swept the in-flight prior epoch';
+    END IF;
+    EXECUTE format('INSERT INTO %I (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
+        VALUES ($1, $2, $3, $4, 3, $5 * 3, now())', period_staging_table(2, 0))
+        USING subjD, kind, objD, phi, s_conf;
+
+    IF materialize_period_partition(period_staging_table(1, 0)) <> 1
+    OR materialize_period_partition(period_staging_table(1, 1)) <> 0 THEN
+        RAISE EXCEPTION 'FAIL: epoch 1 fold counts wrong';
+    END IF;
+    SELECT rating, rd, witness_count INTO e1_r, e1_rd, e1_wc FROM consensus WHERE subject_id = subjD;
+
+    IF materialize_period_partition(period_staging_table(2, 0)) <> 1
+    OR materialize_period_partition(period_staging_table(2, 1)) <> 0 THEN
+        RAISE EXCEPTION 'FAIL: epoch 2 fold counts wrong';
+    END IF;
+    SELECT count(*) INTO e_rows FROM consensus WHERE subject_id = subjD;
+    SELECT rating, rd, witness_count INTO e2_r, e2_rd, e2_wc FROM consensus WHERE subject_id = subjD;
+
+    IF e_rows <> 1 THEN RAISE EXCEPTION 'FAIL: epoch folds created % rows (want 1)', e_rows; END IF;
+    IF e1_wc <> 2 OR e2_wc <> 5 THEN RAISE EXCEPTION 'FAIL: epoch witness_count did not accumulate (% then %, want 2 then 5)', e1_wc, e2_wc; END IF;
+    IF e2_r <= e1_r THEN RAISE EXCEPTION 'FAIL: epoch 2 confirm did not raise μ (% <= %)', e2_r, e1_r; END IF;
+    IF e2_rd >= e1_rd THEN RAISE EXCEPTION 'FAIL: epoch 2 did not tighten rd (% >= %)', e2_rd, e1_rd; END IF;
+    IF to_regclass(period_staging_table(1, 0)) IS NOT NULL
+    OR to_regclass(period_staging_table(2, 0)) IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL: epoch fold did not drop its staging partition';
+    END IF;
+
+    PERFORM create_period_staging(1, 3);
+    PERFORM drop_period_staging();
+    IF to_regclass(period_staging_table(3, 0)) IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL: drop_period_staging missed epoch-named staging';
+    END IF;
+
+    RAISE NOTICE '✓ epoch staging: rotation preserves in-flight epochs, ordered epoch folds accumulate on one row, sweep covers epoch names';
+END $$;
+ROLLBACK;
+
+BEGIN;
+SET search_path = laplace, public;
+DO $$
+DECLARE
     type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
     src    bytea := laplace_hash128_blake3('test/inband/source');
     word   bytea := laplace_hash128_blake3('test/inband/word');

@@ -10,6 +10,8 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 
 public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDisposable
 {
+    public const string PeriodBoundaryUnitPrefix = "period-boundary/";
+
     private readonly ISubstrateWriter _inner;
     private readonly NpgsqlDataSource _ds;
     private readonly int _stagingThreshold;
@@ -29,7 +31,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     private ConcurrentDictionary<(Hash128 S, Hash128 K, Hash128? O), Acc> _accumulation = new();
     private long _observationsAccumulated;
-    private bool _stagingCreated;
+    private int  _periodEpoch;
+    private bool _sweptStale;
+    private bool _anyEpochCreated;
+    private long _foldedRelations;
+    private int  _epochsStaged;
+    private int  _epochsFolded;
+    private Task _foldChain = Task.CompletedTask;
     private readonly SemaphoreSlim _stagingGate = new(1, 1);
     private readonly ReaderWriterLockSlim _swapLock = new();
 
@@ -66,15 +74,21 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     {
         ArgumentNullException.ThrowIfNull(changes);
 
+        bool boundary = false;
         foreach (var c in changes)
         {
             if (c.Metadata.SourceContentUnitName.StartsWith("layer-complete/", StringComparison.Ordinal))
                 continue;
+            if (c.Metadata.SourceContentUnitName.StartsWith(PeriodBoundaryUnitPrefix, StringComparison.Ordinal))
+            {
+                boundary = true;
+                continue;
+            }
             foreach (var a in c.Attestations) Accumulate(a);
         }
 
-        if (_accumulation.Count >= _stagingThreshold)
-            await StagePartialsAsync(ct);
+        if (boundary || _accumulation.Count >= _stagingThreshold)
+            await FlushPeriodAsync(ct);
 
         return await _inner.ApplyManyAsync(changes, ct);
     }
@@ -113,18 +127,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private int PartitionOf(Acc acc)
         => (int)((acc.Subject.Lo ^ acc.Type.Lo ^ (acc.Object?.Lo ?? 0UL)) % (ulong)_partitions);
 
-    private async Task EnsureStagingAsync(CancellationToken ct)
-    {
-        if (_stagingCreated) return;
-        await using var conn = await _ds.OpenConnectionAsync(ct);
-        await using var ddl = conn.CreateCommand();
-        ddl.CommandText = "SELECT laplace.create_period_staging($1)";
-        ddl.Parameters.AddWithValue(_partitions);
-        await ddl.ExecuteNonQueryAsync(ct);
-        _stagingCreated = true;
-    }
-
-    private async Task StagePartialsAsync(CancellationToken ct)
+    public async Task FlushPeriodAsync(CancellationToken ct = default)
     {
         await _stagingGate.WaitAsync(ct);
         try
@@ -142,8 +145,25 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             }
             if (snapshot.IsEmpty) return;
 
+            int epoch = ++_periodEpoch;
             var stageSw = System.Diagnostics.Stopwatch.StartNew();
-            await EnsureStagingAsync(ct);
+
+            await using (var conn = await _ds.OpenConnectionAsync(ct))
+            {
+                if (!_sweptStale)
+                {
+                    await using var sweep = conn.CreateCommand();
+                    sweep.CommandText = "SELECT laplace.drop_period_staging()";
+                    await sweep.ExecuteNonQueryAsync(ct);
+                    _sweptStale = true;
+                }
+                await using var ddl = conn.CreateCommand();
+                ddl.CommandText = "SELECT laplace.create_period_staging($1, $2)";
+                ddl.Parameters.AddWithValue(_partitions);
+                ddl.Parameters.AddWithValue(epoch);
+                await ddl.ExecuteNonQueryAsync(ct);
+                _anyEpochCreated = true;
+            }
 
             var buckets = new List<Acc>[_partitions];
             for (int k = 0; k < _partitions; k++) buckets[k] = new List<Acc>();
@@ -153,19 +173,63 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             for (int k = 0; k < _partitions; k++)
             {
                 int part = k;
-                copies[k] = Task.Run(() => CopyPartitionAsync(part, buckets[part], ct), ct);
+                copies[k] = Task.Run(() => CopyPartitionAsync(epoch, part, buckets[part], ct), ct);
             }
             await Task.WhenAll(copies);
             stageSw.Stop();
+            int staged = Interlocked.Increment(ref _epochsStaged);
             _log.LogInformation(
-                "consensus stage: {Relations:N0} partial relations → {Partitions} partition(s) in {Ms:N0}ms ({Rps:N0} rel/s)",
-                snapshot.Count, _partitions, stageSw.ElapsedMilliseconds,
-                snapshot.Count / Math.Max(1e-3, stageSw.Elapsed.TotalSeconds));
+                "consensus stage e{Epoch}: {Relations:N0} partial relations → {Partitions} partition(s) in {Ms:N0}ms ({Rps:N0} rel/s); fold queue depth {Depth}",
+                epoch, snapshot.Count, _partitions, stageSw.ElapsedMilliseconds,
+                snapshot.Count / Math.Max(1e-3, stageSw.Elapsed.TotalSeconds),
+                staged - Volatile.Read(ref _epochsFolded));
+
+            var prev = _foldChain;
+            _foldChain = ChainFoldAsync(prev, epoch);
         }
         finally
         {
             _stagingGate.Release();
         }
+    }
+
+    private async Task ChainFoldAsync(Task prev, int epoch)
+    {
+        await prev.ConfigureAwait(false);
+        var foldSw = System.Diagnostics.Stopwatch.StartNew();
+        var folds = new Task<long>[_partitions];
+        for (int k = 0; k < _partitions; k++)
+        {
+            int part = k;
+            folds[k] = Task.Run(async () =>
+            {
+                await using var conn = await _ds.OpenConnectionAsync().ConfigureAwait(false);
+                conn.Notice += (_, e) =>
+                    _log.LogInformation("consensus fold: {Message}", e.Notice.MessageText);
+                await using (var sub = conn.CreateCommand())
+                {
+                    sub.CommandText = "SET client_min_messages = 'log'";
+                    await sub.ExecuteNonQueryAsync().ConfigureAwait(false);
+                }
+                await using var mat = conn.CreateCommand();
+                mat.CommandTimeout = 0;
+                mat.CommandText =
+                    "SELECT laplace.materialize_period_partition(laplace.period_staging_table($1, $2))";
+                mat.Parameters.AddWithValue(epoch);
+                mat.Parameters.AddWithValue(part);
+                return (long)(await mat.ExecuteScalarAsync().ConfigureAwait(false) ?? 0L);
+            });
+        }
+        var counts = await Task.WhenAll(folds).ConfigureAwait(false);
+        foldSw.Stop();
+        long total = counts.Sum();
+        Interlocked.Add(ref _foldedRelations, total);
+        int folded = Interlocked.Increment(ref _epochsFolded);
+        _log.LogInformation(
+            "consensus fold e{Epoch}: {Relations:N0} relations materialized across {Partitions} partition(s) in {Ms:N0}ms ({Rps:N0} rel/s); epochs folded {Folded}/{Staged}",
+            epoch, total, _partitions, foldSw.ElapsedMilliseconds,
+            total / Math.Max(1e-3, foldSw.Elapsed.TotalSeconds),
+            folded, Volatile.Read(ref _epochsStaged));
     }
 
     private static readonly byte[] CopyBinaryHeader =
@@ -206,12 +270,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         return o;
     }
 
-    private async Task CopyPartitionAsync(int partition, List<Acc> rows, CancellationToken ct)
+    private async Task CopyPartitionAsync(int epoch, int partition, List<Acc> rows, CancellationToken ct)
     {
         if (rows.Count == 0) return;
+        string table = $"consensus_period_staging_e{epoch:D4}_{partition}";
         await using var conn = await _ds.OpenConnectionAsync(ct);
         await using var stream = await conn.BeginRawBinaryCopyAsync(
-            $"COPY laplace.consensus_period_staging_{partition} "
+            $"COPY laplace.{table} "
           + "(subject_id, type_id, object_id, phi, games, sum_score, last_ts) "
           + "FROM STDIN (FORMAT BINARY)", ct);
 
@@ -238,46 +303,22 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     public async Task<long> MaterializeConsensusAsync(CancellationToken ct = default)
     {
-        await StagePartialsAsync(ct);
-        if (!_stagingCreated) return 0;
-
-        var foldSw = System.Diagnostics.Stopwatch.StartNew();
-        var folds = new Task<long>[_partitions];
-        for (int k = 0; k < _partitions; k++)
-        {
-            int part = k;
-            folds[k] = Task.Run(async () =>
-            {
-                await using var conn = await _ds.OpenConnectionAsync(ct);
-                conn.Notice += (_, e) =>
-                    _log.LogInformation("consensus fold: {Message}", e.Notice.MessageText);
-                await using (var sub = conn.CreateCommand())
-                {
-                    sub.CommandText = "SET client_min_messages = 'log'";
-                    await sub.ExecuteNonQueryAsync(ct);
-                }
-                await using var mat = conn.CreateCommand();
-                mat.CommandTimeout = 0;
-                mat.CommandText = "SELECT laplace.materialize_period_consensus($1)";
-                mat.Parameters.AddWithValue(part);
-                return (long)(await mat.ExecuteScalarAsync(ct) ?? 0L);
-            }, ct);
-        }
-        var counts = await Task.WhenAll(folds);
-        foldSw.Stop();
-        long total = counts.Sum();
-        _log.LogInformation(
-            "consensus fold: {Relations:N0} relations materialized across {Partitions} partition(s) in {Ms:N0}ms ({Rps:N0} rel/s)",
-            total, _partitions, foldSw.ElapsedMilliseconds,
-            total / Math.Max(1e-3, foldSw.Elapsed.TotalSeconds));
-
-        _stagingCreated = false;
-        return total;
+        await FlushPeriodAsync(ct);
+        await _foldChain;
+        return Interlocked.Read(ref _foldedRelations);
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_stagingCreated)
+        try
+        {
+            await _foldChain;
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "in-flight period fold failed before dispose; staging sweep follows");
+        }
+        if (_anyEpochCreated)
         {
             try
             {
@@ -288,9 +329,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             }
             catch (Exception ex)
             {
-                _log.LogWarning(ex, "period staging sweep on dispose failed; next create_period_staging sweeps it");
+                _log.LogWarning(ex, "period staging sweep on dispose failed; next run's first flush sweeps it");
             }
-            _stagingCreated = false;
+            _anyEpochCreated = false;
         }
         _stagingGate.Dispose();
         _swapLock.Dispose();
