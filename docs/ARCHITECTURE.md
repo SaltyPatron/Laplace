@@ -112,7 +112,7 @@ All durable tables are `pg_extension_config_dump`'d — the extension is the dep
 19 (RETIRED by ruling — geometry evidence/consensus tables)
 20 converse: word_id/label/prompt_words/word_language/senses/define/synonyms/
              translations/hypernyms/examples/resolve_last_word/prompt_state/expansion/
-             kind_label/realize/realize_path/related(_in)/describe/isa_path/usage_overlap/
+             type_label/realize/realize_path/related(_in)/describe/isa_path/usage_overlap/
              reason/relatedness/epistemic_status/gaps/contrast/route_prompt/resolve_topic/
              respond/converse/structural_neighbors/structural_locale/generate
 21 seed: build_codepoint_render() + the canonical vocabulary

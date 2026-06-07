@@ -217,7 +217,7 @@ SELECT realize(laplace_hash128_blake3('test/converse/synset1'),
  p
 (1 row)
 
-SELECT kind_label(relation_type_id('IS_A')) AS isa_label;
+SELECT type_label(relation_type_id('IS_A')) AS isa_label;
  isa_label 
 -----------
  is a
@@ -268,7 +268,7 @@ SELECT reply FROM respond('is h a c?');
  No witnessed IS_A path from "h" to "c".
 (1 row)
 
-SELECT g.step, kind_label(g.type_id) AS kind,
+SELECT g.step, type_label(g.type_id) AS kind,
        g.entity_id = laplace_hash128_blake3('test/converse/synset2') AS is_synset2
 FROM generate_greedy(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A')) g;
  step | kind | is_synset2 

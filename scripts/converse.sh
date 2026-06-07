@@ -67,7 +67,7 @@ SHIMS
             -e 's/^CREATE UNLOGGED TABLE converse_turns/CREATE TEMP TABLE converse_turns/' \
             -e 's/SET search_path = @extschema@, public/SET search_path = pg_temp, laplace, public/' \
       | grep -v '^COMMENT ON' | grep -v "^    '" | grep -v '^SELECT pg_extension_config_dump' \
-      | sed -E 's/\b(word_id|label|prompt_words|word_language|senses|define|synonyms|translations|hypernyms|examples|resolve_last_word|prompt_state|expansion|kind_label|realize_path|realize|relatedness|related_in|related|usage_overlap|reason|contrast|describe|isa_path|route_prompt|resolve_topic|respond|converse|generate_greedy|generate_tree|refuted|type_id|eff_mu|eff_mu_display)\(/pg_temp.\1(/g; s/pg_temp\.pg_temp\./pg_temp./g'
+      | sed -E 's/\b(word_id|label|prompt_words|word_language|senses|define|synonyms|translations|hypernyms|examples|resolve_last_word|prompt_state|expansion|type_label|realize_path|realize|relatedness|related_in|related|usage_overlap|reason|contrast|describe|isa_path|route_prompt|resolve_topic|respond|converse|generate_greedy|generate_tree|refuted|type_id|eff_mu|eff_mu_display)\(/pg_temp.\1(/g; s/pg_temp\.pg_temp\./pg_temp./g'
 
     cat <<'ASK'
 CREATE OR REPLACE FUNCTION pg_temp.ask(p text)

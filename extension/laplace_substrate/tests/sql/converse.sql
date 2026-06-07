@@ -122,7 +122,7 @@ SELECT (SELECT sn.synset_id FROM senses(word_id('dog'), ARRAY[word_id('h')]) sn 
 SELECT realize(word_id('p'), NULL) AS leaf_realizes;
 SELECT realize(laplace_hash128_blake3('test/converse/synset1'),
                laplace_hash128_blake3('test/converse/lang_en')) AS synset_realizes_member;
-SELECT kind_label(relation_type_id('IS_A')) AS isa_label;
+SELECT type_label(relation_type_id('IS_A')) AS isa_label;
 SELECT realize_path(ARRAY[laplace_hash128_blake3('test/converse/synset1'),
                           laplace_hash128_blake3('test/converse/synset2')],
                     ARRAY[relation_type_id('IS_A')],
@@ -135,7 +135,7 @@ SELECT fact FROM related_in(laplace_hash128_blake3('test/converse/synset1'), rel
 SELECT reply FROM respond('is a dog a c?');
 SELECT reply FROM respond('is h a c?');
 
-SELECT g.step, kind_label(g.type_id) AS kind,
+SELECT g.step, type_label(g.type_id) AS kind,
        g.entity_id = laplace_hash128_blake3('test/converse/synset2') AS is_synset2
 FROM generate_greedy(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A')) g;
 SELECT count(*) AS tree_nodes

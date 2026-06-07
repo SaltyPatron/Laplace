@@ -244,7 +244,7 @@ CREATE OR REPLACE FUNCTION define(p_word bytea, p_context bytea[], p_limit int D
     LIMIT p_limit
 $$;
 
-CREATE OR REPLACE FUNCTION kind_label(p_type bytea)
+CREATE OR REPLACE FUNCTION type_label(p_type bytea)
     RETURNS text
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
@@ -300,7 +300,7 @@ CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_kinds bytea[],
     SET search_path = @extschema@, public AS $$
     SELECT string_agg(
                CASE WHEN i = 1 THEN COALESCE(realize(p_path[i], p_lang), '?')
-                    ELSE ' —' || COALESCE(kind_label(p_kinds[i-1]), '?') || '→ '
+                    ELSE ' —' || COALESCE(type_label(p_kinds[i-1]), '?') || '→ '
                          || COALESCE(realize(p_path[i], p_lang), '?')
                END, '' ORDER BY i)
     FROM generate_subscripts(p_path, 1) AS i
@@ -314,8 +314,8 @@ CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_kinds bytea[], p_dirs 
     SELECT string_agg(
                CASE WHEN i = 1 THEN COALESCE(realize(p_path[i], p_lang), '?')
                     ELSE CASE WHEN p_dirs[i-1] = -1
-                              THEN ' ←' || COALESCE(kind_label(p_kinds[i-1]), '?') || '— '
-                              ELSE ' —' || COALESCE(kind_label(p_kinds[i-1]), '?') || '→ '
+                              THEN ' ←' || COALESCE(type_label(p_kinds[i-1]), '?') || '— '
+                              ELSE ' —' || COALESCE(type_label(p_kinds[i-1]), '?') || '→ '
                          END || COALESCE(realize(p_path[i], p_lang), '?')
                END, '' ORDER BY i)
     FROM generate_subscripts(p_path, 1) AS i
@@ -404,7 +404,7 @@ CREATE OR REPLACE FUNCTION describe(p_word bytea, p_lang bytea DEFAULT NULL,
             LIMIT p_limit
         ) cc
     )
-    SELECT kind_label(t.type_id),
+    SELECT type_label(t.type_id),
            realize(t.object_id, COALESCE(p_lang, word_language(p_word))),
            eff_mu_display(t.rating, t.rd), t.witness_count
     FROM top t
@@ -480,14 +480,14 @@ CREATE OR REPLACE FUNCTION reason(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
     direct AS (
         SELECT realize_path(ARRAY[x.id, c.object_id], ARRAY[c.type_id], ARRAY[1],
                             COALESCE(word_language(p_x), word_language(p_y))) AS chain,
-               eff_mu_display(c.rating, c.rd) AS mu, 1 AS len, kind_label(c.type_id) AS plane
+               eff_mu_display(c.rating, c.rd) AS mu, 1 AS len, type_label(c.type_id) AS plane
         FROM xset x JOIN consensus c ON c.subject_id = x.id
             AND c.object_id IN (SELECT id FROM yset)
             AND c.type_id IN (SELECT k FROM lat) AND NOT refuted(c.rating, c.rd)
         UNION ALL
         SELECT realize_path(ARRAY[x.id, c.subject_id], ARRAY[c.type_id], ARRAY[-1],
                             COALESCE(word_language(p_x), word_language(p_y))),
-               eff_mu_display(c.rating, c.rd), 1, kind_label(c.type_id)
+               eff_mu_display(c.rating, c.rd), 1, type_label(c.type_id)
         FROM xset x JOIN consensus c ON c.object_id = x.id
             AND c.subject_id IN (SELECT id FROM yset)
             AND c.type_id IN (SELECT k FROM lat) AND NOT refuted(c.rating, c.rd)),
@@ -573,7 +573,7 @@ CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT N
                                     relation_type_id('HAS_LANGUAGE'))
             ORDER BY eff_mu(c.rating, c.rd) DESC
             LIMIT p_limit)
-    SELECT kind_label(r.type_id),
+    SELECT type_label(r.type_id),
            realize(r.object_id, COALESCE(p_lang, word_language(p_word))),
            CASE WHEN r.rating + 2 * r.rd < glicko2_neutral_mu() THEN 'refuted'
                 WHEN r.rating - 2 * r.rd > glicko2_neutral_mu() THEN 'confirmed'
@@ -641,7 +641,7 @@ CREATE OR REPLACE FUNCTION contrast(p_x bytea, p_y bytea, p_lang bytea DEFAULT N
           AND c.type_id IN (SELECT k FROM feat) GROUP BY 1, 2)
     SELECT CASE WHEN xr.object_id IS NOT NULL AND yr.object_id IS NOT NULL THEN 'both'
                 WHEN xr.object_id IS NOT NULL THEN 'x-only' ELSE 'y-only' END,
-           kind_label(COALESCE(xr.type_id, yr.type_id)),
+           type_label(COALESCE(xr.type_id, yr.type_id)),
            realize(COALESCE(xr.object_id, yr.object_id), p_lang),
            COALESCE(xr.mu, yr.mu)
     FROM xr FULL JOIN yr ON xr.type_id = yr.type_id AND xr.object_id = yr.object_id
@@ -897,7 +897,7 @@ BEGIN
     ELSIF r.intent IN ('walk', 'complete') THEN
         RETURN QUERY
             SELECT COALESCE(realize(v_topic, v_lang), label(v_topic))
-                   || string_agg(' —' || COALESCE(kind_label(g.type_id), '?') || '→ '
+                   || string_agg(' —' || COALESCE(type_label(g.type_id), '?') || '→ '
                                  || COALESCE(realize(g.entity_id, v_lang), label(g.entity_id)),
                                  '' ORDER BY g.step),
                    min(g.eff_mu), NULL::bigint
