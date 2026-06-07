@@ -20,6 +20,7 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_sentence_break.cpp
     test_normalize_nfc.cpp
     test_text_decomposer.cpp
+    test_grammar_decomposer.cpp
 )
 
 add_compile_definitions(LAPLACE_UCD_PATH_FOR_TESTS="${LAPLACE_UCD_CONFORMANCE_DIR}")

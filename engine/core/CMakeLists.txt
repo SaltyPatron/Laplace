@@ -14,6 +14,9 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/intent_stage.h
     include/laplace/core/merkle_dedup.h
     include/laplace/core/hash_composer.h
+    include/laplace/core/grapheme_floor.h
+    include/laplace/core/grammar_registry.h
+    include/laplace/core/grammar_decomposer.h
     include/laplace/core/grapheme_break.h
     include/laplace/core/word_break.h
     include/laplace/core/sentence_break.h
@@ -38,6 +41,9 @@ set(LAPLACE_CORE_SOURCES
     src/intent_stage.c
     src/merkle_dedup.c
     src/hash_composer.c
+    src/grapheme_floor.c
+    src/grammar_registry.c
+    src/grammar_decomposer.c
     src/grapheme_break.c
     src/word_break.c
     src/sentence_break.c
@@ -55,6 +61,13 @@ if(WIN32)
     target_link_libraries(laplace_core_static
         PUBLIC  laplace_eigen
         PRIVATE blake3 LibXml2::LibXml2)
+endif()
+
+# tree-sitter runtime + the starter grammars (each = a domain recipe), linked into both core libs.
+add_subdirectory(grammars)
+target_link_libraries(laplace_core PRIVATE tree_sitter_rt ${LAPLACE_TS_GRAMMARS})
+if(WIN32)
+    target_link_libraries(laplace_core_static PRIVATE tree_sitter_rt ${LAPLACE_TS_GRAMMARS})
 endif()
 
 set(LAPLACE_PERFCACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/perfcache")

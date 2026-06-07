@@ -7,6 +7,23 @@
 #include "laplace/core/math4d.h"
 #include "laplace/core/tier_tree.h"
 
+void hash_composer_compose_node(
+    uint8_t          tier,
+    const hash128_t* child_ids,
+    const double*    child_coords,
+    size_t           n,
+    hash128_t*       out_id,
+    double           out_coord[4],
+    hilbert128_t*    out_hb) {
+    if (n == 1) {
+        *out_id = child_ids[0];
+    } else {
+        hash128_merkle(tier, child_ids, n, out_id);
+    }
+    math4d_centroid(child_coords, n, out_coord);
+    hilbert4d_encode(out_coord, out_hb);
+}
+
 int hash_composer_run(
     tier_tree_t*                   tree,
     hash_composer_atom_resolver_fn resolver,
@@ -53,20 +70,9 @@ int hash_composer_run(
             return -1;
         }
 
-        if (cnt == 1) {
-            ids[i] = ids[first];
-        } else {
-            hash128_merkle(tiers[i], &ids[first], (size_t)cnt, &ids[i]);
-        }
-
-        double centroid[4];
-        math4d_centroid(&coords[(size_t)first * 4], (size_t)cnt, centroid);
-        coords[i * 4 + 0] = centroid[0];
-        coords[i * 4 + 1] = centroid[1];
-        coords[i * 4 + 2] = centroid[2];
-        coords[i * 4 + 3] = centroid[3];
-
-        hilbert4d_encode(centroid, &hbs[i]);
+        hash_composer_compose_node(tiers[i], &ids[first],
+                                   &coords[(size_t)first * 4], (size_t)cnt,
+                                   &ids[i], &coords[i * 4], &hbs[i]);
     }
     return 0;
 }
