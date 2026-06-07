@@ -18,5 +18,8 @@ cd app
 dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q || exit /b 1
 for %%s in (%*) do (
   echo ==== ingest %%s ====
+  setlocal
+  if /I "%%s"=="unicode" set "LAPLACE_INGEST_WORKERS=1"
   dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest %%s || exit /b 1
+  endlocal
 )
