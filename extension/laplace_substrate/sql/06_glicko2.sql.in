@@ -32,6 +32,16 @@ CREATE AGGREGATE laplace_glicko2_accumulate(
     FINALFUNC = laplace_glicko2_finalfunc
 );
 
+CREATE FUNCTION laplace_score(v double precision, m double precision)
+    RETURNS bigint
+    AS 'MODULE_PATHNAME', 'pg_laplace_score'
+    LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION laplace_score_inverse(score bigint, m double precision)
+    RETURNS double precision
+    AS 'MODULE_PATHNAME', 'pg_laplace_score_inverse'
+    LANGUAGE C IMMUTABLE STRICT;
+
 CREATE FUNCTION laplace_glicko2_accumulate_games(
     prior_rating     bigint,
     prior_rd         bigint,

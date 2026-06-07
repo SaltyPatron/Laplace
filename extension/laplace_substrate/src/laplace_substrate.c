@@ -11,6 +11,7 @@
 
 #include "laplace/core/version.h"
 #include "laplace/core/glicko2.h"
+#include "laplace/core/score.h"
 #include "laplace/dynamics/init.h"
 
 PG_MODULE_MAGIC;
@@ -131,6 +132,22 @@ pg_laplace_glicko2_finalfunc(PG_FUNCTION_ARGS)
 
     tuple = heap_form_tuple(tupdesc, values, nulls);
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_score);
+
+Datum
+pg_laplace_score(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT64(laplace_score_fp(PG_GETARG_FLOAT8(0), PG_GETARG_FLOAT8(1)));
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_score_inverse);
+
+Datum
+pg_laplace_score_inverse(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_FLOAT8(laplace_score_inverse_fp(PG_GETARG_INT64(0), PG_GETARG_FLOAT8(1)));
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_glicko2_accumulate_games);

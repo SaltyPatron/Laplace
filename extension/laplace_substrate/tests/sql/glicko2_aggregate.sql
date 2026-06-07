@@ -169,3 +169,11 @@ FROM replay, batch;
 SELECT laplace_glicko2_accumulate_games(
     1500000000000, 350000000000, 60000000,
     1500000000000,  80000000000, 0, 0, 500000000);
+
+SELECT laplace.laplace_score(0.0, 1.0)   = 500000000 AS zero_is_midpoint,
+       laplace.laplace_score(15.0, 1.0)  = 968750000 AS fifteen_pinned,
+       laplace.laplace_score(100.0, 1.0) = 995049505 AS hundred_pinned,
+       laplace.laplace_score(15.0, 1.0) <> laplace.laplace_score(100.0, 1.0) AS tail_distinguished;
+
+SELECT laplace.laplace_score(laplace.laplace_score_inverse(968750000, 1.0), 1.0) = 968750000 AS rescore_identity_15,
+       laplace.laplace_score(laplace.laplace_score_inverse(995049505, 1.0), 1.0) = 995049505 AS rescore_identity_100;
