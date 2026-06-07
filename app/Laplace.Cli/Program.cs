@@ -1202,8 +1202,9 @@ internal static class Program
             Console.Error.WriteLine(
                 $"[{sourceName}] recorded {rows:N0} rows = {p.EntitiesInserted:N0} ent + "
                 + $"{p.PhysicalitiesInserted:N0} phys + {p.AttestationsInserted:N0} att "
-                + $"@ {rows / secs:N0} rows/s; {p.UnitsApplied:N0} intents"
-                + (p.EstimatedTotal is { } t && t > 0 ? $" (~{100.0 * rows / t:F0}% of {t:N0} rows)" : "")
+                + $"@ {rows / secs:N0} rows/s; {p.UnitsApplied:N0}/{p.UnitsProduced:N0} intents applied/decomposed "
+                + $"({p.UnitsProduced / secs:N1} dec/s); {p.RoundTrips:N0} RT"
+                + (p.EstimatedTotal is { } t && t > 0 ? $"; ~{100.0 * p.UnitsProduced / t:F0}% of {t:N0} units" : "")
                 + $"; {p.Elapsed.TotalSeconds:F0}s"
                 + (p.UnitsFailed > 0 ? $"; {p.UnitsFailed:N0} FAILED" : ""));
         });

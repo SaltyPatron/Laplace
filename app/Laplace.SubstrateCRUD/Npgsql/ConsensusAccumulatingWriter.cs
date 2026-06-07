@@ -142,6 +142,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             }
             if (snapshot.IsEmpty) return;
 
+            var stageSw = System.Diagnostics.Stopwatch.StartNew();
             await EnsureStagingAsync(ct);
 
             var buckets = new List<Acc>[_partitions];
@@ -155,6 +156,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 copies[k] = Task.Run(() => CopyPartitionAsync(part, buckets[part], ct), ct);
             }
             await Task.WhenAll(copies);
+            stageSw.Stop();
+            _log.LogInformation(
+                "consensus stage: {Relations:N0} partial relations → {Partitions} partition(s) in {Ms:N0}ms ({Rps:N0} rel/s)",
+                snapshot.Count, _partitions, stageSw.ElapsedMilliseconds,
+                snapshot.Count / Math.Max(1e-3, stageSw.Elapsed.TotalSeconds));
         }
         finally
         {
@@ -235,6 +241,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         await StagePartialsAsync(ct);
         if (!_stagingCreated) return 0;
 
+        var foldSw = System.Diagnostics.Stopwatch.StartNew();
         var folds = new Task<long>[_partitions];
         for (int k = 0; k < _partitions; k++)
         {
@@ -257,9 +264,15 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             }, ct);
         }
         var counts = await Task.WhenAll(folds);
+        foldSw.Stop();
+        long total = counts.Sum();
+        _log.LogInformation(
+            "consensus fold: {Relations:N0} relations materialized across {Partitions} partition(s) in {Ms:N0}ms ({Rps:N0} rel/s)",
+            total, _partitions, foldSw.ElapsedMilliseconds,
+            total / Math.Max(1e-3, foldSw.Elapsed.TotalSeconds));
 
         _stagingCreated = false;
-        return counts.Sum();
+        return total;
     }
 
     public async ValueTask DisposeAsync()

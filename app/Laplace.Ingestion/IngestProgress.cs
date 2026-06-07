@@ -8,4 +8,6 @@ public sealed record IngestProgress(
     TimeSpan Elapsed,
     long  EntitiesInserted = 0,
     long  PhysicalitiesInserted = 0,
-    long  AttestationsInserted = 0);
+    long  AttestationsInserted = 0,
+    long  RoundTrips = 0,
+    long  UnitsProduced = 0);

@@ -101,6 +101,7 @@ public sealed class IngestRunner
             await foreach (var intent in decomposer.DecomposeAsync(ctx, options.DecomposerOptions, ct).WithCancellation(ct))
             {
                 ct.ThrowIfCancellationRequested();
+                Interlocked.Increment(ref counters._unitsProduced);
                 if (batchSize == 1 && commitRows == 0)
                 {
                     await ProcessOneIntentAsync(intent, decomposer, options, rng,
@@ -138,6 +139,7 @@ public sealed class IngestRunner
                     await foreach (var intent in decomposer.DecomposeAsync(ctx, options.DecomposerOptions, ct)
                                                             .WithCancellation(ct))
                     {
+                        Interlocked.Increment(ref counters._unitsProduced);
                         await channel.Writer.WriteAsync(intent, ct);
                     }
                 }
@@ -395,7 +397,8 @@ public sealed class IngestRunner
     private static IngestProgress MakeProgress(RunCounters c) =>
         new(c.UnitsAttempted, c.UnitsApplied, c.UnitsFailed,
             c.EstimatedTotal, c.Sw?.Elapsed ?? TimeSpan.Zero,
-            c.EntitiesInserted, c.PhysicalitiesInserted, c.AttestationsInserted);
+            c.EntitiesInserted, c.PhysicalitiesInserted, c.AttestationsInserted,
+            c.RoundTrips, c.UnitsProduced);
 
     private sealed class RunCounters
     {
@@ -406,9 +409,11 @@ public sealed class IngestRunner
         internal long _physicalitiesInserted;
         internal long _attestationsInserted;
         internal long _roundTrips;
+        internal long _unitsProduced;
         internal Stopwatch? Sw;
         internal long? EstimatedTotal;
         public long UnitsAttempted        => Interlocked.Read(ref _unitsAttempted);
+        public long UnitsProduced         => Interlocked.Read(ref _unitsProduced);
         public long UnitsApplied          => Interlocked.Read(ref _unitsApplied);
         public long UnitsFailed           => Interlocked.Read(ref _unitsFailed);
         public long EntitiesInserted      => Interlocked.Read(ref _entitiesInserted);
