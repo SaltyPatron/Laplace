@@ -17,8 +17,8 @@ internal static class ConsensusReExport
     internal sealed class CalibratedInverse
     {
         private readonly Dictionary<long, (double[] Mu, double[] Wom)> _byN = new();
-        private readonly NpgsqlConnection _conn;
-        public CalibratedInverse(NpgsqlConnection conn) => _conn = conn;
+        private readonly NpgsqlDataSource _ds;
+        public CalibratedInverse(NpgsqlDataSource ds) => _ds = ds;
 
         private (double[] Mu, double[] Wom) Map(long n)
         {
@@ -33,7 +33,8 @@ internal static class ConsensusReExport
                 sumFp[i] = (long)Math.Round(score * 1e9) * n;
             }
             var mu = new double[G];
-            using (var cmd = _conn.CreateCommand())
+            using (var conn = _ds.OpenConnection())
+            using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText =
                     "SELECT g.i, (laplace.laplace_glicko2_accumulate_games("
@@ -77,7 +78,7 @@ internal static class ConsensusReExport
         var cells = new float[(long)rows * cols];
         long relations = 0;
         await using var conn = await ds.OpenConnectionAsync();
-        var inverse = new CalibratedInverse(conn);
+        var inverse = new CalibratedInverse(ds);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
             """
@@ -113,7 +114,7 @@ internal static class ConsensusReExport
         var vec = new float[dModel];
         Array.Fill(vec, 1.0f);
         await using var conn = await ds.OpenConnectionAsync();
-        var inverse = new CalibratedInverse(conn);
+        var inverse = new CalibratedInverse(ds);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
             """
