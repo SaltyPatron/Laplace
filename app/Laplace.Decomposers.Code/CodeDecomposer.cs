@@ -42,9 +42,11 @@ public sealed class CodeDecomposer : IDecomposer
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        // Structure rides on PRECEDES (canonical); typed CALLS/DEFINES/REFERENCES arrive with
-        // tags.scm semantic arcs (a later phase). Bootstrap registers the source + trust class.
+        // Structure rides on PRECEDES (canonical); typed semantic arcs come from tags.scm.
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
+        boot.AddRelationType("CALLS");
+        boot.AddRelationType("DEFINES");
+        boot.AddRelationType("REFERENCES");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -78,7 +80,8 @@ public sealed class CodeDecomposer : IDecomposer
             try
             {
                 using var ast = GrammarDecomposer.Parse(bytes, recipe);
-                var geb = new GrammarEntityBuilder(bytes, ast, Source, modality);
+                var geb = new GrammarEntityBuilder(
+                    bytes, ast, Source, modality, recipe, GrammarTags.TagsSource(modality));
                 (ents, phys, atts, _) = geb.Build(SourceTrust.StructuredCorpus);
             }
             catch

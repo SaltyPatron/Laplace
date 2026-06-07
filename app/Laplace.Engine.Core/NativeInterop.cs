@@ -255,4 +255,14 @@ public static unsafe partial class NativeInterop
 
     [LibraryImport(Library, EntryPoint = "laplace_grapheme_floor_free_owned")]
     internal static partial void GraphemeFloorFreeOwned(IntPtr floor);
+
+    // --- semantic arcs: tags.scm def/ref extraction (sealed; returns Laplace captures) ---
+
+    [LibraryImport(Library, EntryPoint = "laplace_grammar_tags_run")]
+    internal static partial int GrammarTagsRun(
+        IntPtr lang, byte* tagsScm, nuint tagsLen, byte* utf8, nuint len,
+        LaplaceTag** outTags, nuint* outN);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grammar_tags_free")]
+    internal static partial void GrammarTagsFree(LaplaceTag* tags);
 }

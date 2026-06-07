@@ -1,0 +1,68 @@
+namespace Laplace.Engine.Core;
+
+/// <summary>
+/// Runs a grammar's tags.scm def/ref query over source (the sealed engine mechanism) and resolves
+/// the .scm source from the vendored grammar. Used to turn code into typed CALLS/DEFINES/REFERENCES
+/// arcs (richer than positional PRECEDES). No tree-sitter type crosses this surface.
+/// </summary>
+public static unsafe class GrammarTags
+{
+    public static IReadOnlyList<TagCapture> Run(IntPtr recipe, ReadOnlySpan<byte> tagsScm, ReadOnlySpan<byte> utf8)
+    {
+        if (recipe == IntPtr.Zero || tagsScm.IsEmpty || utf8.IsEmpty)
+            return Array.Empty<TagCapture>();
+
+        LaplaceTag* outTags = null;
+        nuint n = 0;
+        int rc;
+        fixed (byte* t = tagsScm)
+        fixed (byte* u = utf8)
+        {
+            rc = NativeInterop.GrammarTagsRun(recipe, t, (nuint)tagsScm.Length, u, (nuint)utf8.Length, &outTags, &n);
+        }
+        if (rc != 0 || outTags == null) return Array.Empty<TagCapture>();
+
+        try
+        {
+            var list = new List<TagCapture>((int)n);
+            for (nuint i = 0; i < n; i++)
+            {
+                LaplaceTag g = outTags[i];
+                list.Add(new TagCapture(g.MatchId, (TagKind)g.CaptureKind, g.StartByte, g.EndByte));
+            }
+            return list;
+        }
+        finally
+        {
+            NativeInterop.GrammarTagsFree(outTags);
+        }
+    }
+
+    // --- tags.scm source resolution (from the vendored grammars; cached) ---
+
+    private static readonly Dictionary<string, byte[]?> _cache = new();
+
+    /// <summary>The grammar's tags.scm bytes for a modality, or null if it ships none.</summary>
+    public static byte[]? TagsSource(string modality)
+    {
+        lock (_cache)
+        {
+            if (_cache.TryGetValue(modality, out var cached)) return cached;
+            var path = LocateTagsScm(modality);
+            byte[]? bytes = path is not null && File.Exists(path) ? File.ReadAllBytes(path) : null;
+            _cache[modality] = bytes;
+            return bytes;
+        }
+    }
+
+    private static string? LocateTagsScm(string modality)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var p = Path.Combine(dir.FullName, "external", "tree-sitter-grammars",
+                                 $"tree-sitter-{modality}", "queries", "tags.scm");
+            if (File.Exists(p)) return p;
+        }
+        return null;
+    }
+}

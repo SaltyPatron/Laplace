@@ -19,13 +19,18 @@ public sealed class GrammarEntityBuilder
     private readonly GrammarAst _ast;
     private readonly Hash128    _sourceId;
     private readonly string     _modalityId;
+    private readonly IntPtr     _recipe;    // for tags.scm semantic arcs (optional)
+    private readonly byte[]?    _tagsScm;
 
-    public GrammarEntityBuilder(byte[] utf8, GrammarAst ast, Hash128 sourceId, string modalityId)
+    public GrammarEntityBuilder(byte[] utf8, GrammarAst ast, Hash128 sourceId, string modalityId,
+                                IntPtr recipe = default, byte[]? tagsScm = null)
     {
         _utf8       = utf8 ?? throw new ArgumentNullException(nameof(utf8));
         _ast        = ast ?? throw new ArgumentNullException(nameof(ast));
         _sourceId   = sourceId;
         _modalityId = modalityId ?? throw new ArgumentNullException(nameof(modalityId));
+        _recipe     = recipe;
+        _tagsScm    = tagsScm;
     }
 
     public static Hash128 KindTypeId(string modalityId, string kindName) =>
@@ -178,7 +183,8 @@ public sealed class GrammarEntityBuilder
         }
 
         var rootId = compValid[0] ? compId[0] : default;
-        var attestations = BuildSequenceAttestations(childrenOf, compId, compValid, witnessWeight);
+        var attestations = BuildSequenceAttestations(childrenOf, compId, compValid, witnessWeight)
+            .AddRange(BuildTagAttestations(nodes, compId, compValid, witnessWeight));
         return (entities.ToImmutable(), physicalities.ToImmutable(), attestations, rootId);
     }
 
@@ -213,6 +219,49 @@ public sealed class GrammarEntityBuilder
             rows.Add(AttestationFactory.CreateAggregated(
                 pair.A, PrecedesTypeId, pair.B, _sourceId, contextId: null,
                 games: count, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
+        }
+        return rows.ToImmutable();
+    }
+
+    /// <summary>
+    /// Typed semantic arcs from the grammar's tags.scm: one DEFINES / CALLS / REFERENCES edge per
+    /// matched definition/reference. A capture's byte span correlates to the AST node (hence entity
+    /// id) at that span, so a def or call resolves to real substrate entities. No-op when no recipe
+    /// or tags.scm was supplied (structure then rides on PRECEDES alone).
+    /// </summary>
+    private ImmutableArray<AttestationRow> BuildTagAttestations(
+        LaplaceAstNode[] nodes, Hash128[] compId, bool[] compValid, double witnessWeight)
+    {
+        if (_recipe == IntPtr.Zero || _tagsScm is null) return ImmutableArray<AttestationRow>.Empty;
+
+        var caps = GrammarTags.Run(_recipe, _tagsScm, _utf8);
+        if (caps.Count == 0) return ImmutableArray<AttestationRow>.Empty;
+
+        var spanId = new Dictionary<(uint, uint), Hash128>();
+        for (int i = 0; i < nodes.Length; i++)
+            if (compValid[i]) spanId.TryAdd((nodes[i].StartByte, nodes[i].EndByte), compId[i]);
+
+        var rows = ImmutableArray.CreateBuilder<AttestationRow>();
+        foreach (var grp in caps.GroupBy(c => c.MatchId))
+        {
+            Hash128? name = null, def = null, refCall = null, refType = null;
+            foreach (var c in grp)
+            {
+                if (!spanId.TryGetValue((c.StartByte, c.EndByte), out var id)) continue;
+                switch (c.Kind)
+                {
+                    case TagKind.Name:        name    = id; break;
+                    case TagKind.DefFunction:
+                    case TagKind.DefType:
+                    case TagKind.DefVar:      def     = id; break;
+                    case TagKind.RefCall:     refCall = id; break;
+                    case TagKind.RefType:     refType = id; break;
+                }
+            }
+            if (name is not { } nm) continue;
+            if (def     is { } d)  rows.Add(RelationTypeRegistry.Attest(d,  "DEFINES",    nm, _sourceId, witnessWeight));
+            if (refCall is { } rc) rows.Add(RelationTypeRegistry.Attest(rc, "CALLS",      nm, _sourceId, witnessWeight));
+            if (refType is { } rt) rows.Add(RelationTypeRegistry.Attest(rt, "REFERENCES", nm, _sourceId, witnessWeight));
         }
         return rows.ToImmutable();
     }
