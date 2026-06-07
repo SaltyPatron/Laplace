@@ -866,30 +866,45 @@ internal static class Program
         double MOf(params IEnumerable<string>[] groups) =>
             ConsensusReExport.MoldArenaScale(refMap, groups.SelectMany(g => g));
 
+        string arenaSelRaw = (Environment.GetEnvironmentVariable("LAPLACE_SYNTH_ARENAS") ?? "ALL").Trim();
+        HashSet<string>? arenaSel = arenaSelRaw.Equals("ALL", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : new HashSet<string>(arenaSelRaw.ToUpperInvariant()
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        bool Pour(string key) => arenaSel is null || arenaSel.Contains(key);
+        if (arenaSel is not null)
+        {
+            if (refMap is null)
+                return Fail("LAPLACE_SYNTH_ARENAS ablation needs the mold's original tensors alongside the recipe");
+            Console.WriteLine($"  ablation: pour {{{string.Join(",", arenaSel)}}} from substrate; all other arenas copied from the mold");
+        }
+        static ConsensusReExport.TableArena Zero(int rows, int cols) =>
+            new(new float[(long)rows * cols], rows, cols, 0);
+
         Console.WriteLine("  pouring consensus arenas into the mold's tensor layouts...");
         var swArena = Stopwatch.StartNew();
         var chan = Of(chanMap); var attn = Of(attnMap); var kv = Of(kvMap); var neuron = Of(neuronMap);
-        var embedA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.EmbedsTypeId,
-            vocab, dModel, rowsAreOut: false, Tok, chan, MOf([prof.EmbedTokens]));
-        var lmHeadA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.OutputProjectsTypeId,
-            vocab, dModel, rowsAreOut: true, chan, Tok, MOf([prof.LmHead ?? prof.EmbedTokens]));
-        var qA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.QProjectsTypeId,
-            attnOutR, dModel, rowsAreOut: true, chan, attn, MOf(Layers(prof.QProj)));
-        var kA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.KProjectsTypeId,
-            kvDimR, dModel, rowsAreOut: true, chan, kv, MOf(Layers(prof.KProj)));
-        var vA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.VProjectsTypeId,
-            kvDimR, dModel, rowsAreOut: true, chan, kv, MOf(Layers(prof.VProj)));
-        var oA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.OProjectsTypeId,
-            dModel, attnOutR, rowsAreOut: true, attn, chan, MOf(Layers(prof.OProj)));
+        var embedA = Pour("EMBEDS") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.EmbedsTypeId,
+            vocab, dModel, rowsAreOut: false, Tok, chan, MOf([prof.EmbedTokens])) : Zero(vocab, dModel);
+        var lmHeadA = Pour("OUTPUT") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.OutputProjectsTypeId,
+            vocab, dModel, rowsAreOut: true, chan, Tok, MOf([prof.LmHead ?? prof.EmbedTokens])) : Zero(vocab, dModel);
+        var qA = Pour("Q") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.QProjectsTypeId,
+            attnOutR, dModel, rowsAreOut: true, chan, attn, MOf(Layers(prof.QProj))) : Zero(attnOutR, dModel);
+        var kA = Pour("K") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.KProjectsTypeId,
+            kvDimR, dModel, rowsAreOut: true, chan, kv, MOf(Layers(prof.KProj))) : Zero(kvDimR, dModel);
+        var vA = Pour("V") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.VProjectsTypeId,
+            kvDimR, dModel, rowsAreOut: true, chan, kv, MOf(Layers(prof.VProj))) : Zero(kvDimR, dModel);
+        var oA = Pour("O") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.OProjectsTypeId,
+            dModel, attnOutR, rowsAreOut: true, attn, chan, MOf(Layers(prof.OProj))) : Zero(dModel, attnOutR);
         var gateA = prof.GateProj is null ? null
-            : await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.GatesTypeId,
-                intermR, dModel, rowsAreOut: true, chan, neuron, MOf(Layers(prof.GateProj)));
-        var upA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.UpProjectsTypeId,
-            intermR, dModel, rowsAreOut: true, chan, neuron, MOf(Layers(prof.UpProj)));
-        var downA = await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.DownProjectsTypeId,
-            dModel, intermR, rowsAreOut: true, neuron, chan, MOf(Layers(prof.DownProj)));
-        var normV = await ConsensusReExport.ReadNormVectorAsync(ds, ModelDecomposer.NormScalesTypeId,
-            dModel, chan, MOf(Layers(prof.PerLayerNorms[0]), [prof.FinalNorm]));
+            : Pour("GATES") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.GatesTypeId,
+                intermR, dModel, rowsAreOut: true, chan, neuron, MOf(Layers(prof.GateProj))) : Zero(intermR, dModel);
+        var upA = Pour("UP") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.UpProjectsTypeId,
+            intermR, dModel, rowsAreOut: true, chan, neuron, MOf(Layers(prof.UpProj))) : Zero(intermR, dModel);
+        var downA = Pour("DOWN") ? await ConsensusReExport.ReadTableArenaAsync(ds, ModelDecomposer.DownProjectsTypeId,
+            dModel, intermR, rowsAreOut: true, neuron, chan, MOf(Layers(prof.DownProj))) : Zero(dModel, intermR);
+        var normV = Pour("NORMS") ? await ConsensusReExport.ReadNormVectorAsync(ds, ModelDecomposer.NormScalesTypeId,
+            dModel, chan, MOf(Layers(prof.PerLayerNorms[0]), [prof.FinalNorm])) : new float[dModel];
 
         long totalRelations = embedA.Relations + lmHeadA.Relations + qA.Relations + kA.Relations
             + vA.Relations + oA.Relations + (gateA?.Relations ?? 0) + upA.Relations + downA.Relations;
