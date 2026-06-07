@@ -4,11 +4,6 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Engine.Core.Tests;
 
-/// <summary>
-/// P/Invoke round-trip tests for the Hash128 BLAKE3 wrapper. Each test
-/// proves the C# wrapper calls the engine ABI correctly + the byte layout
-/// matches between managed and native.
-/// </summary>
 public class Hash128Tests
 {
     [Fact]
@@ -24,8 +19,6 @@ public class Hash128Tests
     [Fact]
     public void Blake3_OfEmptyMatchesKnownVector()
     {
-        // BLAKE3 of empty input (first 16 bytes):
-        //   af1349b9 f5f9a1a6 a0404dea 36dcc949
         var h = Hash128.Blake3(ReadOnlySpan<byte>.Empty);
         byte[] expected =
         {
@@ -78,7 +71,6 @@ public class Hash128Tests
     [Fact]
     public void Merkle_TierIsNotIdentity()
     {
-        // Same content = same hash; tier is metadata, never identity.
         var a = Hash128.Blake3("x"u8);
         var t1 = Hash128.Merkle(1, new[] { a });
         var t2 = Hash128.Merkle(2, new[] { a });

@@ -6,13 +6,6 @@ using Xunit;
 
 namespace Laplace.Decomposers.SemLink.Tests;
 
-/// <summary>
-/// Verifies SemLinkDecomposer against tiny inline instance JSON fixtures (pb-vn2 + vn-fn2):
-/// pure registry-routed CORRESPONDS_TO between meta entities whose ids EXACTLY match the
-/// VerbNet / PropBank / FrameNet conventions (so they co-assert onto the owners' entities),
-/// role-level content alignments with class context, the referenced meta entities emitted
-/// idempotently (standalone ingest), and no raw rows.
-/// </summary>
 public sealed class SemLinkDecomposerTests
 {
     static SemLinkDecomposerTests() => CodepointPerfcache.Load(ResolvePerfcacheBlob());
@@ -43,7 +36,6 @@ public sealed class SemLinkDecomposerTests
         var atts = await CollectAttestationsAsync();
         var canonical = new HashSet<Hash128>(RelationTypeRegistry.AllCanonical().Select(k => k.Id));
         Assert.All(atts, a => Assert.Contains(a.TypeId, canonical));
-        // SemLink is pure alignment — every emitted attestation is CORRESPONDS_TO.
         Assert.All(atts, a => Assert.Equal(RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO"), a.TypeId));
         Assert.NotEmpty(atts);
     }
@@ -52,7 +44,6 @@ public sealed class SemLinkDecomposerTests
     public async Task PbVn_Maps_Roleset_To_VerbNet_Class_With_Shared_Ids()
     {
         var atts = await CollectAttestationsAsync();
-        // roleset give.01 ↔ VN class 13.1-1 — ids match PropBank / VerbNet conventions exactly.
         var rsId = Hash128.OfCanonical("propbank/roleset/give.01");
         var vnId = Hash128.OfCanonical("verbnet/class/13.1-1");
         Assert.Equal(rsId, SemLinkDecomposer.RolesetId("give.01"));
@@ -82,7 +73,6 @@ public sealed class SemLinkDecomposerTests
     public async Task VnFn_Maps_Class_To_FrameNet_Frame_With_Shared_Ids()
     {
         var atts = await CollectAttestationsAsync();
-        // vn-fn2 key "13.1-1-give" → VN class 13.1-1 ↔ FN frame "Giving" (framenet/frame/<name>).
         var vnId = Hash128.OfCanonical("verbnet/class/13.1-1");
         var fnId = Hash128.OfCanonical("framenet/frame/Giving");
         Assert.Equal(fnId, SemLinkDecomposer.FrameId("Giving"));
@@ -103,8 +93,6 @@ public sealed class SemLinkDecomposerTests
     [Fact]
     public async Task Referenced_Meta_Entities_Emitted_For_Standalone_Ingest()
     {
-        // Drain the WHOLE stream (entities too) and confirm the referenced meta entities
-        // ride the batches — so SemLink ingests even if VerbNet/PropBank have not run.
         var (ents, _) = await CollectAllAsync();
         Assert.Contains(ents, e => e.Id == Hash128.OfCanonical("propbank/roleset/give.01"));
         Assert.Contains(ents, e => e.Id == Hash128.OfCanonical("verbnet/class/13.1-1"));
@@ -154,10 +142,8 @@ public sealed class SemLinkDecomposerTests
             }
             return (ents, atts);
         }
-        finally { try { Directory.Delete(dir, recursive: true); } catch { /* best effort */ } }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { } }
     }
-
-    // === fakes ===
 
     private sealed class FakeContext(ISubstrateWriter writer) : IDecomposerContext
     {

@@ -6,9 +6,9 @@
 #include <random>
 #include <vector>
 
-#include "laplace/synthesis/qk_pairs_threshold.h"          /* all-pairs kernel */
-#include "laplace/synthesis/qk_pairs_threshold_pruned.h"    /* pruned kernel    */
-#include "laplace/synthesis/qk_project_cached.h"            /* project + score  */
+#include "laplace/synthesis/qk_pairs_threshold.h"
+#include "laplace/synthesis/qk_pairs_threshold_pruned.h"
+#include "laplace/synthesis/qk_project_cached.h"
 
 #ifdef LAPLACE_HAS_MKL
 #  include <oneapi/tbb/global_control.h>
@@ -40,7 +40,6 @@ void expect_pairs_eq(const std::vector<qk_pair_f64_t>& a,
     }
 }
 
-/* All-pairs reference for ONE head slice (Wq + head, Wk + kv_head). */
 std::vector<qk_pair_f64_t> all_pairs_head(
     const std::vector<float>& E, size_t vocab, size_t d_model,
     const float* Wq_head, const float* Wk_head, size_t head_dim,
@@ -67,14 +66,11 @@ std::vector<qk_pair_f64_t> pruned_head(
     return std::vector<qk_pair_f64_t>(out.begin(), out.begin() + (n < 0 ? 0 : n));
 }
 
-} /* namespace */
+}
 
-/* ── 1. Project-once + score-from-cache is BIT-IDENTICAL to BOTH the all-pairs
- * kernel AND the pruned kernel, across multiple GQA heads and several floors
- * (including floor == 0). This is the correctness gate. ───────────────────── */
 TEST(QkProjectCached, ParityWithAllPairsAndPrunedAcrossHeads) {
     const size_t vocab = 300, d_model = 32, head_dim = 16;
-    const size_t n_heads = 8, n_kv = 2;          /* GQA: queriesPerKv = 4 */
+    const size_t n_heads = 8, n_kv = 2;
     const size_t queries_per_kv = n_heads / n_kv;
 
     auto E  = rand_f32(vocab * d_model, 0xC0FFEEu);
@@ -97,7 +93,7 @@ TEST(QkProjectCached, ParityWithAllPairsAndPrunedAcrossHeads) {
 
             auto ref    = all_pairs_head(E, vocab, d_model, Wq_head, Wk_head, head_dim, floor, 0, vocab);
             auto pruned = pruned_head  (E, vocab, d_model, Wq_head, Wk_head, head_dim, floor, 0, vocab);
-            expect_pairs_eq(pruned, ref);  /* sanity: pruned == all-pairs */
+            expect_pairs_eq(pruned, ref);
 
             std::vector<qk_pair_f64_t> out(vocab * vocab);
             int ov = -1;
@@ -117,13 +113,11 @@ TEST(QkProjectCached, ParityWithAllPairsAndPrunedAcrossHeads) {
     EXPECT_TRUE(saw_nonfull);
 }
 
-/* ── 2. Cache path matches across thread counts and across window splits, and the
- * concatenated windows equal the pruned single-call run. ──────────────────── */
 TEST(QkProjectCached, DeterministicAcrossThreadsAndWindows) {
     const size_t vocab = 200, d_model = 41, head_dim = 13;
     const size_t n_heads = 4, n_kv = 2;
     const size_t queries_per_kv = n_heads / n_kv;
-    const size_t head = 3, kv_head = head / queries_per_kv;  /* kv_head = 1 */
+    const size_t head = 3, kv_head = head / queries_per_kv;
     const double floor = 0.9;
 
     auto E  = rand_f32(vocab * d_model, 0xBADC0DEu);
@@ -145,7 +139,6 @@ TEST(QkProjectCached, DeterministicAcrossThreadsAndWindows) {
     ASSERT_EQ(ov, 0);
     std::vector<qk_pair_f64_t> many(out_many.begin(), out_many.begin() + n_many);
 
-    /* Single-threaded run must match the multi-threaded run bit-for-bit. */
     std::vector<qk_pair_f64_t> out_one(vocab * vocab);
 #ifdef LAPLACE_HAS_MKL
     {
@@ -165,7 +158,6 @@ TEST(QkProjectCached, DeterministicAcrossThreadsAndWindows) {
     std::vector<qk_pair_f64_t> one(out_one.begin(), out_one.begin() + n_many);
     expect_pairs_eq(one, many);
 
-    /* Windowed: [0,57)+[57,131)+[131,200) concatenated must equal the full run. */
     std::vector<qk_pair_f64_t> windowed;
     const size_t bounds[] = {0, 57, 131, 200};
     for (int w = 0; w < 3; ++w) {
@@ -179,18 +171,15 @@ TEST(QkProjectCached, DeterministicAcrossThreadsAndWindows) {
     }
     expect_pairs_eq(windowed, many);
 
-    /* And the full cache run must equal the pruned single-head kernel. */
     const float* Wq_head = Wq.data() + head    * head_dim * d_model;
     const float* Wk_head = Wk.data() + kv_head * head_dim * d_model;
     auto pruned = pruned_head(E, vocab, d_model, Wq_head, Wk_head, head_dim, floor, 0, vocab);
     expect_pairs_eq(many, pruned);
 }
 
-/* ── 3. Overflow contract: tiny out_cap => overflow=1, whole-row deterministic
- * prefix matching the head of the pruned (== all-pairs) run. ──────────────── */
 TEST(QkProjectCached, OverflowWholeRowPrefix) {
     const size_t vocab = 120, d_model = 29, head_dim = 11;
-    const size_t n_heads = 4, n_kv = 4;          /* MHA */
+    const size_t n_heads = 4, n_kv = 4;
     const size_t head = 2, kv_head = 2;
     const double floor = 0.6;
 
@@ -235,7 +224,6 @@ TEST(QkProjectCached, OverflowWholeRowPrefix) {
     EXPECT_EQ(ov, 1);
 }
 
-/* ── 4. Bad-args contract for both entry points. ──────────────────────────── */
 TEST(QkProjectCached, BadArgsRejected) {
     const size_t vocab = 4, d_model = 3, head_dim = 2, n_heads = 2, n_kv = 1;
     auto E  = rand_f32(vocab * d_model, 1);
@@ -261,10 +249,10 @@ TEST(QkProjectCached, BadArgsRejected) {
     EXPECT_EQ(score_qk_head_cached(q_cache.data(), n_heads, k_cache.data(), n_kv, vocab, head_dim, 0, 0, 0.0, 0, vocab, out.data(), out.size(), nullptr), -1);
     EXPECT_EQ(score_qk_head_cached(q_cache.data(), n_heads, k_cache.data(), n_kv, 0, head_dim, 0, 0, 0.0, 0, 0, out.data(), out.size(), &ov), -1);
     EXPECT_EQ(score_qk_head_cached(q_cache.data(), n_heads, k_cache.data(), n_kv, vocab, 0, 0, 0, 0.0, 0, vocab, out.data(), out.size(), &ov), -1);
-    EXPECT_EQ(score_qk_head_cached(q_cache.data(), n_heads, k_cache.data(), n_kv, vocab, head_dim, n_heads, 0, 0.0, 0, vocab, out.data(), out.size(), &ov), -1); /* head out of range */
-    EXPECT_EQ(score_qk_head_cached(q_cache.data(), n_heads, k_cache.data(), n_kv, vocab, head_dim, 0, n_kv, 0.0, 0, vocab, out.data(), out.size(), &ov), -1);   /* kv_head out of range */
-    EXPECT_EQ(score_qk_head_cached(q_cache.data(), n_heads, k_cache.data(), n_kv, vocab, head_dim, 0, 0, 0.0, 3, 2, out.data(), out.size(), &ov), -1);          /* q0 > q1 */
-    EXPECT_EQ(score_qk_head_cached(q_cache.data(), n_heads, k_cache.data(), n_kv, vocab, head_dim, 0, 0, 0.0, 0, vocab + 1, out.data(), out.size(), &ov), -1);  /* q1 > vocab */
-    EXPECT_EQ(score_qk_head_cached(q_cache.data(), n_heads, k_cache.data(), n_kv, vocab, head_dim, 0, 0, -1.0, 0, vocab, out.data(), out.size(), &ov), -1);     /* floor < 0 */
+    EXPECT_EQ(score_qk_head_cached(q_cache.data(), n_heads, k_cache.data(), n_kv, vocab, head_dim, n_heads, 0, 0.0, 0, vocab, out.data(), out.size(), &ov), -1);
+    EXPECT_EQ(score_qk_head_cached(q_cache.data(), n_heads, k_cache.data(), n_kv, vocab, head_dim, 0, n_kv, 0.0, 0, vocab, out.data(), out.size(), &ov), -1);
+    EXPECT_EQ(score_qk_head_cached(q_cache.data(), n_heads, k_cache.data(), n_kv, vocab, head_dim, 0, 0, 0.0, 3, 2, out.data(), out.size(), &ov), -1);
+    EXPECT_EQ(score_qk_head_cached(q_cache.data(), n_heads, k_cache.data(), n_kv, vocab, head_dim, 0, 0, 0.0, 0, vocab + 1, out.data(), out.size(), &ov), -1);
+    EXPECT_EQ(score_qk_head_cached(q_cache.data(), n_heads, k_cache.data(), n_kv, vocab, head_dim, 0, 0, -1.0, 0, vocab, out.data(), out.size(), &ov), -1);
     EXPECT_EQ(score_qk_head_cached(q_cache.data(), n_heads, k_cache.data(), n_kv, vocab, head_dim, 0, 0, std::nan(""), 0, vocab, out.data(), out.size(), &ov), -1);
 }

@@ -2,12 +2,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Laplace.Cli;
 
-/// <summary>
-/// Minimal timestamped stderr logger so ingestion emits real phase/progress lines
-/// ("what fired, what completed, how long") instead of forcing post-hoc top/ps/DB
-/// guessing. Format: <c>[HH:mm:ss.fff] LVL Category: message</c>. No external
-/// logging-provider package — built on Logging.Abstractions, already referenced.
-/// </summary>
 public sealed class ConsoleLoggerProvider : ILoggerProvider
 {
     private readonly LogLevel _min;
@@ -15,8 +9,6 @@ public sealed class ConsoleLoggerProvider : ILoggerProvider
     public ILogger CreateLogger(string categoryName) => new ConsoleLogger(categoryName, _min);
     public void Dispose() { }
 
-    /// <summary>Self-contained <see cref="ILoggerFactory"/> over this provider — avoids a
-    /// dependency on the Logging.Console / LoggerFactory.Create builder package.</summary>
     public static ILoggerFactory Factory(LogLevel min = LogLevel.Information) =>
         new SimpleFactory(min);
 
@@ -36,7 +28,6 @@ public sealed class ConsoleLoggerProvider : ILoggerProvider
         private readonly LogLevel _min;
         public ConsoleLogger(string category, LogLevel min)
         {
-            // Shorten "Decomposer:model/..." style categories to the trailing segment.
             int colon = category.IndexOf(':');
             _category = colon >= 0 ? category[(colon + 1)..] : category;
             _min = min;

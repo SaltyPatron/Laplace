@@ -6,14 +6,6 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.ISO;
 
-/// <summary>
-/// Emits ISO 639-3 language entities into the substrate from
-/// iso-639-3.tab. Each language becomes a T2 Language entity keyed
-/// by <see cref="LanguageEntityId.FromIso639_3"/>. Languages that carry
-/// an ISO 639-1 two-letter code get a HAS_ISO639_1_CODE attestation.
-/// LayerOrder = 1 so OMW / UD / Wiktionary / Tatoeba / ConceptNet
-/// (layers 3-8) can reference these language entities safely.
-/// </summary>
 public sealed class ISODecomposer : IDecomposer
 {
     public static readonly Hash128 Source =
@@ -29,13 +21,10 @@ public sealed class ISODecomposer : IDecomposer
         Hash128.OfCanonical("substrate/kind/IS_LANGUAGE_CODE/v1");
     private static readonly Hash128 KindHasIso6391Code =
         Hash128.OfCanonical("substrate/kind/HAS_ISO639_1_CODE/v1");
-    // Language reference GRAPH (see LanguageGraph): the hub that makes language
-    // filterable/focusable structurally instead of via a HAS_LANGUAGE join.
     private static readonly Hash128 KindUsesScript =
         Hash128.OfCanonical("substrate/kind/USES_SCRIPT/v1");
     private static readonly Hash128 KindMemberOfMacrolanguage =
         Hash128.OfCanonical("substrate/kind/MEMBER_OF_MACROLANGUAGE/v1");
-    // UnicodeDecomposer's classifier type — script entities the graph links to.
     private static readonly Hash128 UcdClassifierTypeId =
         Hash128.OfCanonical("substrate/type/UcdClassifier/v1");
 
@@ -44,15 +33,8 @@ public sealed class ISODecomposer : IDecomposer
     public int     LayerOrder  => 1;
     public Hash128 TrustClassId => TrustClass;
 
-    // Data-derived per-code entity canonical names minted during DecomposeAsync
-    // (iso639-1:xx / iso639-2:xxx). The scope/type/kind vocabulary is already in
-    // the extension seed; only these data-derived names need post-ingest
-    // registration so render() answers them in names. Collected as we emit.
     private readonly HashSet<string> _codeNames = new(StringComparer.Ordinal);
 
-    /// <summary>The data-derived ISO 639 code entity canonical names
-    /// (iso639-1:xx / iso639-2:xxx) collected during <see cref="DecomposeAsync"/>.
-    /// Empty before DecomposeAsync runs.</summary>
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _codeNames;
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -79,7 +61,6 @@ public sealed class ISODecomposer : IDecomposer
     {
         string dataPath = Path.Combine(context.EcosystemPath, "iso-639-3.tab");
 
-        // Language records + the reference graph fit comfortably in one change.
         var b = new SubstrateChangeBuilder(
             Source, "iso639-3/all", null,
             entityCapacity: 24_000, physicalityCapacity: 0, attestationCapacity: 48_000);
@@ -103,7 +84,6 @@ public sealed class ISODecomposer : IDecomposer
                     RelationTypeRank.Partitive, SourceTrust.StandardsDerived));
             }
 
-            // ── 2026-06-05 completeness: 639-2 codes, scope, vitality type ──
             foreach (var p2 in new[] { rec.Part2b, rec.Part2t }.Distinct())
             {
                 if (p2.Length == 0) continue;
@@ -114,14 +94,14 @@ public sealed class ISODecomposer : IDecomposer
                 b.AddAttestation(RelationTypeRegistry.Attest(
                     langId, "HAS_ISO639_2_CODE", iso2Id, Source, SourceTrust.StandardsDerived));
             }
-            if (rec.Scope.Length > 0)   // I=Individual, M=Macrolanguage, S=Special
+            if (rec.Scope.Length > 0)
             {
                 var scopeId = Hash128.OfCanonical($"substrate/iso639/scope/{rec.Scope}/v1");
                 b.AddEntity(scopeId, (byte)MetaTier.Meta, Iso639CodeTypeId, Source);
                 b.AddAttestation(RelationTypeRegistry.Attest(
                     langId, "HAS_LANGUAGE_SCOPE", scopeId, Source, SourceTrust.StandardsDerived));
             }
-            if (rec.Type.Length > 0)    // L=Living, E=Extinct, A=Ancient, H=Historical, C=Constructed, S=Special
+            if (rec.Type.Length > 0)
             {
                 var typeId = Hash128.OfCanonical($"substrate/iso639/type/{rec.Type}/v1");
                 b.AddEntity(typeId, (byte)MetaTier.Meta, Iso639CodeTypeId, Source);
@@ -130,13 +110,8 @@ public sealed class ISODecomposer : IDecomposer
             }
         }
 
-        // ── language reference GRAPH ── make each language a navigable hub so the
-        // substrate can FILTER/FOCUS by language/script/macrolanguage structurally
-        // (codepoint→script[Unicode]→language→macrolanguage) instead of a HAS_LANGUAGE
-        // join. Every edge converges on entities the Unicode layer / 639-3 pass created.
         var undId = LanguageEntityId.FromIso639_3("und");
 
-        // individual → macrolanguage (e.g. cmn/yue/… → zho): groups the 639-3 individuals.
         foreach (var (indiv, macro) in LanguageGraph.Macrolanguages(context.EcosystemPath))
         {
             var indivId = LanguageEntityId.FromIso639_3(indiv);
@@ -148,29 +123,25 @@ public sealed class ISODecomposer : IDecomposer
                 RelationTypeRank.Taxonomic, SourceTrust.StandardsDerived));
         }
 
-        // language → script, converging on the Unicode script entities via the ISO
-        // 15924 code→UCD-name alias. UCD lives beside ISO639 under /vault/Data.
         string unidata = Path.GetFullPath(
             Path.Combine(context.EcosystemPath, "..", "Unicode", "Public", "UNIDATA"));
         var scriptName = LanguageGraph.LoadScriptCodeToUcdName(unidata);
         foreach (var (subtag, scriptCodes) in LanguageGraph.LanguageScripts(context.EcosystemPath))
         {
             var langId = LanguageReference.Resolve(subtag);
-            if (langId.Equals(undId)) continue;       // unresolvable subtag → skip, don't pollute und
+            if (langId.Equals(undId)) continue;
             b.AddEntity(langId, (byte)MetaTier.Meta, LanguageTypeId, Source);
             foreach (var code in scriptCodes)
             {
-                if (!scriptName.TryGetValue(code, out var name)) continue;  // unknown 15924 code
+                if (!scriptName.TryGetValue(code, out var name)) continue;
                 var scriptId = LanguageGraph.ScriptEntityId(name);
-                b.AddEntity(scriptId, (byte)MetaTier.Meta, UcdClassifierTypeId, Source);  // idempotent w/ Unicode
+                b.AddEntity(scriptId, (byte)MetaTier.Meta, UcdClassifierTypeId, Source);
                 b.AddAttestation(AttestationFactory.Create(
                     langId, KindUsesScript, scriptId, Source, null,
                     RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
             }
         }
 
-        // ── Retirements: retired code → successor (the SAME variant arena
-        // other sources use, so retired-code references converge). ──
         string retPath = Path.Combine(context.EcosystemPath, "iso-639-3_Retirements.tab");
         if (File.Exists(retPath))
         {
@@ -195,9 +166,6 @@ public sealed class ISODecomposer : IDecomposer
             yield return b.Build();
         await Task.Yield();
 
-        // ── Name_Index: language NAMES as content (HAS_DEFINITION — the
-        // name describes the language entity; converges with every source
-        // that mentions the wordform). Self-contained batches. ──
         string namePath = Path.Combine(context.EcosystemPath, "iso-639-3_Name_Index.tab");
         if (File.Exists(namePath))
         {

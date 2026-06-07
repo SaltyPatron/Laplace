@@ -8,62 +8,6 @@ using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
-/// <summary>
-/// THE write surface: consensus accumulates AT INGEST; evidence persists as
-/// PROVENANCE-ONLY rows.
-///
-/// Decorates the one substrate writer (not a second insert path: entities,
-/// physicalities and layer-completion markers still flow through it
-/// unchanged). Each attestation row carries the witness's TESTIMONY IN FLIGHT
-/// (score, trust→φ): the testimony is CONSUMED here — accumulated per RELATION
-/// IDENTITY (subject, kind, object) and materialized into <c>consensus</c>
-/// through the substrate's period fold when <see cref="MaterializeConsensusAsync"/>
-/// runs at the clean end of the ingest period, through the same C aggregate.
-/// The rows then flow to the inner writer WHOLE, whose COPY layout persists
-/// exactly the PROVENANCE columns (identity 5-tuple, outcome class, games,
-/// time) — the values never reach the wire. EVIDENCE IS PROVENANCE: a stored
-/// per-witness score is invertible to the weight — recording raw weights —
-/// and is banned.
-///
-/// <para><b>Exactness.</b> Within one ingest period a relation's opponent φ is
-/// CONSTANT (φ = kind_rank × source_trust × tenant_trust — one kind, one
-/// source, one tenant per run), and the Glicko-2 period update depends on the
-/// match multiset only through n (game count) and Σs (score sum): every game
-/// contributes the same g(φ)²E(1−E) to v, and Δ ∝ Σs − nE. So the accumulator
-/// keeps exactly (n, Σs) per relation; the fold replays n games whose scores
-/// sum EXACTLY to Σs (n−1 at ⌊Σs/n⌋ + one remainder game) through the SAME C
-/// aggregate (<c>laplace_glicko2_accumulate</c>) the per-period SQL path uses.
-/// Staged partials merge as Σ of Σ — still exact; φ-uniformity is verified in
-/// the fold's merge pass and fails loud, never averaged.</para>
-///
-/// <para><b>The machine, not one core.</b> Partials stage into K UNLOGGED
-/// partitions routed by relation identity (BLAKE3 low bits — all partials of
-/// one relation land in ONE partition), so staging COPYs run K-wide and the
-/// period fold runs as K concurrent <c>materialize_period_consensus(k)</c>
-/// sessions over DISJOINT consensus rows. K = <c>LAPLACE_FOLD_WORKERS</c>
-/// (default min(4, cores−2)). The single-session TEMP design folded a
-/// model-scale period on ONE backend — the 2026-06-05 CI autopsy: 153M staged
-/// relations, &gt;4h14m, killed by the job timeout with nothing materialized.
-/// Staging rows are framed as PG COPY BINARY in pooled buffers and streamed
-/// raw (same discipline as the substrate writer's IntentStage path) — never
-/// per-field awaited writes.</para>
-///
-/// <para><b>Bounded memory at ANY volume.</b> The in-memory map holds partial
-/// (n, Σs) aggregates; past the staging threshold (default 250M relations ≈
-/// 62 GB — sized to the host; env <c>LAPLACE_STAGING_THRESHOLD</c>) it STAGES
-/// to the partitions — append-only heaps, zero indexes — and keeps
-/// accumulating. A small model at a tight floor and a 400B MoE at a dense one
-/// differ only in how many stagings occur.</para>
-///
-/// <para><b>Idempotency / crash safety.</b> Consensus is untouched until the
-/// period completes: the fold is the ONLY path into consensus and the caller
-/// runs it ONLY after a clean period — a killed run materializes NOTHING. A
-/// PG crash truncates the UNLOGGED staging; a killed app leaves dead staging
-/// that <c>create_period_staging</c> sweeps before the next period (and
-/// <see cref="DisposeAsync"/> sweeps on clean abort). Layer-completion marker
-/// intents (unit name <c>layer-complete/N</c>) pass through whole — markers
-/// are substrate bookkeeping, not evidence.</para>
-/// </summary>
 public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDisposable
 {
     private readonly ISubstrateWriter _inner;
@@ -77,20 +21,16 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         public Hash128  Subject;
         public Hash128  Type;
         public Hash128? Object;
-        public long     PhiFp1e9;       // invariant: constant per relation per period
+        public long     PhiFp1e9;
         public long     Games;
-        public long     SumScoreFp1e9;  // Σ(score × occurrences); ≤ 9.2e18 ⇒ ~9e9 games headroom
+        public long     SumScoreFp1e9;
         public long     MaxTsUnixUs;
     }
 
     private ConcurrentDictionary<(Hash128 S, Hash128 K, Hash128? O), Acc> _accumulation = new();
     private long _observationsAccumulated;
-    private bool _stagingCreated;                       // period staging partitions exist in the DB
+    private bool _stagingCreated;
     private readonly SemaphoreSlim _stagingGate = new(1, 1);
-    // Accumulate (readers, concurrent) vs snapshot-exchange (writer): with
-    // ParallelWorkers > 1 the appliers call ApplyManyAsync concurrently, and an
-    // unguarded Interlocked.Exchange could lose partials written into the old
-    // map after the swap. Read lock per Accumulate, write lock around the swap.
     private readonly ReaderWriterLockSlim _swapLock = new();
 
     public ConsensusAccumulatingWriter(
@@ -101,17 +41,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         _log = logger ?? (ILogger)NullLogger<ConsensusAccumulatingWriter>.Instance;
-        // Default sized to the machine, not to timidity: measured ~250 B per
-        // in-memory relation entry ⇒ 250M ≈ 62 GB — right for a 128 GB box
-        // with PG capped at 32 GB. A bigger window = more in-memory
-        // pre-collapse and fewer staging pauses; RAM is the cheap resource.
-        // LAPLACE_STAGING_THRESHOLD tunes it without a rebuild.
         _stagingThreshold = stagingThresholdRelations
             ?? (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_STAGING_THRESHOLD"), out var t) && t > 0
                 ? t : 250_000_000);
-        // K staging partitions = K fold sessions = K cores on the fold. Sized
-        // to the machine (cores − 2 leaves room for the PG checkpointer + the
-        // app), capped at 4 by default; LAPLACE_FOLD_WORKERS overrides.
         _partitions = foldWorkers
             ?? (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_FOLD_WORKERS"), out var w) && w > 0
                 ? w : Math.Clamp(Environment.ProcessorCount - 2, 1, 4));
@@ -120,20 +52,15 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 "fold workers must be in 1..64 (create_period_staging's partition bound)");
     }
 
-    /// <summary>Distinct relation identities currently held IN MEMORY (resets at each staging).</summary>
     public int RelationCount => _accumulation.Count;
 
-    /// <summary>Total matches (games) accumulated so far this period.</summary>
     public long ObservationsAccumulated => Interlocked.Read(ref _observationsAccumulated);
 
-    /// <summary>Staging/fold partition count for this period (= fold parallelism).</summary>
     public int FoldWorkers => _partitions;
 
-    /// <inheritdoc/>
     public Task<ApplyResult> ApplyAsync(SubstrateChange change, CancellationToken ct = default)
         => ApplyManyAsync(new[] { change }, ct);
 
-    /// <inheritdoc/>
     public async Task<ApplyResult> ApplyManyAsync(
         IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
     {
@@ -141,20 +68,14 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
         foreach (var c in changes)
         {
-            // Layer-completion markers are bookkeeping rows the completion
-            // guard + layer gates read — no testimony to consume.
             if (c.Metadata.SourceContentUnitName.StartsWith("layer-complete/", StringComparison.Ordinal))
                 continue;
-            // CONSUME the testimony (score, φ) into the period accumulation.
             foreach (var a in c.Attestations) Accumulate(a);
         }
 
         if (_accumulation.Count >= _stagingThreshold)
             await StagePartialsAsync(ct);
 
-        // The rows flow to the inner writer WHOLE: its COPY layout persists
-        // only the PROVENANCE columns (identity, outcome class, games, time) —
-        // the consumed values never reach the wire.
         return await _inner.ApplyManyAsync(changes, ct);
     }
 
@@ -173,14 +94,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 }
                 else if (acc.PhiFp1e9 != a.OpponentRdFp1e9)
                 {
-                    // One kind × one source × one tenant per period ⇒ φ constant.
-                    // Mixed φ is a decomposer bug — fail loud, never average.
                     throw new InvalidOperationException(
                         $"accumulation invariant violated: relation observed with φ={a.OpponentRdFp1e9} after φ={acc.PhiFp1e9} in the same period");
                 }
                 acc.Games        += a.ObservationCount;
-                // Pre-aggregated rows carry their EXACT score sum (positions folded
-                // onto one row); uniform rows contribute score × occurrences.
                 acc.SumScoreFp1e9 = checked(acc.SumScoreFp1e9
                     + (a.SumScoreFp1e9 ?? checked(a.ScoreFp1e9 * a.ObservationCount)));
                 if (a.LastObservedAtUnixUs > acc.MaxTsUnixUs) acc.MaxTsUnixUs = a.LastObservedAtUnixUs;
@@ -193,13 +110,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         Interlocked.Add(ref _observationsAccumulated, a.ObservationCount);
     }
 
-    /// <summary>Relation identity → staging partition. BLAKE3 low bits are
-    /// uniform; identity-determined routing keeps every partial of a relation
-    /// in ONE partition (exact Σ of Σ, disjoint parallel folds).</summary>
     private int PartitionOf(Acc acc)
         => (int)((acc.Subject.Lo ^ acc.Type.Lo ^ (acc.Object?.Lo ?? 0UL)) % (ulong)_partitions);
 
-    /// <summary>Create the period's staging partitions once (substrate-owned DDL).</summary>
     private async Task EnsureStagingAsync(CancellationToken ct)
     {
         if (_stagingCreated) return;
@@ -211,9 +124,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         _stagingCreated = true;
     }
 
-    /// <summary>Stage the in-memory partial aggregates to the K staging
-    /// partitions (parallel raw-binary COPY) and reset the map. Partials for
-    /// the same relation across stagings merge exactly at the fold (Σ of Σ).</summary>
     private async Task StagePartialsAsync(CancellationToken ct)
     {
         await _stagingGate.WaitAsync(ct);
@@ -252,20 +162,15 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         }
     }
 
-    // ── PG COPY BINARY framing — buffer-materialized, streamed raw ─────────
-    // (Per-field awaited writes cost ~7 awaits × rows; a 153M-relation period
-    // is ~1.1e9 awaited calls. Frame rows into pooled chunks instead and hand
-    // the stream whole buffers — the IntentStage discipline.)
-
     private static readonly byte[] CopyBinaryHeader =
     {
-        0x50, 0x47, 0x43, 0x4F, 0x50, 0x59, 0x0A, 0xFF, 0x0D, 0x0A, 0x00, // "PGCOPY\n\xFF\r\n\0"
-        0x00, 0x00, 0x00, 0x00,                                           // flags
-        0x00, 0x00, 0x00, 0x00                                            // header extension length
+        0x50, 0x47, 0x43, 0x4F, 0x50, 0x59, 0x0A, 0xFF, 0x0D, 0x0A, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00
     };
 
-    private const long PgEpochDeltaUs = 946_684_800_000_000L;  // 2000-01-01 − 1970-01-01 in µs
-    private const int  MaxRowBytes    = 110;                   // 2 + 3×(4+16) + 3×(4+8) + (4+8); NULL object is smaller
+    private const long PgEpochDeltaUs = 946_684_800_000_000L;
+    private const int  MaxRowBytes    = 110;
 
     private static int WriteHash(Span<byte> dst, int o, in Hash128 h)
     {
@@ -291,7 +196,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         o = WriteInt64Field(dst, o, acc.PhiFp1e9);
         o = WriteInt64Field(dst, o, acc.Games);
         o = WriteInt64Field(dst, o, acc.SumScoreFp1e9);
-        o = WriteInt64Field(dst, o, acc.MaxTsUnixUs - PgEpochDeltaUs);   // timestamptz = µs since 2000-01-01
+        o = WriteInt64Field(dst, o, acc.MaxTsUnixUs - PgEpochDeltaUs);
         return o;
     }
 
@@ -316,7 +221,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             }
             filled = WriteRow(buffer, filled, acc);
         }
-        // trailer: int16 -1
         if (filled > buffer.Length - 2)
         {
             await stream.WriteAsync(buffer.AsMemory(0, filled), ct);
@@ -326,16 +230,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         await stream.WriteAsync(buffer.AsMemory(0, filled), ct);
     }
 
-    /// <summary>
-    /// Materialize the period's consensus: stage remaining partials, then fold
-    /// the K partitions CONCURRENTLY — one <c>materialize_period_consensus(k)</c>
-    /// session per partition (disjoint by relation identity; φ-uniformity
-    /// guarded inside the fold's merge pass, fail loud). prior = the
-    /// relation's CURRENT consensus row (neutral if absent); the period's
-    /// games replay through the SAME C aggregate the per-period SQL path uses.
-    /// Run ONLY after the ingest period completed cleanly (the caller owns the
-    /// completion-marker semantics). Returns the relation count materialized.
-    /// </summary>
     public async Task<long> MaterializeConsensusAsync(CancellationToken ct = default)
     {
         await StagePartialsAsync(ct);
@@ -350,8 +244,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 await using var conn = await _ds.OpenConnectionAsync(ct);
                 conn.Notice += (_, e) =>
                     _log.LogInformation("consensus fold: {Message}", e.Notice.MessageText);
-                // The fold reports per-partition progress at LOG severity
-                // (regress-deterministic); opt this session in to receive it.
                 await using (var sub = conn.CreateCommand())
                 {
                     sub.CommandText = "SET client_min_messages = 'log'";
@@ -370,14 +262,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         return counts.Sum();
     }
 
-    /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
         if (_stagingCreated)
         {
-            // Clean-abort sweep (best effort): the period did not complete, so
-            // nothing materialized; drop the staging now rather than leaving it
-            // for the next period's create-sweep.
             try
             {
                 await using var conn = await _ds.OpenConnectionAsync();

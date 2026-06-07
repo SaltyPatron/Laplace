@@ -7,53 +7,16 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// Converts a hash-composed <see cref="TierTree"/> (after
-/// <see cref="HashComposer.Run"/> has filled all node IDs) into
-/// <see cref="EntityRow"/> + <see cref="PhysicalityRow"/> collections.
-///
-/// <para>Deduplication layers applied:</para>
-/// <list type="number">
-///   <item>Level 1 — within-intent: <c>HashSet&lt;Hash128&gt;</c> prevents
-///     duplicate entity rows when two tree paths reference the same entity
-///     (e.g. a repeated word appearing as a child of two different sentence
-///     nodes in the same intent).</item>
-///   <item>Level 2 — cross-intent bitmap: if <paramref name="existingBitmap"/>
-///     is non-null, <see cref="MerkleDedup.TrunkShortcircuit"/> prunes
-///     subtrees already present in the substrate — relying on the
-///     SubstrateCRUD invariant that parent-presence implies
-///     descendant-presence. Pass <c>null</c> to skip; rely on DB-level
-///     <c>ON CONFLICT DO NOTHING</c> as the backstop.</item>
-/// </list>
-///
-/// <para>Trajectories are RLE-compressed via
-/// <see cref="Trajectory.BuildRle"/> — one vertex per run of consecutive
-/// identical child IDs. <c>NConstituents</c> in each physicality row
-/// records the original uncompressed child count.</para>
-///
-/// <para>Caller must have called <see cref="TierTree.FinalizeParents"/> and
-/// <see cref="HashComposer.Run"/> before constructing this builder.</para>
-/// </summary>
 public sealed class TextEntityBuilder
 {
-    // Canonical substrate type IDs for each text tier — same formulas used
-    // by UnicodeDecomposer (T0) and bootstrapped by SubstrateCanonical.
     public static readonly Hash128 CodepointTypeId = Hash128.OfCanonical("substrate/type/Codepoint/v1");
     public static readonly Hash128 GraphemeTypeId  = Hash128.OfCanonical("substrate/type/Grapheme/v1");
     public static readonly Hash128 WordTypeId      = Hash128.OfCanonical("substrate/type/Word/v1");
     public static readonly Hash128 SentenceTypeId  = Hash128.OfCanonical("substrate/type/Sentence/v1");
     public static readonly Hash128 DocumentTypeId  = Hash128.OfCanonical("substrate/type/Document/v1");
 
-    // The DISTRIBUTIONAL witness kinds (bootstrap-seeded). Adjacent within-sentence
-    // word order is the only thing prose can HONESTLY attest beyond its mechanical
-    // decomposition — usage, never meaning. a PRECEDES b ⇔ b FOLLOWS a.
-    /* ONE adjacency arena (registry rule 3): "A PRECEDES B"; the inverse
-     * ("B follows A") is the reverse query (consensus_in on this arena), never
-     * a second arena — the FOLLOWS twin doubled the testimony and was retired
-     * 2026-06-05 (FOLLOWS is now a flip-alias in the registry). */
     public static readonly Hash128 PrecedesTypeId = RelationTypeRegistry.RelationTypeId("PRECEDES");
 
-    // The text tiers (match TierTypeId / the histogram): 2=Word, 3=Sentence.
     private const byte WordTier     = 2;
     private const byte SentenceTier = 3;
 
@@ -76,8 +39,6 @@ public sealed class TextEntityBuilder
         _physicalities  = ImmutableArray.CreateBuilder<PhysicalityRow>(n);
     }
 
-    /// <summary>Emit entity + physicality rows for all novel nodes in the
-    /// tree. Call once; subsequent calls add duplicates.</summary>
     public (ImmutableArray<EntityRow> Entities, ImmutableArray<PhysicalityRow> Physicalities) Build()
     {
         int nodeCount = _tree.NodeCount;
@@ -106,15 +67,8 @@ public sealed class TextEntityBuilder
     {
         var node = _tree.GetNode(idx);
 
-        // Tier-0 codepoints are the foundational SEEDED atoms — UnicodeDecomposer
-        // seeds them once (with perf-cache-derived coord/Hilbert), independently of
-        // this builder. Content paths REFERENCE them by id inside grapheme/word
-        // trajectories; re-emitting here would create a duplicate per-source codepoint
-        // physicality for every text that uses them. Skip — the trajectory child-ids
-        // still point at the seeded entities.
         if (node.Tier == 0) return;
 
-        // Level 1 dedup: skip if already emitted within this intent
         if (!_emittedIds.Add(node.Id)) return;
 
         var typeId = TierTypeId(node.Tier);
@@ -131,19 +85,9 @@ public sealed class TextEntityBuilder
             {
                 var child = _tree.GetNode(node.FirstChildIdx + ci);
                 childIds[ci] = child.Id;
-                // In-band constituent type + atom (mantissa.h flag layout):
-                // a render/walk reads tier + codepoint from the vertex itself —
-                // no entities/codepoint_render join per leaf (2026-06-05).
                 childFlags[ci] = Trajectory.VertexFlags(
                     child.Tier, hasAtom: child.Tier == 0, atom: child.Atom);
             }
-            // Non-RLE: ONE vertex per constituent. The trajectory codec's decode
-            // (trajectory_constituents) does NOT expand run_length, so BuildRle is
-            // LOSSY through reconstruction — a repeated child (the 'l's in "hello")
-            // RLE-collapses to one vertex and can't be recovered. Build keeps every
-            // constituent as its own vertex → bit-perfect round-trip. The engine emits
-            // a POINT for a single vertex and a LINESTRING for ≥2 (both valid GEOMETRY
-            // ZM), so a single-constituent node carries an honest trajectory, never NULL.
             trajectoryXyzm = Trajectory.Build(childIds, childFlags);
             nConstituents  = (int)node.ChildCount;
         }
@@ -182,16 +126,6 @@ public sealed class TextEntityBuilder
         _ => DocumentTypeId,
     };
 
-    /* ============================================================
-     * Static composition helpers — TextDecomposer + HashComposer +
-     * (optionally) entity-row build. Single source of the resolver
-     * + decomposition glue used by every text-bearing decomposer.
-     * CodepointPerfcache.Load MUST be called by the host first;
-     * the resolver returns -1 atom-not-found if records are absent.
-     * ============================================================ */
-
-    /// <summary>Perfcache-backed atom resolver for HashComposer.
-    /// Exposed as an unmanaged function pointer; zero per-call allocation.</summary>
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     public static unsafe int Resolver(
         uint atom, IntPtr userData,
@@ -207,11 +141,6 @@ public sealed class TextEntityBuilder
         return 0;
     }
 
-    /// <summary>
-    /// Decompose canonical bytes through TextDecomposer + HashComposer and
-    /// return the content-addressed root node (id / tier / 4D coord). Returns
-    /// false if TextDecomposer rejects the input (e.g. invalid UTF-8).
-    /// </summary>
     public static bool TryDecomposeRoot(
         byte[] canonical,
         out Hash128 rootId, out byte rootTier,
@@ -241,10 +170,6 @@ public sealed class TextEntityBuilder
         }
     }
 
-    /// <summary>
-    /// Decompose + emit entity and CONTENT-physicality rows for the root and
-    /// every tier-tree ancestor. Returns false if TextDecomposer rejects.
-    /// </summary>
     public static bool TryBuildRows(
         byte[] canonical, Hash128 sourceId,
         out ImmutableArray<EntityRow> entities,
@@ -279,17 +204,6 @@ public sealed class TextEntityBuilder
         }
     }
 
-    /// <summary>
-    /// Decompose + emit content (entities + CONTENT physicalities) AND the
-    /// honest DISTRIBUTIONAL witness: per sentence, the adjacent word bigrams
-    /// (<c>a PRECEDES b</c> / <c>b FOLLOWS a</c>), aggregated across the whole
-    /// text so identical bigrams FOLD onto one evidence row (context NULL,
-    /// observation_count = occurrences) — the §10/architecture position-fold.
-    /// Each occurrence is a confirm (score 1); witness weight is the caller's
-    /// (kind_rank × source_trust). Prose attests sequence/usage, NEVER meaning;
-    /// the semantic arenas come from curated sources and models. Returns false
-    /// if TextDecomposer rejects the input.
-    /// </summary>
     public static bool TryBuildContentWitness(
         byte[] canonical, Hash128 sourceId, double witnessWeight,
         out ImmutableArray<EntityRow> entities,
@@ -328,23 +242,12 @@ public sealed class TextEntityBuilder
         }
     }
 
-    /// <summary>
-    /// The distributional witness of a composed text: adjacent within-sentence
-    /// word bigrams, aggregated. Positions FOLD — every occurrence of the
-    /// ordered pair (a,b) collapses to ONE evidence row with games = count and
-    /// an exact Σscore (count × 1.0, each occurrence a confirm). Emits BOTH
-    /// directed views per pair so either walk direction is an indexed
-    /// per-subject read: <c>a PRECEDES b</c> (forward) and <c>b FOLLOWS a</c>
-    /// (backward). Bounded at 2·(words−1) rows per sentence before the fold;
-    /// the fold makes it the count of DISTINCT bigrams. Cross-sentence pairs
-    /// are never formed — the sentence is the natural co-occurrence unit.
-    /// </summary>
     public static ImmutableArray<AttestationRow> BuildDistributionalAttestations(
         TierTree tree, Hash128 sourceId, double witnessWeight)
     {
         ArgumentNullException.ThrowIfNull(tree);
         var precedes = new Dictionary<(Hash128 A, Hash128 B), long>();
-        var contentMemo = new Dictionary<Hash128, bool>();   // word id → has alnum content
+        var contentMemo = new Dictionary<Hash128, bool>();
         var content = new List<Hash128>();
         int n = tree.NodeCount;
         for (uint idx = 0; idx < (uint)n; idx++)
@@ -352,10 +255,6 @@ public sealed class TextEntityBuilder
             var node = tree.GetNode(idx);
             if (node.Tier != SentenceTier || node.ChildCount < 2) continue;
 
-            // Adjacency is between CONTENT words: whitespace/punctuation tokens are
-            // the mechanical delimiters, not content, and (being ultra-frequent
-            // hubs) would drown the signal — "Captain<space>Ahab" must read as the
-            // bigram (Captain, Ahab). Skip any token with no alphanumeric codepoint.
             content.Clear();
             for (uint ci = 0; ci < node.ChildCount; ci++)
             {
@@ -377,7 +276,6 @@ public sealed class TextEntityBuilder
         var rows = ImmutableArray.CreateBuilder<AttestationRow>(precedes.Count);
         foreach (var (pair, count) in precedes)
         {
-            // Each occurrence is a confirm (score 1.0 ⇒ 1e9 fixed-point).
             long sumScore = checked(count * Glicko2.FpScale);
             rows.Add(AttestationFactory.CreateAggregated(
                 pair.A, PrecedesTypeId, pair.B, sourceId, contextId: null,
@@ -386,9 +284,6 @@ public sealed class TextEntityBuilder
         return rows.ToImmutable();
     }
 
-    /// <summary>A token is CONTENT (vs a whitespace/punctuation delimiter) iff at
-    /// least one of its codepoint leaves is a letter or digit. Memoized by the
-    /// token's content id — repeated words ("the", "whale") resolve once.</summary>
     private static bool IsContentWord(TierTree tree, uint idx, Dictionary<Hash128, bool> memo)
     {
         var node = tree.GetNode(idx);

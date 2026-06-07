@@ -3,12 +3,6 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-/// <summary>
-/// THE POS value canon (2026-06-05 ruling): one language-generic inventory
-/// (the 17 UPOS categories), every source tagset resolved INTO it at ingest —
-/// so "dog is a noun" from UD, WordNet and Wiktionary lands on ONE consensus
-/// row. Unknown tags go probationary + logged, never silent, never guessed.
-/// </summary>
 public class PosReferenceTests
 {
     [Fact]
@@ -24,7 +18,7 @@ public class PosReferenceTests
     [InlineData('n', "NOUN")]
     [InlineData('v', "VERB")]
     [InlineData('a', "ADJ")]
-    [InlineData('s', "ADJ")]   // satellite adjectives ARE adjectives (satellite-ness stays on the synset)
+    [InlineData('s', "ADJ")]
     [InlineData('r', "ADV")]
     public void WordNet_SsTypes_MapToCanon(char ss, string expected)
         => Assert.Equal(PosReference.CanonicalId(expected),
@@ -45,7 +39,6 @@ public class PosReferenceTests
         long before = PosReference.ResolveMisses;
         var id = PosReference.Resolve("proverb", PosReference.PosTagset.Wiktionary);
 
-        // Namespaced probationary value — never a canonical id, never a collision.
         Assert.Equal(Hash128.OfCanonical("substrate/pos/probationary/wiktionary/proverb/v1"), id);
         Assert.DoesNotContain(PosReference.Canonical,
             t => PosReference.CanonicalId(t) == id);

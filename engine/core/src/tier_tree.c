@@ -3,13 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* SoA arena. Parallel arrays — one per field. Allocated with a single
- * capacity; grown geometrically when add operations would exceed it.
- *
- * The id/coord/hilbert arrays are zeroed at allocation so hash_composer
- * can write to them without worrying about uninitialized state on the
- * pre-compose read paths. */
-
 struct tier_tree {
     size_t count;
     size_t capacity;
@@ -23,16 +16,13 @@ struct tier_tree {
     uint32_t*     atom;
 
     hash128_t*    id;
-    double*       coord;     /* count * 4 doubles */
+    double*       coord;
     hilbert128_t* hilbert;
 };
 
 static int tier_tree_grow(tier_tree_t* t, size_t min_capacity) {
     size_t new_cap = t->capacity > 0 ? t->capacity : 16;
     while (new_cap < min_capacity) {
-        /* geometric growth — 2x is fine; we don't expect frequent reallocs
-         * because callers pass a good capacity_hint (TextDecomposer upper-
-         * bounds from input byte length). */
         if (new_cap > (SIZE_MAX / 2)) {
             return -1;
         }
@@ -50,16 +40,9 @@ static int tier_tree_grow(tier_tree_t* t, size_t min_capacity) {
     double*       new_coord           = (double*)      realloc(t->coord,           new_cap * 4 * sizeof(double));
     hilbert128_t* new_hilbert         = (hilbert128_t*)realloc(t->hilbert,         new_cap * sizeof(hilbert128_t));
 
-    /* If any single realloc failed, leave the tree in its prior state. The
-     * partial reallocs that succeeded just enlarge the buffer; the bookkeeping
-     * (count, capacity) is unchanged, so the next add will retry and the extra
-     * bytes are simply unused. */
     if (!new_tier || !new_parent_idx || !new_first_child_idx || !new_child_count
         || !new_text_range_off || !new_text_range_len || !new_atom
         || !new_id || !new_coord || !new_hilbert) {
-        /* Best-effort: install whatever did succeed (so we don't leak), and
-         * report failure. Subsequent add will see the unchanged capacity and
-         * retry the grow. */
         if (new_tier)            t->tier            = new_tier;
         if (new_parent_idx)      t->parent_idx      = new_parent_idx;
         if (new_first_child_idx) t->first_child_idx = new_first_child_idx;
@@ -73,8 +56,6 @@ static int tier_tree_grow(tier_tree_t* t, size_t min_capacity) {
         return -1;
     }
 
-    /* Zero the newly added slots in id/coord/hilbert so pre-compose reads see
-     * deterministic zero (matches hash128_zero). */
     memset(new_id + t->capacity, 0, (new_cap - t->capacity) * sizeof(hash128_t));
     memset(new_coord + t->capacity * 4, 0, (new_cap - t->capacity) * 4 * sizeof(double));
     memset(new_hilbert + t->capacity, 0, (new_cap - t->capacity) * sizeof(hilbert128_t));
@@ -144,13 +125,12 @@ static uint32_t tier_tree_append(
     }
     const uint32_t idx = (uint32_t)tree->count;
     tree->tier[idx]            = tier;
-    tree->parent_idx[idx]      = TIER_TREE_INVALID; /* set by finalize */
+    tree->parent_idx[idx]      = TIER_TREE_INVALID;
     tree->first_child_idx[idx] = first_child_idx;
     tree->child_count[idx]     = child_count;
     tree->text_range_off[idx]  = text_range_off;
     tree->text_range_len[idx]  = text_range_len;
     tree->atom[idx]            = atom;
-    /* id/coord/hilbert already zeroed by grow. */
     tree->count++;
     return idx;
 }
@@ -173,17 +153,12 @@ uint32_t tier_tree_add_node(
     uint32_t     text_range_off,
     uint32_t     text_range_len) {
     if (!tree) return TIER_TREE_INVALID;
-    /* Validate: child range must be entirely within existing nodes
-     * (topological order). child_count==0 is allowed and produces an interior
-     * node with no children — caller can treat as an empty container. */
     if (child_count > 0) {
         if (first_child_idx == TIER_TREE_INVALID) return TIER_TREE_INVALID;
-        /* Overflow check: first_child_idx + child_count must not wrap. */
         if (first_child_idx > UINT32_MAX - child_count) return TIER_TREE_INVALID;
         const uint32_t last_child = first_child_idx + child_count - 1;
         if (last_child >= tree->count) return TIER_TREE_INVALID;
     } else if (first_child_idx != TIER_TREE_INVALID) {
-        /* zero count but non-sentinel first_child_idx is malformed */
         return TIER_TREE_INVALID;
     }
     return tier_tree_append(tree, tier, first_child_idx, child_count,
@@ -192,9 +167,6 @@ uint32_t tier_tree_add_node(
 
 int tier_tree_finalize(tier_tree_t* tree) {
     if (!tree) return -1;
-    /* Reset all parent_idx to INVALID, then walk each node and set
-     * parent_idx[child] = parent for every child in its range. Single
-     * pass; O(N). */
     for (size_t i = 0; i < tree->count; ++i) {
         tree->parent_idx[i] = TIER_TREE_INVALID;
     }

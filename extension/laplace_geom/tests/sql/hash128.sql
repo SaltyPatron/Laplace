@@ -1,28 +1,16 @@
--- Smoke test for laplace_hash128_blake3 + laplace_hash128_merkle PG wrappers.
--- Verifies the engine kernels are reachable from SQL and produce byte-
--- identical output to the C ABI (cross-language consistency).
-
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION laplace_geom;
 
--- BLAKE3 of the empty string -- the empty-string truncated digest is
--- a known canonical value verified against the engine's
--- LaplaceCoreHash128.BlakeEmptyMatchesKnownTruncatedVector test.
 SELECT octet_length(laplace_hash128_blake3(''::bytea)) AS empty_len;
 
--- BLAKE3 of "hello" -- deterministic; same input always same 16 bytes.
 SELECT encode(laplace_hash128_blake3('hello'::bytea), 'hex') AS hello_hex;
 
--- BLAKE3 is deterministic: same input twice -> same output.
 SELECT laplace_hash128_blake3('foo'::bytea)
      = laplace_hash128_blake3('foo'::bytea) AS deterministic;
 
--- Different inputs produce different outputs.
 SELECT laplace_hash128_blake3('foo'::bytea)
     <> laplace_hash128_blake3('bar'::bytea) AS distinct_inputs_distinct_outputs;
 
--- Merkle composition: deterministic, order-dependent, tier-prefix domain-
--- separating.
 SELECT octet_length(
     laplace_hash128_merkle(
         0::smallint,
@@ -33,9 +21,6 @@ SELECT octet_length(
     )
 ) AS merkle_len;
 
--- TIER IS METADATA, NEVER IDENTITY: the same ordered constituent set composed
--- "at" two different strata is ONE entity (content is identity; tier records
--- decomposition depth on the entity row, never in the hash).
 SELECT laplace_hash128_merkle(
         0::smallint,
         ARRAY[laplace_hash128_blake3('x'::bytea)]
@@ -45,7 +30,6 @@ SELECT laplace_hash128_merkle(
         ARRAY[laplace_hash128_blake3('x'::bytea)]
     ) AS tier_is_not_identity;
 
--- Child order matters: (a, b) != (b, a).
 SELECT laplace_hash128_merkle(
         0::smallint,
         ARRAY[
@@ -61,7 +45,6 @@ SELECT laplace_hash128_merkle(
         ]
     ) AS child_order_matters;
 
--- Validation: child hashes must be exactly 16 bytes (raise error if not).
 DO $$
 BEGIN
     PERFORM laplace_hash128_merkle(
@@ -70,7 +53,6 @@ BEGIN
     );
     RAISE EXCEPTION 'expected error for non-16-byte child';
 EXCEPTION WHEN invalid_parameter_value THEN
-    -- Expected.
     NULL;
 END;
 $$;

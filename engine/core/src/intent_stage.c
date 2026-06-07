@@ -1,34 +1,32 @@
 #include "laplace/core/intent_stage.h"
 
-#include <endian.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* === Constants === */
+#ifdef _WIN32
+#include <stdlib.h>
+#define htobe16(x) _byteswap_ushort(x)
+#define htobe32(x) _byteswap_ulong(x)
+#define htobe64(x) _byteswap_uint64(x)
+#define htole32(x) (x)
+#define htole64(x) (x)
+#else
+#include <endian.h>
+#endif
 
-/* COPY BINARY signature: "PGCOPY\n\xff\r\n\0" — 11 bytes (per PG docs). */
 static const uint8_t kCopyBinarySignature[11] = {
     'P', 'G', 'C', 'O', 'P', 'Y', '\n', 0xff, '\r', '\n', '\0'
 };
 
-/* Header = signature (11) + flags (4 BE, value 0) + hdr_ext_length (4 BE, 0). */
 #define INTENT_STAGE_HEADER_BYTES 19u
-/* Trailer = int16 BE -1 (0xFFFF) = 2 bytes. */
 #define INTENT_STAGE_TRAILER_BYTES 2u
 
-/* PostGIS EWKB type flag bits (postgis/liblwgeom convention). */
 #define WKB_Z_FLAG    0x80000000u
 #define WKB_M_FLAG    0x40000000u
 #define WKB_SRID_FLAG 0x20000000u
 #define WKB_POINT_TYPE      1u
 #define WKB_LINESTRING_TYPE 2u
 
-/* EWKB on the wire is little-endian by convention; we emit byte_order=1
- * (NDR / little-endian) and write integers/doubles in host order on x86_64.
- * PG receives them as little-endian payload. The OUTER COPY BINARY field
- * framing IS big-endian, but the geometry blob inside is its own world. */
-
-/* Per-table column lists for the COPY ... FROM STDIN BINARY statement. */
 static const char* const kEntityColumns =
     "id, tier, type_id, first_observed_by";
 static const char* const kPhysicalityColumns =
@@ -38,12 +36,9 @@ static const char* const kAttestationColumns =
     "id, subject_id, type_id, object_id, source_id, context_id, "
     "outcome, last_observed_at, observation_count";
 
-/* Per-table column count (matches the field_count int16 prefix in each tuple). */
 #define ENTITY_COL_COUNT       4
 #define PHYSICALITY_COL_COUNT 11
 #define ATTESTATION_COL_COUNT  9
-
-/* === Growable byte buffer === */
 
 typedef struct {
     uint8_t* data;
@@ -113,7 +108,6 @@ static int buf_append_le_u32(byte_buf_t* b, uint32_t v) {
     return buf_append(b, &le, 4);
 }
 
-/* COPY-BINARY field helpers: NULL is length=-1, no data. Non-NULL is length>=0 + data. */
 static int buf_append_field_null(byte_buf_t* b) {
     return buf_append_be32(b, -1);
 }
@@ -148,19 +142,14 @@ static int buf_append_field_float8(byte_buf_t* b, double v) {
     return buf_append_be_double(b, v);
 }
 
-/* PG timestamptz binary format: int64 microseconds since 2000-01-01 UTC. */
 static int buf_append_field_timestamptz(byte_buf_t* b, int64_t unix_us) {
     const int64_t pg_us = unix_us - INTENT_STAGE_PG_EPOCH_UNIX_US;
     return buf_append_field_int8(b, pg_us);
 }
 
-/* Build EWKB for a PointZM without SRID. 37 bytes total:
- *   1   byte order (1 = NDR / little-endian)
- *   4   type (uint32 LE) with Z+M flags
- *   8*4 x, y, z, m (doubles LE) */
 static int buf_append_field_pointzm(byte_buf_t* b, const double coord[4]) {
-    if (buf_append_be32(b, 37) != 0) return -1; /* field length */
-    if (buf_append_u8(b, 0x01) != 0) return -1; /* NDR */
+    if (buf_append_be32(b, 37) != 0) return -1;
+    if (buf_append_u8(b, 0x01) != 0) return -1;
     if (buf_append_le_u32(b, WKB_POINT_TYPE | WKB_Z_FLAG | WKB_M_FLAG) != 0) return -1;
     if (buf_append_le_double(b, coord[0]) != 0) return -1;
     if (buf_append_le_double(b, coord[1]) != 0) return -1;
@@ -169,15 +158,13 @@ static int buf_append_field_pointzm(byte_buf_t* b, const double coord[4]) {
     return 0;
 }
 
-/* Build EWKB for a LineStringZM without SRID.
- * Field bytes: 1 + 4 + 4 + 32*n  (byte-order, type, npoints, n*xyzm). */
 static int buf_append_field_linestringzm(
     byte_buf_t*    b,
-    const double*  xyzm,        /* 4*n_vertices doubles */
+    const double*  xyzm,
     uint32_t       n_vertices) {
     const uint32_t field_len = 1u + 4u + 4u + 32u * n_vertices;
     if (buf_append_be32(b, (int32_t)field_len) != 0) return -1;
-    if (buf_append_u8(b, 0x01) != 0) return -1; /* NDR */
+    if (buf_append_u8(b, 0x01) != 0) return -1;
     if (buf_append_le_u32(b, WKB_LINESTRING_TYPE | WKB_Z_FLAG | WKB_M_FLAG) != 0) return -1;
     if (buf_append_le_u32(b, n_vertices) != 0) return -1;
     for (uint32_t i = 0; i < n_vertices; ++i) {
@@ -189,8 +176,6 @@ static int buf_append_field_linestringzm(
     return 0;
 }
 
-/* === intent_stage struct === */
-
 struct intent_stage {
     byte_buf_t entities;
     byte_buf_t physicalities;
@@ -200,9 +185,6 @@ struct intent_stage {
 intent_stage_t* intent_stage_new(size_t row_capacity_hint) {
     intent_stage_t* s = (intent_stage_t*)calloc(1, sizeof(*s));
     if (!s) return NULL;
-    /* Rough byte preallocation: entities row ≈ 60B, physicalities ≈ 200B,
-     * attestations ≈ 130B. Use 128B per row as a generic seed (geometric
-     * growth handles undershoot). */
     if (row_capacity_hint > 0) {
         const size_t hint_bytes = row_capacity_hint * 128;
         if (buf_reserve(&s->entities, hint_bytes) != 0
@@ -235,8 +217,6 @@ const char* intent_stage_copy_column_list(intent_stage_table_t table) {
         default:                               return NULL;
     }
 }
-
-/* === Row add functions === */
 
 int intent_stage_add_entity(
     intent_stage_t*  stage,
@@ -292,10 +272,6 @@ int intent_stage_add_physicality(
     if (trajectory_xyzm == NULL || trajectory_n_vertices == 0) {
         if (buf_append_field_null(b) != 0) return -1;
     } else if (trajectory_n_vertices == 1) {
-        /* One constituent → an honest POINT ZM (PostGIS rejects a 1-vertex
-         * LINESTRING). The trajectory column is generic GEOMETRY ZM, so a POINT is
-         * valid and ST_DumpPoints reads it identically on reconstruct. Reuses the
-         * existing pointzm builder. */
         if (buf_append_field_pointzm(b, trajectory_xyzm) != 0) return -1;
     } else {
         if (buf_append_field_linestringzm(b, trajectory_xyzm, trajectory_n_vertices) != 0) return -1;
@@ -330,10 +306,6 @@ int intent_stage_add_attestation(
     if (!stage || !id || !subject_id || !type_id || !source_id) return -1;
     if (observation_count < 0) return -1;
     if (outcome < 0 || outcome > 2) return -1;
-    /* Evidence row = PROVENANCE: who witnessed which relation, when, how many
-     * games, and the dissent record as a CLASS (0=refute, 1=draw, 2=confirm) —
-     * never a magnitude. The witness's value is testimony, consumed into the
-     * consensus match at ingest; rating/rd/volatility live on consensus. */
     byte_buf_t* b = &stage->attestations;
 
     if (buf_append_be16(b, ATTESTATION_COL_COUNT) != 0) return -1;
@@ -358,8 +330,6 @@ int intent_stage_add_attestation(
     return 0;
 }
 
-/* === Emit === */
-
 static const byte_buf_t* stage_buf(const intent_stage_t* stage, intent_stage_table_t table) {
     if (!stage) return NULL;
     switch (table) {
@@ -383,24 +353,17 @@ size_t intent_stage_emit_copy_binary(
     size_t off = 0;
     memcpy(buf + off, kCopyBinarySignature, sizeof(kCopyBinarySignature));
     off += sizeof(kCopyBinarySignature);
-    /* flags (BE u32 = 0) */
     memset(buf + off, 0, 4); off += 4;
-    /* header extension area length (BE u32 = 0) */
     memset(buf + off, 0, 4); off += 4;
-    /* tuples */
     if (src->len > 0) {
         memcpy(buf + off, src->data, src->len);
         off += src->len;
     }
-    /* trailer: int16 BE -1 */
     buf[off++] = 0xff;
     buf[off++] = 0xff;
     return required;
 }
 
-/* Stream accessor: the raw tuple bytes (no header/trailer) + their length, so the
- * caller can pipe the engine's native serialization straight into a COPY socket
- * without materializing the whole stage into one array. */
 const uint8_t* intent_stage_tuple_ptr(
     const intent_stage_t* stage,
     intent_stage_table_t  table,

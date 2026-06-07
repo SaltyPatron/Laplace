@@ -1,16 +1,5 @@
 name: _ingest (reusable)
 
-# THE one implementation of "ingest one source and gate it" (2026-06-05
-# modular re-architecture). Every per-source workflow (unicode.yml,
-# wordnet.yml, …) is a thin caller carrying only its name, timeout, and
-# signature gates. Modularity rules:
-#   - per-source workflows are dispatchable alone AND composable by
-#     orchestrators (seed-ladder.yml) — one box per source in the UI;
-#   - gates are "KIND MIN" lines checked against the INSTALLED substrate
-#     surface (laplace.consensus_count/kind_id — never inline SQL);
-#   - worker knobs live HERE, once (measured 2026-06-05: 2+2+4 on the 6-core
-#     runner; 4+4 oversubscribes and runs slower — re-tune only with a profile).
-
 on:
   workflow_call:
     inputs:
@@ -71,9 +60,6 @@ jobs:
             echo "gate $1: consensus=$n (min $2)"
             [ "$n" -ge "$2" ] || { echo "::error::gate failed: $1 consensus $n < $2"; exit 1; }
           }
-          # NB: `[ -n "$kind" ] && gate ...` poisons the exit code when the
-          # block scalar's trailing newline yields a final empty read (the
-          # 2026-06-05 first-exercise failure: all gates passed, step exited 1).
           printf '%s\n' "$GATE_SPEC" | while read -r kind min; do
             if [ -n "$kind" ]; then gate "$kind" "$min"; fi
           done

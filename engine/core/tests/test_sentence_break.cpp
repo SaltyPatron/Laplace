@@ -65,7 +65,7 @@ static std::vector<size_t> segment_all(const std::vector<uint32_t>& cps) {
     return b;
 }
 
-} // namespace
+}
 
 TEST(LaplaceCoreSentenceBreak, UAX29ConformancePerLine) {
     const std::string path = std::string(LAPLACE_UCD_PATH_FOR_TESTS)

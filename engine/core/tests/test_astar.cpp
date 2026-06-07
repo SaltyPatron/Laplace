@@ -7,15 +7,10 @@
 #include "laplace/core/astar.h"
 #include "laplace/core/hash128.h"
 
-/* Compiled cascade: least-cost path over a graph supplied by the expansion
- * callback. These tests run the kernel over a small synthetic weighted graph
- * (the PG SRF supplies the real consensus/Glicko-μ provider in the extension).*/
-
 namespace {
 
 hash128_t H(uint64_t n) { return hash128_t{0, n}; }
 
-/* adjacency: node id -> list of (target, cost) */
 struct Graph {
     std::map<uint64_t, std::vector<astar_edge_t>> adj;
 };
@@ -47,10 +42,8 @@ std::vector<uint64_t> run(Graph& g, uint64_t start, std::vector<uint64_t> goals,
     return path;
 }
 
-}  // namespace
+}
 
-/* Diamond: 1→2 (1.0), 1→3 (3.0), 2→4 (1.0), 3→4 (1.0).
- * Two routes to 4: 1-2-4 cost 2.0 vs 1-3-4 cost 4.0 — cheapest wins. */
 TEST(LaplaceCoreAstar, PicksLeastCostPath) {
     Graph g;
     g.adj[1] = {{H(2), 1.0}, {H(3), 3.0}};
@@ -59,12 +52,10 @@ TEST(LaplaceCoreAstar, PicksLeastCostPath) {
     auto p = run(g, 1, {4});
     ASSERT_EQ(p.size(), 3u);
     EXPECT_EQ(p[0], 1u);
-    EXPECT_EQ(p[1], 2u);   // via the cheaper hop, not 3
+    EXPECT_EQ(p[1], 2u);
     EXPECT_EQ(p[2], 4u);
 }
 
-/* A direct expensive edge must lose to a cheaper multi-hop route:
- * 1→9 (10.0) vs 1→2→9 (1.0 + 1.0). */
 TEST(LaplaceCoreAstar, MultiHopBeatsExpensiveDirect) {
     Graph g;
     g.adj[1] = {{H(9), 10.0}, {H(2), 1.0}};
@@ -74,24 +65,21 @@ TEST(LaplaceCoreAstar, MultiHopBeatsExpensiveDirect) {
     EXPECT_EQ(p[1], 2u);
 }
 
-/* Goal region: the nearest (cheapest) goal among several is the one reached. */
 TEST(LaplaceCoreAstar, ReachesNearestGoalInRegion) {
     Graph g;
     g.adj[1] = {{H(2), 1.0}, {H(3), 5.0}};
     auto p = run(g, 1, {2, 3});
     ASSERT_EQ(p.size(), 2u);
-    EXPECT_EQ(p[1], 2u);  // nearer goal
+    EXPECT_EQ(p[1], 2u);
 }
 
-/* No route → empty path (a witnessed GAP), query still valid/non-null. */
 TEST(LaplaceCoreAstar, NoPathYieldsEmpty) {
     Graph g;
-    g.adj[1] = {{H(2), 1.0}};  // dead end; goal 99 unreachable
+    g.adj[1] = {{H(2), 1.0}};
     auto p = run(g, 1, {99});
     EXPECT_TRUE(p.empty());
 }
 
-/* Start already in the goal region → a single-node path. */
 TEST(LaplaceCoreAstar, StartIsGoal) {
     Graph g;
     auto p = run(g, 7, {7});
@@ -99,21 +87,19 @@ TEST(LaplaceCoreAstar, StartIsGoal) {
     EXPECT_EQ(p[0], 7u);
 }
 
-/* max_depth bounds hop count: the only route needs 3 hops; depth 2 caps it out. */
 TEST(LaplaceCoreAstar, RespectsMaxDepth) {
     Graph g;
     g.adj[1] = {{H(2), 1.0}};
     g.adj[2] = {{H(3), 1.0}};
     g.adj[3] = {{H(4), 1.0}};
-    EXPECT_TRUE(run(g, 1, {4}, 2).empty());   // 3 hops needed, capped at 2
-    EXPECT_EQ(run(g, 1, {4}, 3).size(), 4u);  // exactly enough
+    EXPECT_TRUE(run(g, 1, {4}, 2).empty());
+    EXPECT_EQ(run(g, 1, {4}, 3).size(), 4u);
 }
 
-/* Bad arguments → NULL handle. */
 TEST(LaplaceCoreAstar, RejectsBadArgs) {
     Graph g;
     hash128_t s = H(1), goal = H(2);
     EXPECT_EQ(astar_open(nullptr, &goal, 1, 8, 1, expand, &g), nullptr);
-    EXPECT_EQ(astar_open(&s, &goal, 0, 8, 1, expand, &g), nullptr);   // goal_count 0
-    EXPECT_EQ(astar_open(&s, &goal, 1, 8, 1, nullptr, &g), nullptr);  // no expander
+    EXPECT_EQ(astar_open(&s, &goal, 0, 8, 1, expand, &g), nullptr);
+    EXPECT_EQ(astar_open(&s, &goal, 1, 8, 1, nullptr, &g), nullptr);
 }

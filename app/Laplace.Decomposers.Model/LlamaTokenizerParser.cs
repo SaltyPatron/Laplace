@@ -9,34 +9,15 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Model;
 
-/// <summary>
-/// Tokenizer-framing role of a vocab entry — recorded so the canonical-text dedup
-/// (▁the / the → "the") stays reversible and special/byte tokens are handled correctly,
-/// rather than the framing being stripped and lost. Tokenizer-family-agnostic
-/// (SentencePiece ▁, GPT-2/BPE Ġ/Ċ, byte-fallback, added specials).
-/// </summary>
 [Flags]
 public enum TokenRole : byte
 {
-    None         = 0,   // ordinary subword (no leading-space framing)
-    LeadingSpace = 1,   // word-initial: SentencePiece '▁' / GPT-2 'Ġ' marker
-    ByteLevel    = 2,   // '<0xNN>' byte-fallback (raw byte content)
-    Special      = 4,   // control/special token from the tokenizer's added_tokens
+    None         = 0,
+    LeadingSpace = 1,
+    ByteLevel    = 2,
+    Special      = 4,
 }
 
-/// <summary>
-/// Parses a HuggingFace tokenizer.json (BPE/SentencePiece format) into
-/// substrate Text entity rows.
-///
-/// BPE marker stripping:
-///   '▁' (U+2581 LOWER ONE EIGHTH BLOCK) → leading space stripped
-///   'Ġ'  (U+0120 LATIN SMALL LETTER G WITH DOT ABOVE) → leading space stripped (GPT-2)
-///   'Ċ'  (U+010A) → newline (stripped for canonical surface)
-///   Byte-level tokens '&lt;0xNN&gt;' → single byte 0xNN (canonical bytes = [0xNN])
-///
-/// Canonical surface bytes = UTF-8 of stripped token string (or raw byte for byte-level).
-/// Entity ID = Hash128.Blake3(canonical_bytes), consistent with text corpus entities.
-/// </summary>
 public sealed class LlamaTokenizerParser
 {
     public sealed class TokenRecord
@@ -47,15 +28,8 @@ public sealed class LlamaTokenizerParser
         public required Hash128  EntityId       { get; init; }
         public required byte     Tier           { get; init; }
         public required bool     IsByteLevel    { get; init; }
-        /// <summary>Tokenizer-framing role mask (leading-space / byte-level / special).
-        /// Recorded into the substrate so the canonical-text dedup is reversible.</summary>
         public required TokenRole Role          { get; init; }
 
-        /* Substrate-canonical 4D coord of this token entity (tier-tree root
-         * Merkle composition of its codepoint trajectory). Used as the
-         * Procrustes target when aligning per-source model embeddings onto
-         * substrate frame. NaN-filled when TextDecomposer rejected the token
-         * (invalid-UTF-8 byte-level token) — caller MUST check before using. */
         public required double   ContentX       { get; init; }
         public required double   ContentY       { get; init; }
         public required double   ContentZ       { get; init; }
@@ -63,28 +37,19 @@ public sealed class LlamaTokenizerParser
         public required bool     HasContentCoord { get; init; }
     }
 
-    /// <summary>
-    /// Parse tokenizer.json and return all vocab entries as TokenRecords.
-    /// Handles SentencePiece (▁) and GPT-2 (Ġ) BPE markers, byte-level tokens.
-    /// </summary>
     public static IReadOnlyList<TokenRecord> Parse(string tokenizerJsonPath)
     {
         byte[] jsonBytes = File.ReadAllBytes(tokenizerJsonPath);
         using var doc = JsonDocument.Parse(jsonBytes);
 
-        /* Navigate to model.vocab — the canonical vocab map */
         JsonElement vocab;
         if (!doc.RootElement.TryGetProperty("model", out var model) ||
             !model.TryGetProperty("vocab", out vocab))
         {
-            /* Some tokenizer.json formats put vocab at root level */
             if (!doc.RootElement.TryGetProperty("vocab", out vocab))
                 throw new InvalidDataException("tokenizer.json: cannot find model.vocab or vocab");
         }
 
-        /* Special/control token ids from added_tokens (special:true): <s>, </s>, <unk>,
-         * [INST], … These are STRUCTURAL, not their literal characters — flagged Special
-         * and given a distinct content-addressed entity, never a text decomposition. */
         var specialIds = new HashSet<int>();
         if (doc.RootElement.TryGetProperty("added_tokens", out var added) &&
             added.ValueKind == JsonValueKind.Array)
@@ -105,10 +70,6 @@ public sealed class LlamaTokenizerParser
             (byte[] canonical, TokenRole role) = Canonicalize(raw);
             if (specialIds.Contains(tokenId)) role |= TokenRole.Special;
 
-            /* Route through TextDecomposer so token entity IDs come from the
-             * substrate's standard tier-tree Merkle composition (R5 — same
-             * content => same entity ID). Specials get a distinct structural entity;
-             * byte-level / invalid-UTF-8 fall back to a plain Blake3 entity. */
             Hash128 entityId;
             byte tier;
             double cx = double.NaN, cy = double.NaN, cz = double.NaN, cm = double.NaN;
@@ -120,7 +81,6 @@ public sealed class LlamaTokenizerParser
             }
             else if (TryDecomposeRoot(canonical, out entityId, out tier, out cx, out cy, out cz, out cm))
             {
-                /* tier + 4D coord from tree root — codepoint=0 / grapheme=1 / word=2 / etc. */
                 hasContent = true;
             }
             else
@@ -129,10 +89,6 @@ public sealed class LlamaTokenizerParser
                 tier = (byte)(canonical.Length <= 1 ? 0 : canonical.Length <= 4 ? 1 : 2);
                 if (canonical.Length == 1 && canonical[0] >= ByteAtoms.First)
                 {
-                    /* BYTE TIER (2026-06-05): a high-byte token IS the byte atom
-                     * (same content, same id as the seeded entity) — anchor at
-                     * its canonical placement so the morph residual-scores it
-                     * like any codepoint. The floor is no longer unanchored. */
                     var bc = ByteAtoms.Coord(canonical[0]);
                     cx = bc[0]; cy = bc[1]; cz = bc[2]; cm = bc[3];
                     hasContent = true;
@@ -156,19 +112,11 @@ public sealed class LlamaTokenizerParser
             });
         }
 
-        /* Sort by token_id so _tokens[(int)vocabIndex] == entity for token vocabIndex.
-         * The QK scorer returns vocab indices, not JSON property order positions. */
         records.Sort((a, b) => a.TokenId.CompareTo(b.TokenId));
 
         return records;
     }
 
-    /// <summary>
-    /// Run the canonical bytes through TextDecomposer; return the root tier-tree
-    /// node's content-addressed ID and tier. Returns false (and leaves outputs
-    /// at defaults) if TextDecomposer rejects the input (typically: byte-level
-    /// tokens whose single byte is not valid UTF-8).
-    /// </summary>
     private static bool TryDecomposeRoot(
         byte[] canonical,
         out Hash128 entityId, out byte tier,
@@ -177,9 +125,6 @@ public sealed class LlamaTokenizerParser
         try
         {
             using var tree = TextDecomposer.Run(canonical);
-            /* TextDecomposer returns tree topology only — IDs/coords/Hilbert are
-             * UNPOPULATED until HashComposer.Run walks the tree leaf-to-trunk
-             * via the perfcache resolver. */
             unsafe { HashComposer.Run(tree, &PerfcacheResolver); }
 
             int nc = tree.NodeCount;
@@ -204,12 +149,6 @@ public sealed class LlamaTokenizerParser
         }
     }
 
-    /// <summary>
-    /// Run the canonical bytes through TextDecomposer + TextEntityBuilder to
-    /// produce entity + CONTENT-physicality rows for the token and every
-    /// tier-tree ancestor (codepoints, graphemes). Returns false if
-    /// TextDecomposer rejects the input.
-    /// </summary>
     private static bool TryBuildTreeRows(
         byte[] canonical, Hash128 sourceId,
         out ImmutableArray<EntityRow> entities,
@@ -218,22 +157,12 @@ public sealed class LlamaTokenizerParser
         try
         {
             using var tree = TextDecomposer.Run(canonical);
-            /* Empty tree (e.g. a token that canonicalizes to no content, like the
-             * bare ▁ space marker) → no tier-tree entity. MUST mirror
-             * TryDecomposeRoot's nc==0 guard: there, Parse falls back to a
-             * Blake3(canonical) entity id, and BuildBatches must take the SAME
-             * fallback (its else branch emits rec.EntityId) instead of emitting an
-             * empty row set — otherwise the token's entity is never inserted and a
-             * later QK attestation referencing it violates the subject FK. */
             if (tree.NodeCount == 0)
             {
                 entities = ImmutableArray<EntityRow>.Empty;
                 physicalities = ImmutableArray<PhysicalityRow>.Empty;
                 return false;
             }
-            /* TextDecomposer returns tree topology only; HashComposer fills
-             * IDs / coords / Hilbert leaf-to-trunk via the perfcache resolver
-             *. TextEntityBuilder REQUIRES this before Build(). */
             unsafe { HashComposer.Run(tree, &PerfcacheResolver); }
             var (es, ps) = new TextEntityBuilder(tree, sourceId).Build();
             entities = es;
@@ -248,12 +177,6 @@ public sealed class LlamaTokenizerParser
         }
     }
 
-    /* Perfcache-backed atom resolver for HashComposer. Mirrors
-     * ContentRoundtrip.Resolver — reads codepoint hash/coord/Hilbert from the
-     * process-wide T0 perf-cache. Caller MUST have invoked
-     * CodepointPerfcache.Load(path) before any decomposer that triggers
-     * HashComposer.Run; the failure mode if not loaded is a clean engine
-     * error code rather than silent corruption. */
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static unsafe int PerfcacheResolver(
         uint atom, IntPtr userData,
@@ -269,20 +192,8 @@ public sealed class LlamaTokenizerParser
         return 0;
     }
 
-    /// <summary>
-    /// Strip BPE markers and return canonical byte representation.
-    /// </summary>
-    /// <summary>
-    /// Canonicalize a raw tokenizer entry to its content bytes AND the token-role mask
-    /// the tokenizer framing implies. The role is RECORDED (not discarded): the leading
-    /// space marker is what distinguishes the word-initial form ("▁the") from the subword
-    /// form ("the") even though both share the canonical text "the" — needed for faithful
-    /// re-tokenization on synthesis. <see cref="TokenRole.Special"/> is set by the caller
-    /// from the tokenizer's added_tokens metadata, not here.
-    /// </summary>
     public static (byte[] canonical, TokenRole role) Canonicalize(string rawToken)
     {
-        /* Byte-level token: <0xNN> — raw byte content, flagged. */
         if (rawToken.Length == 6 && rawToken.StartsWith("<0x", StringComparison.Ordinal)
             && rawToken.EndsWith('>'))
         {
@@ -294,38 +205,20 @@ public sealed class LlamaTokenizerParser
         TokenRole role = TokenRole.None;
         string surface = rawToken;
 
-        /* Leading SentencePiece '▁' (U+2581) or GPT-2 'Ġ' (U+0120) space marker →
-         * word-initial; RECORD it as LeadingSpace rather than silently stripping. */
         if (surface.Length > 0 && (surface[0] == '▁' || surface[0] == 'Ġ'))
         {
             role |= TokenRole.LeadingSpace;
             surface = surface.Substring(1);
         }
 
-        /* GPT-2 newline marker 'Ċ' (U+010A) → actual newline. */
         surface = surface.Replace('Ċ', '\n');
 
-        /* Empty after stripping (e.g. the space token itself "▁") → single space byte. */
         if (surface.Length == 0)
             surface = " ";
 
         return (Encoding.UTF8.GetBytes(surface), role);
     }
 
-    /// <summary>
-    /// Yield SubstrateChange batches for all token ENTITIES (+ their tier-tree
-    /// content). Records MUST be sorted by TokenId (Parse() does this) so that
-    /// _tokens[(int)vocabIndex].EntityId is correct for the QK scorer's
-    /// vocab-index output.
-    ///
-    /// TOKEN_MAPS_TO is NOT emitted here (2026-06-05 ruling): the mapping is a
-    /// MAGNITUDE matchup scored by the S³-morph's per-token alignment residual
-    /// ("the distance becomes a metric in the Glicko-2 match"), so the
-    /// attestations are emitted by <see cref="TokenS3Morph.Emit"/> where the
-    /// residuals exist — strictly after these entities land (FK-safe). The
-    /// categorical fallback (morph skipped/degenerate) is
-    /// <see cref="BuildTokenMapsToCategorical"/>.
-    /// </summary>
     public static IEnumerable<SubstrateChange> BuildBatches(
         IReadOnlyList<TokenRecord> records,
         Hash128 sourceId,
@@ -338,9 +231,6 @@ public sealed class LlamaTokenizerParser
             int end = Math.Min(start + batchSize, total);
             int n   = end - start;
 
-            /* Capacity ~= 5 nodes per tier tree on average (codepoint + grapheme
-             * + word ancestors); DB-level ON CONFLICT DO NOTHING dedupes
-             * codepoints that UnicodeDecomposer already emitted. */
             var b = new SubstrateChangeBuilder(
                 sourceId,
                 $"tokenizer/vocab/{start}..{end - 1}",
@@ -352,16 +242,6 @@ public sealed class LlamaTokenizerParser
             {
                 var rec = records[i];
 
-                /* Substrate-consistent emit: route the token's bytes through
-                 * TextDecomposer + TextEntityBuilder so the token entity AND
-                 * its codepoint trajectory ancestors get content-addressed
-                 * + 4D-positioned the same way every other text entity does.
-                 * Falls back to a plain EntityRow only for invalid-UTF-8
-                 * byte-level tokens. */
-                /* Special/control tokens are structural — emit their distinct entity
-                 * directly (rec.EntityId is the special-namespace id, not a text tree),
-                 * never decomposed as literal text. Byte-level / invalid-UTF-8 also fall
-                 * to the plain-entity path (TryBuildTreeRows returns false). */
                 if (!rec.Role.HasFlag(TokenRole.Special)
                     && TryBuildTreeRows(rec.CanonicalBytes, sourceId, out var treeEntities, out var treePhys))
                 {
@@ -370,8 +250,6 @@ public sealed class LlamaTokenizerParser
                 }
                 else
                 {
-                    /* No CONTENT physicality for specials / non-UTF-8 byte-level tokens —
-                     * entity exists but lacks a substrate-canonical 4D anchor. */
                     b.AddEntity(rec.EntityId, (byte)MetaTier.Meta, textTypeId, firstObservedBy: sourceId);
                 }
 
@@ -381,12 +259,6 @@ public sealed class LlamaTokenizerParser
         }
     }
 
-    /// <summary>
-    /// Parse <c>model.merges</c> — the tokenizer's LEARNED merge lattice
-    /// ("a b" pairs, ordered by rank; earlier = more fundamental), previously
-    /// unextracted (2026-06-05 completeness). Pair parts canonicalize through
-    /// the SAME rule as vocab entries.
-    /// </summary>
     public static List<(byte[] Left, byte[] Right)> ParseMerges(string tokenizerJsonPath)
     {
         var merges = new List<(byte[], byte[])>();
@@ -408,14 +280,6 @@ public sealed class LlamaTokenizerParser
         return merges;
     }
 
-    /// <summary>
-    /// MERGES_WITH matchups from the ordered merge lattice: magnitude
-    /// <c>m = M − rank</c> with <c>M = RMS(rank)</c> over the list — earlier
-    /// merges (more fundamental) win, the typical rank draws, late ranks lose;
-    /// MEASURED from the list, never a knob (the same shape as the
-    /// TOKEN_MAPS_TO residual scoring). Self-contained batches: both pair
-    /// sides' content entities ride the intent (idempotent with vocab).
-    /// </summary>
     public static IEnumerable<SubstrateChange> BuildMergesBatches(
         List<(byte[] Left, byte[] Right)> merges,
         Hash128 sourceId,
@@ -425,7 +289,7 @@ public sealed class LlamaTokenizerParser
         if (merges.Count == 0) yield break;
         double sumSq = 0;
         for (int i = 0; i < merges.Count; i++) sumSq += (double)i * i;
-        double m = Math.Sqrt(sumSq / merges.Count);   // RMS of the rank positions
+        double m = Math.Sqrt(sumSq / merges.Count);
         if (m <= 0) yield break;
 
         for (int start = 0; start < merges.Count; start += batchSize)
@@ -450,9 +314,6 @@ public sealed class LlamaTokenizerParser
         }
     }
 
-    /// <summary>One merge-pair side → its content entity, self-contained in the
-    /// batch (tier-tree rows when decomposable, Blake3 fallback otherwise —
-    /// the EXACT vocab-entry rule, so merge sides converge with token entities).</summary>
     private static Hash128 ResolveMergeSide(
         SubstrateChangeBuilder b, byte[] canonical, Hash128 sourceId, Hash128 textTypeId)
     {
@@ -468,14 +329,6 @@ public sealed class LlamaTokenizerParser
         return id;
     }
 
-    /// <summary>
-    /// Categorical TOKEN_MAPS_TO fallback — used ONLY when the S³-morph is
-    /// skipped (<c>LAPLACE_SKIP_MORPH=1</c>) or degenerate (no anchored tokens /
-    /// kernel failure), so the mapping arena is never empty. Routed through the
-    /// registry (rank × source trust → φ — never a hand-coded constant). When
-    /// the morph runs, it emits the magnitude-scored form instead
-    /// (<see cref="TokenS3Morph.Emit"/>).
-    /// </summary>
     public static IEnumerable<SubstrateChange> BuildTokenMapsToCategorical(
         IReadOnlyList<TokenRecord> records,
         Hash128 sourceId,

@@ -1,22 +1,8 @@
--- consensus_signed.sql — ARCHITECTURE.md §10 signed-observation → consensus,
--- through THE fold: period staging → materialize_period_consensus.
---
--- Guards the signed-consensus law:
---   • a CONFIRM witness (s > ½) raises consensus μ ABOVE neutral (1500)
---   • a REFUTE witness (s < ½) lowers consensus μ BELOW neutral
---   • a DRAW (s = ½) leaves μ ≈ neutral
---   • trust enters as opponent φ: a trusted witness (low φ) moves μ MORE than
---     a crank (high φ) at the SAME score — not via the score
---   • observation_count plays as games: more occurrences ⇒ larger move
---   • evidence persists as PROVENANCE-ONLY rows (outcome class — no values)
---
--- Run inside a transaction and ROLLBACK — leaves no rows. RAISE EXCEPTION on any
--- failed assertion (non-zero psql exit).
 BEGIN;
 SET search_path = laplace, public;
 DO $$
 DECLARE
-    type_t   bytea := laplace_hash128_blake3('substrate/type/Type/v1');   -- bootstrapped meta-type
+    type_t   bytea := laplace_hash128_blake3('substrate/type/Type/v1');
     src      bytea := laplace_hash128_blake3('test/s10/source');
     kind     bytea := laplace_hash128_blake3('test/s10/kind');
     subj     bytea := laplace_hash128_blake3('test/s10/subject');
@@ -27,17 +13,16 @@ DECLARE
     o_crank  bytea := laplace_hash128_blake3('test/s10/obj_crank');
     o_games  bytea := laplace_hash128_blake3('test/s10/obj_manygames');
     o_one    bytea := laplace_hash128_blake3('test/s10/obj_onegame');
-    phi_trust bigint := 30000000000;    -- trusted witness opponent φ (30 ×1e9)
-    phi_crank bigint := 350000000000;   -- crank witness opponent φ   (350 ×1e9)
-    s_conf   bigint := 900000000;       -- score 0.90 (confirm) — testimony, staged only
-    s_ref    bigint := 100000000;       -- score 0.10 (refute)
-    s_draw   bigint := 500000000;       -- score 0.50 (draw)
+    phi_trust bigint := 30000000000;
+    phi_crank bigint := 350000000000;
+    s_conf   bigint := 900000000;
+    s_ref    bigint := 100000000;
+    s_draw   bigint := 500000000;
     mu_conf bigint; mu_ref bigint; mu_draw bigint;
     mu_trust bigint; mu_crank bigint; mu_many bigint; mu_one bigint;
     n_prov   bigint;
-    neutral bigint := 1500000000000;    -- 1500 ×1e9
+    neutral bigint := 1500000000000;
 BEGIN
-    -- entities (self-consistent FKs)
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
         (src,    0, type_t, NULL),
         (kind,   0, type_t, src), (subj, 0, type_t, src),
@@ -45,7 +30,6 @@ BEGIN
         (o_trust,0, type_t, src), (o_crank,0, type_t, src),
         (o_games,0, type_t, src), (o_one, 0, type_t, src);
 
-    -- EVIDENCE = PROVENANCE: who witnessed, outcome CLASS, games — no values.
     INSERT INTO attestations
         (id, subject_id, type_id, object_id, source_id, context_id,
          outcome, last_observed_at, observation_count)
@@ -61,8 +45,6 @@ BEGIN
     SELECT count(*) INTO n_prov FROM attestations WHERE type_id = kind;
     IF n_prov <> 7 THEN RAISE EXCEPTION 'FAIL: expected 7 provenance rows, got %', n_prov; END IF;
 
-    -- THE fold: the testimony (score, φ) is consumed via the period staging —
-    -- (n games, Σ score) partials per relation — then ONE set-based upsert.
     PERFORM create_period_staging();
     INSERT INTO consensus_period_staging_0
         (subject_id, type_id, object_id, phi, games, sum_score, last_ts)

@@ -1,29 +1,6 @@
--- substrate-inference-demo.sql — SQL inference over an ingested model, no GPU.
---
--- Run against a DB that has a model ingested (consensus populated):
---   psql -d laplace-dev -U laplace_admin -v ON_ERROR_STOP=1 \
---        -v src=<model-source-hex-CLI-order> -v subj=<entity-hex-CLI-order> \
---        -f scripts/substrate-inference-demo.sql
---
--- Proves three claims of the invention, each as plain SQL the substrate ships
--- (consensus is read directly — never a per-query re-aggregation of evidence):
---   A. CONTENT ROUND-TRIP — an entity's text is recovered from its own
---      content trajectory (mantissa-packed constituent codepoint ids → chars),
---      with zero model/source in the path. Identity is content.
---   B. RANKED-μ RELATEDNESS — a sorted index scan over consensus effective μ.
---   C. THE QUERY-TIME BILINEAR READ — token --EMBEDS--> channels
---      --OUTPUT_PROJECTS--> tokens, composed by a μ-ranked join (the embed→
---      unembed map; the layers' knowledge is the multi-hop extension of this).
---
--- :src  = the model's content source id, CLI-printed hex (u64-LE halves).
--- :subj = a subject entity id to inspect, in CLI-printed hex (what
---         `laplace inspect` shows). Default below = TinyLlama "Paris",
---         CLI id 72e7eea2c9fd8c5c84d10b3bc594a4cc (→ DB-order bytea via cli_id).
-
 \set ON_ERROR_STOP on
 \timing on
 
--- CLI hex (two u64 printed big-endian) -> DB bytea (per-u64 little-endian).
 CREATE OR REPLACE FUNCTION pg_temp.cli_id(h text) RETURNS bytea LANGUAGE sql IMMUTABLE AS $$
   SELECT decode(
     (SELECT string_agg(substr(h, 17-2*i, 2), '' ORDER BY i) FROM generate_series(1,8) i) ||
@@ -31,14 +8,12 @@ CREATE OR REPLACE FUNCTION pg_temp.cli_id(h text) RETURNS bytea LANGUAGE sql IMM
 CREATE OR REPLACE FUNCTION pg_temp.kind(n text) RETURNS bytea LANGUAGE sql IMMUTABLE AS $$
   SELECT public.laplace_hash128_blake3(convert_to('substrate/kind/'||n||'/v1','UTF8')) $$;
 
--- Derivable codepoint reverse map: entity id = BLAKE3(utf8(char)).
 DROP TABLE IF EXISTS cp_map;
 CREATE TEMP TABLE cp_map AS
   SELECT public.laplace_hash128_blake3(convert_to(chr(i),'UTF8')) AS id, chr(i) AS ch
   FROM generate_series(1, 1114111) i WHERE i NOT BETWEEN 55296 AND 57343;
 CREATE UNIQUE INDEX ON cp_map(id);
 
--- surface(entity) — recover text from the content trajectory (kind=1).
 CREATE OR REPLACE FUNCTION pg_temp.surface(p_id bytea) RETURNS text LANGUAGE sql STABLE AS $$
   SELECT string_agg(repeat(m.ch, GREATEST((u).run_length,1)), '' ORDER BY (u).ordinal)
   FROM laplace.physicalities p,

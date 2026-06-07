@@ -1,13 +1,3 @@
-# engine/synthesis/CMakeLists.txt
-#
-# liblaplace_synthesis.so — Substrate Synthesis: parse a recipe JSON,
-# materialize tensors from substrate state, emit a model file.
-#, this lib inherits dynamics' MKL/TBB/Spectra footprint.
-#
-# MKL/TBB sourced directly here (not assumed transitive from dynamics)
-# because the export-only SVD factoring (tensor_decompose) needs
-# LAPACK/MKL at link time.
-
 set(LAPLACE_SYNTHESIS_HEADERS
     include/laplace/synthesis/version.h
     include/laplace/synthesis/recipe.h
@@ -54,8 +44,6 @@ target_link_libraries(laplace_synthesis
     PUBLIC  laplace_core laplace_dynamics
 )
 
-# === oneMKL + oneTBB (same detection as dynamics — needed for the export-only SVD) ===
-
 option(LAPLACE_SYNTHESIS_REQUIRE_MKL
     "Fail configure if MKL/TBB not found for synthesis (production)"
     OFF)
@@ -85,7 +73,6 @@ else()
         "  Source /opt/intel/oneapi/setvars.sh and re-run cmake to enable DGEMM path.")
 endif()
 
-# bf16_decoder.c needs AVX2 when available (same icx flags as other engine sources)
 if(CMAKE_C_COMPILER_ID MATCHES "Intel")
     set_source_files_properties(src/bf16_decoder.c PROPERTIES
         COMPILE_OPTIONS "-mavx2")

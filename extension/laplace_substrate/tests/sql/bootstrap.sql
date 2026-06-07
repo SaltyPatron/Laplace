@@ -1,20 +1,9 @@
--- Smoke test for laplace_substrate bootstrap.
--- Verifies the install-time seeding ran cleanly and produced the expected
--- substrate-canonical entities + meta-attestations.
-
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION laplace_geom;
 CREATE EXTENSION laplace_substrate;
 
--- Substrate tables live in the laplace schema; engine kernels in public.
 SET search_path TO laplace, public;
 
--- The 16 canonical kind arenas must be seeded — checked by content-addressed
--- id (a semantic contract, not a brittle total-row count: adding a new kind or
--- text-tier later must NOT break bootstrap). Kind significance is the numeric
--- kind_rank, not a tier-on-kinds (truth #5); the vestigial kind-value-tier
--- entities are purged (asserted below). Provenance (HAS_TRUST_CLASS) is asserted
--- by the EXISTS check below, not by a total attestation count.
 SELECT count(*) AS canonical_kind_count FROM entities
 WHERE id IN (
     laplace_hash128_blake3('substrate/kind/IS_A/v1'::bytea),
@@ -35,15 +24,11 @@ WHERE id IN (
     laplace_hash128_blake3('substrate/kind/IS_ALIAS_OF/v1'::bytea)
 );
 
--- SubstrateCanonical source entity must exist at the expected canonical id.
 SELECT EXISTS(
     SELECT 1 FROM entities
     WHERE id = laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
 ) AS substrate_canonical_present;
 
--- The 11 vestigial kind-value-tier entities must NOT exist — purged in the L0
--- identity pass (kind significance is the numeric kind_rank, truth #5). This
--- guards against accidental re-seeding; expected count is 0.
 SELECT count(*) AS tier_count FROM entities
 WHERE id IN (
     laplace_hash128_blake3('substrate/kind_tier/T1_Mandate/v1'::bytea),
@@ -59,7 +44,6 @@ WHERE id IN (
     laplace_hash128_blake3('substrate/kind_tier/T11_Probationary/v1'::bytea)
 );
 
--- All 10 trust classes must exist.
 SELECT count(*) AS trust_class_count FROM entities
 WHERE id IN (
     laplace_hash128_blake3('substrate/trust_class/SubstrateMandate/v1'::bytea),
@@ -74,8 +58,6 @@ WHERE id IN (
     laplace_hash128_blake3('substrate/trust_class/AdversarialUntrusted/v1'::bytea)
 );
 
--- HAS_TRUST_CLASS meta-attestation on SubstrateCanonical points at
--- SubstrateMandate.
 SELECT EXISTS(
     SELECT 1 FROM attestations
     WHERE subject_id = laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
@@ -84,7 +66,6 @@ SELECT EXISTS(
       AND source_id  = laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
 ) AS substrate_canonical_trust_class_set;
 
--- FK constraints exist post-bootstrap.
 SELECT count(*) AS deferred_fk_count
 FROM pg_constraint
 WHERE conrelid = 'entities'::regclass

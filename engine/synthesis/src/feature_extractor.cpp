@@ -2,8 +2,6 @@
 
 #include <cstddef>
 
-/* Real impls land Chunk 7 Stories 7.3-7.10. Stubs satisfy linkage. */
-
 struct feature_extractor {
     int _placeholder;
 };

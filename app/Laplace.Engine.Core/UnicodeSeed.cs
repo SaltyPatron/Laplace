@@ -1,18 +1,9 @@
 namespace Laplace.Engine.Core;
 
-/// <summary>
-/// Managed wrapper for the C engine's <c>laplace_unicode_seed_compute</c> —
-/// the single function that parses UCDXML + DUCET and produces the 1,114,112
-/// per-codepoint records the substrate seed needs. Same compiled function the
-/// perf-cache emitter calls, so the C# DB seed and the on-disk blob are
-/// byte-identical siblings of one engine pass. C# marshals; never re-derives.
-/// </summary>
 public static unsafe class UnicodeSeed
 {
-    public const int CodepointCount = 0x110000;   // 1,114,112
+    public const int CodepointCount = 0x110000;
 
-    /// <summary>Computes all 1,114,112 codepoint records from the given UCD
-    /// source files into <paramref name="outRecords"/>. Throws on failure.</summary>
     public static void Compute(string ucdxmlPath, string ducetPath, Span<CodepointRecord> outRecords)
     {
         ArgumentException.ThrowIfNullOrEmpty(ucdxmlPath);
@@ -27,7 +18,6 @@ public static unsafe class UnicodeSeed
         }
     }
 
-    /// <summary>Allocating convenience: returns a fresh record array.</summary>
     public static CodepointRecord[] Compute(string ucdxmlPath, string ducetPath)
     {
         var buf = new CodepointRecord[CodepointCount];

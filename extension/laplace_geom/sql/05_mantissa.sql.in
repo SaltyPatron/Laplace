@@ -1,11 +1,3 @@
-/* 05_mantissa.sql.in — mantissa-packed payload pack/unpack.
- *
- *: each LINESTRING vertex of an entity's `trajectory` column
- * carries a 212-bit payload split across the 4 × FP64 coord components:
- *   XYZ encode the referenced entity's full BLAKE3-128 entity_id;
- *   M encodes per-vertex metadata (ordinal, run_length, 52 reserved flag bits).
- */
-
 CREATE FUNCTION @extschema@.laplace_mantissa_pack(
         entity_id  bytea,
         ordinal    integer,
@@ -15,9 +7,6 @@ CREATE FUNCTION @extschema@.laplace_mantissa_pack(
     AS 'MODULE_PATHNAME', 'pg_laplace_mantissa_pack'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
 
-COMMENT ON FUNCTION @extschema@.laplace_mantissa_pack(bytea, integer, integer, bigint) IS
-'Pack (entity_id, ordinal, run_length, flags) into a POINT4D mantissa-payload vertex.';
-
 CREATE FUNCTION @extschema@.laplace_mantissa_unpack(vertex geometry,
         OUT entity_id  bytea,
         OUT ordinal    integer,
@@ -25,6 +14,3 @@ CREATE FUNCTION @extschema@.laplace_mantissa_unpack(vertex geometry,
         OUT flags      bigint)
     AS 'MODULE_PATHNAME', 'pg_laplace_mantissa_unpack'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
-
-COMMENT ON FUNCTION @extschema@.laplace_mantissa_unpack(geometry) IS
-'Inverse of laplace_mantissa_pack: POINT4D mantissa-payload vertex → (entity_id, ordinal, run_length, flags).';

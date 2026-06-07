@@ -3,20 +3,6 @@ using Xunit;
 
 namespace Laplace.Engine.Core.Tests;
 
-/// <summary>
-/// Loads the T0 codepoint perf-cache once for tests that exercise the engine
-/// text-decomposition path. After the build decoupled liblaplace_core from
-/// the UCD source (the UAX#29/UAX#15 state machines read properties from the
-/// runtime-loaded perf-cache, not compiled-in tables), any consumer of
-/// <see cref="TextDecomposer"/> / HashComposer must load the blob first — this fixture
-/// is the test-side of that contract.
-///
-/// Locates the blob via (1) <c>LAPLACE_PERFCACHE_BIN</c>, (2) the installed
-/// <c>/opt/laplace/share/laplace/</c>, (3) a <c>build*/**/perfcache/</c> tree
-/// under the repo. Fails loud if none is found — the blob is a genuine
-/// prerequisite (built by <c>just build</c> / the <c>laplace_t0_perfcache</c>
-/// target), not an optional fixture.
-/// </summary>
 public sealed class PerfcacheTestFixture : IDisposable
 {
     public string BlobPath { get; }
@@ -59,7 +45,5 @@ public sealed class PerfcacheTestFixture : IDisposable
     }
 }
 
-/// <summary>Shared across every test class that needs the perf-cache loaded.
-/// Process-wide native global state ⇒ one load for the whole collection.</summary>
 [CollectionDefinition("Perfcache")]
 public sealed class PerfcacheCollection : ICollectionFixture<PerfcacheTestFixture> { }

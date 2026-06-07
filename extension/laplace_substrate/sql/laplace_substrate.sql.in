@@ -1,8 +1,3 @@
-/* extension/laplace_substrate/sql/laplace_substrate.sql.in
- *
- * Entry point for the laplace_substrate extension install script.
- * — #includes the numbered modules in load order. */
-
 #include "sqldefines.h"
 
 #include "01_schema.sql.in"

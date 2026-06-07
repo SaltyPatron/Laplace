@@ -7,9 +7,6 @@ namespace Laplace.Engine.Core.Tests;
 
 public class HashComposerTests
 {
-    /// <summary>Synthetic resolver: maps atom -> (BLAKE3(atom_le_bytes),
-    /// coord = atom/1000 along x, hilbert = encode(coord)). Static + Cdecl
-    /// so we can take its function-pointer address.</summary>
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(System.Runtime.CompilerServices.CallConvCdecl) })]
     private static unsafe int SynthResolver(
         uint atom, IntPtr userData, Hash128* outId, double* outCoord, Hilbert128* outHb)
@@ -45,7 +42,7 @@ public class HashComposerTests
         using var t = TierTree.New(8);
         t.AddLeaf(0, 100, 0, 1);
         t.AddLeaf(0, 101, 1, 1);
-        t.AddNode(1, 0, 2, 0, 2);  // idx 2
+        t.AddNode(1, 0, 2, 0, 2);
         unsafe { HashComposer.Run(t, &SynthResolver); }
 
         var leaf0 = Hash128.Blake3(new byte[] { 100, 0, 0, 0 });

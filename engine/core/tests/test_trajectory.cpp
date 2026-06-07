@@ -6,11 +6,6 @@
 #include "laplace/core/trajectory.h"
 #include "laplace/core/hash128.h"
 
-/* Lossless both ways: N constituent hashes → mantissa-packed XYZM buffer →
- * N hashes back, byte-identical, in order. This is the substrate's
- * content-trajectory packing; it must be exactly reversible or content
- * reconstruction from the DB cannot be bit-perfect. */
-
 TEST(LaplaceCoreTrajectory, BuildThenConstituentsRoundTrips) {
     std::vector<hash128_t> in(5);
     for (size_t i = 0; i < in.size(); ++i) {
@@ -30,10 +25,8 @@ TEST(LaplaceCoreTrajectory, BuildThenConstituentsRoundTrips) {
 }
 
 TEST(LaplaceCoreTrajectory, EveryVertexIsGeometryValidDouble) {
- // : each packed component must be a finite normal double in
-    // [1,2)∪(-2,-1] so PG geometry accepts it (no NaN/inf).
     std::vector<hash128_t> in(3);
-    for (auto& h : in) { h.hi = ~0ull; h.lo = ~0ull; }   // all-ones: worst case
+    for (auto& h : in) { h.hi = ~0ull; h.lo = ~0ull; }
     std::vector<double> xyzm(in.size() * 4);
     ASSERT_EQ(0, trajectory_build(in.data(), in.size(), xyzm.data()));
     for (double d : xyzm) {
@@ -44,8 +37,6 @@ TEST(LaplaceCoreTrajectory, EveryVertexIsGeometryValidDouble) {
 }
 
 TEST(LaplaceCoreTrajectory, RejectsOverwideTrajectory) {
-    // ordinal is uint16 — a single trajectory caps at 65535 direct
-    // constituents (tier deeper instead of widening).
     EXPECT_NE(0, trajectory_build(nullptr, 70000, nullptr));
 }
 
@@ -56,10 +47,7 @@ TEST(LaplaceCoreTrajectory, EmptyTrajectoryIsValid) {
     EXPECT_EQ(0, trajectory_constituents(nullptr, 0, &out_dummy, 1));
 }
 
-// --- RLE variant tests ---
-
 TEST(LaplaceCoreTrajectoryRle, AllDistinctMatchesVertexCount) {
-    // No runs: vertex count must equal n, and entity round-trip is lossless
     std::vector<hash128_t> in(5);
     for (size_t i = 0; i < in.size(); ++i) {
         in[i].hi = i + 1;
@@ -80,7 +68,6 @@ TEST(LaplaceCoreTrajectoryRle, AllDistinctMatchesVertexCount) {
 }
 
 TEST(LaplaceCoreTrajectoryRle, ConsecutiveDuplicatesCollapse) {
-    // [A, A, B, C, C] → 3 vertices; each vertex round-trips to the correct entity
     hash128_t A = {}; A.hi = 1; A.lo = 1;
     hash128_t B = {}; B.hi = 2; B.lo = 2;
     hash128_t C = {}; C.hi = 3; C.lo = 3;

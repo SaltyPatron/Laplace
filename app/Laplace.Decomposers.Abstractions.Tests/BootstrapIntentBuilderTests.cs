@@ -17,9 +17,7 @@ public class BootstrapIntentBuilderTests
     {
         var b = new BootstrapIntentBuilder(SourceId, "UnicodeDecomposer", TrustClassId);
         var change = b.Build();
-        // First entity is the source itself
         Assert.Contains(change.Entities, e => e.Id == SourceId);
-        // Source's type_id is the canonical Source type
         var srcRow = change.Entities.First(e => e.Id == SourceId);
         Assert.Equal(BootstrapIntentBuilder.SourceTypeId, srcRow.TypeId);
     }
@@ -53,8 +51,6 @@ public class BootstrapIntentBuilderTests
     {
         var b = new BootstrapIntentBuilder(SourceId, "TestDecomposer", TrustClassId);
         var change = b.Build();
-        // The bootstrap also seeds the canonical-kind taxonomy (is_a-on-kinds);
-        // among those, exactly one trust-class attestation, and it's correct.
         var a = Assert.Single(change.Attestations,
             x => x.TypeId == BootstrapIntentBuilder.HasTrustClassTypeId);
         Assert.Equal(SourceId, a.SubjectId);
@@ -83,9 +79,6 @@ public class BootstrapIntentBuilderTests
     [Fact]
     public void CanonicalIdConventions_AreStable()
     {
-        // These are load-bearing — every decomposer derives type/kind IDs
-        // from BLAKE3 of this canonical-name convention; tests pin the
-        // convention so cross-decomposer entity convergence works.
         Assert.Equal(Hash128.OfCanonical("substrate/type/Source/v1"),
                      BootstrapIntentBuilder.SourceTypeId);
         Assert.Equal(Hash128.OfCanonical("substrate/type/Type/v1"),

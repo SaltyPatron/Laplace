@@ -1,68 +1,34 @@
-/* 06_st_4d.sql.in — ST_*_4d function family.
- *
- *: extend PostGIS, never replace. Standard PostGIS
- * `geometry` with Z+M flags = 4D. Custom functions ONLY where PostGIS
- * is 2D/3D-only (centroid, distance, dwithin, Fréchet, Hausdorff,
- * radius-from-origin).
- *
- * Engine kernels in liblaplace_core operate on POINT4D / POINTARRAY
- * raw double buffers ( — POINT4D from liblwgeom IS the
- * canonical type; the engine sees raw `double*` since liblaplace_core
- * stays free of liblwgeom dependency).
- */
-
 CREATE FUNCTION @extschema@.laplace_distance_4d(a geometry, b geometry)
     RETURNS double precision
     AS 'MODULE_PATHNAME', 'pg_laplace_distance_4d'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
-
-COMMENT ON FUNCTION @extschema@.laplace_distance_4d(geometry, geometry) IS
-'Euclidean 4D distance between two POINT geometries (missing Z/M default to 0).';
 
 CREATE FUNCTION @extschema@.laplace_angular_distance_4d(a geometry, b geometry)
     RETURNS double precision
     AS 'MODULE_PATHNAME', 'pg_laplace_angular_distance_4d'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
 
-COMMENT ON FUNCTION @extschema@.laplace_angular_distance_4d(geometry, geometry) IS
-'Geodesic (angular) distance on the unit 3-sphere S³ between two POINT geometries: acos(â·b̂) over the normalized XYZM vectors. This is the structural-geometry metric — Karcher/Fréchet means and S³ neighbor queries use this, NOT the Euclidean chord distance.';
-
 CREATE FUNCTION @extschema@.laplace_dwithin_4d(a geometry, b geometry, eps double precision)
     RETURNS boolean
     AS 'MODULE_PATHNAME', 'pg_laplace_dwithin_4d'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
-
-COMMENT ON FUNCTION @extschema@.laplace_dwithin_4d(geometry, geometry, double precision) IS
-'4D within-epsilon predicate: distance(a,b) ≤ eps. Uses squared distance internally to avoid sqrt.';
 
 CREATE FUNCTION @extschema@.laplace_centroid_4d(g geometry)
     RETURNS geometry
     AS 'MODULE_PATHNAME', 'pg_laplace_centroid_4d'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
 
-COMMENT ON FUNCTION @extschema@.laplace_centroid_4d(geometry) IS
-'Centroid of a geometry''s vertices in 4D (POINT, LINESTRING, or MULTIPOINT input → POINT output).';
-
 CREATE FUNCTION @extschema@.laplace_radius_origin(p geometry)
     RETURNS double precision
     AS 'MODULE_PATHNAME', 'pg_laplace_radius_origin'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
-
-COMMENT ON FUNCTION @extschema@.laplace_radius_origin(geometry) IS
-'Euclidean 4D distance from a POINT to the origin (norm of the XYZM vector).';
 
 CREATE FUNCTION @extschema@.laplace_frechet_4d(a geometry, b geometry)
     RETURNS double precision
     AS 'MODULE_PATHNAME', 'pg_laplace_frechet_4d'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
 
-COMMENT ON FUNCTION @extschema@.laplace_frechet_4d(geometry, geometry) IS
-'Discrete Fréchet distance (Eiter-Mannila 1994) between two 4D LINESTRING/POINT/MULTIPOINT geometries.';
-
 CREATE FUNCTION @extschema@.laplace_hausdorff_4d(a geometry, b geometry)
     RETURNS double precision
     AS 'MODULE_PATHNAME', 'pg_laplace_hausdorff_4d'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
-
-COMMENT ON FUNCTION @extschema@.laplace_hausdorff_4d(geometry, geometry) IS
-'Symmetric Hausdorff distance between two 4D POINT/MULTIPOINT/LINESTRING geometries.';

@@ -6,33 +6,6 @@ using Npgsql;
 
 namespace Laplace.Migrations;
 
-/// <summary>
-/// DbUp-based migration runner for Laplace's Layer 1 — extension lifecycle
-/// orchestration. (DbUp + Npgsql) + (extension owns
-/// schema; DbUp orchestrates).
-///
-/// Scope: ensure the 'laplace' database exists, CREATE EXTENSION postgis +
-/// laplace (or ALTER EXTENSION laplace UPDATE), apply role grants. The
-/// substrate schema itself (entities/physicalities/attestations) is owned
-/// by the laplace extension's .sql files, NOT by DbUp migrations.
-///
-/// Usage:
-///   dotnet run --project app/Laplace.Migrations -- [up|status|reset|nuke]
-///
-/// Commands:
-///   up      EnsureDatabase + apply pending migrations (default)
-///   status  Show applied + pending migrations
-///   reset   Drop the DbUp 'SchemaVersions' table — re-applies on next 'up'.
-///           Does NOT drop the database or extensions.
-///   nuke    DROP DATABASE laplace + re-create empty. Full Layer-1 reset.
-///           Requires typing 'NUKE' to confirm.
-///
-/// Connection is read from (priority order):
-///   1. --connection-string &lt;value&gt; CLI arg
-///   2. DATABASE_URL env var (Npgsql connection-string format or postgres:// URL)
-///   3. PG_* env vars (PGHOST, PGUSER, PGDATABASE, PGPORT)
-///   4. Default: peer auth → laplace_admin role on local socket, db=laplace
-/// </summary>
 internal static class Program
 {
     public static int Main(string[] args)
@@ -69,12 +42,6 @@ internal static class Program
 
     private static int RunUp(string connectionString)
     {
-        // EnsureDatabase: connect to maintenance DB ('postgres') as our role,
-        // create the target DB if missing. laplace_admin is SUPERUSER per
-        // bootstrap_pg_roles, so the migration's CREATE EXTENSION postgis
-        // works against the empty DB without any template-DB or
-        // laplace_priv wrapper machinery., the database
-        // itself is a Layer-1 concern.
         EnsureDatabase.For.PostgresqlDatabase(connectionString);
 
         var engine = BuildEngine(connectionString);
@@ -124,11 +91,6 @@ internal static class Program
         return 0;
     }
 
-    /// <summary>Destructive-command gate. Non-interactive callers (Justfile,
-    /// CI, scripts) pass <c>--yes</c> or set <c>LAPLACE_CONFIRM=&lt;token&gt;</c> —
-    /// piping the token through `dotnet run`'s stdin is NOT reliable (MSBuild
-    /// can consume the pipe before the app reads it; bit db-fresh 2026-06-05).
-    /// Interactive callers still type the token.</summary>
     private static bool Confirmed(string token)
     {
         if (Environment.GetCommandLineArgs().Contains("--yes")) return true;
@@ -149,14 +111,6 @@ internal static class Program
         }
         using var conn = new NpgsqlConnection(connectionString);
         conn.Open();
-        // DbUp's default CREATE TABLE for the journal uses the unquoted
-        // identifier `SchemaVersions`, which PostgreSQL case-folds to
-        // `schemaversions`. A quoted DROP "SchemaVersions" matches
-        // nothing (silently no-ops via IF EXISTS), leaving the journal
-        // intact and the next `up` reporting "No new scripts." Match the
-        // case-folded name explicitly. BuildEngine() pins this in code
-        // via JournalToPostgresqlTable("public", "schemaversions") so
-        // this contract isn't relying on PG's case-folding default.
         using var cmd = new NpgsqlCommand(
             "DROP TABLE IF EXISTS public.schemaversions", conn);
         cmd.ExecuteNonQuery();
@@ -179,12 +133,10 @@ internal static class Program
             return 1;
         }
 
-        // Connect to maintenance DB to drop + recreate the target.
         var maintenance = new NpgsqlConnectionStringBuilder(connectionString) { Database = "postgres" };
         using var conn = new NpgsqlConnection(maintenance.ConnectionString);
         conn.Open();
 
-        // Terminate other sessions on the target DB so DROP isn't blocked.
         using (var term = new NpgsqlCommand(
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity " +
             "WHERE datname = @db AND pid <> pg_backend_pid()", conn))
@@ -193,16 +145,12 @@ internal static class Program
             term.ExecuteNonQuery();
         }
 
-        // Quote the database name to defend against any future weird naming.
         var quoted = '"' + targetDb.Replace("\"", "\"\"") + '"';
         using (var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS {quoted}", conn))
         {
             drop.ExecuteNonQuery();
             Console.WriteLine($"[migrate nuke] Dropped {targetDb}.");
         }
-        // Recreate empty. laplace_admin is SUPERUSER so the next `db-up`
-        // can CREATE EXTENSION postgis + laplace_geom + laplace_substrate
-        // without any template machinery.
         using (var create = new NpgsqlCommand(
             $"CREATE DATABASE {quoted} OWNER laplace_admin", conn))
         {
@@ -222,20 +170,8 @@ internal static class Program
         return DeployChanges.To
             .PostgresqlDatabase(connectionString)
             .WithScriptsFromFileSystem(migrationsDir)
-            // Pin the journal table name to lowercase explicitly so the
-            // identity is documented in code instead of relying on
-            // PostgreSQL's unquoted-identifier case-folding. Matches what
-            // DbUp produces by default; RunReset() drops by this same name.
             .JournalToPostgresqlTable("public", "schemaversions")
-            // Migrations are plain PostgreSQL DDL — none uses DbUp's $var$
-            // substitution, and leaving it on makes DbUp misparse PG
-            // dollar-quote tags as variables ("Variable f has no value
-            // defined" on $f$…$f$ in 20260605050000).
             .WithVariablesDisabled()
-            // Substrate-scale DDL (index builds over 10⁸-row consensus/evidence
-            // tables) outlives Npgsql's 30 s default CommandTimeout — the
-            // 20260604220000 index build timed out client-side mid-CREATE.
-            // Migrations are deliberate, supervised runs; give them four hours.
             .WithExecutionTimeout(TimeSpan.FromHours(4))
             .LogToConsole()
             .Build();
@@ -243,8 +179,6 @@ internal static class Program
 
     private static string LocateMigrationsDir()
     {
-        // Walk up from the assembly location looking for the repo's db/migrations dir.
-        // CI sets working dir to repo root, but local invocations may run from elsewhere.
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir != null)
         {
@@ -252,7 +186,6 @@ internal static class Program
             if (Directory.Exists(candidate)) return candidate;
             dir = dir.Parent;
         }
-        // Fallback to CWD/db/migrations.
         var cwdCandidate = Path.Combine(Directory.GetCurrentDirectory(), "db", "migrations");
         if (Directory.Exists(cwdCandidate)) return cwdCandidate;
         throw new DirectoryNotFoundException(
@@ -261,7 +194,6 @@ internal static class Program
 
     private static string ResolveConnectionString(string[] args)
     {
-        // CLI override
         for (int i = 0; i < args.Length - 1; i++)
         {
             if (args[i] == "--connection-string") return args[i + 1];
@@ -272,20 +204,15 @@ internal static class Program
         var fromEnv = config["DATABASE_URL"];
         if (!string.IsNullOrWhiteSpace(fromEnv))
         {
-            // DATABASE_URL may be in URL format (postgres://...) or Npgsql key-value format.
             return fromEnv.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)
                 ? ParsePostgresUrl(fromEnv)
                 : fromEnv;
         }
 
-        // PG_* env vars (libpq convention)
         var builder = new NpgsqlConnectionStringBuilder
         {
             Host = config["PGHOST"] ?? "/var/run/postgresql",
             Username = config["PGUSER"] ?? "laplace_admin",
-            // Dev-default: unset PGDATABASE → laplace-dev (safe). CI/prod sets
-            // PGDATABASE=laplace (via setup-laplace-env) to override. A missed
-            // override targets the dev DB, never nukes prod.
             Database = config["PGDATABASE"] ?? "laplace-dev",
         };
         if (int.TryParse(config["PGPORT"], out var port)) builder.Port = port;
@@ -296,7 +223,6 @@ internal static class Program
 
     private static string ParsePostgresUrl(string url)
     {
-        // postgres://user:password@host:port/dbname?param=value
         var uri = new Uri(url);
         var b = new NpgsqlConnectionStringBuilder
         {
@@ -346,8 +272,6 @@ internal static class Program
               DATABASE_URL env var
               PG_* env vars (PGHOST, PGUSER, PGDATABASE, PGPORT, PGPASSWORD)
               Default: peer auth → laplace_admin on /var/run/postgresql, db=laplace
-
-            See (DbUp + Npgsql) + (extension owns schema).
             """);
         return 64;
     }

@@ -9,36 +9,22 @@
 
 namespace {
 
-/* Helper: build a tiny 3-level tree:
- *
- *       root (tier=2, idx=6)
- *       / \
- *  inter0  inter1   (tier=1, idx=4,5)
- *   / \      |
- *  L0 L1    L2-L3  (tier=0, idx=0..3, atoms 100..103)
- *
- * Returns the tree (caller frees) with root index in *out_root.
- */
 tier_tree_t* build_sample_tree(uint32_t* out_root) {
     tier_tree_t* t = tier_tree_new(8);
     EXPECT_NE(nullptr, t);
-    /* leaves (4) */
     EXPECT_EQ(0u, tier_tree_add_leaf(t, 0, 100, 0, 1));
     EXPECT_EQ(1u, tier_tree_add_leaf(t, 0, 101, 1, 1));
     EXPECT_EQ(2u, tier_tree_add_leaf(t, 0, 102, 2, 1));
     EXPECT_EQ(3u, tier_tree_add_leaf(t, 0, 103, 3, 1));
-    /* inter0: children [0..1] */
     EXPECT_EQ(4u, tier_tree_add_node(t, 1, 0, 2, 0, 2));
-    /* inter1: children [2..3] */
     EXPECT_EQ(5u, tier_tree_add_node(t, 1, 2, 2, 2, 2));
-    /* root: children [4..5] */
     EXPECT_EQ(6u, tier_tree_add_node(t, 2, 4, 2, 0, 4));
     EXPECT_EQ(0, tier_tree_finalize(t));
     *out_root = 6;
     return t;
 }
 
-} // namespace
+}
 
 TEST(LaplaceCoreTierTree, NewWithZeroCapacityProducesEmpty) {
     tier_tree_t* t = tier_tree_new(0);
@@ -57,16 +43,16 @@ TEST(LaplaceCoreTierTree, NewWithCapacityHintAllocates) {
 }
 
 TEST(LaplaceCoreTierTree, FreeNullIsSafe) {
-    tier_tree_free(nullptr);  /* must not crash */
+    tier_tree_free(nullptr);
     SUCCEED();
 }
 
 TEST(LaplaceCoreTierTree, AddLeafReturnsSequentialIndices) {
     tier_tree_t* t = tier_tree_new(4);
     ASSERT_NE(nullptr, t);
-    EXPECT_EQ(0u, tier_tree_add_leaf(t, 0, 65, 0, 1));   /* 'A' */
-    EXPECT_EQ(1u, tier_tree_add_leaf(t, 0, 66, 1, 1));   /* 'B' */
-    EXPECT_EQ(2u, tier_tree_add_leaf(t, 0, 67, 2, 1));   /* 'C' */
+    EXPECT_EQ(0u, tier_tree_add_leaf(t, 0, 65, 0, 1));
+    EXPECT_EQ(1u, tier_tree_add_leaf(t, 0, 66, 1, 1));
+    EXPECT_EQ(2u, tier_tree_add_leaf(t, 0, 67, 2, 1));
     EXPECT_EQ(3u, tier_tree_node_count(t));
     tier_tree_free(t);
 }
@@ -74,7 +60,6 @@ TEST(LaplaceCoreTierTree, AddLeafReturnsSequentialIndices) {
 TEST(LaplaceCoreTierTree, AddNodeRejectsChildRangeOutOfBounds) {
     tier_tree_t* t = tier_tree_new(4);
     ASSERT_NE(nullptr, t);
-    /* No nodes yet — referring to children [0..1] is invalid */
     EXPECT_EQ(TIER_TREE_INVALID, tier_tree_add_node(t, 1, 0, 2, 0, 2));
     EXPECT_EQ(0u, tier_tree_node_count(t));
     tier_tree_free(t);
@@ -83,9 +68,7 @@ TEST(LaplaceCoreTierTree, AddNodeRejectsChildRangeOutOfBounds) {
 TEST(LaplaceCoreTierTree, AddNodeRejectsMalformedSentinel) {
     tier_tree_t* t = tier_tree_new(4);
     ASSERT_NE(nullptr, t);
-    /* child_count==0 + first_child_idx not sentinel is malformed */
     EXPECT_EQ(TIER_TREE_INVALID, tier_tree_add_node(t, 1, 0, 0, 0, 0));
-    /* child_count>0 + first_child_idx==INVALID is malformed */
     EXPECT_EQ(TIER_TREE_INVALID, tier_tree_add_node(t, 1, TIER_TREE_INVALID, 1, 0, 0));
     tier_tree_free(t);
 }
@@ -127,8 +110,8 @@ TEST(LaplaceCoreTierTree, GetNodeRejectsOutOfBounds) {
     ASSERT_NE(nullptr, t);
     tier_tree_add_leaf(t, 0, 1, 0, 0);
     tier_node_view_t v;
-    EXPECT_NE(0, tier_tree_get_node(t, 1, &v));   /* idx == count */
-    EXPECT_NE(0, tier_tree_get_node(t, 100, &v)); /* way past */
+    EXPECT_NE(0, tier_tree_get_node(t, 1, &v));
+    EXPECT_NE(0, tier_tree_get_node(t, 100, &v));
     EXPECT_NE(0, tier_tree_get_node(t, 0, nullptr));
     EXPECT_NE(0, tier_tree_get_node(nullptr, 0, &v));
     tier_tree_free(t);
@@ -138,16 +121,12 @@ TEST(LaplaceCoreTierTree, FinalizeSetsParentForEveryNonRootNode) {
     uint32_t root = TIER_TREE_INVALID;
     tier_tree_t* t = build_sample_tree(&root);
     tier_node_view_t v;
-    /* leaves 0..1 -> parent 4 */
     EXPECT_EQ(0, tier_tree_get_node(t, 0, &v)); EXPECT_EQ(4u, v.parent_idx);
     EXPECT_EQ(0, tier_tree_get_node(t, 1, &v)); EXPECT_EQ(4u, v.parent_idx);
-    /* leaves 2..3 -> parent 5 */
     EXPECT_EQ(0, tier_tree_get_node(t, 2, &v)); EXPECT_EQ(5u, v.parent_idx);
     EXPECT_EQ(0, tier_tree_get_node(t, 3, &v)); EXPECT_EQ(5u, v.parent_idx);
-    /* inter 4..5 -> parent 6 */
     EXPECT_EQ(0, tier_tree_get_node(t, 4, &v)); EXPECT_EQ(6u, v.parent_idx);
     EXPECT_EQ(0, tier_tree_get_node(t, 5, &v)); EXPECT_EQ(6u, v.parent_idx);
-    /* root -> no parent */
     EXPECT_EQ(0, tier_tree_get_node(t, root, &v)); EXPECT_EQ(TIER_TREE_INVALID, v.parent_idx);
     tier_tree_free(t);
 }
@@ -155,7 +134,6 @@ TEST(LaplaceCoreTierTree, FinalizeSetsParentForEveryNonRootNode) {
 TEST(LaplaceCoreTierTree, FinalizeIsIdempotent) {
     uint32_t root = TIER_TREE_INVALID;
     tier_tree_t* t = build_sample_tree(&root);
-    /* second finalize must produce identical state */
     EXPECT_EQ(0, tier_tree_finalize(t));
     tier_node_view_t v;
     EXPECT_EQ(0, tier_tree_get_node(t, 0, &v));
@@ -213,7 +191,7 @@ TEST(LaplaceCoreTierTree, SettersRejectOutOfBounds) {
     hash128_t h; hash128_zero(&h);
     double c[4] = {0};
     hilbert128_t hb; memset(&hb, 0, sizeof(hb));
-    EXPECT_NE(0, tier_tree_set_id(t, 0, &h));        /* count is 0 */
+    EXPECT_NE(0, tier_tree_set_id(t, 0, &h));
     EXPECT_NE(0, tier_tree_set_coord(t, 0, c));
     EXPECT_NE(0, tier_tree_set_hilbert(t, 0, &hb));
     EXPECT_NE(0, tier_tree_set_id(nullptr, 0, &h));
@@ -263,7 +241,6 @@ TEST(LaplaceCoreTierTree, MutableArraysAllowComposerFill) {
     ASSERT_NE(nullptr, ids);
     ASSERT_NE(nullptr, coords);
 
-    /* Simulate hash_composer filling root id + coord */
     ids[root].hi = 0xDEADBEEFCAFEBABEull;
     ids[root].lo = 0x0123456789ABCDEFull;
     coords[root * 4 + 0] = 0.5;
@@ -298,15 +275,12 @@ TEST(LaplaceCoreTierTree, AddNodeRejectsOverflowingChildRange) {
     tier_tree_t* t = tier_tree_new(4);
     ASSERT_NE(nullptr, t);
     tier_tree_add_leaf(t, 0, 1, 0, 0);
-    /* first_child_idx + child_count would wrap u32 -> reject */
     EXPECT_EQ(TIER_TREE_INVALID,
               tier_tree_add_node(t, 1, UINT32_MAX - 1, 5, 0, 0));
     tier_tree_free(t);
 }
 
 TEST(LaplaceCoreTierTree, ParentIdxInvariantHoldsBeforeFinalize) {
-    /* Before finalize, parent_idx is INVALID for every node. After
-     * finalize, it's INVALID only for the root. */
     tier_tree_t* t = tier_tree_new(4);
     ASSERT_NE(nullptr, t);
     tier_tree_add_leaf(t, 0, 1, 0, 0);

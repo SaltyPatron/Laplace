@@ -1,30 +1,9 @@
-/* 02_entities.sql.in — entities table.
- *
- * Entities are pure identity: id + tier + type_id + lightweight metadata.
- * No geometry, no trajectory, no canonical_coord -- those live on
- * physicalities ( schema reorganization). The id column-role
- * is "id"; the value IS a BLAKE3-128 hash of canonical (type-canonicalized)
- * content bytes. */
-
 CREATE TABLE entities (
     id                 bytea            PRIMARY KEY CHECK (octet_length(id) = 16),
     tier               smallint         NOT NULL CHECK (tier >= 0 AND tier < 256),
-    type_id            bytea            NOT NULL,                                   -- FK to entities(id) added in 99_constraints.sql.in after bootstrap rows exist
+    type_id            bytea            NOT NULL,
     first_observed_by  bytea,
     created_at         timestamptz      NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE entities IS
-    'Pure identity layer. One row per unique observed n-gram, content-addressed by BLAKE3-128 of canonical content bytes per type. No geometry on this table -- that lives on physicalities. type_id and first_observed_by are FKs to entities(id); the FK constraints are added after bootstrap to allow the self-referential meta-type rows to insert.';
-
-COMMENT ON COLUMN entities.id IS
-    'BLAKE3-128 of canonical content bytes per the entity type. Column-role is "id"; value IS a hash. Raw bytes only -- no hex, no casts.';
-COMMENT ON COLUMN entities.tier IS
-    'Stratum in the Merkle DAG. T0 = atoms (Codepoint), T1 = graphemes/word-forms (modality-dependent), etc. Metadata, not knowledge.';
-COMMENT ON COLUMN entities.type_id IS
-    'FK to entities(id) -- the type entity (Text / Pixel / Codepoint / Language / Model_Recipe / WordNet_Synset / ...). Drives canonicalization, decomposition, reconstruction, and modality-applicable attestation kinds.';
-COMMENT ON COLUMN entities.first_observed_by IS
-    'FK to entities(id) -- the source entity that first ingested this content. Nullable for bootstrap meta-type and substrate-canonical source rows.';
-
-/* Ensure substrate data survives pg_dump. */
 SELECT pg_extension_config_dump('entities', '');

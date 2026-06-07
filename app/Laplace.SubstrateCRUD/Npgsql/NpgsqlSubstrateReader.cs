@@ -4,11 +4,6 @@ using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
-/// <summary>
-/// Npgsql-backed <see cref="ISubstrateReader"/> implementation. Read-only
-/// view used by IngestRunner for layer-ordering checks +
-/// by IDecomposer.InitializeAsync for bootstrap verification.
-/// </summary>
 public sealed class NpgsqlSubstrateReader : ISubstrateReader
 {
     private readonly NpgsqlDataSource _ds;
@@ -16,16 +11,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     public NpgsqlSubstrateReader(NpgsqlDataSource dataSource)
         => _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
 
-    /// <inheritdoc/>
-    /// <remarks>
-    /// Probes for the layer's HasLayerCompleted marker attestation — the
-    /// completion marker each decomposer run records at end of layer, which
-    /// the IngestRunner's layer gate reads.
-    /// </remarks>
     public async Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
     {
-        // Marker kind id resolved by the substrate's own canonical_id — the
-        // app layer never hand-builds a blake3/convert_to expression.
         await using var cmd = _ds.CreateCommand(
             "SELECT laplace.evidence_count(p_type => laplace.canonical_id($1)) > 0");
         cmd.Parameters.AddWithValue(NpgsqlDbType.Text,
@@ -37,13 +24,10 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         }
         catch (PostgresException)
         {
-            // Function or kind not yet present (pre-bootstrap or test DB) — treat
-            // as "not completed" rather than throwing.
             return false;
         }
     }
 
-    /// <inheritdoc/>
     public async Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default)
     {
         await using var cmd = _ds.CreateCommand(
@@ -58,12 +42,10 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         }
         catch (PostgresException)
         {
-            // Pre-bootstrap / test DB without the surface — treat as "not completed".
             return false;
         }
     }
 
-    /// <inheritdoc/>
     public async Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default)
     {
         await using var cmd = _ds.CreateCommand(
@@ -73,13 +55,11 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         return result is long l ? l : 0L;
     }
 
-    /// <inheritdoc/>
     public async Task<byte[]> EntitiesExistBitmapAsync(IReadOnlyList<Hash128> candidates, CancellationToken ct = default)
     {
         if (candidates is null) throw new ArgumentNullException(nameof(candidates));
         if (candidates.Count == 0) return Array.Empty<byte>();
 
-        // Marshal candidates to a bytea[] for the SRF call.
         var byteaArray = new byte[candidates.Count][];
         for (int i = 0; i < candidates.Count; i++) byteaArray[i] = candidates[i].ToBytes();
 

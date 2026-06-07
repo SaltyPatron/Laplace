@@ -1,7 +1,1 @@
-/* 03_hash128_ops.sql.in — laplace_btree_hash128_ops B-tree opclass.
- *
- *: substrate-specific B-tree opclass on bytea optimized
- * for 16-byte BLAKE3-truncated hash comparison. Non-default — opted
- * into via index DDL: CREATE INDEX ... USING btree (hash laplace_btree_hash128_ops).
- *
- * Real opclass + support functions land Chunk 1 Story 1.14. */
+

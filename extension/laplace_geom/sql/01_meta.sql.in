@@ -1,10 +1,4 @@
-/* 01_meta.sql.in — extension identity + version check.
- *. Real wrapper SQL for laplace_geom_version() lives here. */
-
 CREATE FUNCTION laplace_geom_version()
     RETURNS text
     AS 'MODULE_PATHNAME', 'pg_laplace_geom_version'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
-
-COMMENT ON FUNCTION laplace_geom_version() IS
-    'Returns the laplace_geom extension version (linked against liblaplace_core).';

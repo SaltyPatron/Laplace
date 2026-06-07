@@ -3,11 +3,6 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Engine.Core.Tests;
 
-/// <summary>
-/// Exercises the engine text-decomposition path, which (post-decouple) reads
-/// segmentation + NFC properties from the runtime-loaded perf-cache — hence
-/// the <see cref="PerfcacheTestFixture"/> via the "Perfcache" collection.
-/// </summary>
 [Collection("Perfcache")]
 public class TextDecomposerTests
 {
@@ -82,29 +77,21 @@ public class TextDecomposerTests
     [Fact]
     public void DistinctNormalizationForms_StayDistinct()
     {
-        // No NFC at ingest: precomposed é (U+00E9, one codepoint) and decomposed
-        // e + combining acute (U+0065 U+0301, two codepoints) are different
-        // observed forms → distinct content-addressed entities, linked later by
-        // a canonical-equivalence attestation, never collapsed at the door.
         using var pre = TextDecomposer.Run(new byte[] { 0xC3, 0xA9 });
         using var dec = TextDecomposer.Run(new byte[] { 0x65, 0xCC, 0x81 });
-        Assert.NotEqual(pre.NodeCount, dec.NodeCount);   // 1 vs 2 codepoint leaves
-        Assert.Equal(0x00E9u, pre.GetNode(0).Atom);      // precomposed é
-        Assert.Equal(0x0065u, dec.GetNode(0).Atom);      // 'e', acute follows separately
+        Assert.NotEqual(pre.NodeCount, dec.NodeCount);
+        Assert.Equal(0x00E9u, pre.GetNode(0).Atom);
+        Assert.Equal(0x0065u, dec.GetNode(0).Atom);
     }
 
     [Fact]
     public void HashComposerCanPopulateAfterDecompose()
     {
-        // Full round-trip: decompose → HashComposer fills in the IDs.
         using var t = TextDecomposer.Run("hi");
-        // Synthetic atom resolver for the test (since perfcache isn't
-        // loaded in this test environment).
         unsafe
         {
             HashComposer.Run(t, &SynthResolver);
         }
-        // After Run, the root id should be non-zero.
         var root = t.GetNode((uint)t.NodeCount - 1);
         Assert.NotEqual(Hash128.Zero, root.Id);
     }

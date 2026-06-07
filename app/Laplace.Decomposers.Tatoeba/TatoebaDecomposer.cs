@@ -6,21 +6,6 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Tatoeba;
 
-/// <summary>
-/// Emits the Tatoeba multilingual sentence corpus as content + attestations.
-///
-/// Each sentence (sentences.csv: id ⇥ lang ⇥ text) is decomposed as content
-/// (ContentEmitter) — so 13.26M sentences become real, deduped, queryable content that
-/// converges with every other source. The Tatoeba numeric id is a join key, NOT identity:
-/// it's carried as a HAS_EXTERNAL_ID attestation on the content. Translation pairs
-/// (links.csv: id ⇥ id) become IS_TRANSLATION_OF between the external-id entities — bounded
-/// memory (no 13M-entry id→hash map): the content↔content translation is recoverable by
-/// joining through HAS_EXTERNAL_ID.
-///
-/// Two passes: pass 1 sentences (content + external-id entity + HAS_EXTERNAL_ID +
-/// HAS_LANGUAGE); pass 2 links (IS_TRANSLATION_OF). Audio metadata is deferred to the
-/// audio modality.
-/// </summary>
 public sealed class TatoebaDecomposer : IDecomposer
 {
     public static readonly Hash128 Source =
@@ -36,14 +21,13 @@ public sealed class TatoebaDecomposer : IDecomposer
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "TatoebaDecomposer";
-    public int     LayerOrder   => 2;   // needs only unicode(0)+iso(1) — independent of wordnet/omw
+    public int     LayerOrder   => 2;
     public Hash128 TrustClassId => TrustClass;
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("Tatoeba_Sentence");
-        // Rank/trust live in the REGISTRY at attest time — AddRelationType(name) only.
         boot.AddRelationType("HAS_EXTERNAL_ID");
         boot.AddRelationType("IS_TRANSLATION_OF");
         await context.Writer.ApplyAsync(boot.Build(), ct);
@@ -58,7 +42,6 @@ public sealed class TatoebaDecomposer : IDecomposer
         string links     = Path.Combine(context.EcosystemPath, "links.csv");
         int batch = options.BatchSize > 1 ? options.BatchSize : 2048;
 
-        // Pass 1: sentences → content + external-id + HAS_LANGUAGE.
         if (File.Exists(sentences))
         {
             var b = NewBuilder("tatoeba/sent-0", batch);
@@ -96,7 +79,6 @@ public sealed class TatoebaDecomposer : IDecomposer
             if (n > 0 && !options.DryRun) yield return b.Build();
         }
 
-        // Pass 2: links → IS_TRANSLATION_OF between external-id entities.
         if (File.Exists(links))
         {
             var b = NewBuilder("tatoeba/link-0", batch);
@@ -110,14 +92,8 @@ public sealed class TatoebaDecomposer : IDecomposer
 
                 Hash128 ea = SourceEntityIdConventions.TatoebaSentence(a);
                 Hash128 eb = SourceEntityIdConventions.TatoebaSentence(bId);
-                // Emit endpoints inline (idempotent) so the FK holds even if a link
-                // references an id absent from sentences.csv.
                 b.AddEntity(new EntityRow(ea, (byte)MetaTier.Meta, SentenceRefTypeId, Source));
                 b.AddEntity(new EntityRow(eb, (byte)MetaTier.Meta, SentenceRefTypeId, Source));
-                // Registry-routed: IS_TRANSLATION_OF is SYMMETRIC — Orient
-                // canonicalizes endpoint order so (a,b) and (b,a) land on ONE
-                // consensus row. The old factory bypass skipped this and forked
-                // the whole translation arena (2026-06-05 audit).
                 b.AddAttestation(RelationTypeRegistry.Attest(
                     ea, "IS_TRANSLATION_OF", eb, Source, SourceTrust.StructuredCorpus));
 

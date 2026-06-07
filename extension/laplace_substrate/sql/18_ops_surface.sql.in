@@ -1,36 +1,18 @@
-/* ── OPERATING SURFACE: canonical-family ids + substrate accounting ────────
- *
- * The id-builders own the canonicalization rules ('substrate/kind/<NAME>/v1',
- * 'substrate/source/<Name>/v1') so NO caller — workflow, script, C#, psql —
- * ever hand-writes a blake3/convert_to expression or juggles hex. The count
- * functions are the audit/verify surface the CI gates and scripts call
- * instead of hand-written inline SQL. */
-
-/* Kind name → kind entity id. THE one place the kind family rule lives. */
 CREATE FUNCTION relation_type_id(p_name text) RETURNS bytea
     LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
     SELECT @extschema@.canonical_id('substrate/kind/' || p_name || '/v1')
 $$;
-COMMENT ON FUNCTION relation_type_id(text) IS
-    'Kind NAME → kind entity id via the one canonicalization rule substrate/kind/<NAME>/v1. Callers never hand-build the canonical string.';
 
-/* DEPRECATED one-cycle compat: the pre-unification name. */
 CREATE FUNCTION kind_id(p_name text) RETURNS bytea
     LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
     SELECT @extschema@.relation_type_id(p_name)
 $$;
-COMMENT ON FUNCTION kind_id(text) IS
-    'DEPRECATED (2026-06-05 type-system unification): use relation_type_id(). Thin compat wrapper, removed next cycle.';
 
-/* Source (decomposer) name → source entity id. */
 CREATE FUNCTION source_id(p_name text) RETURNS bytea
     LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
     SELECT @extschema@.canonical_id('substrate/source/' || p_name || '/v1')
 $$;
-COMMENT ON FUNCTION source_id(text) IS
-    'Source NAME → source entity id via the rule substrate/source/<Name>/v1.';
 
-/* EVIDENCE accounting: attestation rows by kind / source / object (all optional). */
 CREATE FUNCTION evidence_count(
     p_type bytea DEFAULT NULL, p_source bytea DEFAULT NULL, p_object bytea DEFAULT NULL)
     RETURNS bigint
@@ -42,10 +24,7 @@ CREATE FUNCTION evidence_count(
       AND (p_source IS NULL OR a.source_id = p_source)
       AND (p_object IS NULL OR a.object_id = p_object)
 $$;
-COMMENT ON FUNCTION evidence_count(bytea, bytea, bytea) IS
-    'Count EVIDENCE (attestation) rows, optionally filtered by kind/source/object id (compose with type_id/source_id/canonical_id). The verify-gate primitive.';
 
-/* CONSENSUS accounting: relation rows by kind (optional). */
 CREATE FUNCTION consensus_count(p_type bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
@@ -53,10 +32,7 @@ CREATE FUNCTION consensus_count(p_type bytea DEFAULT NULL)
     SELECT count(*) FROM @extschema@.consensus c
     WHERE (p_type IS NULL OR c.type_id = p_type)
 $$;
-COMMENT ON FUNCTION consensus_count(bytea) IS
-    'Count CONSENSUS relations, optionally by kind id (compose with type_id). The substance inference reads — the CI kind gates call this.';
 
-/* CONTENT accounting: Content physicalities (kind=1) by source (optional). */
 CREATE FUNCTION content_count(p_source bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
@@ -65,10 +41,7 @@ CREATE FUNCTION content_count(p_source bytea DEFAULT NULL)
     WHERE p.type = 1
       AND (p_source IS NULL OR p.source_id = p_source)
 $$;
-COMMENT ON FUNCTION content_count(bytea) IS
-    'Count CONTENT physicalities (kind=1), optionally by source id — "did this decomposer land content, not just attestations".';
 
-/* Cross-source convergence: entities witnessed by more than one source. */
 CREATE FUNCTION multi_source_entity_count()
     RETURNS bigint
     LANGUAGE sql STABLE
@@ -78,10 +51,7 @@ CREATE FUNCTION multi_source_entity_count()
         GROUP BY p.entity_id
         HAVING count(DISTINCT p.source_id) > 1) t
 $$;
-COMMENT ON FUNCTION multi_source_entity_count() IS
-    'Entities carrying physicalities from >1 source — the omni-source convergence metric (content is identity; sources are witnesses).';
 
-/* The substrate's own row accounting — one call, labeled. */
 CREATE FUNCTION substrate_counts()
     RETURNS TABLE(metric text, value bigint)
     LANGUAGE sql STABLE
@@ -99,15 +69,7 @@ CREATE FUNCTION substrate_counts()
     UNION ALL
     SELECT 'consensus (relations)',    count(*) FROM @extschema@.consensus
 $$;
-COMMENT ON FUNCTION substrate_counts() IS
-    'Labeled row accounting across the substrate''s core tables — the stats surface (CLI stats, e2e scripts) instead of hand-written counts.';
 
-/* ── OBSERVABILITY / GATE SURFACE (2026-06-05 "make every query permanent"
- * ruling): the verification queries that were being hand-written against the
- * live DB during gating and debugging, installed once. All read the substrate
- * in its own voice (render / eff_mu) — never hand-rolled SQL at call sites. */
-
-/* Every arena present, with its consensus mass — THE arena inventory. */
 CREATE FUNCTION arena_counts()
     RETURNS TABLE(type text, type_id bytea, relations bigint, witnesses bigint,
                   top_eff_mu numeric)
@@ -119,10 +81,7 @@ CREATE FUNCTION arena_counts()
     GROUP BY c.type_id
     ORDER BY count(*) DESC
 $$;
-COMMENT ON FUNCTION arena_counts() IS
-    'Arena inventory: every kind with consensus relations, witness mass, and its top effective μ. The per-kind ingest gate reads this.';
 
-/* Every witnessing source, with its evidence + content footprint. */
 CREATE FUNCTION source_counts()
     RETURNS TABLE(source text, source_id bytea, evidence bigint, content bigint)
     LANGUAGE sql STABLE
@@ -133,10 +92,7 @@ CREATE FUNCTION source_counts()
     FROM (SELECT DISTINCT a.source_id AS sid FROM @extschema@.attestations a) s
     ORDER BY 3 DESC
 $$;
-COMMENT ON FUNCTION source_counts() IS
-    'Witness inventory: every source with evidence rows and CONTENT physicalities — the per-source ingest gate.';
 
-/* Entity population by type and tier. */
 CREATE FUNCTION entity_type_counts()
     RETURNS TABLE(type text, type_id bytea, tier smallint, entities bigint)
     LANGUAGE sql STABLE
@@ -146,11 +102,7 @@ CREATE FUNCTION entity_type_counts()
     GROUP BY e.type_id, e.tier
     ORDER BY count(*) DESC
 $$;
-COMMENT ON FUNCTION entity_type_counts() IS
-    'Entity population by (type, tier) — the substrate census.';
 
-/* Consensus mass by SUBJECT tier — which tiers carry relations (the
- * "books witness content but no edges" diagnostic, 2026-06-05). */
 CREATE FUNCTION consensus_tier_distribution()
     RETURNS TABLE(subject_tier smallint, relations bigint)
     LANGUAGE sql STABLE
@@ -160,13 +112,7 @@ CREATE FUNCTION consensus_tier_distribution()
     WHERE c.object_id IS NOT NULL
     GROUP BY e.tier ORDER BY e.tier
 $$;
-COMMENT ON FUNCTION consensus_tier_distribution() IS
-    'Relations by subject tier — shows which tiers of the content web actually carry consensus edges.';
 
-/* The hex-render gap detector: distinct consensus-referenced ids whose
- * @extschema@.render() falls back to hex (no canonical name, no codepoint, no
- * reconstructable content) — the readback-coverage gate. The no-hex P10
- * gate is: every row here is a known dynamic family awaiting registration. */
 CREATE FUNCTION render_gaps(p_limit integer DEFAULT 50)
     RETURNS TABLE(id bytea, roles text, refs bigint)
     LANGUAGE sql STABLE
@@ -191,11 +137,7 @@ CREATE FUNCTION render_gaps(p_limit integer DEFAULT 50)
     ORDER BY a.refs DESC
     LIMIT p_limit
 $$;
-COMMENT ON FUNCTION render_gaps(integer) IS
-    'Readback-coverage gate: consensus-referenced ids that would render as hex — unregistered dynamic names or unreconstructable content, ranked by reference count.';
 
-/* Period-staging health: any partitions present = a period mid-stage (or a
- * dead period awaiting the create-sweep). */
 CREATE FUNCTION period_staging_status()
     RETURNS TABLE(partition_table text, staged_rows bigint)
     LANGUAGE plpgsql STABLE
@@ -214,6 +156,3 @@ BEGIN
     END LOOP;
 END;
 $$;
-COMMENT ON FUNCTION period_staging_status() IS
-    'Live staging partitions + row counts: non-empty = a period mid-stage; presence after a finished run = a dead period awaiting the create-sweep.';
-

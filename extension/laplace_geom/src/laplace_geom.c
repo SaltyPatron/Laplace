@@ -1,30 +1,3 @@
-/*
- * extension/laplace_geom/src/laplace_geom.c
- *
- * PG_FUNCTION_INFO_V1 wrappers for laplace_geom., this
- * file is thin marshalling code only -- no math. Engine kernels in
- * liblaplace_core do the work; liblwgeom (static-linked)
- * does the gserialized -> POINT4D extraction.
- *
- * Functions exposed:
- *   - pg_laplace_geom_version         : extension self-identity
- *   - pg_laplace_hash128_blake3       : BLAKE3-128 of an arbitrary bytea
- *   - pg_laplace_hash128_merkle       : tier-prefixed Merkle composition
- *
- *   - pg_laplace_distance_4d          : Euclidean 4D distance between POINTs
- *   - pg_laplace_dwithin_4d           : Euclidean 4D within-epsilon predicate
- *   - pg_laplace_centroid_4d          : centroid of a geometry's vertices
- *   - pg_laplace_radius_origin        : radius of a POINT from origin
- *   - pg_laplace_frechet_4d           : discrete Frechet distance, LINESTRINGs
- *   - pg_laplace_hausdorff_4d         : symmetric Hausdorff distance
- *
- *   - pg_laplace_hilbert_encode       : POINT -> bytea(16)
- *   - pg_laplace_hilbert_decode       : bytea(16) -> POINT
- *
- *   - pg_laplace_mantissa_pack        : (entity_id, ordinal, run_length, flags) -> POINT4D
- *   - pg_laplace_mantissa_unpack      : POINT4D -> (entity_id, ordinal, run_length, flags)
- */
-
 #include "postgres.h"
 #include "fmgr.h"
 #include "funcapi.h"
@@ -43,13 +16,6 @@
 
 PG_MODULE_MAGIC;
 
-/* ================================================================= */
-/* Helpers — geometry deserialization                                */
-/* ================================================================= */
-
-/* Detoast + deserialize. Returns a palloc'd LWGEOM. Errors on NULL.
- * Caller passes the detoasted GSERIALIZED in to free_if_copy after use
- * (when the original Datum was toasted, PG_DETOAST_DATUM mallocs a copy). */
 static LWGEOM *
 lwgeom_from_datum(Datum d, GSERIALIZED **out_gser)
 {
@@ -65,9 +31,6 @@ lwgeom_from_datum(Datum d, GSERIALIZED **out_gser)
     return geom;
 }
 
-/* Extract a single POINT4D from a geometry that must be a POINT.
- * Missing Z and/or M are zeroed (so 2D/3D POINTs lift cleanly into 4D).
- * Frees `geom` before erroring. */
 static void
 require_point4d(LWGEOM *geom, const char *fn_name, POINT4D *out)
 {
@@ -88,17 +51,9 @@ require_point4d(LWGEOM *geom, const char *fn_name, POINT4D *out)
                  errmsg("%s: POINT has %u vertices, expected exactly 1",
                         fn_name, lwpoint->point->npoints)));
     }
-    /* getPoint4d_p zeros Z/M when the underlying pointarray lacks them. */
     getPoint4d_p(lwpoint->point, 0, out);
 }
 
-/* Pull a flat XYZM double buffer from a geometry that exposes a POINTARRAY
- * (POINT, MULTIPOINT, or LINESTRING). The returned buffer is freshly
- * palloc'd and contains `npoints * 4` doubles in XYZM order, with missing
- * Z/M zeroed. Frees `geom` before erroring on type mismatch.
- *
- * On success, the caller is responsible for pfree(buf) and lwgeom_free(geom)
- * when done with both. */
 static double *
 geom_to_xyzm_buffer(LWGEOM *geom, const char *fn_name, size_t *out_npoints)
 {
@@ -114,8 +69,6 @@ geom_to_xyzm_buffer(LWGEOM *geom, const char *fn_name, size_t *out_npoints)
             break;
         case MULTIPOINTTYPE:
         {
-            /* MULTIPOINT is a collection of single-point sub-LWPOINTs.
-             * Flatten into a single buffer. */
             LWMPOINT *mp = (LWMPOINT *) geom;
             const uint32_t n = mp->ngeoms;
             double *buf = (double *) palloc(sizeof(double) * 4 * (Size) n);
@@ -157,8 +110,6 @@ geom_to_xyzm_buffer(LWGEOM *geom, const char *fn_name, size_t *out_npoints)
     return buf;
 }
 
-/* Build a GSERIALIZED POINT4D from a (x, y, z, m) tuple and return as Datum.
- * lwpoint_make4d + gserialized_from_lwgeom is the canonical path. */
 static Datum
 gserialized_point4d_datum(double x, double y, double z, double m)
 {
@@ -170,10 +121,6 @@ gserialized_point4d_datum(double x, double y, double z, double m)
     PG_RETURN_POINTER(gser);
 }
 
-/* ================================================================= */
-/* pg_laplace_geom_version                                            */
-/* ================================================================= */
-
 PG_FUNCTION_INFO_V1(pg_laplace_geom_version);
 
 Datum
@@ -182,10 +129,6 @@ pg_laplace_geom_version(PG_FUNCTION_ARGS)
     const char *v = laplace_core_version();
     PG_RETURN_TEXT_P(cstring_to_text(v));
 }
-
-/* ================================================================= */
-/* pg_laplace_hash128_blake3(bytea) -> bytea(16)                      */
-/* ================================================================= */
 
 PG_FUNCTION_INFO_V1(pg_laplace_hash128_blake3);
 
@@ -203,10 +146,6 @@ pg_laplace_hash128_blake3(PG_FUNCTION_ARGS)
 
     PG_RETURN_BYTEA_P(result);
 }
-
-/* ================================================================= */
-/* pg_laplace_hash128_merkle(int2 tier, bytea[] children) -> bytea(16) */
-/* ================================================================= */
 
 PG_FUNCTION_INFO_V1(pg_laplace_hash128_merkle);
 
@@ -262,10 +201,6 @@ pg_laplace_hash128_merkle(PG_FUNCTION_ARGS)
     PG_RETURN_BYTEA_P(result);
 }
 
-/* ================================================================= */
-/* pg_laplace_distance_4d(geometry, geometry) -> double precision     */
-/* ================================================================= */
-
 PG_FUNCTION_INFO_V1(pg_laplace_distance_4d);
 
 Datum
@@ -288,10 +223,6 @@ pg_laplace_distance_4d(PG_FUNCTION_ARGS)
     PG_RETURN_FLOAT8(d);
 }
 
-/* ================================================================= */
-/* pg_laplace_angular_distance_4d(geometry, geometry) -> double        */
-/* ================================================================= */
-
 PG_FUNCTION_INFO_V1(pg_laplace_angular_distance_4d);
 
 Datum
@@ -307,18 +238,12 @@ pg_laplace_angular_distance_4d(PG_FUNCTION_ARGS)
 
     const double a[4] = {pa.x, pa.y, pa.z, pa.m};
     const double b[4] = {pb.x, pb.y, pb.z, pb.m};
-    /* Geodesic distance on S³ = acos(â·b̂); the engine normalizes defensively
-     * and clamps the cosine for FP safety. */
     const double d = math4d_angular_distance(a, b);
 
     lwgeom_free(l_a);
     lwgeom_free(l_b);
     PG_RETURN_FLOAT8(d);
 }
-
-/* ================================================================= */
-/* pg_laplace_dwithin_4d(geometry, geometry, double) -> boolean       */
-/* ================================================================= */
 
 PG_FUNCTION_INFO_V1(pg_laplace_dwithin_4d);
 
@@ -345,7 +270,6 @@ pg_laplace_dwithin_4d(PG_FUNCTION_ARGS)
 
     const double a[4] = {pa.x, pa.y, pa.z, pa.m};
     const double b[4] = {pb.x, pb.y, pb.z, pb.m};
-    /* Use distance_sq vs eps*eps — avoids the sqrt in the kernel. */
     const double d2 = math4d_distance_sq(a, b);
     const bool   within = d2 <= eps * eps;
 
@@ -353,10 +277,6 @@ pg_laplace_dwithin_4d(PG_FUNCTION_ARGS)
     lwgeom_free(l_b);
     PG_RETURN_BOOL(within);
 }
-
-/* ================================================================= */
-/* pg_laplace_centroid_4d(geometry) -> geometry                       */
-/* ================================================================= */
 
 PG_FUNCTION_INFO_V1(pg_laplace_centroid_4d);
 
@@ -386,10 +306,6 @@ pg_laplace_centroid_4d(PG_FUNCTION_ARGS)
     return gserialized_point4d_datum(c[0], c[1], c[2], c[3]);
 }
 
-/* ================================================================= */
-/* pg_laplace_radius_origin(geometry) -> double precision             */
-/* ================================================================= */
-
 PG_FUNCTION_INFO_V1(pg_laplace_radius_origin);
 
 Datum
@@ -407,10 +323,6 @@ pg_laplace_radius_origin(PG_FUNCTION_ARGS)
     lwgeom_free(l);
     PG_RETURN_FLOAT8(r);
 }
-
-/* ================================================================= */
-/* pg_laplace_frechet_4d(geometry, geometry) -> double precision      */
-/* ================================================================= */
 
 PG_FUNCTION_INFO_V1(pg_laplace_frechet_4d);
 
@@ -437,10 +349,6 @@ pg_laplace_frechet_4d(PG_FUNCTION_ARGS)
     PG_RETURN_FLOAT8(d);
 }
 
-/* ================================================================= */
-/* pg_laplace_hausdorff_4d(geometry, geometry) -> double precision    */
-/* ================================================================= */
-
 PG_FUNCTION_INFO_V1(pg_laplace_hausdorff_4d);
 
 Datum
@@ -466,10 +374,6 @@ pg_laplace_hausdorff_4d(PG_FUNCTION_ARGS)
     PG_RETURN_FLOAT8(d);
 }
 
-/* ================================================================= */
-/* pg_laplace_hilbert_encode(geometry) -> bytea(16)                   */
-/* ================================================================= */
-
 PG_FUNCTION_INFO_V1(pg_laplace_hilbert_encode);
 
 Datum
@@ -489,10 +393,6 @@ pg_laplace_hilbert_encode(PG_FUNCTION_ARGS)
     lwgeom_free(l);
     PG_RETURN_BYTEA_P(result);
 }
-
-/* ================================================================= */
-/* pg_laplace_hilbert_decode(bytea) -> geometry                       */
-/* ================================================================= */
 
 PG_FUNCTION_INFO_V1(pg_laplace_hilbert_decode);
 
@@ -515,10 +415,6 @@ pg_laplace_hilbert_decode(PG_FUNCTION_ARGS)
 
     return gserialized_point4d_datum(v[0], v[1], v[2], v[3]);
 }
-
-/* ================================================================= */
-/* pg_laplace_mantissa_pack(bytea, int, int, bigint) -> geometry      */
-/* ================================================================= */
 
 PG_FUNCTION_INFO_V1(pg_laplace_mantissa_pack);
 
@@ -544,7 +440,6 @@ pg_laplace_mantissa_pack(PG_FUNCTION_ARGS)
         ereport(ERROR,
                 (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                  errmsg("laplace_mantissa_pack: run_length %d out of uint16 range", run_length)));
-    /*: only low 52 bits of flags are usable; high 12 must be zero. */
     if ((uint64_t) flags_arg & 0xFFF0000000000000ULL)
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -561,11 +456,6 @@ pg_laplace_mantissa_pack(PG_FUNCTION_ARGS)
     return gserialized_point4d_datum(v[0], v[1], v[2], v[3]);
 }
 
-/* ================================================================= */
-/* pg_laplace_mantissa_unpack(geometry) ->                            */
-/*     TABLE(entity_id bytea, ordinal int, run_length int, flags bigint) */
-/* ================================================================= */
-
 PG_FUNCTION_INFO_V1(pg_laplace_mantissa_unpack);
 
 Datum
@@ -581,7 +471,6 @@ pg_laplace_mantissa_unpack(PG_FUNCTION_ARGS)
     mantissa_payload_t payload;
     mantissa_unpack(v, &payload);
 
-    /* Build the result tuple via TupleDesc the caller declared with RETURNS TABLE. */
     TupleDesc tupdesc;
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
     {

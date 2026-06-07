@@ -6,19 +6,6 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Atomic2020;
 
-/// <summary>
-/// Emits the ATOMIC 2020 commonsense knowledge graph as content + attestations.
-///
-/// Each triple (head ⇥ relation ⇥ tail) from {train,dev,test}.tsv: the PersonX/PersonY
-/// templated head/tail events are decomposed as content (ContentEmitter) — they're real
-/// text. The relation becomes a typed kind (xIntent, xNeed, oEffect, …). A "none" tail is
-/// PRESERVED as signal (absence-is-signal): it attests head → the canonical NONE marker,
-/// recording "annotators inferred nothing here" rather than dropping the row. The split
-/// (train/dev/test) is carried as context_id provenance.
-///
-/// Single-pass (acyclic): entities + attestations emit together; the writer orders
-/// entities before attestations within each batch so the head/tail content FK always holds.
-/// </summary>
 public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
 {
     public static readonly Hash128 Source =
@@ -32,7 +19,6 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
 
     private static Hash128 SplitId(string s) => Hash128.OfCanonical($"atomic/split/{s}");
 
-    // ATOMIC 2020 relation → canonical kind name.
     private static readonly (string Rel, string Type)[] Relations =
     {
         ("oEffect", "O_EFFECT"), ("oReact", "O_REACT"), ("oWant", "O_WANT"),
@@ -40,14 +26,11 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
         ("xNeed", "X_NEED"), ("xReact", "X_REACT"), ("xWant", "X_WANT"), ("xReason", "X_REASON"),
         ("HinderedBy", "OBSTRUCTED_BY"), ("isAfter", "IS_AFTER"), ("isBefore", "IS_BEFORE"),
         ("isFilledBy", "X_FILLED_BY"), ("Causes", "CAUSES"), ("ObjectUse", "OBJECT_USE"),
-        // BOTH TSV spellings of HasSubEvent occur in the data — one arena.
         ("AtLocation", "AT_LOCATION"), ("HasSubEvent", "HAS_SUBEVENT"), ("HasSubevent", "HAS_SUBEVENT"),
         ("CapableOf", "CAPABLE_OF"), ("Desires", "DESIRES"), ("HasProperty", "HAS_PROPERTY"),
         ("MadeUpOf", "MADE_UP_OF"), ("NotDesires", "NOT_DESIRES"),
     };
 
-    // Relation string → canonical kind NAME; the registry owns id + rank +
-    // orientation at attest time (no per-source id constructor).
     private static readonly Dictionary<string, string> RelTypeId =
         Relations.ToDictionary(r => r.Rel, r => r.Type);
 
@@ -55,7 +38,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
 
     public override Hash128 SourceId     => Source;
     public override string  SourceName   => "Atomic2020Decomposer";
-    public override int     LayerOrder   => 2;   // needs only unicode(0) — independent of wordnet/omw
+    public override int     LayerOrder   => 2;
     public override Hash128 TrustClassId => TrustClass;
 
     protected override bool RequiresTwoPass => false;
@@ -65,7 +48,6 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("Atomic_Marker");
         boot.AddType("Atomic_Split");
-        // Rank/trust live in the REGISTRY at attest time — AddRelationType(name) only.
         foreach (var name in Relations.Select(r => r.Type).Distinct())
             boot.AddRelationType(RelationTypeRegistry.Resolve(name).Canonical);
         await context.Writer.ApplyAsync(boot.Build(), ct);
@@ -80,11 +62,6 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(1_331_113L);
 
-    /// <summary>The data-derived marker / split canonical names this source mints
-    /// — the split provenance contexts (<c>atomic/split/{train,dev,test}</c>) and
-    /// the NONE marker (<c>substrate/atomic/none/v1</c>) — built from the SAME
-    /// <see cref="SplitId"/> / <see cref="NoneId"/> templates so render() resolves
-    /// the same ids. Static set; the relation kinds are already in the seed.</summary>
     public IReadOnlyCollection<string> CanonicalNamesForReadback =>
         [.. Splits.Select(s => $"atomic/split/{s}"), "substrate/atomic/none/v1"];
 
@@ -116,7 +93,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
                 Hash128 tailId;
                 if (tail.Length == 0 || tail.Equals("none", StringComparison.OrdinalIgnoreCase))
                 {
-                    tailId = NoneId; // absence-is-signal: explicit "no inference"
+                    tailId = NoneId;
                 }
                 else
                 {

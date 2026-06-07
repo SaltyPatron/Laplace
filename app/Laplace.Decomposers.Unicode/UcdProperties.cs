@@ -5,25 +5,8 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Unicode;
 
-/// <summary>
-/// Parsed UCD text-file properties needed for attestation emission by
-/// <see cref="UnicodeDecomposer"/>. Loads, under <c>{ucdDir}/</c>:
-/// <c>UnicodeData.txt</c> (categories, combining classes, case mappings incl.
-/// titlecase, canonical AND compatibility decompositions, numeric values,
-/// bidi class/mirrored), <c>Scripts.txt</c>, <c>Blocks.txt</c>,
-/// <c>DerivedAge.txt</c>, <c>NameAliases.txt</c>, <c>BidiMirroring.txt</c>,
-/// <c>emoji/emoji-data.txt</c>, and <c>../security/confusables.txt</c> —
-/// the 2026-06-05 completeness sweep: ONE load extracts everything the
-/// source testifies. All data is load-once; field arrays are indexed by
-/// codepoint scalar value (max 0x10FFFF). Range-based properties are sorted
-/// range arrays with binary-search lookup; overlapping emoji properties are a
-/// per-codepoint bitmask.
-/// </summary>
 internal sealed class UcdProperties
 {
-    // ── attestation-kind IDs (content-addressed, stable) ──
-
-    // (ids via RelationTypeRegistry.TypeId — the ONE kind-id constructor.)
     public static readonly Hash128 KindHasGeneralCategory  = RelationTypeRegistry.RelationTypeId("HAS_GENERAL_CATEGORY");
     public static readonly Hash128 KindHasCombiningClass   = RelationTypeRegistry.RelationTypeId("HAS_COMBINING_CLASS");
     public static readonly Hash128 KindHasScript           = RelationTypeRegistry.RelationTypeId("HAS_SCRIPT");
@@ -41,65 +24,38 @@ internal sealed class UcdProperties
     public static readonly Hash128 KindConfusableWith       = RelationTypeRegistry.RelationTypeId("CONFUSABLE_WITH");
     public static readonly Hash128 KindHasEmojiProperty     = RelationTypeRegistry.RelationTypeId("HAS_EMOJI_PROPERTY");
 
-    // ── per-codepoint arrays (length = 0x110000) ──
-
-    /// <summary>Two-letter general category string per codepoint, or null
-    /// for unassigned (Cn).</summary>
     public readonly string?[] GeneralCategory;
 
-    /// <summary>Canonical combining class (0–254) per codepoint.</summary>
     public readonly byte[] CombiningClass;
 
-    /// <summary>Uppercase mapping target, or 0 if none.</summary>
     public readonly uint[] UppercaseMapping;
 
-    /// <summary>Lowercase mapping target, or 0 if none.</summary>
     public readonly uint[] LowercaseMapping;
 
-    /// <summary>Titlecase mapping target (UnicodeData field 14), or 0 if none.</summary>
     public readonly uint[] TitlecaseMapping;
 
-    /// <summary>Numeric value string (UnicodeData field 8 — may be rational
-    /// "1/4"), or null. The VALUE classifier entity is unicode/numeric/{v}/v1.</summary>
     public readonly string?[] NumericValue;
 
-    /// <summary>Bidi class (UnicodeData field 4, e.g. L/R/AL/EN), or null.</summary>
     public readonly string?[] BidiClass;
 
-    /// <summary>Bidi mirror pair target (BidiMirroring.txt), or 0 if none.</summary>
     public readonly uint[] BidiMirror;
 
-    /// <summary>Emoji property bitmask per codepoint (bit i =
-    /// <see cref="EmojiPropNames"/>[i] from emoji/emoji-data.txt).</summary>
     public readonly byte[] EmojiProps;
     public static readonly string[] EmojiPropNames =
         ["Emoji", "Emoji_Presentation", "Emoji_Modifier", "Emoji_Modifier_Base",
          "Emoji_Component", "Extended_Pictographic"];
 
-    /// <summary>Formal name aliases (NameAliases.txt), sparse.</summary>
     public readonly Dictionary<uint, List<string>> NameAliases;
 
-    /// <summary>Confusable mappings (security/confusables.txt): source codepoint →
-    /// target STRING (one or more codepoints; single-cp targets attest codepoint↔
-    /// codepoint, sequences attest against the sequence's content entity).</summary>
     public readonly List<(uint Src, string Target)> Confusables;
 
-    /// <summary>Canonical decomposition targets per codepoint (null if none;
-    /// 1 or 2 targets for most canonical mappings).</summary>
     public readonly uint[]?[] CanonDecomp;
 
-    /// <summary>COMPATIBILITY decomposition targets (the &lt;tag&gt; forms —
-    /// a DISTINCT, weaker equivalence; its own arena, never folded into the
-    /// canonical one). Previously excluded entirely (2026-06-05 completeness).</summary>
     public readonly uint[]?[] CompatDecomp;
-
-    // ── range arrays for script + block ──
 
     private readonly (uint S, uint E, string N)[] _scriptRanges;
     private readonly (uint S, uint E, string N)[] _blockRanges;
     private readonly (uint S, uint E, string N)[] _ageRanges;
-
-    // ── entity ID caches for classification objects ──
 
     public readonly Dictionary<string, Hash128> CategoryEntityIds;
     public readonly Dictionary<string, Hash128> ScriptEntityIds;
@@ -109,7 +65,6 @@ internal sealed class UcdProperties
     public readonly Dictionary<string, Hash128> EmojiPropEntityIds;
     public readonly Dictionary<string, Hash128> NumericEntityIds;
 
-    // ── ordinal context IDs for decomp sequences ──
     public static readonly Hash128 OrdinalCtx0 = Hash128.OfCanonical("ordinal/0/v1");
     public static readonly Hash128 OrdinalCtx1 = Hash128.OfCanonical("ordinal/1/v1");
 
@@ -167,8 +122,6 @@ internal sealed class UcdProperties
         return d;
     }
 
-    // ── lookup helpers ──
-
     public string? ScriptForCodepoint(uint cp)  => RangeLookup(_scriptRanges, cp);
     public string? BlockForCodepoint(uint cp)   => RangeLookup(_blockRanges, cp);
     public string? AgeForCodepoint(uint cp)     => RangeLookup(_ageRanges, cp);
@@ -187,11 +140,6 @@ internal sealed class UcdProperties
         return null;
     }
 
-    // ── bootstrap entity rows for classification objects ──
-
-    /// <summary>Entity rows for all category / script / block classifier
-    /// entities. Emitted in InitializeAsync so BuildBatch can reference
-    /// them without re-emitting.</summary>
     public IEnumerable<EntityRow> ClassificationEntities(Hash128 sourceId)
     {
         var typeId = Hash128.OfCanonical("substrate/type/UcdClassifier/v1");
@@ -211,8 +159,6 @@ internal sealed class UcdProperties
             yield return new EntityRow(id, (byte)MetaTier.Meta, typeId, sourceId);
     }
 
-    // ── factory ──
-
     public static UcdProperties Load(string ucdDir)
     {
         const int Total = 0x110000;
@@ -228,7 +174,6 @@ internal sealed class UcdProperties
         var bidiMir  = new uint[Total];
         var emoji    = new byte[Total];
 
-        // ── UnicodeData.txt ──
         string udPath = Path.Combine(ucdDir, "UnicodeData.txt");
         Span<Range> ranges = stackalloc Range[15];
         foreach (var line in File.ReadLines(udPath))
@@ -246,12 +191,9 @@ internal sealed class UcdProperties
             if (byte.TryParse(span[ranges[3]], out byte cc))
                 combCls[cp] = cc;
 
-            // Field 4: bidi class (L/R/AL/EN/…)
             if (!span[ranges[4]].IsEmpty)
                 bidiCls[cp] = string.Intern(new string(span[ranges[4]]));
 
-            // Field 5: decomposition mapping — canonical (bare) AND
-            // compatibility (<tag>-prefixed) into their DISTINCT arenas.
             var decompSpan = span[ranges[5]];
             if (!decompSpan.IsEmpty)
             {
@@ -275,28 +217,21 @@ internal sealed class UcdProperties
                 }
             }
 
-            // Field 8: numeric value (may be rational "1/4")
             if (n > 8 && !span[ranges[8]].IsEmpty)
                 numeric[cp] = string.Intern(new string(span[ranges[8]]));
 
-            // Field 9: Bidi_Mirrored flag is implied by BidiMirroring.txt pairs
-            // (parsed below) — the Y/N flag alone carries no pair target.
-
-            // Field 12: uppercase mapping
             if (n > 12 && !span[ranges[12]].IsEmpty)
             {
                 if (uint.TryParse(span[ranges[12]], NumberStyles.HexNumber, null, out uint u))
                     upperMap[cp] = u;
             }
 
-            // Field 13: lowercase mapping
             if (n > 13 && !span[ranges[13]].IsEmpty)
             {
                 if (uint.TryParse(span[ranges[13]], NumberStyles.HexNumber, null, out uint l))
                     lowerMap[cp] = l;
             }
 
-            // Field 14: titlecase mapping (previously unread)
             if (n > 14 && !span[ranges[14]].IsEmpty)
             {
                 if (uint.TryParse(span[ranges[14]], NumberStyles.HexNumber, null, out uint t))
@@ -304,14 +239,12 @@ internal sealed class UcdProperties
             }
         }
 
-        // ── Scripts.txt / Blocks.txt / DerivedAge.txt (range files) ──
         var scriptRanges = ParseRangeFile(Path.Combine(ucdDir, "Scripts.txt"));
         var blockRanges  = ParseRangeFile(Path.Combine(ucdDir, "Blocks.txt"));
         var ageRanges    = File.Exists(Path.Combine(ucdDir, "DerivedAge.txt"))
             ? ParseRangeFile(Path.Combine(ucdDir, "DerivedAge.txt"))
             : Array.Empty<(uint, uint, string)>();
 
-        // ── BidiMirroring.txt: "0028; 0029 # ..." mirror pairs ──
         string mirPath = Path.Combine(ucdDir, "BidiMirroring.txt");
         if (File.Exists(mirPath))
             foreach (var raw in File.ReadLines(mirPath))
@@ -325,7 +258,6 @@ internal sealed class UcdProperties
                     bidiMir[a] = m;
             }
 
-        // ── emoji/emoji-data.txt: overlapping boolean properties → bitmask ──
         string emojiPath = Path.Combine(ucdDir, "emoji", "emoji-data.txt");
         if (File.Exists(emojiPath))
         {
@@ -336,7 +268,6 @@ internal sealed class UcdProperties
                     for (uint c = st; c <= en && c < Total; c++) emoji[c] |= bit;
         }
 
-        // ── NameAliases.txt: "cp;alias;type" ──
         var aliases = new Dictionary<uint, List<string>>();
         string aliasPath = Path.Combine(ucdDir, "NameAliases.txt");
         if (File.Exists(aliasPath))
@@ -352,7 +283,6 @@ internal sealed class UcdProperties
                 list.Add(alias);
             }
 
-        // ── ../security/confusables.txt: "src ; target(s) ; type" ──
         var confusables = new List<(uint, string)>();
         string confPath = Path.Combine(ucdDir, "..", "security", "confusables.txt");
         if (File.Exists(confPath))

@@ -8,20 +8,10 @@
 #include <unordered_set>
 #include <vector>
 
-/* Compiled cascade traversal: least-cost path over the consensus graph, the
- * native operator that replaces recursive-SQL / app-loop traversal. The kernel
- * owns the algorithm; the graph arrives through the expansion callback, so this
- * stays PG-free (the extension supplies the SPI + Glicko-μ→cost provider).
- *
- * Uniform-cost (Dijkstra) today — h is carried in every step and the frontier
- * is ordered by f = g + h, so dropping in a glome-geodesic heuristic is a
- * one-line change with no restructuring. */
-
 namespace {
 
 struct H128Hash {
     size_t operator()(const hash128_t& k) const noexcept {
-        /* fnv-ish mix of the two 64-bit halves */
         uint64_t x = k.hi * 1099511628211ULL ^ k.lo;
         x ^= x >> 33;
         return static_cast<size_t>(x);
@@ -33,8 +23,6 @@ struct H128Eq {
     }
 };
 
-/* Frontier entry. Ordered by f ascending (min-heap via std::greater). g is
- * carried so a popped-stale entry (g worse than the recorded best) is skipped. */
 struct Frontier {
     double    f;
     double    g;
@@ -47,13 +35,13 @@ struct FrontierGreater {
     }
 };
 
-constexpr int    kExpandCap = 256;  /* per-node neighbor cap (provider tops by μ) */
+constexpr int    kExpandCap = 256;
 constexpr double kInf       = std::numeric_limits<double>::infinity();
 
-}  // namespace
+}
 
 struct astar_query {
-    std::vector<astar_step_t> path;  /* start → … → goal, in order */
+    std::vector<astar_step_t> path;
     size_t                    cursor = 0;
 };
 
@@ -61,7 +49,7 @@ astar_query_t* astar_open(const hash128_t* start,
                           const hash128_t* goal_region, size_t goal_count,
                           size_t max_depth, size_t k_paths,
                           astar_expand_fn expand, void* ctx) {
-    (void)k_paths;  /* single least-cost path for now */
+    (void)k_paths;
     if (start == nullptr || expand == nullptr || goal_region == nullptr ||
         goal_count == 0) {
         return nullptr;
@@ -87,7 +75,6 @@ astar_query_t* astar_open(const hash128_t* start,
         Frontier cur = frontier.top();
         frontier.pop();
 
-        /* stale entry — a cheaper route to this node was found after it was pushed */
         auto bg = best_g.find(cur.node);
         if (bg != best_g.end() && cur.g > bg->second) continue;
 
@@ -96,34 +83,32 @@ astar_query_t* astar_open(const hash128_t* start,
 
         int n = expand(ctx, &cur.node, buf.data(), kExpandCap);
         if (n < 0) {
-            /* provider error — abandon the search, return an empty (no-path) query */
             return new astar_query();
         }
         for (int i = 0; i < n; ++i) {
             const astar_edge_t& e = buf[static_cast<size_t>(i)];
-            double cost = e.cost < 0.0 ? 0.0 : e.cost;  /* clamp: admissibility */
+            double cost = e.cost < 0.0 ? 0.0 : e.cost;
             double ng   = cur.g + cost;
             auto   it   = best_g.find(e.target);
             double prev = (it == best_g.end()) ? kInf : it->second;
             if (ng < prev) {
                 best_g[e.target]    = ng;
                 came_from[e.target] = cur.node;
-                double h = 0.0;  /* heuristic-ready: f = g + h */
+                double h = 0.0;
                 frontier.push(Frontier{ng + h, ng, cur.depth + 1, e.target});
             }
         }
     }
 
     auto* q = new astar_query();
-    if (!reached) return q;  /* empty path = no witnessed route */
+    if (!reached) return q;
 
-    /* reconstruct goal → start, then reverse to start → goal */
     std::vector<hash128_t> rev;
     hash128_t at = goal_hit;
     rev.push_back(at);
     while (!(at.hi == start->hi && at.lo == start->lo)) {
         auto it = came_from.find(at);
-        if (it == came_from.end()) break;  /* defensive: broken chain */
+        if (it == came_from.end()) break;
         at = it->second;
         rev.push_back(at);
     }

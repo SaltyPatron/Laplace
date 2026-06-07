@@ -7,13 +7,6 @@ using Xunit;
 
 namespace Laplace.Decomposers.FrameNet.Tests;
 
-/// <summary>
-/// Verifies FrameNetDecomposer's frame-file extraction against a tiny inline XML fixture:
-/// the right attestation kinds are present and every attestation/entity is registry-routed
-/// (canonical kind ids, no raw rows). ContentEmitter routes lemmas/definitions/examples
-/// through the T0 perf-cache, so the static ctor loads it (same host precondition every
-/// content-bearing decomposer has).
-/// </summary>
 public sealed class FrameNetDecomposerTests
 {
     static FrameNetDecomposerTests()
@@ -35,11 +28,6 @@ public sealed class FrameNetDecomposerTests
         throw new InvalidOperationException("perf-cache blob not found; build the engine or set LAPLACE_PERFCACHE_BIN.");
     }
 
-    // A minimal but faithful frame/*.xml: one frame, one Core + one Peripheral FE (each
-    // with a def-root definition + an inline <ex> example), two embedded LUs (a verb and a
-    // noun), and three directional relations (Inherits from → IS_A; Uses → FRAME_USES;
-    // Subframe of → HAS_SUBEVENT-flipped). The inverse-direction "Is Inherited by" is
-    // present and MUST be skipped (one arena, the registry flips for the reverse query).
     private const string FrameXml = """
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <frame name="Giving" ID="139" xmlns="http://framenet.icsi.berkeley.edu">
@@ -78,7 +66,6 @@ public sealed class FrameNetDecomposerTests
 
         Assert.Equal("Giving", f.Name);
         Assert.Contains("transfers a Theme to a Recipient", f.Definition);
-        // <ex> is split out of the definition body, not left inline.
         Assert.DoesNotContain("gave him a book", f.Definition);
         Assert.Contains(f.Examples, e => e.Contains("gave him a book"));
 
@@ -91,7 +78,6 @@ public sealed class FrameNetDecomposerTests
         Assert.Contains(f.LexUnits, lu => lu.Lemma == "give" && lu.Pos == "V");
         Assert.Contains(f.LexUnits, lu => lu.Lemma == "donation" && lu.Pos == "N");
 
-        // Only the three canonical-direction relations; "Is Inherited by" is skipped.
         Assert.Equal(3, f.Relations.Count);
         Assert.Contains(f.Relations, r => r.Type == "Inherits from" && r.TargetFrame == "Transfer");
         Assert.Contains(f.Relations, r => r.Type == "Uses" && r.TargetFrame == "Intentionally_act");
@@ -104,12 +90,9 @@ public sealed class FrameNetDecomposerTests
     {
         var atts = await CollectAttestationsAsync();
 
-        // Every kind id on every attestation is a canonical-registry kind id (registry-routed,
-        // never a raw row / hand-built "substrate/kind/..." hash).
         var canonical = new HashSet<Hash128>(RelationTypeRegistry.AllCanonical().Select(k => k.Id));
         Assert.All(atts, a => Assert.Contains(a.TypeId, canonical));
 
-        // The load-bearing arenas are present.
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("EVOKES_FRAME"));
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_FRAME_ELEMENT"));
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_DEFINITION"));
@@ -117,7 +100,6 @@ public sealed class FrameNetDecomposerTests
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_EXAMPLE"));
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("FRAME_USES"));
 
-        // Inherits from resolves to IS_A; Subframe of resolves to HAS_SUBEVENT (aliases).
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("IS_A"));
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SUBEVENT"));
     }
@@ -127,7 +109,6 @@ public sealed class FrameNetDecomposerTests
     {
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(FrameNetDecomposer.Source, "fixture", null);
-        // "give" wordform → EVOKES_FRAME → Giving frame meta entity.
         var giveId = ContentEmitter.Emit(b, "give", FrameNetDecomposer.Source);
         var frameId = Hash128.OfCanonical("framenet/frame/Giving");
         Assert.NotNull(giveId);
@@ -136,7 +117,6 @@ public sealed class FrameNetDecomposerTests
             && a.SubjectId == giveId!.Value
             && a.ObjectId == frameId);
 
-        // HAS_FRAME_ELEMENT carries the coreness classifier as context_id (Core for Donor).
         var coreCtx = Hash128.OfCanonical("framenet/coreness/Core");
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_FRAME_ELEMENT") && a.ContextId == coreCtx);
@@ -149,7 +129,6 @@ public sealed class FrameNetDecomposerTests
         var writer = new CapturingWriter();
         await dec.InitializeAsync(new FakeContext(writer));
 
-        // Two intents: (1) source/type/kind bootstrap, (2) POS + coreness classifier seed.
         Assert.Equal(2, writer.Captured.Count);
         var boot = writer.Captured[0];
 
@@ -158,20 +137,16 @@ public sealed class FrameNetDecomposerTests
         Assert.Contains(boot.Entities, e =>
             e.Id == Hash128.OfCanonical("substrate/type/FrameNet_Frame/v1")
             && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
-        // EVOKES_FRAME kind entity is registered (FK floor) with the same id the registry uses.
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("EVOKES_FRAME"));
-        // HAS_TRUST_CLASS: source → AcademicCurated.
         Assert.Contains(boot.Attestations, a =>
             a.SubjectId == FrameNetDecomposer.Source
             && a.TypeId == BootstrapIntentBuilder.HasTrustClassTypeId
             && a.ObjectId == FrameNetDecomposer.TrustClass);
 
-        // The coreness classifier entities are seeded in the second intent.
         Assert.Contains(writer.Captured[1].Entities, e =>
             e.Id == Hash128.OfCanonical("framenet/coreness/Core"));
     }
 
-    // Run the fixture frame through the decomposer's attestation emitter via a one-frame dir.
     private static async Task<List<AttestationRow>> CollectAttestationsAsync()
     {
         string dir = Path.Combine(Path.GetTempPath(), "fn-test-" + Guid.NewGuid().ToString("N"));
@@ -182,18 +157,15 @@ public sealed class FrameNetDecomposerTests
             var dec = new FrameNetDecomposer();
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var atts = new List<AttestationRow>();
-            // Drain both passes (entities then attestations); collect the attestation rows.
             await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
                 atts.AddRange(change.Attestations.ToArray());
             return atts;
         }
         finally
         {
-            try { Directory.Delete(dir, recursive: true); } catch { /* best effort */ }
+            try { Directory.Delete(dir, recursive: true); } catch { }
         }
     }
-
-    // === fakes ===
 
     private sealed class FakeContext(ISubstrateWriter writer) : IDecomposerContext
     {

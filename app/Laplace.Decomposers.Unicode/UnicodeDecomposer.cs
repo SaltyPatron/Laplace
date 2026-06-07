@@ -12,12 +12,6 @@ public sealed class UnicodeDecomposer : IDecomposer
     public static readonly Hash128 TrustClass = Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
     public static readonly Hash128 CodepointType = Hash128.OfCanonical("substrate/type/Codepoint/v1");
 
-    // Combining-class value id memo (the perf-cache discipline, sibling to the
-    // pre-built CategoryEntityIds / ScriptEntityIds dictionaries this loop also
-    // reads). Combining class is the closed set 1..254, but the per-codepoint emit
-    // loop runs over the whole codepoint space — without the memo every combining
-    // codepoint re-formats + UTF8-encodes + BLAKE3s the same string. Computed once
-    // per distinct class; index 0 is unused (zero is the default, never attested).
     private static readonly Hash128[] CombiningClassIds = BuildCombiningClassIds();
 
     private static Hash128[] BuildCombiningClassIds()
@@ -29,7 +23,7 @@ public sealed class UnicodeDecomposer : IDecomposer
     }
 
     private const string UnicodeVersion = "17.0.0";
-    private const int DefaultBatch = 4096;   // smaller: batches now carry attestations
+    private const int DefaultBatch = 4096;
 
     private readonly string? _ucdxmlZip;
     private readonly string? _ducet;
@@ -49,12 +43,10 @@ public sealed class UnicodeDecomposer : IDecomposer
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        // ── bootstrap: types + attestation kinds ──
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("Codepoint");
         boot.AddType("UcdClassifier");
         boot.AddType("OrdinalContext");
-        // Rank lives ONLY in RelationTypeRegistry (all UCD kinds are StandardsStructural).
         boot.AddRelationType("HAS_GENERAL_CATEGORY");
         boot.AddRelationType("HAS_COMBINING_CLASS");
         boot.AddRelationType("HAS_SCRIPT");
@@ -62,7 +54,6 @@ public sealed class UnicodeDecomposer : IDecomposer
         boot.AddRelationType("HAS_UPPERCASE_MAPPING");
         boot.AddRelationType("HAS_LOWERCASE_MAPPING");
         boot.AddRelationType("CANONICAL_DECOMPOSES_TO");
-        // 2026-06-05 completeness sweep — the UCD properties the seed left out.
         boot.AddRelationType("HAS_TITLECASE_MAPPING");
         boot.AddRelationType("COMPATIBILITY_DECOMPOSES_TO");
         boot.AddRelationType("HAS_NUMERIC_VALUE");
@@ -72,7 +63,6 @@ public sealed class UnicodeDecomposer : IDecomposer
         boot.AddRelationType("HAS_NAME_ALIAS");
         boot.AddRelationType("CONFUSABLE_WITH");
         boot.AddRelationType("HAS_EMOJI_PROPERTY");
-        // Byte tier (2026-06-05): encoding relations of the 128 high-byte atoms.
         boot.AddRelationType("DECODES_TO");
         boot.AddRelationType("HAS_UTF8_ROLE");
         boot.AddType("Byte");
@@ -80,21 +70,16 @@ public sealed class UnicodeDecomposer : IDecomposer
         boot.AddType("CharacterEncoding");
         await context.Writer.ApplyAsync(boot.Build(), ct);
 
-        // ── seed classifier entities (category/script/block + ordinal contexts + combining class values) ──
         EnsureUcdProperties(context);
         var ucdClassifierTypeId = Hash128.OfCanonical("substrate/type/UcdClassifier/v1");
         var ordinalContextTypeId = Hash128.OfCanonical("substrate/type/OrdinalContext/v1");
-        // categories/scripts/blocks/bidi/ages/emoji/numeric classifiers
-        // + 2 ordinal + 254 combining-class values
         var classifiers = new SubstrateChangeBuilder(
             Source, "bootstrap/ucd-classifiers", null,
             entityCapacity: 2048, physicalityCapacity: 0, attestationCapacity: 0);
         foreach (var row in _ucd!.ClassificationEntities(Source))
             classifiers.AddEntity(row);
-        // Ordinal context entities used as context_id on CANONICAL_DECOMPOSES_TO attestations
         classifiers.AddEntity(new EntityRow(UcdProperties.OrdinalCtx0, (byte)MetaTier.Meta, ordinalContextTypeId, Source));
         classifiers.AddEntity(new EntityRow(UcdProperties.OrdinalCtx1, (byte)MetaTier.Meta, ordinalContextTypeId, Source));
-        // Combining class value entities used as object_id on HAS_COMBINING_CLASS attestations (1-254)
         for (int cc = 1; cc <= 254; cc++)
             classifiers.AddEntity(new EntityRow(CombiningClassIds[cc], (byte)MetaTier.Meta, ucdClassifierTypeId, Source));
         await context.Writer.ApplyAsync(classifiers.Build(), ct);
@@ -110,10 +95,6 @@ public sealed class UnicodeDecomposer : IDecomposer
         int total = _records!.Length;
         int batch = options.BatchSize > 1 ? options.BatchSize : DefaultBatch;
 
-        // Pass 1: entities + physicalities only.
-        // Attestations reference codepoint entities as object_id (case mappings,
-        // decomposition targets). Some targets are in later batches, so we
-        // commit all entities before emitting any attestations.
         for (int start = 0; start < total; start += batch)
         {
             ct.ThrowIfCancellationRequested();
@@ -122,7 +103,6 @@ public sealed class UnicodeDecomposer : IDecomposer
             await Task.Yield();
         }
 
-        // Pass 2: attestations only (all 1.1M codepoint entities now exist).
         for (int start = 0; start < total; start += batch)
         {
             ct.ThrowIfCancellationRequested();
@@ -131,10 +111,6 @@ public sealed class UnicodeDecomposer : IDecomposer
             await Task.Yield();
         }
 
-        // Pass 3 (2026-06-05 completeness): sparse text-valued properties —
-        // formal name aliases (NameAliases.txt) and confusable mappings
-        // (security/confusables.txt). Self-contained batches: the alias /
-        // sequence CONTENT rides the same intent as its attestation.
         {
             var recs = _records!;
             var ucd = _ucd!;
@@ -168,8 +144,6 @@ public sealed class UnicodeDecomposer : IDecomposer
             {
                 ct.ThrowIfCancellationRequested();
                 if (src >= (uint)recs.Length || target.Length == 0) continue;
-                // single-codepoint target → the codepoint entity itself;
-                // sequence target → its content entity (tier tree).
                 int first = char.ConvertToUtf32(target, 0);
                 int firstLen = char.IsSurrogatePair(target, 0) ? 2 : 1;
                 Hash128? targetId = target.Length == firstLen
@@ -190,17 +164,6 @@ public sealed class UnicodeDecomposer : IDecomposer
             if (count > 0) yield return b.Build();
         }
 
-        // Pass 4 (2026-06-05): the BYTE TIER — the substrate's modality-blind
-        // floor. Bytes ≤ 0x7F ARE their ASCII codepoint entities (same content
-        // bytes, same id — nothing to add). The 128 high bytes are atoms BELOW
-        // the codepoint tier: canonical structural placements (super-Fibonacci
-        // over the byte band, ByteAtoms — the ONE implementation any anchorer
-        // shares), plus the encoding relations the standards define:
-        //   byte —HAS_UTF8_ROLE→ continuation / lead2..4 / invalid (RFC 3629);
-        //   byte —DECODES_TO(ctx: ISO-8859-1)→ U+0080+b   (Latin-1 alignment);
-        //   byte —DECODES_TO(ctx: windows-1252)→ the remapped 0x80–0x9F chars.
-        // Which character a byte means is a property of the ENCODING — these
-        // are witnessed relations with the encoding as context, NEVER identity.
         {
             var recs = _records!;
             var bb = new SubstrateChangeBuilder(Source, "bytes/atoms-and-encodings", null,
@@ -242,14 +205,10 @@ public sealed class UnicodeDecomposer : IDecomposer
                     byteId, "HAS_UTF8_ROLE", roleIds[ByteAtoms.Utf8Role(bv)],
                     Source, SourceTrust.StandardsDerived));
 
-                // Latin-1: byte value IS the codepoint index (the alignment
-                // Unicode chose for its first 256 codepoints).
                 bb.AddAttestation(RelationTypeRegistry.Attest(
                     byteId, "DECODES_TO", recs[v].Hash, Source,
                     SourceTrust.StandardsDerived, contextId: latin1));
 
-                // Windows-1252: 0x80–0x9F remapped (5 undefined slots skipped);
-                // 0xA0–0xFF agrees with Latin-1.
                 uint cp1252Target = bv <= 0x9F
                     ? ByteAtoms.Cp1252High[bv - 0x80]
                     : (uint)bv;
@@ -265,20 +224,12 @@ public sealed class UnicodeDecomposer : IDecomposer
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(UnicodeSeed.CodepointCount);
 
-    /// <summary>The data-derived UCD classifier / value canonical names this
-    /// decomposer mints (category/script/block/bidi/age/emoji/numeric +
-    /// combining-class values). Built from the SAME format templates the
-    /// UcdProperties entity-id dictionaries use, so render() resolves the same
-    /// ids. Read post-DecomposeAsync (the decomposer caches <c>_ucd</c>) —
-    /// returns empty if the UCD properties aren't loaded yet.</summary>
     public IReadOnlyCollection<string> CanonicalNamesForReadback
     {
         get
         {
             var ucd = _ucd;
             if (ucd is null) return Array.Empty<string>();
-            // Keys are the names; rebuild the canonical strings from the SAME
-            // templates UcdProperties.BuildEntityIds used per dictionary.
             var names = new List<string>(2048);
             foreach (var n in ucd.CategoryEntityIds.Keys)   names.Add($"unicode/category/{n}/v1");
             foreach (var n in ucd.ScriptEntityIds.Keys)     names.Add($"unicode/script/{n}/v1");
@@ -287,9 +238,7 @@ public sealed class UnicodeDecomposer : IDecomposer
             foreach (var n in ucd.AgeEntityIds.Keys)        names.Add($"unicode/age/{n}/v1");
             foreach (var n in ucd.EmojiPropEntityIds.Keys)  names.Add($"unicode/emoji/{n}/v1");
             foreach (var v in ucd.NumericEntityIds.Keys)    names.Add($"unicode/numeric/{v}/v1");
-            // Combining-class value entities (1..254), seeded in InitializeAsync.
             for (int cc = 1; cc <= 254; cc++)               names.Add($"unicode/combining_class/{cc}/v1");
-            // Byte-tier classifiers (pass 4).
             names.Add("substrate/type/Byte/v1");
             names.Add("substrate/encoding/ISO-8859-1/v1");
             names.Add("substrate/encoding/windows-1252/v1");
@@ -340,31 +289,26 @@ public sealed class UnicodeDecomposer : IDecomposer
             {
                 uint ucp = (uint)cp;
 
-                // HAS_GENERAL_CATEGORY
                 string? cat = ucd.GeneralCategory[cp];
                 if (cat != null && ucd.CategoryEntityIds.TryGetValue(cat, out var catId))
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasGeneralCategory,
                         catId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
 
-                // HAS_COMBINING_CLASS (only for non-zero — zero is the default)
                 if (ucd.CombiningClass[cp] > 0)
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasCombiningClass,
                         CombiningClassIds[ucd.CombiningClass[cp]], Source, null,
                         RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
 
-                // HAS_SCRIPT
                 string? script = ucd.ScriptForCodepoint(ucp);
                 if (script != null && ucd.ScriptEntityIds.TryGetValue(script, out var scriptId))
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasScript,
                         scriptId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
 
-                // HAS_BLOCK
                 string? block = ucd.BlockForCodepoint(ucp);
                 if (block != null && ucd.BlockEntityIds.TryGetValue(block, out var blockId))
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasBlock,
                         blockId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
 
-                // HAS_UPPERCASE_MAPPING
                 if (ucd.UppercaseMapping[cp] != 0)
                 {
                     uint targetCp = ucd.UppercaseMapping[cp];
@@ -373,7 +317,6 @@ public sealed class UnicodeDecomposer : IDecomposer
                             recs[targetCp].Hash, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
                 }
 
-                // HAS_LOWERCASE_MAPPING
                 if (ucd.LowercaseMapping[cp] != 0)
                 {
                     uint targetCp = ucd.LowercaseMapping[cp];
@@ -382,7 +325,6 @@ public sealed class UnicodeDecomposer : IDecomposer
                             recs[targetCp].Hash, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
                 }
 
-                // CANONICAL_DECOMPOSES_TO
                 uint[]? decomp = ucd.CanonDecomp[cp];
                 if (decomp != null)
                 {
@@ -400,15 +342,11 @@ public sealed class UnicodeDecomposer : IDecomposer
                     }
                 }
 
-                // ── 2026-06-05 completeness sweep ──
-
-                // HAS_TITLECASE_MAPPING
                 if (ucd.TitlecaseMapping[cp] != 0 && ucd.TitlecaseMapping[cp] < (uint)recs.Length)
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasTitlecaseMapping,
                         recs[ucd.TitlecaseMapping[cp]].Hash, Source, null,
                         RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
 
-                // COMPATIBILITY_DECOMPOSES_TO — the <tag> forms, DISTINCT arena.
                 uint[]? compat = ucd.CompatDecomp[cp];
                 if (compat != null)
                 {
@@ -426,32 +364,26 @@ public sealed class UnicodeDecomposer : IDecomposer
                     }
                 }
 
-                // HAS_NUMERIC_VALUE (ScalarValued rank via the registry)
                 string? num = ucd.NumericValue[cp];
                 if (num != null && ucd.NumericEntityIds.TryGetValue(num, out var numId))
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasNumericValue,
                         numId, Source, null, RelationTypeRank.ScalarValued, SourceTrust.StandardsDerived));
 
-                // HAS_BIDI_CLASS
                 string? bidi = ucd.BidiClass[cp];
                 if (bidi != null && ucd.BidiClassEntityIds.TryGetValue(bidi, out var bidiId))
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasBidiClass,
                         bidiId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
 
-                // HAS_MIRROR (symmetric — emit once from the lower codepoint;
-                // the registry would orient anyway, this avoids the duplicate)
                 uint mir = ucd.BidiMirror[cp];
                 if (mir != 0 && mir < (uint)recs.Length && cp <= mir)
                     b.AddAttestation(RelationTypeRegistry.Attest(
                         entityId, "HAS_MIRROR", recs[mir].Hash, Source, SourceTrust.StandardsDerived));
 
-                // HAS_AGE (the Unicode version that introduced the codepoint)
                 string? age = ucd.AgeForCodepoint(ucp);
                 if (age != null && ucd.AgeEntityIds.TryGetValue(age, out var ageId))
                     b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.KindHasAge,
                         ageId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
 
-                // HAS_EMOJI_PROPERTY (overlapping booleans → one arena, classifier values)
                 byte eprops = ucd.EmojiProps[cp];
                 if (eprops != 0)
                     for (int bit = 0; bit < UcdProperties.EmojiPropNames.Length; bit++)

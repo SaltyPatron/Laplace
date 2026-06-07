@@ -1,9 +1,3 @@
-/* ── Permanent inference queries — part of the substrate, not regenerated per session ──────
- * Relatedness/inference is a sorted index scan over consensus effective μ (μ - 2·rd). These
- * are the queries the substrate ships with; call them directly instead of hand-writing SQL. */
-
-/* Top consensus relations by effective μ, ranked. Optional kind filter (e.g. COMPLETES_TO).
- * This IS ranked-μ inference: a single index scan over consensus_eff_mu_btree. */
 CREATE OR REPLACE FUNCTION top_relations(p_limit integer DEFAULT 50, p_type bytea DEFAULT NULL)
     RETURNS TABLE(subject_id bytea, type_id bytea, object_id bytea, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
@@ -14,12 +8,7 @@ CREATE OR REPLACE FUNCTION top_relations(p_limit integer DEFAULT 50, p_type byte
     ORDER BY eff_mu(c.rating, c.rd) DESC
     LIMIT p_limit
 $$;
-COMMENT ON FUNCTION top_relations(integer, bytea) IS
-    'Top consensus relations by effective μ (μ - 2·rd), optional kind filter. Ranked-μ inference as a sorted index scan.';
 
-/* The completions of a subject (n-gram / entity), ranked by consensus effective μ —
- * "[subject] ⇒ {objects} ORDER BY μ". The generation/lookup primitive (reads consensus,
- * not evidence — no per-query re-aggregation). */
 CREATE OR REPLACE FUNCTION completions(p_subject bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(object_id bytea, type_id bytea, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
@@ -29,14 +18,7 @@ CREATE OR REPLACE FUNCTION completions(p_subject bytea, p_limit integer DEFAULT 
     ORDER BY eff_mu(c.rating, c.rd) DESC
     LIMIT p_limit
 $$;
-COMMENT ON FUNCTION completions(bytea, integer) IS
-    'Completions of a subject ranked by consensus effective μ — [subject] ⇒ {objects} ORDER BY μ.';
 
-/* Consensus NEIGHBORHOOD of an entity — the materialized Glicko-2 state (μ/rd/σ + witness
- * fan-in) per relation, ranked by effective μ. This is the inspect/inference read surface for
- * one entity: it reads `consensus` (source + context already dropped — ONE row per relation),
- * NOT the per-witness evidence. The raw rating/rd/volatility are returned (×1e9) so callers
- * render μ/rd/σ directly. */
 CREATE OR REPLACE FUNCTION consensus_out(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(type_id bytea, object_id bytea, rating bigint, rd bigint,
                   volatility bigint, witness_count bigint)
@@ -47,8 +29,6 @@ CREATE OR REPLACE FUNCTION consensus_out(p_id bytea, p_limit integer DEFAULT 40)
     ORDER BY eff_mu(c.rating, c.rd) DESC
     LIMIT p_limit
 $$;
-COMMENT ON FUNCTION consensus_out(bytea, integer) IS
-    'Outgoing CONSENSUS neighborhood: accumulated Glicko-2 (rating/rd/volatility ×1e9) + witness_count per (this→object) relation, ranked by effective μ. Source/context out of identity.';
 
 CREATE OR REPLACE FUNCTION consensus_in(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(subject_id bytea, type_id bytea, rating bigint, rd bigint,
@@ -60,43 +40,23 @@ CREATE OR REPLACE FUNCTION consensus_in(p_id bytea, p_limit integer DEFAULT 40)
     ORDER BY eff_mu(c.rating, c.rd) DESC
     LIMIT p_limit
 $$;
-COMMENT ON FUNCTION consensus_in(bytea, integer) IS
-    'Incoming CONSENSUS neighborhood: accumulated Glicko-2 + witness_count per (subject→this) relation, ranked by effective μ.';
 
-/* ── THE FORWARD PASS: generation as a recursive ranked-μ traversal ────────────────────────
- *
- * The model's forward pass was precomputed at ingest into ranked, trust-rated
- * consensus relations. Generation does NOT run the model: it WALKS the arena.
- * From a prompt entity, expand the top-p_beam completions by effective μ
- * (μ − 2·rd), recurse to p_depth — reconstructing the model's lexical OUTPUT
- * TREE for the prompt: every branch is a response the model could produce,
- * ranked by consensus strength, with path_mu the cumulative trust of the
- * branch. One indexed scan per node; no GPU, no softmax-over-vocab, no model
- * executed. */
 CREATE OR REPLACE FUNCTION generate_tree(
-    p_prompt bytea,                 -- prompt entity (token / n-gram id)
-    p_type   bytea  DEFAULT NULL,   -- arena to walk (e.g. COMPLETES_TO); NULL = all arenas
-    p_depth  int    DEFAULT 4,      -- tree depth (response length in steps)
-    p_beam   int    DEFAULT 5)      -- branches per node (ranked-μ beam)
+    p_prompt bytea,
+    p_type   bytea  DEFAULT NULL,
+    p_depth  int    DEFAULT 4,
+    p_beam   int    DEFAULT 5)
     RETURNS TABLE(depth int, path bytea[], kinds bytea[], entity_id bytea,
                   eff_mu numeric, path_mu numeric, witnesses bigint)
     AS 'MODULE_PATHNAME', 'pg_laplace_generate_tree'
     LANGUAGE C STABLE;
-COMMENT ON FUNCTION generate_tree(bytea, bytea, int, int) IS
-    'THE FORWARD PASS AS C (SPI; 2026-06-05 layer law — a recursive walk is algorithm, not set logic): reconstruct the model''s lexical output tree for a prompt entity by ranked-μ beam traversal of consensus (depth-bounded, cycle-free, refuted edges pruned per §11). One prepared edge plan per backend; rows ordered (depth, path_mu DESC). No model is executed.';
 
-/* Greedy decode: the single highest-μ branch — "the response the model would
- * most likely produce" — as one path. */
 CREATE OR REPLACE FUNCTION generate_greedy(
     p_prompt bytea, p_type bytea DEFAULT NULL, p_depth int DEFAULT 8)
     RETURNS TABLE(step int, type_id bytea, entity_id bytea, eff_mu numeric)
     AS 'MODULE_PATHNAME', 'pg_laplace_generate_greedy'
     LANGUAGE C STABLE;
-COMMENT ON FUNCTION generate_greedy(bytea, bytea, int) IS
-    'Greedy decode over consensus in C (SPI): follow the single highest effective-μ completion from the prompt entity for p_depth steps (refuted edges pruned per §11), emitting the edge kind taken at each step — the model''s most-likely response path, produced without running the model.';
 
-/* Consensus / dedup health: evidence vs consensus row counts + witness fan-in. dedup_ratio =
- * evidence/consensus (how much the per-witness evidence collapsed — the "~params - dupes"). */
 CREATE OR REPLACE FUNCTION consensus_stats()
     RETURNS TABLE(evidence_rows bigint, consensus_rows bigint, dedup_ratio numeric,
                   avg_witnesses numeric, max_witnesses bigint)
@@ -108,5 +68,3 @@ CREATE OR REPLACE FUNCTION consensus_stats()
            (SELECT round(avg(witness_count), 3) FROM consensus),
            (SELECT max(witness_count) FROM consensus)
 $$;
-COMMENT ON FUNCTION consensus_stats() IS
-    'Dedup/consensus health: evidence rows, consensus rows, dedup ratio (evidence/consensus), avg + max witness fan-in.';

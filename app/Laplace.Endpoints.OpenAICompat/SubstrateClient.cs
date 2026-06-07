@@ -330,7 +330,6 @@ internal sealed class SubstrateClient : IAsyncDisposable
 
     private static string BuildConnectionString()
     {
-        // Keep parity with CLI safety defaults: unset LAPLACE_DB targets laplace-dev.
         var s = Environment.GetEnvironmentVariable("LAPLACE_DB")
             ?? "Host=/var/run/postgresql;Username=laplace_admin;Database=laplace-dev";
         if (!s.Contains("Include Error Detail", StringComparison.OrdinalIgnoreCase))

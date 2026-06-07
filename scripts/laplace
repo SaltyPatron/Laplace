@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-# laplace — run the Laplace CLI from anywhere.
-#
-# Symlinked onto PATH (e.g. ~/.local/bin/laplace). Resolves the repo from the
-# script's real location, prefers the Release build, defaults the connection to
-# laplace-dev (override with $LAPLACE_DB), and execs the CLI with your args.
-#
-#   laplace generate "the whale"     # one-shot continuation
-#   laplace generate                  # REPL — type a prompt, Enter
-#   laplace nn whale                  # plural nearest-neighbor (structural + semantic)
-#   laplace converse "what is a dog"  # the conversation surface
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"

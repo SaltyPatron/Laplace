@@ -2,20 +2,8 @@ using System.Text;
 
 namespace Laplace.Engine.Core;
 
-/// <summary>
-/// Managed wrapper over the engine <c>laplace_text_decomposer_run</c>
-/// (engine/core/include/laplace/core/text_decomposer.h). Observed UTF-8 +
-/// UAX#29 segmentation (no NFC/NFD at ingest).
-///
-/// <para>Same input bytes -> identical TierTree -> identical content-
-/// addressed hashes. Determinism is pinned by the compiled-in
-/// UCD tables from <c>LAPLACE_UCD_PATH</c> at the version
-/// <c>LAPLACE_UNICODE_VERSION</c>.</para>
-/// </summary>
 public static class TextDecomposer
 {
-    /// <summary>Decompose UTF-8 bytes into a tier_tree. Caller owns
-    /// the returned <see cref="TierTree"/> and must dispose it.</summary>
     public static TierTree Run(ReadOnlySpan<byte> utf8)
     {
         IntPtr handle = IntPtr.Zero;
@@ -43,7 +31,6 @@ public static class TextDecomposer
         return TierTree.FromExistingHandle(handle);
     }
 
-    /// <summary>UTF-8-encode <paramref name="text"/> and decompose.</summary>
     public static TierTree Run(string text)
     {
         ArgumentNullException.ThrowIfNull(text);

@@ -8,20 +8,11 @@ using Xunit;
 
 namespace Laplace.Decomposers.OpenSubtitles.Tests;
 
-/// <summary>
-/// Verifies the OpenSubtitles Moses-format decomposer on a small inline fixture: two
-/// parallel line-aligned entries in one ".txt.zip" → content + IS_TRANSLATION_OF +
-/// HAS_LANGUAGE, all routed through the registry. Needs liblaplace_core.so + a loaded
-/// T0 perf-cache (the documented host precondition for any content-bearing decomposer).
-/// </summary>
 public sealed class OpenSubtitlesDecomposerTests
 {
     static OpenSubtitlesDecomposerTests()
     {
-        // Content emission routes text through ContentEmitter → the perf-cache must be
-        // loaded (same static-ctor pattern as UnicodeDecomposerTests).
         CodepointPerfcache.Load(ResolvePerfcacheBlob());
-        // HAS_LANGUAGE / language-entity resolution reads the ISO 639 reference index.
         LanguageReference.EnsureLoaded();
     }
 
@@ -39,19 +30,17 @@ public sealed class OpenSubtitlesDecomposerTests
         throw new InvalidOperationException("perf-cache blob not found; build the engine or set LAPLACE_PERFCACHE_BIN.");
     }
 
-    // Inline aligned fixture (en ⇥ es), line N ↔ line N.
-    private static readonly string[] En = { "Hello there.", "What is your name?", "" /* blank skipped */ };
+    private static readonly string[] En = { "Hello there.", "What is your name?", "" };
     private static readonly string[] Es = { "Hola allí.",   "¿Cómo te llamas?",  "" };
 
     private static string WriteFixtureZip(string dir)
     {
-        // Mirror the real OPUS naming: OpenSubtitles.<pair>.<langSuffix>, two parallel entries.
         string zipPath = Path.Combine(dir, "en-es.txt.zip");
         using var fs = File.Create(zipPath);
         using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
         WriteEntry(zip, "OpenSubtitles.en-es.en", En);
         WriteEntry(zip, "OpenSubtitles.en-es.es", Es);
-        WriteEntry(zip, "README",  new[] { "a corpus" });   // non-text entry, must be ignored
+        WriteEntry(zip, "README",  new[] { "a corpus" });
         WriteEntry(zip, "LICENSE", new[] { "terms" });
         return zipPath;
     }
@@ -88,30 +77,22 @@ public sealed class OpenSubtitlesDecomposerTests
                 {
                     if (a.TypeId == translationKind) translationEdges++;
                     else if (a.TypeId == languageKind) { languageEdges++; if (a.ObjectId is { } o) langObjects.Add(o); }
-                    // Every attestation is routed through the registry (a known canonical kind).
                     Assert.True(a.TypeId == translationKind || a.TypeId == languageKind,
                         "only registry-routed IS_TRANSLATION_OF / HAS_LANGUAGE kinds are emitted");
                 }
             }
 
-            // Two non-blank aligned lines → 2 translation edges + 4 HAS_LANGUAGE edges
-            // (one per sentence per line). The trailing blank line is skipped.
             Assert.Equal(2, translationEdges);
             Assert.Equal(4, languageEdges);
 
-            // The language objects are the omni-glottal canonical entities, resolved
-            // identically to every other source (en → eng, es → spa).
             Hash128 enId = LanguageReference.Resolve("en");
             Hash128 esId = LanguageReference.Resolve("es");
             Assert.Contains(enId, langObjects);
             Assert.Contains(esId, langObjects);
 
-            // Both language entities were emitted (so the HAS_LANGUAGE FK is satisfiable).
             Assert.Contains(enId, entities);
             Assert.Contains(esId, entities);
 
-            // Both sentences landed as content: the IS_TRANSLATION_OF endpoints are
-            // exactly the content-addressed root ids of the surfaces.
             Hash128? helloId = ContentEmitter.RootId("Hello there.");
             Hash128? holaId  = ContentEmitter.RootId("Hola allí.");
             Assert.NotNull(helloId);
@@ -137,7 +118,6 @@ public sealed class OpenSubtitlesDecomposerTests
 
         Assert.Contains(boot.Entities, e =>
             e.Id == OpenSubtitlesDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
-        // IS_TRANSLATION_OF kind entity is seeded.
         Hash128 translationKind = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
         Assert.Contains(boot.Entities, e => e.Id == translationKind);
     }
@@ -146,11 +126,8 @@ public sealed class OpenSubtitlesDecomposerTests
     public async Task Estimate_Reports_Published_Pair_Total()
     {
         var dec = new OpenSubtitlesDecomposer();
-        // Sum of PROVENANCE.md per-pair aligned-pair counts.
         Assert.Equal(600_995_230L, await dec.EstimateUnitCountAsync(new FakeContext("/vault/Data/OpenSubtitles", new NullWriter())));
     }
-
-    // === fakes ===
 
     private sealed class FakeContext(string ecosystemPath, ISubstrateWriter writer) : IDecomposerContext
     {

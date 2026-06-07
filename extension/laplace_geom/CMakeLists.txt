@@ -1,21 +1,98 @@
-# extension/laplace_geom/CMakeLists.txt
-#
-# laplace_geom extension — general-purpose 4D PostGIS additions per
-# . CMake-driven build (no PGXS). Modular SQL via
-# cpp preprocessor.
+if(WIN32)
+    set(POSTGIS_SRCDIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/postgis")
+    set(LWGEOM_DIR "${POSTGIS_SRCDIR}/liblwgeom")
+    set(PROJ_SRCDIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/proj")
+
+    set(POSTGIS_MAJOR_VERSION 3)
+    set(POSTGIS_MINOR_VERSION 6)
+    set(POSTGIS_MICRO_VERSION 3)
+    set(POSTGIS_LIB_VERSION "3.6.3")
+    set(POSTGIS_GEOS_VERSION "")
+    set(POSTGIS_PGSQL_VERSION 180)
+    set(SRID_MAX 999999)
+    set(SRID_USR_MAX 998999)
+
+    configure_file("${LWGEOM_DIR}/liblwgeom.h.in"
+                   "${CMAKE_CURRENT_BINARY_DIR}/lwgeom_inc/liblwgeom.h" @ONLY)
+    file(COPY "${LWGEOM_DIR}/lwinline.h"
+         DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/lwgeom_inc")
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/postgis_config_win.h.in"
+                   "${CMAKE_CURRENT_BINARY_DIR}/postgis_config.h" @ONLY)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/postgis_config_win.h.in"
+                   "${POSTGIS_SRCDIR}/postgis_config.h" @ONLY)
+
+    set(LWGEOM_CORE_SOURCES
+        stringbuffer.c optionlist.c stringlist.c bytebuffer.c
+        measures.c measures3d.c ptarray.c lookup3.c
+        lwgeom_api.c lwgeom.c lwpoint.c lwline.c lwpoly.c lwtriangle.c
+        lwmpoint.c lwmline.c lwmpoly.c lwboundingcircle.c lwcollection.c
+        lwcircstring.c lwcompound.c lwcurvepoly.c lwmcurve.c lwmsurface.c
+        lwpsurface.c lwtin.c
+        lwout_wkb.c lwin_wkb.c lwin_twkb.c lwiterator.c lwgeom_median.c
+        lwout_wkt.c lwout_twkb.c lwin_wkt_parse.c lwin_wkt_lex.c lwin_wkt.c
+        lwin_encoded_polyline.c lwutil.c lwhomogenize.c intervaltree.c
+        lwalgorithm.c lwstroke.c lwlinearreferencing.c lwprint.c
+        gbox.c gserialized.c gserialized1.c gserialized2.c
+        lwgeodetic.c lwgeodetic_measures.c lwgeodetic_tree.c
+        lwrandom.c lwtree.c
+        lwout_gml.c lwout_kml.c lwout_geojson.c lwout_svg.c lwout_x3d.c
+        lwout_encoded_polyline.c lwgeom_debug.c
+        lwunionfind.c effectivearea.c lwchaikins.c lwmval.c lwkmeans.c
+        varint.c lwgeom_remove_irrelevant_points_for_view.c
+    )
+    set(_lwgeom_srcs "")
+    foreach(_s IN LISTS LWGEOM_CORE_SOURCES)
+        if(EXISTS "${LWGEOM_DIR}/${_s}")
+            list(APPEND _lwgeom_srcs "${LWGEOM_DIR}/${_s}")
+        endif()
+    endforeach()
+    list(APPEND _lwgeom_srcs "${POSTGIS_SRCDIR}/deps/ryu/d2s.c")
+    list(APPEND _lwgeom_srcs "${CMAKE_CURRENT_SOURCE_DIR}/src/lwgeom_win32_stubs.c")
+
+    add_library(lwgeom_static STATIC ${_lwgeom_srcs})
+    target_include_directories(lwgeom_static PUBLIC
+        "${CMAKE_CURRENT_BINARY_DIR}/lwgeom_inc"
+        "${CMAKE_CURRENT_BINARY_DIR}"
+        "${LWGEOM_DIR}"
+        "${POSTGIS_SRCDIR}"
+        "${POSTGIS_SRCDIR}/deps"
+        "${POSTGIS_SRCDIR}/deps/ryu"
+        "${PROJ_SRCDIR}/src"
+    )
+    target_compile_options(lwgeom_static PRIVATE /w
+        "/FI${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/win32_lwgeom_compat.h")
+    target_compile_definitions(lwgeom_static PRIVATE
+        _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS WIN32)
+
+    add_library(laplace_geom MODULE src/laplace_geom.c)
+    set_target_properties(laplace_geom PROPERTIES
+        PREFIX "" OUTPUT_NAME laplace_geom SUFFIX ".dll"
+        WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
+    target_include_directories(laplace_geom PRIVATE
+        "${LAPLACE_PG_INCLUDEDIR_SERVER}/port/win32_msvc"
+        "${LAPLACE_PG_INCLUDEDIR_SERVER}/port/win32"
+        "${LAPLACE_PG_INCLUDEDIR_SERVER}"
+        "${LAPLACE_PG_INCLUDEDIR}"
+    )
+    target_compile_definitions(laplace_geom PRIVATE
+        _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS WIN32)
+    target_link_libraries(laplace_geom PRIVATE
+        laplace_core
+        lwgeom_static
+        "${LAPLACE_PG_LIBDIR}/postgres.lib"
+    )
+    return()
+endif()
 
 set(EXT_NAME    laplace_geom)
 set(EXT_VERSION ${PROJECT_VERSION})
 
-# === C wrapper sources (PG_FUNCTION_INFO_V1) ===
 set(EXT_C_SOURCES
     src/laplace_geom.c
 )
 
 add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})
 
-# PG extension naming: no `lib` prefix; `.so` suffix even on macOS would be
-# wrong (PG uses .so/.dll); for our Linux-only target this is fine.
 set_target_properties(${EXT_NAME} PROPERTIES
     PREFIX ""
     OUTPUT_NAME ${EXT_NAME}
@@ -25,24 +102,6 @@ target_include_directories(${EXT_NAME} PRIVATE
     ${LAPLACE_PG_INCLUDEDIR_SERVER}
 )
 
-# === liblwgeom for ST_*_4d geometry deserialization ===
-# postgis-3.so hides its internal lwgeom API (-fvisibility=hidden — only
-# 9 lwgeom_* symbols exported), and stock apt PostGIS doesn't ship dev
-# headers. We statically link against the liblwgeom the PostGIS submodule
-# build produced — installed at ${LAPLACE_DEPS_LWGEOM_PREFIX}/{include,lib}/
-# by external/CMakeLists.txt's postgis ExternalProject step. Static link
-# keeps our wrappers' lwgeom independent of whatever postgis-3.so is
-# loaded at runtime (system PG or custom); we only use lwgeom for raw
-# gserialized → POINT4D extraction, no cross-function state.
-#
-# Lookup is independent of LAPLACE_PG_PREFIX (which selects the RUNTIME PG
-# the extension will be loaded into — stock or custom). liblwgeom always
-# comes from the PostGIS submodule build at /opt/laplace/pgsql-18/, since
-# that's where `just build-deps` produces it regardless of which PG the
-# substrate is targeting at runtime.
-#
-# Prerequisites: `just build-deps` must have run. The check below fails
-# the configure with a clear pointer if it hasn't.
 set(LAPLACE_DEPS_LWGEOM_PREFIX "/opt/laplace/pgsql-18"
     CACHE PATH "Prefix where liblwgeom.{h,a} are installed by external/CMakeLists.txt's postgis step")
 find_path(LAPLACE_LIBLWGEOM_INCLUDE_DIR
@@ -68,9 +127,6 @@ message(STATUS "laplace_geom: liblwgeom.h = ${LAPLACE_LIBLWGEOM_INCLUDE_DIR}/lib
 message(STATUS "laplace_geom: liblwgeom.a = ${LAPLACE_LIBLWGEOM_STATIC}")
 target_include_directories(${EXT_NAME} PRIVATE ${LAPLACE_LIBLWGEOM_INCLUDE_DIR})
 
-# liblwgeom.h transitively #includes "proj.h" — must be on the include
-# path. PROJ from external/CMakeLists.txt's proj step lands at
-# /opt/laplace/proj/include/.
 find_path(LAPLACE_PROJ_INCLUDE_DIR
     NAMES proj.h
     HINTS "/opt/laplace/proj/include"
@@ -83,19 +139,6 @@ if(NOT LAPLACE_PROJ_INCLUDE_DIR)
 endif()
 target_include_directories(${EXT_NAME} PRIVATE ${LAPLACE_PROJ_INCLUDE_DIR})
 
-# liblwgeom static-links a lot of geometry code that transitively
-# references libgeos (lwgeom_geos.o, lwgeom_topo.o, etc.) and libproj
-# (lwspheroid.o → geod_*). We link all three so every undefined
-# symbol resolves at PG load time.
-#
-# Critical: this only works when PG itself runs against the consistent
-# /opt/laplace dep set. If the running PG already loaded SYSTEM
-# postgis-3.so → SYSTEM libgeos 3.10.2, our extension's libgeos
-# resolves to the same pinned 3.10.2 at load (despite our RUNPATH
-# preferring 3.12.2) and PostGIS 3.6.3 symbols like
-# GEOSConcaveHullOfPolygons are missing. The substrate runtime
-# therefore must use the /opt/laplace/pgsql-18 cluster — system PG
-# is not supported once laplace_geom is loaded into the backend.
 find_library(LAPLACE_LIBGEOS_C geos_c
     HINTS "/opt/laplace/geos/lib"
     NO_DEFAULT_PATH)
@@ -124,29 +167,17 @@ target_link_options(${EXT_NAME} PRIVATE
     "-Wl,-rpath,$<TARGET_FILE_DIR:laplace_core>"
 )
 
-#: the extension is THIN wrappers. Heavy lifting is in
-# liblaplace_core; the .c file here is just PG_FUNCTION_INFO_V1 wrappers.
-
-# === .control file (built from .control.in via configure_file) ===
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/${EXT_NAME}.control.in
     ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.control
     @ONLY
 )
 
-# === sqldefines.h shared macros (built via configure_file) ===
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/sql/sqldefines.h.in
     ${CMAKE_CURRENT_BINARY_DIR}/sql/sqldefines.h
     @ONLY
 )
-
-# === Modular SQL via cpp preprocessor ===
-#
-# Entry: sql/laplace_geom.sql.in (which #includes the numbered modules).
-# Build: cpp -traditional-cpp -w -P -Upixel -Ubool  →  grep -v ^#  →
-#        perl s/MODULE_PATHNAME/$libdir/laplace_geom/  →  perl s/@extschema@\.//
-# Output: build/extension/laplace_geom/laplace_geom--0.1.0.sql
 
 set(EXT_SQL_MODULES
     sql/laplace_geom.sql.in
@@ -184,7 +215,6 @@ add_custom_command(
 add_custom_target(${EXT_NAME}_sql ALL DEPENDS ${EXT_BUILT_SQL})
 add_dependencies(${EXT_NAME} ${EXT_NAME}_sql)
 
-# === Install ===
 install(TARGETS ${EXT_NAME}
     LIBRARY
         DESTINATION ${LAPLACE_EXT_LIBDIR}
@@ -197,8 +227,6 @@ install(FILES
     PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )
 
-# === Tests (pg_regress via CTest — see tests/CMakeLists.txt for the
-# fixture + add_test() wiring; landed by B′.9 #196). ===
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()

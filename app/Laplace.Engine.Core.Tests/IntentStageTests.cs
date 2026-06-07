@@ -22,7 +22,7 @@ public class IntentStageTests
     {
         using var s = IntentStage.New(0);
         var bytes = s.EmitCopyBinary(IntentStageTable.Entities);
-        Assert.Equal(21, bytes.Length); // 19 header + 2 trailer
+        Assert.Equal(21, bytes.Length);
         for (int i = 0; i < 11; i++) Assert.Equal(kSig[i], bytes[i]);
         Assert.Equal(0u, ReadBe32(bytes.AsSpan(11, 4)));
         Assert.Equal(0u, ReadBe32(bytes.AsSpan(15, 4)));
@@ -41,13 +41,12 @@ public class IntentStageTests
 
         var bytes = s.EmitCopyBinary(IntentStageTable.Entities);
         Assert.Equal(73, bytes.Length);
-        Assert.Equal(4, ReadBe16(bytes.AsSpan(19, 2))); // field_count
-        Assert.Equal(16u, ReadBe32(bytes.AsSpan(21, 4))); // id len
-        // skip id bytes 25..41
-        Assert.Equal(2u, ReadBe32(bytes.AsSpan(41, 4)));  // tier len
-        Assert.Equal(5, ReadBe16(bytes.AsSpan(45, 2)));   // tier value
-        Assert.Equal(16u, ReadBe32(bytes.AsSpan(47, 4))); // type_id len
-        Assert.Equal(unchecked((uint)-1), ReadBe32(bytes.AsSpan(67, 4))); // first_observed_by NULL
+        Assert.Equal(4, ReadBe16(bytes.AsSpan(19, 2)));
+        Assert.Equal(16u, ReadBe32(bytes.AsSpan(21, 4)));
+        Assert.Equal(2u, ReadBe32(bytes.AsSpan(41, 4)));
+        Assert.Equal(5, ReadBe16(bytes.AsSpan(45, 2)));
+        Assert.Equal(16u, ReadBe32(bytes.AsSpan(47, 4)));
+        Assert.Equal(unchecked((uint)-1), ReadBe32(bytes.AsSpan(67, 4)));
     }
 
     [Fact]
@@ -77,7 +76,7 @@ public class IntentStageTests
         Assert.Throws<ArgumentException>(() =>
             s.AddPhysicality(h, h, h, 1,
                 stackalloc double[] { 0, 0, 0, 0 }, hb,
-                stackalloc double[5],  // not multiple of 4
+                stackalloc double[5],
                 nConstituents: 0,
                 alignmentResidual: null,
                 sourceDim: null,
@@ -89,12 +88,10 @@ public class IntentStageTests
     {
         using var s = IntentStage.New(1);
         var h = Hash128.Zero;
-        s.AddAttestation(h, h, h, /*object*/null, h, /*context*/null,
+        s.AddAttestation(h, h, h, null, h, null,
             outcome: 2, lastObservedAtUnixUs: 0, observationCount: 1);
         Assert.Equal(1, s.AttestationCount);
         var bytes = s.EmitCopyBinary(IntentStageTable.Attestations);
-        // After 19 header + 2 (field_count=9) + 3*(4+16) (id, subject, kind) = 81 bytes
-        // → next int32 BE should be -1 (object NULL)
         Assert.Equal(unchecked((uint)-1), ReadBe32(bytes.AsSpan(81, 4)));
     }
 

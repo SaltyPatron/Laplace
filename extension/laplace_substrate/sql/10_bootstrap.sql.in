@@ -1,48 +1,22 @@
-/* 10_bootstrap.sql.in -- substrate-canonical seeding.
- *
- * Runs at extension install AFTER tables exist (modules 02-05) but BEFORE any
- * decomposer runs. Seeds the substrate's built-in entities, stages 0-3.5:
- *
- *   Stage 0  -- meta-types: Type, Kind, PhysicalityKind, Source, SubstrateCanonical.
- *   Stage 1  -- SubstrateCanonical source entity.
- *   Stage 2  -- PhysicalityKind enum entities: CONTENT, BUILDING_BLOCK, PROJECTION.
- *   Stage 3  -- modality-agnostic attestation-kind vocabulary.
- *   Stage 3.5 -- 10 source-trust-class entities ( Part B).
- *
- * All bootstrap rows are content-addressed by BLAKE3-128 of a canonical
- * name string of the form "substrate/<category>/<Name>/v1". Same substrate
- * version on any machine produces byte-identical bootstrap rows.
- *
- * Self-reference: the Type meta-type's type_id points at itself. We seed
- * Type FIRST (its id derived from its canonical name) then reference that
- * id from every subsequent row. */
-
 DO $bootstrap$
 DECLARE
-    /* Stage 0 -- meta-type ids (content-addressed; computed via the
-     * laplace_hash128_blake3 SQL wrapper). */
     type_id              bytea;
     kind_id              bytea;
     physicality_kind_id  bytea;
     source_id            bytea;
-    subscan_id           bytea;  -- SubstrateCanonical source entity
+    subscan_id           bytea;
 
-    /* PhysicalityKind enum entity ids (Stage 2). */
     pk_content_id        bytea;
     pk_buildblock_id     bytea;
     pk_projection_id     bytea;
     pk_projection_out_id bytea;
 
-    /* Universal text-tier type entities (used by TextEntityBuilder from ANY
-     * text-using decomposer — Unicode T0 seed, the model decomposer's tokenizer pass,
-     * future ladder sources). Substrate-canonical: same id everywhere. */
     type_codepoint_id    bytea;
     type_grapheme_id     bytea;
     type_word_id         bytea;
     type_sentence_id     bytea;
     type_document_id     bytea;
 
- /* Source-trust-class entity ids (Part B; 10 tiers). */
     tc_mandate_id        bytea;
     tc_standards_id      bytea;
     tc_academic_id       bytea;
@@ -54,8 +28,6 @@ DECLARE
     tc_user_prompt_id    bytea;
     tc_adversarial_id    bytea;
 
-    /* Modality-agnostic kind ids (Stage 3 vocabulary; bootstrap subset --
-     * decomposers add their domain-specific kinds at first run). */
     kind_is_a_id              bytea;
     kind_has_part_id          bytea;
     kind_co_occurs_with_id    bytea;
@@ -73,39 +45,25 @@ DECLARE
     kind_has_trust_class_id   bytea;
     kind_is_alias_of_id       bytea;
 
-    /* High tier reserved for abstract meta-entities so they don't collide
-     * with content tiers (T0 codepoints through T255 in normal usage). */
     META_TIER  CONSTANT smallint := 250;
     KIND_TIER  CONSTANT smallint := 248;
     TRUST_TIER CONSTANT smallint := 247;
 
 BEGIN
-    /* === Stage 0: meta-types =========================================== */
-
-    /* Compute ids by hashing the canonical name string. The Type meta-type
-     * is self-referential: we compute its id first, then insert the row
-     * with type_id = itself. */
-
     type_id             := public.laplace_hash128_blake3('substrate/type/Type/v1'::bytea);
     kind_id             := public.laplace_hash128_blake3('substrate/type/Kind/v1'::bytea);
     physicality_kind_id := public.laplace_hash128_blake3('substrate/type/PhysicalityKind/v1'::bytea);
     source_id           := public.laplace_hash128_blake3('substrate/type/Source/v1'::bytea);
 
-    /* Insert Type (self-typed). FK constraints to entities(id) are deferred
-     * until after bootstrap completes (see end of this block). */
     INSERT INTO entities (id, tier, type_id) VALUES
         (type_id,             META_TIER, type_id),
         (kind_id,             META_TIER, type_id),
         (physicality_kind_id, META_TIER, type_id),
         (source_id,           META_TIER, type_id);
 
-    /* === Stage 1: substrate-canonical Source entity ==================== */
-
     subscan_id := public.laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea);
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
         (subscan_id, META_TIER, source_id, NULL);
-
-    /* === Stage 2: PhysicalityKind enum entities ======================== */
 
     pk_content_id    := public.laplace_hash128_blake3('substrate/physicality_kind/CONTENT/v1'::bytea);
     pk_buildblock_id := public.laplace_hash128_blake3('substrate/physicality_kind/BUILDING_BLOCK/v1'::bytea);
@@ -119,21 +77,6 @@ BEGIN
         (pk_projection_id,     META_TIER, physicality_kind_id, subscan_id),
         (pk_projection_out_id, META_TIER, physicality_kind_id, subscan_id);
 
-    /* === Stage 2.5: substrate-canonical text-tier type entities ===========
-     *
- * Per the tier ladder and TextDecomposer: every
-     * text-using decomposer (UnicodeDecomposer at seed time; the model
-     * decomposer's tokenizer pass; future linguistic-ladder sources; the prompt
-     * ingest path) emits entities at tiers 0..6 with the per-tier type IDs
-     * resolved by TextEntityBuilder.TierTypeId. The tier-type entities
-     * themselves must exist in `entities` before any tier-N entity
-     * referencing them is inserted (entities_type_fk).
-     *
-     * Codepoint is also emitted at runtime by UnicodeDecomposer's
-     * InitializeAsync (idempotent under ON CONFLICT DO NOTHING). The
-     * higher tiers (Grapheme/Word/Sentence/Document) have no runtime
-     * bootstrap path — they're substrate canon. */
-
     type_codepoint_id := public.laplace_hash128_blake3('substrate/type/Codepoint/v1'::bytea);
     type_grapheme_id  := public.laplace_hash128_blake3('substrate/type/Grapheme/v1'::bytea);
     type_word_id      := public.laplace_hash128_blake3('substrate/type/Word/v1'::bytea);
@@ -146,13 +89,6 @@ BEGIN
         (type_word_id,      META_TIER, type_id, subscan_id),
         (type_sentence_id,  META_TIER, type_id, subscan_id),
         (type_document_id,  META_TIER, type_id, subscan_id);
-
- /* === Stage 3.5: source-trust-class entities (Part B) ====== *
-     * We seed these BEFORE attestation kinds because the kind-tier entities
-     * carry meta-attestations sourced to SubstrateCanonical, which itself
-     * needs HAS_TRUST_CLASS pointing at TrustClass_SubstrateMandate. Stage
-     * order: trust classes first, then kind tiers, then kinds, then the
-     * meta-attestations binding them. */
 
     tc_mandate_id       := public.laplace_hash128_blake3('substrate/trust_class/SubstrateMandate/v1'::bytea);
     tc_standards_id     := public.laplace_hash128_blake3('substrate/trust_class/StandardsDerived/v1'::bytea);
@@ -176,12 +112,6 @@ BEGIN
         (tc_app_derived_id,   TRUST_TIER, type_id, subscan_id),
         (tc_user_prompt_id,   TRUST_TIER, type_id, subscan_id),
         (tc_adversarial_id,   TRUST_TIER, type_id, subscan_id);
-
-    /* === Stage 3: modality-agnostic attestation kinds ================== *
-     * (Kind-value-tier entities are GONE — truth #5: tier is the entity Merkle
-     * stratum only, never a tier-on-kinds entity. Kind significance is now the
-     * numeric kind_rank folded into the Glicko opponent φ at ingest, never a
-     * seeded tier entity nobody reads.) */
 
     kind_is_a_id              := public.laplace_hash128_blake3('substrate/kind/IS_A/v1'::bytea);
     kind_has_part_id          := public.laplace_hash128_blake3('substrate/kind/HAS_PART/v1'::bytea);
@@ -218,21 +148,6 @@ BEGIN
         (kind_has_trust_class_id,   KIND_TIER, kind_id, subscan_id),
         (kind_is_alias_of_id,       KIND_TIER, kind_id, subscan_id);
 
-    /* === Meta-attestations binding it all together ===================== *
-     * SubstrateCanonical HAS_TRUST_CLASS SubstrateMandate (source provenance).
-     *
-     * Evidence rows are PROVENANCE now: who witnessed (source, context), when,
-     * how many games, and the outcome CLASS (0=refute/1=draw/2=confirm) — never
-     * a value. (Kind-value-tier entities + the HAS_KIND_VALUE_TIER row are
-     * GONE — truth #5; kind significance is the numeric kind_rank folded into
-     * the consensus match at ingest, never a tier entity and never persisted.)
-     *
-     * Attestation ids are computed via the laplace_hash128_merkle wrapper
-     * over (subject_id, kind_id, object_id, source_id, context_id) so the
-     * id IS the content. */
-
-    /* SubstrateCanonical HAS_TRUST_CLASS TrustClass_SubstrateMandate —
-     * a categorical confirm (outcome = 2). */
     INSERT INTO attestations (
         id, subject_id, type_id, object_id, source_id, context_id,
         outcome, last_observed_at, observation_count
@@ -243,8 +158,6 @@ BEGIN
         subscan_id, kind_has_trust_class_id, tc_mandate_id, subscan_id, NULL,
         2, now(), 1
     );
-
-    /* === Deferred FK constraints (added now that bootstrap rows exist) = */
 
     ALTER TABLE entities ADD CONSTRAINT entities_type_fk
         FOREIGN KEY (type_id) REFERENCES entities(id);

@@ -2,21 +2,6 @@ using System.Runtime.InteropServices;
 
 namespace Laplace.Engine.Core;
 
-/// <summary>
-/// The BYTE TIER — the substrate's modality-blind floor (2026-06-05 ruling:
-/// binary is authored content; bytes are the universal atoms every encoded
-/// modality bottoms out at). Bytes 0x00–0x7F ARE their ASCII codepoint
-/// entities (identical content bytes ⇒ identical BLAKE3 ⇒ one entity — the
-/// content law, not a special case). Bytes 0x80–0xFF are 128 atoms BELOW the
-/// codepoint tier (a lone high byte is an encoding fragment, not a character)
-/// with their own canonical structural placements.
-///
-/// Placement: super-Fibonacci over the 128-point band, index = byte − 0x80 —
-/// the byte's own standard order, same placement law as codepoints
-/// (structural, never semantic). ONE implementation serves both the seed
-/// (UnicodeDecomposer byte pass) and any anchorer (TokenS3Morph) so
-/// coordinates are bit-identical everywhere.
-/// </summary>
 public static class ByteAtoms
 {
     public const byte First = 0x80;
@@ -44,11 +29,8 @@ public static class ByteAtoms
         return hs;
     }
 
-    /// <summary>Entity id of a byte atom: BLAKE3 of the single byte — for
-    /// b ≤ 0x7F this IS the ASCII codepoint's id (one content, one entity).</summary>
     public static Hash128 Id(byte b) => Hash128.Blake3(stackalloc byte[1] { b });
 
-    /// <summary>Canonical placement of a high byte atom (b ≥ 0x80).</summary>
     public static ReadOnlySpan<double> Coord(byte b)
     {
         if (b < First) throw new ArgumentOutOfRangeException(nameof(b),
@@ -62,8 +44,6 @@ public static class ByteAtoms
         return Hilberts[b - First];
     }
 
-    /// <summary>UTF-8 role of a byte value — the standard's own classification
-    /// (RFC 3629): continuation (0x80–0xBF), 2/3/4-byte lead, or never-valid.</summary>
     public static string Utf8Role(byte b) => b switch
     {
         >= 0x80 and <= 0xBF => "continuation",
@@ -75,8 +55,6 @@ public static class ByteAtoms
         _                   => "ascii",
     };
 
-    /// <summary>Windows-1252 decoding of the 0x80–0x9F band (the 27 remapped
-    /// characters; 5 slots undefined → 0). 0xA0–0xFF and Latin-1 agree.</summary>
     public static readonly ushort[] Cp1252High = new ushort[32]
     {
         0x20AC, 0, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,

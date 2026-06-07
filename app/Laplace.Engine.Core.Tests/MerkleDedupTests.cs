@@ -36,7 +36,6 @@ public class MerkleDedupTests
             new(0, 0), new(1, 1), new(2, 2), new(3, 3),
             new(4, 4), new(5, 5), new(6, 6), new(7, 7),
         };
-        // bits set at 0, 2, 5, 6 → novel = {1, 3, 4, 7}
         var bm = new byte[] { 0b01100101 };
         var outBuf = new Hash128[8];
         int n = MerkleDedup.FilterNovel(ids, bm, outBuf);
@@ -79,9 +78,9 @@ public class MerkleDedupTests
         using var tree = TierTree.New(8);
         tree.AddLeaf(0, 1, 0, 0);
         tree.AddLeaf(0, 2, 0, 0);
-        tree.AddNode(1, 0, 2, 0, 0);  // root at idx 2
+        tree.AddNode(1, 0, 2, 0, 0);
         tree.FinalizeParents();
-        var bm = new byte[] { 0b00000100 }; // bit 2 set
+        var bm = new byte[] { 0b00000100 };
         var outBuf = new uint[3];
         Assert.Equal(0, MerkleDedup.TrunkShortcircuit(tree, bm, outBuf));
     }

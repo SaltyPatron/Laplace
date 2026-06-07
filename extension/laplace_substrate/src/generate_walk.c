@@ -1,18 +1,3 @@
-/* generate_walk.c — THE FORWARD PASS AS C (2026-06-05).
- *
- * generate_tree / generate_greedy moved from recursive SQL into SPI per the
- * layer law: a recursive graph walk is ALGORITHM, not set logic — SQL
- * orchestrates sets, C walks. Semantics are IDENTICAL to the retired SQL
- * bodies (17_consensus_reads.sql.in history): ranked-μ beam over consensus,
- * refuted edges pruned (§11), cycle-free per branch, eff_mu_display rounding,
- * rows ordered (depth, path_mu DESC).
- *
- * The per-node edge query is ONE prepared SPI plan per backend (plan once,
- * execute per node — the recursive-CTE version re-derived the lateral every
- * level). The plan's ORDER BY laplace.eff_mu(rating, rd) matches the
- * consensus expression index exactly as the SQL version did.
- */
-
 #include "postgres.h"
 
 #include "catalog/pg_type.h"
@@ -29,8 +14,6 @@
 PG_FUNCTION_INFO_V1(pg_laplace_generate_tree);
 PG_FUNCTION_INFO_V1(pg_laplace_generate_greedy);
 
-/* Runaway guard: a beam^depth explosion is a query-shape error, not data.
- * (The SQL predecessor had no guard and would grind to OOM instead.) */
 #define GENERATE_NODE_BUDGET 1000000
 
 static const char *EDGE_QUERY =
@@ -61,8 +44,6 @@ ensure_edge_plan(void)
     }
 }
 
-/* eff_mu_display(rating, rd) = round((rating - 2*rd) / 1e9, 3) — numeric,
- * matching 13_mu_law.sql.in bit for bit (int64 math, then numeric ops). */
 static Datum
 eff_mu_display_numeric(int64 rating, int64 rd)
 {
@@ -73,15 +54,14 @@ eff_mu_display_numeric(int64 rating, int64 rd)
     return DirectFunctionCall2(numeric_round, d, Int32GetDatum(3));
 }
 
-/* One walk node (tree mode). Parent chain reconstructs path/kinds at emit. */
 typedef struct WalkNode
 {
-    int     parent;        /* index into the node array; -1 for the root      */
+    int     parent;
     int     depth;
-    Datum   entity;        /* bytea datum (copied into CurrentMemoryContext)  */
-    Datum   kind;          /* edge kind taken to reach this node (bytea)      */
-    Datum   eff_mu;        /* numeric */
-    Datum   path_mu;       /* numeric */
+    Datum   entity;
+    Datum   kind;
+    Datum   eff_mu;
+    Datum   path_mu;
     int64   witnesses;
 } WalkNode;
 
@@ -95,12 +75,10 @@ copy_bytea_datum(Datum d)
     return PointerGetDatum(dst);
 }
 
-/* Build the branch's path as a bytea[] (root .. node) for the cycle filter
- * and the output row. kinds excludes the root (no edge leads to it). */
 static ArrayType *
 branch_array(WalkNode *nodes, int idx, bool kinds)
 {
-    int     depth = nodes[idx].depth;          /* root depth = 0 */
+    int     depth = nodes[idx].depth;
     int     n = kinds ? depth : depth + 1;
     Datum  *elems = (Datum *) palloc(sizeof(Datum) * (n > 0 ? n : 1));
     int     i = idx;
@@ -145,7 +123,6 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
     cap = 256;
     nodes = (WalkNode *) palloc(sizeof(WalkNode) * cap);
 
-    /* Root (depth 0; excluded from output, exactly as the SQL version). */
     nodes[0].parent    = -1;
     nodes[0].depth     = 0;
     nodes[0].entity    = copy_bytea_datum(PointerGetDatum(prompt));
@@ -157,13 +134,13 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
 
     for (int frontier_start = 0, level = 0; level < max_depth; level++)
     {
-        int frontier_end = n_nodes;     /* nodes of the current level */
+        int frontier_end = n_nodes;
         if (frontier_start == frontier_end)
-            break;                       /* level emptied — done early */
+            break;
 
         for (int f = frontier_start; f < frontier_end; f++)
         {
-            ArrayType *path_arr = branch_array(nodes, f, /*kinds*/ false);
+            ArrayType *path_arr = branch_array(nodes, f, false);
             Datum  args[4];
             char   nulls[5] = "    ";
             int    rc;
@@ -174,7 +151,7 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
             args[2] = Int32GetDatum(beam);
             args[3] = PointerGetDatum(path_arr);
 
-            rc = SPI_execute_plan(edge_plan, args, nulls, /*read_only*/ true, beam);
+            rc = SPI_execute_plan(edge_plan, args, nulls, true, beam);
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "generate_tree: edge query failed: %s",
                      SPI_result_code_string(rc));
@@ -217,11 +194,8 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
         frontier_start = frontier_end;
     }
 
-    /* Emit ordered (depth, path_mu DESC) — stable over BFS insertion order,
-     * mirroring the SQL ORDER BY. Root (index 0) excluded. */
     order = (int *) palloc(sizeof(int) * n_nodes);
     for (int i = 0; i < n_nodes; i++) order[i] = i;
-    /* insertion sort: levels are already grouped ascending; sort within. */
     for (int i = 2; i < n_nodes; i++)
     {
         int j = i, v = order[i];
@@ -233,7 +207,7 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
             {
                 int32 cmp = DatumGetInt32(DirectFunctionCall2(
                     numeric_cmp, nodes[u].path_mu, nodes[v].path_mu));
-                if (cmp >= 0) break;     /* DESC: keep larger-or-equal first */
+                if (cmp >= 0) break;
             }
             order[j] = u;
             j--;
@@ -248,8 +222,8 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
         bool   rnulls[7] = { false, false, false, false, false, false, false };
 
         values[0] = Int32GetDatum(nodes[i].depth);
-        values[1] = PointerGetDatum(branch_array(nodes, i, /*kinds*/ false));
-        values[2] = PointerGetDatum(branch_array(nodes, i, /*kinds*/ true));
+        values[1] = PointerGetDatum(branch_array(nodes, i, false));
+        values[2] = PointerGetDatum(branch_array(nodes, i, true));
         values[3] = nodes[i].entity;
         values[4] = nodes[i].eff_mu;
         values[5] = nodes[i].path_mu;
@@ -321,7 +295,7 @@ pg_laplace_generate_greedy(PG_FUNCTION_ARGS)
         if (SPI_processed == 0)
         {
             pfree(seen_arr);
-            break;                       /* dead end — the walk path ends */
+            break;
         }
 
         tup = SPI_tuptable->vals[0];
@@ -352,15 +326,6 @@ pg_laplace_generate_greedy(PG_FUNCTION_ARGS)
 }
 
 
-/* ───────────────────────── render_text in C ─────────────────────────
- * The O(tier) reconstruction law, executed where algorithms live (2026-06-05):
- * SQL keeps the set primitive (laplace.constituents — one indexed trajectory
- * fetch + laplace_geom mantissa unpack); C owns the recursion: a memo keyed
- * by entity id resolves each DISTINCT constituent ONCE regardless of
- * repetition, leaves decode from the IN-BAND vertex atom flags, and the
- * id→codepoint map is the legacy fallback only. Replaces the plpgsql
- * temp-table version (STABLE again — no DDL, parallel-friendly). */
-
 #define VFLAG_HAS_ATOM   ((int64) 1)
 #define VFLAG_ATOM_SHIFT 31
 #define VFLAG_ATOM_MASK  ((int64) 0x1FFFFF)
@@ -375,8 +340,8 @@ static SPIPlanPtr codepoint_plan = NULL;
 
 typedef struct RenderMemoEntry
 {
-    char  key[16];          /* entity id bytes */
-    char *text;             /* palloc'd UTF-8, NULL = unrenderable */
+    char  key[16];
+    char *text;
 } RenderMemoEntry;
 
 static void
@@ -433,7 +398,6 @@ append_codepoint_utf8(StringInfo out, uint32 cp)
     appendBinaryStringInfo(out, (char *) buf, 4);
 }
 
-/* Legacy fallback: id → codepoint via the seeded map. true on hit. */
 static bool
 append_codepoint_render(StringInfo out, Datum id)
 {
@@ -451,8 +415,6 @@ append_codepoint_render(StringInfo out, Datum id)
     return true;
 }
 
-/* Memoized depth-first render: each DISTINCT id resolved once.
- * Returns the memo entry's text (NULL = unrenderable at this node). */
 static const char *
 render_node(HTAB *memo, Datum id, int depth, int max_depth)
 {
@@ -468,7 +430,7 @@ render_node(HTAB *memo, Datum id, int depth, int max_depth)
     e = (RenderMemoEntry *) hash_search(memo, key, HASH_ENTER, &found);
     if (found)
         return e->text;
-    e->text = NULL;                       /* cycle/unrenderable until proven */
+    e->text = NULL;
 
     if (depth < max_depth)
     {
@@ -483,8 +445,6 @@ render_node(HTAB *memo, Datum id, int depth, int max_depth)
 
         if (nrows > 0)
         {
-            /* Copy the child rows out before recursing (recursion clobbers
-             * SPI_tuptable). */
             typedef struct { Datum child; int32 run; int64 flags; } ChildRow;
             ChildRow *rows = (ChildRow *) palloc(sizeof(ChildRow) * nrows);
             StringInfoData out;
@@ -518,12 +478,11 @@ render_node(HTAB *memo, Datum id, int depth, int max_depth)
                         for (int32 k = 0; k < rows[r].run; k++)
                             appendStringInfoString(&out, child_text);
                     else if (!append_codepoint_render(&out, rows[r].child))
-                        ok = false;       /* truly unrenderable child */
+                        ok = false;
                 }
             }
             pfree(rows);
 
-            /* re-fetch OUR entry: recursion may have grown the hash table. */
             e = (RenderMemoEntry *) hash_search(memo, key, HASH_FIND, &found);
             Assert(found);
             e->text = ok ? out.data : NULL;
@@ -531,7 +490,6 @@ render_node(HTAB *memo, Datum id, int depth, int max_depth)
         }
     }
 
-    /* Leaf (no trajectory): the id→codepoint legacy fallback. */
     {
         StringInfoData out;
         initStringInfo(&out);
@@ -555,7 +513,7 @@ pg_laplace_render_text(PG_FUNCTION_ARGS)
     HASHCTL ctl;
     HTAB   *memo;
     const char *rendered;
-    MemoryContext caller_cxt = CurrentMemoryContext;   /* survives SPI_finish */
+    MemoryContext caller_cxt = CurrentMemoryContext;
 
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
@@ -580,9 +538,6 @@ pg_laplace_render_text(PG_FUNCTION_ARGS)
     }
     else
     {
-        /* Copy OUT of the SPI proc context before SPI_finish frees it —
-         * returning SPI-context memory is a dangling pointer (the 2026-06-05
-         * p-renders-as-h bug: later calls reused the freed heap). */
         MemoryContext spi_cxt = MemoryContextSwitchTo(caller_cxt);
         text *result = cstring_to_text(rendered);
         MemoryContextSwitchTo(spi_cxt);

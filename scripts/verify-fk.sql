@@ -1,11 +1,3 @@
--- scripts/verify-fk.sql
--- FK integrity checks for the substrate.
--- Run via: psql -d laplace -f scripts/verify-fk.sql
---
--- All orphan checks must be empty for referential integrity to hold.
--- These tables don't exist until Chunk 2 (Geometry serde) creates the schema;
--- this script skips gracefully in that case.
-
 \set ON_ERROR_STOP on
 
 DO $$

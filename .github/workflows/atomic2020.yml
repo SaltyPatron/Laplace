@@ -1,10 +1,5 @@
 name: atomic2020
 
-# layer 2 · inferential commonsense (multi-hour)
-# Thin per-source workflow (2026-06-05 modular CI): dispatchable alone
-# (deploy=true brings the runner current first) and composable by
-# seed-ladder.yml. The ingest/gate implementation lives in _ingest.yml.
-
 on:
   workflow_dispatch:
     inputs:

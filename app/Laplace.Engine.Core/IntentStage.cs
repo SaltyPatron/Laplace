@@ -3,10 +3,6 @@ using System.Text;
 
 namespace Laplace.Engine.Core;
 
-/// <summary>
-/// Which substrate table a row / emitted COPY stream targets. Matches
-/// engine <c>intent_stage_table_t</c>.
-/// </summary>
 public enum IntentStageTable
 {
     Entities      = 1,
@@ -14,22 +10,8 @@ public enum IntentStageTable
     Attestations  = 3,
 }
 
-/// <summary>
-/// Managed wrapper over the engine <c>intent_stage_t*</c> opaque handle
-/// (engine/core/include/laplace/core/intent_stage.h). RAII via
-/// <see cref="SafeHandle"/>.
-///
-/// Used by <c>Laplace.SubstrateCRUD.NpgsqlSubstrateWriter</c>
-/// to materialize PG COPY BINARY byte streams in-engine — the C# layer is a
-/// thin transport over engine-emitted bytes. Zero per-row managed
-/// allocations. One COPY round-trip per table.
-/// </summary>
 public sealed class IntentStage : SafeHandle
 {
-    /// <summary>PG epoch (2000-01-01 UTC) as microseconds since the Unix
-    /// epoch — caller-side helper for converting Unix-µs timestamps to the
-    /// values <see cref="AddAttestation"/> + <see cref="AddPhysicality"/>
-    /// expect.</summary>
     public const long PgEpochUnixUs = 946684800000000L;
 
     private IntentStage(IntPtr handle) : base(IntPtr.Zero, ownsHandle: true)
@@ -37,19 +19,14 @@ public sealed class IntentStage : SafeHandle
         SetHandle(handle);
     }
 
-    /// <inheritdoc/>
     public override bool IsInvalid => handle == IntPtr.Zero;
 
-    /// <inheritdoc/>
     protected override bool ReleaseHandle()
     {
         NativeInterop.IntentStageFree(handle);
         return true;
     }
 
-    /// <summary>Allocate an intent stage with a row-count hint that
-    /// pre-sizes the per-table buffers. Hint is non-binding — buffers
-    /// grow geometrically past it.</summary>
     public static IntentStage New(int rowCapacityHint)
     {
         if (rowCapacityHint < 0) throw new ArgumentOutOfRangeException(nameof(rowCapacityHint));
@@ -62,9 +39,6 @@ public sealed class IntentStage : SafeHandle
     public int PhysicalityCount { get { ThrowIfDisposed(); return checked((int)NativeInterop.IntentStagePhysicalityCount(handle)); } }
     public int AttestationCount { get { ThrowIfDisposed(); return checked((int)NativeInterop.IntentStageAttestationCount(handle)); } }
 
-    /// <summary>Comma-separated column list matching the wire bytes — for
-    /// composing the <c>COPY laplace.entities (…) FROM STDIN BINARY</c>
-    /// statement before <see cref="EmitCopyBinary"/>.</summary>
     public static string CopyColumnList(IntentStageTable table)
     {
         IntPtr p = NativeInterop.IntentStageCopyColumnList((int)table);
@@ -72,8 +46,6 @@ public sealed class IntentStage : SafeHandle
             ?? throw new ArgumentOutOfRangeException(nameof(table));
     }
 
-    /// <summary>Add one <c>entities</c> row.</summary>
-    /// <param name="firstObservedBy">Nullable; pass <c>null</c> for SQL NULL.</param>
     public void AddEntity(Hash128 id, short tier, Hash128 typeId, Hash128? firstObservedBy)
     {
         ThrowIfDisposed();
@@ -93,9 +65,6 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
- /// <summary>Add one <c>physicalities</c> row. See schema
-    /// shape; pass <paramref name="trajectoryXyzm"/>=<c>null</c> for SQL
-    /// NULL trajectory.</summary>
     public void AddPhysicality(
         Hash128         id,
         Hash128         entityId,
@@ -134,12 +103,6 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
-    /// <summary>Add one <c>attestations</c> (EVIDENCE) row — PROVENANCE, never
-    /// values: who witnessed which relation, when, how many games, and the
-    /// dissent record as a CLASS (<paramref name="outcome"/>: 0=refute, 1=draw,
-    /// 2=confirm — never a magnitude). The witness's value is testimony,
-    /// consumed into the consensus accumulation at ingest and not persisted;
-    /// the accumulated rating/rd/volatility live on consensus.</summary>
     public void AddAttestation(
         Hash128  id,
         Hash128  subjectId,
@@ -168,10 +131,6 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
-    /// <summary>Emit the complete COPY BINARY stream for <paramref name="table"/>
-    /// (header + accumulated tuples + trailer) into a fresh byte array.
-    /// For zero-copy emission, use the <see cref="EmitCopyBinary(IntentStageTable, Span{byte})"/>
-    /// overload with a caller-allocated buffer.</summary>
     public byte[] EmitCopyBinary(IntentStageTable table)
     {
         ThrowIfDisposed();
@@ -188,10 +147,6 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
-    /// <summary>The raw COPY-binary TUPLE bytes for <paramref name="table"/> (no header/
-    /// trailer) and their length, owned by the engine stage — for STREAMING the native
-    /// serialization straight into a COPY socket instead of materializing a managed array.
-    /// Valid until the next add / dispose.</summary>
     public unsafe (IntPtr Ptr, long Len) TupleBuffer(IntentStageTable table)
     {
         ThrowIfDisposed();
@@ -200,9 +155,6 @@ public sealed class IntentStage : SafeHandle
         return ((IntPtr)p, checked((long)len));
     }
 
-    /// <summary>Emit into the caller-allocated <paramref name="dest"/>.
-    /// Returns the number of bytes required (also written if dest was
-    /// large enough; nothing written otherwise).</summary>
     public int EmitCopyBinary(IntentStageTable table, Span<byte> dest)
     {
         ThrowIfDisposed();

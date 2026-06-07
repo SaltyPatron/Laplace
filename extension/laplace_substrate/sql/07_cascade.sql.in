@@ -1,27 +1,9 @@
-/* 07_cascade.sql.in — compiled cascade traversal: the native A* SRF declaration.
- *
- * cascade is a substrate-native operator: engine/core/astar.cpp owns the frontier
- * heap, visited/stale-skip, came-from reconstruction, max_depth bound, and goal
- * region; this is the thin C boundary. NOT a recursive CTE, NOT an app-layer
- * SELECT loop, NOT cursor-driven. The neighbor SET (which edges exist) is set
- * logic supplied to the kernel by an SPI provider (astar_path.c); the SEARCH
- * (which path wins) is the compiled kernel.
- *
- * The arena-defaulting and rendered consumer wrappers (astar_path / cascade)
- * live in 22_cascade_surface.sql.in — after the type resolver (18) and the
- * realize* helpers (20), which this raw declaration must not forward-reference. */
-
 CREATE OR REPLACE FUNCTION astar_path_raw(
-    p_start     bytea,                 -- start entity
-    p_goals     bytea[],               -- goal region (reached when any is hit)
-    p_types     bytea[],               -- relation types (arenas) to traverse
+    p_start     bytea,
+    p_goals     bytea[],
+    p_types     bytea[],
     p_max_depth int  DEFAULT 7,
-    p_directed  bool DEFAULT false)    -- false = undirected (relatedness is symmetric)
+    p_directed  bool DEFAULT false)
     RETURNS TABLE(step int, entity_id bytea, g double precision)
     AS 'MODULE_PATHNAME', 'pg_laplace_astar_path'
     LANGUAGE C STABLE;
-COMMENT ON FUNCTION astar_path_raw(bytea, bytea[], bytea[], int, bool) IS
-    'Compiled cascade (engine/core astar.cpp via the astar_path.c SPI neighbor provider): '
-    'least-cost path from p_start into the p_goals region over the p_types arenas, edges '
-    'weighted by Glicko μ (stronger relation = cheaper hop), refuted edges pruned. The native '
-    'operator that replaces recursive-SQL traversal — heavy lifting in C, set logic in SPI.';

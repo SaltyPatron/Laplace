@@ -3,6 +3,10 @@
 #include <cmath>
 #include <cstring>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 #include "laplace/core/math4d.h"
 
 namespace {
@@ -80,8 +84,6 @@ TEST(LaplaceCoreMath4d, AngularDistanceAntipodalIsPi) {
 }
 
 TEST(LaplaceCoreMath4d, AngularDistanceHandlesFpRoundoffPastUnity) {
-    // Two near-identical unit vectors — dot product can land just above 1.0 from
-    // FP roundoff; the clamp inside math4d_angular_distance must keep acos finite.
     const double a[4] = {1.0, 0.0, 0.0, 0.0};
     const double b[4] = {1.0, 0.0, 0.0, 0.0};
     const double d = math4d_angular_distance(a, b);
@@ -151,13 +153,9 @@ TEST(LaplaceCoreMath4d, CentroidDeterministicAcrossRuns) {
     EXPECT_EQ(0, std::memcmp(a, b, sizeof(a)));
 }
 
-/* === math4d_log_s3 / math4d_exp_s3 (geodesic chart maps) ================= */
-
 TEST(LaplaceCoreMath4d, LogExpRoundTripRecoversPoint) {
-    // Log then Exp at the same base must recover the original point on S³.
     const double base[4] = {1.0, 0.0, 0.0, 0.0};
     double p[4] = {0.3, 0.5, -0.2, 0.7};
-    // normalize p onto the sphere
     const double n = std::sqrt(p[0]*p[0] + p[1]*p[1] + p[2]*p[2] + p[3]*p[3]);
     for (double &c : p) c /= n;
 
@@ -171,7 +169,6 @@ TEST(LaplaceCoreMath4d, LogExpRoundTripRecoversPoint) {
 }
 
 TEST(LaplaceCoreMath4d, LogTangentNormEqualsAngularDistance) {
-    // |Log_base(p)| must equal the geodesic (angular) distance base→p.
     const double base[4] = {0.5, 0.5, 0.5, 0.5};
     double p[4] = {0.0, 1.0, 0.0, 0.0};
     double tng[4];
@@ -196,7 +193,6 @@ TEST(LaplaceCoreMath4d, LogOfBaseIsZeroTangent) {
 }
 
 TEST(LaplaceCoreMath4d, LogOfAntipodeFallsBackToZeroTangent) {
-    // Antipodal point: geodesic direction undefined → documented zero-tangent fallback.
     const double base[4] = {1.0, 0.0, 0.0, 0.0};
     const double anti[4] = {-1.0, 0.0, 0.0, 0.0};
     double tng[4];
@@ -215,17 +211,14 @@ TEST(LaplaceCoreMath4d, ExpZeroTangentReturnsBase) {
     EXPECT_DOUBLE_EQ(out[3], base[3]);
 }
 
-/* === math4d_karcher_mean (geodesic / Fréchet mean on S³) ================= */
-
 namespace {
 constexpr double kKarcherTol = 1e-12;
 constexpr int    kKarcherMaxIters = 64;
 
-// Assert a 4-vector is on the unit sphere.
 void ExpectOnSphere(const double v[4], double eps = 1e-12) {
     EXPECT_NEAR(math4d_norm(v), 1.0, eps);
 }
-}  // namespace
+}
 
 TEST(LaplaceCoreMath4d, KarcherZeroPointsLeavesOutputZeroed) {
     double out[4] = {99, 99, 99, 99};
@@ -248,7 +241,7 @@ TEST(LaplaceCoreMath4d, KarcherSinglePointIsThatPointOnSphere) {
 }
 
 TEST(LaplaceCoreMath4d, KarcherSinglePointNonUnitIsNormalized) {
-    const double p[4] = {0.0, 3.0, 0.0, 0.0};  // not on the sphere
+    const double p[4] = {0.0, 3.0, 0.0, 0.0};
     double out[4];
     math4d_karcher_mean(p, 1, nullptr, kKarcherTol, kKarcherMaxIters, out);
     EXPECT_DOUBLE_EQ(out[1], 1.0);
@@ -271,9 +264,6 @@ TEST(LaplaceCoreMath4d, KarcherAllEqualPointsIsThatPoint) {
 }
 
 TEST(LaplaceCoreMath4d, KarcherSymmetricPairIsGeodesicMidpoint) {
-    // Two unit vectors separated by 90°; the Karcher mean is the geodesic
-    // midpoint — the bisector direction, on the sphere. For e0 and e1 that is
-    // (1/√2, 1/√2, 0, 0), and it must be equidistant from both.
     const double a[4] = {1.0, 0.0, 0.0, 0.0};
     const double b[4] = {0.0, 1.0, 0.0, 0.0};
     const double pts[8] = {
@@ -289,21 +279,16 @@ TEST(LaplaceCoreMath4d, KarcherSymmetricPairIsGeodesicMidpoint) {
     EXPECT_NEAR(out[2], 0.0, 1e-10);
     EXPECT_NEAR(out[3], 0.0, 1e-10);
     ExpectOnSphere(out);
-    // Equidistant from both endpoints (the defining midpoint property).
     EXPECT_NEAR(math4d_angular_distance(out, a),
                 math4d_angular_distance(out, b), 1e-10);
-    // Each leg is half the total separation (π/2 → π/4).
     EXPECT_NEAR(math4d_angular_distance(out, a), M_PI / 4.0, 1e-10);
 }
 
 TEST(LaplaceCoreMath4d, KarcherClusterMeanLiesNearClusterAndOnSphere) {
-    // A tight cluster around a known direction d. The Karcher mean must land
-    // near d (small angular distance) AND be exactly on the sphere.
     double d[4] = {0.2, 0.4, 0.5, 0.7};
     const double dn = std::sqrt(d[0]*d[0] + d[1]*d[1] + d[2]*d[2] + d[3]*d[3]);
     for (double &c : d) c /= dn;
 
-    // Build 5 points by small perturbations of d, each re-projected to S³.
     const double pert[5][4] = {
         { 0.01,  0.00,  0.00,  0.00},
         {-0.01,  0.02,  0.00,  0.00},
@@ -322,26 +307,21 @@ TEST(LaplaceCoreMath4d, KarcherClusterMeanLiesNearClusterAndOnSphere) {
     double out[4];
     math4d_karcher_mean(pts, 5, nullptr, kKarcherTol, kKarcherMaxIters, out);
     ExpectOnSphere(out);
-    // Mean direction within a small angle of the cluster center.
     EXPECT_LT(math4d_angular_distance(out, d), 0.02);
 }
 
 TEST(LaplaceCoreMath4d, KarcherWeightsPullTowardHeavyPoint) {
-    // Two points; weighting one heavily pulls the mean toward it.
     const double pts[8] = {
-        1.0, 0.0, 0.0, 0.0,   // a
-        0.0, 1.0, 0.0, 0.0,   // b
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
     };
     const double a[4] = {1.0, 0.0, 0.0, 0.0};
     const double b[4] = {0.0, 1.0, 0.0, 0.0};
-    const double weights[2] = {9.0, 1.0};  // heavily favor a
+    const double weights[2] = {9.0, 1.0};
     double out[4];
     math4d_karcher_mean(pts, 2, weights, kKarcherTol, kKarcherMaxIters, out);
     ExpectOnSphere(out);
-    // Closer to a than to b.
     EXPECT_LT(math4d_angular_distance(out, a), math4d_angular_distance(out, b));
-    // The weighted geodesic mean of two points sits at fraction w_b/(w_a+w_b)
-    // of the arc from a → b, i.e. 0.1·(π/2) from a.
     EXPECT_NEAR(math4d_angular_distance(out, a), 0.1 * (M_PI / 2.0), 1e-9);
 }
 
@@ -366,9 +346,6 @@ TEST(LaplaceCoreMath4d, KarcherDeterministicAcrossRuns) {
 }
 
 TEST(LaplaceCoreMath4d, KarcherDiffersFromEuclideanCentroid) {
-    // The whole point of the Karcher mean: it is NOT the normalized Euclidean
-    // centroid for points spread apart on the sphere. Use a wide spread so the
-    // two means provably differ.
     const double pts[12] = {
         1.0, 0.0, 0.0, 0.0,
         0.0, 1.0, 0.0, 0.0,
@@ -379,29 +356,22 @@ TEST(LaplaceCoreMath4d, KarcherDiffersFromEuclideanCentroid) {
 
     double centroid[4];
     math4d_centroid(pts, 3, centroid);
-    // Normalize the Euclidean centroid onto the sphere for an apples-to-apples
-    // comparison.
     const double cn = math4d_norm(centroid);
     for (double &c : centroid) c /= cn;
 
     ExpectOnSphere(karcher);
-    // For this symmetric spread the two happen to coincide by symmetry, so use
-    // an asymmetric case to prove they diverge.
     const double pts2[12] = {
         1.0, 0.0, 0.0, 0.0,
         0.0, 1.0, 0.0, 0.0,
-        0.0, 1.0, 0.0, 0.0,   // duplicate pulls the mean toward e1
+        0.0, 1.0, 0.0, 0.0,
     };
     double k2[4], c2[4];
     math4d_karcher_mean(pts2, 3, nullptr, kKarcherTol, kKarcherMaxIters, k2);
     math4d_centroid(pts2, 3, c2);
     const double c2n = math4d_norm(c2);
     for (double &c : c2) c /= c2n;
-    // They should differ: the geodesic mean is not the chord/Euclidean mean.
     EXPECT_GT(math4d_angular_distance(k2, c2), 1e-6);
 }
-
-/* === math4d_frechet ====================================================== */
 
 TEST(LaplaceCoreMath4d, FrechetEmptyTrajectoryReturnsNaN) {
     const double p[4] = {0, 0, 0, 0};
@@ -418,11 +388,10 @@ TEST(LaplaceCoreMath4d, FrechetIdenticalSinglePointIsZero) {
 TEST(LaplaceCoreMath4d, FrechetSinglePointEqualsEuclidean) {
     const double p[4] = {0.0, 0.0, 0.0, 0.0};
     const double q[4] = {1.0, 1.0, 1.0, 1.0};
-    EXPECT_DOUBLE_EQ(math4d_frechet(p, 1, q, 1), 2.0);  /* sqrt(4) */
+    EXPECT_DOUBLE_EQ(math4d_frechet(p, 1, q, 1), 2.0);
 }
 
 TEST(LaplaceCoreMath4d, FrechetIdenticalTrajectoriesAreZero) {
-    /* Same 3-point trajectory walked at the same speed → leash length 0. */
     const double traj[12] = {
         0.0, 0.0, 0.0, 0.0,
         1.0, 0.0, 0.0, 0.0,
@@ -432,8 +401,6 @@ TEST(LaplaceCoreMath4d, FrechetIdenticalTrajectoriesAreZero) {
 }
 
 TEST(LaplaceCoreMath4d, FrechetParallelTrajectoriesEqualOffset) {
-    /* Two parallel straight trajectories offset by (0,1,0,0).
-     * Each P[i] aligns with Q[i] at distance 1; min leash = 1. */
     const double p[12] = {
         0.0, 0.0, 0.0, 0.0,
         1.0, 0.0, 0.0, 0.0,
@@ -448,11 +415,6 @@ TEST(LaplaceCoreMath4d, FrechetParallelTrajectoriesEqualOffset) {
 }
 
 TEST(LaplaceCoreMath4d, FrechetCoarseSamplingPaysGapCost) {
-    /* Same geometric line, but P samples only the endpoints while Q
-     * samples 5 points along it. DISCRETE Fréchet (unlike continuous)
-     * pays the cost of mismatched sampling: at the optimal coupling
-     * the middle Q[2] = (2,0,0,0) must pair with either P[0] or P[1],
-     * each at distance 2.0. Hand-derived: ca[4,1] = 2.0. */
     const double p[8] = {
         0.0, 0.0, 0.0, 0.0,
         4.0, 0.0, 0.0, 0.0,
@@ -468,7 +430,6 @@ TEST(LaplaceCoreMath4d, FrechetCoarseSamplingPaysGapCost) {
 }
 
 TEST(LaplaceCoreMath4d, FrechetSymmetric) {
-    /* Frechet(P,Q) = Frechet(Q,P). */
     const double p[8] = {
         0.0, 0.0, 0.0, 0.0,
         1.0, 1.0, 0.0, 0.0,
@@ -495,8 +456,6 @@ TEST(LaplaceCoreMath4d, FrechetDeterministicAcrossRuns) {
     EXPECT_DOUBLE_EQ(a, b);
 }
 
-/* === math4d_hausdorff ==================================================== */
-
 TEST(LaplaceCoreMath4d, HausdorffEmptySetReturnsNaN) {
     const double p[4] = {0, 0, 0, 0};
     EXPECT_TRUE(std::isnan(math4d_hausdorff(p, 1, nullptr, 0)));
@@ -520,7 +479,6 @@ TEST(LaplaceCoreMath4d, HausdorffSinglePointEqualsEuclidean) {
 }
 
 TEST(LaplaceCoreMath4d, HausdorffSymmetric) {
-    /* By construction symmetric: max(directed(A,B), directed(B,A)). */
     const double a[8] = {
         0.0, 0.0, 0.0, 0.0,
         1.0, 0.0, 0.0, 0.0,
@@ -535,9 +493,6 @@ TEST(LaplaceCoreMath4d, HausdorffSymmetric) {
 }
 
 TEST(LaplaceCoreMath4d, HausdorffSupersetAndSubset) {
-    /* B is a superset of A. directed(A,B) = 0 (every a∈A is in B exactly).
-     * directed(B,A) = max distance from any b∈B to nearest A — = 1.0 here.
-     * Symmetric Hausdorff = max(0, 1.0) = 1.0. */
     const double a[8] = {
         0.0, 0.0, 0.0, 0.0,
         2.0, 0.0, 0.0, 0.0,

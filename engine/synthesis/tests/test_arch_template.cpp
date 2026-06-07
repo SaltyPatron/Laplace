@@ -32,8 +32,6 @@ TEST(LaplaceSynthesisArchTemplate, RequiredTensorsCountForTinyLlama) {
     recipe_t* r = recipe_parse(kTinyLlamaConfig, strlen(kTinyLlamaConfig));
     ASSERT_NE(r, nullptr);
 
-    /* TinyLlama has 22 layers × 9 tensors/layer + embed_tokens + norm + lm_head
-     * = 22*9 + 3 = 201 */
     constexpr size_t kExpected = 201;
     constexpr size_t kCap = 256;
     tensor_spec_t specs[kCap];
@@ -55,8 +53,8 @@ TEST(LaplaceSynthesisArchTemplate, EmbedTokensIsFirstTensor) {
     ASSERT_GT(n, 0);
     EXPECT_STREQ(specs[0].name, "model.embed_tokens.weight");
     EXPECT_EQ(specs[0].rank, 2u);
-    EXPECT_EQ(specs[0].shape[0], 32000u); /* vocab_size */
-    EXPECT_EQ(specs[0].shape[1], 2048u);  /* hidden_size */
+    EXPECT_EQ(specs[0].shape[0], 32000u);
+    EXPECT_EQ(specs[0].shape[1], 2048u);
 
     recipe_free(r);
     arch_template_free(t);
@@ -89,7 +87,6 @@ TEST(LaplaceSynthesisArchTemplate, Layer0QProjShape) {
     int n = arch_template_required_tensors(t, r, specs, 256);
     ASSERT_GT(n, 1);
 
-    /* Second tensor should be layers.0.self_attn.q_proj.weight [2048×2048] */
     EXPECT_STREQ(specs[1].name, "model.layers.0.self_attn.q_proj.weight");
     EXPECT_EQ(specs[1].shape[0], 2048u);
     EXPECT_EQ(specs[1].shape[1], 2048u);
@@ -106,7 +103,7 @@ TEST(LaplaceSynthesisArchTemplate, CapTooSmallReturnsCount) {
 
     tensor_spec_t specs[1];
     int n = arch_template_required_tensors(t, r, specs, 1);
-    EXPECT_GT(n, 1); /* returns full count, not -1, so caller can resize */
+    EXPECT_GT(n, 1);
 
     recipe_free(r);
     arch_template_free(t);

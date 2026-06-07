@@ -1,13 +1,3 @@
-/*
- * extension/laplace_substrate/src/laplace_substrate.c
- *
- * Thin PG_FUNCTION_INFO_V1 wrappers for the laplace_substrate extension
- * — DB calls engine, no DB-side math beyond aggregate
- * accumulation. The aggregate state is an int64 fixed-point glicko2_state_t
- * + a growing observation buffer; FINALFUNC delegates to glicko2_update_period
- * for the full Glickman 2013 rating-period algorithm.
- */
-
 #include "postgres.h"
 #include "fmgr.h"
 #include "funcapi.h"
@@ -30,32 +20,9 @@ PG_FUNCTION_INFO_V1(pg_laplace_substrate_version);
 Datum
 pg_laplace_substrate_version(PG_FUNCTION_ARGS)
 {
-    /* Returns the core version string. Proves laplace_substrate links
-     * BOTH liblaplace_core AND liblaplace_dynamics. */
     const char* v = laplace_core_version();
     PG_RETURN_TEXT_P(cstring_to_text(v));
 }
-
-/* ------------------------------------------------------------------------- */
-/* Glicko-2 aggregate.                                     */
-/*                                                                           */
-/* Aggregate signature (per CREATE AGGREGATE in sql/06_glicko2.sql.in):      */
-/*                                                                           */
-/*   laplace_glicko2_accumulate(                                             */
-/*       prior_rating     bigint,  -- fixed-point ×1e9 (Glicko-1 scale)      */
-/*       prior_rd         bigint,  -- fixed-point ×1e9 (Glicko-1 scale)      */
-/*       prior_volatility bigint,  -- fixed-point ×1e9                       */
-/*       opponent_rating  bigint,  -- per-row observation                    */
-/*       opponent_rd      bigint,                                            */
-/*       score            bigint,  -- 0=loss, 5e8=draw, 1e9=win              */
-/*       tau              bigint   -- system constant ×1e9                   */
-/*   ) RETURNS laplace_glicko2_result                                        */
-/*                                                                           */
-/* arena semantics, prior_* + tau are constant for a given      */
-/* attestation update — supplied per row but only read from the FIRST row    */
-/* (initialized flag short-circuits subsequent rows). The aggregate is       */
-/* commutative within a rating period per Glickman §"Step 7".                */
-/* ------------------------------------------------------------------------- */
 
 typedef struct {
     bool                     initialized;
@@ -91,7 +58,6 @@ pg_laplace_glicko2_sfunc(PG_FUNCTION_ARGS)
         state = (LaplaceGlicko2AggState*) PG_GETARG_POINTER(0);
     }
 
-    /* First non-NULL prior wins; remember and never re-read prior args. */
     if (!state->initialized) {
         if (PG_ARGISNULL(1) || PG_ARGISNULL(2) || PG_ARGISNULL(3))
             ereport(ERROR,
@@ -109,9 +75,6 @@ pg_laplace_glicko2_sfunc(PG_FUNCTION_ARGS)
         state->initialized = true;
     }
 
-    /* Skip rows with a NULL observation triple — useful for LEFT JOINs
-     * where an entity has zero observations in the period; the rating-
-     * period decay path still runs in FINALFUNC. */
     if (PG_ARGISNULL(4) || PG_ARGISNULL(5) || PG_ARGISNULL(6))
         PG_RETURN_POINTER(state);
 
@@ -148,7 +111,6 @@ pg_laplace_glicko2_finalfunc(PG_FUNCTION_ARGS)
 
     state = (LaplaceGlicko2AggState*) PG_GETARG_POINTER(0);
 
-    /* Aggregate received zero rows OR a row that never carried a usable prior. */
     if (!state->initialized)
         PG_RETURN_NULL();
 
@@ -159,13 +121,9 @@ pg_laplace_glicko2_finalfunc(PG_FUNCTION_ARGS)
                     "that cannot accept type record")));
     BlessTupleDesc(tupdesc);
 
-    /* Copy prior into a local result; do not mutate aggcontext state
-     * (PG may invoke FINALFUNC repeatedly under some plans). now_ns = 0
-     * keeps the aggregate output deterministic; callers set last_observed_at
-     * explicitly when persisting back into the attestations table. */
     result = state->prior;
     glicko2_update_period(&result, state->obs, state->obs_len,
-                          state->tau, /* now_ns */ 0);
+                          state->tau, 0);
 
     values[0] = Int64GetDatum(result.rating);
     values[1] = Int64GetDatum(result.rd);
@@ -175,26 +133,6 @@ pg_laplace_glicko2_finalfunc(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
-/* ------------------------------------------------------------------------- */
-/* laplace_glicko2_accumulate_games — the period fold's batch entry.         */
-/*                                                                           */
-/* One relation's period = n games against ONE opponent (the neutral line at */
-/* the witness's trust→φ) whose individual scores summed EXACTLY to Σs. The  */
-/* period update depends on the multiset only through what the kernel sums,  */
-/* so this builds the SAME observation array the SQL replay built —          */
-/* (n−1) games at q = ⌊Σs/n⌋ followed by one remainder game so the scores    */
-/* sum exactly to Σs — and runs the SAME glicko2_update_period once.         */
-/* Bit-identical to the aggregate over a generate_series replay BY           */
-/* CONSTRUCTION (same array, same order, same kernel), without pushing       */
-/* games×relations rows through the executor: the TinyLlama fold replayed    */
-/* 1.1e9 rows for 153e6 relations through the lateral; this is one call per  */
-/* relation.                                                                 */
-/*                                                                           */
-/* SQL signature:                                                            */
-/*   laplace_glicko2_accumulate_games(prior_rating, prior_rd, prior_vol,     */
-/*       opponent_rating, opponent_rd, games, sum_score, tau)                */
-/*     RETURNS laplace_glicko2_result                                        */
-/* ------------------------------------------------------------------------- */
 PG_FUNCTION_INFO_V1(pg_laplace_glicko2_accumulate_games);
 
 Datum
@@ -213,9 +151,9 @@ pg_laplace_glicko2_accumulate_games(PG_FUNCTION_ARGS)
     HeapTuple               tuple;
 
     glicko2_init(&st,
-                 PG_GETARG_INT64(0),    /* prior rating     */
-                 PG_GETARG_INT64(1),    /* prior rd         */
-                 PG_GETARG_INT64(2));   /* prior volatility */
+                 PG_GETARG_INT64(0),
+                 PG_GETARG_INT64(1),
+                 PG_GETARG_INT64(2));
     opp_rating = PG_GETARG_INT64(3);
     opp_rd     = PG_GETARG_INT64(4);
     games      = PG_GETARG_INT64(5);
@@ -228,9 +166,6 @@ pg_laplace_glicko2_accumulate_games(PG_FUNCTION_ARGS)
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
              errmsg("laplace_glicko2_accumulate_games: games must be > 0 (got %ld)",
                     (long) games)));
-    /* Fail-loud memory bound: 2^27 games ≈ 3 GB of observations per relation
-     * would mean a single relation witnessed 134M times in ONE period —
-     * far beyond any source; a real period that large is a caller bug. */
     if (games > (INT64CONST(1) << 27))
         ereport(ERROR,
             (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
@@ -255,9 +190,9 @@ pg_laplace_glicko2_accumulate_games(PG_FUNCTION_ARGS)
     }
     obs[games - 1].opponent_rating = opp_rating;
     obs[games - 1].opponent_rd     = opp_rd;
-    obs[games - 1].score           = rem;     /* Σ scores == sum_score, exactly */
+    obs[games - 1].score           = rem;
 
-    glicko2_update_period(&st, obs, (size_t) games, tau, /* now_ns */ 0);
+    glicko2_update_period(&st, obs, (size_t) games, tau, 0);
     pfree(obs);
 
     values[0] = Int64GetDatum(st.rating);
@@ -267,21 +202,6 @@ pg_laplace_glicko2_accumulate_games(PG_FUNCTION_ARGS)
     tuple = heap_form_tuple(tupdesc, values, nulls);
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
-
-/* ------------------------------------------------------------------------- */
-/* entities_exist_bitmap (Story D.3 / #250 / Framework Epic #232).           */
-/*                                                                           */
-/* SQL signature:                                                            */
-/*   laplace.entities_exist_bitmap(ids bytea[]) RETURNS bytea                */
-/*                                                                           */
-/* For N candidate IDs, returns a packed bitmap of ceil(N/8) bytes where     */
-/* bit i (LSB-first within each byte) is set iff candidates[i] is already    */
-/* in laplace.entities.                                                      */
-/*                                                                           */
-/* Implementation: single SPI execute joining unnest(WITH ORDINALITY)        */
-/* against the indexed entities.id; iterate result and set bits. One DB      */
-/* round-trip (the SPI execute) regardless of candidate count.               */
-/* ------------------------------------------------------------------------- */
 
 PG_FUNCTION_INFO_V1(pg_laplace_entities_exist_bitmap);
 
@@ -348,7 +268,7 @@ pg_laplace_entities_exist_bitmap(PG_FUNCTION_ARGS)
         "FROM unnest($1::bytea[]) WITH ORDINALITY u(id, ord) "
         "JOIN laplace.entities e ON e.id = u.id",
         1, argtypes, args, NULL,
-        true /* read_only */, 0 /* unlimited */);
+        true, 0);
 
     if (spi_rc != SPI_OK_SELECT)
     {
@@ -378,11 +298,6 @@ pg_laplace_entities_exist_bitmap(PG_FUNCTION_ARGS)
     PG_RETURN_BYTEA_P(result);
 }
 
-/*
- * _PG_init — called when the extension is loaded.
- *: laplace_dynamics_init() locks MKL threading layer to TBB
- * and sets MKL_CBWR for substrate determinism. Idempotent.
- */
 void _PG_init(void);
 void
 _PG_init(void)

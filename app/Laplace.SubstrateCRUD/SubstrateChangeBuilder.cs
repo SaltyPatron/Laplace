@@ -3,17 +3,6 @@ using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD;
 
-/// <summary>
-/// Fluent helper for constructing a <see cref="SubstrateChange"/> from a
-/// populated <see cref="TierTree"/> + per-source attestations. Centralises
-/// the slot-filling that every per-source decomposer would otherwise
-/// reinvent (forbidden by).
-///
-/// FK-ordering invariant: entities → physicalities → attestations. The
-/// builder appends to ordered lists; the apply path validates that
-/// every physicality.entity_id refers to an entity in the same intent
-/// (or to one already in substrate) and likewise for attestation FKs.
-/// </summary>
 public sealed class SubstrateChangeBuilder
 {
     private readonly ImmutableArray<EntityRow>.Builder _entities;
@@ -23,17 +12,6 @@ public sealed class SubstrateChangeBuilder
     private readonly string _sourceContentUnitName;
     private readonly Hash128? _parentIntentId;
 
-    // ── O(tier) dedup-by-construction, AT THE BUILDER (2026-06-06) ──────────
-    // Identity rows (entities/physicalities) are content-addressed: the same id
-    // re-added within an intent is the SAME row — append once, skip repeats.
-    // Testimony (attestations) is NOT idempotent: every occurrence is a Glicko
-    // GAME. Repeats of one relation id FOLD onto its single evidence row —
-    // observation_count = Σ games, SumScoreFp1e9 = exact Σ score (int64,
-    // checked; bit-identical to per-occurrence accumulation), net outcome
-    // CLASS, max timestamp. Before this, every occurrence shipped its own row:
-    // ~95% of the wire/staging traffic was discarded by ON CONFLICT and the
-    // evidence observation_count stayed 1 forever (measured 33.5M rows,
-    // games_per_row = 1.000 — the fold law unhonored).
     private readonly HashSet<Hash128> _seenEntities = new();
     private readonly HashSet<Hash128> _seenPhysicalities = new();
     private readonly Dictionary<Hash128, int> _attestationIndex = new();
@@ -79,9 +57,6 @@ public sealed class SubstrateChangeBuilder
         if (_attestationIndex.TryGetValue(row.Id, out int at))
         {
             var prior = _attestations[at];
-            // One relation × one source × one period ⇒ one φ. Mixed φ inside a
-            // single intent is a decomposer bug — same invariant the consensus
-            // accumulation enforces; fail loud, never average.
             if (prior.OpponentRdFp1e9 != row.OpponentRdFp1e9)
                 throw new InvalidOperationException(
                     $"attestation fold invariant violated: relation observed with φ={row.OpponentRdFp1e9} after φ={prior.OpponentRdFp1e9} in one intent");
@@ -90,8 +65,6 @@ public sealed class SubstrateChangeBuilder
             long sum   = checked(
                 (prior.SumScoreFp1e9 ?? checked(prior.ScoreFp1e9 * prior.ObservationCount))
                 + (row.SumScoreFp1e9 ?? checked(row.ScoreFp1e9 * row.ObservationCount)));
-            // Net outcome CLASS over the folded games (evidence law: outcome is
-            // a class, never a magnitude): Σscore vs the all-draws baseline.
             long draws = checked(games * 500_000_000L);
             var net = sum > draws ? AttestationOutcome.Confirm
                     : sum < draws ? AttestationOutcome.Refute
@@ -112,18 +85,12 @@ public sealed class SubstrateChangeBuilder
         return this;
     }
 
-    /// <summary>Build the immutable intent. <see cref="SubstrateChangeMetadata.IntentId"/>
-    /// is derived deterministically from the row IDs so re-running the
-    /// same decomposer on the same input produces the same intent ID —
-    /// idempotent re-ingest (content-addressing + ON CONFLICT) relies on this.</summary>
     public SubstrateChange Build()
     {
         var entities      = _entities.ToImmutable();
         var physicalities = _physicalities.ToImmutable();
         var attestations  = _attestations.ToImmutable();
 
-        // Intent ID = BLAKE3 over (sourceId ‖ source_content_unit_name_bytes ‖ row_id_bytes ...)
-        // Stable across re-runs of the same decomposer on the same input.
         var intentId = ComputeIntentId(_sourceId, _sourceContentUnitName,
                                         entities, physicalities, attestations);
 
@@ -144,10 +111,6 @@ public sealed class SubstrateChangeBuilder
         ImmutableArray<PhysicalityRow> physicalities,
         ImmutableArray<AttestationRow> attestations)
     {
-        // Build the buffer: 16 bytes sourceId + utf8 bytes(unit_name)
-        //   + (4 bytes entity_count + n*16 bytes entity ids)
-        //   + (4 bytes physicality_count + n*16 bytes physicality ids)
-        //   + (4 bytes attestation_count + n*16 bytes attestation ids)
         int nameByteCount = System.Text.Encoding.UTF8.GetByteCount(unitName);
         int total = 16 + nameByteCount
                     + 4 + entities.Length * 16
@@ -167,7 +130,6 @@ public sealed class SubstrateChangeBuilder
     private static void WriteLengthAndIds<T>(
         Span<byte> dst, ref int offset, ImmutableArray<T> rows, Func<T, Hash128> getId)
     {
-        // Little-endian uint32 count
         int count = rows.Length;
         dst[offset++] = (byte)(count & 0xFF);
         dst[offset++] = (byte)((count >> 8) & 0xFF);

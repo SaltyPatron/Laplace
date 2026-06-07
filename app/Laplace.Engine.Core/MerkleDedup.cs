@@ -2,24 +2,8 @@ using System.Runtime.InteropServices;
 
 namespace Laplace.Engine.Core;
 
-/// <summary>
-/// Managed wrappers over the engine merkle_dedup primitives
-/// (engine/core/include/laplace/core/merkle_dedup.h). Hot-loop helpers for
-/// <c>Laplace.SubstrateCRUD.NpgsqlSubstrateWriter</c>.
-///
-/// Bitmap convention: packed LSB-first within each byte; bit i is at
-/// <c>(bitmap[i >> 3] >> (i &amp; 7)) &amp; 1u</c>. Caller is responsible
-/// for ensuring bitmap capacity covers the candidate count / node count.
-/// </summary>
 public static unsafe class MerkleDedup
 {
-    /// <summary>Filter <paramref name="candidates"/> into novel-only output
-    /// per <paramref name="existingBitmap"/>. Returns the count of novel
-    /// hashes written into <paramref name="outNovel"/>.
-    ///
-    /// Order-preserving: novel hashes appear in their original candidate
-    /// order. <paramref name="outNovel"/> must have capacity ≥
-    /// <paramref name="candidates"/>.Length.</summary>
     public static int FilterNovel(
         ReadOnlySpan<Hash128> candidates,
         ReadOnlySpan<byte>    existingBitmap,
@@ -50,14 +34,6 @@ public static unsafe class MerkleDedup
         return checked((int)outN);
     }
 
-    /// <summary>Trunk-shortcircuit walk over <paramref name="tree"/>:
-    /// emit indices of nodes that are novel (clear bit) AND not under an
-    /// ancestor whose bit is set. Returns the count of indices written.
-    ///
-    /// Caller must have called <see cref="TierTree.FinalizeParents"/> on
-    /// the tree first (parent_idx must be populated). Assumes the SubstrateCRUD
-    /// invariant "parent in substrate ⇒ all named descendants in substrate"
-    /// + the header documentation.</summary>
     public static int TrunkShortcircuit(
         TierTree           tree,
         ReadOnlySpan<byte> existingBitmap,

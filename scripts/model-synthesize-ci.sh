@@ -1,23 +1,8 @@
 #!/usr/bin/env bash
-# scripts/model-synthesize-ci.sh
-# Substrate model CI: ingest a model → evidence + consensus → synthesize from substrate.
-#
-# Pipeline under test:
-#   1. Migrations up + seed T0 (idempotent — NO nuke: re-ingest converges by
-#      content-addressing + ON CONFLICT; per-source eviction is the only reset)
-#   2. Ingest the model — the cell ETL: every non-zero weight cell = one
-#      adjudicated match under its tensor-role kind (EMBEDS … OUTPUT_PROJECTS),
-#      positions aggregating as witnesses — + S³ placements
-#   3. Idempotent re-ingest must short-circuit (re-ingest guard)
-#   4. Verify evidence + consensus row gates for the tensor-role kinds
-#   5. Synthesize from substrate (re-export = fill the mold) → GGUF
-#   6. Verify output GGUF is valid and non-trivial in size
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# Model dir by CONVENTION only: $1 or $LAPLACE_TINYLLAMA_DIR — never a hardcoded
-# snapshot SHA.
 MODEL_DIR="${1:-${LAPLACE_TINYLLAMA_DIR:-}}"
 [ -n "$MODEL_DIR" ] || { echo "[substrate-ci] ERROR: pass a model dir or set LAPLACE_TINYLLAMA_DIR" >&2; exit 2; }
 GGUF_OUT="${LAPLACE_GGUF_OUT:-${TMPDIR:-/tmp}/tinyllama-substrate-ci.gguf}"
@@ -29,7 +14,6 @@ export LD_LIBRARY_PATH="$ROOT/build/engine/core:$ROOT/build/engine/dynamics:$ROO
 log() { echo "[substrate-ci] $*"; }
 die() { echo "[substrate-ci] ERROR: $*" >&2; exit 1; }
 
-# --- prereqs ---
 for f in "$MODEL_DIR/config.json" "$MODEL_DIR/tokenizer.json"; do
   [ -e "$f" ] || die "missing: $f"
 done
@@ -52,14 +36,12 @@ if [ ! -f "$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll" ]; then
   (cd "$ROOT/app" && dotnet build Laplace.Cli/Laplace.Cli.csproj -c Release -v q)
 fi
 
-# --- migrations + T0 seed (idempotent; never nuke-to-reingest) ---
 log "migrations up + ingest unicode (idempotent; consensus folds, layer-0 marker set)"
 (cd "$ROOT/app" && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- up) \
   || die "db-up failed"
 (cd "$ROOT/app" && "${CLI[@]}" ingest unicode) \
   || die "ingest unicode failed"
 
-# --- ingest ---
 log "ingest model (pass 1)"
 (cd "$ROOT/app" && "${CLI[@]}" ingest model "$MODEL_DIR") \
   || die "model ingest pass 1 failed"
@@ -70,12 +52,7 @@ echo "$pass2_out"
 echo "$pass2_out" | grep -qi "already ingested" \
   || die "pass 2 did not short-circuit — idempotency broken"
 
-# --- evidence + consensus gates (the LIVE tensor-role arenas) ---
-# ATTENDS / OV_RELATES / COMPLETES_TO are the query-time bilinear reads
-# composed across these arenas — never ingest-written, never gated here.
 log "evidence/consensus gates"
-# Substrate operating surface only — kind names resolve in-DB (kind_id),
-# counts come from evidence_count; no hand-built hash, no hex round-trip.
 check_kind_evidence() {
   local kind="$1" min="$2"
   local count
@@ -99,7 +76,6 @@ cn=$(psql -d laplace -U laplace_admin -tAc "SELECT count(*) FROM laplace.consens
 [ "${cn:-0}" -gt 0 ] || die "consensus empty after ingest (accumulate-at-ingest produced no rows)"
 log "  consensus: $cn rows OK"
 
-# --- substrate synthesis (re-export = fill the mold) ---
 log "synthesize substrate → $GGUF_OUT"
 rm -f "$GGUF_OUT"
 syn_out="$(cd "$ROOT/app" && "${CLI[@]}" synthesize substrate "$MODEL_DIR/config.json" "$GGUF_OUT" 2>&1)"

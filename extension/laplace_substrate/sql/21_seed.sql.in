@@ -1,13 +1,3 @@
-/* 21_seed.sql.in — the substrate's READBACK SEED, shipped WITH the extension
- * (2026-06-05 migrations refactor): the extension is the deployment unit (the
- * postgis model — spatial_ref_sys ships with postgis; canonical_names +
- * codepoint_render ship with laplace_substrate). The DbUp chain carries ZERO
- * substrate content — Layer-1 orchestration only (extensions, roles, grants).
- *
- * canonical_names rows here are the STATIC canonical vocabulary (kinds, types,
- * trust classes, POS values, ISO classifiers, ordinals, …). Dynamic families
- * (DEP_* / FEAT_* / DBPEDIA_*, UCD classifier names) register at ingest. */
-
 SELECT build_codepoint_render();
 
 INSERT INTO canonical_names (id, name)

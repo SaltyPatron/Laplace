@@ -7,18 +7,10 @@ using Xunit;
 
 namespace Laplace.Decomposers.Unicode.Tests;
 
-/// <summary>
-/// Verifies the T0 codepoint seed via <see cref="UnicodeSeed.Compute"/> on UCD/DUCET
-/// (sibling of the perf-cache blob — seed does not mmap the blob).
-/// Needs liblaplace_core.so + <c>/vault/Data/Unicode</c> paths on the test host.
-/// </summary>
 public sealed class UnicodeDecomposerTests
 {
     static UnicodeDecomposerTests()
     {
-        // Pass 3 (name aliases / confusables, 2026-06-05 completeness) routes
-        // text through ContentEmitter — the documented host precondition is a
-        // loaded T0 perf-cache (same as every content-bearing decomposer).
         CodepointPerfcache.Load(ResolvePerfcacheBlob());
     }
 
@@ -38,9 +30,6 @@ public sealed class UnicodeDecomposerTests
 
     private const int TotalCodepoints = 1_114_112;
 
-    // Use the same path discipline as production: the decomposer reads source
-    // paths from IDecomposerContext.EcosystemPath. The test context below
-    // supplies it; the decomposer ctor takes no path args here.
     private static UnicodeDecomposer NewDecomposer() => new UnicodeDecomposer();
 
     private static IDecomposerContext Context(ISubstrateWriter writer) =>
@@ -54,12 +43,8 @@ public sealed class UnicodeDecomposerTests
         var ctx = Context(new NullWriter());
 
         await dec.EstimateUnitCountAsync(ctx);
-        // 'A' = U+0041, entity id = BLAKE3-128 of single byte 0x41.
         Hash128 aHash = Hash128.Blake3(new byte[] { 0x41 });
 
-        // Pass 1+2 emit the 1,114,112 codepoints; pass 3 (2026-06-05
-        // completeness) adds name-alias / confusable-sequence CONTENT — so the
-        // CODEPOINT-typed count is exact and the extras are pinned > 0.
         long codepointEntities = 0, codepointPhysicalities = 0, passThreeEntities = 0;
         bool allTier0 = true, allFirstObserved = true;
         EntityRow? aEntity = null;
@@ -99,8 +84,6 @@ public sealed class UnicodeDecomposerTests
         Assert.True(allTier0, "all codepoint entities are tier 0");
         Assert.True(allFirstObserved, "all codepoint entities first_observed_by UnicodeDecomposer");
 
-        // 'A' is emitted as a tier-0 Codepoint entity with one CONTENT physicality
-        // on the unit glome (super-Fibonacci ⇒ x²+y²+z²+m² = 1).
         Assert.NotNull(aEntity);
         Assert.NotNull(aPhys);
         Assert.Equal(PhysicalityType.Content, aPhys!.Type);
@@ -121,17 +104,13 @@ public sealed class UnicodeDecomposerTests
         var writer = new CapturingWriter();
         await dec.InitializeAsync(Context(writer));
 
-        // Two intents: (1) type/kind bootstrap, (2) classifier entities
         Assert.Equal(2, writer.Captured.Count);
         var boot = writer.Captured[0];
 
-        // Source entity declared as a Source-typed entity.
         Assert.Contains(boot.Entities, e =>
             e.Id == UnicodeDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
-        // Codepoint type registered as a Type-typed entity.
         Assert.Contains(boot.Entities, e =>
             e.Id == UnicodeDecomposer.CodepointType && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
-        // HAS_TRUST_CLASS attestation: source -> StandardsDerived.
         Assert.Contains(boot.Attestations, a =>
             a.SubjectId == UnicodeDecomposer.Source
             && a.TypeId == BootstrapIntentBuilder.HasTrustClassTypeId
@@ -162,8 +141,6 @@ public sealed class UnicodeDecomposerTests
         var dec = NewDecomposer();
         Assert.Equal(TotalCodepoints, await dec.EstimateUnitCountAsync(Context(new NullWriter())));
     }
-
-    // === fakes ===
 
     private sealed class FakeContext(ISubstrateWriter writer) : IDecomposerContext
     {

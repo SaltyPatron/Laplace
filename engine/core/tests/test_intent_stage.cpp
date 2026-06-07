@@ -57,7 +57,7 @@ hash128_t make_hash(uint8_t fill) {
     return h;
 }
 
-} // namespace
+}
 
 TEST(LaplaceCoreIntentStage, NewWithZeroCapacityIsValid) {
     intent_stage_t* s = intent_stage_new(0);
@@ -92,11 +92,8 @@ TEST(LaplaceCoreIntentStage, EmptyStreamHasHeaderAndTrailerOnly) {
                                                         buf.data(), buf.size());
     EXPECT_EQ(required, written);
     EXPECT_EQ(0, std::memcmp(buf.data(), kSig, sizeof(kSig)));
-    /* flags = 0 */
     EXPECT_EQ(0u, read_be32(buf.data() + 11));
-    /* hdr_ext_length = 0 */
     EXPECT_EQ(0u, read_be32(buf.data() + 15));
-    /* trailer = 0xFFFF */
     EXPECT_EQ(0xff, buf[buf.size() - 2]);
     EXPECT_EQ(0xff, buf[buf.size() - 1]);
     intent_stage_free(s);
@@ -129,20 +126,6 @@ TEST(LaplaceCoreIntentStage, AddEntityEncodesOneRowExactly) {
     ASSERT_EQ(need, intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_ENTITIES,
                                                  buf.data(), buf.size()));
 
-    /* Layout:
-     *   [0..11)   signature
-     *   [11..15)  flags=0
-     *   [15..19)  hdr ext=0
-     *   [19..21)  field_count=4 BE
-     *   [21..25)  field_len=16 BE
-     *   [25..41)  16 bytes of id (all 0x11)
-     *   [41..45)  field_len=2 BE
-     *   [45..47)  tier=5 BE (int16)
-     *   [47..51)  field_len=16 BE
-     *   [51..67)  16 bytes of type_id (all 0x22)
-     *   [67..71)  field_len=-1 (NULL first_observed_by)
-     *   [71..73)  trailer 0xFFFF
-     */
     ASSERT_EQ(73u, need);
     EXPECT_EQ(4, (int16_t)read_be16(buf.data() + 19));
     EXPECT_EQ(16u, read_be32(buf.data() + 21));
@@ -168,7 +151,6 @@ TEST(LaplaceCoreIntentStage, AddEntityFirstObservedByPopulated) {
     std::vector<uint8_t> buf(need);
     ASSERT_EQ(need, intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_ENTITIES,
                                                  buf.data(), buf.size()));
-    /* Last field: len=16 + 16 bytes of 0x30 */
     EXPECT_EQ(16u, read_be32(buf.data() + 67));
     for (int i = 0; i < 16; ++i) EXPECT_EQ(0x30, buf[71 + i]);
     intent_stage_free(s);
@@ -180,8 +162,6 @@ TEST(LaplaceCoreIntentStage, BufferTooSmallReturnsRequiredCount) {
     uint8_t small[4];
     const size_t r = intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_ENTITIES, small, sizeof(small));
     EXPECT_EQ(kHeader + kTrailer, r);
-    /* Nothing should be written; we don't easily check that, but the
-     * contract says nothing is written when buf_capacity < required. */
     intent_stage_free(s);
 }
 
@@ -195,8 +175,6 @@ TEST(LaplaceCoreIntentStage, MultipleEntitiesAccumulate) {
     }
     EXPECT_EQ(3u, intent_stage_entity_count(s));
     const size_t need = intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_ENTITIES, nullptr, 0);
-    /* Each entity row is 2 (field_count) + 4+16 + 4+2 + 4+16 + 4 = 52 bytes.
-     * 3 rows = 156 bytes + header(19) + trailer(2) = 177. */
     EXPECT_EQ(177u, need);
     intent_stage_free(s);
 }
@@ -210,19 +188,19 @@ TEST(LaplaceCoreIntentStage, AddPhysicalityRoundTripsAllFields) {
     double coord[4] = { 0.25, 0.5, 0.75, 1.0 };
     hilbert128_t hb;
     for (int i = 0; i < 16; ++i) hb.bytes[i] = (uint8_t)(0x40 + i);
-    double traj[8] = { 1.0, 2.0, 3.0, 4.0,  5.0, 6.0, 7.0, 8.0 }; /* 2 vertices */
+    double traj[8] = { 1.0, 2.0, 3.0, 4.0,  5.0, 6.0, 7.0, 8.0 };
 
     ASSERT_EQ(0, intent_stage_add_physicality(
         s, &id, &eid, &sid,
-        /*kind*/ 1,
+        1,
         coord, &hb,
-        traj, /*n_vertices*/ 2,
-        /*n_constituents*/ 2,
-        /*alignment_residual_is_null*/ 0,
-        /*alignment_residual*/ 0.0125,
-        /*source_dim_is_null*/ 1,
-        /*source_dim*/ 0,
-        /*observed_at_unix_us*/ INTENT_STAGE_PG_EPOCH_UNIX_US + 1234567));
+        traj, 2,
+        2,
+        0,
+        0.0125,
+        1,
+        0,
+        INTENT_STAGE_PG_EPOCH_UNIX_US + 1234567));
 
     const size_t need = intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_PHYSICALITIES,
                                                      nullptr, 0);
@@ -232,30 +210,23 @@ TEST(LaplaceCoreIntentStage, AddPhysicalityRoundTripsAllFields) {
 
     const uint8_t* p = buf.data() + kHeader;
     EXPECT_EQ(11, (int16_t)read_be16(p)); p += 2;
-    /* id */
     EXPECT_EQ(16u, read_be32(p)); p += 4;
     for (int i = 0; i < 16; ++i) EXPECT_EQ(0x01, *p++);
-    /* entity_id */
     EXPECT_EQ(16u, read_be32(p)); p += 4;
     for (int i = 0; i < 16; ++i) EXPECT_EQ(0x02, *p++);
-    /* source_id */
     EXPECT_EQ(16u, read_be32(p)); p += 4;
     for (int i = 0; i < 16; ++i) EXPECT_EQ(0x03, *p++);
-    /* kind=1 int2 */
     EXPECT_EQ(2u, read_be32(p)); p += 4;
     EXPECT_EQ(1, (int16_t)read_be16(p)); p += 2;
-    /* coord — PointZM EWKB, 37 bytes */
     EXPECT_EQ(37u, read_be32(p)); p += 4;
-    EXPECT_EQ(0x01, *p++); /* NDR */
-    EXPECT_EQ(0xC0000001u, read_le_u32(p)); p += 4;  /* POINT | Z | M */
+    EXPECT_EQ(0x01, *p++);
+    EXPECT_EQ(0xC0000001u, read_le_u32(p)); p += 4;
     EXPECT_EQ(0.25, read_le_double(p)); p += 8;
     EXPECT_EQ(0.5,  read_le_double(p)); p += 8;
     EXPECT_EQ(0.75, read_le_double(p)); p += 8;
     EXPECT_EQ(1.0,  read_le_double(p)); p += 8;
-    /* hilbert_index — 16 bytes raw */
     EXPECT_EQ(16u, read_be32(p)); p += 4;
     for (int i = 0; i < 16; ++i) EXPECT_EQ((uint8_t)(0x40 + i), *p++);
-    /* trajectory — LineStringZM EWKB, 1+4+4+32*2 = 73 bytes */
     EXPECT_EQ(73u, read_be32(p)); p += 4;
     EXPECT_EQ(0x01, *p++);
     EXPECT_EQ(0xC0000002u, read_le_u32(p)); p += 4;
@@ -267,19 +238,14 @@ TEST(LaplaceCoreIntentStage, AddPhysicalityRoundTripsAllFields) {
             p += 8;
         }
     }
-    /* n_constituents = 2 int4 */
     EXPECT_EQ(4u, read_be32(p)); p += 4;
     EXPECT_EQ(2, (int32_t)read_be32(p)); p += 4;
-    /* alignment_residual = 0.0125 float8 */
     EXPECT_EQ(8u, read_be32(p)); p += 4;
     EXPECT_EQ(0.0125, read_be_double(p)); p += 8;
-    /* source_dim NULL */
     EXPECT_EQ((uint32_t)-1, read_be32(p)); p += 4;
-    /* observed_at: 1_234_567 µs after PG epoch */
     EXPECT_EQ(8u, read_be32(p)); p += 4;
     EXPECT_EQ((int64_t)1234567, (int64_t)read_be64(p)); p += 8;
 
-    /* trailer */
     EXPECT_EQ(0xff, *p++);
     EXPECT_EQ(0xff, *p++);
     EXPECT_EQ(buf.data() + buf.size(), p);
@@ -295,7 +261,7 @@ TEST(LaplaceCoreIntentStage, AddPhysicalityNullTrajectoryIsValid) {
     hilbert128_t hb; std::memset(&hb, 0, sizeof(hb));
     ASSERT_EQ(0, intent_stage_add_physicality(
         s, &z, &z, &z, 1, coord, &hb, nullptr, 0, 0,
-        /*ar_null*/ 1, 0.0, /*sd_null*/ 1, 0, 0));
+        1, 0.0, 1, 0, 0));
     EXPECT_EQ(1u, intent_stage_physicality_count(s));
     intent_stage_free(s);
 }
@@ -321,9 +287,7 @@ TEST(LaplaceCoreIntentStage, AddAttestationAllFieldsBigEndian) {
     hash128_t obj = make_hash(0xA4);
     hash128_t src = make_hash(0xA5);
     hash128_t ctx = make_hash(0xA6);
-    /* Evidence is PROVENANCE: outcome class (0=refute/1=draw/2=confirm) —
-     * never a value. */
-    const int16_t outcome    = 2;                       /* confirm */
+    const int16_t outcome    = 2;
     const int64_t obs_us     = INTENT_STAGE_PG_EPOCH_UNIX_US + 999;
     const int64_t obs_count  = 17;
 
@@ -338,19 +302,15 @@ TEST(LaplaceCoreIntentStage, AddAttestationAllFieldsBigEndian) {
                                                   buf.data(), buf.size()));
     const uint8_t* p = buf.data() + kHeader;
     EXPECT_EQ(9, (int16_t)read_be16(p)); p += 2;
-    /* skip 5 hash128 fields and 1 nullable hash128 — verify field lengths only */
     for (int f = 0; f < 6; ++f) {
         EXPECT_EQ(16u, read_be32(p)); p += 4;
-        EXPECT_EQ((uint8_t)(0xA1 + f), *p);  /* leading byte of each */
+        EXPECT_EQ((uint8_t)(0xA1 + f), *p);
         p += 16;
     }
-    /* outcome int2 */
     EXPECT_EQ(2u, read_be32(p)); p += 4;
     EXPECT_EQ(outcome, (int16_t)read_be16(p)); p += 2;
-    /* last_observed_at: 999 µs after PG epoch */
     EXPECT_EQ(8u, read_be32(p)); p += 4;
     EXPECT_EQ((int64_t)999, (int64_t)read_be64(p)); p += 8;
-    /* observation_count */
     EXPECT_EQ(8u, read_be32(p)); p += 4;
     EXPECT_EQ(obs_count, (int64_t)read_be64(p));
     intent_stage_free(s);
@@ -361,23 +321,20 @@ TEST(LaplaceCoreIntentStage, AddAttestationNullObjectAndContext) {
     ASSERT_NE(nullptr, s);
     hash128_t z = make_hash(0);
     ASSERT_EQ(0, intent_stage_add_attestation(
-        s, &z, &z, &z, /*object*/nullptr, &z, /*context*/nullptr,
-        /*outcome*/0, 0, 0));
+        s, &z, &z, &z, nullptr, &z, nullptr,
+        0, 0, 0));
     const size_t need = intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_ATTESTATIONS,
                                                       nullptr, 0);
     std::vector<uint8_t> buf(need);
     ASSERT_EQ(need, intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_ATTESTATIONS,
                                                   buf.data(), buf.size()));
     const uint8_t* p = buf.data() + kHeader;
-    p += 2;            /* field_count */
-    p += 4 + 16;       /* id */
-    p += 4 + 16;       /* subject */
-    p += 4 + 16;       /* kind */
-    /* object_id == NULL: length = -1 */
+    p += 2;
+    p += 4 + 16;
+    p += 4 + 16;
+    p += 4 + 16;
     EXPECT_EQ((uint32_t)-1, read_be32(p)); p += 4;
-    /* source_id */
     EXPECT_EQ(16u, read_be32(p)); p += 4 + 16;
-    /* context_id == NULL */
     EXPECT_EQ((uint32_t)-1, read_be32(p));
     intent_stage_free(s);
 }
@@ -397,7 +354,5 @@ TEST(LaplaceCoreIntentStage, EachTableHasIndependentRowCount) {
 }
 
 TEST(LaplaceCoreIntentStage, PGEpochOffsetConstantIsCorrect) {
-    /* 946684800000000 µs is 2000-01-01T00:00:00Z in Unix-µs.
-     * Spot-check: 30 years * ~365.25 d/y * 86400 s/d ≈ 9.467e8 s. */
     EXPECT_EQ(INT64_C(946684800000000), INTENT_STAGE_PG_EPOCH_UNIX_US);
 }

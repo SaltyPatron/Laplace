@@ -7,21 +7,6 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Wiktionary;
 
-/// <summary>
-/// Emits Wiktionary (wiktextract JSONL) as content + attestations.
-///
-/// Input is the pre-extracted JSONL (raw-wiktextract-data.jsonl, all languages, or the
-/// kaikki English snapshot) — NOT the raw MediaWiki XML. Per record: the headword, every
-/// sense gloss + example, IPA pronunciations, translations, sense relations
-/// (syn/ant/hyper/hypo/mero/holo/derived/related), inflected forms, and etymology prose are
-/// all decomposed as content (ContentEmitter) so they converge with every other source.
-/// Attestations: HAS_LANGUAGE, HAS_POS, DEFINES (gloss), HAS_EXAMPLE, TRANSCRIBES_AS (IPA),
-/// IS_TRANSLATION_OF, IS_SYNONYM_OF / IS_ANTONYM_OF / HAS_HYPERNYM / HAS_HYPONYM / HAS_PART /
-/// IS_PART_OF / DERIVATIONALLY_RELATED / RELATED_TO, HAS_VARIANT_OF, HAS_ETYMOLOGY.
-///
-/// Single-pass: each record emits its referenced content inline, so every attestation's FK is
-/// satisfied within the same batch (writer orders entities before attestations).
-/// </summary>
 public sealed class WiktionaryDecomposer : IDecomposer
 {
     public static readonly Hash128 Source =
@@ -31,8 +16,6 @@ public sealed class WiktionaryDecomposer : IDecomposer
 
     private static readonly Hash128 LanguageTypeId = Hash128.OfCanonical("substrate/type/Language/v1");
 
-    // Sense-relation property → kind NAME only. Rank / symmetry / direction-flip
-    // resolve through RelationTypeRegistry (the single source of truth) at attest time.
     private static readonly Dictionary<string, string> RelMap = new(StringComparer.Ordinal)
     {
         ["synonyms"]  = "IS_SYNONYM_OF",
@@ -47,17 +30,14 @@ public sealed class WiktionaryDecomposer : IDecomposer
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "WiktionaryDecomposer";
-    public int     LayerOrder   => 2;   // needs only unicode(0)+iso(1) — independent of wordnet/omw
+    public int     LayerOrder   => 2;
     public Hash128 TrustClassId => TrustClass;
 
-    /* pos string → THE canonical POS value (PosReference); unmapped strings →
-     * namespaced probationary value + logged miss — never silent, never guessed. */
     private static Hash128 PosId(string p) => PosReference.Resolve(p, PosReference.PosTagset.Wiktionary);
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        // Rank/trust live in the REGISTRY at attest time — AddRelationType(name) only.
         boot.AddRelationType("HAS_POS");
         boot.AddRelationType("HAS_DEFINITION");
         boot.AddRelationType("HAS_EXAMPLE");
@@ -75,8 +55,6 @@ public sealed class WiktionaryDecomposer : IDecomposer
         boot.AddRelationType("ETYMOLOGICALLY_DERIVED_FROM");
         await context.Writer.ApplyAsync(boot.Build(), ct);
 
-        // THE canonical POS inventory (PosReference) — canonical value FKs;
-        // probationary values self-contain per record at emit time.
         var posSeed = new SubstrateChangeBuilder(
             Source, "bootstrap/pos-canonical", null,
             entityCapacity: PosReference.Canonical.Length + 1,
@@ -104,7 +82,7 @@ public sealed class WiktionaryDecomposer : IDecomposer
 
             bool emitted;
             try { emitted = EmitRecord(b, line); }
-            catch (JsonException) { continue; } // tolerate malformed lines
+            catch (JsonException) { continue; }
 
             if (emitted && ++n >= batch)
             {
@@ -120,9 +98,6 @@ public sealed class WiktionaryDecomposer : IDecomposer
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    /// <summary>The usage-register vocabulary worth witnessing from sense tags
-    /// (wiktextract mixes registers with grammar tags — only registers land in
-    /// HAS_USAGE_REGISTER; grammar lives in the FEAT_*/UPOS layers).</summary>
     private static readonly HashSet<string> RegisterTags = new(StringComparer.OrdinalIgnoreCase)
     {
         "archaic", "obsolete", "dated", "slang", "colloquial", "informal", "formal",
@@ -142,7 +117,6 @@ public sealed class WiktionaryDecomposer : IDecomposer
         if (wordId is null) return false;
         Hash128 w = wordId.Value;
 
-        // Language
         string? langCode = Str(rec, "lang_code") ?? Str(rec, "lang");
         if (!string.IsNullOrEmpty(langCode))
         {
@@ -152,7 +126,6 @@ public sealed class WiktionaryDecomposer : IDecomposer
                 w, "HAS_LANGUAGE", langId, Source, SourceTrust.AcademicCuratedUserInput));
         }
 
-        // POS
         string? pos = Str(rec, "pos");
         Hash128? posCtx = null;
         if (!string.IsNullOrEmpty(pos))
@@ -164,11 +137,6 @@ public sealed class WiktionaryDecomposer : IDecomposer
                 w, "HAS_POS", posId, Source, SourceTrust.AcademicCuratedUserInput));
         }
 
-        // Senses → glosses (HAS_DEFINITION, context=pos) + examples + the
-        // PER-SENSE relations the 2026-06-05 audit found dropped entirely —
-        // the sense-specificity is the point of a dictionary. The sense's POS
-        // rides as context on the relation (the sense disambiguator available
-        // at this tier; wordform-level identity is the subject as ever).
         if (rec.TryGetProperty("senses", out var senses) && senses.ValueKind == JsonValueKind.Array)
         {
             foreach (var sense in senses.EnumerateArray())
@@ -184,8 +152,6 @@ public sealed class WiktionaryDecomposer : IDecomposer
                         AttestText(b, w, "HAS_EXAMPLE", txt, null);
                     }
 
-                // Per-sense lexical relations (synonyms/antonyms/hypernyms/…
-                // + coordinate_terms — co-hyponyms, their own symmetric arena).
                 foreach (var (prop, typeName) in RelMap)
                     if (sense.TryGetProperty(prop, out var sarr) && sarr.ValueKind == JsonValueKind.Array)
                         foreach (var el in sarr.EnumerateArray())
@@ -194,9 +160,6 @@ public sealed class WiktionaryDecomposer : IDecomposer
                     foreach (var el in coord.EnumerateArray())
                         AttestText(b, w, "IS_COORDINATE_TERM_WITH", Str(el, "word"), posCtx);
 
-                // Sense categories → the SHARED domain arena (converges with
-                // WordNet lexname domains); register tags (slang/archaic/…) →
-                // HAS_USAGE_REGISTER with the register wordform as value.
                 if (sense.TryGetProperty("categories", out var cats) && cats.ValueKind == JsonValueKind.Array)
                     foreach (var cEl in cats.EnumerateArray())
                     {
@@ -210,8 +173,6 @@ public sealed class WiktionaryDecomposer : IDecomposer
             }
         }
 
-        // IPA pronunciations — the dialect tag (US/UK/RP/…) rides as context
-        // on the transcription (which variety says it this way), as content.
         if (rec.TryGetProperty("sounds", out var sounds) && sounds.ValueKind == JsonValueKind.Array)
             foreach (var snd in sounds.EnumerateArray())
             {
@@ -223,17 +184,15 @@ public sealed class WiktionaryDecomposer : IDecomposer
                         if (tg.ValueKind == JsonValueKind.String)
                         {
                             dialectCtx = ContentEmitter.Emit(b, tg.GetString()!, Source);
-                            break;   // first tag = the variety label
+                            break;
                         }
                 AttestText(b, w, "TRANSCRIBES_AS", ipa, dialectCtx);
             }
 
-        // Translations
         if (rec.TryGetProperty("translations", out var tr) && tr.ValueKind == JsonValueKind.Array)
             foreach (var t in tr.EnumerateArray())
                 AttestText(b, w, "IS_TRANSLATION_OF", Str(t, "word"), null);
 
-        // Root-level relations (synonyms / antonyms / hypernyms / … + coordinate terms)
         foreach (var (prop, typeName) in RelMap)
             if (rec.TryGetProperty(prop, out var arr) && arr.ValueKind == JsonValueKind.Array)
                 foreach (var el in arr.EnumerateArray())
@@ -242,24 +201,18 @@ public sealed class WiktionaryDecomposer : IDecomposer
             foreach (var el in rootCoord.EnumerateArray())
                 AttestText(b, w, "IS_COORDINATE_TERM_WITH", Str(el, "word"), null);
 
-        // Inflected forms → variants
         if (rec.TryGetProperty("forms", out var forms) && forms.ValueKind == JsonValueKind.Array)
             foreach (var f in forms.EnumerateArray())
                 AttestText(b, w, "HAS_VARIANT_OF", Str(f, "form"), null);
 
-        // Etymology prose
         AttestText(b, w, "HAS_ETYMOLOGY", Str(rec, "etymology_text"), null);
 
-        // Structured etymology templates (minimal lawful slice): borrowed /
-        // derived / inherited carry a source-language term → the cognate
-        // wordform, in the existing etymological arenas.
         if (rec.TryGetProperty("etymology_templates", out var etys) && etys.ValueKind == JsonValueKind.Array)
             foreach (var et in etys.EnumerateArray())
             {
                 string? name = Str(et, "name");
                 if (name is not ("bor" or "borrowed" or "der" or "derived" or "inh" or "inherited")) continue;
                 if (!et.TryGetProperty("args", out var args) || args.ValueKind != JsonValueKind.Object) continue;
-                // wiktextract template args: "2" = source language, "3" = the term.
                 string? term = args.TryGetProperty("3", out var a3) && a3.ValueKind == JsonValueKind.String
                     ? a3.GetString() : null;
                 if (string.IsNullOrWhiteSpace(term) || term == "-") continue;
@@ -269,9 +222,6 @@ public sealed class WiktionaryDecomposer : IDecomposer
         return true;
     }
 
-    /// <summary>Emit <paramref name="text"/> as content and attest
-    /// (subject)→(kind)→(content), rank/symmetry/direction resolved through
-    /// <see cref="RelationTypeRegistry"/> — the single source of truth.</summary>
     private static void AttestText(
         SubstrateChangeBuilder b, Hash128 subject, string typeName, string? text,
         Hash128? context)
@@ -295,7 +245,6 @@ public sealed class WiktionaryDecomposer : IDecomposer
             string p = Path.Combine(dir, name);
             if (File.Exists(p)) return p;
         }
-        // Fall back to any *.jsonl in the directory.
         if (Directory.Exists(dir))
             foreach (var p in Directory.EnumerateFiles(dir, "*.jsonl")) return p;
         return null;

@@ -3,30 +3,11 @@ using System.Xml.Linq;
 
 namespace Laplace.Decomposers.ISO;
 
-/// <summary>
-/// Builds the language reference GRAPH that turns a language into a navigable hub
-/// instead of a bare node reachable only by a HAS_LANGUAGE join:
-///   • language → script  — from CLDR supplementalData &lt;languageData&gt;, converging on
-///     the SAME Unicode script entities (UcdProperties keys them "unicode/script/{name}/v1")
-///     via the ISO 15924 code→UCD-name alias in UCD PropertyValueAliases.txt.
-///   • individual → macrolanguage — from iso-639-3-macrolanguages.tab.
-/// With Unicode's codepoint→script already attested, this completes
-/// codepoint→script→language→macrolanguage so the substrate can FILTER/FOCUS by
-/// language, script, or macrolanguage structurally — no runtime joins, no lazy edge.
-/// All ids derive from the canonical formulas so every edge lands on entities the
-/// Unicode layer and the 639-3 pass already created.
-/// </summary>
 internal static class LanguageGraph
 {
-    /// <summary>Script entity id — MUST match UnicodeDecomposer/UcdProperties:
-    /// <c>unicode/script/{UCD-long-name}/v1</c> (e.g. name "Latin").</summary>
     public static Laplace.Engine.Core.Hash128 ScriptEntityId(string ucdName) =>
         Laplace.Engine.Core.Hash128.OfCanonical($"unicode/script/{ucdName}/v1");
 
-    /// <summary>ISO 15924 script code → UCD script long-name (e.g. "Latn"→"Latin"),
-    /// from UCD PropertyValueAliases.txt lines <c>sc ; Latn ; Latin</c>. This is the
-    /// authoritative name UnicodeDecomposer keyed its script entities by, so the link
-    /// converges on the real entity rather than a phantom.</summary>
     public static Dictionary<string, string> LoadScriptCodeToUcdName(string unidataDir)
     {
         var map = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -43,8 +24,6 @@ internal static class LanguageGraph
         return map;
     }
 
-    /// <summary>(individual 639-3, macrolanguage 639-3) pairs from
-    /// iso-639-3-macrolanguages.tab (header: M_Id\tI_Id\tI_Status).</summary>
     public static IEnumerable<(string Individual, string Macro)> Macrolanguages(string iso639Dir)
     {
         string path = Path.Combine(iso639Dir, "iso-639-3-macrolanguages.tab");
@@ -61,14 +40,10 @@ internal static class LanguageGraph
         }
     }
 
-    /// <summary>(language subtag, script codes) from CLDR supplementalData
-    /// &lt;languageData&gt;: <c>&lt;language type="aa" scripts="Latn"/&gt;</c> — scripts
-    /// space-separated, both primary and alt="secondary" rows included.</summary>
     public static IEnumerable<(string Lang, string[] Scripts)> LanguageScripts(string iso639Dir)
     {
         string path = Path.Combine(iso639Dir, "cldr", "supplementalData.xml");
         if (!File.Exists(path)) yield break;
-        // CLDR files carry a DOCTYPE referencing an external DTD; ignore it (don't fetch).
         var settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Ignore, XmlResolver = null };
         using var reader = XmlReader.Create(path, settings);
         var doc = XDocument.Load(reader);

@@ -1,29 +1,14 @@
 namespace Laplace.Decomposers.Containers.Abstractions;
 
-/// <summary>
-/// Magic-byte → parser lookup. The model-ingest path peeks
-/// at a file's leading bytes and asks the registry which parser handles
-/// the format; if no parser matches the file is logged + skipped (never
-/// loaded).
-/// </summary>
 public interface IContainerRegistry
 {
-    /// <summary>All registered parsers. Order is registration order.</summary>
     IReadOnlyCollection<IContainerParser> Parsers { get; }
 
-    /// <summary>Register a parser. Last-registered-wins for ambiguous
-    /// magic prefixes (callers SHOULD use disjoint magic).</summary>
     void Register(IContainerParser parser);
 
-    /// <summary>Returns the first registered parser whose
-    /// <see cref="IContainerParser.CanParse"/> returns true for the magic
-    /// prefix, or <c>null</c> if no parser matches.</summary>
     IContainerParser? Resolve(ReadOnlySpan<byte> magic);
 }
 
-/// <summary>Default <see cref="IContainerRegistry"/> implementation —
-/// in-memory list, last-registered-wins, thread-safe registration
-/// (lock-free reads).</summary>
 public sealed class ContainerRegistry : IContainerRegistry
 {
     private readonly List<IContainerParser> _parsers = new();
@@ -45,7 +30,6 @@ public sealed class ContainerRegistry : IContainerRegistry
 
     public IContainerParser? Resolve(ReadOnlySpan<byte> magic)
     {
-        // Walk from most-recent registration backward.
         IContainerParser[] snapshot;
         lock (_lock) snapshot = _parsers.ToArray();
         for (int i = snapshot.Length - 1; i >= 0; i--)

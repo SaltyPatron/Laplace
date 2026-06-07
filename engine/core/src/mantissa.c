@@ -2,12 +2,6 @@
 
 #include <string.h>
 
-/* See mantissa.h for the bit layout rationale. The biased exponent of every
- * emitted FP64 component is pinned to 0x3FF (unbiased 0), so values have
- * magnitude in [1, 2). That sacrifices 4 × 11 = 44 of the 256 storage bits for
- * a fixed exponent in exchange for finite-normal validity; the remaining
- * 4 × (1 sign + 52 mantissa) = 212 bits carry the payload. */
-
 #define LAPLACE_FP_EXP_BIASED_ZERO 0x3FFULL
 #define LAPLACE_FP_EXP_SHIFT       52
 #define LAPLACE_MANTISSA_MASK_52   ((1ULL << 52) - 1ULL)
@@ -28,9 +22,6 @@
 #define LAPLACE_Z_HASH_BITS        22u
 #define LAPLACE_Z_HASH_MASK        ((1ULL << LAPLACE_Z_HASH_BITS) - 1ULL)
 
-/* Pack a 53-bit payload "slot" (sign at bit 52, mantissa at bits 51..0) into
- * a fixed-exponent FP64. Caller is responsible for keeping `slot` within
- * 53 bits; bits ≥ 53 are ignored. */
 static inline double laplace_slot_to_fp(uint64_t slot) {
     const uint64_t sign     = (slot >> 52) & 1ULL;
     const uint64_t mantissa = slot & LAPLACE_MANTISSA_MASK_52;
@@ -43,8 +34,6 @@ static inline double laplace_slot_to_fp(uint64_t slot) {
     return out;
 }
 
-/* Recover the 53 payload bits from an FP64 component, discarding the fixed
- * exponent field. Output layout matches `laplace_slot_to_fp`'s input. */
 static inline uint64_t laplace_fp_to_slot(double d) {
     uint64_t bits;
     memcpy(&bits, &d, sizeof(bits));

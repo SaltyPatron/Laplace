@@ -4,20 +4,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Model;
 
-/// <summary>
-/// Placement axis of the model ETL + the shared exact tensor loader.
-///
-///  - <see cref="EmitS3MorphAsync"/> — embed_tokens placed on the shared
-///    Unicode S³ frame as Projection physicalities (the per-model embed
-///    species; Voronoi/Karcher = the geometric consensus that aligns the
-///    model's axis entities cross-model).
-///  - <see cref="LoadTensorF32"/> — the one exact dtype→f32 cell loader the
-///    ETL streams tables through (<see cref="ModelTableETL"/> owns the
-///    relation axis: cells → adjudicated matches under the tensor-role kinds).
-///
-/// Never here, never anywhere: forward passes, probes, GEMM pre-joins,
-/// floors/top-k, per-token magnitude reduction, weight storage.
-/// </summary>
 public sealed class WeightTensorETL
 {
     private readonly LlamaRecipeExtractor.RecipeInfo _recipe;
@@ -40,15 +26,9 @@ public sealed class WeightTensorETL
         _sourceId = sourceId;
         _tokenizerEntityId = tokenizerEntityId;
         _log      = log ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
-        // Sharded-aware: union of every *.safetensors shard; each tensor carries its FilePath.
         _refs     = SafetensorsContainerParser.ParseModel(modelDir);
     }
 
-    /// <summary>
-    /// Placement axis: morph <c>embed_tokens</c> onto the shared S³ Unicode frame and emit
-    /// one Projection physicality per token — the per-model embed species. Streams the
-    /// embedding table; never a recompute.
-    /// </summary>
     public async IAsyncEnumerable<SubstrateChange> EmitS3MorphAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
@@ -67,14 +47,11 @@ public sealed class WeightTensorETL
         }
     }
 
-    /* ── The one exact tensor-cell loader ─────────────────────────────────── */
-
     public static byte[] LoadRawBytes(
         Dictionary<string, SafetensorsContainerParser.TensorReference> refMap, string name)
     {
         var tref = refMap[name];
         byte[] rawBytes = new byte[tref.DataLength];
-        // Open the SHARD this tensor lives in (sharded-aware); FilePath is set by ParseModel.
         using var fs = new FileStream(tref.FilePath, FileMode.Open, FileAccess.Read,
                                       FileShare.Read, 1 << 16, useAsync: false);
         fs.Seek(tref.AbsoluteDataStart, SeekOrigin.Begin);
@@ -95,10 +72,6 @@ public sealed class WeightTensorETL
         var tref = refMap[name];
         byte[] raw = LoadRawBytes(refMap, name);
         float[] result = new float[expectedElements];
-        // Generic dtype → f32 dispatch. The dtype is self-describing (safetensors header),
-        // so handling a new one is just a decoder, never detection. Covers every safetensors
-        // numeric/bool dtype incl. the float8 quant formats; fails loud (never zeros) on
-        // anything else (e.g. GGUF block-quant, which is a different container entirely).
         long n = expectedElements;
         unsafe
         {
@@ -130,8 +103,6 @@ public sealed class WeightTensorETL
         return result;
     }
 
-    /* float8 E5M2 (1-5-2, bias 15) → f32. Same 5-bit exponent/bias as IEEE half, so widen
-     * the mantissa into a half and let the half decoder handle normals/subnormals/inf/nan. */
     private static float DecodeE5M2(byte b)
     {
         int sign = (b >> 7) & 1, exp = (b >> 2) & 0x1F, mant = b & 0x3;
@@ -139,12 +110,11 @@ public sealed class WeightTensorETL
         return (float)BitConverter.UInt16BitsToHalf(half);
     }
 
-    /* float8 E4M3FN (1-4-3, bias 7, no inf; S.1111.111 = NaN; max 448) → f32. */
     private static float DecodeE4M3(byte b)
     {
         int sign = (b >> 7) & 1, exp = (b >> 3) & 0xF, mant = b & 0x7;
         float v;
-        if (exp == 0)                 v = mant * MathF.ScaleB(1f, -9);          // subnormal: mant/8·2⁻⁶
+        if (exp == 0)                 v = mant * MathF.ScaleB(1f, -9);
         else if (exp == 15 && mant == 7) v = float.NaN;
         else                          v = (1f + mant * 0.125f) * MathF.ScaleB(1f, exp - 7);
         return sign != 0 ? -v : v;

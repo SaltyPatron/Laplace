@@ -1,11 +1,4 @@
 #!/bin/bash
-# scripts/verify-pg-postgis.sh
-# Verify the substrate-owned PostgreSQL 18 + PostGIS 3.6.3 install under
-# /opt/laplace/pgsql-18: binaries, extension artifacts, linker paths, and
-# (when the cluster is up) CREATE EXTENSION smoke tests.
-#
-# Usage: just verify-deps
-#    or: scripts/verify-pg-postgis.sh
 
 set -euo pipefail
 

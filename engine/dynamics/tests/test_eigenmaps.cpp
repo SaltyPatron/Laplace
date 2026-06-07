@@ -5,27 +5,16 @@
 #include <random>
 #include <vector>
 
-#include "laplace/dynamics/eigenmaps.h"
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
-/* Laplacian eigenmaps (Belkin & Niyogi 2003) via Spectra sparse
- * eigensolver. Verifies the algebraic properties + a manifold-recovery
- * sanity test (points on a 1D ring in high-dim space should embed to a
- * 1D circle in 2D output). */
+#include "laplace/dynamics/eigenmaps.h"
 
 namespace {
 
 bool embedding_preserves_order_on_ring(const double* low, std::size_t n,
                                        std::size_t target_dim) {
-    /* For a ring with N points, a successful 2D Laplacian embedding
-     * recovers the cyclic order (rotation of the input ring) up to:
-     *   - reflection (the 2nd vs 3rd eigenvector ordering can swap signs)
-     *   - global rotation
-     *   - direction (CW vs CCW)
-     * The verifiable property: sort points by angle in the output; the
-     * resulting order is a cyclic rotation of the input order (modulo
-     * reflection). We measure success by: each input point's index
-     * neighbors-on-ring map to angular neighbors in the embedding (within
-     * a window of K=3). */
     if (target_dim < 2) return false;
     std::vector<std::pair<double, std::size_t>> angles(n);
     for (std::size_t i = 0; i < n; ++i) {
@@ -33,9 +22,6 @@ bool embedding_preserves_order_on_ring(const double* low, std::size_t n,
     }
     std::sort(angles.begin(), angles.end());
 
-    /* For each input point i, find its position in the sorted-by-angle
-     * order. Adjacent input indices should map to adjacent angular
-     * positions (within a small window). */
     std::vector<std::size_t> rank(n);
     for (std::size_t p = 0; p < n; ++p) rank[angles[p].second] = p;
 
@@ -50,7 +36,7 @@ bool embedding_preserves_order_on_ring(const double* low, std::size_t n,
     return adjacent_hits >= static_cast<int>(n * 9 / 10);
 }
 
-}  // namespace
+}
 
 TEST(LaplaceDynamicsEigenmaps, RejectsNullInputs) {
     double out[16];
@@ -62,18 +48,12 @@ TEST(LaplaceDynamicsEigenmaps, RejectsNullInputs) {
 TEST(LaplaceDynamicsEigenmaps, RejectsInvalidArgs) {
     double pts[12] = {0};
     double out[16];
-    /* k_neighbors >= n */
     EXPECT_EQ(-2, laplacian_eigenmaps(pts, 4, 3, 5, 2, out));
-    /* target_dim + 1 >= n */
     EXPECT_EQ(-2, laplacian_eigenmaps(pts, 4, 3, 2, 4, out));
-    /* n=0 */
     EXPECT_EQ(-2, laplacian_eigenmaps(pts, 0, 3, 2, 4, out));
 }
 
 TEST(LaplaceDynamicsEigenmaps, RecoversRingManifold) {
-    /* N points on a 1D ring embedded in 10D space (last 8 coords are
-     * small noise). The Laplacian embedding to 2D should recover the
-     * circular structure. */
     constexpr std::size_t N = 60;
     constexpr std::size_t HIGH_DIM = 10;
     constexpr std::size_t K = 4;
@@ -98,9 +78,6 @@ TEST(LaplaceDynamicsEigenmaps, RecoversRingManifold) {
         << "ring structure not recovered in 2D embedding";
 }
 
-/* Build a symmetric path graph 0-1-...-(N-1) as COO (both directions, unit
- * weight) + its degrees. Non-uniform degrees (ends=1, interior=2) so the
- * D-weighting is actually exercised. */
 static void make_path_graph(int N, std::vector<int>& rows, std::vector<int>& cols,
                             std::vector<double>& w, std::vector<double>& deg) {
     rows.clear(); cols.clear(); w.clear(); deg.assign(static_cast<std::size_t>(N), 0.0);
@@ -112,10 +89,6 @@ static void make_path_graph(int N, std::vector<int>& rows, std::vector<int>& col
 }
 
 TEST(LaplaceDynamicsEigenmaps, EmbeddingIsDWeightedZeroMean) {
-    /* CANONICAL (Belkin-Niyogi generalized) eigenvectors are D-orthogonal to
-     * the constant eigenvector, so each output column has DEGREE-WEIGHTED mean
-     * zero: Σ_i d_i f_i[k] = 0 (NOT the plain mean). Use the sparse-graph entry
-     * point so the test controls the graph and knows the degrees. */
     constexpr int N = 40;
     constexpr std::size_t TARGET = 3;
     std::vector<int> rows, cols; std::vector<double> w, deg;
@@ -135,10 +108,6 @@ TEST(LaplaceDynamicsEigenmaps, EmbeddingIsDWeightedZeroMean) {
 }
 
 TEST(LaplaceDynamicsEigenmaps, EmbeddingColumnsAreDOrthonormal) {
-    /* CANONICAL generalized eigenvectors are D-ORTHONORMAL:
-     * Σ_i d_i f_i[a] f_i[b] = δ_ab. (Equivalently the underlying L_sym
-     * eigenvectors u = D^{1/2} f are plain-orthonormal, which Spectra
-     * returns to ~1e-12; the D-form is the embedding's invariant.) */
     constexpr int N = 50;
     constexpr std::size_t TARGET = 4;
     std::vector<int> rows, cols; std::vector<double> w, deg;
@@ -182,10 +151,6 @@ TEST(LaplaceDynamicsEigenmaps, DeterministicOnIdenticalInput) {
     ASSERT_EQ(0, laplacian_eigenmaps(pts.data(), N, HIGH_DIM, K, TARGET, emb1.data()));
     ASSERT_EQ(0, laplacian_eigenmaps(pts.data(), N, HIGH_DIM, K, TARGET, emb2.data()));
 
-    /* Lanczos can flip eigenvector signs across runs; compare absolute
-     * values column-wise. The columns themselves should match exactly
-     * since the eigendecomposition is deterministic for a deterministic
-     * eigensolver on the same input. */
     for (std::size_t i = 0; i < N * TARGET; ++i) {
         EXPECT_NEAR(std::abs(emb1[i]), std::abs(emb2[i]), 1e-12)
             << "non-determinism at element " << i;

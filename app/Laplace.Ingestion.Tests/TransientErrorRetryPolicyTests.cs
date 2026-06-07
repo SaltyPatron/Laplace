@@ -40,7 +40,6 @@ public class TransientErrorRetryPolicyTests
     {
         var p = TransientErrorRetryPolicy.Default;
         var rng = new Random(0);
-        // 10% jitter on 100ms base → range [90, 110]
         for (int i = 0; i < 20; i++)
         {
             var d = p.DelayBeforeAttempt(0, rng);

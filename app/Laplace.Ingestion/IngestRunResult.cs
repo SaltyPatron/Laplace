@@ -2,8 +2,6 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Ingestion;
 
-/// <summary>Aggregate per-run statistics returned by
-/// <see cref="IngestRunner.RunAsync"/>.</summary>
 public sealed record IngestRunResult(
     Hash128                   SourceId,
     string                    SourceName,

@@ -10,36 +10,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.FrameNet;
 
-/// <summary>
-/// Emits Berkeley FrameNet 1.7 into the substrate as "normal content + attestations".
-///
-/// <para>THE LAW: content is identity. Frame names, frame-element (FE) names, lexical-unit
-/// (LU) lemmas, definitions and example sentences are emitted as content-addressed CONTENT
-/// (<see cref="ContentEmitter"/>) — the same entity any other source produces for the same
-/// bytes — so FrameNet co-asserts with WordNet, the model, prose, every witness. The
-/// FrameNet-specific STRUCTURES (a frame as an object, an FE as an object, an LU as an
-/// object) have no canonical text form, so they keep content-addressed external-id meta
-/// entities.</para>
-///
-/// <para>One pass per file class (completeness is a property of the emitter):</para>
-/// <list type="bullet">
-///   <item><b>frame/*.xml</b> — the spine. Each file carries everything FrameNet testifies
-///   about one frame in one document: the frame (name content + meta entity + HAS_DEFINITION);
-///   its FEs (name content + meta entity + HAS_FRAME_ELEMENT with the coreness Core /
-///   Peripheral / Extra-Thematic / Core-Unexpressed as the context_id classifier, + the FE's
-///   HAS_DEFINITION); its embedded LUs (lemma content + HAS_POS via PosReference + the LU
-///   EVOKES_FRAME the frame); and its directional frameRelation edges (Inherits from → IS_A,
-///   Uses → FRAME_USES, Perspective on → PERSPECTIVE_ON, Subframe of → HAS_SUBEVENT-flipped,
-///   Is Causative of → CAUSATIVE_OF, Is Inchoative of → INCHOATIVE_OF, Precedes → PRECEDES,
-///   See also → RELATED_TO).</item>
-///   <item><b>fulltext/*.xml</b> — running-text annotation. Each sentence is content; each
-///   manually-annotated target attests target-wordform EVOKES_FRAME(frame) with the sentence
-///   as context_id (the attested occurrence in situ).</item>
-/// </list>
-///
-/// <para>Two passes (FK-safe): pass 1 emits entities (frame/FE/LU meta entities + all content);
-/// pass 2 emits attestations. The frame directory is walked once per pass.</para>
-/// </summary>
 public sealed class FrameNetDecomposer : IDecomposer
 {
     public static readonly Hash128 Source =
@@ -47,16 +17,11 @@ public sealed class FrameNetDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    // Frame / FE / LU are abstract FrameNet constructs (no canonical text form) — meta
-    // entities keyed by their FrameNet identity. The FE coreness classes are the context_id
-    // values for HAS_FRAME_ELEMENT (a classifier on the edge, NOT a separate kind).
     private static readonly Hash128 FrameTypeId    = Hash128.OfCanonical("substrate/type/FrameNet_Frame/v1");
     private static readonly Hash128 FrameElemTypeId = Hash128.OfCanonical("substrate/type/FrameNet_FE/v1");
     private static readonly Hash128 LexUnitTypeId  = Hash128.OfCanonical("substrate/type/FrameNet_LU/v1");
     private static readonly Hash128 CorenessTypeId = Hash128.OfCanonical("substrate/type/FrameNet_Coreness/v1");
 
-    /// <summary>Frame meta-entity id, keyed by frame name (the FrameNet identity, also the
-    /// content-addressed text — the meta id is the structural object, the content is the name).</summary>
     private static Hash128 FrameId(string name)
     {
         string canonical = $"framenet/frame/{name}";
@@ -64,45 +29,29 @@ public sealed class FrameNetDecomposer : IDecomposer
         return Hash128.OfCanonical(canonical);
     }
 
-    /// <summary>FE meta-entity id, scoped to its frame (an FE "Agent" of Giving ≠ "Agent" of
-    /// Abandonment — same NAME content, distinct structural roles).</summary>
     private static Hash128 FeId(string frame, string fe) => Hash128.OfCanonical($"framenet/fe/{frame}/{fe}");
 
-    /// <summary>LU meta-entity id, keyed by FrameNet LU id (lemma+POS+frame triple — stable).</summary>
     private static Hash128 LuId(int luId) => Hash128.OfCanonical($"framenet/lu/{luId}");
 
-    /// <summary>Coreness classifier entity (the HAS_FRAME_ELEMENT context_id value).</summary>
     private static Hash128 CorenessId(string coreType) =>
         Hash128.OfCanonical($"framenet/coreness/{coreType}");
 
-    // The four coreType values FrameNet uses on FEs (built + counted from the v1.7 data).
     private static readonly string[] CorenessValues =
         ["Core", "Peripheral", "Extra-Thematic", "Core-Unexpressed"];
 
-    // FrameNet POS tag → UPOS, resolved through PosReference (the omni-glottal POS index).
-    // Confident mappings only; the long tail (IDIO, ART, C, SCON, NUM, …) routes to the
-    // namespaced probationary value via PosReference.Resolve, never guessed or dropped.
     private static readonly Dictionary<string, string> PosToUpos = new(StringComparer.OrdinalIgnoreCase)
     {
         ["N"]    = "NOUN", ["V"]   = "VERB", ["A"]    = "ADJ",   ["ADV"]  = "ADV",
         ["PREP"] = "ADP",  ["NUM"] = "NUM",  ["INTJ"] = "INTJ",  ["PRON"] = "PRON",
         ["ART"]  = "DET",  ["SCON"] = "SCONJ", ["C"]   = "CCONJ",
-        // IDIO (idiomatic multi-word) has no UPOS — left out so PosReference logs it
-        // probationary rather than a wrong guess.
     };
 
-    /// <summary>FrameNet directional frameRelation type → canonical kind name. ONLY the
-    /// canonical-direction member of each inverse pair is mapped: the registry flips
-    /// endpoints for the reverse query (rule 3 — one arena), so emitting the inverse
-    /// ("Is Inherited by", "Is Used by", "Has Subframe(s)", "Is Perspectivized in",
-    /// "Is Preceded by", "Is Causative of"⁻¹) would DOUBLE the testimony. See also is
-    /// symmetric → RELATED_TO. The subject is the frame whose file declares the relation.</summary>
     private static readonly Dictionary<string, string> RelationKinds = new(StringComparer.Ordinal)
     {
-        ["Inherits from"]   = "INHERITS_FROM",   // → IS_A (registry alias)
+        ["Inherits from"]   = "INHERITS_FROM",
         ["Uses"]            = "FRAME_USES",
         ["Perspective on"]  = "PERSPECTIVE_ON",
-        ["Subframe of"]     = "SUBFRAME_OF",      // → HAS_SUBEVENT, flipped (registry alias)
+        ["Subframe of"]     = "SUBFRAME_OF",
         ["Is Causative of"] = "CAUSATIVE_OF",
         ["Is Inchoative of"] = "INCHOATIVE_OF",
         ["Precedes"]        = "PRECEDES",
@@ -113,10 +62,6 @@ public sealed class FrameNetDecomposer : IDecomposer
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "FrameNetDecomposer";
-    // FrameNet sits a tier later than WordNet (layer 2): its LU lemmas converge onto the
-    // wordform content WordNet/Wiktionary already seeded, and EVOKES_FRAME co-asserts with
-    // the predicate-semantic arena. Independent of the frame structures themselves, but the
-    // ladder orders it after the layer-2 lexical corpora.
     public int     LayerOrder   => 3;
     public Hash128 TrustClassId => TrustClass;
 
@@ -128,9 +73,6 @@ public sealed class FrameNetDecomposer : IDecomposer
         boot.AddType("FrameNet_LU");
         boot.AddType("FrameNet_Coreness");
 
-        // Every kind name this source Attests. Rank/trust live in RelationTypeRegistry — AddRelationType(name)
-        // only. Canonical names (registry resolves the source aliases INHERITS_FROM / SUBFRAME_OF
-        // to their arenas; seeding the canonical entity is what satisfies the kind_id FK floor).
         boot.AddRelationType("EVOKES_FRAME");
         boot.AddRelationType("HAS_FRAME_ELEMENT");
         boot.AddRelationType("HAS_DEFINITION");
@@ -141,14 +83,12 @@ public sealed class FrameNetDecomposer : IDecomposer
         boot.AddRelationType("CAUSATIVE_OF");
         boot.AddRelationType("INCHOATIVE_OF");
         boot.AddRelationType("PRECEDES");
-        boot.AddRelationType("IS_A");          // INHERITS_FROM resolves here
-        boot.AddRelationType("HAS_SUBEVENT");  // SUBFRAME_OF resolves here
-        boot.AddRelationType("RELATED_TO");    // See also
+        boot.AddRelationType("IS_A");
+        boot.AddRelationType("HAS_SUBEVENT");
+        boot.AddRelationType("RELATED_TO");
 
         await context.Writer.ApplyAsync(boot.Build(), ct);
 
-        // Seed THE canonical POS inventory (PosReference) + the coreness classifier
-        // entities (context_id values for HAS_FRAME_ELEMENT). Idempotent — content-addressed.
         var seed = new SubstrateChangeBuilder(
             Source, "bootstrap/framenet-vocab", null,
             entityCapacity: PosReference.Canonical.Length + 1 + CorenessValues.Length + 1,
@@ -170,16 +110,11 @@ public sealed class FrameNetDecomposer : IDecomposer
         string fulltextDir = Path.Combine(context.EcosystemPath, "fulltext");
         int batch = options.BatchSize > 1 ? options.BatchSize : 256;
 
-        // Pass 1: entities — frame/FE/LU meta entities + all content (frame names, FE names,
-        // LU lemmas, definitions, examples). Pass 2: attestations (every referent exists now).
         await foreach (var change in StreamFramesAsync(frameDir, batch, entitiesOnly: true, ct))
         { if (!options.DryRun) yield return change; await Task.Yield(); }
         await foreach (var change in StreamFramesAsync(frameDir, batch, entitiesOnly: false, ct))
         { if (!options.DryRun) yield return change; await Task.Yield(); }
 
-        // Fulltext annotation: sentence content (pass 1) + target-evokes-frame (pass 2),
-        // each batch self-contained (sentence + target wordform ride the same intent the
-        // writer orders entities-before-attestations within).
         await foreach (var change in StreamFulltextAsync(fulltextDir, batch, ct))
         { if (!options.DryRun) yield return change; await Task.Yield(); }
     }
@@ -196,18 +131,10 @@ public sealed class FrameNetDecomposer : IDecomposer
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    /// <summary>The data-derived classifier canonical names this source mints (so
-    /// <c>render()</c> answers them in names, not hex): the four coreness context values.
-    /// The relation kinds are canonical-registry names, already render-resolvable.</summary>
-    /// <summary>Coreness classifiers + every frame meta-entity name minted
-    /// during parse — registered post-ingest so render() answers
-    /// "framenet/frame/Giving", never hex (2026-06-05).</summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> MetaNames = new();
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback =>
         [.. CorenessValues.Select(c => $"framenet/coreness/{c}"), .. MetaNames.Keys];
-
-    // ── frame/*.xml streaming ─────────────────────────────────────────────────
 
     private static async IAsyncEnumerable<SubstrateChange> StreamFramesAsync(
         string frameDir, int batch, bool entitiesOnly,
@@ -218,7 +145,6 @@ public sealed class FrameNetDecomposer : IDecomposer
         var b = NewBuilder($"framenet/frame-0/{suffix}", entitiesOnly, batch);
         int count = 0, batchNum = 0;
 
-        // Ordinal sort so intent ids are deterministic across runs.
         foreach (var path in Directory.EnumerateFiles(frameDir, "*.xml").OrderBy(p => p, StringComparer.Ordinal))
         {
             ct.ThrowIfCancellationRequested();
@@ -259,9 +185,6 @@ public sealed class FrameNetDecomposer : IDecomposer
             ContentEmitter.Emit(b, lu.Lemma, Source);
         }
 
-        // Related frame NAMES are content too: the target frame's name entity is the FK for
-        // the relation attestation. The target frame's own file emits its meta entity; the
-        // name content here just guarantees the wordform exists (idempotent dedup).
         foreach (var rel in frame.Relations)
             ContentEmitter.Emit(b, rel.TargetFrame, Source);
     }
@@ -270,7 +193,6 @@ public sealed class FrameNetDecomposer : IDecomposer
     {
         Hash128 frameId = FrameId(frame.Name);
 
-        // frame → definition.
         if (frame.Definition.Length > 0)
         {
             var defId = ContentEmitter.RootId(frame.Definition);
@@ -286,8 +208,6 @@ public sealed class FrameNetDecomposer : IDecomposer
                     frameId, "HAS_EXAMPLE", exId.Value, Source, SourceTrust.AcademicCurated));
         }
 
-        // frame → FE (FE name content as the object; coreness as the context_id classifier),
-        // + FE → definition.
         foreach (var fe in frame.Elements)
         {
             var feNameId = ContentEmitter.RootId(fe.Name);
@@ -307,9 +227,6 @@ public sealed class FrameNetDecomposer : IDecomposer
             }
         }
 
-        // LU lemma → POS, and LU lemma → EVOKES_FRAME → frame. The lemma WORDFORM is the
-        // subject (the omni-glottal tie: "give" evokes Giving, and "give" is the same content
-        // WordNet/the model emit). The LU's POS rides HAS_POS on that wordform.
         foreach (var lu in frame.LexUnits)
         {
             var lemmaId = ContentEmitter.RootId(lu.Lemma);
@@ -322,8 +239,6 @@ public sealed class FrameNetDecomposer : IDecomposer
                 lemmaId.Value, "EVOKES_FRAME", frameId, Source, SourceTrust.AcademicCurated));
         }
 
-        // frame → related frame. The registry resolves alias → canonical arena, applies the
-        // direction flip (SUBFRAME_OF ⇒ HAS_SUBEVENT swapped) and supplies the rank.
         foreach (var rel in frame.Relations)
         {
             if (!RelationKinds.TryGetValue(rel.Type, out var typeName)) continue;
@@ -332,8 +247,6 @@ public sealed class FrameNetDecomposer : IDecomposer
                 frameId, typeName, tgt, Source, SourceTrust.AcademicCurated));
         }
     }
-
-    // ── fulltext/*.xml streaming ──────────────────────────────────────────────
 
     private static async IAsyncEnumerable<SubstrateChange> StreamFulltextAsync(
         string fulltextDir, int batch,
@@ -348,8 +261,6 @@ public sealed class FrameNetDecomposer : IDecomposer
             ct.ThrowIfCancellationRequested();
             await foreach (var ann in ParseFulltextAsync(path, ct))
             {
-                // Self-contained: the sentence content, the target wordform content, and the
-                // EVOKES_FRAME attestation all ride one intent (writer orders entities first).
                 var sentId = ContentEmitter.Emit(b, ann.Sentence, Source);
                 var targetId = ContentEmitter.Emit(b, ann.TargetText, Source);
                 if (sentId is not null && targetId is not null)
@@ -369,30 +280,19 @@ public sealed class FrameNetDecomposer : IDecomposer
         if (count > 0) yield return b.Build();
     }
 
-    // ── helpers ────────────────────────────────────────────────────────────────
-
     private static SubstrateChangeBuilder NewBuilder(string unit, bool entitiesOnly, int batch) =>
         new(Source, unit, null,
             entityCapacity:      entitiesOnly ? batch * 32 : batch * 4,
             physicalityCapacity: entitiesOnly ? batch * 32 : batch * 4,
             attestationCapacity: entitiesOnly ? 0          : batch * 32);
 
-    /// <summary>FrameNet POS → canonical UPOS value id (through PosReference). Mapped tags
-    /// resolve to the universal value; unmapped tags (IDIO, …) route to the namespaced
-    /// probationary value (logged, never silent — PosReference owns the miss counter).</summary>
     private static Hash128 ResolvePos(string fnPos)
     {
         if (PosToUpos.TryGetValue(fnPos, out var upos))
             return PosReference.Resolve(upos, PosReference.PosTagset.Upos);
-        // Route the raw FrameNet tag through the probationary path (Upos tagset rejects it,
-        // so it namespaces + counts it) — the mapping table grows from observed data.
         return PosReference.Resolve(fnPos, PosReference.PosTagset.Upos);
     }
 
-    // ── parsers ──────────────────────────────────────────────────────────────
-
-    /// <summary>Parse one frame/*.xml into its frame, FEs, embedded LUs and directional
-    /// relations. Frames are small (≤ a few hundred KB) so XDocument is appropriate.</summary>
     internal static Frame? ParseFrame(string path)
     {
         XDocument doc;
@@ -409,7 +309,6 @@ public sealed class FrameNetDecomposer : IDecomposer
         string? name = (string?)root.Attribute("name");
         if (string.IsNullOrEmpty(name)) return null;
 
-        // Frame definition: the element's value is HTML-entity-decoded def-root markup.
         var (frameDef, frameExamples) = ParseDefRoot((string?)root.Element(ns + "definition") ?? "");
 
         var elements = new List<FrameElement>();
@@ -425,7 +324,7 @@ public sealed class FrameNetDecomposer : IDecomposer
         var lus = new List<LexUnit>();
         foreach (var lu in root.Elements(ns + "lexUnit"))
         {
-            string? luName = (string?)lu.Attribute("name");   // "lemma.pos"
+            string? luName = (string?)lu.Attribute("name");
             string? pos    = (string?)lu.Attribute("POS");
             if (string.IsNullOrEmpty(luName) || string.IsNullOrEmpty(pos)) continue;
             if (!int.TryParse((string?)lu.Attribute("ID"), out int id)) continue;
@@ -438,7 +337,7 @@ public sealed class FrameNetDecomposer : IDecomposer
         foreach (var fr in root.Elements(ns + "frameRelation"))
         {
             string type = (string?)fr.Attribute("type") ?? "";
-            if (!RelationKinds.ContainsKey(type)) continue;   // skip inverse-direction members
+            if (!RelationKinds.ContainsKey(type)) continue;
             foreach (var rf in fr.Elements(ns + "relatedFrame"))
             {
                 string target = ((string?)rf)?.Trim() ?? "";
@@ -449,18 +348,12 @@ public sealed class FrameNetDecomposer : IDecomposer
         return new Frame(name, frameDef, frameExamples, elements, lus, relations);
     }
 
-    /// <summary>LU name "give.v" → lemma "give"; multi-word "give up.v" → "give up". The POS
-    /// suffix after the LAST dot is dropped (the POS attribute is authoritative).</summary>
     private static string LemmaOf(string luName)
     {
         int dot = luName.LastIndexOf('.');
         return (dot > 0 ? luName[..dot] : luName).Trim();
     }
 
-    /// <summary>Streaming fulltext parse: each sentence's text + each MANUAL annotationSet's
-    /// target span (the LU's frame), yielding (sentence, target-substring, frameName). The
-    /// target span is the &lt;label name="Target"&gt; start/end into the sentence text. UNANN
-    /// (auto POS/NER) annotationSets carry no frame and are skipped.</summary>
     internal static async IAsyncEnumerable<FulltextAnno> ParseFulltextAsync(
         string path, [EnumeratorCancellation] CancellationToken ct)
     {
@@ -468,7 +361,6 @@ public sealed class FrameNetDecomposer : IDecomposer
         using var reader = XmlReader.Create(path, settings);
 
         string sentence = "";
-        // Per-annotationSet state.
         string? frameName = null;
         int targetStart = -1, targetEnd = -1;
         bool inTargetLayer = false;
@@ -497,7 +389,6 @@ public sealed class FrameNetDecomposer : IDecomposer
                     case "label":
                         if (inTargetLayer && reader.GetAttribute("name") == "Target")
                         {
-                            // First Target label of the set is the predicate span.
                             if (targetStart < 0)
                             {
                                 int.TryParse(reader.GetAttribute("start"), out targetStart);
@@ -512,7 +403,6 @@ public sealed class FrameNetDecomposer : IDecomposer
                 if (!string.IsNullOrEmpty(frameName) && !string.IsNullOrEmpty(sentence)
                     && targetStart >= 0 && targetEnd >= targetStart && targetEnd < sentence.Length)
                 {
-                    // FrameNet offsets are inclusive character indices into the sentence text.
                     string target = sentence.Substring(targetStart, targetEnd - targetStart + 1).Trim();
                     if (target.Length > 0)
                         yield return new FulltextAnno(sentence, target, frameName!);
@@ -524,18 +414,11 @@ public sealed class FrameNetDecomposer : IDecomposer
         }
     }
 
-    /// <summary>Split FrameNet def-root markup (the entity-decoded value of a &lt;definition&gt;)
-    /// into clean definition text + example sentences. The markup wraps the body in
-    /// &lt;def-root&gt; with inline &lt;fex&gt;/&lt;fen&gt;/&lt;t&gt; (kept as plain text) and
-    /// &lt;ex&gt; example blocks (extracted as HAS_EXAMPLE content). The leading "COD:"/"FN:"
-    /// source tags some defs carry are preserved as-is (observed bytes, no normalization).</summary>
     internal static (string Def, List<string> Examples) ParseDefRoot(string raw)
     {
         var examples = new List<string>();
         if (string.IsNullOrWhiteSpace(raw)) return ("", examples);
 
-        // The value is decoded text that itself contains markup. Wrap + parse as a fragment.
-        // It may also be plain text (e.g. LU defs like "COD: about, concerning") with no tags.
         string wrapped = raw.Contains('<') ? raw : $"<def-root>{System.Security.SecurityElement.Escape(raw)}</def-root>";
         XElement el;
         try
@@ -544,8 +427,6 @@ public sealed class FrameNetDecomposer : IDecomposer
         }
         catch (XmlException)
         {
-            // Malformed inline markup (rare unbalanced tag) — fall back to the raw text minus
-            // angle-bracket tags, never dropping the definition.
             return (StripTags(raw).Trim(), examples);
         }
 
@@ -554,9 +435,6 @@ public sealed class FrameNetDecomposer : IDecomposer
         return (CollapseWs(defBody.ToString()), examples);
     }
 
-    /// <summary>Walk the def-root tree: text outside &lt;ex&gt; accretes into the definition;
-    /// each &lt;ex&gt; block's text is one example. &lt;fex&gt;/&lt;fen&gt;/&lt;t&gt; are
-    /// transparent (their text belongs to whichever bucket the node sits in).</summary>
     private static void CollectText(XElement el, StringBuilder def, List<string> examples, bool insideExample)
     {
         foreach (var node in el.Nodes())
@@ -614,8 +492,6 @@ public sealed class FrameNetDecomposer : IDecomposer
         }
         return sb.ToString().Trim();
     }
-
-    // ── records ──────────────────────────────────────────────────────────────
 
     internal sealed record Frame(
         string Name, string Definition, List<string> Examples,

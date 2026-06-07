@@ -3,17 +3,6 @@ using Xunit;
 
 namespace Laplace.Migrations.Tests;
 
-/// <summary>
-/// Shared per-class fixture that spins up a postgis/postgis:18 container,
-/// exposes its connection string, and tears down on dispose. xUnit's
-/// IAsyncLifetime semantics handle container startup/shutdown.
-///
-/// Per the testing standard — Testcontainers covers the DbUp + extension
-/// install layer at unit-test grain. Substrate-level integration tests
-/// (laplace extension functions, opclasses) run via pg_regress against
-/// the deployed cluster, not Testcontainers (the laplace_geom +
-/// laplace_substrate extensions aren't in the postgis image).
-/// </summary>
 public class PostgisContainerFixture : IAsyncLifetime
 {
     public PostgreSqlContainer Container { get; }

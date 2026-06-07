@@ -5,25 +5,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Audio;
 
-/// <summary>
-/// Stream D scaffold per /home/ahart/.claude/plans/replicated-hatching-stream.md.
-///
-/// Universal T0 + composite decomposer pattern:
-/// AudioDecomposer = ContainerFormat&lt;WAV/FLAC/MP3/Ogg/Opus/...&gt; × CodecDecoder
-/// × ModalityBinder&lt;Sample/Frame/Track&gt;. Per every modality bottoms
-/// at the same 1,114,112 Unicode codepoints — audio sample magnitudes content-address
-/// through their integer values, sharing hash space with text mentions of those integers.
-///
-/// Stream D-complete implements:
-///   - WavContainer (RIFF header + PCM sample interleave)
-///   - FlacContainer (FLAC stream parser)
-///   - OpusContainer (Ogg-wrapped Opus packets)
-///   - PcmCodecDecoder (per-sample integer per channel)
-///   - SampleModalityBinder (per-sample T1; per-frame T2 via mantissa-packed window; per-track T3)
-///   - Cross-modal kinds: TRANSCRIBES_AS / HAS_FREQUENCY_PEAK
-///
-/// Stream D-minimum (this stub): scaffold + bootstrap audio-tier types.
-/// </summary>
 public sealed class AudioDecomposer : IDecomposer
 {
     public static readonly Hash128 Source =
@@ -33,18 +14,17 @@ public sealed class AudioDecomposer : IDecomposer
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "AudioDecomposer";
-    public int     LayerOrder   => 12;  // After image (11) generalization
+    public int     LayerOrder   => 12;
     public Hash128 TrustClassId => TrustClass;
 
     public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
- // Audio-tier types + 
         boot.AddType("Audio_Sample");
         boot.AddType("Audio_Frame");
         boot.AddType("Audio_Track");
         boot.AddType("Voice");
- // Audio-modality kinds         boot.AddRelationType("IS_AT_SAMPLE");
+        boot.AddRelationType("IS_AT_SAMPLE");
         boot.AddRelationType("HAS_FREQUENCY_PEAK");
         boot.AddRelationType("HAS_VOICE");
         boot.AddRelationType("TRANSCRIBES_AS");

@@ -8,38 +8,6 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.OpenSubtitles;
 
-/// <summary>
-/// Emits the OpenSubtitles v2024 aligned parallel corpus as content + attestations.
-///
-/// <para>DATA — Moses format. Each language pair is one <c>&lt;a&gt;-&lt;b&gt;.txt.zip</c>
-/// holding TWO parallel, line-aligned plain-text entries
-/// (<c>OpenSubtitles.&lt;a&gt;-&lt;b&gt;.&lt;a&gt;</c> and <c>…&lt;b&gt;</c>): line N of one is the
-/// translation of line N of the other. 10 pairs, ~601M aligned sentence pairs, ~15 GB
-/// compressed — by a wide margin the biggest source in the ladder, so the inner loop is
-/// allocation-lean and the files are streamed line-by-line straight out of the zip
-/// (never extracted, never buffered whole).</para>
-///
-/// <para>EMISSION — the SAME translation arena Tatoeba witnesses. Per aligned pair:
-/// <list type="bullet">
-///   <item>both sentences as content (<see cref="ContentEmitter"/>) — their tier trees
-///   give words / graphemes for free, deduped + converging with every other source;</item>
-///   <item><c>sentenceA —IS_TRANSLATION_OF→ sentenceB</c> (registry-routed; the kind is
-///   SYMMETRIC, so <c>Orient</c> canonicalizes endpoint order onto ONE consensus row);</item>
-///   <item>each sentence <c>—HAS_LANGUAGE→</c> its language entity
-///   (<see cref="LanguageReference.Resolve"/> — the same omni-glottal value every source
-///   resolves into).</item>
-/// </list></para>
-///
-/// <para>PRECEDES — DELIBERATELY NOT EMITTED. The Moses package is flat, alignment-extracted
-/// sentence PAIRS: line N is an alignment, not a position in an ordered subtitle transcript.
-/// The format preserves no document / film / subtitle-stream boundaries and no within-stream
-/// ordering (pairs are extracted and concatenated across the whole collection, with
-/// intra-lingual alternate-upload alignments mixed in per the OPUS README). Consecutive lines
-/// are therefore NOT guaranteed consecutive conversational turns, so a <c>PRECEDES</c> edge
-/// would fabricate structure the data does not carry — skipped, per the "never invent
-/// structure" rule. (Turn adjacency would need the standoff / xml alignment packages, not the
-/// Moses package fetched here.)</para>
-/// </summary>
 public sealed class OpenSubtitlesDecomposer : IDecomposer
 {
     public static readonly Hash128 Source =
@@ -50,9 +18,6 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer
     private static readonly Hash128 LanguageTypeId =
         Hash128.OfCanonical("substrate/type/Language/v1");
 
-    // Sum of the per-pair aligned-pair counts published in PROVENANCE.md (OPUS v2024
-    // Moses headers). Used directly by EstimateUnitCountAsync — counting 1.2 billion
-    // lines to estimate a 601M-pair stream would cost a full extra pass over 15 GB.
     private static readonly (string Pair, long Pairs)[] PairCounts =
     {
         ("ar-en",     87_893_588L),
@@ -69,13 +34,12 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "OpenSubtitlesDecomposer";
-    public int     LayerOrder   => 2;   // needs only unicode(0)+iso(1) — independent of wordnet/omw
+    public int     LayerOrder   => 2;
     public Hash128 TrustClassId => TrustClass;
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        // Rank/trust live in the REGISTRY at attest time — AddRelationType(name) only.
         boot.AddRelationType("IS_TRANSLATION_OF");
         boot.AddRelationType("HAS_LANGUAGE");
         await context.Writer.ApplyAsync(boot.Build(), ct);
@@ -89,7 +53,6 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer
         if (!Directory.Exists(context.EcosystemPath)) yield break;
         int batch = options.BatchSize > 1 ? options.BatchSize : 8192;
 
-        // One pass over each pair zip; deterministic order so intent ids are stable.
         var zips = Directory.EnumerateFiles(context.EcosystemPath, "*.txt.zip")
                             .OrderBy(p => p, StringComparer.Ordinal)
                             .ToList();
@@ -98,9 +61,6 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer
         {
             ct.ThrowIfCancellationRequested();
 
-            // Two parallel line-aligned entries per pair: derive each side's language
-            // from the entry's filename SUFFIX (the part after the last '.') — robust to
-            // region codes that themselves contain '_' (e.g. zh_CN).
             using var zip = ZipFile.OpenRead(zipPath);
             var textEntries = zip.Entries
                 .Where(e => e.Length > 0 && IsTextEntry(e.FullName))
@@ -113,7 +73,7 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer
             Hash128 langA = LanguageReference.Resolve(LangSuffix(entA.FullName));
             Hash128 langB = LanguageReference.Resolve(LangSuffix(entB.FullName));
 
-            string unitStem = Path.GetFileNameWithoutExtension(zipPath); // e.g. "en-es.txt"
+            string unitStem = Path.GetFileNameWithoutExtension(zipPath);
             var b = NewBuilder($"opensubtitles/{unitStem}/0", batch);
             int n = 0, bn = 0;
 
@@ -127,8 +87,6 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer
                 ct.ThrowIfCancellationRequested();
                 string? lineA = await rA.ReadLineAsync(ct);
                 string? lineB = await rB.ReadLineAsync(ct);
-                // Both null = both files ended together (the aligned invariant). If one ends
-                // first the files are not parallel — stop this pair rather than misalign.
                 if (lineA is null || lineB is null) break;
 
                 if (lineA.Length == 0 || lineB.Length == 0) continue;
@@ -137,11 +95,9 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer
                 var idB = ContentEmitter.Emit(b, lineB, Source);
                 if (idA is null || idB is null) continue;
 
-                // Language entities (idempotent with the ISO layer) so HAS_LANGUAGE FK holds.
                 b.AddEntity(new EntityRow(langA, (byte)MetaTier.Meta, LanguageTypeId, Source));
                 b.AddEntity(new EntityRow(langB, (byte)MetaTier.Meta, LanguageTypeId, Source));
 
-                // SYMMETRIC: Orient canonicalizes (A,B)/(B,A) onto one consensus row.
                 b.AddAttestation(RelationTypeRegistry.Attest(
                     idA.Value, "IS_TRANSLATION_OF", idB.Value, Source, SourceTrust.StructuredCorpus));
                 b.AddAttestation(RelationTypeRegistry.Attest(
@@ -163,17 +119,13 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        // Sum of the published per-pair aligned-pair counts (PROVENANCE.md). Exact, free —
-        // line-counting 1.2B lines to estimate would be a wasted pass over the whole corpus.
         long total = 0;
         foreach (var (_, pairs) in PairCounts) total += pairs;
-        return Task.FromResult<long?>(total);   // 600,995,230
+        return Task.FromResult<long?>(total);
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    // The Moses text entries are "OpenSubtitles.<a>-<b>.<a>" / "…<b>"; README / LICENSE are
-    // the only other entries. A text entry is one whose name starts with "OpenSubtitles.".
     private static bool IsTextEntry(string entryName)
     {
         string leaf = entryName;
@@ -182,8 +134,6 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer
         return leaf.StartsWith("OpenSubtitles.", StringComparison.Ordinal);
     }
 
-    // Language suffix = the part of the entry filename after the LAST '.'
-    // (e.g. "OpenSubtitles.en-zh_CN.zh_CN" -> "zh_CN", "…en-es.es" -> "es").
     private static string LangSuffix(string entryName)
     {
         string leaf = entryName;

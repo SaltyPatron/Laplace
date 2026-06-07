@@ -1,11 +1,3 @@
-// engine/core/src/unicode_seed.cpp
-//
-// The single source of truth for the T0 codepoint records. Extracted from
-// laplace_ucd_tables_emit (formerly the only consumer); now also called via
-// the C ABI by the C# UnicodeDecomposer so the DB seed and the perf-cache blob
-// are byte-identical siblings derived from the same in-process compute, not
-// from each other.
-
 #include "laplace/core/unicode_seed.h"
 
 #include <algorithm>
@@ -29,9 +21,8 @@
 
 namespace {
 
-constexpr uint32_t CP_COUNT = LAPLACE_PERFCACHE_RECORD_COUNT;  // 0x110000
+constexpr uint32_t CP_COUNT = LAPLACE_PERFCACHE_RECORD_COUNT;
 
-// ===== short-code → fixed id maps =====
 uint8_t map_gb(const char* s) {
     static const std::unordered_map<std::string, uint8_t> m = {
         {"XX",LAPLACE_GB_OTHER},{"CR",LAPLACE_GB_CR},{"LF",LAPLACE_GB_LF},
@@ -201,7 +192,7 @@ size_t utf8_encode(uint32_t cp, uint8_t o[4]) {
     o[0]=0xF0|(cp>>18); o[1]=0x80|((cp>>12)&0x3F); o[2]=0x80|((cp>>6)&0x3F); o[3]=0x80|(cp&0x3F); return 4;
 }
 
-}  // namespace
+}
 
 extern "C" int laplace_unicode_seed_compute(const char* ucdxml_path,
                                             const char* ducet_path,
@@ -216,9 +207,6 @@ extern "C" int laplace_unicode_seed_compute(const char* ucdxml_path,
     sax.startElement = on_start; sax.endElement = on_end;
     LIBXML_TEST_VERSION
 
-    // Accept either the raw .xml or a .zip containing exactly the .xml — the
-    // UCDXML download ships as a zip; libxml2's xmlReadIO over a zlib stream
-    // would need libzip too, so we shell out to `unzip -p` for the zip case.
     bool is_zip = false;
     {
         size_t n = std::strlen(ucdxml_path);
@@ -226,14 +214,27 @@ extern "C" int laplace_unicode_seed_compute(const char* ucdxml_path,
     }
     int parse_rc;
     if (is_zip) {
+#ifdef _WIN32
+        std::string cmd = std::string("tar -xOf \"") + ucdxml_path + "\"";
+        FILE* p = _popen(cmd.c_str(), "rb");
+#else
         std::string cmd = std::string("unzip -p '") + ucdxml_path + "'";
         FILE* p = popen(cmd.c_str(), "r");
+#endif
         if (!p) { xmlCleanupParser(); return -2; }
         xmlParserCtxtPtr pctx = xmlCreateIOParserCtxt(&sax, &ctx,
             [](void* c, char* buf, int len) -> int { return (int)std::fread(buf, 1, (size_t)len, (FILE*)c); },
+#ifdef _WIN32
+            [](void* c) -> int { return _pclose((FILE*)c); },
+#else
             [](void* c) -> int { return pclose((FILE*)c); },
+#endif
             p, XML_CHAR_ENCODING_NONE);
+#ifdef _WIN32
+        if (!pctx) { _pclose(p); xmlCleanupParser(); return -2; }
+#else
         if (!pctx) { pclose(p); xmlCleanupParser(); return -2; }
+#endif
         parse_rc = xmlParseDocument(pctx);
         xmlFreeParserCtxt(pctx);
     } else {

@@ -1,10 +1,5 @@
 name: _build-deploy (reusable)
 
-# Bring the runner current for a standalone per-source run: engine + extension
-# build/install, app build, Layer-1 migration up (CREATE EXTENSION self-seeds —
-# the extension is the deployment unit). NO nuke here — destructive resets are
-# integration.yml's explicit db-deploy step only.
-
 on:
   workflow_call:
     inputs:

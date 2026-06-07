@@ -3,13 +3,6 @@ using Laplace.Engine.Synthesis;
 
 namespace Laplace.Engine.Synthesis.Tests;
 
-/// <summary>
-/// Cross-language parity for the exact streaming QK kernel
-/// (<see cref="NativeInterop.ComputeQkPairsAboveThreshold"/>). An independent C#
-/// reimplementation of the identical compensated projection + dot-product + threshold
-/// must produce the same pair set, same order (t asc, then s asc), and bit-identical
-/// f64 scores as the native engine kernel.
-/// </summary>
 public class QkPairsThresholdParityTests
 {
     private static void Neumaier(ref double sum, ref double c, double term)
@@ -60,8 +53,8 @@ public class QkPairsThresholdParityTests
     }
 
     [Theory]
-    [InlineData(0.0)]    // all non-zero pairs → full projection/score/order parity
-    [InlineData(1.5)]    // higher floor → threshold-subset parity
+    [InlineData(0.0)]
+    [InlineData(1.5)]
     public unsafe void MatchesManagedReference_Bitwise(double floor)
     {
         const int vocab = 64, dModel = 16, headDim = 8;
@@ -90,8 +83,6 @@ public class QkPairsThresholdParityTests
         }
     }
 
-    /// <summary>The sub-quadratic norm-pruned kernel (used by ingestion) must produce
-    /// output bit-identical to the all-pairs kernel through the C# bindings too.</summary>
     [Theory]
     [InlineData(0.0)]
     [InlineData(1.0)]
@@ -120,11 +111,6 @@ public class QkPairsThresholdParityTests
         }
     }
 
-    /// <summary>The project-once cache (ProjectQkLayer, used by the live ingest's address-book
-    /// projection) must produce output BIT-IDENTICAL to the all-pairs kernel for every GQA head,
-    /// across thresholds including floor=0. This is a determinism/exactness guarantee: the
-    /// substrate does no ANN or approximation, so the cached projection and the reference
-    /// projection are the SAME compensated math and must agree to the bit.</summary>
     [Theory]
     [InlineData(0.0)]
     [InlineData(1.0)]
@@ -148,7 +134,6 @@ public class QkPairsThresholdParityTests
         for (int head = 0; head < nHeads; head++)
         {
             int kvHead = head / queriesPerKv;
-            // All-pairs reference for this head's slice.
             var wqHead = new float[headDim * dModel];
             var wkHead = new float[headDim * dModel];
             Array.Copy(wq, (long)head   * headDim * dModel, wqHead, 0, headDim * dModel);

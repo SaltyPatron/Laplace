@@ -1,111 +1,19 @@
 #!/bin/bash
-# scripts/bootstrap-laplace-runner.sh
-#
-# Layer 0 — one-time root setup (idempotent + reversible) for the Laplace
-# CI runner identity. (three-layer architecture), this script
-# does ONLY what requires root and only what is independent of substrate
-# schema. Database creation, extension install, schema, and seed data are
-# Layer 1 concerns owned by `app/Laplace.Migrations/` (DbUp) and `just`
-# recipes.
-#
-# What this manages (idempotent):
-#   1. System account `laplace-runner` (no home in /home, no shell) + interactive
-#      dev user added to that group so `just *` recipes write to laplace-runner-
-#      owned files (obj/, bin/, /opt/laplace) via group perms — no sudo
-#   2. GitHub Actions runner installed at /var/lib/agents/laplace-runner/actions-runner
-#      (on the dedicated vg-hosting/lv-agents LV — older bootstraps placed it at
-#      /var/lib/laplace-runner on /var; bootstrap_migrate_runner_home performs
-#      the one-time move).
-#   3. systemd service running as laplace-runner
-#   4. PG roles laplace_admin / laplace_app / laplace_readonly
-#   5. pg_ident.conf  → maps OS user laplace-runner (and ahart, for interactive
-#      dev) onto PG role laplace_admin
-#   6. pg_hba.conf    → peer auth for laplace_admin via that map
-#   7. /etc/ld.so.conf.d/laplace.conf → /opt/laplace/lib + the Intel oneAPI
-#      runtime (libsvml/libirc/libimf) registered with the dynamic linker
-#      so engine .so files (and the PG extensions that DT_NEED them) load
-#      under the `postgres` user without LD_LIBRARY_PATH
-#   8. Sweep of stale Laplace + Hartonomous installs from /usr/local/lib +
-#      /usr/lib/postgresql/$PG_VERSION/lib + /usr/share/postgresql/$PG_VERSION/extension
-#      (left behind by prior `sudo cmake --install` runs that used the
-#      old install layout; superseded by the /opt/laplace-staged layout)
-#   9. postgresql.conf extension_control_path + dynamic_library_path →
-#      point the running PG at /opt/laplace/{share,lib}/postgresql/$PG_VERSION
-#      (so `just install-laplace-prefix` lands extensions where CREATE
-#      EXTENSION finds them, without sudo on per-iteration); managed
-#      between marker comments so re-runs replace cleanly instead of
-#      appending duplicates
-#  10. Removal of legacy /etc/sudoers.d/laplace-runner (the prior bounded-
-#      NOPASSWD-for-cmake-install workaround). With CMAKE_INSTALL_PREFIX
-#      = /opt/laplace (laplace-runner-group writable, setgid) plus PG's
-#      extension_control_path / dynamic_library_path pointing there,
-#      the install is sudo-free amendment 2026-05-23.
-#  11. Cleanup of legacy state (ahart-as-superuser, ahart DB, old runner
-#      under /home/ahart/actions-runner)
-#  12. /opt/laplace/external/ — empty cache directory with the right perms
-#      (ahart:laplace-runner setgid 2775). POPULATION is project state, not
-#      machine state — it belongs in the pipeline. scripts/sync-external.sh
-#      (invoked from integration.yml or run by a developer via group membership)
-#      maintains it as non-bare checkouts at .gitmodules-pinned SHAs, idempotent.
-#  13. /var/lib/laplace-runner/.config/gh/hosts.yml — gh CLI auth for the
-#      runner user, derived from $SUDO_USER's existing gh config. Lets the
-#      runner do `gh issue edit` / `gh api` per CLAUDE.md cadence without
-#      manual login (the runner has no shell — no interactive `gh auth login`
-#      is possible).
-#
-# What this does NOT touch (those live in Layer 1 / Justfile):
-#   - The `laplace` database (DbUp creates it via EnsureDatabase)
-#   - The `postgis` / `laplace` extensions (DbUp's migrations do CREATE EXTENSION)
-#   - Any substrate schema (the `laplace` extension's .sql files own that)
-#   - Seed data (just seed-t0)
-#
-# Usage:
-#   sudo scripts/bootstrap-laplace-runner.sh bootstrap   (default — idempotent set-up)
-#   sudo scripts/bootstrap-laplace-runner.sh stripe      (Stripe sandbox env block only)
-#   sudo scripts/bootstrap-laplace-runner.sh status      (show current state)
-#   sudo scripts/bootstrap-laplace-runner.sh reset       (full tear-down)
-#
-# Requires for `bootstrap`:
-#   - gh CLI authenticated for $SUDO_USER as an admin on SaltyPatron/Laplace
-#     (script uses $SUDO_USER's gh config to mint runner tokens)
 
 set -eo pipefail
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 RUNNER_USER="laplace-runner"
 RUNNER_GROUP="laplace-runner"
-# Runner home lives on the dedicated vg-hosting/lv-agents LV (64G), not /var.
-# Older bootstraps placed it at /var/lib/laplace-runner; bootstrap_migrate_runner_home
-# below handles the one-time move from the legacy location.
 RUNNER_HOME="/var/lib/agents/laplace-runner"
 RUNNER_HOME_LEGACY="/var/lib/laplace-runner"
 RUNNER_DIR="$RUNNER_HOME/actions-runner"
 PG_VERSION="18"
-# Substrate cluster lives at /opt/laplace/pgsql-18/data (the custom-built
-# PG 18.3 produced by `just build-deps`, against /opt/laplace GEOS 3.12.2
-# + PROJ 9.x). System apt-installed postgresql@18-main on /etc/postgresql/18/main
-# is stopped + disabled — the substrate must run against the consistent
-# /opt/laplace dep set so liblwgeom's libgeos/libproj transitive references
-# all resolve to one version per ABI. (Two libproj versions in the backend
-# segfault on shutdown: libproj.so.22's UnitOfMeasure destructor double-frees
-# state libproj.so.25 already freed. Verified via core dump 2026-05-24.)
 LAPLACE_PG_PREFIX="/opt/laplace/pgsql-18"
 LAPLACE_PG_DATA="$LAPLACE_PG_PREFIX/data"
 LAPLACE_PG_PORT="5432"
 LAPLACE_PG_SOCKET_DIR="/var/run/postgresql"
 LAPLACE_PG_SERVICE="laplace-postgresql.service"
-# LAN CIDR for remote PG access. Defaults to the dev LAN (192.168.1.0/24) so the
-# workstation can reach the substrate cluster; override LAPLACE_PG_LAN_CIDR= (empty)
-# for localhost-only, or pass another CIDR. When non-empty, listen_addresses
-# becomes '*' and that subnet is trusted in pg_hba. Lives here (not a hand-edited
-# pg_hba) so it survives reboots AND bootstrap re-runs — this script overwrites
-# pg_hba on every run, which is what clobbered the prior manual rule.
 LAPLACE_PG_LAN_CIDR="${LAPLACE_PG_LAN_CIDR:-192.168.1.0/24}"
-# Legacy paths still referenced for the system-PG teardown step; once
-# bootstrap_disable_system_postgresql runs, the substrate stops touching
-# /etc/postgresql/$PG_VERSION/main entirely.
 PG_CONFIG_DIR="/etc/postgresql/$PG_VERSION/main"
 REPO="SaltyPatron/Laplace"
 REPO_URL="https://github.com/$REPO"
@@ -113,12 +21,6 @@ RUNNER_VERSION="v2.334.0"
 RUNNER_TARBALL="actions-runner-linux-x64-${RUNNER_VERSION#v}.tar.gz"
 RUNNER_DL_URL="https://github.com/actions/runner/releases/download/$RUNNER_VERSION/$RUNNER_TARBALL"
 SUDOERS_FILE="/etc/sudoers.d/laplace-runner"
-# Auth configs live OUTSIDE the data dir so developers in the laplace-runner
-# group can read + edit them without sudo. PG enforces 0700 on the data dir
-# itself (hard startup check), so files inside it are unreachable to anyone
-# but the postgres process. PG supports hba_file + ident_file pointing
-# anywhere — we put them at /opt/laplace/pgsql-18/conf/ which is 2750
-# (group laplace-runner, group readable + writable via setgid + group bit).
 LAPLACE_PG_CONF_DIR="$LAPLACE_PG_PREFIX/conf"
 PG_HBA_FILE="$LAPLACE_PG_CONF_DIR/pg_hba.conf"
 PG_IDENT_FILE="$LAPLACE_PG_CONF_DIR/pg_ident.conf"
@@ -131,9 +33,6 @@ LAPLACE_STRIPE_SUCCESS_URL_DEFAULT="${LAPLACE_STRIPE_SUCCESS_URL:-http://127.0.0
 LAPLACE_STRIPE_CANCEL_URL_DEFAULT="${LAPLACE_STRIPE_CANCEL_URL:-http://127.0.0.1:5187/billing/cancel}"
 LAPLACE_BILLING_CURRENCY_DEFAULT="${LAPLACE_BILLING_CURRENCY:-usd}"
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 green()  { printf '\033[0;32m%s\033[0m\n' "$1"; }
 yellow() { printf '\033[0;33m%s\033[0m\n' "$1"; }
 red()    { printf '\033[0;31m%s\033[0m\n' "$1"; }
@@ -175,17 +74,10 @@ EOF
 }
 
 mint_gh_token() {
-    # Mint a registration or remove token via gh CLI run as the invoking user.
-    # \$1 = "registration-token" or "remove-token"
     local kind="$1"
     sudo -u "$GH_SUDO_USER" -H gh api -X POST \
         "repos/$REPO/actions/runners/$kind" --jq '.token' 2>/dev/null || true
 }
-
-# ---------------------------------------------------------------------------
-# bootstrap_*  — each step is its own function so order is obvious + reset
-#                can call the inverse in reverse order
-# ---------------------------------------------------------------------------
 
 bootstrap_user() {
     say "Ensure system account: $RUNNER_USER"
@@ -205,20 +97,6 @@ bootstrap_user() {
     chmod 750 "$RUNNER_HOME"
     green "✓ $RUNNER_HOME owned by $RUNNER_USER:$RUNNER_GROUP (mode 750)"
 
-    # Add the interactive dev user (GH_SUDO_USER — typically `ahart`) to
-    # the laplace-runner group. /opt/laplace is laplace-runner:laplace-runner
-    # mode 2775 setgid. Group membership gives the dev user read+write+execute
-    # for almost all iteration: just db-up, just test-app, sync-external.sh,
-    # cmake --build, running binaries from build/, psql against the deployed
-    # extensions, etc.
-    #
-    # EXCEPTION: `cmake --install` calls chmod, which requires being the file
-    # owner (not just group write — Linux chmod is unconditionally owner-only
-    # by POSIX). Local installs as the dev user must use `sudo -u laplace-runner
-    # cmake --install build`. CI runs as laplace-runner natively so its installs
-    # work without any sudo.
-    #
-    # Idempotent — adding to a group you're already in is a no-op.
     if id "$GH_SUDO_USER" >/dev/null 2>&1; then
         if id -nG "$GH_SUDO_USER" | tr ' ' '\n' | grep -qx "$RUNNER_GROUP"; then
             green "✓ $GH_SUDO_USER already in $RUNNER_GROUP group"
@@ -232,13 +110,6 @@ bootstrap_user() {
 }
 
 bootstrap_build_environment() {
-    # System packages + /opt/laplace prefix for the custom-built dependency
-    # chain (Epic B: PostgreSQL + PostGIS + PROJ + GEOS + GDAL + Eigen +
-    # Spectra + BLAKE3 as git submodules, built with Intel icx/icpx per
-    #
-    # Idempotent — apt install is a no-op when packages are present;
-    # mkdir -p + chown are safe to re-run.
-
     say "Build environment: apt build-deps + /opt/laplace prefix"
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -252,49 +123,18 @@ bootstrap_build_environment() {
         libjpeg-turbo8-dev libnetcdf-dev libhdf5-dev libexpat1-dev \
         >/dev/null
     green "✓ Build-deps apt packages present"
-    # sqlite3 (binary, not just libsqlite3-dev) is required by PROJ's CMake
-    # to populate proj.db during configure (PROJ 6+ replaced datumgrid files
 
-    # Custom-build install prefix. Owned by laplace-runner (the CI runner's
-    # identity) with laplace-runner as the group, mode 2775 (setgid + g+w):
-    #   - CI's `cmake --install` runs as laplace-runner → it owns the install
-    #     destinations → `chmod` calls in install rules succeed (chmod is
-    #     owner-only; group write isn't enough).
-    #   - Developers (ahart) in the laplace-runner group can READ + WRITE
-    #     files in /opt/laplace via group permissions (setgid keeps new
-    #     files' group as laplace-runner regardless of creator). They
-    #     CANNOT chmod laplace-runner-owned files. For local installs
-    #     (cmake --install), developers must `sudo -u laplace-runner cmake
-    #     --install build` OR use a per-user CMAKE_INSTALL_PREFIX.
-    # The earlier shape (chown to $GH_SUDO_USER) caused the chmod-by-non-owner
-    # collision when CI installed over ahart-owned files; flipped to
-    # laplace-runner ownership per the 2026-05-24 alignment.
     mkdir -p /opt/laplace
-    # /opt/laplace must be laplace-runner-owned with setgid 2775 (group
-    # laplace-runner inherits to new entries) and NO sticky bit, so that
-    # any group member can unlink files regardless of owner. That property —
-    # plus the pre-wipe install(CODE) block at the top of the project's
-    # CMakeLists.txt — makes `cmake --install build` work for both ahart
-    # (local) and laplace-runner (CI) without sudo and without ownership
-    # coordination. The pre-wipe deletes existing files; cmake then creates
-    # fresh files owned by the installer; the post-copy chmod() succeeds
-    # because the installer owns its own newly-created files.
     chown "$RUNNER_USER:$RUNNER_GROUP" /opt/laplace
     chmod 2775 /opt/laplace
     green "✓ /opt/laplace: $RUNNER_USER:$RUNNER_GROUP mode 2775 (setgid, no sticky)"
 }
 
 bootstrap_migrate_runner_home() {
-    # The runner was originally placed at /var/lib/laplace-runner — which is
-    # on the /var LV (cramped). vg-hosting/lv-agents is mounted at
-    # /var/lib/agents (64G dedicated, mostly empty) and was set up precisely
-    # for this kind of agent installation. Move the runner home to its
-    # rightful drive. Idempotent — no-op once migrated.
     say "Migrate runner home: $RUNNER_HOME_LEGACY -> $RUNNER_HOME (dedicated lv-agents LV)"
 
     if [ ! -d "$RUNNER_HOME_LEGACY" ] || [ -z "$(ls -A "$RUNNER_HOME_LEGACY" 2>/dev/null)" ]; then
         green "✓ No legacy $RUNNER_HOME_LEGACY content to migrate"
-        # Still ensure the new home exists, owned correctly.
         mkdir -p "$RUNNER_HOME"
         chown -R "$RUNNER_USER:$RUNNER_GROUP" "$RUNNER_HOME"
         chmod 750 "$RUNNER_HOME"
@@ -303,13 +143,11 @@ bootstrap_migrate_runner_home() {
 
     if [ ! -d /var/lib/agents ] || ! mountpoint -q /var/lib/agents; then
         yellow "  /var/lib/agents not mounted — skipping migration (keeping runner at $RUNNER_HOME_LEGACY)"
-        # Adjust globals so the rest of the bootstrap uses the legacy path.
         RUNNER_HOME="$RUNNER_HOME_LEGACY"
         RUNNER_DIR="$RUNNER_HOME/actions-runner"
         return
     fi
 
-    # Stop the runner service while we move things.
     local runner_was_active=0
     if systemctl is-active --quiet "$RUNNER_SERVICE" 2>/dev/null; then
         runner_was_active=1
@@ -317,22 +155,17 @@ bootstrap_migrate_runner_home() {
         echo "  stopped $RUNNER_SERVICE for migration"
     fi
 
-    # Rsync everything (preserves hardlinks, xattrs, ownership).
     mkdir -p "$RUNNER_HOME"
     rsync -aHAX "$RUNNER_HOME_LEGACY/" "$RUNNER_HOME/"
     chown -R "$RUNNER_USER:$RUNNER_GROUP" "$RUNNER_HOME"
     chmod 750 "$RUNNER_HOME"
     green "✓ Copied $RUNNER_HOME_LEGACY -> $RUNNER_HOME"
 
-    # Update the OS user's home-dir metadata to the new location.
     if [ "$(getent passwd "$RUNNER_USER" | cut -d: -f6)" != "$RUNNER_HOME" ]; then
         usermod -d "$RUNNER_HOME" "$RUNNER_USER"
         green "✓ usermod -d $RUNNER_HOME $RUNNER_USER"
     fi
 
-    # The systemd unit references the OLD path via WorkingDirectory + ExecStart.
-    # The runner's svc.sh writes these into /etc/systemd/system/<unit>; rewrite
-    # the paths in place (between the unit's [Service] lines).
     local unit_file="/etc/systemd/system/$RUNNER_SERVICE"
     if [ -f "$unit_file" ] && grep -q "$RUNNER_HOME_LEGACY" "$unit_file"; then
         sed -i "s|$RUNNER_HOME_LEGACY|$RUNNER_HOME|g" "$unit_file"
@@ -340,8 +173,6 @@ bootstrap_migrate_runner_home() {
         green "✓ Rewrote $unit_file: $RUNNER_HOME_LEGACY -> $RUNNER_HOME"
     fi
 
-    # Archive the legacy tree (don't blow it away — keeps a fallback for a
-    # single bootstrap iteration in case the new location has any issue).
     local archive="${RUNNER_HOME_LEGACY}.pre-migration-$(date +%Y%m%d-%H%M%S)"
     mv "$RUNNER_HOME_LEGACY" "$archive"
     green "✓ Archived legacy tree to $archive (rm -rf when satisfied)"
@@ -421,12 +252,6 @@ bootstrap_runner_install() {
 bootstrap_runner_register() {
     say "Register runner with $REPO_URL"
 
-    # Idempotency check — the actions-runner writes a `.runner` file (its
-    # config + credentials) when config.sh succeeds. If that file exists,
-    # this host is already registered with GitHub and re-running config.sh
-    # would fail with "Cannot configure: already configured". Use the
-    # presence of .runner as the canonical idempotency signal, plus the
-    # systemd unit file as a second guard.
     if [ -f "$RUNNER_DIR/.runner" ] \
        || [ -f "/etc/systemd/system/$RUNNER_SERVICE" ]; then
         green "✓ Runner already registered (.runner or service unit present) — skipping config.sh"
@@ -453,16 +278,10 @@ bootstrap_runner_register() {
 }
 
 bootstrap_runner_oom_guard() {
-    # The runner listener must survive job OOMs: on 2026-06-05 the kernel
-    # picked the runner cgroup's listener during a job's memory spike and the
-    # runner stayed dead for 8h with the queue stranded. Drop-in sets the
-    # SERVICE (listener) to a protected score; job processes keep default 0,
-    # so the kernel kills the job, not the runner.
     say "Runner OOM guard: OOMScoreAdjust drop-in for $RUNNER_SERVICE"
     local dropin_dir="/etc/systemd/system/$RUNNER_SERVICE.d"
     mkdir -p "$dropin_dir"
     cat > "$dropin_dir/10-oom-guard.conf" <<'EOF'
-# Managed by bootstrap-laplace-runner.sh (bootstrap_runner_oom_guard).
 [Service]
 OOMScoreAdjust=-800
 Restart=always
@@ -476,21 +295,6 @@ bootstrap_runner_oom_guard
 
 
 bootstrap_runner_job_env() {
-    # Machine-static job environment → the runner's .env file. The GH runner
-    # loads KEY=VALUE lines from $RUNNER_DIR/.env into EVERY job it executes —
-    # the idiomatic home for machine truth (oneAPI toolchain roots + runtime
-    # lib paths). Workflows then stop re-sourcing setvars.sh per job;
-    # .github/actions/setup-laplace-env keeps a conditional fallback for
-    # runners bootstrapped before this block, and continues to own the
-    # WORKSPACE-relative env (build-tree LD_LIBRARY_PATH prepend) which a
-    # machine-level file cannot express. PATH is deliberately NOT written
-    # here (the runner manages its own PATH; toolchain compilers resolve via
-    # the cmake toolchain file / setvars fallback in the build job).
-    # Idempotent — same begin/end marker pattern as the cluster config.
-    # Two-DB law: CI-box test runs target the CI database, never laplace-dev
-    # (2026-06-05: UnicodeSeedIntegrationTests defaulted to laplace-dev and CI
-    # wrote the unicode seed into the DEV db every run — caught when another
-    # agent dropped laplace-dev mid-run).
     grep -q '^LAPLACE_TEST_DB=' "$RUNNER_DIR/.env" 2>/dev/null || echo 'LAPLACE_TEST_DB=laplace' >> "$RUNNER_DIR/.env"
     say "Runner job env: oneAPI machine-static vars → $RUNNER_DIR/.env"
     if [ ! -d "$RUNNER_DIR" ] || [ ! -d /opt/intel/oneapi ]; then
@@ -504,35 +308,22 @@ bootstrap_runner_job_env() {
     sed -i -e "/$marker_begin/,/$marker_end/d" "$envfile"
     {
         echo "$marker_begin"
-        # Clean subshell (env -i): the captured values are purely what
-        # setvars.sh sets, uncontaminated by the bootstrap caller's env.
         env -i bash -c 'source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1; printenv' \
           | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|PKG_CONFIG_PATH|LD_LIBRARY_PATH)='
         echo "$marker_end"
     } >> "$envfile"
     chown "$RUNNER_USER:$RUNNER_GROUP" "$envfile"
-    # The runner reads .env at service start — restart to apply.
     systemctl restart "$RUNNER_SERVICE" 2>/dev/null || true
     green "✓ runner .env oneAPI block written (service restarted to load it)"
 }
 
 bootstrap_runner_model_env() {
-    # Machine-static model snapshot dirs → the runner's .env (same channel as
-    # the oneAPI block above). model-pipeline.yml resolves its model dir as
-    # ${MODEL_DIR_INPUT:-$LAPLACE_TINYLLAMA_DIR} — workflow input wins, else
-    # THIS convention; with neither set the ingest rung dies on a missing
-    # argument (run 26965821821, 2026-06-04: exit 2 at 18:57:21Z). Paths are
-    # RESOLVED HERE at bootstrap time — newest snapshot that actually carries
-    # weights, same rule as scripts/e2e-substrate.sh newest_snapshot — never
-    # a hardcoded snapshot SHA in source. Re-run the bootstrap after pulling
-    # a new snapshot to refresh the values.
-    # Idempotent — same begin/end marker pattern as the oneAPI block.
     say "Runner job env: model snapshot dirs → $RUNNER_DIR/.env"
     if [ ! -d "$RUNNER_DIR" ]; then
         yellow "runner dir missing — skipping model dirs .env block"
         return 0
     fi
-    newest_weighted_snapshot() { # <models--ORG--NAME glob under /vault/models>
+    newest_weighted_snapshot() {
         local fam snap
         for fam in /vault/models/$1; do
             [ -d "$fam/snapshots" ] || continue
@@ -561,16 +352,11 @@ bootstrap_runner_model_env() {
         echo "$marker_end"
     } >> "$envfile"
     chown "$RUNNER_USER:$RUNNER_GROUP" "$envfile"
-    # The runner reads .env at service start — restart to apply.
     systemctl restart "$RUNNER_SERVICE" 2>/dev/null || true
     green "✓ runner .env model dirs block written (service restarted to load it)"
 }
 
 bootstrap_runner_stripe_env() {
-    # Machine-static Stripe sandbox env for runner jobs and service startup.
-    # Writes a managed block into $RUNNER_DIR/.env. If LAPLACE_STRIPE_API_KEY is
-    # provided at invocation time, it is written; otherwise only non-secret vars
-    # are managed and key injection is left to local user env bootstrap.
     say "Runner job env: Stripe sandbox vars → $RUNNER_DIR/.env"
     if [ ! -d "$RUNNER_DIR" ]; then
         yellow "runner dir missing — skipping Stripe .env block"
@@ -606,7 +392,6 @@ bootstrap_runner_service() {
     local unit_file="/etc/systemd/system/$RUNNER_SERVICE"
     if [ -f "$unit_file" ]; then
         green "✓ Service unit $unit_file already exists — skipping svc.sh install"
-        # Ensure it's enabled + running.
         systemctl enable "$RUNNER_SERVICE" >/dev/null 2>&1 || true
         if systemctl is-active "$RUNNER_SERVICE" >/dev/null 2>&1; then
             green "✓ Service already active"
@@ -623,23 +408,11 @@ bootstrap_runner_service() {
     (cd "$RUNNER_DIR" && ./svc.sh status | head -3) || true
 }
 
-# ---------------------------------------------------------------------------
-# bootstrap_disable_system_postgresql — stop + disable apt-installed
-# postgresql@$PG_VERSION-main so the substrate doesn't share /var/run/postgresql
-# with another cluster. Required because the substrate cluster (laplace-postgresql)
-# binds /var/run/postgresql/.s.PGSQL.$LAPLACE_PG_PORT, which the system unit
-# already owns by default. Idempotent — silent no-op if the system unit is
-# already disabled or not installed.
-# ---------------------------------------------------------------------------
 bootstrap_disable_system_postgresql() {
     say "Disable system postgresql@$PG_VERSION-main (substrate uses /opt/laplace cluster only)"
     local sys_unit="postgresql@${PG_VERSION}-main.service"
     local sys_wrapper="postgresql.service"
 
-    # systemctl list-unit-files only shows unit TEMPLATES (postgresql@.service),
-    # not INSTANCES (postgresql@18-main.service). Probe the instance via
-    # status — exit 0/3 means "known to systemd"; exit 4 means "not loaded."
-    # `|| sys_status=$?` keeps set -e from killing us when status returns 3.
     local sys_status=0
     systemctl status "$sys_unit" --no-pager >/dev/null 2>&1 || sys_status=$?
     if [ $sys_status -eq 4 ]; then
@@ -647,9 +420,6 @@ bootstrap_disable_system_postgresql() {
         return
     fi
 
-    # Stop forcefully. system PG owns /var/run/postgresql/.s.PGSQL.5432 by
-    # default, and the substrate cluster (same port) collides + fails if
-    # the system unit isn't down BEFORE we start ours.
     if systemctl is-active --quiet "$sys_unit"; then
         systemctl stop "$sys_unit"
         green "✓ Stopped $sys_unit"
@@ -664,36 +434,12 @@ bootstrap_disable_system_postgresql() {
         green "✓ $sys_unit already disabled (or not enableable)"
     fi
 
-    # The postgresql.service wrapper auto-starts all postgresql@*-main units
-    # on boot. Mask it so socket activation + boot-time start can't bring
-    # system PG back behind our cluster's back.
     if systemctl is-enabled --quiet "$sys_wrapper" 2>/dev/null; then
         systemctl mask "$sys_wrapper" >/dev/null 2>&1 || true
         green "✓ Masked $sys_wrapper wrapper (prevents boot-time auto-start)"
     fi
 }
 
-# ---------------------------------------------------------------------------
-# bootstrap_laplace_pg_cluster — provision + start the /opt/laplace/pgsql-18
-# substrate cluster as a systemd unit running as laplace-runner.
-#
-# Lays down (idempotent at every step):
-#   1. initdb $LAPLACE_PG_DATA as laplace-runner if data dir not yet a cluster
-#   2. postgresql.conf: port 5432, listen_addresses=localhost,
-#      unix_socket_directories=/var/run/postgresql,/tmp,
-#      extension_control_path + dynamic_library_path → /opt/laplace,
-#      logging to /opt/laplace/pgsql-18/log/
-#   3. pg_hba.conf: peer auth via laplace_map for local connections
-#   4. pg_ident.conf: laplace_map maps OS users (laplace-runner, ahart) → laplace_admin
-#   5. systemd unit /etc/systemd/system/laplace-postgresql.service
-#   6. /var/run/postgresql ownership so laplace-runner can bind the socket
-#   7. systemctl daemon-reload + enable + start + wait for ready
-#
-# The cluster owns the /var/run/postgresql socket at port 5432 — same shape
-# as the system cluster it replaces, so existing `psql -d laplace -U laplace_admin`
-# invocations (DbUp, Justfile, pg_regress) Just Work without per-command
-# PGHOST/PGPORT overrides.
-# ---------------------------------------------------------------------------
 bootstrap_laplace_pg_cluster() {
     say "Provision /opt/laplace/pgsql-18 cluster (substrate runtime PG)"
 
@@ -703,12 +449,8 @@ bootstrap_laplace_pg_cluster() {
     fi
 
     install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_PREFIX/log"
-    # 2775 conf dir: setgid + group laplace-runner + group writable.
-    # Developers in the laplace-runner group (ahart) can read + edit
-    # pg_hba.conf / pg_ident.conf without sudo.
     install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_CONF_DIR"
 
-    # initdb if not yet a cluster. Detect by PG_VERSION marker file.
     if [ ! -f "$LAPLACE_PG_DATA/PG_VERSION" ]; then
         if [ -d "$LAPLACE_PG_DATA" ] && [ -n "$(ls -A "$LAPLACE_PG_DATA" 2>/dev/null)" ]; then
             yellow "  $LAPLACE_PG_DATA exists + non-empty but no PG_VERSION — bailing rather than wipe"
@@ -727,22 +469,12 @@ bootstrap_laplace_pg_cluster() {
         green "✓ Cluster already initialized at $LAPLACE_PG_DATA"
     fi
 
-    # Ensure the data dir is fully owned by $RUNNER_USER. PG refuses to
-    # start when the data dir contents have mixed ownership (a prior
-    # interactive `pg_ctl start` as a different user can leave files
-    # behind owned by that user). Chown is idempotent on a correctly-
-    # owned tree.
     chown -R "$RUNNER_USER:$RUNNER_GROUP" "$LAPLACE_PG_DATA"
     chmod 0700 "$LAPLACE_PG_DATA"
     green "✓ $LAPLACE_PG_DATA owned by $RUNNER_USER (mode 0700)"
 
-    # Configure postgresql.conf. Idempotent — strip prior managed block,
-    # then append fresh values. Same begin/end marker pattern as
-    # bootstrap_pg_extension_paths.
     local marker_begin="# >>> laplace-runner managed: cluster config >>>"
     local marker_end="# <<< laplace-runner managed: cluster config <<<"
-    # localhost by default; if a LAN CIDR is configured, listen on all
-    # interfaces so the subnet (scoped in pg_hba below) can reach the cluster.
     local pg_listen="localhost"
     [ -n "$LAPLACE_PG_LAN_CIDR" ] && pg_listen="*"
     sudo -u "$RUNNER_USER" sed -i \
@@ -762,87 +494,48 @@ bootstrap_laplace_pg_cluster() {
     sudo -u "$RUNNER_USER" tee -a "$PG_POSTGRESQL_CONF" >/dev/null <<EOF
 
 $marker_begin
-# Substrate cluster — written by scripts/bootstrap-laplace-runner.sh.
-# Owns /var/run/postgresql/.s.PGSQL.$LAPLACE_PG_PORT so existing
-# psql -d laplace -U laplace_admin invocations connect here.
 port = $LAPLACE_PG_PORT
 listen_addresses = '$pg_listen'
 unix_socket_directories = '$LAPLACE_PG_SOCKET_DIR,/tmp'
-# Extension paths — same shape as the prior system-PG bootstrap.
-# PG 18 appends '/extension' to each custom extension_control_path entry,
-# so this is the SHAREDIR, not the extension subdir.
 extension_control_path = '/opt/laplace/share/postgresql/$PG_VERSION:\$system'
 dynamic_library_path = '\$libdir:/opt/laplace/lib/postgresql/$PG_VERSION'
-# Logging — collect to /opt/laplace/pgsql-18/log/ so logs survive the
-# systemd unit's stdout/stderr handling. log_file_mode 0640 + dir owned
-# by laplace-runner with group laplace-runner makes logs group-readable;
-# any dev in the laplace-runner group (ahart) tails without sudo.
 logging_collector = on
 log_directory = '$LAPLACE_PG_PREFIX/log'
 log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
 log_file_mode = 0640
-# hba_file + ident_file outside the 0700 data dir so the
-# laplace-runner group can read+edit them without sudo.
 hba_file = '$PG_HBA_FILE'
 ident_file = '$PG_IDENT_FILE'
 
-# --- Performance tuning — substrate bulk-ingest + PostGIS (125 GB RAM, 6 cores, NVMe).
-# In the managed block so it is reproduced idempotently on every bootstrap; tune the
-# values here (source of truth), never via ALTER SYSTEM on the live cluster.
-# Memory
 shared_buffers = 32GB
 effective_cache_size = 96GB
-maintenance_work_mem = 8GB          # fast CREATE INDEX — the bulk index-build lever
+maintenance_work_mem = 8GB
 work_mem = 256MB
-# WAL + checkpoints: bulk ingest emits heavy WAL; widen the ceiling, stretch checkpoints
 wal_compression = on
 max_wal_size = 32GB
 min_wal_size = 2GB
 checkpoint_timeout = 30min
 checkpoint_completion_target = 0.9
 wal_buffers = 64MB
-# fsync stays ON (no corruption). synchronous_commit=off only defers the WAL flush —
-# at most the last <1s of committed txns are lost on a crash, never corruption — and
-# ingestion is content-addressed + idempotent (re-runnable), so this is free throughput.
 synchronous_commit = off
-# Planner + IO for NVMe
 random_page_cost = 1.1
 effective_io_concurrency = 200
 maintenance_io_concurrency = 200
 default_statistics_target = 200
-# Parallelism (6 cores), incl. parallel CREATE INDEX
 max_worker_processes = 8
 max_parallel_workers = 6
 max_parallel_maintenance_workers = 4
 max_parallel_workers_per_gather = 4
-# Huge pages if the OS has them, else fall back (safe)
 huge_pages = try
 $marker_end
 EOF
     green "✓ Wrote substrate cluster config to $PG_POSTGRESQL_CONF"
 
-    # pg_hba.conf — overwrite with our managed block ONLY. PG processes
-    # rules top-to-bottom and the FIRST match wins, so any initdb default
-    # `local all all peer` rule above ours would be matched before the
-    # mapped `local all laplace_admin peer map=laplace_map` rule and
-    # peer auth would fail (OS user laplace-runner != PG role laplace_admin
-    # without the map). Easier than ordering preservation: own the file
-    # entirely. This cluster is the substrate's, not a generic PG instance.
     sudo -u "$RUNNER_USER" tee "$PG_HBA_FILE" >/dev/null <<EOF
-# Substrate cluster auth — managed by scripts/bootstrap-laplace-runner.sh.
-# Do not hand-edit; re-run \`sudo just bootstrap\` to regenerate.
-#
-# laplace_map = OS users (laplace-runner, ahart, postgres) → PG role
-# laplace_admin. Mapping defined in pg_ident.conf.
 local   all             laplace_admin                           peer map=laplace_map
 local   all             all                                     peer
 host    all             all             127.0.0.1/32            trust
 host    all             all             ::1/128                 trust
 EOF
-    # Optional LAN remote access (e.g. a dev workstation). Trust within the
-    # configured private subnet — same posture as the localhost trust above.
-    # Empty by default (localhost-only). Appended here so it's re-applied on
-    # every bootstrap that rewrites this file (no more hand-edits getting lost).
     if [ -n "$LAPLACE_PG_LAN_CIDR" ]; then
         printf 'host    all             all             %-22s trust\n' "$LAPLACE_PG_LAN_CIDR" \
             | sudo -u "$RUNNER_USER" tee -a "$PG_HBA_FILE" >/dev/null
@@ -851,11 +544,9 @@ EOF
     sudo -u "$RUNNER_USER" chmod 0600 "$PG_HBA_FILE"
     green "✓ Wrote substrate cluster pg_hba.conf (managed block as full file)"
 
-    # pg_ident.conf — laplace_map.
     if ! sudo -u "$RUNNER_USER" grep -q "^laplace_map" "$PG_IDENT_FILE" 2>/dev/null; then
         sudo -u "$RUNNER_USER" tee -a "$PG_IDENT_FILE" >/dev/null <<EOF
 
-# laplace_map — OS users authorized to connect as laplace_admin via peer auth.
 laplace_map   laplace-runner   laplace_admin
 laplace_map   ahart            laplace_admin
 laplace_map   postgres         laplace_admin
@@ -865,29 +556,10 @@ EOF
         green "✓ laplace_map already present in $PG_IDENT_FILE"
     fi
 
-    # /var/run/postgresql needs to be writable by laplace-runner (the systemd
-    # unit's User=). Default ownership is postgres:postgres; setgid + group
-    # add laplace-runner so both can write without sudo gymnastics. NOTE: this
-    # only fixes the CURRENT boot — the dir is tmpfs and reverts to
-    # postgres:postgres on reboot. The durable, per-start re-assertion is the
-    # unit's `ExecStartPre=+install -d` below; this line just makes the dir
-    # correct immediately so the start later in THIS bootstrap run succeeds.
     install -d -m 2775 -o postgres -g "$RUNNER_GROUP" "$LAPLACE_PG_SOCKET_DIR" 2>/dev/null \
         || install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_SOCKET_DIR"
     green "✓ $LAPLACE_PG_SOCKET_DIR writable by $RUNNER_GROUP"
 
-    # systemd unit. Type=simple — our custom /opt/laplace/pgsql-18/bin/postgres
-    # was built WITHOUT --with-systemd (it's the from-source build pinned to
-    # the upstream REL_18_0 tag; sd_notify support requires explicit configure
-    # flag which we don't pass). Without --with-systemd, postgres has no
-    # sd_notify READY=1 to send → Type=notify deadlocks → systemd kills it
-    # with status=1.
-    # With logging_collector=on, postgres forks the log collector child but
-    # doesn't itself daemonize — the main process stays as the postmaster
-    # listening on the unix socket. Type=simple correctly tracks that.
-    # ExecStart inherits the kernel's ld.so.cache (via bootstrap_engine_lib_path)
-    # so /opt/laplace/{geos,proj,gdal}/lib take precedence — no
-    # Environment=LD_LIBRARY_PATH needed.
     local unit_file="/etc/systemd/system/$LAPLACE_PG_SERVICE"
     cat > "$unit_file" <<EOF
 [Unit]
@@ -900,14 +572,6 @@ ConditionPathExists=$LAPLACE_PG_DATA/PG_VERSION
 Type=simple
 User=$RUNNER_USER
 Group=$RUNNER_GROUP
-# $LAPLACE_PG_SOCKET_DIR is on tmpfs — wiped every boot and recreated by
-# /usr/lib/tmpfiles.d/postgresql-common.conf as postgres:postgres, which
-# the User=$RUNNER_USER postmaster cannot write → "FATAL: could not create
-# lock file .s.PGSQL.$LAPLACE_PG_PORT.lock: Permission denied". Re-assert
-# group+setgid as root (the '+' prefix runs ExecStartPre as root regardless
-# of User=) before each start, so the socket dir is correct on every boot
-# WITHOUT re-running bootstrap. install -d is idempotent (chowns/chmods an
-# existing dir too).
 ExecStartPre=+/usr/bin/install -d -m 2775 -o postgres -g $RUNNER_GROUP $LAPLACE_PG_SOCKET_DIR
 ExecStart=$LAPLACE_PG_PREFIX/bin/postgres -D $LAPLACE_PG_DATA
 ExecReload=/bin/kill -HUP \$MAINPID
@@ -915,9 +579,6 @@ KillMode=mixed
 KillSignal=SIGINT
 TimeoutSec=120
 Restart=on-failure
-# Group-readable logs so developers can tail them without sudo (postgres
-# forks the log collector before this UMask takes effect for already-
-# created log files; the bootstrap also chmods the log dir g+r).
 UMask=0027
 
 [Install]
@@ -927,12 +588,6 @@ EOF
     systemctl daemon-reload
     green "✓ Installed $unit_file"
 
-    # Enable UNCONDITIONALLY — the unit must come back on every reboot
-    # regardless of whether it happens to be active right now. (The prior
-    # `if active → restart` branch skipped enable, so a unit that was
-    # manually started before bootstrap ran never got its boot symlink.)
-    # reset-failed clears any prior crash-loop latch ("Start request repeated
-    # too quickly") so the start/restart below isn't refused.
     systemctl enable "$LAPLACE_PG_SERVICE" >/dev/null 2>&1 || true
     systemctl reset-failed "$LAPLACE_PG_SERVICE" 2>/dev/null || true
     if systemctl is-active --quiet "$LAPLACE_PG_SERVICE" 2>/dev/null; then
@@ -943,8 +598,6 @@ EOF
         green "✓ Enabled + started $LAPLACE_PG_SERVICE"
     fi
 
-    # Wait for the socket to appear (Type=notify makes systemctl start block
-    # until ready, but defensively poll the socket too).
     local tries=0
     while [ $tries -lt 30 ]; do
         if [ -S "$LAPLACE_PG_SOCKET_DIR/.s.PGSQL.$LAPLACE_PG_PORT" ]; then
@@ -959,11 +612,6 @@ EOF
     return 1
 }
 
-# Assert the managed performance tuning is actually LIVE after the (re)start, so bootstrap
-# never reports success on an untuned cluster. Catches exactly what bit us: config edited
-# but never applied (no restart), a stale postgresql.auto.conf overriding postgresql.conf,
-# or the wrong cluster. Memory values are compared by BYTES so unit formatting (32GB vs
-# 32768MB) can't false-fail; the catch-all asserts nothing is left pending_restart.
 validate_pg_tuning() {
     say "Validate cluster tuning is live (post-restart)"
     local vbad=0 nm live ok pend
@@ -985,8 +633,6 @@ WITH want(name, expected, mode) AS (VALUES
   ('synchronous_commit','off','eq'), ('checkpoint_timeout','30min','eq'),
   ('wal_compression','on','enabled'), ('max_parallel_maintenance_workers','4','eq'),
   ('effective_io_concurrency','200','eq'), ('huge_pages','try','eq'))
--- 'mem' compares by bytes (unit formatting can't false-fail); 'enabled' = any non-off
--- value (wal_compression 'on' resolves to the default method 'pglz'); 'eq' = literal.
 SELECT w.name, current_setting(w.name),
        CASE w.mode
          WHEN 'mem'     THEN pg_size_bytes(current_setting(w.name)) = pg_size_bytes(w.expected)
@@ -1015,29 +661,6 @@ PG_EOF
 
 bootstrap_pg_roles() {
     say "Ensure PG roles: laplace_admin (SUPERUSER) / laplace_app / laplace_readonly"
-    # laplace_admin is a SUPERUSER. Rationale:
-    #   * postgis is not a trusted extension — CREATE EXTENSION postgis
-    #     requires SUPERUSER (PG docs). Without it laplace_admin can't
-    #     install postgis, so we'd need either a SECURITY DEFINER wrapper
-    #     (laplace_priv approach, accumulates per-DB state that dies with
-    #     `just db-nuke`) or a custom template DB (more moving parts).
-    #     Both are workarounds for the constraint that laplace_admin isn't
-    #     a superuser.
-    #   * For trusted extensions, contained-object ownership stays with
-    #     the bootstrap superuser unless the install script explicitly
-    #     does `ALTER ... OWNER TO`. Same problem class.
-    #   * Standard PG pattern for a dedicated-cluster substrate is for the
-    #     operator role to be a superuser. ahart already has OS sudo on
-    #     this host (it's the dev box); making laplace_admin a SUPERUSER
-    #     doesn't widen the attack surface — it just stops fighting PG's
-    #     ownership / privilege model. AWS RDS uses rds_superuser, GCP
-    #     Cloud SQL uses cloudsqlsuperuser; both are the same pattern.
-    # laplace_app + laplace_readonly remain ordinary roles for future
-    # least-privilege application + analyst access.
-    # Connects to our substrate cluster via peer auth as laplace_admin
-    # (initdb created the cluster with laplace_admin as the bootstrap
-    # superuser; pg_hba + pg_ident grant ahart/laplace-runner OS users
-    # peer access to that role).
     sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
         -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" \
         -d postgres -U laplace_admin -v ON_ERROR_STOP=1 <<'PG_EOF'
@@ -1078,19 +701,6 @@ bootstrap_pg_legacy_cleanup() {
 bootstrap_pg_database_and_postgis() {
     say "Ensure 'laplace' database owned by laplace_admin"
 
-    # Single responsibility: ensure the laplace DB exists and is owned
-    # by laplace_admin. That's it. Per-DB state (postgis, the laplace
-    # schema + tables, role grants) is Layer-1 (DbUp) — laplace_admin
-    # being a SUPERUSER means it can do all of that itself without any
-    # wrapper, template, or sudo escalation in the iterative loop.
-    #
-    # `just db-nuke` drops + recreates the empty DB as laplace_admin (no
-    # sudo). `just db-up` then runs `CREATE EXTENSION postgis;
-    # CREATE EXTENSION laplace_geom; CREATE EXTENSION laplace_substrate;`
-    # as laplace_admin, which is SUPERUSER, so all three install cleanly
-    # and own their objects. No `laplace_priv` SECURITY DEFINER wrapper.
-    # No custom `template_laplace`. No `ALTER OWNER` bandaids.
-
     local pgbin="$LAPLACE_PG_PREFIX/bin"
     local conn=(-h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" -U laplace_admin)
 
@@ -1102,9 +712,6 @@ bootstrap_pg_database_and_postgis() {
         green "✓ Created database 'laplace' owned by laplace_admin"
     fi
 
-    # CONNECT grants on the database for app + readonly roles. (Schema
-    # USAGE is Layer 1's job since the laplace schema is created by
-    # CREATE EXTENSION laplace_substrate, not here.)
     sudo -u "$RUNNER_USER" "$pgbin/psql" "${conn[@]}" -d laplace \
         -v ON_ERROR_STOP=1 >/dev/null <<'PG_EOF'
 DO $$
@@ -1119,10 +726,6 @@ END $$;
 PG_EOF
     green "✓ CONNECT grants on laplace for laplace_app / laplace_readonly"
 
-    # Clean up legacy template_laplace + per-DB laplace_priv if present
-    # from prior bootstrap iterations that used wrapper/template patterns.
-    # All harmless to remove now that laplace_admin is SUPERUSER and the
-    # migration uses plain CREATE EXTENSION.
     sudo -u "$RUNNER_USER" "$pgbin/psql" "${conn[@]}" -d postgres \
         -v ON_ERROR_STOP=0 >/dev/null 2>&1 <<'PG_EOF'
 UPDATE pg_database SET datistemplate = false WHERE datname = 'template_laplace';
@@ -1135,46 +738,13 @@ PG_EOF
     green "✓ Removed legacy template_laplace / laplace_priv (if present from prior bootstrap iterations)"
 }
 
-# bootstrap_pg_auth — superseded by bootstrap_laplace_pg_cluster, which
-# writes pg_hba.conf + pg_ident.conf + postgresql.conf together as one
-# managed block in $LAPLACE_PG_DATA/. Kept as a no-op shim so any
-# external script invoking it directly doesn't break.
 bootstrap_pg_auth() {
     green "✓ pg_hba.conf + pg_ident.conf maintained by bootstrap_laplace_pg_cluster"
 }
 
-# ---------------------------------------------------------------------------
-# bootstrap_engine_lib_path — register /opt/laplace/lib with the dynamic
-# linker so test binaries + the PG extension .so files find liblaplace_*.so
-# automatically (no LD_LIBRARY_PATH dance, no rpath gymnastics, no being
-# poisoned by stale .so files left in /usr/local/lib by a prior install).
-# Idempotent — re-writing the same conf + re-running ldconfig is a no-op.
-# ---------------------------------------------------------------------------
 bootstrap_engine_lib_path() {
     say "Register /opt/laplace/lib + dep prefixes + Intel oneAPI runtime with ld.so.conf.d"
     local conf=/etc/ld.so.conf.d/laplace.conf
-    # /opt/laplace/lib hosts the engine liblaplace_*.so files. The Intel
-    # oneAPI runtime dir hosts libsvml.so, libirc.so, libimf.so etc., which
-    # any .so compiled with icx/icpx DT_NEEDS at load. Without this entry
-    # the `postgres` user (which doesn't source setvars.sh on login) gets
-    # "libsvml.so: cannot open shared object file" the first time it tries
-    # to dlopen a Laplace extension. The `latest` symlink in the Intel path
-    # keeps this entry stable across oneAPI version bumps.
-    #
-    # /opt/laplace/{geos,proj,gdal}/lib host the from-source dep libraries
-    # built via `just build-deps` (). Registering them
-    # here, with laplace.conf processed BEFORE libc.conf and
-    # x86_64-linux-gnu.conf (alphabetical .d order), makes ld.so.cache
-    # prefer our libgeos.so.3.12.2 / libgeos_c.so.1.18.2 / libproj.so.25
-    # / libgdal.so over the system 3.10.2 / older variants. This is
-    # load-bearing for laplace_geom: liblwgeom (static-linked into our
-    # extension) transitively references the GEOS C API; without ld.so
-    # preferring our versions, the backend ends up with system libgeos
-    # 3.10.2 in its address space and `CREATE EXTENSION laplace_geom`
-    # fails with `undefined symbol: GEOSConcaveHullOfPolygons` (a
-    # GEOS 3.11+ symbol). The same goes for postgis-3.so when running
-    # against /opt/laplace/pgsql-18/lib/postgis-3.so (PostGIS 3.6.3
-    # built against /opt/laplace/geos 3.12.2 — needs 3.11+ symbols).
     local intel_runtime=/opt/intel/oneapi/compiler/latest/lib
     local desired_lines=(
         "/opt/laplace/lib"
@@ -1204,59 +774,20 @@ bootstrap_engine_lib_path() {
     green "✓ Ran ldconfig"
 }
 
-# ---------------------------------------------------------------------------
-# bootstrap_pg_extension_paths — tell the running system PG (PG_VERSION)
-# to look for Laplace extensions and their engine .so deps under
-# /opt/laplace, so `just install-laplace-prefix` is sudo-free and DbUp
-# `CREATE EXTENSION laplace_geom; CREATE EXTENSION laplace_substrate;`
-# finds the freshly-installed files.
-#
-# PG 18 caveat (per project memory project_pg18_extension_control_path):
-# extension_control_path appends "/extension" to each custom entry — so
-# pass the sharedir (.../share/postgresql/$PG_VERSION) NOT the extension
-# subdir (.../share/postgresql/$PG_VERSION/extension). Get this wrong and
-# CREATE EXTENSION silently loads a stale $system install instead.
-#
-# Also strips any pre-existing extension_control_path / dynamic_library_path
-# lines, including stale entries pointing at older Hartonomous-* projects
-# left over on this host. Idempotent — same desired-value writes are no-ops.
-# ---------------------------------------------------------------------------
-# bootstrap_pg_extension_paths — superseded by bootstrap_laplace_pg_cluster,
-# which sets extension_control_path + dynamic_library_path in
-# $PG_POSTGRESQL_CONF as part of the substrate cluster's managed config
-# block. Kept as a no-op shim for callers that invoke it directly.
 bootstrap_pg_extension_paths() {
     green "✓ extension_control_path + dynamic_library_path set by bootstrap_laplace_pg_cluster"
 }
 
-# ---------------------------------------------------------------------------
-# bootstrap_cleanup_stale_installs — sweep system PG paths + /usr/local/lib
-# of anything left by a prior `sudo cmake --install` of Laplace or an older
-# project. Required because (a) until this script ran, ad-hoc installs
-# landed there; (b) the new /opt/laplace-staged install layout means those
-# files are now strictly stale; (c) leaving them around lets the loader /
-# PG dlopen find the wrong copy on hosts where ld.so.cache reaches into
-# /usr/local/lib first. This runs as part of bootstrap so the user
-# doesn't accumulate "one more sudo command the agent forgot to script."
-# Idempotent — silently absent is fine.
-# ---------------------------------------------------------------------------
 bootstrap_cleanup_stale_installs() {
     say "Remove stale Laplace + Hartonomous installs from system PG + /usr/local"
     local removed=0
     local f
 
-    # Stale engine .so left in /usr/local/lib by a pre-/opt/laplace
-    # `sudo cmake --install`. These now live at /opt/laplace/lib + are
-    # registered with ld.so via bootstrap_engine_lib_path.
     for f in /usr/local/lib/liblaplace_*.so*; do
         [ -e "$f" ] || continue
         rm -f "$f" && removed=$((removed + 1))
     done
 
-    # Stale extension .so left in system PG pkglibdir by a prior
- # `sudo cmake --install`. Includes the pre- monolithic
-    # `laplace.so` AND the split `laplace_{geom,substrate}.so`. New ones
-    # live at /opt/laplace/lib/postgresql/$PG_VERSION via dynamic_library_path.
     for f in /usr/lib/postgresql/$PG_VERSION/lib/laplace.so \
              /usr/lib/postgresql/$PG_VERSION/lib/laplace_geom.so \
              /usr/lib/postgresql/$PG_VERSION/lib/laplace_substrate.so; do
@@ -1264,8 +795,6 @@ bootstrap_cleanup_stale_installs() {
         rm -f "$f" && removed=$((removed + 1))
     done
 
-    # Stale extension control + .sql files in system PG sharedir. Same
-    # rationale; new ones live at /opt/laplace/share/postgresql/$PG_VERSION/extension.
     for f in /usr/share/postgresql/$PG_VERSION/extension/laplace.control \
              /usr/share/postgresql/$PG_VERSION/extension/laplace--*.sql \
              /usr/share/postgresql/$PG_VERSION/extension/laplace_geom.control \
@@ -1276,12 +805,6 @@ bootstrap_cleanup_stale_installs() {
         rm -f "$f" && removed=$((removed + 1))
     done
 
-    # Hartonomous-* leftovers from the previous-iteration project (per
- # / — Hartonomous-001 is the predecessor and
-    # must not bleed into this host). Removes the library, extension
-    # files, and any extension-aux subdirs (e.g. /usr/share/postgresql/
-    # $PG_VERSION/extension/hartonomous-ucd is a directory, not a file —
-    # rm -rf so the glob handles both cases). Pre-Laplace; safe to nuke.
     for f in /usr/lib/postgresql/$PG_VERSION/lib/libhartonomous*.so* \
              /usr/share/postgresql/$PG_VERSION/extension/hartonomous*; do
         [ -e "$f" ] || continue
@@ -1297,14 +820,6 @@ bootstrap_cleanup_stale_installs() {
 }
 
 bootstrap_remove_legacy_sudoers() {
-    # Removes /etc/sudoers.d/laplace-runner left over from prior bootstrap
-    # iterations. The NOPASSWD-for-cmake-install entry was a workaround
-    # for installing extensions into root-owned system PG paths. With
-    # CMAKE_INSTALL_PREFIX=/opt/laplace (laplace-runner-owned, mode 2775)
-    # plus extension_control_path / dynamic_library_path managed by
-    # bootstrap_pg_extension_paths, the runner installs extensions to
-    # /opt/laplace/share/postgresql/$PG_VERSION/extension and PG finds
-    # them there — no sudo, no escalation, no NOPASSWD lying around.
     say "Remove legacy /etc/sudoers.d/laplace-runner (workaround no longer needed)"
     if [ -f "$SUDOERS_FILE" ]; then
         rm -f "$SUDOERS_FILE"
@@ -1315,25 +830,11 @@ bootstrap_remove_legacy_sudoers() {
 }
 
 bootstrap_external_dirs() {
-    # Create /opt/laplace/external/ AND the per-dep install destinations
-    # (tree-sitter, geos, proj, gdal, pgsql-18) with laplace-runner ownership
-    # and setgid 2775 — so cmake --install / make install from the runner
-    # (laplace-runner) can chmod the dirs it creates (must be owner) AND
-    # ahart-in-laplace-runner-group can write through setgid+gw, without
-    # collisions.
-    #
-    # /opt/laplace/external/ POPULATION is project state, not machine state —
-    # it belongs in the pipeline. scripts/sync-external.sh maintains
-    # /opt/laplace/external/<sm>/ as non-bare checkouts at .gitmodules-pinned
-    # SHAs, idempotent, no sudo required.
     say "Ensure /opt/laplace/external/ + per-dep install destinations + engine install destinations"
     install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" /opt/laplace/external
-    # System-dep install destinations (per-dep cmake --install or make install lands here)
     for dep in tree-sitter geos proj gdal pgsql-18; do
         install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "/opt/laplace/$dep"
     done
-    # Engine install destinations (top-level cmake --install build lands here:
-    # liblaplace_*.so, headers, PG extension .so + .control + .sql).
     for sub in include lib share bin; do
         install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "/opt/laplace/$sub"
     done
@@ -1342,15 +843,6 @@ bootstrap_external_dirs() {
 }
 
 bootstrap_runner_gh_auth() {
-    # The runner user has no shell, so `gh auth login` is not possible.
-    # Mirror $SUDO_USER's gh hosts.yml into the runner's $XDG_CONFIG_HOME
-    # so the runner can invoke `gh issue edit`, `gh api`, etc. per the
-    # CLAUDE.md cadence.
-    #
-    # Security note: this shares the invoking user's GitHub token with
-    # the runner. For tighter separation, replace with a runner-specific
-    # fine-grained PAT after bootstrap. The token's scope is whatever
-    # the invoking user has minted; trust boundary is the local machine.
     say "Set up gh CLI auth for $RUNNER_USER (mirror $GH_SUDO_USER's token)"
 
     local src="/home/$GH_SUDO_USER/.config/gh/hosts.yml"
@@ -1366,17 +858,12 @@ bootstrap_runner_gh_auth() {
     install -m 600 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$src" "$dst"
     green "✓ Mirrored $src -> $dst (mode 600, owned $RUNNER_USER)"
 
-    # Sanity probe.
     if sudo -u "$RUNNER_USER" -H gh auth status >/dev/null 2>&1; then
         green "✓ $RUNNER_USER can authenticate with GitHub"
     else
         yellow "  gh auth status failed under $RUNNER_USER — token may have host-binding or scope issue"
     fi
 
-    # Configure git's credential helper to use gh's token. This is what
-    # makes `git clone https://github.com/...` authenticated (instead of
-    # anonymous + rate-limited) for subsequent bootstrap_submodule_cache
-    # runs as well as any workflow's git operations.
     if sudo -u "$RUNNER_USER" -H gh auth setup-git >/dev/null 2>&1; then
         green "✓ git credential helper wired to gh for $RUNNER_USER"
     else
@@ -1384,9 +871,6 @@ bootstrap_runner_gh_auth() {
     fi
 }
 
-# ---------------------------------------------------------------------------
-# do_status — what's the current state?
-# ---------------------------------------------------------------------------
 do_status() {
     say "User"
     id "$RUNNER_USER" 2>/dev/null || echo "  (absent)"
@@ -1452,9 +936,6 @@ do_status() {
     fi
 }
 
-# ---------------------------------------------------------------------------
-# do_reset — undo everything bootstrap_* sets up, in reverse order
-# ---------------------------------------------------------------------------
 do_reset() {
     cat <<EOF
 ========================================================================
@@ -1482,7 +963,6 @@ EOF
         exit 1
     fi
 
-    # --- Reverse step 8: tear down runner service + GitHub registration ---
     say "Stop + uninstall runner service"
     systemctl stop "$RUNNER_SERVICE" 2>/dev/null || true
     systemctl disable "$RUNNER_SERVICE" 2>/dev/null || true
@@ -1501,12 +981,10 @@ EOF
         yellow "Could not deregister via gh CLI; if a 'hart-server' runner persists in repo settings, remove it manually"
     fi
 
-    # --- Reverse step 7: sudoers ---
     say "Remove sudoers"
     rm -f "$SUDOERS_FILE"
     green "✓ $SUDOERS_FILE removed"
 
-    # --- Reverse steps 5+6: tear down substrate cluster (roles, DBs, data dir, unit) ---
     say "Stop + disable substrate cluster systemd unit ($LAPLACE_PG_SERVICE)"
     if systemctl list-unit-files "$LAPLACE_PG_SERVICE" 2>/dev/null | grep -q "$LAPLACE_PG_SERVICE"; then
         systemctl stop "$LAPLACE_PG_SERVICE" 2>/dev/null || true
@@ -1535,7 +1013,6 @@ EOF
         green "✓ Re-enabled $sys_unit (start it manually if you want it back)"
     fi
 
-    # --- Reverse steps 1–4: runner dir + user ---
     say "Remove runner installation"
     if [ -d "$RUNNER_DIR" ]; then
         rm -rf "$RUNNER_DIR"
@@ -1545,13 +1022,10 @@ EOF
         rm -rf "$RUNNER_HOME"
         green "✓ Removed $RUNNER_HOME"
     fi
-    # Also remove the legacy /var/lib/laplace-runner path in case a
-    # pre-migration bootstrap is being reset.
     if [ -d "$RUNNER_HOME_LEGACY" ] && [ "$RUNNER_HOME_LEGACY" != "$RUNNER_HOME" ]; then
         rm -rf "$RUNNER_HOME_LEGACY"
         green "✓ Removed legacy $RUNNER_HOME_LEGACY"
     fi
-    # And any pre-migration archives left behind.
     for archive in "$RUNNER_HOME_LEGACY".pre-migration-*; do
         [ -e "$archive" ] || continue
         rm -rf "$archive"
@@ -1572,9 +1046,6 @@ EOF
     echo "To rebuild: sudo $0 bootstrap"
 }
 
-# ---------------------------------------------------------------------------
-# do_bootstrap — full Layer 0 set-up
-# ---------------------------------------------------------------------------
 do_bootstrap() {
     bootstrap_user
     bootstrap_build_environment
@@ -1587,37 +1058,19 @@ do_bootstrap() {
     bootstrap_runner_model_env
     bootstrap_runner_stripe_env
 
-    # ld.so.cache must list /opt/laplace/{geos,proj,gdal}/lib BEFORE our
-    # substrate cluster starts — otherwise the postgres binary forks
-    # backends that resolve libgeos/libproj to system 3.10.2 / 8.x first
-    # and segfault at backend exit (verified via core dump 2026-05-24:
-    # libproj.so.22's UnitOfMeasure destructor double-frees state
-    # libproj.so.25 already freed when both ABIs are loaded).
     bootstrap_engine_lib_path
-    # /opt/laplace/external/ + per-dep install destinations need correct
-    # ownership before the cluster's data dir is initdb'd (which lives
-    # under /opt/laplace/pgsql-18/).
     bootstrap_external_dirs
 
-    # Stand up the substrate PG cluster: stop system PG, initdb
-    # /opt/laplace/pgsql-18/data as laplace-runner, write managed
-    # conf/hba/ident blocks, install + start systemd unit. Owns
-    # /var/run/postgresql/.s.PGSQL.5432 — same shape as system PG
-    # so all existing psql/DbUp connections keep working.
     bootstrap_disable_system_postgresql
     bootstrap_laplace_pg_cluster
 
-    # PG roles + database now operate against the substrate cluster
-    # (peer auth via laplace_map, as laplace-runner → laplace_admin).
     bootstrap_pg_roles
     bootstrap_pg_legacy_cleanup
-    bootstrap_pg_auth                # no-op shim — cluster owns its own conf
+    bootstrap_pg_auth
     bootstrap_pg_database_and_postgis
 
-    # Cleanup runs AFTER the substrate cluster is up but BEFORE any
-    # downstream operations might depend on the cleaned state.
     bootstrap_cleanup_stale_installs
-    bootstrap_pg_extension_paths     # no-op shim — cluster owns its own conf
+    bootstrap_pg_extension_paths
     bootstrap_remove_legacy_sudoers
     bootstrap_runner_gh_auth
 
@@ -1631,11 +1084,6 @@ do_bootstrap() {
     sudo -u "$GH_SUDO_USER" -H gh api "repos/$REPO/actions/runners" \
         --jq '.runners[] | "\(.name) \(.status) labels=[\(.labels | map(.name) | join(","))]"' 2>/dev/null || true
 
-    # Peer auth flow: pg_hba.conf rule applies to the *requested* PG role
-    # (laplace_admin), and pg_ident.conf's laplace_map allows OS user
-    # laplace-runner (or ahart) to fulfill that request. So we MUST pass
-    # -U laplace_admin explicitly — psql's default of (PG role = OS user)
-    # would request role `laplace-runner`, which doesn't exist as a PG role.
     echo
     echo "Peer auth (OS laplace-runner → PG laplace_admin on 'postgres' DB):"
     sudo -u "$RUNNER_USER" psql -d postgres -U laplace_admin -tAc \
@@ -1650,14 +1098,6 @@ do_bootstrap() {
 
     echo
     echo "Sudoers entry (laplace-runner NOPASSWD for /usr/bin/cmake --install + legacy /usr/bin/make install*):"
-    # Use sudo -ln (list allowed commands, non-interactive) so we don't have
-    # to invoke a command that matches the allowed pattern. sudo -n alone
-    # would attempt to authorize a specific command and fail under pipefail
-    # if the command doesn't match the sudoers pattern — that's a probe bug,
-    # not a real failure.
-    # The rule was DELIBERATELY removed (step 10: staged /opt/laplace install,
-    # group-writable 2775 — no sudo needed). Verify ABSENCE; the old check
-    # expected the rule active and printed a permanent false ✗ (2026-06-05).
     if sudo -u "$RUNNER_USER" -H sudo -ln 2>&1 | grep -qE 'NOPASSWD.*(cmake --install|make install)'; then
         red "✗ Legacy sudoers rule still active for laplace-runner (should be removed; see step 10)"
     else
@@ -1692,9 +1132,6 @@ do_stripe() {
     echo "  sudo LAPLACE_STRIPE_API_KEY=sk_test_xxx $0 stripe"
 }
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 case "$MODE" in
     bootstrap)
         require_root

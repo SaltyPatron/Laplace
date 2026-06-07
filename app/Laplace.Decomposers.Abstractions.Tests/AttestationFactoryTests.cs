@@ -4,12 +4,6 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-/// <summary>
-/// AttestationFactory: ID hashing + the §10 signed-observation mechanism.
-/// Every per-source decomposer routes through this factory; these
-/// tests fix the contract: signed magnitude → Glicko score, trust → opponent φ
-/// (NOT a μ multiplier), no tiers in evidence.
-/// </summary>
 public class AttestationFactoryTests
 {
     private static Hash128 H(string s) => Hash128.OfCanonical(s);
@@ -60,8 +54,6 @@ public class AttestationFactoryTests
         Assert.Equal(standalone, fromObs);
     }
 
-    // ── §10: signed magnitude → score = ½(1 + tanh(m/M)) ───────────────────
-
     [Fact]
     public void Score_PositiveMagnitude_AboveHalf()
         => Assert.True(AttestationFactory.Score(1.0, 1.0) > 0.5);
@@ -77,7 +69,6 @@ public class AttestationFactoryTests
     [Fact]
     public void Score_IsSymmetricAroundHalf()
     {
-        // tanh is odd ⇒ s(+m) + s(−m) = 1: a refute is the mirror of a confirm.
         double up = AttestationFactory.Score(0.7, 0.3);
         double dn = AttestationFactory.Score(-0.7, 0.3);
         Assert.Equal(1.0, up + dn, 12);
@@ -98,13 +89,10 @@ public class AttestationFactoryTests
     [Fact]
     public void CreateObservation_NegativeMagnitude_ScoreBelowHalf()
     {
-        // A refute/repel witness (negative coupling) must land below neutral — not abs'd to a win.
         var r = AttestationFactory.CreateObservation(
             H("s"), H("k"), H("o"), H("src"), null, signedMagnitude: -1.5, arenaScale: 1.0, witnessWeight: 0.5);
         Assert.True(r.ScoreFp1e9 < Glicko2.FpScale / 2);
     }
-
-    // ── §10: trust → opponent φ (opponent_rd), NEVER the score ──────────────
 
     [Fact]
     public void WitnessPhi_TrustedTighterThanCrank()
@@ -113,15 +101,13 @@ public class AttestationFactoryTests
     [Fact]
     public void Trust_ChangesOpponentRd_NotScore()
     {
-        // Same magnitude + arena, different witness trust: identical SCORE,
-        // different OPPONENT φ. Trust weights via g(φ), never by moving the outcome.
         var trusted = AttestationFactory.CreateObservation(
             H("s"), H("k"), H("o"), H("src"), null, signedMagnitude: 1.0, arenaScale: 1.0, witnessWeight: 1.0);
         var crank = AttestationFactory.CreateObservation(
             H("s"), H("k"), H("o"), H("src"), null, signedMagnitude: 1.0, arenaScale: 1.0, witnessWeight: 0.05);
 
-        Assert.Equal(trusted.ScoreFp1e9, crank.ScoreFp1e9);          // outcome unchanged by trust
-        Assert.True(trusted.OpponentRdFp1e9 < crank.OpponentRdFp1e9); // trusted → tighter opponent
+        Assert.Equal(trusted.ScoreFp1e9, crank.ScoreFp1e9);
+        Assert.True(trusted.OpponentRdFp1e9 < crank.OpponentRdFp1e9);
     }
 
     [Fact]
@@ -132,15 +118,13 @@ public class AttestationFactoryTests
         var refute = AttestationFactory.CreateCategorical(
             H("s"), H("k"), H("o2"), H("src"), null, confirm: false, witnessWeight: 1.0);
 
-        Assert.Equal(Glicko2.FpScale, confirm.ScoreFp1e9);   // 1.0
-        Assert.Equal(0L,              refute.ScoreFp1e9);     // 0.0
+        Assert.Equal(Glicko2.FpScale, confirm.ScoreFp1e9);
+        Assert.Equal(0L,              refute.ScoreFp1e9);
     }
 
     [Fact]
     public void Evidence_CarriesNoAccumulatedState()
     {
-        // The evidence row is an observation: score/opponent_rd/arena_m only. No
-        // rating/rd/volatility field exists to bake a tier prior into (truth #5).
         var r = AttestationFactory.CreateObservation(
             H("s"), H("k"), H("o"), H("src"), null, signedMagnitude: 1.0, arenaScale: 1.0, witnessWeight: 0.5);
         Assert.True(r.ScoreFp1e9 is >= 0 and <= Glicko2.FpScale);

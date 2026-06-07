@@ -35,7 +35,7 @@ static TreeStats classify(tier_tree_t* t) {
     return s;
 }
 
-} // namespace
+}
 
 TEST(LaplaceCoreTextDecomposer, EmptyInputProducesRootOnly) {
     tier_tree_t* t = nullptr;
@@ -65,8 +65,8 @@ TEST(LaplaceCoreTextDecomposer, ASCIIHelloWorldTopology) {
     ASSERT_EQ(0, laplace_text_decomposer_run(
         (const uint8_t*)s, std::strlen(s), &t));
     auto stats = classify(t);
-    EXPECT_EQ(12, stats.leaves);     // 12 ASCII codepoints
-    EXPECT_EQ(12, stats.graphemes);   // each ASCII char its own grapheme
+    EXPECT_EQ(12, stats.leaves);
+    EXPECT_EQ(12, stats.graphemes);
     EXPECT_EQ(1, stats.docs);
     EXPECT_GE(stats.words, 1);
     EXPECT_GE(stats.sentences, 1);
@@ -74,25 +74,18 @@ TEST(LaplaceCoreTextDecomposer, ASCIIHelloWorldTopology) {
 }
 
 TEST(LaplaceCoreTextDecomposer, DistinctNormalizationFormsStayDistinct) {
-    // No NFC at ingest: the same abstract character expressed two ways —
-    //   precomposed: U+00E9 (é)          — one codepoint
-    //   decomposed:  U+0065 U+0301 (e+´) — two codepoints
-    // are DIFFERENT observed forms → different codepoint leaves → distinct
-    // content-addressed entities, linked later by a canonical-equivalence
-    // attestation, never collapsed by a destructive transform at ingest.
     tier_tree_t* a = nullptr;
     tier_tree_t* b = nullptr;
-    const uint8_t pre[] = {0xC3, 0xA9};                 // U+00E9 in UTF-8
-    const uint8_t dec[] = {0x65, 0xCC, 0x81};            // U+0065 U+0301 in UTF-8
+    const uint8_t pre[] = {0xC3, 0xA9};
+    const uint8_t dec[] = {0x65, 0xCC, 0x81};
     ASSERT_EQ(0, laplace_text_decomposer_run(pre, sizeof(pre), &a));
     ASSERT_EQ(0, laplace_text_decomposer_run(dec, sizeof(dec), &b));
-    // Distinct codepoint-leaf counts (1 vs 2) ⇒ distinct trees — NOT merged.
     EXPECT_NE(tier_tree_node_count(a), tier_tree_node_count(b));
     tier_node_view_t la, lb;
     tier_tree_get_node(a, 0, &la);
     tier_tree_get_node(b, 0, &lb);
-    EXPECT_EQ(0u, la.tier); EXPECT_EQ(0x00E9u, la.atom);   // precomposed é
-    EXPECT_EQ(0u, lb.tier); EXPECT_EQ(0x0065u, lb.atom);   // 'e' (acute follows separately)
+    EXPECT_EQ(0u, la.tier); EXPECT_EQ(0x00E9u, la.atom);
+    EXPECT_EQ(0u, lb.tier); EXPECT_EQ(0x0065u, lb.atom);
     tier_tree_free(a);
     tier_tree_free(b);
 }
@@ -121,8 +114,6 @@ TEST(LaplaceCoreTextDecomposer, DeterministicAcrossRuns) {
 }
 
 TEST(LaplaceCoreTextDecomposer, MultiLanguageInputSegmentsCleanly) {
-    // Mixed Latin + Cyrillic + Han + Hebrew. Just verify it succeeds +
-    // node counts are reasonable.
     const char* s = "Hello мир 中国 שלום";
     tier_tree_t* t = nullptr;
     ASSERT_EQ(0, laplace_text_decomposer_run(
@@ -130,13 +121,11 @@ TEST(LaplaceCoreTextDecomposer, MultiLanguageInputSegmentsCleanly) {
     auto stats = classify(t);
     EXPECT_GT(stats.leaves, 10);
     EXPECT_EQ(1, stats.docs);
-    EXPECT_GE(stats.words, 4); // 4 distinct word runs
+    EXPECT_GE(stats.words, 4);
     tier_tree_free(t);
 }
 
 TEST(LaplaceCoreTextDecomposer, GraphemeCountMatchesUserPerceivedChars) {
-    // "é" as precomposed = 1 grapheme; as decomposed (e + combining
-    // acute) = also 1 grapheme (combining mark joined with base).
     tier_tree_t* a = nullptr;
     const uint8_t dec[] = {0x65, 0xCC, 0x81};
     ASSERT_EQ(0, laplace_text_decomposer_run(dec, sizeof(dec), &a));
@@ -150,13 +139,11 @@ TEST(LaplaceCoreTextDecomposer, FinalizedParentIdxIsCorrect) {
     tier_tree_t* t = nullptr;
     ASSERT_EQ(0, laplace_text_decomposer_run(
         (const uint8_t*)s, std::strlen(s), &t));
-    // Root has no parent
     uint32_t last = (uint32_t)(tier_tree_node_count(t) - 1);
     tier_node_view_t v;
     tier_tree_get_node(t, last, &v);
     EXPECT_EQ(4, v.tier);
     EXPECT_EQ(TIER_TREE_INVALID, v.parent_idx);
-    // Leaf has parent (some grapheme)
     tier_tree_get_node(t, 0, &v);
     EXPECT_EQ(0, v.tier);
     EXPECT_NE(TIER_TREE_INVALID, v.parent_idx);

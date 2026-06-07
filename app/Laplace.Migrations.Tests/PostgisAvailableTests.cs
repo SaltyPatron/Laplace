@@ -3,13 +3,6 @@ using Xunit;
 
 namespace Laplace.Migrations.Tests;
 
-/// <summary>
-/// Baseline: verify the postgis/postgis:18 Testcontainer image starts and
-/// PostGIS is callable. Real DbUp-on-container tests (idempotency of our
-/// 20260606000000_layer1_database.sql migration, role grants, etc.)
-/// land alongside the full DbUp test harness — these are the smoke tests
-/// proving the Testcontainers + Npgsql wiring works.
-/// </summary>
 public class PostgisAvailableTests : IClassFixture<PostgisContainerFixture>
 {
     private readonly PostgisContainerFixture _fixture;

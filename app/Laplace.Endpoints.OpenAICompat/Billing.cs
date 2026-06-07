@@ -14,7 +14,6 @@ internal sealed class StripeBillingOptions
     public string CancelUrl { get; set; } = "http://localhost:5187/billing/cancel";
 }
 
-// A logical billable capability. Maps 1:1 to a Stripe Product.
 internal sealed record BillingProduct(
     string ProductId,
     string Name,
@@ -33,11 +32,6 @@ internal sealed record BillingPlan(
     string SupportTier,
     bool Active);
 
-// A concrete price for a routing key (service_id), bound to a product.
-// LookupKey is the stable Stripe price lookup_key used for idempotent sync.
-// Metered services (e.g. synthesis) bill BaseFeeCents + UnitPriceCents * units,
-// where units is a usage meter (millions of parameters for synthesis); flat
-// services leave BaseFeeCents = 0 and Metered = false.
 internal sealed record ServicePrice(
     string ServiceId,
     string ProductId,
@@ -82,9 +76,6 @@ internal interface IBillingCatalog
     bool TryGetProduct(string productId, out BillingProduct product);
 }
 
-// Code-defined catalog. Prices are flat per-request defaults — adjust the cents
-// values here to set the business pricing model. Currency follows the configured
-// LAPLACE_BILLING_CURRENCY so the Stripe price currency stays consistent.
 internal sealed class StaticBillingCatalog : IBillingCatalog
 {
     private readonly Dictionary<string, BillingProduct> _products;
@@ -165,10 +156,6 @@ internal sealed class StaticBillingCatalog : IBillingCatalog
                 Metered: metered,
                 RecurringInterval: recurringInterval);
 
-        // Cents values below are business defaults — adjust to set the pricing model.
-        // Synthesis is the dimensionality-metered money-maker: a flat job fee plus a
-        // per-million-parameter rate, so a bigger recipe (more vocab/hidden/layers)
-        // costs proportionally more.
         _prices = new(StringComparer.OrdinalIgnoreCase)
         {
             ["chat.completions"] = Price("chat.completions", "laplace.inference.chat", 3, "request", "Laplace Chat Completion"),
@@ -272,8 +259,6 @@ internal sealed class StaticBillingCatalog : IBillingCatalog
     public bool TryGetProduct(string productId, out BillingProduct product) => _products.TryGetValue(productId, out product!);
 }
 
-// Caches resolved Stripe price ids keyed by lookup_key so checkout can reuse
-// real Stripe Price objects instead of recreating ad-hoc inline prices.
 internal interface IStripePriceMap
 {
     bool TryGet(string lookupKey, out string stripePriceId);
@@ -298,9 +283,6 @@ internal sealed record StripeCatalogEntryResult(
 
 internal sealed record StripeCatalogSyncResult(bool StripeConfigured, IReadOnlyList<StripeCatalogEntryResult> Entries);
 
-// Idempotently provisions Stripe Product + Price objects for the catalog.
-// Price idempotency is pinned on lookup_key; product idempotency on a metadata tag.
-// With no API key configured every call degrades to a no-op (test/dev safe).
 internal interface IStripeCatalogSync
 {
     Task<StripeCatalogSyncResult> EnsureAllAsync(CancellationToken ct);
@@ -369,7 +351,6 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
     {
         StripeConfiguration.ApiKey = _options.ApiKey;
 
-        // 1) Reuse an existing price pinned to this lookup_key.
         var priceService = new PriceService();
         var existing = await priceService.ListAsync(new PriceListOptions
         {
@@ -385,10 +366,8 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
             return (found.Id, found.ProductId, "exists");
         }
 
-        // 2) Ensure the product exists.
         var productId = await EnsureProductAsync(price.ProductId, ct);
 
-        // 3) Create the price bound to the product, claiming the lookup_key.
         var created = await priceService.CreateAsync(new PriceCreateOptions
         {
             Product = productId,
@@ -416,7 +395,6 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
         _catalog.TryGetProduct(productKey, out var product);
         var productService = new ProductService();
 
-        // Reuse a product tagged with our internal id, if the Search API is available.
         try
         {
             var search = await productService.SearchAsync(new ProductSearchOptions
@@ -429,7 +407,6 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
         }
         catch (StripeException)
         {
-            // Search API not enabled — fall through and create.
         }
 
         var createdProduct = await productService.CreateAsync(new ProductCreateOptions
@@ -528,9 +505,6 @@ internal sealed class StripeCheckoutGateway : IStripeCheckoutGateway
             SessionLineItemOptions lineItem;
             if (price.Metered || price.BaseFeeCents > 0)
             {
-                // Metered/base-fee services bill the authoritative quote total as a
-                // single computed line item (a per-unit Stripe Price cannot express
-                // base fee + dimensionality-scaled meter).
                 lineItem = new SessionLineItemOptions
                 {
                     Quantity = 1,
@@ -548,8 +522,6 @@ internal sealed class StripeCheckoutGateway : IStripeCheckoutGateway
             }
             else
             {
-                // Flat per-unit service: prefer a real, provisioned Stripe Price; fall
-                // back to inline price data if catalog sync could not resolve one.
                 var stripePriceId = await _catalogSync.EnsurePriceAsync(price, ct);
                 lineItem = stripePriceId is not null
                     ? new SessionLineItemOptions { Quantity = quote.Units, Price = stripePriceId }
@@ -600,8 +572,6 @@ internal sealed class StripeCheckoutGateway : IStripeCheckoutGateway
         }
         catch (StripeException ex)
         {
-            // Stripe is configured but unreachable/misconfigured — fall back to manual
-            // approval rather than failing the caller's preflight.
             return new StripeCheckoutSessionResult(false, null, null, $"stripe_error:{ex.StripeError?.Code ?? "stripe_error"}");
         }
     }

@@ -23,7 +23,6 @@ public class SubstrateChangeTests
             null, 0, null, null, 0));
         b.AddAttestation(new AttestationRow(
             H(4), H(1), H(50), H(2), src, null,
-            // outcome, last_observed, observation_count, in-flight score + φ
             AttestationOutcome.Confirm, 0L, 1L, 1_000_000_000L, 30_000_000_000L));
 
         var change = b.Build();
@@ -55,7 +54,7 @@ public class SubstrateChangeTests
         var bA = new SubstrateChangeBuilder(H(0), "unit");
         bA.AddEntity(H(1), 0, H(99));
         var bB = new SubstrateChangeBuilder(H(0), "unit");
-        bB.AddEntity(H(2), 0, H(99));  // different entity id
+        bB.AddEntity(H(2), 0, H(99));
         Assert.NotEqual(bA.Build().Metadata.IntentId, bB.Build().Metadata.IntentId);
     }
 
@@ -130,18 +129,13 @@ public class SubstrateChangeTests
         Assert.Null(p.TrajectoryXyzm);
     }
 
-    // ── O(tier) dedup-by-construction at the builder (2026-06-06) ────────────
-    // Identity rows append once per intent; testimony FOLDS — observation_count
-    // = Σ games, SumScore exact, net outcome CLASS — bit-identical input to the
-    // consensus accumulation (Games += ObservationCount, Σ via SumScoreFp1e9).
-
     [Fact]
     public void Builder_DeduplicatesIdentityRowsWithinIntent()
     {
         var src = Hash128.OfCanonical("substrate/source/Test/v1");
         var b = new SubstrateChangeBuilder(src, "unit-dedup");
         b.AddEntity(H(1), 0, H(99));
-        b.AddEntity(H(1), 0, H(99));            // same content-addressed id → same row
+        b.AddEntity(H(1), 0, H(99));
         var hb = new Hilbert128();
         var phys = new PhysicalityRow(H(3), H(1), src, PhysicalityType.Content,
             0.1, 0.2, 0.3, 0.4, hb, null, 0, null, null, 0);
@@ -157,7 +151,6 @@ public class SubstrateChangeTests
     {
         var src = Hash128.OfCanonical("substrate/source/Test/v1");
         var b = new SubstrateChangeBuilder(src, "unit-fold");
-        // one relation witnessed 3 times: ONE evidence row, 3 games, exact Σscore
         for (int i = 0; i < 3; i++)
             b.AddAttestation(new AttestationRow(
                 H(4), H(1), H(50), H(2), src, null,
@@ -165,8 +158,8 @@ public class SubstrateChangeTests
         var a = Assert.Single(b.Build().Attestations);
         Assert.Equal(3L, a.ObservationCount);
         Assert.Equal(3_000_000_000L, a.SumScoreFp1e9);
-        Assert.Equal(2L, a.LastObservedAtUnixUs);            // max ts wins
-        Assert.Equal(AttestationOutcome.Confirm, a.Outcome); // net class
+        Assert.Equal(2L, a.LastObservedAtUnixUs);
+        Assert.Equal(AttestationOutcome.Confirm, a.Outcome);
     }
 
     [Fact]
@@ -174,7 +167,6 @@ public class SubstrateChangeTests
     {
         var src = Hash128.OfCanonical("substrate/source/Test/v1");
         var b = new SubstrateChangeBuilder(src, "unit-net");
-        // confirm (1e9) + refute (0): Σ = 1e9 over 2 games = the all-draws sum → Draw
         b.AddAttestation(new AttestationRow(H(4), H(1), H(50), H(2), src, null,
             AttestationOutcome.Confirm, 0L, 1L, 1_000_000_000L, 30_000_000_000L));
         b.AddAttestation(new AttestationRow(H(4), H(1), H(50), H(2), src, null,
@@ -191,7 +183,6 @@ public class SubstrateChangeTests
         var b = new SubstrateChangeBuilder(src, "unit-phi");
         b.AddAttestation(new AttestationRow(H(4), H(1), H(50), H(2), src, null,
             AttestationOutcome.Confirm, 0L, 1L, 1_000_000_000L, 30_000_000_000L));
-        // one relation × one source × one period ⇒ one φ — mixed φ is a decomposer bug
         Assert.Throws<InvalidOperationException>(() =>
             b.AddAttestation(new AttestationRow(H(4), H(1), H(50), H(2), src, null,
                 AttestationOutcome.Confirm, 0L, 1L, 1_000_000_000L, 99_000_000_000L)));

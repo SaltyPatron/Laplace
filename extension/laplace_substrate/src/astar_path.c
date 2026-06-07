@@ -1,23 +1,3 @@
-/* astar_path.c — the compiled cascade SRF (2026-06-06).
- *
- * laplace_astar_path: least-cost path over the consensus graph, the
- * substrate-native operator that replaces recursive-SQL / app-loop traversal.
- * The SEARCH is the C/C++ kernel (engine/core/astar.cpp — frontier heap,
- * visited/stale-skip, came-from reconstruction, max_depth, goal region); THIS
- * file is the thin PG boundary: it supplies the kernel its graph through an SPI
- * neighbor callback (per-node, ONE prepared plan per backend) and streams the
- * resolved path out as SRF rows.
- *
- * Edge cost is derived from Glicko μ — a stronger relation (higher μ) is a
- * cheaper hop — so least-cost = shortest, best-corroborated path. Refuted edges
- * (rating + 2·rd < neutral) are pruned in the neighbor query exactly as the SQL
- * reads do; a node over the cap keeps its top-μ neighbors (cheapest hops).
- *
- * Layer law: SQL/C orchestrate, the kernel does the heavy lifting. The neighbor
- * SET (which edges exist) is set-logic → SPI; the SEARCH (which path wins) is
- * algorithm → the compiled kernel.
- */
-
 #include "postgres.h"
 
 #include "catalog/pg_type.h"
@@ -31,13 +11,8 @@
 
 PG_FUNCTION_INFO_V1(pg_laplace_astar_path);
 
-/* Glicko neutral μ at scale 1e9 (1500.0). NOT-refuted ≡ rating + 2·rd ≥ neutral. */
 #define LAPLACE_NEUTRAL_MU 1500000000000LL
 
-/* Undirected neighbor set: edges out of (subject=$1) and into (object=$1) the
- * node, over the requested relation types ($2), non-refuted, top-μ-capped ($3).
- * Relatedness is symmetric, so a cascade walks edges either way; the directed
- * variant keeps only the forward (subject→object) orientation. */
 static const char *Q_UNDIRECTED =
     "SELECT nbr, rating, rd FROM ("
     "  SELECT object_id AS nbr, rating, rd FROM laplace.consensus"
@@ -76,27 +51,20 @@ ensure_plan(bool directed)
     return *slot;
 }
 
-/* μ → edge cost: base hop 1.0 + a sub-1.0 penalty that grows as μ falls below
- * neutral, so cost ∈ [1.0, 1.99). The penalty never reorders hop count
- * (shortest path always wins; μ only breaks ties among equal-length paths —
- * matching the validated SQL reason() behaviour). */
 static double
 edge_cost(int64 rating, int64 rd)
 {
-    double eff = (double) (rating - 2 * rd) / 1e9;   /* eff_mu_display */
+    double eff = (double) (rating - 2 * rd) / 1e9;
     double pen = (1500.0 - eff) / 1000.0;
     if (pen < 0.0)  pen = 0.0;
     if (pen > 0.99) pen = 0.99;
     return 1.0 + pen;
 }
 
-/* Per-call neighbor provider for the kernel. ctx carries the relation-type
- * filter and a reusable single-row bytea for $1 (the node), so the hot loop
- * doesn't palloc a fresh node bytea every expansion. */
 typedef struct {
-    Datum  types;       /* bytea[] of relation type ids ($2) */
+    Datum  types;
     bool   directed;
-    bytea *nodebuf;     /* VARHDRSZ + 16, reused each call for $1 */
+    bytea *nodebuf;
 } expand_ctx;
 
 static int
@@ -113,9 +81,9 @@ spi_expand(void *ctxp, const hash128_t *node, astar_edge_t *out, int cap)
     args[2] = Int32GetDatum(cap);
 
     rc = SPI_execute_plan(ensure_plan(ctx->directed), args, NULL,
-                          /*read_only*/ true, cap);
+                          true, cap);
     if (rc != SPI_OK_SELECT)
-        return -1;   /* kernel turns this into an empty (no-path) result */
+        return -1;
 
     for (r = 0; r < SPI_processed && (int) r < cap; r++)
     {
@@ -200,7 +168,7 @@ pg_laplace_astar_path(PG_FUNCTION_ARGS)
     q = astar_open(&start_h, goal_h, (size_t) goal_n,
                    (size_t) max_depth, 1, spi_expand, &ctx);
 
-    SPI_finish();   /* search complete; the path is held in the kernel handle */
+    SPI_finish();
 
     if (q != NULL)
     {

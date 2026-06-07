@@ -6,20 +6,11 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Model.Tests;
 
-/// <summary>
-/// TOKEN_MAPS_TO is a MAGNITUDE matchup (2026-06-05 ruling): the S³-morph's
-/// per-token alignment residual is the metric — score s = ½(1+tanh((M−resid)/M))
-/// with M = RMS(resid) measured over the anchored set. Unanchored tokens
-/// (specials / non-UTF-8 bytes) and the morph-skipped/degenerate path are
-/// categorical confirms at REGISTRY rank — never a hand-coded φ.
-/// </summary>
 public class TokenMapsToTests
 {
     private static readonly Hash128 Source      = Hash128.OfCanonical("substrate/test/tmt/source");
     private static readonly Hash128 TokenizerId = Hash128.OfCanonical("substrate/test/tmt/tokenizer");
 
-    /// <summary>The registry-derived φ every TOKEN_MAPS_TO row must carry —
-    /// computed through the SAME factory surface the emitters use.</summary>
     private static long RegistryPhiFp() =>
         (long)(AttestationFactory.WitnessPhi(
             RelationTypeRegistry.Resolve("TOKEN_MAPS_TO").Rank * SourceTrust.AiModelProbe) * Glicko2.FpScale);
@@ -40,23 +31,17 @@ public class TokenMapsToTests
     [Fact]
     public void Morph_Emits_ResidualScored_ForAnchored_And_Categorical_ForUnanchored()
     {
-        // 14 tokens: 13 anchored on distinct S³ points (12 content + the byte
-        // token <0xFF>, anchored at its BYTE-TIER canonical placement since
-        // 2026-06-05), 1 unanchored special. Embedding: 14 rows × 8 dims with
-        // distinct geometry so eigenmaps + Procrustes produce varying residuals.
         var rng = new Random(42);
         int n = 14, d = 8;
         var recs = new List<LlamaTokenizerParser.TokenRecord>();
         for (int i = 0; i < 12; i++)
         {
-            // distinct unit-norm anchors
             double ax = Math.Sin(i * 0.7), ay = Math.Cos(i * 0.7),
                    az = Math.Sin(i * 0.3 + 1), am = Math.Cos(i * 0.3 + 1);
             double nrm = Math.Sqrt(ax * ax + ay * ay + az * az + am * am);
             recs.Add(Rec(i, $"t{i}", anchored: true, ax / nrm, ay / nrm, az / nrm, am / nrm));
         }
         recs.Add(Rec(12, "<s>", anchored: false));
-        // Byte token: anchored at ByteAtoms.Coord(0xFF) — the byte tier.
         {
             var bc = Laplace.Engine.Core.ByteAtoms.Coord(0xFF);
             recs.Add(new LlamaTokenizerParser.TokenRecord
@@ -80,21 +65,20 @@ public class TokenMapsToTests
 
         var atts = changes.SelectMany(c => c.Attestations)
             .Where(a => a.TypeId == RelationTypeRegistry.RelationTypeId("TOKEN_MAPS_TO")).ToList();
-        Assert.Equal(n, atts.Count);   // EVERY placed token gets a matchup
+        Assert.Equal(n, atts.Count);
 
         long phi = RegistryPhiFp();
-        Assert.All(atts, a => Assert.Equal(phi, a.OpponentRdFp1e9));   // φ from the registry, never hand-coded
+        Assert.All(atts, a => Assert.Equal(phi, a.OpponentRdFp1e9));
 
         var byObj = atts.ToDictionary(a => a.ObjectId!.Value);
         var anchoredScores = recs.Where(r => r.HasContentCoord)
             .Select(r => byObj[r.EntityId].ScoreFp1e9).ToList();
-        // Residual-scored: NOT the categorical 1.0, and not all identical.
         Assert.All(anchoredScores, sc => Assert.True(sc < Glicko2.FpScale));
         Assert.True(anchoredScores.Distinct().Count() > 1,
             "anchored scores must vary with the residual");
 
         foreach (var r in recs.Where(r => !r.HasContentCoord))
-            Assert.Equal(Glicko2.FpScale, byObj[r.EntityId].ScoreFp1e9);   // categorical confirm
+            Assert.Equal(Glicko2.FpScale, byObj[r.EntityId].ScoreFp1e9);
     }
 
     [Fact]
@@ -116,7 +100,7 @@ public class TokenMapsToTests
         {
             Assert.Equal(RelationTypeRegistry.RelationTypeId("TOKEN_MAPS_TO"), a.TypeId);
             Assert.Equal(TokenizerId, a.SubjectId);
-            Assert.Equal(Glicko2.FpScale, a.ScoreFp1e9);   // categorical confirm
+            Assert.Equal(Glicko2.FpScale, a.ScoreFp1e9);
             Assert.Equal(phi, a.OpponentRdFp1e9);
         });
     }
@@ -124,8 +108,6 @@ public class TokenMapsToTests
     [Fact]
     public void VocabBatches_EmitEntitiesOnly_NoAttestations()
     {
-        // BuildBatches is the ENTITY phase now — the matchups belong to the
-        // morph (or the categorical fallback), never a raw row at hand-φ.
         var recs = new List<LlamaTokenizerParser.TokenRecord>
         {
             new()

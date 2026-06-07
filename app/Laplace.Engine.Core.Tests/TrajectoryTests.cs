@@ -3,9 +3,6 @@ using Xunit;
 
 namespace Laplace.Engine.Core.Tests;
 
-/// <summary>The content-trajectory packing must be exactly reversible through the
-/// C# boundary — it's what stores + replays composition for content
-/// reconstruction from the DB.</summary>
 public sealed class TrajectoryTests
 {
     [Fact]

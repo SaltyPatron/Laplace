@@ -1,14 +1,7 @@
 name: Set up Laplace build/runtime env
 description: >
   Export the WORKSPACE-relative runtime env (build-tree LD_LIBRARY_PATH prepend
-  for the engine .so) into $GITHUB_ENV. The MACHINE-static oneAPI environment
-  (MKLROOT/TBBROOT/CPATH/… + the oneAPI LD_LIBRARY_PATH) is injected into every
-  job by the runner's own .env file — written once by the bootstrap managed
-  block (scripts/bootstrap-laplace-runner.sh: bootstrap_runner_job_env) — so
-  jobs do NOT re-source setvars.sh. A conditional fallback below covers runners
-  bootstrapped before that block existed. The T0 perf-cache needs no env at
-  all: the CLI discovers it (env override → /opt/laplace/share/laplace →
-  build-tree walk-up; Laplace.Cli ResolveBlob).
+  for the engine .so) into $GITHUB_ENV.
 
 runs:
   using: composite
@@ -16,9 +9,6 @@ runs:
     - name: Export workspace env (+ oneAPI fallback for pre-.env runners)
       shell: bash
       run: |
-        # Fallback ONLY: if the runner's .env managed block hasn't provided
-        # the toolchain env (pre-managed-block runner), source setvars here.
-        # setvars trips unset-var checks — relax `-u` only across the source.
         if [ -z "${MKLROOT:-}" ]; then
           set +u
           source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
@@ -27,17 +17,8 @@ runs:
           echo "PATH=$PATH" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
         else
-          # Workspace-relative prepend: engine libs (core/dynamics/synthesis)
-          # ahead of the oneAPI libs the runner .env provided. $PWD is the
-          # repo root post-checkout.
           echo "LD_LIBRARY_PATH=$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
         fi
-        # DB targeting. The CODE defaults to laplace-dev (an unset env is the safe
-        # dev DB, never prod). CI is the prod run: supply `laplace` here so every
-        # job's dotnet tools (migrations/CLI) and psql helpers hit prod — but
-        # RESPECT a value a workflow already set (job-level env, _build-deploy's
-        # per-step PGDATABASE, or a laplace-dev workflow_dispatch). ${VAR:-laplace}
-        # reads whatever is present when this step runs, so it only fills the default.
         echo "PGDATABASE=${PGDATABASE:-laplace}" >> "$GITHUB_ENV"
         echo "LAPLACE_QUERY_DB=${LAPLACE_QUERY_DB:-laplace}" >> "$GITHUB_ENV"
         echo "LAPLACE_DB=${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=laplace}" >> "$GITHUB_ENV"

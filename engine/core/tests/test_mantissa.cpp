@@ -26,7 +26,7 @@ uint64_t fp_mantissa(double d) {
 constexpr uint64_t kBiasedExpZero = 0x3FFULL;
 constexpr uint64_t kFlagsMask52   = (1ULL << 52) - 1ULL;
 
-}  // namespace
+}
 
 TEST(LaplaceCoreMantissa, ZeroPayloadRoundTrip) {
     const mantissa_payload_t in = {{0, 0}, 0, 0, 0};
@@ -43,7 +43,6 @@ TEST(LaplaceCoreMantissa, ZeroPayloadRoundTrip) {
     EXPECT_EQ(out.run_length, 0u);
     EXPECT_EQ(out.flags, 0ULL);
 
-    /* All-zero payload → every vertex coord is exactly +1.0. */
     EXPECT_DOUBLE_EQ(vertex[0], 1.0);
     EXPECT_DOUBLE_EQ(vertex[1], 1.0);
     EXPECT_DOUBLE_EQ(vertex[2], 1.0);
@@ -51,9 +50,6 @@ TEST(LaplaceCoreMantissa, ZeroPayloadRoundTrip) {
 }
 
 TEST(LaplaceCoreMantissa, FixedExponentInvariant) {
-    /* Every packed vertex coord MUST have biased exponent 0x3FF and magnitude
-     * in [1, 2). This is what makes the LINESTRING PG-geometry-valid (finite,
-     * normal) under any input payload. */
     const mantissa_payload_t inputs[] = {
         {{0, 0}, 0, 0, 0},
         {{~0ULL, ~0ULL}, 0xFFFFu, 0xFFFFu, kFlagsMask52},
@@ -74,7 +70,6 @@ TEST(LaplaceCoreMantissa, FixedExponentInvariant) {
 }
 
 TEST(LaplaceCoreMantissa, FullHashRoundTripsExactly) {
-    /* All 128 BLAKE3 bits must survive — no truncation. */
     const hash128_t h = {0xFEDCBA9876543210ULL, 0x0123456789ABCDEFULL};
     const mantissa_payload_t in = {h, 0, 0, 0};
 
@@ -104,7 +99,6 @@ TEST(LaplaceCoreMantissa, MaxFieldsRoundTrip) {
 }
 
 TEST(LaplaceCoreMantissa, HashLivesInXYZNotM) {
-    /* With zero metadata, only XYZ carry data; M is +1.0 (sign 0, mantissa 0). */
     const hash128_t h = {0xDEADBEEFCAFEBABEULL, 0x0123456789ABCDEFULL};
     const mantissa_payload_t in = {h, 0, 0, 0};
     double vertex[4];
@@ -113,7 +107,6 @@ TEST(LaplaceCoreMantissa, HashLivesInXYZNotM) {
 }
 
 TEST(LaplaceCoreMantissa, MetadataLivesInMNotXYZ) {
-    /* With zero hash and zero flags, only M carries data; XYZ are all +1.0. */
     const mantissa_payload_t in = {{0, 0}, 1234u, 7u, 0};
     double vertex[4];
     mantissa_pack(vertex, &in);
@@ -130,9 +123,6 @@ TEST(LaplaceCoreMantissa, MetadataLivesInMNotXYZ) {
 }
 
 TEST(LaplaceCoreMantissa, FlagsSplitAcrossZAndMHighBits) {
-    /* Flag bit 0 lands in Z's high half; flag bit 31 (first M-side flag) lands
-     * in M's high half. Verifies the documented bit distribution and that
-     * round-trip recovers the original 52-bit flag word. */
     const mantissa_payload_t low_flag = {{0, 0}, 0, 0, 1ULL};
     double vertex[4];
     mantissa_pack(vertex, &low_flag);
@@ -158,8 +148,6 @@ TEST(LaplaceCoreMantissa, FlagsSplitAcrossZAndMHighBits) {
 }
 
 TEST(LaplaceCoreMantissa, FlagsAboveBit51AreMasked) {
-    /* The high 12 bits of `flags` are documented as MUST-be-zero; if a caller
-     * accidentally sets them, they must not leak into other fields. */
     const mantissa_payload_t in = {{0, 0}, 0, 0, ~0ULL};
     double vertex[4];
     mantissa_pack(vertex, &in);
@@ -174,16 +162,8 @@ TEST(LaplaceCoreMantissa, FlagsAboveBit51AreMasked) {
 }
 
 TEST(LaplaceCoreMantissa, SameHashSameXYZBitsAcrossPayloads) {
-    /* The visualization property: same entity_id → identical XYZ bit
-     * patterns whenever the Z-side flag bits agree. Same constituent renders
-     * to the same 3D scatter position across every vertex that references it.
-     *
-     * Z holds hash[106..127] + flags[0..30], so XYZ-identity requires both
-     * the hash AND the low 31 flag bits to match. M-only metadata (ordinal,
-     * run_length, flags[31..51]) is free to vary. */
     const hash128_t h = {0xDEADBEEFCAFEBABEULL, 0x0123456789ABCDEFULL};
 
-    /* M-only flags: bits 31..51 only — leaves Z-side flags[0..30] zero. */
     const uint64_t m_only_flags = (uint64_t)0xABCDE << 31;
 
     const mantissa_payload_t a = {h, 0,       0,    0};
@@ -199,11 +179,9 @@ TEST(LaplaceCoreMantissa, SameHashSameXYZBitsAcrossPayloads) {
 }
 
 TEST(LaplaceCoreMantissa, ZShiftsWhenZSideFlagsDiffer) {
-    /* Counterpart to SameHashSameXYZBitsAcrossPayloads: Z legitimately differs
-     * when flags[0..30] differ, even with identical hash. */
     const hash128_t h = {0xDEADBEEFCAFEBABEULL, 0x0123456789ABCDEFULL};
     const mantissa_payload_t a = {h, 0, 0, 0};
-    const mantissa_payload_t b = {h, 0, 0, 0xABCDEFULL};  /* sets bits 0..23 */
+    const mantissa_payload_t b = {h, 0, 0, 0xABCDEFULL};
     double va[4], vb[4];
     mantissa_pack(va, &a);
     mantissa_pack(vb, &b);
@@ -226,9 +204,6 @@ TEST(LaplaceCoreMantissa, DeterministicAcrossRuns) {
 }
 
 TEST(LaplaceCoreMantissa, EveryHashBitProbed) {
-    /* For each of 128 hash positions, set exactly that one bit, round-trip,
-     * verify only that bit comes back. Catches off-by-one in the X/Y/Z
-     * splice arithmetic. */
     for (int bit = 0; bit < 128; ++bit) {
         hash128_t h = {0, 0};
         if (bit < 64) h.lo = 1ULL << bit;

@@ -6,12 +6,6 @@ using Xunit;
 
 namespace Laplace.Decomposers.PropBank.Tests;
 
-/// <summary>
-/// Verifies PropBankDecomposer against a tiny inline frameset XML fixture (one predicate,
-/// one roleset, numbered roles with a VerbNet rolelink, an example): registry-routed kinds,
-/// the shared meta id conventions (roleset / VN class), the arg-number ordinal context, and
-/// no raw rows. ContentEmitter routes text through the perf-cache (host precondition).
-/// </summary>
 public sealed class PropBankDecomposerTests
 {
     static PropBankDecomposerTests() => CodepointPerfcache.Load(ResolvePerfcacheBlob());
@@ -30,9 +24,6 @@ public sealed class PropBankDecomposerTests
         throw new InvalidOperationException("perf-cache blob not found; build the engine or set LAPLACE_PERFCACHE_BIN.");
     }
 
-    // A faithful give.xml fixture: predicate "give", roleset give.01 "transfer", three
-    // numbered roles (giver/0, thing given/1, entity given to/2) each with a VerbNet rolelink
-    // (class give-13.1-1, theta role), and one example.
     private const string FramesetXml = """
 <frameset>
   <predicate lemma="give">
@@ -82,7 +73,6 @@ public sealed class PropBankDecomposerTests
         Assert.Equal(Hash128.OfCanonical("propbank/roleset/give.01"), rsId);
         Assert.NotNull(giveId);
 
-        // lemma —HAS_SENSE→ roleset (the WordNet lemma→sense arena + direction).
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SENSE")
             && a.SubjectId == giveId!.Value && a.ObjectId == rsId);
@@ -96,7 +86,6 @@ public sealed class PropBankDecomposerTests
         var giverId = ContentEmitter.Emit(b, "giver", PropBankDecomposer.Source);
         var rsId = PropBankDecomposer.RolesetId("give.01");
 
-        // roleset —HAS_SEMANTIC_ROLE→ "giver" with arg 0's ordinal entity as context.
         var ord0 = PropBankDecomposer.OrdinalId("0");
         Assert.Equal(Hash128.OfCanonical("ordinal/0/v1"), ord0);
         Assert.NotNull(giverId);
@@ -112,7 +101,6 @@ public sealed class PropBankDecomposerTests
         var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
         var rsId = PropBankDecomposer.RolesetId("give.01");
 
-        // roleset ↔ VN class (bare-numeric 13.1-1 — collides with VerbNet/SemLink).
         var vnId = PropBankDecomposer.VnClassId("give-13.1-1");
         Assert.Equal(Hash128.OfCanonical("verbnet/class/13.1-1"), vnId);
         Assert.Contains(atts, a =>
@@ -120,7 +108,6 @@ public sealed class PropBankDecomposerTests
             && (a.SubjectId == rsId || a.ObjectId == rsId)
             && (a.SubjectId == vnId || a.ObjectId == vnId));
 
-        // PB role "giver" ↔ VN theta "agent" (both content), VN class as context.
         var giverId = ContentEmitter.Emit(b, "giver", PropBankDecomposer.Source);
         var agentId = ContentEmitter.Emit(b, "agent", PropBankDecomposer.Source);
         Assert.NotNull(giverId);
@@ -174,10 +161,8 @@ public sealed class PropBankDecomposerTests
                 atts.AddRange(change.Attestations.ToArray());
             return atts;
         }
-        finally { try { Directory.Delete(dir, recursive: true); } catch { /* best effort */ } }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { } }
     }
-
-    // === fakes ===
 
     private sealed class FakeContext(ISubstrateWriter writer) : IDecomposerContext
     {

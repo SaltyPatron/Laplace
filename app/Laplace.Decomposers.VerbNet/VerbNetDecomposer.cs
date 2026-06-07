@@ -7,37 +7,8 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.VerbNet;
 
-/// <summary>
-/// Emits VerbNet 3.4 (Palmer et al.) into the substrate as "content + attestations".
-///
-/// VerbNet groups verbs into Levin-style classes (give-13.1, …), each a verb-sense
-/// inventory with thematic roles, syntactic frames, and per-frame example sentences.
-/// Classes nest into subclasses (give-13.1-1) recursively.
-///
-/// <para><b>The law applied:</b> verb member LEMMAS, thematic-role NAMES (Agent / Theme /
-/// Recipient / …), frame DESCRIPTIONS (the "NP V NP PP.recipient" primary string), and
-/// frame EXAMPLE sentences are CONTENT entities (<see cref="ContentEmitter"/>) so they
-/// co-assert with WordNet, PropBank, FrameNet, and every prose/model witness for the same
-/// text. Only the abstract CLASS construct (no canonical text form) keeps a content-addressed
-/// meta id (<c>verbnet/class/&lt;id&gt;</c>) — the EXACT convention SemLink references back.</para>
-///
-/// <para>Coverage: member lemma —IS_A→ class; class —IS_A→ parent class (subclass nesting);
-/// class —HAS_THEMATIC_ROLE→ role name (selectional restriction set carried as a named-skip,
-/// see below); frame description —HAS_VERB_FRAME→ class (the SAME arena WordNet's verb frames
-/// use — deliberate co-assertion; RelationTypeRegistry orients subject=class, object=frame content via
-/// the registry's direction handling — emitted class→frame, asymmetric); frame example
-/// —HAS_EXAMPLE→ class (context = class); member <c>wn=</c> sense keys —CORRESPONDS_TO→ the
-/// WordNet sense entity (<c>wordnet/sense/&lt;key&gt;</c>, the WordNetDecomposer convention).</para>
-///
-/// <para>Single XML pass per class file (subclasses recursed in-file): each batch is
-/// self-contained — the class meta entity + every referenced content/sense entity ride the
-/// same intent as the attestations (the writer orders entities before attestations), so the
-/// FK floor always holds and batches commit in any order (ON CONFLICT idempotent).</para>
-/// </summary>
 public sealed class VerbNetDecomposer : IDecomposer
 {
-    /// <summary>Meta-entity canonical names — registered post-ingest so
-    /// render() answers in names, never hex (2026-06-05).</summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> MetaNames = new();
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback
@@ -53,12 +24,6 @@ public sealed class VerbNetDecomposer : IDecomposer
     private static readonly Hash128 WordNetSenseTypeId =
         Hash128.OfCanonical("substrate/type/WordNet_Sense/v1");
 
-    // Meta-entity id conventions (the LAW: classes get meta ids; SemLink + PropBank
-    // reference these EXACT strings). A class id is keyed on the BARE NUMERIC form
-    // (give-13.1 → 13.1, give-13.1-1 → 13.1-1): VerbNet's XML ID carries the lemma
-    // prefix, PropBank rolelinks carry it too, but SemLink's instance JSONs use the
-    // bare numeric form — stripping the prefix is what makes all three resources
-    // co-assert on ONE class entity instead of forking parallel near-duplicates.
     internal static Hash128 ClassId(string classId)
     {
         string name = $"verbnet/class/{NumericClassId(classId)}";
@@ -67,24 +32,17 @@ public sealed class VerbNetDecomposer : IDecomposer
     }
     internal static Hash128 SenseId(string senseKey)  => Hash128.OfCanonical($"wordnet/sense/{senseKey}");
 
-    /// <summary>Strip a VerbNet class id's lemma prefix to its bare numeric form:
-    /// <c>give-13.1</c> → <c>13.1</c>; <c>give-13.1-1</c> → <c>13.1-1</c>;
-    /// <c>break_down-45.8</c> → <c>45.8</c>; <c>13.1-1</c> (already bare, as
-    /// PropBank/SemLink emit) → <c>13.1-1</c>. A class id either starts with a
-    /// digit (already bare) or with an alphabetic lemma the first
-    /// <c>-&lt;digit&gt;</c> separates from the numeric class.</summary>
     internal static string NumericClassId(string classId)
     {
-        if (classId.Length == 0 || char.IsDigit(classId[0])) return classId;  // already bare numeric
+        if (classId.Length == 0 || char.IsDigit(classId[0])) return classId;
         for (int i = classId.IndexOf('-'); i >= 0 && i + 1 < classId.Length; i = classId.IndexOf('-', i + 1))
             if (char.IsDigit(classId[i + 1])) return classId[(i + 1)..];
-        return classId;   // no numeric class found (defensive)
+        return classId;
     }
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "VerbNetDecomposer";
-    public int     LayerOrder   => 2;   // needs only unicode(0)+iso(1); WordNet senses are
-                                         // referenced by id and emitted idempotently here
+    public int     LayerOrder   => 2;
     public Hash128 TrustClassId => TrustClass;
 
     private const long EstimatedClasses = 329L;
@@ -93,9 +51,7 @@ public sealed class VerbNetDecomposer : IDecomposer
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("VerbNet_Class");
-        boot.AddType("WordNet_Sense");        // matches WordNetDecomposer's sense-entity type
-        // Rank/trust live ONLY in RelationTypeRegistry; AddRelationType(name) just guarantees the
-        // kind entity exists (SeedCanonical in Build() seeds every canonical arena).
+        boot.AddType("WordNet_Sense");
         boot.AddRelationType("IS_A");
         boot.AddRelationType("HAS_THEMATIC_ROLE");
         boot.AddRelationType("HAS_VERB_FRAME");
@@ -120,7 +76,7 @@ public sealed class VerbNetDecomposer : IDecomposer
             ct.ThrowIfCancellationRequested();
             var doc = new XmlDocument();
             try { doc.Load(file); }
-            catch (XmlException) { continue; }   // tolerate a malformed file, keep ingesting
+            catch (XmlException) { continue; }
             var root = doc.DocumentElement;
             if (root is null || !root.Name.Equals("VNCLASS", StringComparison.Ordinal)) continue;
 
@@ -141,11 +97,6 @@ public sealed class VerbNetDecomposer : IDecomposer
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    // ── emission ──────────────────────────────────────────────────────────────
-
-    /// <summary>Emit one VNCLASS or VNSUBCLASS element (and recurse into its
-    /// SUBCLASSES). <paramref name="el"/>'s ID attribute is the class id; for a
-    /// subclass, <paramref name="parentClassId"/> is the enclosing class.</summary>
     private static void EmitClass(SubstrateChangeBuilder b, XmlElement el, string? parentClassId)
     {
         string? classId = el.GetAttribute("ID");
@@ -154,8 +105,6 @@ public sealed class VerbNetDecomposer : IDecomposer
         Hash128 classEntity = ClassId(classId);
         b.AddEntity(new EntityRow(classEntity, (byte)MetaTier.Meta, ClassTypeId, Source));
 
-        // class —IS_A→ parent class (subclass nesting). The parent meta entity
-        // also rides this batch so the FK holds standalone (idempotent).
         if (parentClassId is not null)
         {
             Hash128 parentEntity = ClassId(parentClassId);
@@ -164,7 +113,6 @@ public sealed class VerbNetDecomposer : IDecomposer
                 classEntity, "IS_A", parentEntity, Source, TC.AcademicCurated));
         }
 
-        // MEMBERS: lemma (content) —IS_A→ class; wn= sense keys —CORRESPONDS_TO→ WN sense.
         foreach (var member in ChildElements(el, "MEMBERS", "MEMBER"))
         {
             string name = member.GetAttribute("name").Replace('_', ' ').Trim();
@@ -174,9 +122,6 @@ public sealed class VerbNetDecomposer : IDecomposer
             b.AddAttestation(RelationTypeRegistry.Attest(
                 lemmaId.Value, "IS_A", classEntity, Source, TC.AcademicCurated));
 
-            // wn="give%2:40:03 give%2:40:00 …" — WordNet sense keys. Normalize to the
-            // index.sense canonical form (strip an uncertainty '?'/'!' marker; append
-            // the '::' the data drops) so the id matches WordNetDecomposer's exactly.
             string wn = member.GetAttribute("wn");
             if (wn.Length > 0)
                 foreach (var raw in wn.Split(' ', StringSplitOptions.RemoveEmptyEntries))
@@ -184,17 +129,12 @@ public sealed class VerbNetDecomposer : IDecomposer
                     string? key = NormalizeSenseKey(raw);
                     if (key is null) continue;
                     Hash128 senseEntity = SenseId(key);
-                    b.AddEntity(new EntityRow(senseEntity, /*tier*/ 2, WordNetSenseTypeId, Source));
+                    b.AddEntity(new EntityRow(senseEntity, 2, WordNetSenseTypeId, Source));
                     b.AddAttestation(RelationTypeRegistry.Attest(
                         lemmaId.Value, "CORRESPONDS_TO", senseEntity, Source, TC.AcademicCurated));
                 }
         }
 
-        // THEMROLES: class —HAS_THEMATIC_ROLE→ role NAME (content). The selectional
-        // restriction set (SELRESTRS, e.g. +animate ∨ +organization) is a named-skip
-        // here — it is a logic tree over restriction TYPES, not a single classifier
-        // value, so cheap context-id attachment would falsify it; recorded as a
-        // skip rather than mangled (see coverage report).
         foreach (var role in ChildElements(el, "THEMROLES", "THEMROLE"))
         {
             string type = role.GetAttribute("type").Trim();
@@ -205,8 +145,6 @@ public sealed class VerbNetDecomposer : IDecomposer
                 classEntity, "HAS_THEMATIC_ROLE", roleId.Value, Source, TC.AcademicCurated));
         }
 
-        // FRAMES: frame DESCRIPTION primary (content) —HAS_VERB_FRAME→ class;
-        // each EXAMPLE (content) —HAS_EXAMPLE→ class (context = class).
         foreach (var frame in ChildElements(el, "FRAMES", "FRAME"))
         {
             string primary = "";
@@ -219,8 +157,6 @@ public sealed class VerbNetDecomposer : IDecomposer
             {
                 var frameId = ContentEmitter.Emit(b, primary, Source);
                 if (frameId is not null)
-                    // SAME arena as WordNet verb frames; registry orients subject=class,
-                    // object=frame content (HAS_VERB_FRAME is asymmetric, no flip).
                     b.AddAttestation(RelationTypeRegistry.Attest(
                         classEntity, "HAS_VERB_FRAME", frameId.Value, Source, TC.AcademicCurated));
             }
@@ -237,13 +173,10 @@ public sealed class VerbNetDecomposer : IDecomposer
             }
         }
 
-        // SUBCLASSES (recursive): each VNSUBCLASS is a class with this class as parent.
         foreach (var subWrap in DirectChildren(el, "SUBCLASSES"))
             foreach (var sub in DirectChildren(subWrap, "VNSUBCLASS"))
                 EmitClass(b, sub, parentClassId: classId);
     }
-
-    // ── helpers ──────────────────────────────────────────────────────────────
 
     private static SubstrateChangeBuilder NewBuilder(string unit, int batch) =>
         new(Source, unit, null,
@@ -251,24 +184,14 @@ public sealed class VerbNetDecomposer : IDecomposer
             physicalityCapacity: batch * 64,
             attestationCapacity: batch * 32);
 
-    /// <summary>Normalize a VerbNet <c>wn=</c> sense key to the WordNet
-    /// <c>index.sense</c> canonical form so its content-addressed id matches the
-    /// WordNetDecomposer's. VerbNet drops the trailing <c>::</c> (the
-    /// lemma_id:head_word:head_id suffix) and prefixes uncertain senses with
-    /// <c>?</c>/<c>!</c>; both are reconciled here. Returns null if the token is
-    /// not a sense key (no <c>%</c>).</summary>
     internal static string? NormalizeSenseKey(string raw)
     {
         string k = raw.Trim().TrimStart('?', '!');
         int pct = k.IndexOf('%');
         if (pct <= 0 || pct + 1 >= k.Length) return null;
-        // Collapse any trailing colons, then restore the canonical "::" the
-        // index.sense key always carries.
         return k.TrimEnd(':') + "::";
     }
 
-    /// <summary>The 329 class XMLs. The data root may be the repo root (contains
-    /// <c>verbnet3.4/</c>) or the class dir itself.</summary>
     private static string ResolveClassDir(string ecosystemPath)
     {
         foreach (var c in new[]
@@ -291,9 +214,6 @@ public sealed class VerbNetDecomposer : IDecomposer
             yield return f;
     }
 
-    /// <summary>Direct child elements of <paramref name="el"/> named
-    /// <paramref name="name"/> (no descendant recursion — VNSUBCLASS nesting means
-    /// GetElementsByTagName would leak a subclass's MEMBERS into its parent).</summary>
     private static IEnumerable<XmlElement> DirectChildren(XmlElement el, string name)
     {
         foreach (XmlNode child in el.ChildNodes)
@@ -301,9 +221,6 @@ public sealed class VerbNetDecomposer : IDecomposer
                 yield return ce;
     }
 
-    /// <summary>Items named <paramref name="item"/> inside the single direct-child
-    /// wrapper <paramref name="wrapper"/> (e.g. MEMBER inside MEMBERS) — scoped to
-    /// THIS class, never a nested subclass's.</summary>
     private static IEnumerable<XmlElement> ChildElements(XmlElement el, string wrapper, string item)
     {
         foreach (var w in DirectChildren(el, wrapper))

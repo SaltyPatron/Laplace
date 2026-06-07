@@ -6,12 +6,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Model;
 
-/// <summary>
-/// Extracts a Model_Recipe entity + per-field attestations from config.json.
-/// The recipe entity ID = Hash128.Blake3(canonical config.json bytes).
-/// Per-field attestations record the model architecture parameters on the recipe
-/// entity (HAS_HIDDEN_SIZE, HAS_NUM_LAYERS, etc.) for substrate queries.
-/// </summary>
 public sealed class LlamaRecipeExtractor
 {
     public sealed class RecipeInfo
@@ -45,26 +39,18 @@ public sealed class LlamaRecipeExtractor
             if (len > 0) arch = archArr[0].GetString() ?? arch;
         }
 
-        // Required structural dims — refuse to guess. A missing key means the
-        // config isn't the architecture we assume; a silent Llama-shaped default
-        // (2048/22/32/5632/32000) would corrupt the ingest. Faithfulness mandate.
         int hiddenSize = GetIntRequired(root, "hidden_size");
         int numLayers  = GetIntRequired(root, "num_hidden_layers");
         int numHeads   = GetIntRequired(root, "num_attention_heads");
-        // num_key_value_heads legitimately absent on pure-MHA models → = numHeads.
         int numKvHeads = GetInt(root, "num_key_value_heads", numHeads);
         int intermSize = GetIntRequired(root, "intermediate_size");
         int vocabSize  = GetIntRequired(root, "vocab_size");
         string dtype   = root.TryGetProperty("torch_dtype",  out var dtProp) ? dtProp.GetString() ?? "bfloat16" : "bfloat16";
         string act     = root.TryGetProperty("hidden_act",   out var actProp) ? actProp.GetString() ?? "silu" : "silu";
         double theta   = GetDoubleOr(root, "rope_theta", 10000.0);
-        // Phi (and others) carry rms_norm_eps:null and use layer_norm_eps instead; GetDouble()
-        // on a JSON null throws. Take rms_norm_eps if it's a real number, else layer_norm_eps,
-        // else 1e-5 — generic across norm conventions, never crashes on a null.
         double rmsEps  = GetDoubleOr(root, "rms_norm_eps", GetDoubleOr(root, "layer_norm_eps", 1e-5));
         string mtype   = root.TryGetProperty("model_type",   out var mtProp) ? mtProp.GetString() ?? "llama" : "llama";
 
-        /* Canonical bytes = deterministic JSON re-serialisation (sorted keys). */
         byte[] canonical = CanonicalizeJson(root);
         var recipeId = Hash128.Blake3(canonical);
 
@@ -87,9 +73,6 @@ public sealed class LlamaRecipeExtractor
         };
     }
 
-    /// <summary>
-    /// Yield the recipe entity + recipe-parameter attestations as a single SubstrateChange.
-    /// </summary>
     public static SubstrateChange BuildChange(
         RecipeInfo recipe,
         Hash128 sourceId,
@@ -108,14 +91,11 @@ public sealed class LlamaRecipeExtractor
 
         b.AddEntity(recipe.RecipeEntityId, (byte)MetaTier.Meta, modelRecipeTypeId, firstObservedBy: sourceId);
 
-        // Recipe attestations are categorical config facts (HAS_*; the value lives in
-        // the object entity, not the score). A confirm observation, full trust.
         void AddAttestation(Hash128 typeId, Hash128? objectId)
             => b.AddAttestation(AttestationFactory.CreateCategorical(
                 recipe.RecipeEntityId, typeId, objectId, sourceId, contextId: null,
                 confirm: true, witnessWeight: 1.0));
 
-        /* Scalar-valued recipe parameters stored as content entities */
         void AddScalar(Hash128 typeId, string value)
         {
             var valueBytes = Encoding.UTF8.GetBytes(value);
@@ -131,7 +111,6 @@ public sealed class LlamaRecipeExtractor
         AddScalar(hasIntermSizeTypeId,  recipe.IntermediateSize.ToString());
         AddScalar(hasVocabSizeTypeId,   recipe.VocabSize.ToString());
 
-        /* IS_A attestation → architecture entity */
         b.AddEntity(architectureEntityId, (byte)MetaTier.Meta, Hash128.OfCanonical("substrate/type/Architecture/v1"), sourceId);
         AddAttestation(isAKindId, architectureEntityId);
 
@@ -142,12 +121,9 @@ public sealed class LlamaRecipeExtractor
     {
         if (root.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.Number)
             return prop.GetInt32();
-        return def;   // absent OR null (e.g. num_key_value_heads:null) → default
+        return def;
     }
 
-    // Double-or-default that tolerates absent AND null (JSON null is ValueTypeId.Null, not
-    // Number → GetDouble() would throw). Generic across configs that null out a key they
-    // don't use (Phi: rms_norm_eps:null).
     private static double GetDoubleOr(JsonElement root, string key, double def)
     {
         if (root.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.Number)
@@ -155,10 +131,6 @@ public sealed class LlamaRecipeExtractor
         return def;
     }
 
-    // No default — a missing required structural dim throws rather than silently
-    // substituting a (Llama-shaped) guess. Per the exact/faithful mandate: never
-    // invent model geometry. The embed-tensor size check in WeightTensorETL is a
-    // backstop; this fails earlier with a clearer message.
     private static int GetIntRequired(JsonElement root, string key)
     {
         if (root.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.Number)
@@ -170,7 +142,6 @@ public sealed class LlamaRecipeExtractor
 
     private static byte[] CanonicalizeJson(JsonElement root)
     {
-        /* Sort keys alphabetically for determinism. */
         var opts = new JsonSerializerOptions { WriteIndented = false };
         using var ms = new System.IO.MemoryStream();
         using var writer = new Utf8JsonWriter(ms);
@@ -197,7 +168,7 @@ public sealed class LlamaRecipeExtractor
         kind.WriteBytes(buf.Slice(16, 16));
         (obj ?? default).WriteBytes(buf.Slice(32, 16));
         source.WriteBytes(buf.Slice(48, 16));
-        buf.Slice(64, 16).Clear(); /* context = zero */
+        buf.Slice(64, 16).Clear();
         return Hash128.Blake3(buf);
     }
 }

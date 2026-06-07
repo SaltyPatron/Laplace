@@ -1,29 +1,4 @@
 #!/usr/bin/env python3
-"""validate-arena-reconstruction.py — does consensus μ faithfully encode the weights?
-
-The export's correctness rests on one measurable premise: that the stored
-signed consensus strength for an arena cell is a faithful (monotone, ideally
-near-linear) proxy of the source weight at that cell. If it is, a wrong export
-is a distribution bug. If it isn't, the score→Glicko→μ chain is lossy and no
-exporter can recover the model — you need to know which.
-
-EMBEDS is the clean probe: ONE global tensor, a single position, so there is
-NO cross-layer aggregation to confound the measurement. Any gap is purely the
-encode→accumulate→invert round-trip.
-
-Method, for one token row of model.embed_tokens.weight:
-  forward (ingest):  score = ½(1 + tanh(w / M)),  M = pooled RMS of the tensor
-                     → one Glicko game vs the neutral 1500 line → consensus μ
-  inverse (export):  m̂ = atanh(2·E(μ) − 1),  E(μ) = expected score of μ vs 1500
-  faithful iff m̂ ≈ w / M  (and ŵ = m̂·M ≈ w).
-
-Reports Pearson r, Spearman ρ, and relative L2 error ‖ŵ−w‖/‖w‖ over the row's
-2048 channels — raw numbers, no interpretation baked in.
-
-Usage:
-  validate-arena-reconstruction.py <model_dir> <token_surface> \
-      "<conninfo>" "<source_cli_hex>" "<token_entity_cli_hex>"
-"""
 import json, struct, sys, math, os, subprocess
 import numpy as np
 
@@ -42,7 +17,6 @@ def load_embed(model_dir):
 
 
 def signed_strength(mu):
-    # μ (Glicko rating, neutral 1500) → expected score vs 1500 → atanh.
     e = 1.0 / (1.0 + np.power(10.0, -(mu - 1500.0) / 400.0))
     x = np.clip(2.0 * e - 1.0, -1 + 1e-12, 1 - 1e-12)
     return np.arctanh(x)
@@ -50,7 +24,7 @@ def signed_strength(mu):
 
 def main():
     if len(sys.argv) != 6:
-        sys.exit(__doc__)
+        sys.exit('Usage: validate-arena-reconstruction.py <model_dir> <token_surface> "<conninfo>" "<source_cli_hex>" "<token_entity_cli_hex>"')
     model_dir, surface, conn, src_hex, tok_hex = sys.argv[1:6]
 
     vocab = json.load(open(os.path.join(model_dir, "tokenizer.json")))["model"]["vocab"]
@@ -61,13 +35,10 @@ def main():
 
     E = load_embed(model_dir)
     M = math.sqrt(float(np.mean(E * E)))
-    w = E[tid]                      # [d_model] true weights for this token row
+    w = E[tid]
     d = w.shape[0]
     print(f"token {key!r} id={tid}  d_model={d}  arena M(EMBEDS)={M:.6e}")
 
-    # Pull this token's per-channel consensus μ from the DB, ordered by channel
-    # index (axis entity id = BLAKE3('model/<src>/channel/<i>')). cli hex → DB
-    # byte order (per-u64 LE) is done in SQL via the same halving the demo uses.
     sql = f"""
     WITH ax AS (
       SELECT i, public.laplace_hash128_blake3(
@@ -105,16 +76,10 @@ def main():
 
     wp = w[present]
     mhat = signed_strength(mu[present])
-    target = wp / M                 # what m̂ should equal if faithful
-    what = mhat * M                 # reconstructed weight estimate (approx inverse)
+    target = wp / M
+    what = mhat * M
 
-    # --- CALIBRATED inverse via the REAL kernel ----------------------------
-    # The encode w→μ is deterministic given (M, opponent φ, prior, tau), the
-    # SAME for every EMBEDS cell. Build the exact forward table w→μ by running
-    # the substrate's own laplace_glicko2_accumulate over a w-grid (one game,
-    # neutral 1500 prior + opponent, φ = WitnessPhi(0.27·0.50)), then invert by
-    # monotone interpolation. This is the inverse the exporter SHOULD use.
-    phi = 350.0 + (30.0 - 350.0) * (0.27 * 0.50)        # WitnessPhi(weight)
+    phi = 350.0 + (30.0 - 350.0) * (0.27 * 0.50)
     grid_w = np.linspace(-6.0 * M, 6.0 * M, 2001)
     score_fp = np.clip(0.5 * (1.0 + np.tanh(grid_w / M)), 0, 1) * 1_000_000_000
     rows = ",".join(f"({i},{int(s)})" for i, s in enumerate(score_fp))
@@ -128,14 +93,12 @@ def main():
     if fo.returncode != 0:
         sys.exit("forward-map psql failed:\n" + fo.stderr)
     gmu = np.array([float(l.split(",")[1]) for l in fo.stdout.strip().splitlines()])
-    order = np.argsort(gmu)                       # monotone → sort for interp
+    order = np.argsort(gmu)
     what_cal = np.interp(mu[present], gmu[order], grid_w[order])
-    # tanh saturation: |w/M| beyond which score rounds to 0/1 in fixed point
     sat = np.abs(wp) / M > 6.0
     sat_any = np.abs(wp) / M > np.arctanh(1 - 2e-9) if True else sat
     n_sat = int((0.5*(1+np.tanh(wp/M)) > 1 - 1e-9).sum() + (0.5*(1+np.tanh(wp/M)) < 1e-9).sum())
 
-    # Correlations and error — raw.
     def pearson(a, b):
         a, b = a - a.mean(), b - b.mean()
         return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-30))

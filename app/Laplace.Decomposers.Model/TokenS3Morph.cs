@@ -6,48 +6,13 @@ using DynInterop = Laplace.Engine.Dynamics.NativeInterop;
 
 namespace Laplace.Decomposers.Model;
 
-/// <summary>
-/// Model embedding → S³ morph (SUBSTRATE-FOUNDATION truth #3).
-///
-/// The S³ glome is the canonical, Unicode-anchored embedding frame. A model is a
-/// witness: its <c>embed_tokens</c> table is morphed ONTO that shared frame — it is
-/// NOT a conventional per-model embedding. Each token becomes a Projection physicality
-/// placing the model's view of that token on the shared frame, alongside the token's
-/// canonical Content physicality (and every other source's Projection of it) — that
-/// shared frame is the cross-model consensus moat.
-///
-/// The morph is the exact ratified pipeline, using the engine's real dynamics kernels
-/// (NOT a PCA/SVD stand-in):
-///
-///   AI model embedding
-///     → Laplacian eigenmaps      (engine <c>laplacian_eigenmaps</c>): the embedding's
-///        local-neighbourhood manifold structure, reduced to a low-dim basis via the
-///        spectrum of its k-NN graph Laplacian — preserves *which tokens are near which*,
-///        not global variance directions (that is what PCA would give, and is wrong here).
-///     → Gram-Schmidt             (engine <c>gram_schmidt_orthonormalize</c>): orthonormalize
-///        the eigenmap basis directions before alignment (Eigen HouseholderQR).
-///     → Procrustes alignment     (engine <c>procrustes_fit</c>/<c>_apply</c>): the rigid
-///        rotation + scale + translation that lands the orthonormal eigenmap basis onto the
-///        S³ content coords of the tokens in question (their Unicode-anchored placements).
-///
-/// This reads the embedding table (truth #1) — no recompute, no GEMM, no vocab² blowup.
-/// The interior q/k/v/o/gate/up/down resolution is OPEN (foundation doc §47) and is
-/// deliberately NOT emitted here — flagged, not fabricated.
-///
-/// Scaling: the dense <c>laplacian_eigenmaps</c> builds its k-NN graph by brute force
-/// (O(n²·d_model), single-threaded — see engine/dynamics/src/eigenmaps.cpp). That is
-/// fine for this model's anchorable vocab as a one-time ingest, but does NOT scale to
-/// frontier vocabularies; a sublinear k-NN (→ <c>laplacian_eigenmaps_from_sparse_graph</c>)
-/// or an out-of-sample (Nyström) extension is the scaling step, and is left explicitly
-/// open rather than faked.
-/// </summary>
 public sealed class TokenS3Morph
 {
-    private const int S3            = 4;    // S³ ⊂ ℝ⁴
-    private const int EigTargetDim  = 64;   // eigenmap basis dim (mirrors the synthesis spectral basis)
-    private const int KNeighbors    = 15;   // k-NN graph degree for the Laplacian
+    private const int S3            = 4;
+    private const int EigTargetDim  = 64;
+    private const int KNeighbors    = 15;
 
-    private readonly float[] _embed;   // [vocab × dModel] row-major, f32 (decoded)
+    private readonly float[] _embed;
     private readonly int _vocab;
     private readonly int _dModel;
     private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
@@ -67,27 +32,15 @@ public sealed class TokenS3Morph
 
     public IEnumerable<SubstrateChange> Emit()
     {
-        // 1. TWO different sets, deliberately (the 2026-06-05 correction —
-        //    "fit on anchors, place ALL"):
-        //    - The FIT set: anchorable vocab with a precomputed Unicode-anchored
-        //      S³ content coord (LlamaTokenizerParser.Parse → TokenRecord.Content*,
-        //      the documented Procrustes target). Alignment ground truth exists
-        //      only here (TinyLlama: 31,869 of 32,000).
-        //    - The PLACEMENT set: EVERY vocab row. The model witnesses geometry
-        //      for specials and invalid-UTF-8 byte-level tokens too — their
-        //      embedding rows exist — so the fitted transform APPLIES to all of
-        //      them; they are placed without an alignment residual (NULL: no
-        //      anchor to measure against). rec.EntityId is the exact entity the
-        //      vocab phase emitted (FK-safe); rec.TokenId is the embed-table row.
-        var fitIdx     = new List<int>(_vocab);       // index INTO the full eigenmap rows
-        var anchors    = new List<double[]>(_vocab);  // S³ targets B, [nFit × 4]
+        var fitIdx     = new List<int>(_vocab);
+        var anchors    = new List<double[]>(_vocab);
         var rows       = new List<LlamaTokenizerParser.TokenRecord>(_vocab);
         foreach (var rec in _tokens)
         {
             if (rec.TokenId < 0 || rec.TokenId >= _vocab) continue;
             rows.Add(rec);
         }
-        int n = rows.Count;                            // full placement set
+        int n = rows.Count;
         for (int i = 0; i < n; i++)
         {
             var rec = rows[i];
@@ -104,7 +57,6 @@ public sealed class TokenS3Morph
             return Array.Empty<SubstrateChange>();
         }
 
-        // 2. Gather the embedding rows for the FULL vocab (f32 → f64).
         var src = new double[(long)n * _dModel];
         for (int i = 0; i < n; i++)
         {
@@ -112,7 +64,6 @@ public sealed class TokenS3Morph
             for (int j = 0; j < _dModel; j++) src[(long)i * _dModel + j] = _embed[s + j];
         }
 
-        // 3. Laplacian eigenmaps over the FULL vocab manifold → [n × targetDim].
         var Y = new double[(long)n * targetDim];
         int rc;
         unsafe
@@ -128,11 +79,6 @@ public sealed class TokenS3Morph
             return Array.Empty<SubstrateChange>();
         }
 
-        // 4. Gram-Schmidt orthonormalize the targetDim basis DIRECTIONS. GS orthonormalizes
-        //    n_vecs row-vectors of length dim and requires n_vecs ≤ dim — so the data must be
-        //    laid out [targetDim × n] (each row one direction over the n tokens); calling it
-        //    on the token-major [n × targetDim] layout would return -2 / scramble (the layout
-        //    bug). Transpose in, orthonormalize, transpose back.
         var Yt = new double[(long)targetDim * n];
         for (int i = 0; i < n; i++)
             for (int d = 0; d < targetDim; d++) Yt[(long)d * n + i] = Y[(long)i * targetDim + d];
@@ -144,11 +90,6 @@ public sealed class TokenS3Morph
         else
             _log.LogWarning("S3-morph: gram_schmidt_orthonormalize rc={Rc}; using raw eigenmap basis", gsRc);
 
-        // 5. Procrustes: FIT on the anchored correspondences only (the eigenmap
-        //    rows of the anchorable tokens [nFit × targetDim] onto their S³
-        //    content coords [nFit × 4] — you can only align where ground truth
-        //    exists), then APPLY the fitted transform to every vocab row.
-        //    (Schönemann + Umeyama, engine SVD.)
         var Yfit = new double[(long)nFit * targetDim];
         for (int f = 0; f < nFit; f++)
             Array.Copy(Y, (long)fitIdx[f] * targetDim, Yfit, (long)f * targetDim, targetDim);
@@ -178,12 +119,6 @@ public sealed class TokenS3Morph
                 "phase=S3-morph: eigenmaps(target_dim={Td},k={K}) over {N} vocab rows → gram-schmidt → "
                 + "procrustes fit on {NFit} anchored (residual={R:F4})", targetDim, k, n, nFit, globalResid);
 
-            // 6. APPLY pass: transform every vocab row, re-normalize onto S³,
-            //    record per-token residuals where an anchor exists. The residual
-            //    is then THE metric of the TOKEN_MAPS_TO matchup ("the distance
-            //    becomes a metric in the Glicko-2 match" — 2026-06-05 ruling),
-            //    so the arena scale M = RMS(resid) over the anchored set is
-            //    measured BEFORE any score is assigned — never a knob.
             long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
             var outv = new double[S3];
             var px = new double[n]; var pyv = new double[n];
@@ -200,7 +135,7 @@ public sealed class TokenS3Morph
                 }
                 double x = outv[0], y = outv[1], z = outv[2], m = outv[3];
                 double norm = Math.Sqrt(x * x + y * y + z * z + m * m);
-                if (norm < 1e-12 || double.IsNaN(norm)) continue;   // degenerate; cannot place on S³
+                if (norm < 1e-12 || double.IsNaN(norm)) continue;
                 px[i] = x / norm; pyv[i] = y / norm; pz[i] = z / norm; pm[i] = m / norm;
                 placed[i] = true;
 
@@ -217,16 +152,6 @@ public sealed class TokenS3Morph
             }
             double arenaM = nResid > 0 ? Math.Sqrt(sumSq / nResid) : 0.0;
 
-            // 7. EMIT pass: one Projection physicality per placed token
-            //    (alignment_residual NULL where unanchored) + one TOKEN_MAPS_TO
-            //    matchup per placed token:
-            //      anchored  → magnitude m = (M − resid), arena scale M: a token
-            //                  landing on its content coordinate is a strong win
-            //                  (~0.76), the typical distance is a draw, far
-            //                  outliers are losses — ONE measured quantity is
-            //                  both center and scale;
-            //      unanchored (specials / non-UTF-8 bytes) or degenerate M →
-            //                  categorical confirm at registry rank.
             var bb = new SubstrateChangeBuilder(_sourceId, "model/embed-s3-morph",
                 entityCapacity: 0, physicalityCapacity: n, attestationCapacity: n);
             int emitted = 0, emittedAnchored = 0;

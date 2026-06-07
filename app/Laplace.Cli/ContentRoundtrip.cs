@@ -9,31 +9,16 @@ using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Cli;
 
-/// <summary>
-/// The non-attestation content path: record a text's composed tiers into the
-/// substrate (entities + CONTENT physicalities whose trajectory packs the
-/// ordered constituent ids), then reconstruct the exact bytes by reading those
-/// trajectories back out of the database. Pure content — no attestations. The
-/// split point for the attestation path is after <see cref="RecordAsync"/>
-/// returns the document id: a source would attest onto these content-addressed
-/// ids post-dedup. Generic over the tier→type map; text fills it here.
-/// </summary>
 internal static class ContentRoundtrip
 {
-    // Prompt = non-attested user data. Its own source entity + trust class.
     public static readonly Hash128 PromptSource = Hash128.OfCanonical("substrate/source/UserPrompt/v1");
     public static readonly Hash128 PromptTrust  = Hash128.OfCanonical("substrate/trust_class/UserPromptContent/v1");
 
-    // Text modality tier → type entity (T0 Codepoint already seeded).
     private static readonly Hash128 TGrapheme = Hash128.OfCanonical("substrate/type/Grapheme/v1");
     private static readonly Hash128 TWord     = Hash128.OfCanonical("substrate/type/Word/v1");
     private static readonly Hash128 TSentence = Hash128.OfCanonical("substrate/type/Sentence/v1");
     private static readonly Hash128 TDocument = Hash128.OfCanonical("substrate/type/Document/v1");
 
-    /// <summary>Register the prompt source + the text tier types as plain
-    /// entities. NO attestations — content is non-attested; the source's
-    /// trust class + any meaning are the deferred attestation path. (Trust
-    /// matters only when a source attests; pure content weights nothing.)</summary>
     public static async Task BootstrapAsync(ISubstrateWriter writer, CancellationToken ct = default)
     {
         var b = new SubstrateChangeBuilder(PromptSource, "bootstrap/UserPrompt", parentIntentId: null);
@@ -42,30 +27,16 @@ internal static class ContentRoundtrip
         b.AddEntity(TWord,     (byte)MetaTier.Meta, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
         b.AddEntity(TSentence, (byte)MetaTier.Meta, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
         b.AddEntity(TDocument, (byte)MetaTier.Meta, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
-        await writer.ApplyAsync(b.Build(), ct);   // entities only — nothing attested
+        await writer.ApplyAsync(b.Build(), ct);
     }
 
-    /// <summary>Decompose + compose the text, store the composed tiers (entities +
-    /// CONTENT physicalities with trajectories) AND the honest DISTRIBUTIONAL
-    /// witness (adjacent within-sentence word bigrams as PRECEDES evidence; the inverse is the reverse query)
-    /// through the writer, and return the document entity id (the reconstruction
-    /// handle). The bigrams are the ONLY thing prose can honestly attest beyond its
-    /// mechanical decomposition — usage/sequence, never meaning; semantics come from
-    /// curated sources and models. Witnessed at UserPrompt trust (kind_rank ×
-    /// source_trust), so a prose witness nudges co-occurrence μ but never out-votes
-    /// a curated relation.</summary>
     public static async Task<Hash128> RecordAsync(
         ISubstrateWriter writer, byte[] utf8, CancellationToken ct = default)
     {
-        // Single source of truth: TextEntityBuilder is the ONE decompose→emit path
-        // (tier-0 codepoints referenced not re-emitted, content-addressed dedup, the
-        // canonical lossless Build trajectory + POINT/LINESTRING geometry, and the
-        // distributional bigram witness). The prompt path adds no emission logic of
-        // its own — it just records under PromptSource at UserPrompt trust.
         double witnessWeight = RelationTypeRank.Associative * SourceTrust.UserPrompt;
         if (!TextEntityBuilder.TryBuildContentWitness(utf8, PromptSource, witnessWeight,
                 out var entities, out var physicalities, out var attestations, out var rootId, out _))
-            return Hash128.Zero;   // TextDecomposer rejected (empty / invalid UTF-8)
+            return Hash128.Zero;
 
         var b = new SubstrateChangeBuilder(PromptSource, "prompt", parentIntentId: null,
             entityCapacity: entities.Length, physicalityCapacity: physicalities.Length,
@@ -77,12 +48,6 @@ internal static class ContentRoundtrip
         return rootId;
     }
 
-    /// <summary>Reconstruct the original bytes from the database. Scales to
-    /// large content: ONE batched read pulls every composed entity's trajectory
-    /// for this source into an in-memory id→children DAG (bounded by the number
-    /// of UNIQUE n-grams, not by text length), then a DFS from the document
-    /// walks the DAG emitting codepoints. Codepoint id→value comes from the
-    /// perf-cache.</summary>
     public static async Task<byte[]> ReconstructAsync(
         NpgsqlDataSource ds, Hash128 documentId, CancellationToken ct = default)
     {
@@ -90,7 +55,6 @@ internal static class ContentRoundtrip
         ReadOnlySpan<CodepointRecord> recs = CodepointPerfcache.Records;
         for (int i = 0; i < recs.Length; i++) idToCp[recs[i].Hash] = recs[i].Codepoint;
 
-        // One query: all (entity → ordered constituent ids) for this source.
         var nConst = new Dictionary<Hash128, int>();
         var pts = new Dictionary<Hash128, List<(int path, double x, double y, double z, double m)>>();
 
@@ -114,7 +78,6 @@ internal static class ContentRoundtrip
             }
         }
 
-        // Build id → ordered children (sliced to the true constituent count).
         var children = new Dictionary<Hash128, Hash128[]>(pts.Count);
         foreach (var (id, list) in pts)
         {
@@ -130,7 +93,6 @@ internal static class ContentRoundtrip
             children[id] = verts[..take];
         }
 
-        // DFS from the document (tier depth is ~5, so recursion is shallow).
         var sb = new StringBuilder();
         Emit(documentId, children, idToCp, sb);
         return Encoding.UTF8.GetBytes(sb.ToString());

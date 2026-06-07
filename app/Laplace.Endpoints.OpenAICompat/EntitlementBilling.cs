@@ -249,8 +249,6 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
 
     public Task<StripeWebhookProcessResult> HandleStripeAsync(string payload, string? signature, CancellationToken ct)
     {
-        // Fail closed: with no signing secret we cannot verify authenticity, so we
-        // refuse to act on the event rather than trusting an unverified payload.
         if (string.IsNullOrWhiteSpace(_options.WebhookSecret))
             return Task.FromResult(Result(false, false, false, null, "unknown", "webhook_secret_unconfigured", null, null, null, null));
 

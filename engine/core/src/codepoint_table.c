@@ -2,19 +2,23 @@
 #include "laplace/core/perfcache_format.h"
 #include "laplace/core/hash128.h"
 
-#include <fcntl.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
 
-/* Process-wide loaded perf-cache. Loaded once at startup; lookups are
- * lock-free reads against the immutable mapping. */
 static struct {
-    const uint8_t*                     base;       /* mmap base */
-    size_t                             length;     /* mmap length */
+    const uint8_t*                     base;
+    size_t                             length;
     const laplace_perfcache_header_t*  header;
     const laplace_perfcache_record_t*  records;
     const laplace_perfcache_decomp_t*  decomp_recs;
@@ -25,20 +29,38 @@ static struct {
     uint64_t                           compose_count;
 } g_pc = {0};
 
-void codepoint_table_unload(void) {
-    if (g_pc.base) {
-        munmap((void*)g_pc.base, g_pc.length);
+#ifdef _WIN32
+
+static int pc_map(const char* path, const uint8_t** out_base, size_t* out_len) {
+    HANDLE f = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f == INVALID_HANDLE_VALUE) return -1;
+    LARGE_INTEGER sz;
+    if (!GetFileSizeEx(f, &sz)
+        || sz.QuadPart < (LONGLONG)(sizeof(laplace_perfcache_header_t)
+                                    + LAPLACE_PERFCACHE_TRAILER_BYTES)) {
+        CloseHandle(f);
+        return -1;
     }
-    memset(&g_pc, 0, sizeof(g_pc));
+    HANDLE m = CreateFileMappingA(f, NULL, PAGE_READONLY, 0, 0, NULL);
+    CloseHandle(f);
+    if (m == NULL) return -1;
+    void* v = MapViewOfFile(m, FILE_MAP_READ, 0, 0, 0);
+    CloseHandle(m);
+    if (v == NULL) return -1;
+    *out_base = (const uint8_t*)v;
+    *out_len = (size_t)sz.QuadPart;
+    return 0;
 }
 
-int codepoint_table_is_loaded(void) {
-    return g_pc.records != NULL;
+static void pc_unmap(const uint8_t* base, size_t len) {
+    (void)len;
+    UnmapViewOfFile((const void*)base);
 }
 
-int codepoint_table_load_perfcache(const char* path) {
-    if (path == NULL) return -1;   /* embedded-.rodata variant not yet wired */
+#else
 
+static int pc_map(const char* path, const uint8_t** out_base, size_t* out_len) {
     int fd = open(path, O_RDONLY);
     if (fd < 0) return -1;
 
@@ -52,35 +74,59 @@ int codepoint_table_load_perfcache(const char* path) {
     void* m = mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
     if (m == MAP_FAILED) return -1;
+    *out_base = (const uint8_t*)m;
+    *out_len = len;
+    return 0;
+}
 
-    const uint8_t* base = (const uint8_t*)m;
+static void pc_unmap(const uint8_t* base, size_t len) {
+    munmap((void*)base, len);
+}
+
+#endif
+
+void codepoint_table_unload(void) {
+    if (g_pc.base) {
+        pc_unmap(g_pc.base, g_pc.length);
+    }
+    memset(&g_pc, 0, sizeof(g_pc));
+}
+
+int codepoint_table_is_loaded(void) {
+    return g_pc.records != NULL;
+}
+
+int codepoint_table_load_perfcache(const char* path) {
+    if (path == NULL) return -1;
+
+    const uint8_t* base = NULL;
+    size_t len = 0;
+    if (pc_map(path, &base, &len) != 0) return -1;
+
     const laplace_perfcache_header_t* h = (const laplace_perfcache_header_t*)base;
 
     if (h->magic != LAPLACE_PERFCACHE_MAGIC || h->format_version != LAPLACE_PERFCACHE_VERSION) {
-        munmap(m, len); return -2;
+        pc_unmap(base, len); return -2;
     }
     if (h->record_count != LAPLACE_PERFCACHE_RECORD_COUNT
         || h->record_size != sizeof(laplace_perfcache_record_t)) {
-        munmap(m, len); return -3;
+        pc_unmap(base, len); return -3;
     }
-    /* Section bounds sanity. */
     uint64_t body_end = len - LAPLACE_PERFCACHE_TRAILER_BYTES;
     if (h->records_offset + h->record_count * h->record_size > body_end
         || h->decomp_records_offset + h->decomp_record_count * sizeof(laplace_perfcache_decomp_t) > body_end
         || h->decomp_data_offset + h->decomp_data_count * sizeof(uint32_t) > body_end
         || h->compose_records_offset + h->compose_record_count * sizeof(laplace_perfcache_compose_t) > body_end) {
-        munmap(m, len); return -3;
+        pc_unmap(base, len); return -3;
     }
 
-    /* Body CRC: BLAKE3-128 of everything before the 16-byte trailer. */
     hash128_t crc;
     hash128_blake3(base, (size_t)body_end, &crc);
     const hash128_t* stored = (const hash128_t*)(base + body_end);
     if (memcmp(&crc, stored, sizeof(hash128_t)) != 0) {
-        munmap(m, len); return -4;
+        pc_unmap(base, len); return -4;
     }
 
-    /* Install. */
     codepoint_table_unload();
     g_pc.base = base;
     g_pc.length = len;
@@ -97,7 +143,7 @@ int codepoint_table_load_perfcache(const char* path) {
 
 const codepoint_entry_t* codepoint_table_lookup(uint32_t cp) {
     if (g_pc.records == NULL || cp >= g_pc.record_count) return NULL;
-    return &g_pc.records[cp];   /* direct index: record i is codepoint i */
+    return &g_pc.records[cp];
 }
 
 int codepoint_table_records(const codepoint_entry_t** out_records, uint64_t* out_count) {

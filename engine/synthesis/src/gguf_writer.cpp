@@ -6,27 +6,8 @@
 #include <string>
 #include <vector>
 
-/* GGUF v3 binary proof/compatibility writer.
- *
- * Format reference: https://github.com/ggerganov/ggml/blob/master/docs/gguf.md
- *
- * Layout:
- *   magic[4]        = "GGUF"
- *   version[4]      = 3 (uint32_le)
- *   n_tensors[8]    = uint64_le
- *   n_kv[8]         = uint64_le
- *   kv_pairs[]      = variable-length key-value metadata
- *   tensor_infos[]  = name + dims + dtype + offset per tensor
- *   <pad to 32B>
- *   tensor_data[]   = concatenated tensor bytes (each aligned to 32B)
- *
- *: we implement the format directly rather than linking
- * llama.cpp/ggml.: sparse-by-construction — the caller
- * is responsible for zeroing unsupported tensor positions. */
-
 namespace {
 
-/* GGUF metadata value type tags. */
 enum GgufType : uint32_t {
     GGUF_TYPE_UINT32  = 4,
     GGUF_TYPE_INT32   = 5,
@@ -36,11 +17,10 @@ enum GgufType : uint32_t {
     GGUF_TYPE_ARRAY   = 9,
 };
 
-/* GGUF tensor element type tags (must match GGML's ggml_type enum). */
 enum GgufTensorType : uint32_t {
     GGUF_TENSOR_F32  = 0,
     GGUF_TENSOR_F16  = 1,
-    GGUF_TENSOR_BF16 = 30,   /* GGML_TYPE_BF16 = 30, NOT 32 */
+    GGUF_TENSOR_BF16 = 30,
 };
 
 inline void write_u32(std::vector<uint8_t>& buf, uint32_t v) {
@@ -55,7 +35,6 @@ inline void write_u64(std::vector<uint8_t>& buf, uint64_t v) {
         buf.push_back((uint8_t)((v >> (8 * i)) & 0xFF));
 }
 
-/* GGUF string: uint64_le length + raw bytes (no null terminator). */
 inline void write_string(std::vector<uint8_t>& buf, const std::string& s) {
     write_u64(buf, (uint64_t)s.size());
     buf.insert(buf.end(), s.begin(), s.end());
@@ -70,7 +49,7 @@ enum MetaKind {
     META_U32,
     META_F32,
     META_BOOL,
-    META_STR_ARRAY_PACKED, /* pre-packed GGUF-format strings */
+    META_STR_ARRAY_PACKED,
     META_F32_ARRAY,
     META_I32_ARRAY,
 };
@@ -79,23 +58,21 @@ struct MetaKV {
     std::string key;
     MetaKind kind = META_STR;
 
-    /* Scalar fields */
     std::string str_val;
     uint32_t    u32_val = 0;
     float       f32_val = 0.0f;
 
-    /* Array fields */
-    size_t               array_count = 0;  /* element count for all array kinds */
-    std::vector<uint8_t> packed_data;      /* for META_STR_ARRAY_PACKED */
-    std::vector<float>   f32_array;        /* for META_F32_ARRAY */
-    std::vector<int32_t> i32_array;        /* for META_I32_ARRAY */
+    size_t               array_count = 0;
+    std::vector<uint8_t> packed_data;
+    std::vector<float>   f32_array;
+    std::vector<int32_t> i32_array;
 };
 
 struct TensorEntry {
     std::string           name;
-    uint32_t              dtype;    /* GGUF tensor type tag */
-    std::vector<uint64_t> dims;     /* shape dimensions (GGUF / ggml column-major order) */
-    std::vector<uint8_t>  data;     /* raw bytes */
+    uint32_t              dtype;
+    std::vector<uint64_t> dims;
+    std::vector<uint8_t>  data;
 };
 
 size_t gguf_dtype_element_size(uint32_t dtype) {
@@ -108,7 +85,6 @@ size_t gguf_dtype_element_size(uint32_t dtype) {
 }
 
 int dtype_from_api(int api_dtype) {
-    /* API dtype: 0=f32, 1=f16, 2=bf16 */
     switch (api_dtype) {
         case 0: return (int)GGUF_TENSOR_F32;
         case 1: return (int)GGUF_TENSOR_F16;
@@ -117,7 +93,7 @@ int dtype_from_api(int api_dtype) {
     }
 }
 
-} /* namespace */
+}
 
 struct gguf_writer {
     std::string              output_path;
@@ -244,22 +220,17 @@ int gguf_writer_add_tensor(gguf_writer_t* w,
 extern "C" int gguf_writer_finalize(gguf_writer_t* w) {
     if (!w) return -1;
 
-    /* === Build the header + KV + tensor_info buffer in memory === */
     std::vector<uint8_t> header;
     header.reserve(4096);
 
-    /* Magic */
     header.push_back('G'); header.push_back('G');
     header.push_back('U'); header.push_back('F');
 
-    /* Version = 3 */
     write_u32(header, 3);
 
-    /* n_tensors and n_kv */
     write_u64(header, (uint64_t)w->tensors.size());
     write_u64(header, (uint64_t)w->metadata.size());
 
-    /* KV pairs */
     for (const MetaKV& kv : w->metadata) {
         write_string(header, kv.key);
         switch (kv.kind) {
@@ -283,7 +254,6 @@ extern "C" int gguf_writer_finalize(gguf_writer_t* w) {
             header.push_back((uint8_t)(kv.u32_val ? 1 : 0));
             break;
         case META_STR_ARRAY_PACKED:
-            /* GGUF array: type=ARRAY(9) | elem_type=STRING(8) | count(u64) | packed strings */
             write_u32(header, (uint32_t)GGUF_TYPE_ARRAY);
             write_u32(header, (uint32_t)GGUF_TYPE_STRING);
             write_u64(header, (uint64_t)kv.array_count);
@@ -309,13 +279,10 @@ extern "C" int gguf_writer_finalize(gguf_writer_t* w) {
         }
     }
 
-    /* Compute tensor data offsets (each tensor data section is 32B-aligned) */
     std::vector<uint64_t> tensor_offsets(w->tensors.size());
     {
         size_t tensor_info_bytes = 0;
         for (const TensorEntry& te : w->tensors) {
-            /* name (uint64 + bytes) + n_dims (uint32) + dims (n_dims × uint64)
-             * + type (uint32) + offset (uint64) */
             tensor_info_bytes += 8 + te.name.size();
             tensor_info_bytes += 4;
             tensor_info_bytes += te.dims.size() * 8;
@@ -336,7 +303,6 @@ extern "C" int gguf_writer_finalize(gguf_writer_t* w) {
         }
     }
 
-    /* Tensor info section */
     for (size_t i = 0; i < w->tensors.size(); ++i) {
         const TensorEntry& te = w->tensors[i];
         write_string(header, te.name);
@@ -346,11 +312,9 @@ extern "C" int gguf_writer_finalize(gguf_writer_t* w) {
         write_u64(header, tensor_offsets[i]);
     }
 
-    /* Pad header to 32B alignment */
     const size_t pad = align_up(header.size(), 32) - header.size();
     header.insert(header.end(), pad, 0x00);
 
-    /* === Write to file === */
     FILE* f = std::fopen(w->output_path.c_str(), "wb");
     if (!f) return -1;
 
@@ -359,7 +323,6 @@ extern "C" int gguf_writer_finalize(gguf_writer_t* w) {
         return -1;
     }
 
-    /* Tensor data section (each tensor padded to 32B) */
     for (size_t i = 0; i < w->tensors.size(); ++i) {
         const TensorEntry& te = w->tensors[i];
         if (std::fwrite(te.data.data(), 1, te.data.size(), f) != te.data.size()) {

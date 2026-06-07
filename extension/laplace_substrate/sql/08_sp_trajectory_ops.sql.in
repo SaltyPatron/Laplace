@@ -1,5 +1,1 @@
-/* 08_sp_trajectory_ops.sql.in — laplace_sp_trajectory_ops SP-GiST opclass.
- *
- *: substrate-specific SP-GiST opclass for trajectory
- * prefix-match (mantissa-packed LINESTRING constituents). Real opclass
- * + support functions land Chunk 2 Story 2.16. */
+

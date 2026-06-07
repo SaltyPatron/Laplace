@@ -1,7 +1,3 @@
-# engine/synthesis/tests/CMakeLists.txt
-#
-# GoogleTest-based unit tests for liblaplace_synthesis.
-
 set(LAPLACE_SYNTHESIS_TEST_SOURCES
     test_version.cpp
     test_recipe.cpp

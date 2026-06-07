@@ -23,7 +23,7 @@ TEST(LaplaceSynthesisBf16Decoder, ZeroElements) {
     uint16_t data[1] = {0};
     double out[1] = {99.0};
     EXPECT_EQ(laplace_bf16_decode(data, 0, out), 0);
-    EXPECT_DOUBLE_EQ(out[0], 99.0); /* unchanged */
+    EXPECT_DOUBLE_EQ(out[0], 99.0);
 }
 
 TEST(LaplaceSynthesisBf16Decoder, PositiveOne) {
@@ -31,7 +31,7 @@ TEST(LaplaceSynthesisBf16Decoder, PositiveOne) {
     uint16_t bf16 = f32_to_bf16(f);
     double out = 0.0;
     EXPECT_EQ(laplace_bf16_decode(&bf16, 1, &out), 0);
-    EXPECT_NEAR(out, 1.0, 1e-2); /* BF16 precision ~2 decimal digits */
+    EXPECT_NEAR(out, 1.0, 1e-2);
 }
 
 TEST(LaplaceSynthesisBf16Decoder, NegativeValue) {
@@ -50,7 +50,6 @@ TEST(LaplaceSynthesisBf16Decoder, Zero) {
 }
 
 TEST(LaplaceSynthesisBf16Decoder, BatchOf8Aligned) {
-    /* 8 values = one AVX2 iteration if available */
     float inputs[8] = {1.0f, -1.0f, 0.5f, -0.5f, 2.0f, -2.0f, 0.0f, 100.0f};
     uint16_t bf16[8];
     for (int i = 0; i < 8; ++i) bf16[i] = f32_to_bf16(inputs[i]);
@@ -64,7 +63,6 @@ TEST(LaplaceSynthesisBf16Decoder, BatchOf8Aligned) {
 }
 
 TEST(LaplaceSynthesisBf16Decoder, BatchOf17WithScalarTail) {
-    /* 17 = 2 full AVX2 iterations + 1 scalar tail */
     float inputs[17];
     uint16_t bf16[17];
     for (int i = 0; i < 17; ++i) {
@@ -81,7 +79,6 @@ TEST(LaplaceSynthesisBf16Decoder, BatchOf17WithScalarTail) {
 }
 
 TEST(LaplaceSynthesisBf16Decoder, SpecialValues) {
-    /* BF16 representation of +Inf, -Inf, NaN should survive round-trip */
     uint16_t pos_inf = 0x7F80;
     uint16_t neg_inf = 0xFF80;
     uint16_t nan_val = 0x7FC0;

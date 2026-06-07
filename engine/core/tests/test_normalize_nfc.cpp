@@ -11,27 +11,12 @@
 
 namespace {
 
-/* NormalizationTest.txt format (UCD):
- *   source ; NFC ; NFD ; NFKC ; NFKD # comment
- * where each column is a space-separated hex codepoint sequence.
- *
- * Conformance per UAX #15:
- *   NFC(source) == NFC(NFC) == NFC(NFD)
- *   NFD(source) == NFD(NFC) == NFD(NFD)
- *   NFC(NFKC) == NFC(NFKD) == NFKC == NFKD
- *   NFD(NFKC) == NFD(NFKD) == NFKD
- *
- * We only ship NFC; pin against NFC of columns 1 (source), 2 (NFC),
- * 3 (NFD) — all should equal column 2 (NFC).
- *
- * The file has a @Part0..@Part3 sectioning system. @Part1 is the main
- * conformance corpus. @Part0 is "specific cases" — also valid. */
 struct TestCase {
     std::vector<uint32_t> source;
     std::vector<uint32_t> nfc;
     std::vector<uint32_t> nfd;
     size_t                line_number;
-    std::string           part;     // e.g. "@Part1"
+    std::string           part;
 };
 
 static std::vector<uint32_t> parse_hex_seq(const std::string& s) {
@@ -56,7 +41,6 @@ static std::vector<TestCase> load(const std::string& path) {
             && (unsigned char)line[0] == 0xef
             && (unsigned char)line[1] == 0xbb
             && (unsigned char)line[2] == 0xbf) line.erase(0, 3);
-        // Strip comment AFTER tracking @Part headers (which appear in comments).
         auto hash = line.find('#');
         std::string comment = (hash == std::string::npos) ? "" : line.substr(hash);
         std::string data = (hash == std::string::npos) ? line : line.substr(0, hash);
@@ -72,7 +56,6 @@ static std::vector<TestCase> load(const std::string& path) {
         data = data.substr(first, last - first + 1);
         if (data.empty()) continue;
 
-        // Split on ';'
         std::vector<std::string> cols;
         size_t pos = 0;
         while (pos != std::string::npos) {
@@ -101,7 +84,7 @@ static std::vector<uint32_t> nfc(const std::vector<uint32_t>& in) {
     return out;
 }
 
-} // namespace
+}
 
 TEST(LaplaceCoreNormalizeNfc, UAX15ConformancePerLine) {
     const std::string path = std::string(LAPLACE_UCD_PATH_FOR_TESTS)

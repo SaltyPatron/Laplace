@@ -1,18 +1,4 @@
 #!/bin/bash
-# scripts/configure-github-repo.sh
-#
-# Idempotent: pushes the repo-level Actions variables that integration.yml
-# reads to find the canonical paths on the self-hosted runner. Variables
-# (not secrets — these are paths, not credentials) are surfaced in
-# Settings → Variables → Actions so they're discoverable, auditable, and
-# overrideable per-environment.
-#
-# Run as a user with `repo:admin` (or maintainer) scope on SaltyPatron/Laplace:
-#   scripts/configure-github-repo.sh
-#
-# The variables match the integration.yml `env:` block fallbacks; setting
-# them here just makes the values explicit in repo settings rather than
-# relying on the hardcoded defaults in the workflow.
 
 set -euo pipefail
 
@@ -28,7 +14,6 @@ if ! gh auth status >/dev/null 2>&1; then
     err "gh not authenticated; run: gh auth login"; exit 1
 fi
 
-# (name, value, description-not-pushed-but-tracked-here)
 declare -A vars=(
     [LAPLACE_EXTERNAL]="/opt/laplace/external"
     [LAPLACE_INSTALL_PREFIX]="/opt/laplace"
@@ -37,7 +22,6 @@ declare -A vars=(
 
 for name in "${!vars[@]}"; do
     val="${vars[$name]}"
-    # gh variable set is idempotent — it updates if the var exists.
     if gh variable set "$name" --body "$val" --repo "$REPO" >/dev/null 2>&1; then
         ok "✓ $name = $val"
     else

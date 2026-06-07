@@ -39,31 +39,16 @@ internal static class Program
     {
         get
         {
-            // Always include error detail — without it Npgsql redacts the FK-violating
-            // row's data ("DETAIL: Detail redacted as it may contain sensitive data"),
-            // which makes substrate-debug iteration painful. The substrate's per-row
-            // bytea(16) values are not actually sensitive — they're content-addressed
-            // hashes of public substrate canon.
-            // Dev-default: an unset LAPLACE_DB targets laplace-dev (safe, recoverable),
-            // NEVER the prod/CI `laplace`. Prod/CI sets LAPLACE_DB (or PGDATABASE via
-            // setup-laplace-env) to override. The worst case of a missed override is
-            // hitting the dev DB, not damaging prod.
             var s = Environment.GetEnvironmentVariable("LAPLACE_DB")
                 ?? "Host=/var/run/postgresql;Username=laplace_admin;Database=laplace-dev";
             if (!s.Contains("Include Error Detail", StringComparison.OrdinalIgnoreCase))
                 s += ";Include Error Detail=true";
-            // The substrate inspection SRFs (laplace.entity_facets, attestations_out, …)
-            // reference their tables unqualified, so the laplace schema must be on the
-            // session search_path for them to resolve.
             if (!s.Contains("Search Path", StringComparison.OrdinalIgnoreCase))
                 s += ";Search Path=laplace,public";
             return s;
         }
     }
 
-    /// <summary>Read a positive integer tuning knob from the environment,
-    /// falling back to <paramref name="fallback"/> when unset or unparseable.
-    /// Same env-override convention as <see cref="ConnString"/>.</summary>
     private static int EnvInt(string name, int fallback, int min)
     {
         var raw = Environment.GetEnvironmentVariable(name);
@@ -126,16 +111,6 @@ internal static class Program
 
     private static int Fail(string m) { Console.Error.WriteLine(m); return 2; }
 
-    // Consensus accumulates AT INGEST through ConsensusAccumulatingWriter (the
-    // testimony is consumed into period partials; the period materializes via
-    // laplace.materialize_period_consensus with prior = the current row). There
-    // is NO evidence-replay fold: evidence is PROVENANCE-only (no values), so
-    // re-accumulating consensus from evidence is impossible by construction —
-    // and was the forbidden backfill class anyway.
-
-    // === svd-exact-bench: prove tensor_svd_truncate factors a REAL tensor fp-exactly (no DB) ===
-    // Plan gate G2.1. Model dir resolves by convention when omitted: $LAPLACE_TINYLLAMA_DIR,
-    // else the newest models--TinyLlama--* snapshot under /vault/models.
     private static int SvdExactBenchCmd(string[] rest)
     {
         string modelDir = rest.Length > 0 && !string.IsNullOrEmpty(rest[0])
@@ -151,8 +126,6 @@ internal static class Program
         return pass ? 0 : 1;
     }
 
-    // Discover a TinyLlama model dir by convention (no hardcoded snapshot SHA):
-    // $LAPLACE_TINYLLAMA_DIR if set, else the newest models--TinyLlama--*/snapshots/* under /vault/models.
     private static string ResolveTinyLlamaDir()
     {
         var env = Environment.GetEnvironmentVariable("LAPLACE_TINYLLAMA_DIR");
@@ -165,7 +138,6 @@ internal static class Program
         {
             var snapsDir = Path.Combine(fam, "snapshots");
             if (!Directory.Exists(snapsDir)) continue;
-            // Newest snapshot by write time; must contain a safetensors shard.
             foreach (var snap in Directory.GetDirectories(snapsDir)
                                           .OrderByDescending(Directory.GetLastWriteTimeUtc))
             {
@@ -175,20 +147,12 @@ internal static class Program
         return "";
     }
 
-    // === db-roundtrip: store content in the substrate, reconstruct FROM the DB ===
     private static async Task<int> DbRoundtripAsync(string path)
     {
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
             return Fail($"usage: laplace db-roundtrip <file>  (not found: {path})");
         CodepointPerfcache.Load(ResolveBlob());
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
-        // Content now carries the DISTRIBUTIONAL witness (within-sentence
-        // PRECEDES bigrams; "follows" is the reverse query, not a second
-        // arena), so the text path is a real witnessing ingest: it must
-        // accumulate into CONSENSUS like any other source, or the edges land in
-        // evidence only and inference (which reads consensus) stays blind to them.
-        // create_period_staging DROPs any existing staging — so this must NOT run
-        // concurrent with another ingest's period (one source/period at a time).
         var loggerFactory = ConsoleLoggerProvider.Factory();
         var inner = new NpgsqlSubstrateWriter(ds);
         await using var accumulator = new ConsensusAccumulatingWriter(inner, ds,
@@ -203,7 +167,6 @@ internal static class Program
         swR.Stop();
         Console.WriteLine($"recorded : {original.Length,10:N0} bytes → document {Hex(docId)}  in {swR.Elapsed.TotalSeconds:F1}s");
 
-        // Fold the distributional witness into consensus (period completed cleanly).
         var swC = Stopwatch.StartNew();
         long materialized = await accumulator.MaterializeConsensusAsync();
         swC.Stop();
@@ -225,28 +188,11 @@ internal static class Program
         return match ? 0 : 1;
     }
 
-    /// <summary>Wire-order hex — matches encode(id,'hex') in SQL byte for byte.
-    /// The old "{Hi:x16}{Lo:x16}" form printed each ulong half big-endian while
-    /// the bytea wire bytes are the struct's little-endian memory — every id it
-    /// displayed was half-wise byte-reversed against the database.</summary>
     private static string Hex(Hash128 h) => Convert.ToHexString(h.ToBytes()).ToLowerInvariant();
 
     private static Hash128 ReadHash16(byte[] b) =>
         new Hash128(BitConverter.ToUInt64(b, 0), BitConverter.ToUInt64(b, 8));
 
-    // === inspect: resolve text -> entity via the engine, read its substrate facets ===
-    // The glass-box, usable by hand: text → correct merkle entity id (engine
-    // TextDecomposer + HashComposer, not SQL), then its glome physicalities and
-    // Glicko-2-rated attestation neighborhood straight from the DB.
-    // === converse: the conversation loop — ONE round-trip per turn, no engine call ===
-    // Text→id resolution happens IN the substrate (laplace.word_id /
-    // prompt_words ride the seeded codepoint perf-cache + blake3 kernel
-    // DB-side), so the CLI neither loads the perfcache blob nor hashes
-    // locally: one SELECT per turn. laplace.converse routes the question
-    // shape to the matching ranked-μ consensus read and keeps the session's
-    // turn state (anaphora: "what about its synonyms?"). With a prompt:
-    // one-shot. Without: a REPL on ONE connection — the connection IS the
-    // session (converse() defaults the session id to the backend pid).
     private static async Task<int> ConverseAsync(string prompt)
     {
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
@@ -289,13 +235,6 @@ internal static class Program
         return 0;
     }
 
-    // === cognize: the Gödel cognition loop (phase 1 — answer-with-proof-and-gaps) ===
-    // C# orchestration ONLY (the layer law): it SEQUENCES the substrate's reads — the
-    // answer (respond(), which routes to reason/relatedness/define/… ranked-μ reads) and
-    // then the GAPS (gaps(): the conceptual arenas the substrate holds NO consensus for —
-    // the `unknown`, the engine's research agenda). What conventional inference can't do:
-    // separate "no" from "not witnessed", and say so. Phase 2 adds the native cascade for
-    // multi-hop goals, verdicts written back as content, and self-tasking on the gaps.
     private static async Task<int> CognizeAsync(string goal)
     {
         if (string.IsNullOrWhiteSpace(goal))
@@ -309,7 +248,6 @@ internal static class Program
 
         Console.WriteLine($"goal     : {goal}");
 
-        // 1. the answer + proof path + confidence — the reads, sequenced.
         Console.WriteLine("── answer ─────────────────────────────────────────");
         bool any = false;
         await using (var cmd = conn.CreateCommand())
@@ -328,8 +266,6 @@ internal static class Program
         }
         if (!any) Console.WriteLine("  (the substrate holds no answer to this yet)");
 
-        // 2. the GAPS — what the substrate does NOT hold about the topic: the
-        //    research agenda, named honestly rather than confabulated.
         Console.WriteLine("── gaps (unwitnessed arenas — the research agenda) ──");
         var gaps = new List<string>();
         await using (var cmd = conn.CreateCommand())
@@ -348,15 +284,6 @@ internal static class Program
         return 0;
     }
 
-    // === nn: plural nearest-neighbor — the two co-equal axes for a word ===
-    // STRUCTURAL (glome geodesic NN, nd-GiST KNN prune → native laplace_angular_distance_4d
-    // refine, + native discrete Fréchet shape) and SEMANTIC (consensus μ) via laplace.describe.
-    // The canonical home of the structural read is laplace.structural_neighbors
-    // (20_converse.sql.in) — but it isn't installed on the running substrate yet (hand-applying
-    // function DDL to the live DB is blocked by the no-manual-mutation rule, and a db-fresh
-    // would wipe the populated substrate), so the CLI inlines that exact body here as a bridge
-    // until the extension rebuild installs it; then this collapses to a single function call.
-    // Read-only; no GPU.
     private static async Task<int> NearestNeighborsAsync(string word)
     {
         if (string.IsNullOrWhiteSpace(word)) return Fail("usage: laplace nn <word>");
@@ -366,9 +293,6 @@ internal static class Program
         await using var conn = await ds.OpenConnectionAsync();
         var sw = Stopwatch.StartNew();
 
-        // Resolve the word to its entity id + glome placement (coord) + trajectory,
-        // the coord/traj as hex-EWKB so they ride back as geometry literals (a
-        // variable/constant is what lets the planner use the GiST KNN index).
         byte[]? id = null; string? coordHex = null, trajHex = null;
         await using (var res = conn.CreateCommand())
         {
@@ -394,15 +318,12 @@ internal static class Program
             return 1;
         }
 
-        // ── STRUCTURAL axis: glome geodesic + Fréchet shape ──
         Console.WriteLine($"\n  '{word}' — STRUCTURAL (glome geodesic) + SHAPE (Fréchet)");
         Console.WriteLine($"  {"neighbor",-26} {"geodesic",10} {"frechet",10}");
         Console.WriteLine($"  {new string('-', 26)} {new string('-', 10)} {new string('-', 10)}");
         bool anyStructural = false;
         await using (var st = conn.CreateCommand())
         {
-            // Exact body of laplace.structural_neighbors, inlined as a bridge: nd-GiST
-            // KNN prune (<<->>) → native geodesic refine + dedup → take k → Fréchet on k.
             st.CommandText = @"
                 WITH knn AS (
                     SELECT entity_id, coord, trajectory FROM laplace.physicalities
@@ -436,7 +357,6 @@ internal static class Program
         if (!anyStructural)
             Console.WriteLine($"  (‘{word}’ is not a placed content entity in this substrate)");
 
-        // ── SEMANTIC axis: consensus μ (the orthogonal axis) ──
         if (id is not null)
         {
             Console.WriteLine($"\n  '{word}' — SEMANTIC (consensus μ via describe)");
@@ -465,14 +385,6 @@ internal static class Program
         return 0;
     }
 
-    // === generate: the forward pass — a ranked-μ walk over witnessed sequence ===
-    // No model, no GPU. Each step's next-token distribution is READ from consensus μ
-    // over the last N tokens (context = attention), shaped by a deterministic recipe
-    // (content mask via HAS_POS, stop-set, top-k, temperature; 0 = greedy), refuted
-    // edges pruned (epistemic), per-step μ available (glass-box — you see WHY each
-    // token). Canonical home is laplace.generate (20_converse.sql.in); inlined here
-    // as the run-today bridge until the extension rebuild installs it. Knobs via env:
-    // LAPLACE_GEN_STEPS / _WINDOW / _TOPK / _TEMP / _VERBOSE.
     private static readonly string[] GenStop =
     {
         "the","a","an","and","or","but","of","to","in","on","at","by","for","with","as",
@@ -486,8 +398,6 @@ internal static class Program
         stops AS (SELECT DISTINCT p.id FROM unnest(@stop::text[]) w(t)
                   CROSS JOIN LATERAL laplace.prompt_state(w.t) p WHERE p.id IS NOT NULL),
         topic AS (SELECT id FROM laplace.prompt_state(@prompt) WHERE id IS NOT NULL),
-        -- topic field resolved ONCE (@boost>0): prompt tokens + corpus associations
-        -- (PRECEDES both ways) + synonyms. The walk biases toward it to stay on-subject.
         field AS (
             SELECT id FROM topic
             UNION SELECT c.object_id FROM laplace.consensus c JOIN topic t ON c.subject_id=t.id
@@ -528,7 +438,7 @@ internal static class Program
         int window = EnvInt("LAPLACE_GEN_WINDOW", 3, 1);
         int topk   = EnvInt("LAPLACE_GEN_TOPK", 8, 1);
         double temp = EnvDouble("LAPLACE_GEN_TEMP", 0.6);
-        double steer = EnvDouble("LAPLACE_GEN_STEER", 0.0);   // topic-field boost; 0 = off
+        double steer = EnvDouble("LAPLACE_GEN_STEER", 0.0);
         bool verbose = Environment.GetEnvironmentVariable("LAPLACE_GEN_VERBOSE") == "1";
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
@@ -585,9 +495,6 @@ internal static class Program
         using var tree = TextDecomposer.Run(text);
         unsafe { HashComposer.Run(tree, &PerfcacheResolver); }
 
-        // Rendering is the SUBSTRATE's job (laplace.render: canonical name |
-        // codepoint | reconstructed content text | hex fallback) — no managed
-        // per-call dictionary, no app-side reverse map.
         var root = tree.GetNode(tree.NaturalUnitIndex());
         Hash128 id = root.Id;
         Console.WriteLine($"inspect \"{text}\"");
@@ -597,7 +504,6 @@ internal static class Program
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         await using var conn = await ds.OpenConnectionAsync();
 
-        // Identity facet — laplace.entity_facets(id)
         bool exists = false;
         await using (var cmd = conn.CreateCommand())
         {
@@ -610,10 +516,6 @@ internal static class Program
                 Console.WriteLine($"  ENTITY: present  tier={r.GetInt16(0)}  type={r.GetString(1)}");
             }
         }
-        // CONSTITUENT KNOWLEDGE — composed content answers through its parts.
-        // A novel composite is not a dead end: its word-tier constituents are
-        // content-addressed against the SAME ids every source attested onto, so
-        // the substrate answers the sentence through what it knows of its words.
         var utf8Input = Encoding.UTF8.GetBytes(text);
         var wordSeen  = new HashSet<Hash128>();
         var words     = new List<(Hash128 Id, string Label)>();
@@ -652,7 +554,6 @@ internal static class Program
 
         if (!exists) return 0;
 
-        // Glome facet — laplace.entity_physicalities(id)
         await using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = "SELECT p.type, p.x, p.y, p.z, p.m, p.radius, p.n_constituents, laplace.render(p.source_id) "
@@ -670,8 +571,6 @@ internal static class Program
             if (n == 0) Console.WriteLine("    (none)");
         }
 
-        // Consensus neighborhood — laplace.consensus_out/_in(id): the ranked-μ read surface
-        // (accumulated Glicko-2 across all witnesses; source/context out of identity).
         await using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = "SELECT laplace.render(c.type_id), laplace.render(c.object_id), "
@@ -710,9 +609,6 @@ internal static class Program
             if (n == 0) Console.WriteLine("    (none)");
         }
 
-        // Raw EVIDENCE neighborhood — laplace.attestations_out/_in(id): PROVENANCE —
-        // who witnessed (source, circuit context), outcome class, games. No values;
-        // strength is the consensus reads above.
         static string Outc(short o) => o switch { 0 => "refute", 1 => "draw", _ => "confirm" };
         await using (var cmd = conn.CreateCommand())
         {
@@ -756,7 +652,6 @@ internal static class Program
         return 0;
     }
 
-    // === ingest: IngestRunner + per-source decomposer ===
     private static async Task<int> IngestAsync(string[] args)
     {
         string source = args.Length > 0 ? args[0] : "";
@@ -791,33 +686,15 @@ internal static class Program
         if (string.IsNullOrEmpty(modelDir) || !Directory.Exists(modelDir))
             return Fail($"usage: laplace ingest model <model-dir>  (not found: {modelDir})");
 
-        /* LlamaTokenizerParser.Parse now routes tokens through TextDecomposer +
-         * HashComposer + TextEntityBuilder so token entities are content-addressed
-         * the same as every other text entity (R5). The HashComposer atom resolver
-         * reads from CodepointPerfcache, so the process-wide T0 perf-cache MUST
-         * be loaded before any tokenizer parse runs. */
         CodepointPerfcache.Load(ResolveBlob());
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
 
         var dec = new ModelDecomposer(modelDir);
 
-        /* Re-ingest guard — keys on the COMPLETION MARKER (the HasLayerCompleted
-         * attestation IngestRunner writes ONLY when a run finishes with zero
-         * failures), NOT on partial evidence presence. Marker present = the model
-         * fully ingested → a re-run is refused (it would double-count its votes
-         * and contaminate consensus). Marker ABSENT with partial evidence = a
-         * killed/crashed run → the re-run proceeds as lawful idempotent
-         * CONTINUATION: landed rows dedup away (content-addressed ids), novel
-         * work continues, and the period fold at the end covers everything since
-         * the consensus watermark — including the killed run's window. The old
-         * COMPLETES_TO-presence guard locked a crashed ingest out permanently,
-         * leaving nuke-to-reingest (forbidden) as the only exit. */
         var (modelSource, modelName) = ModelDecomposer.SourceForModel(modelDir);
         await using (var chkConn = await ds.OpenConnectionAsync())
         {
-            // Substrate operating surface — the same probe the IngestRunner
-            // guard uses (evidence_count over the completion-marker kind).
             await using var chkCmd = chkConn.CreateCommand();
             chkCmd.CommandText =
                 "SELECT laplace.evidence_count(p_type => $2, p_source => $1) > 0";
@@ -826,10 +703,6 @@ internal static class Program
             bool alreadyIngested = (bool)(await chkCmd.ExecuteScalarAsync() ?? false);
             if (alreadyIngested)
             {
-                // Completed model: re-ingesting would double-count its votes and
-                // contaminate consensus, so it is refused by design. To re-run
-                // (e.g. testing), reset the DB: `just db-fresh` (nuke + migrate +
-                // seed-t0). There is intentionally no in-place override.
                 Console.WriteLine($"Model already ingested — source {modelName}: {modelSource}");
                 Console.WriteLine($"(re-ingest is refused to prevent consensus contamination; "
                                   + $"reset with 'just db-fresh' to test from scratch)");
@@ -837,11 +710,6 @@ internal static class Program
             }
         }
 
-        /* THE ONE MODE: consensus accumulates AT INGEST (the testimony — score,
-         * trust→φ — is consumed into the period accumulation) and evidence
-         * persists as PROVENANCE-ONLY rows (identity 5-tuple, outcome class,
-         * games, time — never a value). No mode knob: evidence is provenance,
-         * always recorded; values, never. */
         var loggerFactory = ConsoleLoggerProvider.Factory();
         var inner = new NpgsqlSubstrateWriter(ds);
         var accumulator = new ConsensusAccumulatingWriter(inner, ds,
@@ -851,27 +719,6 @@ internal static class Program
         var runner = new IngestRunner(writer, reader, loggerFactory);
         Console.WriteLine("mode: consensus accumulates at ingest; evidence = provenance-only rows");
 
-        // Model ingestion is mechanical and embarrassingly parallel: thousands
-        // of weight-tensor intents. Two levers, both env-tunable (same
-        // convention as LAPLACE_DB):
-        //   LAPLACE_INGEST_BATCH   — max intents buffered per batched apply
-        //       (default 1024): one existence pass + one staged COPY/INSERT per
-        //       table per batch instead of ~6 round-trips and 3 connection-opens
-        //       PER intent. Acts as the upper cap on buffered intents.
-        //   LAPLACE_INGEST_COMMIT_ROWS — rows (entities+physicalities+attestations)
-        //       per commit (default 100_000). This is the real throughput dial:
-        //       intent fan-out is wildly uneven (a single QK head-intent ≈ thousands
-        //       of attestations), so batching by intent count makes the COPY payload
-        //       swing from KBs to GBs; batching by ROW count pins it (≈ rows × 200 B,
-        //       so 100k ≈ 20 MB) regardless of fan-out. Dial up for fewer/larger
-        //       COPYs (throughput at scale), down (e.g. 512) for finer-grained
-        //       streaming commits + earlier visibility. 0 = batch purely by intent.
-        //   LAPLACE_INGEST_WORKERS — concurrent batch appliers (default 1):
-        //       safe because NpgsqlSubstrateWriter promotes via a TEMP staging
-        //       table + INSERT … ON CONFLICT DO NOTHING, so overlapping novel
-        //       ids across workers converge instead of throwing duplicate-key.
-        // Throughput knobs (env-tunable, documented above) + human-valued progress are
-        // built once in BuildIngestOptions — the SAME path the corpus decomposers use.
         Console.WriteLine($"ingest model {modelDir} via IngestRunner → {ConnString} ...");
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(
@@ -894,10 +741,6 @@ internal static class Program
             return 1;
         }
         {
-            // Materialize the period: K disjoint partition folds run
-            // concurrently (prior = current consensus row). Runs only here —
-            // after a clean period — so a killed run materializes nothing
-            // (crash-safe). Per-partition progress arrives as fold NOTICEs.
             Console.WriteLine(
                 $"consensus: folding {accumulator.ObservationsAccumulated:N0} matches "
                 + $"across {accumulator.FoldWorkers} partition(s) ...");
@@ -913,12 +756,6 @@ internal static class Program
         return 0;
     }
 
-    // === synthesize: substrate → model package (re-export = fill the mold) ===
-    //
-    //   synthesize substrate <recipe.json> [out] [--source-scope ...] [--format ...]
-    //     Substrate-mediated. Reads the user-authored recipe (the mold); queries the
-    //     substrate's CONSENSUS; factors each consensus circuit back into the mold's
-    //     weight tensors; emits via the selected IFormatWriter (GGUF today).
     private static async Task<int> SynthesizeAsync(string[] args)
     {
         string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "";
@@ -926,8 +763,6 @@ internal static class Program
         if (sub == "substrate")
         {
             string recipePath = args.Length > 1 ? args[1] : "";
-            // Output is a DELIVERABLE: explicit path or the LAPLACE_GGUF_OUT
-            // convention — never a silent temp default that loses a 2 GB export.
             string? outEnv = Environment.GetEnvironmentVariable("LAPLACE_GGUF_OUT");
             string outputPath = args.Length > 2 ? args[2]
                 : !string.IsNullOrEmpty(outEnv) ? outEnv
@@ -943,17 +778,6 @@ internal static class Program
             + "  substrate <recipe.json> [output.gguf]   substrate-mediated synthesis\n");
     }
 
-    /// <summary>
-    /// Re-export = the ingestion run backward (ARCHITECTURE.md §8): parse the
-    /// user-authored recipe (the MOLD), read each tensor-role arena's CONSENSUS
-    /// (μ → SignedStrength per relation; source and position out of identity),
-    /// resolve endpoints back to tensor indices (tokens through the tokenizer's
-    /// key-mapping, hidden axes through the source-scoped Model_Axis ids), pour
-    /// each role's table into every mold slot of that role, and write via the
-    /// recipe-selected format writer (GGUF). The output is the consensus of all
-    /// ingested witnesses in the chosen shape — never a reconstruction of any
-    /// one model, never bit-perfect. See <see cref="ConsensusReExport"/>.
-    /// </summary>
     private static async Task<int> SynthesizeFromSubstrateAsync(string recipePath, string outputPath)
     {
         if (string.IsNullOrEmpty(recipePath) || !File.Exists(recipePath))
@@ -974,9 +798,6 @@ internal static class Program
         int vocab = recipe.VocabSize;
         int dModel = recipe.HiddenSize;
 
-        // ── The TRANSFORM run backward: entity → tensor indices ──
-        // Token content entity → EVERY vocab slot that carries it (duplicate-
-        // content slots folded at ingest; each receives the consensus back).
         var tokenSlots = new Dictionary<Hash128, List<int>>(tokens.Count);
         foreach (var t in tokens)
         {
@@ -985,9 +806,6 @@ internal static class Program
                 tokenSlots[t.EntityId] = slots = new List<int>(1);
             slots.Add(t.TokenId);
         }
-        // Axis entities are source-scoped surrogate keys: resolved through the
-        // recipe's source (cross-model alignment via placements is not built —
-        // one model's axes per mold for now).
         var (moldSource, moldSourceName) = ModelDecomposer.SourceForModel(modelDir);
         Console.WriteLine($"  mold source: {moldSourceName} ({moldSource})");
         int nHeadsR = recipe.NumHeads, nKvR = recipe.NumKvHeads;
@@ -1009,7 +827,6 @@ internal static class Program
         Func<Hash128, IReadOnlyList<int>?> Of(Dictionary<Hash128, int[]> m) =>
             e => m.TryGetValue(e, out var s) ? s : null;
 
-        // Load arch template + recipe handle
         byte[] configJson = File.ReadAllBytes(recipePath);
         IntPtr recipeHandle, tmplHandle;
         var specs = new TensorSpec[300];
@@ -1028,9 +845,6 @@ internal static class Program
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
 
-        // ── The mold's per-role scale M (absolute scale is the MOLD's, not the
-        //    substrate's): measured from the mold dir's reference tensors when
-        //    present, else 1.0 (relative structure only).
         Dictionary<string, SafetensorsContainerParser.TensorReference>? refMap = null;
         try
         {
@@ -1042,7 +856,7 @@ internal static class Program
                 foreach (var r in refs) refMap[r.Name] = r;
             }
         }
-        catch { /* no shards alongside the recipe — relative scale */ }
+        catch { }
         if (refMap is null)
             Console.WriteLine("  (no reference tensors alongside the recipe — per-role scale M = 1.0)");
 
@@ -1052,11 +866,6 @@ internal static class Program
         double MOf(params IEnumerable<string>[] groups) =>
             ConsensusReExport.MoldArenaScale(refMap, groups.SelectMany(g => g));
 
-        // ── Read the tensor-role CONSENSUS arenas (re-export reads consensus —
-        //    one signed row per relation, source and position out of identity —
-        //    never the per-witness evidence) straight into tensor layout. The
-        //    ingestion run backward: μ → SignedStrength → cell; every mold
-        //    position receives its relation's one consensus value.
         Console.WriteLine("  pouring consensus arenas into the mold's tensor layouts...");
         var swArena = Stopwatch.StartNew();
         var chan = Of(chanMap); var attn = Of(attnMap); var kv = Of(kvMap); var neuron = Of(neuronMap);
@@ -1091,7 +900,6 @@ internal static class Program
         if (totalRelations == 0)
             return Fail("no model consensus in the substrate — ingest a model first");
 
-        // ── Write GGUF: fill each mold slot from the arena factors ─────────
         var gguf = SynthInterop.GgufWriterCreate(outputPath);
         if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
         WriteGgufMetadata(gguf, recipe, tokens, modelDir);
@@ -1144,17 +952,6 @@ internal static class Program
         return 0;
     }
 
-    /// <summary>
-    /// Fill ONE mold tensor slot DIRECTLY from its tensor-role arena — the
-    /// ingestion run backward. Every layer instance of a role receives the SAME
-    /// poured table (positions folded at ingest; a deeper mold receives the
-    /// consensus at every position — consensus-of-all in the chosen shape,
-    /// never bit-perfect). Norm slots pour the per-channel NORM_SCALES
-    /// consensus; the SwiGLU gating nonlinearity itself is runtime, never
-    /// attested — its WEIGHT table (GATES) pours like any other. A mold whose
-    /// slot shape differs from the arena's schema shape fails loud — shape/rank
-    /// retargeting is the export-only SVD path, not built.
-    /// </summary>
     private static void FillMoldTensor(
         float[] vals, string name,
         ConsensusReExport.TableArena embedA, ConsensusReExport.TableArena lmHeadA,
@@ -1193,13 +990,9 @@ internal static class Program
             Array.Copy(normV, vals, vals.Length);
             return;
         }
-        // unknown slot — stays zero (absence is signal)
     }
 
 
-    // Map HuggingFace safetensors tensor names → GGML/llama.cpp names.
-    // arch_template emits HF names (to match the source safetensors during ingest);
-    // llama.cpp's loader requires the GGML naming scheme, so we rename at GGUF-write time.
     private static string HfToGgmlName(string hf)
     {
         if (hf == "model.embed_tokens.weight") return "token_embd.weight";
@@ -1230,7 +1023,7 @@ internal static class Program
                 return $"blk.{idx}.{g}";
             }
         }
-        return hf; // unknown — pass through unchanged
+        return hf;
     }
 
     private static unsafe Hash128 Hash128FromBytes(byte[] b)
@@ -1239,7 +1032,6 @@ internal static class Program
         fixed (byte* p = b) return *(Hash128*)p;
     }
 
-    // Write all GGUF metadata: architecture params + tokenizer vocab.
     private static void WriteGgufMetadata(
         IntPtr gguf,
         LlamaRecipeExtractor.RecipeInfo recipe,
@@ -1259,23 +1051,16 @@ internal static class Program
         SynthInterop.GgufWriterAddMetadataF32(gguf, "llama.attention.layer_norm_rms_epsilon", 1e-5f);
         SynthInterop.GgufWriterAddMetadataF32(gguf, "llama.rope.freq_base",           (float)recipe.RopeTheta);
 
-        // Tokenizer
         SynthInterop.GgufWriterAddMetadataStr(gguf, "tokenizer.ggml.model", "llama");
         SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.bos_token_id",     1);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.eos_token_id",     2);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.unknown_token_id", 0);
-        // Tokenizer control flags a real Llama conversion always writes — without these
-        // llama.cpp doesn't prepend BOS (model degenerates) and mishandles the SPM
-        // leading-space prefix (output loses spaces). LlamaTokenizer defaults.
         SynthInterop.GgufWriterAddMetadataBool(gguf, "tokenizer.ggml.add_bos_token",    1);
         SynthInterop.GgufWriterAddMetadataBool(gguf, "tokenizer.ggml.add_eos_token",    0);
         SynthInterop.GgufWriterAddMetadataBool(gguf, "tokenizer.ggml.add_space_prefix", 1);
 
         int n = tokens.Count;
 
-        // Authoritative tokenizer vocab from the SentencePiece model (real pieces +
-        // scores + types). The HF tokenizer.json is BPE-format with no scores; emitting
-        // zero scores under vocab type=SPM breaks tokenization in llama.cpp.
         string spPath = Path.Combine(modelDir, "tokenizer.model");
         SpPiece[]? sp = File.Exists(spPath) ? ParseSentencePieceModel(spPath) : null;
 
@@ -1307,8 +1092,6 @@ internal static class Program
                 SynthInterop.GgufWriterAddMetadataI32Array(gguf, "tokenizer.ggml.token_type", p, (nuint)n);
         }
 
-        // Real chat template from the source model's tokenizer_config (so the server's
-        // chat endpoint uses the model's actual template, not a generic ChatML fallback).
         string cfgPath = Path.Combine(modelDir, "tokenizer_config.json");
         if (File.Exists(cfgPath))
         {
@@ -1319,11 +1102,6 @@ internal static class Program
         }
     }
 
-    // === SentencePiece model (.model protobuf) reader — extracts (piece, score, type)
-    // per token id, dependency-free. ModelProto field 1 = repeated SentencePiece
-    // { string piece=1; float score=2; Type type=3 (default NORMAL=1) }.
-    // SP Type enum values mirror llama.cpp's token types (NORMAL=1, UNKNOWN=2,
-    // CONTROL=3, USER_DEFINED=4, UNUSED=5, BYTE=6), so the type passes through directly.
     private sealed record SpPiece(string Piece, float Score, int Type);
 
     private static SpPiece[] ParseSentencePieceModel(string path)
@@ -1339,7 +1117,7 @@ internal static class Program
             {
                 int len = (int)ReadVarint(d, ref pos);
                 int end = pos + len;
-                string piece = ""; float score = 0f; int type = 1; /* NORMAL */
+                string piece = ""; float score = 0f; int type = 1;
                 while (pos < end)
                 {
                     ulong k2 = ReadVarint(d, ref pos);
@@ -1382,7 +1160,6 @@ internal static class Program
         }
     }
 
-    // Pack strings in GGUF wire format: uint64_le byte-length + UTF-8 bytes per string.
     private static byte[] PackStrings(IReadOnlyList<string> strings)
     {
         using var ms = new System.IO.MemoryStream();
@@ -1397,7 +1174,6 @@ internal static class Program
         return ms.ToArray();
     }
 
-    // GGUF token type: 0=NORMAL, 1=UNKNOWN, 2=CONTROL, 5=BYTE
     private static int ClassifyTokenType(string raw)
     {
         if (raw is "<unk>" or "<UNK>" or "<unknown>") return 1;
@@ -1412,11 +1188,6 @@ internal static class Program
     private static async Task<int> IngestISO639Async()
         => await IngestViaRunnerAsync(new ISODecomposer(), "/vault/Data/ISO639", skipLayerCheck: false);
 
-    // ── one ingest path for EVERY decomposer ─────────────────────────────────
-    // A model is a witness/decomposer like UD or OMW (§3 omni-source), so there is no
-    // separate "model path": this builds the throughput knobs (env-tunable) + human-valued
-    // progress once, used by BOTH the corpus and model ingests. Progress reports what was
-    // actually RECORDED — entities/physicalities/attestations + rows/s — never "intents/s".
     private static IngestRunOptions BuildIngestOptions(
         Stopwatch sw, string sourceName, bool skipLayerCheck, string? ecosystemPath)
     {
@@ -1432,7 +1203,6 @@ internal static class Program
                 $"[{sourceName}] recorded {rows:N0} rows = {p.EntitiesInserted:N0} ent + "
                 + $"{p.PhysicalitiesInserted:N0} phys + {p.AttestationsInserted:N0} att "
                 + $"@ {rows / secs:N0} rows/s; {p.UnitsApplied:N0} intents"
-                // EstimatedTotal is a ROW estimate (EstimateUnitCountAsync) — compare rows, not intents.
                 + (p.EstimatedTotal is { } t && t > 0 ? $" (~{100.0 * rows / t:F0}% of {t:N0} rows)" : "")
                 + $"; {p.Elapsed.TotalSeconds:F0}s"
                 + (p.UnitsFailed > 0 ? $"; {p.UnitsFailed:N0} FAILED" : ""));
@@ -1451,22 +1221,11 @@ internal static class Program
     private static async Task<int> IngestViaRunnerAsync(
         IDecomposer dec, string ecosystemPath, bool skipLayerCheck)
     {
-        // Content-bearing decomposers (WordNet/OMW/UD/Tatoeba/ConceptNet/Atomic2020/
-        // Wiktionary) route lemmas/glosses/examples/sentences through ContentEmitter →
-        // TextDecomposer + HashComposer, whose atom resolver reads the T0 perf-cache. It
-        // MUST be loaded before the run or every decomposition silently yields no content.
         CodepointPerfcache.Load(ResolveBlob());
 
-        // Omni-glottal language resolution index (the "language perf-cache"): every
-        // 639-1-code source (UD/OMW/Wiktionary/Tatoeba/ConceptNet) resolves its raw
-        // codes/names through this to the ONE canonical 639-3 language entity, so the
-        // substrate unifies languages at ingest (no runtime joins). Built from the same
-        // attested ISO 639 reference the ISODecomposer seeds. Idempotent + fail-loud.
         LanguageReference.EnsureLoaded();
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
-        // THE ONE MODE (same as model ingest): testimony consumed into the
-        // period accumulation; evidence persists as provenance-only rows.
         var loggerFactory = ConsoleLoggerProvider.Factory();
         var innerWriter = new NpgsqlSubstrateWriter(ds);
         await using var accumulator = new ConsensusAccumulatingWriter(innerWriter, ds,
@@ -1475,11 +1234,6 @@ internal static class Program
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader, loggerFactory);
 
-        // Throughput knobs + human-valued progress via the ONE shared builder (same as the
-        // model ingest — no separate path). The legacy default (BatchSize=1, CommitRows=0)
-        // ran a transaction (connection + CREATE TEMP + COPY + INSERT + commit) PER intent —
-        // the row-by-row floor, NOT index maintenance; BuildIngestOptions sets CommitRows so
-        // intents coalesce into ~100k-row bulk-COPY transactions.
         Console.WriteLine($"ingest {dec.SourceName} via IngestRunner → {ConnString} ...");
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(
@@ -1506,22 +1260,12 @@ internal static class Program
         Console.WriteLine($"consensus: {materialized:N0} relations materialized "
                         + $"(accumulated at ingest; evidence = provenance-only)");
         await RegisterDynamicCanonicalsAsync(ds, dec.CanonicalNamesForReadback);
-        // Diagnostics must NEVER fail a completed ingest: the data + fold + marker
-        // are already durable; a counts query timing out on a hot 50M-row substrate
-        // exit-coded two whole ladder runs (2026-06-06) before this guard.
         try { await PrintCountsAsync(ds); }
         catch (Exception ex)
         { Console.Error.WriteLine($"warn: substrate counts diagnostic failed (ingest itself is complete): {ex.Message}"); }
         return 0;
     }
 
-    /* seed-unicode (legacy) DELETED: it streamed the T0 seed through a bare
-     * NpgsqlSubstrateWriter — no consensus fold, no HasLayerCompleted marker —
-     * so every script had to work around it ("seed-t0 alone does NOT set the
-     * marker"). The T0 seed is `ingest unicode`: THE ONE ingest path
-     * (IngestRunner + ConsensusAccumulatingWriter), same as every source. */
-
-    // === stats: current substrate row counts ===
     private static async Task<int> StatsAsync()
     {
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
@@ -1529,12 +1273,6 @@ internal static class Program
         return 0;
     }
 
-    // Register the dynamic classifier/value canonical names a decomposer minted
-    // (data-derived names absent from the extension's static seed) so
-    // laplace.render() answers them in NAMES instead of falling back to hex.
-    // laplace.register_canonicals is an idempotent batch insert (ON CONFLICT DO
-    // NOTHING). Runs post-ingest, AFTER the consensus fold — once the names'
-    // entities are committed. No-op when the set is empty.
     private static async Task RegisterDynamicCanonicalsAsync(
         NpgsqlDataSource ds, IReadOnlyCollection<string> names)
     {
@@ -1556,23 +1294,16 @@ internal static class Program
     {
         await using var conn = await ds.OpenConnectionAsync();
 
-        // The substrate's own accounting surface — no hand-written counts.
         Console.WriteLine("substrate counts:");
         {
             await using var counts = conn.CreateCommand();
-            counts.CommandTimeout = 0;   // diagnostic over 10^7-row tables on a hot system
+            counts.CommandTimeout = 0;
             counts.CommandText = "SELECT metric, value FROM laplace.substrate_counts()";
             await using var rdr = await counts.ExecuteReaderAsync();
             while (await rdr.ReadAsync())
                 Console.WriteLine($"  {rdr.GetString(0),-24}: {rdr.GetInt64(1),12:N0}");
         }
 
-        // Show a concrete row: U+0041 'A' — entirely through the substrate's
-        // glass-box surface (canonical_id resolves, entity_facets/
-        // entity_physicalities report, render reads back). Scoped block so cmd
-        // + rdr dispose before the next conn-using command (a leaked reader on
-        // the shared conn surfaces as NpgsqlOperationInProgressException — see
-        // commit be99495's CI failure).
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"SELECT laplace.render(laplace.canonical_id('A')), f.tier,
@@ -1595,10 +1326,6 @@ internal static class Program
             }
         }
 
-        // Multi-model: count the model relation kinds GLOBALLY (across every model
-        // source) via the substrate's evidence accounting — kind names resolve
-        // through laplace.kind_id (the one canonicalization rule), so no hash
-        // constants and no inline SQL here.
         async Task<long> KindCount(string typeName)
         {
             await using var c = conn.CreateCommand();
@@ -1607,9 +1334,6 @@ internal static class Program
             return (long)(await c.ExecuteScalarAsync())!;
         }
 
-        // The cell ETL's LIVE arenas — the ten tensor-role kinds. ATTENDS /
-        // OV_RELATES / COMPLETES_TO are query-time read vocabulary (the bilinear
-        // compositions), never ingest-written — they are intentionally absent.
         string[] modelKinds =
         [
             "EMBEDS", "Q_PROJECTS", "K_PROJECTS", "V_PROJECTS", "O_PROJECTS",
@@ -1630,7 +1354,6 @@ internal static class Program
             Console.WriteLine($"  └ {modelKinds[i],-16}: {kindCounts[i],9:N0}");
     }
 
-    // === decompose: run the engine text decomposer + hash composer live ===
     private static int Decompose(string text)
     {
         if (string.IsNullOrEmpty(text)) return Fail("usage: laplace decompose <text>");
@@ -1645,7 +1368,6 @@ internal static class Program
         return 0;
     }
 
-    // === roundtrip: ingest a text file through the engine + export it byte-perfect ===
     private static int Roundtrip(string path, string? outPath)
     {
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
@@ -1654,13 +1376,10 @@ internal static class Program
 
         byte[] original = File.ReadAllBytes(path);
 
-        // Ingest: UTF-8 → observed codepoints → UAX#29 tier tree (no NFC at ingest).
         var swIn = Stopwatch.StartNew();
         using var tree = TextDecomposer.Run(original);
         swIn.Stop();
 
-        // Export: re-encode the tier-0 codepoint leaves (the contiguous prefix,
-        // in document order) back to UTF-8.
         var swOut = Stopwatch.StartNew();
         int total = tree.NodeCount;
         int leaves = 0;

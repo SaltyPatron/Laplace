@@ -291,7 +291,6 @@ internal static class EndpointMappings
         service_id = quote.ServiceId
     };
 
-    // input may be a string or a (non-empty) array of strings per the OpenAI shape.
     private static bool EmbeddingsInputPresent(JsonElement? input)
     {
         if (input is not { } element)
@@ -446,11 +445,6 @@ internal static class EndpointMappings
             if (payload.Units < 1)
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'units' must be >= 1.");
 
-            // Tenant is derived from the request-scoped identity (the X-Laplace-Tenant
-            // header today; the auth pass will bind it to the authenticated principal).
-            // A body-supplied tenant is intentionally NOT honored — that would let any
-            // caller debit another tenant's credits. Body tenant returns under an
-            // explicit admin scope once auth lands.
             var tenant = AppComposition.ResolveTenant(request);
             var consumed = entitlements.TryConsumeCredit(tenant, payload.ServiceId.Trim(), payload.Units, out var debit);
 

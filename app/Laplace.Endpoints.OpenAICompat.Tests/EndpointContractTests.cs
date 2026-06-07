@@ -497,9 +497,7 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
         var largeAmount = large.RootElement.GetProperty("amount_cents").GetInt64();
 
         Assert.True(largeParams > smallParams);
-        // Metered by dimensionality: the bigger mold must cost more.
         Assert.True(largeAmount > smallAmount);
-        // Base job fee floors every synthesis quote above the per-unit meter alone.
         Assert.True(smallAmount > small.RootElement.GetProperty("billable_units").GetInt64());
     }
 
@@ -536,7 +534,6 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
         var academicAmount = academic.RootElement.GetProperty("amount_cents").GetInt64();
 
         Assert.True(academicNodes > shallowNodes);
-        // Deeper/wider trace + academic provenance expansion must cost more.
         Assert.True(academicAmount > shallowAmount);
     }
 

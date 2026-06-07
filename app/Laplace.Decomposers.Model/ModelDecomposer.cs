@@ -6,35 +6,11 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Model;
 
-/// <summary>
-/// IDecomposer for transformer model families (Llama, Qwen, etc.).
-/// LayerOrder = 10 — ingests after all linguistic seed layers.
-///
-/// Decomposition order (FK-dependency safe):
-///   1. Bootstrap types + attestation kinds
-///   2. Recipe entity + recipe-parameter attestations
-///   3. Tokenizer meta-entity, then token vocab entities (batched)
-///   4. Weight tables: the cell ETL (<see cref="ModelTableETL"/> — every
-///      non-zero cell = one adjudicated match under its tensor-role kind;
-///      positions aggregate as witnesses) + S³ placements (separate axis)
-/// </summary>
 public sealed class ModelDecomposer : IDecomposer
 {
-    /* Well-known substrate IDs */
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AIModelProbe/v1");
 
-    /// <summary>
-    /// Source identity for a model is its CONTENT, not its directory name (truth #5):
-    /// chunk-Merkle of config.json + the weight shards (<see cref="SourceEntityIdConventions.ModelContentSourceId"/>).
-    /// Two byte-identical copies — renamed, moved, re-downloaded — are ONE witness (no
-    /// double-counting; cross-model consensus accumulates correctly); a fine-tune or
-    /// re-quantization is a DISTINCT witness. The display NAME is still derived from the
-    /// directory (HF "…/models--ORG--NAME/snapshots/SHA" → "ORG/NAME", else the dir name).
-    /// Falls back to the name-based id only when no weight files are present (fixtures).
-    /// Used by the decomposer AND callers that only have the dir (re-ingest guard, synthesis),
-    /// so they agree on the id.
-    /// </summary>
     public static (Hash128 Id, string Name) SourceForModel(string modelDir)
     {
         string name = DeriveModelName(modelDir);
@@ -54,13 +30,12 @@ public sealed class ModelDecomposer : IDecomposer
         {
             string s = segs[i];
             if (s == "snapshots") continue;
-            if (s.Length >= 32 && s.All(Uri.IsHexDigit)) continue;   // skip a snapshot SHA
+            if (s.Length >= 32 && s.All(Uri.IsHexDigit)) continue;
             return s;
         }
         return "model";
     }
 
-    /* Type IDs */
     public static readonly Hash128 TextTypeId =
         Hash128.OfCanonical("substrate/type/Text/v1");
     public static readonly Hash128 ModelRecipeTypeId =
@@ -71,43 +46,11 @@ public sealed class ModelDecomposer : IDecomposer
         Hash128.OfCanonical("substrate/type/Architecture/v1");
     public static readonly Hash128 ScalarTypeId =
         Hash128.OfCanonical("substrate/type/Scalar/v1");
-    // N-gram trajectory entities (a path of tokens — [the, capital, of] — as one
-    // content-addressed entity, a tier above its constituents).
     public static readonly Hash128 NgramTypeId =
         Hash128.OfCanonical("substrate/type/Ngram/v1");
-    // Model-axis entities: the source's SURROGATE KEYS (residual channels,
-    // attention dims, kv dims, FFN neurons) — first-class join nodes of the
-    // cell ETL (SourceEntityIdConventions.ModelAxisEntity). Source-scoped;
-    // aligned cross-model by placements, never by index identity.
-    //
-    // There is NO per-position witness entity: positions (layers, norm slots)
-    // are NOT identity anywhere — relation identity excludes them and evidence
-    // identity excludes them too (context_id NULL; "no synthetic per-position
-    // entities", #192 §7). Positions aggregate ON the relation's one evidence
-    // row as observation_count games; the witness is the SOURCE itself;
-    // per-position attribution is recipe content.
     public static readonly Hash128 ModelAxisTypeId =
         Hash128.OfCanonical("substrate/type/Model_Axis/v1");
 
-    /* Attestation-kind vocabulary.
-     *
-     * THE TENSOR-ROLE KINDS (EMBEDS … OUTPUT_PROJECTS) are the LIVE arenas of
-     * the model ETL — the inventor's original fixed vocabulary (discussion #192
-     * §6, reconfirmed 2026-06-04: "ETL on conventional AI for AI"). One kind per
-     * logical table role; each cell loads as one signed Glicko match between its
-     * own endpoints; LAYERS/HEADS ARE POSITIONS of the same table and aggregate
-     * as witnesses (per-position attribution = recipe content). The token×token
-     * bilinear (QK/OV/FFN) is the QUERY-TIME read — μ-ranked joins across these
-     * arenas — never an ingest materialization. A prior session's smear of these
-     * kinds as "the disease" was the corruption vector; never re-bury them.
-     *
-     * ATTENDS / OV_RELATES / COMPLETES_TO are READ vocabulary — names for the
-     * query-time bilinear compositions — never ingest-written; the per-(i,j)
-     * pre-join emitter that wrote them (ModelCircuitEdges) is deleted.
-     *
-     * Per-token magnitude reduction (row → one scalar) stays the cardinal sin.
-     * Nonlinearities (softmax, SiLU/SwiGLU gating) are the source's runtime —
-     * never attested, never run at ingest. */
     public static readonly Hash128 EmbedsTypeId        = RelationTypeRegistry.RelationTypeId("EMBEDS");
     public static readonly Hash128 QProjectsTypeId     = RelationTypeRegistry.RelationTypeId("Q_PROJECTS");
     public static readonly Hash128 KProjectsTypeId     = RelationTypeRegistry.RelationTypeId("K_PROJECTS");
@@ -119,19 +62,11 @@ public sealed class ModelDecomposer : IDecomposer
     public static readonly Hash128 NormScalesTypeId    = RelationTypeRegistry.RelationTypeId("NORM_SCALES");
     public static readonly Hash128 OutputProjectsTypeId = RelationTypeRegistry.RelationTypeId("OUTPUT_PROJECTS");
     public static readonly Hash128 TokenMapsToTypeId   = RelationTypeRegistry.RelationTypeId("TOKEN_MAPS_TO");
-    /* Content x content relatedness witnessed from model trajectory geometry — the
-     * corrected ingest axis (same kind the lexical decomposers emit, so model + dataset
-     * witnesses dedup onto one consensus edge). */
     public static readonly Hash128 SimilarToTypeId     = RelationTypeRegistry.RelationTypeId("SIMILAR_TO");
-    // Per-circuit relations, each read per (head/neuron) through the embedding address book:
-    //   ATTENDS      — QK: [query n-gram] attends [key tokens]
-    //   OV_RELATES   — OV: [value n-gram] relates [output tokens]
-    //   COMPLETES_TO — FFN: [context n-gram] ⇒ {completion tokens}
     public static readonly Hash128 AttendsTypeId       = RelationTypeRegistry.RelationTypeId("ATTENDS");
     public static readonly Hash128 OvRelatesTypeId     = RelationTypeRegistry.RelationTypeId("OV_RELATES");
     public static readonly Hash128 CompletesToTypeId   = RelationTypeRegistry.RelationTypeId("COMPLETES_TO");
 
-    /* Recipe attestation kinds */
     public static readonly Hash128 HasHiddenSizeTypeId  = RelationTypeRegistry.RelationTypeId("HAS_HIDDEN_SIZE");
     public static readonly Hash128 HasNumLayersTypeId   = RelationTypeRegistry.RelationTypeId("HAS_NUM_LAYERS");
     public static readonly Hash128 HasNumHeadsTypeId    = RelationTypeRegistry.RelationTypeId("HAS_NUM_HEADS");
@@ -140,7 +75,6 @@ public sealed class ModelDecomposer : IDecomposer
     public static readonly Hash128 HasVocabSizeTypeId   = RelationTypeRegistry.RelationTypeId("HAS_VOCAB_SIZE");
     public static readonly Hash128 IsATypeId            = RelationTypeRegistry.RelationTypeId("IS_A");
 
-    /* Well-known entity */
     public static readonly Hash128 LlamaArchitectureId =
         Hash128.OfCanonical("substrate/entity/Architecture_Llama/v1");
 
@@ -151,10 +85,9 @@ public sealed class ModelDecomposer : IDecomposer
     public ModelDecomposer(string modelDir)
     {
         _modelDir = modelDir ?? throw new ArgumentNullException(nameof(modelDir));
-        (_source, _sourceName) = SourceForModel(modelDir);   // per-model identity, not hardcoded
+        (_source, _sourceName) = SourceForModel(modelDir);
     }
 
-    /// <summary>This model's source identity, derived from its directory.</summary>
     public Hash128 Source       => _source;
     public Hash128 SourceId     => _source;
     public string  SourceName   => _sourceName;
@@ -172,24 +105,8 @@ public sealed class ModelDecomposer : IDecomposer
         boot.AddType("Ngram");
         boot.AddType("Model_Axis");
 
-        /* Codepoint / Grapheme / Word / Sentence / Document type entities are
-         * substrate-canonical text-tier types used by TextEntityBuilder for any
-         * text decomposition (TextDecomposer + HashComposer). They're seeded
-         * by 10_bootstrap.sql.in at install — every text-using decomposer
-         * (UnicodeDecomposer, this one, future WordNet/UD/Wiktionary/etc.)
-         * references the same type IDs.
-         *
-         * Text type alias kept for the canonical name `substrate/type/Text/v1`
-         * used by tokenizer entity rows (separate from the tier-typed entities
-         * TextEntityBuilder emits; matches LlamaTokenizerParser's existing
-         * `textTypeId` parameter). */
         boot.AddType("Text");
 
-        /* Kind vocabulary bootstrapped at first decomposer run. LIVE arenas: the
-         * ten tensor-role kinds (EMBEDS … OUTPUT_PROJECTS — the cell ETL's load
-         * targets) + TOKEN_MAPS_TO + the recipe kinds. ATTENDS / OV_RELATES /
-         * COMPLETES_TO are read-side vocabulary for the query-time bilinear
-         * compositions — registered, never ingest-written. */
         boot.AddRelationType("EMBEDS");
         boot.AddRelationType("Q_PROJECTS");
         boot.AddRelationType("K_PROJECTS");
@@ -226,7 +143,6 @@ public sealed class ModelDecomposer : IDecomposer
         string configPath    = Path.Combine(_modelDir, "config.json");
         string tokenizerPath = Path.Combine(_modelDir, "tokenizer.json");
 
-        /* 1. Recipe */
         var recipe = LlamaRecipeExtractor.Parse(configPath);
         log.LogInformation("phase=recipe parsed: {Layers} layers, {Heads} heads/{Kv} kv, "
             + "d_model={DModel}, vocab={Vocab} ({Ms} ms)",
@@ -238,9 +154,6 @@ public sealed class ModelDecomposer : IDecomposer
             HasIntermSizeTypeId, HasVocabSizeTypeId,
             IsATypeId, LlamaArchitectureId);
 
-        /* 2. Tokenizer meta-entity — MUST come before the TOKEN_MAPS_TO
-         * attestations (emitted by the morph phase, residual-scored; or the
-         * categorical fallback below) that reference tokEntityId as subject. */
         byte[] tokBytes = File.ReadAllBytes(tokenizerPath);
         var tokEntityId = Hash128.Blake3(tokBytes);
         var tokChange = new SubstrateChangeBuilder(Source, "tokenizer/entity",
@@ -248,19 +161,10 @@ public sealed class ModelDecomposer : IDecomposer
         tokChange.AddEntity(tokEntityId, (byte)MetaTier.Meta, ModelTokenizerTypeId, firstObservedBy: Source);
         yield return tokChange.Build();
 
-        /* 3. Token vocab ENTITIES (+ tier-tree content). TOKEN_MAPS_TO is a
-         * MAGNITUDE matchup scored by the morph's per-token residual, so the
-         * attestations are emitted in phase 4b where the residuals exist
-         * (categorical fallback when the morph is skipped/degenerate).
-         * Records are sorted by token_id in Parse() — _tokens[(int)vocabIndex].EntityId
-         * is correct for the QK scorer's vocab-index output. */
         phaseSw.Restart();
         var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
         log.LogInformation("phase=vocab parsed: {Count} tokens ({Ms} ms)",
             tokens.Count, phaseSw.ElapsedMilliseconds);
-        /* Model vocab is always large (32K+); the DecomposerOptions default BatchSize=1
-         * would emit one micro-intent per token (32K transactions, round-trip-bound).
-         * Floor the vocab/weight batch at 8192 regardless of the tiny per-unit default. */
         int batchSz = Math.Max(options.BatchSize, 8192);
         phaseSw.Restart();
         int vocabBatches = 0;
@@ -275,9 +179,6 @@ public sealed class ModelDecomposer : IDecomposer
         log.LogInformation("phase=vocab emitted: {Batches} batches ({Ms} ms)",
             vocabBatches, phaseSw.ElapsedMilliseconds);
 
-        /* 3b. BPE merge lattice (model.merges) — the tokenizer's LEARNED
-         * structure, rank-ordered: MERGES_WITH matchups, magnitude from rank
-         * position against the measured RMS scale (2026-06-05 completeness). */
         phaseSw.Restart();
         var merges = LlamaTokenizerParser.ParseMerges(tokenizerPath);
         int mergeBatches = 0;
@@ -291,20 +192,6 @@ public sealed class ModelDecomposer : IDecomposer
         log.LogInformation("phase=merges emitted: {Count} merges, {Batches} batches ({Ms} ms)",
             merges.Count, mergeBatches, phaseSw.ElapsedMilliseconds);
 
-        /* 4. Weights — "ETL on conventional AI, for AI". The model is a witness;
-         *    its weight tables load as adjudicated matches under the ten
-         *    tensor-role kinds; the embedding additionally becomes Projection
-         *    physicality placements on the shared Unicode S³ frame. */
-
-        // 4a. The records: stream every table's cells AT REST (O(params), exact —
-        //     no forward pass, no probe, no GEMM pre-join). Token axes resolve
-        //     through the model's own embed/lm_head key-mapping tables; hidden
-        //     axes are its surrogate keys (Model_Axis join nodes); positions
-        //     (layer instances) FOLD onto one evidence row per relation
-        //     (observation_count = games; exact score sums into consensus;
-        //     context_id NULL — records bounded by SCHEMA SHAPE, never by
-        //     depth or params). The token×token bilinear (QK/OV/FFN) is the
-        //     QUERY-TIME read across these arenas — never materialized at ingest.
         log.LogInformation("phase=etl starting (weight tables → adjudicated matches under tensor-role kinds)");
         var etl = new ModelTableETL(_modelDir, recipe, tokens, Source, ModelAxisTypeId, log);
         await foreach (var change in etl.EmitAsync(ct))
@@ -313,18 +200,6 @@ public sealed class ModelDecomposer : IDecomposer
             yield return change;
         }
 
-        // 4b. Placement (separate axis): morph embed_tokens onto the shared Unicode S³
-        //     frame (eigenmaps → Gram-Schmidt → Procrustes) as Projection physicalities.
-        //     NOTE: the dense Laplacian-eigenmaps affinity is O(n²·d_model) — it does NOT
-        //     share the O(params) budget of the circuit read; its affinity should come from
-        //     the streamed relation graph (sparse), the same redesign the circuits got.
-        //     LAPLACE_SKIP_MORPH=1 omits this placement so the O(params) circuit ingest can
-        //     be measured/run on its own until the morph affinity is made sparse.
-        // The morph emits the residual-scored TOKEN_MAPS_TO matchups alongside
-        // the Projection placements. If it is SKIPPED (env) or DEGENERATE
-        // (kernel failure / too few anchors → zero changes yielded), the
-        // mapping arena must still exist: categorical fallback at registry
-        // rank — never an empty arena, never a hand-coded φ.
         bool morphEmitted = false;
         if (Environment.GetEnvironmentVariable("LAPLACE_SKIP_MORPH") == "1")
         {
@@ -356,17 +231,6 @@ public sealed class ModelDecomposer : IDecomposer
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        // EXACT row estimate from the recipe's SCHEMA SHAPES — records are
-        // bounded by the shape (one evidence row per relation; positions fold
-        // as games), never by depth or params. Content folding is DETERMINISTIC
-        // from the tokenizer (vocab slots that canonicalize to the same
-        // wordform — ▁the/the — are ONE entity, so their EMBEDS/OUTPUT_PROJECTS
-        // relations are ONE relation identity), so the estimate counts DISTINCT
-        // token entities, not slots: TinyLlama's 32,000 slots fold to ~26.6k
-        // entities and the old slot-based figure (175,146,240) overshot the
-        // recorded 153.2M rows by 12.5% — progress topped out at ~87.5%
-        // forever. Remaining upper-bound caveat: an all-zero relation emits
-        // nothing. Never hardcoded.
         string configPath = Path.Combine(_modelDir, "config.json");
         if (!File.Exists(configPath)) return Task.FromResult<long?>(null);
         var r = LlamaRecipeExtractor.Parse(configPath);
@@ -375,9 +239,6 @@ public sealed class ModelDecomposer : IDecomposer
         long headDim = d / r.NumHeads;
         long attnOut = r.NumHeads * headDim, kvDim = (long)r.NumKvHeads * headDim;
 
-        // Distinct token entities via the SAME parse the vocab phase uses (the
-        // T0 perf-cache is loaded by the CLI before any ingest). Falls back to
-        // the slot-count upper bound only if the tokenizer is unreadable here.
         long distinctVocab = r.VocabSize;
         string tokenizerPath = Path.Combine(_modelDir, "tokenizer.json");
         if (File.Exists(tokenizerPath))
@@ -390,19 +251,17 @@ public sealed class ModelDecomposer : IDecomposer
             }
             catch (Exception)
             {
-                // unreadable tokenizer / perf-cache not loaded — keep the slot bound
             }
         }
 
         long relations =
-              distinctVocab * d                           // EMBEDS (content-folded)
-            + distinctVocab * d                           // OUTPUT_PROJECTS (own table or tied)
-            + 2 * d * attnOut                             // Q + O
-            + 2 * d * kvDim                               // K + V
-            + (p.HasGate ? d * interm : 0)                // GATES
-            + 2 * d * interm                              // UP + DOWN
-            + d;                                          // NORM_SCALES (per channel)
-        // + one TOKEN_MAPS_TO identity per distinct token entity
+              distinctVocab * d
+            + distinctVocab * d
+            + 2 * d * attnOut
+            + 2 * d * kvDim
+            + (p.HasGate ? d * interm : 0)
+            + 2 * d * interm
+            + d;
         return Task.FromResult<long?>(distinctVocab + relations);
     }
 

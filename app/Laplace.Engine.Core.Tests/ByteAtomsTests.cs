@@ -2,15 +2,11 @@ using Xunit;
 
 namespace Laplace.Engine.Core.Tests;
 
-/// <summary>The byte tier's laws (2026-06-05): ASCII bytes ARE their codepoint
-/// entities; high bytes get deterministic canonical placements on the glome;
-/// UTF-8 roles follow RFC 3629; CP1252's remap table is the standard's.</summary>
 public class ByteAtomsTests
 {
     [Fact]
     public void AsciiByte_IsItsCodepointEntity()
     {
-        // One content, one entity — blake3([0x41]) == blake3(utf8('A')).
         Assert.Equal(Hash128.Blake3(new byte[] { 0x41 }), ByteAtoms.Id(0x41));
         Assert.Equal(Hash128.Blake3(System.Text.Encoding.UTF8.GetBytes("A")), ByteAtoms.Id(0x41));
     }
@@ -23,10 +19,9 @@ public class ByteAtomsTests
         {
             var c = ByteAtoms.Coord((byte)b);
             double r2 = c[0] * c[0] + c[1] * c[1] + c[2] * c[2] + c[3] * c[3];
-            Assert.InRange(Math.Sqrt(r2), 1.0 - 1e-12, 1.0 + 1e-12);   // unit glome
+            Assert.InRange(Math.Sqrt(r2), 1.0 - 1e-12, 1.0 + 1e-12);
             Assert.True(seen.Add((c[0], c[1], c[2], c[3])), "placements distinct");
         }
-        // bit-identical across calls — the ONE implementation law
         Assert.True(ByteAtoms.Coord(0xC2).SequenceEqual(ByteAtoms.Coord(0xC2)));
     }
 
@@ -47,8 +42,7 @@ public class ByteAtomsTests
     [Fact]
     public void Cp1252_EuroAtEightyNotLatin1()
     {
-        // The encoding-relativity proof: 0x80 = € under CP1252, U+0080 under Latin-1.
         Assert.Equal(0x20AC, ByteAtoms.Cp1252High[0]);
-        Assert.Equal(0, ByteAtoms.Cp1252High[0x81 - 0x80]);   // undefined slot
+        Assert.Equal(0, ByteAtoms.Cp1252High[0x81 - 0x80]);
     }
 }

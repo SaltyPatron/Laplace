@@ -1,6 +1,3 @@
-/* extension/laplace_substrate/sql/sqldefines.h.in
- * Shared macros for laplace_substrate .sql.in modules. */
-
 #define LAPLACE_SUBSTRATE_VERSION  '@PROJECT_VERSION@'
 
 #define LAPLACE_IMMUTABLE_STRICT  IMMUTABLE STRICT PARALLEL SAFE

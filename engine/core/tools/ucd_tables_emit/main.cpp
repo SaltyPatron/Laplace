@@ -1,28 +1,5 @@
-// engine/core/tools/ucd_tables_emit/main.cpp
-//
-// Perf-cache emitter. Reads UCDXML (UAX#42) +
-// DUCET (UCA allkeys.txt) and writes the T0 codepoint perf-cache BINARY
-// blob: per-codepoint { hash, uca_order, coord (super-Fibonacci on S^3),
-// hilbert, packed GB/WB/SB/InCB/CCC } + canonical decomposition +
-// composition side-tables.
-//
-// This is UnicodeDecomposer's build-time half. The blob is APP/reference
-// data — the runtime (TextDecomposer + HashComposer) mmaps it to compute
-// T>0 without the DB, and it deploys standalone to mobile/embedded. The
-// sibling install-time half (1.1M codepoint entity + physicality DB seed,
-// no complex attestations) reads the same derivation via SubstrateChange.
-//
-// Determinism: same UCDXML + same DUCET + same emit source ->
-// byte-identical blob.
-//
-// Usage:
-//   laplace_ucd_tables_emit \
-//       --ucdxml      .../ucd.nounihan.flat.xml \
-//       --ducet       .../allkeys.txt \
-//       --ucd-version 17.0.0 --uca-version 17.0.0 \
-//       --output      .../perfcache.bin
-
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -47,9 +24,8 @@
 
 namespace fs = std::filesystem;
 
-static const uint32_t CP_COUNT = LAPLACE_PERFCACHE_RECORD_COUNT;  // 0x110000
+static const uint32_t CP_COUNT = LAPLACE_PERFCACHE_RECORD_COUNT;
 
-// ===== CLI =====
 struct Cli { fs::path ucdxml, ducet, output; std::string ucd_version, uca_version; };
 static Cli parse_cli(int argc, char** argv) {
     Cli c;
@@ -72,7 +48,6 @@ static Cli parse_cli(int argc, char** argv) {
     return c;
 }
 
-// ===== short-code -> fixed id maps =====
 static uint8_t map_gb(const char* s) {
     static const std::unordered_map<std::string, uint8_t> m = {
         {"XX",LAPLACE_GB_OTHER},{"CR",LAPLACE_GB_CR},{"LF",LAPLACE_GB_LF},
@@ -112,12 +87,11 @@ static uint8_t map_incb(const char* s) {
     return LAPLACE_INCB_NONE;
 }
 
-// ===== per-codepoint property arrays (direct-indexed) =====
 struct UcdData {
     std::vector<uint8_t> gb, wb, sb, incb, ccc;
     std::vector<uint8_t> ext_pict;
-    std::unordered_map<uint32_t, std::vector<uint32_t>> decomp;  // canonical (dt=can) only
-    std::vector<uint8_t> comp_ex;  // 1 if Comp_Ex=Y
+    std::unordered_map<uint32_t, std::vector<uint32_t>> decomp;
+    std::vector<uint8_t> comp_ex;
     UcdData() {
         gb.assign(CP_COUNT, LAPLACE_GB_OTHER);
         wb.assign(CP_COUNT, LAPLACE_WB_OTHER);
@@ -175,7 +149,6 @@ extern "C" void on_start(void* u, const xmlChar* name, const xmlChar** a) {
         d->gb[c]=gbid; d->wb[c]=wbid; d->sb[c]=sbid; d->incb[c]=inid;
         d->ccc[c]=ccv; d->ext_pict[c]=epv; d->comp_ex[c]=cxv;
     }
-    // Canonical decomposition (single cp only; dt=can)
     if (first == last && dt && dm && std::strcmp((const char*)dt,"can")==0
         && std::strcmp((const char*)dm,"#")!=0) {
         std::vector<uint32_t> seq;
@@ -189,14 +162,9 @@ extern "C" void on_end(void* u, const xmlChar* name) {
     if (std::strcmp((const char*)name,"repertoire")==0) ctx->in_rep = false;
 }
 
-// ===== DUCET → per-codepoint collation sort key =====
-// Sort key per cp: 64-bit (primary<<48 | secondary<<32 | tertiary<<16 | 0),
-// with codepoint as final tiebreak. Single-cp explicit entries read their
-// first CE's weights. Codepoints absent from allkeys get UCA §10.1.3
-// implicit weights (Han/Tangut/Nushu/Khitan/other bases).
 struct DucetKeys {
-    std::vector<uint64_t> key;       // collation sort key per cp
-    std::vector<uint8_t>  explicit_; // 1 if from allkeys, 0 if implicit
+    std::vector<uint64_t> key;
+    std::vector<uint8_t>  explicit_;
     DucetKeys() { key.assign(CP_COUNT, 0); explicit_.assign(CP_COUNT, 0); }
 };
 
@@ -210,7 +178,6 @@ static void parse_ducet(const fs::path& path, DucetKeys& dk) {
     while (std::getline(f, line)) {
         if (line.empty()) continue;
         if (line[0] == '@') {
-            // @implicitweights FIRST..LAST; BASE
             if (line.rfind("@implicitweights", 0) == 0) {
                 const char* p = line.c_str() + 16;
                 char* e;
@@ -224,12 +191,9 @@ static void parse_ducet(const fs::path& path, DucetKeys& dk) {
             continue;
         }
         if (line[0] == '#') continue;
-        // strip comment
         size_t h = line.find('#'); if (h != std::string::npos) line = line.substr(0, h);
         size_t semi = line.find(';'); if (semi == std::string::npos) continue;
-        // left of ; = codepoints; we only handle single-cp entries
         std::string lhs = line.substr(0, semi);
-        // count tokens in lhs
         const char* p = lhs.c_str(); char* e;
         uint32_t cps[4]; int ncp = 0;
         while (*p && ncp < 4) {
@@ -239,10 +203,9 @@ static void parse_ducet(const fs::path& path, DucetKeys& dk) {
             if (e == p) break;
             cps[ncp++] = v; p = e;
         }
-        if (ncp != 1) continue;          // skip contractions
+        if (ncp != 1) continue;
         uint32_t cp = cps[0];
         if (cp >= CP_COUNT) continue;
-        // first CE on rhs: [.PPPP.SSSS.TTTT] or [*PPPP....]
         std::string rhs = line.substr(semi + 1);
         size_t b = rhs.find('[');
         if (b == std::string::npos) continue;
@@ -254,14 +217,11 @@ static void parse_ducet(const fs::path& path, DucetKeys& dk) {
         dk.key[cp] = ((uint64_t)pw << 48) | ((uint64_t)sw << 32) | ((uint64_t)tw << 16);
         dk.explicit_[cp] = 1;
     }
-    // Implicit weights for codepoints not explicitly listed (UCA §10.1.3).
     auto base_for = [&](uint32_t cp) -> uint32_t {
         for (const auto& r : implicit) if (cp >= r.first && cp <= r.last) return r.base;
-        // Core Han Unified + compat
         if ((cp>=0x4E00&&cp<=0x9FFF)||(cp>=0xF900&&cp<=0xFAFF)) return 0xFB40;
-        // CJK extensions (A,B,...) + other ideographs
         if ((cp>=0x3400&&cp<=0x4DBF)||(cp>=0x20000&&cp<=0x3FFFF)) return 0xFB80;
-        return 0xFBC0;  // all other unassigned
+        return 0xFBC0;
     };
     for (uint32_t cp = 0; cp < CP_COUNT; ++cp) {
         if (dk.explicit_[cp]) continue;
@@ -272,7 +232,6 @@ static void parse_ducet(const fs::path& path, DucetKeys& dk) {
     }
 }
 
-// ===== binary write helpers (little-endian) =====
 static void put_u32(std::vector<uint8_t>& b, uint32_t v) { for(int i=0;i<4;++i) b.push_back((uint8_t)(v>>(i*8))); }
 static void put_u64(std::vector<uint8_t>& b, uint64_t v) { for(int i=0;i<8;++i) b.push_back((uint8_t)(v>>(i*8))); }
 static void put_f64(std::vector<uint8_t>& b, double d) { uint64_t v; std::memcpy(&v,&d,8); put_u64(b,v); }
@@ -293,10 +252,6 @@ static size_t utf8_encode(uint32_t cp, uint8_t o[4]) {
 int main(int argc, char** argv) {
     Cli cli = parse_cli(argc, argv);
 
-    // --- Records: the ONE source of truth. Computed by the C ABI function in
-    //     liblaplace_core; the C# UnicodeDecomposer calls the same function so
-    //     the blob and the DB seed are byte-identical siblings, not one fed
-    //     from the other. ---
     std::vector<laplace_perfcache_record_t> rec_array(CP_COUNT);
     int rc = laplace_unicode_seed_compute(cli.ucdxml.string().c_str(),
                                           cli.ducet.string().c_str(),
@@ -305,14 +260,10 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "laplace_unicode_seed_compute returned %d\n", rc);
         return 4;
     }
-    // Serialise the records to the on-disk byte form (header section).
     std::vector<uint8_t> records;
     records.resize(sizeof(laplace_perfcache_record_t) * CP_COUNT);
     std::memcpy(records.data(), rec_array.data(), records.size());
 
-    // --- The emitter ALSO needs a UCDXML pass for the decomp/compose
-    //     side-tables (blob-only artifacts; not part of the DB seed). The
-    //     records computed above are NOT overwritten by this. ---
     UcdData d;
     SaxCtx ctx{&d, false};
     xmlSAXHandler sax{}; sax.initialized = XML_SAX2_MAGIC;
@@ -323,7 +274,6 @@ int main(int argc, char** argv) {
     }
     xmlCleanupParser();
 
-    // --- decomposition side-table (full canonical decomposition, recursive) ---
     std::function<void(uint32_t, std::vector<uint32_t>&)> full;
     full = [&](uint32_t cp, std::vector<uint32_t>& out){
         auto it = d.decomp.find(cp);
@@ -343,15 +293,14 @@ int main(int argc, char** argv) {
         for (uint32_t c : dd.second) { put_u32(decomp_data, c); ++data_idx; }
     }
 
-    // --- composition side-table (pairwise, exclusions filtered) ---
     auto ccc_of = [&](uint32_t cp){ return cp < CP_COUNT ? d.ccc[cp] : 0; };
     std::vector<std::array<uint32_t,3>> comps;
     for (auto& kv : d.decomp) {
         uint32_t cp = kv.first; const auto& seq = kv.second;
         if (seq.size() != 2) continue;
         if (d.comp_ex[cp]) continue;
-        if (ccc_of(seq[0]) != 0) continue;   // non-starter decomposition (singleton excl)
-        if (ccc_of(cp) != 0) continue;        // script-specific excl
+        if (ccc_of(seq[0]) != 0) continue;
+        if (ccc_of(cp) != 0) continue;
         comps.push_back({seq[0], seq[1], cp});
     }
     std::sort(comps.begin(), comps.end(), [](auto&a, auto&b){
@@ -360,7 +309,6 @@ int main(int argc, char** argv) {
     std::vector<uint8_t> compose_recs;
     for (auto& c : comps) { put_u32(compose_recs, c[0]); put_u32(compose_recs, c[1]); put_u32(compose_recs, c[2]); }
 
-    // --- assemble blob: header(128) + records + decomp_recs + decomp_data + compose_recs + trailer(16) ---
     const uint64_t HDR = 128;
     uint64_t off_records   = HDR;
     uint64_t off_decomp_r  = off_records  + records.size();
@@ -369,7 +317,6 @@ int main(int argc, char** argv) {
 
     std::vector<uint8_t> blob;
     blob.reserve(off_compose_r + compose_recs.size() + 16);
-    // header
     put_u32(blob, LAPLACE_PERFCACHE_MAGIC);
     put_u32(blob, LAPLACE_PERFCACHE_VERSION);
     { char v[8]={0}; std::strncpy(v, cli.ucd_version.c_str(), 8); for(int i=0;i<8;++i) blob.push_back((uint8_t)v[i]); }
@@ -383,18 +330,15 @@ int main(int argc, char** argv) {
     put_u64(blob, off_decomp_d);
     put_u64(blob, comps.size());
     put_u64(blob, off_compose_r);
-    { hash128_t z; hash128_zero(&z); put_h128(blob, z); }  // ucd_hash (fingerprint TODO; zero for now)
-    for (int i=0;i<16;++i) blob.push_back(0);               // reserved[16] -> 128 B header
-    // sections
+    { hash128_t z; hash128_zero(&z); put_h128(blob, z); }
+    for (int i=0;i<16;++i) blob.push_back(0);
     blob.insert(blob.end(), records.begin(), records.end());
     blob.insert(blob.end(), decomp_recs.begin(), decomp_recs.end());
     blob.insert(blob.end(), decomp_data.begin(), decomp_data.end());
     blob.insert(blob.end(), compose_recs.begin(), compose_recs.end());
-    // trailer: BLAKE3-128 of everything so far
     hash128_t crc; hash128_blake3(blob.data(), blob.size(), &crc);
     put_h128(blob, crc);
 
-    // write
     std::ofstream out(cli.output, std::ios::binary);
     if (!out) { std::fprintf(stderr, "cannot write %s\n", cli.output.string().c_str()); return 5; }
     out.write((const char*)blob.data(), (std::streamsize)blob.size());

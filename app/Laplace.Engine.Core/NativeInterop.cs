@@ -2,33 +2,15 @@ using System.Runtime.InteropServices;
 
 namespace Laplace.Engine.Core;
 
-/// <summary>
-/// P/Invoke bindings to liblaplace_core ().
-///
-///: engine-boundary types are POD; no exceptions cross
-/// the C ABI.: this project does NOT define parallel
-/// C# types for liblwgeom's POINT4D — geometry round-trips PG ↔ C# via
-/// Npgsql.NetTopologySuite (NTS Coordinate with Ordinates.XYZM).
-///
-/// All bindings use source-generated <c>[LibraryImport]</c> for AOT
-/// friendliness; opaque handles cross as <see cref="IntPtr"/> and are
-/// wrapped in <see cref="SafeHandle"/> subclasses (<see cref="TierTree"/>,
-/// <see cref="IntentStage"/>) at the public API level.
-/// </summary>
 public static unsafe partial class NativeInterop
 {
-    // Linux: liblaplace_core.so   macOS: liblaplace_core.dylib   Windows: laplace_core.dll
     private const string Library = "laplace_core";
-
-    // === version ===
 
     [LibraryImport(Library, EntryPoint = "laplace_core_version")]
     private static partial IntPtr LaplaceCoreVersionPtr();
 
     public static string LaplaceCoreVersion() =>
         Marshal.PtrToStringUTF8(LaplaceCoreVersionPtr()) ?? string.Empty;
-
-    // === hash128 (engine/core/include/laplace/core/hash128.h) ===
 
     [LibraryImport(Library, EntryPoint = "hash128_blake3")]
     internal static partial void Hash128Blake3(byte* data, nuint len, Hash128* outHash);
@@ -45,17 +27,11 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "hash128_zero")]
     internal static partial void Hash128Zero(Hash128* outHash);
 
-    // === super_fibonacci (engine/core/include/laplace/core/super_fibonacci.h) ===
-
     [LibraryImport(Library, EntryPoint = "super_fibonacci")]
     internal static partial void SuperFibonacci(nuint n, double* outQuats);
 
-    // === math4d (engine/core/include/laplace/core/math4d.h) ===
-
     [LibraryImport(Library, EntryPoint = "math4d_centroid")]
     internal static partial void Math4dCentroid(double* points, nuint nPoints, double* out4);
-
-    // === trajectory (engine/core/include/laplace/core/trajectory.h) ===
 
     [LibraryImport(Library, EntryPoint = "trajectory_build")]
     internal static partial int TrajectoryBuild(Hash128* entityHashes, nuint n, double* outXyzm);
@@ -69,8 +45,6 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "trajectory_constituents")]
     internal static partial int TrajectoryConstituents(double* trajectoryXyzm, nuint nPoints, Hash128* outHashes, nuint outCap);
 
-    // === hilbert4d (engine/core/include/laplace/core/hilbert4d.h) ===
-
     [LibraryImport(Library, EntryPoint = "hilbert4d_encode")]
     internal static partial void Hilbert4dEncode(double* point, Hilbert128* outHb);
 
@@ -80,13 +54,9 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "hilbert128_compare")]
     internal static partial int Hilbert128Compare(Hilbert128* a, Hilbert128* b);
 
-    // === unicode_seed (engine/core/include/laplace/core/unicode_seed.h) ===
-
     [LibraryImport(Library, EntryPoint = "laplace_unicode_seed_compute", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int UnicodeSeedCompute(string ucdxmlPath, string ducetPath,
                                                    CodepointRecord* outRecords, nuint outCapacity);
-
-    // === codepoint_table (engine/core/include/laplace/core/codepoint_table.h) ===
 
     [LibraryImport(Library, EntryPoint = "codepoint_table_load_perfcache", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int CodepointTableLoadPerfcache(string path);
@@ -99,8 +69,6 @@ public static unsafe partial class NativeInterop
 
     [LibraryImport(Library, EntryPoint = "codepoint_table_records")]
     internal static partial int CodepointTableRecords(CodepointRecord** outRecords, ulong* outCount);
-
-    // === tier_tree (engine/core/include/laplace/core/tier_tree.h) ===
 
     [LibraryImport(Library, EntryPoint = "tier_tree_new")]
     internal static partial IntPtr TierTreeNew(nuint capacityHint);
@@ -138,23 +106,17 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "tier_tree_set_hilbert")]
     internal static partial int TierTreeSetHilbert(IntPtr tree, uint idx, Hilbert128* hilbert);
 
-    // === text_decomposer (engine/core/include/laplace/core/text_decomposer.h) ===
-
     [LibraryImport(Library, EntryPoint = "laplace_text_decomposer_run")]
     internal static partial int TextDecomposerRun(byte* utf8, nuint len, IntPtr* outTree);
 
     [LibraryImport(Library, EntryPoint = "tier_tree_id_array")]
     internal static partial IntPtr TierTreeIdArray(IntPtr tree);
 
-    // === hash_composer (engine/core/include/laplace/core/hash_composer.h) ===
-
     [LibraryImport(Library, EntryPoint = "hash_composer_run")]
     internal static partial int HashComposerRun(
         IntPtr tree,
         delegate* unmanaged[Cdecl]<uint, IntPtr, Hash128*, double*, Hilbert128*, int> resolver,
         IntPtr resolverUserData);
-
-    // === merkle_dedup (engine/core/include/laplace/core/merkle_dedup.h) ===
 
     [LibraryImport(Library, EntryPoint = "merkle_dedup_filter_novel")]
     internal static partial int MerkleDedupFilterNovel(
@@ -167,8 +129,6 @@ public static unsafe partial class NativeInterop
         IntPtr tree,
         byte* existingBitmap, nuint bitmapBits,
         uint* outNovelIndices, nuint* outN);
-
-    // === intent_stage (engine/core/include/laplace/core/intent_stage.h) ===
 
     [LibraryImport(Library, EntryPoint = "intent_stage_new")]
     internal static partial IntPtr IntentStageNew(nuint rowCapacityHint);
@@ -204,9 +164,6 @@ public static unsafe partial class NativeInterop
         int sourceDimIsNull,         int    sourceDim,
         long observedAtUnixUs);
 
-    // Evidence is PROVENANCE: outcome is the dissent class (0=refute, 1=draw,
-    // 2=confirm), never a magnitude — the witness's value is consumed into the
-    // consensus accumulation at ingest and never persisted.
     [LibraryImport(Library, EntryPoint = "intent_stage_add_attestation")]
     internal static partial int IntentStageAddAttestation(
         IntPtr stage,
@@ -222,8 +179,6 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "intent_stage_tuple_ptr")]
     internal static partial byte* IntentStageTuplePtr(
         IntPtr stage, int table, nuint* outLen);
-
-    // === glicko2 (engine/core/include/laplace/core/glicko2.h) ===
 
     [LibraryImport(Library, EntryPoint = "glicko2_effective_mu")]
     internal static partial long Glicko2EffectiveMu(Glicko2State* state);

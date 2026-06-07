@@ -7,22 +7,15 @@
 #include <sys/stat.h>
 #include <vector>
 
-/* Native safetensors-style package writer.
- *
- * safetensors wire format (single-shard):
- *   header_len[8]  = uint64_le: byte length of the header JSON
- *   header_json[]  = UTF-8 JSON map: tensor_name → {dtype, shape, data_offsets:[start,end]}
- *   tensor_data[]  = concatenated raw tensor bytes
- *
- * Additionally emits:
- *   model.safetensors.index.json  — shard manifest (maps tensor→file)
- *   config.json                   — from recipe (caller-supplied)
- *   tokenizer.json                — from substrate tokenizer entity (caller-supplied)
- *   provenance.json               — substrate lineage metadata
- *
- * Sparse-by-construction: the caller must zero-fill any
- * tensor positions not backed by substrate attestations before calling
- * format_writer_add_tensor. */
+#ifdef _WIN32
+#include <direct.h>
+#define laplace_mkdir(p) _mkdir(p)
+#ifndef S_ISDIR
+#define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
+#endif
+#else
+#define laplace_mkdir(p) mkdir((p), 0755)
+#endif
 
 namespace {
 
@@ -47,7 +40,7 @@ size_t dtype_elem_size(int dtype) {
 bool mkdir_p(const std::string& path) {
     struct stat st;
     if (stat(path.c_str(), &st) == 0) return S_ISDIR(st.st_mode);
-    if (mkdir(path.c_str(), 0755) != 0 && errno != EEXIST) return false;
+    if (laplace_mkdir(path.c_str()) != 0 && errno != EEXIST) return false;
     return true;
 }
 
@@ -70,10 +63,10 @@ struct TensorRecord {
     std::vector<uint8_t> data;
 };
 
-} /* namespace */
+}
 
 struct format_writer {
-    std::string              format;       /* "safetensors" */
+    std::string              format;
     std::string              output_dir;
     std::vector<TensorRecord> tensors;
     std::string              config_json;
@@ -107,7 +100,6 @@ int format_writer_add_tensor(format_writer_t* w,
     tr.dtype = dtype;
     for (size_t d = 0; d < rank; ++d) tr.shape.push_back(shape[d]);
 
-    /* Validate data length = product(shape) * elem_size */
     size_t n_elements = 1;
     for (size_t s : tr.shape) n_elements *= s;
     const size_t expected = n_elements * dtype_elem_size(dtype);
@@ -137,9 +129,6 @@ extern "C"
 int format_writer_finalize(format_writer_t* w) {
     if (!w) return -1;
 
-    /* === Build safetensors binary ===
-     *
-     * Step 1: compute each tensor's byte offset in the data section. */
     std::vector<size_t> offsets(w->tensors.size(), 0);
     size_t cur = 0;
     for (size_t i = 0; i < w->tensors.size(); ++i) {
@@ -147,7 +136,6 @@ int format_writer_finalize(format_writer_t* w) {
         cur += w->tensors[i].data.size();
     }
 
-    /* Step 2: build header JSON */
     std::string header_json = "{";
     bool first = true;
     for (size_t i = 0; i < w->tensors.size(); ++i) {
@@ -155,7 +143,6 @@ int format_writer_finalize(format_writer_t* w) {
         if (!first) header_json += ',';
         first = false;
 
-        /* Build shape JSON array */
         std::string shape_arr = "[";
         for (size_t d = 0; d < tr.shape.size(); ++d) {
             if (d > 0) shape_arr += ',';
@@ -175,13 +162,11 @@ int format_writer_finalize(format_writer_t* w) {
     }
     header_json += '}';
 
-    /* Step 3: write model.safetensors */
     const std::string shard_path = w->output_dir + "/model.safetensors";
     FILE* f = std::fopen(shard_path.c_str(), "wb");
     if (!f) return -1;
 
     const uint64_t header_len = (uint64_t)header_json.size();
-    /* Write header length as uint64_le */
     uint8_t hlen_bytes[8];
     for (int b = 0; b < 8; ++b)
         hlen_bytes[b] = (uint8_t)((header_len >> (8 * b)) & 0xFF);
@@ -197,7 +182,6 @@ int format_writer_finalize(format_writer_t* w) {
     }
     std::fclose(f);
 
-    /* === Write model.safetensors.index.json === */
     std::string index_json = R"({"metadata":{"format":"pt"},"weight_map":{)";
     first = true;
     for (const TensorRecord& tr : w->tensors) {
@@ -210,13 +194,11 @@ int format_writer_finalize(format_writer_t* w) {
     index_json += "}}";
     write_file(w->output_dir + "/model.safetensors.index.json", index_json);
 
-    /* === Write config.json and tokenizer.json if provided === */
     if (!w->config_json.empty())
         write_file(w->output_dir + "/config.json", w->config_json);
     if (!w->tokenizer_json.empty())
         write_file(w->output_dir + "/tokenizer.json", w->tokenizer_json);
 
-    /* === Write provenance.json === */
     const char* provenance = R"({"generator":"laplace_substrate","format":"safetensors_substrate_v0","sparse_by_construction":true,"zero_fill_policy":"no_attestation_exact_zero"})";
     write_file(w->output_dir + "/provenance.json",
                provenance, std::strlen(provenance));

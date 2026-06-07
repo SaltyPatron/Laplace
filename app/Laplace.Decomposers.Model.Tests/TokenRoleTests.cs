@@ -4,16 +4,12 @@ using Laplace.Decomposers.Model;
 
 namespace Laplace.Decomposers.Model.Tests;
 
-/// <summary>
-/// Token-role mask: the tokenizer framing (leading-space / byte-level) is RECORDED, not
-/// stripped, so the canonical-text dedup (▁the / the → "the") stays reversible.
-/// </summary>
 public class TokenRoleTests
 {
     [Theory]
-    [InlineData("▁the", TokenRole.LeadingSpace, "the")]  // SentencePiece word-initial
-    [InlineData("Ġthe", TokenRole.LeadingSpace, "the")]  // GPT-2 word-initial
-    [InlineData("the",  TokenRole.None,         "the")]  // ordinary subword
+    [InlineData("▁the", TokenRole.LeadingSpace, "the")]
+    [InlineData("Ġthe", TokenRole.LeadingSpace, "the")]
+    [InlineData("the",  TokenRole.None,         "the")]
     [InlineData("cat",  TokenRole.None,         "cat")]
     public void Canonicalize_RecordsLeadingSpaceRole(string raw, TokenRole expectedRole, string expectedText)
     {
@@ -27,15 +23,15 @@ public class TokenRoleTests
     {
         var (cInit, rInit) = LlamaTokenizerParser.Canonicalize("▁the");
         var (cSub,  rSub)  = LlamaTokenizerParser.Canonicalize("the");
-        Assert.Equal(cInit, cSub);                        // same content → same entity (dedup)
-        Assert.True(rInit.HasFlag(TokenRole.LeadingSpace)); // word-initial form
-        Assert.False(rSub.HasFlag(TokenRole.LeadingSpace)); // subword form — distinguishable
+        Assert.Equal(cInit, cSub);
+        Assert.True(rInit.HasFlag(TokenRole.LeadingSpace));
+        Assert.False(rSub.HasFlag(TokenRole.LeadingSpace));
     }
 
     [Theory]
-    [InlineData("<0x41>", (byte)0x41)]  // 'A'
-    [InlineData("<0x0A>", (byte)0x0A)]  // newline byte
-    [InlineData("<0xFF>", (byte)0xFF)]  // invalid-UTF-8 byte
+    [InlineData("<0x41>", (byte)0x41)]
+    [InlineData("<0x0A>", (byte)0x0A)]
+    [InlineData("<0xFF>", (byte)0xFF)]
     public void Canonicalize_ByteLevel_Flagged_DecodesByte(string raw, byte expected)
     {
         var (canonical, role) = LlamaTokenizerParser.Canonicalize(raw);

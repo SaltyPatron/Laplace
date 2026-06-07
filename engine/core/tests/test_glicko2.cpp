@@ -1,22 +1,3 @@
-/* engine/core/tests/test_glicko2.cpp
- *
- * Verifies the int64 fixed-point Glicko-2 implementation against the
- * documented values in:
- *
- *     Glickman, M.E. (2022 revision). "Example of the Glicko-2 system."
- *     http://www.glicko.net/glicko/glicko2.pdf
- *
- * Every documented numeric value in §"Example calculation" is pinned to
- * tight tolerance:
- *   per-opponent (mu_j, phi_j, g(phi_j), E(mu, mu_j, phi_j)),
- *   v, Delta, a = ln(sigma^2), sigma', phi*, phi', mu', r', RD'.
- * Tolerances reflect the precision the paper itself reports (4-5
- * significant figures).
- *
- * Fixed-point primitives (laplace_fp_*) are also tested against double-
- * precision references to committed 1e-6 relative error.
- */
-
 #include <gtest/gtest.h>
 
 #include <cmath>
@@ -45,11 +26,7 @@ inline double from_fp(int64_t v) {
         << " diff=" << diff << " tol=" << tol;
 }
 
-}  // namespace
-
-/* ===================================================================== */
-/* Fixed-point primitives (: 1e-6 relative vs double). */
-/* ===================================================================== */
+}
 
 TEST(LaplaceCoreGlicko2Fp, MulAccurate) {
     EXPECT_EQ(laplace_fp_mul(SCALE, SCALE), SCALE);
@@ -86,7 +63,6 @@ TEST(LaplaceCoreGlicko2Fp, LogAccurate) {
     EXPECT_TRUE(close_enough(from_fp(laplace_fp_log(to_fp(std::exp(1.0)))), 1.0));
     EXPECT_TRUE(close_enough(from_fp(laplace_fp_log(to_fp(2.0))), std::log(2.0)));
     EXPECT_TRUE(close_enough(from_fp(laplace_fp_log(to_fp(0.5))), std::log(0.5)));
-    /* Paper's a = ln(0.06^2) = ln(0.0036) = -5.62682. Pin tightly. */
     EXPECT_TRUE(close_enough(from_fp(laplace_fp_log(to_fp(0.0036))),
                              std::log(0.0036), 1e-5, 1e-7));
 }
@@ -97,17 +73,6 @@ TEST(LaplaceCoreGlicko2Fp, ExpLogRoundtrip) {
         EXPECT_TRUE(close_enough(from_fp(y), x, 1e-5, 1e-6));
     }
 }
-
-/* ===================================================================== */
-/* g(phi) and E(mu, mu_j, phi_j) — Glickman §3 per-opponent table.        */
-/* ===================================================================== */
-
-/* From the paper's table (mu = 0, phi = 1.1513):
- *   | j | mu_j    | phi_j  | g(phi_j) | E(mu, mu_j, phi_j) | s_j |
- *   | 1 | -0.5756 | 0.1727 | 0.9955   | 0.639              | 1   |
- *   | 2 |  0.2878 | 0.5756 | 0.9531   | 0.432              | 0   |
- *   | 3 |  1.1513 | 1.7269 | 0.7242   | 0.303              | 0   |
- */
 
 TEST(LaplaceCoreGlicko2, GMatchesPaperTable) {
     EXPECT_NEAR(from_fp(laplace_glicko2_g(to_fp(0.1727))), 0.9955, 0.0005);
@@ -125,10 +90,6 @@ TEST(LaplaceCoreGlicko2, EMatchesPaperTable) {
     EXPECT_NEAR(from_fp(laplace_glicko2_E(mu, to_fp( 1.1513), g3)), 0.303, 0.001);
 }
 
-/* ===================================================================== */
-/* Init                                                                  */
-/* ===================================================================== */
-
 TEST(LaplaceCoreGlicko2, InitSetsInitialState) {
     glicko2_state_t st;
     glicko2_init(&st, to_fp(1500.0), to_fp(350.0), to_fp(0.06));
@@ -139,16 +100,6 @@ TEST(LaplaceCoreGlicko2, InitSetsInitialState) {
     EXPECT_EQ(st.last_observed_at_unix_ns, 0);
 }
 
-/* ===================================================================== */
-/* Glickman §"Example calculation" — every documented intermediate pinned */
-/* ===================================================================== */
-
-/* Player r=1500, RD=200, sigma=0.06. Three opponents:
- *   #1: r=1400, RD=30  — win  (s=1)
- *   #2: r=1550, RD=100 — loss (s=0)
- *   #3: r=1700, RD=300 — loss (s=0)
- * tau = 0.5. Paper's documented intermediates and final values pinned
- * tighter than the paper's own significant figures permit ambiguity. */
 TEST(LaplaceCoreGlicko2, GlickmanPaperIntermediatesPinned) {
     glicko2_state_t st;
     glicko2_init(&st, to_fp(1500.0), to_fp(200.0), to_fp(0.06));
@@ -162,53 +113,36 @@ TEST(LaplaceCoreGlicko2, GlickmanPaperIntermediatesPinned) {
     glicko2_trace_t tr;
     laplace_glicko2_update_period_traced(&st, obs, 3, to_fp(0.5), 1000, &tr);
 
-    /* Step 2: scale conversion. Paper: phi = 1.1513. */
     EXPECT_NEAR(from_fp(tr.mu),      0.0,     1e-7);
     EXPECT_NEAR(from_fp(tr.phi),     1.1513,  0.0005);
 
-    /* Step 3: v. Paper: 1.7785. */
     EXPECT_NEAR(from_fp(tr.v),       1.7785,  0.001);
 
-    /* Step 4: Delta. Paper: -0.4834. */
     EXPECT_NEAR(from_fp(tr.delta),  -0.4834,  0.001);
 
-    /* Step 5: a = ln(sigma^2) = ln(0.0036) = -5.62682. */
     EXPECT_NEAR(from_fp(tr.a_value), -5.62682, 0.0001);
 
-    /* Step 5: sigma'. Paper: 0.05999. */
     EXPECT_NEAR(from_fp(tr.sigma_new), 0.05999, 0.00005);
 
-    /* Step 6: phi*. Paper: 1.152862. */
     EXPECT_NEAR(from_fp(tr.phi_star),  1.152862, 0.0001);
 
-    /* Step 7: phi'. Paper: 0.8722. */
     EXPECT_NEAR(from_fp(tr.phi_new),   0.8722,   0.0005);
 
-    /* Step 7: mu'. Paper: -0.2069. */
     EXPECT_NEAR(from_fp(tr.mu_new),   -0.2069,   0.001);
 
-    /* Step 8: r' = 1464.06, RD' = 151.52. */
     EXPECT_NEAR(from_fp(tr.r_new),  1464.06, 0.05);
     EXPECT_NEAR(from_fp(tr.rd_new), 151.52,  0.05);
 
-    /* State reflects trace. */
     EXPECT_EQ(st.rating,                tr.r_new);
     EXPECT_EQ(st.rd,                    tr.rd_new);
     EXPECT_EQ(st.volatility,            tr.sigma_new);
     EXPECT_EQ(st.observation_count,     3);
     EXPECT_EQ(st.last_observed_at_unix_ns, 1000);
 
-    /* Paper notes: median Illinois iterations = 5, max observed = 19. */
     EXPECT_LE(tr.illinois_iters, 25);
 }
 
-/* The walk-down branch is the rare case (k >= 2 per Glickman's notes).
- * Force a case where Delta^2 <= phi^2 + v AND f(a - tau) < 0 so k must
- * advance. */
 TEST(LaplaceCoreGlicko2, IllinoisConvergesInWalkDownBranch) {
-    /* Mostly-consistent player (small RD) sweeping wins against weak
-     * opponents — Delta is small, f(a) ≈ 0, and the walk-down may
-     * advance. */
     glicko2_state_t st;
     glicko2_init(&st, to_fp(1500.0), to_fp(50.0), to_fp(0.06));
     glicko2_observation_t obs[3] = {
@@ -218,15 +152,9 @@ TEST(LaplaceCoreGlicko2, IllinoisConvergesInWalkDownBranch) {
     };
     glicko2_trace_t tr;
     laplace_glicko2_update_period_traced(&st, obs, 3, to_fp(0.5), 1000, &tr);
-    /* Volatility should stay close to its prior since the result is
-     * "expected"; rating moves up modestly. */
     EXPECT_GT(from_fp(tr.r_new), 1500.0);
     EXPECT_NEAR(from_fp(tr.sigma_new), 0.06, 0.01);
 }
-
-/* ===================================================================== */
-/* Behavior properties (independent of paper example)                    */
-/* ===================================================================== */
 
 TEST(LaplaceCoreGlicko2, EmptyPeriodGrowsRdLeavesRatingAndVolatilityAlone) {
     glicko2_state_t st;
@@ -242,10 +170,6 @@ TEST(LaplaceCoreGlicko2, EmptyPeriodGrowsRdLeavesRatingAndVolatilityAlone) {
 }
 
 TEST(LaplaceCoreGlicko2, EmptyPeriodMatchesPaperFormula) {
-    /* Paper: phi' = phi* = sqrt(phi^2 + sigma^2). With RD=50, sigma=0.06:
-     *   phi = 50/173.7178 ≈ 0.28782
-     *   phi' = sqrt(0.28782^2 + 0.06^2) ≈ 0.29399
-     *   RD' = 0.29399 * 173.7178 ≈ 51.07 */
     glicko2_state_t st;
     glicko2_init(&st, to_fp(1500.0), to_fp(50.0), to_fp(0.06));
     glicko2_update_period(&st, nullptr, 0, to_fp(0.5), 1000);
@@ -306,10 +230,6 @@ TEST(LaplaceCoreGlicko2, EffectiveMuDiscountsByTwoRd) {
     EXPECT_EQ(eff, st.rating - 2 * st.rd);
     EXPECT_EQ(from_fp(eff), 1600.0 - 2.0 * 80.0);
 }
-
-/* ===================================================================== */
-/* Determinism (: cross-machine bit-identical) */
-/* ===================================================================== */
 
 TEST(LaplaceCoreGlicko2, DeterministicAcrossRuns) {
     glicko2_state_t a, b;

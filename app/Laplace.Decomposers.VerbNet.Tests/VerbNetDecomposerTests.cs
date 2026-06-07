@@ -6,13 +6,6 @@ using Xunit;
 
 namespace Laplace.Decomposers.VerbNet.Tests;
 
-/// <summary>
-/// Verifies VerbNetDecomposer against a tiny inline class XML fixture (one class + one
-/// subclass): the right registry-routed attestation kinds land, the meta/content/sense
-/// entities use the shared id conventions, and no raw rows are minted. ContentEmitter routes
-/// lemmas/roles/frames/examples through the T0 perf-cache, so the static ctor loads it (the
-/// host precondition every content-bearing decomposer has).
-/// </summary>
 public sealed class VerbNetDecomposerTests
 {
     static VerbNetDecomposerTests() => CodepointPerfcache.Load(ResolvePerfcacheBlob());
@@ -31,9 +24,6 @@ public sealed class VerbNetDecomposerTests
         throw new InvalidOperationException("perf-cache blob not found; build the engine or set LAPLACE_PERFCACHE_BIN.");
     }
 
-    // A faithful give-13.1 fixture: one top class with members (one with wn= sense keys, one
-    // without), two thematic roles, one frame with a primary description + example; one nested
-    // subclass give-13.1-1 with its own member + role.
     private const string ClassXml = """
 <VNCLASS ID="give-13.1">
  <MEMBERS>
@@ -71,11 +61,9 @@ public sealed class VerbNetDecomposerTests
     {
         var atts = await CollectAttestationsAsync();
 
-        // Every kind id is a canonical-registry kind id (registry-routed, never a raw row).
         var canonical = new HashSet<Hash128>(RelationTypeRegistry.AllCanonical().Select(k => k.Id));
         Assert.All(atts, a => Assert.Contains(a.TypeId, canonical));
 
-        // The load-bearing arenas are present.
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("IS_A"));
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE"));
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_VERB_FRAME"));
@@ -89,7 +77,6 @@ public sealed class VerbNetDecomposerTests
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(VerbNetDecomposer.Source, "fixture", null);
 
-        // "lend" wordform —IS_A→ give-13.1 class meta (bare-numeric id 13.1).
         var lendId = ContentEmitter.Emit(b, "lend", VerbNetDecomposer.Source);
         var classId = VerbNetDecomposer.ClassId("give-13.1");
         Assert.Equal(Hash128.OfCanonical("verbnet/class/13.1"), classId);
@@ -98,7 +85,6 @@ public sealed class VerbNetDecomposerTests
             a.TypeId == RelationTypeRegistry.RelationTypeId("IS_A")
             && a.SubjectId == lendId!.Value && a.ObjectId == classId);
 
-        // subclass give-13.1-1 (bare 13.1-1) —IS_A→ give-13.1 (bare 13.1).
         var subId = VerbNetDecomposer.ClassId("give-13.1-1");
         Assert.Equal(Hash128.OfCanonical("verbnet/class/13.1-1"), subId);
         Assert.Contains(atts, a =>
@@ -113,8 +99,6 @@ public sealed class VerbNetDecomposerTests
         var b = new SubstrateChangeBuilder(VerbNetDecomposer.Source, "fixture", null);
         var lendId = ContentEmitter.Emit(b, "lend", VerbNetDecomposer.Source);
 
-        // wn="lend%2:40:00" normalizes to the index.sense key "lend%2:40:00::" — the
-        // EXACT id WordNetDecomposer mints (wordnet/sense/<key>).
         var senseId = Hash128.OfCanonical("wordnet/sense/lend%2:40:00::");
         Assert.Equal(senseId, VerbNetDecomposer.SenseId("lend%2:40:00::"));
         Assert.NotNull(lendId);
@@ -139,7 +123,7 @@ public sealed class VerbNetDecomposerTests
         Assert.Equal("13.1", VerbNetDecomposer.NumericClassId("give-13.1"));
         Assert.Equal("13.1-1", VerbNetDecomposer.NumericClassId("give-13.1-1"));
         Assert.Equal("10.11-2", VerbNetDecomposer.NumericClassId("resign-10.11-2"));
-        Assert.Equal("13.1", VerbNetDecomposer.NumericClassId("13.1"));   // already bare
+        Assert.Equal("13.1", VerbNetDecomposer.NumericClassId("13.1"));
         Assert.Equal("45.8", VerbNetDecomposer.NumericClassId("break_down-45.8"));
     }
 
@@ -178,10 +162,8 @@ public sealed class VerbNetDecomposerTests
                 atts.AddRange(change.Attestations.ToArray());
             return atts;
         }
-        finally { try { Directory.Delete(dir, recursive: true); } catch { /* best effort */ } }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { } }
     }
-
-    // === fakes ===
 
     private sealed class FakeContext(ISubstrateWriter writer) : IDecomposerContext
     {

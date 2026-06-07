@@ -6,8 +6,8 @@
 #include <random>
 #include <vector>
 
-#include "laplace/synthesis/qk_pairs_threshold.h"          /* all-pairs kernel */
-#include "laplace/synthesis/qk_pairs_threshold_pruned.h"    /* pruned kernel    */
+#include "laplace/synthesis/qk_pairs_threshold.h"
+#include "laplace/synthesis/qk_pairs_threshold_pruned.h"
 
 #ifdef LAPLACE_HAS_MKL
 #  include <oneapi/tbb/global_control.h>
@@ -15,14 +15,12 @@
 
 namespace {
 
-/* Bit pattern of a double for bitwise-identical comparison. */
 uint64_t bits_of(double d) {
     uint64_t u;
     std::memcpy(&u, &d, sizeof(u));
     return u;
 }
 
-/* Random f32 in [-1, 1). */
 std::vector<float> rand_f32(size_t n, uint32_t seed) {
     std::vector<float> v(n);
     std::mt19937 rng(seed);
@@ -41,7 +39,6 @@ void expect_pairs_eq(const std::vector<qk_pair_f64_t>& a,
     }
 }
 
-/* Run the all-pairs reference kernel over the full vocab and return its pairs. */
 std::vector<qk_pair_f64_t> all_pairs(
     const std::vector<float>& E, size_t vocab, size_t d_model,
     const std::vector<float>& Wq, const std::vector<float>& Wk, size_t head_dim,
@@ -55,17 +52,14 @@ std::vector<qk_pair_f64_t> all_pairs(
     return std::vector<qk_pair_f64_t>(out.begin(), out.begin() + (n < 0 ? 0 : n));
 }
 
-} /* namespace */
+}
 
-/* ── 1. PARITY (the key test): pruned kernel output is BITWISE-IDENTICAL to the
- * all-pairs kernel on the same input (same count, same (q,k) pairs in the same
- * order, same f64 score bits). ─────────────────────────────────────────────── */
 TEST(QkPairsThresholdPruned, BitwiseParityWithAllPairs) {
     const size_t vocab = 300, d_model = 32, head_dim = 16;
     auto E  = rand_f32(vocab * d_model, 0xC0FFEEu);
     auto Wq = rand_f32(head_dim * d_model, 0xDECAFu);
     auto Wk = rand_f32(head_dim * d_model, 0xFACADEu);
-    const double floor = 1.5;  /* admits a moderate subset of the v^2 pairs */
+    const double floor = 1.5;
 
     auto ref = all_pairs(E, vocab, d_model, Wq, Wk, head_dim, floor, 0, vocab);
     ASSERT_GT(ref.size(), 0u) << "floor admits nothing — pick a smaller floor";
@@ -82,7 +76,6 @@ TEST(QkPairsThresholdPruned, BitwiseParityWithAllPairs) {
     expect_pairs_eq(got, ref);
 }
 
-/* ── 2. Determinism across thread counts AND window splits (bitwise). ───────── */
 TEST(QkPairsThresholdPruned, DeterministicAcrossThreadCountsAndWindows) {
     const size_t vocab = 200, d_model = 41, head_dim = 13;
     auto E  = rand_f32(vocab * d_model, 0xBADC0DEu);
@@ -98,7 +91,6 @@ TEST(QkPairsThresholdPruned, DeterministicAcrossThreadCountsAndWindows) {
     ASSERT_EQ(ov, 0);
     std::vector<qk_pair_f64_t> many(out_many.begin(), out_many.begin() + n_many);
 
-    /* Single-threaded run must match the multi-threaded run bit-for-bit. */
     std::vector<qk_pair_f64_t> out_one(vocab * vocab);
 #ifdef LAPLACE_HAS_MKL
     {
@@ -116,7 +108,6 @@ TEST(QkPairsThresholdPruned, DeterministicAcrossThreadCountsAndWindows) {
     std::vector<qk_pair_f64_t> one(out_one.begin(), out_one.begin() + n_many);
     expect_pairs_eq(one, many);
 
-    /* Windowed: [0,57)+[57,131)+[131,200) concatenated must equal the full run. */
     std::vector<qk_pair_f64_t> windowed;
     const size_t bounds[] = {0, 57, 131, 200};
     for (int w = 0; w < 3; ++w) {
@@ -130,30 +121,21 @@ TEST(QkPairsThresholdPruned, DeterministicAcrossThreadCountsAndWindows) {
     }
     expect_pairs_eq(windowed, many);
 
-    /* And the full run must equal the all-pairs kernel (parity at this floor). */
     auto ref = all_pairs(E, vocab, d_model, Wq, Wk, head_dim, floor, 0, vocab);
     expect_pairs_eq(many, ref);
 }
 
-/* ── 3. Spread norms so pruning actually prunes most keys — still bit-identical
- * to the all-pairs kernel. Key rows are scaled by geometrically decaying factors
- * so the vast majority have tiny norm and fall below every per-query cutoff,
- * yet the survivor set must be exactly the all-pairs survivor set. ──────────── */
 TEST(QkPairsThresholdPruned, HeavyPruningSpreadNormsMatchesAllPairs) {
     const size_t vocab = 400, d_model = 24, head_dim = 12;
     auto E  = rand_f32(vocab * d_model, 0x5EED01u);
     auto Wq = rand_f32(head_dim * d_model, 0x5EED02u);
     auto Wk = rand_f32(head_dim * d_model, 0x5EED03u);
 
-    /* Scale each embedding row so norms span many orders of magnitude: row r
-     * scaled by ~ 0.97^r. A handful of low-index rows dominate; the rest are
-     * negligible and should be pruned for nearly every query. */
     for (size_t r = 0; r < vocab; ++r) {
         const float scale = std::pow(0.97f, (float)r);
         for (size_t m = 0; m < d_model; ++m) E[r * d_model + m] *= scale;
     }
 
-    /* Floor chosen to admit a small but nonzero subset. */
     const double floor = 0.5;
     auto ref = all_pairs(E, vocab, d_model, Wq, Wk, head_dim, floor, 0, vocab);
     ASSERT_GT(ref.size(), 0u);
@@ -170,7 +152,6 @@ TEST(QkPairsThresholdPruned, HeavyPruningSpreadNormsMatchesAllPairs) {
     expect_pairs_eq(got, ref);
 }
 
-/* ── 4. Bad args / overflow contract — identical to the sibling. ───────────── */
 TEST(QkPairsThresholdPruned, BadArgsRejected) {
     std::vector<float> E = rand_f32(4 * 3, 1);
     std::vector<float> Wq = rand_f32(2 * 3, 2);
@@ -193,8 +174,6 @@ TEST(QkPairsThresholdPruned, BadArgsRejected) {
     EXPECT_EQ(compute_qk_pairs_above_threshold_pruned(E.data(), vocab, d_model, Wq.data(), Wk.data(), head_dim, std::nan(""), 0, vocab, out.data(), out.size(), &ov), -1);
 }
 
-/* Overflow signaling: tiny out_cap => overflow=1, whole-row deterministic prefix
- * matching the head of the full pruned run AND the all-pairs run. */
 TEST(QkPairsThresholdPruned, OverflowSignalsAndPrefixIsDeterministic) {
     const size_t vocab = 120, d_model = 29, head_dim = 11;
     auto E  = rand_f32(vocab * d_model, 0xABCDEFu);
@@ -229,8 +208,6 @@ TEST(QkPairsThresholdPruned, OverflowSignalsAndPrefixIsDeterministic) {
     EXPECT_EQ(ov, 1);
 }
 
-/* ── 5. floor == 0 admits every nonzero pair: parity with all-pairs holds even
- * with no pruning prefix shrinkage. ────────────────────────────────────────── */
 TEST(QkPairsThresholdPruned, ZeroFloorParity) {
     const size_t vocab = 60, d_model = 16, head_dim = 8;
     auto E  = rand_f32(vocab * d_model, 0x0F1001u);

@@ -27,7 +27,6 @@ TEST(LaplaceSynthesisGgufWriter, FinalizeWritesMagic) {
     EXPECT_EQ(gguf_writer_finalize(w), 0);
     gguf_writer_free(w);
 
-    /* Verify GGUF magic + version in the output file */
     FILE* f = std::fopen(kTestPath, "rb");
     ASSERT_NE(f, nullptr);
     uint8_t hdr[8];
@@ -38,7 +37,6 @@ TEST(LaplaceSynthesisGgufWriter, FinalizeWritesMagic) {
     EXPECT_EQ(hdr[1], 'G');
     EXPECT_EQ(hdr[2], 'U');
     EXPECT_EQ(hdr[3], 'F');
-    /* Version = 3 (uint32_le) */
     uint32_t ver = (uint32_t)hdr[4] | ((uint32_t)hdr[5] << 8)
                  | ((uint32_t)hdr[6] << 16) | ((uint32_t)hdr[7] << 24);
     EXPECT_EQ(ver, 3u);
@@ -54,7 +52,6 @@ TEST(LaplaceSynthesisGgufWriter, AddMetadataStr) {
     EXPECT_EQ(gguf_writer_finalize(w), 0);
     gguf_writer_free(w);
 
-    /* File should be larger than a bare header */
     FILE* f = std::fopen(kTestPath, "rb");
     ASSERT_NE(f, nullptr);
     std::fseek(f, 0, SEEK_END);
@@ -80,15 +77,13 @@ TEST(LaplaceSynthesisGgufWriter, AddBF16Tensor) {
     gguf_writer_t* w = gguf_writer_create(kTestPath);
     ASSERT_NE(w, nullptr);
 
-    /* 2×4 BF16 tensor (2 bytes each = 16 bytes data) */
     const uint16_t data[8] = {0x3F80, 0x3F00, 0x0000, 0x4000,
                                0xBF80, 0x3F80, 0x4080, 0x3F00};
     const size_t shape[2] = {2, 4};
-    EXPECT_EQ(gguf_writer_add_tensor(w, "test.weight", 2 /* bf16 */, shape, 2, data), 0);
+    EXPECT_EQ(gguf_writer_add_tensor(w, "test.weight", 2, shape, 2, data), 0);
     EXPECT_EQ(gguf_writer_finalize(w), 0);
     gguf_writer_free(w);
 
-    /* Check file is non-trivially sized */
     FILE* f = std::fopen(kTestPath, "rb");
     ASSERT_NE(f, nullptr);
     std::fseek(f, 0, SEEK_END);

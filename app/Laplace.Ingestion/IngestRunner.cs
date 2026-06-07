@@ -8,21 +8,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Ingestion;
 
-/// <summary>
-/// The shared orchestration loop — composes
-/// <see cref="IDecomposer"/> + <see cref="ISubstrateWriter"/> into the
-/// canonical per-source ingest recipe. Every per-source decomposer
-/// (Unicode, ISO, WordNet, ...) ingests through this same RunAsync.
-///
-/// <para>
-/// Cross-cutting concerns owned here: layer-ordering enforcement,
-/// transient retry, parallel-worker variant, progress reporting,
-/// structured logging, observability emission. Idempotency is the
-/// substrate's own property — content-addressed identity + the writer's
-/// existence-check + INSERT … ON CONFLICT DO NOTHING — so a
-/// re-run converges with no side journal and no resume state to keep coherent.
-/// </para>
-/// </summary>
 public sealed class IngestRunner
 {
     private readonly ISubstrateWriter _writer;
@@ -42,7 +27,6 @@ public sealed class IngestRunner
         _obs           = observability ?? NoOpObservability.Instance;
     }
 
-    /// <summary>Run a decomposer end-to-end.</summary>
     public async Task<IngestRunResult> RunAsync(
         IDecomposer decomposer,
         IngestRunOptions options,
@@ -58,7 +42,6 @@ public sealed class IngestRunner
         long entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
         long totalRoundTrips = 0;
 
-        // 1. Layer-ordering prerequisite check.
         if (!options.SkipLayerOrderingCheck)
         {
             for (int layer = 0; layer < decomposer.LayerOrder; layer++)
@@ -70,16 +53,6 @@ public sealed class IngestRunner
             }
         }
 
-        // 1b. Re-ingest guard — keyed on THIS SOURCE's completion marker (the
-        // same semantics the model path enforces in the CLI). Rows are
-        // idempotent (content-addressing + ON CONFLICT) but TESTIMONY is not:
-        // the accumulating writer consumes scores in flight, so re-running a
-        // COMPLETED source folds its games into consensus a second time —
-        // double-witnessing (measured live 2026-06-05: a wordnet re-run
-        // re-materialized 1,251,591 relations onto already-folded consensus).
-        // Marker ABSENT (crashed/killed run) ⇒ lawful idempotent continuation.
-        // To re-run a source by intent: per-source eviction first (eviction
-        // removes the marker with the rest of the source's rows).
         if (await _reader.HasSourceCompletedAsync(decomposer.SourceId, decomposer.LayerOrder, ct))
         {
             log.LogInformation(
@@ -96,7 +69,6 @@ public sealed class IngestRunner
                 Failures: Array.Empty<IngestFailure>());
         }
 
-        // 2. Build context + bootstrap.
         var ctx = new InternalContext(
             EcosystemPath: ResolveEcosystemPath(decomposer, options),
             Writer: _writer,
@@ -106,21 +78,15 @@ public sealed class IngestRunner
 
         await decomposer.InitializeAsync(ctx, ct);
 
-        // 3. Estimate total units (best-effort).
         long? estimatedTotal = await decomposer.EstimateUnitCountAsync(ctx, ct);
         _obs.OnRunStart(decomposer.SourceName, decomposer.LayerOrder, estimatedTotal);
 
-        // 4. Iterate the decomposer's stream. Serial or parallel.
         var rng = new Random(unchecked((int)decomposer.SourceId.Lo));
         var counters = new RunCounters { Sw = sw, EstimatedTotal = estimatedTotal };
 
         int batchSize  = Math.Max(1, options.BatchSize);
         int commitRows = Math.Max(0, options.CommitRows);
 
-        // Flush trigger. When CommitRows is set, the COPY payload is pinned by row
-        // count (intent fan-out varies wildly — one QK intent ≈ thousands of rows);
-        // BatchSize still caps buffered intents so a single huge intent can't
-        // overshoot unbounded. Otherwise fall back to pure intent-count batching.
         static int RowsOf(SubstrateChange c) =>
             c.Entities.Length + c.Physicalities.Length + c.Attestations.Length;
         bool ShouldFlush(int intents, int rows) =>
@@ -165,7 +131,6 @@ public sealed class IngestRunner
                     FullMode = BoundedChannelFullMode.Wait,
                 });
 
-            // Producer: read from decomposer, push into channel
             var producer = Task.Run(async () =>
             {
                 try
@@ -182,9 +147,6 @@ public sealed class IngestRunner
                 }
             }, ct);
 
-            // Consumers: dequeue + apply concurrently. Each worker fills and
-            // flushes its OWN batch so N workers issue N concurrent batched
-            // COPYs rather than N concurrent single-row applies.
             var consumers = new Task[options.ParallelWorkers];
             for (int w = 0; w < options.ParallelWorkers; w++)
             {
@@ -231,11 +193,9 @@ public sealed class IngestRunner
         attestationsInserted  = counters.AttestationsInserted;
         totalRoundTrips       = counters.RoundTrips;
 
-        // 5. Layer completion marker when the run finished clean.
         if (counters.UnitsFailed == 0 && failures.Count == 0)
             await _writer.ApplyAsync(LayerCompletion.BuildMarker(decomposer), ct);
 
-        // 6. Summary.
         sw.Stop();
 
         var result = new IngestRunResult(
@@ -298,7 +258,6 @@ public sealed class IngestRunner
                 lastEx = ex;
                 if (!options.RetryPolicy.IsTransient(ex))
                 {
-                    // Fatal — record failure, surface, abort run.
                     var fatal = new IngestFailure(
                         intent.Metadata.IntentId,
                         intent.Metadata.SourceContentUnitName,
@@ -314,13 +273,11 @@ public sealed class IngestRunner
                         intent.Metadata.IntentId, intent.Metadata.SourceContentUnitName);
                     throw;
                 }
-                // Transient — loop will retry
                 log.LogWarning(ex, "Transient ingest error on intent {IntentId} (attempt {Attempt}); will retry.",
                     intent.Metadata.IntentId, attempt + 1);
             }
         }
 
-        // All retries exhausted
         var failure = new IngestFailure(
             intent.Metadata.IntentId,
             intent.Metadata.SourceContentUnitName,
@@ -335,14 +292,6 @@ public sealed class IngestRunner
         if (options.AbortOnTransientExhaustion && lastEx is not null) throw lastEx;
     }
 
-    /// <summary>
-    /// Apply a coalesced batch of intents through
-    /// <see cref="ISubstrateWriter.ApplyManyAsync"/> — one existence pass and
-    /// one COPY per table for the whole batch. The batch commits atomically; on
-    /// a fatal error the whole batch rolls back (recorded + aborts, matching
-    /// per-intent fatal semantics). Re-application is idempotent via
-    /// content-addressed identity + INSERT … ON CONFLICT DO NOTHING.
-    /// </summary>
     private async Task ProcessBatchAsync(
         List<SubstrateChange> batch,
         IDecomposer decomposer,
@@ -376,9 +325,6 @@ public sealed class IngestRunner
                 Interlocked.Add(ref counters._attestationsInserted,   apply.AttestationsInserted);
                 Interlocked.Add(ref counters._roundTrips,             apply.RoundTrips);
 
-                // Per-batch observability: where the time actually goes (write vs decompose).
-                // Slow batches ⇒ write-bound (existence/COPY/INSERT); fast batches with gaps
-                // between them ⇒ decompose-bound. Uses what ApplyManyAsync already returns.
                 long batchRows = (long)apply.EntitiesAttempted + apply.PhysicalitiesAttempted + apply.AttestationsAttempted;
                 double secs = Math.Max(1e-3, apply.WallClock.TotalSeconds);
                 log.LogInformation(
@@ -413,7 +359,6 @@ public sealed class IngestRunner
             }
         }
 
-        // All retries exhausted for the batch.
         RecordBatchFailure(batch, decomposer.SourceName, lastEx,
                            wasTransient: true, attempt, failures, counters);
         if (options.AbortOnTransientExhaustion && lastEx is not null) throw lastEx;
@@ -444,10 +389,6 @@ public sealed class IngestRunner
             _obs.OnIntentFailed(sourceName, f);
     }
 
-    // EcosystemPath is the decomposer's read-only source-data root (e.g.
-    // /vault/Data/Unicode). Decomposers that need it set it explicitly via
-    // options.EcosystemPath; the fallback is the process working directory —
-    // never a shared /tmp path.
     private static string ResolveEcosystemPath(IDecomposer decomposer, IngestRunOptions options)
         => options.EcosystemPath ?? Directory.GetCurrentDirectory();
 
@@ -465,8 +406,6 @@ public sealed class IngestRunner
         internal long _physicalitiesInserted;
         internal long _attestationsInserted;
         internal long _roundTrips;
-        // Run clock + estimate so MakeProgress reports rows/s + % without threading
-        // these through the per-intent/per-batch apply methods.
         internal Stopwatch? Sw;
         internal long? EstimatedTotal;
         public long UnitsAttempted        => Interlocked.Read(ref _unitsAttempted);
@@ -486,9 +425,6 @@ public sealed class IngestRunner
         string SubstrateVersion) : IDecomposerContext;
 }
 
-/// <summary>Thrown when <see cref="IngestRunner.RunAsync"/> is invoked
-/// for a decomposer whose Layer N requires Layer 0..N-1 completion, but
-/// some prerequisite layer hasn't completed.</summary>
 public sealed class LayerOrderingViolationException : Exception
 {
     public int DecomposerLayer { get; }

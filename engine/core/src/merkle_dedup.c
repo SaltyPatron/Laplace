@@ -3,8 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Single-bit test on the packed bitmap. Inlined by the compiler in the
- * tight loop. */
 static inline int bitmap_get(const uint8_t* bm, size_t idx) {
     return (bm[idx >> 3] >> (idx & 7u)) & 1u;
 }
@@ -21,14 +19,6 @@ int merkle_dedup_filter_novel(
     if (!candidates || !existing_bitmap || !out_novel) return -1;
     if (bitmap_bits < n) return -1;
 
-    /* Scalar compaction. The hot inner loop is:
-     *   for each candidate:
-     *     if (bit clear) copy candidate to out[count++]
-     * Branch on bitmap byte → predicted well for typical workloads (most
-     * bits one way). icx/gcc will lift the `out_novel[count]` store and
-     * conditional `count++` into a CMOV-style branchless sequence at -O2,
-     * which is the cleanest portable AVX2 path. We can add explicit AVX2
-     * PMOVMSKB-based byte-batched compaction later without breaking ABI. */
     size_t out_count = 0;
     for (size_t i = 0; i < n; ++i) {
         if (!bitmap_get(existing_bitmap, i)) {
@@ -55,32 +45,19 @@ int merkle_dedup_trunk_shortcircuit(
     const uint32_t* parent = tier_tree_parent_idx_array(tree);
     if (!parent) return -1;
 
-    /* Top-down skip-flag propagation. Heap-allocated bit vector to
-     * support large trees without blowing the stack. One byte per node
-     * is wasteful in bits but cache-friendly and simpler than a packed
-     * scheme for a transient mark. */
     uint8_t* skip = (uint8_t*)calloc(count, 1);
     if (!skip) return -1;
 
-    /* Iterate highest-idx (root) first; tier_tree's add invariant ensures
-     * every parent's idx > its children's, so parent is processed before
-     * any child. */
     for (size_t r = count; r > 0; --r) {
         const size_t i = r - 1;
         const int self_existing = bitmap_get(existing_bitmap, i);
         int parent_skipped = 0;
         if (parent[i] != TIER_TREE_INVALID) {
-            /* parent_idx valid only after tier_tree_finalize; if the
-             * caller forgot, parent[i] is INVALID and we degrade to
-             * pure self-bit semantics (correct, just no shortcircuit). */
             parent_skipped = skip[parent[i]];
         }
         skip[i] = (self_existing || parent_skipped) ? (uint8_t)1 : (uint8_t)0;
     }
 
-    /* Emit non-skipped indices in bottom-up order (children before parents)
-     * — this matches tier_tree's add order and is the natural intent_stage
-     * push order. */
     size_t out_count = 0;
     for (size_t i = 0; i < count; ++i) {
         if (!skip[i]) {

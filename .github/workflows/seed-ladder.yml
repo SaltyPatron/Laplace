@@ -1,18 +1,5 @@
 name: Seed ladder (reusable)
 
-# THE ORCHESTRATOR — a thin TRUE-dependency DAG over the per-source workflows
-# (2026-06-05 modular re-architecture; this rewrite REPLACES the monolith —
-# the first attempt died on an assert and was falsely reported done, caught
-# when CI ran the old file). Each box in the UI is one source's workflow
-# (expandable); the ingest/gate implementation lives in _ingest.yml; gates
-# live with each source; worker knobs live in _ingest.yml ONCE.
-# The single self-hosted runner serializes execution, so the DAG declares only
-# REAL dependencies (the layer law), not an artificial chain — "Re-run failed
-# jobs" resumes exactly the failed source. Bounded mode = minutes-scale
-# sources; full_ladder adds the multi-hour corpora and the day-scale
-# opensubtitles giant. NO nuke between stages — the one clean slate is
-# integration.yml's db-deploy; witnesses coexist on one substrate.
-
 on:
   workflow_call:
     inputs:
@@ -25,14 +12,12 @@ permissions:
   contents: read
 
 jobs:
-  # ── layer 0/1: the reference spine ──
   unicode:
     uses: ./.github/workflows/unicode.yml
   iso639:
     needs: unicode
     uses: ./.github/workflows/iso639.yml
 
-  # ── layer 2 (bounded): lexical core + treebanks + predicate semantics ──
   wordnet:
     needs: iso639
     uses: ./.github/workflows/wordnet.yml
@@ -46,7 +31,6 @@ jobs:
     needs: iso639
     uses: ./.github/workflows/propbank.yml
 
-  # ── layer 2 (full ladder): the multi-hour corpora ──
   tatoeba:
     needs: iso639
     if: ${{ inputs.full_ladder }}
@@ -68,7 +52,6 @@ jobs:
     if: ${{ inputs.full_ladder }}
     uses: ./.github/workflows/opensubtitles.yml
 
-  # ── layer 3: builds on layer-2 entities ──
   omw:
     needs: wordnet
     uses: ./.github/workflows/omw.yml
@@ -79,7 +62,6 @@ jobs:
     needs: [verbnet, propbank, framenet]
     uses: ./.github/workflows/semlink.yml
 
-  # ── tail: cross-source convergence report (both modes) ──
   convergence:
     name: "report — cross-source convergence"
     needs: [ud, omw, semlink, atomic2020, opensubtitles]

@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# scripts/agent-anchor.sh — compact briefing for agents (issue + git + hard stops + prereqs).
-# Usage: scripts/agent-anchor.sh [issue_number]
-#   Issue defaults to ISSUE= in .laplace-session when omitted.
 set -euo pipefail
 
 root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -10,7 +7,6 @@ cd "$root"
 issue="${1:-}"
 mode="implement"
 if [[ -z "$issue" && -f .laplace-session ]]; then
-  # shellcheck disable=SC1091
   source .laplace-session 2>/dev/null || true
   issue="${ISSUE:-}"
   mode="${MODE:-implement}"

@@ -1,34 +1,3 @@
-/* 20_converse.sql.in — the conversational surface (inference as SQL).
- *
- * Generation/inference primitives composed into a question-answering surface
- * over the CONSENSUS layer: define / taxonomy / synonyms / translations /
- * usage / describe (every witnessed arena) / is-a checks / realized walks,
- * routed from a plain-text prompt, plus the conversation LOOP (converse():
- * session turns + anaphora). Everything here is a ranked-μ read — no model
- * is executed, no GPU touched; the answers are the accumulated Glicko-2
- * consensus of every witness that has testified. Adjudication happened AT
- * INGEST: nothing on this surface updates a rating — respond() is a pure
- * read; converse() writes only its own session turn log (app-state, not
- * consensus). Walks and realization skip refuted edges (refuted(), §11);
- * ranked reads still surface dissent bottom-ranked.
- *
- * Entity-id resolution from text: the ENGINE (TextDecomposer + HashComposer)
- * remains the authority for full UAX#29 segmentation. word_id() below mirrors
- * the engine's composition rule EXACTLY for the common case — a word whose
- * graphemes are single codepoints — per engine/core/src/hash128.c:
- *     id = BLAKE3-128( 0x01 ‖ child-id bytes in order ),  leaf = BLAKE3-128(UTF-8)
- * (verified bit-identical against engine-resolved ids on the live substrate).
- * Multi-codepoint graphemes compose through an intermediate tier in the
- * engine; for those, resolve through the engine and pass the id directly.
- *
- * Language scoping carries the omni-glottal law: replies are filtered to the
- * PROMPT's own witnessed language (the top-μ HAS_LANGUAGE object of its
- * words) — never to a hardcoded language constant.
- *
- * STABLE throughout: projections over consensus within one statement. */
-
-/* ── text → id (query-side convenience; engine = authority) ─────────────── */
-
 CREATE OR REPLACE FUNCTION word_id(p_text text)
     RETURNS bytea
     LANGUAGE sql LAPLACE_IMMUTABLE_STRICT
@@ -43,12 +12,6 @@ CREATE OR REPLACE FUNCTION word_id(p_text text)
                  ('\x01'::bytea || (SELECT string_agg(cp_id, ''::bytea ORDER BY ord) FROM cps)))
     END
 $$;
-COMMENT ON FUNCTION word_id(text) IS
-    'Content-address a word in pure SQL: BLAKE3-128(0x01 ‖ codepoint ids) per the engine''s '
-    'merkle rule (leaf = BLAKE3-128(UTF-8(cp))). Exact for words of single-codepoint graphemes; '
-    'multi-codepoint graphemes resolve through the engine (TextDecomposer + HashComposer).';
-
-/* ── always-readable label ───────────────────────────────────────────────── */
 
 CREATE OR REPLACE FUNCTION label(p_id bytea)
     RETURNS text
@@ -63,11 +26,6 @@ CREATE OR REPLACE FUNCTION label(p_id bytea)
          WHERE e.id = p_id),
         encode(p_id, 'hex') || '…')
 $$;
-COMMENT ON FUNCTION label(bytea) IS
-    'render() with a typed fallback: reference entities that carry no text (Language, '
-    'WordNet_Synset, …) label as Type:hexprefix instead of bare hex.';
-
-/* ── prompt tokenization + resolution (whitespace/punct split; case fallback) ── */
 
 CREATE OR REPLACE FUNCTION prompt_words(p_text text)
     RETURNS TABLE(ord int, word text, id bytea)
@@ -85,12 +43,6 @@ CREATE OR REPLACE FUNCTION prompt_words(p_text text)
     FROM toks t
     ORDER BY t.ord
 $$;
-COMMENT ON FUNCTION prompt_words(text) IS
-    'Split a prompt on non-word characters, content-address each token (as-given, then '
-    'lowercased), and return the id when the substrate holds that word. id IS NULL = '
-    'never-ingested content.';
-
-/* ── the prompt''s own language (no hardcoded language constants) ────────── */
 
 CREATE OR REPLACE FUNCTION word_language(p_word bytea)
     RETURNS bytea
@@ -104,11 +56,6 @@ CREATE OR REPLACE FUNCTION word_language(p_word bytea)
     ORDER BY eff_mu(c.rating, c.rd) DESC
     LIMIT 1
 $$;
-COMMENT ON FUNCTION word_language(bytea) IS
-    'The word''s top-μ HAS_LANGUAGE object — the language the witnesses most strongly '
-    'agree this word belongs to. Used to scope replies to the prompt''s language.';
-
-/* ── sense chain: word → sense → synset, ranked ──────────────────────────── */
 
 CREATE OR REPLACE FUNCTION senses(p_word bytea)
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint)
@@ -124,11 +71,6 @@ CREATE OR REPLACE FUNCTION senses(p_word bytea)
       AND s.type_id = relation_type_id('HAS_SENSE')
     ORDER BY eff_mu(s.rating, s.rd) + eff_mu(ss.rating, ss.rd) DESC
 $$;
-COMMENT ON FUNCTION senses(bytea) IS
-    'word → HAS_SENSE → sense → IS_SENSE_OF → synset, ranked by combined effective μ. '
-    'The disambiguation sharpens as more witnesses fold in (the learning curve).';
-
-/* ── define: ranked glosses across the word''s senses ────────────────────── */
 
 CREATE OR REPLACE FUNCTION define(p_word bytea, p_limit int DEFAULT 5)
     RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
@@ -143,10 +85,6 @@ CREATE OR REPLACE FUNCTION define(p_word bytea, p_limit int DEFAULT 5)
     ORDER BY sn.eff_mu + eff_mu_display(g.rating, g.rd) DESC
     LIMIT p_limit
 $$;
-COMMENT ON FUNCTION define(bytea, int) IS
-    '"what does X mean" — the glosses of X''s synsets ranked by combined consensus μ.';
-
-/* ── synonyms: sister members of the word''s synsets, in the word''s language ── */
 
 CREATE OR REPLACE FUNCTION synonyms(p_word bytea, p_limit int DEFAULT 10)
     RETURNS TABLE(synonym text, eff_mu numeric, witnesses bigint)
@@ -169,11 +107,6 @@ CREATE OR REPLACE FUNCTION synonyms(p_word bytea, p_limit int DEFAULT 10)
     ORDER BY s.witnesses DESC, s.eff_mu DESC
     LIMIT p_limit
 $$;
-COMMENT ON FUNCTION synonyms(bytea, int) IS
-    'Sister members of X''s synsets sharing X''s own witnessed language — synonymy as '
-    'co-membership under consensus, scoped omni-glottally (no language constant).';
-
-/* ── translations: synset members across every witnessed language ────────── */
 
 CREATE OR REPLACE FUNCTION translations(p_word bytea, p_limit int DEFAULT 24)
     RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
@@ -194,11 +127,6 @@ CREATE OR REPLACE FUNCTION translations(p_word bytea, p_limit int DEFAULT 24)
     ORDER BY t.witnesses DESC, t.eff_mu DESC
     LIMIT p_limit
 $$;
-COMMENT ON FUNCTION translations(bytea, int) IS
-    '"translate X" — members of X''s synsets in every language any witness testified, '
-    'ranked by witness fan-in. Cross-lingual by construction (content is identity).';
-
-/* ── taxonomy: recursive IS_A walk from the top sense ────────────────────── */
 
 CREATE OR REPLACE FUNCTION hypernyms(p_word bytea, p_depth int DEFAULT 8)
     RETURNS TABLE(depth int, hypernym text, gloss text)
@@ -217,9 +145,6 @@ CREATE OR REPLACE FUNCTION hypernyms(p_word bytea, p_depth int DEFAULT 8)
         WHERE u.depth < p_depth
     )
     SELECT u.depth,
-           -- realize() resolves the synset to its top-μ member word via the sense
-           -- chain (same-language preferred), instead of the old IS_TRANSLATION_OF-only
-           -- path that surfaced foreign-language members (individu/causa).
            realize(u.syn, word_language(p_word)),
            (SELECT render_text(g.object_id)
             FROM consensus g
@@ -230,11 +155,6 @@ CREATE OR REPLACE FUNCTION hypernyms(p_word bytea, p_depth int DEFAULT 8)
     FROM up u
     ORDER BY u.depth
 $$;
-COMMENT ON FUNCTION hypernyms(bytea, int) IS
-    '"what IS an X" — recursive IS_A walk up the taxonomy from X''s top-μ sense; each step '
-    'labeled by a member in X''s own language (any-language fallback) with its top gloss.';
-
-/* ── usage examples ──────────────────────────────────────────────────────── */
 
 CREATE OR REPLACE FUNCTION examples(p_word bytea, p_limit int DEFAULT 5)
     RETURNS TABLE(example text, eff_mu numeric, witnesses bigint)
@@ -249,10 +169,7 @@ CREATE OR REPLACE FUNCTION examples(p_word bytea, p_limit int DEFAULT 5)
     ORDER BY sn.eff_mu + eff_mu_display(g.rating, g.rd) DESC
     LIMIT p_limit
 $$;
-COMMENT ON FUNCTION examples(bytea, int) IS
-    'Usage examples attested for X''s synsets, ranked by combined consensus μ.';
 
-/* respond()'s helper: the last word of a phrase the substrate actually holds. */
 CREATE OR REPLACE FUNCTION resolve_last_word(p_phrase text)
     RETURNS bytea
     LANGUAGE sql LAPLACE_STABLE_STRICT
@@ -262,12 +179,6 @@ CREATE OR REPLACE FUNCTION resolve_last_word(p_phrase text)
     ORDER BY pw.ord DESC
     LIMIT 1
 $$;
-COMMENT ON FUNCTION resolve_last_word(text) IS
-    'The id of the last token in the phrase that resolves to an ingested entity — the '
-    'asked-about content word once question words/articles (never ingested as such '
-    'positions) are past.';
-
-/* ── prompt state: the WHOLE prompt's resolved working set ───────────────── */
 
 CREATE OR REPLACE FUNCTION prompt_state(p_text text)
     RETURNS TABLE(ord int, word text, id bytea, language bytea)
@@ -277,12 +188,6 @@ CREATE OR REPLACE FUNCTION prompt_state(p_text text)
     FROM prompt_words(p_text) pw
     WHERE pw.id IS NOT NULL
 $$;
-COMMENT ON FUNCTION prompt_state(text) IS
-    'The prompt''s resolved working set: every token the substrate holds, with its witnessed '
-    'language. The initial state of an inference pass — entities with provenance, never a '
-    'float vector.';
-
-/* ── multi-subject expansion: candidates supported by the whole state ─────── */
 
 CREATE OR REPLACE FUNCTION expansion(p_subjects bytea[], p_type bytea DEFAULT NULL,
                                      p_limit int DEFAULT 40)
@@ -301,13 +206,6 @@ CREATE OR REPLACE FUNCTION expansion(p_subjects bytea[], p_type bytea DEFAULT NU
     ORDER BY count(DISTINCT c.subject_id) DESC, sum(eff_mu(c.rating, c.rd)) DESC
     LIMIT p_limit
 $$;
-COMMENT ON FUNCTION expansion(bytea[], bytea, int) IS
-    'Multi-subject expansion: objects ranked by how many of the given subjects hold a '
-    'non-refuted consensus edge to them (then by summed μ). Aggregates ALREADY-adjudicated '
-    'ratings — never updates one; adjudication happened at ingest. All arenas co-equal: '
-    'lexical and model-circuit kinds are read from the same fused consensus.';
-
-/* ── context-scored senses: the sense the rest of the prompt supports ─────── */
 
 CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint,
@@ -331,11 +229,6 @@ CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
       AND s.type_id = relation_type_id('HAS_SENSE')
     ORDER BY 5 DESC
 $$;
-COMMENT ON FUNCTION senses(bytea, bytea[]) IS
-    'senses() scored in context: each sense''s combined μ plus the summed non-refuted '
-    'consensus between the context entities (the prompt''s other resolved words) and the '
-    'synset, either direction. Disambiguation = the sense the rest of the prompt supports. '
-    'Pure aggregation of settled ratings.';
 
 CREATE OR REPLACE FUNCTION define(p_word bytea, p_context bytea[], p_limit int DEFAULT 5)
     RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
@@ -350,11 +243,6 @@ CREATE OR REPLACE FUNCTION define(p_word bytea, p_context bytea[], p_limit int D
     ORDER BY sn.score + eff_mu_display(g.rating, g.rd) DESC
     LIMIT p_limit
 $$;
-COMMENT ON FUNCTION define(bytea, bytea[], int) IS
-    'define() with context-scored sense ranking: glosses of the senses the rest of the '
-    'prompt supports first.';
-
-/* ── realization: entity → text, in the asker''s witnessed language ────────── */
 
 CREATE OR REPLACE FUNCTION kind_label(p_type bytea)
     RETURNS text
@@ -363,21 +251,13 @@ CREATE OR REPLACE FUNCTION kind_label(p_type bytea)
     SELECT lower(replace(regexp_replace(render(p_type), '^substrate/kind/(.+)/v1$', '\1'),
                          '_', ' '))
 $$;
-COMMENT ON FUNCTION kind_label(bytea) IS
-    'A kind id rendered for prose: canonical name stripped of its substrate/kind/…/v1 frame, '
-    'lowercased, underscores to spaces ("IS_A" → "is a").';
 
 CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     SELECT COALESCE(
-        -- content entities: reconstructed text
         NULLIF(render_text(p_id), ''),
-        -- member-bearing entities (synsets): top-μ member word via the SENSE CHAIN
-        -- synset ← IS_SENSE_OF ← sense ← HAS_SENSE ← word, asker's language preferred.
-        -- (This is the path same-language members live on; IS_TRANSLATION_OF below
-        -- only catches cross-lingual members, so synsets fell through to hex.)
         (SELECT render_text(hs.subject_id)
          FROM consensus io
          JOIN consensus hs ON hs.object_id = io.subject_id
@@ -391,7 +271,6 @@ CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
            AND NULLIF(render_text(hs.subject_id), '') IS NOT NULL
          ORDER BY (lang.object_id IS NOT NULL) DESC, eff_mu(hs.rating, hs.rd) DESC
          LIMIT 1),
-        -- cross-lingual members (OMW): top-μ translation that reconstructs
         (SELECT render_text(m.object_id)
          FROM consensus m
          LEFT JOIN consensus lang ON lang.subject_id = m.object_id
@@ -403,13 +282,8 @@ CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
            AND NULLIF(render_text(m.object_id), '') IS NOT NULL
          ORDER BY (lang.object_id IS NOT NULL) DESC, eff_mu(m.rating, m.rd) DESC
          LIMIT 1),
-        -- reference entities with no members (POS, language, kind): canonical name,
-        -- frame-stripped (substrate/pos/NOUN/v1 → NOUN). BELOW the member branches so
-        -- a synset's ugly wordnet/synset/n/123 name can never beat its member word;
-        -- the LIKE-guard keeps non-substrate canonical names (synsets) out of here.
         (SELECT regexp_replace(n.name, '^substrate/[a-z_]+/(.+)/v1$', '\1')
          FROM canonical_names n WHERE n.id = p_id AND n.name LIKE 'substrate/%'),
-        -- last semantic resort: the synset's own gloss
         (SELECT render_text(g.object_id)
          FROM consensus g
          WHERE g.subject_id = p_id AND g.type_id = relation_type_id('DEFINES')
@@ -418,11 +292,6 @@ CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
          LIMIT 1),
         label(p_id))
 $$;
-COMMENT ON FUNCTION realize(bytea, bytea) IS
-    'Surface-realize ANY entity: canonical name (frame stripped), reconstructed content text, '
-    'or — for member-bearing entities like synsets — the top-μ member in the given language '
-    '(any-language fallback, the hypernyms() per-step rule), else label(). Deterministic '
-    'mold-filling over consensus; no generation model.';
 
 CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_kinds bytea[],
                                         p_lang bytea DEFAULT NULL)
@@ -436,15 +305,7 @@ CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_kinds bytea[],
                END, '' ORDER BY i)
     FROM generate_subscripts(p_path, 1) AS i
 $$;
-COMMENT ON FUNCTION realize_path(bytea[], bytea[], bytea) IS
-    'Realize a walk as prose: each node in the asker''s language joined by its edge kind — '
-    '"dog —is a→ canine —is a→ carnivore". p_kinds[i] is the edge that led to p_path[i+1] '
-    '(generate_tree/generate_greedy emit exactly this shape).';
 
--- Direction-aware variant: a reason() walk is UNDIRECTED (relatedness is
--- symmetric), but each edge carries an orientation so the chain reads truthfully.
--- p_dirs[i] = +1 forward (subject→object, "—kind→"), -1 reverse (object→subject,
--- "←kind—"). "dog —is a→ canid ←is a— wolf" = dog is a canid, wolf is a canid.
 CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_kinds bytea[], p_dirs int[],
                                         p_lang bytea DEFAULT NULL)
     RETURNS text
@@ -459,11 +320,6 @@ CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_kinds bytea[], p_dirs 
                END, '' ORDER BY i)
     FROM generate_subscripts(p_path, 1) AS i
 $$;
-COMMENT ON FUNCTION realize_path(bytea[], bytea[], int[], bytea) IS
-    'Direction-aware path render (reason()''s renderer): like realize_path/3 but p_dirs[i] '
-    'orients edge i — +1 "—kind→", -1 "←kind—" — so an undirected relatedness walk reads true.';
-
-/* ── arena reads: what every witness, of every kind, says about X ─────────── */
 
 CREATE OR REPLACE FUNCTION related(p_word bytea, p_type bytea, p_lang bytea DEFAULT NULL,
                                    p_limit int DEFAULT 10)
@@ -485,7 +341,7 @@ CREATE OR REPLACE FUNCTION related(p_word bytea, p_type bytea, p_lang bytea DEFA
               AND c.object_id IS NOT NULL
               AND NOT refuted(c.rating, c.rd)
             ORDER BY eff_mu(c.rating, c.rd) DESC
-            LIMIT p_limit          -- per-subject bound ⇒ consensus_subject_eff_mu_btree
+            LIMIT p_limit
         ) cc
     )
     SELECT realize(t.object_id, COALESCE(p_lang, word_language(p_word))),
@@ -494,9 +350,6 @@ CREATE OR REPLACE FUNCTION related(p_word bytea, p_type bytea, p_lang bytea DEFA
     ORDER BY eff_mu(t.rating, t.rd) DESC
     LIMIT p_limit
 $$;
-COMMENT ON FUNCTION related(bytea, bytea, bytea, int) IS
-    'One arena of X, realized: non-refuted consensus objects of the given kind from X or its '
-    'synsets, ranked by μ — antonyms, parts, causes, uses … one read, any kind.';
 
 CREATE OR REPLACE FUNCTION related_in(p_word bytea, p_type bytea, p_lang bytea DEFAULT NULL,
                                       p_limit int DEFAULT 10)
@@ -517,7 +370,7 @@ CREATE OR REPLACE FUNCTION related_in(p_word bytea, p_type bytea, p_lang bytea D
               AND c.type_id = p_type
               AND NOT refuted(c.rating, c.rd)
             ORDER BY eff_mu(c.rating, c.rd) DESC
-            LIMIT p_limit          -- per-object bound via consensus_object_btree
+            LIMIT p_limit
         ) cc
     )
     SELECT realize(t.subject_id, COALESCE(p_lang, word_language(p_word))),
@@ -526,10 +379,6 @@ CREATE OR REPLACE FUNCTION related_in(p_word bytea, p_type bytea, p_lang bytea D
     ORDER BY eff_mu(t.rating, t.rd) DESC
     LIMIT p_limit
 $$;
-COMMENT ON FUNCTION related_in(bytea, bytea, bytea, int) IS
-    'The INCOMING arena of X, realized: non-refuted subjects holding an edge of the given kind '
-    'INTO X or its synsets — "what causes X" reads this direction; "what does X cause" reads '
-    'related().';
 
 CREATE OR REPLACE FUNCTION describe(p_word bytea, p_lang bytea DEFAULT NULL,
                                     p_limit int DEFAULT 24)
@@ -552,7 +401,7 @@ CREATE OR REPLACE FUNCTION describe(p_word bytea, p_lang bytea DEFAULT NULL,
               AND c.type_id NOT IN (relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
                                     relation_type_id('HAS_LANGUAGE'))
             ORDER BY eff_mu(c.rating, c.rd) DESC
-            LIMIT p_limit          -- per-subject bound ⇒ consensus_subject_eff_mu_btree
+            LIMIT p_limit
         ) cc
     )
     SELECT kind_label(t.type_id),
@@ -562,13 +411,6 @@ CREATE OR REPLACE FUNCTION describe(p_word bytea, p_lang bytea DEFAULT NULL,
     ORDER BY eff_mu(t.rating, t.rd) DESC
     LIMIT p_limit
 $$;
-COMMENT ON FUNCTION describe(bytea, bytea, int) IS
-    '"tell me about X": EVERY witnessed arena of X and its synsets, realized and μ-ranked — '
-    'taxonomy, members, glosses, causes, uses, model-circuit completions alike (the kinds are '
-    'co-equal; sense/language plumbing excluded as unreadable). Dissent ranks low, refuted is '
-    'pruned, nothing else is hidden.';
-
-/* ── taxonomy check: is X a Y? ─────────────────────────────────────────────── */
 
 CREATE OR REPLACE FUNCTION isa_path(p_x bytea, p_y bytea, p_depth int DEFAULT 8)
     RETURNS TABLE(path bytea[], kinds bytea[], path_mu numeric)
@@ -607,16 +449,7 @@ CREATE OR REPLACE FUNCTION isa_path(p_x bytea, p_y bytea, p_depth int DEFAULT 8)
     ORDER BY cardinality(u.path), u.path_mu DESC
     LIMIT 1
 $$;
-COMMENT ON FUNCTION isa_path(bytea, bytea, int) IS
-    '"is X a Y": shortest non-refuted IS_A walk from X (word or its synsets) to Y (word, its '
-    'synsets, or synsets Y is a member of); path_mu = the weakest edge''s μ (the claim is only '
-    'as strong as its weakest witness consensus). Empty = no witnessed path.';
 
-/* ── the distributional axis: shared usage context (PRECEDES neighborhood) ──────
- * Relatedness from the corpus, not the taxonomy: how many bigram-adjacency
- * neighbors X and Y share. A single indexed set-intersection — no graph walk.
- * Independent of spelling and taxonomy (coffee/tea share ~20 even though they sit
- * far apart on the glome and meet only at "drink"). One co-equal NN axis. */
 CREATE OR REPLACE FUNCTION usage_overlap(p_x bytea, p_y bytea)
     RETURNS bigint
     LANGUAGE sql STABLE PARALLEL SAFE
@@ -631,24 +464,7 @@ CREATE OR REPLACE FUNCTION usage_overlap(p_x bytea, p_y bytea)
         SELECT subject_id FROM consensus WHERE object_id  = p_y AND type_id = relation_type_id('PRECEDES'))
     SELECT count(*) FROM xn JOIN yn USING (n)
 $$;
-COMMENT ON FUNCTION usage_overlap(bytea, bytea) IS
-    'Distributional relatedness (the corpus axis): size of the shared PRECEDES neighborhood — '
-    'how often X and Y occur in the same bigram contexts. High = used together, independent of '
-    'taxonomy or spelling. One of the co-equal NN axes (relatedness/structure/usage), never crowned.';
 
-/* ── general reasoning: how are X and Y related, across EVERY arena? ─────────────
- * isa_path generalized off the single IS_A plane onto every conceptual arena at
- * once — the "3D chess" move: each edge picks its own plane. Two fast, indexed
- * primitives, never a blind graph crawl (the old single-frontier walk had to
- * descend INTO Y through hub nodes — canid's hundreds of hyponyms — and took
- * minutes):
- *   • a 1-hop LATERAL check (synonym/antonym/part/similar/derivational …) for the
- *     direct relation — king —is antonym of→ queen;
- *   • a lowest-common-ancestor UP-walk — both sides climb IS_A/IS_INSTANCE_OF
- *     toward the roots (LOW fanout) and meet — dog —is a→ canid ←is a— wolf.
- * Refuted edges pruned (signed μ); path_mu = the weakest edge (a chain is only as
- * strong as its least-corroborated link); shortest then highest-μ wins. Empty =
- * a GAP: no witnessed conceptual path within p_depth — the Gödel engine''s `unknown`. */
 CREATE OR REPLACE FUNCTION reason(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
     RETURNS TABLE(chain text, path_mu numeric, plane text)
     LANGUAGE sql STABLE PARALLEL SAFE
@@ -661,7 +477,6 @@ CREATE OR REPLACE FUNCTION reason(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
     up_k(k) AS (SELECT relation_type_id(n) FROM unnest(ARRAY['IS_A','IS_INSTANCE_OF']) n),
     xset(id) AS (SELECT p_x UNION SELECT sn.synset_id FROM senses(p_x) sn),
     yset(id) AS (SELECT p_y UNION SELECT sn.synset_id FROM senses(p_y) sn),
-    -- the direct relation: a single lateral edge, either orientation (1 hop)
     direct AS (
         SELECT realize_path(ARRAY[x.id, c.object_id], ARRAY[c.type_id], ARRAY[1],
                             COALESCE(word_language(p_x), word_language(p_y))) AS chain,
@@ -676,7 +491,6 @@ CREATE OR REPLACE FUNCTION reason(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
         FROM xset x JOIN consensus c ON c.object_id = x.id
             AND c.subject_id IN (SELECT id FROM yset)
             AND c.type_id IN (SELECT k FROM lat) AND NOT refuted(c.rating, c.rd)),
-    -- both sides climb toward the roots (low fanout); the LCA is where they meet
     ux(node, path, kinds, mu, d) AS (
         SELECT id, ARRAY[id], ARRAY[]::bytea[], NULL::numeric, 0 FROM xset
         UNION ALL
@@ -693,11 +507,6 @@ CREATE OR REPLACE FUNCTION reason(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
         FROM uy u JOIN consensus c ON c.subject_id = u.node AND c.type_id IN (SELECT k FROM up_k)
             AND c.object_id IS NOT NULL AND NOT refuted(c.rating, c.rd) AND NOT (c.object_id = ANY (u.path))
         WHERE u.d < p_depth),
-    -- the meeting point: among common ancestors, prefer the shortest, then the MOST
-    -- SPECIFIC (lowest IS_A in-degree = highest information content — "carnivore"
-    -- out-informs "male"), then the best-corroborated. The specificity tiebreak is
-    -- a substrate-native disambiguator: it steers ties away from generic person/root
-    -- senses toward the meaningful one (cat/dog meet at carnivore, not at "male").
     lca_pick AS (
         SELECT ux.path AS xp, ux.kinds AS xk, uy.path AS yp, uy.kinds AS yk,
                LEAST(ux.mu, uy.mu) AS mu, ux.d + uy.d AS len
@@ -724,20 +533,7 @@ CREATE OR REPLACE FUNCTION reason(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
     ORDER BY a.len, a.mu DESC NULLS LAST
     LIMIT 1
 $$;
-COMMENT ON FUNCTION reason(bytea, bytea, int) IS
-    '"how are X and Y related": the best conceptual path across every arena — a 1-hop lateral '
-    'edge (antonym/part/synonym/…) or a lowest-common-ancestor IS_A up-walk — direction-rendered, '
-    'refuted-pruned, path_mu = weakest edge. Empty = a witnessed GAP (the Gödel engine''s unknown).';
 
-/* ── fused relatedness: the co-equal axes, and whether they AGREE ───────────────
- * Meaning is the planes'' agreement, never one crowned. relatedness() reads them
- * for a pair and reports each plus a verdict naming which concur:
- *   • relation/plane/μ — the best conceptual path (reason(): taxonomy or a lateral arena);
- *   • usage            — distributional overlap (shared PRECEDES context, the corpus axis);
- *   • geodesic         — structural proximity on the S³ glome (content shape, NOT meaning:
- *                        far for coffee/tea — different spelling — even as they co-occur).
- * dog/wolf: all three concur → unambiguously related. coffee/tea: usage high, glome far →
- * "used together, written differently". whale/computer: all weak → barely related. */
 CREATE OR REPLACE FUNCTION relatedness(p_x bytea, p_y bytea)
     RETURNS TABLE(relation text, plane text, mu numeric, usage bigint,
                   geodesic double precision, verdict text)
@@ -761,21 +557,7 @@ CREATE OR REPLACE FUNCTION relatedness(p_x bytea, p_y bytea)
                    (SELECT coord FROM physicalities WHERE entity_id = p_y AND type = 1 AND coord IS NOT NULL LIMIT 1)
                ) AS geo) g ON true
 $$;
-COMMENT ON FUNCTION relatedness(bytea, bytea) IS
-    'Fused relatedness across the co-equal axes — relational (reason()), distributional '
-    '(usage_overlap), geometric (glome geodesic) — with a verdict naming which concur. The '
-    'invention''s thesis in one read: meaning is the planes'' agreement, no single axis crowned.';
 
-/* ── the epistemic axis: the Gödel engine''s perception ─────────────────────────
- * The plane conventional AI has no equivalent of. Signed μ (Glicko win=confirm /
- * loss=refute) plus volatility (witness disagreement) classify every relation:
- *   • confirmed — μ clearly above neutral (well-witnessed, corroborated);
- *   • refuted   — μ clearly below neutral (an active loss carried its proof — the
- *                 Gödel engine writes these; absent until verdicts exist);
- *   • contested — μ near neutral with ELEVATED volatility (witnesses disagreed —
- *                 the "resolve" trigger);
- *   • thin      — μ near neutral at baseline volatility (just low evidence — a soft gap).
- * Dissent is folded IN and weighted (volatility = the disagreement), never discarded. */
 CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT NULL,
                                             p_limit int DEFAULT 30)
     RETURNS TABLE(type text, fact text, status text, mu numeric,
@@ -801,16 +583,7 @@ CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT N
            round(r.volatility / 1e9, 4), r.witness_count
     FROM rels r
 $$;
-COMMENT ON FUNCTION epistemic_status(bytea, bytea, int) IS
-    'The epistemic plane as a read: each relation of X classified confirmed / refuted / contested '
-    '/ thin by signed μ + volatility. The Gödel engine''s perception — confirmed gates inference, '
-    'contested raises a resolve task, refuted is pruned. (1.5× the initial volatility = the '
-    'contested floor — §10 calibration.)';
 
-/* ── gaps: the `unknown` — the Gödel engine''s research agenda ───────────────────
- * The arenas a subject COULD be witnessed in but is NOT. Conventional AI cannot
- * tell "I don''t know" from "no"; the substrate names the absence explicitly, and
- * each gap is a `research` task the cognition loop can queue. */
 CREATE OR REPLACE FUNCTION gaps(p_word bytea)
     RETURNS TABLE(missing_arena text)
     LANGUAGE sql STABLE PARALLEL SAFE
@@ -825,19 +598,7 @@ CREATE OR REPLACE FUNCTION gaps(p_word bytea)
         SELECT 1 FROM consensus c JOIN subj s ON c.subject_id = s.id
         WHERE c.type_id = relation_type_id(e.name) AND NOT refuted(c.rating, c.rd))
 $$;
-COMMENT ON FUNCTION gaps(bytea) IS
-    'The `unknown`: which conceptual arenas hold no non-refuted consensus for X — the difference '
-    'between "no" and "not witnessed". Each row is a research task for the Gödel cognition loop.';
 
-/* ── contrast: the "bit-bang" attestation set-difference ─────────────────────────
- * relatedness()''s complement — not "how are X and Y alike" but "how do they
- * DIFFER". Each comparable attestation (a transitive IS_A ancestor, or a direct
- * structural feature — part/cause/use/attribute/antonym/…) is set-compared between
- * the two subjects: shared (both), distinctive to X (x-only), distinctive to Y
- * (y-only). Exact set ops over the consensus rows — what one holds that the other
- * does not — a contrastive read conventional models only approximate. (Cross-sense
- * collisions in the shared set are the open WSD limit; comparable-arena whitelist
- * keeps per-sense gloss noise out.) */
 CREATE OR REPLACE FUNCTION contrast(p_x bytea, p_y bytea, p_lang bytea DEFAULT NULL,
                                     p_limit int DEFAULT 80)
     RETURNS TABLE(holder text, type text, fact text, mu numeric)
@@ -887,12 +648,6 @@ CREATE OR REPLACE FUNCTION contrast(p_x bytea, p_y bytea, p_lang bytea DEFAULT N
     ORDER BY 1, 2, 4 DESC NULLS LAST
     LIMIT p_limit
 $$;
-COMMENT ON FUNCTION contrast(bytea, bytea, bytea, int) IS
-    'relatedness()''s complement: the attestation set-difference — shared (both) vs distinctive '
-    '(x-only / y-only) comparable attestations (transitive IS_A ancestors + direct structural '
-    'arenas). "What one holds that the other does not", exact over consensus rows.';
-
-/* ── routing: question shape → intent, in plain SQL ────────────────────────── */
 
 CREATE OR REPLACE FUNCTION route_prompt(p_prompt text)
     RETURNS TABLE(intent text, phrase text, phrase2 text, kind_name text)
@@ -908,12 +663,10 @@ BEGIN
     IF m IS NULL THEN m := regexp_match(p, '^(?:define|meaning\s+of)\s+(.+)$'); END IF;
     IF m IS NOT NULL THEN intent := 'define'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    /* "what is X used for" must outrank the generic what-is shape */
     m := regexp_match(p, '^what\s+(?:is|are)\s+(?:(?:a|an|the)\s+)?(.+?)\s+used\s+for\??$');
     IF m IS NULL THEN m := regexp_match(p, '^uses?\s+of\s+(.+?)\??$'); END IF;
     IF m IS NOT NULL THEN intent := 'related'; kind_name := 'USED_FOR'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    /* relatedness across arenas: "how are X and Y related" / "X vs Y" / "relate X and Y" */
     m := regexp_match(p, '^how\s+(?:are|is)\s+(.+?)\s+(?:and|&)\s+(.+?)\s+related\??$');
     IF m IS NULL THEN m := regexp_match(p, '^how\s+(?:is|are)\s+(.+?)\s+related\s+to\s+(.+?)\??$'); END IF;
     IF m IS NULL THEN m := regexp_match(p, '^(?:relate|relation\s+(?:between|of))\s+(.+?)\s+(?:and|to|&)\s+(.+?)\??$'); END IF;
@@ -938,16 +691,12 @@ BEGIN
     m := regexp_match(p, '^complete\s+(.+?)\??$');
     IF m IS NOT NULL THEN intent := 'complete'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    /* distributional sequence reads: "what comes after X" = X PRECEDES ? ;
-     * "what comes before X" = X FOLLOWS ? (the corpus's witnessed adjacency). */
     m := regexp_match(p, '^(?:what\s+(?:word\s+|comes?\s+)?(?:comes?\s+)?after|what\s+follows?|after|follows?)\s+(.+?)\??$');
     IF m IS NOT NULL THEN intent := 'related'; kind_name := 'PRECEDES'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
     m := regexp_match(p, '^(?:what\s+(?:word\s+|comes?\s+)?(?:comes?\s+)?before|what\s+precedes?|before|precedes?)\s+(.+?)\??$');
     IF m IS NOT NULL THEN intent := 'related'; kind_name := 'FOLLOWS'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    /* anaphora: "what about its synonyms?" / "and their antonyms" — phrase stays
-     * NULL; resolve_topic() falls back to the session context. */
     m := regexp_match(p, '^(?:(?:and|what\s+about)\s+)?(?:its|their|his|her)\s+(definition|meaning|synonyms?|antonyms?|translations?|examples?|parts?|causes?|uses?)\??$');
     IF m IS NOT NULL THEN
         intent := CASE
@@ -974,7 +723,6 @@ BEGIN
     m := regexp_match(p, '^parts?\s+of\s+(.+?)\??$');
     IF m IS NOT NULL THEN intent := 'related'; kind_name := 'HAS_PART'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
-    /* direction matters: "what causes X" = INTO X; "what does X cause" = out of X */
     m := regexp_match(p, '^(?:what\s+causes|causes?\s+of)\s+(.+?)\??$');
     IF m IS NOT NULL THEN intent := 'related_in'; kind_name := 'CAUSES'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
@@ -991,12 +739,6 @@ BEGIN
     RETURN NEXT;
 END;
 $route$;
-COMMENT ON FUNCTION route_prompt(text) IS
-    'Question shape → (intent, asked-about phrase(s), arena kind). The demo router of the '
-    'read surface — the cognition layer''s task loop is the real router; this stays a thin '
-    'affordance over the same reads.';
-
-/* ── topic resolution with anaphora ────────────────────────────────────────── */
 
 CREATE OR REPLACE FUNCTION resolve_topic(p_phrase text, p_context bytea)
     RETURNS bytea
@@ -1010,12 +752,6 @@ CREATE OR REPLACE FUNCTION resolve_topic(p_phrase text, p_context bytea)
         ELSE resolve_last_word(p_phrase)
     END
 $$;
-COMMENT ON FUNCTION resolve_topic(text, bytea) IS
-    'The asked-about entity: a pronoun (or empty phrase) resolves to the session context — '
-    'the previous turn''s topic — when one exists; otherwise the phrase''s last resolvable '
-    'word. NULL = the substrate honestly holds nothing.';
-
-/* ── respond: route a plain-text prompt to the right ranked-μ read ────────── */
 
 CREATE OR REPLACE FUNCTION respond(p_prompt text, p_context bytea DEFAULT NULL)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
@@ -1048,7 +784,6 @@ BEGIN
     END IF;
 
     v_lang := word_language(v_topic);
-    /* the prompt's OTHER resolved words — context for sense disambiguation */
     SELECT array_agg(ps.id) INTO v_ctx
     FROM prompt_state(p_prompt) ps WHERE ps.id <> v_topic;
     v_ctx := COALESCE(v_ctx, ARRAY[]::bytea[]);
@@ -1152,7 +887,6 @@ BEGIN
                                 NULL::numeric, NULL::bigint;
             RETURN;
         END IF;
-        /* fused relatedness: the best conceptual path, glossed by the axes that concur */
         RETURN QUERY
             SELECT CASE WHEN rs.relation IS NOT NULL
                         THEN rs.relation || '  [' || rs.verdict || ']'
@@ -1176,7 +910,7 @@ BEGIN
                                 NULL::numeric, NULL::bigint;
         END IF;
 
-    ELSE  /* fallback: define the last resolvable content word of the prompt */
+    ELSE
         RETURN QUERY
             SELECT label(v_topic) || ': ' || d.definition, d.eff_mu, d.witnesses
             FROM define(v_topic, v_ctx, 3) d;
@@ -1187,21 +921,6 @@ BEGIN
     END IF;
 END;
 $respond$;
-COMMENT ON FUNCTION respond(text, bytea) IS
-    'Conversational entry point: route a plain-text prompt (what is / define / translate / '
-    'synonyms / examples / tell-me-about / is X a Y / antonyms-parts-causes-uses / walk / '
-    'complete) to the matching ranked-μ consensus read; p_context = the previous turn''s '
-    'topic, resolving pronouns. A pure read — adjudication happened at ingest. psql IS a '
-    'chat surface.';
-
-/* ── the conversation loop: session turns + anaphora ───────────────────────
- *
- * APP-STATE, not consensus: the turn log is the read surface's working
- * memory (like the resolution perf-cache — plumbing). Prompts are NOT
- * witnessed into consensus here: the witness weight's user/tenant-trust
- * factor enters with the app/auth layer; witnessing now would hardcode
- * every user's trust. Promotion of turns to witnessed content belongs to
- * the Gödel/auth layer. UNLOGGED by design — losable session state. */
 
 CREATE UNLOGGED TABLE converse_turns (
     session_id  bytea       NOT NULL,
@@ -1211,10 +930,6 @@ CREATE UNLOGGED TABLE converse_turns (
     asked_at    timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (session_id, ord)
 );
-COMMENT ON TABLE converse_turns IS
-    'Conversation session state: one row per turn with the topic entity the turn resolved '
-    'to. App plumbing for anaphora — never consensus, never witnessed (tenant trust is not '
-    'built); UNLOGGED, losable.';
 
 CREATE OR REPLACE FUNCTION converse(p_prompt text, p_session bytea DEFAULT NULL)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
@@ -1245,25 +960,7 @@ BEGIN
     RETURN QUERY SELECT * FROM respond(p_prompt, v_context);
 END;
 $converse$;
-COMMENT ON FUNCTION converse(text, bytea) IS
-    'The conversation loop: resolve the turn''s topic (pronouns → the session''s previous '
-    'topic), log the turn (app-state), answer via respond(). Session defaults to the '
-    'connection (pg_backend_pid) — an interactive psql IS a session. The only write on this '
-    'surface, and it never touches consensus.';
 
-/* ── structural NN: the GLOME axis as a read (co-equal with the semantic μ axis) ─
- * "What is structurally near, and how near?" Nearest-neighbor on the S³ glome by
- * the native geodesic: the nd-GiST coord index prunes by the <<->> KNN operator,
- * then laplace_angular_distance_4d refines on the small candidate set; native
- * discrete Fréchet reports ordered-trajectory shape alongside. STRUCTURAL ONLY —
- * content shape, NOT meaning: an anagram lands at geodesic 0 and two scripts
- * mingle, because the coord is the deterministic content centroid. Meaning is the
- * orthogonal axis (describe() / relation μ); the two compose (structure locates
- * where claims differ, μ adjudicates which is corroborated), neither is crowned.
- * Reads the CONTENT placement (kind=1) — content-addressed ⇒ a pure function of
- * the entity, so it IS the structural consensus, no per-source/per-witness store.
- * v_coord is bound to a variable so the planner uses the GiST KNN index; a
- * CTE-joined coord would fall back to a seqscan (measured: 50ms vs 4.2s). */
 CREATE OR REPLACE FUNCTION structural_neighbors(p_word text, p_k integer DEFAULT 10)
     RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
     LANGUAGE plpgsql STABLE
@@ -1282,46 +979,31 @@ BEGIN
     IF v_id IS NULL THEN RETURN; END IF;
 
     RETURN QUERY
-    WITH knn AS (                                   -- nd-GiST KNN prune (chord)
+    WITH knn AS (
         SELECT p.entity_id, p.coord, p.trajectory
         FROM physicalities p
         WHERE p.type = 1
         ORDER BY p.coord <<->> v_coord
         LIMIT GREATEST(p_k * 20, 200)),
-    nearest AS (                                    -- geodesic refine + dedup per entity (cheap, O(1)/row)
+    nearest AS (
         SELECT DISTINCT ON (k.entity_id) k.entity_id, k.trajectory,
                public.laplace_angular_distance_4d(k.coord, v_coord) AS geo
         FROM knn k
         ORDER BY k.entity_id, public.laplace_angular_distance_4d(k.coord, v_coord)),
-    topk AS (                                       -- take the k nearest BEFORE the O(n·m) Fréchet
+    topk AS (
         SELECT entity_id, trajectory, geo
         FROM nearest
         WHERE entity_id <> v_id
         ORDER BY geo
         LIMIT p_k)
-    SELECT render_text(t.entity_id, 24), t.geo,    -- Fréchet only on the returned k
+    SELECT render_text(t.entity_id, 24), t.geo,
            CASE WHEN t.trajectory IS NOT NULL AND v_traj IS NOT NULL
                 THEN public.laplace_frechet_4d(t.trajectory, v_traj) END
     FROM topk t
     ORDER BY t.geo;
 END;
 $sn$;
-COMMENT ON FUNCTION structural_neighbors(text, integer) IS
-    'Structural nearest-neighbors on the S³ glome: nd-GiST KNN prune (<<->>) → native geodesic '
-    '(laplace_angular_distance_4d) refine, with native discrete Fréchet shape over the '
-    'trajectory. STRUCTURAL axis only (content shape, not meaning — anagrams collide at 0, '
-    'scripts mingle); the orthogonal semantic axis is describe()/relation μ, and they compose. '
-    'Reads the content-addressed CONTENT placement (kind=1) = the structural consensus for content.';
 
-/* ── structural locale: "how far from a cluster am I?" (tahiti vs europa) ─────
- * Neighborhood occupancy on the glome, not just the top-k. `nearest` = geodesic
- * to the closest other entity (is anything here at all); the within-* counts =
- * how crowded the vicinity is; `isolated` = nothing within p_near, i.e. a void —
- * a structural gap where content *could* sit but nothing does. This is the
- * STRUCTURAL reading of isolation (content shape), distinct from EPISTEMIC
- * isolation (a relation's corroboration: μ / volatility / witness_count — truths
- * cluster, lies scatter, on the relation-consensus axis, not here). Same index
- * path: nd-GiST KNN prune → native geodesic; p_near is a calibration knob. */
 CREATE OR REPLACE FUNCTION structural_locale(p_word text, p_near double precision DEFAULT 0.05)
     RETURNS TABLE(nearest double precision, within_near bigint,
                   within_2x bigint, within_5x bigint, isolated boolean)
@@ -1339,13 +1021,13 @@ BEGIN
     IF v_id IS NULL THEN RETURN; END IF;
 
     RETURN QUERY
-    WITH cand AS (                                  -- nd-GiST KNN prune
+    WITH cand AS (
         SELECT p.entity_id, p.coord
         FROM physicalities p
         WHERE p.type = 1
         ORDER BY p.coord <<->> v_coord
         LIMIT 3000),
-    g AS (                                          -- geodesic, dedup per entity, drop self
+    g AS (
         SELECT DISTINCT ON (c.entity_id) c.entity_id,
                public.laplace_angular_distance_4d(c.coord, v_coord) AS d
         FROM cand c
@@ -1359,24 +1041,7 @@ BEGIN
     FROM g;
 END;
 $sl$;
-COMMENT ON FUNCTION structural_locale(text, double precision) IS
-    'Glome neighborhood occupancy: nearest = geodesic to the closest other content entity; '
-    'within_* = how crowded the vicinity is at p_near / 2× / 5×; isolated = nothing within '
-    'p_near (a structural void/gap). STRUCTURAL isolation (content shape) — NOT epistemic '
-    'isolation, which is a relation''s corroboration on the μ/volatility/witness axis.';
 
-/* ── generate: the forward pass as a READ ───────────────────────────────────
- * A ranked-μ walk over the witnessed-sequence (PRECEDES) consensus. There is no
- * model and no GPU: each step's next-token DISTRIBUTION is *read* from consensus
- * μ over the last p_window resolved tokens (the context window IS the attention),
- * then shaped by a deterministic decoding recipe — content mask (HAS_POS),
- * stop-set, top-k, temperature (p_temperature=0 ⇒ greedy argmax) — and sampled.
- * Refuted edges are pruned (epistemic: the engine won't continue down a
- * known-false edge), and the per-step μ is returned, so the walk is glass-box:
- * you see WHY each token was chosen, which a learned LM's logits cannot show.
- * The whole pass is one recursive SQL statement; the continuation is
- * reconstructed by traversing what the corpus attested, not by running weights.
- * Only the chosen token is rendered (1 render/step) — candidates rank on ids. */
 CREATE OR REPLACE FUNCTION generate(
         p_prompt text, p_steps int DEFAULT 16, p_window int DEFAULT 3,
         p_temperature double precision DEFAULT 0.6, p_topk int DEFAULT 8,
@@ -1389,10 +1054,6 @@ stops AS (
     SELECT DISTINCT p.id FROM unnest(p_stop) w(t)
     CROSS JOIN LATERAL prompt_state(w.t) p WHERE p.id IS NOT NULL),
 topic AS (SELECT id FROM prompt_state(p_prompt) WHERE id IS NOT NULL),
-/* topic field resolved ONCE (when p_boost>0): the prompt's tokens + their corpus
- * associations (PRECEDES both directions) + synonyms. The walk biases toward it
- * so the continuation stays on-subject — the multi-arena steer, fused into the
- * sequence walk without a per-step semantic probe. */
 field AS (
     SELECT id FROM topic
     UNION SELECT c.object_id FROM consensus c JOIN topic t ON c.subject_id=t.id
@@ -1434,9 +1095,3 @@ walk AS (
 )
 SELECT step, render_text(oid, 24), mu FROM walk WHERE step > 0 ORDER BY step;
 $gen$;
-COMMENT ON FUNCTION generate(text, int, int, double precision, int, text[], double precision) IS
-    'The forward pass as a READ: a ranked-μ walk over the witnessed-sequence (PRECEDES) '
-    'consensus. Each step''s next-token distribution is read from consensus μ over the last '
-    'p_window tokens (context = attention), content-masked (HAS_POS), stop-filtered, top-k, '
-    'temperature-sampled (0 ⇒ greedy). Refuted edges pruned (epistemic); per-step μ returned '
-    '(glass-box provenance). No model, no GPU — generation reconstructed by traversal.';

@@ -6,10 +6,6 @@
 #include "laplace/core/hash128.h"
 
 namespace {
-/* BLAKE3 default 32-byte output for the empty input is a published constant
- * (see https://github.com/BLAKE3-team/BLAKE3/blob/master/test_vectors/test_vectors.json):
- *   af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262
- * The first 16 bytes are our truncated hash128 for empty input. */
 constexpr uint8_t kBlake3EmptyTruncated[16] = {
     0xaf, 0x13, 0x49, 0xb9, 0xf5, 0xf9, 0xa1, 0xa6,
     0xa0, 0x40, 0x4d, 0xea, 0x36, 0xdc, 0xc9, 0x49,
@@ -57,9 +53,6 @@ TEST(LaplaceCoreHash128, CompareSelfIsZero) {
 }
 
 TEST(LaplaceCoreHash128, CompareMatchesMemcmpOnBytea) {
-    /* The acceptance bullet "total order; matches memcmp of bytea representation"
-     * is the load-bearing invariant — PG `bytea` btree must order identically
-     * to engine hash128_compare. Verify across several BLAKE3 outputs. */
     const std::vector<std::string> inputs = {"", "a", "aa", "ab", "b", "z", "longer input"};
     std::vector<hash128_t> hashes(inputs.size());
     for (size_t i = 0; i < inputs.size(); ++i) {
@@ -69,8 +62,6 @@ TEST(LaplaceCoreHash128, CompareMatchesMemcmpOnBytea) {
         for (size_t j = 0; j < hashes.size(); ++j) {
             const int cmp = hash128_compare(&hashes[i], &hashes[j]);
             const int memcmp_result = std::memcmp(&hashes[i], &hashes[j], sizeof(hash128_t));
-            /* memcmp's exact return value is implementation-defined beyond sign;
-             * normalize both to {-1, 0, 1} before comparing. */
             const auto sign = [](int v) { return (v > 0) - (v < 0); };
             EXPECT_EQ(sign(cmp), sign(memcmp_result))
                 << "i=" << i << " (\"" << inputs[i] << "\") j=" << j << " (\"" << inputs[j] << "\")";
@@ -92,8 +83,6 @@ TEST(LaplaceCoreHash128, MerkleComposesChildrenDeterministically) {
 }
 
 TEST(LaplaceCoreHash128, MerkleTierIsNotIdentity) {
-    /* Same content = same hash; tier is metadata, never identity. The same
-     * ordered constituent set composed "at" two different strata is ONE entity. */
     const uint8_t a_in[] = "child_a";
     hash128_t a;
     hash128_blake3(a_in, sizeof(a_in) - 1, &a);
@@ -118,7 +107,6 @@ TEST(LaplaceCoreHash128, MerkleChildOrderMatters) {
 }
 
 TEST(LaplaceCoreHash128, MerkleEmptyChildSetIsTierIndependent) {
-    /* Tier is metadata, not identity: the empty composition is one value. */
     hash128_t t0, t1;
     hash128_merkle(0, nullptr, 0, &t0);
     hash128_merkle(1, nullptr, 0, &t1);

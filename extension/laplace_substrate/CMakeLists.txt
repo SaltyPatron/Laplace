@@ -1,8 +1,27 @@
-# extension/laplace_substrate/CMakeLists.txt
-#
-# laplace_substrate extension — substrate domain.
-# CMake-driven build (no PGXS). Modular SQL via cpp
-# preprocessor. Same pattern as laplace_geom.
+if(WIN32)
+    add_library(laplace_substrate MODULE
+        src/laplace_substrate.c
+        src/generate_walk.c
+        src/astar_path.c
+    )
+    set_target_properties(laplace_substrate PROPERTIES
+        PREFIX "" OUTPUT_NAME laplace_substrate SUFFIX ".dll"
+        WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
+    target_include_directories(laplace_substrate PRIVATE
+        "${LAPLACE_PG_INCLUDEDIR_SERVER}/port/win32_msvc"
+        "${LAPLACE_PG_INCLUDEDIR_SERVER}/port/win32"
+        "${LAPLACE_PG_INCLUDEDIR_SERVER}"
+        "${LAPLACE_PG_INCLUDEDIR}"
+    )
+    target_compile_definitions(laplace_substrate PRIVATE
+        _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS WIN32)
+    target_link_libraries(laplace_substrate PRIVATE
+        laplace_core
+        laplace_dynamics
+        "${LAPLACE_PG_LIBDIR}/postgres.lib"
+    )
+    return()
+endif()
 
 set(EXT_NAME    laplace_substrate)
 set(EXT_VERSION ${PROJECT_VERSION})
@@ -24,9 +43,6 @@ target_include_directories(${EXT_NAME} PRIVATE
     ${LAPLACE_PG_INCLUDEDIR_SERVER}
 )
 
-# laplace_substrate links liblaplace_core (Glicko-2, A*, cascade) and
-# liblaplace_dynamics (Procrustes, eigenmaps, sparsity) — the full
-# engine stack. rpath points at the engine lib install location.
 target_link_libraries(${EXT_NAME} PRIVATE laplace_core laplace_dynamics)
 target_link_options(${EXT_NAME} PRIVATE
     "-Wl,-rpath,$<TARGET_FILE_DIR:laplace_core>"
@@ -107,7 +123,6 @@ install(FILES
     PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )
 
-# === Tests (pg_regress via CTest — see tests/CMakeLists.txt; landed by B′.9 #196) ===
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()

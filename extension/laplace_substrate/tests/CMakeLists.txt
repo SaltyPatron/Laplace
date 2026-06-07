@@ -1,11 +1,3 @@
-# extension/laplace_substrate/tests/CMakeLists.txt
-#
-# pg_regress wiring for laplace_substrate (per B′.9 #196).
-# Same pattern as extension/laplace_geom/tests/CMakeLists.txt — see that
-# file for the fixture rationale (per-extension test DB avoids ctest -j
-# races; --use-existing against the running system PG keeps the user's
-# `laplace` DB untouched).
-
 find_program(LAPLACE_PG_REGRESS pg_regress
     PATHS "${LAPLACE_PG_PKGLIBDIR}/pgxs/src/test/regress"
     NO_DEFAULT_PATH
@@ -21,8 +13,6 @@ set(REGRESS_TESTS bootstrap glicko2_aggregate entities_exist_bitmap consensus_si
 set(REGRESS_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/regress_output")
 file(MAKE_DIRECTORY "${REGRESS_OUTPUT_DIR}")
 
-# dropdb + createdb (not `psql -c`) — see extension/laplace_geom/tests/CMakeLists.txt
-# for rationale (DROP/CREATE DATABASE can't run inside a transaction).
 add_test(NAME regress_setup_laplace_substrate
     COMMAND bash -c
         "dropdb -U laplace_admin --if-exists ${REGRESS_DB} && createdb -U laplace_admin -O laplace_admin ${REGRESS_DB}"

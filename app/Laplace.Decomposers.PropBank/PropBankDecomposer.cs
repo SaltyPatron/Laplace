@@ -7,36 +7,8 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.PropBank;
 
-/// <summary>
-/// Emits PropBank (Frames v3.4) into the substrate as "content + attestations".
-///
-/// PropBank annotates predicate ARGUMENT STRUCTURE: each predicate lemma carries one or more
-/// ROLESETS (give.01 "transfer", give.08 …), and each roleset lists numbered semantic roles
-/// (Arg0 "giver", Arg1 "thing given", …) with cross-resource rolelinks (VerbNet class + theta
-/// role, FrameNet frame + FE) and gold example sentences.
-///
-/// <para><b>The law applied:</b> predicate LEMMAS, roleset NAME/descr TEXT, role descr TEXT,
-/// and example SENTENCES are CONTENT entities (<see cref="ContentEmitter"/>) — they co-assert
-/// with VerbNet, FrameNet, WordNet, and every prose/model witness. Only the abstract ROLESET
-/// construct keeps a content-addressed meta id (<c>propbank/roleset/&lt;id&gt;</c>) — the EXACT
-/// convention SemLink references back. The rolelink VerbNet target reuses VerbNet's class meta
-/// convention (<c>verbnet/class/&lt;id&gt;</c>) and theta-role CONTENT so PB↔VN aligns on one
-/// substrate.</para>
-///
-/// <para>Coverage: predicate lemma —HAS_SENSE→ roleset (the SAME arena+direction WordNet uses
-/// for lemma→sense, so word-sense inventories co-assert); roleset —HAS_DEFINITION→ its
-/// name/descr text; roleset —HAS_SEMANTIC_ROLE→ role descr text, with the arg NUMBER as a
-/// context-id ordinal entity (<c>ordinal/&lt;n&gt;/v1</c>); rolelink (VerbNet) → CORRESPONDS_TO
-/// roleset↔VN class and arg-role↔VN theta role; example —HAS_EXAMPLE→ roleset.</para>
-///
-/// <para>Single XML pass per frameset file; each batch self-contained (entities ride the same
-/// intent as the attestations referencing them; writer orders entities first) — ON CONFLICT
-/// idempotent, batches commit in any order.</para>
-/// </summary>
 public sealed class PropBankDecomposer : IDecomposer
 {
-    /// <summary>Meta-entity canonical names — registered post-ingest so
-    /// render() answers in names, never hex (2026-06-05).</summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> MetaNames = new();
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback
@@ -54,11 +26,6 @@ public sealed class PropBankDecomposer : IDecomposer
     private static readonly Hash128 OrdinalTypeId =
         Hash128.OfCanonical("substrate/type/Ordinal/v1");
 
-    // Meta-entity id conventions (the LAW: rolesets get meta ids; SemLink references
-    // these EXACT strings). The VerbNet class id reuses VerbNetDecomposer's BARE
-    // NUMERIC convention: PropBank rolelinks carry the lemma prefix (give-13.1-1),
-    // VerbNet/SemLink use the bare numeric (13.1-1) — strip the prefix so PB↔VN↔SemLink
-    // collide on one class entity.
     internal static Hash128 RolesetId(string rolesetId)
     {
         string name = $"propbank/roleset/{rolesetId}";
@@ -72,10 +39,6 @@ public sealed class PropBankDecomposer : IDecomposer
         return Hash128.OfCanonical(name);
     }
 
-    /// <summary>Strip a VerbNet class id's lemma prefix to its bare numeric form —
-    /// the cross-resource convention shared with VerbNet/SemLink (give-13.1-1 → 13.1-1;
-    /// already-bare 13.1-1 → 13.1-1). A class id starts with a digit (bare) or an
-    /// alphabetic lemma the first <c>-&lt;digit&gt;</c> separates from the class.</summary>
     internal static string NumericClassId(string classId)
     {
         if (classId.Length == 0 || char.IsDigit(classId[0])) return classId;
@@ -83,7 +46,6 @@ public sealed class PropBankDecomposer : IDecomposer
             if (char.IsDigit(classId[i + 1])) return classId[(i + 1)..];
         return classId;
     }
-    // Reuse the seeded ordinal context convention (UcdProperties.OrdinalCtx*).
     internal static Hash128 OrdinalId(string n)         => Hash128.OfCanonical($"ordinal/{n}/v1");
 
     public Hash128 SourceId     => Source;
@@ -97,9 +59,9 @@ public sealed class PropBankDecomposer : IDecomposer
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("PropBank_Roleset");
-        boot.AddType("VerbNet_Class");        // matches VerbNetDecomposer's class-entity type
+        boot.AddType("VerbNet_Class");
         boot.AddType("Ordinal");
-        boot.AddRelationType("HAS_SENSE");            // lemma → roleset, SAME arena/direction as WordNet
+        boot.AddRelationType("HAS_SENSE");
         boot.AddRelationType("HAS_DEFINITION");
         boot.AddRelationType("HAS_SEMANTIC_ROLE");
         boot.AddRelationType("HAS_EXAMPLE");
@@ -146,8 +108,6 @@ public sealed class PropBankDecomposer : IDecomposer
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    // ── emission ──────────────────────────────────────────────────────────────
-
     private static void EmitPredicate(SubstrateChangeBuilder b, XmlElement predicate)
     {
         string lemma = predicate.GetAttribute("lemma").Replace('_', ' ').Trim();
@@ -164,11 +124,9 @@ public sealed class PropBankDecomposer : IDecomposer
             Hash128 rsEntity = RolesetId(rsId);
             b.AddEntity(new EntityRow(rsEntity, (byte)MetaTier.Meta, RolesetTypeId, Source));
 
-            // predicate lemma —HAS_SENSE→ roleset (lemma→sense, the WordNet arena/direction).
             b.AddAttestation(RelationTypeRegistry.Attest(
                 lemmaId.Value, "HAS_SENSE", rsEntity, Source, TC.AcademicCurated));
 
-            // roleset —HAS_DEFINITION→ its name/descr text (the gloss of this sense).
             string name = roleset.GetAttribute("name").Trim();
             if (name.Length > 0)
             {
@@ -193,8 +151,6 @@ public sealed class PropBankDecomposer : IDecomposer
             var roleId = ContentEmitter.Emit(b, descr, Source);
             if (roleId is null) continue;
 
-            // arg NUMBER as a context-id ordinal entity (reuse the seeded ordinal
-            // convention). 'm'/'M' (modifier args) normalize to the lowercase form.
             Hash128? ctx = null;
             if (num.Length > 0)
             {
@@ -208,7 +164,6 @@ public sealed class PropBankDecomposer : IDecomposer
                 rsEntity, "HAS_SEMANTIC_ROLE", roleId.Value, Source, TC.AcademicCurated,
                 contextId: ctx));
 
-            // rolelinks → CORRESPONDS_TO: roleset↔VN class, role text↔VN theta role.
             foreach (var link in DescendantElements(role, "rolelink"))
             {
                 if (!link.GetAttribute("resource").Equals("VerbNet", StringComparison.OrdinalIgnoreCase))
@@ -219,12 +174,9 @@ public sealed class PropBankDecomposer : IDecomposer
 
                 Hash128 vnEntity = VnClassId(vnClass);
                 b.AddEntity(new EntityRow(vnEntity, (byte)MetaTier.Meta, VerbNetClassTypeId, Source));
-                // roleset ↔ VN class (symmetric equivalence arena).
                 b.AddAttestation(RelationTypeRegistry.Attest(
                     rsEntity, "CORRESPONDS_TO", vnEntity, Source, TC.AcademicCurated));
 
-                // PB arg role text ↔ VN theta-role text (both CONTENT), with the
-                // VN class pair as provenance context where present.
                 if (theta.Length > 0)
                 {
                     var thetaId = ContentEmitter.Emit(b, theta, Source);
@@ -251,8 +203,6 @@ public sealed class PropBankDecomposer : IDecomposer
                         contextId: rsEntity));
             }
     }
-
-    // ── helpers ──────────────────────────────────────────────────────────────
 
     private static SubstrateChangeBuilder NewBuilder(string unit, int batch) =>
         new(Source, unit, null,

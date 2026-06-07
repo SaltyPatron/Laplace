@@ -1,15 +1,3 @@
-# engine/dynamics/CMakeLists.txt
-#
-# liblaplace_dynamics.so — Procrustes / Laplacian eigenmaps / Gram-Schmidt /
-# the contracted-operator circuit kernels (project_embedding +
-# bilinear_edges_tile). This lib pulls in oneMKL + oneTBB + Spectra;
-# liblaplace_core MUST NOT.
-#
-# MKL/TBB integration: EIGEN_USE_MKL_ALL dispatches
-# Eigen's dense ops to MKL; MKL_THREADING_TBB unifies the scheduler;
-# MKL_CBWR set at process init (laplace_dynamics_init) locks reduction
-# order for substrate determinism.
-
 set(LAPLACE_DYNAMICS_HEADERS
     include/laplace/dynamics/init.h
     include/laplace/dynamics/procrustes.h
@@ -28,6 +16,22 @@ set(LAPLACE_DYNAMICS_SOURCES
 
 add_library(laplace_dynamics SHARED ${LAPLACE_DYNAMICS_SOURCES})
 
+if(WIN32)
+    add_library(laplace_dynamics_static STATIC ${LAPLACE_DYNAMICS_SOURCES})
+    target_include_directories(laplace_dynamics_static PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    target_link_libraries(laplace_dynamics_static
+        PUBLIC laplace_core_static laplace_spectra)
+    target_compile_definitions(laplace_dynamics_static PRIVATE
+        EIGEN_USE_MKL_ALL
+        EIGEN_USE_BLAS
+        EIGEN_USE_LAPACKE
+        MKL_LP64
+        LAPLACE_HAS_MKL=1
+    )
+    target_include_directories(laplace_dynamics_static PRIVATE "$ENV{MKLROOT}/include")
+endif()
+
 set_target_properties(laplace_dynamics PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}
@@ -44,27 +48,8 @@ target_link_libraries(laplace_dynamics
     PUBLIC  laplace_core laplace_spectra
 )
 
-# === oneMKL + oneTBB integration ===
-#
-# find_package looks at oneAPI's MKLConfig.cmake / TBBConfig.cmake, which
-# are installed under /opt/intel/oneapi/<mkl|tbb>/latest/lib/cmake/.
-# Sourcing /opt/intel/oneapi/setvars.sh sets the env vars find_package
-# needs (MKLROOT, TBBROOT, CMAKE_PREFIX_PATH).
-#
-# (no silent failures): if MKL/TBB are not findable,
-# configure prints a clear actionable message but allows the build to
-# proceed with Eigen-only fallback during local dev. Production builds
-# (and Epic D Story D.4+) require strict MKL — flip LAPLACE_REQUIRE_MKL
-# to ON to make missing MKL/TBB a fatal configure error.
-
 option(LAPLACE_REQUIRE_MKL "Fail configure if MKL/TBB not found (Epic D production)" OFF)
 
-# Pin MKL interface to LP64 (32-bit int) BEFORE find_package(MKL). oneMKL's
-# MKLConfig.cmake selects between lp64 and ilp64 based on this variable;
-# without it some versions default to ilp64, which makes lapack_int
-# resolve to `long long` while our EIGEN_USE_LAPACKE path assumes `int*`
-# and fails compile in Eigen/src/QR/ColPivHouseholderQR_LAPACKE.h. The
-# MKL_LP64 compile define below (passed to Eigen) must match this choice.
 set(MKL_INTERFACE "lp64" CACHE STRING "MKL int-size interface (lp64=int, ilp64=long long)")
 set(MKL_THREADING "tbb_thread" CACHE STRING "MKL threading layer")
 

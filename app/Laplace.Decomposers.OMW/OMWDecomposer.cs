@@ -6,19 +6,6 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.OMW;
 
-/// <summary>
-/// Emits Open Multilingual Wordnet (OMW) into the substrate as content + attestations.
-///
-/// Every wn-data-&lt;lang&gt;.tab row type is captured: lemma (→ IS_TRANSLATION_OF synset,
-/// HAS_LANGUAGE), def (→ synset DEFINES gloss, context_id = lang), exe (→ synset HAS_EXAMPLE,
-/// context_id = lang). Lemmas/defs/examples are content-addressed via ContentEmitter so they
-/// converge with WordNet/model/prompt. WN synsets come from the WordNet layer (LayerOrder=2)
-/// which runs before OMW (LayerOrder=3); ISO languages (LayerOrder=1) likewise.
-///
-/// SINGLE pass: each row emits its content entity AND the attestation that references it in the
-/// SAME intent. The writer orders entities before attestations within an intent, so the FK is
-/// satisfied without a second decode of the text (the prior two-pass version decoded twice).
-/// </summary>
 public sealed class OMWDecomposer : IDecomposer
 {
     public static readonly Hash128 Source =
@@ -37,8 +24,6 @@ public sealed class OMWDecomposer : IDecomposer
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        // Kind entities seed via RelationTypeRegistry.SeedCanonical in Build(); rank /
-        // symmetry live ONLY in the registry.
         boot.AddRelationType("HAS_DEFINITION");
         boot.AddRelationType("HAS_EXAMPLE");
         await context.Writer.ApplyAsync(boot.Build(), ct);
@@ -56,9 +41,6 @@ public sealed class OMWDecomposer : IDecomposer
         var b = NewBuilder("omw/batch-0", batch);
         int count = 0, batchNum = 0;
 
-        // All wn-data-*.tab anywhere under wns/ (dirs like mcr/, msa/, cow/ hold files whose
-        // lang differs from the dir name) — the file's lang is the fallback; a row's own
-        // lang prefix wins.
         foreach (string tabFile in Directory.EnumerateFiles(wnsDir, "wn-data-*.tab", SearchOption.AllDirectories))
         {
             string fileLang = FileLang(tabFile);
@@ -90,13 +72,8 @@ public sealed class OMWDecomposer : IDecomposer
 
         Hash128 langId = LanguageReference.Resolve(row.Lang);
         b.AddEntity(new EntityRow(langId, (byte)MetaTier.Meta, LanguageTypeId, Source));
-        // Defensive: the referenced WN synset normally exists from the WordNet layer; emit it
-        // here too (ON CONFLICT keeps WordNet's row) so a synset OMW references but WordNet
-        // lacks can't FK-crash the batch.
         b.AddEntity(new EntityRow(row.SynsetId, (byte)MetaTier.Meta, SynsetTypeId, Source));
 
-        // Rank / symmetry resolve through RelationTypeRegistry — the single source of truth
-        // (IS_TRANSLATION_OF is Equivalence/Symmetric in the canon, never Partitive).
         switch (row.Type)
         {
             case OmwType.Lemma:
@@ -106,7 +83,6 @@ public sealed class OMWDecomposer : IDecomposer
                     contentId.Value, "HAS_LANGUAGE", langId, Source, SourceTrust.AcademicCurated));
                 break;
             case OmwType.Def:
-                // context_id = language → per-language glosses are distinct attestations.
                 b.AddAttestation(RelationTypeRegistry.Attest(
                     row.SynsetId, "HAS_DEFINITION", contentId.Value, Source, SourceTrust.AcademicCurated,
                     contextId: langId));
@@ -127,8 +103,7 @@ public sealed class OMWDecomposer : IDecomposer
 
     private static string FileLang(string path)
     {
-        // wn-data-<lang>.tab → <lang>
-        string name = Path.GetFileNameWithoutExtension(path); // wn-data-<lang>
+        string name = Path.GetFileNameWithoutExtension(path);
         int dash = name.LastIndexOf('-');
         return dash >= 0 && dash + 1 < name.Length ? name[(dash + 1)..] : "und";
     }
@@ -143,10 +118,9 @@ public sealed class OMWDecomposer : IDecomposer
             var cols = line.Split('\t');
             if (cols.Length < 3) continue;
 
-            string synKey = cols[0];          // e.g. 00001740-n
-            string typeField = cols[1];       // lemma | eng:lemma | jpn:def | arb:lemma:root
+            string synKey = cols[0];
+            string typeField = cols[1];
 
-            // Parse [lang:]type[:variant]
             string lang = fileLang;
             string type;
             var tf = typeField.Split(':');
@@ -162,13 +136,13 @@ public sealed class OMWDecomposer : IDecomposer
                 case "exe":   kind = OmwType.Exe;   value = cols.Length > 3 ? cols[3] : (cols.Length > 2 ? cols[2] : ""); break;
                 default: continue;
             }
-            value = value.Replace('_', ' ').Trim(); // '_' → space; observed case
+            value = value.Replace('_', ' ').Trim();
             if (value.Length == 0) continue;
 
             int dash = synKey.LastIndexOf('-');
             if (dash < 0 || dash + 1 >= synKey.Length) continue;
             if (!long.TryParse(synKey[..dash], out long offset)) continue;
-            char pos = synKey[dash + 1] == 's' ? 'a' : synKey[dash + 1]; // satellites share 'a' (match WordNet)
+            char pos = synKey[dash + 1] == 's' ? 'a' : synKey[dash + 1];
 
             Hash128 synId = SourceEntityIdConventions.WordNetSynset(offset, pos);
             yield return new OmwRow(synId, lang, kind, value);

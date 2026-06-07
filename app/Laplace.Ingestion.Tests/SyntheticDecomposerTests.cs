@@ -10,15 +10,6 @@ using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Ingestion.Tests;
 
-/// <summary>
-/// Synthetic end-to-end probe per Story F.4. Builds a tiny decomposer that
-/// emits N intents of fixed shape, pipes them through IngestRunner against
-/// the live local PG, and verifies row counts + idempotency on re-run.
-///
-/// Proves the full framework wiring: IDecomposer → IngestRunner → ISubstrateWriter
-/// → engine IntentStage → PG binary COPY → laplace.entities table. No
-/// concrete decomposer needed — the framework is exercised in isolation.
-/// </summary>
 public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLifetime
 {
     private readonly LocalPgFixture _pg;
@@ -40,28 +31,18 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
 
         public Hash128 SourceId { get; }
         public string SourceName => "SyntheticTest";
-        public int LayerOrder => 0; // probe layer
+        public int LayerOrder => 0;
         public Hash128 TrustClassId =>
             Hash128.OfCanonical("substrate/trust_class/SubstrateMandate/v1");
 
         public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         {
-            // Idempotency probe: if the source entity is already in the
-            // substrate, bootstrap already ran — skip re-emission so the
-            // re-run doesn't trip duplicate-pkey on the HAS_TRUST_CLASS
-            // attestation. (Production decomposers use the same pattern;
- // install-time bootstrap is idempotent by design.)
             var bitmap = await context.Reader.EntitiesExistBitmapAsync(new[] { SourceId }, ct);
             if (bitmap.Length > 0 && (bitmap[0] & 1) != 0) return;
 
-            // Pre-bootstrap: in production these meta-entities land at
- // Stages 0 + 3.5 (Type/Kind/Source meta-types + trust
-            // classes) before any decomposer runs. The synthetic test
-            // stands in for that install-time seeding so the
-            // BootstrapIntentBuilder's FKs resolve.
             var metaSeed = new SubstrateChangeBuilder(SourceId, "meta-seed")
                 .AddEntity(BootstrapIntentBuilder.SourceTypeId, 0,
-                           BootstrapIntentBuilder.SourceTypeId,    // self-typed
+                           BootstrapIntentBuilder.SourceTypeId,
                            firstObservedBy: null)
                 .AddEntity(BootstrapIntentBuilder.TypeMetaTypeId, 0,
                            BootstrapIntentBuilder.SourceTypeId,
@@ -78,7 +59,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
                 .Build();
             await context.Writer.ApplyAsync(metaSeed, ct);
 
-            // Bootstrap: register the source entity + types + kinds + trust attestation.
             var b = new BootstrapIntentBuilder(SourceId, SourceName, TrustClassId);
             await context.Writer.ApplyAsync(b.Build(), ct);
         }
@@ -88,19 +68,12 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
             DecomposerOptions options,
             [EnumeratorCancellation] CancellationToken ct = default)
         {
-            // Heap-allocated reusable buffers — stackalloc'd Spans can't survive
-            // across `yield return` / `await` boundaries in an async iterator,
-            // and CA2014 forbids per-iteration stackalloc (potential stack
-            // overflow on large _unitCount).
             var children = new Hash128[3];
             var seed     = new byte[12];
             for (int i = 0; i < _unitCount; i++)
             {
                 ct.ThrowIfCancellationRequested();
                 var builder = new SubstrateChangeBuilder(SourceId, $"unit-{i}");
-                // 3 leaves per unit + 1 composed entity. Seed includes SourceId.Lo
-                // so atoms are unique per source — keeps tests independent of
-                // ordering even when they share the same PG fixture.
                 for (int k = 0; k < 3; k++)
                 {
                     BitConverter.TryWriteBytes(seed.AsSpan(0, 8), SourceId.Lo);
@@ -140,11 +113,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         Assert.Equal(10, result.UnitsAttempted);
         Assert.Equal(10, result.UnitsApplied);
         Assert.Equal(0, result.UnitsFailed);
-        // 10 units * (3 leaves + 1 parent) + bootstrap (source entity) = 41 entities total
-        // But "EntitiesInserted" is only the novel-on-this-run count, which is what we just ran.
-        // Bootstrap adds the source entity (1).
-        // Decompose yields 10 units, each emitting 4 entities (3 leaves + 1 parent).
-        // Some leaves repeat across units? With distinct seeds (i*100+k), all 4*10 = 40 are unique.
         Assert.True(result.EntitiesInserted >= 40);
     }
 
@@ -161,13 +129,8 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var first = await runner.RunAsync(new SyntheticDecomposer(unitCount: 5, sourceId: srcId), options);
         Assert.Equal(5, first.UnitsApplied);
         Assert.Equal(0, first.UnitsFailed);
-        Assert.True(first.EntitiesInserted >= 20);   // 5 * (3 leaves + 1 parent)
+        Assert.True(first.EntitiesInserted >= 20);
 
-        // Re-run of a COMPLETED source: the runner's re-ingest guard
-        // short-circuits on the completion marker BEFORE decomposition — rows
-        // are idempotent but testimony is not (the accumulating writer consumes
-        // scores in flight; a re-run would fold the source's games into
-        // consensus a second time). Nothing attempted, nothing inserted.
         var second = await runner.RunAsync(new SyntheticDecomposer(unitCount: 5, sourceId: srcId), options);
         Assert.Equal(0, second.UnitsAttempted);
         Assert.Equal(0, second.UnitsApplied);
@@ -204,8 +167,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var srcId = Hash128.OfCanonical("substrate/source/SyntheticBatched/v1");
         var decomposer = new SyntheticDecomposer(unitCount: 10, sourceId: srcId);
 
-        // BatchSize > 1 routes through ApplyManyAsync: one existence pass + one
-        // COPY per table for every 4 intents, instead of per-intent apply.
         var options = IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = true,
@@ -216,8 +177,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         Assert.Equal(10, result.UnitsAttempted);
         Assert.Equal(10, result.UnitsApplied);
         Assert.Equal(0,  result.UnitsFailed);
-        // 10 units x (3 unique leaves + 1 unique parent) = 40 novel entities,
-        // all inserted via batched COPY — same total as the per-intent run.
         Assert.True(result.EntitiesInserted >= 40);
     }
 
@@ -239,10 +198,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         Assert.Equal(7, first.UnitsApplied);
         Assert.Equal(0, first.UnitsFailed);
 
-        // Re-run of a COMPLETED source short-circuits at the re-ingest guard
-        // (completion marker) before the batched path is ever reached — same
-        // contract as the per-intent path: re-running a clean source would
-        // double-count its testimony into consensus.
         var second = await runner.RunAsync(new SyntheticDecomposer(7, srcId), options);
         Assert.Equal(0, second.UnitsAttempted);
         Assert.Equal(0, second.UnitsApplied);
@@ -253,10 +208,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     [Fact]
     public async Task BatchedRun_DedupsEntityRepeatedAcrossIntentsInSameBatch()
     {
-        // The duplicate-key guard: COPY can't ON CONFLICT, so an entity id that
-        // recurs across intents inside ONE batch MUST be collapsed to a single
-        // staged row. If cross-intent dedup regressed, the batched COPY would
-        // throw entities_pkey and the run would fail.
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
@@ -266,24 +217,18 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var options = IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = true,
-            BatchSize              = 8,   // all 8 intents land in one batch
+            BatchSize              = 8,
         };
 
         var result = await runner.RunAsync(decomposer, options);
         Assert.Equal(8, result.UnitsApplied);
         Assert.Equal(0, result.UnitsFailed);
-        // 1 shared entity (deduped from 8 occurrences) + 8 unique = 9 inserted.
         Assert.Equal(9, result.EntitiesInserted);
     }
 
     [Fact]
     public async Task ParallelBatched_ConvergesUnderCrossWorkerIdOverlap()
     {
-        // The conflict-safe-COPY proof: many concurrent workers, each flushing
-        // its own batch, all racing to insert the SAME shared entity id. With a
-        // direct COPY (no staging) the second worker's COMMIT throws
-        // entities_pkey; with the staging-table + ON CONFLICT DO NOTHING promote
-        // they converge. Must apply all units, zero failures.
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
@@ -294,20 +239,15 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         {
             SkipLayerOrderingCheck = true,
             ParallelWorkers        = 4,
-            BatchSize              = 4,   // 10 batches across 4 workers, all sharing one entity id
+            BatchSize              = 4,
         };
 
         var result = await runner.RunAsync(decomposer, options);
         Assert.Equal(40, result.UnitsApplied);
         Assert.Equal(0,  result.UnitsFailed);
-        // The shared entity is inserted exactly once across all workers; the 40
-        // unique entities each once → 41 distinct, no duplicate-key abort.
         Assert.Equal(41, result.EntitiesInserted);
     }
 
-    /// <summary>Emits intents that each carry one shared entity (same id in
-    /// every intent) plus one unique entity — to exercise cross-intent dedup
-    /// inside a single batch.</summary>
     private sealed class OverlapDecomposer : IDecomposer
     {
         private readonly int _unitCount;
@@ -378,7 +318,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
         var srcId = Hash128.OfCanonical("substrate/source/SyntheticLayer/v1");
-        // Build a fake Layer-5 decomposer that should be refused
         var decomposer = new HighLayerDecomposer(srcId);
 
         var options = IngestRunOptions.Default;
@@ -408,9 +347,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     }
 }
 
-// Reuse LocalPgFixture from the SubstrateCRUD.Tests by copy. Cleaner long-term:
-// promote it to a shared test-utils library. For now, a local class keeps
-// Ingestion.Tests self-contained.
 public sealed class LocalPgFixture : IAsyncLifetime
 {
     public const string DatabaseName = "laplace_ingest_test";

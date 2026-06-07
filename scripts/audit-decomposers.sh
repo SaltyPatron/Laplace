@@ -1,15 +1,4 @@
 #!/usr/bin/env bash
-# scripts/audit-decomposers.sh
-# End-to-end decomposer audit: fixed order, before/after counts, exit codes.
-# Logs to ${AUDIT_LOG:-/tmp/laplace-decomposer-audit.log}
-#
-# Usage:
-#   scripts/audit-decomposers.sh              # lexical ladder (iso639 wordnet omw ud) on current DB
-#   scripts/audit-decomposers.sh --full       # + big corpora (tatoeba atomic2020 conceptnet wiktionary)
-#   scripts/audit-decomposers.sh --fresh      # db-nuke + setup + ladder
-#   scripts/audit-decomposers.sh --from iso639  # resume after T0 already seeded
-#
-# Does NOT interpret modality scope — only runs what exists in CLI + ingest-source.sh.
 
 set -euo pipefail
 
@@ -27,7 +16,7 @@ while [[ $# -gt 0 ]]; do
     --full) FULL=1; shift ;;
     --from) FROM="${2:-}"; shift 2 ;;
     -h|--help)
-      sed -n '2,12p' "$0"
+      echo "Usage: $0 [--full] [--fresh] [--from <source>]"
       exit 0
       ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -113,14 +102,10 @@ should_run() {
   return 1
 }
 
-# Layer 0 must complete via IngestRunner (seed-t0 routes through `ingest unicode` now,
-# so it sets HasLayerCompleted/0; this check stays as the gate, not a workaround).
 if should_run "unicode-ingest"; then
   if [[ "$(layer_done 0)" == "t" ]]; then
     skip "ingest unicode (layer 0 already marked)"
   else
-    # Layer 0 is the floor everything gates on — a failed unicode ingest must
-    # fail the audit loudly, never be swallowed.
     run_just "ingest unicode" just ingest unicode || { echo "FATAL: unicode ingest failed"; exit 1; }
   fi
 fi
@@ -129,7 +114,6 @@ AUDIT_FAIL=0
 declare -A LAYER=( [iso639]=1 [wordnet]=2 [omw]=3 [ud]=4
                    [tatoeba]=4 [atomic2020]=4 [conceptnet]=4 [wiktionary]=4 )
 LADDER=(iso639 wordnet omw ud)
-# Big corpora (millions–tens-of-millions of rows) only with --full; layer 4, independent.
 [[ $FULL -eq 1 ]] && LADDER+=(tatoeba atomic2020 conceptnet wiktionary)
 for src in "${LADDER[@]}"; do
   should_run "$src" || continue
@@ -142,11 +126,6 @@ for src in "${LADDER[@]}"; do
   run_just "ingest $src" just ingest "$src" || AUDIT_FAIL=1
 done
 
-# Regression gate: the seed/lexical decomposers MUST emit CONTENT physicalities (kind=1),
-# not just attestations. The pre-fix WordNet emitted ZERO content (only string-keyed
-# entities + attestations); the fix routes lemmas/glosses/examples through ContentEmitter.
-# Count CONTENT physicalities attributed to the WordNet source specifically — 0 before, many
-# after. (Skipped if WordNet wasn't part of this run's ladder.)
 if printf '%s\n' "${LADDER[@]}" | grep -qx wordnet || [[ "$(layer_done 2)" == "t" ]]; then
   section "CONTENT CHECK (seed = content + attestations, not attestations alone)"
   wn_content=$("${PSQL[@]}" -t -A -c \

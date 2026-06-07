@@ -5,12 +5,6 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-/// <summary>
-/// Source identity is CONTENT, not name (truth #5): byte-identical sources are
-/// ONE witness regardless of file/dir name; any content difference is a DISTINCT
-/// witness. Proves the convergence + distinction invariants the consensus layer
-/// depends on (no double-counting a renamed model; a fine-tune does not collide).
-/// </summary>
 public class SourceEntityIdConventionsTests
 {
     private static string NewTempDir()
@@ -43,7 +37,7 @@ public class SourceEntityIdConventionsTests
             Hash128? idb = SourceEntityIdConventions.ModelContentSourceId(b);
 
             Assert.NotNull(ida);
-            Assert.Equal(ida, idb);   // renamed/moved-identical → one witness
+            Assert.Equal(ida, idb);
         }
         finally { Directory.Delete(a, true); Directory.Delete(b, true); }
     }
@@ -58,7 +52,7 @@ public class SourceEntityIdConventionsTests
             var bytes = Encoding.ASCII.GetBytes(new string('W', 4096));
             WriteModel(a, bytes, "{\"hidden\":8}");
             var flipped = (byte[])bytes.Clone();
-            flipped[2048] ^= 0x01;    // a single weight byte → a fine-tune
+            flipped[2048] ^= 0x01;
             WriteModel(b, flipped, "{\"hidden\":8}");
 
             Assert.NotEqual(SourceEntityIdConventions.ModelContentSourceId(a),
@@ -70,7 +64,6 @@ public class SourceEntityIdConventionsTests
     [Fact]
     public void Model_DifferentConfigSameWeights_DistinctId()
     {
-        // Same weights, different architecture interpretation = different math = distinct witness.
         var a = NewTempDir();
         var b = NewTempDir();
         try
@@ -91,8 +84,8 @@ public class SourceEntityIdConventionsTests
         var d = NewTempDir();
         try
         {
-            File.WriteAllText(Path.Combine(d, "config.json"), "{\"hidden\":8}");  // config only
-            Assert.Null(SourceEntityIdConventions.ModelContentSourceId(d));        // caller falls back
+            File.WriteAllText(Path.Combine(d, "config.json"), "{\"hidden\":8}");
+            Assert.Null(SourceEntityIdConventions.ModelContentSourceId(d));
         }
         finally { Directory.Delete(d, true); }
     }
@@ -100,13 +93,11 @@ public class SourceEntityIdConventionsTests
     [Fact]
     public void Model_ChunkBoundary_DeterministicAcrossSizes()
     {
-        // A payload spanning >1 chunk must hash identically when re-read; proves the
-        // fixed-chunk Merkle is allocator-independent (no rented-buffer length leak).
         var a = NewTempDir();
         var b = NewTempDir();
         try
         {
-            var bytes = new byte[70 * 1024 * 1024 + 12345];   // >64 MiB → 2 chunks
+            var bytes = new byte[70 * 1024 * 1024 + 12345];
             for (int i = 0; i < bytes.Length; i++) bytes[i] = (byte)(i * 31 + 7);
             WriteModel(a, bytes, "{\"hidden\":8}");
             WriteModel(b, bytes, "{\"hidden\":8}");
@@ -123,10 +114,8 @@ public class SourceEntityIdConventionsTests
         var b = NewTempDir();
         try
         {
-            // plain UTF-8, LF endings
             File.WriteAllBytes(Path.Combine(a, "corpus.txt"),
                 Encoding.UTF8.GetBytes("alpha\nbeta\ngamma\n"));
-            // UTF-8 BOM + CRLF endings, same logical content
             var withBomCrlf = new List<byte> { 0xEF, 0xBB, 0xBF };
             withBomCrlf.AddRange(Encoding.UTF8.GetBytes("alpha\r\nbeta\r\ngamma\r\n"));
             File.WriteAllBytes(Path.Combine(b, "corpus.txt"), withBomCrlf.ToArray());

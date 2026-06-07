@@ -1,10 +1,4 @@
 #!/bin/bash
-# scripts/check-prereqs.sh
-# Verify Laplace's build/runtime prerequisites are installed.
-# Exits non-zero with diagnostic output if any required dep is missing.
-#
-# Usage: just check-prereqs
-#    or: scripts/check-prereqs.sh
 
 set -e
 

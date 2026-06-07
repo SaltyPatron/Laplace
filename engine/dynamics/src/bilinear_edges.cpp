@@ -8,11 +8,6 @@
 #  include <mkl_cblas.h>
 #endif
 
-/* Faithful contracted-operator edges: M_tile = Left[row_begin:row_end] · Rightᵀ
- * via one exact f64 dgemm, then a deterministic row-major scan emitting every
- * signed cell above the coherence threshold. No argmax, no top-k, no a-priori
- * floor — the only cut is `theta`. See bilinear_edges.h for the invariants. */
-
 extern "C"
 int bilinear_edges_tile(
     const double* left,  std::size_t row_begin, std::size_t row_end,
@@ -30,7 +25,6 @@ int bilinear_edges_tile(
     const std::size_t t = row_end - row_begin;
 
 #ifdef LAPLACE_HAS_MKL
-    /* M [t × n_right] = left[row_begin:,:] [t × r] · rightᵀ [r × n_right]. */
     std::vector<double> M(t * n_right);
     cblas_dgemm(
         CblasRowMajor, CblasNoTrans, CblasTrans,
@@ -51,7 +45,7 @@ int bilinear_edges_tile(
                 if (cnt >= cap) { *overflow = 1; *out_count = cnt; return 0; }
                 out_rows[cnt] = gi;
                 out_cols[cnt] = (int)b;
-                out_vals[cnt] = v;          /* SIGNED — never |v| */
+                out_vals[cnt] = v;
                 ++cnt;
             }
         }
@@ -61,7 +55,7 @@ int bilinear_edges_tile(
 #else
     (void)left; (void)right; (void)r; (void)theta;
     (void)out_rows; (void)out_cols; (void)out_vals; (void)cap; (void)t;
-    return -2;   /* MKL required for the exact dgemm contraction */
+    return -2;
 #endif
 }
 
@@ -71,12 +65,10 @@ int project_embedding(const float* pts, std::size_t n, std::size_t d,
 {
     if (!pts || !W || !out || n == 0 || d == 0 || r == 0) return -1;
 #ifdef LAPLACE_HAS_MKL
-    /* Promote to f64 for an exact contraction (f32 weights carry no more). */
     std::vector<double> P((std::size_t)n * d), Wd((std::size_t)r * d);
     for (std::size_t i = 0; i < (std::size_t)n * d; ++i) P[i]  = (double)pts[i];
     for (std::size_t i = 0; i < (std::size_t)r * d; ++i) Wd[i] = (double)W[i];
 
-    /* out [n × r] = P [n × d] · Wdᵀ [d × r]. */
     cblas_dgemm(
         CblasRowMajor, CblasNoTrans, CblasTrans,
         (MKL_INT)n, (MKL_INT)r, (MKL_INT)d,

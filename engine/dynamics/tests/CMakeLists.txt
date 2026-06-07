@@ -1,7 +1,3 @@
-# engine/dynamics/tests/CMakeLists.txt
-#
-# GoogleTest-based unit tests for liblaplace_dynamics.
-
 set(LAPLACE_DYNAMICS_TEST_SOURCES
     test_init.cpp
     test_procrustes.cpp

@@ -1,7 +1,5 @@
 name: CI — docs + alignment checks
 
-# GitHub-hosted runners (free for public repos).
-# Safe for PR validation: runs on disposable VMs; untrusted code can't escape.
 on:
   push:
     branches: [main]
@@ -24,7 +22,6 @@ jobs:
         run: npm install -g markdownlint-cli
 
       - name: Run markdownlint (advisory)
-        # advisory: doesn't fail CI yet — adopt a strict ruleset later
         continue-on-error: true
         run: markdownlint --disable MD013 MD024 MD033 MD034 MD036 MD041 -- '**/*.md' '!node_modules/**' || true
 
@@ -49,9 +46,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Scan for unflagged banned terms
-        # CLAUDE.md and the skeptic agent ARE allowed to mention banned terms.
-        # Other files should not mention them except as explicit rejection.
-        # ENFORCING: a gate that never fails is a fake gate.
         run: |
           set +e
           banned_terms=(
@@ -64,8 +58,6 @@ jobs:
           for term in "${banned_terms[@]}"; do
             while IFS= read -r match; do
               file=$(echo "$match" | cut -d: -f1)
-              # Allow mentions in CLAUDE.md, the conventional-ai-skeptic agent,
-              # and this workflow file (which defines the banned list itself).
               case "$file" in
                 ./CLAUDE.md|./.claude/agents/conventional-ai-skeptic.md|./.github/workflows/ci.yml)
                   ;;

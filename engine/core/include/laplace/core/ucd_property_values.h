@@ -6,17 +6,6 @@
 extern "C" {
 #endif
 
-/* Fixed UAX#29 / UAX#15 property-value ids — the canonical numbering the
- * perf-cache emitter packs into laplace_perfcache_record_t.flags and the
- * runtime state machines compare against. FIXED (not discovery-order
- * interned) so emitter + loader + state machines agree byte-for-byte
- * regardless of build.
- *
- * Ranges chosen to fit the flags bitfield widths in perfcache_format.h:
- *   GB  4 bits (0..15)   WB 5 bits (0..31)   SB 4 bits (0..15)
- *   InCB 2 bits (0..3)   CCC 8 bits (raw 0..254) */
-
-/* Grapheme_Cluster_Break (15 values) */
 enum {
     LAPLACE_GB_OTHER = 0,
     LAPLACE_GB_CR,
@@ -35,7 +24,6 @@ enum {
     LAPLACE_GB_EXTENDED_PICTOGRAPHIC,
 };
 
-/* Word_Break (up to 31; UAX#29 17.0 uses these) */
 enum {
     LAPLACE_WB_OTHER = 0,
     LAPLACE_WB_CR,
@@ -58,7 +46,6 @@ enum {
     LAPLACE_WB_WSEGSPACE,
 };
 
-/* Sentence_Break (15 values) */
 enum {
     LAPLACE_SB_OTHER = 0,
     LAPLACE_SB_CR,
@@ -77,7 +64,6 @@ enum {
     LAPLACE_SB_CLOSE,
 };
 
-/* Indic_Conjunct_Break (4 values) */
 enum {
     LAPLACE_INCB_NONE = 0,
     LAPLACE_INCB_EXTEND,

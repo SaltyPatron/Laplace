@@ -1,34 +1,4 @@
 #!/usr/bin/env python3
-"""model-forward-oracle.py — the EXPORT VALIDATION GATE.
-
-The re-export (substrate consensus → GGUF) is only correct if the resulting
-model produces the source model's behaviour. This is the independent reference
-it must reproduce: an exact f64 forward pass of a HuggingFace llama-family
-safetensors model, computed straight from the raw weights with numpy — no
-Laplace code in the path. It is the ground truth, deliberately outside the
-substrate, so a passing export cannot be an artifact of shared code.
-
-Three modes:
-  forward      <model_dir> "<prompt>"    next-token distribution (the real
-                                         knowledge: lives in the 22 layers)
-  embed        <model_dir> <surface>     the raw E·E_Uᵀ row for one token
-                                         (the embed→unembed map alone — mostly
-                                         tokenizer geometry, NOT semantics)
-  forward-gguf <gguf> "<prompt>" <tok_dir>
-                                         SAME exact forward pass, but reading
-                                         tensors from a GGUF (the re-export
-                                         deliverable) instead of safetensors —
-                                         the read-back gate: does the synthesized
-                                         model behave? <tok_dir> supplies the
-                                         tokenizer (config/dims come from GGUF KV).
-
-Measured reference (TinyLlama-1.1B-Chat-v1.0, 2026-06-04):
-  forward "The capital of France is"  → rank 1: ▁Paris  +13.39
-  embed   ▁Paris                      → ▁France rank 10814, ▁London rank 28606
-                                         (semantics are NOT in the embedding)
-
-Requires only numpy. BF16/F16/F32 safetensors; fail-loud on anything else.
-"""
 import json, struct, sys, os
 import numpy as np
 
@@ -41,7 +11,6 @@ def _load_header(path):
 
 
 def _shard_map(model_dir):
-    """name -> (shard_path, header, data_start). Single-file or sharded."""
     import os, glob
     shards = sorted(glob.glob(os.path.join(model_dir, "*.safetensors")))
     if not shards:
@@ -85,7 +54,6 @@ def cmd_embed(model_dir, surface):
     smap = _shard_map(model_dir)
     vocab, inv = _vocab(model_dir)
     if surface not in vocab:
-        # accept a leading-space SentencePiece form too
         alt = "▁" + surface
         if alt in vocab:
             surface = alt
@@ -112,9 +80,6 @@ def cmd_forward(model_dir, prompt):
     H = cfg["num_attention_heads"]; KV = cfg["num_key_value_heads"]
     hd = d // H; eps = cfg.get("rms_norm_eps", 1e-5); theta = cfg.get("rope_theta", 10000.0)
 
-    # Tokenize: BOS + the prompt's ▁-prefixed words. Good enough for the probe
-    # (this oracle pins next-token behaviour, not the tokenizer — that is the
-    # source tokenizer's job at real inference).
     ids = [cfg.get("bos_token_id", 1)]
     for w in prompt.strip().split(" "):
         key = "▁" + w
@@ -126,7 +91,7 @@ def cmd_forward(model_dir, prompt):
     def rms(x, w):
         return x / np.sqrt(np.mean(x * x, -1, keepdims=True) + eps) * w
 
-    def rope(x):  # x [T, h, hd]
+    def rope(x):
         freqs = 1.0 / (theta ** (np.arange(0, hd, 2) / hd))
         ang = np.outer(pos, freqs)
         cos, sin = np.cos(ang)[:, None, :], np.sin(ang)[:, None, :]
@@ -162,7 +127,6 @@ def cmd_forward(model_dir, prompt):
 
 
 def _read_gguf(path):
-    """Minimal GGUF reader → (kv dict, {ggml_name: np.float64 array})."""
     f = open(path, "rb")
     assert f.read(4) == b"GGUF", "not a GGUF"
     ver, n_tensors, n_kv = struct.unpack("<IQQ", f.read(20))
@@ -171,9 +135,9 @@ def _read_gguf(path):
         n, = struct.unpack("<Q", f.read(8)); return f.read(n).decode("utf-8", "replace")
 
     def rval(t):
-        if t == 8:  # string
+        if t == 8:
             return rstr()
-        if t == 9:  # array
+        if t == 9:
             et, n = struct.unpack("<IQ", f.read(12)); return [rval(et) for _ in range(n)]
         fmt = {0:"B",1:"b",2:"H",3:"h",4:"I",5:"i",6:"f",7:"?",10:"Q",11:"q",12:"d"}[t]
         sz  = {0:1,1:1,2:2,3:2,4:4,5:4,6:4,7:1,10:8,11:8,12:8}[t]
@@ -205,7 +169,6 @@ def _read_gguf(path):
             a = np.frombuffer(raw, np.float16).astype(np.float32)
         else:
             a = (np.frombuffer(raw, np.uint16).astype(np.uint32) << 16).view(np.float32)
-        # GGUF dims are reversed vs row-major [rows, cols]
         out[name] = a.astype(np.float64).reshape(tuple(reversed(dims)))
     return kv, out
 
@@ -263,7 +226,7 @@ def cmd_forward_gguf(gguf, prompt, tok_dir):
 
 if __name__ == "__main__":
     if len(sys.argv) < 4:
-        sys.exit(__doc__)
+        sys.exit('Usage: model-forward-oracle.py forward <model_dir> "<prompt>" | embed <model_dir> <surface> | forward-gguf <gguf> "<prompt>" <tokenizer_dir>')
     mode = sys.argv[1]
     if mode == "forward":
         cmd_forward(sys.argv[2], sys.argv[3])

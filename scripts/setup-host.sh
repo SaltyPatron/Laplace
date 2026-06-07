@@ -1,40 +1,7 @@
 #!/bin/bash
-# scripts/setup-host.sh
-#
-# THE admin entrypoint for hart-server (or any host that runs the Laplace
-# CI agent + Layer-1 substrate). Idempotent. One command does Layer 0
-# (sudo-required system setup) + Layer 1 (DbUp: ensure database, install
-# extensions, apply role grants). Layer 2 (build / test) is left for the
-# Justfile + CI so this stays focused on "make this host ready."
-#
-# Usage:
-#   scripts/setup-host.sh                  Default: full set-up (bootstrap + db-up)
-#   scripts/setup-host.sh status           Print state of both layers
-#   scripts/setup-host.sh reset             FULL teardown (Layer 1 then Layer 0)
-#                                          Requires typing 'RESET' to confirm.
-#   scripts/setup-host.sh layer0           Layer-0 only (system + runner + PG roles + auth)
-#   scripts/setup-host.sh layer1           Layer-1 only (DbUp: EnsureDatabase + migrations)
-#   scripts/setup-host.sh stripe           Stripe sandbox setup (local env + runner env)
-#
-# Idempotency:
-#   - Layer 0 is idempotent (per scripts/bootstrap-laplace-runner.sh).
-#   - Layer 1 is idempotent (DbUp's SchemaVersions + IF NOT EXISTS SQL).
-#   - The whole script is therefore idempotent: re-running on a fully-
-#     configured host is a no-op that prints "already set up."
-#
-# Requirements:
-#   - You CAN run sudo on this host
-#   - gh CLI authenticated as a user with admin on SaltyPatron/Laplace
-#     (used by Layer 0 to mint runner registration tokens)
-#   - PostgreSQL 18 + PostGIS 3.6.3 installed and running
-#   - .NET 10 SDK installed
-#   - You're standing in the repo root (or pass --repo-dir)
 
 set -euo pipefail
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BOOTSTRAP="$SCRIPT_DIR/bootstrap-laplace-runner.sh"
@@ -44,9 +11,6 @@ RUNNER_USER="laplace-runner"
 
 MODE="${1:-setup}"
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 green()  { printf '\033[0;32m%s\033[0m\n' "$1"; }
 yellow() { printf '\033[0;33m%s\033[0m\n' "$1"; }
 red()    { printf '\033[0;31m%s\033[0m\n' "$1"; }
@@ -83,14 +47,10 @@ Modes:
 
 After 'setup' completes the host is ready. Trigger CI:
   gh workflow run integration.yml
-  # or push to main.
+  (or push to main)
 EOF
 }
 
-# ---------------------------------------------------------------------------
-# Layer-1 runner — invokes the .NET migrations project as laplace-runner
-# (whose peer auth resolves to laplace_admin in PG). Requires Layer 0 done.
-# ---------------------------------------------------------------------------
 ensure_dotnet_present() {
     if ! command -v dotnet >/dev/null 2>&1; then
         red "dotnet not found in PATH. Install .NET 10 SDK first."
@@ -98,29 +58,10 @@ ensure_dotnet_present() {
     fi
 }
 
-# Build artifacts under app/Laplace.Migrations/{bin,obj} MUST be owned by
-# laplace-runner — that's the user that 'dotnet run' executes as. If a
-# prior `dotnet build` ran under a different user (e.g., `ahart` during
-# local dev), the obj/ dir is unwritable to laplace-runner and dotnet's
-# NuGet restore step fails with "Access denied" on a *.tmp file.
 layer1_clean_foreign_build_artifacts() {
-    # All app/Laplace.*/ project directories are owned by the interactive
-    # dev user (ahart) — laplace-runner has read-only access via /home/ahart's
-    # POSIX perms. When dotnet runs as laplace-runner it tries to create
-    # obj/ and bin/ subdirectories in each project root, which fails with
-    # "Access to the path ... is denied". So for every project, we
-    # (a) remove any obj/ + bin/ NOT already owned by laplace-runner (likely
-    #     left by a local `dotnet build` from VS Code as ahart), and
-    # (b) PRE-CREATE both subdirs owned by laplace-runner so the build can
-    #     populate them via the subdir's own write bit instead of needing
-    #     write access to the project root.
-    #
-    # Walking the full app/Laplace.* set (not just .Migrations) keeps
-    # `just test-app` + any future dotnet target safe under laplace-runner.
     local proj
     for proj in "$REPO_DIR"/app/Laplace.*; do
         [ -d "$proj" ] || continue
-        # Skip non-project dirs (e.g. a stray .sln/.slnx-adjacent file).
         ls "$proj"/*.csproj >/dev/null 2>&1 || continue
         for dir in obj bin; do
             local d="$proj/$dir"
@@ -137,8 +78,6 @@ layer1_clean_foreign_build_artifacts() {
     return 0
 }
 
-# Run a dotnet command as laplace-runner with the right environment.
-# Centralises PATH propagation + .NET cache settings + HOME via -H.
 runner_dotnet() {
     sudo -u "$RUNNER_USER" -H \
         PATH="$PATH" \
@@ -167,47 +106,19 @@ layer1_nuke() {
     runner_dotnet "run --project '$MIGRATIONS_PROJ' -c Release -- nuke"
 }
 
-# ---------------------------------------------------------------------------
-# Mode dispatchers
-# ---------------------------------------------------------------------------
 layer1_build_install_extensions() {
     say "Layer 1 — Build + install laplace_geom + laplace_substrate extensions"
-    # (Path B): top-level CMake drives engine + extensions
-    # from one tree. PGXS retired. Produces engine .sos + extension .sos +
-    # preprocessed SQL install scripts in build/.
-    # SAME configure flags as `just install` — a fresh build/ dir configured
-    # without LAPLACE_INSTALL_STAGED=ON would default to the SYSTEM PG tree
-    # (sudo wall + shadow-copy divergence; the 2026-06-05 pipeline audit).
     (cd "$REPO_DIR" && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
         -DLAPLACE_INSTALL_STAGED=ON \
         -DCMAKE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" \
         -DLAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/usr/lib/postgresql/18}" | tail -3)
     (cd "$REPO_DIR" && cmake --build build | tail -3)
-    # `cmake --install` places engine .so + both extensions' .so + .control
-    # + .sql into $LAPLACE_INSTALL_PREFIX (default /opt/laplace, owned
-    # ahart:laplace-runner setgid 2775). PG's extension_control_path +
-    # dynamic_library_path already point there via bootstrap_pg_extension_paths,
-    # so CREATE EXTENSION finds the install — no sudo, no NOPASSWD entry.
-    # amendment (2026-05-23).
     (cd "$REPO_DIR" && cmake --install build --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" | tail -3)
     green "✓ laplace_geom + laplace_substrate .so/.control/.sql installed at ${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 }
 
 layer0_5_build_deps() {
     say "Layer 0.5 — Build vendor deps (proj/geos/gdal/pg/postgis/tree-sitter) into /opt/laplace"
-    # Run as laplace-runner because /opt/laplace install destinations are
-    # owned by that account. CMake install may chmod existing directories,
-    # which is owner-only and fails under a different user even with group
-    # write permission.
-    # Idempotent — ExternalProject_Add's stamp-based tracking skips deps that
-    # are already built at the current submodule SHA. One-time cost on a
-    # fresh tree is ~10-15 min; re-runs are seconds.
-    #
-    # Sits between Layer 0 (system + auth + paths) and Layer 1 (extensions
-    # + DbUp). Layer 1's CMake build prefers /opt/laplace/pgsql-18 (custom
-    # PG produced here) when LAPLACE_PG_PREFIX points there; otherwise it
-    # falls back to the stock system PG (Layer 0 already configured the
-    # running system PG with the /opt/laplace extension paths regardless).
     local deps_build_dir="/opt/laplace/build/deps"
     sudo install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 2775 /opt/laplace/build "$deps_build_dir"
     sudo -u "$RUNNER_USER" -H \
@@ -241,7 +152,7 @@ What's running:
 
 Next:
   gh workflow run integration.yml
-  # or just push to main to trigger CI
+  (or push to main to trigger CI)
 
 Reset paths (each independently resettable):
   $0 reset                                   # full teardown
@@ -293,7 +204,6 @@ EOF
     fi
 
     say "Layer 0 — bootstrap-laplace-runner.sh reset"
-    # Pipe 'RESET' to the bootstrap script so we don't double-prompt.
     echo "RESET" | sudo "$BOOTSTRAP" reset
 
     green "===== HOST RESET COMPLETE ====="

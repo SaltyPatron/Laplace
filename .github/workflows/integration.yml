@@ -1,9 +1,5 @@
 name: Integration — self-hosted (oneAPI + Postgres + Laplace)
 
-# Self-hosted runner with oneAPI, PG 18, .NET 10 access.
-# SECURITY: triggers ONLY on push to main + workflow_dispatch.
-# DO NOT add `pull_request` triggers — untrusted PR code must NEVER run on the self-hosted runner.
-# PR validation is handled by ci.yml on GitHub-hosted disposable VMs.
 on:
   push:
     branches: [main]
@@ -14,11 +10,6 @@ on:
         type: boolean
         default: false
 
-# Serialize integration runs and cancel superseded ones: a new push to main cancels any
-# in-flight integration run instead of stacking another ~1.5h run behind it on the single
-# self-hosted runner + shared cluster (the force-push pile-up). Safe to cancel — db-deploy
-# nukes + re-seeds at the start of every run and ingestion is idempotent by content-
-# addressing, so a cancelled half-run leaves nothing a fresh run can't redo.
 concurrency:
   group: integration-${{ github.ref }}
   cancel-in-progress: true
@@ -26,44 +17,12 @@ concurrency:
 permissions:
   contents: read
 
-# /opt/laplace/external/ is the canonical source for dep checkouts:
-# one non-bare working tree per submodule, maintained at the .gitmodules-pinned
-# SHA by scripts/sync-external.sh. CMake reads dep sources from it directly
-# via -DLAPLACE_EXTERNAL=...  No workspace external/, no .git/modules.
-#
-# Caching: self-hosted runner persists _work across runs. clean: false on
-# every actions/checkout keeps build/deps/* stamp files + build/* CMake
-# artifacts intact between workflow runs. ExternalProject stamp-based
-# incremental + Ninja stamp-based incremental + dotnet incremental together
-# make a no-change re-run effectively no-op per dep.
-#
-# Repeated logic is modularized out of this orchestrator:
-#   .github/actions/setup-laplace-env  — source oneAPI + export build/runtime env
-#   .github/actions/build-dep          — configure + build one dep target + verify
-#   .github/workflows/seed-ladder.yml  — reusable: ingest each seed source, one step each
-#   .github/workflows/model-pipeline.yml — reusable: ingest → consensus → query → synth → GGUF
-#
-# Job DAG (one concern per job, one dep per job):
-#
-#   capabilities
-#       ├── proj ────┐
-#       │            ├── gdal ──┐
-#       ├── geos ────┴─────────┤
-#       ├── postgresql ────────┴── postgis ──┐
-#       ├── tree-sitter ──────────────────────┴── engine ──┐
-#       └── dotnet ──────────────────────────────┴── db-deploy ──┬── dotnet-test ──┐
-#                              (db-nuke: ONE clean slate here)    └── regress ──────┴── seed-ladder ── model-pipeline
-#                                                                        (each stage = a visible step in its module)
 env:
   LAPLACE_EXTERNAL:       ${{ vars.LAPLACE_EXTERNAL       || '/opt/laplace/external' }}
   LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
   LAPLACE_PG_PREFIX:      ${{ vars.LAPLACE_PG_PREFIX      || '/usr/lib/postgresql/18' }}
 
 jobs:
-  # ------------------------------------------------------------------
-  # capabilities — host preflight + idempotent setup (no build work).
-  # Ensures /opt/laplace install destinations exist; syncs external/.
-  # ------------------------------------------------------------------
   capabilities:
     name: Verify self-hosted runner capabilities
     runs-on: [self-hosted, laplace]
@@ -75,12 +34,6 @@ jobs:
 
       - name: Guard — workspace must stay submodule-free (catch the .git/modules bleed)
         run: |
-          # Deps come from $LAPLACE_EXTERNAL (/opt/laplace/external), never from
-          # workspace submodules. A `submodules: false` checkout must NOT create
-          # .git/modules or initialize any submodule. If it did, something
-          # re-introduced submodule init (e.g. a `git submodule update --init`
-          # step) — the 4.5 GB-per-run _work bleed. Fail loud at step one rather
-          # than silently re-downloading 300+ grammar repos every run.
           fail=0
           if [ -d .git/modules ] && [ -n "$(ls -A .git/modules 2>/dev/null)" ]; then
             echo "::error::.git/modules is populated ($(du -sh .git/modules | cut -f1)) — submodule init regressed. Deps must source from \$LAPLACE_EXTERNAL, not workspace submodules."
@@ -97,11 +50,6 @@ jobs:
 
       - name: Ensure /opt/laplace install destinations exist (idempotent)
         run: |
-          # Per-dep dirs (system deps land here from `cmake --build build/deps`)
-          # + engine dirs (top-level `cmake --install build` lands liblaplace_*.so,
-          # headers, PG extension files here). Created by laplace-runner →
-          # owned by laplace-runner; setgid + group inherit from /opt/laplace/'s
-          # 2775 → mode 2775 group laplace-runner. No sudo, no chown.
           for d in tree-sitter geos proj gdal pgsql-18 include lib share bin; do
             if [ ! -d "/opt/laplace/$d" ]; then
               mkdir -p "/opt/laplace/$d"
@@ -161,15 +109,6 @@ jobs:
             echo "::error::Expected 'laplace_admin on postgres', got '$RESULT'"; exit 1; }
           echo "Peer-auth probe: $RESULT"
 
-  # ------------------------------------------------------------------
-  # System dep jobs — one per dep, DAG-ordered. Each job runs
-  # `cmake --build build/deps --target <dep>`. ExternalProject stamps
-  # in build/deps/<dep>-stamp/ persist across runs (clean: false). A
-  # no-change re-run is a no-op for each dep individually.
-  #
-  # External/CMakeLists.txt configure is idempotent — first dep job
-  # configures build/deps; subsequent dep jobs find it configured.
-  # ------------------------------------------------------------------
   proj:
     name: dep — proj (CRS / coordinate transforms)
     needs: capabilities
@@ -255,13 +194,6 @@ jobs:
             /opt/laplace/tree-sitter/lib/libtree-sitter.a
             /opt/laplace/tree-sitter/include/tree_sitter/api.h
 
-  # ------------------------------------------------------------------
-  # engine — C/C++ build of engine libs (core, dynamics, synthesis) +
-  # PG extensions (laplace_geom, laplace_substrate). eigen, spectra are
-  # header-only (consumed via include paths); blake3, googletest are
-  # built as add_subdirectory inside the engine CMakeLists. Intel oneAPI
-  # toolchain (icx/icpx) used here for the dynamics path (MKL/SIMD).
-  # ------------------------------------------------------------------
   engine:
     name: Build engine + extensions (intel toolchain; ctest; SQL artifact verify)
     needs: [postgis, tree-sitter]
@@ -300,9 +232,6 @@ jobs:
             echo "✓ $ext artifacts produced"
           done
 
-  # ------------------------------------------------------------------
-  # dotnet — C# app + test projects. Independent of engine for compile.
-  # ------------------------------------------------------------------
   dotnet:
     name: Build C# app + tests (dotnet build Release)
     needs: capabilities
@@ -315,9 +244,6 @@ jobs:
           cd app
           dotnet build Laplace.slnx -c Release
 
-  # ------------------------------------------------------------------
-  # endpoint-build — OpenAI-compatible endpoint and its tests.
-  # ------------------------------------------------------------------
   endpoint-build:
     name: Build endpoint + endpoint tests
     needs: dotnet
@@ -330,9 +256,6 @@ jobs:
       - name: dotnet build endpoint tests
         run: dotnet build app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release
 
-  # ------------------------------------------------------------------
-  # db-deploy — install engine .so + .control + .sql; run DbUp; verify.
-  # ------------------------------------------------------------------
   db-deploy:
     name: Install extensions + apply DbUp migrations (Layer 1)
     needs: [engine, dotnet]
@@ -344,8 +267,6 @@ jobs:
       - uses: ./.github/actions/setup-laplace-env
 
       - name: cmake --install (no sudo)
-        # umask 0002: dirs born group-writable so the developer identity can
-        # always pre-wipe/overwrite what CI creates (and vice versa).
         run: umask 0002 && cmake --install build
 
       - name: Clean slate — db-nuke (ONE per-run reset; seed + model then accrete onto the SAME DB)
@@ -394,9 +315,6 @@ jobs:
           cd app
           dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- ingest unicode
 
-  # ------------------------------------------------------------------
-  # dotnet-test — C# test suites.
-  # ------------------------------------------------------------------
   dotnet-test:
     name: dotnet test (engine bindings + substrate integration)
     needs: db-deploy
@@ -425,9 +343,6 @@ jobs:
             echo "::endgroup::"
           done
 
-  # ------------------------------------------------------------------
-  # regress — pg_regress smoke tests.
-  # ------------------------------------------------------------------
   regress:
     name: pg_regress smoke (laplace_geom + laplace_substrate)
     needs: db-deploy
@@ -451,9 +366,6 @@ jobs:
             echo "::endgroup::"
           done
 
-  # ------------------------------------------------------------------
-  # endpoint-health — hard gate for endpoint process/route liveliness.
-  # ------------------------------------------------------------------
   endpoint-health:
     name: Endpoint health probe (hard gate)
     needs: [endpoint-build, db-deploy]
@@ -490,9 +402,6 @@ jobs:
         run: |
           test -f endpoint.pid && kill "$(cat endpoint.pid)" 2>/dev/null || true
 
-  # ------------------------------------------------------------------
-  # endpoint-test — advisory while endpoint features stabilize.
-  # ------------------------------------------------------------------
   endpoint-test:
     name: Endpoint tests (advisory)
     continue-on-error: true
@@ -504,12 +413,6 @@ jobs:
       - name: dotnet test endpoint
         run: dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release
 
-  # ------------------------------------------------------------------
-  # Data pipeline — modular reusable workflows so THIS orchestrator stays small.
-  # Each stage is an individually-visible step inside its module file:
-  #   .github/workflows/seed-ladder.yml     (one step per source ingest)
-  #   .github/workflows/model-pipeline.yml  (ingest → consensus → query → synth → GGUF)
-  # ------------------------------------------------------------------
   seed-ladder:
     name: Seed ladder
     needs: [regress, dotnet-test, endpoint-health]
