@@ -17,6 +17,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/grapheme_floor.h
     include/laplace/core/grammar_registry.h
     include/laplace/core/grammar_decomposer.h
+    include/laplace/core/grammar_tags.h
     include/laplace/core/grapheme_break.h
     include/laplace/core/word_break.h
     include/laplace/core/sentence_break.h
@@ -44,6 +45,7 @@ set(LAPLACE_CORE_SOURCES
     src/grapheme_floor.c
     src/grammar_registry.c
     src/grammar_decomposer.c
+    src/grammar_tags.c
     src/grapheme_break.c
     src/word_break.c
     src/sentence_break.c
