@@ -66,7 +66,7 @@ public sealed class UDDecomposer : IDecomposer
 
         int workers = int.TryParse(
             Environment.GetEnvironmentVariable("LAPLACE_DECOMPOSE_WORKERS"), out var w) && w > 0
-            ? w : Math.Clamp(Environment.ProcessorCount - 2, 1, 4);
+            ? w : Math.Clamp(Environment.ProcessorCount - 4, 1, 16);
 
         var files = Directory.EnumerateFiles(treebanksDir, "*.conllu", SearchOption.AllDirectories).ToList();
         if (files.Count == 0) yield break;
@@ -98,6 +98,8 @@ public sealed class UDDecomposer : IDecomposer
                         await Task.Yield();
                     }
                 }
+                if (!options.DryRun)
+                    yield return PeriodBoundary(Path.GetFileNameWithoutExtension(conllu));
             }
             if (sentCount > 0 && !options.DryRun) yield return b.Build();
             yield break;
@@ -141,6 +143,8 @@ public sealed class UDDecomposer : IDecomposer
                     }
                     if (sentCount > 0 && !options.DryRun)
                         await channel.Writer.WriteAsync(b.Build(), ct);
+                    if (!options.DryRun)
+                        await channel.Writer.WriteAsync(PeriodBoundary(stem), ct);
                 }
             }, ct);
         }
@@ -166,6 +170,10 @@ public sealed class UDDecomposer : IDecomposer
             entityCapacity:      batchSentences * 40,
             physicalityCapacity: batchSentences * 40,
             attestationCapacity: batchSentences * 60);
+
+    private static SubstrateChange PeriodBoundary(string stem) =>
+        new SubstrateChangeBuilder(Source, $"period-boundary/{stem}", null,
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build();
 
     private static void EmitSentence(SubstrateChangeBuilder b, UdSentence s, Hash128 langId, string langCode,
                                      HashSet<Hash128> seenEntBatch, ConcurrentIdSet seenAttRun)

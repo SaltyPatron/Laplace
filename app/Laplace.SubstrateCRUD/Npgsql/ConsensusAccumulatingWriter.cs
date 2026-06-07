@@ -87,7 +87,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             foreach (var a in c.Attestations) Accumulate(a);
         }
 
-        if (boundary || _accumulation.Count >= _stagingThreshold)
+        if ((boundary && _accumulation.Count >= Math.Max(1, _stagingThreshold / 8))
+            || _accumulation.Count >= _stagingThreshold)
             await FlushPeriodAsync(ct);
 
         return await _inner.ApplyManyAsync(changes, ct);
