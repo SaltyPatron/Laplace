@@ -1,3 +1,4 @@
+using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
 using Xunit;
 using Xunit.Abstractions;
@@ -21,10 +22,7 @@ public class ScoreLawRoundTripTests
     private const double ArenaM = 0.02;
 
     private static long ForwardSumFp(double v, double m, long games)
-    {
-        double score = 0.5 * (1.0 + Math.Tanh(v / m));
-        return games * (long)(score * 1_000_000_000.0);
-    }
+        => games * ScoreLaw.ScoreFp(v, m);
 
     private async Task<long> FoldRatingAsync(long phi, long games, long sumFp)
     {
@@ -78,18 +76,23 @@ public class ScoreLawRoundTripTests
     [Theory]
     [InlineData(PhiModel, 1L)]
     [InlineData(PhiModel, 22L)]
-    public async Task OutlierRegime_DocumentsSaturationClamp(long phi, long games)
+    public async Task OutlierRegime_SurvivesAndStaysDistinguishable(long phi, long games)
     {
         var inverse = new CalibratedInverse(_pg.DataSource, phi);
         double[] outliersOverM = [4.0, 6.0, 10.0, 30.0, 100.0];
+        double prev = 0;
         foreach (double w in outliersOverM)
         {
             double v = w * ArenaM;
             long rating = await FoldRatingAsync(phi, games, ForwardSumFp(v, ArenaM, games));
             double recovered = inverse.Wom(rating, games) * ArenaM;
-            _out.WriteLine($"OUTLIER phi={phi / 1e9} n={games} v/M={w,6:F1} recovered/M={recovered / ArenaM:F3} survival={recovered / v:P1}");
-            Assert.True(recovered <= 6.05 * ArenaM,
-                $"inverse grid bound exceeded: v/M={w} recovered/M={recovered / ArenaM:F3}");
+            double survival = recovered / v;
+            _out.WriteLine($"OUTLIER phi={phi / 1e9} n={games} v/M={w,6:F1} recovered/M={recovered / ArenaM:F3} survival={survival:P1}");
+            Assert.True(survival >= 0.80,
+                $"outlier crushed: v/M={w} survival={survival:P1} (rational law must not saturate in-range)");
+            Assert.True(recovered > prev + 1e-9,
+                $"outliers not distinguishable: v/M={w} recovered/M={recovered / ArenaM:F3} <= prev {prev / ArenaM:F3}");
+            prev = recovered;
         }
     }
 }

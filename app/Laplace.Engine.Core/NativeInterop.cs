@@ -27,6 +27,15 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "hash128_zero")]
     internal static partial void Hash128Zero(Hash128* outHash);
 
+    [LibraryImport(Library, EntryPoint = "laplace_score_fp")]
+    internal static partial long LaplaceScoreFp(double v, double m);
+
+    [LibraryImport(Library, EntryPoint = "laplace_score_inverse_fp")]
+    internal static partial double LaplaceScoreInverseFp(long scoreFp, double m);
+
+    [LibraryImport(Library, EntryPoint = "laplace_score_batch_fp")]
+    internal static partial void LaplaceScoreBatchFp(float* w, nuint n, double m, long* outScores);
+
     [LibraryImport(Library, EntryPoint = "super_fibonacci")]
     internal static partial void SuperFibonacci(nuint n, double* outQuats);
 

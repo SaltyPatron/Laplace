@@ -1,4 +1,5 @@
 using global::Npgsql;
+using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
@@ -17,14 +18,13 @@ public sealed class CalibratedInverse
     private (double[] Mu, double[] Wom) Map(long n)
     {
         if (_byN.TryGetValue(n, out var m)) return m;
-        const int G = 4001; const double LO = -6.0, HI = 6.0;
+        const int G = 4001;
         var wom = new double[G]; var sumFp = new long[G];
         for (int i = 0; i < G; i++)
         {
-            double w = LO + (HI - LO) * i / (G - 1);
-            wom[i] = w;
-            double score = 0.5 * (1.0 + Math.Tanh(w));
-            sumFp[i] = (long)Math.Round(score * 1e9) * n;
+            long scoreFp = 1 + (long)((ScoreLaw.FpScale - 2) * (double)i / (G - 1));
+            wom[i] = ScoreLaw.InverseFp(scoreFp, 1.0);
+            sumFp[i] = scoreFp * n;
         }
         var mu = new double[G];
         using (var conn = _ds.OpenConnection())

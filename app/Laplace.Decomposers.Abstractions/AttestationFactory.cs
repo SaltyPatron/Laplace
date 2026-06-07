@@ -15,7 +15,7 @@ public static class AttestationFactory
     }
 
     public static double Score(double signedMagnitude, double arenaScale)
-        => arenaScale > 0.0 ? 0.5 * (1.0 + Math.Tanh(signedMagnitude / arenaScale)) : 0.5;
+        => arenaScale > 0.0 ? ScoreLaw.ScoreFp(signedMagnitude, arenaScale) / (double)ScoreLaw.FpScale : 0.5;
 
     public static AttestationRow CreateObservation(
         Hash128 subject, Hash128 typeId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
