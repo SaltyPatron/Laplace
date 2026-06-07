@@ -1,6 +1,12 @@
 @echo off
 set "NoDefaultCurrentDirectoryInExePath="
 call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" >nul 2>&1
+rem setvars adds mpi\lib and tcm\lib to LIB, but this install ships neither (TCM is runtime-only;
+rem MPI here is the runtime layout) -- csc then warns CS1668 once per project. Drop dead dirs from LIB.
+setlocal EnableDelayedExpansion
+set "_LIB="
+for %%D in ("!LIB:;=" "!") do (if not "%%~D"=="" if exist "%%~D\" set "_LIB=!_LIB!%%~D;")
+endlocal & set "LIB=%_LIB%"
 set "LAPLACE_ROOT=%~dp0..\.."
 set "PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64;%PATH%"
 set "PATH=D:\Microsoft Visual Studio\2026\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja;D:\Microsoft Visual Studio\2026\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;%PATH%"
