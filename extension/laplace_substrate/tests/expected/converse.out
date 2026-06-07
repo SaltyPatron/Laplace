@@ -41,7 +41,8 @@ DECLARE
     lang_de  bytea := laplace_hash128_blake3('test/converse/lang_de');
     k_sense  bytea := relation_type_id('HAS_SENSE');
     k_senseof bytea := relation_type_id('IS_SENSE_OF');
-    k_def    bytea := relation_type_id('DEFINES');
+    k_def    bytea := relation_type_id('HAS_DEFINITION');
+    k_syn    bytea := relation_type_id('IS_SYNONYM_OF');
     k_member bytea := relation_type_id('IS_TRANSLATION_OF');
     k_lang   bytea := relation_type_id('HAS_LANGUAGE');
     k_isa    bytea := relation_type_id('IS_A');
@@ -53,6 +54,7 @@ BEGIN
     INSERT INTO entities (id, tier, type_id, first_observed_by)
     VALUES (src, 0, type_t, NULL),
            (k_sense, 0, type_t, src), (k_senseof, 0, type_t, src), (k_def, 0, type_t, src),
+           (k_syn, 0, type_t, src),
            (k_causes, 0, type_t, src), (k_anto, 0, type_t, src),
            (w_dog, 2, type_t, src), (w_p, 0, type_t, src), (w_h, 0, type_t, src),
            (w_c, 0, type_t, src),
@@ -72,7 +74,8 @@ BEGIN
     PERFORM register_canonical('substrate/kind/IS_A/v1');
     PERFORM register_canonical('substrate/kind/CAUSES/v1');
     PERFORM register_canonical('substrate/kind/IS_ANTONYM_OF/v1');
-    PERFORM register_canonical('substrate/kind/DEFINES/v1');
+    PERFORM register_canonical('substrate/kind/HAS_DEFINITION/v1');
+    PERFORM register_canonical('substrate/kind/IS_SYNONYM_OF/v1');
     PERFORM register_canonical('substrate/kind/IS_TRANSLATION_OF/v1');
     PERFORM register_canonical('substrate/kind/HAS_LANGUAGE/v1');
 
@@ -87,6 +90,9 @@ BEGIN
       (consensus_id(synset1, k_member, w_dog),   synset1, k_member, w_dog,   neutral + 100000000000, sharp_rd, 60000000, 2, now()),
       (consensus_id(synset1, k_member, w_p),     synset1, k_member, w_p,     neutral +  90000000000, sharp_rd, 60000000, 2, now()),
       (consensus_id(synset1, k_member, w_h),     synset1, k_member, w_h,     neutral +  80000000000, sharp_rd, 60000000, 2, now()),
+      (consensus_id(w_dog,  k_syn,     synset1), w_dog,  k_syn,     synset1, neutral + 100000000000, sharp_rd, 60000000, 2, now()),
+      (consensus_id(w_p,    k_syn,     synset1), w_p,    k_syn,     synset1, neutral +  90000000000, sharp_rd, 60000000, 2, now()),
+      (consensus_id(w_h,    k_syn,     synset1), w_h,    k_syn,     synset1, neutral +  80000000000, sharp_rd, 60000000, 2, now()),
       (consensus_id(synset1, k_isa,    synset2), synset1, k_isa,    synset2, neutral + 120000000000, sharp_rd, 60000000, 2, now()),
       (consensus_id(synset2, k_member, w_c),     synset2, k_member, w_c,     neutral + 100000000000, sharp_rd, 60000000, 2, now()),
       (consensus_id(synset2, k_isa,    syn_bad), synset2, k_isa,    syn_bad, neutral - 300000000000, sharp_rd, 60000000, 3, now()),
@@ -135,7 +141,8 @@ SELECT synonym FROM synonyms(word_id('dog'));
  synonym 
 ---------
  p
-(1 row)
+ h
+(2 rows)
 
 SELECT translation, language FROM translations(word_id('dog')) ORDER BY translation;
  translation |   language   
@@ -154,7 +161,8 @@ SELECT reply FROM respond('synonyms of dog');
  reply 
 -------
  p
-(1 row)
+ h
+(2 rows)
 
 SELECT reply FROM respond('translate dog');
       reply       
@@ -235,14 +243,15 @@ SELECT realize_path(ARRAY[laplace_hash128_blake3('test/converse/synset1'),
 SELECT type, fact, witnesses FROM describe(word_id('dog'));
        type        |     fact      | witnesses 
 -------------------+---------------+-----------
- defines           | G             |         2
+ has definition    | G             |         2
  is a              | c             |         2
  causes            | h             |         1
  is translation of | Type:01cdcce1 |         2
+ is synonym of     | p             |         2
  is antonym of     | h             |         1
  is translation of | p             |         2
  is translation of | h             |         2
-(7 rows)
+(8 rows)
 
 SELECT reply FROM respond('antonyms of dog');
  reply 
@@ -299,7 +308,8 @@ SELECT reply FROM converse('what about its synonyms?', convert_to('s1', 'UTF8'))
  reply 
 -------
  p
-(1 row)
+ h
+(2 rows)
 
 SELECT reply, witnesses FROM converse('and its causes?', convert_to('s1', 'UTF8'));
  reply | witnesses 

@@ -81,7 +81,7 @@ CREATE OR REPLACE FUNCTION define(p_word bytea, p_limit int DEFAULT 5)
            g.witness_count
     FROM senses(p_word) sn
     JOIN consensus g ON g.subject_id = sn.synset_id
-                    AND g.type_id = relation_type_id('DEFINES')
+                    AND g.type_id = relation_type_id('HAS_DEFINITION')
     ORDER BY sn.eff_mu + eff_mu_display(g.rating, g.rd) DESC
     LIMIT p_limit
 $$;
@@ -91,20 +91,19 @@ CREATE OR REPLACE FUNCTION synonyms(p_word bytea, p_limit int DEFAULT 10)
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
     SELECT * FROM (
-        SELECT DISTINCT ON (m.object_id)
-               render_text(m.object_id) AS synonym,
-               eff_mu_display(m.rating, m.rd) AS eff_mu,
-               m.witness_count AS witnesses
-        FROM senses(p_word) sn
-        JOIN consensus m ON m.subject_id = sn.synset_id
-                        AND m.type_id = relation_type_id('IS_TRANSLATION_OF')
-                        AND m.object_id <> p_word
-        JOIN consensus lang ON lang.subject_id = m.object_id
-                           AND lang.type_id = relation_type_id('HAS_LANGUAGE')
-                           AND lang.object_id = word_language(p_word)
-        ORDER BY m.object_id, eff_mu(m.rating, m.rd) DESC
+        SELECT DISTINCT ON (other.subject_id)
+               render_text(other.subject_id) AS synonym,
+               eff_mu_display(other.rating, other.rd) AS eff_mu,
+               other.witness_count AS witnesses
+        FROM consensus mine
+        JOIN consensus other ON other.object_id = mine.object_id
+                            AND other.type_id = relation_type_id('IS_SYNONYM_OF')
+                            AND other.subject_id <> p_word
+        WHERE mine.subject_id = p_word
+          AND mine.type_id = relation_type_id('IS_SYNONYM_OF')
+        ORDER BY other.subject_id, eff_mu(other.rating, other.rd) DESC
     ) s
-    ORDER BY s.witnesses DESC, s.eff_mu DESC
+    ORDER BY s.eff_mu DESC, s.witnesses DESC
     LIMIT p_limit
 $$;
 
@@ -239,7 +238,7 @@ CREATE OR REPLACE FUNCTION define(p_word bytea, p_context bytea[], p_limit int D
            g.witness_count
     FROM senses(p_word, p_context) sn
     JOIN consensus g ON g.subject_id = sn.synset_id
-                    AND g.type_id = relation_type_id('DEFINES')
+                    AND g.type_id = relation_type_id('HAS_DEFINITION')
     ORDER BY sn.score + eff_mu_display(g.rating, g.rd) DESC
     LIMIT p_limit
 $$;
