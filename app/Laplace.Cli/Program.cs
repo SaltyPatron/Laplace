@@ -936,8 +936,29 @@ internal static class Program
             long nElem = (long)rows * (long)Math.Max(1UL, cols);
             var vals = new float[nElem];
 
-            FillMoldTensor(vals, name,
-                embedA, lmHeadA, qA, kA, vA, oA, gateA, upA, downA, normV);
+            string arenaKey =
+                  name == "model.embed_tokens.weight" ? "EMBEDS"
+                : name == "lm_head.weight"            ? "OUTPUT"
+                : name.EndsWith(".self_attn.q_proj.weight", StringComparison.Ordinal) ? "Q"
+                : name.EndsWith(".self_attn.k_proj.weight", StringComparison.Ordinal) ? "K"
+                : name.EndsWith(".self_attn.v_proj.weight", StringComparison.Ordinal) ? "V"
+                : name.EndsWith(".self_attn.o_proj.weight", StringComparison.Ordinal) ? "O"
+                : name.EndsWith(".mlp.gate_proj.weight",    StringComparison.Ordinal) ? "GATES"
+                : name.EndsWith(".mlp.up_proj.weight",      StringComparison.Ordinal) ? "UP"
+                : name.EndsWith(".mlp.down_proj.weight",    StringComparison.Ordinal) ? "DOWN"
+                : name.EndsWith("norm.weight", StringComparison.Ordinal) ? "NORMS"
+                : "";
+
+            if (arenaKey.Length > 0 && !Pour(arenaKey))
+            {
+                var orig = WeightTensorETL.LoadTensorF32(refMap!, name, nElem);
+                Array.Copy(orig, vals, vals.Length);
+            }
+            else
+            {
+                FillMoldTensor(vals, name,
+                    embedA, lmHeadA, qA, kA, vA, oA, gateA, upA, downA, normV);
+            }
 
             byte[] tensorBytes = dtype == 0
                 ? ConsensusReExport.ToF32Bytes(vals)
