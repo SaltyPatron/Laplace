@@ -7,6 +7,7 @@ using System.Text;
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Atomic2020;
+using Laplace.Decomposers.Code;
 using Laplace.Decomposers.ConceptNet;
 using Laplace.Decomposers.ISO;
 using Laplace.Decomposers.Model;
@@ -677,6 +678,7 @@ internal static class Program
             "verbnet"  => await IngestViaRunnerAsync(new VerbNetDecomposer(),  "/vault/Data/VerbNet",  skipLayerCheck: false),
             "propbank" => await IngestViaRunnerAsync(new PropBankDecomposer(), "/vault/Data/PropBank", skipLayerCheck: false),
             "semlink"  => await IngestViaRunnerAsync(new SemLinkDecomposer(),  "/vault/Data/SemLink",  skipLayerCheck: false),
+            "code"     => await IngestViaRunnerAsync(new CodeDecomposer(), path, skipLayerCheck: true),
             "model"    => await IngestModelAsync(path),
             _ => Fail($"unknown ingest source '{source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, model)"),
         };
@@ -723,12 +725,32 @@ internal static class Program
         Console.WriteLine("mode: bulk fresh-source apply (attestation existence check skipped — IngestModelAsync proved the source is uningested); consensus accumulates at ingest");
 
         Console.WriteLine($"ingest model {modelDir} via IngestRunner → {ConnString} ...");
+
+        var droppedAttIndexes = await DropSecondaryAttestationIndexesAsync(ds, CancellationToken.None);
+        if (droppedAttIndexes.Count > 0)
+            Console.WriteLine($"B2: dropped {droppedAttIndexes.Count} secondary attestations index(es) for index-free bulk load; rebuilt after apply");
+
         var sw = Stopwatch.StartNew();
-        var result = await runner.RunAsync(
-            dec,
-            BuildIngestOptions(sw, dec.SourceName, skipLayerCheck: true, ecosystemPath: null),
-            CancellationToken.None);
-        sw.Stop();
+        IngestRunResult result;
+        try
+        {
+            result = await runner.RunAsync(
+                dec,
+                BuildIngestOptions(sw, dec.SourceName, skipLayerCheck: true, ecosystemPath: null),
+                CancellationToken.None);
+        }
+        finally
+        {
+            sw.Stop();
+            if (droppedAttIndexes.Count > 0)
+            {
+                Console.WriteLine($"B2: rebuilding {droppedAttIndexes.Count} secondary attestations index(es) ...");
+                var ixSw = Stopwatch.StartNew();
+                await RebuildAttestationIndexesAsync(ds, droppedAttIndexes, CancellationToken.None);
+                ixSw.Stop();
+                Console.WriteLine($"B2: secondary attestations indexes rebuilt in {ixSw.Elapsed.TotalSeconds:F1}s");
+            }
+        }
 
         Console.WriteLine(
             $"done: {result.UnitsApplied:N0} intents applied, "
@@ -757,6 +779,59 @@ internal static class Program
         }
         await RegisterDynamicCanonicalsAsync(ds, ((IDecomposer)dec).CanonicalNamesForReadback);
         return 0;
+    }
+
+    private static async Task<List<string>> DropSecondaryAttestationIndexesAsync(
+        global::Npgsql.NpgsqlDataSource ds, CancellationToken ct)
+    {
+        var names = new List<string>();
+        var defs = new List<string>();
+        await using var conn = await ds.OpenConnectionAsync(ct);
+        await using (var q = conn.CreateCommand())
+        {
+            q.CommandText =
+                "SELECT c.relname, pg_get_indexdef(i.indexrelid) "
+                + "FROM pg_index i "
+                + "JOIN pg_class c ON c.oid = i.indexrelid "
+                + "JOIN pg_class t ON t.oid = i.indrelid "
+                + "JOIN pg_namespace n ON n.oid = t.relnamespace "
+                + "WHERE n.nspname = 'laplace' AND t.relname = 'attestations' "
+                + "  AND NOT i.indisprimary AND NOT i.indisunique";
+            await using var r = await q.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                names.Add(r.GetString(0));
+                defs.Add(r.GetString(1));
+            }
+        }
+        foreach (var n in names)
+        {
+            await using var d = conn.CreateCommand();
+            d.CommandTimeout = 0;
+            d.CommandText = $"DROP INDEX IF EXISTS laplace.\"{n}\"";
+            await d.ExecuteNonQueryAsync(ct);
+        }
+        return defs;
+    }
+
+    private static async Task RebuildAttestationIndexesAsync(
+        global::Npgsql.NpgsqlDataSource ds, IReadOnlyList<string> indexDefs, CancellationToken ct)
+    {
+        await using var conn = await ds.OpenConnectionAsync(ct);
+        await using (var t = conn.CreateCommand())
+        {
+            t.CommandText =
+                "SET maintenance_work_mem = '2GB'; "
+                + "SET max_parallel_maintenance_workers = 4";
+            await t.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var def in indexDefs)
+        {
+            await using var c = conn.CreateCommand();
+            c.CommandTimeout = 0;
+            c.CommandText = def;
+            await c.ExecuteNonQueryAsync(ct);
+        }
     }
 
     private static async Task<int> SynthesizeAsync(string[] args)

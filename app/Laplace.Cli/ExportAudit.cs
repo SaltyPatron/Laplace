@@ -106,14 +106,11 @@ internal static class ExportAudit
             long covered = 0;
             foreach (var c in poured.Cells) if (c != 0f) covered++;
 
-            double clampW = 6.0;
+            double outlierW = 6.0;
             var o = WeightTensorETL.LoadTensorF32(refMap, slot.TensorName, total);
             var tm = new double[total];
             for (long i = 0; i < total; i++)
-            {
-                double s = Math.Clamp(Math.Tanh(o[i] / m), -(1.0 - 1e-12), 1.0 - 1e-12);
-                tm[i] = Math.Clamp(MathAtanh(s), -clampW, clampW) * m;
-            }
+                tm[i] = ScoreLaw.InverseFp(ScoreLaw.ScoreFp(o[i], m), m);
 
             double dotLaw = 0, nA = 0, nT = 0, seLaw = 0;
             double dotO = 0, nO = 0, seO = 0;
@@ -125,7 +122,7 @@ internal static class ExportAudit
                 double dl = a - t; seLaw += dl * dl;
                 dotO += a * b; nO += b * b;
                 double d = a - b; seO += d * d;
-                if (Math.Abs(b) > clampW * m)
+                if (Math.Abs(b) > outlierW * m)
                 {
                     outCells++;
                     survSum += Math.Abs(a) / Math.Abs(b);
@@ -168,10 +165,8 @@ internal static class ExportAudit
         }
 
         Console.WriteLine();
-        Console.WriteLine("  cos:law / rmse/M:law  = poured vs the law's reachable image (tanh clamped to 6M); deviation = coverage holes + collision averaging");
+        Console.WriteLine("  cos:law / rmse/M:law  = poured vs the law's reachable image (rational Score-law round-trip of the original); deviation = coverage holes + collision averaging");
         Console.WriteLine("  cos:orig / rmse/M:orig = poured vs the slot's one original tensor (total reconstruction error)");
         return 0;
     }
-
-    private static double MathAtanh(double x) => 0.5 * Math.Log((1.0 + x) / (1.0 - x));
 }
