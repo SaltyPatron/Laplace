@@ -66,7 +66,7 @@ internal static class ContentRoundtrip
                        ST_X(g.geom), ST_Y(g.geom), ST_Z(g.geom), ST_M(g.geom)
                 FROM laplace.physicalities p,
                      LATERAL ST_DumpPoints(p.trajectory) AS g
-                WHERE p.source_id = @s AND p.kind = 1";
+                WHERE p.source_id = @s AND p.type = 1";
             cmd.Parameters.AddWithValue("s", PromptSource.ToBytes());
             await using var r = await cmd.ExecuteReaderAsync(ct);
             while (await r.ReadAsync(ct))

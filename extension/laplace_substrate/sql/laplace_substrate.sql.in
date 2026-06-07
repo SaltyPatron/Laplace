@@ -22,3 +22,4 @@
 #include "20_converse.sql.in"
 #include "21_seed.sql.in"
 #include "22_cascade_surface.sql.in"
+#include "23_structural_surface.sql.in"
