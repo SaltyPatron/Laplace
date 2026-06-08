@@ -45,7 +45,7 @@ def _load(smap, name):
 
 def _vocab(model_dir):
     import os
-    tok = json.load(open(os.path.join(model_dir, "tokenizer.json")))
+    tok = json.load(open(os.path.join(model_dir, "tokenizer.json"), encoding="utf-8"))
     v = tok["model"]["vocab"]
     return v, {i: s for s, i in v.items()}
 
@@ -74,7 +74,7 @@ def cmd_embed(model_dir, surface):
 def cmd_forward(model_dir, prompt):
     import os
     smap = _shard_map(model_dir)
-    cfg = json.load(open(os.path.join(model_dir, "config.json")))
+    cfg = json.load(open(os.path.join(model_dir, "config.json"), encoding="utf-8"))
     vocab, inv = _vocab(model_dir)
     L = cfg["num_hidden_layers"]; d = cfg["hidden_size"]
     H = cfg["num_attention_heads"]; KV = cfg["num_key_value_heads"]

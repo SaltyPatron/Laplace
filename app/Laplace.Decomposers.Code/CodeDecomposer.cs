@@ -32,6 +32,7 @@ public sealed class CodeDecomposer : IDecomposer
             ["cs"] = "c-sharp",
             ["sh"] = "bash", ["bash"] = "bash",
             ["json"] = "json",
+            ["csv"] = "csv",
             ["md"] = "markdown", ["markdown"] = "markdown",
         };
 

@@ -14,6 +14,7 @@ extern const TSLanguage* tree_sitter_c_sharp(void);
 extern const TSLanguage* tree_sitter_bash(void);
 extern const TSLanguage* tree_sitter_json(void);
 extern const TSLanguage* tree_sitter_markdown(void);
+extern const TSLanguage* tree_sitter_csv(void);
 
 typedef const TSLanguage* (*ts_lang_fn)(void);
 
@@ -30,6 +31,7 @@ static const grammar_entry_t GRAMMARS[] = {
     {"bash",       tree_sitter_bash},
     {"json",       tree_sitter_json},
     {"markdown",   tree_sitter_markdown},
+    {"csv",        tree_sitter_csv},
 };
 static const size_t GRAMMAR_COUNT = sizeof(GRAMMARS) / sizeof(GRAMMARS[0]);
 
@@ -46,6 +48,7 @@ static const ext_entry_t EXTS[] = {
     {"sh", "bash"}, {"bash", "bash"},
     {"json", "json"},
     {"md", "markdown"}, {"markdown", "markdown"},
+    {"csv", "csv"},
 };
 static const size_t EXT_COUNT = sizeof(EXTS) / sizeof(EXTS[0]);
 
