@@ -16,6 +16,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private readonly NpgsqlDataSource _ds;
     private readonly int _stagingThreshold;
     private readonly int _partitions;
+    private readonly bool _freshSource;
     private readonly ILogger _log;
 
     private sealed class Acc
@@ -44,10 +45,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     public ConsensusAccumulatingWriter(
         ISubstrateWriter inner, NpgsqlDataSource dataSource,
         int? stagingThresholdRelations = null, int? foldWorkers = null,
+        bool freshSource = false,
         ILogger<ConsensusAccumulatingWriter>? logger = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
+        _freshSource = freshSource;
         _log = logger ?? (ILogger)NullLogger<ConsensusAccumulatingWriter>.Instance;
         _stagingThreshold = stagingThresholdRelations
             ?? (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_STAGING_THRESHOLD"), out var t) && t > 0
@@ -214,8 +217,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 }
                 await using var mat = conn.CreateCommand();
                 mat.CommandTimeout = 0;
-                mat.CommandText =
-                    "SELECT laplace.materialize_period_partition(laplace.period_staging_table($1, $2))";
+                mat.CommandText = _freshSource
+                    ? "SELECT laplace.materialize_period_partition_fresh(laplace.period_staging_table($1, $2))"
+                    : "SELECT laplace.materialize_period_partition(laplace.period_staging_table($1, $2))";
                 mat.Parameters.AddWithValue(epoch);
                 mat.Parameters.AddWithValue(part);
                 return (long)(await mat.ExecuteScalarAsync().ConfigureAwait(false) ?? 0L);

@@ -718,6 +718,7 @@ internal static class Program
             logger: loggerFactory.CreateLogger<NpgsqlSubstrateWriter>(),
             bulkFreshSource: true);
         var accumulator = new ConsensusAccumulatingWriter(inner, ds,
+            freshSource: true,
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
         ISubstrateWriter writer = accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
@@ -726,9 +727,16 @@ internal static class Program
 
         Console.WriteLine($"ingest model {modelDir} via IngestRunner → {ConnString} ...");
 
-        var droppedAttIndexes = await DropSecondaryAttestationIndexesAsync(ds, CancellationToken.None);
+        var droppedAttIndexes = await DropSecondaryIndexesAsync(ds, "attestations", CancellationToken.None);
         if (droppedAttIndexes.Count > 0)
             Console.WriteLine($"B2: dropped {droppedAttIndexes.Count} secondary attestations index(es) for index-free bulk load; rebuilt after apply");
+
+        // The consensus fold writes one row per arena cell; its 5 secondary indexes would be
+        // maintained on every write (the dominant cost, never addressed for consensus). Drop them
+        // for the duration of the fresh-source fold and rebuild once after consensus materializes.
+        var droppedConsensusIndexes = await DropSecondaryIndexesAsync(ds, "consensus", CancellationToken.None);
+        if (droppedConsensusIndexes.Count > 0)
+            Console.WriteLine($"B2: dropped {droppedConsensusIndexes.Count} secondary consensus index(es) for index-free fold; rebuilt after the consensus fold");
 
         var sw = Stopwatch.StartNew();
         IngestRunResult result;
@@ -746,7 +754,7 @@ internal static class Program
             {
                 Console.WriteLine($"B2: rebuilding {droppedAttIndexes.Count} secondary attestations index(es) ...");
                 var ixSw = Stopwatch.StartNew();
-                await RebuildAttestationIndexesAsync(ds, droppedAttIndexes, CancellationToken.None);
+                await RebuildIndexesAsync(ds, droppedAttIndexes, CancellationToken.None);
                 ixSw.Stop();
                 Console.WriteLine($"B2: secondary attestations indexes rebuilt in {ixSw.Elapsed.TotalSeconds:F1}s");
             }
@@ -777,12 +785,20 @@ internal static class Program
                 + $"{accumulator.ObservationsAccumulated:N0} matches in {matSw.Elapsed.TotalSeconds:F1}s "
                 + $"(accumulated at ingest; evidence = provenance-only)");
         }
+        if (droppedConsensusIndexes.Count > 0)
+        {
+            Console.WriteLine($"B2: rebuilding {droppedConsensusIndexes.Count} secondary consensus index(es) ...");
+            var cixSw = Stopwatch.StartNew();
+            await RebuildIndexesAsync(ds, droppedConsensusIndexes, CancellationToken.None);
+            cixSw.Stop();
+            Console.WriteLine($"B2: secondary consensus indexes rebuilt in {cixSw.Elapsed.TotalSeconds:F1}s");
+        }
         await RegisterDynamicCanonicalsAsync(ds, ((IDecomposer)dec).CanonicalNamesForReadback);
         return 0;
     }
 
-    private static async Task<List<string>> DropSecondaryAttestationIndexesAsync(
-        global::Npgsql.NpgsqlDataSource ds, CancellationToken ct)
+    private static async Task<List<string>> DropSecondaryIndexesAsync(
+        global::Npgsql.NpgsqlDataSource ds, string table, CancellationToken ct)
     {
         var names = new List<string>();
         var defs = new List<string>();
@@ -795,8 +811,9 @@ internal static class Program
                 + "JOIN pg_class c ON c.oid = i.indexrelid "
                 + "JOIN pg_class t ON t.oid = i.indrelid "
                 + "JOIN pg_namespace n ON n.oid = t.relnamespace "
-                + "WHERE n.nspname = 'laplace' AND t.relname = 'attestations' "
+                + "WHERE n.nspname = 'laplace' AND t.relname = $1 "
                 + "  AND NOT i.indisprimary AND NOT i.indisunique";
+            q.Parameters.AddWithValue(table);
             await using var r = await q.ExecuteReaderAsync(ct);
             while (await r.ReadAsync(ct))
             {
@@ -814,7 +831,7 @@ internal static class Program
         return defs;
     }
 
-    private static async Task RebuildAttestationIndexesAsync(
+    private static async Task RebuildIndexesAsync(
         global::Npgsql.NpgsqlDataSource ds, IReadOnlyList<string> indexDefs, CancellationToken ct)
     {
         await using var conn = await ds.OpenConnectionAsync(ct);
