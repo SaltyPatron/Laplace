@@ -121,9 +121,13 @@ public sealed class ModelDecomposer : IDecomposer
         boot.AddRelationType("NORM_SCALES");
         boot.AddRelationType("MERGES_WITH");
         boot.AddRelationType("OUTPUT_PROJECTS");
+        boot.AddType("Neuron");
+        boot.AddRelationType("SIMILAR_TO");
         boot.AddRelationType("ATTENDS");
         boot.AddRelationType("OV_RELATES");
         boot.AddRelationType("COMPLETES_TO");
+        boot.AddRelationType("DETECTS");
+        boot.AddRelationType("WRITES");
         boot.AddRelationType("TOKEN_MAPS_TO");
         boot.AddRelationType("HAS_HIDDEN_SIZE");
         boot.AddRelationType("HAS_NUM_LAYERS");
@@ -207,45 +211,25 @@ public sealed class ModelDecomposer : IDecomposer
         log.LogInformation("phase=merges emitted: {Count} merges, {Batches} batches ({Ms} ms)",
             merges.Count, mergeBatches, phaseSw.ElapsedMilliseconds);
 
-        log.LogInformation("phase=etl starting (weight tables → adjudicated matches under tensor-role kinds)");
+        // Point → range → matchups. Full-dim cosine (engine MKL gemm), ranged at the CALCULATED
+        // noise floor (theta = c/√dim per plane) so the in-range set is exactly the signal neighbors,
+        // which become Glicko-2 matchups for the attestation type. No 4D compression (that loses the
+        // relations); no theta=0 (that keeps the noise). Deterministic, bounded by the math.
+        log.LogInformation("phase=etl starting (point → range at calculated noise floor → Glicko matchups)");
         var etl = new ModelTableETL(_modelDir, recipe, tokens, Source, ModelAxisTypeId, log);
         await foreach (var change in etl.EmitAsync(ct))
         {
             ct.ThrowIfCancellationRequested();
-            if (change.Metadata.SourceContentUnitName == "model/axes")
-            {
-                await context.Writer.ApplyAsync(change, ct);
-                continue;
-            }
             yield return change;
         }
 
-        bool morphEmitted = false;
-        if (Environment.GetEnvironmentVariable("LAPLACE_SKIP_MORPH") == "1")
-        {
-            log.LogInformation("phase=S3-morph SKIPPED (LAPLACE_SKIP_MORPH=1)");
-        }
-        else
-        {
-        log.LogInformation("phase=S3-morph starting (embed_tokens → Unicode S³ frame)");
-        var morph = new WeightTensorETL(_modelDir, recipe, tokens, Source, tokEntityId, log);
-        await foreach (var change in morph.EmitS3MorphAsync(ct))
+        // Tokenizer→token provenance so a deposited model knows which tokens are its own.
+        foreach (var batch in LlamaTokenizerParser.BuildTokenMapsToCategorical(
+            tokens, Source, tokEntityId, batchSz))
         {
             ct.ThrowIfCancellationRequested();
-            morphEmitted = true;
-            yield return change;
-        }
-        }
-        if (!morphEmitted)
-        {
-            log.LogInformation("phase=token-maps-to: categorical fallback (morph skipped/degenerate)");
-            foreach (var batch in LlamaTokenizerParser.BuildTokenMapsToCategorical(
-                tokens, Source, tokEntityId, batchSz))
-            {
-                ct.ThrowIfCancellationRequested();
-                yield return batch;
-                await Task.Yield();
-            }
+            yield return batch;
+            await Task.Yield();
         }
     }
 

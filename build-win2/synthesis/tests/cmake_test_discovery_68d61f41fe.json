@@ -1,0 +1,311 @@
+{
+  "tests": 49,
+  "name": "AllTests",
+  "testsuites": [
+    {
+      "name": "LaplaceSynthesisVersion",
+      "tests": 1,
+      "testsuite": [
+        {
+          "name": "ReportsExpectedString",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_version.cpp",
+          "line": 5
+        }
+      ]
+    },
+    {
+      "name": "LaplaceSynthesisRecipe",
+      "tests": 7,
+      "testsuite": [
+        {
+          "name": "ParsesNonNull",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_recipe.cpp",
+          "line": 19
+        },
+        {
+          "name": "ExtractsIntegerFields",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_recipe.cpp",
+          "line": 25
+        },
+        {
+          "name": "ExtractsStringFields",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_recipe.cpp",
+          "line": 37
+        },
+        {
+          "name": "ExtractsArchitecturesFirstElement",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_recipe.cpp",
+          "line": 46
+        },
+        {
+          "name": "MissingFieldReturnsNull",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_recipe.cpp",
+          "line": 55
+        },
+        {
+          "name": "NullInputReturnsNull",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_recipe.cpp",
+          "line": 62
+        },
+        {
+          "name": "EmptyObjectParsesOk",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_recipe.cpp",
+          "line": 67
+        }
+      ]
+    },
+    {
+      "name": "LaplaceSynthesisArchTemplate",
+      "tests": 7,
+      "testsuite": [
+        {
+          "name": "LoadLlamaSucceeds",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_arch_template.cpp",
+          "line": 17
+        },
+        {
+          "name": "LoadUnknownReturnsNull",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_arch_template.cpp",
+          "line": 23
+        },
+        {
+          "name": "RequiredTensorsCountForTinyLlama",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_arch_template.cpp",
+          "line": 28
+        },
+        {
+          "name": "EmbedTokensIsFirstTensor",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_arch_template.cpp",
+          "line": 45
+        },
+        {
+          "name": "LmHeadIsLastTensor",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_arch_template.cpp",
+          "line": 63
+        },
+        {
+          "name": "Layer0QProjShape",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_arch_template.cpp",
+          "line": 80
+        },
+        {
+          "name": "CapTooSmallReturnsCount",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_arch_template.cpp",
+          "line": 98
+        }
+      ]
+    },
+    {
+      "name": "LaplaceSynthesisFeatureExtractor",
+      "tests": 1,
+      "testsuite": [
+        {
+          "name": "StubLoadReturnsNull",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_feature_extractor.cpp",
+          "line": 5
+        }
+      ]
+    },
+    {
+      "name": "LaplaceSynthesisGgufWriter",
+      "tests": 6,
+      "testsuite": [
+        {
+          "name": "CreateReturnsNonNull",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_gguf_writer.cpp",
+          "line": 15
+        },
+        {
+          "name": "FinalizeWritesMagic",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_gguf_writer.cpp",
+          "line": 23
+        },
+        {
+          "name": "AddMetadataStr",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_gguf_writer.cpp",
+          "line": 47
+        },
+        {
+          "name": "AddMetadataU32",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_gguf_writer.cpp",
+          "line": 65
+        },
+        {
+          "name": "AddBF16Tensor",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_gguf_writer.cpp",
+          "line": 75
+        },
+        {
+          "name": "NullPathReturnsNull",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_gguf_writer.cpp",
+          "line": 97
+        }
+      ]
+    },
+    {
+      "name": "LaplaceSynthesisBf16Decoder",
+      "tests": 8,
+      "testsuite": [
+        {
+          "name": "NullReturnsMinusOne",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_bf16_decoder.cpp",
+          "line": 15
+        },
+        {
+          "name": "ZeroElements",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_bf16_decoder.cpp",
+          "line": 22
+        },
+        {
+          "name": "PositiveOne",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_bf16_decoder.cpp",
+          "line": 29
+        },
+        {
+          "name": "NegativeValue",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_bf16_decoder.cpp",
+          "line": 37
+        },
+        {
+          "name": "Zero",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_bf16_decoder.cpp",
+          "line": 45
+        },
+        {
+          "name": "BatchOf8Aligned",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_bf16_decoder.cpp",
+          "line": 52
+        },
+        {
+          "name": "BatchOf17WithScalarTail",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_bf16_decoder.cpp",
+          "line": 65
+        },
+        {
+          "name": "SpecialValues",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_bf16_decoder.cpp",
+          "line": 81
+        }
+      ]
+    },
+    {
+      "name": "TensorDecompose",
+      "tests": 4,
+      "testsuite": [
+        {
+          "name": "NullArgsRejected",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_tensor_decompose.cpp",
+          "line": 30
+        },
+        {
+          "name": "FullRankWhenTolZero",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_tensor_decompose.cpp",
+          "line": 40
+        },
+        {
+          "name": "AdaptiveRankDropsNegligibleMode",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_tensor_decompose.cpp",
+          "line": 54
+        },
+        {
+          "name": "AllZeroTensorHasRankZero",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_tensor_decompose.cpp",
+          "line": 67
+        }
+      ]
+    },
+    {
+      "name": "QkPairsThreshold",
+      "tests": 5,
+      "testsuite": [
+        {
+          "name": "BadArgsRejected",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_qk_pairs_threshold.cpp",
+          "line": 82
+        },
+        {
+          "name": "ThresholdBehaviorKnownScores",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_qk_pairs_threshold.cpp",
+          "line": 104
+        },
+        {
+          "name": "BitwiseMatchesSerialReference",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_qk_pairs_threshold.cpp",
+          "line": 130
+        },
+        {
+          "name": "DeterministicAcrossThreadCountsAndWindows",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_qk_pairs_threshold.cpp",
+          "line": 149
+        },
+        {
+          "name": "OverflowSignalsAndPrefixIsDeterministic",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_qk_pairs_threshold.cpp",
+          "line": 195
+        }
+      ]
+    },
+    {
+      "name": "QkPairsThresholdPruned",
+      "tests": 6,
+      "testsuite": [
+        {
+          "name": "BitwiseParityWithAllPairs",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_qk_pairs_threshold_pruned.cpp",
+          "line": 57
+        },
+        {
+          "name": "DeterministicAcrossThreadCountsAndWindows",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_qk_pairs_threshold_pruned.cpp",
+          "line": 79
+        },
+        {
+          "name": "HeavyPruningSpreadNormsMatchesAllPairs",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_qk_pairs_threshold_pruned.cpp",
+          "line": 128
+        },
+        {
+          "name": "BadArgsRejected",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_qk_pairs_threshold_pruned.cpp",
+          "line": 155
+        },
+        {
+          "name": "OverflowSignalsAndPrefixIsDeterministic",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_qk_pairs_threshold_pruned.cpp",
+          "line": 177
+        },
+        {
+          "name": "ZeroFloorParity",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_qk_pairs_threshold_pruned.cpp",
+          "line": 211
+        }
+      ]
+    },
+    {
+      "name": "QkProjectCached",
+      "tests": 4,
+      "testsuite": [
+        {
+          "name": "ParityWithAllPairsAndPrunedAcrossHeads",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_qk_project_cached.cpp",
+          "line": 71
+        },
+        {
+          "name": "DeterministicAcrossThreadsAndWindows",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_qk_project_cached.cpp",
+          "line": 116
+        },
+        {
+          "name": "OverflowWholeRowPrefix",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_qk_project_cached.cpp",
+          "line": 180
+        },
+        {
+          "name": "BadArgsRejected",
+          "file": "D:\\Repositories\\Laplace\\engine\\synthesis\\tests\\test_qk_project_cached.cpp",
+          "line": 227
+        }
+      ]
+    }
+  ]
+}

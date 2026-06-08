@@ -679,6 +679,7 @@ internal static class Program
             "propbank" => await IngestViaRunnerAsync(new PropBankDecomposer(), "/vault/Data/PropBank", skipLayerCheck: false),
             "semlink"  => await IngestViaRunnerAsync(new SemLinkDecomposer(),  "/vault/Data/SemLink",  skipLayerCheck: false),
             "code"     => await IngestViaRunnerAsync(new CodeDecomposer(), path, skipLayerCheck: true),
+            "tabular"  => await IngestViaRunnerAsync(new TabularDecomposer(), path, skipLayerCheck: true),
             "model"    => await IngestModelAsync(path),
             _ => Fail($"unknown ingest source '{source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, model)"),
         };

@@ -1,0 +1,1291 @@
+{
+  "tests": 227,
+  "name": "AllTests",
+  "testsuites": [
+    {
+      "name": "LaplaceCoreVersion",
+      "tests": 1,
+      "testsuite": [
+        {
+          "name": "ReportsExpectedString",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_version.cpp",
+          "line": 6
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreMath4d",
+      "tests": 46,
+      "testsuite": [
+        {
+          "name": "DotProductBasicValues",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 16
+        },
+        {
+          "name": "DotProductWithZeroVector",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 22
+        },
+        {
+          "name": "NormOfUnitAxisVectors",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 28
+        },
+        {
+          "name": "NormOfHalfHalfHalfHalf",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 39
+        },
+        {
+          "name": "RadiusFromOriginEqualsNorm",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 44
+        },
+        {
+          "name": "DistanceSqAndDistanceConsistent",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 49
+        },
+        {
+          "name": "DistanceSelfIsZero",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 57
+        },
+        {
+          "name": "DistanceSymmetric",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 63
+        },
+        {
+          "name": "AngularDistanceIdenticalUnitVectorIsZero",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 69
+        },
+        {
+          "name": "AngularDistanceOrthogonalIsPiOverTwo",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 74
+        },
+        {
+          "name": "AngularDistanceAntipodalIsPi",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 80
+        },
+        {
+          "name": "AngularDistanceHandlesFpRoundoffPastUnity",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 86
+        },
+        {
+          "name": "AddSubScaleRoundTrip",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 94
+        },
+        {
+          "name": "CentroidSinglePointIsThatPoint",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 111
+        },
+        {
+          "name": "CentroidTwoPointsMidpoint",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 121
+        },
+        {
+          "name": "CentroidZeroPointsLeavesOutputZeroed",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 134
+        },
+        {
+          "name": "CentroidDeterministicAcrossRuns",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 143
+        },
+        {
+          "name": "LogExpRoundTripRecoversPoint",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 156
+        },
+        {
+          "name": "LogTangentNormEqualsAngularDistance",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 171
+        },
+        {
+          "name": "LogTangentIsOrthogonalToBase",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 180
+        },
+        {
+          "name": "LogOfBaseIsZeroTangent",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 188
+        },
+        {
+          "name": "LogOfAntipodeFallsBackToZeroTangent",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 195
+        },
+        {
+          "name": "ExpZeroTangentReturnsBase",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 203
+        },
+        {
+          "name": "KarcherZeroPointsLeavesOutputZeroed",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 223
+        },
+        {
+          "name": "KarcherSinglePointIsThatPointOnSphere",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 232
+        },
+        {
+          "name": "KarcherSinglePointNonUnitIsNormalized",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 243
+        },
+        {
+          "name": "KarcherAllEqualPointsIsThatPoint",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 251
+        },
+        {
+          "name": "KarcherSymmetricPairIsGeodesicMidpoint",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 266
+        },
+        {
+          "name": "KarcherClusterMeanLiesNearClusterAndOnSphere",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 287
+        },
+        {
+          "name": "KarcherWeightsPullTowardHeavyPoint",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 313
+        },
+        {
+          "name": "KarcherDeterministicAcrossRuns",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 328
+        },
+        {
+          "name": "KarcherDiffersFromEuclideanCentroid",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 348
+        },
+        {
+          "name": "FrechetEmptyTrajectoryReturnsNaN",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 376
+        },
+        {
+          "name": "FrechetIdenticalSinglePointIsZero",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 383
+        },
+        {
+          "name": "FrechetSinglePointEqualsEuclidean",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 388
+        },
+        {
+          "name": "FrechetIdenticalTrajectoriesAreZero",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 394
+        },
+        {
+          "name": "FrechetParallelTrajectoriesEqualOffset",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 403
+        },
+        {
+          "name": "FrechetCoarseSamplingPaysGapCost",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 417
+        },
+        {
+          "name": "FrechetSymmetric",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 432
+        },
+        {
+          "name": "FrechetDeterministicAcrossRuns",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 446
+        },
+        {
+          "name": "HausdorffEmptySetReturnsNaN",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 459
+        },
+        {
+          "name": "HausdorffIdenticalSetsAreZero",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 466
+        },
+        {
+          "name": "HausdorffSinglePointEqualsEuclidean",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 475
+        },
+        {
+          "name": "HausdorffSymmetric",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 481
+        },
+        {
+          "name": "HausdorffSupersetAndSubset",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 495
+        },
+        {
+          "name": "HausdorffDeterministicAcrossRuns",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_math4d.cpp",
+          "line": 508
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreHash128",
+      "tests": 11,
+      "testsuite": [
+        {
+          "name": "ZeroProducesAllZero",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash128.cpp",
+          "line": 15
+        },
+        {
+          "name": "BlakeEmptyMatchesKnownTruncatedVector",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash128.cpp",
+          "line": 23
+        },
+        {
+          "name": "BlakeSameInputProducesSameOutput",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash128.cpp",
+          "line": 29
+        },
+        {
+          "name": "BlakeDifferentInputsDiffer",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash128.cpp",
+          "line": 38
+        },
+        {
+          "name": "CompareSelfIsZero",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash128.cpp",
+          "line": 48
+        },
+        {
+          "name": "CompareMatchesMemcmpOnBytea",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash128.cpp",
+          "line": 55
+        },
+        {
+          "name": "MerkleComposesChildrenDeterministically",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash128.cpp",
+          "line": 72
+        },
+        {
+          "name": "MerkleTierIsNotIdentity",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash128.cpp",
+          "line": 85
+        },
+        {
+          "name": "MerkleChildOrderMatters",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash128.cpp",
+          "line": 95
+        },
+        {
+          "name": "MerkleEmptyChildSetIsTierIndependent",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash128.cpp",
+          "line": 109
+        },
+        {
+          "name": "StructLayoutIs16BytesPod",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash128.cpp",
+          "line": 116
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreHilbert4d",
+      "tests": 8,
+      "testsuite": [
+        {
+          "name": "EncodeIsDeterministic",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hilbert4d.cpp",
+          "line": 41
+        },
+        {
+          "name": "OriginEncodesIntoLowHalfOfIndexSpace",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hilbert4d.cpp",
+          "line": 49
+        },
+        {
+          "name": "DecodeIsInverseOfEncodeWithinQuantization",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hilbert4d.cpp",
+          "line": 61
+        },
+        {
+          "name": "BoundaryClampsAreStable",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hilbert4d.cpp",
+          "line": 80
+        },
+        {
+          "name": "CompareMatchesMemcmp",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hilbert4d.cpp",
+          "line": 94
+        },
+        {
+          "name": "ConsecutiveIndicesProduceAdjacentCells",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hilbert4d.cpp",
+          "line": 112
+        },
+        {
+          "name": "AdjacentCellsAreHilbertNearby",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hilbert4d.cpp",
+          "line": 156
+        },
+        {
+          "name": "LocalityNearestNeighborRecall",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hilbert4d.cpp",
+          "line": 196
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreMantissa",
+      "tests": 13,
+      "testsuite": [
+        {
+          "name": "ZeroPayloadRoundTrip",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_mantissa.cpp",
+          "line": 31
+        },
+        {
+          "name": "FixedExponentInvariant",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_mantissa.cpp",
+          "line": 52
+        },
+        {
+          "name": "FullHashRoundTripsExactly",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_mantissa.cpp",
+          "line": 72
+        },
+        {
+          "name": "MaxFieldsRoundTrip",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_mantissa.cpp",
+          "line": 85
+        },
+        {
+          "name": "HashLivesInXYZNotM",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_mantissa.cpp",
+          "line": 101
+        },
+        {
+          "name": "MetadataLivesInMNotXYZ",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_mantissa.cpp",
+          "line": 109
+        },
+        {
+          "name": "FlagsSplitAcrossZAndMHighBits",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_mantissa.cpp",
+          "line": 125
+        },
+        {
+          "name": "FlagsAboveBit51AreMasked",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_mantissa.cpp",
+          "line": 150
+        },
+        {
+          "name": "SameHashSameXYZBitsAcrossPayloads",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_mantissa.cpp",
+          "line": 164
+        },
+        {
+          "name": "ZShiftsWhenZSideFlagsDiffer",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_mantissa.cpp",
+          "line": 181
+        },
+        {
+          "name": "DeterministicAcrossRuns",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_mantissa.cpp",
+          "line": 195
+        },
+        {
+          "name": "EveryHashBitProbed",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_mantissa.cpp",
+          "line": 206
+        },
+        {
+          "name": "EveryFlagBitProbed",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_mantissa.cpp",
+          "line": 224
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreSuperFibonacci",
+      "tests": 10,
+      "testsuite": [
+        {
+          "name": "ProducesUnitQuaternions",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_super_fibonacci.cpp",
+          "line": 11
+        },
+        {
+          "name": "DeterministicAcrossCalls",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_super_fibonacci.cpp",
+          "line": 21
+        },
+        {
+          "name": "ZeroNHandledGracefully",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_super_fibonacci.cpp",
+          "line": 29
+        },
+        {
+          "name": "NullPointerHandledGracefully",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_super_fibonacci.cpp",
+          "line": 38
+        },
+        {
+          "name": "MinDistanceScalesAsExpected",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_super_fibonacci.cpp",
+          "line": 43
+        },
+        {
+          "name": "MeanCenterApproachesOrigin",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_super_fibonacci.cpp",
+          "line": 58
+        },
+        {
+          "name": "HopfBaseLiesOnS2",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_super_fibonacci.cpp",
+          "line": 84
+        },
+        {
+          "name": "HopfPolarHeightEquidistributed",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_super_fibonacci.cpp",
+          "line": 96
+        },
+        {
+          "name": "HopfCircleAnglesEquidistributed",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_super_fibonacci.cpp",
+          "line": 120
+        },
+        {
+          "name": "HandlesUnicodeCodepointScale",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_super_fibonacci.cpp",
+          "line": 148
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreGlicko2Fp",
+      "tests": 6,
+      "testsuite": [
+        {
+          "name": "MulAccurate",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 31
+        },
+        {
+          "name": "DivAccurate",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 38
+        },
+        {
+          "name": "SqrtAccurate",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 44
+        },
+        {
+          "name": "ExpAccurate",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 52
+        },
+        {
+          "name": "LogAccurate",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 61
+        },
+        {
+          "name": "ExpLogRoundtrip",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 70
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreGlicko2",
+      "tests": 15,
+      "testsuite": [
+        {
+          "name": "GMatchesPaperTable",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 77
+        },
+        {
+          "name": "EMatchesPaperTable",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 83
+        },
+        {
+          "name": "InitSetsInitialState",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 93
+        },
+        {
+          "name": "GlickmanPaperIntermediatesPinned",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 103
+        },
+        {
+          "name": "IllinoisConvergesInWalkDownBranch",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 145
+        },
+        {
+          "name": "EmptyPeriodGrowsRdLeavesRatingAndVolatilityAlone",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 159
+        },
+        {
+          "name": "EmptyPeriodMatchesPaperFormula",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 172
+        },
+        {
+          "name": "PositiveEvidenceAgainstHigherRatedReferenceRaisesRating",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 179
+        },
+        {
+          "name": "NegativeEvidenceAgainstLowerRatedReferenceLowersRating",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 188
+        },
+        {
+          "name": "DrawAgainstEqualLeavesRatingNearlyUnchanged",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 197
+        },
+        {
+          "name": "RdNeverExceedsUnratedCap",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 206
+        },
+        {
+          "name": "DecayGrowsRdProportionalToTime",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 215
+        },
+        {
+          "name": "EffectiveMuDiscountsByTwoRd",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 226
+        },
+        {
+          "name": "DeterministicAcrossRuns",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 234
+        },
+        {
+          "name": "DeterministicAcrossMultiplePeriods",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_glicko2.cpp",
+          "line": 250
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreScore",
+      "tests": 7,
+      "testsuite": [
+        {
+          "name": "ZeroIsExactMidpoint",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_score.cpp",
+          "line": 22
+        },
+        {
+          "name": "RangeIsExclusiveOfEndpoints",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_score.cpp",
+          "line": 27
+        },
+        {
+          "name": "RoundTripRelative",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_score.cpp",
+          "line": 42
+        },
+        {
+          "name": "MonotonicSweep",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_score.cpp",
+          "line": 66
+        },
+        {
+          "name": "DistinguishesLargeTailValues",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_score.cpp",
+          "line": 76
+        },
+        {
+          "name": "EndpointsClampWithoutDivByZero",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_score.cpp",
+          "line": 89
+        },
+        {
+          "name": "BatchMatchesScalar",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_score.cpp",
+          "line": 99
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreCodepointTable",
+      "tests": 9,
+      "testsuite": [
+        {
+          "name": "Loaded",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_codepoint_table.cpp",
+          "line": 7
+        },
+        {
+          "name": "DirectIndexIsCodepoint",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_codepoint_table.cpp",
+          "line": 11
+        },
+        {
+          "name": "OutOfRangeIsNull",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_codepoint_table.cpp",
+          "line": 19
+        },
+        {
+          "name": "CoordOnUnitGlome",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_codepoint_table.cpp",
+          "line": 24
+        },
+        {
+          "name": "PropertyAccessorsKnownValues",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_codepoint_table.cpp",
+          "line": 32
+        },
+        {
+          "name": "CanonicalDecomposition",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_codepoint_table.cpp",
+          "line": 44
+        },
+        {
+          "name": "CanonicalComposition",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_codepoint_table.cpp",
+          "line": 54
+        },
+        {
+          "name": "BulkRecordsExposesWholeArray",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_codepoint_table.cpp",
+          "line": 61
+        },
+        {
+          "name": "RejectsBadPath",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_codepoint_table.cpp",
+          "line": 72
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreAstar",
+      "tests": 7,
+      "testsuite": [
+        {
+          "name": "PicksLeastCostPath",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_astar.cpp",
+          "line": 47
+        },
+        {
+          "name": "MultiHopBeatsExpensiveDirect",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_astar.cpp",
+          "line": 59
+        },
+        {
+          "name": "ReachesNearestGoalInRegion",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_astar.cpp",
+          "line": 68
+        },
+        {
+          "name": "NoPathYieldsEmpty",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_astar.cpp",
+          "line": 76
+        },
+        {
+          "name": "StartIsGoal",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_astar.cpp",
+          "line": 83
+        },
+        {
+          "name": "RespectsMaxDepth",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_astar.cpp",
+          "line": 90
+        },
+        {
+          "name": "RejectsBadArgs",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_astar.cpp",
+          "line": 99
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreTrajectory",
+      "tests": 4,
+      "testsuite": [
+        {
+          "name": "BuildThenConstituentsRoundTrips",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_trajectory.cpp",
+          "line": 9
+        },
+        {
+          "name": "EveryVertexIsGeometryValidDouble",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_trajectory.cpp",
+          "line": 27
+        },
+        {
+          "name": "RejectsOverwideTrajectory",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_trajectory.cpp",
+          "line": 39
+        },
+        {
+          "name": "EmptyTrajectoryIsValid",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_trajectory.cpp",
+          "line": 43
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreTrajectoryRle",
+      "tests": 6,
+      "testsuite": [
+        {
+          "name": "AllDistinctMatchesVertexCount",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_trajectory.cpp",
+          "line": 50
+        },
+        {
+          "name": "ConsecutiveDuplicatesCollapse",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_trajectory.cpp",
+          "line": 70
+        },
+        {
+          "name": "AllSameCollapseToOneVertex",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_trajectory.cpp",
+          "line": 88
+        },
+        {
+          "name": "OutputIsGeometryValidDouble",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_trajectory.cpp",
+          "line": 102
+        },
+        {
+          "name": "EmptyInputIsValid",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_trajectory.cpp",
+          "line": 116
+        },
+        {
+          "name": "NullOutArgsFail",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_trajectory.cpp",
+          "line": 123
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreTierTree",
+      "tests": 19,
+      "testsuite": [
+        {
+          "name": "NewWithZeroCapacityProducesEmpty",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 29
+        },
+        {
+          "name": "NewWithCapacityHintAllocates",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 37
+        },
+        {
+          "name": "FreeNullIsSafe",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 45
+        },
+        {
+          "name": "AddLeafReturnsSequentialIndices",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 50
+        },
+        {
+          "name": "AddNodeRejectsChildRangeOutOfBounds",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 60
+        },
+        {
+          "name": "AddNodeRejectsMalformedSentinel",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 68
+        },
+        {
+          "name": "AddNodeWithZeroChildrenIsValidEmptyInterior",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 76
+        },
+        {
+          "name": "GetNodePopulatesView",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 84
+        },
+        {
+          "name": "GetNodeRejectsOutOfBounds",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 108
+        },
+        {
+          "name": "FinalizeSetsParentForEveryNonRootNode",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 120
+        },
+        {
+          "name": "FinalizeIsIdempotent",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 134
+        },
+        {
+          "name": "IdCoordHilbertZeroPreCompose",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 144
+        },
+        {
+          "name": "SetIdSetCoordSetHilbertRoundTrip",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 163
+        },
+        {
+          "name": "SettersRejectOutOfBounds",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 188
+        },
+        {
+          "name": "BulkAccessorsReturnContiguousSoa",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 202
+        },
+        {
+          "name": "MutableArraysAllowComposerFill",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 236
+        },
+        {
+          "name": "GrowsBeyondCapacityHint",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 259
+        },
+        {
+          "name": "AddNodeRejectsOverflowingChildRange",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 274
+        },
+        {
+          "name": "ParentIdxInvariantHoldsBeforeFinalize",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_tier_tree.cpp",
+          "line": 283
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreIntentStage",
+      "tests": 16,
+      "testsuite": [
+        {
+          "name": "NewWithZeroCapacityIsValid",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_intent_stage.cpp",
+          "line": 62
+        },
+        {
+          "name": "FreeNullIsSafe",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_intent_stage.cpp",
+          "line": 71
+        },
+        {
+          "name": "ColumnListsAreStableAndCorrect",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_intent_stage.cpp",
+          "line": 76
+        },
+        {
+          "name": "EmptyStreamHasHeaderAndTrailerOnly",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_intent_stage.cpp",
+          "line": 84
+        },
+        {
+          "name": "AddEntityRejectsInvalidArgs",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_intent_stage.cpp",
+          "line": 102
+        },
+        {
+          "name": "AddEntityEncodesOneRowExactly",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_intent_stage.cpp",
+          "line": 116
+        },
+        {
+          "name": "AddEntityFirstObservedByPopulated",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_intent_stage.cpp",
+          "line": 143
+        },
+        {
+          "name": "BufferTooSmallReturnsRequiredCount",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_intent_stage.cpp",
+          "line": 159
+        },
+        {
+          "name": "MultipleEntitiesAccumulate",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_intent_stage.cpp",
+          "line": 168
+        },
+        {
+          "name": "AddPhysicalityRoundTripsAllFields",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_intent_stage.cpp",
+          "line": 182
+        },
+        {
+          "name": "AddPhysicalityNullTrajectoryIsValid",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_intent_stage.cpp",
+          "line": 256
+        },
+        {
+          "name": "AddPhysicalityRejectsTrajectoryNullPointerNonZeroCount",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_intent_stage.cpp",
+          "line": 269
+        },
+        {
+          "name": "AddAttestationAllFieldsBigEndian",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_intent_stage.cpp",
+          "line": 281
+        },
+        {
+          "name": "AddAttestationNullObjectAndContext",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_intent_stage.cpp",
+          "line": 319
+        },
+        {
+          "name": "EachTableHasIndependentRowCount",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_intent_stage.cpp",
+          "line": 342
+        },
+        {
+          "name": "PGEpochOffsetConstantIsCorrect",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_intent_stage.cpp",
+          "line": 356
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreMerkleDedup",
+      "tests": 16,
+      "testsuite": [
+        {
+          "name": "FilterNovelEmptyInputReturnsZero",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_merkle_dedup.cpp",
+          "line": 33
+        },
+        {
+          "name": "FilterNovelRejectsNullArgs",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_merkle_dedup.cpp",
+          "line": 39
+        },
+        {
+          "name": "FilterNovelRejectsTooSmallBitmap",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_merkle_dedup.cpp",
+          "line": 50
+        },
+        {
+          "name": "FilterNovelAllAbsentEmitsAll",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_merkle_dedup.cpp",
+          "line": 58
+        },
+        {
+          "name": "FilterNovelAllPresentEmitsZero",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_merkle_dedup.cpp",
+          "line": 72
+        },
+        {
+          "name": "FilterNovelPreservesOrder",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_merkle_dedup.cpp",
+          "line": 83
+        },
+        {
+          "name": "FilterNovelWorksAcrossByteBoundaries",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_merkle_dedup.cpp",
+          "line": 98
+        },
+        {
+          "name": "FilterNovelLargeBatchPerf",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_merkle_dedup.cpp",
+          "line": 113
+        },
+        {
+          "name": "TrunkShortcircuitRejectsNullArgs",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_merkle_dedup.cpp",
+          "line": 127
+        },
+        {
+          "name": "TrunkShortcircuitEmptyTreeIsZero",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_merkle_dedup.cpp",
+          "line": 139
+        },
+        {
+          "name": "TrunkShortcircuitAllAbsentEmitsEveryIndex",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_merkle_dedup.cpp",
+          "line": 149
+        },
+        {
+          "name": "TrunkShortcircuitRootPresentEmitsNothing",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_merkle_dedup.cpp",
+          "line": 160
+        },
+        {
+          "name": "TrunkShortcircuitInteriorPresentSkipsItsSubtree",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_merkle_dedup.cpp",
+          "line": 170
+        },
+        {
+          "name": "TrunkShortcircuitLeafPresentSkipsOnlyLeaf",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_merkle_dedup.cpp",
+          "line": 184
+        },
+        {
+          "name": "TrunkShortcircuitMatchesFilterNovelOnSubsetInvariant",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_merkle_dedup.cpp",
+          "line": 196
+        },
+        {
+          "name": "TrunkShortcircuitRejectsTooSmallBitmap",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_merkle_dedup.cpp",
+          "line": 218
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreHashComposer",
+      "tests": 12,
+      "testsuite": [
+        {
+          "name": "RejectsNullArgs",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash_composer.cpp",
+          "line": 50
+        },
+        {
+          "name": "EmptyTreeIsSuccess",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash_composer.cpp",
+          "line": 57
+        },
+        {
+          "name": "ResolverErrorPropagates",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash_composer.cpp",
+          "line": 63
+        },
+        {
+          "name": "LeafIdMatchesResolver",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash_composer.cpp",
+          "line": 70
+        },
+        {
+          "name": "InteriorIdMatchesMerkleOfChildren",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash_composer.cpp",
+          "line": 85
+        },
+        {
+          "name": "InteriorCoordIsChildCentroid",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash_composer.cpp",
+          "line": 104
+        },
+        {
+          "name": "RootIdMatchesMerkleOfMerkles",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash_composer.cpp",
+          "line": 113
+        },
+        {
+          "name": "RootCoordIsCentroidOfInteriorCentroids",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash_composer.cpp",
+          "line": 138
+        },
+        {
+          "name": "IsDeterministicAcrossRuns",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash_composer.cpp",
+          "line": 146
+        },
+        {
+          "name": "HilbertEncodesPopulatedCoord",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash_composer.cpp",
+          "line": 168
+        },
+        {
+          "name": "BottomUpOrderingObserved",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash_composer.cpp",
+          "line": 185
+        },
+        {
+          "name": "ScalesTo1KNodes",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_hash_composer.cpp",
+          "line": 194
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreGraphemeBreak",
+      "tests": 1,
+      "testsuite": [
+        {
+          "name": "UAX29ConformancePerLine",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_grapheme_break.cpp",
+          "line": 93
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreWordBreak",
+      "tests": 1,
+      "testsuite": [
+        {
+          "name": "UAX29ConformancePerLine",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_word_break.cpp",
+          "line": 70
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreSentenceBreak",
+      "tests": 1,
+      "testsuite": [
+        {
+          "name": "UAX29ConformancePerLine",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_sentence_break.cpp",
+          "line": 70
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreNormalizeNfc",
+      "tests": 1,
+      "testsuite": [
+        {
+          "name": "UAX15ConformancePerLine",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_normalize_nfc.cpp",
+          "line": 89
+        }
+      ]
+    },
+    {
+      "name": "LaplaceCoreTextDecomposer",
+      "tests": 9,
+      "testsuite": [
+        {
+          "name": "EmptyInputProducesRootOnly",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_text_decomposer.cpp",
+          "line": 40
+        },
+        {
+          "name": "RejectsNullOutPointer",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_text_decomposer.cpp",
+          "line": 51
+        },
+        {
+          "name": "RejectsInvalidUtf8",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_text_decomposer.cpp",
+          "line": 55
+        },
+        {
+          "name": "ASCIIHelloWorldTopology",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_text_decomposer.cpp",
+          "line": 62
+        },
+        {
+          "name": "DistinctNormalizationFormsStayDistinct",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_text_decomposer.cpp",
+          "line": 76
+        },
+        {
+          "name": "DeterministicAcrossRuns",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_text_decomposer.cpp",
+          "line": 93
+        },
+        {
+          "name": "MultiLanguageInputSegmentsCleanly",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_text_decomposer.cpp",
+          "line": 116
+        },
+        {
+          "name": "GraphemeCountMatchesUserPerceivedChars",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_text_decomposer.cpp",
+          "line": 128
+        },
+        {
+          "name": "FinalizedParentIdxIsCorrect",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_text_decomposer.cpp",
+          "line": 137
+        }
+      ]
+    },
+    {
+      "name": "GrammarRegistry",
+      "tests": 2,
+      "testsuite": [
+        {
+          "name": "ListsTenStarterModalities",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_grammar_decomposer.cpp",
+          "line": 31
+        },
+        {
+          "name": "UnknownModalityIsNull",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_grammar_decomposer.cpp",
+          "line": 37
+        }
+      ]
+    },
+    {
+      "name": "GrammarDecomposer",
+      "tests": 4,
+      "testsuite": [
+        {
+          "name": "EveryRecipeParsesAbiCompatible",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_grammar_decomposer.cpp",
+          "line": 45
+        },
+        {
+          "name": "PythonStructure",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_grammar_decomposer.cpp",
+          "line": 64
+        },
+        {
+          "name": "JsonStructure",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_grammar_decomposer.cpp",
+          "line": 79
+        },
+        {
+          "name": "DeterministicAndWellFormedParentLinks",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_grammar_decomposer.cpp",
+          "line": 96
+        }
+      ]
+    },
+    {
+      "name": "GrammarTags",
+      "tests": 2,
+      "testsuite": [
+        {
+          "name": "PythonDefAndCallCaptures",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_grammar_tags.cpp",
+          "line": 11
+        },
+        {
+          "name": "InvalidQueryIsRejected",
+          "file": "D:\\Repositories\\Laplace\\engine\\core\\tests\\test_grammar_tags.cpp",
+          "line": 48
+        }
+      ]
+    }
+  ]
+}

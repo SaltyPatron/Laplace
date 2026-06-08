@@ -1,0 +1,176 @@
+{
+  "tests": 28,
+  "name": "AllTests",
+  "testsuites": [
+    {
+      "name": "LaplaceDynamicsInit",
+      "tests": 2,
+      "testsuite": [
+        {
+          "name": "ReturnsZeroOnSuccess",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_init.cpp",
+          "line": 5
+        },
+        {
+          "name": "ReportsVersion",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_init.cpp",
+          "line": 9
+        }
+      ]
+    },
+    {
+      "name": "LaplaceDynamicsProcrustes",
+      "tests": 7,
+      "testsuite": [
+        {
+          "name": "IdentityWhenSourceEqualsTarget",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_procrustes.cpp",
+          "line": 26
+        },
+        {
+          "name": "RecoversKnownRotation",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_procrustes.cpp",
+          "line": 51
+        },
+        {
+          "name": "RecoversScale",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_procrustes.cpp",
+          "line": 90
+        },
+        {
+          "name": "RectangularProjectionRecoversInLargeNLimit",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_procrustes.cpp",
+          "line": 117
+        },
+        {
+          "name": "OrthogonalRowsProperty",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_procrustes.cpp",
+          "line": 151
+        },
+        {
+          "name": "NullInputsHandled",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_procrustes.cpp",
+          "line": 203
+        },
+        {
+          "name": "NoiseGivesNonzeroResidual",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_procrustes.cpp",
+          "line": 210
+        }
+      ]
+    },
+    {
+      "name": "LaplaceDynamicsEigenmaps",
+      "tests": 6,
+      "testsuite": [
+        {
+          "name": "RejectsNullInputs",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_eigenmaps.cpp",
+          "line": 41
+        },
+        {
+          "name": "RejectsInvalidArgs",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_eigenmaps.cpp",
+          "line": 48
+        },
+        {
+          "name": "RecoversRingManifold",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_eigenmaps.cpp",
+          "line": 56
+        },
+        {
+          "name": "EmbeddingIsDWeightedZeroMean",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_eigenmaps.cpp",
+          "line": 91
+        },
+        {
+          "name": "EmbeddingColumnsAreDOrthonormal",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_eigenmaps.cpp",
+          "line": 110
+        },
+        {
+          "name": "DeterministicOnIdenticalInput",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_eigenmaps.cpp",
+          "line": 139
+        }
+      ]
+    },
+    {
+      "name": "LaplaceDynamicsGramSchmidt",
+      "tests": 9,
+      "testsuite": [
+        {
+          "name": "IdentityIsAlreadyOrthonormal",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_gram_schmidt.cpp",
+          "line": 36
+        },
+        {
+          "name": "OrthonormalizesArbitraryBasis",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_gram_schmidt.cpp",
+          "line": 46
+        },
+        {
+          "name": "FewerVectorsThanDim",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_gram_schmidt.cpp",
+          "line": 56
+        },
+        {
+          "name": "RejectsMoreVecsThanDim",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_gram_schmidt.cpp",
+          "line": 65
+        },
+        {
+          "name": "DetectsRankDeficiency",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_gram_schmidt.cpp",
+          "line": 75
+        },
+        {
+          "name": "NullInputReturnsError",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_gram_schmidt.cpp",
+          "line": 84
+        },
+        {
+          "name": "ZeroSizeIsNoOp",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_gram_schmidt.cpp",
+          "line": 88
+        },
+        {
+          "name": "NumericallyStableOnIllConditionedBasis",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_gram_schmidt.cpp",
+          "line": 95
+        },
+        {
+          "name": "PreservesRowSpan",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_gram_schmidt.cpp",
+          "line": 106
+        }
+      ]
+    },
+    {
+      "name": "BilinearEdges",
+      "tests": 4,
+      "testsuite": [
+        {
+          "name": "FullBilinearAboveTheta_SignedAndComplete",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_bilinear_edges.cpp",
+          "line": 19
+        },
+        {
+          "name": "RowTilingEqualsSinglePass",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_bilinear_edges.cpp",
+          "line": 61
+        },
+        {
+          "name": "OverflowFlagged",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_bilinear_edges.cpp",
+          "line": 94
+        },
+        {
+          "name": "BadArgs",
+          "file": "D:\\Repositories\\Laplace\\engine\\dynamics\\tests\\test_bilinear_edges.cpp",
+          "line": 107
+        }
+      ]
+    }
+  ]
+}
