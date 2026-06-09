@@ -397,17 +397,39 @@ CREATE OR REPLACE FUNCTION describe(p_word bytea, p_lang bytea DEFAULT NULL,
             WHERE c.subject_id = s.id
               AND c.object_id IS NOT NULL
               AND NOT refuted(c.rating, c.rd)
-              AND c.type_id NOT IN (relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
-                                    relation_type_id('HAS_LANGUAGE'))
+              -- Only describe via real seeded relation kinds; a type_id outside the kind namespace
+              -- renders as a bare hash (UD-feature edges, etc.) and is not a describable fact.
+              AND render(c.type_id) LIKE 'substrate/kind/%'
+              -- Exclude bookkeeping, positional, and morpho-syntactic relations: they carry no
+              -- descriptive content and (PRECEDES especially) dominate eff_mu after corpus ingest,
+              -- burying the semantic facts that actually describe the topic.
+              AND c.type_id NOT IN (
+                  relation_type_id('HAS_SENSE'),  relation_type_id('IS_SENSE_OF'),
+                  relation_type_id('HAS_LANGUAGE'),
+                  relation_type_id('PRECEDES'),    relation_type_id('FOLLOWS'),
+                  relation_type_id('CO_OCCURS_WITH'), relation_type_id('OCCURS_IN_CONTEXT'),
+                  relation_type_id('HAS_POS'),     relation_type_id('HAS_UPOS'),
+                  relation_type_id('HAS_XPOS'),    relation_type_id('HAS_LEX_CATEGORY'),
+                  relation_type_id('HAS_FEATURE'), relation_type_id('HAS_VERB_FRAME'),
+                  relation_type_id('IS_LEMMA_OF'))
             ORDER BY eff_mu(c.rating, c.rd) DESC
-            LIMIT p_limit
+            LIMIT p_limit * 3
         ) cc
     )
-    SELECT type_label(t.type_id),
-           realize(t.object_id, COALESCE(p_lang, word_language(p_word))),
-           eff_mu_display(t.rating, t.rd), t.witness_count
-    FROM top t
-    ORDER BY eff_mu(t.rating, t.rd) DESC
+    SELECT d.type, d.fact, d.eff_mu, d.witnesses
+    FROM (
+        SELECT type_label(t.type_id) AS type,
+               realize(t.object_id, COALESCE(p_lang, word_language(p_word))) AS fact,
+               eff_mu_display(t.rating, t.rd) AS eff_mu, t.witness_count AS witnesses,
+               eff_mu(t.rating, t.rd) AS sort_mu
+        FROM top t
+    ) d
+    -- Drop any fact that did not fully reconstruct to human text (label() falls back to a
+    -- hex id + '…' ellipsis; reject those so the reply never contains bare hashes).
+    WHERE d.fact IS NOT NULL AND d.fact <> ''
+      AND right(d.fact, 1) <> U&'\2026'
+      AND right(d.type, 1) <> U&'\2026'
+    ORDER BY d.sort_mu DESC
     LIMIT p_limit
 $$;
 
@@ -846,7 +868,7 @@ BEGIN
 
     ELSIF r.intent = 'describe' THEN
         RETURN QUERY
-            SELECT d.kind || ': ' || COALESCE(d.fact, '?'), d.eff_mu, d.witnesses
+            SELECT d.type || ': ' || COALESCE(d.fact, '?'), d.eff_mu, d.witnesses
             FROM describe(v_topic, v_lang) d;
         IF NOT FOUND THEN
             RETURN QUERY SELECT 'I hold "' || label(v_topic) || '" but no relation consensus to describe yet.',

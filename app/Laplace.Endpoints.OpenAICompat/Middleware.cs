@@ -38,6 +38,20 @@ internal sealed class ExceptionEnvelopeMiddleware
         {
             await _next(context);
         }
+        catch (SubstrateQueryException ex)
+        {
+            // DB is up; the query/schema is wrong. Surface the real SQL error, do not mislabel as unavailable.
+            _logger.LogError(ex, "Substrate query error.");
+            await Results.Json(new
+            {
+                error = new
+                {
+                    type = "substrate_query_error",
+                    code = "substrate_query_error",
+                    message = ex.Message
+                }
+            }, statusCode: StatusCodes.Status500InternalServerError).ExecuteAsync(context);
+        }
         catch (SubstrateUnavailableException ex)
         {
             _logger.LogError(ex, "Substrate unavailable.");
