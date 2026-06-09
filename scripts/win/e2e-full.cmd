@@ -16,11 +16,10 @@ set "MODEL=D:\Models\hub\models--TinyLlama--TinyLlama-1.1B-Chat-v1.0\snapshots\f
 set "MODEL_CODER=D:\Models\hub\models--Qwen--Qwen2.5-Coder-7B-Instruct\snapshots\c03e6d358207e414f1eca0bb1891e29f1db0e242"
 set "TINY_CODES=D:\Data\Ingest\tiny-codes"
 set "STACK_V2=D:\Data\Ingest\stack-v2"
-rem Seed decomposers emit entities-phase intents, then attestations-phase
-rem intents, relying on serial commit order (attestations reference entities
-rem committed by earlier intents). LAPLACE_INGEST_WORKERS must stay 1 or the
-rem multi-consumer channel commits out of order -> referential proof fails.
-set "LAPLACE_INGEST_WORKERS=1"
+rem Phased sources (Unicode aliases, model ETL) tag CommitEpoch so parallel
+rem commits stay within-epoch; cross-epoch barriers preserve referential order.
+rem Start at 1 when debugging; raise after measured tuning on your box.
+if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=2"
 rem LAPLACE_DECOMPOSE_WORKERS pinned to 1 for deterministic, reproducible
 rem batching while we chase the entities binary-COPY framing fault. Parallel
 rem decode is NOT the root cause (the 22P04 "row field count is 0" still fired
@@ -44,24 +43,17 @@ cd app
 echo ==== build CLI ====
 dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q || exit /b 1
 
-rem ---- seed ladder (order matters: layer-gated) ----------------------------
-for %%s in (unicode iso639 wordnet omw ud tatoeba atomic2020 conceptnet wiktionary framenet opensubtitles verbnet propbank semlink) do (
+rem ---- lexical core (L0–L2 semantics) --------------------------------------
+for %%s in (unicode iso639 wordnet verbnet propbank atomic2020 conceptnet ud) do (
   echo ==== seed %%s ====
   dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest %%s || exit /b 1
 )
 
-echo ==== model: TinyLlama-1.1B ====
-dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest model "%MODEL%" || exit /b 1
-
-echo ==== model: Qwen2.5-Coder-7B-Instruct ====
-dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest model "%MODEL_CODER%" || exit /b 1
-
-rem ---- code corpus (AST testimony: grammar + repo structure) ---------------
+rem ---- functionality: repos + code corpora (before world usage) ------------
 echo ==== code: Laplace repo ====
 dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest repo "%LAPLACE_ROOT%" || exit /b 1
 
-rem ---- tiny-codes (1.6M code snippets; requires parquet files at TINY_CODES) --
-rem Download: scripts\win\download-code-data.cmd tiny-codes
+rem Download: scripts\win\download-code-data.cmd tiny-codes  (requires HF_TOKEN)
 if exist "%TINY_CODES%" (
   echo ==== code: tiny-codes ====
   dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest tiny-codes "%TINY_CODES%" || exit /b 1
@@ -69,9 +61,7 @@ if exist "%TINY_CODES%" (
   echo ==== [skip] tiny-codes not found at %TINY_CODES% ====
 )
 
-rem ---- The Stack v2 (targeted language shards) --------------------------------
-rem Download: scripts\win\download-code-data.cmd stack-v2 [--langs python,cpp,...] [--shards N]
-rem Filter languages: set LAPLACE_STACK_LANGS=python,cpp,rust,go,c-sharp,javascript before ingest
+rem Download: scripts\win\download-code-data.cmd stack-v2  (HF_TOKEN + gated terms)
 if exist "%STACK_V2%" (
   echo ==== code: stack-v2 ====
   dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest stack "%STACK_V2%" || exit /b 1
@@ -79,10 +69,31 @@ if exist "%STACK_V2%" (
   echo ==== [skip] stack-v2 not found at %STACK_V2% ====
 )
 
-rem ---- document/book library (the on-ramp e2e.cmd never ran) ---------------
 for %%f in ("%BOOKS%\*.txt") do (
   echo ==== book %%~nxf ====
   dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- db-roundtrip "%%~f" || exit /b 1
+)
+
+rem ---- world usage (tatoeba / opensubtitles / wiktionary) -------------------
+for %%s in (tatoeba opensubtitles wiktionary) do (
+  echo ==== seed %%s ====
+  dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest %%s || exit /b 1
+)
+
+rem ---- L3 bind --------------------------------------------------------------
+for %%s in (omw framenet semlink) do (
+  echo ==== seed %%s ====
+  dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest %%s || exit /b 1
+)
+
+if not defined LAPLACE_SKIP_MODELS (
+  echo ==== model: TinyLlama-1.1B ====
+  dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest safetensors "%MODEL%" || exit /b 1
+
+  echo ==== model: Qwen2.5-Coder-7B-Instruct ====
+  dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest safetensors "%MODEL_CODER%" || exit /b 1
+) else (
+  echo ==== [skip] safetensor snapshots — LAPLACE_SKIP_MODELS=1 ====
 )
 
 echo ==== audit ====

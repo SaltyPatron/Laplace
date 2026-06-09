@@ -52,6 +52,10 @@ public sealed unsafe class GrammarAst : IDisposable
 
     internal GrammarAst(IntPtr ast) => _ast = ast;
 
+    public static GrammarAst Adopt(IntPtr ast) => new(ast);
+
+    public IntPtr Handle => _ast;
+
     public int NodeCount =>
         _ast == IntPtr.Zero ? 0 : checked((int)NativeInterop.AstNodeCount(_ast));
 

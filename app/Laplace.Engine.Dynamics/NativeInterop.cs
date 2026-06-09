@@ -48,6 +48,13 @@ public static partial class NativeInterop
     public static unsafe partial int ProjectEmbeddingD(
         double* pts, nuint n, nuint d, float* w, nuint r, double* outp);
 
+    [LibraryImport(Library, EntryPoint = "norm_rows_d")]
+    public static unsafe partial int NormRowsD(double* data, nuint n, nuint dim);
+
+    [LibraryImport(Library, EntryPoint = "expand_kv_heads_d")]
+    public static unsafe partial int ExpandKvHeadsD(
+        double* kv, nuint n, nuint nHeads, nuint nKv, nuint headDim, double* outp);
+
     [LibraryImport(Library, EntryPoint = "ffn_token_pairs_tile")]
     public static unsafe partial int FfnTokenPairsTile(
         double* emb, nuint n, nuint d,

@@ -16,7 +16,12 @@ public sealed record SubstrateChangeMetadata(
     DateTimeOffset  BuiltAt,
     Hash128?        ParentIntentId,
     /// <summary>Input records consumed by this intent (sentences, synsets, codepoints, …). 0 = not reported.</summary>
-    long            InputUnitsConsumed = 0);
+    long            InputUnitsConsumed = 0,
+    /// <summary>
+    /// Commit barrier group. Ingest may parallelize commits within one epoch but never across epochs.
+    /// Bump when later intents reference entities committed only in earlier phases.
+    /// </summary>
+    int             CommitEpoch = 0);
 
 public sealed record EntityRow(
     Hash128  Id,

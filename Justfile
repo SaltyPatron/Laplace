@@ -120,7 +120,7 @@ ingest-all: build-app
     scripts/ingest-source.sh all
 
 ingest-tinyllama: build-app
-    scripts/ingest-source.sh model "${LAPLACE_TINYLLAMA_DIR:?set LAPLACE_TINYLLAMA_DIR to the model snapshot dir}"
+    scripts/ingest-source.sh safetensors "${LAPLACE_TINYLLAMA_DIR:?set LAPLACE_TINYLLAMA_DIR to the HF snapshot dir (config+tokenizer+weights)}"
 
 audit-decomposers *args: build-app
     @chmod +x scripts/audit-decomposers.sh

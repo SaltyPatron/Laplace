@@ -504,6 +504,8 @@ render_node(HTAB *memo, Datum id, int depth, int max_depth)
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_render_text);
+PG_FUNCTION_INFO_V1(pg_laplace_render_text_fast);
+PG_FUNCTION_INFO_V1(pg_laplace_render_text_batch);
 
 Datum
 pg_laplace_render_text(PG_FUNCTION_ARGS)
@@ -544,4 +546,107 @@ pg_laplace_render_text(PG_FUNCTION_ARGS)
         SPI_finish();
         PG_RETURN_TEXT_P(result);
     }
+}
+
+Datum
+pg_laplace_render_text_fast(PG_FUNCTION_ARGS)
+{
+    Datum   id;
+    int32   max_depth = 8;
+    HASHCTL ctl;
+    HTAB   *memo;
+    const char *rendered;
+    MemoryContext caller_cxt = CurrentMemoryContext;
+
+    if (PG_ARGISNULL(0))
+        PG_RETURN_NULL();
+    id = PG_GETARG_DATUM(0);
+    if (PG_NARGS() > 1 && !PG_ARGISNULL(1))
+        max_depth = PG_GETARG_INT32(1);
+
+    if (SPI_connect() != SPI_OK_CONNECT)
+        elog(ERROR, "render_text_fast: SPI_connect failed");
+    ensure_render_plans();
+
+    memset(&ctl, 0, sizeof(ctl));
+    ctl.keysize = 16;
+    ctl.entrysize = sizeof(RenderMemoEntry);
+    memo = hash_create("render_text_fast memo", 1024, &ctl, HASH_ELEM | HASH_BLOBS);
+
+    rendered = render_node(memo, id, 0, max_depth);
+
+    if (rendered == NULL || rendered[0] == '\0')
+    {
+        SPI_finish();
+        PG_RETURN_NULL();
+    }
+    MemoryContext spi_cxt = MemoryContextSwitchTo(caller_cxt);
+    text *result = cstring_to_text(rendered);
+    MemoryContextSwitchTo(spi_cxt);
+    SPI_finish();
+    PG_RETURN_TEXT_P(result);
+}
+
+Datum
+pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
+{
+    ArrayType  *arr;
+    int32       max_depth;
+    Datum      *elems;
+    bool       *nulls;
+    int         n;
+    Datum      *out;
+    bool       *out_nulls;
+    ArrayType  *result;
+
+    if (PG_ARGISNULL(0))
+        PG_RETURN_NULL();
+    arr = PG_GETARG_ARRAYTYPE_P(0);
+    max_depth = PG_ARGISNULL(1) ? 8 : PG_GETARG_INT32(1);
+
+    if (ARR_NDIM(arr) != 1)
+        ereport(ERROR, (errmsg("render_text_batch: ids must be 1-dimensional")));
+    if (ARR_ELEMTYPE(arr) != BYTEAOID)
+        ereport(ERROR, (errmsg("render_text_batch: element type must be bytea")));
+
+    deconstruct_array(arr, BYTEAOID, -1, false, TYPALIGN_INT,
+                      &elems, &nulls, &n);
+    out = (Datum *) palloc0(sizeof(Datum) * n);
+    out_nulls = (bool *) palloc0(sizeof(bool) * n);
+
+    if (SPI_connect() != SPI_OK_CONNECT)
+        elog(ERROR, "render_text_batch: SPI_connect failed");
+    ensure_render_plans();
+
+    for (int i = 0; i < n; i++)
+    {
+        HASHCTL ctl;
+        HTAB   *memo;
+        const char *rendered;
+
+        if (nulls[i])
+        {
+            out_nulls[i] = true;
+            continue;
+        }
+        memset(&ctl, 0, sizeof(ctl));
+        ctl.keysize = 16;
+        ctl.entrysize = sizeof(RenderMemoEntry);
+        memo = hash_create("render_text_batch memo", 256, &ctl, HASH_ELEM | HASH_BLOBS);
+        rendered = render_node(memo, elems[i], 0, max_depth);
+        if (rendered == NULL || rendered[0] == '\0')
+            out_nulls[i] = true;
+        else
+            out[i] = CStringGetTextDatum(rendered);
+        hash_destroy(memo);
+    }
+    SPI_finish();
+
+    {
+        int dims[1] = { n };
+        int lbs[1] = { 1 };
+        result = construct_md_array(out, out_nulls, 1, dims, lbs,
+                                  TEXTOID, -1, false, TYPALIGN_INT);
+    }
+    PG_RETURN_ARRAYTYPE_P(result);
 }

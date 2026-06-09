@@ -91,25 +91,17 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         foreach (var id in uniqueEntityIds)
             if (!_provenEntities.Contains(id)) entToCheck.Add(id);
 
-        var existingEntities = entToCheck.Count > 0
-            ? await EntitiesExistAsync(conn, entToCheck, ct)
-            : new HashSet<Hash128>();
-        if (entToCheck.Count > 0) roundTrips++;
-        _provenEntities.AddRange(existingEntities);
-
         var physToCheck = CollectUnprovenIds(changes, static c => c.Physicalities, static p => p.Id, _provenPhys);
-        var existingPhys = await LoadExistingIdsAsync(conn, "physicalities", physToCheck, ct);
-        if (physToCheck.Count > 0) roundTrips++;
-        _provenPhys.AddRange(existingPhys);
+        var attToCheck = _bulkFreshSource
+            ? new List<Hash128>()
+            : CollectUnprovenIds(changes, static c => c.Attestations, static a => a.Id, _provenAtt);
 
-        var existingAtt = new HashSet<Hash128>();
-        if (!_bulkFreshSource)
-        {
-            var attToCheck = CollectUnprovenIds(changes, static c => c.Attestations, static a => a.Id, _provenAtt);
-            existingAtt = await LoadExistingIdsAsync(conn, "attestations", attToCheck, ct);
-            if (attToCheck.Count > 0) roundTrips++;
-            _provenAtt.AddRange(existingAtt);
-        }
+        var (existingEntities, existingPhys, existingAtt) = await IntentPreflightAsync(
+            conn, entToCheck, physToCheck, attToCheck, ct);
+        if (entToCheck.Count > 0 || physToCheck.Count > 0 || attToCheck.Count > 0) roundTrips++;
+        _provenEntities.AddRange(existingEntities);
+        _provenPhys.AddRange(existingPhys);
+        _provenAtt.AddRange(existingAtt);
 
         using var stage = IntentStage.New(Math.Max(Math.Max(uniqueEntityIds.Count, physAttempted), attAttempted));
 
@@ -291,6 +283,70 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             RoundTrips: roundTrips,
             WallClock: sw.Elapsed,
             TrunkShortcircuitHit: !anyRows);
+    }
+
+    private static async Task<(HashSet<Hash128> Entities, HashSet<Hash128> Phys, HashSet<Hash128> Att)>
+        IntentPreflightAsync(
+            NpgsqlConnection conn,
+            IReadOnlyList<Hash128> entityIds,
+            IReadOnlyList<Hash128> physIds,
+            IReadOnlyList<Hash128> attIds,
+            CancellationToken ct)
+    {
+        var entExisting = new HashSet<Hash128>();
+        var physExisting = new HashSet<Hash128>();
+        var attExisting = new HashSet<Hash128>();
+        if (entityIds.Count == 0 && physIds.Count == 0 && attIds.Count == 0)
+            return (entExisting, physExisting, attExisting);
+
+        const int ChunkSize = 250_000;
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 0;
+        cmd.CommandText =
+            "SELECT (p).entity_exists, (p).phys_exists, (p).att_exists " +
+            "FROM laplace.intent_preflight(@ent, @phys, @att) p";
+        var entParam = cmd.Parameters.Add(
+            new NpgsqlParameter("ent", NpgsqlDbType.Array | NpgsqlDbType.Bytea));
+        var physParam = cmd.Parameters.Add(
+            new NpgsqlParameter("phys", NpgsqlDbType.Array | NpgsqlDbType.Bytea));
+        var attParam = cmd.Parameters.Add(
+            new NpgsqlParameter("att", NpgsqlDbType.Array | NpgsqlDbType.Bytea));
+
+        int max = Math.Max(entityIds.Count, Math.Max(physIds.Count, attIds.Count));
+        for (int off = 0; off < max; off += ChunkSize)
+        {
+            int entLen = Math.Min(ChunkSize, Math.Max(0, entityIds.Count - off));
+            int physLen = Math.Min(ChunkSize, Math.Max(0, physIds.Count - off));
+            int attLen = Math.Min(ChunkSize, Math.Max(0, attIds.Count - off));
+
+            entParam.Value = ToByteaArray(entityIds, off, entLen);
+            physParam.Value = ToByteaArray(physIds, off, physLen);
+            attParam.Value = ToByteaArray(attIds, off, attLen);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            if (!await r.ReadAsync(ct)) continue;
+            DecodeBitmap(entExisting, entityIds, off, entLen, r.GetFieldValue<byte[]>(0));
+            DecodeBitmap(physExisting, physIds, off, physLen, r.GetFieldValue<byte[]>(1));
+            DecodeBitmap(attExisting, attIds, off, attLen, r.GetFieldValue<byte[]>(2));
+        }
+        return (entExisting, physExisting, attExisting);
+    }
+
+    private static byte[][] ToByteaArray(IReadOnlyList<Hash128> ids, int off, int len)
+    {
+        var arg = new byte[len][];
+        for (int i = 0; i < len; i++) arg[i] = ids[off + i].ToBytes();
+        return arg;
+    }
+
+    private static void DecodeBitmap(
+        HashSet<Hash128> existing, IReadOnlyList<Hash128> ids, int off, int len, byte[] bitmap)
+    {
+        for (int i = 0; i < len; i++)
+        {
+            byte b = (byte)(i >> 3 < bitmap.Length ? bitmap[i >> 3] : 0);
+            if (((b >> (i & 7)) & 1) != 0) existing.Add(ids[off + i]);
+        }
     }
 
     private static async Task<HashSet<Hash128>> EntitiesExistAsync(

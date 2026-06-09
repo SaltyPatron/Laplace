@@ -152,6 +152,21 @@ public static partial class NativeInterop
 
     [LibraryImport(Library, EntryPoint = "format_writer_free")]
     internal static partial void FormatWriterFree(IntPtr w);
+
+    // Text→tensor bridge (Spectra/MKL eigenmaps path; see docs/OPEN-PROBLEMS §5).
+    [LibraryImport(Library, EntryPoint = "feature_extractor_load",
+        StringMarshalling = StringMarshalling.Utf8)]
+    public static partial IntPtr FeatureExtractorLoad(string extractorName);
+
+    [LibraryImport(Library, EntryPoint = "feature_extractor_output_dim")]
+    public static partial nuint FeatureExtractorOutputDim(IntPtr fe);
+
+    [LibraryImport(Library, EntryPoint = "feature_extractor_extract")]
+    public static unsafe partial int FeatureExtractorExtract(
+        IntPtr fe, byte* entityHash, double* outFeatures, nuint outDim);
+
+    [LibraryImport(Library, EntryPoint = "feature_extractor_free")]
+    public static partial void FeatureExtractorFree(IntPtr fe);
 }
 
 [StructLayout(LayoutKind.Sequential)]

@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <vector>
 
 #ifdef LAPLACE_HAS_MKL
@@ -102,4 +103,52 @@ int project_embedding_d(const double* pts, std::size_t n, std::size_t d,
     (void)pts; (void)W; (void)out;
     return -2;
 #endif
+}
+
+extern "C"
+int norm_rows_d(double* data, std::size_t n, std::size_t dim)
+{
+    if (!data || n == 0 || dim == 0) return -1;
+#ifdef LAPLACE_HAS_MKL
+    for (std::size_t i = 0; i < n; ++i) {
+        double* row = data + i * dim;
+        double ss = cblas_ddot((MKL_INT)dim, row, 1, row, 1);
+        if (ss > 0.0) {
+            double inv = 1.0 / std::sqrt(ss);
+            cblas_dscal((MKL_INT)dim, inv, row, 1);
+        }
+    }
+    return 0;
+#else
+    for (std::size_t i = 0; i < n; ++i) {
+        double* row = data + i * dim;
+        double ss = 0.0;
+        for (std::size_t c = 0; c < dim; ++c) ss += row[c] * row[c];
+        double inv = ss > 0.0 ? 1.0 / std::sqrt(ss) : 0.0;
+        for (std::size_t c = 0; c < dim; ++c) row[c] *= inv;
+    }
+    return 0;
+#endif
+}
+
+extern "C"
+int expand_kv_heads_d(const double* kv, std::size_t n, std::size_t n_heads,
+                      std::size_t n_kv, std::size_t head_dim, double* out)
+{
+    if (!kv || !out || n == 0 || n_heads == 0 || n_kv == 0 || head_dim == 0) return -1;
+    const std::size_t kv_dim = n_kv * head_dim;
+    const std::size_t attn_dim = n_heads * head_dim;
+    if (kv_dim == attn_dim) {
+        std::memcpy(out, kv, n * attn_dim * sizeof(double));
+        return 0;
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        const double* src = kv + i * kv_dim;
+        double* dst = out + i * attn_dim;
+        for (std::size_t h = 0; h < n_heads; ++h) {
+            std::size_t kh = std::min(n_kv - 1, h * n_kv / std::max<std::size_t>(1, n_heads));
+            std::memcpy(dst + h * head_dim, src + kh * head_dim, head_dim * sizeof(double));
+        }
+    }
+    return 0;
 }

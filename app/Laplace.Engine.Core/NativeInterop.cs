@@ -118,6 +118,10 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_text_decomposer_run")]
     internal static partial int TextDecomposerRun(byte* utf8, nuint len, IntPtr* outTree);
 
+    [LibraryImport(Library, EntryPoint = "laplace_normalize_nfc_utf8")]
+    public static partial int NormalizeNfcUtf8(
+        byte* utf8, nuint len, byte** outUtf8, nuint* outLen);
+
     [LibraryImport(Library, EntryPoint = "tier_tree_id_array")]
     internal static partial IntPtr TierTreeIdArray(IntPtr tree);
 
@@ -265,4 +269,87 @@ public static unsafe partial class NativeInterop
 
     [LibraryImport(Library, EntryPoint = "laplace_grammar_tags_free")]
     internal static partial void GrammarTagsFree(LaplaceTag* tags);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grammar_compose", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int GrammarCompose(
+        byte* utf8, nuint len, IntPtr ast, string modalityId,
+        Hash128 sourceId, Hash128 typeMetaId, IntPtr* outResult);
+
+    [LibraryImport(Library, EntryPoint = "laplace_compose_result_free")]
+    public static partial void ComposeResultFree(IntPtr result);
+
+    [LibraryImport(Library, EntryPoint = "laplace_compose_entity_count")]
+    public static partial nuint ComposeEntityCount(IntPtr result);
+
+    [LibraryImport(Library, EntryPoint = "laplace_compose_physicality_count")]
+    public static partial nuint ComposePhysicalityCount(IntPtr result);
+
+    [LibraryImport(Library, EntryPoint = "laplace_compose_precedes_count")]
+    public static partial nuint ComposePrecedesCount(IntPtr result);
+
+    [LibraryImport(Library, EntryPoint = "laplace_compose_root_id")]
+    public static partial Hash128 ComposeRootId(IntPtr result);
+
+    [LibraryImport(Library, EntryPoint = "laplace_compose_get_entity")]
+    public static partial int ComposeGetEntity(IntPtr result, nuint i, ComposeEntityNative* outEntity);
+
+    [LibraryImport(Library, EntryPoint = "laplace_compose_get_physicality")]
+    public static partial int ComposeGetPhysicality(IntPtr result, nuint i, ComposePhysicalityNative* outPhys);
+
+    [LibraryImport(Library, EntryPoint = "laplace_compose_get_precedes")]
+    public static partial int ComposeGetPrecedes(IntPtr result, nuint i, ComposePrecedesNative* outPrec);
+
+    [LibraryImport(Library, EntryPoint = "laplace_compose_span_lookup")]
+    public static partial int ComposeSpanLookup(IntPtr result, uint startByte, uint endByte, Hash128* outId);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grammar_row_iter_new")]
+    public static partial int GrammarRowIterNew(IntPtr recipe, IntPtr* outIter);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grammar_row_iter_feed")]
+    public static partial int GrammarRowIterFeed(
+        IntPtr iter, byte* chunk, nuint len, ParsedRowNative** outRows, nuint* outCount);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grammar_row_iter_free")]
+    public static partial void GrammarRowIterFree(IntPtr iter);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grammar_row_iter_free_rows")]
+    public static partial void GrammarRowIterFreeRows(ParsedRowNative* rows, nuint count);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ParsedRowNative
+    {
+        public IntPtr Ast;
+        public IntPtr RowUtf8;
+        public UIntPtr RowLen;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ComposeEntityNative
+    {
+        public Hash128 Id;
+        public byte Tier;
+        public byte Pad0, Pad1, Pad2;
+        public Hash128 TypeId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ComposePhysicalityNative
+    {
+        public Hash128 Id;
+        public Hash128 EntityId;
+        public Hash128 SourceId;
+        public double Coord0, Coord1, Coord2, Coord3;
+        public Hilbert128 Hilbert;
+        public IntPtr TrajectoryXyzm;
+        public UIntPtr TrajectoryN;
+        public UIntPtr NConstituents;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ComposePrecedesNative
+    {
+        public Hash128 SubjectId;
+        public Hash128 ObjectId;
+        public long Games;
+    }
 }

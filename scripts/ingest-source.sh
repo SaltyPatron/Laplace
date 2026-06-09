@@ -9,8 +9,8 @@ LOGDIR="${INGEST_LOGDIR:-/tmp}"
 LAYER2=(wordnet ud tatoeba atomic2020 conceptnet wiktionary opensubtitles verbnet propbank)
 
 if [[ -z "$source" ]]; then
-    echo "Usage: $0 <source> [path] | all | model <model-dir>" >&2
-    echo "Sources: unicode iso639 ${LAYER2[*]} omw model" >&2
+    echo "Usage: $0 <source> [path] | all | safetensors <snapshot-dir>" >&2
+    echo "Sources: unicode iso639 ${LAYER2[*]} omw safetensors" >&2
     exit 2
 fi
 
@@ -37,10 +37,10 @@ case "$source" in
             echo ">>> stage $src — done in $((SECONDS - t0))s"
         done
         ;;
-    model)
-        [[ -n "$path" ]] || { echo "Usage: $0 model <model-dir-path>" >&2; exit 2; }
+    safetensors|model)
+        [[ -n "$path" ]] || { echo "Usage: $0 safetensors <snapshot-dir>" >&2; exit 2; }
         build_cli
-        ingest model "$path"
+        ingest safetensors "$path"
         ;;
     unicode|iso639|omw|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary)
         build_cli

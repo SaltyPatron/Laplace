@@ -216,12 +216,28 @@ public sealed class LlamaTokenizerParser
         if (surface.Length == 0)
             surface = " ";
 
-        // NOTE: canonicalization (NFC) is the engine's law, not C#'s. Both books and token surfaces
-        // must pass through the SAME engine normalization (laplace_normalize_nfc) so token-id ≡
-        // text-id bit-exactly. Doing NFC here in .NET is a second, non-authoritative implementation
-        // that can diverge on exotic codepoints — the fix belongs in the engine text path, applied
-        // uniformly, not bolted on here.
-        return (Encoding.UTF8.GetBytes(surface), role);
+        var raw = Encoding.UTF8.GetBytes(surface);
+        return (NormalizeNfc(raw), role);
+    }
+
+    private static unsafe byte[] NormalizeNfc(byte[] utf8)
+    {
+        if (utf8.Length == 0) return utf8;
+        byte* outPtr = null;
+        nuint outLen = 0;
+        fixed (byte* p = utf8)
+        {
+            int rc = NativeInterop.NormalizeNfcUtf8(p, (nuint)utf8.Length, &outPtr, &outLen);
+            if (rc != 0) return utf8;
+        }
+        try
+        {
+            return new ReadOnlySpan<byte>(outPtr, (int)outLen).ToArray();
+        }
+        finally
+        {
+            if (outPtr != null) NativeMemory.Free(outPtr);
+        }
     }
 
     public static IEnumerable<SubstrateChange> BuildBatches(

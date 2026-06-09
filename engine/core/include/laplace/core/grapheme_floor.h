@@ -52,6 +52,13 @@ const uint32_t* laplace_grapheme_floor_cp_to_graph(const laplace_grapheme_floor_
 
 void laplace_grapheme_floor_free_owned(laplace_grapheme_floor_t* f);
 
+/* Maps half-open byte span [start_byte, end_byte) to half-open grapheme ordinals
+ * [out_g_start, out_g_end). Returns 0 on success, -1 bad args / empty span. */
+int laplace_grapheme_floor_span_to_graphemes(
+    const laplace_grapheme_floor_t* f,
+    uint32_t start_byte, uint32_t end_byte,
+    size_t* out_g_start, size_t* out_g_end);
+
 #ifdef __cplusplus
 }
 #endif

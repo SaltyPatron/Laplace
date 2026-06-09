@@ -6,7 +6,11 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Model;
 
-public sealed class ModelDecomposer : IDecomposer
+/// <summary>
+/// Deposes a HuggingFace safetensor snapshot (config + tokenizer + weight blobs) into substrate testimony.
+/// Not GGUF — safetensors are tensor containers only; recipe and vocab are external files in the snapshot dir.
+/// </summary>
+public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
 {
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AIModelProbe/v1");
@@ -223,10 +227,35 @@ public sealed class ModelDecomposer : IDecomposer
         }
     }
 
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        if (!SafetensorSnapshotWitness.IsComplete(_modelDir))
+            return Task.FromResult<IngestInventory?>(null);
+
+        var files = new List<IngestFileSpec>();
+        foreach (var path in Directory.GetFiles(_modelDir, "*.safetensors").OrderBy(f => f, StringComparer.Ordinal))
+        {
+            ct.ThrowIfCancellationRequested();
+            int tensors = SafetensorsContainerParser.ParseHeader(path).Count;
+            files.Add(new(Path.GetFileName(path), path, tensors));
+        }
+
+        long matchups = EstimateMatchupUnits();
+        if (matchups <= 0) matchups = 1;
+        return Task.FromResult<IngestInventory?>(new("matchups", matchups, files));
+    }
+
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
+        long n = EstimateMatchupUnits();
+        return Task.FromResult<long?>(n > 0 ? n : null);
+    }
+
+    private long EstimateMatchupUnits()
+    {
         string configPath = Path.Combine(_modelDir, "config.json");
-        if (!File.Exists(configPath)) return Task.FromResult<long?>(null);
+        if (!File.Exists(configPath)) return 0;
         var r = LlamaRecipeExtractor.Parse(configPath);
         var p = ArchitectureProfile.For(r.ModelType);
         long d = r.HiddenSize, interm = r.IntermediateSize;
@@ -256,7 +285,7 @@ public sealed class ModelDecomposer : IDecomposer
             + (p.HasGate ? d * interm : 0)
             + 2 * d * interm
             + d;
-        return Task.FromResult<long?>(distinctVocab + relations);
+        return distinctVocab + relations;
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

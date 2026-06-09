@@ -43,7 +43,7 @@ Fidelity criterion = behavior: same prompts, same harness, diff continuations. B
 
 ## Artifact classes
 
-1. **Round-trip model**: depose model A → re-export at A's recipe → behavioral diff vs A. The compatibility/salvage proof; the open keystone experiment (TinyLlama + Phi-2 staged in D:\Models\hub).
+1. **Round-trip model**: depose safetensor snapshot A → re-export at A's recipe → behavioral diff vs A. The compatibility/salvage proof; the open keystone experiment (TinyLlama + Phi-2 staged in D:\Models\hub).
 2. **Clean-room model**: export from curated-witness consensus with zero model ancestry — every weight traceable to enumerated, licensed sources. A certifiable artifact class nothing trained can match. Depends on (3) for generative quality.
 3. **No-ancestor compile ("a model trained by reading")**: literature → sequence arenas → tensor pours. BLOCKED on the text→tensor bridge (OPEN-PROBLEMS §5): a defined estimator from PRECEDES/CO_OCCURS/COMPLETES_TO statistics into Q/K-affinity and projection pours. The load-bearing open lemma of the whole thesis.
 4. **Resized exports**: same substrate, any target_dim — edge-sized builds on demand (distillation without a teacher-student loop or its license entanglement).

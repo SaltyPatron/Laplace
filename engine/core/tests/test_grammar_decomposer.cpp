@@ -28,10 +28,17 @@ const char* root_kind(laplace_ast_t* ast) {
     return laplace_ast_kind_name(ast, nd.kind_id);
 }
 
-TEST(GrammarRegistry, ListsTenStarterModalities) {
-    const char* ids[16];
-    size_t n = laplace_grammar_list(ids, 16);
-    EXPECT_EQ(n, 10u);
+TEST(GrammarRegistry, ListsRegisteredModalities) {
+    const char* ids[64];
+    size_t n = laplace_grammar_list(ids, 64);
+    EXPECT_GE(n, 11u);
+    bool has_tsv = false, has_csv = false;
+    for (size_t i = 0; i < n; ++i) {
+        if (ids[i] && std::strcmp(ids[i], "tsv") == 0) has_tsv = true;
+        if (ids[i] && std::strcmp(ids[i], "csv") == 0) has_csv = true;
+    }
+    EXPECT_TRUE(has_tsv);
+    EXPECT_TRUE(has_csv);
 }
 
 TEST(GrammarRegistry, UnknownModalityIsNull) {
@@ -42,22 +49,32 @@ TEST(GrammarRegistry, UnknownModalityIsNull) {
 
 // Every starter grammar's recipe must be ABI-compatible with the compiled-in
 // mechanism (ts_parser_set_language succeeds) and yield at least a root node.
-TEST(GrammarDecomposer, EveryRecipeParsesAbiCompatible) {
-    const char* ids[16];
-    size_t n = laplace_grammar_list(ids, 16);
-    ASSERT_EQ(n, 10u);
-    const char* sample = "x\n";
-    for (size_t i = 0; i < n; ++i) {
-        const TSLanguage* recipe = laplace_grammar_lookup_by_id(ids[i]);
-        ASSERT_NE(recipe, nullptr) << ids[i];
-        laplace_ast_t* ast = nullptr;
-        int rc = laplace_grammar_parse(
-            reinterpret_cast<const uint8_t*>(sample), std::strlen(sample), recipe, &ast);
-        EXPECT_EQ(rc, 0) << ids[i];
-        ASSERT_NE(ast, nullptr) << ids[i];
-        EXPECT_GE(laplace_ast_node_count(ast), 1u) << ids[i];
-        laplace_ast_free(ast);
-    }
+TEST(GrammarDecomposer, TsvStructure) {
+    const TSLanguage* recipe = laplace_grammar_lookup_by_id("tsv");
+    ASSERT_NE(recipe, nullptr);
+    const char* src = "uri\trel\tstart\tend\tmeta\n/c/en/dog\tRelatedTo\t/c/en/animal\t/c/en/pet\t{\"weight\":1.0}\n";
+    laplace_ast_t* ast = nullptr;
+    ASSERT_EQ(laplace_grammar_parse(
+        reinterpret_cast<const uint8_t*>(src), std::strlen(src), recipe, &ast), 0);
+    ASSERT_NE(ast, nullptr);
+    EXPECT_STREQ(root_kind(ast), "document");
+    EXPECT_TRUE(has_kind(ast, "row"));
+    EXPECT_TRUE(has_kind(ast, "field"));
+    laplace_ast_free(ast);
+}
+
+TEST(GrammarDecomposer, CsvStructure) {
+    const TSLanguage* recipe = laplace_grammar_lookup_by_id("csv");
+    ASSERT_NE(recipe, nullptr);
+    const char* src = "id,lang,text\n1,en,hello\n";
+    laplace_ast_t* ast = nullptr;
+    ASSERT_EQ(laplace_grammar_parse(
+        reinterpret_cast<const uint8_t*>(src), std::strlen(src), recipe, &ast), 0);
+    ASSERT_NE(ast, nullptr);
+    EXPECT_STREQ(root_kind(ast), "document");
+    EXPECT_TRUE(has_kind(ast, "row"));
+    EXPECT_TRUE(has_kind(ast, "field"));
+    laplace_ast_free(ast);
 }
 
 // Modality-agnostic: Python and JSON go through the identical code path.

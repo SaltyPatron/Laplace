@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "description": "Invention-complete witness manifest — full stack, language-scoped via LAPLACE_INGEST_LANGS",
   "language_scope": {
     "global_env": "LAPLACE_INGEST_LANGS",
@@ -7,47 +7,62 @@
     "cross_language_edges_env": "LAPLACE_EMIT_CROSS_LANG",
     "law": "Every witness source remains in the manifest. Language filters reduce which languages are ingested from multilingual corpora — not which witnesses exist."
   },
-  "ordering_law": "unicode (L0) + iso639 (L1) floor, then wordnet (L2) as foundational lexicon. Foundational L2 semantics before usage corpora; L3 (omw/framenet/semlink) after all L2.",
+  "ordering_law": "unicode (L0) + iso639 (L1) + wordnet (L2 lexicon) → semantic L2 (verbnet…ud) → functionality (repos, db-roundtrip books, tiny-codes, stack) → world usage (tatoeba, opensubtitles, wiktionary) → L3 bind (omw, framenet, semlink). Code before world data.",
   "vault_root": "D:/Data/Ingest",
   "repos_root": "D:/Repositories",
   "models_root": "D:/Models/hub",
-  "lexical_ladder": [
+  "lexical_core": [
     { "order": 1, "cli": "unicode", "path": "Unicode", "layer": "L0", "size_gb": 37.5 },
     { "order": 2, "cli": "iso639", "path": "ISO639", "layer": "L1", "size_gb": 0.01 },
     { "order": 3, "cli": "wordnet", "path": "Wordnet", "layer": "L2", "size_gb": 0.05 },
     { "order": 4, "cli": "verbnet", "path": "VerbNet", "layer": "L2", "size_gb": 0.01 },
     { "order": 5, "cli": "propbank", "path": "PropBank", "layer": "L2", "size_gb": 0.04 },
-    { "order": 6, "cli": "atomic2020", "path": "Atomic2020", "layer": "L2", "size_gb": 0.06 },
-    { "order": 7, "cli": "conceptnet", "path": "ConceptNet", "layer": "L2", "size_gb": 9.5 },
-    { "order": 8, "cli": "ud", "path": "UD-Treebanks", "layer": "L2", "size_gb": 4.2 },
-    { "order": 9, "cli": "tatoeba", "path": "Tatoeba", "layer": "L2", "size_gb": 9.6 },
+    { "order": 6, "cli": "atomic2020", "path": "Atomic2020", "layer": "L2", "size_gb": 0.06, "packaging_modality": "tsv" },
+    { "order": 7, "cli": "conceptnet", "path": "ConceptNet", "layer": "L2", "size_gb": 9.5, "packaging_modality": "tsv" },
+    { "order": 8, "cli": "ud", "path": "UD-Treebanks", "layer": "L2", "size_gb": 4.2 }
+  ],
+  "functionality": {
+    "law": "Repos, document roundtrips, and code corpora deposit PRECEDES + HAS_EXAMPLE — the generate/converse/coding surface. Runs after lexical core, before world usage.",
+    "repositories": [
+      "Laplace",
+      "X_BONEYARD",
+      "llama-workspace",
+      "SpecEditor",
+      "TournamentManager",
+      "Laplace-Space-Game",
+      "temp-llama-models"
+    ],
+    "test_data": {
+      "text_glob": "test-data/text/*.txt",
+      "code_files": ["test-data/text/code.py", "test-data/text/data.json"],
+      "cli": "db-roundtrip",
+      "images_glob": "test-data/images/*.png",
+      "audio_glob": "test-data/audio/*.wav"
+    },
+    "code_corpora": [
+      { "cli": "tiny-codes", "path": "tiny-codes", "download": "download-code-data.cmd tiny-codes", "hf_token_env": "HF_TOKEN" },
+      { "cli": "stack", "path": "stack-v2", "download": "download-code-data.cmd stack-v2", "hf_token_env": "HF_TOKEN" }
+    ]
+  },
+  "world_usage": [
+    { "order": 9, "cli": "tatoeba", "path": "Tatoeba", "layer": "L2", "size_gb": 9.6, "packaging_modality": "tsv" },
     { "order": 10, "cli": "opensubtitles", "path": "OpenSubtitles", "layer": "L2", "size_gb": 15.2 },
-    { "order": 11, "cli": "wiktionary", "path": "Wiktionary", "layer": "L2", "size_gb": 33.8 },
+    { "order": 11, "cli": "wiktionary", "path": "Wiktionary", "layer": "L2", "size_gb": 33.8 }
+  ],
+  "l3_bind": [
     { "order": 12, "cli": "omw", "path": "OMW", "layer": "L3", "size_gb": 0.14 },
     { "order": 13, "cli": "framenet", "path": "FrameNet/framenet_v17", "layer": "L3", "size_gb": 0.89 },
     { "order": 14, "cli": "semlink", "path": "SemLink", "layer": "L3", "size_gb": 0.03 }
   ],
-  "repositories": [
-    "Laplace",
-    "X_BONEYARD",
-    "llama-workspace",
-    "SpecEditor",
-    "TournamentManager",
-    "Laplace-Space-Game",
-    "temp-llama-models"
-  ],
-  "test_data": {
-    "text_glob": "test-data/text/*.txt",
-    "code_files": ["test-data/text/code.py", "test-data/text/data.json"],
-    "images_glob": "test-data/images/*.png",
-    "audio_glob": "test-data/audio/*.wav"
-  },
-  "code_corpora": [
-    { "cli": "tiny-codes", "path": "tiny-codes", "download": "download-code-data.cmd tiny-codes" },
-    { "cli": "stack", "path": "stack-v2", "download": "download-code-data.cmd stack-v2" }
-  ],
-  "models": {
-    "discover": "models--*/snapshots/*",
+  "safetensor_snapshots": {
+    "law": "HF snapshot bundle (config.json + tokenizer.json + *.safetensors). Not self-contained like GGUF — the directory is the witness unit. Optional at seed time: converse, generate, and custom export are attestation-complete without weight deposition.",
+    "skip_env": "LAPLACE_SKIP_MODELS=1",
+    "root": "D:/Models/hub",
+    "witness_set": [
+      "models--TinyLlama--TinyLlama-1.1B-Chat-v1.0",
+      "models--microsoft--phi-2",
+      "models--Qwen--Qwen2.5-Coder-3B-Instruct"
+    ],
     "require_files": ["tokenizer.json", "config.json"]
   }
 }

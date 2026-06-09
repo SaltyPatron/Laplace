@@ -203,3 +203,17 @@ int codepoint_table_compose(uint32_t first, uint32_t second, uint32_t* out_compo
     }
     return 0;
 }
+
+int codepoint_table_resolve_atom(uint32_t atom, hash128_t* out_id,
+                                 double out_coord[4], hilbert128_t* out_hb) {
+    if (!out_id || !out_coord || !out_hb) return -1;
+    const codepoint_entry_t* e = codepoint_table_lookup(atom);
+    if (!e) return -1;
+    *out_id = e->hash;
+    out_coord[0] = e->coord[0];
+    out_coord[1] = e->coord[1];
+    out_coord[2] = e->coord[2];
+    out_coord[3] = e->coord[3];
+    *out_hb = e->hilbert;
+    return 0;
+}

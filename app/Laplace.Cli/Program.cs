@@ -185,10 +185,7 @@ internal static class Program
         return allOk ? 0 : 1;
     }
 
-    private static bool IsModelDir(string dir) =>
-        Directory.Exists(dir)
-        && File.Exists(Path.Combine(dir, "config.json"))
-        && Directory.GetFiles(dir, "*.safetensors").Length > 0;
+    private static bool IsModelDir(string dir) => SafetensorSnapshotWitness.IsComplete(dir);
 
     // HF cache layout: <hub>/models--ORG--NAME/snapshots/<rev>/, weights resolved via blob symlinks.
     private static IEnumerable<string> EnumerateHubModels(string hub)
@@ -228,7 +225,7 @@ internal static class Program
             foreach (var snap in Directory.GetDirectories(snapsDir)
                                           .OrderByDescending(Directory.GetLastWriteTimeUtc))
             {
-                if (Directory.GetFiles(snap, "*.safetensors").Length > 0) return snap;
+                if (SafetensorSnapshotWitness.IsComplete(snap)) return snap;
             }
         }
         return "";
@@ -339,6 +336,7 @@ internal static class Program
         bool any = false;
         await using (var cmd = conn.CreateCommand())
         {
+            cmd.CommandTimeout = 120;
             cmd.CommandText = "SELECT reply, eff_mu, witnesses FROM laplace.respond(@p)";
             cmd.Parameters.AddWithValue("p", goal);
             await using var r = await cmd.ExecuteReaderAsync();
@@ -837,7 +835,7 @@ internal static class Program
         var cli = ParseIngestCliArgs(args);
         if (string.IsNullOrEmpty(cli.Source))
             return Fail("usage: laplace ingest <source> [path] [--langs en,...] [--emit-cross-lang]\n"
-                        + "  sources: unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | code | repo | tabular | tiny-codes | stack | model | image | audio\n"
+                        + "  sources: unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | code | repo | tabular | tiny-codes | stack | safetensors | image | audio\n"
                         + "  language scope: --langs or LAPLACE_INGEST_LANGS; per-source LAPLACE_{SOURCE}_LANGS");
 
         return cli.Source.ToLowerInvariant() switch
@@ -859,19 +857,28 @@ internal static class Program
             "code"       => await IngestViaRunnerAsync(new CodeDecomposer(),     cli.Path, skipLayerCheck: true, cli),
             "repo"       => await IngestViaRunnerAsync(new RepoDecomposer(),     cli.Path, skipLayerCheck: true, cli),
             "tabular"    => await IngestViaRunnerAsync(new TabularDecomposer(),  cli.Path, skipLayerCheck: true, cli),
-            "tiny-codes" => await IngestViaRunnerAsync(new TinyCodesDecomposer(), cli.Path, skipLayerCheck: true, cli),
-            "stack"      => await IngestViaRunnerAsync(new StackDecomposer(),      cli.Path, skipLayerCheck: true, cli),
-            "model"      => await IngestModelAsync(cli.Path, cli),
+            "tiny-codes" => await IngestViaRunnerAsync(new TinyCodesDecomposer(),
+                string.IsNullOrEmpty(cli.Path) ? "/vault/Data/tiny-codes" : cli.Path, skipLayerCheck: true, cli),
+            "stack"      => await IngestViaRunnerAsync(new StackDecomposer(),
+                string.IsNullOrEmpty(cli.Path) ? "/vault/Data/stack-v2" : cli.Path, skipLayerCheck: true, cli),
+            "model" or "safetensors" or "safetensor" => await IngestSafetensorSnapshotAsync(cli.Path, cli),
             "image"      => await IngestViaRunnerAsync(new ImageDecomposer(), string.IsNullOrEmpty(cli.Path) ? "/vault/Data/test-data/images" : cli.Path, skipLayerCheck: true, cli),
             "audio"      => await IngestViaRunnerAsync(new AudioDecomposer(), string.IsNullOrEmpty(cli.Path) ? "/vault/Data/test-data/audio" : cli.Path, skipLayerCheck: true, cli),
-            _ => Fail($"unknown ingest source '{cli.Source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, code, repo, tabular, tiny-codes, stack, model, image, audio)"),
+            _ => Fail($"unknown ingest source '{cli.Source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, code, repo, tabular, tiny-codes, stack, safetensors, image, audio)"),
         };
     }
 
-    private static async Task<int> IngestModelAsync(string modelDir, IngestCliArgs cli)
+    private static async Task<int> IngestSafetensorSnapshotAsync(string modelDir, IngestCliArgs cli)
     {
-        if (string.IsNullOrEmpty(modelDir) || !Directory.Exists(modelDir))
-            return Fail($"usage: laplace ingest model <model-dir>  (not found: {modelDir})");
+        if (string.IsNullOrEmpty(modelDir))
+            return Fail("usage: laplace ingest safetensors <snapshot-dir>\n"
+                        + "  HF snapshot: config.json + tokenizer.json + *.safetensors\n"
+                        + "  (safetensors are not self-contained like GGUF — the directory is the witness unit)");
+
+        var snapshotCheck = SafetensorSnapshotWitness.Validate(modelDir);
+        if (!snapshotCheck.Ok)
+            return Fail($"invalid safetensor snapshot: {snapshotCheck.Error}\n"
+                        + $"path: {modelDir}");
 
         CodepointPerfcache.Load(ResolveBlob());
 
@@ -890,9 +897,9 @@ internal static class Program
             bool alreadyIngested = (bool)(await chkCmd.ExecuteScalarAsync() ?? false);
             if (alreadyIngested)
             {
-                Console.WriteLine($"Model already ingested — source {modelName}: {modelSource}");
-                Console.WriteLine($"(re-ingest is refused to prevent consensus contamination; "
-                                  + $"reset with 'just db-fresh' to test from scratch)");
+                Console.WriteLine($"Safetensor snapshot already deposited — source {modelName}: {modelSource}");
+                Console.WriteLine($"(re-deposition refused to prevent consensus contamination; "
+                                  + $"reset with db-fresh to test from scratch)");
                 return 0;
             }
         }
@@ -907,9 +914,9 @@ internal static class Program
         ISubstrateWriter writer = accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader, loggerFactory);
-        Console.WriteLine("mode: bulk fresh-source apply (attestation existence check skipped — IngestModelAsync proved the source is uningested); consensus accumulates at ingest");
+        Console.WriteLine("mode: bulk fresh-source apply (attestation existence check skipped — safetensor snapshot is uningested); consensus accumulates at ingest");
 
-        Console.WriteLine($"ingest model {modelDir} via IngestRunner → {ConnString} ...");
+        Console.WriteLine($"deposit safetensor snapshot {modelDir} via IngestRunner → {ConnString} ...");
 
         // Index-free bulk load is correct ONLY when seeding an empty table: dropping the global
         // secondary indexes forces a full-table rebuild that is bounded by the WHOLE corpus, not by
@@ -999,7 +1006,10 @@ internal static class Program
                 Console.WriteLine($"B2: secondary consensus indexes rebuilt in {cixSw.Elapsed.TotalSeconds:F1}s");
             }
         }
-        await RegisterDynamicCanonicalsAsync(ds, ((IDecomposer)dec).CanonicalNamesForReadback);
+        await RegisterDynamicCanonicalsAsync(ds, dec);
+        try { await PrintIngestValidationAsync(ds, dec); }
+        catch (Exception ex)
+        { Console.Error.WriteLine($"warn: safetensor deposition validation failed: {ex.Message}"); }
         return 0;
     }
 
@@ -1557,7 +1567,7 @@ internal static class Program
             DecomposerOptions      = DecomposerOptions.ForWitness(
                 sourceName, batch, cli?.LangOverride, cli?.EmitCrossLanguageLinks),
             CommitRows             = EnvInt("LAPLACE_INGEST_COMMIT_ROWS", 250_000, min: 0),
-            ParallelWorkers        = EnvInt("LAPLACE_INGEST_WORKERS",     4,       min: 1),
+            ParallelWorkers        = EnvInt("LAPLACE_INGEST_WORKERS",     1,       min: 1),
             Progress               = progress,
             // Fail fast. No retry/backoff loop and no silent transient drop:
             // the first error surfaces immediately and aborts the run so the
@@ -1608,7 +1618,7 @@ internal static class Program
         var materialized = await accumulator.MaterializeConsensusAsync();
         Console.WriteLine($"consensus: {materialized:N0} relations materialized "
                         + $"(accumulated at ingest; evidence = provenance-only)");
-        await RegisterDynamicCanonicalsAsync(ds, dec.CanonicalNamesForReadback);
+        await RegisterDynamicCanonicalsAsync(ds, dec);
         try { await PrintIngestValidationAsync(ds, dec); }
         catch (Exception ex)
         { Console.Error.WriteLine($"warn: ingest validation failed (ingest itself is complete): {ex.Message}"); }
@@ -1623,16 +1633,18 @@ internal static class Program
     }
 
     private static async Task RegisterDynamicCanonicalsAsync(
-        NpgsqlDataSource ds, IReadOnlyCollection<string> names)
+        NpgsqlDataSource ds, IDecomposer decomposer)
     {
-        if (names is null || names.Count == 0) return;
+        var names = new HashSet<string>(decomposer.CanonicalNamesForReadback, StringComparer.Ordinal);
+        names.Add($"substrate/source/{decomposer.SourceName}/v1");
+        if (names.Count == 0) return;
         await using var conn = await ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT laplace.register_canonicals(@names)";
         cmd.Parameters.Add(new global::Npgsql.NpgsqlParameter
         {
             ParameterName = "names",
-            Value = names as string[] ?? names.ToArray(),
+            Value = names.ToArray(),
             NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Text,
         });
         await cmd.ExecuteNonQueryAsync();
@@ -1708,6 +1720,21 @@ internal static class Program
         long content = await ContentForSource(srcKey);
         bool layerOk = await LayerMarkedComplete(decomposer.LayerOrder, srcKey);
         Console.WriteLine($"  witness [{srcKey}] L{decomposer.LayerOrder}: {att:N0} attestations, {content:N0} content, layer_complete={layerOk}");
+
+        if (decomposer.LayerOrder == 10)
+        {
+            string[] tensorRoles =
+            [
+                "EMBEDS", "Q_PROJECTS", "K_PROJECTS", "V_PROJECTS", "O_PROJECTS",
+                "GATES", "UP_PROJECTS", "DOWN_PROJECTS", "NORM_SCALES", "OUTPUT_PROJECTS",
+            ];
+            long roleAtts = 0;
+            foreach (var k in tensorRoles)
+                roleAtts += await RelationEvidence(k, srcKey);
+            Console.WriteLine($"  check safetensor deposition: {roleAtts:N0} tensor-role attestations "
+                            + $"(snapshot witness, trust=AIModelProbe)");
+            return;
+        }
 
         switch (srcKey)
         {
@@ -1803,19 +1830,6 @@ internal static class Program
             case "OpenSubtitlesDecomposer":
                 Console.WriteLine($"  check opensubtitles: IS_TRANSLATION_OF={await RelationEvidence("IS_TRANSLATION_OF", srcKey):N0}");
                 break;
-            case "ModelDecomposer":
-            {
-                string[] modelKinds =
-                [
-                    "EMBEDS", "Q_PROJECTS", "K_PROJECTS", "V_PROJECTS", "O_PROJECTS",
-                    "GATES", "UP_PROJECTS", "DOWN_PROJECTS", "NORM_SCALES", "OUTPUT_PROJECTS",
-                ];
-                long modelAtts = 0;
-                foreach (var k in modelKinds)
-                    modelAtts += await RelationEvidence(k, srcKey);
-                Console.WriteLine($"  check model: {modelAtts:N0} structural attestations");
-                break;
-            }
             default:
                 Console.WriteLine($"  check: {att:N0} attestations from this witness");
                 break;

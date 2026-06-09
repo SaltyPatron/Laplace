@@ -27,6 +27,7 @@ public sealed class ModelTableETL
     private readonly ILogger _log;
     private readonly Dictionary<string, SafetensorsContainerParser.TensorReference> _refMap;
     private long _strands;
+    private int _commitEpoch;
 
     public ModelTableETL(string modelDir, LlamaRecipeExtractor.RecipeInfo recipe,
         IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens, Hash128 sourceId,
@@ -69,16 +70,22 @@ public sealed class ModelTableETL
         int n = ents.Count;
         if (n == 0 || !_refMap.ContainsKey(_profile.EmbedTokens)) yield break;
 
-        // Phase 1: emit token entities
+        _commitEpoch = 0;
+
+        // Phase 1: emit token entities (epoch 0 — must commit before matchup attestations).
         {
             var eb = NewChunk("token"); int ec = 0;
             for (int t = 0; t < vocab; t++)
             {
                 if (entIdx[t] < 0) continue;
                 eb.AddEntity(new EntityRow(ents[entIdx[t]], tier[t], TextEntityBuilder.WordTypeId, _source));
-                if (++ec >= RowsPerChange) { yield return eb.Build(); eb = NewChunk("token"); ec = 0; }
+                if (++ec >= RowsPerChange)
+                {
+                    yield return eb.SetInputUnitsConsumed(ec).Build();
+                    eb = NewChunk("token"); ec = 0;
+                }
             }
-            if (ec > 0) yield return eb.Build();
+            if (ec > 0) yield return eb.SetInputUnitsConsumed(ec).Build();
             _log.LogInformation("phase=etl tokens: {N:N0} corners", n);
         }
 
@@ -99,7 +106,8 @@ public sealed class ModelTableETL
             NormD(unembN, n, d);
         }
 
-        // Phase 2: stream path matchups — architecture profile drives the loop
+        // Phase 2: stream path matchups — attestations only; references token entities from epoch 0.
+        _commitEpoch = 1;
         foreach (var path in _profile.Paths)
         {
             ct.ThrowIfCancellationRequested();
@@ -245,10 +253,14 @@ public sealed class ModelTableETL
                             ents[oR[e]], kind, ents[oC[e]], _source, ctx, 1, oS[e], ModelWeight));
                         _strands++;
                         if (++inChunk >= RowsPerChange)
-                        { yield return b.Build(); b = NewChunk(ctr.RelationName); inChunk = 0; await Task.Yield(); }
+                        {
+                            yield return b.SetInputUnitsConsumed(inChunk).Build();
+                            b = NewChunk(ctr.RelationName); inChunk = 0;
+                            await Task.Yield();
+                        }
                     }
                 }
-                if (inChunk > 0) yield return b.Build();
+                if (inChunk > 0) yield return b.SetInputUnitsConsumed(inChunk).Build();
                 break;
             }
             default:
@@ -285,10 +297,14 @@ public sealed class ModelTableETL
                     subj[leftBase + i], kind, obj[j], _source, ctx, 1, oS[e], ModelWeight));
                 _strands++;
                 if (++inChunk >= RowsPerChange)
-                { yield return b.Build(); b = NewChunk(kindName); inChunk = 0; await Task.Yield(); }
+                {
+                    yield return b.SetInputUnitsConsumed(inChunk).Build();
+                    b = NewChunk(kindName); inChunk = 0;
+                    await Task.Yield();
+                }
             }
         }
-        if (inChunk > 0) yield return b.Build();
+        if (inChunk > 0) yield return b.SetInputUnitsConsumed(inChunk).Build();
     }
 
     // ── native kernel wrappers ────────────────────────────────────────────────
@@ -364,28 +380,28 @@ public sealed class ModelTableETL
         int kvDim = nKv * headDim, attnDim = nHeads * headDim;
         if (kvDim == attnDim) return kv;
         var o = new double[(long)n * attnDim];
-        System.Threading.Tasks.Parallel.For(0, n, i =>
+        unsafe
         {
-            long srcBase = (long)i * kvDim, dstBase = (long)i * attnDim;
-            for (int h = 0; h < nHeads; h++)
+            fixed (double* pk = kv) fixed (double* po = o)
             {
-                int kh = Math.Min(nKv - 1, h * nKv / Math.Max(1, nHeads));
-                Array.Copy(kv, srcBase + (long)kh * headDim,
-                           o,  dstBase + (long)h  * headDim, headDim);
+                int rc = DynInterop.ExpandKvHeadsD(
+                    pk, (nuint)n, (nuint)nHeads, (nuint)nKv, (nuint)headDim, po);
+                if (rc != 0) throw new InvalidOperationException($"expand_kv_heads_d returned {rc}");
             }
-        });
+        }
         return o;
     }
 
     private static double[] NormD(double[] v, int n, int dim)
     {
-        System.Threading.Tasks.Parallel.For(0, n, i =>
+        unsafe
         {
-            long e = (long)i * dim; double ss = 0;
-            for (int c = 0; c < dim; c++) ss += v[e + c] * v[e + c];
-            double inv = ss > 0 ? 1.0 / Math.Sqrt(ss) : 0;
-            for (int c = 0; c < dim; c++) v[e + c] *= inv;
-        });
+            fixed (double* pv = v)
+            {
+                int rc = DynInterop.NormRowsD(pv, (nuint)n, (nuint)dim);
+                if (rc != 0) throw new InvalidOperationException($"norm_rows_d returned {rc}");
+            }
+        }
         return v;
     }
 
@@ -426,6 +442,7 @@ public sealed class ModelTableETL
     }
 
     private SubstrateChangeBuilder NewChunk(string role) =>
-        new(_source, $"etl/{role}", null,
-            entityCapacity: RowsPerChange, physicalityCapacity: 0, attestationCapacity: RowsPerChange);
+        new SubstrateChangeBuilder(_source, $"etl/{role}", null,
+            entityCapacity: RowsPerChange, physicalityCapacity: 0, attestationCapacity: RowsPerChange)
+            .SetCommitEpoch(_commitEpoch);
 }

@@ -25,7 +25,7 @@ newest_snapshot() {
     return 1
 }
 MODELS=("$@")
-if [ ${#MODELS[@]} -eq 0 ]; then
+if [ ${#MODELS[@]} -eq 0 ] && [ -z "${LAPLACE_SKIP_MODELS:-}" ]; then
     TINY="${LAPLACE_TINYLLAMA_DIR:-$(newest_snapshot 'models--TinyLlama--*' || true)}"
     PHI2="${LAPLACE_PHI2_DIR:-$(newest_snapshot 'models--microsoft--phi-2' || true)}"
     [ -n "$TINY" ] || { echo "no TinyLlama model resolved (set LAPLACE_TINYLLAMA_DIR)"; exit 2; }
@@ -45,11 +45,16 @@ phase 2 "seed iso639"
 scripts/ingest-source.sh iso639
 
 n=3
-for m in "${MODELS[@]}"; do
-    phase "$n" "ingest model $(basename "$(dirname "$(dirname "$m")")" 2>/dev/null || basename "$m")"
-    scripts/ingest-source.sh model "$m"
+if [ -z "${LAPLACE_SKIP_MODELS:-}" ]; then
+    for m in "${MODELS[@]}"; do
+        phase "$n" "deposit safetensors $(basename "$(dirname "$(dirname "$m")")" 2>/dev/null || basename "$m")"
+        scripts/ingest-source.sh safetensors "$m"
+        n=$((n+1))
+    done
+else
+    phase "$n" "skip safetensor deposition (LAPLACE_SKIP_MODELS=1)"
     n=$((n+1))
-done
+fi
 
 phase "$n" "audit — referential integrity + substrate state + consensus"
 psql -U laplace_admin -d "$DB" -f scripts/verify-fk.sql

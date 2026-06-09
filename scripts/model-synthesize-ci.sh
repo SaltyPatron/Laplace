@@ -42,12 +42,12 @@ log "migrations up + ingest unicode (idempotent; consensus folds, layer-0 marker
 (cd "$ROOT/app" && "${CLI[@]}" ingest unicode) \
   || die "ingest unicode failed"
 
-log "ingest model (pass 1)"
-(cd "$ROOT/app" && "${CLI[@]}" ingest model "$MODEL_DIR") \
-  || die "model ingest pass 1 failed"
+log "deposit safetensors (pass 1)"
+(cd "$ROOT/app" && "${CLI[@]}" ingest safetensors "$MODEL_DIR") \
+  || die "safetensor deposition pass 1 failed"
 
-log "ingest model (pass 2 — must short-circuit via the re-ingest guard)"
-pass2_out="$(cd "$ROOT/app" && "${CLI[@]}" ingest model "$MODEL_DIR" 2>&1)"
+log "deposit safetensors (pass 2 — must short-circuit via the re-ingest guard)"
+pass2_out="$(cd "$ROOT/app" && "${CLI[@]}" ingest safetensors "$MODEL_DIR" 2>&1)"
 echo "$pass2_out"
 echo "$pass2_out" | grep -qi "already ingested" \
   || die "pass 2 did not short-circuit — idempotency broken"
