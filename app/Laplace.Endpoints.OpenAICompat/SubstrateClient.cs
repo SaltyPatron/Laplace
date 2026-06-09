@@ -1,4 +1,7 @@
+using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD;
 using Npgsql;
+using NpgsqlTypes;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -35,6 +38,101 @@ internal sealed class SubstrateClient : IAsyncDisposable
         }
     }
 
+    // ── session deposition ────────────────────────────────────────────────────
+
+    private static readonly Hash128 s_precedesTypeId   = Hash128.OfCanonical("substrate/kind/PRECEDES/v1");
+    private static readonly Hash128 s_userPromptSource = Hash128.OfCanonical("substrate/source/UserPrompt/v1");
+    private static readonly Hash128 s_sourceTypeId     = Hash128.OfCanonical("substrate/type/Source/v1");
+    private static readonly Hash128 s_kindTypeId       = Hash128.OfCanonical("substrate/type/Kind/v1");
+
+    private static byte[] ComputeAttestationId(byte[] sub, byte[] type, byte[] obj, byte[] src)
+    {
+        Span<byte> buf = stackalloc byte[80]; // 16 * 5, zero-initialized by runtime
+        sub.AsSpan().CopyTo(buf.Slice(0, 16));
+        type.AsSpan().CopyTo(buf.Slice(16, 16));
+        obj.AsSpan().CopyTo(buf.Slice(32, 16));
+        src.AsSpan().CopyTo(buf.Slice(48, 16));
+        // buf[64..80] = Hash128.Zero (context_id = NULL sentinel)
+        return Hash128.Blake3(buf).ToBytes();
+    }
+
+    /// <summary>
+    /// Deposit a user prompt into the substrate as PRECEDES testimony.
+    /// Resolves word tokens in order and deposits confirm arcs for consecutive pairs under the
+    /// UserPrompt source. Fire-and-forget — caller discards the Task (<c>_ = DepositPromptAsync(...)</c>).
+    /// </summary>
+    public async Task DepositPromptAsync(string prompt, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(prompt)) return;
+        try
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+            // Ensure prerequisite entities exist (idempotent — ON CONFLICT DO NOTHING).
+            // attestations.source_id and attestations.type_id both have FK to entities(id).
+            const string ensureSql = """
+                INSERT INTO laplace.entities (id, tier, type_id) VALUES
+                    (@src_id, @src_tier, @src_type),
+                    (@prec_id, @prec_tier, @prec_type)
+                ON CONFLICT DO NOTHING;
+                """;
+            await using (var cmd = new NpgsqlCommand(ensureSql, conn))
+            {
+                cmd.Parameters.Add(new NpgsqlParameter("src_id",   NpgsqlDbType.Bytea)    { Value = s_userPromptSource.ToBytes() });
+                cmd.Parameters.Add(new NpgsqlParameter("src_tier",  NpgsqlDbType.Smallint) { Value = (short)MetaTier.Meta });
+                cmd.Parameters.Add(new NpgsqlParameter("src_type",  NpgsqlDbType.Bytea)    { Value = s_sourceTypeId.ToBytes() });
+                cmd.Parameters.Add(new NpgsqlParameter("prec_id",   NpgsqlDbType.Bytea)    { Value = s_precedesTypeId.ToBytes() });
+                cmd.Parameters.Add(new NpgsqlParameter("prec_tier", NpgsqlDbType.Smallint) { Value = (short)MetaTier.RelationType });
+                cmd.Parameters.Add(new NpgsqlParameter("prec_type", NpgsqlDbType.Bytea)    { Value = s_kindTypeId.ToBytes() });
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+
+            // Resolve ordered entity IDs from prompt text
+            const string resolveSql = """
+                SELECT id FROM laplace.prompt_state(@p) WHERE id IS NOT NULL ORDER BY ord;
+                """;
+            var ids = new List<byte[]>(32);
+            await using (var cmd = new NpgsqlCommand(resolveSql, conn))
+            {
+                cmd.Parameters.AddWithValue("p", prompt);
+                await using var rdr = await cmd.ExecuteReaderAsync(ct);
+                while (await rdr.ReadAsync(ct))
+                    ids.Add(rdr.GetFieldValue<byte[]>(0));
+            }
+
+            if (ids.Count < 2) return;
+
+            // Insert/increment PRECEDES attestations for consecutive token pairs
+            const string attestSql = """
+                INSERT INTO laplace.attestations
+                    (id, subject_id, type_id, object_id, source_id, context_id,
+                     outcome, last_observed_at, observation_count)
+                VALUES (@id, @sub, @type, @obj, @src, NULL, 2, NOW(), 1)
+                ON CONFLICT (id) DO UPDATE
+                    SET observation_count = laplace.attestations.observation_count + 1,
+                        last_observed_at  = EXCLUDED.last_observed_at;
+                """;
+
+            var srcBytes  = s_userPromptSource.ToBytes();
+            var typeBytes = s_precedesTypeId.ToBytes();
+
+            for (int i = 0; i + 1 < ids.Count; i++)
+            {
+                await using var cmd = new NpgsqlCommand(attestSql, conn);
+                cmd.Parameters.Add(new NpgsqlParameter("id",   NpgsqlDbType.Bytea) { Value = ComputeAttestationId(ids[i], typeBytes, ids[i + 1], srcBytes) });
+                cmd.Parameters.Add(new NpgsqlParameter("sub",  NpgsqlDbType.Bytea) { Value = ids[i] });
+                cmd.Parameters.Add(new NpgsqlParameter("type", NpgsqlDbType.Bytea) { Value = typeBytes });
+                cmd.Parameters.Add(new NpgsqlParameter("obj",  NpgsqlDbType.Bytea) { Value = ids[i + 1] });
+                cmd.Parameters.Add(new NpgsqlParameter("src",  NpgsqlDbType.Bytea) { Value = srcBytes });
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+        }
+        catch
+        {
+            // Best-effort — never let deposition break generation
+        }
+    }
+
     /// <summary>
     /// True autoregressive forward pass: resolve the prompt to a context window of entity IDs,
     /// then walk PRECEDES arcs step by step, yielding one token per step.
@@ -67,7 +165,7 @@ internal sealed class SubstrateClient : IAsyncDisposable
             }
         }
 
-        var seen = new HashSet<byte[]>(ByteArrayComparer.Instance, ctx.Select(x => x));
+        var seen = new HashSet<byte[]>(ctx, ByteArrayComparer.Instance);
 
         for (int step = 1; step <= steps; step++)
         {

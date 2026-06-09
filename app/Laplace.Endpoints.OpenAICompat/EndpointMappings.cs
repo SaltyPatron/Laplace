@@ -62,6 +62,9 @@ internal static class EndpointMappings
 
             if (gate.Quote is not null) billing.MarkConsumedAndRecord(gate.Quote);
 
+            // Deposit prompt as PRECEDES testimony — fire-and-forget, best-effort
+            _ = substrate.DepositPromptAsync(prompt, CancellationToken.None);
+
             if (payload.Stream)
             {
                 var completionId = $"chatcmpl-{Guid.NewGuid():N}";
@@ -146,6 +149,9 @@ internal static class EndpointMappings
                 return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? new { service_id = "completions" } : (object)new { gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl });
 
             if (gate.Quote is not null) billing.MarkConsumedAndRecord(gate.Quote);
+
+            // Deposit prompt as PRECEDES testimony — fire-and-forget, best-effort
+            _ = substrate.DepositPromptAsync(payload.Prompt.Trim(), CancellationToken.None);
 
             int steps = payload.MaxTokens ?? 64;
             double temp = payload.Temperature ?? 0.7;
@@ -345,6 +351,18 @@ internal static class EndpointMappings
         tenant = quote.Tenant,
         service_id = quote.ServiceId
     };
+
+    private static string[]? ReadStopSequences(JsonElement stop) =>
+        stop.ValueKind switch
+        {
+            JsonValueKind.String => stop.GetString() is { Length: > 0 } s ? [s] : null,
+            JsonValueKind.Array  => stop.EnumerateArray()
+                                        .Select(e => e.ValueKind == JsonValueKind.String ? e.GetString() : null)
+                                        .Where(s => !string.IsNullOrEmpty(s))
+                                        .Select(s => s!)
+                                        .ToArray() is { Length: > 0 } arr ? arr : null,
+            _                    => null
+        };
 
     private static bool EmbeddingsInputPresent(JsonElement? input)
     {

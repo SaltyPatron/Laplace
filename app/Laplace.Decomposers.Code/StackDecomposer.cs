@@ -205,19 +205,19 @@ public sealed class StackDecomposer : IDecomposer
             string[] contents  = new string[count];
             string[] languages = new string[count];
             string[]? paths    = pathField is not null ? new string[count] : null;
-            bool[]? vendors    = vendorField is not null ? new bool[count] : null;
-            bool[]? generated  = generatedField is not null ? new bool[count] : null;
+            bool?[]? vendors    = vendorField is not null ? new bool?[count] : null;
+            bool?[]? generated  = generatedField is not null ? new bool?[count] : null;
 
             await rgr.ReadAsync(contentField,  contents);
             await rgr.ReadAsync(languageField, languages);
-            if (paths    is not null) await rgr.ReadAsync(pathField!,      paths);
-            if (vendors  is not null) await rgr.ReadAsync(vendorField!,    vendors);
-            if (generated is not null) await rgr.ReadAsync(generatedField!, generated);
+            if (paths    is not null) await rgr.ReadAsync(pathField!,       paths);
+            if (vendors  is not null) await rgr.ReadAsync<bool>(vendorField!,    vendors);
+            if (generated is not null) await rgr.ReadAsync<bool>(generatedField!, generated);
 
             for (int i = 0; i < count; i++)
             {
-                if (vendors  is not null && vendors[i])   continue;
-                if (generated is not null && generated[i]) continue;
+                if (vendors  is not null && vendors[i] == true)   continue;
+                if (generated is not null && generated[i] == true) continue;
                 yield return new StackRow(
                     contents[i],
                     languages[i],

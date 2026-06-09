@@ -22,6 +22,22 @@ extern const TSLanguage* tree_sitter_ruby(void);
 extern const TSLanguage* tree_sitter_julia(void);
 extern const TSLanguage* tree_sitter_kotlin(void);
 extern const TSLanguage* tree_sitter_php(void);
+/* grammars whose parser.c is generated at configure time (sql: gh-pages, swift: tree-sitter generate) */
+extern const TSLanguage* tree_sitter_sql(void);
+extern const TSLanguage* tree_sitter_swift(void);
+/* HPC/compute grammars */
+extern const TSLanguage* tree_sitter_cuda(void);
+extern const TSLanguage* tree_sitter_glsl(void);
+extern const TSLanguage* tree_sitter_hlsl(void);
+extern const TSLanguage* tree_sitter_wgsl(void);
+extern const TSLanguage* tree_sitter_fortran(void);
+extern const TSLanguage* tree_sitter_asm(void);
+extern const TSLanguage* tree_sitter_nasm(void);
+extern const TSLanguage* tree_sitter_llvm(void);
+extern const TSLanguage* tree_sitter_mlir(void);
+extern const TSLanguage* tree_sitter_cmake(void);
+extern const TSLanguage* tree_sitter_ispc(void);
+extern const TSLanguage* tree_sitter_zig(void);
 
 typedef const TSLanguage* (*ts_lang_fn)(void);
 
@@ -46,6 +62,22 @@ static const grammar_entry_t GRAMMARS[] = {
     {"julia",      tree_sitter_julia},
     {"kotlin",     tree_sitter_kotlin},
     {"php",        tree_sitter_php},
+    /* generated-at-configure-time grammars */
+    {"sql",        tree_sitter_sql},
+    {"swift",      tree_sitter_swift},
+    /* HPC/compute grammars */
+    {"cuda",       tree_sitter_cuda},
+    {"glsl",       tree_sitter_glsl},
+    {"hlsl",       tree_sitter_hlsl},
+    {"wgsl",       tree_sitter_wgsl},
+    {"fortran",    tree_sitter_fortran},
+    {"asm",        tree_sitter_asm},
+    {"nasm",       tree_sitter_nasm},
+    {"llvm",       tree_sitter_llvm},
+    {"mlir",       tree_sitter_mlir},
+    {"cmake",      tree_sitter_cmake},
+    {"ispc",       tree_sitter_ispc},
+    {"zig",        tree_sitter_zig},
 };
 static const size_t GRAMMAR_COUNT = sizeof(GRAMMARS) / sizeof(GRAMMARS[0]);
 
@@ -70,6 +102,23 @@ static const ext_entry_t EXTS[] = {
     {"jl", "julia"},
     {"kt", "kotlin"}, {"kts", "kotlin"},
     {"php", "php"}, {"phtml", "php"},
+    /* HPC/compute */
+    {"cu", "cuda"}, {"cuh", "cuda"},
+    {"glsl", "glsl"}, {"vert", "glsl"}, {"frag", "glsl"},
+    {"comp", "glsl"}, {"geom", "glsl"}, {"tesc", "glsl"}, {"tese", "glsl"},
+    {"hlsl", "hlsl"}, {"hlsli", "hlsl"},
+    {"wgsl", "wgsl"},
+    {"f90", "fortran"}, {"f95", "fortran"}, {"f03", "fortran"}, {"f08", "fortran"},
+    {"f", "fortran"}, {"for", "fortran"},
+    {"s", "asm"},
+    {"nasm", "nasm"}, {"asm", "nasm"},
+    {"ll", "llvm"},
+    {"mlir", "mlir"},
+    {"sql", "sql"}, {"ddl", "sql"}, {"dml", "sql"},
+    {"swift", "swift"},
+    {"cmake", "cmake"},
+    {"ispc", "ispc"},
+    {"zig", "zig"},
 };
 static const size_t EXT_COUNT = sizeof(EXTS) / sizeof(EXTS[0]);
 
