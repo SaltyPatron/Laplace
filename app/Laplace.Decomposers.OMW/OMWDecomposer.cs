@@ -6,7 +6,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.OMW;
 
-public sealed class OMWDecomposer : IDecomposer
+public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/OMWDecomposer/v1");
@@ -44,6 +44,7 @@ public sealed class OMWDecomposer : IDecomposer
         foreach (string tabFile in Directory.EnumerateFiles(wnsDir, "wn-data-*.tab", SearchOption.AllDirectories))
         {
             string fileLang = FileLang(tabFile);
+            if (options.Languages?.MatchesRaw(fileLang) == false) continue;
             await foreach (var row in ParseFileAsync(tabFile, fileLang, ct))
             {
                 ct.ThrowIfCancellationRequested();
@@ -60,8 +61,29 @@ public sealed class OMWDecomposer : IDecomposer
         if (count > 0 && !options.DryRun) yield return b.Build();
     }
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(2_676_800L);
+    public async Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        string wnsDir = Path.Combine(context.EcosystemPath, "wns");
+        if (!Directory.Exists(wnsDir)) return null;
+        var files = new List<IngestFileSpec>();
+        foreach (string tab in Directory.EnumerateFiles(wnsDir, "wn-data-*.tab", SearchOption.AllDirectories))
+        {
+            string lang = FileLang(tab);
+            if (options.Languages?.MatchesRaw(lang) == false) continue;
+            long n = await EtlInventory.CountDataLinesAsync(tab, ct: ct);
+            files.Add(new(lang, tab, n));
+        }
+        long total = 0;
+        foreach (var f in files) total += f.InputUnits;
+        return new IngestInventory("records", total, files);
+    }
+
+    public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    {
+        var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
+        return inv?.TotalInputUnits;
+    }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 

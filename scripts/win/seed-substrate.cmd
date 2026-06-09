@@ -13,6 +13,9 @@ set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ROOT%\build-win\core\perfcache\laplace_t0_pe
 set "INGEST=D:\Data\Ingest"
 set "REPOS=D:\Repositories"
 set "MODELS=D:\Models\hub"
+rem Witness language scope: all multilingual sources honor this (per-source override: LAPLACE_TATOEBA_LANGS etc.)
+rem English-only seed: en resolves eng/en-US via LanguageReference. Cross-lang edges off unless LAPLACE_EMIT_CROSS_LANG=1
+set "LAPLACE_INGEST_LANGS=en"
 set "LAPLACE_INGEST_WORKERS=1"
 set "LAPLACE_DECOMPOSE_WORKERS=1"
 set "LAPLACE_COPY_VALIDATE=1"
@@ -24,13 +27,15 @@ echo ==== DROP + recreate laplace ====
 "%PGBIN%\psql.exe" -h localhost -U postgres -d laplace -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS postgis;" -c "CREATE EXTENSION IF NOT EXISTS laplace_geom;" -c "CREATE EXTENSION IF NOT EXISTS laplace_substrate;" || exit /b 1
 
 echo ==== post-create identity health ====
-"%PGBIN%\psql.exe" -h localhost -U postgres -d laplace -P pager=off -c "SELECT * FROM laplace.substrate_health();" || exit /b 1
+"%PGBIN%\psql.exe" -h localhost -U postgres -d laplace -P pager=off -v ON_ERROR_STOP=1 -c "SET search_path = laplace, public; SELECT * FROM substrate_health();" || exit /b 1
 
 cd app
 dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q || exit /b 1
 
 rem ---- Phase 8a: lexical ladder (witness-manifest.json order) --------------
-for %%s in (unicode iso639 wordnet tatoeba atomic2020 verbnet propbank conceptnet framenet semlink ud wiktionary omw opensubtitles) do (
+rem Floor: unicode (L0) + iso639 (L1). WordNet (L2) is the foundational lexicon — first.
+rem Then foundational L2 semantics (verbnet/propbank/atomic/conceptnet/ud), usage giants last, L3 bind.
+for %%s in (unicode iso639 wordnet verbnet propbank atomic2020 conceptnet ud tatoeba opensubtitles wiktionary omw framenet semlink) do (
   echo ==== ingest %%s ====
   dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest %%s || exit /b 1
 )

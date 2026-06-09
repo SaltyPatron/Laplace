@@ -78,11 +78,21 @@ public sealed class IngestRunner
 
         await decomposer.InitializeAsync(ctx, ct);
 
-        long? estimatedTotal = await decomposer.EstimateUnitCountAsync(ctx, ct);
-        _obs.OnRunStart(decomposer.SourceName, decomposer.LayerOrder, estimatedTotal);
+        var inventory = await ResolveInventoryAsync(decomposer, ctx, options, ct);
+        _obs.OnRunStart(decomposer.SourceName, decomposer.LayerOrder, inventory);
+        log.LogInformation(
+            "INGEST_START source={Source} layer={Layer} unit_kind={UnitKind} input_units={InputUnits} files={Files}",
+            decomposer.SourceName, decomposer.LayerOrder,
+            inventory?.UnitKind ?? "units", inventory?.TotalInputUnits ?? 0, inventory?.FileCount ?? 0);
 
         var rng = new Random(unchecked((int)decomposer.SourceId.Lo));
-        var counters = new RunCounters { Sw = sw, EstimatedTotal = estimatedTotal };
+        var counters = new RunCounters
+        {
+            Sw = sw,
+            SourceName = decomposer.SourceName,
+            LayerOrder = decomposer.LayerOrder,
+            Inventory = inventory,
+        };
 
         int batchSize  = Math.Max(1, options.BatchSize);
         int commitRows = Math.Max(0, options.CommitRows);
@@ -265,6 +275,17 @@ public sealed class IngestRunner
             TotalRoundTrips: totalRoundTrips,
             WallClock: sw.Elapsed,
             Failures: failures);
+        log.LogInformation(
+            "INGEST_COMPLETE source={Source} layer={Layer} input_done={InputDone} input_total={InputTotal} "
+            + "files_done={FilesDone} files_total={FilesTotal} intents={Applied}/{Produced} "
+            + "rows_new={Ent}e+{Phys}p+{Att}a elapsed_s={Elapsed:F1} failed={Failed} status={Status}",
+            decomposer.SourceName, decomposer.LayerOrder,
+            counters.InputUnitsDone, inventory?.TotalInputUnits ?? 0,
+            counters.FilesDone, inventory?.FileCount ?? 0,
+            result.UnitsApplied, result.UnitsAttempted,
+            result.EntitiesInserted, result.PhysicalitiesInserted, result.AttestationsInserted,
+            result.WallClock.TotalSeconds, result.UnitsFailed,
+            result.UnitsFailed > 0 ? "failed" : "ok");
         _obs.OnRunFinished(decomposer.SourceName, result);
         return result;
     }
@@ -299,6 +320,8 @@ public sealed class IngestRunner
                 Interlocked.Add(ref counters._physicalitiesInserted, apply.PhysicalitiesInserted);
                 Interlocked.Add(ref counters._attestationsInserted, apply.AttestationsInserted);
                 Interlocked.Add(ref counters._roundTrips, apply.RoundTrips);
+
+                TrackIntent(counters, intent);
 
                 _obs.OnIntentApplied(decomposer.SourceName, apply);
                 options.Progress?.Report(MakeProgress(counters));
@@ -382,11 +405,15 @@ public sealed class IngestRunner
 
                 long batchRows = (long)apply.EntitiesAttempted + apply.PhysicalitiesAttempted + apply.AttestationsAttempted;
                 double secs = Math.Max(1e-3, apply.WallClock.TotalSeconds);
+                foreach (var intent in batch)
+                    TrackIntent(counters, intent);
+
                 log.LogInformation(
-                    "batch: {Intents} intents / {Rows} rows → {Ent}e+{Phys}p+{Att}a new in {Ms:N0}ms "
-                    + "({Rps:N0} rows/s, {RT} round-trips)",
-                    batch.Count, batchRows, apply.EntitiesInserted, apply.PhysicalitiesInserted,
-                    apply.AttestationsInserted, apply.WallClock.TotalMilliseconds, batchRows / secs, apply.RoundTrips);
+                    "INGEST_BATCH source={Source} intents={Intents} rows={Rows} "
+                    + "rows_new={Ent}e+{Phys}p+{Att}a elapsed_ms={Ms:N0} rate_rows_s={Rps:N0} round_trips={RT}",
+                    decomposer.SourceName, batch.Count, batchRows, apply.EntitiesInserted,
+                    apply.PhysicalitiesInserted, apply.AttestationsInserted,
+                    apply.WallClock.TotalMilliseconds, batchRows / secs, apply.RoundTrips);
 
                 _obs.OnIntentApplied(decomposer.SourceName, apply);
                 options.Progress?.Report(MakeProgress(counters));
@@ -447,11 +474,62 @@ public sealed class IngestRunner
     private static string ResolveEcosystemPath(IDecomposer decomposer, IngestRunOptions options)
         => options.EcosystemPath ?? Directory.GetCurrentDirectory();
 
-    private static IngestProgress MakeProgress(RunCounters c) =>
-        new(c.UnitsAttempted, c.UnitsApplied, c.UnitsFailed,
-            c.EstimatedTotal, c.Sw?.Elapsed ?? TimeSpan.Zero,
-            c.EntitiesInserted, c.PhysicalitiesInserted, c.AttestationsInserted,
-            c.RoundTrips, c.UnitsProduced);
+    private static async Task<IngestInventory?> ResolveInventoryAsync(
+        IDecomposer decomposer,
+        IDecomposerContext ctx,
+        IngestRunOptions options,
+        CancellationToken ct)
+    {
+        if (decomposer is IIngestInventoryProvider provider)
+        {
+            var inv = await provider.DescribeInputAsync(ctx, options.DecomposerOptions, ct);
+            if (inv is not null) return inv;
+        }
+        long? est = await decomposer.EstimateUnitCountAsync(ctx, ct);
+        return est is long n ? IngestInventory.Single(n) : null;
+    }
+
+    private static void TrackIntent(RunCounters c, SubstrateChange intent)
+    {
+        string unit = intent.Metadata.SourceContentUnitName;
+        const string periodBoundary = "period-boundary/";
+        if (unit.StartsWith(periodBoundary, StringComparison.Ordinal))
+        {
+            Interlocked.Increment(ref c._filesDone);
+            c._currentFile = unit[periodBoundary.Length..];
+            return;
+        }
+        if (unit.StartsWith("layer-complete/", StringComparison.Ordinal)) return;
+
+        long consumed = intent.Metadata.InputUnitsConsumed;
+        if (consumed > 0)
+            Interlocked.Add(ref c._inputUnitsDone, consumed);
+        else
+            c._currentFile = unit;
+    }
+
+    private static IngestProgress MakeProgress(RunCounters c)
+    {
+        var inv = c.Inventory;
+        return new(
+            c.SourceName ?? "",
+            c.LayerOrder,
+            c.UnitsAttempted,
+            c.UnitsApplied,
+            c.UnitsFailed,
+            inv?.TotalInputUnits ?? 0,
+            c.InputUnitsDone,
+            inv?.FileCount ?? 0,
+            c.FilesDone,
+            c.CurrentFile,
+            inv?.UnitKind ?? "units",
+            c.Sw?.Elapsed ?? TimeSpan.Zero,
+            c.EntitiesInserted,
+            c.PhysicalitiesInserted,
+            c.AttestationsInserted,
+            c.RoundTrips,
+            c.UnitsProduced);
+    }
 
     private sealed class RunCounters
     {
@@ -463,8 +541,16 @@ public sealed class IngestRunner
         internal long _attestationsInserted;
         internal long _roundTrips;
         internal long _unitsProduced;
+        internal long _inputUnitsDone;
+        internal int _filesDone;
+        internal string? _currentFile;
         internal Stopwatch? Sw;
-        internal long? EstimatedTotal;
+        internal string? SourceName;
+        internal int LayerOrder;
+        internal IngestInventory? Inventory;
+        public long InputUnitsDone => Interlocked.Read(ref _inputUnitsDone);
+        public int FilesDone => Volatile.Read(ref _filesDone);
+        public string? CurrentFile => Volatile.Read(ref _currentFile);
         public long UnitsAttempted        => Interlocked.Read(ref _unitsAttempted);
         public long UnitsProduced         => Interlocked.Read(ref _unitsProduced);
         public long UnitsApplied          => Interlocked.Read(ref _unitsApplied);

@@ -68,7 +68,7 @@ public sealed class WiktionaryDecomposer : IDecomposer
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        string? file = ResolveInput(context.EcosystemPath);
+        string? file = ResolveInput(context.EcosystemPath, options.Languages);
         if (file is null) yield break;
         int batch = options.BatchSize > 1 ? options.BatchSize : 1024;
 
@@ -81,7 +81,7 @@ public sealed class WiktionaryDecomposer : IDecomposer
             if (line.Length == 0 || line[0] != '{') continue;
 
             bool emitted;
-            try { emitted = EmitRecord(b, line); }
+            try { emitted = EmitRecord(b, line, options); }
             catch (JsonException) { continue; }
 
             if (emitted && ++n >= batch)
@@ -106,18 +106,21 @@ public sealed class WiktionaryDecomposer : IDecomposer
         "historical", "figurative",
     };
 
-    private static bool EmitRecord(SubstrateChangeBuilder b, string line)
+    private static bool EmitRecord(SubstrateChangeBuilder b, string line, DecomposerOptions options)
     {
         using var doc = JsonDocument.Parse(line);
         var rec = doc.RootElement;
 
         string? word = Str(rec, "word");
         if (string.IsNullOrEmpty(word)) return false;
+
+        string? langCode = Str(rec, "lang_code") ?? Str(rec, "lang");
+        if (options.Languages?.MatchesRaw(langCode) == false) return false;
+
         var wordId = ContentEmitter.Emit(b, word!, Source);
         if (wordId is null) return false;
         Hash128 w = wordId.Value;
 
-        string? langCode = Str(rec, "lang_code") ?? Str(rec, "lang");
         if (!string.IsNullOrEmpty(langCode))
         {
             Hash128 langId = LanguageReference.Resolve(langCode!);
@@ -189,7 +192,8 @@ public sealed class WiktionaryDecomposer : IDecomposer
                 AttestText(b, w, "TRANSCRIBES_AS", ipa, dialectCtx);
             }
 
-        if (rec.TryGetProperty("translations", out var tr) && tr.ValueKind == JsonValueKind.Array)
+        if (options.EmitCrossLanguageLinks
+            && rec.TryGetProperty("translations", out var tr) && tr.ValueKind == JsonValueKind.Array)
             foreach (var t in tr.EnumerateArray())
                 AttestText(b, w, "IS_TRANSLATION_OF", Str(t, "word"), null);
 
@@ -238,8 +242,13 @@ public sealed class WiktionaryDecomposer : IDecomposer
         el.ValueKind == JsonValueKind.Object && el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String
             ? v.GetString() : null;
 
-    private static string? ResolveInput(string dir)
+    private static string? ResolveInput(string dir, LanguageFilter? langs)
     {
+        if (langs?.IsActive == true)
+        {
+            string eng = Path.Combine(dir, "kaikki.org-dictionary-English.jsonl");
+            if (File.Exists(eng)) return eng;
+        }
         foreach (var name in new[] { "raw-wiktextract-data.jsonl", "kaikki.org-dictionary-English.jsonl" })
         {
             string p = Path.Combine(dir, name);

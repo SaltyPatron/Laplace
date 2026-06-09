@@ -7,7 +7,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.UD;
 
-public sealed class UDDecomposer : IDecomposer
+public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/UDDecomposer/v1");
@@ -68,7 +68,9 @@ public sealed class UDDecomposer : IDecomposer
             Environment.GetEnvironmentVariable("LAPLACE_DECOMPOSE_WORKERS"), out var w) && w > 0
             ? w : Math.Clamp(Environment.ProcessorCount - 4, 1, 16);
 
-        var files = Directory.EnumerateFiles(treebanksDir, "*.conllu", SearchOption.AllDirectories).ToList();
+        var files = Directory.EnumerateFiles(treebanksDir, "*.conllu", SearchOption.AllDirectories)
+            .Where(p => options.Languages?.MatchesUdTreebankFile(Path.GetFileName(p)) != false)
+            .ToList();
         if (files.Count == 0) yield break;
 
         var seenAttRun = new ConcurrentIdSet();
@@ -91,7 +93,7 @@ public sealed class UDDecomposer : IDecomposer
 
                     if (++sentCount >= batchSentences)
                     {
-                        if (!options.DryRun) yield return b.Build();
+                        if (!options.DryRun) yield return b.SetInputUnitsConsumed(sentCount).Build();
                         b = NewBuilder($"ud/batch-{++batchNum}", batchSentences);
                         seenEntBatch.Clear();
                         sentCount = 0;
@@ -101,7 +103,7 @@ public sealed class UDDecomposer : IDecomposer
                 if (!options.DryRun)
                     yield return PeriodBoundary(Path.GetFileNameWithoutExtension(conllu));
             }
-            if (sentCount > 0 && !options.DryRun) yield return b.Build();
+            if (sentCount > 0 && !options.DryRun) yield return b.SetInputUnitsConsumed(sentCount).Build();
             yield break;
         }
 
@@ -135,14 +137,14 @@ public sealed class UDDecomposer : IDecomposer
                         EmitSentence(b, sentence, langId, langCode, seenEntBatch, seenAttRun);
                         if (++sentCount >= batchSentences)
                         {
-                            if (!options.DryRun) await channel.Writer.WriteAsync(b.Build(), ct);
+                            if (!options.DryRun) await channel.Writer.WriteAsync(b.SetInputUnitsConsumed(sentCount).Build(), ct);
                             b = NewBuilder($"ud/w{worker}/{stem}/{++batchNum}", batchSentences);
                             seenEntBatch.Clear();
                             sentCount = 0;
                         }
                     }
                     if (sentCount > 0 && !options.DryRun)
-                        await channel.Writer.WriteAsync(b.Build(), ct);
+                        await channel.Writer.WriteAsync(b.SetInputUnitsConsumed(sentCount).Build(), ct);
                     if (!options.DryRun)
                         await channel.Writer.WriteAsync(PeriodBoundary(stem), ct);
                 }
@@ -160,8 +162,30 @@ public sealed class UDDecomposer : IDecomposer
         await Task.WhenAll(producers);
     }
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(30_000_000L);
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        string treebanksDir = Path.Combine(context.EcosystemPath, "ud-treebanks-v2.17");
+        if (!Directory.Exists(treebanksDir))
+            return Task.FromResult<IngestInventory?>(null);
+        var files = Directory.EnumerateFiles(treebanksDir, "*.conllu", SearchOption.AllDirectories)
+            .Where(p => options.Languages?.MatchesUdTreebankFile(Path.GetFileName(p)) != false)
+            .Select(p =>
+            {
+                string id = Path.GetFileNameWithoutExtension(p);
+                return new IngestFileSpec(id, p, EtlInventory.CountConlluSentences(p));
+            })
+            .ToList();
+        long total = 0;
+        foreach (var f in files) total += f.InputUnits;
+        return Task.FromResult<IngestInventory?>(new IngestInventory("sentences", total, files));
+    }
+
+    public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    {
+        var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
+        return inv?.TotalInputUnits;
+    }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 

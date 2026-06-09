@@ -6,7 +6,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Tatoeba;
 
-public sealed class TatoebaDecomposer : IDecomposer
+public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/TatoebaDecomposer/v1");
@@ -42,6 +42,9 @@ public sealed class TatoebaDecomposer : IDecomposer
         string links     = Path.Combine(context.EcosystemPath, "links.csv");
         int batch = options.BatchSize > 1 ? options.BatchSize : 2048;
 
+        var langs = options.Languages;
+        var allowedSentenceIds = langs?.IsActive == true ? new HashSet<long>() : null;
+
         if (File.Exists(sentences))
         {
             var b = NewBuilder("tatoeba/sent-0", batch);
@@ -53,8 +56,10 @@ public sealed class TatoebaDecomposer : IDecomposer
                 if (c.Length < 3) continue;
                 if (!long.TryParse(c[0], out long sid)) continue;
                 string lang = c[1].Trim();
+                if (langs?.MatchesRaw(lang) == false) continue;
                 string text = c[2];
                 if (text.Length == 0) continue;
+                allowedSentenceIds?.Add(sid);
 
                 Hash128 extId = SourceEntityIdConventions.TatoebaSentence(sid);
                 Hash128 langId = LanguageReference.Resolve(lang);
@@ -72,11 +77,11 @@ public sealed class TatoebaDecomposer : IDecomposer
 
                 if (++n >= batch)
                 {
-                    if (!options.DryRun) yield return b.Build();
+                    if (!options.DryRun) yield return b.SetInputUnitsConsumed(n).Build();
                     b = NewBuilder($"tatoeba/sent-{++bn}", batch); n = 0; await Task.Yield();
                 }
             }
-            if (n > 0 && !options.DryRun) yield return b.Build();
+            if (n > 0 && !options.DryRun) yield return b.SetInputUnitsConsumed(n).Build();
         }
 
         if (File.Exists(links))
@@ -89,6 +94,9 @@ public sealed class TatoebaDecomposer : IDecomposer
                 var c = line.Split('\t');
                 if (c.Length < 2) continue;
                 if (!long.TryParse(c[0], out long a) || !long.TryParse(c[1], out long bId)) continue;
+                if (allowedSentenceIds is not null
+                    && (!allowedSentenceIds.Contains(a) || !allowedSentenceIds.Contains(bId)))
+                    continue;
 
                 Hash128 ea = SourceEntityIdConventions.TatoebaSentence(a);
                 Hash128 eb = SourceEntityIdConventions.TatoebaSentence(bId);
@@ -99,16 +107,23 @@ public sealed class TatoebaDecomposer : IDecomposer
 
                 if (++n >= batch)
                 {
-                    if (!options.DryRun) yield return b.Build();
+                    if (!options.DryRun) yield return b.SetInputUnitsConsumed(n).Build();
                     b = NewBuilder($"tatoeba/link-{++bn}", batch); n = 0; await Task.Yield();
                 }
             }
-            if (n > 0 && !options.DryRun) yield return b.Build();
+            if (n > 0 && !options.DryRun) yield return b.SetInputUnitsConsumed(n).Build();
         }
     }
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(13_262_153L);
+    public async Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+        => await EtlInventory.TatoebaAsync(context.EcosystemPath, options.Languages, ct);
+
+    public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    {
+        var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
+        return inv?.TotalInputUnits;
+    }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 

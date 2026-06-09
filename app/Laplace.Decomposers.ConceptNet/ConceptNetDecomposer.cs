@@ -7,7 +7,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.ConceptNet;
 
-public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
+public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/ConceptNetDecomposer/v1");
@@ -61,8 +61,20 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
-    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(34_074_917L);
+    public async Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        string file = Path.Combine(context.EcosystemPath, "assertions.csv");
+        if (!File.Exists(file)) return null;
+        long n = await EtlInventory.CountDataLinesAsync(file, ct: ct);
+        return new IngestInventory("assertions", n, [new IngestFileSpec("assertions", file, n)]);
+    }
+
+    public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    {
+        var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
+        return inv?.TotalInputUnits;
+    }
 
     protected override async IAsyncEnumerable<SubstrateChange> StreamTriplesAsync(
         string ecosystemPath, TriplePass pass, DecomposerOptions options,
@@ -115,6 +127,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase
             }
             if (!ParseConcept(c[2], out string startTerm, out string startLang)) continue;
             if (!ParseConcept(c[3], out string endTerm, out string endLang)) continue;
+            if (options.Languages?.MatchesAll(startLang, endLang) == false) continue;
 
             var startId = ContentEmitter.Emit(b, startTerm, Source);
             var endId   = ContentEmitter.Emit(b, endTerm, Source);

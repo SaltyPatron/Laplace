@@ -1,22 +1,37 @@
-SET search_path = laplace, public;
-
-\echo '=== substrate_health ==='
-SELECT * FROM substrate_health();
-
-\echo '=== fake_tier_bands (must be 0) ==='
-SELECT fake_tier_band_count();
-
-\echo '=== identity_law_violations (must be empty) ==='
-SELECT count(*) AS violation_count FROM identity_law_violations();
-
-\echo '=== compositional tier distribution ==='
-SELECT * FROM compositional_tier_distribution();
-
-\echo '=== substrate_counts ==='
-SELECT * FROM substrate_counts();
-
-\echo '=== multi_source_entity_count ==='
-SELECT multi_source_entity_count();
-
-\echo '=== word_id dog (hash law smoke) ==='
-SELECT word_id('dog') IS NOT NULL AS dog_resolves;
+SET search_path = laplace, public;
+SET client_min_messages = warning;
+
+\echo '=== substrate_health (must be ok) ==='
+SELECT * FROM substrate_health();
+
+\echo '=== identity law (fake tiers + violations must be 0) ==='
+SELECT fake_tier_band_count() AS fake_tier_bands;
+SELECT count(*) AS identity_violations FROM identity_law_violations();
+
+\echo '=== layer completion markers ==='
+SELECT layer, laplace.evidence_count(
+           p_type => laplace.canonical_id('substrate/kind/HasLayerCompleted/' || layer || '/v1')) > 0 AS completed
+FROM generate_series(0, 3) AS layer
+ORDER BY layer;
+
+\echo '=== substrate_counts ==='
+SELECT * FROM substrate_counts();
+
+\echo '=== witnesses ingested (evidence + content per source) ==='
+SELECT source, evidence, content FROM source_counts();
+
+\echo '=== wordnet foundational lexicon (dog) ==='
+SELECT laplace.word_id('dog') IS NOT NULL AS dog_id_ok;
+SELECT count(*) AS dog_sense_count FROM senses(word_id('dog'));
+SELECT definition, eff_mu, witnesses FROM define(word_id('dog'), 1);
+
+\echo '=== multi-source entities (frayed-edge substrate) ==='
+SELECT multi_source_entity_count();
+
+\echo '=== compositional tier distribution ==='
+SELECT * FROM compositional_tier_distribution();
+
+\echo '=== render_gaps (orphan consensus ids, top 10) ==='
+SELECT count(*) AS gap_count FROM render_gaps(1000);
+SELECT render(id), roles, refs FROM render_gaps(10);
+

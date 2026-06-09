@@ -14,7 +14,9 @@ public sealed record SubstrateChangeMetadata(
     Hash128         SourceId,
     string          SourceContentUnitName,
     DateTimeOffset  BuiltAt,
-    Hash128?        ParentIntentId);
+    Hash128?        ParentIntentId,
+    /// <summary>Input records consumed by this intent (sentences, synsets, codepoints, …). 0 = not reported.</summary>
+    long            InputUnitsConsumed = 0);
 
 public sealed record EntityRow(
     Hash128  Id,
