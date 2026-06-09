@@ -94,10 +94,10 @@ public sealed class FrameNetDecomposer : IDecomposer
             entityCapacity: PosReference.Canonical.Length + 1 + CorenessValues.Length + 1,
             physicalityCapacity: 0, attestationCapacity: 0);
         PosReference.SeedCanonical(seed, Source);
-        seed.AddEntity(new EntityRow(CorenessTypeId, (byte)MetaTier.Meta,
+        seed.AddEntity(new EntityRow(CorenessTypeId, EntityTier.Vocabulary,
             BootstrapIntentBuilder.TypeMetaTypeId, Source));
         foreach (var c in CorenessValues)
-            seed.AddEntity(new EntityRow(CorenessId(c), (byte)MetaTier.Meta, CorenessTypeId, Source));
+            seed.AddEntity(new EntityRow(CorenessId(c), EntityTier.Vocabulary, CorenessTypeId, Source));
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 
@@ -164,27 +164,27 @@ public sealed class FrameNetDecomposer : IDecomposer
 
     private static void EmitFrameEntities(SubstrateChangeBuilder b, Frame frame)
     {
-        b.AddEntity(new EntityRow(FrameId(frame.Name), (byte)MetaTier.Meta, FrameTypeId, Source));
+        b.AddEntity(new EntityRow(FrameId(frame.Name), EntityTier.Vocabulary, FrameTypeId, Source));
         ContentEmitter.Emit(b, frame.Name, Source);
         if (frame.Definition.Length > 0) ContentEmitter.Emit(b, frame.Definition, Source);
         foreach (var ex in frame.Examples) ContentEmitter.Emit(b, ex, Source);
 
         foreach (var fe in frame.Elements)
         {
-            b.AddEntity(new EntityRow(FeId(frame.Name, fe.Name), (byte)MetaTier.Meta, FrameElemTypeId, Source));
+            b.AddEntity(new EntityRow(FeId(frame.Name, fe.Name), EntityTier.Vocabulary, FrameElemTypeId, Source));
             ContentEmitter.Emit(b, fe.Name, Source);
             if (fe.Definition.Length > 0) ContentEmitter.Emit(b, fe.Definition, Source);
         }
 
         foreach (var lu in frame.LexUnits)
         {
-            b.AddEntity(new EntityRow(LuId(lu.Id), (byte)MetaTier.Meta, LexUnitTypeId, Source));
+            b.AddEntity(new EntityRow(LuId(lu.Id), EntityTier.Vocabulary, LexUnitTypeId, Source));
             ContentEmitter.Emit(b, lu.Lemma, Source);
         }
 
         foreach (var rel in frame.Relations)
         {
-            b.AddEntity(new EntityRow(FrameId(rel.TargetFrame), (byte)MetaTier.Meta, FrameTypeId, Source));
+            b.AddEntity(new EntityRow(FrameId(rel.TargetFrame), EntityTier.Vocabulary, FrameTypeId, Source));
             ContentEmitter.Emit(b, rel.TargetFrame, Source);
         }
     }
@@ -233,7 +233,7 @@ public sealed class FrameNetDecomposer : IDecomposer
             if (lemmaId is null) continue;
 
             Hash128 posId = ResolvePos(lu.Pos);
-            b.AddEntity(new EntityRow(posId, (byte)MetaTier.Meta, PosReference.PosTypeId, Source));
+            b.AddEntity(new EntityRow(posId, EntityTier.Vocabulary, PosReference.PosTypeId, Source));
             b.AddAttestation(RelationTypeRegistry.Attest(
                 lemmaId.Value, "HAS_POS", posId, Source, SourceTrust.AcademicCurated));
             b.AddAttestation(RelationTypeRegistry.Attest(
@@ -266,7 +266,7 @@ public sealed class FrameNetDecomposer : IDecomposer
                 var targetId = ContentEmitter.Emit(b, ann.TargetText, Source);
                 if (sentId is not null && targetId is not null)
                 {
-                    b.AddEntity(new EntityRow(FrameId(ann.FrameName), (byte)MetaTier.Meta, FrameTypeId, Source));
+                    b.AddEntity(new EntityRow(FrameId(ann.FrameName), EntityTier.Vocabulary, FrameTypeId, Source));
                     b.AddAttestation(RelationTypeRegistry.Attest(
                         targetId.Value, "EVOKES_FRAME", FrameId(ann.FrameName),
                         Source, SourceTrust.AcademicCurated, contextId: sentId.Value));

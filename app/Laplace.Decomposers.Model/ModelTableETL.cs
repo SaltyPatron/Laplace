@@ -75,7 +75,7 @@ public sealed class ModelTableETL
             for (int t = 0; t < vocab; t++)
             {
                 if (entIdx[t] < 0) continue;
-                eb.AddEntity(new EntityRow(ents[entIdx[t]], tier[t], ModelDecomposer.TextTypeId, _source));
+                eb.AddEntity(new EntityRow(ents[entIdx[t]], tier[t], TextEntityBuilder.WordTypeId, _source));
                 if (++ec >= RowsPerChange) { yield return eb.Build(); eb = NewChunk("token"); ec = 0; }
             }
             if (ec > 0) yield return eb.Build();

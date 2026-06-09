@@ -54,8 +54,8 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
 
         var seed = new SubstrateChangeBuilder(Source, "bootstrap/atomic-vocab", null,
             entityCapacity: 1 + Splits.Length, physicalityCapacity: 0, attestationCapacity: 0);
-        seed.AddEntity(new EntityRow(NoneId, (byte)MetaTier.Meta, MarkerTypeId, Source));
-        foreach (var s in Splits) seed.AddEntity(new EntityRow(SplitId(s), (byte)MetaTier.Meta, SplitTypeId, Source));
+        seed.AddEntity(new EntityRow(NoneId, EntityTier.Vocabulary, MarkerTypeId, Source));
+        foreach (var s in Splits) seed.AddEntity(new EntityRow(SplitId(s), EntityTier.Vocabulary, SplitTypeId, Source));
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 

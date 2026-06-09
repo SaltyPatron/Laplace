@@ -22,11 +22,11 @@ internal static class ContentRoundtrip
     public static async Task BootstrapAsync(ISubstrateWriter writer, CancellationToken ct = default)
     {
         var b = new SubstrateChangeBuilder(PromptSource, "bootstrap/UserPrompt", parentIntentId: null);
-        b.AddEntity(PromptSource, (byte)MetaTier.Meta, BootstrapIntentBuilder.SourceTypeId, firstObservedBy: PromptSource);
-        b.AddEntity(TGrapheme, (byte)MetaTier.Meta, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
-        b.AddEntity(TWord,     (byte)MetaTier.Meta, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
-        b.AddEntity(TSentence, (byte)MetaTier.Meta, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
-        b.AddEntity(TDocument, (byte)MetaTier.Meta, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
+        b.AddEntity(PromptSource, EntityTier.Vocabulary, BootstrapIntentBuilder.SourceTypeId, firstObservedBy: PromptSource);
+        b.AddEntity(TGrapheme, EntityTier.Vocabulary, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
+        b.AddEntity(TWord,     EntityTier.Vocabulary, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
+        b.AddEntity(TSentence, EntityTier.Vocabulary, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
+        b.AddEntity(TDocument, EntityTier.Vocabulary, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
         await writer.ApplyAsync(b.Build(), ct);
     }
 

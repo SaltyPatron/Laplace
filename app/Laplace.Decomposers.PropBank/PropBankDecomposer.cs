@@ -122,7 +122,7 @@ public sealed class PropBankDecomposer : IDecomposer
             if (rsId.Length == 0) continue;
 
             Hash128 rsEntity = RolesetId(rsId);
-            b.AddEntity(new EntityRow(rsEntity, (byte)MetaTier.Meta, RolesetTypeId, Source));
+            b.AddEntity(new EntityRow(rsEntity, EntityTier.Vocabulary, RolesetTypeId, Source));
 
             b.AddAttestation(RelationTypeRegistry.Attest(
                 lemmaId.Value, "HAS_SENSE", rsEntity, Source, TC.AcademicCurated));
@@ -156,7 +156,7 @@ public sealed class PropBankDecomposer : IDecomposer
             {
                 string ord = num.Equals("M", StringComparison.OrdinalIgnoreCase) ? "m" : num;
                 Hash128 ordEntity = OrdinalId(ord);
-                b.AddEntity(new EntityRow(ordEntity, (byte)MetaTier.Meta, OrdinalTypeId, Source));
+                b.AddEntity(new EntityRow(ordEntity, EntityTier.Vocabulary, OrdinalTypeId, Source));
                 ctx = ordEntity;
             }
 
@@ -173,7 +173,7 @@ public sealed class PropBankDecomposer : IDecomposer
                 if (vnClass.Length == 0) continue;
 
                 Hash128 vnEntity = VnClassId(vnClass);
-                b.AddEntity(new EntityRow(vnEntity, (byte)MetaTier.Meta, VerbNetClassTypeId, Source));
+                b.AddEntity(new EntityRow(vnEntity, EntityTier.Vocabulary, VerbNetClassTypeId, Source));
                 b.AddAttestation(RelationTypeRegistry.Attest(
                     rsEntity, "CORRESPONDS_TO", vnEntity, Source, TC.AcademicCurated));
 

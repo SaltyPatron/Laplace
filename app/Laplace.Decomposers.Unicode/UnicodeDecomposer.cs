@@ -78,10 +78,10 @@ public sealed class UnicodeDecomposer : IDecomposer
             entityCapacity: 2048, physicalityCapacity: 0, attestationCapacity: 0);
         foreach (var row in _ucd!.ClassificationEntities(Source))
             classifiers.AddEntity(row);
-        classifiers.AddEntity(new EntityRow(UcdProperties.OrdinalCtx0, (byte)MetaTier.Meta, ordinalContextTypeId, Source));
-        classifiers.AddEntity(new EntityRow(UcdProperties.OrdinalCtx1, (byte)MetaTier.Meta, ordinalContextTypeId, Source));
+        classifiers.AddEntity(new EntityRow(UcdProperties.OrdinalCtx0, EntityTier.Vocabulary, ordinalContextTypeId, Source));
+        classifiers.AddEntity(new EntityRow(UcdProperties.OrdinalCtx1, EntityTier.Vocabulary, ordinalContextTypeId, Source));
         for (int cc = 1; cc <= 254; cc++)
-            classifiers.AddEntity(new EntityRow(CombiningClassIds[cc], (byte)MetaTier.Meta, ucdClassifierTypeId, Source));
+            classifiers.AddEntity(new EntityRow(CombiningClassIds[cc], EntityTier.Vocabulary, ucdClassifierTypeId, Source));
         await context.Writer.ApplyAsync(classifiers.Build(), ct);
     }
 
@@ -165,14 +165,14 @@ public sealed class UnicodeDecomposer : IDecomposer
             var cp1252 = Hash128.OfCanonical("substrate/encoding/windows-1252/v1");
             var encType = Hash128.OfCanonical("substrate/type/CharacterEncoding/v1");
             var roleType = Hash128.OfCanonical("substrate/type/Utf8Role/v1");
-            bb.AddEntity(new EntityRow(latin1, (byte)MetaTier.Meta, encType, Source));
-            bb.AddEntity(new EntityRow(cp1252, (byte)MetaTier.Meta, encType, Source));
+            bb.AddEntity(new EntityRow(latin1, EntityTier.Vocabulary, encType, Source));
+            bb.AddEntity(new EntityRow(cp1252, EntityTier.Vocabulary, encType, Source));
             var roleIds = new Dictionary<string, Hash128>(StringComparer.Ordinal);
             foreach (var role in new[] { "continuation", "lead2", "lead3", "lead4", "invalid" })
             {
                 var rid = Hash128.OfCanonical($"substrate/utf8/{role}/v1");
                 roleIds[role] = rid;
-                bb.AddEntity(new EntityRow(rid, (byte)MetaTier.Meta, roleType, Source));
+                bb.AddEntity(new EntityRow(rid, EntityTier.Vocabulary, roleType, Source));
             }
 
             for (int v = ByteAtoms.First; v <= 0xFF; v++)

@@ -169,7 +169,7 @@ public sealed class WordNetDecomposer : IDecomposer
 
     private static void EmitSynsetEntities(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)
     {
-        b.AddEntity(syn.SynsetId, (byte)MetaTier.Meta, SynsetTypeId, Source);
+        b.AddEntity(syn.SynsetId, EntityTier.Vocabulary, SynsetTypeId, Source);
         foreach (var lemma in syn.Lemmas)
             ContentEmitter.Emit(b, Surface(lemma), Source);
 

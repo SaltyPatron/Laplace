@@ -144,19 +144,19 @@ internal sealed class UcdProperties
     {
         var typeId = Hash128.OfCanonical("substrate/type/UcdClassifier/v1");
         foreach (var (_, id) in CategoryEntityIds)
-            yield return new EntityRow(id, (byte)MetaTier.Meta, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Vocabulary, typeId, sourceId);
         foreach (var (_, id) in ScriptEntityIds)
-            yield return new EntityRow(id, (byte)MetaTier.Meta, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Vocabulary, typeId, sourceId);
         foreach (var (_, id) in BlockEntityIds)
-            yield return new EntityRow(id, (byte)MetaTier.Meta, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Vocabulary, typeId, sourceId);
         foreach (var (_, id) in BidiClassEntityIds)
-            yield return new EntityRow(id, (byte)MetaTier.Meta, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Vocabulary, typeId, sourceId);
         foreach (var (_, id) in AgeEntityIds)
-            yield return new EntityRow(id, (byte)MetaTier.Meta, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Vocabulary, typeId, sourceId);
         foreach (var (_, id) in EmojiPropEntityIds)
-            yield return new EntityRow(id, (byte)MetaTier.Meta, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Vocabulary, typeId, sourceId);
         foreach (var (_, id) in NumericEntityIds)
-            yield return new EntityRow(id, (byte)MetaTier.Meta, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Vocabulary, typeId, sourceId);
     }
 
     public static UcdProperties Load(string ucdDir)

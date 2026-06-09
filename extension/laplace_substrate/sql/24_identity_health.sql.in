@@ -1,0 +1,75 @@
+-- Identity law health checks (extension install surface; no ad-hoc SQL).
+
+CREATE OR REPLACE FUNCTION fake_tier_band_count()
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT count(*)::bigint FROM entities WHERE tier IN (247, 248, 250);
+$$;
+
+CREATE OR REPLACE FUNCTION identity_law_violations()
+RETURNS TABLE(id bytea, tier smallint, reason text)
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT e.id, e.tier, 'tier_out_of_range'::text
+    FROM entities e
+    WHERE e.tier NOT IN (0, 1, 2, 3, 4);
+$$;
+
+CREATE OR REPLACE FUNCTION compositional_type_ids()
+RETURNS bytea[]
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT ARRAY[
+        laplace_hash128_blake3('substrate/type/Codepoint/v1'::bytea),
+        laplace_hash128_blake3('substrate/type/Grapheme/v1'::bytea),
+        laplace_hash128_blake3('substrate/type/Word/v1'::bytea),
+        laplace_hash128_blake3('substrate/type/Sentence/v1'::bytea),
+        laplace_hash128_blake3('substrate/type/Document/v1'::bytea)
+    ];
+$$;
+
+CREATE OR REPLACE FUNCTION is_compositional_type(p_type_id bytea)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT p_type_id = ANY(compositional_type_ids());
+$$;
+
+CREATE OR REPLACE FUNCTION compositional_tier_distribution()
+RETURNS TABLE(tier smallint, n bigint)
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT e.tier, count(*)::bigint
+    FROM entities e
+    WHERE is_compositional_type(e.type_id)
+    GROUP BY e.tier
+    ORDER BY e.tier;
+$$;
+
+CREATE OR REPLACE FUNCTION substrate_health()
+RETURNS TABLE(
+    ok boolean,
+    fake_tier_bands bigint,
+    identity_violations bigint,
+    bootstrap_entities bigint
+)
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT
+        (fake_tier_band_count() = 0
+         AND (SELECT count(*) FROM identity_law_violations()) = 0
+         AND EXISTS (
+             SELECT 1 FROM entities
+             WHERE id = laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
+         )) AS ok,
+        fake_tier_band_count() AS fake_tier_bands,
+        (SELECT count(*) FROM identity_law_violations()) AS identity_violations,
+        (SELECT count(*) FROM entities) AS bootstrap_entities;
+$$;

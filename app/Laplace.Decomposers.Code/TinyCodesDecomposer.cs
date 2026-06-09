@@ -116,7 +116,7 @@ public sealed class TinyCodesDecomposer : IDecomposer
                 if (!string.IsNullOrEmpty(taskId))
                 {
                     var conceptId = Hash128.OfCanonical($"tiny-codes/concept/{taskId}/v1");
-                    b.AddEntity(new EntityRow(conceptId, (byte)MetaTier.Meta, CodeConceptTypeId, Source));
+                    b.AddEntity(new EntityRow(conceptId, EntityTier.Vocabulary, CodeConceptTypeId, Source));
                     b.AddAttestation(RelationTypeRegistry.Attest(
                         conceptId,  "HAS_EXAMPLE",   codeRootId, Source, SourceTrust.StructuredCorpus));
                     b.AddAttestation(RelationTypeRegistry.Attest(

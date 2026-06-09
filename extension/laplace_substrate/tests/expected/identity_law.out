@@ -1,0 +1,21 @@
+BEGIN;
+SET search_path = laplace, public;
+SELECT fake_tier_band_count() = 0 AS no_fake_tiers;
+ no_fake_tiers 
+---------------
+ t
+(1 row)
+
+SELECT count(*) = 0 AS no_identity_violations FROM identity_law_violations();
+ no_identity_violations 
+------------------------
+ t
+(1 row)
+
+SELECT ok AS substrate_healthy FROM substrate_health();
+ substrate_healthy 
+-------------------
+ t
+(1 row)
+
+COMMIT;

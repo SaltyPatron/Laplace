@@ -157,7 +157,7 @@ public sealed class GrammarEntityBuilder
 
             var kindTypeId = KindTypeId(_modalityId, _ast.KindName(node.KindId) ?? "unknown");
             if (emittedKindTypes.Add(kindTypeId))
-                entities.Add(new EntityRow(kindTypeId, (byte)MetaTier.Meta,
+                entities.Add(new EntityRow(kindTypeId, EntityTier.Vocabulary,
                                            BootstrapIntentBuilder.TypeMetaTypeId, _sourceId));
 
             entities.Add(new EntityRow(id, tier, kindTypeId, _sourceId));

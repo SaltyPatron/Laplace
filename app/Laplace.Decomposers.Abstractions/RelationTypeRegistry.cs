@@ -347,7 +347,7 @@ public static class RelationTypeRegistry
     {
         var all = new List<RelationTypeResolution>(AllCanonical());
         foreach (var k in all)
-            builder.AddEntity(new EntityRow(k.Id, (byte)MetaTier.RelationType, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
+            builder.AddEntity(new EntityRow(k.Id, EntityTier.Vocabulary, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
         foreach (var k in all)
             if (k.ParentId is { } parent)
                 builder.AddAttestation(Attest(k.Id, "IS_A", parent, sourceId, SourceTrust.SubstrateMandate));
@@ -358,11 +358,11 @@ public static class RelationTypeRegistry
                                    ConcurrentIdSet seenAttestationsThisRun)
     {
         if (seenEntitiesThisBatch.Add(k.Id))
-            builder.AddEntity(new EntityRow(k.Id, (byte)MetaTier.RelationType, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
+            builder.AddEntity(new EntityRow(k.Id, EntityTier.Vocabulary, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
         if (k.ParentId is { } parent && seenAttestationsThisRun.Add(k.Id))
         {
-            builder.AddEntity(new EntityRow(k.Id, (byte)MetaTier.RelationType, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
-            builder.AddEntity(new EntityRow(parent, (byte)MetaTier.RelationType, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
+            builder.AddEntity(new EntityRow(k.Id, EntityTier.Vocabulary, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
+            builder.AddEntity(new EntityRow(parent, EntityTier.Vocabulary, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
             builder.AddAttestation(Attest(k.Id, "IS_A", parent, sourceId, SourceTrust.AcademicCurated));
         }
     }

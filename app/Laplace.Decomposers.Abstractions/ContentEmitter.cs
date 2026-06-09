@@ -31,21 +31,20 @@ public static class ContentEmitter
     {
         if (canonical.Length == 0) return null;
 
-        var contentHash = Hash128.Blake3(canonical);
-        var key = (sourceId, contentHash);
+        if (!TextEntityBuilder.TryBuildRows(canonical, sourceId,
+                out var entities, out var physicalities, out var rootId, out _))
+        {
+            MemoRoot(canonical, null);
+            return null;
+        }
+
+        var key = (sourceId, rootId);
 
         if (_emitMemo.TryGetValue(key, out var hit))
         {
             foreach (var e in hit.Ents) b.AddEntity(e);
             foreach (var p in hit.Phys) b.AddPhysicality(p);
             return hit.Root;
-        }
-
-        if (!TextEntityBuilder.TryBuildRows(canonical, sourceId,
-                out var entities, out var physicalities, out var rootId, out _))
-        {
-            MemoRoot(contentHash, null);
-            return null;
         }
 
         var seededT0 = new HashSet<Hash128>();
@@ -62,13 +61,16 @@ public static class ContentEmitter
         {
             Interlocked.Increment(ref _emitMemoCount);
         }
-        MemoRoot(contentHash, rootId);
+        MemoRoot(canonical, rootId);
         return rootId;
     }
 
-    private static void MemoRoot(Hash128 contentHash, Hash128? rootId)
+    private static Hash128 MemoKey(byte[] canonical) => Hash128.Blake3(canonical);
+
+    private static void MemoRoot(byte[] canonical, Hash128? rootId)
     {
-        if (Volatile.Read(ref _rootMemoCount) < MemoCap && _rootMemo.TryAdd(contentHash, rootId))
+        var key = MemoKey(canonical);
+        if (Volatile.Read(ref _rootMemoCount) < MemoCap && _rootMemo.TryAdd(key, rootId))
             Interlocked.Increment(ref _rootMemoCount);
     }
 
@@ -76,14 +78,14 @@ public static class ContentEmitter
     {
         if (string.IsNullOrEmpty(surface)) return null;
         var bytes = Encoding.UTF8.GetBytes(surface);
-        var contentHash = Hash128.Blake3(bytes);
+        var key = MemoKey(bytes);
 
-        if (_rootMemo.TryGetValue(contentHash, out var cached)) return cached;
+        if (_rootMemo.TryGetValue(key, out var cached)) return cached;
 
         Hash128? result = TextEntityBuilder.TryDecomposeRoot(bytes,
                 out var rootId, out _, out _, out _, out _, out _)
             ? rootId : (Hash128?)null;
-        MemoRoot(contentHash, result);
+        MemoRoot(bytes, result);
         return result;
     }
 }

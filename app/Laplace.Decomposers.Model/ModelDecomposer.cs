@@ -36,8 +36,7 @@ public sealed class ModelDecomposer : IDecomposer
         return "model";
     }
 
-    public static readonly Hash128 TextTypeId =
-        Hash128.OfCanonical("substrate/type/Text/v1");
+    public static readonly Hash128 TextTypeId = TextEntityBuilder.WordTypeId;
     public static readonly Hash128 ModelRecipeTypeId =
         Hash128.OfCanonical("substrate/type/Model_Recipe/v1");
     public static readonly Hash128 ModelTokenizerTypeId =
@@ -105,8 +104,6 @@ public sealed class ModelDecomposer : IDecomposer
         boot.AddType("Ngram");
         boot.AddType("Model_Axis");
 
-        boot.AddType("Text");
-
         boot.AddRelationType("EMBEDS");
         boot.AddRelationType("Q_PROJECTS");
         boot.AddRelationType("K_PROJECTS");
@@ -138,7 +135,7 @@ public sealed class ModelDecomposer : IDecomposer
         foreach (var slot in ModelArenaPlan.Slots(recipe, prof))
         {
             if (!seededKinds.Add(slot.KindId)) continue;
-            boot.AddEntity(new EntityRow(slot.KindId, (byte)MetaTier.RelationType,
+            boot.AddEntity(new EntityRow(slot.KindId, EntityTier.Vocabulary,
                 BootstrapIntentBuilder.RelationTypeMetaTypeId, Source));
             string baseRole = slot.Role.StartsWith("NORM_SCALES", StringComparison.Ordinal)
                 ? "NORM_SCALES" : slot.Role;
@@ -176,7 +173,7 @@ public sealed class ModelDecomposer : IDecomposer
         var tokEntityId = Hash128.Blake3(tokBytes);
         var tokChange = new SubstrateChangeBuilder(Source, "tokenizer/entity",
             entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 0);
-        tokChange.AddEntity(tokEntityId, (byte)MetaTier.Meta, ModelTokenizerTypeId, firstObservedBy: Source);
+        tokChange.AddEntity(tokEntityId, EntityTier.Vocabulary, ModelTokenizerTypeId, firstObservedBy: Source);
         await context.Writer.ApplyAsync(tokChange.Build(), ct);
 
         phaseSw.Restart();

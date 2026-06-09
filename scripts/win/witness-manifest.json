@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "description": "Invention-complete witness manifest — layer-gated ingest order for seed-substrate.cmd",
+  "vault_root": "D:/Data/Ingest",
+  "repos_root": "D:/Repositories",
+  "models_root": "D:/Models/hub",
+  "lexical_ladder": [
+    { "order": 1, "cli": "unicode", "path": "Unicode", "layer": "L0" },
+    { "order": 2, "cli": "iso639", "path": "ISO639", "layer": "L1" },
+    { "order": 3, "cli": "wordnet", "path": "Wordnet", "layer": "L2" },
+    { "order": 4, "cli": "tatoeba", "path": "Tatoeba", "layer": "L2" },
+    { "order": 5, "cli": "atomic2020", "path": "Atomic2020", "layer": "L2" },
+    { "order": 6, "cli": "verbnet", "path": "VerbNet", "layer": "L2" },
+    { "order": 7, "cli": "propbank", "path": "PropBank", "layer": "L2" },
+    { "order": 8, "cli": "conceptnet", "path": "ConceptNet", "layer": "L2" },
+    { "order": 9, "cli": "framenet", "path": "FrameNet/framenet_v17", "layer": "L3" },
+    { "order": 10, "cli": "semlink", "path": "SemLink", "layer": "L3" },
+    { "order": 11, "cli": "ud", "path": "UD-Treebanks", "layer": "L2" },
+    { "order": 12, "cli": "wiktionary", "path": "Wiktionary", "layer": "L2" },
+    { "order": 13, "cli": "omw", "path": "OMW", "layer": "L3" },
+    { "order": 14, "cli": "opensubtitles", "path": "OpenSubtitles", "layer": "L2" }
+  ],
+  "repositories": [
+    "Laplace",
+    "X_BONEYARD",
+    "llama-workspace",
+    "SpecEditor",
+    "TournamentManager",
+    "Laplace-Space-Game",
+    "temp-llama-models"
+  ],
+  "test_data": {
+    "text_glob": "test-data/text/*.txt",
+    "code_files": ["test-data/text/code.py", "test-data/text/data.json"],
+    "images_glob": "test-data/images/*.png",
+    "audio_glob": "test-data/audio/*.wav"
+  },
+  "code_corpora": [
+    { "cli": "tiny-codes", "path": "tiny-codes", "download": "download-code-data.cmd tiny-codes" },
+    { "cli": "stack", "path": "stack-v2", "download": "download-code-data.cmd stack-v2" }
+  ],
+  "models": {
+    "discover": "models--*/snapshots/*",
+    "require_files": ["tokenizer.json", "config.json"]
+  }
+}

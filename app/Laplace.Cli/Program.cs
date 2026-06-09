@@ -22,6 +22,8 @@ using Laplace.Decomposers.PropBank;
 using Laplace.Decomposers.SemLink;
 using Laplace.Decomposers.Unicode;
 using Laplace.Decomposers.WordNet;
+using Laplace.Decomposers.Image;
+using Laplace.Decomposers.Audio;
 using Laplace.Engine.Core;
 using Laplace.Engine.Synthesis;
 using Laplace.Ingestion;
@@ -803,7 +805,7 @@ internal static class Program
         string path   = args.Length > 1 ? args[1] : "";
 
         if (string.IsNullOrEmpty(source))
-            return Fail("usage: laplace ingest <source> [path]  (unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | code | repo | tabular | tiny-codes | stack | model)");
+            return Fail("usage: laplace ingest <source> [path]  (unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | code | repo | tabular | tiny-codes | stack | model | image | audio)");
 
         return source.ToLowerInvariant() switch
         {
@@ -827,7 +829,9 @@ internal static class Program
             "tiny-codes" => await IngestViaRunnerAsync(new TinyCodesDecomposer(), path, skipLayerCheck: true),
             "stack"      => await IngestViaRunnerAsync(new StackDecomposer(),      path, skipLayerCheck: true),
             "model"      => await IngestModelAsync(path),
-            _ => Fail($"unknown ingest source '{source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, code, repo, tabular, tiny-codes, stack, model)"),
+            "image"      => await IngestViaRunnerAsync(new ImageDecomposer(), string.IsNullOrEmpty(path) ? "/vault/Data/test-data/images" : path, skipLayerCheck: true),
+            "audio"      => await IngestViaRunnerAsync(new AudioDecomposer(), string.IsNullOrEmpty(path) ? "/vault/Data/test-data/audio" : path, skipLayerCheck: true),
+            _ => Fail($"unknown ingest source '{source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, code, repo, tabular, tiny-codes, stack, model, image, audio)"),
         };
     }
 

@@ -178,7 +178,7 @@ public sealed class UDDecomposer : IDecomposer
     private static void EmitSentence(SubstrateChangeBuilder b, UdSentence s, Hash128 langId, string langCode,
                                      HashSet<Hash128> seenEntBatch, ConcurrentIdSet seenAttRun)
     {
-        b.AddEntity(new EntityRow(langId, (byte)MetaTier.Meta, LanguageTypeId, Source));
+        b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, LanguageTypeId, Source));
 
         if (!string.IsNullOrEmpty(s.Text)) ContentEmitter.Emit(b, s.Text!, Source);
 
@@ -202,7 +202,7 @@ public sealed class UDDecomposer : IDecomposer
 
             if (!string.IsNullOrEmpty(tok.Xpos) && tok.Xpos != "_")
             {
-                b.AddEntity(new EntityRow(XposId(langCode, tok.Xpos), (byte)MetaTier.Meta, XposTypeId, Source));
+                b.AddEntity(new EntityRow(XposId(langCode, tok.Xpos), EntityTier.Vocabulary, XposTypeId, Source));
                 b.AddAttestation(RelationTypeRegistry.Attest(
                     form, "HAS_XPOS", XposId(langCode, tok.Xpos), Source, SourceTrust.AcademicCurated));
             }
@@ -211,7 +211,7 @@ public sealed class UDDecomposer : IDecomposer
             {
                 if (!RelationTypeRegistry.ParseFeature(feat, out var fName, out var fVal)) continue;
                 Hash128 valId = FeatValueId(fName, fVal);
-                b.AddEntity(new EntityRow(valId, (byte)MetaTier.Meta, FeatureTypeId, Source));
+                b.AddEntity(new EntityRow(valId, EntityTier.Vocabulary, FeatureTypeId, Source));
                 RelationTypeRegistry.SeedDynamic(b, RelationTypeRegistry.ResolveFeature(fName), Source, seenEntBatch, seenAttRun);
                 b.AddAttestation(RelationTypeRegistry.AttestFeature(
                     form, fName, valId, Source, SourceTrust.AcademicCurated));

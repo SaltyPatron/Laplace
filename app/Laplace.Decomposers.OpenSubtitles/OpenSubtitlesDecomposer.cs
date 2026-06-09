@@ -95,8 +95,8 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer
                 var idB = ContentEmitter.Emit(b, lineB, Source);
                 if (idA is null || idB is null) continue;
 
-                b.AddEntity(new EntityRow(langA, (byte)MetaTier.Meta, LanguageTypeId, Source));
-                b.AddEntity(new EntityRow(langB, (byte)MetaTier.Meta, LanguageTypeId, Source));
+                b.AddEntity(new EntityRow(langA, EntityTier.Vocabulary, LanguageTypeId, Source));
+                b.AddEntity(new EntityRow(langB, EntityTier.Vocabulary, LanguageTypeId, Source));
 
                 b.AddAttestation(RelationTypeRegistry.Attest(
                     idA.Value, "IS_TRANSLATION_OF", idB.Value, Source, SourceTrust.StructuredCorpus));

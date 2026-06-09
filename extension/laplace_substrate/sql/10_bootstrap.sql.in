@@ -45,9 +45,8 @@ DECLARE
     kind_has_trust_class_id   bytea;
     kind_is_alias_of_id       bytea;
 
-    META_TIER  CONSTANT smallint := 250;
-    KIND_TIER  CONSTANT smallint := 248;
-    TRUST_TIER CONSTANT smallint := 247;
+    -- Vocabulary entities: tier=0 inert; type_id is the discriminator (not compositional altitude).
+    VOCAB_TIER CONSTANT smallint := 0;
 
 BEGIN
     type_id             := public.laplace_hash128_blake3('substrate/type/Type/v1'::bytea);
@@ -56,14 +55,14 @@ BEGIN
     source_id           := public.laplace_hash128_blake3('substrate/type/Source/v1'::bytea);
 
     INSERT INTO entities (id, tier, type_id) VALUES
-        (type_id,             META_TIER, type_id),
-        (kind_id,             META_TIER, type_id),
-        (physicality_kind_id, META_TIER, type_id),
-        (source_id,           META_TIER, type_id);
+        (type_id,             VOCAB_TIER, type_id),
+        (kind_id,             VOCAB_TIER, type_id),
+        (physicality_kind_id, VOCAB_TIER, type_id),
+        (source_id,           VOCAB_TIER, type_id);
 
     subscan_id := public.laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea);
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
-        (subscan_id, META_TIER, source_id, NULL);
+        (subscan_id, VOCAB_TIER, source_id, NULL);
 
     pk_content_id    := public.laplace_hash128_blake3('substrate/physicality_kind/CONTENT/v1'::bytea);
     pk_buildblock_id := public.laplace_hash128_blake3('substrate/physicality_kind/BUILDING_BLOCK/v1'::bytea);
@@ -72,10 +71,10 @@ BEGIN
     pk_projection_out_id := public.laplace_hash128_blake3('substrate/physicality_kind/PROJECTION_OUTPUT/v1'::bytea);
 
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
-        (pk_content_id,        META_TIER, physicality_kind_id, subscan_id),
-        (pk_buildblock_id,     META_TIER, physicality_kind_id, subscan_id),
-        (pk_projection_id,     META_TIER, physicality_kind_id, subscan_id),
-        (pk_projection_out_id, META_TIER, physicality_kind_id, subscan_id);
+        (pk_content_id,        VOCAB_TIER, physicality_kind_id, subscan_id),
+        (pk_buildblock_id,     VOCAB_TIER, physicality_kind_id, subscan_id),
+        (pk_projection_id,     VOCAB_TIER, physicality_kind_id, subscan_id),
+        (pk_projection_out_id, VOCAB_TIER, physicality_kind_id, subscan_id);
 
     type_codepoint_id := public.laplace_hash128_blake3('substrate/type/Codepoint/v1'::bytea);
     type_grapheme_id  := public.laplace_hash128_blake3('substrate/type/Grapheme/v1'::bytea);
@@ -84,11 +83,11 @@ BEGIN
     type_document_id  := public.laplace_hash128_blake3('substrate/type/Document/v1'::bytea);
 
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
-        (type_codepoint_id, META_TIER, type_id, subscan_id),
-        (type_grapheme_id,  META_TIER, type_id, subscan_id),
-        (type_word_id,      META_TIER, type_id, subscan_id),
-        (type_sentence_id,  META_TIER, type_id, subscan_id),
-        (type_document_id,  META_TIER, type_id, subscan_id);
+        (type_codepoint_id, VOCAB_TIER, type_id, subscan_id),
+        (type_grapheme_id,  VOCAB_TIER, type_id, subscan_id),
+        (type_word_id,      VOCAB_TIER, type_id, subscan_id),
+        (type_sentence_id,  VOCAB_TIER, type_id, subscan_id),
+        (type_document_id,  VOCAB_TIER, type_id, subscan_id);
 
     tc_mandate_id       := public.laplace_hash128_blake3('substrate/trust_class/SubstrateMandate/v1'::bytea);
     tc_standards_id     := public.laplace_hash128_blake3('substrate/trust_class/StandardsDerived/v1'::bytea);
@@ -102,16 +101,16 @@ BEGIN
     tc_adversarial_id   := public.laplace_hash128_blake3('substrate/trust_class/AdversarialUntrusted/v1'::bytea);
 
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
-        (tc_mandate_id,       TRUST_TIER, type_id, subscan_id),
-        (tc_standards_id,     TRUST_TIER, type_id, subscan_id),
-        (tc_academic_id,      TRUST_TIER, type_id, subscan_id),
-        (tc_academic_user_id, TRUST_TIER, type_id, subscan_id),
-        (tc_corpus_id,        TRUST_TIER, type_id, subscan_id),
-        (tc_user_curated_id,  TRUST_TIER, type_id, subscan_id),
-        (tc_ai_probe_id,      TRUST_TIER, type_id, subscan_id),
-        (tc_app_derived_id,   TRUST_TIER, type_id, subscan_id),
-        (tc_user_prompt_id,   TRUST_TIER, type_id, subscan_id),
-        (tc_adversarial_id,   TRUST_TIER, type_id, subscan_id);
+        (tc_mandate_id,       VOCAB_TIER, type_id, subscan_id),
+        (tc_standards_id,     VOCAB_TIER, type_id, subscan_id),
+        (tc_academic_id,      VOCAB_TIER, type_id, subscan_id),
+        (tc_academic_user_id, VOCAB_TIER, type_id, subscan_id),
+        (tc_corpus_id,        VOCAB_TIER, type_id, subscan_id),
+        (tc_user_curated_id,  VOCAB_TIER, type_id, subscan_id),
+        (tc_ai_probe_id,      VOCAB_TIER, type_id, subscan_id),
+        (tc_app_derived_id,   VOCAB_TIER, type_id, subscan_id),
+        (tc_user_prompt_id,   VOCAB_TIER, type_id, subscan_id),
+        (tc_adversarial_id,   VOCAB_TIER, type_id, subscan_id);
 
     kind_is_a_id              := public.laplace_hash128_blake3('substrate/kind/IS_A/v1'::bytea);
     kind_has_part_id          := public.laplace_hash128_blake3('substrate/kind/HAS_PART/v1'::bytea);
@@ -131,22 +130,22 @@ BEGIN
     kind_is_alias_of_id       := public.laplace_hash128_blake3('substrate/kind/IS_ALIAS_OF/v1'::bytea);
 
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
-        (kind_is_a_id,              KIND_TIER, kind_id, subscan_id),
-        (kind_has_part_id,          KIND_TIER, kind_id, subscan_id),
-        (kind_co_occurs_with_id,    KIND_TIER, kind_id, subscan_id),
-        (kind_follows_id,           KIND_TIER, kind_id, subscan_id),
-        (kind_precedes_id,          KIND_TIER, kind_id, subscan_id),
-        (kind_occurs_in_context_id, KIND_TIER, kind_id, subscan_id),
-        (kind_has_language_id,      KIND_TIER, kind_id, subscan_id),
-        (kind_is_translation_of_id, KIND_TIER, kind_id, subscan_id),
-        (kind_depicts_id,           KIND_TIER, kind_id, subscan_id),
-        (kind_captions_id,          KIND_TIER, kind_id, subscan_id),
-        (kind_transcribes_as_id,    KIND_TIER, kind_id, subscan_id),
-        (kind_is_lossy_enc_id,      KIND_TIER, kind_id, subscan_id),
-        (kind_has_variant_of_id,    KIND_TIER, kind_id, subscan_id),
-        (kind_is_replaced_by_id,    KIND_TIER, kind_id, subscan_id),
-        (kind_has_trust_class_id,   KIND_TIER, kind_id, subscan_id),
-        (kind_is_alias_of_id,       KIND_TIER, kind_id, subscan_id);
+        (kind_is_a_id,              VOCAB_TIER, kind_id, subscan_id),
+        (kind_has_part_id,          VOCAB_TIER, kind_id, subscan_id),
+        (kind_co_occurs_with_id,    VOCAB_TIER, kind_id, subscan_id),
+        (kind_follows_id,           VOCAB_TIER, kind_id, subscan_id),
+        (kind_precedes_id,          VOCAB_TIER, kind_id, subscan_id),
+        (kind_occurs_in_context_id, VOCAB_TIER, kind_id, subscan_id),
+        (kind_has_language_id,      VOCAB_TIER, kind_id, subscan_id),
+        (kind_is_translation_of_id, VOCAB_TIER, kind_id, subscan_id),
+        (kind_depicts_id,           VOCAB_TIER, kind_id, subscan_id),
+        (kind_captions_id,          VOCAB_TIER, kind_id, subscan_id),
+        (kind_transcribes_as_id,    VOCAB_TIER, kind_id, subscan_id),
+        (kind_is_lossy_enc_id,      VOCAB_TIER, kind_id, subscan_id),
+        (kind_has_variant_of_id,    VOCAB_TIER, kind_id, subscan_id),
+        (kind_is_replaced_by_id,    VOCAB_TIER, kind_id, subscan_id),
+        (kind_has_trust_class_id,   VOCAB_TIER, kind_id, subscan_id),
+        (kind_is_alias_of_id,       VOCAB_TIER, kind_id, subscan_id);
 
     INSERT INTO attestations (
         id, subject_id, type_id, object_id, source_id, context_id,
