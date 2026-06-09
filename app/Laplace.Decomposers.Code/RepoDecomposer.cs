@@ -49,6 +49,8 @@ public sealed class RepoDecomposer : IDecomposer
             ["jl"]      = "julia",
             ["kt"]      = "kotlin", ["kts"]  = "kotlin",
             ["php"]     = "php",
+            ["sql"]     = "sql",    ["ddl"]  = "sql",   ["dml"] = "sql",
+            ["swift"]   = "swift",
             // HPC/compute — enabled once grammars compiled
             ["cu"]      = "cuda",   ["cuh"]  = "cuda",
             ["glsl"]    = "glsl",   ["vert"] = "glsl",  ["frag"] = "glsl",

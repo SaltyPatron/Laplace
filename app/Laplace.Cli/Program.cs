@@ -75,6 +75,7 @@ internal static class Program
                 + "  converse [prompt]                 (no prompt: REPL — one connection, one session)\n"
                 + "  nn <word>                         (plural NN: structural geodesic + shape Fréchet + semantic μ)\n"
                 + "  generate [prompt]                 (forward pass: ranked-μ walk over witnessed sequence; no prompt: REPL)\n"
+                + "  attest <confirm|refute> <tok1> [tok2...]   (OODA feedback: deposit PRECEDES witness for a token sequence)\n"
                 + "  roundtrip <file> [out]\n"
                 + "  db-roundtrip <file>\n"
                 + "  svd-exact-bench [model-dir] [tensor]  (prove tensor_svd_truncate is fp-exact on a real tensor; no DB)\n"
@@ -95,6 +96,7 @@ internal static class Program
                 "cognize"      => await CognizeAsync(string.Join(' ', args[1..])),
                 "nn"           => await NearestNeighborsAsync(string.Join(' ', args[1..])),
                 "generate"     => await GenerateAsync(args[1..]),
+                "attest"       => await AttestAsync(args[1..]),
                 "roundtrip"    => Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
                 "db-roundtrip" => await DbRoundtripAsync(args.Length > 1 ? args[1] : ""),
                 "stats"        => await StatsAsync(),
@@ -567,6 +569,68 @@ internal static class Program
             for (int i = 0; i < toks.Count; i++)
                 Console.WriteLine($"    {i + 1,2}. {toks[i].tok,-22} μ={toks[i].mu:F1}");
         Console.WriteLine($"    [{toks.Count} tokens, {sw.Elapsed.TotalMilliseconds:F0} ms — ranked-μ walk, no GPU]");
+        return 0;
+    }
+
+    // OODA "Act" phase: deposit a PRECEDES witness sequence from build/run feedback.
+    // Usage: laplace attest confirm tok1 tok2 ...   (compiler success → strengthen path)
+    //        laplace attest refute  tok1 tok2 ...   (compiler error  → weaken path)
+    private static async Task<int> AttestAsync(string[] args)
+    {
+        if (args.Length < 2)
+            return Fail("usage: laplace attest <confirm|refute> <tok1> [tok2...]");
+
+        string mode = args[0].ToLowerInvariant();
+        bool confirm = mode == "confirm";
+        if (!confirm && mode != "refute")
+            return Fail("usage: laplace attest <confirm|refute> <tok1> [tok2...]");
+
+        string[] tokens = args[1..];
+
+        var feedbackSource = Hash128.OfCanonical("substrate/source/UserFeedback/v1");
+
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var conn = await ds.OpenConnectionAsync();
+
+        var ids = new List<(string Token, Hash128 Id)>(tokens.Length);
+        foreach (var tok in tokens)
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT laplace.word_id(@w)";
+            cmd.Parameters.AddWithValue("w", tok);
+            var v = await cmd.ExecuteScalarAsync();
+            if (v is null or DBNull)
+            {
+                Console.WriteLine($"  warn: '{tok}' has no substrate entity — skipping");
+                continue;
+            }
+            var id = Hash128FromBytes((byte[])v);
+            ids.Add((tok, id));
+        }
+
+        if (ids.Count < 2)
+        {
+            Console.WriteLine($"  attest: need ≥2 resolved tokens for a PRECEDES pair (got {ids.Count})");
+            return ids.Count == 0 ? 1 : 0;
+        }
+
+        var b = new SubstrateChangeBuilder(feedbackSource, "attest/0", null,
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: ids.Count - 1);
+
+        for (int i = 0; i + 1 < ids.Count; i++)
+            b.AddAttestation(RelationTypeRegistry.Attest(
+                ids[i].Id, "PRECEDES", ids[i + 1].Id,
+                feedbackSource, SourceTrust.UserPrompt, confirm: confirm));
+
+        var change = b.Build();
+        var inner = new NpgsqlSubstrateWriter(ds);
+        await using var acc = new ConsensusAccumulatingWriter(inner, ds);
+        var result = await ((ISubstrateWriter)acc).ApplyAsync(change, CancellationToken.None);
+        Console.WriteLine($"  applied: {result.AttestationsInserted} attestation(s) inserted");
+
+        var materialized = await acc.MaterializeConsensusAsync();
+        Console.WriteLine($"  consensus: {materialized} relation(s) updated "
+            + $"({(confirm ? "↑ confirmed" : "↓ refuted")} {ids.Count - 1} PRECEDES pair(s))");
         return 0;
     }
 
