@@ -62,8 +62,21 @@ internal static class EndpointMappings
 
             if (gate.Quote is not null) billing.MarkConsumedAndRecord(gate.Quote);
 
-            // Deposit prompt as PRECEDES testimony — fire-and-forget, best-effort
-            _ = substrate.DepositPromptAsync(prompt, CancellationToken.None);
+            // Serve the substrate's own conversational engine (laplace.converse): route_prompt
+            // classifies intent, respond() grounds every reply line in witnessed consensus.
+            // Session id is derived from the conversation's earlier turns so converse keeps
+            // topic/pronoun continuity ("…and its synonyms?") across calls.
+            var sessionId = DeriveSessionId(payload.Messages);
+            var userTurns = payload.Messages
+                .Where(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)
+                            && !string.IsNullOrWhiteSpace(m.Content))
+                .Select(m => m.Content!.Trim())
+                .ToList();
+            if (userTurns.Count == 0) userTurns.Add(prompt);
+            var rows = await substrate.ConverseTurnsAsync(userTurns, sessionId, ct);
+            var content = rows.Count == 0
+                ? "I hold no consensus about that yet."
+                : string.Join("\n", rows.Select(r => r.Reply));
 
             if (payload.Stream)
             {
@@ -73,27 +86,23 @@ internal static class EndpointMappings
                 request.HttpContext.Response.Headers["Cache-Control"] = "no-cache";
                 request.HttpContext.Response.Headers["X-Accel-Buffering"] = "no";
 
-                // Role chunk first
                 var roleChunk = JsonSerializer.Serialize(new {
                     id = completionId, @object = "chat.completion.chunk", created, model = payload.Model,
                     choices = new[] { new { index = 0, delta = new { role = "assistant" }, finish_reason = (string?)null } }
                 });
                 await request.HttpContext.Response.WriteAsync($"data: {roleChunk}\n\n", ct);
 
-                // Real forward pass: one token per SSE chunk
-                int steps = payload.MaxTokens ?? payload.MaxCompletionTokens ?? 128;
-                double temp = payload.Temperature ?? 0.8;
-                await foreach (var token in substrate.GenerateStreamAsync(
-                    prompt, steps: steps, temperature: temp, ct: ct))
+                // One consensus-grounded reply line per chunk
+                for (int i = 0; i < rows.Count; i++)
                 {
+                    var line = rows[i].Reply + (i + 1 < rows.Count ? "\n" : "");
                     var chunk = JsonSerializer.Serialize(new {
                         id = completionId, @object = "chat.completion.chunk", created, model = payload.Model,
-                        choices = new[] { new { index = 0, delta = new { content = token.Token }, finish_reason = (string?)null } }
+                        choices = new[] { new { index = 0, delta = new { content = line }, finish_reason = (string?)null } }
                     });
                     await request.HttpContext.Response.WriteAsync($"data: {chunk}\n\n", ct);
                 }
 
-                // Stop chunk
                 var stopChunk = JsonSerializer.Serialize(new {
                     id = completionId, @object = "chat.completion.chunk", created, model = payload.Model,
                     choices = new[] { new { index = 0, delta = new { content = "" }, finish_reason = "stop" } }
@@ -102,8 +111,6 @@ internal static class EndpointMappings
                 await request.HttpContext.Response.WriteAsync("data: [DONE]\n\n", ct);
                 return Results.Empty;
             }
-
-            var response = await substrate.ConverseAsync(prompt, ct);
 
             return Results.Json(new
             {
@@ -116,20 +123,12 @@ internal static class EndpointMappings
                     new
                     {
                         index = 0,
-                        message = new { role = "assistant", content = response?.Reply ?? string.Empty },
+                        message = new { role = "assistant", content },
                         finish_reason = "stop"
                     }
                 },
-                billing = gate.Quote is null ? null : (object)new
-                {
-                    quote_id = gate.Quote.QuoteId,
-                    amount_cents = gate.Quote.AmountCents,
-                    currency = gate.Quote.Currency,
-                    tenant = gate.Quote.Tenant
-                },
-                metadata = response is null
-                    ? null
-                    : new { eff_mu = response.EffectiveMu, witnesses = response.Witnesses }
+                billing = (object?)null,
+                metadata = new { witnesses = rows.Sum(r => r.Witnesses), reply_rows = rows.Count }
             });
         });
 
@@ -149,9 +148,6 @@ internal static class EndpointMappings
                 return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? new { service_id = "completions" } : (object)new { gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl });
 
             if (gate.Quote is not null) billing.MarkConsumedAndRecord(gate.Quote);
-
-            // Deposit prompt as PRECEDES testimony — fire-and-forget, best-effort
-            _ = substrate.DepositPromptAsync(payload.Prompt.Trim(), CancellationToken.None);
 
             int steps = payload.MaxTokens ?? 64;
             double temp = payload.Temperature ?? 0.7;
@@ -335,6 +331,20 @@ internal static class EndpointMappings
                 return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
             }
         });
+    }
+
+    /// <summary>
+    /// Derive a stable 16-byte session id from the conversation's earlier turns (everything but the
+    /// final user message). The same multi-turn conversation reuses the same session, so the
+    /// substrate's converse() keeps topic/pronoun continuity ("…and its synonyms?"). A single-message
+    /// request yields null → converse falls back to its per-backend session.
+    /// </summary>
+    private static byte[]? DeriveSessionId(IReadOnlyList<ChatMessage>? messages)
+    {
+        var anchor = messages?.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m.Content))?.Content;
+        if (string.IsNullOrWhiteSpace(anchor)) return null;
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(anchor));
+        return hash[..16];
     }
 
     private static async Task<QuoteExecutionGate> RequireQuoteAsync(HttpRequest request, IBillingOrchestrator billing, string serviceId, CancellationToken ct)

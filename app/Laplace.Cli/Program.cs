@@ -506,8 +506,6 @@ internal static class Program
                       AND c.subject_id = ANY (w.ctx[GREATEST(1,array_length(w.ctx,1)-@window+1):array_length(w.ctx,1)])
                       AND c.object_id IS NOT NULL AND NOT laplace.refuted(c.rating,c.rd)
                       AND c.object_id <> ALL (w.ctx) AND c.object_id NOT IN (SELECT id FROM stops)
-                      AND EXISTS (SELECT 1 FROM laplace.consensus h
-                                  WHERE h.subject_id=c.object_id AND h.type_id=laplace.relation_type_id('HAS_POS'))
                     GROUP BY c.object_id ORDER BY sc DESC LIMIT @topk
                 ) cand
                 ORDER BY CASE WHEN @temp<=0 THEN sc

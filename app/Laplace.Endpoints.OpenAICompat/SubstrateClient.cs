@@ -15,121 +15,64 @@ internal sealed class SubstrateClient : IAsyncDisposable
         _dataSource = new NpgsqlDataSourceBuilder(connString).Build();
     }
 
-    public async Task<ConverseRow?> ConverseAsync(string prompt, CancellationToken ct)
+    /// <summary>
+    /// Call the substrate's own conversational engine (<c>laplace.converse</c>), which routes the
+    /// prompt via <c>route_prompt</c> and grounds every reply line in witnessed consensus
+    /// (definitions, synonyms, relations, walks). Returns every reply row in order — converse
+    /// emits multiple rows for compound answers (e.g. definition + hypernym chain).
+    /// Session keeps pronoun/topic continuity across turns.
+    /// </summary>
+    public async Task<IReadOnlyList<ConverseRow>> ConverseAsync(string prompt, byte[]? session, CancellationToken ct)
+        => await ConverseTurnsAsync([prompt], session, ct);
+
+    /// <summary>
+    /// Replay an ordered list of user turns through <c>laplace.converse</c> under a single session,
+    /// returning the reply rows of the FINAL turn. Prior turns seed converse_turns so the
+    /// substrate resolves follow-up pronouns ("…and its synonyms?") against the running topic —
+    /// correct even for stateless OpenAI clients (Roo Code) that resend the full history each call.
+    /// </summary>
+    public async Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
+        IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct)
     {
-        const string sql = "SELECT reply, eff_mu, witnesses FROM laplace.converse(@p) LIMIT 1;";
+        const string sql = "SELECT reply, eff_mu, witnesses FROM laplace.converse(@p, @s);";
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            await using var cmd = new NpgsqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("p", prompt);
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
-            if (!await reader.ReadAsync(ct))
-                return null;
+            // A single connection = a single backend, so converse's session memory is consistent
+            // across the replay even when @s is NULL (it falls back to the backend pid).
+            var rows = new List<ConverseRow>(8);
+            for (int turn = 0; turn < userTurns.Count; turn++)
+            {
+                bool isLast = turn + 1 == userTurns.Count;
+                await using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("p", userTurns[turn]);
+                cmd.Parameters.Add(new NpgsqlParameter("s", NpgsqlDbType.Bytea)
+                    { Value = (object?)session ?? DBNull.Value });
 
-            var reply = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
-            var mu = reader.IsDBNull(1) ? 0m : reader.GetDecimal(1);
-            var witnesses = reader.IsDBNull(2) ? 0L : reader.GetInt64(2);
-            return new ConverseRow(reply, mu, witnesses);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    if (!isLast) continue; // prior turns only seed context
+                    var reply = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+                    var mu = reader.IsDBNull(1) ? 0m : reader.GetDecimal(1);
+                    var witnesses = reader.IsDBNull(2) ? 0L : reader.GetInt64(2);
+                    rows.Add(new ConverseRow(reply, mu, witnesses));
+                }
+            }
+            return rows;
+        }
+        catch (PostgresException pg)
+        {
+            // A SQL-level error (undefined column/function, type mismatch, …) is a query/schema
+            // bug, NOT the database being unreachable. Surface the real SqlState + message so it
+            // is never again mistaken for a segfault or "db unavailable".
+            throw new SubstrateQueryException(
+                $"converse query failed [{pg.SqlState}] {pg.MessageText}"
+                + (pg.Where is null ? "" : $" @ {pg.Where}"), pg);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
         {
-            throw new SubstrateUnavailableException("Substrate conversation query failed.", ex);
-        }
-    }
-
-    // ── session deposition ────────────────────────────────────────────────────
-
-    private static readonly Hash128 s_precedesTypeId   = Hash128.OfCanonical("substrate/kind/PRECEDES/v1");
-    private static readonly Hash128 s_userPromptSource = Hash128.OfCanonical("substrate/source/UserPrompt/v1");
-    private static readonly Hash128 s_sourceTypeId     = Hash128.OfCanonical("substrate/type/Source/v1");
-    private static readonly Hash128 s_kindTypeId       = Hash128.OfCanonical("substrate/type/Kind/v1");
-
-    private static byte[] ComputeAttestationId(byte[] sub, byte[] type, byte[] obj, byte[] src)
-    {
-        Span<byte> buf = stackalloc byte[80]; // 16 * 5, zero-initialized by runtime
-        sub.AsSpan().CopyTo(buf.Slice(0, 16));
-        type.AsSpan().CopyTo(buf.Slice(16, 16));
-        obj.AsSpan().CopyTo(buf.Slice(32, 16));
-        src.AsSpan().CopyTo(buf.Slice(48, 16));
-        // buf[64..80] = Hash128.Zero (context_id = NULL sentinel)
-        return Hash128.Blake3(buf).ToBytes();
-    }
-
-    /// <summary>
-    /// Deposit a user prompt into the substrate as PRECEDES testimony.
-    /// Resolves word tokens in order and deposits confirm arcs for consecutive pairs under the
-    /// UserPrompt source. Fire-and-forget — caller discards the Task (<c>_ = DepositPromptAsync(...)</c>).
-    /// </summary>
-    public async Task DepositPromptAsync(string prompt, CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(prompt)) return;
-        try
-        {
-            await using var conn = await _dataSource.OpenConnectionAsync(ct);
-
-            // Ensure prerequisite entities exist (idempotent — ON CONFLICT DO NOTHING).
-            // attestations.source_id and attestations.type_id both have FK to entities(id).
-            const string ensureSql = """
-                INSERT INTO laplace.entities (id, tier, type_id) VALUES
-                    (@src_id, @src_tier, @src_type),
-                    (@prec_id, @prec_tier, @prec_type)
-                ON CONFLICT DO NOTHING;
-                """;
-            await using (var cmd = new NpgsqlCommand(ensureSql, conn))
-            {
-                cmd.Parameters.Add(new NpgsqlParameter("src_id",   NpgsqlDbType.Bytea)    { Value = s_userPromptSource.ToBytes() });
-                cmd.Parameters.Add(new NpgsqlParameter("src_tier",  NpgsqlDbType.Smallint) { Value = (short)MetaTier.Meta });
-                cmd.Parameters.Add(new NpgsqlParameter("src_type",  NpgsqlDbType.Bytea)    { Value = s_sourceTypeId.ToBytes() });
-                cmd.Parameters.Add(new NpgsqlParameter("prec_id",   NpgsqlDbType.Bytea)    { Value = s_precedesTypeId.ToBytes() });
-                cmd.Parameters.Add(new NpgsqlParameter("prec_tier", NpgsqlDbType.Smallint) { Value = (short)MetaTier.RelationType });
-                cmd.Parameters.Add(new NpgsqlParameter("prec_type", NpgsqlDbType.Bytea)    { Value = s_kindTypeId.ToBytes() });
-                await cmd.ExecuteNonQueryAsync(ct);
-            }
-
-            // Resolve ordered entity IDs from prompt text
-            const string resolveSql = """
-                SELECT id FROM laplace.prompt_state(@p) WHERE id IS NOT NULL ORDER BY ord;
-                """;
-            var ids = new List<byte[]>(32);
-            await using (var cmd = new NpgsqlCommand(resolveSql, conn))
-            {
-                cmd.Parameters.AddWithValue("p", prompt);
-                await using var rdr = await cmd.ExecuteReaderAsync(ct);
-                while (await rdr.ReadAsync(ct))
-                    ids.Add(rdr.GetFieldValue<byte[]>(0));
-            }
-
-            if (ids.Count < 2) return;
-
-            // Insert/increment PRECEDES attestations for consecutive token pairs
-            const string attestSql = """
-                INSERT INTO laplace.attestations
-                    (id, subject_id, type_id, object_id, source_id, context_id,
-                     outcome, last_observed_at, observation_count)
-                VALUES (@id, @sub, @type, @obj, @src, NULL, 2, NOW(), 1)
-                ON CONFLICT (id) DO UPDATE
-                    SET observation_count = laplace.attestations.observation_count + 1,
-                        last_observed_at  = EXCLUDED.last_observed_at;
-                """;
-
-            var srcBytes  = s_userPromptSource.ToBytes();
-            var typeBytes = s_precedesTypeId.ToBytes();
-
-            for (int i = 0; i + 1 < ids.Count; i++)
-            {
-                await using var cmd = new NpgsqlCommand(attestSql, conn);
-                cmd.Parameters.Add(new NpgsqlParameter("id",   NpgsqlDbType.Bytea) { Value = ComputeAttestationId(ids[i], typeBytes, ids[i + 1], srcBytes) });
-                cmd.Parameters.Add(new NpgsqlParameter("sub",  NpgsqlDbType.Bytea) { Value = ids[i] });
-                cmd.Parameters.Add(new NpgsqlParameter("type", NpgsqlDbType.Bytea) { Value = typeBytes });
-                cmd.Parameters.Add(new NpgsqlParameter("obj",  NpgsqlDbType.Bytea) { Value = ids[i + 1] });
-                cmd.Parameters.Add(new NpgsqlParameter("src",  NpgsqlDbType.Bytea) { Value = srcBytes });
-                await cmd.ExecuteNonQueryAsync(ct);
-            }
-        }
-        catch
-        {
-            // Best-effort — never let deposition break generation
+            throw new SubstrateUnavailableException("Substrate is unreachable.", ex);
         }
     }
 
@@ -614,6 +557,19 @@ internal sealed class SubstrateClient : IAsyncDisposable
 internal sealed class SubstrateUnavailableException : Exception
 {
     public SubstrateUnavailableException(string message, Exception inner)
+        : base(message, inner)
+    {
+    }
+}
+
+/// <summary>
+/// A SQL-level failure (undefined column/function, type mismatch, etc.) raised while executing a
+/// substrate query. Distinct from <see cref="SubstrateUnavailableException"/>: the database is up;
+/// the query or schema is wrong. Surfaced to the client verbatim so the real cause is visible.
+/// </summary>
+internal sealed class SubstrateQueryException : Exception
+{
+    public SubstrateQueryException(string message, Exception inner)
         : base(message, inner)
     {
     }
