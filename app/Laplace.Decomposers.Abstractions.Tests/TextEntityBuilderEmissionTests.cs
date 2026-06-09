@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.Text;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using Xunit;
@@ -10,6 +12,53 @@ public sealed class TextEntityBuilderEmissionTests
 {
     private static readonly Hash128 Src =
         Hash128.OfCanonical("substrate/source/test/TextEmission/v1");
+
+    [Theory]
+    [InlineData("foo.\r\n\r\n")]
+    [InlineData(" to hear about new eBooks.\r\n\r\n")]
+    public void TrailingDoubleNewline_RoundtripsFromPhysicalities(string text)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(text);
+        Assert.True(TextEntityBuilder.TryBuildRows(bytes, Src, out _, out var phys, out var rootId, out _));
+        byte[] rebuilt = ReconstructFromPhysicalities(phys, rootId);
+        Assert.Equal(bytes, rebuilt);
+    }
+
+    [Fact]
+    public void FullGalileo_InMemory_RoundtripsFromPhysicalities()
+    {
+        byte[] bytes = File.ReadAllBytes(@"D:\Data\Ingest\test-data\text\galileo.txt");
+        Assert.True(TextEntityBuilder.TryBuildRows(bytes, Src, out _, out var phys, out var rootId, out _));
+        byte[] rebuilt = ReconstructFromPhysicalities(phys, rootId);
+        Assert.Equal(bytes, rebuilt);
+    }
+
+    private static byte[] ReconstructFromPhysicalities(
+        System.Collections.Immutable.ImmutableArray<PhysicalityRow> phys, Hash128 rootId)
+    {
+        var idToCp = new Dictionary<Hash128, uint>(1_114_112);
+        ReadOnlySpan<CodepointRecord> recs = CodepointPerfcache.Records;
+        for (int i = 0; i < recs.Length; i++) idToCp[recs[i].Hash] = recs[i].Codepoint;
+
+        var children = new Dictionary<Hash128, Hash128[]>();
+        foreach (var p in phys)
+        {
+            if (p.TrajectoryXyzm is not { Length: > 0 } xyzm) continue;
+            children[p.EntityId] = Trajectory.Constituents(xyzm);
+        }
+
+        var sb = new StringBuilder();
+        Emit(rootId, children, idToCp, sb);
+        return Encoding.UTF8.GetBytes(sb.ToString());
+    }
+
+    private static void Emit(Hash128 id, Dictionary<Hash128, Hash128[]> children,
+                             Dictionary<Hash128, uint> idToCp, StringBuilder sb)
+    {
+        if (idToCp.TryGetValue(id, out uint cp)) { sb.Append(char.ConvertFromUtf32((int)cp)); return; }
+        if (children.TryGetValue(id, out var kids))
+            foreach (var k in kids) Emit(k, children, idToCp, sb);
+    }
 
     [Fact]
     public void SingleWord_Suppresses_Document_And_Sentence_Wrappers()

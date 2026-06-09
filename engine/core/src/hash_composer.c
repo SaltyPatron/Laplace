@@ -15,6 +15,12 @@ void hash_composer_compose_node(
     hash128_t*       out_id,
     double           out_coord[4],
     hilbert128_t*    out_hb) {
+    if (n == 0) {
+        hash128_zero(out_id);
+        out_coord[0] = out_coord[1] = out_coord[2] = out_coord[3] = 0.0;
+        for (int b = 0; b < 16; ++b) out_hb->bytes[b] = 0;
+        return;
+    }
     if (n == 1) {
         *out_id = child_ids[0];
     } else {
