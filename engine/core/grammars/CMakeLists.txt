@@ -8,6 +8,10 @@ function(laplace_add_grammar tgt srcdir)
     set(_srcs "${srcdir}/parser.c")
     if(EXISTS "${srcdir}/scanner.c")
         list(APPEND _srcs "${srcdir}/scanner.c")
+    elseif(EXISTS "${srcdir}/scanner.cc")
+        list(APPEND _srcs "${srcdir}/scanner.cc")
+    elseif(EXISTS "${srcdir}/scanner.cpp")
+        list(APPEND _srcs "${srcdir}/scanner.cpp")
     endif()
     add_library(${tgt} OBJECT ${_srcs})
     target_include_directories(${tgt} PRIVATE "${srcdir}")
@@ -27,8 +31,32 @@ laplace_add_grammar(ts_grammar_json       "${_TSG}/tree-sitter-json/src")
 laplace_add_grammar(ts_grammar_markdown   "${_TSG}/tree-sitter-markdown/tree-sitter-markdown/src")
 laplace_add_grammar(ts_grammar_csv        "${_TSG}/tree-sitter-csv/csv/src")
 
+# --- language grammars (initialized submodules with pre-generated parser.c) ---
+laplace_add_grammar(ts_grammar_typescript "${_TSG}/tree-sitter-typescript/typescript/src")
+laplace_add_grammar(ts_grammar_java       "${_TSG}/tree-sitter-java/src")
+laplace_add_grammar(ts_grammar_ruby       "${_TSG}/tree-sitter-ruby/src")
+laplace_add_grammar(ts_grammar_julia      "${_TSG}/tree-sitter-julia/src")
+laplace_add_grammar(ts_grammar_kotlin     "${_TSG}/tree-sitter-kotlin/src")
+laplace_add_grammar(ts_grammar_php        "${_TSG}/tree-sitter-php/php/src")
+
+# --- HPC/compute grammars (added when submodules are confirmed initialized) ---
+# laplace_add_grammar(ts_grammar_cuda    "${_TSG}/tree-sitter-cuda/src")
+# laplace_add_grammar(ts_grammar_glsl    "${_TSG}/tree-sitter-glsl/src")
+# laplace_add_grammar(ts_grammar_hlsl    "${_TSG}/tree-sitter-hlsl/src")
+# laplace_add_grammar(ts_grammar_wgsl    "${_TSG}/tree-sitter-wgsl/src")
+# laplace_add_grammar(ts_grammar_fortran "${_TSG}/tree-sitter-fortran/src")
+# laplace_add_grammar(ts_grammar_asm     "${_TSG}/tree-sitter-asm/src")
+# laplace_add_grammar(ts_grammar_nasm    "${_TSG}/tree-sitter-nasm/src")
+# laplace_add_grammar(ts_grammar_llvm    "${_TSG}/tree-sitter-llvm/src")
+# laplace_add_grammar(ts_grammar_mlir    "${_TSG}/tree-sitter-mlir/src")
+# laplace_add_grammar(ts_grammar_cmake   "${_TSG}/tree-sitter-cmake/src")
+# laplace_add_grammar(ts_grammar_ispc    "${_TSG}/tree-sitter-ispc/src")
+# laplace_add_grammar(ts_grammar_zig     "${_TSG}/tree-sitter-zig/src")
+
 set(LAPLACE_TS_GRAMMARS
     ts_grammar_python ts_grammar_c ts_grammar_cpp ts_grammar_javascript ts_grammar_rust
     ts_grammar_go ts_grammar_c_sharp ts_grammar_bash ts_grammar_json ts_grammar_markdown
     ts_grammar_csv
+    ts_grammar_typescript ts_grammar_java ts_grammar_ruby ts_grammar_julia
+    ts_grammar_kotlin ts_grammar_php
     PARENT_SCOPE)

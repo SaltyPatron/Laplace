@@ -28,6 +28,7 @@ internal static class AppComposition
             options.SuccessUrl = Environment.GetEnvironmentVariable("LAPLACE_STRIPE_SUCCESS_URL") ?? "http://localhost:5187/billing/success";
             options.CancelUrl = Environment.GetEnvironmentVariable("LAPLACE_STRIPE_CANCEL_URL") ?? "http://localhost:5187/billing/cancel";
             options.Currency = Environment.GetEnvironmentVariable("LAPLACE_BILLING_CURRENCY") ?? "usd";
+            options.Bypass   = string.Equals(Environment.GetEnvironmentVariable("LAPLACE_BILLING_BYPASS"), "true", StringComparison.OrdinalIgnoreCase);
         });
 
         return services;

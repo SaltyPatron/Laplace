@@ -10,6 +10,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Parquet.Net" Version="6.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Laplace.Decomposers.Abstractions\Laplace.Decomposers.Abstractions.csproj" />
     <ProjectReference Include="..\Laplace.Engine.Core\Laplace.Engine.Core.csproj" />
     <ProjectReference Include="..\Laplace.SubstrateCRUD\Laplace.SubstrateCRUD.csproj" />

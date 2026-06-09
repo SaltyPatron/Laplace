@@ -15,6 +15,13 @@ extern const TSLanguage* tree_sitter_bash(void);
 extern const TSLanguage* tree_sitter_json(void);
 extern const TSLanguage* tree_sitter_markdown(void);
 extern const TSLanguage* tree_sitter_csv(void);
+/* language grammars */
+extern const TSLanguage* tree_sitter_typescript(void);
+extern const TSLanguage* tree_sitter_java(void);
+extern const TSLanguage* tree_sitter_ruby(void);
+extern const TSLanguage* tree_sitter_julia(void);
+extern const TSLanguage* tree_sitter_kotlin(void);
+extern const TSLanguage* tree_sitter_php(void);
 
 typedef const TSLanguage* (*ts_lang_fn)(void);
 
@@ -32,6 +39,13 @@ static const grammar_entry_t GRAMMARS[] = {
     {"json",       tree_sitter_json},
     {"markdown",   tree_sitter_markdown},
     {"csv",        tree_sitter_csv},
+    /* language grammars */
+    {"typescript", tree_sitter_typescript},
+    {"java",       tree_sitter_java},
+    {"ruby",       tree_sitter_ruby},
+    {"julia",      tree_sitter_julia},
+    {"kotlin",     tree_sitter_kotlin},
+    {"php",        tree_sitter_php},
 };
 static const size_t GRAMMAR_COUNT = sizeof(GRAMMARS) / sizeof(GRAMMARS[0]);
 
@@ -49,6 +63,13 @@ static const ext_entry_t EXTS[] = {
     {"json", "json"},
     {"md", "markdown"}, {"markdown", "markdown"},
     {"csv", "csv"},
+    /* language grammars */
+    {"ts", "typescript"}, {"tsx", "typescript"},
+    {"java", "java"},
+    {"rb", "ruby"}, {"rake", "ruby"}, {"gemspec", "ruby"},
+    {"jl", "julia"},
+    {"kt", "kotlin"}, {"kts", "kotlin"},
+    {"php", "php"}, {"phtml", "php"},
 };
 static const size_t EXT_COUNT = sizeof(EXTS) / sizeof(EXTS[0]);
 

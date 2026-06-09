@@ -186,10 +186,21 @@ intent_stage_t* intent_stage_new(size_t row_capacity_hint) {
     intent_stage_t* s = (intent_stage_t*)calloc(1, sizeof(*s));
     if (!s) return NULL;
     if (row_capacity_hint > 0) {
-        const size_t hint_bytes = row_capacity_hint * 128;
-        if (buf_reserve(&s->entities, hint_bytes) != 0
-            || buf_reserve(&s->physicalities, hint_bytes) != 0
-            || buf_reserve(&s->attestations, hint_bytes) != 0) {
+        /* Reserve each buffer by its OWN maximum row width so the fixed-width
+         * tables (entities, attestations) never realloc mid-staging. A single
+         * shared hint*128 reserve undersized the attestation buffer: an
+         * attestation row is up to 152 bytes (2 field-count + 6 hash128 fields
+         * at 20B + outcome int2 6B + two int8 fields at 12B), so a 128 B/row
+         * reserve forced a realloc partway through the attestation loop. The
+         * margins below bound every fixed-width row:
+         *   entity      max = 68  bytes  -> 80
+         *   attestation max = 152 bytes  -> 168
+         * Physicalities carry a variable-length trajectory (LINESTRING ZM), so
+         * they remain growth-capable; 256 B/row covers the common point/short
+         * cases and grows as needed for long trajectories. */
+        if (buf_reserve(&s->entities,      row_capacity_hint * 80)  != 0
+            || buf_reserve(&s->physicalities, row_capacity_hint * 256) != 0
+            || buf_reserve(&s->attestations,  row_capacity_hint * 168) != 0) {
             intent_stage_free(s);
             return NULL;
         }

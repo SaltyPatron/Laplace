@@ -81,7 +81,6 @@ set(EXT_SQL_MODULES
     sql/16_inspect.sql.in
     sql/17_consensus_reads.sql.in
     sql/18_ops_surface.sql.in
-    sql/19_geometry_consensus.sql.in
     sql/20_converse.sql.in
     sql/21_seed.sql.in
     sql/22_cascade_surface.sql.in

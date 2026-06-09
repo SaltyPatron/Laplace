@@ -4,6 +4,7 @@ set(LAPLACE_DYNAMICS_HEADERS
     include/laplace/dynamics/eigenmaps.h
     include/laplace/dynamics/gram_schmidt.h
     include/laplace/dynamics/bilinear_edges.h
+    include/laplace/dynamics/ffn_edges.h
 )
 
 set(LAPLACE_DYNAMICS_SOURCES
@@ -12,6 +13,7 @@ set(LAPLACE_DYNAMICS_SOURCES
     src/eigenmaps.cpp
     src/gram_schmidt.cpp
     src/bilinear_edges.cpp
+    src/ffn_edges.cpp
 )
 
 add_library(laplace_dynamics SHARED ${LAPLACE_DYNAMICS_SOURCES})

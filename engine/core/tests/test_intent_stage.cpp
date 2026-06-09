@@ -392,3 +392,124 @@ TEST(LaplaceCoreIntentStage, AttestationGrowthFromZeroHintLargeBatchesNoCorrupti
     }
     SUCCEED();
 }
+
+// Reproduces the deterministic UD ingest crash (batch-4016): a single stage
+// carrying all three tables in the order the writer stages them — every entity
+// first, then every physicality (with variable-length trajectories), then a
+// large attestation loop. The crash surfaced as ENTITIES-buffer corruption
+// "first observed at phase after-attestation-loop": the entities block's row
+// field-count header (00 04) at one row was overwritten, shifting the tail by
+// two bytes. This test stages that exact shape, then walks the emitted ENTITIES
+// blob row-by-row asserting every field count == 4 and every hash128 length
+// prefix == 16 (or -1 for a null first_observed_by). If the attestation growth
+// path corrupts the entities block, this fails at the offending row.
+TEST(LaplaceCoreIntentStage, UdBatchShapeEntitiesSurviveAttestationGrowth) {
+    const size_t kEntities     = 8527;
+    const size_t kPhysicalities = 8500;
+    const size_t kAttestations  = 100000;
+
+    // The real writer sizes the hint from the attestation count of the batch.
+    intent_stage_t* s = intent_stage_new(kAttestations);
+    ASSERT_NE(nullptr, s);
+
+    // Phase 1: entities. Alternate null / non-null first_observed_by exactly as
+    // the decomposer emits (some entities are root-observed, some are not).
+    for (size_t i = 0; i < kEntities; ++i) {
+        hash128_t id   = make_hash((uint8_t)(i));
+        hash128_t type = make_hash((uint8_t)(i >> 8));
+        hash128_t fob  = make_hash((uint8_t)(i >> 4));
+        const hash128_t* fobp = (i & 1) ? &fob : nullptr;
+        ASSERT_EQ(0, intent_stage_add_entity(
+            s, &id, (int16_t)(i % 7), &type, fobp))
+            << "entity add failed at i=" << i;
+    }
+    ASSERT_EQ(kEntities, intent_stage_entity_count(s));
+
+    // Phase 2: physicalities with trajectories of varying vertex counts. These
+    // append variable-length LINESTRING ZM payloads into the physicalities
+    // buffer, forcing its independent growth between the entity and attestation
+    // phases — the interleaving present in the live failure.
+    {
+        std::vector<double> traj;
+        hilbert128_t hb; std::memset(&hb, 0, sizeof(hb));
+        double coord[4] = {1.0, 2.0, 3.0, 4.0};
+        for (size_t i = 0; i < kPhysicalities; ++i) {
+            const uint32_t verts = (uint32_t)(1 + (i % 50));
+            traj.resize((size_t)verts * 4);
+            for (uint32_t v = 0; v < verts; ++v) {
+                traj[(size_t)v * 4 + 0] = (double)v;
+                traj[(size_t)v * 4 + 1] = (double)(v + 1);
+                traj[(size_t)v * 4 + 2] = (double)(v + 2);
+                traj[(size_t)v * 4 + 3] = (double)(v + 3);
+            }
+            hash128_t id  = make_hash((uint8_t)(i));
+            hash128_t ent = make_hash((uint8_t)(i % kEntities));
+            hash128_t src = make_hash((uint8_t)(i >> 8));
+            ASSERT_EQ(0, intent_stage_add_physicality(
+                s, &id, &ent, &src, (int16_t)(i % 3), coord, &hb,
+                traj.data(), verts, (int32_t)verts,
+                0, 0.5, 0, (int32_t)(i % 16),
+                INTENT_STAGE_PG_EPOCH_UNIX_US + (int64_t)i))
+                << "physicality add failed at i=" << i;
+        }
+        ASSERT_EQ(kPhysicalities, intent_stage_physicality_count(s));
+    }
+
+    // Phase 3: the large attestation loop — the growth path that surfaced the
+    // corruption. Alternate null object_id / context_id to exercise both the
+    // max-width (152-byte) and short attestation rows.
+    for (size_t i = 0; i < kAttestations; ++i) {
+        hash128_t id  = make_hash((uint8_t)(i));
+        hash128_t sub = make_hash((uint8_t)(i >> 8));
+        hash128_t kid = make_hash((uint8_t)(i >> 16));
+        hash128_t obj = make_hash((uint8_t)(i + 1));
+        hash128_t src = make_hash(0x5A);
+        hash128_t ctx = make_hash((uint8_t)(i + 2));
+        const hash128_t* objp = (i & 1) ? &obj : nullptr;
+        const hash128_t* ctxp = (i & 2) ? &ctx : nullptr;
+        ASSERT_EQ(0, intent_stage_add_attestation(
+            s, &id, &sub, &kid, objp, &src, ctxp,
+            (int16_t)(i % 3), INTENT_STAGE_PG_EPOCH_UNIX_US + (int64_t)i,
+            (int64_t)(i % 100)))
+            << "attestation add failed at i=" << i;
+    }
+    ASSERT_EQ(kAttestations, intent_stage_attestation_count(s));
+
+    // Emit the ENTITIES blob and validate it row-by-row. This is the exact blob
+    // the writer's CheckpointEntities("after-attestation-loop") validates.
+    const size_t need = intent_stage_emit_copy_binary(
+        s, INTENT_STAGE_TABLE_ENTITIES, nullptr, 0);
+    std::vector<uint8_t> buf(need);
+    ASSERT_EQ(need, intent_stage_emit_copy_binary(
+        s, INTENT_STAGE_TABLE_ENTITIES, buf.data(), buf.size()));
+
+    EXPECT_EQ(0, std::memcmp(buf.data(), kSig, sizeof(kSig)));
+    const uint8_t* p   = buf.data() + kHeader;
+    const uint8_t* end = buf.data() + buf.size() - kTrailer;
+    for (size_t row = 0; row < kEntities; ++row) {
+        ASSERT_LE(p + 2, end) << "ran off blob at row " << row;
+        const int16_t fields = (int16_t)read_be16(p);
+        ASSERT_EQ(4, fields)
+            << "ENTITIES corruption at row " << row
+            << " byte offset " << (size_t)(p - buf.data());
+        p += 2;
+        // id (16), tier (int2 = 2), type_id (16): all non-null fixed widths.
+        ASSERT_EQ(16u, read_be32(p)); p += 4 + 16;   // id
+        ASSERT_EQ(2u,  read_be32(p)); p += 4 + 2;     // tier
+        ASSERT_EQ(16u, read_be32(p)); p += 4 + 16;    // type_id
+        // first_observed_by: null (-1) on even rows, 16 bytes on odd rows.
+        const uint32_t fob_len = read_be32(p); p += 4;
+        if ((row & 1) == 0) {
+            ASSERT_EQ((uint32_t)-1, fob_len) << "row " << row;
+        } else {
+            ASSERT_EQ(16u, fob_len) << "row " << row;
+            p += 16;
+        }
+    }
+    // After the last entity row we must land exactly on the trailer.
+    EXPECT_EQ(end, p) << "entity rows did not consume the blob exactly";
+    EXPECT_EQ(0xff, buf[buf.size() - 2]);
+    EXPECT_EQ(0xff, buf[buf.size() - 1]);
+
+    intent_stage_free(s);
+}

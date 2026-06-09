@@ -96,31 +96,84 @@ public sealed class IngestRunner
 
         if (options.ParallelWorkers <= 1)
         {
+            // Pipelined serial path: a single producer task decomposes continuously
+            // into an unbounded channel while THIS thread (the single consumer) batches
+            // and commits in the exact order produced. One consumer preserves the same
+            // strict commit ordering as a fully serial loop, so the cross-batch
+            // referential dependency that breaks parallel workers is unaffected — but
+            // decompose (CPU) now overlaps with the per-batch DB commit (I/O) instead of
+            // the two stages alternating on one thread.
+            //
+            // Backpressure is row-based, not intent-based: intents vary enormously in row
+            // count (UD ~40k rows/intent vs. a 1-row gloss), so an intent-count bound
+            // would either starve overlap for big intents or balloon memory for them.
+            // The producer pauses once the buffered row count exceeds the budget and is
+            // woken as the consumer drains.
+            long rowBudget = Math.Max((long)commitRows, batchSize) * 3L;
+            long bufferedRows = 0;
+            var drained = new SemaphoreSlim(0, 1);
+
+            var channel = Channel.CreateUnbounded<SubstrateChange>(
+                new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+
+            var producer = Task.Run(async () =>
+            {
+                try
+                {
+                    await foreach (var intent in decomposer
+                        .DecomposeAsync(ctx, options.DecomposerOptions, ct).WithCancellation(ct))
+                    {
+                        Interlocked.Increment(ref counters._unitsProduced);
+                        int r = RowsOf(intent);
+                        while (Interlocked.Read(ref bufferedRows) + r > rowBudget
+                               && Volatile.Read(ref bufferedRows) > 0)
+                        {
+                            await drained.WaitAsync(ct);
+                        }
+                        Interlocked.Add(ref bufferedRows, r);
+                        await channel.Writer.WriteAsync(intent, ct);
+                    }
+                    channel.Writer.TryComplete();
+                }
+                catch (Exception ex)
+                {
+                    channel.Writer.TryComplete(ex);
+                }
+            }, ct);
+
             var batch = new List<SubstrateChange>(batchSize);
             int batchRows = 0;
-            await foreach (var intent in decomposer.DecomposeAsync(ctx, options.DecomposerOptions, ct).WithCancellation(ct))
+            while (await channel.Reader.WaitToReadAsync(ct))
             {
-                ct.ThrowIfCancellationRequested();
-                Interlocked.Increment(ref counters._unitsProduced);
-                if (batchSize == 1 && commitRows == 0)
+                while (channel.Reader.TryRead(out var intent))
                 {
-                    await ProcessOneIntentAsync(intent, decomposer, options, rng,
-                                                 counters, failures, log, ct);
-                    continue;
-                }
-                batch.Add(intent);
-                batchRows += RowsOf(intent);
-                if (ShouldFlush(batch.Count, batchRows))
-                {
-                    await ProcessBatchAsync(batch, decomposer, options, rng,
-                                            counters, failures, log, ct);
-                    batch.Clear();
-                    batchRows = 0;
+                    ct.ThrowIfCancellationRequested();
+                    Interlocked.Add(ref bufferedRows, -RowsOf(intent));
+                    try { drained.Release(); } catch (SemaphoreFullException) { }
+
+                    if (batchSize == 1 && commitRows == 0)
+                    {
+                        await ProcessOneIntentAsync(intent, decomposer, options, rng,
+                                                     counters, failures, log, ct);
+                        continue;
+                    }
+                    batch.Add(intent);
+                    batchRows += RowsOf(intent);
+                    if (ShouldFlush(batch.Count, batchRows))
+                    {
+                        await ProcessBatchAsync(batch, decomposer, options, rng,
+                                                counters, failures, log, ct);
+                        batch.Clear();
+                        batchRows = 0;
+                    }
                 }
             }
             if (batch.Count > 0)
                 await ProcessBatchAsync(batch, decomposer, options, rng,
                                         counters, failures, log, ct);
+
+            // Surface any decompose-side exception (channel completed with error).
+            await producer;
         }
         else
         {

@@ -104,6 +104,9 @@ public static class RelationTypeRegistry
 
         ["DEPENDS_ON"]           = new(RelationTypeRank.Partitive, Symmetry.Asymmetric, null),
         ["ENHANCED_DEPENDS_ON"]  = new(RelationTypeRank.Partitive, Symmetry.Asymmetric, null),
+        ["CONTAINS"]             = new(RelationTypeRank.Partitive, Symmetry.Asymmetric, "HAS_PART"),
+        ["CALLS"]                = new(RelationTypeRank.Associative, Symmetry.Asymmetric, "RELATED_TO"),
+        ["REFERENCES"]           = new(RelationTypeRank.Associative, Symmetry.Asymmetric, "RELATED_TO"),
 
         ["IS_SYNONYM_OF"]     = new(RelationTypeRank.Equivalence, Symmetry.Symmetric, "RELATED_TO"),
         ["IS_TRANSLATION_OF"] = new(RelationTypeRank.Equivalence, Symmetry.Symmetric, "RELATED_TO"),
@@ -167,6 +170,8 @@ public static class RelationTypeRegistry
         ["ATTENDS"]      = new(RelationTypeRank.TensorCalculation, Symmetry.Asymmetric, "RELATED_TO"),
         ["OV_RELATES"]   = new(RelationTypeRank.TensorCalculation, Symmetry.Asymmetric, "RELATED_TO"),
         ["COMPLETES_TO"] = new(RelationTypeRank.TensorCalculation, Symmetry.Asymmetric, null),
+        ["DETECTS"]      = new(RelationTypeRank.TensorCalculation, Symmetry.Asymmetric, null),
+        ["WRITES"]       = new(RelationTypeRank.TensorCalculation, Symmetry.Asymmetric, null),
 
         ["HAS_EXTERNAL_ID"] = new(RelationTypeRank.ScalarValued, Symmetry.Asymmetric, null),
     };
