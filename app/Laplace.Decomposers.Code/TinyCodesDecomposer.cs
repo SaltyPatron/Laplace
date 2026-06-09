@@ -1,0 +1,257 @@
+using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
+using System.Text;
+using Laplace.Decomposers.Abstractions;
+using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD;
+using Parquet;
+using Parquet.Schema;
+
+namespace Laplace.Decomposers.Code;
+
+/// <summary>
+/// Deposits the tiny-codes dataset (1.6M high-quality code snippets) as structured code testimony.
+/// Each parquet row pairs a natural-language prompt with a code snippet; the code is parsed through
+/// GrammarDecomposer (AST entities + PRECEDES/CALLS/DEFINES/REFERENCES), and a concept entity for
+/// the prompt is linked to the code root via HAS_EXAMPLE/HAS_DEFINITION. Covers Python, TypeScript,
+/// JavaScript, Ruby, Julia, Rust, C++, Bash, Java, C#, Go, SQL.
+/// </summary>
+public sealed class TinyCodesDecomposer : IDecomposer
+{
+    public static readonly Hash128 Source =
+        Hash128.OfCanonical("substrate/source/TinyCodesDecomposer/v1");
+    public static readonly Hash128 TrustClass =
+        Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
+
+    private static readonly Hash128 CodeConceptTypeId =
+        Hash128.OfCanonical("substrate/type/CodeConcept/v1");
+
+    // Maps tiny-codes task_id language prefix (case-insensitive) → tree-sitter modality id.
+    // null entries are known languages with no registered grammar; they are skipped.
+    private static readonly Dictionary<string, string?> LangModality =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["python"]     = "python",
+            ["javascript"] = "javascript",
+            ["typescript"] = "typescript",
+            ["ruby"]       = "ruby",
+            ["julia"]      = "julia",
+            ["rust"]       = "rust",
+            ["c++"]        = "cpp",
+            ["bash"]       = "bash",
+            ["java"]       = "java",
+            ["c#"]         = "c-sharp",
+            ["go"]         = "go",
+            ["sql"]        = "sql",
+            ["cypher"]     = null,
+        };
+
+    public Hash128 SourceId     => Source;
+    public string  SourceName   => "TinyCodesDecomposer";
+    public int     LayerOrder   => 2;
+    public Hash128 TrustClassId => TrustClass;
+
+    public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    {
+        var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
+        boot.AddType("CodeConcept");
+        boot.AddRelationType("HAS_EXAMPLE");
+        boot.AddRelationType("HAS_DEFINITION");
+        boot.AddRelationType("CALLS");
+        boot.AddRelationType("DEFINES");
+        boot.AddRelationType("REFERENCES");
+        await context.Writer.ApplyAsync(boot.Build(), ct);
+    }
+
+    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+        IDecomposerContext context,
+        DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var files = EnumerateParquet(context.EcosystemPath).ToList();
+        if (files.Count == 0) yield break;
+
+        int batch = options.BatchSize > 1 ? options.BatchSize : 32;
+        var b = NewBuilder(0);
+        int inBatch = 0, bn = 0;
+
+        foreach (var file in files)
+        {
+            await foreach (var (taskId, prompt, response) in ReadRowsAsync(file, ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (string.IsNullOrWhiteSpace(response)) continue;
+
+                string? modality = ResolveModality(taskId);
+                if (modality is null) continue;
+
+                IntPtr recipe = GrammarDecomposer.LookupById(modality);
+                if (recipe == IntPtr.Zero) continue;
+
+                byte[] codeBytes;
+                try { codeBytes = Encoding.UTF8.GetBytes(response); }
+                catch { continue; }
+                if (codeBytes.Length == 0) continue;
+
+                ImmutableArray<EntityRow>      ents;
+                ImmutableArray<PhysicalityRow> phys;
+                ImmutableArray<AttestationRow> atts;
+                Hash128 codeRootId;
+                try
+                {
+                    using var ast = GrammarDecomposer.Parse(codeBytes, recipe);
+                    var geb = new GrammarEntityBuilder(
+                        codeBytes, ast, Source, modality, recipe, GrammarTags.TagsSource(modality));
+                    (ents, phys, atts, codeRootId) = geb.Build(SourceTrust.StructuredCorpus);
+                }
+                catch { continue; }
+
+                if (codeRootId == default) continue;
+
+                foreach (var e in ents) b.AddEntity(e);
+                foreach (var p in phys) b.AddPhysicality(p);
+                foreach (var a in atts) b.AddAttestation(a);
+
+                // Stable concept entity keyed on task_id; the code AST carries the content.
+                if (!string.IsNullOrEmpty(taskId))
+                {
+                    var conceptId = Hash128.OfCanonical($"tiny-codes/concept/{taskId}/v1");
+                    b.AddEntity(new EntityRow(conceptId, (byte)MetaTier.Meta, CodeConceptTypeId, Source));
+                    b.AddAttestation(RelationTypeRegistry.Attest(
+                        conceptId,  "HAS_EXAMPLE",   codeRootId, Source, SourceTrust.StructuredCorpus));
+                    b.AddAttestation(RelationTypeRegistry.Attest(
+                        codeRootId, "HAS_DEFINITION", conceptId,  Source, SourceTrust.StructuredCorpus));
+                }
+
+                // Keyword linking: attest HAS_EXAMPLE from each content word of the prompt to the
+                // code root. word_id() in SQL uses the same grapheme-floor composition as
+                // ContentEmitter, so these entity IDs reconcile with the linguistic substrate.
+                // This is what makes "how do I sort a list" resolve through the 'sort' or 'list'
+                // entity to actual code examples.
+                if (!string.IsNullOrWhiteSpace(prompt))
+                {
+                    foreach (var kw in ExtractKeywords(prompt))
+                    {
+                        var wordId = ContentEmitter.Emit(b, kw, Source);
+                        if (wordId.HasValue)
+                            b.AddAttestation(RelationTypeRegistry.Attest(
+                                wordId.Value, "HAS_EXAMPLE", codeRootId, Source, SourceTrust.StructuredCorpus));
+                    }
+                }
+
+                if (++inBatch >= batch)
+                {
+                    if (!options.DryRun) yield return b.Build();
+                    b = NewBuilder(++bn);
+                    inBatch = 0;
+                    await Task.Yield();
+                }
+            }
+        }
+
+        if (inBatch > 0 && !options.DryRun) yield return b.Build();
+    }
+
+    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+        => Task.FromResult<long?>(null);
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "that", "this", "with", "from", "have", "will", "been", "they", "what",
+        "when", "which", "your", "into", "more", "some", "than", "then", "also",
+        "does", "each", "just", "here", "make", "only", "like", "over", "even",
+        "should", "could", "would", "using", "given", "takes", "returns", "given",
+        "write", "create", "generates", "implement", "function", "method", "code",
+        "program", "script", "snippet", "example", "simple", "basic", "following",
+        "python", "javascript", "typescript", "ruby", "julia", "rust", "bash",
+        "java", "golang", "csharp", "cplusplus", "sql",
+    };
+
+    private static IEnumerable<string> ExtractKeywords(string prompt)
+    {
+        // Split on whitespace and punctuation, yield lower-cased words >= 4 chars that are not stop words.
+        // Limit to first 20 tokens — prompts are short and this caps per-row work.
+        int count = 0;
+        foreach (var raw in prompt.Split(
+            new char[] { ' ', '\t', '\n', '\r', '.', ',', ';', ':', '!', '?', '(', ')', '[', ']', '{', '}', '"', '\'', '/', '\\', '-', '_' },
+            StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (count >= 20) break;
+            if (raw.Length < 4) continue;
+            var w = raw.ToLowerInvariant();
+            // Strip trailing 's' for simple plural normalisation
+            var stem = w.Length > 5 && w.EndsWith('s') ? w[..^1] : w;
+            if (!StopWords.Contains(w) && !StopWords.Contains(stem))
+            {
+                yield return w;
+                count++;
+            }
+        }
+    }
+
+    private static string? ResolveModality(string? taskId)
+    {
+        if (string.IsNullOrEmpty(taskId)) return null;
+        int slash = taskId.IndexOf('/');
+        var lang = slash > 0 ? taskId[..slash] : taskId;
+        return LangModality.TryGetValue(lang, out var m) ? m : null;
+    }
+
+    private static async IAsyncEnumerable<(string? TaskId, string? Prompt, string? Response)> ReadRowsAsync(
+        string path, [EnumeratorCancellation] CancellationToken ct)
+    {
+        await using var fs = File.OpenRead(path);
+        await using var reader = await ParquetReader.CreateAsync(fs, cancellationToken: ct);
+
+        DataField[] fields = reader.Schema.GetDataFields();
+        DataField? taskField   = FindField(fields, "task_id");
+        DataField? promptField = FindField(fields, "prompt");
+        DataField? respField   = FindField(fields, "response");
+        if (taskField is null || promptField is null || respField is null) yield break;
+
+        for (int rg = 0; rg < reader.RowGroupCount; rg++)
+        {
+            ct.ThrowIfCancellationRequested();
+            using var rgr = reader.OpenRowGroupReader(rg);
+            int count = (int)rgr.RowCount;
+
+            string[] taskIds  = new string[count];
+            string[] prompts  = new string[count];
+            string[] resps    = new string[count];
+
+            await rgr.ReadAsync(taskField,   taskIds);
+            await rgr.ReadAsync(promptField, prompts);
+            await rgr.ReadAsync(respField,   resps);
+
+            for (int i = 0; i < count; i++)
+                yield return (taskIds[i], prompts[i], resps[i]);
+        }
+    }
+
+    private static DataField? FindField(DataField[] fields, string name)
+    {
+        foreach (var f in fields)
+            if (string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase))
+                return f;
+        return null;
+    }
+
+    private static IEnumerable<string> EnumerateParquet(string root)
+    {
+        if (File.Exists(root))
+        {
+            if (root.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase)) yield return root;
+            yield break;
+        }
+        if (!Directory.Exists(root)) yield break;
+        foreach (var f in Directory.EnumerateFiles(root, "*.parquet", SearchOption.TopDirectoryOnly)
+                                   .OrderBy(p => p, StringComparer.Ordinal))
+            yield return f;
+    }
+
+    private static SubstrateChangeBuilder NewBuilder(int n) =>
+        new(Source, $"tiny-codes/{n}", null,
+            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 4096);
+}

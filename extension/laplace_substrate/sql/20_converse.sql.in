@@ -734,6 +734,18 @@ BEGIN
     m := regexp_match(p, 'examples?\s+(?:of|for)?\s*(.+)$', 'i');
     IF m IS NOT NULL THEN intent := 'examples'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
+    -- code: "how [do I/you/we/to] {verb phrase} [in {lang}]"
+    m := regexp_match(p, '^how\s+(?:do\s+(?:i|you|we)|to)\s+(.+?)(?:\s+in\s+\w+)?$', 'i');
+    IF m IS NOT NULL THEN intent := 'related'; kind_name := 'HAS_EXAMPLE'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
+
+    -- code: "[show me] [a/an] example [of/for] {phrase}"
+    m := regexp_match(p, '^(?:show\s+(?:me\s+)?(?:an?\s+)?)?(?:code\s+)?example\s+(?:of|for)\s+(.+?)$', 'i');
+    IF m IS NOT NULL THEN intent := 'related'; kind_name := 'HAS_EXAMPLE'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
+
+    -- code: "write/generate/implement/create [a/an] {phrase} [function/method/script/snippet/code]"
+    m := regexp_match(p, '^(?:write|generate|implement|create)\s+(?:(?:a|an|some|the)\s+)?(.+?)(?:\s+(?:function|method|script|snippet|code|program|class))?$', 'i');
+    IF m IS NOT NULL THEN intent := 'related'; kind_name := 'HAS_EXAMPLE'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
+
     intent := 'fallback'; phrase := p;
     RETURN NEXT;
 END;

@@ -48,13 +48,10 @@ internal static class EndpointMappings
             if (payload.Messages is null || payload.Messages.Count == 0)
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'messages' must contain at least one message.");
 
-            var quoteId = AppComposition.ResolveQuoteId(request);
-            if (string.IsNullOrWhiteSpace(quoteId))
-                return EndpointJson.PaymentRequired("quote_required", "Billing quote is required before execution.", new { service_id = "chat.completions" });
-
+            var quoteId = AppComposition.ResolveQuoteId(request) ?? "";
             var gate = await billing.EnsureExecutableAsync(quoteId, "chat.completions", ct);
-            if (!gate.Allowed || gate.Quote is null)
-                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? null : new { gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl });
+            if (!gate.Allowed)
+                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? new { service_id = "chat.completions" } : (object)new { gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl });
 
             var prompt = payload.Messages
                 .Where(m => !string.IsNullOrWhiteSpace(m.Content))
@@ -63,8 +60,47 @@ internal static class EndpointMappings
             if (string.IsNullOrWhiteSpace(prompt))
                 return EndpointJson.BadRequest("invalid_request_error", "At least one message must include non-empty 'content'.");
 
+            if (gate.Quote is not null) billing.MarkConsumedAndRecord(gate.Quote);
+
+            if (payload.Stream)
+            {
+                var completionId = $"chatcmpl-{Guid.NewGuid():N}";
+                var created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                request.HttpContext.Response.ContentType = "text/event-stream";
+                request.HttpContext.Response.Headers["Cache-Control"] = "no-cache";
+                request.HttpContext.Response.Headers["X-Accel-Buffering"] = "no";
+
+                // Role chunk first
+                var roleChunk = JsonSerializer.Serialize(new {
+                    id = completionId, @object = "chat.completion.chunk", created, model = payload.Model,
+                    choices = new[] { new { index = 0, delta = new { role = "assistant" }, finish_reason = (string?)null } }
+                });
+                await request.HttpContext.Response.WriteAsync($"data: {roleChunk}\n\n", ct);
+
+                // Real forward pass: one token per SSE chunk
+                int steps = payload.MaxTokens ?? payload.MaxCompletionTokens ?? 128;
+                double temp = payload.Temperature ?? 0.8;
+                await foreach (var token in substrate.GenerateStreamAsync(
+                    prompt, steps: steps, temperature: temp, ct: ct))
+                {
+                    var chunk = JsonSerializer.Serialize(new {
+                        id = completionId, @object = "chat.completion.chunk", created, model = payload.Model,
+                        choices = new[] { new { index = 0, delta = new { content = token.Token }, finish_reason = (string?)null } }
+                    });
+                    await request.HttpContext.Response.WriteAsync($"data: {chunk}\n\n", ct);
+                }
+
+                // Stop chunk
+                var stopChunk = JsonSerializer.Serialize(new {
+                    id = completionId, @object = "chat.completion.chunk", created, model = payload.Model,
+                    choices = new[] { new { index = 0, delta = new { content = "" }, finish_reason = "stop" } }
+                });
+                await request.HttpContext.Response.WriteAsync($"data: {stopChunk}\n\n", ct);
+                await request.HttpContext.Response.WriteAsync("data: [DONE]\n\n", ct);
+                return Results.Empty;
+            }
+
             var response = await substrate.ConverseAsync(prompt, ct);
-            billing.MarkConsumedAndRecord(gate.Quote);
 
             return Results.Json(new
             {
@@ -81,7 +117,7 @@ internal static class EndpointMappings
                         finish_reason = "stop"
                     }
                 },
-                billing = new
+                billing = gate.Quote is null ? null : (object)new
                 {
                     quote_id = gate.Quote.QuoteId,
                     amount_cents = gate.Quote.AmountCents,
@@ -104,41 +140,62 @@ internal static class EndpointMappings
             if (string.IsNullOrWhiteSpace(payload.Prompt))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'prompt' is required.");
 
-            var quoteId = AppComposition.ResolveQuoteId(request);
-            if (string.IsNullOrWhiteSpace(quoteId))
-                return EndpointJson.PaymentRequired("quote_required", "Billing quote is required before execution.", new { service_id = "completions" });
-
+            var quoteId = AppComposition.ResolveQuoteId(request) ?? "";
             var gate = await billing.EnsureExecutableAsync(quoteId, "completions", ct);
-            if (!gate.Allowed || gate.Quote is null)
-                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? null : new { gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl });
+            if (!gate.Allowed)
+                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? new { service_id = "completions" } : (object)new { gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl });
 
-            var rows = await substrate.CompletionsAsync(payload.Prompt.Trim(), 8, ct);
-            billing.MarkConsumedAndRecord(gate.Quote);
+            if (gate.Quote is not null) billing.MarkConsumedAndRecord(gate.Quote);
 
-            var choices = rows
-                .Select((row, idx) => new
+            int steps = payload.MaxTokens ?? 64;
+            double temp = payload.Temperature ?? 0.7;
+            string[]? stop = payload.Stop is { } s ? ReadStopSequences(s) : null;
+
+            if (payload.Stream)
+            {
+                var completionId = $"cmpl-{Guid.NewGuid():N}";
+                var created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                request.HttpContext.Response.ContentType = "text/event-stream";
+                request.HttpContext.Response.Headers["Cache-Control"] = "no-cache";
+                request.HttpContext.Response.Headers["X-Accel-Buffering"] = "no";
+
+                await foreach (var token in substrate.GenerateStreamAsync(
+                    payload.Prompt.Trim(), steps: steps, temperature: temp, stop: stop, ct: ct))
                 {
-                    text = row.ObjectLabel,
-                    index = idx,
-                    finish_reason = "stop",
-                    metadata = new
-                    {
-                        object_id = row.ObjectIdHex,
-                        kind_id = row.TypeIdHex,
-                        eff_mu = row.EffectiveMu,
-                        witnesses = row.Witnesses
-                    }
-                })
-                .ToArray();
+                    var chunk = JsonSerializer.Serialize(new {
+                        id = completionId, @object = "text_completion",
+                        created, model = payload.Model,
+                        choices = new[] { new { text = token.Token, index = 0, finish_reason = (string?)null,
+                            logprobs = payload.Logprobs.HasValue ? (object)new { token_logprobs = new[] { (double)token.Mu } } : null } }
+                    });
+                    await request.HttpContext.Response.WriteAsync($"data: {chunk}\n\n", ct);
+                }
+                await request.HttpContext.Response.WriteAsync("data: [DONE]\n\n", ct);
+                return Results.Empty;
+            }
 
+            // Non-streaming: collect full sequence then return
+            var tokens = new List<GenerateToken>(steps);
+            await foreach (var token in substrate.GenerateStreamAsync(
+                payload.Prompt.Trim(), steps: steps, temperature: temp, stop: stop, ct: ct))
+                tokens.Add(token);
+
+            var text = string.Concat(tokens.Select(t => t.Token));
             return Results.Json(new
             {
                 id = $"cmpl-{Guid.NewGuid():N}",
                 @object = "text_completion",
                 created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                 model = payload.Model,
-                choices,
-                billing = new
+                choices = new[] { new {
+                    text,
+                    index = 0,
+                    finish_reason = "stop",
+                    logprobs = payload.Logprobs.HasValue
+                        ? (object)new { token_logprobs = tokens.Select(t => (double)t.Mu).ToArray() }
+                        : null
+                }},
+                billing = gate.Quote is null ? null : (object)new
                 {
                     quote_id = gate.Quote.QuoteId,
                     amount_cents = gate.Quote.AmountCents,
@@ -164,7 +221,7 @@ internal static class EndpointMappings
         {
             var payload = await EndpointJson.ReadJsonAsync<AuditReportRequest>(request, ct) ?? new AuditReportRequest();
             var gate = await RequireQuoteAsync(request, billing, "audit.deep_report", ct);
-            if (!gate.Allowed || gate.Quote is null)
+            if (!gate.Allowed)
                 return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? null : new { gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl });
 
             try
@@ -174,7 +231,7 @@ internal static class EndpointMappings
                     includeConvergence: payload.IncludeConvergence,
                     topRelationLimit: payload.Academic ? 50 : 20,
                     ct);
-                billing.MarkConsumedAndRecord(gate.Quote);
+                if (gate.Quote is not null) billing.MarkConsumedAndRecord(gate.Quote);
 
                 return Results.Json(new
                 {
@@ -187,7 +244,7 @@ internal static class EndpointMappings
                     include_consensus = payload.IncludeConsensus,
                     include_convergence = payload.IncludeConvergence,
                     report,
-                    billing = BillingReceipt(gate.Quote)
+                    billing = gate.Quote is null ? null : BillingReceipt(gate.Quote)
                 });
             }
             catch (SubstrateUnavailableException ex)
@@ -200,7 +257,7 @@ internal static class EndpointMappings
         {
             var payload = await EndpointJson.ReadJsonAsync<VisualizationExecuteRequest>(request, ct) ?? new VisualizationExecuteRequest();
             var gate = await RequireQuoteAsync(request, billing, "visualization.deep_export", ct);
-            if (!gate.Allowed || gate.Quote is null)
+            if (!gate.Allowed)
                 return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? null : new { gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl });
 
             try
@@ -210,7 +267,7 @@ internal static class EndpointMappings
                     includeGeometry: payload.IncludeGeometry,
                     includeEvidence: payload.IncludeEvidence,
                     ct);
-                billing.MarkConsumedAndRecord(gate.Quote);
+                if (gate.Quote is not null) billing.MarkConsumedAndRecord(gate.Quote);
 
                 return Results.Json(new
                 {
@@ -221,7 +278,7 @@ internal static class EndpointMappings
                     include_geometry = payload.IncludeGeometry,
                     include_evidence = payload.IncludeEvidence,
                     graph,
-                    billing = BillingReceipt(gate.Quote)
+                    billing = gate.Quote is null ? null : BillingReceipt(gate.Quote)
                 });
             }
             catch (SubstrateUnavailableException ex)
@@ -241,7 +298,7 @@ internal static class EndpointMappings
                 return EndpointJson.BadRequest("invalid_request_error", "Fields 'depth' and 'beam' must each be >= 1.");
 
             var gate = await RequireQuoteAsync(request, billing, "explain.trace", ct);
-            if (!gate.Allowed || gate.Quote is null)
+            if (!gate.Allowed)
                 return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? null : new { gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl });
 
             try
@@ -252,7 +309,7 @@ internal static class EndpointMappings
                     payload.Beam,
                     includeEvidence: payload.Academic,
                     ct);
-                billing.MarkConsumedAndRecord(gate.Quote);
+                if (gate.Quote is not null) billing.MarkConsumedAndRecord(gate.Quote);
 
                 return Results.Json(new
                 {
@@ -264,7 +321,7 @@ internal static class EndpointMappings
                     beam = payload.Beam,
                     academic = payload.Academic,
                     trace,
-                    billing = BillingReceipt(gate.Quote)
+                    billing = gate.Quote is null ? null : BillingReceipt(gate.Quote)
                 });
             }
             catch (SubstrateUnavailableException ex)
@@ -276,9 +333,7 @@ internal static class EndpointMappings
 
     private static async Task<QuoteExecutionGate> RequireQuoteAsync(HttpRequest request, IBillingOrchestrator billing, string serviceId, CancellationToken ct)
     {
-        var quoteId = AppComposition.ResolveQuoteId(request);
-        if (string.IsNullOrWhiteSpace(quoteId))
-            return new QuoteExecutionGate(false, "quote_required", "Billing quote is required before execution.", null);
+        var quoteId = AppComposition.ResolveQuoteId(request) ?? "";
         return await billing.EnsureExecutableAsync(quoteId, serviceId, ct);
     }
 

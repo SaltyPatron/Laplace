@@ -78,6 +78,7 @@ internal static class Program
                 + "  roundtrip <file> [out]\n"
                 + "  db-roundtrip <file>\n"
                 + "  svd-exact-bench [model-dir] [tensor]  (prove tensor_svd_truncate is fp-exact on a real tensor; no DB)\n"
+                + "  model-bench [model-dir]              (run the whole-model FFN/relation ETL on a real model; no DB)\n"
                 + "  stats");
             return 2;
         }
@@ -98,6 +99,7 @@ internal static class Program
                 "db-roundtrip" => await DbRoundtripAsync(args.Length > 1 ? args[1] : ""),
                 "stats"        => await StatsAsync(),
                 "svd-exact-bench" => SvdExactBenchCmd(args[1..]),
+                "model-bench"     => await ModelBenchCmd(args[1..]),
                 _ => Fail($"unknown command '{args[0]}'"),
             };
         }
@@ -126,6 +128,85 @@ internal static class Program
 
         bool pass = SvdExactBench.Run(modelDir, tensor);
         return pass ? 0 : 1;
+    }
+
+    // Benches one model dir, or every model in a hub root. With no arg, walks the default hub
+    // ($LAPLACE_MODEL_HUB or D:\Models\hub) and benches each models--*/snapshots/* that has weights.
+    private static async Task<int> ModelBenchCmd(string[] rest)
+    {
+        var log = ConsoleLoggerProvider.Factory().CreateLogger("model-bench");
+        var arg = rest.Length > 0 ? rest[0] : null;
+
+        List<string> models;
+        if (!string.IsNullOrEmpty(arg) && IsModelDir(arg))
+            models = new() { arg! };
+        else
+        {
+            string hub = !string.IsNullOrEmpty(arg) ? arg!
+                : Environment.GetEnvironmentVariable("LAPLACE_MODEL_HUB")
+                  ?? (Directory.Exists(@"D:\Models\hub") ? @"D:\Models\hub" : "");
+            if (string.IsNullOrEmpty(hub) || !Directory.Exists(hub))
+                return Fail("usage: laplace model-bench [model-dir | hub-root]\n" +
+                            "  pass a model dir, a hub root, or set $LAPLACE_MODEL_HUB; none resolved.");
+            models = EnumerateHubModels(hub).ToList();
+            if (models.Count == 0)
+                return Fail($"model-bench: no models with weights found under {hub}");
+            Console.WriteLine($"model-bench: {models.Count} model(s) under {hub}");
+            Console.WriteLine();
+        }
+
+        bool allOk = true;
+        var failures = new List<string>();
+        foreach (var dir in models)
+        {
+            Console.WriteLine(new string('=', 78));
+            bool ok;
+            try { ok = await ModelFfnBench.RunAsync(dir, log); }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"model-bench: {dir} threw: {ex.Message}");
+                ok = false;
+            }
+            if (!ok) failures.Add(dir);
+            allOk &= ok;
+            Console.WriteLine();
+        }
+
+        if (models.Count > 1)
+        {
+            Console.WriteLine(new string('=', 78));
+            Console.WriteLine($"model-bench: {models.Count - failures.Count}/{models.Count} passed");
+            foreach (var f in failures) Console.WriteLine($"  FAIL {f}");
+        }
+        return allOk ? 0 : 1;
+    }
+
+    private static bool IsModelDir(string dir) =>
+        Directory.Exists(dir)
+        && File.Exists(Path.Combine(dir, "config.json"))
+        && Directory.GetFiles(dir, "*.safetensors").Length > 0;
+
+    // HF cache layout: <hub>/models--ORG--NAME/snapshots/<rev>/, weights resolved via blob symlinks.
+    private static IEnumerable<string> EnumerateHubModels(string hub)
+    {
+        // direct: hub root is itself a model
+        if (IsModelDir(hub)) { yield return hub; yield break; }
+
+        foreach (var fam in Directory.GetDirectories(hub, "models--*").OrderBy(f => f, StringComparer.Ordinal))
+        {
+            var snapsDir = Path.Combine(fam, "snapshots");
+            if (!Directory.Exists(snapsDir)) continue;
+            // newest snapshot that actually carries weights
+            var snap = Directory.GetDirectories(snapsDir)
+                                .OrderByDescending(Directory.GetLastWriteTimeUtc)
+                                .FirstOrDefault(IsModelDir);
+            if (snap != null) yield return snap;
+        }
+
+        // also allow plain (non-HF) model dirs sitting directly under the hub
+        foreach (var d in Directory.GetDirectories(hub).OrderBy(f => f, StringComparer.Ordinal))
+            if (!Path.GetFileName(d).StartsWith("models--", StringComparison.Ordinal) && IsModelDir(d))
+                yield return d;
     }
 
     private static string ResolveTinyLlamaDir()
@@ -660,7 +741,7 @@ internal static class Program
         string path   = args.Length > 1 ? args[1] : "";
 
         if (string.IsNullOrEmpty(source))
-            return Fail("usage: laplace ingest <source> [path]  (unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | model)");
+            return Fail("usage: laplace ingest <source> [path]  (unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | code | repo | tabular | tiny-codes | stack | model)");
 
         return source.ToLowerInvariant() switch
         {
@@ -678,10 +759,13 @@ internal static class Program
             "verbnet"  => await IngestViaRunnerAsync(new VerbNetDecomposer(),  "/vault/Data/VerbNet",  skipLayerCheck: false),
             "propbank" => await IngestViaRunnerAsync(new PropBankDecomposer(), "/vault/Data/PropBank", skipLayerCheck: false),
             "semlink"  => await IngestViaRunnerAsync(new SemLinkDecomposer(),  "/vault/Data/SemLink",  skipLayerCheck: false),
-            "code"     => await IngestViaRunnerAsync(new CodeDecomposer(), path, skipLayerCheck: true),
-            "tabular"  => await IngestViaRunnerAsync(new TabularDecomposer(), path, skipLayerCheck: true),
-            "model"    => await IngestModelAsync(path),
-            _ => Fail($"unknown ingest source '{source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, model)"),
+            "code"       => await IngestViaRunnerAsync(new CodeDecomposer(),     path, skipLayerCheck: true),
+            "repo"       => await IngestViaRunnerAsync(new RepoDecomposer(),     path, skipLayerCheck: true),
+            "tabular"    => await IngestViaRunnerAsync(new TabularDecomposer(),  path, skipLayerCheck: true),
+            "tiny-codes" => await IngestViaRunnerAsync(new TinyCodesDecomposer(), path, skipLayerCheck: true),
+            "stack"      => await IngestViaRunnerAsync(new StackDecomposer(),      path, skipLayerCheck: true),
+            "model"      => await IngestModelAsync(path),
+            _ => Fail($"unknown ingest source '{source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, code, repo, tabular, tiny-codes, stack, model)"),
         };
     }
 
@@ -728,53 +812,53 @@ internal static class Program
 
         Console.WriteLine($"ingest model {modelDir} via IngestRunner → {ConnString} ...");
 
-        var droppedAttIndexes = await DropSecondaryIndexesAsync(ds, "attestations", CancellationToken.None);
+        // Index-free bulk load is correct ONLY when seeding an empty table: dropping the global
+        // secondary indexes forces a full-table rebuild that is bounded by the WHOLE corpus, not by
+        // the incoming source. On a populated (live, large) substrate that rebuild dwarfs a bounded
+        // model load, holds locks, and de-indexes status queries (the HasSourceCompletedAsync probe
+        // would then seq-scan the whole table). So we only drop+rebuild when the table is empty;
+        // otherwise we keep indexes live and let the bounded model load maintain them incrementally.
+        bool attHasRows = await TableHasAnyRowsAsync(ds, "attestations", CancellationToken.None);
+        var droppedAttIndexes = attHasRows
+            ? new List<string>()
+            : await DropSecondaryIndexesAsync(ds, "attestations", CancellationToken.None);
         if (droppedAttIndexes.Count > 0)
-            Console.WriteLine($"B2: dropped {droppedAttIndexes.Count} secondary attestations index(es) for index-free bulk load; rebuilt after apply");
+            Console.WriteLine($"B2: dropped {droppedAttIndexes.Count} secondary attestations index(es) for index-free bulk load (empty table); rebuilt after apply");
+        else if (attHasRows)
+            Console.WriteLine("B2: attestations populated — keeping indexes live; bounded model load maintains them incrementally (no whole-table rebuild)");
 
-        // The consensus fold writes one row per arena cell; its 5 secondary indexes would be
-        // maintained on every write (the dominant cost, never addressed for consensus). Drop them
-        // for the duration of the fresh-source fold and rebuild once after consensus materializes.
-        var droppedConsensusIndexes = await DropSecondaryIndexesAsync(ds, "consensus", CancellationToken.None);
+        bool consHasRows = await TableHasAnyRowsAsync(ds, "consensus", CancellationToken.None);
+        var droppedConsensusIndexes = consHasRows
+            ? new List<string>()
+            : await DropSecondaryIndexesAsync(ds, "consensus", CancellationToken.None);
         if (droppedConsensusIndexes.Count > 0)
-            Console.WriteLine($"B2: dropped {droppedConsensusIndexes.Count} secondary consensus index(es) for index-free fold; rebuilt after the consensus fold");
+            Console.WriteLine($"B2: dropped {droppedConsensusIndexes.Count} secondary consensus index(es) for index-free fold (empty table); rebuilt after the consensus fold");
+        else if (consHasRows)
+            Console.WriteLine("B2: consensus populated — keeping indexes live; bounded model fold maintains them incrementally (no whole-table rebuild)");
 
         var sw = Stopwatch.StartNew();
-        IngestRunResult result;
         try
         {
-            result = await runner.RunAsync(
+            var result = await runner.RunAsync(
                 dec,
                 BuildIngestOptions(sw, dec.SourceName, skipLayerCheck: true, ecosystemPath: null),
                 CancellationToken.None);
-        }
-        finally
-        {
             sw.Stop();
-            if (droppedAttIndexes.Count > 0)
-            {
-                Console.WriteLine($"B2: rebuilding {droppedAttIndexes.Count} secondary attestations index(es) ...");
-                var ixSw = Stopwatch.StartNew();
-                await RebuildIndexesAsync(ds, droppedAttIndexes, CancellationToken.None);
-                ixSw.Stop();
-                Console.WriteLine($"B2: secondary attestations indexes rebuilt in {ixSw.Elapsed.TotalSeconds:F1}s");
-            }
-        }
 
-        Console.WriteLine(
-            $"done: {result.UnitsApplied:N0} intents applied, "
-            + $"{result.EntitiesInserted:N0} novel entities, "
-            + $"{result.AttestationsInserted:N0} attestations, "
-            + $"{result.TotalRoundTrips:N0} round-trips, "
-            + $"{sw.Elapsed.TotalSeconds:F1}s");
-        if (result.Failures.Count > 0)
-        {
-            Console.Error.WriteLine($"failures: {result.Failures.Count}");
-            foreach (var f in result.Failures.Take(5))
-                Console.Error.WriteLine($"  {f}");
-            return 1;
-        }
-        {
+            Console.WriteLine(
+                $"done: {result.UnitsApplied:N0} intents applied, "
+                + $"{result.EntitiesInserted:N0} novel entities, "
+                + $"{result.AttestationsInserted:N0} attestations, "
+                + $"{result.TotalRoundTrips:N0} round-trips, "
+                + $"{sw.Elapsed.TotalSeconds:F1}s");
+            if (result.Failures.Count > 0)
+            {
+                Console.Error.WriteLine($"failures: {result.Failures.Count}");
+                foreach (var f in result.Failures.Take(5))
+                    Console.Error.WriteLine($"  {f}");
+                return 1;
+            }
+
             Console.WriteLine(
                 $"consensus: folding {accumulator.ObservationsAccumulated:N0} matches "
                 + $"across {accumulator.FoldWorkers} partition(s) ...");
@@ -786,16 +870,50 @@ internal static class Program
                 + $"{accumulator.ObservationsAccumulated:N0} matches in {matSw.Elapsed.TotalSeconds:F1}s "
                 + $"(accumulated at ingest; evidence = provenance-only)");
         }
-        if (droppedConsensusIndexes.Count > 0)
+        finally
         {
-            Console.WriteLine($"B2: rebuilding {droppedConsensusIndexes.Count} secondary consensus index(es) ...");
-            var cixSw = Stopwatch.StartNew();
-            await RebuildIndexesAsync(ds, droppedConsensusIndexes, CancellationToken.None);
-            cixSw.Stop();
-            Console.WriteLine($"B2: secondary consensus indexes rebuilt in {cixSw.Elapsed.TotalSeconds:F1}s");
+            // Both index sets were dropped (if at all) BEFORE the run started, so they must be
+            // rebuilt here regardless of how the run/fold above exits — success, failure rows,
+            // or a thrown exception. Rebuilding only on the happy path is what stranded
+            // `consensus` index-free in production: a failed/throwing model ingest left it with
+            // only its primary key, forcing converse/cognize/nn into seq-scans over 57M rows.
+            sw.Stop();
+            if (droppedAttIndexes.Count > 0)
+            {
+                Console.WriteLine($"B2: rebuilding {droppedAttIndexes.Count} secondary attestations index(es) ...");
+                var ixSw = Stopwatch.StartNew();
+                await RebuildIndexesAsync(ds, droppedAttIndexes, CancellationToken.None);
+                ixSw.Stop();
+                Console.WriteLine($"B2: secondary attestations indexes rebuilt in {ixSw.Elapsed.TotalSeconds:F1}s");
+            }
+            if (droppedConsensusIndexes.Count > 0)
+            {
+                Console.WriteLine($"B2: rebuilding {droppedConsensusIndexes.Count} secondary consensus index(es) ...");
+                var cixSw = Stopwatch.StartNew();
+                await RebuildIndexesAsync(ds, droppedConsensusIndexes, CancellationToken.None);
+                cixSw.Stop();
+                Console.WriteLine($"B2: secondary consensus indexes rebuilt in {cixSw.Elapsed.TotalSeconds:F1}s");
+            }
         }
         await RegisterDynamicCanonicalsAsync(ds, ((IDecomposer)dec).CanonicalNamesForReadback);
         return 0;
+    }
+
+    private static async Task<bool> TableHasAnyRowsAsync(
+        global::Npgsql.NpgsqlDataSource ds, string table, CancellationToken ct)
+    {
+        // O(1): stops at the first row. Cannot be fooled by stale planner statistics the way
+        // reltuples can, so the "is this an empty first-seed?" decision is always correct.
+        await using var conn = await ds.OpenConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = table switch
+        {
+            "attestations" => "SELECT EXISTS(SELECT 1 FROM laplace.attestations)",
+            "consensus"    => "SELECT EXISTS(SELECT 1 FROM laplace.consensus)",
+            _ => throw new ArgumentOutOfRangeException(nameof(table), table, "unknown table"),
+        };
+        var r = await cmd.ExecuteScalarAsync(ct);
+        return r is bool b && b;
     }
 
     private static async Task<List<string>> DropSecondaryIndexesAsync(
@@ -1330,6 +1448,11 @@ internal static class Program
             CommitRows             = EnvInt("LAPLACE_INGEST_COMMIT_ROWS", 250_000, min: 0),
             ParallelWorkers        = EnvInt("LAPLACE_INGEST_WORKERS",     4,       min: 1),
             Progress               = progress,
+            // Fail fast. No retry/backoff loop and no silent transient drop:
+            // the first error surfaces immediately and aborts the run so the
+            // real cause is fixed, never retried or swallowed.
+            RetryPolicy                = TransientErrorRetryPolicy.NoRetry,
+            AbortOnTransientExhaustion = true,
         };
     }
 

@@ -12,6 +12,7 @@ internal sealed class StripeBillingOptions
     public string Currency { get; set; } = "usd";
     public string SuccessUrl { get; set; } = "http://localhost:5187/billing/success";
     public string CancelUrl { get; set; } = "http://localhost:5187/billing/cancel";
+    public bool Bypass { get; set; }
 }
 
 internal sealed record BillingProduct(
@@ -685,6 +686,9 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
 
     public async Task<QuoteExecutionGate> EnsureExecutableAsync(string quoteId, string serviceId, CancellationToken ct)
     {
+        if (_options.Bypass)
+            return new QuoteExecutionGate(true, "bypass", "Billing bypass active (LAPLACE_BILLING_BYPASS=true).", null);
+
         if (!_store.TryGet(quoteId, out var quote))
             return new QuoteExecutionGate(false, "quote_not_found", "Quote does not exist.", null);
 

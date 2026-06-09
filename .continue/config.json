@@ -1,0 +1,52 @@
+{
+  "models": [
+    {
+      "title": "Laplace (substrate)",
+      "provider": "openai",
+      "model": "laplace-converse-001",
+      "apiKey": "none",
+      "apiBase": "http://localhost:5187/v1",
+      "completionOptions": {
+        "maxTokens": 2048
+      }
+    }
+  ],
+  "tabAutocompleteModel": {
+    "title": "Laplace Tab",
+    "provider": "openai",
+    "model": "laplace-completions-001",
+    "apiKey": "none",
+    "apiBase": "http://localhost:5187/v1",
+    "completionOptions": {
+      "maxTokens": 256,
+      "stop": ["\n\n", "```\n"]
+    }
+  },
+  "contextProviders": [
+    { "name": "code" },
+    { "name": "diff" },
+    { "name": "terminal" },
+    { "name": "problems" },
+    { "name": "folder" },
+    { "name": "codebase" }
+  ],
+  "slashCommands": [
+    {
+      "name": "edit",
+      "description": "Edit selected code"
+    },
+    {
+      "name": "comment",
+      "description": "Write comments for selected code"
+    },
+    {
+      "name": "share",
+      "description": "Export the current chat session to markdown"
+    },
+    {
+      "name": "cmd",
+      "description": "Generate a shell command"
+    }
+  ],
+  "allowAnonymousTelemetry": false
+}

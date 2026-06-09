@@ -37,12 +37,26 @@ public static partial class NativeInterop
         double* left, nuint rowBegin, nuint rowEnd,
         double* right, nuint nRight,
         nuint r, double theta,
-        int* outRows, int* outCols, double* outVals,
+        int* outRows, int* outCols, double* outVals, long* outScores,
         nuint cap, nuint* outCount, int* overflow);
 
     [LibraryImport(Library, EntryPoint = "project_embedding")]
     public static unsafe partial int ProjectEmbedding(
         float* pts, nuint n, nuint d, float* w, nuint r, double* outp);
+
+    [LibraryImport(Library, EntryPoint = "project_embedding_d")]
+    public static unsafe partial int ProjectEmbeddingD(
+        double* pts, nuint n, nuint d, float* w, nuint r, double* outp);
+
+    [LibraryImport(Library, EntryPoint = "ffn_token_pairs_tile")]
+    public static unsafe partial int FfnTokenPairsTile(
+        double* emb, nuint n, nuint d,
+        double* unemb,
+        double* gate, double* up, double* down, nuint interm,
+        nuint rowBegin, nuint rowEnd,
+        double theta,
+        int* outRows, int* outCols, double* outVals, long* outScores,
+        nuint cap, nuint* outCount, int* overflow);
 
     [LibraryImport(Library, EntryPoint = "gram_schmidt_orthonormalize")]
     public static unsafe partial int GramSchmidtOrthonormalize(

@@ -1,4 +1,5 @@
 #include "laplace/dynamics/bilinear_edges.h"
+#include "laplace/core/score.h"
 
 #include <cmath>
 #include <cstddef>
@@ -13,7 +14,7 @@ int bilinear_edges_tile(
     const double* left,  std::size_t row_begin, std::size_t row_end,
     const double* right, std::size_t n_right,
     std::size_t r, double theta,
-    int* out_rows, int* out_cols, double* out_vals,
+    int* out_rows, int* out_cols, double* out_vals, long long* out_scores,
     std::size_t cap, std::size_t* out_count, int* overflow)
 {
     if (!left || !right || !out_rows || !out_cols || !out_vals || !out_count || !overflow)
@@ -46,6 +47,7 @@ int bilinear_edges_tile(
                 out_rows[cnt] = gi;
                 out_cols[cnt] = (int)b;
                 out_vals[cnt] = v;
+                if (out_scores) out_scores[cnt] = (long long)laplace_score_fp(v, 1.0);
                 ++cnt;
             }
         }
@@ -54,7 +56,7 @@ int bilinear_edges_tile(
     return 0;
 #else
     (void)left; (void)right; (void)r; (void)theta;
-    (void)out_rows; (void)out_cols; (void)out_vals; (void)cap; (void)t;
+    (void)out_rows; (void)out_cols; (void)out_vals; (void)out_scores; (void)cap; (void)t;
     return -2;
 #endif
 }
@@ -73,6 +75,27 @@ int project_embedding(const float* pts, std::size_t n, std::size_t d,
         CblasRowMajor, CblasNoTrans, CblasTrans,
         (MKL_INT)n, (MKL_INT)r, (MKL_INT)d,
         1.0, P.data(), (MKL_INT)d, Wd.data(), (MKL_INT)d,
+        0.0, out, (MKL_INT)r);
+    return 0;
+#else
+    (void)pts; (void)W; (void)out;
+    return -2;
+#endif
+}
+
+extern "C"
+int project_embedding_d(const double* pts, std::size_t n, std::size_t d,
+                         const float* W, std::size_t r, double* out)
+{
+    if (!pts || !W || !out || n == 0 || d == 0 || r == 0) return -1;
+#ifdef LAPLACE_HAS_MKL
+    std::vector<double> Wd((std::size_t)r * d);
+    for (std::size_t i = 0; i < (std::size_t)r * d; ++i) Wd[i] = (double)W[i];
+
+    cblas_dgemm(
+        CblasRowMajor, CblasNoTrans, CblasTrans,
+        (MKL_INT)n, (MKL_INT)r, (MKL_INT)d,
+        1.0, pts, (MKL_INT)d, Wd.data(), (MKL_INT)d,
         0.0, out, (MKL_INT)r);
     return 0;
 #else

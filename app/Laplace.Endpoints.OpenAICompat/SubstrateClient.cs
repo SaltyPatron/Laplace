@@ -35,6 +35,179 @@ internal sealed class SubstrateClient : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// True autoregressive forward pass: resolve the prompt to a context window of entity IDs,
+    /// then walk PRECEDES arcs step by step, yielding one token per step.
+    /// Each yield fires before the next SQL call — this genuinely streams.
+    /// Works for both text and code (no HAS_POS requirement).
+    /// </summary>
+    public async IAsyncEnumerable<GenerateToken> GenerateStreamAsync(
+        string prompt,
+        int steps       = 64,
+        int window      = 4,
+        double temperature = 0.8,
+        int topK        = 12,
+        string[]? stop  = null,
+        double boost    = 0,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        // Resolve prompt text → ordered array of entity IDs (last `window` entities)
+        var ctx = await ResolveContextAsync(conn, prompt, window, ct);
+        if (ctx.Length == 0) yield break;
+
+        var stopIds = new HashSet<byte[]>(ByteArrayComparer.Instance);
+        if (stop is { Length: > 0 })
+        {
+            foreach (var s in stop)
+            {
+                var sid = await ResolveWordIdAsync(conn, s, ct);
+                if (sid != null) stopIds.Add(sid);
+            }
+        }
+
+        var seen = new HashSet<byte[]>(ByteArrayComparer.Instance, ctx.Select(x => x));
+
+        for (int step = 1; step <= steps; step++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var next = await PickNextTokenAsync(conn, ctx, seen, stopIds, topK, temperature, boost, ct);
+            if (next == null) yield break;
+
+            yield return new GenerateToken(step, next.Value.Label, next.Value.Mu);
+
+            seen.Add(next.Value.Id);
+            // Advance sliding window
+            ctx = ctx.Length < window
+                ? [.. ctx, next.Value.Id]
+                : [.. ctx[1..], next.Value.Id];
+        }
+    }
+
+    // ── forward-pass internals ────────────────────────────────────────────────
+
+    private static async Task<byte[][]> ResolveContextAsync(
+        NpgsqlConnection conn, string prompt, int window, CancellationToken ct)
+    {
+        const string sql = """
+            SELECT id FROM laplace.prompt_state(@p) WHERE id IS NOT NULL ORDER BY ord DESC LIMIT @w;
+            """;
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("p", prompt);
+        cmd.Parameters.AddWithValue("w", window);
+        var ids = new List<byte[]>(window);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            ids.Add(reader.GetFieldValue<byte[]>(0));
+        ids.Reverse(); // oldest → newest for context ordering
+        return ids.ToArray();
+    }
+
+    private static async Task<byte[]?> ResolveWordIdAsync(
+        NpgsqlConnection conn, string word, CancellationToken ct)
+    {
+        const string sql = "SELECT laplace.word_id(@w);";
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("w", word);
+        var v = await cmd.ExecuteScalarAsync(ct);
+        return v is null or DBNull ? null : (byte[])v;
+    }
+
+    private static readonly Random _rng = new();
+
+    private static async Task<(byte[] Id, string Label, decimal Mu)?> PickNextTokenAsync(
+        NpgsqlConnection conn,
+        byte[][] ctx,
+        HashSet<byte[]> seen,
+        HashSet<byte[]> stopIds,
+        int topK,
+        double temperature,
+        double boost,
+        CancellationToken ct)
+    {
+        // Fetch top-K PRECEDES candidates from the current context window.
+        // No HAS_POS requirement — works for code tokens too.
+        const string sql = """
+            SELECT c.object_id,
+                   COALESCE(laplace.render_text(c.object_id, 32),
+                            laplace.label(c.object_id),
+                            encode(c.object_id, 'hex')) AS label,
+                   laplace.eff_mu_display(max(c.rating), max(c.rd))  AS mu,
+                   sum(laplace.eff_mu(c.rating, c.rd))               AS sc
+            FROM laplace.consensus c
+            WHERE c.type_id    =  laplace.relation_type_id('PRECEDES')
+              AND c.subject_id =  ANY(@ctx)
+              AND c.object_id  IS NOT NULL
+              AND NOT laplace.refuted(c.rating, c.rd)
+            GROUP BY c.object_id
+            ORDER BY sum(laplace.eff_mu(c.rating, c.rd)) DESC
+            LIMIT @topk;
+            """;
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("ctx", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea, ctx);
+        cmd.Parameters.AddWithValue("topk", topK);
+
+        var candidates = new List<(byte[] Id, string Label, decimal Mu, double Score)>(topK);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var id    = reader.GetFieldValue<byte[]>(0);
+            var label = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+            var mu    = reader.GetDecimal(2);
+            var sc    = (double)reader.GetDecimal(3);
+            if (seen.Contains(id)) continue;
+            if (stopIds.Contains(id)) return null;
+            if (string.IsNullOrEmpty(label)) continue;
+            candidates.Add((id, label, mu, sc));
+        }
+
+        if (candidates.Count == 0) return null;
+        if (candidates.Count == 1) return (candidates[0].Id, candidates[0].Label, candidates[0].Mu);
+
+        // Temperature sampling: Gumbel-max trick
+        // score_i → weight_i = sc_i^(1/T), then sample proportionally.
+        if (temperature <= 0)
+        {
+            var best = candidates[0];
+            return (best.Id, best.Label, best.Mu);
+        }
+
+        double[] weights = new double[candidates.Count];
+        double wsum = 0;
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            double sc = candidates[i].Score;
+            if (boost > 0) sc *= 1 + boost;
+            weights[i] = Math.Pow(Math.Max(sc, 1e-12), 1.0 / temperature);
+            wsum += weights[i];
+        }
+
+        double r = _rng.NextDouble() * wsum;
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            r -= weights[i];
+            if (r <= 0)
+                return (candidates[i].Id, candidates[i].Label, candidates[i].Mu);
+        }
+        var fallback = candidates[^1];
+        return (fallback.Id, fallback.Label, fallback.Mu);
+    }
+
+    private sealed class ByteArrayComparer : IEqualityComparer<byte[]>
+    {
+        public static readonly ByteArrayComparer Instance = new();
+        public bool Equals(byte[]? x, byte[]? y) =>
+            x is null ? y is null : y is not null && x.AsSpan().SequenceEqual(y);
+        public int GetHashCode(byte[] obj)
+        {
+            var h = new HashCode();
+            h.AddBytes(obj);
+            return h.ToHashCode();
+        }
+    }
+
     public async Task<IReadOnlyList<CompletionRow>> CompletionsAsync(string prompt, int limit, CancellationToken ct)
     {
         const string sql = """

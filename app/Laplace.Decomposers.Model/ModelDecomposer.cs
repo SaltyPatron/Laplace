@@ -48,9 +48,6 @@ public sealed class ModelDecomposer : IDecomposer
         Hash128.OfCanonical("substrate/type/Scalar/v1");
     public static readonly Hash128 NgramTypeId =
         Hash128.OfCanonical("substrate/type/Ngram/v1");
-    public static readonly Hash128 ModelAxisTypeId =
-        Hash128.OfCanonical("substrate/type/Model_Axis/v1");
-
     public static readonly Hash128 EmbedsTypeId        = RelationTypeRegistry.RelationTypeId("EMBEDS");
     public static readonly Hash128 QProjectsTypeId     = RelationTypeRegistry.RelationTypeId("Q_PROJECTS");
     public static readonly Hash128 KProjectsTypeId     = RelationTypeRegistry.RelationTypeId("K_PROJECTS");
@@ -211,12 +208,8 @@ public sealed class ModelDecomposer : IDecomposer
         log.LogInformation("phase=merges emitted: {Count} merges, {Batches} batches ({Ms} ms)",
             merges.Count, mergeBatches, phaseSw.ElapsedMilliseconds);
 
-        // Point → range → matchups. Full-dim cosine (engine MKL gemm), ranged at the CALCULATED
-        // noise floor (theta = c/√dim per plane) so the in-range set is exactly the signal neighbors,
-        // which become Glicko-2 matchups for the attestation type. No 4D compression (that loses the
-        // relations); no theta=0 (that keeps the noise). Deterministic, bounded by the math.
-        log.LogInformation("phase=etl starting (point → range at calculated noise floor → Glicko matchups)");
-        var etl = new ModelTableETL(_modelDir, recipe, tokens, Source, ModelAxisTypeId, log);
+        log.LogInformation("phase=etl starting");
+        var etl = new ModelTableETL(_modelDir, recipe, tokens, Source, log);
         await foreach (var change in etl.EmitAsync(ct))
         {
             ct.ThrowIfCancellationRequested();

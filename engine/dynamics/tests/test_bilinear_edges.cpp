@@ -36,7 +36,7 @@ TEST(BilinearEdges, FullBilinearAboveTheta_SignedAndComplete) {
     size_t count = 0; int overflow = 1;
 
     int rc = bilinear_edges_tile(L.data(), 0, nL, R.data(), nR, r, theta,
-                                 rows.data(), cols.data(), vals.data(),
+                                 rows.data(), cols.data(), vals.data(), nullptr,
                                  nL * nR, &count, &overflow);
     ASSERT_EQ(0, rc);
     EXPECT_EQ(0, overflow);
@@ -71,7 +71,7 @@ TEST(BilinearEdges, RowTilingEqualsSinglePass) {
         std::vector<double> vals(nL * nR);
         size_t cnt = 0; int ov = 1;
         EXPECT_EQ(0, bilinear_edges_tile(L.data(), b0, b1, R.data(), nR, r, theta,
-                                         rows.data(), cols.data(), vals.data(),
+                                         rows.data(), cols.data(), vals.data(), nullptr,
                                          nL * nR, &cnt, &ov));
         EXPECT_EQ(0, ov);
         for (size_t e = 0; e < cnt; ++e) { rr.push_back(rows[e]); cc.push_back(cols[e]); vv.push_back(vals[e]); }
@@ -98,7 +98,7 @@ TEST(BilinearEdges, OverflowFlagged) {
     std::vector<int> rows(1), cols(1); std::vector<double> vals(1);
     size_t cnt = 99; int ov = 0;
     int rc = bilinear_edges_tile(L.data(), 0, nL, R.data(), nR, r, 0.0,
-                                 rows.data(), cols.data(), vals.data(), 1, &cnt, &ov);
+                                 rows.data(), cols.data(), vals.data(), nullptr, 1, &cnt, &ov);
     EXPECT_EQ(0, rc);
     EXPECT_EQ(1, ov);
     EXPECT_EQ(1u, cnt);
@@ -106,6 +106,26 @@ TEST(BilinearEdges, OverflowFlagged) {
 
 TEST(BilinearEdges, BadArgs) {
     double x = 1.0; int ri; int ci; double vi; size_t cnt; int ov;
-    EXPECT_EQ(-1, bilinear_edges_tile(nullptr, 0, 1, &x, 1, 1, 0.0, &ri, &ci, &vi, 1, &cnt, &ov));
-    EXPECT_EQ(-1, bilinear_edges_tile(&x, 1, 1, &x, 1, 1, 0.0, &ri, &ci, &vi, 1, &cnt, &ov));
+    EXPECT_EQ(-1, bilinear_edges_tile(nullptr, 0, 1, &x, 1, 1, 0.0, &ri, &ci, &vi, nullptr, 1, &cnt, &ov));
+    EXPECT_EQ(-1, bilinear_edges_tile(&x, 1, 1, &x, 1, 1, 0.0, &ri, &ci, &vi, nullptr, 1, &cnt, &ov));
+}
+
+TEST(ProjectEmbedding, FloatAndDoubleSrcAgree) {
+    // pts[2x3] @ W[2x3]^T = out[2x2]
+    const size_t n = 2, d = 3, r = 2;
+    std::vector<float> pts  = { 1.0f, 0.0f, 0.5f,   0.0f, 1.0f, -0.5f };
+    std::vector<float> W    = { 2.0f, 1.0f, 0.0f,   0.0f, 1.0f,  2.0f };
+    // Expected (row-major): row0=[2.0, 1.0], row1=[1.0, 0.0]
+    std::vector<double> ptsD(pts.begin(), pts.end());
+
+    std::vector<double> outF(n * r), outD(n * r);
+    ASSERT_EQ(0, project_embedding  (pts.data(),  n, d, W.data(), r, outF.data()));
+    ASSERT_EQ(0, project_embedding_d(ptsD.data(), n, d, W.data(), r, outD.data()));
+
+    for (size_t i = 0; i < n * r; ++i)
+        EXPECT_NEAR(outF[i], outD[i], 1e-12);
+    EXPECT_NEAR(2.0, outF[0], 1e-5);
+    EXPECT_NEAR(1.0, outF[1], 1e-5);
+    EXPECT_NEAR(1.0, outF[2], 1e-5);
+    EXPECT_NEAR(0.0, outF[3], 1e-5);
 }

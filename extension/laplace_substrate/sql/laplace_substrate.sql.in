@@ -18,7 +18,6 @@
 #include "16_inspect.sql.in"
 #include "17_consensus_reads.sql.in"
 #include "18_ops_surface.sql.in"
-#include "19_geometry_consensus.sql.in"
 #include "20_converse.sql.in"
 #include "21_seed.sql.in"
 #include "22_cascade_surface.sql.in"

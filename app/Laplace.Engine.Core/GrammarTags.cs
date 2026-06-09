@@ -55,12 +55,23 @@ public static unsafe class GrammarTags
         }
     }
 
+    // Grammars with non-standard layouts: sub-parser directory between repo root and queries/.
+    private static readonly Dictionary<string, string> _repoSubpath = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["typescript"] = "typescript",
+        ["php"]        = "php",
+    };
+
     private static string? LocateTagsScm(string modality)
     {
+        _repoSubpath.TryGetValue(modality, out var sub);
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
-            var p = Path.Combine(dir.FullName, "external", "tree-sitter-grammars",
-                                 $"tree-sitter-{modality}", "queries", "tags.scm");
+            string repoDir = Path.Combine(dir.FullName, "external", "tree-sitter-grammars",
+                                          $"tree-sitter-{modality}");
+            string p = sub is not null
+                ? Path.Combine(repoDir, sub, "queries", "tags.scm")
+                : Path.Combine(repoDir, "queries", "tags.scm");
             if (File.Exists(p)) return p;
         }
         return null;

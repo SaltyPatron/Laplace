@@ -7,197 +7,425 @@ using DynInterop = Laplace.Engine.Dynamics.NativeInterop;
 
 namespace Laplace.Decomposers.Model;
 
-// Reads the whole model as its three native structures, content-addressed, at the calculated noise
-// floor (theta = c/√dim). embed=lookup→token relations; FFN=key-value→neuron NODES + token↔neuron
-// relations; attention=token relations folded across layers. Engine MKL computes (project + bilinear),
-// C# marshals. No sampling, no n² noise, no morph.
+// Streams token→token (or element→element) Glicko-2 matchups for every path the architecture
+// defines. One matchup per (source, target) pair whose path score exceeds the noise floor.
+// The intermediate spaces (neuron, attn_dim, kv_dim) are contracted away inside the native
+// tile kernels — they never surface as entities. The architecture profile owns the path list;
+// adding a new modality or architecture means adding new PathSpec entries, not touching this class.
 public sealed class ModelTableETL
 {
     private const int RowsPerChange = 500_000;
-    private const int RowTile       = 128;
+    private const int RowTile = 256;
     private static readonly double ModelWeight =
         RelationTypeRegistry.Resolve("EMBEDS").Rank * SourceTrust.AiModelProbe;
-    private static readonly Hash128 NeuronType = Hash128.OfCanonical("substrate/type/Neuron/v1");
-
-    private static readonly double NoiseSigma =
-        double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_MODEL_NOISE_SIGMA"),
-            System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture,
-            out var ns) && ns > 0 ? ns : 5.0;
-    private static double NoiseFloor(int dim) => NoiseSigma / Math.Sqrt(Math.Max(1, dim));
+    private static readonly double[] _one = new double[1];
 
     private readonly LlamaRecipeExtractor.RecipeInfo _recipe;
     private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
     private readonly Hash128 _source;
-    private readonly Hash128 _axisType;
+    private readonly ArchitectureProfile _profile;
     private readonly ILogger _log;
     private readonly Dictionary<string, SafetensorsContainerParser.TensorReference> _refMap;
     private long _strands;
 
     public ModelTableETL(string modelDir, LlamaRecipeExtractor.RecipeInfo recipe,
-        IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens, Hash128 sourceId, Hash128 axisType,
+        IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens, Hash128 sourceId,
         ILogger? log = null)
     {
-        _recipe = recipe; _tokens = tokens; _source = sourceId; _axisType = axisType;
-        _log = log ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+        _recipe  = recipe;
+        _tokens  = tokens;
+        _source  = sourceId;
+        _profile = ArchitectureProfile.For(recipe.ModelType);
+        _log     = log ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
         var refs = SafetensorsContainerParser.ParseModel(modelDir);
-        _refMap = new Dictionary<string, SafetensorsContainerParser.TensorReference>(refs.Count, StringComparer.Ordinal);
+        _refMap  = new Dictionary<string, SafetensorsContainerParser.TensorReference>(
+                       refs.Count, StringComparer.Ordinal);
         foreach (var r in refs) _refMap[r.Name] = r;
     }
 
-    public async IAsyncEnumerable<SubstrateChange> EmitAsync([EnumeratorCancellation] CancellationToken ct = default)
+    public async IAsyncEnumerable<SubstrateChange> EmitAsync(
+        [EnumeratorCancellation] CancellationToken ct = default)
     {
         int d = _recipe.HiddenSize, vocab = _recipe.VocabSize;
-        int nHeads = _recipe.NumHeads, nKv = Math.Max(1, _recipe.NumKvHeads), headDim = d / Math.Max(1, nHeads);
-        int attnDim = nHeads * headDim, kvDim = nKv * headDim, interm = _recipe.IntermediateSize, layers = _recipe.NumLayers;
+        int nHeads  = _recipe.NumHeads;
+        int nKv     = Math.Max(1, _recipe.NumKvHeads);
+        int headDim = d / Math.Max(1, nHeads);
+        int attnDim = nHeads * headDim;
+        int kvDim   = nKv   * headDim;
+        int interm  = _recipe.IntermediateSize;
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        var ents = new List<Hash128>(); var ordToRow = new List<int>();
-        { var seen = new Dictionary<Hash128, int>();
-          foreach (var rec in _tokens) { if (rec.TokenId < 0 || rec.TokenId >= vocab) continue;
-            if (seen.TryAdd(rec.EntityId, ents.Count)) { ents.Add(rec.EntityId); ordToRow.Add(rec.TokenId); } } }
+        // Index tokens that have entities
+        var ents   = new List<Hash128>();
+        var entIdx = new int[vocab]; Array.Fill(entIdx, -1);
+        var tier   = new byte[vocab];
+        foreach (var rec in _tokens)
+        {
+            if (rec.TokenId < 0 || rec.TokenId >= vocab || entIdx[rec.TokenId] >= 0) continue;
+            entIdx[rec.TokenId] = ents.Count;
+            ents.Add(rec.EntityId);
+            tier[rec.TokenId] = rec.Tier;
+        }
         int n = ents.Count;
-        _log.LogInformation("phase=etl tokens: {N:N0} distinct token entities", n);
-        if (n == 0) yield break;
+        if (n == 0 || !_refMap.ContainsKey(_profile.EmbedTokens)) yield break;
 
-        var embAll = WeightTensorETL.LoadTensorF32(_refMap, "model.embed_tokens.weight", (long)vocab * d);
-        var embF = Gather(embAll, ordToRow, n, d); embAll = null;
-        var lmName = _refMap.ContainsKey("lm_head.weight") ? "lm_head.weight" : "model.embed_tokens.weight";
-        var lmAll = WeightTensorETL.LoadTensorF32(_refMap, lmName, (long)vocab * d);
-        var unembF = Gather(lmAll, ordToRow, n, d); lmAll = null;
+        // Phase 1: emit token entities
+        {
+            var eb = NewChunk("token"); int ec = 0;
+            for (int t = 0; t < vocab; t++)
+            {
+                if (entIdx[t] < 0) continue;
+                eb.AddEntity(new EntityRow(ents[entIdx[t]], tier[t], ModelDecomposer.TextTypeId, _source));
+                if (++ec >= RowsPerChange) { yield return eb.Build(); eb = NewChunk("token"); ec = 0; }
+            }
+            if (ec > 0) yield return eb.Build();
+            _log.LogInformation("phase=etl tokens: {N:N0} corners", n);
+        }
 
-        // ENTITIES FIRST. Deposit every token entity in entities-only batches — they carry no
-        // relations, so they cannot fail the referential proof, and every later tier's endpoints are
-        // guaranteed present. (Two-phase: all entities, then all relations.)
-        { var eb = NewChunk("token"); int ec = 0;
-          for (int i = 0; i < n; i++) { eb.AddEntity(new EntityRow(ents[i], 2, ModelDecomposer.TextTypeId, _source));
-            if (++ec >= RowsPerChange) { yield return eb.Build(); eb = NewChunk("token"); ec = 0; } }
-          if (ec > 0) yield return eb.Build(); }
+        // Raw embed [n×d] double — source for all projection and FFN inputs
+        var embRawD = GatherF32ToD(_profile.EmbedTokens, vocab, d, entIdx, n);
 
-        // TIER 1 — embed lookup → token↔token SIMILAR_TO.
-        var embN = NormD(ToD(embF, n, d), n, d);
-        await foreach (var c in EmitEdges(embN, n, embN, n, d, "SIMILAR_TO", ents, ents, null, sw, ct)) yield return c;
-        var unembN = NormD(ToD(unembF, n, d), n, d);
+        // L2-normalized un-embedding [n×d] double — the scoring target for all path outputs
+        string lmHead = _profile.LmHead ?? _profile.EmbedTokens;
+        double[] unembN;
+        if (lmHead == _profile.EmbedTokens)
+        {
+            unembN = (double[])embRawD.Clone();
+            NormD(unembN, n, d);
+        }
+        else
+        {
+            unembN = GatherF32ToD(lmHead, vocab, d, entIdx, n);
+            NormD(unembN, n, d);
+        }
 
-        for (int l = 0; l < layers; l++)
+        // Phase 2: stream path matchups — architecture profile drives the loop
+        foreach (var path in _profile.Paths)
         {
             ct.ThrowIfCancellationRequested();
-            string p = $"model.layers.{l}.";
-            var ctx = Hash128.OfCanonical($"substrate/context/{_sourceHex()}/L{l}/v1");
-            // ROOT CAUSE of the C506D2D1 abort: every relation's context_id is itself a referenced
-            // entity. Deposit the layer-context entity before any relation that rides on it.
-            { var eb = NewChunk("ctx"); eb.AddEntity(new EntityRow(ctx, (byte)MetaTier.Meta, _axisType, _source)); yield return eb.Build(); }
 
-            // TIER 3 — attention → token↔token, folded (same type, layer = context).
-            var Wq = Get(p + "self_attn.q_proj.weight", attnDim, d);
-            if (Wq != null) { var q = NormD(Project(Wq, attnDim, d, embF, n), n, attnDim);
-                await foreach (var c in EmitEdges(q, n, q, n, attnDim, "ATTENDS", ents, ents, ctx, sw, ct)) yield return c; }
-            var Wv = Get(p + "self_attn.v_proj.weight", kvDim, d);
-            if (Wv != null) { var v = NormD(Project(Wv, kvDim, d, embF, n), n, kvDim);
-                await foreach (var c in EmitEdges(v, n, v, n, kvDim, "OV_RELATES", ents, ents, ctx, sw, ct)) yield return c; }
-
-            // TIER 2 — FFN key-value: neurons are NODES (content-addressed by their gate key),
-            // token→neuron DETECTS (gate·embed), neuron→token WRITES (down·unembed).
-            var gate = Get(p + "mlp.gate_proj.weight", interm, d);
-            var down = Get(p + "mlp.down_proj.weight", d, interm);
-            if (gate != null)
+            if (!path.PerLayer)
             {
-                // Entities first: deposit this layer's neuron entities (entities-only) before any
-                // DETECTS/WRITES that reference them.
-                var neuronIds = new List<Hash128>(interm);
-                { var eb = NewChunk("neuron"); int ec = 0;
-                  for (int j = 0; j < interm; j++) {
-                      var id = Hash128.Blake3(RowBytes(gate, j, d));
-                      neuronIds.Add(id);
-                      eb.AddEntity(new EntityRow(id, (byte)MetaTier.Meta, NeuronType, _source));
-                      if (++ec >= RowsPerChange) { yield return eb.Build(); eb = NewChunk("neuron"); ec = 0; } }
-                  if (ec > 0) yield return eb.Build(); }
-                var gateN = NormD(ToD(gate, interm, d), interm, d);
-                await foreach (var c in EmitEdges(embN, n, gateN, interm, d, "DETECTS", ents, neuronIds, ctx, sw, ct)) yield return c;
-                if (down != null) {
-                    var downT = Transpose(down, d, interm);          // [interm × d] neuron outputs in channel space
-                    var downN = NormD(ToD(downT, interm, d), interm, d);
-                    await foreach (var c in EmitEdges(downN, interm, unembN, n, d, "WRITES", neuronIds, ents, ctx, sw, ct)) yield return c;
-                }
+                await foreach (var c in EmitGlobalPath(path, embRawD, unembN, n, d,
+                                   attnDim, kvDim, nHeads, nKv, headDim, interm, ents, sw, ct))
+                    yield return c;
+                _log.LogInformation("phase=etl {R}: {S:N0} cum matchups", path.RelationName, _strands);
             }
-            _log.LogInformation("phase=etl layer {L}/{Layers} (cum strands {S:N0}, {Sec:F0}s)", l + 1, layers, _strands, sw.Elapsed.TotalSeconds);
+            else
+            {
+                for (int l = 0; l < _recipe.NumLayers; l++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var ctx = Hash128.OfCanonical($"substrate/layer/{_source}/L{l}/v1");
+                    await foreach (var c in EmitLayerPath(path, l, embRawD, unembN,
+                                       n, d, attnDim, kvDim, nHeads, nKv, headDim, interm,
+                                       ents, ctx, sw, ct))
+                        yield return c;
+                }
+                _log.LogInformation("phase=etl {R} (all layers): {S:N0} cum matchups, {Sec:F0}s",
+                    path.RelationName, _strands, sw.Elapsed.TotalSeconds);
+            }
         }
-        _log.LogInformation("phase=etl WHOLE MODEL done: {S:N0} strands (noise floor {Sig}σ/√dim) in {Sec:F0}s", _strands, NoiseSigma, sw.Elapsed.TotalSeconds);
+
+        _log.LogInformation("phase=etl COMPLETE: {S:N0} matchups in {Sec:F0}s",
+            _strands, sw.Elapsed.TotalSeconds);
     }
 
-    private string _sourceHex() { Span<byte> b = stackalloc byte[16]; _source.WriteBytes(b); return Convert.ToHexString(b); }
+    // ── global path dispatch ──────────────────────────────────────────────────
 
-    private float[]? Get(string name, int outDim, int inDim) =>
-        _refMap.ContainsKey(name) ? WeightTensorETL.LoadTensorF32(_refMap, name, (long)outDim * inDim) : null;
+    private async IAsyncEnumerable<SubstrateChange> EmitGlobalPath(
+        PathSpec path, double[] embRawD, double[] unembN,
+        int n, int d, int attnDim, int kvDim, int nHeads, int nKv, int headDim, int interm,
+        List<Hash128> ents, System.Diagnostics.Stopwatch sw,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        switch (path)
+        {
+            case SelfSimilarityPath sim:
+            {
+                if (!_refMap.ContainsKey(sim.EmbedPattern)) yield break;
+                // Non-token entity sets (patches, audio frames, etc.) require their own
+                // entity index and embedding gather — extend ArchitectureProfile with an
+                // entity-set descriptor when adding those modalities.
+                if (sim.EmbedPattern != _profile.EmbedTokens)
+                {
+                    _log.LogWarning("phase=etl SelfSimilarityPath on non-token tensor '{T}' not yet supported",
+                        sim.EmbedPattern);
+                    yield break;
+                }
+                var src = (double[])embRawD.Clone(); NormD(src, n, d);
+                await foreach (var c in EmitEdges(src, n, src, n, d,
+                                   sim.RelationName, ents, ents, null, sw, ct))
+                    yield return c;
+                break;
+            }
+            default:
+                _log.LogWarning("phase=etl unsupported global path type {T}", path.GetType().Name);
+                break;
+        }
+    }
 
-    private static float[] Gather(float[] all, List<int> rows, int n, int d) {
-        var o = new float[(long)n * d];
-        System.Threading.Tasks.Parallel.For(0, n, i => Array.Copy(all, (long)rows[i] * d, o, (long)i * d, d));
-        return o;
+    // ── per-layer path dispatch ───────────────────────────────────────────────
+
+    private async IAsyncEnumerable<SubstrateChange> EmitLayerPath(
+        PathSpec path, int layer, double[] embRawD, double[] unembN,
+        int n, int d, int attnDim, int kvDim, int nHeads, int nKv, int headDim, int interm,
+        List<Hash128> ents, Hash128 ctx, System.Diagnostics.Stopwatch sw,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        switch (path)
+        {
+            case BilinearPath bil:
+            {
+                string ln = ArchitectureProfile.Layer(bil.LeftPattern,  layer);
+                string rn = ArchitectureProfile.Layer(bil.RightPattern, layer);
+                if (!_refMap.ContainsKey(ln) || !_refMap.ContainsKey(rn)) yield break;
+                int rDim = bil.RightIsKv ? kvDim : attnDim;
+                var Wl = LoadF32(ln, (long)attnDim * d);
+                var Wr = LoadF32(rn, (long)rDim    * d);
+                var qAll = NormD(ProjectD(Wl, attnDim, d, embRawD, n), n, attnDim);
+                var kRaw = ProjectD(Wr, rDim, d, embRawD, n);
+                var kAll = NormD(bil.RightIsKv
+                    ? ExpandKvHeads(kRaw, n, nHeads, nKv, headDim)
+                    : kRaw, n, attnDim);
+                await foreach (var c in EmitEdges(qAll, n, kAll, n, attnDim,
+                                   bil.RelationName, ents, ents, ctx, sw, ct))
+                    yield return c;
+                break;
+            }
+            case ProjectionPath proj:
+            {
+                string vn = ArchitectureProfile.Layer(proj.VPattern, layer);
+                string on = ArchitectureProfile.Layer(proj.OPattern, layer);
+                if (!_refMap.ContainsKey(vn) || !_refMap.ContainsKey(on)) yield break;
+                var Wv = LoadF32(vn, (long)kvDim * d);
+                var Wo = LoadF32(on, (long)d * attnDim);
+                for (int rb = 0; rb < n; rb += RowTile)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    int re = Math.Min(rb + RowTile, n), t = re - rb;
+                    var tileD = SliceRowsD(embRawD, rb, re, d);
+                    var v  = ExpandKvHeads(ProjectD(Wv, kvDim, d, tileD, t), t, nHeads, nKv, headDim);
+                    var ov = NormD(ProjectD(Wo, d, attnDim, v, t), t, d);
+                    await foreach (var c in EmitEdges(ov, t, unembN, n, d,
+                                       proj.RelationName, ents, ents, ctx, sw, ct, leftBase: rb))
+                        yield return c;
+                }
+                break;
+            }
+            case ContractionPath ctr:
+            {
+                string? gn = ctr.GatePattern is null ? null
+                             : ArchitectureProfile.Layer(ctr.GatePattern, layer);
+                string un = ArchitectureProfile.Layer(ctr.UpPattern,   layer);
+                string dn = ArchitectureProfile.Layer(ctr.DownPattern, layer);
+                if (!_refMap.ContainsKey(un) || !_refMap.ContainsKey(dn)) yield break;
+                float[]? gate = gn is not null && _refMap.ContainsKey(gn)
+                    ? LoadF32(gn, (long)interm * d) : null;
+                var up   = LoadF32(un, (long)interm * d);
+                var down = LoadF32(dn, (long)d * interm);
+                var gateD = gate is null ? null : ToD(gate, interm, d);
+                var upD   = ToD(up,   interm, d);
+                var downD = ToD(down, d,      interm);
+                double theta = NoiseFloor(d);
+                long cap = (long)RowTile * n;
+                var oR = new int[cap]; var oC = new int[cap];
+                var oV = new double[cap]; var oS = new long[cap];
+                var kind = RelationTypeRegistry.RelationTypeId(ctr.RelationName);
+                var b = NewChunk(ctr.RelationName); int inChunk = 0;
+                for (int rb = 0; rb < n; rb += RowTile)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    int re = Math.Min(rb + RowTile, n);
+                    int cnt = RunFfnTile(embRawD, n, d, unembN, gateD, upD, downD, interm,
+                                         rb, re, theta, oR, oC, oV, oS, cap);
+                    for (int e = 0; e < cnt; e++)
+                    {
+                        b.AddAttestation(AttestationFactory.CreateAggregated(
+                            ents[oR[e]], kind, ents[oC[e]], _source, ctx, 1, oS[e], ModelWeight));
+                        _strands++;
+                        if (++inChunk >= RowsPerChange)
+                        { yield return b.Build(); b = NewChunk(ctr.RelationName); inChunk = 0; await Task.Yield(); }
+                    }
+                }
+                if (inChunk > 0) yield return b.Build();
+                break;
+            }
+            default:
+                _log.LogWarning("phase=etl L{L} unsupported path type {T}", layer, path.GetType().Name);
+                break;
+        }
     }
-    private static byte[] RowBytes(float[] m, int row, int d) {
-        var b = new byte[d * 4]; Buffer.BlockCopy(m, row * d * 4, b, 0, d * 4); return b;
-    }
-    private static float[] Transpose(float[] m, int rows, int cols) {  // [rows×cols] → [cols×rows]
-        var o = new float[(long)rows * cols];
-        System.Threading.Tasks.Parallel.For(0, rows, r => { for (int c = 0; c < cols; c++) o[(long)c * rows + r] = m[(long)r * cols + c]; });
-        return o;
-    }
-    private static double[] ToD(float[] m, int n, int d) {
-        var o = new double[(long)n * d];
-        System.Threading.Tasks.Parallel.For(0, n, i => { long e = (long)i * d; for (int c = 0; c < d; c++) o[e + c] = m[e + c]; });
-        return o;
-    }
-    private static double[] Project(float[] W, int outDim, int inDim, float[] src, int n) {
-        var outp = new double[(long)n * outDim];
-        unsafe { fixed (float* ps = src) fixed (float* pw = W) fixed (double* po = outp)
-            DynInterop.ProjectEmbedding(ps, (nuint)n, (nuint)inDim, pw, (nuint)outDim, po); }
-        return outp;
-    }
-    private static double[] NormD(double[] v, int n, int dim) {
-        System.Threading.Tasks.Parallel.For(0, n, i => { long e = (long)i * dim; double ss = 0;
-            for (int c = 0; c < dim; c++) ss += v[e + c] * v[e + c];
-            double inv = ss > 0 ? 1.0 / Math.Sqrt(ss) : 0; for (int c = 0; c < dim; c++) v[e + c] *= inv; });
-        return v;
-    }
+
+    // ── edge emission ─────────────────────────────────────────────────────────
 
     private async IAsyncEnumerable<SubstrateChange> EmitEdges(
         double[] left, int nLeft, double[] right, int nRight, int dim, string kindName,
         List<Hash128> subj, List<Hash128> obj, Hash128? ctx,
         System.Diagnostics.Stopwatch sw, [EnumeratorCancellation] CancellationToken ct,
-        List<EntityRow>? seed = null)
+        int leftBase = 0)
     {
-        var kind = RelationTypeRegistry.RelationTypeId(kindName);
+        var kind  = RelationTypeRegistry.RelationTypeId(kindName);
         double theta = NoiseFloor(dim);
-        long cap = (long)RowTile * nRight;
-        var oR = new int[cap]; var oC = new int[cap]; var oV = new double[cap];
-        var b = NewChunk(kindName); int inChunk = 0;
-        if (seed != null) foreach (var e in seed) b.AddEntity(e);   // fence: referenced entities in-batch
+        long cap  = (long)RowTile * nRight;
+        var oR = new int[cap]; var oC = new int[cap];
+        var oV = new double[cap]; var oS = new long[cap];
         bool selfPair = ReferenceEquals(left, right);
+        var b = NewChunk(kindName); int inChunk = 0;
         for (int rb = 0; rb < nLeft; rb += RowTile)
         {
-            int re = Math.Min(rb + RowTile, nLeft);
-            int count = RunTile(left, rb, re, right, nRight, dim, theta, oR, oC, oV, cap);
-            for (int e = 0; e < count; e++)
+            ct.ThrowIfCancellationRequested();
+            int re  = Math.Min(rb + RowTile, nLeft);
+            int cnt = RunTile(left, rb, re, right, nRight, dim, theta, oR, oC, oV, oS, cap);
+            for (int e = 0; e < cnt; e++)
             {
                 int i = oR[e], j = oC[e];
                 if (selfPair && i == j) continue;
-                long s = (long)(AttestationFactory.Score(oV[e], 1.0) * Glicko2.FpScale);
-                b.AddAttestation(AttestationFactory.CreateAggregated(subj[i], kind, obj[j], _source, ctx, 1, s, ModelWeight));
+                b.AddAttestation(AttestationFactory.CreateAggregated(
+                    subj[leftBase + i], kind, obj[j], _source, ctx, 1, oS[e], ModelWeight));
                 _strands++;
-                if (++inChunk >= RowsPerChange) { yield return b.Build(); b = NewChunk(kindName); inChunk = 0; await Task.Yield(); }
+                if (++inChunk >= RowsPerChange)
+                { yield return b.Build(); b = NewChunk(kindName); inChunk = 0; await Task.Yield(); }
             }
         }
         if (inChunk > 0) yield return b.Build();
     }
 
-    private static unsafe int RunTile(double[] left, int rb, int re, double[] right, int nRight, int dim,
-        double theta, int[] oR, int[] oC, double[] oV, long cap) {
+    // ── native kernel wrappers ────────────────────────────────────────────────
+
+    private static unsafe int RunTile(
+        double[] left, int rb, int re, double[] right, int nRight, int dim,
+        double theta, int[] oR, int[] oC, double[] oV, long[] oS, long cap)
+    {
         nuint count = 0; int overflow = 0;
-        fixed (double* pl = left) fixed (double* pr = right) fixed (int* pR = oR) fixed (int* pC = oC) fixed (double* pV = oV)
-            DynInterop.BilinearEdgesTile(pl, (nuint)rb, (nuint)re, pr, (nuint)nRight, (nuint)dim, theta, pR, pC, pV, (nuint)cap, &count, &overflow);
+        fixed (double* pl = left) fixed (double* pr = right)
+        fixed (int* pR = oR) fixed (int* pC = oC)
+        fixed (double* pV = oV) fixed (long* pS = oS)
+            DynInterop.BilinearEdgesTile(pl, (nuint)rb, (nuint)re, pr, (nuint)nRight,
+                (nuint)dim, theta, pR, pC, pV, pS, (nuint)cap, &count, &overflow);
         return (int)count;
     }
 
+    private static unsafe int RunFfnTile(
+        double[] emb, int n, int d, double[] unemb,
+        double[]? gate, double[]? up, double[] down, int interm,
+        int rb, int re, double theta,
+        int[] oR, int[] oC, double[] oV, long[] oS, long cap)
+    {
+        nuint count = 0; int overflow = 0;
+        var gs = gate ?? _one;
+        var us = up   ?? _one;
+        fixed (double* pe = emb) fixed (double* pu = unemb) fixed (double* pd = down)
+        fixed (double* pg = gs)  fixed (double* pp = us)
+        fixed (int* pR = oR)     fixed (int* pC = oC)
+        fixed (double* pV = oV)  fixed (long* pS = oS)
+            DynInterop.FfnTokenPairsTile(pe, (nuint)n, (nuint)d, pu,
+                gate is null ? null : pg,
+                up   is null ? null : pp,
+                pd, (nuint)interm,
+                (nuint)rb, (nuint)re, theta,
+                pR, pC, pV, pS, (nuint)cap, &count, &overflow);
+        return (int)count;
+    }
+
+    // ── math helpers ─────────────────────────────────────────────────────────
+
+    private static double NoiseFloor(int dim)
+    {
+        double sigma = double.TryParse(
+            Environment.GetEnvironmentVariable("LAPLACE_MODEL_NOISE_SIGMA"), out var s) ? s : 5.0;
+        return sigma / Math.Sqrt(dim);
+    }
+
+    private static double[] Project(float[] W, int outDim, int inDim, float[] src, int n)
+    {
+        var o = new double[(long)n * outDim];
+        unsafe
+        {
+            fixed (float* ps = src) fixed (float* pw = W) fixed (double* po = o)
+                DynInterop.ProjectEmbedding(ps, (nuint)n, (nuint)inDim, pw, (nuint)outDim, po);
+        }
+        return o;
+    }
+
+    private static double[] ProjectD(float[] W, int outDim, int inDim, double[] src, int n)
+    {
+        var o = new double[(long)n * outDim];
+        unsafe
+        {
+            fixed (double* ps = src) fixed (float* pw = W) fixed (double* po = o)
+                DynInterop.ProjectEmbeddingD(ps, (nuint)n, (nuint)inDim, pw, (nuint)outDim, po);
+        }
+        return o;
+    }
+
+    private static double[] ExpandKvHeads(double[] kv, int n, int nHeads, int nKv, int headDim)
+    {
+        int kvDim = nKv * headDim, attnDim = nHeads * headDim;
+        if (kvDim == attnDim) return kv;
+        var o = new double[(long)n * attnDim];
+        System.Threading.Tasks.Parallel.For(0, n, i =>
+        {
+            long srcBase = (long)i * kvDim, dstBase = (long)i * attnDim;
+            for (int h = 0; h < nHeads; h++)
+            {
+                int kh = Math.Min(nKv - 1, h * nKv / Math.Max(1, nHeads));
+                Array.Copy(kv, srcBase + (long)kh * headDim,
+                           o,  dstBase + (long)h  * headDim, headDim);
+            }
+        });
+        return o;
+    }
+
+    private static double[] NormD(double[] v, int n, int dim)
+    {
+        System.Threading.Tasks.Parallel.For(0, n, i =>
+        {
+            long e = (long)i * dim; double ss = 0;
+            for (int c = 0; c < dim; c++) ss += v[e + c] * v[e + c];
+            double inv = ss > 0 ? 1.0 / Math.Sqrt(ss) : 0;
+            for (int c = 0; c < dim; c++) v[e + c] *= inv;
+        });
+        return v;
+    }
+
+    private static double[] ToD(float[] m, int n, int d)
+    {
+        var o = new double[(long)n * d];
+        System.Threading.Tasks.Parallel.For(0, n, i =>
+        {
+            long e = (long)i * d;
+            for (int c = 0; c < d; c++) o[e + c] = m[e + c];
+        });
+        return o;
+    }
+
+    private static double[] SliceRowsD(double[] src, int rb, int re, int d)
+    {
+        var o = new double[(long)(re - rb) * d];
+        Array.Copy(src, (long)rb * d, o, 0, o.LongLength);
+        return o;
+    }
+
+    // ── tensor loading / gather ───────────────────────────────────────────────
+
+    private float[] LoadF32(string name, long elems) =>
+        WeightTensorETL.LoadTensorF32(_refMap, name, elems);
+
+    private double[] GatherF32ToD(string tensorName, int vocab, int d, int[] entIdx, int n)
+    {
+        var raw = LoadF32(tensorName, (long)vocab * d);
+        var o   = new double[(long)n * d];
+        System.Threading.Tasks.Parallel.For(0, vocab, t =>
+        {
+            int idx = entIdx[t]; if (idx < 0) return;
+            long src = (long)t * d, dst = (long)idx * d;
+            for (int c = 0; c < d; c++) o[dst + c] = raw[src + c];
+        });
+        return o;
+    }
+
     private SubstrateChangeBuilder NewChunk(string role) =>
-        new(_source, $"etl/{role}", null, entityCapacity: RowsPerChange, physicalityCapacity: 0, attestationCapacity: RowsPerChange);
+        new(_source, $"etl/{role}", null,
+            entityCapacity: RowsPerChange, physicalityCapacity: 0, attestationCapacity: RowsPerChange);
 }
