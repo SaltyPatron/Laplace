@@ -146,16 +146,25 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
                 free(child_ids); free(child_coords); free(child_flags);
                 continue;
             }
+            size_t filled = 0;
             for (size_t g = g_start; g < g_end; ++g) {
                 tier_node_view_t gv;
                 uint32_t gidx = (uint32_t)(graph_first + g);
                 if (tier_tree_get_node(tree, gidx, &gv) != 0) continue;
-                size_t j = g - g_start;
-                child_ids[j] = gv.id;
-                memcpy(child_coords + j * 4, gv.coord, 4 * sizeof(double));
-                child_flags[j] = laplace_vertex_flags(1, 0, 0);
+                child_ids[filled] = gv.id;
+                memcpy(child_coords + filled * 4, gv.coord, 4 * sizeof(double));
+                child_flags[filled] = laplace_vertex_flags(1, 0, 0);
+                filled++;
             }
+            m = filled;
             tier = 2;
+        }
+
+        if (m == 0) {
+            free(child_ids);
+            free(child_coords);
+            free(child_flags);
+            continue;
         }
 
         double out_coord[4];
@@ -242,6 +251,8 @@ static int push_phys(laplace_compose_result_t* r, hash128_t entity_id, hash128_t
 int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
                             const char* modality_id, hash128_t source_id,
                             hash128_t type_meta_id, laplace_compose_result_t** out) {
+    fputs("compose: enter\n", stderr);
+    fflush(stderr);
     if (!utf8 || !ast || !modality_id || !out) return -1;
     *out = NULL;
     if (len == 0 || laplace_ast_node_count(ast) == 0) return 0;
@@ -249,10 +260,19 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
     laplace_compose_result_t* r = (laplace_compose_result_t*)calloc(1, sizeof(*r));
     if (!r) return -3;
 
+    compose_state_t st = {0};
+    size_t n = 0;
+    hash128_t* emitted_entity = NULL;
+    hash128_t* emitted_kind   = NULL;
+    size_t emitted_entity_n = 0, emitted_entity_cap = 0;
+    size_t emitted_kind_n   = 0, emitted_kind_cap   = 0;
+    int rc = 0;
+
     tier_tree_t* tree = NULL;
     laplace_grapheme_floor_t floor;
-    int rc = laplace_grapheme_floor_build(utf8, len, &tree, &floor);
+    rc = laplace_grapheme_floor_build(utf8, len, &tree, &floor);
     if (rc != 0) { free(r); return rc; }
+    fputs("compose: floor ok\n", stderr);
 
     if (codepoint_table_is_loaded()) {
         rc = hash_composer_run(tree, codepoint_resolver, NULL);
@@ -266,32 +286,31 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
 
     hash128_t grapheme_type;
     hash_canonical("substrate/type/Grapheme/v1", &grapheme_type);
+    fputs("compose: hash ok\n", stderr);
 
     size_t g_first = laplace_grapheme_floor_graph_first_idx(&floor);
     size_t g_count = laplace_grapheme_floor_graph_count(&floor);
     for (size_t g = 0; g < g_count; ++g) {
         tier_node_view_t gv;
         if (tier_tree_get_node(tree, (uint32_t)(g_first + g), &gv) != 0) continue;
-        if (push_entity(r, gv.id, 1, grapheme_type) != 0) goto fail;
+        if (push_entity(r, gv.id, 1, grapheme_type) != 0) { rc = -3; goto fail; }
         {
             uint64_t gf = laplace_vertex_flags(1, 0, 0);
+            hash128_t gid = gv.id;
             if (push_phys(r, gv.id, source_id, gv.coord, &gv.hilbert,
-                          &gv.id, &gf, 1) != 0) goto fail;
+                          &gid, &gf, 1) != 0) { rc = -3; goto fail; }
         }
     }
+    fputs("compose: graphemes ok\n", stderr);
 
-    compose_state_t st = {0};
     rc = compose_ast_nodes(utf8, len, ast, modality_id, &floor, tree, &st);
     if (rc != 0) goto fail_st;
+    fputs("compose: ast nodes ok\n", stderr);
 
-    size_t n = st.n;
-    hash128_t* emitted_entity = NULL;
-    hash128_t* emitted_kind   = NULL;
-    size_t emitted_entity_n = 0, emitted_entity_cap = 0;
-    size_t emitted_kind_n   = 0, emitted_kind_cap   = 0;
-
+    n = st.n;
     for (size_t idx = n; idx-- > 0;) {
         if (!st.comp_valid[idx]) continue;
+        fprintf(stderr, "compose: emit idx=%zu\n", idx);
         hash128_t id = st.comp_id[idx];
         if (compose_id_push(&emitted_entity, &emitted_entity_n, &emitted_entity_cap, id) != 1)
             continue;
@@ -322,28 +341,39 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
         if (kid_n > 0) {
             child_ids = (hash128_t*)malloc(kid_n * sizeof(hash128_t));
             child_flags = (uint64_t*)malloc(kid_n * sizeof(uint64_t));
-            for (size_t i = 0, w = 0; i < n; ++i) {
-                laplace_ast_node_t nd;
-                if (laplace_ast_get_node(ast, i, &nd) != 0) continue;
-                if (nd.parent != (uint32_t)idx || !st.comp_valid[i]) continue;
-                child_ids[w] = st.comp_id[i];
-                child_flags[w] = laplace_vertex_flags(st.comp_tier[i], 0, 0);
-                w++;
+            if (child_ids && child_flags) {
+                size_t w = 0;
+                for (size_t i = 0; i < n; ++i) {
+                    laplace_ast_node_t nd;
+                    if (laplace_ast_get_node(ast, i, &nd) != 0) continue;
+                    if (nd.parent != (uint32_t)idx || !st.comp_valid[i]) continue;
+                    child_ids[w] = st.comp_id[i];
+                    child_flags[w] = laplace_vertex_flags(st.comp_tier[i], 0, 0);
+                    w++;
+                }
+                m = w;
+            } else {
+                free(child_ids); free(child_flags);
+                child_ids = NULL;
             }
-            m = kid_n;
         } else {
             size_t g_start = 0, g_end = 0;
             if (laplace_grapheme_floor_span_to_graphemes(
                     &floor, node.start_byte, node.end_byte, &g_start, &g_end) == 0) {
-                m = g_end - g_start;
-                child_ids = (hash128_t*)malloc(m * sizeof(hash128_t));
-                child_flags = (uint64_t*)malloc(m * sizeof(uint64_t));
-                for (size_t g = g_start; g < g_end; ++g) {
-                    tier_node_view_t gv;
-                    if (tier_tree_get_node(tree, (uint32_t)(g_first + g), &gv) != 0) continue;
-                    size_t j = g - g_start;
-                    child_ids[j] = gv.id;
-                    child_flags[j] = laplace_vertex_flags(1, 0, 0);
+                size_t cap = g_end - g_start;
+                child_ids = (hash128_t*)malloc(cap * sizeof(hash128_t));
+                child_flags = (uint64_t*)malloc(cap * sizeof(uint64_t));
+                if (child_ids && child_flags) {
+                    for (size_t g = g_start; g < g_end; ++g) {
+                        tier_node_view_t gv;
+                        if (tier_tree_get_node(tree, (uint32_t)(g_first + g), &gv) != 0) continue;
+                        child_ids[m] = gv.id;
+                        child_flags[m] = laplace_vertex_flags(1, 0, 0);
+                        m++;
+                    }
+                } else {
+                    free(child_ids); free(child_flags);
+                    child_ids = NULL;
                 }
             }
         }
@@ -366,6 +396,7 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
         r->spans[r->span_count].entity_id  = id;
         r->span_count++;
     }
+    fputs("compose: emit ok\n", stderr);
 
     if (st.comp_valid[0])
         r->root_id = st.comp_id[0];

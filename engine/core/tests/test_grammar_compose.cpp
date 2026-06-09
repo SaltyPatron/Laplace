@@ -24,6 +24,8 @@ TEST(GrammarCompose, TsvRowProducesEntitiesAndSpans) {
     hash128_blake3(reinterpret_cast<const uint8_t*>("substrate/type/Meta/v1"), 22, &type_meta);
 
     laplace_compose_result_t* result = nullptr;
+    fputs("test: before compose\n", stderr);
+    fflush(stderr);
     ASSERT_EQ(laplace_grammar_compose(
         reinterpret_cast<const uint8_t*>(src), std::strlen(src), ast,
         "tsv", source_id, type_meta, &result), 0);
@@ -64,6 +66,28 @@ TEST(GrammarCompose, EntityDedupDoesNotInflateCount) {
 
     laplace_compose_result_free(r1);
     laplace_compose_result_free(r2);
+    laplace_ast_free(ast);
+}
+
+TEST(GrammarCompose, PartiallyValidChildSpanDoesNotCrash) {
+    const TSLanguage* recipe = laplace_grammar_lookup_by_id("tsv");
+    ASSERT_NE(recipe, nullptr);
+    /* Empty middle field: AST has leaf nodes with zero grapheme span mixed with real fields. */
+    const char* src = "head\t\ttrail\n";
+    laplace_ast_t* ast = nullptr;
+    ASSERT_EQ(laplace_grammar_parse(
+        reinterpret_cast<const uint8_t*>(src), std::strlen(src), recipe, &ast), 0);
+
+    hash128_t source_id, type_meta;
+    hash128_blake3(reinterpret_cast<const uint8_t*>("src"), 3, &source_id);
+    hash128_blake3(reinterpret_cast<const uint8_t*>("meta"), 4, &type_meta);
+
+    laplace_compose_result_t* result = nullptr;
+    ASSERT_EQ(laplace_grammar_compose(
+        reinterpret_cast<const uint8_t*>(src), std::strlen(src), ast,
+        "tsv", source_id, type_meta, &result), 0);
+    ASSERT_NE(result, nullptr);
+    laplace_compose_result_free(result);
     laplace_ast_free(ast);
 }
 
