@@ -86,7 +86,7 @@ public sealed class LlamaTokenizerParser
             else
             {
                 entityId = Hash128.Blake3(canonical);
-                tier = (byte)(canonical.Length <= 1 ? 0 : canonical.Length <= 4 ? 1 : 2);
+                tier = EntityTier.Word;
                 if (canonical.Length == 1 && canonical[0] >= ByteAtoms.First)
                 {
                     var bc = ByteAtoms.Coord(canonical[0]);
@@ -255,7 +255,8 @@ public sealed class LlamaTokenizerParser
                 }
                 else
                 {
-                    b.AddEntity(rec.EntityId, (byte)MetaTier.Meta, textTypeId, firstObservedBy: sourceId);
+                    b.AddEntity(rec.EntityId, EntityTier.Vocabulary, TextEntityBuilder.WordTypeId,
+                        firstObservedBy: sourceId);
                 }
 
             }
@@ -330,7 +331,7 @@ public sealed class LlamaTokenizerParser
                 return rootId;
         }
         var id = Hash128.Blake3(canonical);
-        b.AddEntity(id, (byte)MetaTier.Meta, textTypeId, firstObservedBy: sourceId);
+        b.AddEntity(id, EntityTier.Vocabulary, TextEntityBuilder.WordTypeId, firstObservedBy: sourceId);
         return id;
     }
 

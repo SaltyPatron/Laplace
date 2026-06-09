@@ -23,7 +23,7 @@ set GEOM_RC=%ERRORLEVEL%
   --inputdir=extension\laplace_substrate\tests ^
   --outputdir=build-win-ext\regress_substrate ^
   --dbname=laplace_regress_substrate --use-existing ^
-  bootstrap glicko2_aggregate entities_exist_bitmap consensus_signed consensus_period converse
+  bootstrap glicko2_aggregate entities_exist_bitmap consensus_signed consensus_period converse identity_law
 set SUB_RC=%ERRORLEVEL%
 
 echo geom_rc=%GEOM_RC% substrate_rc=%SUB_RC%

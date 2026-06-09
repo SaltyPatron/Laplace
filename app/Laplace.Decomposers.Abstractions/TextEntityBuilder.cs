@@ -68,6 +68,7 @@ public sealed class TextEntityBuilder
         var node = _tree.GetNode(idx);
 
         if (node.Tier == 0) return;
+        if (!_tree.ShouldEmitCompositional(idx)) return;
 
         if (!_emittedIds.Add(node.Id)) return;
 

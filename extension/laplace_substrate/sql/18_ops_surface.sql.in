@@ -60,6 +60,26 @@ CREATE FUNCTION substrate_counts()
     UNION ALL
     SELECT 'entities/codepoint (T0)',  count(*) FROM @extschema@.entities
         WHERE type_id = @extschema@.canonical_id('substrate/type/Codepoint/v1')
+          AND tier = 0
+    UNION ALL
+    SELECT 'entities/compositional (T1-T4)', count(*) FROM @extschema@.entities e
+        WHERE e.tier BETWEEN 1 AND 4
+          AND e.type_id = ANY(ARRAY[
+              @extschema@.canonical_id('substrate/type/Grapheme/v1'),
+              @extschema@.canonical_id('substrate/type/Word/v1'),
+              @extschema@.canonical_id('substrate/type/Sentence/v1'),
+              @extschema@.canonical_id('substrate/type/Document/v1')
+          ])
+    UNION ALL
+    SELECT 'entities/vocabulary (tier 0)', count(*) FROM @extschema@.entities e
+        WHERE e.tier = 0
+          AND e.type_id <> ALL(ARRAY[
+              @extschema@.canonical_id('substrate/type/Codepoint/v1'),
+              @extschema@.canonical_id('substrate/type/Grapheme/v1'),
+              @extschema@.canonical_id('substrate/type/Word/v1'),
+              @extschema@.canonical_id('substrate/type/Sentence/v1'),
+              @extschema@.canonical_id('substrate/type/Document/v1')
+          ])
     UNION ALL
     SELECT 'physicalities',            count(*) FROM @extschema@.physicalities
     UNION ALL
@@ -110,6 +130,13 @@ CREATE FUNCTION consensus_tier_distribution()
     SELECT e.tier, count(*)
     FROM @extschema@.consensus c JOIN @extschema@.entities e ON e.id = c.subject_id
     WHERE c.object_id IS NOT NULL
+      AND e.type_id = ANY(ARRAY[
+          @extschema@.canonical_id('substrate/type/Codepoint/v1'),
+          @extschema@.canonical_id('substrate/type/Grapheme/v1'),
+          @extschema@.canonical_id('substrate/type/Word/v1'),
+          @extschema@.canonical_id('substrate/type/Sentence/v1'),
+          @extschema@.canonical_id('substrate/type/Document/v1')
+      ])
     GROUP BY e.tier ORDER BY e.tier
 $$;
 

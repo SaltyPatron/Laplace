@@ -106,7 +106,7 @@ public sealed class RepoDecomposer : IDecomposer
         int batch = options.BatchSize > 1 ? options.BatchSize : 32;
         var b = NewBuilder(0);
         int inBatch = 0, bn = 0;
-        b.AddEntity(new EntityRow(repoId, (byte)MetaTier.Meta, RepoTypeId, Source));
+        b.AddEntity(new EntityRow(repoId, EntityTier.Vocabulary, RepoTypeId, Source));
 
         char sep = Path.DirectorySeparatorChar;
         string[] skipSegs = { $"{sep}obj{sep}", $"{sep}bin{sep}", $"{sep}.git{sep}", $"{sep}node_modules{sep}" };
@@ -155,7 +155,7 @@ public sealed class RepoDecomposer : IDecomposer
             var filePathId = ContentEmitter.Emit(b, relPath, Source);
             if (filePathId.HasValue)
             {
-                b.AddEntity(new EntityRow(filePathId.Value, (byte)MetaTier.Meta, FileTypeId, Source));
+                b.AddEntity(new EntityRow(filePathId.Value, EntityTier.Vocabulary, FileTypeId, Source));
                 b.AddAttestation(RelationTypeRegistry.Attest(
                     repoId,            "CONTAINS",     filePathId.Value, Source, SourceTrust.StructuredCorpus));
                 b.AddAttestation(RelationTypeRegistry.Attest(

@@ -71,8 +71,8 @@ public sealed class OMWDecomposer : IDecomposer
         if (contentId is null) return;
 
         Hash128 langId = LanguageReference.Resolve(row.Lang);
-        b.AddEntity(new EntityRow(langId, (byte)MetaTier.Meta, LanguageTypeId, Source));
-        b.AddEntity(new EntityRow(row.SynsetId, (byte)MetaTier.Meta, SynsetTypeId, Source));
+        b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, LanguageTypeId, Source));
+        b.AddEntity(new EntityRow(row.SynsetId, EntityTier.Vocabulary, SynsetTypeId, Source));
 
         switch (row.Type)
         {

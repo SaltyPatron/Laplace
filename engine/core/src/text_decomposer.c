@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "laplace/core/grapheme_floor.h"
+#include "laplace/core/normalize_nfc.h"
 #include "laplace/core/sentence_break.h"
 #include "laplace/core/tier_tree.h"
 #include "laplace/core/word_break.h"
@@ -22,11 +23,23 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
         return 0;
     }
 
+    uint8_t* norm_utf8 = NULL;
+    size_t norm_len = 0;
+    const uint8_t* work = utf8;
+    size_t work_len = len;
+    int nrc = laplace_normalize_nfc_utf8(utf8, len, &norm_utf8, &norm_len);
+    if (nrc != 0) return nrc;
+    if (norm_utf8) {
+        work = norm_utf8;
+        work_len = norm_len;
+    }
+
     /* Tier-0 codepoint leaves + tier-1 graphemes: the shared floor, byte-identical
      * to what the code law builds for the same bytes. */
     tier_tree_t* tree = NULL;
     laplace_grapheme_floor_t floor;
-    int rc = laplace_grapheme_floor_build(utf8, len, &tree, &floor);
+    int rc = laplace_grapheme_floor_build(work, work_len, &tree, &floor);
+    free(norm_utf8);
     if (rc != 0) return rc;
 
     uint32_t* cps = floor.cps;

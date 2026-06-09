@@ -58,8 +58,8 @@ public sealed class TatoebaDecomposer : IDecomposer
 
                 Hash128 extId = SourceEntityIdConventions.TatoebaSentence(sid);
                 Hash128 langId = LanguageReference.Resolve(lang);
-                b.AddEntity(new EntityRow(extId, (byte)MetaTier.Meta, SentenceRefTypeId, Source));
-                b.AddEntity(new EntityRow(langId, (byte)MetaTier.Meta, LanguageTypeId, Source));
+                b.AddEntity(new EntityRow(extId, EntityTier.Vocabulary, SentenceRefTypeId, Source));
+                b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, LanguageTypeId, Source));
 
                 var contentId = ContentEmitter.Emit(b, text, Source);
                 if (contentId is not null)
@@ -92,8 +92,8 @@ public sealed class TatoebaDecomposer : IDecomposer
 
                 Hash128 ea = SourceEntityIdConventions.TatoebaSentence(a);
                 Hash128 eb = SourceEntityIdConventions.TatoebaSentence(bId);
-                b.AddEntity(new EntityRow(ea, (byte)MetaTier.Meta, SentenceRefTypeId, Source));
-                b.AddEntity(new EntityRow(eb, (byte)MetaTier.Meta, SentenceRefTypeId, Source));
+                b.AddEntity(new EntityRow(ea, EntityTier.Vocabulary, SentenceRefTypeId, Source));
+                b.AddEntity(new EntityRow(eb, EntityTier.Vocabulary, SentenceRefTypeId, Source));
                 b.AddAttestation(RelationTypeRegistry.Attest(
                     ea, "IS_TRANSLATION_OF", eb, Source, SourceTrust.StructuredCorpus));
 

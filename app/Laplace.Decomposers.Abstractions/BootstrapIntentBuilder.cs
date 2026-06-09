@@ -34,20 +34,20 @@ public sealed class BootstrapIntentBuilder
         _inner = new SubstrateChangeBuilder(
             sourceId, $"bootstrap/{sourceName}", parentIntentId: null);
 
-        _inner.AddEntity(sourceId, (byte)MetaTier.Meta, SourceTypeId, sourceId);
+        _inner.AddEntity(sourceId, EntityTier.Vocabulary, SourceTypeId, sourceId);
     }
 
     public Hash128 AddType(string canonicalTypeName)
     {
         var id = Hash128.OfCanonical($"substrate/type/{canonicalTypeName}/v1");
-        _inner.AddEntity(id, (byte)MetaTier.Meta, TypeMetaTypeId, _sourceId);
+        _inner.AddEntity(id, EntityTier.Vocabulary, TypeMetaTypeId, _sourceId);
         return id;
     }
 
     public Hash128 AddRelationType(string canonicalKindName)
     {
         var id = Hash128.OfCanonical($"substrate/kind/{canonicalKindName}/v1");
-        _inner.AddEntity(id, (byte)MetaTier.RelationType, RelationTypeMetaTypeId, _sourceId);
+        _inner.AddEntity(id, EntityTier.Vocabulary, RelationTypeMetaTypeId, _sourceId);
         return id;
     }
 

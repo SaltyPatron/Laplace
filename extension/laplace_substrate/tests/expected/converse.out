@@ -58,11 +58,11 @@ BEGIN
            (k_causes, 0, type_t, src), (k_anto, 0, type_t, src),
            (w_dog, 2, type_t, src), (w_p, 0, type_t, src), (w_h, 0, type_t, src),
            (w_c, 0, type_t, src),
-           (sense1, 250, type_t, src), (synset1, 250, type_t, src),
-           (sense_b, 250, type_t, src), (synset_b, 250, type_t, src),
-           (synset2, 250, type_t, src), (syn_bad, 250, type_t, src),
+           (sense1, 0, type_t, src), (synset1, 0, type_t, src),
+           (sense_b, 0, type_t, src), (synset_b, 0, type_t, src),
+           (synset2, 0, type_t, src), (syn_bad, 0, type_t, src),
            (gloss1, 0, type_t, src),
-           (lang_en, 250, type_t, src), (lang_de, 250, type_t, src)
+           (lang_en, 0, type_t, src), (lang_de, 0, type_t, src)
     ON CONFLICT DO NOTHING;
 
     INSERT INTO codepoint_render (id, cp)

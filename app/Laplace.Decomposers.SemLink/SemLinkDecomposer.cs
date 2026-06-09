@@ -93,14 +93,14 @@ public sealed class SemLinkDecomposer : IDecomposer
             string rolesetKey = rolesetProp.Name.Trim();
             if (rolesetKey.Length == 0 || rolesetProp.Value.ValueKind != JsonValueKind.Object) continue;
             Hash128 rsEntity = RolesetId(rolesetKey);
-            b.AddEntity(new EntityRow(rsEntity, (byte)MetaTier.Meta, PropBankRolesetTypeId, Source));
+            b.AddEntity(new EntityRow(rsEntity, EntityTier.Vocabulary, PropBankRolesetTypeId, Source));
 
             foreach (var classProp in rolesetProp.Value.EnumerateObject())
             {
                 string vnClass = classProp.Name.Trim();
                 if (vnClass.Length == 0) continue;
                 Hash128 vnEntity = VnClassId(vnClass);
-                b.AddEntity(new EntityRow(vnEntity, (byte)MetaTier.Meta, VerbNetClassTypeId, Source));
+                b.AddEntity(new EntityRow(vnEntity, EntityTier.Vocabulary, VerbNetClassTypeId, Source));
 
                 b.AddAttestation(RelationTypeRegistry.Attest(
                     rsEntity, "CORRESPONDS_TO", vnEntity, Source, TC.AcademicCurated));
@@ -138,7 +138,7 @@ public sealed class SemLinkDecomposer : IDecomposer
             string vnClass = VnClassFromKey(keyProp.Name);
             if (vnClass.Length == 0) continue;
             Hash128 vnEntity = VnClassId(vnClass);
-            b.AddEntity(new EntityRow(vnEntity, (byte)MetaTier.Meta, VerbNetClassTypeId, Source));
+            b.AddEntity(new EntityRow(vnEntity, EntityTier.Vocabulary, VerbNetClassTypeId, Source));
 
             if (keyProp.Value.ValueKind != JsonValueKind.Array) continue;
             foreach (var frameElem in keyProp.Value.EnumerateArray())
@@ -147,7 +147,7 @@ public sealed class SemLinkDecomposer : IDecomposer
                 string frame = (frameElem.GetString() ?? "").Trim();
                 if (frame.Length == 0) continue;
                 Hash128 fnEntity = FrameId(frame);
-                b.AddEntity(new EntityRow(fnEntity, (byte)MetaTier.Meta, FrameNetFrameTypeId, Source));
+                b.AddEntity(new EntityRow(fnEntity, EntityTier.Vocabulary, FrameNetFrameTypeId, Source));
                 b.AddAttestation(RelationTypeRegistry.Attest(
                     vnEntity, "CORRESPONDS_TO", fnEntity, Source, TC.AcademicCurated));
             }

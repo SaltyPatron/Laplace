@@ -8,15 +8,15 @@ Authoritative vocabulary. Terms are laws, not suggestions; code and docs use the
 
 **Content addressing** — the identity law: `id = BLAKE3-128(canonical bytes per type)`. Raw 16-byte `bytea`, never hex, never text. Uniqueness is enforced by the primary key alone; restating it with secondary UNIQUE constraints is a measured anti-pattern (~144 B/row of duplication).
 
-**Tier** — an entity's stratum in the Merkle DAG (`entities.tier`, 0–255). T0 = atoms (codepoints). Higher tiers compose lower ones: graphemes, words, sentences, documents (text modality); region/object/scene (image, planned). Tier is metadata, not knowledge.
+**Tier** — compositional altitude in the Merkle DAG (`entities.tier`, 0–4 for text content). 0 = codepoint (T0 atom), 1 = grapheme, 2 = word, 3 = sentence, 4 = document. Meaningful **only** when `type_id` is a compositional text type (Codepoint/Grapheme/Word/Sentence/Document). Vocabulary rows (sources, relation types, synsets, etc.) use `tier = 0` as an inert FK placeholder — interpret them via `type_id`, never via tier.
 
 **T0** — the atomic tier. For text: Unicode codepoints, 1,114,112 of them, placed by deterministic law (super-Fibonacci) and never moved. T0 is the fixed reference lattice the entire geometric frame anchors to.
 
-**Merkle identity / hash composition** — a composed entity's id is the BLAKE3 of a tier prefix byte concatenated with its children's ids in order (`hash_composer`). The tier byte prevents cross-tier collisions. Example law (pinned by regress): `word_id('dog') = blake3('\x01' || id('d') || id('o') || id('g'))`.
+**Merkle identity / hash composition** — T0 leaves: `id = blake3(canonical UTF-8 atom)`. T1+: `id = blake3(0x01 ‖ child_id₁ ‖ child_id₂ ‖ …)` — fixed domain byte `0x01`, **not** the compositional tier. Tier is stored separately in `entities.tier` and is never hashed. Example law (pinned by regress): `word_id('dog') = blake3('\x01' || id('d') || id('o') || id('g'))`.
 
 **Constituent** — an ordered child of a composed entity, carried in the parent's trajectory. Decomposition and reconstruction are exact operations, not statistical ones.
 
-**Canonical name** — a human-readable handle registered in `canonical_names` (id = `canonical_id(name)` = BLAKE3 of UTF-8 name). The static vocabulary (kinds, types, trust classes, POS values, sources) ships in the extension seed; dynamic families register at ingest.
+**Canonical name** — a human-readable handle registered in `canonical_names` (id = `canonical_id(name)` = BLAKE3 of UTF-8 name). The static vocabulary (relation types, entity types, trust classes, POS values, sources) ships in the extension seed; dynamic families register at ingest.
 
 **render() / realize()** — readback: entity id → human-readable text. `render` resolves canonical name, codepoint, or recursive text reconstruction; `realize`/`realize_path` produce natural-language renderings of entities and relation paths, direction-aware. Language is a render-time choice, not a property of knowledge.
 
@@ -26,7 +26,7 @@ Authoritative vocabulary. Terms are laws, not suggestions; code and docs use the
 
 **Deposition** — the act of ingesting a witness: decomposing its content/weights into entities and attestations. "Deposing a model" = running it through the ModelDecomposer's cell ETL.
 
-**Attestation** — one row of evidence in `laplace.attestations`: WHO (source) witnessed WHAT relation (subject, kind→`type_id`, object) in what CONTEXT, with what OUTCOME class and observation count. Provenance only — never a value channel; a witness's magnitude is consumed into consensus at ingest and not persisted. Id = BLAKE3 of the canonical 5-tuple (subject, kind, object, source, context) → re-observation is UPSERT-no-op idempotent.
+**Attestation** — one row of evidence in `laplace.attestations`: WHO (source) witnessed WHAT relation (subject, relation-type→`type_id`, object) in what CONTEXT, with what OUTCOME class and observation count. Provenance only — never a value channel; a witness's magnitude is consumed into consensus at ingest and not persisted. Id = BLAKE3 of the canonical 5-tuple (subject, relation type, object, source, context) → re-observation is UPSERT-no-op idempotent.
 
 **Outcome** — the dissent record as a class, never a magnitude: 0 = refute (loss), 1 = draw, 2 = confirm (win).
 
@@ -34,7 +34,7 @@ Authoritative vocabulary. Terms are laws, not suggestions; code and docs use the
 
 **Trust class** — a witness's evidentiary rank, itself an entity: `SubstrateMandate`, `StandardsDerived`, `AcademicCurated`, `AcademicCuratedWithUserInput`, `StructuredCorpus`, `UserCuratedResource`, `UserPromptContent`, `AppDerived`, `AIModelProbe`, `AdversarialUntrusted`. A model's testimony is admissible and outranked by the dictionary.
 
-**Consensus** — the adjudicated truth layer: ONE row per (subject, kind, object) in `laplace.consensus`, carrying Glicko-2 state accumulated over ALL witnesses. Source and context are excluded from consensus identity — they are witnesses, never identity. Id = BLAKE3(subject ‖ kind ‖ object|zero16).
+**Consensus** — the adjudicated truth layer: ONE row per (subject, relation type, object) in `laplace.consensus`, carrying Glicko-2 state accumulated over ALL witnesses. Source and context are excluded from consensus identity — they are witnesses, never identity. Id = BLAKE3(subject ‖ relation_type ‖ object|zero16).
 
 **Glicko-2** — the rating system used as the adjudication engine (int64 fixed-point ×1e9 throughout; engine kernel is the single source of math truth). Priors: rating 1500e9, RD 350e9, volatility 0.06e9, τ = 0.5e9. Each witness observation is a game against the neutral 1500 line with score s = ½(1 + tanh(m/M)).
 
@@ -54,11 +54,11 @@ Authoritative vocabulary. Terms are laws, not suggestions; code and docs use the
 
 **The flip** — the canonical live-learning demonstration: prove ignorance at T0, ingest one sentence, prove attributed timestamped knowledge at T2. First performed 2026-06-07 02:35 ("Ahab admired Darcy…").
 
-## Arenas & Kinds
+## Arenas & Relation Types
 
-**Kind** — a relation type, itself an entity (`substrate/kind/NAME/v1`). Resolved via `relation_type_id(name)`. NOTE: the *column* on attestations/physicalities is `type`/`type_id`, never `kind` — surviving `kind` column references are refactor residue (see memory/repo law).
+**Relation type** — a vocabulary entity for a relation (`substrate/kind/NAME/v1` — byte path is stable). Resolved via `relation_type_id(name)`. The attestations/consensus column is `type_id`. Term: **relation type** in code and docs; never confuse with physicality `type` or entity `type_id`.
 
-**Arena** — the relation plane for one kind; traversal and ranking happen per-arena or across arena sets.
+**Arena** — the relation plane for one relation type; traversal and ranking happen per-arena or across arena sets.
 
 **Tensor-role arenas (the ten)** — `EMBEDS, Q_PROJECTS, K_PROJECTS, V_PROJECTS, O_PROJECTS, GATES, UP_PROJECTS, DOWN_PROJECTS, NORM_SCALES, OUTPUT_PROJECTS`: the architecture-agnostic relational algebra of transformation. Model weights testify into them at deposition; synthesis pours from them at export.
 
@@ -128,7 +128,7 @@ Authoritative vocabulary. Terms are laws, not suggestions; code and docs use the
 
 **Render target (GGUF)** — a model file as a BUILD ARTIFACT: compiled from consensus arenas, rebuildable, diffable (two builds differ exactly where consensus changed, witnesses nameable), runnable by stock llama.cpp. The static model reduced to a disposable cache of a living substrate.
 
-**Cell ETL** — model deposition law: every non-zero weight cell is one adjudicated match under its tensor-role kind, positions aggregating as witnesses; score s = ½(1+tanh(w/M)) with M = pooled tensor RMS; lottery-ticket sparsity, never flat noise thresholds.
+**Cell ETL** — model deposition law: every non-zero weight cell is one adjudicated match under its tensor-role relation type, positions aggregating as witnesses; score s = ½(1+tanh(w/M)) with M = pooled tensor RMS; lottery-ticket sparsity, never flat noise thresholds.
 
 **Clean-room model** — a GGUF compiled from enumerated, licensed witnesses with zero model ancestry: certifiable provenance no trained artifact can offer.
 

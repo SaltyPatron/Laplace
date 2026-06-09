@@ -75,9 +75,9 @@ public static class PosReference
 
     public static void SeedCanonical(SubstrateChangeBuilder builder, Hash128 sourceId)
     {
-        builder.AddEntity(new EntityRow(PosTypeId, (byte)MetaTier.Meta,
+        builder.AddEntity(new EntityRow(PosTypeId, EntityTier.Vocabulary,
             BootstrapIntentBuilder.TypeMetaTypeId, sourceId));
         foreach (var tag in Canonical)
-            builder.AddEntity(new EntityRow(CanonicalId(tag), (byte)MetaTier.Meta, PosTypeId, sourceId));
+            builder.AddEntity(new EntityRow(CanonicalId(tag), EntityTier.Vocabulary, PosTypeId, sourceId));
     }
 }

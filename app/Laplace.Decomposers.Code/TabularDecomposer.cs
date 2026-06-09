@@ -62,7 +62,7 @@ public sealed class TabularDecomposer : IDecomposer
         boot.AddRelationType("PREDICTS");
         boot.AddRelationType("IS_VALUE_IN");
         boot.AddRelationType("IS_INSTANCE_OF");
-        boot.AddEntity(new EntityRow(OutcomeId, (byte)MetaTier.Meta, OutcomeTypeId, Source));
+        boot.AddEntity(new EntityRow(OutcomeId, EntityTier.Vocabulary, OutcomeTypeId, Source));
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -156,16 +156,16 @@ public sealed class TabularDecomposer : IDecomposer
         var predicts = RelationTypeRegistry.RelationTypeId("PREDICTS");
 
         var b = NewBuilder(0);
-        b.AddEntity(new EntityRow(OutcomeId, (byte)MetaTier.Meta, OutcomeTypeId, Source));
+        b.AddEntity(new EntityRow(OutcomeId, EntityTier.Vocabulary, OutcomeTypeId, Source));
         foreach (var c in featureCols)
-            b.AddEntity(new EntityRow(ColumnId(c), (byte)MetaTier.Meta, ColumnTypeId, Source));
+            b.AddEntity(new EntityRow(ColumnId(c), EntityTier.Vocabulary, ColumnTypeId, Source));
 
         int emitted = 0, bn = 0;
         foreach (var ((col, tok), nm) in counts)
         {
             ct.ThrowIfCancellationRequested();
             var cq = ValueId(col, tok);
-            b.AddEntity(new EntityRow(cq, (byte)MetaTier.Meta, ValueTypeId, Source));
+            b.AddEntity(new EntityRow(cq, EntityTier.Vocabulary, ValueTypeId, Source));
 
             // P(outcome | value-in-column): rating converges to M/N, RD shrinks rare-value confidence.
             b.AddAttestation(AttestationFactory.CreateAggregated(
@@ -197,7 +197,7 @@ public sealed class TabularDecomposer : IDecomposer
         {
             ct.ThrowIfCancellationRequested();
             var cq = Hash128.OfCanonical($"tabular/pair/{pa}={ta}&{pb}={tb}/v1");
-            b.AddEntity(new EntityRow(cq, (byte)MetaTier.Meta, ValueTypeId, Source));
+            b.AddEntity(new EntityRow(cq, EntityTier.Vocabulary, ValueTypeId, Source));
             b.AddAttestation(AttestationFactory.CreateAggregated(
                 cq, predicts, OutcomeId, Source, contextId: null,
                 games: nm.N, sumScoreFp1e9: checked(nm.M * Glicko2.FpScale), witnessWeight: witnessWeight));

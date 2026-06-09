@@ -105,6 +105,38 @@ public sealed class TierTree : SafeHandle
         return idx;
     }
 
+    /// <summary>
+    /// True when a compositional node should be emitted: the natural unit itself, or a node whose
+    /// text span differs from the natural unit (real multi-unit structure). Unary wrappers sharing
+    /// the natural unit's span are suppressed.
+    /// </summary>
+    public bool ShouldEmitCompositional(uint idx)
+    {
+        ThrowIfDisposed();
+        uint naturalIdx = NaturalUnitIndex();
+        if (idx == naturalIdx) return true;
+
+        var node    = GetNode(idx);
+        var natural = GetNode(naturalIdx);
+        if (node.TextRangeOff != natural.TextRangeOff || node.TextRangeLen != natural.TextRangeLen)
+            return true;
+
+        return !IsUnaryAncestorOf(idx, naturalIdx);
+    }
+
+    private bool IsUnaryAncestorOf(uint ancestor, uint descendant)
+    {
+        uint cur = (uint)(NodeCount - 1);
+        while (cur != descendant)
+        {
+            if (cur == ancestor) return true;
+            var n = GetNode(cur);
+            if (n.ChildCount != 1) return false;
+            cur = n.FirstChildIdx;
+        }
+        return false;
+    }
+
     public void SetId(uint idx, Hash128 id)
     {
         ThrowIfDisposed();

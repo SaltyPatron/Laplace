@@ -5,6 +5,64 @@
 
 #include "laplace/core/codepoint_table.h"
 
+static int utf8_decode(const uint8_t* p, size_t remaining,
+                       uint32_t* out_cp, size_t* out_consumed) {
+    if (remaining == 0) return -1;
+    uint8_t b0 = p[0];
+    if (b0 < 0x80) { *out_cp = b0; *out_consumed = 1; return 0; }
+    if ((b0 & 0xE0) == 0xC0) {
+        if (remaining < 2) return -1;
+        uint8_t b1 = p[1];
+        if ((b1 & 0xC0) != 0x80) return -1;
+        uint32_t cp = ((uint32_t)(b0 & 0x1F) << 6) | (b1 & 0x3F);
+        if (cp < 0x80) return -1;
+        *out_cp = cp; *out_consumed = 2; return 0;
+    }
+    if ((b0 & 0xF0) == 0xE0) {
+        if (remaining < 3) return -1;
+        uint8_t b1 = p[1], b2 = p[2];
+        if ((b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80) return -1;
+        uint32_t cp = ((uint32_t)(b0 & 0x0F) << 12)
+                    | ((uint32_t)(b1 & 0x3F) << 6)
+                    | (b2 & 0x3F);
+        if (cp < 0x800) return -1;
+        if (cp >= 0xD800 && cp <= 0xDFFF) return -1;
+        *out_cp = cp; *out_consumed = 3; return 0;
+    }
+    if ((b0 & 0xF8) == 0xF0) {
+        if (remaining < 4) return -1;
+        uint8_t b1 = p[1], b2 = p[2], b3 = p[3];
+        if ((b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 || (b3 & 0xC0) != 0x80) return -1;
+        uint32_t cp = ((uint32_t)(b0 & 0x07) << 18)
+                    | ((uint32_t)(b1 & 0x3F) << 12)
+                    | ((uint32_t)(b2 & 0x3F) << 6)
+                    | (b3 & 0x3F);
+        if (cp < 0x10000 || cp > 0x10FFFF) return -1;
+        *out_cp = cp; *out_consumed = 4; return 0;
+    }
+    return -1;
+}
+
+static size_t utf8_encode(uint32_t cp, uint8_t out[4]) {
+    if (cp < 0x80) { out[0] = (uint8_t)cp; return 1; }
+    if (cp < 0x800) {
+        out[0] = 0xC0 | (uint8_t)(cp >> 6);
+        out[1] = 0x80 | (uint8_t)(cp & 0x3F);
+        return 2;
+    }
+    if (cp < 0x10000) {
+        out[0] = 0xE0 | (uint8_t)(cp >> 12);
+        out[1] = 0x80 | (uint8_t)((cp >> 6) & 0x3F);
+        out[2] = 0x80 | (uint8_t)(cp & 0x3F);
+        return 3;
+    }
+    out[0] = 0xF0 | (uint8_t)(cp >> 18);
+    out[1] = 0x80 | (uint8_t)((cp >> 12) & 0x3F);
+    out[2] = 0x80 | (uint8_t)((cp >> 6) & 0x3F);
+    out[3] = 0x80 | (uint8_t)(cp & 0x3F);
+    return 4;
+}
+
 #define HANGUL_S_BASE  0xAC00u
 #define HANGUL_L_BASE  0x1100u
 #define HANGUL_V_BASE  0x1161u
@@ -172,4 +230,64 @@ size_t laplace_normalize_nfc(
     memcpy(out, buf, composed_len * sizeof(uint32_t));
     free(buf);
     return composed_len;
+}
+
+int laplace_normalize_nfc_utf8(
+    const uint8_t* utf8, size_t len, uint8_t** out_utf8, size_t* out_len) {
+    if (!out_utf8 || !out_len) return -1;
+    *out_utf8 = NULL;
+    *out_len  = 0;
+    if (!utf8 && len > 0) return -1;
+    if (len == 0) return 0;
+
+    size_t cap = len + 1;
+    uint32_t* raw = (uint32_t*)malloc(cap * sizeof(uint32_t));
+    if (!raw) return -3;
+    size_t raw_n = 0;
+    size_t off = 0;
+    while (off < len) {
+        if (raw_n >= cap) {
+            cap *= 2;
+            uint32_t* n = (uint32_t*)realloc(raw, cap * sizeof(uint32_t));
+            if (!n) { free(raw); return -3; }
+            raw = n;
+        }
+        uint32_t cp;
+        size_t consumed;
+        if (utf8_decode(utf8 + off, len - off, &cp, &consumed) != 0) {
+            free(raw);
+            return -2;
+        }
+        raw[raw_n++] = cp;
+        off += consumed;
+    }
+
+    size_t need = laplace_normalize_nfc(raw, raw_n, NULL, 0);
+    if (need == 0) { free(raw); return -3; }
+    uint32_t* nfc = (uint32_t*)malloc(need * sizeof(uint32_t));
+    if (!nfc) { free(raw); return -3; }
+    size_t nfc_n = laplace_normalize_nfc(raw, raw_n, nfc, need);
+    free(raw);
+    if (nfc_n == 0) { free(nfc); return -3; }
+
+    size_t out_cap = nfc_n * 4;
+    uint8_t* buf = (uint8_t*)malloc(out_cap);
+    if (!buf) { free(nfc); return -3; }
+    size_t out_pos = 0;
+    uint8_t enc[4];
+    for (size_t i = 0; i < nfc_n; ++i) {
+        size_t n = utf8_encode(nfc[i], enc);
+        if (out_pos + n > out_cap) {
+            out_cap = (out_pos + n) * 2;
+            uint8_t* grown = (uint8_t*)realloc(buf, out_cap);
+            if (!grown) { free(buf); free(nfc); return -3; }
+            buf = grown;
+        }
+        memcpy(buf + out_pos, enc, n);
+        out_pos += n;
+    }
+    free(nfc);
+    *out_utf8 = buf;
+    *out_len  = out_pos;
+    return 0;
 }

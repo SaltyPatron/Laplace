@@ -103,12 +103,12 @@ public sealed class VerbNetDecomposer : IDecomposer
         if (string.IsNullOrEmpty(classId)) return;
 
         Hash128 classEntity = ClassId(classId);
-        b.AddEntity(new EntityRow(classEntity, (byte)MetaTier.Meta, ClassTypeId, Source));
+        b.AddEntity(new EntityRow(classEntity, EntityTier.Vocabulary, ClassTypeId, Source));
 
         if (parentClassId is not null)
         {
             Hash128 parentEntity = ClassId(parentClassId);
-            b.AddEntity(new EntityRow(parentEntity, (byte)MetaTier.Meta, ClassTypeId, Source));
+            b.AddEntity(new EntityRow(parentEntity, EntityTier.Vocabulary, ClassTypeId, Source));
             b.AddAttestation(RelationTypeRegistry.Attest(
                 classEntity, "IS_A", parentEntity, Source, TC.AcademicCurated));
         }
