@@ -96,6 +96,8 @@ END $$;
 
 SELECT word, (id IS NOT NULL) AS resolved FROM prompt_words('what is a Dog') ORDER BY ord;
 
+SELECT resolve_phrase('sort a list') = word_id('sort') AS phrase_prefers_leftmost;
+SELECT resolve_phrase('what is a dog') = word_id('dog') AS phrase_finds_dog;
 SELECT resolve_last_word('what is a dog') = word_id('dog') AS last_word_is_dog;
 SELECT resolve_last_word('zzzunknownzzz') IS NULL AS unknown_is_null;
 

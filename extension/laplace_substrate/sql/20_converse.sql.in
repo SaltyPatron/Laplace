@@ -92,7 +92,7 @@ CREATE OR REPLACE FUNCTION synonyms(p_word bytea, p_limit int DEFAULT 10)
     SET search_path = @extschema@, public AS $$
     SELECT * FROM (
         SELECT DISTINCT ON (other.subject_id)
-               render_text(other.subject_id) AS synonym,
+               realize(other.subject_id, word_language(p_word)) AS synonym,
                eff_mu_display(other.rating, other.rd) AS eff_mu,
                other.witness_count AS witnesses
         FROM consensus mine
@@ -103,6 +103,7 @@ CREATE OR REPLACE FUNCTION synonyms(p_word bytea, p_limit int DEFAULT 10)
           AND mine.type_id = relation_type_id('IS_SYNONYM_OF')
         ORDER BY other.subject_id, eff_mu(other.rating, other.rd) DESC
     ) s
+    WHERE NULLIF(btrim(s.synonym), '') IS NOT NULL
     ORDER BY s.eff_mu DESC, s.witnesses DESC
     LIMIT p_limit
 $$;
@@ -176,6 +177,37 @@ CREATE OR REPLACE FUNCTION resolve_last_word(p_phrase text)
     SELECT pw.id FROM prompt_words(p_phrase) pw
     WHERE pw.id IS NOT NULL
     ORDER BY pw.ord DESC
+    LIMIT 1
+$$;
+
+-- Longest contiguous token span that resolves to a witnessed entity (leftmost on ties).
+-- Fixes code prompts like "sort a list" resolving to "list" via resolve_last_word.
+CREATE OR REPLACE FUNCTION resolve_phrase(p_phrase text)
+    RETURNS bytea
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+    SET search_path = @extschema@, public AS $$
+    WITH toks AS (
+        SELECT btrim(t.w) AS w, t.ord::int
+        FROM unnest(regexp_split_to_array(lower(btrim(p_phrase)), '[^[:alnum:]''_-]+'))
+             WITH ORDINALITY AS t(w, ord)
+        WHERE btrim(t.w) <> ''
+    ),
+    spans AS (
+        SELECT s.ord AS start_ord, e.ord AS end_ord,
+               e.ord - s.ord + 1 AS len,
+               string_agg(t.w, ' ' ORDER BY t.ord) AS phrase
+        FROM toks s
+        JOIN toks e ON e.ord >= s.ord
+        JOIN toks t ON t.ord BETWEEN s.ord AND e.ord
+        GROUP BY s.ord, e.ord
+    ),
+    hits AS (
+        SELECT sp.len, sp.start_ord, word_id(sp.phrase) AS id
+        FROM spans sp
+        WHERE EXISTS (SELECT 1 FROM entities ent WHERE ent.id = word_id(sp.phrase))
+    )
+    SELECT h.id FROM hits h
+    ORDER BY h.len DESC, h.start_ord ASC
     LIMIT 1
 $$;
 
@@ -496,8 +528,14 @@ CREATE OR REPLACE FUNCTION reason(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
         'HAS_SUBSTANCE','DERIVATIONALLY_RELATED','PERTAINS_TO','ALSO_SEE',
         'IN_VERB_GROUP_WITH','HAS_ATTRIBUTE']) n),
     up_k(k) AS (SELECT relation_type_id(n) FROM unnest(ARRAY['IS_A','IS_INSTANCE_OF']) n),
-    xset(id) AS (SELECT p_x UNION SELECT sn.synset_id FROM senses(p_x) sn),
-    yset(id) AS (SELECT p_y UNION SELECT sn.synset_id FROM senses(p_y) sn),
+    x_top AS (
+        SELECT sn.synset_id FROM senses(p_x) sn ORDER BY sn.eff_mu DESC NULLS LAST LIMIT 1
+    ),
+    y_top AS (
+        SELECT sn.synset_id FROM senses(p_y) sn ORDER BY sn.eff_mu DESC NULLS LAST LIMIT 1
+    ),
+    xset(id) AS (SELECT p_x UNION SELECT synset_id FROM x_top),
+    yset(id) AS (SELECT p_y UNION SELECT synset_id FROM y_top),
     direct AS (
         SELECT realize_path(ARRAY[x.id, c.object_id], ARRAY[c.type_id], ARRAY[1],
                             COALESCE(word_language(p_x), word_language(p_y))) AS chain,
@@ -533,11 +571,7 @@ CREATE OR REPLACE FUNCTION reason(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
                LEAST(ux.mu, uy.mu) AS mu, ux.d + uy.d AS len
         FROM ux JOIN uy ON ux.node = uy.node
         WHERE ux.d > 0 OR uy.d > 0
-        ORDER BY ux.d + uy.d,
-                 (SELECT count(*) FROM consensus c
-                  WHERE c.object_id = ux.node AND c.type_id = relation_type_id('IS_A')
-                    AND NOT refuted(c.rating, c.rd)) ASC,
-                 LEAST(ux.mu, uy.mu) DESC NULLS LAST
+        ORDER BY ux.d + uy.d, LEAST(ux.mu, uy.mu) DESC NULLS LAST
         LIMIT 1),
     lca AS (
         SELECT realize_path(
@@ -782,7 +816,7 @@ CREATE OR REPLACE FUNCTION resolve_topic(p_phrase text, p_context bytea)
         WHEN p_context IS NOT NULL
              AND btrim(lower(p_phrase), ' ?.!') ~ '^(it|its|that|this|they|their|them|those|these|one|he|she|him|her)$'
             THEN p_context
-        ELSE resolve_last_word(p_phrase)
+        ELSE COALESCE(resolve_phrase(p_phrase), resolve_last_word(p_phrase))
     END
 $$;
 

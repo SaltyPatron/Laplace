@@ -214,3 +214,31 @@ void laplace_grapheme_floor_free_owned(laplace_grapheme_floor_t* f) {
     laplace_grapheme_floor_free(f);  /* frees the inner arrays + zeroes */
     free(f);
 }
+
+static size_t lower_bound_cp(const laplace_grapheme_floor_t* f, uint32_t b) {
+    size_t lo = 0, hi = f->cp_n;
+    while (lo < hi) {
+        size_t mid = lo + ((hi - lo) >> 1);
+        if (f->leaf_text_off[mid] < b) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+
+int laplace_grapheme_floor_span_to_graphemes(
+    const laplace_grapheme_floor_t* f,
+    uint32_t start_byte, uint32_t end_byte,
+    size_t* out_g_start, size_t* out_g_end) {
+    if (!f || !out_g_start || !out_g_end) return -1;
+    *out_g_start = 0;
+    *out_g_end   = 0;
+    if (end_byte <= start_byte || f->cp_n == 0) return -1;
+    size_t cp_start = lower_bound_cp(f, start_byte);
+    size_t cp_end   = lower_bound_cp(f, end_byte);
+    if (cp_start >= f->cp_n) return -1;
+    if (cp_end <= cp_start) cp_end = cp_start + 1;
+    if (cp_end > f->cp_n) cp_end = f->cp_n;
+    *out_g_start = f->cp_to_graph[cp_start];
+    *out_g_end   = f->cp_to_graph[cp_end - 1] + 1;
+    return (*out_g_end > *out_g_start) ? 0 : -1;
+}

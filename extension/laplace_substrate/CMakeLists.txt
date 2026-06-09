@@ -85,6 +85,8 @@ set(EXT_SQL_MODULES
     sql/21_seed.sql.in
     sql/22_cascade_surface.sql.in
     sql/23_structural_surface.sql.in
+    sql/24_identity_health.sql.in
+    sql/25_intent_preflight.sql.in
 )
 
 set(EXT_BUILT_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}--${EXT_VERSION}.sql)

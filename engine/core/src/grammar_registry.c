@@ -15,6 +15,7 @@ extern const TSLanguage* tree_sitter_bash(void);
 extern const TSLanguage* tree_sitter_json(void);
 extern const TSLanguage* tree_sitter_markdown(void);
 extern const TSLanguage* tree_sitter_csv(void);
+extern const TSLanguage* tree_sitter_tsv(void);
 /* language grammars */
 extern const TSLanguage* tree_sitter_typescript(void);
 extern const TSLanguage* tree_sitter_java(void);
@@ -55,6 +56,7 @@ static const grammar_entry_t GRAMMARS[] = {
     {"json",       tree_sitter_json},
     {"markdown",   tree_sitter_markdown},
     {"csv",        tree_sitter_csv},
+    {"tsv",        tree_sitter_tsv},
     /* language grammars */
     {"typescript", tree_sitter_typescript},
     {"java",       tree_sitter_java},
@@ -95,6 +97,8 @@ static const ext_entry_t EXTS[] = {
     {"json", "json"},
     {"md", "markdown"}, {"markdown", "markdown"},
     {"csv", "csv"},
+    {"tsv", "tsv"},
+    {"tab", "tsv"},
     /* language grammars */
     {"ts", "typescript"}, {"tsx", "typescript"},
     {"java", "java"},

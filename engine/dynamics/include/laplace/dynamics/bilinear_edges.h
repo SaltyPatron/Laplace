@@ -24,6 +24,11 @@ int project_embedding(const float* pts, size_t n, size_t d,
 int project_embedding_d(const double* pts, size_t n, size_t d,
                         const float* W, size_t r, double* out);
 
+int norm_rows_d(double* data, size_t n, size_t dim);
+
+int expand_kv_heads_d(const double* kv, size_t n, size_t n_heads, size_t n_kv,
+                      size_t head_dim, double* out);
+
 #ifdef __cplusplus
 }
 #endif

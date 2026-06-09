@@ -31,7 +31,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
         ("MadeUpOf", "MADE_UP_OF"), ("NotDesires", "NOT_DESIRES"),
     };
 
-    private static readonly Dictionary<string, string> RelTypeId =
+    internal static readonly Dictionary<string, string> RelTypeId =
         Relations.ToDictionary(r => r.Rel, r => r.Type);
 
     private static readonly string[] Splits = ["train", "dev", "test"];
@@ -70,55 +70,19 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
         [EnumeratorCancellation] CancellationToken ct)
     {
         int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
-        var b = NewBuilder("atomic/batch-0", batch);
-        int n = 0, bn = 0;
+        var witness = new Atomic2020Witness();
 
         foreach (var split in Splits)
         {
             string file = Path.Combine(ecosystemPath, $"{split}.tsv");
             if (!File.Exists(file)) continue;
-            Hash128 splitId = SplitId(split);
 
-            await foreach (var line in File.ReadLinesAsync(file, ct))
+            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
+                file, "tsv", Source, witness, batch, SourceTrust.StructuredCorpus,
+                $"atomic/{split}", reportUnits: null, contextId: SplitId(split), commitEpoch: 0, ct))
             {
-                ct.ThrowIfCancellationRequested();
-                var c = line.Split('\t');
-                if (c.Length < 3) continue;
-                string head = c[0].Trim(), rel = c[1].Trim(), tail = c[2].Trim();
-                if (head.Length == 0 || !RelTypeId.TryGetValue(rel, out var typeName)) continue;
-
-                var headId = ContentEmitter.Emit(b, head, Source);
-                if (headId is null) continue;
-
-                Hash128 tailId;
-                if (tail.Length == 0 || tail.Equals("none", StringComparison.OrdinalIgnoreCase))
-                {
-                    tailId = NoneId;
-                }
-                else
-                {
-                    var t = ContentEmitter.Emit(b, tail, Source);
-                    if (t is null) continue;
-                    tailId = t.Value;
-                }
-
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    headId.Value, typeName, tailId, Source, SourceTrust.StructuredCorpus,
-                    contextId: splitId));
-
-                if (++n >= batch)
-                {
-                    yield return b.Build();
-                    b = NewBuilder($"atomic/batch-{++bn}", batch); n = 0; await Task.Yield();
-                }
+                yield return change;
             }
         }
-        if (n > 0) yield return b.Build();
     }
-
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch) =>
-        new(Source, unit, null,
-            entityCapacity:      batch * 12,
-            physicalityCapacity: batch * 12,
-            attestationCapacity: batch);
 }

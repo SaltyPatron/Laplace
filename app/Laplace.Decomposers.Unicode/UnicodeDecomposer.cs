@@ -99,7 +99,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
         {
             ct.ThrowIfCancellationRequested();
             int end = Math.Min(start + batch, total);
-            yield return BuildBatch(start, end);
+            yield return BuildBatch(start, end, options.DryRun ? 0 : end - start, commitEpoch: 0);
             await Task.Yield();
         }
 
@@ -107,7 +107,8 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
             var recs = _records!;
             var ucd = _ucd!;
             var b = new SubstrateChangeBuilder(Source, "ucd/aliases-confusables/0", null,
-                entityCapacity: batch, physicalityCapacity: batch, attestationCapacity: batch);
+                entityCapacity: batch, physicalityCapacity: batch, attestationCapacity: batch)
+                .SetCommitEpoch(1);
             int count = 0, bn = 0;
 
             foreach (var (cp, aliases) in ucd.NameAliases)
@@ -126,7 +127,8 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                 {
                     yield return b.Build();
                     b = new SubstrateChangeBuilder(Source, $"ucd/aliases-confusables/{++bn}", null,
-                        entityCapacity: batch, physicalityCapacity: batch, attestationCapacity: batch);
+                        entityCapacity: batch, physicalityCapacity: batch, attestationCapacity: batch)
+                        .SetCommitEpoch(1);
                     count = 0;
                     await Task.Yield();
                 }
@@ -148,7 +150,8 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                 {
                     yield return b.Build();
                     b = new SubstrateChangeBuilder(Source, $"ucd/aliases-confusables/{++bn}", null,
-                        entityCapacity: batch, physicalityCapacity: batch, attestationCapacity: batch);
+                        entityCapacity: batch, physicalityCapacity: batch, attestationCapacity: batch)
+                        .SetCommitEpoch(1);
                     count = 0;
                     await Task.Yield();
                 }
@@ -159,7 +162,8 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
         {
             var recs = _records!;
             var bb = new SubstrateChangeBuilder(Source, "bytes/atoms-and-encodings", null,
-                entityCapacity: 512, physicalityCapacity: 128, attestationCapacity: 512);
+                entityCapacity: 512, physicalityCapacity: 128, attestationCapacity: 512)
+                .SetCommitEpoch(1);
 
             var latin1 = Hash128.OfCanonical("substrate/encoding/ISO-8859-1/v1");
             var cp1252 = Hash128.OfCanonical("substrate/encoding/windows-1252/v1");
@@ -247,14 +251,16 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
 
     public ValueTask DisposeAsync() { _records = null; _ucd = null; return ValueTask.CompletedTask; }
 
-    private SubstrateChange BuildBatch(int start, int end)
+    private SubstrateChange BuildBatch(int start, int end, long inputUnitsConsumed = 0, int commitEpoch = 0)
     {
         int n = end - start;
         var b = new SubstrateChangeBuilder(
             Source, $"codepoints/U+{start:X4}..U+{(end - 1):X4}", null,
             entityCapacity:      n * 4,
             physicalityCapacity: n,
-            attestationCapacity: n * 12);
+            attestationCapacity: n * 12)
+            .SetCommitEpoch(commitEpoch);
+        if (inputUnitsConsumed > 0) b.SetInputUnitsConsumed(inputUnitsConsumed);
 
         CodepointRecord[] recs = _records!;
         UcdProperties ucd = _ucd!;

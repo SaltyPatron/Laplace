@@ -4,6 +4,7 @@ rem ==== Download code training data for Laplace ingest =======================
 rem
 rem   download-code-data.cmd tiny-codes
 rem     Downloads nampdn-ai/tiny-codes (~400 MB parquet) to D:\Data\Ingest\tiny-codes
+rem     Requires HF_TOKEN (user env) and dataset access on huggingface.co
 rem
 rem   download-code-data.cmd stack-v2 [--langs py,...] [--shards N]
 rem     Downloads bigcode/the-stack-v2 language shards (5 per lang by default).

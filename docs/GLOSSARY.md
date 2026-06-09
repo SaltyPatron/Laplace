@@ -24,7 +24,11 @@ Authoritative vocabulary. Terms are laws, not suggestions; code and docs use the
 
 **Witness** — any source of knowledge: a standards file, a curated lexicon, a corpus, a document, a user prompt, or a deposed AI model. All witnesses enter through the same machinery and differ only in trust class.
 
-**Deposition** — the act of ingesting a witness: decomposing its content/weights into entities and attestations. "Deposing a model" = running it through the ModelDecomposer's cell ETL.
+**Deposition** — the act of ingesting a witness: decomposing its content into entities and attestations.
+
+**Safetensor snapshot witness** — a HuggingFace-style directory (`config.json` + `tokenizer.json` + `*.safetensors`), deposited via `ModelDecomposer`: recipe parsed from config, vocab from tokenizer, named weight tensors walked by role into tensor-relation testimony. **Not self-contained** — unlike GGUF, a lone `.safetensors` file carries no architecture or vocab.
+
+**GGUF render target** — synthesis output: self-contained runnable artifact (metadata + tokenizer blobs + aligned tensors). Ingest uses distributed safetensor snapshots; export compiles adjudicated arenas back into GGUF.
 
 **Attestation** — one row of evidence in `laplace.attestations`: WHO (source) witnessed WHAT relation (subject, relation-type→`type_id`, object) in what CONTEXT, with what OUTCOME class and observation count. Provenance only — never a value channel; a witness's magnitude is consumed into consensus at ingest and not persisted. Id = BLAKE3 of the canonical 5-tuple (subject, relation type, object, source, context) → re-observation is UPSERT-no-op idempotent.
 

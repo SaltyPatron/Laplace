@@ -23,3 +23,4 @@
 #include "22_cascade_surface.sql.in"
 #include "23_structural_surface.sql.in"
 #include "24_identity_health.sql.in"
+#include "25_intent_preflight.sql.in"

@@ -7,9 +7,11 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.WordNet;
 
-public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, IIngestCommitPolicy
 {
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> MetaNames = new();
+
+    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
 
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/WordNetDecomposer/v1");

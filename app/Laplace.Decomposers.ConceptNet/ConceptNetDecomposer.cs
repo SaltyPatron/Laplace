@@ -16,7 +16,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
 
     private static readonly Hash128 LanguageTypeId = Hash128.OfCanonical("substrate/type/Language/v1");
 
-    private static readonly Dictionary<string, string> RelMap = new(StringComparer.Ordinal)
+    internal static readonly Dictionary<string, string> RelMap = new(StringComparer.Ordinal)
     {
         ["RelatedTo"] = "RELATED_TO",      ["FormOf"] = "FORM_OF",
         ["IsA"] = "IS_A",                  ["PartOf"] = "IS_PART_OF",
@@ -83,126 +83,14 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
         string file = Path.Combine(ecosystemPath, "assertions.csv");
         if (!File.Exists(file)) yield break;
         int batch = options.BatchSize > 1 ? options.BatchSize : 8192;
+        var arena = new ArenaRmsTracker();
+        var witness = new ConceptNetWitness(arena, options.Languages);
 
-        var arenaSumSq = new Dictionary<string, double>(StringComparer.Ordinal);
-        var arenaN     = new Dictionary<string, long>(StringComparer.Ordinal);
-        await foreach (var line in File.ReadLinesAsync(file, ct))
+        await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
+            file, "tsv", Source, witness, batch, SourceTrust.UserCuratedResource,
+            "conceptnet", reportUnits: null, contextId: null, commitEpoch: 0, ct))
         {
-            ct.ThrowIfCancellationRequested();
-            var c = line.Split('\t');
-            if (c.Length < 5) continue;
-            string rel = c[1].StartsWith("/r/", StringComparison.Ordinal) ? c[1][3..] : c[1];
-            string? typeName =
-                RelMap.TryGetValue(rel, out var mapped) ? mapped
-                : rel.StartsWith("dbpedia/", StringComparison.OrdinalIgnoreCase)
-                    ? RelationTypeRegistry.ResolveDbpedia(rel).Canonical
-                    : null;
-            if (typeName is null) continue;
-            (double w, _) = ParseMeta(c[4]);
-            arenaSumSq[typeName] = arenaSumSq.GetValueOrDefault(typeName) + w * w;
-            arenaN[typeName]     = arenaN.GetValueOrDefault(typeName) + 1;
+            yield return change;
         }
-        var arenaM = new Dictionary<string, double>(StringComparer.Ordinal);
-        foreach (var (k, sq) in arenaSumSq)
-            arenaM[k] = arenaN[k] > 0 ? Math.Sqrt(sq / arenaN[k]) : 0.0;
-
-        var seenEntBatch = new HashSet<Hash128>();
-        var seenAttRun = new ConcurrentIdSet();
-        var b = NewBuilder("conceptnet/batch-0", batch);
-        int n = 0, bn = 0;
-
-        await foreach (var line in File.ReadLinesAsync(file, ct))
-        {
-            ct.ThrowIfCancellationRequested();
-            var c = line.Split('\t');
-            if (c.Length < 5) continue;
-
-            string rel = c[1].StartsWith("/r/", StringComparison.Ordinal) ? c[1][3..] : c[1];
-            RelationTypeRegistry.RelationTypeResolution? dbp = null;
-            if (!RelMap.TryGetValue(rel, out var typeName))
-            {
-                if (!rel.StartsWith("dbpedia/", StringComparison.OrdinalIgnoreCase)) continue;
-                var r = RelationTypeRegistry.ResolveDbpedia(rel);
-                dbp = r; typeName = r.Canonical;
-            }
-            if (!ParseConcept(c[2], out string startTerm, out string startLang)) continue;
-            if (!ParseConcept(c[3], out string endTerm, out string endLang)) continue;
-            if (options.Languages?.MatchesAll(startLang, endLang) == false) continue;
-
-            var startId = ContentEmitter.Emit(b, startTerm, Source);
-            var endId   = ContentEmitter.Emit(b, endTerm, Source);
-            if (startId is null || endId is null) continue;
-
-            Hash128 startLangId = LanguageReference.Resolve(startLang);
-            Hash128 endLangId   = LanguageReference.Resolve(endLang);
-            b.AddEntity(new EntityRow(startLangId, EntityTier.Vocabulary, LanguageTypeId, Source));
-            b.AddEntity(new EntityRow(endLangId, EntityTier.Vocabulary, LanguageTypeId, Source));
-
-            (double weight, string? surface) = ParseMeta(c[4]);
-
-            if (dbp is { } dyn)
-                RelationTypeRegistry.SeedDynamic(b, dyn, Source, seenEntBatch, seenAttRun);
-
-            b.AddAttestation(RelationTypeRegistry.AttestWeighted(
-                startId.Value, typeName, endId.Value, Source, SourceTrust.UserCuratedResource,
-                magnitude: weight, arenaScale: arenaM.GetValueOrDefault(typeName)));
-            b.AddAttestation(RelationTypeRegistry.Attest(
-                startId.Value, "HAS_LANGUAGE", startLangId, Source, SourceTrust.UserCuratedResource));
-            b.AddAttestation(RelationTypeRegistry.Attest(
-                endId.Value, "HAS_LANGUAGE", endLangId, Source, SourceTrust.UserCuratedResource));
-            if (surface is not null)
-            {
-                var sId = ContentEmitter.Emit(b, surface, Source);
-                if (sId is not null)
-                    b.AddAttestation(RelationTypeRegistry.Attest(
-                        startId.Value, "HAS_EXAMPLE", sId.Value, Source,
-                        SourceTrust.UserCuratedResource, contextId: endId.Value));
-            }
-
-            if (++n >= batch)
-            {
-                yield return b.Build();
-                seenEntBatch.Clear();
-                b = NewBuilder($"conceptnet/batch-{++bn}", batch);
-                n = 0; await Task.Yield();
-            }
-        }
-        if (n > 0) yield return b.Build();
-    }
-
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch) =>
-        new(Source, unit, null,
-            entityCapacity:      batch * 12,
-            physicalityCapacity: batch * 12,
-            attestationCapacity: batch * 4);
-
-    private static bool ParseConcept(string uri, out string term, out string lang)
-    {
-        term = ""; lang = "";
-        var p = uri.Split('/');
-        if (p.Length < 4 || p[1] != "c") return false;
-        lang = p[2];
-        term = p[3].Replace('_', ' ').Trim();
-        return term.Length > 0;
-    }
-
-    private static (double Weight, string? Surface) ParseMeta(string json)
-    {
-        double weight = 1.0; string? surface = null;
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("weight", out var w) && w.ValueKind == JsonValueKind.Number)
-                weight = w.GetDouble();
-            if (root.TryGetProperty("surfaceText", out var s) && s.ValueKind == JsonValueKind.String)
-            {
-                var txt = s.GetString();
-                if (!string.IsNullOrWhiteSpace(txt))
-                    surface = txt!.Replace("[[", "").Replace("]]", "").TrimStart('*', ' ').Trim();
-            }
-        }
-        catch (JsonException) { }
-        return (weight, string.IsNullOrEmpty(surface) ? null : surface);
     }
 }

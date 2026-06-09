@@ -12,6 +12,7 @@ public sealed class SubstrateChangeBuilder
     private readonly string _sourceContentUnitName;
     private readonly Hash128? _parentIntentId;
     private long _inputUnitsConsumed;
+    private int _commitEpoch;
 
     private readonly HashSet<Hash128> _seenEntities = new();
     private readonly HashSet<Hash128> _seenPhysicalities = new();
@@ -37,6 +38,12 @@ public sealed class SubstrateChangeBuilder
     public SubstrateChangeBuilder SetInputUnitsConsumed(long n)
     {
         _inputUnitsConsumed = n;
+        return this;
+    }
+
+    public SubstrateChangeBuilder SetCommitEpoch(int epoch)
+    {
+        _commitEpoch = epoch;
         return this;
     }
 
@@ -109,7 +116,8 @@ public sealed class SubstrateChangeBuilder
                 _sourceContentUnitName,
                 DateTimeOffset.UtcNow,
                 _parentIntentId,
-                _inputUnitsConsumed));
+                _inputUnitsConsumed,
+                _commitEpoch));
     }
 
     private static Hash128 ComputeIntentId(

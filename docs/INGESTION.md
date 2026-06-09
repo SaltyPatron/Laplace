@@ -27,8 +27,13 @@ Dependency-ordered seed ingestion; each source's IngestRunner refuses to start u
 ```
 L0 unicode      T0 atoms + UCD properties + byte tier        StandardsDerived
 L1 iso639       languages/scripts/macrolanguage              StandardsDerived
-L2 wordnet      synset/lemma/sense lexicon — foundational, first L2 AcademicCurated
+L2 wordnet      synset/lemma/sense lexicon — foundational    AcademicCurated
    verbnet/propbank/atomic2020/conceptnet/ud  semantic + syntactic structure
+   [functionality phase — not layer-gated, runs after L2 core]
+   repos         iteration-stack code trees                   StructuredCorpus
+   db-roundtrip  books/docs → PRECEDES bigrams                UserPromptContent
+   tiny-codes    1.6M prompt→code pairs (AST + HAS_EXAMPLE)   StructuredCorpus
+   stack-v2      The Stack v2 shards (optional)               StructuredCorpus
    tatoeba      sentence translations (GB-scale usage)       StructuredCorpus
    opensubtitles aligned pairs (largest usage)              StructuredCorpus
    wiktionary   dictionary (largest L2)                    StructuredCorpus
@@ -37,7 +42,15 @@ L3 omw          multilingual wordnet (binds L2 to languages) AcademicCuratedWith
    semlink      cross-resource alignment (needs vn+pb+fn)    AcademicCurated
 ```
 
-Seed order after wordnet follows **ascending vault size** on `D:\Data\Ingest` (see `witness-manifest.json`). Tatoeba, OpenSubtitles, and Wiktionary are full witnesses but run late — not second.
+Seed order (see `witness-manifest.json`): **lexical core** → **functionality** (repos, books, code) → **world usage** (tatoeba, opensubtitles, wiktionary) → **L3 bind** → **safetensor snapshots** (optional). Code and books run before Tatoeba/Wiktionary so PRECEDES/HAS_EXAMPLE exist for generate/converse without waiting on GB-scale usage corpora.
+
+| skip flag | effect |
+|---|---|
+| `LAPLACE_SKIP_WORLD=1` | skip tatoeba, opensubtitles, wiktionary |
+| `LAPLACE_SKIP_GIANTS=1` | skip world usage **and** L3 bind (omw, framenet, semlink) |
+| `LAPLACE_SKIP_MODELS=1` | skip safetensor snapshot deposition (TinyLlama, Phi-2, Qwen, …) |
+
+Safetensor deposition is a **separate witness pass**, not required to prove the invention: lexical + structural + code/document attestations supply converse, generate, and the substrate-side recipe for custom export. Deposit models when you want tensor-role testimony stacked on the same entities — or run `ingest safetensors` later against a seeded DB.
 
 ## ETL progress (CI-parseable)
 
@@ -54,16 +67,32 @@ Throughput law: stages run STRICTLY one at a time (a single source gets the whol
 
 ## The pipeline (one stage, end to end)
 
-1. **Decompose** — the source's IDecomposer walks its data; text content goes through the engine TextDecomposer (UAX#29 segmentation → tier tree), structured claims through AttestationFactory/TextEntityBuilder.
+1. **Decompose** — the source's IDecomposer walks its data. Delimited vault corpora (tsv/csv) use `StructuredGrammarIngest`: chunked row parse in `laplace_core`, native `laplace_grammar_compose`, then thin `IGrammarWitness.WalkRow` for semantic attestations — no `line.Split('\t')` on hot paths. Free text still uses TextDecomposer (UAX#29 → tier tree); structured claims use AttestationFactory/TextEntityBuilder.
 2. **Dedup** — candidate ids batched through `entities_exist_bitmap` (engine merkle_dedup; LSB-first bitmap) so only novel rows ship.
 3. **COPY** — entities + physicalities (trajectories mantissa-packed via the intent_stage COPY-binary builder) bulk-load; attestations upsert by content-addressed id (re-observation bumps count/timestamp).
 4. **Accumulate** — each witnessed magnitude becomes a Glicko game (s = ½(1+tanh(m/M)); trust→φ) folded into per-relation period partials in unlogged staging partitions (`LAPLACE_FOLD_WORKERS` parallel sessions, disjoint by relation identity).
 5. **Materialize** — `materialize_period_consensus`: batch kernel `accumulate_games(n, Σs)` per relation (bit-identical to per-game replay), upsert into consensus, staging dropped. φ-mixed within a period is a hard exception (invariant, not warning).
 6. **Mark** — layer completion attested; counts reported (`substrate_counts`).
 
-Idempotency end-to-end: content addressing + ON CONFLICT. A killed run resumes by re-running; completed work short-circuits. Re-ingesting a MODEL is refused outright (double-counting guard) — reset is per-source eviction or db-fresh, never a bypass.
+Idempotency end-to-end: content addressing + ON CONFLICT. A killed run resumes by re-running; completed work short-circuits. Re-depositing a safetensor snapshot is refused outright (double-counting guard) — reset is per-source eviction or db-fresh, never a bypass.
 
-Worker knobs: `LAPLACE_INGEST_WORKERS` / `LAPLACE_DECOMPOSE_WORKERS` / `LAPLACE_FOLD_WORKERS` (measured tuning: 2/2/4 on the 6-core Linux runner; 4/4 on Windows 24-core ingest jobs).
+## Safetensor snapshot deposition (not "model file ingest")
+
+CLI: `laplace ingest safetensors <snapshot-dir>` (`ingest model` is a legacy alias).
+
+| | Safetensor snapshot (ingest) | GGUF (synthesize) |
+|---|---|---|
+| **Unit** | HF snapshot **directory** | Single **file** |
+| **Self-contained** | No — needs `config.json`, `tokenizer.json`, weight blobs | Yes — llama.cpp runs it alone |
+| **What happens** | `ModelDecomposer`: recipe → named tensor ETL → Glicko testimony (`AIModelProbe`) | `synthesize substrate <config.json> <out.gguf>` pours arenas into render target |
+
+Validation (`SafetensorSnapshotWitness`): rejects directories missing recipe or tokenizer. Source identity hashes `config.json` + weight files together.
+
+Seed witness set (see `witness-manifest.json`): TinyLlama, Phi-2, Qwen2.5-Coder-3B snapshots under `D:/Models/hub`. Skipped when `LAPLACE_SKIP_MODELS=1` (default seed path for attestation-only proof).
+
+Worker knobs: `LAPLACE_INGEST_WORKERS` / `LAPLACE_DECOMPOSE_WORKERS` / `LAPLACE_FOLD_WORKERS`.
+
+`LAPLACE_INGEST_WORKERS` controls **parallel DB commit** within a source run. It was pinned to 1 because many decomposers emit phased intents (entities first, attestations second) and naive parallel consumers committed out of order → `SubstrateReferentialIntegrityException`. The runner now uses **epoch barriers**: intents carry `CommitEpoch` in metadata; parallel commits are allowed within one epoch, never across epochs. Model ETL, Unicode aliases, and Tatoeba (sentences then links) use epoch 0 then epoch 1. WordNet's five-phase entity/attestation stream implements `IIngestCommitPolicy.StrictSerial` (pipelined decompose+commit overlap only). Default policy when absent: `EpochBarrier`. Measured starting point: 2–4 on a multi-core box after epoch tagging is in place.
 
 ## Language scope (full witness stack)
 

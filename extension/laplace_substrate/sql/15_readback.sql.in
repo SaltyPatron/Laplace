@@ -68,6 +68,16 @@ CREATE FUNCTION render_text(p_id bytea, p_max_depth integer DEFAULT 32)
     AS 'MODULE_PATHNAME', 'pg_laplace_render_text'
     LANGUAGE C STABLE;
 
+CREATE FUNCTION render_text_fast(p_id bytea, p_max_depth integer DEFAULT 8)
+    RETURNS text
+    AS 'MODULE_PATHNAME', 'pg_laplace_render_text_fast'
+    LANGUAGE C STABLE;
+
+CREATE FUNCTION render_text_batch(p_ids bytea[], p_max_depth integer DEFAULT 8)
+    RETURNS text[]
+    AS 'MODULE_PATHNAME', 'pg_laplace_render_text_batch'
+    LANGUAGE C STABLE;
+
 CREATE FUNCTION render(p_id bytea) RETURNS text
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$

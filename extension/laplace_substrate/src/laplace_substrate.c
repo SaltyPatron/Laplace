@@ -315,6 +315,139 @@ pg_laplace_entities_exist_bitmap(PG_FUNCTION_ARGS)
     PG_RETURN_BYTEA_P(result);
 }
 
+PG_FUNCTION_INFO_V1(pg_laplace_intent_preflight);
+
+static bytea*
+build_exist_bitmap(ArrayType* ids_array, const char* table)
+{
+    int         candidate_count;
+    int         bitmap_bytes;
+    bytea*      result;
+    uint8*      bm;
+    Oid         argtypes[1];
+    Datum       args[1];
+    int         spi_rc;
+    uint64      i;
+    char        query[256];
+
+    if (ARR_NDIM(ids_array) > 1)
+        ereport(ERROR,
+            (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+             errmsg("intent_preflight: ids array must be 1-dimensional")));
+
+    if (ARR_ELEMTYPE(ids_array) != BYTEAOID)
+        ereport(ERROR,
+            (errcode(ERRCODE_DATATYPE_MISMATCH),
+             errmsg("intent_preflight: ids array element type must be bytea")));
+
+    if (ARR_HASNULL(ids_array))
+        ereport(ERROR,
+            (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+             errmsg("intent_preflight: ids array must not contain NULL")));
+
+    candidate_count = ARR_NDIM(ids_array) == 0
+                      ? 0
+                      : ArrayGetNItems(ARR_NDIM(ids_array), ARR_DIMS(ids_array));
+
+    if (candidate_count <= 0)
+    {
+        result = (bytea*) palloc(VARHDRSZ);
+        SET_VARSIZE(result, VARHDRSZ);
+        return result;
+    }
+
+    if (candidate_count > 250000)
+        ereport(ERROR,
+            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+             errmsg("intent_preflight: id batch too large (%d > 250000)", candidate_count)));
+
+    bitmap_bytes = (candidate_count + 7) / 8;
+    result = (bytea*) palloc(VARHDRSZ + bitmap_bytes);
+    SET_VARSIZE(result, VARHDRSZ + bitmap_bytes);
+    memset(VARDATA(result), 0, bitmap_bytes);
+    bm = (uint8*) VARDATA(result);
+
+    if (SPI_connect() != SPI_OK_CONNECT)
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("intent_preflight: SPI_connect failed")));
+
+    snprintf(query, sizeof(query),
+             "SELECT (u.ord - 1)::int "
+             "FROM unnest($1::bytea[]) WITH ORDINALITY u(id, ord) "
+             "JOIN laplace.%s t ON t.id = u.id",
+             table);
+
+    argtypes[0] = BYTEAARRAYOID;
+    args[0]     = PointerGetDatum(ids_array);
+
+    spi_rc = SPI_execute_with_args(query, 1, argtypes, args, NULL, true, 0);
+    if (spi_rc != SPI_OK_SELECT)
+    {
+        SPI_finish();
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("intent_preflight: SPI query on %s failed (rc=%d)", table, spi_rc)));
+    }
+
+    for (i = 0; i < SPI_processed; i++)
+    {
+        bool  isnull;
+        Datum d = SPI_getbinval(SPI_tuptable->vals[i],
+                                SPI_tuptable->tupdesc, 1, &isnull);
+        if (!isnull)
+        {
+            int pos = DatumGetInt32(d);
+            if (pos >= 0 && pos < candidate_count)
+                bm[pos >> 3] |= (uint8)(1u << (pos & 7u));
+        }
+    }
+
+    SPI_finish();
+    return result;
+}
+
+Datum
+pg_laplace_intent_preflight(PG_FUNCTION_ARGS)
+{
+    ArrayType* ent_array;
+    ArrayType* phys_array;
+    ArrayType* att_array;
+    TupleDesc  tupdesc;
+    Datum      values[3];
+    bool       nulls[3] = {false, false, false};
+    HeapTuple  tuple;
+    bytea*     ent_bm;
+    bytea*     phys_bm;
+    bytea*     att_bm;
+
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(1) || PG_ARGISNULL(2))
+        ereport(ERROR,
+            (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+             errmsg("intent_preflight: all id arrays must be non-NULL")));
+
+    ent_array   = PG_GETARG_ARRAYTYPE_P(0);
+    phys_array  = PG_GETARG_ARRAYTYPE_P(1);
+    att_array   = PG_GETARG_ARRAYTYPE_P(2);
+
+    ent_bm  = build_exist_bitmap(ent_array,  "entities");
+    phys_bm = build_exist_bitmap(phys_array, "physicalities");
+    att_bm  = build_exist_bitmap(att_array,  "attestations");
+
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("intent_preflight: return type must be a composite type")));
+
+    BlessTupleDesc(tupdesc);
+
+    values[0] = PointerGetDatum(ent_bm);
+    values[1] = PointerGetDatum(phys_bm);
+    values[2] = PointerGetDatum(att_bm);
+    tuple = heap_form_tuple(tupdesc, values, nulls);
+    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
 void _PG_init(void);
 void
 _PG_init(void)

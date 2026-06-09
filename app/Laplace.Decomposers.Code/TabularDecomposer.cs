@@ -73,22 +73,18 @@ public sealed class TabularDecomposer : IDecomposer
         var files = EnumerateCsv(context.EcosystemPath).ToList();
         if (files.Count == 0) yield break;
 
-        // 1. Load every row, union columns by header name (train.csv + Churn_Modelling.csv share schema).
+        // 1. Load every row via csv grammar field spans (no line.Split).
         var rows = new List<Dictionary<string, string>>();
         foreach (var f in files)
         {
             ct.ThrowIfCancellationRequested();
-            using var sr = new StreamReader(f);
-            var hline = await sr.ReadLineAsync();
-            if (hline is null) continue;
-            var header = SplitCsv(hline);
-            string? line;
-            while ((line = await sr.ReadLineAsync()) is not null)
+            string[]? header = null;
+            await foreach (var (fields, _) in GrammarRowReader.ReadFieldsAsync(f, "csv", ct))
             {
-                var cells = SplitCsv(line);
-                if (cells.Length != header.Length) continue;
+                if (header is null) { header = fields; continue; }
+                if (fields.Length != header.Length) continue;
                 var rec = new Dictionary<string, string>(header.Length, StringComparer.Ordinal);
-                for (int i = 0; i < header.Length; i++) rec[header[i]] = cells[i];
+                for (int i = 0; i < header.Length; i++) rec[header[i]] = fields[i];
                 rows.Add(rec);
             }
         }
@@ -262,19 +258,4 @@ public sealed class TabularDecomposer : IDecomposer
             yield return f;
     }
 
-    private static string[] SplitCsv(string line)
-    {
-        if (line.IndexOf('"') < 0) return line.Split(',');
-        var outp = new List<string>();
-        var sb = new System.Text.StringBuilder();
-        bool q = false;
-        foreach (var ch in line)
-        {
-            if (ch == '"') q = !q;
-            else if (ch == ',' && !q) { outp.Add(sb.ToString()); sb.Clear(); }
-            else sb.Append(ch);
-        }
-        outp.Add(sb.ToString());
-        return outp.ToArray();
-    }
 }

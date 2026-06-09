@@ -7,6 +7,12 @@ description: "Use when touching safetensors, model ETL, tensor-role arenas, mode
 
 Laplace does not treat AI models as oracles, training targets, embedding stores, raw-weight archives, or generic ML artifacts. A model is a witness package to be deposed into substrate testimony.
 
+## Safetensor snapshots vs GGUF
+
+- **Ingest unit** = HuggingFace snapshot **directory**: `config.json` (recipe) + `tokenizer.json` (vocab/merges) + one or more `*.safetensors` (named weight tensors). Validated by `SafetensorSnapshotWitness` — a lone `.safetensors` file is never sufficient.
+- **GGUF** = synthesis **render target**: self-contained (metadata + tokenizer + tensors in one file). Do not conflate ingest (distributed snapshot witness) with export (compiled GGUF artifact).
+- CLI: `laplace ingest safetensors <snapshot-dir>`. `ingest model` is legacy alias only.
+
 ## Safetensors and model files
 
 - Read safetensors through normal file operations: parse the 8-byte little-endian header length, parse JSON tensor metadata, then seek to `HeaderBytes + data_offsets` and stream/read tensor bytes from the file.

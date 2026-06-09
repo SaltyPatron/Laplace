@@ -24,7 +24,9 @@ public sealed class SafetensorsContainerParser
         var files = Directory.GetFiles(modelDir, "*.safetensors")
                              .OrderBy(f => f, StringComparer.Ordinal).ToArray();
         if (files.Length == 0)
-            throw new FileNotFoundException($"no .safetensors found in model dir: {modelDir}");
+            throw new FileNotFoundException(
+                $"no .safetensors in snapshot dir: {modelDir} "
+                + "(safetensor witnesses require config.json + tokenizer.json + weight blobs — not self-contained like GGUF)");
         var all = new List<TensorReference>();
         foreach (var f in files) all.AddRange(ParseHeader(f));
         all.Sort((a, b) =>

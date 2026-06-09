@@ -19,7 +19,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     public Task InitializeAsync() => Task.CompletedTask;
     public Task DisposeAsync() => Task.CompletedTask;
 
-    private sealed class SyntheticDecomposer : IDecomposer
+    private sealed class SyntheticDecomposer : IDecomposer, IIngestCommitPolicy
     {
         private readonly int _unitCount;
 
@@ -31,6 +31,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
 
         public Hash128 SourceId { get; }
         public string SourceName => "SyntheticTest";
+        public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
         public int LayerOrder => 0;
         public Hash128 TrustClassId =>
             Hash128.OfCanonical("substrate/trust_class/SubstrateMandate/v1");
@@ -227,6 +228,29 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     }
 
     [Fact]
+    public async Task EpochBarrier_PhasedEntitiesThenAttestations_ParallelCommits()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var reader = new NpgsqlSubstrateReader(_pg.DataSource);
+        var runner = new IngestRunner(writer, reader);
+        var srcId = Hash128.OfCanonical("substrate/source/SyntheticPhased/v1");
+        var decomposer = new PhasedDecomposer(sourceId: srcId);
+
+        var options = IngestRunOptions.Default with
+        {
+            SkipLayerOrderingCheck = true,
+            ParallelWorkers = 4,
+            BatchSize = 2,
+        };
+
+        var result = await runner.RunAsync(decomposer, options);
+        Assert.Equal(6, result.UnitsApplied);
+        Assert.Equal(0, result.UnitsFailed);
+        Assert.True(result.EntitiesInserted >= 3);
+        Assert.True(result.AttestationsInserted >= 3);
+    }
+
+    [Fact]
     public async Task ParallelBatched_ConvergesUnderCrossWorkerIdOverlap()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
@@ -248,7 +272,65 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         Assert.Equal(41, result.EntitiesInserted);
     }
 
-    private sealed class OverlapDecomposer : IDecomposer
+    private sealed class PhasedDecomposer : IDecomposer
+    {
+        public PhasedDecomposer(Hash128 sourceId) => SourceId = sourceId;
+
+        public Hash128 SourceId { get; }
+        public string SourceName => "SyntheticPhased";
+        public int LayerOrder => 0;
+        public Hash128 TrustClassId =>
+            Hash128.OfCanonical("substrate/trust_class/SubstrateMandate/v1");
+
+        public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+        {
+            var bitmap = await context.Reader.EntitiesExistBitmapAsync(new[] { SourceId }, ct);
+            if (bitmap.Length > 0 && (bitmap[0] & 1) != 0) return;
+            await context.Writer.ApplyAsync(
+                new BootstrapIntentBuilder(SourceId, SourceName, TrustClassId).Build(), ct);
+        }
+
+        public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+            IDecomposerContext context, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct = default)
+        {
+            var ids = new Hash128[3];
+            for (int i = 0; i < 3; i++)
+            {
+                var seed = new byte[12];
+                BitConverter.TryWriteBytes(seed.AsSpan(0, 8), SourceId.Lo);
+                BitConverter.TryWriteBytes(seed.AsSpan(8, 4), i);
+                ids[i] = Hash128.Blake3(seed);
+            }
+
+            for (int i = 0; i < 3; i++)
+            {
+                yield return new SubstrateChangeBuilder(SourceId, $"ent-{i}")
+                    .SetCommitEpoch(0)
+                    .AddEntity(ids[i], 0, BootstrapIntentBuilder.SourceTypeId)
+                    .Build();
+                await Task.Yield();
+            }
+
+            var rel = RelationTypeRegistry.RelationTypeId("PRECEDES");
+            for (int i = 0; i < 3; i++)
+            {
+                yield return new SubstrateChangeBuilder(SourceId, $"att-{i}")
+                    .SetCommitEpoch(1)
+                    .AddAttestation(AttestationFactory.CreateAggregated(
+                        ids[i], rel, ids[(i + 1) % 3], SourceId, null, 1, Glicko2.FpScale, 1.0))
+                    .Build();
+                await Task.Yield();
+            }
+        }
+
+        public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+            => Task.FromResult<long?>(6);
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class OverlapDecomposer : IDecomposer, IIngestCommitPolicy
     {
         private readonly int _unitCount;
         private readonly Hash128 _shared;
@@ -262,6 +344,8 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
             BitConverter.TryWriteBytes(seed.AsSpan(8, 4), -1);
             _shared = Hash128.Blake3(seed);
         }
+
+        public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
         public Hash128 SourceId { get; }
         public string SourceName => "SyntheticOverlap";

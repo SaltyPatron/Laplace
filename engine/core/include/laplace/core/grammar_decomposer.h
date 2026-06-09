@@ -40,6 +40,27 @@ int    laplace_ast_get_node(const laplace_ast_t* ast, size_t idx, laplace_ast_no
 const char* laplace_ast_kind_name(const laplace_ast_t* ast, uint32_t kind_id);
 void   laplace_ast_free(laplace_ast_t* ast);
 
+/* Incremental row iterator for delimited vault files (TSV/CSV lines). */
+typedef struct laplace_grammar_row_iter laplace_grammar_row_iter_t;
+
+int laplace_grammar_row_iter_new(const TSLanguage* recipe,
+                                 laplace_grammar_row_iter_t** out);
+
+typedef struct {
+    laplace_ast_t* ast;
+    uint8_t*       row_utf8;
+    size_t         row_len;
+} laplace_parsed_row_t;
+
+/* Feed a chunk; returns complete rows (AST + row bytes) parsed at newline boundaries.
+ * Caller frees via laplace_grammar_row_iter_free_rows. */
+int laplace_grammar_row_iter_feed(laplace_grammar_row_iter_t* it,
+                                  const uint8_t* chunk, size_t len,
+                                  laplace_parsed_row_t** out_rows, size_t* out_count);
+
+void laplace_grammar_row_iter_free(laplace_grammar_row_iter_t* it);
+void laplace_grammar_row_iter_free_rows(laplace_parsed_row_t* rows, size_t count);
+
 #ifdef __cplusplus
 }
 #endif

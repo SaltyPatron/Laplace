@@ -33,6 +33,10 @@ int codepoint_table_decompose(uint32_t cp, const uint32_t** out_seq, uint32_t* o
 
 int codepoint_table_compose(uint32_t first, uint32_t second, uint32_t* out_composed);
 
+/* Atom resolver for hash_composer_run (perfcache must be loaded). */
+int codepoint_table_resolve_atom(uint32_t atom, hash128_t* out_id,
+                                 double out_coord[4], hilbert128_t* out_hb);
+
 #ifdef __cplusplus
 }
 #endif
