@@ -7,7 +7,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.WordNet;
 
-public sealed class WordNetDecomposer : IDecomposer
+public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider
 {
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> MetaNames = new();
 
@@ -129,8 +129,36 @@ public sealed class WordNetDecomposer : IDecomposer
         { if (!options.DryRun) yield return change; await Task.Yield(); }
     }
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(EstimatedSynsets);
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        string dictDir = Path.Combine(context.EcosystemPath, "WordNet-3.0", "dict");
+        var files = new List<IngestFileSpec>();
+        foreach (var pos in PosFiles)
+        {
+            string p = Path.Combine(dictDir, pos);
+            if (File.Exists(p))
+                files.Add(new(pos, p, CountSynsetLines(p)));
+        }
+        long total = 0;
+        foreach (var f in files) total += f.InputUnits;
+        return Task.FromResult<IngestInventory?>(
+            files.Count > 0 ? new IngestInventory("synsets", total, files) : null);
+    }
+
+    public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    {
+        var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
+        return inv?.TotalInputUnits ?? EstimatedSynsets;
+    }
+
+    private static long CountSynsetLines(string path)
+    {
+        long n = 0;
+        foreach (var line in File.ReadLines(path))
+            if (line.Length > 0 && char.IsDigit(line[0])) n++;
+        return n;
+    }
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => MetaNames.Keys.ToList();
 
@@ -158,13 +186,13 @@ public sealed class WordNetDecomposer : IDecomposer
 
                 if (++count >= batch)
                 {
-                    yield return b.Build();
+                    yield return b.SetInputUnitsConsumed(count).Build();
                     b = NewBuilder($"wordnet/data-{++batchNum}/{suffix}", entitiesOnly, batch);
                     count = 0;
                 }
             }
         }
-        if (count > 0) yield return b.Build();
+        if (count > 0) yield return b.SetInputUnitsConsumed(count).Build();
     }
 
     private static void EmitSynsetEntities(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)

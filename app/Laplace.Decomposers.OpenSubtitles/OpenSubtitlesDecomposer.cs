@@ -8,7 +8,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.OpenSubtitles;
 
-public sealed class OpenSubtitlesDecomposer : IDecomposer
+public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvider
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/OpenSubtitlesDecomposer/v1");
@@ -60,6 +60,8 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer
         foreach (string zipPath in zips)
         {
             ct.ThrowIfCancellationRequested();
+            string pairStem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(zipPath));
+            if (options.Languages?.MatchesLanguagePair(pairStem) == false) continue;
 
             using var zip = ZipFile.OpenRead(zipPath);
             var textEntries = zip.Entries
@@ -117,11 +119,28 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer
         }
     }
 
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
+        if (!Directory.Exists(context.EcosystemPath)) return Task.FromResult<IngestInventory?>(null);
+        var files = Directory.EnumerateFiles(context.EcosystemPath, "*.txt.zip")
+            .Select(p => Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(p)))
+            .Where(pair => options.Languages?.MatchesLanguagePair(pair) != false)
+            .Select(pair =>
+            {
+                long pairs = PairCounts.FirstOrDefault(x => x.Pair == pair).Pairs;
+                return new IngestFileSpec(pair, Path.Combine(context.EcosystemPath, pair + ".txt.zip"), pairs);
+            })
+            .ToList();
         long total = 0;
-        foreach (var (_, pairs) in PairCounts) total += pairs;
-        return Task.FromResult<long?>(total);
+        foreach (var f in files) total += f.InputUnits;
+        return Task.FromResult<IngestInventory?>(new IngestInventory("pairs", total, files));
+    }
+
+    public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    {
+        var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
+        return inv?.TotalInputUnits;
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

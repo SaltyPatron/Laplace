@@ -27,18 +27,28 @@ Dependency-ordered seed ingestion; each source's IngestRunner refuses to start u
 ```
 L0 unicode      T0 atoms + UCD properties + byte tier        StandardsDerived
 L1 iso639       languages/scripts/macrolanguage              StandardsDerived
-L2 wordnet      synset/lemma/sense lexicon                   AcademicCurated
-   ud           treebanks (POS/lemma/features/deps)          AcademicCurated
-   verbnet/propbank  predicate-argument semantics            AcademicCurated
-   tatoeba      sentence translations                        StructuredCorpus
-   atomic2020   inferential commonsense                      AcademicCurated
-   conceptnet   commonsense graph                            AcademicCuratedWithUserInput
-   wiktionary   dictionary                                   StructuredCorpus
-   opensubtitles 601M aligned pairs (day-scale)              StructuredCorpus
+L2 wordnet      synset/lemma/sense lexicon — foundational, first L2 AcademicCurated
+   verbnet/propbank/atomic2020/conceptnet/ud  semantic + syntactic structure
+   tatoeba      sentence translations (GB-scale usage)       StructuredCorpus
+   opensubtitles aligned pairs (largest usage)              StructuredCorpus
+   wiktionary   dictionary (largest L2)                    StructuredCorpus
 L3 omw          multilingual wordnet (binds L2 to languages) AcademicCuratedWithUserInput
    framenet     frame semantics                              AcademicCurated
    semlink      cross-resource alignment (needs vn+pb+fn)    AcademicCurated
 ```
+
+Seed order after wordnet follows **ascending vault size** on `D:\Data\Ingest` (see `witness-manifest.json`). Tatoeba, OpenSubtitles, and Wiktionary are full witnesses but run late — not second.
+
+## ETL progress (CI-parseable)
+
+Each ingest emits structured key=value lines (stderr):
+
+- `INGEST_START` — scanned inventory: `unit_kind`, `input_units`, `files` (from disk, not output-row guesses)
+- `INGEST_PROGRESS` — `input_done/input_total` and `input_pct`, or `files_done/files_total` and `file_pct`; `rows_new` is throughput only, never used for %
+- `INGEST_BATCH` — per-commit batch stats
+- `INGEST_COMPLETE` — final counts + `status=ok|failed`
+
+Input completion uses `InputUnitsConsumed` on each intent (sentences, synsets, records) where the decomposer reports it; file boundaries use `period-boundary/{file}` markers (UD).
 
 Throughput law: stages run STRICTLY one at a time (a single source gets the whole machine; parallel sources merely split CPU+DB and slow every stage). `INGEST_FROM=<src>` is a manual skip-forward, not a resume journal — none is needed.
 
@@ -54,6 +64,30 @@ Throughput law: stages run STRICTLY one at a time (a single source gets the whol
 Idempotency end-to-end: content addressing + ON CONFLICT. A killed run resumes by re-running; completed work short-circuits. Re-ingesting a MODEL is refused outright (double-counting guard) — reset is per-source eviction or db-fresh, never a bypass.
 
 Worker knobs: `LAPLACE_INGEST_WORKERS` / `LAPLACE_DECOMPOSE_WORKERS` / `LAPLACE_FOLD_WORKERS` (measured tuning: 2/2/4 on the 6-core Linux runner; 4/4 on Windows 24-core ingest jobs).
+
+## Language scope (full witness stack)
+
+Every witness source in the manifest stays. Language filters control **which languages** multilingual corpora emit — not which witnesses exist. Tatoeba and Wiktionary are usage witnesses; WordNet, VerbNet, PropBank, FrameNet, ConceptNet, and the rest are lexical/structural witnesses. All run through the same machinery.
+
+| control | effect |
+|---|---|
+| `LAPLACE_INGEST_LANGS=en` | global default; `en`/`eng`/`en-US` resolve via `LanguageReference` |
+| `LAPLACE_{SOURCE}_LANGS` | per-source override (`LAPLACE_TATOEBA_LANGS`, `LAPLACE_UD_LANGS`, …) |
+| `LAPLACE_EMIT_CROSS_LANG=1` | emit `IS_TRANSLATION_OF` and other cross-language edges when a language filter is active (default off) |
+| `laplace ingest <src> --langs en` | CLI override for one run |
+
+Per-source filter law:
+
+| source | filter point |
+|---|---|
+| **ConceptNet** | both `/c/{lang}/…` endpoints must match |
+| **OMW** | skip `wn-data-{lang}.tab` files outside scope |
+| **UD** | conllu filename prefix (`en_ewt`, `en_gum`, … when `en` specified) |
+| **Tatoeba** | `sentences.csv` lang column; translation links only when both sentence ids were ingested |
+| **Wiktionary** | `lang_code` on each record; translations gated on `EmitCrossLanguageLinks`; prefers `kaikki.org-dictionary-English.jsonl` when scoped |
+| **OpenSubtitles** | zip pair stem (`en-es`, `de-en`, …) — ingest when either side matches |
+
+English-only sources (WordNet, VerbNet, PropBank, FrameNet, SemLink, Atomic2020) pass through unchanged. `seed-substrate.cmd` sets `LAPLACE_INGEST_LANGS=en` by default.
 
 ## The document path (books, prompts, any text)
 

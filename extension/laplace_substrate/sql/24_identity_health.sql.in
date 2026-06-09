@@ -4,17 +4,19 @@ CREATE OR REPLACE FUNCTION fake_tier_band_count()
 RETURNS bigint
 LANGUAGE sql
 STABLE
+SET search_path = @extschema@, public
 AS $$
-    SELECT count(*)::bigint FROM entities WHERE tier IN (247, 248, 250);
+    SELECT count(*)::bigint FROM @extschema@.entities WHERE tier IN (247, 248, 250);
 $$;
 
 CREATE OR REPLACE FUNCTION identity_law_violations()
 RETURNS TABLE(id bytea, tier smallint, reason text)
 LANGUAGE sql
 STABLE
+SET search_path = @extschema@, public
 AS $$
     SELECT e.id, e.tier, 'tier_out_of_range'::text
-    FROM entities e
+    FROM @extschema@.entities e
     WHERE e.tier NOT IN (0, 1, 2, 3, 4);
 $$;
 
@@ -22,13 +24,14 @@ CREATE OR REPLACE FUNCTION compositional_type_ids()
 RETURNS bytea[]
 LANGUAGE sql
 IMMUTABLE
+SET search_path = @extschema@, public
 AS $$
     SELECT ARRAY[
-        laplace_hash128_blake3('substrate/type/Codepoint/v1'::bytea),
-        laplace_hash128_blake3('substrate/type/Grapheme/v1'::bytea),
-        laplace_hash128_blake3('substrate/type/Word/v1'::bytea),
-        laplace_hash128_blake3('substrate/type/Sentence/v1'::bytea),
-        laplace_hash128_blake3('substrate/type/Document/v1'::bytea)
+        public.laplace_hash128_blake3('substrate/type/Codepoint/v1'::bytea),
+        public.laplace_hash128_blake3('substrate/type/Grapheme/v1'::bytea),
+        public.laplace_hash128_blake3('substrate/type/Word/v1'::bytea),
+        public.laplace_hash128_blake3('substrate/type/Sentence/v1'::bytea),
+        public.laplace_hash128_blake3('substrate/type/Document/v1'::bytea)
     ];
 $$;
 
@@ -36,18 +39,20 @@ CREATE OR REPLACE FUNCTION is_compositional_type(p_type_id bytea)
 RETURNS boolean
 LANGUAGE sql
 IMMUTABLE
+SET search_path = @extschema@, public
 AS $$
-    SELECT p_type_id = ANY(compositional_type_ids());
+    SELECT p_type_id = ANY(@extschema@.compositional_type_ids());
 $$;
 
 CREATE OR REPLACE FUNCTION compositional_tier_distribution()
 RETURNS TABLE(tier smallint, n bigint)
 LANGUAGE sql
 STABLE
+SET search_path = @extschema@, public
 AS $$
     SELECT e.tier, count(*)::bigint
-    FROM entities e
-    WHERE is_compositional_type(e.type_id)
+    FROM @extschema@.entities e
+    WHERE @extschema@.is_compositional_type(e.type_id)
     GROUP BY e.tier
     ORDER BY e.tier;
 $$;
@@ -61,15 +66,16 @@ RETURNS TABLE(
 )
 LANGUAGE sql
 STABLE
+SET search_path = @extschema@, public
 AS $$
     SELECT
-        (fake_tier_band_count() = 0
-         AND (SELECT count(*) FROM identity_law_violations()) = 0
+        (@extschema@.fake_tier_band_count() = 0
+         AND (SELECT count(*) FROM @extschema@.identity_law_violations()) = 0
          AND EXISTS (
-             SELECT 1 FROM entities
-             WHERE id = laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
+             SELECT 1 FROM @extschema@.entities
+             WHERE id = public.laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
          )) AS ok,
-        fake_tier_band_count() AS fake_tier_bands,
-        (SELECT count(*) FROM identity_law_violations()) AS identity_violations,
-        (SELECT count(*) FROM entities) AS bootstrap_entities;
+        @extschema@.fake_tier_band_count() AS fake_tier_bands,
+        (SELECT count(*) FROM @extschema@.identity_law_violations()) AS identity_violations,
+        (SELECT count(*) FROM @extschema@.entities) AS bootstrap_entities;
 $$;

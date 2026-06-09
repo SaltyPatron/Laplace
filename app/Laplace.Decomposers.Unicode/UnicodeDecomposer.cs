@@ -6,7 +6,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Unicode;
 
-public sealed class UnicodeDecomposer : IDecomposer
+public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
 {
     public static readonly Hash128 Source     = Hash128.OfCanonical("substrate/source/UnicodeDecomposer/v1");
     public static readonly Hash128 TrustClass = Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
@@ -212,6 +212,11 @@ public sealed class UnicodeDecomposer : IDecomposer
             yield return bb.Build();
         }
     }
+
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+        => Task.FromResult<IngestInventory?>(
+            IngestInventory.Single(UnicodeSeed.CodepointCount, "codepoints"));
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(UnicodeSeed.CodepointCount);

@@ -799,43 +799,76 @@ internal static class Program
         return 0;
     }
 
+    private sealed record IngestCliArgs(
+        string Source,
+        string Path,
+        LanguageFilter? LangOverride,
+        bool? EmitCrossLanguageLinks);
+
+    private static IngestCliArgs ParseIngestCliArgs(string[] args)
+    {
+        var rest = new List<string>(args);
+        LanguageFilter? langs = null;
+        bool? emitCross = null;
+        for (int i = 0; i < rest.Count;)
+        {
+            if (rest[i] == "--langs" && i + 1 < rest.Count)
+            {
+                langs = LanguageFilter.FromSpec(rest[i + 1]);
+                rest.RemoveAt(i + 1);
+                rest.RemoveAt(i);
+            }
+            else if (rest[i] == "--emit-cross-lang")
+            {
+                emitCross = true;
+                rest.RemoveAt(i);
+            }
+            else i++;
+        }
+        return new(
+            rest.Count > 0 ? rest[0] : "",
+            rest.Count > 1 ? rest[1] : "",
+            langs,
+            emitCross);
+    }
+
     private static async Task<int> IngestAsync(string[] args)
     {
-        string source = args.Length > 0 ? args[0] : "";
-        string path   = args.Length > 1 ? args[1] : "";
+        var cli = ParseIngestCliArgs(args);
+        if (string.IsNullOrEmpty(cli.Source))
+            return Fail("usage: laplace ingest <source> [path] [--langs en,...] [--emit-cross-lang]\n"
+                        + "  sources: unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | code | repo | tabular | tiny-codes | stack | model | image | audio\n"
+                        + "  language scope: --langs or LAPLACE_INGEST_LANGS; per-source LAPLACE_{SOURCE}_LANGS");
 
-        if (string.IsNullOrEmpty(source))
-            return Fail("usage: laplace ingest <source> [path]  (unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | code | repo | tabular | tiny-codes | stack | model | image | audio)");
-
-        return source.ToLowerInvariant() switch
+        return cli.Source.ToLowerInvariant() switch
         {
-            "unicode"  => await IngestUnicodeViaRunnerAsync(),
-            "iso639"   => await IngestISO639Async(),
-            "wordnet"  => await IngestViaRunnerAsync(new WordNetDecomposer(), "/vault/Data/Wordnet", skipLayerCheck: false),
-            "omw"      => await IngestViaRunnerAsync(new OMWDecomposer(), "/vault/Data/omw", skipLayerCheck: false),
-            "ud"       => await IngestViaRunnerAsync(new UDDecomposer(), "/vault/Data/UD-Treebanks", skipLayerCheck: false),
-            "tatoeba"  => await IngestViaRunnerAsync(new TatoebaDecomposer(), "/vault/Data/Tatoeba", skipLayerCheck: false),
-            "atomic2020" => await IngestViaRunnerAsync(new Atomic2020Decomposer(), "/vault/Data/Atomic2020", skipLayerCheck: false),
-            "conceptnet" => await IngestViaRunnerAsync(new ConceptNetDecomposer(), "/vault/Data/ConceptNet", skipLayerCheck: false),
-            "wiktionary" => await IngestViaRunnerAsync(new WiktionaryDecomposer(), "/vault/Data/Wiktionary", skipLayerCheck: false),
-            "framenet" => await IngestViaRunnerAsync(new FrameNetDecomposer(), "/vault/Data/FrameNet/framenet_v17", skipLayerCheck: false),
-            "opensubtitles" => await IngestViaRunnerAsync(new OpenSubtitlesDecomposer(), "/vault/Data/OpenSubtitles", skipLayerCheck: false),
-            "verbnet"  => await IngestViaRunnerAsync(new VerbNetDecomposer(),  "/vault/Data/VerbNet",  skipLayerCheck: false),
-            "propbank" => await IngestViaRunnerAsync(new PropBankDecomposer(), "/vault/Data/PropBank", skipLayerCheck: false),
-            "semlink"  => await IngestViaRunnerAsync(new SemLinkDecomposer(),  "/vault/Data/SemLink",  skipLayerCheck: false),
-            "code"       => await IngestViaRunnerAsync(new CodeDecomposer(),     path, skipLayerCheck: true),
-            "repo"       => await IngestViaRunnerAsync(new RepoDecomposer(),     path, skipLayerCheck: true),
-            "tabular"    => await IngestViaRunnerAsync(new TabularDecomposer(),  path, skipLayerCheck: true),
-            "tiny-codes" => await IngestViaRunnerAsync(new TinyCodesDecomposer(), path, skipLayerCheck: true),
-            "stack"      => await IngestViaRunnerAsync(new StackDecomposer(),      path, skipLayerCheck: true),
-            "model"      => await IngestModelAsync(path),
-            "image"      => await IngestViaRunnerAsync(new ImageDecomposer(), string.IsNullOrEmpty(path) ? "/vault/Data/test-data/images" : path, skipLayerCheck: true),
-            "audio"      => await IngestViaRunnerAsync(new AudioDecomposer(), string.IsNullOrEmpty(path) ? "/vault/Data/test-data/audio" : path, skipLayerCheck: true),
-            _ => Fail($"unknown ingest source '{source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, code, repo, tabular, tiny-codes, stack, model, image, audio)"),
+            "unicode"  => await IngestUnicodeViaRunnerAsync(cli),
+            "iso639"   => await IngestISO639Async(cli),
+            "wordnet"  => await IngestViaRunnerAsync(new WordNetDecomposer(), "/vault/Data/Wordnet", skipLayerCheck: false, cli),
+            "omw"      => await IngestViaRunnerAsync(new OMWDecomposer(), "/vault/Data/omw", skipLayerCheck: false, cli),
+            "ud"       => await IngestViaRunnerAsync(new UDDecomposer(), "/vault/Data/UD-Treebanks", skipLayerCheck: false, cli),
+            "tatoeba"  => await IngestViaRunnerAsync(new TatoebaDecomposer(), "/vault/Data/Tatoeba", skipLayerCheck: false, cli),
+            "atomic2020" => await IngestViaRunnerAsync(new Atomic2020Decomposer(), "/vault/Data/Atomic2020", skipLayerCheck: false, cli),
+            "conceptnet" => await IngestViaRunnerAsync(new ConceptNetDecomposer(), "/vault/Data/ConceptNet", skipLayerCheck: false, cli),
+            "wiktionary" => await IngestViaRunnerAsync(new WiktionaryDecomposer(), "/vault/Data/Wiktionary", skipLayerCheck: false, cli),
+            "framenet" => await IngestViaRunnerAsync(new FrameNetDecomposer(), "/vault/Data/FrameNet/framenet_v17", skipLayerCheck: false, cli),
+            "opensubtitles" => await IngestViaRunnerAsync(new OpenSubtitlesDecomposer(), "/vault/Data/OpenSubtitles", skipLayerCheck: false, cli),
+            "verbnet"  => await IngestViaRunnerAsync(new VerbNetDecomposer(),  "/vault/Data/VerbNet",  skipLayerCheck: false, cli),
+            "propbank" => await IngestViaRunnerAsync(new PropBankDecomposer(), "/vault/Data/PropBank", skipLayerCheck: false, cli),
+            "semlink"  => await IngestViaRunnerAsync(new SemLinkDecomposer(),  "/vault/Data/SemLink",  skipLayerCheck: false, cli),
+            "code"       => await IngestViaRunnerAsync(new CodeDecomposer(),     cli.Path, skipLayerCheck: true, cli),
+            "repo"       => await IngestViaRunnerAsync(new RepoDecomposer(),     cli.Path, skipLayerCheck: true, cli),
+            "tabular"    => await IngestViaRunnerAsync(new TabularDecomposer(),  cli.Path, skipLayerCheck: true, cli),
+            "tiny-codes" => await IngestViaRunnerAsync(new TinyCodesDecomposer(), cli.Path, skipLayerCheck: true, cli),
+            "stack"      => await IngestViaRunnerAsync(new StackDecomposer(),      cli.Path, skipLayerCheck: true, cli),
+            "model"      => await IngestModelAsync(cli.Path, cli),
+            "image"      => await IngestViaRunnerAsync(new ImageDecomposer(), string.IsNullOrEmpty(cli.Path) ? "/vault/Data/test-data/images" : cli.Path, skipLayerCheck: true, cli),
+            "audio"      => await IngestViaRunnerAsync(new AudioDecomposer(), string.IsNullOrEmpty(cli.Path) ? "/vault/Data/test-data/audio" : cli.Path, skipLayerCheck: true, cli),
+            _ => Fail($"unknown ingest source '{cli.Source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, code, repo, tabular, tiny-codes, stack, model, image, audio)"),
         };
     }
 
-    private static async Task<int> IngestModelAsync(string modelDir)
+    private static async Task<int> IngestModelAsync(string modelDir, IngestCliArgs cli)
     {
         if (string.IsNullOrEmpty(modelDir) || !Directory.Exists(modelDir))
             return Fail($"usage: laplace ingest model <model-dir>  (not found: {modelDir})");
@@ -907,7 +940,12 @@ internal static class Program
         {
             var result = await runner.RunAsync(
                 dec,
-                BuildIngestOptions(sw, dec.SourceName, skipLayerCheck: true, ecosystemPath: null),
+                BuildIngestOptions(sw, dec.SourceName, skipLayerCheck: true, ecosystemPath: null, cli)
+                with { DecomposerOptions = DecomposerOptions.ForWitness(
+                    dec.SourceName,
+                    EnvInt("LAPLACE_INGEST_BATCH", 2048, min: 1),
+                    cli.LangOverride,
+                    cli.EmitCrossLanguageLinks) },
                 CancellationToken.None);
             sw.Stop();
 
@@ -1480,14 +1518,15 @@ internal static class Program
         return 0;
     }
 
-    private static async Task<int> IngestUnicodeViaRunnerAsync()
-        => await IngestViaRunnerAsync(new UnicodeDecomposer(), "/vault/Data/Unicode", skipLayerCheck: true);
+    private static async Task<int> IngestUnicodeViaRunnerAsync(IngestCliArgs cli)
+        => await IngestViaRunnerAsync(new UnicodeDecomposer(), "/vault/Data/Unicode", skipLayerCheck: true, cli);
 
-    private static async Task<int> IngestISO639Async()
-        => await IngestViaRunnerAsync(new ISODecomposer(), "/vault/Data/ISO639", skipLayerCheck: false);
+    private static async Task<int> IngestISO639Async(IngestCliArgs cli)
+        => await IngestViaRunnerAsync(new ISODecomposer(), "/vault/Data/ISO639", skipLayerCheck: false, cli);
 
     private static IngestRunOptions BuildIngestOptions(
-        Stopwatch sw, string sourceName, bool skipLayerCheck, string? ecosystemPath)
+        Stopwatch sw, string sourceName, bool skipLayerCheck, string? ecosystemPath,
+        IngestCliArgs? cli = null)
     {
         long lastMs = -10_000;
         var progress = new Progress<Laplace.Ingestion.IngestProgress>(p =>
@@ -1496,21 +1535,27 @@ internal static class Program
             if (now - lastMs < 2000) return;
             lastMs = now;
             double secs = Math.Max(0.001, p.Elapsed.TotalSeconds);
-            long rows = p.EntitiesInserted + p.PhysicalitiesInserted + p.AttestationsInserted;
+            long rowsNew = p.EntitiesInserted + p.PhysicalitiesInserted + p.AttestationsInserted;
+            string filePart = p.FilesTotal > 0 ? $"files={p.FilesDone}/{p.FilesTotal} file_pct={p.FilePercent:F1}" : "";
+            string inputPart = p.InputUnitsTotal > 0
+                ? $"input={p.InputUnitsDone}/{p.InputUnitsTotal} input_pct={p.InputPercent:F1}"
+                : $"intents={p.UnitsApplied}/{p.UnitsProduced} intent_pct={p.InputPercent:F1}";
+            string cur = string.IsNullOrEmpty(p.CurrentFile) ? "" : $" current={p.CurrentFile}";
             Console.Error.WriteLine(
-                $"[{sourceName}] recorded {rows:N0} rows = {p.EntitiesInserted:N0} ent + "
-                + $"{p.PhysicalitiesInserted:N0} phys + {p.AttestationsInserted:N0} att "
-                + $"@ {rows / secs:N0} rows/s; {p.UnitsApplied:N0}/{p.UnitsProduced:N0} intents applied/decomposed "
-                + $"({p.UnitsProduced / secs:N1} dec/s); {p.RoundTrips:N0} RT"
-                + (p.EstimatedTotal is { } t && t > 0 ? $"; ~{100.0 * rows / t:F0}% of {t:N0} rows" : "")
-                + $"; {p.Elapsed.TotalSeconds:F0}s"
-                + (p.UnitsFailed > 0 ? $"; {p.UnitsFailed:N0} FAILED" : ""));
+                $"INGEST_PROGRESS source={p.SourceName} layer={p.LayerOrder} unit_kind={p.UnitKind} "
+                + $"{inputPart} {filePart}{cur} "
+                + $"rows_new={rowsNew:N0} rate_rows_s={rowsNew / secs:N0} round_trips={p.RoundTrips:N0} "
+                + $"elapsed_s={p.Elapsed.TotalSeconds:F0}"
+                + (p.UnitsFailed > 0 ? $" failed={p.UnitsFailed:N0} status=failed" : " status=running"));
         });
+        int batch = EnvInt("LAPLACE_INGEST_BATCH", 2048, min: 1);
         return IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = skipLayerCheck,
             EcosystemPath          = ecosystemPath,
-            BatchSize              = EnvInt("LAPLACE_INGEST_BATCH",       2048,    min: 1),
+            BatchSize              = batch,
+            DecomposerOptions      = DecomposerOptions.ForWitness(
+                sourceName, batch, cli?.LangOverride, cli?.EmitCrossLanguageLinks),
             CommitRows             = EnvInt("LAPLACE_INGEST_COMMIT_ROWS", 250_000, min: 0),
             ParallelWorkers        = EnvInt("LAPLACE_INGEST_WORKERS",     4,       min: 1),
             Progress               = progress,
@@ -1523,7 +1568,7 @@ internal static class Program
     }
 
     private static async Task<int> IngestViaRunnerAsync(
-        IDecomposer dec, string ecosystemPath, bool skipLayerCheck)
+        IDecomposer dec, string ecosystemPath, bool skipLayerCheck, IngestCliArgs? cli = null)
     {
         CodepointPerfcache.Load(ResolveBlob());
 
@@ -1542,7 +1587,7 @@ internal static class Program
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(
             dec,
-            BuildIngestOptions(sw, dec.SourceName, skipLayerCheck, ecosystemPath),
+            BuildIngestOptions(sw, dec.SourceName, skipLayerCheck, ecosystemPath, cli),
             CancellationToken.None);
         sw.Stop();
 
@@ -1564,16 +1609,16 @@ internal static class Program
         Console.WriteLine($"consensus: {materialized:N0} relations materialized "
                         + $"(accumulated at ingest; evidence = provenance-only)");
         await RegisterDynamicCanonicalsAsync(ds, dec.CanonicalNamesForReadback);
-        try { await PrintCountsAsync(ds); }
+        try { await PrintIngestValidationAsync(ds, dec); }
         catch (Exception ex)
-        { Console.Error.WriteLine($"warn: substrate counts diagnostic failed (ingest itself is complete): {ex.Message}"); }
+        { Console.Error.WriteLine($"warn: ingest validation failed (ingest itself is complete): {ex.Message}"); }
         return 0;
     }
 
     private static async Task<int> StatsAsync()
     {
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
-        await PrintCountsAsync(ds);
+        await PrintIngestValidationAsync(ds, decomposer: null);
         return 0;
     }
 
@@ -1594,9 +1639,48 @@ internal static class Program
         Console.WriteLine($"registered {names.Count:N0} canonical names");
     }
 
-    private static async Task PrintCountsAsync(NpgsqlDataSource ds)
+    private static async Task PrintIngestValidationAsync(NpgsqlDataSource ds, IDecomposer? decomposer)
     {
         await using var conn = await ds.OpenConnectionAsync();
+
+        async Task<long> EvidenceForSource(string sourceKey)
+        {
+            await using var c = conn.CreateCommand();
+            c.CommandText = "SELECT laplace.evidence_count(p_source => laplace.source_id($1))";
+            c.Parameters.AddWithValue(sourceKey);
+            return (long)(await c.ExecuteScalarAsync() ?? 0L);
+        }
+
+        async Task<long> ContentForSource(string sourceKey)
+        {
+            await using var c = conn.CreateCommand();
+            c.CommandText = "SELECT laplace.content_count(p_source => laplace.source_id($1))";
+            c.Parameters.AddWithValue(sourceKey);
+            return (long)(await c.ExecuteScalarAsync() ?? 0L);
+        }
+
+        async Task<long> RelationEvidence(string relationType, string? sourceKey = null)
+        {
+            await using var c = conn.CreateCommand();
+            c.CommandText = sourceKey is null
+                ? "SELECT laplace.evidence_count(p_type => laplace.relation_type_id($1))"
+                : "SELECT laplace.evidence_count(p_type => laplace.relation_type_id($1), p_source => laplace.source_id($2))";
+            c.Parameters.AddWithValue(relationType);
+            if (sourceKey is not null) c.Parameters.AddWithValue(sourceKey);
+            return (long)(await c.ExecuteScalarAsync() ?? 0L);
+        }
+
+        async Task<bool> LayerMarkedComplete(int layer, string sourceKey)
+        {
+            await using var c = conn.CreateCommand();
+            c.CommandText =
+                "SELECT laplace.evidence_count("
+                + "p_type => laplace.canonical_id('substrate/kind/HasLayerCompleted/' || $1 || '/v1'), "
+                + "p_source => laplace.source_id($2)) > 0";
+            c.Parameters.AddWithValue(layer);
+            c.Parameters.AddWithValue(sourceKey);
+            return (bool)(await c.ExecuteScalarAsync() ?? false);
+        }
 
         Console.WriteLine("substrate counts:");
         {
@@ -1608,54 +1692,134 @@ internal static class Program
                 Console.WriteLine($"  {rdr.GetString(0),-24}: {rdr.GetInt64(1),12:N0}");
         }
 
+        if (decomposer is null)
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"SELECT laplace.render(laplace.canonical_id('A')), f.tier,
-                                       p.x, p.y, p.z, p.m, encode(p.hilbert_index, 'hex')
-                                FROM laplace.entity_facets(laplace.canonical_id('A')) f
-                                CROSS JOIN laplace.entity_physicalities(laplace.canonical_id('A')) p
-                                WHERE p.type = 1
-                                  AND p.source_id = laplace.source_id('UnicodeDecomposer')";
-            await using var rdr = await cmd.ExecuteReaderAsync();
-            if (await rdr.ReadAsync())
-            {
-                Console.WriteLine("  sample U+0041 'A':");
-                Console.WriteLine($"    render    : {rdr.GetString(0)}  tier={rdr.GetInt16(1)}");
-                Console.WriteLine($"    coord     : ({rdr.GetDouble(2):F6}, {rdr.GetDouble(3):F6}, {rdr.GetDouble(4):F6}, {rdr.GetDouble(5):F6})");
-                Console.WriteLine($"    hilbert   : {rdr.GetString(6)}");
-            }
-            else
-            {
-                Console.WriteLine("  (no CONTENT physicality for U+0041 yet — run: laplace ingest unicode)");
-            }
-        }
-
-        async Task<long> KindCount(string typeName)
-        {
-            await using var c = conn.CreateCommand();
-            c.CommandText = "SELECT laplace.evidence_count(p_type => laplace.relation_type_id($1))";
-            c.Parameters.AddWithValue(typeName);
-            return (long)(await c.ExecuteScalarAsync())!;
-        }
-
-        string[] modelKinds =
-        [
-            "EMBEDS", "Q_PROJECTS", "K_PROJECTS", "V_PROJECTS", "O_PROJECTS",
-            "GATES", "UP_PROJECTS", "DOWN_PROJECTS", "NORM_SCALES", "OUTPUT_PROJECTS",
-        ];
-        long modelAtts = 0;
-        var kindCounts = new long[modelKinds.Length];
-        for (int i = 0; i < modelKinds.Length; i++)
-            modelAtts += kindCounts[i] = await KindCount(modelKinds[i]);
-        if (modelAtts == 0)
-        {
-            Console.WriteLine("  model attestations    : (none — ingest model)");
+            Console.WriteLine("  witnesses:");
+            await using var src = conn.CreateCommand();
+            src.CommandText = "SELECT source, evidence, content FROM laplace.source_counts()";
+            await using var rdr = await src.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+                Console.WriteLine($"    {rdr.GetString(0),-28}: {rdr.GetInt64(1),12:N0} att  {rdr.GetInt64(2),12:N0} content");
             return;
         }
 
-        Console.WriteLine($"  model attestations    : {modelAtts,9:N0}");
-        for (int i = 0; i < modelKinds.Length; i++)
-            Console.WriteLine($"  └ {modelKinds[i],-16}: {kindCounts[i],9:N0}");
+        string srcKey = decomposer.SourceName;
+        long att = await EvidenceForSource(srcKey);
+        long content = await ContentForSource(srcKey);
+        bool layerOk = await LayerMarkedComplete(decomposer.LayerOrder, srcKey);
+        Console.WriteLine($"  witness [{srcKey}] L{decomposer.LayerOrder}: {att:N0} attestations, {content:N0} content, layer_complete={layerOk}");
+
+        switch (srcKey)
+        {
+            case "UnicodeDecomposer":
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = @"SELECT laplace.render(laplace.canonical_id('A')), f.tier,
+                                           p.x, p.y, p.z, p.m, encode(p.hilbert_index, 'hex')
+                                    FROM laplace.entity_facets(laplace.canonical_id('A')) f
+                                    CROSS JOIN laplace.entity_physicalities(laplace.canonical_id('A')) p
+                                    WHERE p.type = 1
+                                      AND p.source_id = laplace.source_id('UnicodeDecomposer')";
+                await using var rdr = await cmd.ExecuteReaderAsync();
+                if (await rdr.ReadAsync())
+                {
+                    Console.WriteLine("  check U+0041 'A':");
+                    Console.WriteLine($"    render  : {rdr.GetString(0)}  tier={rdr.GetInt16(1)}");
+                    Console.WriteLine($"    coord   : ({rdr.GetDouble(2):F6}, {rdr.GetDouble(3):F6}, {rdr.GetDouble(4):F6}, {rdr.GetDouble(5):F6})");
+                }
+                else Console.WriteLine("  FAIL: no Unicode CONTENT for U+0041");
+                break;
+            }
+            case "ISO639Decomposer":
+            {
+                long langs = await RelationEvidence("HAS_ISO639_3_CODE", srcKey)
+                           + await RelationEvidence("HAS_ISO639_1_CODE", srcKey)
+                           + await RelationEvidence("HAS_ISO639_2_CODE", srcKey);
+                Console.WriteLine($"  check languages: {langs:N0} ISO code attestations");
+                break;
+            }
+            case "WordNetDecomposer":
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                    SELECT laplace.word_id('dog') IS NOT NULL AS dog_ok,
+                           (SELECT count(*) FROM laplace.senses(laplace.word_id('dog'))) AS sense_n,
+                           (SELECT definition FROM laplace.define(laplace.word_id('dog'), 1) LIMIT 1) AS gloss,
+                           laplace.evidence_count(p_type => laplace.relation_type_id('IS_A'),
+                                                  p_source => laplace.source_id('WordNetDecomposer')) AS is_a_n,
+                           laplace.evidence_count(p_type => laplace.relation_type_id('HAS_SENSE'),
+                                                  p_source => laplace.source_id('WordNetDecomposer')) AS has_sense_n";
+                await using var rdr = await cmd.ExecuteReaderAsync();
+                if (await rdr.ReadAsync())
+                {
+                    bool dogOk = rdr.GetBoolean(0);
+                    long senses = rdr.GetInt64(1);
+                    string? gloss = rdr.IsDBNull(2) ? null : rdr.GetString(2);
+                    long isA = rdr.GetInt64(3);
+                    long hasSense = rdr.GetInt64(4);
+                    Console.WriteLine($"  check wordnet/dog: id_ok={dogOk} senses={senses:N0} IS_A={isA:N0} HAS_SENSE={hasSense:N0}");
+                    if (gloss is not null) Console.WriteLine($"    define  : {gloss}");
+                    if (!dogOk || senses == 0) Console.WriteLine("  FAIL: wordnet lexicon not queryable");
+                }
+                break;
+            }
+            case "VerbNetDecomposer":
+                Console.WriteLine($"  check verbnet: HAS_VERB_FRAME={await RelationEvidence("HAS_VERB_FRAME", srcKey):N0} "
+                                + $"HAS_THEMATIC_ROLE={await RelationEvidence("HAS_THEMATIC_ROLE", srcKey):N0}");
+                break;
+            case "PropBankDecomposer":
+                Console.WriteLine($"  check propbank: HAS_SEMANTIC_ROLE={await RelationEvidence("HAS_SEMANTIC_ROLE", srcKey):N0} "
+                                + $"HAS_SENSE={await RelationEvidence("HAS_SENSE", srcKey):N0}");
+                break;
+            case "Atomic2020Decomposer":
+                Console.WriteLine($"  check atomic: CAUSES={await RelationEvidence("CAUSES", srcKey):N0} "
+                                + $"X_WANT={await RelationEvidence("X_WANT", srcKey):N0}");
+                break;
+            case "ConceptNetDecomposer":
+                Console.WriteLine($"  check conceptnet: RelatedTo={await RelationEvidence("RELATED_TO", srcKey):N0} "
+                                + $"IsA={await RelationEvidence("IS_A", srcKey):N0}");
+                break;
+            case "UDDecomposer":
+                Console.WriteLine($"  check ud: HAS_POS={await RelationEvidence("HAS_POS", srcKey):N0} "
+                                + $"HAS_LEMMA={await RelationEvidence("HAS_LEMMA", srcKey):N0}");
+                break;
+            case "TatoebaDecomposer":
+                Console.WriteLine($"  check tatoeba: IS_TRANSLATION_OF={await RelationEvidence("IS_TRANSLATION_OF", srcKey):N0} "
+                                + $"HAS_LANGUAGE={await RelationEvidence("HAS_LANGUAGE", srcKey):N0}");
+                break;
+            case "WiktionaryDecomposer":
+                Console.WriteLine($"  check wiktionary: HAS_DEFINITION={await RelationEvidence("HAS_DEFINITION", srcKey):N0} "
+                                + $"HAS_EXAMPLE={await RelationEvidence("HAS_EXAMPLE", srcKey):N0}");
+                break;
+            case "OMWDecomposer":
+                Console.WriteLine($"  check omw: HAS_DEFINITION={await RelationEvidence("HAS_DEFINITION", srcKey):N0}");
+                break;
+            case "FrameNetDecomposer":
+                Console.WriteLine($"  check framenet: HAS_FRAME_ELEMENT={await RelationEvidence("HAS_FRAME_ELEMENT", srcKey):N0}");
+                break;
+            case "SemLinkDecomposer":
+                Console.WriteLine($"  check semlink: CORRESPONDS_TO={await RelationEvidence("CORRESPONDS_TO", srcKey):N0}");
+                break;
+            case "OpenSubtitlesDecomposer":
+                Console.WriteLine($"  check opensubtitles: IS_TRANSLATION_OF={await RelationEvidence("IS_TRANSLATION_OF", srcKey):N0}");
+                break;
+            case "ModelDecomposer":
+            {
+                string[] modelKinds =
+                [
+                    "EMBEDS", "Q_PROJECTS", "K_PROJECTS", "V_PROJECTS", "O_PROJECTS",
+                    "GATES", "UP_PROJECTS", "DOWN_PROJECTS", "NORM_SCALES", "OUTPUT_PROJECTS",
+                ];
+                long modelAtts = 0;
+                foreach (var k in modelKinds)
+                    modelAtts += await RelationEvidence(k, srcKey);
+                Console.WriteLine($"  check model: {modelAtts:N0} structural attestations");
+                break;
+            }
+            default:
+                Console.WriteLine($"  check: {att:N0} attestations from this witness");
+                break;
+        }
     }
 
     private static int Decompose(string text)

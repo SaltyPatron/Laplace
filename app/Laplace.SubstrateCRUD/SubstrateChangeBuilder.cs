@@ -11,6 +11,7 @@ public sealed class SubstrateChangeBuilder
     private readonly Hash128 _sourceId;
     private readonly string _sourceContentUnitName;
     private readonly Hash128? _parentIntentId;
+    private long _inputUnitsConsumed;
 
     private readonly HashSet<Hash128> _seenEntities = new();
     private readonly HashSet<Hash128> _seenPhysicalities = new();
@@ -31,6 +32,12 @@ public sealed class SubstrateChangeBuilder
         _entities      = ImmutableArray.CreateBuilder<EntityRow>(entityCapacity);
         _physicalities = ImmutableArray.CreateBuilder<PhysicalityRow>(physicalityCapacity);
         _attestations  = ImmutableArray.CreateBuilder<AttestationRow>(attestationCapacity);
+    }
+
+    public SubstrateChangeBuilder SetInputUnitsConsumed(long n)
+    {
+        _inputUnitsConsumed = n;
+        return this;
     }
 
     public SubstrateChangeBuilder AddEntity(EntityRow row)
@@ -101,7 +108,8 @@ public sealed class SubstrateChangeBuilder
                 _sourceId,
                 _sourceContentUnitName,
                 DateTimeOffset.UtcNow,
-                _parentIntentId));
+                _parentIntentId,
+                _inputUnitsConsumed));
     }
 
     private static Hash128 ComputeIntentId(
