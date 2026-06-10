@@ -3,8 +3,11 @@ if(WIN32)
         src/laplace_substrate.c
         src/generate_walk.c
         src/generation_native.c
+        src/generation_index.c
         src/astar_path.c
         src/converse_native.c
+        src/converse_reads_native.c
+        src/respond_native.c
     )
     set_target_properties(laplace_substrate PROPERTIES
         PREFIX "" OUTPUT_NAME laplace_substrate SUFFIX ".dll"
@@ -32,8 +35,11 @@ set(EXT_C_SOURCES
     src/laplace_substrate.c
     src/generate_walk.c
     src/generation_native.c
+    src/generation_index.c
     src/astar_path.c
     src/converse_native.c
+    src/converse_reads_native.c
+    src/respond_native.c
 )
 
 add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})

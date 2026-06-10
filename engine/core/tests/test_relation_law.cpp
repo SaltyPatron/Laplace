@@ -77,6 +77,35 @@ TEST(LaplacePosLaw, UposCanonicalRoundTrip) {
     EXPECT_TRUE(hash128_equals(&id, &expected));
 }
 
+TEST(LaplaceRelationLaw, DeprelDynamicFamily) {
+    hash128_t tid, parent_id;
+    double rank = 0;
+    laplace_rel_symmetry_t sym = LAPLACE_REL_SYMMETRY_ASYMMETRIC;
+    uint8_t flip = 1;
+    ASSERT_EQ(0, laplace_relation_resolve_deprel(
+        "nsubj", &tid, &rank, &sym, &flip, &parent_id));
+    EXPECT_TRUE(hash128_equals(&type_id("DEP_NSUBJ"), &tid));
+    EXPECT_TRUE(hash128_equals(&type_id("DEPENDS_ON"), &parent_id));
+    EXPECT_DOUBLE_EQ(0.73, rank);
+    EXPECT_EQ(0, flip);
+
+    ASSERT_EQ(0, laplace_relation_resolve_deprel(
+        "nsubj:pass", &tid, &rank, &sym, &flip, &parent_id));
+    EXPECT_TRUE(hash128_equals(&type_id("DEP_NSUBJ_PASS"), &tid));
+    EXPECT_TRUE(hash128_equals(&type_id("DEP_NSUBJ"), &parent_id));
+}
+
+TEST(LaplaceRelationLaw, FeatureDynamicFamily) {
+    hash128_t tid, parent_id;
+    double rank = 0;
+    laplace_rel_symmetry_t sym = LAPLACE_REL_SYMMETRY_ASYMMETRIC;
+    uint8_t flip = 1;
+    ASSERT_EQ(0, laplace_relation_resolve_feature(
+        "Number", &tid, &rank, &sym, &flip, &parent_id));
+    EXPECT_TRUE(hash128_equals(&type_id("FEAT_NUMBER"), &tid));
+    EXPECT_TRUE(hash128_equals(&type_id("HAS_FEATURE"), &parent_id));
+}
+
 TEST(LaplacePosLaw, WiktionaryMapsToCanonical) {
     hash128_t id;
     ASSERT_EQ(0, laplace_pos_resolve_entity("noun", LAPLACE_POS_TAGSET_WIKTIONARY, &id));

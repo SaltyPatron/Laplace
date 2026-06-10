@@ -15,7 +15,15 @@ OUT_SEED_FRAG = ROOT / "extension/laplace_substrate/sql/generated/21_seed_relati
 def parse_simple_toml(path: Path) -> dict:
     """Minimal TOML parser for our manifest shape."""
     text = path.read_text(encoding="utf-8")
-    data: dict = {"ranks": {}, "relation": [], "alias": [], "upos": {}, "wordnet": {}, "wiktionary": {}}
+    data: dict = {
+        "ranks": {},
+        "relation": [],
+        "alias": [],
+        "dynamic": {},
+        "upos": {},
+        "wordnet": {},
+        "wiktionary": {},
+    }
     section = None
     current: dict | None = None
     key_stack = []
@@ -35,6 +43,11 @@ def parse_simple_toml(path: Path) -> dict:
                 section = "alias"
                 current = {}
                 data["alias"].append(current)
+                continue
+            if inner.startswith("dynamic."):
+                section = "dynamic"
+                current = {}
+                data["dynamic"][inner.split(".", 1)[1]] = current
                 continue
             if inner == "ranks":
                 section = "ranks"
@@ -70,6 +83,10 @@ def parse_simple_toml(path: Path) -> dict:
                 val = v
         if section == "ranks":
             data["ranks"][k] = val
+        elif section == "dynamic" and current is not None:
+            if k.startswith('"') and k.endswith('"'):
+                k = k[1:-1]
+            current[k] = val
         elif current is not None:
             if k.startswith('"') and k.endswith('"'):
                 k = k[1:-1]
@@ -79,6 +96,179 @@ def parse_simple_toml(path: Path) -> dict:
 
 def c_hash(hi: int, lo: int) -> str:
     return f"{{ .hi = 0x{hi:016x}ULL, .lo = 0x{lo:016x}ULL }}"
+
+
+def emit_dynamic_resolvers(dynamic: dict, ranks: dict) -> str:
+    """Codegen DEP_/EDEP_/FEAT_ dynamic family resolvers."""
+
+    def rank_val(key: str) -> float:
+        return float(ranks.get(key, 0.09))
+
+    dep = dynamic.get("deprel", {})
+    edep = dynamic.get("enhanced_deprel", {})
+    feat = dynamic.get("feature", {})
+
+    dep_rank = rank_val(dep.get("rank", "partitive"))
+    edep_rank = rank_val(edep.get("rank", "partitive"))
+    feat_rank = rank_val(feat.get("rank", "partitive"))
+
+    sym_map = {
+        "symmetric": "LAPLACE_REL_SYMMETRY_SYMMETRIC",
+        "asymmetric": "LAPLACE_REL_SYMMETRY_ASYMMETRIC",
+    }
+    dep_sym = sym_map.get(dep.get("symmetry", "asymmetric"), "LAPLACE_REL_SYMMETRY_ASYMMETRIC")
+    edep_sym = sym_map.get(edep.get("symmetry", "asymmetric"), "LAPLACE_REL_SYMMETRY_ASYMMETRIC")
+    feat_sym = sym_map.get(feat.get("symmetry", "asymmetric"), "LAPLACE_REL_SYMMETRY_ASYMMETRIC")
+
+    return f"""
+static void dyn_trim(char* s) {{
+    size_t n = strlen(s);
+    while (n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\\t' || s[n - 1] == '\\r' || s[n - 1] == '\\n'))
+        s[--n] = '\\0';
+    size_t i = 0;
+    while (s[i] == ' ' || s[i] == '\\t' || s[i] == '\\r' || s[i] == '\\n')
+        ++i;
+    if (i > 0)
+        memmove(s, s + i, strlen(s + i) + 1);
+}}
+
+static void dyn_lower(char* s) {{
+    for (; *s; ++s) {{
+        if (*s >= 'A' && *s <= 'Z')
+            *s = (char)(*s + 32);
+    }}
+}}
+
+static void dyn_upper(char* s) {{
+    for (; *s; ++s) {{
+        if (*s >= 'a' && *s <= 'z')
+            *s = (char)(*s - 32);
+    }}
+}}
+
+static int dyn_build_prefixed(
+    const char* input,
+    const char* prefix,
+    char sep,
+    const char* root_canon,
+    int lowercase_input,
+    char* out_canon,
+    size_t out_canon_sz,
+    char* out_parent_canon,
+    size_t out_parent_sz) {{
+    char norm[128];
+    size_t i, j;
+    if (!input || !prefix || !root_canon || !out_canon || !out_parent_canon)
+        return -1;
+    if (strlen(input) >= sizeof(norm))
+        return -1;
+    memcpy(norm, input, strlen(input) + 1);
+    dyn_trim(norm);
+    if (lowercase_input)
+        dyn_lower(norm);
+    if (norm[0] == '\\0')
+        return -1;
+    if (snprintf(out_canon, out_canon_sz, "%s", prefix) <= 0)
+        return -1;
+    j = strlen(out_canon);
+    for (i = 0; norm[i] != '\\0' && j + 1 < out_canon_sz; ++i) {{
+        char c = norm[i];
+        if (c == sep)
+            c = '_';
+        out_canon[j++] = c;
+    }}
+    out_canon[j] = '\\0';
+    dyn_upper(out_canon + strlen(prefix));
+    if (sep) {{
+        const char* colon = strchr(norm, sep);
+        if (colon && colon > norm) {{
+            char parent_body[96];
+            size_t plen = (size_t)(colon - norm);
+            if (plen >= sizeof(parent_body))
+                return -1;
+            memcpy(parent_body, norm, plen);
+            parent_body[plen] = '\\0';
+            if (snprintf(out_parent_canon, out_parent_sz, "%s%s", prefix, parent_body) <= 0)
+                return -1;
+            dyn_upper(out_parent_canon + strlen(prefix));
+        }} else if (snprintf(out_parent_canon, out_parent_sz, "%s", root_canon) <= 0) {{
+            return -1;
+        }}
+    }} else if (snprintf(out_parent_canon, out_parent_sz, "%s", root_canon) <= 0) {{
+        return -1;
+    }}
+    return 0;
+}}
+
+static int dyn_resolve_prefixed(
+    const char* input,
+    const char* prefix,
+    char sep,
+    const char* root_canon,
+    int lowercase_input,
+    double rank_val,
+    laplace_rel_symmetry_t symmetry,
+    hash128_t* out_type_id,
+    double* out_rank,
+    laplace_rel_symmetry_t* out_symmetry,
+    uint8_t* out_flip,
+    hash128_t* out_parent_id) {{
+    char canon[128], parent_canon[128];
+    if (!out_type_id)
+        return -1;
+    if (dyn_build_prefixed(input, prefix, sep, root_canon, lowercase_input,
+                           canon, sizeof(canon), parent_canon, sizeof(parent_canon)) != 0)
+        return -1;
+    if (laplace_relation_type_id(canon, out_type_id) != 0)
+        return -1;
+    if (out_parent_id && laplace_relation_type_id(parent_canon, out_parent_id) != 0)
+        return -1;
+    if (out_rank)
+        *out_rank = rank_val;
+    if (out_symmetry)
+        *out_symmetry = symmetry;
+    if (out_flip)
+        *out_flip = 0;
+    return 0;
+}}
+
+int laplace_relation_resolve_deprel(
+    const char* deprel,
+    hash128_t* out_type_id,
+    double* out_rank,
+    laplace_rel_symmetry_t* out_symmetry,
+    uint8_t* out_flip,
+    hash128_t* out_parent_id) {{
+    return dyn_resolve_prefixed(deprel, "{dep.get('prefix', 'DEP_')}", '{dep.get('separator', ':')}',
+                                "{dep.get('root', 'DEPENDS_ON')}", 1, {dep_rank}, {dep_sym},
+                                out_type_id, out_rank, out_symmetry, out_flip, out_parent_id);
+}}
+
+int laplace_relation_resolve_enhanced_deprel(
+    const char* deprel,
+    hash128_t* out_type_id,
+    double* out_rank,
+    laplace_rel_symmetry_t* out_symmetry,
+    uint8_t* out_flip,
+    hash128_t* out_parent_id) {{
+    return dyn_resolve_prefixed(deprel, "{edep.get('prefix', 'EDEP_')}", '{edep.get('separator', ':')}',
+                                "{edep.get('root', 'ENHANCED_DEPENDS_ON')}", 1, {edep_rank}, {edep_sym},
+                                out_type_id, out_rank, out_symmetry, out_flip, out_parent_id);
+}}
+
+int laplace_relation_resolve_feature(
+    const char* feature_name,
+    hash128_t* out_type_id,
+    double* out_rank,
+    laplace_rel_symmetry_t* out_symmetry,
+    uint8_t* out_flip,
+    hash128_t* out_parent_id) {{
+    return dyn_resolve_prefixed(feature_name, "{feat.get('prefix', 'FEAT_')}", '\\0',
+                                "{feat.get('root', 'HAS_FEATURE')}", {1 if feat.get('lowercase_input', False) else 0},
+                                {feat_rank}, {feat_sym},
+                                out_type_id, out_rank, out_symmetry, out_flip, out_parent_id);
+}}
+"""
 
 
 def emit_relation_law(rel: dict) -> None:
@@ -143,6 +333,16 @@ int laplace_relation_resolve_surface(const char* surface, hash128_t* out_type_id
                                      uint8_t* out_flip, hash128_t* out_parent_id);
 int laplace_relation_lookup(const hash128_t* type_id, const laplace_relation_def_t** out_def);
 int laplace_relation_in_family(const hash128_t* type_id, const char* family_root, int* out);
+
+int laplace_relation_resolve_deprel(const char* deprel, hash128_t* out_type_id,
+                                    double* out_rank, laplace_rel_symmetry_t* out_symmetry,
+                                    uint8_t* out_flip, hash128_t* out_parent_id);
+int laplace_relation_resolve_enhanced_deprel(const char* deprel, hash128_t* out_type_id,
+                                             double* out_rank, laplace_rel_symmetry_t* out_symmetry,
+                                             uint8_t* out_flip, hash128_t* out_parent_id);
+int laplace_relation_resolve_feature(const char* feature_name, hash128_t* out_type_id,
+                                     double* out_rank, laplace_rel_symmetry_t* out_symmetry,
+                                     uint8_t* out_flip, hash128_t* out_parent_id);
 
 #ifdef __cplusplus
 }
@@ -323,8 +523,11 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
     return 1;
 }}
 """
+    dynamic_impl = emit_dynamic_resolvers(rel.get("dynamic", {}), ranks)
     (OUT_CORE / "src/generated/relation_law.c").parent.mkdir(parents=True, exist_ok=True)
-    (OUT_CORE / "src/generated/relation_law.c").write_text("\n".join(lines) + impl, encoding="utf-8")
+    (OUT_CORE / "src/generated/relation_law.c").write_text(
+        "\n".join(lines) + impl + dynamic_impl, encoding="utf-8"
+    )
 
     # Seed SQL: canonical relation type paths
     seed_names = sorted({f"substrate/type/{n}/v1" for n in canon_names})

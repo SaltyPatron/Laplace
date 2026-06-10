@@ -15,6 +15,7 @@ internal static class EndpointMappings
             {
                 new { id = "laplace-converse-001", @object = "model", created = 0, owned_by = "laplace" },
                 new { id = "laplace-completions-001", @object = "model", created = 0, owned_by = "laplace" },
+                new { id = "laplace-code-001", @object = "model", created = 0, owned_by = "laplace" },
                 new { id = "laplace-embeddings-pending", @object = "model", created = 0, owned_by = "laplace", status = "pending" }
             }
         }));
@@ -61,6 +62,73 @@ internal static class EndpointMappings
                 return EndpointJson.BadRequest("invalid_request_error", "At least one message must include non-empty 'content'.");
 
             if (gate.Quote is not null) billing.MarkConsumedAndRecord(gate.Quote);
+
+            // Chat IS generation: the native autoregressive surface over witnessed
+            // content trajectories is modality-blind — prose and code are both token
+            // sequences over the same floor — so every chat model generates, and the
+            // intent-classified knowledge engine (laplace.converse) is the opt-in
+            // grounded path selected by a "converse" model id.
+            if (!payload.Model.Contains("converse", StringComparison.OrdinalIgnoreCase))
+            {
+                int genSteps = payload.MaxTokens ?? payload.MaxCompletionTokens ?? 128;
+                double genTemp = payload.Temperature ?? 0.6;
+
+                if (payload.Stream)
+                {
+                    var genId = $"chatcmpl-{Guid.NewGuid():N}";
+                    var genCreated = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                    request.HttpContext.Response.ContentType = "text/event-stream";
+                    request.HttpContext.Response.Headers["Cache-Control"] = "no-cache";
+                    request.HttpContext.Response.Headers["X-Accel-Buffering"] = "no";
+
+                    var genRole = JsonSerializer.Serialize(new {
+                        id = genId, @object = "chat.completion.chunk", created = genCreated, model = payload.Model,
+                        choices = new[] { new { index = 0, delta = new { role = "assistant" }, finish_reason = (string?)null } }
+                    });
+                    await request.HttpContext.Response.WriteAsync($"data: {genRole}\n\n", ct);
+
+                    await foreach (var token in substrate.GenerateNgramStreamAsync(
+                        prompt, steps: genSteps, temperature: genTemp, ct: ct))
+                    {
+                        var chunk = JsonSerializer.Serialize(new {
+                            id = genId, @object = "chat.completion.chunk", created = genCreated, model = payload.Model,
+                            choices = new[] { new { index = 0, delta = new { content = token.Token }, finish_reason = (string?)null } }
+                        });
+                        await request.HttpContext.Response.WriteAsync($"data: {chunk}\n\n", ct);
+                    }
+                    var genStop = JsonSerializer.Serialize(new {
+                        id = genId, @object = "chat.completion.chunk", created = genCreated, model = payload.Model,
+                        choices = new[] { new { index = 0, delta = new { content = "" }, finish_reason = "stop" } }
+                    });
+                    await request.HttpContext.Response.WriteAsync($"data: {genStop}\n\n", ct);
+                    await request.HttpContext.Response.WriteAsync("data: [DONE]\n\n", ct);
+                    return Results.Empty;
+                }
+
+                var genTokens = new List<GenerateToken>(genSteps);
+                await foreach (var token in substrate.GenerateNgramStreamAsync(
+                    prompt, steps: genSteps, temperature: genTemp, ct: ct))
+                    genTokens.Add(token);
+
+                return Results.Json(new
+                {
+                    id = $"chatcmpl-{Guid.NewGuid():N}",
+                    @object = "chat.completion",
+                    created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                    model = payload.Model,
+                    choices = new[]
+                    {
+                        new
+                        {
+                            index = 0,
+                            message = new { role = "assistant", content = string.Concat(genTokens.Select(t => t.Token)).TrimStart() },
+                            finish_reason = "stop"
+                        }
+                    },
+                    billing = (object?)null,
+                    metadata = new { generated_tokens = genTokens.Count }
+                });
+            }
 
             // Serve the substrate's own conversational engine (laplace.converse): route_prompt
             // classifies intent, respond() grounds every reply line in witnessed consensus.
