@@ -1,3 +1,5 @@
+# Linux CI / dev-host recipes only. Windows (canonical): scripts/win/*.cmd —
+# see .github/instructions/build-environment.instructions.md (never cmake --install to Program Files).
 set shell := ["bash", "-uc"]
 
 default:

@@ -58,7 +58,17 @@
     "code_corpora": [
       { "cli": "tiny-codes", "path": "tiny-codes", "download": "download-code-data.cmd tiny-codes", "hf_token_env": "HF_TOKEN" },
       { "cli": "stack", "path": "stack-v2", "download": "download-code-data.cmd stack-v2", "hf_token_env": "HF_TOKEN" }
-    ]
+    ],
+    "authority_sources": {
+      "law": "Official language/platform sources and their documentation are the highest-trust code witnesses: the language's own repository testifies its idioms; its docs are the Rosetta intent↔implementation corpus. Acquire with download-code-data.cmd authority; ingest via the repos loop after local repositories.",
+      "root": "D:/Data/Ingest/code-authority",
+      "clones": [
+        { "repo": "postgres/postgres", "dir": "postgres", "witnesses": "C + SQL idioms from the database the substrate lives in" },
+        { "repo": "python/cpython", "dir": "cpython", "witnesses": "C + Python from the language's source of truth" },
+        { "repo": "dotnet/docs", "dir": "docs", "witnesses": "learn.microsoft.com content as markdown — intent↔code pairs" },
+        { "repo": "dotnet/runtime", "dir": "runtime", "witnesses": "C# + C from the platform's source of truth (largest — ingest last)" }
+      ]
+    }
   },
   "world_usage_deferred": {
     "skip_env": "LAPLACE_SKIP_USAGE",

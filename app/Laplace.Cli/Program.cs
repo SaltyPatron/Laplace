@@ -788,6 +788,10 @@ internal static class Program
                         + "  language scope: --langs or LAPLACE_INGEST_LANGS; per-source LAPLACE_{SOURCE}_LANGS\n"
                         + "  --no-evidence: fold consensus only; skip laplace.attestations (or LAPLACE_PERSIST_EVIDENCE=0)");
 
+        // every ingest verb deposits content witnesses, and the native floor
+        // requires the codepoint table — load it once here, not per-verb
+        CodepointPerfcache.Load(ResolveBlob());
+
         return cli.Source.ToLowerInvariant() switch
         {
             "unicode"  => await IngestUnicodeViaRunnerAsync(cli),

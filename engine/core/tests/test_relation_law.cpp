@@ -84,15 +84,18 @@ TEST(LaplaceRelationLaw, DeprelDynamicFamily) {
     uint8_t flip = 1;
     ASSERT_EQ(0, laplace_relation_resolve_deprel(
         "nsubj", &tid, &rank, &sym, &flip, &parent_id));
-    EXPECT_TRUE(hash128_equals(&type_id("DEP_NSUBJ"), &tid));
-    EXPECT_TRUE(hash128_equals(&type_id("DEPENDS_ON"), &parent_id));
+    hash128_t dep_nsubj  = type_id("DEP_NSUBJ");
+    hash128_t depends_on = type_id("DEPENDS_ON");
+    EXPECT_TRUE(hash128_equals(&dep_nsubj, &tid));
+    EXPECT_TRUE(hash128_equals(&depends_on, &parent_id));
     EXPECT_DOUBLE_EQ(0.73, rank);
     EXPECT_EQ(0, flip);
 
     ASSERT_EQ(0, laplace_relation_resolve_deprel(
         "nsubj:pass", &tid, &rank, &sym, &flip, &parent_id));
-    EXPECT_TRUE(hash128_equals(&type_id("DEP_NSUBJ_PASS"), &tid));
-    EXPECT_TRUE(hash128_equals(&type_id("DEP_NSUBJ"), &parent_id));
+    hash128_t dep_nsubj_pass = type_id("DEP_NSUBJ_PASS");
+    EXPECT_TRUE(hash128_equals(&dep_nsubj_pass, &tid));
+    EXPECT_TRUE(hash128_equals(&dep_nsubj, &parent_id));
 }
 
 TEST(LaplaceRelationLaw, FeatureDynamicFamily) {
@@ -102,8 +105,10 @@ TEST(LaplaceRelationLaw, FeatureDynamicFamily) {
     uint8_t flip = 1;
     ASSERT_EQ(0, laplace_relation_resolve_feature(
         "Number", &tid, &rank, &sym, &flip, &parent_id));
-    EXPECT_TRUE(hash128_equals(&type_id("FEAT_NUMBER"), &tid));
-    EXPECT_TRUE(hash128_equals(&type_id("HAS_FEATURE"), &parent_id));
+    hash128_t feat_number = type_id("FEAT_NUMBER");
+    hash128_t has_feature = type_id("HAS_FEATURE");
+    EXPECT_TRUE(hash128_equals(&feat_number, &tid));
+    EXPECT_TRUE(hash128_equals(&has_feature, &parent_id));
 }
 
 TEST(LaplacePosLaw, WiktionaryMapsToCanonical) {

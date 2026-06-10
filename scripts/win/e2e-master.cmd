@@ -6,6 +6,9 @@ rem ============================================================================
 rem  Single orchestration script: clean -> codegen -> build -> perfcache -> DB ->
 rem  full witness ladder ingest -> model deposition -> verify.
 rem
+rem  Agent build/deploy rules: .github\instructions\build-environment.instructions.md
+rem  (extensions deploy to D:\Data\Postgres\laplace via install-extensions.cmd — NOT Program Files)
+rem
 rem  Prerequisites
 rem  -------------
 rem  - PostgreSQL 18 running on localhost (postgres/postgres)
@@ -45,9 +48,10 @@ set "DB_ONLY=0"
 
 :parse_args
 if "%~1"=="" goto args_done
-if /i "%~1"=="--skip-clean"  ( set "SKIP_CLEAN=1"  & shift & goto parse_args )
-if /i "%~1"=="--skip-models" ( set "SKIP_MODELS=1" & shift & goto parse_args )
-if /i "%~1"=="--db-only"    ( set "DB_ONLY=1"     & shift & goto parse_args )
+rem shift /1 keeps %0 intact — plain shift rotates %0 away and breaks %~dp0
+if /i "%~1"=="--skip-clean"  ( set "SKIP_CLEAN=1"  & shift /1 & goto parse_args )
+if /i "%~1"=="--skip-models" ( set "SKIP_MODELS=1" & shift /1 & goto parse_args )
+if /i "%~1"=="--db-only"    ( set "DB_ONLY=1"     & shift /1 & goto parse_args )
 echo unknown flag: %~1
 exit /b 2
 
@@ -238,6 +242,15 @@ for %%r in (Laplace X_BONEYARD llama-workspace SpecEditor TournamentManager Lapl
   )
 )
 
+rem ---- authority sources (manifest functionality.authority_sources) ----------
+if exist "!INGEST!\code-authority" (
+  for /d %%a in ("!INGEST!\code-authority\*") do (
+    call :ingest repo "%%a" || exit /b 1
+  )
+) else (
+  echo ==== [skip] authority sources — run scripts\win\download-code-data.cmd authority ====
+)
+
 rem ---- deferred lexical bulk ------------------------------------------------
 if "%LAPLACE_SKIP_LEXICAL_BULK%"=="1" (
   echo ==== [skip] deferred lexical bulk — LAPLACE_SKIP_LEXICAL_BULK=1 ====
@@ -286,6 +299,9 @@ call "%~dp0regress.cmd" || exit /b 1
 
 echo ==== substrate audit ====
 "%PGBIN%\psql.exe" -h localhost -U postgres -d laplace -P pager=off -f "%LAPLACE_ROOT%\scripts\sql\substrate-audit.sql" || exit /b 1
+
+echo ==== generation content index ====
+call "%~dp0index-content.cmd" laplace deep || exit /b 1
 
 echo ==== smoke: substrate_counts + consensus_stats ====
 "%PGBIN%\psql.exe" -h localhost -U postgres -d laplace -P pager=off -c "SELECT * FROM laplace.substrate_counts();" -c "SELECT * FROM laplace.consensus_stats();" -c "SELECT pg_size_pretty(pg_database_size('laplace')) AS db_size;" || exit /b 1

@@ -38,8 +38,11 @@ The repo's working platform is this Windows machine; Linux scripts persist but m
 | `e2e.cmd <sources…>` | DB ensure + extensions + CLI build + sequential `ingest` per arg (the ladder driver) |
 | `ingest-text.cmd <files…>` | sidecar CLI build + `db-roundtrip` per file (the document/book on-ramp) |
 | `converse.cmd "question"` | the demo: psql :'q' interpolation into laplace.converse() |
+| `verify-deploy.cmd` | check `D:\Data\Postgres\laplace` DLLs + extension versions (no rebuild) |
 
 Standard loop: `build-engine` → `build-extensions` → `install-extensions` → `regress` → `e2e unicode iso639 wordnet …` → `converse "what is a dog"`. No step requires elevation, ever.
+
+**Agents:** build/deploy rules are explicit in `.github/instructions/build-environment.instructions.md` — never `cmake --install` or copy DLLs into `C:\Program Files\PostgreSQL`.
 
 ## Build outputs
 

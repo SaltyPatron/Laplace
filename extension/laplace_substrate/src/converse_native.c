@@ -9,6 +9,7 @@
 
 #include "laplace/core/hash128.h"
 #include "laplace/core/relation_law.h"
+#include "spi_nested.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_hypernyms);
 PG_FUNCTION_INFO_V1(pg_laplace_isa_path);
@@ -405,13 +406,14 @@ pg_laplace_hypernyms(PG_FUNCTION_ARGS)
 
     InitMaterializedSRF(fcinfo, 0);
 
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "hypernyms: SPI_connect failed");
 
     start = spi_top_synset(word);
     if (start == (Datum) 0)
     {
-        SPI_finish();
+        laplace_spi_finish(spi_top);
         return (Datum) 0;
     }
 
@@ -451,7 +453,7 @@ pg_laplace_hypernyms(PG_FUNCTION_ARGS)
         tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
     }
 
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -478,7 +480,8 @@ pg_laplace_isa_path(PG_FUNCTION_ARGS)
 
     InitMaterializedSRF(fcinfo, 0);
 
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "isa_path: SPI_connect failed");
 
     up_types[0] = rel_type_id("IS_A");
@@ -578,7 +581,7 @@ pg_laplace_isa_path(PG_FUNCTION_ARGS)
         pfree(types);
     }
 
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -661,7 +664,8 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
 
     InitMaterializedSRF(fcinfo, 0);
 
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "contrast: SPI_connect failed");
 
     up_types[0] = rel_type_id("IS_A");
@@ -806,7 +810,7 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
         emitted++;
     }
 
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -831,7 +835,8 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
 
     InitMaterializedSRF(fcinfo, 0);
 
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "cascade: SPI_connect failed");
 
     {
@@ -845,14 +850,14 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
             "SELECT laplace.resolve_last_word($1)", 1, argtypes, args, NULL, true, 1);
         if (rc != SPI_OK_SELECT || SPI_processed == 0)
         {
-            SPI_finish();
+            laplace_spi_finish(spi_top);
             return (Datum) 0;
         }
         x_id = copy_bytea_datum(
             SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
         if (isnull)
         {
-            SPI_finish();
+            laplace_spi_finish(spi_top);
             return (Datum) 0;
         }
 
@@ -861,14 +866,14 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
             "SELECT laplace.resolve_last_word($1)", 1, argtypes, args, NULL, true, 1);
         if (rc != SPI_OK_SELECT || SPI_processed == 0)
         {
-            SPI_finish();
+            laplace_spi_finish(spi_top);
             return (Datum) 0;
         }
         y_id = copy_bytea_datum(
             SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
         if (isnull)
         {
-            SPI_finish();
+            laplace_spi_finish(spi_top);
             return (Datum) 0;
         }
     }
@@ -903,7 +908,7 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
 
         if (rc != SPI_OK_SELECT || SPI_processed <= 1)
         {
-            SPI_finish();
+            laplace_spi_finish(spi_top);
             return (Datum) 0;
         }
 
@@ -1014,7 +1019,7 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
         pfree(via_dirs);
     }
 
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -1034,7 +1039,8 @@ pg_laplace_nearest_neighbors_4d(PG_FUNCTION_ARGS)
 
     InitMaterializedSRF(fcinfo, 0);
 
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "nearest_neighbors_4d: SPI_connect failed");
 
     {
@@ -1052,7 +1058,7 @@ pg_laplace_nearest_neighbors_4d(PG_FUNCTION_ARGS)
 
         if (rc != SPI_OK_SELECT || SPI_processed == 0)
         {
-            SPI_finish();
+            laplace_spi_finish(spi_top);
             return (Datum) 0;
         }
 
@@ -1201,7 +1207,7 @@ pg_laplace_nearest_neighbors_4d(PG_FUNCTION_ARGS)
         }
     }
 
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -1285,7 +1291,8 @@ pg_laplace_structural_cluster(PG_FUNCTION_ARGS)
 
     InitMaterializedSRF(fcinfo, 0);
 
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "structural_cluster: SPI_connect failed");
 
     {
@@ -1300,13 +1307,13 @@ pg_laplace_structural_cluster(PG_FUNCTION_ARGS)
 
         if (rc != SPI_OK_SELECT || SPI_processed == 0)
         {
-            SPI_finish();
+            laplace_spi_finish(spi_top);
             return (Datum) 0;
         }
         seed_coord = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
         if (isnull)
         {
-            SPI_finish();
+            laplace_spi_finish(spi_top);
             return (Datum) 0;
         }
     }
@@ -1315,7 +1322,7 @@ pg_laplace_structural_cluster(PG_FUNCTION_ARGS)
     seed_curve_null = (seed_curve == (Datum) 0);
     if (seed_curve_null)
     {
-        SPI_finish();
+        laplace_spi_finish(spi_top);
         return (Datum) 0;
     }
 
@@ -1416,7 +1423,7 @@ pg_laplace_structural_cluster(PG_FUNCTION_ARGS)
         }
     }
 
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -1436,7 +1443,8 @@ pg_laplace_structural_locale(PG_FUNCTION_ARGS)
 
     InitMaterializedSRF(fcinfo, 0);
 
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "structural_locale: SPI_connect failed");
 
     {
@@ -1454,7 +1462,7 @@ pg_laplace_structural_locale(PG_FUNCTION_ARGS)
 
         if (rc != SPI_OK_SELECT || SPI_processed == 0)
         {
-            SPI_finish();
+            laplace_spi_finish(spi_top);
             return (Datum) 0;
         }
 
@@ -1463,7 +1471,7 @@ pg_laplace_structural_locale(PG_FUNCTION_ARGS)
         seed_coord = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 2, &isnull);
         if (isnull)
         {
-            SPI_finish();
+            laplace_spi_finish(spi_top);
             return (Datum) 0;
         }
     }
@@ -1566,6 +1574,6 @@ pg_laplace_structural_locale(PG_FUNCTION_ARGS)
         }
     }
 
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }

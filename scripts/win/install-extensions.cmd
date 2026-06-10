@@ -1,5 +1,7 @@
 @echo off
 setlocal
+rem Deploy extensions to D:\Data\Postgres\laplace and wire PG GUCs. NEVER copy into C:\Program Files\PostgreSQL.
+rem Agent rules: .github\instructions\build-environment.instructions.md
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 set "DEPLOY=D:\Data\Postgres\laplace"

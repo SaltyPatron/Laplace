@@ -31,7 +31,9 @@ if(WIN32 AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     endforeach()
 
     if(NOT DEFINED ENV{MKLROOT})
-        message(FATAL_ERROR "MKLROOT not set — run via scripts\\win\\build-extensions.cmd (env.cmd chain)")
+        message(FATAL_ERROR "MKLROOT not set — run via scripts\\win\\build-extensions.cmd (env.cmd chain). "
+            "Do NOT cmake --install to C:\\Program Files\\PostgreSQL; deploy with scripts\\win\\install-extensions.cmd "
+            "(see .github/instructions/build-environment.instructions.md)")
     endif()
     set(LAPLACE_MKL_STATIC
         "$ENV{MKLROOT}/lib/mkl_intel_lp64.lib"

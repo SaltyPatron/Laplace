@@ -103,6 +103,12 @@ int content_witness_batch_add(
 
     tier_tree_t* tree = NULL;
     if (laplace_text_decomposer_run(utf8, len, &tree) != 0 || !tree) return -2;
+    /* fail loud, not AV: the codepoint floor must be loaded (perfcache) before
+     * any content witness can compose */
+    if (!codepoint_table_is_loaded()) {
+        tier_tree_free(tree);
+        return -3;
+    }
     if (hash_composer_run(tree, codepoint_resolver, NULL) != 0) {
         tier_tree_free(tree);
         return -2;

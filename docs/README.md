@@ -12,6 +12,7 @@ Read in this order.
 | [INGESTION.md](INGESTION.md) | Ingestion IS training: the ladder, the pipeline, the document path, conversation context, the measured record. |
 | [SYNTHESIS.md](SYNTHESIS.md) | The export side: molds, arena pours, GGUF as render target, artifact classes, behavioral validation. |
 | [OPERATIONS-WINDOWS.md](OPERATIONS-WINDOWS.md) | The working platform: machine map, hard-won platform laws, script catalog, the zero-admin loop. |
+| [../.github/instructions/build-environment.instructions.md](../.github/instructions/build-environment.instructions.md) | **Agents:** Windows build/deploy rules — local deploy to `D:\Data\Postgres\laplace`, never Program Files. |
 | [RECEIPTS.md](RECEIPTS.md) | The measured record with conditions — every claim's numbers, timestamped. |
 | [OPEN-PROBLEMS.md](OPEN-PROBLEMS.md) | The honest frontier: file-grounded gaps, dated design rulings, candidate resolutions. |
 

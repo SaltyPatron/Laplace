@@ -1,5 +1,7 @@
 @echo off
 setlocal
+rem pg_regress on localhost (postgres/postgres); output under build-win-ext\regress_*.
+rem Requires install-extensions.cmd first. Agent rules: .github\instructions\build-environment.instructions.md
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 set "PGPASSWORD=postgres"
