@@ -56,43 +56,8 @@ CREATE OR REPLACE FUNCTION structural_cluster(
     p_eps   double precision DEFAULT 0.05,
     p_limit integer          DEFAULT 200)
     RETURNS TABLE(entity_id bytea, label text, frechet double precision, recurrence bigint)
-    LANGUAGE plpgsql STABLE
-    SET search_path = @extschema@, public AS $sc$
-DECLARE
-    v_coord geometry;
-    v_curve geometry;
-BEGIN
-    SELECT p.coord INTO v_coord
-    FROM physicalities p
-    WHERE p.entity_id = p_seed AND p.type = 1 AND p.coord IS NOT NULL
-    LIMIT 1;
-    IF v_coord IS NULL THEN RETURN; END IF;
-
-    v_curve := entity_curve(p_seed);
-    IF v_curve IS NULL THEN RETURN; END IF;
-
-    RETURN QUERY
-    WITH cand AS (
-        SELECT p.entity_id, p.coord
-        FROM physicalities p
-        WHERE p.type = 1 AND p.coord IS NOT NULL AND p.entity_id <> p_seed
-        ORDER BY p.coord <<->> v_coord
-        LIMIT GREATEST(p_limit * 20, 2000)),
-    scored AS (
-        SELECT DISTINCT ON (c.entity_id) c.entity_id,
-               public.laplace_frechet_4d(entity_curve(c.entity_id), v_curve) AS fr
-        FROM cand c
-        ORDER BY c.entity_id)
-    SELECT s.entity_id,
-           render_text(s.entity_id, 48),
-           s.fr,
-           (SELECT count(*) FROM physicalities pp WHERE pp.entity_id = s.entity_id)
-    FROM scored s
-    WHERE s.fr IS NOT NULL AND s.fr <= p_eps
-    ORDER BY s.fr
-    LIMIT p_limit;
-END;
-$sc$;
+    LANGUAGE C STABLE
+    AS 'MODULE_PATHNAME', 'pg_laplace_structural_cluster';
 
 CREATE OR REPLACE FUNCTION structural_cluster_batch(
     p_seeds bytea[],
@@ -117,6 +82,18 @@ CREATE OR REPLACE FUNCTION nearest_neighbors_4d(p_word text, p_k integer DEFAULT
     RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
     LANGUAGE C STABLE STRICT
     AS 'MODULE_PATHNAME', 'pg_laplace_nearest_neighbors_4d';
+
+-- Override plpgsql definitions from 20_converse.sql.in (loaded earlier).
+CREATE OR REPLACE FUNCTION structural_neighbors(p_word text, p_k integer DEFAULT 10)
+    RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
+    LANGUAGE C STABLE
+    AS 'MODULE_PATHNAME', 'pg_laplace_nearest_neighbors_4d';
+
+CREATE OR REPLACE FUNCTION structural_locale(p_word text, p_near double precision DEFAULT 0.05)
+    RETURNS TABLE(nearest double precision, within_near bigint,
+                  within_2x bigint, within_5x bigint, isolated boolean)
+    LANGUAGE C STABLE
+    AS 'MODULE_PATHNAME', 'pg_laplace_structural_locale';
 
 CREATE OR REPLACE FUNCTION consensus_export_relations(p_type_id bytea)
     RETURNS TABLE(subject_id bytea, object_id bytea, rating bigint, witness_count bigint)

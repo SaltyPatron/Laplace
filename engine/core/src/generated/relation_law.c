@@ -316,3 +316,151 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
     }
     return 1;
 }
+
+static void dyn_trim(char* s) {
+    size_t n = strlen(s);
+    while (n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == '\r' || s[n - 1] == '\n'))
+        s[--n] = '\0';
+    size_t i = 0;
+    while (s[i] == ' ' || s[i] == '\t' || s[i] == '\r' || s[i] == '\n')
+        ++i;
+    if (i > 0)
+        memmove(s, s + i, strlen(s + i) + 1);
+}
+
+static void dyn_lower(char* s) {
+    for (; *s; ++s) {
+        if (*s >= 'A' && *s <= 'Z')
+            *s = (char)(*s + 32);
+    }
+}
+
+static void dyn_upper(char* s) {
+    for (; *s; ++s) {
+        if (*s >= 'a' && *s <= 'z')
+            *s = (char)(*s - 32);
+    }
+}
+
+static int dyn_build_prefixed(
+    const char* input,
+    const char* prefix,
+    char sep,
+    const char* root_canon,
+    int lowercase_input,
+    char* out_canon,
+    size_t out_canon_sz,
+    char* out_parent_canon,
+    size_t out_parent_sz) {
+    char norm[128];
+    size_t i, j;
+    if (!input || !prefix || !root_canon || !out_canon || !out_parent_canon)
+        return -1;
+    if (strlen(input) >= sizeof(norm))
+        return -1;
+    memcpy(norm, input, strlen(input) + 1);
+    dyn_trim(norm);
+    if (lowercase_input)
+        dyn_lower(norm);
+    if (norm[0] == '\0')
+        return -1;
+    if (snprintf(out_canon, out_canon_sz, "%s", prefix) <= 0)
+        return -1;
+    j = strlen(out_canon);
+    for (i = 0; norm[i] != '\0' && j + 1 < out_canon_sz; ++i) {
+        char c = norm[i];
+        if (c == sep)
+            c = '_';
+        out_canon[j++] = c;
+    }
+    out_canon[j] = '\0';
+    dyn_upper(out_canon + strlen(prefix));
+    if (sep) {
+        const char* colon = strchr(norm, sep);
+        if (colon && colon > norm) {
+            char parent_body[96];
+            size_t plen = (size_t)(colon - norm);
+            if (plen >= sizeof(parent_body))
+                return -1;
+            memcpy(parent_body, norm, plen);
+            parent_body[plen] = '\0';
+            if (snprintf(out_parent_canon, out_parent_sz, "%s%s", prefix, parent_body) <= 0)
+                return -1;
+            dyn_upper(out_parent_canon + strlen(prefix));
+        } else if (snprintf(out_parent_canon, out_parent_sz, "%s", root_canon) <= 0) {
+            return -1;
+        }
+    } else if (snprintf(out_parent_canon, out_parent_sz, "%s", root_canon) <= 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int dyn_resolve_prefixed(
+    const char* input,
+    const char* prefix,
+    char sep,
+    const char* root_canon,
+    int lowercase_input,
+    double rank_val,
+    laplace_rel_symmetry_t symmetry,
+    hash128_t* out_type_id,
+    double* out_rank,
+    laplace_rel_symmetry_t* out_symmetry,
+    uint8_t* out_flip,
+    hash128_t* out_parent_id) {
+    char canon[128], parent_canon[128];
+    if (!out_type_id)
+        return -1;
+    if (dyn_build_prefixed(input, prefix, sep, root_canon, lowercase_input,
+                           canon, sizeof(canon), parent_canon, sizeof(parent_canon)) != 0)
+        return -1;
+    if (laplace_relation_type_id(canon, out_type_id) != 0)
+        return -1;
+    if (out_parent_id && laplace_relation_type_id(parent_canon, out_parent_id) != 0)
+        return -1;
+    if (out_rank)
+        *out_rank = rank_val;
+    if (out_symmetry)
+        *out_symmetry = symmetry;
+    if (out_flip)
+        *out_flip = 0;
+    return 0;
+}
+
+int laplace_relation_resolve_deprel(
+    const char* deprel,
+    hash128_t* out_type_id,
+    double* out_rank,
+    laplace_rel_symmetry_t* out_symmetry,
+    uint8_t* out_flip,
+    hash128_t* out_parent_id) {
+    return dyn_resolve_prefixed(deprel, "DEP_", ':',
+                                "DEPENDS_ON", 1, 0.73, LAPLACE_REL_SYMMETRY_ASYMMETRIC,
+                                out_type_id, out_rank, out_symmetry, out_flip, out_parent_id);
+}
+
+int laplace_relation_resolve_enhanced_deprel(
+    const char* deprel,
+    hash128_t* out_type_id,
+    double* out_rank,
+    laplace_rel_symmetry_t* out_symmetry,
+    uint8_t* out_flip,
+    hash128_t* out_parent_id) {
+    return dyn_resolve_prefixed(deprel, "EDEP_", ':',
+                                "ENHANCED_DEPENDS_ON", 1, 0.73, LAPLACE_REL_SYMMETRY_ASYMMETRIC,
+                                out_type_id, out_rank, out_symmetry, out_flip, out_parent_id);
+}
+
+int laplace_relation_resolve_feature(
+    const char* feature_name,
+    hash128_t* out_type_id,
+    double* out_rank,
+    laplace_rel_symmetry_t* out_symmetry,
+    uint8_t* out_flip,
+    hash128_t* out_parent_id) {
+    return dyn_resolve_prefixed(feature_name, "FEAT_", '\0',
+                                "HAS_FEATURE", 0,
+                                0.73, LAPLACE_REL_SYMMETRY_ASYMMETRIC,
+                                out_type_id, out_rank, out_symmetry, out_flip, out_parent_id);
+}

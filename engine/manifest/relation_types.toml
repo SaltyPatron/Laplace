@@ -1136,3 +1136,26 @@ surface = "SUBFRAME_OF"
 canonical = "HAS_SUBEVENT"
 flip = true
 
+# Dynamic relation families (codegen → laplace_relation_resolve_deprel/feature)
+
+[dynamic.deprel]
+prefix = "DEP_"
+separator = ":"
+root = "DEPENDS_ON"
+rank = "partitive"
+symmetry = "asymmetric"
+
+[dynamic.enhanced_deprel]
+prefix = "EDEP_"
+separator = ":"
+root = "ENHANCED_DEPENDS_ON"
+rank = "partitive"
+symmetry = "asymmetric"
+
+[dynamic.feature]
+prefix = "FEAT_"
+root = "HAS_FEATURE"
+rank = "partitive"
+symmetry = "asymmetric"
+lowercase_input = false
+

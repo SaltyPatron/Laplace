@@ -38,6 +38,16 @@ typedef struct {
 
 int laplace_relation_resolve(const char* surface, hash128_t* out_type_id);
 
+int laplace_relation_resolve_deprel(const char* deprel, hash128_t* out_type_id,
+                                    double* out_rank, laplace_rel_symmetry_t* out_symmetry,
+                                    uint8_t* out_flip, hash128_t* out_parent_id);
+int laplace_relation_resolve_enhanced_deprel(const char* deprel, hash128_t* out_type_id,
+                                             double* out_rank, laplace_rel_symmetry_t* out_symmetry,
+                                             uint8_t* out_flip, hash128_t* out_parent_id);
+int laplace_relation_resolve_feature(const char* feature_name, hash128_t* out_type_id,
+                                     double* out_rank, laplace_rel_symmetry_t* out_symmetry,
+                                     uint8_t* out_flip, hash128_t* out_parent_id);
+
 size_t      laplace_relation_manifest_count(void);
 const char* laplace_relation_manifest_canonical(size_t idx);
 const char* laplace_relation_canonical_for_type_id(const hash128_t* type_id);

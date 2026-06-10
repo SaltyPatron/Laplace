@@ -385,6 +385,33 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_relation_canonical_for_type_id")]
     internal static partial IntPtr RelationCanonicalForTypeId(Hash128* typeId);
 
+    [LibraryImport(Library, EntryPoint = "laplace_relation_resolve_deprel", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int RelationResolveDeprel(
+        string deprel,
+        Hash128* outTypeId,
+        double* outRank,
+        int* outSymmetry,
+        byte* outFlip,
+        Hash128* outParentId);
+
+    [LibraryImport(Library, EntryPoint = "laplace_relation_resolve_enhanced_deprel", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int RelationResolveEnhancedDeprel(
+        string deprel,
+        Hash128* outTypeId,
+        double* outRank,
+        int* outSymmetry,
+        byte* outFlip,
+        Hash128* outParentId);
+
+    [LibraryImport(Library, EntryPoint = "laplace_relation_resolve_feature", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int RelationResolveFeature(
+        string featureName,
+        Hash128* outTypeId,
+        double* outRank,
+        int* outSymmetry,
+        byte* outFlip,
+        Hash128* outParentId);
+
     [LibraryImport(Library, EntryPoint = "laplace_attestation_categorical_build", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int AttestationCategoricalBuild(
         string surfaceRelation,

@@ -45,13 +45,35 @@ public static class RelationTypeRegistry
     public static RelationTypeResolution ResolveDeprel(string deprel)
     {
         ArgumentException.ThrowIfNullOrEmpty(deprel);
-        string norm = deprel.Trim().ToLowerInvariant();
-        string canon = "DEP_" + norm.Replace(':', '_').ToUpperInvariant();
-        int colon = norm.IndexOf(':');
-        string parent = colon > 0 ? "DEP_" + norm[..colon].ToUpperInvariant() : "DEPENDS_ON";
+        unsafe
+        {
+            Hash128 typeId, parentId;
+            double rank;
+            byte flip;
+            int symmetry;
+            NativeInterop.RelationResolveDeprel(deprel, &typeId, &rank, &symmetry, &flip, &parentId);
+            return DynamicResolution(deprel, "DEP_", typeId, parentId, rank, symmetry, flip);
+        }
+    }
+
+    private static RelationTypeResolution DynamicResolution(
+        string input, string prefix, Hash128 typeId, Hash128 parentId,
+        double rank, int symmetry, byte flip)
+    {
+        string canonical = BuildDynamicCanonical(input, prefix);
+        Hash128? parent = parentId.Equals(Hash128.Zero) ? null : parentId;
         return new RelationTypeResolution(
-            RelationTypeId(canon), RelationTypeRank.Partitive, Symmetry.Asymmetric, false,
-            RelationTypeId(parent), canon);
+            typeId, rank,
+            symmetry == 1 ? Symmetry.Symmetric : Symmetry.Asymmetric,
+            flip != 0, parent, canonical);
+    }
+
+    private static string BuildDynamicCanonical(string input, string prefix)
+    {
+        string norm = prefix.StartsWith("FEAT_", StringComparison.Ordinal)
+            ? input.Trim().ToUpperInvariant()
+            : input.Trim().ToLowerInvariant().Replace(':', '_').ToUpperInvariant();
+        return prefix + norm;
     }
 
     public static AttestationRow AttestDeprel(
@@ -75,13 +97,15 @@ public static class RelationTypeRegistry
     public static RelationTypeResolution ResolveEnhancedDeprel(string deprel)
     {
         ArgumentException.ThrowIfNullOrEmpty(deprel);
-        string norm = deprel.Trim().ToLowerInvariant();
-        string canon = "EDEP_" + norm.Replace(':', '_').ToUpperInvariant();
-        int colon = norm.IndexOf(':');
-        string parent = colon > 0 ? "EDEP_" + norm[..colon].ToUpperInvariant() : "ENHANCED_DEPENDS_ON";
-        return new RelationTypeResolution(
-            RelationTypeId(canon), RelationTypeRank.Partitive, Symmetry.Asymmetric, false,
-            RelationTypeId(parent), canon);
+        unsafe
+        {
+            Hash128 typeId, parentId;
+            double rank;
+            byte flip;
+            int symmetry;
+            NativeInterop.RelationResolveEnhancedDeprel(deprel, &typeId, &rank, &symmetry, &flip, &parentId);
+            return DynamicResolution(deprel, "EDEP_", typeId, parentId, rank, symmetry, flip);
+        }
     }
 
     public static RelationTypeResolution ResolveDbpedia(string rel)
@@ -109,10 +133,15 @@ public static class RelationTypeRegistry
     public static RelationTypeResolution ResolveFeature(string featureName)
     {
         ArgumentException.ThrowIfNullOrEmpty(featureName);
-        string canon = "FEAT_" + featureName.Trim().ToUpperInvariant();
-        return new RelationTypeResolution(
-            RelationTypeId(canon), RelationTypeRank.Partitive, Symmetry.Asymmetric, false,
-            RelationTypeId("HAS_FEATURE"), canon);
+        unsafe
+        {
+            Hash128 typeId, parentId;
+            double rank;
+            byte flip;
+            int symmetry;
+            NativeInterop.RelationResolveFeature(featureName, &typeId, &rank, &symmetry, &flip, &parentId);
+            return DynamicResolution(featureName, "FEAT_", typeId, parentId, rank, symmetry, flip);
+        }
     }
 
     public static AttestationRow AttestFeature(

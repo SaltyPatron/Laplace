@@ -5,7 +5,7 @@
 --     rebuild_content_index / rebuild_content_index_deep  (index lifecycle)
 --     generate_tokens / generation_cache_reset            (native kernel, generation_native.c)
 --     generate_ngram                                      (endpoint surface)
---     pour_peer / pour_walk / pour                        (trajectory-respecting synthesis)
+--     consensus_peer / variant_walk / generate_variant    (variant synthesis over witnessed constituency)
 -- Deploy via scripts\win\build-extensions.cmd + install-extensions.cmd.
 --
 -- This file keeps ONLY prototypes that have not earned extension status.

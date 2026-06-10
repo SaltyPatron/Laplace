@@ -59,74 +59,23 @@ $$;
 
 CREATE OR REPLACE FUNCTION senses(p_word bytea)
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql LAPLACE_STABLE_STRICT
-    SET search_path = @extschema@, public AS $$
-    SELECT s.object_id, ss.object_id,
-           eff_mu_display(s.rating, s.rd),
-           s.witness_count + ss.witness_count
-    FROM consensus s
-    JOIN consensus ss ON ss.subject_id = s.object_id
-                     AND ss.type_id = relation_type_id('IS_SENSE_OF')
-    WHERE s.subject_id = p_word
-      AND s.type_id = relation_type_id('HAS_SENSE')
-    ORDER BY eff_mu(s.rating, s.rd) + eff_mu(ss.rating, ss.rd) DESC
-$$;
+    LANGUAGE C STABLE STRICT
+    AS 'MODULE_PATHNAME', 'pg_laplace_senses';
 
 CREATE OR REPLACE FUNCTION define(p_word bytea, p_limit int DEFAULT 5)
     RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql LAPLACE_STABLE_STRICT
-    SET search_path = @extschema@, public AS $$
-    SELECT render_text(g.object_id),
-           eff_mu_display(g.rating, g.rd),
-           g.witness_count
-    FROM senses(p_word) sn
-    JOIN consensus g ON g.subject_id = sn.synset_id
-                    AND g.type_id = relation_type_id('HAS_DEFINITION')
-    ORDER BY sn.eff_mu + eff_mu_display(g.rating, g.rd) DESC
-    LIMIT p_limit
-$$;
+    LANGUAGE C STABLE STRICT
+    AS 'MODULE_PATHNAME', 'pg_laplace_define';
 
 CREATE OR REPLACE FUNCTION synonyms(p_word bytea, p_limit int DEFAULT 10)
     RETURNS TABLE(synonym text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql LAPLACE_STABLE_STRICT
-    SET search_path = @extschema@, public AS $$
-    SELECT * FROM (
-        SELECT DISTINCT ON (other.subject_id)
-               realize(other.subject_id, word_language(p_word)) AS synonym,
-               eff_mu_display(other.rating, other.rd) AS eff_mu,
-               other.witness_count AS witnesses
-        FROM consensus mine
-        JOIN consensus other ON other.object_id = mine.object_id
-                            AND other.type_id = relation_type_id('IS_SYNONYM_OF')
-                            AND other.subject_id <> p_word
-        WHERE mine.subject_id = p_word
-          AND mine.type_id = relation_type_id('IS_SYNONYM_OF')
-        ORDER BY other.subject_id, eff_mu(other.rating, other.rd) DESC
-    ) s
-    WHERE NULLIF(btrim(s.synonym), '') IS NOT NULL
-    ORDER BY s.eff_mu DESC, s.witnesses DESC
-    LIMIT p_limit
-$$;
+    LANGUAGE C STABLE STRICT
+    AS 'MODULE_PATHNAME', 'pg_laplace_synonyms';
 
 CREATE OR REPLACE FUNCTION translations(p_word bytea, p_limit int DEFAULT 24)
     RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql LAPLACE_STABLE_STRICT
-    SET search_path = @extschema@, public AS $$
-    SELECT * FROM (
-        SELECT DISTINCT ON (m.object_id)
-               render_text(m.object_id) AS translation,
-               label(word_language(m.object_id)) AS language,
-               eff_mu_display(m.rating, m.rd) AS eff_mu,
-               m.witness_count AS witnesses
-        FROM senses(p_word) sn
-        JOIN consensus m ON m.subject_id = sn.synset_id
-                        AND m.type_id = relation_type_id('IS_TRANSLATION_OF')
-                        AND m.object_id <> p_word
-        ORDER BY m.object_id, eff_mu(m.rating, m.rd) DESC
-    ) t
-    ORDER BY t.witnesses DESC, t.eff_mu DESC
-    LIMIT p_limit
-$$;
+    LANGUAGE C STABLE STRICT
+    AS 'MODULE_PATHNAME', 'pg_laplace_translations';
 
 CREATE OR REPLACE FUNCTION hypernyms(p_word bytea, p_depth int DEFAULT 8)
     RETURNS TABLE(depth int, hypernym text, gloss text)
@@ -135,17 +84,8 @@ CREATE OR REPLACE FUNCTION hypernyms(p_word bytea, p_depth int DEFAULT 8)
 
 CREATE OR REPLACE FUNCTION examples(p_word bytea, p_limit int DEFAULT 5)
     RETURNS TABLE(example text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql LAPLACE_STABLE_STRICT
-    SET search_path = @extschema@, public AS $$
-    SELECT render_text(g.object_id),
-           eff_mu_display(g.rating, g.rd),
-           g.witness_count
-    FROM senses(p_word) sn
-    JOIN consensus g ON g.subject_id = sn.synset_id
-                    AND g.type_id = relation_type_id('HAS_EXAMPLE')
-    ORDER BY sn.eff_mu + eff_mu_display(g.rating, g.rd) DESC
-    LIMIT p_limit
-$$;
+    LANGUAGE C STABLE STRICT
+    AS 'MODULE_PATHNAME', 'pg_laplace_examples';
 
 CREATE OR REPLACE FUNCTION resolve_last_word(p_phrase text)
     RETURNS bytea
@@ -200,57 +140,19 @@ $$;
 CREATE OR REPLACE FUNCTION expansion(p_subjects bytea[], p_type bytea DEFAULT NULL,
                                      p_limit int DEFAULT 40)
     RETURNS TABLE(object_id bytea, support int, total_mu numeric)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    SELECT c.object_id,
-           count(DISTINCT c.subject_id)::int,
-           round((sum(eff_mu(c.rating, c.rd)) / 1e9)::numeric, 3)
-    FROM consensus c
-    WHERE c.subject_id = ANY (p_subjects)
-      AND c.object_id IS NOT NULL
-      AND NOT refuted(c.rating, c.rd)
-      AND (p_type IS NULL OR c.type_id = p_type)
-    GROUP BY c.object_id
-    ORDER BY count(DISTINCT c.subject_id) DESC, sum(eff_mu(c.rating, c.rd)) DESC
-    LIMIT p_limit
-$$;
+    LANGUAGE C STABLE PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_expansion';
 
 CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint,
                   score numeric)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    SELECT s.object_id, ss.object_id,
-           eff_mu_display(s.rating, s.rd),
-           s.witness_count + ss.witness_count,
-           round(((eff_mu(s.rating, s.rd) + eff_mu(ss.rating, ss.rd)
-             + COALESCE((SELECT sum(eff_mu(c.rating, c.rd)) FROM consensus c
-                         WHERE c.subject_id = ANY (p_context) AND c.object_id = ss.object_id
-                           AND NOT refuted(c.rating, c.rd)), 0)
-             + COALESCE((SELECT sum(eff_mu(c.rating, c.rd)) FROM consensus c
-                         WHERE c.subject_id = ss.object_id AND c.object_id = ANY (p_context)
-                           AND NOT refuted(c.rating, c.rd)), 0)) / 1e9)::numeric, 3)
-    FROM consensus s
-    JOIN consensus ss ON ss.subject_id = s.object_id
-                     AND ss.type_id = relation_type_id('IS_SENSE_OF')
-    WHERE s.subject_id = p_word
-      AND s.type_id = relation_type_id('HAS_SENSE')
-    ORDER BY 5 DESC
-$$;
+    LANGUAGE C STABLE PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_senses_context';
 
 CREATE OR REPLACE FUNCTION define(p_word bytea, p_context bytea[], p_limit int DEFAULT 5)
     RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    SELECT render_text(g.object_id),
-           eff_mu_display(g.rating, g.rd),
-           g.witness_count
-    FROM senses(p_word, p_context) sn
-    JOIN consensus g ON g.subject_id = sn.synset_id
-                    AND g.type_id = relation_type_id('HAS_DEFINITION')
-    ORDER BY sn.score + eff_mu_display(g.rating, g.rd) DESC
-    LIMIT p_limit
-$$;
+    LANGUAGE C STABLE PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_define_context';
 
 CREATE OR REPLACE FUNCTION type_label(p_type bytea)
     RETURNS text
@@ -332,115 +234,20 @@ $$;
 CREATE OR REPLACE FUNCTION related(p_word bytea, p_type bytea, p_lang bytea DEFAULT NULL,
                                    p_limit int DEFAULT 10)
     RETURNS TABLE(fact text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    WITH subj(id) AS (
-        SELECT p_word
-        UNION
-        SELECT sn.synset_id FROM senses(p_word) sn
-    ), top AS (
-        SELECT cc.object_id, cc.rating, cc.rd, cc.witness_count
-        FROM subj s
-        CROSS JOIN LATERAL (
-            SELECT c.object_id, c.rating, c.rd, c.witness_count
-            FROM consensus c
-            WHERE c.subject_id = s.id
-              AND c.type_id = p_type
-              AND c.object_id IS NOT NULL
-              AND NOT refuted(c.rating, c.rd)
-            ORDER BY eff_mu(c.rating, c.rd) DESC
-            LIMIT p_limit
-        ) cc
-    )
-    SELECT realize(t.object_id, COALESCE(p_lang, word_language(p_word))),
-           eff_mu_display(t.rating, t.rd), t.witness_count
-    FROM top t
-    ORDER BY eff_mu(t.rating, t.rd) DESC
-    LIMIT p_limit
-$$;
+    LANGUAGE C STABLE PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_related';
 
 CREATE OR REPLACE FUNCTION related_in(p_word bytea, p_type bytea, p_lang bytea DEFAULT NULL,
                                       p_limit int DEFAULT 10)
     RETURNS TABLE(fact text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    WITH subj(id) AS (
-        SELECT p_word
-        UNION
-        SELECT sn.synset_id FROM senses(p_word) sn
-    ), top AS (
-        SELECT cc.subject_id, cc.rating, cc.rd, cc.witness_count
-        FROM subj s
-        CROSS JOIN LATERAL (
-            SELECT c.subject_id, c.rating, c.rd, c.witness_count
-            FROM consensus c
-            WHERE c.object_id = s.id
-              AND c.type_id = p_type
-              AND NOT refuted(c.rating, c.rd)
-            ORDER BY eff_mu(c.rating, c.rd) DESC
-            LIMIT p_limit
-        ) cc
-    )
-    SELECT realize(t.subject_id, COALESCE(p_lang, word_language(p_word))),
-           eff_mu_display(t.rating, t.rd), t.witness_count
-    FROM top t
-    ORDER BY eff_mu(t.rating, t.rd) DESC
-    LIMIT p_limit
-$$;
+    LANGUAGE C STABLE PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_related_in';
 
 CREATE OR REPLACE FUNCTION describe(p_word bytea, p_lang bytea DEFAULT NULL,
                                     p_limit int DEFAULT 24)
     RETURNS TABLE(type text, fact text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    WITH subj(id) AS (
-        SELECT p_word
-        UNION
-        SELECT sn.synset_id FROM senses(p_word) sn
-    ), top AS (
-        SELECT cc.type_id, cc.object_id, cc.rating, cc.rd, cc.witness_count
-        FROM subj s
-        CROSS JOIN LATERAL (
-            SELECT c.type_id, c.object_id, c.rating, c.rd, c.witness_count
-            FROM consensus c
-            WHERE c.subject_id = s.id
-              AND c.object_id IS NOT NULL
-              AND NOT refuted(c.rating, c.rd)
-              -- Only describe via real seeded relation types; a type_id outside the type namespace
-              -- renders as a bare hash (UD-feature edges, etc.) and is not a describable fact.
-              AND render(c.type_id) LIKE 'substrate/type/%'
-              -- Exclude bookkeeping, positional, and morpho-syntactic relations: they carry no
-              -- descriptive content and (PRECEDES especially) dominate eff_mu after corpus ingest,
-              -- burying the semantic facts that actually describe the topic.
-              AND NOT relation_type_in_family(c.type_id, 'HAS_POS')
-              AND c.type_id NOT IN (
-                  relation_type_id('HAS_SENSE'),  relation_type_id('IS_SENSE_OF'),
-                  relation_type_id('HAS_LANGUAGE'),
-                  relation_type_id('PRECEDES'),    relation_type_id('FOLLOWS'),
-                  relation_type_id('CO_OCCURS_WITH'), relation_type_id('OCCURS_IN_CONTEXT'),
-                  relation_type_id('HAS_LEX_CATEGORY'),
-                  relation_type_id('HAS_FEATURE'), relation_type_id('HAS_VERB_FRAME'),
-                  relation_type_id('IS_LEMMA_OF'))
-            ORDER BY eff_mu(c.rating, c.rd) DESC
-            LIMIT p_limit * 3
-        ) cc
-    )
-    SELECT d.type, d.fact, d.eff_mu, d.witnesses
-    FROM (
-        SELECT type_label(t.type_id) AS type,
-               realize(t.object_id, COALESCE(p_lang, word_language(p_word))) AS fact,
-               eff_mu_display(t.rating, t.rd) AS eff_mu, t.witness_count AS witnesses,
-               eff_mu(t.rating, t.rd) AS sort_mu
-        FROM top t
-    ) d
-    -- Drop any fact that did not fully reconstruct to human text (label() falls back to a
-    -- hex id + '…' ellipsis; reject those so the reply never contains bare hashes).
-    WHERE d.fact IS NOT NULL AND d.fact <> ''
-      AND right(d.fact, 1) <> U&'\2026'
-      AND right(d.type, 1) <> U&'\2026'
-    ORDER BY d.sort_mu DESC
-    LIMIT p_limit
-$$;
+    LANGUAGE C STABLE PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_describe';
 
 CREATE OR REPLACE FUNCTION isa_path(p_x bytea, p_y bytea, p_depth int DEFAULT 8)
     RETURNS TABLE(path bytea[], types bytea[], path_mu numeric)
@@ -449,113 +256,19 @@ CREATE OR REPLACE FUNCTION isa_path(p_x bytea, p_y bytea, p_depth int DEFAULT 8)
 
 CREATE OR REPLACE FUNCTION usage_overlap(p_x bytea, p_y bytea)
     RETURNS bigint
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    WITH xn(n) AS (
-        SELECT object_id  FROM consensus WHERE subject_id = p_x AND type_id = relation_type_id('PRECEDES')
-        UNION
-        SELECT subject_id FROM consensus WHERE object_id  = p_x AND type_id = relation_type_id('PRECEDES')),
-         yn(n) AS (
-        SELECT object_id  FROM consensus WHERE subject_id = p_y AND type_id = relation_type_id('PRECEDES')
-        UNION
-        SELECT subject_id FROM consensus WHERE object_id  = p_y AND type_id = relation_type_id('PRECEDES'))
-    SELECT count(*) FROM xn JOIN yn USING (n)
-$$;
+    LANGUAGE C STABLE PARALLEL SAFE STRICT
+    AS 'MODULE_PATHNAME', 'pg_laplace_usage_overlap';
 
 CREATE OR REPLACE FUNCTION reason(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
     RETURNS TABLE(chain text, path_mu numeric, plane text)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    WITH RECURSIVE
-    lat(k) AS (SELECT relation_type_id(n) FROM unnest(ARRAY[
-        'IS_SYNONYM_OF','IS_SIMILAR_TO','IS_ANTONYM_OF','HAS_PART','HAS_MEMBER',
-        'HAS_SUBSTANCE','DERIVATIONALLY_RELATED','PERTAINS_TO','ALSO_SEE',
-        'IN_VERB_GROUP_WITH','HAS_ATTRIBUTE']) n),
-    up_k(k) AS (SELECT relation_type_id(n) FROM unnest(ARRAY['IS_A','IS_INSTANCE_OF']) n),
-    x_top AS (
-        SELECT sn.synset_id FROM senses(p_x) sn ORDER BY sn.eff_mu DESC NULLS LAST LIMIT 1
-    ),
-    y_top AS (
-        SELECT sn.synset_id FROM senses(p_y) sn ORDER BY sn.eff_mu DESC NULLS LAST LIMIT 1
-    ),
-    xset(id) AS (SELECT p_x UNION SELECT synset_id FROM x_top),
-    yset(id) AS (SELECT p_y UNION SELECT synset_id FROM y_top),
-    direct AS (
-        SELECT realize_path(ARRAY[x.id, c.object_id], ARRAY[c.type_id], ARRAY[1],
-                            COALESCE(word_language(p_x), word_language(p_y))) AS chain,
-               eff_mu_display(c.rating, c.rd) AS mu, 1 AS len, type_label(c.type_id) AS plane
-        FROM xset x JOIN consensus c ON c.subject_id = x.id
-            AND c.object_id IN (SELECT id FROM yset)
-            AND c.type_id IN (SELECT k FROM lat) AND NOT refuted(c.rating, c.rd)
-        UNION ALL
-        SELECT realize_path(ARRAY[x.id, c.subject_id], ARRAY[c.type_id], ARRAY[-1],
-                            COALESCE(word_language(p_x), word_language(p_y))),
-               eff_mu_display(c.rating, c.rd), 1, type_label(c.type_id)
-        FROM xset x JOIN consensus c ON c.object_id = x.id
-            AND c.subject_id IN (SELECT id FROM yset)
-            AND c.type_id IN (SELECT k FROM lat) AND NOT refuted(c.rating, c.rd)),
-    ux(node, path, types, mu, d) AS (
-        SELECT id, ARRAY[id], ARRAY[]::bytea[], NULL::numeric, 0 FROM xset
-        UNION ALL
-        SELECT c.object_id, u.path || c.object_id, u.types || c.type_id,
-               LEAST(COALESCE(u.mu, eff_mu_display(c.rating, c.rd)), eff_mu_display(c.rating, c.rd)), u.d + 1
-        FROM ux u JOIN consensus c ON c.subject_id = u.node AND c.type_id IN (SELECT k FROM up_k)
-            AND c.object_id IS NOT NULL AND NOT refuted(c.rating, c.rd) AND NOT (c.object_id = ANY (u.path))
-        WHERE u.d < p_depth),
-    uy(node, path, types, mu, d) AS (
-        SELECT id, ARRAY[id], ARRAY[]::bytea[], NULL::numeric, 0 FROM yset
-        UNION ALL
-        SELECT c.object_id, u.path || c.object_id, u.types || c.type_id,
-               LEAST(COALESCE(u.mu, eff_mu_display(c.rating, c.rd)), eff_mu_display(c.rating, c.rd)), u.d + 1
-        FROM uy u JOIN consensus c ON c.subject_id = u.node AND c.type_id IN (SELECT k FROM up_k)
-            AND c.object_id IS NOT NULL AND NOT refuted(c.rating, c.rd) AND NOT (c.object_id = ANY (u.path))
-        WHERE u.d < p_depth),
-    lca_pick AS (
-        SELECT ux.path AS xp, ux.types AS xk, uy.path AS yp, uy.types AS yk,
-               LEAST(ux.mu, uy.mu) AS mu, ux.d + uy.d AS len
-        FROM ux JOIN uy ON ux.node = uy.node
-        WHERE ux.d > 0 OR uy.d > 0
-        ORDER BY ux.d + uy.d, LEAST(ux.mu, uy.mu) DESC NULLS LAST
-        LIMIT 1),
-    lca AS (
-        SELECT realize_path(
-                   xp || array_reverse(yp[1:cardinality(yp)-1]),
-                   xk || array_reverse(yk),
-                   (SELECT COALESCE(array_agg(1),  ARRAY[]::int[]) FROM generate_subscripts(xk, 1))
-                       || (SELECT COALESCE(array_agg(-1), ARRAY[]::int[]) FROM generate_subscripts(yk, 1)),
-                   COALESCE(word_language(p_x), word_language(p_y))) AS chain,
-               mu, len, 'taxonomy'::text AS plane
-        FROM lca_pick)
-    SELECT a.chain, a.mu, a.plane
-    FROM (SELECT chain, mu, len, plane FROM direct
-          UNION ALL SELECT chain, mu, len, plane FROM lca) a
-    ORDER BY a.len, a.mu DESC NULLS LAST
-    LIMIT 1
-$$;
+    LANGUAGE C STABLE PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_reason';
 
 CREATE OR REPLACE FUNCTION relatedness(p_x bytea, p_y bytea)
     RETURNS TABLE(relation text, plane text, mu numeric, usage bigint,
                   geodesic double precision, verdict text)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    SELECT r.chain, r.plane, r.path_mu, COALESCE(u.n, 0), g.geo,
-        concat_ws('',
-            CASE WHEN r.chain IS NOT NULL THEN 'related via ' || r.plane
-                 ELSE 'no witnessed conceptual path' END,
-            CASE WHEN COALESCE(u.n, 0) >= 10 THEN '; strong shared usage (' || u.n || ')'
-                 WHEN COALESCE(u.n, 0) >  0  THEN '; some shared usage ('   || u.n || ')'
-                 ELSE '' END,
-            CASE WHEN g.geo IS NOT NULL AND g.geo < 0.4 THEN '; structurally near'
-                 ELSE '' END)
-    FROM (SELECT 1) one
-    LEFT JOIN LATERAL (SELECT * FROM reason(p_x, p_y) LIMIT 1) r ON true
-    LEFT JOIN LATERAL (SELECT usage_overlap(p_x, p_y) AS n) u ON true
-    LEFT JOIN LATERAL (
-        SELECT public.laplace_angular_distance_4d(
-                   (SELECT coord FROM physicalities WHERE entity_id = p_x AND type = 1 AND coord IS NOT NULL LIMIT 1),
-                   (SELECT coord FROM physicalities WHERE entity_id = p_y AND type = 1 AND coord IS NOT NULL LIMIT 1)
-               ) AS geo) g ON true
-$$;
+    LANGUAGE C STABLE PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_relatedness';
 
 CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT NULL,
                                             p_limit int DEFAULT 30)
@@ -585,18 +298,8 @@ $$;
 
 CREATE OR REPLACE FUNCTION gaps(p_word bytea)
     RETURNS TABLE(missing_arena text)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    WITH subj(id) AS (SELECT p_word UNION SELECT sn.synset_id FROM senses(p_word) sn),
-         expected(name) AS (SELECT unnest(ARRAY[
-            'IS_A','HAS_PART','HAS_MEMBER','CAUSES','USED_FOR','IS_ANTONYM_OF',
-            'IS_SIMILAR_TO','HAS_ATTRIBUTE','DERIVATIONALLY_RELATED']))
-    SELECT e.name
-    FROM expected e
-    WHERE NOT EXISTS (
-        SELECT 1 FROM consensus c JOIN subj s ON c.subject_id = s.id
-        WHERE c.type_id = relation_type_id(e.name) AND NOT refuted(c.rating, c.rd))
-$$;
+    LANGUAGE C STABLE PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_gaps';
 
 CREATE OR REPLACE FUNCTION contrast(p_x bytea, p_y bytea, p_lang bytea DEFAULT NULL,
                                     p_limit int DEFAULT 80)
@@ -606,106 +309,8 @@ CREATE OR REPLACE FUNCTION contrast(p_x bytea, p_y bytea, p_lang bytea DEFAULT N
 
 CREATE OR REPLACE FUNCTION route_prompt(p_prompt text)
     RETURNS TABLE(intent text, phrase text, phrase2 text, type_name text)
-    LANGUAGE plpgsql STABLE STRICT
-    SET search_path = @extschema@, public AS $route$
-DECLARE
-    p text := trim(p_prompt);
-    m text[];
-BEGIN
-    intent := NULL; phrase := NULL; phrase2 := NULL; type_name := NULL;
-
-    m := regexp_match(p, '^what\s+does\s+(.+?)\s+mean\y', 'i');
-    IF m IS NULL THEN m := regexp_match(p, '^(?:define|meaning\s+of)\s+(.+)$', 'i'); END IF;
-    IF m IS NOT NULL THEN intent := 'define'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, '^what\s+(?:is|are)\s+(?:(?:a|an|the)\s+)?(.+?)\s+used\s+for\??$', 'i');
-    IF m IS NULL THEN m := regexp_match(p, '^uses?\s+of\s+(.+?)\??$', 'i'); END IF;
-    IF m IS NOT NULL THEN intent := 'related'; type_name := 'USED_FOR'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, '^how\s+(?:are|is)\s+(.+?)\s+(?:and|&)\s+(.+?)\s+related\??$', 'i');
-    IF m IS NULL THEN m := regexp_match(p, '^how\s+(?:is|are)\s+(.+?)\s+related\s+to\s+(.+?)\??$', 'i'); END IF;
-    IF m IS NULL THEN m := regexp_match(p, '^(?:relate|relation\s+(?:between|of))\s+(.+?)\s+(?:and|to|&)\s+(.+?)\??$', 'i'); END IF;
-    IF m IS NULL THEN m := regexp_match(p, '^(.+?)\s+vs\.?\s+(.+?)\??$', 'i'); END IF;
-    IF m IS NOT NULL THEN intent := 'reason'; phrase := m[1]; phrase2 := m[2]; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, '^(?:is|are)\s+(?:(?:a|an|the)\s+)?(.+?)\s+(?:a|an|the)\s+(.+?)\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'is_a'; phrase := m[1]; phrase2 := m[2]; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, '^what(?:''s|\s+is|\s+are)\s+(?:(?:a|an|the)\s+)?(.+?)\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'what_is'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, '^(?:tell\s+me\s+about|describe|about)\s+(.+?)\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'describe'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, '^translate\s+(.+?)(?:\s+(?:in|to|into)\s+.+)?$', 'i');
-    IF m IS NOT NULL THEN intent := 'translate'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, '^(?:walk|continue|free[- ]?associate(?:\s+from)?)\s+(.+?)\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'walk'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, '^complete\s+(.+?)\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'complete'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, '^(?:what\s+(?:word\s+|comes?\s+)?(?:comes?\s+)?after|what\s+follows?|after|follows?)\s+(.+?)\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'related'; type_name := 'PRECEDES'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, '^(?:what\s+(?:word\s+|comes?\s+)?(?:comes?\s+)?before|what\s+precedes?|before|precedes?)\s+(.+?)\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'related'; type_name := 'FOLLOWS'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, '^(?:(?:and|what\s+about)\s+)?(?:its|their|his|her)\s+(definition|meaning|synonyms?|antonyms?|translations?|examples?|parts?|causes?|uses?)\??$', 'i');
-    IF m IS NOT NULL THEN
-        intent := CASE
-            WHEN lower(m[1]) IN ('definition', 'meaning') THEN 'define'
-            WHEN lower(m[1]) LIKE 'synonym%'              THEN 'synonyms'
-            WHEN lower(m[1]) LIKE 'translation%'          THEN 'translate'
-            WHEN lower(m[1]) LIKE 'example%'              THEN 'examples'
-            WHEN lower(m[1]) LIKE 'cause%'                THEN 'related_in'
-            ELSE 'related' END;
-        type_name := CASE
-            WHEN lower(m[1]) LIKE 'antonym%' THEN 'IS_ANTONYM_OF'
-            WHEN lower(m[1]) LIKE 'part%'    THEN 'HAS_PART'
-            WHEN lower(m[1]) LIKE 'cause%'   THEN 'CAUSES'
-            WHEN lower(m[1]) LIKE 'use%'     THEN 'USED_FOR' END;
-        RETURN NEXT; RETURN;
-    END IF;
-
-    m := regexp_match(p, '^(?:what\s+about|and)\s+(?:it|that|this|them|those)\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'describe'; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, '^antonyms?\s+(?:of|for)?\s*(.+?)\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'related'; type_name := 'IS_ANTONYM_OF'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, '^parts?\s+of\s+(.+?)\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'related'; type_name := 'HAS_PART'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, '^(?:what\s+causes|causes?\s+of)\s+(.+?)\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'related_in'; type_name := 'CAUSES'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, '^what\s+does\s+(.+?)\s+cause\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'related'; type_name := 'CAUSES'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, 'synonyms?\s+(?:of|for)?\s*(.+)$', 'i');
-    IF m IS NOT NULL THEN intent := 'synonyms'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    m := regexp_match(p, 'examples?\s+(?:of|for)?\s*(.+)$', 'i');
-    IF m IS NOT NULL THEN intent := 'examples'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    -- code: "how [do I/you/we/to] {verb phrase} [in {lang}]"
-    m := regexp_match(p, '^how\s+(?:do\s+(?:i|you|we)|to)\s+(.+?)(?:\s+in\s+\w+)?$', 'i');
-    IF m IS NOT NULL THEN intent := 'related'; type_name := 'HAS_EXAMPLE'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    -- code: "[show me] [a/an] example [of/for] {phrase}"
-    m := regexp_match(p, '^(?:show\s+(?:me\s+)?(?:an?\s+)?)?(?:code\s+)?example\s+(?:of|for)\s+(.+?)$', 'i');
-    IF m IS NOT NULL THEN intent := 'related'; type_name := 'HAS_EXAMPLE'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    -- code: "write/generate/implement/create [a/an] {phrase} [function/method/script/snippet/code]"
-    m := regexp_match(p, '^(?:write|generate|implement|create)\s+(?:(?:a|an|some|the)\s+)?(.+?)(?:\s+(?:function|method|script|snippet|code|program|class))?$', 'i');
-    IF m IS NOT NULL THEN intent := 'related'; type_name := 'HAS_EXAMPLE'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
-
-    intent := 'fallback'; phrase := p;
-    RETURN NEXT;
-END;
-$route$;
+    LANGUAGE C STABLE STRICT
+    AS 'MODULE_PATHNAME', 'pg_laplace_route_prompt';
 
 CREATE OR REPLACE FUNCTION resolve_topic(p_phrase text, p_context bytea)
     RETURNS bytea
@@ -722,172 +327,8 @@ $$;
 
 CREATE OR REPLACE FUNCTION respond(p_prompt text, p_context bytea DEFAULT NULL)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
-    LANGUAGE plpgsql STABLE
-    SET search_path = @extschema@, public AS $respond$
-DECLARE
-    r        record;
-    v_topic  bytea;
-    v_topic2 bytea;
-    v_lang   bytea;
-    v_ctx    bytea[];
-    v_path   bytea[];
-    v_types  bytea[];
-    v_mu     numeric;
-BEGIN
-    IF p_prompt IS NULL OR btrim(p_prompt) = '' THEN RETURN; END IF;
-
-    SELECT * INTO r FROM route_prompt(p_prompt);
-    v_topic := resolve_topic(r.phrase, p_context);
-
-    IF v_topic IS NULL THEN
-        IF r.intent = 'fallback' THEN
-            RETURN QUERY SELECT 'I hold no consensus about any word of "' || p_prompt || '" yet.',
-                                NULL::numeric, NULL::bigint;
-        ELSE
-            RETURN QUERY SELECT 'I hold no consensus about "' || COALESCE(r.phrase, p_prompt) || '" yet.',
-                                NULL::numeric, NULL::bigint;
-        END IF;
-        RETURN;
-    END IF;
-
-    v_lang := word_language(v_topic);
-    SELECT array_agg(ps.id) INTO v_ctx
-    FROM prompt_state(p_prompt) ps WHERE ps.id <> v_topic;
-    v_ctx := COALESCE(v_ctx, ARRAY[]::bytea[]);
-
-    IF r.intent = 'define' THEN
-        RETURN QUERY SELECT d.definition, d.eff_mu, d.witnesses FROM define(v_topic, v_ctx) d;
-        IF NOT FOUND THEN
-            RETURN QUERY SELECT 'I hold "' || label(v_topic) || '" but no glosses have been witnessed yet.',
-                                NULL::numeric, NULL::bigint;
-        END IF;
-
-    ELSIF r.intent = 'what_is' THEN
-        RETURN QUERY
-            SELECT label(v_topic) || ': ' || d.definition, d.eff_mu, d.witnesses
-            FROM define(v_topic, v_ctx, 3) d
-            UNION ALL
-            SELECT repeat('  ', h.depth) || '→ is ' || COALESCE(h.hypernym, '?')
-                   || COALESCE(': ' || h.gloss, ''),
-                   NULL::numeric, NULL::bigint
-            FROM hypernyms(v_topic, 6) h
-            WHERE h.depth > 0;
-        IF NOT FOUND THEN
-            RETURN QUERY SELECT 'I hold "' || label(v_topic) || '" but no sense consensus has been witnessed yet.',
-                                NULL::numeric, NULL::bigint;
-        END IF;
-
-    ELSIF r.intent = 'translate' THEN
-        RETURN QUERY
-            SELECT t.translation || ' [' || COALESCE(t.language, '?') || ']', t.eff_mu, t.witnesses
-            FROM translations(v_topic) t;
-        IF NOT FOUND THEN
-            RETURN QUERY SELECT 'I hold "' || label(v_topic) || '" but no translation consensus yet.',
-                                NULL::numeric, NULL::bigint;
-        END IF;
-
-    ELSIF r.intent = 'synonyms' THEN
-        RETURN QUERY SELECT s.synonym, s.eff_mu, s.witnesses FROM synonyms(v_topic) s;
-        IF NOT FOUND THEN
-            RETURN QUERY SELECT 'I hold "' || label(v_topic) || '" but no synonym consensus yet.',
-                                NULL::numeric, NULL::bigint;
-        END IF;
-
-    ELSIF r.intent = 'examples' THEN
-        RETURN QUERY SELECT e.example, e.eff_mu, e.witnesses FROM examples(v_topic) e;
-        IF NOT FOUND THEN
-            RETURN QUERY SELECT 'I hold "' || label(v_topic) || '" but no example consensus yet.',
-                                NULL::numeric, NULL::bigint;
-        END IF;
-
-    ELSIF r.intent = 'describe' THEN
-        RETURN QUERY
-            SELECT d.type || ': ' || COALESCE(d.fact, '?'), d.eff_mu, d.witnesses
-            FROM describe(v_topic, v_lang) d;
-        IF NOT FOUND THEN
-            RETURN QUERY SELECT 'I hold "' || label(v_topic) || '" but no relation consensus to describe yet.',
-                                NULL::numeric, NULL::bigint;
-        END IF;
-
-    ELSIF r.intent = 'related' THEN
-        RETURN QUERY
-            SELECT f.fact, f.eff_mu, f.witnesses
-            FROM related(v_topic, relation_type_id(r.type_name), v_lang) f;
-        IF NOT FOUND THEN
-            RETURN QUERY SELECT 'I hold "' || label(v_topic) || '" but no '
-                                || lower(replace(r.type_name, '_', ' ')) || ' consensus yet.',
-                                NULL::numeric, NULL::bigint;
-        END IF;
-
-    ELSIF r.intent = 'related_in' THEN
-        RETURN QUERY
-            SELECT f.fact, f.eff_mu, f.witnesses
-            FROM related_in(v_topic, relation_type_id(r.type_name), v_lang) f;
-        IF NOT FOUND THEN
-            RETURN QUERY SELECT 'I hold "' || label(v_topic) || '" but no incoming '
-                                || lower(replace(r.type_name, '_', ' ')) || ' consensus yet.',
-                                NULL::numeric, NULL::bigint;
-        END IF;
-
-    ELSIF r.intent = 'is_a' THEN
-        v_topic2 := resolve_topic(r.phrase2, NULL);
-        IF v_topic2 IS NULL THEN
-            RETURN QUERY SELECT 'I hold no consensus about "' || r.phrase2 || '" yet.',
-                                NULL::numeric, NULL::bigint;
-            RETURN;
-        END IF;
-        SELECT ip.path, ip.types, ip.path_mu INTO v_path, v_types, v_mu
-        FROM isa_path(v_topic, v_topic2) ip;
-        IF v_path IS NOT NULL THEN
-            RETURN QUERY SELECT 'Yes — ' || realize_path(v_path, v_types, v_lang), v_mu, NULL::bigint;
-        ELSE
-            RETURN QUERY SELECT 'No witnessed IS_A path from "'
-                                || COALESCE(realize(v_topic, v_lang), label(v_topic)) || '" to "'
-                                || COALESCE(realize(v_topic2, v_lang), label(v_topic2)) || '".',
-                                NULL::numeric, NULL::bigint;
-        END IF;
-
-    ELSIF r.intent = 'reason' THEN
-        v_topic2 := resolve_topic(r.phrase2, NULL);
-        IF v_topic2 IS NULL THEN
-            RETURN QUERY SELECT 'I hold no consensus about "' || r.phrase2 || '" yet.',
-                                NULL::numeric, NULL::bigint;
-            RETURN;
-        END IF;
-        RETURN QUERY
-            SELECT CASE WHEN rs.relation IS NOT NULL
-                        THEN rs.relation || '  [' || rs.verdict || ']'
-                        ELSE rs.verdict END,
-                   rs.mu, rs.usage
-            FROM relatedness(v_topic, v_topic2) rs;
-
-    ELSIF r.intent IN ('walk', 'complete') THEN
-        RETURN QUERY
-            SELECT COALESCE(realize(v_topic, v_lang), label(v_topic))
-                   || string_agg(' —' || COALESCE(type_label(g.type_id), '?') || '→ '
-                                 || COALESCE(realize(g.entity_id, v_lang), label(g.entity_id)),
-                                 '' ORDER BY g.step),
-                   min(g.eff_mu), NULL::bigint
-            FROM generate_greedy(v_topic,
-                                 CASE WHEN r.intent = 'complete' THEN relation_type_id('COMPLETES_TO') END,
-                                 8) g
-            HAVING count(*) > 0;
-        IF NOT FOUND THEN
-            RETURN QUERY SELECT 'I hold "' || label(v_topic) || '" but no outgoing consensus to walk yet.',
-                                NULL::numeric, NULL::bigint;
-        END IF;
-
-    ELSE
-        RETURN QUERY
-            SELECT label(v_topic) || ': ' || d.definition, d.eff_mu, d.witnesses
-            FROM define(v_topic, v_ctx, 3) d;
-        IF NOT FOUND THEN
-            RETURN QUERY SELECT 'I hold "' || label(v_topic) || '" but no glosses have been witnessed yet.',
-                                NULL::numeric, NULL::bigint;
-        END IF;
-    END IF;
-END;
-$respond$;
+    LANGUAGE C STABLE
+    AS 'MODULE_PATHNAME', 'pg_laplace_respond';
 
 CREATE UNLOGGED TABLE converse_turns (
     session_id  bytea       NOT NULL,
@@ -900,33 +341,8 @@ CREATE UNLOGGED TABLE converse_turns (
 
 CREATE OR REPLACE FUNCTION converse(p_prompt text, p_session bytea DEFAULT NULL)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
-    LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public AS $converse$
-DECLARE
-    v_session bytea := COALESCE(p_session, convert_to(pg_backend_pid()::text, 'UTF8'));
-    v_context bytea;
-    r         record;
-    v_topic   bytea;
-BEGIN
-    IF p_prompt IS NULL OR btrim(p_prompt) = '' THEN RETURN; END IF;
-
-    SELECT t.resolved_id INTO v_context
-    FROM converse_turns t
-    WHERE t.session_id = v_session AND t.resolved_id IS NOT NULL
-    ORDER BY t.ord DESC
-    LIMIT 1;
-
-    SELECT * INTO r FROM route_prompt(p_prompt);
-    v_topic := resolve_topic(r.phrase, v_context);
-
-    INSERT INTO converse_turns (session_id, ord, prompt, resolved_id)
-    SELECT v_session, COALESCE(max(t.ord), 0) + 1, p_prompt, v_topic
-    FROM converse_turns t
-    WHERE t.session_id = v_session;
-
-    RETURN QUERY SELECT * FROM respond(p_prompt, v_context);
-END;
-$converse$;
+    LANGUAGE C VOLATILE
+    AS 'MODULE_PATHNAME', 'pg_laplace_converse';
 
 CREATE OR REPLACE FUNCTION structural_neighbors(p_word text, p_k integer DEFAULT 10)
     RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
