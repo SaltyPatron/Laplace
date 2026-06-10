@@ -49,7 +49,7 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
             var witness = new TatoebaSentenceWitness(allowedSentenceIds, options.Languages);
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 sentences, "tsv", Source, witness, batch, SourceTrust.StructuredCorpus,
-                "tatoeba/sent", reportUnits: null, contextId: null, commitEpoch: 0, ct))
+                "tatoeba/sent", reportUnits: null, contextId: null, commitEpoch: 0, ct: ct))
             {
                 if (!options.DryRun) yield return change;
             }
@@ -60,7 +60,7 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
             var witness = new TatoebaLinkWitness(allowedSentenceIds);
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 links, "tsv", Source, witness, batch, SourceTrust.StructuredCorpus,
-                "tatoeba/link", reportUnits: null, contextId: null, commitEpoch: 1, ct))
+                "tatoeba/link", reportUnits: null, contextId: null, commitEpoch: 1, ct: ct))
             {
                 if (!options.DryRun) yield return change;
             }

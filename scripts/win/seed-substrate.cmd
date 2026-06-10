@@ -1,9 +1,19 @@
 @echo off
 setlocal
 rem ==== Invention-complete witness seed (manifest-driven) ===================
-rem Drop/recreate laplace, run full lexical ladder + all repos + test-data.
-rem Safetensor snapshots optional (LAPLACE_SKIP_MODELS=1 for attestation-only seed).
-rem Skip flags: LAPLACE_SKIP_WORLD, LAPLACE_SKIP_GIANTS, LAPLACE_SKIP_MODELS, LAPLACE_SKIP_STACK.
+rem Drop/recreate laplace, run lexical ladder in dependency order, then functionality.
+rem
+rem *Net link law (synset hub):
+rem   WordNet  — synsets + senses + lemma arena + pointer graph (anchor)
+rem   OMW      — same WordNetSynset IDs: translations/defs/examples per language
+rem   VerbNet  — lemma CORRESPONDS_TO wordnet/sense/{key}
+rem   PropBank — lemma HAS_SENSE roleset; roleset CORRESPONDS_TO verbnet/class
+rem   FrameNet — lemma EVOKES_FRAME framenet/frame
+rem   SemLink  — explicit propbank↔verbnet and verbnet↔framenet alignment
+rem   ConceptNet / Atomic2020 — en-scoped graphs sharing the lemma arena (not synset IDs)
+rem
+rem English scope: LAPLACE_INGEST_LANGS=en (+ UD en_* treebanks, Wiktionary English jsonl).
+rem Skip: LAPLACE_SKIP_MODELS (safetensors), LAPLACE_SKIP_USAGE (tatoeba/opensubtitles).
 rem cwd on D: so /vault junctions resolve to D:\Data\Ingest.
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
@@ -14,14 +24,14 @@ set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ROOT%\build-win\core\perfcache\laplace_t0_pe
 set "INGEST=D:\Data\Ingest"
 set "REPOS=D:\Repositories"
 set "MODELS=D:\Models\hub"
-rem Witness language scope: all multilingual sources honor this (per-source override: LAPLACE_TATOEBA_LANGS etc.)
-rem English-only seed: en resolves eng/en-US via LanguageReference. Cross-lang edges off unless LAPLACE_EMIT_CROSS_LANG=1
 set "LAPLACE_INGEST_LANGS=en"
-rem Parallel ingest commits (epoch barriers on phased sources; WordNet stays serial).
+if not defined LAPLACE_EMIT_CROSS_LANG set "LAPLACE_EMIT_CROSS_LANG=0"
 set "LAPLACE_INGEST_WORKERS=4"
 set "LAPLACE_DECOMPOSE_WORKERS=1"
 set "LAPLACE_COPY_VALIDATE=1"
 if not defined LAPLACE_FOLD_WORKERS set "LAPLACE_FOLD_WORKERS=8"
+if not defined LAPLACE_SKIP_MODELS set "LAPLACE_SKIP_MODELS=1"
+if not defined LAPLACE_SKIP_USAGE set "LAPLACE_SKIP_USAGE=1"
 
 echo ==== DROP + recreate laplace ====
 "%PGBIN%\psql.exe" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='laplace' AND pid<>pg_backend_pid();" -c "DROP DATABASE IF EXISTS laplace;" || exit /b 1
@@ -34,15 +44,37 @@ echo ==== post-create identity health ====
 cd app
 dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q || exit /b 1
 
-rem ---- Phase 8a: lexical core (L0–L2 semantics; no usage/world giants) ------
-rem Floor + lexicon + structured semantics. word_id / WordNet must exist before code.
-for %%s in (unicode iso639 wordnet verbnet propbank atomic2020 conceptnet ud) do (
-  echo ==== ingest %%s ====
-  dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest %%s || exit /b 1
-)
+rem ---- L0–L1: floor + language registry ------------------------------------
+echo ==== ingest unicode (L0) ====
+dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest unicode || exit /b 1
+echo ==== ingest iso639 (L1) ====
+dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest iso639 || exit /b 1
 
-rem ---- Phase 8b: functionality (repos + books + code corpora) ---------------
-rem PRECEDES / HAS_EXAMPLE / AST testimony — invention capability, not world data.
+rem ---- *Net cluster: WordNet synset hub, then extensions in link order ------
+echo ==== ingest wordnet (synsets + senses + lemma arena) ====
+dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest wordnet || exit /b 1
+echo ==== ingest omw (bind lemmas/defs to WordNetSynset IDs, en) ====
+dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest omw || exit /b 1
+echo ==== ingest verbnet (CORRESPONDS_TO wordnet/sense) ====
+dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest verbnet || exit /b 1
+echo ==== ingest propbank (HAS_SENSE roleset; CORRESPONDS_TO verbnet) ====
+dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest propbank || exit /b 1
+echo ==== ingest framenet (EVOKES_FRAME from lemmas) ====
+dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest framenet || exit /b 1
+echo ==== ingest semlink (propbank-verbnet + verbnet-framenet alignment) ====
+dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest semlink || exit /b 1
+echo ==== ingest conceptnet (/c/en/ graph, shared lemma arena) ====
+dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest conceptnet || exit /b 1
+echo ==== ingest atomic2020 (script relations on event atoms) ====
+dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest atomic2020 || exit /b 1
+
+rem ---- Syntax + dictionary (English-scoped; not synset-linked) --------------
+echo ==== ingest ud (en_* treebanks) ====
+dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest ud || exit /b 1
+echo ==== ingest wiktionary (English entries only) ====
+dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest wiktionary || exit /b 1
+
+rem ---- Functionality: repos + code corpora --------------------------------
 for %%r in (Laplace X_BONEYARD llama-workspace SpecEditor TournamentManager Laplace-Space-Game temp-llama-models) do (
   if exist "%REPOS%\%%r" (
     echo ==== ingest repo %%r ====
@@ -52,55 +84,26 @@ for %%r in (Laplace X_BONEYARD llama-workspace SpecEditor TournamentManager Lapl
   )
 )
 
-rem ---- Phase 8c: test-data documents (PRECEDES bigrams via db-roundtrip) ---------
-set "BOOKS=%INGEST%\test-data\text"
-for %%f in ("%BOOKS%\*.txt") do (
-  echo ==== db-roundtrip %%~nxf ====
-  dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- db-roundtrip "%%~f" || exit /b 1
-)
-if exist "%INGEST%\test-data\text\code.py" (
-  dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- db-roundtrip "%INGEST%\test-data\text\code.py" || exit /b 1
-)
-if exist "%INGEST%\test-data\text\data.json" (
-  dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- db-roundtrip "%INGEST%\test-data\text\data.json" || exit /b 1
-)
-
-rem ---- Phase 8e: code corpora (download-first if absent) --------------------
 if exist "%INGEST%\tiny-codes" (
+  echo ==== ingest tiny-codes ====
   dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest tiny-codes "%INGEST%\tiny-codes" || exit /b 1
 ) else (
   echo ==== [skip] tiny-codes — run scripts\win\download-code-data.cmd tiny-codes ====
 )
-if not defined LAPLACE_SKIP_STACK if exist "%INGEST%\stack-v2" (
+if exist "%INGEST%\stack-v2" (
+  echo ==== ingest stack-v2 ====
   dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest stack "%INGEST%\stack-v2" || exit /b 1
 ) else (
-  if defined LAPLACE_SKIP_STACK (
-    echo ==== [skip] stack-v2 — LAPLACE_SKIP_STACK=1 ====
-  ) else (
-    echo ==== [skip] stack-v2 — run scripts\win\download-code-data.cmd stack-v2 ====
-  )
+  echo ==== [skip] stack-v2 — run scripts\win\download-code-data.cmd stack-v2 ====
 )
 
-rem ---- Phase 8f: world usage corpora -------------------------------------------
-rem Tatoeba / OpenSubtitles / Wiktionary — illustrative usage, not core lexicon.
-rem LAPLACE_SKIP_GIANTS=1 skips this block and L3 below (coding-focused seed).
-if not defined LAPLACE_SKIP_GIANTS if not defined LAPLACE_SKIP_WORLD (
-  for %%s in (tatoeba opensubtitles wiktionary) do (
+if not defined LAPLACE_SKIP_USAGE (
+  for %%s in (tatoeba opensubtitles) do (
     echo ==== ingest %%s ====
     dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest %%s || exit /b 1
   )
 ) else (
-  echo ==== [skip] world usage corpora ====
-)
-
-rem ---- Phase 8g: L3 bind -----------------------------------------------------
-if not defined LAPLACE_SKIP_GIANTS (
-  for %%s in (omw framenet semlink) do (
-    echo ==== ingest %%s ====
-    dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest %%s || exit /b 1
-  )
-) else (
-  echo ==== [skip] L3 bind — LAPLACE_SKIP_GIANTS=1 ====
+  echo ==== [skip] tatoeba + opensubtitles — LAPLACE_SKIP_USAGE=1 ====
 )
 
 echo ==== ingest image (test-data annex) ====
@@ -108,9 +111,6 @@ dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ing
 echo ==== ingest audio (test-data annex) ====
 dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest audio "%INGEST%\test-data\audio" || exit /b 1
 
-rem ---- Phase 8d: safetensor snapshot deposition (fixed witness set) ---------
-rem HF snapshot dirs: config.json + tokenizer.json + *.safetensors per snapshot
-rem LAPLACE_SKIP_MODELS=1 skips deposition — seed attestations alone prove converse/generate/export.
 if not defined LAPLACE_SKIP_MODELS (
   for %%m in (
     "%MODELS%\models--TinyLlama--TinyLlama-1.1B-Chat-v1.0"

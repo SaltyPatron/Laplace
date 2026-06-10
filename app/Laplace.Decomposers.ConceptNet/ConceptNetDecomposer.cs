@@ -66,7 +66,12 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
     {
         string file = Path.Combine(context.EcosystemPath, "assertions.csv");
         if (!File.Exists(file)) return null;
-        long n = await EtlInventory.CountDataLinesAsync(file, ct: ct);
+        LanguageFilter? langs = options.Languages;
+        long n = await EtlInventory.CountDataLinesAsync(file, line =>
+        {
+            if (langs?.IsActive != true) return true;
+            return ConceptNetRowFilter.MatchesLanguageFilter(line, langs);
+        }, ct: ct);
         return new IngestInventory("assertions", n, [new IngestFileSpec("assertions", file, n)]);
     }
 
@@ -85,10 +90,14 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
         int batch = options.BatchSize > 1 ? options.BatchSize : 8192;
         var arena = new ArenaRmsTracker();
         var witness = new ConceptNetWitness(arena, options.Languages);
+        Func<ReadOnlySpan<byte>, bool>? acceptRow = options.Languages?.IsActive == true
+            ? line => ConceptNetRowFilter.MatchesLanguageFilter(line, options.Languages!)
+            : null;
 
         await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
             file, "tsv", Source, witness, batch, SourceTrust.UserCuratedResource,
-            "conceptnet", reportUnits: null, contextId: null, commitEpoch: 0, ct))
+            "conceptnet", reportUnits: null, contextId: null, commitEpoch: 0,
+            acceptRow: acceptRow, ct: ct))
         {
             yield return change;
         }

@@ -161,8 +161,8 @@ internal static class EndpointMappings
                 request.HttpContext.Response.Headers["Cache-Control"] = "no-cache";
                 request.HttpContext.Response.Headers["X-Accel-Buffering"] = "no";
 
-                await foreach (var token in substrate.GenerateStreamAsync(
-                    payload.Prompt.Trim(), steps: steps, temperature: temp, stop: stop, ct: ct))
+                await foreach (var token in substrate.GenerateNgramStreamAsync(
+                    payload.Prompt.Trim(), steps: steps, temperature: temp, ct: ct))
                 {
                     var chunk = JsonSerializer.Serialize(new {
                         id = completionId, @object = "text_completion",
@@ -178,11 +178,11 @@ internal static class EndpointMappings
 
             // Non-streaming: collect full sequence then return
             var tokens = new List<GenerateToken>(steps);
-            await foreach (var token in substrate.GenerateStreamAsync(
-                payload.Prompt.Trim(), steps: steps, temperature: temp, stop: stop, ct: ct))
+            await foreach (var token in substrate.GenerateNgramStreamAsync(
+                payload.Prompt.Trim(), steps: steps, temperature: temp, ct: ct))
                 tokens.Add(token);
 
-            var text = string.Concat(tokens.Select(t => t.Token));
+            var text = string.Concat(tokens.Select(t => t.Token)).TrimStart();
             return Results.Json(new
             {
                 id = $"cmpl-{Guid.NewGuid():N}",

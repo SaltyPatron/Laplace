@@ -126,6 +126,42 @@ internal sealed class SubstrateClient : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Higher-order generation via longest-context back-off over the witnessed content
+    /// trajectories (<c>laplace.generate_ngram</c>): each token is reproduced verbatim while its
+    /// full preceding context is attested, then recombined when the exact span runs out. No model,
+    /// no HAS_POS gate. Tokens are yielded with a leading space so the OpenAI stream detokenizes to
+    /// readable prose (content trajectories drop whitespace, so we re-insert the separator).
+    /// </summary>
+    public async IAsyncEnumerable<GenerateToken> GenerateNgramStreamAsync(
+        string prompt,
+        int steps          = 32,
+        int maxOrder       = 5,
+        double temperature = 0.7,
+        int topK           = 10,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        const string sql =
+            "SELECT step, token, ord_used FROM laplace.generate_ngram(@p, @steps, @order, @temp, @topk);";
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("p", prompt);
+        cmd.Parameters.AddWithValue("steps", steps);
+        cmd.Parameters.AddWithValue("order", maxOrder);
+        cmd.Parameters.AddWithValue("temp", temperature);
+        cmd.Parameters.AddWithValue("topk", topK);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var step = reader.GetInt32(0);
+            var tok  = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+            var ord  = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
+            if (tok.Length == 0) continue;
+            yield return new GenerateToken(step, " " + tok, ord);
+        }
+    }
+
     // ── forward-pass internals ────────────────────────────────────────────────
 
     private static async Task<byte[][]> ResolveContextAsync(

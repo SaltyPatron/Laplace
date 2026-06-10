@@ -16,7 +16,8 @@ SET client_min_messages = warning;
 -- Tokens that participate in PRECEDES are content words by construction
 -- (BuildDistributionalAttestations filters to alphanumeric-bearing tokens).
 CREATE OR REPLACE PROCEDURE rebuild_content_tok()
-    LANGUAGE plpgsql AS $$
+    LANGUAGE plpgsql
+    SET search_path = laplace, public AS $$
 BEGIN
     DROP TABLE IF EXISTS content_tok;
     CREATE TABLE content_tok AS
@@ -32,6 +33,9 @@ END $$;
 -- pos is consecutive over CONTENT tokens only (whitespace/punctuation dropped),
 -- so generate_ngram's k-way contiguity join matches real word adjacency.
 -- Memory-safe: per-batch window-sort over one keyset page of sentences, COMMIT each.
+-- NB: no SET search_path clause — a config-SET on a procedure forces atomic execution
+-- and forbids COMMIT. Call with the session search_path set to laplace, public (the
+-- generation.sql header and the run scripts do this).
 CREATE OR REPLACE PROCEDURE rebuild_content_index(p_batch int DEFAULT 20000)
     LANGUAGE plpgsql AS $$
 DECLARE
@@ -40,7 +44,15 @@ DECLARE
     v_cnt   int;
     total   bigint := 0;
 BEGIN
-    CALL rebuild_content_tok();
+    -- content vocabulary (inlined; a nested CALL would force this procedure atomic and reject COMMIT)
+    DROP TABLE IF EXISTS content_tok;
+    CREATE TABLE content_tok AS
+        SELECT DISTINCT subject_id AS id FROM consensus
+            WHERE type_id = relation_type_id('PRECEDES')
+        UNION
+        SELECT object_id FROM consensus
+            WHERE type_id = relation_type_id('PRECEDES') AND object_id IS NOT NULL;
+    ALTER TABLE content_tok ADD PRIMARY KEY (id);
 
     DROP TABLE IF EXISTS content_index;
     CREATE TABLE content_index (seq_id bytea NOT NULL, token bytea NOT NULL, pos int NOT NULL);
@@ -140,6 +152,152 @@ BEGIN
         ctx := ctx || nxt;
     END LOOP;
 END $$;
+
+-- ── order-1 PRECEDES walk (modality-agnostic, no index needed) ──────────────
+-- Works for any modality the moment PRECEDES is witnessed (text words, code tokens, …).
+-- Temperature-sampled; avoids immediately repeating the previous token.
+CREATE OR REPLACE FUNCTION walk(
+        p_seed text, p_steps int DEFAULT 16,
+        p_temp float8 DEFAULT 0.6, p_topk int DEFAULT 6)
+    RETURNS text
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = laplace, public AS $w$
+DECLARE
+    cur bytea; nxt bytea; prev bytea; out text := p_seed; i int;
+BEGIN
+    cur := COALESCE(resolve_phrase(p_seed), word_id(p_seed));
+    IF cur IS NULL THEN RETURN p_seed || ' [unknown]'; END IF;
+    FOR i IN 1..p_steps LOOP
+        SELECT object_id INTO nxt FROM (
+            SELECT c.object_id,
+                   (-ln(random())) / power(c.witness_count::float8, 1.0 / GREATEST(p_temp,1e-6)) AS key
+            FROM consensus c
+            WHERE c.subject_id = cur AND c.type_id = relation_type_id('PRECEDES')
+              AND c.object_id IS NOT NULL AND NOT refuted(c.rating, c.rd)
+              AND c.object_id <> COALESCE(prev, '\x00'::bytea)
+            ORDER BY key ASC LIMIT p_topk
+        ) z ORDER BY random() LIMIT 1;
+        EXIT WHEN nxt IS NULL;
+        out := out || ' ' || render_text(nxt, 24);
+        prev := cur; cur := nxt;
+    END LOOP;
+    RETURN out;
+END $w$;
+
+-- ── multi-plane forward pass ────────────────────────────────────────────────
+-- A generation step is not a Markov walk over PRECEDES; it is a fusion over witnessed
+-- relation planes. The SEQUENTIAL plane (longest-context PRECEDES) proposes what comes next
+-- syntactically; the SEMANTIC plane (every non-PRECEDES knowledge edge — IS_A, USED_FOR,
+-- AT_LOCATION, X_INTENT, CAUSES, …) re-weights toward candidates that are actually related to
+-- the recent context. Each plane's vote is a Glicko-2 eff_mu — witnessed, with uncertainty.
+-- The per-plane columns make every choice auditable: you can see which planes elected a token.
+-- return-type changed across versions; CREATE OR REPLACE cannot alter it, so drop first
+DROP FUNCTION IF EXISTS forward_candidates(bytea[], int, int, int, numeric, numeric);
+CREATE OR REPLACE FUNCTION forward_candidates(
+        p_ctx       bytea[],
+        p_window    int     DEFAULT 6,      -- recent entities used for semantic coherence
+        p_max_order int     DEFAULT 5,
+        p_topk      int     DEFAULT 24,
+        w_seq       numeric DEFAULT 1.0,
+        w_sem       numeric DEFAULT 0.7)
+    RETURNS TABLE(token bytea, label text, plane text, seq numeric, sem numeric, score numeric)
+    LANGUAGE plpgsql STABLE
+    SET search_path = laplace, public AS $fc$
+DECLARE
+    clen   int := COALESCE(array_length(p_ctx, 1), 0);
+    recent bytea[];
+    ctok   bytea[];
+    cw     bigint[];
+    k      int;
+    tot    numeric;
+BEGIN
+    IF clen = 0 THEN RETURN; END IF;
+    recent := p_ctx[GREATEST(1, clen - p_window + 1) : clen];
+
+    -- SEQUENTIAL plane with longest-context back-off
+    FOR k IN REVERSE LEAST(p_max_order, clen) .. 1 LOOP
+        SELECT array_agg(c.token), array_agg(c.w) INTO ctok, cw
+        FROM continuations(p_ctx[clen - k + 1 : clen], p_topk) c;
+        EXIT WHEN ctok IS NOT NULL;
+    END LOOP;
+    IF ctok IS NULL THEN RETURN; END IF;
+    SELECT sum(x) INTO tot FROM unnest(cw) x;
+
+    RETURN QUERY
+    WITH
+    -- SEQUENTIAL plane proposes grammatical next tokens (longest-context PRECEDES)
+    seqp AS (
+        SELECT t.tok, (t.w::numeric / NULLIF(tot, 0)) AS seq
+        FROM unnest(ctok, cw) AS t(tok, w)
+    ),
+    -- every non-PRECEDES edge touching the recent context, tagged with its OWN plane
+    -- (has_property, made_up_of, is_a, used_for, at_location, x_intent, …) — not flattened
+    sem_edges AS (
+        SELECT CASE WHEN kk.subject_id = ANY (recent) THEN kk.object_id
+                    ELSE kk.subject_id END        AS tok,
+               type_label(kk.type_id)             AS plane,
+               eff_mu_display(kk.rating, kk.rd)   AS mu
+        FROM consensus kk
+        WHERE kk.type_id <> relation_type_id('PRECEDES')
+          AND NOT refuted(kk.rating, kk.rd)
+          AND (kk.subject_id = ANY (recent) OR kk.object_id = ANY (recent))
+    ),
+    -- SEMANTIC plane proposes knowledge-neighbors, keeping the strongest plane that elected each
+    semp AS (
+        SELECT e.tok,
+               max(e.mu) / 1500.0                          AS sem,
+               (array_agg(e.plane ORDER BY e.mu DESC))[1]  AS plane
+        FROM sem_edges e
+        WHERE e.tok IS NOT NULL
+          AND e.tok <> ALL (recent)
+          AND render_text(e.tok, 16) ~ '[[:alnum:]]'       -- generable word tokens only
+        GROUP BY e.tok
+        ORDER BY 2 DESC
+        LIMIT p_topk
+    ),
+    allc AS (SELECT tok FROM seqp UNION SELECT tok FROM semp)
+    SELECT a.tok,
+           render_text(a.tok, 24),
+           CASE WHEN s.tok IS NOT NULL AND m.tok IS NOT NULL THEN m.plane || '+seq'
+                WHEN m.tok IS NOT NULL THEN m.plane
+                ELSE 'sequence' END,
+           round(COALESCE(s.seq, 0), 4),
+           round(COALESCE(m.sem, 0), 4),
+           round(w_seq * COALESCE(s.seq, 0) + w_sem * COALESCE(m.sem, 0), 4)
+    FROM allc a
+    LEFT JOIN seqp s ON s.tok = a.tok
+    LEFT JOIN semp m ON m.tok = a.tok
+    ORDER BY 6 DESC
+    LIMIT p_topk * 2;
+END $fc$;
+
+-- Generation driven by the multi-plane forward pass; emits the plane breakdown per token.
+CREATE OR REPLACE FUNCTION generate_forward(
+        p_prompt      text,
+        p_steps       int     DEFAULT 24,
+        p_max_order   int     DEFAULT 5,
+        p_temperature float8  DEFAULT 0.6,
+        p_topk        int     DEFAULT 16,
+        w_sem         numeric DEFAULT 0.7)
+    RETURNS TABLE(step int, token text, seq numeric, sem numeric)
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = laplace, public AS $gf$
+DECLARE
+    ctx bytea[]; pick record; i int;
+BEGIN
+    SELECT array_agg(id ORDER BY ord) INTO ctx FROM prompt_state(p_prompt) WHERE id IS NOT NULL;
+    IF ctx IS NULL THEN RETURN; END IF;
+
+    FOR i IN 1..p_steps LOOP
+        SELECT fc.token, fc.label, fc.seq, fc.sem INTO pick
+        FROM forward_candidates(ctx, 6, p_max_order, p_topk, 1.0, w_sem) fc
+        ORDER BY (-ln(random())) / power(GREATEST(fc.score, 1e-9), 1.0 / GREATEST(p_temperature,1e-6)) ASC
+        LIMIT 1;
+        EXIT WHEN pick.token IS NULL;
+        RETURN QUERY SELECT i, pick.label, pick.seq, pick.sem;
+        ctx := ctx || pick.token;
+    END LOOP;
+END $gf$;
 
 -- ── convenience: assemble a completion as one string ────────────────────────
 CREATE OR REPLACE FUNCTION complete(

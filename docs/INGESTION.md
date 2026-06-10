@@ -27,28 +27,27 @@ Dependency-ordered seed ingestion; each source's IngestRunner refuses to start u
 ```
 L0 unicode      T0 atoms + UCD properties + byte tier        StandardsDerived
 L1 iso639       languages/scripts/macrolanguage              StandardsDerived
-L2 wordnet      synset/lemma/sense lexicon — foundational    AcademicCurated
-   verbnet/propbank/atomic2020/conceptnet/ud  semantic + syntactic structure
-   [functionality phase — not layer-gated, runs after L2 core]
-   repos         iteration-stack code trees                   StructuredCorpus
-   db-roundtrip  books/docs → PRECEDES bigrams                UserPromptContent
-   tiny-codes    1.6M prompt→code pairs (AST + HAS_EXAMPLE)   StructuredCorpus
-   stack-v2      The Stack v2 shards (optional)               StructuredCorpus
-   tatoeba      sentence translations (GB-scale usage)       StructuredCorpus
-   opensubtitles aligned pairs (largest usage)              StructuredCorpus
-   wiktionary   dictionary (largest L2)                    StructuredCorpus
-L3 omw          multilingual wordnet (binds L2 to languages) AcademicCuratedWithUserInput
-   framenet     frame semantics                              AcademicCurated
-   semlink      cross-resource alignment (needs vn+pb+fn)    AcademicCurated
+L2 wordnet      synsets + senses + lemma arena (HUB)         StandardsDerived
+L3 omw          binds to WordNetSynset IDs (en-filtered)    AcademicCuratedWithUserInput
+   verbnet      lemma → wordnet/sense (CORRESPONDS_TO)       AcademicCurated
+   propbank     lemma → roleset → verbnet (HAS_SENSE, …)     AcademicCurated
+L3 framenet     lemma → frame (EVOKES_FRAME)                 AcademicCurated
+L3 semlink      propbank↔verbnet↔framenet alignment          AcademicCurated
+   conceptnet   /c/en/ graph (shared lemma arena)            UserCuratedResource
+   atomic2020   script relations on event atoms              StructuredCorpus
+   ud           syntax trees (en_* when scoped)              AcademicCurated
+   wiktionary   dictionary (English jsonl when scoped)       StructuredCorpus
+   [functionality: repos, tiny-codes, stack]
+   [proof sandbox: ingest-text.cmd / e2e-full.cmd — db-roundtrip, not seed]
+   [deferred usage: tatoeba, opensubtitles]
 ```
 
-Seed order (see `witness-manifest.json`): **lexical core** → **functionality** (repos, books, code) → **world usage** (tatoeba, opensubtitles, wiktionary) → **L3 bind** → **safetensor snapshots** (optional). Code and books run before Tatoeba/Wiktionary so PRECEDES/HAS_EXAMPLE exist for generate/converse without waiting on GB-scale usage corpora.
+Seed order (see `witness-manifest.json`): **wordnet (synset hub)** → **omw → verbnet → propbank → framenet → semlink** → conceptnet → atomic2020 → ud → wiktionary → **repos + code + image/audio**. Tatoeba/OpenSubtitles deferred unless `LAPLACE_SKIP_USAGE=0`. **db-roundtrip is not seed** — run `scripts\win\ingest-text.cmd` or `e2e-full.cmd` separately to prove bit-perfect document round-trip.
 
 | skip flag | effect |
 |---|---|
-| `LAPLACE_SKIP_WORLD=1` | skip tatoeba, opensubtitles, wiktionary |
-| `LAPLACE_SKIP_GIANTS=1` | skip world usage **and** L3 bind (omw, framenet, semlink) |
-| `LAPLACE_SKIP_MODELS=1` | skip safetensor snapshot deposition (TinyLlama, Phi-2, Qwen, …) |
+| `LAPLACE_SKIP_USAGE=1` | skip tatoeba, opensubtitles (translation-pair usage; default at seed) |
+| `LAPLACE_SKIP_MODELS=1` | skip safetensor snapshot deposition (default at seed) |
 
 Safetensor deposition is a **separate witness pass**, not required to prove the invention: lexical + structural + code/document attestations supply converse, generate, and the substrate-side recipe for custom export. Deposit models when you want tensor-role testimony stacked on the same entities — or run `ingest safetensors` later against a seeded DB.
 

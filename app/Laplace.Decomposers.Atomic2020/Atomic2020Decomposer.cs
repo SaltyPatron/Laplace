@@ -79,7 +79,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
 
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 file, "tsv", Source, witness, batch, SourceTrust.StructuredCorpus,
-                $"atomic/{split}", reportUnits: null, contextId: SplitId(split), commitEpoch: 0, ct))
+                $"atomic/{split}", reportUnits: null, contextId: SplitId(split), commitEpoch: 0, ct: ct))
             {
                 yield return change;
             }

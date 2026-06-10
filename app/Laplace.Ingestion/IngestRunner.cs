@@ -53,7 +53,8 @@ public sealed class IngestRunner
             }
         }
 
-        if (await _reader.HasSourceCompletedAsync(decomposer.SourceId, decomposer.LayerOrder, ct))
+        if (!options.SkipSourceCompletion
+            && await _reader.HasSourceCompletedAsync(decomposer.SourceId, decomposer.LayerOrder, ct))
         {
             log.LogInformation(
                 "{Source}: already ingested (completion marker present) — short-circuiting; "
@@ -220,7 +221,7 @@ public sealed class IngestRunner
         attestationsInserted  = counters.AttestationsInserted;
         totalRoundTrips       = counters.RoundTrips;
 
-        if (counters.UnitsFailed == 0 && failures.Count == 0)
+        if (!options.SkipSourceCompletion && counters.UnitsFailed == 0 && failures.Count == 0)
             await _writer.ApplyAsync(LayerCompletion.BuildMarker(decomposer), ct);
 
         sw.Stop();
