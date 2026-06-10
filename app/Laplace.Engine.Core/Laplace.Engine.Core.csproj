@@ -10,4 +10,10 @@
     <AssemblyName>Laplace.Engine.Core</AssemblyName>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Laplace.Decomposers.Abstractions" />
+    <InternalsVisibleTo Include="Laplace.Decomposers.Abstractions.Tests" />
+    <InternalsVisibleTo Include="Laplace.Engine.Core.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -63,7 +63,7 @@ internal static class WiktionaryWitness
         {
             Hash128 langId = LanguageReference.Resolve(langCode!);
             b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, LanguageTypeId, WiktionaryDecomposer.Source));
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 w, "HAS_LANGUAGE", langId, WiktionaryDecomposer.Source, SourceTrust.AcademicCuratedUserInput));
         }
 
@@ -71,11 +71,11 @@ internal static class WiktionaryWitness
         Hash128? posCtx = null;
         if (!string.IsNullOrEmpty(pos))
         {
-            Hash128 posId = PosReference.Resolve(pos!, PosReference.PosTagset.Wiktionary);
+            Hash128 posId = NativeAttestation.ResolvePos(pos!, NativeAttestation.PosTagset.Wiktionary);
             posCtx = posId;
             b.AddEntity(new EntityRow(posId, EntityTier.Vocabulary, PosReference.PosTypeId, WiktionaryDecomposer.Source));
-            b.AddAttestation(RelationTypeRegistry.Attest(
-                w, "HAS_POS", posId, WiktionaryDecomposer.Source, SourceTrust.AcademicCuratedUserInput));
+            b.AddAttestation(NativeAttestation.PosWiktionary(
+                w, pos!, WiktionaryDecomposer.Source, posCtx, SourceTrust.AcademicCuratedUserInput));
         }
 
         if (rec.TryGetProperty("senses", out var senses) && senses.ValueKind == JsonValueKind.Array)
@@ -171,7 +171,7 @@ internal static class WiktionaryWitness
         if (string.IsNullOrWhiteSpace(text)) return;
         var id = ContentEmitter.RootId(text!);
         if (id is null) return;
-        b.AddAttestation(RelationTypeRegistry.Attest(
+        b.AddAttestation(NativeAttestation.Categorical(
             subject, typeName, id.Value, WiktionaryDecomposer.Source, SourceTrust.AcademicCuratedUserInput,
             contextId: context));
     }

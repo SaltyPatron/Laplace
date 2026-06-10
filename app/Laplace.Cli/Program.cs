@@ -451,21 +451,12 @@ internal static class Program
         return 0;
     }
 
-    private static readonly string[] GenStop =
-    {
-        "the","a","an","and","or","but","of","to","in","on","at","by","for","with","as",
-        "is","was","are","were","be","been","have","has","had","do","did","will","would",
-        "can","could","may","might","must","i","you","he","she","it","we","they","not",
-        "no","so","this","that","which","who","what","all","one","him","her","them","its","his",
-    };
-
     private static async Task<int> GenerateAsync(string[] args)
     {
         int steps  = EnvInt("LAPLACE_GEN_STEPS", 20, 1);
-        int window = EnvInt("LAPLACE_GEN_WINDOW", 3, 1);
+        int order  = EnvInt("LAPLACE_GEN_ORDER", EnvInt("LAPLACE_GEN_WINDOW", 5, 1), 1);
         int topk   = EnvInt("LAPLACE_GEN_TOPK", 8, 1);
         double temp = EnvDouble("LAPLACE_GEN_TEMP", 0.6);
-        double steer = EnvDouble("LAPLACE_GEN_STEER", 0.0);
         bool verbose = Environment.GetEnvironmentVariable("LAPLACE_GEN_VERBOSE") == "1";
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
@@ -473,7 +464,7 @@ internal static class Program
 
         string prompt = string.Join(' ', args).Trim();
         if (!string.IsNullOrWhiteSpace(prompt))
-            return await GenerateOnceAsync(conn, prompt, steps, window, temp, topk, steer, verbose);
+            return await GenerateOnceAsync(conn, prompt, steps, order, temp, topk, verbose);
 
         Console.WriteLine("laplace generate — type a prompt, Enter. Blank line or Ctrl-D quits.");
         while (true)
@@ -481,39 +472,36 @@ internal static class Program
             Console.Write("\nprompt> ");
             var line = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(line)) break;
-            await GenerateOnceAsync(conn, line, steps, window, temp, topk, steer, verbose);
+            await GenerateOnceAsync(conn, line, steps, order, temp, topk, verbose);
         }
         return 0;
     }
 
     private static async Task<int> GenerateOnceAsync(
-        NpgsqlConnection conn, string prompt, int steps, int window, double temp, int topk, double boost, bool verbose)
+        NpgsqlConnection conn, string prompt, int steps, int order, double temp, int topk, bool verbose)
     {
         var sw = Stopwatch.StartNew();
-        var toks = new List<(string tok, decimal mu)>();
+        var toks = new List<(string tok, int ordUsed)>();
         await using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText =
-                "SELECT step, token, mu FROM laplace.generate("
-                + "@prompt, @steps, @window, @temp, @topk, @stop, @boost, @require_pos)";
+                "SELECT step, token, ord_used FROM laplace.generate_ngram("
+                + "@prompt, @steps, @order, @temp, @topk)";
             cmd.Parameters.AddWithValue("prompt", prompt);
-            cmd.Parameters.AddWithValue("stop", GenStop);
             cmd.Parameters.AddWithValue("steps", steps);
-            cmd.Parameters.AddWithValue("window", window);
+            cmd.Parameters.AddWithValue("order", order);
             cmd.Parameters.AddWithValue("temp", temp);
             cmd.Parameters.AddWithValue("topk", topk);
-            cmd.Parameters.AddWithValue("boost", boost);
-            cmd.Parameters.AddWithValue("require_pos", false);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
-                toks.Add((r.IsDBNull(1) ? "" : r.GetString(1), r.IsDBNull(2) ? 0m : r.GetDecimal(2)));
+                toks.Add((r.IsDBNull(1) ? "" : r.GetString(1), r.IsDBNull(2) ? 0 : r.GetInt32(2)));
         }
         sw.Stop();
         Console.WriteLine(prompt + " " + string.Join(' ', toks.Select(t => t.tok)));
         if (verbose)
             for (int i = 0; i < toks.Count; i++)
-                Console.WriteLine($"    {i + 1,2}. {toks[i].tok,-22} μ={toks[i].mu:F1}");
-        Console.WriteLine($"    [{toks.Count} tokens, {sw.Elapsed.TotalMilliseconds:F0} ms — ranked-μ walk, no GPU]");
+                Console.WriteLine($"    {i + 1,2}. {toks[i].tok,-22} ord={toks[i].ordUsed}");
+        Console.WriteLine($"    [{toks.Count} tokens, {sw.Elapsed.TotalMilliseconds:F0} ms — native ngram backoff, no GPU]");
         return 0;
     }
 
@@ -563,9 +551,9 @@ internal static class Program
             entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: ids.Count - 1);
 
         for (int i = 0; i + 1 < ids.Count; i++)
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 ids[i].Id, "PRECEDES", ids[i + 1].Id,
-                feedbackSource, SourceTrust.UserPrompt, confirm: confirm));
+                feedbackSource, null, SourceTrust.UserPrompt, confirm: confirm));
 
         var change = b.Build();
         var inner = new NpgsqlSubstrateWriter(ds);

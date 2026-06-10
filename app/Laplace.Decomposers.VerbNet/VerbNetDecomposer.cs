@@ -107,7 +107,7 @@ public sealed class VerbNetDecomposer : IDecomposer
         {
             Hash128 parentEntity = ClassId(parentClassId);
             b.AddEntity(new EntityRow(parentEntity, EntityTier.Vocabulary, ClassTypeId, Source));
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 classEntity, "IS_A", parentEntity, Source, TC.AcademicCurated));
         }
 
@@ -117,7 +117,7 @@ public sealed class VerbNetDecomposer : IDecomposer
             if (name.Length == 0) continue;
             var lemmaId = ContentEmitter.Emit(b, name, Source);
             if (lemmaId is null) continue;
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 lemmaId.Value, "IS_A", classEntity, Source, TC.AcademicCurated));
 
             string wn = member.GetAttribute("wn");
@@ -128,7 +128,7 @@ public sealed class VerbNetDecomposer : IDecomposer
                     if (key is null) continue;
                     Hash128 senseEntity = SenseId(key);
                     b.AddEntity(new EntityRow(senseEntity, 2, WordNetSenseTypeId, Source));
-                    b.AddAttestation(RelationTypeRegistry.Attest(
+                    b.AddAttestation(NativeAttestation.Categorical(
                         lemmaId.Value, "CORRESPONDS_TO", senseEntity, Source, TC.AcademicCurated));
                 }
         }
@@ -139,7 +139,7 @@ public sealed class VerbNetDecomposer : IDecomposer
             if (type.Length == 0) continue;
             var roleId = ContentEmitter.Emit(b, type, Source);
             if (roleId is null) continue;
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 classEntity, "HAS_THEMATIC_ROLE", roleId.Value, Source, TC.AcademicCurated));
         }
 
@@ -155,7 +155,7 @@ public sealed class VerbNetDecomposer : IDecomposer
             {
                 var frameId = ContentEmitter.Emit(b, primary, Source);
                 if (frameId is not null)
-                    b.AddAttestation(RelationTypeRegistry.Attest(
+                    b.AddAttestation(NativeAttestation.Categorical(
                         classEntity, "HAS_VERB_FRAME", frameId.Value, Source, TC.AcademicCurated));
             }
 
@@ -165,7 +165,7 @@ public sealed class VerbNetDecomposer : IDecomposer
                 if (ex.Length == 0) continue;
                 var exId = ContentEmitter.Emit(b, ex, Source);
                 if (exId is not null)
-                    b.AddAttestation(RelationTypeRegistry.Attest(
+                    b.AddAttestation(NativeAttestation.Categorical(
                         classEntity, "HAS_EXAMPLE", exId.Value, Source, TC.AcademicCurated,
                         contextId: classEntity));
             }

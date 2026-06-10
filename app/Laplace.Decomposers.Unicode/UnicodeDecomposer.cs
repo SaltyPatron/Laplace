@@ -120,7 +120,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                 {
                     var aliasId = ContentEmitter.Emit(b, alias, Source);
                     if (aliasId is { } aid)
-                        b.AddAttestation(RelationTypeRegistry.Attest(
+                        b.AddAttestation(NativeAttestation.Categorical(
                             StageCodepointTarget(b, recs, cp), "HAS_NAME_ALIAS", aid, Source, SourceTrust.StandardsDerived));
                     count++;
                 }
@@ -145,7 +145,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                     ? StageCodepointTarget(b, recs, (uint)first)
                     : ContentEmitter.Emit(b, target, Source);
                 if (targetId is { } tid)
-                    b.AddAttestation(RelationTypeRegistry.Attest(
+                    b.AddAttestation(NativeAttestation.Categorical(
                         StageCodepointTarget(b, recs, src), "CONFUSABLE_WITH", tid, Source, SourceTrust.StandardsDerived));
                 if (++count >= batch)
                 {
@@ -198,11 +198,11 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                     TrajectoryXyzm: null, NConstituents: 0,
                     AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
 
-                bb.AddAttestation(RelationTypeRegistry.Attest(
+                bb.AddAttestation(NativeAttestation.Categorical(
                     byteId, "HAS_UTF8_ROLE", roleIds[ByteAtoms.Utf8Role(bv)],
                     Source, SourceTrust.StandardsDerived));
 
-                bb.AddAttestation(RelationTypeRegistry.Attest(
+                bb.AddAttestation(NativeAttestation.Categorical(
                     byteId, "DECODES_TO", StageCodepointTarget(bb, recs, (uint)v), Source,
                     SourceTrust.StandardsDerived, contextId: latin1));
 
@@ -210,7 +210,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                     ? ByteAtoms.Cp1252High[bv - 0x80]
                     : (uint)bv;
                 if (cp1252Target != 0)
-                    bb.AddAttestation(RelationTypeRegistry.Attest(
+                    bb.AddAttestation(NativeAttestation.Categorical(
                         byteId, "DECODES_TO", StageCodepointTarget(bb, recs, cp1252Target), Source,
                         SourceTrust.StandardsDerived, contextId: cp1252));
             }
@@ -290,38 +290,38 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
 
             string? cat = ucd.GeneralCategory[cp];
             if (cat != null && ucd.CategoryEntityIds.TryGetValue(cat, out var catId))
-                b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.RelTypeHasGeneralCategory,
-                    catId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+                b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasGeneralCategory,
+                    catId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
 
             if (ucd.CombiningClass[cp] > 0)
-                b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.RelTypeHasCombiningClass,
+                b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasCombiningClass,
                     CombiningClassIds[ucd.CombiningClass[cp]], Source, null,
-                    RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+                    RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
 
             string? script = ucd.ScriptForCodepoint(ucp);
             if (script != null && ucd.ScriptEntityIds.TryGetValue(script, out var scriptId))
-                b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.RelTypeHasScript,
-                    scriptId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+                b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasScript,
+                    scriptId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
 
             string? block = ucd.BlockForCodepoint(ucp);
             if (block != null && ucd.BlockEntityIds.TryGetValue(block, out var blockId))
-                b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.RelTypeHasBlock,
-                    blockId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+                b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasBlock,
+                    blockId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
 
             if (ucd.UppercaseMapping[cp] != 0)
             {
                 uint targetCp = ucd.UppercaseMapping[cp];
                 if (targetCp < (uint)recs.Length)
-                    b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.RelTypeHasUppercaseMapping,
-                        StageCodepointTarget(b, recs, targetCp), Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasUppercaseMapping,
+                        StageCodepointTarget(b, recs, targetCp), Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
             }
 
             if (ucd.LowercaseMapping[cp] != 0)
             {
                 uint targetCp = ucd.LowercaseMapping[cp];
                 if (targetCp < (uint)recs.Length)
-                    b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.RelTypeHasLowercaseMapping,
-                        StageCodepointTarget(b, recs, targetCp), Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasLowercaseMapping,
+                        StageCodepointTarget(b, recs, targetCp), Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
             }
 
             uint[]? decomp = ucd.CanonDecomp[cp];
@@ -333,18 +333,18 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                     if (targetCp < (uint)recs.Length)
                     {
                         Hash128 ctx = di == 0 ? UcdProperties.OrdinalCtx0 : UcdProperties.OrdinalCtx1;
-                        b.AddAttestation(AttestationFactory.Create(entityId,
+                        b.AddAttestation(NativeAttestation.CategoricalResolved(entityId,
                             UcdProperties.RelTypeCanonDecomposesTo,
                             StageCodepointTarget(b, recs, targetCp), Source, ctx,
-                            RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+                            RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
                     }
                 }
             }
 
             if (ucd.TitlecaseMapping[cp] != 0 && ucd.TitlecaseMapping[cp] < (uint)recs.Length)
-                b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.RelTypeHasTitlecaseMapping,
+                b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasTitlecaseMapping,
                     StageCodepointTarget(b, recs, ucd.TitlecaseMapping[cp]), Source, null,
-                    RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+                    RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
 
             uint[]? compat = ucd.CompatDecomp[cp];
             if (compat != null)
@@ -355,41 +355,41 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
                     if (targetCp < (uint)recs.Length)
                     {
                         Hash128 ctx = di == 0 ? UcdProperties.OrdinalCtx0 : UcdProperties.OrdinalCtx1;
-                        b.AddAttestation(AttestationFactory.Create(entityId,
+                        b.AddAttestation(NativeAttestation.CategoricalResolved(entityId,
                             UcdProperties.RelTypeCompatDecomposesTo,
                             StageCodepointTarget(b, recs, targetCp), Source, ctx,
-                            RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+                            RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
                     }
                 }
             }
 
             string? num = ucd.NumericValue[cp];
             if (num != null && ucd.NumericEntityIds.TryGetValue(num, out var numId))
-                b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.RelTypeHasNumericValue,
-                    numId, Source, null, RelationTypeRank.ScalarValued, SourceTrust.StandardsDerived));
+                b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasNumericValue,
+                    numId, Source, null, RelationTypeRank.ScalarValued * SourceTrust.StandardsDerived));
 
             string? bidi = ucd.BidiClass[cp];
             if (bidi != null && ucd.BidiClassEntityIds.TryGetValue(bidi, out var bidiId))
-                b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.RelTypeHasBidiClass,
-                    bidiId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+                b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasBidiClass,
+                    bidiId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
 
             uint mir = ucd.BidiMirror[cp];
             if (mir != 0 && mir < (uint)recs.Length && cp <= mir)
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    entityId, "HAS_MIRROR", StageCodepointTarget(b, recs, mir), Source, SourceTrust.StandardsDerived));
+                b.AddAttestation(NativeAttestation.Categorical(
+                    entityId, "HAS_MIRROR", StageCodepointTarget(b, recs, mir), Source, null, SourceTrust.StandardsDerived));
 
             string? age = ucd.AgeForCodepoint(ucp);
             if (age != null && ucd.AgeEntityIds.TryGetValue(age, out var ageId))
-                b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.RelTypeHasAge,
-                    ageId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+                b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasAge,
+                    ageId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
 
             byte eprops = ucd.EmojiProps[cp];
             if (eprops != 0)
                 for (int bit = 0; bit < UcdProperties.EmojiPropNames.Length; bit++)
                     if ((eprops & (1 << bit)) != 0
                         && ucd.EmojiPropEntityIds.TryGetValue(UcdProperties.EmojiPropNames[bit], out var epId))
-                        b.AddAttestation(AttestationFactory.Create(entityId, UcdProperties.RelTypeHasEmojiProperty,
-                            epId, Source, null, RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+                        b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasEmojiProperty,
+                            epId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
         }
         return b.Build();
     }

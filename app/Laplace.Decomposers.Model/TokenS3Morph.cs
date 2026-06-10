@@ -181,7 +181,7 @@ public sealed class TokenS3Morph
 
                 if (resids[i] is double resid && arenaM > 0)
                 {
-                    bb.AddAttestation(RelationTypeRegistry.AttestWeighted(
+                    bb.AddAttestation(NativeAttestation.Categorical(
                         _tokenizerEntityId, "TOKEN_MAPS_TO", entityId, _sourceId,
                         SourceTrust.AiModelProbe,
                         magnitude: arenaM - resid, arenaScale: arenaM));
@@ -189,7 +189,7 @@ public sealed class TokenS3Morph
                 }
                 else
                 {
-                    bb.AddAttestation(RelationTypeRegistry.Attest(
+                    bb.AddAttestation(NativeAttestation.Categorical(
                         _tokenizerEntityId, "TOKEN_MAPS_TO", entityId, _sourceId,
                         SourceTrust.AiModelProbe));
                 }

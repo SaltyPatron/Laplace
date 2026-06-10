@@ -74,17 +74,17 @@ internal sealed class ConceptNetWitness : IGrammarWitness
         if (dbp is { } dyn)
             RelationTypeRegistry.SeedDynamic(b, dyn, ConceptNetDecomposer.Source, _seenEntBatch, _seenAttRun);
 
-        b.AddAttestation(RelationTypeRegistry.AttestWeighted(
+        b.AddAttestation(NativeAttestation.Categorical(
             startId, typeName, endId, ConceptNetDecomposer.Source, SourceTrust.UserCuratedResource,
             magnitude: weight, arenaScale: _arena.Scale(typeName)));
-        b.AddAttestation(RelationTypeRegistry.Attest(
+        b.AddAttestation(NativeAttestation.Categorical(
             startId, "HAS_LANGUAGE", startLangId, ConceptNetDecomposer.Source, SourceTrust.UserCuratedResource));
-        b.AddAttestation(RelationTypeRegistry.Attest(
+        b.AddAttestation(NativeAttestation.Categorical(
             endId, "HAS_LANGUAGE", endLangId, ConceptNetDecomposer.Source, SourceTrust.UserCuratedResource));
 
         if (surface is not null && ContentEmitter.Emit(b, surface, ConceptNetDecomposer.Source) is { } sId)
         {
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 startId, "HAS_EXAMPLE", sId, ConceptNetDecomposer.Source,
                 SourceTrust.UserCuratedResource, contextId: endId));
         }

@@ -70,7 +70,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
             NativeInterop.ComposePrecedesNative pr;
             NativeInterop.ComposeGetPrecedes(_compose, i, &pr);
             long sumScore = checked(pr.Games * Glicko2.FpScale);
-            precedes.Add(AttestationFactory.CreateAggregated(
+            precedes.Add(NativeAttestation.Aggregated(
                 pr.SubjectId, GrammarEntityBuilder.PrecedesTypeId, pr.ObjectId,
                 _sourceId, contextId: null,
                 games: pr.Games, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));

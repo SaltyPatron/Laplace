@@ -99,7 +99,7 @@ public sealed class SemLinkDecomposer : IDecomposer
                 Hash128 vnEntity = VnClassId(vnClass);
                 b.AddEntity(new EntityRow(vnEntity, EntityTier.Vocabulary, VerbNetClassTypeId, Source));
 
-                b.AddAttestation(RelationTypeRegistry.Attest(
+                b.AddAttestation(NativeAttestation.Categorical(
                     rsEntity, "CORRESPONDS_TO", vnEntity, Source, TC.AcademicCurated));
 
                 if (classProp.Value.ValueKind == JsonValueKind.Object)
@@ -112,7 +112,7 @@ public sealed class SemLinkDecomposer : IDecomposer
                         var argId   = ContentEmitter.Emit(b, arg, Source);
                         var thetaId = ContentEmitter.Emit(b, theta, Source);
                         if (argId is null || thetaId is null) continue;
-                        b.AddAttestation(RelationTypeRegistry.Attest(
+                        b.AddAttestation(NativeAttestation.Categorical(
                             argId.Value, "CORRESPONDS_TO", thetaId.Value, Source, TC.AcademicCurated,
                             contextId: vnEntity));
                     }
@@ -145,7 +145,7 @@ public sealed class SemLinkDecomposer : IDecomposer
                 if (frame.Length == 0) continue;
                 Hash128 fnEntity = FrameId(frame);
                 b.AddEntity(new EntityRow(fnEntity, EntityTier.Vocabulary, FrameNetFrameTypeId, Source));
-                b.AddAttestation(RelationTypeRegistry.Attest(
+                b.AddAttestation(NativeAttestation.Categorical(
                     vnEntity, "CORRESPONDS_TO", fnEntity, Source, TC.AcademicCurated));
             }
         }

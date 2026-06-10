@@ -164,11 +164,11 @@ public sealed class RepoDecomposer : IDecomposer
             if (filePathId.HasValue)
             {
                 b.AddEntity(new EntityRow(filePathId.Value, EntityTier.Vocabulary, FileTypeId, Source));
-                b.AddAttestation(RelationTypeRegistry.Attest(
+                b.AddAttestation(NativeAttestation.Categorical(
                     repoId,            "CONTAINS",     filePathId.Value, Source, SourceTrust.StructuredCorpus));
-                b.AddAttestation(RelationTypeRegistry.Attest(
+                b.AddAttestation(NativeAttestation.Categorical(
                     filePathId.Value,  "HAS_EXAMPLE",  codeRootId,       Source, SourceTrust.StructuredCorpus));
-                b.AddAttestation(RelationTypeRegistry.Attest(
+                b.AddAttestation(NativeAttestation.Categorical(
                     codeRootId, "HAS_DEFINITION", filePathId.Value,      Source, SourceTrust.StructuredCorpus));
             }
 
@@ -183,7 +183,7 @@ public sealed class RepoDecomposer : IDecomposer
                     if (seg.Length < 3) continue;
                     var segId = ContentEmitter.Emit(b, seg.ToLowerInvariant(), Source);
                     if (segId.HasValue)
-                        b.AddAttestation(RelationTypeRegistry.Attest(
+                        b.AddAttestation(NativeAttestation.Categorical(
                             segId.Value, "HAS_EXAMPLE", codeRootId, Source, SourceTrust.StructuredCorpus));
                 }
             }

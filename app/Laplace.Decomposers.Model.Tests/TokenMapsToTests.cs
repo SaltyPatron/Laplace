@@ -12,7 +12,7 @@ public class TokenMapsToTests
     private static readonly Hash128 TokenizerId = Hash128.OfCanonical("substrate/test/tmt/tokenizer");
 
     private static long RegistryPhiFp() =>
-        (long)(AttestationFactory.WitnessPhi(
+        (long)(NativeAttestation.WitnessPhi(
             RelationTypeRegistry.Resolve("TOKEN_MAPS_TO").Rank * SourceTrust.AiModelProbe) * Glicko2.FpScale);
 
     private static LlamaTokenizerParser.TokenRecord Rec(

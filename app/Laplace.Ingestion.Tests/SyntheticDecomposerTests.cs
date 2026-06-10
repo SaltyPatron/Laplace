@@ -317,7 +317,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
             {
                 yield return new SubstrateChangeBuilder(SourceId, $"att-{i}")
                     .SetCommitEpoch(1)
-                    .AddAttestation(AttestationFactory.CreateAggregated(
+                    .AddAttestation(NativeAttestation.Aggregated(
                         ids[i], rel, ids[(i + 1) % 3], SourceId, null, 1, Glicko2.FpScale, 1.0))
                     .Build();
                 await Task.Yield();

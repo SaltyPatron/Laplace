@@ -12,6 +12,8 @@
 #include "laplace/core/version.h"
 #include "laplace/core/glicko2.h"
 #include "laplace/core/score.h"
+#include "laplace/core/hash128.h"
+#include "laplace/core/relation_law.h"
 #include "laplace/dynamics/init.h"
 
 PG_MODULE_MAGIC;
@@ -446,6 +448,59 @@ pg_laplace_intent_preflight(PG_FUNCTION_ARGS)
     values[2] = PointerGetDatum(att_bm);
     tuple = heap_form_tuple(tupdesc, values, nulls);
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
+static hash128_t
+bytea_to_hash128(const bytea* b)
+{
+    hash128_t h;
+    if (VARSIZE_ANY_EXHDR(b) < 16)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+             errmsg("expected 16-byte hash128 bytea")));
+    memcpy(&h, VARDATA_ANY(b), sizeof(hash128_t));
+    return h;
+}
+
+static bytea*
+hash128_to_bytea(const hash128_t* h)
+{
+    bytea* result = (bytea*) palloc(VARHDRSZ + sizeof(hash128_t));
+    SET_VARSIZE(result, VARHDRSZ + sizeof(hash128_t));
+    memcpy(VARDATA(result), h, sizeof(hash128_t));
+    return result;
+}
+
+PG_FUNCTION_INFO_V1(pg_relation_type_resolve);
+
+Datum
+pg_relation_type_resolve(PG_FUNCTION_ARGS)
+{
+    text*   surface_txt = PG_GETARG_TEXT_PP(0);
+    char*   surface     = text_to_cstring(surface_txt);
+    hash128_t type_id;
+    int     rc = laplace_relation_resolve_surface(surface, &type_id, NULL, NULL, NULL, NULL);
+    pfree(surface);
+    if (rc < 0)
+        PG_RETURN_NULL();
+    PG_RETURN_BYTEA_P(hash128_to_bytea(&type_id));
+}
+
+PG_FUNCTION_INFO_V1(pg_relation_type_in_family);
+
+Datum
+pg_relation_type_in_family(PG_FUNCTION_ARGS)
+{
+    bytea*  type_ba = PG_GETARG_BYTEA_PP(0);
+    text*   fam_txt = PG_GETARG_TEXT_PP(1);
+    hash128_t type_id = bytea_to_hash128(type_ba);
+    char*   family  = text_to_cstring(fam_txt);
+    int     in_family = 0;
+    int     rc = laplace_relation_in_family(&type_id, family, &in_family);
+    pfree(family);
+    if (rc != 0)
+        PG_RETURN_BOOL(false);
+    PG_RETURN_BOOL(in_family != 0);
 }
 
 void _PG_init(void);

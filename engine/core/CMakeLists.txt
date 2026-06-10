@@ -26,6 +26,9 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/text_decomposer.h
     include/laplace/core/content_witness_batch.h
     include/laplace/core/unicode_seed.h
+    include/laplace/core/relation_law.h
+    include/laplace/core/pos_law.h
+    include/laplace/core/attestation_engine.h
 )
 
 set(LAPLACE_CORE_SOURCES
@@ -57,6 +60,9 @@ set(LAPLACE_CORE_SOURCES
     src/text_decomposer.c
     src/content_witness_batch.c
     src/unicode_seed.cpp
+    src/generated/relation_law.c
+    src/generated/pos_law.c
+    src/attestation_engine.c
 )
 
 add_library(laplace_core SHARED ${LAPLACE_CORE_SOURCES})

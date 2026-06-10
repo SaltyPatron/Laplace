@@ -33,10 +33,21 @@ public static class ContentWitnessBatch
         Hash128 sourceId,
         out Hash128 rootId)
     {
-        using var stage = IntentStage.New(Math.Max(32, canonical.Length));
-        if (!TryAddToIntentStage(stage, canonical, sourceId, out rootId))
-            return false;
-        builder.AddIntentStage(stage);
-        return true;
+        var stage = IntentStage.New(Math.Max(32, canonical.Length));
+        try
+        {
+            if (!TryAddToIntentStage(stage, canonical, sourceId, out rootId))
+            {
+                stage.Dispose();
+                return false;
+            }
+            builder.AddIntentStage(stage);
+            return true;
+        }
+        catch
+        {
+            stage.Dispose();
+            throw;
+        }
     }
 }

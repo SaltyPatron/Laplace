@@ -227,10 +227,10 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         {
             var lemmaId = ContentEmitter.RootId(Surface(lemma));
             if (lemmaId is null) continue;
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 lemmaId.Value, "IS_SYNONYM_OF", syn.SynsetId, Source, SourceTrust.StandardsDerived));
-            b.AddAttestation(RelationTypeRegistry.Attest(
-                lemmaId.Value, "HAS_POS", posId, Source, SourceTrust.StandardsDerived));
+            b.AddAttestation(NativeAttestation.PosWordNet(
+                lemmaId.Value, syn.SsType, Source, null, SourceTrust.StandardsDerived));
         }
 
         var (def, examples) = ParseGloss(syn.Gloss);
@@ -238,14 +238,14 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         {
             var defId = ContentEmitter.RootId(def);
             if (defId is not null)
-                b.AddAttestation(RelationTypeRegistry.Attest(
+                b.AddAttestation(NativeAttestation.Categorical(
                     syn.SynsetId, "HAS_DEFINITION", defId.Value, Source, SourceTrust.StandardsDerived));
         }
         foreach (var ex in examples)
         {
             var exId = ContentEmitter.RootId(ex);
             if (exId is not null)
-                b.AddAttestation(RelationTypeRegistry.Attest(
+                b.AddAttestation(NativeAttestation.Categorical(
                     syn.SynsetId, "HAS_EXAMPLE", exId.Value, Source, SourceTrust.StandardsDerived));
         }
 
@@ -253,7 +253,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         {
             var domainId = ContentEmitter.RootId(LexDomain(Lexnames[syn.LexFilenum]));
             if (domainId is not null)
-                b.AddAttestation(RelationTypeRegistry.Attest(
+                b.AddAttestation(NativeAttestation.Categorical(
                     syn.SynsetId, "HAS_DOMAIN_TOPIC", domainId.Value,
                     Source, SourceTrust.StandardsDerived));
         }
@@ -269,7 +269,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
                 var lemmaId = ContentEmitter.RootId(Surface(syn.Lemmas[wordNum - 1]));
                 if (lemmaId is { } lid) subject = lid;
             }
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 subject, "HAS_VERB_FRAME", tplId.Value, Source, SourceTrust.StandardsDerived));
         }
 
@@ -277,7 +277,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         {
             if (!PointerTypes.TryGetValue(ptr.Symbol, out var typeName)) continue;
             Hash128 tgt = SourceEntityIdConventions.WordNetSynset(ptr.TargetOffset, NormPos(ptr.TargetPos));
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 syn.SynsetId, typeName, tgt, Source, SourceTrust.StandardsDerived));
         }
     }
@@ -306,10 +306,10 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
                 var lemmaId = ContentEmitter.RootId(s.Lemma);
                 if (lemmaId is not null)
                 {
-                    b.AddAttestation(RelationTypeRegistry.AttestWeighted(
+                    b.AddAttestation(NativeAttestation.Categorical(
                         lemmaId.Value, "HAS_SENSE", s.SenseId, Source, SourceTrust.StandardsDerived,
                         magnitude: s.TagCount, arenaScale: 1.0));
-                    b.AddAttestation(RelationTypeRegistry.Attest(
+                    b.AddAttestation(NativeAttestation.Categorical(
                         s.SenseId, "IS_SENSE_OF", s.SynsetId, Source, SourceTrust.StandardsDerived));
                 }
             }
@@ -373,7 +373,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
                     string baseForm = parts[i].Replace('_', ' ');
                     var baseId = ContentEmitter.Emit(b, baseForm, Source);
                     if (baseId is null) continue;
-                    b.AddAttestation(RelationTypeRegistry.Attest(
+                    b.AddAttestation(NativeAttestation.Categorical(
                         baseId.Value, "IS_LEMMA_OF", infId.Value, Source, SourceTrust.StandardsDerived));
                 }
                 if (++count >= batch)

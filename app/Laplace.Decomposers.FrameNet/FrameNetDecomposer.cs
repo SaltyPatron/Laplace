@@ -197,14 +197,14 @@ public sealed class FrameNetDecomposer : IDecomposer
         {
             var defId = ContentEmitter.RootId(frame.Definition);
             if (defId is not null)
-                b.AddAttestation(RelationTypeRegistry.Attest(
+                b.AddAttestation(NativeAttestation.Categorical(
                     frameId, "HAS_DEFINITION", defId.Value, Source, SourceTrust.AcademicCurated));
         }
         foreach (var ex in frame.Examples)
         {
             var exId = ContentEmitter.RootId(ex);
             if (exId is not null)
-                b.AddAttestation(RelationTypeRegistry.Attest(
+                b.AddAttestation(NativeAttestation.Categorical(
                     frameId, "HAS_EXAMPLE", exId.Value, Source, SourceTrust.AcademicCurated));
         }
 
@@ -213,7 +213,7 @@ public sealed class FrameNetDecomposer : IDecomposer
             var feNameId = ContentEmitter.RootId(fe.Name);
             if (feNameId is null) continue;
             Hash128? coreCtx = CorenessValues.Contains(fe.CoreType) ? CorenessId(fe.CoreType) : null;
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 frameId, "HAS_FRAME_ELEMENT", feNameId.Value, Source, SourceTrust.AcademicCurated,
                 contextId: coreCtx));
 
@@ -221,7 +221,7 @@ public sealed class FrameNetDecomposer : IDecomposer
             {
                 var feDefId = ContentEmitter.RootId(fe.Definition);
                 if (feDefId is not null)
-                    b.AddAttestation(RelationTypeRegistry.Attest(
+                    b.AddAttestation(NativeAttestation.Categorical(
                         FeId(frame.Name, fe.Name), "HAS_DEFINITION", feDefId.Value,
                         Source, SourceTrust.AcademicCurated));
             }
@@ -234,9 +234,9 @@ public sealed class FrameNetDecomposer : IDecomposer
 
             Hash128 posId = ResolvePos(lu.Pos);
             b.AddEntity(new EntityRow(posId, EntityTier.Vocabulary, PosReference.PosTypeId, Source));
-            b.AddAttestation(RelationTypeRegistry.Attest(
-                lemmaId.Value, "HAS_POS", posId, Source, SourceTrust.AcademicCurated));
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
+                lemmaId.Value, "HAS_POS", posId, Source, null, SourceTrust.AcademicCurated));
+            b.AddAttestation(NativeAttestation.Categorical(
                 lemmaId.Value, "EVOKES_FRAME", frameId, Source, SourceTrust.AcademicCurated));
         }
 
@@ -244,7 +244,7 @@ public sealed class FrameNetDecomposer : IDecomposer
         {
             if (!RelationTypes.TryGetValue(rel.Type, out var typeName)) continue;
             Hash128 tgt = FrameId(rel.TargetFrame);
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 frameId, typeName, tgt, Source, SourceTrust.AcademicCurated));
         }
     }
@@ -267,7 +267,7 @@ public sealed class FrameNetDecomposer : IDecomposer
                 if (sentId is not null && targetId is not null)
                 {
                     b.AddEntity(new EntityRow(FrameId(ann.FrameName), EntityTier.Vocabulary, FrameTypeId, Source));
-                    b.AddAttestation(RelationTypeRegistry.Attest(
+                    b.AddAttestation(NativeAttestation.Categorical(
                         targetId.Value, "EVOKES_FRAME", FrameId(ann.FrameName),
                         Source, SourceTrust.AcademicCurated, contextId: sentId.Value));
                 }

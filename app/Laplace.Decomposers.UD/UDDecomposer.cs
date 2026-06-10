@@ -32,7 +32,6 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
     private static readonly ConcurrentDictionary<(string Name, string Value), Hash128> _featValueIdMemo =
         new();
 
-    private static Hash128 UposId(string t) => PosReference.Resolve(t, PosReference.PosTagset.Upos);
     private static Hash128 XposId(string lang, string t) =>
         _xposIdMemo.GetOrAdd((lang, t), static k => Hash128.OfCanonical($"xpos:{k.Lang}:{k.Tag}"));
     private static Hash128 FeatValueId(string name, string value) =>
@@ -218,14 +217,14 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
             if (!refToForm.TryGetValue(tok.Ref, out var form)) continue;
 
             if (!string.IsNullOrEmpty(tok.Upos) && tok.Upos != "_")
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    form, "HAS_UPOS", UposId(tok.Upos), Source, SourceTrust.AcademicCurated));
+                b.AddAttestation(NativeAttestation.PosUpos(
+                    form, tok.Upos, Source, null, SourceTrust.AcademicCurated));
 
             if (!string.IsNullOrEmpty(tok.Xpos) && tok.Xpos != "_")
             {
                 b.AddEntity(new EntityRow(XposId(langCode, tok.Xpos), EntityTier.Vocabulary, XposTypeId, Source));
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    form, "HAS_XPOS", XposId(langCode, tok.Xpos), Source, SourceTrust.AcademicCurated));
+                b.AddAttestation(NativeAttestation.PosXpos(
+                    form, XposId(langCode, tok.Xpos), Source, null, SourceTrust.AcademicCurated));
             }
 
             foreach (var feat in tok.Feats)
@@ -234,18 +233,19 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
                 Hash128 valId = FeatValueId(fName, fVal);
                 b.AddEntity(new EntityRow(valId, EntityTier.Vocabulary, FeatureTypeId, Source));
                 RelationTypeRegistry.SeedDynamic(b, RelationTypeRegistry.ResolveFeature(fName), Source, seenEntBatch, seenAttRun);
-                b.AddAttestation(RelationTypeRegistry.AttestFeature(
-                    form, fName, valId, Source, SourceTrust.AcademicCurated));
+                var featRel = RelationTypeRegistry.ResolveFeature(fName);
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
+                    form, featRel.Id, valId, Source, null, featRel.Rank * SourceTrust.AcademicCurated));
             }
 
-            b.AddAttestation(RelationTypeRegistry.Attest(
-                form, "HAS_LANGUAGE", langId, Source, SourceTrust.AcademicCurated));
+            b.AddAttestation(NativeAttestation.Categorical(
+                form, "HAS_LANGUAGE", langId, Source, null, SourceTrust.AcademicCurated));
 
             if (tok.Lemma != tok.Form)
             {
                 var lemmaId = ContentEmitter.RootId(tok.Lemma);
                 if (lemmaId is not null)
-                    b.AddAttestation(RelationTypeRegistry.Attest(
+                    b.AddAttestation(NativeAttestation.Categorical(
                         lemmaId.Value, "IS_LEMMA_OF", form, Source, SourceTrust.AcademicCurated));
             }
 
@@ -253,8 +253,9 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
                 && !string.IsNullOrEmpty(tok.Deprel) && tok.Deprel != "_")
             {
                 RelationTypeRegistry.SeedDeprel(b, tok.Deprel, Source, seenEntBatch, seenAttRun);
-                b.AddAttestation(RelationTypeRegistry.AttestDeprel(
-                    form, tok.Deprel, headId, Source, SourceTrust.AcademicCurated));
+                var dep = RelationTypeRegistry.ResolveDeprel(tok.Deprel);
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
+                    form, dep.Id, headId, Source, null, dep.Rank * SourceTrust.AcademicCurated));
             }
 
             if (tok.Deps.Length > 0 && tok.Deps != "_")
@@ -268,8 +269,9 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
                     if (erel.Length == 0 || headRef == "0") continue;
                     if (!refToForm.TryGetValue(headRef, out var eHead)) continue;
                     RelationTypeRegistry.SeedEnhancedDeprel(b, erel, Source, seenEntBatch, seenAttRun);
-                    b.AddAttestation(RelationTypeRegistry.AttestEnhancedDeprel(
-                        form, erel, eHead, Source, SourceTrust.AcademicCurated));
+                    var edep = RelationTypeRegistry.ResolveEnhancedDeprel(erel);
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        form, edep.Id, eHead, Source, null, edep.Rank * SourceTrust.AcademicCurated));
                 }
             }
 
@@ -286,14 +288,14 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
                     {
                         var g = ContentEmitter.Emit(b, val, Source);
                         if (g is { } gid)
-                            b.AddAttestation(RelationTypeRegistry.Attest(
+                            b.AddAttestation(NativeAttestation.Categorical(
                                 form, "HAS_DEFINITION", gid, Source, SourceTrust.AcademicCurated));
                     }
                     else if (key.Equals("Translit", StringComparison.OrdinalIgnoreCase))
                     {
                         var t = ContentEmitter.Emit(b, val, Source);
                         if (t is { } tid)
-                            b.AddAttestation(RelationTypeRegistry.Attest(
+                            b.AddAttestation(NativeAttestation.Categorical(
                                 form, "TRANSCRIBES_AS", tid, Source, SourceTrust.AcademicCurated));
                     }
                 }
@@ -306,7 +308,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
             if (surfaceId is null) continue;
             for (int id = mwt.Start; id <= mwt.End && id <= s.MaxId; id++)
                 if (formId[id] is { } partId)
-                    b.AddAttestation(RelationTypeRegistry.Attest(
+                    b.AddAttestation(NativeAttestation.Categorical(
                         surfaceId.Value, "HAS_PART", partId, Source, SourceTrust.AcademicCurated));
         }
     }

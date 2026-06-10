@@ -104,12 +104,13 @@ public class TypeIdLawTests
     }
 
     [Fact]
-    public void CliProgram_CallsExtensionGenerate()
+    public void CliProgram_CallsExtensionGenerateNgram()
     {
         var repoRoot = FindRepoRoot();
         var program = Path.Combine(repoRoot, "app", "Laplace.Cli", "Program.cs");
         var text = File.ReadAllText(program);
-        Assert.Contains("laplace.generate", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("laplace.generate_ngram", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("laplace.generate(", text, StringComparison.Ordinal);
     }
 
     [Fact]

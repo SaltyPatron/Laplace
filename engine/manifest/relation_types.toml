@@ -1,0 +1,1138 @@
+# Generated from RelationTypeRegistry — edit here; run codegen-attestation-law.ps1
+
+[ranks]
+mandate = 1.0
+standards_structural = 0.91
+taxonomic = 0.82
+partitive = 0.73
+causal = 0.64
+equivalence = 0.55
+oppositional = 0.45
+associative = 0.36
+tensor_calculation = 0.27
+scalar_valued = 0.18
+probationary = 0.09
+
+[[relation]]
+canonical = "ADJACENT_TO_PIXEL"
+rank = "associative"
+symmetry = "symmetric"
+parent = null
+family_root = "ADJACENT_TO_PIXEL"
+
+[[relation]]
+canonical = "ALSO_SEE"
+rank = "associative"
+symmetry = "asymmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "ATTENDS"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "AT_LOCATION"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "AT_LOCATION"
+
+[[relation]]
+canonical = "CALLS"
+rank = "associative"
+symmetry = "asymmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "CANONICAL_DECOMPOSES_TO"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "CANONICAL_DECOMPOSES_TO"
+
+[[relation]]
+canonical = "CAPABLE_OF"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "CAPABLE_OF"
+
+[[relation]]
+canonical = "CAPTIONS"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "CAPTIONS"
+
+[[relation]]
+canonical = "CAUSATIVE_OF"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "CAUSATIVE_OF"
+
+[[relation]]
+canonical = "CAUSES"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "CAUSES"
+
+[[relation]]
+canonical = "CAUSES_DESIRE"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "CAUSES_DESIRE"
+
+[[relation]]
+canonical = "COMPATIBILITY_DECOMPOSES_TO"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "COMPATIBILITY_DECOMPOSES_TO"
+
+[[relation]]
+canonical = "COMPLETES_TO"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "COMPLETES_TO"
+
+[[relation]]
+canonical = "CONFUSABLE_WITH"
+rank = "standards_structural"
+symmetry = "symmetric"
+parent = null
+family_root = "CONFUSABLE_WITH"
+
+[[relation]]
+canonical = "CONTAINS"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = "HAS_PART"
+family_root = "HAS_PART"
+
+[[relation]]
+canonical = "CORRESPONDS_TO"
+rank = "equivalence"
+symmetry = "symmetric"
+parent = null
+family_root = "CORRESPONDS_TO"
+
+[[relation]]
+canonical = "CREATED_BY"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "CREATED_BY"
+
+[[relation]]
+canonical = "DECODES_TO"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "DECODES_TO"
+
+[[relation]]
+canonical = "DEPENDS_ON"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "DEPENDS_ON"
+
+[[relation]]
+canonical = "DEPICTS"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "DEPICTS"
+
+[[relation]]
+canonical = "DERIVATIONALLY_RELATED"
+rank = "associative"
+symmetry = "symmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "DERIVED_FROM"
+rank = "associative"
+symmetry = "asymmetric"
+parent = "DERIVATIONALLY_RELATED"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "DESIRES"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "DESIRES"
+
+[[relation]]
+canonical = "DETECTS"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "DETECTS"
+
+[[relation]]
+canonical = "DISTINCT_FROM"
+rank = "oppositional"
+symmetry = "symmetric"
+parent = null
+family_root = "DISTINCT_FROM"
+
+[[relation]]
+canonical = "DOWN_PROJECTS"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "DOWN_PROJECTS"
+
+[[relation]]
+canonical = "EMBEDS"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "EMBEDS"
+
+[[relation]]
+canonical = "ENHANCED_DEPENDS_ON"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "ENHANCED_DEPENDS_ON"
+
+[[relation]]
+canonical = "ENTAILS"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "ENTAILS"
+
+[[relation]]
+canonical = "ETYMOLOGICALLY_DERIVED_FROM"
+rank = "associative"
+symmetry = "asymmetric"
+parent = "HAS_ETYMOLOGY"
+family_root = "HAS_ETYMOLOGY"
+
+[[relation]]
+canonical = "ETYMOLOGICALLY_RELATED_TO"
+rank = "associative"
+symmetry = "symmetric"
+parent = "HAS_ETYMOLOGY"
+family_root = "HAS_ETYMOLOGY"
+
+[[relation]]
+canonical = "EVOKES_FRAME"
+rank = "taxonomic"
+symmetry = "asymmetric"
+parent = null
+family_root = "EVOKES_FRAME"
+
+[[relation]]
+canonical = "FORM_OF"
+rank = "equivalence"
+symmetry = "asymmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "FRAME_USES"
+rank = "associative"
+symmetry = "asymmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "GATES"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "GATES"
+
+[[relation]]
+canonical = "HAS_A"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = "HAS_PART"
+family_root = "HAS_PART"
+
+[[relation]]
+canonical = "HAS_AGE"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_AGE"
+
+[[relation]]
+canonical = "HAS_ATTRIBUTE"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_ATTRIBUTE"
+
+[[relation]]
+canonical = "HAS_BIDI_CLASS"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_BIDI_CLASS"
+
+[[relation]]
+canonical = "HAS_BLOCK"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_BLOCK"
+
+[[relation]]
+canonical = "HAS_COMBINING_CLASS"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_COMBINING_CLASS"
+
+[[relation]]
+canonical = "HAS_CONTEXT"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_CONTEXT"
+
+[[relation]]
+canonical = "HAS_DBPEDIA_RELATION"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_DBPEDIA_RELATION"
+
+[[relation]]
+canonical = "HAS_DEFINITION"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_DEFINITION"
+
+[[relation]]
+canonical = "HAS_DOMAIN_REGION"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_DOMAIN_REGION"
+
+[[relation]]
+canonical = "HAS_DOMAIN_TOPIC"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_DOMAIN_TOPIC"
+
+[[relation]]
+canonical = "HAS_DOMAIN_USAGE"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_DOMAIN_USAGE"
+
+[[relation]]
+canonical = "HAS_EMOJI_PROPERTY"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_EMOJI_PROPERTY"
+
+[[relation]]
+canonical = "HAS_ETYMOLOGY"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_ETYMOLOGY"
+
+[[relation]]
+canonical = "HAS_EXAMPLE"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_EXAMPLE"
+
+[[relation]]
+canonical = "HAS_EXTERNAL_ID"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_EXTERNAL_ID"
+
+[[relation]]
+canonical = "HAS_FEATURE"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_FEATURE"
+
+[[relation]]
+canonical = "HAS_FIRST_SUBEVENT"
+rank = "causal"
+symmetry = "asymmetric"
+parent = "HAS_SUBEVENT"
+family_root = "HAS_SUBEVENT"
+
+[[relation]]
+canonical = "HAS_FRAME_ELEMENT"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_FRAME_ELEMENT"
+
+[[relation]]
+canonical = "HAS_GENERAL_CATEGORY"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_GENERAL_CATEGORY"
+
+[[relation]]
+canonical = "HAS_ISO639_1_CODE"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_ISO639_1_CODE"
+
+[[relation]]
+canonical = "HAS_ISO639_2_CODE"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_ISO639_2_CODE"
+
+[[relation]]
+canonical = "HAS_LANGUAGE"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_LANGUAGE"
+
+[[relation]]
+canonical = "HAS_LANGUAGE_SCOPE"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_LANGUAGE_SCOPE"
+
+[[relation]]
+canonical = "HAS_LANGUAGE_TYPE"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_LANGUAGE_TYPE"
+
+[[relation]]
+canonical = "HAS_LAST_SUBEVENT"
+rank = "causal"
+symmetry = "asymmetric"
+parent = "HAS_SUBEVENT"
+family_root = "HAS_SUBEVENT"
+
+[[relation]]
+canonical = "HAS_LOWERCASE_MAPPING"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_LOWERCASE_MAPPING"
+
+[[relation]]
+canonical = "HAS_MEMBER"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = "HAS_PART"
+family_root = "HAS_PART"
+
+[[relation]]
+canonical = "HAS_MIRROR"
+rank = "standards_structural"
+symmetry = "symmetric"
+parent = null
+family_root = "HAS_MIRROR"
+
+[[relation]]
+canonical = "HAS_NAME_ALIAS"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_NAME_ALIAS"
+
+[[relation]]
+canonical = "HAS_NUMERIC_VALUE"
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_NUMERIC_VALUE"
+
+[[relation]]
+canonical = "HAS_PART"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_PART"
+
+[[relation]]
+canonical = "HAS_POS"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_POS"
+
+[[relation]]
+canonical = "HAS_PREREQUISITE"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_PREREQUISITE"
+
+[[relation]]
+canonical = "HAS_PROPERTY"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = "HAS_ATTRIBUTE"
+family_root = "HAS_ATTRIBUTE"
+
+[[relation]]
+canonical = "HAS_SCRIPT"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_SCRIPT"
+
+[[relation]]
+canonical = "HAS_SEMANTIC_ROLE"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_SEMANTIC_ROLE"
+
+[[relation]]
+canonical = "HAS_SENSE"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_SENSE"
+
+[[relation]]
+canonical = "HAS_SUBEVENT"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_SUBEVENT"
+
+[[relation]]
+canonical = "HAS_SUBSTANCE"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = "HAS_PART"
+family_root = "HAS_PART"
+
+[[relation]]
+canonical = "HAS_THEMATIC_ROLE"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_THEMATIC_ROLE"
+
+[[relation]]
+canonical = "HAS_TITLECASE_MAPPING"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_TITLECASE_MAPPING"
+
+[[relation]]
+canonical = "HAS_UPPERCASE_MAPPING"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_UPPERCASE_MAPPING"
+
+[[relation]]
+canonical = "HAS_USAGE_REGISTER"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_USAGE_REGISTER"
+
+[[relation]]
+canonical = "HAS_UTF8_ROLE"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_UTF8_ROLE"
+
+[[relation]]
+canonical = "HAS_VARIANT_OF"
+rank = "equivalence"
+symmetry = "symmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "HAS_VERB_FRAME"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_VERB_FRAME"
+
+[[relation]]
+canonical = "HAS_XPOS"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = "HAS_POS"
+family_root = "HAS_POS"
+
+[[relation]]
+canonical = "INCHOATIVE_OF"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "INCHOATIVE_OF"
+
+[[relation]]
+canonical = "IN_VERB_GROUP_WITH"
+rank = "associative"
+symmetry = "symmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "IS_A"
+rank = "taxonomic"
+symmetry = "asymmetric"
+parent = null
+family_root = "IS_A"
+
+[[relation]]
+canonical = "IS_AFTER"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "IS_AFTER"
+
+[[relation]]
+canonical = "IS_ANTONYM_OF"
+rank = "oppositional"
+symmetry = "symmetric"
+parent = null
+family_root = "IS_ANTONYM_OF"
+
+[[relation]]
+canonical = "IS_AT_SAMPLE"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "IS_AT_SAMPLE"
+
+[[relation]]
+canonical = "IS_BEFORE"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "IS_BEFORE"
+
+[[relation]]
+canonical = "IS_COORDINATE_TERM_WITH"
+rank = "associative"
+symmetry = "symmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "IS_INSTANCE_OF"
+rank = "taxonomic"
+symmetry = "asymmetric"
+parent = "IS_A"
+family_root = "IS_A"
+
+[[relation]]
+canonical = "IS_LANGUAGE_CODE"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "IS_LANGUAGE_CODE"
+
+[[relation]]
+canonical = "IS_LEMMA_OF"
+rank = "equivalence"
+symmetry = "asymmetric"
+parent = null
+family_root = "IS_LEMMA_OF"
+
+[[relation]]
+canonical = "IS_PARTICIPLE_OF"
+rank = "equivalence"
+symmetry = "asymmetric"
+parent = null
+family_root = "IS_PARTICIPLE_OF"
+
+[[relation]]
+canonical = "IS_PIXEL_OF"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "IS_PIXEL_OF"
+
+[[relation]]
+canonical = "IS_SENSE_OF"
+rank = "taxonomic"
+symmetry = "asymmetric"
+parent = null
+family_root = "IS_SENSE_OF"
+
+[[relation]]
+canonical = "IS_SIMILAR_TO"
+rank = "equivalence"
+symmetry = "symmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "IS_SYNONYM_OF"
+rank = "equivalence"
+symmetry = "symmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "IS_TRANSLATION_OF"
+rank = "equivalence"
+symmetry = "symmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "K_PROJECTS"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "K_PROJECTS"
+
+[[relation]]
+canonical = "LOCATED_NEAR"
+rank = "associative"
+symmetry = "symmetric"
+parent = null
+family_root = "LOCATED_NEAR"
+
+[[relation]]
+canonical = "MADE_UP_OF"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = "HAS_PART"
+family_root = "HAS_PART"
+
+[[relation]]
+canonical = "MANNER_OF"
+rank = "taxonomic"
+symmetry = "asymmetric"
+parent = "IS_A"
+family_root = "IS_A"
+
+[[relation]]
+canonical = "MEMBER_OF_MACROLANGUAGE"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "MEMBER_OF_MACROLANGUAGE"
+
+[[relation]]
+canonical = "MERGES_WITH"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "MERGES_WITH"
+
+[[relation]]
+canonical = "MOTIVATED_BY_GOAL"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "MOTIVATED_BY_GOAL"
+
+[[relation]]
+canonical = "NORMALIZES_TO"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "NORMALIZES_TO"
+
+[[relation]]
+canonical = "NORM_SCALES"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "NORM_SCALES"
+
+[[relation]]
+canonical = "NOT_CAPABLE_OF"
+rank = "oppositional"
+symmetry = "asymmetric"
+parent = null
+family_root = "NOT_CAPABLE_OF"
+
+[[relation]]
+canonical = "NOT_DESIRES"
+rank = "oppositional"
+symmetry = "asymmetric"
+parent = null
+family_root = "NOT_DESIRES"
+
+[[relation]]
+canonical = "NOT_HAS_PROPERTY"
+rank = "oppositional"
+symmetry = "asymmetric"
+parent = null
+family_root = "NOT_HAS_PROPERTY"
+
+[[relation]]
+canonical = "NOT_USED_FOR"
+rank = "oppositional"
+symmetry = "asymmetric"
+parent = null
+family_root = "NOT_USED_FOR"
+
+[[relation]]
+canonical = "OBJECT_USE"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "OBJECT_USE"
+
+[[relation]]
+canonical = "OBSTRUCTED_BY"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "OBSTRUCTED_BY"
+
+[[relation]]
+canonical = "OUTPUT_PROJECTS"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "OUTPUT_PROJECTS"
+
+[[relation]]
+canonical = "OV_RELATES"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "O_EFFECT"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "O_EFFECT"
+
+[[relation]]
+canonical = "O_PROJECTS"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "O_PROJECTS"
+
+[[relation]]
+canonical = "O_REACT"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "O_REACT"
+
+[[relation]]
+canonical = "O_WANT"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "O_WANT"
+
+[[relation]]
+canonical = "PERSPECTIVE_ON"
+rank = "associative"
+symmetry = "asymmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "PERTAINS_TO"
+rank = "associative"
+symmetry = "asymmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "PRECEDES"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "PRECEDES"
+
+[[relation]]
+canonical = "Q_PROJECTS"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "Q_PROJECTS"
+
+[[relation]]
+canonical = "RECEIVES_ACTION"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "RECEIVES_ACTION"
+
+[[relation]]
+canonical = "REFERENCES"
+rank = "associative"
+symmetry = "asymmetric"
+parent = "RELATED_TO"
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "RELATED_TO"
+rank = "associative"
+symmetry = "symmetric"
+parent = null
+family_root = "RELATED_TO"
+
+[[relation]]
+canonical = "SYMBOL_OF"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "SYMBOL_OF"
+
+[[relation]]
+canonical = "TOKEN_MAPS_TO"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "TOKEN_MAPS_TO"
+
+[[relation]]
+canonical = "TRANSCRIBES_AS"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "TRANSCRIBES_AS"
+
+[[relation]]
+canonical = "UP_PROJECTS"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "UP_PROJECTS"
+
+[[relation]]
+canonical = "USED_FOR"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "USED_FOR"
+
+[[relation]]
+canonical = "USES_SCRIPT"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "USES_SCRIPT"
+
+[[relation]]
+canonical = "V_PROJECTS"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "V_PROJECTS"
+
+[[relation]]
+canonical = "WRITES"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "WRITES"
+
+[[relation]]
+canonical = "X_ATTR"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "X_ATTR"
+
+[[relation]]
+canonical = "X_EFFECT"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "X_EFFECT"
+
+[[relation]]
+canonical = "X_FILLED_BY"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "X_FILLED_BY"
+
+[[relation]]
+canonical = "X_INTENT"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "X_INTENT"
+
+[[relation]]
+canonical = "X_NEED"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "X_NEED"
+
+[[relation]]
+canonical = "X_REACT"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "X_REACT"
+
+[[relation]]
+canonical = "X_REASON"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "X_REASON"
+
+[[relation]]
+canonical = "X_WANT"
+rank = "causal"
+symmetry = "asymmetric"
+parent = null
+family_root = "X_WANT"
+
+[[alias]]
+surface = "DEFINED_AS"
+canonical = "HAS_DEFINITION"
+flip = false
+
+[[alias]]
+surface = "DEFINES"
+canonical = "HAS_DEFINITION"
+flip = false
+
+[[alias]]
+surface = "FOLLOWS"
+canonical = "PRECEDES"
+flip = true
+
+[[alias]]
+surface = "HAS_HYPERNYM"
+canonical = "IS_A"
+flip = false
+
+[[alias]]
+surface = "HAS_HYPONYM"
+canonical = "IS_A"
+flip = true
+
+[[alias]]
+surface = "HAS_INSTANCE"
+canonical = "IS_INSTANCE_OF"
+flip = true
+
+[[alias]]
+surface = "HAS_SENSE_OF"
+canonical = "IS_SENSE_OF"
+flip = false
+
+[[alias]]
+surface = "HAS_UPOS"
+canonical = "HAS_POS"
+flip = false
+
+[[alias]]
+surface = "HINDERED_BY"
+canonical = "OBSTRUCTED_BY"
+flip = false
+
+[[alias]]
+surface = "INHERITS_FROM"
+canonical = "IS_A"
+flip = false
+
+[[alias]]
+surface = "IS_DOMAIN_REGION_MEMBER"
+canonical = "HAS_DOMAIN_REGION"
+flip = true
+
+[[alias]]
+surface = "IS_DOMAIN_TOPIC_MEMBER"
+canonical = "HAS_DOMAIN_TOPIC"
+flip = true
+
+[[alias]]
+surface = "IS_DOMAIN_USAGE_MEMBER"
+canonical = "HAS_DOMAIN_USAGE"
+flip = true
+
+[[alias]]
+surface = "IS_FILLED_BY"
+canonical = "X_FILLED_BY"
+flip = false
+
+[[alias]]
+surface = "IS_HYPERNYM_OF"
+canonical = "IS_A"
+flip = true
+
+[[alias]]
+surface = "IS_HYPONYM_OF"
+canonical = "IS_A"
+flip = false
+
+[[alias]]
+surface = "IS_INHERITED_BY"
+canonical = "IS_A"
+flip = true
+
+[[alias]]
+surface = "IS_MEMBER_OF"
+canonical = "HAS_MEMBER"
+flip = true
+
+[[alias]]
+surface = "IS_PART_OF"
+canonical = "HAS_PART"
+flip = true
+
+[[alias]]
+surface = "IS_SUBSTANCE_OF"
+canonical = "HAS_SUBSTANCE"
+flip = true
+
+[[alias]]
+surface = "MADE_OF"
+canonical = "HAS_SUBSTANCE"
+flip = false
+
+[[alias]]
+surface = "SIMILAR_TO"
+canonical = "IS_SIMILAR_TO"
+flip = false
+
+[[alias]]
+surface = "SUBFRAME_OF"
+canonical = "HAS_SUBEVENT"
+flip = true
+

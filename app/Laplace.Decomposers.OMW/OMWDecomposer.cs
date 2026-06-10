@@ -82,20 +82,18 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider
         switch (row.Type)
         {
             case OmwType.Lemma:
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    contentId.Value, "IS_TRANSLATION_OF", row.SynsetId, Source, SourceTrust.AcademicCurated));
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    contentId.Value, "HAS_LANGUAGE", langId, Source, SourceTrust.AcademicCurated));
+                b.AddAttestation(NativeAttestation.Categorical(
+                    contentId.Value, "IS_TRANSLATION_OF", row.SynsetId, Source, null, SourceTrust.AcademicCurated));
+                b.AddAttestation(NativeAttestation.Categorical(
+                    contentId.Value, "HAS_LANGUAGE", langId, Source, null, SourceTrust.AcademicCurated));
                 break;
             case OmwType.Def:
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    row.SynsetId, "HAS_DEFINITION", contentId.Value, Source, SourceTrust.AcademicCurated,
-                    contextId: langId));
+                b.AddAttestation(NativeAttestation.Categorical(
+                    row.SynsetId, "HAS_DEFINITION", contentId.Value, Source, langId, SourceTrust.AcademicCurated));
                 break;
             case OmwType.Exe:
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    row.SynsetId, "HAS_EXAMPLE", contentId.Value, Source, SourceTrust.AcademicCurated,
-                    contextId: langId));
+                b.AddAttestation(NativeAttestation.Categorical(
+                    row.SynsetId, "HAS_EXAMPLE", contentId.Value, Source, langId, SourceTrust.AcademicCurated));
                 break;
         }
     }

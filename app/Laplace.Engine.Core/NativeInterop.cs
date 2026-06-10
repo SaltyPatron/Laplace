@@ -360,4 +360,128 @@ public static unsafe partial class NativeInterop
         nuint len,
         Hash128* sourceId,
         Hash128* outRootId);
+
+    [LibraryImport(Library, EntryPoint = "laplace_relation_resolve", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int RelationResolve(string surface, Hash128* outTypeId);
+
+    [LibraryImport(Library, EntryPoint = "laplace_relation_resolve_surface", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int RelationResolveSurface(
+        string surface,
+        Hash128* outTypeId,
+        double* outRank,
+        int* outSymmetry,
+        byte* outFlip,
+        Hash128* outParentId);
+
+    [LibraryImport(Library, EntryPoint = "laplace_relation_type_id", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int RelationTypeIdNative(string canonicalName, Hash128* outTypeId);
+
+    [LibraryImport(Library, EntryPoint = "laplace_relation_manifest_count")]
+    internal static partial nuint RelationManifestCount();
+
+    [LibraryImport(Library, EntryPoint = "laplace_relation_manifest_canonical")]
+    internal static partial IntPtr RelationManifestCanonical(nuint idx);
+
+    [LibraryImport(Library, EntryPoint = "laplace_relation_canonical_for_type_id")]
+    internal static partial IntPtr RelationCanonicalForTypeId(Hash128* typeId);
+
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_categorical_build", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int AttestationCategoricalBuild(
+        string surfaceRelation,
+        Hash128* subjectId,
+        Hash128* objectId,
+        byte objectIsNull,
+        Hash128* source,
+        Hash128* context,
+        byte contextIsNull,
+        double trustWeight,
+        int confirm,
+        long observationCount,
+        long nowUnixUs,
+        AttestationStagedNative* outStaged);
+
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_resolved_build")]
+    internal static partial int AttestationResolvedBuild(
+        Hash128* subjectId,
+        Hash128* typeId,
+        Hash128* objectId,
+        byte objectIsNull,
+        Hash128* source,
+        Hash128* context,
+        byte contextIsNull,
+        double witnessWeight,
+        int confirm,
+        long observationCount,
+        long nowUnixUs,
+        AttestationStagedNative* outStaged);
+
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_categorical_scored_build", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int AttestationCategoricalScoredBuild(
+        string surfaceRelation,
+        Hash128* subjectId,
+        Hash128* objectId,
+        byte objectIsNull,
+        Hash128* source,
+        Hash128* context,
+        byte contextIsNull,
+        double trustWeight,
+        double magnitude,
+        double arenaScale,
+        long observationCount,
+        long nowUnixUs,
+        AttestationStagedNative* outStaged);
+
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_resolved_scored_build")]
+    internal static partial int AttestationResolvedScoredBuild(
+        Hash128* subjectId,
+        Hash128* typeId,
+        Hash128* objectId,
+        byte objectIsNull,
+        Hash128* source,
+        Hash128* context,
+        byte contextIsNull,
+        double witnessWeight,
+        double magnitude,
+        double arenaScale,
+        long observationCount,
+        long nowUnixUs,
+        AttestationStagedNative* outStaged);
+
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_aggregated_build")]
+    internal static partial int AttestationAggregatedBuild(
+        Hash128* subjectId,
+        Hash128* typeId,
+        Hash128* objectId,
+        byte objectIsNull,
+        Hash128* source,
+        Hash128* context,
+        byte contextIsNull,
+        double witnessWeight,
+        long games,
+        long sumScoreFp1e9,
+        long nowUnixUs,
+        AttestationStagedNative* outStaged);
+
+    [LibraryImport(Library, EntryPoint = "laplace_pos_resolve_entity", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int PosResolveEntity(string tag, int tagset, Hash128* outEntityId);
+
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_categorical_add", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int AttestationCategoricalAdd(
+        IntPtr stage,
+        string surfaceRelation,
+        Hash128* subjectId,
+        Hash128* objectId,
+        byte objectIsNull,
+        Hash128* source,
+        Hash128* context,
+        byte contextIsNull,
+        double trustWeight,
+        int confirm,
+        long observationCount);
+
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_witness_phi")]
+    internal static partial double AttestationWitnessPhi(double witnessWeight);
+
+    [LibraryImport(Library, EntryPoint = "laplace_score_fp")]
+    internal static partial long ScoreFp(double v, double m);
 }

@@ -65,17 +65,25 @@ public sealed class OpenSubtitlesDecomposerTests
             var ctx = new FakeContext(dir, new NullWriter());
 
             var entities = new HashSet<Hash128>();
-            int translationEdges = 0, languageEdges = 0;
+            int translationEdges = 0, languageEdges = 0, intentStages = 0;
             var langObjects = new HashSet<Hash128>();
+            var translationSubjects = new HashSet<Hash128>();
+            var translationObjects = new HashSet<Hash128>();
             Hash128 translationType = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
             Hash128 languageType     = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
 
             await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
             {
+                intentStages += change.IntentStages.Length;
                 foreach (var e in change.Entities) entities.Add(e.Id);
                 foreach (var a in change.Attestations)
                 {
-                    if (a.TypeId == translationType) translationEdges++;
+                    if (a.TypeId == translationType)
+                    {
+                        translationEdges++;
+                        translationSubjects.Add(a.SubjectId);
+                        if (a.ObjectId is { } to) translationObjects.Add(to);
+                    }
                     else if (a.TypeId == languageType) { languageEdges++; if (a.ObjectId is { } o) langObjects.Add(o); }
                     Assert.True(a.TypeId == translationType || a.TypeId == languageType,
                         "only registry-routed IS_TRANSLATION_OF / HAS_LANGUAGE types are emitted");
@@ -84,6 +92,7 @@ public sealed class OpenSubtitlesDecomposerTests
 
             Assert.Equal(2, translationEdges);
             Assert.Equal(4, languageEdges);
+            Assert.True(intentStages > 0, "content witness batches should populate IntentStages");
 
             Hash128 enId = LanguageReference.Resolve("en");
             Hash128 esId = LanguageReference.Resolve("es");
@@ -97,8 +106,8 @@ public sealed class OpenSubtitlesDecomposerTests
             Hash128? holaId  = ContentEmitter.RootId("Hola allí.");
             Assert.NotNull(helloId);
             Assert.NotNull(holaId);
-            Assert.Contains(helloId!.Value, entities);
-            Assert.Contains(holaId!.Value, entities);
+            Assert.Contains(helloId!.Value, translationSubjects);
+            Assert.Contains(holaId!.Value, translationObjects);
         }
         finally
         {

@@ -41,8 +41,8 @@ public class RelationTypeRegistryTests
         var src = Hash128.OfCanonical("substrate/test/reg/source");
         var a = Hash128.OfCanonical("substrate/test/reg/a");
         var b = Hash128.OfCanonical("substrate/test/reg/b");
-        var ab = RelationTypeRegistry.Attest(a, "IS_TRANSLATION_OF", b, src, SourceTrust.StructuredCorpus);
-        var ba = RelationTypeRegistry.Attest(b, "IS_TRANSLATION_OF", a, src, SourceTrust.StructuredCorpus);
+        var ab = NativeAttestation.Categorical(a, "IS_TRANSLATION_OF", b, src, null, SourceTrust.StructuredCorpus);
+        var ba = NativeAttestation.Categorical(b, "IS_TRANSLATION_OF", a, src, null, SourceTrust.StructuredCorpus);
         Assert.Equal(ab.Id, ba.Id);
         Assert.Equal(ab.SubjectId, ba.SubjectId);
         Assert.Equal(ab.ObjectId, ba.ObjectId);
@@ -117,8 +117,8 @@ public class RelationTypeRegistryTests
     public void Flip_AppliedToEndpoints_OnAttest()
     {
         Hash128 animal = Hash128.OfCanonical("e/animal"), dog = Hash128.OfCanonical("e/dog");
-        var flipped = RelationTypeRegistry.Attest(animal, "HAS_HYPONYM", dog, Hash128.OfCanonical("src"), 1.0);
-        var direct  = RelationTypeRegistry.Attest(dog,    "IS_A",        animal, Hash128.OfCanonical("src"), 1.0);
+        var flipped = NativeAttestation.Categorical(animal, "HAS_HYPONYM", dog, Hash128.OfCanonical("src"), null, 1.0);
+        var direct  = NativeAttestation.Categorical(dog,    "IS_A",        animal, Hash128.OfCanonical("src"), null, 1.0);
         Assert.Equal(dog, flipped.SubjectId);
         Assert.Equal(animal, flipped.ObjectId);
         Assert.Equal(direct.Id, flipped.Id);
@@ -129,8 +129,8 @@ public class RelationTypeRegistryTests
     {
         Hash128 a = Hash128.OfCanonical("e/alpha"), b = Hash128.OfCanonical("e/beta");
         Hash128 src = Hash128.OfCanonical("src");
-        var ab = RelationTypeRegistry.Attest(a, "IS_SYNONYM_OF", b, src, 1.0);
-        var ba = RelationTypeRegistry.Attest(b, "IS_SYNONYM_OF", a, src, 1.0);
+        var ab = NativeAttestation.Categorical(a, "IS_SYNONYM_OF", b, src, null, 1.0);
+        var ba = NativeAttestation.Categorical(b, "IS_SYNONYM_OF", a, src, null, 1.0);
         Assert.Equal(ab.Id, ba.Id);
         Assert.Equal(ab.SubjectId, ba.SubjectId);
         Assert.Equal(ab.ObjectId, ba.ObjectId);
@@ -141,8 +141,8 @@ public class RelationTypeRegistryTests
     {
         Hash128 dog = Hash128.OfCanonical("e/dog"), animal = Hash128.OfCanonical("e/animal");
         Hash128 src = Hash128.OfCanonical("src");
-        var fwd = RelationTypeRegistry.Attest(dog, "IS_A", animal, src, 1.0);
-        var rev = RelationTypeRegistry.Attest(animal, "IS_A", dog, src, 1.0);
+        var fwd = NativeAttestation.Categorical(dog, "IS_A", animal, src, null, 1.0);
+        var rev = NativeAttestation.Categorical(animal, "IS_A", dog, src, null, 1.0);
         Assert.NotEqual(fwd.Id, rev.Id);
     }
 
@@ -197,5 +197,14 @@ public class RelationTypeRegistryTests
         Assert.Equal(RelationTypeRank.Taxonomic, RelationTypeRegistry.Resolve("IS_A").Rank);
         Assert.Equal(RelationTypeRank.Associative, RelationTypeRegistry.Resolve("RELATED_TO").Rank);
         Assert.Equal(RelationTypeRank.TensorCalculation, RelationTypeRegistry.Resolve("ATTENDS").Rank);
+    }
+
+    [Fact]
+    public void AllCanonical_EnumeratesNativeManifest()
+    {
+        var all = RelationTypeRegistry.AllCanonical().ToList();
+        Assert.True(all.Count >= 100);
+        Assert.Contains(all, r => r.Canonical == "PRECEDES");
+        Assert.DoesNotContain(all, r => r.Canonical == "HAS_UPOS");
     }
 }

@@ -33,7 +33,7 @@ internal sealed class Atomic2020Witness : IGrammarWitness
         else if (!composed.Composer.TrySpanEntity(fields[2].Start, fields[2].End, out tailId))
             return;
 
-        b.AddAttestation(RelationTypeRegistry.Attest(
+        b.AddAttestation(NativeAttestation.Categorical(
             headId, typeName, tailId, Atomic2020Decomposer.Source, SourceTrust.StructuredCorpus,
             contextId: ctx.ContextId));
     }
