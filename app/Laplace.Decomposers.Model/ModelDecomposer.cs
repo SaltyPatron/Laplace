@@ -41,16 +41,11 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
     }
 
     public static readonly Hash128 TextTypeId = TextEntityBuilder.WordTypeId;
-    public static readonly Hash128 ModelRecipeTypeId =
-        Hash128.OfCanonical("substrate/type/Model_Recipe/v1");
-    public static readonly Hash128 ModelTokenizerTypeId =
-        Hash128.OfCanonical("substrate/type/Model_Tokenizer/v1");
-    public static readonly Hash128 ArchitectureTypeId =
-        Hash128.OfCanonical("substrate/type/Architecture/v1");
-    public static readonly Hash128 ScalarTypeId =
-        Hash128.OfCanonical("substrate/type/Scalar/v1");
-    public static readonly Hash128 NgramTypeId =
-        Hash128.OfCanonical("substrate/type/Ngram/v1");
+    public static readonly Hash128 ModelRecipeTypeId    = EntityTypeRegistry.ModelRecipe;
+    public static readonly Hash128 ModelTokenizerTypeId = EntityTypeRegistry.ModelTokenizer;
+    public static readonly Hash128 ArchitectureTypeId   = EntityTypeRegistry.Architecture;
+    public static readonly Hash128 ScalarTypeId         = EntityTypeRegistry.Scalar;
+    public static readonly Hash128 NgramTypeId          = EntityTypeRegistry.Ngram;
     public static readonly Hash128 EmbedsTypeId        = RelationTypeRegistry.RelationTypeId("EMBEDS");
     public static readonly Hash128 QProjectsTypeId     = RelationTypeRegistry.RelationTypeId("Q_PROJECTS");
     public static readonly Hash128 KProjectsTypeId     = RelationTypeRegistry.RelationTypeId("K_PROJECTS");
@@ -135,18 +130,18 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         boot.AddRelationType("HAS_VOCAB_SIZE");
         boot.AddRelationType("IS_A");
 
-        var seededKinds = new HashSet<Hash128>();
+        var seededTypes = new HashSet<Hash128>();
         foreach (var slot in ModelArenaPlan.Slots(recipe, prof))
         {
-            if (!seededKinds.Add(slot.KindId)) continue;
-            boot.AddEntity(new EntityRow(slot.KindId, EntityTier.Vocabulary,
+            if (!seededTypes.Add(slot.RelationTypeId)) continue;
+            boot.AddEntity(new EntityRow(slot.RelationTypeId, EntityTier.Vocabulary,
                 BootstrapIntentBuilder.RelationTypeMetaTypeId, Source));
             string baseRole = slot.Role.StartsWith("NORM_SCALES", StringComparison.Ordinal)
                 ? "NORM_SCALES" : slot.Role;
-            Hash128 baseId = ModelArenaPlan.BaseKindId(baseRole);
-            if (baseId != slot.KindId)
+            Hash128 baseId = ModelArenaPlan.BaseRelationTypeId(baseRole);
+            if (baseId != slot.RelationTypeId)
                 boot.AddAttestation(RelationTypeRegistry.Attest(
-                    slot.KindId, "IS_A", baseId, Source, SourceTrust.AiModelProbe));
+                    slot.RelationTypeId, "IS_A", baseId, Source, SourceTrust.AiModelProbe));
         }
 
         return context.Writer.ApplyAsync(boot.Build(), ct);

@@ -19,12 +19,9 @@ public sealed class SemLinkDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    private static readonly Hash128 VerbNetClassTypeId =
-        Hash128.OfCanonical("substrate/type/VerbNet_Class/v1");
-    private static readonly Hash128 PropBankRolesetTypeId =
-        Hash128.OfCanonical("substrate/type/PropBank_Roleset/v1");
-    private static readonly Hash128 FrameNetFrameTypeId =
-        Hash128.OfCanonical("substrate/type/FrameNet_Frame/v1");
+    private static readonly Hash128 VerbNetClassTypeId    = EntityTypeRegistry.VerbNetClass;
+    private static readonly Hash128 PropBankRolesetTypeId = EntityTypeRegistry.PropBankRoleset;
+    private static readonly Hash128 FrameNetFrameTypeId   = EntityTypeRegistry.FrameNetFrame;
 
     internal static Hash128 VnClassId(string vnClass)
     {

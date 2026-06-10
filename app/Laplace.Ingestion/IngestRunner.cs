@@ -79,12 +79,16 @@ public sealed class IngestRunner
 
         await decomposer.InitializeAsync(ctx, ct);
 
+        log.LogInformation(
+            "INGEST_PATH source={Source} ecosystem_path={Path} exists={Exists}",
+            decomposer.SourceName, ctx.EcosystemPath, Directory.Exists(ctx.EcosystemPath));
+
         var inventory = await ResolveInventoryAsync(decomposer, ctx, options, ct);
         _obs.OnRunStart(decomposer.SourceName, decomposer.LayerOrder, inventory);
         log.LogInformation(
-            "INGEST_START source={Source} layer={Layer} unit_kind={UnitKind} input_units={InputUnits} files={Files}",
+            "INGEST_START source={Source} layer={Layer} unit_type={UnitType} input_units={InputUnits} files={Files}",
             decomposer.SourceName, decomposer.LayerOrder,
-            inventory?.UnitKind ?? "units", inventory?.TotalInputUnits ?? 0, inventory?.FileCount ?? 0);
+            inventory?.UnitType ?? "units", inventory?.TotalInputUnits ?? 0, inventory?.FileCount ?? 0);
 
         var rng = new Random(unchecked((int)decomposer.SourceId.Lo));
         var counters = new RunCounters
@@ -221,7 +225,10 @@ public sealed class IngestRunner
         attestationsInserted  = counters.AttestationsInserted;
         totalRoundTrips       = counters.RoundTrips;
 
-        if (!options.SkipSourceCompletion && counters.UnitsFailed == 0 && failures.Count == 0)
+        if (!options.SkipSourceCompletion
+            && counters.UnitsFailed == 0
+            && failures.Count == 0
+            && counters.UnitsApplied > 0)
             await _writer.ApplyAsync(LayerCompletion.BuildMarker(decomposer), ct);
 
         sw.Stop();
@@ -718,7 +725,7 @@ public sealed class IngestRunner
             inv?.FileCount ?? 0,
             c.FilesDone,
             c.CurrentFile,
-            inv?.UnitKind ?? "units",
+            inv?.UnitType ?? "units",
             c.Sw?.Elapsed ?? TimeSpan.Zero,
             c.EntitiesInserted,
             c.PhysicalitiesInserted,

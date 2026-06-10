@@ -5,7 +5,7 @@ namespace Laplace.Engine.Core;
 /// <summary>
 /// The shared, modality-agnostic decomposition mechanism. A grammar is the recipe for
 /// a structured-knowledge modality; this resolves a recipe and parses bytes into a
-/// Laplace AST. Domain decomposers (Code, Chess, ...) sit on top, adding relation kinds
+/// Laplace AST. Domain decomposers (Code, Chess, ...) sit on top, adding relation types
 /// and trust. The grammar-execution mechanism (compiled into laplace_core) never leaks
 /// past this surface.
 /// </summary>
@@ -68,10 +68,10 @@ public sealed unsafe class GrammarAst : IDisposable
         return node;
     }
 
-    public string? KindName(uint kindId)
+    public string? NodeTypeName(uint nodeTypeId)
     {
         ObjectDisposedException.ThrowIf(_ast == IntPtr.Zero, this);
-        var p = NativeInterop.AstKindName(_ast, kindId);
+        var p = NativeInterop.AstTypeName(_ast, nodeTypeId);
         return p == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(p);
     }
 

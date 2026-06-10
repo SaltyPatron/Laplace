@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "description": "Invention-complete witness manifest — English-scoped by default (LAPLACE_INGEST_LANGS=en)",
   "language_scope": {
     "global_env": "LAPLACE_INGEST_LANGS",
@@ -8,7 +8,8 @@
     "law": "Every witness source remains in the manifest. Language filters reduce which languages are ingested from multilingual corpora — not which witnesses exist."
   },
   "synset_hub_law": "WordNet synsets (WordNetSynset offset+pos) and senses (wordnet/sense/{key}) are the shared anchor. OMW attaches to synset IDs. VerbNet attaches to sense IDs. PropBank attaches lemmas→rolesets→VerbNet. FrameNet attaches lemmas→frames. SemLink aligns PropBank↔VerbNet↔FrameNet. ConceptNet/Atomic2020 share the lemma arena but do not use synset IDs.",
-  "ordering_law": "unicode → iso639 → wordnet → omw → verbnet → propbank → framenet → semlink → conceptnet → atomic2020 → ud → wiktionary → functionality → image/audio",
+  "ordering_law": "unicode → iso639 → wordnet → omw → verbnet → propbank → framenet → semlink → tiny-codes → stack → text/image/audio → repos → models → [deferred] conceptnet → atomic2020 → ud → wiktionary",
+  "proof_first_law": "Proof path (code + annex + repos) runs immediately after the *Net hub so invention claims are testable before multi-hour lexical bulk. Deferred lexical is idempotent and skippable via LAPLACE_SKIP_LEXICAL_BULK=1.",
   "vault_root": "D:/Data/Ingest",
   "repos_root": "D:/Repositories",
   "models_root": "D:/Models/hub",
@@ -19,19 +20,25 @@
     { "order": 4, "cli": "propbank", "path": "PropBank", "layer": "L2", "links": "lemma HAS_SENSE roleset; roleset CORRESPONDS_TO verbnet/class" },
     { "order": 5, "cli": "framenet", "path": "FrameNet/framenet_v17", "layer": "L3", "links": "lemma EVOKES_FRAME framenet/frame" },
     { "order": 6, "cli": "semlink", "path": "SemLink", "layer": "L3", "links": "propbank↔verbnet (pb-vn2), verbnet↔framenet (vn-fn2)" },
-    { "order": 7, "cli": "conceptnet", "path": "ConceptNet", "layer": "L2", "links": "/c/en/ terms — shared ContentEmitter lemmas, not synset IDs" },
-    { "order": 8, "cli": "atomic2020", "path": "Atomic2020", "layer": "L2", "links": "script relations (XWant, Causes, …) on event atoms" }
+    { "order": 7, "cli": "conceptnet", "path": "ConceptNet", "layer": "L2", "links": "/c/en/ terms — shared ContentEmitter lemmas, not synset IDs", "phase": "deferred_lexical" },
+    { "order": 8, "cli": "atomic2020", "path": "Atomic2020", "layer": "L2", "links": "script relations (XWant, Causes, …) on event atoms", "phase": "deferred_lexical" }
   ],
+  "deferred_lexical_bulk": {
+    "skip_env": "LAPLACE_SKIP_LEXICAL_BULK",
+    "default": "run after proof path (scripts/win/seed-deferred-lexical.cmd)",
+    "sources": ["conceptnet", "atomic2020", "ud", "wiktionary"],
+    "note": "High-value usage/examples; not required to prove code/repo/document/image paths."
+  },
   "floor": [
     { "order": 0, "cli": "unicode", "path": "Unicode", "layer": "L0" },
     { "order": 0, "cli": "iso639", "path": "ISO639", "layer": "L1" }
   ],
   "lexical_satellites": [
-    { "order": 9, "cli": "ud", "path": "UD-Treebanks", "layer": "L2", "note": "en_* treebanks — syntax, not synset-linked" },
-    { "order": 10, "cli": "wiktionary", "path": "Wiktionary", "layer": "L2", "note": "English jsonl — dictionary, not synset-linked" }
+    { "order": 9, "cli": "ud", "path": "UD-Treebanks", "layer": "L2", "note": "en_* treebanks — syntax, not synset-linked", "phase": "deferred_lexical" },
+    { "order": 10, "cli": "wiktionary", "path": "Wiktionary", "layer": "L2", "note": "English jsonl — dictionary/usage examples", "phase": "deferred_lexical" }
   ],
   "functionality": {
-    "law": "Repos and code corpora deposit PRECEDES + HAS_EXAMPLE. Document bit-perfect proof is NOT seed — use scripts/win/ingest-text.cmd or e2e-full.cmd (db-roundtrip sandbox).",
+    "law": "Code corpora (tiny-codes, stack) and test-data annex (document/image/audio) deposit before repos; repos before safetensor snapshots. test-data/text is ingested via ingest document; db-roundtrip on the same files is proof-only (ingest-text.cmd / e2e-full.cmd).",
     "repositories": [
       "Laplace",
       "X_BONEYARD",
@@ -42,7 +49,9 @@
       "temp-llama-models"
     ],
     "test_data": {
-      "roundtrip_proof": "scripts/win/ingest-text.cmd or e2e-full.cmd — db-roundtrip sandbox, not seed-substrate",
+      "text_cli": "ingest document test-data/text (seed-substrate)",
+      "roundtrip_proof": "scripts/win/ingest-text.cmd or e2e-full.cmd — db-roundtrip sandbox only",
+      "text_glob": "test-data/text/*",
       "images_glob": "test-data/images/*.png",
       "audio_glob": "test-data/audio/*.wav"
     },

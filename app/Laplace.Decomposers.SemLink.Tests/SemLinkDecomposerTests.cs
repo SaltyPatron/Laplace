@@ -100,7 +100,7 @@ public sealed class SemLinkDecomposerTests
     }
 
     [Fact]
-    public async Task Bootstrap_Registers_Source_Types_And_KindEntities()
+    public async Task Bootstrap_Registers_Source_Types_And_RelationTypeEntities()
     {
         var dec = new SemLinkDecomposer();
         var writer = new CapturingWriter();

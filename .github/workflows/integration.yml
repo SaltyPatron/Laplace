@@ -337,7 +337,12 @@ jobs:
             Laplace.SubstrateCRUD.Tests \
             Laplace.Ingestion.Tests \
             Laplace.Decomposers.Unicode.Tests \
-            Laplace.Decomposers.Model.Tests; do
+            Laplace.Decomposers.Model.Tests \
+            Laplace.Decomposers.FrameNet.Tests \
+            Laplace.Decomposers.VerbNet.Tests \
+            Laplace.Decomposers.SemLink.Tests \
+            Laplace.Decomposers.PropBank.Tests \
+            Laplace.Decomposers.OpenSubtitles.Tests; do
             echo "::group::dotnet test $proj"
             dotnet test "$proj/$proj.csproj" -c Release --no-build --nologo --verbosity minimal
             echo "::endgroup::"
@@ -403,9 +408,8 @@ jobs:
           test -f endpoint.pid && kill "$(cat endpoint.pid)" 2>/dev/null || true
 
   endpoint-test:
-    name: Endpoint tests (advisory)
-    continue-on-error: true
-    needs: endpoint-build
+    name: Endpoint tests
+    needs: [endpoint-build, db-deploy]
     runs-on: [self-hosted, laplace]
     steps:
       - uses: actions/checkout@v4

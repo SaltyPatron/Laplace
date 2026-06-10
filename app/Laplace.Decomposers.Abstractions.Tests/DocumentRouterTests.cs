@@ -13,7 +13,7 @@ public sealed class DocumentRouterTests
         var doc = "just some prose\nwith two lines\n";
         var spans = DocumentRouter.Split(doc);
         Assert.Single(spans);
-        Assert.Equal(SpanKind.Prose, spans[0].Kind);
+        Assert.Equal(SpanType.Prose, spans[0].Type);
         Assert.Equal(doc, Text(doc, spans[0]));
     }
 
@@ -24,14 +24,14 @@ public sealed class DocumentRouterTests
         var spans = DocumentRouter.Split(doc);
         Assert.Equal(3, spans.Count);
 
-        Assert.Equal(SpanKind.Prose, spans[0].Kind);
+        Assert.Equal(SpanType.Prose, spans[0].Type);
         Assert.Equal("To read a file:\n", Text(doc, spans[0]));
 
-        Assert.Equal(SpanKind.Code, spans[1].Kind);
+        Assert.Equal(SpanType.Code, spans[1].Type);
         Assert.Equal("python", spans[1].Language);
         Assert.Equal("open(path).read()\n", Text(doc, spans[1]));
 
-        Assert.Equal(SpanKind.Prose, spans[2].Kind);
+        Assert.Equal(SpanType.Prose, spans[2].Type);
         Assert.Equal("That's it.\n", Text(doc, spans[2]));
     }
 
@@ -40,7 +40,7 @@ public sealed class DocumentRouterTests
     {
         var doc = "```\nraw text\n```\n";
         var spans = DocumentRouter.Split(doc);
-        var code = Assert.Single(spans, s => s.Kind == SpanKind.Code);
+        var code = Assert.Single(spans, s => s.Type == SpanType.Code);
         Assert.Null(code.Language);
         Assert.Equal("raw text\n", Text(doc, code));
     }
@@ -57,8 +57,8 @@ public sealed class DocumentRouterTests
         var doc = "intro\n```rust\nfn main() {}\n";
         var spans = DocumentRouter.Split(doc);
         Assert.Equal(2, spans.Count);
-        Assert.Equal(SpanKind.Prose, spans[0].Kind);
-        Assert.Equal(SpanKind.Code, spans[1].Kind);
+        Assert.Equal(SpanType.Prose, spans[0].Type);
+        Assert.Equal(SpanType.Code, spans[1].Type);
         Assert.Equal("rust", spans[1].Language);
         Assert.Equal("fn main() {}\n", Text(doc, spans[1]));
     }
@@ -78,7 +78,7 @@ public sealed class DocumentRouterTests
             prevEnd = s.Start + s.Length;
         }
 
-        var codes = spans.Where(s => s.Kind == SpanKind.Code).ToList();
+        var codes = spans.Where(s => s.Type == SpanType.Code).ToList();
         Assert.Equal(2, codes.Count);
         Assert.Equal("js", codes[0].Language);
         Assert.Equal("py", codes[1].Language);

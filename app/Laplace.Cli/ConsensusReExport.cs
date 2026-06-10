@@ -15,7 +15,7 @@ internal static class ConsensusReExport
     private static long PhiFp() => (long)((350.0 + (30.0 - 350.0) * ModelWeight) * 1e9);
 
     internal static Laplace.SubstrateCRUD.Npgsql.CalibratedInverse NewInverse(NpgsqlDataSource ds) =>
-        new(ds, PhiFp());
+        new(PhiFp());
 
     internal static async Task<TableArena> ReadTableArenaAsync(
         NpgsqlDataSource ds, Hash128 typeId, int rows, int cols, bool rowsAreOut,
@@ -29,10 +29,8 @@ internal static class ConsensusReExport
         var inverse = NewInverse(ds);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            """
-            SELECT subject_id, object_id, rating, witness_count FROM laplace.consensus
-            WHERE type_id = $1 AND object_id IS NOT NULL
-            """;
+            "SELECT subject_id, object_id, rating, witness_count "
+            + "FROM laplace.consensus_export_relations($1)";
         cmd.Parameters.AddWithValue(typeId.ToBytes());
         await using var rdr = await cmd.ExecuteReaderAsync();
         while (await rdr.ReadAsync())
@@ -65,10 +63,8 @@ internal static class ConsensusReExport
         var inverse = NewInverse(ds);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            """
-            SELECT subject_id, rating, witness_count FROM laplace.consensus
-            WHERE type_id = $1 AND object_id IS NULL
-            """;
+            "SELECT subject_id, rating, witness_count "
+            + "FROM laplace.consensus_export_unary($1)";
         cmd.Parameters.AddWithValue(typeId.ToBytes());
         await using var rdr = await cmd.ExecuteReaderAsync();
         while (await rdr.ReadAsync())

@@ -41,7 +41,7 @@ Audit date: 2026-06-07. Each item is file-grounded and states what the vision re
 
 **Needs (one of, or a blend).**
 - A synthesis-side estimator that derives tensor-role pours from sequence arenas: co-occurrence consensus → Q/K affinity; completion consensus → output projection; tier composition/decomposition → up/down; gating from contextual-selection statistics.
-- Or text-side attestation directly into tensor-role kinds under a defined estimator at ingest.
+- Or text-side attestation directly into tensor-role types under a defined estimator at ingest.
 The mapping must be written down as law before implementation; it is the load-bearing step for the "model trained by reading" claim.
 
 ## 6. No first-class document/corpus ingest route
@@ -58,21 +58,21 @@ The mapping must be written down as law before implementation; it is the load-be
 
 ## 8. Placement consolidation — RULED (2026-06-07): physicalities is the one geometric home
 
-**Ruling.** `physicalities` was designed for this: per-source 4D views with `alignment_residual` + `source_dim` (the LE+GSO+PA outputs) and seeded PROJECTION/PROJECTION_OUTPUT kinds. Firefly placements are physicalities rows:
+**Ruling.** `physicalities` was designed for this: per-source 4D views with `alignment_residual` + `source_dim` (the LE+GSO+PA outputs) and seeded PROJECTION/PROJECTION_OUTPUT types. Firefly placements are physicalities rows:
 
-- `type` = extended physicality-kind vocabulary per tensor role (which tensor the placement was stripped from);
+- `type` = extended physicality-type vocabulary per tensor role (which tensor the placement was stripped from);
 - `source_id` = the **circuit entity** (model+layer+head/expert) rather than the bare model — the same context-as-entity pattern attestations use via `context_id`; per-specimen granularity with zero schema widening; species reassemble by joining circuit→model;
 - weight moves to trust policy (§7); re-observation idempotency via the existing `UNIQUE(entity_id, source_id, type)` upsert + `observed_at`.
 
 **Consequences.** `geometry_placement_evidence` and `geometry_consensus` (19_geometry_consensus.sql.in) retire; the optional instrument-tier consensus view (§1), if ever built, derives from physicalities. Structural reads see firefly specimens with zero new read paths; one GIST + one Hilbert key + one table for GIS tooling; source eviction cascades clean.
 
-**Implementation (pending, with next model-ingest work).** Extend the physicality-kind registry with per-role kinds; repoint TokenS3Morph/ModelDecomposer writes; drop 19_* tables; regress pins.
+**Implementation (pending, with next model-ingest work).** Extend the physicality-type registry with per-role types; repoint TokenS3Morph/ModelDecomposer writes; drop 19_* tables; regress pins.
 
 ## 9. Modality annexes unwritten
 
 **Vision.** Per-modality segmentation law (the UAX#29 analog for images/audio/video): deterministic, versioned, conformance-tested, perfcache-compiled — after which the entire identity/attestation/consensus machinery applies unchanged.
 
-**Today.** Image/Audio decomposer projects are scaffolds; the kinds vocabulary (`IS_PIXEL_OF`, `IS_AT_SAMPLE`, `DEPICTS`, `CAPTIONS`, `TRANSCRIBES_AS`) is seeded; no annexes exist.
+**Today.** Image/Audio decomposer projects are scaffolds; the relation-type vocabulary (`IS_PIXEL_OF`, `IS_AT_SAMPLE`, `DEPICTS`, `CAPTIONS`, `TRANSCRIBES_AS`) is seeded; no annexes exist.
 
 **Sequencing.** Deliberately after text lock-down, per project direction.
 

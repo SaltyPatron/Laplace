@@ -1,7 +1,8 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
 rem ==== Invention-complete witness seed (manifest-driven) ===================
-rem Drop/recreate laplace, run lexical ladder in dependency order, then functionality.
+rem Drop/recreate laplace: *Net hub → proof path → deferred lexical bulk → models.
+rem Proof path (tiny-codes/stack/annex → repos) runs before conceptnet/ud/wiktionary.
 rem
 rem *Net link law (synset hub):
 rem   WordNet  — synsets + senses + lemma arena + pointer graph (anchor)
@@ -14,6 +15,7 @@ rem   ConceptNet / Atomic2020 — en-scoped graphs sharing the lemma arena (not 
 rem
 rem English scope: LAPLACE_INGEST_LANGS=en (+ UD en_* treebanks, Wiktionary English jsonl).
 rem Skip: LAPLACE_SKIP_MODELS (safetensors), LAPLACE_SKIP_USAGE (tatoeba/opensubtitles).
+rem Optional: --no-evidence or LAPLACE_PERSIST_EVIDENCE=0 to fold consensus without laplace.attestations writes.
 rem cwd on D: so /vault junctions resolve to D:\Data\Ingest.
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
@@ -32,6 +34,12 @@ set "LAPLACE_COPY_VALIDATE=1"
 if not defined LAPLACE_FOLD_WORKERS set "LAPLACE_FOLD_WORKERS=8"
 if not defined LAPLACE_SKIP_MODELS set "LAPLACE_SKIP_MODELS=1"
 if not defined LAPLACE_SKIP_USAGE set "LAPLACE_SKIP_USAGE=1"
+if not defined LAPLACE_SKIP_LEXICAL_BULK set "LAPLACE_SKIP_LEXICAL_BULK=0"
+
+echo ==== build engine + extensions (native exports must match CLI) ====
+call "%~dp0build-engine-libs.cmd" || exit /b 1
+call "%~dp0build-extensions.cmd" || exit /b 1
+call "%~dp0install-extensions.cmd" || exit /b 1
 
 echo ==== DROP + recreate laplace ====
 "%PGBIN%\psql.exe" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='laplace' AND pid<>pg_backend_pid();" -c "DROP DATABASE IF EXISTS laplace;" || exit /b 1
@@ -63,40 +71,17 @@ echo ==== ingest framenet (EVOKES_FRAME from lemmas) ====
 dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest framenet || exit /b 1
 echo ==== ingest semlink (propbank-verbnet + verbnet-framenet alignment) ====
 dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest semlink || exit /b 1
-echo ==== ingest conceptnet (/c/en/ graph, shared lemma arena) ====
-set "LAPLACE_INGEST_WORKERS=1"
-set "LAPLACE_INGEST_COMMIT_ROWS=50000"
-dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest conceptnet || exit /b 1
-set "LAPLACE_INGEST_WORKERS=4"
-set "LAPLACE_INGEST_COMMIT_ROWS="
-echo ==== ingest atomic2020 (script relations on event atoms) ====
-dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest atomic2020 || exit /b 1
 
-rem ---- Syntax + dictionary (English-scoped; not synset-linked) --------------
-echo ==== ingest ud (en_* treebanks) ====
-dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest ud || exit /b 1
-echo ==== ingest wiktionary (English entries only) ====
-dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest wiktionary || exit /b 1
-
-rem ---- Functionality: repos + code corpora --------------------------------
-for %%r in (Laplace X_BONEYARD llama-workspace SpecEditor TournamentManager Laplace-Space-Game temp-llama-models) do (
-  if exist "%REPOS%\%%r" (
-    echo ==== ingest repo %%r ====
-    dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest repo "%REPOS%\%%r" || exit /b 1
-  ) else (
-    echo ==== [skip] repo not found: %REPOS%\%%r ====
-  )
-)
-
-if exist "%INGEST%\tiny-codes" (
+rem ---- Proof path: code corpora → test-data annex → repos (before lexical bulk) ---
+if exist "!INGEST!\tiny-codes" (
   echo ==== ingest tiny-codes ====
-  dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest tiny-codes "%INGEST%\tiny-codes" || exit /b 1
+  dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest tiny-codes "!INGEST!\tiny-codes" || exit /b 1
 ) else (
   echo ==== [skip] tiny-codes — run scripts\win\download-code-data.cmd tiny-codes ====
 )
-if exist "%INGEST%\stack-v2" (
+if exist "!INGEST!\stack-v2" (
   echo ==== ingest stack-v2 ====
-  dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest stack "%INGEST%\stack-v2" || exit /b 1
+  dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest stack "!INGEST!\stack-v2" || exit /b 1
 ) else (
   echo ==== [skip] stack-v2 — run scripts\win\download-code-data.cmd stack-v2 ====
 )
@@ -110,10 +95,25 @@ if not defined LAPLACE_SKIP_USAGE (
   echo ==== [skip] tatoeba + opensubtitles — LAPLACE_SKIP_USAGE=1 ====
 )
 
-echo ==== ingest image (test-data annex) ====
-dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest image "%INGEST%\test-data\images" || exit /b 1
-echo ==== ingest audio (test-data annex) ====
-dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest audio "%INGEST%\test-data\audio" || exit /b 1
+rem ---- test-data annex (document / image / audio) — before repos ------------
+if exist "!INGEST!\test-data\text" (
+  echo ==== ingest document - test-data text annex ====
+  dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest document "!INGEST!\test-data\text" || exit /b 1
+) else (
+  echo ==== [skip] test-data text annex not found: !INGEST!\test-data\text ====
+)
+echo ==== [skip] image — ImageDecomposer is a stub (no file ingest yet) ====
+echo ==== [skip] audio — AudioDecomposer is a stub (no file ingest yet) ====
+
+rem ---- repos (after test-data annex) ----------------------------------------
+for %%r in (Laplace X_BONEYARD llama-workspace SpecEditor TournamentManager Laplace-Space-Game temp-llama-models) do (
+  if exist "!REPOS!\%%r" (
+    echo ==== ingest repo %%r ====
+    dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest repo "!REPOS!\%%r" || exit /b 1
+  ) else (
+    echo ==== [skip] repo not found: !REPOS!\%%r ====
+  )
+)
 
 if not defined LAPLACE_SKIP_MODELS (
   for %%m in (
@@ -134,6 +134,12 @@ if not defined LAPLACE_SKIP_MODELS (
   )
 ) else (
   echo ==== [skip] safetensor snapshots — LAPLACE_SKIP_MODELS=1 ====
+)
+
+if "%LAPLACE_SKIP_LEXICAL_BULK%"=="1" (
+  echo ==== [skip] deferred lexical bulk — LAPLACE_SKIP_LEXICAL_BULK=1 ====
+) else (
+  call "%~dp0seed-deferred-lexical.cmd" || exit /b 1
 )
 
 cd /d "%LAPLACE_ROOT%"

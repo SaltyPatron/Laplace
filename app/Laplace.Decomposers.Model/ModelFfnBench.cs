@@ -12,7 +12,7 @@ namespace Laplace.Decomposers.Model;
 // modular FFN benchmark: point it at any model on the farm and read the numbers.
 public static class ModelFfnBench
 {
-    private static readonly Hash128 NeuronType = Hash128.OfCanonical("substrate/type/Neuron/v1");
+    private static readonly Hash128 NeuronType = EntityTypeRegistry.Neuron;
 
     private static readonly (string Name, Hash128 Id)[] RelTypes =
     {

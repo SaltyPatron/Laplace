@@ -30,7 +30,7 @@ TEST(GrammarTags, PythonDefAndCallCaptures)
 
     bool defFn = false, refCall = false, name = false;
     for (size_t i = 0; i < n; ++i) {
-        switch (out[i].capture_kind) {
+        switch (out[i].capture_type) {
             case LAPLACE_TAG_DEF_FUNCTION: defFn = true; break;
             case LAPLACE_TAG_REF_CALL:     refCall = true; break;
             case LAPLACE_TAG_NAME:         name = true; break;

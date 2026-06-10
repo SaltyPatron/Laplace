@@ -55,7 +55,7 @@ typedef struct {
 
 /* Compose a parsed grammar AST into substrate entities, physicalities, PRECEDES pairs,
  * and a byte-span index for witness walkers. type_meta_id is the vocabulary meta-type
- * for grammar kind entities (substrate/type/MetaType/v1). Returns 0 on success. */
+ * for grammar node-type entities (substrate/type/MetaType/v1). Returns 0 on success. */
 int laplace_grammar_compose(
     const uint8_t*              utf8,
     size_t                      len,

@@ -147,7 +147,7 @@ public class RelationTypeRegistryTests
     }
 
     [Fact]
-    public void RollUp_ModelKinds_ParentRelatedTo()
+    public void RollUp_ModelRelationTypes_ParentRelatedTo()
     {
         Assert.Equal(Kid("RELATED_TO"), RelationTypeRegistry.Resolve("ATTENDS").ParentId);
         Assert.Equal(Kid("RELATED_TO"), RelationTypeRegistry.Resolve("OV_RELATES").ParentId);
@@ -183,7 +183,7 @@ public class RelationTypeRegistryTests
     }
 
     [Fact]
-    public void UnknownKind_GracefulProbationaryFallback()
+    public void UnknownRelationType_GracefulProbationaryFallback()
     {
         var r = RelationTypeRegistry.Resolve("ZZZ_NOT_REGISTERED");
         Assert.Equal(Kid("ZZZ_NOT_REGISTERED"), r.Id);

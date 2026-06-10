@@ -13,8 +13,8 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    private static readonly Hash128 LanguageTypeId = Hash128.OfCanonical("substrate/type/Language/v1");
-    private static readonly Hash128 SynsetTypeId   = Hash128.OfCanonical("substrate/type/WordNet_Synset/v1");
+    private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
+    private static readonly Hash128 SynsetTypeId   = EntityTypeRegistry.WordNetSynset;
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "OMWDecomposer";
@@ -38,27 +38,10 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider
         if (!Directory.Exists(wnsDir)) yield break;
         int batch = options.BatchSize > 1 ? options.BatchSize : 8192;
 
-        var b = NewBuilder("omw/batch-0", batch);
-        int count = 0, batchNum = 0;
-
-        foreach (string tabFile in Directory.EnumerateFiles(wnsDir, "wn-data-*.tab", SearchOption.AllDirectories))
+        await foreach (var change in OMWFastIngest.IngestAsync(wnsDir, options.Languages, batch, ct))
         {
-            string fileLang = FileLang(tabFile);
-            if (options.Languages?.MatchesRaw(fileLang) == false) continue;
-            await foreach (var row in ParseFileAsync(tabFile, fileLang, ct))
-            {
-                ct.ThrowIfCancellationRequested();
-                EmitRow(b, row);
-                if (++count >= batch)
-                {
-                    if (!options.DryRun) yield return b.Build();
-                    b = NewBuilder($"omw/batch-{++batchNum}", batch);
-                    count = 0;
-                    await Task.Yield();
-                }
-            }
+            if (!options.DryRun) yield return change;
         }
-        if (count > 0 && !options.DryRun) yield return b.Build();
     }
 
     public async Task<IngestInventory?> DescribeInputAsync(
@@ -149,13 +132,13 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider
             if (tf.Length == 1) { type = tf[0]; }
             else { lang = tf[0]; type = tf[1]; }
 
-            OmwType kind;
+            OmwType rowType;
             string value;
             switch (type)
             {
-                case "lemma": kind = OmwType.Lemma; value = cols.Length > 2 ? cols[2] : ""; break;
-                case "def":   kind = OmwType.Def;   value = cols.Length > 3 ? cols[3] : (cols.Length > 2 ? cols[2] : ""); break;
-                case "exe":   kind = OmwType.Exe;   value = cols.Length > 3 ? cols[3] : (cols.Length > 2 ? cols[2] : ""); break;
+                case "lemma": rowType = OmwType.Lemma; value = cols.Length > 2 ? cols[2] : ""; break;
+                case "def":   rowType = OmwType.Def;   value = cols.Length > 3 ? cols[3] : (cols.Length > 2 ? cols[2] : ""); break;
+                case "exe":   rowType = OmwType.Exe;   value = cols.Length > 3 ? cols[3] : (cols.Length > 2 ? cols[2] : ""); break;
                 default: continue;
             }
             value = value.Replace('_', ' ').Trim();
@@ -167,7 +150,7 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider
             char pos = synKey[dash + 1] == 's' ? 'a' : synKey[dash + 1];
 
             Hash128 synId = SourceEntityIdConventions.WordNetSynset(offset, pos);
-            yield return new OmwRow(synId, lang, kind, value);
+            yield return new OmwRow(synId, lang, rowType, value);
         }
     }
 

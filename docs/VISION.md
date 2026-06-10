@@ -33,13 +33,13 @@ This is the deepest break with the token paradigm. A transformer's vocabulary is
 
 ### Testimony: everything is a witness
 
-Every source of knowledge — Unicode data files, WordNet, treebanks, corpora, raw documents, user prompts, and transformer models themselves — enters the substrate the same way: as a witness depositing attestations. An attestation records WHO witnessed WHAT relation (subject, kind, object), in what context, with what outcome class. It is provenance only, never a value channel.
+Every source of knowledge — Unicode data files, WordNet, treebanks, corpora, raw documents, user prompts, and transformer models themselves — enters the substrate the same way: as a witness depositing attestations. An attestation records WHO witnessed WHAT relation (subject, relType, object), in what context, with what outcome class. It is provenance only, never a value channel.
 
 Witnesses carry trust classes (standards-derived, academically curated, structured corpus, user prompt, AI model probe, adversarial...). A model's testimony is admissible and outranked by the dictionary.
 
 ### Adjudication: truth as a tournament
 
-Consensus is one row per (subject, kind, object) carrying Glicko-2 state — rating, deviation, volatility — accumulated over every witness. Relations have strength (μ = rating − 2·RD, the conservative bound), uncertainty (RD), and refutation (upper bound below baseline = confidently denied; pruned from traversal, preserved as visible dissent in ranked reads).
+Consensus is one row per (subject, relType, object) carrying Glicko-2 state — rating, deviation, volatility — accumulated over every witness. Relations have strength (μ = rating − 2·RD, the conservative bound), uncertainty (RD), and refutation (upper bound below baseline = confidently denied; pruned from traversal, preserved as visible dissent in ranked reads).
 
 Disagreement is recorded, not erased. Confidence is a number, not a tone. "I don't know" is structural: an empty cascade is a witnessed gap.
 
@@ -69,7 +69,7 @@ EMBEDS, Q_PROJECTS, K_PROJECTS, V_PROJECTS, O_PROJECTS, GATES, UP_PROJECTS, DOWN
 
 ### The fireflies: a jar of model beliefs
 
-Every entity has constructed geometry: T0 atoms placed by deterministic law (super-Fibonacci on S³ — the fixed anchor lattice), higher tiers by composition. When a model is deposed, LE+GSO+PA (Laplacian eigenmaps + Gram-Schmidt orthonormalization + Procrustes alignment) projects its native embedding space into the shared 4D frame — and the alignment is well-posed only because of the core invention: content-addressed identity supplies the point correspondences (the model's "king" IS the substrate's king), and the S³ lattice plus already-placed entities supply the fixed frame LE+GSO+PA anchor to. Cross-model geometry is commensurable because identity is content. One firefly per witness per entity, per layer/head/expert — stored as `physicalities` rows (the table's `alignment_residual` and `source_dim` columns exist precisely for LE+GSO+PA outputs), with per-circuit witness entities carrying the layer/head granularity and per-tensor-role physicality kinds recording what each placement was stripped from. Llama's king and Qwen's king are distinct specimens of the same identity: **species of king**, swarming one address.
+Every entity has constructed geometry: T0 atoms placed by deterministic law (super-Fibonacci on S³ — the fixed anchor lattice), higher tiers by composition. When a model is deposed, LE+GSO+PA (Laplacian eigenmaps + Gram-Schmidt orthonormalization + Procrustes alignment) projects its native embedding space into the shared 4D frame — and the alignment is well-posed only because of the core invention: content-addressed identity supplies the point correspondences (the model's "king" IS the substrate's king), and the S³ lattice plus already-placed entities supply the fixed frame LE+GSO+PA anchor to. Cross-model geometry is commensurable because identity is content. One firefly per witness per entity, per layer/head/expert — stored as `physicalities` rows (the table's `alignment_residual` and `source_dim` columns exist precisely for LE+GSO+PA outputs), with per-circuit witness entities carrying the layer/head granularity and per-tensor-role physicality types recording what each placement was stripped from. Llama's king and Qwen's king are distinct specimens of the same identity: **species of king**, swarming one address.
 
 The species — never a blend of them — are the product. This is the audit instrument:
 
@@ -103,7 +103,7 @@ Words are realized as curves (constituent paths through real coordinates — sto
 
 Text works because Unicode spent thirty years writing the segmentation law — versioned, conformance-tested, canonical. No other modality ever got its annex; the tensor paradigm never needed identity. Laplace's expansion plan is exactly: author the UAX#29 analog per modality (pixel→region→object; sample→frame→event), versioned and conformance-tested, compiled to a perfcache — after which identity, attestation, adjudication, geometry, rendering, and export apply **unchanged**. The codepoint never knew it was text.
 
-The kinds vocabulary is already seeded (IS_PIXEL_OF, IS_AT_SAMPLE, DEPICTS, CAPTIONS, TRANSCRIBES_AS); the witness pool (vision, audio, coder models) is already on disk, waiting for deposition.
+The relation-type vocabulary is already seeded (IS_PIXEL_OF, IS_AT_SAMPLE, DEPICTS, CAPTIONS, TRANSCRIBES_AS); the witness pool (vision, audio, coder models) is already on disk, waiting for deposition.
 
 ---
 

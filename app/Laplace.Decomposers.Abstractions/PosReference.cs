@@ -6,7 +6,7 @@ namespace Laplace.Decomposers.Abstractions;
 
 public static class PosReference
 {
-    public static readonly Hash128 PosTypeId = Hash128.OfCanonical("substrate/type/POS/v1");
+    public static readonly Hash128 PosTypeId = EntityTypeRegistry.Pos;
 
     public static readonly string[] Canonical =
         ["ADJ", "ADP", "ADV", "AUX", "CCONJ", "DET", "INTJ", "NOUN", "NUM",

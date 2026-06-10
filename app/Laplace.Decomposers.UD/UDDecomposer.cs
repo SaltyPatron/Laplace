@@ -14,9 +14,9 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    private static readonly Hash128 XposTypeId     = Hash128.OfCanonical("substrate/type/UD_XPOS/v1");
-    private static readonly Hash128 FeatureTypeId  = Hash128.OfCanonical("substrate/type/UD_Feature/v1");
-    private static readonly Hash128 LanguageTypeId = Hash128.OfCanonical("substrate/type/Language/v1");
+    private static readonly Hash128 XposTypeId     = EntityTypeRegistry.UdXpos;
+    private static readonly Hash128 FeatureTypeId  = EntityTypeRegistry.UdFeature;
+    private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
 
     private static readonly string[] UposTags =
         ["ADJ","ADP","ADV","AUX","CCONJ","DET","INTJ","NOUN","NUM",
@@ -68,9 +68,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
             Environment.GetEnvironmentVariable("LAPLACE_DECOMPOSE_WORKERS"), out var w) && w > 0
             ? w : Math.Clamp(Environment.ProcessorCount - 4, 1, 16);
 
-        var files = Directory.EnumerateFiles(treebanksDir, "*.conllu", SearchOption.AllDirectories)
-            .Where(p => options.Languages?.MatchesUdTreebankFile(Path.GetFileName(p)) != false)
-            .ToList();
+        var files = ListTreebankFiles(treebanksDir, options);
         if (files.Count == 0) yield break;
 
         var seenAttRun = new ConcurrentIdSet();
@@ -168,8 +166,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
         string treebanksDir = Path.Combine(context.EcosystemPath, "ud-treebanks-v2.17");
         if (!Directory.Exists(treebanksDir))
             return Task.FromResult<IngestInventory?>(null);
-        var files = Directory.EnumerateFiles(treebanksDir, "*.conllu", SearchOption.AllDirectories)
-            .Where(p => options.Languages?.MatchesUdTreebankFile(Path.GetFileName(p)) != false)
+        var files = ListTreebankFiles(treebanksDir, options)
             .Select(p =>
             {
                 string id = Path.GetFileNameWithoutExtension(p);
@@ -314,6 +311,23 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
         }
     }
 
+    private static LanguageFilter? EffectiveLanguages(DecomposerOptions options) =>
+        options.Languages is { IsActive: true } ? options.Languages
+        : LanguageFilter.ForSource("UDDecomposer");
+
+    private static List<string> ListTreebankFiles(string treebanksDir, DecomposerOptions options)
+    {
+        var all = Directory.EnumerateFiles(treebanksDir, "*.conllu", SearchOption.AllDirectories).ToList();
+        var langs = EffectiveLanguages(options);
+        if (langs is { IsActive: true })
+            return all.Where(p => langs.MatchesUdTreebankFile(Path.GetFileName(p))).ToList();
+        if (all.Count > 50)
+            throw new InvalidOperationException(
+                $"UD ingest found {all.Count} treebank files with no language filter active. "
+                + "Set LAPLACE_INGEST_LANGS=en (or LAPLACE_UD_LANGS) or pass --langs en to scope to en_* dialects.");
+        return all;
+    }
+
     private static string ExtractLangCode(string fileName)
     {
         int under = fileName.IndexOf('_');
@@ -328,51 +342,60 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
         string? text = null;
         int maxId = 0;
 
-        await foreach (var line in File.ReadLinesAsync(path, ct))
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
         {
-            if (string.IsNullOrEmpty(line))
+            ReadOnlySpan<byte> line = lineMem.Span;
+            if (line.IsEmpty)
             {
                 if (tokens.Count > 0)
                     yield return new UdSentence(text, tokens.ToList(), mwts.ToList(), maxId);
                 tokens.Clear(); mwts.Clear(); text = null; maxId = 0;
                 continue;
             }
-            if (line[0] == '#')
+            if (line[0] == (byte)'#')
             {
-                int eq = line.IndexOf('=');
-                if (eq > 0 && line.AsSpan(0, eq).Trim().SequenceEqual("# text"))
-                    text = line[(eq + 1)..].Trim();
+                int eq = line.IndexOf((byte)'=');
+                if (eq > 0 && line[..eq].Trim((byte)' ').SequenceEqual("# text"u8))
+                    text = System.Text.Encoding.UTF8.GetString(line[(eq + 1)..]).Trim();
                 continue;
             }
 
-            var c = line.Split('\t');
-            if (c.Length < 8) continue;
-            string id0 = c[0];
+            if (!TsvSpan.TryField(line, 0, out var id0Span)) continue;
+            string id0 = System.Text.Encoding.UTF8.GetString(id0Span);
 
             if (id0.Contains('-'))
             {
                 int dash = id0.IndexOf('-');
                 if (int.TryParse(id0[..dash], out int st) && int.TryParse(id0[(dash + 1)..], out int en))
-                    mwts.Add(new UdMwt(st, en, c[1].Trim()));
+                    mwts.Add(new UdMwt(st, en, TsvSpan.TryField(line, 1, out var mwtForm)
+                        ? System.Text.Encoding.UTF8.GetString(mwtForm).Trim() : ""));
                 continue;
             }
             bool isEmptyNode = id0.Contains('.');
             int id = 0;
             if (!isEmptyNode && !int.TryParse(id0, out id)) continue;
 
-            string form = c[1].Trim();
+            if (!TsvSpan.TryField(line, 1, out var formSpan)) continue;
+            string form = System.Text.Encoding.UTF8.GetString(formSpan).Trim();
             if (form.Length == 0 || form == "_") continue;
-            string lemma = c[2].Trim();
+            string lemma = TsvSpan.TryField(line, 2, out var lemmaSpan)
+                ? System.Text.Encoding.UTF8.GetString(lemmaSpan).Trim() : form;
             if (lemma.Length == 0 || lemma == "_") lemma = form;
-            string upos = c[3].Trim();
-            string xpos = c[4].Trim();
-            string[] feats = (c[5] == "_" || c[5].Length == 0)
-                ? System.Array.Empty<string>()
-                : c[5].Split('|', StringSplitOptions.RemoveEmptyEntries);
-            int head = int.TryParse(c[6], out int h) ? h : 0;
-            string deprel = c[7].Trim();
-            string deps = c.Length > 8 ? c[8].Trim() : "_";
-            string misc = c.Length > 9 ? c[9].Trim() : "_";
+            string upos = TsvSpan.TryField(line, 3, out var uposSpan)
+                ? System.Text.Encoding.UTF8.GetString(uposSpan).Trim() : "";
+            string xpos = TsvSpan.TryField(line, 4, out var xposSpan)
+                ? System.Text.Encoding.UTF8.GetString(xposSpan).Trim() : "";
+            string[] feats = TsvSpan.TryField(line, 5, out var featSpan) && !featSpan.SequenceEqual("_"u8)
+                ? System.Text.Encoding.UTF8.GetString(featSpan).Split('|', StringSplitOptions.RemoveEmptyEntries)
+                : System.Array.Empty<string>();
+            int head = TsvSpan.TryField(line, 6, out var headSpan)
+                && int.TryParse(System.Text.Encoding.UTF8.GetString(headSpan), out int h) ? h : 0;
+            string deprel = TsvSpan.TryField(line, 7, out var depSpan)
+                ? System.Text.Encoding.UTF8.GetString(depSpan).Trim() : "";
+            string deps = TsvSpan.TryField(line, 8, out var depsSpan)
+                ? System.Text.Encoding.UTF8.GetString(depsSpan).Trim() : "_";
+            string misc = TsvSpan.TryField(line, 9, out var miscSpan)
+                ? System.Text.Encoding.UTF8.GetString(miscSpan).Trim() : "_";
 
             if (!isEmptyNode && id > maxId) maxId = id;
             tokens.Add(new UdToken(isEmptyNode ? -1 : id, id0, form, lemma, upos, xpos, feats, head, deprel, deps, misc));

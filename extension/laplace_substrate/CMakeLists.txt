@@ -2,6 +2,7 @@ if(WIN32)
     add_library(laplace_substrate MODULE
         src/laplace_substrate.c
         src/generate_walk.c
+        src/generation_native.c
         src/astar_path.c
     )
     set_target_properties(laplace_substrate PROPERTIES
@@ -29,6 +30,7 @@ set(EXT_VERSION ${PROJECT_VERSION})
 set(EXT_C_SOURCES
     src/laplace_substrate.c
     src/generate_walk.c
+    src/generation_native.c
     src/astar_path.c
 )
 
@@ -87,6 +89,7 @@ set(EXT_SQL_MODULES
     sql/23_structural_surface.sql.in
     sql/24_identity_health.sql.in
     sql/25_intent_preflight.sql.in
+    sql/26_generation.sql.in
 )
 
 set(EXT_BUILT_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}--${EXT_VERSION}.sql)

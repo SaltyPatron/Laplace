@@ -17,6 +17,7 @@ public sealed class SubstrateChangeBuilder
     private readonly HashSet<Hash128> _seenEntities = new();
     private readonly HashSet<Hash128> _seenPhysicalities = new();
     private readonly Dictionary<Hash128, int> _attestationIndex = new();
+    private readonly List<IntentStage> _intentStages = new();
 
     public SubstrateChangeBuilder(
         Hash128 sourceId,
@@ -62,6 +63,13 @@ public sealed class SubstrateChangeBuilder
     {
         ArgumentNullException.ThrowIfNull(row);
         if (_seenPhysicalities.Add(row.Id)) _physicalities.Add(row);
+        return this;
+    }
+
+    public SubstrateChangeBuilder AddIntentStage(IntentStage stage)
+    {
+        ArgumentNullException.ThrowIfNull(stage);
+        _intentStages.Add(stage);
         return this;
     }
 
@@ -117,7 +125,8 @@ public sealed class SubstrateChangeBuilder
                 DateTimeOffset.UtcNow,
                 _parentIntentId,
                 _inputUnitsConsumed,
-                _commitEpoch));
+                _commitEpoch),
+            _intentStages.Count > 0 ? _intentStages.ToImmutableArray() : default);
     }
 
     private static Hash128 ComputeIntentId(

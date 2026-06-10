@@ -430,6 +430,9 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
     [Fact]
     public async Task StripeWebhook_InvalidSignature_IsRejected()
     {
+        await using var strict = new StrictWebhookFactory();
+        using var client = strict.CreateClient();
+
         var payload = JsonSerializer.Serialize(new
         {
             id = $"evt_{Guid.NewGuid():N}",
@@ -442,7 +445,7 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
         };
         request.Headers.Add("Stripe-Signature", "t=1700000000,v1=deadbeef");
 
-        using var response = await _client.SendAsync(request);
+        using var response = await client.SendAsync(request);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());

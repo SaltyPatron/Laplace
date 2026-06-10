@@ -28,7 +28,7 @@ public static unsafe class GrammarTags
             for (nuint i = 0; i < n; i++)
             {
                 LaplaceTag g = outTags[i];
-                list.Add(new TagCapture(g.MatchId, (TagKind)g.CaptureKind, g.StartByte, g.EndByte));
+                list.Add(new TagCapture(g.MatchId, (TagType)g.CaptureType, g.StartByte, g.EndByte));
             }
             return list;
         }
@@ -65,6 +65,18 @@ public static unsafe class GrammarTags
     private static string? LocateTagsScm(string modality)
     {
         _repoSubpath.TryGetValue(modality, out var sub);
+        // The CLI often runs from a sidecar outside the repo tree (%TEMP%), where the
+        // BaseDirectory parent walk can never reach external/ — LAPLACE_ROOT wins when set.
+        var root = Environment.GetEnvironmentVariable("LAPLACE_ROOT");
+        if (!string.IsNullOrEmpty(root))
+        {
+            string rootRepo = Path.Combine(Path.GetFullPath(root), "external", "tree-sitter-grammars",
+                                           $"tree-sitter-{modality}");
+            string rp = sub is not null
+                ? Path.Combine(rootRepo, sub, "queries", "tags.scm")
+                : Path.Combine(rootRepo, "queries", "tags.scm");
+            if (File.Exists(rp)) return rp;
+        }
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
             string repoDir = Path.Combine(dir.FullName, "external", "tree-sitter-grammars",

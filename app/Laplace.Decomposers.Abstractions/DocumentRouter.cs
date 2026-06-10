@@ -1,9 +1,9 @@
 namespace Laplace.Decomposers.Abstractions;
 
-public enum SpanKind { Prose, Code }
+public enum SpanType { Prose, Code }
 
 /// <summary>A contiguous run of a mixed document, classified prose or code (with a language).</summary>
-public readonly record struct DocumentSpan(SpanKind Kind, string? Language, int Start, int Length);
+public readonly record struct DocumentSpan(SpanType Type, string? Language, int Start, int Length);
 
 /// <summary>
 /// Splits a mixed document (an article/tutorial holding prose AND code) into prose vs. code spans,
@@ -32,7 +32,7 @@ public static class DocumentRouter
             if (TryOpenFence(line, out char fenceChar, out int fenceLen, out string? lang))
             {
                 if (lineStart > proseStart)
-                    spans.Add(new DocumentSpan(SpanKind.Prose, null, proseStart, lineStart - proseStart));
+                    spans.Add(new DocumentSpan(SpanType.Prose, null, proseStart, lineStart - proseStart));
 
                 int codeStart = lineEnd;
                 int codeEnd = n;
@@ -52,7 +52,7 @@ public static class DocumentRouter
                 }
 
                 if (codeEnd > codeStart)
-                    spans.Add(new DocumentSpan(SpanKind.Code, lang, codeStart, codeEnd - codeStart));
+                    spans.Add(new DocumentSpan(SpanType.Code, lang, codeStart, codeEnd - codeStart));
 
                 proseStart = afterClose;
                 i = afterClose;
@@ -64,7 +64,7 @@ public static class DocumentRouter
         }
 
         if (n > proseStart)
-            spans.Add(new DocumentSpan(SpanKind.Prose, null, proseStart, n - proseStart));
+            spans.Add(new DocumentSpan(SpanType.Prose, null, proseStart, n - proseStart));
         return spans;
     }
 

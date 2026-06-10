@@ -13,20 +13,17 @@ public sealed class ISODecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
 
-    private static readonly Hash128 LanguageTypeId =
-        Hash128.OfCanonical("substrate/type/Language/v1");
-    private static readonly Hash128 Iso639CodeTypeId =
-        Hash128.OfCanonical("substrate/type/ISO639Code/v1");
-    private static readonly Hash128 KindIsLanguageCode =
-        Hash128.OfCanonical("substrate/kind/IS_LANGUAGE_CODE/v1");
-    private static readonly Hash128 KindHasIso6391Code =
-        Hash128.OfCanonical("substrate/kind/HAS_ISO639_1_CODE/v1");
-    private static readonly Hash128 KindUsesScript =
-        Hash128.OfCanonical("substrate/kind/USES_SCRIPT/v1");
-    private static readonly Hash128 KindMemberOfMacrolanguage =
-        Hash128.OfCanonical("substrate/kind/MEMBER_OF_MACROLANGUAGE/v1");
-    private static readonly Hash128 UcdClassifierTypeId =
-        Hash128.OfCanonical("substrate/type/UcdClassifier/v1");
+    private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
+    private static readonly Hash128 Iso639CodeTypeId = EntityTypeRegistry.Iso639Code;
+    private static readonly Hash128 RelTypeIsLanguageCode =
+        RelationTypeRegistry.RelationTypeId("IS_LANGUAGE_CODE");
+    private static readonly Hash128 RelTypeHasIso6391Code =
+        RelationTypeRegistry.RelationTypeId("HAS_ISO639_1_CODE");
+    private static readonly Hash128 RelTypeUsesScript =
+        RelationTypeRegistry.RelationTypeId("USES_SCRIPT");
+    private static readonly Hash128 RelTypeMemberOfMacrolanguage =
+        RelationTypeRegistry.RelationTypeId("MEMBER_OF_MACROLANGUAGE");
+    private static readonly Hash128 UcdClassifierTypeId = EntityTypeRegistry.UcdClassifier;
 
     public Hash128 SourceId    => Source;
     public string  SourceName  => "ISO639Decomposer";
@@ -70,7 +67,7 @@ public sealed class ISODecomposer : IDecomposer
             var langId = LanguageEntityId.FromIso639_3(rec.Id);
             b.AddEntity(langId, EntityTier.Vocabulary, LanguageTypeId, Source);
             b.AddAttestation(AttestationFactory.Create(
-                langId, KindIsLanguageCode, null, Source, null,
+                langId, RelTypeIsLanguageCode, null, Source, null,
                 RelationTypeRank.Partitive, SourceTrust.StandardsDerived));
 
             if (rec.Part1.Length > 0)
@@ -80,7 +77,7 @@ public sealed class ISODecomposer : IDecomposer
                 var iso1Id = Hash128.OfCanonical(iso1Name);
                 b.AddEntity(iso1Id, EntityTier.Vocabulary, Iso639CodeTypeId, Source);
                 b.AddAttestation(AttestationFactory.Create(
-                    langId, KindHasIso6391Code, iso1Id, Source, null,
+                    langId, RelTypeHasIso6391Code, iso1Id, Source, null,
                     RelationTypeRank.Partitive, SourceTrust.StandardsDerived));
             }
 
@@ -119,7 +116,7 @@ public sealed class ISODecomposer : IDecomposer
             b.AddEntity(indivId, EntityTier.Vocabulary, LanguageTypeId, Source);
             b.AddEntity(macroId, EntityTier.Vocabulary, LanguageTypeId, Source);
             b.AddAttestation(AttestationFactory.Create(
-                indivId, KindMemberOfMacrolanguage, macroId, Source, null,
+                indivId, RelTypeMemberOfMacrolanguage, macroId, Source, null,
                 RelationTypeRank.Taxonomic, SourceTrust.StandardsDerived));
         }
 
@@ -137,7 +134,7 @@ public sealed class ISODecomposer : IDecomposer
                 var scriptId = LanguageGraph.ScriptEntityId(name);
                 b.AddEntity(scriptId, EntityTier.Vocabulary, UcdClassifierTypeId, Source);
                 b.AddAttestation(AttestationFactory.Create(
-                    langId, KindUsesScript, scriptId, Source, null,
+                    langId, RelTypeUsesScript, scriptId, Source, null,
                     RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
             }
         }

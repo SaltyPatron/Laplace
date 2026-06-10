@@ -5,8 +5,8 @@ CREATE OR REPLACE FUNCTION pg_temp.cli_id(h text) RETURNS bytea LANGUAGE sql IMM
   SELECT decode(
     (SELECT string_agg(substr(h, 17-2*i, 2), '' ORDER BY i) FROM generate_series(1,8) i) ||
     (SELECT string_agg(substr(h, 33-2*i, 2), '' ORDER BY i) FROM generate_series(1,8) i), 'hex') $$;
-CREATE OR REPLACE FUNCTION pg_temp.kind(n text) RETURNS bytea LANGUAGE sql IMMUTABLE AS $$
-  SELECT public.laplace_hash128_blake3(convert_to('substrate/kind/'||n||'/v1','UTF8')) $$;
+CREATE OR REPLACE FUNCTION pg_temp.relation_type_id(n text) RETURNS bytea LANGUAGE sql IMMUTABLE AS $$
+  SELECT public.laplace_hash128_blake3(convert_to('substrate/type/'||n||'/v1','UTF8')) $$;
 
 DROP TABLE IF EXISTS cp_map;
 CREATE TEMP TABLE cp_map AS
@@ -20,7 +20,7 @@ CREATE OR REPLACE FUNCTION pg_temp.surface(p_id bytea) RETURNS text LANGUAGE sql
        LATERAL ST_DumpPoints(p.trajectory) g,
        LATERAL public.laplace_mantissa_unpack(g.geom) u
   JOIN cp_map m ON m.id = (u).entity_id
-  WHERE p.entity_id = p_id AND p.kind = 1 $$;
+  WHERE p.entity_id = p_id AND p.type = 1 $$;
 
 \if :{?subj}
 \else
@@ -33,7 +33,7 @@ SELECT :'subj' AS subject_cli_hex, pg_temp.surface(pg_temp.cli_id(:'subj')) AS r
 \echo '== B. RANKED-μ: top EMBEDS channels of the subject (sorted index scan) =='
 SELECT left(encode(object_id,'hex'),16) AS channel, round((rating/1e9)::numeric,3) AS mu, witness_count
 FROM laplace.consensus
-WHERE subject_id = pg_temp.cli_id(:'subj') AND kind_id = pg_temp.kind('EMBEDS')
+WHERE subject_id = pg_temp.cli_id(:'subj') AND type_id = pg_temp.relation_type_id('EMBEDS')
 ORDER BY rating DESC LIMIT 5;
 
 \echo '== C. QUERY-TIME BILINEAR READ: subject --EMBEDS--> ch --OUTPUT_PROJECTS--> tokens =='
@@ -41,12 +41,12 @@ ORDER BY rating DESC LIMIT 5;
 WITH emb AS (
   SELECT object_id AS ch, (rating/1e9 - 1500.0) AS m
   FROM laplace.consensus
-  WHERE subject_id = pg_temp.cli_id(:'subj') AND kind_id = pg_temp.kind('EMBEDS')
+  WHERE subject_id = pg_temp.cli_id(:'subj') AND type_id = pg_temp.relation_type_id('EMBEDS')
 ),
 comp AS (
   SELECT o.object_id AS tok, sum(e.m * (o.rating/1e9 - 1500.0)) AS score
   FROM emb e
-  JOIN laplace.consensus o ON o.subject_id = e.ch AND o.kind_id = pg_temp.kind('OUTPUT_PROJECTS')
+  JOIN laplace.consensus o ON o.subject_id = e.ch AND o.type_id = pg_temp.relation_type_id('OUTPUT_PROJECTS')
   GROUP BY o.object_id
 )
 SELECT rank() OVER (ORDER BY score DESC) AS rnk,

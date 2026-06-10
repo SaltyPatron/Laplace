@@ -60,4 +60,46 @@ public static unsafe class Glicko2
                 (nuint)observations.Length, tauFp1e9, nowUnixNs);
         }
     }
+
+    /// <summary>Bit-identical to PG <c>laplace_glicko2_accumulate_games</c>.</summary>
+    public static Glicko2State AccumulateGames(
+        long priorRatingFp1e9,
+        long priorRdFp1e9,
+        long priorVolatilityFp1e9,
+        long opponentRatingFp1e9,
+        long opponentRdFp1e9,
+        long games,
+        long sumScoreFp,
+        long tauFp1e9 = DefaultTauFp1e9)
+    {
+        if (games <= 0) throw new ArgumentOutOfRangeException(nameof(games));
+        var state = new Glicko2State
+        {
+            RatingFp1e9     = priorRatingFp1e9,
+            RdFp1e9         = priorRdFp1e9,
+            VolatilityFp1e9 = priorVolatilityFp1e9,
+        };
+        long q = sumScoreFp / games;
+        long rem = sumScoreFp - q * (games - 1);
+        Span<Glicko2Observation> obs = games <= 4096
+            ? stackalloc Glicko2Observation[(int)games]
+            : new Glicko2Observation[games];
+        for (long i = 0; i < games - 1; i++)
+        {
+            obs[(int)i] = new Glicko2Observation
+            {
+                OpponentRatingFp1e9 = opponentRatingFp1e9,
+                OpponentRdFp1e9     = opponentRdFp1e9,
+                ScoreFp1e9          = q,
+            };
+        }
+        obs[(int)(games - 1)] = new Glicko2Observation
+        {
+            OpponentRatingFp1e9 = opponentRatingFp1e9,
+            OpponentRdFp1e9     = opponentRdFp1e9,
+            ScoreFp1e9          = rem,
+        };
+        UpdatePeriod(ref state, obs, tauFp1e9, 0);
+        return state;
+    }
 }

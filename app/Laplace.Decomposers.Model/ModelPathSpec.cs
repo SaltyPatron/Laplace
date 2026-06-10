@@ -2,7 +2,7 @@ namespace Laplace.Decomposers.Model;
 
 // A path is one trajectory type a model computes between source entities and target entities.
 // The ETL streams one Glicko-2 matchup per (source, target) pair above the noise floor.
-// PathSpec subclasses encode the tensor chain and contraction shape; the ETL dispatches on kind.
+// PathSpec subclasses encode the tensor chain and contraction shape; the ETL dispatches on type.
 // New modalities (vision patches, audio frames, cross-modal) add new subclasses here.
 public abstract record PathSpec(string RelationName, bool PerLayer);
 

@@ -19,12 +19,9 @@ public sealed class PropBankDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    private static readonly Hash128 RolesetTypeId =
-        Hash128.OfCanonical("substrate/type/PropBank_Roleset/v1");
-    private static readonly Hash128 VerbNetClassTypeId =
-        Hash128.OfCanonical("substrate/type/VerbNet_Class/v1");
-    private static readonly Hash128 OrdinalTypeId =
-        Hash128.OfCanonical("substrate/type/Ordinal/v1");
+    private static readonly Hash128 RolesetTypeId      = EntityTypeRegistry.PropBankRoleset;
+    private static readonly Hash128 VerbNetClassTypeId = EntityTypeRegistry.VerbNetClass;
+    private static readonly Hash128 OrdinalTypeId      = EntityTypeRegistry.Ordinal;
 
     internal static Hash128 RolesetId(string rolesetId)
     {

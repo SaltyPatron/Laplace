@@ -59,7 +59,7 @@ typedef struct WalkNode
     int     parent;
     int     depth;
     Datum   entity;
-    Datum   kind;
+    Datum   rel_type;
     Datum   eff_mu;
     Datum   path_mu;
     int64   witnesses;
@@ -76,16 +76,16 @@ copy_bytea_datum(Datum d)
 }
 
 static ArrayType *
-branch_array(WalkNode *nodes, int idx, bool kinds)
+branch_array(WalkNode *nodes, int idx, bool types)
 {
     int     depth = nodes[idx].depth;
-    int     n = kinds ? depth : depth + 1;
+    int     n = types ? depth : depth + 1;
     Datum  *elems = (Datum *) palloc(sizeof(Datum) * (n > 0 ? n : 1));
     int     i = idx;
 
     for (int slot = n - 1; slot >= 0; slot--)
     {
-        elems[slot] = kinds ? nodes[i].kind : nodes[i].entity;
+        elems[slot] = types ? nodes[i].rel_type : nodes[i].entity;
         i = nodes[i].parent;
     }
     return construct_array(elems, n, BYTEAOID, -1, false, TYPALIGN_INT);
@@ -96,8 +96,8 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     bytea  *prompt;
-    Datum   kind_datum = 0;
-    bool    kind_null;
+    Datum   type_datum = 0;
+    bool    type_null;
     int32   max_depth, beam;
     WalkNode *nodes;
     int     n_nodes = 0, cap;
@@ -106,9 +106,9 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("generate_tree: prompt entity must not be NULL")));
     prompt    = PG_GETARG_BYTEA_PP(0);
-    kind_null = PG_ARGISNULL(1);
-    if (!kind_null)
-        kind_datum = PG_GETARG_DATUM(1);
+    type_null = PG_ARGISNULL(1);
+    if (!type_null)
+        type_datum = PG_GETARG_DATUM(1);
     max_depth = PG_ARGISNULL(2) ? 4 : PG_GETARG_INT32(2);
     beam      = PG_ARGISNULL(3) ? 5 : PG_GETARG_INT32(3);
     if (max_depth < 0 || beam < 0)
@@ -126,7 +126,7 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
     nodes[0].parent    = -1;
     nodes[0].depth     = 0;
     nodes[0].entity    = copy_bytea_datum(PointerGetDatum(prompt));
-    nodes[0].kind      = (Datum) 0;
+    nodes[0].rel_type      = (Datum) 0;
     nodes[0].eff_mu    = (Datum) 0;
     nodes[0].path_mu   = DirectFunctionCall1(int8_numeric, Int64GetDatum(0));
     nodes[0].witnesses = 0;
@@ -146,8 +146,8 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
             int    rc;
 
             args[0] = nodes[f].entity;
-            args[1] = kind_null ? (Datum) 0 : kind_datum;
-            if (kind_null) nulls[1] = 'n';
+            args[1] = type_null ? (Datum) 0 : type_datum;
+            if (type_null) nulls[1] = 'n';
             args[2] = Int32GetDatum(beam);
             args[3] = PointerGetDatum(path_arr);
 
@@ -162,7 +162,7 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
                 TupleDesc  td  = SPI_tuptable->tupdesc;
                 bool       isnull;
                 Datum      obj   = SPI_getbinval(tup, td, 1, &isnull);
-                Datum      ekind = SPI_getbinval(tup, td, 2, &isnull);
+                Datum      etype = SPI_getbinval(tup, td, 2, &isnull);
                 int64      rating = DatumGetInt64(SPI_getbinval(tup, td, 3, &isnull));
                 int64      rd     = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
                 int64      wc     = DatumGetInt64(SPI_getbinval(tup, td, 5, &isnull));
@@ -182,7 +182,7 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
                 nodes[n_nodes].parent    = f;
                 nodes[n_nodes].depth     = level + 1;
                 nodes[n_nodes].entity    = copy_bytea_datum(obj);
-                nodes[n_nodes].kind      = copy_bytea_datum(ekind);
+                nodes[n_nodes].rel_type      = copy_bytea_datum(etype);
                 nodes[n_nodes].eff_mu    = mu;
                 nodes[n_nodes].path_mu   = DirectFunctionCall2(numeric_add,
                                                                nodes[f].path_mu, mu);
@@ -240,8 +240,8 @@ pg_laplace_generate_greedy(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     bytea  *prompt;
-    Datum   kind_datum = 0;
-    bool    kind_null;
+    Datum   type_datum = 0;
+    bool    type_null;
     int32   max_depth;
     Datum   cur;
     Datum  *seen;
@@ -250,9 +250,9 @@ pg_laplace_generate_greedy(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("generate_greedy: prompt entity must not be NULL")));
     prompt    = PG_GETARG_BYTEA_PP(0);
-    kind_null = PG_ARGISNULL(1);
-    if (!kind_null)
-        kind_datum = PG_GETARG_DATUM(1);
+    type_null = PG_ARGISNULL(1);
+    if (!type_null)
+        type_datum = PG_GETARG_DATUM(1);
     max_depth = PG_ARGISNULL(2) ? 8 : PG_GETARG_INT32(2);
 
     InitMaterializedSRF(fcinfo, 0);
@@ -277,14 +277,14 @@ pg_laplace_generate_greedy(PG_FUNCTION_ARGS)
         HeapTuple tup;
         TupleDesc td;
         bool   isnull;
-        Datum  obj, ekind;
+        Datum  obj, etype;
         int64  rating, rd;
         Datum  values[4];
         bool   rnulls[4] = { false, false, false, false };
 
         args[0] = cur;
-        args[1] = kind_null ? (Datum) 0 : kind_datum;
-        if (kind_null) nulls[1] = 'n';
+        args[1] = type_null ? (Datum) 0 : type_datum;
+        if (type_null) nulls[1] = 'n';
         args[2] = Int32GetDatum(1);
         args[3] = PointerGetDatum(seen_arr);
 
@@ -301,12 +301,12 @@ pg_laplace_generate_greedy(PG_FUNCTION_ARGS)
         tup = SPI_tuptable->vals[0];
         td  = SPI_tuptable->tupdesc;
         obj    = copy_bytea_datum(SPI_getbinval(tup, td, 1, &isnull));
-        ekind  = copy_bytea_datum(SPI_getbinval(tup, td, 2, &isnull));
+        etype  = copy_bytea_datum(SPI_getbinval(tup, td, 2, &isnull));
         rating = DatumGetInt64(SPI_getbinval(tup, td, 3, &isnull));
         rd     = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
 
         values[0] = Int32GetDatum(step);
-        values[1] = ekind;
+        values[1] = etype;
         values[2] = obj;
         values[3] = eff_mu_display_numeric(rating, rd);
         tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, rnulls);

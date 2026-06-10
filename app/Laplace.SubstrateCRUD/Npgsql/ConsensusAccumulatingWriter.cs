@@ -17,6 +17,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private readonly int _stagingThreshold;
     private readonly int _partitions;
     private readonly bool _freshSource;
+    private readonly bool _persistEvidence;
     private readonly ILogger _log;
 
     private sealed class Acc
@@ -42,16 +43,22 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private readonly SemaphoreSlim _stagingGate = new(1, 1);
     private readonly ReaderWriterLockSlim _swapLock = new();
 
+    public bool PersistEvidence => _persistEvidence;
+
     public ConsensusAccumulatingWriter(
         ISubstrateWriter inner, NpgsqlDataSource dataSource,
         int? stagingThresholdRelations = null, int? foldWorkers = null,
-        bool freshSource = false,
+        bool freshSource = false, bool? persistEvidence = null,
         ILogger<ConsensusAccumulatingWriter>? logger = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         _freshSource = freshSource;
+        _persistEvidence = persistEvidence ?? ResolvePersistEvidence();
         _log = logger ?? (ILogger)NullLogger<ConsensusAccumulatingWriter>.Instance;
+        if (!_persistEvidence)
+            _log.LogInformation(
+                "consensus-only deposit: accumulating and folding relations; laplace.attestations writes skipped");
         _stagingThreshold = stagingThresholdRelations
             ?? (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_STAGING_THRESHOLD"), out var t) && t > 0
                 ? t : 250_000_000);
@@ -94,7 +101,42 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             || _accumulation.Count >= _stagingThreshold)
             await FlushPeriodAsync(ct);
 
-        return await _inner.ApplyManyAsync(changes, ct);
+        return await _inner.ApplyManyAsync(ForwardChanges(changes), ct);
+    }
+
+    public static bool ResolvePersistEvidence()
+    {
+        string? persist = Environment.GetEnvironmentVariable("LAPLACE_PERSIST_EVIDENCE");
+        if (!string.IsNullOrEmpty(persist))
+            return !IsEnvDisabled(persist);
+        string? evidence = Environment.GetEnvironmentVariable("LAPLACE_EVIDENCE");
+        if (!string.IsNullOrEmpty(evidence))
+            return !IsEnvDisabled(evidence);
+        return true;
+    }
+
+    private static bool IsEnvDisabled(string value) =>
+        value is "0" or "false" or "False" or "no" or "NO" or "off" or "OFF";
+
+    private IReadOnlyList<SubstrateChange> ForwardChanges(IReadOnlyList<SubstrateChange> changes)
+    {
+        if (_persistEvidence) return changes;
+        bool anyAttestations = false;
+        foreach (var c in changes)
+        {
+            if (!c.Attestations.IsEmpty) { anyAttestations = true; break; }
+        }
+        if (!anyAttestations) return changes;
+
+        var stripped = new SubstrateChange[changes.Count];
+        for (int i = 0; i < changes.Count; i++)
+        {
+            var c = changes[i];
+            stripped[i] = c.Attestations.IsEmpty
+                ? c
+                : c with { Attestations = ImmutableArray<AttestationRow>.Empty };
+        }
+        return stripped;
     }
 
     private void Accumulate(AttestationRow a)

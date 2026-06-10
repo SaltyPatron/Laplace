@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using SynInterop = Laplace.Engine.Synthesis.NativeInterop;
 
 namespace Laplace.Decomposers.Model;
 
@@ -83,7 +84,18 @@ public sealed class WeightTensorETL
                     case "F32":  { float*  s = (float*)rp;  for (long i = 0; i < n; i++) op[i] = s[i]; break; }
                     case "F64":  { double* s = (double*)rp; for (long i = 0; i < n; i++) op[i] = (float)s[i]; break; }
                     case "F16":  { ushort* s = (ushort*)rp; for (long i = 0; i < n; i++) op[i] = (float)BitConverter.UInt16BitsToHalf(s[i]); break; }
-                    case "BF16": { ushort* s = (ushort*)rp; for (long i = 0; i < n; i++) { uint b = (uint)s[i] << 16; float f; Buffer.MemoryCopy(&b, &f, 4, 4); op[i] = f; } break; }
+                    case "BF16":
+                    {
+                        var tmp = GC.AllocateUninitializedArray<double>((int)n);
+                        fixed (double* td = tmp)
+                        {
+                            int rc = SynInterop.Bf16Decode(rp, (nuint)n, td);
+                            if (rc != 0)
+                                throw new InvalidOperationException($"laplace_bf16_decode returned {rc}");
+                            for (long i = 0; i < n; i++) op[i] = (float)tmp[i];
+                        }
+                        break;
+                    }
                     case "F8_E5M2": { byte* s = rp; for (long i = 0; i < n; i++) op[i] = DecodeE5M2(s[i]); break; }
                     case "F8_E4M3": { byte* s = rp; for (long i = 0; i < n; i++) op[i] = DecodeE4M3(s[i]); break; }
                     case "I64":  { long*  s = (long*)rp;  for (long i = 0; i < n; i++) op[i] = s[i]; break; }

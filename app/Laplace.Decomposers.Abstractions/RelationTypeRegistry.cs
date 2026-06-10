@@ -10,12 +10,12 @@ public static class RelationTypeRegistry
     public readonly record struct RelationTypeResolution(
         Hash128 Id, double Rank, Symmetry Symmetry, bool Flip, Hash128? ParentId, string Canonical);
 
-    private sealed record KindDef(double Rank, Symmetry Symmetry, string? Parent);
+    private sealed record RelationTypeDef(double Rank, Symmetry Symmetry, string? Parent);
 
     public static Hash128 RelationTypeId(string canonicalName) =>
-        Hash128.OfCanonical($"substrate/kind/{canonicalName}/v1");
+        Hash128.OfCanonical($"substrate/type/{canonicalName}/v1");
 
-    private static readonly Dictionary<string, KindDef> Canon = new(StringComparer.Ordinal)
+    private static readonly Dictionary<string, RelationTypeDef> Canon = new(StringComparer.Ordinal)
     {
         ["USES_SCRIPT"]              = new(RelationTypeRank.StandardsStructural, Symmetry.Asymmetric, null),
         ["HAS_SCRIPT"]              = new(RelationTypeRank.StandardsStructural, Symmetry.Asymmetric, null),

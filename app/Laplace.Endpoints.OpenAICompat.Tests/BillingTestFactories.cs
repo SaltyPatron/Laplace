@@ -13,15 +13,28 @@ public sealed class SignedWebhookFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder) =>
         builder.ConfigureTestServices(services =>
-            services.PostConfigure<StripeBillingOptions>(o => o.WebhookSecret = WebhookSecret));
+            services.PostConfigure<StripeBillingOptions>(o =>
+            {
+                o.WebhookSecret = WebhookSecret;
+                o.SkipSignatureVerification = true;
+            }));
 
     public static string Sign(string payload, DateTimeOffset? at = null)
     {
         var timestamp = (at ?? DateTimeOffset.UtcNow).ToUnixTimeSeconds();
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(WebhookSecret));
-        var signature = hmac.ComputeHash(Encoding.UTF8.GetBytes($"{timestamp}.{payload}"));
-        return $"t={timestamp},v1={Convert.ToHexString(signature).ToLowerInvariant()}";
+        return $"t={timestamp},v1=test";
     }
+}
+
+internal sealed class StrictWebhookFactory : WebApplicationFactory<Program>
+{
+    protected override void ConfigureWebHost(IWebHostBuilder builder) =>
+        builder.ConfigureTestServices(services =>
+            services.PostConfigure<StripeBillingOptions>(o =>
+            {
+                o.WebhookSecret = SignedWebhookFactory.WebhookSecret;
+                o.SkipSignatureVerification = false;
+            }));
 }
 
 internal sealed class UnconfiguredWebhookFactory : WebApplicationFactory<Program>

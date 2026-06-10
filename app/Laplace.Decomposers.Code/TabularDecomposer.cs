@@ -12,7 +12,7 @@ namespace Laplace.Decomposers.Code;
 /// signal, exactly as UD emits HAS_UPOS / dependency arcs over raw tokens.
 ///
 /// Per (column, value) it deposits a WIN-RATE relation: subject = the column-qualified value
-/// (Geography=France), kind = PREDICTS, object = the target outcome — encoded so the Glicko rating
+/// (Geography=France), type = PREDICTS, object = the target outcome — encoded so the Glicko rating
 /// converges to P(outcome | value): games = occurrences, sum_score = outcome-positive occurrences. RD
 /// then shrinks rare-value confidence automatically, and unique-identifier columns self-prune as
 /// single-witness frayed edges. Plus IS_VALUE_IN(column) for structure, and — for categoricals —
@@ -26,9 +26,9 @@ public sealed class TabularDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
-    private static readonly Hash128 ColumnTypeId  = Hash128.OfCanonical("substrate/type/TabularColumn/v1");
-    private static readonly Hash128 ValueTypeId   = Hash128.OfCanonical("substrate/type/TabularValue/v1");
-    private static readonly Hash128 OutcomeTypeId = Hash128.OfCanonical("substrate/type/TabularOutcome/v1");
+    private static readonly Hash128 ColumnTypeId  = EntityTypeRegistry.TabularColumn;
+    private static readonly Hash128 ValueTypeId   = EntityTypeRegistry.TabularValue;
+    private static readonly Hash128 OutcomeTypeId = EntityTypeRegistry.TabularOutcome;
 
     private static readonly HashSet<string> IdLike =
         new(StringComparer.OrdinalIgnoreCase) { "id", "customerid", "rownumber" };

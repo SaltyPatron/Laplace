@@ -10,6 +10,7 @@ set(LAPLACE_SYNTHESIS_HEADERS
     include/laplace/synthesis/qk_pairs_threshold_pruned.h
     include/laplace/synthesis/qk_project_cached.h
     include/laplace/synthesis/format_writer.h
+    include/laplace/synthesis/f32_gather.h
 )
 
 set(LAPLACE_SYNTHESIS_SOURCES
@@ -24,6 +25,7 @@ set(LAPLACE_SYNTHESIS_SOURCES
     src/qk_pairs_threshold_pruned.cpp
     src/qk_project_cached.cpp
     src/format_writer.cpp
+    src/f32_gather.c
 )
 
 add_library(laplace_synthesis SHARED ${LAPLACE_SYNTHESIS_SOURCES})

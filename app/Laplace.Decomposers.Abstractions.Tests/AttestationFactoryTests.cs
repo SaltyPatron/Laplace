@@ -12,13 +12,13 @@ public class AttestationFactoryTests
     public void ComputeId_DeterministicOnSameTuple()
     {
         var subj = H("subject/v1");
-        var kind = H("kind/v1");
+        var relType = H("type/v1");
         var obj  = H("object/v1");
         var src  = H("source/v1");
         var ctx  = H("context/v1");
 
-        var id1 = AttestationFactory.ComputeId(subj, kind, obj, src, ctx);
-        var id2 = AttestationFactory.ComputeId(subj, kind, obj, src, ctx);
+        var id1 = AttestationFactory.ComputeId(subj, relType, obj, src, ctx);
+        var id2 = AttestationFactory.ComputeId(subj, relType, obj, src, ctx);
         Assert.Equal(id1, id2);
     }
 
@@ -45,12 +45,12 @@ public class AttestationFactoryTests
     [Fact]
     public void ComputeId_MatchesObservationRowId()
     {
-        var subj = H("s"); var kind = H("k"); var obj = H("o");
+        var subj = H("s"); var relType = H("k"); var obj = H("o");
         var src  = H("src"); var ctx = H("ctx");
 
-        var standalone = AttestationFactory.ComputeId(subj, kind, obj, src, ctx);
+        var standalone = AttestationFactory.ComputeId(subj, relType, obj, src, ctx);
         var fromObs = AttestationFactory.CreateObservation(
-            subj, kind, obj, src, ctx, signedMagnitude: 0.5, arenaScale: 0.1, witnessWeight: 0.5).Id;
+            subj, relType, obj, src, ctx, signedMagnitude: 0.5, arenaScale: 0.1, witnessWeight: 0.5).Id;
         Assert.Equal(standalone, fromObs);
     }
 

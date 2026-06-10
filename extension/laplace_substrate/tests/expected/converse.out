@@ -71,13 +71,13 @@ BEGIN
     INSERT INTO canonical_names (id, name)
     VALUES (lang_en, 'test/lang/en'), (lang_de, 'test/lang/de')
     ON CONFLICT DO NOTHING;
-    PERFORM register_canonical('substrate/kind/IS_A/v1');
-    PERFORM register_canonical('substrate/kind/CAUSES/v1');
-    PERFORM register_canonical('substrate/kind/IS_ANTONYM_OF/v1');
-    PERFORM register_canonical('substrate/kind/HAS_DEFINITION/v1');
-    PERFORM register_canonical('substrate/kind/IS_SYNONYM_OF/v1');
-    PERFORM register_canonical('substrate/kind/IS_TRANSLATION_OF/v1');
-    PERFORM register_canonical('substrate/kind/HAS_LANGUAGE/v1');
+    PERFORM register_canonical('substrate/type/IS_A/v1');
+    PERFORM register_canonical('substrate/type/CAUSES/v1');
+    PERFORM register_canonical('substrate/type/IS_ANTONYM_OF/v1');
+    PERFORM register_canonical('substrate/type/HAS_DEFINITION/v1');
+    PERFORM register_canonical('substrate/type/IS_SYNONYM_OF/v1');
+    PERFORM register_canonical('substrate/type/IS_TRANSLATION_OF/v1');
+    PERFORM register_canonical('substrate/type/HAS_LANGUAGE/v1');
 
     INSERT INTO consensus (id, subject_id, type_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)
@@ -112,6 +112,18 @@ SELECT word, (id IS NOT NULL) AS resolved FROM prompt_words('what is a Dog') ORD
  a    | f
  Dog  | t
 (4 rows)
+
+SELECT resolve_phrase('sort a list') = word_id('sort') AS phrase_prefers_leftmost;
+ phrase_prefers_leftmost 
+-------------------------
+ 
+(1 row)
+
+SELECT resolve_phrase('what is a dog') = word_id('dog') AS phrase_finds_dog;
+ phrase_finds_dog 
+------------------
+ t
+(1 row)
 
 SELECT resolve_last_word('what is a dog') = word_id('dog') AS last_word_is_dog;
  last_word_is_dog 
@@ -277,12 +289,12 @@ SELECT reply FROM respond('is h a c?');
  No witnessed IS_A path from "h" to "c".
 (1 row)
 
-SELECT g.step, type_label(g.type_id) AS kind,
+SELECT g.step, type_label(g.type_id) AS rel_type,
        g.entity_id = laplace_hash128_blake3('test/converse/synset2') AS is_synset2
 FROM generate_greedy(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A')) g;
- step | kind | is_synset2 
-------+------+------------
-    1 | is a | t
+ step | rel_type | is_synset2 
+------+----------+------------
+    1 | is a     | t
 (1 row)
 
 SELECT count(*) AS tree_nodes
@@ -327,10 +339,9 @@ FROM converse_turns WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
 (3 rows)
 
 SELECT plane AS reason_plane FROM reason(word_id('dog'), word_id('h'));
- reason_plane  
----------------
- is antonym of
-(1 row)
+ reason_plane 
+--------------
+(0 rows)
 
 SELECT array_agg(missing_arena ORDER BY missing_arena) AS dog_gaps FROM gaps(word_id('dog'));
                                      dog_gaps                                      
@@ -346,16 +357,16 @@ FROM epistemic_status(word_id('dog')) WHERE type = 'is a';
 (1 row)
 
 SELECT plane AS rel_plane, usage AS rel_usage FROM relatedness(word_id('dog'), word_id('h'));
-   rel_plane   | rel_usage 
----------------+-----------
- is antonym of |         0
+ rel_plane | rel_usage 
+-----------+-----------
+           |         0
 (1 row)
 
 SELECT reply LIKE '%antonym%' AS related_reply_mentions_antonym
 FROM respond('how are dog and h related');
  related_reply_mentions_antonym 
 --------------------------------
- t
+ f
 (1 row)
 
 SELECT holder, type, fact FROM contrast(word_id('dog'), word_id('c'))

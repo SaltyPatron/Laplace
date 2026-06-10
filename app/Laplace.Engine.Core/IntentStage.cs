@@ -69,7 +69,7 @@ public sealed class IntentStage : SafeHandle
         Hash128         id,
         Hash128         entityId,
         Hash128         sourceId,
-        short           kind,
+        short           physicalityType,
         ReadOnlySpan<double> coord,
         Hilbert128      hilbertIndex,
         ReadOnlySpan<double> trajectoryXyzm,
@@ -95,7 +95,7 @@ public sealed class IntentStage : SafeHandle
                 double arVal = alignmentResidual ?? 0.0;
                 int    sdVal = sourceDim          ?? 0;
                 int rc = NativeInterop.IntentStageAddPhysicality(
-                    handle, &id, &entityId, &sourceId, kind, pCoord, &hilbertIndex,
+                    handle, &id, &entityId, &sourceId, physicalityType, pCoord, &hilbertIndex,
                     nVerts == 0 ? null : pTraj, nVerts, nConstituents,
                     arNull, arVal, sdNull, sdVal, observedAtUnixUs);
                 if (rc != 0) throw new InvalidOperationException("intent_stage_add_physicality failed");
@@ -164,6 +164,28 @@ public sealed class IntentStage : SafeHandle
             {
                 nuint required = NativeInterop.IntentStageEmitCopyBinary(handle, (int)table, p, (nuint)dest.Length);
                 return checked((int)required);
+            }
+        }
+    }
+
+    internal IntPtr DangerousNativeHandle => handle;
+
+    public bool TryAddContentWitness(ReadOnlySpan<byte> canonical, Hash128 sourceId, out Hash128 rootId)
+    {
+        rootId = default;
+        if (canonical.IsEmpty) return false;
+        ThrowIfDisposed();
+        unsafe
+        {
+            Hash128 src = sourceId;
+            Hash128 root = default;
+            fixed (byte* utf8 = canonical)
+            {
+                int rc = NativeInterop.ContentWitnessBatchAdd(
+                    handle, utf8, (nuint)canonical.Length, &src, &root);
+                if (rc != 0) return false;
+                rootId = root;
+                return true;
             }
         }
     }

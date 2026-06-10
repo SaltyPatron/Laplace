@@ -23,8 +23,7 @@ public sealed class TinyCodesDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
-    private static readonly Hash128 CodeConceptTypeId =
-        Hash128.OfCanonical("substrate/type/CodeConcept/v1");
+    private static readonly Hash128 CodeConceptTypeId = EntityTypeRegistry.CodeConcept;
 
     // Maps tiny-codes task_id language prefix (case-insensitive) → tree-sitter modality id.
     // null entries are known languages with no registered grammar; they are skipped.
@@ -69,7 +68,14 @@ public sealed class TinyCodesDecomposer : IDecomposer
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var files = EnumerateParquet(context.EcosystemPath).ToList();
-        if (files.Count == 0) yield break;
+        if (files.Count == 0)
+        {
+            if (Directory.Exists(context.EcosystemPath))
+                throw new InvalidOperationException(
+                    $"TinyCodesDecomposer: no *.parquet files under '{context.EcosystemPath}' "
+                    + "(expected top-level shards from download-code-data.cmd)");
+            yield break;
+        }
 
         int batch = options.BatchSize > 1 ? options.BatchSize : 32;
         var b = NewBuilder(0);

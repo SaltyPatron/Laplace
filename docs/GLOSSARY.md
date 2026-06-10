@@ -60,7 +60,7 @@ Authoritative vocabulary. Terms are laws, not suggestions; code and docs use the
 
 ## Arenas & Relation Types
 
-**Relation type** — a vocabulary entity for a relation (`substrate/kind/NAME/v1` — byte path is stable). Resolved via `relation_type_id(name)`. The attestations/consensus column is `type_id`. Term: **relation type** in code and docs; never confuse with physicality `type` or entity `type_id`.
+**Relation type** — a vocabulary entity for a relation (`substrate/type/NAME/v1` — byte path is stable). Resolved via `relation_type_id(name)`. The attestations/consensus column is `type_id`. Term: **relation type** in code and docs; never confuse with physicality `type` or entity `type_id`.
 
 **Arena** — the relation plane for one relation type; traversal and ranking happen per-arena or across arena sets.
 
@@ -80,9 +80,9 @@ Authoritative vocabulary. Terms are laws, not suggestions; code and docs use the
 
 **Hilbert key (hilbert_index)** — 16-byte locality-preserving 1-D key from the 4D Hilbert curve (Skilling). Plain B-tree range scan = spatial neighborhood. Identical position ⇒ identical key, which makes multiset lookup (anagrams) a B-tree equality (31 ms vs 27 s spatial; discovered 2026-06-07).
 
-**Physicality** — a per-source per-kind 4D view of an entity: `physicalities(entity_id, source_id, type, coord PointZM, hilbert_index, trajectory, radius_origin, n_constituents, alignment_residual, source_dim, observed_at)` with UNIQUE(entity, source, type). RULED (2026-06-07): physicalities is the ONE geometric home; firefly placements are physicalities rows (per-tensor-role `type`, circuit-entity `source_id`); the separate geometry evidence/consensus tables retire.
+**Physicality** — a per-source per-type 4D view of an entity: `physicalities(entity_id, source_id, type, coord PointZM, hilbert_index, trajectory, radius_origin, n_constituents, alignment_residual, source_dim, observed_at)` with UNIQUE(entity, source, type). RULED (2026-06-07): physicalities is the ONE geometric home; firefly placements are physicalities rows (per-tensor-role `type`, circuit-entity `source_id`); the separate geometry evidence/consensus tables retire.
 
-**Physicality kind (`type` column)** — what a placement is: `BUILDING_BLOCK`, `CONTENT` (=1, the realized content view), `PROJECTION`, `PROJECTION_OUTPUT`, extended per tensor role for model placements.
+**Physicality type (`type` column)** — what a placement is: `BUILDING_BLOCK`, `CONTENT` (=1, the realized content view), `PROJECTION`, `PROJECTION_OUTPUT`, extended per tensor role for model placements.
 
 **Trajectory** — the constituent sequence as a LINESTRING whose vertices are mantissa-packed: XYZ mantissas carry the child's 128-bit id; M carries ordinal, run_length, and flags. Stores IDENTITY, never coordinates — by law: consensus positions can move; identity is the only stable cargo. T0 constituents are additionally self-describing inline (`vertex_atom`: flag bit 0 + 21-bit codepoint).
 
@@ -116,7 +116,7 @@ Authoritative vocabulary. Terms are laws, not suggestions; code and docs use the
 
 **The ladder** — dependency-ordered seed ingestion: layer 0 unicode → 1 iso639 → 2 {wordnet, ud, tatoeba, atomic2020, conceptnet, wiktionary, opensubtitles, verbnet, propbank} → 3 {omw, framenet, semlink}. Strictly one source at a time by throughput law; each stage idempotent.
 
-**Layer gate (HasLayerCompleted)** — IngestRunner refuses a source until lower layers carry completion markers (attested under `substrate/kind/HasLayerCompleted/<n>/v1`).
+**Layer gate (HasLayerCompleted)** — IngestRunner refuses a source until lower layers carry completion markers (attested under `substrate/type/HasLayerCompleted/<n>/v1`).
 
 **Idempotency law** — content addressing + ON CONFLICT make every ingest re-runnable and convergent; there is no checkpoint apparatus because none is needed. Re-ingesting a model is refused (double-counting guard) — reset is per-source eviction or db-fresh, never bypass.
 

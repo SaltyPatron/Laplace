@@ -19,10 +19,8 @@ public sealed class VerbNetDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    private static readonly Hash128 ClassTypeId =
-        Hash128.OfCanonical("substrate/type/VerbNet_Class/v1");
-    private static readonly Hash128 WordNetSenseTypeId =
-        Hash128.OfCanonical("substrate/type/WordNet_Sense/v1");
+    private static readonly Hash128 ClassTypeId        = EntityTypeRegistry.VerbNetClass;
+    private static readonly Hash128 WordNetSenseTypeId = EntityTypeRegistry.WordNetSense;
 
     internal static Hash128 ClassId(string classId)
     {

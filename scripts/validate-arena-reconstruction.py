@@ -54,7 +54,7 @@ def main():
     JOIN laplace.consensus c
       ON c.object_id = a.id
      AND c.subject_id = (SELECT id FROM subj)
-     AND c.kind_id = public.laplace_hash128_blake3(convert_to('substrate/kind/EMBEDS/v1','UTF8'))
+     AND c.type_id = public.laplace_hash128_blake3(convert_to('substrate/type/EMBEDS/v1','UTF8'))
     ORDER BY a.i;
     """
     out = subprocess.run(["psql", conn, "-tAF,", "-c", sql],

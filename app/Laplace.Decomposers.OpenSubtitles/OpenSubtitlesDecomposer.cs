@@ -15,8 +15,7 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
-    private static readonly Hash128 LanguageTypeId =
-        Hash128.OfCanonical("substrate/type/Language/v1");
+    private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
 
     private static readonly (string Pair, long Pairs)[] PairCounts =
     {
@@ -63,59 +62,10 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
             string pairStem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(zipPath));
             if (options.Languages?.MatchesLanguagePair(pairStem) == false) continue;
 
-            using var zip = ZipFile.OpenRead(zipPath);
-            var textEntries = zip.Entries
-                .Where(e => e.Length > 0 && IsTextEntry(e.FullName))
-                .OrderBy(e => e.FullName, StringComparer.Ordinal)
-                .Take(2)
-                .ToList();
-            if (textEntries.Count != 2) continue;
-
-            ZipArchiveEntry entA = textEntries[0], entB = textEntries[1];
-            Hash128 langA = LanguageReference.Resolve(LangSuffix(entA.FullName));
-            Hash128 langB = LanguageReference.Resolve(LangSuffix(entB.FullName));
-
-            string unitStem = Path.GetFileNameWithoutExtension(zipPath);
-            var b = NewBuilder($"opensubtitles/{unitStem}/0", batch);
-            int n = 0, bn = 0;
-
-            using var sA = entA.Open();
-            using var sB = entB.Open();
-            using var rA = new StreamReader(sA, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-            using var rB = new StreamReader(sB, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-
-            while (true)
+            await foreach (var change in OpenSubtitlesFastIngest.IngestZipAsync(zipPath, pairStem, batch, ct))
             {
-                ct.ThrowIfCancellationRequested();
-                string? lineA = await rA.ReadLineAsync(ct);
-                string? lineB = await rB.ReadLineAsync(ct);
-                if (lineA is null || lineB is null) break;
-
-                if (lineA.Length == 0 || lineB.Length == 0) continue;
-
-                var idA = ContentEmitter.Emit(b, lineA, Source);
-                var idB = ContentEmitter.Emit(b, lineB, Source);
-                if (idA is null || idB is null) continue;
-
-                b.AddEntity(new EntityRow(langA, EntityTier.Vocabulary, LanguageTypeId, Source));
-                b.AddEntity(new EntityRow(langB, EntityTier.Vocabulary, LanguageTypeId, Source));
-
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    idA.Value, "IS_TRANSLATION_OF", idB.Value, Source, SourceTrust.StructuredCorpus));
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    idA.Value, "HAS_LANGUAGE", langA, Source, SourceTrust.StructuredCorpus));
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    idB.Value, "HAS_LANGUAGE", langB, Source, SourceTrust.StructuredCorpus));
-
-                if (++n >= batch)
-                {
-                    if (!options.DryRun) yield return b.Build();
-                    b = NewBuilder($"opensubtitles/{unitStem}/{++bn}", batch);
-                    n = 0;
-                    await Task.Yield();
-                }
+                if (!options.DryRun) yield return change;
             }
-            if (n > 0 && !options.DryRun) yield return b.Build();
         }
     }
 

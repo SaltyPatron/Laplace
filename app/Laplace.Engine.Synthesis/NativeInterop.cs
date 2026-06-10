@@ -15,6 +15,10 @@ public static partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_bf16_decode")]
     public static unsafe partial int Bf16Decode(void* rawBytes, nuint nElements, double* outValues);
 
+    [LibraryImport(Library, EntryPoint = "laplace_f32_gather_to_f64")]
+    public static unsafe partial int F32GatherToF64(
+        float* src, int* rowMap, nuint nRows, nuint d, double* outValues);
+
     [LibraryImport(Library, EntryPoint = "recipe_parse")]
     public static unsafe partial IntPtr RecipeParse(byte* jsonText, nuint len);
 

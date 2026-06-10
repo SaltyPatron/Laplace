@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Laplace.Decomposers.Abstractions\Laplace.Decomposers.Abstractions.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.OMW\Laplace.Decomposers.OMW.csproj" />
   </ItemGroup>
 
 </Project>

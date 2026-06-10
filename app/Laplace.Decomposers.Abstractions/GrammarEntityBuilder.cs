@@ -8,8 +8,8 @@ namespace Laplace.Decomposers.Abstractions;
 /// Composes a parsed <see cref="GrammarAst"/> into substrate rows — the grammar analog of
 /// <see cref="TextEntityBuilder"/>. Both share the codepoint→grapheme floor (so a code identifier
 /// and a prose word reconcile by id) and the one composition kernel (<c>HashComposer.ComposeNode</c>).
-/// Constituency is the content trajectory; tree-sitter's node-kinds become first-class substrate
-/// type entities (<c>substrate/type/grammar/{modality}/{kind}/v1</c>) — no foreign type persists.
+/// Constituency is the content trajectory; tree-sitter's node-types become first-class substrate
+/// type entities (<c>substrate/type/grammar/{modality}/{type}/v1</c>) — no foreign type persists.
 /// </summary>
 public sealed class GrammarEntityBuilder
 {
@@ -33,8 +33,16 @@ public sealed class GrammarEntityBuilder
         _tagsScm    = tagsScm;
     }
 
-    public static Hash128 KindTypeId(string modalityId, string kindName) =>
-        Hash128.OfCanonical($"substrate/type/grammar/{modalityId}/{kindName}/v1");
+    public static Hash128 GrammarNodeTypeId(string modalityId, string typeName) =>
+        Hash128.OfCanonical($"substrate/type/grammar/{modalityId}/{typeName}/v1");
+
+    /// <summary>
+    /// Canonical names of every grammar node-type entity this build deposited
+    /// (<c>substrate/type/grammar/{modality}/{type}/v1</c>). Feed these to the decomposer's
+    /// CanonicalNamesForReadback so node-types are readable/queryable by name, not hex.
+    /// </summary>
+    public IReadOnlyCollection<string> NodeTypeCanonicalNames => _nodeTypeNames;
+    private readonly HashSet<string> _nodeTypeNames = new(StringComparer.Ordinal);
 
     public unsafe (ImmutableArray<EntityRow> Entities,
                    ImmutableArray<PhysicalityRow> Physicalities,
@@ -109,6 +117,8 @@ public sealed class GrammarEntityBuilder
             {
                 nodes[i] = _ast.GetNode(i);
                 var nd = nodes[i];
+                if (_ast.NodeTypeName(nd.NodeTypeId) is { } typeName)
+                    _nodeTypeNames.Add($"substrate/type/grammar/{_modalityId}/{typeName}/v1");
                 Hash128 spanId;
                 if (NativeInterop.ComposeSpanLookup(
                         composeResult, nd.StartByte, nd.EndByte, &spanId) == 0)
@@ -189,14 +199,14 @@ public sealed class GrammarEntityBuilder
             foreach (var c in grp)
             {
                 if (!spanId.TryGetValue((c.StartByte, c.EndByte), out var id)) continue;
-                switch (c.Kind)
+                switch (c.Type)
                 {
-                    case TagKind.Name:        name    = id; break;
-                    case TagKind.DefFunction:
-                    case TagKind.DefType:
-                    case TagKind.DefVar:      def     = id; break;
-                    case TagKind.RefCall:     refCall = id; break;
-                    case TagKind.RefType:     refType = id; break;
+                    case TagType.Name:        name    = id; break;
+                    case TagType.DefFunction:
+                    case TagType.DefType:
+                    case TagType.DefVar:      def     = id; break;
+                    case TagType.RefCall:     refCall = id; break;
+                    case TagType.RefType:     refType = id; break;
                 }
             }
             if (name is not { } nm) continue;

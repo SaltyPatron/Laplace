@@ -23,10 +23,8 @@ public sealed class RepoDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
-    private static readonly Hash128 RepoTypeId =
-        Hash128.OfCanonical("substrate/type/RepoRoot/v1");
-    private static readonly Hash128 FileTypeId =
-        Hash128.OfCanonical("substrate/type/SourceFile/v1");
+    private static readonly Hash128 RepoTypeId = EntityTypeRegistry.RepoRoot;
+    private static readonly Hash128 FileTypeId = EntityTypeRegistry.SourceFile;
 
     private static readonly Dictionary<string, string> ExtToModality =
         new(StringComparer.OrdinalIgnoreCase)
@@ -79,6 +77,14 @@ public sealed class RepoDecomposer : IDecomposer
     public int     LayerOrder   => 2;
     public Hash128 TrustClassId => TrustClass;
 
+    // Names declared at bootstrap + every grammar node-type witnessed during decompose,
+    // registered after ingest so AST types and relation arcs render by name instead of hex.
+    // Derived from the declaration sites (BootstrapIntentBuilder, GrammarEntityBuilder) —
+    // nothing is retyped here.
+    private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
+
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
+
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
@@ -91,6 +97,7 @@ public sealed class RepoDecomposer : IDecomposer
         boot.AddRelationType("HAS_EXAMPLE");
         boot.AddRelationType("HAS_DEFINITION");
         await context.Writer.ApplyAsync(boot.Build(), ct);
+        _canonicalNames.UnionWith(boot.CanonicalNames);
     }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
@@ -141,6 +148,7 @@ public sealed class RepoDecomposer : IDecomposer
                 var geb = new GrammarEntityBuilder(
                     bytes, ast, Source, modality, recipe, GrammarTags.TagsSource(modality));
                 (ents, phys, atts, codeRootId) = geb.Build(SourceTrust.StructuredCorpus);
+                _canonicalNames.UnionWith(geb.NodeTypeCanonicalNames);
             }
             catch { continue; }
 

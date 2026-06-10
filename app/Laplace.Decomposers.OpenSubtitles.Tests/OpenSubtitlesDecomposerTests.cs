@@ -67,18 +67,18 @@ public sealed class OpenSubtitlesDecomposerTests
             var entities = new HashSet<Hash128>();
             int translationEdges = 0, languageEdges = 0;
             var langObjects = new HashSet<Hash128>();
-            Hash128 translationKind = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
-            Hash128 languageKind     = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
+            Hash128 translationType = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
+            Hash128 languageType     = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
 
             await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
             {
                 foreach (var e in change.Entities) entities.Add(e.Id);
                 foreach (var a in change.Attestations)
                 {
-                    if (a.TypeId == translationKind) translationEdges++;
-                    else if (a.TypeId == languageKind) { languageEdges++; if (a.ObjectId is { } o) langObjects.Add(o); }
-                    Assert.True(a.TypeId == translationKind || a.TypeId == languageKind,
-                        "only registry-routed IS_TRANSLATION_OF / HAS_LANGUAGE kinds are emitted");
+                    if (a.TypeId == translationType) translationEdges++;
+                    else if (a.TypeId == languageType) { languageEdges++; if (a.ObjectId is { } o) langObjects.Add(o); }
+                    Assert.True(a.TypeId == translationType || a.TypeId == languageType,
+                        "only registry-routed IS_TRANSLATION_OF / HAS_LANGUAGE types are emitted");
                 }
             }
 
@@ -107,7 +107,7 @@ public sealed class OpenSubtitlesDecomposerTests
     }
 
     [Fact]
-    public async Task Initialize_Bootstraps_Source_And_Translation_Kind()
+    public async Task Initialize_Bootstraps_Source_And_Translation_RelationType()
     {
         var dec = new OpenSubtitlesDecomposer();
         var writer = new CapturingWriter();
@@ -118,8 +118,8 @@ public sealed class OpenSubtitlesDecomposerTests
 
         Assert.Contains(boot.Entities, e =>
             e.Id == OpenSubtitlesDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
-        Hash128 translationKind = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
-        Assert.Contains(boot.Entities, e => e.Id == translationKind);
+        Hash128 translationType = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
+        Assert.Contains(boot.Entities, e => e.Id == translationType);
     }
 
     [Fact]

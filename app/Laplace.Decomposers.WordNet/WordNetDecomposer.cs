@@ -18,12 +18,10 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
 
-    private static readonly Hash128 SynsetTypeId      = Hash128.OfCanonical("substrate/type/WordNet_Synset/v1");
-    private static readonly Hash128 SenseTypeId       = Hash128.OfCanonical("substrate/type/WordNet_Sense/v1");
+    private static readonly Hash128 SynsetTypeId = EntityTypeRegistry.WordNetSynset;
+    private static readonly Hash128 SenseTypeId  = EntityTypeRegistry.WordNetSense;
 
-    private static Hash128 Kind(string name) => Hash128.OfCanonical($"substrate/kind/{name}/v1");
-
-    private static readonly Dictionary<string, string> PointerKinds = new()
+    private static readonly Dictionary<string, string> PointerTypes = new()
     {
         ["!"]  = "IS_ANTONYM_OF",
         ["@"]  = "HAS_HYPERNYM",
@@ -96,7 +94,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         boot.AddRelationType("HAS_SENSE");
         boot.AddRelationType("IS_SENSE_OF");
 
-        foreach (var name in PointerKinds.Values)
+        foreach (var name in PointerTypes.Values)
             boot.AddRelationType(RelationTypeRegistry.Resolve(name).Canonical);
 
         await context.Writer.ApplyAsync(boot.Build(), ct);
@@ -277,7 +275,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
 
         foreach (var ptr in syn.Pointers)
         {
-            if (!PointerKinds.TryGetValue(ptr.Symbol, out var typeName)) continue;
+            if (!PointerTypes.TryGetValue(ptr.Symbol, out var typeName)) continue;
             Hash128 tgt = SourceEntityIdConventions.WordNetSynset(ptr.TargetOffset, NormPos(ptr.TargetPos));
             b.AddAttestation(RelationTypeRegistry.Attest(
                 syn.SynsetId, typeName, tgt, Source, SourceTrust.StandardsDerived));
@@ -361,9 +359,10 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         {
             string path = Path.Combine(dictDir, excFile);
             if (!File.Exists(path)) continue;
-            await foreach (var line in File.ReadLinesAsync(path, ct))
+            await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
             {
                 ct.ThrowIfCancellationRequested();
+                string line = System.Text.Encoding.UTF8.GetString(lineMem.Span);
                 var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length < 2) continue;
                 string inflected = parts[0].Replace('_', ' ');
@@ -412,8 +411,9 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
     private static async IAsyncEnumerable<WnSynset> ParseDataAsync(
         string path, [EnumeratorCancellation] CancellationToken ct)
     {
-        await foreach (var line in File.ReadLinesAsync(path, ct))
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
         {
+            string line = System.Text.Encoding.UTF8.GetString(lineMem.Span);
             if (line.Length == 0 || line[0] == ' ') continue;
 
             int glossSep = line.IndexOf(" | ", StringComparison.Ordinal);

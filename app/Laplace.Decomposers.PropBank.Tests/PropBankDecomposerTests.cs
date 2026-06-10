@@ -50,7 +50,7 @@ public sealed class PropBankDecomposerTests
 """;
 
     [Fact]
-    public async Task Attestations_Use_RegistryRouted_Canonical_Kind_Ids()
+    public async Task Attestations_Use_RegistryRouted_Canonical_Type_Ids()
     {
         var atts = await CollectAttestationsAsync();
         var canonical = new HashSet<Hash128>(RelationTypeRegistry.AllCanonical().Select(k => k.Id));
@@ -128,7 +128,7 @@ public sealed class PropBankDecomposerTests
     }
 
     [Fact]
-    public async Task Bootstrap_Registers_Source_Types_And_KindEntities()
+    public async Task Bootstrap_Registers_Source_Types_And_RelationTypeEntities()
     {
         var dec = new PropBankDecomposer();
         var writer = new CapturingWriter();

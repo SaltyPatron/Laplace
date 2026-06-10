@@ -5,24 +5,28 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Unicode;
 
+/// <summary>
+/// Supplementary UCD attestation tables (category, mappings, aliases). Codepoint geometry and
+/// Hilbert placement are native-owned via <see cref="UnicodeSeed"/> / <see cref="CodepointPerfcache"/>.
+/// </summary>
 internal sealed class UcdProperties
 {
-    public static readonly Hash128 KindHasGeneralCategory  = RelationTypeRegistry.RelationTypeId("HAS_GENERAL_CATEGORY");
-    public static readonly Hash128 KindHasCombiningClass   = RelationTypeRegistry.RelationTypeId("HAS_COMBINING_CLASS");
-    public static readonly Hash128 KindHasScript           = RelationTypeRegistry.RelationTypeId("HAS_SCRIPT");
-    public static readonly Hash128 KindHasBlock            = RelationTypeRegistry.RelationTypeId("HAS_BLOCK");
-    public static readonly Hash128 KindHasUppercaseMapping = RelationTypeRegistry.RelationTypeId("HAS_UPPERCASE_MAPPING");
-    public static readonly Hash128 KindHasLowercaseMapping = RelationTypeRegistry.RelationTypeId("HAS_LOWERCASE_MAPPING");
-    public static readonly Hash128 KindHasTitlecaseMapping = RelationTypeRegistry.RelationTypeId("HAS_TITLECASE_MAPPING");
-    public static readonly Hash128 KindCanonDecomposesTo   = RelationTypeRegistry.RelationTypeId("CANONICAL_DECOMPOSES_TO");
-    public static readonly Hash128 KindCompatDecomposesTo  = RelationTypeRegistry.RelationTypeId("COMPATIBILITY_DECOMPOSES_TO");
-    public static readonly Hash128 KindHasNumericValue     = RelationTypeRegistry.RelationTypeId("HAS_NUMERIC_VALUE");
-    public static readonly Hash128 KindHasBidiClass        = RelationTypeRegistry.RelationTypeId("HAS_BIDI_CLASS");
-    public static readonly Hash128 KindHasMirror           = RelationTypeRegistry.RelationTypeId("HAS_MIRROR");
-    public static readonly Hash128 KindHasAge               = RelationTypeRegistry.RelationTypeId("HAS_AGE");
-    public static readonly Hash128 KindHasNameAlias         = RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS");
-    public static readonly Hash128 KindConfusableWith       = RelationTypeRegistry.RelationTypeId("CONFUSABLE_WITH");
-    public static readonly Hash128 KindHasEmojiProperty     = RelationTypeRegistry.RelationTypeId("HAS_EMOJI_PROPERTY");
+    public static readonly Hash128 RelTypeHasGeneralCategory  = RelationTypeRegistry.RelationTypeId("HAS_GENERAL_CATEGORY");
+    public static readonly Hash128 RelTypeHasCombiningClass   = RelationTypeRegistry.RelationTypeId("HAS_COMBINING_CLASS");
+    public static readonly Hash128 RelTypeHasScript           = RelationTypeRegistry.RelationTypeId("HAS_SCRIPT");
+    public static readonly Hash128 RelTypeHasBlock            = RelationTypeRegistry.RelationTypeId("HAS_BLOCK");
+    public static readonly Hash128 RelTypeHasUppercaseMapping = RelationTypeRegistry.RelationTypeId("HAS_UPPERCASE_MAPPING");
+    public static readonly Hash128 RelTypeHasLowercaseMapping = RelationTypeRegistry.RelationTypeId("HAS_LOWERCASE_MAPPING");
+    public static readonly Hash128 RelTypeHasTitlecaseMapping = RelationTypeRegistry.RelationTypeId("HAS_TITLECASE_MAPPING");
+    public static readonly Hash128 RelTypeCanonDecomposesTo   = RelationTypeRegistry.RelationTypeId("CANONICAL_DECOMPOSES_TO");
+    public static readonly Hash128 RelTypeCompatDecomposesTo  = RelationTypeRegistry.RelationTypeId("COMPATIBILITY_DECOMPOSES_TO");
+    public static readonly Hash128 RelTypeHasNumericValue     = RelationTypeRegistry.RelationTypeId("HAS_NUMERIC_VALUE");
+    public static readonly Hash128 RelTypeHasBidiClass        = RelationTypeRegistry.RelationTypeId("HAS_BIDI_CLASS");
+    public static readonly Hash128 RelTypeHasMirror           = RelationTypeRegistry.RelationTypeId("HAS_MIRROR");
+    public static readonly Hash128 RelTypeHasAge               = RelationTypeRegistry.RelationTypeId("HAS_AGE");
+    public static readonly Hash128 RelTypeHasNameAlias         = RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS");
+    public static readonly Hash128 RelTypeConfusableWith       = RelationTypeRegistry.RelationTypeId("CONFUSABLE_WITH");
+    public static readonly Hash128 RelTypeHasEmojiProperty     = RelationTypeRegistry.RelationTypeId("HAS_EMOJI_PROPERTY");
 
     public readonly string?[] GeneralCategory;
 
@@ -142,7 +146,7 @@ internal sealed class UcdProperties
 
     public IEnumerable<EntityRow> ClassificationEntities(Hash128 sourceId)
     {
-        var typeId = Hash128.OfCanonical("substrate/type/UcdClassifier/v1");
+        var typeId = EntityTypeRegistry.UcdClassifier;
         foreach (var (_, id) in CategoryEntityIds)
             yield return new EntityRow(id, EntityTier.Vocabulary, typeId, sourceId);
         foreach (var (_, id) in ScriptEntityIds)

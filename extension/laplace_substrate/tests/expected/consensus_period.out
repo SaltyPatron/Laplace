@@ -10,7 +10,7 @@ DO $$
 DECLARE
     type_t  bytea := laplace_hash128_blake3('substrate/type/Type/v1');
     src     bytea := laplace_hash128_blake3('test/period/source');
-    kind    bytea := laplace_hash128_blake3('test/period/kind');
+    rel_type bytea := laplace_hash128_blake3('test/period/reltype');
     subjA   bytea := laplace_hash128_blake3('test/period/subjectA');
     subjB   bytea := laplace_hash128_blake3('test/period/subjectB');
     objA    bytea := laplace_hash128_blake3('test/period/objectA');
@@ -31,15 +31,15 @@ DECLARE
 BEGIN
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
         (src,   0, type_t, NULL),
-        (kind,  0, type_t, src),
+        (rel_type,  0, type_t, src),
         (subjA, 0, type_t, src), (objA, 0, type_t, src),
         (subjB, 0, type_t, src), (objB, 0, type_t, src),
         (subjC, 0, type_t, src), (objC, 0, type_t, src);
 
     PERFORM create_period_staging();
     INSERT INTO consensus_period_staging_0 (subject_id, type_id, object_id, phi, games, sum_score, last_ts) VALUES
-        (subjA, kind, objA, phi, 2, s_conf * 2, now()),
-        (subjB, kind, objB, phi, 3, s_ref  * 3, now());
+        (subjA, rel_type, objA, phi, 2, s_conf * 2, now()),
+        (subjB, rel_type, objB, phi, 3, s_ref  * 3, now());
     PERFORM materialize_period_consensus();
     SELECT rating, rd, volatility INTO fA_r, fA_rd, fA_v FROM consensus WHERE subject_id = subjA;
     SELECT rating, rd, volatility INTO fB_r, fB_rd, fB_v FROM consensus WHERE subject_id = subjB;
@@ -48,8 +48,8 @@ BEGIN
 
     PERFORM create_period_staging();
     INSERT INTO consensus_period_staging_0 (subject_id, type_id, object_id, phi, games, sum_score, last_ts) VALUES
-        (subjB, kind, objB, phi, 3, s_ref  * 3, now()),
-        (subjA, kind, objA, phi, 2, s_conf * 2, now());
+        (subjB, rel_type, objB, phi, 3, s_ref  * 3, now()),
+        (subjA, rel_type, objA, phi, 2, s_conf * 2, now());
     PERFORM materialize_period_consensus();
     SELECT rating, rd, volatility INTO rA_r, rA_rd, rA_v FROM consensus WHERE subject_id = subjA;
     SELECT rating, rd, volatility INTO rB_r, rB_rd, rB_v FROM consensus WHERE subject_id = subjB;
@@ -61,13 +61,13 @@ BEGIN
 
     PERFORM create_period_staging();
     INSERT INTO consensus_period_staging_0 (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
-        VALUES (subjC, kind, objC, phi, 2, s_conf * 2, now());
+        VALUES (subjC, rel_type, objC, phi, 2, s_conf * 2, now());
     PERFORM materialize_period_consensus();
     SELECT rating, rd, witness_count INTO c1_r, c1_rd, c1_wc FROM consensus WHERE subject_id = subjC;
 
     PERFORM create_period_staging();
     INSERT INTO consensus_period_staging_0 (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
-        VALUES (subjC, kind, objC, phi, 3, s_conf * 3, now());
+        VALUES (subjC, rel_type, objC, phi, 3, s_conf * 3, now());
     PERFORM materialize_period_consensus();
     SELECT count(*) INTO c_rows FROM consensus WHERE subject_id = subjC;
     SELECT rating, rd, witness_count INTO c2_r, c2_rd, c2_wc FROM consensus WHERE subject_id = subjC;
@@ -79,8 +79,8 @@ BEGIN
 
     PERFORM create_period_staging();
     INSERT INTO consensus_period_staging_0 (subject_id, type_id, object_id, phi, games, sum_score, last_ts) VALUES
-        (subjA, kind, objA, phi,  1, s_conf, now()),
-        (subjA, kind, objA, phi2, 1, s_conf, now());
+        (subjA, rel_type, objA, phi,  1, s_conf, now()),
+        (subjA, rel_type, objA, phi2, 1, s_conf, now());
     BEGIN
         PERFORM materialize_period_consensus();
     EXCEPTION WHEN OTHERS THEN
@@ -93,9 +93,9 @@ BEGIN
     PERFORM create_period_staging(2);
     DELETE FROM consensus WHERE subject_id IN (subjA, subjB);
     INSERT INTO consensus_period_staging_0 (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
-        VALUES (subjA, kind, objA, phi, 2, s_conf * 2, now());
+        VALUES (subjA, rel_type, objA, phi, 2, s_conf * 2, now());
     INSERT INTO consensus_period_staging_1 (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
-        VALUES (subjB, kind, objB, phi, 3, s_ref * 3, now());
+        VALUES (subjB, rel_type, objB, phi, 3, s_ref * 3, now());
     IF materialize_period_consensus() <> 2 THEN
         RAISE EXCEPTION 'FAIL: NULL fold did not cover both partitions';
     END IF;
@@ -108,9 +108,9 @@ BEGIN
 
     PERFORM create_period_staging(2);
     INSERT INTO consensus_period_staging_0 (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
-        VALUES (subjC, kind, objC, phi, 1, s_conf, now());
+        VALUES (subjC, rel_type, objC, phi, 1, s_conf, now());
     INSERT INTO consensus_period_staging_1 (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
-        VALUES (subjA, kind, objB, phi, 1, s_conf, now());
+        VALUES (subjA, rel_type, objB, phi, 1, s_conf, now());
     IF materialize_period_consensus(0) <> 1 OR materialize_period_consensus(1) <> 1 THEN
         RAISE EXCEPTION 'FAIL: per-partition fold did not materialize exactly its partition';
     END IF;
@@ -168,7 +168,7 @@ DO $$
 DECLARE
     type_t  bytea := laplace_hash128_blake3('substrate/type/Type/v1');
     src     bytea := laplace_hash128_blake3('test/epoch/source');
-    kind    bytea := laplace_hash128_blake3('test/epoch/kind');
+    rel_type bytea := laplace_hash128_blake3('test/epoch/reltype');
     subjD   bytea := laplace_hash128_blake3('test/epoch/subjectD');
     objD    bytea := laplace_hash128_blake3('test/epoch/objectD');
     phi     bigint := 30000000000;
@@ -178,13 +178,13 @@ DECLARE
 BEGIN
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
         (src,   0, type_t, NULL),
-        (kind,  0, type_t, src),
+        (rel_type,  0, type_t, src),
         (subjD, 0, type_t, src), (objD, 0, type_t, src);
 
     PERFORM create_period_staging(2, 1);
     EXECUTE format('INSERT INTO %I (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
         VALUES ($1, $2, $3, $4, 2, $5 * 2, now())', period_staging_table(1, 0))
-        USING subjD, kind, objD, phi, s_conf;
+        USING subjD, rel_type, objD, phi, s_conf;
 
     PERFORM create_period_staging(2, 2);
     IF to_regclass(period_staging_table(1, 0)) IS NULL THEN
@@ -192,7 +192,7 @@ BEGIN
     END IF;
     EXECUTE format('INSERT INTO %I (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
         VALUES ($1, $2, $3, $4, 3, $5 * 3, now())', period_staging_table(2, 0))
-        USING subjD, kind, objD, phi, s_conf;
+        USING subjD, rel_type, objD, phi, s_conf;
 
     IF materialize_period_partition(period_staging_table(1, 0)) <> 1
     OR materialize_period_partition(period_staging_table(1, 1)) <> 0 THEN
