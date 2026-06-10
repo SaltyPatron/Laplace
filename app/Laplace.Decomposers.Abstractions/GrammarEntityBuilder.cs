@@ -105,7 +105,7 @@ public sealed class GrammarEntityBuilder
                 NativeInterop.ComposePrecedesNative pr;
                 NativeInterop.ComposeGetPrecedes(composeResult, i, &pr);
                 long sumScore = checked(pr.Games * Glicko2.FpScale);
-                attestations.Add(AttestationFactory.CreateAggregated(
+                attestations.Add(NativeAttestation.Aggregated(
                     pr.SubjectId, PrecedesTypeId, pr.ObjectId, _sourceId, contextId: null,
                     games: pr.Games, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
             }
@@ -167,7 +167,7 @@ public sealed class GrammarEntityBuilder
         foreach (var (pair, count) in precedes)
         {
             long sumScore = checked(count * Glicko2.FpScale);
-            rows.Add(AttestationFactory.CreateAggregated(
+            rows.Add(NativeAttestation.Aggregated(
                 pair.A, PrecedesTypeId, pair.B, _sourceId, contextId: null,
                 games: count, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
         }
@@ -210,9 +210,9 @@ public sealed class GrammarEntityBuilder
                 }
             }
             if (name is not { } nm) continue;
-            if (def     is { } d)  rows.Add(RelationTypeRegistry.Attest(d,  "DEFINES",    nm, _sourceId, witnessWeight));
-            if (refCall is { } rc) rows.Add(RelationTypeRegistry.Attest(rc, "CALLS",      nm, _sourceId, witnessWeight));
-            if (refType is { } rt) rows.Add(RelationTypeRegistry.Attest(rt, "REFERENCES", nm, _sourceId, witnessWeight));
+            if (def     is { } d)  rows.Add(NativeAttestation.Categorical(d,  "DEFINES",    nm, _sourceId, null, witnessWeight));
+            if (refCall is { } rc) rows.Add(NativeAttestation.Categorical(rc, "CALLS",      nm, _sourceId, null, witnessWeight));
+            if (refType is { } rt) rows.Add(NativeAttestation.Categorical(rt, "REFERENCES", nm, _sourceId, null, witnessWeight));
         }
         return rows.ToImmutable();
     }

@@ -378,4 +378,25 @@ ORDER BY holder, type, fact;
  x-only | is antonym of | h
 (3 rows)
 
+SELECT count(*) >= 0 AS hypernyms_runs
+FROM hypernyms(word_id('dog'), 4);
+ hypernyms_runs 
+----------------
+ t
+(1 row)
+
+SELECT cardinality(path) > 1 AS isa_path_found
+FROM isa_path(word_id('dog'), word_id('c'));
+ isa_path_found 
+----------------
+ t
+(1 row)
+
+SELECT reply LIKE 'Yes%' AS cascade_via_isa
+FROM respond('is a dog a c?');
+ cascade_via_isa 
+-----------------
+ t
+(1 row)
+
 ROLLBACK;

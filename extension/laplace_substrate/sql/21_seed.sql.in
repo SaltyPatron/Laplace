@@ -311,3 +311,6 @@ FROM (VALUES
     ('unicode/emoji/Extended_Pictographic/v1')
 ) AS v(name)
 ON CONFLICT (id) DO NOTHING;
+
+#include "generated/21_seed_relation_types.sql.in"
+#include "generated/21_seed_pos.sql.in"

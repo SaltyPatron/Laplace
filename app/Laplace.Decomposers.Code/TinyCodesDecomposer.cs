@@ -123,9 +123,9 @@ public sealed class TinyCodesDecomposer : IDecomposer
                 {
                     var conceptId = Hash128.OfCanonical($"tiny-codes/concept/{taskId}/v1");
                     b.AddEntity(new EntityRow(conceptId, EntityTier.Vocabulary, CodeConceptTypeId, Source));
-                    b.AddAttestation(RelationTypeRegistry.Attest(
+                    b.AddAttestation(NativeAttestation.Categorical(
                         conceptId,  "HAS_EXAMPLE",   codeRootId, Source, SourceTrust.StructuredCorpus));
-                    b.AddAttestation(RelationTypeRegistry.Attest(
+                    b.AddAttestation(NativeAttestation.Categorical(
                         codeRootId, "HAS_DEFINITION", conceptId,  Source, SourceTrust.StructuredCorpus));
                 }
 
@@ -140,7 +140,7 @@ public sealed class TinyCodesDecomposer : IDecomposer
                     {
                         var wordId = ContentEmitter.Emit(b, kw, Source);
                         if (wordId.HasValue)
-                            b.AddAttestation(RelationTypeRegistry.Attest(
+                            b.AddAttestation(NativeAttestation.Categorical(
                                 wordId.Value, "HAS_EXAMPLE", codeRootId, Source, SourceTrust.StructuredCorpus));
                     }
                 }

@@ -10,6 +10,14 @@ public class SubstrateChangeTests
     private static Hash128 H(int seed) => Hash128.Blake3(BitConverter.GetBytes(seed));
 
     [Fact]
+    public void Builder_IntentStagesEmptyByDefault()
+    {
+        var change = new SubstrateChangeBuilder(H(0), "empty").Build();
+        Assert.Equal(0, change.IntentStages.Length);
+        Assert.True(change.IntentStages.IsDefaultOrEmpty);
+    }
+
+    [Fact]
     public void Builder_ProducesIntentWithAllRows()
     {
         var src = Hash128.OfCanonical("substrate/source/Test/v1");

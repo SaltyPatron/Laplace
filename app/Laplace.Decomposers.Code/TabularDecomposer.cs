@@ -164,18 +164,18 @@ public sealed class TabularDecomposer : IDecomposer
             b.AddEntity(new EntityRow(cq, EntityTier.Vocabulary, ValueTypeId, Source));
 
             // P(outcome | value-in-column): rating converges to M/N, RD shrinks rare-value confidence.
-            b.AddAttestation(AttestationFactory.CreateAggregated(
+            b.AddAttestation(NativeAttestation.Aggregated(
                 cq, predicts, OutcomeId, Source, contextId: ColumnId(col),
                 games: nm.N, sumScoreFp1e9: checked(nm.M * Glicko2.FpScale), witnessWeight: witnessWeight));
 
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 cq, "IS_VALUE_IN", ColumnId(col), Source, SourceTrust.StructuredCorpus));
 
             if (!isNumeric[col])
             {
                 var bare = ContentEmitter.Emit(b, tok, Source);
                 if (bare is { } bid)
-                    b.AddAttestation(RelationTypeRegistry.Attest(
+                    b.AddAttestation(NativeAttestation.Categorical(
                         cq, "IS_INSTANCE_OF", bid, Source, SourceTrust.StructuredCorpus));
             }
 
@@ -194,7 +194,7 @@ public sealed class TabularDecomposer : IDecomposer
             ct.ThrowIfCancellationRequested();
             var cq = Hash128.OfCanonical($"tabular/pair/{pa}={ta}&{pb}={tb}/v1");
             b.AddEntity(new EntityRow(cq, EntityTier.Vocabulary, ValueTypeId, Source));
-            b.AddAttestation(AttestationFactory.CreateAggregated(
+            b.AddAttestation(NativeAttestation.Aggregated(
                 cq, predicts, OutcomeId, Source, contextId: null,
                 games: nm.N, sumScoreFp1e9: checked(nm.M * Glicko2.FpScale), witnessWeight: witnessWeight));
             if (++emitted >= batch)

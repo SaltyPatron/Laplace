@@ -278,7 +278,7 @@ public sealed class TextEntityBuilder
         foreach (var (pair, count) in precedes)
         {
             long sumScore = checked(count * Glicko2.FpScale);
-            rows.Add(AttestationFactory.CreateAggregated(
+            rows.Add(NativeAttestation.Aggregated(
                 pair.A, PrecedesTypeId, pair.B, sourceId, contextId: null,
                 games: count, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
         }

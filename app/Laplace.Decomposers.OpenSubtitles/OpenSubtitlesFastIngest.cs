@@ -43,11 +43,11 @@ internal static class OpenSubtitlesFastIngest
 
             b.AddEntity(new EntityRow(langA, EntityTier.Vocabulary, EntityTypeRegistry.Language, OpenSubtitlesDecomposer.Source));
             b.AddEntity(new EntityRow(langB, EntityTier.Vocabulary, EntityTypeRegistry.Language, OpenSubtitlesDecomposer.Source));
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 idA.Value, "IS_TRANSLATION_OF", idB.Value, OpenSubtitlesDecomposer.Source, TC.StructuredCorpus));
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 idA.Value, "HAS_LANGUAGE", langA, OpenSubtitlesDecomposer.Source, TC.StructuredCorpus));
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 idB.Value, "HAS_LANGUAGE", langB, OpenSubtitlesDecomposer.Source, TC.StructuredCorpus));
 
             if (++n >= batchSize)
@@ -96,12 +96,28 @@ internal static class OpenSubtitlesFastIngest
         }
     }
 
-    private static bool IsTextEntry(string name) =>
-        name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)
-        || name.EndsWith(".tsv", StringComparison.OrdinalIgnoreCase);
+    private static bool IsTextEntry(string name)
+    {
+        string leaf = Path.GetFileName(name);
+        if (leaf.Equals("README", StringComparison.OrdinalIgnoreCase)
+            || leaf.Equals("LICENSE", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".tsv", StringComparison.OrdinalIgnoreCase))
+            return true;
+        // Published pairs use OpenSubtitles.en-es.en (no .txt suffix).
+        return leaf.StartsWith("OpenSubtitles.", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string LangSuffix(string entryName)
     {
+        string leaf = Path.GetFileName(entryName);
+        if (leaf.StartsWith("OpenSubtitles.", StringComparison.OrdinalIgnoreCase))
+        {
+            int lastDot = leaf.LastIndexOf('.');
+            if (lastDot > 0 && lastDot + 1 < leaf.Length)
+                return leaf[(lastDot + 1)..];
+        }
         string baseName = Path.GetFileNameWithoutExtension(entryName);
         int dot = baseName.LastIndexOf('.');
         return dot >= 0 ? baseName[(dot + 1)..] : baseName;

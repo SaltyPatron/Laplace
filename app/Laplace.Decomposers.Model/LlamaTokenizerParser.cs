@@ -327,7 +327,7 @@ public sealed class LlamaTokenizerParser
                 var (l, r) = merges[i];
                 Hash128 lid = ResolveMergeSide(b, l, sourceId, textTypeId);
                 Hash128 rid = ResolveMergeSide(b, r, sourceId, textTypeId);
-                b.AddAttestation(Laplace.Decomposers.Abstractions.RelationTypeRegistry.AttestWeighted(
+                b.AddAttestation(Laplace.Decomposers.Abstractions.NativeAttestation.Categorical(
                     lid, "MERGES_WITH", rid, sourceId,
                     Laplace.Decomposers.Abstractions.SourceTrust.AiModelProbe,
                     magnitude: m - i, arenaScale: m));
@@ -367,7 +367,7 @@ public sealed class LlamaTokenizerParser
                 attestationCapacity: end - start);
             for (int i = start; i < end; i++)
             {
-                b.AddAttestation(Laplace.Decomposers.Abstractions.RelationTypeRegistry.Attest(
+                b.AddAttestation(Laplace.Decomposers.Abstractions.NativeAttestation.Categorical(
                     tokenizerEntityId, "TOKEN_MAPS_TO", records[i].EntityId, sourceId,
                     Laplace.Decomposers.Abstractions.SourceTrust.AiModelProbe));
             }

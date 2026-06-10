@@ -141,6 +141,19 @@ CREATE OR REPLACE FUNCTION generate_ngram(
     WHERE ctx.ids IS NOT NULL
 $$;
 
+-- legacy shim: ranked-μ SQL walk removed; delegate to native ngram kernel
+CREATE OR REPLACE FUNCTION generate(
+        p_prompt text, p_steps int DEFAULT 16, p_window int DEFAULT 3,
+        p_temperature double precision DEFAULT 0.6, p_topk int DEFAULT 8,
+        p_stop text[] DEFAULT '{}', p_boost double precision DEFAULT 0,
+        p_require_pos boolean DEFAULT true)
+    RETURNS TABLE(step int, token text, mu numeric)
+    LANGUAGE sql VOLATILE
+    SET search_path = @extschema@, public AS $$
+    SELECT g.step, g.token, NULL::numeric AS mu
+    FROM generate_ngram(p_prompt, p_steps, GREATEST(p_window, 1), p_temperature, p_topk) g
+$$;
+
 -- pour: trajectory-respecting synthesis ------------------------------------------
 -- A content trajectory is a witnessed WHOLE. The pour walks a witnessed mold
 -- instance in trajectory order and substitutes COMPOSITE constituents with

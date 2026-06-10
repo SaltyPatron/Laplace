@@ -171,4 +171,13 @@ FROM respond('how are dog and h related');
 SELECT holder, type, fact FROM contrast(word_id('dog'), word_id('c'))
 ORDER BY holder, type, fact;
 
+SELECT count(*) >= 0 AS hypernyms_runs
+FROM hypernyms(word_id('dog'), 4);
+
+SELECT cardinality(path) > 1 AS isa_path_found
+FROM isa_path(word_id('dog'), word_id('c'));
+
+SELECT reply LIKE 'Yes%' AS cascade_via_isa
+FROM respond('is a dog a c?');
+
 ROLLBACK;

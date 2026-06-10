@@ -159,7 +159,7 @@ public sealed class StackDecomposer : IDecomposer
                         if (seg.Length < 3) continue;
                         var segId = ContentEmitter.Emit(b, seg.ToLowerInvariant(), Source);
                         if (segId.HasValue)
-                            b.AddAttestation(RelationTypeRegistry.Attest(
+                            b.AddAttestation(NativeAttestation.Categorical(
                                 segId.Value, "HAS_EXAMPLE", codeRootId, Source, SourceTrust.StructuredCorpus));
                     }
                 }

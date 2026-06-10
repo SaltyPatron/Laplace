@@ -103,18 +103,13 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         _provenPhys.AddRange(existingPhys);
         _provenAtt.AddRange(existingAtt);
 
-        int prebuiltEntityInserts = 0, prebuiltPhysInserts = 0;
+        var prebuiltStages = new List<IntentStage>();
         foreach (var c in changes)
         {
-            if (c.IntentStages.Length == 0) continue;
+            if (c.IntentStages.IsDefaultOrEmpty) continue;
             foreach (var pre in c.IntentStages)
             {
-                if (pre.IsInvalid) continue;
-                prebuiltEntityInserts += await StageAndInsertAsync(
-                    conn, pre, IntentStageTable.Entities, "entities", ct);
-                prebuiltPhysInserts += await StageAndInsertAsync(
-                    conn, pre, IntentStageTable.Physicalities, "physicalities", ct);
-                roundTrips += 2;
+                if (!pre.IsInvalid) prebuiltStages.Add(pre);
             }
         }
 
@@ -130,7 +125,8 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         var referenced = new HashSet<Hash128>();
         void Reference(Hash128 id)
         {
-            if (!seenEntityArg.Contains(id) && !_provenEntities.Contains(id)) referenced.Add(id);
+            if (seenEntityArg.Contains(id) || _provenEntities.Contains(id) || seenEntity.Contains(id)) return;
+            referenced.Add(id);
         }
 
         foreach (var c in changes)
@@ -185,29 +181,10 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             }
         CheckpointEntities(stage, "after-attestation-loop");
 
-        if (referenced.Count > 0)
-        {
-            var refList = new List<Hash128>(referenced);
-            var present = await EntitiesExistAsync(conn, refList, ct);
-            roundTrips++;
-            if (present.Count != refList.Count)
-            {
-                Hash128 firstMissing = default;
-                int missingCount = 0;
-                foreach (var id in refList)
-                    if (!present.Contains(id))
-                    {
-                        if (missingCount == 0) firstMissing = id;
-                        missingCount++;
-                    }
-                throw new SubstrateReferentialIntegrityException(
-                    missingCount, Convert.ToHexString(firstMissing.ToBytes()));
-            }
-            _provenEntities.AddRange(present);
-        }
-
         int entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
-        bool anyRows = stage.EntityCount > 0 || stage.PhysicalityCount > 0 || stage.AttestationCount > 0
+        bool anyPrebuilt = prebuiltStages.Count > 0;
+        bool anyRows = anyPrebuilt
+                       || stage.EntityCount > 0 || stage.PhysicalityCount > 0 || stage.AttestationCount > 0
                        || attGamesDelta.Count > 0;
 
         if (anyRows)
@@ -222,12 +199,50 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 }
                 roundTrips++;
 
+                foreach (var pre in prebuiltStages)
+                {
+                    try
+                    {
+                        entitiesInserted += await StageAndInsertAsync(
+                            conn, pre, IntentStageTable.Entities, "entities", ct);
+                        physicalitiesInserted += await StageAndInsertAsync(
+                            conn, pre, IntentStageTable.Physicalities, "physicalities", ct);
+                        roundTrips += 2;
+                    }
+                    finally
+                    {
+                        pre.Dispose();
+                    }
+                }
+
                 if (stage.EntityCount > 0)
                 {
-                    entitiesInserted = await StageAndInsertAsync(
+                    entitiesInserted += await StageAndInsertAsync(
                         conn, stage, IntentStageTable.Entities, "entities", ct);
                     roundTrips += 3;
                 }
+
+                if (referenced.Count > 0)
+                {
+                    var refList = new List<Hash128>(referenced);
+                    var present = await EntitiesExistAsync(conn, refList, ct);
+                    roundTrips++;
+                    if (present.Count != refList.Count)
+                    {
+                        Hash128 firstMissing = default;
+                        int missingCount = 0;
+                        foreach (var id in refList)
+                            if (!present.Contains(id))
+                            {
+                                if (missingCount == 0) firstMissing = id;
+                                missingCount++;
+                            }
+                        throw new SubstrateReferentialIntegrityException(
+                            missingCount, Convert.ToHexString(firstMissing.ToBytes()));
+                    }
+                    _provenEntities.AddRange(present);
+                }
+
                 if (stage.PhysicalityCount > 0)
                 {
                     physicalitiesInserted = await StageAndInsertAsync(
@@ -285,6 +300,11 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 catch { }
                 throw;
             }
+        }
+        else
+        {
+            foreach (var pre in prebuiltStages)
+                pre.Dispose();
         }
 
         sw.Stop();

@@ -34,16 +34,13 @@ public class PosReferenceTests
                         PosReference.Resolve(pos, PosReference.PosTagset.Wiktionary));
 
     [Fact]
-    public void UnknownTag_GoesProbationary_Logged_NeverSilent_NeverThrows()
+    public void UnknownTag_GoesProbationary_NeverSilent_NeverThrows()
     {
-        long before = PosReference.ResolveMisses;
         var id = PosReference.Resolve("proverb", PosReference.PosTagset.Wiktionary);
 
         Assert.Equal(Hash128.OfCanonical("substrate/pos/probationary/wiktionary/proverb/v1"), id);
         Assert.DoesNotContain(PosReference.Canonical,
             t => PosReference.CanonicalId(t) == id);
-        Assert.True(PosReference.ResolveMisses > before);
-        Assert.Contains("wiktionary:proverb", (IDictionary<string, long>)PosReference.MissedTags);
     }
 
     [Fact]

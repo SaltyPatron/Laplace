@@ -16,14 +16,13 @@ public static class LayerCompletion
                 decomposer.SourceId, $"layer-complete/{decomposer.LayerOrder}", null,
                 entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1)
             .AddEntity(typeId, EntityTier.Vocabulary, BootstrapIntentBuilder.RelationTypeMetaTypeId, decomposer.SourceId)
-            .AddAttestation(AttestationFactory.Create(
+            .AddAttestation(NativeAttestation.CategoricalResolved(
                 decomposer.SourceId,
                 typeId,
                 decomposer.SourceId,
                 decomposer.SourceId,
                 contextId: null,
-                RelationTypeRank.Mandate,
-                SourceTrust.SubstrateMandate))
+                RelationTypeRank.Mandate * SourceTrust.SubstrateMandate))
             .Build();
     }
 }

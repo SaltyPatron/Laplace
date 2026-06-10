@@ -126,7 +126,7 @@ public sealed class SubstrateChangeBuilder
                 _parentIntentId,
                 _inputUnitsConsumed,
                 _commitEpoch),
-            _intentStages.Count > 0 ? _intentStages.ToImmutableArray() : default);
+            _intentStages.ToImmutableArray());
     }
 
     private static Hash128 ComputeIntentId(

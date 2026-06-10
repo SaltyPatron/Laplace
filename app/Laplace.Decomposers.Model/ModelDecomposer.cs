@@ -140,7 +140,7 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
                 ? "NORM_SCALES" : slot.Role;
             Hash128 baseId = ModelArenaPlan.BaseRelationTypeId(baseRole);
             if (baseId != slot.RelationTypeId)
-                boot.AddAttestation(RelationTypeRegistry.Attest(
+                boot.AddAttestation(NativeAttestation.Categorical(
                     slot.RelationTypeId, "IS_A", baseId, Source, SourceTrust.AiModelProbe));
         }
 

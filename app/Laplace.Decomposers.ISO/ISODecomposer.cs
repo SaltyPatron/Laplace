@@ -66,9 +66,9 @@ public sealed class ISODecomposer : IDecomposer
         {
             var langId = LanguageEntityId.FromIso639_3(rec.Id);
             b.AddEntity(langId, EntityTier.Vocabulary, LanguageTypeId, Source);
-            b.AddAttestation(AttestationFactory.Create(
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
                 langId, RelTypeIsLanguageCode, null, Source, null,
-                RelationTypeRank.Partitive, SourceTrust.StandardsDerived));
+                RelationTypeRank.Partitive * SourceTrust.StandardsDerived));
 
             if (rec.Part1.Length > 0)
             {
@@ -76,9 +76,9 @@ public sealed class ISODecomposer : IDecomposer
                 _codeNames.Add(iso1Name);
                 var iso1Id = Hash128.OfCanonical(iso1Name);
                 b.AddEntity(iso1Id, EntityTier.Vocabulary, Iso639CodeTypeId, Source);
-                b.AddAttestation(AttestationFactory.Create(
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
                     langId, RelTypeHasIso6391Code, iso1Id, Source, null,
-                    RelationTypeRank.Partitive, SourceTrust.StandardsDerived));
+                    RelationTypeRank.Partitive * SourceTrust.StandardsDerived));
             }
 
             foreach (var p2 in new[] { rec.Part2b, rec.Part2t }.Distinct())
@@ -88,21 +88,21 @@ public sealed class ISODecomposer : IDecomposer
                 _codeNames.Add(iso2Name);
                 var iso2Id = Hash128.OfCanonical(iso2Name);
                 b.AddEntity(iso2Id, EntityTier.Vocabulary, Iso639CodeTypeId, Source);
-                b.AddAttestation(RelationTypeRegistry.Attest(
+                b.AddAttestation(NativeAttestation.Categorical(
                     langId, "HAS_ISO639_2_CODE", iso2Id, Source, SourceTrust.StandardsDerived));
             }
             if (rec.Scope.Length > 0)
             {
                 var scopeId = Hash128.OfCanonical($"substrate/iso639/scope/{rec.Scope}/v1");
                 b.AddEntity(scopeId, EntityTier.Vocabulary, Iso639CodeTypeId, Source);
-                b.AddAttestation(RelationTypeRegistry.Attest(
+                b.AddAttestation(NativeAttestation.Categorical(
                     langId, "HAS_LANGUAGE_SCOPE", scopeId, Source, SourceTrust.StandardsDerived));
             }
             if (rec.Type.Length > 0)
             {
                 var typeId = Hash128.OfCanonical($"substrate/iso639/type/{rec.Type}/v1");
                 b.AddEntity(typeId, EntityTier.Vocabulary, Iso639CodeTypeId, Source);
-                b.AddAttestation(RelationTypeRegistry.Attest(
+                b.AddAttestation(NativeAttestation.Categorical(
                     langId, "HAS_LANGUAGE_TYPE", typeId, Source, SourceTrust.StandardsDerived));
             }
         }
@@ -115,9 +115,9 @@ public sealed class ISODecomposer : IDecomposer
             var macroId = LanguageEntityId.FromIso639_3(macro);
             b.AddEntity(indivId, EntityTier.Vocabulary, LanguageTypeId, Source);
             b.AddEntity(macroId, EntityTier.Vocabulary, LanguageTypeId, Source);
-            b.AddAttestation(AttestationFactory.Create(
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
                 indivId, RelTypeMemberOfMacrolanguage, macroId, Source, null,
-                RelationTypeRank.Taxonomic, SourceTrust.StandardsDerived));
+                RelationTypeRank.Taxonomic * SourceTrust.StandardsDerived));
         }
 
         string unidata = Path.GetFullPath(
@@ -133,9 +133,9 @@ public sealed class ISODecomposer : IDecomposer
                 if (!scriptName.TryGetValue(code, out var name)) continue;
                 var scriptId = LanguageGraph.ScriptEntityId(name);
                 b.AddEntity(scriptId, EntityTier.Vocabulary, UcdClassifierTypeId, Source);
-                b.AddAttestation(AttestationFactory.Create(
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
                     langId, RelTypeUsesScript, scriptId, Source, null,
-                    RelationTypeRank.StandardsStructural, SourceTrust.StandardsDerived));
+                    RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
             }
         }
 
@@ -154,7 +154,7 @@ public sealed class ISODecomposer : IDecomposer
                 var sucId = LanguageEntityId.FromIso639_3(changeTo);
                 b.AddEntity(retId, EntityTier.Vocabulary, LanguageTypeId, Source);
                 b.AddEntity(sucId, EntityTier.Vocabulary, LanguageTypeId, Source);
-                b.AddAttestation(RelationTypeRegistry.Attest(
+                b.AddAttestation(NativeAttestation.Categorical(
                     retId, "HAS_VARIANT_OF", sucId, Source, SourceTrust.StandardsDerived));
             }
         }
@@ -182,7 +182,7 @@ public sealed class ISODecomposer : IDecomposer
                 nb.AddEntity(lid, EntityTier.Vocabulary, LanguageTypeId, Source);
                 var nameId = ContentEmitter.Emit(nb, printName, Source);
                 if (nameId is { } nid)
-                    nb.AddAttestation(RelationTypeRegistry.Attest(
+                    nb.AddAttestation(NativeAttestation.Categorical(
                         lid, "HAS_DEFINITION", nid, Source, SourceTrust.StandardsDerived));
                 if (++n >= 2048)
                 {

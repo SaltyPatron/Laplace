@@ -16,37 +16,5 @@ $$;
 
 CREATE OR REPLACE FUNCTION cascade(p_x text, p_y text, p_max_depth int DEFAULT 7)
     RETURNS TABLE(chain text, cost double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    WITH x AS (SELECT resolve_last_word(p_x) AS id),
-         goals AS (
-            SELECT array_agg(g) AS ids
-            FROM (SELECT resolve_last_word(p_y) AS g
-                  UNION
-                  SELECT sn.synset_id FROM senses(resolve_last_word(p_y)) sn) s),
-         p AS (
-            SELECT ap.step, ap.entity_id, ap.g,
-                   lag(ap.entity_id) OVER (ORDER BY ap.step) AS prev
-            FROM astar_path((SELECT id FROM x), (SELECT ids FROM goals), p_max_depth) ap),
-         hop AS (
-            SELECT p.step, p.entity_id, p.g,
-                   e.type_id AS via_type,
-                   CASE WHEN e.subject_id = p.prev THEN 1 ELSE -1 END AS via_dir
-            FROM p
-            LEFT JOIN LATERAL (
-                SELECT c.type_id, c.subject_id
-                FROM consensus c
-                WHERE ((c.subject_id = p.prev AND c.object_id = p.entity_id)
-                    OR (c.subject_id = p.entity_id AND c.object_id = p.prev))
-                  AND NOT refuted(c.rating, c.rd)
-                ORDER BY eff_mu(c.rating, c.rd) DESC
-                LIMIT 1) e ON p.prev IS NOT NULL)
-    SELECT realize_path(
-               array_agg(hop.entity_id ORDER BY hop.step),
-               (array_agg(hop.via_type ORDER BY hop.step))[2:],
-               (array_agg(hop.via_dir  ORDER BY hop.step))[2:],
-               word_language((SELECT id FROM x))),
-           max(hop.g)
-    FROM hop
-    HAVING count(*) > 1
-$$;
+    LANGUAGE C STABLE STRICT PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_cascade';

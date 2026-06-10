@@ -92,9 +92,8 @@ public sealed class LlamaRecipeExtractor
         b.AddEntity(recipe.RecipeEntityId, EntityTier.Vocabulary, modelRecipeTypeId, firstObservedBy: sourceId);
 
         void AddAttestation(Hash128 typeId, Hash128? objectId)
-            => b.AddAttestation(AttestationFactory.CreateCategorical(
-                recipe.RecipeEntityId, typeId, objectId, sourceId, contextId: null,
-                confirm: true, witnessWeight: 1.0));
+            => b.AddAttestation(NativeAttestation.CategoricalResolved(
+                recipe.RecipeEntityId, typeId, objectId, sourceId, null, 1.0));
 
         void AddScalar(Hash128 typeId, string value)
         {

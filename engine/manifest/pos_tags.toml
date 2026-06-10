@@ -1,0 +1,45 @@
+# POS tag law manifest — run codegen-attestation-law.ps1 after edits
+
+[upos]
+canonical = ["ADJ", "ADP", "ADV", "AUX", "CCONJ", "DET", "INTJ", "NOUN", "NUM", "PART", "PRON", "PROPN", "PUNCT", "SCONJ", "SYM", "VERB", "X"]
+
+[wordnet]
+n = "NOUN"
+v = "VERB"
+a = "ADJ"
+s = "ADJ"
+r = "ADV"
+
+[wiktionary]
+"adj" = "ADJ"
+"adjective" = "ADJ"
+"adp" = "ADP"
+"adv" = "ADV"
+"adverb" = "ADV"
+"article" = "DET"
+"aux" = "AUX"
+"auxiliary" = "AUX"
+"conj" = "CCONJ"
+"conjunction" = "CCONJ"
+"det" = "DET"
+"determiner" = "DET"
+"interjection" = "INTJ"
+"intj" = "INTJ"
+"name" = "PROPN"
+"noun" = "NOUN"
+"num" = "NUM"
+"numeral" = "NUM"
+"particle" = "PART"
+"postp" = "ADP"
+"postposition" = "ADP"
+"prep" = "ADP"
+"preposition" = "ADP"
+"pron" = "PRON"
+"pronoun" = "PRON"
+"proper noun" = "PROPN"
+"punct" = "PUNCT"
+"punctuation" = "PUNCT"
+"punctuation mark" = "PUNCT"
+"sym" = "SYM"
+"symbol" = "SYM"
+"verb" = "VERB"

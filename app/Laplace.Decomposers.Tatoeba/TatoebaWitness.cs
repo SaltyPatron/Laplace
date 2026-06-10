@@ -16,9 +16,9 @@ internal static class TatoebaWitness
 
         if (ContentEmitter.Emit(b, row.Text, TatoebaDecomposer.Source) is { } emitted)
         {
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 emitted, "HAS_EXTERNAL_ID", extId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 emitted, "HAS_LANGUAGE", langId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
         }
     }
@@ -29,7 +29,7 @@ internal static class TatoebaWitness
         Hash128 eb = SourceEntityIdConventions.TatoebaSentence(row.B);
         b.AddEntity(new EntityRow(ea, EntityTier.Vocabulary, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
         b.AddEntity(new EntityRow(eb, EntityTier.Vocabulary, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
-        b.AddAttestation(RelationTypeRegistry.Attest(
+        b.AddAttestation(NativeAttestation.Categorical(
             ea, "IS_TRANSLATION_OF", eb, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
     }
 }

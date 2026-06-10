@@ -121,7 +121,7 @@ public sealed class PropBankDecomposer : IDecomposer
             Hash128 rsEntity = RolesetId(rsId);
             b.AddEntity(new EntityRow(rsEntity, EntityTier.Vocabulary, RolesetTypeId, Source));
 
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 lemmaId.Value, "HAS_SENSE", rsEntity, Source, TC.AcademicCurated));
 
             string name = roleset.GetAttribute("name").Trim();
@@ -129,7 +129,7 @@ public sealed class PropBankDecomposer : IDecomposer
             {
                 var defId = ContentEmitter.Emit(b, name, Source);
                 if (defId is not null)
-                    b.AddAttestation(RelationTypeRegistry.Attest(
+                    b.AddAttestation(NativeAttestation.Categorical(
                         rsEntity, "HAS_DEFINITION", defId.Value, Source, TC.AcademicCurated));
             }
 
@@ -157,7 +157,7 @@ public sealed class PropBankDecomposer : IDecomposer
                 ctx = ordEntity;
             }
 
-            b.AddAttestation(RelationTypeRegistry.Attest(
+            b.AddAttestation(NativeAttestation.Categorical(
                 rsEntity, "HAS_SEMANTIC_ROLE", roleId.Value, Source, TC.AcademicCurated,
                 contextId: ctx));
 
@@ -171,14 +171,14 @@ public sealed class PropBankDecomposer : IDecomposer
 
                 Hash128 vnEntity = VnClassId(vnClass);
                 b.AddEntity(new EntityRow(vnEntity, EntityTier.Vocabulary, VerbNetClassTypeId, Source));
-                b.AddAttestation(RelationTypeRegistry.Attest(
+                b.AddAttestation(NativeAttestation.Categorical(
                     rsEntity, "CORRESPONDS_TO", vnEntity, Source, TC.AcademicCurated));
 
                 if (theta.Length > 0)
                 {
                     var thetaId = ContentEmitter.Emit(b, theta, Source);
                     if (thetaId is not null)
-                        b.AddAttestation(RelationTypeRegistry.Attest(
+                        b.AddAttestation(NativeAttestation.Categorical(
                             roleId.Value, "CORRESPONDS_TO", thetaId.Value, Source, TC.AcademicCurated,
                             contextId: vnEntity));
                 }
@@ -195,7 +195,7 @@ public sealed class PropBankDecomposer : IDecomposer
                 if (ex.Length == 0) continue;
                 var exId = ContentEmitter.Emit(b, ex, Source);
                 if (exId is not null)
-                    b.AddAttestation(RelationTypeRegistry.Attest(
+                    b.AddAttestation(NativeAttestation.Categorical(
                         rsEntity, "HAS_EXAMPLE", exId.Value, Source, TC.AcademicCurated,
                         contextId: rsEntity));
             }

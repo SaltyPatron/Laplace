@@ -250,7 +250,7 @@ public sealed class ModelTableETL
                                          rb, re, theta, oR, oC, oV, oS, cap);
                     for (int e = 0; e < cnt; e++)
                     {
-                        b.AddAttestation(AttestationFactory.CreateAggregated(
+                        b.AddAttestation(NativeAttestation.Aggregated(
                             ents[oR[e]], typeId, ents[oC[e]], _source, ctx, 1, oS[e], ModelWeight));
                         _strands++;
                         if (++inChunk >= RowsPerChange)
@@ -294,7 +294,7 @@ public sealed class ModelTableETL
             {
                 int i = oR[e], j = oC[e];
                 if (selfPair && i == j) continue;
-                b.AddAttestation(AttestationFactory.CreateAggregated(
+                b.AddAttestation(NativeAttestation.Aggregated(
                     subj[leftBase + i], typeId, obj[j], _source, ctx, 1, oS[e], ModelWeight));
                 _strands++;
                 if (++inChunk >= RowsPerChange)

@@ -103,20 +103,18 @@ public static class OMWFastIngest
         switch (row.Type)
         {
             case OmwType.Lemma:
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    contentId.Value, "IS_TRANSLATION_OF", row.SynsetId, OMWDecomposer.Source, TC.AcademicCurated));
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    contentId.Value, "HAS_LANGUAGE", langId, OMWDecomposer.Source, TC.AcademicCurated));
+                b.AddAttestation(NativeAttestation.Categorical(
+                    contentId.Value, "IS_TRANSLATION_OF", row.SynsetId, OMWDecomposer.Source, null, TC.AcademicCurated));
+                b.AddAttestation(NativeAttestation.Categorical(
+                    contentId.Value, "HAS_LANGUAGE", langId, OMWDecomposer.Source, null, TC.AcademicCurated));
                 break;
             case OmwType.Def:
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    row.SynsetId, "HAS_DEFINITION", contentId.Value, OMWDecomposer.Source, TC.AcademicCurated,
-                    contextId: langId));
+                b.AddAttestation(NativeAttestation.Categorical(
+                    row.SynsetId, "HAS_DEFINITION", contentId.Value, OMWDecomposer.Source, langId, TC.AcademicCurated));
                 break;
             case OmwType.Exe:
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    row.SynsetId, "HAS_EXAMPLE", contentId.Value, OMWDecomposer.Source, TC.AcademicCurated,
-                    contextId: langId));
+                b.AddAttestation(NativeAttestation.Categorical(
+                    row.SynsetId, "HAS_EXAMPLE", contentId.Value, OMWDecomposer.Source, langId, TC.AcademicCurated));
                 break;
         }
     }

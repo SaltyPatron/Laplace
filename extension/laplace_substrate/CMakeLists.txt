@@ -4,6 +4,7 @@ if(WIN32)
         src/generate_walk.c
         src/generation_native.c
         src/astar_path.c
+        src/converse_native.c
     )
     set_target_properties(laplace_substrate PROPERTIES
         PREFIX "" OUTPUT_NAME laplace_substrate SUFFIX ".dll"
@@ -32,6 +33,7 @@ set(EXT_C_SOURCES
     src/generate_walk.c
     src/generation_native.c
     src/astar_path.c
+    src/converse_native.c
 )
 
 add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})
@@ -83,6 +85,7 @@ set(EXT_SQL_MODULES
     sql/16_inspect.sql.in
     sql/17_consensus_reads.sql.in
     sql/18_ops_surface.sql.in
+    sql/19_relation_law.sql.in
     sql/20_converse.sql.in
     sql/21_seed.sql.in
     sql/22_cascade_surface.sql.in
@@ -102,6 +105,7 @@ add_custom_command(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     COMMAND ${LAPLACE_SQLPP} -traditional-cpp -w -P -Upixel -Ubool
             -I${CMAKE_CURRENT_SOURCE_DIR}/sql
+            -I${CMAKE_CURRENT_SOURCE_DIR}/sql/generated
             -I${CMAKE_CURRENT_BINARY_DIR}/sql
             ${CMAKE_CURRENT_SOURCE_DIR}/sql/${EXT_NAME}.sql.in
             > ${EXT_TMP_SQL}

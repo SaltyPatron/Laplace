@@ -74,14 +74,14 @@ public sealed class BootstrapIntentBuilder
 
     private void AddTrustClassAttestation()
     {
-        _inner.AddAttestation(AttestationFactory.CreateCategorical(
-            subject:    _sourceId,
-            typeId:     HasTrustClassTypeId,
-            obj:        _trustClassId,
-            sourceId:   _sourceId,
-            contextId:  null,
-            confirm:    true,
-            witnessWeight: 1.0));
+        _inner.AddAttestation(NativeAttestation.CategoricalResolved(
+            subject: _sourceId,
+            typeId: HasTrustClassTypeId,
+            obj: _trustClassId,
+            sourceId: _sourceId,
+            contextId: null,
+            witnessWeight: 1.0,
+            confirm: true));
     }
 
     public SubstrateChange Build()

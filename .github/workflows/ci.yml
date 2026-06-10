@@ -12,6 +12,33 @@ permissions:
 
 jobs:
 
+  attestation-engine-law:
+    name: Attestation engine law (native-only policy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Regenerate attestation law and check drift
+        run: |
+          python scripts/codegen-attestation-law.py
+          git diff --exit-code engine/core/src/generated/ extension/laplace_substrate/sql/generated/
+
+      - name: Forbid C# attestation policy in decomposers
+        run: |
+          set -e
+          violations=0
+          shopt -s globstar
+          files=$(find app -path 'app/Laplace.Decomposers.*/*.cs' \
+            ! -path 'app/Laplace.Decomposers.*.Tests/*')
+          for pattern in AttestationFactory 'RelationTypeRegistry\.Attest' 'ScoreFp1e9\s*=' 'AttestationOutcome\.(Confirm|Refute|Draw)'; do
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              echo "::error file=$f::Forbidden attestation policy: $pattern"
+              violations=$((violations+1))
+            done < <(rg -l "$pattern" $files 2>/dev/null || true)
+          done
+          exit "$violations"
+
   markdown-lint:
     name: Markdown lint
     runs-on: ubuntu-latest
