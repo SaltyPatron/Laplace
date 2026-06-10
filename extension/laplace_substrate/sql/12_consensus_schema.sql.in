@@ -13,8 +13,8 @@ CREATE TABLE consensus (
 SELECT pg_extension_config_dump('consensus', '');
 
 CREATE INDEX consensus_object_btree       ON consensus (object_id) WHERE object_id IS NOT NULL;
-CREATE INDEX consensus_kind_btree         ON consensus (type_id);
-CREATE INDEX consensus_subject_kind_btree ON consensus (subject_id, type_id);
+CREATE INDEX consensus_type_btree         ON consensus (type_id);
+CREATE INDEX consensus_subject_type_btree ON consensus (subject_id, type_id);
 
 CREATE INDEX consensus_eff_mu_btree ON consensus (((rating - 2*rd)) DESC) WHERE object_id IS NOT NULL;
 

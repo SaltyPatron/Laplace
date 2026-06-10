@@ -60,13 +60,13 @@ BEGIN
     INSERT INTO canonical_names (id, name)
     VALUES (lang_en, 'test/lang/en'), (lang_de, 'test/lang/de')
     ON CONFLICT DO NOTHING;
-    PERFORM register_canonical('substrate/kind/IS_A/v1');
-    PERFORM register_canonical('substrate/kind/CAUSES/v1');
-    PERFORM register_canonical('substrate/kind/IS_ANTONYM_OF/v1');
-    PERFORM register_canonical('substrate/kind/HAS_DEFINITION/v1');
-    PERFORM register_canonical('substrate/kind/IS_SYNONYM_OF/v1');
-    PERFORM register_canonical('substrate/kind/IS_TRANSLATION_OF/v1');
-    PERFORM register_canonical('substrate/kind/HAS_LANGUAGE/v1');
+    PERFORM register_canonical('substrate/type/IS_A/v1');
+    PERFORM register_canonical('substrate/type/CAUSES/v1');
+    PERFORM register_canonical('substrate/type/IS_ANTONYM_OF/v1');
+    PERFORM register_canonical('substrate/type/HAS_DEFINITION/v1');
+    PERFORM register_canonical('substrate/type/IS_SYNONYM_OF/v1');
+    PERFORM register_canonical('substrate/type/IS_TRANSLATION_OF/v1');
+    PERFORM register_canonical('substrate/type/HAS_LANGUAGE/v1');
 
     INSERT INTO consensus (id, subject_id, type_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)
@@ -143,7 +143,7 @@ SELECT fact FROM related_in(laplace_hash128_blake3('test/converse/synset1'), rel
 SELECT reply FROM respond('is a dog a c?');
 SELECT reply FROM respond('is h a c?');
 
-SELECT g.step, type_label(g.type_id) AS kind,
+SELECT g.step, type_label(g.type_id) AS rel_type,
        g.entity_id = laplace_hash128_blake3('test/converse/synset2') AS is_synset2
 FROM generate_greedy(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A')) g;
 SELECT count(*) AS tree_nodes

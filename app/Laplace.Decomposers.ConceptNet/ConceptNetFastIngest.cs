@@ -24,7 +24,7 @@ internal static class ConceptNetFastIngest
         int inBatch = 0, bn = 0;
         long rowsInBatch = 0;
 
-        await foreach (var line in ReadLinesAsync(filePath, ct))
+        await foreach (var line in StreamingUtf8LineReader.ReadLinesAsync(filePath, ct))
         {
             ReadOnlySpan<byte> span = line.Span;
             if (langs?.IsActive == true && !ConceptNetRowFilter.MatchesLanguageFilter(span, langs))
@@ -53,59 +53,4 @@ internal static class ConceptNetFastIngest
             physicalityCapacity: batchSize * 32,
             attestationCapacity: batchSize * 8);
 
-    private static async IAsyncEnumerable<ReadOnlyMemory<byte>> ReadLinesAsync(
-        string filePath, [EnumeratorCancellation] CancellationToken ct)
-    {
-        await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
-            FileShare.Read, bufferSize: 1 << 20, useAsync: true);
-        var carry = new byte[256];
-        int carryLen = 0;
-        var buf = new byte[1 << 20];
-
-        int read;
-        while ((read = await fs.ReadAsync(buf, ct)) > 0)
-        {
-            ct.ThrowIfCancellationRequested();
-            int start = 0;
-            for (int i = 0; i < read; i++)
-            {
-                if (buf[i] != (byte)'\n') continue;
-
-                int lineLen = carryLen + (i - start);
-                var line = new byte[lineLen];
-                if (carryLen > 0)
-                {
-                    carry.AsSpan(0, carryLen).CopyTo(line);
-                    Buffer.BlockCopy(buf, start, line, carryLen, i - start);
-                    carryLen = 0;
-                }
-                else
-                {
-                    Buffer.BlockCopy(buf, start, line, 0, i - start);
-                }
-
-                if (lineLen > 0 && line[^1] == (byte)'\r') lineLen--;
-                if (lineLen > 0) yield return line.AsMemory(0, lineLen);
-                start = i + 1;
-            }
-
-            int tail = read - start;
-            if (tail <= 0) continue;
-            if (carryLen + tail > carry.Length)
-            {
-                var grown = new byte[Math.Max(carry.Length * 2, carryLen + tail)];
-                Buffer.BlockCopy(carry, 0, grown, 0, carryLen);
-                carry = grown;
-            }
-            Buffer.BlockCopy(buf, start, carry, carryLen, tail);
-            carryLen += tail;
-        }
-
-        if (carryLen > 0)
-        {
-            int lineLen = carryLen;
-            if (lineLen > 0 && carry[lineLen - 1] == (byte)'\r') lineLen--;
-            if (lineLen > 0) yield return carry.AsMemory(0, lineLen);
-        }
-    }
 }

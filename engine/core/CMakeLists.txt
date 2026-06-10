@@ -24,6 +24,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/sentence_break.h
     include/laplace/core/normalize_nfc.h
     include/laplace/core/text_decomposer.h
+    include/laplace/core/content_witness_batch.h
     include/laplace/core/unicode_seed.h
 )
 
@@ -54,6 +55,7 @@ set(LAPLACE_CORE_SOURCES
     src/sentence_break.c
     src/normalize_nfc.c
     src/text_decomposer.c
+    src/content_witness_batch.c
     src/unicode_seed.cpp
 )
 

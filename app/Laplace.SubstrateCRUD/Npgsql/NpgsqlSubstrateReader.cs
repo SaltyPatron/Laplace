@@ -16,7 +16,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         await using var cmd = _ds.CreateCommand(
             "SELECT laplace.evidence_count(p_type => laplace.canonical_id($1)) > 0");
         cmd.Parameters.AddWithValue(NpgsqlDbType.Text,
-            $"substrate/kind/HasLayerCompleted/{layerOrder}/v1");
+            $"substrate/type/HasLayerCompleted/{layerOrder}/v1");
         try
         {
             var result = await cmd.ExecuteScalarAsync(ct);
@@ -33,7 +33,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         await using var cmd = _ds.CreateCommand(
             "SELECT laplace.evidence_count(p_type => laplace.canonical_id($1), p_source => $2) > 0");
         cmd.Parameters.AddWithValue(NpgsqlDbType.Text,
-            $"substrate/kind/HasLayerCompleted/{layerOrder}/v1");
+            $"substrate/type/HasLayerCompleted/{layerOrder}/v1");
         cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
         try
         {

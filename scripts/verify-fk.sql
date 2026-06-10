@@ -30,10 +30,10 @@ BEGIN
 	IF EXISTS (
 		SELECT 1
 		FROM laplace.attestations a
-		LEFT JOIN laplace.entities e ON e.id = a.kind_id
+		LEFT JOIN laplace.entities e ON e.id = a.type_id
 		WHERE e.id IS NULL
 	) THEN
-		RAISE EXCEPTION 'orphan attestations.kind_id rows found';
+		RAISE EXCEPTION 'orphan attestations.type_id rows found';
 	END IF;
 
 	IF EXISTS (

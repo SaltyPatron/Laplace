@@ -279,7 +279,7 @@ CREATE OR REPLACE FUNCTION type_label(p_type bytea)
     RETURNS text
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
-    SELECT lower(replace(regexp_replace(render(p_type), '^substrate/kind/(.+)/v1$', '\1'),
+    SELECT lower(replace(regexp_replace(render(p_type), '^substrate/type/(.+)/v1$', '\1'),
                          '_', ' '))
 $$;
 
@@ -324,20 +324,20 @@ CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
         label(p_id))
 $$;
 
-CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_kinds bytea[],
+CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_types bytea[],
                                         p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     SELECT string_agg(
                CASE WHEN i = 1 THEN COALESCE(realize(p_path[i], p_lang), '?')
-                    ELSE ' —' || COALESCE(type_label(p_kinds[i-1]), '?') || '→ '
+                    ELSE ' —' || COALESCE(type_label(p_types[i-1]), '?') || '→ '
                          || COALESCE(realize(p_path[i], p_lang), '?')
                END, '' ORDER BY i)
     FROM generate_subscripts(p_path, 1) AS i
 $$;
 
-CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_kinds bytea[], p_dirs int[],
+CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_types bytea[], p_dirs int[],
                                         p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE
@@ -345,8 +345,8 @@ CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_kinds bytea[], p_dirs 
     SELECT string_agg(
                CASE WHEN i = 1 THEN COALESCE(realize(p_path[i], p_lang), '?')
                     ELSE CASE WHEN p_dirs[i-1] = -1
-                              THEN ' ←' || COALESCE(type_label(p_kinds[i-1]), '?') || '— '
-                              ELSE ' —' || COALESCE(type_label(p_kinds[i-1]), '?') || '→ '
+                              THEN ' ←' || COALESCE(type_label(p_types[i-1]), '?') || '— '
+                              ELSE ' —' || COALESCE(type_label(p_types[i-1]), '?') || '→ '
                          END || COALESCE(realize(p_path[i], p_lang), '?')
                END, '' ORDER BY i)
     FROM generate_subscripts(p_path, 1) AS i
@@ -429,9 +429,9 @@ CREATE OR REPLACE FUNCTION describe(p_word bytea, p_lang bytea DEFAULT NULL,
             WHERE c.subject_id = s.id
               AND c.object_id IS NOT NULL
               AND NOT refuted(c.rating, c.rd)
-              -- Only describe via real seeded relation kinds; a type_id outside the kind namespace
+              -- Only describe via real seeded relation types; a type_id outside the type namespace
               -- renders as a bare hash (UD-feature edges, etc.) and is not a describable fact.
-              AND render(c.type_id) LIKE 'substrate/kind/%'
+              AND render(c.type_id) LIKE 'substrate/type/%'
               -- Exclude bookkeeping, positional, and morpho-syntactic relations: they carry no
               -- descriptive content and (PRECEDES especially) dominate eff_mu after corpus ingest,
               -- burying the semantic facts that actually describe the topic.
@@ -466,7 +466,7 @@ CREATE OR REPLACE FUNCTION describe(p_word bytea, p_lang bytea DEFAULT NULL,
 $$;
 
 CREATE OR REPLACE FUNCTION isa_path(p_x bytea, p_y bytea, p_depth int DEFAULT 8)
-    RETURNS TABLE(path bytea[], kinds bytea[], path_mu numeric)
+    RETURNS TABLE(path bytea[], types bytea[], path_mu numeric)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     WITH RECURSIVE targets(id) AS (
@@ -481,10 +481,10 @@ CREATE OR REPLACE FUNCTION isa_path(p_x bytea, p_y bytea, p_depth int DEFAULT 8)
         SELECT p_x
         UNION
         SELECT sn.synset_id FROM senses(p_x) sn
-    ), up(node, path, kinds, path_mu, d) AS (
+    ), up(node, path, types, path_mu, d) AS (
         SELECT s.id, ARRAY[s.id], ARRAY[]::bytea[], NULL::numeric, 0 FROM start s
         UNION ALL
-        SELECT c.object_id, u.path || c.object_id, u.kinds || c.type_id,
+        SELECT c.object_id, u.path || c.object_id, u.types || c.type_id,
                LEAST(COALESCE(u.path_mu, eff_mu_display(c.rating, c.rd)),
                      eff_mu_display(c.rating, c.rd)),
                u.d + 1
@@ -496,7 +496,7 @@ CREATE OR REPLACE FUNCTION isa_path(p_x bytea, p_y bytea, p_depth int DEFAULT 8)
                         AND NOT (c.object_id = ANY (u.path))
         WHERE u.d < p_depth
     )
-    SELECT u.path, u.kinds, u.path_mu
+    SELECT u.path, u.types, u.path_mu
     FROM up u
     WHERE u.d > 0 AND u.node IN (SELECT t.id FROM targets t)
     ORDER BY cardinality(u.path), u.path_mu DESC
@@ -550,24 +550,24 @@ CREATE OR REPLACE FUNCTION reason(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
         FROM xset x JOIN consensus c ON c.object_id = x.id
             AND c.subject_id IN (SELECT id FROM yset)
             AND c.type_id IN (SELECT k FROM lat) AND NOT refuted(c.rating, c.rd)),
-    ux(node, path, kinds, mu, d) AS (
+    ux(node, path, types, mu, d) AS (
         SELECT id, ARRAY[id], ARRAY[]::bytea[], NULL::numeric, 0 FROM xset
         UNION ALL
-        SELECT c.object_id, u.path || c.object_id, u.kinds || c.type_id,
+        SELECT c.object_id, u.path || c.object_id, u.types || c.type_id,
                LEAST(COALESCE(u.mu, eff_mu_display(c.rating, c.rd)), eff_mu_display(c.rating, c.rd)), u.d + 1
         FROM ux u JOIN consensus c ON c.subject_id = u.node AND c.type_id IN (SELECT k FROM up_k)
             AND c.object_id IS NOT NULL AND NOT refuted(c.rating, c.rd) AND NOT (c.object_id = ANY (u.path))
         WHERE u.d < p_depth),
-    uy(node, path, kinds, mu, d) AS (
+    uy(node, path, types, mu, d) AS (
         SELECT id, ARRAY[id], ARRAY[]::bytea[], NULL::numeric, 0 FROM yset
         UNION ALL
-        SELECT c.object_id, u.path || c.object_id, u.kinds || c.type_id,
+        SELECT c.object_id, u.path || c.object_id, u.types || c.type_id,
                LEAST(COALESCE(u.mu, eff_mu_display(c.rating, c.rd)), eff_mu_display(c.rating, c.rd)), u.d + 1
         FROM uy u JOIN consensus c ON c.subject_id = u.node AND c.type_id IN (SELECT k FROM up_k)
             AND c.object_id IS NOT NULL AND NOT refuted(c.rating, c.rd) AND NOT (c.object_id = ANY (u.path))
         WHERE u.d < p_depth),
     lca_pick AS (
-        SELECT ux.path AS xp, ux.kinds AS xk, uy.path AS yp, uy.kinds AS yk,
+        SELECT ux.path AS xp, ux.types AS xk, uy.path AS yp, uy.types AS yk,
                LEAST(ux.mu, uy.mu) AS mu, ux.d + uy.d AS len
         FROM ux JOIN uy ON ux.node = uy.node
         WHERE ux.d > 0 OR uy.d > 0
@@ -705,14 +705,14 @@ CREATE OR REPLACE FUNCTION contrast(p_x bytea, p_y bytea, p_lang bytea DEFAULT N
 $$;
 
 CREATE OR REPLACE FUNCTION route_prompt(p_prompt text)
-    RETURNS TABLE(intent text, phrase text, phrase2 text, kind_name text)
+    RETURNS TABLE(intent text, phrase text, phrase2 text, type_name text)
     LANGUAGE plpgsql STABLE STRICT
     SET search_path = @extschema@, public AS $route$
 DECLARE
     p text := trim(p_prompt);
     m text[];
 BEGIN
-    intent := NULL; phrase := NULL; phrase2 := NULL; kind_name := NULL;
+    intent := NULL; phrase := NULL; phrase2 := NULL; type_name := NULL;
 
     m := regexp_match(p, '^what\s+does\s+(.+?)\s+mean\y', 'i');
     IF m IS NULL THEN m := regexp_match(p, '^(?:define|meaning\s+of)\s+(.+)$', 'i'); END IF;
@@ -720,7 +720,7 @@ BEGIN
 
     m := regexp_match(p, '^what\s+(?:is|are)\s+(?:(?:a|an|the)\s+)?(.+?)\s+used\s+for\??$', 'i');
     IF m IS NULL THEN m := regexp_match(p, '^uses?\s+of\s+(.+?)\??$', 'i'); END IF;
-    IF m IS NOT NULL THEN intent := 'related'; kind_name := 'USED_FOR'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
+    IF m IS NOT NULL THEN intent := 'related'; type_name := 'USED_FOR'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
     m := regexp_match(p, '^how\s+(?:are|is)\s+(.+?)\s+(?:and|&)\s+(.+?)\s+related\??$', 'i');
     IF m IS NULL THEN m := regexp_match(p, '^how\s+(?:is|are)\s+(.+?)\s+related\s+to\s+(.+?)\??$', 'i'); END IF;
@@ -747,10 +747,10 @@ BEGIN
     IF m IS NOT NULL THEN intent := 'complete'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
     m := regexp_match(p, '^(?:what\s+(?:word\s+|comes?\s+)?(?:comes?\s+)?after|what\s+follows?|after|follows?)\s+(.+?)\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'related'; kind_name := 'PRECEDES'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
+    IF m IS NOT NULL THEN intent := 'related'; type_name := 'PRECEDES'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
     m := regexp_match(p, '^(?:what\s+(?:word\s+|comes?\s+)?(?:comes?\s+)?before|what\s+precedes?|before|precedes?)\s+(.+?)\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'related'; kind_name := 'FOLLOWS'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
+    IF m IS NOT NULL THEN intent := 'related'; type_name := 'FOLLOWS'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
     m := regexp_match(p, '^(?:(?:and|what\s+about)\s+)?(?:its|their|his|her)\s+(definition|meaning|synonyms?|antonyms?|translations?|examples?|parts?|causes?|uses?)\??$', 'i');
     IF m IS NOT NULL THEN
@@ -761,7 +761,7 @@ BEGIN
             WHEN lower(m[1]) LIKE 'example%'              THEN 'examples'
             WHEN lower(m[1]) LIKE 'cause%'                THEN 'related_in'
             ELSE 'related' END;
-        kind_name := CASE
+        type_name := CASE
             WHEN lower(m[1]) LIKE 'antonym%' THEN 'IS_ANTONYM_OF'
             WHEN lower(m[1]) LIKE 'part%'    THEN 'HAS_PART'
             WHEN lower(m[1]) LIKE 'cause%'   THEN 'CAUSES'
@@ -773,16 +773,16 @@ BEGIN
     IF m IS NOT NULL THEN intent := 'describe'; RETURN NEXT; RETURN; END IF;
 
     m := regexp_match(p, '^antonyms?\s+(?:of|for)?\s*(.+?)\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'related'; kind_name := 'IS_ANTONYM_OF'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
+    IF m IS NOT NULL THEN intent := 'related'; type_name := 'IS_ANTONYM_OF'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
     m := regexp_match(p, '^parts?\s+of\s+(.+?)\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'related'; kind_name := 'HAS_PART'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
+    IF m IS NOT NULL THEN intent := 'related'; type_name := 'HAS_PART'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
     m := regexp_match(p, '^(?:what\s+causes|causes?\s+of)\s+(.+?)\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'related_in'; kind_name := 'CAUSES'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
+    IF m IS NOT NULL THEN intent := 'related_in'; type_name := 'CAUSES'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
     m := regexp_match(p, '^what\s+does\s+(.+?)\s+cause\??$', 'i');
-    IF m IS NOT NULL THEN intent := 'related'; kind_name := 'CAUSES'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
+    IF m IS NOT NULL THEN intent := 'related'; type_name := 'CAUSES'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
     m := regexp_match(p, 'synonyms?\s+(?:of|for)?\s*(.+)$', 'i');
     IF m IS NOT NULL THEN intent := 'synonyms'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
@@ -792,15 +792,15 @@ BEGIN
 
     -- code: "how [do I/you/we/to] {verb phrase} [in {lang}]"
     m := regexp_match(p, '^how\s+(?:do\s+(?:i|you|we)|to)\s+(.+?)(?:\s+in\s+\w+)?$', 'i');
-    IF m IS NOT NULL THEN intent := 'related'; kind_name := 'HAS_EXAMPLE'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
+    IF m IS NOT NULL THEN intent := 'related'; type_name := 'HAS_EXAMPLE'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
     -- code: "[show me] [a/an] example [of/for] {phrase}"
     m := regexp_match(p, '^(?:show\s+(?:me\s+)?(?:an?\s+)?)?(?:code\s+)?example\s+(?:of|for)\s+(.+?)$', 'i');
-    IF m IS NOT NULL THEN intent := 'related'; kind_name := 'HAS_EXAMPLE'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
+    IF m IS NOT NULL THEN intent := 'related'; type_name := 'HAS_EXAMPLE'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
     -- code: "write/generate/implement/create [a/an] {phrase} [function/method/script/snippet/code]"
     m := regexp_match(p, '^(?:write|generate|implement|create)\s+(?:(?:a|an|some|the)\s+)?(.+?)(?:\s+(?:function|method|script|snippet|code|program|class))?$', 'i');
-    IF m IS NOT NULL THEN intent := 'related'; kind_name := 'HAS_EXAMPLE'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
+    IF m IS NOT NULL THEN intent := 'related'; type_name := 'HAS_EXAMPLE'; phrase := m[1]; RETURN NEXT; RETURN; END IF;
 
     intent := 'fallback'; phrase := p;
     RETURN NEXT;
@@ -831,7 +831,7 @@ DECLARE
     v_lang   bytea;
     v_ctx    bytea[];
     v_path   bytea[];
-    v_kinds  bytea[];
+    v_types  bytea[];
     v_mu     numeric;
 BEGIN
     IF p_prompt IS NULL OR btrim(p_prompt) = '' THEN RETURN; END IF;
@@ -912,20 +912,20 @@ BEGIN
     ELSIF r.intent = 'related' THEN
         RETURN QUERY
             SELECT f.fact, f.eff_mu, f.witnesses
-            FROM related(v_topic, relation_type_id(r.kind_name), v_lang) f;
+            FROM related(v_topic, relation_type_id(r.type_name), v_lang) f;
         IF NOT FOUND THEN
             RETURN QUERY SELECT 'I hold "' || label(v_topic) || '" but no '
-                                || lower(replace(r.kind_name, '_', ' ')) || ' consensus yet.',
+                                || lower(replace(r.type_name, '_', ' ')) || ' consensus yet.',
                                 NULL::numeric, NULL::bigint;
         END IF;
 
     ELSIF r.intent = 'related_in' THEN
         RETURN QUERY
             SELECT f.fact, f.eff_mu, f.witnesses
-            FROM related_in(v_topic, relation_type_id(r.kind_name), v_lang) f;
+            FROM related_in(v_topic, relation_type_id(r.type_name), v_lang) f;
         IF NOT FOUND THEN
             RETURN QUERY SELECT 'I hold "' || label(v_topic) || '" but no incoming '
-                                || lower(replace(r.kind_name, '_', ' ')) || ' consensus yet.',
+                                || lower(replace(r.type_name, '_', ' ')) || ' consensus yet.',
                                 NULL::numeric, NULL::bigint;
         END IF;
 
@@ -936,10 +936,10 @@ BEGIN
                                 NULL::numeric, NULL::bigint;
             RETURN;
         END IF;
-        SELECT ip.path, ip.kinds, ip.path_mu INTO v_path, v_kinds, v_mu
+        SELECT ip.path, ip.types, ip.path_mu INTO v_path, v_types, v_mu
         FROM isa_path(v_topic, v_topic2) ip;
         IF v_path IS NOT NULL THEN
-            RETURN QUERY SELECT 'Yes — ' || realize_path(v_path, v_kinds, v_lang), v_mu, NULL::bigint;
+            RETURN QUERY SELECT 'Yes — ' || realize_path(v_path, v_types, v_lang), v_mu, NULL::bigint;
         ELSE
             RETURN QUERY SELECT 'No witnessed IS_A path from "'
                                 || COALESCE(realize(v_topic, v_lang), label(v_topic)) || '" to "'
@@ -1112,7 +1112,8 @@ $sl$;
 CREATE OR REPLACE FUNCTION generate(
         p_prompt text, p_steps int DEFAULT 16, p_window int DEFAULT 3,
         p_temperature double precision DEFAULT 0.6, p_topk int DEFAULT 8,
-        p_stop text[] DEFAULT '{}', p_boost double precision DEFAULT 0)
+        p_stop text[] DEFAULT '{}', p_boost double precision DEFAULT 0,
+        p_require_pos boolean DEFAULT true)
     RETURNS TABLE(step int, token text, mu numeric)
     LANGUAGE sql VOLATILE
     SET search_path = @extschema@, public AS $gen$
@@ -1137,10 +1138,12 @@ walk AS (
     UNION ALL
     SELECT w.ctx || nx.oid, nx.oid, nx.mu, w.step + 1
     FROM walk w CROSS JOIN LATERAL (
-        SELECT oid, mu FROM (
+        SELECT oid, mu, sc FROM (
             SELECT c.object_id oid,
                    eff_mu_display(max(c.rating), max(c.rd)) mu,
-                   sum(eff_mu(c.rating, c.rd)) / 1e9 AS sc
+                   sum(eff_mu(c.rating, c.rd)) / 1e9
+                     * (CASE WHEN p_boost > 0 AND c.object_id IN (SELECT id FROM field)
+                             THEN 1 + p_boost ELSE 1 END) AS sc
             FROM consensus c
             WHERE c.type_id = relation_type_id('PRECEDES')
               AND c.subject_id = ANY (
@@ -1149,10 +1152,12 @@ walk AS (
               AND NOT refuted(c.rating, c.rd)
               AND c.object_id <> ALL (w.ctx)
               AND c.object_id NOT IN (SELECT id FROM stops)
-              AND EXISTS (SELECT 1 FROM consensus h
-                          WHERE h.subject_id = c.object_id AND h.type_id = relation_type_id('HAS_POS'))
+              AND (NOT p_require_pos OR EXISTS (
+                      SELECT 1 FROM consensus h
+                       WHERE h.subject_id = c.object_id
+                         AND h.type_id = relation_type_id('HAS_POS')))
             GROUP BY c.object_id
-            ORDER BY sum(eff_mu(c.rating, c.rd)) DESC
+            ORDER BY sc DESC
             LIMIT p_topk
         ) cand
         ORDER BY CASE WHEN p_temperature <= 0 THEN sc

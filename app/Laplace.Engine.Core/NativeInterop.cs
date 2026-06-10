@@ -169,7 +169,7 @@ public static unsafe partial class NativeInterop
     internal static partial int IntentStageAddPhysicality(
         IntPtr stage,
         Hash128* id, Hash128* entityId, Hash128* sourceId,
-        short kind,
+        short physicalityType,
         double* coord, Hilbert128* hilbertIndex,
         double* trajectoryXyzm, uint trajectoryNVertices,
         int nConstituents,
@@ -221,8 +221,8 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_ast_get_node")]
     internal static partial int AstGetNode(IntPtr ast, nuint idx, LaplaceAstNode* outNode);
 
-    [LibraryImport(Library, EntryPoint = "laplace_ast_kind_name")]
-    internal static partial IntPtr AstKindName(IntPtr ast, uint kindId);
+    [LibraryImport(Library, EntryPoint = "laplace_ast_type_name")]
+    internal static partial IntPtr AstTypeName(IntPtr ast, uint nodeTypeId);
 
     [LibraryImport(Library, EntryPoint = "laplace_ast_free")]
     internal static partial void AstFree(IntPtr ast);
@@ -352,4 +352,12 @@ public static unsafe partial class NativeInterop
         public Hash128 ObjectId;
         public long Games;
     }
+
+    [LibraryImport(Library, EntryPoint = "content_witness_batch_add")]
+    internal static partial int ContentWitnessBatchAdd(
+        IntPtr stage,
+        byte* utf8,
+        nuint len,
+        Hash128* sourceId,
+        Hash128* outRootId);
 }

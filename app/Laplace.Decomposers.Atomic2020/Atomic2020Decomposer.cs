@@ -13,8 +13,8 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
-    private static readonly Hash128 MarkerTypeId = Hash128.OfCanonical("substrate/type/Atomic_Marker/v1");
-    private static readonly Hash128 SplitTypeId  = Hash128.OfCanonical("substrate/type/Atomic_Split/v1");
+    private static readonly Hash128 MarkerTypeId = EntityTypeRegistry.AtomicMarker;
+    private static readonly Hash128 SplitTypeId  = EntityTypeRegistry.AtomicSplit;
     private static readonly Hash128 NoneId       = Hash128.OfCanonical("substrate/atomic/none/v1");
 
     private static Hash128 SplitId(string s) => Hash128.OfCanonical($"atomic/split/{s}");

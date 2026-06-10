@@ -25,10 +25,29 @@ namespace {
 using SpMat = Eigen::SparseMatrix<double>;
 using Triplet = Eigen::Triplet<double>;
 
+#if defined(__AVX2__) && defined(__x86_64__)
+#  include <immintrin.h>
+#endif
+
 double sq_dist(const double* pts, std::size_t a, std::size_t b, std::size_t d) {
+    const double* pa = pts + a * d;
+    const double* pb = pts + b * d;
     double s = 0.0;
-    for (std::size_t k = 0; k < d; ++k) {
-        const double diff = pts[a * d + k] - pts[b * d + k];
+    std::size_t k = 0;
+#if defined(__AVX2__) && defined(__x86_64__)
+    __m256d acc = _mm256_setzero_pd();
+    for (; k + 4 <= d; k += 4) {
+        __m256d va = _mm256_loadu_pd(pa + k);
+        __m256d vb = _mm256_loadu_pd(pb + k);
+        __m256d diff = _mm256_sub_pd(va, vb);
+        acc = _mm256_fmadd_pd(diff, diff, acc);
+    }
+    alignas(32) double parts[4];
+    _mm256_store_pd(parts, acc);
+    s = parts[0] + parts[1] + parts[2] + parts[3];
+#endif
+    for (; k < d; ++k) {
+        const double diff = pa[k] - pb[k];
         s += diff * diff;
     }
     return s;

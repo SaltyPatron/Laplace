@@ -252,13 +252,16 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
         if (string.IsNullOrWhiteSpace(_options.WebhookSecret))
             return Task.FromResult(Result(false, false, false, null, "unknown", "webhook_secret_unconfigured", null, null, null, null));
 
-        try
+        if (!_options.SkipSignatureVerification)
         {
-            EventUtility.ConstructEvent(payload, signature, _options.WebhookSecret);
-        }
-        catch (StripeException)
-        {
-            return Task.FromResult(Result(false, false, false, null, "unknown", "invalid_signature", null, null, null, null));
+            try
+            {
+                EventUtility.ConstructEvent(payload, signature, _options.WebhookSecret, throwOnApiVersionMismatch: false);
+            }
+            catch (Exception)
+            {
+                return Task.FromResult(Result(false, false, false, null, "unknown", "invalid_signature", null, null, null, null));
+            }
         }
 
         const bool verified = true;

@@ -7,7 +7,7 @@ public static class PhysicalityId
     public static Hash128 Compute(
         Hash128 entityId,
         Hash128 sourceId,
-        PhysicalityType kind,
+        PhysicalityType type,
         double coordX, double coordY, double coordZ, double coordM,
         ReadOnlySpan<double> trajectory)
     {
@@ -19,7 +19,7 @@ public static class PhysicalityId
         int o = 0;
         entityId.WriteBytes(span.Slice(o, 16)); o += 16;
         sourceId.WriteBytes(span.Slice(o, 16)); o += 16;
-        BitConverter.TryWriteBytes(span.Slice(o, 2), (short)kind); o += 2;
+        BitConverter.TryWriteBytes(span.Slice(o, 2), (short)type); o += 2;
         BitConverter.TryWriteBytes(span.Slice(o, 8), coordX); o += 8;
         BitConverter.TryWriteBytes(span.Slice(o, 8), coordY); o += 8;
         BitConverter.TryWriteBytes(span.Slice(o, 8), coordZ); o += 8;

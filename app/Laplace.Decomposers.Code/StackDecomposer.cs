@@ -97,7 +97,14 @@ public sealed class StackDecomposer : IDecomposer
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var files = EnumerateParquet(context.EcosystemPath).ToList();
-        if (files.Count == 0) yield break;
+        if (files.Count == 0)
+        {
+            if (Directory.Exists(context.EcosystemPath))
+                throw new InvalidOperationException(
+                    $"StackDecomposer: no *.parquet files under '{context.EcosystemPath}' "
+                    + "(expected data/<lang>/train-*.parquet from download-code-data.cmd)");
+            yield break;
+        }
 
         int batch = options.BatchSize > 1 ? options.BatchSize : 32;
         var b = NewBuilder(0);

@@ -5,6 +5,35 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Tatoeba;
 
+internal static class TatoebaWitness
+{
+    public static void WalkSentence(in TatoebaSentenceRow row, SubstrateChangeBuilder b)
+    {
+        Hash128 extId = SourceEntityIdConventions.TatoebaSentence(row.Id);
+        Hash128 langId = LanguageReference.Resolve(row.Lang);
+        b.AddEntity(new EntityRow(extId, EntityTier.Vocabulary, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
+        b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, TatoebaDecomposer.LanguageTypeId, TatoebaDecomposer.Source));
+
+        if (ContentEmitter.Emit(b, row.Text, TatoebaDecomposer.Source) is { } emitted)
+        {
+            b.AddAttestation(RelationTypeRegistry.Attest(
+                emitted, "HAS_EXTERNAL_ID", extId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
+            b.AddAttestation(RelationTypeRegistry.Attest(
+                emitted, "HAS_LANGUAGE", langId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
+        }
+    }
+
+    public static void WalkLink(in TatoebaLinkRow row, SubstrateChangeBuilder b)
+    {
+        Hash128 ea = SourceEntityIdConventions.TatoebaSentence(row.A);
+        Hash128 eb = SourceEntityIdConventions.TatoebaSentence(row.B);
+        b.AddEntity(new EntityRow(ea, EntityTier.Vocabulary, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
+        b.AddEntity(new EntityRow(eb, EntityTier.Vocabulary, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
+        b.AddAttestation(RelationTypeRegistry.Attest(
+            ea, "IS_TRANSLATION_OF", eb, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
+    }
+}
+
 internal sealed class TatoebaSentenceWitness : IGrammarWitness
 {
     private readonly HashSet<long>? _allowedIds;
@@ -32,29 +61,12 @@ internal sealed class TatoebaSentenceWitness : IGrammarWitness
         if (_langs?.MatchesRaw(lang) == false) return;
         _allowedIds?.Add(sid);
 
-        Hash128 extId = SourceEntityIdConventions.TatoebaSentence(sid);
-        Hash128 langId = LanguageReference.Resolve(lang);
-        b.AddEntity(new EntityRow(extId, EntityTier.Vocabulary, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
-        b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, TatoebaDecomposer.LanguageTypeId, TatoebaDecomposer.Source));
-
-        if (composed.Composer.TrySpanEntity(fields[2].Start, fields[2].End, out var contentId))
+        TatoebaWitness.WalkSentence(new TatoebaSentenceRow
         {
-            b.AddAttestation(RelationTypeRegistry.Attest(
-                contentId, "HAS_EXTERNAL_ID", extId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
-            b.AddAttestation(RelationTypeRegistry.Attest(
-                contentId, "HAS_LANGUAGE", langId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
-        }
-        else
-        {
-            string text = FieldText(composed, fields[2]);
-            if (ContentEmitter.Emit(b, text, TatoebaDecomposer.Source) is { } emitted)
-            {
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    emitted, "HAS_EXTERNAL_ID", extId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
-                b.AddAttestation(RelationTypeRegistry.Attest(
-                    emitted, "HAS_LANGUAGE", langId, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
-            }
-        }
+            Id = sid,
+            Lang = lang,
+            Text = FieldText(composed, fields[2]),
+        }, b);
     }
 
     private static string FieldText(in GrammarComposeContext ctx, (uint Start, uint End) span) =>
@@ -80,12 +92,7 @@ internal sealed class TatoebaLinkWitness : IGrammarWitness
         if (_allowedIds is not null && (!_allowedIds.Contains(a) || !_allowedIds.Contains(bId)))
             return;
 
-        Hash128 ea = SourceEntityIdConventions.TatoebaSentence(a);
-        Hash128 eb = SourceEntityIdConventions.TatoebaSentence(bId);
-        b.AddEntity(new EntityRow(ea, EntityTier.Vocabulary, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
-        b.AddEntity(new EntityRow(eb, EntityTier.Vocabulary, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
-        b.AddAttestation(RelationTypeRegistry.Attest(
-            ea, "IS_TRANSLATION_OF", eb, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
+        TatoebaWitness.WalkLink(new TatoebaLinkRow { A = a, B = bId }, b);
     }
 
     private static string FieldText(in GrammarComposeContext ctx, (uint Start, uint End) span) =>

@@ -13,7 +13,7 @@ CREATE INDEX physicalities_radius_btree    ON physicalities USING btree (radius_
 CREATE INDEX physicalities_residual_btree  ON physicalities USING btree (alignment_residual) WHERE alignment_residual IS NOT NULL;
 CREATE INDEX physicalities_observed_brin   ON physicalities USING brin  (observed_at);
 
-CREATE INDEX attestations_kind_btree          ON attestations USING btree (type_id);
+CREATE INDEX attestations_type_btree          ON attestations USING btree (type_id);
 CREATE INDEX attestations_object_btree        ON attestations USING btree (object_id) WHERE object_id IS NOT NULL;
 CREATE INDEX attestations_source_btree        ON attestations USING btree (source_id);
 CREATE INDEX attestations_context_btree       ON attestations USING btree (context_id) WHERE context_id IS NOT NULL;

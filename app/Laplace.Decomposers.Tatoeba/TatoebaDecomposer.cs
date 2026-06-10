@@ -2,7 +2,6 @@ using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Tatoeba;
 
@@ -13,10 +12,8 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
-    internal static readonly Hash128 SentenceRefTypeId =
-        Hash128.OfCanonical("substrate/type/Tatoeba_Sentence/v1");
-    internal static readonly Hash128 LanguageTypeId =
-        Hash128.OfCanonical("substrate/type/Language/v1");
+    internal static readonly Hash128 SentenceRefTypeId = EntityTypeRegistry.TatoebaSentence;
+    internal static readonly Hash128 LanguageTypeId   = EntityTypeRegistry.Language;
 
 
     public Hash128 SourceId     => Source;
@@ -46,10 +43,8 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
 
         if (File.Exists(sentences))
         {
-            var witness = new TatoebaSentenceWitness(allowedSentenceIds, options.Languages);
-            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-                sentences, "tsv", Source, witness, batch, SourceTrust.StructuredCorpus,
-                "tatoeba/sent", reportUnits: null, contextId: null, commitEpoch: 0, ct: ct))
+            await foreach (var change in TatoebaFastIngest.IngestSentencesAsync(
+                sentences, batch, options.Languages, allowedSentenceIds, ct))
             {
                 if (!options.DryRun) yield return change;
             }
@@ -57,10 +52,8 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
 
         if (File.Exists(links))
         {
-            var witness = new TatoebaLinkWitness(allowedSentenceIds);
-            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-                links, "tsv", Source, witness, batch, SourceTrust.StructuredCorpus,
-                "tatoeba/link", reportUnits: null, contextId: null, commitEpoch: 1, ct: ct))
+            await foreach (var change in TatoebaFastIngest.IngestLinksAsync(
+                links, batch, allowedSentenceIds, ct))
             {
                 if (!options.DryRun) yield return change;
             }
@@ -69,7 +62,11 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
 
     public async Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
-        => await EtlInventory.TatoebaAsync(context.EcosystemPath, options.Languages, ct);
+    {
+        if (options.Languages?.IsActive == true)
+            return null;
+        return await EtlInventory.TatoebaAsync(context.EcosystemPath, options.Languages, ct);
+    }
 
     public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {

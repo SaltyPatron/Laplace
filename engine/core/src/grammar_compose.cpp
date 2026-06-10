@@ -17,9 +17,9 @@ static void hash_canonical(const char* s, hash128_t* out) {
     hash128_blake3(reinterpret_cast<const uint8_t*>(s), strlen(s), out);
 }
 
-static void kind_type_id(const char* modality, const char* kind, hash128_t* out) {
+static void node_type_entity_id(const char* modality, const char* node_type, hash128_t* out) {
     char buf[256];
-    int n = snprintf(buf, sizeof(buf), "substrate/type/grammar/%s/%s/v1", modality, kind);
+    int n = snprintf(buf, sizeof(buf), "substrate/type/grammar/%s/%s/v1", modality, node_type);
     if (n <= 0 || (size_t)n >= sizeof(buf)) {
         hash128_zero(out);
         return;
@@ -43,8 +43,8 @@ static void physicality_id_compute(hash128_t entity_id, hash128_t source_id,
     size_t o = 0;
     memcpy(buf + o, &entity_id, 16); o += 16;
     memcpy(buf + o, &source_id, 16); o += 16;
-    int16_t kind = 1; /* PhysicalityType.Content */
-    memcpy(buf + o, &kind, 2); o += 2;
+    int16_t physicality_type = 1; /* PhysicalityType.Content */
+    memcpy(buf + o, &physicality_type, 2); o += 2;
     memcpy(buf + o, coord, 32); o += 32;
     if (traj_n > 0) {
         memcpy(buf + o, traj, traj_bytes);
@@ -264,9 +264,9 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
     compose_state_t st = {0};
     size_t n = 0;
     hash128_t* emitted_entity = NULL;
-    hash128_t* emitted_kind   = NULL;
+    hash128_t* emitted_type   = NULL;
     size_t emitted_entity_n = 0, emitted_entity_cap = 0;
-    size_t emitted_kind_n   = 0, emitted_kind_cap   = 0;
+    size_t emitted_type_n   = 0, emitted_type_cap   = 0;
     int rc = 0;
 
     tier_tree_t* tree = NULL;
@@ -313,14 +313,14 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
 
         laplace_ast_node_t node;
         if (laplace_ast_get_node(ast, idx, &node) != 0) continue;
-        const char* kind = laplace_ast_kind_name(ast, node.kind_id);
-        if (!kind) kind = "unknown";
-        hash128_t kind_type;
-        kind_type_id(modality_id, kind, &kind_type);
-        if (compose_id_push(&emitted_kind, &emitted_kind_n, &emitted_kind_cap, kind_type) == 1) {
-            if (push_entity(r, kind_type, 0, type_meta_id) != 0) { rc = -3; goto fail_emit; }
+        const char* node_type = laplace_ast_type_name(ast, node.type_id);
+        if (!node_type) node_type = "unknown";
+        hash128_t grammar_type_id;
+        node_type_entity_id(modality_id, node_type, &grammar_type_id);
+        if (compose_id_push(&emitted_type, &emitted_type_n, &emitted_type_cap, grammar_type_id) == 1) {
+            if (push_entity(r, grammar_type_id, 0, type_meta_id) != 0) { rc = -3; goto fail_emit; }
         }
-        if (push_entity(r, id, st.comp_tier[idx], kind_type) != 0) { rc = -3; goto fail_emit; }
+        if (push_entity(r, id, st.comp_tier[idx], grammar_type_id) != 0) { rc = -3; goto fail_emit; }
 
         hilbert128_t hb;
         hilbert4d_encode(st.comp_coord + idx * 4, &hb);
@@ -432,7 +432,7 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
     }
 
     free(emitted_entity);
-    free(emitted_kind);
+    free(emitted_type);
     free(st.comp_id);
     free(st.comp_coord);
     free(st.comp_tier);
@@ -444,7 +444,7 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
 
 fail_emit:
     free(emitted_entity);
-    free(emitted_kind);
+    free(emitted_type);
 fail_st:
     free(st.comp_id);
     free(st.comp_coord);

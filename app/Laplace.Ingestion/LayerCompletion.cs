@@ -7,7 +7,7 @@ namespace Laplace.Ingestion;
 public static class LayerCompletion
 {
     public static Hash128 RelationTypeId(int layerOrder) =>
-        Hash128.OfCanonical($"substrate/kind/HasLayerCompleted/{layerOrder}/v1");
+        Hash128.OfCanonical($"substrate/type/HasLayerCompleted/{layerOrder}/v1");
 
     public static SubstrateChange BuildMarker(IDecomposer decomposer)
     {

@@ -19,7 +19,7 @@ trap 'rm -f "$TMP"' EXIT
 SET check_function_bodies = off;
 CREATE OR REPLACE FUNCTION pg_temp.relation_type_id(p_name text) RETURNS bytea
     LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
-    SELECT laplace.canonical_id('substrate/kind/' || p_name || '/v1')
+    SELECT laplace.canonical_id('substrate/type/' || p_name || '/v1')
 $$;
 CREATE OR REPLACE FUNCTION pg_temp.eff_mu(p_rating bigint, p_rd bigint) RETURNS bigint
     LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
@@ -43,7 +43,7 @@ DECLARE
     seen bytea[] := ARRAY[p_prompt];
 BEGIN
     FOR i IN 1..p_depth LOOP
-        SELECT c.object_id, c.type_id AS step_kind, pg_temp.eff_mu_display(c.rating, c.rd) AS mu
+        SELECT c.object_id, c.type_id AS step_type, pg_temp.eff_mu_display(c.rating, c.rd) AS mu
         INTO nxt
         FROM laplace.consensus c
         WHERE c.subject_id = cur AND c.object_id IS NOT NULL
@@ -53,7 +53,7 @@ BEGIN
         ORDER BY pg_temp.eff_mu(c.rating, c.rd) DESC
         LIMIT 1;
         EXIT WHEN nxt IS NULL OR nxt.object_id IS NULL;
-        step := i; type_id := nxt.step_kind; entity_id := nxt.object_id; eff_mu := nxt.mu;
+        step := i; type_id := nxt.step_type; entity_id := nxt.object_id; eff_mu := nxt.mu;
         RETURN NEXT;
         seen := seen || nxt.object_id;
         cur  := nxt.object_id;

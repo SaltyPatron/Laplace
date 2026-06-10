@@ -31,7 +31,7 @@ Inverse-encode law: the exporter must invert the ingest encode (s = ½(1+tanh(w/
 
 ## Model deposition (the other direction, summarized)
 
-Cell ETL: every non-zero weight cell = one adjudicated match under its tensor-role kind; positions aggregate as witnesses; context_id = layer/head circuit entity; M = pooled tensor RMS; lottery-ticket sparsity (flat noise thresholds are banned as a class). Re-ingest refused (double-counting). Geometry side: LE+GSO+PA fireflies per circuit (GEOMETRY.md).
+Cell ETL: every non-zero weight cell = one adjudicated match under its tensor-role type; positions aggregate as witnesses; context_id = layer/head circuit entity; M = pooled tensor RMS; lottery-ticket sparsity (flat noise thresholds are banned as a class). Re-ingest refused (double-counting). Geometry side: LE+GSO+PA fireflies per circuit (GEOMETRY.md).
 
 ## Validation: behavioral, not bitwise
 

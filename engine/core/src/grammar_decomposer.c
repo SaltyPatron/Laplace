@@ -15,7 +15,7 @@ struct laplace_ast {
     int                 oom;
 };
 
-static uint32_t ast_append(laplace_ast_t* ast, uint32_t kind_id,
+static uint32_t ast_append(laplace_ast_t* ast, uint32_t type_id,
                            uint32_t start_byte, uint32_t end_byte,
                            uint32_t parent, uint8_t is_error) {
     if (ast->count >= ast->cap) {
@@ -28,7 +28,7 @@ static uint32_t ast_append(laplace_ast_t* ast, uint32_t kind_id,
     }
     uint32_t idx = (uint32_t)ast->count++;
     laplace_ast_node_t* nd = &ast->nodes[idx];
-    nd->kind_id    = kind_id;
+    nd->type_id    = type_id;
     nd->start_byte = start_byte;
     nd->end_byte   = end_byte;
     nd->parent     = parent;
@@ -38,12 +38,14 @@ static uint32_t ast_append(laplace_ast_t* ast, uint32_t kind_id,
 }
 
 /* Pre-order: a named node is appended, then its children recurse with it as parent.
- * Anonymous nodes are transparent — their named descendants link through to the
- * nearest named ancestor. */
+ * Anonymous LEAF tokens (operators, punctuation, keywords-as-literals) are appended
+ * too — constituency must carry the complete token stream or rendered/generated code
+ * loses its syntax. Anonymous interior nodes stay transparent: their descendants
+ * link through to the nearest appended ancestor. */
 static void ast_walk(laplace_ast_t* ast, TSNode node, uint32_t parent_idx) {
     if (ast->oom) return;
     uint32_t next_parent = parent_idx;
-    if (ts_node_is_named(node)) {
+    if (ts_node_is_named(node) || ts_node_child_count(node) == 0) {
         uint32_t idx = ast_append(ast,
             (uint32_t)ts_node_symbol(node),
             ts_node_start_byte(node),
@@ -98,9 +100,9 @@ int laplace_ast_get_node(const laplace_ast_t* ast, size_t idx, laplace_ast_node_
     return 0;
 }
 
-const char* laplace_ast_kind_name(const laplace_ast_t* ast, uint32_t kind_id) {
+const char* laplace_ast_type_name(const laplace_ast_t* ast, uint32_t type_id) {
     if (!ast || !ast->lang) return NULL;
-    return ts_language_symbol_name(ast->lang, (TSSymbol)kind_id);
+    return ts_language_symbol_name(ast->lang, (TSSymbol)type_id);
 }
 
 void laplace_ast_free(laplace_ast_t* ast) {

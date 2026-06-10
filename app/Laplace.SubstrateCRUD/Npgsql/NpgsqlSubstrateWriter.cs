@@ -103,6 +103,21 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         _provenPhys.AddRange(existingPhys);
         _provenAtt.AddRange(existingAtt);
 
+        int prebuiltEntityInserts = 0, prebuiltPhysInserts = 0;
+        foreach (var c in changes)
+        {
+            if (c.IntentStages.Length == 0) continue;
+            foreach (var pre in c.IntentStages)
+            {
+                if (pre.IsInvalid) continue;
+                prebuiltEntityInserts += await StageAndInsertAsync(
+                    conn, pre, IntentStageTable.Entities, "entities", ct);
+                prebuiltPhysInserts += await StageAndInsertAsync(
+                    conn, pre, IntentStageTable.Physicalities, "physicalities", ct);
+                roundTrips += 2;
+            }
+        }
+
         using var stage = IntentStage.New(Math.Max(Math.Max(uniqueEntityIds.Count, physAttempted), attAttempted));
 
         var seenEntity = new HashSet<Hash128>(uniqueEntityIds.Count);
@@ -467,8 +482,11 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
     private static void ValidateCopyBlob(IntPtr ptr, long len, int expectedFields, string tableName, int rowCount)
     {
         if (ptr == IntPtr.Zero || len <= 0) return;
-        var blob = new byte[len];
-        System.Runtime.InteropServices.Marshal.Copy(ptr, blob, 0, checked((int)len));
+        var blob = GC.AllocateUninitializedArray<byte>(checked((int)len));
+        unsafe
+        {
+            new ReadOnlySpan<byte>((void*)ptr, checked((int)len)).CopyTo(blob);
+        }
 
         // Entities are STRICTLY fixed-size: int16(4) + [int32(16)+16 id] + [int32(2)+2 tier]
         // + [int32(16)+16 type_id] + [int32(16)+16 fob | int32(-1) NULL fob].
@@ -661,7 +679,10 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 for (long off = 0; off < len; off += window.Length)
                 {
                     int n = (int)Math.Min(window.Length, len - off);
-                    System.Runtime.InteropServices.Marshal.Copy(ptr + (nint)off, window, 0, n);
+                    unsafe
+                    {
+                        new ReadOnlySpan<byte>((void*)(ptr + (nint)off), n).CopyTo(window);
+                    }
                     await stream.WriteAsync(window.AsMemory(0, n), ct);
                 }
             }

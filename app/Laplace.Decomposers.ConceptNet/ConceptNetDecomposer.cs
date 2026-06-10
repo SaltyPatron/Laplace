@@ -14,7 +14,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/UserCuratedResource/v1");
 
-    private static readonly Hash128 LanguageTypeId = Hash128.OfCanonical("substrate/type/Language/v1");
+    private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
 
     internal static readonly Dictionary<string, string> RelMap = new(StringComparer.Ordinal)
     {

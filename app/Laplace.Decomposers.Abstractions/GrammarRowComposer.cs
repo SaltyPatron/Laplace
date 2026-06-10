@@ -93,7 +93,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         for (int i = 0; i < _ast.NodeCount; i++)
         {
             var nd = _ast.GetNode(i);
-            if (_ast.KindName(nd.KindId) == "field")
+            if (_ast.NodeTypeName(nd.NodeTypeId) == "field")
                 list.Add((nd.StartByte, nd.EndByte));
         }
         return list;

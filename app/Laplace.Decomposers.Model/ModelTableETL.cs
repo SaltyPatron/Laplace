@@ -4,6 +4,7 @@ using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using DynInterop = Laplace.Engine.Dynamics.NativeInterop;
+using SynInterop = Laplace.Engine.Synthesis.NativeInterop;
 
 namespace Laplace.Decomposers.Model;
 
@@ -239,7 +240,7 @@ public sealed class ModelTableETL
                 long cap = (long)RowTile * n;
                 var oR = new int[cap]; var oC = new int[cap];
                 var oV = new double[cap]; var oS = new long[cap];
-                var kind = RelationTypeRegistry.RelationTypeId(ctr.RelationName);
+                var typeId = RelationTypeRegistry.RelationTypeId(ctr.RelationName);
                 var b = NewChunk(ctr.RelationName); int inChunk = 0;
                 for (int rb = 0; rb < n; rb += RowTile)
                 {
@@ -250,7 +251,7 @@ public sealed class ModelTableETL
                     for (int e = 0; e < cnt; e++)
                     {
                         b.AddAttestation(AttestationFactory.CreateAggregated(
-                            ents[oR[e]], kind, ents[oC[e]], _source, ctx, 1, oS[e], ModelWeight));
+                            ents[oR[e]], typeId, ents[oC[e]], _source, ctx, 1, oS[e], ModelWeight));
                         _strands++;
                         if (++inChunk >= RowsPerChange)
                         {
@@ -272,18 +273,18 @@ public sealed class ModelTableETL
     // ── edge emission ─────────────────────────────────────────────────────────
 
     private async IAsyncEnumerable<SubstrateChange> EmitEdges(
-        double[] left, int nLeft, double[] right, int nRight, int dim, string kindName,
+        double[] left, int nLeft, double[] right, int nRight, int dim, string typeName,
         List<Hash128> subj, List<Hash128> obj, Hash128? ctx,
         System.Diagnostics.Stopwatch sw, [EnumeratorCancellation] CancellationToken ct,
         int leftBase = 0)
     {
-        var kind  = RelationTypeRegistry.RelationTypeId(kindName);
+        var typeId  = RelationTypeRegistry.RelationTypeId(typeName);
         double theta = NoiseFloor(dim);
         long cap  = (long)RowTile * nRight;
         var oR = new int[cap]; var oC = new int[cap];
         var oV = new double[cap]; var oS = new long[cap];
         bool selfPair = ReferenceEquals(left, right);
-        var b = NewChunk(kindName); int inChunk = 0;
+        var b = NewChunk(typeName); int inChunk = 0;
         for (int rb = 0; rb < nLeft; rb += RowTile)
         {
             ct.ThrowIfCancellationRequested();
@@ -294,12 +295,12 @@ public sealed class ModelTableETL
                 int i = oR[e], j = oC[e];
                 if (selfPair && i == j) continue;
                 b.AddAttestation(AttestationFactory.CreateAggregated(
-                    subj[leftBase + i], kind, obj[j], _source, ctx, 1, oS[e], ModelWeight));
+                    subj[leftBase + i], typeId, obj[j], _source, ctx, 1, oS[e], ModelWeight));
                 _strands++;
                 if (++inChunk >= RowsPerChange)
                 {
                     yield return b.SetInputUnitsConsumed(inChunk).Build();
-                    b = NewChunk(kindName); inChunk = 0;
+                    b = NewChunk(typeName); inChunk = 0;
                     await Task.Yield();
                 }
             }
@@ -408,11 +409,18 @@ public sealed class ModelTableETL
     private static double[] ToD(float[] m, int n, int d)
     {
         var o = new double[(long)n * d];
-        System.Threading.Tasks.Parallel.For(0, n, i =>
+        var map = new int[n];
+        for (int i = 0; i < n; i++) map[i] = i;
+        unsafe
         {
-            long e = (long)i * d;
-            for (int c = 0; c < d; c++) o[e + c] = m[e + c];
-        });
+            fixed (float* src = m)
+            fixed (int* rm = map)
+            fixed (double* dst = o)
+            {
+                int rc = SynInterop.F32GatherToF64(src, rm, (nuint)n, (nuint)d, dst);
+                if (rc != 0) throw new InvalidOperationException($"f32_gather_to_f64 returned {rc}");
+            }
+        }
         return o;
     }
 
@@ -432,12 +440,23 @@ public sealed class ModelTableETL
     {
         var raw = LoadF32(tensorName, (long)vocab * d);
         var o   = new double[(long)n * d];
-        System.Threading.Tasks.Parallel.For(0, vocab, t =>
+        var map = new int[n];
+        Array.Fill(map, -1);
+        for (int t = 0; t < vocab; t++)
         {
-            int idx = entIdx[t]; if (idx < 0) return;
-            long src = (long)t * d, dst = (long)idx * d;
-            for (int c = 0; c < d; c++) o[dst + c] = raw[src + c];
-        });
+            int idx = entIdx[t];
+            if (idx >= 0 && idx < n) map[idx] = t;
+        }
+        unsafe
+        {
+            fixed (float* src = raw)
+            fixed (int* rm = map)
+            fixed (double* dst = o)
+            {
+                int rc = SynInterop.F32GatherToF64(src, rm, (nuint)n, (nuint)d, dst);
+                if (rc != 0) throw new InvalidOperationException($"f32_gather_to_f64 returned {rc}");
+            }
+        }
         return o;
     }
 

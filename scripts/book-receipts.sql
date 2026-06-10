@@ -41,9 +41,9 @@ WHERE c.subject_id = laplace.word_id('captain')
 ORDER BY laplace.eff_mu(c.rating, c.rd) DESC LIMIT 6;
 
 \echo
-\echo ===== Q2  WHAT KINDS OF WHALE?  words attested to precede "whale" =====
+\echo ===== Q2  WHAT TYPES OF WHALE?  words attested to precede "whale" =====
 \echo '       (sperm, white, right, Greenland, great = the whale types in the novel)'
-SELECT laplace.label(c.subject_id) AS kind_of_whale,
+SELECT laplace.label(c.subject_id) AS type_of_whale,
        laplace.eff_mu_display(c.rating, c.rd) AS eff_mu, c.witness_count AS games
 FROM laplace.consensus c
 WHERE c.object_id = laplace.word_id('whale')

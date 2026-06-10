@@ -18,7 +18,7 @@ extern "C" {
 #define LAPLACE_AST_ROOT UINT32_MAX
 
 typedef struct {
-    uint32_t kind_id;     /* recipe-local node-kind id; name via laplace_ast_kind_name */
+    uint32_t type_id;     /* recipe-local node-type id; name via laplace_ast_type_name */
     uint32_t start_byte;  /* [start_byte, end_byte) byte span in the input */
     uint32_t end_byte;
     uint32_t parent;      /* index of nearest named ancestor, or LAPLACE_AST_ROOT */
@@ -37,7 +37,7 @@ int laplace_grammar_parse(const uint8_t* utf8, size_t len,
 
 size_t laplace_ast_node_count(const laplace_ast_t* ast);
 int    laplace_ast_get_node(const laplace_ast_t* ast, size_t idx, laplace_ast_node_t* out);
-const char* laplace_ast_kind_name(const laplace_ast_t* ast, uint32_t kind_id);
+const char* laplace_ast_type_name(const laplace_ast_t* ast, uint32_t type_id);
 void   laplace_ast_free(laplace_ast_t* ast);
 
 /* Incremental row iterator for delimited vault files (TSV/CSV lines). */

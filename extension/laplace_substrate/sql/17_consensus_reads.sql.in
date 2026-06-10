@@ -46,7 +46,7 @@ CREATE OR REPLACE FUNCTION generate_tree(
     p_type   bytea  DEFAULT NULL,
     p_depth  int    DEFAULT 4,
     p_beam   int    DEFAULT 5)
-    RETURNS TABLE(depth int, path bytea[], kinds bytea[], entity_id bytea,
+    RETURNS TABLE(depth int, path bytea[], types bytea[], entity_id bytea,
                   eff_mu numeric, path_mu numeric, witnesses bigint)
     AS 'MODULE_PATHNAME', 'pg_laplace_generate_tree'
     LANGUAGE C STABLE;

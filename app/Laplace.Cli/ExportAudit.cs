@@ -99,7 +99,7 @@ internal static class ExportAudit
             int cols = slot.RowsAreOut ? inDim : outDim;
             double m = ConsensusReExport.MoldArenaScale(refMap, [slot.TensorName]);
             var poured = await ConsensusReExport.ReadTableArenaAsync(
-                ds, slot.KindId, rows, cols, slot.RowsAreOut,
+                ds, slot.RelationTypeId, rows, cols, slot.RowsAreOut,
                 SpaceIndex(slot.InSpace), SpaceIndex(slot.OutSpace), m);
             long total = poured.Cells.LongLength;
 
@@ -142,7 +142,7 @@ internal static class ExportAudit
         async Task AuditNormSlot(ArenaSlot slot)
         {
             double m = ConsensusReExport.MoldArenaScale(refMap, [slot.TensorName]);
-            var normV = await ConsensusReExport.ReadNormVectorAsync(ds, slot.KindId, dModel, SpaceIndex(slot.InSpace), m);
+            var normV = await ConsensusReExport.ReadNormVectorAsync(ds, slot.RelationTypeId, dModel, SpaceIndex(slot.InSpace), m);
             var o = WeightTensorETL.LoadTensorF32(refMap, slot.TensorName, dModel);
             double dot = 0, nO = 0, nP = 0, se = 0;
             for (int i = 0; i < dModel; i++)

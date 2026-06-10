@@ -57,14 +57,14 @@ public sealed class TokenS3Morph
             return Array.Empty<SubstrateChange>();
         }
 
-        var src = new double[(long)n * _dModel];
+        var src = GC.AllocateUninitializedArray<double>((int)((long)n * _dModel), pinned: true);
         for (int i = 0; i < n; i++)
         {
             long s = (long)rows[i].TokenId * _dModel;
             for (int j = 0; j < _dModel; j++) src[(long)i * _dModel + j] = _embed[s + j];
         }
 
-        var Y = new double[(long)n * targetDim];
+        var Y = GC.AllocateUninitializedArray<double>((int)((long)n * targetDim), pinned: true);
         int rc;
         unsafe
         {

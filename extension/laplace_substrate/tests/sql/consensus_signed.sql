@@ -5,7 +5,7 @@ DO $$
 DECLARE
     type_t   bytea := laplace_hash128_blake3('substrate/type/Type/v1');
     src      bytea := laplace_hash128_blake3('test/s10/source');
-    kind     bytea := laplace_hash128_blake3('test/s10/kind');
+    rel_type  bytea := laplace_hash128_blake3('test/s10/reltype');
     subj     bytea := laplace_hash128_blake3('test/s10/subject');
     o_conf   bytea := laplace_hash128_blake3('test/s10/obj_confirm');
     o_ref    bytea := laplace_hash128_blake3('test/s10/obj_refute');
@@ -26,7 +26,7 @@ DECLARE
 BEGIN
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
         (src,    0, type_t, NULL),
-        (kind,   0, type_t, src), (subj, 0, type_t, src),
+        (rel_type,   0, type_t, src), (subj, 0, type_t, src),
         (o_conf, 0, type_t, src), (o_ref, 0, type_t, src), (o_draw, 0, type_t, src),
         (o_trust,0, type_t, src), (o_crank,0, type_t, src),
         (o_games,0, type_t, src), (o_one, 0, type_t, src);
@@ -35,28 +35,28 @@ BEGIN
         (id, subject_id, type_id, object_id, source_id, context_id,
          outcome, last_observed_at, observation_count)
     VALUES
-        (laplace_hash128_blake3('a/confirm'), subj, kind, o_conf,  src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('a/refute'),  subj, kind, o_ref,   src, NULL, 0, now(), 1),
-        (laplace_hash128_blake3('a/draw'),    subj, kind, o_draw,  src, NULL, 1, now(), 1),
-        (laplace_hash128_blake3('a/trusted'), subj, kind, o_trust, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('a/crank'),   subj, kind, o_crank, src, NULL, 2, now(), 1),
-        (laplace_hash128_blake3('a/many'),    subj, kind, o_games, src, NULL, 2, now(), 8),
-        (laplace_hash128_blake3('a/one'),     subj, kind, o_one,   src, NULL, 2, now(), 1);
+        (laplace_hash128_blake3('a/confirm'), subj, rel_type, o_conf,  src, NULL, 2, now(), 1),
+        (laplace_hash128_blake3('a/refute'),  subj, rel_type, o_ref,   src, NULL, 0, now(), 1),
+        (laplace_hash128_blake3('a/draw'),    subj, rel_type, o_draw,  src, NULL, 1, now(), 1),
+        (laplace_hash128_blake3('a/trusted'), subj, rel_type, o_trust, src, NULL, 2, now(), 1),
+        (laplace_hash128_blake3('a/crank'),   subj, rel_type, o_crank, src, NULL, 2, now(), 1),
+        (laplace_hash128_blake3('a/many'),    subj, rel_type, o_games, src, NULL, 2, now(), 8),
+        (laplace_hash128_blake3('a/one'),     subj, rel_type, o_one,   src, NULL, 2, now(), 1);
 
-    SELECT count(*) INTO n_prov FROM attestations WHERE type_id = kind;
+    SELECT count(*) INTO n_prov FROM attestations WHERE type_id = rel_type;
     IF n_prov <> 7 THEN RAISE EXCEPTION 'FAIL: expected 7 provenance rows, got %', n_prov; END IF;
 
     PERFORM create_period_staging();
     INSERT INTO consensus_period_staging_0
         (subject_id, type_id, object_id, phi, games, sum_score, last_ts)
     VALUES
-        (subj, kind, o_conf,  phi_trust, 1, s_conf,     now()),
-        (subj, kind, o_ref,   phi_trust, 1, s_ref,      now()),
-        (subj, kind, o_draw,  phi_trust, 1, s_draw,     now()),
-        (subj, kind, o_trust, phi_trust, 1, s_conf,     now()),
-        (subj, kind, o_crank, phi_crank, 1, s_conf,     now()),
-        (subj, kind, o_games, phi_trust, 8, s_conf * 8, now()),
-        (subj, kind, o_one,   phi_trust, 1, s_conf,     now());
+        (subj, rel_type, o_conf,  phi_trust, 1, s_conf,     now()),
+        (subj, rel_type, o_ref,   phi_trust, 1, s_ref,      now()),
+        (subj, rel_type, o_draw,  phi_trust, 1, s_draw,     now()),
+        (subj, rel_type, o_trust, phi_trust, 1, s_conf,     now()),
+        (subj, rel_type, o_crank, phi_crank, 1, s_conf,     now()),
+        (subj, rel_type, o_games, phi_trust, 8, s_conf * 8, now()),
+        (subj, rel_type, o_one,   phi_trust, 1, s_conf,     now());
     PERFORM materialize_period_consensus();
 
     SELECT rating INTO mu_conf  FROM consensus WHERE object_id = o_conf;

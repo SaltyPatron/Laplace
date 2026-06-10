@@ -17,10 +17,10 @@ public sealed class FrameNetDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    private static readonly Hash128 FrameTypeId    = Hash128.OfCanonical("substrate/type/FrameNet_Frame/v1");
-    private static readonly Hash128 FrameElemTypeId = Hash128.OfCanonical("substrate/type/FrameNet_FE/v1");
-    private static readonly Hash128 LexUnitTypeId  = Hash128.OfCanonical("substrate/type/FrameNet_LU/v1");
-    private static readonly Hash128 CorenessTypeId = Hash128.OfCanonical("substrate/type/FrameNet_Coreness/v1");
+    private static readonly Hash128 FrameTypeId     = EntityTypeRegistry.FrameNetFrame;
+    private static readonly Hash128 FrameElemTypeId = EntityTypeRegistry.FrameNetFe;
+    private static readonly Hash128 LexUnitTypeId   = EntityTypeRegistry.FrameNetLu;
+    private static readonly Hash128 CorenessTypeId  = EntityTypeRegistry.FrameNetCoreness;
 
     private static Hash128 FrameId(string name)
     {
@@ -46,7 +46,7 @@ public sealed class FrameNetDecomposer : IDecomposer
         ["ART"]  = "DET",  ["SCON"] = "SCONJ", ["C"]   = "CCONJ",
     };
 
-    private static readonly Dictionary<string, string> RelationKinds = new(StringComparer.Ordinal)
+    private static readonly Dictionary<string, string> RelationTypes = new(StringComparer.Ordinal)
     {
         ["Inherits from"]   = "INHERITS_FROM",
         ["Uses"]            = "FRAME_USES",
@@ -242,7 +242,7 @@ public sealed class FrameNetDecomposer : IDecomposer
 
         foreach (var rel in frame.Relations)
         {
-            if (!RelationKinds.TryGetValue(rel.Type, out var typeName)) continue;
+            if (!RelationTypes.TryGetValue(rel.Type, out var typeName)) continue;
             Hash128 tgt = FrameId(rel.TargetFrame);
             b.AddAttestation(RelationTypeRegistry.Attest(
                 frameId, typeName, tgt, Source, SourceTrust.AcademicCurated));
@@ -341,7 +341,7 @@ public sealed class FrameNetDecomposer : IDecomposer
         foreach (var fr in root.Elements(ns + "frameRelation"))
         {
             string type = (string?)fr.Attribute("type") ?? "";
-            if (!RelationKinds.ContainsKey(type)) continue;
+            if (!RelationTypes.ContainsKey(type)) continue;
             foreach (var rf in fr.Elements(ns + "relatedFrame"))
             {
                 string target = ((string?)rf)?.Trim() ?? "";

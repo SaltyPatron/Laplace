@@ -1,0 +1,232 @@
+-- ── generation surface ────────────────────────────────────────────────────────
+-- Autoregressive generation over witnessed content trajectories. The kernel is
+-- native (generation_native.c): one SPI scan builds a backend-cached suffix
+-- array over content_index; longest-context back-off is binary search; sampling
+-- is seeded, so (corpus, prompt, seed) reproduces its output exactly.
+
+-- content_index lifecycle ------------------------------------------------------
+-- Text law: tier-3 sentence trajectories, one level deep, batched + resumable.
+CREATE OR REPLACE PROCEDURE rebuild_content_index(p_batch int DEFAULT 20000)
+    LANGUAGE plpgsql AS $$
+DECLARE
+    last_id bytea := '\x'::bytea;
+    v_max   bytea;
+    v_cnt   int;
+BEGIN
+    DROP TABLE IF EXISTS content_index;
+    CREATE TABLE content_index (seq_id bytea NOT NULL, token bytea NOT NULL, pos int NOT NULL);
+
+    LOOP
+        SELECT max(entity_id), count(*) INTO v_max, v_cnt
+        FROM (
+            SELECT DISTINCT p.entity_id
+            FROM physicalities p
+            JOIN entities e ON e.id = p.entity_id AND e.tier = 3
+            WHERE p.type = 1 AND p.trajectory IS NOT NULL AND p.entity_id > last_id
+            ORDER BY p.entity_id
+            LIMIT p_batch
+        ) z;
+        EXIT WHEN v_cnt = 0 OR v_cnt IS NULL;
+
+        INSERT INTO content_index (seq_id, token, pos)
+        SELECT s.entity_id, u.entity_id,
+               row_number() OVER (PARTITION BY s.entity_id ORDER BY dp.path[1])::int
+        FROM (
+            SELECT DISTINCT ON (p.entity_id) p.entity_id, p.trajectory
+            FROM physicalities p
+            JOIN entities e ON e.id = p.entity_id AND e.tier = 3
+            WHERE p.type = 1 AND p.trajectory IS NOT NULL
+              AND p.entity_id > last_id AND p.entity_id <= v_max
+        ) s,
+        LATERAL public.ST_DumpPoints(s.trajectory) dp,
+        LATERAL laplace_mantissa_unpack(dp.geom) u
+        WHERE EXISTS (
+            SELECT 1 FROM consensus c
+            WHERE c.type_id = relation_type_id('PRECEDES')
+              AND (c.subject_id = u.entity_id OR c.object_id = u.entity_id)
+            LIMIT 1);
+
+        COMMIT;
+        last_id := v_max;
+    END LOOP;
+
+    CREATE INDEX content_index_seq ON content_index(seq_id, pos);
+    CREATE INDEX content_index_tok ON content_index(token, pos);
+    ANALYZE content_index;
+    PERFORM generation_cache_reset();
+END $$;
+
+-- Grammar law: full constituency flattened recursively to the token floor.
+-- Sequence roots are structural — constituency parents that are nobody's
+-- constituent (per-file code roots, standalone documents).
+CREATE OR REPLACE PROCEDURE rebuild_content_index_deep()
+    LANGUAGE plpgsql AS $$
+BEGIN
+    DROP TABLE IF EXISTS constituency_edge;
+    CREATE TABLE constituency_edge AS
+    SELECT p.entity_id AS parent, u.entity_id AS child,
+           u.ordinal::int AS ord, GREATEST(u.run_length, 1)::int AS run
+    FROM (SELECT DISTINCT ON (entity_id) entity_id, trajectory
+          FROM physicalities
+          WHERE type = 1 AND trajectory IS NOT NULL) p
+    JOIN entities e ON e.id = p.entity_id AND e.tier > 2,
+    LATERAL public.ST_DumpPoints(p.trajectory) dp,
+    LATERAL laplace_mantissa_unpack(dp.geom) u;
+    CREATE INDEX constituency_edge_parent ON constituency_edge(parent);
+    ANALYZE constituency_edge;
+    COMMIT;
+
+    DROP TABLE IF EXISTS content_index;
+    CREATE TABLE content_index (seq_id bytea NOT NULL, token bytea NOT NULL, pos int NOT NULL);
+
+    INSERT INTO content_index (seq_id, token, pos)
+    WITH RECURSIVE roots AS (
+        SELECT DISTINCT p.parent AS id
+        FROM constituency_edge p
+        WHERE NOT EXISTS (SELECT 1 FROM constituency_edge c WHERE c.child = p.parent)
+    ),
+    walk AS (
+        SELECT r.id AS seq_id, t.child AS node, ARRAY[t.ord, g.i] AS path
+        FROM roots r
+        JOIN constituency_edge t ON t.parent = r.id,
+        LATERAL generate_series(1, t.run) g(i)
+        UNION ALL
+        SELECT w.seq_id, t.child, w.path || t.ord || g.i
+        FROM walk w
+        JOIN constituency_edge t ON t.parent = w.node,
+        LATERAL generate_series(1, t.run) g(i)
+    )
+    SELECT w.seq_id, w.node,
+           row_number() OVER (PARTITION BY w.seq_id ORDER BY w.path)::int
+    FROM walk w
+    WHERE NOT EXISTS (SELECT 1 FROM constituency_edge t WHERE t.parent = w.node);
+
+    CREATE INDEX content_index_seq ON content_index(seq_id, pos);
+    CREATE INDEX content_index_tok ON content_index(token, pos);
+    ANALYZE content_index;
+    PERFORM generation_cache_reset();
+END $$;
+
+-- native kernel ----------------------------------------------------------------
+CREATE OR REPLACE FUNCTION generate_tokens(
+        p_ctx bytea[], p_steps int DEFAULT 24, p_max_order int DEFAULT 5,
+        p_temperature float8 DEFAULT 0.7, p_topk int DEFAULT 10,
+        p_seed bigint DEFAULT NULL)
+    RETURNS TABLE(step int, token bytea, ord_used int)
+    AS 'MODULE_PATHNAME', 'pg_laplace_generate_tokens'
+    LANGUAGE C VOLATILE;
+
+CREATE OR REPLACE FUNCTION generation_cache_reset() RETURNS boolean
+    AS 'MODULE_PATHNAME', 'pg_laplace_generation_cache_reset'
+    LANGUAGE C VOLATILE;
+
+-- endpoint surface: prompt text in, rendered tokens out (the signature
+-- SubstrateClient.GenerateNgramStreamAsync calls)
+CREATE OR REPLACE FUNCTION generate_ngram(
+        p_prompt text, p_steps int DEFAULT 24, p_max_order int DEFAULT 5,
+        p_temperature float8 DEFAULT 0.7, p_topk int DEFAULT 10,
+        p_seed bigint DEFAULT NULL)
+    RETURNS TABLE(step int, token text, ord_used int)
+    LANGUAGE sql VOLATILE
+    SET search_path = @extschema@, public AS $$
+    WITH ctx AS (
+        SELECT array_agg(id ORDER BY ord) AS ids
+        FROM prompt_state(p_prompt) WHERE id IS NOT NULL
+    )
+    -- the kernel is deterministic given a seed; entropy is the caller's choice,
+    -- so an unseeded call draws one here instead of repeating a constant stream
+    SELECT g.step, render_text(g.token, 64), g.ord_used
+    FROM ctx, generate_tokens(ctx.ids, p_steps, p_max_order, p_temperature, p_topk,
+                              COALESCE(p_seed, (floor(random() * 9e18))::bigint)) g
+    WHERE ctx.ids IS NOT NULL
+$$;
+
+-- pour: trajectory-respecting synthesis ------------------------------------------
+-- A content trajectory is a witnessed WHOLE. The pour walks a witnessed mold
+-- instance in trajectory order and substitutes COMPOSITE constituents with
+-- geometric peers: same node type, coord KNN prefilter, laplace_frechet_4d
+-- refine (the structural_cluster law). Tokens (tier <= 2) are the pour floor —
+-- never opened, never respelled. Novelty arises only at substitution points and
+-- is justified by geometry; every emitted fragment stays a witnessed whole.
+CREATE OR REPLACE FUNCTION pour_peer(p_id bytea, p_k int DEFAULT 6)
+    RETURNS bytea
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    WITH me AS (
+        SELECT e.type_id, p.coord, p.trajectory
+        FROM entities e JOIN physicalities p ON p.entity_id = e.id AND p.type = 1
+        WHERE e.id = p_id AND p.trajectory IS NOT NULL
+        LIMIT 1
+    ),
+    knn AS (
+        SELECT e2.id, p2.trajectory AS t2
+        FROM me, entities e2
+        JOIN physicalities p2 ON p2.entity_id = e2.id AND p2.type = 1
+        WHERE e2.type_id = me.type_id AND e2.id <> p_id AND p2.trajectory IS NOT NULL
+        ORDER BY p2.coord <<->> me.coord
+        LIMIT 48
+    ),
+    near AS (
+        SELECT knn.id FROM me, knn
+        ORDER BY public.laplace_frechet_4d(knn.t2, me.trajectory) ASC
+        LIMIT p_k
+    )
+    SELECT id FROM near ORDER BY random() LIMIT 1
+$$;
+
+CREATE OR REPLACE FUNCTION pour_walk(p_id bytea, p_swap float8 DEFAULT 0.3,
+                          p_k int DEFAULT 6, p_depth int DEFAULT 4)
+    RETURNS text
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    v_traj geometry; v_tier int; r record; i int; cur bytea; piece text; out_text text := '';
+BEGIN
+    SELECT e.tier INTO v_tier FROM entities e WHERE e.id = p_id;
+    IF v_tier IS NULL OR v_tier <= 2 THEN
+        RETURN COALESCE(render_text(p_id, 64), '');
+    END IF;
+    SELECT p.trajectory INTO v_traj
+    FROM physicalities p
+    WHERE p.entity_id = p_id AND p.type = 1 AND p.trajectory IS NOT NULL
+    LIMIT 1;
+    IF v_traj IS NULL THEN
+        RETURN COALESCE(render_text(p_id, 64), '');
+    END IF;
+    FOR r IN
+        SELECT u.entity_id AS cid, u.ordinal, GREATEST(u.run_length, 1)::int AS run,
+               (SELECT e.tier FROM entities e WHERE e.id = u.entity_id) AS ctier
+        FROM public.ST_DumpPoints(v_traj) dp, LATERAL laplace_mantissa_unpack(dp.geom) u
+        ORDER BY u.ordinal
+    LOOP
+        FOR i IN 1..r.run LOOP
+            cur := r.cid;
+            IF p_depth > 0 AND COALESCE(r.ctier, 0) > 2 AND random() < p_swap THEN
+                cur := COALESCE(pour_peer(r.cid, p_k), r.cid);
+            END IF;
+            piece := pour_walk(cur, p_swap, p_k, p_depth - 1);
+            IF piece <> '' THEN
+                out_text := out_text || CASE WHEN out_text = '' THEN '' ELSE ' ' END || piece;
+            END IF;
+        END LOOP;
+    END LOOP;
+    RETURN out_text;
+END $$;
+
+CREATE OR REPLACE FUNCTION pour(p_node_type text, p_modality text DEFAULT 'c-sharp',
+                     p_swap float8 DEFAULT 0.3, p_k int DEFAULT 6, p_depth int DEFAULT 4)
+    RETURNS text
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    seed bytea;
+BEGIN
+    SELECT e.id INTO seed
+    FROM canonical_names n
+    JOIN entities e ON e.type_id = n.id
+    JOIN physicalities p ON p.entity_id = e.id AND p.type = 1 AND p.trajectory IS NOT NULL
+    WHERE n.name = 'substrate/type/grammar/' || p_modality || '/' || p_node_type || '/v1'
+    ORDER BY random() LIMIT 1;
+    IF seed IS NULL THEN RETURN NULL; END IF;
+    RETURN pour_walk(seed, p_swap, p_k, p_depth);
+END $$;

@@ -423,7 +423,7 @@ internal sealed class SubstrateClient : IAsyncDisposable
             SELECT
                 gt.depth,
                 ARRAY(SELECT encode(x, 'hex') FROM unnest(gt.path) AS u(x)) AS path_hex,
-                ARRAY(SELECT encode(x, 'hex') FROM unnest(gt.kinds) AS u(x)) AS kind_path_hex,
+                ARRAY(SELECT encode(x, 'hex') FROM unnest(gt.types) AS u(x)) AS type_path_hex,
                 encode(gt.entity_id, 'hex') AS entity_id_hex,
                 COALESCE(laplace.label(gt.entity_id), encode(gt.entity_id, 'hex')) AS entity_label,
                 gt.eff_mu,
@@ -449,7 +449,7 @@ internal sealed class SubstrateClient : IAsyncDisposable
                     rows.Add(new ExplainTraceStep(
                         Depth: reader.GetInt32(0),
                         PathHex: reader.GetFieldValue<string[]>(1),
-                        KindPathHex: reader.GetFieldValue<string[]>(2),
+                        TypePathHex: reader.GetFieldValue<string[]>(2),
                         EntityIdHex: reader.GetString(3),
                         EntityLabel: reader.GetString(4),
                         EffectiveMu: reader.GetDecimal(5),

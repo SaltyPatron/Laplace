@@ -83,7 +83,7 @@ public sealed class LlamaRecipeExtractor
         Hash128 hasNumKvHeadsTypeId,
         Hash128 hasIntermSizeTypeId,
         Hash128 hasVocabSizeTypeId,
-        Hash128 isAKindId,
+        Hash128 isATypeId,
         Hash128 architectureEntityId)
     {
         var b = new SubstrateChangeBuilder(sourceId, "recipe/config.json",
@@ -100,7 +100,7 @@ public sealed class LlamaRecipeExtractor
         {
             var valueBytes = Encoding.UTF8.GetBytes(value);
             var valueId    = Hash128.Blake3(valueBytes);
-            b.AddEntity(valueId, EntityTier.Vocabulary, Hash128.OfCanonical("substrate/type/Scalar/v1"), sourceId);
+            b.AddEntity(valueId, EntityTier.Vocabulary, EntityTypeRegistry.Scalar, sourceId);
             AddAttestation(typeId, valueId);
         }
 
@@ -111,8 +111,8 @@ public sealed class LlamaRecipeExtractor
         AddScalar(hasIntermSizeTypeId,  recipe.IntermediateSize.ToString());
         AddScalar(hasVocabSizeTypeId,   recipe.VocabSize.ToString());
 
-        b.AddEntity(architectureEntityId, EntityTier.Vocabulary, Hash128.OfCanonical("substrate/type/Architecture/v1"), sourceId);
-        AddAttestation(isAKindId, architectureEntityId);
+        b.AddEntity(architectureEntityId, EntityTier.Vocabulary, EntityTypeRegistry.Architecture, sourceId);
+        AddAttestation(isATypeId, architectureEntityId);
 
         return b.Build();
     }
@@ -161,11 +161,11 @@ public sealed class LlamaRecipeExtractor
     }
 
     internal static Hash128 ComputeAttestationId(
-        Hash128 subject, Hash128 kind, Hash128? obj, Hash128 source)
+        Hash128 subject, Hash128 typeId, Hash128? obj, Hash128 source)
     {
         Span<byte> buf = stackalloc byte[80];
         subject.WriteBytes(buf.Slice(0, 16));
-        kind.WriteBytes(buf.Slice(16, 16));
+        typeId.WriteBytes(buf.Slice(16, 16));
         (obj ?? default).WriteBytes(buf.Slice(32, 16));
         source.WriteBytes(buf.Slice(48, 16));
         buf.Slice(64, 16).Clear();

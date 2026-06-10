@@ -106,7 +106,7 @@ public class NpgsqlSubstrateWriterTests
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var src = Hash128.OfCanonical("substrate/source/test/full-row");
         var typeId = await EnsureTestTypeAsync(src);
-        var relTypeId = await EnsureTestKindAsync(src, "HAS_TEST");
+        var relTypeId = await EnsureTestRelationTypeAsync(src, "HAS_TEST");
 
         var subjId = H(4001);
         var change = new SubstrateChangeBuilder(src, "full-unit")
@@ -154,7 +154,7 @@ public class NpgsqlSubstrateWriterTests
 
         var goodEntity = H(5001);
         var missingSubject = H(5099);
-        var relationTypeId = await EnsureTestKindAsync(src, "HAS_TEST_ROLLBACK");
+        var relationTypeId = await EnsureTestRelationTypeAsync(src, "HAS_TEST_ROLLBACK");
         var change = new SubstrateChangeBuilder(src, "rollback-unit")
             .AddEntity(goodEntity, 0, relationTypeId)
             .AddAttestation(new AttestationRow(
@@ -215,9 +215,9 @@ public class NpgsqlSubstrateWriterTests
         return typeId;
     }
 
-    private async Task<Hash128> EnsureTestKindAsync(Hash128 source, string name)
+    private async Task<Hash128> EnsureTestRelationTypeAsync(Hash128 source, string name)
     {
-        var typeId = Hash128.OfCanonical($"substrate/kind/{name}/v1");
+        var typeId = Hash128.OfCanonical($"substrate/type/{name}/v1");
         var relTypeId = Hash128.OfCanonical("substrate/type/TestFixture/v1");
         await using var cmd = _pg.DataSource.CreateCommand(
             "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) "

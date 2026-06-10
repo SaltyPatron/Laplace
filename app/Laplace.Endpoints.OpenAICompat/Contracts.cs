@@ -177,7 +177,7 @@ internal sealed record EvidenceSample(
 internal sealed record ExplainTraceStep(
     int Depth,
     IReadOnlyList<string> PathHex,
-    IReadOnlyList<string> KindPathHex,
+    IReadOnlyList<string> TypePathHex,
     string EntityIdHex,
     string EntityLabel,
     decimal EffectiveMu,

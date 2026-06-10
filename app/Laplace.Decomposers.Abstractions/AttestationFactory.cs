@@ -36,17 +36,17 @@ public static class AttestationFactory
 
     public static AttestationRow Create(
         Hash128 subject, Hash128 typeId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
-        double kindRank, double sourceTrust, long observationCount = 1)
+        double typeRank, double sourceTrust, long observationCount = 1)
         => CreateCategorical(subject, typeId, obj, sourceId, contextId,
-                             confirm: true, witnessWeight: kindRank * sourceTrust,
+                             confirm: true, witnessWeight: typeRank * sourceTrust,
                              observationCount: observationCount);
 
     public static AttestationRow CreateWeighted(
         Hash128 subject, Hash128 typeId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
-        double kindRank, double sourceTrust, double magnitude, double arenaScale, long observationCount = 1)
+        double typeRank, double sourceTrust, double magnitude, double arenaScale, long observationCount = 1)
         => CreateObservation(subject, typeId, obj, sourceId, contextId,
                              signedMagnitude: magnitude, arenaScale: arenaScale,
-                             witnessWeight: kindRank * sourceTrust, observationCount: observationCount);
+                             witnessWeight: typeRank * sourceTrust, observationCount: observationCount);
 
     public static AttestationRow CreateAggregated(
         Hash128 subject, Hash128 typeId, Hash128? obj, Hash128 sourceId, Hash128? contextId,

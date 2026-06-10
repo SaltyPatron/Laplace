@@ -1,0 +1,39 @@
+CREATE EXTENSION IF NOT EXISTS postgis;
+NOTICE:  extension "postgis" already exists, skipping
+CREATE EXTENSION laplace_geom;
+ERROR:  extension "laplace_geom" already exists
+CREATE EXTENSION laplace_substrate;
+ERROR:  extension "laplace_substrate" already exists
+SET search_path TO laplace, public;
+SELECT count(*) = 6 AS structural_functions_present
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'laplace'
+  AND p.proname IN (
+      'word_curve', 'word_shape_distance', 'anagrams_of',
+      'collocates', 'structural_cluster', 'entity_curve');
+ structural_functions_present 
+------------------------------
+ t
+(1 row)
+
+SELECT count(*) AS collocates_empty_for_unknown_word
+FROM collocates('zzznosuchword', 5);
+ collocates_empty_for_unknown_word 
+-----------------------------------
+                                 0
+(1 row)
+
+SELECT word_curve(word_id('dog')) IS NULL AS no_curve_without_physicality;
+ no_curve_without_physicality 
+------------------------------
+ t
+(1 row)
+
+SELECT count(*) = 0 AS cluster_empty_without_physicality
+FROM structural_cluster(word_id('dog'), 0.05, 10);
+ cluster_empty_without_physicality 
+-----------------------------------
+ t
+(1 row)
+

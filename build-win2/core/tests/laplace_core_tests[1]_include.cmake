@@ -1,5 +1,0 @@
-if(EXISTS "D:/Repositories/Laplace/build-win2/core/tests/laplace_core_tests[1]_tests.cmake")
-  include("D:/Repositories/Laplace/build-win2/core/tests/laplace_core_tests[1]_tests.cmake")
-else()
-  add_test(laplace_core_tests_NOT_BUILT laplace_core_tests_NOT_BUILT)
-endif()

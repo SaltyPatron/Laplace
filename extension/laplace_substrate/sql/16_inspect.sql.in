@@ -107,9 +107,9 @@ AS $$
     LIMIT GREATEST(1, p_top_k)
 $$;
 
-CREATE FUNCTION attestation_response_kind(
+CREATE FUNCTION attestation_response_type(
     p_subject_id   bytea,
-    p_kind_id      bytea,
+    p_relation_type_id      bytea,
     p_source_scope bytea[]    DEFAULT NULL,
     p_context_id   bytea      DEFAULT NULL,
     p_top_k        integer    DEFAULT 32
@@ -124,7 +124,7 @@ RETURNS TABLE(
 LANGUAGE sql STABLE
 SET search_path = @extschema@, public
 AS $$
-    SELECT * FROM attestation_response(p_subject_id, p_kind_id, p_source_scope, p_context_id, p_top_k)
+    SELECT * FROM attestation_response(p_subject_id, p_relation_type_id, p_source_scope, p_context_id, p_top_k)
 $$;
 
 CREATE FUNCTION attestation_unary_response(
@@ -163,9 +163,9 @@ AS $$
           )
 $$;
 
-CREATE FUNCTION attestation_unary_response_kind(
+CREATE FUNCTION attestation_unary_response_type(
     p_subject_id   bytea,
-    p_kind_id      bytea,
+    p_relation_type_id      bytea,
     p_source_scope bytea[]    DEFAULT NULL,
     p_context_id   bytea      DEFAULT NULL
 )
@@ -178,5 +178,5 @@ RETURNS TABLE(
 LANGUAGE sql STABLE
 SET search_path = @extschema@, public
 AS $$
-    SELECT * FROM attestation_unary_response(p_subject_id, p_kind_id, p_source_scope, p_context_id)
+    SELECT * FROM attestation_unary_response(p_subject_id, p_relation_type_id, p_source_scope, p_context_id)
 $$;

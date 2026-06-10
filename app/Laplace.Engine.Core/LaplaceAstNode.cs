@@ -8,8 +8,8 @@ namespace Laplace.Engine.Core;
 /// </summary>
 public unsafe struct LaplaceAstNode
 {
-    /// <summary>Recipe-local node-kind id; resolve to a name via GrammarAst.KindName.</summary>
-    public uint KindId;
+    /// <summary>Recipe-local node-type id; resolve to a name via GrammarAst.NodeTypeName.</summary>
+    public uint NodeTypeId;
 
     /// <summary>[StartByte, EndByte) byte span of this node in the input.</summary>
     public uint StartByte;

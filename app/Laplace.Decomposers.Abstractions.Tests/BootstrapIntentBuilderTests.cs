@@ -37,12 +37,12 @@ public class BootstrapIntentBuilderTests
     }
 
     [Fact]
-    public void Build_AddKindRegistersKindEntityWithStableId()
+    public void Build_AddRelationTypeRegistersEntityWithStableId()
     {
         var b = new BootstrapIntentBuilder(SourceId, "WordNetDecomposer", TrustClassId);
         var typeId = b.AddRelationType("IS_HYPERNYM_OF");
         var change = b.Build();
-        Assert.Equal(Hash128.OfCanonical("substrate/kind/IS_HYPERNYM_OF/v1"), typeId);
+        Assert.Equal(Hash128.OfCanonical("substrate/type/IS_HYPERNYM_OF/v1"), typeId);
         Assert.Contains(change.Entities, e => e.Id == typeId);
     }
 
@@ -65,7 +65,7 @@ public class BootstrapIntentBuilderTests
         BootstrapIntentBuilder Make() {
             var b = new BootstrapIntentBuilder(SourceId, "DetTest", TrustClassId);
             b.AddType("DetTest_Foo");
-            b.AddRelationType("DET_TEST_KIND");
+            b.AddRelationType("DET_TEST_TYPE");
             return b;
         }
         var a = Make().Build();
@@ -83,9 +83,9 @@ public class BootstrapIntentBuilderTests
                      BootstrapIntentBuilder.SourceTypeId);
         Assert.Equal(Hash128.OfCanonical("substrate/type/Type/v1"),
                      BootstrapIntentBuilder.TypeMetaTypeId);
-        Assert.Equal(Hash128.OfCanonical("substrate/type/Kind/v1"),
+        Assert.Equal(Hash128.OfCanonical("substrate/type/RelationType/v1"),
                      BootstrapIntentBuilder.RelationTypeMetaTypeId);
-        Assert.Equal(Hash128.OfCanonical("substrate/kind/HAS_TRUST_CLASS/v1"),
+        Assert.Equal(Hash128.OfCanonical("substrate/type/HAS_TRUST_CLASS/v1"),
                      BootstrapIntentBuilder.HasTrustClassTypeId);
     }
 }

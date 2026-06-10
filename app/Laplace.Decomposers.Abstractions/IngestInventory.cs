@@ -4,14 +4,14 @@ namespace Laplace.Decomposers.Abstractions;
 public sealed record IngestFileSpec(string Id, string Path, long InputUnits);
 
 public sealed record IngestInventory(
-    string UnitKind,
+    string UnitType,
     long TotalInputUnits,
     IReadOnlyList<IngestFileSpec> Files)
 {
     public int FileCount => Files.Count;
 
-    public static IngestInventory Single(long units, string unitKind = "units") =>
-        new(unitKind, units, Array.Empty<IngestFileSpec>());
+    public static IngestInventory Single(long units, string unitType = "units") =>
+        new(unitType, units, Array.Empty<IngestFileSpec>());
 }
 
 public interface IIngestInventoryProvider

@@ -10,8 +10,7 @@ internal sealed class ConceptNetWitness : IGrammarWitness
 {
     public string ModalityId => "tsv";
 
-    private static readonly Hash128 LanguageTypeId =
-        Hash128.OfCanonical("substrate/type/Language/v1");
+    private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
 
     private readonly ArenaRmsTracker _arena;
     private readonly LanguageFilter? _langs;

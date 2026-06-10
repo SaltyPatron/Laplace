@@ -7,7 +7,7 @@
 
 /* tree-sitter is confined to this translation unit (the seam). */
 
-static uint16_t kind_of(const char* name, uint32_t len)
+static uint16_t tag_type_of(const char* name, uint32_t len)
 {
     if (len == 4 && strncmp(name, "name", 4) == 0) return LAPLACE_TAG_NAME;
 
@@ -85,7 +85,7 @@ int laplace_grammar_tags_run(const TSLanguage* lang,
             }
 
             tags[n].match_id     = match_id;
-            tags[n].capture_kind = kind_of(cname, name_len);
+            tags[n].capture_type = tag_type_of(cname, name_len);
             tags[n]._pad         = 0;
             tags[n].start_byte   = ts_node_start_byte(qc.node);
             tags[n].end_byte     = ts_node_end_byte(qc.node);

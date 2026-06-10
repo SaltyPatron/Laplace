@@ -42,11 +42,11 @@ created_at timestamptz
 ```
 No geometry, no payload. Indexes: tier, type, (tier,type) btrees; first_observed partial; created_at BRIN.
 
-### physicalities — per-source per-kind 4D views (THE geometric home)
+### physicalities — per-source per-type 4D views (THE geometric home)
 ```
 id bytea(16) PK
 entity_id / source_id      → entities (CASCADE)
-type smallint              physicality kind (CONTENT=1, BUILDING_BLOCK, PROJECTION…,
+type smallint              physicality type (CONTENT=1, BUILDING_BLOCK, PROJECTION…,
                            extended per tensor role per the 2026-06-07 consolidation ruling)
 coord geometry(PointZM)    position (S³ surface / 4-ball interior)
 hilbert_index bytea(16)    1-D locality key; equality = identical position (multiset signature)
@@ -63,23 +63,23 @@ Ruling: firefly placements live HERE (source_id = circuit entity for layer/head 
 
 ### attestations — EVIDENCE = PROVENANCE (largest table; every index paid per ingested cell)
 ```
-id bytea(16) PK            BLAKE3 of canonical (subject,kind,object,source,context)
+id bytea(16) PK            BLAKE3 of canonical (subject,type,object,source,context)
 subject_id/type_id/object_id/source_id/context_id → entities (object,context nullable)
 outcome smallint 0|1|2     refute | draw | confirm  (class, never magnitude)
 last_observed_at timestamptz
 observation_count bigint
 ```
-Never a value channel. Indexes (minimal audit surface, measured): kind, object partial, source, context partial, (subject,type,object) relation btree, last_observed BRIN. No 5-tuple UNIQUE (the PK IS the law).
+Never a value channel. Indexes (minimal audit surface, measured): type, object partial, source, context partial, (subject,type,object) relation btree, last_observed BRIN. No 5-tuple UNIQUE (the PK IS the law).
 
 ### consensus — adjudicated truth
 ```
-id bytea(16) PK            BLAKE3(subject ‖ kind ‖ object|zero16)  — source+context OUT
+id bytea(16) PK            BLAKE3(subject ‖ type ‖ object|zero16)  — source+context OUT
 subject_id/type_id/object_id → entities
 rating/rd/volatility bigint   Glicko-2 state ×1e9 (rd>0, vol>0)
 witness_count bigint
 last_observed_at timestamptz
 ```
-Indexes: object partial, kind, (subject,kind); ranked-μ expression btrees `((rating-2*rd)) DESC` global-partial and `(subject_id, (rating-2*rd) DESC)` partial — these MUST match eff_mu()'s inlined expression exactly (measured: without them, top-N = 17 s seq scan over 153.7M rows; with, generate-tree laterals are one indexed scan per node).
+Indexes: object partial, relType, (subject,type); ranked-μ expression btrees `((rating-2*rd)) DESC` global-partial and `(subject_id, (rating-2*rd) DESC)` partial — these MUST match eff_mu()'s inlined expression exactly (measured: without them, top-N = 17 s seq scan over 153.7M rows; with, generate-tree laterals are one indexed scan per node).
 
 ### Readback & session
 - `canonical_names(id,name)`, `codepoint_render(id,cp)` (+`build_codepoint_render()` populating all of Unicode) — render() resolution.
@@ -183,3 +183,19 @@ self-contained DLLs deploy to D:\Data\Postgres\laplace and are wired by PG-18
 extension_control_path/dynamic_library_path (SEMICOLON list separator; BARE module names so
 dynamic_library_path applies; ALTER SYSTEM + reload — zero Windows admin). Full operational
 law in OPERATIONS-WINDOWS.md.
+
+## Forbidden patterns (anti-drift)
+
+These reinventions have caused drift; do not reintroduce them. Enforcement: `.github/instructions/layering-law.instructions.md`, `ingest-witness.instructions.md`, `type-id-law.instructions.md`, and CI source scans.
+
+| Pattern | Why forbidden | Correct alternative |
+|---------|---------------|---------------------|
+| Inline `WITH RECURSIVE` in `Laplace.Cli/Program.cs` | Duplicates `laplace.generate` with divergent behavior | `SELECT * FROM laplace.generate(...)` |
+| `Hash128.OfCanonical("substrate/type/...")` in decomposers | Bypasses rank/symmetry; three minting paths | `EntityTypeRegistry.Id` / `RelationTypeRegistry.RelationTypeId` |
+| Glicko2 calibration via SQL `laplace_glicko2_accumulate_games` from C# | Round-trip per grid point | `Glicko2.UpdatePeriod` (native) in `CalibratedInverse` |
+| `ContentEmitter.Emit` in corpus inner loops | Native tree → C# rows → native `IntentStage` churn | `ContentWitnessBatch` or fast-ingest witness + memo |
+| Per-line `new byte[]` in `StreamingUtf8LineReader` | O(lines) allocations on GB corpora | Zero-copy slice or `ArrayPool` rented buffer |
+| `Parallel.For` float→double in `ModelTableETL` | C# tensor math | Native `f32_gather_to_f64` / `laplace_bf16_decode` |
+| Direct `SELECT ... FROM laplace.consensus` in CLI | Bypasses versioned read API | `laplace.consensus_export` or COPY |
+| C# `Vector128` / `Simd` | SIMD belongs in engine | `engine/` AVX2/MKL kernels |
+| Grammar compose for TSV/JSONL/CoNLL-U | 10–100× slower than span fast ingest | `*FastIngest` pattern (ConceptNet/Tatoeba/Wiktionary) |

@@ -12,7 +12,7 @@ on:
         type: number
         required: true
       gate:
-        description: "newline 'KIND MIN_CONSENSUS' pairs gated post-ingest"
+        description: "newline 'RELATION_TYPE MIN_CONSENSUS' pairs gated post-ingest"
         type: string
         default: ""
       path-arg:
@@ -60,6 +60,6 @@ jobs:
             echo "gate $1: consensus=$n (min $2)"
             [ "$n" -ge "$2" ] || { echo "::error::gate failed: $1 consensus $n < $2"; exit 1; }
           }
-          printf '%s\n' "$GATE_SPEC" | while read -r kind min; do
-            if [ -n "$kind" ]; then gate "$kind" "$min"; fi
+          printf '%s\n' "$GATE_SPEC" | while read -r rel_type min; do
+            if [ -n "$rel_type" ]; then gate "$rel_type" "$min"; fi
           done

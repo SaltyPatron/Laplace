@@ -112,3 +112,56 @@ BEGIN
     END LOOP;
 END;
 $scb$;
+
+CREATE OR REPLACE FUNCTION nearest_neighbors_4d(p_word text, p_k integer DEFAULT 10)
+    RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    WITH seed AS (
+        SELECT p.entity_id AS id, p.coord, p.trajectory
+        FROM physicalities p
+        JOIN LATERAL (SELECT id FROM prompt_state(p_word) LIMIT 1) s ON p.entity_id = s.id
+        WHERE p.type = 1 AND p.coord IS NOT NULL
+        LIMIT 1),
+    knn AS (
+        SELECT p.entity_id, p.coord, p.trajectory
+        FROM physicalities p, seed s
+        WHERE p.type = 1
+        ORDER BY p.coord <<->> s.coord
+        LIMIT GREATEST(p_k * 20, 200)),
+    nearest AS (
+        SELECT DISTINCT ON (k.entity_id) k.entity_id, k.trajectory,
+               public.laplace_angular_distance_4d(k.coord, s.coord) AS geo
+        FROM knn k, seed s
+        ORDER BY k.entity_id, public.laplace_angular_distance_4d(k.coord, s.coord)),
+    topk AS (
+        SELECT n.entity_id, n.trajectory, n.geo
+        FROM nearest n, seed s
+        WHERE n.entity_id <> s.id
+        ORDER BY n.geo
+        LIMIT p_k)
+    SELECT render_text(t.entity_id, 24),
+           t.geo,
+           CASE WHEN t.trajectory IS NOT NULL AND s.trajectory IS NOT NULL
+                THEN public.laplace_frechet_4d(t.trajectory, s.trajectory) END
+    FROM topk t, seed s
+    ORDER BY t.geo
+$$;
+
+CREATE OR REPLACE FUNCTION consensus_export_relations(p_type_id bytea)
+    RETURNS TABLE(subject_id bytea, object_id bytea, rating bigint, witness_count bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT c.subject_id, c.object_id, c.rating, c.witness_count
+    FROM consensus c
+    WHERE c.type_id = p_type_id AND c.object_id IS NOT NULL
+$$;
+
+CREATE OR REPLACE FUNCTION consensus_export_unary(p_type_id bytea)
+    RETURNS TABLE(subject_id bytea, rating bigint, witness_count bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT c.subject_id, c.rating, c.witness_count
+    FROM consensus c
+    WHERE c.type_id = p_type_id AND c.object_id IS NULL
+$$;

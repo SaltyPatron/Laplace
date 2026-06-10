@@ -31,6 +31,7 @@ using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Laplace.Engine.Dynamics;
 using DynamicsInterop = Laplace.Engine.Dynamics.NativeInterop;
 using SynthInterop = Laplace.Engine.Synthesis.NativeInterop;
 
@@ -66,6 +67,9 @@ internal static class Program
 
     private static async Task<int> Main(string[] args)
     {
+        if (Environment.GetEnvironmentVariable("LAPLACE_SKIP_MKL_CHECK") != "1")
+            MklAvailability.EnsureOrThrow();
+
         if (args.Length == 0)
         {
             Console.Error.WriteLine(
@@ -378,26 +382,18 @@ internal static class Program
         await using var conn = await ds.OpenConnectionAsync();
         var sw = Stopwatch.StartNew();
 
-        byte[]? id = null; string? coordHex = null, trajHex = null;
+        byte[]? id = null;
         await using (var res = conn.CreateCommand())
         {
-            res.CommandText = @"
-                SELECT p.entity_id, encode(ST_AsEWKB(p.coord),'hex'),
-                       CASE WHEN p.trajectory IS NOT NULL THEN encode(ST_AsEWKB(p.trajectory),'hex') END
-                FROM laplace.physicalities p
-                JOIN laplace.prompt_state(@w) s ON p.entity_id = s.id
-                WHERE p.type = 1 AND p.coord IS NOT NULL
-                LIMIT 1";
+            res.CommandText =
+                "SELECT p.entity_id FROM laplace.physicalities p "
+                + "JOIN laplace.prompt_state(@w) s ON p.entity_id = s.id "
+                + "WHERE p.type = 1 AND p.coord IS NOT NULL LIMIT 1";
             res.Parameters.AddWithValue("w", word);
-            await using var r = await res.ExecuteReaderAsync();
-            if (await r.ReadAsync())
-            {
-                id = (byte[])r[0];
-                coordHex = r.GetString(1);
-                trajHex = r.IsDBNull(2) ? null : r.GetString(2);
-            }
+            var scalar = await res.ExecuteScalarAsync();
+            if (scalar is byte[] b) id = b;
         }
-        if (id is null || coordHex is null)
+        if (id is null)
         {
             Console.WriteLine($"  ('{word}' is not a placed content entity in this substrate)");
             return 1;
@@ -409,24 +405,9 @@ internal static class Program
         bool anyStructural = false;
         await using (var st = conn.CreateCommand())
         {
-            st.CommandText = @"
-                WITH knn AS (
-                    SELECT entity_id, coord, trajectory FROM laplace.physicalities
-                    WHERE type = 1 ORDER BY coord <<->> @coord::geometry LIMIT GREATEST(@k*20, 200)),
-                nearest AS (
-                    SELECT DISTINCT ON (entity_id) entity_id, trajectory,
-                           public.laplace_angular_distance_4d(coord, @coord::geometry) AS geo
-                    FROM knn ORDER BY entity_id, public.laplace_angular_distance_4d(coord, @coord::geometry)),
-                topk AS (
-                    SELECT entity_id, trajectory, geo FROM nearest
-                    WHERE entity_id <> @id ORDER BY geo LIMIT @k)
-                SELECT laplace.render_text(entity_id, 24), geo,
-                       CASE WHEN trajectory IS NOT NULL AND @traj <> ''
-                            THEN public.laplace_frechet_4d(trajectory, @traj::geometry) END
-                FROM topk ORDER BY geo";
-            st.Parameters.AddWithValue("coord", coordHex);
-            st.Parameters.AddWithValue("traj", (object?)trajHex ?? "");
-            st.Parameters.AddWithValue("id", id);
+            st.CommandText =
+                "SELECT neighbor, geodesic, frechet FROM laplace.nearest_neighbors_4d(@w, @k)";
+            st.Parameters.AddWithValue("w", word);
             st.Parameters.AddWithValue("k", k);
             await using var r = await st.ExecuteReaderAsync();
             while (await r.ReadAsync())
@@ -456,12 +437,12 @@ internal static class Program
             await using var r = await se.ExecuteReaderAsync();
             while (await r.ReadAsync())
             {
-                string kind = r.IsDBNull(0) ? "" : r.GetString(0);
+                string relType = r.IsDBNull(0) ? "" : r.GetString(0);
                 string fact = r.IsDBNull(1) ? "" : r.GetString(1);
                 if (fact.Length > 28) fact = fact[..27] + "…";
                 string mu = r.IsDBNull(2) ? "" : r.GetInt64(2).ToString("N0");
                 string wit = r.IsDBNull(3) ? "" : r.GetInt64(3).ToString();
-                Console.WriteLine($"  {kind,-22} {fact,-28} {mu,10} {wit,4}");
+                Console.WriteLine($"  {relType,-22} {fact,-28} {mu,10} {wit,4}");
             }
         }
 
@@ -477,43 +458,6 @@ internal static class Program
         "can","could","may","might","must","i","you","he","she","it","we","they","not",
         "no","so","this","that","which","who","what","all","one","him","her","them","its","his",
     };
-
-    private const string GenerateSql = @"
-        WITH RECURSIVE
-        stops AS (SELECT DISTINCT p.id FROM unnest(@stop::text[]) w(t)
-                  CROSS JOIN LATERAL laplace.prompt_state(w.t) p WHERE p.id IS NOT NULL),
-        topic AS (SELECT id FROM laplace.prompt_state(@prompt) WHERE id IS NOT NULL),
-        field AS (
-            SELECT id FROM topic
-            UNION SELECT c.object_id FROM laplace.consensus c JOIN topic t ON c.subject_id=t.id
-                  WHERE c.type_id=laplace.relation_type_id('PRECEDES') AND NOT laplace.refuted(c.rating,c.rd)
-            UNION SELECT c.subject_id FROM laplace.consensus c JOIN topic t ON c.object_id=t.id
-                  WHERE c.type_id=laplace.relation_type_id('PRECEDES') AND NOT laplace.refuted(c.rating,c.rd)
-            UNION SELECT c.object_id FROM laplace.consensus c JOIN topic t ON c.subject_id=t.id
-                  WHERE c.type_id=laplace.relation_type_id('IS_SYNONYM_OF')),
-        seed AS (SELECT array_agg(id ORDER BY ord) ctx FROM laplace.prompt_state(@prompt) WHERE id IS NOT NULL),
-        walk AS (
-            SELECT s.ctx AS ctx, NULL::bytea oid, NULL::numeric mu, 0 AS step FROM seed s WHERE s.ctx IS NOT NULL
-            UNION ALL
-            SELECT w.ctx || nx.oid, nx.oid, nx.mu, w.step + 1
-            FROM walk w CROSS JOIN LATERAL (
-                SELECT oid, mu FROM (
-                    SELECT c.object_id oid, laplace.eff_mu_display(max(c.rating),max(c.rd)) mu,
-                           sum(laplace.eff_mu(c.rating,c.rd))/1e9
-                             * (CASE WHEN @boost>0 AND c.object_id IN (SELECT id FROM field) THEN 1+@boost ELSE 1 END) AS sc
-                    FROM laplace.consensus c
-                    WHERE c.type_id = laplace.relation_type_id('PRECEDES')
-                      AND c.subject_id = ANY (w.ctx[GREATEST(1,array_length(w.ctx,1)-@window+1):array_length(w.ctx,1)])
-                      AND c.object_id IS NOT NULL AND NOT laplace.refuted(c.rating,c.rd)
-                      AND c.object_id <> ALL (w.ctx) AND c.object_id NOT IN (SELECT id FROM stops)
-                    GROUP BY c.object_id ORDER BY sc DESC LIMIT @topk
-                ) cand
-                ORDER BY CASE WHEN @temp<=0 THEN sc
-                              ELSE power(random(),1.0/GREATEST(power(sc,1.0/@temp),1e-9)) END DESC
-                LIMIT 1
-            ) nx WHERE w.step < @steps
-        )
-        SELECT step, laplace.render_text(oid,24) AS token, mu FROM walk WHERE step>0 ORDER BY step";
 
     private static async Task<int> GenerateAsync(string[] args)
     {
@@ -549,7 +493,9 @@ internal static class Program
         var toks = new List<(string tok, decimal mu)>();
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = GenerateSql;
+            cmd.CommandText =
+                "SELECT step, token, mu FROM laplace.generate("
+                + "@prompt, @steps, @window, @temp, @topk, @stop, @boost, @require_pos)";
             cmd.Parameters.AddWithValue("prompt", prompt);
             cmd.Parameters.AddWithValue("stop", GenStop);
             cmd.Parameters.AddWithValue("steps", steps);
@@ -557,6 +503,7 @@ internal static class Program
             cmd.Parameters.AddWithValue("temp", temp);
             cmd.Parameters.AddWithValue("topk", topk);
             cmd.Parameters.AddWithValue("boost", boost);
+            cmd.Parameters.AddWithValue("require_pos", false);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
                 toks.Add((r.IsDBNull(1) ? "" : r.GetString(1), r.IsDBNull(2) ? 0m : r.GetDecimal(2)));
@@ -710,7 +657,7 @@ internal static class Program
             while (await r.ReadAsync())
             {
                 n++;
-                Console.WriteLine($"    kind={r.GetInt16(0)}  coord=({r.GetDouble(1):F4},{r.GetDouble(2):F4},{r.GetDouble(3):F4},{r.GetDouble(4):F4})"
+                Console.WriteLine($"    type={r.GetInt16(0)}  coord=({r.GetDouble(1):F4},{r.GetDouble(2):F4},{r.GetDouble(3):F4},{r.GetDouble(4):F4})"
                     + $"  r={r.GetDouble(5):F6}  n_constituents={r.GetInt32(6)}  source={r.GetString(7)}");
             }
             if (n == 0) Console.WriteLine("    (none)");
@@ -728,9 +675,9 @@ internal static class Program
             while (await r.ReadAsync())
             {
                 n++;
-                string kind = r.GetString(0);
+                string relType = r.GetString(0);
                 string obj  = r.IsDBNull(1) ? "(unary)" : r.GetString(1);
-                Console.WriteLine($"    [{kind}] → {obj,-28}  μ={r.GetInt64(2)/1e9:F3} rd={r.GetInt64(3)/1e9:F3} σ={r.GetInt64(4)/1e9:F4}"
+                Console.WriteLine($"    [{relType}] → {obj,-28}  μ={r.GetInt64(2)/1e9:F3} rd={r.GetInt64(3)/1e9:F3} σ={r.GetInt64(4)/1e9:F4}"
                     + $"  witnesses={r.GetInt64(5)}");
             }
             if (n == 0) Console.WriteLine("    (none)");
@@ -801,13 +748,15 @@ internal static class Program
         string Source,
         string Path,
         LanguageFilter? LangOverride,
-        bool? EmitCrossLanguageLinks);
+        bool? EmitCrossLanguageLinks,
+        bool SkipEvidence);
 
     private static IngestCliArgs ParseIngestCliArgs(string[] args)
     {
         var rest = new List<string>(args);
         LanguageFilter? langs = null;
         bool? emitCross = null;
+        bool skipEvidence = false;
         for (int i = 0; i < rest.Count;)
         {
             if (rest[i] == "--langs" && i + 1 < rest.Count)
@@ -821,22 +770,35 @@ internal static class Program
                 emitCross = true;
                 rest.RemoveAt(i);
             }
+            else if (rest[i] == "--no-evidence")
+            {
+                skipEvidence = true;
+                rest.RemoveAt(i);
+            }
             else i++;
         }
         return new(
             rest.Count > 0 ? rest[0] : "",
             rest.Count > 1 ? rest[1] : "",
             langs,
-            emitCross);
+            emitCross,
+            skipEvidence);
+    }
+
+    private static bool ResolvePersistEvidence(IngestCliArgs? cli)
+    {
+        if (cli?.SkipEvidence == true) return false;
+        return ConsensusAccumulatingWriter.ResolvePersistEvidence();
     }
 
     private static async Task<int> IngestAsync(string[] args)
     {
         var cli = ParseIngestCliArgs(args);
         if (string.IsNullOrEmpty(cli.Source))
-            return Fail("usage: laplace ingest <source> [path] [--langs en,...] [--emit-cross-lang]\n"
+            return Fail("usage: laplace ingest <source> [path] [--langs en,...] [--emit-cross-lang] [--no-evidence]\n"
                         + "  sources: unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | code | repo | tabular | tiny-codes | stack | safetensors | image | audio | document\n"
-                        + "  language scope: --langs or LAPLACE_INGEST_LANGS; per-source LAPLACE_{SOURCE}_LANGS");
+                        + "  language scope: --langs or LAPLACE_INGEST_LANGS; per-source LAPLACE_{SOURCE}_LANGS\n"
+                        + "  --no-evidence: fold consensus only; skip laplace.attestations (or LAPLACE_PERSIST_EVIDENCE=0)");
 
         return cli.Source.ToLowerInvariant() switch
         {
@@ -854,13 +816,13 @@ internal static class Program
             "verbnet"  => await IngestViaRunnerAsync(new VerbNetDecomposer(),  "/vault/Data/VerbNet",  skipLayerCheck: false, cli),
             "propbank" => await IngestViaRunnerAsync(new PropBankDecomposer(), "/vault/Data/PropBank", skipLayerCheck: false, cli),
             "semlink"  => await IngestViaRunnerAsync(new SemLinkDecomposer(),  "/vault/Data/SemLink",  skipLayerCheck: false, cli),
-            "code"       => await IngestViaRunnerAsync(new CodeDecomposer(),     cli.Path, skipLayerCheck: true, cli),
-            "repo"       => await IngestViaRunnerAsync(new RepoDecomposer(),     cli.Path, skipLayerCheck: true, cli),
-            "tabular"    => await IngestViaRunnerAsync(new TabularDecomposer(),  cli.Path, skipLayerCheck: true, cli),
+            "code"       => await IngestCodeAsync(cli),
+            "repo"       => await IngestRepoAsync(cli),
+            "tabular"    => await IngestTabularAsync(cli),
             "tiny-codes" => await IngestViaRunnerAsync(new TinyCodesDecomposer(),
-                string.IsNullOrEmpty(cli.Path) ? "/vault/Data/tiny-codes" : cli.Path, skipLayerCheck: true, cli),
+                ResolveIngestPath(cli.Path, "/vault/Data/tiny-codes"), skipLayerCheck: true, cli),
             "stack"      => await IngestViaRunnerAsync(new StackDecomposer(),
-                string.IsNullOrEmpty(cli.Path) ? "/vault/Data/stack-v2" : cli.Path, skipLayerCheck: true, cli),
+                ResolveIngestPath(cli.Path, "/vault/Data/stack-v2"), skipLayerCheck: true, cli),
             "model" or "safetensors" or "safetensor" => await IngestSafetensorSnapshotAsync(cli.Path, cli),
             "image"      => await IngestViaRunnerAsync(new ImageDecomposer(), string.IsNullOrEmpty(cli.Path) ? "/vault/Data/test-data/images" : cli.Path, skipLayerCheck: true, cli),
             "audio"      => await IngestViaRunnerAsync(new AudioDecomposer(), string.IsNullOrEmpty(cli.Path) ? "/vault/Data/test-data/audio" : cli.Path, skipLayerCheck: true, cli),
@@ -911,6 +873,7 @@ internal static class Program
             bulkFreshSource: true);
         var accumulator = new ConsensusAccumulatingWriter(inner, ds,
             freshSource: true,
+            persistEvidence: ResolvePersistEvidence(cli),
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
         ISubstrateWriter writer = accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
@@ -1238,14 +1201,14 @@ internal static class Program
             if (slot.IsNorm)
             {
                 normByTensor[slot.TensorName] = await ConsensusReExport.ReadNormVectorAsync(
-                    ds, slot.KindId, dModel, SpaceIndex(slot.InSpace), m);
+                    ds, slot.RelationTypeId, dModel, SpaceIndex(slot.InSpace), m);
                 continue;
             }
             int inDim = SpaceDim(slot.InSpace), outDim = SpaceDim(slot.OutSpace);
             int tr = slot.RowsAreOut ? outDim : inDim;
             int tc = slot.RowsAreOut ? inDim : outDim;
             var arena = await ConsensusReExport.ReadTableArenaAsync(
-                ds, slot.KindId, tr, tc, slot.RowsAreOut,
+                ds, slot.RelationTypeId, tr, tc, slot.RowsAreOut,
                 SpaceIndex(slot.InSpace), SpaceIndex(slot.OutSpace), m);
             arenaByTensor[slot.TensorName] = arena;
             totalRelations += arena.Relations;
@@ -1552,6 +1515,36 @@ internal static class Program
     private static async Task<int> IngestISO639Async(IngestCliArgs cli)
         => await IngestViaRunnerAsync(new ISODecomposer(), "/vault/Data/ISO639", skipLayerCheck: false, cli);
 
+    private static string ResolveIngestPath(string? cliPath, string defaultPath)
+        => Path.GetFullPath(string.IsNullOrWhiteSpace(cliPath) ? defaultPath : cliPath);
+
+    private static string? ResolveRequiredIngestPath(string? cliPath)
+        => string.IsNullOrWhiteSpace(cliPath) ? null : Path.GetFullPath(cliPath);
+
+    private static async Task<int> IngestCodeAsync(IngestCliArgs cli)
+    {
+        var path = ResolveRequiredIngestPath(cli.Path);
+        if (path is null)
+            return Fail("usage: laplace ingest code <file-or-directory>");
+        return await IngestViaRunnerAsync(new CodeDecomposer(), path, skipLayerCheck: true, cli);
+    }
+
+    private static async Task<int> IngestRepoAsync(IngestCliArgs cli)
+    {
+        var path = ResolveRequiredIngestPath(cli.Path);
+        if (path is null)
+            return Fail("usage: laplace ingest repo <repository-root>");
+        return await IngestViaRunnerAsync(new RepoDecomposer(), path, skipLayerCheck: true, cli);
+    }
+
+    private static async Task<int> IngestTabularAsync(IngestCliArgs cli)
+    {
+        var path = ResolveRequiredIngestPath(cli.Path);
+        if (path is null)
+            return Fail("usage: laplace ingest tabular <file-or-directory>");
+        return await IngestViaRunnerAsync(new TabularDecomposer(), path, skipLayerCheck: true, cli);
+    }
+
     private static IngestRunOptions BuildIngestOptions(
         Stopwatch sw, string sourceName, bool skipLayerCheck, string? ecosystemPath,
         IngestCliArgs? cli = null, bool skipSourceCompletion = false)
@@ -1570,7 +1563,7 @@ internal static class Program
                 : $"intents={p.UnitsApplied}/{p.UnitsProduced} intent_pct={p.InputPercent:F1}";
             string cur = string.IsNullOrEmpty(p.CurrentFile) ? "" : $" current={p.CurrentFile}";
             Console.Error.WriteLine(
-                $"INGEST_PROGRESS source={p.SourceName} layer={p.LayerOrder} unit_kind={p.UnitKind} "
+                $"INGEST_PROGRESS source={p.SourceName} layer={p.LayerOrder} unit_type={p.UnitType} "
                 + $"{inputPart} {filePart}{cur} "
                 + $"rows_new={rowsNew:N0} rate_rows_s={rowsNew / secs:N0} round_trips={p.RoundTrips:N0} "
                 + $"elapsed_s={p.Elapsed.TotalSeconds:F0}"
@@ -1607,13 +1600,16 @@ internal static class Program
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         var loggerFactory = ConsoleLoggerProvider.Factory();
         var innerWriter = new NpgsqlSubstrateWriter(ds);
+        bool persistEvidence = ResolvePersistEvidence(cli);
         await using var accumulator = new ConsensusAccumulatingWriter(innerWriter, ds,
+            persistEvidence: persistEvidence,
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
         var writer = (ISubstrateWriter)accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader, loggerFactory);
 
-        Console.WriteLine($"ingest {dec.SourceName} via IngestRunner → {ConnString} ...");
+        Console.WriteLine($"ingest {dec.SourceName} via IngestRunner → {ConnString} ..."
+            + (persistEvidence ? "" : " (consensus-only, no attestation writes)"));
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(
             dec,
@@ -1707,7 +1703,7 @@ internal static class Program
             await using var c = conn.CreateCommand();
             c.CommandText =
                 "SELECT laplace.evidence_count("
-                + "p_type => laplace.canonical_id('substrate/kind/HasLayerCompleted/' || $1 || '/v1'), "
+                + "p_type => laplace.canonical_id('substrate/type/HasLayerCompleted/' || $1 || '/v1'), "
                 + "p_source => laplace.source_id($2)) > 0";
             c.Parameters.AddWithValue(layer);
             c.Parameters.AddWithValue(sourceKey);

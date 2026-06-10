@@ -24,7 +24,7 @@ Context (`context_id`) refines the witness without entering relation identity: f
 
 ## The evidence law
 
-`attestations` records THAT a witnessing happened: (subject, kind, object, source, context), an outcome **class** (refute/draw/confirm), a count, a timestamp. Never a magnitude: a stored per-witness score is mathematically invertible to the raw weight — value-channel smuggling wearing provenance as a costume — and is banned. The witness's magnitude is consumed at ingest into adjudication and not persisted.
+`attestations` records THAT a witnessing happened: (subject, relType, object, source, context), an outcome **class** (refute/draw/confirm), a count, a timestamp. Never a magnitude: a stored per-witness score is mathematically invertible to the raw weight — value-channel smuggling wearing provenance as a costume — and is banned. The witness's magnitude is consumed at ingest into adjudication and not persisted.
 
 Consequences:
 - Re-observation is idempotent (content-addressed 5-tuple id → UPSERT bumps count/timestamp).
@@ -46,7 +46,7 @@ Reading the state:
 - **Refuted** = `rating + 2·RD < 1500e9`: even read optimistically, the witnesses net-deny it. Pruned from cascade/realization; visible (bottom-ranked) in reads. Continuing a walk across a refuted edge would assert what the consensus denies.
 - **witness_count** = how many distinct witnessings accumulated — corroboration breadth, distinct from strength.
 
-Consensus identity excludes source and context: ONE row per (subject, kind, object). Witnesses affect the state, never the identity — this is what makes "what does *everyone* think" a single indexed lookup.
+Consensus identity excludes source and context: ONE row per (subject, relType, object). Witnesses affect the state, never the identity — this is what makes "what does *everyone* think" a single indexed lookup.
 
 ## Geometry's epistemic role
 

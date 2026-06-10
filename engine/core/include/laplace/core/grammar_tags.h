@@ -22,7 +22,7 @@ enum {
 
 typedef struct {
     uint32_t match_id;       /* captures of one query match share this — pair @name with its @definition/@reference */
-    uint16_t capture_kind;   /* LAPLACE_TAG_* */
+    uint16_t capture_type;   /* LAPLACE_TAG_* */
     uint16_t _pad;
     uint32_t start_byte;     /* [start_byte, end_byte) of the captured node */
     uint32_t end_byte;

@@ -1,12 +1,8 @@
 CREATE FUNCTION relation_type_id(p_name text) RETURNS bytea
     LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
-    SELECT @extschema@.canonical_id('substrate/kind/' || p_name || '/v1')
+    SELECT @extschema@.canonical_id('substrate/type/' || p_name || '/v1')
 $$;
 
-CREATE FUNCTION kind_id(p_name text) RETURNS bytea
-    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
-    SELECT @extschema@.relation_type_id(p_name)
-$$;
 
 CREATE FUNCTION source_id(p_name text) RETURNS bytea
     LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
@@ -145,7 +141,7 @@ CREATE FUNCTION render_gaps(p_limit integer DEFAULT 50)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     WITH refs AS (
-        SELECT c.type_id AS id, 'kind' AS role FROM @extschema@.consensus c
+        SELECT c.type_id AS id, 'type' AS role FROM @extschema@.consensus c
         UNION ALL
         SELECT c.object_id, 'object' FROM @extschema@.consensus c WHERE c.object_id IS NOT NULL
         UNION ALL

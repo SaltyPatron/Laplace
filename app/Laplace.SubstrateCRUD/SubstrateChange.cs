@@ -7,7 +7,8 @@ public sealed record SubstrateChange(
     ImmutableArray<EntityRow>       Entities,
     ImmutableArray<PhysicalityRow>  Physicalities,
     ImmutableArray<AttestationRow>  Attestations,
-    SubstrateChangeMetadata         Metadata);
+    SubstrateChangeMetadata         Metadata,
+    ImmutableArray<IntentStage>     IntentStages = default);
 
 public sealed record SubstrateChangeMetadata(
     Hash128         IntentId,

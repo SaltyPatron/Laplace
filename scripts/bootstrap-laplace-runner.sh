@@ -74,9 +74,9 @@ EOF
 }
 
 mint_gh_token() {
-    local kind="$1"
+    local rel_type="$1"
     sudo -u "$GH_SUDO_USER" -H gh api -X POST \
-        "repos/$REPO/actions/runners/$kind" --jq '.token' 2>/dev/null || true
+        "repos/$REPO/actions/runners/$rel_type" --jq '.token' 2>/dev/null || true
 }
 
 bootstrap_user() {

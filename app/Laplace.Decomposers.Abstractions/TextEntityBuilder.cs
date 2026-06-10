@@ -9,11 +9,11 @@ namespace Laplace.Decomposers.Abstractions;
 
 public sealed class TextEntityBuilder
 {
-    public static readonly Hash128 CodepointTypeId = Hash128.OfCanonical("substrate/type/Codepoint/v1");
-    public static readonly Hash128 GraphemeTypeId  = Hash128.OfCanonical("substrate/type/Grapheme/v1");
-    public static readonly Hash128 WordTypeId      = Hash128.OfCanonical("substrate/type/Word/v1");
-    public static readonly Hash128 SentenceTypeId  = Hash128.OfCanonical("substrate/type/Sentence/v1");
-    public static readonly Hash128 DocumentTypeId  = Hash128.OfCanonical("substrate/type/Document/v1");
+    public static readonly Hash128 CodepointTypeId = EntityTypeRegistry.Codepoint;
+    public static readonly Hash128 GraphemeTypeId  = EntityTypeRegistry.Grapheme;
+    public static readonly Hash128 WordTypeId      = EntityTypeRegistry.Word;
+    public static readonly Hash128 SentenceTypeId  = EntityTypeRegistry.Sentence;
+    public static readonly Hash128 DocumentTypeId  = EntityTypeRegistry.Document;
 
     public static readonly Hash128 PrecedesTypeId = RelationTypeRegistry.RelationTypeId("PRECEDES");
 

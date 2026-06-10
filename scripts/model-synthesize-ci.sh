@@ -53,24 +53,24 @@ echo "$pass2_out" | grep -qi "already ingested" \
   || die "pass 2 did not short-circuit — idempotency broken"
 
 log "evidence/consensus gates"
-check_kind_evidence() {
-  local kind="$1" min="$2"
+check_type_evidence() {
+  local rel_type="$1" min="$2"
   local count
   count=$(psql -d laplace -U laplace_admin -tAc \
-    "SELECT laplace.evidence_count(p_type => laplace.relation_type_id('$kind'))")
-  [ "${count:-0}" -ge "$min" ] || die "kind $kind has $count evidence rows (need >= $min) — ingest broken"
-  log "  $kind: $count evidence rows OK"
+    "SELECT laplace.evidence_count(p_type => laplace.relation_type_id('$rel_type'))")
+  [ "${count:-0}" -ge "$min" ] || die "type $rel_type has $count evidence rows (need >= $min) — ingest broken"
+  log "  $rel_type: $count evidence rows OK"
 }
-check_kind_evidence EMBEDS          1000
-check_kind_evidence Q_PROJECTS      1000
-check_kind_evidence K_PROJECTS      1000
-check_kind_evidence V_PROJECTS      1000
-check_kind_evidence O_PROJECTS      1000
-check_kind_evidence GATES           1000
-check_kind_evidence UP_PROJECTS     1000
-check_kind_evidence DOWN_PROJECTS   1000
-check_kind_evidence NORMALIZES      1000
-check_kind_evidence OUTPUT_PROJECTS 1000
+check_type_evidence EMBEDS          1000
+check_type_evidence Q_PROJECTS      1000
+check_type_evidence K_PROJECTS      1000
+check_type_evidence V_PROJECTS      1000
+check_type_evidence O_PROJECTS      1000
+check_type_evidence GATES           1000
+check_type_evidence UP_PROJECTS     1000
+check_type_evidence DOWN_PROJECTS   1000
+check_type_evidence NORMALIZES      1000
+check_type_evidence OUTPUT_PROJECTS 1000
 
 cn=$(psql -d laplace -U laplace_admin -tAc "SELECT count(*) FROM laplace.consensus")
 [ "${cn:-0}" -gt 0 ] || die "consensus empty after ingest (accumulate-at-ingest produced no rows)"

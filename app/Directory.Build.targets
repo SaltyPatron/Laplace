@@ -1,0 +1,25 @@
+<Project>
+  <PropertyGroup>
+    <LaplaceRepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))</LaplaceRepoRoot>
+    <LaplaceBuildWin>$(LaplaceRepoRoot)\build-win</LaplaceBuildWin>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsTestProject)' == 'true'">
+    <Compile Include="$(MSBuildThisFileDirectory)NativeTestBootstrap.cs" />
+  </ItemGroup>
+
+  <Target Name="LaplaceCopyNativeLibs" AfterTargets="Build"
+          Condition="'$(IsTestProject)' == 'true' AND Exists('$(LaplaceBuildWin)\core\laplace_core.dll')">
+    <Copy SourceFiles="$(LaplaceBuildWin)\core\laplace_core.dll"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="C:\Program Files\PostgreSQL\18\bin\libxml2.dll"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true"
+          Condition="Exists('C:\Program Files\PostgreSQL\18\bin\libxml2.dll')" />
+    <Copy SourceFiles="$(LaplaceBuildWin)\dynamics\laplace_dynamics.dll"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true"
+          Condition="Exists('$(LaplaceBuildWin)\dynamics\laplace_dynamics.dll')" />
+    <Copy SourceFiles="$(LaplaceBuildWin)\synthesis\laplace_synthesis.dll"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true"
+          Condition="Exists('$(LaplaceBuildWin)\synthesis\laplace_synthesis.dll')" />
+  </Target>
+</Project>

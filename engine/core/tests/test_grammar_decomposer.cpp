@@ -10,22 +10,22 @@
 
 namespace {
 
-bool has_kind(laplace_ast_t* ast, const char* name) {
+bool has_node_type(laplace_ast_t* ast, const char* name) {
     size_t n = laplace_ast_node_count(ast);
     for (size_t i = 0; i < n; ++i) {
         laplace_ast_node_t nd;
         if (laplace_ast_get_node(ast, i, &nd) != 0) continue;
-        const char* kn = laplace_ast_kind_name(ast, nd.kind_id);
+        const char* kn = laplace_ast_type_name(ast, nd.type_id);
         if (kn && std::strcmp(kn, name) == 0) return true;
     }
     return false;
 }
 
-const char* root_kind(laplace_ast_t* ast) {
+const char* root_node_type(laplace_ast_t* ast) {
     laplace_ast_node_t nd;
     if (laplace_ast_get_node(ast, 0, &nd) != 0) return nullptr;
     EXPECT_EQ(nd.parent, LAPLACE_AST_ROOT);
-    return laplace_ast_kind_name(ast, nd.kind_id);
+    return laplace_ast_type_name(ast, nd.type_id);
 }
 
 TEST(GrammarRegistry, ListsRegisteredModalities) {
@@ -57,9 +57,9 @@ TEST(GrammarDecomposer, TsvStructure) {
     ASSERT_EQ(laplace_grammar_parse(
         reinterpret_cast<const uint8_t*>(src), std::strlen(src), recipe, &ast), 0);
     ASSERT_NE(ast, nullptr);
-    EXPECT_STREQ(root_kind(ast), "document");
-    EXPECT_TRUE(has_kind(ast, "row"));
-    EXPECT_TRUE(has_kind(ast, "field"));
+    EXPECT_STREQ(root_node_type(ast), "document");
+    EXPECT_TRUE(has_node_type(ast, "row"));
+    EXPECT_TRUE(has_node_type(ast, "field"));
     laplace_ast_free(ast);
 }
 
@@ -71,9 +71,9 @@ TEST(GrammarDecomposer, CsvStructure) {
     ASSERT_EQ(laplace_grammar_parse(
         reinterpret_cast<const uint8_t*>(src), std::strlen(src), recipe, &ast), 0);
     ASSERT_NE(ast, nullptr);
-    EXPECT_STREQ(root_kind(ast), "document");
-    EXPECT_TRUE(has_kind(ast, "row"));
-    EXPECT_TRUE(has_kind(ast, "field"));
+    EXPECT_STREQ(root_node_type(ast), "document");
+    EXPECT_TRUE(has_node_type(ast, "row"));
+    EXPECT_TRUE(has_node_type(ast, "field"));
     laplace_ast_free(ast);
 }
 
@@ -86,10 +86,10 @@ TEST(GrammarDecomposer, PythonStructure) {
     ASSERT_EQ(laplace_grammar_parse(
         reinterpret_cast<const uint8_t*>(src), std::strlen(src), recipe, &ast), 0);
     ASSERT_NE(ast, nullptr);
-    EXPECT_STREQ(root_kind(ast), "module");
-    EXPECT_TRUE(has_kind(ast, "function_definition"));
-    EXPECT_TRUE(has_kind(ast, "identifier"));
-    EXPECT_TRUE(has_kind(ast, "return_statement"));
+    EXPECT_STREQ(root_node_type(ast), "module");
+    EXPECT_TRUE(has_node_type(ast, "function_definition"));
+    EXPECT_TRUE(has_node_type(ast, "identifier"));
+    EXPECT_TRUE(has_node_type(ast, "return_statement"));
     laplace_ast_free(ast);
 }
 
@@ -101,10 +101,10 @@ TEST(GrammarDecomposer, JsonStructure) {
     ASSERT_EQ(laplace_grammar_parse(
         reinterpret_cast<const uint8_t*>(src), std::strlen(src), recipe, &ast), 0);
     ASSERT_NE(ast, nullptr);
-    EXPECT_STREQ(root_kind(ast), "document");
-    EXPECT_TRUE(has_kind(ast, "object"));
-    EXPECT_TRUE(has_kind(ast, "pair"));
-    EXPECT_TRUE(has_kind(ast, "array"));
+    EXPECT_STREQ(root_node_type(ast), "document");
+    EXPECT_TRUE(has_node_type(ast, "object"));
+    EXPECT_TRUE(has_node_type(ast, "pair"));
+    EXPECT_TRUE(has_node_type(ast, "array"));
     laplace_ast_free(ast);
 }
 
@@ -125,7 +125,7 @@ TEST(GrammarDecomposer, DeterministicAndWellFormedParentLinks) {
         laplace_ast_node_t na, nb;
         laplace_ast_get_node(a, i, &na);
         laplace_ast_get_node(b, i, &nb);
-        EXPECT_EQ(na.kind_id, nb.kind_id);
+        EXPECT_EQ(na.type_id, nb.type_id);
         EXPECT_EQ(na.start_byte, nb.start_byte);
         EXPECT_EQ(na.end_byte, nb.end_byte);
         EXPECT_EQ(na.parent, nb.parent);

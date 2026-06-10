@@ -19,7 +19,7 @@ The repo's working platform is this Windows machine; Linux scripts persist but m
 4. **Bare module names**: control/SQL must reference `laplace_substrate`, not `$libdir/...` — `$libdir`-prefixed paths bypass dynamic_library_path entirely. gen-sql.ps1 enforces.
 5. **.cmd files MUST be CRLF** (cmd's LF bug eats leading characters of lines). Convert after authoring: `sed -i 's/\r$//; s/$/\r/'`.
 6. **PowerShell -replace is case-INSENSITIVE** — macro/token substitution scripts must use `-creplace` (the LAPLACE_GEOM_VERSION vs laplace_geom_version() incident).
-7. **Column law**: attestation/physicality column is `type`, never `kind` — surviving `kind` column refs are refactor residue (ContentRoundtrip incident, fixed).
+7. **Column law**: attestation/physicality column is `type` (legacy type column removed in ContentRoundtrip refactor).
 8. **Concurrent runners lock CLI binaries** — ingest-text.cmd builds a SIDECAR copy (`%TEMP%\laplace-cli-sidecar`) so document ingestion runs while ladder runners hold bin\Release. (Guard TODO: skip rebuild when sidecar exists.)
 9. **pg_regress.exe ships with EDB** (lib\pgxs\src\test\regress\) and needs Git's diff on PATH.
 10. Engine UCD inputs: pass the four cache-derived vars explicitly when repointing (LAPLACE_UCD_PATH alone doesn't refresh derived cached paths).

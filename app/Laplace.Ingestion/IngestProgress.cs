@@ -12,7 +12,7 @@ public sealed record IngestProgress(
     int      FilesTotal,
     int      FilesDone,
     string?  CurrentFile,
-    string   UnitKind,
+    string   UnitType,
     TimeSpan Elapsed,
     long     EntitiesInserted = 0,
     long     PhysicalitiesInserted = 0,

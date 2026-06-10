@@ -16,7 +16,7 @@ Depositing a transformer's weights as adjudicated testimony, then synthesizing a
 
 **Two laws fixed:**
 1. **Rational Score law** `s = ½(1 + v/(M+|v|))` replaced `tanh(v/M)`. tanh saturated at ~10.7·M and crushed attention-sink outliers (the babble cause). Rational law: outliers v/M = 10/30/100 now recover at 100% (were 60/20/6%). One implementation in `engine/core/src/score.c`, exposed to SQL (`laplace_score*`) and C# (`Laplace.Engine.Core.ScoreLaw`). LAW: this lives in the engine only; SQL and C# orchestrate, never re-implement.
-2. **Per-layer arenas** (JUST WRITTEN, UNVALIDATED): collapsing 22 layers into one consensus relation destroyed projections (audit measured cos-vs-original ≈ 0.20). Fix: each (role, layer) is its own kind. See `app/Laplace.Decomposers.Model/ModelArenaPlan.cs` — the single contract all three consumers iterate.
+2. **Per-layer arenas** (JUST WRITTEN, UNVALIDATED): collapsing 22 layers into one consensus relation destroyed projections (audit measured cos-vs-original ≈ 0.20). Fix: each (role, layer) is its own type. See `app/Laplace.Decomposers.Model/ModelArenaPlan.cs` — the single contract all three consumers iterate.
 
 ## The export law (user ruling — do not violate)
 
@@ -24,12 +24,12 @@ The substrate NEVER replays a witness's numbers back into their mold. Consensus 
 
 ## Identity-vs-provenance law (user ruling)
 
-- Relation about the **witness's own mechanism** (the tensor-role arenas): layer enters the KIND identity (`Q_PROJECTS/L7/v1`). Endpoints are per-source axis entities, so nothing cross-witness fragments.
+- Relation about the **witness's own mechanism** (the tensor-role arenas): layer enters the TYPE identity (`Q_PROJECTS/L7/v1`). Endpoints are per-source axis entities, so nothing cross-witness fragments.
 - Relation about the **world** ("dog IS_A noun" extracted from a model): ONE shared arena always; the layer rides as `context_id` (the docs §13 provenance pattern). Layers agreeing = games strengthening one relation, not orphans.
 
 ## IMMEDIATE NEXT STEP (where to resume)
 
-The per-layer rewire (`ModelArenaPlan.cs`, `ModelTableETL.cs` per-slot fold, `ModelDecomposer.InitializeAsync` per-layer kind seeding, `ConsensusReExport`/`Program.cs SynthesizeFromSubstrateAsync`/`ExportAudit.cs` per-slot reads) **compiles** (CLI builds, `Laplace.Decomposers.Model.Tests` 11/11) but has NOT run live. Validate:
+The per-layer rewire (`ModelArenaPlan.cs`, `ModelTableETL.cs` per-slot fold, `ModelDecomposer.InitializeAsync` per-layer type seeding, `ConsensusReExport`/`Program.cs SynthesizeFromSubstrateAsync`/`ExportAudit.cs` per-slot reads) **compiles** (CLI builds, `Laplace.Decomposers.Model.Tests` 11/11) but has NOT run live. Validate:
 
 1. Fast-iteration loop the user authorized: fresh DB, ingest unicode + iso639 only, then deposit the two models. Linguistic ladder deferred — data is disposable until export is perfect.
 2. Deposit TinyLlama snapshot: `ingest safetensors D:\Models\hub\models--TinyLlama--TinyLlama-1.1B-Chat-v1.0\snapshots\fe8a4ea1ffedaf415f4da2f062534de366a451e6`. Expect ~1.1B relations now (per-layer), not 153M. **B1 bulk-fresh apply is committed** (NpgsqlSubstrateWriter `bulkFreshSource`, set true by `IngestSafetensorSnapshotAsync`) — skips the attestation existence check. If apply is still the bottleneck, B2 (drop attestations secondary indexes before the role stream, rebuild after) is the next lever — NOT yet built.

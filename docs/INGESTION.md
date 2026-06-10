@@ -33,21 +33,22 @@ L3 omw          binds to WordNetSynset IDs (en-filtered)    AcademicCuratedWithU
    propbank     lemma → roleset → verbnet (HAS_SENSE, …)     AcademicCurated
 L3 framenet     lemma → frame (EVOKES_FRAME)                 AcademicCurated
 L3 semlink      propbank↔verbnet↔framenet alignment          AcademicCurated
-   conceptnet   /c/en/ graph (shared lemma arena)            UserCuratedResource
-   atomic2020   script relations on event atoms              StructuredCorpus
-   ud           syntax trees (en_* when scoped)              AcademicCurated
-   wiktionary   dictionary (English jsonl when scoped)       StructuredCorpus
-   [functionality: repos, tiny-codes, stack]
+   [proof path: tiny-codes, stack, document/image/audio, repos]
+   [deferred lexical: conceptnet, atomic2020, ud, wiktionary]
    [proof sandbox: ingest-text.cmd / e2e-full.cmd — db-roundtrip, not seed]
    [deferred usage: tatoeba, opensubtitles]
 ```
 
-Seed order (see `witness-manifest.json`): **wordnet (synset hub)** → **omw → verbnet → propbank → framenet → semlink** → conceptnet → atomic2020 → ud → wiktionary → **repos + code + image/audio**. Tatoeba/OpenSubtitles deferred unless `LAPLACE_SKIP_USAGE=0`. **db-roundtrip is not seed** — run `scripts\win\ingest-text.cmd` or `e2e-full.cmd` separately to prove bit-perfect document round-trip.
+Seed order (see `witness-manifest.json`): **wordnet (synset hub)** → **omw → verbnet → propbank → framenet → semlink** → **tiny-codes → stack → document/image/audio → repos → models** → **[deferred] conceptnet → atomic2020 → ud → wiktionary**. Proof path runs before multi-hour lexical bulk so code/repo/modality claims are testable first. Resume scripts: `seed-resume-prove.cmd` (proof only), `seed-deferred-lexical.cmd` (lexical bulk). Tatoeba/OpenSubtitles deferred unless `LAPLACE_SKIP_USAGE=0`; models deferred unless `LAPLACE_SKIP_MODELS=0`; lexical bulk skippable via `LAPLACE_SKIP_LEXICAL_BULK=1`. **db-roundtrip is not seed** — run `scripts\win\ingest-text.cmd` or `e2e-full.cmd` separately to prove bit-perfect document round-trip.
 
 | skip flag | effect |
 |---|---|
 | `LAPLACE_SKIP_USAGE=1` | skip tatoeba, opensubtitles (translation-pair usage; default at seed) |
 | `LAPLACE_SKIP_MODELS=1` | skip safetensor snapshot deposition (default at seed) |
+| `LAPLACE_SKIP_LEXICAL_BULK=1` | skip deferred conceptnet/atomic2020/ud/wiktionary at end of seed |
+| `LAPLACE_INGEST_LANGS=en` | default in `env.cmd`; UD without this ingests all ~686 treebanks (~38M sents) instead of 29 `en_*` dialects (~1.1M) |
+
+UD treebank filter: `en_ewt-ud-train.conllu` → base lang `en` → matches `en`/`eng` filter; all English dialect treebanks (`en_gum`, `en_lines`, …) are included.
 
 Safetensor deposition is a **separate witness pass**, not required to prove the invention: lexical + structural + code/document attestations supply converse, generate, and the substrate-side recipe for custom export. Deposit models when you want tensor-role testimony stacked on the same entities — or run `ingest safetensors` later against a seeded DB.
 
@@ -55,7 +56,7 @@ Safetensor deposition is a **separate witness pass**, not required to prove the 
 
 Each ingest emits structured key=value lines (stderr):
 
-- `INGEST_START` — scanned inventory: `unit_kind`, `input_units`, `files` (from disk, not output-row guesses)
+- `INGEST_START` — scanned inventory: `unit_type`, `input_units`, `files` (from disk, not output-row guesses)
 - `INGEST_PROGRESS` — `input_done/input_total` and `input_pct`, or `files_done/files_total` and `file_pct`; `rows_new` is throughput only, never used for %
 - `INGEST_BATCH` — per-commit batch stats
 - `INGEST_COMPLETE` — final counts + `status=ok|failed`

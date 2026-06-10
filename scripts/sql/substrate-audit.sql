@@ -10,7 +10,7 @@ SELECT count(*) AS identity_violations FROM identity_law_violations();
 
 \echo '=== layer completion markers ==='
 SELECT layer, laplace.evidence_count(
-           p_type => laplace.canonical_id('substrate/kind/HasLayerCompleted/' || layer || '/v1')) > 0 AS completed
+           p_type => laplace.canonical_id('substrate/type/HasLayerCompleted/' || layer || '/v1')) > 0 AS completed
 FROM generate_series(0, 3) AS layer
 ORDER BY layer;
 
