@@ -148,30 +148,70 @@ $$;
 -- refine (the structural_cluster law). Tokens (tier <= 2) are the pour floor —
 -- never opened, never respelled. Novelty arises only at substitution points and
 -- is justified by geometry; every emitted fragment stays a witnessed whole.
+-- Peer election is CONSENSUS-FIRST (Glicko-2 replaces nearest neighbor): a peer
+-- is an entity of the same node type co-witnessed in the same typed relation
+-- contexts, scored by the weaker of the two adjudicated eff_mu ratings — so
+-- uncertain testimony (high RD) cannot elect a peer. Geometry (coord KNN +
+-- Fréchet over trajectories) is only the fallback for thinly-witnessed entities.
 CREATE OR REPLACE FUNCTION pour_peer(p_id bytea, p_k int DEFAULT 6)
     RETURNS bytea
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    WITH me AS (
-        SELECT e.type_id, p.coord, p.trajectory
-        FROM entities e JOIN physicalities p ON p.entity_id = e.id AND p.type = 1
-        WHERE e.id = p_id AND p.trajectory IS NOT NULL
-        LIMIT 1
+    WITH my_type AS (
+        SELECT type_id FROM entities WHERE id = p_id
     ),
-    knn AS (
-        SELECT e2.id, p2.trajectory AS t2
-        FROM me, entities e2
-        JOIN physicalities p2 ON p2.entity_id = e2.id AND p2.type = 1
-        WHERE e2.type_id = me.type_id AND e2.id <> p_id AND p2.trajectory IS NOT NULL
-        ORDER BY p2.coord <<->> me.coord
-        LIMIT 48
+    my_ctx AS (
+        SELECT c.type_id AS rel,
+               CASE WHEN c.subject_id = p_id THEN c.object_id ELSE c.subject_id END AS partner,
+               (c.subject_id = p_id) AS as_subject,
+               eff_mu(c.rating, c.rd) AS mu
+        FROM consensus c
+        WHERE (c.subject_id = p_id OR c.object_id = p_id)
+          AND c.object_id IS NOT NULL
+          AND NOT refuted(c.rating, c.rd)
     ),
-    near AS (
-        SELECT knn.id FROM me, knn
-        ORDER BY public.laplace_frechet_4d(knn.t2, me.trajectory) ASC
+    elected AS (
+        SELECT x.id,
+               sum(LEAST(m.mu, eff_mu(c2.rating, c2.rd))) AS score
+        FROM my_ctx m
+        JOIN consensus c2 ON c2.type_id = m.rel
+          AND NOT refuted(c2.rating, c2.rd)
+          AND ((m.as_subject     AND c2.object_id  = m.partner AND c2.subject_id <> p_id)
+            OR (NOT m.as_subject AND c2.subject_id = m.partner AND c2.object_id  <> p_id))
+        JOIN entities x
+          ON x.id = CASE WHEN m.as_subject THEN c2.subject_id ELSE c2.object_id END
+        JOIN my_type t ON x.type_id = t.type_id
+        GROUP BY x.id
+        ORDER BY score DESC
         LIMIT p_k
+    ),
+    geometric AS (        -- fallback: witnessed shape, structural_cluster law
+        SELECT near.id FROM (
+            SELECT e.type_id, p.coord, p.trajectory
+            FROM entities e JOIN physicalities p ON p.entity_id = e.id AND p.type = 1
+            WHERE e.id = p_id AND p.trajectory IS NOT NULL
+            LIMIT 1
+        ) me,
+        LATERAL (
+            SELECT knn.id, knn.t2 FROM (
+                SELECT e2.id, p2.trajectory AS t2
+                FROM entities e2
+                JOIN physicalities p2 ON p2.entity_id = e2.id AND p2.type = 1
+                WHERE e2.type_id = me.type_id AND e2.id <> p_id AND p2.trajectory IS NOT NULL
+                ORDER BY p2.coord <<->> me.coord
+                LIMIT 48
+            ) knn
+            ORDER BY public.laplace_frechet_4d(knn.t2, me.trajectory) ASC
+            LIMIT p_k
+        ) near
     )
-    SELECT id FROM near ORDER BY random() LIMIT 1
+    SELECT id FROM (
+        SELECT id FROM elected
+        UNION ALL
+        SELECT id FROM geometric
+        WHERE NOT EXISTS (SELECT 1 FROM elected)
+    ) z
+    ORDER BY random() LIMIT 1
 $$;
 
 CREATE OR REPLACE FUNCTION pour_walk(p_id bytea, p_swap float8 DEFAULT 0.3,
