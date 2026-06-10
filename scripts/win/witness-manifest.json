@@ -1,28 +1,37 @@
 {
-  "version": 3,
-  "description": "Invention-complete witness manifest — full stack, language-scoped via LAPLACE_INGEST_LANGS",
+  "version": 5,
+  "description": "Invention-complete witness manifest — English-scoped by default (LAPLACE_INGEST_LANGS=en)",
   "language_scope": {
     "global_env": "LAPLACE_INGEST_LANGS",
     "per_source_env": "LAPLACE_{SOURCE}_LANGS",
     "cross_language_edges_env": "LAPLACE_EMIT_CROSS_LANG",
     "law": "Every witness source remains in the manifest. Language filters reduce which languages are ingested from multilingual corpora — not which witnesses exist."
   },
-  "ordering_law": "unicode (L0) + iso639 (L1) + wordnet (L2 lexicon) → semantic L2 (verbnet…ud) → functionality (repos, db-roundtrip books, tiny-codes, stack) → world usage (tatoeba, opensubtitles, wiktionary) → L3 bind (omw, framenet, semlink). Code before world data.",
+  "synset_hub_law": "WordNet synsets (WordNetSynset offset+pos) and senses (wordnet/sense/{key}) are the shared anchor. OMW attaches to synset IDs. VerbNet attaches to sense IDs. PropBank attaches lemmas→rolesets→VerbNet. FrameNet attaches lemmas→frames. SemLink aligns PropBank↔VerbNet↔FrameNet. ConceptNet/Atomic2020 share the lemma arena but do not use synset IDs.",
+  "ordering_law": "unicode → iso639 → wordnet → omw → verbnet → propbank → framenet → semlink → conceptnet → atomic2020 → ud → wiktionary → functionality → image/audio",
   "vault_root": "D:/Data/Ingest",
   "repos_root": "D:/Repositories",
   "models_root": "D:/Models/hub",
-  "lexical_core": [
-    { "order": 1, "cli": "unicode", "path": "Unicode", "layer": "L0", "size_gb": 37.5 },
-    { "order": 2, "cli": "iso639", "path": "ISO639", "layer": "L1", "size_gb": 0.01 },
-    { "order": 3, "cli": "wordnet", "path": "Wordnet", "layer": "L2", "size_gb": 0.05 },
-    { "order": 4, "cli": "verbnet", "path": "VerbNet", "layer": "L2", "size_gb": 0.01 },
-    { "order": 5, "cli": "propbank", "path": "PropBank", "layer": "L2", "size_gb": 0.04 },
-    { "order": 6, "cli": "atomic2020", "path": "Atomic2020", "layer": "L2", "size_gb": 0.06, "packaging_modality": "tsv" },
-    { "order": 7, "cli": "conceptnet", "path": "ConceptNet", "layer": "L2", "size_gb": 9.5, "packaging_modality": "tsv" },
-    { "order": 8, "cli": "ud", "path": "UD-Treebanks", "layer": "L2", "size_gb": 4.2 }
+  "wordnet_cluster": [
+    { "order": 1, "cli": "wordnet", "path": "Wordnet", "layer": "L2", "links": "anchor: synsets, senses, lemma arena, pointer graph" },
+    { "order": 2, "cli": "omw", "path": "OMW", "layer": "L3", "links": "WordNetSynset IDs — IS_TRANSLATION_OF, HAS_DEFINITION, HAS_EXAMPLE (en-filtered)" },
+    { "order": 3, "cli": "verbnet", "path": "VerbNet", "layer": "L2", "links": "lemma CORRESPONDS_TO wordnet/sense/{key}" },
+    { "order": 4, "cli": "propbank", "path": "PropBank", "layer": "L2", "links": "lemma HAS_SENSE roleset; roleset CORRESPONDS_TO verbnet/class" },
+    { "order": 5, "cli": "framenet", "path": "FrameNet/framenet_v17", "layer": "L3", "links": "lemma EVOKES_FRAME framenet/frame" },
+    { "order": 6, "cli": "semlink", "path": "SemLink", "layer": "L3", "links": "propbank↔verbnet (pb-vn2), verbnet↔framenet (vn-fn2)" },
+    { "order": 7, "cli": "conceptnet", "path": "ConceptNet", "layer": "L2", "links": "/c/en/ terms — shared ContentEmitter lemmas, not synset IDs" },
+    { "order": 8, "cli": "atomic2020", "path": "Atomic2020", "layer": "L2", "links": "script relations (XWant, Causes, …) on event atoms" }
+  ],
+  "floor": [
+    { "order": 0, "cli": "unicode", "path": "Unicode", "layer": "L0" },
+    { "order": 0, "cli": "iso639", "path": "ISO639", "layer": "L1" }
+  ],
+  "lexical_satellites": [
+    { "order": 9, "cli": "ud", "path": "UD-Treebanks", "layer": "L2", "note": "en_* treebanks — syntax, not synset-linked" },
+    { "order": 10, "cli": "wiktionary", "path": "Wiktionary", "layer": "L2", "note": "English jsonl — dictionary, not synset-linked" }
   ],
   "functionality": {
-    "law": "Repos, document roundtrips, and code corpora deposit PRECEDES + HAS_EXAMPLE — the generate/converse/coding surface. Runs after lexical core, before world usage.",
+    "law": "Repos and code corpora deposit PRECEDES + HAS_EXAMPLE. Document bit-perfect proof is NOT seed — use scripts/win/ingest-text.cmd or e2e-full.cmd (db-roundtrip sandbox).",
     "repositories": [
       "Laplace",
       "X_BONEYARD",
@@ -33,9 +42,7 @@
       "temp-llama-models"
     ],
     "test_data": {
-      "text_glob": "test-data/text/*.txt",
-      "code_files": ["test-data/text/code.py", "test-data/text/data.json"],
-      "cli": "db-roundtrip",
+      "roundtrip_proof": "scripts/win/ingest-text.cmd or e2e-full.cmd — db-roundtrip sandbox, not seed-substrate",
       "images_glob": "test-data/images/*.png",
       "audio_glob": "test-data/audio/*.wav"
     },
@@ -44,25 +51,17 @@
       { "cli": "stack", "path": "stack-v2", "download": "download-code-data.cmd stack-v2", "hf_token_env": "HF_TOKEN" }
     ]
   },
-  "world_usage": [
-    { "order": 9, "cli": "tatoeba", "path": "Tatoeba", "layer": "L2", "size_gb": 9.6, "packaging_modality": "tsv" },
-    { "order": 10, "cli": "opensubtitles", "path": "OpenSubtitles", "layer": "L2", "size_gb": 15.2 },
-    { "order": 11, "cli": "wiktionary", "path": "Wiktionary", "layer": "L2", "size_gb": 33.8 }
-  ],
-  "l3_bind": [
-    { "order": 12, "cli": "omw", "path": "OMW", "layer": "L3", "size_gb": 0.14 },
-    { "order": 13, "cli": "framenet", "path": "FrameNet/framenet_v17", "layer": "L3", "size_gb": 0.89 },
-    { "order": 14, "cli": "semlink", "path": "SemLink", "layer": "L3", "size_gb": 0.03 }
-  ],
+  "world_usage_deferred": {
+    "skip_env": "LAPLACE_SKIP_USAGE",
+    "default": "skip at seed — translation-pair witnesses",
+    "sources": [
+      { "cli": "tatoeba", "path": "Tatoeba", "layer": "L2" },
+      { "cli": "opensubtitles", "path": "OpenSubtitles", "layer": "L2" }
+    ]
+  },
   "safetensor_snapshots": {
-    "law": "HF snapshot bundle (config.json + tokenizer.json + *.safetensors). Not self-contained like GGUF — the directory is the witness unit. Optional at seed time: converse, generate, and custom export are attestation-complete without weight deposition.",
-    "skip_env": "LAPLACE_SKIP_MODELS=1",
-    "root": "D:/Models/hub",
-    "witness_set": [
-      "models--TinyLlama--TinyLlama-1.1B-Chat-v1.0",
-      "models--microsoft--phi-2",
-      "models--Qwen--Qwen2.5-Coder-3B-Instruct"
-    ],
-    "require_files": ["tokenizer.json", "config.json"]
+    "skip_env": "LAPLACE_SKIP_MODELS",
+    "default": "skip (LAPLACE_SKIP_MODELS=1)",
+    "root": "D:/Models/hub"
   }
 }

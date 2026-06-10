@@ -38,3 +38,11 @@ target_link_libraries(laplace_core_tests
 )
 
 gtest_discover_tests(laplace_core_tests)
+
+if(WIN32)
+    add_custom_command(TARGET laplace_core_tests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:laplace_core>
+                $<TARGET_FILE_DIR:laplace_core_tests>
+        COMMENT "Copy laplace_core.dll beside laplace_core_tests.exe")
+endif()

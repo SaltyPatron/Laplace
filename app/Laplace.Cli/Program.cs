@@ -835,7 +835,7 @@ internal static class Program
         var cli = ParseIngestCliArgs(args);
         if (string.IsNullOrEmpty(cli.Source))
             return Fail("usage: laplace ingest <source> [path] [--langs en,...] [--emit-cross-lang]\n"
-                        + "  sources: unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | code | repo | tabular | tiny-codes | stack | safetensors | image | audio\n"
+                        + "  sources: unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | code | repo | tabular | tiny-codes | stack | safetensors | image | audio | document\n"
                         + "  language scope: --langs or LAPLACE_INGEST_LANGS; per-source LAPLACE_{SOURCE}_LANGS");
 
         return cli.Source.ToLowerInvariant() switch
@@ -864,7 +864,8 @@ internal static class Program
             "model" or "safetensors" or "safetensor" => await IngestSafetensorSnapshotAsync(cli.Path, cli),
             "image"      => await IngestViaRunnerAsync(new ImageDecomposer(), string.IsNullOrEmpty(cli.Path) ? "/vault/Data/test-data/images" : cli.Path, skipLayerCheck: true, cli),
             "audio"      => await IngestViaRunnerAsync(new AudioDecomposer(), string.IsNullOrEmpty(cli.Path) ? "/vault/Data/test-data/audio" : cli.Path, skipLayerCheck: true, cli),
-            _ => Fail($"unknown ingest source '{cli.Source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, code, repo, tabular, tiny-codes, stack, safetensors, image, audio)"),
+            "document"   => await IngestDocumentAsync(cli),
+            _ => Fail($"unknown ingest source '{cli.Source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, code, repo, tabular, tiny-codes, stack, safetensors, image, audio, document)"),
         };
     }
 
@@ -1528,6 +1529,23 @@ internal static class Program
         return 0;
     }
 
+    private static async Task<int> IngestDocumentAsync(IngestCliArgs cli)
+    {
+        if (string.IsNullOrEmpty(cli.Path))
+            return Fail("usage: laplace ingest document <file-or-directory>\n"
+                        + "  Deposits whole documents (entities + physicalities + PRECEDES bigrams).\n"
+                        + "  Bit-perfect proof: laplace db-roundtrip <file>  (reconstruct + compare).");
+        if (!File.Exists(cli.Path) && !Directory.Exists(cli.Path))
+            return Fail($"ingest document: path not found: {cli.Path}");
+
+        return await IngestViaRunnerAsync(
+            new DocumentDecomposer(),
+            Path.GetFullPath(cli.Path),
+            skipLayerCheck: true,
+            cli,
+            skipSourceCompletion: true);
+    }
+
     private static async Task<int> IngestUnicodeViaRunnerAsync(IngestCliArgs cli)
         => await IngestViaRunnerAsync(new UnicodeDecomposer(), "/vault/Data/Unicode", skipLayerCheck: true, cli);
 
@@ -1536,7 +1554,7 @@ internal static class Program
 
     private static IngestRunOptions BuildIngestOptions(
         Stopwatch sw, string sourceName, bool skipLayerCheck, string? ecosystemPath,
-        IngestCliArgs? cli = null)
+        IngestCliArgs? cli = null, bool skipSourceCompletion = false)
     {
         long lastMs = -10_000;
         var progress = new Progress<Laplace.Ingestion.IngestProgress>(p =>
@@ -1562,6 +1580,7 @@ internal static class Program
         return IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = skipLayerCheck,
+            SkipSourceCompletion   = skipSourceCompletion,
             EcosystemPath          = ecosystemPath,
             BatchSize              = batch,
             DecomposerOptions      = DecomposerOptions.ForWitness(
@@ -1578,7 +1597,8 @@ internal static class Program
     }
 
     private static async Task<int> IngestViaRunnerAsync(
-        IDecomposer dec, string ecosystemPath, bool skipLayerCheck, IngestCliArgs? cli = null)
+        IDecomposer dec, string ecosystemPath, bool skipLayerCheck, IngestCliArgs? cli = null,
+        bool skipSourceCompletion = false)
     {
         CodepointPerfcache.Load(ResolveBlob());
 
@@ -1597,7 +1617,7 @@ internal static class Program
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(
             dec,
-            BuildIngestOptions(sw, dec.SourceName, skipLayerCheck, ecosystemPath, cli),
+            BuildIngestOptions(sw, dec.SourceName, skipLayerCheck, ecosystemPath, cli, skipSourceCompletion),
             CancellationToken.None);
         sw.Stop();
 

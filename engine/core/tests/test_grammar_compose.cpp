@@ -24,8 +24,6 @@ TEST(GrammarCompose, TsvRowProducesEntitiesAndSpans) {
     hash128_blake3(reinterpret_cast<const uint8_t*>("substrate/type/Meta/v1"), 22, &type_meta);
 
     laplace_compose_result_t* result = nullptr;
-    fputs("test: before compose\n", stderr);
-    fflush(stderr);
     ASSERT_EQ(laplace_grammar_compose(
         reinterpret_cast<const uint8_t*>(src), std::strlen(src), ast,
         "tsv", source_id, type_meta, &result), 0);

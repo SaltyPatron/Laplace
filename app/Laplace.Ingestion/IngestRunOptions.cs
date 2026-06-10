@@ -9,6 +9,7 @@ public sealed record IngestRunOptions(
     IProgress<IngestProgress>? Progress,
     bool                       AbortOnTransientExhaustion = false,
     bool                       SkipLayerOrderingCheck = false,
+    bool                       SkipSourceCompletion = false,
     string?                    EcosystemPath = null,
     int                        BatchSize = 1,
     int                        CommitRows = 0)

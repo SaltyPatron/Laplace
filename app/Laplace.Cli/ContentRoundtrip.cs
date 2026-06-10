@@ -11,40 +11,17 @@ namespace Laplace.Cli;
 
 internal static class ContentRoundtrip
 {
-    public static readonly Hash128 PromptSource = Hash128.OfCanonical("substrate/source/UserPrompt/v1");
-    public static readonly Hash128 PromptTrust  = Hash128.OfCanonical("substrate/trust_class/UserPromptContent/v1");
+    public static Hash128 PromptSource => UserPromptContent.Source;
 
-    private static readonly Hash128 TGrapheme = Hash128.OfCanonical("substrate/type/Grapheme/v1");
-    private static readonly Hash128 TWord     = Hash128.OfCanonical("substrate/type/Word/v1");
-    private static readonly Hash128 TSentence = Hash128.OfCanonical("substrate/type/Sentence/v1");
-    private static readonly Hash128 TDocument = Hash128.OfCanonical("substrate/type/Document/v1");
-
-    public static async Task BootstrapAsync(ISubstrateWriter writer, CancellationToken ct = default)
-    {
-        var b = new SubstrateChangeBuilder(PromptSource, "bootstrap/UserPrompt", parentIntentId: null);
-        b.AddEntity(PromptSource, EntityTier.Vocabulary, BootstrapIntentBuilder.SourceTypeId, firstObservedBy: PromptSource);
-        b.AddEntity(TGrapheme, EntityTier.Vocabulary, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
-        b.AddEntity(TWord,     EntityTier.Vocabulary, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
-        b.AddEntity(TSentence, EntityTier.Vocabulary, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
-        b.AddEntity(TDocument, EntityTier.Vocabulary, BootstrapIntentBuilder.TypeMetaTypeId, PromptSource);
-        await writer.ApplyAsync(b.Build(), ct);
-    }
+    public static Task BootstrapAsync(ISubstrateWriter writer, CancellationToken ct = default)
+        => writer.ApplyAsync(UserPromptContent.BuildBootstrapChange(), ct);
 
     public static async Task<Hash128> RecordAsync(
         ISubstrateWriter writer, byte[] utf8, CancellationToken ct = default)
     {
-        double witnessWeight = RelationTypeRank.Associative * SourceTrust.UserPrompt;
-        if (!TextEntityBuilder.TryBuildContentWitness(utf8, PromptSource, witnessWeight,
-                out var entities, out var physicalities, out var attestations, out var rootId, out _))
+        if (!UserPromptContent.TryBuildWitnessChange(utf8, "prompt", out var change, out var rootId))
             return Hash128.Zero;
-
-        var b = new SubstrateChangeBuilder(PromptSource, "prompt", parentIntentId: null,
-            entityCapacity: entities.Length, physicalityCapacity: physicalities.Length,
-            attestationCapacity: attestations.Length);
-        foreach (var e in entities)      b.AddEntity(e);
-        foreach (var p in physicalities) b.AddPhysicality(p);
-        foreach (var a in attestations)  b.AddAttestation(a);
-        await writer.ApplyAsync(b.Build(), ct);
+        await writer.ApplyAsync(change, ct);
         return rootId;
     }
 

@@ -20,6 +20,7 @@ public static class StructuredGrammarIngest
         Action<long>? reportUnits,
         Hash128? contextId = null,
         int commitEpoch = 0,
+        Func<ReadOnlySpan<byte>, bool>? acceptRow = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         IntPtr recipe = GrammarDecomposer.LookupById(modalityId);
@@ -46,6 +47,9 @@ public static class StructuredGrammarIngest
                 foreach (var row in FeedChunk(iter, buf, read))
                 {
                     rowsTotal++;
+                    if (acceptRow is not null && !acceptRow(row.LineUtf8))
+                        continue;
+
                     rowsInBatch++;
                     using var ast = GrammarAst.Adopt(row.Ast);
                     using var composer = new GrammarRowComposer(row.LineUtf8, ast, sourceId, modalityId);

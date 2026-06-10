@@ -66,6 +66,9 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
                              const char* modality_id,
                              const laplace_grapheme_floor_t* floor, tier_tree_t* tree,
                              compose_state_t* st) {
+    (void)utf8;
+    (void)len;
+    (void)modality_id;
     size_t n = laplace_ast_node_count(ast);
     st->n = n;
     if (n == 0) return 0;
@@ -89,9 +92,9 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
         if (nd.parent != LAPLACE_AST_ROOT && nd.parent < n) {
             uint32_t p = nd.parent;
             uint32_t cc = child_counts[p]++;
-            children_of[p] = (uint32_t*)realloc(children_of[p], (size_t)cc * sizeof(uint32_t));
+            children_of[p] = (uint32_t*)realloc(children_of[p], (size_t)(cc + 1) * sizeof(uint32_t));
             if (!children_of[p]) return -3;
-            children_of[p][cc - 1] = (uint32_t)i;
+            children_of[p][cc] = (uint32_t)i;
         }
     }
 
@@ -251,8 +254,6 @@ static int push_phys(laplace_compose_result_t* r, hash128_t entity_id, hash128_t
 int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
                             const char* modality_id, hash128_t source_id,
                             hash128_t type_meta_id, laplace_compose_result_t** out) {
-    fputs("compose: enter\n", stderr);
-    fflush(stderr);
     if (!utf8 || !ast || !modality_id || !out) return -1;
     *out = NULL;
     if (len == 0 || laplace_ast_node_count(ast) == 0) return 0;
@@ -272,7 +273,6 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
     laplace_grapheme_floor_t floor;
     rc = laplace_grapheme_floor_build(utf8, len, &tree, &floor);
     if (rc != 0) { free(r); return rc; }
-    fputs("compose: floor ok\n", stderr);
 
     if (codepoint_table_is_loaded()) {
         rc = hash_composer_run(tree, codepoint_resolver, NULL);
@@ -286,7 +286,6 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
 
     hash128_t grapheme_type;
     hash_canonical("substrate/type/Grapheme/v1", &grapheme_type);
-    fputs("compose: hash ok\n", stderr);
 
     size_t g_first = laplace_grapheme_floor_graph_first_idx(&floor);
     size_t g_count = laplace_grapheme_floor_graph_count(&floor);
@@ -301,16 +300,13 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
                           &gid, &gf, 1) != 0) { rc = -3; goto fail; }
         }
     }
-    fputs("compose: graphemes ok\n", stderr);
 
     rc = compose_ast_nodes(utf8, len, ast, modality_id, &floor, tree, &st);
     if (rc != 0) goto fail_st;
-    fputs("compose: ast nodes ok\n", stderr);
 
     n = st.n;
     for (size_t idx = n; idx-- > 0;) {
         if (!st.comp_valid[idx]) continue;
-        fprintf(stderr, "compose: emit idx=%zu\n", idx);
         hash128_t id = st.comp_id[idx];
         if (compose_id_push(&emitted_entity, &emitted_entity_n, &emitted_entity_cap, id) != 1)
             continue;
@@ -396,7 +392,6 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
         r->spans[r->span_count].entity_id  = id;
         r->span_count++;
     }
-    fputs("compose: emit ok\n", stderr);
 
     if (st.comp_valid[0])
         r->root_id = st.comp_id[0];
