@@ -14,7 +14,10 @@ internal static class ConceptNetRowFilter
     }
 
     public static bool MatchesLanguageFilter(string line, LanguageFilter langs)
-        => MatchesLanguageFilter(Encoding.UTF8.GetBytes(line), langs);
+    {
+        if (!langs.IsActive) return true;
+        return MatchesLanguageFilter(System.Text.Encoding.UTF8.GetBytes(line), langs);
+    }
 
     private static bool TryConceptLang(ReadOnlySpan<byte> line, int fieldIndex, out string lang)
     {
