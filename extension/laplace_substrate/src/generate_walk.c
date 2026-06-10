@@ -11,6 +11,8 @@
 #include "lib/stringinfo.h"
 #include "mb/pg_wchar.h"
 
+#include "spi_nested.h"
+
 PG_FUNCTION_INFO_V1(pg_laplace_generate_tree);
 PG_FUNCTION_INFO_V1(pg_laplace_generate_greedy);
 
@@ -257,7 +259,8 @@ pg_laplace_generate_greedy(PG_FUNCTION_ARGS)
 
     InitMaterializedSRF(fcinfo, 0);
 
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "generate_greedy: SPI_connect failed");
     ensure_edge_plan();
 
@@ -321,7 +324,7 @@ pg_laplace_generate_greedy(PG_FUNCTION_ARGS)
         pfree(seen_arr);
     }
 
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 

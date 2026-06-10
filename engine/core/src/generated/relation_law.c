@@ -415,10 +415,16 @@ static int dyn_resolve_prefixed(
     if (dyn_build_prefixed(input, prefix, sep, root_canon, lowercase_input,
                            canon, sizeof(canon), parent_canon, sizeof(parent_canon)) != 0)
         return -1;
-    if (laplace_relation_type_id(canon, out_type_id) != 0)
-        return -1;
-    if (out_parent_id && laplace_relation_type_id(parent_canon, out_parent_id) != 0)
-        return -1;
+    {
+        int rc = laplace_relation_type_id(canon, out_type_id);
+        if (rc < 0)
+            return -1;
+    }
+    if (out_parent_id) {
+        int rc = laplace_relation_type_id(parent_canon, out_parent_id);
+        if (rc < 0)
+            return -1;
+    }
     if (out_rank)
         *out_rank = rank_val;
     if (out_symmetry)

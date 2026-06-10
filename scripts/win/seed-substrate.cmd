@@ -115,6 +115,16 @@ for %%r in (Laplace X_BONEYARD llama-workspace SpecEditor TournamentManager Lapl
   )
 )
 
+rem ---- authority sources (manifest functionality.authority_sources) ----------
+if exist "!INGEST!\code-authority" (
+  for /d %%a in ("!INGEST!\code-authority\*") do (
+    echo ==== ingest repo %%~nxa ====
+    dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest repo "%%a" || exit /b 1
+  )
+) else (
+  echo ==== [skip] authority sources — run scripts\win\download-code-data.cmd authority ====
+)
+
 if not defined LAPLACE_SKIP_MODELS (
   for %%m in (
     "%MODELS%\models--TinyLlama--TinyLlama-1.1B-Chat-v1.0"

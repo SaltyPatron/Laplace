@@ -79,7 +79,7 @@ rebuild_content_index_impl(int32 batch)
         "    AND p.entity_id > $1 AND p.entity_id <= $2"
         ") s, "
         "LATERAL public.ST_DumpPoints(s.trajectory) dp, "
-        "LATERAL laplace.laplace_mantissa_unpack(dp.geom) u "
+        "LATERAL public.laplace_mantissa_unpack(dp.geom) u "
         "WHERE EXISTS ("
         "  SELECT 1 FROM laplace.consensus c "
         "  WHERE c.type_id = laplace.relation_type_id('PRECEDES') "
@@ -155,7 +155,7 @@ rebuild_content_index_deep_impl(void)
         "      WHERE type = 1 AND trajectory IS NOT NULL) p "
         "JOIN laplace.entities e ON e.id = p.entity_id AND e.tier > 2, "
         "LATERAL public.ST_DumpPoints(p.trajectory) dp, "
-        "LATERAL laplace.laplace_mantissa_unpack(dp.geom) u";
+        "LATERAL public.laplace_mantissa_unpack(dp.geom) u";
 
     static const char *INSERT_SQL =
         "INSERT INTO laplace.content_index (seq_id, token, pos) "
@@ -205,7 +205,8 @@ pg_laplace_rebuild_content_index(PG_FUNCTION_ARGS)
     if (batch < 1)
         ereport(ERROR, (errmsg("rebuild_content_index: batch must be >= 1")));
 
-    if (SPI_connect() != SPI_OK_CONNECT)
+    /* nonatomic: the rebuild COMMITs per batch page (memory-bounded, resumable) */
+    if (SPI_connect_ext(SPI_OPT_NONATOMIC) != SPI_OK_CONNECT)
         elog(ERROR, "rebuild_content_index: SPI_connect failed");
 
     rebuild_content_index_impl(batch);
@@ -216,7 +217,8 @@ pg_laplace_rebuild_content_index(PG_FUNCTION_ARGS)
 Datum
 pg_laplace_rebuild_content_index_deep(PG_FUNCTION_ARGS)
 {
-    if (SPI_connect() != SPI_OK_CONNECT)
+    /* nonatomic: edge build + index fill COMMIT between phases */
+    if (SPI_connect_ext(SPI_OPT_NONATOMIC) != SPI_OK_CONNECT)
         elog(ERROR, "rebuild_content_index_deep: SPI_connect failed");
 
     rebuild_content_index_deep_impl();

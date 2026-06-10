@@ -1,5 +1,6 @@
 @echo off
 setlocal
+rem Build engine to build-win\ (NOT cmake --install). Agent rules: .github\instructions\build-environment.instructions.md
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 cmake -B build-win -S engine -G Ninja ^

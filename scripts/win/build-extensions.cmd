@@ -1,5 +1,7 @@
 @echo off
 setlocal
+rem Build PG extensions to build-win-ext\ (deploy via install-extensions.cmd, NOT Program Files).
+rem Agent rules: .github\instructions\build-environment.instructions.md
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 cmake -B build-win-ext -S extension -G Ninja ^

@@ -575,7 +575,7 @@ fetch_trajectory_points(Datum id, int *out_n)
         "       (SELECT e.tier FROM laplace.entities e WHERE e.id = u.entity_id) AS ctier "
         "FROM laplace.physicalities p, "
         "LATERAL public.ST_DumpPoints(p.trajectory) dp, "
-        "LATERAL laplace.laplace_mantissa_unpack(dp.geom) u "
+        "LATERAL public.laplace_mantissa_unpack(dp.geom) u "
         "WHERE p.entity_id = $1 AND p.type = 1 AND p.trajectory IS NOT NULL "
         "ORDER BY u.ordinal";
 

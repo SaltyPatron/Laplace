@@ -83,12 +83,12 @@ public sealed class TinyCodesDecomposer : IDecomposer
 
         foreach (var file in files)
         {
-            await foreach (var (taskId, prompt, response) in ReadRowsAsync(file, ct))
+            await foreach (var (conceptKey, lang, prompt, response) in ReadRowsAsync(file, ct))
             {
                 ct.ThrowIfCancellationRequested();
                 if (string.IsNullOrWhiteSpace(response)) continue;
 
-                string? modality = ResolveModality(taskId);
+                string? modality = ResolveModality(lang);
                 if (modality is null) continue;
 
                 IntPtr recipe = GrammarDecomposer.LookupById(modality);
@@ -118,10 +118,10 @@ public sealed class TinyCodesDecomposer : IDecomposer
                 foreach (var p in phys) b.AddPhysicality(p);
                 foreach (var a in atts) b.AddAttestation(a);
 
-                // Stable concept entity keyed on task_id; the code AST carries the content.
-                if (!string.IsNullOrEmpty(taskId))
+                // Stable concept entity keyed on task_id (or language/idx); the code AST carries the content.
+                if (!string.IsNullOrEmpty(conceptKey))
                 {
-                    var conceptId = Hash128.OfCanonical($"tiny-codes/concept/{taskId}/v1");
+                    var conceptId = Hash128.OfCanonical($"tiny-codes/concept/{conceptKey}/v1");
                     b.AddEntity(new EntityRow(conceptId, EntityTier.Vocabulary, CodeConceptTypeId, Source));
                     b.AddAttestation(NativeAttestation.Categorical(
                         conceptId,  "HAS_EXAMPLE",   codeRootId, Source, SourceTrust.StructuredCorpus));
@@ -197,25 +197,40 @@ public sealed class TinyCodesDecomposer : IDecomposer
         }
     }
 
-    private static string? ResolveModality(string? taskId)
+    private static string? ResolveModality(string? lang)
     {
-        if (string.IsNullOrEmpty(taskId)) return null;
-        int slash = taskId.IndexOf('/');
-        var lang = slash > 0 ? taskId[..slash] : taskId;
-        return LangModality.TryGetValue(lang, out var m) ? m : null;
+        if (string.IsNullOrEmpty(lang)) return null;
+        int slash = lang.IndexOf('/');
+        if (slash > 0) lang = lang[..slash];
+        lang = lang.Trim();
+        if (LangModality.TryGetValue(lang, out var m)) return m;
+        // multi-word values in the shipped dataset: "Neo4j database and Cypher",
+        // "relation database and SQL" — resolve by containment
+        if (lang.Contains("cypher", StringComparison.OrdinalIgnoreCase)) return null;
+        if (lang.Contains("sql", StringComparison.OrdinalIgnoreCase)) return "sql";
+        return null;
     }
 
-    private static async IAsyncEnumerable<(string? TaskId, string? Prompt, string? Response)> ReadRowsAsync(
+    private static async IAsyncEnumerable<(string? ConceptKey, string? Lang, string? Prompt, string? Response)> ReadRowsAsync(
         string path, [EnumeratorCancellation] CancellationToken ct)
     {
         await using var fs = File.OpenRead(path);
         await using var reader = await ParquetReader.CreateAsync(fs, cancellationToken: ct);
 
         DataField[] fields = reader.Schema.GetDataFields();
+        // the published dataset carries (programming_language, idx, prompt, response);
+        // older/derived exports carry task_id ("python/...") instead
         DataField? taskField   = FindField(fields, "task_id");
+        DataField? langField   = FindField(fields, "programming_language");
         DataField? promptField = FindField(fields, "prompt");
         DataField? respField   = FindField(fields, "response");
-        if (taskField is null || promptField is null || respField is null) yield break;
+        string fileStem = Path.GetFileNameWithoutExtension(path);
+        long rowBase = 0;
+        if (promptField is null || respField is null || (taskField is null && langField is null))
+            throw new InvalidOperationException(
+                $"TinyCodesDecomposer: unrecognized parquet schema in '{path}' — "
+                + $"need prompt+response and task_id or programming_language; found: "
+                + string.Join(", ", fields.Select(f => f.Name)));
 
         for (int rg = 0; rg < reader.RowGroupCount; rg++)
         {
@@ -223,16 +238,27 @@ public sealed class TinyCodesDecomposer : IDecomposer
             using var rgr = reader.OpenRowGroupReader(rg);
             int count = (int)rgr.RowCount;
 
-            string[] taskIds  = new string[count];
+            string[]? taskIds = null;
+            string[]? langs   = null;
             string[] prompts  = new string[count];
             string[] resps    = new string[count];
 
-            await rgr.ReadAsync(taskField,   taskIds);
+            if (taskField is not null)
+                await rgr.ReadAsync(taskField, taskIds = new string[count]);
+            if (langField is not null)
+                await rgr.ReadAsync(langField, langs = new string[count]);
             await rgr.ReadAsync(promptField, prompts);
             await rgr.ReadAsync(respField,   resps);
 
             for (int i = 0; i < count; i++)
-                yield return (taskIds[i], prompts[i], resps[i]);
+            {
+                string? lang = taskIds?[i] ?? langs?[i];
+                // concept identity: task_id when the export carries one, else the
+                // stable (shard, row ordinal) position in the published dataset
+                string? key  = taskIds?[i] ?? $"{fileStem}/{rowBase + i}";
+                yield return (key, lang, prompts[i], resps[i]);
+            }
+            rowBase += count;
         }
     }
 

@@ -1,4 +1,6 @@
 @echo off
+rem Laplace Windows environment chain (Intel MKL/TBB, LAPLACE_ROOT, PGBIN read-only).
+rem All scripts\win\*.cmd call this first. Agent rules: .github\instructions\build-environment.instructions.md
 set "NoDefaultCurrentDirectoryInExePath="
 call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" >nul 2>&1
 rem setvars adds mpi\lib and tcm\lib to LIB, but this install ships neither (TCM is runtime-only;

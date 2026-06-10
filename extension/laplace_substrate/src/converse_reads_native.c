@@ -13,6 +13,7 @@
 
 #include "laplace/core/hash128.h"
 #include "laplace/core/relation_law.h"
+#include "spi_nested.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_senses);
 PG_FUNCTION_INFO_V1(pg_laplace_senses_context);
@@ -254,10 +255,11 @@ pg_laplace_senses(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("senses: p_word must not be NULL")));
     InitMaterializedSRF(fcinfo, 0);
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "senses: SPI_connect failed");
     emit_senses_rows(rsinfo, PG_GETARG_DATUM(0), (Datum) 0, false);
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -268,27 +270,28 @@ pg_laplace_senses_context(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("senses: p_word must not be NULL")));
     InitMaterializedSRF(fcinfo, 0);
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "senses: SPI_connect failed");
     emit_senses_rows(rsinfo, PG_GETARG_DATUM(0),
                      PG_ARGISNULL(1) ? (Datum) 0 : PG_GETARG_DATUM(1), true);
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
 static void
 emit_define_rows(ReturnSetInfo *rsinfo, Datum word, Datum context_arr, bool has_context, int lim)
 {
-    Oid     argtypes[3] = { BYTEAOID, BYTEAARRAYOID, INT4OID };
-    Datum   args[3];
-    char    nulls[4] = " nn";
-    int     rc;
+    int rc;
 
-    args[0] = word;
-    args[2] = Int32GetDatum(lim);
     if (has_context)
     {
+        Oid   argtypes[3] = { BYTEAOID, BYTEAARRAYOID, INT4OID };
+        Datum args[3];
+
+        args[0] = word;
         args[1] = context_arr;
+        args[2] = Int32GetDatum(lim);
         rc = SPI_execute_with_args(
             "SELECT laplace.render_text(g.object_id), "
             "       laplace.eff_mu_display(g.rating, g.rd), g.witness_count "
@@ -297,10 +300,15 @@ emit_define_rows(ReturnSetInfo *rsinfo, Datum word, Datum context_arr, bool has_
             "                       AND g.type_id = laplace.relation_type_id('HAS_DEFINITION') "
             "ORDER BY sn.score + laplace.eff_mu_display(g.rating, g.rd) DESC "
             "LIMIT $3",
-            3, argtypes, args, nulls, true, 0);
+            3, argtypes, args, NULL, true, 0);
     }
     else
     {
+        Oid   argtypes[2] = { BYTEAOID, INT4OID };
+        Datum args[2];
+
+        args[0] = word;
+        args[1] = Int32GetDatum(lim);
         rc = SPI_execute_with_args(
             "SELECT laplace.render_text(g.object_id), "
             "       laplace.eff_mu_display(g.rating, g.rd), g.witness_count "
@@ -309,7 +317,7 @@ emit_define_rows(ReturnSetInfo *rsinfo, Datum word, Datum context_arr, bool has_
             "                       AND g.type_id = laplace.relation_type_id('HAS_DEFINITION') "
             "ORDER BY sn.eff_mu + laplace.eff_mu_display(g.rating, g.rd) DESC "
             "LIMIT $2",
-            2, argtypes, args, " n", true, 0);
+            2, argtypes, args, NULL, true, 0);
     }
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "converse_reads: define query failed");
@@ -338,10 +346,11 @@ pg_laplace_define(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("define: p_word must not be NULL")));
     InitMaterializedSRF(fcinfo, 0);
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "define: SPI_connect failed");
     emit_define_rows(rsinfo, PG_GETARG_DATUM(0), (Datum) 0, false, lim);
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -353,11 +362,12 @@ pg_laplace_define_context(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("define: p_word must not be NULL")));
     InitMaterializedSRF(fcinfo, 0);
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "define: SPI_connect failed");
     emit_define_rows(rsinfo, PG_GETARG_DATUM(0),
                      PG_ARGISNULL(1) ? (Datum) 0 : PG_GETARG_DATUM(1), true, lim);
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -376,7 +386,8 @@ pg_laplace_synonyms(PG_FUNCTION_ARGS)
     word = PG_GETARG_DATUM(0);
     lim = PG_ARGISNULL(1) ? 10 : PG_GETARG_INT32(1);
     InitMaterializedSRF(fcinfo, 0);
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "synonyms: SPI_connect failed");
 
     args[0] = word;
@@ -414,7 +425,7 @@ pg_laplace_synonyms(PG_FUNCTION_ARGS)
         }
         tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls_out);
     }
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -433,7 +444,8 @@ pg_laplace_translations(PG_FUNCTION_ARGS)
     word = PG_GETARG_DATUM(0);
     lim = PG_ARGISNULL(1) ? 24 : PG_GETARG_INT32(1);
     InitMaterializedSRF(fcinfo, 0);
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "translations: SPI_connect failed");
 
     args[0] = word;
@@ -469,7 +481,7 @@ pg_laplace_translations(PG_FUNCTION_ARGS)
         }
         tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls_out);
     }
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -488,7 +500,8 @@ pg_laplace_examples(PG_FUNCTION_ARGS)
     word = PG_GETARG_DATUM(0);
     lim = PG_ARGISNULL(1) ? 5 : PG_GETARG_INT32(1);
     InitMaterializedSRF(fcinfo, 0);
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "examples: SPI_connect failed");
 
     args[0] = word;
@@ -519,7 +532,7 @@ pg_laplace_examples(PG_FUNCTION_ARGS)
         }
         tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls_out);
     }
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -540,7 +553,8 @@ pg_laplace_expansion(PG_FUNCTION_ARGS)
     type_filter = PG_ARGISNULL(1) ? (Datum) 0 : PG_GETARG_DATUM(1);
     lim = PG_ARGISNULL(2) ? 40 : PG_GETARG_INT32(2);
     InitMaterializedSRF(fcinfo, 0);
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "expansion: SPI_connect failed");
 
     args[0] = subjects;
@@ -579,7 +593,7 @@ pg_laplace_expansion(PG_FUNCTION_ARGS)
         }
         tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls_out);
     }
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -657,12 +671,13 @@ pg_laplace_related(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
         ereport(ERROR, (errmsg("related: p_word and p_type required")));
     InitMaterializedSRF(fcinfo, 0);
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "related: SPI_connect failed");
     emit_related_rows(rsinfo, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1),
                       PG_ARGISNULL(2) ? (Datum) 0 : PG_GETARG_DATUM(2),
                       PG_ARGISNULL(3) ? 10 : PG_GETARG_INT32(3), false);
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -673,12 +688,13 @@ pg_laplace_related_in(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
         ereport(ERROR, (errmsg("related_in: p_word and p_type required")));
     InitMaterializedSRF(fcinfo, 0);
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "related_in: SPI_connect failed");
     emit_related_rows(rsinfo, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1),
                       PG_ARGISNULL(2) ? (Datum) 0 : PG_GETARG_DATUM(2),
                       PG_ARGISNULL(3) ? 10 : PG_GETARG_INT32(3), true);
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -699,7 +715,8 @@ pg_laplace_describe(PG_FUNCTION_ARGS)
     lang = PG_ARGISNULL(1) ? (Datum) 0 : PG_GETARG_DATUM(1);
     lim = PG_ARGISNULL(2) ? 24 : PG_GETARG_INT32(2);
     InitMaterializedSRF(fcinfo, 0);
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "describe: SPI_connect failed");
 
     args[0] = word;
@@ -758,7 +775,7 @@ pg_laplace_describe(PG_FUNCTION_ARGS)
         }
         tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls_out);
     }
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -776,7 +793,8 @@ pg_laplace_usage_overlap(PG_FUNCTION_ARGS)
     x = PG_GETARG_DATUM(0);
     y = PG_GETARG_DATUM(1);
 
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "usage_overlap: SPI_connect failed");
     args[0] = x;
     args[1] = y;
@@ -800,7 +818,7 @@ pg_laplace_usage_overlap(PG_FUNCTION_ARGS)
         count = DatumGetInt64(
             SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
     }
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     PG_RETURN_INT64(count);
 }
 
@@ -820,7 +838,8 @@ pg_laplace_reason(PG_FUNCTION_ARGS)
     y = PG_GETARG_DATUM(1);
     depth = PG_ARGISNULL(2) ? 7 : PG_GETARG_INT32(2);
     InitMaterializedSRF(fcinfo, 0);
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "reason: SPI_connect failed");
 
     args[0] = x;
@@ -915,7 +934,7 @@ pg_laplace_reason(PG_FUNCTION_ARGS)
         }
         tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls_out);
     }
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -933,7 +952,8 @@ pg_laplace_relatedness(PG_FUNCTION_ARGS)
     x = PG_GETARG_DATUM(0);
     y = PG_GETARG_DATUM(1);
     InitMaterializedSRF(fcinfo, 0);
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "relatedness: SPI_connect failed");
 
     args[0] = x;
@@ -975,7 +995,7 @@ pg_laplace_relatedness(PG_FUNCTION_ARGS)
         }
         tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls_out);
     }
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
 
@@ -992,7 +1012,8 @@ pg_laplace_gaps(PG_FUNCTION_ARGS)
         ereport(ERROR, (errmsg("gaps: p_word must not be NULL")));
     word = PG_GETARG_DATUM(0);
     InitMaterializedSRF(fcinfo, 0);
-    if (SPI_connect() != SPI_OK_CONNECT)
+    bool spi_top = false;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "gaps: SPI_connect failed");
 
     args[0] = word;
@@ -1022,6 +1043,6 @@ pg_laplace_gaps(PG_FUNCTION_ARGS)
         nulls_out[0] = isnull;
         tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls_out);
     }
-    SPI_finish();
+    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }

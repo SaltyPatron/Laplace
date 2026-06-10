@@ -182,11 +182,12 @@ STATIC-link the engine (laplace_core_static, laplace_dynamics_static + sequentia
 self-contained DLLs deploy to D:\Data\Postgres\laplace and are wired by PG-18
 extension_control_path/dynamic_library_path (SEMICOLON list separator; BARE module names so
 dynamic_library_path applies; ALTER SYSTEM + reload — zero Windows admin). Full operational
-law in OPERATIONS-WINDOWS.md.
+law in OPERATIONS-WINDOWS.md. Agent-facing build/deploy rules:
+`.github/instructions/build-environment.instructions.md`.
 
 ## Forbidden patterns (anti-drift)
 
-These reinventions have caused drift; do not reintroduce them. Enforcement: `.github/instructions/layering-law.instructions.md`, `ingest-witness.instructions.md`, `type-id-law.instructions.md`, and CI source scans.
+These reinventions have caused drift; do not reintroduce them. Enforcement: `.github/instructions/layering-law.instructions.md`, `build-environment.instructions.md`, `ingest-witness.instructions.md`, `type-id-law.instructions.md`, and CI source scans.
 
 | Pattern | Why forbidden | Correct alternative |
 |---------|---------------|---------------------|
