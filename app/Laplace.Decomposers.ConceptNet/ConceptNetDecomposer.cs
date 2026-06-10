@@ -61,12 +61,21 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
-    public async Task<IngestInventory?> DescribeInputAsync(
+    public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
+        // Skip a full-file pre-scan (9+ GB) — progress uses rows consumed during the single pass.
+        if (options.Languages?.IsActive == true)
+            return Task.FromResult<IngestInventory?>(null);
+
         string file = Path.Combine(context.EcosystemPath, "assertions.csv");
-        if (!File.Exists(file)) return null;
-        LanguageFilter? langs = options.Languages;
+        if (!File.Exists(file)) return Task.FromResult<IngestInventory?>(null);
+        return CountInventoryAsync(file, options.Languages, ct);
+    }
+
+    private static async Task<IngestInventory?> CountInventoryAsync(
+        string file, LanguageFilter? langs, CancellationToken ct)
+    {
         long n = await EtlInventory.CountDataLinesAsync(file, line =>
         {
             if (langs?.IsActive != true) return true;
@@ -88,16 +97,9 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
         string file = Path.Combine(ecosystemPath, "assertions.csv");
         if (!File.Exists(file)) yield break;
         int batch = options.BatchSize > 1 ? options.BatchSize : 8192;
-        var arena = new ArenaRmsTracker();
-        var witness = new ConceptNetWitness(arena, options.Languages);
-        Func<ReadOnlySpan<byte>, bool>? acceptRow = options.Languages?.IsActive == true
-            ? line => ConceptNetRowFilter.MatchesLanguageFilter(line, options.Languages!)
-            : null;
 
-        await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-            file, "tsv", Source, witness, batch, SourceTrust.UserCuratedResource,
-            "conceptnet", reportUnits: null, contextId: null, commitEpoch: 0,
-            acceptRow: acceptRow, ct: ct))
+        await foreach (var change in ConceptNetFastIngest.IngestAssertionsAsync(
+            file, batch, options.Languages, ct))
         {
             yield return change;
         }

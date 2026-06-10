@@ -30,7 +30,19 @@ internal sealed class ConceptNetWitness : IGrammarWitness
         var fields = composed.Composer.FieldSpans();
         if (fields.Count < 5) return;
 
-        string rel = FieldText(composed, fields[1]);
+        var row = new ConceptNetTsvRow
+        {
+            Relation = composed.Utf8.AsSpan((int)fields[1].Start, (int)(fields[1].End - fields[1].Start)),
+            StartUri = composed.Utf8.AsSpan((int)fields[2].Start, (int)(fields[2].End - fields[2].Start)),
+            EndUri   = composed.Utf8.AsSpan((int)fields[3].Start, (int)(fields[3].End - fields[3].Start)),
+            MetaJson = composed.Utf8.AsSpan((int)fields[4].Start, (int)(fields[4].End - fields[4].Start)),
+        };
+        WalkAssertion(row, b);
+    }
+
+    internal void WalkAssertion(in ConceptNetTsvRow row, SubstrateChangeBuilder b)
+    {
+        string rel = row.RelationText();
         if (rel.StartsWith("/r/", StringComparison.Ordinal)) rel = rel[3..];
 
         RelationTypeRegistry.RelationTypeResolution? dbp = null;
@@ -45,8 +57,8 @@ internal sealed class ConceptNetWitness : IGrammarWitness
         }
         else return;
 
-        if (!ParseConcept(FieldText(composed, fields[2]), out var startTerm, out var startLang)) return;
-        if (!ParseConcept(FieldText(composed, fields[3]), out var endTerm, out var endLang)) return;
+        if (!ParseConcept(row.StartUriText(), out var startTerm, out var startLang)) return;
+        if (!ParseConcept(row.EndUriText(), out var endTerm, out var endLang)) return;
         if (_langs?.MatchesAll(startLang, endLang) == false) return;
 
         if (ContentEmitter.Emit(b, startTerm, ConceptNetDecomposer.Source) is not { } startId) return;
@@ -57,7 +69,7 @@ internal sealed class ConceptNetWitness : IGrammarWitness
         b.AddEntity(new EntityRow(startLangId, EntityTier.Vocabulary, LanguageTypeId, ConceptNetDecomposer.Source));
         b.AddEntity(new EntityRow(endLangId, EntityTier.Vocabulary, LanguageTypeId, ConceptNetDecomposer.Source));
 
-        (double weight, string? surface) = ParseMeta(FieldText(composed, fields[4]));
+        (double weight, string? surface) = ParseMeta(row.MetaText());
         _arena.Record(typeName, weight);
 
         if (dbp is { } dyn)
