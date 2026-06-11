@@ -33,21 +33,10 @@ public static class ContentWitnessBatch
         Hash128 sourceId,
         out Hash128 rootId)
     {
-        var stage = IntentStage.New(Math.Max(32, canonical.Length));
-        try
-        {
-            if (!TryAddToIntentStage(stage, canonical, sourceId, out rootId))
-            {
-                stage.Dispose();
-                return false;
-            }
-            builder.AddIntentStage(stage);
-            return true;
-        }
-        catch
-        {
-            stage.Dispose();
-            throw;
-        }
+        // All content witnesses in one change share the builder's coalesced stage:
+        // the writer stages it once (one COPY + one INSERT per table) instead of
+        // paying the pair per witness. A failed witness leaves the shared stage
+        // intact with its prior successful rows.
+        return TryAddToIntentStage(builder.ContentStage, canonical, sourceId, out rootId);
     }
 }

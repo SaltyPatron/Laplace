@@ -1,0 +1,10 @@
+{
+  "accepted": true,
+  "tenant": "golden-entitlement-tenant",
+  "plan_id": "studio",
+  "service_id": "synthesis",
+  "units": 10,
+  "remaining": 490,
+  "period_end": "<timestamp>",
+  "status": "consumed"
+}

@@ -1,0 +1,23 @@
+{
+  "quote_id": "<quote_id>",
+  "tenant": "golden-explainq-tenant",
+  "service_id": "explain.trace",
+  "depth": 4,
+  "beam": 4,
+  "academic": true,
+  "estimated_trace_nodes": 48,
+  "billable_units": 1,
+  "unit": "trace_unit",
+  "amount_cents": 108,
+  "currency": "usd",
+  "status": "awaiting_manual_approval",
+  "expires_at": "<timestamp>",
+  "stripe_checkout_url": null,
+  "next": {
+    "execute_header": {
+      "name": "X-Laplace-Quote-Id",
+      "value": "<quote_id>"
+    },
+    "note": "Step-by-step explainability is metered by trace size (depth x beam); the academic tier expands each node with evidence provenance / citations."
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "tenant": "golden-entitlement-tenant",
+  "data": [
+    {
+      "tenant": "golden-entitlement-tenant",
+      "plan_id": "studio",
+      "status": "active",
+      "period_start": "<timestamp>",
+      "period_end": "<timestamp>",
+      "monthly_credits": {
+        "chat.completions": 10000,
+        "completions": 10000,
+        "generate": 5000,
+        "embeddings": 50000,
+        "inspect": 2500,
+        "audit.deep_report": 50,
+        "visualization.deep_export": 50,
+        "explain.trace": 250,
+        "synthesis": 500
+      },
+      "used_credits": {},
+      "stripe_customer_id": "cus_evt_golden_entitlement",
+      "stripe_subscription_id": "sub_golden_entitlement",
+      "updated_at": "<timestamp>"
+    }
+  ]
+}

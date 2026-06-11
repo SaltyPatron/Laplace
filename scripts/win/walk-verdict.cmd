@@ -24,6 +24,12 @@ psql -h localhost -U postgres -d %VERDICT_DB% -P pager=off ^
     -f "%LAPLACE_ROOT%\scripts\sql\model-planes-audit.sql" ^
     -o "%OUTDIR%\model-planes-%VERDICT_DB%.txt" || exit /b 1
 
+echo ==== substrate law probes on %VERDICT_DB% ====
+psql -h localhost -U postgres -d %VERDICT_DB% -P pager=off ^
+    -f "%LAPLACE_ROOT%\scripts\sql\substrate-law-probes.sql" ^
+    -o "%OUTDIR%\law-probes-%VERDICT_DB%.txt" || exit /b 1
+
 type "%OUTDIR%\model-planes-%VERDICT_DB%.txt"
+type "%OUTDIR%\law-probes-%VERDICT_DB%.txt"
 echo.
-echo verdict written to %OUTDIR%\model-planes-%VERDICT_DB%.txt
+echo verdicts written to %OUTDIR%\model-planes-%VERDICT_DB%.txt and law-probes-%VERDICT_DB%.txt

@@ -1,0 +1,12 @@
+{
+  "accepted": true,
+  "verified": true,
+  "duplicate": false,
+  "event_id": "evt_golden_webhook",
+  "event_type": "checkout.session.completed",
+  "status": "quote_approved",
+  "tenant": "golden-webhook-tenant",
+  "service_id": "audit.report",
+  "quote_id": "<quote_id>",
+  "plan_id": null
+}

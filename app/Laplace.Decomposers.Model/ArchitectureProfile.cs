@@ -31,6 +31,7 @@ public sealed class ArchitectureProfile
         "llama"  => Llama,
         "phi"    => Phi,
         "qwen2"  => Qwen2,
+        "bert"   => Bert,
         _ => throw new NotSupportedException(
             $"no ArchitectureProfile for model_type '{modelType}' — add it"),
     };
@@ -142,6 +143,49 @@ public sealed class ArchitectureProfile
                 GatePattern: "model.layers.{L}.mlp.gate_proj.weight",
                 UpPattern:   "model.layers.{L}.mlp.up_proj.weight",
                 DownPattern: "model.layers.{L}.mlp.down_proj.weight"),
+        },
+    };
+
+    // BERT-family encoders (e.g. all-MiniLM): post-LayerNorm, gateless GELU FFN,
+    // tied unembedding (no lm_head — readout = word embeddings). γ-fold caveat:
+    // BERT norms are POST-sublayer, so folding layer L's own LN weights into its
+    // projections is an off-by-one approximation of the pre-scaled stream the
+    // tile kernels assume — acceptable for thresholded testimony, noted here so
+    // nobody mistakes it for the exact pre-norm law the llama family enjoys.
+    public static readonly ArchitectureProfile Bert = new()
+    {
+        ModelType = "bert",
+        HasGate = false, HasBiases = true, RmsNorm = false,
+        EmbedTokens   = "embeddings.word_embeddings.weight",
+        LmHead        = null,
+        FinalNorm     = "embeddings.LayerNorm.weight",
+        PerLayerNorms = new[]
+        {
+            "encoder.layer.{L}.attention.output.LayerNorm.weight",
+            "encoder.layer.{L}.output.LayerNorm.weight",
+        },
+        QProj    = "encoder.layer.{L}.attention.self.query.weight",
+        KProj    = "encoder.layer.{L}.attention.self.key.weight",
+        VProj    = "encoder.layer.{L}.attention.self.value.weight",
+        OProj    = "encoder.layer.{L}.attention.output.dense.weight",
+        GateProj = null,
+        UpProj   = "encoder.layer.{L}.intermediate.dense.weight",
+        DownProj = "encoder.layer.{L}.output.dense.weight",
+        Paths = new PathSpec[]
+        {
+            new SelfSimilarityPath("SIMILAR_TO",
+                EmbedPattern: "embeddings.word_embeddings.weight"),
+            new BilinearPath("ATTENDS",
+                LeftPattern:  "encoder.layer.{L}.attention.self.query.weight",
+                RightPattern: "encoder.layer.{L}.attention.self.key.weight",
+                RightIsKv:    false),
+            new ProjectionPath("OV_RELATES",
+                VPattern: "encoder.layer.{L}.attention.self.value.weight",
+                OPattern: "encoder.layer.{L}.attention.output.dense.weight"),
+            new ContractionPath("COMPLETES_TO",
+                GatePattern: null,
+                UpPattern:   "encoder.layer.{L}.intermediate.dense.weight",
+                DownPattern: "encoder.layer.{L}.output.dense.weight"),
         },
     };
 

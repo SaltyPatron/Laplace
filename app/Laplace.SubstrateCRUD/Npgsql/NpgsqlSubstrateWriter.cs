@@ -308,6 +308,27 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         }
 
         sw.Stop();
+
+        // The round-trip budget law: RT must amortize over rows. The per-witness
+        // prebuilt-stage pattern once cost 16,681 RT for 51k rows — this guard makes
+        // that class of regression a loud failure instead of log archaeology.
+        // LAPLACE_RT_BUDGET_PER_10K (default 64; 0 disables) is the allowed RT per
+        // 10k attempted rows on top of a fixed per-intent allowance; set
+        // LAPLACE_RT_BUDGET_ENFORCE=1 (tests) to throw instead of warn.
+        long rowsAttempted = (long)entitiesAttempted + physAttempted + attAttempted;
+        if (rowsAttempted >= 1000 && RtBudgetPer10K > 0)
+        {
+            long budget = 20 + RtBudgetPer10K * (rowsAttempted / 10_000 + 1);
+            if (roundTrips > budget)
+            {
+                string msg = $"round-trip budget exceeded: {roundTrips} RT for {rowsAttempted:N0} rows "
+                           + $"(budget {budget}; LAPLACE_RT_BUDGET_PER_10K={RtBudgetPer10K})";
+                if (RtBudgetEnforce)
+                    throw new InvalidOperationException(msg);
+                _log.LogWarning("{Message}", msg);
+            }
+        }
+
         return new ApplyResult(
             EntitiesAttempted: entitiesAttempted,
             EntitiesInserted: entitiesInserted,
@@ -319,6 +340,12 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             WallClock: sw.Elapsed,
             TrunkShortcircuitHit: !anyRows);
     }
+
+    private static readonly long RtBudgetPer10K =
+        long.TryParse(Environment.GetEnvironmentVariable("LAPLACE_RT_BUDGET_PER_10K"), out var b) && b >= 0
+            ? b : 64;
+    private static readonly bool RtBudgetEnforce =
+        Environment.GetEnvironmentVariable("LAPLACE_RT_BUDGET_ENFORCE") == "1";
 
     private static async Task<(HashSet<Hash128> Entities, HashSet<Hash128> Phys, HashSet<Hash128> Att)>
         IntentPreflightAsync(

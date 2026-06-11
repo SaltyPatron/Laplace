@@ -1,0 +1,25 @@
+{
+  "quote_id": "<quote_id>",
+  "tenant": "golden-recipeq-tenant",
+  "service_id": "recipe.export",
+  "action": "export",
+  "content_items": 2500,
+  "commercial": true,
+  "private_export": true,
+  "metered_items": 5000,
+  "billable_units": 5,
+  "unit": "content_thousand",
+  "items_per_unit": 1000,
+  "amount_cents": 150,
+  "currency": "usd",
+  "status": "awaiting_manual_approval",
+  "expires_at": "<timestamp>",
+  "stripe_checkout_url": null,
+  "next": {
+    "execute_header": {
+      "name": "X-Laplace-Quote-Id",
+      "value": "<quote_id>"
+    },
+    "note": "Recipe quotes cover publishing, access, compilation, commercial use, and private content export."
+  }
+}

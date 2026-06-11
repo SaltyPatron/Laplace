@@ -1,0 +1,27 @@
+{
+  "quote_id": "<quote_id>",
+  "tenant": "golden-vizq-tenant",
+  "service_id": "visualization.deep_export",
+  "nodes": 100,
+  "edges": 250,
+  "include_geometry": true,
+  "include_evidence": true,
+  "interactive": true,
+  "format": "json",
+  "metered_items": 1900,
+  "billable_units": 19,
+  "unit": "visual_unit",
+  "items_per_unit": 100,
+  "amount_cents": 170,
+  "currency": "usd",
+  "status": "awaiting_manual_approval",
+  "expires_at": "<timestamp>",
+  "stripe_checkout_url": null,
+  "next": {
+    "execute_header": {
+      "name": "X-Laplace-Quote-Id",
+      "value": "<quote_id>"
+    },
+    "note": "Visualization exports are metered by graph size, geometry inclusion, evidence overlays, and interactive output."
+  }
+}

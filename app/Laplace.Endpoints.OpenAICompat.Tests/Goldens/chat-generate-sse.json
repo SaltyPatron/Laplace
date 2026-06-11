@@ -1,0 +1,87 @@
+[
+  {
+    "id": "<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "laplace-completions-001",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "role": "assistant"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "id": "<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "laplace-completions-001",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "content": " the"
+        },
+        "finish_reason": null
+      }
+    ],
+    "laplace": {
+      "ord_used": 5
+    }
+  },
+  {
+    "id": "<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "laplace-completions-001",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "content": " whale"
+        },
+        "finish_reason": null
+      }
+    ],
+    "laplace": {
+      "ord_used": 4
+    }
+  },
+  {
+    "id": "<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "laplace-completions-001",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "content": " sings"
+        },
+        "finish_reason": null
+      }
+    ],
+    "laplace": {
+      "ord_used": 3
+    }
+  },
+  {
+    "id": "<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "laplace-completions-001",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "content": ""
+        },
+        "finish_reason": "stop"
+      }
+    ]
+  },
+  "[DONE]"
+]

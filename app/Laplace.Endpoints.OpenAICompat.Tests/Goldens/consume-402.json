@@ -1,0 +1,10 @@
+{
+  "accepted": false,
+  "tenant": "golden-entitlement-tenant",
+  "plan_id": "",
+  "service_id": "synthesis",
+  "units": 100000,
+  "remaining": 0,
+  "period_end": "<timestamp>",
+  "status": "insufficient_credits"
+}

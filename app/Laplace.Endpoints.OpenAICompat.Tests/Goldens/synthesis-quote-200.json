@@ -1,0 +1,21 @@
+{
+  "quote_id": "<quote_id>",
+  "tenant": "golden-synthq-tenant",
+  "service_id": "synthesis",
+  "estimated_parameters": 49545216,
+  "billable_units": 50,
+  "unit": "param_million",
+  "amount_cents": 500,
+  "currency": "usd",
+  "status": "awaiting_manual_approval",
+  "expires_at": "<timestamp>",
+  "stripe_checkout_url": null,
+  "format": "gguf",
+  "next": {
+    "execute_header": {
+      "name": "X-Laplace-Quote-Id",
+      "value": "<quote_id>"
+    },
+    "note": "Synthesis is dimensionality-metered: amount = base job fee + per-million-parameter rate."
+  }
+}

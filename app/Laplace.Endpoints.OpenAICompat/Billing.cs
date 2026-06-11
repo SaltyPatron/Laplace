@@ -265,17 +265,22 @@ internal sealed class StaticBillingCatalog : IBillingCatalog
 
 internal interface IStripePriceMap
 {
-    bool TryGet(string lookupKey, out string stripePriceId);
-    void Set(string lookupKey, string stripePriceId);
+    Task<string?> TryGetAsync(string lookupKey, CancellationToken ct);
+    Task SetAsync(string lookupKey, string stripePriceId, CancellationToken ct);
 }
 
 internal sealed class InMemoryStripePriceMap : IStripePriceMap
 {
     private readonly ConcurrentDictionary<string, string> _map = new(StringComparer.Ordinal);
 
-    public bool TryGet(string lookupKey, out string stripePriceId) => _map.TryGetValue(lookupKey, out stripePriceId!);
+    public Task<string?> TryGetAsync(string lookupKey, CancellationToken ct) =>
+        Task.FromResult(_map.TryGetValue(lookupKey, out var id) ? id : null);
 
-    public void Set(string lookupKey, string stripePriceId) => _map[lookupKey] = stripePriceId;
+    public Task SetAsync(string lookupKey, string stripePriceId, CancellationToken ct)
+    {
+        _map[lookupKey] = stripePriceId;
+        return Task.CompletedTask;
+    }
 }
 
 internal sealed record StripeCatalogEntryResult(
@@ -335,7 +340,8 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
 
     public async Task<string?> EnsurePriceAsync(ServicePrice price, CancellationToken ct)
     {
-        if (_map.TryGet(price.LookupKey, out var cached))
+        var cached = await _map.TryGetAsync(price.LookupKey, ct);
+        if (cached is not null)
             return cached;
         if (string.IsNullOrWhiteSpace(_options.ApiKey))
             return null;
@@ -366,7 +372,7 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
         if (existing.Data.Count > 0)
         {
             var found = existing.Data[0];
-            _map.Set(price.LookupKey, found.Id);
+            await _map.SetAsync(price.LookupKey, found.Id, ct);
             return (found.Id, found.ProductId, "exists");
         }
 
@@ -390,7 +396,7 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
             }
         }, cancellationToken: ct);
 
-        _map.Set(price.LookupKey, created.Id);
+        await _map.SetAsync(price.LookupKey, created.Id, ct);
         return (created.Id, productId, "created");
     }
 
@@ -430,51 +436,54 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
 
 internal interface IBillingQuoteStore
 {
-    BillingQuote Put(BillingQuote quote);
-    bool TryGet(string quoteId, out BillingQuote quote);
-    BillingQuote Update(BillingQuote quote);
+    Task<BillingQuote> PutAsync(BillingQuote quote, CancellationToken ct);
+    Task<BillingQuote?> TryGetAsync(string quoteId, CancellationToken ct);
+    Task<BillingQuote> UpdateAsync(BillingQuote quote, CancellationToken ct);
 }
 
 internal sealed class InMemoryBillingQuoteStore : IBillingQuoteStore
 {
     private readonly ConcurrentDictionary<string, BillingQuote> _quotes = new(StringComparer.OrdinalIgnoreCase);
 
-    public BillingQuote Put(BillingQuote quote)
+    public Task<BillingQuote> PutAsync(BillingQuote quote, CancellationToken ct)
     {
         _quotes[quote.QuoteId] = quote;
-        return quote;
+        return Task.FromResult(quote);
     }
 
-    public bool TryGet(string quoteId, out BillingQuote quote) => _quotes.TryGetValue(quoteId, out quote!);
+    public Task<BillingQuote?> TryGetAsync(string quoteId, CancellationToken ct) =>
+        Task.FromResult(_quotes.TryGetValue(quoteId, out var quote) ? quote : null);
 
-    public BillingQuote Update(BillingQuote quote)
+    public Task<BillingQuote> UpdateAsync(BillingQuote quote, CancellationToken ct)
     {
         _quotes[quote.QuoteId] = quote;
-        return quote;
+        return Task.FromResult(quote);
     }
 }
 
 internal interface IBillingLedger
 {
-    void Record(BillingUsageRecord record);
-    IReadOnlyList<BillingUsageRecord> GetByTenant(string tenant);
+    Task RecordAsync(BillingUsageRecord record, CancellationToken ct);
+    Task<IReadOnlyList<BillingUsageRecord>> GetByTenantAsync(string tenant, CancellationToken ct);
 }
 
 internal sealed class InMemoryBillingLedger : IBillingLedger
 {
     private readonly ConcurrentDictionary<string, ConcurrentQueue<BillingUsageRecord>> _records = new(StringComparer.OrdinalIgnoreCase);
 
-    public void Record(BillingUsageRecord record)
+    public Task RecordAsync(BillingUsageRecord record, CancellationToken ct)
     {
         var queue = _records.GetOrAdd(record.Tenant, _ => new ConcurrentQueue<BillingUsageRecord>());
         queue.Enqueue(record);
+        return Task.CompletedTask;
     }
 
-    public IReadOnlyList<BillingUsageRecord> GetByTenant(string tenant)
+    public Task<IReadOnlyList<BillingUsageRecord>> GetByTenantAsync(string tenant, CancellationToken ct)
     {
         if (!_records.TryGetValue(tenant, out var queue))
-            return Array.Empty<BillingUsageRecord>();
-        return queue.ToArray().OrderByDescending(r => r.ExecutedAt).ToArray();
+            return Task.FromResult<IReadOnlyList<BillingUsageRecord>>(Array.Empty<BillingUsageRecord>());
+        return Task.FromResult<IReadOnlyList<BillingUsageRecord>>(
+            queue.ToArray().OrderByDescending(r => r.ExecutedAt).ToArray());
     }
 }
 
@@ -605,11 +614,11 @@ internal interface IBillingOrchestrator
 {
     Task<BillingQuote> CreatePreflightQuoteAsync(string tenant, string serviceId, int units, CancellationToken ct);
     Task<QuoteExecutionGate> EnsureExecutableAsync(string quoteId, string serviceId, CancellationToken ct);
-    bool TryApproveQuote(string quoteId, out BillingQuote quote);
-    void MarkConsumedAndRecord(BillingQuote quote);
-    bool TryGetQuote(string quoteId, out BillingQuote quote);
+    Task<BillingQuote?> TryApproveQuoteAsync(string quoteId, CancellationToken ct);
+    Task MarkConsumedAndRecordAsync(BillingQuote quote, CancellationToken ct);
+    Task<BillingQuote?> TryGetQuoteAsync(string quoteId, CancellationToken ct);
     IReadOnlyList<ServicePrice> ListCatalog();
-    IReadOnlyList<BillingUsageRecord> GetUsage(string tenant);
+    Task<IReadOnlyList<BillingUsageRecord>> GetUsageAsync(string tenant, CancellationToken ct);
 }
 
 internal sealed class BillingOrchestrator : IBillingOrchestrator
@@ -636,20 +645,19 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
 
     public IReadOnlyList<ServicePrice> ListCatalog() => _catalog.List();
 
-    public IReadOnlyList<BillingUsageRecord> GetUsage(string tenant) => _ledger.GetByTenant(tenant);
+    public Task<IReadOnlyList<BillingUsageRecord>> GetUsageAsync(string tenant, CancellationToken ct) =>
+        _ledger.GetByTenantAsync(tenant, ct);
 
-    public bool TryGetQuote(string quoteId, out BillingQuote quote) => _store.TryGet(quoteId, out quote!);
+    public Task<BillingQuote?> TryGetQuoteAsync(string quoteId, CancellationToken ct) =>
+        _store.TryGetAsync(quoteId, ct);
 
-    public bool TryApproveQuote(string quoteId, out BillingQuote quote)
+    public async Task<BillingQuote?> TryApproveQuoteAsync(string quoteId, CancellationToken ct)
     {
-        if (!_store.TryGet(quoteId, out var existing))
-        {
-            quote = default!;
-            return false;
-        }
+        var existing = await _store.TryGetAsync(quoteId, ct);
+        if (existing is null)
+            return null;
 
-        quote = _store.Update(existing with { Status = "approved" });
-        return true;
+        return await _store.UpdateAsync(existing with { Status = "approved" }, ct);
     }
 
     public async Task<BillingQuote> CreatePreflightQuoteAsync(string tenant, string serviceId, int units, CancellationToken ct)
@@ -673,18 +681,18 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
             ExpiresAt: DateTimeOffset.UtcNow.AddMinutes(30),
             Consumed: false);
 
-        quote = _store.Put(quote);
+        quote = await _store.PutAsync(quote, ct);
 
         var checkout = await _stripe.CreateCheckoutSessionAsync(quote, price, ct);
         if (!checkout.Created)
-            return _store.Update(quote with { Status = "awaiting_manual_approval" });
+            return await _store.UpdateAsync(quote with { Status = "awaiting_manual_approval" }, ct);
 
-        return _store.Update(quote with
+        return await _store.UpdateAsync(quote with
         {
             StripeSessionId = checkout.SessionId,
             StripeCheckoutUrl = checkout.Url,
             Status = "pending_payment"
-        });
+        }, ct);
     }
 
     public async Task<QuoteExecutionGate> EnsureExecutableAsync(string quoteId, string serviceId, CancellationToken ct)
@@ -692,7 +700,8 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
         if (_options.Bypass)
             return new QuoteExecutionGate(true, "bypass", "Billing bypass active (LAPLACE_BILLING_BYPASS=true).", null);
 
-        if (!_store.TryGet(quoteId, out var quote))
+        var quote = await _store.TryGetAsync(quoteId, ct);
+        if (quote is null)
             return new QuoteExecutionGate(false, "quote_not_found", "Quote does not exist.", null);
 
         if (!string.Equals(quote.ServiceId, serviceId, StringComparison.OrdinalIgnoreCase))
@@ -715,7 +724,7 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
             var paid = await _stripe.IsSessionPaidAsync(quote.StripeSessionId, ct);
             if (paid)
             {
-                var approved = _store.Update(quote with { Status = "approved" });
+                var approved = await _store.UpdateAsync(quote with { Status = "approved" }, ct);
                 return new QuoteExecutionGate(true, "approved", "Stripe payment verified.", approved);
             }
 
@@ -725,15 +734,15 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
         return new QuoteExecutionGate(false, "payment_pending", "Quote is not yet approved.", quote);
     }
 
-    public void MarkConsumedAndRecord(BillingQuote quote)
+    public async Task MarkConsumedAndRecordAsync(BillingQuote quote, CancellationToken ct)
     {
-        var consumed = _store.Update(quote with { Consumed = true, Status = "consumed" });
-        _ledger.Record(new BillingUsageRecord(
+        var consumed = await _store.UpdateAsync(quote with { Consumed = true, Status = "consumed" }, ct);
+        await _ledger.RecordAsync(new BillingUsageRecord(
             QuoteId: consumed.QuoteId,
             Tenant: consumed.Tenant,
             ServiceId: consumed.ServiceId,
             Units: consumed.Units,
             AmountCents: consumed.AmountCents,
-            ExecutedAt: DateTimeOffset.UtcNow));
+            ExecutedAt: DateTimeOffset.UtcNow), ct);
     }
 }

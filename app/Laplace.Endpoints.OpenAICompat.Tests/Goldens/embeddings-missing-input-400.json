@@ -1,0 +1,7 @@
+{
+  "error": {
+    "type": "invalid_request_error",
+    "code": "invalid_request_error",
+    "message": "Field 'input' must be a non-empty string or array of strings."
+  }
+}

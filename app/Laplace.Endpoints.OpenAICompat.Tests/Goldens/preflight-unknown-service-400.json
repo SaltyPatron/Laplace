@@ -1,0 +1,7 @@
+{
+  "error": {
+    "type": "invalid_request_error",
+    "code": "invalid_request_error",
+    "message": "Unknown service_id 'no.such.service'. (Parameter 'serviceId')"
+  }
+}

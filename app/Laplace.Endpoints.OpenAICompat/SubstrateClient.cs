@@ -1,3 +1,4 @@
+using Laplace.Api.Contracts;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using Npgsql;
@@ -5,7 +6,7 @@ using NpgsqlTypes;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
-internal sealed class SubstrateClient : IAsyncDisposable
+internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
 {
     private readonly NpgsqlDataSource _dataSource;
 
@@ -369,6 +370,86 @@ internal sealed class SubstrateClient : IAsyncDisposable
         cmd.Parameters.AddWithValue("id", entityIdHex);
         var value = await cmd.ExecuteScalarAsync(ct);
         return value is null or DBNull ? null : Convert.ToInt64(value);
+    }
+
+    /// <summary>
+    /// Receipt drill-down: resolve a target (32-hex entity id, or a word via laplace.word_id)
+    /// to its labeled outbound attestations. Returns null when the target is unknown.
+    /// </summary>
+    public async Task<EntityEvidence?> EvidenceAsync(string target, int limit, CancellationToken ct)
+    {
+        const string resolveSql = """
+            SELECT CASE
+                WHEN @target ~ '^[0-9a-f]{32}$' THEN decode(@target, 'hex')
+                ELSE laplace.word_id(@target)
+            END;
+            """;
+        const string evidenceSql = """
+            SELECT
+                encode(a.type_id, 'hex'),
+                COALESCE(laplace.label(a.type_id), encode(a.type_id, 'hex')),
+                encode(a.object_id, 'hex'),
+                COALESCE(laplace.label(a.object_id), encode(a.object_id, 'hex')),
+                encode(a.source_id, 'hex'),
+                COALESCE(laplace.label(a.source_id), encode(a.source_id, 'hex')),
+                CASE WHEN a.context_id IS NULL THEN NULL ELSE encode(a.context_id, 'hex') END,
+                a.outcome,
+                a.observation_count
+            FROM laplace.attestations_out(@id, @limit) a;
+            """;
+        try
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+            byte[]? entityId;
+            await using (var resolve = new NpgsqlCommand(resolveSql, conn))
+            {
+                resolve.Parameters.AddWithValue("target", target.Trim().ToLowerInvariant());
+                entityId = await resolve.ExecuteScalarAsync(ct) as byte[];
+            }
+            if (entityId is null)
+                return null;
+
+            string entityLabel;
+            await using (var label = new NpgsqlCommand(
+                "SELECT COALESCE(laplace.label(@id), encode(@id, 'hex'));", conn))
+            {
+                label.Parameters.Add(new NpgsqlParameter("id", NpgsqlDbType.Bytea) { Value = entityId });
+                entityLabel = (string)(await label.ExecuteScalarAsync(ct))!;
+            }
+
+            var items = new List<Laplace.Api.Contracts.LabeledEvidenceItem>(limit);
+            await using (var cmd = new NpgsqlCommand(evidenceSql, conn))
+            {
+                cmd.Parameters.Add(new NpgsqlParameter("id", NpgsqlDbType.Bytea) { Value = entityId });
+                cmd.Parameters.AddWithValue("limit", limit);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    items.Add(new Laplace.Api.Contracts.LabeledEvidenceItem(
+                        TypeId: reader.GetString(0),
+                        TypeLabel: reader.GetString(1),
+                        ObjectId: reader.GetString(2),
+                        ObjectLabel: reader.GetString(3),
+                        SourceId: reader.GetString(4),
+                        SourceLabel: reader.GetString(5),
+                        ContextId: reader.IsDBNull(6) ? null : reader.GetString(6),
+                        Outcome: reader.GetInt16(7),
+                        ObservationCount: reader.GetInt64(8)));
+                }
+            }
+
+            return new EntityEvidence(Convert.ToHexStringLower(entityId), entityLabel, items);
+        }
+        catch (PostgresException pg)
+        {
+            throw new SubstrateQueryException(
+                $"evidence query failed [{pg.SqlState}] {pg.MessageText}", pg);
+        }
+        catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
+        {
+            throw new SubstrateUnavailableException("Substrate evidence query failed.", ex);
+        }
     }
 
     private static async Task<IReadOnlyList<EvidenceSample>> ReadEvidenceSamplesAsync(NpgsqlConnection conn, string entityIdHex, int limit, CancellationToken ct)

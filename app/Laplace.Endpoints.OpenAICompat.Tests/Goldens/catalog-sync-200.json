@@ -1,0 +1,152 @@
+{
+  "stripe_configured": false,
+  "entries": [
+    {
+      "service_id": "audit.deep_report",
+      "lookup_key": "laplace_audit_deep_report_audit_unit_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "audit.report",
+      "lookup_key": "laplace_audit_report_report_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "chat.completions",
+      "lookup_key": "laplace_chat_completions_request_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "completions",
+      "lookup_key": "laplace_completions_request_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "embeddings",
+      "lookup_key": "laplace_embeddings_request_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "explain.report",
+      "lookup_key": "laplace_explain_report_report_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "explain.trace",
+      "lookup_key": "laplace_explain_trace_trace_unit_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "generate",
+      "lookup_key": "laplace_generate_request_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "inspect",
+      "lookup_key": "laplace_inspect_entity_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "nn",
+      "lookup_key": "laplace_nn_query_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "plan.developer",
+      "lookup_key": "laplace_plan_developer_month_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "plan.enterprise",
+      "lookup_key": "laplace_plan_enterprise_month_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "plan.studio",
+      "lookup_key": "laplace_plan_studio_month_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "recipe.access",
+      "lookup_key": "laplace_recipe_access_use_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "recipe.compile",
+      "lookup_key": "laplace_recipe_compile_recipe_unit_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "recipe.export",
+      "lookup_key": "laplace_recipe_export_content_thousand_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "recipe.publish",
+      "lookup_key": "laplace_recipe_publish_recipe_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "search",
+      "lookup_key": "laplace_search_request_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "synthesis",
+      "lookup_key": "laplace_synthesis_param_million_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "visualization.deep_export",
+      "lookup_key": "laplace_visualization_deep_export_visual_unit_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "visualization.export",
+      "lookup_key": "laplace_visualization_export_export_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    }
+  ]
+}

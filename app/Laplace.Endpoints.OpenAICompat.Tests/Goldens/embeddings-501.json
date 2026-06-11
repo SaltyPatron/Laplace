@@ -1,0 +1,8 @@
+{
+  "error": {
+    "type": "not_implemented",
+    "code": "stream_e_pending",
+    "endpoint": "embeddings",
+    "message": "Pending Stream E physicality lookup path."
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "id": "<id>",
+  "object": "chat.completion",
+  "created": 0,
+  "model": "laplace-converse-001",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "A whale is a marine mammal.\nwhale IS_A cetacean."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "billing": null,
+  "metadata": {
+    "witnesses": 59,
+    "reply_rows": 2,
+    "laplace": {
+      "provenance": [
+        {
+          "reply": "A whale is a marine mammal.",
+          "eff_mu": 0.91,
+          "witnesses": 42
+        },
+        {
+          "reply": "whale IS_A cetacean.",
+          "eff_mu": 0.84,
+          "witnesses": 17
+        }
+      ]
+    }
+  }
+}

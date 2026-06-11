@@ -28,25 +28,29 @@ internal sealed record BillingCreditDebit(
 
 internal interface IBillingEntitlementStore
 {
-    BillingEntitlement ActivatePlan(
+    Task<BillingEntitlement> ActivatePlanAsync(
         string tenant,
         BillingPlan plan,
         string? stripeCustomerId,
         string? stripeSubscriptionId,
-        DateTimeOffset activatedAt);
+        DateTimeOffset activatedAt,
+        CancellationToken ct);
 
-    BillingEntitlement RenewPlan(
+    Task<BillingEntitlement> RenewPlanAsync(
         string tenant,
         BillingPlan plan,
         string? stripeCustomerId,
         string? stripeSubscriptionId,
-        DateTimeOffset renewedAt);
+        DateTimeOffset renewedAt,
+        CancellationToken ct);
 
-    bool DeactivateSubscription(string stripeSubscriptionId, string status, out BillingEntitlement entitlement);
+    /// <summary>Returns the deactivated entitlement, or null when no subscription matched.</summary>
+    Task<BillingEntitlement?> DeactivateSubscriptionAsync(string stripeSubscriptionId, string status, CancellationToken ct);
 
-    IReadOnlyList<BillingEntitlement> GetByTenant(string tenant);
+    Task<IReadOnlyList<BillingEntitlement>> GetByTenantAsync(string tenant, CancellationToken ct);
 
-    bool TryConsumeCredit(string tenant, string serviceId, int units, out BillingCreditDebit debit);
+    Task<(bool Consumed, BillingCreditDebit Debit)> TryConsumeCreditAsync(
+        string tenant, string serviceId, int units, CancellationToken ct);
 }
 
 internal sealed class InMemoryBillingEntitlementStore : IBillingEntitlementStore
@@ -54,12 +58,13 @@ internal sealed class InMemoryBillingEntitlementStore : IBillingEntitlementStore
     private readonly ConcurrentDictionary<string, BillingEntitlement> _entitlements = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
 
-    public BillingEntitlement ActivatePlan(
+    public Task<BillingEntitlement> ActivatePlanAsync(
         string tenant,
         BillingPlan plan,
         string? stripeCustomerId,
         string? stripeSubscriptionId,
-        DateTimeOffset activatedAt)
+        DateTimeOffset activatedAt,
+        CancellationToken ct)
     {
         var entitlement = new BillingEntitlement(
             Tenant: tenant,
@@ -74,15 +79,16 @@ internal sealed class InMemoryBillingEntitlementStore : IBillingEntitlementStore
             UpdatedAt: activatedAt);
 
         _entitlements[Key(tenant, plan.PlanId)] = entitlement;
-        return entitlement;
+        return Task.FromResult(entitlement);
     }
 
-    public BillingEntitlement RenewPlan(
+    public Task<BillingEntitlement> RenewPlanAsync(
         string tenant,
         BillingPlan plan,
         string? stripeCustomerId,
         string? stripeSubscriptionId,
-        DateTimeOffset renewedAt)
+        DateTimeOffset renewedAt,
+        CancellationToken ct)
     {
         var key = Key(tenant, plan.PlanId);
         var existing = _entitlements.TryGetValue(key, out var current) ? current : null;
@@ -99,44 +105,43 @@ internal sealed class InMemoryBillingEntitlementStore : IBillingEntitlementStore
             UpdatedAt: renewedAt);
 
         _entitlements[key] = entitlement;
-        return entitlement;
+        return Task.FromResult(entitlement);
     }
 
-    public bool DeactivateSubscription(string stripeSubscriptionId, string status, out BillingEntitlement entitlement)
+    public Task<BillingEntitlement?> DeactivateSubscriptionAsync(string stripeSubscriptionId, string status, CancellationToken ct)
     {
         lock (_gate)
         {
             var current = _entitlements.Values.FirstOrDefault(e =>
                 string.Equals(e.StripeSubscriptionId, stripeSubscriptionId, StringComparison.OrdinalIgnoreCase));
             if (current is null)
-            {
-                entitlement = default!;
-                return false;
-            }
+                return Task.FromResult<BillingEntitlement?>(null);
 
-            entitlement = current with
+            var entitlement = current with
             {
                 Status = status,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
             _entitlements[Key(entitlement.Tenant, entitlement.PlanId)] = entitlement;
-            return true;
+            return Task.FromResult<BillingEntitlement?>(entitlement);
         }
     }
 
-    public IReadOnlyList<BillingEntitlement> GetByTenant(string tenant) =>
+    public Task<IReadOnlyList<BillingEntitlement>> GetByTenantAsync(string tenant, CancellationToken ct) =>
+        Task.FromResult(GetByTenant(tenant));
+
+    private IReadOnlyList<BillingEntitlement> GetByTenant(string tenant) =>
         _entitlements.Values
             .Where(e => string.Equals(e.Tenant, tenant, StringComparison.OrdinalIgnoreCase))
             .OrderBy(e => e.PlanId, StringComparer.Ordinal)
             .ToArray();
 
-    public bool TryConsumeCredit(string tenant, string serviceId, int units, out BillingCreditDebit debit)
+    public Task<(bool Consumed, BillingCreditDebit Debit)> TryConsumeCreditAsync(
+        string tenant, string serviceId, int units, CancellationToken ct)
     {
         if (units <= 0)
-        {
-            debit = new BillingCreditDebit(tenant, string.Empty, serviceId, units, 0, DateTimeOffset.MinValue, "invalid_units");
-            return false;
-        }
+            return Task.FromResult((false,
+                new BillingCreditDebit(tenant, string.Empty, serviceId, units, 0, DateTimeOffset.MinValue, "invalid_units")));
 
         lock (_gate)
         {
@@ -168,20 +173,19 @@ internal sealed class InMemoryBillingEntitlementStore : IBillingEntitlementStore
                 };
                 _entitlements[Key(entitlement.Tenant, entitlement.PlanId)] = updated;
 
-                debit = new BillingCreditDebit(
+                return Task.FromResult((true, new BillingCreditDebit(
                     Tenant: tenant,
                     PlanId: entitlement.PlanId,
                     ServiceId: serviceId,
                     Units: units,
                     Remaining: remaining - units,
                     PeriodEnd: entitlement.PeriodEnd,
-                    Status: "consumed");
-                return true;
+                    Status: "consumed")));
             }
         }
 
-        debit = new BillingCreditDebit(tenant, string.Empty, serviceId, units, 0, DateTimeOffset.MinValue, "insufficient_credits");
-        return false;
+        return Task.FromResult((false,
+            new BillingCreditDebit(tenant, string.Empty, serviceId, units, 0, DateTimeOffset.MinValue, "insufficient_credits")));
     }
 
     private static int CreditLimit(BillingEntitlement entitlement, string serviceId) =>
@@ -207,17 +211,22 @@ internal sealed record StripeWebhookProcessResult(
 
 internal interface IBillingWebhookEventStore
 {
-    bool TryBegin(string eventId, string eventType);
-    void Complete(string eventId, string status);
+    Task<bool> TryBeginAsync(string eventId, string eventType, CancellationToken ct);
+    Task CompleteAsync(string eventId, string status, CancellationToken ct);
 }
 
 internal sealed class InMemoryBillingWebhookEventStore : IBillingWebhookEventStore
 {
     private readonly ConcurrentDictionary<string, string> _events = new(StringComparer.OrdinalIgnoreCase);
 
-    public bool TryBegin(string eventId, string eventType) => _events.TryAdd(eventId, $"processing:{eventType}");
+    public Task<bool> TryBeginAsync(string eventId, string eventType, CancellationToken ct) =>
+        Task.FromResult(_events.TryAdd(eventId, $"processing:{eventType}"));
 
-    public void Complete(string eventId, string status) => _events[eventId] = status;
+    public Task CompleteAsync(string eventId, string status, CancellationToken ct)
+    {
+        _events[eventId] = status;
+        return Task.CompletedTask;
+    }
 }
 
 internal interface IBillingWebhookHandler
@@ -247,10 +256,10 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
         _eventStore = eventStore;
     }
 
-    public Task<StripeWebhookProcessResult> HandleStripeAsync(string payload, string? signature, CancellationToken ct)
+    public async Task<StripeWebhookProcessResult> HandleStripeAsync(string payload, string? signature, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(_options.WebhookSecret))
-            return Task.FromResult(Result(false, false, false, null, "unknown", "webhook_secret_unconfigured", null, null, null, null));
+            return Result(false, false, false, null, "unknown", "webhook_secret_unconfigured", null, null, null, null);
 
         if (!_options.SkipSignatureVerification)
         {
@@ -260,7 +269,7 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
             }
             catch (Exception)
             {
-                return Task.FromResult(Result(false, false, false, null, "unknown", "invalid_signature", null, null, null, null));
+                return Result(false, false, false, null, "unknown", "invalid_signature", null, null, null, null);
             }
         }
 
@@ -273,7 +282,7 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
         }
         catch (JsonException)
         {
-            return Task.FromResult(Result(false, verified, false, null, "unknown", "invalid_json", null, null, null, null));
+            return Result(false, verified, false, null, "unknown", "invalid_json", null, null, null, null);
         }
 
         using (doc)
@@ -284,13 +293,13 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
             ? typeElement.GetString() ?? "unknown"
             : "unknown";
 
-        if (!_eventStore.TryBegin(eventId, eventType))
-            return Task.FromResult(Result(true, verified, true, eventId, eventType, "duplicate", null, null, null, null));
+        if (!await _eventStore.TryBeginAsync(eventId, eventType, ct))
+            return Result(true, verified, true, eventId, eventType, "duplicate", null, null, null, null);
 
         if (!root.TryGetProperty("data", out var data) || !data.TryGetProperty("object", out var obj))
         {
-            _eventStore.Complete(eventId, "missing_object");
-            return Task.FromResult(Result(false, verified, false, eventId, eventType, "missing_object", null, null, null, null));
+            await _eventStore.CompleteAsync(eventId, "missing_object", ct);
+            return Result(false, verified, false, eventId, eventType, "missing_object", null, null, null, null);
         }
 
         var metadata = MetadataContainer(obj);
@@ -303,19 +312,19 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
         if (string.Equals(eventType, "checkout.session.completed", StringComparison.OrdinalIgnoreCase))
         {
             if (!string.IsNullOrWhiteSpace(quoteId))
-                _billing.TryApproveQuote(quoteId, out _);
+                await _billing.TryApproveQuoteAsync(quoteId, ct);
 
             var plan = _catalog.ListPlans()
                 .FirstOrDefault(p => string.Equals(p.ServiceId, serviceId, StringComparison.OrdinalIgnoreCase));
             if (plan is not null && !string.IsNullOrWhiteSpace(tenant))
             {
-                _entitlements.ActivatePlan(tenant, plan, customerId, subscriptionId, DateTimeOffset.UtcNow);
-                _eventStore.Complete(eventId, "plan_activated");
-                return Task.FromResult(Result(true, verified, false, eventId, eventType, "plan_activated", tenant, serviceId, quoteId, plan.PlanId));
+                await _entitlements.ActivatePlanAsync(tenant, plan, customerId, subscriptionId, DateTimeOffset.UtcNow, ct);
+                await _eventStore.CompleteAsync(eventId, "plan_activated", ct);
+                return Result(true, verified, false, eventId, eventType, "plan_activated", tenant, serviceId, quoteId, plan.PlanId);
             }
 
-            _eventStore.Complete(eventId, "quote_approved");
-            return Task.FromResult(Result(true, verified, false, eventId, eventType, "quote_approved", tenant, serviceId, quoteId, null));
+            await _eventStore.CompleteAsync(eventId, "quote_approved", ct);
+            return Result(true, verified, false, eventId, eventType, "quote_approved", tenant, serviceId, quoteId, null);
         }
 
         if (string.Equals(eventType, "invoice.paid", StringComparison.OrdinalIgnoreCase))
@@ -324,18 +333,19 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
                 .FirstOrDefault(p => string.Equals(p.ServiceId, serviceId, StringComparison.OrdinalIgnoreCase));
             if (plan is not null && !string.IsNullOrWhiteSpace(tenant))
             {
-                _entitlements.RenewPlan(tenant, plan, customerId, subscriptionId, DateTimeOffset.UtcNow);
-                _eventStore.Complete(eventId, "plan_renewed");
-                return Task.FromResult(Result(true, verified, false, eventId, eventType, "plan_renewed", tenant, serviceId, quoteId, plan.PlanId));
+                await _entitlements.RenewPlanAsync(tenant, plan, customerId, subscriptionId, DateTimeOffset.UtcNow, ct);
+                await _eventStore.CompleteAsync(eventId, "plan_renewed", ct);
+                return Result(true, verified, false, eventId, eventType, "plan_renewed", tenant, serviceId, quoteId, plan.PlanId);
             }
         }
 
         if (string.Equals(eventType, "customer.subscription.deleted", StringComparison.OrdinalIgnoreCase))
         {
-            if (!string.IsNullOrWhiteSpace(subscriptionId) && _entitlements.DeactivateSubscription(subscriptionId, "canceled", out var entitlement))
+            if (!string.IsNullOrWhiteSpace(subscriptionId) &&
+                await _entitlements.DeactivateSubscriptionAsync(subscriptionId, "canceled", ct) is { } entitlement)
             {
-                _eventStore.Complete(eventId, "plan_canceled");
-                return Task.FromResult(Result(true, verified, false, eventId, eventType, "plan_canceled", entitlement.Tenant, serviceId, quoteId, entitlement.PlanId));
+                await _eventStore.CompleteAsync(eventId, "plan_canceled", ct);
+                return Result(true, verified, false, eventId, eventType, "plan_canceled", entitlement.Tenant, serviceId, quoteId, entitlement.PlanId);
             }
         }
 
@@ -343,15 +353,15 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
         {
             var subscriptionStatus = StringProperty(obj, "status") ?? "updated";
             if (subscriptionStatus is "canceled" or "unpaid" or "incomplete_expired" && !string.IsNullOrWhiteSpace(subscriptionId) &&
-                _entitlements.DeactivateSubscription(subscriptionId, subscriptionStatus, out var entitlement))
+                await _entitlements.DeactivateSubscriptionAsync(subscriptionId, subscriptionStatus, ct) is { } entitlement)
             {
-                _eventStore.Complete(eventId, $"plan_{subscriptionStatus}");
-                return Task.FromResult(Result(true, verified, false, eventId, eventType, $"plan_{subscriptionStatus}", entitlement.Tenant, serviceId, quoteId, entitlement.PlanId));
+                await _eventStore.CompleteAsync(eventId, $"plan_{subscriptionStatus}", ct);
+                return Result(true, verified, false, eventId, eventType, $"plan_{subscriptionStatus}", entitlement.Tenant, serviceId, quoteId, entitlement.PlanId);
             }
         }
 
-        _eventStore.Complete(eventId, "ignored");
-        return Task.FromResult(Result(true, verified, false, eventId, eventType, "ignored", tenant, serviceId, quoteId, null));
+        await _eventStore.CompleteAsync(eventId, "ignored", ct);
+        return Result(true, verified, false, eventId, eventType, "ignored", tenant, serviceId, quoteId, null);
         }
     }
 

@@ -1,0 +1,71 @@
+[
+  {
+    "id": "<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "laplace-converse-001",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "role": "assistant"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "id": "<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "laplace-converse-001",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "content": "A whale is a marine mammal.\n"
+        },
+        "finish_reason": null
+      }
+    ],
+    "laplace": {
+      "eff_mu": 0.91,
+      "witnesses": 42
+    }
+  },
+  {
+    "id": "<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "laplace-converse-001",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "content": "whale IS_A cetacean."
+        },
+        "finish_reason": null
+      }
+    ],
+    "laplace": {
+      "eff_mu": 0.84,
+      "witnesses": 17
+    }
+  },
+  {
+    "id": "<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "laplace-converse-001",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "content": ""
+        },
+        "finish_reason": "stop"
+      }
+    ]
+  },
+  "[DONE]"
+]
