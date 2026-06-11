@@ -16,6 +16,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private readonly NpgsqlDataSource _ds;
     private readonly int _stagingThreshold;
     private readonly int _partitions;
+    private readonly int _maxFoldBacklog;
     private readonly bool _freshSource;
     private readonly bool _persistEvidence;
     private readonly ILogger _log;
@@ -65,6 +66,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         _partitions = foldWorkers
             ?? (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_FOLD_WORKERS"), out var w) && w > 0
                 ? w : Math.Clamp(Environment.ProcessorCount - 2, 1, 4));
+        // Staged-but-unfolded epochs live on disk (~rows×110B each); an unbounded backlog
+        // exhausted the drive on the first 1B+-relation behavioral deposit (2026-06-11).
+        // 0 or negative disables the bound.
+        _maxFoldBacklog = int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_FOLD_BACKLOG_MAX"), out var bl)
+            ? bl : 12;
         if (_partitions is < 1 or > 64)
             throw new ArgumentOutOfRangeException(nameof(foldWorkers), _partitions,
                 "fold workers must be in 1..64 (create_period_staging's partition bound)");
@@ -178,6 +184,23 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         await _stagingGate.WaitAsync(ct);
         try
         {
+            if (_maxFoldBacklog > 0)
+            {
+                bool throttled = false;
+                while (Volatile.Read(ref _epochsStaged) - Volatile.Read(ref _epochsFolded) >= _maxFoldBacklog)
+                {
+                    if (!throttled)
+                    {
+                        throttled = true;
+                        _log.LogInformation(
+                            "consensus stage throttled: fold backlog {Depth} >= {Max}; holding staging (accumulator keeps merging in RAM) until folds drain",
+                            Volatile.Read(ref _epochsStaged) - Volatile.Read(ref _epochsFolded), _maxFoldBacklog);
+                    }
+                    await Task.WhenAny(_foldChain, Task.Delay(TimeSpan.FromSeconds(5), ct));
+                    ct.ThrowIfCancellationRequested();
+                }
+            }
+
             ConcurrentDictionary<(Hash128, Hash128, Hash128?), Acc> snapshot;
             _swapLock.EnterWriteLock();
             try
