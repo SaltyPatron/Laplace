@@ -2,6 +2,20 @@
 
 Hand this file to the next session verbatim. It is the complete state of the export-fidelity + model-deposition work.
 
+## 2026-06-11 SESSION END — read docs/HANDOFF-fold-lane.md FIRST
+
+The definitive merge-fold behavioral deposit was KILLED BY THE USER at 21/49 epochs folded:
+the consensus merge fold is the write-path ceiling (~6+ h/model), and a separate agent now
+owns the model-ingestion refactor + DB redo. All measured evidence, the PK-less C bulk-fold
+design, and the laws the refactor must not break are in `docs/HANDOFF-fold-lane.md`.
+Headlines: ETL is fast (1.118B matchups in 77 min, C++ kernels fine); ATTENDS is 99.9% of
+behavioral volume (the per-head-vs-summed decision is a ~32× fleet multiplier, still open);
+the fold's 2-random-PK-probes-per-relation against a 62 GB working set on 48 GB RAM is the
+whole problem; sorted probes were deployed live and measured ineffective. Also landed that
+session: fold-backlog backpressure (LAPLACE_FOLD_BACKLOG_MAX), walk-verdict.cmd,
+prompts-as-witnesses (TurnWitness in the endpoint, OPEN-PROBLEMS §4 resolved), document
+context stamping (§13), stopwords diagnosis (§12 — UD was never seeded; not a binding bug).
+
 ## 2026-06-10 RESUMPTION — what actually happened to the per-layer rewire
 
 **The checkpoint (`c213b47`) per-slot cell fold was DESTROYED by the next commit (`169fc03`,

@@ -83,6 +83,14 @@ The mapping must be written down as law before implementation; it is the load-be
 
 ## 11. Performance headroom (the slow-tier disclosure)
 
+**2026-06-11 addendum — the fold lane is the proven write ceiling.** The consensus merge fold
+measured 25–70k rel/s on a 1.1B-relation behavioral deposit (2 random PK probes per relation,
+62 GB working set vs 48 GB RAM, 3–4× re-touch across Glicko periods; sorted probes deployed
+live and measured ineffective — the heap is history-random). Full evidence + the PK-less
+C bulk-fold design (`prepare/finish_consensus_bulk`): `docs/HANDOFF-fold-lane.md`. Build that
+lane before any fleet deposit; everything else on the write path (ETL kernels, COPY staging)
+already runs at 1–4M rel/s.
+
 Every 2026-06-07 query number was taken on the slow tier. Levers, each independent, multiplicative, and either built or planned:
 - **SPI offload of walks** — the compiled cascade (`astar_path_raw`, generate_tree/greedy) exists in the installed DLLs; new query surfaces (collocate walks, hypothesis scans) should route through C+SPI like it does (10–100× on traversal).
 - **Batched kernel entry points** — Fréchet/angular/hilbert calls cross the fmgr boundary per pair; array-in/array-out variants amortize thousands of comparisons per call and unlock SIMD lanes (engine is /arch:AVX2; AVX-512 available on this CPU) (10–50×).

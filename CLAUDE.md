@@ -56,7 +56,8 @@ holders; `locks.cmd --kill` clears the safe ones. Dead-configure debris is clear
 | `seed-ladder.cmd` | THE witness ladder (executable mirror of `witness-manifest.json`). Knobs: `LAPLACE_LADDER_START=proof`, `LAPLACE_LADDER_DRY=1`, `LAPLACE_SKIP_{USAGE,MODELS,LEXICAL_BULK}`. NEVER copy the ladder into a new script — call this |
 | `seed-substrate.cmd` / `seed-resume-prove.cmd` / `seed-deferred-lexical.cmd` | thin callers: fresh drop+seed / resume proof path / heavy lexical — all delegate to the ladder |
 | `index-content.cmd <db> [deep\|text]` | rebuild generation content index after seeding |
-| `serve.cmd` / `converse.cmd "q"` | dev endpoint / one-shot converse query |
+| `walk-verdict.cmd [db]` | post-deposit acceptance: rebuild consensus secondaries (B2 pair) + model-planes-audit; verdict → `build-win\verdicts\` |
+| `serve.cmd` / `converse.cmd "q"` | dev endpoint / one-shot converse query (endpoint also runs TurnWitness: served turns deposit as UserPrompt testimony) |
 | `download-code-data.cmd {tiny-codes\|stack-v2\|authority}` | fetch code corpora (HF_TOKEN needed for HF) |
 
 ## Iteration recipes — change → minimal pipeline
@@ -96,3 +97,5 @@ Never start at the right end: e2e is for proving the whole pipeline, not for che
 - Attestation/physicality column is `type` — any surviving `kind` reference is refactor residue, i.e. a bug.
 - `icpx` is the GNU driver and rejects MSVC flags — both C and C++ use `icx` on Windows.
 - Justfile / `scripts/*.sh` / GH workflows are the (stale) Linux CI path — not for this machine.
+- Any process running TextDecomposer must call `CodepointPerfcache.LoadDefault()` first (Engine.Core) — `TryBuildContentWitness` swallows the not-loaded error into a silent no-op (cost a debugging round 2026-06-11).
+- **The consensus merge fold is the write-path ceiling** (25–70k rel/s; 2 random PK probes/relation, working set > RAM, 3–4× re-touch across periods — measured, see `docs/HANDOFF-fold-lane.md`). Sorted probes do NOT fix it (heap is history-random). Bulk deposits: backlog is bounded by `LAPLACE_FOLD_BACKLOG_MAX` (default 12 epochs ≈ ~28 GB staging on disk; 0 disables). The fix is the PK-less C bulk fold (unbuilt) — read the handoff before touching this lane.
