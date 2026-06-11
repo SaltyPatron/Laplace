@@ -1178,7 +1178,7 @@ internal static class Program
         // planes AND the corpus sequence consensus — "the capital of" → "France" is
         // PRECEDES testimony, and it is exactly what the completion operator encodes.
         int degreeCap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_LE_DEGREE", 48);
-        int cooWindow = FoundryExport.EnvInt("LAPLACE_FOUNDRY_TRAJ_WINDOW", 4);
+        int maxGap = Math.Max(1, Math.Min(FoundryExport.EnvInt("LAPLACE_FOUNDRY_TRAJ_MAX_GAP", 8), nLayers));
         var swPour = Stopwatch.StartNew();
         var simT = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("SIMILAR_TO"),     tokenSlots, degreeCap);
         var attT = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("ATTENDS"),        tokenSlots, degreeCap);
@@ -1186,24 +1186,24 @@ internal static class Program
         var cmpT = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("COMPLETES_TO"),   tokenSlots, degreeCap);
         var preT = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("PRECEDES"),       tokenSlots, degreeCap);
         var cooT = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("CO_OCCURS_WITH"), tokenSlots, degreeCap);
-        // The usage observations themselves: conditional continuation (window 1) and
-        // forward co-occurrence (window N) read from the content trajectories.
-        var tnxT = FoundryExport.ReadTrajectoryPlaneAsync(ds, 1,         tokenSlots, degreeCap);
-        var twnT = FoundryExport.ReadTrajectoryPlaneAsync(ds, cooWindow, tokenSlots, degreeCap);
-        await Task.WhenAll(simT, attT, ovT, cmpT, preT, cooT, tnxT, twnT);
+        // The usage observations themselves: the order ladder — per-gap conditional
+        // frequencies walked out of the content trajectories. Gap g pours into layer g.
+        var gapT = FoundryExport.ReadTrajectoryGapPlanesAsync(ds, maxGap, tokenSlots, degreeCap);
+        await Task.WhenAll(simT, attT, ovT, cmpT, preT, cooT, gapT);
         var sim = FoundryExport.Normalize(simT.Result);
         var att = FoundryExport.Normalize(attT.Result);
         var ov  = FoundryExport.Normalize(ovT.Result);
         var cmp = FoundryExport.Normalize(cmpT.Result);
         var pre = FoundryExport.Normalize(preT.Result);
         var coo = FoundryExport.Normalize(cooT.Result);
-        var tnx = tnxT.Result;
-        var twn = twnT.Result;
-        long planeEdges = (long)sim.Nnz + att.Nnz + ov.Nnz + cmp.Nnz + pre.Nnz + coo.Nnz + tnx.Nnz + twn.Nnz;
+        var gaps = gapT.Result;
+        var tnx = gaps[0];
+        long gapEdges = gaps.Sum(g => (long)g.Nnz);
+        long planeEdges = (long)sim.Nnz + att.Nnz + ov.Nnz + cmp.Nnz + pre.Nnz + coo.Nnz + gapEdges;
         Console.WriteLine($"  consensus + trajectory planes read in {swPour.Elapsed.TotalSeconds:F1}s: "
             + $"SIMILAR_TO={sim.Nnz:N0} ATTENDS={att.Nnz:N0} OV_RELATES={ov.Nnz:N0} COMPLETES_TO={cmp.Nnz:N0} "
             + $"PRECEDES={pre.Nnz:N0} CO_OCCURS_WITH={coo.Nnz:N0} "
-            + $"TRAJ_NEXT={tnx.Nnz:N0} TRAJ_WINDOW={twn.Nnz:N0} (degree cap {degreeCap})");
+            + $"TRAJ gaps 1..{maxGap}=[{string.Join(",", gaps.Select(g => g.Nnz))}] (degree cap {degreeCap})");
         if (planeEdges == 0)
             return Fail("no token→token consensus in the substrate — deposit a model or corpus first");
 
@@ -1218,7 +1218,8 @@ internal static class Program
         var basisSeed = Hash128.Blake3(recipe.CanonicalJson);
         var swBasis = Stopwatch.StartNew();
         var E = FoundryExport.BuildBasis(vocab, dModel,
-            FoundryExport.Union(sim, att, ov, cmp, pre, coo, tnx, twn), anchors, basisSeed, out var basisStats);
+            FoundryExport.Union(new[] { sim, att, ov, cmp, pre, coo }.Concat(gaps).ToArray()),
+            anchors, basisSeed, out var basisStats);
         Console.WriteLine($"  basis generated in {swBasis.Elapsed.TotalSeconds:F1}s: "
             + $"spectral K={basisStats.SpectralRank}, {basisStats.ZeroSpectralTokens:N0} tokens off-graph (capacity-only rows), "
             + $"procrustes residual={basisStats.ProcrustesResidual:F4}");
@@ -1227,25 +1228,35 @@ internal static class Program
         double relTol = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_REL_ERR_TOL", 0.0);
         int kAttn = Math.Min(kvDimR, dModel);
         int kFfn  = Math.Min(intermR, dModel);
-        // Attention affinity = model ATTENDS ∪ co-occurrence consensus ∪ windowed
-        // trajectory co-occurrence; completion = model COMPLETES_TO ∪ PRECEDES
-        // consensus ∪ the trajectory continuation distribution itself ("followed by
-        // N% of the time", read from the usage observations). Models, corpora, and
-        // the witnessed sequences all pour into the same mold.
+        // Completion = model COMPLETES_TO ∪ PRECEDES consensus ∪ the trajectory
+        // continuation distribution; OV from model testimony. Attention is the ORDER
+        // LADDER: layer l carries gap-(l+1) trajectory structure on top of the
+        // consensus attention backbone — the mold's depth is bought with sequential
+        // order walked out of the witnessed trajectories.
         var swOps = Stopwatch.StartNew();
-        var mA = FoundryExport.ProjectOperator(E, vocab, dModel, FoundryExport.Union(att, coo, twn));
         var mB = FoundryExport.ProjectOperator(E, vocab, dModel, ov);
         var mC = FoundryExport.ProjectOperator(E, vocab, dModel, FoundryExport.Union(cmp, pre, tnx));
         // ATTENDS composes Wqᵀ·Wk; OV and FFN compose outer·inner (Wo·Wv, Wdown·Wup) → factor Mᵀ.
-        var fAttn = FoundryExport.Factor(mA, dModel, kAttn, relTol, transpose: false);
-        var fOv   = FoundryExport.Factor(mB, dModel, kAttn, relTol, transpose: true);
-        var fFfn  = FoundryExport.Factor(mC, dModel, kFfn,  relTol, transpose: true);
+        var fOv  = FoundryExport.Factor(mB, dModel, kAttn, relTol, transpose: true);
+        var fFfn = FoundryExport.Factor(mC, dModel, kFfn,  relTol, transpose: true);
+        var fAttnByGap = new FoundryExport.Factors[maxGap];
+        for (int g = 0; g < maxGap; g++)
+        {
+            var mA = FoundryExport.ProjectOperator(E, vocab, dModel, FoundryExport.Union(att, coo, gaps[g]));
+            fAttnByGap[g] = FoundryExport.Factor(mA, dModel, kAttn, relTol, transpose: false);
+        }
         Console.WriteLine($"  operators projected + factored in {swOps.Elapsed.TotalSeconds:F1}s: "
-            + $"ATTENDS rank {fAttn.Rank} (resid {fAttn.SampleResidual:F3}), OV rank {fOv.Rank} (resid {fOv.SampleResidual:F3}), "
-            + $"FFN rank {fFfn.Rank} (resid {fFfn.SampleResidual:F3})");
+            + $"ATTENDS gaps ranks [{string.Join(",", fAttnByGap.Select(f => f.Rank))}] "
+            + $"(resid [{string.Join(",", fAttnByGap.Select(f => f.SampleResidual.ToString("F3")))}]), "
+            + $"OV rank {fOv.Rank} (resid {fOv.SampleResidual:F3}), FFN rank {fFfn.Rank} (resid {fFfn.SampleResidual:F3})");
 
-        // Uniform residual split: each of L layers carries the operator at 1/L (each
-        // factor scaled (1/L)^½), so the residual-stream sum reproduces it once.
+        // Layer assignment: gap g → layer g (clamped at maxGap; deeper layers share
+        // the longest gap, scaled so each shared group sums to one operator). OV/FFN
+        // carry the same operator at every layer via uniform residual split (1/L).
+        int GapForLayer(int l) => Math.Min(l + 1, maxGap);
+        var gapGroupSize = new int[maxGap + 1];
+        for (int l = 0; l < nLayers; l++) gapGroupSize[GapForLayer(l)]++;
+        double AttnScale(int l) => 1.0 / Math.Sqrt(Math.Max(1, gapGroupSize[GapForLayer(l)]));
         double layerScale = 1.0 / Math.Sqrt(Math.Max(1, nLayers));
         // The gate reads only the bias channel; after RMSNorm the bias component is
         // ≈ √(d/2), so gateCol·√(d/2) = GateZ lands SiLU in its near-linear region,
@@ -1293,11 +1304,15 @@ internal static class Program
             }
             else if (name.StartsWith("model.layers.", StringComparison.Ordinal))
             {
-                string rest = name[(name.IndexOf('.', "model.layers.".Length) + 1)..];
+                int layerDot = name.IndexOf('.', "model.layers.".Length);
+                int layerIdx = int.Parse(name["model.layers.".Length..layerDot]);
+                string rest = name[(layerDot + 1)..];
+                var fAttn = fAttnByGap[GapForLayer(layerIdx) - 1];
+                double attnScale = AttnScale(layerIdx);
                 switch (rest)
                 {
-                    case "self_attn.q_proj.weight": FoundryExport.FillRows(vals, tr, tc, fAttn, layerScale); break;
-                    case "self_attn.k_proj.weight": FoundryExport.FillRowsRight(vals, tr, tc, fAttn, layerScale); break;
+                    case "self_attn.q_proj.weight": FoundryExport.FillRows(vals, tr, tc, fAttn, attnScale); break;
+                    case "self_attn.k_proj.weight": FoundryExport.FillRowsRight(vals, tr, tc, fAttn, attnScale); break;
                     case "self_attn.v_proj.weight": FoundryExport.FillRowsRight(vals, tr, tc, fOv, layerScale); break;
                     case "self_attn.o_proj.weight": FoundryExport.FillCols(vals, tr, tc, fOv, layerScale); break;
                     case "mlp.gate_proj.weight":    FoundryExport.FillGate(vals, tr, tc, gateCol); break;

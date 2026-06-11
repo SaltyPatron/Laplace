@@ -51,6 +51,7 @@ internal static class FoundryExport
         var adj = new Dictionary<int, List<(int Col, double W)>>();
         await using var conn = await ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 600;
         cmd.CommandText =
             "SELECT subject_id, object_id, eff_mu_fp "
             + "FROM laplace.consensus_export_relations_mu($1)";
@@ -104,6 +105,7 @@ internal static class FoundryExport
         try
         {
             await using var cmd = conn.CreateCommand();
+            cmd.CommandTimeout = 600;
             cmd.CommandText =
                 "SELECT subject_id, object_id, cnt, subject_total "
                 + "FROM laplace.content_trajectory_pairs($1)";
@@ -150,6 +152,75 @@ internal static class FoundryExport
                 rows[at] = r; cols[at] = c; vals[at] = w; at++;
             }
         return new PlaneCoo(rows, cols, vals);
+    }
+
+    // The order ladder: per-gap planes (gap = exact forward distance in a witnessed
+    // sequence), read in ONE pass via content_trajectory_pairs_by_gap. gapPlanes[g-1]
+    // holds P(object at distance g | subject); the foundry pours gap g into layer g,
+    // so the mold's depth is bought with sequential order from the trajectories.
+    internal static async Task<PlaneCoo[]> ReadTrajectoryGapPlanesAsync(
+        NpgsqlDataSource ds, int maxGap,
+        Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
+    {
+        var adjByGap = new Dictionary<int, List<(int Col, double W)>>[maxGap];
+        for (int g = 0; g < maxGap; g++) adjByGap[g] = new Dictionary<int, List<(int, double)>>();
+        await using var conn = await ds.OpenConnectionAsync();
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandTimeout = 600;
+            cmd.CommandText =
+                "SELECT subject_id, object_id, gap, cnt, subject_total "
+                + "FROM laplace.content_trajectory_pairs_by_gap($1)";
+            cmd.Parameters.AddWithValue(maxGap);
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+                int gap = rdr.GetInt32(2);
+                if (gap < 1 || gap > maxGap) continue;
+                long total = rdr.GetInt64(4);
+                if (total <= 0) continue;
+                double w = rdr.GetInt64(3) / (double)total;
+                var adj = adjByGap[gap - 1];
+                foreach (int s in subj)
+                {
+                    if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
+                    foreach (int o in obj) row.Add((o, w));
+                }
+            }
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine($"  (trajectory gap ladder unavailable: {ex.SqlState} — pouring from consensus planes only)");
+            return Enumerable.Repeat(PlaneCoo.Empty, maxGap).ToArray();
+        }
+
+        var planes = new PlaneCoo[maxGap];
+        for (int g = 0; g < maxGap; g++)
+        {
+            var adj = adjByGap[g];
+            long kept = 0;
+            foreach (var row in adj.Values)
+            {
+                if (row.Count > degreeCap)
+                {
+                    row.Sort((a, b) => Math.Abs(b.W).CompareTo(Math.Abs(a.W)));
+                    row.RemoveRange(degreeCap, row.Count - degreeCap);
+                }
+                kept += row.Count;
+            }
+            var rows = new int[kept]; var cols = new int[kept]; var vals = new double[kept];
+            long at = 0;
+            foreach (var (r, row) in adj)
+                foreach (var (c, w) in row)
+                {
+                    rows[at] = r; cols[at] = c; vals[at] = w; at++;
+                }
+            planes[g] = new PlaneCoo(rows, cols, vals);
+        }
+        return planes;
     }
 
     // Per-plane scale normalization (max |w| → 1) so μ-weighted consensus planes
@@ -329,37 +400,39 @@ internal static class FoundryExport
 
     internal sealed record Factors(float[] Left, float[] Right, int Rank, int Dim, double SampleResidual);
 
-    // Factor M ≈ Leftᵀ·Right with Left/Right [kmax × d] rows = √Sᵣ·uᵣᵀ / √Sᵣ·vᵣᵀ.
+    // Factor M ≈ Leftᵀ·Right with Left/Right [rankCap × d] rows = √Sᵣ·uᵣᵀ / √Sᵣ·vᵣᵀ.
     // transpose=true factors Mᵀ instead (for operators whose composed orientation
-    // is Wouter·Winner, e.g. Wo·Wv and Wdown·Wup).
-    internal static Factors Factor(double[] m, int d, int kmax, double relTol, bool transpose)
+    // is Wouter·Winner, e.g. Wo·Wv and Wdown·Wup). The native kernel computes the
+    // FULL SVD (its kmax is buffer capacity, required ≥ min(m,n)) and truncates by
+    // rel_err_tol; the mold's rank cap is applied here, keeping the strongest modes.
+    internal static Factors Factor(double[] m, int d, int rankCap, double relTol, bool transpose)
     {
         var a = new float[(long)d * d];
         for (int i = 0; i < d; i++)
             for (int j = 0; j < d; j++)
                 a[(long)i * d + j] = (float)(transpose ? m[(long)j * d + i] : m[(long)i * d + j]);
 
-        var u = new float[(long)d * kmax];
-        var s = new float[kmax];
-        var vt = new float[(long)kmax * d];
+        var u = new float[(long)d * d];
+        var s = new float[d];
+        var vt = new float[(long)d * d];
         nuint outRank = 0;
         int rc;
         unsafe
         {
             fixed (float* pa = a) fixed (float* pu = u) fixed (float* ps = s) fixed (float* pvt = vt)
-                rc = SynInterop.TensorSvdTruncate(pa, (nuint)d, (nuint)d, relTol, &outRank, pu, ps, pvt, (nuint)kmax);
+                rc = SynInterop.TensorSvdTruncate(pa, (nuint)d, (nuint)d, relTol, &outRank, pu, ps, pvt, (nuint)d);
         }
-        if (rc != 0) throw new InvalidOperationException($"tensor_svd_truncate rc={rc} (d={d}, kmax={kmax})");
-        int k = (int)outRank;
+        if (rc != 0) throw new InvalidOperationException($"tensor_svd_truncate rc={rc} (d={d})");
+        int k = Math.Min((int)outRank, rankCap);
 
-        var left = new float[(long)kmax * d];
-        var right = new float[(long)kmax * d];
+        var left = new float[(long)k * d];
+        var right = new float[(long)k * d];
         for (int r = 0; r < k; r++)
         {
             float sq = MathF.Sqrt(Math.Max(0f, s[r]));
             for (int j = 0; j < d; j++)
             {
-                left[(long)r * d + j] = sq * u[(long)j * kmax + r];
+                left[(long)r * d + j] = sq * u[(long)j * d + r];
                 right[(long)r * d + j] = sq * vt[(long)r * d + j];
             }
         }
