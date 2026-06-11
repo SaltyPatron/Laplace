@@ -81,4 +81,20 @@ public sealed class TextEntityBuilderEmissionTests
         Assert.True(TextEntityBuilder.TryBuildRows(bytes, Src, out var ents, out _, out _, out _));
         Assert.Contains(ents, e => e.Tier == EntityTier.Sentence);
     }
+
+    [Fact]
+    public void DistributionalBigrams_Carry_Containing_Document_As_Context()
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes("Brave whales chase tiny boats. Second sentence holds more words.");
+        Assert.True(TextEntityBuilder.TryBuildContentWitness(bytes, Src, 1.0,
+            out var ents, out _, out var atts, out var rootId, out _));
+
+        Assert.NotEmpty(atts);
+        Assert.All(atts, a =>
+        {
+            Assert.True(a.ContextId.HasValue);
+            Assert.True(a.ContextId!.Value.EqualsBytewise(rootId));
+        });
+        Assert.Contains(ents, e => e.Id.EqualsBytewise(rootId));
+    }
 }

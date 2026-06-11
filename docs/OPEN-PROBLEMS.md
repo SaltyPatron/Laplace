@@ -98,9 +98,19 @@ Composite conservative estimate: 2–3 orders of magnitude above RECEIPTS.md num
 
 The idea (ruled good): function-word-ness derives from UD's HAS_POS consensus, not hardcoded lists. First implementation returned false for obvious function words — the HAS_POS subject identity needs diagnosis (does UD attest POS on the surface word entity, the lemma, or an occurrence/lemma-in-language entity?). Resolve the binding, then promote `is_function_word()` into the extension and use it to split collocate views into content/function planes.
 
-## 13. Document context stamping (text bigrams)
+## 13. Document context stamping (text bigrams) — FIXED 2026-06-11 (prospective)
 
-All 340,707 library PRECEDES attestations carry `context_id NULL`. The text emitter must stamp the containing document entity as context (the exact pattern model witnesses use for layer/head). Unlocks per-author conditioning ("speak as Melville" via attestation filters), per-document provenance of sequence knowledge, and witness-restricted generation. Until then, per-book sequences remain derivable from trajectories (doc→sentences→words), at higher query cost.
+`TextEntityBuilder.BuildDistributionalAttestations` now stamps the containing natural-unit
+entity (the document root) as `context_id` on every PRECEDES row — the exact context-as-entity
+pattern model witnesses use for layer/head. Consensus identity excludes context, so folds are
+unchanged; the attestation-side scope filters (16_inspect `p_context_id`) become meaningful for
+text. Unlocks per-author conditioning ("speak as Melville"), per-document provenance, and
+witness-restricted generation. Every TryBuildContentWitness caller inherits it (DocumentDecomposer,
+db-roundtrip record, TurnWitness conversation turns). Pinned in TextEntityBuilderEmissionTests.
+
+Pre-existing library rows (340,707 PRECEDES) remain `context_id NULL` until their sources are
+replayed — replay-from-sources (§3) is the lawful backfill; do not UPDATE rows in place
+(attestation identity includes context, so a stamp is a new row, not a mutation).
 
 ## 14. 23_structural_surface module — registration + pins
 
