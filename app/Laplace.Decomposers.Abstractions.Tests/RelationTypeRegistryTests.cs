@@ -29,9 +29,8 @@ public class RelationTypeRegistryTests
     [Fact]
     public void NormalizesSplit_TwoAssertions_TwoArenas()
     {
-        Assert.NotEqual(Kid("NORMALIZES_TO"), Kid("NORM_SCALES"));
+        Assert.NotEqual(Kid("NORMALIZES_TO"), Kid("NORMALIZES"));
         Assert.Equal(RelationTypeRank.StandardsStructural, RelationTypeRegistry.Resolve("NORMALIZES_TO").Rank);
-        Assert.Equal(RelationTypeRank.TensorCalculation, RelationTypeRegistry.Resolve("NORM_SCALES").Rank);
         Assert.Equal(RelationTypeRank.Probationary, RelationTypeRegistry.Resolve("NORMALIZES").Rank);
     }
 
@@ -78,17 +77,27 @@ public class RelationTypeRegistryTests
     }
 
     [Fact]
-    public void TensorRoleFamily_FirstClass_NoParent()
+    public void TokenizerWitnessTypes_FirstClass_NoParent()
     {
-        foreach (var role in new[] { "EMBEDS", "Q_PROJECTS", "K_PROJECTS", "V_PROJECTS",
-                                     "O_PROJECTS", "GATES", "UP_PROJECTS", "DOWN_PROJECTS",
-                                     "NORM_SCALES", "OUTPUT_PROJECTS", "TOKEN_MAPS_TO", "MERGES_WITH" })
+        foreach (var role in new[] { "TOKEN_MAPS_TO", "MERGES_WITH" })
         {
             var r = RelationTypeRegistry.Resolve(role);
             Assert.Equal(RelationTypeRank.TensorCalculation, r.Rank);
             Assert.Null(r.ParentId);
             Assert.Equal(RelationTypeRegistry.RelationTypeId(role), r.Id);
         }
+    }
+
+    // Tombstone for the cell-archive purge: the tensor-role arenas were removed from the
+    // manifest because model deposition is token->token behavioral planes only. If one of
+    // these resolves above probationary again, the manifest re-grew the condemned vocabulary.
+    [Fact]
+    public void TensorRoleArenas_Purged_FallToProbationary()
+    {
+        foreach (var dead in new[] { "EMBEDS", "Q_PROJECTS", "K_PROJECTS", "V_PROJECTS",
+                                     "O_PROJECTS", "GATES", "UP_PROJECTS", "DOWN_PROJECTS",
+                                     "NORM_SCALES", "OUTPUT_PROJECTS", "DETECTS", "WRITES" })
+            Assert.Equal(RelationTypeRank.Probationary, RelationTypeRegistry.Resolve(dead).Rank);
     }
 
     [Fact]

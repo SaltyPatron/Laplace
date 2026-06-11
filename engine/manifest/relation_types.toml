@@ -175,32 +175,11 @@ parent = null
 family_root = "DESIRES"
 
 [[relation]]
-canonical = "DETECTS"
-rank = "tensor_calculation"
-symmetry = "asymmetric"
-parent = null
-family_root = "DETECTS"
-
-[[relation]]
 canonical = "DISTINCT_FROM"
 rank = "oppositional"
 symmetry = "symmetric"
 parent = null
 family_root = "DISTINCT_FROM"
-
-[[relation]]
-canonical = "DOWN_PROJECTS"
-rank = "tensor_calculation"
-symmetry = "asymmetric"
-parent = null
-family_root = "DOWN_PROJECTS"
-
-[[relation]]
-canonical = "EMBEDS"
-rank = "tensor_calculation"
-symmetry = "asymmetric"
-parent = null
-family_root = "EMBEDS"
 
 [[relation]]
 canonical = "ENHANCED_DEPENDS_ON"
@@ -250,13 +229,6 @@ rank = "associative"
 symmetry = "asymmetric"
 parent = "RELATED_TO"
 family_root = "RELATED_TO"
-
-[[relation]]
-canonical = "GATES"
-rank = "tensor_calculation"
-symmetry = "asymmetric"
-parent = null
-family_root = "GATES"
 
 [[relation]]
 canonical = "HAS_A"
@@ -714,13 +686,6 @@ parent = "RELATED_TO"
 family_root = "RELATED_TO"
 
 [[relation]]
-canonical = "K_PROJECTS"
-rank = "tensor_calculation"
-symmetry = "asymmetric"
-parent = null
-family_root = "K_PROJECTS"
-
-[[relation]]
 canonical = "LOCATED_NEAR"
 rank = "associative"
 symmetry = "symmetric"
@@ -770,13 +735,6 @@ parent = null
 family_root = "NORMALIZES_TO"
 
 [[relation]]
-canonical = "NORM_SCALES"
-rank = "tensor_calculation"
-symmetry = "asymmetric"
-parent = null
-family_root = "NORM_SCALES"
-
-[[relation]]
 canonical = "NOT_CAPABLE_OF"
 rank = "oppositional"
 symmetry = "asymmetric"
@@ -819,13 +777,6 @@ parent = null
 family_root = "OBSTRUCTED_BY"
 
 [[relation]]
-canonical = "OUTPUT_PROJECTS"
-rank = "tensor_calculation"
-symmetry = "asymmetric"
-parent = null
-family_root = "OUTPUT_PROJECTS"
-
-[[relation]]
 canonical = "OV_RELATES"
 rank = "tensor_calculation"
 symmetry = "asymmetric"
@@ -838,13 +789,6 @@ rank = "causal"
 symmetry = "asymmetric"
 parent = null
 family_root = "O_EFFECT"
-
-[[relation]]
-canonical = "O_PROJECTS"
-rank = "tensor_calculation"
-symmetry = "asymmetric"
-parent = null
-family_root = "O_PROJECTS"
 
 [[relation]]
 canonical = "O_REACT"
@@ -880,13 +824,6 @@ rank = "associative"
 symmetry = "asymmetric"
 parent = null
 family_root = "PRECEDES"
-
-[[relation]]
-canonical = "Q_PROJECTS"
-rank = "tensor_calculation"
-symmetry = "asymmetric"
-parent = null
-family_root = "Q_PROJECTS"
 
 [[relation]]
 canonical = "RECEIVES_ACTION"
@@ -931,13 +868,6 @@ parent = null
 family_root = "TRANSCRIBES_AS"
 
 [[relation]]
-canonical = "UP_PROJECTS"
-rank = "tensor_calculation"
-symmetry = "asymmetric"
-parent = null
-family_root = "UP_PROJECTS"
-
-[[relation]]
 canonical = "USED_FOR"
 rank = "associative"
 symmetry = "asymmetric"
@@ -950,20 +880,6 @@ rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
 family_root = "USES_SCRIPT"
-
-[[relation]]
-canonical = "V_PROJECTS"
-rank = "tensor_calculation"
-symmetry = "asymmetric"
-parent = null
-family_root = "V_PROJECTS"
-
-[[relation]]
-canonical = "WRITES"
-rank = "tensor_calculation"
-symmetry = "asymmetric"
-parent = null
-family_root = "WRITES"
 
 [[relation]]
 canonical = "X_ATTR"
