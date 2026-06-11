@@ -20,7 +20,7 @@ Trust ladder (entities in the seed, descending typical force):
 
 The deliberate inversion vs. the industry: **a transformer's testimony is admissible and outranked by the dictionary.** Models are witnesses to be cross-examined, not oracles.
 
-Context (`context_id`) refines the witness without entering relation identity: for models, the layer/head circuit entity (per-circuit testimony enables interpretability queries); for documents, the containing document (stamping in the text path is open work — OPEN-PROBLEMS).
+Context (`context_id`) refines the witness without entering relation identity: for models, the per-layer `Model_Layer` context entity (the same token pair folds across layers — cross-layer agreement is the strongest testimony — while per-layer provenance stays queryable); for documents, the containing document.
 
 ## The evidence law
 
@@ -36,7 +36,7 @@ Why a *rating* system: truth-from-many-witnesses is structurally a tournament �
 
 Mechanics (engine kernel `glicko2.c`, int64 ×1e9, single source of math truth):
 - Every relation starts at the neutral prior: rating 1500e9, RD 350e9, vol 0.06e9; τ = 0.5e9.
-- A witness observation is a **game vs. the neutral 1500 line** with score `s = ½(1 + tanh(m/M))` where m is the witness's magnitude and M the arena normalizer (e.g., pooled tensor RMS for model cells); witness trust sets opponent φ via WitnessPhi.
+- A witness observation is a **game vs. the neutral 1500 line** with score `s = ½(1 + tanh(m/M))` where m is the witness's magnitude and M the arena normalizer (1.0 for the cosine-normalized model behavioral planes); witness trust sets opponent φ via WitnessPhi.
 - Within a period, observations are commutative (pinned by determinism vectors); periods fold via the batch kernel `accumulate_games(n, Σs)` — bit-identical to one-by-one replay.
 - The accumulation invariant: one φ per relation per period (mixed-φ trips a hard exception, not a silent average).
 

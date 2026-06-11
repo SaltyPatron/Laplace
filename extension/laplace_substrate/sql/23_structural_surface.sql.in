@@ -124,3 +124,17 @@ CREATE OR REPLACE FUNCTION consensus_export_relations_mu(p_type_id bytea)
     FROM consensus c
     WHERE c.type_id = p_type_id AND c.object_id IS NOT NULL
 $$;
+
+-- Discovered molds: every deposed model's recipe, rendered. The recipe entity id
+-- is Blake3 of the canonical config JSON, which deposition registers verbatim in
+-- canonical_names — so the full recipe reads back by id and the foundry can pour
+-- the same mold with better data (synthesize substrate --recipe-from).
+CREATE OR REPLACE FUNCTION model_recipes()
+    RETURNS TABLE(recipe_id bytea, recipe_json text, first_observed_by bytea)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT e.id, cn.name, e.first_observed_by
+    FROM entities e
+    JOIN canonical_names cn ON cn.id = e.id
+    WHERE e.type_id = canonical_id('substrate/type/Model_Recipe/v1')
+$$;

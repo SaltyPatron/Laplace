@@ -46,8 +46,7 @@ No geometry, no payload. Indexes: tier, type, (tier,type) btrees; first_observed
 ```
 id bytea(16) PK
 entity_id / source_id      → entities (CASCADE)
-type smallint              physicality type (CONTENT=1, BUILDING_BLOCK, PROJECTION…,
-                           extended per tensor role per the 2026-06-07 consolidation ruling)
+type smallint              physicality type (CONTENT=1, BUILDING_BLOCK, PROJECTION, PROJECTION_OUTPUT)
 coord geometry(PointZM)    position (S³ surface / 4-ball interior)
 hilbert_index bytea(16)    1-D locality key; equality = identical position (multiset signature)
 trajectory geometry        mantissa-packed constituent sequence (identity, never coordinates)
@@ -59,7 +58,7 @@ observed_at timestamptz
 UNIQUE (entity_id, source_id, type)   ← idempotent re-observation upsert
 ```
 Indexes: entity/source/type btrees, coord ND-GIST, hilbert btree, radius btree, residual partial, observed BRIN.
-Ruling: firefly placements live HERE (source_id = circuit entity for layer/head granularity); 19_geometry_* tables retire.
+Ruling (2026-06-07, narrowed 2026-06-11): per-witness placements live HERE (source_id = the model source; the S3 morph writes PROJECTION rows — no circuit entities, no per-role types); 19_geometry_* tables retire.
 
 ### attestations — EVIDENCE = PROVENANCE (largest table; every index paid per ingested cell)
 ```
@@ -163,8 +162,11 @@ READ: converse/respond route prompts → resolve via Merkle word_id → arena re
 eff_mu indexes / compiled cascade (SPI) → realize to language. Structural reads: physicalities
 coord/hilbert/curves via geom kernels.
 
-EXPORT (instrument-tier): declared architecture shape → render tensor-role consensus arenas (qk kernels, decompose) →
-gguf_writer → llama.cpp-runnable artifact; behavioral harness diffs against oracle.
+EXPORT (instrument-tier, the foundry): mold (recipe file or discovered via model_recipes) →
+consensus + trajectory plane reads → LE basis (GSO + Procrustes anchor) → operator grams →
+SVD factors at mold ranks → gguf_writer → llama.cpp-runnable artifact; acceptance =
+conventional function (forward-gguf oracle + behavioral harness), never numeric agreement
+with any ingested witness.
 
 ## Determinism architecture
 

@@ -1048,20 +1048,74 @@ internal static class Program
 
         if (sub == "substrate")
         {
-            string recipePath = args.Length > 1 ? args[1] : "";
+            string? recipeFrom = null, tokenizerDir = null;
+            var positional = new List<string>();
+            for (int i = 1; i < args.Length; i++)
+            {
+                switch (args[i])
+                {
+                    case "--recipe-from" when i + 1 < args.Length: recipeFrom = args[++i]; break;
+                    case "--tokenizer"   when i + 1 < args.Length: tokenizerDir = args[++i]; break;
+                    default: positional.Add(args[i]); break;
+                }
+            }
             string? outEnv = Environment.GetEnvironmentVariable("LAPLACE_GGUF_OUT");
-            string outputPath = args.Length > 2 ? args[2]
-                : !string.IsNullOrEmpty(outEnv) ? outEnv
-                : "";
+            string recipePath = recipeFrom is null ? (positional.Count > 0 ? positional[0] : "") : "";
+            string outputPath = (recipeFrom is null ? positional.ElementAtOrDefault(1) : positional.ElementAtOrDefault(0))
+                ?? (!string.IsNullOrEmpty(outEnv) ? outEnv : "");
             if (string.IsNullOrEmpty(outputPath))
                 return Fail("usage: laplace synthesize substrate <recipe.json> <output.gguf>\n"
+                          + "   or: laplace synthesize substrate --recipe-from <recipe-id-prefix> --tokenizer <dir> <output.gguf>\n"
                           + "  (or set LAPLACE_GGUF_OUT; no temp-dir default)");
+
+            if (recipeFrom is not null)
+            {
+                if (string.IsNullOrEmpty(tokenizerDir) || !File.Exists(Path.Combine(tokenizerDir, "tokenizer.json")))
+                    return Fail("--recipe-from needs --tokenizer <dir> containing tokenizer.json "
+                              + "(tokenizer regeneration from the substrate is a future item)");
+                var molded = await MaterializeDiscoveredMoldAsync(recipeFrom, tokenizerDir);
+                if (molded is null) return 2;
+                recipePath = molded;
+            }
             return await SynthesizeFromSubstrateAsync(recipePath, outputPath);
         }
 
         return Fail(
             "usage: laplace synthesize <subcommand> [args]\n"
-            + "  substrate <recipe.json> [output.gguf]   substrate-mediated synthesis\n");
+            + "  substrate <recipe.json> [output.gguf]                        pour consensus into a recipe-file mold\n"
+            + "  substrate --recipe-from <id-prefix> --tokenizer <dir> [out]  pour a mold discovered from a deposed model ('*' = the only one)\n");
+    }
+
+    // Reads a discovered recipe out of the substrate (laplace.model_recipes) and lays
+    // it down as a mold directory: config.json straight from the DB, tokenizer files
+    // copied from the caller's dir. Returns the config.json path, or null after Fail.
+    private static async Task<string?> MaterializeDiscoveredMoldAsync(string recipeIdPrefix, string tokenizerDir)
+    {
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT recipe_id, recipe_json FROM laplace.model_recipes()";
+        var hits = new List<(string Hex, string Json)>();
+        await using (var rdr = await cmd.ExecuteReaderAsync())
+            while (await rdr.ReadAsync())
+            {
+                string hex = Convert.ToHexString((byte[])rdr[0]).ToLowerInvariant();
+                if (recipeIdPrefix == "*" || hex.StartsWith(recipeIdPrefix.ToLowerInvariant(), StringComparison.Ordinal))
+                    hits.Add((hex, rdr.GetString(1)));
+            }
+        if (hits.Count == 0) { Fail($"no deposed recipe matches '{recipeIdPrefix}' — list them: SELECT * FROM laplace.model_recipes()"); return null; }
+        if (hits.Count > 1) { Fail($"recipe prefix '{recipeIdPrefix}' is ambiguous ({hits.Count} matches) — extend the prefix"); return null; }
+
+        string moldDir = Path.Combine(Path.GetTempPath(), $"laplace-foundry-mold-{hits[0].Hex[..12]}");
+        Directory.CreateDirectory(moldDir);
+        await File.WriteAllTextAsync(Path.Combine(moldDir, "config.json"), hits[0].Json);
+        foreach (var f in new[] { "tokenizer.json", "tokenizer.model", "tokenizer_config.json", "generation_config.json" })
+        {
+            string src = Path.Combine(tokenizerDir, f);
+            if (File.Exists(src)) File.Copy(src, Path.Combine(moldDir, f), overwrite: true);
+        }
+        Console.WriteLine($"  discovered mold {hits[0].Hex} → {moldDir}");
+        return Path.Combine(moldDir, "config.json");
     }
 
     private static async Task<int> SynthesizeFromSubstrateAsync(string recipePath, string outputPath)

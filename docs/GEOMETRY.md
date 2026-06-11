@@ -8,7 +8,7 @@ Space is 4D. Surface entities live on the unit 3-sphere S³; composed interiors 
 
 - **T0 lattice (the law):** all 1,114,112 codepoints are placed by super-Fibonacci spirals — deterministic, uniform, byte-identical across every consumer (the engine's 1-ULP determinism war exists because emitter and runtime must agree exactly). T0 never moves. It is the coordinate system's skeleton.
 - **Composition placement:** higher-tier entities derive position from constituents. Empirical law discovered 2026-06-07: **position encodes the constituent multiset** — perfect anagrams collide at geodesic 0 (whale ≡ wheal ≡ waleh ≡ elhwa ≡ welah). Order is deliberately NOT in the point.
-- **Witness placement (fireflies):** deposed models' embeddings are projected into the frame by LE+GSO+PA (below), one specimen per (entity × witness-circuit × tensor-role), stored as physicalities rows per the consolidation ruling.
+- **Witness placement (fireflies):** deposed models' embeddings are projected into the frame by LE+GSO+PA (below), one specimen per (entity × witness) — the S3 morph's PROJECTION rows in physicalities. (Circuit/per-tensor-role granularity was purged with the cell archive, 2026-06-11.)
 
 ## Two-channel identity (the discovered law)
 
@@ -43,20 +43,23 @@ Realized curves are always built on demand from LIVE coordinates, so curve math 
 - `hilbert_index` — Skilling 4D curve, pure integer: locality range-scans on a vanilla btree; equality = multiset identity.
 - Full stock PostGIS applies (the refuse-custom-types dividend): GIST, ST_DumpPoints, spatial joins, and GIS tooling (QGIS renders the jar with zero custom viewers).
 
-## LE+GSO+PA: depositing a witness's geometry
+## LE+GSO+PA: the same instruments, both directions
 
-Pipeline (dynamics lib): **L**aplacian **E**igenmaps (dense points or sparse relation graph) reduce the witness's native space → **G**ram-**S**chmidt **o**rthonormalization → **P**rocrustes **A**lignment onto the substrate frame, residual recorded per placement (`alignment_residual`), native dimensionality kept (`source_dim`).
+Pipeline (dynamics lib): **L**aplacian **E**igenmaps (dense points or sparse relation graph) → **G**ram-**S**chmidt **o**rthonormalization → **P**rocrustes **A**lignment, residual recorded.
+
+**Deposition direction (the S3 morph):** reduce a witness's native embedding space and align it onto the substrate frame — one specimen placement per witness (`alignment_residual`, `source_dim` kept).
+
+**Export direction (the foundry — the inversion):** LE runs over the CONSENSUS token→token graph (planes + content-trajectory pairs) to GENERATE a brand-new basis at the mold's dimension; GSO orthonormalizes it; Procrustes anchors it to token content coordinates. The generated spaces owe nothing to any witness's geometry — see SYNTHESIS.md.
 
 The alignment is well-posed **because of the core invention**: content addressing supplies exact point correspondences (the model's "king" IS the substrate's king — the correspondence problem that cripples manifold alignment elsewhere is solved by construction), and the T0 lattice plus already-placed entities supply the fixed target frame. Cross-model geometry is commensurable because identity is content.
 
 ## Fireflies (the instrument)
 
-One specimen per witness per entity (per layer/head/expert via circuit-entity sources): SPECIES of the same identity — Llama's king-light and Qwen's king-light in one jar. The species, never a blend, are the product. Ruling: consensus-folding positions is optional derived-view territory; collapsing species destroys the comparative signal that IS the instrument.
+One specimen per witness per entity: SPECIES of the same identity — Llama's king-light and Qwen's king-light in one jar. The species, never a blend, are the product. Ruling: consensus-folding positions is optional derived-view territory; collapsing species destroys the comparative signal that IS the instrument.
 
 Audit capabilities (each a query, not a research program):
 - per-entity cross-model belief distance (geodesics);
 - whole-cloud signatures → lineage/distillation forensics (Hausdorff between clouds);
-- per-layer flight paths of a concept through network depth;
 - checkpoint-drift diffs (what fine-tuning moved, by name);
 - bias measurement in defensible geodesics;
 - **Voronoi territories**: tessellate placements → membership-by-geometry, boundary proximity = ambiguity/confusability, empty cells = visible lexical gaps, cross-model carve-up comparison, and geometric cross-validation of relational taxonomy (engine disagreement = audit flag);
