@@ -31,6 +31,7 @@ public sealed class WeightTensorETL
     }
 
     public async IAsyncEnumerable<SubstrateChange> EmitS3MorphAsync(
+        int commitEpoch = 0,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
         var refMap = new Dictionary<string, SafetensorsContainerParser.TensorReference>(
@@ -39,7 +40,7 @@ public sealed class WeightTensorETL
         int vocabSize = _recipe.VocabSize, dModel = _recipe.HiddenSize;
         float[] embed = LoadTensorF32(refMap, "model.embed_tokens.weight",
             (long)vocabSize * dModel);
-        var morph = new TokenS3Morph(embed, vocabSize, dModel, _tokens, _sourceId, _tokenizerEntityId, _log);
+        var morph = new TokenS3Morph(embed, vocabSize, dModel, _tokens, _sourceId, _tokenizerEntityId, _log, commitEpoch);
         foreach (var change in morph.Emit())
         {
             ct.ThrowIfCancellationRequested();

@@ -58,16 +58,10 @@ jobs:
             [ "${n:-0}" -ge "$2" ] || { echo "::error::consensus type $1 has ${n:-0} relations (need >= $2)"; exit 1; }
             echo "  ✓ $1 = $n consensus relations"
           }
-          gate EMBEDS           1000
-          gate Q_PROJECTS       1000
-          gate K_PROJECTS       1000
-          gate V_PROJECTS       1000
-          gate O_PROJECTS       1000
-          gate GATES            1000
-          gate UP_PROJECTS      1000
-          gate DOWN_PROJECTS    1000
-          gate NORM_SCALES      1000
-          gate OUTPUT_PROJECTS  1000
+          gate SIMILAR_TO       1000
+          gate ATTENDS          1000
+          gate OV_RELATES       1000
+          gate COMPLETES_TO     1000
 
   consensus:
     name: "consensus — verify the per-period fold ran at ingest (no batch rebuild exists)"
@@ -116,7 +110,7 @@ jobs:
           rm -f "$GGUF_OUT"
           out="$($CLI synthesize substrate "${MODEL_DIR_INPUT:-$LAPLACE_TINYLLAMA_DIR}/config.json" "$GGUF_OUT" 2>&1)"; echo "$out"
           echo "$out" | grep -qiE 'synthesis complete' || { echo "::error::synthesize did not complete"; exit 1; }
-          echo "$out" | grep -qi 'consensus arenas poured' || { echo "::error::arena pour did not run"; exit 1; }
+          echo "$out" | grep -qi 'basis generated' || { echo "::error::foundry basis generation did not run"; exit 1; }
 
   gguf-verify:
     name: "verify — GGUF valid + non-trivial"

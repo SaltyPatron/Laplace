@@ -95,7 +95,6 @@ internal static class Program
             {
                 "ingest"       => await IngestAsync(args[1..]),
                 "synthesize"   => await SynthesizeAsync(args[1..]),
-                "audit-export" => await ExportAudit.RunAsync(args.Length > 1 ? args[1] : "", ConnString, ResolveBlob()),
                 "decompose"    => Decompose(string.Join(' ', args[1..])),
                 "inspect"      => await InspectAsync(string.Join(' ', args[1..])),
                 "converse"     => await ConverseAsync(string.Join(' ', args[1..])),
@@ -863,15 +862,11 @@ internal static class Program
         var inner = new NpgsqlSubstrateWriter(ds,
             logger: loggerFactory.CreateLogger<NpgsqlSubstrateWriter>(),
             bulkFreshSource: true);
-        // The FRESH consensus fold (plain insert, ON CONFLICT DO NOTHING) is lawful only
-        // when every staged relation id appears exactly once — true for the per-(role,layer)
-        // cell lane, FALSE for the behavioral token planes: the same (token, ATTENDS, token)
-        // pair legitimately recurs across layers and accumulation windows and must MERGE,
-        // or cross-layer agreement (the strongest testimony) is silently dropped.
-        string planesMode = Environment.GetEnvironmentVariable("LAPLACE_MODEL_PLANES") ?? "all";
-        bool cellsOnly = planesMode.Equals("cells", StringComparison.OrdinalIgnoreCase);
+        // The behavioral token planes MERGE: the same (token, ATTENDS, token) pair
+        // legitimately recurs across layers and accumulation windows, and cross-layer
+        // agreement is the strongest testimony — a FRESH fold would silently drop it.
         var accumulator = new ConsensusAccumulatingWriter(inner, ds,
-            freshSource: cellsOnly,
+            freshSource: false,
             persistEvidence: ResolvePersistEvidence(cli),
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
         ISubstrateWriter writer = accumulator;
@@ -1076,7 +1071,7 @@ internal static class Program
                 "usage: laplace synthesize substrate <recipe.json> [output.gguf]\n"
                 + $"  (recipe not found: {recipePath})");
 
-        Console.WriteLine($"synthesize substrate (Stream B-minimum) → {outputPath}");
+        Console.WriteLine($"synthesize substrate (foundry) → {outputPath}");
         CodepointPerfcache.Load(ResolveBlob());
 
         string modelDir = Path.GetDirectoryName(recipePath) ?? ".";
@@ -1097,26 +1092,13 @@ internal static class Program
                 tokenSlots[t.EntityId] = slots = new List<int>(1);
             slots.Add(t.TokenId);
         }
-        var (moldSource, moldSourceName) = ModelDecomposer.SourceForModel(modelDir);
-        Console.WriteLine($"  mold source: {moldSourceName} ({moldSource})");
+        var (_, moldName) = ModelDecomposer.SourceForModel(modelDir);
+        Console.WriteLine($"  mold: {moldName}");
         int nHeadsR = recipe.NumHeads, nKvR = recipe.NumKvHeads;
         int headDimR = dModel / Math.Max(1, nHeadsR);
         int attnOutR = nHeadsR * headDimR, kvDimR = nKvR * headDimR;
         int intermR  = recipe.IntermediateSize;
-        Dictionary<Hash128, int[]> AxisMap(string space, int dim)
-        {
-            var m = new Dictionary<Hash128, int[]>(dim);
-            for (int i = 0; i < dim; i++)
-                m[SourceEntityIdConventions.ModelAxisEntity(moldSource, space, i)] = [i];
-            return m;
-        }
-        var chanMap   = AxisMap("channel",  dModel);
-        var attnMap   = AxisMap("attn_dim", attnOutR);
-        var kvMap     = AxisMap("kv_dim",   kvDimR);
-        var neuronMap = AxisMap("neuron",   intermR);
-        Func<Hash128, IReadOnlyList<int>?> Tok   = e => tokenSlots.TryGetValue(e, out var s) ? s : null;
-        Func<Hash128, IReadOnlyList<int>?> Of(Dictionary<Hash128, int[]> m) =>
-            e => m.TryGetValue(e, out var s) ? s : null;
+        int nLayers  = recipe.NumLayers;
 
         byte[] configJson = File.ReadAllBytes(recipePath);
         IntPtr recipeHandle, tmplHandle;
@@ -1136,87 +1118,87 @@ internal static class Program
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
 
-        Dictionary<string, SafetensorsContainerParser.TensorReference>? refMap = null;
-        try
+        // ── read the consensus planes (one set-based query each; entity→ordinal is
+        // perf-cache territory, the DB is never asked per token). The pour draws from
+        // BOTH witness classes over the same token entities: the model behavioral
+        // planes AND the corpus sequence consensus — "the capital of" → "France" is
+        // PRECEDES testimony, and it is exactly what the completion operator encodes.
+        int degreeCap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_LE_DEGREE", 48);
+        int cooWindow = FoundryExport.EnvInt("LAPLACE_FOUNDRY_TRAJ_WINDOW", 4);
+        var swPour = Stopwatch.StartNew();
+        var simT = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("SIMILAR_TO"),     tokenSlots, degreeCap);
+        var attT = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("ATTENDS"),        tokenSlots, degreeCap);
+        var ovT  = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("OV_RELATES"),     tokenSlots, degreeCap);
+        var cmpT = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("COMPLETES_TO"),   tokenSlots, degreeCap);
+        var preT = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("PRECEDES"),       tokenSlots, degreeCap);
+        var cooT = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("CO_OCCURS_WITH"), tokenSlots, degreeCap);
+        // The usage observations themselves: conditional continuation (window 1) and
+        // forward co-occurrence (window N) read from the content trajectories.
+        var tnxT = FoundryExport.ReadTrajectoryPlaneAsync(ds, 1,         tokenSlots, degreeCap);
+        var twnT = FoundryExport.ReadTrajectoryPlaneAsync(ds, cooWindow, tokenSlots, degreeCap);
+        await Task.WhenAll(simT, attT, ovT, cmpT, preT, cooT, tnxT, twnT);
+        var sim = FoundryExport.Normalize(simT.Result);
+        var att = FoundryExport.Normalize(attT.Result);
+        var ov  = FoundryExport.Normalize(ovT.Result);
+        var cmp = FoundryExport.Normalize(cmpT.Result);
+        var pre = FoundryExport.Normalize(preT.Result);
+        var coo = FoundryExport.Normalize(cooT.Result);
+        var tnx = tnxT.Result;
+        var twn = twnT.Result;
+        long planeEdges = (long)sim.Nnz + att.Nnz + ov.Nnz + cmp.Nnz + pre.Nnz + coo.Nnz + tnx.Nnz + twn.Nnz;
+        Console.WriteLine($"  consensus + trajectory planes read in {swPour.Elapsed.TotalSeconds:F1}s: "
+            + $"SIMILAR_TO={sim.Nnz:N0} ATTENDS={att.Nnz:N0} OV_RELATES={ov.Nnz:N0} COMPLETES_TO={cmp.Nnz:N0} "
+            + $"PRECEDES={pre.Nnz:N0} CO_OCCURS_WITH={coo.Nnz:N0} "
+            + $"TRAJ_NEXT={tnx.Nnz:N0} TRAJ_WINDOW={twn.Nnz:N0} (degree cap {degreeCap})");
+        if (planeEdges == 0)
+            return Fail("no token→token consensus in the substrate — deposit a model or corpus first");
+
+        // ── generate the basis: LE over the union graph, GSO, Procrustes-anchored
+        // to token content coordinates, deterministic capacity fill, bias channel ──
+        var anchors = new double[vocab][];
+        foreach (var t in tokens)
         {
-            var refs = SafetensorsContainerParser.ParseModel(modelDir);
-            if (refs.Count > 0)
-            {
-                refMap = new Dictionary<string, SafetensorsContainerParser.TensorReference>(
-                    refs.Count, StringComparer.Ordinal);
-                foreach (var r in refs) refMap[r.Name] = r;
-            }
+            if (t.TokenId < 0 || t.TokenId >= vocab || !t.HasContentCoord) continue;
+            anchors[t.TokenId] = [t.ContentX, t.ContentY, t.ContentZ, t.ContentM];
         }
-        catch { }
-        if (refMap is null)
-            Console.WriteLine("  (no reference tensors alongside the recipe — per-role scale M = 1.0)");
+        var basisSeed = Hash128.Blake3(recipe.CanonicalJson);
+        var swBasis = Stopwatch.StartNew();
+        var E = FoundryExport.BuildBasis(vocab, dModel,
+            FoundryExport.Union(sim, att, ov, cmp, pre, coo, tnx, twn), anchors, basisSeed, out var basisStats);
+        Console.WriteLine($"  basis generated in {swBasis.Elapsed.TotalSeconds:F1}s: "
+            + $"spectral K={basisStats.SpectralRank}, {basisStats.ZeroSpectralTokens:N0} tokens off-graph (capacity-only rows), "
+            + $"procrustes residual={basisStats.ProcrustesResidual:F4}");
 
-        var prof = ArchitectureProfile.For(recipe.ModelType);
+        // ── project the operators through the basis and factor them at mold ranks ─
+        double relTol = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_REL_ERR_TOL", 0.0);
+        int kAttn = Math.Min(kvDimR, dModel);
+        int kFfn  = Math.Min(intermR, dModel);
+        // Attention affinity = model ATTENDS ∪ co-occurrence consensus ∪ windowed
+        // trajectory co-occurrence; completion = model COMPLETES_TO ∪ PRECEDES
+        // consensus ∪ the trajectory continuation distribution itself ("followed by
+        // N% of the time", read from the usage observations). Models, corpora, and
+        // the witnessed sequences all pour into the same mold.
+        var swOps = Stopwatch.StartNew();
+        var mA = FoundryExport.ProjectOperator(E, vocab, dModel, FoundryExport.Union(att, coo, twn));
+        var mB = FoundryExport.ProjectOperator(E, vocab, dModel, ov);
+        var mC = FoundryExport.ProjectOperator(E, vocab, dModel, FoundryExport.Union(cmp, pre, tnx));
+        // ATTENDS composes Wqᵀ·Wk; OV and FFN compose outer·inner (Wo·Wv, Wdown·Wup) → factor Mᵀ.
+        var fAttn = FoundryExport.Factor(mA, dModel, kAttn, relTol, transpose: false);
+        var fOv   = FoundryExport.Factor(mB, dModel, kAttn, relTol, transpose: true);
+        var fFfn  = FoundryExport.Factor(mC, dModel, kFfn,  relTol, transpose: true);
+        Console.WriteLine($"  operators projected + factored in {swOps.Elapsed.TotalSeconds:F1}s: "
+            + $"ATTENDS rank {fAttn.Rank} (resid {fAttn.SampleResidual:F3}), OV rank {fOv.Rank} (resid {fOv.SampleResidual:F3}), "
+            + $"FFN rank {fFfn.Rank} (resid {fFfn.SampleResidual:F3})");
 
-        string arenaSelRaw = (Environment.GetEnvironmentVariable("LAPLACE_SYNTH_ARENAS") ?? "ALL").Trim();
-        HashSet<string>? arenaSel = arenaSelRaw.Equals("ALL", StringComparison.OrdinalIgnoreCase)
-            ? null
-            : new HashSet<string>(arenaSelRaw.ToUpperInvariant()
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-        static string AblationKey(string role) =>
-            role.StartsWith("NORM_SCALES", StringComparison.Ordinal) ? "NORMS" : role.Split('_', '.', '/')[0];
-        bool RenderArena(ArenaSlot s) => arenaSel is null || arenaSel.Contains(AblationKey(s.Role));
-        if (arenaSel is not null)
-        {
-            if (refMap is null)
-                return Fail("LAPLACE_SYNTH_ARENAS ablation needs the mold's original tensors alongside the recipe");
-            Console.WriteLine($"  ablation: render {{{string.Join(",", arenaSel)}}} from substrate; all other arenas copied from the mold");
-        }
-
-        Func<Hash128, IReadOnlyList<int>?> SpaceIndex(string space) => space switch
-        {
-            "TOKEN"    => Tok,
-            "channel"  => Of(chanMap),
-            "attn_dim" => Of(attnMap),
-            "kv_dim"   => Of(kvMap),
-            "neuron"   => Of(neuronMap),
-            _ => throw new InvalidOperationException($"no index map for space '{space}'"),
-        };
-        int SpaceDim(string space) => space switch
-        {
-            "TOKEN"    => vocab,
-            "channel"  => dModel,
-            "attn_dim" => attnOutR,
-            "kv_dim"   => kvDimR,
-            "neuron"   => intermR,
-            _ => throw new InvalidOperationException($"no dimension for space '{space}'"),
-        };
-
-        Console.WriteLine("  rendering per-layer consensus arenas into the recipe's tensor layouts...");
-        var swArena = Stopwatch.StartNew();
-        var arenaByTensor = new Dictionary<string, ConsensusReExport.TableArena>(StringComparer.Ordinal);
-        var normByTensor  = new Dictionary<string, float[]>(StringComparer.Ordinal);
-        long totalRelations = 0;
-        foreach (var slot in ModelArenaPlan.Slots(recipe, prof))
-        {
-            if (refMap is not null && !refMap.ContainsKey(slot.TensorName)) continue;
-            if (!RenderArena(slot)) continue;
-            double m = ConsensusReExport.MoldArenaScale(refMap, [slot.TensorName]);
-            if (slot.IsNorm)
-            {
-                normByTensor[slot.TensorName] = await ConsensusReExport.ReadNormVectorAsync(
-                    ds, slot.RelationTypeId, dModel, SpaceIndex(slot.InSpace), m);
-                continue;
-            }
-            int inDim = SpaceDim(slot.InSpace), outDim = SpaceDim(slot.OutSpace);
-            int tr = slot.RowsAreOut ? outDim : inDim;
-            int tc = slot.RowsAreOut ? inDim : outDim;
-            var arena = await ConsensusReExport.ReadTableArenaAsync(
-                ds, slot.RelationTypeId, tr, tc, slot.RowsAreOut,
-                SpaceIndex(slot.InSpace), SpaceIndex(slot.OutSpace), m);
-            arenaByTensor[slot.TensorName] = arena;
-            totalRelations += arena.Relations;
-        }
-        Console.WriteLine(
-            $"  consensus arenas rendered in {swArena.Elapsed.TotalSeconds:F1}s: "
-            + $"{arenaByTensor.Count} table slots + {normByTensor.Count} norm slots, {totalRelations:N0} relations");
-        if (totalRelations == 0)
-            return Fail("no model consensus in the substrate — ingest a model first");
+        // Uniform residual split: each of L layers carries the operator at 1/L (each
+        // factor scaled (1/L)^½), so the residual-stream sum reproduces it once.
+        double layerScale = 1.0 / Math.Sqrt(Math.Max(1, nLayers));
+        // The gate reads only the bias channel; after RMSNorm the bias component is
+        // ≈ √(d/2), so gateCol·√(d/2) = GateZ lands SiLU in its near-linear region,
+        // and the up factor is pre-divided by SiLU(GateZ) to neutralize the gain.
+        double gateZ = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_GATE_Z", 6.0);
+        double gateCol = gateZ / Math.Sqrt(dModel / 2.0);
+        double upGain = 1.0 / FoundryExport.Silu(gateZ);
 
         var gguf = SynthInterop.GgufWriterCreate(outputPath);
         if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
@@ -1238,20 +1220,47 @@ internal static class Program
             }
             long nElem = (long)rows * (long)Math.Max(1UL, cols);
             var vals = new float[nElem];
+            int tr = (int)rows, tc = (int)Math.Max(1UL, cols);
 
-            if (arenaByTensor.TryGetValue(name, out var arena))
-                FillMoldTensor(vals, name, arena, null);
-            else if (normByTensor.TryGetValue(name, out var normV))
-                FillMoldTensor(vals, name, null, normV);
-            else if (refMap is not null && refMap.ContainsKey(name))
+            // The mold is filled ENTIRELY from generated material. Any manifest name
+            // the foundry does not define is a hard error — never a zero-fill, never
+            // a copy from someone else's tensors.
+            if (name is "model.embed_tokens.weight" or "lm_head.weight")
             {
-                var orig = WeightTensorETL.LoadTensorF32(refMap, name, nElem);
-                Array.Copy(orig, vals, vals.Length);
+                for (int r = 0; r < tr; r++)
+                    for (int c = 0; c < tc; c++)
+                        vals[(long)r * tc + c] = (float)E[(long)r * dModel + c];
+            }
+            else if (name == "model.norm.weight"
+                     || name.EndsWith("input_layernorm.weight", StringComparison.Ordinal)
+                     || name.EndsWith("post_attention_layernorm.weight", StringComparison.Ordinal))
+            {
+                Array.Fill(vals, 1.0f);
+            }
+            else if (name.StartsWith("model.layers.", StringComparison.Ordinal))
+            {
+                string rest = name[(name.IndexOf('.', "model.layers.".Length) + 1)..];
+                switch (rest)
+                {
+                    case "self_attn.q_proj.weight": FoundryExport.FillRows(vals, tr, tc, fAttn, layerScale); break;
+                    case "self_attn.k_proj.weight": FoundryExport.FillRowsRight(vals, tr, tc, fAttn, layerScale); break;
+                    case "self_attn.v_proj.weight": FoundryExport.FillRowsRight(vals, tr, tc, fOv, layerScale); break;
+                    case "self_attn.o_proj.weight": FoundryExport.FillCols(vals, tr, tc, fOv, layerScale); break;
+                    case "mlp.gate_proj.weight":    FoundryExport.FillGate(vals, tr, tc, gateCol); break;
+                    case "mlp.up_proj.weight":      FoundryExport.FillRowsRight(vals, tr, tc, fFfn, layerScale * upGain); break;
+                    case "mlp.down_proj.weight":    FoundryExport.FillCols(vals, tr, tc, fFfn, layerScale); break;
+                    default:
+                        return Fail($"foundry does not define mold tensor '{name}' — the mold and the foundry disagree");
+                }
+            }
+            else
+            {
+                return Fail($"foundry does not define mold tensor '{name}' — the mold and the foundry disagree");
             }
 
             byte[] tensorBytes = dtype == 0
-                ? ConsensusReExport.ToF32Bytes(vals)
-                : ConsensusReExport.ToBf16Bytes(vals);
+                ? FoundryExport.ToF32Bytes(vals)
+                : FoundryExport.ToBf16Bytes(vals);
 
             nuint[] ggufDims = cols > 1 ? [(nuint)cols, (nuint)rows] : [(nuint)rows];
             unsafe
@@ -1276,31 +1285,6 @@ internal static class Program
         Console.WriteLine($"synthesis complete: {outputPath} ({fileSize / 1048576.0:F0} MB) in {sw.Elapsed.TotalSeconds:F1}s");
         return 0;
     }
-
-    private static void FillMoldTensor(
-        float[] vals, string name,
-        ConsensusReExport.TableArena? arena, float[]? normV)
-    {
-        if (arena is not null)
-        {
-            if (arena.Cells.LongLength != vals.LongLength)
-                throw new InvalidOperationException(
-                    $"mold slot {name} has {vals.LongLength:N0} cells but the arena's schema shape is "
-                    + $"[{arena.Rows}×{arena.Cols}] = {arena.Cells.LongLength:N0} — shape/rank retargeting "
-                    + "(export-only SVD) is not built; the mold must match the substrate's schema shape");
-            Array.Copy(arena.Cells, vals, vals.Length);
-            return;
-        }
-        if (normV is not null)
-        {
-            if (normV.Length != vals.Length)
-                throw new InvalidOperationException(
-                    $"mold norm slot {name} has {vals.Length:N0} channels but its norm slot carries {normV.Length:N0}");
-            Array.Copy(normV, vals, vals.Length);
-            return;
-        }
-    }
-
 
     private static string HfToGgmlName(string hf)
     {
@@ -1357,12 +1341,26 @@ internal static class Program
         SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.attention.head_count",     (uint)recipe.NumHeads);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.attention.head_count_kv",  (uint)recipe.NumKvHeads);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.vocab_size",               (uint)recipe.VocabSize);
-        SynthInterop.GgufWriterAddMetadataF32(gguf, "llama.attention.layer_norm_rms_epsilon", 1e-5f);
+        SynthInterop.GgufWriterAddMetadataF32(gguf, "llama.attention.layer_norm_rms_epsilon", (float)recipe.RmsNormEps);
         SynthInterop.GgufWriterAddMetadataF32(gguf, "llama.rope.freq_base",           (float)recipe.RopeTheta);
 
+        // bos/eos from the mold's generation_config.json when present; llama defaults otherwise.
+        uint bosId = 1, eosId = 2;
+        string genCfgPath = Path.Combine(modelDir, "generation_config.json");
+        if (File.Exists(genCfgPath))
+        {
+            using var gen = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(genCfgPath));
+            if (gen.RootElement.TryGetProperty("bos_token_id", out var bos)
+                && bos.ValueKind == System.Text.Json.JsonValueKind.Number)
+                bosId = bos.GetUInt32();
+            if (gen.RootElement.TryGetProperty("eos_token_id", out var eos)
+                && eos.ValueKind == System.Text.Json.JsonValueKind.Number)
+                eosId = eos.GetUInt32();
+        }
+
         SynthInterop.GgufWriterAddMetadataStr(gguf, "tokenizer.ggml.model", "llama");
-        SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.bos_token_id",     1);
-        SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.eos_token_id",     2);
+        SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.bos_token_id",     bosId);
+        SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.eos_token_id",     eosId);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.unknown_token_id", 0);
         SynthInterop.GgufWriterAddMetadataBool(gguf, "tokenizer.ggml.add_bos_token",    1);
         SynthInterop.GgufWriterAddMetadataBool(gguf, "tokenizer.ggml.add_eos_token",    0);

@@ -10,9 +10,6 @@ public static class SourceEntityIdConventions
     public static Hash128 WordNetSynset(long byteOffset, char pos) =>
         Hash128.OfCanonical($"wordnet/synset/{pos}/{byteOffset}");
 
-    public static Hash128 ModelAxisEntity(Hash128 modelSource, string space, int index) =>
-        Hash128.OfCanonical($"model/{modelSource.Hi:x16}{modelSource.Lo:x16}/{space}/{index}");
-
     public static Hash128 TatoebaSentence(long sentenceId) =>
         Hash128.OfCanonical($"tatoeba/sentence/{sentenceId}");
 
