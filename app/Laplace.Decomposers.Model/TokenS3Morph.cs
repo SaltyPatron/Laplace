@@ -18,15 +18,17 @@ public sealed class TokenS3Morph
     private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
     private readonly Hash128 _sourceId;
     private readonly Hash128 _tokenizerEntityId;
+    private readonly int _commitEpoch;
     private readonly ILogger _log;
 
     public TokenS3Morph(
         float[] embed, int vocab, int dModel,
         IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
-        Hash128 sourceId, Hash128 tokenizerEntityId, ILogger log)
+        Hash128 sourceId, Hash128 tokenizerEntityId, ILogger log, int commitEpoch = 0)
     {
         _embed = embed; _vocab = vocab; _dModel = dModel;
         _tokens = tokens; _sourceId = sourceId; _tokenizerEntityId = tokenizerEntityId;
+        _commitEpoch = commitEpoch;
         _log = log;
     }
 
@@ -153,7 +155,8 @@ public sealed class TokenS3Morph
             double arenaM = nResid > 0 ? Math.Sqrt(sumSq / nResid) : 0.0;
 
             var bb = new SubstrateChangeBuilder(_sourceId, "model/embed-s3-morph",
-                entityCapacity: 0, physicalityCapacity: n, attestationCapacity: n);
+                entityCapacity: 0, physicalityCapacity: n, attestationCapacity: n)
+                .SetCommitEpoch(_commitEpoch);
             int emitted = 0, emittedAnchored = 0;
             for (int i = 0; i < n; i++)
             {

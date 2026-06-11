@@ -12,7 +12,9 @@ namespace Laplace.Decomposers.Model;
 // modular FFN benchmark: point it at any model on the farm and read the numbers.
 public static class ModelFfnBench
 {
-    private static readonly Hash128 NeuronType = EntityTypeRegistry.Neuron;
+    // The Neuron entity type was purged with the cell archive; the raw hash stays so
+    // the bench can keep asserting that no neuron entity ever materializes again.
+    private static readonly Hash128 NeuronType = EntityTypeRegistry.Id("Neuron");
 
     private static readonly (string Name, Hash128 Id)[] RelTypes =
     {
@@ -48,7 +50,7 @@ public static class ModelFfnBench
         Console.WriteLine();
 
         var etl = new ModelTableETL(modelDir, recipe, tokens, source,
-            ModelDecomposer.ModelAxisTypeId, epochBase: 0, log);
+            ModelDecomposer.ModelLayerTypeId, epochBase: 0, log);
 
         long entities = 0, neuronEntities = 0, attestations = 0;
         var byType = new Dictionary<Hash128, long>();

@@ -43,7 +43,7 @@ public class ModelTableETLTests
             };
 
             var etl = new ModelTableETL(dir, Recipe(), tokens, Source,
-                ModelDecomposer.ModelAxisTypeId);
+                ModelDecomposer.ModelLayerTypeId);
             var changes = new List<SubstrateChange>();
             await foreach (var c in etl.EmitAsync()) changes.Add(c);
 

@@ -61,16 +61,10 @@ check_type_evidence() {
   [ "${count:-0}" -ge "$min" ] || die "type $rel_type has $count evidence rows (need >= $min) — ingest broken"
   log "  $rel_type: $count evidence rows OK"
 }
-check_type_evidence EMBEDS          1000
-check_type_evidence Q_PROJECTS      1000
-check_type_evidence K_PROJECTS      1000
-check_type_evidence V_PROJECTS      1000
-check_type_evidence O_PROJECTS      1000
-check_type_evidence GATES           1000
-check_type_evidence UP_PROJECTS     1000
-check_type_evidence DOWN_PROJECTS   1000
-check_type_evidence NORMALIZES      1000
-check_type_evidence OUTPUT_PROJECTS 1000
+check_type_evidence SIMILAR_TO      1000
+check_type_evidence ATTENDS         1000
+check_type_evidence OV_RELATES      1000
+check_type_evidence COMPLETES_TO    1000
 
 cn=$(psql -d laplace -U laplace_admin -tAc "SELECT count(*) FROM laplace.consensus")
 [ "${cn:-0}" -gt 0 ] || die "consensus empty after ingest (accumulate-at-ingest produced no rows)"

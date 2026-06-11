@@ -46,16 +46,6 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
     public static readonly Hash128 ArchitectureTypeId   = EntityTypeRegistry.Architecture;
     public static readonly Hash128 ScalarTypeId         = EntityTypeRegistry.Scalar;
     public static readonly Hash128 NgramTypeId          = EntityTypeRegistry.Ngram;
-    public static readonly Hash128 EmbedsTypeId        = RelationTypeRegistry.RelationTypeId("EMBEDS");
-    public static readonly Hash128 QProjectsTypeId     = RelationTypeRegistry.RelationTypeId("Q_PROJECTS");
-    public static readonly Hash128 KProjectsTypeId     = RelationTypeRegistry.RelationTypeId("K_PROJECTS");
-    public static readonly Hash128 VProjectsTypeId     = RelationTypeRegistry.RelationTypeId("V_PROJECTS");
-    public static readonly Hash128 OProjectsTypeId     = RelationTypeRegistry.RelationTypeId("O_PROJECTS");
-    public static readonly Hash128 GatesTypeId         = RelationTypeRegistry.RelationTypeId("GATES");
-    public static readonly Hash128 UpProjectsTypeId    = RelationTypeRegistry.RelationTypeId("UP_PROJECTS");
-    public static readonly Hash128 DownProjectsTypeId  = RelationTypeRegistry.RelationTypeId("DOWN_PROJECTS");
-    public static readonly Hash128 NormScalesTypeId    = RelationTypeRegistry.RelationTypeId("NORM_SCALES");
-    public static readonly Hash128 OutputProjectsTypeId = RelationTypeRegistry.RelationTypeId("OUTPUT_PROJECTS");
     public static readonly Hash128 TokenMapsToTypeId   = RelationTypeRegistry.RelationTypeId("TOKEN_MAPS_TO");
     public static readonly Hash128 SimilarToTypeId     = RelationTypeRegistry.RelationTypeId("SIMILAR_TO");
     public static readonly Hash128 AttendsTypeId       = RelationTypeRegistry.RelationTypeId("ATTENDS");
@@ -73,7 +63,7 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
     public static readonly Hash128 LlamaArchitectureId =
         Hash128.OfCanonical("substrate/entity/Architecture_Llama/v1");
 
-    public static readonly Hash128 ModelAxisTypeId = EntityTypeRegistry.ModelAxis;
+    public static readonly Hash128 ModelLayerTypeId = EntityTypeRegistry.ModelLayer;
 
     private readonly string _modelDir;
     private readonly Hash128 _source;
@@ -95,34 +85,18 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
 
-        var recipe = LlamaRecipeExtractor.Parse(Path.Combine(_modelDir, "config.json"));
-        var prof = ArchitectureProfile.For(recipe.ModelType);
-
         boot.AddType("Model_Recipe");
         boot.AddType("Model_Tokenizer");
         boot.AddType("Scalar");
         boot.AddType("Architecture");
         boot.AddType("Ngram");
-        boot.AddType("Model_Axis");
+        boot.AddType("Model_Layer");
 
-        boot.AddRelationType("EMBEDS");
-        boot.AddRelationType("Q_PROJECTS");
-        boot.AddRelationType("K_PROJECTS");
-        boot.AddRelationType("V_PROJECTS");
-        boot.AddRelationType("O_PROJECTS");
-        boot.AddRelationType("GATES");
-        boot.AddRelationType("UP_PROJECTS");
-        boot.AddRelationType("DOWN_PROJECTS");
-        boot.AddRelationType("NORM_SCALES");
         boot.AddRelationType("MERGES_WITH");
-        boot.AddRelationType("OUTPUT_PROJECTS");
-        boot.AddType("Neuron");
         boot.AddRelationType("SIMILAR_TO");
         boot.AddRelationType("ATTENDS");
         boot.AddRelationType("OV_RELATES");
         boot.AddRelationType("COMPLETES_TO");
-        boot.AddRelationType("DETECTS");
-        boot.AddRelationType("WRITES");
         boot.AddRelationType("TOKEN_MAPS_TO");
         boot.AddRelationType("HAS_HIDDEN_SIZE");
         boot.AddRelationType("HAS_NUM_LAYERS");
@@ -131,20 +105,6 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         boot.AddRelationType("HAS_INTERMEDIATE_SIZE");
         boot.AddRelationType("HAS_VOCAB_SIZE");
         boot.AddRelationType("IS_A");
-
-        var seededTypes = new HashSet<Hash128>();
-        foreach (var slot in ModelArenaPlan.Slots(recipe, prof))
-        {
-            if (!seededTypes.Add(slot.RelationTypeId)) continue;
-            boot.AddEntity(new EntityRow(slot.RelationTypeId, EntityTier.Vocabulary,
-                BootstrapIntentBuilder.RelationTypeMetaTypeId, Source));
-            string baseRole = slot.Role.StartsWith("NORM_SCALES", StringComparison.Ordinal)
-                ? "NORM_SCALES" : slot.Role;
-            Hash128 baseId = ModelArenaPlan.BaseRelationTypeId(baseRole);
-            if (baseId != slot.RelationTypeId)
-                boot.AddAttestation(NativeAttestation.Categorical(
-                    slot.RelationTypeId, "IS_A", baseId, Source, SourceTrust.AiModelProbe));
-        }
 
         return context.Writer.ApplyAsync(boot.Build(), ct);
     }
@@ -206,44 +166,29 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         log.LogInformation("phase=merges emitted: {Count} merges, {Batches} batches ({Ms} ms)",
             merges.Count, mergeBatches, phaseSw.ElapsedMilliseconds);
 
-        // LAPLACE_MODEL_PLANES: cells | behavioral | all (default all).
-        // cells      = per-(role,layer) arena testimony (what audit-export/synthesize read)
-        // behavioral = token<->token planes (SIMILAR_TO/ATTENDS/OV_RELATES/COMPLETES_TO)
-        string planes = Environment.GetEnvironmentVariable("LAPLACE_MODEL_PLANES") ?? "all";
-        bool doCells = planes is "all" or "cells";
-        bool doBehavioral = planes is "all" or "behavioral";
-
-        if (doCells)
+        // The deposition: token→token behavioral planes (SIMILAR_TO/ATTENDS/OV_RELATES/
+        // COMPLETES_TO). Token entities commit at epoch 0, matchups at epoch 1.
+        log.LogInformation("phase=etl starting");
+        var etl = new ModelTableETL(_modelDir, recipe, tokens, Source, ModelLayerTypeId,
+            epochBase: 0, log);
+        await foreach (var change in etl.EmitAsync(ct))
         {
-            log.LogInformation("phase=cells starting");
-            var cells = new ModelCellETL(_modelDir, recipe, tokens, Source, ModelAxisTypeId, log);
-            await foreach (var change in cells.EmitAsync(ct))
-            {
-                ct.ThrowIfCancellationRequested();
-                yield return change;
-            }
+            ct.ThrowIfCancellationRequested();
+            yield return change;
         }
-        else
-            log.LogInformation("phase=cells skipped (LAPLACE_MODEL_PLANES={Planes})", planes);
+        const int finalEpoch = 1;
 
-        if (doBehavioral)
+        // S3 morph: per-witness Projection physicalities + anchored TOKEN_MAPS_TO.
+        // References token entities (epoch 0), so it stamps the matchup epoch.
+        var s3 = new WeightTensorETL(_modelDir, recipe, tokens, Source, tokEntityId, log);
+        await foreach (var change in s3.EmitS3MorphAsync(finalEpoch, ct))
         {
-            log.LogInformation("phase=etl starting");
-            var etl = new ModelTableETL(_modelDir, recipe, tokens, Source, ModelAxisTypeId,
-                epochBase: doCells ? 2 : 0, log);
-            await foreach (var change in etl.EmitAsync(ct))
-            {
-                ct.ThrowIfCancellationRequested();
-                yield return change;
-            }
+            ct.ThrowIfCancellationRequested();
+            yield return change;
         }
-        else
-            log.LogInformation("phase=etl skipped (LAPLACE_MODEL_PLANES={Planes})", planes);
 
         // Tokenizer→token provenance so a deposited model knows which tokens are its own.
         // Stamped with the highest epoch any ETL stream used (equal epochs are legal).
-        int finalEpoch = (doCells ? 2 : 0) + (doBehavioral ? 2 : 0);
-        if (finalEpoch > 0) finalEpoch -= 1;
         foreach (var batch in LlamaTokenizerParser.BuildTokenMapsToCategorical(
             tokens, Source, tokEntityId, batchSz, finalEpoch))
         {
@@ -278,15 +223,15 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         return Task.FromResult<long?>(n > 0 ? n : null);
     }
 
+    // Claim-shaped, not parameter-shaped: the deposit emits above-noise token→token
+    // matchups, so the estimate is vocab × expected above-noise partners per plane —
+    // per layer for the three per-layer planes, once for SIMILAR_TO. Feeds only
+    // ingest inventory/progress; never sizes storage.
     private long EstimateMatchupUnits()
     {
         string configPath = Path.Combine(_modelDir, "config.json");
         if (!File.Exists(configPath)) return 0;
         var r = LlamaRecipeExtractor.Parse(configPath);
-        var p = ArchitectureProfile.For(r.ModelType);
-        long d = r.HiddenSize, interm = r.IntermediateSize;
-        long headDim = d / r.NumHeads;
-        long attnOut = r.NumHeads * headDim, kvDim = (long)r.NumKvHeads * headDim;
 
         long distinctVocab = r.VocabSize;
         string tokenizerPath = Path.Combine(_modelDir, "tokenizer.json");
@@ -303,15 +248,10 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
             }
         }
 
-        long relations =
-              distinctVocab * d
-            + distinctVocab * d
-            + 2 * d * attnOut
-            + 2 * d * kvDim
-            + (p.HasGate ? d * interm : 0)
-            + 2 * d * interm
-            + d;
-        return distinctVocab + relations;
+        long partners = Math.Min(distinctVocab, 64);
+        long perLayerPlanes = 3L * distinctVocab * partners * r.NumLayers;
+        long similarTo = distinctVocab * partners;
+        return distinctVocab + perLayerPlanes + similarTo;
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

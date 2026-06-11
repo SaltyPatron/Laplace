@@ -17,6 +17,28 @@ CREATE OR REPLACE PROCEDURE rebuild_content_index_deep()
     AS 'MODULE_PATHNAME', 'pg_laplace_rebuild_content_index_deep'
     LANGUAGE C;
 
+-- Trajectory pair surface for the foundry: forward co-occurrence counts within a
+-- window over witnessed content sequences, with per-subject totals so callers form
+-- conditional frequencies — the "followed by N% of the time" distribution, read
+-- straight from the usage observations (physicalities.trajectory via content_index),
+-- not from any pairwise summary. p_window=1 is strict continuation; larger windows
+-- give the attention-style forward co-occurrence surface.
+CREATE OR REPLACE FUNCTION content_trajectory_pairs(p_window int DEFAULT 1)
+    RETURNS TABLE(subject_id bytea, object_id bytea, cnt bigint, subject_total bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    WITH pairs AS (
+        SELECT a.token AS s, b.token AS o, count(*) AS c
+        FROM content_index a
+        JOIN content_index b ON b.seq_id = a.seq_id
+                            AND b.pos > a.pos AND b.pos <= a.pos + p_window
+        GROUP BY a.token, b.token
+    ), totals AS (
+        SELECT s, sum(c) AS t FROM pairs GROUP BY s
+    )
+    SELECT p.s, p.o, p.c, t.t FROM pairs p JOIN totals t USING (s)
+$$;
+
 -- native kernel ----------------------------------------------------------------
 CREATE OR REPLACE FUNCTION generate_tokens(
         p_ctx bytea[], p_steps int DEFAULT 24, p_max_order int DEFAULT 5,
