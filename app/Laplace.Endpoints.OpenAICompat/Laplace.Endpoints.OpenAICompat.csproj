@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <PackageReference Include="Stripe.net" Version="50.0.0" />
+    <ProjectReference Include="..\Laplace.Decomposers.Abstractions\Laplace.Decomposers.Abstractions.csproj" />
     <ProjectReference Include="..\Laplace.Engine.Core\Laplace.Engine.Core.csproj" />
     <ProjectReference Include="..\Laplace.SubstrateCRUD\Laplace.SubstrateCRUD.csproj" />
   </ItemGroup>

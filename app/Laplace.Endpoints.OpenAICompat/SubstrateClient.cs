@@ -15,6 +15,8 @@ internal sealed class SubstrateClient : IAsyncDisposable
         _dataSource = new NpgsqlDataSourceBuilder(connString).Build();
     }
 
+    internal NpgsqlDataSource DataSource => _dataSource;
+
     /// <summary>
     /// Call the substrate's own conversational engine (<c>laplace.converse</c>), which routes the
     /// prompt via <c>route_prompt</c> and grounds every reply line in witnessed consensus

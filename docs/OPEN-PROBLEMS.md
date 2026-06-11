@@ -23,13 +23,16 @@ Audit date: 2026-06-07. Each item is file-grounded and states what the vision re
 - **Revocation witnesses.** Counter-testimony at matched weight; epistemically truthful ("retracted" is itself an event) but leaves dispersion widened rather than influence removed.
 - **Retained per-source period partials.** True algebraic reversal at meaningful storage cost; contradicts the current "no value channel" law and needs explicit reconciliation if chosen.
 
-## 4. Prompts are not yet witnesses (infinite context unrealized)
+## 4. Prompts are not yet witnesses — RESOLVED 2026-06-11 (endpoint path live)
 
 **Vision.** Every prompt is ingested testimony under `substrate/source/UserPrompt/v1` (trust class `UserPromptContent`): conversation history becomes substrate content, addressable at every tier, forever — context as biography, not buffer.
 
-**Today.** `converse_turns` is an UNLOGGED session table holding raw prompt text + resolved id. Turns are never decomposed by the TextDecomposer, never attested, never become entities.
+**Resolution.** `TurnWitness` (Laplace.Endpoints.OpenAICompat) deposits every served turn — the user's prompt and the reply — as Document-tier content under the UserPrompt source, off the request path (bounded channel + background apply). Wired into chat (converse + generation branches) and /v1/completions. converse_turns remains the fast session cursor; the substrate holds the durable record. Laws encoded:
+- **Replay is not testimony.** Stateless OpenAI clients resend the full history every call; only the final user turn is enqueued, and content the UserPrompt source already witnessed (physicalities probe on the root) is skipped, so replays never double-count games. Genuine cross-session repetition is currently also skipped — strengthening-by-repetition needs explicit per-session bookkeeping if ever wanted.
+- **Perfcache is process law.** TextDecomposer hosts must call `CodepointPerfcache.LoadDefault()` (Engine.Core; resolves LAPLACE_PERFCACHE_BIN, falls back to ancestor build trees). The builder otherwise swallows the failure into a silent no-op — that cost a debugging round.
+- Floor-gated: no Codepoint entities ⇒ turns are not witnessed (warned once).
 
-**Needs.** A turn-attestation path: decompose each prompt (and reply) as Document-tier content, emit via ContentEmitter under the UserPrompt source, layer-gated like any witness. converse_turns remains as the fast session cursor; the substrate holds the durable record.
+Proven live 2026-06-11: unique prompt deposited (prompt+reply roots in laplace.physicalities), identical replay skipped.
 
 ## 5. The text→tensor-arena bridge (keystone lemma)
 
