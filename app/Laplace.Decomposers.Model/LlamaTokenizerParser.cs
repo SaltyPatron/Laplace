@@ -355,8 +355,12 @@ public sealed class LlamaTokenizerParser
         IReadOnlyList<TokenRecord> records,
         Hash128 sourceId,
         Hash128 tokenizerEntityId,
-        int batchSize = 8192)
+        int batchSize = 8192,
+        int commitEpoch = 0)
     {
+        // commitEpoch: these batches are yielded AFTER the ETL streams, which advance the
+        // runner's monotonic epoch — stamping the default 0 here killed a 49-minute deposit
+        // at the finish line (epochs must be non-decreasing).
         int total = records.Count;
         for (int start = 0; start < total; start += batchSize)
         {
@@ -365,6 +369,7 @@ public sealed class LlamaTokenizerParser
                 sourceId, $"tokenizer/maps-to/{start}..{end - 1}",
                 entityCapacity: 0, physicalityCapacity: 0,
                 attestationCapacity: end - start);
+            b.SetCommitEpoch(commitEpoch);
             for (int i = start; i < end; i++)
             {
                 b.AddAttestation(Laplace.Decomposers.Abstractions.NativeAttestation.Categorical(

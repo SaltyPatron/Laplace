@@ -4,8 +4,6 @@ rem pg_regress on localhost (postgres/postgres); output under build-win-ext\regr
 rem Requires install-extensions.cmd first. Agent rules: .github\instructions\build-environment.instructions.md
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
-set "PGPASSWORD=postgres"
-set "PGBIN=C:\Program Files\PostgreSQL\18\bin"
 set "PGREGRESS=C:\Program Files\PostgreSQL\18\lib\pgxs\src\test\regress\pg_regress.exe"
 set "CONN=-h localhost -U postgres"
 set "PATH=%PATH%;C:\Program Files\Git\usr\bin"

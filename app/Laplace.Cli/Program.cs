@@ -1153,12 +1153,12 @@ internal static class Program
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
         static string AblationKey(string role) =>
             role.StartsWith("NORM_SCALES", StringComparison.Ordinal) ? "NORMS" : role.Split('_', '.', '/')[0];
-        bool Pour(ArenaSlot s) => arenaSel is null || arenaSel.Contains(AblationKey(s.Role));
+        bool RenderArena(ArenaSlot s) => arenaSel is null || arenaSel.Contains(AblationKey(s.Role));
         if (arenaSel is not null)
         {
             if (refMap is null)
                 return Fail("LAPLACE_SYNTH_ARENAS ablation needs the mold's original tensors alongside the recipe");
-            Console.WriteLine($"  ablation: pour {{{string.Join(",", arenaSel)}}} from substrate; all other arenas copied from the mold");
+            Console.WriteLine($"  ablation: render {{{string.Join(",", arenaSel)}}} from substrate; all other arenas copied from the mold");
         }
 
         Func<Hash128, IReadOnlyList<int>?> SpaceIndex(string space) => space switch
@@ -1180,7 +1180,7 @@ internal static class Program
             _ => throw new InvalidOperationException($"no dimension for space '{space}'"),
         };
 
-        Console.WriteLine("  pouring per-layer consensus arenas into the mold's tensor layouts...");
+        Console.WriteLine("  rendering per-layer consensus arenas into the recipe's tensor layouts...");
         var swArena = Stopwatch.StartNew();
         var arenaByTensor = new Dictionary<string, ConsensusReExport.TableArena>(StringComparer.Ordinal);
         var normByTensor  = new Dictionary<string, float[]>(StringComparer.Ordinal);
@@ -1188,7 +1188,7 @@ internal static class Program
         foreach (var slot in ModelArenaPlan.Slots(recipe, prof))
         {
             if (refMap is not null && !refMap.ContainsKey(slot.TensorName)) continue;
-            if (!Pour(slot)) continue;
+            if (!RenderArena(slot)) continue;
             double m = ConsensusReExport.MoldArenaScale(refMap, [slot.TensorName]);
             if (slot.IsNorm)
             {
@@ -1206,7 +1206,7 @@ internal static class Program
             totalRelations += arena.Relations;
         }
         Console.WriteLine(
-            $"  consensus arenas poured in {swArena.Elapsed.TotalSeconds:F1}s: "
+            $"  consensus arenas rendered in {swArena.Elapsed.TotalSeconds:F1}s: "
             + $"{arenaByTensor.Count} table slots + {normByTensor.Count} norm slots, {totalRelations:N0} relations");
         if (totalRelations == 0)
             return Fail("no model consensus in the substrate — ingest a model first");

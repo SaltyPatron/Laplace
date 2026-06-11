@@ -358,6 +358,9 @@ BEGIN
     FROM physicalities p
     JOIN prompt_state(p_word) s ON p.entity_id = s.id
     WHERE p.type = 1 AND p.coord IS NOT NULL
+    -- deterministic witness preference: unordered LIMIT 1 let the planner pick
+    -- whichever per-source specimen came first (OPEN-PROBLEMS #2)
+    ORDER BY s.ord, p.source_id
     LIMIT 1;
     IF v_id IS NULL THEN RETURN; END IF;
 
@@ -400,6 +403,8 @@ BEGIN
     FROM physicalities p
     JOIN prompt_state(p_word) s ON p.entity_id = s.id
     WHERE p.type = 1 AND p.coord IS NOT NULL
+    -- deterministic witness preference (OPEN-PROBLEMS #2)
+    ORDER BY s.ord, p.source_id
     LIMIT 1;
     IF v_id IS NULL THEN RETURN; END IF;
 

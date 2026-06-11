@@ -163,7 +163,7 @@ READ: converse/respond route prompts → resolve via Merkle word_id → arena re
 eff_mu indexes / compiled cascade (SPI) → realize to language. Structural reads: physicalities
 coord/hilbert/curves via geom kernels.
 
-EXPORT: recipe mold → pour tensor-role consensus arenas (qk kernels, decompose) →
+EXPORT (instrument-tier): declared architecture shape → render tensor-role consensus arenas (qk kernels, decompose) →
 gguf_writer → llama.cpp-runnable artifact; behavioral harness diffs against oracle.
 
 ## Determinism architecture

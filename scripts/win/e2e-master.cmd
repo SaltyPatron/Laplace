@@ -61,14 +61,7 @@ if "%SKIP_MODELS%"=="1" set "LAPLACE_SKIP_MODELS=1"
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 
-set "PGPASSWORD=postgres"
-set "PGBIN=C:\Program Files\PostgreSQL\18\bin"
-set "LAPLACE_DB=Host=localhost;Username=postgres;Password=postgres;Database=laplace"
-set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ROOT%\build-win\core\perfcache\laplace_t0_perfcache.bin"
-set "INGEST=D:\Data\Ingest"
-set "REPOS=D:\Repositories"
-set "LAPLACE_MODEL_HUB=D:\Models\hub"
-if defined LAPLACE_MODEL_HUB_USER set "LAPLACE_MODEL_HUB=%LAPLACE_MODEL_HUB_USER%"
+rem Connection/data-path constants come from env.cmd (single source; pre-set to override).
 
 rem Ingest tuning — conservative defaults for reproducible COPY framing proofs.
 set "LAPLACE_INGEST_LANGS=en"
@@ -86,6 +79,9 @@ rem --------------------------------------------------------------------------
 if "%SKIP_CLEAN%"=="0" (
   echo.
   echo ===== PHASE 1 — CLEAN =====
+  rem never delete a tree mid-build: take its mutex first (waits for live builds)
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" acquire build-win || exit /b 1
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" acquire build-win-ext || exit /b 1
   if exist "%LAPLACE_ROOT%\build-win" (
     echo removing build-win ...
     rmdir /s /q "%LAPLACE_ROOT%\build-win"
@@ -186,109 +182,29 @@ cd "%LAPLACE_ROOT%\app"
 dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q || exit /b 1
 
 rem --------------------------------------------------------------------------
-rem Phase 8 — Ingest corpora (witness ladder)
+rem Phase 8 — Witness ladder (single source: seed-ladder.cmd ⇔ witness-manifest.json)
 rem --------------------------------------------------------------------------
 echo.
-echo ===== PHASE 8 — INGEST CORPORA =====
+echo ===== PHASE 8 — WITNESS LADDER =====
+rem Ladder covers floor → *Net hub → proof path → models → deferred lexical.
+rem e2e-master REQUIRES models unless --skip-models (ladder errors on a missing snapshot).
+call "%~dp0seed-ladder.cmd" || exit /b 1
 
-rem ---- L0-L1: floor ---------------------------------------------------------
-call :ingest unicode || exit /b 1
-call :ingest iso639 || exit /b 1
-
-rem ---- *Net cluster (synset hub law) ----------------------------------------
-call :ingest wordnet || exit /b 1
-call :ingest omw || exit /b 1
-call :ingest verbnet || exit /b 1
-call :ingest propbank || exit /b 1
-call :ingest framenet || exit /b 1
-call :ingest semlink || exit /b 1
-
-rem ---- proof path: code corpora ---------------------------------------------
-if exist "!INGEST!\tiny-codes" (
-  call :ingest tiny-codes "!INGEST!\tiny-codes" || exit /b 1
-) else (
-  echo ==== [skip] tiny-codes — run scripts\win\download-code-data.cmd tiny-codes ====
-)
-if exist "!INGEST!\stack-v2" (
-  call :ingest stack "!INGEST!\stack-v2" || exit /b 1
-) else (
-  echo ==== [skip] stack-v2 — run scripts\win\download-code-data.cmd stack-v2 ====
-)
-
-rem ---- world usage (optional) -----------------------------------------------
-if not defined LAPLACE_SKIP_USAGE (
-  call :ingest tatoeba || exit /b 1
-  call :ingest opensubtitles || exit /b 1
-) else (
-  echo ==== [skip] tatoeba + opensubtitles — LAPLACE_SKIP_USAGE=1 ====
-)
-
-rem ---- test-data annex + repos ----------------------------------------------
+rem ---- db-roundtrip proofs over the document annex ---------------------------
+cd "%LAPLACE_ROOT%\app"
 if exist "!INGEST!\test-data\text" (
-  call :ingest document "!INGEST!\test-data\text" || exit /b 1
   for %%f in ("!INGEST!\test-data\text\*.txt") do (
     echo ==== db-roundtrip proof %%~nxf ====
     dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- db-roundtrip "%%~f" || exit /b 1
   )
-) else (
-  echo ==== [skip] test-data text annex: !INGEST!\test-data\text ====
-)
-
-for %%r in (Laplace X_BONEYARD llama-workspace SpecEditor TournamentManager Laplace-Space-Game temp-llama-models) do (
-  if exist "!REPOS!\%%r" (
-    call :ingest repo "!REPOS!\%%r" || exit /b 1
-  ) else (
-    echo ==== [skip] repo not found: !REPOS!\%%r ====
-  )
-)
-
-rem ---- authority sources (manifest functionality.authority_sources) ----------
-if exist "!INGEST!\code-authority" (
-  for /d %%a in ("!INGEST!\code-authority\*") do (
-    call :ingest repo "%%a" || exit /b 1
-  )
-) else (
-  echo ==== [skip] authority sources — run scripts\win\download-code-data.cmd authority ====
-)
-
-rem ---- deferred lexical bulk ------------------------------------------------
-if "%LAPLACE_SKIP_LEXICAL_BULK%"=="1" (
-  echo ==== [skip] deferred lexical bulk — LAPLACE_SKIP_LEXICAL_BULK=1 ====
-) else (
-  call "%~dp0seed-deferred-lexical.cmd" || exit /b 1
 )
 
 rem --------------------------------------------------------------------------
-rem Phase 9 — Model ingest
-rem --------------------------------------------------------------------------
-echo.
-echo ===== PHASE 9 — MODEL INGEST =====
-if defined LAPLACE_SKIP_MODELS (
-  echo ==== [skip] safetensor snapshots — LAPLACE_SKIP_MODELS=1 / --skip-models ====
-  goto phase_verify
-)
-
-call :resolve_model LAPLACE_MODEL_TINYLLAMA LAPLACE_TINYLLAMA_DIR "models--TinyLlama--TinyLlama-1.1B-Chat-v1.0" TINYLLAMA
-if errorlevel 1 exit /b 1
-echo ==== model: TinyLlama ====
-call :ingest safetensors "!TINYLLAMA!" || exit /b 1
-
-call :resolve_model LAPLACE_MODEL_PHI LAPLACE_PHI2_DIR "models--microsoft--phi-2" PHI
-if errorlevel 1 exit /b 1
-echo ==== model: Phi-2 ====
-call :ingest safetensors "!PHI!" || exit /b 1
-
-call :resolve_model LAPLACE_MODEL_QWEN25_CODER LAPLACE_QWEN25_CODER_DIR "models--Qwen--Qwen2.5-Coder-3B-Instruct" QWEN
-if errorlevel 1 exit /b 1
-echo ==== model: Qwen2.5-Coder ====
-call :ingest safetensors "!QWEN!" || exit /b 1
-
-rem --------------------------------------------------------------------------
-rem Phase 10 — Verify
+rem Phase 9 — Verify
 rem --------------------------------------------------------------------------
 :phase_verify
 echo.
-echo ===== PHASE 10 — VERIFY =====
+echo ===== PHASE 9 — VERIFY =====
 cd /d "%LAPLACE_ROOT%"
 
 echo ==== engine gtest (excl. regress label) ====
@@ -309,49 +225,3 @@ echo ==== smoke: substrate_counts + consensus_stats ====
 echo.
 echo ===== E2E-MASTER COMPLETE =====
 exit /b 0
-
-rem ============================================================================
-rem Subroutines
-rem ============================================================================
-
-:ingest
-echo ==== ingest %* ====
-dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest %*
-if errorlevel 1 exit /b 1
-exit /b 0
-
-rem Resolve model snapshot: %1=primary env, %2=legacy env, %3=hub family dir, %4=output var name
-:resolve_model
-set "%~4="
-set "_resolved="
-call set "_resolved=%%%~1%%"
-if not defined _resolved call set "_resolved=%%%~2%%"
-if defined _resolved (
-  if exist "!_resolved!\config.json" if exist "!_resolved!\tokenizer.json" (
-    set "%~4=!_resolved!"
-    echo resolved %~4: !_resolved!
-    exit /b 0
-  )
-  echo ERROR: %~1 is set but not a complete HF snapshot: !_resolved!
-  echo   need config.json + tokenizer.json + *.safetensors
-  exit /b 1
-)
-set "_fam=%LAPLACE_MODEL_HUB%\%~3"
-if not exist "!_fam!" (
-  echo ERROR: model not found — set %~1 to a snapshot dir, or download into:
-  echo   !_fam!\snapshots\<rev>\
-  exit /b 1
-)
-for /d %%s in ("!_fam!\snapshots\*") do (
-  if exist "%%s\config.json" if exist "%%s\tokenizer.json" (
-    dir /b "%%s\*.safetensors" >nul 2>&1
-    if not errorlevel 1 (
-      set "%~4=%%s"
-      echo resolved %~4: %%s
-      exit /b 0
-    )
-  )
-)
-echo ERROR: no weighted snapshot under !_fam!\snapshots\
-echo   set %~1 to your local HF snapshot path
-exit /b 1

@@ -13,7 +13,6 @@ echo === dotnet test ===
 call "%~dp0test-app.cmd" || exit /b 1
 
 echo === verify-fk ===
-set "PGPASSWORD=postgres"
 "%PGBIN%\psql.exe" -h localhost -U postgres -d laplace -v ON_ERROR_STOP=1 -f scripts\verify-fk.sql || (
   echo verify-fk skipped or failed — laplace DB may not exist yet
 )

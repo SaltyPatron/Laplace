@@ -4,8 +4,7 @@ rem Verify local extension deploy at D:\Data\Postgres\laplace (no rebuild).
 rem Agent rules: .github\instructions\build-environment.instructions.md
 call "%~dp0env.cmd"
 set "DEPLOY=D:\Data\Postgres\laplace"
-set "PGPASSWORD=postgres"
-set "PSQL=C:\Program Files\PostgreSQL\18\bin\psql.exe"
+set "PSQL=%PGBIN%\psql.exe"
 
 echo === Laplace local deploy verification ===
 echo deploy root: %DEPLOY%

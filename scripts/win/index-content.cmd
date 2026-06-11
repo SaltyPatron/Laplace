@@ -12,8 +12,7 @@ if "%~1"=="" (
     echo usage: index-content.cmd ^<database^> [deep^|text]
     exit /b 2
 )
-set "PGPASSWORD=postgres"
-set "PGBIN=C:\Program Files\PostgreSQL\18\bin"
+call "%~dp0env.cmd"
 set "MODE=%~2"
 if "%MODE%"=="" set "MODE=deep"
 if /i "%MODE%"=="deep" (

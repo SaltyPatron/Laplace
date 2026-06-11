@@ -173,3 +173,59 @@ TEST(LaplaceAttestationEngine, Aggregated_OutcomeFromNetScore) {
     EXPECT_EQ(LAPLACE_GLICKO2_FP_SCALE, win.score_fp1e9);
     EXPECT_TRUE(hash128_equals(&win.id, &loss.id));
 }
+
+TEST(LaplaceAttestationEngine, AggregatedBatch_IdenticalToPerCell) {
+    hash128_t type = type_id("PRECEDES");
+    hash128_t sym  = type_id("IS_SYNONYM_OF");
+    hash128_t src  = hash_path("src");
+
+    laplace_attestation_aggregated_cell_t cells[4];
+    for (int i = 0; i < 4; ++i) {
+        char sb[8], ob[8];
+        snprintf(sb, sizeof(sb), "s%d", i);
+        snprintf(ob, sizeof(ob), "o%d", i);
+        cells[i].subject = hash_path(sb);
+        cells[i].object  = hash_path(ob);
+        cells[i].object_is_null = 0;
+        cells[i].games = i + 1;
+        cells[i].sum_score_fp1e9 = (i % 2 == 0)
+            ? (int64_t)(i + 1) * LAPLACE_GLICKO2_FP_SCALE   /* all-confirm */
+            : 0;                                            /* all-refute */
+    }
+
+    laplace_attestation_staged_t batch[4];
+    ASSERT_EQ(0, laplace_attestation_aggregated_batch_build(
+        cells, 4, &type, &src, NULL, 1, 0.7, 12345, batch));
+
+    for (int i = 0; i < 4; ++i) {
+        laplace_attestation_staged_t one;
+        ASSERT_EQ(0, laplace_attestation_aggregated_build(
+            &cells[i].subject, &type, &cells[i].object, 0, &src, NULL, 1,
+            0.7, cells[i].games, cells[i].sum_score_fp1e9, 12345, &one));
+        EXPECT_TRUE(hash128_equals(&batch[i].id, &one.id)) << "cell " << i;
+        EXPECT_EQ(one.outcome, batch[i].outcome) << "cell " << i;
+        EXPECT_EQ(one.score_fp1e9, batch[i].score_fp1e9) << "cell " << i;
+        EXPECT_EQ(one.sum_score_fp1e9, batch[i].sum_score_fp1e9) << "cell " << i;
+        EXPECT_EQ(one.opponent_rd_fp1e9, batch[i].opponent_rd_fp1e9) << "cell " << i;
+        EXPECT_EQ(one.observation_count, batch[i].observation_count) << "cell " << i;
+        EXPECT_EQ(one.is_aggregated, batch[i].is_aggregated) << "cell " << i;
+        EXPECT_TRUE(hash128_equals(&batch[i].subject_id, &one.subject_id)) << "cell " << i;
+        EXPECT_TRUE(hash128_equals(&batch[i].object_id, &one.object_id)) << "cell " << i;
+    }
+
+    /* symmetric relations must canonicalize endpoint order identically in both paths */
+    laplace_attestation_aggregated_cell_t flipped[2];
+    flipped[0].subject = hash_path("zz");
+    flipped[0].object  = hash_path("aa");
+    flipped[0].object_is_null = 0;
+    flipped[0].games = 1;
+    flipped[0].sum_score_fp1e9 = LAPLACE_GLICKO2_FP_SCALE;
+    flipped[1] = flipped[0];
+    flipped[1].subject = hash_path("aa");
+    flipped[1].object  = hash_path("zz");
+
+    laplace_attestation_staged_t symed[2];
+    ASSERT_EQ(0, laplace_attestation_aggregated_batch_build(
+        flipped, 2, &sym, &src, NULL, 1, 0.7, 12345, symed));
+    EXPECT_TRUE(hash128_equals(&symed[0].id, &symed[1].id));
+}

@@ -5,8 +5,7 @@ rem Run after proof path (seed-resume-prove or full seed functionality block).
 rem Idempotent: completed sources short-circuit on layer-complete marker.
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
-set "LAPLACE_DB=Host=localhost;Username=postgres;Password=postgres;Database=laplace"
-set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ROOT%\build-win\core\perfcache\laplace_t0_perfcache.bin"
+rem Connection/data-path constants come from env.cmd. Reproducibility pins below are deliberate.
 set "LAPLACE_INGEST_LANGS=en"
 if not defined LAPLACE_EMIT_CROSS_LANG set "LAPLACE_EMIT_CROSS_LANG=0"
 set "LAPLACE_INGEST_WORKERS=4"

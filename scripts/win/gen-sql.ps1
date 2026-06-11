@@ -92,13 +92,18 @@ if ($Module) {
     $sql = ($lines -join "`n")
     $sql = $sql -creplace 'MODULE_PATHNAME', $Name
     $sql = $sql -creplace '@extschema@', 'laplace'
+    # refresh mode reruns whole modules against live DBs: CREATE TABLE/INDEX must be
+    # idempotent (functions already are via CREATE OR REPLACE)
+    $sql = $sql -creplace 'CREATE (UNLOGGED )?TABLE (?!IF NOT EXISTS)', 'CREATE $1TABLE IF NOT EXISTS '
+    $sql = $sql -creplace 'CREATE (UNIQUE )?INDEX (?!IF NOT EXISTS)', 'CREATE $1INDEX IF NOT EXISTS '
     $sql = "SET search_path = laplace, public;`nSET check_function_bodies = off;`n" + $sql
 
     $tmp = Join-Path $env:TEMP "laplace_refresh_$($Module -replace '\W','_').sql"
     [System.IO.File]::WriteAllText($tmp, $sql + "`n", [System.Text.UTF8Encoding]::new($false))
 
-    $env:PGPASSWORD = 'postgres'
-    & 'C:\Program Files\PostgreSQL\18\bin\psql.exe' -h localhost -U postgres -d $Database `
+    if (-not $env:PGPASSWORD) { $env:PGPASSWORD = 'postgres' }
+    $psql = if ($env:PGBIN) { Join-Path $env:PGBIN 'psql.exe' } else { 'C:\Program Files\PostgreSQL\18\bin\psql.exe' }
+    & $psql -h localhost -U postgres -d $Database `
         -v ON_ERROR_STOP=1 -f $tmp
     if ($LASTEXITCODE -ne 0) { throw "refresh failed: $Module → $Database" }
     Write-Host "refreshed: $Module → $Database"

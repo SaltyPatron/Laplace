@@ -28,19 +28,26 @@ The repo's working platform is this Windows machine; Linux scripts persist but m
 
 | script | purpose |
 |---|---|
+| `status.cmd` | RUN FIRST: tree freshness (ninja dry-run), deploy currency (hash diff), PG/extensions/DBs/counts, endpoint, locks |
+| `locks.cmd [--kill]` | who holds Laplace artifacts; `--kill` stops the safe set (never postgres, never live builds) |
 | `env.cmd` | THE environment chain: harness-var unset → setvars → SDK rc/mt pins (LAPLACE_RC/MT) → CMake/Ninja → TBB/MKL/compiler bins → build-tree DLL dirs → LAPLACE_ROOT |
-| `build-engine.cmd` | configure+build `build-win`: icx/icx, Ninja, WINDOWS_EXPORT_ALL_SYMBOLS, BLAKE3_SIMD_TYPE=none, BUILD_TESTING=ON, UCD@D:\Data\Ingest, PG-bundled libxml2 |
-| `build-extensions.cmd` | configure+build `build-win-ext` standalone (`-S extension`): pg_config discovery, static engine import, trimmed lwgeom |
-| `install-extensions.cmd` | gen-sql.ps1 → stage `D:\Data\Postgres\laplace` → GUC wiring + reload → availability probe. Idempotent redeploy. |
+| `build-engine.cmd [--reconfigure] [targets…]` | incremental `build-win` (configure only if needed; mutex-guarded; dead-configure debris auto-cleared): icx, Ninja, WINDOWS_EXPORT_ALL_SYMBOLS, BLAKE3_SIMD_TYPE=none, BUILD_TESTING=ON, UCD@D:\Data\Ingest, PG-bundled libxml2 |
+| `build-engine-asan.cmd [targets…]` | `build-win-asan` (ASan): the icx flag law is baked in (dynamic CRT pin, /MD at link, Intel clang_rt on PATH, tree-dir PATH shadowing) — never configure by hand |
+| `build-extensions.cmd [--reconfigure] [targets…]` | incremental `build-win-ext` (`-S extension`): pg_config discovery, static engine import, trimmed lwgeom |
+| `install-extensions.cmd [--recycle]` | gen-sql.ps1 → stage `D:\Data\Postgres\laplace` → GUC wiring + reload. Locked DLLs hot-swap (rename + copy); `--recycle` bounces laplace% backends |
+| `refresh-substrate-module.cmd <NN.sql.in> <db>` | hot-reload ONE substrate SQL module on a live DB (no rebuild) |
 | `gen-sql.ps1` | the .sql.in pipeline replica: configured sqldefines include, case-SENSITIVE macro expansion, bare MODULE_PATHNAME, geom @extschema@. strip |
-| `regress.cmd` | per-extension fresh DBs + pg_regress (geom: hash128 st_4d; substrate: bootstrap glicko2_aggregate entities_exist_bitmap consensus_signed consensus_period converse) |
-| `test-engine.cmd` | ctest over build-win (RUN SERIAL — gguf tests share a fixed temp path and race under -j) |
-| `e2e.cmd <sources…>` | DB ensure + extensions + CLI build + sequential `ingest` per arg (the ladder driver) |
+| `regress.cmd` | per-extension fresh DBs + pg_regress (geom: hash128 st_4d; substrate: bootstrap glicko2_aggregate entities_exist_bitmap consensus_signed consensus_period converse identity_law schema_law structural_surface) |
+| `test-engine.cmd` / `test-app.cmd [Filter]` / `test-all.cmd` | ctest over build-win (SERIAL — gguf tests race under -j) / dotnet tests (optional project substring filter) / all layers |
+| `seed-ladder.cmd` | THE witness ladder, single source (mirror of witness-manifest.json); knobs LAPLACE_LADDER_START=proof, LAPLACE_LADDER_DRY=1, LAPLACE_SKIP_* |
+| `e2e-master.cmd [--skip-clean\|--skip-models\|--db-only]` | full orchestrator: clean → codegen → builds → deploy → DB → seed-ladder → verify |
+| `seed-substrate.cmd` / `seed-resume-prove.cmd` | thin ladder callers: fresh drop+seed / proof-path resume |
+| `e2e.cmd <sources…>` | targeted: DB ensure + extensions + CLI build + sequential `ingest` per arg |
 | `ingest-text.cmd <files…>` | sidecar CLI build + `db-roundtrip` per file (the document/book on-ramp) |
 | `converse.cmd "question"` | the demo: psql :'q' interpolation into laplace.converse() |
 | `verify-deploy.cmd` | check `D:\Data\Postgres\laplace` DLLs + extension versions (no rebuild) |
 
-Standard loop: `build-engine` → `build-extensions` → `install-extensions` → `regress` → `e2e unicode iso639 wordnet …` → `converse "what is a dog"`. No step requires elevation, ever.
+Standard loop: `status` → `build-engine` → `build-extensions` → `install-extensions` → `regress` → `e2e unicode iso639 wordnet …` → `converse "what is a dog"`. No step requires elevation, ever.
 
 **Agents:** build/deploy rules are explicit in `.github/instructions/build-environment.instructions.md` — never `cmake --install` or copy DLLs into `C:\Program Files\PostgreSQL`.
 

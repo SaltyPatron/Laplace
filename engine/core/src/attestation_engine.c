@@ -418,6 +418,80 @@ int laplace_attestation_aggregated_build(
         witness_weight, score_fp, outcome, games, now_unix_us, sum_score_fp1e9, 1, out);
 }
 
+int laplace_attestation_aggregated_batch_build(
+    const laplace_attestation_aggregated_cell_t* cells,
+    size_t           n,
+    const hash128_t* type_id,
+    const hash128_t* source,
+    const hash128_t* context,
+    uint8_t          context_is_null,
+    double           witness_weight,
+    int64_t          now_unix_us,
+    laplace_attestation_staged_t* out) {
+    if (!cells || !type_id || !source || !out) return -1;
+
+    /* shared per batch: relation symmetry, context, phi, timestamp */
+    const laplace_relation_def_t* def = NULL;
+    laplace_rel_symmetry_t symmetry = LAPLACE_REL_SYMMETRY_ASYMMETRIC;
+    if (laplace_relation_lookup(type_id, &def) == 0 && def)
+        symmetry = def->symmetry;
+
+    hash128_t ctx;
+    hash128_zero(&ctx);
+    uint8_t ctx_null = context_is_null;
+    if (!ctx_null && context) ctx = *context;
+
+    const int64_t opponent_rd =
+        (int64_t)(laplace_attestation_witness_phi(witness_weight) * (double)LAPLACE_GLICKO2_FP_SCALE);
+    const int64_t observed_at = now_unix_us > 0 ? now_unix_us : unix_us_now();
+
+    for (size_t i = 0; i < n; ++i) {
+        const laplace_attestation_aggregated_cell_t* c = &cells[i];
+        if (c->games <= 0) return -1;
+
+        hash128_t subj = c->subject;
+        hash128_t obj;
+        hash128_zero(&obj);
+        uint8_t obj_null = c->object_is_null;
+        if (!obj_null) {
+            obj = c->object;
+            if (laplace_attestation_orient(type_id, 0, symmetry, &subj, &obj, &obj_null) != 0)
+                return -1;
+        }
+
+        const int64_t net_half = c->games * kScoreHalfFp;
+        int16_t outcome;
+        if (c->sum_score_fp1e9 > net_half)      outcome = LAPLACE_ATTESTATION_OUTCOME_CONFIRM;
+        else if (c->sum_score_fp1e9 < net_half) outcome = LAPLACE_ATTESTATION_OUTCOME_REFUTE;
+        else                                    outcome = LAPLACE_ATTESTATION_OUTCOME_DRAW;
+
+        laplace_attestation_staged_t* o = &out[i];
+        o->subject_id = subj;
+        o->type_id = *type_id;
+        o->object_id = obj;
+        o->source_id = *source;
+        o->context_id = ctx;
+        o->object_is_null = obj_null;
+        o->context_is_null = ctx_null;
+        o->outcome = outcome;
+        o->last_observed_at_unix_us = observed_at;
+        o->observation_count = c->games;
+        o->score_fp1e9 = c->sum_score_fp1e9 / c->games;
+        o->opponent_rd_fp1e9 = opponent_rd;
+        o->sum_score_fp1e9 = c->sum_score_fp1e9;
+        o->is_aggregated = 1;
+
+        if (laplace_attestation_id_compute(
+                &o->subject_id, &o->type_id,
+                obj_null ? NULL : &o->object_id, obj_null,
+                &o->source_id,
+                ctx_null ? NULL : &o->context_id, ctx_null,
+                &o->id) != 0)
+            return -1;
+    }
+    return 0;
+}
+
 static int staged_to_intent(intent_stage_t* stage, const laplace_attestation_staged_t* a) {
     hash128_t* obj_ptr = a->object_is_null ? NULL : (hash128_t*)&a->object_id;
     hash128_t* ctx_ptr = a->context_is_null ? NULL : (hash128_t*)&a->context_id;

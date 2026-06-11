@@ -180,4 +180,9 @@ FROM isa_path(word_id('dog'), word_id('c'));
 SELECT reply LIKE 'Yes%' AS cascade_via_isa
 FROM respond('is a dog a c?');
 
+-- NULL session must default to the backend-pid session (the converse.cmd path);
+-- this branch is otherwise unreachable from tests that pass sessions explicitly
+SELECT count(*) >= 1 AS null_session_converse_runs
+FROM converse('what does dog mean?');
+
 ROLLBACK;

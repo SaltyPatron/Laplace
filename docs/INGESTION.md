@@ -84,7 +84,7 @@ CLI: `laplace ingest safetensors <snapshot-dir>` (`ingest model` is a legacy ali
 |---|---|---|
 | **Unit** | HF snapshot **directory** | Single **file** |
 | **Self-contained** | No — needs `config.json`, `tokenizer.json`, weight blobs | Yes — llama.cpp runs it alone |
-| **What happens** | `ModelDecomposer`: recipe → named tensor ETL → Glicko testimony (`AIModelProbe`) | `synthesize substrate <config.json> <out.gguf>` pours arenas into render target |
+| **What happens** | `ModelDecomposer`: recipe → named tensor ETL → Glicko testimony (`AIModelProbe`) | `synthesize substrate <config.json> <out.gguf>` renders arenas into the render target |
 
 Validation (`SafetensorSnapshotWitness`): rejects directories missing recipe or tokenizer. Source identity hashes `config.json` + weight files together.
 

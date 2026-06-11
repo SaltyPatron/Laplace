@@ -13,6 +13,7 @@
 
 #include "laplace/core/hash128.h"
 #include "laplace/core/relation_law.h"
+#include "spi_common.h"
 #include "spi_nested.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_senses);
@@ -34,151 +35,7 @@ PG_FUNCTION_INFO_V1(pg_laplace_gaps);
 #define TAX_WALK_CAP 2048
 #define REASON_LAT_N 11
 
-static Datum
-copy_bytea_datum(Datum d)
-{
-    bytea *src = DatumGetByteaPP(d);
-    Size   len = VARSIZE_ANY(src);
-    bytea *dst = (bytea *) palloc(len);
-    memcpy(dst, src, len);
-    return PointerGetDatum(dst);
-}
-
-static hash128_t
-datum_to_hash128(Datum d)
-{
-    bytea *b = DatumGetByteaPP(d);
-    hash128_t h;
-    if (VARSIZE_ANY_EXHDR(b) < (int) sizeof(hash128_t))
-        ereport(ERROR, (errmsg("converse_reads: expected 16-byte entity id")));
-    memcpy(&h, VARDATA_ANY(b), sizeof(hash128_t));
-    return h;
-}
-
-static Datum
-hash128_to_datum(const hash128_t *h)
-{
-    bytea *b = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
-    SET_VARSIZE(b, VARHDRSZ + sizeof(hash128_t));
-    memcpy(VARDATA(b), h, sizeof(hash128_t));
-    return PointerGetDatum(b);
-}
-
-static bool
-hash128_eq(const hash128_t *a, const hash128_t *b)
-{
-    return a->hi == b->hi && a->lo == b->lo;
-}
-
-static Datum
-eff_mu_display_numeric(int64 rating, int64 rd)
-{
-    int64 eff = rating - 2 * rd;
-    Datum n = DirectFunctionCall1(int8_numeric, Int64GetDatum(eff));
-    Datum b = DirectFunctionCall1(int8_numeric, Int64GetDatum(INT64CONST(1000000000)));
-    Datum d = DirectFunctionCall2(numeric_div, n, b);
-    return DirectFunctionCall2(numeric_round, d, Int32GetDatum(3));
-}
-
-static hash128_t
-rel_type_id(const char *name)
-{
-    hash128_t id;
-    if (laplace_relation_type_id(name, &id) < 0)
-        ereport(ERROR, (errmsg("converse_reads: unknown relation type %s", name)));
-    return id;
-}
-
-static Datum
-spi_realize(Datum id, Datum lang)
-{
-    Oid     argtypes[2] = { BYTEAOID, BYTEAOID };
-    Datum   args[2] = { id, lang };
-    char    nulls[3] = " n";
-    bool    isnull;
-    int     rc;
-
-    if (lang == (Datum) 0)
-        nulls[1] = 'n';
-    rc = SPI_execute_with_args(
-        "SELECT laplace.realize($1, $2)", 2, argtypes, args, nulls, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return (Datum) 0;
-    return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-}
-
-static Datum
-spi_type_label(Datum type_id)
-{
-    Oid   argtypes[1] = { BYTEAOID };
-    Datum args[1] = { type_id };
-    bool  isnull;
-    int   rc;
-
-    rc = SPI_execute_with_args(
-        "SELECT laplace.type_label($1)", 1, argtypes, args, NULL, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return (Datum) 0;
-    return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-}
-
-static Datum
-spi_word_language(Datum word)
-{
-    Oid   argtypes[1] = { BYTEAOID };
-    Datum args[1] = { word };
-    bool  isnull;
-    int   rc;
-
-    rc = SPI_execute_with_args(
-        "SELECT laplace.word_language($1)", 1, argtypes, args, NULL, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return (Datum) 0;
-    return copy_bytea_datum(
-        SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
-}
-
-static Datum
-spi_render_text(Datum id)
-{
-    Oid   argtypes[1] = { BYTEAOID };
-    Datum args[1] = { id };
-    bool  isnull;
-    int   rc;
-
-    rc = SPI_execute_with_args(
-        "SELECT laplace.render_text($1)", 1, argtypes, args, NULL, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return (Datum) 0;
-    return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-}
-
-static int
-spi_fetch_synset_ids(Datum word, Datum **out_ids, int *out_n)
-{
-    Oid   argtypes[1] = { BYTEAOID };
-    Datum args[1] = { word };
-    int   rc;
-
-    *out_ids = NULL;
-    *out_n = 0;
-    rc = SPI_execute_with_args(
-        "SELECT sn.synset_id FROM laplace.senses($1) sn",
-        1, argtypes, args, NULL, true, 0);
-    if (rc != SPI_OK_SELECT)
-        elog(ERROR, "converse_reads: senses query failed: %s", SPI_result_code_string(rc));
-    if (SPI_processed == 0)
-        return 0;
-    *out_ids = (Datum *) palloc(sizeof(Datum) * SPI_processed);
-    for (uint64 r = 0; r < SPI_processed; r++)
-    {
-        bool isnull;
-        (*out_ids)[r] = copy_bytea_datum(
-            SPI_getbinval(SPI_tuptable->vals[r], SPI_tuptable->tupdesc, 1, &isnull));
-    }
-    *out_n = (int) SPI_processed;
-    return *out_n;
-}
+/* shared datum/hash/SPI-read helpers live in spi_common.h */
 
 static void
 emit_senses_rows(ReturnSetInfo *rsinfo, Datum word, Datum context_arr, bool has_context)
@@ -187,7 +44,6 @@ emit_senses_rows(ReturnSetInfo *rsinfo, Datum word, Datum context_arr, bool has_
     hash128_t k_is_sense  = rel_type_id("IS_SENSE_OF");
     Oid       argtypes[3] = { BYTEAOID, BYTEAOID, BYTEAARRAYOID };
     Datum     args[3];
-    char      nulls[4] = "  n";
     int       rc;
 
     args[0] = word;
@@ -196,6 +52,8 @@ emit_senses_rows(ReturnSetInfo *rsinfo, Datum word, Datum context_arr, bool has_
     if (has_context)
     {
         args[2] = context_arr;
+        /* the nulls string must track the actual array: a constant "  n" here
+         * silently nulled $3, making context re-ranking a no-op (2026-06-10) */
         rc = SPI_execute_with_args(
             "SELECT s.object_id, ss.object_id, "
             "       laplace.eff_mu_display(s.rating, s.rd), "
@@ -212,7 +70,7 @@ emit_senses_rows(ReturnSetInfo *rsinfo, Datum word, Datum context_arr, bool has_
             "                         AND ss.type_id = $2 "
             "WHERE s.subject_id = $1 AND s.type_id = laplace.relation_type_id('HAS_SENSE') "
             "ORDER BY 5 DESC",
-            3, argtypes, args, nulls, true, 0);
+            3, argtypes, args, context_arr == (Datum) 0 ? "  n" : NULL, true, 0);
     }
     else
     {
@@ -300,7 +158,7 @@ emit_define_rows(ReturnSetInfo *rsinfo, Datum word, Datum context_arr, bool has_
             "                       AND g.type_id = laplace.relation_type_id('HAS_DEFINITION') "
             "ORDER BY sn.score + laplace.eff_mu_display(g.rating, g.rd) DESC "
             "LIMIT $3",
-            3, argtypes, args, NULL, true, 0);
+            3, argtypes, args, context_arr == (Datum) 0 ? " n " : NULL, true, 0);
     }
     else
     {
@@ -544,7 +402,9 @@ pg_laplace_expansion(PG_FUNCTION_ARGS)
     int32 lim;
     Oid   argtypes[3] = { BYTEAARRAYOID, BYTEAOID, INT4OID };
     Datum args[3];
-    char  nulls[4] = " nn";
+    /* "  nn" lied twice: $2 was stuck NULL even when a filter was passed, and
+     * $3 (LIMIT) was permanently NULL = unbounded (2026-06-10) */
+    char  nulls[4] = "   ";
     int   rc;
 
     if (PG_ARGISNULL(0))
@@ -602,7 +462,7 @@ emit_related_rows(ReturnSetInfo *rsinfo, Datum word, Datum type_id, Datum lang, 
 {
     Oid     argtypes[4] = { BYTEAOID, BYTEAOID, BYTEAOID, INT4OID };
     Datum   args[4];
-    char    nulls[5] = "  n ";
+    char    nulls[5] = "    ";
     const char *sql_out =
         "WITH subj(id) AS ( "
         "  SELECT $1 UNION SELECT sn.synset_id FROM laplace.senses($1) sn "
@@ -706,7 +566,7 @@ pg_laplace_describe(PG_FUNCTION_ARGS)
     int32 lim;
     Oid   argtypes[3] = { BYTEAOID, BYTEAOID, INT4OID };
     Datum args[3];
-    char  nulls[4] = " n ";
+    char  nulls[4] = "   ";
     int   rc;
 
     if (PG_ARGISNULL(0))
@@ -1011,7 +871,10 @@ pg_laplace_gaps(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("gaps: p_word must not be NULL")));
     word = PG_GETARG_DATUM(0);
-    InitMaterializedSRF(fcinfo, 0);
+    /* RETURNS TABLE with ONE column is SETOF scalar to PG, not a rowtype —
+     * the default InitMaterializedSRF path then errors "return type must be
+     * a row type". Use the caller's expected descriptor instead. */
+    InitMaterializedSRF(fcinfo, MAT_SRF_USE_EXPECTED_DESC);
     bool spi_top = false;
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "gaps: SPI_connect failed");

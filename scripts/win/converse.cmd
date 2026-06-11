@@ -1,7 +1,6 @@
 @echo off
 setlocal
-set "PGPASSWORD=postgres"
-set "PGBIN=C:\Program Files\PostgreSQL\18\bin"
+call "%~dp0env.cmd"
 if "%~1"=="" (
     echo usage: converse.cmd "your question"
     exit /b 2

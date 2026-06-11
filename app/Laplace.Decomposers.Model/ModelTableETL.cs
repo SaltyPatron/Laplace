@@ -24,6 +24,8 @@ public sealed class ModelTableETL
     private readonly LlamaRecipeExtractor.RecipeInfo _recipe;
     private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
     private readonly Hash128 _source;
+    private readonly Hash128 _axisType;
+    private readonly int _epochBase;
     private readonly ArchitectureProfile _profile;
     private readonly ILogger _log;
     private readonly Dictionary<string, SafetensorsContainerParser.TensorReference> _refMap;
@@ -32,11 +34,13 @@ public sealed class ModelTableETL
 
     public ModelTableETL(string modelDir, LlamaRecipeExtractor.RecipeInfo recipe,
         IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens, Hash128 sourceId,
-        ILogger? log = null)
+        Hash128 axisType, int epochBase = 0, ILogger? log = null)
     {
         _recipe  = recipe;
         _tokens  = tokens;
         _source  = sourceId;
+        _axisType = axisType;
+        _epochBase = epochBase;
         _profile = ArchitectureProfile.For(recipe.ModelType);
         _log     = log ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
         var refs = SafetensorsContainerParser.ParseModel(modelDir);
@@ -71,9 +75,12 @@ public sealed class ModelTableETL
         int n = ents.Count;
         if (n == 0 || !_refMap.ContainsKey(_profile.EmbedTokens)) yield break;
 
-        _commitEpoch = 0;
+        _commitEpoch = _epochBase;
 
-        // Phase 1: emit token entities (epoch 0 — must commit before matchup attestations).
+        // Phase 1: emit token entities + per-layer context entities (first epoch — the
+        // fence: matchup attestations reference both, so they must commit first).
+        // The layer-context entities were silently dropped in the post-checkpoint churn,
+        // leaving every per-layer attestation with a dangling context_id (verify-fk fails).
         {
             var eb = NewChunk("token"); int ec = 0;
             for (int t = 0; t < vocab; t++)
@@ -86,8 +93,15 @@ public sealed class ModelTableETL
                     eb = NewChunk("token"); ec = 0;
                 }
             }
+            for (int l = 0; l < _recipe.NumLayers; l++)
+            {
+                eb.AddEntity(new EntityRow(
+                    Hash128.OfCanonical($"substrate/layer/{_source}/L{l}/v1"),
+                    EntityTier.Vocabulary, _axisType, _source));
+                ec++;
+            }
             if (ec > 0) yield return eb.SetInputUnitsConsumed(ec).Build();
-            _log.LogInformation("phase=etl tokens: {N:N0} corners", n);
+            _log.LogInformation("phase=etl tokens: {N:N0} corners (+{L} layer contexts)", n, _recipe.NumLayers);
         }
 
         // Raw embed [n×d] double — source for all projection and FFN inputs
@@ -107,8 +121,8 @@ public sealed class ModelTableETL
             NormD(unembN, n, d);
         }
 
-        // Phase 2: stream path matchups — attestations only; references token entities from epoch 0.
-        _commitEpoch = 1;
+        // Phase 2: stream path matchups — attestations only; references epoch-fenced entities.
+        _commitEpoch = _epochBase + 1;
         foreach (var path in _profile.Paths)
         {
             ct.ThrowIfCancellationRequested();
@@ -176,6 +190,29 @@ public sealed class ModelTableETL
 
     // ── per-layer path dispatch ───────────────────────────────────────────────
 
+    // The model applies RMSNorm(x)⊙γ before every projection; the planes must too, or
+    // per-channel weighting is wrong in every bilinear score. γ folds exactly into the
+    // weight columns (W·diag(γ)); the per-token scalar normalization is absorbed by the
+    // cosine NormD that follows each projection. preFfn selects post_attention_layernorm
+    // (last entry; equals input_layernorm for single-norm parallel-block architectures).
+    private float[]? LoadGamma(int layer, bool preFfn)
+    {
+        if (_profile.PerLayerNorms.Count == 0) return null;
+        int idx = preFfn ? _profile.PerLayerNorms.Count - 1 : 0;
+        string name = ArchitectureProfile.Layer(_profile.PerLayerNorms[idx], layer);
+        if (!_refMap.ContainsKey(name)) return null;
+        return WeightTensorETL.LoadTensorF32(_refMap, name, _recipe.HiddenSize);
+    }
+
+    private static void FoldGammaColumns(float[] w, int rows, int cols, float[] gamma)
+    {
+        for (int r = 0; r < rows; r++)
+        {
+            long off = (long)r * cols;
+            for (int c = 0; c < cols; c++) w[off + c] *= gamma[c];
+        }
+    }
+
     private async IAsyncEnumerable<SubstrateChange> EmitLayerPath(
         PathSpec path, int layer, double[] embRawD, double[] unembN,
         int n, int d, int attnDim, int kvDim, int nHeads, int nKv, int headDim, int interm,
@@ -192,6 +229,11 @@ public sealed class ModelTableETL
                 int rDim = bil.RightIsKv ? kvDim : attnDim;
                 var Wl = LoadF32(ln, (long)attnDim * d);
                 var Wr = LoadF32(rn, (long)rDim    * d);
+                if (LoadGamma(layer, preFfn: false) is { } gAttn)
+                {
+                    FoldGammaColumns(Wl, attnDim, d, gAttn);
+                    FoldGammaColumns(Wr, rDim,    d, gAttn);
+                }
                 var qAll = NormD(ProjectD(Wl, attnDim, d, embRawD, n), n, attnDim);
                 var kRaw = ProjectD(Wr, rDim, d, embRawD, n);
                 var kAll = NormD(bil.RightIsKv
@@ -209,6 +251,10 @@ public sealed class ModelTableETL
                 if (!_refMap.ContainsKey(vn) || !_refMap.ContainsKey(on)) yield break;
                 var Wv = LoadF32(vn, (long)kvDim * d);
                 var Wo = LoadF32(on, (long)d * attnDim);
+                // V reads the same γ-scaled pre-attention stream; O reads attention
+                // output (already in head space) and stays unfolded.
+                if (LoadGamma(layer, preFfn: false) is { } gAttnV)
+                    FoldGammaColumns(Wv, kvDim, d, gAttnV);
                 for (int rb = 0; rb < n; rb += RowTile)
                 {
                     ct.ThrowIfCancellationRequested();
@@ -233,6 +279,12 @@ public sealed class ModelTableETL
                     ? LoadF32(gn, (long)interm * d) : null;
                 var up   = LoadF32(un, (long)interm * d);
                 var down = LoadF32(dn, (long)d * interm);
+                // gate/up read the γ-scaled pre-FFN stream; down reads neuron space.
+                if (LoadGamma(layer, preFfn: true) is { } gFfn)
+                {
+                    if (gate is not null) FoldGammaColumns(gate, interm, d, gFfn);
+                    FoldGammaColumns(up, interm, d, gFfn);
+                }
                 var gateD = gate is null ? null : ToD(gate, interm, d);
                 var upD   = ToD(up,   interm, d);
                 var downD = ToD(down, d,      interm);

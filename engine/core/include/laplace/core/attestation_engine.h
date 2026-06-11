@@ -148,6 +148,30 @@ int laplace_attestation_aggregated_build(
     int64_t          now_unix_us,
     laplace_attestation_staged_t* out);
 
+/* One cell of an aggregated arena batch (subject/object pair + presummed games). */
+typedef struct {
+    hash128_t subject;
+    hash128_t object;            /* ignored when object_is_null */
+    uint8_t   object_is_null;
+    int64_t   games;             /* > 0 */
+    int64_t   sum_score_fp1e9;
+} laplace_attestation_aggregated_cell_t;
+
+/* Batch form of laplace_attestation_aggregated_build for arenas where every cell
+ * shares (type, source, context, weight): the relation law is resolved ONCE and the
+ * fmgr-free per-cell loop runs natively. out must hold n entries. Returns 0, or -1
+ * on the first invalid cell (games <= 0 / null args). */
+int laplace_attestation_aggregated_batch_build(
+    const laplace_attestation_aggregated_cell_t* cells,
+    size_t           n,
+    const hash128_t* type_id,
+    const hash128_t* source,
+    const hash128_t* context,
+    uint8_t          context_is_null,
+    double           witness_weight,
+    int64_t          now_unix_us,
+    laplace_attestation_staged_t* out);
+
 int laplace_attestation_categorical_add(
     intent_stage_t*  stage,
     const char*      surface_relation,

@@ -1,4 +1,4 @@
-﻿#include "postgres.h"
+#include "postgres.h"
 
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
@@ -9,6 +9,7 @@
 
 #include "laplace/core/hash128.h"
 #include "laplace/core/relation_law.h"
+#include "spi_common.h"
 #include "spi_nested.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_hypernyms);
@@ -23,72 +24,7 @@ PG_FUNCTION_INFO_V1(pg_laplace_structural_locale);
 #define TAX_WALK_CAP 2048
 #define CONTRAST_FEAT_CAP 512
 
-static Datum
-copy_bytea_datum(Datum d)
-{
-    bytea *src = DatumGetByteaPP(d);
-    Size   len = VARSIZE_ANY(src);
-    bytea *dst = (bytea *) palloc(len);
-    memcpy(dst, src, len);
-    return PointerGetDatum(dst);
-}
-
-static bool
-bytea_eq(Datum a, Datum b)
-{
-    bytea *ba = DatumGetByteaPP(a);
-    bytea *bb = DatumGetByteaPP(b);
-    Size   la = VARSIZE_ANY_EXHDR(ba);
-    Size   lb = VARSIZE_ANY_EXHDR(bb);
-    if (la != lb)
-        return false;
-    return memcmp(VARDATA_ANY(ba), VARDATA_ANY(bb), la) == 0;
-}
-
-static hash128_t
-datum_to_hash128(Datum d)
-{
-    bytea *b = DatumGetByteaPP(d);
-    hash128_t h;
-    if (VARSIZE_ANY_EXHDR(b) < (int) sizeof(hash128_t))
-        ereport(ERROR, (errmsg("converse_native: expected 16-byte entity id")));
-    memcpy(&h, VARDATA_ANY(b), sizeof(hash128_t));
-    return h;
-}
-
-static Datum
-hash128_to_datum(const hash128_t *h)
-{
-    bytea *b = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
-    SET_VARSIZE(b, VARHDRSZ + sizeof(hash128_t));
-    memcpy(VARDATA(b), h, sizeof(hash128_t));
-    return PointerGetDatum(b);
-}
-
-static bool
-hash128_eq(const hash128_t *a, const hash128_t *b)
-{
-    return a->hi == b->hi && a->lo == b->lo;
-}
-
-static Datum
-eff_mu_display_numeric(int64 rating, int64 rd)
-{
-    int64 eff = rating - 2 * rd;
-    Datum n = DirectFunctionCall1(int8_numeric, Int64GetDatum(eff));
-    Datum b = DirectFunctionCall1(int8_numeric, Int64GetDatum(INT64CONST(1000000000)));
-    Datum d = DirectFunctionCall2(numeric_div, n, b);
-    return DirectFunctionCall2(numeric_round, d, Int32GetDatum(3));
-}
-
-static hash128_t
-rel_type_id(const char *name)
-{
-    hash128_t id;
-    if (laplace_relation_type_id(name, &id) < 0)
-        ereport(ERROR, (errmsg("converse_native: unknown relation type %s", name)));
-    return id;
-}
+/* shared datum/hash/SPI-read helpers live in spi_common.h */
 
 static int
 tax_find(const hash128_t *ids, int n, const hash128_t *key)
@@ -108,37 +44,6 @@ typedef struct {
     int64_t    rd;
 } TaxNode;
 
-static int
-spi_fetch_synsets(Datum word, Datum **out_ids, int *out_n)
-{
-    Oid     argtypes[1] = { BYTEAOID };
-    Datum   args[1] = { word };
-    int     rc;
-
-    *out_ids = NULL;
-    *out_n = 0;
-
-    rc = SPI_execute_with_args(
-        "SELECT sn.synset_id FROM laplace.senses($1) sn",
-        1, argtypes, args, NULL, true, 0);
-    if (rc != SPI_OK_SELECT)
-        elog(ERROR, "converse_native: senses query failed: %s",
-             SPI_result_code_string(rc));
-
-    if (SPI_processed == 0)
-        return 0;
-
-    *out_ids = (Datum *) palloc(sizeof(Datum) * SPI_processed);
-    for (uint64 r = 0; r < SPI_processed; r++)
-    {
-        bool isnull;
-        (*out_ids)[r] = copy_bytea_datum(
-            SPI_getbinval(SPI_tuptable->vals[r], SPI_tuptable->tupdesc, 1, &isnull));
-    }
-    *out_n = (int) SPI_processed;
-    return *out_n;
-}
-
 static Datum
 spi_top_synset(Datum word)
 {
@@ -151,56 +56,6 @@ spi_top_synset(Datum word)
         "SELECT sn.synset_id FROM laplace.senses($1) sn "
         "ORDER BY sn.eff_mu DESC NULLS LAST LIMIT 1",
         1, argtypes, args, NULL, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return (Datum) 0;
-    return copy_bytea_datum(
-        SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
-}
-
-static Datum
-spi_realize(Datum id, Datum lang)
-{
-    Oid     argtypes[2] = { BYTEAOID, BYTEAOID };
-    Datum   args[2] = { id, lang };
-    char    nulls[3] = " n";
-    bool    isnull;
-    int     rc;
-
-    if (lang == (Datum) 0)
-        nulls[1] = 'n';
-
-    rc = SPI_execute_with_args(
-        "SELECT laplace.realize($1, $2)", 2, argtypes, args, nulls, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return (Datum) 0;
-    return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-}
-
-static Datum
-spi_type_label(Datum type_id)
-{
-    Oid   argtypes[1] = { BYTEAOID };
-    Datum args[1] = { type_id };
-    bool  isnull;
-    int   rc;
-
-    rc = SPI_execute_with_args(
-        "SELECT laplace.type_label($1)", 1, argtypes, args, NULL, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return (Datum) 0;
-    return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-}
-
-static Datum
-spi_word_language(Datum word)
-{
-    Oid   argtypes[1] = { BYTEAOID };
-    Datum args[1] = { word };
-    bool  isnull;
-    int   rc;
-
-    rc = SPI_execute_with_args(
-        "SELECT laplace.word_language($1)", 1, argtypes, args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     return copy_bytea_datum(
@@ -492,7 +347,7 @@ pg_laplace_isa_path(PG_FUNCTION_ARGS)
     {
         Datum *synsets;
         int    ns;
-        spi_fetch_synsets(y, &synsets, &ns);
+        spi_fetch_synset_ids(y, &synsets, &ns);
         for (int i = 0; i < ns; i++)
             targets[n_targets++] = datum_to_hash128(synsets[i]);
         targets[n_targets++] = datum_to_hash128(y);
@@ -525,7 +380,7 @@ pg_laplace_isa_path(PG_FUNCTION_ARGS)
 
         starts = (hash128_t *) palloc(sizeof(hash128_t) * 64);
         starts[n_starts++] = datum_to_hash128(x);
-        spi_fetch_synsets(x, &synsets, &ns);
+        spi_fetch_synset_ids(x, &synsets, &ns);
         for (int i = 0; i < ns; i++)
             starts[n_starts++] = datum_to_hash128(synsets[i]);
 
@@ -691,12 +546,12 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
         int    ns_x = 0, ns_y = 0;
 
         seeds_x[nx++] = datum_to_hash128(x);
-        spi_fetch_synsets(x, &synsets_x, &ns_x);
+        spi_fetch_synset_ids(x, &synsets_x, &ns_x);
         for (int i = 0; i < ns_x && nx < 32; i++)
             seeds_x[nx++] = datum_to_hash128(synsets_x[i]);
 
         seeds_y[ny++] = datum_to_hash128(y);
-        spi_fetch_synsets(y, &synsets_y, &ns_y);
+        spi_fetch_synset_ids(y, &synsets_y, &ns_y);
         for (int i = 0; i < ns_y && ny < 32; i++)
             seeds_y[ny++] = datum_to_hash128(synsets_y[i]);
 
@@ -735,7 +590,7 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
             int    ns;
             bool   from_x = side == 0;
 
-            spi_fetch_synsets(anchor, &synsets, &ns);
+            spi_fetch_synset_ids(anchor, &synsets, &ns);
             for (int si = -1; si < ns; si++)
             {
                 Datum subj = si < 0 ? anchor : synsets[si];
@@ -884,7 +739,7 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
     {
         Datum *synsets;
         int    ns;
-        spi_fetch_synsets(y_id, &synsets, &ns);
+        spi_fetch_synset_ids(y_id, &synsets, &ns);
         for (int i = 0; i < ns && n_goals < 64; i++)
             goals[n_goals++] = copy_bytea_datum(synsets[i]);
     }

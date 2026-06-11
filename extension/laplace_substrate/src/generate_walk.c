@@ -11,6 +11,7 @@
 #include "lib/stringinfo.h"
 #include "mb/pg_wchar.h"
 
+#include "spi_common.h"
 #include "spi_nested.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_generate_tree);
@@ -46,15 +47,7 @@ ensure_edge_plan(void)
     }
 }
 
-static Datum
-eff_mu_display_numeric(int64 rating, int64 rd)
-{
-    int64 eff = rating - 2 * rd;
-    Datum n = DirectFunctionCall1(int8_numeric, Int64GetDatum(eff));
-    Datum b = DirectFunctionCall1(int8_numeric, Int64GetDatum(INT64CONST(1000000000)));
-    Datum d = DirectFunctionCall2(numeric_div, n, b);
-    return DirectFunctionCall2(numeric_round, d, Int32GetDatum(3));
-}
+/* eff_mu_display_numeric / copy_bytea_datum live in spi_common.h */
 
 typedef struct WalkNode
 {
@@ -66,16 +59,6 @@ typedef struct WalkNode
     Datum   path_mu;
     int64   witnesses;
 } WalkNode;
-
-static Datum
-copy_bytea_datum(Datum d)
-{
-    bytea *src = DatumGetByteaPP(d);
-    Size   len = VARSIZE_ANY(src);
-    bytea *dst = (bytea *) palloc(len);
-    memcpy(dst, src, len);
-    return PointerGetDatum(dst);
-}
 
 static ArrayType *
 branch_array(WalkNode *nodes, int idx, bool types)

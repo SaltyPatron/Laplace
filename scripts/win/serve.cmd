@@ -13,9 +13,7 @@ rem ==========================================================================
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 
-if not defined LAPLACE_DB (
-    set "LAPLACE_DB=Host=localhost;Username=postgres;Password=postgres;Database=laplace"
-)
+rem LAPLACE_DB comes from env.cmd (single source; pre-set to override).
 if not defined LAPLACE_PORT (
     set "LAPLACE_PORT=5187"
 )

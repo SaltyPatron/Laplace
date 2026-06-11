@@ -378,6 +378,14 @@ public sealed class IngestRunner
 
         var epochBuffer = new List<SubstrateChange>(batchSize * options.ParallelWorkers);
         int currentEpoch = 0;
+        long bufferedRows = 0;
+        // An epoch is an UNORDERED parallel set — the barrier exists only BETWEEN epochs.
+        // Flushing an epoch in bounded waves therefore preserves the fence law while capping
+        // memory. Without this, a model-deposit epoch (~1.1B rows) buffered entirely in RAM
+        // before the first apply (observed: zero INGEST_BATCH lines while RSS climbed to 30+ GB;
+        // the prior run's "hang" was this buffer, not the ETL).
+        long flushRows = Math.Max((long)Math.Max(commitRows, 1), 500_000L)
+                         * Math.Max(1, options.ParallelWorkers);
 
         while (await channel.Reader.WaitToReadAsync(ct))
         {
@@ -396,9 +404,19 @@ public sealed class IngestRunner
                         epochBuffer, decomposer, options, batchSize, commitRows,
                         shouldFlush, rowsOf, counters, failures, log, rng, ct);
                     epochBuffer.Clear();
+                    bufferedRows = 0;
                     currentEpoch = intentEpoch;
                 }
                 epochBuffer.Add(intent);
+                bufferedRows += rowsOf(intent);
+                if (bufferedRows >= flushRows)
+                {
+                    await FlushEpochParallelAsync(
+                        epochBuffer, decomposer, options, batchSize, commitRows,
+                        shouldFlush, rowsOf, counters, failures, log, rng, ct);
+                    epochBuffer.Clear();
+                    bufferedRows = 0;
+                }
             }
         }
 

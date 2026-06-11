@@ -1,7 +1,6 @@
 @echo off
 setlocal
-set "PGPASSWORD=postgres"
-set "PGBIN=C:\Program Files\PostgreSQL\18\bin"
+call "%~dp0env.cmd"
 set "PSQL="%PGBIN%\psql.exe" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1"
 
 %PSQL% ^
