@@ -94,9 +94,24 @@ Every 2026-06-07 query number was taken on the slow tier. Levers, each independe
 - **GPU phase** — AFTER ingest/export proofing: batch ingest math (LE/Procrustes/cell ETL) only; never the query path. 4060 Ti + 1080 Ti on board; driver pinned for Pascal.
 Composite conservative estimate: 2–3 orders of magnitude above RECEIPTS.md numbers before any new algorithm.
 
-## 12. Witnessed stopwords — POS binding diagnosis
+## 12. Witnessed stopwords — DIAGNOSED 2026-06-11 (missing witness, not a binding bug)
 
-The idea (ruled good): function-word-ness derives from UD's HAS_POS consensus, not hardcoded lists. First implementation returned false for obvious function words — the HAS_POS subject identity needs diagnosis (does UD attest POS on the surface word entity, the lemma, or an occurrence/lemma-in-language entity?). Resolve the binding, then promote `is_function_word()` into the extension and use it to split collocate views into content/function planes.
+The idea (ruled good): function-word-ness derives from UD's HAS_POS consensus, not hardcoded lists.
+
+**Diagnosis.** The binding is correct and was never the problem: UD attests HAS_POS on the surface
+form's content root (UDDecomposer.cs `NativeAttestation.PosUpos(form, …)`) — the exact identity
+`laplace.word_id()` resolves. The lexical sources (WordNet/FrameNet/Wiktionary) attest POS on lemma
+content roots, which coincide where surface = lemma. `is_function_word()` returned false because
+**UD has zero evidence rows in the working DB** (`evidence_count(NULL, source_id('UDDecomposer'),
+NULL) = 0`): UD sits in the deferred lexical-bulk phase (`seed-deferred-lexical.cmd`; ordering law
+"… → [deferred] conceptnet → atomic2020 → ud → wiktionary") which has not been run. The 158k
+existing HAS_POS consensus rows are content-lemma testimony — closed-class words have no synsets,
+so no other witness can cover "the"/DET.
+
+**Remediation.** Run the UD seed (deferred phase) when the cluster is free, then promote
+`is_function_word()` as a consensus probe: UPOS ∈ {DET, ADP, AUX, CCONJ, SCONJ, PART, PRON} above a
+witness threshold. Nuance: UD attests "The" and "the" as distinct content roots — the probe should
+case-fold or accept either form's consensus.
 
 ## 13. Document context stamping (text bigrams) — FIXED 2026-06-11 (prospective)
 
