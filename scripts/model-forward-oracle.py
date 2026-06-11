@@ -181,7 +181,7 @@ def cmd_forward_gguf(gguf, prompt, tok_dir):
     hd = d // H
     eps = kv.get(pre+"attention.layer_norm_rms_epsilon", 1e-5)
     theta = kv.get(pre+"rope.freq_base", 10000.0)
-    vocab = json.load(open(os.path.join(tok_dir, "tokenizer.json")))["model"]["vocab"]
+    vocab = json.load(open(os.path.join(tok_dir, "tokenizer.json"), encoding="utf-8"))["model"]["vocab"]
     inv = {i: s for s, i in vocab.items()}
 
     ids = [1]

@@ -39,6 +39,26 @@ CREATE OR REPLACE FUNCTION content_trajectory_pairs(p_window int DEFAULT 1)
     SELECT p.s, p.o, p.c, t.t FROM pairs p JOIN totals t USING (s)
 $$;
 
+-- The order ladder, one pass: pair counts BY GAP (exact forward distance within a
+-- witnessed sequence) up to p_max_gap, with per-(subject,gap) totals. The foundry
+-- pours gap g into layer g of the mold — depth in the cast model is bought with
+-- sequential order from the trajectories, not with copies of one pairwise summary.
+CREATE OR REPLACE FUNCTION content_trajectory_pairs_by_gap(p_max_gap int DEFAULT 8)
+    RETURNS TABLE(subject_id bytea, object_id bytea, gap int, cnt bigint, subject_total bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    WITH pairs AS (
+        SELECT a.token AS s, b.token AS o, (b.pos - a.pos)::int AS g, count(*) AS c
+        FROM content_index a
+        JOIN content_index b ON b.seq_id = a.seq_id
+                            AND b.pos > a.pos AND b.pos <= a.pos + p_max_gap
+        GROUP BY a.token, b.token, b.pos - a.pos
+    ), totals AS (
+        SELECT s, g, sum(c) AS t FROM pairs GROUP BY s, g
+    )
+    SELECT p.s, p.o, p.g, p.c, t.t FROM pairs p JOIN totals t USING (s, g)
+$$;
+
 -- native kernel ----------------------------------------------------------------
 CREATE OR REPLACE FUNCTION generate_tokens(
         p_ctx bytea[], p_steps int DEFAULT 24, p_max_order int DEFAULT 5,
