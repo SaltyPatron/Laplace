@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 
 namespace Laplace.Endpoints.OpenAICompat;
@@ -39,7 +40,7 @@ internal static class EndpointMappings
 
     public static void MapOpenAiCompatEndpoints(this WebApplication app)
     {
-        app.MapPost("/v1/chat/completions", async (HttpRequest request, SubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
+        app.MapPost("/v1/chat/completions", async (HttpRequest request, SubstrateClient substrate, IBillingOrchestrator billing, TurnWitness turnWitness, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<ChatCompletionsRequest>(request, ct);
             if (payload is null)
@@ -87,15 +88,19 @@ internal static class EndpointMappings
                     });
                     await request.HttpContext.Response.WriteAsync($"data: {genRole}\n\n", ct);
 
+                    var genStreamText = new StringBuilder();
                     await foreach (var token in substrate.GenerateNgramStreamAsync(
                         prompt, steps: genSteps, temperature: genTemp, ct: ct))
                     {
+                        genStreamText.Append(token.Token);
                         var chunk = JsonSerializer.Serialize(new {
                             id = genId, @object = "chat.completion.chunk", created = genCreated, model = payload.Model,
                             choices = new[] { new { index = 0, delta = new { content = token.Token }, finish_reason = (string?)null } }
                         });
                         await request.HttpContext.Response.WriteAsync($"data: {chunk}\n\n", ct);
                     }
+                    turnWitness.Enqueue(prompt, "prompt");
+                    turnWitness.Enqueue(genStreamText.ToString().TrimStart(), "reply");
                     var genStop = JsonSerializer.Serialize(new {
                         id = genId, @object = "chat.completion.chunk", created = genCreated, model = payload.Model,
                         choices = new[] { new { index = 0, delta = new { content = "" }, finish_reason = "stop" } }
@@ -110,6 +115,10 @@ internal static class EndpointMappings
                     prompt, steps: genSteps, temperature: genTemp, ct: ct))
                     genTokens.Add(token);
 
+                var genContent = string.Concat(genTokens.Select(t => t.Token)).TrimStart();
+                turnWitness.Enqueue(prompt, "prompt");
+                turnWitness.Enqueue(genContent, "reply");
+
                 return Results.Json(new
                 {
                     id = $"chatcmpl-{Guid.NewGuid():N}",
@@ -121,7 +130,7 @@ internal static class EndpointMappings
                         new
                         {
                             index = 0,
-                            message = new { role = "assistant", content = string.Concat(genTokens.Select(t => t.Token)).TrimStart() },
+                            message = new { role = "assistant", content = genContent },
                             finish_reason = "stop"
                         }
                     },
@@ -145,6 +154,11 @@ internal static class EndpointMappings
             var content = rows.Count == 0
                 ? "I hold no consensus about that yet."
                 : string.Join("\n", rows.Select(r => r.Reply));
+
+            // Only the FINAL user turn is new testimony: stateless clients resend the
+            // full history every call, and prior turns were each final once already.
+            turnWitness.Enqueue(userTurns[^1], "prompt");
+            if (rows.Count > 0) turnWitness.Enqueue(content, "reply");
 
             if (payload.Stream)
             {
@@ -200,7 +214,7 @@ internal static class EndpointMappings
             });
         });
 
-        app.MapPost("/v1/completions", async (HttpRequest request, SubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
+        app.MapPost("/v1/completions", async (HttpRequest request, SubstrateClient substrate, IBillingOrchestrator billing, TurnWitness turnWitness, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<CompletionsRequest>(request, ct);
             if (payload is null)
@@ -229,9 +243,11 @@ internal static class EndpointMappings
                 request.HttpContext.Response.Headers["Cache-Control"] = "no-cache";
                 request.HttpContext.Response.Headers["X-Accel-Buffering"] = "no";
 
+                var streamText = new StringBuilder();
                 await foreach (var token in substrate.GenerateNgramStreamAsync(
                     payload.Prompt.Trim(), steps: steps, temperature: temp, ct: ct))
                 {
+                    streamText.Append(token.Token);
                     var chunk = JsonSerializer.Serialize(new {
                         id = completionId, @object = "text_completion",
                         created, model = payload.Model,
@@ -240,6 +256,8 @@ internal static class EndpointMappings
                     });
                     await request.HttpContext.Response.WriteAsync($"data: {chunk}\n\n", ct);
                 }
+                turnWitness.Enqueue(payload.Prompt.Trim(), "prompt");
+                turnWitness.Enqueue(streamText.ToString().TrimStart(), "reply");
                 await request.HttpContext.Response.WriteAsync("data: [DONE]\n\n", ct);
                 return Results.Empty;
             }
@@ -251,6 +269,8 @@ internal static class EndpointMappings
                 tokens.Add(token);
 
             var text = string.Concat(tokens.Select(t => t.Token)).TrimStart();
+            turnWitness.Enqueue(payload.Prompt.Trim(), "prompt");
+            turnWitness.Enqueue(text, "reply");
             return Results.Json(new
             {
                 id = $"cmpl-{Guid.NewGuid():N}",

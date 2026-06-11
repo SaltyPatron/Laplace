@@ -21,6 +21,31 @@ public static unsafe class CodepointPerfcache
         }
     }
 
+    /// <summary>
+    /// Idempotent default load: LAPLACE_PERFCACHE_BIN if set, else the nearest ancestor
+    /// build tree's blob. Mirrors the CLI's resolver so every host process shares one law.
+    /// </summary>
+    public static void LoadDefault()
+    {
+        if (IsLoaded) return;
+        Load(ResolveDefaultPath());
+    }
+
+    public static string ResolveDefaultPath()
+    {
+        var env = Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN");
+        if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+            foreach (var build in dir.EnumerateDirectories("build*"))
+            {
+                var hit = Directory.EnumerateFiles(build.FullName, "laplace_t0_perfcache.bin",
+                                                   SearchOption.AllDirectories).FirstOrDefault();
+                if (hit is not null) return hit;
+            }
+        throw new InvalidOperationException(
+            "perf-cache blob not found; build the engine or set LAPLACE_PERFCACHE_BIN.");
+    }
+
     public static void Unload() => NativeInterop.CodepointTableUnload();
 
     public static bool IsLoaded => NativeInterop.CodepointTableIsLoaded() != 0;

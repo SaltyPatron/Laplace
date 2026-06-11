@@ -7,6 +7,8 @@ internal static class AppComposition
     public static IServiceCollection AddOpenAiCompatServices(this IServiceCollection services)
     {
         services.AddSingleton<SubstrateClient>();
+        services.AddSingleton<TurnWitness>();
+        services.AddHostedService(sp => sp.GetRequiredService<TurnWitness>());
         services.AddSingleton<IBillingCatalog, StaticBillingCatalog>();
         services.AddSingleton<IStripePriceMap, InMemoryStripePriceMap>();
         services.AddSingleton<IStripeCatalogSync, StripeCatalogSync>();
