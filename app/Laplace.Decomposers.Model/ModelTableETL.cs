@@ -18,7 +18,7 @@ public sealed class ModelTableETL
     private const int RowsPerChange = 500_000;
     private const int RowTile = 256;
     private static readonly double ModelWeight =
-        RelationTypeRegistry.Resolve("EMBEDS").Rank * SourceTrust.AiModelProbe;
+        RelationTypeRegistry.Resolve("ATTENDS").Rank * SourceTrust.AiModelProbe;
     private static readonly double[] _one = new double[1];
 
     private readonly LlamaRecipeExtractor.RecipeInfo _recipe;
