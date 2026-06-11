@@ -96,6 +96,13 @@ BEGIN
     IF to_regclass(p_table) IS NULL THEN
         RAISE EXCEPTION 'materialize_period_partition: staging % does not exist', p_table;
     END IF;
+    -- Stats so the planner sees the real row count (fresh UNLOGGED tables have none).
+    EXECUTE format('ANALYZE %I', p_table);
+    -- Probe order is the law here: BLAKE3 keys have zero locality, so unordered
+    -- upserts random-fault the 25GB+ PK leaf-by-leaf (2 probes/row: join + conflict
+    -- arbiter). Sorting the batch by cid turns both probe streams into an ascending
+    -- leaf walk, and the 8 parallel partition folds share buffers instead of
+    -- evicting each other (measured 2026-06-11: 45-70k rel/s unordered).
     EXECUTE format($f$
         WITH merged AS (
             SELECT s.subject_id, s.type_id, s.object_id,
@@ -106,6 +113,11 @@ BEGIN
                    max(s.last_ts)           AS last_ts
             FROM %I s
             GROUP BY s.subject_id, s.type_id, s.object_id
+        ),
+        keyed AS MATERIALIZED (
+            SELECT mm.*, consensus_id(mm.subject_id, mm.type_id, mm.object_id) AS cid
+            FROM merged mm
+            ORDER BY consensus_id(mm.subject_id, mm.type_id, mm.object_id)
         )
         INSERT INTO consensus (id, subject_id, type_id, object_id,
                                rating, rd, volatility, witness_count, last_observed_at)
@@ -129,10 +141,10 @@ BEGIN
                        m.sum_score,
                        glicko2_tau()
                    ) AS acc
-            FROM (SELECT mm.*, consensus_id(mm.subject_id, mm.type_id, mm.object_id) AS cid
-                  FROM merged mm) m
+            FROM keyed m
             LEFT JOIN consensus c ON c.id = m.cid
         ) f
+        ORDER BY f.cid
         ON CONFLICT (id) DO UPDATE SET
             rating           = EXCLUDED.rating,
             rd               = EXCLUDED.rd,
@@ -168,6 +180,8 @@ BEGIN
     IF to_regclass(p_table) IS NULL THEN
         RAISE EXCEPTION 'materialize_period_partition_fresh: staging % does not exist', p_table;
     END IF;
+    EXECUTE format('ANALYZE %I', p_table);
+    -- Sorted-arbiter law: see materialize_period_partition.
     EXECUTE format($f$
         WITH merged AS (
             SELECT s.subject_id, s.type_id, s.object_id,
@@ -181,12 +195,13 @@ BEGIN
         )
         INSERT INTO consensus (id, subject_id, type_id, object_id,
                                rating, rd, volatility, witness_count, last_observed_at)
-        SELECT consensus_id(m.subject_id, m.type_id, m.object_id),
+        SELECT m.cid,
                m.subject_id, m.type_id, m.object_id,
                (m.acc).rating, (m.acc).rd, (m.acc).volatility,
                m.games, m.last_ts
         FROM (
             SELECT mm.subject_id, mm.type_id, mm.object_id, mm.games, mm.last_ts,
+                   consensus_id(mm.subject_id, mm.type_id, mm.object_id) AS cid,
                    laplace_glicko2_accumulate_games(
                        glicko2_neutral_mu(),
                        glicko2_initial_rd(),
@@ -201,6 +216,7 @@ BEGIN
                    ) AS acc
             FROM merged mm
         ) m
+        ORDER BY m.cid
         ON CONFLICT (id) DO NOTHING
     $f$, p_table);
     GET DIAGNOSTICS n_materialized = ROW_COUNT;
