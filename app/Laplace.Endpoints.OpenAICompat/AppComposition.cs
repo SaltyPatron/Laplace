@@ -1,3 +1,5 @@
+using Laplace.Endpoints.OpenAICompat.Auth;
+using Laplace.Endpoints.OpenAICompat.BillingPostgres;
 using Microsoft.Extensions.Options;
 
 namespace Laplace.Endpoints.OpenAICompat;
@@ -6,22 +8,54 @@ internal static class AppComposition
 {
     public static IServiceCollection AddOpenAiCompatServices(this IServiceCollection services)
     {
+        // Tenant seam: LAPLACE_AUTH_MODE selects the resolver. "header" is the only mode today;
+        // Azure B2C later registers a JwtTenantResolver here — consumers key on the tenant string.
+        var authMode = Environment.GetEnvironmentVariable("LAPLACE_AUTH_MODE") ?? "header";
+        services.AddSingleton<ITenantResolver>(authMode.ToLowerInvariant() switch
+        {
+            "header" => new HeaderTenantResolver(),
+            _ => throw new InvalidOperationException(
+                $"Unknown LAPLACE_AUTH_MODE '{authMode}' (supported: header).")
+        });
+
         services.AddSingleton<SubstrateClient>();
+        services.AddSingleton<ISubstrateClient>(sp => sp.GetRequiredService<SubstrateClient>());
         services.AddSingleton<TurnWitness>();
         services.AddHostedService(sp => sp.GetRequiredService<TurnWitness>());
         services.AddSingleton<IBillingCatalog, StaticBillingCatalog>();
-        services.AddSingleton<IStripePriceMap, InMemoryStripePriceMap>();
         services.AddSingleton<IStripeCatalogSync, StripeCatalogSync>();
         services.AddSingleton<ISynthesisQuoteCalculator, SynthesisQuoteCalculator>();
         services.AddSingleton<ITraceQuoteCalculator, TraceQuoteCalculator>();
         services.AddSingleton<IReportQuoteCalculator, ReportQuoteCalculator>();
-        services.AddSingleton<IBillingEntitlementStore, InMemoryBillingEntitlementStore>();
-        services.AddSingleton<IBillingWebhookEventStore, InMemoryBillingWebhookEventStore>();
         services.AddSingleton<IBillingWebhookHandler, BillingWebhookHandler>();
-        services.AddSingleton<IBillingLedger, InMemoryBillingLedger>();
-        services.AddSingleton<IBillingQuoteStore, InMemoryBillingQuoteStore>();
         services.AddSingleton<IStripeCheckoutGateway, StripeCheckoutGateway>();
         services.AddSingleton<IBillingOrchestrator, BillingOrchestrator>();
+
+        // Billing stores: in-memory (test/dev default) or Postgres (production — app schema,
+        // applied by Laplace.Migrations). Both implement the same async contracts; the
+        // dual-implementation store-contract tests pin behavioral parity.
+        var billingStore = Environment.GetEnvironmentVariable("LAPLACE_BILLING_STORE") ?? "memory";
+        if (string.Equals(billingStore, "postgres", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddSingleton<IStripePriceMap>(sp => new PostgresStripePriceMap(sp.GetRequiredService<SubstrateClient>().DataSource));
+            services.AddSingleton<IBillingEntitlementStore>(sp => new PostgresBillingEntitlementStore(sp.GetRequiredService<SubstrateClient>().DataSource));
+            services.AddSingleton<IBillingWebhookEventStore>(sp => new PostgresBillingWebhookEventStore(sp.GetRequiredService<SubstrateClient>().DataSource));
+            services.AddSingleton<IBillingLedger>(sp => new PostgresBillingLedger(sp.GetRequiredService<SubstrateClient>().DataSource));
+            services.AddSingleton<IBillingQuoteStore>(sp => new PostgresBillingQuoteStore(sp.GetRequiredService<SubstrateClient>().DataSource));
+        }
+        else if (string.Equals(billingStore, "memory", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddSingleton<IStripePriceMap, InMemoryStripePriceMap>();
+            services.AddSingleton<IBillingEntitlementStore, InMemoryBillingEntitlementStore>();
+            services.AddSingleton<IBillingWebhookEventStore, InMemoryBillingWebhookEventStore>();
+            services.AddSingleton<IBillingLedger, InMemoryBillingLedger>();
+            services.AddSingleton<IBillingQuoteStore, InMemoryBillingQuoteStore>();
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                $"Unknown LAPLACE_BILLING_STORE '{billingStore}' (supported: memory, postgres).");
+        }
 
         services.AddOptions<StripeBillingOptions>().Configure(options =>
         {
@@ -34,12 +68,6 @@ internal static class AppComposition
         });
 
         return services;
-    }
-
-    public static string ResolveTenant(HttpRequest request)
-    {
-        var header = request.Headers["X-Laplace-Tenant"].ToString();
-        return string.IsNullOrWhiteSpace(header) ? "local-dev" : header.Trim();
     }
 
     public static string? ResolveQuoteId(HttpRequest request)

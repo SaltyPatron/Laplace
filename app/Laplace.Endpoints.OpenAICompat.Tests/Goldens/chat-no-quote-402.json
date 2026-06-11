@@ -1,0 +1,10 @@
+{
+  "error": {
+    "type": "payment_required",
+    "code": "quote_not_found",
+    "message": "Quote does not exist.",
+    "detail": {
+      "service_id": "chat.completions"
+    }
+  }
+}

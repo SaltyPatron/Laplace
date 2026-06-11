@@ -1,0 +1,57 @@
+[
+  {
+    "id": "<id>",
+    "object": "text_completion",
+    "created": 0,
+    "model": "laplace-completions-001",
+    "choices": [
+      {
+        "text": " the",
+        "index": 0,
+        "finish_reason": null,
+        "logprobs": {
+          "token_logprobs": [
+            5
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "<id>",
+    "object": "text_completion",
+    "created": 0,
+    "model": "laplace-completions-001",
+    "choices": [
+      {
+        "text": " whale",
+        "index": 0,
+        "finish_reason": null,
+        "logprobs": {
+          "token_logprobs": [
+            4
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "<id>",
+    "object": "text_completion",
+    "created": 0,
+    "model": "laplace-completions-001",
+    "choices": [
+      {
+        "text": " sings",
+        "index": 0,
+        "finish_reason": null,
+        "logprobs": {
+          "token_logprobs": [
+            3
+          ]
+        }
+      }
+    ]
+  },
+  "[DONE]"
+]

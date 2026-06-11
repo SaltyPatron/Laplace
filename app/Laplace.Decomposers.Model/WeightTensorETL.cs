@@ -38,7 +38,8 @@ public sealed class WeightTensorETL
             _refs.Count, StringComparer.Ordinal);
         foreach (var r in _refs) refMap[r.Name] = r;
         int vocabSize = _recipe.VocabSize, dModel = _recipe.HiddenSize;
-        float[] embed = LoadTensorF32(refMap, "model.embed_tokens.weight",
+        string embedName = ArchitectureProfile.For(_recipe.ModelType).EmbedTokens;
+        float[] embed = LoadTensorF32(refMap, embedName,
             (long)vocabSize * dModel);
         var morph = new TokenS3Morph(embed, vocabSize, dModel, _tokens, _sourceId, _tokenizerEntityId, _log, commitEpoch);
         foreach (var change in morph.Emit())

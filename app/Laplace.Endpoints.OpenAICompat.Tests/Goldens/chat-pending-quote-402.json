@@ -1,0 +1,12 @@
+{
+  "error": {
+    "type": "payment_required",
+    "code": "payment_pending",
+    "message": "Stripe is not configured; quote is awaiting manual approval.",
+    "detail": {
+      "quoteId": "<quote_id>",
+      "status": "awaiting_manual_approval",
+      "stripeCheckoutUrl": null
+    }
+  }
+}

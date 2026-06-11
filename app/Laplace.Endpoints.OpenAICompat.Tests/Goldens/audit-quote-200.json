@@ -1,0 +1,23 @@
+{
+  "quote_id": "<quote_id>",
+  "tenant": "golden-auditq-tenant",
+  "service_id": "audit.deep_report",
+  "scope": "full",
+  "academic": true,
+  "metered_items": 54,
+  "billable_units": 54,
+  "unit": "audit_unit",
+  "items_per_unit": 1,
+  "amount_cents": 1230,
+  "currency": "usd",
+  "status": "awaiting_manual_approval",
+  "expires_at": "<timestamp>",
+  "stripe_checkout_url": null,
+  "next": {
+    "execute_header": {
+      "name": "X-Laplace-Quote-Id",
+      "value": "<quote_id>"
+    },
+    "note": "Audit reports are metered by selected sections, scope breadth, and academic provenance expansion."
+  }
+}

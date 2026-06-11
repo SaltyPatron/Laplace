@@ -1,0 +1,28 @@
+{
+  "entity_id": "00112233445566778899aabbccddeeff",
+  "entity_label": "whale",
+  "evidence": [
+    {
+      "type_id": "0123456789abcdef0123456789abcdef",
+      "type_label": "IS_A",
+      "object_id": "ffeeddccbbaa99887766554433221100",
+      "object_label": "cetacean",
+      "source_id": "fedcba9876543210fedcba9876543210",
+      "source_label": "WordNet",
+      "context_id": null,
+      "outcome": 2,
+      "observation_count": 12
+    },
+    {
+      "type_id": "0123456789abcdef0123456789abcdef",
+      "type_label": "IS_A",
+      "object_id": "ffeeddccbbaa99887766554433221100",
+      "object_label": "cetacean",
+      "source_id": "fedcba9876543210fedcba9876543210",
+      "source_label": "ConceptNet",
+      "context_id": null,
+      "outcome": 2,
+      "observation_count": 7
+    }
+  ]
+}

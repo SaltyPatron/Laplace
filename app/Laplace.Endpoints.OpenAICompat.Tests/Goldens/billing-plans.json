@@ -1,0 +1,108 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "plan_id": "developer",
+      "service_id": "plan.developer",
+      "name": "Developer",
+      "description": "Individual builder access with enough credits to prototype paid quote-gated workflows.",
+      "monthly_price_cents": 2900,
+      "currency": "usd",
+      "monthly_credits": {
+        "chat.completions": 1000,
+        "completions": 1000,
+        "generate": 500,
+        "embeddings": 5000,
+        "inspect": 250,
+        "explain.trace": 25
+      },
+      "included_product_ids": [
+        "laplace.audit",
+        "laplace.embedding",
+        "laplace.explainability",
+        "laplace.generation",
+        "laplace.inference.chat",
+        "laplace.inference.completion",
+        "laplace.inspection",
+        "laplace.neighbors",
+        "laplace.recipe",
+        "laplace.search",
+        "laplace.synthesis",
+        "laplace.visualization"
+      ],
+      "support_tier": "community",
+      "active": true
+    },
+    {
+      "plan_id": "studio",
+      "service_id": "plan.studio",
+      "name": "Studio",
+      "description": "Team bundle for heavier research, reporting, visualization, and model-building workloads.",
+      "monthly_price_cents": 9900,
+      "currency": "usd",
+      "monthly_credits": {
+        "chat.completions": 10000,
+        "completions": 10000,
+        "generate": 5000,
+        "embeddings": 50000,
+        "inspect": 2500,
+        "audit.deep_report": 50,
+        "visualization.deep_export": 50,
+        "explain.trace": 250,
+        "synthesis": 500
+      },
+      "included_product_ids": [
+        "laplace.audit",
+        "laplace.embedding",
+        "laplace.explainability",
+        "laplace.generation",
+        "laplace.inference.chat",
+        "laplace.inference.completion",
+        "laplace.inspection",
+        "laplace.neighbors",
+        "laplace.recipe",
+        "laplace.search",
+        "laplace.synthesis",
+        "laplace.visualization"
+      ],
+      "support_tier": "priority",
+      "active": true
+    },
+    {
+      "plan_id": "enterprise",
+      "service_id": "plan.enterprise",
+      "name": "Enterprise",
+      "description": "High-throughput substrate access with large synthesis/export meters and account-level support.",
+      "monthly_price_cents": 49900,
+      "currency": "usd",
+      "monthly_credits": {
+        "chat.completions": 100000,
+        "completions": 100000,
+        "generate": 50000,
+        "embeddings": 500000,
+        "inspect": 25000,
+        "audit.deep_report": 500,
+        "visualization.deep_export": 500,
+        "explain.trace": 2500,
+        "synthesis": 10000,
+        "recipe.export": 1000
+      },
+      "included_product_ids": [
+        "laplace.audit",
+        "laplace.embedding",
+        "laplace.explainability",
+        "laplace.generation",
+        "laplace.inference.chat",
+        "laplace.inference.completion",
+        "laplace.inspection",
+        "laplace.neighbors",
+        "laplace.recipe",
+        "laplace.search",
+        "laplace.synthesis",
+        "laplace.visualization"
+      ],
+      "support_tier": "account",
+      "active": true
+    }
+  ]
+}

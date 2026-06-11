@@ -10,7 +10,7 @@ call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 rem Connection/data-path constants come from env.cmd. Reproducibility pins below are deliberate.
 set "LAPLACE_INGEST_LANGS=en"
-set "LAPLACE_INGEST_WORKERS=4"
+if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=4"
 set "LAPLACE_DECOMPOSE_WORKERS=1"
 set "LAPLACE_COPY_VALIDATE=1"
 if not defined LAPLACE_SKIP_MODELS set "LAPLACE_SKIP_MODELS=1"

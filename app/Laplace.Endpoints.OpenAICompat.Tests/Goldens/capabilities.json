@@ -1,0 +1,41 @@
+{
+  "stream": "F-scaffold",
+  "endpoints": {
+    "chat_completions": {
+      "status": "live",
+      "backend": "laplace.converse",
+      "billing": "preflight_quote_required"
+    },
+    "completions": {
+      "status": "live",
+      "backend": "laplace.completions",
+      "billing": "preflight_quote_required"
+    },
+    "embeddings": {
+      "status": "pending",
+      "reason": "requires Stream E physicality lookup path"
+    },
+    "audit_reports": {
+      "status": "live",
+      "backend": "laplace.substrate_counts + laplace.consensus_stats + laplace.top_relations",
+      "billing": "audit.deep_report"
+    },
+    "visualizations": {
+      "status": "live",
+      "backend": "laplace.top_relations + laplace.entity_physicalities",
+      "billing": "visualization.deep_export"
+    },
+    "explainability_reports": {
+      "status": "live",
+      "backend": "laplace.generate_tree + laplace.attestations_out",
+      "billing": "explain.trace"
+    },
+    "billing": {
+      "status": "live",
+      "provider": "stripe_or_manual"
+    },
+    "models": {
+      "status": "live"
+    }
+  }
+}

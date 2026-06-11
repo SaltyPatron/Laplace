@@ -1,0 +1,319 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "product_id": "laplace.audit",
+      "name": "Laplace Substrate Audit",
+      "description": "Substrate accounting and dedup-health reports: entity/consensus/evidence counts, omni-source convergence, witness fan-in.",
+      "category": "audit",
+      "prices": [
+        {
+          "service_id": "audit.deep_report",
+          "unit": "audit_unit",
+          "unit_price_cents": 20,
+          "base_fee_cents": 150,
+          "currency": "usd",
+          "lookup_key": "laplace_audit_deep_report_audit_unit_usd",
+          "metered": true,
+          "recurring_interval": null
+        },
+        {
+          "service_id": "audit.report",
+          "unit": "report",
+          "unit_price_cents": 50,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_audit_report_report_usd",
+          "metered": false,
+          "recurring_interval": null
+        }
+      ]
+    },
+    {
+      "product_id": "laplace.embedding",
+      "name": "Laplace Structural Embedding",
+      "description": "Native 4-D S^3 structural coordinate for content (structural, not a learned semantic vector).",
+      "category": "embedding",
+      "prices": [
+        {
+          "service_id": "embeddings",
+          "unit": "request",
+          "unit_price_cents": 1,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_embeddings_request_usd",
+          "metered": false,
+          "recurring_interval": null
+        }
+      ]
+    },
+    {
+      "product_id": "laplace.explainability",
+      "name": "Laplace Explainability Trace",
+      "description": "Step-by-step 'how the answer formed' report: the token-by-token, path-by-path generation traversal with per-path consensus μ and witness fan-in. The academic tier expands every node with its evidence provenance and citations. Metered by trace size.",
+      "category": "explainability",
+      "prices": [
+        {
+          "service_id": "explain.report",
+          "unit": "report",
+          "unit_price_cents": 200,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_explain_report_report_usd",
+          "metered": false,
+          "recurring_interval": null
+        },
+        {
+          "service_id": "explain.trace",
+          "unit": "trace_unit",
+          "unit_price_cents": 8,
+          "base_fee_cents": 100,
+          "currency": "usd",
+          "lookup_key": "laplace_explain_trace_trace_unit_usd",
+          "metered": true,
+          "recurring_interval": null
+        }
+      ]
+    },
+    {
+      "product_id": "laplace.generation",
+      "name": "Laplace Token Generation",
+      "description": "Token-by-token generative traversal of the consensus output tree.",
+      "category": "generation",
+      "prices": [
+        {
+          "service_id": "generate",
+          "unit": "request",
+          "unit_price_cents": 4,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_generate_request_usd",
+          "metered": false,
+          "recurring_interval": null
+        }
+      ]
+    },
+    {
+      "product_id": "laplace.inference.chat",
+      "name": "Laplace Chat Inference",
+      "description": "Single-shot conversational answer synthesized from consensus reads over the substrate.",
+      "category": "inference",
+      "prices": [
+        {
+          "service_id": "chat.completions",
+          "unit": "request",
+          "unit_price_cents": 3,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_chat_completions_request_usd",
+          "metered": false,
+          "recurring_interval": null
+        }
+      ]
+    },
+    {
+      "product_id": "laplace.inference.completion",
+      "name": "Laplace Text Completion",
+      "description": "Ranked-consensus continuation for a prompt.",
+      "category": "inference",
+      "prices": [
+        {
+          "service_id": "completions",
+          "unit": "request",
+          "unit_price_cents": 2,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_completions_request_usd",
+          "metered": false,
+          "recurring_interval": null
+        }
+      ]
+    },
+    {
+      "product_id": "laplace.inspection",
+      "name": "Laplace Glass-Box Inspection",
+      "description": "Per-entity interpretability read: identity tier/type, S^3 physicalities, ranked-consensus neighborhood, and evidence provenance.",
+      "category": "inspection",
+      "prices": [
+        {
+          "service_id": "inspect",
+          "unit": "entity",
+          "unit_price_cents": 1,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_inspect_entity_usd",
+          "metered": false,
+          "recurring_interval": null
+        }
+      ]
+    },
+    {
+      "product_id": "laplace.neighbors",
+      "name": "Laplace Nearest Neighbors",
+      "description": "Plural nearest-neighbor query across the three independent axes: ranked-consensus relatedness, structural Fréchet shape, and PostGIS proximity.",
+      "category": "inference",
+      "prices": [
+        {
+          "service_id": "nn",
+          "unit": "query",
+          "unit_price_cents": 1,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_nn_query_usd",
+          "metered": false,
+          "recurring_interval": null
+        }
+      ]
+    },
+    {
+      "product_id": "laplace.platform",
+      "name": "Laplace Platform Plans",
+      "description": "Monthly access bundles for teams building on Laplace: included credits across inference, synthesis, audit, visualization, recipe, and explainability services.",
+      "category": "plan",
+      "prices": [
+        {
+          "service_id": "plan.developer",
+          "unit": "month",
+          "unit_price_cents": 2900,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_plan_developer_month_usd",
+          "metered": false,
+          "recurring_interval": "month"
+        },
+        {
+          "service_id": "plan.enterprise",
+          "unit": "month",
+          "unit_price_cents": 49900,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_plan_enterprise_month_usd",
+          "metered": false,
+          "recurring_interval": "month"
+        },
+        {
+          "service_id": "plan.studio",
+          "unit": "month",
+          "unit_price_cents": 9900,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_plan_studio_month_usd",
+          "metered": false,
+          "recurring_interval": "month"
+        }
+      ]
+    },
+    {
+      "product_id": "laplace.recipe",
+      "name": "Laplace Synthesis Recipes",
+      "description": "Author, publish, and access reusable build-a-model recipes (the architecture template that defines content scope, shape, and output format).",
+      "category": "recipe",
+      "prices": [
+        {
+          "service_id": "recipe.access",
+          "unit": "use",
+          "unit_price_cents": 25,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_recipe_access_use_usd",
+          "metered": false,
+          "recurring_interval": null
+        },
+        {
+          "service_id": "recipe.compile",
+          "unit": "recipe_unit",
+          "unit_price_cents": 5,
+          "base_fee_cents": 25,
+          "currency": "usd",
+          "lookup_key": "laplace_recipe_compile_recipe_unit_usd",
+          "metered": true,
+          "recurring_interval": null
+        },
+        {
+          "service_id": "recipe.export",
+          "unit": "content_thousand",
+          "unit_price_cents": 10,
+          "base_fee_cents": 100,
+          "currency": "usd",
+          "lookup_key": "laplace_recipe_export_content_thousand_usd",
+          "metered": true,
+          "recurring_interval": null
+        },
+        {
+          "service_id": "recipe.publish",
+          "unit": "recipe",
+          "unit_price_cents": 100,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_recipe_publish_recipe_usd",
+          "metered": false,
+          "recurring_interval": null
+        }
+      ]
+    },
+    {
+      "product_id": "laplace.search",
+      "name": "Laplace Web Search",
+      "description": "Server-side web retrieval used for ephemeral prompt augmentation.",
+      "category": "search",
+      "prices": [
+        {
+          "service_id": "search",
+          "unit": "request",
+          "unit_price_cents": 2,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_search_request_usd",
+          "metered": false,
+          "recurring_interval": null
+        }
+      ]
+    },
+    {
+      "product_id": "laplace.synthesis",
+      "name": "Laplace Substrate Synthesis",
+      "description": "Build-a-model export: render the consensus substrate into a recipe's tensor layout (your choice of vocabulary, dimensionality, heads, layers) and download the model. Metered by parameter count.",
+      "category": "synthesis",
+      "prices": [
+        {
+          "service_id": "synthesis",
+          "unit": "param_million",
+          "unit_price_cents": 5,
+          "base_fee_cents": 250,
+          "currency": "usd",
+          "lookup_key": "laplace_synthesis_param_million_usd",
+          "metered": true,
+          "recurring_interval": null
+        }
+      ]
+    },
+    {
+      "product_id": "laplace.visualization",
+      "name": "Laplace Substrate Visualization",
+      "description": "Rendered structural exports of a substrate neighborhood (geometry + ranked-consensus graph) for review and reporting.",
+      "category": "visualization",
+      "prices": [
+        {
+          "service_id": "visualization.deep_export",
+          "unit": "visual_unit",
+          "unit_price_cents": 5,
+          "base_fee_cents": 75,
+          "currency": "usd",
+          "lookup_key": "laplace_visualization_deep_export_visual_unit_usd",
+          "metered": true,
+          "recurring_interval": null
+        },
+        {
+          "service_id": "visualization.export",
+          "unit": "export",
+          "unit_price_cents": 10,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_visualization_export_export_usd",
+          "metered": false,
+          "recurring_interval": null
+        }
+      ]
+    }
+  ]
+}

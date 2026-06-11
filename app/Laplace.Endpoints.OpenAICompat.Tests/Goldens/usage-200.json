@@ -1,0 +1,14 @@
+{
+  "tenant": "golden-usage-tenant",
+  "total_amount_cents": 2,
+  "entries": [
+    {
+      "quoteId": "<quote_id>",
+      "tenant": "golden-usage-tenant",
+      "serviceId": "completions",
+      "units": 1,
+      "amountCents": 2,
+      "executedAt": "<timestamp>"
+    }
+  ]
+}

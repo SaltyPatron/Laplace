@@ -6,8 +6,11 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.ISO;
 
-public sealed class ISODecomposer : IDecomposer
+public sealed class ISODecomposer : IDecomposer, IIngestCommitPolicy
 {
+    // iso639-3/all and iso639/names-* batches share LanguageEntityId rows and
+    // ContentEmitter roots; parallel commits within an epoch deadlock (40P01).
+    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/ISO639Decomposer/v1");
     public static readonly Hash128 TrustClass =

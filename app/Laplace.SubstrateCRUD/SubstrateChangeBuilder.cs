@@ -73,6 +73,28 @@ public sealed class SubstrateChangeBuilder
         return this;
     }
 
+    private IntentStage? _contentStage;
+
+    /// <summary>
+    /// THE coalesced content stage for this change: every content witness appends
+    /// here, so the writer pays its staging round trips once per change instead of
+    /// once per witness (the per-witness pattern cost iso639 16,681 round trips
+    /// for 51k rows). Lazily created and attached on first use; the writer owns
+    /// disposal after staging, same as any prebuilt stage.
+    /// </summary>
+    public IntentStage ContentStage
+    {
+        get
+        {
+            if (_contentStage is null || _contentStage.IsInvalid)
+            {
+                _contentStage = IntentStage.New(256);
+                _intentStages.Add(_contentStage);
+            }
+            return _contentStage;
+        }
+    }
+
     public SubstrateChangeBuilder AddAttestation(AttestationRow row)
     {
         ArgumentNullException.ThrowIfNull(row);

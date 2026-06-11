@@ -1,0 +1,12 @@
+{
+  "quote_id": "<quote_id>",
+  "tenant": "golden-quote-tenant",
+  "service_id": "audit.report",
+  "units": 1,
+  "amount_cents": 50,
+  "currency": "usd",
+  "status": "approved",
+  "consumed": false,
+  "stripe_checkout_url": null,
+  "expires_at": "<timestamp>"
+}

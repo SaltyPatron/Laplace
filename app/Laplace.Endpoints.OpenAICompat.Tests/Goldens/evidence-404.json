@@ -1,0 +1,7 @@
+{
+  "error": {
+    "type": "not_found",
+    "code": "entity_not_found",
+    "message": "No entity for target 'unknown-word'."
+  }
+}

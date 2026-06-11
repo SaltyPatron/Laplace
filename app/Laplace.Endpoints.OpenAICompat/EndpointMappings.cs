@@ -1,5 +1,7 @@
 using System.Text;
 using System.Text.Json;
+using Laplace.Api.Contracts;
+using Laplace.Endpoints.OpenAICompat.Auth;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -7,40 +9,32 @@ internal static class EndpointMappings
 {
     public static void MapCoreEndpoints(this WebApplication app)
     {
-        app.MapGet("/health", () => Results.Ok(new { status = "ok", stream = "F-scaffold" }));
+        app.MapGet("/health", () => Results.Json(new HealthResponse("ok", "F-scaffold")))
+            .WithTags("core").Produces<HealthResponse>();
 
-        app.MapGet("/v1/models", () => Results.Json(new
-        {
-            @object = "list",
-            data = new object[]
-            {
-                new { id = "laplace-converse-001", @object = "model", created = 0, owned_by = "laplace" },
-                new { id = "laplace-completions-001", @object = "model", created = 0, owned_by = "laplace" },
-                new { id = "laplace-code-001", @object = "model", created = 0, owned_by = "laplace" },
-                new { id = "laplace-embeddings-pending", @object = "model", created = 0, owned_by = "laplace", status = "pending" }
-            }
-        }));
+        app.MapGet("/v1/models", () => Results.Json(new ModelList("list",
+        [
+            new ModelInfo("laplace-converse-001", "model", 0, "laplace"),
+            new ModelInfo("laplace-completions-001", "model", 0, "laplace"),
+            new ModelInfo("laplace-code-001", "model", 0, "laplace"),
+            new ModelInfo("laplace-embeddings-pending", "model", 0, "laplace", Status: "pending")
+        ]))).WithTags("core").Produces<ModelList>();
 
-        app.MapGet("/v1/capabilities", () => Results.Json(new
-        {
-            stream = "F-scaffold",
-            endpoints = new
-            {
-                chat_completions = new { status = "live", backend = "laplace.converse", billing = "preflight_quote_required" },
-                completions = new { status = "live", backend = "laplace.completions", billing = "preflight_quote_required" },
-                embeddings = new { status = "pending", reason = "requires Stream E physicality lookup path" },
-                audit_reports = new { status = "live", backend = "laplace.substrate_counts + laplace.consensus_stats + laplace.top_relations", billing = "audit.deep_report" },
-                visualizations = new { status = "live", backend = "laplace.top_relations + laplace.entity_physicalities", billing = "visualization.deep_export" },
-                explainability_reports = new { status = "live", backend = "laplace.generate_tree + laplace.attestations_out", billing = "explain.trace" },
-                billing = new { status = "live", provider = "stripe_or_manual" },
-                models = new { status = "live" }
-            }
-        }));
+        app.MapGet("/v1/capabilities", () => Results.Json(new CapabilitiesResponse("F-scaffold", new CapabilityEndpoints(
+            ChatCompletions: new CapabilityStatus("live", Backend: "laplace.converse", Billing: "preflight_quote_required"),
+            Completions: new CapabilityStatus("live", Backend: "laplace.completions", Billing: "preflight_quote_required"),
+            Embeddings: new CapabilityStatus("pending", Reason: "requires Stream E physicality lookup path"),
+            AuditReports: new CapabilityStatus("live", Backend: "laplace.substrate_counts + laplace.consensus_stats + laplace.top_relations", Billing: "audit.deep_report"),
+            Visualizations: new CapabilityStatus("live", Backend: "laplace.top_relations + laplace.entity_physicalities", Billing: "visualization.deep_export"),
+            ExplainabilityReports: new CapabilityStatus("live", Backend: "laplace.generate_tree + laplace.attestations_out", Billing: "explain.trace"),
+            Billing: new CapabilityStatus("live", Provider: "stripe_or_manual"),
+            Models: new CapabilityStatus("live")))))
+            .WithTags("core").Produces<CapabilitiesResponse>();
     }
 
     public static void MapOpenAiCompatEndpoints(this WebApplication app)
     {
-        app.MapPost("/v1/chat/completions", async (HttpRequest request, SubstrateClient substrate, IBillingOrchestrator billing, TurnWitness turnWitness, CancellationToken ct) =>
+        app.MapPost("/v1/chat/completions", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, TurnWitness turnWitness, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<ChatCompletionsRequest>(request, ct);
             if (payload is null)
@@ -53,7 +47,9 @@ internal static class EndpointMappings
             var quoteId = AppComposition.ResolveQuoteId(request) ?? "";
             var gate = await billing.EnsureExecutableAsync(quoteId, "chat.completions", ct);
             if (!gate.Allowed)
-                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? new { service_id = "chat.completions" } : (object)new { gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl });
+                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null
+                    ? new QuoteServiceDetail("chat.completions")
+                    : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
 
             var prompt = payload.Messages
                 .Where(m => !string.IsNullOrWhiteSpace(m.Content))
@@ -62,7 +58,7 @@ internal static class EndpointMappings
             if (string.IsNullOrWhiteSpace(prompt))
                 return EndpointJson.BadRequest("invalid_request_error", "At least one message must include non-empty 'content'.");
 
-            if (gate.Quote is not null) billing.MarkConsumedAndRecord(gate.Quote);
+            if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
             // Chat IS generation: the native autoregressive surface over witnessed
             // content trajectories is modality-blind — prose and code are both token
@@ -82,10 +78,9 @@ internal static class EndpointMappings
                     request.HttpContext.Response.Headers["Cache-Control"] = "no-cache";
                     request.HttpContext.Response.Headers["X-Accel-Buffering"] = "no";
 
-                    var genRole = JsonSerializer.Serialize(new {
-                        id = genId, @object = "chat.completion.chunk", created = genCreated, model = payload.Model,
-                        choices = new[] { new { index = 0, delta = new { role = "assistant" }, finish_reason = (string?)null } }
-                    });
+                    var genRole = JsonSerializer.Serialize(new ChatCompletionChunk(
+                        genId, "chat.completion.chunk", genCreated, payload.Model,
+                        [new ChatChunkChoice(0, new ChatDelta(Role: "assistant"), null)]));
                     await request.HttpContext.Response.WriteAsync($"data: {genRole}\n\n", ct);
 
                     var genStreamText = new StringBuilder();
@@ -93,18 +88,17 @@ internal static class EndpointMappings
                         prompt, steps: genSteps, temperature: genTemp, ct: ct))
                     {
                         genStreamText.Append(token.Token);
-                        var chunk = JsonSerializer.Serialize(new {
-                            id = genId, @object = "chat.completion.chunk", created = genCreated, model = payload.Model,
-                            choices = new[] { new { index = 0, delta = new { content = token.Token }, finish_reason = (string?)null } }
-                        });
+                        var chunk = JsonSerializer.Serialize(new ChatCompletionChunk(
+                            genId, "chat.completion.chunk", genCreated, payload.Model,
+                            [new ChatChunkChoice(0, new ChatDelta(Content: token.Token), null)],
+                            Laplace: new ChunkProvenance(OrdUsed: (int)token.Mu)));
                         await request.HttpContext.Response.WriteAsync($"data: {chunk}\n\n", ct);
                     }
                     turnWitness.Enqueue(prompt, "prompt");
                     turnWitness.Enqueue(genStreamText.ToString().TrimStart(), "reply");
-                    var genStop = JsonSerializer.Serialize(new {
-                        id = genId, @object = "chat.completion.chunk", created = genCreated, model = payload.Model,
-                        choices = new[] { new { index = 0, delta = new { content = "" }, finish_reason = "stop" } }
-                    });
+                    var genStop = JsonSerializer.Serialize(new ChatCompletionChunk(
+                        genId, "chat.completion.chunk", genCreated, payload.Model,
+                        [new ChatChunkChoice(0, new ChatDelta(Content: ""), "stop")]));
                     await request.HttpContext.Response.WriteAsync($"data: {genStop}\n\n", ct);
                     await request.HttpContext.Response.WriteAsync("data: [DONE]\n\n", ct);
                     return Results.Empty;
@@ -119,24 +113,14 @@ internal static class EndpointMappings
                 turnWitness.Enqueue(prompt, "prompt");
                 turnWitness.Enqueue(genContent, "reply");
 
-                return Results.Json(new
-                {
-                    id = $"chatcmpl-{Guid.NewGuid():N}",
-                    @object = "chat.completion",
-                    created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                    model = payload.Model,
-                    choices = new[]
-                    {
-                        new
-                        {
-                            index = 0,
-                            message = new { role = "assistant", content = genContent },
-                            finish_reason = "stop"
-                        }
-                    },
-                    billing = (object?)null,
-                    metadata = new { generated_tokens = genTokens.Count }
-                });
+                return Results.Json(new ChatCompletionResponse(
+                    Id: $"chatcmpl-{Guid.NewGuid():N}",
+                    Object: "chat.completion",
+                    Created: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                    Model: payload.Model,
+                    Choices: [new ChatChoice(0, new ChatResponseMessage("assistant", genContent), "stop")],
+                    Billing: null,
+                    Metadata: new ChatMetadata(GeneratedTokens: genTokens.Count)));
             }
 
             // Serve the substrate's own conversational engine (laplace.converse): route_prompt
@@ -168,53 +152,50 @@ internal static class EndpointMappings
                 request.HttpContext.Response.Headers["Cache-Control"] = "no-cache";
                 request.HttpContext.Response.Headers["X-Accel-Buffering"] = "no";
 
-                var roleChunk = JsonSerializer.Serialize(new {
-                    id = completionId, @object = "chat.completion.chunk", created, model = payload.Model,
-                    choices = new[] { new { index = 0, delta = new { role = "assistant" }, finish_reason = (string?)null } }
-                });
+                var roleChunk = JsonSerializer.Serialize(new ChatCompletionChunk(
+                    completionId, "chat.completion.chunk", created, payload.Model,
+                    [new ChatChunkChoice(0, new ChatDelta(Role: "assistant"), null)]));
                 await request.HttpContext.Response.WriteAsync($"data: {roleChunk}\n\n", ct);
 
-                // One consensus-grounded reply line per chunk
+                // One consensus-grounded reply line per chunk, each carrying its receipt
                 for (int i = 0; i < rows.Count; i++)
                 {
                     var line = rows[i].Reply + (i + 1 < rows.Count ? "\n" : "");
-                    var chunk = JsonSerializer.Serialize(new {
-                        id = completionId, @object = "chat.completion.chunk", created, model = payload.Model,
-                        choices = new[] { new { index = 0, delta = new { content = line }, finish_reason = (string?)null } }
-                    });
+                    var chunk = JsonSerializer.Serialize(new ChatCompletionChunk(
+                        completionId, "chat.completion.chunk", created, payload.Model,
+                        [new ChatChunkChoice(0, new ChatDelta(Content: line), null)],
+                        Laplace: new ChunkProvenance(EffMu: rows[i].EffectiveMu, Witnesses: rows[i].Witnesses)));
                     await request.HttpContext.Response.WriteAsync($"data: {chunk}\n\n", ct);
                 }
 
-                var stopChunk = JsonSerializer.Serialize(new {
-                    id = completionId, @object = "chat.completion.chunk", created, model = payload.Model,
-                    choices = new[] { new { index = 0, delta = new { content = "" }, finish_reason = "stop" } }
-                });
+                var stopChunk = JsonSerializer.Serialize(new ChatCompletionChunk(
+                    completionId, "chat.completion.chunk", created, payload.Model,
+                    [new ChatChunkChoice(0, new ChatDelta(Content: ""), "stop")]));
                 await request.HttpContext.Response.WriteAsync($"data: {stopChunk}\n\n", ct);
                 await request.HttpContext.Response.WriteAsync("data: [DONE]\n\n", ct);
                 return Results.Empty;
             }
 
-            return Results.Json(new
-            {
-                id = $"chatcmpl-{Guid.NewGuid():N}",
-                @object = "chat.completion",
-                created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                model = payload.Model,
-                choices = new[]
-                {
-                    new
-                    {
-                        index = 0,
-                        message = new { role = "assistant", content },
-                        finish_reason = "stop"
-                    }
-                },
-                billing = (object?)null,
-                metadata = new { witnesses = rows.Sum(r => r.Witnesses), reply_rows = rows.Count }
-            });
-        });
+            return Results.Json(new ChatCompletionResponse(
+                Id: $"chatcmpl-{Guid.NewGuid():N}",
+                Object: "chat.completion",
+                Created: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                Model: payload.Model,
+                Choices: [new ChatChoice(0, new ChatResponseMessage("assistant", content), "stop")],
+                Billing: null,
+                Metadata: new ChatMetadata(
+                    Witnesses: rows.Sum(r => r.Witnesses),
+                    ReplyRows: rows.Count,
+                    Laplace: new LaplaceChatMetadata(
+                        rows.Select(r => new ProvenanceLine(r.Reply, r.EffectiveMu, r.Witnesses)).ToArray()))));
+        })
+        .WithTags("openai")
+        .Accepts<ChatCompletionsRequest>("application/json")
+        .Produces<ChatCompletionResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired);
 
-        app.MapPost("/v1/completions", async (HttpRequest request, SubstrateClient substrate, IBillingOrchestrator billing, TurnWitness turnWitness, CancellationToken ct) =>
+        app.MapPost("/v1/completions", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, TurnWitness turnWitness, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<CompletionsRequest>(request, ct);
             if (payload is null)
@@ -227,9 +208,11 @@ internal static class EndpointMappings
             var quoteId = AppComposition.ResolveQuoteId(request) ?? "";
             var gate = await billing.EnsureExecutableAsync(quoteId, "completions", ct);
             if (!gate.Allowed)
-                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? new { service_id = "completions" } : (object)new { gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl });
+                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null
+                    ? new QuoteServiceDetail("completions")
+                    : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
 
-            if (gate.Quote is not null) billing.MarkConsumedAndRecord(gate.Quote);
+            if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
             int steps = payload.MaxTokens ?? 64;
             double temp = payload.Temperature ?? 0.7;
@@ -248,12 +231,10 @@ internal static class EndpointMappings
                     payload.Prompt.Trim(), steps: steps, temperature: temp, ct: ct))
                 {
                     streamText.Append(token.Token);
-                    var chunk = JsonSerializer.Serialize(new {
-                        id = completionId, @object = "text_completion",
-                        created, model = payload.Model,
-                        choices = new[] { new { text = token.Token, index = 0, finish_reason = (string?)null,
-                            logprobs = payload.Logprobs.HasValue ? (object)new { token_logprobs = new[] { (double)token.Mu } } : null } }
-                    });
+                    var chunk = JsonSerializer.Serialize(new CompletionChunk(
+                        completionId, "text_completion", created, payload.Model,
+                        [new CompletionChoice(token.Token, 0, null,
+                            payload.Logprobs.HasValue ? new CompletionLogprobs([(double)token.Mu]) : null)]));
                     await request.HttpContext.Response.WriteAsync($"data: {chunk}\n\n", ct);
                 }
                 turnWitness.Enqueue(payload.Prompt.Trim(), "prompt");
@@ -271,29 +252,27 @@ internal static class EndpointMappings
             var text = string.Concat(tokens.Select(t => t.Token)).TrimStart();
             turnWitness.Enqueue(payload.Prompt.Trim(), "prompt");
             turnWitness.Enqueue(text, "reply");
-            return Results.Json(new
-            {
-                id = $"cmpl-{Guid.NewGuid():N}",
-                @object = "text_completion",
-                created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                model = payload.Model,
-                choices = new[] { new {
-                    text,
-                    index = 0,
-                    finish_reason = "stop",
-                    logprobs = payload.Logprobs.HasValue
-                        ? (object)new { token_logprobs = tokens.Select(t => (double)t.Mu).ToArray() }
-                        : null
-                }},
-                billing = gate.Quote is null ? null : (object)new
-                {
-                    quote_id = gate.Quote.QuoteId,
-                    amount_cents = gate.Quote.AmountCents,
-                    currency = gate.Quote.Currency,
-                    tenant = gate.Quote.Tenant
-                }
-            });
-        });
+            return Results.Json(new CompletionResponse(
+                Id: $"cmpl-{Guid.NewGuid():N}",
+                Object: "text_completion",
+                Created: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                Model: payload.Model,
+                Choices:
+                [
+                    new CompletionChoice(text, 0, "stop",
+                        payload.Logprobs.HasValue
+                            ? new CompletionLogprobs(tokens.Select(t => (double)t.Mu).ToArray())
+                            : null)
+                ],
+                Billing: gate.Quote is null
+                    ? null
+                    : new CompletionsReceipt(gate.Quote.QuoteId, gate.Quote.AmountCents, gate.Quote.Currency, gate.Quote.Tenant)));
+        })
+        .WithTags("openai")
+        .Accepts<CompletionsRequest>("application/json")
+        .Produces<CompletionResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired);
 
         app.MapPost("/v1/embeddings", async (HttpRequest request, CancellationToken ct) =>
         {
@@ -305,14 +284,45 @@ internal static class EndpointMappings
             if (!EmbeddingsInputPresent(payload.Input))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'input' must be a non-empty string or array of strings.");
             return EndpointJson.NotImplemented("embeddings", "Pending Stream E physicality lookup path.");
-        });
+        })
+        .WithTags("openai")
+        .Accepts<EmbeddingsRequest>("application/json")
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<NotImplementedResponse>(StatusCodes.Status501NotImplemented);
 
-        app.MapPost("/v1/audit/report", async (HttpRequest request, SubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
+        // The trust surface: quote-free receipt drill-down. Target = entity id (32-hex) or word.
+        app.MapGet("/v1/evidence/{target}", async (string target, int? limit, ISubstrateClient substrate, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(target))
+                return EndpointJson.BadRequest("invalid_request_error", "Route parameter 'target' is required.");
+
+            try
+            {
+                var evidence = await substrate.EvidenceAsync(target.Trim(), Math.Clamp(limit ?? 10, 1, 50), ct);
+                if (evidence is null)
+                    return EndpointJson.NotFound("entity_not_found", $"No entity for target '{target.Trim()}'.");
+
+                return Results.Json(new EvidenceResponse(
+                    EntityId: evidence.EntityIdHex,
+                    EntityLabel: evidence.EntityLabel,
+                    Evidence: evidence.Items));
+            }
+            catch (SubstrateUnavailableException ex)
+            {
+                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
+            }
+        })
+        .WithTags("openai")
+        .Produces<EvidenceResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/v1/audit/report", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<AuditReportRequest>(request, ct) ?? new AuditReportRequest();
             var gate = await RequireQuoteAsync(request, billing, "audit.deep_report", ct);
             if (!gate.Allowed)
-                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? null : new { gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl });
+                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? null : new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
 
             try
             {
@@ -321,34 +331,37 @@ internal static class EndpointMappings
                     includeConvergence: payload.IncludeConvergence,
                     topRelationLimit: payload.Academic ? 50 : 20,
                     ct);
-                if (gate.Quote is not null) billing.MarkConsumedAndRecord(gate.Quote);
+                if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
-                return Results.Json(new
-                {
-                    id = $"audit-{Guid.NewGuid():N}",
-                    @object = "laplace.audit.report",
-                    created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                    scope = string.IsNullOrWhiteSpace(payload.Scope) ? "summary" : payload.Scope.Trim(),
-                    academic = payload.Academic,
-                    include_evidence = payload.IncludeEvidence,
-                    include_consensus = payload.IncludeConsensus,
-                    include_convergence = payload.IncludeConvergence,
-                    report,
-                    billing = gate.Quote is null ? null : BillingReceipt(gate.Quote)
-                });
+                return Results.Json(new AuditReportResponse(
+                    Id: $"audit-{Guid.NewGuid():N}",
+                    Object: "laplace.audit.report",
+                    Created: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                    Scope: string.IsNullOrWhiteSpace(payload.Scope) ? "summary" : payload.Scope.Trim(),
+                    Academic: payload.Academic,
+                    IncludeEvidence: payload.IncludeEvidence,
+                    IncludeConsensus: payload.IncludeConsensus,
+                    IncludeConvergence: payload.IncludeConvergence,
+                    Report: report,
+                    Billing: gate.Quote is null ? null : MakeReceipt(gate.Quote)));
             }
             catch (SubstrateUnavailableException ex)
             {
                 return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
             }
-        });
+        })
+        .WithTags("reports")
+        .Accepts<AuditReportRequest>("application/json")
+        .Produces<AuditReportResponse>()
+        .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
-        app.MapPost("/v1/visualizations/substrate", async (HttpRequest request, SubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
+        app.MapPost("/v1/visualizations/substrate", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<VisualizationExecuteRequest>(request, ct) ?? new VisualizationExecuteRequest();
             var gate = await RequireQuoteAsync(request, billing, "visualization.deep_export", ct);
             if (!gate.Allowed)
-                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? null : new { gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl });
+                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? null : new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
 
             try
             {
@@ -357,27 +370,30 @@ internal static class EndpointMappings
                     includeGeometry: payload.IncludeGeometry,
                     includeEvidence: payload.IncludeEvidence,
                     ct);
-                if (gate.Quote is not null) billing.MarkConsumedAndRecord(gate.Quote);
+                if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
-                return Results.Json(new
-                {
-                    id = $"viz-{Guid.NewGuid():N}",
-                    @object = "laplace.visualization.graph",
-                    created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                    format = string.IsNullOrWhiteSpace(payload.Format) ? "json" : payload.Format.Trim(),
-                    include_geometry = payload.IncludeGeometry,
-                    include_evidence = payload.IncludeEvidence,
-                    graph,
-                    billing = gate.Quote is null ? null : BillingReceipt(gate.Quote)
-                });
+                return Results.Json(new VisualizationGraphResponse(
+                    Id: $"viz-{Guid.NewGuid():N}",
+                    Object: "laplace.visualization.graph",
+                    Created: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                    Format: string.IsNullOrWhiteSpace(payload.Format) ? "json" : payload.Format.Trim(),
+                    IncludeGeometry: payload.IncludeGeometry,
+                    IncludeEvidence: payload.IncludeEvidence,
+                    Graph: graph,
+                    Billing: gate.Quote is null ? null : MakeReceipt(gate.Quote)));
             }
             catch (SubstrateUnavailableException ex)
             {
                 return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
             }
-        });
+        })
+        .WithTags("reports")
+        .Accepts<VisualizationExecuteRequest>("application/json")
+        .Produces<VisualizationGraphResponse>()
+        .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
-        app.MapPost("/v1/explain/report", async (HttpRequest request, SubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
+        app.MapPost("/v1/explain/report", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<ExplainReportRequest>(request, ct);
             if (payload is null)
@@ -389,7 +405,7 @@ internal static class EndpointMappings
 
             var gate = await RequireQuoteAsync(request, billing, "explain.trace", ct);
             if (!gate.Allowed)
-                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? null : new { gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl });
+                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? null : new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
 
             try
             {
@@ -399,26 +415,30 @@ internal static class EndpointMappings
                     payload.Beam,
                     includeEvidence: payload.Academic,
                     ct);
-                if (gate.Quote is not null) billing.MarkConsumedAndRecord(gate.Quote);
+                if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
-                return Results.Json(new
-                {
-                    id = $"explain-{Guid.NewGuid():N}",
-                    @object = "laplace.explainability.report",
-                    created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                    prompt = payload.Prompt.Trim(),
-                    depth = payload.Depth,
-                    beam = payload.Beam,
-                    academic = payload.Academic,
-                    trace,
-                    billing = gate.Quote is null ? null : BillingReceipt(gate.Quote)
-                });
+                return Results.Json(new ExplainReportResponse(
+                    Id: $"explain-{Guid.NewGuid():N}",
+                    Object: "laplace.explainability.report",
+                    Created: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                    Prompt: payload.Prompt.Trim(),
+                    Depth: payload.Depth,
+                    Beam: payload.Beam,
+                    Academic: payload.Academic,
+                    Trace: trace,
+                    Billing: gate.Quote is null ? null : MakeReceipt(gate.Quote)));
             }
             catch (SubstrateUnavailableException ex)
             {
                 return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
             }
-        });
+        })
+        .WithTags("reports")
+        .Accepts<ExplainReportRequest>("application/json")
+        .Produces<ExplainReportResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
     }
 
     /// <summary>
@@ -441,14 +461,8 @@ internal static class EndpointMappings
         return await billing.EnsureExecutableAsync(quoteId, serviceId, ct);
     }
 
-    private static object BillingReceipt(BillingQuote quote) => new
-    {
-        quote_id = quote.QuoteId,
-        amount_cents = quote.AmountCents,
-        currency = quote.Currency,
-        tenant = quote.Tenant,
-        service_id = quote.ServiceId
-    };
+    private static BillingReceipt MakeReceipt(BillingQuote quote) =>
+        new(quote.QuoteId, quote.AmountCents, quote.Currency, quote.Tenant, quote.ServiceId);
 
     private static string[]? ReadStopSequences(JsonElement stop) =>
         stop.ValueKind switch
@@ -476,73 +490,65 @@ internal static class EndpointMappings
 
     public static void MapBillingEndpoints(this WebApplication app)
     {
-        app.MapGet("/v1/billing/catalog", (IBillingCatalog catalog, IStripePriceMap priceMap) =>
-            Results.Json(new
+        app.MapGet("/v1/billing/catalog", async (IBillingCatalog catalog, IStripePriceMap priceMap, CancellationToken ct) =>
+        {
+            var services = new List<CatalogServiceView>();
+            foreach (var s in catalog.List())
             {
-                @object = "list",
-                data = catalog.List().Select(s => new
-                {
-                    service_id = s.ServiceId,
-                    product_id = s.ProductId,
-                    display_name = s.DisplayName,
-                    unit = s.UnitName,
-                    unit_price_cents = s.UnitPriceCents,
-                    base_fee_cents = s.BaseFeeCents,
-                    currency = s.Currency,
-                    lookup_key = s.LookupKey,
-                    active = s.Active,
-                    metered = s.Metered,
-                    recurring_interval = s.RecurringInterval,
-                    stripe_price_id = priceMap.TryGet(s.LookupKey, out var pid) ? pid : null
-                })
-            }));
+                services.Add(new CatalogServiceView(
+                    ServiceId: s.ServiceId,
+                    ProductId: s.ProductId,
+                    DisplayName: s.DisplayName,
+                    Unit: s.UnitName,
+                    UnitPriceCents: s.UnitPriceCents,
+                    BaseFeeCents: s.BaseFeeCents,
+                    Currency: s.Currency,
+                    LookupKey: s.LookupKey,
+                    Active: s.Active,
+                    Metered: s.Metered,
+                    RecurringInterval: s.RecurringInterval,
+                    StripePriceId: await priceMap.TryGetAsync(s.LookupKey, ct)));
+            }
+            return Results.Json(new BillingCatalogResponse("list", services));
+        })
+            .WithTags("billing").Produces<BillingCatalogResponse>();
 
         app.MapGet("/v1/billing/products", (IBillingCatalog catalog) =>
-            Results.Json(new
-            {
-                @object = "list",
-                data = catalog.ListProducts().Select(p => new
-                {
-                    product_id = p.ProductId,
-                    name = p.Name,
-                    description = p.Description,
-                    category = p.Category,
-                    prices = catalog.List()
+            Results.Json(new BillingProductsResponse("list",
+                catalog.ListProducts().Select(p => new ProductView(
+                    ProductId: p.ProductId,
+                    Name: p.Name,
+                    Description: p.Description,
+                    Category: p.Category,
+                    Prices: catalog.List()
                         .Where(s => string.Equals(s.ProductId, p.ProductId, StringComparison.OrdinalIgnoreCase))
-                        .Select(s => new
-                        {
-                            service_id = s.ServiceId,
-                            unit = s.UnitName,
-                            unit_price_cents = s.UnitPriceCents,
-                            base_fee_cents = s.BaseFeeCents,
-                            currency = s.Currency,
-                            lookup_key = s.LookupKey,
-                            metered = s.Metered,
-                            recurring_interval = s.RecurringInterval
-                        })
-                })
-            }));
+                        .Select(s => new ProductPriceView(
+                            ServiceId: s.ServiceId,
+                            Unit: s.UnitName,
+                            UnitPriceCents: s.UnitPriceCents,
+                            BaseFeeCents: s.BaseFeeCents,
+                            Currency: s.Currency,
+                            LookupKey: s.LookupKey,
+                            Metered: s.Metered,
+                            RecurringInterval: s.RecurringInterval)).ToArray())).ToArray())))
+            .WithTags("billing").Produces<BillingProductsResponse>();
 
         app.MapGet("/v1/billing/plans", (IBillingCatalog catalog) =>
-            Results.Json(new
-            {
-                @object = "list",
-                data = catalog.ListPlans().Select(p => new
-                {
-                    plan_id = p.PlanId,
-                    service_id = p.ServiceId,
-                    name = p.Name,
-                    description = p.Description,
-                    monthly_price_cents = p.MonthlyPriceCents,
-                    currency = p.Currency,
-                    monthly_credits = p.MonthlyCredits,
-                    included_product_ids = p.IncludedProductIds,
-                    support_tier = p.SupportTier,
-                    active = p.Active
-                })
-            }));
+            Results.Json(new BillingPlansResponse("list",
+                catalog.ListPlans().Select(p => new PlanView(
+                    PlanId: p.PlanId,
+                    ServiceId: p.ServiceId,
+                    Name: p.Name,
+                    Description: p.Description,
+                    MonthlyPriceCents: p.MonthlyPriceCents,
+                    Currency: p.Currency,
+                    MonthlyCredits: p.MonthlyCredits,
+                    IncludedProductIds: p.IncludedProductIds,
+                    SupportTier: p.SupportTier,
+                    Active: p.Active)).ToArray())))
+            .WithTags("billing").Produces<BillingPlansResponse>();
 
-        app.MapPost("/v1/billing/plans/{planId}/subscribe", async (string planId, HttpRequest request, IBillingCatalog catalog, IBillingOrchestrator billing, CancellationToken ct) =>
+        app.MapPost("/v1/billing/plans/{planId}/subscribe", async (string planId, HttpRequest request, IBillingCatalog catalog, IBillingOrchestrator billing, ITenantResolver resolver, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<PlanSubscribeRequest>(request, ct) ?? new PlanSubscribeRequest(null);
             var plan = catalog.ListPlans()
@@ -551,7 +557,7 @@ internal static class EndpointMappings
                 return EndpointJson.BadRequest("invalid_request_error", $"Unknown plan '{planId}'.");
 
             var tenant = string.IsNullOrWhiteSpace(payload.Tenant)
-                ? AppComposition.ResolveTenant(request)
+                ? (await resolver.ResolveAsync(request.HttpContext, ct)).TenantId
                 : payload.Tenant.Trim();
 
             BillingQuote quote;
@@ -564,49 +570,45 @@ internal static class EndpointMappings
                 return EndpointJson.BadRequest("invalid_request_error", ex.Message);
             }
 
-            return Results.Json(new
-            {
-                quote_id = quote.QuoteId,
-                tenant = quote.Tenant,
-                plan_id = plan.PlanId,
-                service_id = quote.ServiceId,
-                monthly_price_cents = plan.MonthlyPriceCents,
-                amount_cents = quote.AmountCents,
-                currency = quote.Currency,
-                status = quote.Status,
-                stripe_checkout_url = quote.StripeCheckoutUrl,
-                monthly_credits = plan.MonthlyCredits,
-                next = new
-                {
-                    checkout_url = quote.StripeCheckoutUrl,
-                    note = "Plan checkout activates monthly credits when Stripe sends checkout.session.completed."
-                }
-            });
-        });
+            return Results.Json(new PlanSubscribeResponse(
+                QuoteId: quote.QuoteId,
+                Tenant: quote.Tenant,
+                PlanId: plan.PlanId,
+                ServiceId: quote.ServiceId,
+                MonthlyPriceCents: plan.MonthlyPriceCents,
+                AmountCents: quote.AmountCents,
+                Currency: quote.Currency,
+                Status: quote.Status,
+                StripeCheckoutUrl: quote.StripeCheckoutUrl,
+                MonthlyCredits: plan.MonthlyCredits,
+                Next: new PlanNextStep(
+                    quote.StripeCheckoutUrl,
+                    "Plan checkout activates monthly credits when Stripe sends checkout.session.completed.")));
+        })
+        .WithTags("billing")
+        .Accepts<PlanSubscribeRequest>("application/json")
+        .Produces<PlanSubscribeResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest);
 
-        app.MapGet("/v1/billing/entitlements", (HttpRequest request, IBillingEntitlementStore entitlements) =>
+        app.MapGet("/v1/billing/entitlements", async (HttpRequest request, IBillingEntitlementStore entitlements, ITenantResolver resolver, CancellationToken ct) =>
         {
-            var tenant = AppComposition.ResolveTenant(request);
-            return Results.Json(new
-            {
-                tenant,
-                data = entitlements.GetByTenant(tenant).Select(e => new
-                {
-                    tenant = e.Tenant,
-                    plan_id = e.PlanId,
-                    status = e.Status,
-                    period_start = e.PeriodStart,
-                    period_end = e.PeriodEnd,
-                    monthly_credits = e.MonthlyCredits,
-                    used_credits = e.UsedCredits,
-                    stripe_customer_id = e.StripeCustomerId,
-                    stripe_subscription_id = e.StripeSubscriptionId,
-                    updated_at = e.UpdatedAt
-                })
-            });
-        });
+            var tenant = (await resolver.ResolveAsync(request.HttpContext, ct)).TenantId;
+            return Results.Json(new EntitlementsResponse(tenant,
+                (await entitlements.GetByTenantAsync(tenant, ct)).Select(e => new EntitlementView(
+                    Tenant: e.Tenant,
+                    PlanId: e.PlanId,
+                    Status: e.Status,
+                    PeriodStart: e.PeriodStart,
+                    PeriodEnd: e.PeriodEnd,
+                    MonthlyCredits: e.MonthlyCredits,
+                    UsedCredits: e.UsedCredits,
+                    StripeCustomerId: e.StripeCustomerId,
+                    StripeSubscriptionId: e.StripeSubscriptionId,
+                    UpdatedAt: e.UpdatedAt)).ToArray()));
+        })
+        .WithTags("billing").Produces<EntitlementsResponse>();
 
-        app.MapPost("/v1/billing/entitlements/consume", async (HttpRequest request, IBillingEntitlementStore entitlements, CancellationToken ct) =>
+        app.MapPost("/v1/billing/entitlements/consume", async (HttpRequest request, IBillingEntitlementStore entitlements, ITenantResolver resolver, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<CreditConsumeRequest>(request, ct);
             if (payload is null)
@@ -616,21 +618,25 @@ internal static class EndpointMappings
             if (payload.Units < 1)
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'units' must be >= 1.");
 
-            var tenant = AppComposition.ResolveTenant(request);
-            var consumed = entitlements.TryConsumeCredit(tenant, payload.ServiceId.Trim(), payload.Units, out var debit);
+            var tenant = (await resolver.ResolveAsync(request.HttpContext, ct)).TenantId;
+            var (consumed, debit) = await entitlements.TryConsumeCreditAsync(tenant, payload.ServiceId.Trim(), payload.Units, ct);
 
-            return Results.Json(new
-            {
-                accepted = consumed,
-                tenant = debit.Tenant,
-                plan_id = debit.PlanId,
-                service_id = debit.ServiceId,
-                units = debit.Units,
-                remaining = debit.Remaining,
-                period_end = debit.PeriodEnd,
-                status = debit.Status
-            }, statusCode: consumed ? StatusCodes.Status200OK : StatusCodes.Status402PaymentRequired);
-        });
+            return Results.Json(new CreditConsumeResponse(
+                Accepted: consumed,
+                Tenant: debit.Tenant,
+                PlanId: debit.PlanId,
+                ServiceId: debit.ServiceId,
+                Units: debit.Units,
+                Remaining: debit.Remaining,
+                PeriodEnd: debit.PeriodEnd,
+                Status: debit.Status),
+                statusCode: consumed ? StatusCodes.Status200OK : StatusCodes.Status402PaymentRequired);
+        })
+        .WithTags("billing")
+        .Accepts<CreditConsumeRequest>("application/json")
+        .Produces<CreditConsumeResponse>()
+        .Produces<CreditConsumeResponse>(StatusCodes.Status402PaymentRequired)
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest);
 
         app.MapPost("/v1/billing/webhooks/stripe", async (HttpRequest request, IBillingWebhookHandler handler, CancellationToken ct) =>
         {
@@ -638,39 +644,38 @@ internal static class EndpointMappings
             var payload = await reader.ReadToEndAsync(ct);
             var signature = request.Headers["Stripe-Signature"].ToString();
             var result = await handler.HandleStripeAsync(payload, signature, ct);
-            return Results.Json(new
-            {
-                accepted = result.Accepted,
-                verified = result.Verified,
-                duplicate = result.Duplicate,
-                event_id = result.EventId,
-                event_type = result.EventType,
-                status = result.Status,
-                tenant = result.Tenant,
-                service_id = result.ServiceId,
-                quote_id = result.QuoteId,
-                plan_id = result.PlanId
-            }, statusCode: result.Accepted ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest);
-        });
+            return Results.Json(new WebhookResponse(
+                Accepted: result.Accepted,
+                Verified: result.Verified,
+                Duplicate: result.Duplicate,
+                EventId: result.EventId,
+                EventType: result.EventType,
+                Status: result.Status,
+                Tenant: result.Tenant,
+                ServiceId: result.ServiceId,
+                QuoteId: result.QuoteId,
+                PlanId: result.PlanId),
+                statusCode: result.Accepted ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest);
+        })
+        .WithTags("billing")
+        .Produces<WebhookResponse>()
+        .Produces<WebhookResponse>(StatusCodes.Status400BadRequest);
 
         app.MapPost("/v1/billing/catalog/sync", async (IStripeCatalogSync sync, CancellationToken ct) =>
         {
             var result = await sync.EnsureAllAsync(ct);
-            return Results.Json(new
-            {
-                stripe_configured = result.StripeConfigured,
-                entries = result.Entries.Select(e => new
-                {
-                    service_id = e.ServiceId,
-                    lookup_key = e.LookupKey,
-                    stripe_price_id = e.StripePriceId,
-                    stripe_product_id = e.StripeProductId,
-                    status = e.Status
-                })
-            });
-        });
+            return Results.Json(new CatalogSyncResponse(
+                result.StripeConfigured,
+                result.Entries.Select(e => new CatalogSyncEntryView(
+                    ServiceId: e.ServiceId,
+                    LookupKey: e.LookupKey,
+                    StripePriceId: e.StripePriceId,
+                    StripeProductId: e.StripeProductId,
+                    Status: e.Status)).ToArray()));
+        })
+        .WithTags("billing").Produces<CatalogSyncResponse>();
 
-        app.MapPost("/v1/billing/preflight", async (HttpRequest request, IBillingOrchestrator billing, CancellationToken ct) =>
+        app.MapPost("/v1/billing/preflight", async (HttpRequest request, IBillingOrchestrator billing, ITenantResolver resolver, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<BillingPreflightRequest>(request, ct);
             if (payload is null)
@@ -681,7 +686,7 @@ internal static class EndpointMappings
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'units' must be >= 1.");
 
             var tenant = string.IsNullOrWhiteSpace(payload.Tenant)
-                ? AppComposition.ResolveTenant(request)
+                ? (await resolver.ResolveAsync(request.HttpContext, ct)).TenantId
                 : payload.Tenant.Trim();
 
             BillingQuote quote;
@@ -694,26 +699,24 @@ internal static class EndpointMappings
                 return EndpointJson.BadRequest("invalid_request_error", ex.Message);
             }
 
-            return Results.Json(new
-            {
-                quote_id = quote.QuoteId,
-                tenant = quote.Tenant,
-                service_id = quote.ServiceId,
-                units = quote.Units,
-                amount_cents = quote.AmountCents,
-                currency = quote.Currency,
-                status = quote.Status,
-                expires_at = quote.ExpiresAt,
-                stripe_checkout_url = quote.StripeCheckoutUrl,
-                next = new
-                {
-                    execute_header = new { name = "X-Laplace-Quote-Id", value = quote.QuoteId },
-                    note = "Execution endpoints require an approved quote before execution."
-                }
-            });
-        });
+            return Results.Json(new PreflightQuoteResponse(
+                QuoteId: quote.QuoteId,
+                Tenant: quote.Tenant,
+                ServiceId: quote.ServiceId,
+                Units: quote.Units,
+                AmountCents: quote.AmountCents,
+                Currency: quote.Currency,
+                Status: quote.Status,
+                ExpiresAt: quote.ExpiresAt,
+                StripeCheckoutUrl: quote.StripeCheckoutUrl,
+                Next: NextStep(quote, "Execution endpoints require an approved quote before execution.")));
+        })
+        .WithTags("billing")
+        .Accepts<BillingPreflightRequest>("application/json")
+        .Produces<PreflightQuoteResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest);
 
-        app.MapPost("/v1/billing/synthesis/quote", async (HttpRequest request, IBillingOrchestrator billing, ISynthesisQuoteCalculator calc, CancellationToken ct) =>
+        app.MapPost("/v1/billing/synthesis/quote", async (HttpRequest request, IBillingOrchestrator billing, ISynthesisQuoteCalculator calc, ITenantResolver resolver, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<SynthesisQuoteRequest>(request, ct);
             if (payload is null)
@@ -734,7 +737,7 @@ internal static class EndpointMappings
 
             var estimate = calc.Estimate(dims);
             var tenant = string.IsNullOrWhiteSpace(payload.Tenant)
-                ? AppComposition.ResolveTenant(request)
+                ? (await resolver.ResolveAsync(request.HttpContext, ct)).TenantId
                 : payload.Tenant.Trim();
 
             BillingQuote quote;
@@ -748,29 +751,27 @@ internal static class EndpointMappings
                 return EndpointJson.BadRequest("invalid_request_error", ex.Message);
             }
 
-            return Results.Json(new
-            {
-                quote_id = quote.QuoteId,
-                tenant = quote.Tenant,
-                service_id = quote.ServiceId,
-                estimated_parameters = estimate.Parameters,
-                billable_units = quote.Units,
-                unit = "param_million",
-                amount_cents = quote.AmountCents,
-                currency = quote.Currency,
-                status = quote.Status,
-                expires_at = quote.ExpiresAt,
-                stripe_checkout_url = quote.StripeCheckoutUrl,
-                format = string.IsNullOrWhiteSpace(payload.Format) ? "gguf" : payload.Format.Trim(),
-                next = new
-                {
-                    execute_header = new { name = "X-Laplace-Quote-Id", value = quote.QuoteId },
-                    note = "Synthesis is dimensionality-metered: amount = base job fee + per-million-parameter rate."
-                }
-            });
-        });
+            return Results.Json(new SynthesisQuoteResponse(
+                QuoteId: quote.QuoteId,
+                Tenant: quote.Tenant,
+                ServiceId: quote.ServiceId,
+                EstimatedParameters: estimate.Parameters,
+                BillableUnits: quote.Units,
+                Unit: "param_million",
+                AmountCents: quote.AmountCents,
+                Currency: quote.Currency,
+                Status: quote.Status,
+                ExpiresAt: quote.ExpiresAt,
+                StripeCheckoutUrl: quote.StripeCheckoutUrl,
+                Format: string.IsNullOrWhiteSpace(payload.Format) ? "gguf" : payload.Format.Trim(),
+                Next: NextStep(quote, "Synthesis is dimensionality-metered: amount = base job fee + per-million-parameter rate.")));
+        })
+        .WithTags("billing")
+        .Accepts<SynthesisQuoteRequest>("application/json")
+        .Produces<SynthesisQuoteResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest);
 
-        app.MapPost("/v1/billing/explain/quote", async (HttpRequest request, IBillingOrchestrator billing, ITraceQuoteCalculator calc, CancellationToken ct) =>
+        app.MapPost("/v1/billing/explain/quote", async (HttpRequest request, IBillingOrchestrator billing, ITraceQuoteCalculator calc, ITenantResolver resolver, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<ExplainQuoteRequest>(request, ct);
             if (payload is null)
@@ -782,7 +783,7 @@ internal static class EndpointMappings
 
             var estimate = calc.Estimate(new TraceReportRequest(payload.Depth, payload.Beam, payload.Academic));
             var tenant = string.IsNullOrWhiteSpace(payload.Tenant)
-                ? AppComposition.ResolveTenant(request)
+                ? (await resolver.ResolveAsync(request.HttpContext, ct)).TenantId
                 : payload.Tenant.Trim();
 
             BillingQuote quote;
@@ -796,31 +797,29 @@ internal static class EndpointMappings
                 return EndpointJson.BadRequest("invalid_request_error", ex.Message);
             }
 
-            return Results.Json(new
-            {
-                quote_id = quote.QuoteId,
-                tenant = quote.Tenant,
-                service_id = quote.ServiceId,
-                depth = payload.Depth,
-                beam = payload.Beam,
-                academic = payload.Academic,
-                estimated_trace_nodes = estimate.TraceNodes,
-                billable_units = quote.Units,
-                unit = "trace_unit",
-                amount_cents = quote.AmountCents,
-                currency = quote.Currency,
-                status = quote.Status,
-                expires_at = quote.ExpiresAt,
-                stripe_checkout_url = quote.StripeCheckoutUrl,
-                next = new
-                {
-                    execute_header = new { name = "X-Laplace-Quote-Id", value = quote.QuoteId },
-                    note = "Step-by-step explainability is metered by trace size (depth x beam); the academic tier expands each node with evidence provenance / citations."
-                }
-            });
-        });
+            return Results.Json(new ExplainQuoteResponse(
+                QuoteId: quote.QuoteId,
+                Tenant: quote.Tenant,
+                ServiceId: quote.ServiceId,
+                Depth: payload.Depth,
+                Beam: payload.Beam,
+                Academic: payload.Academic,
+                EstimatedTraceNodes: estimate.TraceNodes,
+                BillableUnits: quote.Units,
+                Unit: "trace_unit",
+                AmountCents: quote.AmountCents,
+                Currency: quote.Currency,
+                Status: quote.Status,
+                ExpiresAt: quote.ExpiresAt,
+                StripeCheckoutUrl: quote.StripeCheckoutUrl,
+                Next: NextStep(quote, "Step-by-step explainability is metered by trace size (depth x beam); the academic tier expands each node with evidence provenance / citations.")));
+        })
+        .WithTags("billing")
+        .Accepts<ExplainQuoteRequest>("application/json")
+        .Produces<ExplainQuoteResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest);
 
-        app.MapPost("/v1/billing/audit/quote", async (HttpRequest request, IBillingOrchestrator billing, IReportQuoteCalculator calc, CancellationToken ct) =>
+        app.MapPost("/v1/billing/audit/quote", async (HttpRequest request, IBillingOrchestrator billing, IReportQuoteCalculator calc, ITenantResolver resolver, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<AuditQuoteRequest>(request, ct);
             if (payload is null)
@@ -833,7 +832,7 @@ internal static class EndpointMappings
                 IncludeConvergence: payload.IncludeConvergence,
                 Academic: payload.Academic));
             var tenant = string.IsNullOrWhiteSpace(payload.Tenant)
-                ? AppComposition.ResolveTenant(request)
+                ? (await resolver.ResolveAsync(request.HttpContext, ct)).TenantId
                 : payload.Tenant.Trim();
 
             BillingQuote quote;
@@ -847,31 +846,29 @@ internal static class EndpointMappings
                 return EndpointJson.BadRequest("invalid_request_error", ex.Message);
             }
 
-            return Results.Json(new
-            {
-                quote_id = quote.QuoteId,
-                tenant = quote.Tenant,
-                service_id = quote.ServiceId,
-                scope = string.IsNullOrWhiteSpace(payload.Scope) ? "summary" : payload.Scope.Trim(),
-                academic = payload.Academic,
-                metered_items = estimate.MeteredItems,
-                billable_units = quote.Units,
-                unit = estimate.UnitName,
-                items_per_unit = estimate.ItemsPerUnit,
-                amount_cents = quote.AmountCents,
-                currency = quote.Currency,
-                status = quote.Status,
-                expires_at = quote.ExpiresAt,
-                stripe_checkout_url = quote.StripeCheckoutUrl,
-                next = new
-                {
-                    execute_header = new { name = "X-Laplace-Quote-Id", value = quote.QuoteId },
-                    note = "Audit reports are metered by selected sections, scope breadth, and academic provenance expansion."
-                }
-            });
-        });
+            return Results.Json(new AuditQuoteResponse(
+                QuoteId: quote.QuoteId,
+                Tenant: quote.Tenant,
+                ServiceId: quote.ServiceId,
+                Scope: string.IsNullOrWhiteSpace(payload.Scope) ? "summary" : payload.Scope.Trim(),
+                Academic: payload.Academic,
+                MeteredItems: estimate.MeteredItems,
+                BillableUnits: quote.Units,
+                Unit: estimate.UnitName,
+                ItemsPerUnit: estimate.ItemsPerUnit,
+                AmountCents: quote.AmountCents,
+                Currency: quote.Currency,
+                Status: quote.Status,
+                ExpiresAt: quote.ExpiresAt,
+                StripeCheckoutUrl: quote.StripeCheckoutUrl,
+                Next: NextStep(quote, "Audit reports are metered by selected sections, scope breadth, and academic provenance expansion.")));
+        })
+        .WithTags("billing")
+        .Accepts<AuditQuoteRequest>("application/json")
+        .Produces<AuditQuoteResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest);
 
-        app.MapPost("/v1/billing/visualization/quote", async (HttpRequest request, IBillingOrchestrator billing, IReportQuoteCalculator calc, CancellationToken ct) =>
+        app.MapPost("/v1/billing/visualization/quote", async (HttpRequest request, IBillingOrchestrator billing, IReportQuoteCalculator calc, ITenantResolver resolver, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<VisualizationQuoteRequest>(request, ct);
             if (payload is null)
@@ -886,7 +883,7 @@ internal static class EndpointMappings
                 IncludeEvidence: payload.IncludeEvidence,
                 Interactive: payload.Interactive));
             var tenant = string.IsNullOrWhiteSpace(payload.Tenant)
-                ? AppComposition.ResolveTenant(request)
+                ? (await resolver.ResolveAsync(request.HttpContext, ct)).TenantId
                 : payload.Tenant.Trim();
 
             BillingQuote quote;
@@ -900,35 +897,33 @@ internal static class EndpointMappings
                 return EndpointJson.BadRequest("invalid_request_error", ex.Message);
             }
 
-            return Results.Json(new
-            {
-                quote_id = quote.QuoteId,
-                tenant = quote.Tenant,
-                service_id = quote.ServiceId,
-                nodes = payload.Nodes,
-                edges = payload.Edges,
-                include_geometry = payload.IncludeGeometry,
-                include_evidence = payload.IncludeEvidence,
-                interactive = payload.Interactive,
-                format = string.IsNullOrWhiteSpace(payload.Format) ? "json" : payload.Format.Trim(),
-                metered_items = estimate.MeteredItems,
-                billable_units = quote.Units,
-                unit = estimate.UnitName,
-                items_per_unit = estimate.ItemsPerUnit,
-                amount_cents = quote.AmountCents,
-                currency = quote.Currency,
-                status = quote.Status,
-                expires_at = quote.ExpiresAt,
-                stripe_checkout_url = quote.StripeCheckoutUrl,
-                next = new
-                {
-                    execute_header = new { name = "X-Laplace-Quote-Id", value = quote.QuoteId },
-                    note = "Visualization exports are metered by graph size, geometry inclusion, evidence overlays, and interactive output."
-                }
-            });
-        });
+            return Results.Json(new VisualizationQuoteResponse(
+                QuoteId: quote.QuoteId,
+                Tenant: quote.Tenant,
+                ServiceId: quote.ServiceId,
+                Nodes: payload.Nodes,
+                Edges: payload.Edges,
+                IncludeGeometry: payload.IncludeGeometry,
+                IncludeEvidence: payload.IncludeEvidence,
+                Interactive: payload.Interactive,
+                Format: string.IsNullOrWhiteSpace(payload.Format) ? "json" : payload.Format.Trim(),
+                MeteredItems: estimate.MeteredItems,
+                BillableUnits: quote.Units,
+                Unit: estimate.UnitName,
+                ItemsPerUnit: estimate.ItemsPerUnit,
+                AmountCents: quote.AmountCents,
+                Currency: quote.Currency,
+                Status: quote.Status,
+                ExpiresAt: quote.ExpiresAt,
+                StripeCheckoutUrl: quote.StripeCheckoutUrl,
+                Next: NextStep(quote, "Visualization exports are metered by graph size, geometry inclusion, evidence overlays, and interactive output.")));
+        })
+        .WithTags("billing")
+        .Accepts<VisualizationQuoteRequest>("application/json")
+        .Produces<VisualizationQuoteResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest);
 
-        app.MapPost("/v1/billing/recipe/quote", async (HttpRequest request, IBillingOrchestrator billing, IReportQuoteCalculator calc, CancellationToken ct) =>
+        app.MapPost("/v1/billing/recipe/quote", async (HttpRequest request, IBillingOrchestrator billing, IReportQuoteCalculator calc, ITenantResolver resolver, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<RecipeQuoteRequest>(request, ct);
             if (payload is null)
@@ -944,7 +939,7 @@ internal static class EndpointMappings
                 Commercial: payload.Commercial,
                 PrivateExport: payload.PrivateExport));
             var tenant = string.IsNullOrWhiteSpace(payload.Tenant)
-                ? AppComposition.ResolveTenant(request)
+                ? (await resolver.ResolveAsync(request.HttpContext, ct)).TenantId
                 : payload.Tenant.Trim();
 
             BillingQuote quote;
@@ -958,62 +953,65 @@ internal static class EndpointMappings
                 return EndpointJson.BadRequest("invalid_request_error", ex.Message);
             }
 
-            return Results.Json(new
-            {
-                quote_id = quote.QuoteId,
-                tenant = quote.Tenant,
-                service_id = quote.ServiceId,
-                action = payload.Action.Trim(),
-                content_items = payload.ContentItems,
-                commercial = payload.Commercial,
-                private_export = payload.PrivateExport,
-                metered_items = estimate.MeteredItems,
-                billable_units = quote.Units,
-                unit = estimate.UnitName,
-                items_per_unit = estimate.ItemsPerUnit,
-                amount_cents = quote.AmountCents,
-                currency = quote.Currency,
-                status = quote.Status,
-                expires_at = quote.ExpiresAt,
-                stripe_checkout_url = quote.StripeCheckoutUrl,
-                next = new
-                {
-                    execute_header = new { name = "X-Laplace-Quote-Id", value = quote.QuoteId },
-                    note = "Recipe quotes cover publishing, access, compilation, commercial use, and private content export."
-                }
-            });
-        });
+            return Results.Json(new RecipeQuoteResponse(
+                QuoteId: quote.QuoteId,
+                Tenant: quote.Tenant,
+                ServiceId: quote.ServiceId,
+                Action: payload.Action.Trim(),
+                ContentItems: payload.ContentItems,
+                Commercial: payload.Commercial,
+                PrivateExport: payload.PrivateExport,
+                MeteredItems: estimate.MeteredItems,
+                BillableUnits: quote.Units,
+                Unit: estimate.UnitName,
+                ItemsPerUnit: estimate.ItemsPerUnit,
+                AmountCents: quote.AmountCents,
+                Currency: quote.Currency,
+                Status: quote.Status,
+                ExpiresAt: quote.ExpiresAt,
+                StripeCheckoutUrl: quote.StripeCheckoutUrl,
+                Next: NextStep(quote, "Recipe quotes cover publishing, access, compilation, commercial use, and private content export.")));
+        })
+        .WithTags("billing")
+        .Accepts<RecipeQuoteRequest>("application/json")
+        .Produces<RecipeQuoteResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest);
 
-        app.MapGet("/v1/billing/quotes/{quoteId}", (string quoteId, IBillingOrchestrator billing) =>
+        app.MapGet("/v1/billing/quotes/{quoteId}", async (string quoteId, IBillingOrchestrator billing, CancellationToken ct) =>
         {
-            if (!billing.TryGetQuote(quoteId, out var quote))
+            var quote = await billing.TryGetQuoteAsync(quoteId, ct);
+            if (quote is null)
                 return EndpointJson.BadRequest("quote_not_found", "Quote does not exist.");
 
-            return Results.Json(new
-            {
-                quote_id = quote.QuoteId,
-                tenant = quote.Tenant,
-                service_id = quote.ServiceId,
-                units = quote.Units,
-                amount_cents = quote.AmountCents,
-                currency = quote.Currency,
-                status = quote.Status,
-                consumed = quote.Consumed,
-                stripe_checkout_url = quote.StripeCheckoutUrl,
-                expires_at = quote.ExpiresAt
-            });
-        });
+            return Results.Json(new QuoteStatusResponse(
+                QuoteId: quote.QuoteId,
+                Tenant: quote.Tenant,
+                ServiceId: quote.ServiceId,
+                Units: quote.Units,
+                AmountCents: quote.AmountCents,
+                Currency: quote.Currency,
+                Status: quote.Status,
+                Consumed: quote.Consumed,
+                StripeCheckoutUrl: quote.StripeCheckoutUrl,
+                ExpiresAt: quote.ExpiresAt));
+        })
+        .WithTags("billing")
+        .Produces<QuoteStatusResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest);
 
-        app.MapGet("/v1/billing/usage", (HttpRequest request, IBillingOrchestrator billing) =>
+        app.MapGet("/v1/billing/usage", async (HttpRequest request, IBillingOrchestrator billing, ITenantResolver resolver, CancellationToken ct) =>
         {
-            var tenant = AppComposition.ResolveTenant(request);
-            var usage = billing.GetUsage(tenant);
-            return Results.Json(new
-            {
-                tenant,
-                total_amount_cents = usage.Sum(x => x.AmountCents),
-                entries = usage
-            });
-        });
+            var tenant = (await resolver.ResolveAsync(request.HttpContext, ct)).TenantId;
+            var usage = await billing.GetUsageAsync(tenant, ct);
+            return Results.Json(new UsageResponse(
+                Tenant: tenant,
+                TotalAmountCents: usage.Sum(x => x.AmountCents),
+                Entries: usage.Select(u => new UsageEntry(
+                    u.QuoteId, u.Tenant, u.ServiceId, u.Units, u.AmountCents, u.ExecutedAt)).ToArray()));
+        })
+        .WithTags("billing").Produces<UsageResponse>();
     }
+
+    private static QuoteNextStep NextStep(BillingQuote quote, string note) =>
+        new(new ExecuteHeader("X-Laplace-Quote-Id", quote.QuoteId), note);
 }

@@ -6,8 +6,12 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Unicode;
 
-public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider, IIngestCommitPolicy
 {
+    // Codepoint batches and alias/confusables intents cross-reference arbitrary codepoints
+    // and shared content roots via StageCodepointTarget / ContentEmitter. Parallel commits
+    // within an epoch deadlock on overlapping entity/attestation rows (40P01).
+    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
     public static readonly Hash128 Source     = Hash128.OfCanonical("substrate/source/UnicodeDecomposer/v1");
     public static readonly Hash128 TrustClass = Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
     /// <summary>Codepoint geometry and UCD property emit are native-owned via <c>unicode_seed</c> / perfcache.</summary>

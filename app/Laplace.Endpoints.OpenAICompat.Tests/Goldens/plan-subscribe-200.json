@@ -1,0 +1,26 @@
+{
+  "quote_id": "<quote_id>",
+  "tenant": "golden-plan-tenant",
+  "plan_id": "studio",
+  "service_id": "plan.studio",
+  "monthly_price_cents": 9900,
+  "amount_cents": 9900,
+  "currency": "usd",
+  "status": "awaiting_manual_approval",
+  "stripe_checkout_url": null,
+  "monthly_credits": {
+    "chat.completions": 10000,
+    "completions": 10000,
+    "generate": 5000,
+    "embeddings": 50000,
+    "inspect": 2500,
+    "audit.deep_report": 50,
+    "visualization.deep_export": 50,
+    "explain.trace": 250,
+    "synthesis": 500
+  },
+  "next": {
+    "checkout_url": null,
+    "note": "Plan checkout activates monthly credits when Stripe sends checkout.session.completed."
+  }
+}

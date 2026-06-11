@@ -1,3 +1,5 @@
+using Laplace.Api.Contracts;
+
 namespace Laplace.Endpoints.OpenAICompat;
 
 internal sealed class CorrelationIdMiddleware
@@ -42,15 +44,9 @@ internal sealed class ExceptionEnvelopeMiddleware
         {
             // DB is up; the query/schema is wrong. Surface the real SQL error, do not mislabel as unavailable.
             _logger.LogError(ex, "Substrate query error.");
-            await Results.Json(new
-            {
-                error = new
-                {
-                    type = "substrate_query_error",
-                    code = "substrate_query_error",
-                    message = ex.Message
-                }
-            }, statusCode: StatusCodes.Status500InternalServerError).ExecuteAsync(context);
+            await Results.Json(
+                new ErrorResponse(new ErrorBody("substrate_query_error", "substrate_query_error", ex.Message)),
+                statusCode: StatusCodes.Status500InternalServerError).ExecuteAsync(context);
         }
         catch (SubstrateUnavailableException ex)
         {
@@ -60,15 +56,9 @@ internal sealed class ExceptionEnvelopeMiddleware
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unhandled endpoint exception.");
-            await Results.Json(new
-            {
-                error = new
-                {
-                    type = "internal_error",
-                    code = "unhandled_exception",
-                    message = "Unexpected endpoint failure."
-                }
-            }, statusCode: StatusCodes.Status500InternalServerError).ExecuteAsync(context);
+            await Results.Json(
+                new ErrorResponse(new ErrorBody("internal_error", "unhandled_exception", "Unexpected endpoint failure.")),
+                statusCode: StatusCodes.Status500InternalServerError).ExecuteAsync(context);
         }
     }
 }

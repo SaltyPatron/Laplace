@@ -1,0 +1,20 @@
+{
+  "id": "<id>",
+  "object": "chat.completion",
+  "created": 0,
+  "model": "laplace-completions-001",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "the whale sings"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "billing": null,
+  "metadata": {
+    "generated_tokens": 3
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "id": "<id>",
+  "object": "laplace.explainability.report",
+  "created": 0,
+  "prompt": "whale",
+  "depth": 2,
+  "beam": 2,
+  "academic": true,
+  "trace": [
+    {
+      "depth": 1,
+      "pathHex": [
+        "00112233445566778899aabbccddeeff"
+      ],
+      "typePathHex": [
+        "0123456789abcdef0123456789abcdef"
+      ],
+      "entityIdHex": "00112233445566778899aabbccddeeff",
+      "entityLabel": "whale",
+      "effectiveMu": 0.91,
+      "pathMu": 0.91,
+      "witnesses": 42,
+      "evidence": [
+        {
+          "typeIdHex": "0123456789abcdef0123456789abcdef",
+          "objectIdHex": "ffeeddccbbaa99887766554433221100",
+          "sourceIdHex": "fedcba9876543210fedcba9876543210",
+          "contextIdHex": null,
+          "outcome": 2,
+          "observationCount": 12
+        }
+      ]
+    },
+    {
+      "depth": 2,
+      "pathHex": [
+        "00112233445566778899aabbccddeeff",
+        "ffeeddccbbaa99887766554433221100"
+      ],
+      "typePathHex": [
+        "0123456789abcdef0123456789abcdef",
+        "0123456789abcdef0123456789abcdef"
+      ],
+      "entityIdHex": "ffeeddccbbaa99887766554433221100",
+      "entityLabel": "cetacean",
+      "effectiveMu": 0.84,
+      "pathMu": 0.7644,
+      "witnesses": 17,
+      "evidence": [
+        {
+          "typeIdHex": "0123456789abcdef0123456789abcdef",
+          "objectIdHex": "ffeeddccbbaa99887766554433221100",
+          "sourceIdHex": "fedcba9876543210fedcba9876543210",
+          "contextIdHex": null,
+          "outcome": 2,
+          "observationCount": 12
+        }
+      ]
+    }
+  ],
+  "billing": {
+    "quote_id": "<quote_id>",
+    "amount_cents": 108,
+    "currency": "usd",
+    "tenant": "golden-explain-tenant",
+    "service_id": "explain.trace"
+  }
+}

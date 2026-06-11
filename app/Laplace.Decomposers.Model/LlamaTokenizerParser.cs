@@ -16,6 +16,7 @@ public enum TokenRole : byte
     LeadingSpace = 1,
     ByteLevel    = 2,
     Special      = 4,
+    Continuation = 8,   // WordPiece "##" pieces: joins the preceding token, no boundary
 }
 
 public sealed class LlamaTokenizerParser
@@ -209,6 +210,13 @@ public sealed class LlamaTokenizerParser
         {
             role |= TokenRole.LeadingSpace;
             surface = surface.Substring(1);
+        }
+        else if (surface.Length > 2 && surface.StartsWith("##", StringComparison.Ordinal))
+        {
+            // WordPiece continuation (BERT-family): same content identity as the bare
+            // piece — the role carries the joining semantics, never the identity.
+            role |= TokenRole.Continuation;
+            surface = surface.Substring(2);
         }
 
         surface = surface.Replace('Ċ', '\n');
