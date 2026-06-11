@@ -40,64 +40,25 @@ internal static class FoundryExport
             System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= 0 ? v : dflt;
 
-    // One set-based read per plane; entity→ordinal mapping is in-process (perf-cache
-    // derived token entities), so the DB is touched exactly once per plane. Edge
-    // weight = effective μ (rating − 2·rd, conservative), signed. Degree-capped at
-    // top-m by |w| per subject ordinal to bound eigensolver factorization fill-in.
-    internal static async Task<PlaneCoo> ReadPlaneAsync(
-        NpgsqlDataSource ds, Hash128 typeId,
-        Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
+    // A plane is named, never hand-rolled: ('consensus', TYPE) reads adjudicated
+    // eff-μ RELATIVE TO NEUTRAL (signed; refuted < 0); ('traj', next|gap|window, n)
+    // reads conditional frequencies straight from the witnessed trajectories. The
+    // SQL surface (laplace.token_plane) is the single definition both this reader
+    // and every audit/walk view share.
+    internal readonly record struct PlaneSpec(string Family, string Name, int? Arg)
     {
-        var adj = new Dictionary<int, List<(int Col, double W)>>();
-        await using var conn = await ds.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 600;
-        cmd.CommandText =
-            "SELECT subject_id, object_id, eff_mu_fp "
-            + "FROM laplace.consensus_export_relations_mu($1)";
-        cmd.Parameters.AddWithValue(typeId.ToBytes());
-        await using var rdr = await cmd.ExecuteReaderAsync();
-        while (await rdr.ReadAsync())
-        {
-            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
-            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
-            double w = rdr.GetInt64(2) / 1e9;
-            if (w == 0.0) continue;
-            foreach (int s in subj)
-            {
-                if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
-                foreach (int o in obj) row.Add((o, w));
-            }
-        }
-
-        long kept = 0;
-        foreach (var row in adj.Values)
-        {
-            if (row.Count > degreeCap)
-            {
-                row.Sort((a, b) => Math.Abs(b.W).CompareTo(Math.Abs(a.W)));
-                row.RemoveRange(degreeCap, row.Count - degreeCap);
-            }
-            kept += row.Count;
-        }
-
-        var rows = new int[kept]; var cols = new int[kept]; var vals = new double[kept];
-        long at = 0;
-        foreach (var (r, row) in adj)
-            foreach (var (c, w) in row)
-            {
-                rows[at] = r; cols[at] = c; vals[at] = w; at++;
-            }
-        return new PlaneCoo(rows, cols, vals);
+        public static PlaneSpec Consensus(string name) => new("consensus", name, null);
+        public static PlaneSpec TrajNext() => new("traj", "next", null);
+        public static PlaneSpec TrajGap(int g) => new("traj", "gap", g);
+        public static PlaneSpec TrajWindow(int w) => new("traj", "window", w);
+        public override string ToString() => Arg is null ? $"{Family}:{Name}" : $"{Family}:{Name}:{Arg}";
     }
 
-    // The trajectory plane: conditional continuation frequencies read from the
-    // witnessed usage sequences themselves (content_index over the content
-    // trajectories) — weight = P(object follows subject within window). Window 1
-    // is the "followed by N% of the time" distribution; wider windows give the
-    // attention-style forward co-occurrence surface.
-    internal static async Task<PlaneCoo> ReadTrajectoryPlaneAsync(
-        NpgsqlDataSource ds, int window,
+    // One set-based read per plane; entity→ordinal mapping is in-process (perf-cache
+    // derived token entities), so the DB is touched exactly once per plane. Degree-
+    // capped at top-m by |w| per subject ordinal to bound factorization fill-in.
+    internal static async Task<PlaneCoo> ReadTokenPlaneAsync(
+        NpgsqlDataSource ds, PlaneSpec spec,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
     {
         var adj = new Dictionary<int, List<(int Col, double W)>>();
@@ -107,17 +68,17 @@ internal static class FoundryExport
             await using var cmd = conn.CreateCommand();
             cmd.CommandTimeout = 600;
             cmd.CommandText =
-                "SELECT subject_id, object_id, cnt, subject_total "
-                + "FROM laplace.content_trajectory_pairs($1)";
-            cmd.Parameters.AddWithValue(window);
+                "SELECT subject_id, object_id, w FROM laplace.token_plane($1, $2, $3)";
+            cmd.Parameters.AddWithValue(spec.Family);
+            cmd.Parameters.AddWithValue(spec.Name);
+            cmd.Parameters.AddWithValue((object?)spec.Arg ?? DBNull.Value);
             await using var rdr = await cmd.ExecuteReaderAsync();
             while (await rdr.ReadAsync())
             {
                 if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
                 if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
-                long total = rdr.GetInt64(3);
-                if (total <= 0) continue;
-                double w = rdr.GetInt64(2) / (double)total;
+                double w = rdr.GetDouble(2);
+                if (w == 0.0) continue;
                 foreach (int s in subj)
                 {
                     if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
@@ -127,9 +88,7 @@ internal static class FoundryExport
         }
         catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
         {
-            // content_index not built (or the function not yet deployed) — the pour
-            // proceeds from consensus alone; run rebuild_content_index to enrich it.
-            Console.WriteLine($"  (trajectory plane window={window} unavailable: {ex.SqlState} — pouring from consensus planes only)");
+            Console.WriteLine($"  (plane {spec} unavailable: {ex.SqlState} — skipped)");
             return PlaneCoo.Empty;
         }
 
@@ -152,75 +111,6 @@ internal static class FoundryExport
                 rows[at] = r; cols[at] = c; vals[at] = w; at++;
             }
         return new PlaneCoo(rows, cols, vals);
-    }
-
-    // The order ladder: per-gap planes (gap = exact forward distance in a witnessed
-    // sequence), read in ONE pass via content_trajectory_pairs_by_gap. gapPlanes[g-1]
-    // holds P(object at distance g | subject); the foundry pours gap g into layer g,
-    // so the mold's depth is bought with sequential order from the trajectories.
-    internal static async Task<PlaneCoo[]> ReadTrajectoryGapPlanesAsync(
-        NpgsqlDataSource ds, int maxGap,
-        Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
-    {
-        var adjByGap = new Dictionary<int, List<(int Col, double W)>>[maxGap];
-        for (int g = 0; g < maxGap; g++) adjByGap[g] = new Dictionary<int, List<(int, double)>>();
-        await using var conn = await ds.OpenConnectionAsync();
-        try
-        {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandTimeout = 600;
-            cmd.CommandText =
-                "SELECT subject_id, object_id, gap, cnt, subject_total "
-                + "FROM laplace.content_trajectory_pairs_by_gap($1)";
-            cmd.Parameters.AddWithValue(maxGap);
-            await using var rdr = await cmd.ExecuteReaderAsync();
-            while (await rdr.ReadAsync())
-            {
-                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
-                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
-                int gap = rdr.GetInt32(2);
-                if (gap < 1 || gap > maxGap) continue;
-                long total = rdr.GetInt64(4);
-                if (total <= 0) continue;
-                double w = rdr.GetInt64(3) / (double)total;
-                var adj = adjByGap[gap - 1];
-                foreach (int s in subj)
-                {
-                    if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
-                    foreach (int o in obj) row.Add((o, w));
-                }
-            }
-        }
-        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
-        {
-            Console.WriteLine($"  (trajectory gap ladder unavailable: {ex.SqlState} — pouring from consensus planes only)");
-            return Enumerable.Repeat(PlaneCoo.Empty, maxGap).ToArray();
-        }
-
-        var planes = new PlaneCoo[maxGap];
-        for (int g = 0; g < maxGap; g++)
-        {
-            var adj = adjByGap[g];
-            long kept = 0;
-            foreach (var row in adj.Values)
-            {
-                if (row.Count > degreeCap)
-                {
-                    row.Sort((a, b) => Math.Abs(b.W).CompareTo(Math.Abs(a.W)));
-                    row.RemoveRange(degreeCap, row.Count - degreeCap);
-                }
-                kept += row.Count;
-            }
-            var rows = new int[kept]; var cols = new int[kept]; var vals = new double[kept];
-            long at = 0;
-            foreach (var (r, row) in adj)
-                foreach (var (c, w) in row)
-                {
-                    rows[at] = r; cols[at] = c; vals[at] = w; at++;
-                }
-            planes[g] = new PlaneCoo(rows, cols, vals);
-        }
-        return planes;
     }
 
     // Per-plane scale normalization (max |w| → 1) so μ-weighted consensus planes

@@ -59,6 +59,121 @@ CREATE OR REPLACE FUNCTION content_trajectory_pairs_by_gap(p_max_gap int DEFAULT
     SELECT p.s, p.o, p.g, p.c, t.t FROM pairs p JOIN totals t USING (s, g)
 $$;
 
+-- ── the generic plane surface ───────────────────────────────────────────────────
+-- ONE read surface for token→token strength, whatever the source: adjudicated
+-- consensus arenas, or readings of the content trajectories (which carry
+-- precedes/follows/co-occurs at every gap without new records). Everything that
+-- consumes planes — the foundry, audits, walk views — reads THIS, so sources are
+-- interchangeable, combinations are plain SQL, and the surface is regress-pinnable.
+--
+--   token_plane('consensus', 'SIMILAR_TO')      eff-μ RELATIVE TO NEUTRAL, in μ units
+--                                               (signed: refuted < 0 < confirmed)
+--   token_plane('traj', 'next')                 P(object follows subject), gap 1
+--   token_plane('traj', 'gap', 3)               P(object at exact distance 3 | subject)
+--   token_plane('traj', 'window', 4)            P(object within 4 ahead | subject)
+--
+-- Trajectory families read the content_pairs cache when present (rebuild via
+-- rebuild_content_pairs after rebuild_content_index) — every read an index scan —
+-- and fall back to the live content_index join when it is not.
+
+CREATE TABLE IF NOT EXISTS content_pairs (
+    gap           int    NOT NULL,
+    subject_id    bytea  NOT NULL,
+    object_id     bytea  NOT NULL,
+    cnt           bigint NOT NULL,
+    subject_total bigint NOT NULL
+);
+CREATE INDEX IF NOT EXISTS content_pairs_gap_subject
+    ON content_pairs(gap, subject_id);
+
+-- The native build: one ordered scan of content_index, sliding window, in-memory
+-- hash aggregation (generation_index.c) — engine computes, SQL orchestrates.
+CREATE OR REPLACE FUNCTION content_pairs_scan(p_max_gap int)
+    RETURNS TABLE(gap int, subject_id bytea, object_id bytea, cnt bigint)
+    AS 'MODULE_PATHNAME', 'pg_laplace_content_pairs_scan'
+    LANGUAGE C STRICT VOLATILE;
+
+CREATE OR REPLACE PROCEDURE rebuild_content_pairs(p_max_gap int DEFAULT 8)
+    LANGUAGE plpgsql
+    SET search_path = @extschema@, public AS $$
+BEGIN
+    TRUNCATE content_pairs;
+    INSERT INTO content_pairs (gap, subject_id, object_id, cnt, subject_total)
+    SELECT s.gap, s.subject_id, s.object_id, s.cnt,
+           sum(s.cnt) OVER (PARTITION BY s.subject_id, s.gap)
+    FROM content_pairs_scan(p_max_gap) s;
+    ANALYZE content_pairs;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION token_plane(p_family text, p_name text, p_arg int DEFAULT NULL)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE plpgsql STABLE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    g int;
+    cached boolean;
+BEGIN
+    IF p_family = 'consensus' THEN
+        RETURN QUERY
+        SELECT c.subject_id, c.object_id,
+               ((c.rating - 2 * c.rd) - glicko2_neutral_mu())::double precision / 1e9
+        FROM consensus c
+        WHERE c.type_id = relation_type_id(p_name) AND c.object_id IS NOT NULL;
+        RETURN;
+    END IF;
+
+    IF p_family <> 'traj' THEN
+        RAISE EXCEPTION 'token_plane: unknown family % (consensus | traj)', p_family;
+    END IF;
+
+    g := CASE p_name
+             WHEN 'next'   THEN 1
+             WHEN 'gap'    THEN COALESCE(p_arg, 1)
+             WHEN 'window' THEN COALESCE(p_arg, 4)
+             ELSE NULL
+         END;
+    IF g IS NULL THEN
+        RAISE EXCEPTION 'token_plane: unknown traj plane % (next | gap | window)', p_name;
+    END IF;
+
+    SELECT EXISTS (SELECT 1 FROM content_pairs LIMIT 1) INTO cached;
+
+    IF p_name = 'window' THEN
+        IF cached THEN
+            RETURN QUERY
+            WITH g_rows AS (
+                SELECT cp.subject_id AS s, cp.object_id AS o, cp.gap, cp.cnt, cp.subject_total
+                FROM content_pairs cp WHERE cp.gap <= g
+            ),
+            totals AS (
+                SELECT s, sum(t) AS total
+                FROM (SELECT DISTINCT gr.s, gr.gap, gr.subject_total AS t FROM g_rows gr) d
+                GROUP BY s
+            )
+            SELECT gr.s, gr.o, sum(gr.cnt)::double precision / t.total
+            FROM g_rows gr JOIN totals t ON t.s = gr.s
+            GROUP BY gr.s, gr.o, t.total;
+        ELSE
+            RETURN QUERY
+            SELECT t.subject_id, t.object_id, t.cnt::double precision / t.subject_total
+            FROM content_trajectory_pairs(g) t;
+        END IF;
+        RETURN;
+    END IF;
+
+    IF cached THEN
+        RETURN QUERY
+        SELECT cp.subject_id, cp.object_id, cp.cnt::double precision / cp.subject_total
+        FROM content_pairs cp WHERE cp.gap = g;
+    ELSE
+        RETURN QUERY
+        SELECT t.subject_id, t.object_id, t.cnt::double precision / t.subject_total
+        FROM content_trajectory_pairs_by_gap(g) t WHERE t.gap = g;
+    END IF;
+END;
+$$;
+
 -- native kernel ----------------------------------------------------------------
 CREATE OR REPLACE FUNCTION generate_tokens(
         p_ctx bytea[], p_steps int DEFAULT 24, p_max_order int DEFAULT 5,

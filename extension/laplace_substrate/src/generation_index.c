@@ -8,8 +8,11 @@
 
 #include "executor/spi.h"
 #include "funcapi.h"
+#include "miscadmin.h"
 #include "utils/builtins.h"
+#include "utils/hsearch.h"
 #include "utils/memutils.h"
+#include "utils/tuplestore.h"
 
 #include "spi_common.h"
 
@@ -217,4 +220,176 @@ pg_laplace_rebuild_content_index_deep(PG_FUNCTION_ARGS)
     rebuild_content_index_deep_impl();
     SPI_finish();
     PG_RETURN_VOID();
+}
+
+/*
+ * content_pairs_scan(max_gap) — the native build behind the trajectory planes.
+ *
+ * The SQL self-join formulation materializes positions × max_gap intermediate
+ * rows through executor nodes; this is one ordered scan of content_index with a
+ * sliding window and an in-memory hash aggregation (engine computes, SQL
+ * orchestrates — the same law as the bulk fold). Emits (gap, subject, object,
+ * cnt); per-(subject,gap) totals are a window aggregate in the caller.
+ */
+PG_FUNCTION_INFO_V1(pg_laplace_content_pairs_scan);
+
+typedef struct ContentPairKey
+{
+    uint8 subject[16];
+    uint8 object[16];
+    int32 gap;
+} ContentPairKey;
+
+typedef struct ContentPairEntry
+{
+    ContentPairKey key;            /* dynahash requires key first */
+    int64          cnt;
+} ContentPairEntry;
+
+Datum
+pg_laplace_content_pairs_scan(PG_FUNCTION_ARGS)
+{
+    int32           max_gap = PG_GETARG_INT32(0);
+    ReturnSetInfo*  rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    TupleDesc       tupdesc;
+    Tuplestorestate* tupstore;
+    MemoryContext   per_query;
+    MemoryContext   oldctx;
+    HASHCTL         hctl;
+    HTAB*           pairs;
+    Portal          portal;
+    uint8           win_tok[64][16];
+    uint8           cur_seq[16];
+    int             win_len = 0;
+    bool            have_seq = false;
+    HASH_SEQ_STATUS seq;
+    ContentPairEntry* e;
+
+    if (max_gap < 1 || max_gap > 64)
+        ereport(ERROR, (errmsg("content_pairs_scan: max_gap must be 1..64 (got %d)", max_gap)));
+    if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo) ||
+        (rsinfo->allowedModes & SFRM_Materialize) == 0)
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("content_pairs_scan: set-valued function called in context "
+                    "that cannot accept a set")));
+
+    per_query = rsinfo->econtext->ecxt_per_query_memory;
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+        ereport(ERROR, (errmsg("content_pairs_scan: return type must be a row type")));
+
+    oldctx = MemoryContextSwitchTo(per_query);
+    tupstore = tuplestore_begin_heap(false, false, work_mem);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tupstore;
+    rsinfo->setDesc = CreateTupleDescCopy(tupdesc);
+    MemoryContextSwitchTo(oldctx);
+
+    memset(&hctl, 0, sizeof(hctl));
+    hctl.keysize = sizeof(ContentPairKey);
+    hctl.entrysize = sizeof(ContentPairEntry);
+    hctl.hcxt = CurrentMemoryContext;
+    pairs = hash_create("content_pairs_scan", 4 * 1024 * 1024, &hctl,
+                        HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    if (SPI_connect() != SPI_OK_CONNECT)
+        elog(ERROR, "content_pairs_scan: SPI_connect failed");
+
+    portal = SPI_cursor_open_with_args(
+        "content_pairs_scan",
+        "SELECT seq_id, token FROM laplace.content_index ORDER BY seq_id, pos",
+        0, NULL, NULL, NULL, true, 0);
+
+    for (;;)
+    {
+        uint64 i;
+
+        SPI_cursor_fetch(portal, true, 100000);
+        if (SPI_processed == 0)
+            break;
+
+        for (i = 0; i < SPI_processed; i++)
+        {
+            HeapTuple   tup = SPI_tuptable->vals[i];
+            TupleDesc   td  = SPI_tuptable->tupdesc;
+            bool        null1, null2;
+            bytea*      seq_b = DatumGetByteaPP(SPI_getbinval(tup, td, 1, &null1));
+            bytea*      tok_b = DatumGetByteaPP(SPI_getbinval(tup, td, 2, &null2));
+            const uint8* seq;
+            const uint8* tok;
+            int         d;
+
+            if (null1 || null2 ||
+                VARSIZE_ANY_EXHDR(seq_b) != 16 || VARSIZE_ANY_EXHDR(tok_b) != 16)
+                ereport(ERROR, (errmsg("content_pairs_scan: content_index ids must be 16 bytes")));
+            seq = (const uint8 *) VARDATA_ANY(seq_b);
+            tok = (const uint8 *) VARDATA_ANY(tok_b);
+
+            if (!have_seq || memcmp(seq, cur_seq, 16) != 0)
+            {
+                memcpy(cur_seq, seq, 16);
+                have_seq = true;
+                win_len = 0;
+            }
+
+            for (d = 1; d <= win_len; d++)
+            {
+                ContentPairKey   key;
+                ContentPairEntry* ent;
+                bool             found;
+
+                /* HASH_BLOBS hashes/compares the full keysize — padding included */
+                memset(&key, 0, sizeof(key));
+                memcpy(key.subject, win_tok[(win_len - d) % 64], 16);
+                memcpy(key.object, tok, 16);
+                key.gap = d;
+                ent = (ContentPairEntry *) hash_search(pairs, &key, HASH_ENTER, &found);
+                if (!found)
+                    ent->cnt = 0;
+                ent->cnt++;
+            }
+
+            /* slide: the window holds the last max_gap tokens of this sequence */
+            if (win_len < max_gap)
+            {
+                memcpy(win_tok[win_len % 64], tok, 16);
+                win_len++;
+            }
+            else
+            {
+                int j;
+                for (j = 0; j < max_gap - 1; j++)
+                    memcpy(win_tok[j % 64], win_tok[(j + 1) % 64], 16);
+                memcpy(win_tok[(max_gap - 1) % 64], tok, 16);
+            }
+        }
+        SPI_freetuptable(SPI_tuptable);
+    }
+    SPI_cursor_close(portal);
+    SPI_finish();
+
+    hash_seq_init(&seq, pairs);
+    while ((e = (ContentPairEntry *) hash_seq_search(&seq)) != NULL)
+    {
+        Datum  values[4];
+        bool   nulls[4] = { false, false, false, false };
+        bytea* s = (bytea *) palloc(VARHDRSZ + 16);
+        bytea* o = (bytea *) palloc(VARHDRSZ + 16);
+
+        SET_VARSIZE(s, VARHDRSZ + 16);
+        memcpy(VARDATA(s), e->key.subject, 16);
+        SET_VARSIZE(o, VARHDRSZ + 16);
+        memcpy(VARDATA(o), e->key.object, 16);
+
+        values[0] = Int32GetDatum(e->key.gap);
+        values[1] = PointerGetDatum(s);
+        values[2] = PointerGetDatum(o);
+        values[3] = Int64GetDatum(e->cnt);
+        tuplestore_putvalues(tupstore, rsinfo->setDesc, values, nulls);
+        pfree(s);
+        pfree(o);
+    }
+    hash_destroy(pairs);
+
+    return (Datum) 0;
 }

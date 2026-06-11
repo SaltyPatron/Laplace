@@ -228,6 +228,180 @@ BEGIN
 END;
 $$;
 
+-- ── the bulk fold lane (HANDOFF-fold-lane / OPEN-PROBLEMS §11) ──────────────────
+-- The merge fold pays 2 random index probes per relation against a working set
+-- beyond RAM, re-touched once per period. This lane replaces every probe with one
+-- external sort: all staged epochs + the existing consensus rows (as period-0
+-- seeds) GROUP BY relation identity, periods folded IN ORDER through the C
+-- aggregate below — sequential I/O end to end, one fmgr transition per
+-- (relation, period). Fresh substrates take a sorted INSERT (append-order PK
+-- maintenance); live substrates get a full rebuild into a new heap whose PK is
+-- built once, then an atomic swap — production indexes are never dropped in place.
+
+-- Refresh-safe: these are no-ops on a fresh extension install and make
+-- refresh-substrate-module.cmd idempotent on a live DB.
+DROP AGGREGATE IF EXISTS consensus_fold(
+    boolean, bigint, bigint, bigint, bigint, bigint, bigint, bigint);
+DROP FUNCTION IF EXISTS consensus_fold_step(
+    internal, boolean, bigint, bigint, bigint, bigint, bigint, bigint, bigint);
+DROP FUNCTION IF EXISTS consensus_fold_final(internal);
+DROP TYPE IF EXISTS consensus_fold_result;
+
+CREATE TYPE consensus_fold_result AS (
+    rating bigint, rd bigint, volatility bigint, witness_count bigint);
+
+CREATE FUNCTION consensus_fold_step(
+        internal, boolean, bigint, bigint, bigint, bigint, bigint, bigint, bigint)
+    RETURNS internal LANGUAGE C PARALLEL RESTRICTED
+    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_fold_step';
+
+CREATE FUNCTION consensus_fold_final(internal)
+    RETURNS consensus_fold_result LANGUAGE C PARALLEL RESTRICTED
+    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_fold_final';
+
+-- args: (is_seed, rating, rd, volatility, phi, games|witness_count, sum_score, tau)
+-- Callers MUST order inputs seed-first then epochs ascending (ORDER BY in the call).
+CREATE AGGREGATE consensus_fold(
+        boolean, bigint, bigint, bigint, bigint, bigint, bigint, bigint) (
+    SFUNC     = consensus_fold_step,
+    STYPE     = internal,
+    FINALFUNC = consensus_fold_final
+);
+
+CREATE OR REPLACE FUNCTION finish_consensus_bulk()
+    RETURNS bigint LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public
+    SET session_replication_role = replica
+    SET work_mem = '4GB'
+    SET maintenance_work_mem = '4GB' AS $$
+DECLARE
+    parts text := '';
+    seed  text := '';
+    rel   record;
+    n     bigint := 0;
+    fresh boolean;
+    t0    timestamptz := clock_timestamp();
+BEGIN
+    FOR rel IN
+        SELECT c.relname,
+               substring(c.relname FROM 'consensus_period_staging_e(\d{4})_')::int AS epoch
+        FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+        WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+          AND c.relname ~ '^consensus_period_staging_e\d{4}_\d+$'
+        ORDER BY c.relname
+    LOOP
+        IF parts <> '' THEN parts := parts || ' UNION ALL '; END IF;
+        parts := parts || format(
+            'SELECT subject_id, type_id, object_id, %s::int AS ord, phi, games, sum_score, last_ts FROM %I',
+            rel.epoch, rel.relname);
+    END LOOP;
+    IF parts = '' THEN
+        RETURN 0;
+    END IF;
+
+    SELECT NOT EXISTS (SELECT 1 FROM consensus LIMIT 1) INTO fresh;
+    IF NOT fresh THEN
+        seed := 'UNION ALL '
+             || 'SELECT c.subject_id, c.type_id, c.object_id, 0 AS ord, true AS is_seed, '
+             || '       c.rating AS v1, c.rd AS v2, c.volatility AS v3, '
+             || '       0::bigint AS phi, c.witness_count AS games, 0::bigint AS sum_score, '
+             || '       c.last_observed_at AS last_ts '
+             || 'FROM consensus c';
+    END IF;
+
+    -- The fold query: per-(relation, period) pre-merge with the φ guard, then the
+    -- ordered fold per relation. One sort feeds both groupings.
+    parts := format($q$
+        WITH staged AS (%s),
+        partial AS (
+            SELECT subject_id, type_id, object_id, ord,
+                   CASE WHEN min(phi) <> max(phi)
+                        THEN period_phi_mixed(subject_id, type_id, object_id)
+                        ELSE min(phi) END AS phi,
+                   sum(games)::bigint     AS games,
+                   sum(sum_score)::bigint AS sum_score,
+                   max(last_ts)           AS last_ts
+            FROM staged
+            GROUP BY subject_id, type_id, object_id, ord
+        ),
+        united AS (
+            SELECT subject_id, type_id, object_id, ord, false AS is_seed,
+                   0::bigint AS v1, 0::bigint AS v2, 0::bigint AS v3,
+                   phi, games, sum_score, last_ts
+            FROM partial
+            %s
+        ),
+        folded AS (
+            SELECT subject_id, type_id, object_id,
+                   consensus_fold(is_seed, v1, v2, v3, phi, games, sum_score,
+                                  glicko2_tau() ORDER BY ord) AS f,
+                   max(last_ts) AS last_ts
+            FROM united
+            GROUP BY subject_id, type_id, object_id
+        )
+        SELECT consensus_id(subject_id, type_id, object_id) AS id,
+               subject_id, type_id, object_id,
+               (f).rating, (f).rd, (f).volatility, (f).witness_count,
+               last_ts AS last_observed_at
+        FROM folded
+    $q$, parts, seed);
+
+    IF fresh THEN
+        EXECUTE 'INSERT INTO consensus (id, subject_id, type_id, object_id, '
+             || '                       rating, rd, volatility, witness_count, last_observed_at) '
+             || parts || ' ORDER BY 1';
+        GET DIAGNOSTICS n = ROW_COUNT;
+    ELSE
+        EXECUTE 'CREATE TABLE consensus_bulk_new AS ' || parts || ' ORDER BY 1';
+        GET DIAGNOSTICS n = ROW_COUNT;
+        ALTER TABLE consensus_bulk_new
+            ALTER COLUMN id SET NOT NULL,
+            ALTER COLUMN subject_id SET NOT NULL,
+            ALTER COLUMN type_id SET NOT NULL,
+            ALTER COLUMN rating SET NOT NULL,
+            ALTER COLUMN rd SET NOT NULL,
+            ALTER COLUMN volatility SET NOT NULL,
+            ALTER COLUMN witness_count SET NOT NULL,
+            ALTER COLUMN last_observed_at SET NOT NULL;
+        ALTER TABLE consensus_bulk_new ADD PRIMARY KEY (id);
+        -- Atomic swap: readers keep the old consensus until this transaction
+        -- commits; no in-place index drop ever touches the live table. Membership
+        -- note: a swapped-in consensus is a plain table (extension membership is
+        -- dropped so the retired heap can be dropped; pg_dump then includes the
+        -- data natively, and pg_extension_config_dump is CREATE-EXTENSION-only).
+        IF EXISTS (
+            SELECT 1 FROM pg_depend d
+            JOIN pg_extension e ON e.oid = d.refobjid AND d.refclassid = 'pg_extension'::regclass
+            WHERE e.extname = 'laplace_substrate'
+              AND d.classid = 'pg_class'::regclass
+              AND d.objid = to_regclass(current_schema() || '.consensus')
+              AND d.deptype = 'e')
+        THEN
+            EXECUTE format('ALTER EXTENSION %I DROP TABLE consensus', 'laplace_substrate');
+        END IF;
+        ALTER TABLE consensus RENAME TO consensus_retired_bulk;
+        ALTER TABLE consensus_bulk_new RENAME TO consensus;
+        DROP TABLE consensus_retired_bulk;
+    END IF;
+
+    -- Staging is consumed either way.
+    FOR rel IN
+        SELECT c.relname
+        FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+        WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+          AND c.relname ~ '^consensus_period_staging_e\d{4}_\d+$'
+    LOOP
+        EXECUTE format('DROP TABLE %I', rel.relname);
+    END LOOP;
+
+    EXECUTE 'ANALYZE consensus';
+    RAISE LOG 'bulk fold: % relations materialized (%) in %',
+        n, CASE WHEN fresh THEN 'fresh sorted insert' ELSE 'rebuild + swap' END,
+        clock_timestamp() - t0;
+    RETURN n;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION materialize_period_consensus(p_partition integer DEFAULT NULL)
     RETURNS bigint LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public

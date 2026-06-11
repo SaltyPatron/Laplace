@@ -1180,23 +1180,25 @@ internal static class Program
         int degreeCap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_LE_DEGREE", 48);
         int maxGap = Math.Max(1, Math.Min(FoundryExport.EnvInt("LAPLACE_FOUNDRY_TRAJ_MAX_GAP", 8), nLayers));
         var swPour = Stopwatch.StartNew();
-        var simT = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("SIMILAR_TO"),     tokenSlots, degreeCap);
-        var attT = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("ATTENDS"),        tokenSlots, degreeCap);
-        var ovT  = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("OV_RELATES"),     tokenSlots, degreeCap);
-        var cmpT = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("COMPLETES_TO"),   tokenSlots, degreeCap);
-        var preT = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("PRECEDES"),       tokenSlots, degreeCap);
-        var cooT = FoundryExport.ReadPlaneAsync(ds, RelationTypeRegistry.RelationTypeId("CO_OCCURS_WITH"), tokenSlots, degreeCap);
+        var simT = FoundryExport.ReadTokenPlaneAsync(ds, FoundryExport.PlaneSpec.Consensus("SIMILAR_TO"),     tokenSlots, degreeCap);
+        var attT = FoundryExport.ReadTokenPlaneAsync(ds, FoundryExport.PlaneSpec.Consensus("ATTENDS"),        tokenSlots, degreeCap);
+        var ovT  = FoundryExport.ReadTokenPlaneAsync(ds, FoundryExport.PlaneSpec.Consensus("OV_RELATES"),     tokenSlots, degreeCap);
+        var cmpT = FoundryExport.ReadTokenPlaneAsync(ds, FoundryExport.PlaneSpec.Consensus("COMPLETES_TO"),   tokenSlots, degreeCap);
+        var preT = FoundryExport.ReadTokenPlaneAsync(ds, FoundryExport.PlaneSpec.Consensus("PRECEDES"),       tokenSlots, degreeCap);
+        var cooT = FoundryExport.ReadTokenPlaneAsync(ds, FoundryExport.PlaneSpec.Consensus("CO_OCCURS_WITH"), tokenSlots, degreeCap);
         // The usage observations themselves: the order ladder — per-gap conditional
         // frequencies walked out of the content trajectories. Gap g pours into layer g.
-        var gapT = FoundryExport.ReadTrajectoryGapPlanesAsync(ds, maxGap, tokenSlots, degreeCap);
-        await Task.WhenAll(simT, attT, ovT, cmpT, preT, cooT, gapT);
+        var gapT = new Task<FoundryExport.PlaneCoo>[maxGap];
+        for (int g = 1; g <= maxGap; g++)
+            gapT[g - 1] = FoundryExport.ReadTokenPlaneAsync(ds, FoundryExport.PlaneSpec.TrajGap(g), tokenSlots, degreeCap);
+        await Task.WhenAll(new Task[] { simT, attT, ovT, cmpT, preT, cooT }.Concat(gapT));
         var sim = FoundryExport.Normalize(simT.Result);
         var att = FoundryExport.Normalize(attT.Result);
         var ov  = FoundryExport.Normalize(ovT.Result);
         var cmp = FoundryExport.Normalize(cmpT.Result);
         var pre = FoundryExport.Normalize(preT.Result);
         var coo = FoundryExport.Normalize(cooT.Result);
-        var gaps = gapT.Result;
+        var gaps = gapT.Select(t => t.Result).ToArray();
         var tnx = gaps[0];
         long gapEdges = gaps.Sum(g => (long)g.Nnz);
         long planeEdges = (long)sim.Nnz + att.Nnz + ov.Nnz + cmp.Nnz + pre.Nnz + coo.Nnz + gapEdges;
