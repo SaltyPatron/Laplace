@@ -81,6 +81,27 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
     public int     LayerOrder   => 10;
     public Hash128 TrustClassId => TrustClass;
 
+    // Registered post-ingest so the recipe round-trips: the recipe entity id IS
+    // Blake3(canonical config JSON), and canonical_id(name) is the same hash law —
+    // registering the canonical JSON itself makes render(recipe_id) return the
+    // full recipe. That is how a discovered mold is read back for the foundry
+    // (synthesize substrate --recipe-from). The six scalar values render too.
+    public IReadOnlyCollection<string> CanonicalNamesForReadback
+    {
+        get
+        {
+            string configPath = Path.Combine(_modelDir, "config.json");
+            if (!File.Exists(configPath)) return Array.Empty<string>();
+            var r = LlamaRecipeExtractor.Parse(configPath);
+            return new[]
+            {
+                System.Text.Encoding.UTF8.GetString(r.CanonicalJson),
+                r.HiddenSize.ToString(), r.NumLayers.ToString(), r.NumHeads.ToString(),
+                r.NumKvHeads.ToString(), r.IntermediateSize.ToString(), r.VocabSize.ToString(),
+            };
+        }
+    }
+
     public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);

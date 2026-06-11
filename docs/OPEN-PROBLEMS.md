@@ -4,7 +4,7 @@ Audit date: 2026-06-07. Each item is file-grounded and states what the vision re
 
 ## 1. Geometry consensus fold — INSTRUMENT-TIER, not core
 
-**Status: reclassified by design decision (2026-06-07): has value, but not for the core invention.** The invention's truth machinery is relational (Glicko over arenas). The fireflies are the AUDIT INSTRUMENT: each witness's placement of the same entity is a distinct, comparable specimen in one Procrustes-aligned frame. The species — not any blend of them — are the product, and evidence rows (`geometry_placement_evidence`) are fully functional today. Audit capabilities this supports directly: per-entity cross-model belief distance (angular), whole-cloud model signatures and lineage/distillation forensics (Hausdorff between clouds), per-layer/head concept flight paths, checkpoint-drift diffs, bias measurement in exact geodesics; Voronoi tessellation of placements into conceptual territories (membership-by-geometry, boundary-proximity as ambiguity, empty cells as visible lexical gaps, cross-model territory comparison, geometric cross-validation of relational taxonomy) — and, because placements are stock PostGIS geometry, standard GIS tooling (e.g. QGIS) can render the jar without custom viewers. Collapsing species into one blended coordinate adds no epistemic strength and can destroy the comparative signal.
+**Status: reclassified by design decision (2026-06-07): has value, but not for the core invention.** The invention's truth machinery is relational (Glicko over arenas). The fireflies are the AUDIT INSTRUMENT: each witness's placement of the same entity is a distinct, comparable specimen in one Procrustes-aligned frame. The species — not any blend of them — are the product, and evidence rows (`geometry_placement_evidence`) are fully functional today. Audit capabilities this supports directly: per-entity cross-model belief distance (angular), whole-cloud model signatures and lineage/distillation forensics (Hausdorff between clouds), checkpoint-drift diffs, bias measurement in exact geodesics; Voronoi tessellation of placements into conceptual territories (membership-by-geometry, boundary-proximity as ambiguity, empty cells as visible lexical gaps, cross-model territory comparison, geometric cross-validation of relational taxonomy) — and, because placements are stock PostGIS geometry, standard GIS tooling (e.g. QGIS) can render the jar without custom viewers. Collapsing species into one blended coordinate adds no epistemic strength and can destroy the comparative signal.
 
 **If a derived consensus view is ever wanted** (single default coordinate for fast structural serving; precomputed `dispersion` as a polysemy/contest scalar): the math already exists — `math4d_karcher_mean` with `math4d_log_s3`/`math4d_exp_s3` (engine/core/math4d.c) implements weighted iterative tangent-space Karcher averaging on S³, covered by the engine test suite. Interior entities use the weighted Euclidean mean. Only a thin SQL wrapper/aggregate plus a fold cadence would be needed. Build only if a profiled read path demands it.
 
@@ -34,16 +34,13 @@ Audit date: 2026-06-07. Each item is file-grounded and states what the vision re
 
 Proven live 2026-06-11: unique prompt deposited (prompt+reply roots in laplace.physicalities), identical replay skipped.
 
-## 5. The text→tensor-arena bridge (keystone lemma)
+## 5. The text→tensor bridge — RESOLVED 2026-06-11 (the foundry); quality remains the bet
 
-**Vision.** Ingestion is training: text attests into the same arena space a transformer's weights testify into, so `synthesize substrate` can render a no-ancestor model from literature alone.
+**Vision.** Ingestion is training: text attests into the same token→token consensus a transformer's weights testify into, so `synthesize substrate` can cast a no-ancestor model from literature alone.
 
-**Today.** Text-side attestation (`TextEntityBuilder`) writes sequence arenas: `FOLLOWS`, `PRECEDES`, `CO_OCCURS_WITH`, `OCCURS_IN_CONTEXT`, `COMPLETES_TO`. Synthesis renders tensors from the ten tensor-role arenas (`EMBEDS`, `Q_PROJECTS`, …) — see `ConsensusReExport`/synthesis kernels. A pure-text compile today produces empty projection tensors.
+**Resolution.** The foundry (FoundryExport + SynthesizeFromSubstrateAsync; see SYNTHESIS.md) is the estimator: LE over the union of consensus planes (SIMILAR_TO/ATTENDS/OV_RELATES/COMPLETES_TO/PRECEDES/CO_OCCURS_WITH) AND content-trajectory pairs generates the embedding basis; attention = ATTENDS ∪ co-occurrence ∪ windowed trajectory pairs, completion = COMPLETES_TO ∪ PRECEDES ∪ trajectory continuation, projected through the basis (compute_substrate_gram) and SVD-factored at the mold's ranks. A pure-text compile now produces fully defined tensors. The tensor-role arenas and their inverse score law were purged the same day (the cell-archive ruling).
 
-**Needs (one of, or a blend).**
-- A synthesis-side estimator that derives tensor-role renders from sequence arenas: co-occurrence consensus → Q/K affinity; completion consensus → output projection; tier composition/decomposition → up/down; gating from contextual-selection statistics.
-- Or text-side attestation directly into tensor-role types under a defined estimator at ingest.
-The mapping must be written down as law before implementation; it is the load-bearing step for the "model trained by reading" claim.
+**What remains open.** Generative QUALITY of cast artifacts at scale — measured on the behavioral harness, never as numeric agreement with any witness. Knobs awaiting tuning: basis rank, degree cap, trajectory window, layer-split policy, gate operating point, SVD tolerance.
 
 ## 6. No first-class document/corpus ingest route
 
@@ -59,15 +56,11 @@ The mapping must be written down as law before implementation; it is the load-be
 
 ## 8. Placement consolidation — RULED (2026-06-07): physicalities is the one geometric home
 
-**Ruling.** `physicalities` was designed for this: per-source 4D views with `alignment_residual` + `source_dim` (the LE+GSO+PA outputs) and seeded PROJECTION/PROJECTION_OUTPUT types. Firefly placements are physicalities rows:
-
-- `type` = extended physicality-type vocabulary per tensor role (which tensor the placement was stripped from);
-- `source_id` = the **circuit entity** (model+layer+head/expert) rather than the bare model — the same context-as-entity pattern attestations use via `context_id`; per-specimen granularity with zero schema widening; species reassemble by joining circuit→model;
-- weight moves to trust policy (§7); re-observation idempotency via the existing `UNIQUE(entity_id, source_id, type)` upsert + `observed_at`.
+**Ruling (2026-06-07, narrowed 2026-06-11).** `physicalities` was designed for this: per-source 4D views with `alignment_residual` + `source_dim` (the LE+GSO+PA outputs) and seeded PROJECTION/PROJECTION_OUTPUT types. Per-witness model placements are physicalities rows: `type` = PROJECTION, `source_id` = the model source. The 2026-06-11 cell-archive ruling killed the per-tensor-role type vocabulary and the circuit entities (layer/head granularity was packaging, not testimony); the S3 morph (`TokenS3Morph`, wired into `ModelDecomposer` 2026-06-11) writes exactly this shape. Weight moves to trust policy (§7); re-observation idempotency via the existing `UNIQUE(entity_id, source_id, type)` upsert + `observed_at`.
 
 **Consequences.** `geometry_placement_evidence` and `geometry_consensus` (19_geometry_consensus.sql.in) retire; the optional instrument-tier consensus view (§1), if ever built, derives from physicalities. Structural reads see firefly specimens with zero new read paths; one GIST + one Hilbert key + one table for GIS tooling; source eviction cascades clean.
 
-**Implementation (pending, with next model-ingest work).** Extend the physicality-type registry with per-role types; repoint TokenS3Morph/ModelDecomposer writes; drop 19_* tables; regress pins.
+**Implementation (remaining).** Drop the 19_* tables; regress pins.
 
 ## 9. Modality annexes unwritten
 
@@ -99,7 +92,7 @@ Every 2026-06-07 query number was taken on the slow tier. Levers, each independe
 - **Prepared/pooled access** — all measurements were cold one-shot psql (parse+plan per query; 5–20× on small queries).
 - **SP-GiST trajectory prefix opclass** (planned) — sequence-prefix search on packed IDs.
 - **KNN planner tuning** — type-filtered `<<->>` fell off the index path (27 s naive / 5.9 s pooled); needs KNN-first-filter-later shaping or a words-only coord index.
-- **GPU phase** — AFTER ingest/export proofing: batch ingest math (LE/Procrustes/cell ETL) only; never the query path. 4060 Ti + 1080 Ti on board; driver pinned for Pascal.
+- **GPU phase** — AFTER ingest/export proofing: batch ingest/export math (LE/Procrustes/operator grams) only; never the query path. 4060 Ti + 1080 Ti on board; driver pinned for Pascal.
 Composite conservative estimate: 2–3 orders of magnitude above RECEIPTS.md numbers before any new algorithm.
 
 ## 12. Witnessed stopwords — DIAGNOSED 2026-06-11 (missing witness, not a binding bug)

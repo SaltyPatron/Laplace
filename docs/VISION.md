@@ -55,13 +55,13 @@ Queries are index descents and compiled A* cascades over relation arenas, edges 
 
 ### Synthesis: the model as a render target
 
-`synthesize substrate <recipe> <out.gguf>` renders consensus arenas into a declared architecture shape. The recipe is the target triple; weights are build artifacts. A model is something you **compile**, not train — rebuildable, diffable (two builds differ exactly where consensus changed, with witnesses nameable), exportable at any dimension, runnable by the existing ecosystem (llama.cpp) which never needs to know no one trained it. The substrate's own inference never touches the artifact: it walks the consensus directly.
+`synthesize substrate <recipe> <out.gguf>` is the foundry: it pours adjudicated consensus into a mold — a user-authored architecture recipe, or one discovered from any deposed model (`--recipe-from`: pour the same mold with better data). The basis and every interior tensor are GENERATED from consensus (LE over the token→token graph + content trajectories, operator factorization — SYNTHESIS.md); nothing is reconstructed from any witness's floats. A model is something you **cast**, not train — rebuildable, diffable (two builds differ exactly where consensus changed, with witnesses nameable), exportable at any dimension, runnable by the existing ecosystem (llama.cpp) which never needs to know no one trained it. The substrate's own inference never touches the artifact: it walks the consensus directly.
 
-This kills the static model. Frozen weights become disposable caches of a living substrate. (The text→tensor-arena bridge that completes the no-ancestor compile is the keystone work item — see OPEN-PROBLEMS §5.)
+This kills the static model. Frozen weights become disposable caches of a living substrate.
 
-### The ten arenas
+### The arenas
 
-EMBEDS, Q_PROJECTS, K_PROJECTS, V_PROJECTS, O_PROJECTS, GATES, UP_PROJECTS, DOWN_PROJECTS, NORM_SCALES, OUTPUT_PROJECTS — per-source carriage arenas for declared synthesis targets; synthesis renders from them at export. The model-deposition PRODUCT (2026-06-10 ruling) is the behavioral token-relation arenas (SIMILAR_TO, ATTENDS, OV_RELATES, COMPLETES_TO): a transformer's projection math is a compiled form of token→token knowledge, extracted at deposition into the same token entity space the text-side sequence arenas (FOLLOWS, PRECEDES, CO_OCCURS_WITH, OCCURS_IN_CONTEXT, COMPLETES_TO) attest from raw corpora — one consensus, walked at inference.
+The model-deposition PRODUCT is the behavioral token-relation arenas (SIMILAR_TO, ATTENDS, OV_RELATES, COMPLETES_TO): a transformer's projection math is a compiled form of token→token knowledge, extracted at deposition into the same token entity space the text-side sequence arenas (FOLLOWS, PRECEDES, CO_OCCURS_WITH, OCCURS_IN_CONTEXT, COMPLETES_TO) attest from raw corpora — one consensus, walked at inference, poured at export. (The ten per-(role,layer) "carriage" arenas and their axis entities were purged 2026-06-11: a weight archive wearing attestation costume, structurally unable to fold across witnesses. Remove the product from the packaging and throw away the packaging.)
 
 ---
 
@@ -69,13 +69,12 @@ EMBEDS, Q_PROJECTS, K_PROJECTS, V_PROJECTS, O_PROJECTS, GATES, UP_PROJECTS, DOWN
 
 ### The fireflies: a jar of model beliefs
 
-Every entity has constructed geometry: T0 atoms placed by deterministic law (super-Fibonacci on S³ — the fixed anchor lattice), higher tiers by composition. When a model is deposed, LE+GSO+PA (Laplacian eigenmaps + Gram-Schmidt orthonormalization + Procrustes alignment) projects its native embedding space into the shared 4D frame — and the alignment is well-posed only because of the core invention: content-addressed identity supplies the point correspondences (the model's "king" IS the substrate's king), and the S³ lattice plus already-placed entities supply the fixed frame LE+GSO+PA anchor to. Cross-model geometry is commensurable because identity is content. One firefly per witness per entity, per layer/head/expert — stored as `physicalities` rows (the table's `alignment_residual` and `source_dim` columns exist precisely for LE+GSO+PA outputs), with per-circuit witness entities carrying the layer/head granularity and per-tensor-role physicality types recording what each placement was stripped from. Llama's king and Qwen's king are distinct specimens of the same identity: **species of king**, swarming one address.
+Every entity has constructed geometry: T0 atoms placed by deterministic law (super-Fibonacci on S³ — the fixed anchor lattice), higher tiers by composition. When a model is deposed, LE+GSO+PA (Laplacian eigenmaps + Gram-Schmidt orthonormalization + Procrustes alignment) projects its native embedding space into the shared 4D frame — and the alignment is well-posed only because of the core invention: content-addressed identity supplies the point correspondences (the model's "king" IS the substrate's king), and the S³ lattice plus already-placed entities supply the fixed frame LE+GSO+PA anchor to. Cross-model geometry is commensurable because identity is content. One firefly per witness per entity — stored as `physicalities` PROJECTION rows (the table's `alignment_residual` and `source_dim` columns exist precisely for LE+GSO+PA outputs). Llama's king and Qwen's king are distinct specimens of the same identity: **species of king**, swarming one address.
 
 The species — never a blend of them — are the product. This is the audit instrument:
 
 - per-entity cross-model belief distance (exact geodesics on S³)
 - whole-cloud model signatures; lineage/distillation forensics via Hausdorff between clouds
-- per-layer flight paths of a concept through a network's depth
 - checkpoint-drift diffs (what fine-tuning actually moved)
 - bias measurement in defensible geometry
 - Voronoi tessellation into conceptual territories: membership by geometry, boundary proximity as ambiguity, empty cells as visible lexical gaps, cross-model comparison of how reality gets carved, and geometric cross-validation of relational taxonomy (disagreement between the two engines is itself an audit flag)

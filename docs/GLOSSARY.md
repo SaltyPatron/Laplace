@@ -64,7 +64,9 @@ Authoritative vocabulary. Terms are laws, not suggestions; code and docs use the
 
 **Arena** — the relation plane for one relation type; traversal and ranking happen per-arena or across arena sets.
 
-**Tensor-role arenas (the ten)** — `EMBEDS, Q_PROJECTS, K_PROJECTS, V_PROJECTS, O_PROJECTS, GATES, UP_PROJECTS, DOWN_PROJECTS, NORM_SCALES, OUTPUT_PROJECTS`: per-source carriage arenas for a declared synthesis target (endpoints are per-source axis entities — they never fuse across witnesses). Instrument-tier only (2026-06-10 ruling): a model's qkvo/gate/up/down math is a compiled form of token→token knowledge, and deposition's product is the token-relation arenas it extracts, not these.
+**Tensor-role arenas (PURGED, 2026-06-11)** — the ten per-(role,layer) carriage arenas (`EMBEDS, Q_PROJECTS, …, OUTPUT_PROJECTS`) and their per-source axis entities are deleted: they were a weight archive wearing attestation costume (Glicko-2 as an invertible float codec), structurally unable to fold across witnesses, with parameter-shaped row counts. A model's qkvo/gate/up/down math is a compiled form of token→token knowledge; deposition extracts that knowledge and discards the packaging. The tombstone test `TensorRoleArenas_Purged_FallToProbationary` pins all twelve names at probationary.
+
+**Mold / pour / foundry (export-direction canon)** — the mold is an architecture recipe (user-authored, or discovered from a deposed model via `laplace.model_recipes()`); the foundry (`synthesize substrate`) pours adjudicated consensus into it, generating brand-new tensors (LE basis + operator factorization — see SYNTHESIS.md). These words apply ONLY to export; deposition never "pours".
 
 **Sequence arenas** — text-side structure: `FOLLOWS, PRECEDES, CO_OCCURS_WITH, OCCURS_IN_CONTEXT`. The document path currently attests `PRECEDES` as immediate adjacency (bigrams).
 
@@ -80,9 +82,9 @@ Authoritative vocabulary. Terms are laws, not suggestions; code and docs use the
 
 **Hilbert key (hilbert_index)** — 16-byte locality-preserving 1-D key from the 4D Hilbert curve (Skilling). Plain B-tree range scan = spatial neighborhood. Identical position ⇒ identical key, which makes multiset lookup (anagrams) a B-tree equality (31 ms vs 27 s spatial; discovered 2026-06-07).
 
-**Physicality** — a per-source per-type 4D view of an entity: `physicalities(entity_id, source_id, type, coord PointZM, hilbert_index, trajectory, radius_origin, n_constituents, alignment_residual, source_dim, observed_at)` with UNIQUE(entity, source, type). RULED (2026-06-07): physicalities is the ONE geometric home; firefly placements are physicalities rows (per-tensor-role `type`, circuit-entity `source_id`); the separate geometry evidence/consensus tables retire.
+**Physicality** — a per-source per-type 4D view of an entity: `physicalities(entity_id, source_id, type, coord PointZM, hilbert_index, trajectory, radius_origin, n_constituents, alignment_residual, source_dim, observed_at)` with UNIQUE(entity, source, type). RULED (2026-06-07, narrowed 2026-06-11): physicalities is the ONE geometric home; per-witness model placements are `PROJECTION` rows with `source_id` = the model source (the S3 morph) — no circuit entities, no per-tensor-role types; the separate geometry evidence/consensus tables retire.
 
-**Physicality type (`type` column)** — what a placement is: `BUILDING_BLOCK`, `CONTENT` (=1, the realized content view), `PROJECTION`, `PROJECTION_OUTPUT`, extended per tensor role for model placements.
+**Physicality type (`type` column)** — what a placement is: `BUILDING_BLOCK`, `CONTENT` (=1, the realized content view), `PROJECTION`, `PROJECTION_OUTPUT`.
 
 **Trajectory** — the constituent sequence as a LINESTRING whose vertices are mantissa-packed: XYZ mantissas carry the child's 128-bit id; M carries ordinal, run_length, and flags. Stores IDENTITY, never coordinates — by law: consensus positions can move; identity is the only stable cargo. T0 constituents are additionally self-describing inline (`vertex_atom`: flag bit 0 + 21-bit codepoint).
 
@@ -98,9 +100,9 @@ Authoritative vocabulary. Terms are laws, not suggestions; code and docs use the
 
 **Karcher mean** — the weighted Riemannian mean on S³: iterative log-map → weighted tangent average → exp-map (`math4d_karcher_mean`, `math4d_log_s3/exp_s3`). Exists, tested; needed only if the optional geometry-consensus view is ever built.
 
-**LE+GSO+PA** — the deposition projection pipeline: Laplacian Eigenmaps (dense or sparse-graph) reduce a witness's native space; Gram-Schmidt orthonormalizes; Procrustes aligns onto the substrate frame, residual recorded. Well-posed BECAUSE of content addressing: shared entities supply exact point correspondences ("the model's king IS the substrate's king"), and the T0 lattice + already-placed entities supply the fixed frame.
+**LE+GSO+PA** — the same three instruments run in BOTH directions. Deposition (the S3 morph): Laplacian Eigenmaps reduce a witness's native embedding space, Gram-Schmidt orthonormalizes, Procrustes aligns onto the substrate frame (residual recorded) — one specimen placement per witness. Export (the foundry, the inversion): LE over the CONSENSUS token→token graph generates a brand-new basis at the mold's dimension, GSO orthonormalizes it, Procrustes anchors it to token content coordinates — the generated spaces owe nothing to any witness's geometry. Well-posed BECAUSE of content addressing: shared entities supply exact point correspondences ("the model's king IS the substrate's king").
 
-**Fireflies** — the instrument (NOT core truth machinery): each witness's placement of an entity is a distinct specimen in the shared jar — Llama's king, Qwen's king, per layer/head/expert: SPECIES of king. Supports per-entity cross-model belief distance, whole-cloud lineage forensics (Hausdorff), per-layer concept flight paths, checkpoint drift, bias geodesics, Voronoi conceptual territories, all viewable in stock GIS tooling. The species are the product; blending them adds no epistemic strength.
+**Fireflies** — the instrument (NOT core truth machinery): each witness's placement of an entity is a distinct specimen in the shared jar — Llama's king, Qwen's king: SPECIES of king. Supports per-entity cross-model belief distance, whole-cloud lineage forensics (Hausdorff), checkpoint drift, bias geodesics, Voronoi conceptual territories, all viewable in stock GIS tooling. The species are the product; blending them adds no epistemic strength.
 
 **Voronoi territories** — tessellation of placements into per-concept regions: membership-by-geometry, boundary proximity = ambiguity/confusability, empty cells = visible lexical gaps, cross-model territory comparison, and geometric cross-validation of relational taxonomy.
 
@@ -128,17 +130,17 @@ Authoritative vocabulary. Terms are laws, not suggestions; code and docs use the
 
 ## Synthesis & Models
 
-**Recipe** — the architecture template (config.json-shaped) a consensus render targets. Recipe-agnostic target_dim: same substrate, any size.
+**Recipe (the mold)** — the architecture template (config.json-shaped) the foundry pours into. User-authored or discovered: every deposed model's recipe round-trips via `laplace.model_recipes()` (the recipe entity id is Blake3 of the canonical config JSON, registered verbatim in canonical_names) — pour the same mold with better data. Any size: same substrate, any target shapes.
 
-**Render target (GGUF)** — a model file as a BUILD ARTIFACT: compiled from consensus arenas, rebuildable, diffable (two builds differ exactly where consensus changed, witnesses nameable), runnable by stock llama.cpp. The static model reduced to a disposable cache of a living substrate.
+**Render target (GGUF)** — a model file as a BUILD ARTIFACT: cast from consensus by the foundry, rebuildable, diffable (two builds differ exactly where consensus changed, witnesses nameable), runnable by stock llama.cpp. The static model reduced to a disposable cache of a living substrate.
 
-**Cell ETL** — the carriage instrument (instrument-tier, 2026-06-10): every non-zero weight cell as one aggregated match under its per-(role,layer) relation type, rational Score law s = ½(1 + v/(M+|v|)) with M = arena RMS. Used only to validate carriage for a declared synthesis target; the deposition PRODUCT is the behavioral token-relation arenas.
+**Cell ETL (PURGED, 2026-06-11)** — the per-cell weight carriage lane is deleted; see "Tensor-role arenas (PURGED)". Export needs no carriage: the foundry generates tensors from consensus, it does not transport weights.
 
-**Clean-room model** — a GGUF compiled from enumerated, licensed witnesses with zero model ancestry: certifiable provenance no trained artifact can offer.
+**Clean-room model** — a GGUF cast from enumerated, licensed witnesses with zero model ancestry: certifiable provenance no trained artifact can offer.
 
-**Behavioral equivalence** — the fidelity criterion (NOT bit-identity of blobs): same prompts, same harness, diff continuations. Ground truth = `model-forward-oracle.py` (exact f64 forward pass, deliberately outside Laplace code); harness = `llama_behavioral` against `D:\LlamaCPP\llama-completion.exe`.
+**Conventional-function acceptance** — the export bar: the cast GGUF loads and runs as a normal, non-faulty model via conventional means, CPU-only, no degradation vs a structurally comparable model. Instrument = `model-forward-oracle.py forward-gguf` (exact f64 forward pass, deliberately outside Laplace code); harness = `llama_behavioral` against `D:\LlamaCPP\llama-completion.exe`. Numeric agreement with any ingested witness is not a metric; the original is at most a baseline to beat.
 
-**Text→tensor bridge** — the keystone open lemma: the defined mapping from sequence-arena consensus to rendered tensors enabling the no-ancestor compile ("a model trained by reading").
+**Text→tensor bridge** — formerly the keystone open lemma, now the foundry's basis/operator path (LE over consensus + trajectory pairs → operator factorization). What remains open is generative quality at scale, measured behaviorally.
 
 ## Determinism & Operations
 
