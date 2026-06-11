@@ -30,3 +30,7 @@ rem a multi-statement -c runs atomic and rejects its internal COMMITs.
 set "PGOPTIONS=-c search_path=laplace,public"
 "%PGBIN%\psql.exe" -h localhost -U postgres -d %~1 -v ON_ERROR_STOP=1 -c "%CALLSQL%" || exit /b 1
 "%PGBIN%\psql.exe" -h localhost -U postgres -d %~1 -tAc "SELECT count(*) || ' positions, ' || count(DISTINCT seq_id) || ' sequences' FROM laplace.content_index;"
+
+echo ==== trajectory pair cache on %~1 (token_plane traj families) ====
+"%PGBIN%\psql.exe" -h localhost -U postgres -d %~1 -v ON_ERROR_STOP=1 -c "CALL laplace.rebuild_content_pairs();" || exit /b 1
+"%PGBIN%\psql.exe" -h localhost -U postgres -d %~1 -tAc "SELECT count(*) || ' pairs across ' || count(DISTINCT gap) || ' gaps' FROM laplace.content_pairs;"

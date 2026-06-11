@@ -9,7 +9,7 @@ if(NOT LAPLACE_PG_REGRESS)
 endif()
 
 set(REGRESS_DB "laplace_regress_substrate")
-set(REGRESS_TESTS bootstrap glicko2_aggregate entities_exist_bitmap consensus_signed consensus_period converse identity_law schema_law structural_surface)
+set(REGRESS_TESTS bootstrap glicko2_aggregate entities_exist_bitmap consensus_signed consensus_period consensus_bulk converse identity_law schema_law structural_surface)
 set(REGRESS_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/regress_output")
 file(MAKE_DIRECTORY "${REGRESS_OUTPUT_DIR}")
 

@@ -34,6 +34,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     private ConcurrentDictionary<(Hash128 S, Hash128 K, Hash128? O), Acc> _accumulation = new();
     private long _observationsAccumulated;
+    private readonly bool _bulkLane;
     private int  _periodEpoch;
     private bool _sweptStale;
     private bool _anyEpochCreated;
@@ -71,6 +72,15 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         // 0 or negative disables the bound.
         _maxFoldBacklog = int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_FOLD_BACKLOG_MAX"), out var bl)
             ? bl : 12;
+        // LAPLACE_FOLD_LANE=bulk: stage every epoch to disk and fold ONCE at the end
+        // through finish_consensus_bulk (one external sort, zero per-row index probes,
+        // sequential I/O — the HANDOFF-fold-lane design). The per-epoch merge fold and
+        // its backlog bound are bypassed; disk must hold the whole staged journal.
+        _bulkLane = string.Equals(Environment.GetEnvironmentVariable("LAPLACE_FOLD_LANE"), "bulk",
+            StringComparison.OrdinalIgnoreCase);
+        if (_bulkLane)
+            _log.LogInformation(
+                "bulk fold lane: epochs stage to disk and fold once at materialize (finish_consensus_bulk)");
         if (_partitions is < 1 or > 64)
             throw new ArgumentOutOfRangeException(nameof(foldWorkers), _partitions,
                 "fold workers must be in 1..64 (create_period_staging's partition bound)");
@@ -184,7 +194,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         await _stagingGate.WaitAsync(ct);
         try
         {
-            if (_maxFoldBacklog > 0)
+            if (_maxFoldBacklog > 0 && !_bulkLane)
             {
                 bool throttled = false;
                 while (Volatile.Read(ref _epochsStaged) - Volatile.Read(ref _epochsFolded) >= _maxFoldBacklog)
@@ -253,8 +263,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 snapshot.Count / Math.Max(1e-3, stageSw.Elapsed.TotalSeconds),
                 staged - Volatile.Read(ref _epochsFolded));
 
-            var prev = _foldChain;
-            _foldChain = ChainFoldAsync(prev, epoch);
+            if (!_bulkLane)
+            {
+                var prev = _foldChain;
+                _foldChain = ChainFoldAsync(prev, epoch);
+            }
         }
         finally
         {
@@ -374,6 +387,27 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     public async Task<long> MaterializeConsensusAsync(CancellationToken ct = default)
     {
         await FlushPeriodAsync(ct);
+        if (_bulkLane)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            await using var conn = await _ds.OpenConnectionAsync(ct);
+            conn.Notice += (_, e) =>
+                _log.LogInformation("bulk fold: {Message}", e.Notice.MessageText);
+            await using (var sub = conn.CreateCommand())
+            {
+                sub.CommandText = "SET client_min_messages = 'log'";
+                await sub.ExecuteNonQueryAsync(ct);
+            }
+            await using var fin = conn.CreateCommand();
+            fin.CommandTimeout = 0;
+            fin.CommandText = "SELECT laplace.finish_consensus_bulk()";
+            long n = (long)(await fin.ExecuteScalarAsync(ct) ?? 0L);
+            Interlocked.Add(ref _foldedRelations, n);
+            _log.LogInformation(
+                "bulk fold complete: {Relations:N0} consensus relations in {Sec:F0}s ({Rps:N0} rel/s)",
+                n, sw.Elapsed.TotalSeconds, n / Math.Max(1e-3, sw.Elapsed.TotalSeconds));
+            return Interlocked.Read(ref _foldedRelations);
+        }
         await _foldChain;
         return Interlocked.Read(ref _foldedRelations);
     }
