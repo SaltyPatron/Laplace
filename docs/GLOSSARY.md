@@ -64,11 +64,11 @@ Authoritative vocabulary. Terms are laws, not suggestions; code and docs use the
 
 **Arena** — the relation plane for one relation type; traversal and ranking happen per-arena or across arena sets.
 
-**Tensor-role arenas (the ten)** — `EMBEDS, Q_PROJECTS, K_PROJECTS, V_PROJECTS, O_PROJECTS, GATES, UP_PROJECTS, DOWN_PROJECTS, NORM_SCALES, OUTPUT_PROJECTS`: the architecture-agnostic relational algebra of transformation. Model weights testify into them at deposition; synthesis pours from them at export.
+**Tensor-role arenas (the ten)** — `EMBEDS, Q_PROJECTS, K_PROJECTS, V_PROJECTS, O_PROJECTS, GATES, UP_PROJECTS, DOWN_PROJECTS, NORM_SCALES, OUTPUT_PROJECTS`: per-source carriage arenas for a declared synthesis target (endpoints are per-source axis entities — they never fuse across witnesses). Instrument-tier only (2026-06-10 ruling): a model's qkvo/gate/up/down math is a compiled form of token→token knowledge, and deposition's product is the token-relation arenas it extracts, not these.
 
 **Sequence arenas** — text-side structure: `FOLLOWS, PRECEDES, CO_OCCURS_WITH, OCCURS_IN_CONTEXT`. The document path currently attests `PRECEDES` as immediate adjacency (bigrams).
 
-**Query-time bilinear reads** — `ATTENDS, OV_RELATES, COMPLETES_TO`: composed across arenas at read time; never ingest-written, never gated.
+**Model behavioral arenas** — `SIMILAR_TO, ATTENDS, OV_RELATES, COMPLETES_TO`: token↔token testimony extracted from a model's composed circuits at deposition (2026-06-10 ruling: THE model-deposition product). They share the token entity space with the sequence arenas, so model and text witnesses adjudicate into the same consensus; inference walks that consensus.
 
 **Cascade** — compiled traversal: the native A* SRF (`astar_path_raw`, C + SPI neighbor provider) over chosen arenas, edges weighted by μ (stronger relation = cheaper hop), refuted edges pruned. NOT recursive SQL, NOT an app loop. `cascade(x,y)` renders the least-cost path between two words.
 
@@ -128,17 +128,17 @@ Authoritative vocabulary. Terms are laws, not suggestions; code and docs use the
 
 ## Synthesis & Models
 
-**Mold / recipe** — the architecture template (config.json-shaped) synthesis pours into. Recipe-agnostic target_dim: same substrate, any size.
+**Recipe** — the architecture template (config.json-shaped) a consensus render targets. Recipe-agnostic target_dim: same substrate, any size.
 
 **Render target (GGUF)** — a model file as a BUILD ARTIFACT: compiled from consensus arenas, rebuildable, diffable (two builds differ exactly where consensus changed, witnesses nameable), runnable by stock llama.cpp. The static model reduced to a disposable cache of a living substrate.
 
-**Cell ETL** — model deposition law: every non-zero weight cell is one adjudicated match under its tensor-role relation type, positions aggregating as witnesses; score s = ½(1+tanh(w/M)) with M = pooled tensor RMS; lottery-ticket sparsity, never flat noise thresholds.
+**Cell ETL** — the carriage instrument (instrument-tier, 2026-06-10): every non-zero weight cell as one aggregated match under its per-(role,layer) relation type, rational Score law s = ½(1 + v/(M+|v|)) with M = arena RMS. Used only to validate carriage for a declared synthesis target; the deposition PRODUCT is the behavioral token-relation arenas.
 
 **Clean-room model** — a GGUF compiled from enumerated, licensed witnesses with zero model ancestry: certifiable provenance no trained artifact can offer.
 
 **Behavioral equivalence** — the fidelity criterion (NOT bit-identity of blobs): same prompts, same harness, diff continuations. Ground truth = `model-forward-oracle.py` (exact f64 forward pass, deliberately outside Laplace code); harness = `llama_behavioral` against `D:\LlamaCPP\llama-completion.exe`.
 
-**Text→tensor bridge** — the keystone open lemma: the defined mapping from sequence arenas to tensor-role pours enabling the no-ancestor compile ("a model trained by reading").
+**Text→tensor bridge** — the keystone open lemma: the defined mapping from sequence-arena consensus to rendered tensors enabling the no-ancestor compile ("a model trained by reading").
 
 ## Determinism & Operations
 

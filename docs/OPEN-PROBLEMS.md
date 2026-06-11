@@ -8,11 +8,9 @@ Audit date: 2026-06-07. Each item is file-grounded and states what the vision re
 
 **If a derived consensus view is ever wanted** (single default coordinate for fast structural serving; precomputed `dispersion` as a polysemy/contest scalar): the math already exists — `math4d_karcher_mean` with `math4d_log_s3`/`math4d_exp_s3` (engine/core/math4d.c) implements weighted iterative tangent-space Karcher averaging on S³, covered by the engine test suite. Interior entities use the weighted Euclidean mean. Only a thin SQL wrapper/aggregate plus a fold cadence would be needed. Build only if a profiled read path demands it.
 
-## 2. Structural reads pick an arbitrary witness (determinism bug)
+## 2. Structural reads pick an arbitrary witness — FIXED 2026-06-10
 
-**Today.** `20_converse.sql.in` — `relatedness` (line ~556) selects a coord from `physicalities` with `LIMIT 1` and no ORDER BY: whichever per-source row the planner returns first wins. Nondeterministic witness preference.
-
-**Fix.** Deterministic witness preference: `ORDER BY` trust class / source id before `LIMIT 1` (one-line change at each site: ~556, ~975, ~1017). This is a determinism fix, not an adjudication feature; per problem 1, reads serve a deterministically chosen specimen, not a blended coordinate.
+`structural_neighbors` / `structural_locale` (the two surviving sites after the native migration) now anchor with `ORDER BY s.ord, p.source_id` before `LIMIT 1`. Reads serve a deterministically chosen specimen, not a blended coordinate (per problem 1). Trust-class-aware preference can supersede source-id ordering when problem 7 lands.
 
 ## 3. Unlearning cannot reach consensus state
 
@@ -35,12 +33,12 @@ Audit date: 2026-06-07. Each item is file-grounded and states what the vision re
 
 ## 5. The text→tensor-arena bridge (keystone lemma)
 
-**Vision.** Ingestion is training: text attests into the same arena space a transformer's weights testify into, so `synthesize substrate` can pour a no-ancestor model from literature alone.
+**Vision.** Ingestion is training: text attests into the same arena space a transformer's weights testify into, so `synthesize substrate` can render a no-ancestor model from literature alone.
 
-**Today.** Text-side attestation (`TextEntityBuilder`) writes sequence arenas: `FOLLOWS`, `PRECEDES`, `CO_OCCURS_WITH`, `OCCURS_IN_CONTEXT`, `COMPLETES_TO`. Synthesis pours tensors from the ten tensor-role arenas (`EMBEDS`, `Q_PROJECTS`, …) — see `ConsensusReExport`/synthesis kernels. A pure-text compile today produces empty projection tensors.
+**Today.** Text-side attestation (`TextEntityBuilder`) writes sequence arenas: `FOLLOWS`, `PRECEDES`, `CO_OCCURS_WITH`, `OCCURS_IN_CONTEXT`, `COMPLETES_TO`. Synthesis renders tensors from the ten tensor-role arenas (`EMBEDS`, `Q_PROJECTS`, …) — see `ConsensusReExport`/synthesis kernels. A pure-text compile today produces empty projection tensors.
 
 **Needs (one of, or a blend).**
-- A synthesis-side estimator that derives tensor-role pours from sequence arenas: co-occurrence consensus → Q/K affinity; completion consensus → output projection; tier composition/decomposition → up/down; gating from contextual-selection statistics.
+- A synthesis-side estimator that derives tensor-role renders from sequence arenas: co-occurrence consensus → Q/K affinity; completion consensus → output projection; tier composition/decomposition → up/down; gating from contextual-selection statistics.
 - Or text-side attestation directly into tensor-role types under a defined estimator at ingest.
 The mapping must be written down as law before implementation; it is the load-bearing step for the "model trained by reading" claim.
 
@@ -105,9 +103,9 @@ All 340,707 library PRECEDES attestations carry `context_id NULL`. The text emit
 
 `word_curve` / `word_shape_distance` / `anagrams_of` / `collocates` were proven live (RECEIPTS.md) and added as `extension/laplace_substrate/sql/23_structural_surface.sql.in` (registered in the entry script + CMake module list). Needs: pg_regress pins (incl. the whale anagram set and the Fréchet ordering whale~while < whale~whole < whale~ship), and a `realized_trajectory(entity)` generalization.
 
-## 15. ingest-text sidecar rebuild guard
+## 15. ingest-text sidecar rebuild guard — FIXED 2026-06-10
 
-`scripts\win\ingest-text.cmd` rebuilds the sidecar CLI every invocation (~30 s overhead measured on the flip). Guard with existence/staleness check.
+`scripts\win\cli-sidecar.cmd` (shared by ingest-text/ingest-repo) builds only when the sidecar is missing or any `app\` source is newer than the sidecar dll — both the per-invocation rebuild overhead and the stale-sidecar-after-C#-changes gotcha are gone.
 
 ---
 

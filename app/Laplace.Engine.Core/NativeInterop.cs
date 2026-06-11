@@ -474,6 +474,25 @@ public static unsafe partial class NativeInterop
         long nowUnixUs,
         AttestationStagedNative* outStaged);
 
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_aggregated_batch_build")]
+    internal static partial int AttestationAggregatedBatchBuild(
+        AttestationAggregatedCellNative* cells,
+        nuint count,
+        Hash128* typeId,
+        Hash128* source,
+        Hash128* context,
+        byte contextIsNull,
+        double witnessWeight,
+        long nowUnixUs,
+        AttestationStagedNative* outStaged);
+
+    [LibraryImport(Library, EntryPoint = "laplace_score_batch_fp")]
+    internal static partial void ScoreBatchFp(
+        float* values,
+        nuint count,
+        double arenaScale,
+        long* outFp);
+
     [LibraryImport(Library, EntryPoint = "laplace_attestation_aggregated_build")]
     internal static partial int AttestationAggregatedBuild(
         Hash128* subjectId,

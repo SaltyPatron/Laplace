@@ -1,9 +1,27 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
+rem Run dotnet test projects (Release). Usage:
+rem   test-app.cmd                          all test projects
+rem   test-app.cmd SubstrateCRUD            only projects whose name contains the filter (case-insensitive)
+rem   test-app.cmd Model --filter Name~Etl  extra args after the project filter go to dotnet test
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%\app"
 set "Platform="
 set "PlatformTarget="
+
+set "FILTER="
+set "ARGS="
+:parse
+if "%~1"=="" goto run
+set "A=%~1"
+set "TAKEN="
+if not defined FILTER if not "%A:~0,1%"=="-" ( set "FILTER=%A%" & set "TAKEN=1" )
+if not defined TAKEN set "ARGS=!ARGS! %1"
+shift /1
+goto parse
+
+:run
+set "MATCHED="
 for %%P in (
   Laplace.Engine.Core.Tests
   Laplace.Engine.Dynamics.Tests
@@ -21,6 +39,17 @@ for %%P in (
   Laplace.Decomposers.OpenSubtitles.Tests
   Laplace.Endpoints.OpenAICompat.Tests
 ) do (
-  dotnet test "%%P\%%P.csproj" -c Release -v minimal --nologo %* || exit /b 1
+  set "RUNIT=1"
+  if defined FILTER (
+    echo %%P | findstr /i /c:"%FILTER%" >nul || set "RUNIT="
+  )
+  if defined RUNIT (
+    set "MATCHED=1"
+    dotnet test "%%P\%%P.csproj" -c Release -v minimal --nologo !ARGS! || exit /b 1
+  )
 )
-exit /b %ERRORLEVEL%
+if defined FILTER if not defined MATCHED (
+  echo test-app: no test project matches "%FILTER%"
+  exit /b 2
+)
+exit /b 0

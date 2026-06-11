@@ -113,11 +113,11 @@ internal sealed class StaticBillingCatalog : IBillingCatalog
                 "Server-side web retrieval used for ephemeral prompt augmentation.", "search"),
             ["laplace.synthesis"] = new(
                 "laplace.synthesis", "Laplace Substrate Synthesis",
-                "Build-a-model re-export: pour the consensus substrate into a recipe's tensor mold (your choice of vocabulary, dimensionality, heads, layers) and download the model. Metered by parameter count.",
+                "Build-a-model export: render the consensus substrate into a recipe's tensor layout (your choice of vocabulary, dimensionality, heads, layers) and download the model. Metered by parameter count.",
                 "synthesis"),
             ["laplace.recipe"] = new(
                 "laplace.recipe", "Laplace Synthesis Recipes",
-                "Author, publish, and access reusable build-a-model recipes (the mold that defines content scope, shape, and output format).",
+                "Author, publish, and access reusable build-a-model recipes (the architecture template that defines content scope, shape, and output format).",
                 "recipe"),
             ["laplace.audit"] = new(
                 "laplace.audit", "Laplace Substrate Audit",

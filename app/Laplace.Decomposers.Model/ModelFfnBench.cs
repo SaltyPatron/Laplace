@@ -47,7 +47,8 @@ public static class ModelFfnBench
         Console.WriteLine($"  theta  : {Environment.GetEnvironmentVariable("LAPLACE_MODEL_NOISE_SIGMA") ?? "5.0"} sigma / sqrt(dim)");
         Console.WriteLine();
 
-        var etl = new ModelTableETL(modelDir, recipe, tokens, source, log);
+        var etl = new ModelTableETL(modelDir, recipe, tokens, source,
+            ModelDecomposer.ModelAxisTypeId, epochBase: 0, log);
 
         long entities = 0, neuronEntities = 0, attestations = 0;
         var byType = new Dictionary<Hash128, long>();

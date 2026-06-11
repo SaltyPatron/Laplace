@@ -2,6 +2,53 @@
 
 Hand this file to the next session verbatim. It is the complete state of the export-fidelity + model-deposition work.
 
+## 2026-06-10 RESUMPTION — what actually happened to the per-layer rewire
+
+**The checkpoint (`c213b47`) per-slot cell fold was DESTROYED by the next commit (`169fc03`,
+"AI sabotage commit"), which replaced ModelTableETL.cs wholesale with a behavioral-planes-only
+ETL.** Every later commit refined the impostor; no cell arena was ever deposited again, which is
+why audit-export could never measure anything. Recovered 2026-06-10:
+
+- `ModelCellETL.cs` — the checkpoint fold resurrected and ported to the current API
+  (NativeAttestation.Score/Aggregated, slot.RelationTypeId, EntityTier.Vocabulary), epoch-fenced
+  axis entities, plus a native **aggregated-batch path** (`laplace_attestation_aggregated_batch_build`
+  + `laplace_score_batch_fp` bindings) that amortizes the per-cell P/Invoke + relation-law ceremony.
+- `LAPLACE_MODEL_PLANES=cells|behavioral|all` — cells are the export testimony; the behavioral
+  planes (token↔token) are world-knowledge adjudication. Both streams compose under the runner's
+  monotonic-epoch law (cells 0/1, behavioral 2/3).
+- **IngestRunner epoch buffering fixed**: the epoch barrier buffered an ENTIRE epoch in RAM before
+  the first apply (a per-layer model epoch ≈ 1.1B rows → OOM; this also explains a prior
+  "hang"). Epochs now flush in bounded waves — an epoch is an unordered set, so waves preserve
+  the fence law.
+- **Deposit speed levers measured**: live-index attestation upserts ≈ 36k rows/s (8h/model — too
+  slow). `LAPLACE_PERSIST_EVIDENCE=0` (consensus-only, the disposable-iteration lane) engages the
+  period-fold staging path at ~940k relations/s; fold-side ETL then bottlenecks ~260k/s → ~70 min
+  for TinyLlama at full grain. The aggregated-batch path (above, built but not yet benchmarked)
+  targets the fold-side ceremony (~3.8 µs/relation).
+- Behavioral ETL fixes: layer-context ENTITIES are now emitted (they were stamped as dangling
+  context_ids → verify-fk failure), and the relation-law lookup no longer recomputes BLAKE3 per
+  table entry per call (precomputed id cache in generated relation_law.c — the old cost was
+  ~144 hashes per attestation build, billions per deposit).
+- Known behavioral-planes issue (separate hunt): ATTENDS first-burst under full parallelism
+  produced one AV and one stall pre-fix; planes=cells quarantines it. Fidelity gaps flagged:
+  ATTENDS sums across heads; RMSNorm γ not folded into projections; FfnTokenPairsTile SiLU
+  application unverified.
+
+**Fleet-scale RULING (user, 2026-06-10, late session): token↔token planes ARE the deposition
+product.** Cell arenas are the weight matrix re-encoded 35× larger into endpoints no other
+witness can ever address — they cannot fuse, they never meet the text testimony, and they are
+"raw weights + static model instructions," not knowledge. They are DEMOTED to an on-demand
+carriage instrument (`LAPLACE_MODEL_PLANES=cells`) for synthesis-target validation only; the
+original artifact already sits content-addressed in D:\Models\hub.
+
+The behavioral planes are what scales: consensus identity excludes source AND context, so
+ATTENDS/SIMILAR_TO/OV_RELATES/COMPLETES_TO pairs collapse across layers AND across witnesses —
+every model in the 2.4TB fleet strengthens the SAME token-pair rows as Glicko games. Fidelity
+work done same session: RMSNorm γ now folds into Q/K/V/gate/up columns before the planes are
+computed (exact under the post-projection cosine); FfnTokenPairsTile verified applying SiLU
+(ffn_edges.cpp). Open fidelity item: ATTENDS sums across heads (per-head = head entity as
+context_id, ~32× volume, noise-floor-controlled) — decide before the fleet run.
+
 ## What this work is
 
 Depositing a transformer's weights as adjudicated testimony, then synthesizing a GGUF back out. Two laws were wrong and are now fixed in code (committed); a third change (per-layer arenas) is **freshly written but NOT yet validated by a live run**.
@@ -20,7 +67,7 @@ Depositing a transformer's weights as adjudicated testimony, then synthesizing a
 
 ## The export law (user ruling — do not violate)
 
-The substrate NEVER replays a witness's numbers back into their mold. Consensus is a new epistemic object (all witnesses adjudicated together). Export = synthesize every arena FROM consensus. The cell-replay pour (`synthesize substrate` Stream B) is a **pipeline-validation instrument only** — it proved lossless carriage (cos:law = 1.0000). The real export (A5, not yet built) is generative: Laplacian Eigenmaps over the relation planes → Gram-Schmidt + Procrustes onto the S³ anchors via content-addressed correspondences → render at the mold's dimensionality. "Export their lm_head" is a dead concept.
+The substrate NEVER replays a witness's numbers back into their architecture. Consensus is a new epistemic object (all witnesses adjudicated together). Export = render every arena FROM consensus. The cell-replay render (`synthesize substrate` Stream B) is a **pipeline-validation instrument only** — it proved lossless carriage (cos:law = 1.0000). The real export (A5, not yet built) is generative: Laplacian Eigenmaps over the relation planes → Gram-Schmidt + Procrustes onto the S³ anchors via content-addressed correspondences → render at the recipe's dimensionality. "Export their lm_head" is a dead concept.
 
 ## Identity-vs-provenance law (user ruling)
 
@@ -42,11 +89,11 @@ The per-layer rewire (`ModelArenaPlan.cs`, `ModelTableETL.cs` per-slot fold, `Mo
 - DB: `LAPLACE_DB=Host=localhost;Username=postgres;Password=postgres;Database=laplace`. PG18 at localhost, postgres/postgres, tuned (scripts/win/tune-pg.cmd, committed). Perfcache: `LAPLACE_PERFCACHE_BIN=D:\Repositories\Laplace\build-win\core\perfcache\laplace_t0_perfcache.bin`.
 - Model deposition envs: `LAPLACE_INGEST_WORKERS=8 LAPLACE_INGEST_BATCH=1 LAPLACE_INGEST_COMMIT_ROWS=250000 LAPLACE_FOLD_WORKERS=8 LAPLACE_DECOMPOSE_WORKERS=10 LAPLACE_STAGING_THRESHOLD=20000000`.
 - Engine build: `cmake --build D:\Repositories\Laplace\build-win`; extensions: `scripts\win\build-extensions.cmd` then `install-extensions.cmd`; regress: `scripts\win\regress.cmd` (8/8 expected).
-- `LAPLACE_SYNTH_ARENAS=EMBEDS,Q,…` (csv) ablation: pour named arenas from consensus, copy the rest from the mold verbatim. Validates plumbing only.
+- `LAPLACE_SYNTH_ARENAS=EMBEDS,Q,…` (csv) ablation: render named arenas from consensus, copy the rest from the source snapshot verbatim. Validates plumbing only.
 
 ## Hard-won laws (violating these = the user deletes documentation and is genuinely harmed)
 
-- **Vocabulary**: never use ML/compression jargon ("codec", "encode/decode", "embedding table", "compression"). Use project terms: Score law, the pour, deposition, testimony, witness, arena, mold, fold, epoch, evict. The vocabulary IS the ontology.
+- **Vocabulary**: never use ML/compression jargon ("codec", "encode/decode", "embedding table", "compression"). Use project terms: Score law, deposition, testimony, witness, arena, fold, epoch, evict, render. ("pour"/"mold" were DELETED from the vocabulary 2026-06-10.) The vocabulary IS the ontology.
 - **Tests**: each layer owns one pin (engine gtest = math, pg_regress = SQL surface, C# integration = end-to-end fold). NEVER hand-type expected pg_regress output — run, review the actual, bless from `build-win-ext/regress_substrate/results/`.
 - **Self-containment**: any decomposer whose later batches reference earlier batches' entities must stage every referenced entity in-batch or have it DB-committed first (the fence) — required for parallel apply. Proven on FrameNet, Unicode, model axes.
 - **Eviction**: pre-fold pruning = one `DELETE WHERE source_id`; partial failed depositions MUST be evicted before re-running or games double-count.

@@ -55,13 +55,13 @@ Queries are index descents and compiled A* cascades over relation arenas, edges 
 
 ### Synthesis: the model as a render target
 
-`synthesize substrate <recipe> <out.gguf>` pours consensus arenas into an architecture mold. The recipe is the target triple; weights are build artifacts. A model is something you **compile**, not train — rebuildable, diffable (two builds differ exactly where consensus changed, with witnesses nameable), exportable at any dimension, runnable by the existing ecosystem (llama.cpp) which never needs to know no one trained it.
+`synthesize substrate <recipe> <out.gguf>` renders consensus arenas into a declared architecture shape. The recipe is the target triple; weights are build artifacts. A model is something you **compile**, not train — rebuildable, diffable (two builds differ exactly where consensus changed, with witnesses nameable), exportable at any dimension, runnable by the existing ecosystem (llama.cpp) which never needs to know no one trained it. The substrate's own inference never touches the artifact: it walks the consensus directly.
 
 This kills the static model. Frozen weights become disposable caches of a living substrate. (The text→tensor-arena bridge that completes the no-ancestor compile is the keystone work item — see OPEN-PROBLEMS §5.)
 
 ### The ten arenas
 
-EMBEDS, Q_PROJECTS, K_PROJECTS, V_PROJECTS, O_PROJECTS, GATES, UP_PROJECTS, DOWN_PROJECTS, NORM_SCALES, OUTPUT_PROJECTS — the architecture-agnostic relational algebra of transformation. Model weights testify into them at deposition; synthesis pours from them at export; query-time bilinear reads (ATTENDS, OV_RELATES, COMPLETES_TO) compose across them and are never ingest-written. Text-side sequence arenas (FOLLOWS, PRECEDES, CO_OCCURS_WITH, OCCURS_IN_CONTEXT, COMPLETES_TO) capture the same structure from raw corpora.
+EMBEDS, Q_PROJECTS, K_PROJECTS, V_PROJECTS, O_PROJECTS, GATES, UP_PROJECTS, DOWN_PROJECTS, NORM_SCALES, OUTPUT_PROJECTS — per-source carriage arenas for declared synthesis targets; synthesis renders from them at export. The model-deposition PRODUCT (2026-06-10 ruling) is the behavioral token-relation arenas (SIMILAR_TO, ATTENDS, OV_RELATES, COMPLETES_TO): a transformer's projection math is a compiled form of token→token knowledge, extracted at deposition into the same token entity space the text-side sequence arenas (FOLLOWS, PRECEDES, CO_OCCURS_WITH, OCCURS_IN_CONTEXT, COMPLETES_TO) attest from raw corpora — one consensus, walked at inference.
 
 ---
 

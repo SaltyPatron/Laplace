@@ -369,5 +369,6 @@ __pycache__/
 !engine/test/fixtures/*.bin
 
 .claude/
-build-win/
-build-win-ext/
+# ALL build trees (build-win, build-win-ext, build-win-asan, and any accidental variant --
+# the 'build-win2' incident committed 74k lines of artifacts because only exact names were listed)
+build-win*/

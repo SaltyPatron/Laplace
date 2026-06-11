@@ -1,26 +1,56 @@
 @echo off
 setlocal
 rem Deploy extensions to D:\Data\Postgres\laplace and wire PG GUCs. NEVER copy into C:\Program Files\PostgreSQL.
+rem DLLs mapped by live PG backends are HOT-SWAPPED (old image renamed *.stale~N, new file copied in);
+rem running backends keep the old image until they reconnect. --recycle terminates laplace% backends
+rem (KILLS in-flight queries/ingest -- use only when nothing important is running) so the next
+rem connection loads the fresh DLLs/SQL immediately.
+rem Usage: install-extensions.cmd [--recycle]
 rem Agent rules: .github\instructions\build-environment.instructions.md
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 set "DEPLOY=D:\Data\Postgres\laplace"
+set "RECYCLE=0"
+if /i "%~1"=="--recycle" set "RECYCLE=1"
 if not exist "%DEPLOY%\lib" mkdir "%DEPLOY%\lib"
 if not exist "%DEPLOY%\share\extension" mkdir "%DEPLOY%\share\extension"
+del /q "%DEPLOY%\lib\*.stale~*" 2>nul
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0gen-sql.ps1" -Stage "%DEPLOY%\share_stage" || exit /b 1
 move /y "%DEPLOY%\share_stage\extension\*" "%DEPLOY%\share\extension\" >nul
 rmdir /s /q "%DEPLOY%\share_stage" 2>nul
-copy /y build-win-ext\laplace_geom\laplace_geom.dll "%DEPLOY%\lib\" >nul || exit /b 1
-copy /y build-win-ext\laplace_substrate\laplace_substrate.dll "%DEPLOY%\lib\" >nul || exit /b 1
-copy /y build-win\core\laplace_core.dll "%DEPLOY%\lib\" >nul || exit /b 1
-copy /y build-win\dynamics\laplace_dynamics.dll "%DEPLOY%\lib\" >nul || exit /b 1
-copy /y "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\tbb12.dll" "%DEPLOY%\lib\" >nul || exit /b 1
-copy /y "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\libhwloc-15.dll" "%DEPLOY%\lib\" >nul
+call :swapcopy "build-win-ext\laplace_geom\laplace_geom.dll" || exit /b 1
+call :swapcopy "build-win-ext\laplace_substrate\laplace_substrate.dll" || exit /b 1
+call :swapcopy "build-win\core\laplace_core.dll" || exit /b 1
+call :swapcopy "build-win\dynamics\laplace_dynamics.dll" || exit /b 1
+call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\tbb12.dll" || exit /b 1
+call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\libhwloc-15.dll"
 echo deployed: %DEPLOY%
-set "PGPASSWORD=postgres"
-set "PSQL=C:\Program Files\PostgreSQL\18\bin\psql.exe"
+set "PSQL=%PGBIN%\psql.exe"
 "%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET extension_control_path = '$system;D:/Data/Postgres/laplace/share';" || exit /b 1
 "%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET dynamic_library_path = '$libdir;D:/Data/Postgres/laplace/lib';" || exit /b 1
 "%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "SELECT pg_reload_conf();" || exit /b 1
 "%PSQL%" -h localhost -U postgres -d postgres -tAc "SELECT name, default_version FROM pg_available_extensions WHERE name LIKE 'laplace%%' ORDER BY 1;"
+if "%RECYCLE%"=="1" (
+  echo recycling laplace backends so fresh DLLs/SQL load on next connection...
+  "%PSQL%" -h localhost -U postgres -d postgres -tAc "SELECT count(pg_terminate_backend(pid)) || ' backend(s) recycled' FROM pg_stat_activity WHERE datname LIKE 'laplace%%' AND pid <> pg_backend_pid();"
+)
 echo wired: extension_control_path + dynamic_library_path now include %DEPLOY%
+exit /b 0
+
+rem NOTE: no parenthesized blocks below -- %SRC% may contain "(x86)" and a ')' inside a block
+rem closes it mid-expansion ("...was unexpected at this time").
+:swapcopy
+set "SRC=%~1"
+set "BASE=%~nx1"
+if exist "%SRC%" goto sc_copy
+echo missing build artifact: "%SRC%"
+exit /b 1
+:sc_copy
+copy /y "%SRC%" "%DEPLOY%\lib\%BASE%" >nul 2>nul && exit /b 0
+ren "%DEPLOY%\lib\%BASE%" "%BASE%.stale~%RANDOM%" 2>nul || goto sc_fail
+copy /y "%SRC%" "%DEPLOY%\lib\%BASE%" >nul 2>nul || goto sc_fail
+echo   hot-swapped %BASE% -- old image renamed; backends pick up the new copy on reconnect
+exit /b 0
+:sc_fail
+echo FAILED to deploy %BASE% into %DEPLOY%\lib
+exit /b 1

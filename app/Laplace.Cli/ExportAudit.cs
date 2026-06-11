@@ -98,13 +98,13 @@ internal static class ExportAudit
             int rows = slot.RowsAreOut ? outDim : inDim;
             int cols = slot.RowsAreOut ? inDim : outDim;
             double m = ConsensusReExport.MoldArenaScale(refMap, [slot.TensorName]);
-            var poured = await ConsensusReExport.ReadTableArenaAsync(
+            var rendered = await ConsensusReExport.ReadTableArenaAsync(
                 ds, slot.RelationTypeId, rows, cols, slot.RowsAreOut,
                 SpaceIndex(slot.InSpace), SpaceIndex(slot.OutSpace), m);
-            long total = poured.Cells.LongLength;
+            long total = rendered.Cells.LongLength;
 
             long covered = 0;
-            foreach (var c in poured.Cells) if (c != 0f) covered++;
+            foreach (var c in rendered.Cells) if (c != 0f) covered++;
 
             double outlierW = 6.0;
             var o = WeightTensorETL.LoadTensorF32(refMap, slot.TensorName, total);
@@ -117,7 +117,7 @@ internal static class ExportAudit
             long outCells = 0; double survSum = 0; long survN = 0;
             for (long i = 0; i < total; i++)
             {
-                double a = poured.Cells[i], b = o[i], t = tm[i];
+                double a = rendered.Cells[i], b = o[i], t = tm[i];
                 dotLaw += a * t; nA += a * a; nT += t * t;
                 double dl = a - t; seLaw += dl * dl;
                 dotO += a * b; nO += b * b;
@@ -136,7 +136,7 @@ internal static class ExportAudit
             double survival = survN > 0 ? survSum / survN : 1.0;
             string label = slot.Layer >= 0 ? $"{slot.Role}/L{slot.Layer}" : slot.Role;
             Console.WriteLine(
-                $"  {label,-28} {100.0 * covered / total,8:F2}% {cosLaw,8:F4} {rmseLaw,11:F4} {cosOrig,9:F4} {rmseOrig,12:F4} {outCells,12:N0} {100.0 * survival,8:F1}%  rel={poured.Relations:N0} nz={covered:N0}/{total:N0}");
+                $"  {label,-28} {100.0 * covered / total,8:F2}% {cosLaw,8:F4} {rmseLaw,11:F4} {cosOrig,9:F4} {rmseOrig,12:F4} {outCells,12:N0} {100.0 * survival,8:F1}%  rel={rendered.Relations:N0} nz={covered:N0}/{total:N0}");
         }
 
         async Task AuditNormSlot(ArenaSlot slot)
@@ -165,8 +165,8 @@ internal static class ExportAudit
         }
 
         Console.WriteLine();
-        Console.WriteLine("  cos:law / rmse/M:law  = poured vs the law's reachable image (rational Score-law round-trip of the original); deviation = coverage holes + collision averaging");
-        Console.WriteLine("  cos:orig / rmse/M:orig = poured vs the slot's one original tensor (total reconstruction error)");
+        Console.WriteLine("  cos:law / rmse/M:law  = rendered vs the law's reachable image (rational Score-law round-trip of the original); deviation = coverage holes + collision averaging");
+        Console.WriteLine("  cos:orig / rmse/M:orig = rendered vs the slot's one original tensor (total reconstruction error)");
         return 0;
     }
 }

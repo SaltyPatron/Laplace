@@ -197,6 +197,51 @@ public static class NativeAttestation
         }
     }
 
+    /// <summary>
+    /// Batch form of <see cref="Aggregated"/> for arenas where every cell shares
+    /// (type, source, context, weight): one P/Invoke per chunk instead of one per cell.
+    /// Fills <paramref name="staged"/>[0..count) — convert rows via <see cref="Row"/>.
+    /// </summary>
+    public static void AggregatedBatch(
+        AttestationAggregatedCellNative[] cells, int count,
+        Hash128 typeId, Hash128 sourceId, Hash128? contextId, double witnessWeight,
+        AttestationStagedNative[] staged)
+    {
+        if (count == 0) return;
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(count, cells.Length);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(count, staged.Length);
+        unsafe
+        {
+            Hash128 ctxVal = contextId ?? default;
+            fixed (AttestationAggregatedCellNative* pc = cells)
+            fixed (AttestationStagedNative* ps = staged)
+            {
+                int rc = NativeInterop.AttestationAggregatedBatchBuild(
+                    pc, (nuint)count, &typeId, &sourceId,
+                    contextId is null ? null : &ctxVal,
+                    (byte)(contextId is null ? 1 : 0),
+                    witnessWeight, 0, ps);
+                if (rc != 0)
+                    throw new InvalidOperationException($"aggregated batch build failed: {rc}");
+            }
+        }
+    }
+
+    public static AttestationRow Row(in AttestationStagedNative staged) => ToRow(staged);
+
+    /// <summary>Rational Score law over a float span — one P/Invoke per call.</summary>
+    public static void ScoreBatchFp(ReadOnlySpan<float> values, double arenaScale, Span<long> outFp)
+    {
+        if (values.Length == 0) return;
+        ArgumentOutOfRangeException.ThrowIfLessThan(outFp.Length, values.Length);
+        unsafe
+        {
+            fixed (float* pv = values)
+            fixed (long* po = outFp)
+                NativeInterop.ScoreBatchFp(pv, (nuint)values.Length, arenaScale, po);
+        }
+    }
+
     public static double WitnessPhi(double witnessWeight) =>
         NativeInterop.AttestationWitnessPhi(witnessWeight);
 

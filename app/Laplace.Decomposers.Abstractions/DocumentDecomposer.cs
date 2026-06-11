@@ -11,7 +11,10 @@ namespace Laplace.Decomposers.Abstractions;
 public sealed class DocumentDecomposer : IDecomposer, IIngestInventoryProvider
 {
     public Hash128 SourceId     => UserPromptContent.Source;
-    public string  SourceName   => "DocumentDecomposer";
+    // SourceName must resolve (substrate/source/<name>/v1) to the SAME entity as SourceId —
+    // documents deposit as UserPrompt content by law. A divergent label here made the
+    // post-ingest check and L2 layer gate query a source that never wrote a row (2026-06-09).
+    public string  SourceName   => "UserPrompt";
     public int     LayerOrder   => 2;
     public Hash128 TrustClassId => UserPromptContent.TrustClass;
 

@@ -26,6 +26,7 @@
 #include "utils/memutils.h"
 #include "lib/stringinfo.h"
 #include "common/pg_prng.h"
+#include "spi_common.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_generate_tokens);
 PG_FUNCTION_INFO_V1(pg_laplace_generation_cache_reset);
@@ -445,16 +446,7 @@ pg_laplace_generation_cache_reset(PG_FUNCTION_ARGS)
 
 /* ── variant synthesis over witnessed constituency ─────────────────────────── */
 
-static Datum
-copy_bytea_datum(Datum d)
-{
-    bytea *src = DatumGetByteaPP(d);
-    Size   len = VARSIZE_ANY(src);
-    bytea *dst = (bytea *) palloc(len);
-
-    memcpy(dst, src, len);
-    return PointerGetDatum(dst);
-}
+/* copy_bytea_datum lives in spi_common.h */
 
 static Datum
 consensus_peer_lookup(Datum id, int32 k)
@@ -560,14 +552,14 @@ render_entity_text(Datum id, int32 max_depth)
     return text_to_cstring(t);
 }
 
-typedef struct PourPoint
+typedef struct WalkPoint
 {
     Datum  cid;
     int32  run;
     int32  ctier;
-} PourPoint;
+} WalkPoint;
 
-static PourPoint *
+static WalkPoint *
 fetch_trajectory_points(Datum id, int *out_n)
 {
     static const char *POINTS_SQL =
@@ -582,7 +574,7 @@ fetch_trajectory_points(Datum id, int *out_n)
     Oid   argtypes[1] = { BYTEAOID };
     Datum args[1] = { id };
     int   rc;
-    PourPoint *pts;
+    WalkPoint *pts;
 
     rc = SPI_execute_with_args(POINTS_SQL, 1, argtypes, args, NULL, true, 0);
     if (rc != SPI_OK_SELECT)
@@ -593,7 +585,7 @@ fetch_trajectory_points(Datum id, int *out_n)
     if (*out_n == 0)
         return NULL;
 
-    pts = (PourPoint *) palloc(sizeof(PourPoint) * (*out_n));
+    pts = (WalkPoint *) palloc(sizeof(WalkPoint) * (*out_n));
     for (uint64 r = 0; r < SPI_processed; r++)
     {
         HeapTuple tup = SPI_tuptable->vals[r];
@@ -645,7 +637,7 @@ variant_walk_impl(Datum id, float8 swap, int32 k, int32 depth)
 {
     int32      tier = entity_tier(id);
     StringInfoData out;
-    PourPoint *pts;
+    WalkPoint *pts;
     int        n_pts;
     bool       first = true;
 

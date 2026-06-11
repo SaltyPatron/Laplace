@@ -73,6 +73,8 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
     public static readonly Hash128 LlamaArchitectureId =
         Hash128.OfCanonical("substrate/entity/Architecture_Llama/v1");
 
+    public static readonly Hash128 ModelAxisTypeId = EntityTypeRegistry.ModelAxis;
+
     private readonly string _modelDir;
     private readonly Hash128 _source;
     private readonly string  _sourceName;
@@ -204,17 +206,46 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         log.LogInformation("phase=merges emitted: {Count} merges, {Batches} batches ({Ms} ms)",
             merges.Count, mergeBatches, phaseSw.ElapsedMilliseconds);
 
-        log.LogInformation("phase=etl starting");
-        var etl = new ModelTableETL(_modelDir, recipe, tokens, Source, log);
-        await foreach (var change in etl.EmitAsync(ct))
+        // LAPLACE_MODEL_PLANES: cells | behavioral | all (default all).
+        // cells      = per-(role,layer) arena testimony (what audit-export/synthesize read)
+        // behavioral = token<->token planes (SIMILAR_TO/ATTENDS/OV_RELATES/COMPLETES_TO)
+        string planes = Environment.GetEnvironmentVariable("LAPLACE_MODEL_PLANES") ?? "all";
+        bool doCells = planes is "all" or "cells";
+        bool doBehavioral = planes is "all" or "behavioral";
+
+        if (doCells)
         {
-            ct.ThrowIfCancellationRequested();
-            yield return change;
+            log.LogInformation("phase=cells starting");
+            var cells = new ModelCellETL(_modelDir, recipe, tokens, Source, ModelAxisTypeId, log);
+            await foreach (var change in cells.EmitAsync(ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return change;
+            }
         }
+        else
+            log.LogInformation("phase=cells skipped (LAPLACE_MODEL_PLANES={Planes})", planes);
+
+        if (doBehavioral)
+        {
+            log.LogInformation("phase=etl starting");
+            var etl = new ModelTableETL(_modelDir, recipe, tokens, Source, ModelAxisTypeId,
+                epochBase: doCells ? 2 : 0, log);
+            await foreach (var change in etl.EmitAsync(ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return change;
+            }
+        }
+        else
+            log.LogInformation("phase=etl skipped (LAPLACE_MODEL_PLANES={Planes})", planes);
 
         // Tokenizer→token provenance so a deposited model knows which tokens are its own.
+        // Stamped with the highest epoch any ETL stream used (equal epochs are legal).
+        int finalEpoch = (doCells ? 2 : 0) + (doBehavioral ? 2 : 0);
+        if (finalEpoch > 0) finalEpoch -= 1;
         foreach (var batch in LlamaTokenizerParser.BuildTokenMapsToCategorical(
-            tokens, Source, tokEntityId, batchSz))
+            tokens, Source, tokEntityId, batchSz, finalEpoch))
         {
             ct.ThrowIfCancellationRequested();
             yield return batch;

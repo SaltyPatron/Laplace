@@ -11,6 +11,8 @@
 #include "utils/builtins.h"
 #include "utils/memutils.h"
 
+#include "spi_common.h"
+
 PG_FUNCTION_INFO_V1(pg_laplace_rebuild_content_index);
 PG_FUNCTION_INFO_V1(pg_laplace_rebuild_content_index_deep);
 
@@ -43,16 +45,7 @@ empty_bytea(void)
     return PointerGetDatum(b);
 }
 
-static Datum
-copy_bytea_datum(Datum d)
-{
-    bytea *src = DatumGetByteaPP(d);
-    Size   len = VARSIZE_ANY(src);
-    bytea *dst = (bytea *) palloc(len);
-
-    memcpy(dst, src, len);
-    return PointerGetDatum(dst);
-}
+/* copy_bytea_datum lives in spi_common.h */
 
 static void
 rebuild_content_index_impl(int32 batch)

@@ -1,5 +1,6 @@
 #include "postgres.h"
 
+#include "catalog/pg_collation.h"
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
 #include "funcapi.h"
@@ -10,6 +11,7 @@
 #include "utils/fmgrprotos.h"
 #include "utils/memutils.h"
 
+#include "spi_common.h"
 #include "spi_nested.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_route_prompt);
@@ -36,6 +38,9 @@ typedef struct ReplyRow
 
 typedef struct ReplyBuf
 {
+    MemoryContext cxt;          /* context current at init — must outlive SPI_finish,
+                                 * because rows are emitted AFTER the SPI proc context
+                                 * (CurrentMemoryContext while connected) is destroyed */
     ReplyRow *rows;
     int       n;
     int       cap;
@@ -69,7 +74,12 @@ text_to_cstr(Datum d)
 static char *
 trim_dup(const char *s)
 {
-    return text_to_cstr(DirectFunctionCall1(btrim, CStringGetTextDatum(s)));
+    /* btrim1 is the 1-arg SQL btrim(text); the C symbol btrim is the 2-arg
+     * (string, charset) version -- calling THAT with DirectFunctionCall1 made
+     * it detoast stack garbage as its second argument (AV at entry; the
+     * respond/converse never-worked crash, 2026-06-10). */
+    return text_to_cstr(DirectFunctionCall1Coll(btrim1, DEFAULT_COLLATION_OID,
+                                                CStringGetTextDatum(s)));
 }
 
 static bool
@@ -81,7 +91,8 @@ str_empty(const char *s)
 static char *
 lower_dup(const char *s)
 {
-    return text_to_cstr(DirectFunctionCall1(lower, CStringGetTextDatum(s)));
+    return text_to_cstr(DirectFunctionCall1Coll(lower, DEFAULT_COLLATION_OID,
+                                                CStringGetTextDatum(s)));
 }
 
 static bool
@@ -127,13 +138,24 @@ regexp_groups(const char *str, const char *pat, const char *flags,
     *g1 = NULL;
     *g2 = NULL;
 
-    result = DirectFunctionCall3(
-        regexp_match,
-        CStringGetTextDatum(str),
-        CStringGetTextDatum(pat),
-        CStringGetTextDatum(flags));
-    if (DatumGetPointer(result) == NULL)
-        return 0;
+    /* regexp_match needs a collation AND returns SQL NULL on no-match;
+     * DirectFunctionCall* elogs on a NULL return, so invoke via fcinfo. */
+    {
+        LOCAL_FCINFO(fcinfo, 3);
+
+        InitFunctionCallInfoData(*fcinfo, NULL, 3, DEFAULT_COLLATION_OID,
+                                 NULL, NULL);
+        fcinfo->args[0].value = CStringGetTextDatum(str);
+        fcinfo->args[0].isnull = false;
+        fcinfo->args[1].value = CStringGetTextDatum(pat);
+        fcinfo->args[1].isnull = false;
+        fcinfo->args[2].value = CStringGetTextDatum(flags);
+        fcinfo->args[2].isnull = false;
+
+        result = regexp_match(fcinfo);
+        if (fcinfo->isnull)
+            return 0;
+    }
 
     arr = DatumGetArrayTypeP(result);
     deconstruct_array(arr, TEXTOID, -1, false, TYPALIGN_INT,
@@ -369,6 +391,7 @@ emit_route_row(ReturnSetInfo *rsinfo, const RouteResult *r)
 static void
 reply_buf_init(ReplyBuf *buf)
 {
+    buf->cxt = CurrentMemoryContext;    /* callers init BEFORE SPI_connect */
     buf->rows = NULL;
     buf->n = 0;
     buf->cap = 0;
@@ -378,10 +401,14 @@ static void
 reply_buf_add(ReplyBuf *buf, Datum reply, Datum mu, Datum witnesses,
               bool reply_null, bool mu_null, bool wit_null)
 {
+    MemoryContext old = MemoryContextSwitchTo(buf->cxt);
+
     if (buf->n >= buf->cap)
     {
         buf->cap = buf->cap < 8 ? 8 : buf->cap * 2;
-        buf->rows = repalloc(buf->rows, buf->cap * sizeof(ReplyRow));
+        buf->rows = buf->rows
+            ? repalloc(buf->rows, buf->cap * sizeof(ReplyRow))
+            : palloc(buf->cap * sizeof(ReplyRow));
     }
 
     {
@@ -394,6 +421,7 @@ reply_buf_add(ReplyBuf *buf, Datum reply, Datum mu, Datum witnesses,
         row->mu = mu_null ? (Datum) 0 : datumCopy(mu, false, -1);
         row->witnesses = witnesses;
     }
+    MemoryContextSwitchTo(old);
 }
 
 static void
@@ -450,7 +478,10 @@ spi_resolve_topic(const char *phrase, Datum context, bool ctx_null)
 {
     Oid   types[2] = { TEXTOID, BYTEAOID };
     Datum args[2];
-    char  nulls[3] = " n";
+    /* start with ALL params present; mark 'n' only for the ones actually null.
+     * The old " n" default never cleared slot 2, so resolve_topic never saw the
+     * session context and every pronoun follow-up failed (2026-06-10). */
+    char  nulls[3] = "  ";
     bool  isnull;
     int   rc;
 
@@ -470,20 +501,7 @@ spi_resolve_topic(const char *phrase, Datum context, bool ctx_null)
     return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
 }
 
-static Datum
-spi_label(Datum topic)
-{
-    Oid   types[1] = { BYTEAOID };
-    Datum args[1] = { topic };
-    bool  isnull;
-    int   rc;
-
-    rc = SPI_execute_with_args(
-        "SELECT laplace.label($1)", 1, types, args, NULL, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return (Datum) 0;
-    return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-}
+/* spi_label / spi_word_language live in spi_common.h */
 
 static void
 emit_no_topic_msg(ReplyBuf *buf, const char *prompt, const RouteResult *route)
@@ -527,21 +545,6 @@ emit_type_miss(ReplyBuf *buf, Datum topic, const char *type_name, bool incoming)
     reply_buf_add(buf, CStringGetTextDatum(msg), (Datum) 0, (Datum) 0, false, true, true);
 }
 
-static Datum
-spi_word_language(Datum topic)
-{
-    Oid   types[1] = { BYTEAOID };
-    Datum args[1] = { topic };
-    bool  isnull;
-    int   rc;
-
-    rc = SPI_execute_with_args(
-        "SELECT laplace.word_language($1)", 1, types, args, NULL, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return (Datum) 0;
-    return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-}
-
 static void
 respond_is_a(ReplyBuf *buf, Datum topic, const RouteResult *route)
 {
@@ -579,7 +582,7 @@ respond_is_a(ReplyBuf *buf, Datum topic, const RouteResult *route)
             {
                 Oid   rtypes[3] = { BYTEAARRAYOID, BYTEAARRAYOID, BYTEAOID };
                 Datum rargs[3];
-                char  rnulls[4] = "  n";
+                char  rnulls[4] = "   ";
                 Datum lang = spi_word_language(topic);
                 bool  cn;
                 int   crc;
@@ -606,7 +609,7 @@ respond_is_a(ReplyBuf *buf, Datum topic, const RouteResult *route)
         {
             Oid   rtypes[3] = { BYTEAOID, BYTEAOID, BYTEAOID };
             Datum rargs[3];
-            char  rnulls[4] = "  n";
+            char  rnulls[4] = "   ";
             Datum lang = spi_word_language(topic);
             int   crc;
 
@@ -890,11 +893,18 @@ pg_laplace_converse(PG_FUNCTION_ARGS)
 
     if (PG_ARGISNULL(1))
     {
-        char pidbuf[32];
-        snprintf(pidbuf, sizeof(pidbuf), "%d", MyProcPid);
-        session = DirectFunctionCall2(pg_convert_to,
-                                      CStringGetTextDatum(pidbuf),
-                                      CStringGetTextDatum("UTF8"));
+        /* default session = backend pid as bytea. Built by hand: pg_convert_to
+         * takes a NAME as its second arg, and feeding it a text datum via
+         * DirectFunctionCall read garbage ("invalid destination encoding") --
+         * the btrim-arity bug family. Regress passes sessions explicitly, so
+         * only NULL-session calls (converse.cmd) ever hit this branch. */
+        char   pidbuf[32];
+        int    len = snprintf(pidbuf, sizeof(pidbuf), "%d", MyProcPid);
+        bytea *b = (bytea *) palloc(VARHDRSZ + len);
+
+        SET_VARSIZE(b, VARHDRSZ + len);
+        memcpy(VARDATA(b), pidbuf, len);
+        session = PointerGetDatum(b);
     }
     else
         session = PG_GETARG_DATUM(1);
@@ -938,11 +948,14 @@ pg_laplace_converse(PG_FUNCTION_ARGS)
             iargs[0] = session;
             iargs[1] = CStringGetTextDatum(prompt);
             iargs[2] = topic;
+            /* resolved_id is NULL only when the topic did not resolve — a constant
+             * "  n" here silently dropped every turn's topic, killing pronoun
+             * follow-up context (2026-06-10). */
             SPI_execute_with_args(
                 "INSERT INTO laplace.converse_turns (session_id, ord, prompt, resolved_id) "
                 "SELECT $1, COALESCE(max(t.ord), 0) + 1, $2, $3 "
                 "FROM laplace.converse_turns t WHERE t.session_id = $1",
-                3, itypes, iargs, "  n", false, 0);
+                3, itypes, iargs, topic == (Datum) 0 ? "  n" : NULL, false, 0);
         }
 
         respond_impl(prompt, context, ctx_null, &buf);

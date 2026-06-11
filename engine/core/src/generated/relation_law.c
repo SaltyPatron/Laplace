@@ -197,9 +197,41 @@ static int type_id_from_canonical(const char* canonical_name, hash128_t* out_typ
     return 0;
 }
 
+/* Type-id cache: lookups are the hot path of every attestation build (model
+ * deposits issue hundreds of millions). Recomputing BLAKE3 per table entry per
+ * call made laplace_relation_lookup cost ~144 hashes per MISS —
+ * billions of hashes per deposit. Ids are computed once, thread-safely. */
+static hash128_t k_relation_type_id_cache[144];
+
+#ifdef _WIN32
+#include <windows.h>
+static volatile LONG g_relation_ids_state = 0;
+static int ids_try_begin(void) { return InterlockedCompareExchange(&g_relation_ids_state, 1, 0) == 0; }
+static void ids_mark_ready(void) { InterlockedExchange(&g_relation_ids_state, 2); }
+static int ids_ready(void) { return InterlockedCompareExchange(&g_relation_ids_state, 2, 2) == 2; }
+#else
+static volatile int g_relation_ids_state = 0;
+static int ids_try_begin(void) { int expected = 0; return __atomic_compare_exchange_n(&g_relation_ids_state, &expected, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE); }
+static void ids_mark_ready(void) { __atomic_store_n(&g_relation_ids_state, 2, __ATOMIC_RELEASE); }
+static int ids_ready(void) { return __atomic_load_n(&g_relation_ids_state, __ATOMIC_ACQUIRE) == 2; }
+#endif
+
+static void relation_ids_ensure(void) {
+    if (ids_ready()) return;
+    if (ids_try_begin()) {
+        for (size_t i = 0; i < laplace_relation_table_count; ++i)
+            type_id_from_canonical(laplace_relation_table[i].canonical, &k_relation_type_id_cache[i]);
+        ids_mark_ready();
+    } else {
+        while (!ids_ready()) { /* another thread is filling the cache */ }
+    }
+}
+
 static int table_entry_type_id(size_t idx, hash128_t* out_type_id) {
     if (idx >= laplace_relation_table_count || !out_type_id) return -1;
-    return type_id_from_canonical(laplace_relation_table[idx].canonical, out_type_id);
+    relation_ids_ensure();
+    *out_type_id = k_relation_type_id_cache[idx];
+    return 0;
 }
 
 int laplace_relation_type_id(const char* canonical_name, hash128_t* out_type_id) {
@@ -265,10 +297,9 @@ int laplace_relation_resolve_surface(const char* surface, hash128_t* out_type_id
 
 int laplace_relation_lookup(const hash128_t* type_id, const laplace_relation_def_t** out_def) {
     if (!type_id || !out_def) return -1;
-    hash128_t entry_id;
+    relation_ids_ensure();
     for (size_t i = 0; i < laplace_relation_table_count; ++i) {
-        if (table_entry_type_id(i, &entry_id) != 0) continue;
-        if (hash128_equals(type_id, &entry_id)) {
+        if (hash128_equals(type_id, &k_relation_type_id_cache[i])) {
             *out_def = &laplace_relation_table[i];
             return 0;
         }
