@@ -43,7 +43,14 @@ original artifact already sits content-addressed in D:\Models\hub.
 
 The behavioral planes are what scales: consensus identity excludes source AND context, so
 ATTENDS/SIMILAR_TO/OV_RELATES/COMPLETES_TO pairs collapse across layers AND across witnesses —
-every model in the 2.4TB fleet strengthens the SAME token-pair rows as Glicko games. Fidelity
+every model in the 2.4TB fleet strengthens the SAME token-pair rows as Glicko games.
+
+**Fold-merge law (the collapse has a write-side consequence):** recurring pairs mean the
+behavioral lane MUST fold through the merge path (`materialize_period_partition`, epoch-ordered
+Glicko accumulate). The fresh fold (`_fresh`, ON CONFLICT DO NOTHING) is exactly-once-only —
+lawful for the cell lane, silently drops cross-layer agreement for planes. `freshSource` is now
+cells-only in the safetensor ingest wiring. Also fixed same night: TOKEN_MAPS_TO batches are
+epoch-stamped (default epoch 0 after the ETL's epoch advance killed a completed 49-min deposit). Fidelity
 work done same session: RMSNorm γ now folds into Q/K/V/gate/up columns before the planes are
 computed (exact under the post-projection cosine); FfnTokenPairsTile verified applying SiLU
 (ffn_edges.cpp). Open fidelity item: ATTENDS sums across heads (per-head = head entity as

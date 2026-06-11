@@ -863,8 +863,15 @@ internal static class Program
         var inner = new NpgsqlSubstrateWriter(ds,
             logger: loggerFactory.CreateLogger<NpgsqlSubstrateWriter>(),
             bulkFreshSource: true);
+        // The FRESH consensus fold (plain insert, ON CONFLICT DO NOTHING) is lawful only
+        // when every staged relation id appears exactly once — true for the per-(role,layer)
+        // cell lane, FALSE for the behavioral token planes: the same (token, ATTENDS, token)
+        // pair legitimately recurs across layers and accumulation windows and must MERGE,
+        // or cross-layer agreement (the strongest testimony) is silently dropped.
+        string planesMode = Environment.GetEnvironmentVariable("LAPLACE_MODEL_PLANES") ?? "all";
+        bool cellsOnly = planesMode.Equals("cells", StringComparison.OrdinalIgnoreCase);
         var accumulator = new ConsensusAccumulatingWriter(inner, ds,
-            freshSource: true,
+            freshSource: cellsOnly,
             persistEvidence: ResolvePersistEvidence(cli),
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
         ISubstrateWriter writer = accumulator;
