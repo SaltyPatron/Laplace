@@ -274,12 +274,16 @@ public sealed class TextEntityBuilder
 
         if (precedes.Count == 0) return ImmutableArray<AttestationRow>.Empty;
 
+        // The containing natural unit stamps its sequence testimony (docs/OPEN-PROBLEMS.md §13) —
+        // the same context-as-entity pattern model witnesses use for layers. Consensus identity
+        // excludes context, so folds are unchanged; provenance becomes per-document.
+        var contextId = tree.GetNode(tree.NaturalUnitIndex()).Id;
         var rows = ImmutableArray.CreateBuilder<AttestationRow>(precedes.Count);
         foreach (var (pair, count) in precedes)
         {
             long sumScore = checked(count * Glicko2.FpScale);
             rows.Add(NativeAttestation.Aggregated(
-                pair.A, PrecedesTypeId, pair.B, sourceId, contextId: null,
+                pair.A, PrecedesTypeId, pair.B, sourceId, contextId: contextId,
                 games: count, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
         }
         return rows.ToImmutable();
