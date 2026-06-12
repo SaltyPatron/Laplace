@@ -846,7 +846,7 @@ internal static class Program
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
 
-        var dec = new ModelDecomposer(modelDir);
+        var dec = new ModelDecomposer(modelDir, persistEvidence: ResolvePersistEvidence(cli));
 
         // Repair lane: re-register readback canonicals (recipe JSON + scalars)
         // for a deposit whose post-steps died (e.g. a fold ENOSPC) without

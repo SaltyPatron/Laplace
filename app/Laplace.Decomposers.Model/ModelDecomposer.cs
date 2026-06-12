@@ -68,11 +68,13 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
     private readonly string _modelDir;
     private readonly Hash128 _source;
     private readonly string  _sourceName;
+    private readonly bool?   _persistEvidence;
 
-    public ModelDecomposer(string modelDir)
+    public ModelDecomposer(string modelDir, bool? persistEvidence = null)
     {
         _modelDir = modelDir ?? throw new ArgumentNullException(nameof(modelDir));
         (_source, _sourceName) = SourceForModel(modelDir);
+        _persistEvidence = persistEvidence;
     }
 
     public Hash128 Source       => _source;
@@ -191,7 +193,7 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         // COMPLETES_TO). Token entities commit at epoch 0, matchups at epoch 1.
         log.LogInformation("phase=etl starting");
         var etl = new ModelTableETL(_modelDir, recipe, tokens, Source, ModelLayerTypeId,
-            epochBase: 0, log);
+            epochBase: 0, log, persistEvidence: _persistEvidence);
         await foreach (var change in etl.EmitAsync(ct))
         {
             ct.ThrowIfCancellationRequested();

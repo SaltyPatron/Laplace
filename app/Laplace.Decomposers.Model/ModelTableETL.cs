@@ -21,13 +21,14 @@ public sealed class ModelTableETL
         RelationTypeRegistry.Resolve("ATTENDS").Rank * SourceTrust.AiModelProbe;
     private static readonly double[] _one = new double[1];
 
-    // Consensus-only deposits take the tile lane: kernel output arrays travel to
-    // the accumulator as one AggregatedTile per kernel call — no per-pair
-    // AttestationRow, no per-pair native crossing, no per-pair BLAKE3 id (the
-    // accumulator keys on identity; ids only exist for persisted evidence).
-    // Evidence-persisting deposits keep the per-row path.
-    private static readonly bool EvidenceMode =
-        Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter.ResolvePersistEvidence();
+    // Consensus-only deposits take THE TRAJECTORY JOURNAL: per-subject walks
+    // packed under the 212-bit vertex law — no per-pair AttestationRow, no
+    // per-pair native crossing, no per-pair BLAKE3 id. Evidence-persisting
+    // deposits keep the per-row path. The mode is THREADED IN by the caller
+    // (the writer's resolved mode) — never re-derived from the environment:
+    // the CLI's --no-evidence flag and the env var must agree by construction
+    // (an env-only static here once silently ran the per-pair lane).
+    private readonly bool EvidenceMode;
     private long _phiFp1e9 = -1;
 
     /// <summary>φ for this witness weight, derived once through the native law.</summary>
@@ -92,8 +93,11 @@ public sealed class ModelTableETL
 
     public ModelTableETL(string modelDir, LlamaRecipeExtractor.RecipeInfo recipe,
         IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens, Hash128 sourceId,
-        Hash128 axisType, int epochBase = 0, ILogger? log = null)
+        Hash128 axisType, int epochBase = 0, ILogger? log = null,
+        bool? persistEvidence = null)
     {
+        EvidenceMode = persistEvidence
+            ?? Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter.ResolvePersistEvidence();
         _recipe  = recipe;
         _tokens  = tokens;
         _source  = sourceId;
