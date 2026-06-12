@@ -55,41 +55,40 @@ static void physicality_id_compute(hash128_t entity_id, hash128_t source_id,
     free(buf);
 }
 
-static uint32_t natural_unit_index(const tier_tree_t* tree) {
-    size_t nc = tier_tree_node_count(tree);
-    if (nc == 0) return 0;
-    uint32_t idx = (uint32_t)(nc - 1);
+/* The no-artificial-inflation law: a unary wrapper above the grapheme floor —
+ * a node with tier > 1, exactly one child, covering the same text span as that
+ * child — is NOT a unit of content; its child stands in for it everywhere
+ * (id, trajectory reference, emission). collapse_idx descends to the
+ * stand-in. Never below tier 1: bare codepoints are perfcache floor, not
+ * content roots, so a grapheme keeps its single-codepoint composition. */
+static uint32_t collapse_idx(const tier_tree_t* tree, uint32_t idx) {
     for (;;) {
         tier_node_view_t node;
         if (tier_tree_get_node(tree, idx, &node) != 0) break;
-        if (node.tier <= 2 || node.child_count != 1) break;
+        if (node.tier <= 1 || node.child_count != 1) break;
+        tier_node_view_t child;
+        if (tier_tree_get_node(tree, node.first_child_idx, &child) != 0) break;
+        if (child.text_range_off != node.text_range_off
+            || child.text_range_len != node.text_range_len) break;
         idx = node.first_child_idx;
     }
     return idx;
 }
 
-static int is_unary_ancestor_of(const tier_tree_t* tree, uint32_t ancestor, uint32_t descendant) {
+/* The natural unit: the top of the tree with its unary wrappers collapsed. */
+static uint32_t natural_unit_index(const tier_tree_t* tree) {
     size_t nc = tier_tree_node_count(tree);
-    uint32_t cur = (uint32_t)(nc - 1);
-    while (cur != descendant) {
-        if (cur == ancestor) return 1;
-        tier_node_view_t n;
-        if (tier_tree_get_node(tree, cur, &n) != 0) return 0;
-        if (n.child_count != 1) return 0;
-        cur = n.first_child_idx;
-    }
-    return 0;
+    if (nc == 0) return 0;
+    return collapse_idx(tree, (uint32_t)(nc - 1));
 }
 
 static int should_emit_compositional(const tier_tree_t* tree, uint32_t idx) {
-    uint32_t natural = natural_unit_index(tree);
-    if (idx == natural) return 1;
-    tier_node_view_t node, nat;
+    /* a collapsible wrapper never emits anywhere in the tree */
+    if (collapse_idx(tree, idx) != idx) return 0;
+    tier_node_view_t node;
     if (tier_tree_get_node(tree, idx, &node) != 0) return 0;
-    if (tier_tree_get_node(tree, natural, &nat) != 0) return 0;
-    if (node.text_range_off != nat.text_range_off || node.text_range_len != nat.text_range_len)
-        return 1;
-    return !is_unary_ancestor_of(tree, idx, natural);
+    if (node.tier == 0) return 0;
+    return 1;
 }
 
 int content_witness_batch_add(
@@ -150,8 +149,11 @@ int content_witness_batch_add(
                 return -2;
             }
             for (uint32_t ci = 0; ci < m; ++ci) {
+                /* references collapse with the wrapper: a parent's trajectory
+                 * names the stand-in (the suppressed unary child's child),
+                 * never an unemitted wrapper id */
                 tier_node_view_t ch;
-                tier_tree_get_node(tree, node.first_child_idx + ci, &ch);
+                tier_tree_get_node(tree, collapse_idx(tree, node.first_child_idx + ci), &ch);
                 child_ids[ci] = ch.id;
                 flags[ci] = laplace_vertex_flags(
                     ch.tier, ch.tier == 0 ? 1 : 0, ch.atom);

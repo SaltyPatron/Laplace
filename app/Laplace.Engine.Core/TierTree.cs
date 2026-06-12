@@ -90,51 +90,49 @@ public sealed class TierTree : SafeHandle
         return view;
     }
 
+    /// <summary>
+    /// The no-artificial-inflation law: a unary wrapper above the grapheme floor —
+    /// tier &gt; 1, exactly one child, covering the same text span as that child — is
+    /// not a unit of content; its child stands in for it everywhere (emission,
+    /// trajectory references, the natural unit). Descends to the stand-in. Never
+    /// below tier 1: codepoints are perfcache floor, not content roots, so a
+    /// grapheme keeps its single-codepoint composition.
+    /// MUST match collapse_idx in content_witness_batch.c.
+    /// </summary>
+    public uint CollapseIndex(uint idx)
+    {
+        ThrowIfDisposed();
+        for (;;)
+        {
+            var node = GetNode(idx);
+            if (node.Tier <= 1 || node.ChildCount != 1) break;
+            var child = GetNode(node.FirstChildIdx);
+            if (child.TextRangeOff != node.TextRangeOff || child.TextRangeLen != node.TextRangeLen)
+                break;
+            idx = node.FirstChildIdx;
+        }
+        return idx;
+    }
+
+    /// <summary>The natural unit: the top of the tree with its unary wrappers collapsed.</summary>
     public uint NaturalUnitIndex()
     {
         ThrowIfDisposed();
         int nc = NodeCount;
         if (nc <= 0) return 0;
-        uint idx = (uint)(nc - 1);
-        TierNodeView node = GetNode(idx);
-        while (node.Tier > 2 && node.ChildCount == 1)
-        {
-            idx  = node.FirstChildIdx;
-            node = GetNode(idx);
-        }
-        return idx;
+        return CollapseIndex((uint)(nc - 1));
     }
 
     /// <summary>
-    /// True when a compositional node should be emitted: the natural unit itself, or a node whose
-    /// text span differs from the natural unit (real multi-unit structure). Unary wrappers sharing
-    /// the natural unit's span are suppressed.
+    /// True when a compositional node should be emitted: collapsible wrappers never
+    /// emit anywhere in the tree (their stand-in child does), codepoints never emit
+    /// (perfcache floor), everything else does.
     /// </summary>
     public bool ShouldEmitCompositional(uint idx)
     {
         ThrowIfDisposed();
-        uint naturalIdx = NaturalUnitIndex();
-        if (idx == naturalIdx) return true;
-
-        var node    = GetNode(idx);
-        var natural = GetNode(naturalIdx);
-        if (node.TextRangeOff != natural.TextRangeOff || node.TextRangeLen != natural.TextRangeLen)
-            return true;
-
-        return !IsUnaryAncestorOf(idx, naturalIdx);
-    }
-
-    private bool IsUnaryAncestorOf(uint ancestor, uint descendant)
-    {
-        uint cur = (uint)(NodeCount - 1);
-        while (cur != descendant)
-        {
-            if (cur == ancestor) return true;
-            var n = GetNode(cur);
-            if (n.ChildCount != 1) return false;
-            cur = n.FirstChildIdx;
-        }
-        return false;
+        if (CollapseIndex(idx) != idx) return false;
+        return GetNode(idx).Tier != 0;
     }
 
     public void SetId(uint idx, Hash128 id)

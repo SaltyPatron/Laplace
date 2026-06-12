@@ -138,6 +138,15 @@ public sealed class SubstrateChangeBuilder
         var intentId = ComputeIntentId(_sourceId, _sourceContentUnitName,
                                         entities, physicalities, attestations);
 
+        // Detach the stages at hand-off: the writer owns them now (it disposes
+        // after staging, possibly on another thread). A builder reused after
+        // Build() must never touch a handed-over native handle — Emitting into
+        // one is a use-after-free (the 0xC0000005 in ContentWitnessBatchAdd),
+        // and re-Building would re-hand disposed stages to the writer.
+        var stages = _intentStages.ToImmutableArray();
+        _intentStages.Clear();
+        _contentStage = null;
+
         return new SubstrateChange(
             entities, physicalities, attestations,
             new SubstrateChangeMetadata(
@@ -148,7 +157,7 @@ public sealed class SubstrateChangeBuilder
                 _parentIntentId,
                 _inputUnitsConsumed,
                 _commitEpoch),
-            _intentStages.ToImmutableArray());
+            stages);
     }
 
     private static Hash128 ComputeIntentId(
