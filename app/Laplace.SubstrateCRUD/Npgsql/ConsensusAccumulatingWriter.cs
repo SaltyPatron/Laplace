@@ -186,6 +186,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         Interlocked.Add(ref _observationsAccumulated, a.ObservationCount);
     }
 
+    // The routing law: identity → staging partition, stable across epochs so the
+    // bulk fold can consume one partition at a time (bounded pgsql_tmp). MUST
+    // equal laplace.consensus_partition_of (14_period_fold.sql.in) — the fold
+    // routes consensus seeds with the SQL twin; drift fails its PK build loudly.
     private int PartitionOf(Acc acc)
         => (int)((acc.Subject.Lo ^ acc.Type.Lo ^ (acc.Object?.Lo ?? 0UL)) % (ulong)_partitions);
 
