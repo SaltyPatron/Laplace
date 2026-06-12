@@ -21,6 +21,48 @@ public sealed class ModelTableETL
         RelationTypeRegistry.Resolve("ATTENDS").Rank * SourceTrust.AiModelProbe;
     private static readonly double[] _one = new double[1];
 
+    // Consensus-only deposits take the tile lane: kernel output arrays travel to
+    // the accumulator as one AggregatedTile per kernel call — no per-pair
+    // AttestationRow, no per-pair native crossing, no per-pair BLAKE3 id (the
+    // accumulator keys on identity; ids only exist for persisted evidence).
+    // Evidence-persisting deposits keep the per-row path.
+    private static readonly bool EvidenceMode =
+        Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter.ResolvePersistEvidence();
+    private long _phiFp1e9 = -1;
+
+    /// <summary>φ for this witness weight, derived once through the native law.</summary>
+    private long PhiFp1e9(Hash128 subject, Hash128 typeId, Hash128? obj, Hash128? ctx, long score)
+    {
+        if (_phiFp1e9 < 0)
+            _phiFp1e9 = NativeAttestation.Aggregated(
+                subject, typeId, obj, _source, ctx, 1, score, ModelWeight).OpponentRdFp1e9;
+        return _phiFp1e9;
+    }
+
+    private AggregatedTile BuildTile(
+        Hash128 typeId, Hash128? ctx, int cnt,
+        int[] oR, int[] oC, long[] oS,
+        IReadOnlyList<Hash128> subj, IReadOnlyList<Hash128> obj,
+        int leftBase, bool skipSelf)
+    {
+        var subjects = new Hash128[cnt];
+        var objects  = new Hash128[cnt];
+        var sums     = new long[cnt];
+        int k = 0;
+        for (int e = 0; e < cnt; e++)
+        {
+            int i = oR[e], j = oC[e];
+            if (skipSelf && i == j) continue;
+            subjects[k] = subj[leftBase + i];
+            objects[k]  = obj[j];
+            sums[k]     = oS[e];
+            k++;
+        }
+        long phi = k > 0 ? PhiFp1e9(subjects[0], typeId, objects[0], ctx, sums[0]) : 0;
+        return new AggregatedTile(typeId, ctx, phi, subjects, objects, sums, k,
+                                  DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000);
+    }
+
     private readonly LlamaRecipeExtractor.RecipeInfo _recipe;
     private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
     private readonly Hash128 _source;
@@ -300,6 +342,21 @@ public sealed class ModelTableETL
                     int re = Math.Min(rb + RowTile, n);
                     int cnt = RunFfnTile(embRawD, n, d, unembN, gateD, upD, downD, interm,
                                          rb, re, theta, oR, oC, oV, oS, cap);
+                    if (cnt == 0) continue;
+                    if (!EvidenceMode)
+                    {
+                        var tile = BuildTile(typeId, ctx, cnt, oR, oC, oS, ents, ents, 0, false);
+                        b.AddAggregatedTile(tile);
+                        _strands += tile.Count;
+                        inChunk += tile.Count;
+                        if (inChunk >= RowsPerChange)
+                        {
+                            yield return b.SetInputUnitsConsumed(inChunk).Build();
+                            b = NewChunk(ctr.RelationName); inChunk = 0;
+                            await Task.Yield();
+                        }
+                        continue;
+                    }
                     for (int e = 0; e < cnt; e++)
                     {
                         b.AddAttestation(NativeAttestation.Aggregated(
@@ -342,6 +399,22 @@ public sealed class ModelTableETL
             ct.ThrowIfCancellationRequested();
             int re  = Math.Min(rb + RowTile, nLeft);
             int cnt = RunTile(left, rb, re, right, nRight, dim, theta, oR, oC, oV, oS, cap);
+            if (cnt == 0) continue;
+            if (!EvidenceMode)
+            {
+                var tile = BuildTile(typeId, ctx, cnt, oR, oC, oS, subj, obj, leftBase, selfPair);
+                if (tile.Count == 0) continue;
+                b.AddAggregatedTile(tile);
+                _strands += tile.Count;
+                inChunk += tile.Count;
+                if (inChunk >= RowsPerChange)
+                {
+                    yield return b.SetInputUnitsConsumed(inChunk).Build();
+                    b = NewChunk(typeName); inChunk = 0;
+                    await Task.Yield();
+                }
+                continue;
+            }
             for (int e = 0; e < cnt; e++)
             {
                 int i = oR[e], j = oC[e];

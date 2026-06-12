@@ -8,7 +8,26 @@ public sealed record SubstrateChange(
     ImmutableArray<PhysicalityRow>  Physicalities,
     ImmutableArray<AttestationRow>  Attestations,
     SubstrateChangeMetadata         Metadata,
-    ImmutableArray<IntentStage>     IntentStages = default);
+    ImmutableArray<IntentStage>     IntentStages = default,
+    ImmutableArray<AggregatedTile>  AggregatedTiles = default);
+
+/// <summary>
+/// One kernel tile of aggregated token→token testimony, carrying exactly what
+/// adjudication uses: subject, object, score (games = 1 per pair), with φ
+/// derived ONCE per witness weight — no per-pair attestation ids, rows, or
+/// native crossings. Tiles exist only on the consensus-only deposit path
+/// (evidence-persisting deposits emit full AttestationRows at the decomposer);
+/// the consensus accumulator walks the arrays directly.
+/// </summary>
+public sealed record AggregatedTile(
+    Hash128   TypeId,
+    Hash128?  ContextId,
+    long      PhiFp1e9,
+    Hash128[] Subjects,
+    Hash128[] Objects,
+    long[]    SumScoresFp1e9,
+    int       Count,
+    long      ObservedAtUnixUs);
 
 public sealed record SubstrateChangeMetadata(
     Hash128         IntentId,

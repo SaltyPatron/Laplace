@@ -18,6 +18,7 @@ public sealed class SubstrateChangeBuilder
     private readonly HashSet<Hash128> _seenPhysicalities = new();
     private readonly Dictionary<Hash128, int> _attestationIndex = new();
     private readonly List<IntentStage> _intentStages = new();
+    private readonly List<AggregatedTile> _tiles = new();
 
     public SubstrateChangeBuilder(
         Hash128 sourceId,
@@ -95,6 +96,19 @@ public sealed class SubstrateChangeBuilder
         }
     }
 
+    /// <summary>
+    /// Attach a kernel tile of aggregated testimony. Duplicate pairs inside or
+    /// across tiles need no per-intent merge here — the consensus accumulator
+    /// merges identical relations under the same φ, summing games and scores
+    /// exactly as per-row attestations would.
+    /// </summary>
+    public SubstrateChangeBuilder AddAggregatedTile(AggregatedTile tile)
+    {
+        ArgumentNullException.ThrowIfNull(tile);
+        _tiles.Add(tile);
+        return this;
+    }
+
     public SubstrateChangeBuilder AddAttestation(AttestationRow row)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -147,6 +161,9 @@ public sealed class SubstrateChangeBuilder
         _intentStages.Clear();
         _contentStage = null;
 
+        var tiles = _tiles.ToImmutableArray();
+        _tiles.Clear();
+
         return new SubstrateChange(
             entities, physicalities, attestations,
             new SubstrateChangeMetadata(
@@ -157,7 +174,8 @@ public sealed class SubstrateChangeBuilder
                 _parentIntentId,
                 _inputUnitsConsumed,
                 _commitEpoch),
-            stages);
+            stages,
+            tiles);
     }
 
     private static Hash128 ComputeIntentId(

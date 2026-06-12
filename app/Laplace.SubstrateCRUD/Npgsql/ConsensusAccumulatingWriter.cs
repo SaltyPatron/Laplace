@@ -61,9 +61,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         if (!_persistEvidence)
             _log.LogInformation(
                 "consensus-only deposit: accumulating and folding relations; laplace.attestations writes skipped");
+        // The accumulator is a bounded pre-merge of recurrent pairs before they
+        // stream to the staging journal — never a place testimony accumulates.
+        // The old 250M default held ~most of a model deposit in RAM and OOM'd;
+        // 20M keeps the pre-merge win at a bounded ~2-3 GB.
         _stagingThreshold = stagingThresholdRelations
             ?? (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_STAGING_THRESHOLD"), out var t) && t > 0
-                ? t : 250_000_000);
+                ? t : 20_000_000);
         _partitions = foldWorkers
             ?? (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_FOLD_WORKERS"), out var w) && w > 0
                 ? w : Math.Clamp(Environment.ProcessorCount - 2, 1, 4));
@@ -113,6 +117,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 continue;
             }
             foreach (var a in c.Attestations) Accumulate(a);
+            if (!c.AggregatedTiles.IsDefaultOrEmpty)
+                foreach (var t in c.AggregatedTiles) AccumulateTile(t);
         }
 
         if ((boundary && _accumulation.Count >= Math.Max(1, _stagingThreshold / 8))
@@ -138,21 +144,28 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     private IReadOnlyList<SubstrateChange> ForwardChanges(IReadOnlyList<SubstrateChange> changes)
     {
-        if (_persistEvidence) return changes;
-        bool anyAttestations = false;
+        // Tiles never travel past the accumulator (the inner writer has no tile
+        // surface); attestation rows forward only when evidence persists.
+        bool anyToStrip = false;
         foreach (var c in changes)
         {
-            if (!c.Attestations.IsEmpty) { anyAttestations = true; break; }
+            if ((!_persistEvidence && !c.Attestations.IsEmpty) || !c.AggregatedTiles.IsDefaultOrEmpty)
+            {
+                anyToStrip = true;
+                break;
+            }
         }
-        if (!anyAttestations) return changes;
+        if (!anyToStrip) return changes;
 
         var stripped = new SubstrateChange[changes.Count];
         for (int i = 0; i < changes.Count; i++)
         {
             var c = changes[i];
-            stripped[i] = c.Attestations.IsEmpty
-                ? c
-                : c with { Attestations = ImmutableArray<AttestationRow>.Empty };
+            if (!_persistEvidence && !c.Attestations.IsEmpty)
+                c = c with { Attestations = ImmutableArray<AttestationRow>.Empty };
+            if (!c.AggregatedTiles.IsDefaultOrEmpty)
+                c = c with { AggregatedTiles = ImmutableArray<AggregatedTile>.Empty };
+            stripped[i] = c;
         }
         return stripped;
     }
@@ -186,6 +199,45 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             _swapLock.ExitReadLock();
         }
         Interlocked.Add(ref _observationsAccumulated, a.ObservationCount);
+    }
+
+    /// <summary>
+    /// The consensus-direct lane: one kernel tile lands in the accumulator with
+    /// zero per-pair objects, ids, or native crossings — same merge law as
+    /// <see cref="Accumulate"/> (φ guard, games/score sums, max timestamp).
+    /// </summary>
+    private void AccumulateTile(AggregatedTile t)
+    {
+        _swapLock.EnterReadLock();
+        try
+        {
+            for (int i = 0; i < t.Count; i++)
+            {
+                var acc = _accumulation.GetOrAdd((t.Subjects[i], t.TypeId, t.Objects[i]),
+                                                 static _ => new Acc());
+                lock (acc)
+                {
+                    if (acc.Games == 0)
+                    {
+                        acc.Subject = t.Subjects[i]; acc.Type = t.TypeId; acc.Object = t.Objects[i];
+                        acc.PhiFp1e9 = t.PhiFp1e9;
+                    }
+                    else if (acc.PhiFp1e9 != t.PhiFp1e9)
+                    {
+                        throw new InvalidOperationException(
+                            $"accumulation invariant violated: relation observed with φ={t.PhiFp1e9} after φ={acc.PhiFp1e9} in the same period");
+                    }
+                    acc.Games++;
+                    acc.SumScoreFp1e9 = checked(acc.SumScoreFp1e9 + t.SumScoresFp1e9[i]);
+                    if (t.ObservedAtUnixUs > acc.MaxTsUnixUs) acc.MaxTsUnixUs = t.ObservedAtUnixUs;
+                }
+            }
+        }
+        finally
+        {
+            _swapLock.ExitReadLock();
+        }
+        Interlocked.Add(ref _observationsAccumulated, t.Count);
     }
 
     // The routing law: identity → staging partition, stable across epochs so the
