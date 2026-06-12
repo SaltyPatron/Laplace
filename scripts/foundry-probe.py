@@ -2,15 +2,20 @@
 """Foundry cast acceptance: does the poured GGUF carry the substrate's testimony?
 
 "Finite, non-flat logits" is vacuous — broken wiring also emits finite varied
-numbers. This probe measures testimony transfer at two depths:
+numbers. This probe measures testimony transfer, matched to the WITNESS CLASS:
 
   1. BASIS: cosine similarity (content dims, bias channel excluded) of
      consensus-related word pairs vs a random-pair baseline. If the Laplacian-
      eigenmaps basis carries the SIMILAR_TO consensus geometry, related pairs
      must separate from the baseline.
-  2. READOUT: full-vocab logit relief from the oracle forward pass — spread of
-     the logit distribution, and the ranks of expected continuations vs the
-     rare-token noise floor.
+  2. WITNESS FIDELITY (when the source snapshot is present): Spearman agreement
+     between the source model's own embedding cosines and the cast's content-dim
+     cosines over random word pairs. THE test for an embedding-model witness —
+     its testimony IS similarity geometry. Expected-continuation ranks are an
+     LLM-witness test and only apply to substrates with sequence testimony.
+  3. READOUT: full-vocab logit relief from the oracle forward pass, plus
+     depth-resolved ranks (k=0..L) — the wiring diagnostic that localizes
+     scale/orientation defects to a layer.
 
 Usage: foundry-probe.py <gguf> <tokenizer_dir> [prompt] [expected,tokens]
 """
@@ -85,6 +90,53 @@ def main():
     print(f"  random    n={keep.sum()}  mean={rand.mean():+.4f}  std={rand.std():.4f}")
     print(f"  separation = {sep:+.2f} sigma "
           f"({'CARRIES consensus geometry' if sep > 3 else 'NO consensus geometry'})")
+
+    # Witness fidelity: the deposited testimony came from the source model's own
+    # geometry — agreement of pairwise cosines is the faithful instrument test.
+    import glob
+    if glob.glob(os.path.join(tok_dir, "*.safetensors")):
+        smap = oracle._shard_map(tok_dir)
+        src_name = next((n for n in (
+            "embeddings.word_embeddings.weight",
+            "bert.embeddings.word_embeddings.weight",
+            "model.embed_tokens.weight") if n in smap), None)
+        if src_name is not None:
+            S = oracle._load(smap, src_name)
+            sn = np.linalg.norm(S, axis=1)
+            sn[sn == 0] = 1.0
+            Sn = S / sn[:, None]
+            m = min(len(Sn), nvocab)
+            print(f"\n== witness fidelity: source {src_name} vs cast ==")
+            # Context only: global rank agreement over random pairs. Most random
+            # pairs are sub-threshold noise the witness never deposited (the
+            # SIMILAR_TO plane is top-k structure, degree-capped) — expect weak.
+            pa = rng.integers(0, m, 3000)
+            pb = rng.integers(0, m, 3000)
+            pk = pa != pb
+            src_cos = np.einsum("ij,ij->i", Sn[pa[pk]], Sn[pb[pk]])
+            cast_cos = np.einsum("ij,ij->i", Cn[pa[pk]], Cn[pb[pk]])
+            sr = np.argsort(np.argsort(src_cos)).astype(np.float64)
+            cr = np.argsort(np.argsort(cast_cos)).astype(np.float64)
+            rho = float(np.corrcoef(sr, cr)[0, 1])
+            print(f"  all-pairs spearman (context, noise included) = {rho:+.4f}")
+            # THE gate: the witness testified about its top similarity structure —
+            # of each probe word's top-10 source neighbors, what fraction does the
+            # cast rank in its top-100 of {m}? Chance is 100/m.
+            probes = rng.choice(m, 300, replace=False)
+            sims_src = Sn[probes] @ Sn.T
+            sims_cast = Cn[probes] @ Cn[:m].T
+            hits, total = 0, 0
+            for r in range(len(probes)):
+                s = sims_src[r].copy(); s[probes[r]] = -np.inf
+                c = sims_cast[r].copy(); c[probes[r]] = -np.inf
+                top_src = np.argpartition(s, -10)[-10:]
+                top_cast = set(np.argpartition(c, -100)[-100:].tolist())
+                hits += sum(1 for t in top_src if int(t) in top_cast)
+                total += 10
+            rec = hits / total
+            print(f"  neighbor recall: source top-10 in cast top-100 = {rec:.1%} "
+                  f"(chance {100 / m:.2%}) "
+                  f"({'cast RENDERS the witness geometry' if rec > 0.2 else 'weak/no rendering'})")
 
     print(f'\n== readout probe: full-vocab logits for "{prompt}" ==')
     ids = oracle.tokenize_words(vocab, prompt)
