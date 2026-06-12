@@ -4,11 +4,15 @@ CREATE OR REPLACE FUNCTION drop_period_staging()
 DECLARE
     stale text;
 BEGIN
+    -- Both journal shapes: flat epoch staging AND the walk journal. A dead
+    -- run's stale journal must never leak into the next deposit's fold
+    -- (create_walk_staging is IF NOT EXISTS — it would keep stale rows).
     FOR stale IN
         SELECT c.relname FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = current_schema() AND c.relkind = 'r'
-          AND c.relname LIKE 'consensus\_period\_staging\_%'
+          AND (c.relname LIKE 'consensus\_period\_staging\_%'
+               OR c.relname ~ '^consensus_walk_staging_\d+$')
     LOOP
         EXECUTE format('DROP TABLE %I', stale);
     END LOOP;

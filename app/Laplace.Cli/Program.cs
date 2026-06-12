@@ -524,20 +524,27 @@ internal static class Program
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         await using var conn = await ds.OpenConnectionAsync();
 
+        // ids are pure computation under the engine law (same kernel as deposits);
+        // the DB round trip is only the existence check.
+        CodepointPerfcache.LoadDefault();
         var ids = new List<(string Token, Hash128 Id)>(tokens.Length);
         foreach (var tok in tokens)
         {
+            Hash128? rid = TextDecomposer.ContentRootId(tok);
+            if (rid is null)
+            {
+                Console.WriteLine($"  warn: '{tok}' is empty — skipping");
+                continue;
+            }
             await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT laplace.word_id(@w)";
-            cmd.Parameters.AddWithValue("w", tok);
-            var v = await cmd.ExecuteScalarAsync();
-            if (v is null or DBNull)
+            cmd.CommandText = "SELECT EXISTS(SELECT 1 FROM laplace.entities e WHERE e.id = @id)";
+            cmd.Parameters.AddWithValue("id", rid.Value.ToBytes());
+            if (await cmd.ExecuteScalarAsync() is not true)
             {
                 Console.WriteLine($"  warn: '{tok}' has no substrate entity — skipping");
                 continue;
             }
-            var id = Hash128FromBytes((byte[])v);
-            ids.Add((tok, id));
+            ids.Add((tok, rid.Value));
         }
 
         if (ids.Count < 2)
@@ -882,9 +889,13 @@ internal static class Program
         // The behavioral token planes MERGE: the same (token, ATTENDS, token) pair
         // legitimately recurs across layers and accumulation windows, and cross-layer
         // agreement is the strongest testimony — a FRESH fold would silently drop it.
+        // Without evidence the ETL emits testimony walks, and the writer must journal
+        // ALL consensus partials (vocab, S3-morph) as walks too — one shape, one fold.
+        bool persistEvidenceResolved = ResolvePersistEvidence(cli);
         var accumulator = new ConsensusAccumulatingWriter(inner, ds,
             freshSource: false,
-            persistEvidence: ResolvePersistEvidence(cli),
+            persistEvidence: persistEvidenceResolved,
+            stageAsWalks: !persistEvidenceResolved,
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
         ISubstrateWriter writer = accumulator;
         var reader = new NpgsqlSubstrateReader(ds);

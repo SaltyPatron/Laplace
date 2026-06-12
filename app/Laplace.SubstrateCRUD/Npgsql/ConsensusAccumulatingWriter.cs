@@ -35,6 +35,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private ConcurrentDictionary<(Hash128 S, Hash128 K, Hash128? O), Acc> _accumulation = new();
     private long _observationsAccumulated;
     private readonly bool _terminalFold;
+    private readonly bool _stageAsWalks;
     private int  _periodEpoch;
     private bool _sweptStale;
     private bool _anyEpochCreated;
@@ -47,15 +48,23 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     public bool PersistEvidence => _persistEvidence;
 
+    /// <param name="stageAsWalks">THE TRAJECTORY JOURNAL mode: every consensus
+    /// partial journals as a testimony walk — flat period staging is never
+    /// created, so the deposit folds as ONE shape through the terminal walk
+    /// fold. Required whenever the decomposer emits TestimonyWalks (mixed
+    /// shapes are refused by finish_consensus_fold). Threaded explicitly from
+    /// the ingest entry point, never re-derived from the environment.</param>
     public ConsensusAccumulatingWriter(
         ISubstrateWriter inner, NpgsqlDataSource dataSource,
         int? stagingThresholdRelations = null, int? foldWorkers = null,
         bool freshSource = false, bool? persistEvidence = null,
+        bool stageAsWalks = false,
         ILogger<ConsensusAccumulatingWriter>? logger = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         _freshSource = freshSource;
+        _stageAsWalks = stageAsWalks;
         _persistEvidence = persistEvidence ?? ResolvePersistEvidence();
         _log = logger ?? (ILogger)NullLogger<ConsensusAccumulatingWriter>.Instance;
         if (!_persistEvidence)
@@ -217,11 +226,21 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     private void BufferWalk(TestimonyWalkRow w)
     {
+        if (!_stageAsWalks)
+            throw new InvalidOperationException(
+                "testimony walks arrived but the writer is not in walk-journal mode: "
+                + "thread stageAsWalks from the ingest entry point (mixed walk/flat "
+                + "staging is refused at the fold)");
+        BufferWalkCore(w);
+        Interlocked.Add(ref _observationsAccumulated, w.GamesTotal);
+    }
+
+    private void BufferWalkCore(TestimonyWalkRow w)
+    {
         _walkBuffers ??= Enumerable.Range(0, _partitions)
             .Select(_ => new List<TestimonyWalkRow>()).ToArray();
         _walkBuffers[(int)(w.Subject.Lo % (ulong)_partitions)].Add(w);
         _walkBuffered++;
-        Interlocked.Add(ref _observationsAccumulated, w.GamesTotal);
     }
 
     private async Task FlushWalksAsync(CancellationToken ct)
@@ -230,31 +249,46 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         await _stagingGate.WaitAsync(ct);
         try
         {
-            await using var conn = await _ds.OpenConnectionAsync(ct);
-            if (!_walkStagingCreated)
-            {
-                await using var create = conn.CreateCommand();
-                create.CommandText = $"SELECT laplace.create_walk_staging({_partitions})";
-                await create.ExecuteNonQueryAsync(ct);
-                _walkStagingCreated = true;
-            }
-            for (int p = 0; p < _partitions; p++)
-            {
-                var rows = _walkBuffers[p];
-                if (rows.Count == 0) continue;
-                await using var stream = await conn.BeginRawBinaryCopyAsync(
-                    $"COPY laplace.consensus_walk_staging_{p} "
-                    + "(subject_id, type_id, context_id, phi, n_vertices, games_total, last_ts, walk) "
-                    + "FROM STDIN (FORMAT BINARY)", ct);
-                WriteWalkRows(stream, rows, ct);
-                rows.Clear();
-            }
-            _walkBuffered = 0;
+            await FlushWalksLockedAsync(ct);
         }
         finally
         {
             _stagingGate.Release();
         }
+    }
+
+    /// <summary>Caller holds _stagingGate.</summary>
+    private async Task FlushWalksLockedAsync(CancellationToken ct)
+    {
+        if (_walkBuffers is null || _walkBuffered == 0) return;
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        if (!_walkStagingCreated)
+        {
+            if (!_sweptStale)
+            {
+                await using var sweep = conn.CreateCommand();
+                sweep.CommandText = "SELECT laplace.drop_period_staging()";
+                await sweep.ExecuteNonQueryAsync(ct);
+                _sweptStale = true;
+            }
+            await using var create = conn.CreateCommand();
+            create.CommandText = $"SELECT laplace.create_walk_staging({_partitions})";
+            await create.ExecuteNonQueryAsync(ct);
+            _walkStagingCreated = true;
+            _anyEpochCreated = true;
+        }
+        for (int p = 0; p < _partitions; p++)
+        {
+            var rows = _walkBuffers[p];
+            if (rows.Count == 0) continue;
+            await using var stream = await conn.BeginRawBinaryCopyAsync(
+                $"COPY laplace.consensus_walk_staging_{p} "
+                + "(subject_id, type_id, context_id, phi, n_vertices, games_total, last_ts, walk) "
+                + "FROM STDIN (FORMAT BINARY)", ct);
+            WriteWalkRows(stream, rows, ct);
+            rows.Clear();
+        }
+        _walkBuffered = 0;
     }
 
     private static void WriteWalkRows(Stream stream, List<TestimonyWalkRow> rows, CancellationToken ct)
@@ -318,6 +352,35 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         await _stagingGate.WaitAsync(ct);
         try
         {
+            if (_stageAsWalks)
+            {
+                // THE TRAJECTORY JOURNAL: partials journal as walks too — one
+                // shape, one fold, one period. The q/rem split is lossless:
+                // (games−rem) observations of q plus rem of (q+1) re-merge in
+                // the fold to the exact (games, sum) the flat lane would stage.
+                ConcurrentDictionary<(Hash128, Hash128, Hash128?), Acc> snap;
+                _swapLock.EnterWriteLock();
+                try
+                {
+                    snap = _accumulation;
+                    _accumulation = new ConcurrentDictionary<(Hash128, Hash128, Hash128?), Acc>();
+                }
+                finally
+                {
+                    _swapLock.ExitWriteLock();
+                }
+                if (!snap.IsEmpty)
+                {
+                    foreach (var acc in snap.Values)
+                        BufferWalkCore(ConvertPartialToWalk(acc));
+                    _log.LogInformation(
+                        "consensus stage (walk journal): {Relations:N0} partial relations journaled as testimony walks",
+                        snap.Count);
+                }
+                await FlushWalksLockedAsync(ct);
+                return;
+            }
+
             if (_maxFoldBacklog > 0 && !_terminalFold)
             {
                 bool throttled = false;
@@ -396,6 +459,45 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         finally
         {
             _stagingGate.Release();
+        }
+    }
+
+    // A partial (games, sum) becomes ≤2 score levels — q and q+1 with rem of
+    // the latter — chunked to the uint16 run_length bound. A NULL object rides
+    // as zero16, the identity-preimage law carried into the vertex.
+    private static TestimonyWalkRow ConvertPartialToWalk(Acc acc)
+    {
+        long games = acc.Games, sum = acc.SumScoreFp1e9;
+        long q = sum / games, rem = sum % games;
+        if (rem < 0) { q--; rem += games; }
+
+        var objects = new List<Hash128>(2);
+        var scores  = new List<long>(2);
+        var runs    = new List<ushort>(2);
+        Hash128 obj = acc.Object ?? default;
+        AppendRuns(objects, scores, runs, obj, q, games - rem);
+        AppendRuns(objects, scores, runs, obj, q + 1, rem);
+
+        byte[] packed = TestimonyWalk.Pack(
+            System.Runtime.InteropServices.CollectionsMarshal.AsSpan(objects),
+            System.Runtime.InteropServices.CollectionsMarshal.AsSpan(scores),
+            System.Runtime.InteropServices.CollectionsMarshal.AsSpan(runs));
+        return new TestimonyWalkRow(
+            acc.Subject, acc.Type, null, acc.PhiFp1e9,
+            packed, objects.Count, games, acc.MaxTsUnixUs);
+    }
+
+    private static void AppendRuns(
+        List<Hash128> objects, List<long> scores, List<ushort> runs,
+        Hash128 obj, long score, long count)
+    {
+        while (count > 0)
+        {
+            ushort run = count > ushort.MaxValue ? ushort.MaxValue : (ushort)count;
+            objects.Add(obj);
+            scores.Add(score);
+            runs.Add(run);
+            count -= run;
         }
     }
 
@@ -512,15 +614,20 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     {
         await FlushWalksAsync(ct);
         await FlushPeriodAsync(ct);
-        if (_terminalFold)
+        if (_terminalFold || _stageAsWalks)
         {
+            // The walk journal has exactly one fold — the terminal walk fold —
+            // so walk mode takes this path regardless of LAPLACE_FOLD_LANE.
             // LAPLACE_FOLD_IMPL selects the lane inside the terminal fold:
             // 'engine' (default, consensus_fold_partition in C) or 'sql' (the
             // ordered-aggregate escape hatch and parity reference).
             // LAPLACE_FOLD_RESUMABLE=1 runs the per-partition-COMMIT procedure:
             // staging drops as the fold walks, and a re-run resumes mid-deposit.
+            if (_stageAsWalks && !_terminalFold)
+                _log.LogInformation("walk journal staged: materializing through the terminal walk fold");
             string impl = Environment.GetEnvironmentVariable("LAPLACE_FOLD_IMPL") ?? "engine";
-            bool resumable = Environment.GetEnvironmentVariable("LAPLACE_FOLD_RESUMABLE") == "1";
+            bool resumable = !_stageAsWalks
+                && Environment.GetEnvironmentVariable("LAPLACE_FOLD_RESUMABLE") == "1";
             var sw = System.Diagnostics.Stopwatch.StartNew();
             await using var conn = await _ds.OpenConnectionAsync(ct);
             conn.Notice += (_, e) =>
