@@ -1,62 +1,89 @@
 -- ── generation surface ────────────────────────────────────────────────────────
--- Autoregressive generation over witnessed content trajectories. The kernel is
--- native (generation_native.c): one SPI scan builds a backend-cached suffix
--- array over content_index; longest-context back-off is binary search; sampling
--- is seeded, so (corpus, prompt, seed) reproduces its output exactly.
+-- Autoregressive generation over witnessed content trajectories.
+-- SINGLE SOURCE: physicalities.trajectory — each vertex mantissa-encodes its
+-- entity id, so the geometry IS the sequence. The kernel (generation_native.c)
+-- builds a backend-cached corpus straight from the trajectories (edge scan +
+-- constituency walk to the token floor), then a suffix array; longest-context
+-- back-off is binary search; sampling is seeded, so (corpus, prompt, seed)
+-- reproduces its output exactly. When the witnessed stream is silent at every
+-- order, the COMPLETES_TO consensus is the floor (steps marked ord_used = 0).
+--
+-- The separator rule (word stride): whitespace tokens are witnessed content
+-- (round-trip law) but are NOT units of order — the corpus excludes them, so
+-- contexts, pairs, and gap distances count in content-bearing strides. Display
+-- re-inserts separators (SubstrateClient.cs is the single separator authority).
+--
+-- There is no content_index table, no constituency_edge table, no content_pairs
+-- cache — those were derived disk copies of the trajectories and are retired.
 
--- content_index lifecycle (generation_index.c) ---------------------------------
--- Text law: tier-3 sentence trajectories, one level deep, batched + resumable.
-CREATE OR REPLACE PROCEDURE rebuild_content_index(p_batch int DEFAULT 20000)
-    AS 'MODULE_PATHNAME', 'pg_laplace_rebuild_content_index'
-    LANGUAGE C;
+-- refresh-safe retirement of the derived copies (live DBs converge on refresh)
+DO $do$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_depend d
+        JOIN pg_extension e ON e.oid = d.refobjid AND d.refclassid = 'pg_extension'::regclass
+        WHERE e.extname = 'laplace_substrate'
+          AND d.classid = 'pg_class'::regclass
+          AND d.objid = to_regclass('@extschema@.content_pairs')
+          AND d.deptype = 'e')
+    THEN
+        EXECUTE format('ALTER EXTENSION %I DROP TABLE @extschema@.content_pairs', 'laplace_substrate');
+    END IF;
+    EXECUTE 'DROP TABLE IF EXISTS @extschema@.content_pairs';
+    EXECUTE 'DROP TABLE IF EXISTS @extschema@.content_index';
+    EXECUTE 'DROP TABLE IF EXISTS @extschema@.constituency_edge';
+    EXECUTE 'DROP PROCEDURE IF EXISTS @extschema@.rebuild_content_index(int)';
+    EXECUTE 'DROP PROCEDURE IF EXISTS @extschema@.rebuild_content_index_deep()';
+    EXECUTE 'DROP PROCEDURE IF EXISTS @extschema@.rebuild_content_pairs(int)';
+END $do$;
 
--- Grammar law: full constituency flattened recursively to the token floor.
--- Sequence roots are structural — constituency parents that are nobody's
--- constituent (per-file code roots, standalone documents).
-CREATE OR REPLACE PROCEDURE rebuild_content_index_deep()
-    AS 'MODULE_PATHNAME', 'pg_laplace_rebuild_content_index_deep'
-    LANGUAGE C;
+-- corpus observability + warm verb: building the corpus IS the warm-up; the
+-- stats are the receipt (sequences walked, word-stride positions, vocab,
+-- separators excluded, and the invalidation probe state).
+CREATE OR REPLACE FUNCTION corpus_stats(
+        OUT sequences bigint, OUT positions bigint, OUT vocab int,
+        OUT separators bigint, OUT trajectories bigint, OUT last_witnessed timestamptz)
+    AS 'MODULE_PATHNAME', 'pg_laplace_corpus_stats'
+    LANGUAGE C VOLATILE;
 
--- Trajectory pair surface for the foundry: forward co-occurrence counts within a
--- window over witnessed content sequences, with per-subject totals so callers form
--- conditional frequencies — the "followed by N% of the time" distribution, read
--- straight from the usage observations (physicalities.trajectory via content_index),
--- not from any pairwise summary. p_window=1 is strict continuation; larger windows
--- give the attention-style forward co-occurrence surface.
+-- Trajectory pairs straight from the corpus stream (word-stride by
+-- construction): one walk, sliding window, in-memory hash aggregation —
+-- engine computes, SQL orchestrates.
+CREATE OR REPLACE FUNCTION content_pairs_scan(p_max_gap int)
+    RETURNS TABLE(gap int, subject_id bytea, object_id bytea, cnt bigint)
+    AS 'MODULE_PATHNAME', 'pg_laplace_content_pairs_scan'
+    LANGUAGE C STRICT VOLATILE;
+
+-- Trajectory pair surface for the foundry: forward co-occurrence counts within
+-- a window over witnessed content sequences, with per-subject totals so callers
+-- form conditional frequencies — the "followed by N% of the time" distribution.
+-- p_window=1 is strict continuation; larger windows give the attention-style
+-- forward co-occurrence surface.
 CREATE OR REPLACE FUNCTION content_trajectory_pairs(p_window int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, object_id bytea, cnt bigint, subject_total bigint)
-    LANGUAGE sql STABLE
+    LANGUAGE sql VOLATILE
     SET search_path = @extschema@, public AS $$
     WITH pairs AS (
-        SELECT a.token AS s, b.token AS o, count(*) AS c
-        FROM content_index a
-        JOIN content_index b ON b.seq_id = a.seq_id
-                            AND b.pos > a.pos AND b.pos <= a.pos + p_window
-        GROUP BY a.token, b.token
+        SELECT s.subject_id AS s, s.object_id AS o, sum(s.cnt) AS c
+        FROM content_pairs_scan(p_window) s
+        GROUP BY s.subject_id, s.object_id
     ), totals AS (
         SELECT s, sum(c) AS t FROM pairs GROUP BY s
     )
-    SELECT p.s, p.o, p.c, t.t FROM pairs p JOIN totals t USING (s)
+    SELECT p.s, p.o, p.c::bigint, t.t::bigint FROM pairs p JOIN totals t USING (s)
 $$;
 
--- The order ladder, one pass: pair counts BY GAP (exact forward distance within a
--- witnessed sequence) up to p_max_gap, with per-(subject,gap) totals. The foundry
--- pours gap g into layer g of the mold — depth in the cast model is bought with
--- sequential order from the trajectories, not with copies of one pairwise summary.
+-- The order ladder, one pass: pair counts BY GAP (exact forward word-stride
+-- distance within a witnessed sequence) up to p_max_gap, with per-(subject,gap)
+-- totals. The foundry pours gap g into layer g of the mold — depth in the cast
+-- model is bought with sequential order from the trajectories.
 CREATE OR REPLACE FUNCTION content_trajectory_pairs_by_gap(p_max_gap int DEFAULT 8)
     RETURNS TABLE(subject_id bytea, object_id bytea, gap int, cnt bigint, subject_total bigint)
-    LANGUAGE sql STABLE
+    LANGUAGE sql VOLATILE
     SET search_path = @extschema@, public AS $$
-    WITH pairs AS (
-        SELECT a.token AS s, b.token AS o, (b.pos - a.pos)::int AS g, count(*) AS c
-        FROM content_index a
-        JOIN content_index b ON b.seq_id = a.seq_id
-                            AND b.pos > a.pos AND b.pos <= a.pos + p_max_gap
-        GROUP BY a.token, b.token, b.pos - a.pos
-    ), totals AS (
-        SELECT s, g, sum(c) AS t FROM pairs GROUP BY s, g
-    )
-    SELECT p.s, p.o, p.g, p.c, t.t FROM pairs p JOIN totals t USING (s, g)
+    SELECT s.subject_id, s.object_id, s.gap, s.cnt,
+           sum(s.cnt) OVER (PARTITION BY s.subject_id, s.gap)::bigint
+    FROM content_pairs_scan(p_max_gap) s
 $$;
 
 -- ── the generic plane surface ───────────────────────────────────────────────────
@@ -72,47 +99,13 @@ $$;
 --   token_plane('traj', 'gap', 3)               P(object at exact distance 3 | subject)
 --   token_plane('traj', 'window', 4)            P(object within 4 ahead | subject)
 --
--- Trajectory families read the content_pairs cache when present (rebuild via
--- rebuild_content_pairs after rebuild_content_index) — every read an index scan —
--- and fall back to the live content_index join when it is not.
-
-CREATE TABLE IF NOT EXISTS content_pairs (
-    gap           int    NOT NULL,
-    subject_id    bytea  NOT NULL,
-    object_id     bytea  NOT NULL,
-    cnt           bigint NOT NULL,
-    subject_total bigint NOT NULL
-);
-CREATE INDEX IF NOT EXISTS content_pairs_gap_subject
-    ON content_pairs(gap, subject_id);
-
--- The native build: one ordered scan of content_index, sliding window, in-memory
--- hash aggregation (generation_index.c) — engine computes, SQL orchestrates.
-CREATE OR REPLACE FUNCTION content_pairs_scan(p_max_gap int)
-    RETURNS TABLE(gap int, subject_id bytea, object_id bytea, cnt bigint)
-    AS 'MODULE_PATHNAME', 'pg_laplace_content_pairs_scan'
-    LANGUAGE C STRICT VOLATILE;
-
-CREATE OR REPLACE PROCEDURE rebuild_content_pairs(p_max_gap int DEFAULT 8)
-    LANGUAGE plpgsql
-    SET search_path = @extschema@, public AS $$
-BEGIN
-    TRUNCATE content_pairs;
-    INSERT INTO content_pairs (gap, subject_id, object_id, cnt, subject_total)
-    SELECT s.gap, s.subject_id, s.object_id, s.cnt,
-           sum(s.cnt) OVER (PARTITION BY s.subject_id, s.gap)
-    FROM content_pairs_scan(p_max_gap) s;
-    ANALYZE content_pairs;
-END;
-$$;
-
+-- Trajectory families read the corpus stream (word stride) via the native scan.
 CREATE OR REPLACE FUNCTION token_plane(p_family text, p_name text, p_arg int DEFAULT NULL)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
-    LANGUAGE plpgsql STABLE
+    LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public AS $$
 DECLARE
     g int;
-    cached boolean;
 BEGIN
     IF p_family = 'consensus' THEN
         RETURN QUERY
@@ -137,44 +130,22 @@ BEGIN
         RAISE EXCEPTION 'token_plane: unknown traj plane % (next | gap | window)', p_name;
     END IF;
 
-    SELECT EXISTS (SELECT 1 FROM content_pairs LIMIT 1) INTO cached;
-
     IF p_name = 'window' THEN
-        IF cached THEN
-            RETURN QUERY
-            WITH g_rows AS (
-                SELECT cp.subject_id AS s, cp.object_id AS o, cp.gap, cp.cnt, cp.subject_total
-                FROM content_pairs cp WHERE cp.gap <= g
-            ),
-            totals AS (
-                SELECT s, sum(t) AS total
-                FROM (SELECT DISTINCT gr.s, gr.gap, gr.subject_total AS t FROM g_rows gr) d
-                GROUP BY s
-            )
-            SELECT gr.s, gr.o, sum(gr.cnt)::double precision / t.total
-            FROM g_rows gr JOIN totals t ON t.s = gr.s
-            GROUP BY gr.s, gr.o, t.total;
-        ELSE
-            RETURN QUERY
-            SELECT t.subject_id, t.object_id, t.cnt::double precision / t.subject_total
-            FROM content_trajectory_pairs(g) t;
-        END IF;
+        RETURN QUERY
+        SELECT t.subject_id, t.object_id, t.cnt::double precision / t.subject_total
+        FROM content_trajectory_pairs(g) t;
         RETURN;
     END IF;
 
-    IF cached THEN
-        RETURN QUERY
-        SELECT cp.subject_id, cp.object_id, cp.cnt::double precision / cp.subject_total
-        FROM content_pairs cp WHERE cp.gap = g;
-    ELSE
-        RETURN QUERY
-        SELECT t.subject_id, t.object_id, t.cnt::double precision / t.subject_total
-        FROM content_trajectory_pairs_by_gap(g) t WHERE t.gap = g;
-    END IF;
+    RETURN QUERY
+    SELECT t.subject_id, t.object_id, t.cnt::double precision / t.subject_total
+    FROM content_trajectory_pairs_by_gap(g) t WHERE t.gap = g;
 END;
 $$;
 
 -- native kernel ----------------------------------------------------------------
+-- ord_used: the witnessed order that produced the step; 0 = the step came from
+-- the COMPLETES_TO consensus floor (no witnessed continuation at any order).
 CREATE OR REPLACE FUNCTION generate_tokens(
         p_ctx bytea[], p_steps int DEFAULT 24, p_max_order int DEFAULT 5,
         p_temperature float8 DEFAULT 0.7, p_topk int DEFAULT 10,

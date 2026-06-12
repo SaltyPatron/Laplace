@@ -18,8 +18,9 @@ mold     recipe.json (dims/layers/heads — user-authored, or discovered from an
          model via laplace.model_recipes() + synthesize substrate --recipe-from)
   → planes      one set-based read per token→token consensus plane (SIMILAR_TO, ATTENDS,
                 OV_RELATES, COMPLETES_TO, PRECEDES, CO_OCCURS_WITH; eff-μ = rating − 2·rd)
-                PLUS the usage observations themselves: content_trajectory_pairs over
-                content_index — "followed by N% of the time", windowed co-occurrence
+                PLUS the usage observations themselves: content_trajectory_pairs straight
+                off the witnessed trajectories (word-stride) — "followed by N% of the
+                time", windowed co-occurrence
   → basis       laplacian_eigenmaps_from_sparse_graph over the union graph (degree-capped)
                 → gram_schmidt → procrustes anchored to token content coords → deterministic
                 capacity fill (seeded from the recipe, never the clock) → bias channel

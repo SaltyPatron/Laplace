@@ -71,11 +71,8 @@ internal static class WiktionaryWitness
         Hash128? posCtx = null;
         if (!string.IsNullOrEmpty(pos))
         {
-            Hash128 posId = NativeAttestation.ResolvePos(pos!, NativeAttestation.PosTagset.Wiktionary);
-            posCtx = posId;
-            b.AddEntity(new EntityRow(posId, EntityTier.Vocabulary, PosReference.PosTypeId, WiktionaryDecomposer.Source));
-            b.AddAttestation(NativeAttestation.PosWiktionary(
-                w, pos!, WiktionaryDecomposer.Source, posCtx, SourceTrust.AcademicCuratedUserInput));
+            posCtx = PosReference.Attest(b, w, pos!, PosReference.PosTagset.Wiktionary,
+                WiktionaryDecomposer.Source, null, SourceTrust.AcademicCuratedUserInput);
         }
 
         if (rec.TryGetProperty("senses", out var senses) && senses.ValueKind == JsonValueKind.Array)
@@ -167,7 +164,7 @@ internal static class WiktionaryWitness
 
     // The tier-witness law: an attestation object must be WITNESSED content, never a
     // bare RootId — id-without-witness is a ghost reference (no entity, no trajectory,
-    // no tier; invisible to content_index/generation). Emit deposits the content tree
+    // no tier; invisible to the generation corpus). Emit deposits the content tree
     // at its natural tier through the builder's coalesced stage (cheap since the
     // per-witness round-trip cost died), then the claim attests to real content.
     private static void AttestText(

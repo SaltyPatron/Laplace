@@ -1,36 +1,21 @@
 @echo off
 setlocal
-rem ==== Build the generation content index after seeding ========================
-rem   scripts\win\index-content.cmd <database> [deep|text]      (default: deep)
-rem deep = full constituency flattened to the token floor (code + prose + any
-rem        grammar modality — the index the chat/completions endpoint serves).
-rem text = tier-3 sentence trajectories only (legacy text law).
-rem Runs ANALYZE first (fresh bulk loads have no planner stats), then the
-rem native rebuild procedure, then reports index size. Idempotent.
+rem ==== Warm the generation corpus and report its stats =========================
+rem   scripts\win\index-content.cmd <database>
+rem The corpus is built per backend straight from physicalities.trajectory
+rem (single source — no content_index/content_pairs tables exist). Building it
+rem IS the warm-up; corpus_stats() is the receipt. Runs ANALYZE first so the
+rem trajectory probe and edge scan plan well on fresh bulk loads. Idempotent.
 rem ==============================================================================
 if "%~1"=="" (
-    echo usage: index-content.cmd ^<database^> [deep^|text]
+    echo usage: index-content.cmd ^<database^>
     exit /b 2
 )
 call "%~dp0env.cmd"
-set "MODE=%~2"
-if "%MODE%"=="" set "MODE=deep"
-if /i "%MODE%"=="deep" (
-    set "CALLSQL=CALL laplace.rebuild_content_index_deep();"
-) else (
-    set "CALLSQL=CALL laplace.rebuild_content_index();"
-)
 
 echo ==== analyze %~1 ====
 "%PGBIN%\vacuumdb.exe" -h localhost -U postgres -d %~1 --analyze-only || exit /b 1
 
-echo ==== %MODE% content index on %~1 ====
-rem CALL must run alone with connection-level search_path: a procedure invoked in
-rem a multi-statement -c runs atomic and rejects its internal COMMITs.
+echo ==== corpus stats on %~1 (build = warm) ====
 set "PGOPTIONS=-c search_path=laplace,public"
-"%PGBIN%\psql.exe" -h localhost -U postgres -d %~1 -v ON_ERROR_STOP=1 -c "%CALLSQL%" || exit /b 1
-"%PGBIN%\psql.exe" -h localhost -U postgres -d %~1 -tAc "SELECT count(*) || ' positions, ' || count(DISTINCT seq_id) || ' sequences' FROM laplace.content_index;"
-
-echo ==== trajectory pair cache on %~1 (token_plane traj families) ====
-"%PGBIN%\psql.exe" -h localhost -U postgres -d %~1 -v ON_ERROR_STOP=1 -c "CALL laplace.rebuild_content_pairs();" || exit /b 1
-"%PGBIN%\psql.exe" -h localhost -U postgres -d %~1 -tAc "SELECT count(*) || ' pairs across ' || count(DISTINCT gap) || ' gaps' FROM laplace.content_pairs;"
+"%PGBIN%\psql.exe" -h localhost -U postgres -d %~1 -P pager=off -v ON_ERROR_STOP=1 -c "SELECT * FROM laplace.corpus_stats();" || exit /b 1
