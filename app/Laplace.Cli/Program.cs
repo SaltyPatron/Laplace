@@ -736,7 +736,8 @@ internal static class Program
         string Path,
         LanguageFilter? LangOverride,
         bool? EmitCrossLanguageLinks,
-        bool SkipEvidence);
+        bool SkipEvidence,
+        bool RegisterOnly);
 
     private static IngestCliArgs ParseIngestCliArgs(string[] args)
     {
@@ -744,6 +745,7 @@ internal static class Program
         LanguageFilter? langs = null;
         bool? emitCross = null;
         bool skipEvidence = false;
+        bool registerOnly = false;
         for (int i = 0; i < rest.Count;)
         {
             if (rest[i] == "--langs" && i + 1 < rest.Count)
@@ -762,6 +764,11 @@ internal static class Program
                 skipEvidence = true;
                 rest.RemoveAt(i);
             }
+            else if (rest[i] == "--register-only")
+            {
+                registerOnly = true;
+                rest.RemoveAt(i);
+            }
             else i++;
         }
         return new(
@@ -769,7 +776,8 @@ internal static class Program
             rest.Count > 1 ? rest[1] : "",
             langs,
             emitCross,
-            skipEvidence);
+            skipEvidence,
+            registerOnly);
     }
 
     private static bool ResolvePersistEvidence(IngestCliArgs? cli)
@@ -839,6 +847,15 @@ internal static class Program
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
 
         var dec = new ModelDecomposer(modelDir);
+
+        // Repair lane: re-register readback canonicals (recipe JSON + scalars)
+        // for a deposit whose post-steps died (e.g. a fold ENOSPC) without
+        // re-walking the tensors. Idempotent.
+        if (cli.RegisterOnly)
+        {
+            await RegisterDynamicCanonicalsAsync(ds, dec);
+            return 0;
+        }
 
         var (modelSource, modelName) = ModelDecomposer.SourceForModel(modelDir);
         await using (var chkConn = await ds.OpenConnectionAsync())
@@ -928,6 +945,12 @@ internal static class Program
                 return 1;
             }
 
+            // Register BEFORE the fold: readback canonicals (the recipe JSON the
+            // foundry's --recipe-from reads back) depend only on the applied
+            // deposit, and the fold is the long, failure-prone tail — a fold
+            // ENOSPC once ate the recipe registration of a completed deposit.
+            await RegisterDynamicCanonicalsAsync(ds, dec);
+
             Console.WriteLine(
                 $"consensus: folding {accumulator.ObservationsAccumulated:N0} matches "
                 + $"across {accumulator.FoldWorkers} partition(s) ...");
@@ -964,7 +987,6 @@ internal static class Program
                 Console.WriteLine($"B2: secondary consensus indexes rebuilt in {cixSw.Elapsed.TotalSeconds:F1}s");
             }
         }
-        await RegisterDynamicCanonicalsAsync(ds, dec);
         try { await PrintIngestValidationAsync(ds, dec); }
         catch (Exception ex)
         { Console.Error.WriteLine($"warn: safetensor deposition validation failed: {ex.Message}"); }
@@ -1696,13 +1718,15 @@ internal static class Program
             Console.Error.WriteLine($"failures: {result.Failures.Count}");
             return 1;
         }
+        // Before the fold: registration depends only on the applied deposit,
+        // and the fold is the failure-prone tail (see safetensors path).
+        await RegisterDynamicCanonicalsAsync(ds, dec);
         Console.WriteLine(
             $"consensus: folding {accumulator.ObservationsAccumulated:N0} matches "
             + $"across {accumulator.FoldWorkers} partition(s) ...");
         var materialized = await accumulator.MaterializeConsensusAsync();
         Console.WriteLine($"consensus: {materialized:N0} relations materialized "
                         + $"(accumulated at ingest; evidence = provenance-only)");
-        await RegisterDynamicCanonicalsAsync(ds, dec);
         try { await PrintIngestValidationAsync(ds, dec); }
         catch (Exception ex)
         { Console.Error.WriteLine($"warn: ingest validation failed (ingest itself is complete): {ex.Message}"); }
