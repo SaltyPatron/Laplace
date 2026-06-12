@@ -34,7 +34,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     private ConcurrentDictionary<(Hash128 S, Hash128 K, Hash128? O), Acc> _accumulation = new();
     private long _observationsAccumulated;
-    private readonly bool _bulkLane;
+    private readonly bool _terminalFold;
     private int  _periodEpoch;
     private bool _sweptStale;
     private bool _anyEpochCreated;
@@ -72,15 +72,17 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         // 0 or negative disables the bound.
         _maxFoldBacklog = int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_FOLD_BACKLOG_MAX"), out var bl)
             ? bl : 12;
-        // LAPLACE_FOLD_LANE=bulk: stage every epoch to disk and fold ONCE at the end
-        // through finish_consensus_bulk (one external sort, zero per-row index probes,
-        // sequential I/O — the HANDOFF-fold-lane design). The per-epoch merge fold and
-        // its backlog bound are bypassed; disk must hold the whole staged journal.
-        _bulkLane = string.Equals(Environment.GetEnvironmentVariable("LAPLACE_FOLD_LANE"), "bulk",
-            StringComparison.OrdinalIgnoreCase);
-        if (_bulkLane)
+        // LAPLACE_FOLD_LANE=terminal: stage every epoch to disk and fold ONCE at the
+        // end through finish_consensus_fold (sequential I/O, zero per-row index probes
+        // — the HANDOFF-fold-lane design). The per-epoch merge fold and its backlog
+        // bound are bypassed; disk must hold the whole staged journal. ("bulk" is the
+        // retired name for the same lane and stays accepted.)
+        var lane = Environment.GetEnvironmentVariable("LAPLACE_FOLD_LANE");
+        _terminalFold = string.Equals(lane, "terminal", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(lane, "bulk", StringComparison.OrdinalIgnoreCase);
+        if (_terminalFold)
             _log.LogInformation(
-                "bulk fold lane: epochs stage to disk and fold once at materialize (finish_consensus_bulk)");
+                "terminal fold: epochs stage to disk and fold once at materialize (finish_consensus_fold)");
         if (_partitions is < 1 or > 64)
             throw new ArgumentOutOfRangeException(nameof(foldWorkers), _partitions,
                 "fold workers must be in 1..64 (create_period_staging's partition bound)");
@@ -198,7 +200,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         await _stagingGate.WaitAsync(ct);
         try
         {
-            if (_maxFoldBacklog > 0 && !_bulkLane)
+            if (_maxFoldBacklog > 0 && !_terminalFold)
             {
                 bool throttled = false;
                 while (Volatile.Read(ref _epochsStaged) - Volatile.Read(ref _epochsFolded) >= _maxFoldBacklog)
@@ -267,7 +269,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 snapshot.Count / Math.Max(1e-3, stageSw.Elapsed.TotalSeconds),
                 staged - Volatile.Read(ref _epochsFolded));
 
-            if (!_bulkLane)
+            if (!_terminalFold)
             {
                 var prev = _foldChain;
                 _foldChain = ChainFoldAsync(prev, epoch);
@@ -391,24 +393,38 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     public async Task<long> MaterializeConsensusAsync(CancellationToken ct = default)
     {
         await FlushPeriodAsync(ct);
-        if (_bulkLane)
+        if (_terminalFold)
         {
+            // LAPLACE_FOLD_IMPL selects the lane inside the terminal fold:
+            // 'engine' (default, consensus_fold_partition in C) or 'sql' (the
+            // ordered-aggregate escape hatch and parity reference).
+            // LAPLACE_FOLD_RESUMABLE=1 runs the per-partition-COMMIT procedure:
+            // staging drops as the fold walks, and a re-run resumes mid-deposit.
+            string impl = Environment.GetEnvironmentVariable("LAPLACE_FOLD_IMPL") ?? "engine";
+            bool resumable = Environment.GetEnvironmentVariable("LAPLACE_FOLD_RESUMABLE") == "1";
             var sw = System.Diagnostics.Stopwatch.StartNew();
             await using var conn = await _ds.OpenConnectionAsync(ct);
             conn.Notice += (_, e) =>
-                _log.LogInformation("bulk fold: {Message}", e.Notice.MessageText);
+                _log.LogInformation("terminal fold: {Message}", e.Notice.MessageText);
             await using (var sub = conn.CreateCommand())
             {
                 sub.CommandText = "SET client_min_messages = 'log'";
                 await sub.ExecuteNonQueryAsync(ct);
             }
+            await using (var laneCmd = conn.CreateCommand())
+            {
+                laneCmd.CommandText = $"SET laplace.fold_lane = '{(impl == "sql" ? "sql" : "engine")}'";
+                await laneCmd.ExecuteNonQueryAsync(ct);
+            }
             await using var fin = conn.CreateCommand();
             fin.CommandTimeout = 0;
-            fin.CommandText = "SELECT laplace.finish_consensus_bulk()";
+            fin.CommandText = resumable
+                ? "CALL laplace.finish_consensus_fold_steps(NULL)"
+                : "SELECT laplace.finish_consensus_fold()";
             long n = (long)(await fin.ExecuteScalarAsync(ct) ?? 0L);
             Interlocked.Add(ref _foldedRelations, n);
             _log.LogInformation(
-                "bulk fold complete: {Relations:N0} consensus relations in {Sec:F0}s ({Rps:N0} rel/s)",
+                "terminal fold complete: {Relations:N0} consensus relations in {Sec:F0}s ({Rps:N0} rel/s)",
                 n, sw.Elapsed.TotalSeconds, n / Math.Max(1e-3, sw.Elapsed.TotalSeconds));
             return Interlocked.Read(ref _foldedRelations);
         }

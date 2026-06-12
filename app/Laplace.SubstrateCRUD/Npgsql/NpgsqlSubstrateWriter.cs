@@ -122,11 +122,13 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         var stagedAttIds  = new List<Hash128>();
         Span<double> coord = stackalloc double[4];
 
-        var referenced = new HashSet<Hash128>();
-        void Reference(Hash128 id)
+        // Referrer provenance: the proof's failure message names WHO referenced the
+        // missing id (role + unit), turning "decomposer bug somewhere" into a file:line.
+        var referenced = new Dictionary<Hash128, string>();
+        void Reference(Hash128 id, string role, string unit)
         {
             if (seenEntityArg.Contains(id) || _provenEntities.Contains(id) || seenEntity.Contains(id)) return;
-            referenced.Add(id);
+            if (!referenced.ContainsKey(id)) referenced.Add(id, $"{role} in {unit}");
         }
 
         foreach (var c in changes)
@@ -136,8 +138,8 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 if (_provenEntities.Contains(e.Id)) continue;
                 if (!seenEntity.Add(e.Id)) continue;
                 stage.AddEntity(e.Id, e.Tier, e.TypeId, e.FirstObservedBy);
-                Reference(e.TypeId);
-                if (e.FirstObservedBy is Hash128 fob) Reference(fob);
+                Reference(e.TypeId, $"entity {Convert.ToHexString(e.Id.ToBytes())} type_id", c.Metadata.SourceContentUnitName);
+                if (e.FirstObservedBy is Hash128 fob) Reference(fob, $"entity {Convert.ToHexString(e.Id.ToBytes())} first_observed_by", c.Metadata.SourceContentUnitName);
             }
         CheckpointEntities(stage, "after-entity-loop");
         foreach (var c in changes)
@@ -153,8 +155,8 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                                               : p.TrajectoryXyzm.AsSpan(),
                     p.NConstituents, p.AlignmentResidual, p.SourceDim, p.ObservedAtUnixUs);
                 stagedPhysIds.Add(p.Id);
-                Reference(p.EntityId);
-                Reference(p.SourceId);
+                Reference(p.EntityId, $"physicality {Convert.ToHexString(p.Id.ToBytes())} entity_id", c.Metadata.SourceContentUnitName);
+                Reference(p.SourceId, $"physicality {Convert.ToHexString(p.Id.ToBytes())} source_id", c.Metadata.SourceContentUnitName);
             }
         CheckpointEntities(stage, "after-physicality-loop");
         var attGamesDelta = new Dictionary<Hash128, (long Games, long MaxTsUs)>();
@@ -173,11 +175,12 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                     (short)a.Outcome,
                     a.LastObservedAtUnixUs, a.ObservationCount);
                 stagedAttIds.Add(a.Id);
-                Reference(a.SubjectId);
-                Reference(a.TypeId);
-                Reference(a.SourceId);
-                if (a.ObjectId  is Hash128 aObj) Reference(aObj);
-                if (a.ContextId is Hash128 aCtx) Reference(aCtx);
+                var attHex = Convert.ToHexString(a.Id.ToBytes());
+                Reference(a.SubjectId, $"attestation {attHex} subject_id", c.Metadata.SourceContentUnitName);
+                Reference(a.TypeId, $"attestation {attHex} type_id", c.Metadata.SourceContentUnitName);
+                Reference(a.SourceId, $"attestation {attHex} source_id", c.Metadata.SourceContentUnitName);
+                if (a.ObjectId  is Hash128 aObj) Reference(aObj, $"attestation {attHex} object_id", c.Metadata.SourceContentUnitName);
+                if (a.ContextId is Hash128 aCtx) Reference(aCtx, $"attestation {attHex} context_id", c.Metadata.SourceContentUnitName);
             }
         CheckpointEntities(stage, "after-attestation-loop");
 
@@ -224,7 +227,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
 
                 if (referenced.Count > 0)
                 {
-                    var refList = new List<Hash128>(referenced);
+                    var refList = new List<Hash128>(referenced.Keys);
                     var present = await EntitiesExistAsync(conn, refList, ct);
                     roundTrips++;
                     if (present.Count != refList.Count)
@@ -238,7 +241,8 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                                 missingCount++;
                             }
                         throw new SubstrateReferentialIntegrityException(
-                            missingCount, Convert.ToHexString(firstMissing.ToBytes()));
+                            missingCount, Convert.ToHexString(firstMissing.ToBytes()),
+                            referenced.GetValueOrDefault(firstMissing));
                     }
                     _provenEntities.AddRange(present);
                 }
