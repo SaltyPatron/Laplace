@@ -260,6 +260,114 @@ BEGIN
     RAISE NOTICE '✓ consensus_fold: engine lane under spill (3000 relations, 1 MB budget) row-identical to the sql lane';
 END $$;
 
+-- ── THE TRAJECTORY JOURNAL: walks fold without sorting ──────────────────────
+-- A walk row = (subject, type, layer-context) + vertices packed under the
+-- 212-bit law (object ref, games in run_length, zigzagged fp1e9 score in
+-- flags). Pinned: the walk fold's values equal one accumulate_games call (the
+-- period rule); seeds whose subjects have NO walks pass through the swap
+-- unchanged; the conservation receipt (games in == games folded) is enforced
+-- by the fold itself.
+DO $$
+DECLARE
+    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    src    bytea := laplace_hash128_blake3('test/walk/source');
+    rel    bytea := laplace_hash128_blake3('test/walk/reltype');
+    sW  bytea := laplace_hash128_blake3('test/walk/subject');
+    oW1 bytea := laplace_hash128_blake3('test/walk/object1');
+    oW2 bytea := laplace_hash128_blake3('test/walk/object2');
+    sP  bytea := laplace_hash128_blake3('test/walk/passthrough');
+    oP  bytea := laplace_hash128_blake3('test/walk/passobj');
+    phi    bigint := 30000000000;
+    sc1    bigint := 900000000;
+    sc2    bigint := -400000000;
+    ts timestamptz := '2026-01-01 00:00:00+00';
+    walk   bytea := ''::bytea;
+    v      geometry;
+    d      float8;
+    b      bytea;
+    i      int;
+    k      int;
+    eW     record;
+    n      bigint;
+BEGIN
+    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+        (src, 0, type_t, NULL), (rel, 0, type_t, src),
+        (sW, 0, type_t, src), (oW1, 0, type_t, src), (oW2, 0, type_t, src),
+        (sP, 0, type_t, src), (oP, 0, type_t, src);
+
+    -- a pass-through seed: a relation whose subject has no walks must survive
+    DELETE FROM consensus;
+    INSERT INTO consensus (id, subject_id, type_id, object_id,
+                           rating, rd, volatility, witness_count, last_observed_at)
+    VALUES (consensus_id(sP, rel, oP), sP, rel, oP,
+            1700000000000, 120000000000, 60000000, 5, ts);
+
+    -- pack two testimony vertices via the geometry pack, then serialize the
+    -- four vertex doubles little-endian (the fold reads raw double images)
+    FOR i IN 1..2 LOOP
+        v := public.laplace_mantissa_pack(
+                 CASE WHEN i = 1 THEN oW1 ELSE oW2 END, i, 1,
+                 64 + (((CASE WHEN i = 1 THEN sc1 ELSE sc2 END << 1)
+                        # (CASE WHEN i = 1 THEN sc1 ELSE sc2 END >> 63)) << 7));
+        FOR k IN 1..4 LOOP
+            d := CASE k WHEN 1 THEN public.ST_X(v) WHEN 2 THEN public.ST_Y(v)
+                        WHEN 3 THEN public.ST_Z(v) ELSE public.ST_M(v) END;
+            b := pg_catalog.float8send(d);
+            walk := walk || set_byte(set_byte(set_byte(set_byte(
+                            set_byte(set_byte(set_byte(set_byte(
+                                '\x0000000000000000'::bytea,
+                            0, get_byte(b, 7)), 1, get_byte(b, 6)),
+                            2, get_byte(b, 5)), 3, get_byte(b, 4)),
+                            4, get_byte(b, 3)), 5, get_byte(b, 2)),
+                            6, get_byte(b, 1)), 7, get_byte(b, 0));
+        END LOOP;
+    END LOOP;
+
+    PERFORM create_walk_staging(1);
+    EXECUTE format('INSERT INTO %I VALUES ($1, $2, NULL, $3, 2, 2, $4, $5)',
+                   'consensus_walk_staging_0')
+        USING sW, rel, phi, ts, walk;
+
+    n := finish_consensus_fold();
+    IF n <> 3 THEN
+        RAISE EXCEPTION 'FAIL(walks): % relations folded (want 3: 2 walked + 1 pass-through)', n;
+    END IF;
+
+    -- each walked relation = ONE period of one game from the neutral prior
+    SELECT * INTO eW FROM laplace_glicko2_accumulate_games(
+        glicko2_neutral_mu(), glicko2_initial_rd(), glicko2_initial_volatility(),
+        glicko2_neutral_mu(), phi, 1, sc1, glicko2_tau());
+    IF NOT EXISTS (
+        SELECT 1 FROM consensus
+        WHERE subject_id = sW AND object_id = oW1
+          AND rating = eW.rating AND rd = eW.rd AND volatility = eW.volatility
+          AND witness_count = 1) THEN
+        RAISE EXCEPTION 'FAIL(walks): walked relation 1 diverged from the accumulate_games expectation';
+    END IF;
+    SELECT * INTO eW FROM laplace_glicko2_accumulate_games(
+        glicko2_neutral_mu(), glicko2_initial_rd(), glicko2_initial_volatility(),
+        glicko2_neutral_mu(), phi, 1, sc2, glicko2_tau());
+    IF NOT EXISTS (
+        SELECT 1 FROM consensus
+        WHERE subject_id = sW AND object_id = oW2
+          AND rating = eW.rating AND rd = eW.rd AND volatility = eW.volatility
+          AND witness_count = 1) THEN
+        RAISE EXCEPTION 'FAIL(walks): walked relation 2 diverged (negative score path)';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM consensus
+        WHERE subject_id = sP AND object_id = oP
+          AND rating = 1700000000000 AND rd = 120000000000
+          AND witness_count = 5) THEN
+        RAISE EXCEPTION 'FAIL(walks): pass-through seed lost or altered by the swap';
+    END IF;
+    IF to_regclass('consensus_walk_staging_0') IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL(walks): walk journal not consumed';
+    END IF;
+
+    RAISE NOTICE '✓ consensus_fold: the trajectory journal folds without sorting — walk values equal one accumulate_games period (signed scores), pass-through seeds survive the swap, conservation enforced by the fold, journal consumed';
+END $$;
+
 -- ── mixed φ within one fold must refuse, in both lanes ──────────────────────
 DO $$
 DECLARE

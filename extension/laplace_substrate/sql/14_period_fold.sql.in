@@ -319,6 +319,48 @@ CREATE OR REPLACE FUNCTION consensus_fold_partition(
     AS 'MODULE_PATHNAME', 'pg_laplace_consensus_fold_partition'
     LANGUAGE C VOLATILE;
 
+-- ── THE TRAJECTORY JOURNAL (the walk lane) ──────────────────────────────────────
+-- Model testimony journals as WALKS under the trajectory law: one row per
+-- (subject, type, layer-context), vertices mantissa-packed (object reference +
+-- games + zigzagged score — the testimony-vertex payload, mantissa.h). The
+-- journal is subject-grouped by construction, so the fold needs NO global
+-- sort: per subject, merge its walks' objects in a vocab-bounded map, ONE
+-- Glicko period per relation (the period rule), emit. Partitioned by
+-- subject.lo %% nparts — the gather unit — NOT consensus_partition_of (which
+-- hashes the full identity; walks gather by subject alone).
+CREATE OR REPLACE FUNCTION create_walk_staging(p_partitions integer)
+    RETURNS void LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    p integer;
+BEGIN
+    IF p_partitions < 1 OR p_partitions > 64 THEN
+        RAISE EXCEPTION 'create_walk_staging: partitions must be 1..64';
+    END IF;
+    FOR p IN 0 .. p_partitions - 1 LOOP
+        EXECUTE format($t$
+            CREATE UNLOGGED TABLE IF NOT EXISTS %I (
+                subject_id  bytea       NOT NULL,
+                type_id     bytea       NOT NULL,
+                context_id  bytea,
+                phi         bigint      NOT NULL,
+                n_vertices  int         NOT NULL,
+                games_total bigint      NOT NULL,
+                last_ts     timestamptz NOT NULL,
+                walk        bytea       NOT NULL
+            )$t$, 'consensus_walk_staging_' || p);
+    END LOOP;
+END;
+$$;
+
+-- Fold one walk partition into consensus_next. The conservation receipt is in
+-- the LOG line: games read == games folded, every observation exactly once.
+CREATE OR REPLACE FUNCTION consensus_fold_walks(
+        p_partition integer, p_nparts integer, p_seed boolean)
+    RETURNS bigint
+    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_fold_walks'
+    LANGUAGE C VOLATILE;
+
 -- Fold ONE staged partition into consensus_next, by lane. Shared by the
 -- one-shot finish_consensus_fold and the resumable finish_consensus_fold_steps.
 -- lane 'engine' (default) = consensus_fold_partition; lane 'sql' = the ordered
@@ -478,6 +520,7 @@ CREATE OR REPLACE FUNCTION finish_consensus_fold()
     SET maintenance_work_mem = '4GB' AS $$
 DECLARE
     nparts  integer;
+    nwalk   integer;
     p       integer;
     lane    text;
     n_round bigint;
@@ -485,6 +528,13 @@ DECLARE
     fresh   boolean;
     t0      timestamptz := clock_timestamp();
 BEGIN
+    -- The walk journal (trajectory law) takes precedence: subject-grouped
+    -- walks fold without any global sort.
+    SELECT max(substring(c.relname FROM '_(\d+)$')::int) + 1 INTO nwalk
+    FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+    WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+      AND c.relname ~ '^consensus_walk_staging_\d+$';
+
     -- One fold per staged PARTITION, never one fold over everything: identity →
     -- partition is stable across epochs (the writer hashes the relation
     -- identity), so partitions fold independently and the temp envelope is
@@ -495,6 +545,42 @@ BEGIN
     FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
     WHERE ns.nspname = current_schema() AND c.relkind = 'r'
       AND c.relname ~ '^consensus_period_staging_e\d{4}_\d+$';
+    IF nwalk IS NOT NULL AND nparts IS NOT NULL THEN
+        RAISE EXCEPTION 'finish_consensus_fold: both walk and flat journals staged — fold one shape at a time';
+    END IF;
+
+    IF nwalk IS NOT NULL THEN
+        SELECT NOT EXISTS (SELECT 1 FROM consensus LIMIT 1) INTO fresh;
+        IF to_regclass(current_schema() || '.consensus_next') IS NOT NULL THEN
+            EXECUTE 'DROP TABLE consensus_next';
+        END IF;
+        CREATE TABLE consensus_next (
+            id               bytea,
+            subject_id       bytea,
+            type_id          bytea,
+            object_id        bytea,
+            rating           bigint,
+            rd               bigint,
+            volatility       bigint,
+            witness_count    bigint,
+            last_observed_at timestamptz
+        );
+        FOR p IN 0 .. nwalk - 1 LOOP
+            n_round := consensus_fold_walks(p, nwalk, NOT fresh);
+            n := n + n_round;
+            RAISE LOG 'terminal fold (walks): partition %/%: % relations folded (% cumulative) at %',
+                p + 1, nwalk, n_round, n, clock_timestamp() - t0;
+        END LOOP;
+        FOR p IN 0 .. nwalk - 1 LOOP
+            EXECUTE format('DROP TABLE %I', 'consensus_walk_staging_' || p);
+        END LOOP;
+        PERFORM consensus_fold_swap();
+        RAISE LOG 'terminal fold (walks): % relations materialized (% partition(s), %) in %',
+            n, nwalk, CASE WHEN fresh THEN 'fresh' ELSE 'seeded rebuild + swap' END,
+            clock_timestamp() - t0;
+        RETURN n;
+    END IF;
+
     IF nparts IS NULL THEN
         RETURN 0;
     END IF;
@@ -563,6 +649,13 @@ DECLARE
 BEGIN
     p_total := 0;
     PERFORM set_config('search_path', '@extschema@, public', true);
+    IF EXISTS (
+        SELECT 1 FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+        WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+          AND c.relname ~ '^consensus_walk_staging_\d+$')
+    THEN
+        RAISE EXCEPTION 'finish_consensus_fold_steps: walk journal staged — the walk fold is minutes, use finish_consensus_fold()';
+    END IF;
     resume := to_regclass(current_schema() || '.consensus_next') IS NOT NULL;
 
     -- Partitions fold ascending, so the highest staged suffix survives until

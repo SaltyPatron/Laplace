@@ -107,6 +107,25 @@ and a fold failure must not eat the recipe of an applied deposit. Repair lane:
 The C-side PK-less bulk fold above (radix sort in-engine, heap_multi_insert) remains the
 next rung if the SQL bulk lane's external sorts become the ceiling.
 
+## 2026-06-12 (final): THE TRAJECTORY JOURNAL — flat staging is deprecated
+
+User ruling, end of session: the flat staging journal (per-pair rows) is the wrong
+encoding — the invention's own sequence law applies to testimony. A subject's
+thresholded table read at one (plane, layer) is a WALK: an ordered sequence of object
+references with scores, the same shape as a sentence's constituency trajectory. The
+journal becomes trajectory rows (one per subject × plane × layer; ~2.8M rows ≈ 30-35 GB
+for TinyLlama vs 111 GB flat), vertices packed under the 212-bit mantissa law
+(engine/core/src/mantissa.c; testimony variant: id in X/Y/Z, quantized score in M).
+The fold's global sort dies — the journal is subject-grouped by construction; the fold
+is a per-subject gather + vocab-bounded merge + ONE Glicko per relation (the period
+rule), embarrassingly parallel over the vocabulary. Per-(plane, layer) provenance
+persists on every walk row. The flat-lane work below (chunk sort, k-way merge, BufFile
+spill) remains correct and parity-pinned for whatever still stages flat; the walk lane
+replaces it for model deposits. Build order: testimony vertex pack/unpack (engine core +
+geom SQL) → writer walk emission (tile output → packed walk rows) → walk fold (per-
+subject, batched Glicko, partition-parallel) → conservation receipt in the fold log
+(games read == games folded) → pins → TinyLlama redeposit through the walk lane.
+
 ## 2026-06-12: the engine lane landed — and the names changed
 
 The C lane shipped as `consensus_fold_engine.c` (one call per partition: table-AM staging

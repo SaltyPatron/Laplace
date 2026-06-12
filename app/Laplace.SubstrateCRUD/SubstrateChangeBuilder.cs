@@ -18,7 +18,7 @@ public sealed class SubstrateChangeBuilder
     private readonly HashSet<Hash128> _seenPhysicalities = new();
     private readonly Dictionary<Hash128, int> _attestationIndex = new();
     private readonly List<IntentStage> _intentStages = new();
-    private readonly List<AggregatedTile> _tiles = new();
+    private readonly List<TestimonyWalkRow> _walks = new();
 
     public SubstrateChangeBuilder(
         Hash128 sourceId,
@@ -97,15 +97,14 @@ public sealed class SubstrateChangeBuilder
     }
 
     /// <summary>
-    /// Attach a kernel tile of aggregated testimony. Duplicate pairs inside or
-    /// across tiles need no per-intent merge here — the consensus accumulator
-    /// merges identical relations under the same φ, summing games and scores
-    /// exactly as per-row attestations would.
+    /// Attach one testimony walk (the trajectory journal). Recurrence across
+    /// walks needs no merge here — the fold gathers per subject and merges
+    /// under the period rule.
     /// </summary>
-    public SubstrateChangeBuilder AddAggregatedTile(AggregatedTile tile)
+    public SubstrateChangeBuilder AddTestimonyWalk(TestimonyWalkRow walk)
     {
-        ArgumentNullException.ThrowIfNull(tile);
-        _tiles.Add(tile);
+        ArgumentNullException.ThrowIfNull(walk);
+        _walks.Add(walk);
         return this;
     }
 
@@ -161,8 +160,8 @@ public sealed class SubstrateChangeBuilder
         _intentStages.Clear();
         _contentStage = null;
 
-        var tiles = _tiles.ToImmutableArray();
-        _tiles.Clear();
+        var walks = _walks.ToImmutableArray();
+        _walks.Clear();
 
         return new SubstrateChange(
             entities, physicalities, attestations,
@@ -175,7 +174,7 @@ public sealed class SubstrateChangeBuilder
                 _inputUnitsConsumed,
                 _commitEpoch),
             stages,
-            tiles);
+            walks);
     }
 
     private static Hash128 ComputeIntentId(

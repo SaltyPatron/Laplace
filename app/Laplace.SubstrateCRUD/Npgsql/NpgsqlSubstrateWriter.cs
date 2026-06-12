@@ -72,11 +72,11 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         int entitiesAttempted = 0, physAttempted = 0, attAttempted = 0;
         for (int i = 0; i < changes.Count; i++)
         {
-            if (!changes[i].AggregatedTiles.IsDefaultOrEmpty)
+            if (!changes[i].TestimonyWalks.IsDefaultOrEmpty)
                 throw new InvalidOperationException(
-                    "aggregated tiles reached the evidence writer: tiles are the consensus-only "
-                    + "lane (the accumulating writer consumes and strips them); evidence-persisting "
-                    + "deposits emit AttestationRows at the decomposer");
+                    "testimony walks reached the evidence writer: walks are the consensus-only "
+                    + "journal (the accumulating writer journals and strips them); evidence-"
+                    + "persisting deposits emit AttestationRows at the decomposer");
             entitiesAttempted += changes[i].Entities.Length;
             physAttempted     += changes[i].Physicalities.Length;
             attAttempted      += changes[i].Attestations.Length;
