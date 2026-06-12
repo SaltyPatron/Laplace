@@ -169,10 +169,14 @@ int content_witness_batch_add(
         }
 
         hash128_t phys_id;
+        /* UNITS: physicality_id_compute takes the trajectory length in DOUBLES (m*4);
+         * intent_stage_add_physicality takes it in VERTICES (m). Passing m*4 there made
+         * the COPY writer read 32*(m*4) bytes from a 32*m buffer — the transient
+         * ContentWitnessBatchAdd AV, and 4x-vertex garbage trajectories when it survived. */
         physicality_id_compute(node.id, *source_id, node.coord, traj, m * 4, &phys_id);
         if (intent_stage_add_physicality(
                 stage, &phys_id, &node.id, source_id, 1,
-                node.coord, &node.hilbert, traj, (uint32_t)(m * 4),
+                node.coord, &node.hilbert, traj, (uint32_t)m,
                 (int32_t)m, 1, 0.0, 1, 0, now_us) != 0) {
             free(traj);
             tier_tree_free(tree);
