@@ -40,39 +40,12 @@ laplace_add_grammar(ts_grammar_julia      "${_TSG}/tree-sitter-julia/src")
 laplace_add_grammar(ts_grammar_kotlin     "${_TSG}/tree-sitter-kotlin/src")
 laplace_add_grammar(ts_grammar_php        "${_TSG}/tree-sitter-php/php/src")
 
-# --- grammars requiring parser.c generation at configure time ---
-# Idempotent: the execute_process blocks are no-ops when parser.c already exists.
-# On a fresh clone both will regenerate automatically before the build.
-
-# SQL: parser.c lives on gh-pages branch, not main.
-set(_SQL_SRC "${_TSG}/tree-sitter-sql/src")
-if(NOT EXISTS "${_SQL_SRC}/parser.c")
-    message(STATUS "tree-sitter-sql: fetching parser.c from origin/gh-pages")
-    execute_process(COMMAND git fetch --depth=1 origin gh-pages
-        WORKING_DIRECTORY "${_TSG}/tree-sitter-sql" OUTPUT_QUIET ERROR_QUIET)
-    execute_process(COMMAND git checkout origin/gh-pages -- src/parser.c src/scanner.c src/tree_sitter/
-        WORKING_DIRECTORY "${_TSG}/tree-sitter-sql" RESULT_VARIABLE _rc)
-    if(NOT _rc EQUAL 0)
-        message(FATAL_ERROR "tree-sitter-sql: failed to checkout gh-pages src/ (rc=${_rc}). "
-            "Ensure git can reach github.com or pre-generate with: "
-            "cd ${_TSG}/tree-sitter-sql && git fetch origin gh-pages && "
-            "git checkout origin/gh-pages -- src/parser.c src/scanner.c src/tree_sitter/")
-    endif()
-endif()
-laplace_add_grammar(ts_grammar_sql "${_SQL_SRC}")
-
-# Swift: no pre-generated parser.c; requires tree-sitter CLI.
-set(_SWIFT_SRC "${_TSG}/tree-sitter-swift/src")
-if(NOT EXISTS "${_SWIFT_SRC}/parser.c")
-    message(STATUS "tree-sitter-swift: running tree-sitter generate")
-    execute_process(COMMAND tree-sitter generate
-        WORKING_DIRECTORY "${_TSG}/tree-sitter-swift" RESULT_VARIABLE _rc)
-    if(NOT _rc EQUAL 0)
-        message(FATAL_ERROR "tree-sitter-swift: tree-sitter generate failed (rc=${_rc}). "
-            "Install tree-sitter-cli: npm install -g tree-sitter-cli")
-    endif()
-endif()
-laplace_add_grammar(ts_grammar_swift "${_SWIFT_SRC}")
+# --- grammars whose upstreams do not commit parser.c (sql: gh-pages only; swift: never) ---
+# Their generated C is vendored in generated/<name>/ — committed artifacts of a scripted
+# step, like engine/core/src/generated/. No network fetch, no tree-sitter CLI, on any
+# machine. Regeneration recipe (grammar bumps only): generated/README.md.
+laplace_add_grammar(ts_grammar_sql   "${CMAKE_CURRENT_SOURCE_DIR}/generated/sql")
+laplace_add_grammar(ts_grammar_swift "${CMAKE_CURRENT_SOURCE_DIR}/generated/swift")
 
 # --- HPC/compute grammars ---
 laplace_add_grammar(ts_grammar_cuda    "${_TSG}/tree-sitter-cuda/src")
