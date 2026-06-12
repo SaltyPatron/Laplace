@@ -27,6 +27,10 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "hash128_zero")]
     internal static partial void Hash128Zero(Hash128* outHash);
 
+    [LibraryImport(Library, EntryPoint = "laplace_testimony_pack_walk")]
+    internal static partial int LaplaceTestimonyPackWalk(
+        Hash128* objectIds, long* scoresFp1e9, ushort* games, nuint n, double* out4n);
+
     [LibraryImport(Library, EntryPoint = "laplace_score_fp")]
     internal static partial long LaplaceScoreFp(double v, double m);
 

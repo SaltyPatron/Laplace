@@ -9,24 +9,25 @@ public sealed record SubstrateChange(
     ImmutableArray<AttestationRow>  Attestations,
     SubstrateChangeMetadata         Metadata,
     ImmutableArray<IntentStage>     IntentStages = default,
-    ImmutableArray<AggregatedTile>  AggregatedTiles = default);
+    ImmutableArray<TestimonyWalkRow> TestimonyWalks = default);
 
 /// <summary>
-/// One kernel tile of aggregated token→token testimony, carrying exactly what
-/// adjudication uses: subject, object, score (games = 1 per pair), with φ
-/// derived ONCE per witness weight — no per-pair attestation ids, rows, or
-/// native crossings. Tiles exist only on the consensus-only deposit path
-/// (evidence-persisting deposits emit full AttestationRows at the decomposer);
-/// the consensus accumulator walks the arrays directly.
+/// THE TRAJECTORY JOURNAL: a subject's thresholded table read at one
+/// (plane, layer) is a WALK — vertices packed under the 212-bit trajectory law
+/// (object reference, games in run_length, zigzagged fp1e9 score in flags;
+/// Engine.Core TestimonyWalk.Pack). φ derives ONCE per witness weight. Walks
+/// exist only on the consensus-only deposit path; the writer journals them to
+/// walk staging and the terminal fold gathers per subject — no global sort,
+/// ONE Glicko period per relation (the period rule).
 /// </summary>
-public sealed record AggregatedTile(
+public sealed record TestimonyWalkRow(
+    Hash128   Subject,
     Hash128   TypeId,
     Hash128?  ContextId,
     long      PhiFp1e9,
-    Hash128[] Subjects,
-    Hash128[] Objects,
-    long[]    SumScoresFp1e9,
+    byte[]    PackedVertices,
     int       Count,
+    long      GamesTotal,
     long      ObservedAtUnixUs);
 
 public sealed record SubstrateChangeMetadata(

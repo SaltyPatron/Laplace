@@ -117,9 +117,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 continue;
             }
             foreach (var a in c.Attestations) Accumulate(a);
-            if (!c.AggregatedTiles.IsDefaultOrEmpty)
-                foreach (var t in c.AggregatedTiles) AccumulateTile(t);
+            if (!c.TestimonyWalks.IsDefaultOrEmpty)
+                foreach (var w in c.TestimonyWalks) BufferWalk(w);
         }
+
+        if (_walkBuffered >= WalkFlushRows)
+            await FlushWalksAsync(ct);
 
         if ((boundary && _accumulation.Count >= Math.Max(1, _stagingThreshold / 8))
             || _accumulation.Count >= _stagingThreshold)
@@ -144,12 +147,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     private IReadOnlyList<SubstrateChange> ForwardChanges(IReadOnlyList<SubstrateChange> changes)
     {
-        // Tiles never travel past the accumulator (the inner writer has no tile
+        // Walks never travel past the journal (the inner writer has no walk
         // surface); attestation rows forward only when evidence persists.
         bool anyToStrip = false;
         foreach (var c in changes)
         {
-            if ((!_persistEvidence && !c.Attestations.IsEmpty) || !c.AggregatedTiles.IsDefaultOrEmpty)
+            if ((!_persistEvidence && !c.Attestations.IsEmpty) || !c.TestimonyWalks.IsDefaultOrEmpty)
             {
                 anyToStrip = true;
                 break;
@@ -163,8 +166,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             var c = changes[i];
             if (!_persistEvidence && !c.Attestations.IsEmpty)
                 c = c with { Attestations = ImmutableArray<AttestationRow>.Empty };
-            if (!c.AggregatedTiles.IsDefaultOrEmpty)
-                c = c with { AggregatedTiles = ImmutableArray<AggregatedTile>.Empty };
+            if (!c.TestimonyWalks.IsDefaultOrEmpty)
+                c = c with { TestimonyWalks = ImmutableArray<TestimonyWalkRow>.Empty };
             stripped[i] = c;
         }
         return stripped;
@@ -201,43 +204,110 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         Interlocked.Add(ref _observationsAccumulated, a.ObservationCount);
     }
 
-    /// <summary>
-    /// The consensus-direct lane: one kernel tile lands in the accumulator with
-    /// zero per-pair objects, ids, or native crossings — same merge law as
-    /// <see cref="Accumulate"/> (φ guard, games/score sums, max timestamp).
-    /// </summary>
-    private void AccumulateTile(AggregatedTile t)
+    // ── THE TRAJECTORY JOURNAL ───────────────────────────────────────────────
+    // Walks bypass the accumulator entirely: they ARE the journal. Buffered per
+    // subject-partition (subject.lo % partitions — the fold's gather unit) and
+    // COPY'd to consensus_walk_staging_{p}. The terminal fold gathers per
+    // subject; recurrence merges there under the period rule.
+
+    private const int WalkFlushRows = 65_536;
+    private List<TestimonyWalkRow>[]? _walkBuffers;
+    private int _walkBuffered;
+    private bool _walkStagingCreated;
+
+    private void BufferWalk(TestimonyWalkRow w)
     {
-        _swapLock.EnterReadLock();
+        _walkBuffers ??= Enumerable.Range(0, _partitions)
+            .Select(_ => new List<TestimonyWalkRow>()).ToArray();
+        _walkBuffers[(int)(w.Subject.Lo % (ulong)_partitions)].Add(w);
+        _walkBuffered++;
+        Interlocked.Add(ref _observationsAccumulated, w.GamesTotal);
+    }
+
+    private async Task FlushWalksAsync(CancellationToken ct)
+    {
+        if (_walkBuffers is null || _walkBuffered == 0) return;
+        await _stagingGate.WaitAsync(ct);
         try
         {
-            for (int i = 0; i < t.Count; i++)
+            await using var conn = await _ds.OpenConnectionAsync(ct);
+            if (!_walkStagingCreated)
             {
-                var acc = _accumulation.GetOrAdd((t.Subjects[i], t.TypeId, t.Objects[i]),
-                                                 static _ => new Acc());
-                lock (acc)
-                {
-                    if (acc.Games == 0)
-                    {
-                        acc.Subject = t.Subjects[i]; acc.Type = t.TypeId; acc.Object = t.Objects[i];
-                        acc.PhiFp1e9 = t.PhiFp1e9;
-                    }
-                    else if (acc.PhiFp1e9 != t.PhiFp1e9)
-                    {
-                        throw new InvalidOperationException(
-                            $"accumulation invariant violated: relation observed with φ={t.PhiFp1e9} after φ={acc.PhiFp1e9} in the same period");
-                    }
-                    acc.Games++;
-                    acc.SumScoreFp1e9 = checked(acc.SumScoreFp1e9 + t.SumScoresFp1e9[i]);
-                    if (t.ObservedAtUnixUs > acc.MaxTsUnixUs) acc.MaxTsUnixUs = t.ObservedAtUnixUs;
-                }
+                await using var create = conn.CreateCommand();
+                create.CommandText = $"SELECT laplace.create_walk_staging({_partitions})";
+                await create.ExecuteNonQueryAsync(ct);
+                _walkStagingCreated = true;
             }
+            for (int p = 0; p < _partitions; p++)
+            {
+                var rows = _walkBuffers[p];
+                if (rows.Count == 0) continue;
+                await using var stream = await conn.BeginRawBinaryCopyAsync(
+                    $"COPY laplace.consensus_walk_staging_{p} "
+                    + "(subject_id, type_id, context_id, phi, n_vertices, games_total, last_ts, walk) "
+                    + "FROM STDIN (FORMAT BINARY)", ct);
+                WriteWalkRows(stream, rows, ct);
+                rows.Clear();
+            }
+            _walkBuffered = 0;
         }
         finally
         {
-            _swapLock.ExitReadLock();
+            _stagingGate.Release();
         }
-        Interlocked.Add(ref _observationsAccumulated, t.Count);
+    }
+
+    private static void WriteWalkRows(Stream stream, List<TestimonyWalkRow> rows, CancellationToken ct)
+    {
+        Span<byte> head = stackalloc byte[19];
+        "PGCOPY\n\xFF\r\n\0"u8.CopyTo(head);
+        BinaryPrimitives.WriteInt32BigEndian(head[11..], 0);
+        BinaryPrimitives.WriteInt32BigEndian(head[15..], 0);
+        stream.Write(head);
+
+        Span<byte> scratch = stackalloc byte[64];
+        foreach (var w in rows)
+        {
+            ct.ThrowIfCancellationRequested();
+            BinaryPrimitives.WriteInt16BigEndian(scratch, 8);
+            stream.Write(scratch[..2]);
+
+            WriteHashField(stream, scratch, w.Subject);
+            WriteHashField(stream, scratch, w.TypeId);
+            if (w.ContextId is { } ctx) WriteHashField(stream, scratch, ctx);
+            else { BinaryPrimitives.WriteInt32BigEndian(scratch, -1); stream.Write(scratch[..4]); }
+
+            BinaryPrimitives.WriteInt32BigEndian(scratch, 8);
+            BinaryPrimitives.WriteInt64BigEndian(scratch[4..], w.PhiFp1e9);
+            stream.Write(scratch[..12]);
+
+            BinaryPrimitives.WriteInt32BigEndian(scratch, 4);
+            BinaryPrimitives.WriteInt32BigEndian(scratch[4..], w.Count);
+            stream.Write(scratch[..8]);
+
+            BinaryPrimitives.WriteInt32BigEndian(scratch, 8);
+            BinaryPrimitives.WriteInt64BigEndian(scratch[4..], w.GamesTotal);
+            stream.Write(scratch[..12]);
+
+            // timestamptz: µs since 2000-01-01
+            BinaryPrimitives.WriteInt32BigEndian(scratch, 8);
+            BinaryPrimitives.WriteInt64BigEndian(scratch[4..],
+                w.ObservedAtUnixUs - 946_684_800_000_000L);
+            stream.Write(scratch[..12]);
+
+            BinaryPrimitives.WriteInt32BigEndian(scratch, w.PackedVertices.Length);
+            stream.Write(scratch[..4]);
+            stream.Write(w.PackedVertices);
+        }
+        BinaryPrimitives.WriteInt16BigEndian(scratch, -1);
+        stream.Write(scratch[..2]);
+    }
+
+    private static void WriteHashField(Stream stream, Span<byte> scratch, Hash128 h)
+    {
+        BinaryPrimitives.WriteInt32BigEndian(scratch, 16);
+        h.WriteBytes(scratch.Slice(4, 16));
+        stream.Write(scratch[..20]);
     }
 
     // The routing law: identity → staging partition, stable across epochs so the
@@ -444,6 +514,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     public async Task<long> MaterializeConsensusAsync(CancellationToken ct = default)
     {
+        await FlushWalksAsync(ct);
         await FlushPeriodAsync(ct);
         if (_terminalFold)
         {

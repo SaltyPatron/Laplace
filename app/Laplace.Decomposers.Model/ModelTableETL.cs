@@ -39,28 +39,44 @@ public sealed class ModelTableETL
         return _phiFp1e9;
     }
 
-    private AggregatedTile BuildTile(
-        Hash128 typeId, Hash128? ctx, int cnt,
+    /// <summary>
+    /// THE TRAJECTORY JOURNAL: slice one kernel tile's output into per-subject
+    /// walks (the kernel emits row-major, so a subject's objects are
+    /// consecutive) and pack each walk under the 212-bit vertex law. Emits the
+    /// walks into the builder; returns pairs emitted.
+    /// </summary>
+    private int EmitWalks(
+        SubstrateChangeBuilder b, Hash128 typeId, Hash128? ctx, int cnt,
         int[] oR, int[] oC, long[] oS,
         IReadOnlyList<Hash128> subj, IReadOnlyList<Hash128> obj,
         int leftBase, bool skipSelf)
     {
-        var subjects = new Hash128[cnt];
-        var objects  = new Hash128[cnt];
-        var sums     = new long[cnt];
-        int k = 0;
-        for (int e = 0; e < cnt; e++)
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
+        int emitted = 0;
+        int e = 0;
+        var objects = new List<Hash128>(256);
+        var scores  = new List<long>(256);
+        while (e < cnt)
         {
-            int i = oR[e], j = oC[e];
-            if (skipSelf && i == j) continue;
-            subjects[k] = subj[leftBase + i];
-            objects[k]  = obj[j];
-            sums[k]     = oS[e];
-            k++;
+            int row = oR[e];
+            objects.Clear(); scores.Clear();
+            for (; e < cnt && oR[e] == row; e++)
+            {
+                if (skipSelf && row == oC[e]) continue;
+                objects.Add(obj[oC[e]]);
+                scores.Add(oS[e]);
+            }
+            if (objects.Count == 0) continue;
+            var subject = subj[leftBase + row];
+            long phi = PhiFp1e9(subject, typeId, objects[0], ctx, scores[0]);
+            b.AddTestimonyWalk(new TestimonyWalkRow(
+                subject, typeId, ctx, phi,
+                TestimonyWalk.Pack(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(objects),
+                                   System.Runtime.InteropServices.CollectionsMarshal.AsSpan(scores)),
+                objects.Count, objects.Count, nowUs));
+            emitted += objects.Count;
         }
-        long phi = k > 0 ? PhiFp1e9(subjects[0], typeId, objects[0], ctx, sums[0]) : 0;
-        return new AggregatedTile(typeId, ctx, phi, subjects, objects, sums, k,
-                                  DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000);
+        return emitted;
     }
 
     private readonly LlamaRecipeExtractor.RecipeInfo _recipe;
@@ -345,10 +361,9 @@ public sealed class ModelTableETL
                     if (cnt == 0) continue;
                     if (!EvidenceMode)
                     {
-                        var tile = BuildTile(typeId, ctx, cnt, oR, oC, oS, ents, ents, 0, false);
-                        b.AddAggregatedTile(tile);
-                        _strands += tile.Count;
-                        inChunk += tile.Count;
+                        int emitted = EmitWalks(b, typeId, ctx, cnt, oR, oC, oS, ents, ents, 0, false);
+                        _strands += emitted;
+                        inChunk += emitted;
                         if (inChunk >= RowsPerChange)
                         {
                             yield return b.SetInputUnitsConsumed(inChunk).Build();
@@ -402,11 +417,9 @@ public sealed class ModelTableETL
             if (cnt == 0) continue;
             if (!EvidenceMode)
             {
-                var tile = BuildTile(typeId, ctx, cnt, oR, oC, oS, subj, obj, leftBase, selfPair);
-                if (tile.Count == 0) continue;
-                b.AddAggregatedTile(tile);
-                _strands += tile.Count;
-                inChunk += tile.Count;
+                int emitted = EmitWalks(b, typeId, ctx, cnt, oR, oC, oS, subj, obj, leftBase, selfPair);
+                _strands += emitted;
+                inChunk += emitted;
                 if (inChunk >= RowsPerChange)
                 {
                     yield return b.SetInputUnitsConsumed(inChunk).Build();

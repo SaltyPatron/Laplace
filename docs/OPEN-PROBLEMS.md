@@ -87,8 +87,28 @@ already runs at 1–4M rel/s.
 table-AM reads, chunk sort on the 48-byte identity preimage, k-way merge, shared fold math
 via `consensus_fold_math.h`, multi-insert; `finish_consensus_fold` dispatches lanes via
 `laplace.fold_lane`, `finish_consensus_fold_steps` is the per-partition-COMMIT resumable
-variant). Parity regress-pinned (`consensus_fold`). At-scale rel/s measurement: pending the
-TinyLlama redeposit into the primary.
+variant). Parity regress-pinned (`consensus_fold`). Same day: THE PERIOD RULE (one fold =
+one rating period; flush epochs are RAM quanta, never Glicko periods — consensus values
+are knob-independent now) and the tile lane (kernel arrays → accumulator; no per-pair
+P/Invokes/ids/rows on consensus-only deposits).
+
+**2026-06-12 (later) — THE TRAJECTORY JOURNAL supersedes flat staging (user ruling).**
+The flat journal ballooned (1.1B rows × 104B ≈ 111 GB, repeating four type ids ~18 GB, one
+φ ~9 GB, and full 16-byte token ids where a 32k vocabulary lives) and forced a global
+sort the data never needed. The invention already contains the encoding law: testimony is
+WALKS — a subject's thresholded reads at one (plane, layer) are an ordered sequence of
+object references, exactly like a sentence's constituents. Journal = trajectory rows
+(one per subject × plane × layer, ~2.8M rows ≈ 30-35 GB for TinyLlama), vertices
+mantissa-packed under the 212-bit law (id in X/Y/Z mantissas; M carries the quantized
+score — the testimony-vertex variant of `laplace_mantissa_pack`). Consequences: the
+fold's global sort DIES (the journal is subject-grouped by construction; fold = per-
+subject gather + vocab-bounded merge + one Glicko per relation, embarrassingly parallel
+over the vocabulary); per-(plane, layer) provenance persists on every walk row (feeds
+head characterization); model and corpus testimony become the same substrate object.
+Measured on the flat lane before the ruling: engine fold ≈ 70k rel/s single-threaded
+(period rule lifted writes 244→428 MB/min; remaining wall = fixed-point Glicko unit cost
+— batching rides the walk-fold rebuild). Target after the stack: a 2 GB model deposited
+end-to-end in ~15 min.
 
 Every 2026-06-07 query number was taken on the slow tier. Levers, each independent, multiplicative, and either built or planned:
 - **SPI offload of walks** — the compiled cascade (`astar_path_raw`, generate_tree/greedy) exists in the installed DLLs; new query surfaces (collocate walks, hypothesis scans) should route through C+SPI like it does (10–100× on traversal).
