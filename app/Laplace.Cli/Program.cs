@@ -1271,8 +1271,10 @@ internal static class Program
         }
         Console.WriteLine($"  operators projected + factored in {swOps.Elapsed.TotalSeconds:F1}s: "
             + $"ATTENDS gaps ranks [{string.Join(",", fAttnByGap.Select(f => f.Rank))}] "
-            + $"(resid [{string.Join(",", fAttnByGap.Select(f => f.SampleResidual.ToString("F3")))}]), "
-            + $"OV rank {fOv.Rank} (resid {fOv.SampleResidual:F3}), FFN rank {fFfn.Rank} (resid {fFfn.SampleResidual:F3})");
+            + $"(resid [{string.Join(",", fAttnByGap.Select(f => f.SampleResidual.ToString("F3")))}], "
+            + $"s0 [{string.Join(",", fAttnByGap.Select(f => f.SpectralNorm.ToString("F1")))}]), "
+            + $"OV rank {fOv.Rank} (resid {fOv.SampleResidual:F3}, s0 {fOv.SpectralNorm:F1}), "
+            + $"FFN rank {fFfn.Rank} (resid {fFfn.SampleResidual:F3}, s0 {fFfn.SpectralNorm:F1})");
 
         // Layer assignment: gap g → layer g (clamped at maxGap; deeper layers share
         // the longest gap, scaled so each shared group sums to one operator). OV/FFN
@@ -1280,8 +1282,14 @@ internal static class Program
         int GapForLayer(int l) => Math.Min(l + 1, maxGap);
         var gapGroupSize = new int[maxGap + 1];
         for (int l = 0; l < nLayers; l++) gapGroupSize[GapForLayer(l)]++;
-        double AttnScale(int l) => 1.0 / Math.Sqrt(Math.Max(1, gapGroupSize[GapForLayer(l)]));
-        double layerScale = 1.0 / Math.Sqrt(Math.Max(1, nLayers));
+        // Gains calibrate spectral-norm-1 operators against the residual stream
+        // (both halves of a composed pair carry the scale, so the operator gets
+        // gain²). Calibrated by scripts/foundry-probe.py depth probe: the prompt
+        // embedding must survive all layers while operator structure accrues.
+        double attnGain  = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_ATTN_GAIN", 1.0);
+        double residGain = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RESID_GAIN", 1.0);
+        double AttnScale(int l) => attnGain / Math.Sqrt(Math.Max(1, gapGroupSize[GapForLayer(l)]));
+        double layerScale = residGain / Math.Sqrt(Math.Max(1, nLayers));
         // The gate reads only the bias channel; after RMSNorm the bias component is
         // ≈ √(d/2), so gateCol·√(d/2) = GateZ lands SiLU in its near-linear region,
         // and the up factor is pre-divided by SiLU(GateZ) to neutralize the gain.

@@ -294,13 +294,20 @@ internal static class FoundryExport
         return binary;
     }
 
-    internal sealed record Factors(float[] Left, float[] Right, int Rank, int Dim, double SampleResidual);
+    internal sealed record Factors(float[] Left, float[] Right, int Rank, int Dim, double SampleResidual, double SpectralNorm);
 
     // Factor M ≈ Leftᵀ·Right with Left/Right [rankCap × d] rows = √Sᵣ·uᵣᵀ / √Sᵣ·vᵣᵀ.
     // transpose=true factors Mᵀ instead (for operators whose composed orientation
     // is Wouter·Winner, e.g. Wo·Wv and Wdown·Wup). The native kernel computes the
     // FULL SVD (its kmax is buffer capacity, required ≥ min(m,n)) and truncates by
     // rel_err_tol; the mold's rank cap is applied here, keeping the strongest modes.
+    //
+    // Factors are SPECTRALLY NORMALIZED (divided by √s₀ each, so the composed
+    // operator is M/s₀ with spectral norm 1). Plane normalization bounds edge
+    // weights, not ‖EᵀAE‖₂ — unnormalized, one layer's residual add is s₀ (~10²)
+    // times the stream and the forward pass power-iterates onto the dominant
+    // eigendirection, erasing the prompt (measured: paris rank 267→18,559 after
+    // one layer). The layer scales in the fill are the entire depth budget.
     internal static Factors Factor(double[] m, int d, int rankCap, double relTol, bool transpose)
     {
         var a = new float[(long)d * d];
@@ -321,11 +328,12 @@ internal static class FoundryExport
         if (rc != 0) throw new InvalidOperationException($"tensor_svd_truncate rc={rc} (d={d})");
         int k = Math.Min((int)outRank, rankCap);
 
+        double s0 = k > 0 && s[0] > 0f ? s[0] : 1.0;
         var left = new float[(long)k * d];
         var right = new float[(long)k * d];
         for (int r = 0; r < k; r++)
         {
-            float sq = MathF.Sqrt(Math.Max(0f, s[r]));
+            float sq = MathF.Sqrt((float)(Math.Max(0f, s[r]) / s0));
             for (int j = 0; j < d; j++)
             {
                 left[(long)r * d + j] = sq * u[(long)j * d + r];
@@ -343,12 +351,12 @@ internal static class FoundryExport
             int j = (int)(Next(ref rng) % (ulong)d);
             double approx = 0;
             for (int r = 0; r < k; r++) approx += (double)left[(long)r * d + i] * right[(long)r * d + j];
-            double exact = a[(long)i * d + j];
+            double exact = a[(long)i * d + j] / s0;
             num += (exact - approx) * (exact - approx);
             den += exact * exact;
         }
         double resid = den > 0 ? Math.Sqrt(num / den) : 0.0;
-        return new Factors(left, right, k, d, resid);
+        return new Factors(left, right, k, d, resid, s0);
     }
 
     // ── mold tensor fills ─────────────────────────────────────────────────────
