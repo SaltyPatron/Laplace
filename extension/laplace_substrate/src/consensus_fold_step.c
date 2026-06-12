@@ -1,18 +1,19 @@
 /*
- * consensus_bulk.c — the PK-less bulk fold lane (OPEN-PROBLEMS §11, HANDOFF-fold-lane).
+ * consensus_fold_step.c — the consensus_fold ordered aggregate, the SQL lane
+ * of the terminal fold (OPEN-PROBLEMS §11, HANDOFF-fold-lane).
  *
  * The merge fold pays 2 random index probes per relation against a consensus
- * working set that exceeds RAM, re-touched 3-4x across Glicko periods. This lane
- * replaces probes with one external sort: all staged epochs UNION the existing
- * consensus rows (as period-0 seeds), GROUP BY relation identity with the epochs
- * folded IN ORDER through this aggregate — one fmgr transition per (relation,
- * period partial), zero per-row index probes, sequential I/O end to end. The
- * result lands in a fresh heap whose PK is built once, then atomically swapped
- * in (finish_consensus_bulk, 14_period_fold.sql.in). Production indexes on the
- * live table are never dropped or degraded; readers see the old consensus until
- * the swap commits.
+ * working set that exceeds RAM, re-touched 3-4x across Glicko periods. The
+ * terminal fold replaces probes with one external sort: all staged epochs
+ * UNION the existing consensus rows (as period-0 seeds), GROUP BY relation
+ * identity with the epochs folded IN ORDER through this aggregate — one fmgr
+ * transition per (relation, period partial), zero per-row index probes,
+ * sequential I/O end to end. The result lands in a fresh heap whose PK is
+ * built once, then atomically swapped in (finish_consensus_fold,
+ * 14_period_fold.sql.in). Production indexes on the live table are never
+ * dropped or degraded; readers see the old consensus until the swap commits.
  *
- * Laws carried over from the merge lane (bit-identical by construction):
+ * Invariants carried over from the merge lane (bit-identical by construction):
  *   - epochs fold strictly in order (ORDER BY inside the aggregate call);
  *   - one φ per relation per period (the per-(relation,epoch) pre-merge guards
  *     mixed φ before rows reach this aggregate; a differing φ across epochs is
@@ -29,19 +30,17 @@
 
 #include "laplace/core/glicko2.h"
 
-/* The neutral prior, fp 1e9 — MUST match 13_mu_law.sql.in (glicko2_neutral_mu /
- * glicko2_initial_rd / glicko2_initial_volatility); the regress lane-parity pin
- * exists to catch drift between these and the SQL constants. */
-#define CONSENSUS_BULK_NEUTRAL_MU         INT64CONST(1500000000000)
-#define CONSENSUS_BULK_INITIAL_RD         INT64CONST(350000000000)
-#define CONSENSUS_BULK_INITIAL_VOLATILITY INT64CONST(60000000)
+/* Constants and the partial-application math are shared with the engine lane
+ * (consensus_fold_engine.c) via consensus_fold_math.h — lane drift breaks the
+ * regress parity pin. */
+#include "consensus_fold_math.h"
 
 typedef struct {
     bool            seeded;      /* saw the period-0 seed row (existing consensus) */
     bool            any;         /* state holds at least one input                 */
     glicko2_state_t st;
     int64_t         witness_count;
-} ConsensusBulkFoldState;
+} ConsensusFoldState;
 
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_fold_step);
 
@@ -59,7 +58,7 @@ Datum
 pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
 {
     MemoryContext           aggcontext;
-    ConsensusBulkFoldState* state;
+    ConsensusFoldState* state;
     bool                    is_seed;
     int64_t                 games;
 
@@ -67,10 +66,10 @@ pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
         elog(ERROR, "consensus_fold_step called outside aggregate context");
 
     if (PG_ARGISNULL(0)) {
-        state = (ConsensusBulkFoldState*)
-            MemoryContextAllocZero(aggcontext, sizeof(ConsensusBulkFoldState));
+        state = (ConsensusFoldState*)
+            MemoryContextAllocZero(aggcontext, sizeof(ConsensusFoldState));
     } else {
-        state = (ConsensusBulkFoldState*) PG_GETARG_POINTER(0);
+        state = (ConsensusFoldState*) PG_GETARG_POINTER(0);
     }
 
     is_seed = PG_GETARG_BOOL(1);
@@ -98,7 +97,6 @@ pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
         int64_t phi       = PG_GETARG_INT64(5);
         int64_t tau       = PG_ARGISNULL(8) ? LAPLACE_GLICKO2_DEFAULT_TAU
                                             : PG_GETARG_INT64(8);
-        int64_t q, rem, i;
 
         if (games <= 0)
             ereport(ERROR,
@@ -112,28 +110,19 @@ pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
 
         if (!state->any) {
             glicko2_init(&state->st,
-                         CONSENSUS_BULK_NEUTRAL_MU,
-                         CONSENSUS_BULK_INITIAL_RD,
-                         CONSENSUS_BULK_INITIAL_VOLATILITY);
+                         CONSENSUS_FOLD_NEUTRAL_MU,
+                         CONSENSUS_FOLD_INITIAL_RD,
+                         CONSENSUS_FOLD_INITIAL_VOLATILITY);
             state->witness_count = 0;
             state->any = true;
         }
 
-        /* The exact observation split of pg_laplace_glicko2_accumulate_games. */
+        /* The exact observation split of pg_laplace_glicko2_accumulate_games —
+         * the math itself lives in consensus_fold_math.h, shared with the
+         * engine lane. */
         obs = (glicko2_observation_t*)
             palloc(sizeof(glicko2_observation_t) * (Size) games);
-        q   = sum_score / games;
-        rem = sum_score - q * (games - 1);
-        for (i = 0; i < games - 1; i++) {
-            obs[i].opponent_rating = CONSENSUS_BULK_NEUTRAL_MU;
-            obs[i].opponent_rd     = phi;
-            obs[i].score           = q;
-        }
-        obs[games - 1].opponent_rating = CONSENSUS_BULK_NEUTRAL_MU;
-        obs[games - 1].opponent_rd     = phi;
-        obs[games - 1].score           = rem;
-
-        glicko2_update_period(&state->st, obs, (size_t) games, tau, 0);
+        consensus_fold_apply_partial(&state->st, phi, games, sum_score, tau, obs);
         pfree(obs);
 
         state->witness_count += games;
@@ -147,7 +136,7 @@ PG_FUNCTION_INFO_V1(pg_laplace_consensus_fold_final);
 Datum
 pg_laplace_consensus_fold_final(PG_FUNCTION_ARGS)
 {
-    ConsensusBulkFoldState* state;
+    ConsensusFoldState* state;
     TupleDesc               tupdesc;
     Datum                   values[4];
     bool                    nulls[4] = { false, false, false, false };
@@ -155,7 +144,7 @@ pg_laplace_consensus_fold_final(PG_FUNCTION_ARGS)
 
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
-    state = (ConsensusBulkFoldState*) PG_GETARG_POINTER(0);
+    state = (ConsensusFoldState*) PG_GETARG_POINTER(0);
     if (!state->any)
         PG_RETURN_NULL();
 

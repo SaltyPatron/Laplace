@@ -1,0 +1,264 @@
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS laplace_geom;
+CREATE EXTENSION IF NOT EXISTS laplace_substrate;
+
+-- Lane-parity pin: the terminal fold (finish_consensus_fold) is an OPTIMIZATION
+-- of the merge fold, never a semantics change — and its two lanes (the 'sql'
+-- ordered aggregate and the 'engine' chunk-sort/merge in C) must be int64-
+-- identical to each other and to the merge fold, in both the fresh and the
+-- incremental (seeded rebuild + swap) paths. Rows are placed by
+-- consensus_partition_of — the SQL twin of the writer's PartitionOf — because
+-- the per-partition fold routes seeds with it; a fixture that hand-placed rows
+-- elsewhere would be staging input no real writer can produce.
+
+BEGIN;
+SET search_path = laplace, public;
+
+DO $$
+DECLARE
+    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    src    bytea := laplace_hash128_blake3('test/fold/source');
+    rel    bytea := laplace_hash128_blake3('test/fold/reltype');
+    sA bytea := laplace_hash128_blake3('test/fold/subjectA');
+    oA bytea := laplace_hash128_blake3('test/fold/objectA');
+    sB bytea := laplace_hash128_blake3('test/fold/subjectB');
+    oB bytea := laplace_hash128_blake3('test/fold/objectB');
+    sC bytea := laplace_hash128_blake3('test/fold/subjectC');
+    oC bytea := laplace_hash128_blake3('test/fold/objectC');
+    sD bytea := laplace_hash128_blake3('test/fold/subjectD');
+    phi    bigint := 30000000000;
+    s_conf bigint := 900000000;
+    s_ref  bigint := 100000000;
+    ts timestamptz := '2026-01-01 00:00:00+00';
+    mA_r bigint; mA_rd bigint; mA_v bigint; mA_wc bigint;
+    mB_r bigint; mB_rd bigint; mB_v bigint; mB_wc bigint;
+    mD_r bigint; mD_rd bigint; mD_v bigint; mD_wc bigint;
+    bA_r bigint; bA_rd bigint; bA_v bigint; bA_wc bigint;
+    bB_r bigint; bB_rd bigint; bB_v bigint; bB_wc bigint;
+    xA_r bigint; xA_rd bigint; xA_v bigint; xA_wc bigint;
+    eA   record;
+    lane text;
+    n bigint;
+BEGIN
+    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+        (src, 0, type_t, NULL), (rel, 0, type_t, src),
+        (sA, 0, type_t, src), (oA, 0, type_t, src),
+        (sB, 0, type_t, src), (oB, 0, type_t, src),
+        (sC, 0, type_t, src), (oC, 0, type_t, src),
+        (sD, 0, type_t, src);
+
+    -- ── MERGE LANE over two epochs (recurrence on A; D carries a NULL object) ─
+    PERFORM create_period_staging(2, 1);
+    EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,2,$5*2,$6)', period_staging_table(1, 0))
+        USING sA, rel, oA, phi, s_conf, ts;
+    EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,3,$5*3,$6)', period_staging_table(1, 1))
+        USING sB, rel, oB, phi, s_ref, ts;
+    EXECUTE format('INSERT INTO %I VALUES ($1,$2,NULL,$3,2,$4*2,$5)',
+                   period_staging_table(1, consensus_partition_of(sD, rel, NULL, 2)))
+        USING sD, rel, phi, s_ref, ts;
+    PERFORM create_period_staging(2, 2);
+    EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,5,$5*5,$6)', period_staging_table(2, 0))
+        USING sA, rel, oA, phi, s_conf, ts;
+    PERFORM materialize_period_partition(period_staging_table(1, 0));
+    PERFORM materialize_period_partition(period_staging_table(1, 1));
+    PERFORM materialize_period_partition(period_staging_table(2, 0));
+    PERFORM materialize_period_partition(period_staging_table(2, 1));
+    SELECT rating, rd, volatility, witness_count INTO mA_r, mA_rd, mA_v, mA_wc
+        FROM consensus WHERE subject_id = sA;
+    SELECT rating, rd, volatility, witness_count INTO mB_r, mB_rd, mB_v, mB_wc
+        FROM consensus WHERE subject_id = sB;
+    SELECT rating, rd, volatility, witness_count INTO mD_r, mD_rd, mD_v, mD_wc
+        FROM consensus WHERE subject_id = sD;
+
+    -- ── BOTH terminal-fold lanes, fresh + incremental, against the merge lane ─
+    FOREACH lane IN ARRAY ARRAY['sql', 'engine'] LOOP
+        PERFORM set_config('laplace.fold_lane', lane, true);
+        DELETE FROM consensus WHERE subject_id IN (sA, sB, sC, sD);
+
+        -- fresh path: identical staged input, one terminal fold
+        PERFORM create_period_staging(2, 1);
+        EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,2,$5*2,$6)',
+                       period_staging_table(1, consensus_partition_of(sA, rel, oA, 2)))
+            USING sA, rel, oA, phi, s_conf, ts;
+        EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,3,$5*3,$6)',
+                       period_staging_table(1, consensus_partition_of(sB, rel, oB, 2)))
+            USING sB, rel, oB, phi, s_ref, ts;
+        EXECUTE format('INSERT INTO %I VALUES ($1,$2,NULL,$3,2,$4*2,$5)',
+                       period_staging_table(1, consensus_partition_of(sD, rel, NULL, 2)))
+            USING sD, rel, phi, s_ref, ts;
+        PERFORM create_period_staging(2, 2);
+        EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,5,$5*5,$6)',
+                       period_staging_table(2, consensus_partition_of(sA, rel, oA, 2)))
+            USING sA, rel, oA, phi, s_conf, ts;
+        n := finish_consensus_fold();
+        IF n <> 3 THEN
+            RAISE EXCEPTION 'FAIL(%): fresh terminal fold materialized % relations (want 3)', lane, n;
+        END IF;
+        SELECT rating, rd, volatility, witness_count INTO bA_r, bA_rd, bA_v, bA_wc
+            FROM consensus WHERE subject_id = sA;
+        SELECT rating, rd, volatility, witness_count INTO bB_r, bB_rd, bB_v, bB_wc
+            FROM consensus WHERE subject_id = sB;
+
+        IF bA_r <> mA_r OR bA_rd <> mA_rd OR bA_v <> mA_v OR bA_wc <> mA_wc
+        OR bB_r <> mB_r OR bB_rd <> mB_rd OR bB_v <> mB_v OR bB_wc <> mB_wc THEN
+            RAISE EXCEPTION 'FAIL(%): fresh terminal fold diverged from the merge lane '
+                '(A % % % % vs % % % %; B % % % % vs % % % %)', lane,
+                bA_r, bA_rd, bA_v, bA_wc, mA_r, mA_rd, mA_v, mA_wc,
+                bB_r, bB_rd, bB_v, bB_wc, mB_r, mB_rd, mB_v, mB_wc;
+        END IF;
+        IF NOT EXISTS (
+            SELECT 1 FROM consensus
+            WHERE subject_id = sD AND object_id IS NULL
+              AND rating = mD_r AND rd = mD_rd AND volatility = mD_v
+              AND witness_count = mD_wc) THEN
+            RAISE EXCEPTION 'FAIL(%): NULL-object relation diverged from the merge lane', lane;
+        END IF;
+
+        IF to_regclass(period_staging_table(1, 0)) IS NOT NULL
+        OR to_regclass(period_staging_table(2, 0)) IS NOT NULL THEN
+            RAISE EXCEPTION 'FAIL(%): terminal fold did not consume its staging', lane;
+        END IF;
+
+        -- incremental path (seeded rebuild + swap): A advances by one more
+        -- period; C is brand new; B must pass through unchanged.
+        PERFORM create_period_staging(2, 3);
+        EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,1,$5,$6)',
+                       period_staging_table(3, consensus_partition_of(sA, rel, oA, 2)))
+            USING sA, rel, oA, phi, s_conf, ts;
+        EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,4,$5*4,$6)',
+                       period_staging_table(3, consensus_partition_of(sC, rel, oC, 2)))
+            USING sC, rel, oC, phi, s_conf, ts;
+        n := finish_consensus_fold();
+        IF n <> 4 THEN
+            RAISE EXCEPTION 'FAIL(%): incremental terminal fold materialized % relations (want 4)', lane, n;
+        END IF;
+
+        -- Expected A = one merge-lane period applied on the seed state.
+        SELECT * INTO eA FROM laplace_glicko2_accumulate_games(
+            bA_r, bA_rd, bA_v, glicko2_neutral_mu(), phi, 1, s_conf, glicko2_tau());
+        SELECT rating, rd, volatility, witness_count INTO xA_r, xA_rd, xA_v, xA_wc
+            FROM consensus WHERE subject_id = sA;
+        IF xA_r <> eA.rating OR xA_rd <> eA.rd OR xA_v <> eA.volatility OR xA_wc <> bA_wc + 1 THEN
+            RAISE EXCEPTION 'FAIL(%): incremental terminal fold diverged on the seeded relation '
+                '(% % % % vs expected % % % %)', lane,
+                xA_r, xA_rd, xA_v, xA_wc, eA.rating, eA.rd, eA.volatility, bA_wc + 1;
+        END IF;
+        SELECT rating, rd, volatility, witness_count INTO xA_r, xA_rd, xA_v, xA_wc
+            FROM consensus WHERE subject_id = sB;
+        IF xA_r <> bB_r OR xA_rd <> bB_rd OR xA_v <> bB_v OR xA_wc <> bB_wc THEN
+            RAISE EXCEPTION 'FAIL(%): untouched relation did not pass through the swap unchanged', lane;
+        END IF;
+        IF (SELECT count(*) FROM consensus WHERE subject_id = sC) <> 1 THEN
+            RAISE EXCEPTION 'FAIL(%): new relation missing after incremental terminal fold', lane;
+        END IF;
+    END LOOP;
+
+    RAISE NOTICE '✓ consensus_fold: both terminal-fold lanes int64-identical to the merge lane (fresh, incremental, NULL object); staging consumed; swap passes untouched rows through';
+END $$;
+
+-- ── engine lane under spill: many relations, tiny memory budget ─────────────
+-- The engine lane sorts in bounded chunks and k-way merges spilled runs; the
+-- result must equal the sql lane's on the same staged input. 3000 relations ×
+-- 2 epochs with fold_mem_mb=1 forces multiple runs (the arena floor is 1024
+-- rows), so a relation's epochs meet across run boundaries.
+DO $$
+DECLARE
+    rel  bytea := laplace_hash128_blake3('test/fold/spill/reltype');
+    phi  bigint := 30000000000;
+    ts   timestamptz := '2026-01-01 00:00:00+00';
+    lane text;
+    n bigint;
+BEGIN
+    CREATE TEMP TABLE spill_ids ON COMMIT DROP AS
+        SELECT i,
+               laplace_hash128_blake3(convert_to('test/fold/spill/s' || i, 'UTF8')) AS s,
+               laplace_hash128_blake3(convert_to('test/fold/spill/o' || i, 'UTF8')) AS o
+        FROM generate_series(1, 3000) i;
+    DELETE FROM consensus;  -- both lanes run the fresh path on exactly 3000
+
+    FOREACH lane IN ARRAY ARRAY['sql', 'engine'] LOOP
+        PERFORM set_config('laplace.fold_lane', lane, true);
+        PERFORM set_config('laplace.fold_mem_mb', '1', true);
+
+        PERFORM create_period_staging(2, 1);
+        FOR n IN 0..1 LOOP
+            EXECUTE format(
+                'INSERT INTO %I SELECT s, $1, o, $2, 2, 2*$3, $4 FROM spill_ids '
+                'WHERE consensus_partition_of(s, $1, o, 2) = %s',
+                period_staging_table(1, n::int), n)
+                USING rel, phi, (700000000)::bigint, ts;
+        END LOOP;
+        PERFORM create_period_staging(2, 2);
+        FOR n IN 0..1 LOOP
+            EXECUTE format(
+                'INSERT INTO %I SELECT s, $1, o, $2, 3, 3*$3, $4 FROM spill_ids '
+                'WHERE i %% 2 = 0 AND consensus_partition_of(s, $1, o, 2) = %s',
+                period_staging_table(2, n::int), n)
+                USING rel, phi, (400000000)::bigint, ts;
+        END LOOP;
+
+        n := finish_consensus_fold();
+        IF n <> 3000 THEN
+            RAISE EXCEPTION 'FAIL(%): spill fold materialized % relations (want 3000)', lane, n;
+        END IF;
+
+        IF lane = 'sql' THEN
+            CREATE TEMP TABLE spill_expected ON COMMIT DROP AS
+                SELECT id, subject_id, type_id, object_id,
+                       rating, rd, volatility, witness_count, last_observed_at
+                FROM consensus c JOIN spill_ids si ON si.s = c.subject_id;
+            DELETE FROM consensus c USING spill_ids si WHERE si.s = c.subject_id;
+        ELSE
+            IF EXISTS (
+                (SELECT id, subject_id, type_id, object_id,
+                        rating, rd, volatility, witness_count, last_observed_at
+                 FROM consensus c JOIN spill_ids si ON si.s = c.subject_id
+                 EXCEPT SELECT * FROM spill_expected)
+                UNION ALL
+                (SELECT * FROM spill_expected
+                 EXCEPT
+                 SELECT id, subject_id, type_id, object_id,
+                        rating, rd, volatility, witness_count, last_observed_at
+                 FROM consensus c JOIN spill_ids si ON si.s = c.subject_id))
+            THEN
+                RAISE EXCEPTION 'FAIL: engine lane under spill diverged from the sql lane';
+            END IF;
+        END IF;
+    END LOOP;
+
+    RAISE NOTICE '✓ consensus_fold: engine lane under spill (3000 relations, 1 MB budget) row-identical to the sql lane';
+END $$;
+
+-- ── mixed φ within one epoch must refuse, in both lanes ─────────────────────
+DO $$
+DECLARE
+    rel bytea := laplace_hash128_blake3('test/fold/phi/reltype');
+    sX  bytea := laplace_hash128_blake3('test/fold/phi/subject');
+    oX  bytea := laplace_hash128_blake3('test/fold/phi/object');
+    ts  timestamptz := '2026-01-01 00:00:00+00';
+    lane text;
+    refused boolean;
+    n bigint;
+BEGIN
+    FOREACH lane IN ARRAY ARRAY['sql', 'engine'] LOOP
+        PERFORM set_config('laplace.fold_lane', lane, true);
+        refused := false;
+        BEGIN
+            PERFORM create_period_staging(1, 1);
+            EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,30000000000,1,500000000,$4)',
+                           period_staging_table(1, 0)) USING sX, rel, oX, ts;
+            EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,40000000000,1,500000000,$4)',
+                           period_staging_table(1, 0)) USING sX, rel, oX, ts;
+            n := finish_consensus_fold();
+        EXCEPTION WHEN data_exception OR raise_exception THEN
+            refused := true; -- the refusal is the pass (sql lane raises P0001
+                             -- via period_phi_mixed; engine lane data_exception)
+        END;
+        IF NOT refused THEN
+            RAISE EXCEPTION 'FAIL(%): mixed-phi staging folded without refusing', lane;
+        END IF;
+    END LOOP;
+    RAISE NOTICE '✓ consensus_fold: mixed φ within one period refuses in both lanes';
+END $$;
+
+ROLLBACK;

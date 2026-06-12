@@ -161,7 +161,7 @@ BEGIN
 END;
 $$;
 
--- Fresh-source fold: when a bulk source is known to contribute only NEW relations
+-- Fresh-source fold: when a source is known to contribute only NEW relations
 -- (every (subject,type,object) distinct and absent from consensus -- e.g. a model
 -- deposit's per-(role,layer) arenas), the read-modify-write upsert is dead weight.
 -- Skip the LEFT JOIN consensus (always empty) and the ON CONFLICT DO UPDATE
@@ -228,15 +228,15 @@ BEGIN
 END;
 $$;
 
--- ── the bulk fold lane (HANDOFF-fold-lane / OPEN-PROBLEMS §11) ──────────────────
+-- ── the terminal fold (HANDOFF-fold-lane / OPEN-PROBLEMS §11) ───────────────────
 -- The merge fold pays 2 random index probes per relation against a working set
--- beyond RAM, re-touched once per period. This lane replaces every probe with one
--- external sort: all staged epochs + the existing consensus rows (as period-0
--- seeds) GROUP BY relation identity, periods folded IN ORDER through the C
--- aggregate below — sequential I/O end to end, one fmgr transition per
--- (relation, period). Fresh substrates take a sorted INSERT (append-order PK
--- maintenance); live substrates get a full rebuild into a new heap whose PK is
--- built once, then an atomic swap — production indexes are never dropped in place.
+-- beyond RAM, re-touched once per period. The terminal fold replaces every probe
+-- with sorting: all staged epochs + the existing consensus rows (as period-0
+-- seeds) grouped by relation identity, periods folded IN ORDER — sequential I/O
+-- end to end. Two lanes share the math (consensus_fold_math.h): 'sql' runs the
+-- ordered aggregate below; 'engine' runs consensus_fold_partition (chunk sort +
+-- k-way merge in C). The result lands in a new heap whose PK is built once,
+-- then an atomic swap — production indexes are never dropped in place.
 
 -- Refresh-safe: on a live DB the fold aggregate is extension-owned — it can be
 -- neither dropped nor replaced (no OR REPLACE for aggregates), and its DDL is
@@ -292,7 +292,7 @@ $$;
 -- The routing law: relation identity → staging partition. MUST equal
 -- ConsensusAccumulatingWriter.PartitionOf:
 --     (Subject.Lo ^ Type.Lo ^ (Object?.Lo ?? 0)) % nparts    (unsigned mod)
--- The writer buckets staged rows C#-side; finish_consensus_bulk routes SEEDS
+-- The writer buckets staged rows C#-side; finish_consensus_fold routes SEEDS
 -- with this twin so each identity folds in exactly one partition round. Drift
 -- cannot fold silently: a misrouted seed lands in a different round than its
 -- staged epochs and the duplicate id fails the terminal PRIMARY KEY build.
@@ -308,7 +308,165 @@ CREATE OR REPLACE FUNCTION consensus_partition_of(
                  COALESCE(hash128_lo(p_object), 0::bigint) AS x) t;
 $$;
 
-CREATE OR REPLACE FUNCTION finish_consensus_bulk()
+-- The engine lane of the terminal fold: one call folds one partition's staged
+-- epochs (+ routed seeds) straight into consensus_next — table-AM reads, chunk
+-- sort + k-way merge, the shared fold math, multi-insert writes. SQL stays the
+-- orchestrator (catalog discovery, DDL, PK, swap). consensus_fold_engine.c.
+CREATE OR REPLACE FUNCTION consensus_fold_partition(
+        p_tables text[], p_epochs int[],
+        p_partition integer, p_nparts integer, p_seed boolean)
+    RETURNS bigint
+    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_fold_partition'
+    LANGUAGE C VOLATILE;
+
+-- Fold ONE staged partition into consensus_next, by lane. Shared by the
+-- one-shot finish_consensus_fold and the resumable finish_consensus_fold_steps.
+-- lane 'engine' (default) = consensus_fold_partition; lane 'sql' = the ordered
+-- consensus_fold aggregate — the escape hatch and the parity reference.
+CREATE OR REPLACE FUNCTION consensus_fold_one_partition(
+        p integer, nparts integer, fresh boolean, lane text)
+    RETURNS bigint LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    tabs    text[] := '{}';
+    eps     int[]  := '{}';
+    parts   text := '';
+    seed    text := '';
+    q       text;
+    rel     record;
+    n_round bigint;
+BEGIN
+    FOR rel IN
+        SELECT c.relname,
+               substring(c.relname FROM 'consensus_period_staging_e(\d{4})_')::int AS epoch
+        FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+        WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+          AND c.relname ~ format('^consensus_period_staging_e\d{4}_%s$', p)
+        ORDER BY c.relname
+    LOOP
+        tabs := tabs || rel.relname;
+        eps  := eps  || rel.epoch;
+        IF parts <> '' THEN parts := parts || ' UNION ALL '; END IF;
+        parts := parts || format(
+            'SELECT subject_id, type_id, object_id, %s::int AS ord, phi, games, sum_score, last_ts FROM %I',
+            rel.epoch, rel.relname);
+    END LOOP;
+    IF tabs = '{}' THEN
+        RETURN 0;
+    END IF;
+
+    IF lane = 'engine' THEN
+        RETURN consensus_fold_partition(tabs, eps, p, nparts, NOT fresh);
+    END IF;
+
+    IF NOT fresh THEN
+        seed := format(
+            'UNION ALL '
+            'SELECT c.subject_id, c.type_id, c.object_id, 0 AS ord, true AS is_seed, '
+            '       c.rating AS v1, c.rd AS v2, c.volatility AS v3, '
+            '       0::bigint AS phi, c.witness_count AS games, 0::bigint AS sum_score, '
+            '       c.last_observed_at AS last_ts '
+            'FROM consensus c '
+            'WHERE consensus_partition_of(c.subject_id, c.type_id, c.object_id, %s) = %s',
+            nparts, p);
+    END IF;
+
+    -- The fold query: per-(relation, period) pre-merge with the φ guard, then
+    -- the ordered fold per relation. One sort feeds both groupings; no final
+    -- ORDER BY — the terminal PK build sorts the complete heap once.
+    q := format($q$
+        INSERT INTO consensus_next
+        WITH staged AS (%s),
+        partial AS (
+            SELECT subject_id, type_id, object_id, ord,
+                   CASE WHEN min(phi) <> max(phi)
+                        THEN period_phi_mixed(subject_id, type_id, object_id)
+                        ELSE min(phi) END AS phi,
+                   sum(games)::bigint     AS games,
+                   sum(sum_score)::bigint AS sum_score,
+                   max(last_ts)           AS last_ts
+            FROM staged
+            GROUP BY subject_id, type_id, object_id, ord
+        ),
+        united AS (
+            SELECT subject_id, type_id, object_id, ord, false AS is_seed,
+                   0::bigint AS v1, 0::bigint AS v2, 0::bigint AS v3,
+                   phi, games, sum_score, last_ts
+            FROM partial
+            %s
+        ),
+        folded AS (
+            SELECT subject_id, type_id, object_id,
+                   consensus_fold(is_seed, v1, v2, v3, phi, games, sum_score,
+                                  glicko2_tau() ORDER BY ord) AS f,
+                   max(last_ts) AS last_ts
+            FROM united
+            GROUP BY subject_id, type_id, object_id
+        )
+        SELECT consensus_id(subject_id, type_id, object_id) AS id,
+               subject_id, type_id, object_id,
+               (f).rating, (f).rd, (f).volatility, (f).witness_count,
+               last_ts AS last_observed_at
+        FROM folded
+    $q$, parts, seed);
+
+    EXECUTE q;
+    GET DIAGNOSTICS n_round = ROW_COUNT;
+    RETURN n_round;
+END;
+$$;
+
+-- Terminal-fold shared tail: NOT NULLs, the PK build (the loud detector for
+-- partition-routing drift), the atomic swap, ANALYZE. Membership note: a
+-- swapped-in consensus is a plain table (extension membership is dropped so
+-- the retired heap can be dropped; pg_dump then includes the data natively,
+-- and pg_extension_config_dump is CREATE-EXTENSION-only).
+CREATE OR REPLACE FUNCTION consensus_fold_swap()
+    RETURNS void LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public
+    SET maintenance_work_mem = '4GB' AS $$
+DECLARE
+    rel record;
+BEGIN
+    ALTER TABLE consensus_next
+        ALTER COLUMN id SET NOT NULL,
+        ALTER COLUMN subject_id SET NOT NULL,
+        ALTER COLUMN type_id SET NOT NULL,
+        ALTER COLUMN rating SET NOT NULL,
+        ALTER COLUMN rd SET NOT NULL,
+        ALTER COLUMN volatility SET NOT NULL,
+        ALTER COLUMN witness_count SET NOT NULL,
+        ALTER COLUMN last_observed_at SET NOT NULL;
+    ALTER TABLE consensus_next ADD PRIMARY KEY (id);
+    IF EXISTS (
+        SELECT 1 FROM pg_depend d
+        JOIN pg_extension e ON e.oid = d.refobjid AND d.refclassid = 'pg_extension'::regclass
+        WHERE e.extname = 'laplace_substrate'
+          AND d.classid = 'pg_class'::regclass
+          AND d.objid = to_regclass(current_schema() || '.consensus')
+          AND d.deptype = 'e')
+    THEN
+        EXECUTE format('ALTER EXTENSION %I DROP TABLE consensus', 'laplace_substrate');
+    END IF;
+    ALTER TABLE consensus RENAME TO consensus_retired;
+    ALTER TABLE consensus_next RENAME TO consensus;
+    DROP TABLE consensus_retired;
+
+    -- Staging is consumed either way.
+    FOR rel IN
+        SELECT c.relname
+        FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+        WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+          AND c.relname ~ '^consensus_period_staging_e\d{4}_\d+$'
+    LOOP
+        EXECUTE format('DROP TABLE %I', rel.relname);
+    END LOOP;
+
+    EXECUTE 'ANALYZE consensus';
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION finish_consensus_fold()
     RETURNS bigint LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public
     SET session_replication_role = replica
@@ -317,10 +475,7 @@ CREATE OR REPLACE FUNCTION finish_consensus_bulk()
 DECLARE
     nparts  integer;
     p       integer;
-    parts   text;
-    seed    text;
-    q       text;
-    rel     record;
+    lane    text;
     n_round bigint;
     n       bigint := 0;
     fresh   boolean;
@@ -328,10 +483,10 @@ DECLARE
 BEGIN
     -- One fold per staged PARTITION, never one fold over everything: identity →
     -- partition is stable across epochs (the writer hashes the relation
-    -- identity), so partitions fold independently and the pgsql_tmp envelope is
-    -- one partition's external sort (~staged_bytes/nparts), not the whole
-    -- deposit's. The monolithic fold needed temp ≈ all staged bytes and hit
-    -- ENOSPC at 113 GB staged on a 125 GB-free volume (TinyLlama, 2026-06-11).
+    -- identity), so partitions fold independently and the temp envelope is
+    -- one partition's bytes, not the whole deposit's. The monolithic fold
+    -- needed temp ≈ all staged bytes and hit ENOSPC at 113 GB staged on a
+    -- 125 GB-free volume (TinyLlama, 2026-06-11).
     SELECT max(substring(c.relname FROM '_(\d+)$')::int) + 1 INTO nparts
     FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
     WHERE ns.nspname = current_schema() AND c.relkind = 'r'
@@ -350,136 +505,137 @@ BEGIN
         HAVING count(*) <> nparts
             OR max(substring(c.relname FROM '_(\d+)$')::int) + 1 <> nparts)
     THEN
-        RAISE EXCEPTION 'finish_consensus_bulk: staged epochs disagree on the partition fan-out';
+        RAISE EXCEPTION 'finish_consensus_fold: staged epochs disagree on the partition fan-out';
     END IF;
 
     SELECT NOT EXISTS (SELECT 1 FROM consensus LIMIT 1) INTO fresh;
-    IF to_regclass(current_schema() || '.consensus_bulk_new') IS NOT NULL THEN
-        EXECUTE 'DROP TABLE consensus_bulk_new';
+    IF to_regclass(current_schema() || '.consensus_next') IS NOT NULL THEN
+        EXECUTE 'DROP TABLE consensus_next';
     END IF;
+    CREATE TABLE consensus_next (
+        id               bytea,
+        subject_id       bytea,
+        type_id          bytea,
+        object_id        bytea,
+        rating           bigint,
+        rd               bigint,
+        volatility       bigint,
+        witness_count    bigint,
+        last_observed_at timestamptz
+    );
 
+    lane := COALESCE(NULLIF(current_setting('laplace.fold_lane', true), ''), 'engine');
     FOR p IN 0 .. nparts - 1 LOOP
-        parts := '';
-        FOR rel IN
-            SELECT c.relname,
-                   substring(c.relname FROM 'consensus_period_staging_e(\d{4})_')::int AS epoch
-            FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
-            WHERE ns.nspname = current_schema() AND c.relkind = 'r'
-              AND c.relname ~ format('^consensus_period_staging_e\d{4}_%s$', p)
-            ORDER BY c.relname
-        LOOP
-            IF parts <> '' THEN parts := parts || ' UNION ALL '; END IF;
-            parts := parts || format(
-                'SELECT subject_id, type_id, object_id, %s::int AS ord, phi, games, sum_score, last_ts FROM %I',
-                rel.epoch, rel.relname);
-        END LOOP;
-
-        seed := '';
-        IF NOT fresh THEN
-            seed := format(
-                'UNION ALL '
-                'SELECT c.subject_id, c.type_id, c.object_id, 0 AS ord, true AS is_seed, '
-                '       c.rating AS v1, c.rd AS v2, c.volatility AS v3, '
-                '       0::bigint AS phi, c.witness_count AS games, 0::bigint AS sum_score, '
-                '       c.last_observed_at AS last_ts '
-                'FROM consensus c '
-                'WHERE consensus_partition_of(c.subject_id, c.type_id, c.object_id, %s) = %s',
-                nparts, p);
-        END IF;
-
-        -- The fold query: per-(relation, period) pre-merge with the φ guard, then
-        -- the ordered fold per relation. One sort feeds both groupings; no final
-        -- ORDER BY — the terminal PK build sorts the complete heap once.
-        q := format($q$
-            WITH staged AS (%s),
-            partial AS (
-                SELECT subject_id, type_id, object_id, ord,
-                       CASE WHEN min(phi) <> max(phi)
-                            THEN period_phi_mixed(subject_id, type_id, object_id)
-                            ELSE min(phi) END AS phi,
-                       sum(games)::bigint     AS games,
-                       sum(sum_score)::bigint AS sum_score,
-                       max(last_ts)           AS last_ts
-                FROM staged
-                GROUP BY subject_id, type_id, object_id, ord
-            ),
-            united AS (
-                SELECT subject_id, type_id, object_id, ord, false AS is_seed,
-                       0::bigint AS v1, 0::bigint AS v2, 0::bigint AS v3,
-                       phi, games, sum_score, last_ts
-                FROM partial
-                %s
-            ),
-            folded AS (
-                SELECT subject_id, type_id, object_id,
-                       consensus_fold(is_seed, v1, v2, v3, phi, games, sum_score,
-                                      glicko2_tau() ORDER BY ord) AS f,
-                       max(last_ts) AS last_ts
-                FROM united
-                GROUP BY subject_id, type_id, object_id
-            )
-            SELECT consensus_id(subject_id, type_id, object_id) AS id,
-                   subject_id, type_id, object_id,
-                   (f).rating, (f).rd, (f).volatility, (f).witness_count,
-                   last_ts AS last_observed_at
-            FROM folded
-        $q$, parts, seed);
-
-        IF p = 0 THEN
-            EXECUTE 'CREATE TABLE consensus_bulk_new AS ' || q;
-        ELSE
-            EXECUTE 'INSERT INTO consensus_bulk_new ' || q;
-        END IF;
-        GET DIAGNOSTICS n_round = ROW_COUNT;
+        n_round := consensus_fold_one_partition(p, nparts, fresh, lane);
         n := n + n_round;
-        RAISE LOG 'bulk fold: partition %/%: % relations folded (% cumulative) at %',
-            p + 1, nparts, n_round, n, clock_timestamp() - t0;
+        RAISE LOG 'terminal fold (%): partition %/%: % relations folded (% cumulative) at %',
+            lane, p + 1, nparts, n_round, n, clock_timestamp() - t0;
     END LOOP;
 
-    ALTER TABLE consensus_bulk_new
-        ALTER COLUMN id SET NOT NULL,
-        ALTER COLUMN subject_id SET NOT NULL,
-        ALTER COLUMN type_id SET NOT NULL,
-        ALTER COLUMN rating SET NOT NULL,
-        ALTER COLUMN rd SET NOT NULL,
-        ALTER COLUMN volatility SET NOT NULL,
-        ALTER COLUMN witness_count SET NOT NULL,
-        ALTER COLUMN last_observed_at SET NOT NULL;
-    ALTER TABLE consensus_bulk_new ADD PRIMARY KEY (id);
-    -- Atomic swap: readers keep the old consensus until this transaction
-    -- commits; no in-place index drop ever touches the live table. Membership
-    -- note: a swapped-in consensus is a plain table (extension membership is
-    -- dropped so the retired heap can be dropped; pg_dump then includes the
-    -- data natively, and pg_extension_config_dump is CREATE-EXTENSION-only).
-    IF EXISTS (
-        SELECT 1 FROM pg_depend d
-        JOIN pg_extension e ON e.oid = d.refobjid AND d.refclassid = 'pg_extension'::regclass
-        WHERE e.extname = 'laplace_substrate'
-          AND d.classid = 'pg_class'::regclass
-          AND d.objid = to_regclass(current_schema() || '.consensus')
-          AND d.deptype = 'e')
-    THEN
-        EXECUTE format('ALTER EXTENSION %I DROP TABLE consensus', 'laplace_substrate');
-    END IF;
-    ALTER TABLE consensus RENAME TO consensus_retired_bulk;
-    ALTER TABLE consensus_bulk_new RENAME TO consensus;
-    DROP TABLE consensus_retired_bulk;
-
-    -- Staging is consumed either way.
-    FOR rel IN
-        SELECT c.relname
-        FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
-        WHERE ns.nspname = current_schema() AND c.relkind = 'r'
-          AND c.relname ~ '^consensus_period_staging_e\d{4}_\d+$'
-    LOOP
-        EXECUTE format('DROP TABLE %I', rel.relname);
-    END LOOP;
-
-    EXECUTE 'ANALYZE consensus';
-    RAISE LOG 'bulk fold: % relations materialized (% partition(s), %) in %',
+    PERFORM consensus_fold_swap();
+    RAISE LOG 'terminal fold: % relations materialized (% partition(s), %) in %',
         n, nparts, CASE WHEN fresh THEN 'fresh' ELSE 'seeded rebuild + swap' END,
         clock_timestamp() - t0;
     RETURN n;
+END;
+$$;
+
+-- The resumable terminal fold: one transaction per partition. Each round folds
+-- a partition, drops ITS staging tables, and COMMITs — so the remaining
+-- staging tables ARE the restart state, and the temp/staging envelope is
+-- reclaimed as the fold walks. A re-CALL after any interruption skips folded
+-- partitions (their staging is gone) and finishes the swap.
+CREATE OR REPLACE PROCEDURE finish_consensus_fold_steps(INOUT p_total bigint DEFAULT 0)
+    LANGUAGE plpgsql AS $$
+DECLARE
+    nparts  integer;
+    p       integer;
+    lane    text;
+    rel     record;
+    n_round bigint;
+    resume  boolean;
+    fresh   boolean;
+    t0      timestamptz := clock_timestamp();
+BEGIN
+    p_total := 0;
+    PERFORM set_config('search_path', '@extschema@, public', true);
+    resume := to_regclass(current_schema() || '.consensus_next') IS NOT NULL;
+
+    -- Partitions fold ascending, so the highest staged suffix survives until
+    -- the last round and max+1 names the true fan-out even mid-resume.
+    SELECT max(substring(c.relname FROM '_(\d+)$')::int) + 1 INTO nparts
+    FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+    WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+      AND c.relname ~ '^consensus_period_staging_e\d{4}_\d+$';
+    IF nparts IS NULL AND NOT resume THEN
+        RAISE EXCEPTION 'finish_consensus_fold_steps: nothing staged and no fold in progress';
+    END IF;
+
+    IF NOT resume THEN
+        -- a fresh start gets the strict fan-out check; a resume cannot (folded
+        -- partitions already dropped their staging)
+        IF EXISTS (
+            SELECT 1
+            FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+            WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+              AND c.relname ~ '^consensus_period_staging_e\d{4}_\d+$'
+            GROUP BY substring(c.relname FROM 'e(\d{4})_')
+            HAVING count(*) <> nparts
+                OR max(substring(c.relname FROM '_(\d+)$')::int) + 1 <> nparts)
+        THEN
+            RAISE EXCEPTION 'finish_consensus_fold_steps: staged epochs disagree on the partition fan-out';
+        END IF;
+        CREATE TABLE consensus_next (
+            id               bytea,
+            subject_id       bytea,
+            type_id          bytea,
+            object_id        bytea,
+            rating           bigint,
+            rd               bigint,
+            volatility       bigint,
+            witness_count    bigint,
+            last_observed_at timestamptz
+        );
+        COMMIT;
+        PERFORM set_config('search_path', '@extschema@, public', true);
+    END IF;
+
+    SELECT NOT EXISTS (SELECT 1 FROM consensus LIMIT 1) INTO fresh;
+    lane := COALESCE(NULLIF(current_setting('laplace.fold_lane', true), ''), 'engine');
+
+    IF nparts IS NOT NULL THEN
+        FOR p IN 0 .. nparts - 1 LOOP
+            PERFORM set_config('work_mem', '4GB', true);
+            PERFORM set_config('session_replication_role', 'replica', true);
+            n_round := consensus_fold_one_partition(p, nparts, fresh, lane);
+            IF n_round > 0 OR EXISTS (
+                SELECT 1
+                FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+                WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+                  AND c.relname ~ format('^consensus_period_staging_e\d{4}_%s$', p))
+            THEN
+                FOR rel IN
+                    SELECT c.relname
+                    FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+                    WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+                      AND c.relname ~ format('^consensus_period_staging_e\d{4}_%s$', p)
+                LOOP
+                    EXECUTE format('DROP TABLE %I', rel.relname);
+                END LOOP;
+                p_total := p_total + n_round;
+                COMMIT;
+                PERFORM set_config('search_path', '@extschema@, public', true);
+                RAISE LOG 'terminal fold (%, resumable): partition %/%: % relations folded at %',
+                    lane, p + 1, nparts, n_round, clock_timestamp() - t0;
+            END IF;
+        END LOOP;
+    END IF;
+
+    PERFORM set_config('maintenance_work_mem', '4GB', true);
+    PERFORM consensus_fold_swap();
+    SELECT count(*) INTO p_total FROM consensus;
+    RAISE LOG 'terminal fold (resumable): % consensus relations after swap in %',
+        p_total, clock_timestamp() - t0;
 END;
 $$;
 

@@ -1,7 +1,8 @@
 if(WIN32)
     add_library(laplace_substrate MODULE
         src/laplace_substrate.c
-        src/consensus_bulk.c
+        src/consensus_fold_step.c
+        src/consensus_fold_engine.c
         src/generate_walk.c
         src/generation_native.c
         src/generation_index.c
@@ -34,7 +35,8 @@ set(EXT_VERSION ${PROJECT_VERSION})
 
 set(EXT_C_SOURCES
     src/laplace_substrate.c
-    src/consensus_bulk.c
+    src/consensus_fold_step.c
+    src/consensus_fold_engine.c
     src/generate_walk.c
     src/generation_native.c
     src/generation_index.c
