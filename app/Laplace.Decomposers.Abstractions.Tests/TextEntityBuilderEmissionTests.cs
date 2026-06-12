@@ -24,10 +24,17 @@ public sealed class TextEntityBuilderEmissionTests
         Assert.Equal(bytes, rebuilt);
     }
 
+    private static readonly string GalileoPath =
+        Environment.GetEnvironmentVariable("LAPLACE_TEST_TEXT") is { Length: > 0 } dir
+            ? Path.Combine(dir, "galileo.txt")
+            : (OperatingSystem.IsWindows()
+                ? @"D:\Data\Ingest\test-data\text\galileo.txt"
+                : "/vault/Data/test-data/text/galileo.txt");
+
     [Fact]
     public void FullGalileo_InMemory_RoundtripsFromPhysicalities()
     {
-        byte[] bytes = File.ReadAllBytes(@"D:\Data\Ingest\test-data\text\galileo.txt");
+        byte[] bytes = File.ReadAllBytes(GalileoPath);
         Assert.True(TextEntityBuilder.TryBuildRows(bytes, Src, out _, out var phys, out var rootId, out _));
         byte[] rebuilt = ReconstructFromPhysicalities(phys, rootId);
         Assert.Equal(bytes, rebuilt);
