@@ -1,0 +1,178 @@
+CREATE EXTENSION IF NOT EXISTS postgis;
+NOTICE:  extension "postgis" already exists, skipping
+CREATE EXTENSION IF NOT EXISTS laplace_geom;
+NOTICE:  extension "laplace_geom" already exists, skipping
+CREATE EXTENSION IF NOT EXISTS laplace_substrate;
+NOTICE:  extension "laplace_substrate" already exists, skipping
+-- The single-source corpus pin: generation and the trajectory planes read
+-- physicalities.trajectory DIRECTLY (no content_index / constituency_edge /
+-- content_pairs tables exist). Pinned here:
+--   - deep flattening: a tier-4 root walks through its tier-3 constituent to
+--     the token floor, run-lengths expanded, contained sentences not re-walked;
+--   - the separator rule: whitespace tokens are excluded from the stream, so
+--     pairs and gaps count word strides;
+--   - seeded determinism of generate_tokens;
+--   - the consensus floor: a dead-end context continues through COMPLETES_TO
+--     with ord_used = 0;
+--   - invalidation: a new witnessed trajectory rebuilds the corpus.
+BEGIN;
+SET search_path = laplace, public;
+DO $$
+DECLARE
+    type_t    bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    src       bytea := laplace_hash128_blake3('test/corpus/source');
+    w_the     bytea := laplace_hash128_blake3('test/corpus/word-the');
+    w_capital bytea := laplace_hash128_blake3('test/corpus/word-capital');
+    w_of      bytea := laplace_hash128_blake3('test/corpus/word-of');
+    w_france  bytea := laplace_hash128_blake3('test/corpus/word-france');
+    w_end     bytea := laplace_hash128_blake3('test/corpus/word-end');
+    w_target  bytea := laplace_hash128_blake3('test/corpus/word-target');
+    sp        bytea := laplace_hash128_blake3('test/corpus/space');
+    sent      bytea := laplace_hash128_blake3('test/corpus/sentence');
+    sent2     bytea := laplace_hash128_blake3('test/corpus/sentence2');
+    sent3     bytea := laplace_hash128_blake3('test/corpus/sentence3');
+    doc       bytea := laplace_hash128_blake3('test/corpus/document');
+    t2flag    bigint := (2::bigint << 1);
+    st        record;
+    n bigint;
+BEGIN
+    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+        (src, 0, type_t, NULL),
+        (w_the, 2, type_t, src), (w_capital, 2, type_t, src),
+        (w_of, 2, type_t, src), (w_france, 2, type_t, src),
+        (w_end, 2, type_t, src), (w_target, 2, type_t, src),
+        (sp, 2, type_t, src),
+        (sent, 3, type_t, src), (sent2, 3, type_t, src), (doc, 4, type_t, src);
+
+    -- the space token renders as whitespace (in-band atom decode, cp 32)
+    INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,
+                               trajectory, n_constituents, observed_at)
+    VALUES (laplace_hash128_blake3('test/corpus/phys-space'), sp, src, 1,
+            public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
+            decode('00000000000000000000000000000000','hex'),
+            public.ST_MakeLine(ARRAY[
+                public.laplace_mantissa_pack(sp, 1, 1, (1 + (32::bigint << 31))),
+                public.laplace_mantissa_pack(sp, 2, 1, (1 + (32::bigint << 31)))]),
+            2, now());
+
+    -- sentence: "the capital of france" (spaces witnessed between words)
+    INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,
+                               trajectory, n_constituents, observed_at)
+    VALUES (laplace_hash128_blake3('test/corpus/phys-sentence'), sent, src, 1,
+            public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
+            decode('00000000000000000000000000000000','hex'),
+            public.ST_MakeLine(ARRAY[
+                public.laplace_mantissa_pack(w_the, 1, 1, t2flag),
+                public.laplace_mantissa_pack(sp, 2, 1, t2flag),
+                public.laplace_mantissa_pack(w_capital, 3, 1, t2flag),
+                public.laplace_mantissa_pack(sp, 4, 1, t2flag),
+                public.laplace_mantissa_pack(w_of, 5, 1, t2flag),
+                public.laplace_mantissa_pack(sp, 6, 1, t2flag),
+                public.laplace_mantissa_pack(w_france, 7, 1, t2flag)]),
+            7, now());
+
+    -- document: the sentence witnessed twice (run expansion through the walk)
+    INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,
+                               trajectory, n_constituents, observed_at)
+    VALUES (laplace_hash128_blake3('test/corpus/phys-doc'), doc, src, 1,
+            public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
+            decode('00000000000000000000000000000000','hex'),
+            public.ST_MakeLine(ARRAY[
+                public.laplace_mantissa_pack(sent, 1, 2, (3::bigint << 1))]),
+            1, now());
+
+    -- standalone sentence: "france end" (w_end is sequence-final everywhere)
+    INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,
+                               trajectory, n_constituents, observed_at)
+    VALUES (laplace_hash128_blake3('test/corpus/phys-sentence2'), sent2, src, 1,
+            public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
+            decode('00000000000000000000000000000000','hex'),
+            public.ST_MakeLine(ARRAY[
+                public.laplace_mantissa_pack(w_france, 1, 1, t2flag),
+                public.laplace_mantissa_pack(sp, 2, 1, t2flag),
+                public.laplace_mantissa_pack(w_end, 3, 1, t2flag)]),
+            3, now());
+
+    -- ── corpus shape: 2 roots (doc, sent2); sent is contained, not re-walked ──
+    SELECT * INTO st FROM corpus_stats();
+    IF st.sequences <> 2 THEN
+        RAISE EXCEPTION 'FAIL: % sequences walked (want 2: doc + sent2)', st.sequences;
+    END IF;
+    -- doc = sentence ×2 = 8 words; sent2 = 2 words; spaces excluded
+    IF st.positions <> 10 THEN
+        RAISE EXCEPTION 'FAIL: % word-stride positions (want 10)', st.positions;
+    END IF;
+    IF st.separators <> 1 THEN
+        RAISE EXCEPTION 'FAIL: % separator(s) classified (want 1: the space token)', st.separators;
+    END IF;
+
+    -- ── word stride: next-pairs skip the witnessed spaces ─────────────────────
+    IF NOT EXISTS (
+        SELECT 1 FROM content_pairs_scan(1) s
+        WHERE s.subject_id = w_the AND s.object_id = w_capital AND s.cnt = 2) THEN
+        RAISE EXCEPTION 'FAIL: (the→capital) gap-1 pair missing or wrong count (want 2: run expansion)';
+    END IF;
+    IF EXISTS (SELECT 1 FROM content_pairs_scan(1) s
+               WHERE s.subject_id = sp OR s.object_id = sp) THEN
+        RAISE EXCEPTION 'FAIL: separator token leaked into the order metrics';
+    END IF;
+    -- the run boundary is witnessed order too: ...france | the... inside doc
+    IF NOT EXISTS (
+        SELECT 1 FROM content_pairs_scan(1) s
+        WHERE s.subject_id = w_france AND s.object_id = w_the AND s.cnt = 1) THEN
+        RAISE EXCEPTION 'FAIL: (france→the) run-boundary pair missing';
+    END IF;
+    -- token_plane('traj','next') = conditional frequency over word strides
+    IF NOT EXISTS (
+        SELECT 1 FROM token_plane('traj', 'next') p
+        WHERE p.subject_id = w_of AND p.object_id = w_france AND p.w = 1.0) THEN
+        RAISE EXCEPTION 'FAIL: token_plane traj next (of→france) missing or not P=1.0';
+    END IF;
+
+    -- ── seeded determinism ─────────────────────────────────────────────────────
+    IF EXISTS (
+        SELECT 1 FROM (
+            SELECT g1.step, g1.token AS t1, g2.token AS t2
+            FROM generate_tokens(ARRAY[w_the], 6, 3, 0.7, 4, 42) g1
+            JOIN generate_tokens(ARRAY[w_the], 6, 3, 0.7, 4, 42) g2 USING (step)
+        ) z WHERE z.t1 <> z.t2) THEN
+        RAISE EXCEPTION 'FAIL: same (corpus, prompt, seed) produced different streams';
+    END IF;
+
+    -- ── the consensus floor: dead-end context continues via COMPLETES_TO ──────
+    INSERT INTO entities (id, tier, type_id, first_observed_by)
+    VALUES (relation_type_id('COMPLETES_TO'), 0, type_t, src)
+    ON CONFLICT (id) DO NOTHING;
+    INSERT INTO consensus (id, subject_id, type_id, object_id,
+                           rating, rd, volatility, witness_count, last_observed_at)
+    VALUES (consensus_id(w_end, relation_type_id('COMPLETES_TO'), w_target),
+            w_end, relation_type_id('COMPLETES_TO'), w_target,
+            2000000000000, 100000000000, 60000000, 3, now());
+    SELECT count(*) INTO n
+    FROM generate_tokens(ARRAY[w_end], 1, 3, 0.1, 4, 7) g
+    WHERE g.ord_used = 0 AND g.token = w_target;
+    IF n <> 1 THEN
+        RAISE EXCEPTION 'FAIL: dead-end context did not continue through the consensus floor (ord_used=0)';
+    END IF;
+
+    -- ── invalidation: a new witnessed trajectory rebuilds the corpus ──────────
+    INSERT INTO entities (id, tier, type_id, first_observed_by)
+    VALUES (sent3, 3, type_t, src);
+    INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,
+                               trajectory, n_constituents, observed_at)
+    VALUES (laplace_hash128_blake3('test/corpus/phys-sentence3'), sent3, src, 1,
+            public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
+            decode('00000000000000000000000000000000','hex'),
+            public.ST_MakeLine(ARRAY[
+                public.laplace_mantissa_pack(w_capital, 1, 1, t2flag),
+                public.laplace_mantissa_pack(w_of, 2, 1, t2flag)]),
+            2, now());
+    SELECT * INTO st FROM corpus_stats();
+    IF st.sequences <> 3 THEN
+        RAISE EXCEPTION 'FAIL: corpus did not rebuild after a new trajectory (% sequences, want 3)', st.sequences;
+    END IF;
+
+    RAISE NOTICE '✓ generation_corpus: trajectories are the single source — deep flattening with run expansion, word-stride pairs, seeded determinism, the consensus floor (ord_used=0), and probe invalidation all hold';
+END $$;
+NOTICE:  ✓ generation_corpus: trajectories are the single source — deep flattening with run expansion, word-stride pairs, seeded determinism, the consensus floor (ord_used=0), and probe invalidation all hold
+ROLLBACK;

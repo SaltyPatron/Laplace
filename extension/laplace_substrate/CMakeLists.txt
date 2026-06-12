@@ -5,7 +5,6 @@ if(WIN32)
         src/consensus_fold_engine.c
         src/generate_walk.c
         src/generation_native.c
-        src/generation_index.c
         src/astar_path.c
         src/converse_native.c
         src/converse_reads_native.c
@@ -39,7 +38,6 @@ set(EXT_C_SOURCES
     src/consensus_fold_engine.c
     src/generate_walk.c
     src/generation_native.c
-    src/generation_index.c
     src/astar_path.c
     src/converse_native.c
     src/converse_reads_native.c

@@ -36,13 +36,6 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
         boot.AddRelationType("HAS_DOMAIN_TOPIC");
         boot.AddRelationType("ETYMOLOGICALLY_DERIVED_FROM");
         await context.Writer.ApplyAsync(boot.Build(), ct);
-
-        var posSeed = new SubstrateChangeBuilder(
-            Source, "bootstrap/pos-canonical", null,
-            entityCapacity: PosReference.Canonical.Length + 1,
-            physicalityCapacity: 0, attestationCapacity: 0);
-        PosReference.SeedCanonical(posSeed, Source);
-        await context.Writer.ApplyAsync(posSeed.Build(), ct);
     }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
