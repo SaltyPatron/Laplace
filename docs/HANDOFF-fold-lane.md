@@ -76,3 +76,33 @@ consensus_period_staging_e00NN_K tables; force-kill skipped the dispose sweep). 
 isn't being dropped wholesale: `SELECT laplace.drop_period_staging();` reclaims it.
 walk-verdict.cmd (scripts/win) is the one-command acceptance for any future deposit:
 rebuild-consensus-indexes.sql + model-planes-audit.sql.
+
+## 2026-06-11 (later): the bulk lane LANDED — and its first 1.1B-row outing
+
+The SQL-side bulk lane shipped (consensus_fold C ordered aggregate +
+finish_consensus_bulk; LAPLACE_FOLD_LANE=bulk skips per-epoch merge folds entirely),
+parity-pinned int64-identical to the merge lane (regress consensus_bulk). The full
+TinyLlama redeposit then proved the staging side at scale: ETL 3036s, 1,118,295,719
+matches staged across 100 epochs × 4 partitions ≈ 113 GB UNLOGGED.
+
+**The disk-envelope law (learned by ENOSPC).** The terminal fold's external sort needs
+pgsql_tmp ≈ its INPUT bytes. The first finish_consensus_bulk UNION ALLed all staging
+tables into one query → temp ≈ ALL staged bytes → ENOSPC at 113 GB staged / 125 GB free,
+after the ETL had already finished. Fix (commit 7749217): fold ONE partition per round.
+Identity → partition is epoch-stable (writer hashes the relation identity:
+ConsensusAccumulatingWriter.PartitionOf ≡ laplace.consensus_partition_of — the SQL twin
+routes seeds; drift fails the terminal PK build loudly). Envelope drops to
+~staged/nparts per round (measured: 55 GB peak for a 28 GB partition — the GROUP-BY sort
+and the fold sort pipeline concurrently, so budget ≈ 2× one partition). Staging is only
+unlinked at COMMIT: the whole fold is one transaction, so staged bytes are held until the
+end. If a fleet box needs mid-fold reclamation, the escalation is a PROCEDURE with
+per-partition COMMIT (drops partition staging as it goes; naturally resumable — remaining
+staging tables ARE the restart state). Unbuilt; build it only when a real envelope forces it.
+
+Registration order law (commit 5000a42): readback canonicals (the recipe JSON that
+--recipe-from pours from) register BEFORE the fold — the fold is the failure-prone tail
+and a fold failure must not eat the recipe of an applied deposit. Repair lane:
+`ingest safetensors <dir> --register-only`.
+
+The C-side PK-less bulk fold above (radix sort in-engine, heap_multi_insert) remains the
+next rung if the SQL bulk lane's external sorts become the ceiling.
