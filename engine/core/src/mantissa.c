@@ -68,6 +68,53 @@ void mantissa_pack(double vertex[4], const mantissa_payload_t* p) {
     vertex[3] = laplace_slot_to_fp(slot_m);
 }
 
+static inline uint64_t laplace_zigzag(int64_t v) {
+    return ((uint64_t)v << 1) ^ (uint64_t)(v >> 63);
+}
+
+static inline int64_t laplace_unzigzag(uint64_t z) {
+    return (int64_t)(z >> 1) ^ -(int64_t)(z & 1ULL);
+}
+
+int laplace_testimony_pack_walk(const hash128_t* object_ids,
+                                const int64_t*   scores_fp1e9,
+                                const uint16_t*  games,
+                                size_t n, double* out) {
+    size_t i;
+    if (!object_ids || !scores_fp1e9 || !out || n == 0)
+        return -1;
+    for (i = 0; i < n; i++) {
+        const uint64_t z = laplace_zigzag(scores_fp1e9[i]);
+        mantissa_payload_t p;
+        if (z > LAPLACE_VFLAG_SCORE_MASK)
+            return -2;
+        p.entity_id  = object_ids[i];
+        p.ordinal    = (uint16_t)(i & 0xFFFF);
+        p.run_length = games ? games[i] : 1;
+        p.flags      = LAPLACE_VFLAG_TESTIMONY
+                     | (z << LAPLACE_VFLAG_SCORE_SHIFT);
+        mantissa_pack(out + i * 4, &p);
+    }
+    return 0;
+}
+
+int laplace_testimony_unpack_vertex(const double vertex[4],
+                                    hash128_t* object_id,
+                                    int64_t*   score_fp1e9,
+                                    uint16_t*  games,
+                                    uint16_t*  ordinal) {
+    mantissa_payload_t p;
+    mantissa_unpack(vertex, &p);
+    if (!(p.flags & LAPLACE_VFLAG_TESTIMONY))
+        return -1;
+    if (object_id)    *object_id    = p.entity_id;
+    if (score_fp1e9)  *score_fp1e9  = laplace_unzigzag(
+        (p.flags >> LAPLACE_VFLAG_SCORE_SHIFT) & LAPLACE_VFLAG_SCORE_MASK);
+    if (games)        *games        = p.run_length;
+    if (ordinal)      *ordinal      = p.ordinal;
+    return 0;
+}
+
 void mantissa_unpack(const double vertex[4], mantissa_payload_t* out) {
     const uint64_t slot_x = laplace_fp_to_slot(vertex[0]);
     const uint64_t slot_y = laplace_fp_to_slot(vertex[1]);
