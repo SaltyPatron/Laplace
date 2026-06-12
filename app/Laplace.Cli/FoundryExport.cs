@@ -92,21 +92,27 @@ internal static class FoundryExport
             return PlaneCoo.Empty;
         }
 
+        // Canonical order regardless of DB scan order: the cast law (identical
+        // consensus + identical mold => identical cast) dies here otherwise —
+        // |w| ties at the degree cap kept a scan-order subset, and dictionary
+        // emission order perturbed downstream float summation.
         long kept = 0;
         foreach (var row in adj.Values)
         {
-            if (row.Count > degreeCap)
+            row.Sort((a, b) =>
             {
-                row.Sort((a, b) => Math.Abs(b.W).CompareTo(Math.Abs(a.W)));
+                int c = Math.Abs(b.W).CompareTo(Math.Abs(a.W));
+                return c != 0 ? c : a.Col.CompareTo(b.Col);
+            });
+            if (row.Count > degreeCap)
                 row.RemoveRange(degreeCap, row.Count - degreeCap);
-            }
             kept += row.Count;
         }
 
         var rows = new int[kept]; var cols = new int[kept]; var vals = new double[kept];
         long at = 0;
-        foreach (var (r, row) in adj)
-            foreach (var (c, w) in row)
+        foreach (var r in adj.Keys.OrderBy(k => k))
+            foreach (var (c, w) in adj[r])
             {
                 rows[at] = r; cols[at] = c; vals[at] = w; at++;
             }

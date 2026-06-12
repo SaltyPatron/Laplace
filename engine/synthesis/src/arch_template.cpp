@@ -37,7 +37,9 @@ std::vector<TensorSpec> llama_tensor_manifest(const recipe_t* r) {
     const size_t hidden_size  = get_int("hidden_size",             2048);
     const size_t n_layers     = get_int("num_hidden_layers",         22);
     const size_t n_heads      = get_int("num_attention_heads",       32);
-    const size_t n_kv_heads   = get_int("num_key_value_heads",        4);
+    // Absent num_key_value_heads means MHA (kv == heads) — HF config semantics,
+    // shared with LlamaRecipeExtractor; canonical recipes never inject the field.
+    const size_t n_kv_heads   = get_int("num_key_value_heads",   n_heads);
     const size_t interm_size  = get_int("intermediate_size",       5632);
 
     const size_t head_dim    = hidden_size / n_heads;

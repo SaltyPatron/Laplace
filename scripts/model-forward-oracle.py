@@ -184,12 +184,17 @@ def cmd_forward_gguf(gguf, prompt, tok_dir):
     vocab = json.load(open(os.path.join(tok_dir, "tokenizer.json"), encoding="utf-8"))["model"]["vocab"]
     inv = {i: s for s, i in vocab.items()}
 
-    ids = [1]
+    # SentencePiece vocabs key words as ▁word with BOS=1; WordPiece vocabs key
+    # plain (lowercased) pieces and lead with [CLS]. The mold is llama either way —
+    # only the vocab keying differs.
+    ids = [vocab.get("[CLS]", 1)]
     for w in prompt.strip().split(" "):
-        key = "▁" + w
-        if key not in vocab:
+        for key in ("▁" + w, w, w.lower()):
+            if key in vocab:
+                ids.append(vocab[key])
+                break
+        else:
             sys.exit(f"prompt word {w!r} not a single vocab token")
-        ids.append(vocab[key])
     n = len(ids); pos = np.arange(n)
 
     def rms(x, w): return x/np.sqrt(np.mean(x*x,-1,keepdims=True)+eps)*w

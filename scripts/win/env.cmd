@@ -7,6 +7,11 @@ rem which breaks Windows PowerShell 5.1 module autoload in child scripts -- Get-
 rem ConvertTo-Json silently vanish. Clear it; 5.1 rebuilds its own default.
 set "PSModulePath="
 call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" >nul 2>&1
+rem setvars chains the VS dev environment, which exports Platform=x64. MSBuild lifts
+rem the Platform ENV VAR into a global property, forking managed output into
+rem bin\x64\Release beside bin\Release (two trees = stale-DLL shadowing; cost a
+rem 30-min pour on a stale synthesis DLL 2026-06-12). CMake/ninja never read it.
+set "Platform="
 rem setvars adds mpi\lib and tcm\lib to LIB, but this install ships neither (TCM is runtime-only;
 rem MPI here is the runtime layout) -- csc then warns CS1668 once per project. Drop dead dirs from LIB.
 setlocal EnableDelayedExpansion

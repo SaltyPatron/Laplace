@@ -95,6 +95,36 @@ TEST(LaplaceSynthesisArchTemplate, Layer0QProjShape) {
     arch_template_free(t);
 }
 
+// Absent num_key_value_heads means MHA (kv == heads) — HF config semantics,
+// shared with LlamaRecipeExtractor. MiniLM-shaped: BERT configs carry no kv field.
+static const char* kMiniLmConfig = R"({
+  "architectures": ["BertModel"],
+  "hidden_size": 384,
+  "intermediate_size": 1536,
+  "num_attention_heads": 12,
+  "num_hidden_layers": 6,
+  "torch_dtype": "float32",
+  "vocab_size": 30522
+})";
+
+TEST(LaplaceSynthesisArchTemplate, AbsentKvHeadsDefaultsToHeadCount) {
+    arch_template_t* t = arch_template_load("llama");
+    ASSERT_NE(t, nullptr);
+    recipe_t* r = recipe_parse(kMiniLmConfig, strlen(kMiniLmConfig));
+    ASSERT_NE(r, nullptr);
+
+    tensor_spec_t specs[256];
+    int n = arch_template_required_tensors(t, r, specs, 256);
+    ASSERT_GT(n, 2);
+
+    EXPECT_STREQ(specs[2].name, "model.layers.0.self_attn.k_proj.weight");
+    EXPECT_EQ(specs[2].shape[0], 384u);
+    EXPECT_EQ(specs[2].shape[1], 384u);
+
+    recipe_free(r);
+    arch_template_free(t);
+}
+
 TEST(LaplaceSynthesisArchTemplate, CapTooSmallReturnsCount) {
     arch_template_t* t = arch_template_load("llama");
     ASSERT_NE(t, nullptr);
