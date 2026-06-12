@@ -371,14 +371,18 @@ BEGIN
             nparts, p);
     END IF;
 
-    -- The fold query: per-(relation, period) pre-merge with the φ guard, then
-    -- the ordered fold per relation. One sort feeds both groupings; no final
-    -- ORDER BY — the terminal PK build sorts the complete heap once.
+    -- The fold query under THE PERIOD RULE: one fold = one rating period.
+    -- Staging epochs are flush quanta (RAM bounds), not time — every staged
+    -- row of a relation pre-merges into ONE partial (φ guard across the whole
+    -- fold), which folds as a single Glicko period on top of the seed. This
+    -- keeps consensus values independent of LAPLACE_STAGING_THRESHOLD;
+    -- distinct deposits at distinct times remain distinct periods because
+    -- they fold against the prior consensus as seeds.
     q := format($q$
         INSERT INTO consensus_next
         WITH staged AS (%s),
         partial AS (
-            SELECT subject_id, type_id, object_id, ord,
+            SELECT subject_id, type_id, object_id,
                    CASE WHEN min(phi) <> max(phi)
                         THEN period_phi_mixed(subject_id, type_id, object_id)
                         ELSE min(phi) END AS phi,
@@ -386,10 +390,10 @@ BEGIN
                    sum(sum_score)::bigint AS sum_score,
                    max(last_ts)           AS last_ts
             FROM staged
-            GROUP BY subject_id, type_id, object_id, ord
+            GROUP BY subject_id, type_id, object_id
         ),
         united AS (
-            SELECT subject_id, type_id, object_id, ord, false AS is_seed,
+            SELECT subject_id, type_id, object_id, 1 AS ord, false AS is_seed,
                    0::bigint AS v1, 0::bigint AS v2, 0::bigint AS v3,
                    phi, games, sum_score, last_ts
             FROM partial

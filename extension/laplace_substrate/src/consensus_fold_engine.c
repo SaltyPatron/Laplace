@@ -23,11 +23,17 @@
  * loud detector for partition-routing drift.
  *
  * Invariants (identical to the SQL lane, see consensus_fold_step.c):
- *   - epochs fold strictly in order; seed (existing consensus row) is epoch 0;
- *   - one φ per relation per epoch — mixed φ raises;
+ *   - THE PERIOD RULE: one fold = one rating period. Staging epochs are flush
+ *     quanta (RAM bounds), not time — all of a relation's staged games merge
+ *     into ONE Glicko period, like one tournament. Distinct deposits at
+ *     distinct times remain distinct periods (they fold against the prior
+ *     consensus as seeds). This keeps consensus values independent of
+ *     LAPLACE_STAGING_THRESHOLD.
+ *   - seed (existing consensus row) initializes the state; one φ per relation
+ *     per fold — mixed φ raises;
  *   - the q/rem observation split of pg_laplace_glicko2_accumulate_games;
- *   - witness_count: seed restores it, partials add their games;
- *   - last_observed_at = max over the seed and every partial.
+ *   - witness_count: seed restores it, the period adds its games;
+ *   - last_observed_at = max over the seed and every staged row.
  */
 #include "postgres.h"
 
@@ -476,8 +482,7 @@ typedef struct FoldGroup
     int64  witness;
     int64  max_ts;
 
-    bool   partial_open;
-    int32  p_epoch;
+    bool   partial_open;           /* the fold's ONE period, accumulating      */
     int64  p_phi, p_games, p_sum;
 } FoldGroup;
 
@@ -734,7 +739,9 @@ pg_laplace_consensus_fold_partition(PG_FUNCTION_ARGS)
                      errmsg("consensus_fold_partition: games must be > 0 (got "
                             INT64_FORMAT ")", row.games)));
 
-        if (g.partial_open && g.p_epoch == row.epoch)
+        /* the period rule: every staged row of this relation joins the ONE
+         * period of this fold, regardless of which flush epoch journaled it */
+        if (g.partial_open)
         {
             if (g.p_phi != row.phi)
                 ereport(ERROR,
@@ -746,9 +753,7 @@ pg_laplace_consensus_fold_partition(PG_FUNCTION_ARGS)
         }
         else
         {
-            fold_close_partial(&g, tau, &scratch);
             g.partial_open = true;
-            g.p_epoch = row.epoch;
             g.p_phi   = row.phi;
             g.p_games = row.games;
             g.p_sum   = row.sum_score;
