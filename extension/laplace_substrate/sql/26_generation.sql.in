@@ -16,19 +16,24 @@
 -- There is no content_index table, no constituency_edge table, no content_pairs
 -- cache — those were derived disk copies of the trajectories and are retired.
 
--- refresh-safe retirement of the derived copies (live DBs converge on refresh)
+-- refresh-safe retirement of the derived copies (live DBs converge on refresh;
+-- retired objects may be extension MEMBERS there — membership drops first)
 DO $do$
+DECLARE
+    obj text;
 BEGIN
-    IF EXISTS (
-        SELECT 1 FROM pg_depend d
-        JOIN pg_extension e ON e.oid = d.refobjid AND d.refclassid = 'pg_extension'::regclass
-        WHERE e.extname = 'laplace_substrate'
-          AND d.classid = 'pg_class'::regclass
-          AND d.objid = to_regclass('@extschema@.content_pairs')
-          AND d.deptype = 'e')
-    THEN
-        EXECUTE format('ALTER EXTENSION %I DROP TABLE @extschema@.content_pairs', 'laplace_substrate');
-    END IF;
+    FOREACH obj IN ARRAY ARRAY[
+        'TABLE @extschema@.content_pairs',
+        'PROCEDURE @extschema@.rebuild_content_index(int)',
+        'PROCEDURE @extschema@.rebuild_content_index_deep()',
+        'PROCEDURE @extschema@.rebuild_content_pairs(int)']
+    LOOP
+        BEGIN
+            EXECUTE format('ALTER EXTENSION %I DROP %s', 'laplace_substrate', obj);
+        EXCEPTION WHEN OTHERS THEN
+            NULL;  -- not a member / does not exist: already converged
+        END;
+    END LOOP;
     EXECUTE 'DROP TABLE IF EXISTS @extschema@.content_pairs';
     EXECUTE 'DROP TABLE IF EXISTS @extschema@.content_index';
     EXECUTE 'DROP TABLE IF EXISTS @extschema@.constituency_edge';
