@@ -243,6 +243,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
 
             if (tok.Lemma != tok.Form)
             {
+                // lawful re-derivation: the first token loop Emitted this lemma
                 var lemmaId = ContentEmitter.RootId(tok.Lemma);
                 if (lemmaId is not null)
                     b.AddAttestation(NativeAttestation.Categorical(

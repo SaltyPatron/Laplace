@@ -219,6 +219,9 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         return dot >= 0 ? lexname[(dot + 1)..] : lexname;
     }
 
+    // RootId here is LAWFUL re-derivation, not a ghost reference: every surface
+    // this pass attests to was Emitted by EmitSynsetEntities in pass 1 (the
+    // tier-witness law's two-pass shape — witness first, then claim).
     private static void EmitSynsetAttestations(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)
     {
         Hash128 posId = PosId(syn.SsType);
