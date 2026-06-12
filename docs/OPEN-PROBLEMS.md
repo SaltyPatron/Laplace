@@ -79,10 +79,16 @@ Proven live 2026-06-11: unique prompt deposited (prompt+reply roots in laplace.p
 **2026-06-11 addendum — the fold lane is the proven write ceiling.** The consensus merge fold
 measured 25–70k rel/s on a 1.1B-relation behavioral deposit (2 random PK probes per relation,
 62 GB working set vs 48 GB RAM, 3–4× re-touch across Glicko periods; sorted probes deployed
-live and measured ineffective — the heap is history-random). Full evidence + the PK-less
-C bulk-fold design (`prepare/finish_consensus_bulk`): `docs/HANDOFF-fold-lane.md`. Build that
-lane before any fleet deposit; everything else on the write path (ETL kernels, COPY staging)
+live and measured ineffective — the heap is history-random). Full evidence:
+`docs/HANDOFF-fold-lane.md`. Everything else on the write path (ETL kernels, COPY staging)
 already runs at 1–4M rel/s.
+
+**2026-06-12 — the terminal fold's engine lane LANDED** (`consensus_fold_engine.c`:
+table-AM reads, chunk sort on the 48-byte identity preimage, k-way merge, shared fold math
+via `consensus_fold_math.h`, multi-insert; `finish_consensus_fold` dispatches lanes via
+`laplace.fold_lane`, `finish_consensus_fold_steps` is the per-partition-COMMIT resumable
+variant). Parity regress-pinned (`consensus_fold`). At-scale rel/s measurement: pending the
+TinyLlama redeposit into the primary.
 
 Every 2026-06-07 query number was taken on the slow tier. Levers, each independent, multiplicative, and either built or planned:
 - **SPI offload of walks** — the compiled cascade (`astar_path_raw`, generate_tree/greedy) exists in the installed DLLs; new query surfaces (collocate walks, hypothesis scans) should route through C+SPI like it does (10–100× on traversal).

@@ -18,10 +18,10 @@ cd app
 dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q || exit /b 1
 
 echo ==== ingest conceptnet (/c/en/ graph) ====
-set "LAPLACE_INGEST_WORKERS=1"
+rem Serial commit is decomposer-owned now (RelationTripleDecomposerBase: StrictSerial);
+rem only the memory pin remains.
 set "LAPLACE_INGEST_COMMIT_ROWS=50000"
 dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest conceptnet || exit /b 1
-set "LAPLACE_INGEST_WORKERS=4"
 set "LAPLACE_INGEST_COMMIT_ROWS="
 echo ==== ingest atomic2020 ====
 dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest atomic2020 || exit /b 1

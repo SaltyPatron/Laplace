@@ -106,3 +106,20 @@ and a fold failure must not eat the recipe of an applied deposit. Repair lane:
 
 The C-side PK-less bulk fold above (radix sort in-engine, heap_multi_insert) remains the
 next rung if the SQL bulk lane's external sorts become the ceiling.
+
+## 2026-06-12: the engine lane landed — and the names changed
+
+The C lane shipped as `consensus_fold_engine.c` (one call per partition: table-AM staging
+reads, bounded-memory chunk sorts on the 48-byte identity preimage with BufFile spill under
+`laplace.fold_mem_mb`, k-way merge keyed (identity, epoch), the shared fold math, multi-insert
+into the new heap). BLAKE3 runs once per output relation. Vocabulary correction in the same
+landing — "bulk" is retired: `finish_consensus_bulk` → **`finish_consensus_fold`** (lane
+dispatch `laplace.fold_lane` = engine | sql), `consensus_bulk_new` → **`consensus_next`**,
+the aggregate file is `consensus_fold_step.c`, shared constants/math in
+`consensus_fold_math.h`. `LAPLACE_FOLD_LANE=terminal` is the canon knob value ("bulk" still
+accepted). **`finish_consensus_fold_steps`** is the per-partition-COMMIT resumable variant
+(staging drops as the fold walks; remaining staging IS the restart state) —
+`LAPLACE_FOLD_RESUMABLE=1`. Parity pins: regress `consensus_fold` (both lanes vs merge lane,
+fresh/incremental/NULL-object; engine under forced spill; mixed-φ refusal). The 113 GB banked
+staging was dropped with laplace_export (one-substrate law: deposits go into the primary);
+the at-scale measurement runs on the TinyLlama redeposit into `laplace`.
