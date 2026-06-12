@@ -1,0 +1,155 @@
+:root {
+  --bg: #0b0e14;
+  --panel: #121826;
+  --panel-2: #1a2235;
+  --border: #243049;
+  --text: #d7e0f0;
+  --muted: #7d8db0;
+  --accent: #4f8cff;
+  --error: #ff6b6b;
+  --confirm: #3ecf8e;
+  --refute: #ff6b6b;
+  --draw: #e8b339;
+  font-size: 15px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+#root, .app { height: 100vh; display: flex; flex-direction: column; }
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.6rem 1.2rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+header h1 { font-size: 1.15rem; margin: 0; letter-spacing: 0.04em; }
+header .tagline { font-size: 0.7rem; color: var(--muted); margin-left: 0.6rem; font-weight: 400; }
+
+nav { display: flex; gap: 0.4rem; }
+nav button {
+  background: none; border: 1px solid transparent; color: var(--muted);
+  padding: 0.35rem 0.9rem; border-radius: 6px; cursor: pointer; font-size: 0.9rem;
+}
+nav button.active { color: var(--text); border-color: var(--border); background: var(--panel-2); }
+
+.tenant { margin-left: auto; display: flex; align-items: center; gap: 0.45rem; }
+.tenant label { color: var(--muted); font-size: 0.78rem; }
+.tenant input {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  padding: 0.3rem 0.55rem; border-radius: 6px; width: 11rem; font-size: 0.85rem;
+}
+
+main { flex: 1; min-height: 0; }
+
+/* ---- chat ---- */
+.chat-layout { display: flex; height: 100%; }
+.chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.chat-toolbar {
+  display: flex; gap: 0.6rem; padding: 0.55rem 1rem; align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+.chat-toolbar select {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 0.3rem 0.5rem;
+}
+button {
+  background: var(--accent); color: #fff; border: none; border-radius: 6px;
+  padding: 0.45rem 1rem; cursor: pointer; font-size: 0.9rem;
+}
+button:disabled { opacity: 0.45; cursor: default; }
+button.ghost { background: none; border: 1px solid var(--border); color: var(--muted); }
+
+.transcript { flex: 1; overflow-y: auto; padding: 1.2rem; display: flex; flex-direction: column; gap: 0.9rem; }
+.empty { margin: auto; text-align: center; color: var(--muted); max-width: 26rem; }
+.empty h2 { color: var(--text); }
+
+.message { max-width: 72%; padding: 0.65rem 0.9rem; border-radius: 10px; white-space: pre-wrap; }
+.message.user { align-self: flex-end; background: #20304f; }
+.message.assistant { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border); }
+.message .error { color: var(--error); font-size: 0.8rem; }
+
+.badges { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.5rem; }
+.badge {
+  font-size: 0.72rem; padding: 0.1rem 0.5rem; border-radius: 99px;
+  border: 1px solid var(--border); color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.badge-mu { background: rgba(0, 0, 0, 0.25); }
+
+.composer { display: flex; gap: 0.6rem; padding: 0.8rem 1rem; border-top: 1px solid var(--border); }
+.composer textarea {
+  flex: 1; resize: none; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 0.55rem 0.75rem;
+  font-family: inherit; font-size: 0.95rem;
+}
+
+.quote-banner {
+  margin: 0 1rem 0.6rem; padding: 0.6rem 0.9rem; border-radius: 8px;
+  background: #2a2410; border: 1px solid #5d4d18; font-size: 0.88rem;
+}
+.quote-banner a { color: var(--accent); }
+.quote-banner button { margin-left: 0.5rem; padding: 0.25rem 0.7rem; font-size: 0.82rem; }
+
+/* ---- receipt panel ---- */
+.receipt-panel {
+  width: 22rem; border-left: 1px solid var(--border); background: var(--panel);
+  padding: 1rem; overflow-y: auto; flex-shrink: 0;
+}
+.receipt-panel h2 { margin: 0 0 0.3rem; font-size: 1rem; }
+.hint { color: var(--muted); font-size: 0.8rem; }
+.row { display: flex; gap: 0.45rem; margin: 0.6rem 0; }
+.row input {
+  flex: 1; background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; padding: 0.4rem 0.6rem;
+}
+.error { color: var(--error); font-size: 0.85rem; }
+
+.evidence h3 { font-size: 0.95rem; margin: 0.8rem 0 0.4rem; }
+.entity-id { display: block; color: var(--muted); font-size: 0.65rem; font-family: monospace; font-weight: 400; }
+.evidence ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+.evidence li {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.5rem 0.65rem; font-size: 0.82rem; display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center;
+}
+.relation { color: var(--accent); font-family: monospace; font-size: 0.75rem; }
+.object { font-weight: 600; }
+.source { color: var(--muted); margin-left: auto; font-size: 0.74rem; }
+.chip { font-size: 0.68rem; padding: 0.05rem 0.45rem; border-radius: 99px; }
+.chip-confirm { background: rgba(62, 207, 142, 0.15); color: var(--confirm); }
+.chip-refute { background: rgba(255, 107, 107, 0.15); color: var(--refute); }
+.chip-draw { background: rgba(232, 179, 57, 0.15); color: var(--draw); }
+
+/* ---- billing ---- */
+.billing { padding: 1.2rem 2rem; overflow-y: auto; height: 100%; }
+.billing h2 { font-size: 1rem; margin: 1.4rem 0 0.7rem; }
+.plan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1rem; }
+.plan-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 1rem;
+  display: flex; flex-direction: column; gap: 0.5rem;
+}
+.plan-card h3 { margin: 0; text-transform: capitalize; }
+.price { font-size: 1.4rem; margin: 0; }
+.credits { list-style: none; padding: 0; margin: 0; font-size: 0.8rem; color: var(--muted); flex: 1; }
+.credits li { display: flex; justify-content: space-between; padding: 0.12rem 0; }
+
+table.catalog { border-collapse: collapse; width: 100%; max-width: 50rem; font-size: 0.85rem; }
+table.catalog th, table.catalog td {
+  text-align: left; padding: 0.4rem 0.7rem; border-bottom: 1px solid var(--border);
+}
+table.catalog th { color: var(--muted); font-weight: 500; }
+
+@media (max-width: 900px) {
+  .receipt-panel { display: none; }
+  .message { max-width: 92%; }
+}
