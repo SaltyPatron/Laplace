@@ -235,3 +235,40 @@ TEST(LaplaceCoreMantissa, EveryFlagBitProbed) {
         EXPECT_EQ(out.run_length, 0u);
     }
 }
+
+
+TEST(LaplaceCoreMantissa, TestimonyWalkRoundTrip) {
+    const hash128_t ids[3] = {
+        {0xDEADBEEFCAFEBABEULL, 0x0123456789ABCDEFULL},
+        {0x1ULL, 0x2ULL},
+        {~0ULL, ~0ULL},
+    };
+    const int64_t scores[3] = { 987654321LL, -1000000000LL, 0LL };
+    const uint16_t games[3] = { 1, 7, 65535 };
+    double walk[12];
+    ASSERT_EQ(0, laplace_testimony_pack_walk(ids, scores, games, 3, walk));
+
+    for (int i = 0; i < 3; i++) {
+        hash128_t oid; int64_t score; uint16_t g, ord;
+        ASSERT_EQ(0, laplace_testimony_unpack_vertex(walk + i * 4, &oid, &score, &g, &ord));
+        EXPECT_EQ(oid.hi, ids[i].hi);
+        EXPECT_EQ(oid.lo, ids[i].lo);
+        EXPECT_EQ(score, scores[i]);
+        EXPECT_EQ(g, games[i]);
+        EXPECT_EQ(ord, (uint16_t)i);
+        // the exponent-pinning law holds for testimony vertices too
+        for (int c = 0; c < 4; c++)
+            EXPECT_EQ(fp_biased_exp(walk[i * 4 + c]), kBiasedExpZero);
+    }
+
+    // a content vertex is never mistaken for testimony
+    const mantissa_payload_t content = {{5, 6}, 1, 1,
+        laplace_vertex_flags(2, 1, 104)};
+    double cv[4];
+    mantissa_pack(cv, &content);
+    EXPECT_EQ(-1, laplace_testimony_unpack_vertex(cv, nullptr, nullptr, nullptr, nullptr));
+
+    // scores beyond the 36-bit zigzag budget refuse
+    const int64_t too_big[1] = { 1LL << 40 };
+    EXPECT_EQ(-2, laplace_testimony_pack_walk(ids, too_big, nullptr, 1, walk));
+}
