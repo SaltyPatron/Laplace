@@ -84,7 +84,9 @@ public sealed class TextEntityBuilder
             var childFlags = new ulong[node.ChildCount];
             for (uint ci = 0; ci < node.ChildCount; ci++)
             {
-                var child = _tree.GetNode(node.FirstChildIdx + ci);
+                // references collapse with the wrapper: the trajectory names the
+                // stand-in, never an unemitted unary wrapper id
+                var child = _tree.GetNode(_tree.CollapseIndex(node.FirstChildIdx + ci));
                 childIds[ci] = child.Id;
                 childFlags[ci] = Trajectory.VertexFlags(
                     child.Tier, hasAtom: child.Tier == 0, atom: child.Atom);
