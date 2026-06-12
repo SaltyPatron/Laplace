@@ -1,0 +1,4164 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Laplace.Endpoints.OpenAICompat | v1",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "core"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "tags": [
+          "core"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capabilities": {
+      "get": {
+        "tags": [
+          "core"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilitiesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "tags": [
+          "openai"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatCompletionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatCompletionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequiredResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/completions": {
+      "post": {
+        "tags": [
+          "openai"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompletionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompletionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequiredResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/embeddings": {
+      "post": {
+        "tags": [
+          "openai"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmbeddingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not Implemented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotImplementedResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/evidence/{target}": {
+      "get": {
+        "tags": [
+          "openai"
+        ],
+        "parameters": [
+          {
+            "name": "target",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/audit/report": {
+      "post": {
+        "tags": [
+          "reports"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuditReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditReportResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequiredResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/visualizations/substrate": {
+      "post": {
+        "tags": [
+          "reports"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VisualizationExecuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VisualizationGraphResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequiredResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/explain/report": {
+      "post": {
+        "tags": [
+          "reports"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplainReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplainReportResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequiredResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/catalog": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingCatalogResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/products": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingProductsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/plans": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingPlansResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/plans/{planId}/subscribe": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "parameters": [
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanSubscribeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanSubscribeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/entitlements": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntitlementsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/entitlements/consume": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreditConsumeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditConsumeResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditConsumeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/webhooks/stripe": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/catalog/sync": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogSyncResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/preflight": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillingPreflightRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreflightQuoteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/synthesis/quote": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SynthesisQuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SynthesisQuoteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/explain/quote": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplainQuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplainQuoteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/audit/quote": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuditQuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditQuoteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/visualization/quote": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VisualizationQuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VisualizationQuoteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/recipe/quote": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeQuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeQuoteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/quotes/{quoteId}": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "parameters": [
+          {
+            "name": "quoteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteStatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/usage": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AuditQuoteRequest": {
+        "required": [
+          "tenant"
+        ],
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "scope": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "include_evidence": {
+            "type": "boolean",
+            "default": true
+          },
+          "include_consensus": {
+            "type": "boolean",
+            "default": true
+          },
+          "include_convergence": {
+            "type": "boolean",
+            "default": true
+          },
+          "academic": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "AuditQuoteResponse": {
+        "required": [
+          "quote_id",
+          "tenant",
+          "service_id",
+          "scope",
+          "academic",
+          "metered_items",
+          "billable_units",
+          "unit",
+          "items_per_unit",
+          "amount_cents",
+          "currency",
+          "status",
+          "expires_at",
+          "stripe_checkout_url",
+          "next"
+        ],
+        "type": "object",
+        "properties": {
+          "quote_id": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "service_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "academic": {
+            "type": "boolean"
+          },
+          "metered_items": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "billable_units": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "items_per_unit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "amount_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stripe_checkout_url": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "next": {
+            "$ref": "#/components/schemas/QuoteNextStep"
+          }
+        }
+      },
+      "AuditReportRequest": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "include_evidence": {
+            "type": "boolean",
+            "default": true
+          },
+          "include_consensus": {
+            "type": "boolean",
+            "default": true
+          },
+          "include_convergence": {
+            "type": "boolean",
+            "default": true
+          },
+          "academic": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "AuditReportResponse": {
+        "required": [
+          "id",
+          "object",
+          "created",
+          "scope",
+          "academic",
+          "include_evidence",
+          "include_consensus",
+          "include_convergence",
+          "report",
+          "billing"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "academic": {
+            "type": "boolean"
+          },
+          "include_evidence": {
+            "type": "boolean"
+          },
+          "include_consensus": {
+            "type": "boolean"
+          },
+          "include_convergence": {
+            "type": "boolean"
+          },
+          "report": {
+            "$ref": "#/components/schemas/SubstrateAuditReport"
+          },
+          "billing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BillingReceipt"
+              }
+            ]
+          }
+        }
+      },
+      "BillingCatalogResponse": {
+        "required": [
+          "object",
+          "data"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogServiceView"
+            }
+          }
+        }
+      },
+      "BillingPlansResponse": {
+        "required": [
+          "object",
+          "data"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanView"
+            }
+          }
+        }
+      },
+      "BillingPreflightRequest": {
+        "required": [
+          "service_id",
+          "units",
+          "tenant"
+        ],
+        "type": "object",
+        "properties": {
+          "service_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "units": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "tenant": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "BillingProductsResponse": {
+        "required": [
+          "object",
+          "data"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductView"
+            }
+          }
+        }
+      },
+      "BillingReceipt": {
+        "required": [
+          "quote_id",
+          "amount_cents",
+          "currency",
+          "tenant",
+          "service_id"
+        ],
+        "type": "object",
+        "properties": {
+          "quote_id": {
+            "type": "string"
+          },
+          "amount_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "service_id": {
+            "type": "string"
+          }
+        }
+      },
+      "CapabilitiesResponse": {
+        "required": [
+          "stream",
+          "endpoints"
+        ],
+        "type": "object",
+        "properties": {
+          "stream": {
+            "type": "string"
+          },
+          "endpoints": {
+            "$ref": "#/components/schemas/CapabilityEndpoints"
+          }
+        }
+      },
+      "CapabilityEndpoints": {
+        "required": [
+          "chat_completions",
+          "completions",
+          "embeddings",
+          "audit_reports",
+          "visualizations",
+          "explainability_reports",
+          "billing",
+          "models"
+        ],
+        "type": "object",
+        "properties": {
+          "chat_completions": {
+            "$ref": "#/components/schemas/CapabilityStatus"
+          },
+          "completions": {
+            "$ref": "#/components/schemas/CapabilityStatus"
+          },
+          "embeddings": {
+            "$ref": "#/components/schemas/CapabilityStatus"
+          },
+          "audit_reports": {
+            "$ref": "#/components/schemas/CapabilityStatus"
+          },
+          "visualizations": {
+            "$ref": "#/components/schemas/CapabilityStatus"
+          },
+          "explainability_reports": {
+            "$ref": "#/components/schemas/CapabilityStatus"
+          },
+          "billing": {
+            "$ref": "#/components/schemas/CapabilityStatus"
+          },
+          "models": {
+            "$ref": "#/components/schemas/CapabilityStatus"
+          }
+        }
+      },
+      "CapabilityStatus": {
+        "required": [
+          "status"
+        ],
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "backend": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "billing": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "provider": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "CatalogServiceView": {
+        "required": [
+          "service_id",
+          "product_id",
+          "display_name",
+          "unit",
+          "unit_price_cents",
+          "base_fee_cents",
+          "currency",
+          "lookup_key",
+          "active",
+          "metered",
+          "recurring_interval",
+          "stripe_price_id"
+        ],
+        "type": "object",
+        "properties": {
+          "service_id": {
+            "type": "string"
+          },
+          "product_id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "unit_price_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "base_fee_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "lookup_key": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "metered": {
+            "type": "boolean"
+          },
+          "recurring_interval": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "stripe_price_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "CatalogSyncEntryView": {
+        "required": [
+          "service_id",
+          "lookup_key",
+          "stripe_price_id",
+          "stripe_product_id",
+          "status"
+        ],
+        "type": "object",
+        "properties": {
+          "service_id": {
+            "type": "string"
+          },
+          "lookup_key": {
+            "type": "string"
+          },
+          "stripe_price_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "stripe_product_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "CatalogSyncResponse": {
+        "required": [
+          "stripe_configured",
+          "entries"
+        ],
+        "type": "object",
+        "properties": {
+          "stripe_configured": {
+            "type": "boolean"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogSyncEntryView"
+            }
+          }
+        }
+      },
+      "ChatChoice": {
+        "required": [
+          "index",
+          "message",
+          "finish_reason"
+        ],
+        "type": "object",
+        "properties": {
+          "index": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "message": {
+            "$ref": "#/components/schemas/ChatResponseMessage"
+          },
+          "finish_reason": {
+            "type": "string"
+          }
+        }
+      },
+      "ChatCompletionResponse": {
+        "required": [
+          "id",
+          "object",
+          "created",
+          "model",
+          "choices",
+          "billing",
+          "metadata"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "model": {
+            "type": "string"
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatChoice"
+            }
+          },
+          "billing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BillingReceipt"
+              }
+            ]
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ChatMetadata"
+          }
+        }
+      },
+      "ChatCompletionsRequest": {
+        "required": [
+          "model",
+          "messages"
+        ],
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "messages": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            }
+          },
+          "stream": {
+            "type": "boolean",
+            "default": false
+          },
+          "max_tokens": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "max_completion_tokens": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "temperature": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "top_p": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "top_k": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "window": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "topic_boost": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "stop": { },
+          "web_search": {
+            "type": "boolean",
+            "default": false
+          },
+          "web_search_results": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "ChatMessage": {
+        "required": [
+          "role",
+          "content"
+        ],
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "content": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ChatMetadata": {
+        "type": "object",
+        "properties": {
+          "witnesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "reply_rows": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "generated_tokens": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "laplace": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LaplaceChatMetadata"
+              }
+            ]
+          }
+        }
+      },
+      "ChatResponseMessage": {
+        "required": [
+          "role",
+          "content"
+        ],
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        }
+      },
+      "CompletionChoice": {
+        "required": [
+          "text",
+          "index",
+          "finish_reason",
+          "logprobs"
+        ],
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "index": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "finish_reason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "logprobs": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CompletionLogprobs"
+              }
+            ]
+          }
+        }
+      },
+      "CompletionLogprobs": {
+        "required": [
+          "token_logprobs"
+        ],
+        "type": "object",
+        "properties": {
+          "token_logprobs": {
+            "type": "array",
+            "items": {
+              "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+              "type": [
+                "number",
+                "string"
+              ],
+              "format": "double"
+            }
+          }
+        }
+      },
+      "CompletionResponse": {
+        "required": [
+          "id",
+          "object",
+          "created",
+          "model",
+          "choices",
+          "billing"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "model": {
+            "type": "string"
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletionChoice"
+            }
+          },
+          "billing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CompletionsReceipt"
+              }
+            ]
+          }
+        }
+      },
+      "CompletionsReceipt": {
+        "required": [
+          "quote_id",
+          "amount_cents",
+          "currency",
+          "tenant"
+        ],
+        "type": "object",
+        "properties": {
+          "quote_id": {
+            "type": "string"
+          },
+          "amount_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          }
+        }
+      },
+      "CompletionsRequest": {
+        "required": [
+          "model",
+          "prompt"
+        ],
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "prompt": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "stream": {
+            "type": "boolean",
+            "default": false
+          },
+          "max_tokens": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "temperature": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "top_p": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "top_k": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "window": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "topic_boost": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "stop": { },
+          "echo": {
+            "type": "boolean",
+            "default": false
+          },
+          "logprobs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "ConsensusHealth": {
+        "required": [
+          "evidenceRows",
+          "consensusRows",
+          "dedupRatio",
+          "avgWitnesses",
+          "maxWitnesses"
+        ],
+        "type": "object",
+        "properties": {
+          "evidenceRows": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "consensusRows": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "dedupRatio": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "avgWitnesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "maxWitnesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "CreditConsumeRequest": {
+        "required": [
+          "tenant",
+          "service_id"
+        ],
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "service_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "units": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 1
+          }
+        }
+      },
+      "CreditConsumeResponse": {
+        "required": [
+          "accepted",
+          "tenant",
+          "plan_id",
+          "service_id",
+          "units",
+          "remaining",
+          "period_end",
+          "status"
+        ],
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "plan_id": {
+            "type": "string"
+          },
+          "service_id": {
+            "type": "string"
+          },
+          "units": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "remaining": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "EmbeddingsRequest": {
+        "required": [
+          "model",
+          "input"
+        ],
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "input": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JsonElement"
+              }
+            ]
+          }
+        }
+      },
+      "EntitlementsResponse": {
+        "required": [
+          "tenant",
+          "data"
+        ],
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EntitlementView"
+            }
+          }
+        }
+      },
+      "EntitlementView": {
+        "required": [
+          "tenant",
+          "plan_id",
+          "status",
+          "period_start",
+          "period_end",
+          "monthly_credits",
+          "used_credits",
+          "stripe_customer_id",
+          "stripe_subscription_id",
+          "updated_at"
+        ],
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": "string"
+          },
+          "plan_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "monthly_credits": {
+            "type": "object",
+            "additionalProperties": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          "used_credits": {
+            "type": "object",
+            "additionalProperties": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          "stripe_customer_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "stripe_subscription_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ErrorBody": {
+        "required": [
+          "type",
+          "code",
+          "message"
+        ],
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "required": [
+          "error"
+        ],
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          }
+        }
+      },
+      "EvidenceResponse": {
+        "required": [
+          "entity_id",
+          "entity_label",
+          "evidence"
+        ],
+        "type": "object",
+        "properties": {
+          "entity_id": {
+            "type": "string"
+          },
+          "entity_label": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LabeledEvidenceItem"
+            }
+          }
+        }
+      },
+      "EvidenceSample": {
+        "required": [
+          "typeIdHex",
+          "objectIdHex",
+          "sourceIdHex",
+          "contextIdHex",
+          "outcome",
+          "observationCount"
+        ],
+        "type": "object",
+        "properties": {
+          "typeIdHex": {
+            "type": "string"
+          },
+          "objectIdHex": {
+            "type": "string"
+          },
+          "sourceIdHex": {
+            "type": "string"
+          },
+          "contextIdHex": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "outcome": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int16"
+          },
+          "observationCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "ExecuteHeader": {
+        "required": [
+          "name",
+          "value"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "ExplainQuoteRequest": {
+        "required": [
+          "tenant",
+          "prompt",
+          "depth",
+          "beam"
+        ],
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "prompt": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "depth": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "beam": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "academic": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "ExplainQuoteResponse": {
+        "required": [
+          "quote_id",
+          "tenant",
+          "service_id",
+          "depth",
+          "beam",
+          "academic",
+          "estimated_trace_nodes",
+          "billable_units",
+          "unit",
+          "amount_cents",
+          "currency",
+          "status",
+          "expires_at",
+          "stripe_checkout_url",
+          "next"
+        ],
+        "type": "object",
+        "properties": {
+          "quote_id": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "service_id": {
+            "type": "string"
+          },
+          "depth": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "beam": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "academic": {
+            "type": "boolean"
+          },
+          "estimated_trace_nodes": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "billable_units": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "amount_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stripe_checkout_url": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "next": {
+            "$ref": "#/components/schemas/QuoteNextStep"
+          }
+        }
+      },
+      "ExplainReportRequest": {
+        "required": [
+          "prompt",
+          "depth",
+          "beam"
+        ],
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "depth": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "beam": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "academic": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "ExplainReportResponse": {
+        "required": [
+          "id",
+          "object",
+          "created",
+          "prompt",
+          "depth",
+          "beam",
+          "academic",
+          "trace",
+          "billing"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "depth": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "beam": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "academic": {
+            "type": "boolean"
+          },
+          "trace": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExplainTraceStep"
+            }
+          },
+          "billing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BillingReceipt"
+              }
+            ]
+          }
+        }
+      },
+      "ExplainTraceStep": {
+        "required": [
+          "depth",
+          "pathHex",
+          "typePathHex",
+          "entityIdHex",
+          "entityLabel",
+          "effectiveMu",
+          "pathMu",
+          "witnesses",
+          "evidence"
+        ],
+        "type": "object",
+        "properties": {
+          "depth": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "pathHex": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "typePathHex": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "entityIdHex": {
+            "type": "string"
+          },
+          "entityLabel": {
+            "type": "string"
+          },
+          "effectiveMu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "pathMu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "witnesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EvidenceSample"
+            }
+          }
+        }
+      },
+      "HealthResponse": {
+        "required": [
+          "status",
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "stream": {
+            "type": "string"
+          }
+        }
+      },
+      "JsonElement": { },
+      "LabeledEvidenceItem": {
+        "required": [
+          "type_id",
+          "type_label",
+          "object_id",
+          "object_label",
+          "source_id",
+          "source_label",
+          "context_id",
+          "outcome",
+          "observation_count"
+        ],
+        "type": "object",
+        "properties": {
+          "type_id": {
+            "type": "string"
+          },
+          "type_label": {
+            "type": "string"
+          },
+          "object_id": {
+            "type": "string"
+          },
+          "object_label": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "source_label": {
+            "type": "string"
+          },
+          "context_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "outcome": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int16"
+          },
+          "observation_count": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "LaplaceChatMetadata": {
+        "required": [
+          "provenance"
+        ],
+        "type": "object",
+        "properties": {
+          "provenance": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProvenanceLine"
+            }
+          }
+        }
+      },
+      "ModelInfo": {
+        "required": [
+          "id",
+          "object",
+          "created",
+          "owned_by"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "owned_by": {
+            "type": "string"
+          },
+          "status": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ModelList": {
+        "required": [
+          "object",
+          "data"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelInfo"
+            }
+          }
+        }
+      },
+      "NotImplementedBody": {
+        "required": [
+          "type",
+          "code",
+          "endpoint",
+          "message"
+        ],
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "NotImplementedResponse": {
+        "required": [
+          "error"
+        ],
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/NotImplementedBody"
+          }
+        }
+      },
+      "PaymentRequiredBody": {
+        "required": [
+          "type",
+          "code",
+          "message",
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "detail": { }
+        }
+      },
+      "PaymentRequiredResponse": {
+        "required": [
+          "error"
+        ],
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/PaymentRequiredBody"
+          }
+        }
+      },
+      "PlanNextStep": {
+        "required": [
+          "checkout_url",
+          "note"
+        ],
+        "type": "object",
+        "properties": {
+          "checkout_url": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "PlanSubscribeRequest": {
+        "required": [
+          "tenant"
+        ],
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "PlanSubscribeResponse": {
+        "required": [
+          "quote_id",
+          "tenant",
+          "plan_id",
+          "service_id",
+          "monthly_price_cents",
+          "amount_cents",
+          "currency",
+          "status",
+          "stripe_checkout_url",
+          "monthly_credits",
+          "next"
+        ],
+        "type": "object",
+        "properties": {
+          "quote_id": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "plan_id": {
+            "type": "string"
+          },
+          "service_id": {
+            "type": "string"
+          },
+          "monthly_price_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "amount_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "stripe_checkout_url": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "monthly_credits": {
+            "type": "object",
+            "additionalProperties": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          "next": {
+            "$ref": "#/components/schemas/PlanNextStep"
+          }
+        }
+      },
+      "PlanView": {
+        "required": [
+          "plan_id",
+          "service_id",
+          "name",
+          "description",
+          "monthly_price_cents",
+          "currency",
+          "monthly_credits",
+          "included_product_ids",
+          "support_tier",
+          "active"
+        ],
+        "type": "object",
+        "properties": {
+          "plan_id": {
+            "type": "string"
+          },
+          "service_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "monthly_price_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "monthly_credits": {
+            "type": "object",
+            "additionalProperties": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          "included_product_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "support_tier": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PreflightQuoteResponse": {
+        "required": [
+          "quote_id",
+          "tenant",
+          "service_id",
+          "units",
+          "amount_cents",
+          "currency",
+          "status",
+          "expires_at",
+          "stripe_checkout_url",
+          "next"
+        ],
+        "type": "object",
+        "properties": {
+          "quote_id": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "service_id": {
+            "type": "string"
+          },
+          "units": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "amount_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stripe_checkout_url": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "next": {
+            "$ref": "#/components/schemas/QuoteNextStep"
+          }
+        }
+      },
+      "ProductPriceView": {
+        "required": [
+          "service_id",
+          "unit",
+          "unit_price_cents",
+          "base_fee_cents",
+          "currency",
+          "lookup_key",
+          "metered",
+          "recurring_interval"
+        ],
+        "type": "object",
+        "properties": {
+          "service_id": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "unit_price_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "base_fee_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "lookup_key": {
+            "type": "string"
+          },
+          "metered": {
+            "type": "boolean"
+          },
+          "recurring_interval": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ProductView": {
+        "required": [
+          "product_id",
+          "name",
+          "description",
+          "category",
+          "prices"
+        ],
+        "type": "object",
+        "properties": {
+          "product_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "prices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductPriceView"
+            }
+          }
+        }
+      },
+      "ProvenanceLine": {
+        "required": [
+          "reply",
+          "eff_mu",
+          "witnesses"
+        ],
+        "type": "object",
+        "properties": {
+          "reply": {
+            "type": "string"
+          },
+          "eff_mu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "witnesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "QuoteNextStep": {
+        "required": [
+          "execute_header",
+          "note"
+        ],
+        "type": "object",
+        "properties": {
+          "execute_header": {
+            "$ref": "#/components/schemas/ExecuteHeader"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "QuoteStatusResponse": {
+        "required": [
+          "quote_id",
+          "tenant",
+          "service_id",
+          "units",
+          "amount_cents",
+          "currency",
+          "status",
+          "consumed",
+          "stripe_checkout_url",
+          "expires_at"
+        ],
+        "type": "object",
+        "properties": {
+          "quote_id": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "service_id": {
+            "type": "string"
+          },
+          "units": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "amount_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "consumed": {
+            "type": "boolean"
+          },
+          "stripe_checkout_url": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RecipeQuoteRequest": {
+        "required": [
+          "tenant",
+          "action"
+        ],
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "action": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "content_items": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 1
+          },
+          "commercial": {
+            "type": "boolean",
+            "default": false
+          },
+          "private_export": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "RecipeQuoteResponse": {
+        "required": [
+          "quote_id",
+          "tenant",
+          "service_id",
+          "action",
+          "content_items",
+          "commercial",
+          "private_export",
+          "metered_items",
+          "billable_units",
+          "unit",
+          "items_per_unit",
+          "amount_cents",
+          "currency",
+          "status",
+          "expires_at",
+          "stripe_checkout_url",
+          "next"
+        ],
+        "type": "object",
+        "properties": {
+          "quote_id": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "service_id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "content_items": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "commercial": {
+            "type": "boolean"
+          },
+          "private_export": {
+            "type": "boolean"
+          },
+          "metered_items": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "billable_units": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "items_per_unit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "amount_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stripe_checkout_url": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "next": {
+            "$ref": "#/components/schemas/QuoteNextStep"
+          }
+        }
+      },
+      "SubstrateAuditReport": {
+        "required": [
+          "counts",
+          "consensus",
+          "multiSourceEntityCount",
+          "topRelations"
+        ],
+        "type": "object",
+        "properties": {
+          "counts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubstrateCount"
+            }
+          },
+          "consensus": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConsensusHealth"
+              }
+            ]
+          },
+          "multiSourceEntityCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "topRelations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VisualizationEdge"
+            }
+          }
+        }
+      },
+      "SubstrateCount": {
+        "required": [
+          "metric",
+          "value"
+        ],
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string"
+          },
+          "value": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "SubstrateVisualizationGraph": {
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "type": "object",
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VisualizationNode"
+            }
+          },
+          "edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VisualizationEdge"
+            }
+          }
+        }
+      },
+      "SynthesisQuoteRequest": {
+        "required": [
+          "tenant",
+          "vocab_size",
+          "hidden_size",
+          "num_layers",
+          "num_heads"
+        ],
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "vocab_size": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "hidden_size": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "num_layers": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "num_heads": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "num_kv_heads": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "intermediate_size": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64",
+            "default": 0
+          },
+          "tied_embeddings": {
+            "type": "boolean",
+            "default": false
+          },
+          "format": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "SynthesisQuoteResponse": {
+        "required": [
+          "quote_id",
+          "tenant",
+          "service_id",
+          "estimated_parameters",
+          "billable_units",
+          "unit",
+          "amount_cents",
+          "currency",
+          "status",
+          "expires_at",
+          "stripe_checkout_url",
+          "format",
+          "next"
+        ],
+        "type": "object",
+        "properties": {
+          "quote_id": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "service_id": {
+            "type": "string"
+          },
+          "estimated_parameters": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "billable_units": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "amount_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stripe_checkout_url": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "format": {
+            "type": "string"
+          },
+          "next": {
+            "$ref": "#/components/schemas/QuoteNextStep"
+          }
+        }
+      },
+      "UsageEntry": {
+        "required": [
+          "quoteId",
+          "tenant",
+          "serviceId",
+          "units",
+          "amountCents",
+          "executedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "serviceId": {
+            "type": "string"
+          },
+          "units": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "amountCents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "executedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UsageResponse": {
+        "required": [
+          "tenant",
+          "total_amount_cents",
+          "entries"
+        ],
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": "string"
+          },
+          "total_amount_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageEntry"
+            }
+          }
+        }
+      },
+      "VisualizationEdge": {
+        "required": [
+          "subjectIdHex",
+          "subject",
+          "typeIdHex",
+          "type",
+          "objectIdHex",
+          "object",
+          "effectiveMu",
+          "witnesses"
+        ],
+        "type": "object",
+        "properties": {
+          "subjectIdHex": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "typeIdHex": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "objectIdHex": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "effectiveMu": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "witnesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "VisualizationExecuteRequest": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "include_geometry": {
+            "type": "boolean",
+            "default": true
+          },
+          "include_evidence": {
+            "type": "boolean",
+            "default": false
+          },
+          "format": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "VisualizationGraphResponse": {
+        "required": [
+          "id",
+          "object",
+          "created",
+          "format",
+          "include_geometry",
+          "include_evidence",
+          "graph",
+          "billing"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "format": {
+            "type": "string"
+          },
+          "include_geometry": {
+            "type": "boolean"
+          },
+          "include_evidence": {
+            "type": "boolean"
+          },
+          "graph": {
+            "$ref": "#/components/schemas/SubstrateVisualizationGraph"
+          },
+          "billing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BillingReceipt"
+              }
+            ]
+          }
+        }
+      },
+      "VisualizationNode": {
+        "required": [
+          "idHex",
+          "label",
+          "x",
+          "y",
+          "z",
+          "m",
+          "radius",
+          "constituents",
+          "evidenceRows"
+        ],
+        "type": "object",
+        "properties": {
+          "idHex": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "x": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "y": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "z": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "m": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "radius": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "constituents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "evidenceRows": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "VisualizationQuoteRequest": {
+        "required": [
+          "tenant",
+          "nodes"
+        ],
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "nodes": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "edges": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 0
+          },
+          "include_geometry": {
+            "type": "boolean",
+            "default": true
+          },
+          "include_evidence": {
+            "type": "boolean",
+            "default": false
+          },
+          "interactive": {
+            "type": "boolean",
+            "default": false
+          },
+          "format": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "VisualizationQuoteResponse": {
+        "required": [
+          "quote_id",
+          "tenant",
+          "service_id",
+          "nodes",
+          "edges",
+          "include_geometry",
+          "include_evidence",
+          "interactive",
+          "format",
+          "metered_items",
+          "billable_units",
+          "unit",
+          "items_per_unit",
+          "amount_cents",
+          "currency",
+          "status",
+          "expires_at",
+          "stripe_checkout_url",
+          "next"
+        ],
+        "type": "object",
+        "properties": {
+          "quote_id": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "service_id": {
+            "type": "string"
+          },
+          "nodes": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "edges": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "include_geometry": {
+            "type": "boolean"
+          },
+          "include_evidence": {
+            "type": "boolean"
+          },
+          "interactive": {
+            "type": "boolean"
+          },
+          "format": {
+            "type": "string"
+          },
+          "metered_items": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "billable_units": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "items_per_unit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "amount_cents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stripe_checkout_url": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "next": {
+            "$ref": "#/components/schemas/QuoteNextStep"
+          }
+        }
+      },
+      "WebhookResponse": {
+        "required": [
+          "accepted",
+          "verified",
+          "duplicate",
+          "event_id",
+          "event_type",
+          "status",
+          "tenant",
+          "service_id",
+          "quote_id",
+          "plan_id"
+        ],
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "duplicate": {
+            "type": "boolean"
+          },
+          "event_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "event_type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "service_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "quote_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "plan_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "core"
+    },
+    {
+      "name": "openai"
+    },
+    {
+      "name": "reports"
+    },
+    {
+      "name": "billing"
+    }
+  ]
+}

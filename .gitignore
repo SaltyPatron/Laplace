@@ -372,3 +372,9 @@ __pycache__/
 # ALL build trees (build-win, build-win-ext, build-win-asan, and any accidental variant --
 # the 'build-win2' incident committed 74k lines of artifacts because only exact names were listed)
 build-win*/
+
+# Laplace web SPA build artifacts (built by scripts\win\build-web.cmd)
+app/Laplace.Endpoints.OpenAICompat/wwwroot/
+web/node_modules/
+web/dist/
+out/
