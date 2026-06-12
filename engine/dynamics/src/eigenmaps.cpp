@@ -2,8 +2,8 @@
 
 #include <Eigen/Core>
 #include <Eigen/Sparse>
-#include <Spectra/SymEigsShiftSolver.h>
-#include <Spectra/MatOp/SparseSymShiftSolve.h>
+#include <Spectra/SymEigsSolver.h>
+#include <Spectra/MatOp/SparseSymMatProd.h>
 #include <Spectra/Util/SelectionRule.h>
 
 #include <algorithm>
@@ -94,11 +94,14 @@ int eigendecompose_laplacian(const SpMat& W,
     const int ncv = std::min(ni - 1, std::max(2 * nev + 1, 20));
     if (ncv <= nev) return -2;
 
-    Spectra::SparseSymShiftSolve<double> op(L);
-    Spectra::SymEigsShiftSolver<Spectra::SparseSymShiftSolve<double>>
-        eigs(op, nev, ncv, 0.0);
+    // Smallest Laplacian eigenvalues are extremal: plain Lanczos matvecs reach
+    // them in O(nnz) per step. Never shift-and-invert here — sparse factorization
+    // of a graph Laplacian fills in catastrophically at vocab scale.
+    Spectra::SparseSymMatProd<double> op(L);
+    Spectra::SymEigsSolver<Spectra::SparseSymMatProd<double>>
+        eigs(op, nev, ncv);
     eigs.init();
-    const int nconv = eigs.compute(Spectra::SortRule::LargestMagn);
+    const int nconv = eigs.compute(Spectra::SortRule::SmallestAlge);
     if (eigs.info() != Spectra::CompInfo::Successful || nconv < nev) {
         return -3;
     }
