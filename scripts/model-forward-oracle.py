@@ -173,17 +173,11 @@ def _read_gguf(path):
     return kv, out
 
 
-def cmd_forward_gguf(gguf, prompt, tok_dir):
-    kv, T = _read_gguf(gguf)
-    pre = "llama."
-    L = kv[pre+"block_count"]; d = kv[pre+"embedding_length"]
-    H = kv[pre+"attention.head_count"]; KV = kv[pre+"attention.head_count_kv"]
-    hd = d // H
-    eps = kv.get(pre+"attention.layer_norm_rms_epsilon", 1e-5)
-    theta = kv.get(pre+"rope.freq_base", 10000.0)
-    vocab = json.load(open(os.path.join(tok_dir, "tokenizer.json"), encoding="utf-8"))["model"]["vocab"]
-    inv = {i: s for s, i in vocab.items()}
+def gguf_vocab(tok_dir):
+    return json.load(open(os.path.join(tok_dir, "tokenizer.json"), encoding="utf-8"))["model"]["vocab"]
 
+
+def tokenize_words(vocab, prompt):
     # SentencePiece vocabs key words as ▁word with BOS=1; WordPiece vocabs key
     # plain (lowercased) pieces and lead with [CLS]. The mold is llama either way —
     # only the vocab keying differs.
@@ -195,6 +189,17 @@ def cmd_forward_gguf(gguf, prompt, tok_dir):
                 break
         else:
             sys.exit(f"prompt word {w!r} not a single vocab token")
+    return ids
+
+
+def gguf_forward(kv, T, ids, layers=None):
+    pre = "llama."
+    L = kv[pre+"block_count"]; d = kv[pre+"embedding_length"]
+    if layers is not None: L = min(L, layers)
+    H = kv[pre+"attention.head_count"]; KV = kv[pre+"attention.head_count_kv"]
+    hd = d // H
+    eps = kv.get(pre+"attention.layer_norm_rms_epsilon", 1e-5)
+    theta = kv.get(pre+"rope.freq_base", 10000.0)
     n = len(ids); pos = np.arange(n)
 
     def rms(x, w): return x/np.sqrt(np.mean(x*x,-1,keepdims=True)+eps)*w
@@ -222,7 +227,14 @@ def cmd_forward_gguf(gguf, prompt, tok_dir):
         g = h @ T[b+"ffn_gate.weight"].T; u = h @ T[b+"ffn_up.weight"].T
         x = x + (g/(1+np.exp(-g))*u) @ T[b+"ffn_down.weight"].T
     lm = T.get("output.weight", T["token_embd.weight"])
-    logits = rms(x[-1], T["output_norm.weight"]) @ lm.T
+    return rms(x[-1], T["output_norm.weight"]) @ lm.T
+
+
+def cmd_forward_gguf(gguf, prompt, tok_dir):
+    kv, T = _read_gguf(gguf)
+    vocab = gguf_vocab(tok_dir)
+    inv = {i: s for s, i in vocab.items()}
+    logits = gguf_forward(kv, T, tokenize_words(vocab, prompt))
     order = np.argsort(logits)[::-1]
     print(f'GGUF next-token for "{prompt}" — top 15:')
     for r,i in enumerate(order[:15],1):
