@@ -259,11 +259,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     private static void WriteWalkRows(Stream stream, List<TestimonyWalkRow> rows, CancellationToken ct)
     {
-        Span<byte> head = stackalloc byte[19];
-        "PGCOPY\n\xFF\r\n\0"u8.CopyTo(head);
-        BinaryPrimitives.WriteInt32BigEndian(head[11..], 0);
-        BinaryPrimitives.WriteInt32BigEndian(head[15..], 0);
-        stream.Write(head);
+        stream.Write(CopyBinaryHeader);
 
         Span<byte> scratch = stackalloc byte[64];
         foreach (var w in rows)
@@ -292,7 +288,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             // timestamptz: µs since 2000-01-01
             BinaryPrimitives.WriteInt32BigEndian(scratch, 8);
             BinaryPrimitives.WriteInt64BigEndian(scratch[4..],
-                w.ObservedAtUnixUs - 946_684_800_000_000L);
+                w.ObservedAtUnixUs - PgEpochDeltaUs);
             stream.Write(scratch[..12]);
 
             BinaryPrimitives.WriteInt32BigEndian(scratch, w.PackedVertices.Length);
