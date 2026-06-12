@@ -2,14 +2,26 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS laplace_geom;
 CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 
--- Lane-parity pin: the terminal fold (finish_consensus_fold) is an OPTIMIZATION
--- of the merge fold, never a semantics change — and its two lanes (the 'sql'
--- ordered aggregate and the 'engine' chunk-sort/merge in C) must be int64-
--- identical to each other and to the merge fold, in both the fresh and the
--- incremental (seeded rebuild + swap) paths. Rows are placed by
--- consensus_partition_of — the SQL twin of the writer's PartitionOf — because
--- the per-partition fold routes seeds with it; a fixture that hand-placed rows
--- elsewhere would be staging input no real writer can produce.
+-- Lane-parity + period-rule pins for the terminal fold (finish_consensus_fold).
+--
+-- THE PERIOD RULE: one fold = one rating period. Staging epochs are flush
+-- quanta (RAM bounds), not time — all of a relation's staged games merge into
+-- ONE Glicko period (one tournament), so consensus values are independent of
+-- LAPLACE_STAGING_THRESHOLD. Distinct deposits at distinct times remain
+-- distinct periods (they fold against the prior consensus as seeds).
+--
+-- Pinned here:
+--   - the 'sql' and 'engine' lanes are int64-identical to each other, and to
+--     the merge fold on single-epoch input (where the lanes lawfully agree);
+--   - a relation staged across MULTIPLE epochs folds as ONE period — equal to
+--     one laplace_glicko2_accumulate_games call over the summed games;
+--   - the incremental path (seeded rebuild + swap) advances seeds by exactly
+--     one period, passes untouched rows through, lands new rows;
+--   - NULL-object relations route and fold identically in every lane;
+--   - the engine lane under forced spill is row-identical to the sql lane;
+--   - mixed φ within one fold refuses in both lanes.
+-- Rows are placed by consensus_partition_of — the SQL twin of the writer's
+-- PartitionOf — because the per-partition fold routes seeds with it.
 
 BEGIN;
 SET search_path = laplace, public;
@@ -26,6 +38,8 @@ DECLARE
     sC bytea := laplace_hash128_blake3('test/fold/subjectC');
     oC bytea := laplace_hash128_blake3('test/fold/objectC');
     sD bytea := laplace_hash128_blake3('test/fold/subjectD');
+    sE bytea := laplace_hash128_blake3('test/fold/subjectE');
+    oE bytea := laplace_hash128_blake3('test/fold/objectE');
     phi    bigint := 30000000000;
     s_conf bigint := 900000000;
     s_ref  bigint := 100000000;
@@ -37,6 +51,7 @@ DECLARE
     bB_r bigint; bB_rd bigint; bB_v bigint; bB_wc bigint;
     xA_r bigint; xA_rd bigint; xA_v bigint; xA_wc bigint;
     eA   record;
+    eE   record;
     lane text;
     n bigint;
 BEGIN
@@ -45,24 +60,22 @@ BEGIN
         (sA, 0, type_t, src), (oA, 0, type_t, src),
         (sB, 0, type_t, src), (oB, 0, type_t, src),
         (sC, 0, type_t, src), (oC, 0, type_t, src),
-        (sD, 0, type_t, src);
+        (sD, 0, type_t, src),
+        (sE, 0, type_t, src), (oE, 0, type_t, src);
 
-    -- ── MERGE LANE over two epochs (recurrence on A; D carries a NULL object) ─
+    -- ── MERGE LANE, single epoch (the regime where all lanes lawfully agree) ──
     PERFORM create_period_staging(2, 1);
-    EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,2,$5*2,$6)', period_staging_table(1, 0))
+    EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,2,$5*2,$6)',
+                   period_staging_table(1, consensus_partition_of(sA, rel, oA, 2)))
         USING sA, rel, oA, phi, s_conf, ts;
-    EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,3,$5*3,$6)', period_staging_table(1, 1))
+    EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,3,$5*3,$6)',
+                   period_staging_table(1, consensus_partition_of(sB, rel, oB, 2)))
         USING sB, rel, oB, phi, s_ref, ts;
     EXECUTE format('INSERT INTO %I VALUES ($1,$2,NULL,$3,2,$4*2,$5)',
                    period_staging_table(1, consensus_partition_of(sD, rel, NULL, 2)))
         USING sD, rel, phi, s_ref, ts;
-    PERFORM create_period_staging(2, 2);
-    EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,5,$5*5,$6)', period_staging_table(2, 0))
-        USING sA, rel, oA, phi, s_conf, ts;
     PERFORM materialize_period_partition(period_staging_table(1, 0));
     PERFORM materialize_period_partition(period_staging_table(1, 1));
-    PERFORM materialize_period_partition(period_staging_table(2, 0));
-    PERFORM materialize_period_partition(period_staging_table(2, 1));
     SELECT rating, rd, volatility, witness_count INTO mA_r, mA_rd, mA_v, mA_wc
         FROM consensus WHERE subject_id = sA;
     SELECT rating, rd, volatility, witness_count INTO mB_r, mB_rd, mB_v, mB_wc
@@ -70,12 +83,19 @@ BEGIN
     SELECT rating, rd, volatility, witness_count INTO mD_r, mD_rd, mD_v, mD_wc
         FROM consensus WHERE subject_id = sD;
 
-    -- ── BOTH terminal-fold lanes, fresh + incremental, against the merge lane ─
+    -- The period rule's expected value for E: 2 games (epoch 1) + 5 games
+    -- (epoch 2) = ONE period of 7 games from the neutral prior.
+    SELECT * INTO eE FROM laplace_glicko2_accumulate_games(
+        glicko2_neutral_mu(), glicko2_initial_rd(), glicko2_initial_volatility(),
+        glicko2_neutral_mu(), phi, 7, s_conf * 7, glicko2_tau());
+
+    -- ── BOTH terminal-fold lanes, fresh + incremental ──────────────────────────
     FOREACH lane IN ARRAY ARRAY['sql', 'engine'] LOOP
         PERFORM set_config('laplace.fold_lane', lane, true);
-        DELETE FROM consensus WHERE subject_id IN (sA, sB, sC, sD);
+        DELETE FROM consensus WHERE subject_id IN (sA, sB, sC, sD, sE);
 
-        -- fresh path: identical staged input, one terminal fold
+        -- fresh path: A/B/D single-epoch (merge-lane parity); E across two
+        -- epochs (the period-rule pin)
         PERFORM create_period_staging(2, 1);
         EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,2,$5*2,$6)',
                        period_staging_table(1, consensus_partition_of(sA, rel, oA, 2)))
@@ -86,13 +106,16 @@ BEGIN
         EXECUTE format('INSERT INTO %I VALUES ($1,$2,NULL,$3,2,$4*2,$5)',
                        period_staging_table(1, consensus_partition_of(sD, rel, NULL, 2)))
             USING sD, rel, phi, s_ref, ts;
+        EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,2,$5*2,$6)',
+                       period_staging_table(1, consensus_partition_of(sE, rel, oE, 2)))
+            USING sE, rel, oE, phi, s_conf, ts;
         PERFORM create_period_staging(2, 2);
         EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,5,$5*5,$6)',
-                       period_staging_table(2, consensus_partition_of(sA, rel, oA, 2)))
-            USING sA, rel, oA, phi, s_conf, ts;
+                       period_staging_table(2, consensus_partition_of(sE, rel, oE, 2)))
+            USING sE, rel, oE, phi, s_conf, ts;
         n := finish_consensus_fold();
-        IF n <> 3 THEN
-            RAISE EXCEPTION 'FAIL(%): fresh terminal fold materialized % relations (want 3)', lane, n;
+        IF n <> 4 THEN
+            RAISE EXCEPTION 'FAIL(%): fresh terminal fold materialized % relations (want 4)', lane, n;
         END IF;
         SELECT rating, rd, volatility, witness_count INTO bA_r, bA_rd, bA_v, bA_wc
             FROM consensus WHERE subject_id = sA;
@@ -113,14 +136,22 @@ BEGIN
               AND witness_count = mD_wc) THEN
             RAISE EXCEPTION 'FAIL(%): NULL-object relation diverged from the merge lane', lane;
         END IF;
+        IF NOT EXISTS (
+            SELECT 1 FROM consensus
+            WHERE subject_id = sE
+              AND rating = eE.rating AND rd = eE.rd AND volatility = eE.volatility
+              AND witness_count = 7) THEN
+            RAISE EXCEPTION 'FAIL(%): multi-epoch relation did not fold as ONE period '
+                '(want the 7-game tournament value)', lane;
+        END IF;
 
         IF to_regclass(period_staging_table(1, 0)) IS NOT NULL
         OR to_regclass(period_staging_table(2, 0)) IS NOT NULL THEN
             RAISE EXCEPTION 'FAIL(%): terminal fold did not consume its staging', lane;
         END IF;
 
-        -- incremental path (seeded rebuild + swap): A advances by one more
-        -- period; C is brand new; B must pass through unchanged.
+        -- incremental path (a LATER deposit = a new period on the seed): A
+        -- advances by exactly one period; C is brand new; B passes through.
         PERFORM create_period_staging(2, 3);
         EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,1,$5,$6)',
                        period_staging_table(3, consensus_partition_of(sA, rel, oA, 2)))
@@ -129,11 +160,10 @@ BEGIN
                        period_staging_table(3, consensus_partition_of(sC, rel, oC, 2)))
             USING sC, rel, oC, phi, s_conf, ts;
         n := finish_consensus_fold();
-        IF n <> 4 THEN
-            RAISE EXCEPTION 'FAIL(%): incremental terminal fold materialized % relations (want 4)', lane, n;
+        IF n <> 5 THEN
+            RAISE EXCEPTION 'FAIL(%): incremental terminal fold materialized % relations (want 5)', lane, n;
         END IF;
 
-        -- Expected A = one merge-lane period applied on the seed state.
         SELECT * INTO eA FROM laplace_glicko2_accumulate_games(
             bA_r, bA_rd, bA_v, glicko2_neutral_mu(), phi, 1, s_conf, glicko2_tau());
         SELECT rating, rd, volatility, witness_count INTO xA_r, xA_rd, xA_v, xA_wc
@@ -153,14 +183,15 @@ BEGIN
         END IF;
     END LOOP;
 
-    RAISE NOTICE '✓ consensus_fold: both terminal-fold lanes int64-identical to the merge lane (fresh, incremental, NULL object); staging consumed; swap passes untouched rows through';
+    RAISE NOTICE '✓ consensus_fold: both terminal-fold lanes agree with the merge lane on single-epoch input; multi-epoch input folds as ONE period (the period rule); incremental rebuild+swap advances seeds exactly; NULL object lawful; staging consumed';
 END $$;
 
 -- ── engine lane under spill: many relations, tiny memory budget ─────────────
 -- The engine lane sorts in bounded chunks and k-way merges spilled runs; the
 -- result must equal the sql lane's on the same staged input. 3000 relations ×
 -- 2 epochs with fold_mem_mb=1 forces multiple runs (the arena floor is 1024
--- rows), so a relation's epochs meet across run boundaries.
+-- rows), so a relation's epochs meet across run boundaries — and still fold
+-- as one period.
 DO $$
 DECLARE
     rel  bytea := laplace_hash128_blake3('test/fold/spill/reltype');
@@ -229,7 +260,7 @@ BEGIN
     RAISE NOTICE '✓ consensus_fold: engine lane under spill (3000 relations, 1 MB budget) row-identical to the sql lane';
 END $$;
 
--- ── mixed φ within one epoch must refuse, in both lanes ─────────────────────
+-- ── mixed φ within one fold must refuse, in both lanes ──────────────────────
 DO $$
 DECLARE
     rel bytea := laplace_hash128_blake3('test/fold/phi/reltype');
@@ -258,7 +289,7 @@ BEGIN
             RAISE EXCEPTION 'FAIL(%): mixed-phi staging folded without refusing', lane;
         END IF;
     END LOOP;
-    RAISE NOTICE '✓ consensus_fold: mixed φ within one period refuses in both lanes';
+    RAISE NOTICE '✓ consensus_fold: mixed φ within one fold refuses in both lanes';
 END $$;
 
 ROLLBACK;
