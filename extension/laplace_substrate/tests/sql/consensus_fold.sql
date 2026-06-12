@@ -368,6 +368,104 @@ BEGIN
     RAISE NOTICE '✓ consensus_fold: the trajectory journal folds without sorting — walk values equal one accumulate_games period (signed scores), pass-through seeds survive the swap, conservation enforced by the fold, journal consumed';
 END $$;
 
+-- ── walk journal: the zero16 law and the partial-conversion contract ─────────
+-- In walk-journal mode the writer journals NON-walk consensus partials as
+-- walks too (one shape, one fold, one period): a NULL-object partial rides as
+-- a zero16 vertex (the identity-preimage law carried into the vertex), and a
+-- partial (games, sum) splits into ≤2 score levels — q×(games−rem) and
+-- (q+1)×rem — which the fold re-merges into the EXACT accumulate_games period
+-- the flat lane would compute from (games, sum).
+CREATE FUNCTION pg_temp.walk_vertex(p_oid bytea, p_ord int, p_run int, p_score bigint)
+RETURNS bytea LANGUAGE plpgsql AS $$
+DECLARE
+    v   public.geometry;
+    d   float8;
+    b   bytea;
+    o   bytea := ''::bytea;
+    k   int;
+BEGIN
+    v := public.laplace_mantissa_pack(p_oid, p_ord, p_run,
+             64 + (((p_score << 1) # (p_score >> 63)) << 7));
+    FOR k IN 1..4 LOOP
+        d := CASE k WHEN 1 THEN public.ST_X(v) WHEN 2 THEN public.ST_Y(v)
+                    WHEN 3 THEN public.ST_Z(v) ELSE public.ST_M(v) END;
+        b := pg_catalog.float8send(d);
+        o := o || set_byte(set_byte(set_byte(set_byte(
+                  set_byte(set_byte(set_byte(set_byte(
+                      '\x0000000000000000'::bytea,
+                  0, get_byte(b, 7)), 1, get_byte(b, 6)),
+                  2, get_byte(b, 5)), 3, get_byte(b, 4)),
+                  4, get_byte(b, 3)), 5, get_byte(b, 2)),
+                  6, get_byte(b, 1)), 7, get_byte(b, 0));
+    END LOOP;
+    RETURN o;
+END $$;
+
+DO $$
+DECLARE
+    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    src    bytea := laplace_hash128_blake3('test/walkconv/source');
+    rel    bytea := laplace_hash128_blake3('test/walkconv/reltype');
+    sZ  bytea := laplace_hash128_blake3('test/walkconv/nullobj-subject');
+    sQ  bytea := laplace_hash128_blake3('test/walkconv/qrem-subject');
+    oQ  bytea := laplace_hash128_blake3('test/walkconv/qrem-object');
+    z16 bytea := '\x00000000000000000000000000000000'::bytea;
+    phi   bigint := 30000000000;
+    scZ   bigint := 250000000;
+    q     bigint := 640000000;
+    games bigint := 5;
+    rem   bigint := 1;
+    ts timestamptz := '2026-01-01 00:00:00+00';
+    eW  record;
+    n   bigint;
+BEGIN
+    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+        (src, 0, type_t, NULL), (rel, 0, type_t, src),
+        (sZ, 0, type_t, src), (sQ, 0, type_t, src), (oQ, 0, type_t, src);
+    DELETE FROM consensus;
+
+    PERFORM create_walk_staging(1);
+    -- a NULL-object partial: one zero16 vertex, score scZ observed twice
+    EXECUTE format('INSERT INTO %I VALUES ($1, $2, NULL, $3, 1, 2, $4, $5)',
+                   'consensus_walk_staging_0')
+        USING sZ, rel, phi, ts, pg_temp.walk_vertex(z16, 1, 2, scZ);
+    -- a converted partial (games=5, sum=q·5+1): vertices (q, 4) and (q+1, 1)
+    EXECUTE format('INSERT INTO %I VALUES ($1, $2, NULL, $3, 2, 5, $4, $5)',
+                   'consensus_walk_staging_0')
+        USING sQ, rel, phi, ts,
+              pg_temp.walk_vertex(oQ, 1, (games - rem)::int, q)
+              || pg_temp.walk_vertex(oQ, 2, rem::int, q + 1);
+
+    n := finish_consensus_fold();
+    IF n <> 2 THEN
+        RAISE EXCEPTION 'FAIL(walkconv): % relations folded (want 2)', n;
+    END IF;
+
+    SELECT * INTO eW FROM laplace_glicko2_accumulate_games(
+        glicko2_neutral_mu(), glicko2_initial_rd(), glicko2_initial_volatility(),
+        glicko2_neutral_mu(), phi, 2, 2 * scZ, glicko2_tau());
+    IF NOT EXISTS (
+        SELECT 1 FROM consensus
+        WHERE subject_id = sZ AND object_id IS NULL
+          AND rating = eW.rating AND rd = eW.rd AND volatility = eW.volatility
+          AND witness_count = 2) THEN
+        RAISE EXCEPTION 'FAIL(walkconv): zero16 vertex did not fold as the NULL-object relation';
+    END IF;
+
+    SELECT * INTO eW FROM laplace_glicko2_accumulate_games(
+        glicko2_neutral_mu(), glicko2_initial_rd(), glicko2_initial_volatility(),
+        glicko2_neutral_mu(), phi, games, q * games + rem, glicko2_tau());
+    IF NOT EXISTS (
+        SELECT 1 FROM consensus
+        WHERE subject_id = sQ AND object_id = oQ
+          AND rating = eW.rating AND rd = eW.rd AND volatility = eW.volatility
+          AND witness_count = games) THEN
+        RAISE EXCEPTION 'FAIL(walkconv): q/rem vertices diverged from the flat-lane accumulate_games period';
+    END IF;
+
+    RAISE NOTICE '✓ consensus_fold: converted partials ride the walk journal — zero16 vertex = NULL-object relation, q/rem split re-merges to the exact flat-lane period';
+END $$;
+
 -- ── mixed φ within one fold must refuse, in both lanes ──────────────────────
 DO $$
 DECLARE

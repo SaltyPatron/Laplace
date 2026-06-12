@@ -1252,9 +1252,14 @@ pg_laplace_consensus_fold_walks(PG_FUNCTION_ARGS)
                         memcpy(ident, subject, 16);
                         memcpy(ident + 16, e->key.type, 16);
                         memcpy(ident + 32, e->key.object, 16);
-                        /* a zero16 object in a walk vertex is not expressible:
-                         * testimony walks always reference real objects */
-                        has_obj = true;
+                        /* the identity-preimage law carried into the vertex:
+                         * a zero16 object id IS the NULL-object relation (the
+                         * writer journals NULL-object partials as zero16) */
+                        {
+                            static const uint8 zero16[16] = {0};
+
+                            has_obj = memcmp(e->key.object, zero16, 16) != 0;
+                        }
                         fold_out_emit(&out, ident, has_obj, &st, e->games, subj_max_ts);
                         groups++;
                     }
