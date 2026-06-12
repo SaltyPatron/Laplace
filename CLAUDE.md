@@ -65,7 +65,7 @@ holders; `locks.cmd --kill` clears the safe ones. Dead-configure debris is clear
 - **Engine C** (`engine/core|dynamics|synthesis`): `build-engine-libs.cmd` → `test-engine.cmd -R <area> -LE regress`. If extensions statically consume it: `build-extensions.cmd` → `install-extensions.cmd` → `regress.cmd`.
 - **Extension C** (`extension/laplace_substrate/src`): `build-extensions.cmd` → `install-extensions.cmd --recycle` → `regress.cmd` (or targeted audit SQL below).
 - **SQL surface**: edit `extension/laplace_substrate/sql/NN_*.sql.in` (NEVER a generated/staged `.sql`) → `refresh-substrate-module.cmd NN_module.sql.in laplace`. Full redeploy only when the module set changes.
-- **C# app**: `dotnet build app\<Project>\<Project>.csproj -c Release` → `test-app.cmd <Project>`. A running CLI/endpoint locks `bin\Release` — `locks.cmd --kill`. Long ingests use the sidecar pattern (`ingest-text.cmd` builds to `%TEMP%\laplace-cli-sidecar`) so they never pin the repo bins.
+- **C# app**: `dotnet build app\<Project>\<Project>.csproj -c Release` → `test-app.cmd <Project>`. A running CLI/endpoint locks `bin\Release` — `locks.cmd --kill`. **Sequencing law**: a running deposit pins `bin\Release` for its duration — build engine/extension trees freely meanwhile; app builds wait for the deposit. NEVER stand up a second CLI copy (the sidecar was retired 2026-06-12: a third binary tree = another stale-copy surface).
 - **Relation/attestation law**: edit `engine/manifest/relation_types.toml` (the single source of truth — the C# registry delegates to native) → `scripts\codegen-attestation-law.ps1` → rebuild engine libs + extensions + refresh seed module. NEVER hand-edit `engine/core/src/generated/*` or `extension/laplace_substrate/sql/generated/*`.
 - **Memory bug hunt**: `build-engine-asan.cmd laplace_core_tests` → `ctest --test-dir build-win-asan -R <area>`. PATH law: `env.cmd` puts `build-win\core` first, so before running anything from the ASan tree prepend `build-win-asan\{core,dynamics,synthesis}` (the build script does this itself; do the same for standalone ctest) — otherwise its exes silently load the Release DLLs (0xC0000139).
 
@@ -75,8 +75,6 @@ Shared datum/hash/SPI-read helpers (`copy_bytea_datum`, `rel_type_id`, `spi_real
 `eff_mu_display_numeric`, …) live in **`spi_common.h`** — never re-declare one in a native file
 (they used to exist in up to five copies, twice with the same bug). The SPI **nulls-string law**
 is documented in that header: start all-present (`"   "`), mark `'n'` per-param conditionally.
-Long-running CLI work goes through `cli-sidecar.cmd` (staleness-checked sidecar — never pins
-`bin\Release`).
 
 ## Validation ladder — cheapest first
 
@@ -98,4 +96,4 @@ Never start at the right end: e2e is for proving the whole pipeline, not for che
 - `icpx` is the GNU driver and rejects MSVC flags — both C and C++ use `icx` on Windows.
 - Justfile / `scripts/*.sh` / GH workflows are the (stale) Linux CI path — not for this machine.
 - Any process running TextDecomposer must call `CodepointPerfcache.LoadDefault()` first (Engine.Core) — `TryBuildContentWitness` swallows the not-loaded error into a silent no-op (cost a debugging round 2026-06-11).
-- **The consensus merge fold is the write-path ceiling** (25–70k rel/s; 2 random PK probes/relation, working set > RAM, 3–4× re-touch across periods — measured, see `docs/HANDOFF-fold-lane.md`). Sorted probes do NOT fix it (heap is history-random). Bulk deposits: backlog is bounded by `LAPLACE_FOLD_BACKLOG_MAX` (default 12 epochs ≈ ~28 GB staging on disk; 0 disables). The fix is the PK-less C bulk fold (unbuilt) — read the handoff before touching this lane.
+- **The per-epoch merge fold is the slow path** (25–70k rel/s; 2 random PK probes/relation — measured, see `docs/HANDOFF-fold-lane.md`); its backlog is bounded by `LAPLACE_FOLD_BACKLOG_MAX` (default 12 epochs; 0 disables). Big deposits take the **terminal fold**: `LAPLACE_FOLD_LANE=terminal` stages every epoch, `finish_consensus_fold` folds once at materialize — engine lane (C chunk-sort/merge, `consensus_fold_engine.c`) by default, `LAPLACE_FOLD_IMPL=sql` as escape hatch, `LAPLACE_FOLD_RESUMABLE=1` for per-partition-COMMIT (staging = restart state). Both lanes share `consensus_fold_math.h`; parity is regress-pinned (`consensus_fold`).

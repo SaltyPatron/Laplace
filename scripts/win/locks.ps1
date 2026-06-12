@@ -7,22 +7,21 @@ param([switch]$Kill)
 $ErrorActionPreference = 'SilentlyContinue'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $deployLib = 'D:\Data\Postgres\laplace\lib'
-$sidecar = Join-Path $env:TEMP 'laplace-cli-sidecar'
 $buildTools = @('ninja', 'cmake', 'icx', 'icx-cc', 'clang', 'link')
 
 $holders = @()
 
-# Pass 1: processes whose main image lives under the repo or the CLI sidecar.
+# Pass 1: processes whose main image lives under the repo.
 foreach ($p in Get-Process) {
     $path = $null
     try { $path = $p.MainModule.FileName } catch { continue }
     if (-not $path) { continue }
-    if ($path.StartsWith($root, 'OrdinalIgnoreCase') -or $path.StartsWith($sidecar, 'OrdinalIgnoreCase')) {
+    if ($path.StartsWith($root, 'OrdinalIgnoreCase')) {
         $isBuildTool = $buildTools -contains $p.ProcessName.ToLower()
         $holders += [pscustomobject]@{
             Pid = $p.Id; Process = $p.ProcessName; Holds = $path
             SafeToKill = -not $isBuildTool
-            Note = if ($isBuildTool) { 'build in progress - wait, do not kill' } else { 'runs from repo/sidecar' }
+            Note = if ($isBuildTool) { 'build in progress - wait, do not kill' } else { 'runs from repo' }
         }
     }
 }
@@ -33,8 +32,7 @@ foreach ($p in Get-Process -Name dotnet, testhost) {
     $hit = $null
     try {
         $hit = ($p.Modules | Where-Object {
-                $_.FileName -and ($_.FileName.StartsWith($root, 'OrdinalIgnoreCase') -or
-                    $_.FileName.StartsWith($sidecar, 'OrdinalIgnoreCase')) } | Select-Object -First 1).FileName
+                $_.FileName -and ($_.FileName.StartsWith($root, 'OrdinalIgnoreCase')) } | Select-Object -First 1).FileName
     } catch {}
     if ($hit) {
         $holders += [pscustomobject]@{
