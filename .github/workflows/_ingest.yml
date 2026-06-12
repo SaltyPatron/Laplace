@@ -23,6 +23,18 @@ on:
         description: "target database (two-DB law: laplace = CI, laplace-dev = manual)"
         type: string
         default: "laplace"
+      langs:
+        description: "language scope (LAPLACE_INGEST_LANGS) — ud/wiktionary law: en"
+        type: string
+        default: ""
+      workers:
+        description: "LAPLACE_INGEST_WORKERS override (conceptnet law: 1)"
+        type: string
+        default: ""
+      commit-rows:
+        description: "LAPLACE_INGEST_COMMIT_ROWS override (conceptnet law: 50000)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -45,6 +57,10 @@ jobs:
         env:
           LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
         run: |
+          # Per-source reproducibility pins (mirror scripts/win/seed-deferred-lexical.cmd)
+          if [ -n "${{ inputs.langs }}" ]; then export LAPLACE_INGEST_LANGS="${{ inputs.langs }}"; fi
+          if [ -n "${{ inputs.workers }}" ]; then export LAPLACE_INGEST_WORKERS="${{ inputs.workers }}"; fi
+          if [ -n "${{ inputs.commit-rows }}" ]; then export LAPLACE_INGEST_COMMIT_ROWS="${{ inputs.commit-rows }}"; fi
           if [ -n "${{ inputs.path-arg }}" ]; then
             scripts/ingest-source.sh "${{ inputs.source }}" "${{ inputs.path-arg }}"
           else

@@ -136,39 +136,24 @@ public static class NativeAttestation
         Hash128 sourceId, Hash128? contextId)
         => CategoricalResolved(subject, typeId, obj, sourceId, contextId, 1.0).Id;
 
-    public static Hash128 ResolvePos(string tag, PosTagset tagset) =>
-        tagset switch
-        {
-            PosTagset.Upos => ResolvePosNative(tag, 0),
-            PosTagset.WordNet => ResolvePosNative(tag, 1),
-            PosTagset.Wiktionary => ResolvePosNative(tag, 2),
-            _ => throw new ArgumentOutOfRangeException(nameof(tagset)),
-        };
+    public static Hash128 ResolvePos(string tag, PosReference.PosTagset tagset) =>
+        ResolvePos(tag, tagset, out _);
 
-    public static AttestationRow PosUpos(
-        Hash128 subject, string uposTag, Hash128 sourceId, Hash128? contextId,
-        double sourceTrust, long observationCount = 1)
-        => Categorical(subject, "HAS_UPOS", ResolvePos(uposTag, PosTagset.Upos), sourceId, contextId, sourceTrust,
-            observationCount: observationCount);
+    /// <summary>
+    /// Resolve a source tag through the native pos law. <paramref name="probationary"/> is
+    /// true when the tag is unmapped — the witnessing change MUST emit the probationary pos
+    /// entity (use <see cref="PosReference.Attest"/>, which does this automatically; the
+    /// 2026-06-12 wordnet ghost was a probationary id referenced but never emitted).
+    /// </summary>
+    public static Hash128 ResolvePos(string tag, PosReference.PosTagset tagset, out bool probationary) =>
+        ResolvePosNative(tag, (int)tagset, out probationary);
 
+    /// <summary>XPOS keeps caller-minted entities (treebank-local tagsets are not normalized law).</summary>
     public static AttestationRow PosXpos(
         Hash128 subject, Hash128 xposEntity, Hash128 sourceId, Hash128? contextId,
         double sourceTrust, long observationCount = 1)
         => Categorical(subject, "HAS_XPOS", xposEntity, sourceId, contextId, sourceTrust,
             observationCount: observationCount);
-
-    public static AttestationRow PosWordNet(
-        Hash128 subject, char ssType, Hash128 sourceId, Hash128? contextId,
-        double sourceTrust, long observationCount = 1)
-        => PosUpos(subject, ssType.ToString(), sourceId, contextId, sourceTrust, observationCount);
-
-    public static AttestationRow PosWiktionary(
-        Hash128 subject, string pos, Hash128 sourceId, Hash128? contextId,
-        double sourceTrust, long observationCount = 1)
-    {
-        Hash128 posId = ResolvePos(pos, PosTagset.Wiktionary);
-        return Categorical(subject, "HAS_POS", posId, sourceId, contextId, sourceTrust, observationCount: observationCount);
-    }
 
     public static AttestationRow Aggregated(
         Hash128 subject, Hash128 typeId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
@@ -251,8 +236,6 @@ public static class NativeAttestation
     public static double Score(double signedMagnitude, double arenaScale) =>
         ScoreFp(signedMagnitude, arenaScale) / (double)Glicko2.FpScale;
 
-    public enum PosTagset { Upos, WordNet, Wiktionary }
-
     private static AttestationRow BuildCategoricalScored(
         Hash128 subject,
         string surfaceRelation,
@@ -289,13 +272,14 @@ public static class NativeAttestation
         }
     }
 
-    private static Hash128 ResolvePosNative(string tag, int tagset)
+    private static Hash128 ResolvePosNative(string tag, int tagset, out bool probationary)
     {
         unsafe
         {
             Hash128 id;
             int rc = NativeInterop.PosResolveEntity(tag, tagset, &id);
             if (rc < 0) throw new InvalidOperationException($"pos resolve failed: {tag}");
+            probationary = rc == 1;
             return id;
         }
     }

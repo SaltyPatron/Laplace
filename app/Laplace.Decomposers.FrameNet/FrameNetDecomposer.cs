@@ -39,13 +39,6 @@ public sealed class FrameNetDecomposer : IDecomposer
     private static readonly string[] CorenessValues =
         ["Core", "Peripheral", "Extra-Thematic", "Core-Unexpressed"];
 
-    private static readonly Dictionary<string, string> PosToUpos = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["N"]    = "NOUN", ["V"]   = "VERB", ["A"]    = "ADJ",   ["ADV"]  = "ADV",
-        ["PREP"] = "ADP",  ["NUM"] = "NUM",  ["INTJ"] = "INTJ",  ["PRON"] = "PRON",
-        ["ART"]  = "DET",  ["SCON"] = "SCONJ", ["C"]   = "CCONJ",
-    };
-
     private static readonly Dictionary<string, string> RelationTypes = new(StringComparer.Ordinal)
     {
         ["Inherits from"]   = "INHERITS_FROM",
@@ -91,9 +84,8 @@ public sealed class FrameNetDecomposer : IDecomposer
 
         var seed = new SubstrateChangeBuilder(
             Source, "bootstrap/framenet-vocab", null,
-            entityCapacity: PosReference.Canonical.Length + 1 + CorenessValues.Length + 1,
+            entityCapacity: CorenessValues.Length + 1,
             physicalityCapacity: 0, attestationCapacity: 0);
-        PosReference.SeedCanonical(seed, Source);
         seed.AddEntity(new EntityRow(CorenessTypeId, EntityTier.Vocabulary,
             BootstrapIntentBuilder.TypeMetaTypeId, Source));
         foreach (var c in CorenessValues)
@@ -235,10 +227,8 @@ public sealed class FrameNetDecomposer : IDecomposer
             var lemmaId = ContentEmitter.RootId(lu.Lemma);
             if (lemmaId is null) continue;
 
-            Hash128 posId = ResolvePos(lu.Pos);
-            b.AddEntity(new EntityRow(posId, EntityTier.Vocabulary, PosReference.PosTypeId, Source));
-            b.AddAttestation(NativeAttestation.Categorical(
-                lemmaId.Value, "HAS_POS", posId, Source, null, SourceTrust.AcademicCurated));
+            PosReference.Attest(b, lemmaId.Value, lu.Pos, PosReference.PosTagset.FrameNet,
+                Source, null, SourceTrust.AcademicCurated);
             b.AddAttestation(NativeAttestation.Categorical(
                 lemmaId.Value, "EVOKES_FRAME", frameId, Source, SourceTrust.AcademicCurated));
         }
@@ -293,12 +283,6 @@ public sealed class FrameNetDecomposer : IDecomposer
             physicalityCapacity: batch * 32,
             attestationCapacity: batch * 32);
 
-    private static Hash128 ResolvePos(string fnPos)
-    {
-        if (PosToUpos.TryGetValue(fnPos, out var upos))
-            return PosReference.Resolve(upos, PosReference.PosTagset.Upos);
-        return PosReference.Resolve(fnPos, PosReference.PosTagset.Upos);
-    }
 
     internal static Frame? ParseFrame(string path)
     {

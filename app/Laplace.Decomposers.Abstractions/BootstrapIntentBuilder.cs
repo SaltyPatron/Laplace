@@ -88,6 +88,9 @@ public sealed class BootstrapIntentBuilder
     {
         AddTrustClassAttestation();
         RelationTypeRegistry.SeedCanonical(_inner, _sourceId);
+        // Every bootstrapping decomposer gets the canonical pos floor — per-decomposer
+        // SeedCanonical calls were the scattered wheel behind the 2026-06-12 pos ghost.
+        PosReference.SeedCanonical(_inner, _sourceId);
         return _inner.Build();
     }
 }

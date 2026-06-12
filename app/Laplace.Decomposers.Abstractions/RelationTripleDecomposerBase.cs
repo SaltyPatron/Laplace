@@ -3,12 +3,20 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-public abstract class RelationTripleDecomposerBase : IDecomposer
+public abstract class RelationTripleDecomposerBase : IDecomposer, IIngestCommitPolicy
 {
     public abstract Engine.Core.Hash128 SourceId     { get; }
     public abstract string              SourceName   { get; }
     public abstract int                 LayerOrder   { get; }
     public abstract Engine.Core.Hash128 TrustClassId { get; }
+
+    /// <summary>
+    /// Relation-triple graphs re-attest the same concept rows across the whole corpus:
+    /// parallel batch commits collide on those row locks (40P01 deadlocks — the class
+    /// behind the conceptnet/omw serial env pins, retired 2026-06-12). Pipelined serial
+    /// commit keeps decompose parallelism; override for a sharded variant.
+    /// </summary>
+    public virtual IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
 
     protected abstract bool RequiresTwoPass { get; }
 

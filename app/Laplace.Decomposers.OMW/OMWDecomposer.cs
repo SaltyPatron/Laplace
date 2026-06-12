@@ -6,12 +6,19 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.OMW;
 
-public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider, IIngestCommitPolicy
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/OMWDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+
+    /// <summary>
+    /// OMW re-attests the SAME synset/lemma rows across languages: parallel batch
+    /// commits collide on those row locks (40P01 deadlocks, 2026-06-12 — the documented
+    /// wordnet/omw serial law). Pipelined serial commit keeps decompose parallelism.
+    /// </summary>
+    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
 
     private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
     private static readonly Hash128 SynsetTypeId   = EntityTypeRegistry.WordNetSynset;

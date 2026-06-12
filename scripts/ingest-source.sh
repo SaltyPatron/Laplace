@@ -6,7 +6,7 @@ source="${1:-}"
 path="${2:-}"
 LOGDIR="${INGEST_LOGDIR:-/tmp}"
 
-LAYER2=(wordnet ud tatoeba atomic2020 conceptnet wiktionary opensubtitles verbnet propbank)
+LAYER2=(wordnet ud tatoeba atomic2020 conceptnet wiktionary opensubtitles verbnet propbank framenet semlink)
 
 if [[ -z "$source" ]]; then
     echo "Usage: $0 <source> [path] | all | safetensors <snapshot-dir>" >&2
@@ -42,7 +42,7 @@ case "$source" in
         build_cli
         ingest safetensors "$path"
         ;;
-    unicode|iso639|omw|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary)
+    unicode|iso639|omw|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|propbank|framenet|semlink)
         build_cli
         ingest "$source"
         ;;

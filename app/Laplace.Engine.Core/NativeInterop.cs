@@ -511,6 +511,9 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_pos_resolve_entity", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int PosResolveEntity(string tag, int tagset, Hash128* outEntityId);
 
+    [LibraryImport(Library, EntryPoint = "laplace_pos_upos_canonical")]
+    internal static partial byte** PosUposCanonical(nuint* outCount);
+
     [LibraryImport(Library, EntryPoint = "laplace_attestation_categorical_add", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int AttestationCategoricalAdd(
         IntPtr stage,

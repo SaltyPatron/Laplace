@@ -38,6 +38,8 @@ jobs:
     with:
       source: conceptnet
       timeout-minutes: 720
+      workers: "1"
+      commit-rows: "50000"
       database: ${{ inputs.database }}
       gate: |
         CAPABLE_OF 1

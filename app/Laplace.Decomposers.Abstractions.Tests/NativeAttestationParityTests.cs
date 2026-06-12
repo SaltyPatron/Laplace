@@ -36,25 +36,44 @@ public class NativeAttestationParityTests
     }
 
     [Fact]
-
-    public void PosUpos_MatchesRegistryResolve()
-
+    public void PosAttest_MatchesCanonicalResolve_AndAliasCollapses()
     {
-
         Hash128 form = Hash128.OfCanonical("substrate/test/word/v1");
-
         Hash128 src  = Hash128.OfCanonical("substrate/test/src/v1");
 
-        var native = NativeAttestation.PosUpos(form, "NOUN", src, null, SourceTrust.AcademicCurated);
+        var b = new SubstrateChangeBuilder(src, "test/pos-attest", null);
+        PosReference.Attest(b, form, "NOUN", PosReference.PosTagset.Upos, src, null, SourceTrust.AcademicCurated);
+        var change = b.Build();
 
+        // Canonical tag: no probationary entity emitted, one HAS_POS attestation whose id
+        // equals the directly-built canonical row (HAS_UPOS aliases to HAS_POS in the law).
+        Assert.Empty(change.Entities);
+        var att = Assert.Single(change.Attestations);
         var expected = NativeAttestation.Categorical(
-
             form, "HAS_UPOS", PosReference.CanonicalId("NOUN"), src, null, SourceTrust.AcademicCurated);
+        Assert.Equal(expected.Id, att.Id);
+        Assert.Equal(expected.TypeId, att.TypeId);
+    }
 
-        Assert.Equal(expected.Id, native.Id);
+    [Fact]
+    public void PosAttest_ProbationaryTag_EmitsThePosEntityInBatch()
+    {
+        Hash128 form = Hash128.OfCanonical("substrate/test/word/v1");
+        Hash128 src  = Hash128.OfCanonical("substrate/test/src/v1");
 
-        Assert.Equal(expected.TypeId, native.TypeId);
+        var b = new SubstrateChangeBuilder(src, "test/pos-probationary", null);
+        var posId = PosReference.Attest(b, form, "IDIO", PosReference.PosTagset.FrameNet,
+            src, null, SourceTrust.AcademicCurated);
+        var change = b.Build();
 
+        // Unmapped tag: the probationary entity rides the SAME change as the attestation —
+        // the referenced id can never be a ghost (the 2026-06-12 wordnet failure class).
+        Assert.Equal(Hash128.OfCanonical("substrate/pos/probationary/framenet/IDIO/v1"), posId);
+        var ent = Assert.Single(change.Entities);
+        Assert.Equal(posId, ent.Id);
+        Assert.Equal(PosReference.PosTypeId, ent.TypeId);
+        var att = Assert.Single(change.Attestations);
+        Assert.Equal(posId, att.ObjectId);
     }
 
 
