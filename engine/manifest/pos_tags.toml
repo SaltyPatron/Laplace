@@ -1,4 +1,11 @@
 # POS tag law manifest — run codegen-attestation-law.ps1 after edits
+#
+# [upos] is the canonical set. Every OTHER section is a source tagset mapping
+# source tags -> UPOS canonicals; codegen emits one native resolver per section.
+# SECTION ORDER IS ABI: tagset enum values are assigned in file order starting
+# at 1 (UPOS = 0). Append new tagsets at the end; never reorder.
+# Unmapped tags resolve to probationary ids (substrate/pos/probationary/<tagset>/<tag>/v1);
+# the witnessing change must emit the probationary entity (PosReference.Attest does).
 
 [upos]
 canonical = ["ADJ", "ADP", "ADV", "AUX", "CCONJ", "DET", "INTJ", "NOUN", "NUM", "PART", "PRON", "PROPN", "PUNCT", "SCONJ", "SYM", "VERB", "X"]
@@ -43,3 +50,19 @@ r = "ADV"
 "sym" = "SYM"
 "symbol" = "SYM"
 "verb" = "VERB"
+
+# FrameNet lexical-unit POS (was a private dict in FrameNetDecomposer — moved
+# here 2026-06-12). IDIO and AVP are deliberately unmapped: probationary ids
+# preserve the distinction instead of flattening to X.
+[framenet]
+"n" = "NOUN"
+"v" = "VERB"
+"a" = "ADJ"
+"adv" = "ADV"
+"prep" = "ADP"
+"num" = "NUM"
+"intj" = "INTJ"
+"pron" = "PRON"
+"art" = "DET"
+"scon" = "SCONJ"
+"c" = "CCONJ"

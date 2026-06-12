@@ -38,6 +38,7 @@ jobs:
     with:
       source: wiktionary
       timeout-minutes: 720
+      langs: en
       database: ${{ inputs.database }}
       gate: |
         HAS_DEFINITION 100000

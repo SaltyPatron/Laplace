@@ -98,13 +98,6 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
             boot.AddRelationType(RelationTypeRegistry.Resolve(name).Canonical);
 
         await context.Writer.ApplyAsync(boot.Build(), ct);
-
-        var seed = new SubstrateChangeBuilder(
-            Source, "bootstrap/wordnet-vocab", null,
-            entityCapacity: PosReference.Canonical.Length + 1,
-            physicalityCapacity: 0, attestationCapacity: 0);
-        PosReference.SeedCanonical(seed, Source);
-        await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
@@ -232,8 +225,8 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
             if (lemmaId is null) continue;
             b.AddAttestation(NativeAttestation.Categorical(
                 lemmaId.Value, "IS_SYNONYM_OF", syn.SynsetId, Source, SourceTrust.StandardsDerived));
-            b.AddAttestation(NativeAttestation.PosWordNet(
-                lemmaId.Value, syn.SsType, Source, null, SourceTrust.StandardsDerived));
+            PosReference.Attest(b, lemmaId.Value, syn.SsType.ToString(),
+                PosReference.PosTagset.WordNet, Source, null, SourceTrust.StandardsDerived);
         }
 
         var (def, examples) = ParseGloss(syn.Gloss);

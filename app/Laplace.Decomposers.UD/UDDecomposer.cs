@@ -46,12 +46,6 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
         boot.AddRelationType("ENHANCED_DEPENDS_ON");
         boot.AddType("UD_Feature");
         await context.Writer.ApplyAsync(boot.Build(), ct);
-
-        var upos = new SubstrateChangeBuilder(
-            Source, "bootstrap/ud-upos", null,
-            entityCapacity: PosReference.Canonical.Length + 1, physicalityCapacity: 0, attestationCapacity: 0);
-        PosReference.SeedCanonical(upos, Source);
-        await context.Writer.ApplyAsync(upos.Build(), ct);
     }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
@@ -217,8 +211,8 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
             if (!refToForm.TryGetValue(tok.Ref, out var form)) continue;
 
             if (!string.IsNullOrEmpty(tok.Upos) && tok.Upos != "_")
-                b.AddAttestation(NativeAttestation.PosUpos(
-                    form, tok.Upos, Source, null, SourceTrust.AcademicCurated));
+                PosReference.Attest(b, form, tok.Upos!, PosReference.PosTagset.Upos,
+                    Source, null, SourceTrust.AcademicCurated);
 
             if (!string.IsNullOrEmpty(tok.Xpos) && tok.Xpos != "_")
             {

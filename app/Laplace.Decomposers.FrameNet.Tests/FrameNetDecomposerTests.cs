@@ -179,7 +179,9 @@ public sealed class FrameNetDecomposerTests
                 Assert.Contains(targetId, entityIds);
             }
 
-            var idioPos = Hash128.OfCanonical("substrate/pos/probationary/upos/IDIO/v1");
+            // IDIO is deliberately unmapped in the [framenet] tagset: probationary under the
+            // framenet namespace (was probationary/upos before the manifest unification).
+            var idioPos = Hash128.OfCanonical("substrate/pos/probationary/framenet/IDIO/v1");
             Assert.Contains(idioPos, referenced);
             Assert.Contains(idioPos, entityIds);
         }
