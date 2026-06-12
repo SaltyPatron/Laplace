@@ -189,6 +189,9 @@ public sealed class FrameNetDecomposer : IDecomposer
         }
     }
 
+    // RootId here is LAWFUL re-derivation, not a ghost reference: every surface
+    // this pass attests to was Emitted by EmitFrameEntities on the same builder
+    // (the tier-witness law — witness first, then claim).
     private static void EmitFrameAttestations(SubstrateChangeBuilder b, Frame frame)
     {
         Hash128 frameId = FrameId(frame.Name);
