@@ -223,6 +223,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     private List<TestimonyWalkRow>[]? _walkBuffers;
     private int _walkBuffered;
     private bool _walkStagingCreated;
+    private NpgsqlConnection? _walkConn;
 
     private void BufferWalk(TestimonyWalkRow w)
     {
@@ -257,21 +258,23 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         }
     }
 
-    /// <summary>Caller holds _stagingGate.</summary>
+    /// <summary>Caller holds _stagingGate. One long-lived connection serves the
+    /// whole deposit's walk COPYs — a fresh connection per 65 k-row flush meant
+    /// ~17 000 opens on a 1.1 B-matchup model.</summary>
     private async Task FlushWalksLockedAsync(CancellationToken ct)
     {
         if (_walkBuffers is null || _walkBuffered == 0) return;
-        await using var conn = await _ds.OpenConnectionAsync(ct);
+        _walkConn ??= await _ds.OpenConnectionAsync(ct);
         if (!_walkStagingCreated)
         {
             if (!_sweptStale)
             {
-                await using var sweep = conn.CreateCommand();
+                await using var sweep = _walkConn.CreateCommand();
                 sweep.CommandText = "SELECT laplace.drop_period_staging()";
                 await sweep.ExecuteNonQueryAsync(ct);
                 _sweptStale = true;
             }
-            await using var create = conn.CreateCommand();
+            await using var create = _walkConn.CreateCommand();
             create.CommandText = $"SELECT laplace.create_walk_staging({_partitions})";
             await create.ExecuteNonQueryAsync(ct);
             _walkStagingCreated = true;
@@ -281,63 +284,72 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         {
             var rows = _walkBuffers[p];
             if (rows.Count == 0) continue;
-            await using var stream = await conn.BeginRawBinaryCopyAsync(
+            await using var stream = await _walkConn.BeginRawBinaryCopyAsync(
                 $"COPY laplace.consensus_walk_staging_{p} "
                 + "(subject_id, type_id, context_id, phi, n_vertices, games_total, last_ts, walk) "
                 + "FROM STDIN (FORMAT BINARY)", ct);
-            WriteWalkRows(stream, rows, ct);
+            await WriteWalkRowsAsync(stream, rows, ct);
             rows.Clear();
         }
         _walkBuffered = 0;
     }
 
-    private static void WriteWalkRows(Stream stream, List<TestimonyWalkRow> rows, CancellationToken ct)
+    // Async, chunked COPY framing — the twin of CopyPartitionAsync. The earlier
+    // synchronous per-field stream.Write stalled a large COMPLETES_TO flush past
+    // the COPY write timeout (TinyLlama, 2026-06-12); buffer into a 4 MB array and
+    // flush async so the socket and the server-side heap write overlap.
+    private static async Task WriteWalkRowsAsync(
+        Stream stream, List<TestimonyWalkRow> rows, CancellationToken ct)
     {
-        stream.Write(CopyBinaryHeader);
+        // Fixed framing per row = 2 (field count) + 20·3 (subject,type,context)
+        // + 12 (phi) + 8 (n_vertices) + 12 (games) + 12 (last_ts) + 4 (walk len);
+        // a NULL context is 4 not 20. The walk bytea is variable and can dwarf a
+        // 4 MB buffer (a high-degree COMPLETES_TO subject), so the buffer grows.
+        const int fixedRowBytes = 2 + 20 * 3 + 12 + 8 + 12 + 12 + 4;
+        var buffer = new byte[4 * 1024 * 1024];
+        CopyBinaryHeader.CopyTo(buffer, 0);
+        int filled = CopyBinaryHeader.Length;
 
-        Span<byte> scratch = stackalloc byte[64];
         foreach (var w in rows)
         {
             ct.ThrowIfCancellationRequested();
-            BinaryPrimitives.WriteInt16BigEndian(scratch, 8);
-            stream.Write(scratch[..2]);
-
-            WriteHashField(stream, scratch, w.Subject);
-            WriteHashField(stream, scratch, w.TypeId);
-            if (w.ContextId is { } ctx) WriteHashField(stream, scratch, ctx);
-            else { BinaryPrimitives.WriteInt32BigEndian(scratch, -1); stream.Write(scratch[..4]); }
-
-            BinaryPrimitives.WriteInt32BigEndian(scratch, 8);
-            BinaryPrimitives.WriteInt64BigEndian(scratch[4..], w.PhiFp1e9);
-            stream.Write(scratch[..12]);
-
-            BinaryPrimitives.WriteInt32BigEndian(scratch, 4);
-            BinaryPrimitives.WriteInt32BigEndian(scratch[4..], w.Count);
-            stream.Write(scratch[..8]);
-
-            BinaryPrimitives.WriteInt32BigEndian(scratch, 8);
-            BinaryPrimitives.WriteInt64BigEndian(scratch[4..], w.GamesTotal);
-            stream.Write(scratch[..12]);
-
-            // timestamptz: µs since 2000-01-01
-            BinaryPrimitives.WriteInt32BigEndian(scratch, 8);
-            BinaryPrimitives.WriteInt64BigEndian(scratch[4..],
-                w.ObservedAtUnixUs - PgEpochDeltaUs);
-            stream.Write(scratch[..12]);
-
-            BinaryPrimitives.WriteInt32BigEndian(scratch, w.PackedVertices.Length);
-            stream.Write(scratch[..4]);
-            stream.Write(w.PackedVertices);
+            int need = fixedRowBytes + w.PackedVertices.Length;
+            if (filled + need > buffer.Length)
+            {
+                if (filled > 0)
+                {
+                    await stream.WriteAsync(buffer.AsMemory(0, filled), ct);
+                    filled = 0;
+                }
+                if (need > buffer.Length)
+                    buffer = new byte[need];
+            }
+            filled = WriteWalkRow(buffer, filled, w);
         }
-        BinaryPrimitives.WriteInt16BigEndian(scratch, -1);
-        stream.Write(scratch[..2]);
+        if (filled + 2 > buffer.Length)
+        {
+            await stream.WriteAsync(buffer.AsMemory(0, filled), ct);
+            filled = 0;
+        }
+        BinaryPrimitives.WriteInt16BigEndian(buffer.AsSpan(filled), -1); filled += 2;
+        await stream.WriteAsync(buffer.AsMemory(0, filled), ct);
     }
 
-    private static void WriteHashField(Stream stream, Span<byte> scratch, Hash128 h)
+    private static int WriteWalkRow(Span<byte> dst, int o, TestimonyWalkRow w)
     {
-        BinaryPrimitives.WriteInt32BigEndian(scratch, 16);
-        h.WriteBytes(scratch.Slice(4, 16));
-        stream.Write(scratch[..20]);
+        BinaryPrimitives.WriteInt16BigEndian(dst[o..], 8); o += 2;
+        o = WriteHash(dst, o, w.Subject);
+        o = WriteHash(dst, o, w.TypeId);
+        if (w.ContextId is { } ctx) o = WriteHash(dst, o, ctx);
+        else { BinaryPrimitives.WriteInt32BigEndian(dst[o..], -1); o += 4; }
+        o = WriteInt64Field(dst, o, w.PhiFp1e9);
+        BinaryPrimitives.WriteInt32BigEndian(dst[o..], 4); o += 4;
+        BinaryPrimitives.WriteInt32BigEndian(dst[o..], w.Count); o += 4;
+        o = WriteInt64Field(dst, o, w.GamesTotal);
+        o = WriteInt64Field(dst, o, w.ObservedAtUnixUs - PgEpochDeltaUs);
+        BinaryPrimitives.WriteInt32BigEndian(dst[o..], w.PackedVertices.Length); o += 4;
+        w.PackedVertices.CopyTo(dst[o..]); o += w.PackedVertices.Length;
+        return o;
     }
 
     // The routing law: identity → staging partition, stable across epochs so the
@@ -667,6 +679,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         catch (Exception ex)
         {
             _log.LogWarning(ex, "in-flight period fold failed before dispose; staging sweep follows");
+        }
+        if (_walkConn is not null)
+        {
+            await _walkConn.DisposeAsync();
+            _walkConn = null;
         }
         if (_anyEpochCreated)
         {

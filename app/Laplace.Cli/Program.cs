@@ -851,7 +851,15 @@ internal static class Program
 
         CodepointPerfcache.Load(ResolveBlob());
 
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        // Bulk deposit: a multi-hour COPY stream into the walk journal must never
+        // hit the 30 s default command timeout — that timeout governs each COPY
+        // write-buffer flush, and a large COMPLETES_TO flush under disk pressure
+        // exceeds it (the TinyLlama walk smoke died there, 2026-06-12). The fold
+        // already sets CommandTimeout=0 per command; the COPY stream has no command
+        // object, so it inherits the connection default — disable it at the source.
+        var dsb = new NpgsqlDataSourceBuilder(ConnString);
+        dsb.ConnectionStringBuilder.CommandTimeout = 0;
+        await using var ds = dsb.Build();
 
         var dec = new ModelDecomposer(modelDir, persistEvidence: ResolvePersistEvidence(cli));
 
