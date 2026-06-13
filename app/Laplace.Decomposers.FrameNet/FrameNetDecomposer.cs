@@ -10,7 +10,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.FrameNet;
 
-public sealed class FrameNetDecomposer : IDecomposer
+public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/FrameNetDecomposer/v1");
@@ -57,6 +57,14 @@ public sealed class FrameNetDecomposer : IDecomposer
     public string  SourceName   => "FrameNetDecomposer";
     public int     LayerOrder   => 3;
     public Hash128 TrustClassId => TrustClass;
+
+    // FrameNet attaches lemmas -> frames and shares the lemma arena across intents — the same
+    // cross-intent referential dependency wordnet/omw/iso/unicode and the RelationTriple
+    // decomposers carry. Under LAPLACE_INGEST_WORKERS>1 the default EpochBarrier lets parallel
+    // committers race to lock the same shared lemma/frame entities and deadlock (40P01). The
+    // pipelined StrictSerial path keeps decompose/commit overlap while committing in producer
+    // order, which removes the cycle.
+    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
