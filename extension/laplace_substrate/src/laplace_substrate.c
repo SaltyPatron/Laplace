@@ -16,6 +16,8 @@
 #include "laplace/core/relation_law.h"
 #include "laplace/dynamics/init.h"
 
+#include "perfcache_native.h"
+
 PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(pg_laplace_substrate_version);
@@ -142,6 +144,27 @@ Datum
 pg_laplace_score(PG_FUNCTION_ARGS)
 {
     PG_RETURN_INT64(laplace_score_fp(PG_GETARG_FLOAT8(0), PG_GETARG_FLOAT8(1)));
+}
+
+/* The conservative-μ law, compiled truth. The SQL eff_mu() mirrors this inline
+ * for the ORDER BY hot path; effective_mu() is the law surface a regress pin
+ * asserts eff_mu() against, so the inline can never drift from the engine. */
+PG_FUNCTION_INFO_V1(pg_laplace_effective_mu);
+
+Datum
+pg_laplace_effective_mu(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT64(laplace_effective_mu_fp(PG_GETARG_INT64(0), PG_GETARG_INT64(1)));
+}
+
+/* The neutral/anchor μ, compiled truth. No-arg IMMUTABLE: the planner folds it
+ * to a constant, so refuted()/index predicates pay nothing at runtime. */
+PG_FUNCTION_INFO_V1(pg_laplace_glicko2_neutral_mu);
+
+Datum
+pg_laplace_glicko2_neutral_mu(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT64(laplace_glicko2_neutral_mu_fp());
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_score_inverse);
@@ -508,4 +531,5 @@ void
 _PG_init(void)
 {
     (void)laplace_dynamics_init();
+    laplace_substrate_perfcache_init();
 }

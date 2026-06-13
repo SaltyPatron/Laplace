@@ -54,3 +54,10 @@ FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'laplace'
   AND c.relname = convert_from(decode('6174746573746174696f6e735f6b696e645f6274726565', 'hex'), 'UTF8');
+
+-- Retirement pin: T0 renders come from the perfcache (codepoint_for_id), never
+-- a shadow table. The 1.1M-row codepoint_render table must not reappear.
+SELECT count(*) = 0 AS no_codepoint_render_shadow
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'laplace' AND c.relname = 'codepoint_render';

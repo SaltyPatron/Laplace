@@ -65,9 +65,6 @@ BEGIN
            (lang_en, 0, type_t, src), (lang_de, 0, type_t, src)
     ON CONFLICT DO NOTHING;
 
-    INSERT INTO codepoint_render (id, cp)
-    VALUES (gloss1, ascii('G')), (w_p, ascii('p')), (w_h, ascii('h')), (w_c, ascii('c'))
-    ON CONFLICT DO NOTHING;
     INSERT INTO canonical_names (id, name)
     VALUES (lang_en, 'test/lang/en'), (lang_de, 'test/lang/de')
     ON CONFLICT DO NOTHING;

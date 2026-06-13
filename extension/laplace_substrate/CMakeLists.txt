@@ -9,6 +9,7 @@ if(WIN32)
         src/converse_native.c
         src/converse_reads_native.c
         src/respond_native.c
+        src/perfcache_native.c
     )
     set_target_properties(laplace_substrate PROPERTIES
         PREFIX "" OUTPUT_NAME laplace_substrate SUFFIX ".dll"
@@ -42,6 +43,7 @@ set(EXT_C_SOURCES
     src/converse_native.c
     src/converse_reads_native.c
     src/respond_native.c
+    src/perfcache_native.c
 )
 
 add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})

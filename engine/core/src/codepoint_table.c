@@ -217,3 +217,66 @@ int codepoint_table_resolve_atom(uint32_t atom, hash128_t* out_id,
     *out_hb = e->hilbert;
     return 0;
 }
+
+/* Unicode White_Space = WB{CR, LF, Newline, WSegSpace} plus exactly
+ * {0009 TAB, 00A0 NBSP, 2007 FIGURE SPACE, 202F NARROW NO-BREAK SPACE}
+ * (the non-breaking spaces UAX#29 deliberately keeps out of WSegSpace,
+ * and TAB which carries no WB whitespace class). The union reproduces
+ * PropList.txt White_Space byte-for-byte. */
+int laplace_codepoint_is_whitespace(uint32_t cp) {
+    switch (codepoint_table_wb(cp)) {
+        case LAPLACE_WB_CR:
+        case LAPLACE_WB_LF:
+        case LAPLACE_WB_NEWLINE:
+        case LAPLACE_WB_WSEGSPACE:
+            return 1;
+        default:
+            break;
+    }
+    return cp == 0x0009u || cp == 0x00A0u || cp == 0x2007u || cp == 0x202Fu;
+}
+
+static int laplace_ws_utf8_decode(const uint8_t* p, size_t remaining,
+                                  uint32_t* out_cp, size_t* out_consumed) {
+    if (remaining == 0) return -1;
+    uint8_t b0 = p[0];
+    if (b0 < 0x80) { *out_cp = b0; *out_consumed = 1; return 0; }
+    if ((b0 & 0xE0) == 0xC0) {
+        if (remaining < 2 || (p[1] & 0xC0) != 0x80) return -1;
+        uint32_t cp = ((uint32_t)(b0 & 0x1F) << 6) | (p[1] & 0x3F);
+        if (cp < 0x80) return -1;
+        *out_cp = cp; *out_consumed = 2; return 0;
+    }
+    if ((b0 & 0xF0) == 0xE0) {
+        if (remaining < 3 || (p[1] & 0xC0) != 0x80 || (p[2] & 0xC0) != 0x80) return -1;
+        uint32_t cp = ((uint32_t)(b0 & 0x0F) << 12)
+                    | ((uint32_t)(p[1] & 0x3F) << 6) | (p[2] & 0x3F);
+        if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) return -1;
+        *out_cp = cp; *out_consumed = 3; return 0;
+    }
+    if ((b0 & 0xF8) == 0xF0) {
+        if (remaining < 4 || (p[1] & 0xC0) != 0x80
+            || (p[2] & 0xC0) != 0x80 || (p[3] & 0xC0) != 0x80) return -1;
+        uint32_t cp = ((uint32_t)(b0 & 0x07) << 18)
+                    | ((uint32_t)(p[1] & 0x3F) << 12)
+                    | ((uint32_t)(p[2] & 0x3F) << 6) | (p[3] & 0x3F);
+        if (cp < 0x10000 || cp > 0x10FFFF) return -1;
+        *out_cp = cp; *out_consumed = 4; return 0;
+    }
+    return -1;
+}
+
+int laplace_text_is_all_whitespace(const uint8_t* utf8, size_t len) {
+    if (utf8 == NULL || len == 0) return 0;
+    size_t off = 0;
+    while (off < len) {
+        uint32_t cp;
+        size_t   consumed;
+        if (laplace_ws_utf8_decode(utf8 + off, len - off, &cp, &consumed) != 0)
+            return 0;
+        if (!laplace_codepoint_is_whitespace(cp))
+            return 0;
+        off += consumed;
+    }
+    return 1;
+}

@@ -1,4 +1,4 @@
-CREATE FUNCTION canonical_id(p_name text) RETURNS bytea
+CREATE OR REPLACE FUNCTION canonical_id(p_name text) RETURNS bytea
     LANGUAGE sql IMMUTABLE STRICT AS $$
     SELECT public.laplace_hash128_blake3(convert_to(p_name, 'UTF8'))
 $$;
@@ -9,7 +9,7 @@ CREATE TABLE canonical_names (
 );
 SELECT pg_extension_config_dump('canonical_names', '');
 
-CREATE FUNCTION register_canonical(p_name text) RETURNS bytea
+CREATE OR REPLACE FUNCTION register_canonical(p_name text) RETURNS bytea
     LANGUAGE sql AS $$
     INSERT INTO canonical_names (id, name)
     VALUES (@extschema@.canonical_id(p_name), p_name)
@@ -17,23 +17,23 @@ CREATE FUNCTION register_canonical(p_name text) RETURNS bytea
     SELECT @extschema@.canonical_id(p_name)
 $$;
 
-CREATE TABLE codepoint_render (
-    id bytea   PRIMARY KEY CHECK (octet_length(id) = 16),
-    cp integer NOT NULL
-);
-SELECT pg_extension_config_dump('codepoint_render', '');
+-- T0 reverse lookup (id -> codepoint) straight from the perfcache: the 1.1M-row
+-- codepoint_render table this replaced is retired. Returns NULL when the id is
+-- not a renderable codepoint id or the perfcache GUC is unset.
+CREATE OR REPLACE FUNCTION codepoint_for_id(p_id bytea)
+    RETURNS integer
+    AS 'MODULE_PATHNAME', 'pg_laplace_codepoint_for_id'
+    LANGUAGE C LAPLACE_STABLE_STRICT;
 
-CREATE FUNCTION build_codepoint_render() RETURNS bigint
-    LANGUAGE sql AS $$
-    INSERT INTO codepoint_render (id, cp)
-    SELECT @extschema@.canonical_id(chr(g.cp)), g.cp
-    FROM generate_series(1, 1114111) AS g(cp)
-    WHERE g.cp NOT BETWEEN 55296 AND 57343
-    ON CONFLICT (id) DO NOTHING;
-    SELECT count(*) FROM @extschema@.codepoint_render
-$$;
+-- Omniglottal separator test: the engine's Unicode White_Space law over the
+-- perfcache WB classes, not an ASCII [[:space:]] regex. STRICT: a NULL render
+-- is not a separator (the WHERE drops it), matching the old COALESCE(...'x').
+CREATE OR REPLACE FUNCTION is_all_whitespace(p_text text)
+    RETURNS boolean
+    AS 'MODULE_PATHNAME', 'pg_laplace_is_all_whitespace'
+    LANGUAGE C LAPLACE_STABLE_STRICT;
 
-CREATE FUNCTION constituents(p_id bytea)
+CREATE OR REPLACE FUNCTION constituents(p_id bytea)
     RETURNS TABLE(ordinal integer, child_id bytea, run_length integer, flags bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
@@ -47,48 +47,48 @@ CREATE FUNCTION constituents(p_id bytea)
         ORDER BY p.source_id
         LIMIT 1
     ) t
-    CROSS JOIN LATERAL public.ST_DumpPoints(t.traj) AS dp
-    CROSS JOIN LATERAL public.laplace_mantissa_unpack(dp.geom) AS u
+    CROSS JOIN LATERAL public.laplace_trajectory_constituents(t.traj) AS u
     ORDER BY 1
 $$;
 
-CREATE FUNCTION vertex_atom(p_flags bigint) RETURNS integer
+-- The vertex flag layout lives ONCE, in mantissa.h: these delegate to the geom
+-- C decoders (public.laplace_vertex_*) instead of re-spelling shifts and masks.
+CREATE OR REPLACE FUNCTION vertex_atom(p_flags bigint) RETURNS integer
     LANGUAGE sql LAPLACE_IMMUTABLE AS $$
-    SELECT CASE WHEN p_flags & 1 = 1
-                THEN ((p_flags >> 31) & 2097151)::integer END
+    SELECT public.laplace_vertex_atom(p_flags)
 $$;
 
-CREATE FUNCTION vertex_tier(p_flags bigint) RETURNS smallint
+CREATE OR REPLACE FUNCTION vertex_tier(p_flags bigint) RETURNS smallint
     LANGUAGE sql LAPLACE_IMMUTABLE AS $$
-    SELECT ((p_flags >> 1) & 31)::smallint
+    SELECT public.laplace_vertex_tier(p_flags)
 $$;
 
-CREATE FUNCTION render_text(p_id bytea, p_max_depth integer DEFAULT 32)
+CREATE OR REPLACE FUNCTION render_text(p_id bytea, p_max_depth integer DEFAULT 32)
     RETURNS text
     AS 'MODULE_PATHNAME', 'pg_laplace_render_text'
     LANGUAGE C STABLE;
 
-CREATE FUNCTION render_text_fast(p_id bytea, p_max_depth integer DEFAULT 8)
+CREATE OR REPLACE FUNCTION render_text_fast(p_id bytea, p_max_depth integer DEFAULT 8)
     RETURNS text
     AS 'MODULE_PATHNAME', 'pg_laplace_render_text_fast'
     LANGUAGE C STABLE;
 
-CREATE FUNCTION render_text_batch(p_ids bytea[], p_max_depth integer DEFAULT 8)
+CREATE OR REPLACE FUNCTION render_text_batch(p_ids bytea[], p_max_depth integer DEFAULT 8)
     RETURNS text[]
     AS 'MODULE_PATHNAME', 'pg_laplace_render_text_batch'
     LANGUAGE C STABLE;
 
-CREATE FUNCTION render(p_id bytea) RETURNS text
+CREATE OR REPLACE FUNCTION render(p_id bytea) RETURNS text
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     SELECT COALESCE(
         (SELECT n.name FROM @extschema@.canonical_names n WHERE n.id = p_id),
-        (SELECT chr(r.cp) FROM @extschema@.codepoint_render r WHERE r.id = p_id),
+        chr(@extschema@.codepoint_for_id(p_id)),
         render_text(p_id),
         encode(p_id, 'hex') || '…')
 $$;
 
-CREATE FUNCTION register_canonicals(p_names text[]) RETURNS bigint
+CREATE OR REPLACE FUNCTION register_canonicals(p_names text[]) RETURNS bigint
     LANGUAGE sql AS $$
     INSERT INTO canonical_names (id, name)
     SELECT @extschema@.canonical_id(n), n FROM unnest(p_names) AS n

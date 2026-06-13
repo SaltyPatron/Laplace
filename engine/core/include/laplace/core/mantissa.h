@@ -39,6 +39,18 @@ static inline uint64_t laplace_vertex_flags(uint8_t tier, int has_atom, uint32_t
     return f;
 }
 
+/* Field accessors — THE single decode of the vertex flag word. SQL helpers
+ * (laplace_vertex_atom/tier) wrap these; never re-spell the shifts/masks. */
+static inline int laplace_vflag_has_atom(uint64_t flags) {
+    return (flags & LAPLACE_VFLAG_HAS_ATOM) != 0;
+}
+static inline uint8_t laplace_vflag_tier(uint64_t flags) {
+    return (uint8_t)((flags >> LAPLACE_VFLAG_TIER_SHIFT) & LAPLACE_VFLAG_TIER_MASK);
+}
+static inline uint32_t laplace_vflag_atom(uint64_t flags) {
+    return (uint32_t)((flags >> LAPLACE_VFLAG_ATOM_SHIFT) & LAPLACE_VFLAG_ATOM_MASK);
+}
+
 void mantissa_pack(double vertex[4], const mantissa_payload_t* p);
 void mantissa_unpack(const double vertex[4], mantissa_payload_t* out);
 

@@ -115,7 +115,7 @@ BEGIN
     IF p_family = 'consensus' THEN
         RETURN QUERY
         SELECT c.subject_id, c.object_id,
-               ((c.rating - 2 * c.rd) - glicko2_neutral_mu())::double precision / 1e9
+               (eff_mu(c.rating, c.rd) - glicko2_neutral_mu())::double precision / 1e9
         FROM consensus c
         WHERE c.type_id = relation_type_id(p_name) AND c.object_id IS NOT NULL;
         RETURN;

@@ -167,6 +167,9 @@ public sealed class TextEntityBuilder
         }
         catch (InvalidOperationException)
         {
+            // not-loaded is a process-setup bug, never a data condition: a silent
+            // false here turned every emission into a no-op (burned 2026-06-11)
+            if (!CodepointPerfcache.IsLoaded) throw;
             rootId = default; rootTier = 0;
             cx = cy = cz = cm = double.NaN;
             return false;
@@ -200,6 +203,7 @@ public sealed class TextEntityBuilder
         }
         catch (InvalidOperationException)
         {
+            if (!CodepointPerfcache.IsLoaded) throw;
             entities = ImmutableArray<EntityRow>.Empty;
             physicalities = ImmutableArray<PhysicalityRow>.Empty;
             rootId = default; rootTier = 0;
@@ -237,6 +241,7 @@ public sealed class TextEntityBuilder
         }
         catch (InvalidOperationException)
         {
+            if (!CodepointPerfcache.IsLoaded) throw;
             entities = ImmutableArray<EntityRow>.Empty;
             physicalities = ImmutableArray<PhysicalityRow>.Empty;
             attestations = ImmutableArray<AttestationRow>.Empty;

@@ -77,11 +77,15 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         Assert.True(applied >= TotalCodepoints,
             $"presented {applied:N0} entities, expected at least {TotalCodepoints:N0}");
 
-        long renderable = await ScalarLong("SELECT count(*) FROM laplace.codepoint_render");
-        long covered = await ScalarLong(
-            "SELECT count(*) FROM laplace.codepoint_render cr JOIN laplace.entities e ON e.id = cr.id");
-        Assert.True(renderable > 1_100_000, $"codepoint_render unexpectedly small: {renderable:N0}");
-        Assert.Equal(renderable, covered);
+        // T0 renders come from the perfcache (codepoint_for_id), not a shadow table:
+        // seeded codepoint entities reverse-resolve to their codepoints (NUL and
+        // surrogates are non-renderable by law, mirroring the retired table's rows).
+        long resolvable = await ScalarLong(
+            @"SELECT count(*) FROM laplace.entities e
+              WHERE e.type_id = laplace.canonical_id('substrate/type/Codepoint/v1')
+                AND e.tier = 0
+                AND laplace.codepoint_for_id(e.id) IS NOT NULL");
+        Assert.True(resolvable > 1_100_000, $"perfcache-resolvable codepoints unexpectedly few: {resolvable:N0}");
 
         long physCount = await ScalarLong(
             "SELECT laplace.content_count(@s)",

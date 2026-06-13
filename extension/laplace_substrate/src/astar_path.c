@@ -8,27 +8,30 @@
 
 #include "laplace/core/astar.h"
 #include "laplace/core/hash128.h"
+#include "laplace/core/glicko2.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_astar_path);
 
-#define LAPLACE_NEUTRAL_MU 1500000000000LL
-
+/* The "not refuted" gate and the eff-μ order are the substrate's μ-law surfaces
+ * (laplace.refuted / laplace.eff_mu, both SQL-IMMUTABLE so the planner inlines
+ * them to the consensus_eff_mu_btree expression). No hand-spelled rating±2·rd
+ * or neutral literal here — the law lives once, in the engine. */
 static const char *Q_UNDIRECTED =
     "SELECT nbr, rating, rd FROM ("
     "  SELECT object_id AS nbr, rating, rd FROM laplace.consensus"
     "   WHERE subject_id = $1 AND object_id IS NOT NULL"
-    "     AND type_id = ANY ($2) AND (rating + 2*rd) >= 1500000000000"
+    "     AND type_id = ANY ($2) AND NOT laplace.refuted(rating, rd)"
     "  UNION ALL"
     "  SELECT subject_id, rating, rd FROM laplace.consensus"
     "   WHERE object_id = $1"
-    "     AND type_id = ANY ($2) AND (rating + 2*rd) >= 1500000000000"
-    ") e ORDER BY (rating - 2*rd) DESC LIMIT $3";
+    "     AND type_id = ANY ($2) AND NOT laplace.refuted(rating, rd)"
+    ") e ORDER BY laplace.eff_mu(rating, rd) DESC LIMIT $3";
 
 static const char *Q_DIRECTED =
     "SELECT object_id AS nbr, rating, rd FROM laplace.consensus"
     "  WHERE subject_id = $1 AND object_id IS NOT NULL"
-    "    AND type_id = ANY ($2) AND (rating + 2*rd) >= 1500000000000"
-    "  ORDER BY (rating - 2*rd) DESC LIMIT $3";
+    "    AND type_id = ANY ($2) AND NOT laplace.refuted(rating, rd)"
+    "  ORDER BY laplace.eff_mu(rating, rd) DESC LIMIT $3";
 
 static SPIPlanPtr plan_undirected = NULL;
 static SPIPlanPtr plan_directed   = NULL;
@@ -54,8 +57,9 @@ ensure_plan(bool directed)
 static double
 edge_cost(int64 rating, int64 rd)
 {
-    double eff = (double) (rating - 2 * rd) / 1e9;
-    double pen = (1500.0 - eff) / 1000.0;
+    double eff     = (double) laplace_effective_mu_fp(rating, rd) / 1e9;
+    double neutral = (double) laplace_glicko2_neutral_mu_fp() / 1e9;
+    double pen     = (neutral - eff) / 1000.0;
     if (pen < 0.0)  pen = 0.0;
     if (pen > 0.99) pen = 0.99;
     return 1.0 + pen;

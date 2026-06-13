@@ -20,10 +20,10 @@ SET client_min_messages = warning;
 SELECT laplace.laplace_substrate_version() AS substrate_lib,
        public.laplace_geom_version()       AS geom_lib;
 
-\echo '-- 0b. codepoint perf-cache seeded (render_text reads this; expect ~1.1M) --'
-SELECT count(*) AS codepoint_render_rows,
-       CASE WHEN count(*) > 1000000 THEN 'PASS' ELSE 'FAIL — perfcache unseeded/partial' END AS verdict
-FROM laplace.codepoint_render;
+\echo '-- 0b. T0 perfcache wired (render_text leaves resolve via codepoint_for_id) --'
+SELECT laplace.codepoint_for_id(laplace.canonical_id('A')) AS cp_of_A,
+       CASE WHEN laplace.codepoint_for_id(laplace.canonical_id('A')) = 65
+            THEN 'PASS' ELSE 'FAIL — laplace_substrate.perfcache_path unset/stale' END AS verdict;
 
 \echo '-- 0c. render_text C offload round-trips codepoint, word, and batch --'
 SELECT render_text(word_id('A'))                                  AS r_codepoint,

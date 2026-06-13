@@ -1,17 +1,12 @@
+-- THE lookup law: the same decomposer, composer, and collapse law as the
+-- deposit path (laplace_content_root_id), so lookup ids are byte-identical to
+-- deposit ids for every input. The former SQL formulation (flat per-character
+-- blake3 merkle) forked from the engine law on multi-codepoint graphemes and
+-- is retired. Requires laplace_substrate.perfcache_path (fails loud if unset).
 CREATE OR REPLACE FUNCTION word_id(p_text text)
     RETURNS bytea
-    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT
-    SET search_path = @extschema@, public AS $$
-    WITH cps AS (
-        SELECT public.laplace_hash128_blake3(convert_to(c, 'UTF8')) AS cp_id, ord
-        FROM unnest(string_to_array(p_text, NULL)) WITH ORDINALITY AS t(c, ord))
-    SELECT CASE
-        WHEN (SELECT count(*) FROM cps) = 0 THEN NULL
-        WHEN (SELECT count(*) FROM cps) = 1 THEN (SELECT cp_id FROM cps)
-        ELSE public.laplace_hash128_blake3(
-                 ('\x01'::bytea || (SELECT string_agg(cp_id, ''::bytea ORDER BY ord) FROM cps)))
-    END
-$$;
+    AS 'MODULE_PATHNAME', 'pg_laplace_word_id'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
 
 CREATE OR REPLACE FUNCTION label(p_id bytea)
     RETURNS text
@@ -135,6 +130,20 @@ CREATE OR REPLACE FUNCTION prompt_state(p_text text)
     SELECT pw.ord, pw.word, pw.id, word_language(pw.id)
     FROM prompt_words(p_text) pw
     WHERE pw.id IS NOT NULL
+$$;
+
+-- First placed content entity among a prompt's resolved words (the structural
+-- neighbour query's anchor). Named surface for the CLI `nn` command, which
+-- otherwise inlined this join.
+CREATE OR REPLACE FUNCTION first_placed_topic(p_text text)
+    RETURNS bytea
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+    SET search_path = @extschema@, public AS $$
+    SELECT p.entity_id
+    FROM physicalities p
+    JOIN prompt_state(p_text) s ON p.entity_id = s.id
+    WHERE p.type = 1 AND p.coord IS NOT NULL
+    LIMIT 1
 $$;
 
 CREATE OR REPLACE FUNCTION expansion(p_subjects bytea[], p_type bytea DEFAULT NULL,
@@ -287,8 +296,8 @@ CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT N
             LIMIT p_limit)
     SELECT type_label(r.type_id),
            realize(r.object_id, COALESCE(p_lang, word_language(p_word))),
-           CASE WHEN r.rating + 2 * r.rd < glicko2_neutral_mu() THEN 'refuted'
-                WHEN r.rating - 2 * r.rd > glicko2_neutral_mu() THEN 'confirmed'
+           CASE WHEN refuted(r.rating, r.rd) THEN 'refuted'
+                WHEN eff_mu(r.rating, r.rd) > glicko2_neutral_mu() THEN 'confirmed'
                 WHEN r.volatility::numeric > glicko2_initial_volatility() * 1.5 THEN 'contested'
                 ELSE 'thin' END,
            eff_mu_display(r.rating, r.rd),
