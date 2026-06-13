@@ -32,6 +32,26 @@ int laplace_content_root_id(
     size_t         len,
     hash128_t*     out_root_id);
 
+/* Per-word emit callback for laplace_content_word_segment. word_utf8 points
+ * INTO the caller's input buffer (valid only during the call); id is the
+ * content id matching how that word was deposited (collapse law applied). */
+typedef void (*laplace_word_emit_fn)(void* ctx, uint32_t ordinal,
+                                     const uint8_t* word_utf8, uint32_t word_len,
+                                     const hash128_t* id);
+
+/* THE omniglottal word segmentation: decompose UTF-8 with the engine's UAX#29
+ * word law (the same decomposer word_id/deposition use), then emit each
+ * content word in order — ordinal, surface span, and deposition-matching id.
+ * Whitespace-run "words" (WSegSpace) are separators and are NOT emitted. No
+ * regex, no ASCII character class: 中文 segments by the same law as English.
+ * Returns 0 on success; -1 bad args; -2 empty/invalid UTF-8; -3 perfcache
+ * not loaded. */
+int laplace_content_word_segment(
+    const uint8_t*       utf8,
+    size_t               len,
+    laplace_word_emit_fn emit,
+    void*                ctx);
+
 #ifdef __cplusplus
 }
 #endif

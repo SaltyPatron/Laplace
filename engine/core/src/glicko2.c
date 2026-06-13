@@ -177,59 +177,15 @@ static int64_t illinois_f(int64_t x,
     return lhs - rhs;
 }
 
-static void glicko2_update_period_impl(glicko2_state_t* st,
-                                       const glicko2_observation_t* obs,
-                                       size_t n,
-                                       int64_t tau,
-                                       int64_t now_ns,
-                                       glicko2_trace_t* trace)
+/* The volatility solve + state commit, shared by the per-observation loop and
+ * the closed-form fold path (glicko2_fold_uniform_period). Everything that
+ * could drift between the two must live here once. */
+static void glicko2_finish_period(glicko2_state_t* st,
+                                  int64_t mu, int64_t phi, int64_t phi_sq,
+                                  int64_t sigma, int64_t v_inv, int64_t delta_inner,
+                                  size_t n, int64_t tau, int64_t now_ns,
+                                  glicko2_trace_t* trace)
 {
-    if (!st) return;
-
-    if (n == 0 || !obs) {
-        int64_t phi    = g1_to_phi(st->rd);
-        int64_t sigma  = st->volatility;
-        int64_t phi_sq = laplace_fp_mul(phi, phi);
-        int64_t sig_sq = laplace_fp_mul(sigma, sigma);
-        int64_t phi_new = laplace_fp_sqrt(phi_sq + sig_sq);
-        int64_t rd_new = phi_to_g1(phi_new);
-        if (rd_new > LAPLACE_FP_RD_MAX) rd_new = LAPLACE_FP_RD_MAX;
-        if (trace) {
-            trace->mu             = g1_to_mu(st->rating);
-            trace->phi            = phi;
-            trace->v              = 0;
-            trace->delta          = 0;
-            trace->a_value        = laplace_fp_log(laplace_fp_mul(sigma, sigma));
-            trace->sigma_new      = sigma;
-            trace->phi_star       = phi_new;
-            trace->phi_new        = phi_new;
-            trace->mu_new         = trace->mu;
-            trace->r_new          = st->rating;
-            trace->rd_new         = rd_new;
-            trace->illinois_iters = 0;
-        }
-        st->rd = rd_new;
-        st->last_observed_at_unix_ns = now_ns;
-        return;
-    }
-
-    int64_t mu     = g1_to_mu(st->rating);
-    int64_t phi    = g1_to_phi(st->rd);
-    int64_t sigma  = st->volatility;
-    int64_t phi_sq = laplace_fp_mul(phi, phi);
-
-    int64_t v_inv       = 0;
-    int64_t delta_inner = 0;
-    for (size_t i = 0; i < n; ++i) {
-        int64_t mu_j  = g1_to_mu(obs[i].opponent_rating);
-        int64_t phi_j = g1_to_phi(obs[i].opponent_rd);
-        int64_t g_j   = laplace_glicko2_g(phi_j);
-        int64_t E_j   = laplace_glicko2_E(mu, mu_j, g_j);
-        int64_t g_sq  = laplace_fp_mul(g_j, g_j);
-        int64_t E_1mE = laplace_fp_mul(E_j, LAPLACE_FP_ONE - E_j);
-        v_inv       += laplace_fp_mul(g_sq, E_1mE);
-        delta_inner += laplace_fp_mul(g_j, obs[i].score - E_j);
-    }
     if (v_inv <= 0) v_inv = 1;
     int64_t v        = laplace_fp_div(LAPLACE_FP_ONE, v_inv);
     int64_t delta    = laplace_fp_mul(v, delta_inner);
@@ -313,6 +269,63 @@ static void glicko2_update_period_impl(glicko2_state_t* st,
     st->observation_count       += (int64_t)n;
 }
 
+static void glicko2_update_period_impl(glicko2_state_t* st,
+                                       const glicko2_observation_t* obs,
+                                       size_t n,
+                                       int64_t tau,
+                                       int64_t now_ns,
+                                       glicko2_trace_t* trace)
+{
+    if (!st) return;
+
+    if (n == 0 || !obs) {
+        int64_t phi    = g1_to_phi(st->rd);
+        int64_t sigma  = st->volatility;
+        int64_t phi_sq = laplace_fp_mul(phi, phi);
+        int64_t sig_sq = laplace_fp_mul(sigma, sigma);
+        int64_t phi_new = laplace_fp_sqrt(phi_sq + sig_sq);
+        int64_t rd_new = phi_to_g1(phi_new);
+        if (rd_new > LAPLACE_FP_RD_MAX) rd_new = LAPLACE_FP_RD_MAX;
+        if (trace) {
+            trace->mu             = g1_to_mu(st->rating);
+            trace->phi            = phi;
+            trace->v              = 0;
+            trace->delta          = 0;
+            trace->a_value        = laplace_fp_log(laplace_fp_mul(sigma, sigma));
+            trace->sigma_new      = sigma;
+            trace->phi_star       = phi_new;
+            trace->phi_new        = phi_new;
+            trace->mu_new         = trace->mu;
+            trace->r_new          = st->rating;
+            trace->rd_new         = rd_new;
+            trace->illinois_iters = 0;
+        }
+        st->rd = rd_new;
+        st->last_observed_at_unix_ns = now_ns;
+        return;
+    }
+
+    int64_t mu     = g1_to_mu(st->rating);
+    int64_t phi    = g1_to_phi(st->rd);
+    int64_t sigma  = st->volatility;
+    int64_t phi_sq = laplace_fp_mul(phi, phi);
+
+    int64_t v_inv       = 0;
+    int64_t delta_inner = 0;
+    for (size_t i = 0; i < n; ++i) {
+        int64_t mu_j  = g1_to_mu(obs[i].opponent_rating);
+        int64_t phi_j = g1_to_phi(obs[i].opponent_rd);
+        int64_t g_j   = laplace_glicko2_g(phi_j);
+        int64_t E_j   = laplace_glicko2_E(mu, mu_j, g_j);
+        int64_t g_sq  = laplace_fp_mul(g_j, g_j);
+        int64_t E_1mE = laplace_fp_mul(E_j, LAPLACE_FP_ONE - E_j);
+        v_inv       += laplace_fp_mul(g_sq, E_1mE);
+        delta_inner += laplace_fp_mul(g_j, obs[i].score - E_j);
+    }
+    glicko2_finish_period(st, mu, phi, phi_sq, sigma, v_inv, delta_inner,
+                          n, tau, now_ns, trace);
+}
+
 void glicko2_update_period(glicko2_state_t* st,
                            const glicko2_observation_t* obs,
                            size_t n,
@@ -320,6 +333,50 @@ void glicko2_update_period(glicko2_state_t* st,
                            int64_t now_ns)
 {
     glicko2_update_period_impl(st, obs, n, tau, now_ns, NULL);
+}
+
+/* Closed-form period update for the consensus fold: all `games` observations
+ * are against ONE opponent (opponent_rating, opponent_phi), scored q,...,q,rem
+ * (the apply_partial split). g_j and E_j are then constant across the period,
+ * so v_inv and delta_inner collapse to O(1) — and the result is int64-IDENTICAL
+ * to the per-observation loop, because each loop term is the same rounded fp
+ * value and summing it `games` times is integer multiplication. This removes
+ * the per-relation observation array and the O(games) inner loop the fold paid
+ * once per relation over hundreds of millions of relations. */
+void glicko2_fold_uniform_period(glicko2_state_t* st,
+                                 int64_t opponent_rating,
+                                 int64_t opponent_phi,
+                                 int64_t games,
+                                 int64_t sum_score,
+                                 int64_t tau,
+                                 int64_t now_ns)
+{
+    if (!st || games <= 0) return;
+
+    int64_t mu     = g1_to_mu(st->rating);
+    int64_t phi    = g1_to_phi(st->rd);
+    int64_t sigma  = st->volatility;
+    int64_t phi_sq = laplace_fp_mul(phi, phi);
+
+    int64_t mu_j  = g1_to_mu(opponent_rating);
+    int64_t phi_j = g1_to_phi(opponent_phi);
+    int64_t g_j   = laplace_glicko2_g(phi_j);
+    int64_t E_j   = laplace_glicko2_E(mu, mu_j, g_j);
+    int64_t g_sq  = laplace_fp_mul(g_j, g_j);
+    int64_t E_1mE = laplace_fp_mul(E_j, LAPLACE_FP_ONE - E_j);
+
+    /* loop: v_inv += fp_mul(g_sq, E_1mE), `games` identical terms */
+    int64_t v_inv = games * laplace_fp_mul(g_sq, E_1mE);
+
+    /* loop: delta_inner += fp_mul(g_j, score_i - E_j); scores are q (games-1
+     * times) then rem once — the exact split consensus_fold_apply_partial used */
+    int64_t q   = sum_score / games;
+    int64_t rem = sum_score - q * (games - 1);
+    int64_t delta_inner = (games - 1) * laplace_fp_mul(g_j, q - E_j)
+                        + laplace_fp_mul(g_j, rem - E_j);
+
+    glicko2_finish_period(st, mu, phi, phi_sq, sigma, v_inv, delta_inner,
+                          (size_t) games, tau, now_ns, NULL);
 }
 
 void laplace_glicko2_update_period_traced(glicko2_state_t* st,

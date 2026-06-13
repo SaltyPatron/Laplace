@@ -38,6 +38,18 @@ void glicko2_update_period(glicko2_state_t* st,
                            int64_t tau,
                            int64_t now_ns);
 
+/* Closed-form period update where all `games` observations are against one
+ * opponent (opponent_rating, opponent_phi) scored q,...,q,rem. int64-identical
+ * to the per-observation loop; O(1) instead of O(games), no observation array.
+ * This is the consensus fold's per-relation Glicko. */
+void glicko2_fold_uniform_period(glicko2_state_t* st,
+                                 int64_t opponent_rating,
+                                 int64_t opponent_phi,
+                                 int64_t games,
+                                 int64_t sum_score,
+                                 int64_t tau,
+                                 int64_t now_ns);
+
 void glicko2_update(glicko2_state_t* st,
                     int64_t score,
                     int64_t source_credibility,
