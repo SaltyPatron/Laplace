@@ -21,9 +21,13 @@
 #define CONSENSUS_FOLD_INITIAL_RD         INT64CONST(350000000000)
 #define CONSENSUS_FOLD_INITIAL_VOLATILITY INT64CONST(60000000)
 
-/* One period's pre-merged partial applied to a Glicko-2 state. The caller
- * guards games (> 0, <= 1<<27) and supplies a scratch buffer with capacity
- * >= games observations. */
+/* One period's pre-merged partial applied to a Glicko-2 state. All `games`
+ * observations are against the neutral line at opponent φ, so the period is
+ * the closed-form uniform-opponent update — O(1), no observation array, and
+ * int64-identical to the per-observation loop (regress parity pins it). The
+ * `obs` parameter is retained for ABI stability and ignored; callers may pass
+ * NULL once their scratch allocations are removed. The caller guards games
+ * (> 0, <= 1<<27). */
 static inline void
 consensus_fold_apply_partial(glicko2_state_t *st,
                              int64_t phi,
@@ -32,21 +36,9 @@ consensus_fold_apply_partial(glicko2_state_t *st,
                              int64_t tau,
                              glicko2_observation_t *obs)
 {
-    int64_t q   = sum_score / games;
-    int64_t rem = sum_score - q * (games - 1);
-    int64_t i;
-
-    for (i = 0; i < games - 1; i++)
-    {
-        obs[i].opponent_rating = CONSENSUS_FOLD_NEUTRAL_MU;
-        obs[i].opponent_rd     = phi;
-        obs[i].score           = q;
-    }
-    obs[games - 1].opponent_rating = CONSENSUS_FOLD_NEUTRAL_MU;
-    obs[games - 1].opponent_rd     = phi;
-    obs[games - 1].score           = rem;
-
-    glicko2_update_period(st, obs, (size_t) games, tau, 0);
+    (void) obs;
+    glicko2_fold_uniform_period(st, CONSENSUS_FOLD_NEUTRAL_MU, phi,
+                                games, sum_score, tau, 0);
 }
 
 #endif /* LAPLACE_CONSENSUS_FOLD_MATH_H */

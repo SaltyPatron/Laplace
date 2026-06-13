@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <vector>
 
 #include "laplace/core/glicko2.h"
 
@@ -259,4 +260,42 @@ TEST(LaplaceCoreGlicko2, DeterministicAcrossMultiplePeriods) {
     EXPECT_EQ(a.rating, b.rating);
     EXPECT_EQ(a.rd, b.rd);
     EXPECT_EQ(a.volatility, b.volatility);
+}
+
+/* The closed-form consensus-fold period (glicko2_fold_uniform_period) must be
+ * int64-IDENTICAL to building the games-long q/rem observation array and
+ * folding it through glicko2_update_period — that identity is what lets the
+ * fold drop the per-relation observation loop. */
+TEST(LaplaceCoreGlicko2, FoldUniformMatchesObservationLoop) {
+    const int64_t neutral = 1500000000000LL;
+    const int64_t tau     = 500000000LL;
+
+    struct Case { int64_t r, rd, vol, phi, games, sum_score; };
+    const Case cases[] = {
+        { 1500000000000LL, 350000000000LL, 60000000LL,  30000000000LL,  1,  500000000LL },
+        { 1500000000000LL, 350000000000LL, 60000000LL,  30000000000LL,  3, 1500000000LL },
+        { 1600000000000LL, 120000000000LL, 60000000LL, 200000000000LL, 22, 13000000000LL },
+        { 1480000000000LL,  90000000000LL, 61000000LL,  45000000000LL,  7,  2100000000LL },
+        { 1500000000000LL, 350000000000LL, 60000000LL, 350000000000LL, 80, 40000000000LL },
+        { 1720000000000LL,  40000000000LL, 59000000LL,  12000000000LL,  2,   900000000LL },
+    };
+
+    for (const auto& c : cases) {
+        glicko2_state_t closed; glicko2_init(&closed, c.r, c.rd, c.vol);
+        glicko2_fold_uniform_period(&closed, neutral, c.phi, c.games, c.sum_score, tau, 0);
+
+        glicko2_state_t loop; glicko2_init(&loop, c.r, c.rd, c.vol);
+        std::vector<glicko2_observation_t> obs((size_t)c.games);
+        int64_t q   = c.sum_score / c.games;
+        int64_t rem = c.sum_score - q * (c.games - 1);
+        for (int64_t i = 0; i < c.games - 1; ++i)
+            obs[(size_t)i] = { neutral, c.phi, q };
+        obs[(size_t)(c.games - 1)] = { neutral, c.phi, rem };
+        glicko2_update_period(&loop, obs.data(), (size_t)c.games, tau, 0);
+
+        EXPECT_EQ(closed.rating,     loop.rating)     << "games=" << c.games;
+        EXPECT_EQ(closed.rd,         loop.rd)         << "games=" << c.games;
+        EXPECT_EQ(closed.volatility, loop.volatility) << "games=" << c.games;
+        EXPECT_EQ(closed.observation_count, loop.observation_count) << "games=" << c.games;
+    }
 }
