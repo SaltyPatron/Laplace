@@ -10,7 +10,7 @@
 #define LAPLACE_FP_PI       3141592654LL
 #define LAPLACE_FP_PI_SQ    9869604401LL
 
-#define LAPLACE_FP_BASE_RATING   1500000000000LL
+#define LAPLACE_FP_BASE_RATING   LAPLACE_GLICKO2_NEUTRAL_MU_FP
 #define LAPLACE_FP_RATING_SCALE   173717800000LL
 #define LAPLACE_FP_RD_MAX         350000000000LL
 
@@ -369,7 +369,15 @@ void glicko2_decay_rd_in_place(glicko2_state_t* st, int64_t now_ns) {
     st->last_observed_at_unix_ns = now_ns;
 }
 
+int64_t laplace_glicko2_neutral_mu_fp(void) {
+    return LAPLACE_GLICKO2_NEUTRAL_MU_FP;
+}
+
+int64_t laplace_effective_mu_fp(int64_t rating, int64_t rd) {
+    return rating - 2 * rd;
+}
+
 int64_t glicko2_effective_mu(const glicko2_state_t* st) {
     if (!st) return 0;
-    return st->rating - 2 * st->rd;
+    return laplace_effective_mu_fp(st->rating, st->rd);
 }

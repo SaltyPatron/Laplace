@@ -28,6 +28,7 @@
 
 #include "laplace/core/hash128.h"
 #include "laplace/core/relation_law.h"
+#include "laplace/core/glicko2.h"
 
 /* ---- datum / hash utilities ------------------------------------------- */
 
@@ -86,7 +87,9 @@ hash128_eq(const hash128_t *a, const hash128_t *b)
 static inline Datum
 eff_mu_display_numeric(int64 rating, int64 rd)
 {
-    int64 eff = rating - 2 * rd;
+    /* the conservative-μ law has ONE compiled source (engine) — never re-spell
+     * `rating - 2*rd` here; it drifted into five native copies once already */
+    int64 eff = laplace_effective_mu_fp(rating, rd);
     Datum n = DirectFunctionCall1(int8_numeric, Int64GetDatum(eff));
     Datum b = DirectFunctionCall1(int8_numeric, Int64GetDatum(INT64CONST(1000000000)));
     Datum d = DirectFunctionCall2(numeric_div, n, b);
@@ -161,13 +164,20 @@ spi_word_language(Datum word)
     Datum args[1] = { word };
     bool  isnull;
     int   rc;
+    Datum d;
 
     rc = SPI_execute_with_args(
         "SELECT laplace.word_language($1)", 1, argtypes, args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
-    return copy_bytea_datum(
-        SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
+    /* word_language is a non-SRF: one row ALWAYS comes back, NULL-valued when
+     * the word has no HAS_LANGUAGE consensus. Copying without the isnull check
+     * detoasted Datum 0 — a backend AV (postmaster reset) on every is_a prompt
+     * whose topic lacked a language (found via crashdump 2026-06-12). */
+    d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+    if (isnull)
+        return (Datum) 0;
+    return copy_bytea_datum(d);
 }
 
 static inline Datum

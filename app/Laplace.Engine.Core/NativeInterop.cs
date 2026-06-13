@@ -365,6 +365,12 @@ public static unsafe partial class NativeInterop
         Hash128* sourceId,
         Hash128* outRootId);
 
+    [LibraryImport(Library, EntryPoint = "laplace_content_root_id")]
+    internal static partial int ContentRootId(
+        byte* utf8,
+        nuint len,
+        Hash128* outRootId);
+
     [LibraryImport(Library, EntryPoint = "laplace_relation_resolve", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int RelationResolve(string surface, Hash128* outTypeId);
 

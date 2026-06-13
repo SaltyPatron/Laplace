@@ -1,0 +1,214 @@
+/*
+ * perfcache_native.c -- the T0 oracle inside the backend.
+ *
+ * word_id(text) is THE lookup law: laplace_content_root_id runs the same
+ * decomposer, composer, and collapse law as the deposit path
+ * (content_witness_batch_add), so lookup ids are byte-identical to deposit
+ * ids for every input -- including multi-codepoint graphemes, where the
+ * retired SQL formulation (flat per-character blake3 merkle) forked from the
+ * engine law.
+ *
+ * codepoint_for_id(bytea) is the reverse T0 lookup that retired the 1.1M-row
+ * codepoint_render table: a binary search over a per-backend index of
+ * codepoints sorted by record hash, built once on first use (~4.4 MB).
+ */
+#include "postgres.h"
+
+#include "fmgr.h"
+#include "utils/builtins.h"
+#include "utils/guc.h"
+#include "utils/memutils.h"
+
+#include "laplace/core/codepoint_table.h"
+#include "laplace/core/content_witness_batch.h"
+#include "laplace/core/hash128.h"
+
+#include "perfcache_native.h"
+
+static char *perfcache_path = NULL;
+
+void
+laplace_substrate_perfcache_init(void)
+{
+    DefineCustomStringVariable(
+        "laplace_substrate.perfcache_path",
+        "Path to the T0 perfcache blob (laplace_t0_perfcache.bin).",
+        "Empty disables perfcache-backed lookups; consumers fall back or error per their contract.",
+        &perfcache_path,
+        "",
+        PGC_SIGHUP,
+        0,
+        NULL, NULL, NULL);
+    MarkGUCPrefixReserved("laplace_substrate");
+}
+
+bool
+laplace_perfcache_ready(void)
+{
+    int rc;
+
+    if (codepoint_table_is_loaded())
+        return true;
+    if (perfcache_path == NULL || perfcache_path[0] == '\0')
+        return false;
+
+    rc = codepoint_table_load_perfcache(perfcache_path);
+    if (rc != 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_CONFIG_FILE_ERROR),
+                 errmsg("laplace_substrate: failed to load perfcache \"%s\" (rc=%d)",
+                        perfcache_path, rc),
+                 errdetail("rc -1: open/stat/mmap failure; -2: bad magic/version; "
+                           "-3: record count/size mismatch; -4: body CRC mismatch."),
+                 errhint("Fix laplace_substrate.perfcache_path or redeploy the blob "
+                         "(install-extensions.cmd stages it).")));
+    return true;
+}
+
+/* ---- reverse index: codepoints sorted by record hash ------------------- */
+
+static uint32_t *rev_idx = NULL;
+static uint64_t  rev_count = 0;
+static const codepoint_entry_t *rev_records = NULL;
+
+static int
+rev_cmp(const void *pa, const void *pb)
+{
+    uint32_t a = *(const uint32_t *) pa;
+    uint32_t b = *(const uint32_t *) pb;
+    return memcmp(&rev_records[a].hash, &rev_records[b].hash, sizeof(hash128_t));
+}
+
+static void
+rev_index_ensure(void)
+{
+    const codepoint_entry_t *records;
+    uint64_t count;
+
+    if (rev_idx != NULL)
+        return;
+
+    if (codepoint_table_records(&records, &count) != 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("laplace_substrate: perfcache records unavailable for reverse index")));
+
+    {
+        uint32_t *idx = (uint32_t *)
+            MemoryContextAlloc(TopMemoryContext, sizeof(uint32_t) * count);
+        for (uint64_t i = 0; i < count; ++i)
+            idx[i] = (uint32_t) i;
+        rev_records = records;
+        qsort(idx, count, sizeof(uint32_t), rev_cmp);
+        rev_count = count;
+        rev_idx = idx;
+    }
+}
+
+bool
+laplace_perfcache_codepoint_for_id(const uint8_t id[16], uint32_t *out_cp)
+{
+    uint64_t lo, hi;
+
+    if (!laplace_perfcache_ready())
+        return false;
+    rev_index_ensure();
+
+    lo = 0;
+    hi = rev_count;
+    while (lo < hi)
+    {
+        uint64_t mid = lo + ((hi - lo) >> 1);
+        uint32_t cp = rev_idx[mid];
+        int c = memcmp(id, &rev_records[cp].hash, sizeof(hash128_t));
+
+        if (c < 0)
+            hi = mid;
+        else if (c > 0)
+            lo = mid + 1;
+        else
+        {
+            /* mirror the retired codepoint_render row set: no NUL, no surrogates */
+            if (cp == 0 || (cp >= 0xD800 && cp <= 0xDFFF))
+                return false;
+            *out_cp = cp;
+            return true;
+        }
+    }
+    return false;
+}
+
+/* ---- SQL surface -------------------------------------------------------- */
+
+PG_FUNCTION_INFO_V1(pg_laplace_word_id);
+
+Datum
+pg_laplace_word_id(PG_FUNCTION_ARGS)
+{
+    text       *t = PG_GETARG_TEXT_PP(0);
+    const char *data = VARDATA_ANY(t);
+    Size        len = VARSIZE_ANY_EXHDR(t);
+    hash128_t   id;
+    int         rc;
+    bytea      *out;
+
+    if (len == 0)
+        PG_RETURN_NULL();
+
+    if (!laplace_perfcache_ready())
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("word_id requires the T0 perfcache"),
+                 errhint("ALTER SYSTEM SET laplace_substrate.perfcache_path = '<blob>'; "
+                         "SELECT pg_reload_conf(); (install-extensions.cmd wires this)")));
+
+    rc = laplace_content_root_id((const uint8_t *) data, (size_t) len, &id);
+    if (rc != 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("word_id: content decomposition failed (rc=%d)", rc)));
+
+    out = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
+    SET_VARSIZE(out, VARHDRSZ + sizeof(hash128_t));
+    memcpy(VARDATA(out), &id, sizeof(hash128_t));
+    PG_RETURN_BYTEA_P(out);
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_codepoint_for_id);
+
+Datum
+pg_laplace_codepoint_for_id(PG_FUNCTION_ARGS)
+{
+    bytea   *b = PG_GETARG_BYTEA_PP(0);
+    uint32_t cp;
+
+    if (VARSIZE_ANY_EXHDR(b) != sizeof(hash128_t))
+        PG_RETURN_NULL();
+    if (!laplace_perfcache_codepoint_for_id((const uint8_t *) VARDATA_ANY(b), &cp))
+        PG_RETURN_NULL();
+    PG_RETURN_INT32((int32) cp);
+}
+
+/* Omniglottal separator test: true iff the text is non-empty and every
+ * codepoint is Unicode White_Space (the banked WB law), in any script.
+ * Replaces the ASCII-bound `~ '^[[:space:]]+$'` regex the generation corpus
+ * used, which silently kept U+3000, NBSP, U+2000..200A as units of order. */
+PG_FUNCTION_INFO_V1(pg_laplace_is_all_whitespace);
+
+Datum
+pg_laplace_is_all_whitespace(PG_FUNCTION_ARGS)
+{
+    text *t;
+
+    if (PG_ARGISNULL(0))
+        PG_RETURN_BOOL(false);
+    if (!laplace_perfcache_ready())
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("is_all_whitespace requires the T0 perfcache"),
+                 errhint("ALTER SYSTEM SET laplace_substrate.perfcache_path = '<blob>'; "
+                         "SELECT pg_reload_conf();")));
+    t = PG_GETARG_TEXT_PP(0);
+    PG_RETURN_BOOL(laplace_text_is_all_whitespace(
+        (const uint8_t *) VARDATA_ANY(t), VARSIZE_ANY_EXHDR(t)) != 0);
+}

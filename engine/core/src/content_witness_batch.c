@@ -91,18 +91,12 @@ static int should_emit_compositional(const tier_tree_t* tree, uint32_t idx) {
     return 1;
 }
 
-int content_witness_batch_add(
-    intent_stage_t*  stage,
-    const uint8_t*   utf8,
-    size_t           len,
-    const hash128_t* source_id,
-    hash128_t*       out_root_id) {
-    if (!stage || !utf8 || !source_id || !out_root_id) return -1;
+/* Shared front half: decompose -> compose. Fail loud, not AV: the codepoint
+ * floor must be loaded (perfcache) BEFORE the text decomposer runs --
+ * segmentation itself reads the perfcache tables, so a post-decomposer guard
+ * is unreachable in the unloaded case. */
+static int content_tree_build(const uint8_t* utf8, size_t len, tier_tree_t** out_tree) {
     if (len == 0) return -2;
-
-    /* fail loud, not AV: the codepoint floor must be loaded (perfcache) BEFORE
-     * the text decomposer runs -- segmentation itself reads the perfcache tables,
-     * so a post-decomposer guard is unreachable in the unloaded case */
     if (!codepoint_table_is_loaded()) return -3;
 
     tier_tree_t* tree = NULL;
@@ -111,13 +105,49 @@ int content_witness_batch_add(
         tier_tree_free(tree);
         return -2;
     }
-
-    size_t nc = tier_tree_node_count(tree);
-    if (nc == 0) {
+    if (tier_tree_node_count(tree) == 0) {
         tier_tree_free(tree);
-        hash128_zero(out_root_id);
         return -2;
     }
+    *out_tree = tree;
+    return 0;
+}
+
+int laplace_content_root_id(
+    const uint8_t* utf8,
+    size_t         len,
+    hash128_t*     out_root_id) {
+    if (!utf8 || !out_root_id) return -1;
+
+    tier_tree_t* tree = NULL;
+    int rc = content_tree_build(utf8, len, &tree);
+    if (rc != 0) return rc;
+
+    tier_node_view_t root;
+    tier_tree_get_node(tree, natural_unit_index(tree), &root);
+    *out_root_id = root.id;
+    tier_tree_free(tree);
+    return 0;
+}
+
+int content_witness_batch_add(
+    intent_stage_t*  stage,
+    const uint8_t*   utf8,
+    size_t           len,
+    const hash128_t* source_id,
+    hash128_t*       out_root_id) {
+    if (!stage || !utf8 || !source_id || !out_root_id) return -1;
+
+    tier_tree_t* tree = NULL;
+    {
+        int rc = content_tree_build(utf8, len, &tree);
+        if (rc != 0) {
+            hash128_zero(out_root_id);
+            return rc;
+        }
+    }
+
+    size_t nc = tier_tree_node_count(tree);
 
     uint32_t root_idx = natural_unit_index(tree);
     tier_node_view_t root;

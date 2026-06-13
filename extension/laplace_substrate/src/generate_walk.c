@@ -13,6 +13,7 @@
 
 #include "spi_common.h"
 #include "spi_nested.h"
+#include "perfcache_native.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_generate_tree);
 PG_FUNCTION_INFO_V1(pg_laplace_generate_greedy);
@@ -318,11 +319,8 @@ pg_laplace_generate_greedy(PG_FUNCTION_ARGS)
 
 static const char *CONSTITUENTS_QUERY =
     "SELECT c.child_id, c.run_length, c.flags FROM laplace.constituents($1) c ORDER BY c.ordinal";
-static const char *CODEPOINT_QUERY =
-    "SELECT r.cp FROM laplace.codepoint_render r WHERE r.id = $1";
 
 static SPIPlanPtr constituents_plan = NULL;
-static SPIPlanPtr codepoint_plan = NULL;
 
 typedef struct RenderMemoEntry
 {
@@ -343,17 +341,6 @@ ensure_render_plans(void)
         if (SPI_keepplan(plan) != 0)
             elog(ERROR, "render_text: SPI_keepplan failed");
         constituents_plan = plan;
-    }
-    if (codepoint_plan == NULL)
-    {
-        Oid argtypes[1] = { BYTEAOID };
-        SPIPlanPtr plan = SPI_prepare(CODEPOINT_QUERY, 1, argtypes);
-        if (plan == NULL)
-            elog(ERROR, "render_text: SPI_prepare(codepoint) failed: %s",
-                 SPI_result_code_string(SPI_result));
-        if (SPI_keepplan(plan) != 0)
-            elog(ERROR, "render_text: SPI_keepplan failed");
-        codepoint_plan = plan;
     }
 }
 
@@ -384,20 +371,19 @@ append_codepoint_utf8(StringInfo out, uint32 cp)
     appendBinaryStringInfo(out, (char *) buf, 4);
 }
 
+/* T0 leaf render: perfcache reverse lookup, in process. Replaced the
+ * per-grapheme SPI probe into the retired codepoint_render table. */
 static bool
 append_codepoint_render(StringInfo out, Datum id)
 {
-    Datum args[1] = { id };
-    int rc = SPI_execute_plan(codepoint_plan, args, NULL, true, 1);
-    bool isnull;
-    if (rc != SPI_OK_SELECT)
-        elog(ERROR, "render_text: codepoint lookup failed: %s",
-             SPI_result_code_string(rc));
-    if (SPI_processed == 0)
+    bytea   *idb = DatumGetByteaPP(id);
+    uint32_t cp;
+
+    if (VARSIZE_ANY_EXHDR(idb) != 16)
         return false;
-    append_codepoint_utf8(out,
-        (uint32) DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[0],
-                                             SPI_tuptable->tupdesc, 1, &isnull)));
+    if (!laplace_perfcache_codepoint_for_id((const uint8 *) VARDATA_ANY(idb), &cp))
+        return false;
+    append_codepoint_utf8(out, cp);
     return true;
 }
 

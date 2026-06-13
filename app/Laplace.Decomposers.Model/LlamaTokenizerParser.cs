@@ -143,6 +143,9 @@ public sealed class LlamaTokenizerParser
         }
         catch (InvalidOperationException)
         {
+            // not-loaded is a process-setup bug: silently degrading every vocab
+            // token to a raw blake3 blob is worse than failing the deposit
+            if (!CodepointPerfcache.IsLoaded) throw;
             entityId = default;
             tier = 0;
             cx = cy = cz = cm = double.NaN;
@@ -172,6 +175,7 @@ public sealed class LlamaTokenizerParser
         }
         catch (InvalidOperationException)
         {
+            if (!CodepointPerfcache.IsLoaded) throw;
             entities = ImmutableArray<EntityRow>.Empty;
             physicalities = ImmutableArray<PhysicalityRow>.Empty;
             return false;

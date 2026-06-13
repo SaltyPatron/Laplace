@@ -1,0 +1,72 @@
+BEGIN;
+SET search_path = laplace, public;
+
+-- word_id is THE lookup law: same decomposer/composer/collapse as the deposit
+-- path. These pins prove (a) no drift for the already-deposited ASCII shape,
+-- (b) the grapheme law the retired SQL formulation forked from.
+
+-- single grapheme collapses to the codepoint id
+SELECT word_id('a') = laplace_hash128_blake3(convert_to('a', 'UTF8'))
+    AS single_grapheme_collapses;
+
+-- ASCII word: single-codepoint graphemes pass through; word id = flat merkle
+SELECT word_id('dog') = laplace_hash128_blake3(
+           ('\x01'::bytea
+            || laplace_hash128_blake3(convert_to('d', 'UTF8'))
+            || laplace_hash128_blake3(convert_to('o', 'UTF8'))
+            || laplace_hash128_blake3(convert_to('g', 'UTF8'))))
+    AS ascii_word_law_holds;
+
+SELECT word_id('') IS NULL AS empty_is_null;
+
+-- multi-codepoint grapheme ("e" + U+0301 + "x"): the word composes over the
+-- GRAPHEME id (itself a merkle over its codepoints), never the flat codepoint
+-- list. This is exactly where the retired SQL word_id diverged from deposits.
+WITH ids AS (
+    SELECT laplace_hash128_blake3(convert_to('e', 'UTF8'))           AS e_id,
+           laplace_hash128_blake3(convert_to(U&'\0301', 'UTF8'))     AS acc_id,
+           laplace_hash128_blake3(convert_to('x', 'UTF8'))           AS x_id
+)
+SELECT word_id('e' || U&'\0301' || 'x')
+           = laplace_hash128_blake3('\x01'::bytea
+                 || laplace_hash128_blake3('\x01'::bytea || e_id || acc_id)
+                 || x_id)                                            AS grapheme_law_nested,
+       word_id('e' || U&'\0301' || 'x')
+           <> laplace_hash128_blake3('\x01'::bytea || e_id || acc_id || x_id)
+                                                                     AS grapheme_law_not_flat
+FROM ids;
+
+-- T0 reverse lookup straight from the perfcache (codepoint_render is retired)
+SELECT codepoint_for_id(laplace_hash128_blake3(convert_to('A', 'UTF8'))) = 65
+    AS reverse_lookup_works;
+SELECT codepoint_for_id('\x00000000000000000000000000000000'::bytea) IS NULL
+    AS unknown_id_is_null;
+SELECT codepoint_for_id(laplace_hash128_blake3(convert_to('字', 'UTF8'))) = 23383
+    AS reverse_lookup_cjk;
+
+-- render() of a bare codepoint id works with no table and no fixtures
+SELECT render(laplace_hash128_blake3(convert_to('A', 'UTF8'))) = 'A'
+    AS render_t0_via_perfcache;
+
+-- Omniglottal separator law: the engine White_Space classes, not [[:space:]].
+-- The four below were SILENTLY KEPT as word-order units by the retired regex.
+SELECT is_all_whitespace('   ')        AS ascii_spaces_ws,
+       is_all_whitespace(U&'\3000')    AS ideographic_space_ws,  -- CJK
+       is_all_whitespace(U&'\00A0')    AS nbsp_ws,
+       is_all_whitespace(U&'\2003')    AS em_space_ws,
+       NOT is_all_whitespace(U&'\200B') AS zwsp_is_not_ws,        -- FORMAT, not WS
+       NOT is_all_whitespace('a b')    AS mixed_is_not_ws,
+       NOT is_all_whitespace('')       AS empty_is_not_ws;
+
+-- μ-law single-source: the SQL eff_mu() inline must equal the engine's compiled
+-- effective_mu() across the rating/rd range (the hot-path inline cannot drift).
+SELECT bool_and(eff_mu(r, d) = effective_mu(r, d)) AS eff_mu_matches_engine
+FROM (VALUES
+    (1500000000000::bigint, 350000000000::bigint),
+    (1600000000000::bigint,  80000000000::bigint),
+    (2010500000000::bigint,  12000000000::bigint),
+    (0::bigint, 0::bigint),
+    (-5::bigint, 7::bigint)
+) v(r, d);
+
+COMMIT;

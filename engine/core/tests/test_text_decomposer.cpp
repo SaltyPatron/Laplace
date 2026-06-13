@@ -149,3 +149,79 @@ TEST(LaplaceCoreTextDecomposer, FinalizedParentIdxIsCorrect) {
     EXPECT_NE(TIER_TREE_INVALID, v.parent_idx);
     tier_tree_free(t);
 }
+
+/* ---- laplace_content_root_id: THE lookup law (decompose -> compose ->
+ * natural unit). Pins that lookup ids are byte-identical to deposit ids. */
+
+#include "laplace/core/codepoint_table.h"
+#include "laplace/core/content_witness_batch.h"
+#include "laplace/core/hash128.h"
+
+static hash128_t t0_id(uint32_t cp) {
+    const codepoint_entry_t* e = codepoint_table_lookup(cp);
+    EXPECT_NE(nullptr, e);
+    return e->hash;
+}
+
+TEST(LaplaceContentRootId, SingleCharCollapsesToCodepointId) {
+    hash128_t id;
+    ASSERT_EQ(0, laplace_content_root_id((const uint8_t*)"a", 1, &id));
+    hash128_t expect = t0_id('a');
+    EXPECT_TRUE(hash128_equals(&id, &expect));
+}
+
+TEST(LaplaceContentRootId, AsciiWordIsFlatMerkleOverCodepointIds) {
+    /* single-codepoint graphemes pass through (compose n==1), so the word id
+     * is merkle over the T0 ids — the identity the SQL regress pins for 'dog' */
+    hash128_t id;
+    ASSERT_EQ(0, laplace_content_root_id((const uint8_t*)"dog", 3, &id));
+    hash128_t kids[3] = { t0_id('d'), t0_id('o'), t0_id('g') };
+    hash128_t expect;
+    hash128_merkle(2, kids, 3, &expect);
+    EXPECT_TRUE(hash128_equals(&id, &expect));
+}
+
+TEST(LaplaceContentRootId, MultiCodepointGraphemeComposesNested) {
+    /* "e<U+0301>x": grapheme(e,́) then word(grapheme, x) — NOT the flat
+     * merkle over all three codepoints (the retired SQL fork's shape) */
+    const uint8_t s[] = {0x65, 0xCC, 0x81, 0x78};
+    hash128_t id;
+    ASSERT_EQ(0, laplace_content_root_id(s, sizeof(s), &id));
+
+    hash128_t g_kids[2] = { t0_id(0x0065), t0_id(0x0301) };
+    hash128_t grapheme;
+    hash128_merkle(1, g_kids, 2, &grapheme);
+    hash128_t w_kids[2] = { grapheme, t0_id(0x0078) };
+    hash128_t nested;
+    hash128_merkle(2, w_kids, 2, &nested);
+    EXPECT_TRUE(hash128_equals(&id, &nested));
+
+    hash128_t flat_kids[3] = { t0_id(0x0065), t0_id(0x0301), t0_id(0x0078) };
+    hash128_t flat;
+    hash128_merkle(2, flat_kids, 3, &flat);
+    EXPECT_FALSE(hash128_equals(&id, &flat));
+}
+
+TEST(LaplaceContentRootId, MatchesContentWitnessBatchRoot) {
+    const char* s = "whale song";
+    hash128_t lookup_id;
+    ASSERT_EQ(0, laplace_content_root_id(
+        (const uint8_t*)s, std::strlen(s), &lookup_id));
+
+    intent_stage_t* stage = intent_stage_new(64);
+    ASSERT_NE(nullptr, stage);
+    hash128_t source;
+    hash128_blake3((const uint8_t*)"test/root-id-parity", 19, &source);
+    hash128_t deposit_id;
+    ASSERT_EQ(0, content_witness_batch_add(
+        stage, (const uint8_t*)s, std::strlen(s), &source, &deposit_id));
+    EXPECT_TRUE(hash128_equals(&lookup_id, &deposit_id));
+    intent_stage_free(stage);
+}
+
+TEST(LaplaceContentRootId, RejectsEmptyAndNull) {
+    hash128_t id;
+    EXPECT_EQ(-2, laplace_content_root_id((const uint8_t*)"x", 0, &id));
+    EXPECT_EQ(-1, laplace_content_root_id(nullptr, 1, &id));
+    EXPECT_EQ(-1, laplace_content_root_id((const uint8_t*)"x", 1, nullptr));
+}

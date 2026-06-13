@@ -183,6 +183,11 @@ public sealed class IntentStage : SafeHandle
             {
                 int rc = NativeInterop.ContentWitnessBatchAdd(
                     handle, utf8, (nuint)canonical.Length, &src, &root);
+                // -3 = perfcache not loaded: a process-setup bug, never a data
+                // condition. Flattening it into false made every content witness
+                // a silent no-op (cost a debugging round 2026-06-11).
+                if (rc == -3) throw new InvalidOperationException(
+                    "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
                 if (rc != 0) return false;
                 rootId = root;
                 return true;

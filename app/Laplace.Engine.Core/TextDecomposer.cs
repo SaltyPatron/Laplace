@@ -45,4 +45,43 @@ public static class TextDecomposer
         byte[] heap = Encoding.UTF8.GetBytes(text);
         return Run(heap.AsSpan());
     }
+
+    /// <summary>
+    /// THE lookup law: the natural content unit's id under the same decomposer,
+    /// composer, and collapse law as the deposit path — byte-identical to what
+    /// content deposition emitted for the same text. Returns null for empty
+    /// input. Requires CodepointPerfcache.Load/LoadDefault first (fails loud).
+    /// </summary>
+    public static Hash128? ContentRootId(ReadOnlySpan<byte> utf8)
+    {
+        if (utf8.Length == 0) return null;
+        Hash128 id = default;
+        unsafe
+        {
+            fixed (byte* p = utf8)
+            {
+                int rc = NativeInterop.ContentRootId(p, (nuint)utf8.Length, &id);
+                if (rc == -3) throw new InvalidOperationException(
+                    "laplace_content_root_id: perfcache not loaded — call CodepointPerfcache.LoadDefault() first");
+                if (rc != 0) throw new InvalidOperationException(
+                    $"laplace_content_root_id failed (rc={rc})");
+            }
+        }
+        return id;
+    }
+
+    public static Hash128? ContentRootId(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        if (text.Length == 0) return null;
+        int max = Encoding.UTF8.GetMaxByteCount(text.Length);
+        if (max <= 4096)
+        {
+            Span<byte> buf = stackalloc byte[max];
+            int n = Encoding.UTF8.GetBytes(text, buf);
+            return ContentRootId(buf.Slice(0, n));
+        }
+        byte[] heap = Encoding.UTF8.GetBytes(text);
+        return ContentRootId(heap.AsSpan());
+    }
 }

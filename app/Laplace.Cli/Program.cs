@@ -384,10 +384,7 @@ internal static class Program
         byte[]? id = null;
         await using (var res = conn.CreateCommand())
         {
-            res.CommandText =
-                "SELECT p.entity_id FROM laplace.physicalities p "
-                + "JOIN laplace.prompt_state(@w) s ON p.entity_id = s.id "
-                + "WHERE p.type = 1 AND p.coord IS NOT NULL LIMIT 1";
+            res.CommandText = "SELECT laplace.first_placed_topic(@w)";
             res.Parameters.AddWithValue("w", word);
             var scalar = await res.ExecuteScalarAsync();
             if (scalar is byte[] b) id = b;

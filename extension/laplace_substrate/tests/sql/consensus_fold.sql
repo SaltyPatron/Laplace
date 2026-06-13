@@ -515,6 +515,69 @@ BEGIN
     RAISE NOTICE '✓ consensus_fold_swap: degenerate empty swap refused (consensus intact); explicit override permits it';
 END $$;
 
+-- ── walk fold: a subject that has BOTH seeds and walks ──────────────────────
+-- The scale case the earlier fixtures never covered: a shared subject (the same
+-- token witnessed by two models) carries existing consensus seeds AND new walk
+-- objects. The fold must emit S + (W − matched), never a cross product. (A
+-- seeded TinyLlama fold over an 11.8M MiniLM consensus emitted ~10× the
+-- expected rows — this fixture is the regression probe for that.)
+DO $$
+DECLARE
+    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    src bytea := laplace_hash128_blake3('test/shared/source');
+    rel bytea := laplace_hash128_blake3('test/shared/reltype');
+    s   bytea := laplace_hash128_blake3('test/shared/subject');
+    oA  bytea := laplace_hash128_blake3('test/shared/A');
+    oB  bytea := laplace_hash128_blake3('test/shared/B');
+    oC  bytea := laplace_hash128_blake3('test/shared/C');
+    oD  bytea := laplace_hash128_blake3('test/shared/D');
+    phi bigint := 30000000000;
+    sc  bigint := 500000000;
+    ts timestamptz := '2026-01-01 00:00:00+00';
+    n bigint; cnt bigint;
+BEGIN
+    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+        (src,0,type_t,NULL), (rel,0,type_t,src), (s,0,type_t,src),
+        (oA,0,type_t,src), (oB,0,type_t,src), (oC,0,type_t,src), (oD,0,type_t,src);
+    DELETE FROM consensus;
+    -- three existing seeds for s: objects A, B, C
+    INSERT INTO consensus (id, subject_id, type_id, object_id,
+                           rating, rd, volatility, witness_count, last_observed_at)
+    VALUES (consensus_id(s,rel,oA), s,rel,oA, 1600000000000,120000000000,60000000,2,ts),
+           (consensus_id(s,rel,oB), s,rel,oB, 1600000000000,120000000000,60000000,2,ts),
+           (consensus_id(s,rel,oC), s,rel,oC, 1600000000000,120000000000,60000000,2,ts);
+
+    -- one walk for s to objects B, C, D (B,C shared with seeds; D new; A untouched)
+    PERFORM create_walk_staging(1);
+    EXECUTE format('INSERT INTO %I VALUES ($1,$2,NULL,$3,3,3,$4,$5)', 'consensus_walk_staging_0')
+        USING s, rel, phi, ts,
+              pg_temp.walk_vertex(oB,1,1,sc) || pg_temp.walk_vertex(oC,2,1,sc)
+              || pg_temp.walk_vertex(oD,3,1,sc);
+
+    n := finish_consensus_fold();
+    -- exactly four relations for s: A (pass-through), B & C (seed folded with walk),
+    -- D (new from walk). NOT a cross product (which would be 3 seeds × 3 walks = 9+).
+    SELECT count(*) INTO cnt FROM consensus WHERE subject_id = s;
+    IF cnt <> 4 THEN
+        RAISE EXCEPTION 'FAIL(shared): % relations for a subject with 3 seeds + 3 walks (want 4: A,B,C,D)', cnt;
+    END IF;
+    IF n <> 4 THEN
+        RAISE EXCEPTION 'FAIL(shared): fold returned % relations (want 4)', n;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM consensus WHERE subject_id=s AND object_id=oA AND witness_count=2) THEN
+        RAISE EXCEPTION 'FAIL(shared): seed A not passed through unchanged';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM consensus WHERE subject_id=s AND object_id=oD AND witness_count=1) THEN
+        RAISE EXCEPTION 'FAIL(shared): new walk object D not emitted';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM consensus WHERE subject_id=s AND object_id=oB AND witness_count=3) THEN
+        RAISE EXCEPTION 'FAIL(shared): seed B not folded with its walk (witness 2+1=3 expected)';
+    END IF;
+
+    DELETE FROM consensus;
+    RAISE NOTICE '✓ consensus_fold: a subject with both seeds and walks emits S + (W − matched), never a cross product';
+END $$;
+
 -- ── mixed φ within one fold must refuse, in both lanes ──────────────────────
 DO $$
 DECLARE

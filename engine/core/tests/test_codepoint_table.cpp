@@ -74,3 +74,48 @@ TEST(LaplaceCoreCodepointTable, RejectsBadPath) {
     EXPECT_TRUE(codepoint_table_is_loaded());
     EXPECT_NE(codepoint_table_lookup(0x41u), nullptr);
 }
+
+/* ---- White_Space law: omniglottal separators, never an ASCII regex ---- */
+
+TEST(LaplaceWhitespaceLaw, AsciiAndUnicodeSpacesAreWhitespace) {
+    /* ASCII set the old [[:space:]] regex caught */
+    for (uint32_t cp : {0x09u, 0x0Au, 0x0Bu, 0x0Cu, 0x0Du, 0x20u})
+        EXPECT_TRUE(laplace_codepoint_is_whitespace(cp)) << "cp=" << cp;
+    /* the omniglottal set the regex SILENTLY DROPPED (kept as word-order units) */
+    for (uint32_t cp : {0x00A0u,  /* NBSP                  */
+                        0x1680u,  /* OGHAM SPACE MARK      */
+                        0x2000u, 0x2001u, 0x2002u, 0x2003u, 0x2004u, 0x2005u,
+                        0x2006u, 0x2007u, 0x2008u, 0x2009u, 0x200Au,
+                        0x2028u,  /* LINE SEPARATOR        */
+                        0x2029u,  /* PARAGRAPH SEPARATOR   */
+                        0x202Fu,  /* NARROW NO-BREAK SPACE */
+                        0x205Fu,  /* MEDIUM MATH SPACE     */
+                        0x3000u}) /* IDEOGRAPHIC SPACE     */
+        EXPECT_TRUE(laplace_codepoint_is_whitespace(cp)) << "cp=" << cp;
+}
+
+TEST(LaplaceWhitespaceLaw, LettersAndZwspAreNotWhitespace) {
+    /* ZERO WIDTH SPACE is NOT White_Space (it is FORMAT) — a classic trap */
+    for (uint32_t cp : {0x41u, 0x61u, 0x4E2Du, 0x200Bu, 0xFEFFu, 0x30u})
+        EXPECT_FALSE(laplace_codepoint_is_whitespace(cp)) << "cp=" << cp;
+}
+
+TEST(LaplaceWhitespaceLaw, AllWhitespaceTextOmniglottal) {
+    EXPECT_TRUE(laplace_text_is_all_whitespace((const uint8_t*)"   ", 3));
+    EXPECT_TRUE(laplace_text_is_all_whitespace((const uint8_t*)"\t\n ", 3));
+    /* U+3000 IDEOGRAPHIC SPACE = E3 80 80, all-whitespace in CJK text */
+    const uint8_t ideo[] = {0xE3, 0x80, 0x80};
+    EXPECT_TRUE(laplace_text_is_all_whitespace(ideo, sizeof(ideo)));
+    /* NBSP + ASCII space */
+    const uint8_t nbsp_sp[] = {0xC2, 0xA0, 0x20};
+    EXPECT_TRUE(laplace_text_is_all_whitespace(nbsp_sp, sizeof(nbsp_sp)));
+}
+
+TEST(LaplaceWhitespaceLaw, NonWhitespaceAndEmptyRejected) {
+    EXPECT_FALSE(laplace_text_is_all_whitespace((const uint8_t*)"", 0));
+    EXPECT_FALSE(laplace_text_is_all_whitespace((const uint8_t*)" a ", 3));
+    EXPECT_FALSE(laplace_text_is_all_whitespace((const uint8_t*)"x", 1));
+    /* invalid UTF-8 is not a separator */
+    const uint8_t bad[] = {0xFF, 0xFE};
+    EXPECT_FALSE(laplace_text_is_all_whitespace(bad, sizeof(bad)));
+}

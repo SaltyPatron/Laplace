@@ -150,11 +150,13 @@ static const char *CORPUS_PROBE =
     "FROM laplace.physicalities WHERE type = 1 AND trajectory IS NOT NULL";
 
 /* whitespace-only renders are separators: witnessed in content, excluded from
- * order. One batch query per corpus build. */
+ * order. One batch query per corpus build. The predicate is the engine's
+ * Unicode White_Space law (is_all_whitespace), NOT an ASCII [[:space:]] regex
+ * — U+3000, NBSP, U+2000..200A are separators in every script, not word units. */
 static const char *CORPUS_SEPARATOR_QUERY =
     "SELECT v.ord::int4 - 1 "
     "FROM unnest($1::bytea[]) WITH ORDINALITY v(id, ord) "
-    "WHERE COALESCE(laplace.render_text(v.id, 8), 'x') ~ '^[[:space:]]+$'";
+    "WHERE laplace.is_all_whitespace(laplace.render_text(v.id, 8))";
 
 #define CORPUS_WALK_DEPTH_CAP 64
 
@@ -899,12 +901,12 @@ pg_laplace_generate_tokens(PG_FUNCTION_ARGS)
              * walk is generate_greedy, respond_native.c). */
             static const char *FLOOR_SQL =
                 "SELECT c.object_id, "
-                "       GREATEST((c.rating - 2*c.rd) / 1000000000, 1)::int8 "
+                "       GREATEST(laplace.eff_mu(c.rating, c.rd) / 1000000000, 1)::int8 "
                 "FROM laplace.consensus c "
                 "WHERE c.subject_id = $1 AND c.object_id IS NOT NULL "
                 "  AND c.type_id = laplace.relation_type_id('COMPLETES_TO') "
                 "  AND NOT laplace.refuted(c.rating, c.rd) "
-                "ORDER BY (c.rating - 2*c.rd) DESC LIMIT $2";
+                "ORDER BY laplace.eff_mu(c.rating, c.rd) DESC LIMIT $2";
             Oid    argtypes[2] = { BYTEAOID, INT4OID };
             Datum  args[2];
             bytea *subj = (bytea *) palloc(VARHDRSZ + 16);

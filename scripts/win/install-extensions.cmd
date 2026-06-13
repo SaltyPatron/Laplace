@@ -22,12 +22,15 @@ call :swapcopy "build-win-ext\laplace_geom\laplace_geom.dll" || exit /b 1
 call :swapcopy "build-win-ext\laplace_substrate\laplace_substrate.dll" || exit /b 1
 call :swapcopy "build-win\core\laplace_core.dll" || exit /b 1
 call :swapcopy "build-win\dynamics\laplace_dynamics.dll" || exit /b 1
+rem T0 perfcache blob: the backend oracle (word_id, codepoint_for_id, render leaves).
+copy /y "build-win\core\perfcache\laplace_t0_perfcache.bin" "%DEPLOY%\share\laplace_t0_perfcache.bin" >nul || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\tbb12.dll" || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\libhwloc-15.dll"
 echo deployed: %DEPLOY%
 set "PSQL=%PGBIN%\psql.exe"
 "%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET extension_control_path = '$system;D:/Data/Postgres/laplace/share';" || exit /b 1
 "%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET dynamic_library_path = '$libdir;D:/Data/Postgres/laplace/lib';" || exit /b 1
+"%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET laplace_substrate.perfcache_path = 'D:/Data/Postgres/laplace/share/laplace_t0_perfcache.bin';" || exit /b 1
 "%PSQL%" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "SELECT pg_reload_conf();" || exit /b 1
 "%PSQL%" -h localhost -U postgres -d postgres -tAc "SELECT name, default_version FROM pg_available_extensions WHERE name LIKE 'laplace%%' ORDER BY 1;"
 if "%RECYCLE%"=="1" (

@@ -1,15 +1,15 @@
-CREATE FUNCTION relation_type_id(p_name text) RETURNS bytea
+CREATE OR REPLACE FUNCTION relation_type_id(p_name text) RETURNS bytea
     LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
     SELECT @extschema@.canonical_id('substrate/type/' || p_name || '/v1')
 $$;
 
 
-CREATE FUNCTION source_id(p_name text) RETURNS bytea
+CREATE OR REPLACE FUNCTION source_id(p_name text) RETURNS bytea
     LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
     SELECT @extschema@.canonical_id('substrate/source/' || p_name || '/v1')
 $$;
 
-CREATE FUNCTION evidence_count(
+CREATE OR REPLACE FUNCTION evidence_count(
     p_type bytea DEFAULT NULL, p_source bytea DEFAULT NULL, p_object bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
@@ -21,7 +21,7 @@ CREATE FUNCTION evidence_count(
       AND (p_object IS NULL OR a.object_id = p_object)
 $$;
 
-CREATE FUNCTION consensus_count(p_type bytea DEFAULT NULL)
+CREATE OR REPLACE FUNCTION consensus_count(p_type bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
@@ -29,7 +29,7 @@ CREATE FUNCTION consensus_count(p_type bytea DEFAULT NULL)
     WHERE (p_type IS NULL OR c.type_id = p_type)
 $$;
 
-CREATE FUNCTION content_count(p_source bytea DEFAULT NULL)
+CREATE OR REPLACE FUNCTION content_count(p_source bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
@@ -38,7 +38,7 @@ CREATE FUNCTION content_count(p_source bytea DEFAULT NULL)
       AND (p_source IS NULL OR p.source_id = p_source)
 $$;
 
-CREATE FUNCTION multi_source_entity_count()
+CREATE OR REPLACE FUNCTION multi_source_entity_count()
     RETURNS bigint
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
@@ -48,7 +48,7 @@ CREATE FUNCTION multi_source_entity_count()
         HAVING count(DISTINCT p.source_id) > 1) t
 $$;
 
-CREATE FUNCTION substrate_counts()
+CREATE OR REPLACE FUNCTION substrate_counts()
     RETURNS TABLE(metric text, value bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
@@ -86,7 +86,7 @@ CREATE FUNCTION substrate_counts()
     SELECT 'consensus (relations)',    count(*) FROM @extschema@.consensus
 $$;
 
-CREATE FUNCTION arena_counts()
+CREATE OR REPLACE FUNCTION arena_counts()
     RETURNS TABLE(type text, type_id bytea, relations bigint, witnesses bigint,
                   top_eff_mu numeric)
     LANGUAGE sql STABLE
@@ -98,7 +98,7 @@ CREATE FUNCTION arena_counts()
     ORDER BY count(*) DESC
 $$;
 
-CREATE FUNCTION source_counts()
+CREATE OR REPLACE FUNCTION source_counts()
     RETURNS TABLE(source text, source_id bytea, evidence bigint, content bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
@@ -109,7 +109,7 @@ CREATE FUNCTION source_counts()
     ORDER BY 3 DESC
 $$;
 
-CREATE FUNCTION entity_type_counts()
+CREATE OR REPLACE FUNCTION entity_type_counts()
     RETURNS TABLE(type text, type_id bytea, tier smallint, entities bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
@@ -119,7 +119,7 @@ CREATE FUNCTION entity_type_counts()
     ORDER BY count(*) DESC
 $$;
 
-CREATE FUNCTION consensus_tier_distribution()
+CREATE OR REPLACE FUNCTION consensus_tier_distribution()
     RETURNS TABLE(subject_tier smallint, relations bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
@@ -136,7 +136,7 @@ CREATE FUNCTION consensus_tier_distribution()
     GROUP BY e.tier ORDER BY e.tier
 $$;
 
-CREATE FUNCTION render_gaps(p_limit integer DEFAULT 50)
+CREATE OR REPLACE FUNCTION render_gaps(p_limit integer DEFAULT 50)
     RETURNS TABLE(id bytea, roles text, refs bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
@@ -154,14 +154,14 @@ CREATE FUNCTION render_gaps(p_limit integer DEFAULT 50)
     SELECT a.id, a.roles, a.refs
     FROM agg a
     WHERE NOT EXISTS (SELECT 1 FROM @extschema@.canonical_names n WHERE n.id = a.id)
-      AND NOT EXISTS (SELECT 1 FROM @extschema@.codepoint_render cr WHERE cr.id = a.id)
+      AND @extschema@.codepoint_for_id(a.id) IS NULL
       AND NOT EXISTS (SELECT 1 FROM @extschema@.physicalities p
                       WHERE p.entity_id = a.id AND p.type = 1 AND p.trajectory IS NOT NULL)
     ORDER BY a.refs DESC
     LIMIT p_limit
 $$;
 
-CREATE FUNCTION period_staging_status()
+CREATE OR REPLACE FUNCTION period_staging_status()
     RETURNS TABLE(partition_table text, staged_rows bigint)
     LANGUAGE plpgsql STABLE
     SET search_path = @extschema@, public AS $$

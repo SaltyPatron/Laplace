@@ -1,8 +1,10 @@
 #include "postgres.h"
 #include "fmgr.h"
 #include "funcapi.h"
+#include "nodes/execnodes.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/tuplestore.h"
 #include "catalog/pg_type.h"
 #include "access/htup_details.h"
 
@@ -497,4 +499,69 @@ pg_laplace_mantissa_unpack(PG_FUNCTION_ARGS)
 
     lwgeom_free(l);
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
+/* Vertex flag-word field decode — the mantissa.h accessors are the single
+ * source of the bit layout; the SQL vertex_atom/vertex_tier helpers delegate
+ * here instead of re-spelling shifts and masks. */
+PG_FUNCTION_INFO_V1(pg_laplace_vertex_atom);
+
+Datum
+pg_laplace_vertex_atom(PG_FUNCTION_ARGS)
+{
+    uint64 flags = (uint64) PG_GETARG_INT64(0);
+
+    if (!laplace_vflag_has_atom(flags))
+        PG_RETURN_NULL();
+    PG_RETURN_INT32((int32) laplace_vflag_atom(flags));
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_vertex_tier);
+
+Datum
+pg_laplace_vertex_tier(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT16((int16) laplace_vflag_tier((uint64) PG_GETARG_INT64(0)));
+}
+
+/* One C loop over a stored trajectory: every vertex mantissa-unpacked in
+ * process. Replaces the per-vertex fmgr lateral (ST_DumpPoints +
+ * laplace_mantissa_unpack per point) that the substrate's constituents()
+ * surface used to fan out into. Output is bit-identical to that lateral. */
+PG_FUNCTION_INFO_V1(pg_laplace_trajectory_constituents);
+
+Datum
+pg_laplace_trajectory_constituents(PG_FUNCTION_ARGS)
+{
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+
+    InitMaterializedSRF(fcinfo, 0);
+
+    GSERIALIZED *g;
+    LWGEOM *l = lwgeom_from_datum(PG_GETARG_DATUM(0), &g);
+
+    size_t  n = 0;
+    double *xyzm = geom_to_xyzm_buffer(l, "laplace_trajectory_constituents", &n);
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        mantissa_payload_t payload;
+        mantissa_unpack(&xyzm[i * 4], &payload);
+
+        bytea *eid_out = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
+        SET_VARSIZE(eid_out, VARHDRSZ + sizeof(hash128_t));
+        memcpy(VARDATA(eid_out), &payload.entity_id, sizeof(hash128_t));
+
+        Datum values[4];
+        bool  nulls[4] = {false, false, false, false};
+        values[0] = Int32GetDatum((int32) payload.ordinal);
+        values[1] = PointerGetDatum(eid_out);
+        values[2] = Int32GetDatum((int32) payload.run_length);
+        values[3] = Int64GetDatum((int64) payload.flags);
+        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+    }
+
+    pfree(xyzm);
+    lwgeom_free(l);
+    return (Datum) 0;
 }
