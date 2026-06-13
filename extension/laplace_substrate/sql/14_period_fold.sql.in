@@ -478,6 +478,17 @@ CREATE OR REPLACE FUNCTION consensus_fold_swap()
 DECLARE
     rel record;
 BEGIN
+    -- THE DEGENERATE-SWAP GUARD. A fold that produced an empty consensus_next
+    -- while consensus is populated is ALWAYS a bug (a no-op/errored fold, a
+    -- search_path mishap), and swapping it wipes the substrate's product. Refuse.
+    -- A genuinely fresh build has an empty consensus and never trips this.
+    -- (Set laplace.allow_empty_swap=on only for a deliberate truncate-by-fold.)
+    IF NOT EXISTS (SELECT 1 FROM consensus_next)
+       AND EXISTS (SELECT 1 FROM consensus)
+       AND COALESCE(NULLIF(current_setting('laplace.allow_empty_swap', true), ''), 'off') <> 'on'
+    THEN
+        RAISE EXCEPTION 'consensus_fold_swap: refusing to swap an empty consensus_next over a populated consensus — the fold produced no rows (errored or no-op); this would wipe consensus. Set laplace.allow_empty_swap=on to override.';
+    END IF;
     ALTER TABLE consensus_next
         ALTER COLUMN id SET NOT NULL,
         ALTER COLUMN subject_id SET NOT NULL,
@@ -513,6 +524,80 @@ BEGIN
     END LOOP;
 
     EXECUTE 'ANALYZE consensus';
+END;
+$$;
+
+-- ── THE PARALLEL WALK FOLD ──────────────────────────────────────────────────
+-- The walk partitions are independent by construction: partition p reads only
+-- consensus_walk_staging_p and its routed seed slice, and writes consensus_next.
+-- So N backends fold concurrently (concurrent heap inserts into the un-indexed
+-- consensus_next are safe; the seed scan is read-only over consensus). The
+-- caller (ConsensusAccumulatingWriter) runs prepare on one connection, then
+-- consensus_fold_walks(p, nwalk, seed) on N connections in parallel, then
+-- finalize. finish_consensus_fold() stays the single-connection equivalent —
+-- the parity reference and the direct-psql re-fold path. This is a 4× wall-clock
+-- cut AND a smaller window for a concurrent install --recycle to kill the fold.
+CREATE OR REPLACE FUNCTION walk_fold_prepare(OUT nwalk integer, OUT fresh boolean)
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    nflat integer;
+BEGIN
+    SELECT max(substring(c.relname FROM '_(\d+)$')::int) + 1 INTO nwalk
+    FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+    WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+      AND c.relname ~ '^consensus_walk_staging_\d+$';
+    SELECT max(substring(c.relname FROM '_(\d+)$')::int) + 1 INTO nflat
+    FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+    WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+      AND c.relname ~ '^consensus_period_staging_e\d{4}_\d+$';
+    IF nwalk IS NULL THEN
+        RAISE EXCEPTION 'walk_fold_prepare: no walk journal staged';
+    END IF;
+    IF nflat IS NOT NULL THEN
+        RAISE EXCEPTION 'walk_fold_prepare: both walk and flat journals staged — fold one shape at a time';
+    END IF;
+    SELECT NOT EXISTS (SELECT 1 FROM consensus LIMIT 1) INTO fresh;
+    IF to_regclass(current_schema() || '.consensus_next') IS NOT NULL THEN
+        EXECUTE 'DROP TABLE consensus_next';
+    END IF;
+    CREATE TABLE consensus_next (
+        id               bytea,
+        subject_id       bytea,
+        type_id          bytea,
+        object_id        bytea,
+        rating           bigint,
+        rd               bigint,
+        volatility       bigint,
+        witness_count    bigint,
+        last_observed_at timestamptz
+    );
+END;
+$$;
+
+-- Drop the (now consumed) walk journal and run the shared swap tail. Runs after
+-- every parallel consensus_fold_walks has committed its partition's rows into
+-- consensus_next.
+CREATE OR REPLACE FUNCTION walk_fold_finalize()
+    RETURNS void LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public
+    SET session_replication_role = replica
+    SET maintenance_work_mem = '4GB' AS $$
+DECLARE
+    rel record;
+BEGIN
+    IF to_regclass(current_schema() || '.consensus_next') IS NULL THEN
+        RAISE EXCEPTION 'walk_fold_finalize: consensus_next missing — prepare did not run or was rolled back';
+    END IF;
+    FOR rel IN
+        SELECT c.relname
+        FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+        WHERE ns.nspname = current_schema() AND c.relkind = 'r'
+          AND c.relname ~ '^consensus_walk_staging_\d+$'
+    LOOP
+        EXECUTE format('DROP TABLE %I', rel.relname);
+    END LOOP;
+    PERFORM consensus_fold_swap();
 END;
 $$;
 

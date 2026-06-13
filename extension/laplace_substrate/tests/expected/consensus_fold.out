@@ -465,6 +465,55 @@ BEGIN
     RAISE NOTICE '✓ consensus_fold: converted partials ride the walk journal — zero16 vertex = NULL-object relation, q/rem split re-merges to the exact flat-lane period';
 END $$;
 NOTICE:  ✓ consensus_fold: converted partials ride the walk journal — zero16 vertex = NULL-object relation, q/rem split re-merges to the exact flat-lane period
+-- ── the degenerate-swap guard ───────────────────────────────────────────────
+-- A fold that yields an EMPTY consensus_next while consensus is populated is
+-- always a bug (an errored/no-op fold, a search_path mishap); swapping it would
+-- wipe the substrate's product. consensus_fold_swap must refuse it and leave
+-- consensus untouched. (Once wiped a live 14M-row consensus, 2026-06-12.)
+DO $$
+DECLARE
+    type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
+    s bytea := laplace_hash128_blake3('test/guard/subject');
+    t bytea := laplace_hash128_blake3('test/guard/reltype');
+    o bytea := laplace_hash128_blake3('test/guard/object');
+    refused boolean := false;
+BEGIN
+    DELETE FROM consensus;
+    INSERT INTO consensus (id, subject_id, type_id, object_id,
+                           rating, rd, volatility, witness_count, last_observed_at)
+    VALUES (consensus_id(s, t, o), s, t, o,
+            1500000000000, 350000000000, 60000000, 1, '2026-01-01 00:00:00+00');
+
+    IF to_regclass('consensus_next') IS NOT NULL THEN EXECUTE 'DROP TABLE consensus_next'; END IF;
+    CREATE TABLE consensus_next (
+        id bytea, subject_id bytea, type_id bytea, object_id bytea,
+        rating bigint, rd bigint, volatility bigint,
+        witness_count bigint, last_observed_at timestamptz);
+
+    BEGIN
+        PERFORM consensus_fold_swap();
+    EXCEPTION WHEN raise_exception THEN
+        refused := true;
+    END;
+    IF NOT refused THEN
+        RAISE EXCEPTION 'FAIL(guard): empty consensus_next swap over populated consensus was not refused';
+    END IF;
+    IF (SELECT count(*) FROM consensus) <> 1 THEN
+        RAISE EXCEPTION 'FAIL(guard): refused swap still altered consensus';
+    END IF;
+
+    -- the override lets a deliberate truncate-by-fold through
+    PERFORM set_config('laplace.allow_empty_swap', 'on', true);
+    PERFORM consensus_fold_swap();
+    PERFORM set_config('laplace.allow_empty_swap', 'off', true);
+    IF (SELECT count(*) FROM consensus) <> 0 THEN
+        RAISE EXCEPTION 'FAIL(guard): override did not permit the empty swap';
+    END IF;
+
+    DELETE FROM consensus;
+    RAISE NOTICE '✓ consensus_fold_swap: degenerate empty swap refused (consensus intact); explicit override permits it';
+END $$;
+NOTICE:  ✓ consensus_fold_swap: degenerate empty swap refused (consensus intact); explicit override permits it
 -- ── mixed φ within one fold must refuse, in both lanes ──────────────────────
 DO $$
 DECLARE
