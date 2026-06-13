@@ -626,6 +626,19 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     {
         await FlushWalksAsync(ct);
         await FlushPeriodAsync(ct);
+
+        // Walk mode: the partitions are independent, so fold them on N connections
+        // in parallel (prepare → consensus_fold_walks×N → finalize). 'sql' impl or a
+        // single partition fall through to the single-connection finish_consensus_fold
+        // (the parity reference). LAPLACE_FOLD_PARALLEL=0 forces the serial path.
+        if (_stageAsWalks
+            && _partitions > 1
+            && (Environment.GetEnvironmentVariable("LAPLACE_FOLD_IMPL") ?? "engine") != "sql"
+            && Environment.GetEnvironmentVariable("LAPLACE_FOLD_PARALLEL") != "0")
+        {
+            return await ParallelWalkFoldAsync(ct);
+        }
+
         if (_terminalFold || _stageAsWalks)
         {
             // The walk journal has exactly one fold — the terminal walk fold —
@@ -667,6 +680,77 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             return Interlocked.Read(ref _foldedRelations);
         }
         await _foldChain;
+        return Interlocked.Read(ref _foldedRelations);
+    }
+
+    // The parallel terminal walk fold. prepare creates consensus_next (autocommit,
+    // so the parallel backends see it); each partition folds on its own connection
+    // (concurrent heap inserts into the un-indexed consensus_next are safe, the seed
+    // scan is read-only); finalize drops the journal and swaps. A killed partition
+    // (e.g. a concurrent install --recycle) aborts the whole fold — the walk journal
+    // persists, so a re-run re-folds without re-ETL, exactly as the serial lane.
+    private async Task<long> ParallelWalkFoldAsync(CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        int nwalk;
+        bool fresh;
+        await using (var conn = await _ds.OpenConnectionAsync(ct))
+        {
+            await using var prep = conn.CreateCommand();
+            prep.CommandTimeout = 0;
+            prep.CommandText = "SELECT nwalk, fresh FROM laplace.walk_fold_prepare()";
+            await using var r = await prep.ExecuteReaderAsync(ct);
+            await r.ReadAsync(ct);
+            nwalk = r.GetInt32(0);
+            fresh = r.GetBoolean(1);
+        }
+        _log.LogInformation(
+            "parallel walk fold: {Nwalk} partition(s) over {Mode} consensus",
+            nwalk, fresh ? "fresh" : "seeded");
+
+        var folds = new Task<long>[nwalk];
+        for (int k = 0; k < nwalk; k++)
+        {
+            int p = k;
+            folds[p] = Task.Run(async () =>
+            {
+                await using var c = await _ds.OpenConnectionAsync().ConfigureAwait(false);
+                c.Notice += (_, e) =>
+                    _log.LogInformation("walk fold: {Message}", e.Notice.MessageText);
+                await using (var sub = c.CreateCommand())
+                {
+                    sub.CommandText = "SET client_min_messages = 'log'";
+                    await sub.ExecuteNonQueryAsync().ConfigureAwait(false);
+                }
+                await using var cmd = c.CreateCommand();
+                cmd.CommandTimeout = 0;
+                cmd.CommandText = "SELECT laplace.consensus_fold_walks($1, $2, $3)";
+                cmd.Parameters.AddWithValue(p);
+                cmd.Parameters.AddWithValue(nwalk);
+                cmd.Parameters.AddWithValue(!fresh);
+                return (long)(await cmd.ExecuteScalarAsync().ConfigureAwait(false) ?? 0L);
+            });
+        }
+        long total = (await Task.WhenAll(folds).ConfigureAwait(false)).Sum();
+
+        await using (var conn = await _ds.OpenConnectionAsync(ct))
+        {
+            conn.Notice += (_, e) =>
+                _log.LogInformation("walk fold finalize: {Message}", e.Notice.MessageText);
+            await using (var sub = conn.CreateCommand())
+            {
+                sub.CommandText = "SET client_min_messages = 'log'";
+                await sub.ExecuteNonQueryAsync(ct);
+            }
+            await using var fin = conn.CreateCommand();
+            fin.CommandTimeout = 0;
+            fin.CommandText = "SELECT laplace.walk_fold_finalize()";
+            await fin.ExecuteNonQueryAsync(ct);
+        }
+        Interlocked.Add(ref _foldedRelations, total);
+        _log.LogInformation(
+            "parallel walk fold complete: {Relations:N0} consensus relations in {Sec:F0}s ({Rps:N0} rel/s)",
+            total, sw.Elapsed.TotalSeconds, total / Math.Max(1e-3, sw.Elapsed.TotalSeconds));
         return Interlocked.Read(ref _foldedRelations);
     }
 
