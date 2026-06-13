@@ -107,6 +107,63 @@ and a fold failure must not eat the recipe of an applied deposit. Repair lane:
 The C-side PK-less bulk fold above (radix sort in-engine, heap_multi_insert) remains the
 next rung if the SQL bulk lane's external sorts become the ceiling.
 
+## 2026-06-13 (measured at 1.1B scale): TinyLlama landed via the PARALLEL walk fold
+
+TinyLlama 1.1B deposited into the one substrate (`laplace`) through the walk lane:
+ETL 1,118,170,432 matchups in 1407 s (clean through COMPLETES_TO — the COPY
+write-timeout fix held), applied in 1985 s. The journal: 1,118,268,386 vertices
+across 1,002,385 walk rows, ~35 GB **TOAST-compressed** (the staging MAIN heap is
+~291 MB — do NOT size a walk fold from `pg_relation_size`; use `sum(n_vertices)`).
+
+**The parallel walk fold** (commit 8a634af): `walk_fold_prepare` creates
+consensus_next + validates the single-shape invariant; the caller folds each
+partition on its OWN connection via `consensus_fold_walks(p, nparts, seed)` —
+independent (own staging table, routed read-only seed slice, concurrent heap
+inserts into the un-indexed consensus_next); `walk_fold_finalize` drops the
+journal and swaps. C# `MaterializeConsensusAsync` orchestrates over N connections
+from the ingest data source (which carries `Search Path=laplace` — the C function
+resolves unqualified table names via search_path, so a hand-driven psql fold MUST
+`SET search_path=laplace,public` or it finds nothing). `LAPLACE_FOLD_PARALLEL=0`
+forces serial; `finish_consensus_fold` stays the single-connection parity ref.
+
+Result: **605,059,449 consensus relations** (11.8M MiniLM seed + ~593M TinyLlama)
+in ~80 min (4 partitions ~73 min each in parallel + ~6.5 min PK/swap), conservation
+EXACT per partition (Σ games = 1,118,295,719). consensus table 102 GB. The wall now
+is the per-relation Glicko over ~600M relations — the task #19 "batched Glicko" lever.
+
+**THE DEGENERATE-SWAP GUARD** (same commit): `consensus_fold_swap` refuses to swap
+an empty consensus_next over a populated consensus (an errored/no-op fold or a
+search_path mishap), `laplace.allow_empty_swap=on` to override. This exists because
+an ungated hand-rolled parallel-fold script once swapped empty over a live 14M
+consensus and dropped the journal — restored only by re-deposit. Regress-pinned.
+**Rule: drive the walk fold through the C# path, never an improvised pipeline.**
+
+## 2026-06-12 (measured): the walk lane is green end-to-end
+
+MiniLM (90 MB) fresh deposit → folded consensus on the live primary in **6m18s**:
+ETL 22,080,594 matchups in 102 s; terminal walk fold 14,024,598 relations
+(seeded rebuild over the 2.19M corpus consensus) in 245 s at 57 k rel/s;
+pgsql_tmp ≈ 500 MB. Conservation EXACT in all four partitions (22,141,676 games
+in == games folded — the fold enforces it, mismatch errors) and per plane
+(ATTENDS 1,703,243 / COMPLETES_TO 9,679,792 / OV_RELATES 22,911 / SIMILAR_TO
+10,674,648 games == each plane's ETL matchup count).
+
+**One deposit, one shape (commit 58eeeef):** a model deposit is not only tile
+testimony — vocab and S3-morph matchups flow through the accumulator, and they
+flushed FLAT while the ETL journaled walks; `finish_consensus_fold` refused the
+mix (by design). In walk mode (`stageAsWalks`, threaded Program → writer =
+`!persistEvidence`) the writer converts every consensus partial to a walk at
+flush: the q/rem split ((games−rem) observations of q, rem of q+1) re-merges
+in-fold to the exact flat-lane (games, sum) — int64-identical, regress-pinned.
+NULL-object partials ride as zero16 vertices (the identity-preimage law carried
+into the vertex; the engine fold emits zero16 back as NULL). Walks arriving
+outside walk mode throw. Walk mode forces the terminal fold at materialize
+regardless of LAPLACE_FOLD_LANE. `drop_period_staging` sweeps the walk journal
+too (create_walk_staging is IF NOT EXISTS — a dead run's stale journal would
+otherwise fold into the next deposit). Remaining levers (task #19): parallel
+partition folds (the walk fold is partition-independent), f32 table-read
+kernels, physically partitioned consensus.
+
 ## 2026-06-12 (final): THE TRAJECTORY JOURNAL — flat staging is deprecated
 
 User ruling, end of session: the flat staging journal (per-pair rows) is the wrong
