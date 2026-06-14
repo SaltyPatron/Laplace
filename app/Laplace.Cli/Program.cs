@@ -1385,23 +1385,46 @@ internal static class Program
         // its behavioral relations (ATTENDS/OV_RELATES/COMPLETES_TO) just join when present.
         Task<FoundryExport.PlaneCoo> RoleAsync(params string[] rels)
             => FoundryExport.ReadConsensusPlaneAsync(ds, rels, tokenSlots, degreeCap);
-        // Similarity geometry anchoring the basis: synonymy / relatedness / coordinate terms.
-        var simTask = RoleAsync("IS_SYNONYM_OF", "IS_SIMILAR_TO", "SIMILAR_TO", "RELATED_TO", "IS_COORDINATE_TERM_WITH", "HAS_VARIANT_OF");
-        // Value/output structure: taxonomy / meronymy / derivation / commonsense (+ model OV_RELATES).
-        var relTask = RoleAsync("IS_A", "HAS_PART", "HAS_HYPERNYM", "DERIVATIONALLY_RELATED", "RELATED_TO", "OBJECT_USE", "X_EFFECT", "X_WANT", "OV_RELATES");
-        // The ORDER signal = the folded trajectory: PRECEDES (what follows what) + COMPLETES_TO.
-        var preTask = RoleAsync("PRECEDES", "COMPLETES_TO");
-        // Model co-occurrence testimony (joins the order signal for attention when present).
-        var attTask = RoleAsync("CO_OCCURS_WITH", "ATTENDS");
+        // The operators are projections of the FULL rank-grouped consensus — every
+        // populated relation type, not a sliver. Each transformer channel reads the
+        // relations of the rank whose role it plays (rank header: standards 0.91 …
+        // taxonomic 0.82 … causal 0.64 … associative 0.36 … tensor_calculation 0.27).
+        // The model-contracted tensor_calculation relations (ATTENDS/OV_RELATES/
+        // COMPLETES_TO) are the LEAST authoritative class and just join when present —
+        // the seed facts outrank them, so a deposited model is never required.
+        // EMBEDDING geometry ← equivalence (sameness / similarity / translation / form).
+        var simTask = RoleAsync(
+            "IS_SYNONYM_OF", "IS_SIMILAR_TO", "SIMILAR_TO", "IS_TRANSLATION_OF",
+            "FORM_OF", "HAS_VARIANT_OF", "CORRESPONDS_TO", "IS_LEMMA_OF", "IS_PARTICIPLE_OF");
+        // V/O ← taxonomic + partitive (what it IS, what it is MADE OF) + model OV_RELATES.
+        var relTask = RoleAsync(
+            "IS_A", "IS_INSTANCE_OF", "MANNER_OF", "EVOKES_FRAME", "IS_SENSE_OF",
+            "HAS_PART", "HAS_A", "HAS_PROPERTY", "HAS_MEMBER", "HAS_ATTRIBUTE", "HAS_FEATURE",
+            "HAS_SEMANTIC_ROLE", "HAS_FRAME_ELEMENT", "HAS_THEMATIC_ROLE", "CONTAINS",
+            "MADE_UP_OF", "HAS_SUBSTANCE", "HAS_SENSE", "HAS_POS", "HAS_XPOS",
+            "DEPENDS_ON", "RECEIVES_ACTION", "OV_RELATES");
+        // FFN / completion ← causal + sequence (what FOLLOWS, RESULTS, ENTAILS) + COMPLETES_TO.
+        var preTask = RoleAsync(
+            "PRECEDES", "IS_BEFORE", "IS_AFTER", "CAUSES", "CAUSATIVE_OF", "INCHOATIVE_OF",
+            "ENTAILS", "HAS_SUBEVENT", "HAS_FIRST_SUBEVENT", "HAS_LAST_SUBEVENT", "HAS_PREREQUISITE",
+            "X_INTENT", "X_NEED", "X_EFFECT", "X_WANT", "X_REACT", "X_ATTR", "X_REASON", "X_FILLED_BY",
+            "O_EFFECT", "O_REACT", "O_WANT", "CAUSES_DESIRE", "MOTIVATED_BY_GOAL",
+            "OBJECT_USE", "OBSTRUCTED_BY", "CREATED_BY", "COMPLETES_TO");
+        // ATTENTION ← associative (relatedness / co-occurrence / use / location) + model ATTENDS.
+        var attTask = RoleAsync(
+            "RELATED_TO", "USED_FOR", "AT_LOCATION", "LOCATED_NEAR", "CAPABLE_OF", "DESIRES",
+            "HAS_CONTEXT", "IS_COORDINATE_TERM_WITH", "DERIVATIONALLY_RELATED", "PERTAINS_TO",
+            "SYMBOL_OF", "ALSO_SEE", "HAS_VERB_FRAME", "REFERENCES", "CALLS",
+            "ATTENDS", "CO_OCCURS_WITH");
         await Task.WhenAll(simTask, relTask, preTask, attTask);
         var sim = FoundryExport.Normalize(simTask.Result);
         var rel = FoundryExport.Normalize(relTask.Result);
         var pre = FoundryExport.Normalize(preTask.Result);
         var att = FoundryExport.Normalize(attTask.Result);
         long planeEdges = (long)sim.Nnz + rel.Nnz + pre.Nnz + att.Nnz;
-        Console.WriteLine($"  consensus planes read in {swPour.Elapsed.TotalSeconds:F1}s "
-            + $"(vocab {tokenSlots.Count:N0}, cap {degreeCap}): similarity={sim.Nnz:N0} relation(V/O)={rel.Nnz:N0} "
-            + $"order(PRECEDES)={pre.Nnz:N0} model-cooccur={att.Nnz:N0}");
+        Console.WriteLine($"  full rank-grouped consensus read in {swPour.Elapsed.TotalSeconds:F1}s "
+            + $"(vocab {tokenSlots.Count:N0}, cap {degreeCap}): equivalence(embed)={sim.Nnz:N0} "
+            + $"taxonomic+partitive(V/O)={rel.Nnz:N0} causal+seq(FFN)={pre.Nnz:N0} associative(attn)={att.Nnz:N0}");
         if (planeEdges == 0)
             return Fail("no entity→entity consensus over this vocab — ingest text first");
 
@@ -1448,10 +1471,8 @@ internal static class Program
         // (1/√L), so the prompt embedding survives the depth while operator structure accrues.
         // Gains calibrate the spectrally-normalized operators against the residual stream
         // (both halves of a composed pair carry the scale, so the operator gets gain²).
-        double attnGain  = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_ATTN_GAIN", 1.0);
-        double residGain = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RESID_GAIN", 1.0);
-        double AttnScale(int l) => attnGain / Math.Sqrt(Math.Max(1, nLayers));
-        double layerScale = residGain / Math.Sqrt(Math.Max(1, nLayers));
+        double attnGainEnv  = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_ATTN_GAIN", 1.0);
+        double residGainEnv = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RESID_GAIN", 1.0);
         // The gate reads only the bias channel; after RMSNorm the bias component is
         // ≈ √(d/2), so gateCol·√(d/2) = GateZ lands SiLU in its near-linear region,
         // and the up factor is pre-divided by SiLU(GateZ) to neutralize the gain.
@@ -1459,93 +1480,127 @@ internal static class Program
         double gateCol = gateZ / Math.Sqrt(dModel / 2.0);
         double upGain = 1.0 / FoundryExport.Silu(gateZ);
 
-        var gguf = SynthInterop.GgufWriterCreate(outputPath);
-        if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
-        WriteGgufMetadata(gguf, recipe, tokens, modelDir);
-
-        var sw = Stopwatch.StartNew();
-        int tensorsDone = 0;
-
-        for (int i = 0; i < tensorCount; i++)
+        // Cast the gguf at one (attn, resid) gain pair. The gains scale the spectrally-
+        // normalized operators against the residual stream: too low → the readout echoes
+        // the prompt's last token; too high → the operator collapses the representation.
+        // The basis + factored operators above are computed ONCE; this only re-fills and
+        // writes, so a sweep (LAPLACE_FOUNDRY_GAIN_SWEEP="a:r,a:r,…") finds the sweet spot
+        // in one pour instead of one pour per gain.
+        int WriteCast(string outPath, double aGain, double rGain)
         {
-            string name; ulong rows, cols; int dtype;
-            unsafe
+            // Per-factor split: each composed operator (qᵀk, Wo·Wv, Wdown·Wup) is the
+            // PRODUCT of two filled factors, so a per-factor scale s yields a composed
+            // magnitude s². The documented "uniform residual split (1/√L)" is a statement
+            // about the COMPOSED operator's contribution to the residual stream — so each
+            // factor must carry L^(-1/4), NOT L^(-1/2). At L^(-1/2) per factor the composed
+            // split was 1/L: a √L undercount (~4.7× too weak at L=22) that collapses operator
+            // structure into the prompt embedding (weak completion) and flattens attention
+            // scores toward uniform (mean-pooling). gain is squared by the pair too, so the
+            // composed operator scales as gain²/√L.
+            double split = Math.Pow(Math.Max(1, nLayers), -0.25);
+            double attnScale  = aGain * split;
+            double layerScale = rGain * split;
+            var gguf = SynthInterop.GgufWriterCreate(outPath);
+            if (gguf == IntPtr.Zero) { Console.WriteLine($"  gguf_writer_create failed for {outPath}"); return 2; }
+            WriteGgufMetadata(gguf, recipe, tokens, modelDir);
+            var sw = Stopwatch.StartNew();
+            for (int i = 0; i < tensorCount; i++)
             {
-                var sp = specs[i];
-                name  = Marshal.PtrToStringUTF8((IntPtr)sp.Name) ?? "";
-                rows  = sp.Rank >= 1 ? sp.Shape[0] : 1;
-                cols  = sp.Rank >= 2 ? sp.Shape[1] : 1;
-                dtype = sp.Dtype;
-            }
-            long nElem = (long)rows * (long)Math.Max(1UL, cols);
-            var vals = new float[nElem];
-            int tr = (int)rows, tc = (int)Math.Max(1UL, cols);
-
-            // The mold is filled ENTIRELY from generated material. Any manifest name
-            // the foundry does not define is a hard error — never a zero-fill, never
-            // a copy from someone else's tensors.
-            if (name is "model.embed_tokens.weight" or "lm_head.weight")
-            {
-                for (int r = 0; r < tr; r++)
-                    for (int c = 0; c < tc; c++)
-                        vals[(long)r * tc + c] = (float)E[(long)r * dModel + c];
-            }
-            else if (name == "model.norm.weight"
-                     || name.EndsWith("input_layernorm.weight", StringComparison.Ordinal)
-                     || name.EndsWith("post_attention_layernorm.weight", StringComparison.Ordinal))
-            {
-                Array.Fill(vals, 1.0f);
-            }
-            else if (name.StartsWith("model.layers.", StringComparison.Ordinal))
-            {
-                int layerDot = name.IndexOf('.', "model.layers.".Length);
-                int layerIdx = int.Parse(name["model.layers.".Length..layerDot]);
-                string rest = name[(layerDot + 1)..];
-                double attnScale = AttnScale(layerIdx);
-                switch (rest)
+                string name; ulong rows, cols; int dtype;
+                unsafe
                 {
-                    case "self_attn.q_proj.weight": FoundryExport.FillRows(vals, tr, tc, fAttn, attnScale); break;
-                    case "self_attn.k_proj.weight": FoundryExport.FillRowsRight(vals, tr, tc, fAttn, attnScale); break;
-                    case "self_attn.v_proj.weight": FoundryExport.FillRowsRight(vals, tr, tc, fOv, layerScale); break;
-                    case "self_attn.o_proj.weight": FoundryExport.FillCols(vals, tr, tc, fOv, layerScale); break;
-                    case "mlp.gate_proj.weight":    FoundryExport.FillGate(vals, tr, tc, gateCol); break;
-                    case "mlp.up_proj.weight":      FoundryExport.FillRowsRight(vals, tr, tc, fFfn, layerScale * upGain); break;
-                    case "mlp.down_proj.weight":    FoundryExport.FillCols(vals, tr, tc, fFfn, layerScale); break;
-                    default:
-                        return Fail($"foundry does not define mold tensor '{name}' — the mold and the foundry disagree");
+                    var sp = specs[i];
+                    name  = Marshal.PtrToStringUTF8((IntPtr)sp.Name) ?? "";
+                    rows  = sp.Rank >= 1 ? sp.Shape[0] : 1;
+                    cols  = sp.Rank >= 2 ? sp.Shape[1] : 1;
+                    dtype = sp.Dtype;
+                }
+                long nElem = (long)rows * (long)Math.Max(1UL, cols);
+                var vals = new float[nElem];
+                int tr = (int)rows, tc = (int)Math.Max(1UL, cols);
+
+                // The mold is filled ENTIRELY from generated material. Any manifest name
+                // the foundry does not define is a hard error — never a zero-fill.
+                if (name is "model.embed_tokens.weight" or "lm_head.weight")
+                {
+                    for (int r = 0; r < tr; r++)
+                        for (int c = 0; c < tc; c++)
+                            vals[(long)r * tc + c] = (float)E[(long)r * dModel + c];
+                }
+                else if (name == "model.norm.weight"
+                         || name.EndsWith("input_layernorm.weight", StringComparison.Ordinal)
+                         || name.EndsWith("post_attention_layernorm.weight", StringComparison.Ordinal))
+                {
+                    Array.Fill(vals, 1.0f);
+                }
+                else if (name.StartsWith("model.layers.", StringComparison.Ordinal))
+                {
+                    int layerDot = name.IndexOf('.', "model.layers.".Length);
+                    string rest = name[(layerDot + 1)..];
+                    switch (rest)
+                    {
+                        case "self_attn.q_proj.weight": FoundryExport.FillRows(vals, tr, tc, fAttn, attnScale); break;
+                        case "self_attn.k_proj.weight": FoundryExport.FillRowsRight(vals, tr, tc, fAttn, attnScale); break;
+                        case "self_attn.v_proj.weight": FoundryExport.FillRowsRight(vals, tr, tc, fOv, layerScale); break;
+                        case "self_attn.o_proj.weight": FoundryExport.FillCols(vals, tr, tc, fOv, layerScale); break;
+                        case "mlp.gate_proj.weight":    FoundryExport.FillGate(vals, tr, tc, gateCol); break;
+                        case "mlp.up_proj.weight":      FoundryExport.FillRowsRight(vals, tr, tc, fFfn, layerScale * upGain); break;
+                        case "mlp.down_proj.weight":    FoundryExport.FillCols(vals, tr, tc, fFfn, layerScale); break;
+                        default:
+                            Console.WriteLine($"  foundry does not define mold tensor '{name}'");
+                            SynthInterop.GgufWriterFree(gguf); return 3;
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"  foundry does not define mold tensor '{name}'");
+                    SynthInterop.GgufWriterFree(gguf); return 3;
+                }
+
+                byte[] tensorBytes = dtype == 0
+                    ? FoundryExport.ToF32Bytes(vals)
+                    : FoundryExport.ToBf16Bytes(vals);
+
+                nuint[] ggufDims = cols > 1 ? [(nuint)cols, (nuint)rows] : [(nuint)rows];
+                unsafe
+                {
+                    fixed (nuint* dimsPtr = ggufDims)
+                    fixed (byte*  dataPtr = tensorBytes)
+                        SynthInterop.GgufWriterAddTensor(gguf, HfToGgmlName(name), dtype, dimsPtr, (nuint)ggufDims.Length, dataPtr);
                 }
             }
-            else
-            {
-                return Fail($"foundry does not define mold tensor '{name}' — the mold and the foundry disagree");
-            }
-
-            byte[] tensorBytes = dtype == 0
-                ? FoundryExport.ToF32Bytes(vals)
-                : FoundryExport.ToBf16Bytes(vals);
-
-            nuint[] ggufDims = cols > 1 ? [(nuint)cols, (nuint)rows] : [(nuint)rows];
-            unsafe
-            {
-                fixed (nuint* dimsPtr = ggufDims)
-                fixed (byte*  dataPtr = tensorBytes)
-                    SynthInterop.GgufWriterAddTensor(gguf, HfToGgmlName(name), dtype, dimsPtr, (nuint)ggufDims.Length, dataPtr);
-            }
-
-            tensorsDone++;
-            if (tensorsDone == 1 || tensorsDone % 20 == 0)
-                Console.WriteLine($"  [{tensorsDone}/{tensorCount}] {name} rows={rows} cols={cols} {sw.Elapsed.TotalSeconds:F1}s");
+            int rcw = SynthInterop.GgufWriterFinalize(gguf);
+            SynthInterop.GgufWriterFree(gguf);
+            if (rcw != 0) { Console.WriteLine($"  gguf_writer_finalize failed (rc={rcw}) for {outPath}"); return 4; }
+            long fsz = new FileInfo(outPath).Length;
+            Console.WriteLine($"synthesis complete: {outPath} ({fsz / 1048576.0:F0} MB, attn={aGain} resid={rGain}) in {sw.Elapsed.TotalSeconds:F1}s");
+            return 0;
         }
 
-        int rc = SynthInterop.GgufWriterFinalize(gguf);
-        SynthInterop.GgufWriterFree(gguf);
+        int status;
+        string? sweep = Environment.GetEnvironmentVariable("LAPLACE_FOUNDRY_GAIN_SWEEP");
+        if (!string.IsNullOrWhiteSpace(sweep))
+        {
+            status = 0;
+            foreach (var pair in sweep.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var ar = pair.Split(':', StringSplitOptions.TrimEntries);
+                double a = double.Parse(ar[0], System.Globalization.CultureInfo.InvariantCulture);
+                double r = ar.Length > 1 ? double.Parse(ar[1], System.Globalization.CultureInfo.InvariantCulture) : a;
+                string vpath = (outputPath.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase)
+                    ? outputPath[..^5] : outputPath) + $"_{pair.Replace(':', '-')}.gguf";
+                int s = WriteCast(vpath, a, r);
+                if (s != 0) status = s;
+            }
+        }
+        else
+        {
+            status = WriteCast(outputPath, attnGainEnv, residGainEnv);
+        }
+
         SynthInterop.ArchTemplateFree(tmplHandle);
         SynthInterop.RecipeFree(recipeHandle);
-        if (rc != 0) return Fail($"gguf_writer_finalize failed (rc={rc})");
-
-        long fileSize = new FileInfo(outputPath).Length;
-        Console.WriteLine($"synthesis complete: {outputPath} ({fileSize / 1048576.0:F0} MB) in {sw.Elapsed.TotalSeconds:F1}s");
-        return 0;
+        return status == 0 ? 0 : Fail($"foundry write failed (status {status})");
     }
 
     private static string HfToGgmlName(string hf)

@@ -793,6 +793,38 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
         if (n == 0)
             emit_label_fallback(buf, topic, "no outgoing consensus to walk yet.");
     }
+    else if (route.intent && strcmp(route.intent, "fallback") == 0)
+    {
+        /* A declarative / unrecognized prompt: walk the strongest consensus
+         * relations outward from the resolved topic -- indexed per-hop reads on
+         * consensus (the same kernel the "complete" intent uses), NOT walk_text,
+         * which pays a full trajectory-stream build per backend. Inference =
+         * walking the consensus, applied to the chat path. Gloss of the resolved
+         * topic remains only as the fallback-of-last-resort. */
+        Oid   wtypes[1] = { BYTEAOID };
+        Datum wargs[1] = { topic };
+        n = spi_forward_replies(buf,
+            "SELECT COALESCE(laplace.realize($1, laplace.word_language($1)), laplace.label($1)) "
+            "       || string_agg(' —' || COALESCE(laplace.type_label(g.type_id), '?') || E'\\u2192 ' "
+            "                     || COALESCE(laplace.realize(g.entity_id, laplace.word_language($1)), "
+            "                                 laplace.label(g.entity_id)), '' ORDER BY g.step), "
+            "       min(g.eff_mu), NULL::bigint "
+            "FROM laplace.walk_strongest($1, NULL::bytea, 6) g HAVING count(*) > 0",
+            1, wtypes, wargs, NULL);
+        if (n == 0)
+        {
+            Oid   dtypes[2] = { TEXTOID, BYTEAOID };
+            Datum dargs[2] = { CStringGetTextDatum(prompt), topic };
+            n = spi_forward_replies(buf,
+                "SELECT laplace.label($2) || ': ' || d.definition, d.eff_mu, d.witnesses "
+                "FROM laplace.define($2, "
+                "  COALESCE((SELECT array_agg(ps.id) FROM laplace.prompt_state($1) ps "
+                "            WHERE ps.id <> $2), ARRAY[]::bytea[]), 3) d",
+                2, dtypes, dargs, NULL);
+            if (n == 0)
+                emit_label_fallback(buf, topic, "no continuation or gloss witnessed yet.");
+        }
+    }
     else
     {
         Oid   types[2] = { TEXTOID, BYTEAOID };
