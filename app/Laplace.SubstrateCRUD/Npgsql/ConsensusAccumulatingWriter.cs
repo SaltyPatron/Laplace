@@ -140,6 +140,44 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         return await _inner.ApplyManyAsync(ForwardChanges(changes), ct);
     }
 
+    /// <summary>Append path: accumulate consensus exactly as ApplyManyAsync, but forward the
+    /// evidence to the inner writer's lock-free append-to-staging instead of an immediate upsert.
+    /// The evidence is merged in one pass by FinalizeSourceAsync; consensus is materialized
+    /// separately by MaterializeConsensusAsync.</summary>
+    public async Task<ApplyResult> AppendAsync(
+        IReadOnlyList<SubstrateChange> changes, Hash128 sourceId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+
+        bool boundary = false;
+        foreach (var c in changes)
+        {
+            if (c.Metadata.SourceContentUnitName.StartsWith("layer-complete/", StringComparison.Ordinal))
+                continue;
+            if (c.Metadata.SourceContentUnitName.StartsWith(PeriodBoundaryUnitPrefix, StringComparison.Ordinal))
+            {
+                boundary = true;
+                continue;
+            }
+            foreach (var a in c.Attestations) Accumulate(a);
+            if (!c.TestimonyWalks.IsDefaultOrEmpty)
+                foreach (var w in c.TestimonyWalks) BufferWalk(w);
+        }
+
+        if (_walkBuffered >= WalkFlushRows)
+            await FlushWalksAsync(ct);
+
+        if ((boundary && _accumulation.Count >= Math.Max(1, _stagingThreshold / 8))
+            || _accumulation.Count >= _stagingThreshold)
+            await FlushPeriodAsync(ct);
+
+        return await _inner.AppendAsync(ForwardChanges(changes), sourceId, ct);
+    }
+
+    public Task<(int Entities, int Physicalities, int Attestations)> FinalizeSourceAsync(
+        Hash128 sourceId, CancellationToken ct = default)
+        => _inner.FinalizeSourceAsync(sourceId, ct);
+
     public static bool ResolvePersistEvidence()
     {
         string? persist = Environment.GetEnvironmentVariable("LAPLACE_PERSIST_EVIDENCE");

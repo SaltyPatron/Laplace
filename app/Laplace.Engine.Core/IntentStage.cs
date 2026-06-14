@@ -170,6 +170,15 @@ public sealed class IntentStage : SafeHandle
 
     internal IntPtr DangerousNativeHandle => handle;
 
+    /// <summary>
+    /// Clear the native record-once content bank — the ids the content witness has already
+    /// emitted this run. Call once at the start of each ingest so record-once is scoped per run
+    /// (one source per process); within a run a node shared across terms/sentences is recorded
+    /// once and referenced (via trajectory) thereafter, and a wholly-known unit short-circuits
+    /// at its root (O(tier), not O(content)).
+    /// </summary>
+    public static void ResetContentBank() => NativeInterop.ContentWitnessReset();
+
     public bool TryAddContentWitness(ReadOnlySpan<byte> canonical, Hash128 sourceId, out Hash128 rootId)
     {
         rootId = default;

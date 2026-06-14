@@ -146,11 +146,11 @@ CREATE OR REPLACE FUNCTION first_placed_topic(p_text text)
     LIMIT 1
 $$;
 
-CREATE OR REPLACE FUNCTION expansion(p_subjects bytea[], p_type bytea DEFAULT NULL,
+CREATE OR REPLACE FUNCTION shared_objects(p_subjects bytea[], p_type bytea DEFAULT NULL,
                                      p_limit int DEFAULT 40)
     RETURNS TABLE(object_id bytea, support int, total_mu numeric)
     LANGUAGE C STABLE PARALLEL SAFE
-    AS 'MODULE_PATHNAME', 'pg_laplace_expansion';
+    AS 'MODULE_PATHNAME', 'pg_laplace_shared_objects';
 
 CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint,
@@ -252,11 +252,11 @@ CREATE OR REPLACE FUNCTION related_in(p_word bytea, p_type bytea, p_lang bytea D
     LANGUAGE C STABLE PARALLEL SAFE
     AS 'MODULE_PATHNAME', 'pg_laplace_related_in';
 
-CREATE OR REPLACE FUNCTION describe(p_word bytea, p_lang bytea DEFAULT NULL,
+CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL,
                                     p_limit int DEFAULT 24)
     RETURNS TABLE(type text, fact text, eff_mu numeric, witnesses bigint)
     LANGUAGE C STABLE PARALLEL SAFE
-    AS 'MODULE_PATHNAME', 'pg_laplace_describe';
+    AS 'MODULE_PATHNAME', 'pg_laplace_salient_facts';
 
 CREATE OR REPLACE FUNCTION isa_path(p_x bytea, p_y bytea, p_depth int DEFAULT 8)
     RETURNS TABLE(path bytea[], types bytea[], path_mu numeric)
@@ -268,16 +268,16 @@ CREATE OR REPLACE FUNCTION usage_overlap(p_x bytea, p_y bytea)
     LANGUAGE C STABLE PARALLEL SAFE STRICT
     AS 'MODULE_PATHNAME', 'pg_laplace_usage_overlap';
 
-CREATE OR REPLACE FUNCTION reason(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
+CREATE OR REPLACE FUNCTION relate_path(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
     RETURNS TABLE(chain text, path_mu numeric, plane text)
     LANGUAGE C STABLE PARALLEL SAFE
-    AS 'MODULE_PATHNAME', 'pg_laplace_reason';
+    AS 'MODULE_PATHNAME', 'pg_laplace_relate_path';
 
-CREATE OR REPLACE FUNCTION relatedness(p_x bytea, p_y bytea)
+CREATE OR REPLACE FUNCTION relation_summary(p_x bytea, p_y bytea)
     RETURNS TABLE(relation text, plane text, mu numeric, usage bigint,
                   geodesic double precision, verdict text)
     LANGUAGE C STABLE PARALLEL SAFE
-    AS 'MODULE_PATHNAME', 'pg_laplace_relatedness';
+    AS 'MODULE_PATHNAME', 'pg_laplace_relation_summary';
 
 CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT NULL,
                                             p_limit int DEFAULT 30)
@@ -316,10 +316,10 @@ CREATE OR REPLACE FUNCTION contrast(p_x bytea, p_y bytea, p_lang bytea DEFAULT N
     LANGUAGE C STABLE PARALLEL SAFE
     AS 'MODULE_PATHNAME', 'pg_laplace_contrast';
 
-CREATE OR REPLACE FUNCTION route_prompt(p_prompt text)
-    RETURNS TABLE(intent text, phrase text, phrase2 text, type_name text)
+CREATE OR REPLACE FUNCTION parse_ask(p_prompt text)
+    RETURNS TABLE(ask_kind text, phrase text, phrase2 text, type_name text)
     LANGUAGE C STABLE STRICT
-    AS 'MODULE_PATHNAME', 'pg_laplace_route_prompt';
+    AS 'MODULE_PATHNAME', 'pg_laplace_parse_ask';
 
 CREATE OR REPLACE FUNCTION resolve_topic(p_phrase text, p_context bytea)
     RETURNS bytea
@@ -334,12 +334,12 @@ CREATE OR REPLACE FUNCTION resolve_topic(p_phrase text, p_context bytea)
     END
 $$;
 
-CREATE OR REPLACE FUNCTION respond(p_prompt text, p_context bytea DEFAULT NULL)
+CREATE OR REPLACE FUNCTION recall(p_prompt text, p_context bytea DEFAULT NULL)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE C STABLE
-    AS 'MODULE_PATHNAME', 'pg_laplace_respond';
+    AS 'MODULE_PATHNAME', 'pg_laplace_recall';
 
-CREATE UNLOGGED TABLE converse_turns (
+CREATE UNLOGGED TABLE session_topics (
     session_id  bytea       NOT NULL,
     ord         integer     NOT NULL,
     prompt      text        NOT NULL,
@@ -348,10 +348,10 @@ CREATE UNLOGGED TABLE converse_turns (
     PRIMARY KEY (session_id, ord)
 );
 
-CREATE OR REPLACE FUNCTION converse(p_prompt text, p_session bytea DEFAULT NULL)
+CREATE OR REPLACE FUNCTION recall_session(p_prompt text, p_session bytea DEFAULT NULL)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE C VOLATILE
-    AS 'MODULE_PATHNAME', 'pg_laplace_converse';
+    AS 'MODULE_PATHNAME', 'pg_laplace_recall_session';
 
 CREATE OR REPLACE FUNCTION structural_neighbors(p_word text, p_k integer DEFAULT 10)
     RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
@@ -380,21 +380,21 @@ BEGIN
         WHERE p.type = 1
         ORDER BY p.coord <<->> v_coord
         LIMIT GREATEST(p_k * 20, 200)),
-    nearest AS (
+    dedup AS (
         SELECT DISTINCT ON (k.entity_id) k.entity_id, k.trajectory,
                public.laplace_angular_distance_4d(k.coord, v_coord) AS geo
         FROM knn k
         ORDER BY k.entity_id, public.laplace_angular_distance_4d(k.coord, v_coord)),
-    topk AS (
+    nearest AS (
         SELECT entity_id, trajectory, geo
-        FROM nearest
+        FROM dedup
         WHERE entity_id <> v_id
         ORDER BY geo
         LIMIT p_k)
     SELECT render_text(t.entity_id, 24), t.geo,
            CASE WHEN t.trajectory IS NOT NULL AND v_traj IS NOT NULL
                 THEN public.laplace_frechet_4d(t.trajectory, v_traj) END
-    FROM topk t
+    FROM nearest t
     ORDER BY t.geo;
 END;
 $sn$;
@@ -439,4 +439,4 @@ BEGIN
 END;
 $sl$;
 
--- laplace.generate: legacy shim recreated in 26_generation.sql.in after generate_ngram loads.
+-- laplace.continue_text: legacy shim recreated in 26_generation.sql.in after walk_text loads.

@@ -44,10 +44,8 @@ public sealed class SemLinkDecomposerTests
     public async Task PbVn_Maps_Roleset_To_VerbNet_Class_With_Shared_Ids()
     {
         var atts = await CollectAttestationsAsync();
-        var rsId = Hash128.OfCanonical("propbank/roleset/give.01");
-        var vnId = Hash128.OfCanonical("verbnet/class/13.1-1");
-        Assert.Equal(rsId, SemLinkDecomposer.RolesetId("give.01"));
-        Assert.Equal(vnId, SemLinkDecomposer.VnClassId("13.1-1"));
+        var rsId = CategoryAnchor.Id("give.01")!.Value;   // shared roleset anchor (content)
+        var vnId = CategoryAnchor.Id("13.1-1")!.Value;    // shared VerbNet class anchor (content)
         Assert.Contains(atts, a =>
             (a.SubjectId == rsId && a.ObjectId == vnId) ||
             (a.SubjectId == vnId && a.ObjectId == rsId));
@@ -60,7 +58,7 @@ public sealed class SemLinkDecomposerTests
         var b = new SubstrateChangeBuilder(SemLinkDecomposer.Source, "fixture", null);
         var argId   = ContentEmitter.Emit(b, "ARG0", SemLinkDecomposer.Source);
         var thetaId = ContentEmitter.Emit(b, "agent", SemLinkDecomposer.Source);
-        var vnId    = Hash128.OfCanonical("verbnet/class/13.1-1");
+        var vnId    = CategoryAnchor.Id("13.1-1")!.Value;
         Assert.NotNull(argId);
         Assert.NotNull(thetaId);
         Assert.Contains(atts, a =>
@@ -73,9 +71,8 @@ public sealed class SemLinkDecomposerTests
     public async Task VnFn_Maps_Class_To_FrameNet_Frame_With_Shared_Ids()
     {
         var atts = await CollectAttestationsAsync();
-        var vnId = Hash128.OfCanonical("verbnet/class/13.1-1");
-        var fnId = Hash128.OfCanonical("framenet/frame/Giving");
-        Assert.Equal(fnId, SemLinkDecomposer.FrameId("Giving"));
+        var vnId = CategoryAnchor.Id("13.1-1")!.Value;
+        var fnId = CategoryAnchor.Id("Giving")!.Value;
         Assert.Contains(atts, a =>
             (a.SubjectId == vnId && a.ObjectId == fnId) ||
             (a.SubjectId == fnId && a.ObjectId == vnId));
@@ -91,12 +88,17 @@ public sealed class SemLinkDecomposerTests
     }
 
     [Fact]
-    public async Task Referenced_Meta_Entities_Emitted_For_Standalone_Ingest()
+    public async Task Referenced_Concepts_Are_Shared_Content_Anchors_Not_Blobs()
     {
-        var (ents, _) = await CollectAllAsync();
-        Assert.Contains(ents, e => e.Id == Hash128.OfCanonical("propbank/roleset/give.01"));
-        Assert.Contains(ents, e => e.Id == Hash128.OfCanonical("verbnet/class/13.1-1"));
-        Assert.Contains(ents, e => e.Id == Hash128.OfCanonical("framenet/frame/Giving"));
+        // The roleset/class/frame are content anchors now (staged natively, shared with
+        // PropBank/VerbNet/FrameNet) — standalone ingest references the SAME ids, not per-witness blobs.
+        var atts = await CollectAttestationsAsync();
+        var rs = CategoryAnchor.Id("give.01")!.Value;
+        var vn = CategoryAnchor.Id("13.1-1")!.Value;
+        var fn = CategoryAnchor.Id("Giving")!.Value;
+        Assert.Contains(atts, a => a.SubjectId == rs || a.ObjectId == rs);
+        Assert.Contains(atts, a => a.SubjectId == vn || a.ObjectId == vn);
+        Assert.Contains(atts, a => a.SubjectId == fn || a.ObjectId == fn);
     }
 
     [Fact]

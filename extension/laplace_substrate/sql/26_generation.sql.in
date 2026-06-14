@@ -1,15 +1,15 @@
 -- ── generation surface ────────────────────────────────────────────────────────
--- Autoregressive generation over witnessed content trajectories.
+-- Stride-continuation generation over witnessed content trajectories.
 -- SINGLE SOURCE: physicalities.trajectory — each vertex mantissa-encodes its
--- entity id, so the geometry IS the sequence. The kernel (generation_native.c)
--- builds a backend-cached corpus straight from the trajectories (edge scan +
+-- entity id, so the geometry IS the sequence. The kernel (trajectory_walk.c)
+-- builds a backend-cached trajectory stream straight from the trajectories (edge scan +
 -- constituency walk to the token floor), then a suffix array; longest-context
--- back-off is binary search; sampling is seeded, so (corpus, prompt, seed)
+-- stride descent is binary search; weighted selection is seeded, so (stream, prompt, seed)
 -- reproduces its output exactly. When the witnessed stream is silent at every
--- order, the COMPLETES_TO consensus is the floor (steps marked ord_used = 0).
+-- order, the COMPLETES_TO consensus is the floor (steps marked stride_used = 0).
 --
 -- The separator rule (word stride): whitespace tokens are witnessed content
--- (round-trip law) but are NOT units of order — the corpus excludes them, so
+-- (round-trip law) but are NOT units of order — the stream excludes them, so
 -- contexts, pairs, and gap distances count in content-bearing strides. Display
 -- re-inserts separators (SubstrateClient.cs is the single separator authority).
 --
@@ -42,35 +42,35 @@ BEGIN
     EXECUTE 'DROP PROCEDURE IF EXISTS @extschema@.rebuild_content_pairs(int)';
 END $do$;
 
--- corpus observability + warm verb: building the corpus IS the warm-up; the
--- stats are the receipt (sequences walked, word-stride positions, vocab,
+-- trajectory-stream observability + warm verb: building the stream IS the warm-up; the
+-- stats are the receipt (sequences walked, word-stride positions, distinct entities,
 -- separators excluded, and the invalidation probe state).
-CREATE OR REPLACE FUNCTION corpus_stats(
-        OUT sequences bigint, OUT positions bigint, OUT vocab int,
+CREATE OR REPLACE FUNCTION stream_stats(
+        OUT sequences bigint, OUT positions bigint, OUT distinct_entities int,
         OUT separators bigint, OUT trajectories bigint, OUT last_witnessed timestamptz)
-    AS 'MODULE_PATHNAME', 'pg_laplace_corpus_stats'
+    AS 'MODULE_PATHNAME', 'pg_laplace_stream_stats'
     LANGUAGE C VOLATILE;
 
--- Trajectory pairs straight from the corpus stream (word-stride by
+-- Trajectory pairs straight from the trajectory stream (word-stride by
 -- construction): one walk, sliding window, in-memory hash aggregation —
 -- engine computes, SQL orchestrates.
-CREATE OR REPLACE FUNCTION content_pairs_scan(p_max_gap int)
+CREATE OR REPLACE FUNCTION cooccurrence_scan(p_max_gap int)
     RETURNS TABLE(gap int, subject_id bytea, object_id bytea, cnt bigint)
-    AS 'MODULE_PATHNAME', 'pg_laplace_content_pairs_scan'
+    AS 'MODULE_PATHNAME', 'pg_laplace_cooccurrence_scan'
     LANGUAGE C STRICT VOLATILE;
 
 -- Trajectory pair surface for the foundry: forward co-occurrence counts within
 -- a window over witnessed content sequences, with per-subject totals so callers
 -- form conditional frequencies — the "followed by N% of the time" distribution.
--- p_window=1 is strict continuation; larger windows give the attention-style
--- forward co-occurrence surface.
-CREATE OR REPLACE FUNCTION content_trajectory_pairs(p_window int DEFAULT 1)
+-- p_window=1 is strict continuation; larger windows give the forward co-occurrence
+-- surface.
+CREATE OR REPLACE FUNCTION trajectory_cooccurrence(p_window int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, object_id bytea, cnt bigint, subject_total bigint)
     LANGUAGE sql VOLATILE
     SET search_path = @extschema@, public AS $$
     WITH pairs AS (
         SELECT s.subject_id AS s, s.object_id AS o, sum(s.cnt) AS c
-        FROM content_pairs_scan(p_window) s
+        FROM cooccurrence_scan(p_window) s
         GROUP BY s.subject_id, s.object_id
     ), totals AS (
         SELECT s, sum(c) AS t FROM pairs GROUP BY s
@@ -82,30 +82,30 @@ $$;
 -- distance within a witnessed sequence) up to p_max_gap, with per-(subject,gap)
 -- totals. The foundry pours gap g into layer g of the mold — depth in the cast
 -- model is bought with sequential order from the trajectories.
-CREATE OR REPLACE FUNCTION content_trajectory_pairs_by_gap(p_max_gap int DEFAULT 8)
+CREATE OR REPLACE FUNCTION trajectory_cooccurrence_by_stride(p_max_gap int DEFAULT 8)
     RETURNS TABLE(subject_id bytea, object_id bytea, gap int, cnt bigint, subject_total bigint)
     LANGUAGE sql VOLATILE
     SET search_path = @extschema@, public AS $$
     SELECT s.subject_id, s.object_id, s.gap, s.cnt,
            sum(s.cnt) OVER (PARTITION BY s.subject_id, s.gap)::bigint
-    FROM content_pairs_scan(p_max_gap) s
+    FROM cooccurrence_scan(p_max_gap) s
 $$;
 
 -- ── the generic plane surface ───────────────────────────────────────────────────
--- ONE read surface for token→token strength, whatever the source: adjudicated
+-- ONE read surface for entity→entity strength, whatever the source: adjudicated
 -- consensus arenas, or readings of the content trajectories (which carry
 -- precedes/follows/co-occurs at every gap without new records). Everything that
 -- consumes planes — the foundry, audits, walk views — reads THIS, so sources are
 -- interchangeable, combinations are plain SQL, and the surface is regress-pinnable.
 --
---   token_plane('consensus', 'SIMILAR_TO')      eff-μ RELATIVE TO NEUTRAL, in μ units
+--   relation_plane('consensus', 'SIMILAR_TO')   eff-μ RELATIVE TO NEUTRAL, in μ units
 --                                               (signed: refuted < 0 < confirmed)
---   token_plane('traj', 'next')                 P(object follows subject), gap 1
---   token_plane('traj', 'gap', 3)               P(object at exact distance 3 | subject)
---   token_plane('traj', 'window', 4)            P(object within 4 ahead | subject)
+--   relation_plane('traj', 'next')              P(object follows subject), gap 1
+--   relation_plane('traj', 'gap', 3)            P(object at exact distance 3 | subject)
+--   relation_plane('traj', 'window', 4)         P(object within 4 ahead | subject)
 --
--- Trajectory families read the corpus stream (word stride) via the native scan.
-CREATE OR REPLACE FUNCTION token_plane(p_family text, p_name text, p_arg int DEFAULT NULL)
+-- Trajectory families read the trajectory stream (word stride) via the native scan.
+CREATE OR REPLACE FUNCTION relation_plane(p_family text, p_name text, p_arg int DEFAULT NULL)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public AS $$
@@ -122,7 +122,7 @@ BEGIN
     END IF;
 
     IF p_family <> 'traj' THEN
-        RAISE EXCEPTION 'token_plane: unknown family % (consensus | traj)', p_family;
+        RAISE EXCEPTION 'relation_plane: unknown family % (consensus | traj)', p_family;
     END IF;
 
     g := CASE p_name
@@ -132,44 +132,75 @@ BEGIN
              ELSE NULL
          END;
     IF g IS NULL THEN
-        RAISE EXCEPTION 'token_plane: unknown traj plane % (next | gap | window)', p_name;
+        RAISE EXCEPTION 'relation_plane: unknown traj plane % (next | gap | window)', p_name;
     END IF;
 
     IF p_name = 'window' THEN
         RETURN QUERY
         SELECT t.subject_id, t.object_id, t.cnt::double precision / t.subject_total
-        FROM content_trajectory_pairs(g) t;
+        FROM trajectory_cooccurrence(g) t;
         RETURN;
     END IF;
 
     RETURN QUERY
     SELECT t.subject_id, t.object_id, t.cnt::double precision / t.subject_total
-    FROM content_trajectory_pairs_by_gap(g) t WHERE t.gap = g;
+    FROM trajectory_cooccurrence_by_stride(g) t WHERE t.gap = g;
 END;
 $$;
 
+-- Vocab-bounded entity→entity consensus plane: ONLY the vocab×vocab edges of the
+-- given relation types, degree-capped per subject by |eff-μ|, computed server-side
+-- via the (subject_id, type_id) index — no full-type scan, no row streaming to the
+-- client. The foundry passes its vocab entity set + the relation names for a role
+-- (similarity / relation / completion / co-occurrence) and gets back exactly the
+-- intra-vocab adjacency it pours, already capped. PARALLEL SAFE so PG fans it out.
+CREATE OR REPLACE FUNCTION entity_relation_plane(
+        p_vocab bytea[], p_rel_names text[], p_degree_cap int DEFAULT 48)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+         t(tid) AS (SELECT relation_type_id(n) FROM unnest(p_rel_names) AS n),
+         edges AS (
+             SELECT c.subject_id, c.object_id,
+                    (eff_mu(c.rating, c.rd) - glicko2_neutral_mu())::double precision / 1e9 AS w
+             FROM v
+             JOIN consensus c ON c.subject_id = v.id
+             JOIN t           ON t.tid = c.type_id
+             WHERE c.object_id IS NOT NULL
+               AND EXISTS (SELECT 1 FROM v vo WHERE vo.id = c.object_id)
+         ),
+         capped AS (
+             SELECT e.subject_id, e.object_id, e.w,
+                    row_number() OVER (PARTITION BY e.subject_id
+                                       ORDER BY abs(e.w) DESC, e.object_id) AS rn
+             FROM edges e
+         )
+    SELECT c.subject_id, c.object_id, c.w FROM capped c WHERE c.rn <= p_degree_cap
+$$;
+
 -- native kernel ----------------------------------------------------------------
--- ord_used: the witnessed order that produced the step; 0 = the step came from
+-- stride_used: the witnessed order that produced the step; 0 = the step came from
 -- the COMPLETES_TO consensus floor (no witnessed continuation at any order).
-CREATE OR REPLACE FUNCTION generate_tokens(
-        p_ctx bytea[], p_steps int DEFAULT 24, p_max_order int DEFAULT 5,
-        p_temperature float8 DEFAULT 0.7, p_topk int DEFAULT 10,
+CREATE OR REPLACE FUNCTION walk_continuations(
+        p_ctx bytea[], p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
+        p_spread float8 DEFAULT 0.7, p_breadth int DEFAULT 10,
         p_seed bigint DEFAULT NULL)
-    RETURNS TABLE(step int, token bytea, ord_used int)
-    AS 'MODULE_PATHNAME', 'pg_laplace_generate_tokens'
+    RETURNS TABLE(step int, entity bytea, stride_used int)
+    AS 'MODULE_PATHNAME', 'pg_laplace_walk_continuations'
     LANGUAGE C VOLATILE;
 
-CREATE OR REPLACE FUNCTION generation_cache_reset() RETURNS boolean
-    AS 'MODULE_PATHNAME', 'pg_laplace_generation_cache_reset'
+CREATE OR REPLACE FUNCTION stream_reset() RETURNS boolean
+    AS 'MODULE_PATHNAME', 'pg_laplace_stream_reset'
     LANGUAGE C VOLATILE;
 
 -- endpoint surface: prompt text in, rendered tokens out (the signature
 -- SubstrateClient.GenerateNgramStreamAsync calls)
-CREATE OR REPLACE FUNCTION generate_ngram(
-        p_prompt text, p_steps int DEFAULT 24, p_max_order int DEFAULT 5,
-        p_temperature float8 DEFAULT 0.7, p_topk int DEFAULT 10,
+CREATE OR REPLACE FUNCTION walk_text(
+        p_prompt text, p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
+        p_spread float8 DEFAULT 0.7, p_breadth int DEFAULT 10,
         p_seed bigint DEFAULT NULL)
-    RETURNS TABLE(step int, token text, ord_used int)
+    RETURNS TABLE(step int, entity text, stride_used int)
     LANGUAGE sql VOLATILE
     SET search_path = @extschema@, public AS $$
     WITH ctx AS (
@@ -178,27 +209,27 @@ CREATE OR REPLACE FUNCTION generate_ngram(
     )
     -- the kernel is deterministic given a seed; entropy is the caller's choice,
     -- so an unseeded call draws one here instead of repeating a constant stream
-    SELECT g.step, render_text(g.token, 64), g.ord_used
-    FROM ctx, generate_tokens(ctx.ids, p_steps, p_max_order, p_temperature, p_topk,
+    SELECT g.step, render_text(g.entity, 64), g.stride_used
+    FROM ctx, walk_continuations(ctx.ids, p_steps, p_max_stride, p_spread, p_breadth,
                               COALESCE(p_seed, (floor(random() * 9e18))::bigint)) g
     WHERE ctx.ids IS NOT NULL
 $$;
 
--- legacy shim: ranked-μ SQL walk removed; delegate to native ngram kernel
-CREATE OR REPLACE FUNCTION generate(
+-- legacy shim: ranked-μ SQL walk removed; delegate to native stride kernel
+CREATE OR REPLACE FUNCTION continue_text(
         p_prompt text, p_steps int DEFAULT 16, p_window int DEFAULT 3,
-        p_temperature double precision DEFAULT 0.6, p_topk int DEFAULT 8,
+        p_spread double precision DEFAULT 0.6, p_breadth int DEFAULT 8,
         p_stop text[] DEFAULT '{}', p_boost double precision DEFAULT 0,
         p_require_pos boolean DEFAULT true)
-    RETURNS TABLE(step int, token text, mu numeric)
+    RETURNS TABLE(step int, entity text, mu numeric)
     LANGUAGE sql VOLATILE
     SET search_path = @extschema@, public AS $$
-    SELECT g.step, g.token, NULL::numeric AS mu
-    FROM generate_ngram(p_prompt, p_steps, GREATEST(p_window, 1), p_temperature, p_topk) g
+    SELECT g.step, g.entity, NULL::numeric AS mu
+    FROM walk_text(p_prompt, p_steps, GREATEST(p_window, 1), p_spread, p_breadth) g
 $$;
 
 -- variant synthesis over witnessed constituency ----------------------------------
--- A content trajectory is a witnessed WHOLE. generate_variant walks a witnessed
+-- A content trajectory is a witnessed WHOLE. respell_variant walks a witnessed
 -- instance in trajectory order and substitutes COMPOSITE constituents with
 -- elected peers. Tokens (tier <= 2) are the floor — never opened, never
 -- respelled. Novelty arises only at substitution points, and every substitution
@@ -220,8 +251,8 @@ CREATE OR REPLACE FUNCTION variant_walk(p_id bytea, p_swap float8 DEFAULT 0.3,
     AS 'MODULE_PATHNAME', 'pg_laplace_variant_walk'
     LANGUAGE C VOLATILE;
 
-CREATE OR REPLACE FUNCTION generate_variant(p_node_type text, p_modality text DEFAULT 'c-sharp',
-                     p_swap float8 DEFAULT 0.3, p_k int DEFAULT 6, p_depth int DEFAULT 4)
+CREATE OR REPLACE FUNCTION respell_variant(p_node_type text, p_modality text DEFAULT 'c-sharp',
+                     p_substitution_rate float8 DEFAULT 0.3, p_k int DEFAULT 6, p_depth int DEFAULT 4)
     RETURNS text
-    AS 'MODULE_PATHNAME', 'pg_laplace_generate_variant'
+    AS 'MODULE_PATHNAME', 'pg_laplace_respell_variant'
     LANGUAGE C VOLATILE;

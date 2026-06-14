@@ -77,19 +77,25 @@ public sealed class VerbNetDecomposerTests
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(VerbNetDecomposer.Source, "fixture", null);
 
-        var lendId = ContentEmitter.Emit(b, "lend", VerbNetDecomposer.Source);
-        var classId = VerbNetDecomposer.ClassId("give-13.1");
-        Assert.Equal(Hash128.OfCanonical("verbnet/class/13.1"), classId);
+        var lendId  = ContentEmitter.Emit(b, "lend", VerbNetDecomposer.Source);
+        // The class is now its numeric id "13.1" decomposed as content — not a verbnet/class blob.
+        var classId = CategoryAnchor.Id(VerbNetDecomposer.NumericClassId("give-13.1"));
         Assert.NotNull(lendId);
+        Assert.NotNull(classId);
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("IS_A")
-            && a.SubjectId == lendId!.Value && a.ObjectId == classId);
+            && a.SubjectId == lendId!.Value && a.ObjectId == classId!.Value);
+        // the class itself IS_A VerbNet_Class (category attestation replacing the old type column)
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("IS_A")
+            && a.SubjectId == classId!.Value
+            && a.ObjectId == Hash128.OfCanonical("substrate/type/VerbNet_Class/v1"));
 
-        var subId = VerbNetDecomposer.ClassId("give-13.1-1");
-        Assert.Equal(Hash128.OfCanonical("verbnet/class/13.1-1"), subId);
+        var subId = CategoryAnchor.Id(VerbNetDecomposer.NumericClassId("give-13.1-1"));
+        Assert.NotNull(subId);
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("IS_A")
-            && a.SubjectId == subId && a.ObjectId == classId);
+            && a.SubjectId == subId!.Value && a.ObjectId == classId!.Value);
     }
 
     [Fact]
@@ -99,22 +105,26 @@ public sealed class VerbNetDecomposerTests
         var b = new SubstrateChangeBuilder(VerbNetDecomposer.Source, "fixture", null);
         var lendId = ContentEmitter.Emit(b, "lend", VerbNetDecomposer.Source);
 
-        var senseId = Hash128.OfCanonical("wordnet/sense/lend%2:40:00::");
-        Assert.Equal(senseId, VerbNetDecomposer.SenseId("lend%2:40:00::"));
+        // The sense is the normalized key "lend%2:40:00" decomposed as content (the same anchor
+        // WordNet emits and attests IS_A WordNet_Sense), not a wordnet/sense/{key} blob.
+        var senseId = CategoryAnchor.Id("lend%2:40:00");
+        Assert.NotNull(senseId);
         Assert.NotNull(lendId);
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO")
             && (a.SubjectId == lendId!.Value || a.ObjectId == lendId!.Value)
-            && (a.SubjectId == senseId || a.ObjectId == senseId));
+            && (a.SubjectId == senseId!.Value || a.ObjectId == senseId!.Value));
     }
 
     [Fact]
-    public void NormalizeSenseKey_Appends_DoubleColon_And_Strips_Uncertainty_Marker()
+    public void NormalizeSenseKey_Canonicalizes_To_ThreeFields_And_Strips_Markers()
     {
-        Assert.Equal("give%2:40:03::", VerbNetDecomposer.NormalizeSenseKey("give%2:40:03"));
-        Assert.Equal("give%2:40:03::", VerbNetDecomposer.NormalizeSenseKey("give%2:40:03::"));
-        Assert.Equal("ache%2:37:06::", VerbNetDecomposer.NormalizeSenseKey("?ache%2:37:06"));
-        Assert.Null(VerbNetDecomposer.NormalizeSenseKey("notasensekey"));
+        // Shared normalizer (SourceEntityIdConventions): canonical form is lemma%ss:lf:id — the
+        // trailing head:head_id is dropped so WordNet, VerbNet and the Predicate Matrix converge.
+        Assert.Equal("give%2:40:03", SourceEntityIdConventions.NormalizeSenseKey("give%2:40:03"));
+        Assert.Equal("give%2:40:03", SourceEntityIdConventions.NormalizeSenseKey("give%2:40:03::"));
+        Assert.Equal("ache%2:37:06", SourceEntityIdConventions.NormalizeSenseKey("?ache%2:37:06"));
+        Assert.Null(SourceEntityIdConventions.NormalizeSenseKey("notasensekey"));
     }
 
     [Fact]

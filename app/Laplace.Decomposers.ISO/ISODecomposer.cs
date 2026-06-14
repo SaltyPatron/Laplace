@@ -124,7 +124,7 @@ public sealed class ISODecomposer : IDecomposer, IIngestCommitPolicy
         }
 
         string unidata = Path.GetFullPath(
-            Path.Combine(context.EcosystemPath, "..", "Unicode", "Public", "UNIDATA"));
+            Path.Combine(context.EcosystemPath, "..", "UCD", "Public", "UCD", "latest", "ucd"));
         var scriptName = LanguageGraph.LoadScriptCodeToUcdName(unidata);
         foreach (var (subtag, scriptCodes) in LanguageGraph.LanguageScripts(context.EcosystemPath))
         {

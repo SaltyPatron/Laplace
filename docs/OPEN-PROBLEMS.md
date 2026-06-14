@@ -130,12 +130,12 @@ form's content root (UDDecomposer.cs `NativeAttestation.PosUpos(form, …)`) —
 `laplace.word_id()` resolves. The lexical sources (WordNet/FrameNet/Wiktionary) attest POS on lemma
 content roots, which coincide where surface = lemma. `is_function_word()` returned false because
 **UD has zero evidence rows in the working DB** (`evidence_count(NULL, source_id('UDDecomposer'),
-NULL) = 0`): UD sits in the deferred lexical-bulk phase (`seed-deferred-lexical.cmd`; ordering law
-"… → [deferred] conceptnet → atomic2020 → ud → wiktionary") which has not been run. The 158k
+NULL) = 0`): UD runs in the knowledge layer (uniform ladder: … semlink → conceptnet → atomic2020 →
+**ud** → wiktionary), which had not been run in the DB this was diagnosed against. The 158k
 existing HAS_POS consensus rows are content-lemma testimony — closed-class words have no synsets,
 so no other witness can cover "the"/DET.
 
-**Remediation.** Run the UD seed (deferred phase) when the cluster is free, then promote
+**Remediation.** Run a full-cadence seed (UD lands in the knowledge layer), then promote
 `is_function_word()` as a consensus probe: UPOS ∈ {DET, ADP, AUX, CCONJ, SCONJ, PART, PRON} above a
 witness threshold. Nuance: UD attests "The" and "the" as distinct content roots — the probe should
 case-fold or accept either form's consensus.

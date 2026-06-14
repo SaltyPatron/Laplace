@@ -9,11 +9,6 @@ namespace Laplace.Decomposers.PropBank;
 
 public sealed class PropBankDecomposer : IDecomposer
 {
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> MetaNames = new();
-
-    public IReadOnlyCollection<string> CanonicalNamesForReadback
-        => System.Linq.Enumerable.ToList(MetaNames.Keys);
-
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/PropBankDecomposer/v1");
     public static readonly Hash128 TrustClass =
@@ -22,19 +17,6 @@ public sealed class PropBankDecomposer : IDecomposer
     private static readonly Hash128 RolesetTypeId      = EntityTypeRegistry.PropBankRoleset;
     private static readonly Hash128 VerbNetClassTypeId = EntityTypeRegistry.VerbNetClass;
     private static readonly Hash128 OrdinalTypeId      = EntityTypeRegistry.Ordinal;
-
-    internal static Hash128 RolesetId(string rolesetId)
-    {
-        string name = $"propbank/roleset/{rolesetId}";
-        MetaNames.TryAdd(name, 0);
-        return Hash128.OfCanonical(name);
-    }
-    internal static Hash128 VnClassId(string vnClass)
-    {
-        string name = $"verbnet/class/{NumericClassId(vnClass)}";
-        MetaNames.TryAdd(name, 0);
-        return Hash128.OfCanonical(name);
-    }
 
     internal static string NumericClassId(string classId)
     {
@@ -118,8 +100,11 @@ public sealed class PropBankDecomposer : IDecomposer
             string rsId = roleset.GetAttribute("id").Trim();
             if (rsId.Length == 0) continue;
 
-            Hash128 rsEntity = RolesetId(rsId);
-            b.AddEntity(new EntityRow(rsEntity, EntityTier.Vocabulary, RolesetTypeId, Source));
+            // Roleset identity = "give.01" decomposed as content + IS_A PropBank_Roleset (shared
+            // with SemLink and the Predicate Matrix that cite the same roleset) — not a blob.
+            Hash128? rsAnchor = CategoryAnchor.Emit(b, rsId, RolesetTypeId, Source, TC.AcademicCurated);
+            if (rsAnchor is null) continue;
+            Hash128 rsEntity = rsAnchor.Value;
 
             b.AddAttestation(NativeAttestation.Categorical(
                 lemmaId.Value, "HAS_SENSE", rsEntity, Source, TC.AcademicCurated));
@@ -169,8 +154,11 @@ public sealed class PropBankDecomposer : IDecomposer
                 string theta   = link.InnerText.Trim();
                 if (vnClass.Length == 0) continue;
 
-                Hash128 vnEntity = VnClassId(vnClass);
-                b.AddEntity(new EntityRow(vnEntity, EntityTier.Vocabulary, VerbNetClassTypeId, Source));
+                // VerbNet class = its numeric id as content + IS_A VerbNet_Class — the SAME anchor
+                // VerbNet and SemLink emit for this class (convergence), not a per-witness blob.
+                Hash128? vnAnchor = CategoryAnchor.Emit(b, NumericClassId(vnClass), VerbNetClassTypeId, Source, TC.AcademicCurated);
+                if (vnAnchor is null) continue;
+                Hash128 vnEntity = vnAnchor.Value;
                 b.AddAttestation(NativeAttestation.Categorical(
                     rsEntity, "CORRESPONDS_TO", vnEntity, Source, TC.AcademicCurated));
 

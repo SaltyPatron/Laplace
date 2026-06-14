@@ -41,20 +41,20 @@ CREATE OR REPLACE FUNCTION consensus_in(p_id bytea, p_limit integer DEFAULT 40)
     LIMIT p_limit
 $$;
 
-CREATE OR REPLACE FUNCTION generate_tree(
+CREATE OR REPLACE FUNCTION walk_branches(
     p_prompt bytea,
-    p_type   bytea  DEFAULT NULL,
-    p_depth  int    DEFAULT 4,
-    p_beam   int    DEFAULT 5)
+    p_type     bytea  DEFAULT NULL,
+    p_depth    int    DEFAULT 4,
+    p_breadth  int    DEFAULT 5)
     RETURNS TABLE(depth int, path bytea[], types bytea[], entity_id bytea,
                   eff_mu numeric, path_mu numeric, witnesses bigint)
-    AS 'MODULE_PATHNAME', 'pg_laplace_generate_tree'
+    AS 'MODULE_PATHNAME', 'pg_laplace_walk_branches'
     LANGUAGE C STABLE;
 
-CREATE OR REPLACE FUNCTION generate_greedy(
+CREATE OR REPLACE FUNCTION walk_strongest(
     p_prompt bytea, p_type bytea DEFAULT NULL, p_depth int DEFAULT 8)
     RETURNS TABLE(step int, type_id bytea, entity_id bytea, eff_mu numeric)
-    AS 'MODULE_PATHNAME', 'pg_laplace_generate_greedy'
+    AS 'MODULE_PATHNAME', 'pg_laplace_walk_strongest'
     LANGUAGE C STABLE;
 
 CREATE OR REPLACE FUNCTION consensus_stats()

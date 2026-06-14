@@ -27,25 +27,31 @@ Dependency-ordered seed ingestion; each source's IngestRunner refuses to start u
 ```
 L0 unicode      T0 atoms + UCD properties + byte tier        StandardsDerived
 L1 iso639       languages/scripts/macrolanguage              StandardsDerived
-L2 wordnet      synsets + senses + lemma arena (HUB)         StandardsDerived
-L3 omw          binds to WordNetSynset IDs (en-filtered)    AcademicCuratedWithUserInput
-   verbnet      lemma → wordnet/sense (CORRESPONDS_TO)       AcademicCurated
-   propbank     lemma → roleset → verbnet (HAS_SENSE, …)     AcademicCurated
-L3 framenet     lemma → frame (EVOKES_FRAME)                 AcademicCurated
-L3 semlink      propbank↔verbnet↔framenet alignment          AcademicCurated
-   [proof path: tiny-codes, stack, document/image/audio, repos]
-   [deferred lexical: conceptnet, atomic2020, ud, wiktionary]
+L2 document     books / long text — distributional trajectories (proves AI-via-SQL)
+L2 wordnet      synsets (ILI-anchored) + senses + lemma arena (HUB)  StandardsDerived
+L3 omw          per-language wordforms attest the SAME ILI    AcademicCuratedWithUserInput
+   verbnet      members → wn sense → ILI; thematic roles      AcademicCurated
+   propbank     rolesets → verbnet → ILI                      AcademicCurated
+L3 framenet     frames/FEs/LUs → wn synset → ILI              AcademicCurated
+L3 semlink      propbank↔verbnet↔framenet alignment           AcademicCurated
+   conceptnet   /c/<lang>/word[/pos/wn/sense] graph           AcademicCurated
+   atomic2020   event anchors + role-typed relations          AcademicCurated
+   ud           forms/lemmas + universal UPOS/deprel/feature  AcademicCurated
+   wiktionary   wordforms + glosses + translations            AcademicCurated
+L2 usage        tatoeba sentences + opensubtitles dialogue
+   code         CAPSTONE: stack + Laplace + code-authority/* + tiny-codes
+   models       LAST: safetensor deposits (presuppose export)
    [proof sandbox: ingest-text.cmd / e2e-full.cmd — db-roundtrip, not seed]
-   [deferred usage: tatoeba, opensubtitles]
 ```
 
-Seed order (see `witness-manifest.json`): **wordnet (synset hub)** → **omw → verbnet → propbank → framenet → semlink** → **tiny-codes → stack → document/image/audio → repos → models** → **[deferred] conceptnet → atomic2020 → ud → wiktionary**. Proof path runs before multi-hour lexical bulk so code/repo/modality claims are testable first. Resume scripts: `seed-resume-prove.cmd` (proof only), `seed-deferred-lexical.cmd` (lexical bulk). Tatoeba/OpenSubtitles deferred unless `LAPLACE_SKIP_USAGE=0`; models deferred unless `LAPLACE_SKIP_MODELS=0`; lexical bulk skippable via `LAPLACE_SKIP_LEXICAL_BULK=1`. **db-roundtrip is not seed** — run `scripts\win\ingest-text.cmd` or `e2e-full.cmd` separately to prove bit-perfect document round-trip.
+Seed order (see `witness-manifest.json`) is a **signal-dependency stack**, each layer presupposing the prior: **unicode → iso639** (floor) → **document** (books, right after the floor — raw-text distributional trajectories that prove AI-via-SQL answers from text alone) → the **knowledge layer** as one UNIFORM ingest sequence **wordnet → omw → verbnet → propbank → framenet → semlink → conceptnet → atomic2020 → ud → wiktionary** (wordnet first; the rest bind to its ILI-anchored synsets/senses) → **usage** (tatoeba, opensubtitles) → **code capstone** (stack + Laplace + code-authority/* + tiny-codes, right before models) → **models** (last — deposition presupposes export, which the capstone proves). No source is special-cased; each layer ENRICHES the prior. Resume `seed-resume-prove.cmd` (proof path); stop early with `LAPLACE_LADDER_STOP={nets,usage}`. Tatoeba/OpenSubtitles run unless `LAPLACE_SKIP_USAGE=1` (default at seed); models unless `LAPLACE_SKIP_MODELS=1`. **db-roundtrip is not seed** — run `scripts\win\ingest-text.cmd` or `e2e-full.cmd` separately to prove bit-perfect document round-trip.
 
-| skip flag | effect |
+| skip / stop flag | effect |
 |---|---|
-| `LAPLACE_SKIP_USAGE=1` | skip tatoeba, opensubtitles (translation-pair usage; default at seed) |
+| `LAPLACE_SKIP_USAGE=1` | skip tatoeba, opensubtitles (language-in-use; default at seed) |
 | `LAPLACE_SKIP_MODELS=1` | skip safetensor snapshot deposition (default at seed) |
-| `LAPLACE_SKIP_LEXICAL_BULK=1` | skip deferred conceptnet/atomic2020/ud/wiktionary at end of seed |
+| `LAPLACE_LADDER_STOP=nets` | stop after the knowledge layer (the lexical/semantic iteration target) |
+| `LAPLACE_LADDER_STOP=usage` | stop after tatoeba/opensubtitles |
 | `LAPLACE_INGEST_LANGS=en` | default in `env.cmd`; UD without this ingests all ~686 treebanks (~38M sents) instead of 29 `en_*` dialects (~1.1M) |
 
 UD treebank filter: `en_ewt-ud-train.conllu` → base lang `en` → matches `en`/`eng` filter; all English dialect treebanks (`en_gum`, `en_lines`, …) are included.

@@ -9,26 +9,12 @@ namespace Laplace.Decomposers.VerbNet;
 
 public sealed class VerbNetDecomposer : IDecomposer
 {
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> MetaNames = new();
-
-    public IReadOnlyCollection<string> CanonicalNamesForReadback
-        => System.Linq.Enumerable.ToList(MetaNames.Keys);
-
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/VerbNetDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    private static readonly Hash128 ClassTypeId        = EntityTypeRegistry.VerbNetClass;
-    private static readonly Hash128 WordNetSenseTypeId = EntityTypeRegistry.WordNetSense;
-
-    internal static Hash128 ClassId(string classId)
-    {
-        string name = $"verbnet/class/{NumericClassId(classId)}";
-        MetaNames.TryAdd(name, 0);
-        return Hash128.OfCanonical(name);
-    }
-    internal static Hash128 SenseId(string senseKey)  => Hash128.OfCanonical($"wordnet/sense/{senseKey}");
+    private static readonly Hash128 ClassTypeId = EntityTypeRegistry.VerbNetClass;
 
     internal static string NumericClassId(string classId)
     {
@@ -100,15 +86,18 @@ public sealed class VerbNetDecomposer : IDecomposer
         string? classId = el.GetAttribute("ID");
         if (string.IsNullOrEmpty(classId)) return;
 
-        Hash128 classEntity = ClassId(classId);
-        b.AddEntity(new EntityRow(classEntity, EntityTier.Vocabulary, ClassTypeId, Source));
+        // Class identity = its numeric class id (51.3.1) decomposed as content + IS_A VerbNet_Class,
+        // shared with PropBank/SemLink/the Predicate Matrix that cite the same class — not a blob.
+        Hash128? classAnchor = CategoryAnchor.Emit(b, NumericClassId(classId), ClassTypeId, Source, TC.AcademicCurated);
+        if (classAnchor is null) return;
+        Hash128 classEntity = classAnchor.Value;
 
         if (parentClassId is not null)
         {
-            Hash128 parentEntity = ClassId(parentClassId);
-            b.AddEntity(new EntityRow(parentEntity, EntityTier.Vocabulary, ClassTypeId, Source));
-            b.AddAttestation(NativeAttestation.Categorical(
-                classEntity, "IS_A", parentEntity, Source, TC.AcademicCurated));
+            Hash128? parentAnchor = CategoryAnchor.Emit(b, NumericClassId(parentClassId), ClassTypeId, Source, TC.AcademicCurated);
+            if (parentAnchor is not null)
+                b.AddAttestation(NativeAttestation.Categorical(
+                    classEntity, "IS_A", parentAnchor.Value, Source, TC.AcademicCurated));
         }
 
         foreach (var member in ChildElements(el, "MEMBERS", "MEMBER"))
@@ -124,12 +113,14 @@ public sealed class VerbNetDecomposer : IDecomposer
             if (wn.Length > 0)
                 foreach (var raw in wn.Split(' ', StringSplitOptions.RemoveEmptyEntries))
                 {
-                    string? key = NormalizeSenseKey(raw);
+                    // The WN sense is the shared sense anchor (normalized key as content) — the same
+                    // id WordNet emits and attests IS_A WordNet_Sense; VerbNet links its lemma to it.
+                    string? key = SourceEntityIdConventions.NormalizeSenseKey(raw);
                     if (key is null) continue;
-                    Hash128 senseEntity = SenseId(key);
-                    b.AddEntity(new EntityRow(senseEntity, 2, WordNetSenseTypeId, Source));
+                    var senseEntity = ContentEmitter.Emit(b, key, Source);
+                    if (senseEntity is null) continue;
                     b.AddAttestation(NativeAttestation.Categorical(
-                        lemmaId.Value, "CORRESPONDS_TO", senseEntity, Source, TC.AcademicCurated));
+                        lemmaId.Value, "CORRESPONDS_TO", senseEntity.Value, Source, TC.AcademicCurated));
                 }
         }
 
@@ -181,14 +172,6 @@ public sealed class VerbNetDecomposer : IDecomposer
             entityCapacity:      batch * 64,
             physicalityCapacity: batch * 64,
             attestationCapacity: batch * 32);
-
-    internal static string? NormalizeSenseKey(string raw)
-    {
-        string k = raw.Trim().TrimStart('?', '!');
-        int pct = k.IndexOf('%');
-        if (pct <= 0 || pct + 1 >= k.Length) return null;
-        return k.TrimEnd(':') + "::";
-    }
 
     private static string ResolveClassDir(string ecosystemPath)
     {

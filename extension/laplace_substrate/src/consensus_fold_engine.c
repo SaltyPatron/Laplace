@@ -805,7 +805,7 @@ pg_laplace_consensus_fold_partition(PG_FUNCTION_ARGS)
  * The journal is subject-grouped by construction (one row per subject × type ×
  * layer-context, vertices = testimony-packed object references). The fold:
  * bucket the partition's walks by subject in memory, then per subject merge
- * its walks' vertices in a vocab-bounded map — ONE Glicko period per relation
+ * its walks' vertices in a distinct-entities-bounded map — ONE Glicko period per relation
  * (the period rule) — and emit. Seeds (existing consensus rows) route by the
  * same subject hash and initialize their relation's state. The conservation
  * receipt is in the LOG line: games read == games folded.

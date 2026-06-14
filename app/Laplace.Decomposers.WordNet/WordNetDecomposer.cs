@@ -9,8 +9,6 @@ namespace Laplace.Decomposers.WordNet;
 
 public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, IIngestCommitPolicy
 {
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> MetaNames = new();
-
     public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
 
     public static readonly Hash128 Source =
@@ -18,7 +16,8 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
 
-    private static readonly Hash128 SynsetTypeId = EntityTypeRegistry.WordNetSynset;
+    // Synset type is no longer an entity column — synset identity is the decomposed ILI anchor and
+    // its category is an IS_A attestation (see ConceptAnchor). Sense stays a typed blob until #13.
     private static readonly Hash128 SenseTypeId  = EntityTypeRegistry.WordNetSense;
 
     private static readonly Dictionary<string, string> PointerTypes = new()
@@ -64,8 +63,6 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         "verb.perception", "verb.possession", "verb.social", "verb.stative", "verb.weather",
         "adj.ppl",
     };
-
-    private static Hash128 PosId(char p) => PosReference.Resolve(p.ToString(), PosReference.PosTagset.WordNet);
 
     private const long EstimatedSynsets = 117_700L;
 
@@ -153,8 +150,6 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         return n;
     }
 
-    public IReadOnlyCollection<string> CanonicalNamesForReadback => MetaNames.Keys.ToList();
-
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     private static async IAsyncEnumerable<SubstrateChange> StreamDataAsync(
@@ -190,7 +185,10 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
 
     private static void EmitSynsetEntities(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)
     {
-        b.AddEntity(syn.SynsetId, EntityTier.Vocabulary, SynsetTypeId, Source);
+        // The synset's identity is its ILI concept id decomposed to content (codepoint floor) — not
+        // a wordnet/synset/{pos}/{offset} blob. EmitAnchor stages content only (no attestation), so
+        // it is safe in this entities-only builder; the IS_A category is attested in pass 2.
+        ConceptAnchor.EmitAnchor(b, syn.Offset, syn.SsType, Source);
         foreach (var lemma in syn.Lemmas)
             ContentEmitter.Emit(b, Surface(lemma), Source);
 
@@ -217,14 +215,19 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
     // tier-witness law's two-pass shape — witness first, then claim).
     private static void EmitSynsetAttestations(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)
     {
-        Hash128 posId = PosId(syn.SsType);
+        // Resolve the shared ILI anchor (emitted as content in pass 1). Null only if the synset is
+        // unmapped in CILI — skip the whole synset's claims rather than dangle them at a phantom id.
+        Hash128? synAnchor = ConceptAnchor.SynsetId(syn.Offset, syn.SsType);
+        if (synAnchor is null) return;
+        Hash128 synId = synAnchor.Value;
+        ConceptAnchor.AttestSynsetCategory(b, synId, Source, SourceTrust.StandardsDerived);
 
         foreach (var lemma in syn.Lemmas)
         {
             var lemmaId = ContentEmitter.RootId(Surface(lemma));
             if (lemmaId is null) continue;
             b.AddAttestation(NativeAttestation.Categorical(
-                lemmaId.Value, "IS_SYNONYM_OF", syn.SynsetId, Source, SourceTrust.StandardsDerived));
+                lemmaId.Value, "IS_SYNONYM_OF", synId, Source, SourceTrust.StandardsDerived));
             PosReference.Attest(b, lemmaId.Value, syn.SsType.ToString(),
                 PosReference.PosTagset.WordNet, Source, null, SourceTrust.StandardsDerived);
         }
@@ -235,14 +238,14 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
             var defId = ContentEmitter.RootId(def);
             if (defId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    syn.SynsetId, "HAS_DEFINITION", defId.Value, Source, SourceTrust.StandardsDerived));
+                    synId, "HAS_DEFINITION", defId.Value, Source, SourceTrust.StandardsDerived));
         }
         foreach (var ex in examples)
         {
             var exId = ContentEmitter.RootId(ex);
             if (exId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    syn.SynsetId, "HAS_EXAMPLE", exId.Value, Source, SourceTrust.StandardsDerived));
+                    synId, "HAS_EXAMPLE", exId.Value, Source, SourceTrust.StandardsDerived));
         }
 
         if (syn.LexFilenum >= 0 && syn.LexFilenum < Lexnames.Length)
@@ -250,7 +253,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
             var domainId = ContentEmitter.RootId(LexDomain(Lexnames[syn.LexFilenum]));
             if (domainId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    syn.SynsetId, "HAS_DOMAIN_TOPIC", domainId.Value,
+                    synId, "HAS_DOMAIN_TOPIC", domainId.Value,
                     Source, SourceTrust.StandardsDerived));
         }
 
@@ -259,7 +262,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
             if (frame <= 0 || frame >= frameTemplates.Length || frameTemplates[frame] is not { } tpl) continue;
             var tplId = ContentEmitter.RootId(tpl);
             if (tplId is null) continue;
-            Hash128 subject = syn.SynsetId;
+            Hash128 subject = synId;
             if (wordNum > 0 && wordNum <= syn.Lemmas.Count)
             {
                 var lemmaId = ContentEmitter.RootId(Surface(syn.Lemmas[wordNum - 1]));
@@ -272,9 +275,12 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         foreach (var ptr in syn.Pointers)
         {
             if (!PointerTypes.TryGetValue(ptr.Symbol, out var typeName)) continue;
-            Hash128 tgt = SourceEntityIdConventions.WordNetSynset(ptr.TargetOffset, NormPos(ptr.TargetPos));
+            // Pointer target is another synset → its ILI anchor, resolved with the RAW target pos
+            // (a satellite '-s' target must not fold to 'a'). Skip if the target is unmapped.
+            Hash128? tgt = ConceptAnchor.SynsetId(ptr.TargetOffset, ptr.TargetPos);
+            if (tgt is null) continue;
             b.AddAttestation(NativeAttestation.Categorical(
-                syn.SynsetId, typeName, tgt, Source, SourceTrust.StandardsDerived));
+                synId, typeName, tgt.Value, Source, SourceTrust.StandardsDerived));
         }
     }
 
@@ -294,19 +300,25 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
             ct.ThrowIfCancellationRequested();
             if (entitiesOnly)
             {
-                b.AddEntity(s.SenseId, 2, SenseTypeId, Source);
+                // The sense's identity is its (normalized) sense KEY decomposed as content — the
+                // stable cross-resource id VerbNet/PropBank/the Predicate Matrix also cite — never a
+                // wordnet/sense/{key} blob. IS_A WordNet_Sense is attested in the attestation pass.
+                ContentEmitter.Emit(b, s.SenseKey, Source);
                 ContentEmitter.Emit(b, s.Lemma, Source);
             }
             else
             {
-                var lemmaId = ContentEmitter.RootId(s.Lemma);
-                if (lemmaId is not null)
+                var senseId   = CategoryAnchor.Id(s.SenseKey);
+                var lemmaId   = ContentEmitter.RootId(s.Lemma);
+                var synAnchor = ConceptAnchor.SynsetId(s.Offset, s.Pos);  // RAW pos — shared ILI anchor
+                if (senseId is not null && lemmaId is not null && synAnchor is not null)
                 {
+                    CategoryAnchor.AttestCategory(b, senseId.Value, SenseTypeId, Source, SourceTrust.StandardsDerived);
                     b.AddAttestation(NativeAttestation.Categorical(
-                        lemmaId.Value, "HAS_SENSE", s.SenseId, Source, SourceTrust.StandardsDerived,
+                        lemmaId.Value, "HAS_SENSE", senseId.Value, Source, SourceTrust.StandardsDerived,
                         magnitude: s.TagCount, arenaScale: 1.0));
                     b.AddAttestation(NativeAttestation.Categorical(
-                        s.SenseId, "IS_SENSE_OF", s.SynsetId, Source, SourceTrust.StandardsDerived));
+                        senseId.Value, "IS_SENSE_OF", synAnchor.Value, Source, SourceTrust.StandardsDerived));
                 }
             }
 
@@ -327,8 +339,6 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
             attestationCapacity: entitiesOnly ? 0 : batch * 8);
 
     private static string Surface(string lemma) => lemma.Replace('_', ' ');
-
-    private static char NormPos(char ssType) => ssType == 's' ? 'a' : ssType;
 
     private static string?[] LoadVerbFrames(string dictDir)
     {
@@ -457,9 +467,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
                 }
             }
 
-            Hash128 synId = SourceEntityIdConventions.WordNetSynset(offset, NormPos(ssType));
-            MetaNames.TryAdd($"wordnet/synset/{NormPos(ssType)}/{offset}", 0);
-            yield return new WnSynset(synId, ssType, lexFilenum, lemmas, pointers, gloss, frames);
+            yield return new WnSynset(offset, ssType, lexFilenum, lemmas, pointers, gloss, frames);
         }
     }
 
@@ -484,19 +492,20 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
                 '1' => 'n', '2' => 'v', '3' => 'a', '4' => 'r', '5' => 's', _ => 'n',
             };
 
-            Hash128 synId   = SourceEntityIdConventions.WordNetSynset(offset, NormPos(pos));
-            Hash128 senseId = Hash128.OfCanonical($"wordnet/sense/{senseKey}");
-            MetaNames.TryAdd($"wordnet/sense/{senseKey}", 0);
-            yield return new WnSense(senseId, synId, lemma, tagCount);
+            // Identity = the normalized sense key as content (shared with VerbNet/PropBank/Matrix);
+            // synset reference resolves to the shared ILI anchor (offset + RAW pos carried below).
+            string? normKey = SourceEntityIdConventions.NormalizeSenseKey(senseKey);
+            if (normKey is null) continue;
+            yield return new WnSense(normKey, offset, pos, lemma, tagCount);
         }
     }
 
     private sealed record WnSynset(
-        Hash128 SynsetId, char SsType, int LexFilenum,
+        long Offset, char SsType, int LexFilenum,
         List<string> Lemmas, List<WnPointer> Pointers, string Gloss,
         List<(int Frame, int WordNum)> Frames);
 
     private readonly record struct WnPointer(string Symbol, long TargetOffset, char TargetPos);
 
-    private sealed record WnSense(Hash128 SenseId, Hash128 SynsetId, string Lemma, int TagCount);
+    private sealed record WnSense(string SenseKey, long Offset, char Pos, string Lemma, int TagCount);
 }

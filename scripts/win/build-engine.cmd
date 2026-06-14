@@ -42,10 +42,10 @@ cmake -B build-win -S engine -G Ninja ^
   -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON ^
   -DBLAKE3_SIMD_TYPE=none ^
   -DBUILD_TESTING=ON ^
-  "-DLAPLACE_UCD_PATH=D:/Data/Ingest/Unicode/Public/17.0.0" ^
-  "-DLAPLACE_UCDXML_ZIP=D:/Data/Ingest/Unicode/Public/17.0.0/ucdxml/ucd.nounihan.flat.zip" ^
-  "-DLAPLACE_DUCET_FILE=D:/Data/Ingest/Unicode/Public/17.0.0/uca/allkeys.txt" ^
-  "-DLAPLACE_UCD_CONFORMANCE_DIR=D:/Data/Ingest/Unicode/Public/17.0.0/ucd" ^
+  "-DLAPLACE_UCD_PATH=D:/Data/Ingest/UCD/Public/UCD/latest" ^
+  "-DLAPLACE_UCDXML_ZIP=D:/Data/Ingest/UCD/Public/UCD/latest/ucdxml/ucd.nounihan.flat.zip" ^
+  "-DLAPLACE_DUCET_FILE=D:/Data/Ingest/UCD/Public/UCD/latest/uca/allkeys.txt" ^
+  "-DLAPLACE_UCD_CONFORMANCE_DIR=D:/Data/Ingest/UCD/Public/UCD/latest/ucd" ^
   "-DLIBXML2_INCLUDE_DIR=C:/Program Files/PostgreSQL/18/include" ^
   "-DLIBXML2_LIBRARY=C:/Program Files/PostgreSQL/18/lib/libxml2.lib"
 if errorlevel 1 goto fail

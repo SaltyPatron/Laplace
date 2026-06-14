@@ -21,12 +21,12 @@ internal static class EndpointMappings
         ]))).WithTags("core").Produces<ModelList>();
 
         app.MapGet("/v1/capabilities", () => Results.Json(new CapabilitiesResponse("F-scaffold", new CapabilityEndpoints(
-            ChatCompletions: new CapabilityStatus("live", Backend: "laplace.converse", Billing: "preflight_quote_required"),
+            ChatCompletions: new CapabilityStatus("live", Backend: "laplace.recall_session", Billing: "preflight_quote_required"),
             Completions: new CapabilityStatus("live", Backend: "laplace.completions", Billing: "preflight_quote_required"),
             Embeddings: new CapabilityStatus("pending", Reason: "requires Stream E physicality lookup path"),
             AuditReports: new CapabilityStatus("live", Backend: "laplace.substrate_counts + laplace.consensus_stats + laplace.top_relations", Billing: "audit.deep_report"),
             Visualizations: new CapabilityStatus("live", Backend: "laplace.top_relations + laplace.entity_physicalities", Billing: "visualization.deep_export"),
-            ExplainabilityReports: new CapabilityStatus("live", Backend: "laplace.generate_tree + laplace.attestations_out", Billing: "explain.trace"),
+            ExplainabilityReports: new CapabilityStatus("live", Backend: "laplace.walk_branches + laplace.attestations_out", Billing: "explain.trace"),
             Billing: new CapabilityStatus("live", Provider: "stripe_or_manual"),
             Models: new CapabilityStatus("live")))))
             .WithTags("core").Produces<CapabilitiesResponse>();
@@ -60,10 +60,10 @@ internal static class EndpointMappings
 
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
-            // Chat IS generation: the native autoregressive surface over witnessed
-            // content trajectories is modality-blind — prose and code are both token
-            // sequences over the same floor — so every chat model generates, and the
-            // intent-classified knowledge engine (laplace.converse) is the opt-in
+            // Chat IS a trajectory walk: the native stride-continuation surface over
+            // witnessed content trajectories is modality-blind — prose and code are both
+            // entity sequences over the same floor — so every chat model walks, and the
+            // intent-routed consensus-lookup path (laplace.recall_session) is the opt-in
             // grounded path selected by a "converse" model id.
             if (!payload.Model.Contains("converse", StringComparison.OrdinalIgnoreCase))
             {
@@ -84,7 +84,7 @@ internal static class EndpointMappings
                     await request.HttpContext.Response.WriteAsync($"data: {genRole}\n\n", ct);
 
                     var genStreamText = new StringBuilder();
-                    await foreach (var token in substrate.GenerateNgramStreamAsync(
+                    await foreach (var token in substrate.WalkTextStreamAsync(
                         prompt, steps: genSteps, temperature: genTemp, ct: ct))
                     {
                         genStreamText.Append(token.Token);
@@ -105,7 +105,7 @@ internal static class EndpointMappings
                 }
 
                 var genTokens = new List<GenerateToken>(genSteps);
-                await foreach (var token in substrate.GenerateNgramStreamAsync(
+                await foreach (var token in substrate.WalkTextStreamAsync(
                     prompt, steps: genSteps, temperature: genTemp, ct: ct))
                     genTokens.Add(token);
 
@@ -123,10 +123,10 @@ internal static class EndpointMappings
                     Metadata: new ChatMetadata(GeneratedTokens: genTokens.Count)));
             }
 
-            // Serve the substrate's own conversational engine (laplace.converse): route_prompt
-            // classifies intent, respond() grounds every reply line in witnessed consensus.
-            // Session id is derived from the conversation's earlier turns so converse keeps
-            // topic/pronoun continuity ("…and its synonyms?") across calls.
+            // Serve the substrate's intent-routed consensus lookup (laplace.recall_session): parse_ask
+            // classifies the ask, recall() grounds every reply line in witnessed consensus.
+            // Session id is derived from the conversation's earlier turns so recall_session keeps
+            // topic/pronoun continuity ("…and its synonyms?") across calls via its last-topic pointer.
             var sessionId = DeriveSessionId(payload.Messages);
             var userTurns = payload.Messages
                 .Where(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)
@@ -227,7 +227,7 @@ internal static class EndpointMappings
                 request.HttpContext.Response.Headers["X-Accel-Buffering"] = "no";
 
                 var streamText = new StringBuilder();
-                await foreach (var token in substrate.GenerateNgramStreamAsync(
+                await foreach (var token in substrate.WalkTextStreamAsync(
                     payload.Prompt.Trim(), steps: steps, temperature: temp, ct: ct))
                 {
                     streamText.Append(token.Token);
@@ -245,7 +245,7 @@ internal static class EndpointMappings
 
             // Non-streaming: collect full sequence then return
             var tokens = new List<GenerateToken>(steps);
-            await foreach (var token in substrate.GenerateNgramStreamAsync(
+            await foreach (var token in substrate.WalkTextStreamAsync(
                 payload.Prompt.Trim(), steps: steps, temperature: temp, ct: ct))
                 tokens.Add(token);
 
@@ -444,8 +444,8 @@ internal static class EndpointMappings
     /// <summary>
     /// Derive a stable 16-byte session id from the conversation's earlier turns (everything but the
     /// final user message). The same multi-turn conversation reuses the same session, so the
-    /// substrate's converse() keeps topic/pronoun continuity ("…and its synonyms?"). A single-message
-    /// request yields null → converse falls back to its per-backend session.
+    /// substrate's recall_session() keeps topic/pronoun continuity ("…and its synonyms?"). A single-message
+    /// request yields null → recall_session falls back to its per-backend session.
     /// </summary>
     private static byte[]? DeriveSessionId(IReadOnlyList<ChatMessage>? messages)
     {

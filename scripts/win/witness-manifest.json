@@ -1,86 +1,106 @@
 {
-  "version": 6,
-  "description": "Invention-complete witness manifest — English-scoped by default (LAPLACE_INGEST_LANGS=en)",
+  "version": 7,
+  "description": "Witness manifest — the conceptual mirror of seed-ladder.cmd. The ingestion order is a SIGNAL-DEPENDENCY STACK, not a skip list: each layer is a different kind of signal that presupposes the prior. English-scoped by default (LAPLACE_INGEST_LANGS=en); the decomposition logic is language-agnostic, so flipping the filter to all languages runs the same code.",
   "language_scope": {
     "global_env": "LAPLACE_INGEST_LANGS",
     "per_source_env": "LAPLACE_{SOURCE}_LANGS",
     "cross_language_edges_env": "LAPLACE_EMIT_CROSS_LANG",
-    "law": "Every witness source remains in the manifest. Language filters reduce which languages are ingested from multilingual corpora — not which witnesses exist."
+    "law": "Every witness source remains in the manifest. Language filters reduce which languages are ingested from multilingual corpora — not which witnesses exist. DecomposerOptions.ForWitness falls back to LanguageFilter.ForSource(sourceKey), which reads LAPLACE_INGEST_LANGS — so the env scopes every decomposer uniformly; none needs a bespoke --langs flag."
   },
-  "synset_hub_law": "WordNet synsets (WordNetSynset offset+pos) and senses (wordnet/sense/{key}) are the shared anchor. OMW attaches to synset IDs. VerbNet attaches to sense IDs. PropBank attaches lemmas→rolesets→VerbNet. FrameNet attaches lemmas→frames. SemLink aligns PropBank↔VerbNet↔FrameNet. ConceptNet/Atomic2020 share the lemma arena but do not use synset IDs.",
-  "ordering_law": "unicode → iso639 → wordnet → omw → verbnet → propbank → framenet → semlink → tiny-codes → stack → text/image/audio → repos → models → [deferred] conceptnet → atomic2020 → ud → wiktionary",
-  "proof_first_law": "Proof path (code + annex + repos) runs immediately after the *Net hub so invention claims are testable before multi-hour lexical bulk. Deferred lexical is idempotent and skippable via LAPLACE_SKIP_LEXICAL_BULK=1.",
+  "cadence_law": "floor (atoms + the language axis) → document (raw-text distributional trajectories: the corpus that proves AI-via-SQL answers from text ALONE) → knowledge (the *Net synset hub + the semantic/syntactic graph — uniform :ingest steps converging on shared content anchors) → usage (language in use) → code capstone (the full tree-sitter/grammar/AST pipeline; the precondition for model export) → models (LAST, because deposition presupposes export). Each layer ENRICHES the prior; none is 'deferred bulk'. The QKVO/FFN-exact analog lives in the knowledge layer; the de-blob lives there.",
+  "anchor_law": "Concepts are decomposed CONTENT, never OfCanonical(\"witness/namespace/string\") blobs. A synset's identity is its Collaborative Interlingual Index (CILI, e.g. i46531) decomposed to codepoints — NOT the WordNet byte-offset, which is a file address that differs across languages and versions. Witness → source_id; category (synset/sense/class/frame/roleset) and pos → IS_A / HAS_POS attestations. Every language's distinct wordforms (dog != perro — never merged) converge by attesting onto the same shared concept anchor. The codepoint floor is the only dedup level. The shared de-blob surfaces are ConceptAnchor (ILI-resolving) and CategoryAnchor (key-as-content + IS_A); decomposers are thin callers, never minting their own blobs.",
   "vault_root": "D:/Data/Ingest",
   "repos_root": "D:/Repositories",
   "models_root": "D:/Models/hub",
-  "wordnet_cluster": [
-    { "order": 1, "cli": "wordnet", "path": "Wordnet", "layer": "L2", "links": "anchor: synsets, senses, lemma arena, pointer graph" },
-    { "order": 2, "cli": "omw", "path": "OMW", "layer": "L3", "links": "WordNetSynset IDs — IS_TRANSLATION_OF, HAS_DEFINITION, HAS_EXAMPLE (en-filtered)" },
-    { "order": 3, "cli": "verbnet", "path": "VerbNet", "layer": "L2", "links": "lemma CORRESPONDS_TO wordnet/sense/{key}" },
-    { "order": 4, "cli": "propbank", "path": "PropBank", "layer": "L2", "links": "lemma HAS_SENSE roleset; roleset CORRESPONDS_TO verbnet/class" },
-    { "order": 5, "cli": "framenet", "path": "FrameNet/framenet_v17", "layer": "L3", "links": "lemma EVOKES_FRAME framenet/frame" },
-    { "order": 6, "cli": "semlink", "path": "SemLink", "layer": "L3", "links": "propbank↔verbnet (pb-vn2), verbnet↔framenet (vn-fn2)" },
-    { "order": 7, "cli": "conceptnet", "path": "ConceptNet", "layer": "L2", "links": "/c/en/ terms — shared ContentEmitter lemmas, not synset IDs", "phase": "deferred_lexical" },
-    { "order": 8, "cli": "atomic2020", "path": "Atomic2020", "layer": "L2", "links": "script relations (XWant, Causes, …) on event atoms", "phase": "deferred_lexical" }
-  ],
-  "deferred_lexical_bulk": {
-    "skip_env": "LAPLACE_SKIP_LEXICAL_BULK",
-    "default": "run after proof path (scripts/win/seed-deferred-lexical.cmd)",
-    "sources": ["conceptnet", "atomic2020", "ud", "wiktionary"],
-    "note": "High-value usage/examples; not required to prove code/repo/document/image paths."
-  },
-  "floor": [
-    { "order": 0, "cli": "unicode", "path": "Unicode", "layer": "L0" },
-    { "order": 0, "cli": "iso639", "path": "ISO639", "layer": "L1" }
-  ],
-  "lexical_satellites": [
-    { "order": 9, "cli": "ud", "path": "UD-Treebanks", "layer": "L2", "note": "en_* treebanks — syntax, not synset-linked", "phase": "deferred_lexical" },
-    { "order": 10, "cli": "wiktionary", "path": "Wiktionary", "layer": "L2", "note": "English jsonl — dictionary/usage examples", "phase": "deferred_lexical" }
-  ],
-  "functionality": {
-    "law": "Code corpora (tiny-codes, stack) and test-data annex (document/image/audio) deposit before repos; repos before safetensor snapshots. test-data/text is ingested via ingest document; db-roundtrip on the same files is proof-only (ingest-text.cmd / e2e-full.cmd).",
-    "repositories": [
-      "Laplace",
-      "X_BONEYARD",
-      "llama-workspace",
-      "SpecEditor",
-      "TournamentManager",
-      "Laplace-Space-Game",
-      "temp-llama-models"
-    ],
-    "test_data": {
-      "text_cli": "ingest document test-data/text (seed-substrate)",
-      "roundtrip_proof": "scripts/win/ingest-text.cmd or e2e-full.cmd — db-roundtrip sandbox only",
-      "text_glob": "test-data/text/*",
-      "images_glob": "test-data/images/*.png",
-      "audio_glob": "test-data/audio/*.wav"
+  "cadence": [
+    {
+      "stage": "floor",
+      "order": 0,
+      "sources": [
+        { "cli": "unicode", "path": "UCD/Public/UCD/latest", "layer": "L0", "role": "codepoint atoms — the only dedup floor" },
+        { "cli": "iso639", "path": "ISO639", "layer": "L1", "role": "the language axis; 639-1/-2/-3 codes for one language converge to one language entity, macrolanguage = IS_A/HAS_MEMBER" }
+      ]
     },
-    "code_corpora": [
-      { "cli": "tiny-codes", "path": "tiny-codes", "download": "download-code-data.cmd tiny-codes", "hf_token_env": "HF_TOKEN" },
-      { "cli": "stack", "path": "stack-v2", "download": "download-code-data.cmd stack-v2", "hf_token_env": "HF_TOKEN" }
-    ],
-    "authority_sources": {
-      "law": "Official language/platform sources and their documentation are the highest-trust code witnesses: the language's own repository testifies its idioms; its docs are the Rosetta intent↔implementation corpus. Acquire with download-code-data.cmd authority; ingest via the repos loop after local repositories.",
-      "root": "D:/Data/Ingest/code-authority",
-      "clones": [
-        { "repo": "postgres/postgres", "dir": "postgres", "witnesses": "C + SQL idioms from the database the substrate lives in" },
-        { "repo": "python/cpython", "dir": "cpython", "witnesses": "C + Python from the language's source of truth" },
-        { "repo": "dotnet/docs", "dir": "docs", "witnesses": "learn.microsoft.com content as markdown — intent↔code pairs" },
-        { "repo": "dotnet/runtime", "dir": "runtime", "witnesses": "C# + C from the platform's source of truth (largest — ingest last)" }
+    {
+      "stage": "document",
+      "order": 1,
+      "law": "RIGHT AFTER the floor. Distributional PRECEDES/FOLLOWS/CO_OCCURS_WITH trajectories — the exact signal a transformer trains on. 'You can ingest unicode, iso, and just the books and start answering questions': attention needs nothing more to start. Everything below ENRICHES; it is not the core.",
+      "sources": [
+        { "cli": "document", "path": "test-data/text", "layer": "L2", "role": "books / long text (mobydick, dracula, tale, ...) — raw-text corpus that proves AI-via-SQL" }
+      ]
+    },
+    {
+      "stage": "knowledge",
+      "order": 2,
+      "law": "The *Net synset hub then the semantic/syntactic graph — UNIFORM :ingest steps (no source special-cased). wordnet first: the rest bind to its ILI-anchored synsets/senses. Attested typed structure (IS_A, hypernymy, synonymy, roles, frames, commonsense, syntax, omniglottal breadth).",
+      "sources": [
+        { "order": 1,  "cli": "wordnet",    "path": "Wordnet",                 "layer": "L2", "links": "synsets (ILI-anchored content) + senses + lemma arena + pointer graph — THE anchor. Offset resolves to ILI via CILI; members IS_SYNONYM_OF synset, gloss HAS_DEFINITION, pointers typed relations." },
+        { "order": 2,  "cli": "omw",        "path": "OMW",                     "layer": "L3", "links": "expand method: per-language wordforms attest onto the SAME ILI synset — no cross-language wordform dedup. RAW ss_type (satellite s != head a)." },
+        { "order": 3,  "cli": "verbnet",    "path": "VerbNet",                 "layer": "L2", "links": "Levin classes (CategoryAnchor); members carry wn sense keys → WN synset → ILI; thematic roles → shared role inventory." },
+        { "order": 4,  "cli": "propbank",   "path": "PropBank",                "layer": "L2", "links": "rolesets (CategoryAnchor) → VerbNet class → WN → ILI; args Arg0-4 + ArgM standardized." },
+        { "order": 5,  "cli": "framenet",   "path": "FrameNet/framenet_v17",   "layer": "L3", "links": "frames + FEs + LUs (CategoryAnchor); LUs map to WN synsets → ILI." },
+        { "order": 6,  "cli": "semlink",    "path": "SemLink",                 "layer": "L3", "links": "PB<->VN<->FN alignment, CORRESPONDS_TO only (owners attest IS_A). Predicate Matrix extends the bridge to WN (WSD-aligned) → ILI." },
+        { "order": 7,  "cli": "conceptnet", "path": "ConceptNet",              "layer": "L2", "links": "/c/<lang>/word[/pos/wn/sense] graph — word=content, lang=attestation, /r/X relations universal across languages; /wn/ carries the synset→ILI bridge; TranslationOf cross-lingual links." },
+        { "order": 8,  "cli": "atomic2020", "path": "Atomic2020",              "layer": "L2", "links": "event heads ('PersonX gives Y') = event anchors; xIntent/xEffect/... role-typed; converges with ConceptNet via RelationTypeRegistry." },
+        { "order": 9,  "cli": "ud",         "path": "UD-Treebanks",            "layer": "L2", "links": "forms/lemmas=content, UPOS→PosReference, deprel→core+subtype FEATURE (ResolveDeprel), features→ResolveFeature — all universal/omniglottal." },
+        { "order": 10, "cli": "wiktionary", "path": "Wiktionary",              "layer": "L2", "links": "wordforms=content, lang=attestation, senses.glosses=HAS_DEFINITION, translations=cross-lingual concept links (wiktextract jsonl)." }
+      ]
+    },
+    {
+      "stage": "usage",
+      "order": 3,
+      "skip_env": "LAPLACE_SKIP_USAGE",
+      "law": "Language in use: cross-lingual alignment + dialogue. Part of the cadence — SKIP_USAGE=1 is an iteration knob, not a 'deferred' verdict.",
+      "sources": [
+        { "cli": "tatoeba",       "path": "Tatoeba",       "layer": "L2", "role": "sentences = content trajectories; links.csv → IS_TRANSLATION_OF (cross-lingual alignment)" },
+        { "cli": "opensubtitles", "path": "OpenSubtitles", "layer": "L2", "role": "dialogue — language in use" }
+      ]
+    },
+    {
+      "stage": "code_capstone",
+      "order": 4,
+      "law": "Boil the ocean, RIGHT BEFORE models: all code info together through the full tree-sitter/grammar/AST pipeline. Success = the whole machinery works end-to-end — the precondition for model export. X_BONEYARD/incidental local repos are NOT the default capstone.",
+      "sources": [
+        { "cli": "stack",      "path": "stack-v2",                "download": "download-code-data.cmd stack-v2",  "hf_token_env": "HF_TOKEN" },
+        { "cli": "repo",       "path": "D:/Repositories/Laplace", "role": "the substrate's own source" },
+        { "cli": "repo",       "path": "code-authority/*",        "download": "download-code-data.cmd authority", "role": "highest-trust language/platform witnesses (see authority_sources)" },
+        { "cli": "tiny-codes", "path": "tiny-codes",              "download": "download-code-data.cmd tiny-codes", "hf_token_env": "HF_TOKEN", "role": "code-reasoning snippets — lives in D:/Models/hub (HF), not D:/Data/Ingest" }
+      ]
+    },
+    {
+      "stage": "models",
+      "order": 5,
+      "skip_env": "LAPLACE_SKIP_MODELS",
+      "law": "LAST — model ingestion presupposes that model EXPORT works (the foundry is ingest's inverse), which the code capstone proves the machinery for. UNSET/0 = models REQUIRED (error if missing).",
+      "root": "D:/Models/hub",
+      "sources": [
+        { "cli": "safetensors", "env": "LAPLACE_MODEL_TINYLLAMA",     "family": "models--TinyLlama--TinyLlama-1.1B-Chat-v1.0" },
+        { "cli": "safetensors", "env": "LAPLACE_MODEL_PHI",          "family": "models--microsoft--phi-2" },
+        { "cli": "safetensors", "env": "LAPLACE_MODEL_QWEN25_CODER", "family": "models--Qwen--Qwen2.5-Coder-3B-Instruct" }
       ]
     }
+  ],
+  "stop_and_resume_knobs": {
+    "LAPLACE_LADDER_START": "floor (default) | proof — proof skips floor + knowledge for a resume.",
+    "LAPLACE_LADDER_STOP": "nets = stop after the knowledge layer; usage = stop after usage. The scoped iteration targets for the lexical/semantic decomposers — NEVER a substitute for the full-cadence gate.",
+    "LAPLACE_LADDER_DRY": "1 = print the resolved plan, ingest nothing.",
+    "LAPLACE_SKIP_USAGE": "1 skips tatoeba/opensubtitles.",
+    "LAPLACE_SKIP_MODELS": "1 skips safetensor deposits; UNSET/0 = models REQUIRED."
   },
-  "world_usage_deferred": {
-    "skip_env": "LAPLACE_SKIP_USAGE",
-    "default": "skip at seed — translation-pair witnesses",
-    "sources": [
-      { "cli": "tatoeba", "path": "Tatoeba", "layer": "L2" },
-      { "cli": "opensubtitles", "path": "OpenSubtitles", "layer": "L2" }
+  "authority_sources": {
+    "law": "Official language/platform sources and their documentation are the highest-trust code witnesses: the language's own repository testifies its idioms; its docs are the Rosetta intent<->implementation corpus. Acquire with download-code-data.cmd authority; ingest via the repo loop inside the code capstone.",
+    "root": "D:/Data/Ingest/code-authority",
+    "clones": [
+      { "repo": "postgres/postgres", "dir": "postgres", "witnesses": "C + SQL idioms from the database the substrate lives in" },
+      { "repo": "python/cpython",    "dir": "cpython",  "witnesses": "C + Python from the language's source of truth" },
+      { "repo": "dotnet/docs",       "dir": "docs",     "witnesses": "learn.microsoft.com content as markdown — intent<->code pairs" },
+      { "repo": "dotnet/runtime",    "dir": "runtime",  "witnesses": "C# + C from the platform's source of truth (largest — ingest last)" }
     ]
   },
-  "safetensor_snapshots": {
-    "skip_env": "LAPLACE_SKIP_MODELS",
-    "default": "skip (LAPLACE_SKIP_MODELS=1)",
-    "root": "D:/Models/hub"
+  "test_data": {
+    "law": "test-data/text is ingested via 'ingest document' in the document stage. db-roundtrip on the same files is proof-only (ingest-text.cmd / e2e-full.cmd) — bit-perfect is for raw user content, NOT seed/model data (which is consensus-folded).",
+    "text_glob": "test-data/text/*",
+    "images_glob": "test-data/images/*.png",
+    "audio_glob": "test-data/audio/*.wav"
   }
 }

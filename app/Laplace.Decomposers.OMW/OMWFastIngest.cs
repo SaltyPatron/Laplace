@@ -84,8 +84,8 @@ public static class OMWFastIngest
         int dash = synStr.LastIndexOf('-');
         if (dash < 0 || dash + 1 >= synStr.Length) return false;
         if (!long.TryParse(synStr.AsSpan(0, dash), out long offset)) return false;
-        char pos = synStr[dash + 1] == 's' ? 'a' : synStr[dash + 1];
-        row = new OmwRow(SourceEntityIdConventions.WordNetSynset(offset, pos), lang, rowType, value);
+        char ssType = synStr[dash + 1];   // RAW — satellite 's' must not fold to 'a' (drops 10,693 synsets)
+        row = new OmwRow(offset, ssType, lang, rowType, value);
         return true;
     }
 
@@ -96,25 +96,31 @@ public static class OMWFastIngest
             ? root : (Hash128?)null;
         if (contentId is null) return;
 
+        // The synset is the shared ILI anchor — the SAME content id WordNet emits for this offset.
+        // This is the convergence point: every language's wordform attests onto it, no wordform
+        // dedup. Emit it (idempotent) so OMW is self-contained; WordNet (layer 2) carries the IS_A.
+        Hash128? synAnchor = ConceptAnchor.EmitAnchor(b, row.Offset, row.SsType, OMWDecomposer.Source);
+        if (synAnchor is null) return;   // unmapped in CILI — skip (CILI covers PWN-3.0)
+        Hash128 synId = synAnchor.Value;
+
         Hash128 langId = LanguageReference.Resolve(row.Lang);
         b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, EntityTypeRegistry.Language, OMWDecomposer.Source));
-        b.AddEntity(new EntityRow(row.SynsetId, EntityTier.Vocabulary, EntityTypeRegistry.WordNetSynset, OMWDecomposer.Source));
 
         switch (row.Type)
         {
             case OmwType.Lemma:
                 b.AddAttestation(NativeAttestation.Categorical(
-                    contentId.Value, "IS_TRANSLATION_OF", row.SynsetId, OMWDecomposer.Source, null, TC.AcademicCurated));
+                    contentId.Value, "IS_TRANSLATION_OF", synId, OMWDecomposer.Source, null, TC.AcademicCurated));
                 b.AddAttestation(NativeAttestation.Categorical(
                     contentId.Value, "HAS_LANGUAGE", langId, OMWDecomposer.Source, null, TC.AcademicCurated));
                 break;
             case OmwType.Def:
                 b.AddAttestation(NativeAttestation.Categorical(
-                    row.SynsetId, "HAS_DEFINITION", contentId.Value, OMWDecomposer.Source, langId, TC.AcademicCurated));
+                    synId, "HAS_DEFINITION", contentId.Value, OMWDecomposer.Source, langId, TC.AcademicCurated));
                 break;
             case OmwType.Exe:
                 b.AddAttestation(NativeAttestation.Categorical(
-                    row.SynsetId, "HAS_EXAMPLE", contentId.Value, OMWDecomposer.Source, langId, TC.AcademicCurated));
+                    synId, "HAS_EXAMPLE", contentId.Value, OMWDecomposer.Source, langId, TC.AcademicCurated));
                 break;
         }
     }
@@ -131,5 +137,5 @@ public static class OMWFastIngest
             entityCapacity: batch * 6, physicalityCapacity: batch * 6, attestationCapacity: batch * 2);
 
     public enum OmwType { Lemma, Def, Exe }
-    public readonly record struct OmwRow(Hash128 SynsetId, string Lang, OmwType Type, string Value);
+    public readonly record struct OmwRow(long Offset, char SsType, string Lang, OmwType Type, string Value);
 }

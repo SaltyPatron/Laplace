@@ -1,5 +1,5 @@
 /*
- * perfcache_native.c -- the T0 oracle inside the backend.
+ * perfcache.c -- the T0 oracle inside the backend.
  *
  * word_id(text) is THE lookup law: laplace_content_root_id runs the same
  * decomposer, composer, and collapse law as the deposit path
@@ -191,8 +191,8 @@ pg_laplace_codepoint_for_id(PG_FUNCTION_ARGS)
 
 /* Omniglottal separator test: true iff the text is non-empty and every
  * codepoint is Unicode White_Space (the banked WB law), in any script.
- * Replaces the ASCII-bound `~ '^[[:space:]]+$'` regex the generation corpus
- * used, which silently kept U+3000, NBSP, U+2000..200A as units of order. */
+ * Replaces the ASCII-bound `~ '^[[:space:]]+$'` regex the generation trajectory
+ * stream used, which silently kept U+3000, NBSP, U+2000..200A as units of order. */
 PG_FUNCTION_INFO_V1(pg_laplace_is_all_whitespace);
 
 Datum

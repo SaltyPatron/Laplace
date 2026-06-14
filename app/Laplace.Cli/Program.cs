@@ -79,8 +79,8 @@ internal static class Program
                 + "  decompose <text>\n"
                 + "  inspect <text>\n"
                 + "  converse [prompt]                 (no prompt: REPL — one connection, one session)\n"
-                + "  nn <word>                         (plural NN: structural geodesic + shape Fréchet + semantic μ)\n"
-                + "  generate [prompt]                 (forward pass: ranked-μ walk over witnessed sequence; no prompt: REPL)\n"
+                + "  neighbors <word>                  (plural NN: structural geodesic + shape Fréchet + semantic μ)\n"
+                + "  walk [prompt]                     (n-gram stride backoff over witnessed trajectories; no prompt: REPL)\n"
                 + "  attest <confirm|refute> <tok1> [tok2...]   (OODA feedback: deposit PRECEDES witness for a token sequence)\n"
                 + "  roundtrip <file> [out]\n"
                 + "  db-roundtrip <file>\n"
@@ -98,9 +98,9 @@ internal static class Program
                 "decompose"    => Decompose(string.Join(' ', args[1..])),
                 "inspect"      => await InspectAsync(string.Join(' ', args[1..])),
                 "converse"     => await ConverseAsync(string.Join(' ', args[1..])),
-                "cognize"      => await CognizeAsync(string.Join(' ', args[1..])),
-                "nn"           => await NearestNeighborsAsync(string.Join(' ', args[1..])),
-                "generate"     => await GenerateAsync(args[1..]),
+                "recall"       => await RecallAsync(string.Join(' ', args[1..])),
+                "neighbors"    => await NeighborsAsync(string.Join(' ', args[1..])),
+                "walk"         => await WalkAsync(args[1..]),
                 "attest"       => await AttestAsync(args[1..]),
                 "roundtrip"    => Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
                 "db-roundtrip" => await DbRoundtripAsync(args.Length > 1 ? args[1] : ""),
@@ -303,7 +303,7 @@ internal static class Program
     {
         var sw = Stopwatch.StartNew();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT reply, eff_mu, witnesses FROM laplace.converse(@p)";
+        cmd.CommandText = "SELECT reply, eff_mu, witnesses FROM laplace.recall_session(@p)";
         cmd.Parameters.AddWithValue("p", prompt);
         await using var r = await cmd.ExecuteReaderAsync();
         if (echoPrompt) Console.WriteLine($"you      : {prompt}");
@@ -322,11 +322,11 @@ internal static class Program
         return 0;
     }
 
-    private static async Task<int> CognizeAsync(string goal)
+    private static async Task<int> RecallAsync(string goal)
     {
         if (string.IsNullOrWhiteSpace(goal))
         {
-            Console.Error.WriteLine("usage: laplace cognize \"<goal>\"  (e.g. \"what is a dog\", \"how are whale and dolphin related\")");
+            Console.Error.WriteLine("usage: laplace recall \"<goal>\"  (e.g. \"what is a dog\", \"how are whale and dolphin related\")");
             return 2;
         }
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
@@ -340,7 +340,7 @@ internal static class Program
         await using (var cmd = conn.CreateCommand())
         {
             cmd.CommandTimeout = 120;
-            cmd.CommandText = "SELECT reply, eff_mu, witnesses FROM laplace.respond(@p)";
+            cmd.CommandText = "SELECT reply, eff_mu, witnesses FROM laplace.recall(@p)";
             cmd.Parameters.AddWithValue("p", goal);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
@@ -368,13 +368,13 @@ internal static class Program
             : "  (none — every conceptual arena is witnessed)");
 
         sw.Stop();
-        Console.WriteLine($"           [{sw.Elapsed.TotalMilliseconds:F1} ms, cognition over consensus reads]");
+        Console.WriteLine($"           [{sw.Elapsed.TotalMilliseconds:F1} ms, intent-routed consensus reads]");
         return 0;
     }
 
-    private static async Task<int> NearestNeighborsAsync(string word)
+    private static async Task<int> NeighborsAsync(string word)
     {
-        if (string.IsNullOrWhiteSpace(word)) return Fail("usage: laplace nn <word>");
+        if (string.IsNullOrWhiteSpace(word)) return Fail("usage: laplace neighbors <word>");
         int k = EnvInt("LAPLACE_NN_K", 10, 1);
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
@@ -421,13 +421,13 @@ internal static class Program
 
         if (id is not null)
         {
-            Console.WriteLine($"\n  '{word}' — SEMANTIC (consensus μ via describe)");
+            Console.WriteLine($"\n  '{word}' — SEMANTIC (consensus μ via salient_facts)");
             Console.WriteLine($"  {"type",-22} {"fact",-28} {"eff_mu",10} {"wit",4}");
             Console.WriteLine($"  {new string('-', 22)} {new string('-', 28)} {new string('-', 10)} {new string('-', 4)}");
             await using var se = conn.CreateCommand();
             se.CommandText =
                 "SELECT type, fact, round(eff_mu,0)::bigint, witnesses "
-                + "FROM laplace.describe(@id) ORDER BY eff_mu DESC LIMIT @k";
+                + "FROM laplace.salient_facts(@id) ORDER BY eff_mu DESC LIMIT @k";
             se.Parameters.AddWithValue("id", id);
             se.Parameters.AddWithValue("k", k);
             await using var r = await se.ExecuteReaderAsync();
@@ -447,7 +447,7 @@ internal static class Program
         return 0;
     }
 
-    private static async Task<int> GenerateAsync(string[] args)
+    private static async Task<int> WalkAsync(string[] args)
     {
         int steps  = EnvInt("LAPLACE_GEN_STEPS", 20, 1);
         int order  = EnvInt("LAPLACE_GEN_ORDER", EnvInt("LAPLACE_GEN_WINDOW", 5, 1), 1);
@@ -460,28 +460,28 @@ internal static class Program
 
         string prompt = string.Join(' ', args).Trim();
         if (!string.IsNullOrWhiteSpace(prompt))
-            return await GenerateOnceAsync(conn, prompt, steps, order, temp, topk, verbose);
+            return await WalkOnceAsync(conn, prompt, steps, order, temp, topk, verbose);
 
-        Console.WriteLine("laplace generate — type a prompt, Enter. Blank line or Ctrl-D quits.");
+        Console.WriteLine("laplace walk — type a prompt, Enter. Blank line or Ctrl-D quits.");
         while (true)
         {
             Console.Write("\nprompt> ");
             var line = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(line)) break;
-            await GenerateOnceAsync(conn, line, steps, order, temp, topk, verbose);
+            await WalkOnceAsync(conn, line, steps, order, temp, topk, verbose);
         }
         return 0;
     }
 
-    private static async Task<int> GenerateOnceAsync(
+    private static async Task<int> WalkOnceAsync(
         NpgsqlConnection conn, string prompt, int steps, int order, double temp, int topk, bool verbose)
     {
         var sw = Stopwatch.StartNew();
-        var toks = new List<(string tok, int ordUsed)>();
+        var toks = new List<(string entity, int strideUsed)>();
         await using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText =
-                "SELECT step, token, ord_used FROM laplace.generate_ngram("
+                "SELECT step, entity, stride_used FROM laplace.walk_text("
                 + "@prompt, @steps, @order, @temp, @topk)";
             cmd.Parameters.AddWithValue("prompt", prompt);
             cmd.Parameters.AddWithValue("steps", steps);
@@ -493,11 +493,11 @@ internal static class Program
                 toks.Add((r.IsDBNull(1) ? "" : r.GetString(1), r.IsDBNull(2) ? 0 : r.GetInt32(2)));
         }
         sw.Stop();
-        Console.WriteLine(prompt + " " + string.Join(' ', toks.Select(t => t.tok)));
+        Console.WriteLine(prompt + " " + string.Join(' ', toks.Select(t => t.entity)));
         if (verbose)
             for (int i = 0; i < toks.Count; i++)
-                Console.WriteLine($"    {i + 1,2}. {toks[i].tok,-22} ord={toks[i].ordUsed}");
-        Console.WriteLine($"    [{toks.Count} tokens, {sw.Elapsed.TotalMilliseconds:F0} ms — native ngram backoff, no GPU]");
+                Console.WriteLine($"    {i + 1,2}. {toks[i].entity,-22} stride={toks[i].strideUsed}");
+        Console.WriteLine($"    [{toks.Count} entities, {sw.Elapsed.TotalMilliseconds:F0} ms — native stride descent, no GPU]");
         return 0;
     }
 
@@ -984,7 +984,7 @@ internal static class Program
             // rebuilt here regardless of how the run/fold above exits — success, failure rows,
             // or a thrown exception. Rebuilding only on the happy path is what stranded
             // `consensus` index-free in production: a failed/throwing model ingest left it with
-            // only its primary key, forcing converse/cognize/nn into seq-scans over 57M rows.
+            // only its primary key, forcing recall_session/recall/neighbors into seq-scans over 57M rows.
             sw.Stop();
             if (droppedAttIndexes.Count > 0)
             {
@@ -1110,7 +1110,7 @@ internal static class Program
             {
                 if (string.IsNullOrEmpty(tokenizerDir) || !File.Exists(Path.Combine(tokenizerDir, "tokenizer.json")))
                     return Fail("--recipe-from needs --tokenizer <dir> containing tokenizer.json "
-                              + "(tokenizer regeneration from the substrate is a future item)");
+                              + "(the vocab — gguf slots mapped onto the substrate's content entities)");
                 var molded = await MaterializeDiscoveredMoldAsync(recipeFrom, tokenizerDir);
                 if (molded is null) return 2;
                 recipePath = molded;
@@ -1216,36 +1216,35 @@ internal static class Program
         // planes AND the corpus sequence consensus — "the capital of" → "France" is
         // PRECEDES testimony, and it is exactly what the completion operator encodes.
         int degreeCap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_LE_DEGREE", 48);
-        int maxGap = Math.Max(1, Math.Min(FoundryExport.EnvInt("LAPLACE_FOUNDRY_TRAJ_MAX_GAP", 8), nLayers));
         var swPour = Stopwatch.StartNew();
-        var simT = FoundryExport.ReadTokenPlaneAsync(ds, FoundryExport.PlaneSpec.Consensus("SIMILAR_TO"),     tokenSlots, degreeCap);
-        var attT = FoundryExport.ReadTokenPlaneAsync(ds, FoundryExport.PlaneSpec.Consensus("ATTENDS"),        tokenSlots, degreeCap);
-        var ovT  = FoundryExport.ReadTokenPlaneAsync(ds, FoundryExport.PlaneSpec.Consensus("OV_RELATES"),     tokenSlots, degreeCap);
-        var cmpT = FoundryExport.ReadTokenPlaneAsync(ds, FoundryExport.PlaneSpec.Consensus("COMPLETES_TO"),   tokenSlots, degreeCap);
-        var preT = FoundryExport.ReadTokenPlaneAsync(ds, FoundryExport.PlaneSpec.Consensus("PRECEDES"),       tokenSlots, degreeCap);
-        var cooT = FoundryExport.ReadTokenPlaneAsync(ds, FoundryExport.PlaneSpec.Consensus("CO_OCCURS_WITH"), tokenSlots, degreeCap);
-        // The usage observations themselves: the order ladder — per-gap conditional
-        // frequencies walked out of the content trajectories. Gap g pours into layer g.
-        var gapT = new Task<FoundryExport.PlaneCoo>[maxGap];
-        for (int g = 1; g <= maxGap; g++)
-            gapT[g - 1] = FoundryExport.ReadTokenPlaneAsync(ds, FoundryExport.PlaneSpec.TrajGap(g), tokenSlots, degreeCap);
-        await Task.WhenAll(new Task[] { simT, attT, ovT, cmpT, preT, cooT }.Concat(gapT));
-        var sim = FoundryExport.Normalize(simT.Result);
-        var att = FoundryExport.Normalize(attT.Result);
-        var ov  = FoundryExport.Normalize(ovT.Result);
-        var cmp = FoundryExport.Normalize(cmpT.Result);
-        var pre = FoundryExport.Normalize(preT.Result);
-        var coo = FoundryExport.Normalize(cooT.Result);
-        var gaps = gapT.Select(t => t.Result).ToArray();
-        var tnx = gaps[0];
-        long gapEdges = gaps.Sum(g => (long)g.Nnz);
-        long planeEdges = (long)sim.Nnz + att.Nnz + ov.Nnz + cmp.Nnz + pre.Nnz + coo.Nnz + gapEdges;
-        Console.WriteLine($"  consensus + trajectory planes read in {swPour.Elapsed.TotalSeconds:F1}s: "
-            + $"SIMILAR_TO={sim.Nnz:N0} ATTENDS={att.Nnz:N0} OV_RELATES={ov.Nnz:N0} COMPLETES_TO={cmp.Nnz:N0} "
-            + $"PRECEDES={pre.Nnz:N0} CO_OCCURS_WITH={coo.Nnz:N0} "
-            + $"TRAJ gaps 1..{maxGap}=[{string.Join(",", gaps.Select(g => g.Nnz))}] (degree cap {degreeCap})");
+        // Text IS the training signal. The pour draws from what text deposits as entity→entity
+        // consensus — the lexical/semantic graph (similarity, relation, sequence) — read
+        // VOCAB-BOUNDED and INDEX-DRIVEN: entity_relation_plane returns ONLY the vocab×vocab
+        // edges of each role's relation set, degree-capped server-side via the
+        // (subject_id, type_id) index. No full-type scan, no row streaming into this process.
+        // A deposited model is NOT required; its behavioral relations (ATTENDS/OV_RELATES/
+        // COMPLETES_TO) just join the same unions when present.
+        Task<FoundryExport.PlaneCoo> RoleAsync(params string[] rels)
+            => FoundryExport.ReadConsensusPlaneAsync(ds, rels, tokenSlots, degreeCap);
+        // Similarity geometry anchoring the basis: synonymy / relatedness / coordinate terms.
+        var simTask = RoleAsync("IS_SYNONYM_OF", "IS_SIMILAR_TO", "SIMILAR_TO", "RELATED_TO", "IS_COORDINATE_TERM_WITH", "HAS_VARIANT_OF");
+        // Value/output structure: taxonomy / meronymy / derivation / commonsense (+ model OV_RELATES).
+        var relTask = RoleAsync("IS_A", "HAS_PART", "HAS_HYPERNYM", "DERIVATIONALLY_RELATED", "RELATED_TO", "OBJECT_USE", "X_EFFECT", "X_WANT", "OV_RELATES");
+        // Completion = forward sequence consensus (+ model COMPLETES_TO).
+        var preTask = RoleAsync("PRECEDES", "COMPLETES_TO");
+        // Attention = witnessed co-occurrence: forward sequence + relatedness (+ model ATTENDS).
+        var attTask = RoleAsync("PRECEDES", "RELATED_TO", "CO_OCCURS_WITH", "ATTENDS");
+        await Task.WhenAll(simTask, relTask, preTask, attTask);
+        var sim = FoundryExport.Normalize(simTask.Result);
+        var rel = FoundryExport.Normalize(relTask.Result);
+        var pre = FoundryExport.Normalize(preTask.Result);
+        var att = FoundryExport.Normalize(attTask.Result);
+        long planeEdges = (long)sim.Nnz + rel.Nnz + pre.Nnz + att.Nnz;
+        Console.WriteLine($"  bounded consensus planes read in {swPour.Elapsed.TotalSeconds:F1}s "
+            + $"(vocab {tokenSlots.Count:N0}, degree cap {degreeCap}): "
+            + $"similarity={sim.Nnz:N0} relation(V/O)={rel.Nnz:N0} completion={pre.Nnz:N0} attention={att.Nnz:N0}");
         if (planeEdges == 0)
-            return Fail("no token→token consensus in the substrate — deposit a model or corpus first");
+            return Fail("no entity→entity consensus over this vocab — ingest text first");
 
         // ── generate the basis: LE over the union graph, GSO, Procrustes-anchored
         // to token content coordinates, deterministic capacity fill, bias channel ──
@@ -1258,7 +1257,7 @@ internal static class Program
         var basisSeed = Hash128.Blake3(recipe.CanonicalJson);
         var swBasis = Stopwatch.StartNew();
         var E = FoundryExport.BuildBasis(vocab, dModel,
-            FoundryExport.Union(new[] { sim, att, ov, cmp, pre, coo }.Concat(gaps).ToArray()),
+            FoundryExport.Union(sim, rel, pre, att),
             anchors, basisSeed, out var basisStats);
         Console.WriteLine($"  basis generated in {swBasis.Elapsed.TotalSeconds:F1}s: "
             + $"spectral K={basisStats.SpectralRank}, {basisStats.ZeroSpectralTokens:N0} tokens off-graph (capacity-only rows), "
@@ -1268,21 +1267,21 @@ internal static class Program
         double relTol = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_REL_ERR_TOL", 0.0);
         int kAttn = Math.Min(kvDimR, dModel);
         int kFfn  = Math.Min(intermR, dModel);
-        // Completion = model COMPLETES_TO ∪ PRECEDES consensus ∪ the trajectory
-        // continuation distribution; OV from model testimony. Attention is the ORDER
-        // LADDER: layer l carries gap-(l+1) trajectory structure on top of the
-        // consensus attention backbone — the mold's depth is bought with sequential
-        // order walked out of the witnessed trajectories.
+        // Each operator pours from BOTH witness classes over the same token entities: TEXT
+        // (the witnessed relation graph + the trajectory sequence) AND, when a model has been
+        // deposited, its behavioral testimony (ATTENDS/OV_RELATES/COMPLETES_TO) stacked on the
+        // same consensus. Value/output = the relation graph; completion = PRECEDES ∪ trajectory
+        // continuation; attention is the ORDER LADDER — layer l carries gap-(l+1) co-occurrence.
         var swOps = Stopwatch.StartNew();
-        var mB = FoundryExport.ProjectOperator(E, vocab, dModel, ov);
-        var mC = FoundryExport.ProjectOperator(E, vocab, dModel, FoundryExport.Union(cmp, pre, tnx));
-        // ATTENDS composes Wqᵀ·Wk; OV and FFN compose outer·inner (Wo·Wv, Wdown·Wup) → factor Mᵀ.
+        var mB = FoundryExport.ProjectOperator(E, vocab, dModel, rel);
+        var mC = FoundryExport.ProjectOperator(E, vocab, dModel, FoundryExport.Union(pre, tnx));
+        // OV and FFN compose outer·inner (Wo·Wv, Wdown·Wup) → factor Mᵀ; attention composes Wqᵀ·Wk.
         var fOv  = FoundryExport.Factor(mB, dModel, kAttn, relTol, transpose: true);
         var fFfn = FoundryExport.Factor(mC, dModel, kFfn,  relTol, transpose: true);
         var fAttnByGap = new FoundryExport.Factors[maxGap];
         for (int g = 0; g < maxGap; g++)
         {
-            var mA = FoundryExport.ProjectOperator(E, vocab, dModel, FoundryExport.Union(att, coo, gaps[g]));
+            var mA = FoundryExport.ProjectOperator(E, vocab, dModel, FoundryExport.Union(att, gaps[g]));
             fAttnByGap[g] = FoundryExport.Factor(mA, dModel, kAttn, relTol, transpose: false);
         }
         Console.WriteLine($"  operators projected + factored in {swOps.Elapsed.TotalSeconds:F1}s: "
@@ -1624,7 +1623,7 @@ internal static class Program
     }
 
     private static async Task<int> IngestUnicodeViaRunnerAsync(IngestCliArgs cli)
-        => await IngestViaRunnerAsync(new UnicodeDecomposer(), "/vault/Data/Unicode", skipLayerCheck: true, cli);
+        => await IngestViaRunnerAsync(new UnicodeDecomposer(), "/vault/Data/UCD/Public/UCD/latest", skipLayerCheck: true, cli);
 
     private static async Task<int> IngestISO639Async(IngestCliArgs cli)
         => await IngestViaRunnerAsync(new ISODecomposer(), "/vault/Data/ISO639", skipLayerCheck: false, cli);
@@ -1684,6 +1683,7 @@ internal static class Program
                 + (p.UnitsFailed > 0 ? $" failed={p.UnitsFailed:N0} status=failed" : " status=running"));
         });
         int batch = EnvInt("LAPLACE_INGEST_BATCH", 2048, min: 1);
+        int workers = EnvInt("LAPLACE_INGEST_WORKERS", 1, min: 1);
         return IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = skipLayerCheck,
@@ -1693,12 +1693,16 @@ internal static class Program
             DecomposerOptions      = DecomposerOptions.ForWitness(
                 sourceName, batch, cli?.LangOverride, cli?.EmitCrossLanguageLinks),
             CommitRows             = EnvInt("LAPLACE_INGEST_COMMIT_ROWS", 250_000, min: 0),
-            ParallelWorkers        = EnvInt("LAPLACE_INGEST_WORKERS",     1,       min: 1),
+            ParallelWorkers        = workers,
             Progress               = progress,
-            // Fail fast. No retry/backoff loop and no silent transient drop:
-            // the first error surfaces immediately and aborts the run so the
-            // real cause is fixed, never retried or swallowed.
-            RetryPolicy                = TransientErrorRetryPolicy.NoRetry,
+            // Serial ingest fails fast — no retry/backoff, no silent transient drop: the first
+            // error surfaces and aborts so the real cause is fixed, never retried or swallowed.
+            // Parallel ingest (workers>1) instead retries the genuine concurrency outcomes
+            // (40P01 deadlock / 40001 serialization) the way Postgres prescribes — the victim
+            // re-runs; everything else still fails fast. A persistent fault aborts after the cap.
+            RetryPolicy                = workers > 1
+                                            ? TransientErrorRetryPolicy.ConcurrencyRetry
+                                            : TransientErrorRetryPolicy.NoRetry,
             AbortOnTransientExhaustion = true,
         };
     }
@@ -2083,7 +2087,7 @@ internal static class Program
 
     private sealed class CliContext(ISubstrateWriter writer, ISubstrateReader reader) : IDecomposerContext
     {
-        public string EcosystemPath => "/vault/Data/Unicode";
+        public string EcosystemPath => "/vault/Data/UCD/Public/UCD/latest";
         public ISubstrateWriter Writer { get; } = writer;
         public ISubstrateReader Reader { get; } = reader;
         public Microsoft.Extensions.Logging.ILogger Logger { get; } = NullLogger.Instance;

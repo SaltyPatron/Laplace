@@ -130,6 +130,87 @@ int laplace_content_root_id(
     return 0;
 }
 
+/* ── Record-once bank (the content-addressed / Merkle-DAG law) ────────────────
+ * Same content = same id = recorded ONCE, then referenced. A sentence references
+ * its words, a word its graphemes, a grapheme its codepoints — the reference is
+ * the parent's trajectory (mantissa-packed child ids), which the emit loop below
+ * already builds. This bank stops the witness from physically RE-recording a node
+ * it already emitted this ingest, so a shared grapheme/word is ONE row, not one
+ * per occurrence (the ConceptNet 100M-row balloon). Codepoints are tier 0 and are
+ * never emitted at all — the perfcache banks those. Cross-ingest repeats are
+ * caught by the writer's existence filter; this kills the in-run re-recording
+ * that is the bulk.
+ *
+ * One decompose thread (LAPLACE_DECOMPOSE_WORKERS=1): unsynchronized. A racy
+ * double-record would cost only a redundant row the writer drops on conflict,
+ * never corruption. content_witness_reset() clears it at each ingest start. */
+typedef struct { hash128_t* slots; size_t cap; size_t count; } emit_bank_t;
+static emit_bank_t g_emit_bank;
+
+static int emit_bank_slot_empty(const hash128_t* h) { return (h->hi | h->lo) == 0; }
+
+/* 1 if id was already recorded this run, 0 if newly recorded. */
+static int emit_bank_record(const hash128_t* id) {
+    emit_bank_t* s = &g_emit_bank;
+    if (s->cap == 0) {
+        /* Pre-size for the whole source so the table does NOT realloc mid-run. The grow
+         * path (calloc new + rehash + free old) is heap churn that was empirically the
+         * trigger for the latent content-witness heap transient: a single staged content
+         * row would silently vanish from a stage near a grow (the data-36 / sense-21
+         * reseed ghosts) — drop count tracked the grow count, and a run that banked one
+         * id (no grow) never lost a row. 2^22 slots = 67 MB holds ~3.1M distinct ids at
+         * 0.75 load, covering every seed source; memory is not the constraint on this box.
+         * The grow below remains as a correctness backstop for an unexpectedly huge source. */
+        s->cap = (size_t)1 << 22;
+        s->slots = (hash128_t*)calloc(s->cap, sizeof(hash128_t));
+        if (!s->slots) { s->cap = 0; return 0; }  /* OOM: treat as novel; writer dedups */
+    } else if ((s->count + 1) * 4 >= s->cap * 3) {  /* grow at 0.75 load */
+        size_t ncap = s->cap << 1;
+        hash128_t* ns = (hash128_t*)calloc(ncap, sizeof(hash128_t));
+        if (ns) {
+            size_t nmask = ncap - 1;
+            for (size_t i = 0; i < s->cap; ++i) {
+                if (emit_bank_slot_empty(&s->slots[i])) continue;
+                size_t j = (size_t)s->slots[i].lo & nmask;
+                while (!emit_bank_slot_empty(&ns[j])) j = (j + 1) & nmask;
+                ns[j] = s->slots[i];
+            }
+            free(s->slots);
+            s->slots = ns;
+            s->cap = ncap;
+        }
+    }
+    size_t mask = s->cap - 1;
+    size_t j = (size_t)id->lo & mask;
+    while (!emit_bank_slot_empty(&s->slots[j])) {
+        if (hash128_equals(&s->slots[j], id)) return 1;
+        j = (j + 1) & mask;
+    }
+    s->slots[j] = *id;
+    s->count++;
+    return 0;
+}
+
+/* 1 if id is already banked, without recording it. */
+static int emit_bank_contains(const hash128_t* id) {
+    emit_bank_t* s = &g_emit_bank;
+    if (s->cap == 0) return 0;
+    size_t mask = s->cap - 1;
+    size_t j = (size_t)id->lo & mask;
+    while (!emit_bank_slot_empty(&s->slots[j])) {
+        if (hash128_equals(&s->slots[j], id)) return 1;
+        j = (j + 1) & mask;
+    }
+    return 0;
+}
+
+void content_witness_reset(void) {
+    free(g_emit_bank.slots);
+    g_emit_bank.slots = NULL;
+    g_emit_bank.cap = 0;
+    g_emit_bank.count = 0;
+}
+
 int content_witness_batch_add(
     intent_stage_t*  stage,
     const uint8_t*   utf8,
@@ -154,6 +235,11 @@ int content_witness_batch_add(
     tier_tree_get_node(tree, root_idx, &root);
     *out_root_id = root.id;
 
+    /* Trunk short-circuit (O(tier), not O(content)): a unit whose root is already
+     * banked this run is WHOLLY recorded — reference it, do not re-walk its subtree.
+     * Re-ingesting John 3:16 inside the Bible hits this at the verse root. */
+    if (emit_bank_contains(&root.id)) { tier_tree_free(tree); return 0; }
+
     int64_t now_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
 
     for (uint32_t idx = 0; idx < (uint32_t)nc; ++idx) {
@@ -161,6 +247,9 @@ int content_witness_batch_add(
         if (tier_tree_get_node(tree, idx, &node) != 0) continue;
         if (node.tier == 0) continue;
         if (!should_emit_compositional(tree, idx)) continue;
+        /* record-once: a node already emitted this run is referenced by its
+         * parents' trajectories, never physically re-recorded. */
+        if (emit_bank_record(&node.id)) continue;
 
         hash128_t type_id = tier_type_id(node.tier);
         if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0) {

@@ -14,9 +14,9 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 
-PG_FUNCTION_INFO_V1(pg_laplace_route_prompt);
-PG_FUNCTION_INFO_V1(pg_laplace_respond);
-PG_FUNCTION_INFO_V1(pg_laplace_converse);
+PG_FUNCTION_INFO_V1(pg_laplace_parse_ask);
+PG_FUNCTION_INFO_V1(pg_laplace_recall);
+PG_FUNCTION_INFO_V1(pg_laplace_recall_session);
 
 typedef struct RouteResult
 {
@@ -456,7 +456,7 @@ spi_forward_replies(ReplyBuf *buf, const char *query,
     int rc = SPI_execute_with_args(query, nparams, types, values, nulls, true, 0);
 
     if (rc != SPI_OK_SELECT)
-        elog(ERROR, "respond_native: query failed: %s", SPI_result_code_string(rc));
+        elog(ERROR, "recall: query failed: %s", SPI_result_code_string(rc));
 
     for (uint64 i = 0; i < SPI_processed; i++)
     {
@@ -720,7 +720,7 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
         Datum args[1] = { topic };
         n = spi_forward_replies(buf,
             "SELECT d.type || ': ' || COALESCE(d.fact, '?'), d.eff_mu, d.witnesses "
-            "FROM laplace.describe($1, laplace.word_language($1)) d",
+            "FROM laplace.salient_facts($1, laplace.word_language($1)) d",
             1, types, args, NULL);
         if (n == 0)
             emit_label_fallback(buf, topic, "no relation consensus to describe yet.");
@@ -771,7 +771,7 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
                 "SELECT CASE WHEN rs.relation IS NOT NULL "
                 "            THEN rs.relation || '  [' || rs.verdict || ']' "
                 "            ELSE rs.verdict END, rs.mu, rs.usage "
-                "FROM laplace.relatedness($1, $2) rs",
+                "FROM laplace.relation_summary($1, $2) rs",
                 2, types, args, NULL);
         }
     }
@@ -786,7 +786,7 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
             "                     || COALESCE(laplace.realize(g.entity_id, laplace.word_language($1)), "
             "                                 laplace.label(g.entity_id)), '' ORDER BY g.step), "
             "       min(g.eff_mu), NULL::bigint "
-            "FROM laplace.generate_greedy($1, "
+            "FROM laplace.walk_strongest($1, "
             "     CASE WHEN $2 = 'complete' THEN laplace.relation_type_id('COMPLETES_TO') END, 8) g "
             "HAVING count(*) > 0",
             2, types, args, NULL);
@@ -811,7 +811,7 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
 }
 
 Datum
-pg_laplace_route_prompt(PG_FUNCTION_ARGS)
+pg_laplace_parse_ask(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     text          *prompt_txt;
@@ -819,7 +819,7 @@ pg_laplace_route_prompt(PG_FUNCTION_ARGS)
     RouteResult    route;
 
     if (PG_ARGISNULL(0))
-        ereport(ERROR, (errmsg("route_prompt: p_prompt must not be NULL")));
+        ereport(ERROR, (errmsg("parse_ask: p_prompt must not be NULL")));
     prompt_txt = PG_GETARG_TEXT_PP(0);
     prompt = text_to_cstring(prompt_txt);
 
@@ -832,7 +832,7 @@ pg_laplace_route_prompt(PG_FUNCTION_ARGS)
 }
 
 Datum
-pg_laplace_respond(PG_FUNCTION_ARGS)
+pg_laplace_recall(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     text          *prompt_txt;
@@ -860,7 +860,7 @@ pg_laplace_respond(PG_FUNCTION_ARGS)
 
     reply_buf_init(&buf);
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-        elog(ERROR, "respond: SPI_connect failed");
+        elog(ERROR, "recall: SPI_connect failed");
 
     respond_impl(prompt, context, ctx_null, &buf);
 
@@ -872,7 +872,7 @@ pg_laplace_respond(PG_FUNCTION_ARGS)
 }
 
 Datum
-pg_laplace_converse(PG_FUNCTION_ARGS)
+pg_laplace_recall_session(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     text          *prompt_txt;
@@ -915,14 +915,14 @@ pg_laplace_converse(PG_FUNCTION_ARGS)
 
         reply_buf_init(&buf);
         if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-            elog(ERROR, "converse: SPI_connect failed");
+            elog(ERROR, "recall_session: SPI_connect failed");
 
         {
             Oid   types[1] = { BYTEAOID };
             Datum args[1] = { session };
             bool  isnull;
             int   rc = SPI_execute_with_args(
-                "SELECT t.resolved_id FROM laplace.converse_turns t "
+                "SELECT t.resolved_id FROM laplace.session_topics t "
                 "WHERE t.session_id = $1 AND t.resolved_id IS NOT NULL "
                 "ORDER BY t.ord DESC LIMIT 1",
                 1, types, args, NULL, true, 1);
@@ -952,9 +952,9 @@ pg_laplace_converse(PG_FUNCTION_ARGS)
              * "  n" here silently dropped every turn's topic, killing pronoun
              * follow-up context (2026-06-10). */
             SPI_execute_with_args(
-                "INSERT INTO laplace.converse_turns (session_id, ord, prompt, resolved_id) "
+                "INSERT INTO laplace.session_topics (session_id, ord, prompt, resolved_id) "
                 "SELECT $1, COALESCE(max(t.ord), 0) + 1, $2, $3 "
-                "FROM laplace.converse_turns t WHERE t.session_id = $1",
+                "FROM laplace.session_topics t WHERE t.session_id = $1",
                 3, itypes, iargs, topic == (Datum) 0 ? "  n" : NULL, false, 0);
         }
 

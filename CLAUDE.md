@@ -53,8 +53,8 @@ holders; `locks.cmd --kill` clears the safe ones. Dead-configure debris is clear
 | `test-all.cmd` | engine + regress + app + verify-fk |
 | `refresh-substrate-module.cmd <NN_mod.sql.in> <db>` | hot-reload ONE substrate SQL module on a live DB — no rebuild, no redeploy |
 | `e2e-master.cmd [--skip-clean] [--skip-models] [--db-only]` | THE orchestrator: clean→codegen→build→deploy→DB→ladder→verify |
-| `seed-ladder.cmd` | THE witness ladder (executable mirror of `witness-manifest.json`). Knobs: `LAPLACE_LADDER_START=proof`, `LAPLACE_LADDER_DRY=1`, `LAPLACE_SKIP_{USAGE,MODELS,LEXICAL_BULK}`. NEVER copy the ladder into a new script — call this |
-| `seed-substrate.cmd` / `seed-resume-prove.cmd` / `seed-deferred-lexical.cmd` | thin callers: fresh drop+seed / resume proof path / heavy lexical — all delegate to the ladder |
+| `seed-ladder.cmd` | THE witness ladder (executable mirror of `witness-manifest.json`). Cadence = signal-dependency stack: floor→document→knowledge (uniform :ingest loop)→usage→code capstone→models. Knobs: `LAPLACE_LADDER_START=proof`, `LAPLACE_LADDER_STOP={nets,usage}`, `LAPLACE_LADDER_DRY=1`, `LAPLACE_SKIP_{USAGE,MODELS}`. NEVER copy the ladder into a new script — call this |
+| `seed-substrate.cmd` / `seed-resume-prove.cmd` | thin callers: fresh drop+seed / resume proof path — both delegate to the ladder |
 | `index-content.cmd <db> [deep\|text]` | rebuild generation content index after seeding |
 | `walk-verdict.cmd [db]` | post-deposit acceptance: rebuild consensus secondaries (B2 pair) + model-planes-audit; verdict → `build-win\verdicts\` |
 | `serve.cmd` / `converse.cmd "q"` | dev endpoint / one-shot converse query (endpoint also runs TurnWitness: served turns deposit as UserPrompt testimony) |
