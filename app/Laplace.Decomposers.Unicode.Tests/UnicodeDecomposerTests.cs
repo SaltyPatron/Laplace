@@ -152,7 +152,7 @@ public sealed class UnicodeDecomposerTests
 
     private sealed class FakeContext(ISubstrateWriter writer) : IDecomposerContext
     {
-        public string EcosystemPath => "/vault/Data/Unicode";
+        public string EcosystemPath => "/vault/Data/UCD/Public/UCD/latest";
         public ISubstrateWriter Writer { get; } = writer;
         public ISubstrateReader Reader { get; } = new NullReader();
         public Microsoft.Extensions.Logging.ILogger Logger { get; } = NullLogger.Instance;

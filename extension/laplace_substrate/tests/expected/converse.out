@@ -160,33 +160,33 @@ SELECT translation, language FROM translations(word_id('dog')) ORDER BY translat
  p           | test/lang/en
 (2 rows)
 
-SELECT reply, witnesses FROM respond('what does dog mean?');
+SELECT reply, witnesses FROM recall('what does dog mean?');
  reply | witnesses 
 -------+-----------
  G     |         2
 (1 row)
 
-SELECT reply FROM respond('synonyms of dog');
+SELECT reply FROM recall('synonyms of dog');
  reply 
 -------
  p
  h
 (2 rows)
 
-SELECT reply FROM respond('translate dog');
+SELECT reply FROM recall('translate dog');
       reply       
 ------------------
  p [test/lang/en]
  h [test/lang/de]
 (2 rows)
 
-SELECT reply FROM respond('what is zzzunknownzzz');
+SELECT reply FROM recall('what is zzzunknownzzz');
                      reply                      
 ------------------------------------------------
  I hold no consensus about "zzzunknownzzz" yet.
 (1 row)
 
-SELECT reply FROM respond('translate h');
+SELECT reply FROM recall('translate h');
                     reply                     
 ----------------------------------------------
  I hold "h" but no translation consensus yet.
@@ -200,7 +200,7 @@ SELECT word FROM prompt_state('what is a Dog') ORDER BY ord;
 
 SELECT support,
        object_id = laplace_hash128_blake3('test/converse/lang_en') AS is_lang_en
-FROM expansion(ARRAY[word_id('dog'), word_id('p')])
+FROM shared_objects(ARRAY[word_id('dog'), word_id('p')])
 LIMIT 1;
  support | is_lang_en 
 ---------+------------
@@ -249,7 +249,7 @@ SELECT realize_path(ARRAY[laplace_hash128_blake3('test/converse/synset1'),
  p —is a→ c
 (1 row)
 
-SELECT type, fact, witnesses FROM describe(word_id('dog'));
+SELECT type, fact, witnesses FROM salient_facts(word_id('dog'));
        type        |     fact      | witnesses 
 -------------------+---------------+-----------
  has definition    | G             |         2
@@ -262,7 +262,7 @@ SELECT type, fact, witnesses FROM describe(word_id('dog'));
  is translation of | h             |         2
 (8 rows)
 
-SELECT reply FROM respond('antonyms of dog');
+SELECT reply FROM recall('antonyms of dog');
  reply 
 -------
  h
@@ -274,13 +274,13 @@ SELECT fact FROM related_in(laplace_hash128_blake3('test/converse/synset1'), rel
  h
 (1 row)
 
-SELECT reply FROM respond('is a dog a c?');
+SELECT reply FROM recall('is a dog a c?');
       reply       
 ------------------
  Yes — p —is a→ c
 (1 row)
 
-SELECT reply FROM respond('is h a c?');
+SELECT reply FROM recall('is h a c?');
                   reply                  
 -----------------------------------------
  No witnessed IS_A path from "h" to "c".
@@ -288,46 +288,46 @@ SELECT reply FROM respond('is h a c?');
 
 SELECT g.step, type_label(g.type_id) AS rel_type,
        g.entity_id = laplace_hash128_blake3('test/converse/synset2') AS is_synset2
-FROM generate_greedy(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A')) g;
+FROM walk_strongest(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A')) g;
  step | rel_type | is_synset2 
 ------+----------+------------
     1 | is a     | t
 (1 row)
 
 SELECT count(*) AS tree_nodes
-FROM generate_tree(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A'), 4, 5);
+FROM walk_branches(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A'), 4, 5);
  tree_nodes 
 ------------
           1
 (1 row)
 
-SELECT reply, eff_mu FROM respond('walk p');
+SELECT reply, eff_mu FROM recall('walk p');
              reply             |  eff_mu  
 -------------------------------+----------
  p —has language→ test/lang/en | 1690.000
 (1 row)
 
-SELECT reply, witnesses FROM converse('what does dog mean?', convert_to('s1', 'UTF8'));
+SELECT reply, witnesses FROM recall_session('what does dog mean?', convert_to('s1', 'UTF8'));
  reply | witnesses 
 -------+-----------
  G     |         2
 (1 row)
 
-SELECT reply FROM converse('what about its synonyms?', convert_to('s1', 'UTF8'));
+SELECT reply FROM recall_session('what about its synonyms?', convert_to('s1', 'UTF8'));
  reply 
 -------
  p
  h
 (2 rows)
 
-SELECT reply, witnesses FROM converse('and its causes?', convert_to('s1', 'UTF8'));
+SELECT reply, witnesses FROM recall_session('and its causes?', convert_to('s1', 'UTF8'));
  reply | witnesses 
 -------+-----------
  h     |         2
 (1 row)
 
 SELECT ord, prompt, resolved_id = word_id('dog') AS topic_is_dog
-FROM converse_turns WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
+FROM session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
  ord |          prompt          | topic_is_dog 
 -----+--------------------------+--------------
    1 | what does dog mean?      | t
@@ -335,7 +335,7 @@ FROM converse_turns WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
    3 | and its causes?          | t
 (3 rows)
 
-SELECT plane AS reason_plane FROM reason(word_id('dog'), word_id('h'));
+SELECT plane AS reason_plane FROM relate_path(word_id('dog'), word_id('h'));
  reason_plane 
 --------------
 (0 rows)
@@ -353,14 +353,14 @@ FROM epistemic_status(word_id('dog')) WHERE type = 'is a';
  t
 (1 row)
 
-SELECT plane AS rel_plane, usage AS rel_usage FROM relatedness(word_id('dog'), word_id('h'));
+SELECT plane AS rel_plane, usage AS rel_usage FROM relation_summary(word_id('dog'), word_id('h'));
  rel_plane | rel_usage 
 -----------+-----------
            |         0
 (1 row)
 
 SELECT reply LIKE '%antonym%' AS related_reply_mentions_antonym
-FROM respond('how are dog and h related');
+FROM recall('how are dog and h related');
  related_reply_mentions_antonym 
 --------------------------------
  f
@@ -390,7 +390,7 @@ FROM isa_path(word_id('dog'), word_id('c'));
 (1 row)
 
 SELECT reply LIKE 'Yes%' AS cascade_via_isa
-FROM respond('is a dog a c?');
+FROM recall('is a dog a c?');
  cascade_via_isa 
 -----------------
  t
@@ -399,7 +399,7 @@ FROM respond('is a dog a c?');
 -- NULL session must default to the backend-pid session (the converse.cmd path);
 -- this branch is otherwise unreachable from tests that pass sessions explicitly
 SELECT count(*) >= 1 AS null_session_converse_runs
-FROM converse('what does dog mean?');
+FROM recall_session('what does dog mean?');
  null_session_converse_runs 
 ----------------------------
  t

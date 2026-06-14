@@ -73,8 +73,8 @@ public sealed class SharedContentStageParityTests
     [InlineData("ab", 2)]
     [InlineData("A", 1)]
     [InlineData("̐", 1)]                // U+0310, lone combining mark
-    [InlineData("ç", 1)]                // precomposed
-    [InlineData("ç", 1)]               // c + U+0327: 2 codepoints, 1 grapheme
+    [InlineData("\u00e7", 1)]   // precomposed c-cedilla U+00E7: 1 codepoint, 1 grapheme
+    [InlineData("c\u0327", 1)] // decomposed c + U+0327 combining cedilla: 2 codepoints, 1 grapheme
     public void RootTier_Is_The_Natural_Unit(string s, int expected)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(s);

@@ -213,7 +213,9 @@ corpus_vocab_intern(GenCorpus *c, const char key[16])
             MemoryContext old = MemoryContextSwitchTo(c->cxt);
 
             c->vocab_cap *= 2;
-            c->ids = (char (*)[16]) repalloc(c->ids, sizeof(char[16]) * c->vocab_cap);
+            /* repalloc_huge: distinct-entity id table exceeds the 1GB palloc cap on
+             * a large substrate (the 96GB box holds it; the cap is the only limit). */
+            c->ids = (char (*)[16]) repalloc_huge(c->ids, sizeof(char[16]) * (Size) c->vocab_cap);
             MemoryContextSwitchTo(old);
         }
         ve->id = c->n_vocab;
@@ -310,7 +312,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
                 if (n_nodes == node_cap)
                 {
                     node_cap *= 2;
-                    meta = (NodeMeta *) repalloc(meta, sizeof(NodeMeta) * node_cap);
+                    meta = (NodeMeta *) repalloc_huge(meta, sizeof(NodeMeta) * (Size) node_cap);
                 }
                 pn->idx = n_nodes;
                 meta[n_nodes].first_edge = -1;
@@ -327,7 +329,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
                 if (n_nodes == node_cap)
                 {
                     node_cap *= 2;
-                    meta = (NodeMeta *) repalloc(meta, sizeof(NodeMeta) * node_cap);
+                    meta = (NodeMeta *) repalloc_huge(meta, sizeof(NodeMeta) * (Size) node_cap);
                     /* pn may have moved with meta only; node hash entries are stable */
                 }
                 cn->idx = n_nodes;
@@ -352,7 +354,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
             if (n_edges == edge_cap)
             {
                 edge_cap *= 2;
-                edges = (CorpusEdge *) repalloc(edges, sizeof(CorpusEdge) * edge_cap);
+                edges = (CorpusEdge *) repalloc_huge(edges, sizeof(CorpusEdge) * (Size) edge_cap);
             }
             edges[n_edges].child = cidx;
             edges[n_edges].run = (run < 1) ? 1 : run;
@@ -376,8 +378,8 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
         int         depth;
         int32       root;
 
+        node_ids = (char (*)[16]) MemoryContextAllocHuge(walk_cxt, sizeof(char[16]) * (Size) Max(n_nodes, 1));
         old = MemoryContextSwitchTo(walk_cxt);
-        node_ids = (char (*)[16]) palloc(sizeof(char[16]) * Max(n_nodes, 1));
         stack = (WalkFrame *) palloc(sizeof(WalkFrame) * CORPUS_WALK_DEPTH_CAP);
         MemoryContextSwitchTo(old);
 
@@ -420,7 +422,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
                             {
                                 old = MemoryContextSwitchTo(walk_cxt);
                                 raw_cap *= 2;
-                                raw = (int32 *) repalloc(raw, sizeof(int32) * raw_cap);
+                                raw = (int32 *) repalloc_huge(raw, sizeof(int32) * (Size) raw_cap);
                                 MemoryContextSwitchTo(old);
                             }
                             raw[raw_len++] = vid;
@@ -454,7 +456,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
             {
                 old = MemoryContextSwitchTo(walk_cxt);
                 raw_cap *= 2;
-                raw = (int32 *) repalloc(raw, sizeof(int32) * raw_cap);
+                raw = (int32 *) repalloc_huge(raw, sizeof(int32) * (Size) raw_cap);
                 MemoryContextSwitchTo(old);
             }
             raw[raw_len++] = GEN_SENTINEL;
@@ -467,48 +469,65 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
     old = MemoryContextSwitchTo(walk_cxt);
     is_sep = (uint8 *) palloc0((Size) Max(c->n_vocab, 1));
     MemoryContextSwitchTo(old);
+    /* CHUNKED so the bytea[] passed to SQL never approaches the 1GB array cap on a
+     * large distinct-entity set: classify SEP_CHUNK ids per SPI call, freeing the
+     * per-chunk byteas between batches; the query's ordinal is chunk-local, so the
+     * chunk base maps it back to the global vocab index. */
     if (c->n_vocab > 0)
     {
-        Datum     *elems = (Datum *) palloc(sizeof(Datum) * c->n_vocab);
-        ArrayType *arr;
-        Oid        argtypes[1] = { BYTEAARRAYOID };
-        Datum      args[1];
-        int        rc;
+        const int32   SEP_CHUNK = 2 * 1024 * 1024;
+        Oid           argtypes[1] = { BYTEAARRAYOID };
+        MemoryContext sep_cxt = AllocSetContextCreate(walk_cxt,
+                                    "laplace corpus separator chunk",
+                                    ALLOCSET_DEFAULT_SIZES);
 
-        for (int32 i = 0; i < c->n_vocab; i++)
+        for (int32 base = 0; base < c->n_vocab; base += SEP_CHUNK)
         {
-            bytea *b = (bytea *) palloc(VARHDRSZ + 16);
+            int32      len = Min(SEP_CHUNK, c->n_vocab - base);
+            Datum     *elems;
+            ArrayType *arr;
+            Datum      args[1];
+            int        rc;
+            MemoryContext old2 = MemoryContextSwitchTo(sep_cxt);
 
-            SET_VARSIZE(b, VARHDRSZ + 16);
-            memcpy(VARDATA(b), c->ids[i], 16);
-            elems[i] = PointerGetDatum(b);
-        }
-        arr = construct_array(elems, c->n_vocab, BYTEAOID, -1, false, TYPALIGN_INT);
-        args[0] = PointerGetDatum(arr);
-
-        rc = SPI_execute_with_args(CORPUS_SEPARATOR_QUERY, 1, argtypes, args,
-                                   NULL, true, 0);
-        if (rc != SPI_OK_SELECT)
-            elog(ERROR, "trajectory_stream: separator classification failed: %s",
-                 SPI_result_code_string(rc));
-        for (uint64 r = 0; r < SPI_processed; r++)
-        {
-            bool  isnull;
-            int32 ord = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[r],
-                                                    SPI_tuptable->tupdesc, 1, &isnull));
-
-            if (ord >= 0 && ord < c->n_vocab)
+            elems = (Datum *) palloc(sizeof(Datum) * len);
+            for (int32 i = 0; i < len; i++)
             {
-                is_sep[ord] = 1;
-                c->separators++;
+                bytea *b = (bytea *) palloc(VARHDRSZ + 16);
+
+                SET_VARSIZE(b, VARHDRSZ + 16);
+                memcpy(VARDATA(b), c->ids[base + i], 16);
+                elems[i] = PointerGetDatum(b);
             }
+            arr = construct_array(elems, len, BYTEAOID, -1, false, TYPALIGN_INT);
+            args[0] = PointerGetDatum(arr);
+            MemoryContextSwitchTo(old2);
+
+            rc = SPI_execute_with_args(CORPUS_SEPARATOR_QUERY, 1, argtypes, args,
+                                       NULL, true, 0);
+            if (rc != SPI_OK_SELECT)
+                elog(ERROR, "trajectory_stream: separator classification failed: %s",
+                     SPI_result_code_string(rc));
+            for (uint64 r = 0; r < SPI_processed; r++)
+            {
+                bool  isnull;
+                int32 ord = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[r],
+                                                        SPI_tuptable->tupdesc, 1, &isnull));
+
+                if (ord >= 0 && ord < len)
+                {
+                    is_sep[base + ord] = 1;
+                    c->separators++;
+                }
+            }
+            SPI_freetuptable(SPI_tuptable);
+            MemoryContextReset(sep_cxt);
         }
+        MemoryContextDelete(sep_cxt);
     }
 
     /* 4) compact (drop separators, collapse empty sequences) + suffix array */
-    old = MemoryContextSwitchTo(cxt);
-    c->stream = (int32 *) palloc(sizeof(int32) * (Size) (raw_len + 2));
-    MemoryContextSwitchTo(old);
+    c->stream = (int32 *) MemoryContextAllocHuge(cxt, sizeof(int32) * (Size) (raw_len + 2));
     {
         bool at_boundary = true;
 
@@ -534,19 +553,32 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
             c->stream[c->stream_len++] = GEN_SENTINEL;
     }
 
-    old = MemoryContextSwitchTo(cxt);
-    c->suffix = (int32 *) palloc(sizeof(int32) * (Size) Max(c->stream_len, 1));
-    MemoryContextSwitchTo(old);
-    for (int32 i = 0; i < c->stream_len; i++)
-        if (c->stream[i] != GEN_SENTINEL)
-            c->suffix[c->n_suffix++] = i;
-
-    cmp_stream = c->stream;
-    cmp_len    = c->stream_len;
-    qsort(c->suffix, c->n_suffix, sizeof(int32), suffix_cmp);
+    /* The suffix array is the GENERATION index (continuations binary-search), an
+     * O(n·depth) sort over hundreds of millions of suffixes. The trajectory-pair
+     * scans (cooccurrence_scan, the foundry's order ladder) need only c->stream, so
+     * the index is built LAZILY on first generation call — a pour never pays for it. */
+    c->suffix = NULL;
+    c->n_suffix = 0;
 
     MemoryContextDelete(walk_cxt);
     gen_corpus = c;
+}
+
+/* Build the generation suffix index on demand (idempotent): only walk_continuations
+ * needs it; cooccurrence/foundry scans skip it entirely. */
+static void
+corpus_ensure_suffix(GenCorpus *c)
+{
+    if (c->suffix != NULL)
+        return;
+    c->suffix = (int32 *) MemoryContextAllocHuge(c->cxt, sizeof(int32) * (Size) Max(c->stream_len, 1));
+    c->n_suffix = 0;
+    for (int32 i = 0; i < c->stream_len; i++)
+        if (c->stream[i] != GEN_SENTINEL)
+            c->suffix[c->n_suffix++] = i;
+    cmp_stream = c->stream;
+    cmp_len    = c->stream_len;
+    qsort(c->suffix, c->n_suffix, sizeof(int32), suffix_cmp);
 }
 
 static GenCorpus *
@@ -586,6 +618,7 @@ pg_laplace_stream_stats(PG_FUNCTION_ARGS)
     if (SPI_connect() != SPI_OK_CONNECT)
         elog(ERROR, "stream_stats: SPI_connect failed");
     c = corpus_ensure();
+    corpus_ensure_suffix(c);   /* the warm verb fully warms: positions = n_suffix */
     SPI_finish();
 
     max_ts = (TimestampTz) c->probe_max_us
@@ -634,6 +667,11 @@ pg_laplace_cooccurrence_scan(PG_FUNCTION_ARGS)
     int              win_len = 0;
     HASH_SEQ_STATUS  seq;
     StreamPairEntry *e;
+    /* optional vocab bound (the ETL extract filter): when a vocab array is given,
+     * only pairs whose BOTH endpoints are in it are counted and emitted, so the
+     * hash and the output are bounded by the requested vocab, never the whole
+     * stream's all-pairs. NULL/absent = the full unbounded scan (back-compat). */
+    bool            *in_vocab = NULL;
 
     if (max_gap < 1 || max_gap > 64)
         ereport(ERROR, (errmsg("cooccurrence_scan: max_gap must be 1..64 (got %d)", max_gap)));
@@ -667,6 +705,30 @@ pg_laplace_cooccurrence_scan(PG_FUNCTION_ARGS)
     c = corpus_ensure();
     SPI_finish();
 
+    /* build the in-vocab mask from the optional bytea[] arg (the bounded extract) */
+    if (PG_NARGS() >= 2 && !PG_ARGISNULL(1))
+    {
+        ArrayType *va = PG_GETARG_ARRAYTYPE_P(1);
+        Datum     *elems;
+        bool      *elnulls;
+        int        nelems;
+
+        in_vocab = (bool *) palloc0(sizeof(bool) * (c->n_vocab > 0 ? c->n_vocab : 1));
+        deconstruct_array(va, BYTEAOID, -1, false, 'i', &elems, &elnulls, &nelems);
+        for (int k = 0; k < nelems; k++)
+        {
+            bytea      *b;
+            VocabEntry *ve;
+
+            if (elnulls[k]) continue;
+            b = DatumGetByteaPP(elems[k]);
+            if (VARSIZE_ANY_EXHDR(b) != 16) continue;
+            ve = (VocabEntry *) hash_search(c->vocab, VARDATA_ANY(b), HASH_FIND, NULL);
+            if (ve != NULL && ve->id < c->n_vocab)
+                in_vocab[ve->id] = true;
+        }
+    }
+
     for (int32 i = 0; i < c->stream_len; i++)
     {
         int32 tok = c->stream[i];
@@ -677,14 +739,21 @@ pg_laplace_cooccurrence_scan(PG_FUNCTION_ARGS)
             continue;
         }
 
+        /* object out of vocab: no in-vocab pair can end here — skip counting, but
+         * still slide the window so gap distances over the kept tokens stay exact. */
+        if (in_vocab == NULL || in_vocab[tok])
         for (int d = 1; d <= win_len; d++)
         {
             StreamPairKey    key;
             StreamPairEntry *ent;
             bool             found;
+            int32            subj = win[win_len - d];
+
+            if (in_vocab != NULL && !in_vocab[subj])
+                continue;
 
             memset(&key, 0, sizeof(key));
-            key.subject = win[win_len - d];
+            key.subject = subj;
             key.object = tok;
             key.gap = d;
             ent = (StreamPairEntry *) hash_search(pairs, &key, HASH_ENTER, &found);

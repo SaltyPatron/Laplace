@@ -40,6 +40,10 @@ BEGIN
     EXECUTE 'DROP PROCEDURE IF EXISTS @extschema@.rebuild_content_index(int)';
     EXECUTE 'DROP PROCEDURE IF EXISTS @extschema@.rebuild_content_index_deep()';
     EXECUTE 'DROP PROCEDURE IF EXISTS @extschema@.rebuild_content_pairs(int)';
+    -- retired foundry-export experiments: the export reads consensus (foundry_vocab +
+    -- entity_relation_plane), it does not re-fold trajectories at export time.
+    EXECUTE 'DROP FUNCTION IF EXISTS @extschema@.entity_trajectory_plane(bytea[], int, int)';
+    EXECUTE 'DROP FUNCTION IF EXISTS @extschema@.cooccurrence_scan(int, bytea[])';
 END $do$;
 
 -- trajectory-stream observability + warm verb: building the stream IS the warm-up; the
@@ -54,6 +58,10 @@ CREATE OR REPLACE FUNCTION stream_stats(
 -- Trajectory pairs straight from the trajectory stream (word-stride by
 -- construction): one walk, sliding window, in-memory hash aggregation —
 -- engine computes, SQL orchestrates.
+-- Native trajectory-pair scan: the GENERATION co-occurrence surface (relation_plane
+-- 'traj', trajectory_cooccurrence). The foundry's order ladder does NOT use this — it
+-- reads the trajectories set-based in SQL (entity_trajectory_plane). One walk over the
+-- per-backend stream, in-memory hash aggregation.
 CREATE OR REPLACE FUNCTION cooccurrence_scan(p_max_gap int)
     RETURNS TABLE(gap int, subject_id bytea, object_id bytea, cnt bigint)
     AS 'MODULE_PATHNAME', 'pg_laplace_cooccurrence_scan'
@@ -177,6 +185,41 @@ CREATE OR REPLACE FUNCTION entity_relation_plane(
              FROM edges e
          )
     SELECT c.subject_id, c.object_id, c.w FROM capped c WHERE c.rn <= p_degree_cap
+$$;
+
+-- The foundry's TOKEN LIST, selected from the substrate's own entities (the invention's
+-- "selectable token list"). Ranked by CONSENSUS RICHNESS over the relations the operators
+-- pour from — similarity/relation (so the basis carries geometry: content words with
+-- IS_A / IS_SYNONYM_OF / RELATED_TO edges) plus PRECEDES (the folded order, for fluency).
+-- Renderable, non-whitespace, distinct surfaces; weight = total degree (the SPM score).
+-- One set-based read; the CLI calls THIS, never ad-hoc SQL.
+CREATE OR REPLACE FUNCTION foundry_vocab(p_size int)
+    RETURNS TABLE(entity_id bytea, surface text, weight bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH src(tid) AS (
+        SELECT relation_type_id(n) FROM unnest(ARRAY[
+            'IS_SYNONYM_OF','IS_A','RELATED_TO','DERIVATIONALLY_RELATED','HAS_PART',
+            'OBJECT_USE','IS_COORDINATE_TERM_WITH','IS_SIMILAR_TO','IS_ANTONYM_OF',
+            'HAS_HYPERNYM','PRECEDES']) AS n
+    ),
+    deg AS (
+        SELECT c.subject_id, count(*) AS d
+        FROM consensus c JOIN src ON src.tid = c.type_id
+        WHERE c.object_id IS NOT NULL
+        GROUP BY c.subject_id
+    ),
+    named AS (
+        SELECT d.subject_id, d.d, render_text(d.subject_id, 64) AS s
+        FROM deg d ORDER BY d.d DESC LIMIT p_size * 3
+    ),
+    clean AS (
+        SELECT DISTINCT ON (n.s) n.subject_id, n.s, n.d
+        FROM named n
+        WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT is_all_whitespace(n.s)
+        ORDER BY n.s, n.d DESC
+    )
+    SELECT c.subject_id, c.s, c.d FROM clean c ORDER BY c.d DESC LIMIT p_size
 $$;
 
 -- native kernel ----------------------------------------------------------------

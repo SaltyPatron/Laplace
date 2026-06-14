@@ -188,6 +188,85 @@ internal static class FoundryExport
         return new PlaneCoo(rows, cols, vals);
     }
 
+    // Vocab-bounded trajectory ORDER LADDER in ONE walk: entity_trajectory_plane
+    // masks both endpoints to the vocab inside the native scan and emits forward
+    // co-occurrence at every gap 1..maxGap, degree-capped per (subject, gap). We
+    // stream the single result and split it into per-gap adjacency — no per-gap
+    // re-walk, no all-pairs materialization. Returns planes[0..maxGap-1] (gap g → [g-1]).
+    internal static async Task<PlaneCoo[]> ReadTrajectoryLadderAsync(
+        NpgsqlDataSource ds, int maxGap,
+        Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
+
+        // adj[g] : subject ordinal -> (object ordinal, w)
+        var adj = new Dictionary<int, List<(int Col, double W)>>[maxGap];
+        for (int g = 0; g < maxGap; g++) adj[g] = new Dictionary<int, List<(int, double)>>();
+
+        await using var conn = await ds.OpenConnectionAsync();
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandTimeout = 0;   // the per-backend corpus build walks the whole stream once
+            cmd.CommandText =
+                "SELECT gap, subject_id, object_id, w FROM laplace.entity_trajectory_plane($1, $2, $3)";
+            cmd.Parameters.Add(new NpgsqlParameter
+                { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            cmd.Parameters.AddWithValue(maxGap);
+            cmd.Parameters.AddWithValue(degreeCap);
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                int g = rdr.GetInt32(0);
+                if (g < 1 || g > maxGap) continue;
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var subj)) continue;
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[2]), out var obj)) continue;
+                double w = rdr.GetDouble(3);
+                if (w == 0.0) continue;
+                var a = adj[g - 1];
+                foreach (int s in subj)
+                {
+                    if (!a.TryGetValue(s, out var row)) a[s] = row = new List<(int, double)>(8);
+                    foreach (int o in obj) row.Add((o, w));
+                }
+            }
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine($"  (trajectory ladder unavailable: {ex.SqlState} — skipped)");
+            return Enumerable.Range(0, maxGap).Select(_ => PlaneCoo.Empty).ToArray();
+        }
+
+        var planes = new PlaneCoo[maxGap];
+        for (int g = 0; g < maxGap; g++) planes[g] = CooFromAdj(adj[g], degreeCap);
+        return planes;
+    }
+
+    // Canonical-order COO from a subject->(object,w) adjacency, degree-capped by |w|.
+    // Shared by the bounded readers so the cast law (same consensus + same mold =>
+    // same bytes) holds regardless of DB scan order.
+    private static PlaneCoo CooFromAdj(Dictionary<int, List<(int Col, double W)>> adj, int degreeCap)
+    {
+        long kept = 0;
+        foreach (var row in adj.Values)
+        {
+            row.Sort((a, b) =>
+            {
+                int c = Math.Abs(b.W).CompareTo(Math.Abs(a.W));
+                return c != 0 ? c : a.Col.CompareTo(b.Col);
+            });
+            if (row.Count > degreeCap) row.RemoveRange(degreeCap, row.Count - degreeCap);
+            kept += row.Count;
+        }
+        var rows = new int[kept]; var cols = new int[kept]; var vals = new double[kept];
+        long at = 0;
+        foreach (var r in adj.Keys.OrderBy(k => k))
+            foreach (var (c, w) in adj[r]) { rows[at] = r; cols[at] = c; vals[at] = w; at++; }
+        return new PlaneCoo(rows, cols, vals);
+    }
+
     // Per-plane scale normalization (max |w| → 1) so μ-weighted consensus planes
     // and frequency-weighted trajectory planes union into operators at comparable
     // magnitude. Relative structure within each plane is untouched.
@@ -315,8 +394,15 @@ internal static class FoundryExport
         for (int i = 0; i < vocab; i++)
             Array.Copy(y, (long)i * k, e, (long)i * dModel, k);
 
-        // Deterministic capacity dims: seeded Gaussian columns at spectral magnitude.
-        double capScale = 0.5 / Math.Sqrt(vocab);
+        // Deterministic capacity dims: seeded Gaussian columns that give the embedding
+        // full rank WITHOUT drowning the spectral geometry. The GSO'd spectral block has
+        // per-row energy ≈ k/vocab; size the capacity block to carry only capFrac of that
+        // total, so ≥(1-capFrac) of each normalized row is consensus structure (otherwise
+        // 1792 random dims at spectral magnitude out-energize the 256 real dims and the
+        // similarity cosine washes to noise — measured: +0.05σ → the geometry vanishes).
+        double capFrac = EnvDouble("LAPLACE_FOUNDRY_CAP_FRAC", 0.05);
+        int capDims = Math.Max(1, dModel - 1 - k);
+        double capScale = Math.Sqrt(capFrac * ((double)k / vocab) / capDims);
         for (int d = k; d < dModel - 1; d++)
         {
             ulong s = SplitMix(unchecked((ulong)seed.Hi) ^ (ulong)d);
