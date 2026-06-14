@@ -420,15 +420,17 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider, I
     private void EnsureUcdProperties(IDecomposerContext context)
     {
         if (_ucd is not null) return;
-        string ucdDir = Path.Combine(context.EcosystemPath, "Public", UnicodeVersion, "ucd");
+        // EcosystemPath is the UCD version root (contains ucd/ ucdxml/ uca/) — same convention as
+        // the build's LAPLACE_UCD_PATH; the proper source is D:\Data\Ingest\UCD\Public\UCD\latest.
+        string ucdDir = Path.Combine(context.EcosystemPath, "ucd");
         _ucd = UcdProperties.Load(ucdDir);
     }
 
     private (string xml, string duc) ResolveSource(IDecomposerContext context)
     {
         string baseDir = context.EcosystemPath;
-        string xml = _ucdxmlZip ?? Path.Combine(baseDir, "Public", UnicodeVersion, "ucdxml", "ucd.nounihan.flat.zip");
-        string duc = _ducet    ?? Path.Combine(baseDir, "Public", UnicodeVersion, "uca", "allkeys.txt");
+        string xml = _ucdxmlZip ?? Path.Combine(baseDir, "ucdxml", "ucd.nounihan.flat.zip");
+        string duc = _ducet    ?? Path.Combine(baseDir, "uca", "allkeys.txt");
         return (xml, duc);
     }
 }

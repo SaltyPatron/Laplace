@@ -23,4 +23,22 @@ public interface ISubstrateWriter
         }
         return new ApplyResult(ea, ei, pa, pi, aa, ai, rt, wall, allShort);
     }
+
+    /// <summary>
+    /// Append-only bulk commit: stage rows for <paramref name="sourceId"/> without touching the
+    /// live tables, to be merged in one set operation by <see cref="FinalizeSourceAsync"/>.
+    /// Default falls back to the immediate <see cref="ApplyManyAsync"/> path (writers that have no
+    /// staging just apply now), so callers can always use append/finalize uniformly.
+    /// </summary>
+    Task<ApplyResult> AppendAsync(
+        IReadOnlyList<SubstrateChange> changes, Hash128 sourceId, CancellationToken ct = default)
+        => ApplyManyAsync(changes, ct);
+
+    /// <summary>
+    /// Merge a source's staged rows into the live tables in one pass (dedup entities/physicalities,
+    /// fold attestation observation counts). Default is a no-op for writers that apply immediately.
+    /// </summary>
+    Task<(int Entities, int Physicalities, int Attestations)> FinalizeSourceAsync(
+        Hash128 sourceId, CancellationToken ct = default)
+        => Task.FromResult((0, 0, 0));
 }

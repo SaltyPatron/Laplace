@@ -328,7 +328,7 @@ CREATE OR REPLACE FUNCTION consensus_fold_partition(
 -- (subject, type, layer-context), vertices mantissa-packed (object reference +
 -- games + zigzagged score — the testimony-vertex payload, mantissa.h). The
 -- journal is subject-grouped by construction, so the fold needs NO global
--- sort: per subject, merge its walks' objects in a vocab-bounded map, ONE
+-- sort: per subject, merge its walks' objects in a distinct-entities-bounded map, ONE
 -- Glicko period per relation (the period rule), emit. Partitioned by
 -- subject.lo %% nparts — the gather unit — NOT consensus_partition_of (which
 -- hashes the full identity; walks gather by subject alone).

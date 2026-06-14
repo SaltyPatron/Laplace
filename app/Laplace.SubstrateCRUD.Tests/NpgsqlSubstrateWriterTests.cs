@@ -197,6 +197,61 @@ public class NpgsqlSubstrateWriterTests
         Assert.Equal((byte)0b00000101, bitmap[0]);
     }
 
+    [Fact]
+    public async Task AppendThenFinalize_DedupesEntities_SumsAttestationObservations()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var src = Hash128.OfCanonical("substrate/source/test/append-finalize");
+        var typeId = await EnsureTestTypeAsync(src);
+
+        var idA = H(7001);
+        var idB = H(7002);
+        var attId = H(7100);
+
+        SubstrateChange Batch(long seedTs, long obs) =>
+            new SubstrateChangeBuilder(src, $"append-u{seedTs}")
+                .AddEntity(idA, 0, typeId)
+                .AddEntity(idB, 0, typeId)
+                .AddAttestation(new AttestationRow(
+                    Id: attId, SubjectId: idA, TypeId: typeId,
+                    ObjectId: idB, SourceId: src, ContextId: null,
+                    Outcome: AttestationOutcome.Confirm,
+                    LastObservedAtUnixUs: IntentStage.PgEpochUnixUs + seedTs,
+                    ObservationCount: obs,
+                    ScoreFp1e9: 1_000_000_000L,
+                    OpponentRdFp1e9: 30_000_000_000L))
+                .Build();
+
+        // Two batches: entities duplicated across both, attestation re-observed (3 then 5).
+        var r1 = await writer.AppendAsync(new[] { Batch(1, 3) }, src);
+        var r2 = await writer.AppendAsync(new[] { Batch(2, 5) }, src);
+        Assert.Equal(2, r1.EntitiesInserted);
+        Assert.Equal(2, r2.EntitiesInserted);
+
+        // Append is staged only — nothing in the live tables yet.
+        Assert.Equal(0L, await CountLiveEntitiesAsync(idA, idB));
+
+        var merged = await writer.FinalizeSourceAsync(src);
+        Assert.Equal(2, merged.Entities);       // idA, idB deduped from 4 staged rows
+        Assert.Equal(1, merged.Attestations);   // one attestation id
+
+        Assert.Equal(2L, await CountLiveEntitiesAsync(idA, idB));
+
+        await using var cmd = _pg.DataSource.CreateCommand(
+            "SELECT observation_count FROM laplace.attestations WHERE id = $1");
+        cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, attId.ToBytes());
+        Assert.Equal(8L, (long)(await cmd.ExecuteScalarAsync())!);   // 3 + 5
+    }
+
+    private async Task<long> CountLiveEntitiesAsync(Hash128 a, Hash128 b)
+    {
+        await using var cmd = _pg.DataSource.CreateCommand(
+            "SELECT count(*) FROM laplace.entities WHERE id = ANY($1::bytea[])");
+        var p = cmd.Parameters.AddWithValue(new[] { a.ToBytes(), b.ToBytes() });
+        p.NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea;
+        return (long)(await cmd.ExecuteScalarAsync())!;
+    }
+
     private async Task<Hash128> EnsureTestTypeAsync(Hash128 source)
     {
         var typeId = Hash128.OfCanonical("substrate/type/TestFixture/v1");

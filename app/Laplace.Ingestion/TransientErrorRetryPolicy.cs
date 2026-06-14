@@ -21,6 +21,30 @@ public sealed record TransientErrorRetryPolicy(
             JitterFraction: 0.0,
             IsTransient: static _ => false);
 
+    /// <summary>
+    /// Parallel-commit policy: retries ONLY the genuine concurrency outcomes a multi-writer
+    /// ingest provokes — 40P01 deadlock_detected and 40001 serialization_failure. Postgres
+    /// documents these as the victim's-job-to-retry; they are not bugs, so retrying is correct
+    /// handling, not masking (a persistent fault still aborts after the cap). Every other error
+    /// (referential, COPY-blob corruption, constraint) stays fail-fast. High attempt count with
+    /// jittered backoff lets contending writers de-conflict instead of livelocking.
+    /// </summary>
+    public static TransientErrorRetryPolicy ConcurrencyRetry { get; } =
+        new(MaxAttempts: 10,
+            InitialDelay: TimeSpan.FromMilliseconds(15),
+            BackoffMultiplier: 1.8,
+            JitterFraction: 0.5,
+            IsTransient: IsConcurrencyConflict);
+
+    private static bool IsConcurrencyConflict(Exception ex)
+    {
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+            if (e is global::Npgsql.PostgresException pg
+                && pg.SqlState is "40P01" or "40001")
+                return true;
+        return false;
+    }
+
     public TimeSpan DelayBeforeAttempt(int attemptIndex, Random rng)
     {
         if (attemptIndex < 0) return TimeSpan.Zero;

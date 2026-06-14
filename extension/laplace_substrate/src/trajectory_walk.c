@@ -1,24 +1,25 @@
 /*
- * generation_native.c — native autoregressive generation over the witnessed
+ * trajectory_walk.c — native stride-continuation generation over the witnessed
  * trajectories. SINGLE SOURCE: physicalities.trajectory (each vertex mantissa-
  * encodes its entity id) — there is no content_index table, no constituency_edge
- * table, no content_pairs cache. The corpus is built per backend straight from
- * the trajectory geometries: one edge scan (ST_DumpPoints + mantissa_unpack,
- * tier > 2), an explicit-stack walk from the roots down to the token floor,
- * then a suffix array over the resulting stream.
+ * table, no content_pairs cache. The trajectory stream is built per backend
+ * straight from the trajectory geometries: one edge scan (ST_DumpPoints +
+ * mantissa_unpack, tier > 2), an explicit-stack walk from the roots down to the
+ * token floor, then a suffix array over the resulting stream.
  *
  * The separator rule (word stride): whitespace tokens are witnessed content
  * (round-trip law) but are NOT units of order — they are excluded from the
- * stream, so n-gram contexts, trajectory pairs, and gap distances all count in
+ * stream, so stride contexts, trajectory pairs, and gap distances all count in
  * content-bearing strides. The display layer re-inserts separators
  * (SubstrateClient.cs) and is the single separator authority on output.
  *
- * Back-off floor: when no witnessed continuation exists at any order, the
+ * Stride descent floor: when no witnessed continuation exists at any order, the
  * COMPLETES_TO consensus supplies candidates (eff-μ weighted) — emitted with
- * ord_used = 0, the audit marker for a consensus-backed step.
+ * stride_used = 0, the audit marker for a consensus-backed step.
  *
- * Sampling is seeded (splitmix64), so a (corpus, prompt, seed) triple
- * reproduces its output exactly — generation is testimony-deterministic.
+ * Weighted selection is seeded (splitmix64), so a (trajectory stream, prompt,
+ * seed) triple reproduces its output exactly — generation is
+ * testimony-deterministic.
  *
  * Cache: TopMemoryContext child, invalidated when (count, max(observed_at)) of
  * trajectory-bearing physicalities changes.
@@ -44,11 +45,11 @@
 #include "common/pg_prng.h"
 #include "spi_common.h"
 
-PG_FUNCTION_INFO_V1(pg_laplace_generate_tokens);
-PG_FUNCTION_INFO_V1(pg_laplace_generation_cache_reset);
+PG_FUNCTION_INFO_V1(pg_laplace_walk_continuations);
+PG_FUNCTION_INFO_V1(pg_laplace_stream_reset);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_peer);
 PG_FUNCTION_INFO_V1(pg_laplace_variant_walk);
-PG_FUNCTION_INFO_V1(pg_laplace_generate_variant);
+PG_FUNCTION_INFO_V1(pg_laplace_respell_variant);
 
 #define GEN_COMPARE_CAP   64      /* suffix order depth; >= max usable context */
 #define GEN_MAX_ORDER     16
@@ -128,7 +129,7 @@ prefix_cmp(const GenCorpus *c, int32 s, const int32 *ctx, int k)
     return 0;
 }
 
-/* ── corpus build: physicalities.trajectory is the single source ───────────── */
+/* ── trajectory-stream build: physicalities.trajectory is the single source ──── */
 
 /* the witnessed constituency, one ordered edge scan: parent → (child, run),
  * parents tier > 2, the per-entity trajectory chosen deterministically
@@ -150,7 +151,7 @@ static const char *CORPUS_PROBE =
     "FROM laplace.physicalities WHERE type = 1 AND trajectory IS NOT NULL";
 
 /* whitespace-only renders are separators: witnessed in content, excluded from
- * order. One batch query per corpus build. The predicate is the engine's
+ * order. One batch query per trajectory-stream build. The predicate is the engine's
  * Unicode White_Space law (is_all_whitespace), NOT an ASCII [[:space:]] regex
  * — U+3000, NBSP, U+2000..200A are separators in every script, not word units. */
 static const char *CORPUS_SEPARATOR_QUERY =
@@ -192,7 +193,7 @@ corpus_probe(int64 *rows, int64 *max_us)
     bool isnull;
 
     if (SPI_execute(CORPUS_PROBE, true, 1) != SPI_OK_SELECT || SPI_processed == 0)
-        elog(ERROR, "generate_tokens: trajectory probe failed");
+        elog(ERROR, "trajectory_stream: trajectory probe failed");
     *rows = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0],
                                         SPI_tuptable->tupdesc, 1, &isnull));
     *max_us = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0],
@@ -299,7 +300,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
             int32     pidx, cidx;
 
             if (VARSIZE_ANY_EXHDR(pb) != 16 || VARSIZE_ANY_EXHDR(cb) != 16)
-                ereport(ERROR, (errmsg("generate_tokens: trajectory ids must be 16 bytes")));
+                ereport(ERROR, (errmsg("trajectory_stream: trajectory ids must be 16 bytes")));
 
             old = MemoryContextSwitchTo(walk_cxt);
             memcpy(key, VARDATA_ANY(pb), 16);
@@ -344,7 +345,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
             {
                 if (meta[pidx].n_edges != 0)
                     ereport(ERROR, (errmsg(
-                        "generate_tokens: trajectory edge scan not parent-grouped")));
+                        "trajectory_stream: trajectory edge scan not parent-grouped")));
                 meta[pidx].first_edge = (int32) n_edges;
                 cur_parent = pidx;
             }
@@ -364,7 +365,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
     }
     SPI_cursor_close(portal);
 
-    /* the vocab carries every LEAF; node ids live in the node hash. To map a
+    /* the distinct-entities set carries every LEAF; node ids live in the node hash. To map a
      * leaf node idx back to its 16-byte id during the walk, keep a parallel
      * id table (filled lazily from hash entries). */
     {
@@ -438,7 +439,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
 
                     if (depth + 1 >= CORPUS_WALK_DEPTH_CAP)
                         ereport(ERROR, (errmsg(
-                            "generate_tokens: constituency deeper than %d (cycle?)",
+                            "trajectory_stream: constituency deeper than %d (cycle?)",
                             CORPUS_WALK_DEPTH_CAP)));
                     depth++;
                     stack[depth].node = e->child;
@@ -462,7 +463,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
         }
     }
 
-    /* 3) separator classification, one batch query over the vocab */
+    /* 3) separator classification, one batch query over the distinct entities */
     old = MemoryContextSwitchTo(walk_cxt);
     is_sep = (uint8 *) palloc0((Size) Max(c->n_vocab, 1));
     MemoryContextSwitchTo(old);
@@ -488,7 +489,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
         rc = SPI_execute_with_args(CORPUS_SEPARATOR_QUERY, 1, argtypes, args,
                                    NULL, true, 0);
         if (rc != SPI_OK_SELECT)
-            elog(ERROR, "generate_tokens: separator classification failed: %s",
+            elog(ERROR, "trajectory_stream: separator classification failed: %s",
                  SPI_result_code_string(rc));
         for (uint64 r = 0; r < SPI_processed; r++)
         {
@@ -556,7 +557,7 @@ corpus_ensure(void)
     corpus_probe(&rows, &max_us);
     if (rows == 0)
         ereport(ERROR, (errmsg(
-            "generate_tokens: no witnessed trajectories — deposit content first")));
+            "trajectory_stream: no witnessed trajectories — deposit content first")));
     if (gen_corpus == NULL
         || gen_corpus->probe_rows != rows
         || gen_corpus->probe_max_us != max_us)
@@ -564,12 +565,12 @@ corpus_ensure(void)
     return gen_corpus;
 }
 
-/* ── corpus observability (the warm verb) ──────────────────────────────────── */
+/* ── trajectory-stream observability (the warm verb) ────────────────────────── */
 
-PG_FUNCTION_INFO_V1(pg_laplace_corpus_stats);
+PG_FUNCTION_INFO_V1(pg_laplace_stream_stats);
 
 Datum
-pg_laplace_corpus_stats(PG_FUNCTION_ARGS)
+pg_laplace_stream_stats(PG_FUNCTION_ARGS)
 {
     GenCorpus *c;
     TupleDesc  tupdesc;
@@ -579,11 +580,11 @@ pg_laplace_corpus_stats(PG_FUNCTION_ARGS)
     TimestampTz max_ts;
 
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
-        ereport(ERROR, (errmsg("corpus_stats: return type must be a row type")));
+        ereport(ERROR, (errmsg("stream_stats: return type must be a row type")));
     BlessTupleDesc(tupdesc);
 
     if (SPI_connect() != SPI_OK_CONNECT)
-        elog(ERROR, "corpus_stats: SPI_connect failed");
+        elog(ERROR, "stream_stats: SPI_connect failed");
     c = corpus_ensure();
     SPI_finish();
 
@@ -601,9 +602,9 @@ pg_laplace_corpus_stats(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
-/* ── trajectory pairs from the corpus stream (word-stride by construction) ─── */
+/* ── trajectory pairs from the trajectory stream (word-stride by construction) ─ */
 
-PG_FUNCTION_INFO_V1(pg_laplace_content_pairs_scan);
+PG_FUNCTION_INFO_V1(pg_laplace_cooccurrence_scan);
 
 typedef struct StreamPairKey
 {
@@ -619,7 +620,7 @@ typedef struct StreamPairEntry
 } StreamPairEntry;
 
 Datum
-pg_laplace_content_pairs_scan(PG_FUNCTION_ARGS)
+pg_laplace_cooccurrence_scan(PG_FUNCTION_ARGS)
 {
     int32            max_gap = PG_GETARG_INT32(0);
     ReturnSetInfo   *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
@@ -635,17 +636,17 @@ pg_laplace_content_pairs_scan(PG_FUNCTION_ARGS)
     StreamPairEntry *e;
 
     if (max_gap < 1 || max_gap > 64)
-        ereport(ERROR, (errmsg("content_pairs_scan: max_gap must be 1..64 (got %d)", max_gap)));
+        ereport(ERROR, (errmsg("cooccurrence_scan: max_gap must be 1..64 (got %d)", max_gap)));
     if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo) ||
         (rsinfo->allowedModes & SFRM_Materialize) == 0)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-             errmsg("content_pairs_scan: set-valued function called in context "
+             errmsg("cooccurrence_scan: set-valued function called in context "
                     "that cannot accept a set")));
 
     per_query = rsinfo->econtext->ecxt_per_query_memory;
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
-        ereport(ERROR, (errmsg("content_pairs_scan: return type must be a row type")));
+        ereport(ERROR, (errmsg("cooccurrence_scan: return type must be a row type")));
 
     oldctx = MemoryContextSwitchTo(per_query);
     tupstore = tuplestore_begin_heap(false, false, work_mem);
@@ -658,11 +659,11 @@ pg_laplace_content_pairs_scan(PG_FUNCTION_ARGS)
     hctl.keysize = sizeof(StreamPairKey);
     hctl.entrysize = sizeof(StreamPairEntry);
     hctl.hcxt = CurrentMemoryContext;
-    pairs = hash_create("content_pairs_scan", 4 * 1024 * 1024, &hctl,
+    pairs = hash_create("cooccurrence_scan", 4 * 1024 * 1024, &hctl,
                         HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
     if (SPI_connect() != SPI_OK_CONNECT)
-        elog(ERROR, "content_pairs_scan: SPI_connect failed");
+        elog(ERROR, "cooccurrence_scan: SPI_connect failed");
     c = corpus_ensure();
     SPI_finish();
 
@@ -730,7 +731,7 @@ pg_laplace_content_pairs_scan(PG_FUNCTION_ARGS)
     return (Datum) 0;
 }
 
-/* ── seeded sampling (splitmix64) ──────────────────────────────────────────── */
+/* ── seeded weighted selection (splitmix64) ────────────────────────────────── */
 
 static uint64
 splitmix64(uint64 *state)
@@ -818,7 +819,7 @@ continuations_collect(const GenCorpus *c, const int32 *ctx, int k,
 /* ── generation ────────────────────────────────────────────────────────────── */
 
 Datum
-pg_laplace_generate_tokens(PG_FUNCTION_ARGS)
+pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     ArrayType *ctx_arr;
@@ -834,7 +835,7 @@ pg_laplace_generate_tokens(PG_FUNCTION_ARGS)
     Continuation *cand;
 
     if (PG_ARGISNULL(0))
-        ereport(ERROR, (errmsg("generate_tokens: context must not be NULL")));
+        ereport(ERROR, (errmsg("walk_continuations: context must not be NULL")));
     ctx_arr   = PG_GETARG_ARRAYTYPE_P(0);
     steps     = PG_ARGISNULL(1) ? 24  : PG_GETARG_INT32(1);
     max_order = PG_ARGISNULL(2) ? 5   : PG_GETARG_INT32(2);
@@ -844,18 +845,18 @@ pg_laplace_generate_tokens(PG_FUNCTION_ARGS)
                                 : (uint64) PG_GETARG_INT64(5);
 
     if (steps < 1 || steps > GEN_MAX_STEPS)
-        ereport(ERROR, (errmsg("generate_tokens: steps must be in [1,%d]", GEN_MAX_STEPS)));
+        ereport(ERROR, (errmsg("walk_continuations: steps must be in [1,%d]", GEN_MAX_STEPS)));
     if (max_order < 1 || max_order > GEN_MAX_ORDER)
-        ereport(ERROR, (errmsg("generate_tokens: max_order must be in [1,%d]", GEN_MAX_ORDER)));
+        ereport(ERROR, (errmsg("walk_continuations: max_order must be in [1,%d]", GEN_MAX_ORDER)));
     if (topk < 1 || topk > 256)
-        ereport(ERROR, (errmsg("generate_tokens: topk must be in [1,256]")));
+        ereport(ERROR, (errmsg("walk_continuations: topk must be in [1,256]")));
     if (ARR_NDIM(ctx_arr) != 1 || ARR_ELEMTYPE(ctx_arr) != BYTEAOID)
-        ereport(ERROR, (errmsg("generate_tokens: context must be a 1-D bytea array")));
+        ereport(ERROR, (errmsg("walk_continuations: context must be a 1-D bytea array")));
 
     InitMaterializedSRF(fcinfo, 0);
 
     if (SPI_connect() != SPI_OK_CONNECT)
-        elog(ERROR, "generate_tokens: SPI_connect failed");
+        elog(ERROR, "walk_continuations: SPI_connect failed");
     c = corpus_ensure();
 
     deconstruct_array(ctx_arr, BYTEAOID, -1, false, TYPALIGN_INT,
@@ -897,8 +898,8 @@ pg_laplace_generate_tokens(PG_FUNCTION_ARGS)
         {
             /* The witnessed stream is silent at every order: the COMPLETES_TO
              * consensus is the floor. eff-μ in whole-μ units as the weight;
-             * ord_used = 0 marks the step as consensus-backed (the precedent
-             * walk is generate_greedy, respond_native.c). */
+             * stride_used = 0 marks the step as consensus-backed (the precedent
+             * walk is walk_strongest, recall.c). */
             static const char *FLOOR_SQL =
                 "SELECT c.object_id, "
                 "       GREATEST(laplace.eff_mu(c.rating, c.rd) / 1000000000, 1)::int8 "
@@ -918,7 +919,7 @@ pg_laplace_generate_tokens(PG_FUNCTION_ARGS)
             args[1] = Int32GetDatum(topk);
             rc = SPI_execute_with_args(FLOOR_SQL, 2, argtypes, args, NULL, true, 0);
             if (rc != SPI_OK_SELECT)
-                elog(ERROR, "generate_tokens: consensus floor probe failed: %s",
+                elog(ERROR, "walk_continuations: consensus floor probe failed: %s",
                      SPI_result_code_string(rc));
             for (uint64 r = 0; r < SPI_processed && n_cand < 256; r++)
             {
@@ -940,7 +941,7 @@ pg_laplace_generate_tokens(PG_FUNCTION_ARGS)
         if (n_cand == 0)
             break;
 
-        /* heaviest topk, then Gumbel/temperature among them */
+        /* heaviest candidate cap, then weighted draw among them */
         for (int i = 0; i < n_cand; i++)        /* partial selection sort */
         {
             int best = i;
@@ -985,7 +986,7 @@ pg_laplace_generate_tokens(PG_FUNCTION_ARGS)
 }
 
 Datum
-pg_laplace_generation_cache_reset(PG_FUNCTION_ARGS)
+pg_laplace_stream_reset(PG_FUNCTION_ARGS)
 {
     gen_corpus_free();
     PG_RETURN_BOOL(true);
@@ -1288,7 +1289,7 @@ pg_laplace_variant_walk(PG_FUNCTION_ARGS)
 }
 
 Datum
-pg_laplace_generate_variant(PG_FUNCTION_ARGS)
+pg_laplace_respell_variant(PG_FUNCTION_ARGS)
 {
     text  *node_type;
     text  *modality;
@@ -1322,11 +1323,11 @@ pg_laplace_generate_variant(PG_FUNCTION_ARGS)
     args[1] = PointerGetDatum(node_type);
 
     if (SPI_connect() != SPI_OK_CONNECT)
-        elog(ERROR, "generate_variant: SPI_connect failed");
+        elog(ERROR, "respell_variant: SPI_connect failed");
 
     rc = SPI_execute_with_args(seed_sql, 2, argtypes, args, nulls, true, 1);
     if (rc != SPI_OK_SELECT)
-        elog(ERROR, "generate_variant: seed lookup failed: %s", SPI_result_code_string(rc));
+        elog(ERROR, "respell_variant: seed lookup failed: %s", SPI_result_code_string(rc));
     if (SPI_processed == 0)
     {
         SPI_finish();

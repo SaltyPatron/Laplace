@@ -17,22 +17,12 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    private static readonly Hash128 FrameTypeId     = EntityTypeRegistry.FrameNetFrame;
-    private static readonly Hash128 FrameElemTypeId = EntityTypeRegistry.FrameNetFe;
-    private static readonly Hash128 LexUnitTypeId   = EntityTypeRegistry.FrameNetLu;
-    private static readonly Hash128 CorenessTypeId  = EntityTypeRegistry.FrameNetCoreness;
+    private static readonly Hash128 FrameTypeId    = EntityTypeRegistry.FrameNetFrame;
+    private static readonly Hash128 CorenessTypeId = EntityTypeRegistry.FrameNetCoreness;
 
-    private static Hash128 FrameId(string name)
-    {
-        string canonical = $"framenet/frame/{name}";
-        MetaNames.TryAdd(canonical, 0);
-        return Hash128.OfCanonical(canonical);
-    }
-
-    private static Hash128 FeId(string frame, string fe) => Hash128.OfCanonical($"framenet/fe/{frame}/{fe}");
-
-    private static Hash128 LuId(int luId) => Hash128.OfCanonical($"framenet/lu/{luId}");
-
+    // Frame identity = its name decomposed as content + IS_A FrameNet_Frame (shared with SemLink and
+    // the Predicate Matrix that cite the same frame name) — not a framenet/frame/{name} blob. FEs and
+    // LU lemmas are likewise content. Coreness stays a closed bootstrap vocab (like ordinal).
     private static Hash128 CorenessId(string coreType) =>
         Hash128.OfCanonical($"framenet/coreness/{coreType}");
 
@@ -129,10 +119,10 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> MetaNames = new();
-
+    // Only the closed coreness vocab needs name→id registration now; frames/FEs/LUs are content,
+    // readable via their trajectories.
     public IReadOnlyCollection<string> CanonicalNamesForReadback =>
-        [.. CorenessValues.Select(c => $"framenet/coreness/{c}"), .. MetaNames.Keys];
+        [.. CorenessValues.Select(c => $"framenet/coreness/{c}")];
 
     private static async IAsyncEnumerable<SubstrateChange> StreamFramesAsync(
         string frameDir, int batch,
@@ -164,29 +154,24 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
 
     private static void EmitFrameEntities(SubstrateChangeBuilder b, Frame frame)
     {
-        b.AddEntity(new EntityRow(FrameId(frame.Name), EntityTier.Vocabulary, FrameTypeId, Source));
-        ContentEmitter.Emit(b, frame.Name, Source);
+        // The frame anchor IS the decomposed frame name + IS_A FrameNet_Frame (this builder carries
+        // attestation capacity, so the single-pass CategoryAnchor.Emit is fine here).
+        CategoryAnchor.Emit(b, frame.Name, FrameTypeId, Source, SourceTrust.AcademicCurated);
         if (frame.Definition.Length > 0) ContentEmitter.Emit(b, frame.Definition, Source);
         foreach (var ex in frame.Examples) ContentEmitter.Emit(b, ex, Source);
 
         foreach (var fe in frame.Elements)
         {
-            b.AddEntity(new EntityRow(FeId(frame.Name, fe.Name), EntityTier.Vocabulary, FrameElemTypeId, Source));
-            ContentEmitter.Emit(b, fe.Name, Source);
+            ContentEmitter.Emit(b, fe.Name, Source);   // FE name is content (converges into the role inventory)
             if (fe.Definition.Length > 0) ContentEmitter.Emit(b, fe.Definition, Source);
         }
 
+        // LU lemma is content; the unreferenced framenet/lu/{id} blob entity is dropped.
         foreach (var lu in frame.LexUnits)
-        {
-            b.AddEntity(new EntityRow(LuId(lu.Id), EntityTier.Vocabulary, LexUnitTypeId, Source));
             ContentEmitter.Emit(b, lu.Lemma, Source);
-        }
 
         foreach (var rel in frame.Relations)
-        {
-            b.AddEntity(new EntityRow(FrameId(rel.TargetFrame), EntityTier.Vocabulary, FrameTypeId, Source));
-            ContentEmitter.Emit(b, rel.TargetFrame, Source);
-        }
+            CategoryAnchor.Emit(b, rel.TargetFrame, FrameTypeId, Source, SourceTrust.AcademicCurated);
     }
 
     // RootId here is LAWFUL re-derivation, not a ghost reference: every surface
@@ -194,7 +179,9 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
     // (the tier-witness law — witness first, then claim).
     private static void EmitFrameAttestations(SubstrateChangeBuilder b, Frame frame)
     {
-        Hash128 frameId = FrameId(frame.Name);
+        Hash128? frameAnchor = CategoryAnchor.Id(frame.Name);
+        if (frameAnchor is null) return;
+        Hash128 frameId = frameAnchor.Value;
 
         if (frame.Definition.Length > 0)
         {
@@ -225,7 +212,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
                 var feDefId = ContentEmitter.RootId(fe.Definition);
                 if (feDefId is not null)
                     b.AddAttestation(NativeAttestation.Categorical(
-                        FeId(frame.Name, fe.Name), "HAS_DEFINITION", feDefId.Value,
+                        feNameId.Value, "HAS_DEFINITION", feDefId.Value,
                         Source, SourceTrust.AcademicCurated));
             }
         }
@@ -244,9 +231,10 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
         foreach (var rel in frame.Relations)
         {
             if (!RelationTypes.TryGetValue(rel.Type, out var typeName)) continue;
-            Hash128 tgt = FrameId(rel.TargetFrame);
+            Hash128? tgt = CategoryAnchor.Id(rel.TargetFrame);
+            if (tgt is null) continue;
             b.AddAttestation(NativeAttestation.Categorical(
-                frameId, typeName, tgt, Source, SourceTrust.AcademicCurated));
+                frameId, typeName, tgt.Value, Source, SourceTrust.AcademicCurated));
         }
     }
 
@@ -265,11 +253,11 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
             {
                 var sentId = ContentEmitter.Emit(b, ann.Sentence, Source);
                 var targetId = ContentEmitter.Emit(b, ann.TargetText, Source);
-                if (sentId is not null && targetId is not null)
+                var frameId = CategoryAnchor.Emit(b, ann.FrameName, FrameTypeId, Source, SourceTrust.AcademicCurated);
+                if (sentId is not null && targetId is not null && frameId is not null)
                 {
-                    b.AddEntity(new EntityRow(FrameId(ann.FrameName), EntityTier.Vocabulary, FrameTypeId, Source));
                     b.AddAttestation(NativeAttestation.Categorical(
-                        targetId.Value, "EVOKES_FRAME", FrameId(ann.FrameName),
+                        targetId.Value, "EVOKES_FRAME", frameId.Value,
                         Source, SourceTrust.AcademicCurated, contextId: sentId.Value));
                 }
 

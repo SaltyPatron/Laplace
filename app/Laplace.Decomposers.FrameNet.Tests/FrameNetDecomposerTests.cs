@@ -112,12 +112,13 @@ public sealed class FrameNetDecomposerTests
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(FrameNetDecomposer.Source, "fixture", null);
         var giveId = ContentEmitter.Emit(b, "give", FrameNetDecomposer.Source);
-        var frameId = Hash128.OfCanonical("framenet/frame/Giving");
+        var frameId = CategoryAnchor.Id("Giving");   // frame = "Giving" decomposed as content
         Assert.NotNull(giveId);
+        Assert.NotNull(frameId);
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("EVOKES_FRAME")
             && a.SubjectId == giveId!.Value
-            && a.ObjectId == frameId);
+            && a.ObjectId == frameId!.Value);
 
         var coreCtx = Hash128.OfCanonical("framenet/coreness/Core");
         Assert.Contains(atts, a =>
@@ -150,7 +151,7 @@ public sealed class FrameNetDecomposerTests
     }
 
     [Fact]
-    public async Task Dangling_Relation_Targets_Are_Staged_As_Entities()
+    public async Task Relation_Targets_Are_Shared_Content_Anchors()
     {
         string dir = Path.Combine(Path.GetTempPath(), "fn-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(dir, "frame"));
@@ -159,31 +160,24 @@ public sealed class FrameNetDecomposerTests
         {
             var dec = new FrameNetDecomposer();
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
-            var entityIds = new HashSet<Hash128>();
             var referenced = new HashSet<Hash128>();
             await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
-            {
-                foreach (var e in change.Entities) entityIds.Add(e.Id);
                 foreach (var a in change.Attestations)
                 {
                     referenced.Add(a.SubjectId);
                     if (a.ObjectId is { } o) referenced.Add(o);
                 }
-            }
 
-            Assert.Contains(Hash128.OfCanonical("framenet/frame/Giving"), entityIds);
+            // Frames (this one and its relation targets) are content anchors now — referenced by the
+            // attestation graph (and staged natively), not per-witness framenet/frame blobs.
+            Assert.Contains(CategoryAnchor.Id("Giving")!.Value, referenced);
             foreach (var target in new[] { "Transfer", "Intentionally_act", "Commerce_scenario" })
-            {
-                var targetId = Hash128.OfCanonical($"framenet/frame/{target}");
-                Assert.Contains(targetId, referenced);
-                Assert.Contains(targetId, entityIds);
-            }
+                Assert.Contains(CategoryAnchor.Id(target)!.Value, referenced);
 
             // IDIO is deliberately unmapped in the [framenet] tagset: probationary under the
             // framenet namespace (was probationary/upos before the manifest unification).
             var idioPos = Hash128.OfCanonical("substrate/pos/probationary/framenet/IDIO/v1");
             Assert.Contains(idioPos, referenced);
-            Assert.Contains(idioPos, entityIds);
         }
         finally
         {

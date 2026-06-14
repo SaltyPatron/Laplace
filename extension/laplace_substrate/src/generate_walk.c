@@ -15,8 +15,8 @@
 #include "spi_nested.h"
 #include "perfcache_native.h"
 
-PG_FUNCTION_INFO_V1(pg_laplace_generate_tree);
-PG_FUNCTION_INFO_V1(pg_laplace_generate_greedy);
+PG_FUNCTION_INFO_V1(pg_laplace_walk_branches);
+PG_FUNCTION_INFO_V1(pg_laplace_walk_strongest);
 
 #define GENERATE_NODE_BUDGET 1000000
 
@@ -78,7 +78,7 @@ branch_array(WalkNode *nodes, int idx, bool types)
 }
 
 Datum
-pg_laplace_generate_tree(PG_FUNCTION_ARGS)
+pg_laplace_walk_branches(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     bytea  *prompt;
@@ -90,7 +90,7 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
     int    *order;
 
     if (PG_ARGISNULL(0))
-        ereport(ERROR, (errmsg("generate_tree: prompt entity must not be NULL")));
+        ereport(ERROR, (errmsg("walk_branches: prompt entity must not be NULL")));
     prompt    = PG_GETARG_BYTEA_PP(0);
     type_null = PG_ARGISNULL(1);
     if (!type_null)
@@ -98,12 +98,12 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
     max_depth = PG_ARGISNULL(2) ? 4 : PG_GETARG_INT32(2);
     beam      = PG_ARGISNULL(3) ? 5 : PG_GETARG_INT32(3);
     if (max_depth < 0 || beam < 0)
-        ereport(ERROR, (errmsg("generate_tree: depth and beam must be >= 0")));
+        ereport(ERROR, (errmsg("walk_branches: depth and beam must be >= 0")));
 
     InitMaterializedSRF(fcinfo, 0);
 
     if (SPI_connect() != SPI_OK_CONNECT)
-        elog(ERROR, "generate_tree: SPI_connect failed");
+        elog(ERROR, "walk_branches: SPI_connect failed");
     ensure_edge_plan();
 
     cap = 256;
@@ -139,7 +139,7 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
 
             rc = SPI_execute_plan(edge_plan, args, nulls, true, beam);
             if (rc != SPI_OK_SELECT)
-                elog(ERROR, "generate_tree: edge query failed: %s",
+                elog(ERROR, "walk_branches: edge query failed: %s",
                      SPI_result_code_string(rc));
 
             for (uint64 r = 0; r < SPI_processed; r++)
@@ -156,7 +156,7 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
 
                 if (n_nodes >= GENERATE_NODE_BUDGET)
                     ereport(ERROR, (errmsg(
-                        "generate_tree: node budget %d exceeded (beam %d × depth %d) — narrow the walk",
+                        "walk_branches: node budget %d exceeded (beam %d × depth %d) — narrow the walk",
                         GENERATE_NODE_BUDGET, beam, max_depth)));
                 if (n_nodes == cap)
                 {
@@ -222,7 +222,7 @@ pg_laplace_generate_tree(PG_FUNCTION_ARGS)
 }
 
 Datum
-pg_laplace_generate_greedy(PG_FUNCTION_ARGS)
+pg_laplace_walk_strongest(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     bytea  *prompt;
@@ -234,7 +234,7 @@ pg_laplace_generate_greedy(PG_FUNCTION_ARGS)
     int     n_seen, seen_cap;
 
     if (PG_ARGISNULL(0))
-        ereport(ERROR, (errmsg("generate_greedy: prompt entity must not be NULL")));
+        ereport(ERROR, (errmsg("walk_strongest: prompt entity must not be NULL")));
     prompt    = PG_GETARG_BYTEA_PP(0);
     type_null = PG_ARGISNULL(1);
     if (!type_null)
@@ -245,7 +245,7 @@ pg_laplace_generate_greedy(PG_FUNCTION_ARGS)
 
     bool spi_top = false;
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-        elog(ERROR, "generate_greedy: SPI_connect failed");
+        elog(ERROR, "walk_strongest: SPI_connect failed");
     ensure_edge_plan();
 
     seen_cap = max_depth + 1;
@@ -277,7 +277,7 @@ pg_laplace_generate_greedy(PG_FUNCTION_ARGS)
 
         rc = SPI_execute_plan(edge_plan, args, nulls, true, 1);
         if (rc != SPI_OK_SELECT)
-            elog(ERROR, "generate_greedy: edge query failed: %s",
+            elog(ERROR, "walk_strongest: edge query failed: %s",
                  SPI_result_code_string(rc));
         if (SPI_processed == 0)
         {

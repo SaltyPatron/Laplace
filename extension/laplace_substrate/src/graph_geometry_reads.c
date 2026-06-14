@@ -152,7 +152,7 @@ tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
         pfree(DatumGetPointer(args[1]));
 
         if (rc != SPI_OK_SELECT)
-            elog(ERROR, "converse_native: tax walk query failed: %s",
+            elog(ERROR, "graph_geometry_reads: tax walk query failed: %s",
                  SPI_result_code_string(rc));
 
         for (uint64 r = 0; r < SPI_processed; r++)
@@ -192,7 +192,7 @@ tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
             }
 
             if (n >= cap)
-                ereport(ERROR, (errmsg("converse_native: taxonomy walk node cap exceeded")));
+                ereport(ERROR, (errmsg("graph_geometry_reads: taxonomy walk node cap exceeded")));
 
             nodes[n].id = obj_h;
             nodes[n].depth = walk_depth;
@@ -465,7 +465,7 @@ contrast_add_fact(ContrastRow *rows, int *n, int cap,
     if (idx < 0)
     {
         if (*n >= cap)
-            ereport(ERROR, (errmsg("converse_native: contrast row cap exceeded")));
+            ereport(ERROR, (errmsg("graph_geometry_reads: contrast row cap exceeded")));
         rows[*n].type_id = *tid;
         rows[*n].object_id = *oid;
         rows[*n].mu = mu;

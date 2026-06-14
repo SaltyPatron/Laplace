@@ -19,30 +19,30 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
     internal NpgsqlDataSource DataSource => _dataSource;
 
     /// <summary>
-    /// Call the substrate's own conversational engine (<c>laplace.converse</c>), which routes the
-    /// prompt via <c>route_prompt</c> and grounds every reply line in witnessed consensus
-    /// (definitions, synonyms, relations, walks). Returns every reply row in order — converse
+    /// Call the substrate's session recall path (<c>laplace.recall_session</c>), which routes the
+    /// prompt via <c>parse_ask</c> and grounds every reply line in witnessed consensus
+    /// (definitions, synonyms, relations, walks). Returns every reply row in order — recall_session
     /// emits multiple rows for compound answers (e.g. definition + hypernym chain).
-    /// Session keeps pronoun/topic continuity across turns.
+    /// Session keeps pronoun/topic continuity across turns via the last-topic pointer.
     /// </summary>
     public async Task<IReadOnlyList<ConverseRow>> ConverseAsync(string prompt, byte[]? session, CancellationToken ct)
         => await ConverseTurnsAsync([prompt], session, ct);
 
     /// <summary>
-    /// Replay an ordered list of user turns through <c>laplace.converse</c> under a single session,
-    /// returning the reply rows of the FINAL turn. Prior turns seed converse_turns so the
+    /// Replay an ordered list of user turns through <c>laplace.recall_session</c> under a single session,
+    /// returning the reply rows of the FINAL turn. Prior turns seed session_topics so the
     /// substrate resolves follow-up pronouns ("…and its synonyms?") against the running topic —
     /// correct even for stateless OpenAI clients (Roo Code) that resend the full history each call.
     /// </summary>
     public async Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
         IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct)
     {
-        const string sql = "SELECT reply, eff_mu, witnesses FROM laplace.converse(@p, @s);";
+        const string sql = "SELECT reply, eff_mu, witnesses FROM laplace.recall_session(@p, @s);";
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            // A single connection = a single backend, so converse's session memory is consistent
-            // across the replay even when @s is NULL (it falls back to the backend pid).
+            // A single connection = a single backend, so recall_session's last-topic pointer is
+            // consistent across the replay even when @s is NULL (it falls back to the backend pid).
             var rows = new List<ConverseRow>(8);
             for (int turn = 0; turn < userTurns.Count; turn++)
             {
@@ -70,7 +70,7 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
             // bug, NOT the database being unreachable. Surface the real SqlState + message so it
             // is never again mistaken for a segfault or "db unavailable".
             throw new SubstrateQueryException(
-                $"converse query failed [{pg.SqlState}] {pg.MessageText}"
+                $"recall_session query failed [{pg.SqlState}] {pg.MessageText}"
                 + (pg.Where is null ? "" : $" @ {pg.Where}"), pg);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
@@ -80,13 +80,13 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
     }
 
     /// <summary>
-    /// Higher-order generation via longest-context back-off over the witnessed content
-    /// trajectories (<c>laplace.generate_ngram</c>): each token is reproduced verbatim while its
+    /// Higher-order text walk via longest-context stride descent over the witnessed content
+    /// trajectories (<c>laplace.walk_text</c>): each entity is reproduced verbatim while its
     /// full preceding context is attested, then recombined when the exact span runs out. No model,
-    /// no HAS_POS gate. Tokens are yielded with a leading space so the OpenAI stream detokenizes to
+    /// no HAS_POS gate. Entities are yielded with a leading space so the OpenAI stream detokenizes to
     /// readable prose (content trajectories drop whitespace, so we re-insert the separator).
     /// </summary>
-    public async IAsyncEnumerable<GenerateToken> GenerateNgramStreamAsync(
+    public async IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
         string prompt,
         int steps          = 32,
         int maxOrder       = 5,
@@ -95,7 +95,7 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
         const string sql =
-            "SELECT step, token, ord_used FROM laplace.generate_ngram(@p, @steps, @order, @temp, @topk);";
+            "SELECT step, entity, stride_used FROM laplace.walk_text(@p, @steps, @order, @temp, @topk);";
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("p", prompt);
@@ -259,7 +259,7 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
                 gt.eff_mu,
                 gt.path_mu,
                 gt.witnesses
-            FROM laplace.generate_tree(laplace.word_id(@prompt), NULL, @depth, @beam) gt
+            FROM laplace.walk_branches(laplace.word_id(@prompt), NULL, @depth, @beam) gt
             ORDER BY gt.depth, gt.path_mu DESC;
             """;
 

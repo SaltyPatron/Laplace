@@ -1,7 +1,8 @@
 @echo off
 setlocal
-rem Deferred heavy lexical: conceptnet → atomic2020 → ud → wiktionary.
-rem Run after proof path (seed-resume-prove or full seed functionality block).
+rem Semantic knowledge layer (LAYER 2, with the *Net cluster): conceptnet -> atomic2020 -> ud -> wiktionary.
+rem Commonsense graph, causal-social inference, syntax across languages, omniglottal lexical breadth.
+rem NOT "deferred bulk": the world model's knowledge core. Run in place after the *Net cluster.
 rem Idempotent: completed sources short-circuit on layer-complete marker.
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
@@ -29,4 +30,4 @@ echo ==== ingest ud (en_* treebanks only) ====
 dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest ud --langs en || exit /b 1
 echo ==== ingest wiktionary (English jsonl) ====
 dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest wiktionary --langs en || exit /b 1
-echo ==== DEFERRED-LEXICAL COMPLETE ====
+echo ==== SEMANTIC KNOWLEDGE LAYER COMPLETE ====

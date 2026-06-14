@@ -9,39 +9,14 @@ namespace Laplace.Decomposers.SemLink;
 
 public sealed class SemLinkDecomposer : IDecomposer
 {
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> MetaNames = new();
-
-    public IReadOnlyCollection<string> CanonicalNamesForReadback
-        => System.Linq.Enumerable.ToList(MetaNames.Keys);
-
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/SemLinkDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    private static readonly Hash128 VerbNetClassTypeId    = EntityTypeRegistry.VerbNetClass;
-    private static readonly Hash128 PropBankRolesetTypeId = EntityTypeRegistry.PropBankRoleset;
-    private static readonly Hash128 FrameNetFrameTypeId   = EntityTypeRegistry.FrameNetFrame;
-
-    internal static Hash128 VnClassId(string vnClass)
-    {
-        string name = $"verbnet/class/{NumericClassId(vnClass)}";
-        MetaNames.TryAdd(name, 0);
-        return Hash128.OfCanonical(name);
-    }
-    internal static Hash128 RolesetId(string rolesetId)
-    {
-        string name = $"propbank/roleset/{rolesetId}";
-        MetaNames.TryAdd(name, 0);
-        return Hash128.OfCanonical(name);
-    }
-    internal static Hash128 FrameId(string frameName)
-    {
-        string name = $"framenet/frame/{frameName}";
-        MetaNames.TryAdd(name, 0);
-        return Hash128.OfCanonical(name);
-    }
-
+    // SemLink is alignment-only: it references the SAME content anchors PropBank/VerbNet/FrameNet
+    // emit (roleset/class/frame keys decomposed as content) and lays CORRESPONDS_TO edges between
+    // them — it does not own them, so it emits content (referential integrity) but no IS_A category.
     public Hash128 SourceId     => Source;
     public string  SourceName   => "SemLinkDecomposer";
     public int     LayerOrder   => 3;
@@ -89,18 +64,18 @@ public sealed class SemLinkDecomposer : IDecomposer
             ct.ThrowIfCancellationRequested();
             string rolesetKey = rolesetProp.Name.Trim();
             if (rolesetKey.Length == 0 || rolesetProp.Value.ValueKind != JsonValueKind.Object) continue;
-            Hash128 rsEntity = RolesetId(rolesetKey);
-            b.AddEntity(new EntityRow(rsEntity, EntityTier.Vocabulary, PropBankRolesetTypeId, Source));
+            var rsEntity = ContentEmitter.Emit(b, rolesetKey, Source);   // shared roleset anchor
+            if (rsEntity is null) continue;
 
             foreach (var classProp in rolesetProp.Value.EnumerateObject())
             {
                 string vnClass = classProp.Name.Trim();
                 if (vnClass.Length == 0) continue;
-                Hash128 vnEntity = VnClassId(vnClass);
-                b.AddEntity(new EntityRow(vnEntity, EntityTier.Vocabulary, VerbNetClassTypeId, Source));
+                var vnEntity = ContentEmitter.Emit(b, NumericClassId(vnClass), Source);  // shared class anchor
+                if (vnEntity is null) continue;
 
                 b.AddAttestation(NativeAttestation.Categorical(
-                    rsEntity, "CORRESPONDS_TO", vnEntity, Source, TC.AcademicCurated));
+                    rsEntity.Value, "CORRESPONDS_TO", vnEntity.Value, Source, TC.AcademicCurated));
 
                 if (classProp.Value.ValueKind == JsonValueKind.Object)
                     foreach (var roleProp in classProp.Value.EnumerateObject())
@@ -114,7 +89,7 @@ public sealed class SemLinkDecomposer : IDecomposer
                         if (argId is null || thetaId is null) continue;
                         b.AddAttestation(NativeAttestation.Categorical(
                             argId.Value, "CORRESPONDS_TO", thetaId.Value, Source, TC.AcademicCurated,
-                            contextId: vnEntity));
+                            contextId: vnEntity.Value));
                     }
             }
         }
@@ -134,8 +109,8 @@ public sealed class SemLinkDecomposer : IDecomposer
             ct.ThrowIfCancellationRequested();
             string vnClass = VnClassFromKey(keyProp.Name);
             if (vnClass.Length == 0) continue;
-            Hash128 vnEntity = VnClassId(vnClass);
-            b.AddEntity(new EntityRow(vnEntity, EntityTier.Vocabulary, VerbNetClassTypeId, Source));
+            var vnEntity = ContentEmitter.Emit(b, NumericClassId(vnClass), Source);  // shared class anchor
+            if (vnEntity is null) continue;
 
             if (keyProp.Value.ValueKind != JsonValueKind.Array) continue;
             foreach (var frameElem in keyProp.Value.EnumerateArray())
@@ -143,10 +118,10 @@ public sealed class SemLinkDecomposer : IDecomposer
                 if (frameElem.ValueKind != JsonValueKind.String) continue;
                 string frame = (frameElem.GetString() ?? "").Trim();
                 if (frame.Length == 0) continue;
-                Hash128 fnEntity = FrameId(frame);
-                b.AddEntity(new EntityRow(fnEntity, EntityTier.Vocabulary, FrameNetFrameTypeId, Source));
+                var fnEntity = ContentEmitter.Emit(b, frame, Source);   // shared frame anchor
+                if (fnEntity is null) continue;
                 b.AddAttestation(NativeAttestation.Categorical(
-                    vnEntity, "CORRESPONDS_TO", fnEntity, Source, TC.AcademicCurated));
+                    vnEntity.Value, "CORRESPONDS_TO", fnEntity.Value, Source, TC.AcademicCurated));
             }
         }
         yield return b.Build();

@@ -19,6 +19,12 @@ int content_witness_batch_add(
     const hash128_t* source_id,
     hash128_t*       out_root_id);
 
+/* Clear the record-once bank — the set of content ids already emitted. Call at
+ * the start of each ingest so record-once is scoped per run (one source per
+ * process). Records persist across content_witness_batch_add calls within a run
+ * so a node shared across terms/sentences is recorded once and referenced after. */
+void content_witness_reset(void);
+
 /* The id of the natural content unit of UTF-8 input — the SAME tree builder,
  * composer, and collapse law as content_witness_batch_add, minus the staging.
  * For a single token this is the wordform id; for a single grapheme the

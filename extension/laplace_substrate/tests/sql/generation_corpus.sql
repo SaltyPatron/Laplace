@@ -9,7 +9,7 @@ CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 --     the token floor, run-lengths expanded, contained sentences not re-walked;
 --   - the separator rule: whitespace tokens are excluded from the stream, so
 --     pairs and gaps count word strides;
---   - seeded determinism of generate_tokens;
+--   - seeded determinism of walk_continuations;
 --   - the consensus floor: a dead-end context continues through COMPLETES_TO
 --     with ord_used = 0;
 --   - invalidation: a new witnessed trajectory rebuilds the corpus.
@@ -94,7 +94,7 @@ BEGIN
             3, now());
 
     -- ── corpus shape: 2 roots (doc, sent2); sent is contained, not re-walked ──
-    SELECT * INTO st FROM corpus_stats();
+    SELECT * INTO st FROM stream_stats();
     IF st.sequences <> 2 THEN
         RAISE EXCEPTION 'FAIL: % sequences walked (want 2: doc + sent2)', st.sequences;
     END IF;
@@ -108,33 +108,33 @@ BEGIN
 
     -- ── word stride: next-pairs skip the witnessed spaces ─────────────────────
     IF NOT EXISTS (
-        SELECT 1 FROM content_pairs_scan(1) s
+        SELECT 1 FROM cooccurrence_scan(1) s
         WHERE s.subject_id = w_the AND s.object_id = w_capital AND s.cnt = 2) THEN
         RAISE EXCEPTION 'FAIL: (the→capital) gap-1 pair missing or wrong count (want 2: run expansion)';
     END IF;
-    IF EXISTS (SELECT 1 FROM content_pairs_scan(1) s
+    IF EXISTS (SELECT 1 FROM cooccurrence_scan(1) s
                WHERE s.subject_id = sp OR s.object_id = sp) THEN
         RAISE EXCEPTION 'FAIL: separator token leaked into the order metrics';
     END IF;
     -- the run boundary is witnessed order too: ...france | the... inside doc
     IF NOT EXISTS (
-        SELECT 1 FROM content_pairs_scan(1) s
+        SELECT 1 FROM cooccurrence_scan(1) s
         WHERE s.subject_id = w_france AND s.object_id = w_the AND s.cnt = 1) THEN
         RAISE EXCEPTION 'FAIL: (france→the) run-boundary pair missing';
     END IF;
-    -- token_plane('traj','next') = conditional frequency over word strides
+    -- relation_plane('traj','next') = conditional frequency over word strides
     IF NOT EXISTS (
-        SELECT 1 FROM token_plane('traj', 'next') p
+        SELECT 1 FROM relation_plane('traj', 'next') p
         WHERE p.subject_id = w_of AND p.object_id = w_france AND p.w = 1.0) THEN
-        RAISE EXCEPTION 'FAIL: token_plane traj next (of→france) missing or not P=1.0';
+        RAISE EXCEPTION 'FAIL: relation_plane traj next (of→france) missing or not P=1.0';
     END IF;
 
     -- ── seeded determinism ─────────────────────────────────────────────────────
     IF EXISTS (
         SELECT 1 FROM (
-            SELECT g1.step, g1.token AS t1, g2.token AS t2
-            FROM generate_tokens(ARRAY[w_the], 6, 3, 0.7, 4, 42) g1
-            JOIN generate_tokens(ARRAY[w_the], 6, 3, 0.7, 4, 42) g2 USING (step)
+            SELECT g1.step, g1.entity AS t1, g2.entity AS t2
+            FROM walk_continuations(ARRAY[w_the], 6, 3, 0.7, 4, 42) g1
+            JOIN walk_continuations(ARRAY[w_the], 6, 3, 0.7, 4, 42) g2 USING (step)
         ) z WHERE z.t1 <> z.t2) THEN
         RAISE EXCEPTION 'FAIL: same (corpus, prompt, seed) produced different streams';
     END IF;
@@ -149,8 +149,8 @@ BEGIN
             w_end, relation_type_id('COMPLETES_TO'), w_target,
             2000000000000, 100000000000, 60000000, 3, now());
     SELECT count(*) INTO n
-    FROM generate_tokens(ARRAY[w_end], 1, 3, 0.1, 4, 7) g
-    WHERE g.ord_used = 0 AND g.token = w_target;
+    FROM walk_continuations(ARRAY[w_end], 1, 3, 0.1, 4, 7) g
+    WHERE g.stride_used = 0 AND g.entity = w_target;
     IF n <> 1 THEN
         RAISE EXCEPTION 'FAIL: dead-end context did not continue through the consensus floor (ord_used=0)';
     END IF;
@@ -167,7 +167,7 @@ BEGIN
                 public.laplace_mantissa_pack(w_capital, 1, 1, t2flag),
                 public.laplace_mantissa_pack(w_of, 2, 1, t2flag)]),
             2, now());
-    SELECT * INTO st FROM corpus_stats();
+    SELECT * INTO st FROM stream_stats();
     IF st.sequences <> 3 THEN
         RAISE EXCEPTION 'FAIL: corpus did not rebuild after a new trajectory (% sequences, want 3)', st.sequences;
     END IF;

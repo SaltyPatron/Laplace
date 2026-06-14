@@ -23,7 +23,7 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
             new ConverseRow("whale IS_A cetacean.", 0.84m, 17)
         ]);
 
-    public async IAsyncEnumerable<GenerateToken> GenerateNgramStreamAsync(
+    public async IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
         string prompt,
         int steps = 32,
         int maxOrder = 5,

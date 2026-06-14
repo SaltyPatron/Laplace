@@ -4,12 +4,12 @@ if(WIN32)
         src/consensus_fold_step.c
         src/consensus_fold_engine.c
         src/generate_walk.c
-        src/generation_native.c
+        src/trajectory_walk.c
         src/astar_path.c
-        src/converse_native.c
-        src/converse_reads_native.c
-        src/respond_native.c
-        src/perfcache_native.c
+        src/graph_geometry_reads.c
+        src/consensus_reads.c
+        src/recall.c
+        src/perfcache.c
     )
     set_target_properties(laplace_substrate PROPERTIES
         PREFIX "" OUTPUT_NAME laplace_substrate SUFFIX ".dll"
@@ -38,12 +38,12 @@ set(EXT_C_SOURCES
     src/consensus_fold_step.c
     src/consensus_fold_engine.c
     src/generate_walk.c
-    src/generation_native.c
+    src/trajectory_walk.c
     src/astar_path.c
-    src/converse_native.c
-    src/converse_reads_native.c
-    src/respond_native.c
-    src/perfcache_native.c
+    src/graph_geometry_reads.c
+    src/consensus_reads.c
+    src/recall.c
+    src/perfcache.c
 )
 
 add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})

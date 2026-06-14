@@ -11,11 +11,29 @@ public abstract class RelationTripleDecomposerBase : IDecomposer, IIngestCommitP
     public abstract Engine.Core.Hash128 TrustClassId { get; }
 
     /// <summary>
-    /// Relation-triple graphs re-attest the same concept rows across the whole corpus:
-    /// parallel batch commits collide on those row locks (40P01 deadlocks — the class
-    /// behind the conceptnet/omw serial env pins, retired 2026-06-12). Pipelined serial
-    /// commit keeps decompose parallelism; override for a sharded variant.
+    /// Single-pass relation triples are SELF-CONTAINED — each intent creates the concept
+    /// entities it references (ContentEmitter.Emit in the same change), so no intent depends
+    /// on an entity introduced by another. That makes them parallel-commit safe:
+    ///   • the writers are concurrent — ProvenIdCache is a ConcurrentDictionary, connections
+    ///     are per-call, and ConsensusAccumulatingWriter mutates each Acc under lock(acc);
+    ///   • the staging merge inserts "... FROM stage ORDER BY id ON CONFLICT DO NOTHING" and
+    ///     locks attestation rows "ORDER BY a.id FOR UPDATE", so concurrent committers acquire
+    ///     row locks in the SAME order — no 40P01 cycle can form (and class-40 retries backstop
+    ///     any that still slip through under extreme contention).
+    /// The hot-concept-row deadlock that once forced serial (the conceptnet/omw env pins,
+    /// retired 2026-06-12) is resolved by that ordered merge — so the parallel path the
+    /// IngestRunner already implements (RunUnorderedParallelAsync) is the correct default here.
+    ///
+    /// Two-pass variants emit ALL entities then ALL attestations across separate intents, so an
+    /// attestation could commit before its entity under parallel workers; they stay StrictSerial
+    /// until they stamp CommitEpoch (entities epoch N, attestations epoch N+1) for EpochBarrier.
     /// </summary>
+    // NOTE: parallel (Unordered) commit is correct in principle here — these intents are
+    // self-contained — BUT ConceptNet's hot concept rows make ~most concurrent batches
+    // deadlock (40P01), and the runner's retry-the-batch path is broken for prebuilt
+    // IntentStages (ApplyManyAsync disposes them on attempt 1 -> ObjectDisposedException on
+    // retry). Until the commit is sharded by content-id (disjoint rows -> no deadlock, no
+    // retry) OR the stage lifecycle survives retries, StrictSerial is the working path.
     public virtual IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
 
     protected abstract bool RequiresTwoPass { get; }

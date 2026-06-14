@@ -79,6 +79,11 @@ public sealed class IngestRunner
 
         await decomposer.InitializeAsync(ctx, ct);
 
+        // Record-once is scoped to this ingest: clear the content witness's bank of
+        // already-emitted ids so a node shared across this source's terms/sentences is
+        // recorded once and referenced thereafter (the content-addressed / Merkle-DAG law).
+        Laplace.Engine.Core.IntentStage.ResetContentBank();
+
         log.LogInformation(
             "INGEST_PATH source={Source} ecosystem_path={Path} exists={Exists}",
             decomposer.SourceName, ctx.EcosystemPath, Directory.Exists(ctx.EcosystemPath));
@@ -102,16 +107,36 @@ public sealed class IngestRunner
         int batchSize  = Math.Max(1, options.BatchSize);
         int commitRows = Math.Max(0, options.CommitRows);
 
-        static int RowsOf(SubstrateChange c) =>
-            c.Entities.Length + c.Physicalities.Length + c.Attestations.Length;
+        // Content-witness rows live in the native ContentStage (c.IntentStages), NOT in
+        // c.Entities/Physicalities — counting only the C# rows reported ~0 for a pass that
+        // emits 100% through the witness, so the row-based flush (CommitRows) and the
+        // producer backpressure (rowBudget) never fired: ALL of WordNet pass-1 accreted into
+        // one 677,880-entity commit held wholly in RAM, and a single staged content entity
+        // was transiently dropped from that oversized commit (the data-36 def ghost). Count
+        // the prebuilt-stage rows so commits stay bounded (~CommitRows) and memory is capped.
+        static int RowsOf(SubstrateChange c)
+        {
+            int rows = c.Entities.Length + c.Physicalities.Length + c.Attestations.Length;
+            if (!c.IntentStages.IsDefaultOrEmpty)
+                foreach (var s in c.IntentStages)
+                    rows += s.EntityCount + s.PhysicalityCount + s.AttestationCount;
+            return rows;
+        }
         bool ShouldFlush(int intents, int rows) =>
             commitRows > 0
                 ? (rows >= commitRows || intents >= batchSize)
                 : intents >= batchSize;
 
+        // Default StrictSerial: the record-once content witness emits each distinct node ONCE,
+        // in the earliest batch that contains it, and LATER batches reference it (via trajectory /
+        // attestation object_id). That is a cross-batch dependency — the emitting batch must commit
+        // before the referencing one. Unordered/EpochBarrier parallel commit can run the referencing
+        // batch first → referential failure (PropBank: batch-3 referenced `causative agent` emitted by
+        // batch-0, committed out of order). Serial commit preserves producer order, so refs resolve.
+        // A decomposer whose intents are genuinely self-contained may still opt into parallel.
         var commitPolicy = decomposer is IIngestCommitPolicy cp
             ? cp.CommitParallelism
-            : IngestCommitParallelism.EpochBarrier;
+            : IngestCommitParallelism.StrictSerial;
 
         if (options.ParallelWorkers > 1 && commitPolicy == IngestCommitParallelism.StrictSerial)
         {

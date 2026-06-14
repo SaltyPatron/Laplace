@@ -13,8 +13,8 @@ internal interface ISubstrateClient
     Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
         IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct);
 
-    /// <inheritdoc cref="SubstrateClient.GenerateNgramStreamAsync"/>
-    IAsyncEnumerable<GenerateToken> GenerateNgramStreamAsync(
+    /// <inheritdoc cref="SubstrateClient.WalkTextStreamAsync"/>
+    IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
         string prompt,
         int steps          = 32,
         int maxOrder       = 5,

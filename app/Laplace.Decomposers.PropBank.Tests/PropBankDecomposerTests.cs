@@ -69,13 +69,13 @@ public sealed class PropBankDecomposerTests
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
         var giveId = ContentEmitter.Emit(b, "give", PropBankDecomposer.Source);
-        var rsId = PropBankDecomposer.RolesetId("give.01");
-        Assert.Equal(Hash128.OfCanonical("propbank/roleset/give.01"), rsId);
+        var rsId = CategoryAnchor.Id("give.01");   // roleset = "give.01" decomposed as content
+        Assert.NotNull(rsId);
         Assert.NotNull(giveId);
 
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SENSE")
-            && a.SubjectId == giveId!.Value && a.ObjectId == rsId);
+            && a.SubjectId == giveId!.Value && a.ObjectId == rsId!.Value);
     }
 
     [Fact]
@@ -84,14 +84,15 @@ public sealed class PropBankDecomposerTests
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
         var giverId = ContentEmitter.Emit(b, "giver", PropBankDecomposer.Source);
-        var rsId = PropBankDecomposer.RolesetId("give.01");
+        var rsId = CategoryAnchor.Id("give.01");
 
         var ord0 = PropBankDecomposer.OrdinalId("0");
         Assert.Equal(Hash128.OfCanonical("ordinal/0/v1"), ord0);
+        Assert.NotNull(rsId);
         Assert.NotNull(giverId);
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SEMANTIC_ROLE")
-            && a.SubjectId == rsId && a.ObjectId == giverId!.Value && a.ContextId == ord0);
+            && a.SubjectId == rsId!.Value && a.ObjectId == giverId!.Value && a.ContextId == ord0);
     }
 
     [Fact]
@@ -99,14 +100,16 @@ public sealed class PropBankDecomposerTests
     {
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
-        var rsId = PropBankDecomposer.RolesetId("give.01");
+        var rsId = CategoryAnchor.Id("give.01");
 
-        var vnId = PropBankDecomposer.VnClassId("give-13.1-1");
-        Assert.Equal(Hash128.OfCanonical("verbnet/class/13.1-1"), vnId);
+        // VerbNet class is now its numeric id "13.1-1" as content (converges with VerbNet/SemLink).
+        var vnId = CategoryAnchor.Id(PropBankDecomposer.NumericClassId("give-13.1-1"));
+        Assert.NotNull(rsId);
+        Assert.NotNull(vnId);
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO")
-            && (a.SubjectId == rsId || a.ObjectId == rsId)
-            && (a.SubjectId == vnId || a.ObjectId == vnId));
+            && (a.SubjectId == rsId!.Value || a.ObjectId == rsId!.Value)
+            && (a.SubjectId == vnId!.Value || a.ObjectId == vnId!.Value));
 
         var giverId = ContentEmitter.Emit(b, "giver", PropBankDecomposer.Source);
         var agentId = ContentEmitter.Emit(b, "agent", PropBankDecomposer.Source);
@@ -114,7 +117,7 @@ public sealed class PropBankDecomposerTests
         Assert.NotNull(agentId);
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO")
-            && a.ContextId == vnId
+            && a.ContextId == vnId!.Value
             && (a.SubjectId == giverId!.Value || a.ObjectId == giverId!.Value)
             && (a.SubjectId == agentId!.Value || a.ObjectId == agentId!.Value));
     }

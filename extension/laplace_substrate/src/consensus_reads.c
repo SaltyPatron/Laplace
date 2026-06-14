@@ -1,6 +1,6 @@
 /*
- * converse_reads_native.c — lexical / relational converse read SRFs.
- * Migrated from 20_converse.sql.in (route_prompt/respond/converse stay SQL).
+ * consensus_reads.c — lexical / relational consensus read SRFs.
+ * Migrated from 20_converse.sql.in (parse_ask/recall/recall_session stay SQL).
  */
 #include "postgres.h"
 
@@ -23,13 +23,13 @@ PG_FUNCTION_INFO_V1(pg_laplace_define_context);
 PG_FUNCTION_INFO_V1(pg_laplace_synonyms);
 PG_FUNCTION_INFO_V1(pg_laplace_translations);
 PG_FUNCTION_INFO_V1(pg_laplace_examples);
-PG_FUNCTION_INFO_V1(pg_laplace_expansion);
+PG_FUNCTION_INFO_V1(pg_laplace_shared_objects);
 PG_FUNCTION_INFO_V1(pg_laplace_related);
 PG_FUNCTION_INFO_V1(pg_laplace_related_in);
-PG_FUNCTION_INFO_V1(pg_laplace_describe);
+PG_FUNCTION_INFO_V1(pg_laplace_salient_facts);
 PG_FUNCTION_INFO_V1(pg_laplace_usage_overlap);
-PG_FUNCTION_INFO_V1(pg_laplace_reason);
-PG_FUNCTION_INFO_V1(pg_laplace_relatedness);
+PG_FUNCTION_INFO_V1(pg_laplace_relate_path);
+PG_FUNCTION_INFO_V1(pg_laplace_relation_summary);
 PG_FUNCTION_INFO_V1(pg_laplace_gaps);
 
 #define TAX_WALK_CAP 2048
@@ -86,7 +86,7 @@ emit_senses_rows(ReturnSetInfo *rsinfo, Datum word, Datum context_arr, bool has_
             2, argtypes, args, NULL, true, 0);
     }
     if (rc != SPI_OK_SELECT)
-        elog(ERROR, "converse_reads: senses query failed");
+        elog(ERROR, "consensus_reads: senses query failed");
 
     for (uint64 r = 0; r < SPI_processed; r++)
     {
@@ -178,7 +178,7 @@ emit_define_rows(ReturnSetInfo *rsinfo, Datum word, Datum context_arr, bool has_
             2, argtypes, args, NULL, true, 0);
     }
     if (rc != SPI_OK_SELECT)
-        elog(ERROR, "converse_reads: define query failed");
+        elog(ERROR, "consensus_reads: define query failed");
 
     for (uint64 r = 0; r < SPI_processed; r++)
     {
@@ -395,7 +395,7 @@ pg_laplace_examples(PG_FUNCTION_ARGS)
 }
 
 Datum
-pg_laplace_expansion(PG_FUNCTION_ARGS)
+pg_laplace_shared_objects(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     Datum subjects, type_filter;
@@ -408,14 +408,14 @@ pg_laplace_expansion(PG_FUNCTION_ARGS)
     int   rc;
 
     if (PG_ARGISNULL(0))
-        ereport(ERROR, (errmsg("expansion: p_subjects must not be NULL")));
+        ereport(ERROR, (errmsg("shared_objects: p_subjects must not be NULL")));
     subjects = PG_GETARG_DATUM(0);
     type_filter = PG_ARGISNULL(1) ? (Datum) 0 : PG_GETARG_DATUM(1);
     lim = PG_ARGISNULL(2) ? 40 : PG_GETARG_INT32(2);
     InitMaterializedSRF(fcinfo, 0);
     bool spi_top = false;
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-        elog(ERROR, "expansion: SPI_connect failed");
+        elog(ERROR, "shared_objects: SPI_connect failed");
 
     args[0] = subjects;
     args[1] = type_filter;
@@ -437,7 +437,7 @@ pg_laplace_expansion(PG_FUNCTION_ARGS)
         "LIMIT $3",
         3, argtypes, args, nulls, true, 0);
     if (rc != SPI_OK_SELECT)
-        elog(ERROR, "expansion: query failed");
+        elog(ERROR, "shared_objects: query failed");
 
     for (uint64 r = 0; r < SPI_processed; r++)
     {
@@ -506,7 +506,7 @@ emit_related_rows(ReturnSetInfo *rsinfo, Datum word, Datum type_id, Datum lang, 
 
     rc = SPI_execute_with_args(incoming ? sql_in : sql_out, 4, argtypes, args, nulls, true, 0);
     if (rc != SPI_OK_SELECT)
-        elog(ERROR, "converse_reads: related query failed");
+        elog(ERROR, "consensus_reads: related query failed");
 
     for (uint64 r = 0; r < SPI_processed; r++)
     {
@@ -559,7 +559,7 @@ pg_laplace_related_in(PG_FUNCTION_ARGS)
 }
 
 Datum
-pg_laplace_describe(PG_FUNCTION_ARGS)
+pg_laplace_salient_facts(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     Datum word, lang;
@@ -570,14 +570,14 @@ pg_laplace_describe(PG_FUNCTION_ARGS)
     int   rc;
 
     if (PG_ARGISNULL(0))
-        ereport(ERROR, (errmsg("describe: p_word must not be NULL")));
+        ereport(ERROR, (errmsg("salient_facts: p_word must not be NULL")));
     word = PG_GETARG_DATUM(0);
     lang = PG_ARGISNULL(1) ? (Datum) 0 : PG_GETARG_DATUM(1);
     lim = PG_ARGISNULL(2) ? 24 : PG_GETARG_INT32(2);
     InitMaterializedSRF(fcinfo, 0);
     bool spi_top = false;
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-        elog(ERROR, "describe: SPI_connect failed");
+        elog(ERROR, "salient_facts: SPI_connect failed");
 
     args[0] = word;
     args[1] = lang;
@@ -619,7 +619,7 @@ pg_laplace_describe(PG_FUNCTION_ARGS)
         "ORDER BY d.sort_mu DESC LIMIT $3",
         3, argtypes, args, nulls, true, 0);
     if (rc != SPI_OK_SELECT)
-        elog(ERROR, "describe: query failed");
+        elog(ERROR, "salient_facts: query failed");
 
     for (uint64 r = 0; r < SPI_processed; r++)
     {
@@ -683,7 +683,7 @@ pg_laplace_usage_overlap(PG_FUNCTION_ARGS)
 }
 
 Datum
-pg_laplace_reason(PG_FUNCTION_ARGS)
+pg_laplace_relate_path(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     Datum x, y;
@@ -693,14 +693,14 @@ pg_laplace_reason(PG_FUNCTION_ARGS)
     int   rc;
 
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
-        ereport(ERROR, (errmsg("reason: endpoints required")));
+        ereport(ERROR, (errmsg("relate_path: endpoints required")));
     x = PG_GETARG_DATUM(0);
     y = PG_GETARG_DATUM(1);
     depth = PG_ARGISNULL(2) ? 7 : PG_GETARG_INT32(2);
     InitMaterializedSRF(fcinfo, 0);
     bool spi_top = false;
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-        elog(ERROR, "reason: SPI_connect failed");
+        elog(ERROR, "relate_path: SPI_connect failed");
 
     args[0] = x;
     args[1] = y;
@@ -778,7 +778,7 @@ pg_laplace_reason(PG_FUNCTION_ARGS)
         ") a ORDER BY a.len, a.mu DESC NULLS LAST LIMIT 1",
         3, argtypes, args, NULL, true, 0);
     if (rc != SPI_OK_SELECT)
-        elog(ERROR, "reason: query failed");
+        elog(ERROR, "relate_path: query failed");
 
     for (uint64 r = 0; r < SPI_processed; r++)
     {
@@ -799,7 +799,7 @@ pg_laplace_reason(PG_FUNCTION_ARGS)
 }
 
 Datum
-pg_laplace_relatedness(PG_FUNCTION_ARGS)
+pg_laplace_relation_summary(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     Datum x, y;
@@ -808,13 +808,13 @@ pg_laplace_relatedness(PG_FUNCTION_ARGS)
     int   rc;
 
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
-        ereport(ERROR, (errmsg("relatedness: endpoints required")));
+        ereport(ERROR, (errmsg("relation_summary: endpoints required")));
     x = PG_GETARG_DATUM(0);
     y = PG_GETARG_DATUM(1);
     InitMaterializedSRF(fcinfo, 0);
     bool spi_top = false;
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-        elog(ERROR, "relatedness: SPI_connect failed");
+        elog(ERROR, "relation_summary: SPI_connect failed");
 
     args[0] = x;
     args[1] = y;
@@ -829,7 +829,7 @@ pg_laplace_relatedness(PG_FUNCTION_ARGS)
         "         CASE WHEN g.geo IS NOT NULL AND g.geo < 0.4 THEN '; structurally near' "
         "              ELSE '' END) "
         "FROM (SELECT 1) one "
-        "LEFT JOIN LATERAL (SELECT * FROM laplace.reason($1, $2) LIMIT 1) r ON true "
+        "LEFT JOIN LATERAL (SELECT * FROM laplace.relate_path($1, $2) LIMIT 1) r ON true "
         "LEFT JOIN LATERAL (SELECT laplace.usage_overlap($1, $2) AS n) u ON true "
         "LEFT JOIN LATERAL ( "
         "  SELECT public.laplace_angular_distance_4d( "
@@ -839,7 +839,7 @@ pg_laplace_relatedness(PG_FUNCTION_ARGS)
         "     AND coord IS NOT NULL LIMIT 1)) AS geo) g ON true",
         2, argtypes, args, NULL, true, 0);
     if (rc != SPI_OK_SELECT)
-        elog(ERROR, "relatedness: query failed");
+        elog(ERROR, "relation_summary: query failed");
 
     for (uint64 r = 0; r < SPI_processed; r++)
     {
