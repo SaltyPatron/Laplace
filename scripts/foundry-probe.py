@@ -154,6 +154,10 @@ def main():
     in_prompt = [inv.get(i, "?") for i in ids[1:]]
     print(f"  prompt-token ranks: " + ", ".join(
         f"{w}={rank[vocab[w]]}" for w in in_prompt if w in vocab))
+    # The actual prediction: what the cast says comes next (the generation check).
+    topk = [int(i) for i in order[:15]]
+    print("  top-15 next: " + ", ".join(
+        f"{inv.get(i, '?')}({logits[i]:+.2f})" for i in topk))
 
     print("\n== depth probe: expected-token rank after k layers ==")
     probe_ids = [tok_id(w.strip()) for w in expected]
