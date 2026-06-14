@@ -27,7 +27,7 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
 
     public static readonly string EcosystemPath =
         Environment.GetEnvironmentVariable("LAPLACE_TEST_UCD")
-        ?? (OperatingSystem.IsWindows() ? @"D:\Data\Ingest\Unicode" : "/vault/Data/Unicode");
+        ?? (OperatingSystem.IsWindows() ? @"D:\Data\Ingest\UCD\Public\UCD\latest" : "/vault/Data/UCD/Public/UCD/latest");
 
     private const int TotalCodepoints = 1_114_112;
 
@@ -62,6 +62,16 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task Seeds_All_Codepoints_FromSource()
     {
+        // This test is a self-contained ingest into a fresh DB, so it must own both
+        // process-global native singletons the content witness depends on instead of
+        // free-riding on a sibling test:
+        //   - the T0 perfcache (the codepoint oracle the witness reads), and
+        //   - the record-once emit bank, which short-circuits already-banked roots
+        //     WITHOUT re-emitting them. Stale roots banked by another test would make
+        //     this DB's attestations reference entity rows that were never written here.
+        CodepointPerfcache.LoadDefault();
+        IntentStage.ResetContentBank();
+
         var writer = new NpgsqlSubstrateWriter(_ds);
         var reader = new NpgsqlSubstrateReader(_ds);
         var dec = new UnicodeDecomposer();

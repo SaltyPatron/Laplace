@@ -9,6 +9,10 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// — instead of trusting that "it compiles." Proves the offset→ILI→decomposed-anchor + IS_A path
 /// produces a real entity, or fails loudly. Skips only when the CILI data isn't on the box.
 /// </summary>
+// Shares the process-global T0 perfcache, so it MUST run in the GrammarPerfcache collection:
+// xUnit runs separate collections in parallel, and an out-of-collection LoadDefault()/Unload()
+// racing a native GrammarCompose read of the same global crashes the host (0xC0000005).
+[Collection("GrammarPerfcache")]
 public class ConceptAnchorTests
 {
     [Fact]

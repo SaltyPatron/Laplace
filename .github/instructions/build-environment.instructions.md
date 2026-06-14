@@ -125,7 +125,7 @@ D:\Data\Postgres\laplace\
 - PostgreSQL 18 running on localhost (`postgres` / `postgres`)
 - Intel oneAPI 2025.3+ with MKL
 - VS 2026 CMake/Ninja (paths in `env.cmd`)
-- Unicode UCD under `D:\Data\Ingest\Unicode\Public\17.0.0` for full engine build
+- Unicode UCD under `D:\Data\Ingest\UCD\Public\UCD\latest` for full engine build (old `Unicode\Public\17.0.0` is quarantined as `Unicode.BAD-DONOTUSE`)
 - Junctions: `D:\vault\Data` → `D:\Data\Ingest`, `D:\vault\models` → `D:\Models\hub` (for e2e ingest)
 
 ## Related docs

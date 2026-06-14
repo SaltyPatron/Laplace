@@ -104,12 +104,15 @@ public class TypeIdLawTests
     }
 
     [Fact]
-    public void CliProgram_CallsExtensionGenerateNgram()
+    public void CliProgram_CallsExtensionWalkText()
     {
         var repoRoot = FindRepoRoot();
         var program = Path.Combine(repoRoot, "app", "Laplace.Cli", "Program.cs");
         var text = File.ReadAllText(program);
-        Assert.Contains("laplace.generate_ngram", text, StringComparison.OrdinalIgnoreCase);
+        // Generation was renamed walk_* (module 26): the CLI delegates to the
+        // extension's laplace.walk_text wrapper over the engine walk_continuations,
+        // and must never inline a bare laplace.generate(.
+        Assert.Contains("laplace.walk_text", text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("laplace.generate(", text, StringComparison.Ordinal);
     }
 
