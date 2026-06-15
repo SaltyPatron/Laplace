@@ -3,7 +3,7 @@
   "endpoints": {
     "chat_completions": {
       "status": "live",
-      "backend": "laplace.converse",
+      "backend": "laplace.recall_session",
       "billing": "preflight_quote_required"
     },
     "completions": {
@@ -27,7 +27,7 @@
     },
     "explainability_reports": {
       "status": "live",
-      "backend": "laplace.generate_tree + laplace.attestations_out",
+      "backend": "laplace.walk_branches + laplace.attestations_out",
       "billing": "explain.trace"
     },
     "billing": {

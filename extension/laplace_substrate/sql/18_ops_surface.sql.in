@@ -102,11 +102,19 @@ CREATE OR REPLACE FUNCTION source_counts()
     RETURNS TABLE(source text, source_id bytea, evidence bigint, content bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    SELECT @extschema@.render(s.sid), s.sid,
-           (SELECT count(*) FROM @extschema@.attestations a WHERE a.source_id = s.sid),
-           (SELECT count(*) FROM @extschema@.physicalities p WHERE p.source_id = s.sid AND p.type = 1)
-    FROM (SELECT DISTINCT a.source_id AS sid FROM @extschema@.attestations a) s
-    ORDER BY 3 DESC
+    -- One aggregating scan per table (hash-agg over the handful of sources), FULL
+    -- JOINed — NOT DISTINCT + per-source correlated counts, which was O(sources x rows)
+    -- and timed out on the 77M-row attestations table.
+    SELECT @extschema@.render(COALESCE(ev.sid, ct.sid)) AS source,
+           COALESCE(ev.sid, ct.sid)                     AS source_id,
+           COALESCE(ev.evidence, 0)                     AS evidence,
+           COALESCE(ct.content, 0)                      AS content
+    FROM (SELECT a.source_id AS sid, count(*) AS evidence
+          FROM @extschema@.attestations a GROUP BY a.source_id) ev
+    FULL JOIN (SELECT p.source_id AS sid, count(*) AS content
+               FROM @extschema@.physicalities p WHERE p.type = 1 GROUP BY p.source_id) ct
+      ON ev.sid = ct.sid
+    ORDER BY evidence DESC NULLS LAST
 $$;
 
 CREATE OR REPLACE FUNCTION entity_type_counts()

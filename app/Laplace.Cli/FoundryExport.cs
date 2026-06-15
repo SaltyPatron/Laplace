@@ -297,6 +297,59 @@ internal static class FoundryExport
 
     internal sealed record BasisStats(int SpectralRank, int ZeroSpectralTokens, double ProcrustesResidual);
 
+    // AFFINITY-SVD embedding: a token's vector = the SVD reduction of its full relational
+    // affinity ROW (its rank-weighted edges to every other token). Two tokens with similar
+    // relational fingerprints (dog/cat both IS_A mammal, both PRECEDES verbs, …) get similar
+    // rows → similar embeddings. This is the direct factorization of the consensus the user
+    // describes, vs Laplacian-eigenmaps over the capped graph (which measured 0.58σ). The
+    // affinity is symmetrized; the top-k left singular vectors (scaled by √S) are the basis.
+    // NOTE: tensor_svd_truncate needs kmax ≥ min(m,n) = vocab, so this is dense vocab×vocab —
+    // use it at modest vocab (≤~3k); larger vocab needs a sparse solver.
+    internal static double[] BuildBasisAffinity(
+        int vocab, int dModel, PlaneCoo aff, double[]?[] anchors, Hash128 seed,
+        out BasisStats stats)
+    {
+        int k = Math.Min(dModel - 1, Math.Min(EnvInt("LAPLACE_FOUNDRY_BASIS_RANK", 256), vocab));
+        var A = new float[(long)vocab * vocab];
+        for (long e = 0; e < aff.Nnz; e++)
+        {
+            int x = aff.Rows[e], y = aff.Cols[e];
+            if (x < 0 || x >= vocab || y < 0 || y >= vocab) continue;
+            float w = (float)aff.Vals[e];
+            A[(long)x * vocab + y] += w;
+            A[(long)y * vocab + x] += w;   // symmetrize (similarity is undirected)
+        }
+        var U = new float[(long)vocab * vocab];
+        var S = new float[vocab];
+        var Vt = new float[(long)vocab * vocab];
+        nuint outRank = 0; int rc;
+        unsafe
+        {
+            fixed (float* pa = A, pu = U, ps = S, pvt = Vt)
+                rc = SynInterop.TensorSvdTruncate(pa, (nuint)vocab, (nuint)vocab, 0.0,
+                                                  &outRank, pu, ps, pvt, (nuint)vocab);
+        }
+        if (rc != 0) throw new InvalidOperationException($"tensor_svd_truncate (affinity) rc={rc} (vocab={vocab})");
+        int kk = Math.Min(k, (int)outRank);
+        var e2 = new double[(long)vocab * dModel];
+        int zero = 0;
+        for (int i = 0; i < vocab; i++)
+        {
+            long off = (long)i * dModel; double n2 = 0;
+            for (int c = 0; c < kk; c++)
+            {
+                double v = (double)U[(long)i * vocab + c] * Math.Sqrt(Math.Max(0f, S[c]));
+                e2[off + c] = v; n2 += v * v;
+            }
+            double inv = n2 > 1e-24 ? 1.0 / Math.Sqrt(n2) : 0.0;
+            if (inv == 0.0) { e2[off + Math.Max(0, dModel - 2)] = 1.0; inv = 1.0; zero++; }
+            for (int c = 0; c < dModel - 1; c++) e2[off + c] *= inv;
+            e2[off + dModel - 1] = BiasValue;
+        }
+        stats = new BasisStats(kk, zero, double.NaN);
+        return e2;
+    }
+
     // Generates E [vocab × dModel] row-major. anchors[i] is null or a 4D content
     // coordinate for vocab ordinal i. The seed must derive from the recipe (never
     // the clock) so identical consensus + identical mold ⇒ identical cast.
@@ -382,10 +435,15 @@ internal static class FoundryExport
                             specSq += s * s;
                         }
                     }
+                    // The anchoring OVERWRITES the top-4 (most significant) spectral dims with
+                    // the content-coordinate fit. When the fit is poor (high residual) this
+                    // corrupts the strongest geometry rather than aligning it — gate it so the
+                    // pure Laplacian-eigenmap geometry can be used instead.
                     double scale = anchSq > 0 ? Math.Sqrt(specSq / anchSq) : 1.0;
-                    for (int i = 0; i < vocab; i++)
-                        for (int d = 0; d < 4; d++)
-                            y[(long)i * k + d] = a4[(long)i * 4 + d] * scale;
+                    if (EnvInt("LAPLACE_FOUNDRY_PROCRUSTES", 1) != 0)
+                        for (int i = 0; i < vocab; i++)
+                            for (int d = 0; d < 4; d++)
+                                y[(long)i * k + d] = a4[(long)i * 4 + d] * scale;
                 }
                 finally { DynInterop.ProcrustesFree(t); }
             }

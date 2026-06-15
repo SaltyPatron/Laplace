@@ -1,7 +1,5 @@
 using System.Diagnostics;
-using System.Text;
 using global::Npgsql;
-using NpgsqlTypes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Laplace.Engine.Core;
@@ -17,27 +15,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
     private readonly ProvenIdCache _provenPhys;
     private readonly ProvenIdCache _provenAtt;
     private readonly bool _bulkFreshSource;
-
-    private sealed class ProvenIdCache
-    {
-        private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>? _set;
-        private readonly int _cap;
-        public ProvenIdCache(bool enabled, int cap)
-        {
-            _set = enabled ? new() : null;
-            _cap = cap;
-        }
-        public bool Contains(Hash128 id) => _set is { } s && s.ContainsKey(id);
-        public void Add(Hash128 id)
-        {
-            if (_set is { } s && s.Count < _cap) s.TryAdd(id, 0);
-        }
-        public void AddRange(IEnumerable<Hash128> ids)
-        {
-            if (_set is null) return;
-            foreach (var id in ids) Add(id);
-        }
-    }
+    private readonly SubstrateStagingMerge _staging;
 
     public NpgsqlSubstrateWriter(
         NpgsqlDataSource dataSource,
@@ -48,6 +26,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         _reader = new NpgsqlSubstrateReader(dataSource);
         _log = logger ?? NullLogger<NpgsqlSubstrateWriter>.Instance;
         _bulkFreshSource = bulkFreshSource;
+        _staging = new SubstrateStagingMerge(dataSource);
         bool cacheOn = Environment.GetEnvironmentVariable("LAPLACE_PROVEN_CACHE") != "0";
         int cacheMax = int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_PROVEN_CACHE_MAX"), out var m) && m > 0
             ? m : 32_000_000;
@@ -96,12 +75,12 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         foreach (var id in uniqueEntityIds)
             if (!_provenEntities.Contains(id)) entToCheck.Add(id);
 
-        var physToCheck = CollectUnprovenIds(changes, static c => c.Physicalities, static p => p.Id, _provenPhys);
+        var physToCheck = IntentPreflight.CollectUnprovenIds(changes, static c => c.Physicalities, static p => p.Id, _provenPhys);
         var attToCheck = _bulkFreshSource
             ? new List<Hash128>()
-            : CollectUnprovenIds(changes, static c => c.Attestations, static a => a.Id, _provenAtt);
+            : IntentPreflight.CollectUnprovenIds(changes, static c => c.Attestations, static a => a.Id, _provenAtt);
 
-        var (existingEntities, existingPhys, existingAtt) = await IntentPreflightAsync(
+        var (existingEntities, existingPhys, existingAtt) = await IntentPreflight.RunAsync(
             conn, entToCheck, physToCheck, attToCheck, ct);
         if (entToCheck.Count > 0 || physToCheck.Count > 0 || attToCheck.Count > 0) roundTrips++;
         _provenEntities.AddRange(existingEntities);
@@ -146,7 +125,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 Reference(e.TypeId, $"entity {Convert.ToHexString(e.Id.ToBytes())} type_id", c.Metadata.SourceContentUnitName);
                 if (e.FirstObservedBy is Hash128 fob) Reference(fob, $"entity {Convert.ToHexString(e.Id.ToBytes())} first_observed_by", c.Metadata.SourceContentUnitName);
             }
-        CheckpointEntities(stage, "after-entity-loop");
+        CopyBlobValidator.Checkpoint(stage, "after-entity-loop");
         foreach (var c in changes)
             foreach (var p in c.Physicalities)
             {
@@ -163,7 +142,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 Reference(p.EntityId, $"physicality {Convert.ToHexString(p.Id.ToBytes())} entity_id", c.Metadata.SourceContentUnitName);
                 Reference(p.SourceId, $"physicality {Convert.ToHexString(p.Id.ToBytes())} source_id", c.Metadata.SourceContentUnitName);
             }
-        CheckpointEntities(stage, "after-physicality-loop");
+        CopyBlobValidator.Checkpoint(stage, "after-physicality-loop");
         var attGamesDelta = new Dictionary<Hash128, (long Games, long MaxTsUs)>();
         foreach (var c in changes)
             foreach (var a in c.Attestations)
@@ -187,7 +166,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 if (a.ObjectId  is Hash128 aObj) Reference(aObj, $"attestation {attHex} object_id", c.Metadata.SourceContentUnitName);
                 if (a.ContextId is Hash128 aCtx) Reference(aCtx, $"attestation {attHex} context_id", c.Metadata.SourceContentUnitName);
             }
-        CheckpointEntities(stage, "after-attestation-loop");
+        CopyBlobValidator.Checkpoint(stage, "after-attestation-loop");
 
         int entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
         bool anyPrebuilt = prebuiltStages.Count > 0;
@@ -233,7 +212,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 if (referenced.Count > 0)
                 {
                     var refList = new List<Hash128>(referenced.Keys);
-                    var present = await EntitiesExistAsync(conn, refList, ct);
+                    var present = await IntentPreflight.EntitiesExistAsync(conn, refList, ct);
                     roundTrips++;
                     if (present.Count != refList.Count)
                     {
@@ -356,339 +335,6 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
     private static readonly bool RtBudgetEnforce =
         Environment.GetEnvironmentVariable("LAPLACE_RT_BUDGET_ENFORCE") == "1";
 
-    private static async Task<(HashSet<Hash128> Entities, HashSet<Hash128> Phys, HashSet<Hash128> Att)>
-        IntentPreflightAsync(
-            NpgsqlConnection conn,
-            IReadOnlyList<Hash128> entityIds,
-            IReadOnlyList<Hash128> physIds,
-            IReadOnlyList<Hash128> attIds,
-            CancellationToken ct)
-    {
-        var entExisting = new HashSet<Hash128>();
-        var physExisting = new HashSet<Hash128>();
-        var attExisting = new HashSet<Hash128>();
-        if (entityIds.Count == 0 && physIds.Count == 0 && attIds.Count == 0)
-            return (entExisting, physExisting, attExisting);
-
-        const int ChunkSize = 250_000;
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 0;
-        cmd.CommandText =
-            "SELECT (p).entity_exists, (p).phys_exists, (p).att_exists " +
-            "FROM laplace.intent_preflight(@ent, @phys, @att) p";
-        var entParam = cmd.Parameters.Add(
-            new NpgsqlParameter("ent", NpgsqlDbType.Array | NpgsqlDbType.Bytea));
-        var physParam = cmd.Parameters.Add(
-            new NpgsqlParameter("phys", NpgsqlDbType.Array | NpgsqlDbType.Bytea));
-        var attParam = cmd.Parameters.Add(
-            new NpgsqlParameter("att", NpgsqlDbType.Array | NpgsqlDbType.Bytea));
-
-        int max = Math.Max(entityIds.Count, Math.Max(physIds.Count, attIds.Count));
-        for (int off = 0; off < max; off += ChunkSize)
-        {
-            int entLen = Math.Min(ChunkSize, Math.Max(0, entityIds.Count - off));
-            int physLen = Math.Min(ChunkSize, Math.Max(0, physIds.Count - off));
-            int attLen = Math.Min(ChunkSize, Math.Max(0, attIds.Count - off));
-
-            entParam.Value = ToByteaArray(entityIds, off, entLen);
-            physParam.Value = ToByteaArray(physIds, off, physLen);
-            attParam.Value = ToByteaArray(attIds, off, attLen);
-
-            await using var r = await cmd.ExecuteReaderAsync(ct);
-            if (!await r.ReadAsync(ct)) continue;
-            DecodeBitmap(entExisting, entityIds, off, entLen, r.GetFieldValue<byte[]>(0));
-            DecodeBitmap(physExisting, physIds, off, physLen, r.GetFieldValue<byte[]>(1));
-            DecodeBitmap(attExisting, attIds, off, attLen, r.GetFieldValue<byte[]>(2));
-        }
-        return (entExisting, physExisting, attExisting);
-    }
-
-    private static byte[][] ToByteaArray(IReadOnlyList<Hash128> ids, int off, int len)
-    {
-        var arg = new byte[len][];
-        for (int i = 0; i < len; i++) arg[i] = ids[off + i].ToBytes();
-        return arg;
-    }
-
-    private static void DecodeBitmap(
-        HashSet<Hash128> existing, IReadOnlyList<Hash128> ids, int off, int len, byte[] bitmap)
-    {
-        for (int i = 0; i < len; i++)
-        {
-            byte b = (byte)(i >> 3 < bitmap.Length ? bitmap[i >> 3] : 0);
-            if (((b >> (i & 7)) & 1) != 0) existing.Add(ids[off + i]);
-        }
-    }
-
-    private static async Task<HashSet<Hash128>> EntitiesExistAsync(
-        NpgsqlConnection conn, IReadOnlyList<Hash128> ids, CancellationToken ct)
-    {
-        var existing = new HashSet<Hash128>();
-        const int ChunkSize = 250_000;
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 0;
-        cmd.CommandText = "SELECT laplace.entities_exist_bitmap(@ids)";
-        var idsParam = cmd.Parameters.Add(
-            new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea));
-        for (int off = 0; off < ids.Count; off += ChunkSize)
-        {
-            int len = Math.Min(ChunkSize, ids.Count - off);
-            var arg = new byte[len][];
-            for (int i = 0; i < len; i++) arg[i] = ids[off + i].ToBytes();
-            idsParam.Value = arg;
-            var res = await cmd.ExecuteScalarAsync(ct);
-            var bitmap = res as byte[] ?? Array.Empty<byte>();
-            for (int i = 0; i < len; i++)
-            {
-                byte b = (byte)(i >> 3 < bitmap.Length ? bitmap[i >> 3] : 0);
-                if (((b >> (i & 7)) & 1) != 0) existing.Add(ids[off + i]);
-            }
-        }
-        return existing;
-    }
-
-    private static List<Hash128> CollectUnprovenIds<TRow>(
-        IReadOnlyList<SubstrateChange> changes,
-        Func<SubstrateChange, System.Collections.Immutable.ImmutableArray<TRow>> select,
-        Func<TRow, Hash128> idOf,
-        ProvenIdCache proven)
-    {
-        var seen = new HashSet<Hash128>();
-        var ids = new List<Hash128>();
-        foreach (var c in changes)
-            foreach (var row in select(c))
-            {
-                var id = idOf(row);
-                if (!proven.Contains(id) && seen.Add(id)) ids.Add(id);
-            }
-        return ids;
-    }
-
-    private static async Task<HashSet<Hash128>> LoadExistingIdsAsync(
-        NpgsqlConnection conn,
-        string table,
-        IReadOnlyList<Hash128> ids,
-        CancellationToken ct)
-    {
-        var existing = new HashSet<Hash128>();
-        if (ids.Count == 0) return existing;
-        var idBytes = new List<byte[]>(ids.Count);
-        foreach (var id in ids) idBytes.Add(id.ToBytes());
-
-        const int ChunkSize = 250_000;
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 0;
-        cmd.CommandText = $"SELECT id FROM laplace.{table} WHERE id = ANY(@ids)";
-        var idsParam = cmd.Parameters.Add(
-            new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea));
-        for (int off = 0; off < idBytes.Count; off += ChunkSize)
-        {
-            int len = Math.Min(ChunkSize, idBytes.Count - off);
-            var chunk = new byte[len][];
-            idBytes.CopyTo(off, chunk, 0, len);
-            idsParam.Value = chunk;
-            await using var r = await cmd.ExecuteReaderAsync(ct);
-            while (await r.ReadAsync(ct))
-            {
-                var bts = (byte[])r[0];
-                existing.Add(new Hash128(BitConverter.ToUInt64(bts, 0), BitConverter.ToUInt64(bts, 8)));
-            }
-        }
-        return existing;
-    }
-
-    private static readonly byte[] CopyBinaryHeader =
-        { 0x50, 0x47, 0x43, 0x4F, 0x50, 0x59, 0x0A, 0xFF, 0x0D, 0x0A, 0x00,
-          0, 0, 0, 0,  0, 0, 0, 0 };
-    private static readonly byte[] CopyBinaryTrailer = { 0xFF, 0xFF };
-    private const long CopyChunkBytes = 1L << 23;
-
-    private static readonly bool CopyValidate =
-        Environment.GetEnvironmentVariable("LAPLACE_COPY_VALIDATE") == "1";
-
-    // Diagnostic: re-validate the entities buffer at a named staging phase. Because the
-    // entities buffer provably never reallocs and is only written by complete, checked
-    // add_entity rows, any corruption observed here must come from an EXTERNAL heap write
-    // (e.g. a buffer overrun by a later staging phase). Checkpointing after each phase
-    // names the exact phase that introduces the corruption.
-    private static void CheckpointEntities(IntentStage stage, string phase)
-    {
-        if (!CopyValidate) return;
-        int n = stage.EntityCount;
-        if (n == 0) return;
-        (IntPtr ptr, long len) = stage.TupleBuffer(IntentStageTable.Entities);
-        try
-        {
-            ValidateCopyBlob(ptr, len, 4, "entities", n);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException(
-                $"ENTITIES buffer corruption FIRST observed at phase '{phase}' " +
-                $"(entityCount={n}, entities.len={len}, expected={(long)n} rows). " +
-                $"This localizes the heap corruptor to whatever ran BEFORE this checkpoint. {ex.Message}", ex);
-        }
-    }
-
-    // Walks the native PG-binary-COPY blob row-by-row and verifies each row begins with
-    // the expected int16 field count and that field length prefixes stay within bounds.
-    // On the FIRST framing violation it throws with the exact byte offset, the row index,
-    // the expected vs observed field count, and a hex window so we can see what bytes
-    // corrupted the stream (recognizable ASCII / hash / double patterns reveal the source).
-    private static void ValidateCopyBlob(IntPtr ptr, long len, int expectedFields, string tableName, int rowCount)
-    {
-        if (ptr == IntPtr.Zero || len <= 0) return;
-        var blob = GC.AllocateUninitializedArray<byte>(checked((int)len));
-        unsafe
-        {
-            new ReadOnlySpan<byte>((void*)ptr, checked((int)len)).CopyTo(blob);
-        }
-
-        // Entities are STRICTLY fixed-size: int16(4) + [int32(16)+16 id] + [int32(2)+2 tier]
-        // + [int32(16)+16 type_id] + [int32(16)+16 fob | int32(-1) NULL fob].
-        // => stride is 68 bytes (fob present) or 52 bytes (fob NULL). Because the stream
-        // is fixed-size, the FIRST row whose start is not reachable by a valid stride from
-        // the previous row start is the true point of corruption. We detect that precisely
-        // and, on the row-by-row walk below, also confirm field counts/lengths.
-        long off = 0;
-        int row = 0;
-        while (off < len)
-        {
-            long rowStart = off;
-            if (off + 2 > len)
-                FailCopyBlob(blob, rowStart, row, tableName, expectedFields, -1,
-                    "truncated field-count (need 2 bytes)");
-            int fields = (blob[off] << 8) | blob[off + 1];
-            off += 2;
-            if (fields != expectedFields)
-                FailCopyBlob(blob, rowStart, row, tableName, expectedFields, fields,
-                    $"unexpected field count (got {fields})");
-            for (int f = 0; f < fields; f++)
-            {
-                if (off + 4 > len)
-                    FailCopyBlob(blob, rowStart, row, tableName, expectedFields, fields,
-                        $"truncated length prefix at field {f}");
-                int flen = (blob[off] << 24) | (blob[off + 1] << 16) | (blob[off + 2] << 8) | blob[off + 3];
-                off += 4;
-                if (flen == -1) continue;          // NULL field
-                if (flen < 0 || off + flen > len)
-                    FailCopyBlob(blob, rowStart, row, tableName, expectedFields, fields,
-                        $"field {f} length {flen} overruns blob (off={off}, len={len})");
-                off += flen;
-            }
-            row++;
-        }
-        if (row != rowCount)
-            throw new InvalidOperationException(
-                $"COPY blob validation: {tableName} parsed {row} rows but stage reports {rowCount}.");
-    }
-
-    private static void FailCopyBlob(
-        byte[] blob, long rowStart, int row, string tableName, int expected, int got, string why)
-    {
-        long winStart = Math.Max(0, rowStart - 160);
-        long winEnd = Math.Min(blob.LongLength, rowStart + 160);
-        var sb = new StringBuilder();
-        for (long i = winStart; i < winEnd; i++)
-        {
-            if (i == rowStart) sb.Append("[>");
-            sb.Append(blob[i].ToString("X2"));
-            if (i == rowStart) sb.Append("<]");
-            sb.Append(' ');
-        }
-        var ascii = new StringBuilder();
-        for (long i = winStart; i < winEnd; i++)
-        {
-            byte c = blob[i];
-            ascii.Append(c >= 0x20 && c < 0x7F ? (char)c : '.');
-        }
-
-        // Walk forward from the blob start to find the FIRST row that fails to land on a
-        // valid fixed-stride boundary (entities only). This pinpoints the originating
-        // corrupt row rather than the row where the desync surfaced.
-        var strideReport = new StringBuilder();
-        if (tableName == "entities")
-        {
-            strideReport.Append('\n');
-            strideReport.Append(DescribeEntityStride(blob, rowStart));
-        }
-
-        throw new InvalidOperationException(
-            $"COPY blob CORRUPT in '{tableName}': {why}; row #{row}, rowStart byte offset {rowStart}, " +
-            $"expected {expected} fields. Hex window (rowStart marked [>..<]):\n{sb}\nASCII: {ascii}{strideReport}");
-    }
-
-    // Re-walks the entities blob assuming the strict fixed layout and reports the first row
-    // whose framing deviates, plus a per-row stride trace around the failure offset.
-    private static string DescribeEntityStride(byte[] blob, long failOffset)
-    {
-        var sb = new StringBuilder();
-        long off = 0;
-        int row = 0;
-        long len = blob.LongLength;
-        long lastGoodStart = 0;
-        while (off + 2 <= len)
-        {
-            long rowStart = off;
-            int fields = (blob[off] << 8) | blob[off + 1];
-            if (fields != 4)
-            {
-                sb.Append($"first off-layout entity row #{row} at offset {rowStart} (field-count={fields}, expected 4); ");
-                sb.Append($"previous good row started at {lastGoodStart} (stride {rowStart - lastGoodStart}). ");
-                long ws = Math.Max(0, lastGoodStart - 8);
-                long we = Math.Min(len, rowStart + 16);
-                sb.Append("bytes around prev→bad: ");
-                for (long i = ws; i < we; i++)
-                {
-                    if (i == lastGoodStart) sb.Append("{prev>");
-                    if (i == rowStart) sb.Append("{bad>");
-                    sb.Append(blob[i].ToString("X2"));
-                    sb.Append(' ');
-                }
-                return sb.ToString();
-            }
-            // STRICT fixed-layout check: every field length must be exactly as specified.
-            // We do NOT follow a wrong length (which would mask the true origin); instead we
-            // verify each prefix and stop at the FIRST deviation. Layout:
-            //   [int16=4][int32=16 + 16 id][int32=2 + 2 tier][int32=16 + 16 type_id]
-            //   [int32=16 + 16 fob | int32=-1 NULL]
-            int lId   = ReadLen(blob, rowStart + 2);
-            int lTier = ReadLen(blob, rowStart + 2 + 4 + 16);
-            int lType = ReadLen(blob, rowStart + 2 + 4 + 16 + 4 + 2);
-            int lFob  = ReadLen(blob, rowStart + 2 + 4 + 16 + 4 + 2 + 4 + 16);
-            bool ok = lId == 16 && lTier == 2 && lType == 16 && (lFob == 16 || lFob == -1);
-            if (!ok)
-            {
-                sb.Append($"first BAD-LENGTH entity row #{row} at offset {rowStart}: ");
-                sb.Append($"id_len={lId}(want 16) tier_len={lTier}(want 2) type_len={lType}(want 16) fob_len={lFob}(want 16 or -1). ");
-                sb.Append($"prev good row at {lastGoodStart} (stride {rowStart - lastGoodStart}). ");
-                long ws = Math.Max(0, rowStart - 8);
-                long we = Math.Min(len, rowStart + 80);
-                sb.Append("bytes: ");
-                for (long i = ws; i < we; i++)
-                {
-                    if (i == rowStart) sb.Append("{row>");
-                    sb.Append(blob[i].ToString("X2"));
-                    sb.Append(' ');
-                }
-                return sb.ToString();
-            }
-            long stride = lFob == -1 ? 52 : 68;
-            lastGoodStart = rowStart;
-            off = rowStart + stride;
-            row++;
-        }
-        sb.Append($"entities STRICT re-walk completed {row} rows up to offset {off} with NO layout break (failOffset={failOffset}); ");
-        sb.Append($"this means the byte count is consistent but a field-count read 0 at failOffset — investigate buffer len vs row_count. ");
-        return sb.ToString();
-    }
-
-    private static int ReadLen(byte[] blob, long at)
-    {
-        if (at < 0 || at + 4 > blob.LongLength) return -100;
-        return (blob[at] << 24) | (blob[at + 1] << 16) | (blob[at + 2] << 8) | blob[at + 3];
-    }
-
     private static async Task<int> StageAndInsertAsync(
         NpgsqlConnection conn, IntentStage stage, IntentStageTable table, string tableName, CancellationToken ct)
     {
@@ -703,7 +349,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
 
         if (rowCount == 0) return 0;
 
-        if (CopyValidate)
+        if (CopyBlobValidator.Enabled)
         {
             int expectedFields = table switch
             {
@@ -711,7 +357,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 IntentStageTable.Physicalities => 11,
                 _                              => 9,
             };
-            ValidateCopyBlob(ptr, len, expectedFields, tableName, rowCount);
+            CopyBlobValidator.Validate(ptr, len, expectedFields, tableName, rowCount);
         }
 
         string stageName = $"_laplace_stage_{tableName}";
@@ -727,24 +373,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
 
         await using (var stream = await conn.BeginRawBinaryCopyAsync(
             $"COPY {stageName} ({cols}) FROM STDIN (FORMAT BINARY)", ct))
-        {
-            await stream.WriteAsync(CopyBinaryHeader, ct);
-            if (len > 0)
-            {
-                var window = new byte[(int)Math.Min(CopyChunkBytes, len)];
-                for (long off = 0; off < len; off += window.Length)
-                {
-                    int n = (int)Math.Min(window.Length, len - off);
-                    unsafe
-                    {
-                        new ReadOnlySpan<byte>((void*)(ptr + (nint)off), n).CopyTo(window);
-                    }
-                    await stream.WriteAsync(window.AsMemory(0, n), ct);
-                }
-            }
-            await stream.WriteAsync(CopyBinaryTrailer, ct);
-            await stream.FlushAsync(ct);
-        }
+            await PgBinaryCopy.WriteNativeBlobAsync(stream, ptr, len, ct);
 
         await using (var promote = conn.CreateCommand())
         {
@@ -757,216 +386,18 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
     }
 
     // ======================================================================
-    // Append-only bulk commit (the coherent path).
-    //
-    // The chunked transactional-upsert path above holds row locks on hot rows
-    // (deadlock) and re-pays COPY+INSERT per chunk (slow), and bounds RAM that
-    // does not need bounding on a 96 GB box. This path instead COPIES rows into
-    // per-source UNLOGGED staging with NO transaction, NO ON CONFLICT against the
-    // live tables, NO preflight / proven-cache — so it is lock-free (parallel
-    // across cores) and the live tables are touched exactly once, by ONE set-based
-    // merge at FinalizeSourceAsync. Measured on this PG: append ~1.3M row/s, merge
-    // ~135k row/s and ~flat as the target grows (B-tree inserts are O(log n)).
+    // Append-only bulk commit (the coherent path) — see SubstrateStagingMerge.
+    // These public methods are thin delegators so ISubstrateWriter is unchanged;
+    // the lock-free fresh-source strategy lives in SubstrateStagingMerge.
     // ======================================================================
 
-    private static string StagingTag(Hash128 sourceId) =>
-        Convert.ToHexString(sourceId.ToBytes()).ToLowerInvariant();
-
-    private static (string E, string P, string A) StagingNames(string tag) =>
-        ($"laplace._lap_stg_{tag}_e", $"laplace._lap_stg_{tag}_p", $"laplace._lap_stg_{tag}_a");
-
-    /// <summary>
-    /// COPY a batch's rows into this source's UNLOGGED staging (append-only, lock-free).
-    /// Rows are NOT visible in the live tables until <see cref="FinalizeSourceAsync"/>.
-    /// Safe to call concurrently from many tasks for the same source (COPY appends; the
-    /// merge dedups). Re-appending the same intent double-counts attestations, so the
-    /// runner appends each intent exactly once (no retry on the append leg).
-    /// </summary>
-    public async Task<ApplyResult> AppendAsync(
+    /// <inheritdoc cref="SubstrateStagingMerge.AppendAsync"/>
+    public Task<ApplyResult> AppendAsync(
         IReadOnlyList<SubstrateChange> changes, Hash128 sourceId, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(changes);
-        var sw = Stopwatch.StartNew();
-        int eAtt = 0, pAtt = 0, aAtt = 0, roundTrips = 0;
+        => _staging.AppendAsync(changes, sourceId, ct);
 
-        using var stage = IntentStage.New(1024);
-        var prebuilt = new List<IntentStage>();
-        Span<double> coord = stackalloc double[4];
-        foreach (var c in changes)
-        {
-            foreach (var e in c.Entities) { stage.AddEntity(e.Id, e.Tier, e.TypeId, e.FirstObservedBy); eAtt++; }
-            foreach (var p in c.Physicalities)
-            {
-                coord[0] = p.CoordX; coord[1] = p.CoordY; coord[2] = p.CoordZ; coord[3] = p.CoordM;
-                stage.AddPhysicality(
-                    p.Id, p.EntityId, p.SourceId, (short)p.Type, coord, p.HilbertIndex,
-                    p.TrajectoryXyzm is null ? ReadOnlySpan<double>.Empty : p.TrajectoryXyzm.AsSpan(),
-                    p.NConstituents, p.AlignmentResidual, p.SourceDim, p.ObservedAtUnixUs);
-                pAtt++;
-            }
-            foreach (var a in c.Attestations)
-            {
-                stage.AddAttestation(
-                    a.Id, a.SubjectId, a.TypeId, a.ObjectId, a.SourceId, a.ContextId,
-                    (short)a.Outcome, a.LastObservedAtUnixUs, a.ObservationCount);
-                aAtt++;
-            }
-            if (!c.IntentStages.IsDefaultOrEmpty)
-                foreach (var pre in c.IntentStages)
-                    if (!pre.IsInvalid) prebuilt.Add(pre);
-        }
-
-        if (eAtt == 0 && pAtt == 0 && aAtt == 0 && prebuilt.Count == 0)
-            return new ApplyResult(0, 0, 0, 0, 0, 0, 0, sw.Elapsed, true);
-
-        string tag = StagingTag(sourceId);
-        var (eT, pT, aT) = StagingNames(tag);
-        await EnsureStagingAsync(tag, ct);
-
-        await using var conn = await _ds.OpenConnectionAsync(ct);
-        roundTrips++;
-
-        if (stage.EntityCount > 0)      { await CopyAppendAsync(conn, stage, IntentStageTable.Entities, eT, ct); roundTrips++; }
-        if (stage.PhysicalityCount > 0) { await CopyAppendAsync(conn, stage, IntentStageTable.Physicalities, pT, ct); roundTrips++; }
-        if (stage.AttestationCount > 0) { await CopyAppendAsync(conn, stage, IntentStageTable.Attestations, aT, ct); roundTrips++; }
-        foreach (var pre in prebuilt)
-        {
-            try
-            {
-                if (pre.EntityCount > 0)      { await CopyAppendAsync(conn, pre, IntentStageTable.Entities, eT, ct); roundTrips++; }
-                if (pre.PhysicalityCount > 0) { await CopyAppendAsync(conn, pre, IntentStageTable.Physicalities, pT, ct); roundTrips++; }
-                if (pre.AttestationCount > 0) { await CopyAppendAsync(conn, pre, IntentStageTable.Attestations, aT, ct); roundTrips++; }
-            }
-            finally { pre.Dispose(); }
-        }
-
-        sw.Stop();
-        return new ApplyResult(eAtt, eAtt, pAtt, pAtt, aAtt, aAtt, roundTrips, sw.Elapsed, false);
-    }
-
-    /// <summary>
-    /// Merge this source's UNLOGGED staging into the live tables in ONE set operation per
-    /// table — entities/physicalities dedup by id (DISTINCT ON … ON CONFLICT DO NOTHING),
-    /// attestations fold by id (GROUP BY, SUM(observation_count)) — then drop the staging.
-    /// No-op if the source never appended. Entities merge first so attestation/physicality
-    /// FKs resolve against rows merged in the same call.
-    /// </summary>
-    public async Task<(int Entities, int Physicalities, int Attestations)> FinalizeSourceAsync(
+    /// <inheritdoc cref="SubstrateStagingMerge.FinalizeAsync"/>
+    public Task<(int Entities, int Physicalities, int Attestations)> FinalizeSourceAsync(
         Hash128 sourceId, CancellationToken ct = default)
-    {
-        string tag = StagingTag(sourceId);
-        var (eT, pT, aT) = StagingNames(tag);
-        string ecols = IntentStage.CopyColumnList(IntentStageTable.Entities);
-        string pcols = IntentStage.CopyColumnList(IntentStageTable.Physicalities);
-
-        await using var conn = await _ds.OpenConnectionAsync(ct);
-
-        await using (var chk = conn.CreateCommand())
-        {
-            chk.CommandText = $"SELECT to_regclass('{eT}') IS NOT NULL";
-            if (await chk.ExecuteScalarAsync(ct) is not true) return (0, 0, 0);
-        }
-
-        int e, p, a;
-        await using (var m = conn.CreateCommand())
-        {
-            m.CommandTimeout = 0;
-            m.CommandText =
-                $"INSERT INTO laplace.entities ({ecols}) "
-              + $"SELECT DISTINCT ON (id) {ecols} FROM {eT} ORDER BY id ON CONFLICT DO NOTHING";
-            e = await m.ExecuteNonQueryAsync(ct);
-        }
-        await using (var m = conn.CreateCommand())
-        {
-            m.CommandTimeout = 0;
-            m.CommandText =
-                $"INSERT INTO laplace.physicalities ({pcols}) "
-              + $"SELECT DISTINCT ON (id) {pcols} FROM {pT} ORDER BY id ON CONFLICT DO NOTHING";
-            p = await m.ExecuteNonQueryAsync(ct);
-        }
-        await using (var m = conn.CreateCommand())
-        {
-            m.CommandTimeout = 0;
-            m.CommandText =
-                "INSERT INTO laplace.attestations "
-              + "(id, subject_id, type_id, object_id, source_id, context_id, outcome, last_observed_at, observation_count) "
-              + "SELECT id, min(subject_id), min(type_id), min(object_id), min(source_id), min(context_id), "
-              + "       min(outcome), max(last_observed_at), sum(observation_count) "
-              + $"FROM {aT} GROUP BY id "
-              + "ON CONFLICT (id) DO UPDATE SET "
-              + "  observation_count = laplace.attestations.observation_count + excluded.observation_count, "
-              + "  last_observed_at  = GREATEST(laplace.attestations.last_observed_at, excluded.last_observed_at)";
-            a = await m.ExecuteNonQueryAsync(ct);
-        }
-        await using (var d = conn.CreateCommand())
-        {
-            d.CommandText = $"DROP TABLE IF EXISTS {eT}, {pT}, {aT}";
-            await d.ExecuteNonQueryAsync(ct);
-        }
-        return (e, p, a);
-    }
-
-    // Concurrent "CREATE TABLE IF NOT EXISTS" from parallel appenders races on pg_type
-    // (23505) — IF NOT EXISTS is not atomic against concurrent creation. Create each
-    // source's staging exactly once: Lazy<Task> runs the DDL a single time and every
-    // appender awaits that same completion (on its own short-lived connection; DDL
-    // auto-commits, so the tables are visible to the COPY connections afterward).
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<Task>> _stagingInit = new();
-
-    private Task EnsureStagingAsync(string tag, CancellationToken ct) =>
-        _stagingInit.GetOrAdd(tag, t => new Lazy<Task>(() => CreateStagingTablesAsync(t, ct))).Value;
-
-    private async Task CreateStagingTablesAsync(string tag, CancellationToken ct)
-    {
-        var (eT, pT, aT) = StagingNames(tag);
-        await using var conn = await _ds.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 0;
-        cmd.CommandText =
-            $"CREATE UNLOGGED TABLE IF NOT EXISTS {eT} (LIKE laplace.entities INCLUDING DEFAULTS);"
-          + $"CREATE UNLOGGED TABLE IF NOT EXISTS {pT} (LIKE laplace.physicalities INCLUDING DEFAULTS);"
-          + $"CREATE UNLOGGED TABLE IF NOT EXISTS {aT} (LIKE laplace.attestations INCLUDING DEFAULTS);";
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
-
-    private static async Task<int> CopyAppendAsync(
-        NpgsqlConnection conn, IntentStage stage, IntentStageTable table, string targetTable, CancellationToken ct)
-    {
-        int rowCount = table switch
-        {
-            IntentStageTable.Entities      => stage.EntityCount,
-            IntentStageTable.Physicalities => stage.PhysicalityCount,
-            _                              => stage.AttestationCount,
-        };
-        if (rowCount == 0) return 0;
-
-        (IntPtr ptr, long len) = stage.TupleBuffer(table);
-        if (CopyValidate)
-        {
-            int expectedFields = table switch
-            {
-                IntentStageTable.Entities      => 4,
-                IntentStageTable.Physicalities => 11,
-                _                              => 9,
-            };
-            ValidateCopyBlob(ptr, len, expectedFields, targetTable, rowCount);
-        }
-        string cols = IntentStage.CopyColumnList(table);
-        await using var stream = await conn.BeginRawBinaryCopyAsync(
-            $"COPY {targetTable} ({cols}) FROM STDIN (FORMAT BINARY)", ct);
-        await stream.WriteAsync(CopyBinaryHeader, ct);
-        if (len > 0)
-        {
-            var window = new byte[(int)Math.Min(CopyChunkBytes, len)];
-            for (long off = 0; off < len; off += window.Length)
-            {
-                int n = (int)Math.Min(window.Length, len - off);
-                unsafe { new ReadOnlySpan<byte>((void*)(ptr + (nint)off), n).CopyTo(window); }
-                await stream.WriteAsync(window.AsMemory(0, n), ct);
-            }
-        }
-        await stream.WriteAsync(CopyBinaryTrailer, ct);
-        await stream.FlushAsync(ct);
-        return rowCount;
-    }
+        => _staging.FinalizeAsync(sourceId, ct);
 }
