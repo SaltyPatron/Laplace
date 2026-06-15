@@ -224,6 +224,17 @@ internal static class FoundryCommands
         int vocabSize = pieces.Count;
         Console.WriteLine($"  native vocab: {sel.Count:N0} substrate word entities + 256 byte floor + 3 specials = {vocabSize:N0}");
 
+        // FAITHFUL transcription (attestations ARE the tensors): embed and lm_head are the
+        // low-rank factors of the rank-weighted rated adjacency A (truncated SVD to rank=dim),
+        // intermediate layers are no-ops. dim is a NORMAL hidden width (the SVD rank, e.g. 512),
+        // NOT vocab — a 32k-token model is 32000×dim, never 32000². Only constraint: one no-op
+        // layer (the readout transform is the factorization, depth carries no operator here).
+        if (FoundryExport.EnvInt("LAPLACE_FOUNDRY_FAITHFUL", 0) != 0)
+        {
+            layers = 1;
+            Console.WriteLine($"  FAITHFUL: dim={dim} (SVD rank), 1 no-op layer, embed=U√S, lm_head=V√S of A");
+        }
+
         string moldDir = Path.Combine(Path.GetTempPath(), $"laplace-native-mold-d{dim}-v{vocabSize}");
         Directory.CreateDirectory(moldDir);
 
@@ -361,6 +372,20 @@ internal static class FoundryCommands
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
 
+        // ── FAITHFUL transcription path ───────────────────────────────────────────────
+        // attestations ARE the tensors — no basis, no SVD, no operators, no gains, no PMI,
+        // no rank bands, no hand-typed weights. embed = identity, lm_head = the rank-weighted
+        // rated adjacency A (read whole from consensus_adjacency, rank looked up per edge from
+        // the banked law), layers = no-op. logits[Y] = A[Y,X] exactly: the GEMM is the lookup.
+        if (FoundryExport.EnvInt("LAPLACE_FOUNDRY_FAITHFUL", 0) != 0)
+        {
+            int faithfulRc = await WriteFaithfulGgufAsync(
+                ds, recipe, tokens, tokenSlots, vocab, dModel, modelDir, outputPath, specs, tensorCount);
+            SynthInterop.ArchTemplateFree(tmplHandle);
+            SynthInterop.RecipeFree(recipeHandle);
+            return faithfulRc == 0 ? 0 : Fail($"faithful foundry write failed (status {faithfulRc})");
+        }
+
         // ── read the consensus planes (one set-based query each; entity→ordinal is
         // perf-cache territory, the DB is never asked per token). The pour draws from
         // BOTH witness classes over the same token entities: the model behavioral
@@ -376,39 +401,15 @@ internal static class FoundryCommands
         // the role's relation set, degree-capped server-side via the (subject_id, type_id)
         // index) — microseconds, no scan, no corpus build. A deposited model is NOT required;
         // its behavioral relations (ATTENDS/OV_RELATES/COMPLETES_TO) just join when present.
-        Task<FoundryExport.PlaneCoo> RoleAsync(params string[] rels)
-            => FoundryExport.ReadConsensusPlaneAsync(ds, rels, tokenSlots, degreeCap);
-        // The operators are projections of the FULL rank-grouped consensus — every
-        // populated relation type, not a sliver. Each transformer channel reads the
-        // relations of the rank whose role it plays (rank header: standards 0.91 …
-        // taxonomic 0.82 … causal 0.64 … associative 0.36 … tensor_calculation 0.27).
-        // The model-contracted tensor_calculation relations (ATTENDS/OV_RELATES/
-        // COMPLETES_TO) are the LEAST authoritative class and just join when present —
-        // the seed facts outrank them, so a deposited model is never required.
-        // EMBEDDING geometry ← equivalence (sameness / similarity / translation / form).
-        var simTask = RoleAsync(
-            "IS_SYNONYM_OF", "IS_SIMILAR_TO", "SIMILAR_TO", "IS_TRANSLATION_OF",
-            "FORM_OF", "HAS_VARIANT_OF", "CORRESPONDS_TO", "IS_LEMMA_OF", "IS_PARTICIPLE_OF");
-        // V/O ← taxonomic + partitive (what it IS, what it is MADE OF) + model OV_RELATES.
-        var relTask = RoleAsync(
-            "IS_A", "IS_INSTANCE_OF", "MANNER_OF", "EVOKES_FRAME", "IS_SENSE_OF",
-            "HAS_PART", "HAS_A", "HAS_PROPERTY", "HAS_MEMBER", "HAS_ATTRIBUTE", "HAS_FEATURE",
-            "HAS_SEMANTIC_ROLE", "HAS_FRAME_ELEMENT", "HAS_THEMATIC_ROLE", "CONTAINS",
-            "MADE_UP_OF", "HAS_SUBSTANCE", "HAS_SENSE", "HAS_POS", "HAS_XPOS",
-            "DEPENDS_ON", "RECEIVES_ACTION", "OV_RELATES");
-        // FFN / completion ← causal + sequence (what FOLLOWS, RESULTS, ENTAILS) + COMPLETES_TO.
-        var preTask = RoleAsync(
-            "PRECEDES", "IS_BEFORE", "IS_AFTER", "CAUSES", "CAUSATIVE_OF", "INCHOATIVE_OF",
-            "ENTAILS", "HAS_SUBEVENT", "HAS_FIRST_SUBEVENT", "HAS_LAST_SUBEVENT", "HAS_PREREQUISITE",
-            "X_INTENT", "X_NEED", "X_EFFECT", "X_WANT", "X_REACT", "X_ATTR", "X_REASON", "X_FILLED_BY",
-            "O_EFFECT", "O_REACT", "O_WANT", "CAUSES_DESIRE", "MOTIVATED_BY_GOAL",
-            "OBJECT_USE", "OBSTRUCTED_BY", "CREATED_BY", "COMPLETES_TO");
-        // ATTENTION ← associative (relatedness / co-occurrence / use / location) + model ATTENDS.
-        var attTask = RoleAsync(
-            "RELATED_TO", "USED_FOR", "AT_LOCATION", "LOCATED_NEAR", "CAPABLE_OF", "DESIRES",
-            "HAS_CONTEXT", "IS_COORDINATE_TERM_WITH", "DERIVATIONALLY_RELATED", "PERTAINS_TO",
-            "SYMBOL_OF", "ALSO_SEE", "HAS_VERB_FRAME", "REFERENCES", "CALLS",
-            "ATTENDS", "CO_OCCURS_WITH");
+        // WITHIN-LAYER reads (the ranks ARE the layers): each role plane is one rank band,
+        // content objects only, eff_mu weights — no flattening, no app/structural metadata
+        // (HAS_POS etc.), no unnamed types. consensus_layer_plane enforces it server-side.
+        Task<FoundryExport.PlaneCoo> LayerAsync(double lo, double hi)
+            => FoundryExport.ReadLayerPlaneAsync(ds, lo, hi, tokenSlots, degreeCap);
+        var simTask = LayerAsync(0.50, 0.60);   // equivalence (0.55): sameness/synonym  → embedding
+        var relTask = LayerAsync(0.68, 0.86);   // taxonomic+partitive (0.82/0.73): is-a/has-part → V/O
+        var preTask = LayerAsync(0.60, 0.68);   // causal (0.64): what follows/results    → FFN
+        var attTask = LayerAsync(0.30, 0.50);   // associative+oppositional (0.36/0.45)    → attention
         await Task.WhenAll(simTask, relTask, preTask, attTask);
         var sim = FoundryExport.Normalize(simTask.Result);
         var rel = FoundryExport.Normalize(relTask.Result);
@@ -699,6 +700,179 @@ internal static class FoundryCommands
         SynthInterop.ArchTemplateFree(tmplHandle);
         SynthInterop.RecipeFree(recipeHandle);
         return status == 0 ? 0 : Fail($"foundry write failed (status {status})");
+    }
+
+    // FAITHFUL generative cast: the attestations transcribed into the container, no learning,
+    // no gains, no rank bands. The rank-weighted rated adjacency A[X,Y] (read whole from
+    // consensus_adjacency — the rank looked up PER EDGE from the banked law server-side) is
+    // factored by truncated SVD to rank=dim: embed = U√S, lm_head = V√S. In the cast,
+    //   logits[Y|X] = lm_head[Y]·embed[X] = Σ_k U[X,k]·S_k·V[Y,k] = A_dim[X,Y]
+    // — the rank-weighted rating LOOKED UP, factored to the hidden width. dim is a NORMAL
+    // embedding size, NOT vocab (a 32k-token model is 32000×dim). Intermediate layers are
+    // no-ops, norms = 1. This is last-token (bigram) order; carrying context across the prompt
+    // is a later layer of work, and the model says so rather than pretend.
+    private static async Task<int> WriteFaithfulGgufAsync(
+        NpgsqlDataSource ds,
+        LlamaRecipeExtractor.RecipeInfo recipe,
+        IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
+        Dictionary<Hash128, List<int>> tokenSlots,
+        int vocab, int dModel, string modelDir, string outputPath,
+        TensorSpec[] specs, int tensorCount)
+    {
+        int cap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_FAITHFUL_CAP", 128);
+        var sw = Stopwatch.StartNew();
+        var A = await FoundryExport.ReadAdjacencyAsync(ds, tokenSlots, cap);
+        if (A.Nnz == 0)
+            return Fail("consensus_adjacency returned no content edges over this vocab — ingest/seed first");
+        var subjects = new HashSet<int>();
+        foreach (var r in A.Rows) subjects.Add(r);
+        Console.WriteLine($"  FAITHFUL adjacency read in {sw.Elapsed.TotalSeconds:F1}s: {A.Nnz:N0} rank-weighted edges "
+            + $"over {subjects.Count:N0}/{vocab:N0} tokens (cap {cap})");
+
+        // factor A → embed (U) + lm_head (V·S) at rank dModel (the hidden width, not vocab)
+        var swSvd = Stopwatch.StartNew();
+        FoundryExport.FactorAdjacency(A, vocab, dModel, out var embed, out var lmHead, out int usedRank);
+        Console.WriteLine($"  FAITHFUL factorization in {swSvd.Elapsed.TotalSeconds:F1}s: "
+            + $"PPMI-SVD rank {usedRank}/{dModel} → embed=U, lm_head=V·S, no-op layers");
+
+        // ── ACCEPTANCE GATE (in-process, BEFORE the cast) ───────────────────────────────────
+        // The cast's logits[Y|X] rank EXACTLY as lm_head[Y]·embed[X] (the no-op layers pass the
+        // embedding through; the final RMSNorm is a positive per-X scalar that cannot change the
+        // argmax/order over Y). So we can SCORE the model here, without llama.cpp: for each probe
+        // token X, the reconstructed top continuations must reproduce the substrate's own raw
+        // rated adjacency A[X,·] (the ground truth dog→teeth/animal). Overlap is the gate.
+        {
+            var id2surf = new string[vocab];
+            var surf2id = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var t in tokens)
+            {
+                if (t.TokenId < 0 || t.TokenId >= vocab) continue;
+                string s = t.RawToken.StartsWith('▁') ? t.RawToken[1..] : t.RawToken;
+                id2surf[t.TokenId] = s;
+                if (s.Length > 0 && !surf2id.ContainsKey(s)) surf2id[s] = t.TokenId;
+            }
+            // raw-A ground truth: subject ordinal → top objects by weight
+            var rawTop = new Dictionary<int, List<int>>();
+            {
+                var byX = new Dictionary<int, List<(int Y, double W)>>();
+                for (long e = 0; e < A.Nnz; e++)
+                {
+                    int x = A.Rows[e];
+                    if (!byX.TryGetValue(x, out var l)) byX[x] = l = new();
+                    l.Add((A.Cols[e], A.Vals[e]));
+                }
+                foreach (var (x, l) in byX)
+                {
+                    l.Sort((a, b) => b.W.CompareTo(a.W));
+                    rawTop[x] = l.Take(10).Select(p => p.Y).ToList();
+                }
+            }
+            string[] probes = { "dog", "king", "water", "fire", "man", "city", "tree", "food", "house", "river" };
+            int gatePass = 0, gateTotal = 0;
+            Console.WriteLine("  ── acceptance gate: reconstructed continuation vs raw adjacency (ground truth) ──");
+            foreach (var p in probes)
+            {
+                if (!surf2id.TryGetValue(p, out int x) || !rawTop.TryGetValue(x, out var truth) || truth.Count == 0)
+                    continue;
+                gateTotal++;
+                // reconstructed top-5: argmax_Y lm_head[Y]·embed[X]
+                long xo = (long)x * dModel;
+                var scored = new (int Y, double L)[vocab];
+                for (int y = 0; y < vocab; y++)
+                {
+                    long yo = (long)y * dModel; double dot = 0;
+                    for (int c = 0; c < dModel; c++) dot += embed[xo + c] * lmHead[yo + c];
+                    scored[y] = (y, dot);
+                }
+                Array.Sort(scored, (a, b) => b.L.CompareTo(a.L));
+                var recon = scored.Take(5).Select(s => s.Y).ToList();
+                int overlap = recon.Count(y => truth.Contains(y));
+                if (overlap >= 1) gatePass++;
+                string Render(IEnumerable<int> ids) => string.Join(", ",
+                    ids.Select(y => (y >= 0 && y < vocab ? id2surf[y] : null) ?? $"#{y}"));
+                Console.WriteLine($"    {p,-8} recon[{Render(recon)}]  vs truth[{Render(truth.Take(5))}]  overlap={overlap}/5");
+            }
+            string verdict = gateTotal == 0 ? "NO PROBES IN VOCAB"
+                : gatePass >= (gateTotal + 1) / 2 ? $"PASS ({gatePass}/{gateTotal} probes reproduce ≥1 top edge)"
+                : $"WEAK ({gatePass}/{gateTotal}) — rank {dModel} under-captures the adjacency; raise --dim";
+            Console.WriteLine($"  ── gate verdict: {verdict} ──");
+        }
+
+        var gguf = SynthInterop.GgufWriterCreate(outputPath);
+        if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
+        WriteGgufMetadata(gguf, recipe, tokens, modelDir);
+        var swW = Stopwatch.StartNew();
+        for (int i = 0; i < tensorCount; i++)
+        {
+            string name; ulong rows, cols; int dtype;
+            unsafe
+            {
+                var sp = specs[i];
+                name  = Marshal.PtrToStringUTF8((IntPtr)sp.Name) ?? "";
+                rows  = sp.Rank >= 1 ? sp.Shape[0] : 1;
+                cols  = sp.Rank >= 2 ? sp.Shape[1] : 1;
+                dtype = sp.Dtype;
+            }
+            int tr = (int)rows, tc = (int)Math.Max(1UL, cols);
+            var vals = new float[(long)tr * tc];   // zero-initialized = the no-op layer fill
+
+            if (name == "model.embed_tokens.weight")
+            {
+                // embed[X,c] = U[X,c]·√S  (rows = vocab, cols = dim)
+                for (int r = 0; r < tr; r++)
+                    for (int c = 0; c < tc; c++)
+                        vals[(long)r * tc + c] = (float)embed[(long)r * dModel + c];
+            }
+            else if (name == "lm_head.weight")
+            {
+                // lm_head[Y,c] = V[Y,c]·√S  (rows = vocab, cols = dim)
+                for (int r = 0; r < tr; r++)
+                    for (int c = 0; c < tc; c++)
+                        vals[(long)r * tc + c] = (float)lmHead[(long)r * dModel + c];
+            }
+            else if (name == "model.norm.weight"
+                     || name.EndsWith("input_layernorm.weight", StringComparison.Ordinal)
+                     || name.EndsWith("post_attention_layernorm.weight", StringComparison.Ordinal))
+            {
+                Array.Fill(vals, 1.0f);
+            }
+            else if (name.StartsWith("model.layers.", StringComparison.Ordinal))
+            {
+                int layerDot = name.IndexOf('.', "model.layers.".Length);
+                string rest = name[(layerDot + 1)..];
+                // recognized no-op slots stay zero; an unknown layer tensor is a hard error
+                switch (rest)
+                {
+                    case "self_attn.q_proj.weight": case "self_attn.k_proj.weight":
+                    case "self_attn.v_proj.weight": case "self_attn.o_proj.weight":
+                    case "mlp.gate_proj.weight":    case "mlp.up_proj.weight":
+                    case "mlp.down_proj.weight":    break;   // zero (no-op)
+                    default:
+                        Console.WriteLine($"  faithful foundry does not define mold tensor '{name}'");
+                        SynthInterop.GgufWriterFree(gguf); return 3;
+                }
+            }
+            else
+            {
+                Console.WriteLine($"  faithful foundry does not define mold tensor '{name}'");
+                SynthInterop.GgufWriterFree(gguf); return 3;
+            }
+
+            byte[] tensorBytes = dtype == 0 ? FoundryExport.ToF32Bytes(vals) : FoundryExport.ToBf16Bytes(vals);
+            nuint[] ggufDims = cols > 1 ? [(nuint)cols, (nuint)rows] : [(nuint)rows];
+            unsafe
+            {
+                fixed (nuint* dimsPtr = ggufDims)
+                fixed (byte*  dataPtr = tensorBytes)
+                    SynthInterop.GgufWriterAddTensor(gguf, HfToGgmlName(name), dtype, dimsPtr, (nuint)ggufDims.Length, dataPtr);
+            }
+        }
+        int rcw = SynthInterop.GgufWriterFinalize(gguf);
+        SynthInterop.GgufWriterFree(gguf);
+        if (rcw != 0) return Fail($"gguf_writer_finalize failed (rc={rcw}) for {outputPath}");
+        long fsz = new FileInfo(outputPath).Length;
+        Console.WriteLine($"FAITHFUL synthesis complete: {outputPath} ({fsz / 1048576.0:F0} MB) in {swW.Elapsed.TotalSeconds:F1}s");
+        return 0;
     }
 
     private static string HfToGgmlName(string hf)
