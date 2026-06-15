@@ -3,12 +3,21 @@ if(WIN32)
         src/laplace_substrate.c
         src/consensus_fold_step.c
         src/consensus_fold_engine.c
+        src/consensus_fold_walks.c
         src/generate_walk.c
-        src/trajectory_walk.c
+        src/trajectory_corpus.c
+        src/trajectory_generate.c
+        src/variant_synth.c
         src/astar_path.c
         src/graph_geometry_reads.c
+        src/graph_taxonomy.c
+        src/graph_contrast.c
+        src/graph_cascade.c
+        src/foundry_crawl.c
         src/consensus_reads.c
+        src/consensus_lexical_reads.c
         src/recall.c
+        src/recall_route.c
         src/perfcache.c
     )
     set_target_properties(laplace_substrate PROPERTIES
@@ -37,12 +46,21 @@ set(EXT_C_SOURCES
     src/laplace_substrate.c
     src/consensus_fold_step.c
     src/consensus_fold_engine.c
+    src/consensus_fold_walks.c
     src/generate_walk.c
-    src/trajectory_walk.c
+    src/trajectory_corpus.c
+    src/trajectory_generate.c
+    src/variant_synth.c
     src/astar_path.c
     src/graph_geometry_reads.c
+    src/graph_taxonomy.c
+    src/graph_contrast.c
+    src/graph_cascade.c
+    src/foundry_crawl.c
     src/consensus_reads.c
+    src/consensus_lexical_reads.c
     src/recall.c
+    src/recall_route.c
     src/perfcache.c
 )
 

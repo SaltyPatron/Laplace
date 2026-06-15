@@ -341,50 +341,31 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     {
         // Fixed framing per row = 2 (field count) + 20·3 (subject,type,context)
         // + 12 (phi) + 8 (n_vertices) + 12 (games) + 12 (last_ts) + 4 (walk len);
-        // a NULL context is 4 not 20. The walk bytea is variable and can dwarf a
-        // 4 MB buffer (a high-degree COMPLETES_TO subject), so the buffer grows.
+        // a NULL context is 4 not 20. The walk bytea is variable and can dwarf the
+        // buffer (a high-degree COMPLETES_TO subject), which PgCopyRowBuffer grows for.
         const int fixedRowBytes = 2 + 20 * 3 + 12 + 8 + 12 + 12 + 4;
-        var buffer = new byte[4 * 1024 * 1024];
-        CopyBinaryHeader.CopyTo(buffer, 0);
-        int filled = CopyBinaryHeader.Length;
-
+        var copy = new PgCopyRowBuffer(stream);
         foreach (var w in rows)
         {
             ct.ThrowIfCancellationRequested();
-            int need = fixedRowBytes + w.PackedVertices.Length;
-            if (filled + need > buffer.Length)
-            {
-                if (filled > 0)
-                {
-                    await stream.WriteAsync(buffer.AsMemory(0, filled), ct);
-                    filled = 0;
-                }
-                if (need > buffer.Length)
-                    buffer = new byte[need];
-            }
-            filled = WriteWalkRow(buffer, filled, w);
+            await copy.EnsureRoomAsync(fixedRowBytes + w.PackedVertices.Length, ct);
+            copy.Commit(WriteWalkRow(copy.Array, copy.Filled, w));
         }
-        if (filled + 2 > buffer.Length)
-        {
-            await stream.WriteAsync(buffer.AsMemory(0, filled), ct);
-            filled = 0;
-        }
-        BinaryPrimitives.WriteInt16BigEndian(buffer.AsSpan(filled), -1); filled += 2;
-        await stream.WriteAsync(buffer.AsMemory(0, filled), ct);
+        await copy.FinalizeAsync(ct);
     }
 
     private static int WriteWalkRow(Span<byte> dst, int o, TestimonyWalkRow w)
     {
         BinaryPrimitives.WriteInt16BigEndian(dst[o..], 8); o += 2;
-        o = WriteHash(dst, o, w.Subject);
-        o = WriteHash(dst, o, w.TypeId);
-        if (w.ContextId is { } ctx) o = WriteHash(dst, o, ctx);
+        o = PgBinaryCopy.WriteHash(dst, o, w.Subject);
+        o = PgBinaryCopy.WriteHash(dst, o, w.TypeId);
+        if (w.ContextId is { } ctx) o = PgBinaryCopy.WriteHash(dst, o, ctx);
         else { BinaryPrimitives.WriteInt32BigEndian(dst[o..], -1); o += 4; }
-        o = WriteInt64Field(dst, o, w.PhiFp1e9);
+        o = PgBinaryCopy.WriteInt64Field(dst, o, w.PhiFp1e9);
         BinaryPrimitives.WriteInt32BigEndian(dst[o..], 4); o += 4;
         BinaryPrimitives.WriteInt32BigEndian(dst[o..], w.Count); o += 4;
-        o = WriteInt64Field(dst, o, w.GamesTotal);
-        o = WriteInt64Field(dst, o, w.ObservedAtUnixUs - PgEpochDeltaUs);
+        o = PgBinaryCopy.WriteInt64Field(dst, o, w.GamesTotal);
+        o = PgBinaryCopy.WriteInt64Field(dst, o, w.ObservedAtUnixUs - PgEpochDeltaUs);
         BinaryPrimitives.WriteInt32BigEndian(dst[o..], w.PackedVertices.Length); o += 4;
         w.PackedVertices.CopyTo(dst[o..]); o += w.PackedVertices.Length;
         return o;
@@ -591,41 +572,20 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             folded, Volatile.Read(ref _epochsStaged));
     }
 
-    private static readonly byte[] CopyBinaryHeader =
-    {
-        0x50, 0x47, 0x43, 0x4F, 0x50, 0x59, 0x0A, 0xFF, 0x0D, 0x0A, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00
-    };
-
     private const long PgEpochDeltaUs = 946_684_800_000_000L;
     private const int  MaxRowBytes    = 110;
-
-    private static int WriteHash(Span<byte> dst, int o, in Hash128 h)
-    {
-        BinaryPrimitives.WriteInt32BigEndian(dst[o..], 16);
-        h.WriteBytes(dst[(o + 4)..(o + 20)]);
-        return o + 20;
-    }
-
-    private static int WriteInt64Field(Span<byte> dst, int o, long v)
-    {
-        BinaryPrimitives.WriteInt32BigEndian(dst[o..], 8);
-        BinaryPrimitives.WriteInt64BigEndian(dst[(o + 4)..], v);
-        return o + 12;
-    }
 
     private static int WriteRow(Span<byte> dst, int o, Acc acc)
     {
         BinaryPrimitives.WriteInt16BigEndian(dst[o..], 7); o += 2;
-        o = WriteHash(dst, o, acc.Subject);
-        o = WriteHash(dst, o, acc.Type);
-        if (acc.Object is Hash128 obj) o = WriteHash(dst, o, obj);
+        o = PgBinaryCopy.WriteHash(dst, o, acc.Subject);
+        o = PgBinaryCopy.WriteHash(dst, o, acc.Type);
+        if (acc.Object is Hash128 obj) o = PgBinaryCopy.WriteHash(dst, o, obj);
         else { BinaryPrimitives.WriteInt32BigEndian(dst[o..], -1); o += 4; }
-        o = WriteInt64Field(dst, o, acc.PhiFp1e9);
-        o = WriteInt64Field(dst, o, acc.Games);
-        o = WriteInt64Field(dst, o, acc.SumScoreFp1e9);
-        o = WriteInt64Field(dst, o, acc.MaxTsUnixUs - PgEpochDeltaUs);
+        o = PgBinaryCopy.WriteInt64Field(dst, o, acc.PhiFp1e9);
+        o = PgBinaryCopy.WriteInt64Field(dst, o, acc.Games);
+        o = PgBinaryCopy.WriteInt64Field(dst, o, acc.SumScoreFp1e9);
+        o = PgBinaryCopy.WriteInt64Field(dst, o, acc.MaxTsUnixUs - PgEpochDeltaUs);
         return o;
     }
 
@@ -639,25 +599,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
           + "(subject_id, type_id, object_id, phi, games, sum_score, last_ts) "
           + "FROM STDIN (FORMAT BINARY)", ct);
 
-        var buffer = new byte[4 * 1024 * 1024];
-        CopyBinaryHeader.CopyTo(buffer, 0);
-        int filled = CopyBinaryHeader.Length;
+        var copy = new PgCopyRowBuffer(stream);
         foreach (var acc in rows)
         {
-            if (filled > buffer.Length - MaxRowBytes)
-            {
-                await stream.WriteAsync(buffer.AsMemory(0, filled), ct);
-                filled = 0;
-            }
-            filled = WriteRow(buffer, filled, acc);
+            await copy.EnsureRoomAsync(MaxRowBytes, ct);
+            copy.Commit(WriteRow(copy.Array, copy.Filled, acc));
         }
-        if (filled > buffer.Length - 2)
-        {
-            await stream.WriteAsync(buffer.AsMemory(0, filled), ct);
-            filled = 0;
-        }
-        BinaryPrimitives.WriteInt16BigEndian(buffer.AsSpan(filled), -1); filled += 2;
-        await stream.WriteAsync(buffer.AsMemory(0, filled), ct);
+        await copy.FinalizeAsync(ct);
     }
 
     public async Task<long> MaterializeConsensusAsync(CancellationToken ct = default)

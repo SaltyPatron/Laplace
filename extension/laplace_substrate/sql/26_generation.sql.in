@@ -187,39 +187,158 @@ CREATE OR REPLACE FUNCTION entity_relation_plane(
     SELECT c.subject_id, c.object_id, c.w FROM capped c WHERE c.rn <= p_degree_cap
 $$;
 
--- The foundry's TOKEN LIST, selected from the substrate's own entities (the invention's
--- "selectable token list"). Ranked by CONSENSUS RICHNESS over the relations the operators
--- pour from — similarity/relation (so the basis carries geometry: content words with
--- IS_A / IS_SYNONYM_OF / RELATED_TO edges) plus PRECEDES (the folded order, for fluency).
--- Renderable, non-whitespace, distinct surfaces; weight = total degree (the SPM score).
--- One set-based read; the CLI calls THIS, never ad-hoc SQL.
+-- The foundry's TOKEN LIST: a COHERENT, self-defining vocabulary of single UAX29
+-- wordforms (entities.tier = 2 — never multi-word lexical entries, Unicode-name blobs, or
+-- id junk). Two parts so the vocab can represent its own members:
+--   seeds   = the most FREQUENT single words (forward-sequence/PRECEDES degree = the
+--             tokenizer's frequency axis) — the words that actually tile text.
+--   closure = the single words those seeds DEFINE / RELATE to (IS_A, IS_SYNONYM_OF,
+--             RELATED_TO, HAS_PART, DERIVATIONALLY_RELATED, coordinate terms) — so if `dog`
+--             is in, `animal / canine / domestic / …` are in too (no top-k that can't
+--             define its own tokens). weight = frequency (the SPM score). Set-based; the
+--             CLI calls THIS, never ad-hoc SQL.
 CREATE OR REPLACE FUNCTION foundry_vocab(p_size int)
     RETURNS TABLE(entity_id bytea, surface text, weight bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    WITH src(tid) AS (
-        SELECT relation_type_id(n) FROM unnest(ARRAY[
-            'IS_SYNONYM_OF','IS_A','RELATED_TO','DERIVATIONALLY_RELATED','HAS_PART',
-            'OBJECT_USE','IS_COORDINATE_TERM_WITH','IS_SIMILAR_TO','IS_ANTONYM_OF',
-            'HAS_HYPERNYM','PRECEDES']) AS n
-    ),
-    deg AS (
-        SELECT c.subject_id, count(*) AS d
-        FROM consensus c JOIN src ON src.tid = c.type_id
-        WHERE c.object_id IS NOT NULL
+    WITH freq AS (
+        SELECT c.subject_id AS id, count(*) AS d
+        FROM consensus c
+        WHERE c.type_id = relation_type_id('PRECEDES') AND c.object_id IS NOT NULL
         GROUP BY c.subject_id
     ),
+    seeds AS (
+        SELECT f.id, f.d
+        FROM freq f JOIN entities e ON e.id = f.id AND e.tier = 2
+        ORDER BY f.d DESC LIMIT p_size
+    ),
+    closure AS (
+        SELECT DISTINCT c.object_id AS id
+        FROM consensus c
+        JOIN seeds s ON s.id = c.subject_id
+        JOIN entities e ON e.id = c.object_id AND e.tier = 2
+        WHERE c.object_id IS NOT NULL
+          AND c.type_id IN (
+              relation_type_id('IS_A'), relation_type_id('IS_SYNONYM_OF'),
+              relation_type_id('RELATED_TO'), relation_type_id('HAS_PART'),
+              relation_type_id('DERIVATIONALLY_RELATED'), relation_type_id('IS_COORDINATE_TERM_WITH'))
+    ),
+    ids AS (SELECT id FROM seeds UNION SELECT id FROM closure),
     named AS (
-        SELECT d.subject_id, d.d, render_text(d.subject_id, 64) AS s
-        FROM deg d ORDER BY d.d DESC LIMIT p_size * 3
+        SELECT i.id, render_text(i.id, 64) AS s, COALESCE(f.d, 0) AS d
+        FROM ids i LEFT JOIN freq f ON f.id = i.id
     ),
     clean AS (
-        SELECT DISTINCT ON (n.s) n.subject_id, n.s, n.d
+        SELECT DISTINCT ON (n.s) n.id, n.s, n.d
         FROM named n
         WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT is_all_whitespace(n.s)
+          AND position(' ' IN n.s) = 0 AND char_length(n.s) <= 40
         ORDER BY n.s, n.d DESC
     )
-    SELECT c.subject_id, c.s, c.d FROM clean c ORDER BY c.d DESC LIMIT p_size
+    SELECT c.id, c.s, c.d FROM clean c ORDER BY c.d DESC LIMIT p_size
+$$;
+
+-- native crawl kernel (the heavy lifter): BFS over consensus from the seed ids
+-- along the strongest-affirmed edges, O(1) HTAB dedup, index-driven per-node
+-- fanout. Returns tier-2 word ids ranked by path relevance (product of edge
+-- strengths). Implemented in foundry_crawl.c — SQL never walks the graph itself.
+CREATE OR REPLACE FUNCTION foundry_crawl(
+        p_seeds bytea[], p_budget int DEFAULT 32000, p_hops int DEFAULT 3, p_fanout int DEFAULT 64,
+        p_rel_types bytea[] DEFAULT NULL)
+    RETURNS TABLE(entity_id bytea, weight bigint)
+    AS 'MODULE_PATHNAME', 'pg_laplace_foundry_crawl'
+    LANGUAGE C VOLATILE;
+
+-- SEEDED CRAWL vocab (thin orchestrator over foundry_crawl): pick a few words;
+-- the substrate crawls the consensus OUTWARD from them and returns the connected
+-- word neighborhood — that IS the token list (focused on the seeds, self-defining,
+-- NOT a global top-N). SQL only resolves seed text→id, renders the returned ids
+-- (render_text_batch — also native), dedups by surface, and trims to budget; the
+-- graph walk and the rendering are both C. Bounded by p_hops + per-node fanout so
+-- it runs in the seeds' time, not the whole graph's. Single UAX29 wordforms (tier 2).
+CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
+        p_seeds text[], p_max int DEFAULT 32000, p_hops int DEFAULT 3, p_fanout int DEFAULT 64)
+    RETURNS TABLE(entity_id bytea, surface text, weight bigint)
+    LANGUAGE sql VOLATILE
+    SET search_path = @extschema@, public AS $$
+    WITH seed_ids AS (
+        SELECT coalesce(array_agg(wid), '{}'::bytea[]) AS ids
+        FROM (SELECT word_id(s) AS wid FROM unnest(p_seeds) AS s) q
+        WHERE wid IS NOT NULL
+    ),
+    -- the SEMANTIC / definitional edge set: what a word IS, MEANS, RELATES TO and
+    -- is BUILT FROM — never PRECEDES/co-occurrence (that is the stop-word axis) and
+    -- never the Unicode/language metadata relations. This is the "walk the trees,
+    -- include the tokens it references and relates to" set.
+    -- the clean WordNet/lexical edge set: hypernymy, synonymy, meronymy,
+    -- derivation, sense bridges. ConceptNet RELATED_TO / HAS_DOMAIN_TOPIC are
+    -- deliberately OUT — at depth they drag in high-frequency function words
+    -- (the stop-word axis); the lexical relations stay on the seeds' meaning.
+    rel_types AS (
+        SELECT array_agg(relation_type_id(n)) AS ids
+        FROM unnest(ARRAY[
+            'IS_A','IS_SYNONYM_OF','IS_COORDINATE_TERM_WITH','IS_ANTONYM_OF',
+            'HAS_PART','PART_OF','MEMBER_OF','HAS_MEMBER','DERIVATIONALLY_RELATED',
+            'FORM_OF','HAS_HYPONYM','IS_HYPERNYM_OF','SIMILAR_TO','PERTAINS_TO',
+            'HAS_SENSE','IS_SENSE_OF'
+        ]) AS n
+    ),
+    crawled AS (
+        SELECT c.entity_id, c.weight,
+               row_number() OVER (ORDER BY c.weight DESC, c.entity_id) AS rn
+        FROM seed_ids si, rel_types rt
+        CROSS JOIN LATERAL foundry_crawl(si.ids, p_max, p_hops, p_fanout, rt.ids) c
+    ),
+    -- SEQUENCE GLUE (scaffold): the highest-PRECEDES single wordforms. A lexical-only
+    -- crawl has no SEQUENCE coverage — the words that actually follow content words in
+    -- text (dog → and/the/he/growls/look) are function/common words the crawl excludes,
+    -- so without these the model has nothing to complete TO and cannot form sentences.
+    -- Reserved to a quarter of the budget and ranked BELOW the crawl, so the vocab stays
+    -- topic-first but can still sequence. (PRECEDES is the generation axis; it earns its
+    -- place here even though it is the stop-word axis for SELECTION.)
+    scaffold AS (
+        SELECT f.id AS entity_id, f.d::bigint AS weight,
+               row_number() OVER (ORDER BY f.d DESC) AS rn
+        FROM (
+            SELECT c.subject_id AS id, count(*) AS d
+            FROM consensus c
+            JOIN entities e ON e.id = c.subject_id AND e.tier = 2
+            WHERE c.type_id = relation_type_id('PRECEDES') AND c.object_id IS NOT NULL
+            GROUP BY c.subject_id
+        ) f
+    ),
+    picked AS (
+        SELECT entity_id, weight, 1 AS pri FROM crawled  WHERE rn <= p_max - p_max / 4
+        UNION ALL
+        SELECT entity_id, weight, 0 AS pri FROM scaffold WHERE rn <= p_max / 4
+    ),
+    uniq AS (
+        SELECT DISTINCT ON (entity_id) entity_id, weight, pri
+        FROM picked ORDER BY entity_id, pri DESC, weight DESC
+    ),
+    ids_arr AS (
+        SELECT array_agg(entity_id ORDER BY pri DESC, weight DESC) AS ids,
+               array_agg(weight     ORDER BY pri DESC, weight DESC) AS ws,
+               array_agg(pri        ORDER BY pri DESC, weight DESC) AS prs
+        FROM uniq
+    ),
+    rendered AS (
+        SELECT u.entity_id, u.s, a.ws[u.ord::int] AS weight, a.prs[u.ord::int] AS pri
+        FROM ids_arr a
+        CROSS JOIN LATERAL unnest(a.ids, render_text_batch(a.ids, 8))
+                   WITH ORDINALITY AS u(entity_id, s, ord)
+        WHERE a.ids IS NOT NULL AND cardinality(a.ids) > 0
+    ),
+    clean AS (
+        SELECT DISTINCT ON (n.s) n.entity_id, n.s, n.weight, n.pri
+        FROM rendered n
+        WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT is_all_whitespace(n.s)
+          AND position(' ' IN n.s) = 0 AND char_length(n.s) <= 40
+          AND n.s ~ '[[:alpha:]]'          -- must carry a letter (no pure punctuation)
+          AND n.s !~ '^i[0-9]+$'           -- drop bare ILI concept ids (i46531) — not words
+        ORDER BY n.s, n.pri DESC, n.weight DESC
+    )
+    SELECT c.entity_id, c.s, c.weight FROM clean c ORDER BY c.pri DESC, c.weight DESC LIMIT p_max
 $$;
 
 -- native kernel ----------------------------------------------------------------
@@ -229,7 +348,7 @@ CREATE OR REPLACE FUNCTION walk_continuations(
         p_ctx bytea[], p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
         p_spread float8 DEFAULT 0.7, p_breadth int DEFAULT 10,
         p_seed bigint DEFAULT NULL)
-    RETURNS TABLE(step int, entity bytea, stride_used int)
+    RETURNS TABLE(step int, entity bytea, stride_used int, sep_entity bytea)
     AS 'MODULE_PATHNAME', 'pg_laplace_walk_continuations'
     LANGUAGE C VOLATILE;
 
@@ -251,11 +370,28 @@ CREATE OR REPLACE FUNCTION walk_text(
         FROM prompt_state(p_prompt) WHERE id IS NOT NULL
     )
     -- the kernel is deterministic given a seed; entropy is the caller's choice,
-    -- so an unseeded call draws one here instead of repeating a constant stream
-    SELECT g.step, render_text(g.entity, 64), g.stride_used
+    -- so an unseeded call draws one here instead of repeating a constant stream.
+    -- entity carries the word PLUS its witnessed trailing separator (omniglottal spacing:
+    -- Latin space / 。、 / U+3000 / nothing for CJK) — reconstruct text with NO delimiter.
+    SELECT g.step,
+           render_text(g.entity, 64) || COALESCE(render_text(g.sep_entity, 8), ''),
+           g.stride_used
     FROM ctx, walk_continuations(ctx.ids, p_steps, p_max_stride, p_spread, p_breadth,
                               COALESCE(p_seed, (floor(random() * 9e18))::bigint)) g
     WHERE ctx.ids IS NOT NULL
+$$;
+
+-- THE generation surface: prompt in, clean witnessed-spacing text out (omniglottal,
+-- no detok rules — spacing is the witnessed separators). One call.
+CREATE OR REPLACE FUNCTION generate(
+        p_prompt text, p_steps int DEFAULT 40, p_max_stride int DEFAULT 5,
+        p_spread float8 DEFAULT 0.7, p_breadth int DEFAULT 12,
+        p_seed bigint DEFAULT NULL)
+    RETURNS text
+    LANGUAGE sql VOLATILE
+    SET search_path = @extschema@, public AS $$
+    SELECT btrim(string_agg(entity, '' ORDER BY step))
+    FROM walk_text(p_prompt, p_steps, p_max_stride, p_spread, p_breadth, p_seed)
 $$;
 
 -- legacy shim: ranked-μ SQL walk removed; delegate to native stride kernel

@@ -25,6 +25,14 @@ import sys
 
 import numpy as np
 
+# The poured vocab uses U+2581 (SentencePiece word marker); force UTF-8 stdout so
+# printing token surfaces does not crash under a Windows cp1252 console.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 
 def load_oracle():
     here = os.path.dirname(os.path.abspath(__file__))

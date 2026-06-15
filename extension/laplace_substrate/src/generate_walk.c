@@ -570,6 +570,7 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
     Datum      *out;
     bool       *out_nulls;
     ArrayType  *result;
+    MemoryContext caller_cxt = CurrentMemoryContext;
 
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
@@ -609,7 +610,14 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
         if (rendered == NULL || rendered[0] == '\0')
             out_nulls[i] = true;
         else
+        {
+            /* the rendered cstring lives in the SPI context, freed by SPI_finish;
+             * materialize the result text in the CALLER context so it survives to
+             * construct_md_array below (the single-id render_text does the same). */
+            MemoryContext old = MemoryContextSwitchTo(caller_cxt);
             out[i] = CStringGetTextDatum(rendered);
+            MemoryContextSwitchTo(old);
+        }
         hash_destroy(memo);
     }
     SPI_finish();
