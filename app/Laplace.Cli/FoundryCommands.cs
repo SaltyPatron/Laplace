@@ -368,6 +368,12 @@ internal static class FoundryCommands
         foreach (var t in tokens)
         {
             if (t.TokenId < 0 || t.TokenId >= vocab) continue;
+            // Grapheme floor: skip byte tokens from the entity map. A byte token <0xXX> is the
+            // SAME content-addressed entity as its grapheme (0x72 == 'r'), so mapping both
+            // splits the probability mass 50/50 across redundant tokens. Excluded byte tokens
+            // zero-fill (logit ≈ 0, below the grapheme's positive log-odds) and stay in the
+            // vocab purely as invalid-UTF-8 fallback. All mass routes through the grapheme.
+            if (grapheme && t.IsByteLevel) continue;
             if (!tokenSlots.TryGetValue(t.EntityId, out var slots))
                 tokenSlots[t.EntityId] = slots = new List<int>(1);
             slots.Add(t.TokenId);

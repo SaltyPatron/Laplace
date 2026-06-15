@@ -483,13 +483,15 @@ $$;
 -- readout signal for the grapheme-floor model (er/on/in/th… real letter statistics).
 -- Bigram counts within each word's ordered graphemes, masked to the vocab on both ends.
 -- Bounded to the richest words (the common bigrams saturate quickly).
-CREATE OR REPLACE FUNCTION grapheme_order(p_vocab bytea[], p_words int DEFAULT 50000)
+CREATE OR REPLACE FUNCTION grapheme_order(p_vocab bytea[], p_words int DEFAULT 50000, p_gap int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     -- Order is the LineString itself: unpack each word's trajectory in one native C loop
-    -- (laplace_trajectory_constituents), take consecutive vertices as the bigram. No
-    -- constituents() recursion. Both endpoints masked to the vocab.
+    -- (laplace_trajectory_constituents), take vertices at distance p_gap as the (cur,next)
+    -- pair. p_gap=1 is the bigram readout; p_gap=2 is the SKIP-gram (prev -> next, skipping
+    -- the current grapheme) — the signal the history subspace decodes. No constituents()
+    -- recursion. Both endpoints masked to the vocab.
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     t AS (
         -- ONE trajectory per word (lowest source_id — the corpus convention) so the bigram
@@ -512,7 +514,7 @@ CREATE OR REPLACE FUNCTION grapheme_order(p_vocab bytea[], p_words int DEFAULT 5
         CROSS JOIN LATERAL generate_series(1, GREATEST(tc.run_length, 1)) gs(i)
     ),
     bg AS (
-        SELECT ch AS cur, lead(ch) OVER (PARTITION BY wid ORDER BY ord, sub) AS nxt FROM g
+        SELECT ch AS cur, lead(ch, p_gap) OVER (PARTITION BY wid ORDER BY ord, sub) AS nxt FROM g
     ),
     cnt AS (
         SELECT cur, nxt, count(*)::float8 AS c
