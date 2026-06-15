@@ -350,6 +350,119 @@ internal static class FoundryExport
         return planes;
     }
 
+    // GRAPHEME-FLOOR order: P(next grapheme | current) from word constituencies
+    // (laplace.grapheme_order). The grapheme-floor model factors THIS into embed/lm_head,
+    // so the cast generates char-by-char following real letter statistics — and the vocab
+    // (single graphemes) tokenizes any prompt in-engine with no merge path.
+    internal static async Task<PlaneCoo> ReadGraphemeOrderAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
+
+        var adj = new Dictionary<int, List<(int Col, double W)>>();
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 0;   // pays the bounded constituency walk once
+        cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.grapheme_order($1)";
+        cmd.Parameters.Add(new NpgsqlParameter
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        while (await rdr.ReadAsync())
+        {
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+            double w = rdr.GetDouble(2);
+            if (w <= 0) continue;
+            foreach (int s in subj)
+            {
+                if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
+                foreach (int o in obj) row.Add((o, w));
+            }
+        }
+        return CooFromAdj(adj, 256);   // graphemes have few followers; cap generously
+    }
+
+    // LIVE trajectory order ladder: trajectory_cooccurrence_by_stride is the native
+    // word-stride scan (cooccurrence_scan in C) — entity_trajectory_plane was retired.
+    // Returns per-(subject,object,gap) witnessed forward counts + the per-(subject,gap)
+    // total, so cnt/total is the conditional P(object follows subject at gap g). We
+    // collapse gaps into one DIRECTED next-token plane, discounting by gap (closer =
+    // stronger continuation), filtered to the mold's vocab. This is the ORDER signal the
+    // folded causal consensus band (147 edges over the probe vocab) was missing.
+    internal static async Task<PlaneCoo> ReadTrajectoryStrideAsync(
+        NpgsqlDataSource ds, int maxGap,
+        Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
+    {
+        var adj = new Dictionary<int, List<(int Col, double W)>>();
+        await using var conn = await ds.OpenConnectionAsync();
+
+        // Force _PG_init so the corpus GUC is registered BEFORE the SET. The prefix-reserve
+        // reorder makes a pre-load SET adoptable, but loading the extension first makes the
+        // bound apply unconditionally.
+        await using (var warm = conn.CreateCommand())
+        {
+            warm.CommandText = "SELECT laplace.relation_type_id('IS_A')";
+            await warm.ExecuteScalarAsync();
+        }
+
+        // Bound the ONE-TIME corpus build (the GUC the _PG_init reorder made reachable).
+        int corpusMax = EnvInt("LAPLACE_FOUNDRY_CORPUS_MAX", 200_000);
+        if (corpusMax > 0)
+        {
+            await using var setCmd = conn.CreateCommand();
+            setCmd.CommandText = $"SET laplace_substrate.corpus_max_rows = {corpusMax}";
+            await setCmd.ExecuteNonQueryAsync();
+        }
+        try
+        {
+            // Materialize the order ladder ONCE (rebuilds only when the trajectory probe
+            // moves); the expensive stream build is paid here, globally, not per read.
+            await using (var ensure = conn.CreateCommand())
+            {
+                ensure.CommandTimeout = 0;
+                ensure.CommandText = "SELECT laplace.trajectory_pairs_ensure($1)";
+                ensure.Parameters.AddWithValue(maxGap);
+                await ensure.ExecuteScalarAsync();
+            }
+
+            // Vocab-bounded INDEX-SCAN read of the materialized ladder: w is already the
+            // gap-discounted conditional continuation Σ_gap (cnt/subject_total)/gap.
+            var vocab = new byte[tokenSlots.Count][];
+            int vi = 0;
+            foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandTimeout = 600;
+            cmd.CommandText =
+                "SELECT subject_id, object_id, w FROM laplace.trajectory_pairs_plane($1, $2)";
+            cmd.Parameters.Add(new NpgsqlParameter
+                { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            cmd.Parameters.AddWithValue(maxGap);
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+                double w = rdr.GetDouble(2);
+                if (w == 0.0) continue;
+                foreach (int s in subj)
+                {
+                    if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
+                    foreach (int o in obj) row.Add((o, w));
+                }
+            }
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine($"  (trajectory pairs unavailable: {ex.SqlState} — skipped)");
+            return PlaneCoo.Empty;
+        }
+
+        return CooFromAdj(adj, degreeCap);
+    }
+
     // Canonical-order COO from a subject->(object,w) adjacency, degree-capped by |w|.
     // Shared by the bounded readers so the cast law (same consensus + same mold =>
     // same bytes) holds regardless of DB scan order.
@@ -469,7 +582,8 @@ internal static class FoundryExport
     // embed/lmHead come back row-major [vocab × dim], zero-padded past the spectral rank.
     // NOTE: dense vocab×vocab SVD — modest vocab (≤~4k). Larger needs a sparse/randomized solver.
     internal static void FactorAdjacency(
-        PlaneCoo adj, int vocab, int dim, out double[] embed, out double[] lmHead, out int usedRank)
+        PlaneCoo adj, int vocab, int dim, out double[] embed, out double[] lmHead, out int usedRank,
+        bool conditional = false)
     {
         var rowSum = new double[vocab];
         var colSum = new double[vocab];
@@ -495,10 +609,22 @@ internal static class FoundryExport
         var As = new float[(long)vocab * vocab];
         for (int i = 0; i < en; i++)
         {
-            double denom = rowSum[ex[i]] * colSum[ey[i]];
-            if (denom <= 0) continue;
-            double pmi = Math.Log(ew[i] * total / denom);
-            if (pmi > 0) As[(long)ex[i] * vocab + ey[i]] = (float)pmi;
+            if (conditional)
+            {
+                // GENERATIVE readout: P(Y|X) = A[X,Y] / rowSum[X], row-normalized ONLY.
+                // PPMI's −ln P(Y) column term inflates RARE next-tokens (ᴵ/ñ/ʼ) into a hub
+                // that wins every argmax — that is a SIMILARITY transform, wrong for
+                // generation. The conditional probability gives the real next token.
+                double rs = rowSum[ex[i]];
+                if (rs > 0) As[(long)ex[i] * vocab + ey[i]] = (float)(ew[i] / rs);
+            }
+            else
+            {
+                double denom = rowSum[ex[i]] * colSum[ey[i]];
+                if (denom <= 0) continue;
+                double pmi = Math.Log(ew[i] * total / denom);
+                if (pmi > 0) As[(long)ex[i] * vocab + ey[i]] = (float)pmi;
+            }
         }
         var U  = new float[(long)vocab * vocab];
         var S  = new float[vocab];

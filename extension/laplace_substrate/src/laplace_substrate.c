@@ -563,6 +563,11 @@ void
 _PG_init(void)
 {
     (void)laplace_dynamics_init();
-    laplace_substrate_perfcache_init();
+    /* Define all custom GUCs BEFORE reserving the prefix: perfcache_init calls
+     * MarkGUCPrefixReserved("laplace_substrate"), which deletes any not-yet-defined
+     * placeholder under the prefix. Reserving first made corpus_max_rows unreachable
+     * (a pre-load SET was removed before laplace_corpus_guc_init could adopt it), so
+     * the corpus build could never be bounded. Define first, reserve last. */
     laplace_corpus_guc_init();
+    laplace_substrate_perfcache_init();
 }
