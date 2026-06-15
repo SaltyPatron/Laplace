@@ -611,12 +611,17 @@ internal static class FoundryExport
         {
             if (conditional)
             {
-                // GENERATIVE readout: P(Y|X) = A[X,Y] / rowSum[X], row-normalized ONLY.
-                // PPMI's −ln P(Y) column term inflates RARE next-tokens (ᴵ/ñ/ʼ) into a hub
-                // that wins every argmax — that is a SIMILARITY transform, wrong for
-                // generation. The conditional probability gives the real next token.
+                // GENERATIVE readout = LOG-ODDS of the continuation vs uniform:
+                //   log( P(Y|X) · V ),  P(Y|X) = A[X,Y]/rowSum[X].
+                // Row-normalized only (not PPMI: PPMI's −ln P(Y) column term inflates RARE
+                // next-tokens into a hub — a SIMILARITY transform, wrong for generation).
+                // The log is load-bearing: raw P(Y|X)∈[0,1] becomes the pre-softmax logit,
+                // and e^[0,1] spans only 1..e, so softmax flattens at temp>0. The ·V shift
+                // keeps the SPARSE baseline correct — non-edges stay 0 (= uniform), edges sit
+                // above/below; naive log(P) would push edges negative while non-edges (0)
+                // read as certain, inverting the ranking.
                 double rs = rowSum[ex[i]];
-                if (rs > 0) As[(long)ex[i] * vocab + ey[i]] = (float)(ew[i] / rs);
+                if (rs > 0) As[(long)ex[i] * vocab + ey[i]] = (float)Math.Log(ew[i] / rs * vocab);
             }
             else
             {
