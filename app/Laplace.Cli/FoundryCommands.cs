@@ -56,11 +56,17 @@ internal static class FoundryCommands
             // those words (foundry_vocab_crawl), not a global frequency top-N. The token list
             // is exactly what the seeds reference/relate to in the consensus.
             string? crawlSeeds = null; int crawlHops = 3, crawlFanout = 64;
+            // --grapheme-floor: vocab = the substrate's codepoint/grapheme floor (single tokens
+            // that tile ANY text char-by-char in-engine — no merge path, no byte-shredding),
+            // embed/lm_head = the factored grapheme_order (real letter statistics off the
+            // tier-2 trajectory LineStrings). The universal tokenizer base.
+            bool grapheme = false;
             var positional = new List<string>();
             for (int i = 1; i < args.Length; i++)
             {
                 switch (args[i])
                 {
+                    case "--grapheme-floor": grapheme = true; break;
                     case "--recipe-from" when i + 1 < args.Length: recipeFrom = args[++i]; break;
                     case "--tokenizer"   when i + 1 < args.Length: tokenizerDir = args[++i]; break;
                     case "--native-vocab" when i + 1 < args.Length: nativeVocab = int.Parse(args[++i]); break;
@@ -88,7 +94,7 @@ internal static class FoundryCommands
             if (nativeVocab > 0)
             {
                 if (nativeDim <= 0) return Fail("--native-vocab needs --dim <D> (the hidden size the foundry casts to)");
-                var nativeMold = await MaterializeNativeMoldAsync(nativeVocab, nativeDim, nativeLayers, nativeHeads, nativeKv, nativeFfn, crawlSeeds, crawlHops, crawlFanout);
+                var nativeMold = await MaterializeNativeMoldAsync(nativeVocab, nativeDim, nativeLayers, nativeHeads, nativeKv, nativeFfn, crawlSeeds, crawlHops, crawlFanout, grapheme);
                 if (nativeMold is null) return 2;
                 recipePath = nativeMold;
             }
@@ -101,7 +107,7 @@ internal static class FoundryCommands
                 if (molded is null) return 2;
                 recipePath = molded;
             }
-            return await SynthesizeFromSubstrateAsync(recipePath, outputPath);
+            return await SynthesizeFromSubstrateAsync(recipePath, outputPath, grapheme);
         }
 
         return Fail(
@@ -152,7 +158,7 @@ internal static class FoundryCommands
     // consensus edges. The foundry casts a fresh embed/lm_head/operators at the asked shape.
     private static async Task<string?> MaterializeNativeMoldAsync(
         int vocabN, int dim, int layers, int heads, int kvHeads, int ffn,
-        string? crawlSeeds = null, int crawlHops = 3, int crawlFanout = 64)
+        string? crawlSeeds = null, int crawlHops = 3, int crawlFanout = 64, bool grapheme = false)
     {
         if (dim % 64 != 0 && heads <= 0)
             { Fail($"--dim {dim} is not a multiple of 64 — pass --heads explicitly so dim/heads is the head size"); return null; }
@@ -184,7 +190,14 @@ internal static class FoundryCommands
         await using (var cmd = conn.CreateCommand())
         {
             cmd.CommandTimeout = 0;   // the crawl/closure runs server-side; never hit the read timeout
-            if (seeds is { Length: > 0 })
+            if (grapheme)
+            {
+                cmd.CommandText = "SELECT surface, weight FROM laplace.grapheme_floor_vocab($1)";
+                cmd.Parameters.AddWithValue(vocabN);
+                Console.WriteLine($"  vocab: GRAPHEME FLOOR ({vocabN} codepoint/grapheme atoms — "
+                    + "tokenizes any text char-by-char in-engine, no merge path)");
+            }
+            else if (seeds is { Length: > 0 })
             {
                 cmd.CommandText = "SELECT surface, weight FROM laplace.foundry_vocab_crawl($1, $2, $3, $4)";
                 cmd.Parameters.AddWithValue(seeds);
@@ -219,8 +232,20 @@ internal static class FoundryCommands
         pieces.Add(("<s>",   0f, 3));
         pieces.Add(("</s>",  0f, 3));
         for (int b = 0; b < 256; b++) pieces.Add(($"<0x{b:X2}>", -20f, 6));
-        foreach (var (surface, weight) in sel)
-            pieces.Add(("▁" + surface, (float)(Math.Log(weight + 1.0) + 1.0), 1));
+        if (grapheme)
+        {
+            // single-grapheme pieces (bare, NO ▁ prefix) so SP tokenizes char-by-char with no
+            // merge path — every piece is one codepoint, always directly reachable. ▁ is the
+            // space atom (SP maps spaces to it). This is the cut that always tokenizes in-engine.
+            pieces.Add(("▁", 1f, 1));
+            foreach (var (surface, weight) in sel)
+                pieces.Add((surface, (float)(Math.Log(weight + 1.0) + 1.0), 1));
+        }
+        else
+        {
+            foreach (var (surface, weight) in sel)
+                pieces.Add(("▁" + surface, (float)(Math.Log(weight + 1.0) + 1.0), 1));
+        }
         int vocabSize = pieces.Count;
         Console.WriteLine($"  native vocab: {sel.Count:N0} substrate word entities + 256 byte floor + 3 specials = {vocabSize:N0}");
 
@@ -229,10 +254,11 @@ internal static class FoundryCommands
         // intermediate layers are no-ops. dim is a NORMAL hidden width (the SVD rank, e.g. 512),
         // NOT vocab — a 32k-token model is 32000×dim, never 32000². Only constraint: one no-op
         // layer (the readout transform is the factorization, depth carries no operator here).
-        if (FoundryExport.EnvInt("LAPLACE_FOUNDRY_FAITHFUL", 0) != 0)
+        if (grapheme || FoundryExport.EnvInt("LAPLACE_FOUNDRY_FAITHFUL", 0) != 0)
         {
             layers = 1;
-            Console.WriteLine($"  FAITHFUL: dim={dim} (SVD rank), 1 no-op layer, embed=U√S, lm_head=V√S of A");
+            Console.WriteLine($"  FAITHFUL: dim={dim} (SVD rank), 1 no-op layer, embed=U√S, lm_head=V√S of "
+                + (grapheme ? "grapheme_order" : "A"));
         }
 
         string moldDir = Path.Combine(Path.GetTempPath(), $"laplace-native-mold-d{dim}-v{vocabSize}");
@@ -318,7 +344,7 @@ internal static class FoundryCommands
         File.WriteAllBytes(path, ms.ToArray());
     }
 
-    private static async Task<int> SynthesizeFromSubstrateAsync(string recipePath, string outputPath)
+    private static async Task<int> SynthesizeFromSubstrateAsync(string recipePath, string outputPath, bool grapheme = false)
     {
         if (string.IsNullOrEmpty(recipePath) || !File.Exists(recipePath))
             return Fail(
@@ -377,10 +403,10 @@ internal static class FoundryCommands
         // no rank bands, no hand-typed weights. embed = identity, lm_head = the rank-weighted
         // rated adjacency A (read whole from consensus_adjacency, rank looked up per edge from
         // the banked law), layers = no-op. logits[Y] = A[Y,X] exactly: the GEMM is the lookup.
-        if (FoundryExport.EnvInt("LAPLACE_FOUNDRY_FAITHFUL", 0) != 0)
+        if (grapheme || FoundryExport.EnvInt("LAPLACE_FOUNDRY_FAITHFUL", 0) != 0)
         {
             int faithfulRc = await WriteFaithfulGgufAsync(
-                ds, recipe, tokens, tokenSlots, vocab, dModel, modelDir, outputPath, specs, tensorCount);
+                ds, recipe, tokens, tokenSlots, vocab, dModel, modelDir, outputPath, specs, tensorCount, grapheme);
             SynthInterop.ArchTemplateFree(tmplHandle);
             SynthInterop.RecipeFree(recipeHandle);
             return faithfulRc == 0 ? 0 : Fail($"faithful foundry write failed (status {faithfulRc})");
@@ -421,6 +447,24 @@ internal static class FoundryCommands
             + $"taxonomic+partitive(V/O)={rel.Nnz:N0} causal+seq(FFN)={pre.Nnz:N0} associative(attn)={att.Nnz:N0}");
         if (planeEdges == 0)
             return Fail("no entity→entity consensus over this vocab — ingest text first");
+
+        // ORDER channel: witnessed continuation read straight off the trajectory stream
+        // (native trajectory_cooccurrence_by_stride). This is the directed "what follows"
+        // signal the folded causal consensus band lacks (147 edges over the probe vocab),
+        // and it is what makes the readout predict a continuation instead of a neighbor.
+        int trajGap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_TRAJ_GAP", Math.Max(2, Math.Min(nLayers, 8)));
+        var swTraj = Stopwatch.StartNew();
+        var traj = FoundryExport.Normalize(
+            await FoundryExport.ReadTrajectoryStrideAsync(ds, trajGap, tokenSlots, degreeCap));
+        Console.WriteLine($"  trajectory order ladder read in {swTraj.Elapsed.TotalSeconds:F1}s "
+            + $"(gap≤{trajGap}): {traj.Nnz:N0} ordered continuation edges");
+
+        // RANK-WEIGHTED CONTENT pull: consensus_adjacency applies relation_rank PER EDGE
+        // from the BANKED law server-side (Σ relation_rank·eff_mu) — the rank authority is
+        // READ from the substrate, never a hardcoded copy in the app.
+        var adjacency = FoundryExport.Normalize(
+            await FoundryExport.ReadAdjacencyAsync(ds, tokenSlots, degreeCap));
+        Console.WriteLine($"  rank-weighted adjacency read: {adjacency.Nnz:N0} content edges (banked relation_rank)");
 
         // ── generate the basis: LE over the union graph, GSO, Procrustes-anchored
         // to token content coordinates, deterministic capacity fill, bias channel ──
@@ -500,8 +544,15 @@ internal static class FoundryCommands
             var inDeg = new double[vocab];   // Σ_R wRank·Σ_X A_R[X,Y] : Y's full marginal pull
             // role plane ⇒ rank authority (the rank header weights the operators already use):
             // equivalence/standards 0.91, taxonomic+partitive 0.82, causal+seq 0.64, assoc 0.36.
-            var roPlanes = new[] { sim, rel, pre, att };
-            var roW      = new[] { 0.91, 0.82, 0.64, 0.36 };
+            // TWO DISTINCT POURS, not a blend: an lm_head that reads SIMILARITY (the rated
+            // adjacency — what is LIKE the context) is an EMBEDDING model; an lm_head that
+            // reads CONTINUATION (the trajectory order — what FOLLOWS the context in witnessed
+            // sentences) is a GENERATIVE / CHAT model. The substrate computes both channels;
+            // the pour selects one. Generative (default) reads the order channel so
+            // autoregressive decode FLOWS (walk_text transcribed) instead of returning neighbors.
+            bool generative = FoundryExport.EnvInt("LAPLACE_FOUNDRY_GENERATIVE", 1) != 0;
+            var roPlanes = generative ? new[] { traj }      : new[] { traj, adjacency };
+            var roW      = generative ? new[] { 1.0 }       : new[] { 1.0, 1.0 };
             for (int pi = 0; pi < roPlanes.Length; pi++)
             {
                 var pl = roPlanes[pi]; double rw = roW[pi];
@@ -717,13 +768,18 @@ internal static class FoundryCommands
         IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
         Dictionary<Hash128, List<int>> tokenSlots,
         int vocab, int dModel, string modelDir, string outputPath,
-        TensorSpec[] specs, int tensorCount)
+        TensorSpec[] specs, int tensorCount, bool grapheme = false)
     {
         int cap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_FAITHFUL_CAP", 128);
         var sw = Stopwatch.StartNew();
-        var A = await FoundryExport.ReadAdjacencyAsync(ds, tokenSlots, cap);
+        // grapheme floor reads the letter-bigram order off the trajectories; the word model
+        // reads the rank-weighted consensus adjacency. Both factor (PPMI-SVD) into embed/lm_head.
+        var A = grapheme
+            ? await FoundryExport.ReadGraphemeOrderAsync(ds, tokenSlots)
+            : await FoundryExport.ReadAdjacencyAsync(ds, tokenSlots, cap);
         if (A.Nnz == 0)
-            return Fail("consensus_adjacency returned no content edges over this vocab — ingest/seed first");
+            return Fail((grapheme ? "grapheme_order" : "consensus_adjacency")
+                + " returned no edges over this vocab — ingest/seed first");
         var subjects = new HashSet<int>();
         foreach (var r in A.Rows) subjects.Add(r);
         Console.WriteLine($"  FAITHFUL adjacency read in {sw.Elapsed.TotalSeconds:F1}s: {A.Nnz:N0} rank-weighted edges "
@@ -731,7 +787,7 @@ internal static class FoundryCommands
 
         // factor A → embed (U) + lm_head (V·S) at rank dModel (the hidden width, not vocab)
         var swSvd = Stopwatch.StartNew();
-        FoundryExport.FactorAdjacency(A, vocab, dModel, out var embed, out var lmHead, out int usedRank);
+        FoundryExport.FactorAdjacency(A, vocab, dModel, out var embed, out var lmHead, out int usedRank, conditional: grapheme);
         Console.WriteLine($"  FAITHFUL factorization in {swSvd.Elapsed.TotalSeconds:F1}s: "
             + $"PPMI-SVD rank {usedRank}/{dModel} → embed=U, lm_head=V·S, no-op layers");
 
