@@ -527,6 +527,37 @@ pg_relation_type_in_family(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(in_family != 0);
 }
 
+/* Expose the BANKED NATIVE relation law to SQL so reads/exports stay within-layer
+ * (the 11 ranks ARE the layers). The rank already lives in laplace_relation_lookup;
+ * these are thin wrappers — no manifest re-read, no SQL rank table needed. */
+PG_FUNCTION_INFO_V1(pg_relation_rank);
+
+Datum
+pg_relation_rank(PG_FUNCTION_ARGS)
+{
+    bytea*    type_ba = PG_GETARG_BYTEA_PP(0);
+    hash128_t type_id = bytea_to_hash128(type_ba);
+    const laplace_relation_def_t* def = NULL;
+    int       rc = laplace_relation_lookup(&type_id, &def);
+    if (rc != 0 || def == NULL)
+        PG_RETURN_NULL();
+    PG_RETURN_FLOAT8(def->rank);
+}
+
+PG_FUNCTION_INFO_V1(pg_relation_canonical);
+
+Datum
+pg_relation_canonical(PG_FUNCTION_ARGS)
+{
+    bytea*    type_ba = PG_GETARG_BYTEA_PP(0);
+    hash128_t type_id = bytea_to_hash128(type_ba);
+    const laplace_relation_def_t* def = NULL;
+    int       rc = laplace_relation_lookup(&type_id, &def);
+    if (rc != 0 || def == NULL || def->canonical == NULL)
+        PG_RETURN_NULL();
+    PG_RETURN_TEXT_P(cstring_to_text(def->canonical));
+}
+
 void _PG_init(void);
 void
 _PG_init(void)

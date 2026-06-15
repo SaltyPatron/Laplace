@@ -187,6 +187,81 @@ CREATE OR REPLACE FUNCTION entity_relation_plane(
     SELECT c.subject_id, c.object_id, c.w FROM capped c WHERE c.rn <= p_degree_cap
 $$;
 
+-- WITHIN-LAYER plane (the export's data source done right): the rated adjacency among the
+-- vocab for ONE layer = one rank band. Stays inside the layer (the ranks ARE the layers):
+--   * relation_rank IS NOT NULL  -> a relation in the banked law (drops unnamed/unregistered types)
+--   * relation_rank BETWEEN lo,hi -> the layer's rank band (e.g. 0.45..0.85 = the semantic layers)
+--   * object in the vocab          -> the claim points at CONTENT, not a schema anchor (drops HAS_POS
+--                                     etc. whose object is a grammatical anchor)
+-- weight w = eff_mu (the adjudicated rating; positive affinity), degree-capped by rank*eff_mu.
+-- The export transcribes one of these per rank into the container's per-layer slots — no flatten,
+-- no metadata, no learning. See memory attestations-are-tensors / layering-data-class-law.
+CREATE OR REPLACE FUNCTION consensus_layer_plane(
+        p_vocab bytea[], p_rank_lo float8, p_rank_hi float8, p_degree_cap int DEFAULT 48)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision, layer_rank double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+         edges AS (
+             SELECT c.subject_id, c.object_id,
+                    (eff_mu(c.rating, c.rd))::float8 / 1e9 AS w,
+                    relation_rank(c.type_id) AS rk
+             FROM v
+             JOIN consensus c ON c.subject_id = v.id
+             WHERE c.object_id IS NOT NULL
+               AND EXISTS (SELECT 1 FROM v vo WHERE vo.id = c.object_id)
+               AND relation_rank(c.type_id) IS NOT NULL
+               AND relation_rank(c.type_id) BETWEEN p_rank_lo AND p_rank_hi
+         ),
+         capped AS (
+             SELECT e.subject_id, e.object_id, e.w, e.rk,
+                    row_number() OVER (PARTITION BY e.subject_id ORDER BY e.rk * e.w DESC, e.object_id) AS rn
+             FROM edges e
+         )
+    SELECT c.subject_id, c.object_id, c.w, c.rk FROM capped c WHERE c.rn <= p_degree_cap
+$$;
+
+-- FAITHFUL adjacency (the generative mold's transcription source): the rank-weighted rated
+-- CONTENT adjacency among the vocab. Each X→Y edge weight is the SUM over every relation type
+-- of relation_rank(type_id) · eff_mu — the rank read PER EDGE from the banked relation law
+-- (engine/manifest/relation_types.toml is the single source; relation_rank() wraps the native
+-- lookup), NEVER a hand-typed band weight in the caller. There is NO rank-band slicing: the
+-- FULL ladder contributes, each relation by its OWN authority, so mandate>taxonomic>…>probationary
+-- falls out of the data, not out of magic numbers. Content objects only — object must be IN the
+-- vocab (a tier-2 wordform), which structurally drops schema/metadata claims like HAS_POS (whose
+-- object is a grammatical anchor, not in the vocab). relation_rank IS NOT NULL drops unnamed/
+-- unregistered types. Degree-capped per subject by the summed weight.
+-- The generator writes lm_head = A, embed = I; in the cast, logits[Y] = √dim·lm_head[Y,X], and
+-- the mold pre-divides A by √dim, so logits[Y] = A[Y,X] EXACTLY — the rank-weighted rating
+-- looked up, the GEMM literally is the lookup. No SVD, no gains, no learning.
+CREATE OR REPLACE FUNCTION consensus_adjacency(
+        p_vocab bytea[], p_degree_cap int DEFAULT 64)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+         edges AS (
+             -- BOTH endpoints joined to the vocab set (hash join, O(edges)) — never an
+             -- EXISTS-over-unnest, which is a per-edge linear scan of the array (O(edges·vocab),
+             -- the hang at large vocab). subject ∈ vocab AND object ∈ vocab keeps the adjacency
+             -- inside the token set and drops schema/metadata objects (HAS_POS' anchor ∉ vocab).
+             SELECT c.subject_id, c.object_id,
+                    sum(relation_rank(c.type_id) * (eff_mu(c.rating, c.rd))::float8 / 1e9) AS w
+             FROM v
+             JOIN consensus c ON c.subject_id = v.id
+             JOIN v vo        ON vo.id = c.object_id
+             WHERE relation_rank(c.type_id) IS NOT NULL
+             GROUP BY c.subject_id, c.object_id
+         ),
+         capped AS (
+             SELECT e.subject_id, e.object_id, e.w,
+                    row_number() OVER (PARTITION BY e.subject_id ORDER BY e.w DESC, e.object_id) AS rn
+             FROM edges e
+             WHERE e.w > 0
+         )
+    SELECT c.subject_id, c.object_id, c.w FROM capped c WHERE c.rn <= p_degree_cap
+$$;
+
 -- The foundry's TOKEN LIST: a COHERENT, self-defining vocabulary of single UAX29
 -- wordforms (entities.tier = 2 — never multi-word lexical entries, Unicode-name blobs, or
 -- id junk). Two parts so the vocab can represent its own members:

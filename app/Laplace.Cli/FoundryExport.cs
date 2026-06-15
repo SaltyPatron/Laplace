@@ -188,6 +188,112 @@ internal static class FoundryExport
         return new PlaneCoo(rows, cols, vals);
     }
 
+    // WITHIN-LAYER plane read: consensus_layer_plane keeps the read inside one rank band
+    // (the ranks ARE the layers), known relations only, and CONTENT objects only (object in
+    // vocab) — so app/structural annotations (HAS_POS etc.) and unnamed types never enter the
+    // tensor. weight w = eff_mu (the adjudicated rating). This is the export's correct source,
+    // replacing the flat entity_relation_plane (which mixed metadata/structural with meaning).
+    internal static async Task<PlaneCoo> ReadLayerPlaneAsync(
+        NpgsqlDataSource ds, double rankLo, double rankHi,
+        Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
+
+        var adj = new Dictionary<int, List<(int Col, double W)>>();
+        await using var conn = await ds.OpenConnectionAsync();
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandTimeout = 600;
+            cmd.CommandText =
+                "SELECT subject_id, object_id, w FROM laplace.consensus_layer_plane($1, $2, $3, $4)";
+            cmd.Parameters.Add(new NpgsqlParameter
+                { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            cmd.Parameters.AddWithValue(rankLo);
+            cmd.Parameters.AddWithValue(rankHi);
+            cmd.Parameters.AddWithValue(degreeCap);
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+                double w = rdr.GetDouble(2);
+                if (w == 0.0) continue;
+                foreach (int s in subj)
+                {
+                    if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
+                    foreach (int o in obj) row.Add((o, w));
+                }
+            }
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine($"  (layer plane [{rankLo:F2}-{rankHi:F2}] unavailable: {ex.SqlState} — skipped)");
+            return PlaneCoo.Empty;
+        }
+
+        long kept = 0;
+        foreach (var row in adj.Values)
+        {
+            row.Sort((a, b) =>
+            {
+                int c = Math.Abs(b.W).CompareTo(Math.Abs(a.W));
+                return c != 0 ? c : a.Col.CompareTo(b.Col);
+            });
+            if (row.Count > degreeCap) row.RemoveRange(degreeCap, row.Count - degreeCap);
+            kept += row.Count;
+        }
+        var rows = new int[kept]; var cols = new int[kept]; var vals = new double[kept];
+        long at = 0;
+        foreach (var r in adj.Keys.OrderBy(k => k))
+            foreach (var (c, w) in adj[r])
+            {
+                rows[at] = r; cols[at] = c; vals[at] = w; at++;
+            }
+        return new PlaneCoo(rows, cols, vals);
+    }
+
+    // FAITHFUL adjacency read (the generative mold's source): ONE set-based call to
+    // laplace.consensus_adjacency over the whole vocab. The weight is already the
+    // rank-weighted rating Σ relation_rank·eff_mu — the rank looked up PER EDGE from the
+    // banked law server-side, so the caller carries NO band edges and NO hand-typed rank
+    // weights. Maps entity ids → token ordinals via tokenSlots; an entity that resolves to
+    // several token ids fans the same weight to each pairing (the content addressing is the
+    // identity). Degree already capped server-side; we re-cap in canonical order so the cast
+    // is byte-stable regardless of DB scan order.
+    internal static async Task<PlaneCoo> ReadAdjacencyAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
+
+        var adj = new Dictionary<int, List<(int Col, double W)>>();
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 600;
+        cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.consensus_adjacency($1, $2)";
+        cmd.Parameters.Add(new NpgsqlParameter
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        cmd.Parameters.AddWithValue(degreeCap);
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        while (await rdr.ReadAsync())
+        {
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+            double w = rdr.GetDouble(2);
+            if (w == 0.0) continue;
+            foreach (int s in subj)
+            {
+                if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
+                foreach (int o in obj) row.Add((o, w));
+            }
+        }
+        return CooFromAdj(adj, degreeCap);
+    }
+
     // Vocab-bounded trajectory ORDER LADDER in ONE walk: entity_trajectory_plane
     // masks both endpoints to the vocab inside the native scan and emits forward
     // co-occurrence at every gap 1..maxGap, degree-capped per (subject, gap). We
@@ -348,6 +454,84 @@ internal static class FoundryExport
         }
         stats = new BasisStats(kk, zero, double.NaN);
         return e2;
+    }
+
+    // FAITHFUL low-rank factorization of the rated adjacency for the generative cast.
+    // A[X,Y] = rank-weighted rating of the continuation X→Y (DIRECTED — not symmetrized).
+    // The truncated SVD A ≈ U S Vᵀ to rank = dim is the EXACT optimal rank-dim approximation
+    // (Eckart–Young). embed[X] = U[X]·√S, lm_head[Y] = V[Y]·√S, so in the cast
+    //   logits[Y|X] = lm_head[Y]·embed[X] = Σ_k U[X,k]·S_k·V[Y,k] = A_dim[X,Y]
+    // — the rank-weighted rating LOOKED UP, factored to the hidden width. dim is a NORMAL
+    // embedding size (e.g. 512), NEVER vocab: a 32k-token model is 32000×512, not 32000².
+    // The only loss is the truncation tail (singular values past dim); no learning, no gains.
+    // A is scaled to max|w|→1 first so reconstructed logits keep sane magnitude (the cast's
+    // RMSNorm contributes a per-token positive factor = temperature, not an argmax change).
+    // embed/lmHead come back row-major [vocab × dim], zero-padded past the spectral rank.
+    // NOTE: dense vocab×vocab SVD — modest vocab (≤~4k). Larger needs a sparse/randomized solver.
+    internal static void FactorAdjacency(
+        PlaneCoo adj, int vocab, int dim, out double[] embed, out double[] lmHead, out int usedRank)
+    {
+        var rowSum = new double[vocab];
+        var colSum = new double[vocab];
+        double total = 0;
+        // accumulate the directed rated adjacency as a SPARSE list (row=subject X, col=object Y)
+        var ex = new int[adj.Nnz]; var ey = new int[adj.Nnz]; var ew = new double[adj.Nnz]; int en = 0;
+        for (long e = 0; e < adj.Nnz; e++)
+        {
+            int x = adj.Rows[e], y = adj.Cols[e];
+            if (x < 0 || x >= vocab || y < 0 || y >= vocab) continue;
+            double w = adj.Vals[e];
+            ex[en] = x; ey[en] = y; ew[en] = w; en++;
+            rowSum[x] += w; colSum[y] += w; total += w;
+        }
+        // PPMI: As[X,Y] = max(0, ln( A[X,Y]·T / (rowSum[X]·colSum[Y]) )). This is THE proven
+        // co-occurrence→embedding transform (positive pointwise mutual information; SVD-of-PPMI
+        // equals skip-gram, Levy–Goldberg 2014). It conditions each X→Y rating on the base rates,
+        // so the global hub (high in-degree function words the/I/and) is divided out and X's
+        // SPECIFIC continuation surfaces. It is NON-NEGATIVE and ZERO where there is no edge, so
+        // the SVD spends its rank on real structure, not the hub, and the empty byte/special rows
+        // stay ~0 (no spurious byte continuations). Not a tuned scalar — the marginal conditioning
+        // the invention demands ("whitespace must not weigh as heavily as content words").
+        var As = new float[(long)vocab * vocab];
+        for (int i = 0; i < en; i++)
+        {
+            double denom = rowSum[ex[i]] * colSum[ey[i]];
+            if (denom <= 0) continue;
+            double pmi = Math.Log(ew[i] * total / denom);
+            if (pmi > 0) As[(long)ex[i] * vocab + ey[i]] = (float)pmi;
+        }
+        var U  = new float[(long)vocab * vocab];
+        var S  = new float[vocab];
+        var Vt = new float[(long)vocab * vocab];
+        nuint outRank = 0; int rc;
+        unsafe
+        {
+            fixed (float* pa = As, pu = U, ps = S, pvt = Vt)
+                rc = SynInterop.TensorSvdTruncate(pa, (nuint)vocab, (nuint)vocab, 0.0,
+                                                  &outRank, pu, ps, pvt, (nuint)vocab);
+        }
+        if (rc != 0) throw new InvalidOperationException($"tensor_svd_truncate (adjacency) rc={rc} (vocab={vocab})");
+        int kk = Math.Min(dim, (int)outRank);
+        usedRank = kk;
+        embed  = new double[(long)vocab * dim];
+        lmHead = new double[(long)vocab * dim];
+        // S goes ENTIRELY on lm_head, NONE on embed. embed is RMSNorm'd in the cast, and if √S
+        // were on embed the norm would be dominated by the top singular value √S₁, so RMSNorm
+        // would collapse every token onto the top singular DIRECTION → the readout returns one
+        // hub token for all inputs (the "I I I" collapse). With embed = U (unit-scale columns),
+        // RMSNorm preserves each token's true left-singular DIRECTION; lm_head = V·S carries the
+        // full singular weight (it is not normalized). The reconstruction is unchanged:
+        //   logits[Y|X] = lm_head[Y]·RMSNorm(embed[X]) ∝ Σ_k U[X,k]·S_k·V[Y,k] = A_dim[X,Y]
+        // (the per-token 1/‖U[X]‖ from RMSNorm is a positive temperature, not an argmax change).
+        for (int c = 0; c < kk; c++)
+        {
+            double s = Math.Max(0f, S[c]);
+            for (int i = 0; i < vocab; i++)
+            {
+                embed[(long)i * dim + c]  = (double)U[(long)i * vocab + c];            // U[X,c]
+                lmHead[(long)i * dim + c] = (double)Vt[(long)c * vocab + i] * s;       // V[Y,c]·S
+            }
+        }
     }
 
     // Generates E [vocab × dModel] row-major. anchors[i] is null or a 4D content
