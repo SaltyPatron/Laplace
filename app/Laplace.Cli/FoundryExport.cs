@@ -355,7 +355,7 @@ internal static class FoundryExport
     // so the cast generates char-by-char following real letter statistics — and the vocab
     // (single graphemes) tokenizes any prompt in-engine with no merge path.
     internal static async Task<PlaneCoo> ReadGraphemeOrderAsync(
-        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots)
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int gap = 1)
     {
         var vocab = new byte[tokenSlots.Count][];
         int vi = 0;
@@ -365,9 +365,10 @@ internal static class FoundryExport
         await using var conn = await ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 0;   // pays the bounded constituency walk once
-        cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.grapheme_order($1)";
+        cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.grapheme_order($1, 50000, $2)";
         cmd.Parameters.Add(new NpgsqlParameter
             { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        cmd.Parameters.AddWithValue(gap);
         await using var rdr = await cmd.ExecuteReaderAsync();
         while (await rdr.ReadAsync())
         {

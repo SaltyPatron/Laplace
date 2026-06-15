@@ -67,6 +67,7 @@ internal static class FoundryCommands
                 switch (args[i])
                 {
                     case "--grapheme-floor": grapheme = true; break;
+                    case "--grapheme-ngram": grapheme = true; Environment.SetEnvironmentVariable("LAPLACE_FOUNDRY_NGRAM", "1"); break;
                     case "--recipe-from" when i + 1 < args.Length: recipeFrom = args[++i]; break;
                     case "--tokenizer"   when i + 1 < args.Length: tokenizerDir = args[++i]; break;
                     case "--native-vocab" when i + 1 < args.Length: nativeVocab = int.Parse(args[++i]); break;
@@ -411,11 +412,13 @@ internal static class FoundryCommands
         // the banked law), layers = no-op. logits[Y] = A[Y,X] exactly: the GEMM is the lookup.
         if (grapheme || FoundryExport.EnvInt("LAPLACE_FOUNDRY_FAITHFUL", 0) != 0)
         {
-            int faithfulRc = await WriteFaithfulGgufAsync(
-                ds, recipe, tokens, tokenSlots, vocab, dModel, modelDir, outputPath, specs, tensorCount, grapheme);
+            bool ngram = FoundryExport.EnvInt("LAPLACE_FOUNDRY_NGRAM", 0) != 0;
+            int faithfulRc = ngram
+                ? await WriteGraphemeNgramGgufAsync(ds, recipe, tokens, tokenSlots, vocab, dModel, modelDir, outputPath, specs, tensorCount)
+                : await WriteFaithfulGgufAsync(ds, recipe, tokens, tokenSlots, vocab, dModel, modelDir, outputPath, specs, tensorCount, grapheme);
             SynthInterop.ArchTemplateFree(tmplHandle);
             SynthInterop.RecipeFree(recipeHandle);
-            return faithfulRc == 0 ? 0 : Fail($"faithful foundry write failed (status {faithfulRc})");
+            return faithfulRc == 0 ? 0 : Fail($"{(ngram ? "n-gram" : "faithful")} foundry write failed (status {faithfulRc})");
         }
 
         // ── read the consensus planes (one set-based query each; entity→ordinal is
@@ -934,6 +937,131 @@ internal static class FoundryCommands
         if (rcw != 0) return Fail($"gguf_writer_finalize failed (rc={rcw}) for {outputPath}");
         long fsz = new FileInfo(outputPath).Length;
         Console.WriteLine($"FAITHFUL synthesis complete: {outputPath} ({fsz / 1048576.0:F0} MB) in {swW.Elapsed.TotalSeconds:F1}s");
+        return 0;
+    }
+
+    // GRAPHEME N-GRAM (trigram) cast: an analytically-constructed previous-token (shift) head
+    // injects emb_skip(x_{t-1}) into a reserved residual block so the lm_head decodes the
+    // additive trigram  log P(c|cur) + log P_skip(c|prev). The shift is CALCULATED from the
+    // recipe's RoPE law (q_base = R_{-1}·k_base over the recipe's per-pair angles θ_f), not
+    // chosen — the positional scheme is whatever the recipe declares. Residual layout
+    // (block width r = (d-1)/3, head 0 is the shift, cast with --heads 1 so head_dim = d):
+    //   [0,r)   current bigram embed   (written by embed; read by lm_head bigram half)
+    //   [r,2r)  history                (gets emb_skip(prev) from the shift head; skip half)
+    //   [2r,3r) skip source            (emb_skip(cur); read by the head's V, carried to t+1)
+    //   [d-1]   constant 1             (the position-only Q/K channel)
+    private static async Task<int> WriteGraphemeNgramGgufAsync(
+        NpgsqlDataSource ds, LlamaRecipeExtractor.RecipeInfo recipe,
+        IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
+        Dictionary<Hash128, List<int>> tokenSlots,
+        int vocab, int dModel, string modelDir, string outputPath,
+        TensorSpec[] specs, int tensorCount)
+    {
+        int nHeads = Math.Max(1, recipe.NumHeads), headDim = dModel / nHeads;
+        double ropeTheta = recipe.RopeTheta > 0 ? recipe.RopeTheta : 10000.0;
+
+        var sw = Stopwatch.StartNew();
+        var A1 = await FoundryExport.ReadGraphemeOrderAsync(ds, tokenSlots, 1);
+        var A2 = await FoundryExport.ReadGraphemeOrderAsync(ds, tokenSlots, 2);
+        if (A1.Nnz == 0) return Fail("grapheme_order gap1 returned nothing — ingest text first");
+        Console.WriteLine($"  n-gram read in {sw.Elapsed.TotalSeconds:F1}s: bigram {A1.Nnz:N0} edges, skip {A2.Nnz:N0} edges");
+
+        int r = (dModel - 1) / 3;
+        FoundryExport.FactorAdjacency(A1, vocab, r, out var embB, out var lmB, out _, conditional: true);
+        FoundryExport.FactorAdjacency(A2, vocab, r, out var embS, out var lmS, out _, conditional: true);
+
+        int CONST = dModel - 1;
+        // The const channel must DOMINATE each token's norm so RMSNorm (input_layernorm)
+        // leaves it roughly equal across tokens — otherwise a low-norm token (the BOS, whose
+        // embed is only the const dim) gets its key amplified ~√d× and the shift head collapses
+        // onto it. Large const ⇒ rms ≈ const/√d for every token ⇒ h[CONST] ≈ √d (constant) ⇒
+        // the Q/K are truly position-only. It is NOT read by lm_head, so it only sets the scale.
+        double constVal = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_SHIFT_CONST", 10.0);
+        var embed  = new double[(long)vocab * dModel];
+        var lmHead = new double[(long)vocab * dModel];
+        for (int v = 0; v < vocab; v++)
+        {
+            long o = (long)v * dModel;
+            for (int i = 0; i < r; i++)
+            {
+                embed[o + i]         = embB[(long)v * r + i];   // current bigram embed @ [0,r)
+                embed[o + 2 * r + i] = embS[(long)v * r + i];   // skip source          @ [2r,3r)
+                lmHead[o + i]        = lmB[(long)v * r + i];     // bigram readout       @ [0,r)
+                lmHead[o + r + i]    = lmS[(long)v * r + i];     // skip readout         @ [r,2r)
+            }
+            embed[o + CONST] = constVal;   // dominant constant channel for position-only Q/K
+        }
+
+        // RoPE-calculated previous-token (shift) head, head 0. Q/K read ONLY the const channel
+        // so they are position-independent; k_base[pair f] = (s,0), q_base = R_{-1}·k_base =
+        // (s·cosθ_f, −s·sinθ_f), so after RoPE  q_t·k_{t-1}  peaks. s large → softmax ≈ hard.
+        double scale = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_SHIFT_SCALE", 4.0);
+        int npairs = headDim / 2;
+        var qbase = new double[headDim]; var kbase = new double[headDim];
+        for (int f = 0; f < npairs; f++)
+        {
+            double thetaF = Math.Pow(ropeTheta, -2.0 * f / headDim);
+            double s = scale / Math.Sqrt(npairs);
+            // HALF-SPLIT (NeoX) RoPE pairing: pair f is (dim f, dim f+npairs), NOT interleaved
+            // (2f, 2f+1). This matches llama.cpp's NeoX rope and the reference oracle, so the
+            // q_base = R_{-1}·k_base rotation actually shifts attention to t-1.
+            kbase[f] = s;                    kbase[f + npairs] = 0;
+            qbase[f] = s * Math.Cos(thetaF); qbase[f + npairs] = -s * Math.Sin(thetaF);
+        }
+
+        var gguf = SynthInterop.GgufWriterCreate(outputPath);
+        if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
+        WriteGgufMetadata(gguf, recipe, tokens, modelDir);
+        for (int i = 0; i < tensorCount; i++)
+        {
+            string name; ulong rows, cols; int dtype;
+            unsafe
+            {
+                var sp = specs[i];
+                name  = Marshal.PtrToStringUTF8((IntPtr)sp.Name) ?? "";
+                rows  = sp.Rank >= 1 ? sp.Shape[0] : 1;
+                cols  = sp.Rank >= 2 ? sp.Shape[1] : 1;
+                dtype = sp.Dtype;
+            }
+            int tr = (int)rows, tc = (int)Math.Max(1UL, cols);
+            var vals = new float[(long)tr * tc];
+
+            if (name == "model.embed_tokens.weight")
+                for (int v = 0; v < tr; v++) for (int c = 0; c < tc; c++)
+                    vals[(long)v * tc + c] = (float)embed[(long)v * dModel + c];
+            else if (name == "lm_head.weight")
+                for (int v = 0; v < tr; v++) for (int c = 0; c < tc; c++)
+                    vals[(long)v * tc + c] = (float)lmHead[(long)v * dModel + c];
+            else if (name == "model.norm.weight"
+                     || name.EndsWith("input_layernorm.weight", StringComparison.Ordinal)
+                     || name.EndsWith("post_attention_layernorm.weight", StringComparison.Ordinal))
+                Array.Fill(vals, 1.0f);
+            else if (name.EndsWith("self_attn.q_proj.weight", StringComparison.Ordinal))
+                for (int hd = 0; hd < headDim && hd < tr; hd++) vals[(long)hd * tc + CONST] = (float)qbase[hd];
+            else if (name.EndsWith("self_attn.k_proj.weight", StringComparison.Ordinal))
+                for (int hd = 0; hd < headDim && hd < tr; hd++) vals[(long)hd * tc + CONST] = (float)kbase[hd];
+            else if (name.EndsWith("self_attn.v_proj.weight", StringComparison.Ordinal))
+                for (int j = 0; j < r && j < tr; j++) vals[(long)j * tc + (2 * r + j)] = 1.0f;   // v[j] = h[2r+j]
+            else if (name.EndsWith("self_attn.o_proj.weight", StringComparison.Ordinal))
+                for (int j = 0; j < r && (r + j) < tr; j++) vals[(long)(r + j) * tc + j] = 1.0f;  // resid[r+j] += o[j]
+            else if (name.StartsWith("model.layers.", StringComparison.Ordinal))
+            { /* mlp.* and any remaining layer tensor: no-op (leave zero) */ }
+            else { Console.WriteLine($"  n-gram foundry does not define '{name}'"); SynthInterop.GgufWriterFree(gguf); return 3; }
+
+            byte[] tb = dtype == 0 ? FoundryExport.ToF32Bytes(vals) : FoundryExport.ToBf16Bytes(vals);
+            nuint[] dims = cols > 1 ? new nuint[] { (nuint)cols, (nuint)rows } : new nuint[] { (nuint)rows };
+            unsafe
+            {
+                fixed (nuint* dp = dims) fixed (byte* bp = tb)
+                    SynthInterop.GgufWriterAddTensor(gguf, HfToGgmlName(name), dtype, dp, (nuint)dims.Length, bp);
+            }
+        }
+        int rcw = SynthInterop.GgufWriterFinalize(gguf);
+        SynthInterop.GgufWriterFree(gguf);
+        if (rcw != 0) return Fail($"gguf finalize failed rc={rcw}");
+        long fsz = new FileInfo(outputPath).Length;
+        Console.WriteLine($"N-GRAM synthesis complete: {outputPath} ({fsz / 1048576.0:F0} MB, r={r}, heads={nHeads}, "
+            + $"shift-scale={scale}, θ={ropeTheta:F0}) — additive trigram log P(c|cur)+log P_skip(c|prev)");
         return 0;
     }
 
