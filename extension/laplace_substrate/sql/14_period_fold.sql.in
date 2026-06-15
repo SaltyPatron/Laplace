@@ -121,7 +121,7 @@ BEGIN
         keyed AS MATERIALIZED (
             SELECT mm.*, consensus_id(mm.subject_id, mm.type_id, mm.object_id) AS cid
             FROM merged mm
-            ORDER BY consensus_id(mm.subject_id, mm.type_id, mm.object_id)
+            ORDER BY cid   -- the computed alias, NOT a second consensus_id() (BLAKE3) per row
         )
         INSERT INTO consensus (id, subject_id, type_id, object_id,
                                rating, rd, volatility, witness_count, last_observed_at)
