@@ -130,6 +130,66 @@ int laplace_content_root_id(
     return 0;
 }
 
+/* Word-tier order key: tier-2 nodes are disjoint spans, so text offset IS
+ * reading order. The node array is built bottom-up, not guaranteed left-to-right
+ * within a tier, so sort rather than assume. */
+typedef struct { uint32_t off; uint32_t idx; } seg_order_t;
+
+static int seg_order_cmp(const void* a, const void* b) {
+    uint32_t oa = ((const seg_order_t*)a)->off;
+    uint32_t ob = ((const seg_order_t*)b)->off;
+    return (oa > ob) - (oa < ob);
+}
+
+int laplace_content_word_segment(
+    const uint8_t*       utf8,
+    size_t               len,
+    laplace_word_emit_fn emit,
+    void*                ctx) {
+    if (!utf8 || !emit) return -1;
+
+    tier_tree_t* tree = NULL;
+    int rc = content_tree_build(utf8, len, &tree);
+    if (rc != 0) return rc;
+
+    size_t nc = tier_tree_node_count(tree);
+    seg_order_t* words = (seg_order_t*)malloc(nc * sizeof(seg_order_t));
+    if (!words) { tier_tree_free(tree); return -2; }
+
+    /* the Word tier (2) is the UAX#29 word level — collect, then order by span */
+    size_t nw = 0;
+    for (uint32_t idx = 0; idx < (uint32_t)nc; ++idx) {
+        tier_node_view_t node;
+        if (tier_tree_get_node(tree, idx, &node) != 0) continue;
+        if (node.tier != 2) continue;
+        words[nw].off = node.text_range_off;
+        words[nw].idx = idx;
+        nw++;
+    }
+    qsort(words, nw, sizeof(seg_order_t), seg_order_cmp);
+
+    uint32_t ord = 0;
+    for (size_t w = 0; w < nw; ++w) {
+        tier_node_view_t node;
+        if (tier_tree_get_node(tree, words[w].idx, &node) != 0) continue;
+        if (node.text_range_len == 0) continue;
+        const uint8_t* span = utf8 + node.text_range_off;
+        /* WSegSpace runs are witnessed content (round-trip law) but are NOT
+         * units of order — skip them, exactly as the generation stream does. */
+        if (laplace_text_is_all_whitespace(span, node.text_range_len)) continue;
+
+        /* the id is the COLLAPSED stand-in (a single-grapheme word is its
+         * grapheme), matching laplace_content_root_id for that word alone. */
+        tier_node_view_t stand_in;
+        tier_tree_get_node(tree, collapse_idx(tree, words[w].idx), &stand_in);
+        emit(ctx, ord++, span, node.text_range_len, &stand_in.id);
+    }
+
+    free(words);
+    tier_tree_free(tree);
+    return 0;
+}
+
 /* ── Record-once bank (the content-addressed / Merkle-DAG law) ────────────────
  * Same content = same id = recorded ONCE, then referenced. A sentence references
  * its words, a word its graphemes, a grapheme its codepoints — the reference is
