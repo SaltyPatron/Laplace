@@ -16,6 +16,13 @@ CREATE INDEX physicalities_observed_brin   ON physicalities USING brin  (observe
 -- trajectory-bearing rows) runs on every generate call — it must stay an
 -- index-only scan (IF NOT EXISTS: live DBs converge via module refresh)
 CREATE INDEX IF NOT EXISTS physicalities_traj_probe ON physicalities USING btree (observed_at) WHERE type = 1 AND trajectory IS NOT NULL;
+-- ND-GIST on the content-trajectory LineStrings: the geometry IS the sequence index. A
+-- mantissa-packed entity vertex, searched with the n-D overlap operator (&&&, same
+-- gist_geometry_ops_nd op-class as coord_gist), finds every content trajectory whose 4D bbox
+-- contains the point — the trajectories the entity appears in — as an INDEX scan, not the 48M-row
+-- full scan a 2D ST_DWithin forces. Refine bbox candidates with laplace_trajectory_constituents.
+-- (live DBs: build CONCURRENTLY out-of-band; this IF NOT EXISTS is the fresh-DB definition.)
+CREATE INDEX IF NOT EXISTS physicalities_traj_gist ON physicalities USING gist (trajectory gist_geometry_ops_nd) WHERE type = 1 AND trajectory IS NOT NULL AND n_constituents >= 2;
 
 CREATE INDEX attestations_type_btree          ON attestations USING btree (type_id);
 CREATE INDEX attestations_object_btree        ON attestations USING btree (object_id) WHERE object_id IS NOT NULL;
