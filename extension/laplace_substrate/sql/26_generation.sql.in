@@ -316,6 +316,43 @@ CREATE OR REPLACE FUNCTION consensus_layer_plane(
     SELECT c.subject_id, c.object_id, c.w, c.rk FROM capped c WHERE c.rn <= p_degree_cap
 $$;
 
+-- PER-TYPE head reader for the ATTESTATION-TENSOR cast (attestations ARE the tensors): one row
+-- group per relation TYPE = one attention HEAD, the type's rank = its LAYER (11 ranks → 11 layers),
+-- eff_mu = the head's weight. The transformer head h is the SPARSE rated adjacency A_h[X,Y] =
+-- eff_mu(X, type_h, Y) — there is NO flat vocab² matrix and NO band collapse: each type stays its
+-- own head, factored to head_dim on its own (few edges per token → low rank, trivial). Degree-capped
+-- PER (subject, type) so every head is bounded. Same MATERIALIZED rk-eval discipline as the band
+-- readers (one relation_rank eval per scanned consensus row, not per surviving edge).
+CREATE OR REPLACE FUNCTION consensus_type_plane(
+        p_vocab bytea[], p_degree_cap int DEFAULT 48)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision,
+                  type_id bytea, layer_rank double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+         edges AS MATERIALIZED (
+             SELECT c.subject_id, c.object_id, c.rating, c.rd, c.type_id,
+                    relation_rank(c.type_id) AS rk
+             FROM v
+             JOIN consensus c ON c.subject_id = v.id
+             JOIN v vo        ON vo.id = c.object_id
+         ),
+         ranked AS (
+             SELECT e.subject_id, e.object_id,
+                    (eff_mu(e.rating, e.rd))::float8 / 1e9 AS w, e.type_id, e.rk
+             FROM edges e
+             WHERE e.rk IS NOT NULL
+         ),
+         capped AS (
+             SELECT r.subject_id, r.object_id, r.w, r.type_id, r.rk,
+                    row_number() OVER (PARTITION BY r.subject_id, r.type_id
+                                       ORDER BY r.w DESC, r.object_id) AS rn
+             FROM ranked r
+         )
+    SELECT c.subject_id, c.object_id, c.w, c.type_id, c.rk
+    FROM capped c WHERE c.rn <= p_degree_cap
+$$;
+
 -- FAITHFUL adjacency (the generative mold's transcription source): the rank-weighted rated
 -- CONTENT adjacency among the vocab. Each X→Y edge weight is the SUM over every relation type
 -- of relation_rank(type_id) · eff_mu — the rank read PER EDGE from the banked relation law
@@ -524,6 +561,71 @@ CREATE OR REPLACE FUNCTION grapheme_order(p_vocab bytea[], p_words int DEFAULT 5
     FROM cnt b
     JOIN v vs ON vs.id = b.cur
     JOIN v vo ON vo.id = b.nxt
+$$;
+
+-- WORD ORDER: P(next word | current word) from the CONTENT TRAJECTORY GEOMETRY — the word-tier
+-- analog of grapheme_order, one tier up. The witnessed word sequence IS the sentence/phrase
+-- trajectory (tier > 2): unpack its constituents in trajectory order (laplace_trajectory_constituents),
+-- mask to the in-vocab tier-2 words (interspersed tier-0 punctuation/space vertices drop out), and
+-- lead(gap) pairs adjacent in-vocab words. This is the ORDER signal read DIRECTLY off the geometry —
+-- NOT the trajectory_pairs materialization, NOT the folded PRECEDES relation. gap=1 is the bigram
+-- readout; gap=2 is the skip-gram (prev -> next) the history subspace of the shift head decodes.
+-- One trajectory per entity (lowest source_id) so lead() stays within a single witnessed sequence.
+CREATE OR REPLACE FUNCTION word_order(p_vocab bytea[], p_trajs int DEFAULT 100000, p_gap int DEFAULT 1)
+    RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+    t AS (
+        SELECT DISTINCT ON (p.entity_id) p.entity_id AS sid, p.trajectory
+        FROM physicalities p
+        JOIN entities e ON e.id = p.entity_id AND e.tier > 2
+        WHERE p.type = 1 AND p.trajectory IS NOT NULL
+        ORDER BY p.entity_id, p.source_id LIMIT p_trajs
+    ),
+    g AS (
+        SELECT t.sid, tc.ordinal AS ord, tc.entity_id AS wid
+        FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
+        JOIN v ON v.id = tc.entity_id
+    ),
+    bg AS (
+        SELECT wid AS cur, lead(wid, p_gap) OVER (PARTITION BY sid ORDER BY ord) AS nxt FROM g
+    ),
+    cnt AS (
+        SELECT cur, nxt, count(*)::float8 AS c
+        FROM bg WHERE nxt IS NOT NULL AND cur <> nxt GROUP BY cur, nxt
+    )
+    SELECT cur, nxt, c FROM cnt
+$$;
+
+-- CORPUS-FREQUENCY word vocab: the tier-2 wordforms that ACTUALLY OCCUR in the content
+-- trajectories, ranked by occurrence count — the FLOW vocabulary (function/stop words the/of/and/to
+-- INCLUDED, which the richness-ranked foundry_vocab drops). A whole-word n-gram model needs these or
+-- word_order bigrams get masked away (both endpoints must be in vocab) and the continuation set
+-- collapses to a handful of words. Counted over the same sentence trajectories word_order reads.
+CREATE OR REPLACE FUNCTION corpus_word_vocab(p_size int, p_trajs int DEFAULT 400000)
+    RETURNS TABLE(surface text, weight bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH t AS (
+        SELECT DISTINCT ON (p.entity_id) p.entity_id, p.trajectory
+        FROM physicalities p JOIN entities e ON e.id = p.entity_id AND e.tier > 2
+        WHERE p.type = 1 AND p.trajectory IS NOT NULL
+        ORDER BY p.entity_id, p.source_id LIMIT p_trajs
+    ),
+    w AS (
+        SELECT tc.entity_id AS id, count(*) AS c
+        FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
+        JOIN entities e ON e.id = tc.entity_id AND e.tier = 2
+        GROUP BY tc.entity_id
+    ),
+    -- rank by frequency, render a candidate band, then keep only Latin-script word surfaces
+    -- (drops the multilingual corpus's Arabic/CJK tokens and the U+FFFD replacement char for a
+    -- clean first English model — language split is a later refinement). render only the band.
+    cand AS (SELECT id, c, render_text(id, 80) AS s FROM w ORDER BY c DESC LIMIT p_size * 4)
+    SELECT s, c FROM cand
+    WHERE s ~ '^[A-Za-z][A-Za-z''.-]*$'
+    ORDER BY c DESC LIMIT p_size
 $$;
 
 -- METRIC EDGES: a transformer head is a bilinear score between two token entities, and
