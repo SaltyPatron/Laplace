@@ -323,6 +323,10 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     if (SPI_connect() != SPI_OK_CONNECT)
         elog(ERROR, "walk_continuations: SPI_connect failed");
     c = corpus_ensure();
+    corpus_ensure_suffix(c);   /* build the n-gram suffix index on first use — without it
+                                * c->suffix is NULL, continuations_collect binary-searches an
+                                * empty array and returns 0 at every order, collapsing the walk
+                                * to the COMPLETES_TO floor (empty when the context has none). */
 
     deconstruct_array(ctx_arr, BYTEAOID, -1, false, TYPALIGN_INT,
                       &elems, &nulls, &n_in);
