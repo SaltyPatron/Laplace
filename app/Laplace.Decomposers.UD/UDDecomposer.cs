@@ -27,6 +27,12 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
     public int     LayerOrder   => 2;
     public Hash128 TrustClassId => TrustClass;
 
+    // Dynamic relation types (deprels/features) this run actually parsed, named for readback so
+    // they land in canonical_names — derived from the data, populated centrally by SeedDynamic
+    // (the chokepoint), never a hard-coded list. Thread-safe: parallel workers seed concurrently.
+    private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => new List<string>(_canonicalNames.Keys);
+
     private static readonly ConcurrentDictionary<(string Lang, string Tag), Hash128> _xposIdMemo =
         new();
     private static readonly ConcurrentDictionary<(string Name, string Value), Hash128> _featValueIdMemo =
@@ -80,7 +86,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
                 await foreach (var sentence in ParseSentencesAsync(conllu, ct))
                 {
                     ct.ThrowIfCancellationRequested();
-                    EmitSentence(b, sentence, langId, langCode, seenEntBatch, seenAttRun);
+                    EmitSentence(b, sentence, langId, langCode, seenEntBatch, seenAttRun, _canonicalNames);
 
                     if (++sentCount >= batchSentences)
                     {
@@ -125,7 +131,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
                     int sentCount = 0, batchNum = 0;
                     await foreach (var sentence in ParseSentencesAsync(conllu, ct))
                     {
-                        EmitSentence(b, sentence, langId, langCode, seenEntBatch, seenAttRun);
+                        EmitSentence(b, sentence, langId, langCode, seenEntBatch, seenAttRun, _canonicalNames);
                         if (++sentCount >= batchSentences)
                         {
                             if (!options.DryRun) await channel.Writer.WriteAsync(b.SetInputUnitsConsumed(sentCount).Build(), ct);
@@ -190,7 +196,8 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
             entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build();
 
     private static void EmitSentence(SubstrateChangeBuilder b, UdSentence s, Hash128 langId, string langCode,
-                                     HashSet<Hash128> seenEntBatch, ConcurrentIdSet seenAttRun)
+                                     HashSet<Hash128> seenEntBatch, ConcurrentIdSet seenAttRun,
+                                     ConcurrentDictionary<string, byte> canonicalNames)
     {
         b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, LanguageTypeId, Source));
 
@@ -226,7 +233,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
                 if (!RelationTypeRegistry.ParseFeature(feat, out var fName, out var fVal)) continue;
                 Hash128 valId = FeatValueId(fName, fVal);
                 b.AddEntity(new EntityRow(valId, EntityTier.Vocabulary, FeatureTypeId, Source));
-                RelationTypeRegistry.SeedDynamic(b, RelationTypeRegistry.ResolveFeature(fName), Source, seenEntBatch, seenAttRun);
+                RelationTypeRegistry.SeedDynamic(b, RelationTypeRegistry.ResolveFeature(fName), Source, seenEntBatch, seenAttRun, canonicalNames);
                 var featRel = RelationTypeRegistry.ResolveFeature(fName);
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
                     form, featRel.Id, valId, Source, null, featRel.Rank * SourceTrust.AcademicCurated));
@@ -247,7 +254,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
             if (tok.Head > 0 && tok.Head <= s.MaxId && formId[tok.Head] is { } headId
                 && !string.IsNullOrEmpty(tok.Deprel) && tok.Deprel != "_")
             {
-                RelationTypeRegistry.SeedDeprel(b, tok.Deprel, Source, seenEntBatch, seenAttRun);
+                RelationTypeRegistry.SeedDeprel(b, tok.Deprel, Source, seenEntBatch, seenAttRun, canonicalNames);
                 var dep = RelationTypeRegistry.ResolveDeprel(tok.Deprel);
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
                     form, dep.Id, headId, Source, null, dep.Rank * SourceTrust.AcademicCurated));
@@ -263,7 +270,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
                     string erel = edge[(colon + 1)..].Trim();
                     if (erel.Length == 0 || headRef == "0") continue;
                     if (!refToForm.TryGetValue(headRef, out var eHead)) continue;
-                    RelationTypeRegistry.SeedEnhancedDeprel(b, erel, Source, seenEntBatch, seenAttRun);
+                    RelationTypeRegistry.SeedEnhancedDeprel(b, erel, Source, seenEntBatch, seenAttRun, canonicalNames);
                     var edep = RelationTypeRegistry.ResolveEnhancedDeprel(erel);
                     b.AddAttestation(NativeAttestation.CategoricalResolved(
                         form, edep.Id, eHead, Source, null, edep.Rank * SourceTrust.AcademicCurated));

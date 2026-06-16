@@ -445,7 +445,12 @@ internal static class FoundryCommands
         // the banked law), layers = no-op. logits[Y] = A[Y,X] exactly: the GEMM is the lookup.
         if (grapheme || FoundryExport.EnvInt("LAPLACE_FOUNDRY_FAITHFUL", 0) != 0)
         {
-            bool ngram = FoundryExport.EnvInt("LAPLACE_FOUNDRY_NGRAM", 0) != 0;
+            // The grapheme floor defaults to the SHIFT-HEAD TRIGRAM, not the gap-1 bigram. A pure
+            // bigram readout (WriteFaithful) has no state beyond the current grapheme, so greedy
+            // decode walks into a fixed cycle ("...aaaa"). WriteGraphemeNgram carries the previous
+            // grapheme (the gap=2 skip-gram "history subspace" grapheme_order already computes) —
+            // the diagnosed fix. Opt back to the bigram with LAPLACE_FOUNDRY_NGRAM=0.
+            bool ngram = FoundryExport.EnvInt("LAPLACE_FOUNDRY_NGRAM", grapheme ? 1 : 0) != 0;
             // multi-offset multi-head regressed (interpolation sums function-word hubs → "the of the of");
             // default to the single-head trigram. Opt back in with LAPLACE_FOUNDRY_MULTIHEAD=1.
             bool multiHead = ngram && !grapheme && recipe.NumHeads > 1
@@ -583,11 +588,34 @@ internal static class FoundryCommands
         string? affRaw = Environment.GetEnvironmentVariable("LAPLACE_FOUNDRY_EMBED_AFFINITY");
         // A metric head needs the native S³ coordinate IN the basis; BuildBasisAffinity ignores
         // anchors, so force the LE-path builder (which honours coord-direct) when one is active.
-        bool affBasis = attnMetric == "" && (affRaw == "1" || (affRaw != "0" && vocab <= 3000));
-        Console.WriteLine($"  basis path: {(affBasis ? "AFFINITY-SVD (token = SVD of its relational row)" : "Laplacian-eigenmaps")} (vocab {vocab})");
-        var E = affBasis
-            ? FoundryExport.BuildBasisAffinity(vocab, dModel, unionGraph, anchors, basisSeed, out var basisStats)
-            : FoundryExport.BuildBasis(vocab, dModel, unionGraph, anchors, basisSeed, out basisStats);
+        double[] E;
+        FoundryExport.BasisStats basisStats;
+        if (FoundryExport.EnvInt("LAPLACE_FOUNDRY_COORD_ONLY", 0) != 0)
+        {
+            // EXACT S³ EMBED — no LE, no GSO, no Procrustes, no Lanczos, no SVD. The embedding IS
+            // the verbatim super-Fibonacci/DUCET/Hopf coordinate (physicalities.coord, filled into
+            // `anchors`): the 4 S³ dims placed directly into the hidden space, remaining dims zero.
+            // The anchor is the basis; nothing is generated or fit, so nothing can NaN.
+            double cs = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_COORD_SCALE", 20.0);
+            E = new double[(long)vocab * dModel];
+            int placed = 0;
+            for (int t = 0; t < vocab; t++)
+            {
+                if (anchors[t] is not { } a) continue;
+                for (int d = 0; d < 4 && d < dModel; d++) E[(long)t * dModel + d] = a[d] * cs;
+                placed++;
+            }
+            basisStats = new FoundryExport.BasisStats(4, vocab - placed, 0.0);
+            Console.WriteLine($"  EXACT S³ EMBED: {placed:N0} tokens = verbatim coordinate ×{cs} (no LE/GSO/Procrustes/Lanczos/SVD)");
+        }
+        else
+        {
+            bool affBasis = attnMetric == "" && (affRaw == "1" || (affRaw != "0" && vocab <= 3000));
+            Console.WriteLine($"  basis path: {(affBasis ? "AFFINITY-SVD (token = SVD of its relational row)" : "Laplacian-eigenmaps")} (vocab {vocab})");
+            E = affBasis
+                ? FoundryExport.BuildBasisAffinity(vocab, dModel, unionGraph, anchors, basisSeed, out basisStats)
+                : FoundryExport.BuildBasis(vocab, dModel, unionGraph, anchors, basisSeed, out basisStats);
+        }
         Console.WriteLine($"  basis generated in {swBasis.Elapsed.TotalSeconds:F1}s: "
             + $"spectral K={basisStats.SpectralRank}, {basisStats.ZeroSpectralTokens:N0} tokens off-graph (capacity-only rows), "
             + $"procrustes residual={basisStats.ProcrustesResidual:F4}");
@@ -603,7 +631,12 @@ internal static class FoundryCommands
         // made-of), causal+sequence (what-follows), equivalence (sameness) — so the model
         // is a walk down the rank ladder, not M^L. Each is projected through the basis and
         // factored at the mold ranks; OV/FFN compose outer·inner (factor Mᵀ), attention qᵀk.
-        var rankPlanes = new[] { attnPlane, rel, pre, sim };
+        // FFN/completion = the folded causal band UNION the EXACT trajectory continuation. The
+        // folded causal band is near-empty over a focused vocab (here pre.Nnz=0); `traj` (read
+        // above, then previously DISCARDED) is the real "what follows" signal off the LineStrings.
+        // Without it the FFN operator is empty and every prompt collapses to one generic token.
+        var completion = FoundryExport.Normalize(FoundryExport.Union(pre, traj));
+        var rankPlanes = new[] { attnPlane, rel, completion, sim };
         var rankNames  = new[] { attnMetric != "" ? $"metric:{attnMetric}" : "associative", "taxo+part", "causal+seq", "equivalence" };
         int nOps = rankPlanes.Length;
         var fOvR   = new FoundryExport.Factors[nOps];   // transpose:true,  rank kAttn  (V/O)
@@ -681,6 +714,24 @@ internal static class FoundryCommands
                 double idf = 1.0 / (inDeg[v] + 1.0);   // full marginal division = conditional P(X→Y)/P(Y)
                 for (int c = 0; c < dC; c++) lmHead[off + c] *= idf;
                 lmHead[off + dC] = 0.0;
+            }
+            // READOUT = SPACE-LED WORD CONTINUATIONS ONLY. byte tokens (<0xXX>) and the bare
+            // (no-leading-space) dual-form aliases are valid INPUTS but must never be emitted:
+            // a byte-level-BPE detokenizer concatenates a bare piece with no space, so emitting
+            // them runs words together ("on"+"the"+"y"+"of" → "ontheyof"). The ▁/leading-space
+            // form is the output form. Zero the others' lm_head rows (mirrors the n-gram readouts'
+            // suppression, which the default operator/basis path was missing).
+            {
+                int suppressed = 0;
+                foreach (var t in tokens)
+                {
+                    if (t.TokenId < 0 || t.TokenId >= vocab) continue;
+                    if (!(t.IsByteLevel || !t.Role.HasFlag(TokenRole.LeadingSpace))) continue;
+                    long o = (long)t.TokenId * dModel;
+                    for (int c = 0; c < dModel; c++) lmHead[o + c] = 0.0;
+                    suppressed++;
+                }
+                Console.WriteLine($"  lm_head: suppressed {suppressed:N0} byte + bare-alias tokens (space-led word continuations only)");
             }
             // global scale so the average row norm ≈ 1 (sane logit magnitudes).
             double meanSq = 0;
@@ -896,12 +947,32 @@ internal static class FoundryCommands
         bool knowledge = !grapheme && FoundryExport.EnvInt("LAPLACE_FOUNDRY_KNOWLEDGE", 0) != 0;
         double rkLo = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RANK_LO", 0.55);
         double rkHi = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RANK_HI", 0.85);
-        var A = grapheme
-            ? await FoundryExport.ReadGraphemeOrderAsync(ds, tokenSlots)
-            : knowledge
-                ? await FoundryExport.ReadLayerPlaneAsync(ds, rkLo, rkHi, tokenSlots, cap)
-                : await FoundryExport.ReadAdjacencyAsync(ds, tokenSlots, cap);
-        if (knowledge) Console.WriteLine($"  KNOWLEDGE readout: consensus content band rank∈[{rkLo},{rkHi}] (IS_A/property/synonym, no PRECEDES glue)");
+        // TRAJORDER: the EXACT readout — no folded PRECEDES glue, no flat hub. The rated KNOWLEDGE
+        // band (IS_A/property/synonym, rank∈[lo,hi]) UNION the EXACT trajectory continuation
+        // (P(next word | word) read straight off the witnessed sentence trajectory LineStrings via
+        // word_order, NOT the lossy single-hop folded PRECEDES band that hubs on function words).
+        // Both normalized to comparable scale, then merged. This is the order signal the function-
+        // word loop was missing; it lives in the trajectories, not in type=PRECEDES.
+        bool trajOrder = !grapheme && FoundryExport.EnvInt("LAPLACE_FOUNDRY_TRAJORDER", 0) != 0;
+        FoundryExport.PlaneCoo A;
+        if (grapheme)
+            A = await FoundryExport.ReadGraphemeOrderAsync(ds, tokenSlots);
+        else if (trajOrder)
+        {
+            var know  = FoundryExport.Normalize(await FoundryExport.ReadLayerPlaneAsync(ds, rkLo, rkHi, tokenSlots, cap));
+            var order = FoundryExport.Normalize(await FoundryExport.ReadWordOrderAsync(
+                ds, tokenSlots, 1, FoundryExport.EnvInt("LAPLACE_FOUNDRY_WORD_TRAJS", 400000), cap));
+            A = FoundryExport.Union(know, order);
+            Console.WriteLine($"  TRAJORDER readout: knowledge band rank∈[{rkLo},{rkHi}] ∪ exact trajectory continuation "
+                + $"(word_order off LineStrings; {know.Nnz:N0} knowledge + {order.Nnz:N0} order edges)");
+        }
+        else if (knowledge)
+        {
+            A = await FoundryExport.ReadLayerPlaneAsync(ds, rkLo, rkHi, tokenSlots, cap);
+            Console.WriteLine($"  KNOWLEDGE readout: consensus content band rank∈[{rkLo},{rkHi}] (IS_A/property/synonym, no PRECEDES glue)");
+        }
+        else
+            A = await FoundryExport.ReadAdjacencyAsync(ds, tokenSlots, cap);
         if (A.Nnz == 0)
             return Fail((grapheme ? "grapheme_order" : "consensus_adjacency")
                 + " returned no edges over this vocab — ingest/seed first");

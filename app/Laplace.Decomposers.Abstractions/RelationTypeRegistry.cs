@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -179,8 +180,15 @@ public static class RelationTypeRegistry
 
     public static void SeedDynamic(SubstrateChangeBuilder builder, in RelationTypeResolution k, Hash128 sourceId,
                                    ISet<Hash128> seenEntitiesThisBatch,
-                                   ConcurrentIdSet seenAttestationsThisRun)
+                                   ConcurrentIdSet seenAttestationsThisRun,
+                                   ConcurrentDictionary<string, byte>? readbackNames = null)
     {
+        // Normalize: a dynamically-seeded relation type is born NAMED (substrate/type/<CANON>/v1)
+        // so it is a knowable universal anchor that folds across sources/languages — like POS
+        // (substrate/pos/*), CILI (senses), ISO (languages), Unicode (characters) — not an
+        // anonymous head. The name is DERIVED from the resolution (the label actually parsed),
+        // never a hard-coded list, and this is the one chokepoint every decomposer routes through.
+        readbackNames?.TryAdd($"substrate/type/{k.Canonical}/v1", 0);
         if (seenEntitiesThisBatch.Add(k.Id))
             builder.AddEntity(new EntityRow(k.Id, EntityTier.Vocabulary, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
         if (k.ParentId is { } parent && seenAttestationsThisRun.Add(k.Id))
@@ -194,19 +202,21 @@ public static class RelationTypeRegistry
 
     public static void SeedDeprel(SubstrateChangeBuilder builder, string deprel, Hash128 sourceId,
                                   ISet<Hash128> seenEntitiesThisBatch,
-                                  ConcurrentIdSet seenAttestationsThisRun)
+                                  ConcurrentIdSet seenAttestationsThisRun,
+                                  ConcurrentDictionary<string, byte>? readbackNames = null)
     {
         int colon = deprel.IndexOf(':');
-        if (colon > 0) SeedDynamic(builder, ResolveDeprel(deprel[..colon]), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun);
-        SeedDynamic(builder, ResolveDeprel(deprel), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun);
+        if (colon > 0) SeedDynamic(builder, ResolveDeprel(deprel[..colon]), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun, readbackNames);
+        SeedDynamic(builder, ResolveDeprel(deprel), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun, readbackNames);
     }
 
     public static void SeedEnhancedDeprel(SubstrateChangeBuilder builder, string deprel, Hash128 sourceId,
                                           ISet<Hash128> seenEntitiesThisBatch,
-                                          ConcurrentIdSet seenAttestationsThisRun)
+                                          ConcurrentIdSet seenAttestationsThisRun,
+                                          ConcurrentDictionary<string, byte>? readbackNames = null)
     {
         int colon = deprel.IndexOf(':');
-        if (colon > 0) SeedDynamic(builder, ResolveEnhancedDeprel(deprel[..colon]), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun);
-        SeedDynamic(builder, ResolveEnhancedDeprel(deprel), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun);
+        if (colon > 0) SeedDynamic(builder, ResolveEnhancedDeprel(deprel[..colon]), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun, readbackNames);
+        SeedDynamic(builder, ResolveEnhancedDeprel(deprel), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun, readbackNames);
     }
 }

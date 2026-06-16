@@ -544,6 +544,70 @@ pg_relation_rank(PG_FUNCTION_ARGS)
     PG_RETURN_FLOAT8(def->rank);
 }
 
+/* Rank-by-inheritance for DYNAMIC relation types (UD deprels/features, enhanced
+ * deprels, dbpedia rels) that RelationTypeRegistry.SeedDynamic mints OUTSIDE the
+ * compiled law: laplace_relation_lookup misses, so walk the IS_A chain SeedDynamic
+ * wrote (DEP_* IS_A DEPENDS_ON@0.73, EDEP_* IS_A ENHANCED_DEPENDS_ON@0.73, FEAT_*
+ * IS_A HAS_FEATURE@0.73, ...) to the nearest statically-ranked ancestor. The walk
+ * is HERE in C via bounded SPI — never a SQL recursive CTE. Static hits never touch
+ * the DB; only unregistered leaves pay the bounded ancestry probe. */
+PG_FUNCTION_INFO_V1(pg_relation_rank_resolved);
+
+Datum
+pg_relation_rank_resolved(PG_FUNCTION_ARGS)
+{
+    bytea*    type_ba = PG_GETARG_BYTEA_PP(0);
+    hash128_t cur_id  = bytea_to_hash128(type_ba);
+    const laplace_relation_def_t* def = NULL;
+
+    /* fast path: the banked static law, no DB touch */
+    if (laplace_relation_lookup(&cur_id, &def) == 0 && def != NULL)
+        PG_RETURN_FLOAT8(def->rank);
+
+    if (SPI_connect() != SPI_OK_CONNECT)
+        PG_RETURN_NULL();
+
+    double out_rank = 0.0;
+    bool   found    = false;
+    for (int hop = 0; hop < 8 && !found; hop++)
+    {
+        bytea* cur_ba       = hash128_to_bytea(&cur_id);
+        Oid    argtypes[1]  = { BYTEAOID };
+        Datum  args[1]      = { PointerGetDatum(cur_ba) };
+        bool   isnull;
+        int    rc = SPI_execute_with_args(
+            "SELECT object_id FROM laplace.consensus "
+            "WHERE subject_id = $1 "
+            "  AND type_id = laplace.relation_type_id('IS_A') "
+            "ORDER BY laplace.eff_mu(rating, rd) DESC LIMIT 1",
+            1, argtypes, args, NULL, true, 1);
+        if (rc != SPI_OK_SELECT || SPI_processed == 0)
+            break;
+
+        Datum pd = SPI_getbinval(SPI_tuptable->vals[0],
+                                 SPI_tuptable->tupdesc, 1, &isnull);
+        if (isnull)
+            break;
+
+        hash128_t parent_id = bytea_to_hash128((bytea*) DatumGetPointer(pd));
+        const laplace_relation_def_t* pdef = NULL;
+        if (laplace_relation_lookup(&parent_id, &pdef) == 0 && pdef != NULL)
+        {
+            out_rank = pdef->rank;   /* by-value scalar, survives SPI_finish */
+            found    = true;
+        }
+        else
+        {
+            cur_id = parent_id;      /* by-value hash; no SPI memory to retain */
+        }
+    }
+
+    SPI_finish();
+    if (found)
+        PG_RETURN_FLOAT8(out_rank);
+    PG_RETURN_NULL();
+}
+
 PG_FUNCTION_INFO_V1(pg_relation_canonical);
 
 Datum

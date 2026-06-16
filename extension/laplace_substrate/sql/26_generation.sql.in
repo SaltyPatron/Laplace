@@ -286,7 +286,7 @@ $$;
 CREATE OR REPLACE FUNCTION consensus_layer_plane(
         p_vocab bytea[], p_rank_lo float8, p_rank_hi float8, p_degree_cap int DEFAULT 48)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision, layer_rank double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE
+    LANGUAGE sql STABLE PARALLEL RESTRICTED  -- relation_rank_resolved may SPI (dynamic-type IS_A walk); leader-only
     SET search_path = @extschema@, public AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
          edges AS MATERIALIZED (
@@ -296,7 +296,7 @@ CREATE OR REPLACE FUNCTION consensus_layer_plane(
              -- row (~78k at vocab 5000) instead of once per surviving edge (~1.5k).
              -- Materializing pins one eval per edge; measured 76x (7.8s → 0.1s, vocab 5000).
              SELECT c.subject_id, c.object_id, c.rating, c.rd,
-                    relation_rank(c.type_id) AS rk
+                    relation_rank_resolved(c.type_id) AS rk  -- RESOLVED: dynamic UD types (DEP_/EDEP_/FEAT_) inherit rank via IS_A; bare relation_rank() = NULL for them, and the rk IS NOT NULL filter below was dropping 533 types / ~234k edges from every export plane
              FROM v
              JOIN consensus c ON c.subject_id = v.id
              JOIN v vo        ON vo.id = c.object_id   -- hash join, O(edges); never an
@@ -327,12 +327,12 @@ CREATE OR REPLACE FUNCTION consensus_type_plane(
         p_vocab bytea[], p_degree_cap int DEFAULT 48)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision,
                   type_id bytea, layer_rank double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE
+    LANGUAGE sql STABLE PARALLEL RESTRICTED  -- relation_rank_resolved may SPI (dynamic-type IS_A walk); leader-only
     SET search_path = @extschema@, public AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
          edges AS MATERIALIZED (
              SELECT c.subject_id, c.object_id, c.rating, c.rd, c.type_id,
-                    relation_rank(c.type_id) AS rk
+                    relation_rank_resolved(c.type_id) AS rk  -- RESOLVED: dynamic UD types (DEP_/EDEP_/FEAT_) inherit rank via IS_A; bare relation_rank() = NULL for them, and the rk IS NOT NULL filter below was dropping 533 types / ~234k edges from every export plane
              FROM v
              JOIN consensus c ON c.subject_id = v.id
              JOIN v vo        ON vo.id = c.object_id
@@ -369,7 +369,7 @@ $$;
 CREATE OR REPLACE FUNCTION consensus_adjacency(
         p_vocab bytea[], p_degree_cap int DEFAULT 64)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE
+    LANGUAGE sql STABLE PARALLEL RESTRICTED  -- relation_rank_resolved may SPI (dynamic-type IS_A walk); leader-only
     SET search_path = @extschema@, public AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
          edges AS MATERIALIZED (
@@ -381,7 +381,7 @@ CREATE OR REPLACE FUNCTION consensus_adjacency(
              -- relation_rank(type_id) at the index-scan filter, evaluating it once per SCANNED
              -- consensus row (~78k at vocab 5000) — measured 76x slower (7.8s vs 0.1s).
              SELECT c.subject_id, c.object_id, c.rating, c.rd,
-                    relation_rank(c.type_id) AS rk
+                    relation_rank_resolved(c.type_id) AS rk  -- RESOLVED: dynamic UD types (DEP_/EDEP_/FEAT_) inherit rank via IS_A; bare relation_rank() = NULL for them, and the rk IS NOT NULL filter below was dropping 533 types / ~234k edges from every export plane
              FROM v
              JOIN consensus c ON c.subject_id = v.id
              JOIN v vo        ON vo.id = c.object_id
