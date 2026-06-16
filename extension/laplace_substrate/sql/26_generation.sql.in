@@ -779,3 +779,24 @@ CREATE OR REPLACE FUNCTION respell_variant(p_node_type text, p_modality text DEF
     RETURNS text
     AS 'MODULE_PATHNAME', 'pg_laplace_respell_variant'
     LANGUAGE C VOLATILE;
+
+-- CONTENT-ADDRESSED book/fact recall: which content trajectories (sentences) contain entity X,
+-- via the GIN inverted index (physicalities_constituents_gin over laplace_trajectory_constituent_ids).
+-- A trajectory's bbox spans the whole 4D sphere so NO spatial index discriminates — the entity id
+-- IS the exact cell; @> ARRAY[word_id(x)] is a direct index seek (~105ms over 48M trajectories).
+-- Surface sentence-length trajectories, render ONLY the final N. From a hit, read precedes/follows
+-- off the trajectory: the same content trajectory that feeds the generative order/chat readout.
+CREATE OR REPLACE FUNCTION recall_trajectories(p_word text, p_limit int DEFAULT 6)
+    RETURNS TABLE(answer text)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+  WITH ids AS (
+    SELECT ph.entity_id
+    FROM physicalities ph
+    WHERE ph.type = 1 AND ph.trajectory IS NOT NULL
+      AND public.laplace_trajectory_constituent_ids(ph.trajectory) @> ARRAY[word_id(p_word)]
+    ORDER BY abs(ph.n_constituents - 7)        -- sentence-length, not the bare token / a paragraph
+    LIMIT p_limit
+  )
+  SELECT left(replace(render_text(entity_id, 300), chr(10), ' '), 180) FROM ids
+$$;
