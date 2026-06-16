@@ -1324,7 +1324,7 @@ internal static class FoundryCommands
             for (int i = 0; i < n; i++)
             {
                 if (types[i] == 6) { pieces[i] = ByteToUnicode[ParseByteToken(pieces[i])].ToString(); types[i] = 1; }
-                else if (types[i] == 1 && pieces[i].StartsWith("▁", StringComparison.Ordinal)) pieces[i] = ByteEncode(pieces[i][1..]);   // BARE word (no leading Ġ) so a prompt "king" matches directly
+                else if (types[i] == 1 && pieces[i].StartsWith("▁", StringComparison.Ordinal)) pieces[i] = ByteEncode(" " + pieces[i][1..]);   // 'Ġword' (leading space) so generated words render WITH spaces
                 else if (types[i] == 1) pieces[i] = ByteEncode(pieces[i]);
                 else types[i] = 3;   // <unk>/<s>/</s> -> CONTROL
                 scores[i] = 0f;
