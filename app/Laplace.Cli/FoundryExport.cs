@@ -294,6 +294,153 @@ internal static class FoundryExport
         return CooFromAdj(adj, degreeCap);
     }
 
+    // METRIC PLANE: a transformer head is a bilinear score between two token entities, and
+    // a head TRANSCRIBES a NAMED substrate metric between their trajectories rather than
+    // learning a pattern. laplace.metric_edges computes, per token, its k nearest neighbours
+    // under the chosen metric (laplace_frechet_4d / hausdorff_4d / angular_distance_4d) over
+    // the realized trajectory — a DISTANCE. Map distance→affinity (exp(−d): near = high) so
+    // the operator scores near pairs up in the attention softmax, then project+factor it into
+    // q/k exactly like a consensus plane: q·k reproduces the metric. metric ∈ frechet|hausdorff|angular.
+    internal static async Task<PlaneCoo> ReadMetricEdgesAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots,
+        string metric, int k, int probe, int degreeCap)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var key in tokenSlots.Keys) vocab[vi++] = key.ToBytes();
+
+        var adj = new Dictionary<int, List<(int Col, double W)>>();
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 0;   // pays the bounded angular-KNN + metric refine once
+        cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.metric_edges($1, $2, $3, $4)";
+        cmd.Parameters.Add(new NpgsqlParameter
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        cmd.Parameters.AddWithValue(metric);
+        cmd.Parameters.AddWithValue(k);
+        cmd.Parameters.AddWithValue(probe);
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        while (await rdr.ReadAsync())
+        {
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+            double dist = rdr.GetDouble(2);
+            double w = Math.Exp(-dist);   // distance → affinity (near = high score)
+            if (w == 0.0) continue;
+            foreach (int s in subj)
+            {
+                if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
+                foreach (int o in obj) row.Add((o, w));
+            }
+        }
+        return CooFromAdj(adj, degreeCap);
+    }
+
+    // Verify the metric HEAD: after project+factor, q·k must reproduce the metric's
+    // neighbour structure. For sampled subjects, rank all tokens by q·k (q_i = Left·E_i,
+    // k_j = Right·E_j over the basis E) and measure recall of the metric's own top-k
+    // neighbours. Proves "layer/head = metric(A,B)" with a number — a transcription
+    // tripwire, not a tuned metric. K = E·Rightᵀ is precomputed once over the vocab.
+    internal static void ReportMetricHeadFidelity(
+        double[] e, int vocab, int dModel, PlaneCoo plane, Factors f, string metric)
+    {
+        var nbr = new Dictionary<int, List<int>>();
+        for (long t = 0; t < plane.Nnz; t++)
+        {
+            int s = plane.Rows[t], o = plane.Cols[t];
+            if (!nbr.TryGetValue(s, out var l)) nbr[s] = l = new List<int>();
+            l.Add(o);
+        }
+        if (nbr.Count == 0 || f.Rank == 0) { Console.WriteLine("  metric-head fidelity: no edges to check"); return; }
+        int rank = f.Rank;
+        // K[o,r] = Right_r · E_o for every token, once.
+        var K = new double[(long)vocab * rank];
+        for (int o = 0; o < vocab; o++)
+            for (int r = 0; r < rank; r++)
+            {
+                double a = 0;
+                for (int j = 0; j < dModel && j < f.Dim; j++) a += f.Right[(long)r * f.Dim + j] * e[(long)o * dModel + j];
+                K[(long)o * rank + r] = a;
+            }
+        var samples = nbr.Keys.OrderBy(x => x).Take(8).ToList();
+        double recallSum = 0, directSum = 0, noiseSum = 0; int cnt = 0;
+        foreach (int s in samples)
+        {
+            var want = nbr[s]; int kk = want.Count; if (kk == 0) continue;
+            var qs = new double[rank];
+            for (int r = 0; r < rank; r++)
+            {
+                double a = 0;
+                for (int j = 0; j < dModel && j < f.Dim; j++) a += f.Left[(long)r * f.Dim + j] * e[(long)s * dModel + j];
+                qs[r] = a;
+            }
+            var score = new double[vocab];
+            for (int o = 0; o < vocab; o++)
+            {
+                double a = 0;
+                for (int r = 0; r < rank; r++) a += qs[r] * K[(long)o * rank + r];
+                score[o] = a;
+            }
+            var top = Enumerable.Range(0, vocab).Where(o => o != s)
+                                .OrderByDescending(o => score[o]).Take(kk).ToHashSet();
+            recallSum += (double)want.Count(w => top.Contains(w)) / kk;
+
+            // DIRECT S³-frame: q=k= the 4 coordinate dims of E (cos on the sphere), bypassing the
+            // factored operator — isolates whether the basis CARRIES the metric (rigid frame)
+            // from whether the SVD factorization preserves it. For angular this is cos(coord) by
+            // construction, so it is the ceiling the factored head should approach.
+            var dsc = new double[vocab];
+            for (int o = 0; o < vocab; o++)
+            { double a = 0; for (int d = 0; d < 4 && d < dModel; d++) a += e[(long)s * dModel + d] * e[(long)o * dModel + d]; dsc[o] = a; }
+            var dtop = Enumerable.Range(0, vocab).Where(o => o != s).OrderByDescending(o => dsc[o]).Take(kk).ToHashSet();
+            directSum += (double)want.Count(w => dtop.Contains(w)) / kk;
+
+            // noise floor: random top-k overlap with the true k neighbours ≈ k/vocab.
+            noiseSum += (double)kk / vocab;
+            cnt++;
+        }
+        int n = Math.Max(1, cnt);
+        Console.WriteLine($"  metric-head fidelity ({metric}) over {cnt} tokens: "
+            + $"NOISE FLOOR {noiseSum / n * 100:F1}%  |  factored q·k {recallSum / n * 100:F0}%  |  "
+            + $"S³-frame direct (q=k=coord) {directSum / n * 100:F0}%  "
+            + $"[direct = does the rigid frame carry it; factored = does the SVD keep it]");
+    }
+
+    // Pull every vocab token's NATIVE 4D super-Fibonacci S³ coordinate (physicalities.coord)
+    // straight from the substrate — the mantissa/Hilbert placement the metrics are computed
+    // over, NOT a derived LE eigenmap. Fills the anchor array (one coord per token, lowest
+    // source_id). This is the geometry a metric head reads; LE/Procrustes cannot recover it.
+    internal static async Task<int> FillCoordAnchorsAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, double[]?[] anchors)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var key in tokenSlots.Keys) vocab[vi++] = key.ToBytes();
+
+        int filled = 0;
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 120;
+        cmd.CommandText = @"SELECT DISTINCT ON (p.entity_id) p.entity_id,
+                ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord)
+            FROM laplace.physicalities p
+            JOIN unnest($1::bytea[]) AS u(id) ON u.id = p.entity_id
+            WHERE p.type = 1 AND p.coord IS NOT NULL
+            ORDER BY p.entity_id, p.source_id";
+        cmd.Parameters.Add(new NpgsqlParameter
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        while (await rdr.ReadAsync())
+        {
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var slots)) continue;
+            var a = new[] { rdr.GetDouble(1), rdr.GetDouble(2), rdr.GetDouble(3), rdr.GetDouble(4) };
+            // OVERWRITE: use the substrate's physicalities.coord verbatim — the exact coordinate
+            // the metric is computed over — not whatever the tokenizer parser pre-seeded.
+            foreach (int s in slots) { anchors[s] = a; filled++; }
+        }
+        return filled;
+    }
+
     // Vocab-bounded trajectory ORDER LADDER in ONE walk: entity_trajectory_plane
     // masks both endpoints to the vocab inside the native scan and emits forward
     // co-occurrence at every gap 1..maxGap, degree-capped per (subject, gap). We
@@ -584,7 +731,7 @@ internal static class FoundryExport
     // NOTE: dense vocab×vocab SVD — modest vocab (≤~4k). Larger needs a sparse/randomized solver.
     internal static void FactorAdjacency(
         PlaneCoo adj, int vocab, int dim, out double[] embed, out double[] lmHead, out int usedRank,
-        bool conditional = false)
+        bool conditional = false, bool suppressSelf = false)
     {
         var rowSum = new double[vocab];
         var colSum = new double[vocab];
@@ -595,6 +742,7 @@ internal static class FoundryExport
         {
             int x = adj.Rows[e], y = adj.Cols[e];
             if (x < 0 || x >= vocab || y < 0 || y >= vocab) continue;
+            if (suppressSelf && x == y) continue;   // no X→X echo (king→king); grapheme keeps doubles
             double w = adj.Vals[e];
             ex[en] = x; ey[en] = y; ew[en] = w; en++;
             rowSum[x] += w; colSum[y] += w; total += w;
@@ -712,7 +860,24 @@ internal static class FoundryExport
         var fitIdx = new List<int>();
         for (int i = 0; i < vocab; i++) if (anchors[i] is not null) fitIdx.Add(i);
         var e = new double[(long)vocab * dModel];
-        if (fitIdx.Count >= 6 && k >= 4)
+        bool coordDirect = EnvInt("LAPLACE_FOUNDRY_COORD_DIRECT", 0) != 0;
+        if (coordDirect && fitIdx.Count > 0)
+        {
+            // S³ IS THE RIGID FRAME — do not FIT one. The substrate's own 4D super-Fibonacci
+            // coordinate is the entity's position in that fixed frame; place it in dims 0..3
+            // VERBATIM (no LE, no GSO, no Procrustes rotation of an eigenmap that residual~11
+            // proves can't align). q·k is then cos on S³ = angular distance EXACTLY, so a
+            // geometric head reproduces its metric. COORD_SCALE lets the frame dominate the
+            // (optional) LE relation structure left in dims 4..k for the Glicko-rated heads.
+            double cs = EnvDouble("LAPLACE_FOUNDRY_COORD_SCALE", 1.0);
+            for (int i = 0; i < vocab; i++)
+            {
+                var a = anchors[i];
+                if (a is null) continue;
+                for (int d = 0; d < 4 && d < k; d++) y[(long)i * k + d] = a[d] * cs;
+            }
+        }
+        else if (fitIdx.Count >= 6 && k >= 4)
         {
             var yFit = new double[(long)fitIdx.Count * k];
             var b = new double[(long)fitIdx.Count * 4];
@@ -918,6 +1083,20 @@ internal static class FoundryExport
     {
         for (int r = 0; r < rows; r++)
             vals[(long)r * cols + (cols - 1)] = (float)gateCol;
+    }
+
+    // DIRECT RIGID-FRAME attention head: q/k SELECT the basis coordinate dims (0..coordDims) so
+    // q·k = coord·coord = cos on S³ = the angular metric EXACTLY (RMSNorm supplies the per-token
+    // unit normalization). No factored operator — the head IS the S³ frame, transcribed (measured
+    // 100% neighbour recall vs 8% for the SVD-factored path, 2.1% noise floor). Every head in the
+    // layer reads the same coordinate block.
+    internal static void FillCoordHead(float[] vals, int rows, int cols, int headDim, int coordDims, double scale)
+    {
+        if (headDim <= 0) return;
+        int nh = rows / headDim;
+        for (int h = 0; h < nh; h++)
+            for (int d = 0; d < coordDims && d < headDim && d < cols; d++)
+                vals[(long)(h * headDim + d) * cols + d] = (float)scale;
     }
 
     internal static double Silu(double z) => z / (1.0 + Math.Exp(-z));

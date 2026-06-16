@@ -484,14 +484,55 @@ internal static class FoundryCommands
             anchors[t.TokenId] = [t.ContentX, t.ContentY, t.ContentZ, t.ContentM];
         }
         var basisSeed = Hash128.Blake3(recipe.CanonicalJson);
+
+        // METRIC-HEAD attention (destroyed box): a head is a NAMED substrate metric between
+        // token trajectories, not a learned pattern. LAPLACE_FOUNDRY_ATTN_METRIC ∈
+        // frechet|hausdorff|angular replaces the associative consensus band with the geometric
+        // metric — laplace.metric_edges computes each token's metric neighbours. The metric
+        // affinity is GEOMETRIC (trajectory shape), orthogonal to the consensus planes, so it
+        // must be IN the basis E or no linear q/k projection can reproduce it (measured: 4%
+        // recall when E is consensus-only). It therefore joins the union graph that builds E AND
+        // is the attention rank that gets projected+factored. Unset → associative consensus (default).
+        string attnMetric = Environment.GetEnvironmentVariable("LAPLACE_FOUNDRY_ATTN_METRIC") ?? "";
+        var attnPlane = att;
+        if (attnMetric is "frechet" or "hausdorff" or "angular")
+        {
+            int mK = FoundryExport.EnvInt("LAPLACE_FOUNDRY_METRIC_K", 16);
+            int mProbe = FoundryExport.EnvInt("LAPLACE_FOUNDRY_METRIC_PROBE", 64);
+            var swMetric = Stopwatch.StartNew();
+            attnPlane = FoundryExport.Normalize(
+                await FoundryExport.ReadMetricEdgesAsync(ds, tokenSlots, attnMetric, mK, mProbe, degreeCap));
+            Console.WriteLine($"  METRIC HEAD ({attnMetric}): {attnPlane.Nnz:N0} trajectory-metric edges "
+                + $"in {swMetric.Elapsed.TotalSeconds:F1}s — a head transcribes laplace_{attnMetric}_4d, not a learned pattern");
+            // S³ IS THE RIGID FRAME: carry every token's native super-Fib coordinate verbatim
+            // (physicalities.coord) and place it directly in the basis (no LE, no Procrustes fit).
+            int coordFilled = await FoundryExport.FillCoordAnchorsAsync(ds, tokenSlots, anchors);
+            if (Environment.GetEnvironmentVariable("LAPLACE_FOUNDRY_COORD_DIRECT") is null)
+                Environment.SetEnvironmentVariable("LAPLACE_FOUNDRY_COORD_DIRECT", "1");
+            if (Environment.GetEnvironmentVariable("LAPLACE_FOUNDRY_COORD_SCALE") is null)
+                Environment.SetEnvironmentVariable("LAPLACE_FOUNDRY_COORD_SCALE", "20");   // frame dominates the normalized stream → coord dims ≈ unit S³
+            Console.WriteLine($"  S³ frame: {coordFilled:N0} tokens placed at their native coordinate verbatim (no LE/Procrustes)");
+        }
         var swBasis = Stopwatch.StartNew();
-        var unionGraph = FoundryExport.Union(sim, rel, pre, att);
+        // The metric edges (~12k) are outnumbered ~3:1 by the consensus edges in the affinity
+        // SVD, so at equal weight E barely spans the metric geometry (measured: 14% recall).
+        // Up-weight the metric plane into the BASIS union so it claims enough SVD energy for
+        // q/k to select it (the attention rank it factors stays unscaled — this only shapes E).
+        double metricBasisGain = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_METRIC_BASIS_GAIN", 4.0);
+        var metricForBasis = attnMetric != ""
+            ? attnPlane with { Vals = Array.ConvertAll(attnPlane.Vals, v => v * metricBasisGain) }
+            : attnPlane;
+        var unionGraph = attnMetric != ""
+            ? FoundryExport.Union(sim, rel, pre, att, metricForBasis)
+            : FoundryExport.Union(sim, rel, pre, att);
         // AFFINITY-SVD basis (token = SVD of its relational row) carries the consensus geometry
         // far better than Laplacian-eigenmaps (measured +3.0σ vs +0.58σ → conditioning works).
         // It is a dense vocab×vocab SVD, so default it ON for modest vocab and fall back to LE
         // above the size where dense SVD is impractical. Env forces: 1=on, 0=off.
         string? affRaw = Environment.GetEnvironmentVariable("LAPLACE_FOUNDRY_EMBED_AFFINITY");
-        bool affBasis = affRaw == "1" || (affRaw != "0" && vocab <= 3000);
+        // A metric head needs the native S³ coordinate IN the basis; BuildBasisAffinity ignores
+        // anchors, so force the LE-path builder (which honours coord-direct) when one is active.
+        bool affBasis = attnMetric == "" && (affRaw == "1" || (affRaw != "0" && vocab <= 3000));
         Console.WriteLine($"  basis path: {(affBasis ? "AFFINITY-SVD (token = SVD of its relational row)" : "Laplacian-eigenmaps")} (vocab {vocab})");
         var E = affBasis
             ? FoundryExport.BuildBasisAffinity(vocab, dModel, unionGraph, anchors, basisSeed, out var basisStats)
@@ -511,8 +552,8 @@ internal static class FoundryCommands
         // made-of), causal+sequence (what-follows), equivalence (sameness) — so the model
         // is a walk down the rank ladder, not M^L. Each is projected through the basis and
         // factored at the mold ranks; OV/FFN compose outer·inner (factor Mᵀ), attention qᵀk.
-        var rankPlanes = new[] { att, rel, pre, sim };
-        var rankNames  = new[] { "associative", "taxo+part", "causal+seq", "equivalence" };
+        var rankPlanes = new[] { attnPlane, rel, pre, sim };
+        var rankNames  = new[] { attnMetric != "" ? $"metric:{attnMetric}" : "associative", "taxo+part", "causal+seq", "equivalence" };
         int nOps = rankPlanes.Length;
         var fOvR   = new FoundryExport.Factors[nOps];   // transpose:true,  rank kAttn  (V/O)
         var fFfnR  = new FoundryExport.Factors[nOps];   // transpose:true,  rank kFfn   (FFN)
@@ -535,6 +576,8 @@ internal static class FoundryCommands
             fFfnR[r]  = FoundryExport.Factor(mResid, dModel, kFfn,  relTol, transpose: true);
             fAttnR[r] = FoundryExport.Factor(m,      dModel, kAttn, relTol, transpose: false);
         }
+        if (attnMetric != "")
+            FoundryExport.ReportMetricHeadFidelity(E, vocab, dModel, attnPlane, fAttnR[0], attnMetric);
 
         // FULL RANK-WEIGHTED CONSENSUS UNEMBEDDING (the substrate's whole affinity read out,
         // not one plane, not the echo). With lm_head == embed, logits = E·h peaks on the INPUT
@@ -650,7 +693,7 @@ internal static class FoundryCommands
                     name  = Marshal.PtrToStringUTF8((IntPtr)sp.Name) ?? "";
                     rows  = sp.Rank >= 1 ? sp.Shape[0] : 1;
                     cols  = sp.Rank >= 2 ? sp.Shape[1] : 1;
-                    dtype = sp.Dtype;
+                    dtype = 0;   // F32 only — 14900KS has AVX-512 fused off; bf16 has no fast path and crushes the ~0.02 embed deltas
                 }
                 long nElem = (long)rows * (long)Math.Max(1UL, cols);
                 var vals = new float[nElem];
@@ -696,10 +739,19 @@ internal static class FoundryCommands
                     var fAttn = fAttnR[aIdx];
                     var fOv   = fOvR[aIdx];
                     var fFfn  = fFfnR[fIdx];
+                    // A layer on the metric rank → DIRECT rigid-frame (coord) head: q·k = cos on S³
+                    // (the angular metric) by SELECTING the coordinate dims, not the SVD-factored
+                    // operator that collapses to the noise floor (8% vs 100%).
+                    bool coordHead = attnMetric != "" && aIdx == 0;
+                    double coordHeadScale = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_COORD_HEAD_SCALE", Math.Sqrt(Math.Max(1, headDimR)));
                     switch (rest)
                     {
-                        case "self_attn.q_proj.weight": FoundryExport.FillRows(vals, tr, tc, fAttn, attnScale); break;
-                        case "self_attn.k_proj.weight": FoundryExport.FillRowsRight(vals, tr, tc, fAttn, attnScale); break;
+                        case "self_attn.q_proj.weight":
+                            if (coordHead) FoundryExport.FillCoordHead(vals, tr, tc, headDimR, 4, coordHeadScale);
+                            else FoundryExport.FillRows(vals, tr, tc, fAttn, attnScale); break;
+                        case "self_attn.k_proj.weight":
+                            if (coordHead) FoundryExport.FillCoordHead(vals, tr, tc, headDimR, 4, coordHeadScale);
+                            else FoundryExport.FillRowsRight(vals, tr, tc, fAttn, attnScale); break;
                         case "self_attn.v_proj.weight": FoundryExport.FillRowsRight(vals, tr, tc, fOv, layerScale); break;
                         case "self_attn.o_proj.weight": FoundryExport.FillCols(vals, tr, tc, fOv, layerScale); break;
                         case "mlp.gate_proj.weight":    FoundryExport.FillGate(vals, tr, tc, gateCol); break;
@@ -781,11 +833,24 @@ internal static class FoundryCommands
     {
         int cap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_FAITHFUL_CAP", 128);
         var sw = Stopwatch.StartNew();
-        // grapheme floor reads the letter-bigram order off the trajectories; the word model
-        // reads the rank-weighted consensus adjacency. Both factor (PPMI-SVD) into embed/lm_head.
+        // grapheme floor reads the letter-bigram order off the trajectories. The word model has
+        // two readout sources (the LAYERING LAW: severity/eff_mu is not value):
+        //   default     → consensus_adjacency: ALL in-vocab content edges, rank-weighted. Includes
+        //                 the PRECEDES order glue (king→of/was/and) which, being a first-order
+        //                 frequency witness, HUBS on function words under greedy decode.
+        //   --knowledge → consensus_layer_plane gated to the CONTENT rank band [0.55,0.85]: IS_A
+        //                 (king→monarch), HAS_PROPERTY, IS_SYNONYM_OF — ABOVE the 0.36 glue/metadata
+        //                 bucket (PRECEDES, HAS_DOMAIN_TOPIC, HAS_EXAMPLE). The substrate's own
+        //                 relation_rank does the de-hubbing the flat readout threw away.
+        bool knowledge = !grapheme && FoundryExport.EnvInt("LAPLACE_FOUNDRY_KNOWLEDGE", 0) != 0;
+        double rkLo = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RANK_LO", 0.55);
+        double rkHi = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RANK_HI", 0.85);
         var A = grapheme
             ? await FoundryExport.ReadGraphemeOrderAsync(ds, tokenSlots)
-            : await FoundryExport.ReadAdjacencyAsync(ds, tokenSlots, cap);
+            : knowledge
+                ? await FoundryExport.ReadLayerPlaneAsync(ds, rkLo, rkHi, tokenSlots, cap)
+                : await FoundryExport.ReadAdjacencyAsync(ds, tokenSlots, cap);
+        if (knowledge) Console.WriteLine($"  KNOWLEDGE readout: consensus content band rank∈[{rkLo},{rkHi}] (IS_A/property/synonym, no PRECEDES glue)");
         if (A.Nnz == 0)
             return Fail((grapheme ? "grapheme_order" : "consensus_adjacency")
                 + " returned no edges over this vocab — ingest/seed first");
@@ -794,11 +859,71 @@ internal static class FoundryCommands
         Console.WriteLine($"  FAITHFUL adjacency read in {sw.Elapsed.TotalSeconds:F1}s: {A.Nnz:N0} rank-weighted edges "
             + $"over {subjects.Count:N0}/{vocab:N0} tokens (cap {cap})");
 
-        // factor A → embed (U) + lm_head (V·S) at rank dModel (the hidden width, not vocab)
+        // factor A → embed (U) + lm_head (V·S) at rank dModel (the hidden width, not vocab).
+        // conditional=true (log-odds of the continuation P(Y|X)) for BOTH grapheme and word: it is
+        // the GENERATIVE readout. PPMI is a SIMILARITY transform that inflates rare next-tokens into
+        // a hub — wrong for next-token decode (it is what made the word cast collapse to byte garbage
+        // while the grapheme cast, already conditional, generated).
         var swSvd = Stopwatch.StartNew();
-        FoundryExport.FactorAdjacency(A, vocab, dModel, out var embed, out var lmHead, out int usedRank, conditional: grapheme);
+        // conditional log-odds (P(Y|X)) for grapheme + word-default; PMI / global-prior-subtraction
+        // (log P(Y|X) − log P(Y)) for the knowledge readout. The plain log-odds matrix has a dominant
+        // Perron-Frobenius top singular direction (same sign for every token) that acts as a global
+        // bias; bf16 rounding in the GGUF erases the smaller differentiating terms, collapsing every
+        // input to that one hub direction in llama.cpp. PMI subtracts log P(Y), removing exactly that
+        // global-frequency hub so the input-specific signal survives (with byte/content suppression
+        // already taming PMI's rare-token inflation).
+        FoundryExport.FactorAdjacency(A, vocab, dModel, out var embed, out var lmHead, out int usedRank, conditional: true, suppressSelf: !grapheme);
         Console.WriteLine($"  FAITHFUL factorization in {swSvd.Elapsed.TotalSeconds:F1}s: "
-            + $"PPMI-SVD rank {usedRank}/{dModel} → embed=U, lm_head=V·S, no-op layers");
+            + $"log-odds-SVD rank {usedRank}/{dModel} → embed=U, lm_head=V·S, no-op layers");
+
+        // SUBSTRATE-NATIVE LOOKUP (knowledge, dModel≥vocab): the attestation lookup IS the forward
+        // pass — embed = I, lm_head[Y][X] = log-odds(X→Y). Then logits[Y] = lm_head[Y]·RMSNorm(e_X)
+        // = log-odds(X→Y) EXACTLY. NO SVD, so no Perron-Frobenius global-frequency hub (the and/that/as
+        // direction the SVD injected). This is the design the substrate states outright: "lm_head=A,
+        // embed=I; the GEMM literally is the lookup." Grounded in the source material (a knowledge
+        // graph), not in fluent-LM priors. Falls back to SVD if dModel<vocab (identity impossible).
+        bool lookup = knowledge && FoundryExport.EnvInt("LAPLACE_FOUNDRY_LOOKUP", 1) != 0 && dModel >= vocab;
+        if (lookup)
+        {
+            Array.Clear(embed); Array.Clear(lmHead);
+            var rowSum = new double[vocab];
+            for (long e = 0; e < A.Nnz; e++)
+            {
+                int x = A.Rows[e], y = A.Cols[e];
+                if (x >= 0 && x < vocab && y >= 0 && y < vocab && x != y) rowSum[x] += A.Vals[e];
+            }
+            for (int i = 0; i < vocab && i < dModel; i++) embed[(long)i * dModel + i] = 1.0;   // embed = I
+            double invScale = 1.0 / Math.Sqrt(dModel);   // cancels RMSNorm(e_X)=√dModel·e_X
+            for (long e = 0; e < A.Nnz; e++)
+            {
+                int x = A.Rows[e], y = A.Cols[e];
+                if (x < 0 || x >= vocab || y < 0 || y >= vocab || x == y || x >= dModel) continue;
+                if (rowSum[x] <= 0) continue;
+                lmHead[(long)y * dModel + x] = Math.Log(A.Vals[e] / rowSum[x] * vocab) * invScale;
+            }
+            Console.WriteLine("  LOOKUP: embed=I, lm_head=log-odds(A) — the GEMM IS the attestation lookup (no SVD, no global hub)");
+        }
+        else if (knowledge)
+            Console.WriteLine($"  (lookup needs dModel≥vocab; dModel={dModel} vocab={vocab} → SVD fallback, may re-introduce the hub)");
+
+        // A token that nothing precedes (no incoming edge) cannot be a next-token. Such tokens —
+        // the 256 byte floor, specials, off-graph words — have all-zero adjacency rows, so the
+        // truncated SVD assigns them ARBITRARY null-space directions in lm_head that can win the
+        // argmax (king→GJjJj, water→RRRR). Zero their lm_head row so the readout can only emit
+        // witnessed continuations. (embed is left intact — they still tokenize as inputs.)
+        {
+            var isContinuation = new bool[vocab];
+            foreach (var y in A.Cols) if (y >= 0 && y < vocab) isContinuation[y] = true;
+            // For the WORD model, byte/punctuation tokens are valid INPUTS but must never be a
+            // PREDICTED next-token: they are continuation HUBS (<0x49>='I', <0x2E>='.') that
+            // collapse the readout to one direction in llama.cpp. Suppress them; word tokens only.
+            var isByte = new bool[vocab];
+            if (!grapheme) foreach (var t in tokens) if (t.TokenId >= 0 && t.TokenId < vocab && t.IsByteLevel) isByte[t.TokenId] = true;
+            int suppressed = 0;
+            for (int y = 0; y < vocab; y++)
+                if (!isContinuation[y] || isByte[y]) { for (int c = 0; c < dModel; c++) lmHead[(long)y * dModel + c] = 0; suppressed++; }
+            Console.WriteLine($"  suppressed {suppressed:N0}/{vocab:N0} non-continuation + byte tokens from lm_head (word continuations only)");
+        }
 
         // ── ACCEPTANCE GATE (in-process, BEFORE the cast) ───────────────────────────────────
         // The cast's logits[Y|X] rank EXACTLY as lm_head[Y]·embed[X] (the no-op layers pass the
@@ -876,7 +1001,7 @@ internal static class FoundryCommands
                 name  = Marshal.PtrToStringUTF8((IntPtr)sp.Name) ?? "";
                 rows  = sp.Rank >= 1 ? sp.Shape[0] : 1;
                 cols  = sp.Rank >= 2 ? sp.Shape[1] : 1;
-                dtype = sp.Dtype;
+                dtype = 0;   // F32 only — 14900KS has AVX-512 fused off; bf16 has no fast path and crushes the ~0.02 embed deltas
             }
             int tr = (int)rows, tc = (int)Math.Max(1UL, cols);
             var vals = new float[(long)tr * tc];   // zero-initialized = the no-op layer fill
@@ -1021,7 +1146,7 @@ internal static class FoundryCommands
                 name  = Marshal.PtrToStringUTF8((IntPtr)sp.Name) ?? "";
                 rows  = sp.Rank >= 1 ? sp.Shape[0] : 1;
                 cols  = sp.Rank >= 2 ? sp.Shape[1] : 1;
-                dtype = sp.Dtype;
+                dtype = 0;   // F32 only — 14900KS has AVX-512 fused off; bf16 has no fast path and crushes the ~0.02 embed deltas
             }
             int tr = (int)rows, tc = (int)Math.Max(1UL, cols);
             var vals = new float[(long)tr * tc];
