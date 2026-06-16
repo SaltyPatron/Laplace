@@ -208,7 +208,7 @@ internal static class FoundryExport
             await using var cmd = conn.CreateCommand();
             cmd.CommandTimeout = 600;
             cmd.CommandText =
-                "SELECT subject_id, object_id, w FROM laplace.consensus_layer_plane($1, $2, $3, $4)";
+                "SELECT subject_id, object_id, w, layer_rank FROM laplace.consensus_layer_plane($1, $2, $3, $4)";
             cmd.Parameters.Add(new NpgsqlParameter
                 { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
             cmd.Parameters.AddWithValue(rankLo);
@@ -219,7 +219,11 @@ internal static class FoundryExport
             {
                 if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
                 if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
-                double w = rdr.GetDouble(2);
+                // WEIGHT = relation_rank × eff_mu (the layering law: rank is the relation's AUTHORITY,
+                // eff_mu its consensus significance). Weighting by eff_mu alone let a generic low-rank
+                // high-witness edge (king→person/food) outrank the specific high-rank one (king IS_A
+                // monarch, taxonomic 0.82). rank×eff_mu lifts the authoritative relation.
+                double w = rdr.GetDouble(2) * rdr.GetDouble(3);
                 if (w == 0.0) continue;
                 foreach (int s in subj)
                 {
@@ -532,6 +536,43 @@ internal static class FoundryExport
         return CooFromAdj(adj, 256);   // graphemes have few followers; cap generously
     }
 
+    // WORD ORDER off the CONTENT TRAJECTORY GEOMETRY (laplace.word_order): P(next word | cur word)
+    // from the witnessed sentence/phrase trajectories (tier>2), masked to the vocab — the word-tier
+    // analog of ReadGraphemeOrderAsync. gap=1 bigram, gap=2 skip-gram. NOT trajectory_pairs, NOT
+    // folded PRECEDES — the sequence read straight from the trajectory LineStrings.
+    internal static async Task<PlaneCoo> ReadWordOrderAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots,
+        int gap = 1, int trajs = 200000, int cap = 64)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
+
+        var adj = new Dictionary<int, List<(int Col, double W)>>();
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 0;   // pays the bounded trajectory walk once
+        cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.word_order($1, $2, $3)";
+        cmd.Parameters.Add(new NpgsqlParameter
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        cmd.Parameters.AddWithValue(trajs);
+        cmd.Parameters.AddWithValue(gap);
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        while (await rdr.ReadAsync())
+        {
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+            double w = rdr.GetDouble(2);
+            if (w <= 0) continue;
+            foreach (int s in subj)
+            {
+                if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
+                foreach (int o in obj) row.Add((o, w));
+            }
+        }
+        return CooFromAdj(adj, cap);
+    }
+
     // LIVE trajectory order ladder: trajectory_cooccurrence_by_stride is the native
     // word-stride scan (cooccurrence_scan in C) — entity_trajectory_plane was retired.
     // Returns per-(subject,object,gap) witnessed forward counts + the per-(subject,gap)
@@ -731,7 +772,7 @@ internal static class FoundryExport
     // NOTE: dense vocab×vocab SVD — modest vocab (≤~4k). Larger needs a sparse/randomized solver.
     internal static void FactorAdjacency(
         PlaneCoo adj, int vocab, int dim, out double[] embed, out double[] lmHead, out int usedRank,
-        bool conditional = false, bool suppressSelf = false)
+        bool conditional = false, bool suppressSelf = false, double dehub = 0.0)
     {
         var rowSum = new double[vocab];
         var colSum = new double[vocab];
@@ -755,63 +796,186 @@ internal static class FoundryExport
         // the SVD spends its rank on real structure, not the hub, and the empty byte/special rows
         // stay ~0 (no spurious byte continuations). Not a tuned scalar — the marginal conditioning
         // the invention demands ("whitespace must not weigh as heavily as content words").
-        var As = new float[(long)vocab * vocab];
+        // Build As as a SPARSE edge list (non-edges = implicit 0 = uniform baseline). conditional
+        // → signed log-odds log(P(Y|X)·V) (the GENERATIVE readout; PPMI's −ln P(Y) inflates rare
+        // next-tokens into a hub, a SIMILARITY transform wrong for generation); else → PPMI (≥0).
+        var sx = new int[en]; var sy = new int[en]; var sv = new double[en]; int sn = 0;
         for (int i = 0; i < en; i++)
         {
+            double val;
             if (conditional)
             {
-                // GENERATIVE readout = LOG-ODDS of the continuation vs uniform:
-                //   log( P(Y|X) · V ),  P(Y|X) = A[X,Y]/rowSum[X].
-                // Row-normalized only (not PPMI: PPMI's −ln P(Y) column term inflates RARE
-                // next-tokens into a hub — a SIMILARITY transform, wrong for generation).
-                // The log is load-bearing: raw P(Y|X)∈[0,1] becomes the pre-softmax logit,
-                // and e^[0,1] spans only 1..e, so softmax flattens at temp>0. The ·V shift
-                // keeps the SPARSE baseline correct — non-edges stay 0 (= uniform), edges sit
-                // above/below; naive log(P) would push edges negative while non-edges (0)
-                // read as certain, inverting the ranking.
                 double rs = rowSum[ex[i]];
-                if (rs > 0) As[(long)ex[i] * vocab + ey[i]] = (float)Math.Log(ew[i] / rs * vocab);
+                if (rs <= 0) continue;
+                val = Math.Log(ew[i] / rs * vocab);     // log(P(Y|X)·V); non-edges stay 0 = uniform
+                // DE-HUB: subtract λ·log P(Y) so high-frequency function-word continuations (the/of/and)
+                // lose weight and the "the only one of the" loop weakens. λ=0 = pure conditional flow;
+                // λ=1 ≈ PMI. P(Y)=colSum[Y]/total (≤1 so log<0; the subtraction boosts rare Y more than
+                // frequent Y → frequent hubs relatively suppressed).
+                if (dehub != 0.0 && colSum[ey[i]] > 0 && total > 0)
+                    val -= dehub * Math.Log(colSum[ey[i]] / total);
             }
             else
             {
                 double denom = rowSum[ex[i]] * colSum[ey[i]];
                 if (denom <= 0) continue;
-                double pmi = Math.Log(ew[i] * total / denom);
-                if (pmi > 0) As[(long)ex[i] * vocab + ey[i]] = (float)pmi;
+                val = Math.Log(ew[i] * total / denom);
+                if (val <= 0) continue;                 // PPMI clamps negatives to 0
+            }
+            if (val == 0) continue;
+            sx[sn] = ex[i]; sy[sn] = ey[i]; sv[sn] = val; sn++;
+        }
+
+        embed  = new double[(long)vocab * dim];
+        lmHead = new double[(long)vocab * dim];
+
+        // DENSE full SVD for modest vocab; RANDOMIZED sparse-sketch SVD above it. A dense
+        // vocab×vocab matrix is 32k²·4B = 4GB with an O(vocab³) SVD — the SELF-INFLICTED "≤4k"
+        // ceiling. The randomized SVD (Halko–Martinsson–Tropp) NEVER forms it: it sketches the
+        // SPARSE As with a Gaussian, projects, and SVDs only the small L×vocab band. Same factors.
+        if (vocab <= EnvInt("LAPLACE_FOUNDRY_DENSE_SVD_MAX", 6000))
+        {
+            var As = new float[(long)vocab * vocab];
+            for (int i = 0; i < sn; i++) As[(long)sx[i] * vocab + sy[i]] = (float)sv[i];
+            var U  = new float[(long)vocab * vocab];
+            var S  = new float[vocab];
+            var Vt = new float[(long)vocab * vocab];
+            nuint outRank = 0; int rc;
+            unsafe
+            {
+                fixed (float* pa = As, pu = U, ps = S, pvt = Vt)
+                    rc = SynInterop.TensorSvdTruncate(pa, (nuint)vocab, (nuint)vocab, 0.0,
+                                                      &outRank, pu, ps, pvt, (nuint)vocab);
+            }
+            if (rc != 0) throw new InvalidOperationException($"tensor_svd_truncate (adjacency) rc={rc} (vocab={vocab})");
+            int kk = Math.Min(dim, (int)outRank);
+            usedRank = kk;
+            // S goes ENTIRELY on lm_head (embed=U keeps unit columns so RMSNorm preserves direction).
+            for (int c = 0; c < kk; c++)
+            {
+                double s = Math.Max(0f, S[c]);
+                for (int i = 0; i < vocab; i++)
+                {
+                    embed[(long)i * dim + c]  = (double)U[(long)i * vocab + c];
+                    lmHead[(long)i * dim + c] = (double)Vt[(long)c * vocab + i] * s;
+                }
             }
         }
-        var U  = new float[(long)vocab * vocab];
-        var S  = new float[vocab];
-        var Vt = new float[(long)vocab * vocab];
+        else
+        {
+            usedRank = FactorSparseRandomized(sx, sy, sv, sn, vocab, dim, embed, lmHead);
+        }
+    }
+
+    // Randomized truncated SVD of the SPARSE signed matrix As (edge sx[i]→sy[i] = sv[i], else 0):
+    // embed = U[:,0:dim], lm_head = (V·S)[:,0:dim] — the SAME factors the dense path returns, with
+    // NO vocab×vocab dense matrix ever formed. Halko–Martinsson–Tropp with q power iterations; the
+    // only dense SVD is on the L×vocab projected band (L = dim + oversample). Matvecs parallelize
+    // over the L sketch rows (each row independent → race-free), so 32k words factor in seconds.
+    internal static int FactorSparseRandomized(
+        int[] sx, int[] sy, double[] sv, int sn, int vocab, int dim, double[] embed, double[] lmHead)
+    {
+        int L = Math.Min(vocab, dim + EnvInt("LAPLACE_FOUNDRY_RSVD_OVERSAMPLE", 16));
+        int q = EnvInt("LAPLACE_FOUNDRY_RSVD_POWER", 1);
+        // Ω and the running sketch are L×vocab (L vectors as rows).
+        var Y  = new double[(long)L * vocab];
+        var Om = new double[(long)L * vocab];
+        ulong seed = SplitMix(0x9E3779B97F4A7C15UL ^ (ulong)vocab ^ ((ulong)dim << 32));
+        for (long t = 0; t < (long)L * vocab; t++) Om[t] = Gaussian(ref seed);
+        SpMatVec(sx, sy, sv, sn, Om, Y, L, vocab, false);                 // Y = As·Ωᵀ
+        var Z = new double[(long)L * vocab];
+        for (int it = 0; it < q; it++)
+        {
+            Array.Clear(Z); SpMatVec(sx, sy, sv, sn, Y, Z, L, vocab, true);    // Z = Asᵀ·Y
+            Array.Clear(Y); SpMatVec(sx, sy, sv, sn, Z, Y, L, vocab, false);   // Y = As·Z
+        }
+        // Orthonormalize the range of Y via its Gram matrix G = Y·Yᵀ (L×L). This is RANK-REVEALING:
+        // a sparse log-odds matrix with a dominant direction makes the sketch rank-deficient, which
+        // Gram-Schmidt rejects (rc=-4). The Gram eigendecomposition instead DROPS the deficient
+        // directions (σ_k ≤ eps·σ_0). Q[k] = (1/√σ_k)·Σ_i W[i,k]·Y[i] is then orthonormal by W's
+        // orthonormality, with no division by ~0.
+        var G = new double[(long)L * L];
+        System.Threading.Tasks.Parallel.For(0, L, i =>
+        {
+            long bi = (long)i * vocab;
+            for (int j = 0; j <= i; j++)
+            {
+                long bj = (long)j * vocab;
+                double d = 0; for (int t = 0; t < vocab; t++) d += Y[bi + t] * Y[bj + t];
+                G[(long)i * L + j] = d; G[(long)j * L + i] = d;
+            }
+        });
+        var Gf = new float[(long)L * L];
+        for (long t = 0; t < (long)L * L; t++) Gf[t] = (float)G[t];
+        var Wg = new float[(long)L * L]; var Sg = new float[L]; var Vg = new float[(long)L * L];
+        nuint gRank = 0; int grc;
+        unsafe { fixed (float* pg = Gf, pu = Wg, ps = Sg, pv = Vg) grc = SynInterop.TensorSvdTruncate(pg, (nuint)L, (nuint)L, 0.0, &gRank, pu, ps, pv, (nuint)L); }
+        if (grc != 0) throw new InvalidOperationException($"tensor_svd_truncate (rsvd gram) rc={grc} (L={L})");
+        double s0g = Sg.Length > 0 ? Sg[0] : 0;
+        int rkQ = 0; while (rkQ < L && Sg[rkQ] > 1e-10 * s0g && Sg[rkQ] > 0) rkQ++;
+        rkQ = Math.Max(1, rkQ);
+        var Q = new double[(long)rkQ * vocab];                            // rkQ×vocab orthonormal rows
+        System.Threading.Tasks.Parallel.For(0, rkQ, k =>
+        {
+            double invsq = 1.0 / Math.Sqrt(Sg[k]);
+            long bk = (long)k * vocab;
+            for (int i = 0; i < L; i++)
+            {
+                double w = (double)Wg[(long)i * L + k] * invsq;
+                long bi = (long)i * vocab;
+                for (int t = 0; t < vocab; t++) Q[bk + t] += w * Y[bi + t];
+            }
+        });
+        var B = new double[(long)rkQ * vocab];                            // B = Q·As  (rkQ×vocab)
+        SpMatVecQ(sx, sy, sv, sn, Q, B, rkQ, vocab);
+        var Bf = new float[(long)rkQ * vocab];
+        for (long t = 0; t < (long)rkQ * vocab; t++) Bf[t] = (float)B[t];
+        var Ub = new float[(long)rkQ * rkQ]; var Sb = new float[rkQ]; var Vtb = new float[(long)rkQ * vocab];
         nuint outRank = 0; int rc;
         unsafe
         {
-            fixed (float* pa = As, pu = U, ps = S, pvt = Vt)
-                rc = SynInterop.TensorSvdTruncate(pa, (nuint)vocab, (nuint)vocab, 0.0,
-                                                  &outRank, pu, ps, pvt, (nuint)vocab);
+            fixed (float* pb = Bf, pu = Ub, ps = Sb, pvt = Vtb)
+                rc = SynInterop.TensorSvdTruncate(pb, (nuint)rkQ, (nuint)vocab, 0.0, &outRank, pu, ps, pvt, (nuint)rkQ);
         }
-        if (rc != 0) throw new InvalidOperationException($"tensor_svd_truncate (adjacency) rc={rc} (vocab={vocab})");
+        if (rc != 0) throw new InvalidOperationException($"tensor_svd_truncate (rsvd band) rc={rc} (rkQ={rkQ}, vocab={vocab})");
         int kk = Math.Min(dim, (int)outRank);
-        usedRank = kk;
-        embed  = new double[(long)vocab * dim];
-        lmHead = new double[(long)vocab * dim];
-        // S goes ENTIRELY on lm_head, NONE on embed. embed is RMSNorm'd in the cast, and if √S
-        // were on embed the norm would be dominated by the top singular value √S₁, so RMSNorm
-        // would collapse every token onto the top singular DIRECTION → the readout returns one
-        // hub token for all inputs (the "I I I" collapse). With embed = U (unit-scale columns),
-        // RMSNorm preserves each token's true left-singular DIRECTION; lm_head = V·S carries the
-        // full singular weight (it is not normalized). The reconstruction is unchanged:
-        //   logits[Y|X] = lm_head[Y]·RMSNorm(embed[X]) ∝ Σ_k U[X,k]·S_k·V[Y,k] = A_dim[X,Y]
-        // (the per-token 1/‖U[X]‖ from RMSNorm is a positive temperature, not an argmax change).
-        for (int c = 0; c < kk; c++)
+        // U_As = Qᵀ·Ũ (vocab×kk); embed = U_As, lm_head = V·S (S on lm_head, see dense note).
+        System.Threading.Tasks.Parallel.For(0, vocab, x =>
         {
-            double s = Math.Max(0f, S[c]);
-            for (int i = 0; i < vocab; i++)
+            for (int c = 0; c < kk; c++)
             {
-                embed[(long)i * dim + c]  = (double)U[(long)i * vocab + c];            // U[X,c]
-                lmHead[(long)i * dim + c] = (double)Vt[(long)c * vocab + i] * s;       // V[Y,c]·S
+                double acc = 0;
+                for (int j = 0; j < rkQ; j++) acc += Q[(long)j * vocab + x] * Ub[(long)j * rkQ + c];
+                embed[(long)x * dim + c]  = acc;
+                lmHead[(long)x * dim + c] = (double)Vtb[(long)c * vocab + x] * Math.Max(0f, Sb[c]);
             }
-        }
+        });
+        return kk;
+    }
+
+    // Out[c,a] += Σ_edge sv·M[c,b], (a,b)=(x,y) for As·M (transpose=false) or (y,x) for Asᵀ·M.
+    // Parallel over the L sketch rows c — each row writes only its own band, so no races.
+    static void SpMatVec(int[] sx, int[] sy, double[] sv, int sn, double[] M, double[] Outp, int L, int vocab, bool transpose)
+    {
+        System.Threading.Tasks.Parallel.For(0, L, c =>
+        {
+            long baseC = (long)c * vocab;
+            for (int i = 0; i < sn; i++)
+            {
+                int a = transpose ? sy[i] : sx[i];
+                int b = transpose ? sx[i] : sy[i];
+                Outp[baseC + a] += sv[i] * M[baseC + b];
+            }
+        });
+    }
+    // B[c,y] += Q[c,x]·sv  (B = Q·As). Parallel over c.
+    static void SpMatVecQ(int[] sx, int[] sy, double[] sv, int sn, double[] Q, double[] B, int L, int vocab)
+    {
+        System.Threading.Tasks.Parallel.For(0, L, c =>
+        {
+            long baseC = (long)c * vocab;
+            for (int i = 0; i < sn; i++) B[baseC + sy[i]] += Q[baseC + sx[i]] * sv[i];
+        });
     }
 
     // Generates E [vocab × dModel] row-major. anchors[i] is null or a 4D content
@@ -821,30 +985,52 @@ internal static class FoundryExport
         int vocab, int dModel, PlaneCoo leGraph, double[]?[] anchors, Hash128 seed,
         out BasisStats stats)
     {
-        int k = Math.Min(Math.Min(dModel - 1, EnvInt("LAPLACE_FOUNDRY_BASIS_RANK", 256)),
-                         Math.Max(2, vocab - 2));
+        bool coordOnly = EnvInt("LAPLACE_FOUNDRY_COORD_ONLY", 0) != 0;
+        int k = coordOnly
+            ? Math.Min(4, dModel - 1)
+            : Math.Min(Math.Min(dModel - 1, EnvInt("LAPLACE_FOUNDRY_BASIS_RANK", 256)),
+                       Math.Max(2, vocab - 2));
         var y = GC.AllocateUninitializedArray<double>(checked(vocab * k), pinned: true);
-        int rc;
-        unsafe
+        if (coordOnly)
         {
-            fixed (int* pr = leGraph.Rows) fixed (int* pc = leGraph.Cols)
-            fixed (double* pv = leGraph.Vals) fixed (double* py = y)
-                rc = DynInterop.LaplacianEigenmapsFromSparseGraph(
-                    pr, pc, pv, (nuint)leGraph.Nnz, (nuint)vocab, (nuint)k, py);
-        }
-        if (rc != 0)
-            throw new InvalidOperationException(
-                $"laplacian_eigenmaps_from_sparse_graph rc={rc} (vocab={vocab}, K={k}, nnz={leGraph.Nnz})");
-
-        // GSO over the spectral columns (vectors-as-rows: transpose, orthonormalize, transpose back).
-        var yt = new double[(long)k * vocab];
-        for (int i = 0; i < vocab; i++)
-            for (int d = 0; d < k; d++) yt[(long)d * vocab + i] = y[(long)i * k + d];
-        int gsRc;
-        unsafe { fixed (double* p = yt) gsRc = DynInterop.GramSchmidtOrthonormalize(p, (nuint)k, (nuint)vocab); }
-        if (gsRc == 0)
+            // PURE S³ RIGID FRAME — NO Lanczos eigensolve, NO GSO, NO Procrustes. The substrate's
+            // own 4D super-Fibonacci coord IS the embedding (FillCoordAnchors filled `anchors`);
+            // q·k is then cos on S³ = the angular metric EXACTLY. O(vocab), well-conditioned by
+            // construction. This removes the 392s eigensolve and its residual-68 Procrustes — that
+            // ill-conditioned basis collapsed the 32k cast to a single 'or' attractor. Off-graph
+            // tokens stay zero (the row-norm fallback parks them on the bias channel).
+            Array.Clear(y, 0, y.Length);
             for (int i = 0; i < vocab; i++)
-                for (int d = 0; d < k; d++) y[(long)i * k + d] = yt[(long)d * vocab + i];
+            {
+                var a = anchors[i];
+                if (a is null) continue;
+                for (int d = 0; d < 4 && d < k; d++) y[(long)i * k + d] = a[d];
+            }
+        }
+        else
+        {
+            int rc;
+            unsafe
+            {
+                fixed (int* pr = leGraph.Rows) fixed (int* pc = leGraph.Cols)
+                fixed (double* pv = leGraph.Vals) fixed (double* py = y)
+                    rc = DynInterop.LaplacianEigenmapsFromSparseGraph(
+                        pr, pc, pv, (nuint)leGraph.Nnz, (nuint)vocab, (nuint)k, py);
+            }
+            if (rc != 0)
+                throw new InvalidOperationException(
+                    $"laplacian_eigenmaps_from_sparse_graph rc={rc} (vocab={vocab}, K={k}, nnz={leGraph.Nnz})");
+
+            // GSO over the spectral columns (vectors-as-rows: transpose, orthonormalize, transpose back).
+            var yt = new double[(long)k * vocab];
+            for (int i = 0; i < vocab; i++)
+                for (int d = 0; d < k; d++) yt[(long)d * vocab + i] = y[(long)i * k + d];
+            int gsRc;
+            unsafe { fixed (double* p = yt) gsRc = DynInterop.GramSchmidtOrthonormalize(p, (nuint)k, (nuint)vocab); }
+            if (gsRc == 0)
+                for (int i = 0; i < vocab; i++)
+                    for (int d = 0; d < k; d++) y[(long)i * k + d] = yt[(long)d * vocab + i];
+        }
 
         int zeroSpectral = 0;
         for (int i = 0; i < vocab; i++)
@@ -861,7 +1047,11 @@ internal static class FoundryExport
         for (int i = 0; i < vocab; i++) if (anchors[i] is not null) fitIdx.Add(i);
         var e = new double[(long)vocab * dModel];
         bool coordDirect = EnvInt("LAPLACE_FOUNDRY_COORD_DIRECT", 0) != 0;
-        if (coordDirect && fitIdx.Count > 0)
+        if (coordOnly)
+        {
+            // coords are already placed in dims 0..3; no eigenmap to align, nothing to Procrustes.
+        }
+        else if (coordDirect && fitIdx.Count > 0)
         {
             // S³ IS THE RIGID FRAME — do not FIT one. The substrate's own 4D super-Fibonacci
             // coordinate is the entity's position in that fixed frame; place it in dims 0..3
