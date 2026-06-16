@@ -19,6 +19,7 @@ if(WIN32)
         src/recall.c
         src/recall_route.c
         src/perfcache.c
+        src/content_resolve.c
     )
     set_target_properties(laplace_substrate PROPERTIES
         PREFIX "" OUTPUT_NAME laplace_substrate SUFFIX ".dll"
@@ -62,6 +63,7 @@ set(EXT_C_SOURCES
     src/recall.c
     src/recall_route.c
     src/perfcache.c
+    src/content_resolve.c
 )
 
 add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})
