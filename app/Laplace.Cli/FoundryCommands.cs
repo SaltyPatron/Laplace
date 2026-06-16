@@ -682,7 +682,7 @@ internal static class FoundryCommands
             double layerScale = rGain * split;
             var gguf = SynthInterop.GgufWriterCreate(outPath);
             if (gguf == IntPtr.Zero) { Console.WriteLine($"  gguf_writer_create failed for {outPath}"); return 2; }
-            WriteGgufMetadata(gguf, recipe, tokens, modelDir);
+            WriteGgufMetadata(gguf, recipe, tokens, modelDir, byteBpe: true);   // word vocab → byte-level BPE (ignore_merges)
             var sw = Stopwatch.StartNew();
             for (int i = 0; i < tensorCount; i++)
             {
@@ -990,7 +990,7 @@ internal static class FoundryCommands
 
         var gguf = SynthInterop.GgufWriterCreate(outputPath);
         if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
-        WriteGgufMetadata(gguf, recipe, tokens, modelDir);
+        WriteGgufMetadata(gguf, recipe, tokens, modelDir, byteBpe: !grapheme);   // word → byte-level BPE; grapheme → SPM
         var swW = Stopwatch.StartNew();
         for (int i = 0; i < tensorCount; i++)
         {
@@ -1223,11 +1223,31 @@ internal static class FoundryCommands
         return hf;
     }
 
+    // GPT-2 / byte-level BPE byte->unicode map: bytes 0x21-0x7E, 0xA1-0xAC, 0xAE-0xFF render as
+    // themselves; the rest map to U+0100+ so every byte is a printable token. Space (0x20)->'Ġ'
+    // (U+0120). Exactly the map llama.cpp's gpt2/llama3 tokenizer uses.
+    private static readonly char[] ByteToUnicode = BuildByteToUnicode();
+    private static char[] BuildByteToUnicode()
+    {
+        var map = new char[256]; var self = new bool[256];
+        void mark(int lo, int hi) { for (int b = lo; b <= hi; b++) { map[b] = (char)b; self[b] = true; } }
+        mark('!', '~'); mark(0xA1, 0xAC); mark(0xAE, 0xFF);
+        int k = 0; for (int b = 0; b < 256; b++) if (!self[b]) map[b] = (char)(256 + k++);
+        return map;
+    }
+    private static string ByteEncode(string s)
+    {
+        var sb = new StringBuilder();
+        foreach (var b in Encoding.UTF8.GetBytes(s)) sb.Append(ByteToUnicode[b]);
+        return sb.ToString();
+    }
+    private static int ParseByteToken(string p) => Convert.ToInt32(p.Substring(3, 2), 16);   // "<0xXX>" -> XX
+
     private static void WriteGgufMetadata(
         IntPtr gguf,
         LlamaRecipeExtractor.RecipeInfo recipe,
         IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
-        string modelDir)
+        string modelDir, bool byteBpe = false)
     {
         SynthInterop.GgufWriterAddMetadataStr(gguf, "general.architecture", "llama");
         SynthInterop.GgufWriterAddMetadataStr(gguf, "general.name", Path.GetFileName(modelDir.TrimEnd('/')));
@@ -1256,13 +1276,23 @@ internal static class FoundryCommands
                 eosId = eos.GetUInt32();
         }
 
-        SynthInterop.GgufWriterAddMetadataStr(gguf, "tokenizer.ggml.model", "llama");
+        if (byteBpe)
+        {
+            // BYTE-LEVEL BPE (gpt2) + pre="llama3" sets ignore_merges=true in llama.cpp: any word
+            // DIRECTLY in the vocab tokenizes as ONE token, no merge chain — the fix for a
+            // whole-word vocab with no sub-pieces (SPM has no merge path → byte-falls-back to
+            // garbage, the all-session word-cast failure). OOV composes from the 256 byte tokens.
+            SynthInterop.GgufWriterAddMetadataStr(gguf, "tokenizer.ggml.model", "gpt2");
+            SynthInterop.GgufWriterAddMetadataStr(gguf, "tokenizer.ggml.pre",   "llama3");
+        }
+        else
+            SynthInterop.GgufWriterAddMetadataStr(gguf, "tokenizer.ggml.model", "llama");
         SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.bos_token_id",     bosId);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.eos_token_id",     eosId);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.unknown_token_id", 0);
         SynthInterop.GgufWriterAddMetadataBool(gguf, "tokenizer.ggml.add_bos_token",    1);
         SynthInterop.GgufWriterAddMetadataBool(gguf, "tokenizer.ggml.add_eos_token",    0);
-        SynthInterop.GgufWriterAddMetadataBool(gguf, "tokenizer.ggml.add_space_prefix", 1);
+        SynthInterop.GgufWriterAddMetadataBool(gguf, "tokenizer.ggml.add_space_prefix", byteBpe ? 0 : 1);   // bare word pieces: don't prepend a space
 
         int n = tokens.Count;
 
@@ -1285,6 +1315,22 @@ internal static class FoundryCommands
             for (int i = 0; i < n; i++) { pieces[i] = sorted[i].RawToken; scores[i] = 0f; types[i] = ClassifyTokenType(sorted[i].RawToken); }
         }
 
+        if (byteBpe)
+        {
+            // Re-encode the SP pieces into the gpt2 byte-level alphabet: <0xXX> -> that byte's
+            // byte->unicode char (a NORMAL token); "▁word" -> byteEncode(" word") (leading space
+            // becomes 'Ġ'); bare words -> byteEncode(word); specials kept as CONTROL. gpt2 ignores
+            // scores. The token INDEX is unchanged, so embed/lm_head (indexed by id) stay aligned.
+            for (int i = 0; i < n; i++)
+            {
+                if (types[i] == 6) { pieces[i] = ByteToUnicode[ParseByteToken(pieces[i])].ToString(); types[i] = 1; }
+                else if (types[i] == 1 && pieces[i].StartsWith("▁", StringComparison.Ordinal)) pieces[i] = ByteEncode(pieces[i][1..]);   // BARE word (no leading Ġ) so a prompt "king" matches directly
+                else if (types[i] == 1) pieces[i] = ByteEncode(pieces[i]);
+                else types[i] = 3;   // <unk>/<s>/</s> -> CONTROL
+                scores[i] = 0f;
+            }
+        }
+
         byte[] packed = PackStrings(pieces);
         unsafe
         {
@@ -1295,6 +1341,26 @@ internal static class FoundryCommands
                 SynthInterop.GgufWriterAddMetadataF32Array(gguf, "tokenizer.ggml.scores", p, (nuint)n);
             fixed (int* p = types)
                 SynthInterop.GgufWriterAddMetadataI32Array(gguf, "tokenizer.ggml.token_type", p, (nuint)n);
+        }
+        if (byteBpe)
+        {
+            // gpt2 REQUIRES a non-empty merges array to load. With ignore_merges (pre=llama3) the
+            // in-vocab words tokenize directly and NEVER consult merges; these adjacent byte-pair
+            // merges exist only to satisfy the loader (and let OOV compose from byte tokens).
+            var mseen = new HashSet<string>(); var mlist = new List<string>();
+            for (int i = 0; i < n; i++)
+            {
+                if (types[i] != 1) continue;
+                string pc = pieces[i];
+                for (int k = 0; k + 1 < pc.Length; k++)
+                {
+                    string m = pc[k] + " " + pc[k + 1];
+                    if (mseen.Add(m)) mlist.Add(m);
+                }
+            }
+            byte[] mp = PackStrings(mlist.ToArray());
+            unsafe { fixed (byte* p = mp) SynthInterop.GgufWriterAddMetadataStrArrayPacked(gguf, "tokenizer.ggml.merges", p, (nuint)mp.Length, (nuint)mlist.Count); }
+            Console.WriteLine($"  byte-level BPE: {mlist.Count:N0} merges (ignore_merges: words tokenize direct)");
         }
 
         string cfgPath = Path.Combine(modelDir, "tokenizer_config.json");
