@@ -565,3 +565,48 @@ pg_laplace_trajectory_constituents(PG_FUNCTION_ARGS)
     lwgeom_free(l);
     return (Datum) 0;
 }
+
+/* Native bytea[] of the DISTINCT constituent entity-ids of a trajectory. Same decode as
+ * laplace_trajectory_constituents, but returns the id array directly (no SQL array_agg over an
+ * SRF) so it can back a content-addressed GIN index (physicalities_constituents_gin) and the
+ * @> reverse lookup at native speed. */
+PG_FUNCTION_INFO_V1(pg_laplace_trajectory_constituent_ids);
+
+Datum
+pg_laplace_trajectory_constituent_ids(PG_FUNCTION_ARGS)
+{
+    GSERIALIZED *g;
+    LWGEOM *l = lwgeom_from_datum(PG_GETARG_DATUM(0), &g);
+
+    size_t  n = 0;
+    double *xyzm = geom_to_xyzm_buffer(l, "laplace_trajectory_constituent_ids", &n);
+
+    Datum     *elems = (n > 0) ? (Datum *) palloc(sizeof(Datum) * n) : NULL;
+    hash128_t *seen  = (n > 0) ? (hash128_t *) palloc(sizeof(hash128_t) * n) : NULL;
+    int m = 0;
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        mantissa_payload_t payload;
+        mantissa_unpack(&xyzm[i * 4], &payload);
+
+        bool dup = false;
+        for (int j = 0; j < m; ++j)
+            if (memcmp(&seen[j], &payload.entity_id, sizeof(hash128_t)) == 0) { dup = true; break; }
+        if (dup) continue;
+
+        seen[m] = payload.entity_id;
+        bytea *eid_out = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
+        SET_VARSIZE(eid_out, VARHDRSZ + sizeof(hash128_t));
+        memcpy(VARDATA(eid_out), &payload.entity_id, sizeof(hash128_t));
+        elems[m++] = PointerGetDatum(eid_out);
+    }
+
+    pfree(xyzm);
+    lwgeom_free(l);
+
+    ArrayType *result = (m == 0)
+        ? construct_empty_array(BYTEAOID)
+        : construct_array(elems, m, BYTEAOID, -1, false, TYPALIGN_INT);
+    PG_RETURN_ARRAYTYPE_P(result);
+}
