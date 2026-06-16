@@ -82,7 +82,7 @@ is documented in that header: start all-present (`"   "`), mark `'n'` per-param 
 `psql … -f scripts/sql/substrate-audit.sql` / `converse-audit.sql` → `e2e-master.cmd --skip-models`.
 Never start at the right end: e2e is for proving the whole pipeline, not for checking one change.
 
-## Footguns (each one has burned a session)
+## Hazards (each one has burned a session)
 
 - `.cmd` files MUST be CRLF (cmd's LF bug eats characters). After authoring/editing, re-normalize.
 - PowerShell `-replace` is case-INSENSITIVE — use `-creplace` for token/macro work.

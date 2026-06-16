@@ -22,7 +22,7 @@ struct TensorSpec {
     std::vector<size_t> shape;
 };
 
-std::vector<TensorSpec> llama_tensor_manifest(const recipe_t* r) {
+std::vector<TensorSpec> tensor_manifest(const recipe_t* r) {
     std::vector<TensorSpec> specs;
 
     auto get_int = [&](const char* field, size_t def) -> size_t {
@@ -31,6 +31,11 @@ std::vector<TensorSpec> llama_tensor_manifest(const recipe_t* r) {
         char* end;
         long val = std::strtol(v, &end, 10);
         return (end != v && val > 0) ? (size_t)val : def;
+    };
+    auto get_bool = [&](const char* field, bool def) -> bool {
+        const char* v = recipe_get_field(r, field);
+        if (!v) return def;
+        return std::strcmp(v, "true") == 0 || std::strcmp(v, "1") == 0;
     };
 
     const size_t vocab_size   = get_int("vocab_size",             32000);
@@ -42,8 +47,28 @@ std::vector<TensorSpec> llama_tensor_manifest(const recipe_t* r) {
     const size_t n_kv_heads   = get_int("num_key_value_heads",   n_heads);
     const size_t interm_size  = get_int("intermediate_size",       5632);
 
-    const size_t head_dim    = hidden_size / n_heads;
-    const size_t kv_dim      = n_kv_heads * head_dim;
+    // head_dim may be DECLARED independently of hidden/heads (qwen3_moe: hidden 2048, heads 32,
+    // head_dim 128 → q is 4096-wide, not hidden-wide). Read it explicit, fall back to the ratio.
+    const size_t head_dim    = get_int("head_dim", hidden_size / n_heads);
+    const size_t q_dim       = n_heads * head_dim;       // attention q/o width (q_proj rows)
+    const size_t kv_dim      = n_kv_heads * head_dim;    // k/v width (GQA: n_kv_heads ≤ n_heads)
+
+    // The architecture IS a declared tensor manifest derived from the recipe — the only
+    // branch is the recipe's own fields, so MoE / GQA / qkv-bias / tied variants pour without
+    // a per-family code path. MoE engages when any expert-count field is positive (mixtral
+    // num_local_experts; qwen3_moe num_experts; deepseek_v2 n_routed_experts), but NOT every
+    // layer is sparse: first_k_dense_replace keeps the first K layers dense (deepseek_v2) and
+    // decoder_sparse_step makes only every Nth layer MoE (qwen3_moe). Hub configs are the schema.
+    const size_t n_experts     = get_int("num_local_experts",
+                                 get_int("num_experts",
+                                 get_int("n_routed_experts", 0)));
+    const size_t first_k_dense = get_int("first_k_dense_replace", 0);
+    const size_t sparse_step   = get_int("decoder_sparse_step", 1);
+    const size_t moe_interm    = get_int("moe_intermediate_size", interm_size);
+    const size_t n_shared      = get_int("n_shared_experts", get_int("num_shared_experts", 0));
+    const size_t shared_interm = get_int("shared_expert_intermediate_size", moe_interm);
+    const bool   attn_bias     = get_bool("attention_bias", false) || get_bool("qkv_bias", false);
+    const bool   tie_embed     = get_bool("tie_word_embeddings", false);
 
     int dtype = 2;
     const char* dt = recipe_get_field(r, "torch_dtype");
@@ -53,14 +78,14 @@ std::vector<TensorSpec> llama_tensor_manifest(const recipe_t* r) {
         else if (std::strcmp(dt, "bfloat16") == 0) dtype = 2;
     }
 
-    char name_buf[128];
+    char name_buf[160];
 
     specs.push_back({"model.embed_tokens.weight", dtype, {vocab_size, hidden_size}});
 
     for (size_t i = 0; i < n_layers; ++i) {
         std::snprintf(name_buf, sizeof(name_buf),
                       "model.layers.%zu.self_attn.q_proj.weight", i);
-        specs.push_back({name_buf, dtype, {hidden_size, hidden_size}});
+        specs.push_back({name_buf, dtype, {q_dim, hidden_size}});
 
         std::snprintf(name_buf, sizeof(name_buf),
                       "model.layers.%zu.self_attn.k_proj.weight", i);
@@ -72,19 +97,53 @@ std::vector<TensorSpec> llama_tensor_manifest(const recipe_t* r) {
 
         std::snprintf(name_buf, sizeof(name_buf),
                       "model.layers.%zu.self_attn.o_proj.weight", i);
-        specs.push_back({name_buf, dtype, {hidden_size, hidden_size}});
+        specs.push_back({name_buf, dtype, {hidden_size, q_dim}});
 
-        std::snprintf(name_buf, sizeof(name_buf),
-                      "model.layers.%zu.mlp.gate_proj.weight", i);
-        specs.push_back({name_buf, dtype, {interm_size, hidden_size}});
+        if (attn_bias) {
+            std::snprintf(name_buf, sizeof(name_buf), "model.layers.%zu.self_attn.q_proj.bias", i);
+            specs.push_back({name_buf, dtype, {q_dim}});
+            std::snprintf(name_buf, sizeof(name_buf), "model.layers.%zu.self_attn.k_proj.bias", i);
+            specs.push_back({name_buf, dtype, {kv_dim}});
+            std::snprintf(name_buf, sizeof(name_buf), "model.layers.%zu.self_attn.v_proj.bias", i);
+            specs.push_back({name_buf, dtype, {kv_dim}});
+        }
 
-        std::snprintf(name_buf, sizeof(name_buf),
-                      "model.layers.%zu.mlp.up_proj.weight", i);
-        specs.push_back({name_buf, dtype, {interm_size, hidden_size}});
+        if (n_experts > 0 && i >= first_k_dense && (i + 1) % (sparse_step ? sparse_step : 1) == 0) {
+            // router over the experts, then one SwiGLU expert per slot at the MoE width,
+            // plus an optional always-on shared expert with its sigmoid gate.
+            std::snprintf(name_buf, sizeof(name_buf), "model.layers.%zu.mlp.gate.weight", i);
+            specs.push_back({name_buf, dtype, {n_experts, hidden_size}});
+            for (size_t e = 0; e < n_experts; ++e) {
+                std::snprintf(name_buf, sizeof(name_buf), "model.layers.%zu.mlp.experts.%zu.gate_proj.weight", i, e);
+                specs.push_back({name_buf, dtype, {moe_interm, hidden_size}});
+                std::snprintf(name_buf, sizeof(name_buf), "model.layers.%zu.mlp.experts.%zu.up_proj.weight", i, e);
+                specs.push_back({name_buf, dtype, {moe_interm, hidden_size}});
+                std::snprintf(name_buf, sizeof(name_buf), "model.layers.%zu.mlp.experts.%zu.down_proj.weight", i, e);
+                specs.push_back({name_buf, dtype, {hidden_size, moe_interm}});
+            }
+            if (n_shared > 0) {
+                std::snprintf(name_buf, sizeof(name_buf), "model.layers.%zu.mlp.shared_expert.gate_proj.weight", i);
+                specs.push_back({name_buf, dtype, {shared_interm, hidden_size}});
+                std::snprintf(name_buf, sizeof(name_buf), "model.layers.%zu.mlp.shared_expert.up_proj.weight", i);
+                specs.push_back({name_buf, dtype, {shared_interm, hidden_size}});
+                std::snprintf(name_buf, sizeof(name_buf), "model.layers.%zu.mlp.shared_expert.down_proj.weight", i);
+                specs.push_back({name_buf, dtype, {hidden_size, shared_interm}});
+                std::snprintf(name_buf, sizeof(name_buf), "model.layers.%zu.mlp.shared_expert_gate.weight", i);
+                specs.push_back({name_buf, dtype, {1, hidden_size}});
+            }
+        } else {
+            std::snprintf(name_buf, sizeof(name_buf),
+                          "model.layers.%zu.mlp.gate_proj.weight", i);
+            specs.push_back({name_buf, dtype, {interm_size, hidden_size}});
 
-        std::snprintf(name_buf, sizeof(name_buf),
-                      "model.layers.%zu.mlp.down_proj.weight", i);
-        specs.push_back({name_buf, dtype, {hidden_size, interm_size}});
+            std::snprintf(name_buf, sizeof(name_buf),
+                          "model.layers.%zu.mlp.up_proj.weight", i);
+            specs.push_back({name_buf, dtype, {interm_size, hidden_size}});
+
+            std::snprintf(name_buf, sizeof(name_buf),
+                          "model.layers.%zu.mlp.down_proj.weight", i);
+            specs.push_back({name_buf, dtype, {hidden_size, interm_size}});
+        }
 
         std::snprintf(name_buf, sizeof(name_buf),
                       "model.layers.%zu.input_layernorm.weight", i);
@@ -97,7 +156,8 @@ std::vector<TensorSpec> llama_tensor_manifest(const recipe_t* r) {
 
     specs.push_back({"model.norm.weight", 0, {hidden_size}});
 
-    specs.push_back({"lm_head.weight", dtype, {vocab_size, hidden_size}});
+    if (!tie_embed)
+        specs.push_back({"lm_head.weight", dtype, {vocab_size, hidden_size}});
 
     return specs;
 }
@@ -112,9 +172,12 @@ struct arch_template {
 
 extern "C" arch_template_t* arch_template_load(const char* template_name) {
     if (!template_name) return nullptr;
-    if (std::strcmp(template_name, "llama") != 0) return nullptr;
+    // Any architecture loads: the tensor manifest is DERIVED FROM THE RECIPE (shapes are
+    // declared fixed math), not branched per family. The old llama-only strcmp gate was the
+    // single chokepoint that forced every cast into one shape regardless of the declared
+    // recipe — MoE / GQA / biased / tied / arbitrary-dim variants now pour from their fields.
     auto* t = new arch_template();
-    t->arch_name = "llama";
+    t->arch_name = template_name;
     return t;
 }
 
@@ -127,7 +190,7 @@ int arch_template_required_tensors(const arch_template_t* tmpl,
     const recipe_t* r = static_cast<const recipe_t*>(recipe);
 
     auto* mut = const_cast<arch_template_t*>(tmpl);
-    mut->cached_specs = llama_tensor_manifest(r);
+    mut->cached_specs = tensor_manifest(r);
 
     const size_t n = mut->cached_specs.size();
     if (cap < n) return (int)n;

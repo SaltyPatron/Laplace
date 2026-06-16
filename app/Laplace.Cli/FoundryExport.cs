@@ -259,6 +259,64 @@ internal static class FoundryExport
         return new PlaneCoo(rows, cols, vals);
     }
 
+    // PER-TYPE planes — the proper attestation-tensor cast (ranks=layers, types-in-rank=heads,
+    // eff_mu=weights). laplace.consensus_type_plane returns the vocab×vocab rated adjacency
+    // grouped BY relation TYPE (one row group per type, the type's rank = its layer). Each type
+    // becomes its OWN attention head; ranks group heads into layers. This is the separate
+    // per-head/per-layer transcription, NOT 4 coarse rank bands collapsed into one operator.
+    internal sealed record TypePlane(Hash128 TypeId, double Rank, PlaneCoo Plane);
+
+    internal static async Task<List<TypePlane>> ReadTypePlanesAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
+
+        // type_id -> (rank, subject ordinal -> [(object ordinal, w)])
+        var byType = new Dictionary<Hash128, (double Rank, Dictionary<int, List<(int Col, double W)>> Adj)>();
+        await using var conn = await ds.OpenConnectionAsync();
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandTimeout = 600;
+            cmd.CommandText =
+                "SELECT subject_id, object_id, w, type_id, layer_rank FROM laplace.consensus_type_plane($1, $2)";
+            cmd.Parameters.Add(new NpgsqlParameter
+                { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            cmd.Parameters.AddWithValue(degreeCap);
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+                double w = rdr.GetDouble(2);
+                if (w == 0.0) continue;
+                var tid = FromBytes((byte[])rdr[3]);
+                double rank = rdr.GetDouble(4);
+                if (!byType.TryGetValue(tid, out var entry))
+                    byType[tid] = entry = (rank, new Dictionary<int, List<(int, double)>>());
+                foreach (int s in subj)
+                {
+                    if (!entry.Adj.TryGetValue(s, out var row)) entry.Adj[s] = row = new List<(int, double)>(8);
+                    foreach (int o in obj) row.Add((o, w));
+                }
+            }
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine($"  (consensus_type_plane unavailable: {ex.SqlState} — skipped)");
+            return new List<TypePlane>();
+        }
+
+        var result = new List<TypePlane>(byType.Count);
+        foreach (var (tid, entry) in byType)
+            result.Add(new TypePlane(tid, entry.Rank, CooFromAdj(entry.Adj, degreeCap)));
+        // strongest rank first → deterministic head/layer assignment in the cast.
+        result.Sort((a, b) => b.Rank.CompareTo(a.Rank));
+        return result;
+    }
+
     // FAITHFUL adjacency read (the generative mold's source): ONE set-based call to
     // laplace.consensus_adjacency over the whole vocab. The weight is already the
     // rank-weighted rating Σ relation_rank·eff_mu — the rank looked up PER EDGE from the

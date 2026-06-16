@@ -1,7 +1,7 @@
-CREATE FUNCTION relation_type_resolve(p_surface text) RETURNS bytea
+CREATE OR REPLACE FUNCTION relation_type_resolve(p_surface text) RETURNS bytea
     LANGUAGE c IMMUTABLE STRICT PARALLEL SAFE AS 'MODULE_PATHNAME', 'pg_relation_type_resolve';
 
-CREATE FUNCTION relation_type_in_family(p_type_id bytea, p_family text) RETURNS boolean
+CREATE OR REPLACE FUNCTION relation_type_in_family(p_type_id bytea, p_family text) RETURNS boolean
     LANGUAGE c IMMUTABLE STRICT PARALLEL SAFE AS 'MODULE_PATHNAME', 'pg_relation_type_in_family';
 
 -- the banked native rank/canonical of a relation type (the layer it belongs to).
@@ -11,3 +11,14 @@ CREATE OR REPLACE FUNCTION relation_rank(p_type_id bytea) RETURNS float8
 
 CREATE OR REPLACE FUNCTION relation_canonical(p_type_id bytea) RETURNS text
     LANGUAGE c IMMUTABLE STRICT PARALLEL SAFE AS 'MODULE_PATHNAME', 'pg_relation_canonical';
+
+-- Rank-by-inheritance (NATIVE). A dynamically-seeded relation type (UD deprels/features, enhanced
+-- deprels, dbpedia rels via RelationTypeRegistry.SeedDynamic) is not in the compiled manifest, so
+-- relation_rank() returns NULL. SeedDynamic links each one by IS_A to a ranked ancestor (DEP_* IS_A
+-- DEPENDS_ON @0.73, FEAT_* IS_A HAS_FEATURE @0.73, EDEP_* IS_A ENHANCED_DEPENDS_ON @0.73, DBPEDIA_*
+-- IS_A HAS_DBPEDIA_RELATION @0.36). The ancestry walk is in C via bounded SPI
+-- (pg_relation_rank_resolved), NOT a SQL recursive CTE: a static hit returns from the in-memory
+-- relation law with no DB touch; only an unregistered leaf pays the bounded probe. Reads/exports
+-- call this so every named relation type (syntax included) lands in its layer.
+CREATE OR REPLACE FUNCTION relation_rank_resolved(p_type_id bytea) RETURNS float8
+    LANGUAGE c STABLE STRICT AS 'MODULE_PATHNAME', 'pg_relation_rank_resolved';
