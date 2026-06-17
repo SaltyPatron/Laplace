@@ -192,9 +192,6 @@ public sealed class IntentStage : SafeHandle
             {
                 int rc = NativeInterop.ContentWitnessBatchAdd(
                     handle, utf8, (nuint)canonical.Length, &src, &root);
-                
-                
-                
                 if (rc == -3) throw new InvalidOperationException(
                     "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
                 if (rc != 0) return false;

@@ -9,10 +9,11 @@
 
 \pset pager off
 \timing on
+SET laplace_substrate.perfcache_path = 'D:/Data/Postgres/laplace/share/laplace_t0_perfcache.bin';
 
 \echo
 \echo ===== SUBSTRATE STATE (plain text folded to consensus) =====
-SELECT * FROM laplace.consensus_stats();
+SELECT * FROM laplace.consensus_stats_approx();
 
 \echo
 \echo ===== relation types carried in consensus (PRECEDES = the book bigrams) =====

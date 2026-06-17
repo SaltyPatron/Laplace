@@ -58,14 +58,8 @@ public static class ContentWitnessBatch
         SubstrateChangeBuilder builder,
         ReadOnlySpan<byte> canonical,
         Hash128 sourceId,
-        out Hash128 rootId)
-    {
-        
-        
-        
-        
-        return TryAddToIntentStage(builder.ContentStage, canonical, sourceId, out rootId);
-    }
+        out Hash128 rootId) =>
+        TryAddToIntentStage(builder.ContentStage, canonical, sourceId, out rootId);
 
     
     public static bool TryAppendUnderscoredToBuilder(

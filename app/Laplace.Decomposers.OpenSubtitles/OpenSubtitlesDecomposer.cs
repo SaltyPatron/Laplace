@@ -1,8 +1,9 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using System.Threading.Channels;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.OpenSubtitles;
 
@@ -12,8 +13,6 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
         Hash128.OfCanonical("substrate/source/OpenSubtitlesDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
-
-    private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
 
     private static readonly (string Pair, long Pairs)[] PairCounts =
     {
@@ -48,39 +47,205 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (!Directory.Exists(context.EcosystemPath)) yield break;
+
         int batch = options.BatchSize > 1 ? options.BatchSize : 8192;
+        int workers = ResolveDecomposeWorkers();
+        int chunk = Math.Clamp(batch / 4, 512, 4096);
+        var zips = SelectZips(context.EcosystemPath, options);
+        if (zips.Count == 0) yield break;
 
-        var zips = Directory.EnumerateFiles(context.EcosystemPath, "*.txt.zip")
-                            .OrderBy(p => p, StringComparer.Ordinal)
-                            .ToList();
-        var pairAllow = ResolvePairAllowlist();
-
-        foreach (string zipPath in zips)
+        if (workers <= 1)
         {
-            ct.ThrowIfCancellationRequested();
-            string pairStem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(zipPath));
-            if (pairAllow is not null && !pairAllow.Contains(pairStem)) continue;
-            if (options.Languages?.MatchesLanguagePair(pairStem) == false) continue;
-
-            await foreach (var change in OpenSubtitlesFastIngest.IngestZipAsync(zipPath, pairStem, batch, ct))
+            foreach (var (zipPath, pairStem) in zips)
             {
-                if (!options.DryRun) yield return change;
+                ct.ThrowIfCancellationRequested();
+                await foreach (var change in IngestZipSerialAsync(zipPath, pairStem, batch, ct))
+                {
+                    if (!options.DryRun) yield return change;
+                }
+            }
+            yield break;
+        }
+
+        var pairChannel = Channel.CreateBounded<OpenSubtitlesLinePair>(
+            new BoundedChannelOptions(Math.Max(workers * 512, 8192))
+            {
+                SingleWriter = false,
+                SingleReader = false,
+                FullMode = BoundedChannelFullMode.Wait,
+            });
+        var microChannel = Channel.CreateBounded<SubstrateChange>(
+            new BoundedChannelOptions(workers * 8)
+            {
+                SingleWriter = false,
+                SingleReader = true,
+                FullMode = BoundedChannelFullMode.Wait,
+            });
+
+        var zipQueue = new ConcurrentQueue<(string Path, string Stem)>(zips);
+        int readerCount = Math.Min(workers, zips.Count);
+        var readers = new Task[readerCount];
+        for (int ri = 0; ri < readerCount; ri++)
+        {
+            readers[ri] = Task.Run(async () =>
+            {
+                while (zipQueue.TryDequeue(out var zip))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    await foreach (var pair in OpenSubtitlesFastIngest.ReadZipPairsAsync(zip.Path, zip.Stem, ct))
+                        await pairChannel.Writer.WriteAsync(pair, ct);
+                }
+            }, ct);
+        }
+
+        _ = Task.WhenAll(readers).ContinueWith(
+            t => pairChannel.Writer.TryComplete(t.Exception),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        var processors = new Task[workers];
+        for (int wi = 0; wi < workers; wi++)
+        {
+            int worker = wi;
+            processors[wi] = Task.Run(async () =>
+            {
+                SubstrateChangeBuilder? local = null;
+                Hash128 langA = default, langB = default;
+                string? stem = null;
+                int count = 0, bn = 0;
+
+                await foreach (var pair in pairChannel.Reader.ReadAllAsync(ct))
+                {
+                    if (stem != pair.PairStem)
+                    {
+                        if (local is not null && count > 0)
+                            await microChannel.Writer.WriteAsync(
+                                local.SetInputUnitsConsumed(count).Build(), ct);
+                        stem = pair.PairStem;
+                        langA = pair.LangA;
+                        langB = pair.LangB;
+                        bn = 0;
+                        local = OpenSubtitlesFastIngest.NewBuilder(
+                            $"opensubtitles/w{worker}/{stem}/0", chunk, langA, langB);
+                        count = 0;
+                    }
+                    else if (local is null)
+                    {
+                        stem = pair.PairStem;
+                        langA = pair.LangA;
+                        langB = pair.LangB;
+                        local = OpenSubtitlesFastIngest.NewBuilder(
+                            $"opensubtitles/w{worker}/{stem}/0", chunk, langA, langB);
+                    }
+
+                    if (!OpenSubtitlesFastIngest.TryAppendPair(local, pair, out _))
+                        continue;
+
+                    if (++count >= chunk)
+                    {
+                        await microChannel.Writer.WriteAsync(
+                            local.SetInputUnitsConsumed(count).Build(), ct);
+                        bn++;
+                        local = OpenSubtitlesFastIngest.NewBuilder(
+                            $"opensubtitles/w{worker}/{stem}/{bn}", chunk, langA, langB);
+                        count = 0;
+                    }
+                }
+
+                if (local is not null && count > 0)
+                    await microChannel.Writer.WriteAsync(
+                        local.SetInputUnitsConsumed(count).Build(), ct);
+            }, ct);
+        }
+
+        _ = Task.WhenAll(processors).ContinueWith(
+            t => microChannel.Writer.TryComplete(t.Exception),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        SubstrateChangeBuilder? acc = null;
+        long accUnits = 0;
+        int accBn = 0;
+
+        await foreach (var micro in microChannel.Reader.ReadAllAsync(ct))
+        {
+            if (options.DryRun) continue;
+
+            if (acc is null)
+            {
+                acc = new SubstrateChangeBuilder(
+                    Source, $"opensubtitles/batch/{accBn}", null,
+                    entityCapacity: batch * 4,
+                    physicalityCapacity: batch * 8,
+                    attestationCapacity: batch * 4);
+                accUnits = 0;
+            }
+
+            OpenSubtitlesFastIngest.Absorb(acc, micro);
+            accUnits += Math.Max(1, micro.Metadata.InputUnitsConsumed);
+
+            if (accUnits >= batch)
+            {
+                yield return acc.SetInputUnitsConsumed(accUnits).Build();
+                accBn++;
+                acc = null;
+                accUnits = 0;
             }
         }
+
+        if (acc is not null && accUnits > 0)
+            yield return acc.SetInputUnitsConsumed(accUnits).Build();
+
+        await Task.WhenAll(readers.Concat(processors));
+    }
+
+    private static async IAsyncEnumerable<SubstrateChange> IngestZipSerialAsync(
+        string zipPath,
+        string pairStem,
+        int batchSize,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        string unitStem = Path.GetFileNameWithoutExtension(zipPath);
+        SubstrateChangeBuilder? b = null;
+        Hash128 langA = default, langB = default;
+        int n = 0, bn = 0;
+
+        await foreach (var pair in OpenSubtitlesFastIngest.ReadZipPairsAsync(zipPath, pairStem, ct))
+        {
+            if (b is null)
+            {
+                langA = pair.LangA;
+                langB = pair.LangB;
+                b = OpenSubtitlesFastIngest.NewBuilder($"opensubtitles/{unitStem}/0", batchSize, langA, langB);
+            }
+
+            if (!OpenSubtitlesFastIngest.TryAppendPair(b, pair, out _)) continue;
+
+            if (++n >= batchSize)
+            {
+                yield return b.SetInputUnitsConsumed(n).Build();
+                bn++;
+                b = OpenSubtitlesFastIngest.NewBuilder(
+                    $"opensubtitles/{unitStem}/{bn}", batchSize, langA, langB);
+                n = 0;
+            }
+        }
+
+        if (b is not null && n > 0)
+            yield return b.SetInputUnitsConsumed(n).Build();
     }
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
         if (!Directory.Exists(context.EcosystemPath)) return Task.FromResult<IngestInventory?>(null);
-        var files = Directory.EnumerateFiles(context.EcosystemPath, "*.txt.zip")
-            .Select(p => Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(p)))
-            .Where(pair => ResolvePairAllowlist() is not { } allow || allow.Contains(pair))
-            .Where(pair => options.Languages?.MatchesLanguagePair(pair) != false)
-            .Select(pair =>
+        var files = SelectZips(context.EcosystemPath, options)
+            .Select(z =>
             {
-                long pairs = PairCounts.FirstOrDefault(x => x.Pair == pair).Pairs;
-                return new IngestFileSpec(pair, Path.Combine(context.EcosystemPath, pair + ".txt.zip"), pairs);
+                long pairs = PairCounts.FirstOrDefault(x => x.Pair == z.Stem).Pairs;
+                return new IngestFileSpec(z.Stem, z.Path, pairs);
             })
             .ToList();
         long total = 0;
@@ -90,7 +255,7 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
 
     public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
+        var inv = await DescribeInputAsync(context, DecomposerOptions.ForWitness(SourceName), ct);
         return inv?.TotalInputUnits;
     }
 
@@ -102,5 +267,24 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
         if (string.IsNullOrWhiteSpace(env)) return null;
         return env.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                   .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static int ResolveDecomposeWorkers() =>
+        int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_DECOMPOSE_WORKERS"), out var w) && w > 0
+            ? w
+            : Math.Clamp(Environment.ProcessorCount - 2, 1, 16);
+
+    private static List<(string Path, string Stem)> SelectZips(string dir, DecomposerOptions options)
+    {
+        var pairAllow = ResolvePairAllowlist();
+        var list = new List<(string, string)>();
+        foreach (string zipPath in Directory.EnumerateFiles(dir, "*.txt.zip").OrderBy(p => p, StringComparer.Ordinal))
+        {
+            string stem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(zipPath));
+            if (pairAllow is not null && !pairAllow.Contains(stem)) continue;
+            if (options.Languages?.MatchesLanguagePair(stem) == false) continue;
+            list.Add((zipPath, stem));
+        }
+        return list;
     }
 }
