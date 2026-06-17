@@ -33,6 +33,7 @@ public static class StreamingUtf8LineReader
                     {
                         carryLen = 0;
                         start = i + 1;
+                        yield return ReadOnlyMemory<byte>.Empty;
                         continue;
                     }
 

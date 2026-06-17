@@ -201,4 +201,4 @@ These reinventions have caused drift; do not reintroduce them. Enforcement: `.gi
 | `Parallel.For` float→double in `ModelTableETL` | C# tensor math | Native `f32_gather_to_f64` / `laplace_bf16_decode` |
 | Direct `SELECT ... FROM laplace.consensus` in CLI | Bypasses versioned read API | `laplace.consensus_export` or COPY |
 | C# `Vector128` / `Simd` | SIMD belongs in engine | `engine/` AVX2/MKL kernels |
-| Grammar compose for TSV/JSONL/CoNLL-U | 10–100× slower than span fast ingest | `*FastIngest` pattern (ConceptNet/Tatoeba/Wiktionary) |
+| `*FastIngest` corner-cuts (skip grammar compose) | Bypass constituent deposition; ghost content ids | `StructuredGrammarIngest` + `IGrammarWitness` + `TrySpanEntity` |

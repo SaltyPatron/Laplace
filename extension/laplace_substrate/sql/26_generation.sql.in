@@ -735,6 +735,62 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
         FROM seed_ids si, rel_types rt
         CROSS JOIN LATERAL foundry_crawl(si.ids, p_max, p_hops, p_fanout, rt.ids) c
     ),
+    -- ORDER CLOSURE (seed-local): PRECEDES successors of the seeds, 1-hop + 2-hop.
+    -- Geographic/factual chains (capital→of→France) live on witnessed order, NOT the lexical
+    -- crawl edge set — the global scaffold below ranks by corpus-wide out-degree and never asks
+    -- "what follows capital". Path weight = product of edge eff_mu so multi-hop facts rank by
+    -- chain strength; fanout capped per hop so bridge words (of) do not flood the budget.
+    order1 AS (
+        SELECT c.object_id AS entity_id,
+               eff_mu(c.rating, c.rd)::numeric AS w,
+               row_number() OVER (PARTITION BY seed.wid ORDER BY eff_mu(c.rating, c.rd) DESC, c.object_id) AS rn
+        FROM seed_ids si
+        CROSS JOIN unnest(si.ids) AS seed(wid)
+        JOIN consensus c ON c.subject_id = seed.wid
+            AND c.type_id = relation_type_id('PRECEDES')
+            AND c.object_id IS NOT NULL
+            AND NOT refuted(c.rating, c.rd)
+        JOIN entities e ON e.id = c.object_id AND e.tier = 2
+    ),
+    order1_cut AS (
+        SELECT entity_id, w::bigint AS weight FROM order1 WHERE rn <= p_fanout
+    ),
+    order2 AS (
+        SELECT c.object_id AS entity_id,
+               (o.w * eff_mu(c.rating, c.rd)::numeric / 1000000000)::bigint AS weight,
+               row_number() OVER (PARTITION BY o.entity_id ORDER BY eff_mu(c.rating, c.rd) DESC, c.object_id) AS rn
+        FROM order1_cut o
+        JOIN consensus c ON c.subject_id = o.entity_id
+            AND c.type_id = relation_type_id('PRECEDES')
+            AND c.object_id IS NOT NULL
+            AND NOT refuted(c.rating, c.rd)
+        JOIN entities e ON e.id = c.object_id AND e.tier = 2
+    ),
+    order2_cut AS (
+        SELECT entity_id, weight FROM order2 WHERE rn <= p_fanout
+    ),
+    order_lemma AS (
+        SELECT c.object_id AS entity_id, o.weight
+        FROM (SELECT entity_id, max(weight) AS weight FROM (
+                  SELECT entity_id, weight FROM order1_cut
+                  UNION ALL SELECT entity_id, weight FROM order2_cut
+              ) u GROUP BY entity_id) o
+        JOIN consensus c ON c.subject_id = o.entity_id
+            AND c.type_id = relation_type_id('IS_LEMMA_OF')
+            AND c.object_id IS NOT NULL
+            AND NOT refuted(c.rating, c.rd)
+        JOIN entities e ON e.id = c.object_id AND e.tier = 2
+    ),
+    order_closure AS (
+        SELECT entity_id, max(weight) AS weight,
+               row_number() OVER (ORDER BY max(weight) DESC, entity_id) AS rn
+        FROM (
+            SELECT entity_id, weight FROM order1_cut
+            UNION ALL SELECT entity_id, weight FROM order2_cut
+            UNION ALL SELECT entity_id, weight FROM order_lemma
+        ) u
+        GROUP BY entity_id
+    ),
     -- SEQUENCE GLUE (scaffold): the highest-PRECEDES single wordforms. A lexical-only
     -- crawl has no SEQUENCE coverage — the words that actually follow content words in
     -- text (dog → and/the/he/growls/look) are function/common words the crawl excludes,
@@ -754,7 +810,9 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
         ) f
     ),
     picked AS (
-        SELECT entity_id, weight, 1 AS pri FROM crawled  WHERE rn <= p_max - p_max / 4
+        SELECT entity_id, weight, 2 AS pri FROM order_closure WHERE rn <= p_max / 4
+        UNION ALL
+        SELECT entity_id, weight, 1 AS pri FROM crawled  WHERE rn <= p_max - p_max / 2
         UNION ALL
         SELECT entity_id, weight, 0 AS pri FROM scaffold WHERE rn <= p_max / 4
     ),
@@ -815,15 +873,20 @@ CREATE OR REPLACE FUNCTION walk_text(
         SELECT array_agg(id ORDER BY ord) AS ids
         FROM prompt_state(p_prompt) WHERE id IS NOT NULL
     )
-    -- the kernel is deterministic given a seed; entropy is the caller's choice,
-    -- so an unseeded call draws one here instead of repeating a constant stream.
+    -- the kernel is deterministic given a seed. An unseeded call MUST stay deterministic
+    -- (substrate invariant: repeatable), so the seed is derived from the prompt content
+    -- via BLAKE3 — identical prompts yield identical output. Callers wanting variation
+    -- pass an explicit p_seed (e.g. a turn counter); random() is never used here.
     -- entity carries the word PLUS its witnessed trailing separator (omniglottal spacing:
     -- Latin space / 。、 / U+3000 / nothing for CJK) — reconstruct text with NO delimiter.
     SELECT g.step,
            render_text(g.entity, 64) || COALESCE(render_text(g.sep_entity, 8), ''),
            g.stride_used
     FROM ctx, walk_continuations(ctx.ids, p_steps, p_max_stride, p_spread, p_breadth,
-                              COALESCE(p_seed, (floor(random() * 9e18))::bigint)) g
+                              COALESCE(p_seed,
+                                  ('x' || encode(substring(
+                                       public.laplace_hash128_blake3(convert_to(p_prompt, 'UTF8'))
+                                       for 8), 'hex'))::bit(64)::bigint)) g
     WHERE ctx.ids IS NOT NULL
 $$;
 

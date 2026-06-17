@@ -73,6 +73,9 @@ public static class StructuredGrammarIngest
                         new RowContext(rowIndex++, rowsTotal, contextId),
                         b);
 
+                    if (reportUnits is not null && rowsTotal % 100 == 0)
+                        reportUnits(rowsTotal);
+
                     if (++inBatch >= batchSize)
                     {
                         yield return b.SetInputUnitsConsumed(rowsInBatch).Build();

@@ -2,10 +2,11 @@ using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Wiktionary;
 
-public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider, IIngestCommitPolicy
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/WiktionaryDecomposer/v1");
@@ -16,6 +17,8 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
     public string  SourceName   => "WiktionaryDecomposer";
     public int     LayerOrder   => 2;
     public Hash128 TrustClassId => TrustClass;
+
+    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
@@ -56,14 +59,18 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
+        // English-only ingest reads kaikki.org-dictionary-English.jsonl (~1.5M lines).
+        // Never prescan raw-wiktextract-data.jsonl (10.5M lines / 22GB).
         if (options.Languages?.IsActive == true)
             return Task.FromResult<IngestInventory?>(null);
-        return CountInventoryAsync(context.EcosystemPath, ct);
+        return CountInventoryAsync(context.EcosystemPath, langs: null, ct);
     }
 
     public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
+        // Must respect LAPLACE_INGEST_LANGS — Default would pick raw-wiktextract and
+        // full-scan 22GB before the first batch (ConceptNet has the same law).
+        var inv = await DescribeInputAsync(context, DecomposerOptions.ForWitness(SourceName), ct);
         return inv?.TotalInputUnits;
     }
 
@@ -86,9 +93,10 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
         return null;
     }
 
-    private static async Task<IngestInventory?> CountInventoryAsync(string dir, CancellationToken ct)
+    private static async Task<IngestInventory?> CountInventoryAsync(
+        string dir, LanguageFilter? langs, CancellationToken ct)
     {
-        string? file = ResolveInput(dir, langs: null);
+        string? file = ResolveInput(dir, langs);
         if (file is null) return null;
         long n = await EtlInventory.CountDataLinesAsync(file, static line =>
             line.Length > 0 && line[0] == '{', ct: ct);

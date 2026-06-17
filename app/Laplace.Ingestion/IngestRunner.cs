@@ -138,15 +138,6 @@ public sealed class IngestRunner
             ? cp.CommitParallelism
             : IngestCommitParallelism.StrictSerial;
 
-        if (options.ParallelWorkers > 1 && commitPolicy == IngestCommitParallelism.StrictSerial)
-        {
-            log.LogInformation(
-                "{Source}: LAPLACE_INGEST_WORKERS={Workers} but commit policy is StrictSerial — "
-                + "using pipelined serial commit (decompose overlaps commit); raise epoch barriers "
-                + "or implement IIngestCommitPolicy.EpochBarrier to parallelize DB commits.",
-                decomposer.SourceName, options.ParallelWorkers);
-        }
-
         if (options.ParallelWorkers <= 1
             || commitPolicy == IngestCommitParallelism.StrictSerial)
         {
@@ -409,8 +400,12 @@ public sealed class IngestRunner
         // memory. Without this, a model-deposit epoch (~1.1B rows) buffered entirely in RAM
         // before the first apply (observed: zero INGEST_BATCH lines while RSS climbed to 30+ GB;
         // the prior run's "hang" was this buffer, not the ETL).
-        long flushRows = Math.Max((long)Math.Max(commitRows, 1), 500_000L)
-                         * Math.Max(1, options.ParallelWorkers);
+        // CommitRows / batchSize (ShouldFlush) govern lexical corpora; the 500k floor applies
+        // only when CommitRows is unset (model-scale epochs with no row target).
+        long perWorkerCap = commitRows > 0
+            ? (long)Math.Max(commitRows, 1)
+            : Math.Max((long)Math.Max(batchSize, 1) * 1000, 500_000L);
+        long flushRows = perWorkerCap * Math.Max(1, options.ParallelWorkers);
 
         while (await channel.Reader.WaitToReadAsync(ct))
         {
@@ -434,7 +429,8 @@ public sealed class IngestRunner
                 }
                 epochBuffer.Add(intent);
                 bufferedRows += rowsOf(intent);
-                if (bufferedRows >= flushRows)
+                int bufferedRowsInt = bufferedRows > int.MaxValue ? int.MaxValue : (int)bufferedRows;
+                if (shouldFlush(epochBuffer.Count, bufferedRowsInt) || bufferedRows >= flushRows)
                 {
                     await FlushEpochParallelAsync(
                         epochBuffer, decomposer, options, batchSize, commitRows,

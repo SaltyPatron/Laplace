@@ -62,13 +62,141 @@ typedef struct {
     size_t     n;
 } compose_state_t;
 
+static int push_entity(laplace_compose_result_t* r, hash128_t id, uint8_t tier,
+                       hash128_t type_id);
+static int compose_id_push(hash128_t** ids, size_t* count, size_t* cap, hash128_t id);
+static int push_phys(laplace_compose_result_t* r, hash128_t entity_id, hash128_t source_id,
+                     double coord[4], hilbert128_t* hb,
+                     const hash128_t* child_ids, const uint64_t* child_flags, size_t m);
+
+static int is_json_modality(const char* modality_id) {
+    return modality_id && strcmp(modality_id, "json") == 0;
+}
+
+static int emit_grapheme_floor_entities(
+    laplace_compose_result_t* r, hash128_t source_id,
+    tier_tree_t* tree, const laplace_grapheme_floor_t* floor,
+    hash128_t** emitted_entity, size_t* emitted_entity_n, size_t* emitted_entity_cap) {
+    hash128_t grapheme_type;
+    hash_canonical("substrate/type/Grapheme/v1", &grapheme_type);
+    size_t g_first = laplace_grapheme_floor_graph_first_idx(floor);
+    size_t g_count = laplace_grapheme_floor_graph_count(floor);
+    for (size_t g = 0; g < g_count; ++g) {
+        tier_node_view_t gv;
+        if (tier_tree_get_node(tree, (uint32_t)(g_first + g), &gv) != 0) continue;
+        if (compose_id_push(emitted_entity, emitted_entity_n, emitted_entity_cap, gv.id) != 1)
+            continue;
+        if (push_entity(r, gv.id, 1, grapheme_type) != 0) return -3;
+        uint64_t gf = laplace_vertex_flags(1, 0, 0);
+        hash128_t gid = gv.id;
+        if (push_phys(r, gv.id, source_id, gv.coord, &gv.hilbert, &gid, &gf, 1) != 0)
+            return -3;
+    }
+    return 0;
+}
+
+/* JSON rows are huge structured blobs — building one grapheme floor over the
+ * entire line decomposes every " { } : , byte and balloons entity counts.
+ * Leaf string/number literals get a per-span floor instead (the identity
+ * linchpin applies to word content, not JSON syntax). */
+static int json_leaf_fill_grapheme_children(
+    const uint8_t* utf8, size_t len, laplace_ast_t* ast, size_t idx,
+    laplace_compose_result_t* r, hash128_t source_id,
+    hash128_t** emitted_entity, size_t* emitted_entity_n, size_t* emitted_entity_cap,
+    hash128_t** out_ids, double** out_coords, uint64_t** out_flags, size_t* out_m) {
+    *out_ids = NULL;
+    *out_coords = NULL;
+    *out_flags = NULL;
+    *out_m = 0;
+
+    laplace_ast_node_t node;
+    if (laplace_ast_get_node(ast, idx, &node) != 0) return -1;
+    if (node.end_byte <= node.start_byte || node.end_byte > len) return -1;
+
+    const uint8_t* span = utf8 + node.start_byte;
+    size_t span_len = (size_t)(node.end_byte - node.start_byte);
+    const char* nt = laplace_ast_type_name(ast, node.type_id);
+    if (nt && strcmp(nt, "string_content") == 0) {
+        /* inner content bytes */
+    } else if (nt && strcmp(nt, "string") == 0 && span_len >= 2
+               && span[0] == '"' && span[span_len - 1] == '"') {
+        span += 1;
+        span_len -= 2;
+    } else if (!nt || (strcmp(nt, "number") != 0 && strcmp(nt, "true") != 0
+                       && strcmp(nt, "false") != 0 && strcmp(nt, "null") != 0)) {
+        return -1;
+    }
+    if (span_len == 0) return -1;
+
+    tier_tree_t* local_tree = NULL;
+    laplace_grapheme_floor_t local_floor;
+    memset(&local_floor, 0, sizeof(local_floor));
+    if (laplace_grapheme_floor_build(span, span_len, &local_tree, &local_floor) != 0)
+        return -1;
+    if (codepoint_table_is_loaded()) {
+        if (hash_composer_run(local_tree, codepoint_resolver, NULL) != 0) {
+            laplace_grapheme_floor_free(&local_floor);
+            tier_tree_free(local_tree);
+            return -1;
+        }
+    }
+
+    if (r && emitted_entity) {
+        int erc = emit_grapheme_floor_entities(
+            r, source_id, local_tree, &local_floor,
+            emitted_entity, emitted_entity_n, emitted_entity_cap);
+        if (erc != 0) {
+            laplace_grapheme_floor_free(&local_floor);
+            tier_tree_free(local_tree);
+            return erc;
+        }
+    }
+
+    size_t g_first = laplace_grapheme_floor_graph_first_idx(&local_floor);
+    size_t g_count = laplace_grapheme_floor_graph_count(&local_floor);
+    hash128_t* ids = (hash128_t*)malloc(g_count * sizeof(hash128_t));
+    double* coords = (double*)malloc(g_count * 4 * sizeof(double));
+    uint64_t* flags = (uint64_t*)malloc(g_count * sizeof(uint64_t));
+    if (!ids || !coords || !flags) {
+        free(ids);
+        free(coords);
+        free(flags);
+        laplace_grapheme_floor_free(&local_floor);
+        tier_tree_free(local_tree);
+        return -3;
+    }
+    size_t w = 0;
+    for (size_t g = 0; g < g_count; ++g) {
+        tier_node_view_t gv;
+        if (tier_tree_get_node(local_tree, (uint32_t)(g_first + g), &gv) != 0) continue;
+        ids[w] = gv.id;
+        memcpy(coords + w * 4, gv.coord, 4 * sizeof(double));
+        flags[w] = laplace_vertex_flags(1, 0, 0);
+        w++;
+    }
+    laplace_grapheme_floor_free(&local_floor);
+    tier_tree_free(local_tree);
+    if (w == 0) {
+        free(ids);
+        free(coords);
+        free(flags);
+        return -1;
+    }
+    *out_ids = ids;
+    *out_coords = coords;
+    *out_flags = flags;
+    *out_m = w;
+    return 0;
+}
+
 static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
                              const char* modality_id,
                              const laplace_grapheme_floor_t* floor, tier_tree_t* tree,
+                             laplace_compose_result_t* r, hash128_t source_id,
+                             hash128_t** emitted_entity, size_t* emitted_entity_n,
+                             size_t* emitted_entity_cap,
                              compose_state_t* st) {
-    (void)utf8;
-    (void)len;
-    (void)modality_id;
+    (void)tree;
     size_t n = laplace_ast_node_count(ast);
     st->n = n;
     if (n == 0) return 0;
@@ -135,6 +263,13 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
             }
             m = w;
             tier = (uint8_t)((max_tier + 1) < 255 ? (max_tier + 1) : 255);
+        } else if (is_json_modality(modality_id)) {
+            if (json_leaf_fill_grapheme_children(
+                    utf8, len, ast, idx, r, source_id,
+                    emitted_entity, emitted_entity_n, emitted_entity_cap,
+                    &child_ids, &child_coords, &child_flags, &m) != 0)
+                continue;
+            tier = 2;
         } else {
             size_t g_start = 0, g_end = 0;
             if (laplace_grapheme_floor_span_to_graphemes(
@@ -271,37 +406,47 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
 
     tier_tree_t* tree = NULL;
     laplace_grapheme_floor_t floor;
-    rc = laplace_grapheme_floor_build(utf8, len, &tree, &floor);
-    if (rc != 0) { free(r); return rc; }
+    memset(&floor, 0, sizeof(floor));
+    const int json_mod = is_json_modality(modality_id);
+    size_t g_first = 0;
 
-    if (codepoint_table_is_loaded()) {
-        rc = hash_composer_run(tree, codepoint_resolver, NULL);
-        if (rc != 0) {
-            laplace_grapheme_floor_free(&floor);
-            tier_tree_free(tree);
-            free(r);
-            return rc;
+    if (!json_mod) {
+        rc = laplace_grapheme_floor_build(utf8, len, &tree, &floor);
+        if (rc != 0) { free(r); return rc; }
+
+        if (codepoint_table_is_loaded()) {
+            rc = hash_composer_run(tree, codepoint_resolver, NULL);
+            if (rc != 0) {
+                laplace_grapheme_floor_free(&floor);
+                tier_tree_free(tree);
+                free(r);
+                return rc;
+            }
+        }
+
+        hash128_t grapheme_type;
+        hash_canonical("substrate/type/Grapheme/v1", &grapheme_type);
+
+        size_t g_first = laplace_grapheme_floor_graph_first_idx(&floor);
+        size_t g_count = laplace_grapheme_floor_graph_count(&floor);
+        for (size_t g = 0; g < g_count; ++g) {
+            tier_node_view_t gv;
+            if (tier_tree_get_node(tree, (uint32_t)(g_first + g), &gv) != 0) continue;
+            if (push_entity(r, gv.id, 1, grapheme_type) != 0) { rc = -3; goto fail; }
+            {
+                uint64_t gf = laplace_vertex_flags(1, 0, 0);
+                hash128_t gid = gv.id;
+                if (push_phys(r, gv.id, source_id, gv.coord, &gv.hilbert,
+                              &gid, &gf, 1) != 0) { rc = -3; goto fail; }
+            }
         }
     }
 
-    hash128_t grapheme_type;
-    hash_canonical("substrate/type/Grapheme/v1", &grapheme_type);
+    if (!json_mod)
+        g_first = laplace_grapheme_floor_graph_first_idx(&floor);
 
-    size_t g_first = laplace_grapheme_floor_graph_first_idx(&floor);
-    size_t g_count = laplace_grapheme_floor_graph_count(&floor);
-    for (size_t g = 0; g < g_count; ++g) {
-        tier_node_view_t gv;
-        if (tier_tree_get_node(tree, (uint32_t)(g_first + g), &gv) != 0) continue;
-        if (push_entity(r, gv.id, 1, grapheme_type) != 0) { rc = -3; goto fail; }
-        {
-            uint64_t gf = laplace_vertex_flags(1, 0, 0);
-            hash128_t gid = gv.id;
-            if (push_phys(r, gv.id, source_id, gv.coord, &gv.hilbert,
-                          &gid, &gf, 1) != 0) { rc = -3; goto fail; }
-        }
-    }
-
-    rc = compose_ast_nodes(utf8, len, ast, modality_id, &floor, tree, &st);
+    rc = compose_ast_nodes(utf8, len, ast, modality_id, &floor, tree, r, source_id,
+                           &emitted_entity, &emitted_entity_n, &emitted_entity_cap, &st);
     if (rc != 0) goto fail_st;
 
     n = st.n;
@@ -351,6 +496,18 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
             } else {
                 free(child_ids); free(child_flags);
                 child_ids = NULL;
+            }
+        } else if (json_mod) {
+            double* jcoords = NULL;
+            if (json_leaf_fill_grapheme_children(
+                    utf8, len, ast, idx, NULL, source_id,
+                    NULL, NULL, NULL,
+                    &child_ids, &jcoords, &child_flags, &m) == 0) {
+                free(jcoords);
+            } else {
+                child_ids = NULL;
+                child_flags = NULL;
+                m = 0;
             }
         } else {
             size_t g_start = 0, g_end = 0;
@@ -470,7 +627,10 @@ int laplace_grammar_compose_node_id(const uint8_t* utf8, size_t len, laplace_ast
         hash_composer_run(tree, codepoint_resolver, NULL);
 
     compose_state_t st = {0};
-    rc = compose_ast_nodes(utf8, len, ast, "text", &floor, tree, &st);
+    hash128_t no_source;
+    hash128_zero(&no_source);
+    rc = compose_ast_nodes(utf8, len, ast, "text", &floor, tree, NULL, no_source,
+                           NULL, NULL, NULL, &st);
     if (rc == 0 && st.comp_valid[ast_node_index]) {
         *out_id = st.comp_id[ast_node_index];
         if (out_tier) *out_tier = st.comp_tier[ast_node_index];
