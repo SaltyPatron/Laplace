@@ -24,6 +24,14 @@ CREATE OR REPLACE FUNCTION label(p_id bytea)
     SET search_path = @extschema@, public AS $$
     SELECT COALESCE(
         NULLIF(NULLIF(render(p_id), ''), encode(p_id, 'hex') || '…'),
+        -- abstract entities (e.g. Language) carry their human-readable name as HAS_DEFINITION
+        -- (ISO-639 stores it there); resolve it before the Type:hash fallback.
+        (SELECT render_text(c.object_id)
+         FROM consensus c
+         WHERE c.subject_id = p_id
+           AND c.type_id = relation_type_id('HAS_DEFINITION')
+         ORDER BY eff_mu(c.rating, c.rd) DESC
+         LIMIT 1),
         (SELECT regexp_replace(t.name, '^substrate/type/(.*)/v1$', '\1')
                 || ':' || left(encode(p_id, 'hex'), 8)
          FROM entities e

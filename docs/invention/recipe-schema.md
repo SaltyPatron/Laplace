@@ -61,6 +61,33 @@ Each head/embed/lm_head/ffn is one operator. Operators map to the fixed ETL (see
 - **Each head fills its own rows** `[h·head_dim, (h+1)·head_dim)` from *its* operator — never top-k of one operator tiled across heads.
 - Recommended schedule (neighborhood → structure → continuation): early layers = equivalence/associative (+ angular); middle = taxonomic/partitive (+ frechet); last = causal/sequential + `trajectory` ffn.
 
+## Knobs vs derived vs fixed (for UI + descriptor refactor)
+
+Three buckets — the boundary is *the user designs the vessel and chooses what fills it; the substrate
+determines every weight value; the math turning knowledge into weights is fixed.*
+
+**1. KNOBS (user chooses — no single correct value):**
+- Topology: `hidden_size`\*, `num_layers`, `num_heads`/layer, `kv_heads`, `intermediate_size`\*
+- Structure: `dense`/`moe`, `num_experts`, `experts_per_token` (routing), LoRA rank
+- Operator array: which operator each head is (the build-a-bear multi-select); per-layer schedule\*
+- Content: `vocab.source` (+ crawl `seeds`/`hops`/`fanout`/`size`) — what knowledge goes in
+- Flags/output: `rope`(+theta), `tie_embeddings`, `norm`, `embed` op, `lm_head` op, format, dtype
+  (\* = has a substrate-derived default; overridable.)
+
+**2. DERIVED (computed from substrate + knobs; never set):**
+- Every weight value (embed, q/k/v/o, gate/up/down, lm_head, norms) — they ARE the rated
+  attestations, calculated. Nothing in the weights is chosen → this is why provenance is auditable.
+- `head_dim` = hidden/heads; each operator's rank K; `hidden_size` when `"auto"` (= spectral rank);
+  `intermediate_size` default; token S³ coords; consensus μ/RD; recipe id; weight→source provenance.
+
+**3. FIXED (the laws — not configurable):**
+- The ETL operator→tensor map; S³/glome geometry; DUCET→Super-Fibonacci seeding; content-addressing;
+  the relation-rank hierarchy (mandate 1.0 … probationary 0.09); Glicko-2 mechanics; operator signatures.
+
+UI states: a knob-with-derived-default shows the substrate's natural value and flags overrides as
+"deviates from substrate-natural." Constraints link knobs (`head_dim` integer, `experts_per_token ≤
+num_experts`, `kv_heads` divides `heads`) → validate/grey-out, not free fields.
+
 ## Validation by ablation (per-operator signatures)
 
 A single-operator model has a predictable output signature; that signature is the correctness gate:
