@@ -183,6 +183,7 @@ internal static class FoundryCommands
         
         
         var sel = new List<(string surface, long weight)>(vocabN);
+        var atoms = new List<(string surface, long weight)>();   // grapheme/alphabet floor (BPE base)
         string[]? seeds = crawlSeeds
             ?.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         string[] crawlS = [];
@@ -236,6 +237,18 @@ internal static class FoundryCommands
                 while (await rdr.ReadAsync())
                     sel.Add((rdr.GetString(0), rdr.GetInt64(1)));
             }
+
+            // Grapheme/alphabet atom floor (single codepoints/graphemes) from the substrate, laid
+            // below words so every character is covered without byte-bashing (BPE base before n-grams).
+            if (!grapheme)
+            {
+                await using var ac = conn.CreateCommand();
+                ac.CommandTimeout = 0;
+                ac.CommandText = "SELECT surface, weight FROM laplace.grapheme_floor_vocab($1)";
+                ac.Parameters.AddWithValue(FoundryExport.EnvInt("LAPLACE_FOUNDRY_ATOM_FLOOR", 768));
+                await using var ar = await ac.ExecuteReaderAsync();
+                while (await ar.ReadAsync()) atoms.Add((ar.GetString(0), ar.GetInt64(1)));
+            }
             
             
             
@@ -254,19 +267,22 @@ internal static class FoundryCommands
         
         
         
-        var pieces = new List<(string piece, float score, int type)>(3 + 256 + sel.Count);
-        pieces.Add(("<unk>", 0f, 2));
-        pieces.Add(("<s>",   0f, 3));
-        pieces.Add(("</s>",  0f, 3));
-        for (int b = 0; b < 256; b++) pieces.Add(($"<0x{b:X2}>", -20f, 6));
+        var pieces = new List<(string piece, float score, int type)>(3 + 256 + atoms.Count + sel.Count * 2);
+        var seenPiece = new HashSet<string>(StringComparer.Ordinal);
+        bool AddPiece(string p, float score, int type)
+        { if (!seenPiece.Add(p)) return false; pieces.Add((p, score, type)); return true; }
+        AddPiece("<unk>", 0f, 2);
+        AddPiece("<s>",   0f, 3);
+        AddPiece("</s>",  0f, 3);
+        for (int b = 0; b < 256; b++) AddPiece($"<0x{b:X2}>", -20f, 6);
         if (grapheme)
         {
             
             
             
-            pieces.Add(("▁", 1f, 1));
+            AddPiece("▁", 1f, 1);
             foreach (var (surface, weight) in sel)
-                pieces.Add((surface, (float)(Math.Log(weight + 1.0) + 1.0), 1));
+                AddPiece(surface, (float)(Math.Log(weight + 1.0) + 1.0), 1);
         }
         else
         {
@@ -278,14 +294,20 @@ internal static class FoundryCommands
             
             
             
+            // atoms first (low ids, fallback scores), then words on top — BPE base before n-grams,
+            // so any character is covered. The atom set is also the perfcache/deploy package (ASCII min).
+            int atomCount = 0;
+            foreach (var (surface, _) in atoms)
+                if (AddPiece(surface, -2.0f, 1)) atomCount++;
             int aliases = 0;
             foreach (var (surface, weight) in sel)
             {
                 float sc = (float)(Math.Log(weight + 1.0) + 1.0);
-                pieces.Add(("▁" + surface, sc, 1));
-                if (!(surface.Length == 1 && surface[0] < 128)) { pieces.Add((surface, sc, 1)); aliases++; }
+                AddPiece("▁" + surface, sc, 1);
+                if (!(surface.Length == 1 && surface[0] < 128) && AddPiece(surface, sc, 1)) aliases++;
             }
-            Console.WriteLine($"  dual-form: +{aliases:N0} bare-word aliases (sentence-initial match; input-only)");
+            Console.WriteLine($"  BPE floor: 3 special + 256 byte + {atomCount:N0} grapheme atoms; "
+                + $"+{sel.Count:N0} words, +{aliases:N0} bare aliases = {pieces.Count:N0} pieces");
         }
         int vocabSize = pieces.Count;
         Console.WriteLine($"  native vocab: {sel.Count:N0} substrate word entities + 256 byte floor + 3 specials = {vocabSize:N0}");
@@ -379,6 +401,19 @@ internal static class FoundryCommands
             return Fail(
                 "usage: laplace synthesize substrate <recipe.json> [output.gguf]\n"
                 + $"  (recipe not found: {recipePath})");
+
+        // Build-a-bear recipe? Route to the descriptor-driven, per-head synthesis path
+        // (each head = its own operator). Otherwise fall through to the HF/Llama foundry path.
+        string recipeText = await File.ReadAllTextAsync(recipePath);
+        if (recipeText.Contains("\"laplace.recipe\"", StringComparison.Ordinal))
+        {
+            var babDesc = RecipeDescriptor.Parse(recipeText);
+            string babDir = Path.GetDirectoryName(recipePath) ?? ".";
+            string babTok = Path.Combine(babDir, "tokenizer.json");
+            if (!File.Exists(babTok))
+                return Fail($"tokenizer.json not found alongside recipe: {babTok}");
+            return await SynthesizeBuildABearAsync(babDesc, babDir, babTok, outputPath);
+        }
 
         Console.WriteLine($"synthesize substrate (foundry) → {outputPath}");
         CodepointPerfcache.Load(ResolveBlob());
@@ -883,6 +918,277 @@ internal static class FoundryCommands
         SynthInterop.ArchTemplateFree(tmplHandle);
         SynthInterop.RecipeFree(recipeHandle);
         return status == 0 ? 0 : Fail($"foundry write failed (status {status})");
+    }
+
+    // Build-a-bear synthesis: the recipe's per-head operator array drives the model. Each head is a
+    // DISTINCT operator (relation type / metric / trajectory) filling its OWN rows — not the 4-band
+    // mash tiled across heads. C#-first per-head proof; the fill relocates to native arch_template.cpp
+    // once ablation validates the design. Spine constraints: dense, MHA, uniform heads/layer.
+    private static async Task<int> SynthesizeBuildABearAsync(
+        RecipeDescriptor desc, string modelDir, string tokenizerPath, string outputPath)
+    {
+        Console.WriteLine($"synthesize build-a-bear: {desc.Name} ({desc.Structure}) → {outputPath}");
+        CodepointPerfcache.Load(ResolveBlob());
+
+        if (desc.HiddenSizeAuto)
+            return Fail("hidden_size 'auto' (spectral rank) not yet wired for build-a-bear — set an integer for the spine");
+        if (desc.Structure != "dense")
+            return Fail($"build-a-bear spine supports 'dense' (got '{desc.Structure}'); MoE is Milestone B");
+
+        int dModel = desc.HiddenSizeOr(0);
+        int nLayers = desc.NumLayers;
+        int intermR = desc.IntermediateSize;
+        int nHeads = desc.Layers[0].Heads.Count;
+        int nKv = desc.Layers[0].KvHeads;
+        foreach (var L in desc.Layers)
+            if (L.Heads.Count != nHeads || L.KvHeads != nKv)
+                return Fail("build-a-bear spine requires uniform heads/kv per layer (variable-per-layer is Milestone B)");
+        if (dModel <= 0 || dModel % nHeads != 0)
+            return Fail($"hidden_size {dModel} must be a positive multiple of heads/layer {nHeads}");
+        if (nKv != nHeads)
+            return Fail($"build-a-bear spine requires MHA (kv_heads {nKv} == heads {nHeads}); GQA is Milestone B");
+        int headDim = dModel / nHeads;
+
+        var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
+        int vocab = 0;
+        foreach (var t in tokens) if (t.TokenId + 1 > vocab) vocab = t.TokenId + 1;
+        if (vocab == 0) return Fail("tokenizer produced no tokens");
+
+        var tokenSlots = new Dictionary<Hash128, List<int>>(tokens.Count);
+        foreach (var t in tokens)
+        {
+            if (t.TokenId < 0 || t.TokenId >= vocab) continue;
+            if (!tokenSlots.TryGetValue(t.EntityId, out var slots)) tokenSlots[t.EntityId] = slots = new List<int>(1);
+            slots.Add(t.TokenId);
+        }
+
+        // HF-config bridge → reuse the dense tensor layout + GGUF metadata (generalize the template in B).
+        byte[] configJson = BuildHfConfigJson(dModel, nLayers, nHeads, nKv, intermR, vocab);
+        string bridgePath = Path.Combine(Path.GetTempPath(),
+            $"laplace-bab-{Convert.ToHexString(desc.RecipeId.ToBytes())[..12]}-config.json");
+        await File.WriteAllBytesAsync(bridgePath, configJson);
+        var recipe = LlamaRecipeExtractor.Parse(bridgePath);
+
+        IntPtr recipeHandle, tmplHandle;
+        var specs = new TensorSpec[300];
+        int tensorCount;
+        unsafe
+        {
+            fixed (byte* jp = configJson) recipeHandle = SynthInterop.RecipeParse(jp, (nuint)configJson.Length);
+            if (recipeHandle == IntPtr.Zero) return Fail("recipe_parse(bridge) returned null");
+            tmplHandle = SynthInterop.ArchTemplateLoad("llama");   // dense transformer layout
+            if (tmplHandle == IntPtr.Zero) return Fail("arch_template_load returned null");
+            fixed (TensorSpec* sp = specs)
+                tensorCount = SynthInterop.ArchTemplateRequiredTensors(tmplHandle, recipeHandle, sp, (nuint)specs.Length);
+        }
+        if (tensorCount <= 0) return Fail($"required_tensors returned {tensorCount}");
+        Console.WriteLine($"  dims: vocab={vocab} hidden={dModel} layers={nLayers} heads={nHeads} headDim={headDim} ffn={intermR} | {tensorCount} tensors");
+
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        int degreeCap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_LE_DEGREE", 48);
+
+        // distinct operators the recipe references
+        var opKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var L in desc.Layers) { foreach (var h in L.Heads) opKeys.Add(h.Key); opKeys.Add(L.Ffn.Key); }
+        opKeys.Add(desc.LmHead.Key);
+
+        // one read returns every relation-type plane present over the vocab
+        var swRead = Stopwatch.StartNew();
+        var typePlanes = await FoundryExport.ReadTypePlanesAsync(ds, tokenSlots, degreeCap);
+        var planeByType = new Dictionary<Hash128, FoundryExport.PlaneCoo>();
+        foreach (var tp in typePlanes) planeByType[tp.TypeId] = FoundryExport.Normalize(tp.Plane);
+
+        var planeByOp = new Dictionary<string, FoundryExport.PlaneCoo>(StringComparer.Ordinal);
+        var trajPlane = FoundryExport.PlaneCoo.Empty;
+        foreach (var opKey in opKeys)
+        {
+            FoundryExport.PlaneCoo plane;
+            if (opKey.StartsWith("relation:", StringComparison.Ordinal))
+            {
+                var tid = RelationTypeRegistry.RelationTypeId(opKey["relation:".Length..]);
+                plane = planeByType.TryGetValue(tid, out var p) ? p : FoundryExport.PlaneCoo.Empty;
+            }
+            else if (opKey.StartsWith("metric:", StringComparison.Ordinal))
+                plane = FoundryExport.Normalize(await FoundryExport.ReadMetricEdgesAsync(
+                    ds, tokenSlots, opKey["metric:".Length..], 16, 64, degreeCap));
+            else if (opKey == "trajectory")
+            {
+                int gap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_TRAJ_GAP", Math.Max(2, Math.Min(nLayers, 8)));
+                trajPlane = FoundryExport.Normalize(await FoundryExport.ReadTrajectoryStrideAsync(ds, gap, tokenSlots, degreeCap));
+                plane = trajPlane;
+            }
+            else if (opKey == "unary")
+                plane = FoundryExport.Normalize(await FoundryExport.ReadAdjacencyAsync(ds, tokenSlots, degreeCap));
+            else
+                plane = FoundryExport.PlaneCoo.Empty;   // coord/spectral live in the embed basis
+            planeByOp[opKey] = plane;
+            Console.WriteLine($"  operator {opKey}: {plane.Nnz:N0} edges");
+        }
+        Console.WriteLine($"  operator planes read in {swRead.Elapsed.TotalSeconds:F1}s");
+
+        // anchors + embed basis (union of all operator planes → spectral frame)
+        var anchors = new double[vocab][];
+        foreach (var t in tokens)
+        {
+            if (t.TokenId < 0 || t.TokenId >= vocab || !t.HasContentCoord) continue;
+            anchors[t.TokenId] = [t.ContentX, t.ContentY, t.ContentZ, t.ContentM];
+        }
+        var unionGraph = FoundryExport.Union(planeByOp.Values.ToArray());
+        if (unionGraph.Nnz == 0) return Fail("no consensus over this vocab for any recipe operator — ingest content first");
+        double[] E = FoundryExport.BuildBasis(vocab, dModel, unionGraph, anchors, desc.RecipeId, out var basisStats);
+        MirrorDualFormEmbeds(tokens, E, vocab, dModel);
+        Console.WriteLine($"  embed basis: spectral K={basisStats.SpectralRank}, {basisStats.ZeroSpectralTokens:N0} off-graph");
+
+        // factor each operator: attn/ov per-head (rank headDim), ffn (rank interm)
+        double relTol = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_REL_ERR_TOL", 0.0);
+        int kFfn = Math.Min(intermR, dModel);
+        var emptyF = new FoundryExport.Factors(Array.Empty<float>(), Array.Empty<float>(), 0, dModel, 0, 1);
+        var fAttn = new Dictionary<string, FoundryExport.Factors>(StringComparer.Ordinal);
+        var fOv = new Dictionary<string, FoundryExport.Factors>(StringComparer.Ordinal);
+        var fFfn = new Dictionary<string, FoundryExport.Factors>(StringComparer.Ordinal);
+        foreach (var (opKey, plane) in planeByOp)
+        {
+            if (plane.Nnz == 0) { fAttn[opKey] = emptyF; fOv[opKey] = emptyF; fFfn[opKey] = emptyF; continue; }
+            var m = FoundryExport.ProjectOperator(E, vocab, dModel, plane);
+            var mResid = (double[])m.Clone();
+            for (int d = 0; d < dModel; d++) mResid[(long)d * dModel + d] -= 1.0;
+            fAttn[opKey] = FoundryExport.Factor(m,      dModel, headDim, relTol, transpose: false);
+            fOv[opKey]   = FoundryExport.Factor(mResid, dModel, headDim, relTol, transpose: true);
+            fFfn[opKey]  = FoundryExport.Factor(mResid, dModel, kFfn,    relTol, transpose: true);
+        }
+
+        // lm_head ← the recipe's lm_head operator (trajectory continuation log-odds)
+        var lmHead = new double[(long)vocab * dModel];
+        {
+            var pl = desc.LmHead.Key == "trajectory" ? trajPlane
+                   : planeByOp.TryGetValue(desc.LmHead.Key, out var lp) ? lp : FoundryExport.PlaneCoo.Empty;
+            int dC = dModel - 1;
+            var inDeg = new double[vocab];
+            for (long e2 = 0; e2 < pl.Nnz; e2++)
+            {
+                int x = pl.Rows[e2], y = pl.Cols[e2];
+                if (x < 0 || x >= vocab || y < 0 || y >= vocab) continue;
+                double w = pl.Vals[e2];
+                long yo = (long)y * dModel, xo = (long)x * dModel;
+                for (int c = 0; c < dC; c++) lmHead[yo + c] += w * E[xo + c];
+                inDeg[y] += Math.Abs(w);
+            }
+            for (int v = 0; v < vocab; v++)
+            {
+                long off = (long)v * dModel;
+                double idf = 1.0 / (inDeg[v] + 1.0);
+                for (int c = 0; c < dC; c++) lmHead[off + c] *= idf;
+                lmHead[off + dC] = 0.0;
+            }
+            double meanSq = 0;
+            for (int v = 0; v < vocab; v++) { long off = (long)v * dModel; for (int c = 0; c < dC; c++) { double t = lmHead[off + c]; meanSq += t * t; } }
+            meanSq /= Math.Max(1, vocab);
+            double g = meanSq > 1e-24 ? 1.0 / Math.Sqrt(meanSq) : 1.0;
+            for (long i = 0; i < (long)vocab * dModel; i++) lmHead[i] *= g;
+        }
+
+        // write GGUF — per-head fill: head h in layer L ← operator desc.Layers[L].Heads[h]
+        double split = Math.Pow(Math.Max(1, nLayers), -0.25);
+        double attnScale = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_ATTN_GAIN", 1.0) * split;
+        double layerScale = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RESID_GAIN", 1.0) * split;
+        double gateZ = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_GATE_Z", 6.0);
+        double gateCol = gateZ / Math.Sqrt(dModel / 2.0);
+        double upGain = 1.0 / FoundryExport.Silu(gateZ);
+
+        var gguf = SynthInterop.GgufWriterCreate(outputPath);
+        if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
+        WriteGgufMetadata(gguf, recipe, tokens, modelDir, byteBpe: true);
+        var sw = Stopwatch.StartNew();
+        for (int i = 0; i < tensorCount; i++)
+        {
+            string name; ulong rows, cols;
+            unsafe
+            {
+                var sp = specs[i];
+                name = Marshal.PtrToStringUTF8((IntPtr)sp.Name) ?? "";
+                rows = sp.Rank >= 1 ? sp.Shape[0] : 1;
+                cols = sp.Rank >= 2 ? sp.Shape[1] : 1;
+            }
+            long nElem = (long)rows * (long)Math.Max(1UL, cols);
+            var vals = new float[nElem];
+            int tr = (int)rows, tc = (int)Math.Max(1UL, cols);
+
+            if (name is "model.embed_tokens.weight" or "lm_head.weight")
+            {
+                var srcE = name == "lm_head.weight" ? lmHead : E;
+                for (int r = 0; r < tr; r++)
+                    for (int c = 0; c < tc; c++)
+                        vals[(long)r * tc + c] = (float)srcE[(long)r * dModel + c];
+            }
+            else if (name == "model.norm.weight"
+                     || name.EndsWith("input_layernorm.weight", StringComparison.Ordinal)
+                     || name.EndsWith("post_attention_layernorm.weight", StringComparison.Ordinal))
+                Array.Fill(vals, 1.0f);
+            else if (name.StartsWith("model.layers.", StringComparison.Ordinal))
+            {
+                int layerDot = name.IndexOf('.', "model.layers.".Length);
+                int layerIdx = int.Parse(name["model.layers.".Length..layerDot]);
+                string rest = name[(layerDot + 1)..];
+                var layer = desc.Layers[layerIdx];
+                switch (rest)
+                {
+                    case "self_attn.q_proj.weight":
+                        for (int h = 0; h < nHeads; h++)
+                            FoundryExport.FillHead(vals, tr, tc, h, headDim, fAttn[layer.Heads[h].Key], attnScale);
+                        break;
+                    case "self_attn.k_proj.weight":
+                        for (int h = 0; h < nKv; h++)
+                            FoundryExport.FillHeadRight(vals, tr, tc, h, headDim, fAttn[layer.Heads[h].Key], attnScale);
+                        break;
+                    case "self_attn.v_proj.weight":
+                        for (int h = 0; h < nKv; h++)
+                            FoundryExport.FillHeadRight(vals, tr, tc, h, headDim, fOv[layer.Heads[h].Key], layerScale);
+                        break;
+                    case "self_attn.o_proj.weight":
+                        for (int h = 0; h < nHeads; h++)
+                            FoundryExport.FillColsHead(vals, tr, tc, h, headDim, fOv[layer.Heads[h].Key], layerScale);
+                        break;
+                    case "mlp.gate_proj.weight": FoundryExport.FillGate(vals, tr, tc, gateCol); break;
+                    case "mlp.up_proj.weight":   FoundryExport.FillRowsRight(vals, tr, tc, fFfn[layer.Ffn.Key], layerScale * upGain); break;
+                    case "mlp.down_proj.weight": FoundryExport.FillCols(vals, tr, tc, fFfn[layer.Ffn.Key], layerScale); break;
+                    default: SynthInterop.GgufWriterFree(gguf); return Fail($"build-a-bear: undefined tensor '{name}'");
+                }
+            }
+            else { SynthInterop.GgufWriterFree(gguf); return Fail($"build-a-bear: undefined tensor '{name}'"); }
+
+            byte[] tensorBytes = FoundryExport.ToF32Bytes(vals);
+            nuint[] ggufDims = cols > 1 ? [(nuint)cols, (nuint)rows] : [(nuint)rows];
+            unsafe
+            {
+                fixed (nuint* dimsPtr = ggufDims)
+                fixed (byte* dataPtr = tensorBytes)
+                    SynthInterop.GgufWriterAddTensor(gguf, HfToGgmlName(name), 0, dimsPtr, (nuint)ggufDims.Length, dataPtr);
+            }
+        }
+        int rcw = SynthInterop.GgufWriterFinalize(gguf);
+        SynthInterop.GgufWriterFree(gguf);
+        SynthInterop.ArchTemplateFree(tmplHandle);
+        SynthInterop.RecipeFree(recipeHandle);
+        if (rcw != 0) return Fail($"gguf_writer_finalize failed (rc={rcw}) for {outputPath}");
+        long fsz = new FileInfo(outputPath).Length;
+        Console.WriteLine($"build-a-bear complete: {outputPath} | {desc.Name} L={nLayers} H={nHeads} D={dModel} V={vocab} "
+            + $"({fsz / 1048576.0:F0} MB) in {sw.Elapsed.TotalSeconds:F1}s — {opKeys.Count} distinct operators, per-head (no tiling)");
+        return 0;
+    }
+
+    // Minimal HF config (dense Llama tensor layout) synthesized from the build-a-bear dims, so the
+    // native arch template + GGUF metadata can be reused. The operator-per-head logic comes from the
+    // descriptor, not this config — this only carries shapes.
+    private static byte[] BuildHfConfigJson(int hidden, int layers, int heads, int kv, int interm, int vocab)
+    {
+        string cfg = "{"
+            + "\"architectures\":[\"LlamaForCausalLM\"],\"model_type\":\"llama\","
+            + $"\"hidden_size\":{hidden},\"num_hidden_layers\":{layers},"
+            + $"\"num_attention_heads\":{heads},\"num_key_value_heads\":{kv},"
+            + $"\"intermediate_size\":{interm},\"vocab_size\":{vocab},"
+            + "\"hidden_act\":\"silu\",\"rms_norm_eps\":1e-05,\"rope_theta\":10000.0,\"torch_dtype\":\"float32\""
+            + "}";
+        return System.Text.Encoding.UTF8.GetBytes(cfg);
     }
 
     

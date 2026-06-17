@@ -1356,6 +1356,18 @@ internal static class FoundryExport
         }
     }
 
+    // Per-head column fill for o_proj [dModel, nHeads*headDim]: head h's output occupies columns
+    // [h*headDim, (h+1)*headDim) and is projected back by ITS OWN operator (the OV factor).
+    internal static void FillColsHead(float[] vals, int rows, int cols, int headIdx, int headDim, Factors f, double scale)
+    {
+        int baseCol = headIdx * headDim;
+        if (baseCol >= cols) return;
+        int k = Math.Min(f.Rank, headDim);
+        for (int r = 0; r < k && (baseCol + r) < cols; r++)
+            for (int i = 0; i < rows && i < f.Dim; i++)
+                vals[(long)i * cols + (baseCol + r)] = (float)(scale * f.Left[(long)r * f.Dim + i]);
+    }
+
     internal static void FillGate(float[] vals, int rows, int cols, double gateCol)
     {
         for (int r = 0; r < rows; r++)

@@ -42,6 +42,7 @@ public sealed record RecipeDescriptor(
     string Name,
     string Structure,
     string HiddenSize,            // "auto" or an int as string
+    int IntermediateSize,
     int NumLayers,
     bool Rope,
     bool TieEmbeddings,
@@ -69,6 +70,9 @@ public sealed record RecipeDescriptor(
         string hidden    = root.TryGetProperty("hidden_size", out var hs)
             ? (hs.ValueKind == JsonValueKind.Number ? hs.GetInt32().ToString() : hs.GetString() ?? "auto")
             : "auto";
+        int hiddenInt = int.TryParse(hidden, out var hv) ? hv : 0;
+        int intermediate = Int(root, "intermediate_size",
+            hiddenInt > 0 ? RoundTo64(hiddenInt * 8 / 3) : 1024);   // SwiGLU ~2.67x, rounded to 64
         bool rope = root.TryGetProperty("rope", out var rp) && rp.ValueKind == JsonValueKind.True;
         bool tie  = root.TryGetProperty("tie_embeddings", out var te) && te.ValueKind == JsonValueKind.True;
         string norm = Str(root, "norm", "rmsnorm");
@@ -99,9 +103,11 @@ public sealed record RecipeDescriptor(
         byte[] canonical = Encoding.UTF8.GetBytes(recipeJson);
 
         return new RecipeDescriptor(
-            Hash128.Blake3(canonical), name, structure, hidden, layers.Count,
+            Hash128.Blake3(canonical), name, structure, hidden, intermediate, layers.Count,
             rope, tie, norm, embed, lmHead, layers, vocab, canonical);
     }
+
+    private static int RoundTo64(int x) => Math.Max(64, ((x + 63) / 64) * 64);
 
     private static VocabSpec ParseVocab(JsonElement root)
     {

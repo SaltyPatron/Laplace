@@ -46,7 +46,8 @@ internal static class IngestCommands
         LanguageFilter? LangOverride,
         bool? EmitCrossLanguageLinks,
         bool SkipEvidence,
-        bool RegisterOnly);
+        bool RegisterOnly,
+        bool Force = false);
 
     private static IngestCliArgs ParseIngestCliArgs(string[] args)
     {
@@ -55,6 +56,7 @@ internal static class IngestCommands
         bool? emitCross = null;
         bool skipEvidence = false;
         bool registerOnly = false;
+        bool force = false;
         for (int i = 0; i < rest.Count;)
         {
             if (rest[i] == "--langs" && i + 1 < rest.Count)
@@ -78,6 +80,11 @@ internal static class IngestCommands
                 registerOnly = true;
                 rest.RemoveAt(i);
             }
+            else if (rest[i] == "--force")
+            {
+                force = true;
+                rest.RemoveAt(i);
+            }
             else i++;
         }
         return new(
@@ -86,7 +93,8 @@ internal static class IngestCommands
             langs,
             emitCross,
             skipEvidence,
-            registerOnly);
+            registerOnly,
+            force);
     }
 
     private static bool ResolvePersistEvidence(IngestCliArgs? cli)
@@ -113,8 +121,8 @@ internal static class IngestCommands
             "unicode"  => await IngestUnicodeViaRunnerAsync(cli),
             "iso639"   => await IngestISO639Async(cli),
             "wordnet"  => await IngestViaRunnerAsync(new WordNetDecomposer(), "/vault/Data/Wordnet", skipLayerCheck: false, cli),
-            "omw"      => await IngestViaRunnerAsync(new OMWDecomposer(), "/vault/Data/omw", skipLayerCheck: false, cli),
-            "ud"       => await IngestViaRunnerAsync(new UDDecomposer(), "/vault/Data/UD-Treebanks", skipLayerCheck: false, cli),
+            "omw"      => await IngestViaRunnerAsync(new OMWDecomposer(), ResolveIngestPath(cli.Path, "/vault/Data/omw"), skipLayerCheck: false, cli),
+            "ud"       => await IngestViaRunnerAsync(new UDDecomposer(), ResolveIngestPath(cli.Path, "/vault/Data/UD-Treebanks"), skipLayerCheck: false, cli),
             "tatoeba"  => await IngestViaRunnerAsync(new TatoebaDecomposer(), "/vault/Data/Tatoeba", skipLayerCheck: false, cli),
             "atomic2020" => await IngestViaRunnerAsync(new Atomic2020Decomposer(), "/vault/Data/Atomic2020", skipLayerCheck: false, cli),
             "conceptnet" => await IngestViaRunnerAsync(new ConceptNetDecomposer(), "/vault/Data/ConceptNet", skipLayerCheck: false, cli),
@@ -449,7 +457,8 @@ internal static class IngestCommands
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(
             dec,
-            BuildIngestOptions(sw, dec.SourceName, skipLayerCheck, ecosystemPath, cli, skipSourceCompletion),
+            BuildIngestOptions(sw, dec.SourceName, skipLayerCheck, ecosystemPath, cli,
+                skipSourceCompletion || (cli?.Force ?? false)),
             CancellationToken.None);
         sw.Stop();
 

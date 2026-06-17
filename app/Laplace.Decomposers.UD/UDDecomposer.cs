@@ -341,10 +341,9 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
         var langs = EffectiveLanguages(options);
         if (langs is { IsActive: true })
             return all.Where(p => langs.MatchesUdTreebankFile(Path.GetFileName(p))).ToList();
-        if (all.Count > 50)
-            throw new InvalidOperationException(
-                $"UD ingest found {all.Count} treebank files with no language filter active. "
-                + "Set LAPLACE_INGEST_LANGS=en (or LAPLACE_UD_LANGS) or pass --langs en to scope to en_* dialects.");
+        // No filter = ingest every treebank (all languages). Treebanks are just data; full
+        // multilingual ingest is the intended omniglottal path, not an accident to guard against.
+        Console.Error.WriteLine($"UD: no language filter — ingesting all {all.Count} treebank files (multilingual).");
         return all;
     }
 
