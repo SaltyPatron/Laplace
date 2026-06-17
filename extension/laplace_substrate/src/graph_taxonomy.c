@@ -1,9 +1,9 @@
-/*
- * graph_taxonomy.c - upward (hypernym/IS_A) taxonomy walk over the consensus
- * graph and the SRFs built on it (hypernyms, isa_path). The BFS engine
- * (tax_bfs_up + TaxNode) is exported via graph_taxonomy.h so graph_contrast.c
- * reuses it. Split out of graph_geometry_reads.c.
- */
+
+
+
+
+
+
 #include "postgres.h"
 
 #include "catalog/pg_type.h"

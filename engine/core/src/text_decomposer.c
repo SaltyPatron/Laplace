@@ -25,8 +25,8 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
     const uint8_t* work = utf8;
     size_t work_len = len;
 
-    /* Tier-0 codepoint leaves + tier-1 graphemes: the shared floor, byte-identical
-     * to what the code law builds for the same bytes. */
+    
+
     tier_tree_t* tree = NULL;
     laplace_grapheme_floor_t floor;
     int rc = laplace_grapheme_floor_build(work, work_len, &tree, &floor);

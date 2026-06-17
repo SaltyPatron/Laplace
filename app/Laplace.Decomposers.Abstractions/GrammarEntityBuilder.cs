@@ -4,13 +4,13 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// Composes a parsed <see cref="GrammarAst"/> into substrate rows — the grammar analog of
-/// <see cref="TextEntityBuilder"/>. Both share the codepoint→grapheme floor (so a code identifier
-/// and a prose word reconcile by id) and the one composition kernel (<c>HashComposer.ComposeNode</c>).
-/// Constituency is the content trajectory; tree-sitter's node-types become first-class substrate
-/// type entities (<c>substrate/type/grammar/{modality}/{type}/v1</c>) — no foreign type persists.
-/// </summary>
+
+
+
+
+
+
+
 public sealed class GrammarEntityBuilder
 {
     public static readonly Hash128 PrecedesTypeId = RelationTypeRegistry.RelationTypeId("PRECEDES");
@@ -19,7 +19,7 @@ public sealed class GrammarEntityBuilder
     private readonly GrammarAst _ast;
     private readonly Hash128    _sourceId;
     private readonly string     _modalityId;
-    private readonly IntPtr     _recipe;    // for tags.scm semantic arcs (optional)
+    private readonly IntPtr     _recipe;    
     private readonly byte[]?    _tagsScm;
 
     public GrammarEntityBuilder(byte[] utf8, GrammarAst ast, Hash128 sourceId, string modalityId,
@@ -36,11 +36,11 @@ public sealed class GrammarEntityBuilder
     public static Hash128 GrammarNodeTypeId(string modalityId, string typeName) =>
         Hash128.OfCanonical($"substrate/type/grammar/{modalityId}/{typeName}/v1");
 
-    /// <summary>
-    /// Canonical names of every grammar node-type entity this build deposited
-    /// (<c>substrate/type/grammar/{modality}/{type}/v1</c>). Feed these to the decomposer's
-    /// CanonicalNamesForReadback so node-types are readable/queryable by name, not hex.
-    /// </summary>
+    
+    
+    
+    
+    
     public IReadOnlyCollection<string> NodeTypeCanonicalNames => _nodeTypeNames;
     private readonly HashSet<string> _nodeTypeNames = new(StringComparer.Ordinal);
 
@@ -139,11 +139,11 @@ public sealed class GrammarEntityBuilder
         }
     }
 
-    /// <summary>
-    /// PRECEDES over adjacent named children of each composite node — the grammar analog of
-    /// <see cref="TextEntityBuilder.BuildDistributionalAttestations"/>; feeds the existing
-    /// collocates/generate consensus surface with zero new SQL.
-    /// </summary>
+    
+    
+    
+    
+    
     private ImmutableArray<AttestationRow> BuildSequenceAttestations(
         List<int>?[] childrenOf, Hash128[] compId, bool[] compValid, double witnessWeight)
     {
@@ -174,12 +174,12 @@ public sealed class GrammarEntityBuilder
         return rows.ToImmutable();
     }
 
-    /// <summary>
-    /// Typed semantic arcs from the grammar's tags.scm: one DEFINES / CALLS / REFERENCES edge per
-    /// matched definition/reference. A capture's byte span correlates to the AST node (hence entity
-    /// id) at that span, so a def or call resolves to real substrate entities. No-op when no recipe
-    /// or tags.scm was supplied (structure then rides on PRECEDES alone).
-    /// </summary>
+    
+    
+    
+    
+    
+    
     private ImmutableArray<AttestationRow> BuildTagAttestations(
         LaplaceAstNode[] nodes, Hash128[] compId, bool[] compValid, double witnessWeight)
     {

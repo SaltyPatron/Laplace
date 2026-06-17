@@ -7,14 +7,14 @@ using Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
-/// <summary>
-/// Prompts are witnesses (docs/OPEN-PROBLEMS.md §4): every conversation turn — the user's
-/// prompt and the served reply — is deposited off the request path as Document-tier content
-/// under <c>substrate/source/UserPrompt/v1</c>. <c>converse_turns</c> stays the fast session
-/// cursor; the substrate holds the durable record. Content the UserPrompt source has already
-/// witnessed is skipped: stateless OpenAI clients resend the full history every call, and a
-/// replay must not double-count games.
-/// </summary>
+
+
+
+
+
+
+
+
 internal sealed class TurnWitness : BackgroundService
 {
     private readonly SubstrateClient _substrate;

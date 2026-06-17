@@ -102,9 +102,9 @@ CREATE OR REPLACE FUNCTION source_counts()
     RETURNS TABLE(source text, source_id bytea, evidence bigint, content bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    -- One aggregating scan per table (hash-agg over the handful of sources), FULL
-    -- JOINed — NOT DISTINCT + per-source correlated counts, which was O(sources x rows)
-    -- and timed out on the 77M-row attestations table.
+    
+    
+    
     SELECT @extschema@.render(COALESCE(ev.sid, ct.sid)) AS source,
            COALESCE(ev.sid, ct.sid)                     AS source_id,
            COALESCE(ev.evidence, 0)                     AS evidence,
@@ -186,4 +186,20 @@ BEGIN
         RETURN NEXT;
     END LOOP;
 END;
+$$;
+
+-- Self-catalog: every function in the substrate schema (optionally name-filtered).
+-- Query this BEFORE writing new SQL so we reuse what exists instead of reinventing.
+CREATE OR REPLACE FUNCTION api(p_like text DEFAULT NULL)
+    RETURNS TABLE(name text, args text, returns text)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT p.proname::text,
+           pg_get_function_arguments(p.oid),
+           pg_get_function_result(p.oid)
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = current_schema()
+      AND (p_like IS NULL OR p.proname ILIKE '%'||p_like||'%')
+    ORDER BY p.proname
 $$;

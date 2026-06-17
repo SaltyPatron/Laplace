@@ -21,10 +21,10 @@ public static unsafe class CodepointPerfcache
         }
     }
 
-    /// <summary>
-    /// Idempotent default load: LAPLACE_PERFCACHE_BIN if set, else the nearest ancestor
-    /// build tree's blob. Mirrors the CLI's resolver so every host process shares one law.
-    /// </summary>
+    
+    
+    
+    
     public static void LoadDefault()
     {
         if (IsLoaded) return;

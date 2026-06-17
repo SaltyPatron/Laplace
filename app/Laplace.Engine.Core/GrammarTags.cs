@@ -1,10 +1,10 @@
 namespace Laplace.Engine.Core;
 
-/// <summary>
-/// Runs a grammar's tags.scm def/ref query over source (the sealed engine mechanism) and resolves
-/// the .scm source from the vendored grammar. Used to turn code into typed CALLS/DEFINES/REFERENCES
-/// arcs (richer than positional PRECEDES). No tree-sitter type crosses this surface.
-/// </summary>
+
+
+
+
+
 public static unsafe class GrammarTags
 {
     public static IReadOnlyList<TagCapture> Run(IntPtr recipe, ReadOnlySpan<byte> tagsScm, ReadOnlySpan<byte> utf8)
@@ -38,11 +38,11 @@ public static unsafe class GrammarTags
         }
     }
 
-    // --- tags.scm source resolution (from the vendored grammars; cached) ---
+    
 
     private static readonly Dictionary<string, byte[]?> _cache = new();
 
-    /// <summary>The grammar's tags.scm bytes for a modality, or null if it ships none.</summary>
+    
     public static byte[]? TagsSource(string modality)
     {
         lock (_cache)
@@ -55,7 +55,7 @@ public static unsafe class GrammarTags
         }
     }
 
-    // Grammars with non-standard layouts: sub-parser directory between repo root and queries/.
+    
     private static readonly Dictionary<string, string> _repoSubpath = new(StringComparer.OrdinalIgnoreCase)
     {
         ["typescript"] = "typescript",
@@ -65,8 +65,8 @@ public static unsafe class GrammarTags
     private static string? LocateTagsScm(string modality)
     {
         _repoSubpath.TryGetValue(modality, out var sub);
-        // The CLI often runs from a sidecar outside the repo tree (%TEMP%), where the
-        // BaseDirectory parent walk can never reach external/ — LAPLACE_ROOT wins when set.
+        
+        
         var root = Environment.GetEnvironmentVariable("LAPLACE_ROOT");
         if (!string.IsNullOrEmpty(root))
         {

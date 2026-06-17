@@ -106,8 +106,8 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         var stagedAttIds  = new List<Hash128>();
         Span<double> coord = stackalloc double[4];
 
-        // Referrer provenance: the proof's failure message names WHO referenced the
-        // missing id (role + unit), turning "decomposer bug somewhere" into a file:line.
+        
+        
         var referenced = new Dictionary<Hash128, string>();
         void Reference(Hash128 id, string role, string unit)
         {
@@ -186,19 +186,20 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 }
                 roundTrips++;
 
-                foreach (var pre in prebuiltStages)
+                if (prebuiltStages.Count > 0)
                 {
                     try
                     {
-                        entitiesInserted += await StageAndInsertAsync(
-                            conn, pre, IntentStageTable.Entities, "entities", ct);
-                        physicalitiesInserted += await StageAndInsertAsync(
-                            conn, pre, IntentStageTable.Physicalities, "physicalities", ct);
+                        entitiesInserted += await StageAndInsertManyAsync(
+                            conn, prebuiltStages, IntentStageTable.Entities, "entities", ct);
+                        physicalitiesInserted += await StageAndInsertManyAsync(
+                            conn, prebuiltStages, IntentStageTable.Physicalities, "physicalities", ct);
                         roundTrips += 2;
                     }
                     finally
                     {
-                        pre.Dispose();
+                        foreach (var pre in prebuiltStages)
+                            pre.Dispose();
                     }
                 }
 
@@ -297,12 +298,12 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
 
         sw.Stop();
 
-        // The round-trip budget law: RT must amortize over rows. The per-witness
-        // prebuilt-stage pattern once cost 16,681 RT for 51k rows — this guard makes
-        // that class of regression a loud failure instead of log archaeology.
-        // LAPLACE_RT_BUDGET_PER_10K (default 64; 0 disables) is the allowed RT per
-        // 10k attempted rows on top of a fixed per-intent allowance; set
-        // LAPLACE_RT_BUDGET_ENFORCE=1 (tests) to throw instead of warn.
+        
+        
+        
+        
+        
+        
         long rowsAttempted = (long)entitiesAttempted + physAttempted + attAttempted;
         if (rowsAttempted >= 1000 && RtBudgetPer10K > 0)
         {
@@ -337,28 +338,34 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
 
     private static async Task<int> StageAndInsertAsync(
         NpgsqlConnection conn, IntentStage stage, IntentStageTable table, string tableName, CancellationToken ct)
+        => await StageAndInsertManyAsync(conn, new[] { stage }, table, tableName, ct);
+
+    private static async Task<int> StageAndInsertManyAsync(
+        NpgsqlConnection conn,
+        IReadOnlyList<IntentStage> stages,
+        IntentStageTable table,
+        string tableName,
+        CancellationToken ct)
     {
-        (IntPtr ptr, long len) = stage.TupleBuffer(table);
-        string cols = IntentStage.CopyColumnList(table);
-        int rowCount = table switch
+        int totalRowCount = 0;
+        foreach (var s in stages)
         {
-            IntentStageTable.Entities      => stage.EntityCount,
-            IntentStageTable.Physicalities => stage.PhysicalityCount,
-            _                              => stage.AttestationCount,
-        };
-
-        if (rowCount == 0) return 0;
-
-        if (CopyBlobValidator.Enabled)
-        {
-            int expectedFields = table switch
+            totalRowCount += table switch
             {
-                IntentStageTable.Entities      => 4,
-                IntentStageTable.Physicalities => 11,
-                _                              => 9,
+                IntentStageTable.Entities      => s.EntityCount,
+                IntentStageTable.Physicalities => s.PhysicalityCount,
+                _                              => s.AttestationCount,
             };
-            CopyBlobValidator.Validate(ptr, len, expectedFields, tableName, rowCount);
         }
+        if (totalRowCount == 0) return 0;
+
+        string cols = IntentStage.CopyColumnList(table);
+        int expectedFields = table switch
+        {
+            IntentStageTable.Entities      => 4,
+            IntentStageTable.Physicalities => 11,
+            _                              => 9,
+        };
 
         string stageName = $"_laplace_stage_{tableName}";
         await using (var ddl = conn.CreateCommand())
@@ -371,9 +378,24 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             await ddl.ExecuteNonQueryAsync(ct);
         }
 
-        await using (var stream = await conn.BeginRawBinaryCopyAsync(
-            $"COPY {stageName} ({cols}) FROM STDIN (FORMAT BINARY)", ct))
+        foreach (var stage in stages)
+        {
+            int rowCount = table switch
+            {
+                IntentStageTable.Entities      => stage.EntityCount,
+                IntentStageTable.Physicalities => stage.PhysicalityCount,
+                _                              => stage.AttestationCount,
+            };
+            if (rowCount == 0) continue;
+
+            (IntPtr ptr, long len) = stage.TupleBuffer(table);
+            if (CopyBlobValidator.Enabled)
+                CopyBlobValidator.Validate(ptr, len, expectedFields, tableName, rowCount);
+
+            await using var stream = await conn.BeginRawBinaryCopyAsync(
+                $"COPY {stageName} ({cols}) FROM STDIN (FORMAT BINARY)", ct);
             await PgBinaryCopy.WriteNativeBlobAsync(stream, ptr, len, ct);
+        }
 
         await using (var promote = conn.CreateCommand())
         {
@@ -385,18 +407,18 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         }
     }
 
-    // ======================================================================
-    // Append-only bulk commit (the coherent path) — see SubstrateStagingMerge.
-    // These public methods are thin delegators so ISubstrateWriter is unchanged;
-    // the lock-free fresh-source strategy lives in SubstrateStagingMerge.
-    // ======================================================================
+    
+    
+    
+    
+    
 
-    /// <inheritdoc cref="SubstrateStagingMerge.AppendAsync"/>
+    
     public Task<ApplyResult> AppendAsync(
         IReadOnlyList<SubstrateChange> changes, Hash128 sourceId, CancellationToken ct = default)
         => _staging.AppendAsync(changes, sourceId, ct);
 
-    /// <inheritdoc cref="SubstrateStagingMerge.FinalizeAsync"/>
+    
     public Task<(int Entities, int Physicalities, int Attestations)> FinalizeSourceAsync(
         Hash128 sourceId, CancellationToken ct = default)
         => _staging.FinalizeAsync(sourceId, ct);

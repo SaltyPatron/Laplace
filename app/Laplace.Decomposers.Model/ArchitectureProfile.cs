@@ -8,13 +8,13 @@ public sealed class ArchitectureProfile
     public required bool HasBiases { get; init; }
     public required bool RmsNorm   { get; init; }
 
-    // Tensor names used outside the path loop (entity seeding, recipe embedding)
+    
     public required string  EmbedTokens { get; init; }
     public required string? LmHead      { get; init; }
     public required string  FinalNorm   { get; init; }
     public required IReadOnlyList<string> PerLayerNorms { get; init; }
 
-    // Kept for ModelArenaPlan compat (norm seeding); not used by ModelTableETL
+    
     public required string  QProj    { get; init; }
     public required string  KProj    { get; init; }
     public required string  VProj    { get; init; }
@@ -23,7 +23,7 @@ public sealed class ArchitectureProfile
     public required string  UpProj   { get; init; }
     public required string  DownProj { get; init; }
 
-    // All trajectory paths the ETL will stream. Order determines emission order.
+    
     public required IReadOnlyList<PathSpec> Paths { get; init; }
 
     public static ArchitectureProfile For(string modelType) => modelType.ToLowerInvariant() switch
@@ -146,12 +146,12 @@ public sealed class ArchitectureProfile
         },
     };
 
-    // BERT-family encoders (e.g. all-MiniLM): post-LayerNorm, gateless GELU FFN,
-    // tied unembedding (no lm_head — readout = word embeddings). γ-fold caveat:
-    // BERT norms are POST-sublayer, so folding layer L's own LN weights into its
-    // projections is an off-by-one approximation of the pre-scaled stream the
-    // tile kernels assume — acceptable for thresholded testimony, noted here so
-    // nobody mistakes it for the exact pre-norm law the llama family enjoys.
+    
+    
+    
+    
+    
+    
     public static readonly ArchitectureProfile Bert = new()
     {
         ModelType = "bert",

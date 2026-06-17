@@ -1,9 +1,5 @@
 @echo off
 setlocal EnableDelayedExpansion
-rem Run dotnet test projects (Release). Usage:
-rem   test-app.cmd                          all test projects
-rem   test-app.cmd SubstrateCRUD            only projects whose name contains the filter (case-insensitive)
-rem   test-app.cmd Model --filter Name~Etl  extra args after the project filter go to dotnet test
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%\app"
 set "Platform="

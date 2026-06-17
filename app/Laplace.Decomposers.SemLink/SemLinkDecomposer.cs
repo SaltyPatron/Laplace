@@ -14,9 +14,9 @@ public sealed class SemLinkDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    // SemLink is alignment-only: it references the SAME content anchors PropBank/VerbNet/FrameNet
-    // emit (roleset/class/frame keys decomposed as content) and lays CORRESPONDS_TO edges between
-    // them — it does not own them, so it emits content (referential integrity) but no IS_A category.
+    
+    
+    
     public Hash128 SourceId     => Source;
     public string  SourceName   => "SemLinkDecomposer";
     public int     LayerOrder   => 3;
@@ -64,14 +64,14 @@ public sealed class SemLinkDecomposer : IDecomposer
             ct.ThrowIfCancellationRequested();
             string rolesetKey = rolesetProp.Name.Trim();
             if (rolesetKey.Length == 0 || rolesetProp.Value.ValueKind != JsonValueKind.Object) continue;
-            var rsEntity = ContentEmitter.Emit(b, rolesetKey, Source);   // shared roleset anchor
+            var rsEntity = ContentEmitter.Emit(b, rolesetKey, Source);   
             if (rsEntity is null) continue;
 
             foreach (var classProp in rolesetProp.Value.EnumerateObject())
             {
                 string vnClass = classProp.Name.Trim();
                 if (vnClass.Length == 0) continue;
-                var vnEntity = ContentEmitter.Emit(b, NumericClassId(vnClass), Source);  // shared class anchor
+                var vnEntity = ContentEmitter.Emit(b, NumericClassId(vnClass), Source);  
                 if (vnEntity is null) continue;
 
                 b.AddAttestation(NativeAttestation.Categorical(
@@ -109,7 +109,7 @@ public sealed class SemLinkDecomposer : IDecomposer
             ct.ThrowIfCancellationRequested();
             string vnClass = VnClassFromKey(keyProp.Name);
             if (vnClass.Length == 0) continue;
-            var vnEntity = ContentEmitter.Emit(b, NumericClassId(vnClass), Source);  // shared class anchor
+            var vnEntity = ContentEmitter.Emit(b, NumericClassId(vnClass), Source);  
             if (vnEntity is null) continue;
 
             if (keyProp.Value.ValueKind != JsonValueKind.Array) continue;
@@ -118,7 +118,7 @@ public sealed class SemLinkDecomposer : IDecomposer
                 if (frameElem.ValueKind != JsonValueKind.String) continue;
                 string frame = (frameElem.GetString() ?? "").Trim();
                 if (frame.Length == 0) continue;
-                var fnEntity = ContentEmitter.Emit(b, frame, Source);   // shared frame anchor
+                var fnEntity = ContentEmitter.Emit(b, frame, Source);   
                 if (fnEntity is null) continue;
                 b.AddAttestation(NativeAttestation.Categorical(
                     vnEntity.Value, "CORRESPONDS_TO", fnEntity.Value, Source, TC.AcademicCurated));

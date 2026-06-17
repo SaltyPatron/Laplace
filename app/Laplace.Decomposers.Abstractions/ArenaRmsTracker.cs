@@ -1,6 +1,6 @@
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>Online RMS arena scale per relation type (ConceptNet weighted attestations).</summary>
+
 public sealed class ArenaRmsTracker
 {
     private readonly Dictionary<string, double> _sumSq = new(StringComparer.Ordinal);

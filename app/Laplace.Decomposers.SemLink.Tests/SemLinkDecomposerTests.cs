@@ -44,8 +44,8 @@ public sealed class SemLinkDecomposerTests
     public async Task PbVn_Maps_Roleset_To_VerbNet_Class_With_Shared_Ids()
     {
         var atts = await CollectAttestationsAsync();
-        var rsId = CategoryAnchor.Id("give.01")!.Value;   // shared roleset anchor (content)
-        var vnId = CategoryAnchor.Id("13.1-1")!.Value;    // shared VerbNet class anchor (content)
+        var rsId = CategoryAnchor.Id("give.01")!.Value;   
+        var vnId = CategoryAnchor.Id("13.1-1")!.Value;    
         Assert.Contains(atts, a =>
             (a.SubjectId == rsId && a.ObjectId == vnId) ||
             (a.SubjectId == vnId && a.ObjectId == rsId));
@@ -90,8 +90,8 @@ public sealed class SemLinkDecomposerTests
     [Fact]
     public async Task Referenced_Concepts_Are_Shared_Content_Anchors_Not_Blobs()
     {
-        // The roleset/class/frame are content anchors now (staged natively, shared with
-        // PropBank/VerbNet/FrameNet) — standalone ingest references the SAME ids, not per-witness blobs.
+        
+        
         var atts = await CollectAttestationsAsync();
         var rs = CategoryAnchor.Id("give.01")!.Value;
         var vn = CategoryAnchor.Id("13.1-1")!.Value;

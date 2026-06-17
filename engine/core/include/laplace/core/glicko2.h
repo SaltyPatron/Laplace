@@ -38,10 +38,10 @@ void glicko2_update_period(glicko2_state_t* st,
                            int64_t tau,
                            int64_t now_ns);
 
-/* Closed-form period update where all `games` observations are against one
- * opponent (opponent_rating, opponent_phi) scored q,...,q,rem. int64-identical
- * to the per-observation loop; O(1) instead of O(games), no observation array.
- * This is the consensus fold's per-relation Glicko. */
+
+
+
+
 void glicko2_fold_uniform_period(glicko2_state_t* st,
                                  int64_t opponent_rating,
                                  int64_t opponent_phi,
@@ -57,16 +57,16 @@ void glicko2_update(glicko2_state_t* st,
 
 void glicko2_decay_rd_in_place(glicko2_state_t* st, int64_t now_ns);
 
-/* The neutral / anchor rating in fp1e9 (1500.0): the μ a relation holds with no
- * witnesses, and the refuted/confirmed pivot. THE single source — SQL
- * glicko2_neutral_mu() and every native query bound to it. */
+
+
+
 #define LAPLACE_GLICKO2_NEUTRAL_MU_FP   1500000000000LL
 int64_t laplace_glicko2_neutral_mu_fp(void);
 
-/* THE conservative-μ law (rating discounted by 2·rd), in fp1e9. The single
- * compiled truth: glicko2_effective_mu and the extension's display/numeric
- * helpers both delegate here. The SQL eff_mu() mirrors it inline for the
- * ORDER BY hot path and is regress-locked behaviorally (consensus_signed). */
+
+
+
+
 int64_t laplace_effective_mu_fp(int64_t rating, int64_t rd);
 
 int64_t glicko2_effective_mu(const glicko2_state_t* st);

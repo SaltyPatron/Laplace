@@ -52,7 +52,7 @@ nav button.active { color: var(--text); border-color: var(--border); background:
 
 main { flex: 1; min-height: 0; }
 
-/* ---- chat ---- */
+
 .chat-layout { display: flex; height: 100%; }
 .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
@@ -101,7 +101,7 @@ button.ghost { background: none; border: 1px solid var(--border); color: var(--m
 .quote-banner a { color: var(--accent); }
 .quote-banner button { margin-left: 0.5rem; padding: 0.25rem 0.7rem; font-size: 0.82rem; }
 
-/* ---- receipt panel ---- */
+
 .receipt-panel {
   width: 22rem; border-left: 1px solid var(--border); background: var(--panel);
   padding: 1rem; overflow-y: auto; flex-shrink: 0;
@@ -130,7 +130,7 @@ button.ghost { background: none; border: 1px solid var(--border); color: var(--m
 .chip-refute { background: rgba(255, 107, 107, 0.15); color: var(--refute); }
 .chip-draw { background: rgba(232, 179, 57, 0.15); color: var(--draw); }
 
-/* ---- billing ---- */
+
 .billing { padding: 1.2rem 2rem; overflow-y: auto; height: 100%; }
 .billing h2 { font-size: 1rem; margin: 1.4rem 0 0.7rem; }
 .plan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1rem; }

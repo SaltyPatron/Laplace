@@ -1,9 +1,9 @@
 namespace Laplace.Api.Contracts;
 
-// Records embedded inside response payloads (audit report, visualization graph,
-// explainability trace). These serialize through the host's web-default JsonOptions —
-// camelCase on the wire — and that form is pinned by the endpoint golden shape tests.
-// Do NOT add [JsonPropertyName] snake_case here; it would break the served contract.
+
+
+
+
 
 public sealed record SubstrateCount(string Metric, long Value);
 

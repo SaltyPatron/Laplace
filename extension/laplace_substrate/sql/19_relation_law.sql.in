@@ -1,13 +1,24 @@
-CREATE FUNCTION relation_type_resolve(p_surface text) RETURNS bytea
+CREATE OR REPLACE FUNCTION relation_type_resolve(p_surface text) RETURNS bytea
     LANGUAGE c IMMUTABLE STRICT PARALLEL SAFE AS 'MODULE_PATHNAME', 'pg_relation_type_resolve';
 
-CREATE FUNCTION relation_type_in_family(p_type_id bytea, p_family text) RETURNS boolean
+CREATE OR REPLACE FUNCTION relation_type_in_family(p_type_id bytea, p_family text) RETURNS boolean
     LANGUAGE c IMMUTABLE STRICT PARALLEL SAFE AS 'MODULE_PATHNAME', 'pg_relation_type_in_family';
 
--- the banked native rank/canonical of a relation type (the layer it belongs to).
--- reads/exports use these to stay within-layer instead of flat-sorting eff_mu.
+
+
 CREATE OR REPLACE FUNCTION relation_rank(p_type_id bytea) RETURNS float8
     LANGUAGE c IMMUTABLE STRICT PARALLEL SAFE AS 'MODULE_PATHNAME', 'pg_relation_rank';
 
 CREATE OR REPLACE FUNCTION relation_canonical(p_type_id bytea) RETURNS text
     LANGUAGE c IMMUTABLE STRICT PARALLEL SAFE AS 'MODULE_PATHNAME', 'pg_relation_canonical';
+
+
+
+
+
+
+
+
+
+CREATE OR REPLACE FUNCTION relation_rank_resolved(p_type_id bytea) RETURNS float8
+    LANGUAGE c STABLE STRICT AS 'MODULE_PATHNAME', 'pg_relation_rank_resolved';

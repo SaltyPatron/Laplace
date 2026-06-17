@@ -31,9 +31,9 @@ typedef struct ReplyRow
 
 typedef struct ReplyBuf
 {
-    MemoryContext cxt;          /* context current at init — must outlive SPI_finish,
-                                 * because rows are emitted AFTER the SPI proc context
-                                 * (CurrentMemoryContext while connected) is destroyed */
+    MemoryContext cxt;          
+
+
     ReplyRow *rows;
     int       n;
     int       cap;
@@ -60,7 +60,7 @@ emit_route_row(ReturnSetInfo *rsinfo, const RouteResult *r)
 static void
 reply_buf_init(ReplyBuf *buf)
 {
-    buf->cxt = CurrentMemoryContext;    /* callers init BEFORE SPI_connect */
+    buf->cxt = CurrentMemoryContext;    
     buf->rows = NULL;
     buf->n = 0;
     buf->cap = 0;
@@ -147,9 +147,9 @@ spi_resolve_topic(const char *phrase, Datum context, bool ctx_null)
 {
     Oid   types[2] = { TEXTOID, BYTEAOID };
     Datum args[2];
-    /* start with ALL params present; mark 'n' only for the ones actually null.
-     * The old " n" default never cleared slot 2, so resolve_topic never saw the
-     * session context and every pronoun follow-up failed (2026-06-10). */
+    
+
+
     char  nulls[3] = "  ";
     bool  isnull;
     int   rc;
@@ -170,7 +170,7 @@ spi_resolve_topic(const char *phrase, Datum context, bool ctx_null)
     return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
 }
 
-/* spi_label / spi_word_language live in spi_common.h */
+
 
 static void
 emit_no_topic_msg(ReplyBuf *buf, const char *prompt, const RouteResult *route)
@@ -464,12 +464,12 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
     }
     else if (route.intent && strcmp(route.intent, "fallback") == 0)
     {
-        /* A declarative / unrecognized prompt: walk the strongest consensus
-         * relations outward from the resolved topic -- indexed per-hop reads on
-         * consensus (the same kernel the "complete" intent uses), NOT walk_text,
-         * which pays a full trajectory-stream build per backend. Inference =
-         * walking the consensus, applied to the chat path. Gloss of the resolved
-         * topic remains only as the fallback-of-last-resort. */
+        
+
+
+
+
+
         Oid   wtypes[1] = { BYTEAOID };
         Datum wargs[1] = { topic };
         n = spi_forward_replies(buf,
@@ -594,11 +594,11 @@ pg_laplace_recall_session(PG_FUNCTION_ARGS)
 
     if (PG_ARGISNULL(1))
     {
-        /* default session = backend pid as bytea. Built by hand: pg_convert_to
-         * takes a NAME as its second arg, and feeding it a text datum via
-         * DirectFunctionCall read garbage ("invalid destination encoding") --
-         * the btrim-arity bug family. Regress passes sessions explicitly, so
-         * only NULL-session calls (converse.cmd) ever hit this branch. */
+        
+
+
+
+
         char   pidbuf[32];
         int    len = snprintf(pidbuf, sizeof(pidbuf), "%d", MyProcPid);
         bytea *b = (bytea *) palloc(VARHDRSZ + len);
@@ -649,9 +649,9 @@ pg_laplace_recall_session(PG_FUNCTION_ARGS)
             iargs[0] = session;
             iargs[1] = CStringGetTextDatum(prompt);
             iargs[2] = topic;
-            /* resolved_id is NULL only when the topic did not resolve — a constant
-             * "  n" here silently dropped every turn's topic, killing pronoun
-             * follow-up context (2026-06-10). */
+            
+
+
             SPI_execute_with_args(
                 "INSERT INTO laplace.session_topics (session_id, ord, prompt, resolved_id) "
                 "SELECT $1, COALESCE(max(t.ord), 0) + 1, $2, $3 "

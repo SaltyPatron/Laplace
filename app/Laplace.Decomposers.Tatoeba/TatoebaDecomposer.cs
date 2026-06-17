@@ -70,7 +70,7 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
 
     public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
+        var inv = await DescribeInputAsync(context, DecomposerOptions.ForWitness(SourceName), ct);
         return inv?.TotalInputUnits;
     }
 

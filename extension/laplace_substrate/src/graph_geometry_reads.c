@@ -1,10 +1,10 @@
-/*
- * graph_geometry_reads.c - the 4-D geometric reads (coordinate/trajectory
- * distance over PostGIS): nearest_neighbors_4d, structural_cluster,
- * structural_locale and their spi_* distance helpers. The consensus-graph
- * taxonomy/contrast/cascade reads that used to share this file now live in
- * graph_taxonomy.c / graph_contrast.c / graph_cascade.c.
- */
+
+
+
+
+
+
+
 #include "postgres.h"
 
 #include "catalog/namespace.h"
@@ -24,7 +24,7 @@ PG_FUNCTION_INFO_V1(pg_laplace_nearest_neighbors_4d);
 PG_FUNCTION_INFO_V1(pg_laplace_structural_cluster);
 PG_FUNCTION_INFO_V1(pg_laplace_structural_locale);
 
-/* PostGIS geometry type OID (defined below); used by the geometry-param SPI calls. */
+
 static Oid geom_typeoid(void);
 
 Datum
@@ -215,11 +215,11 @@ pg_laplace_nearest_neighbors_4d(PG_FUNCTION_ARGS)
     return (Datum) 0;
 }
 
-/* PostGIS geometry type OID (dynamic — geometry is an extension type). A geometry
- * Datum is gserialized, NOT WKB; passing it through SPI as BYTEAOID makes the planner
- * insert a bytea->geometry cast that WKB-parses the gserialized bytes and fails with
- * "Unknown WKB type" (PostGIS 3.7 dropped the implicit pass-through). Declaring the
- * param with the geometry OID passes the Datum straight through, no cast. */
+
+
+
+
+
 static Oid
 geom_typeoid(void)
 {
@@ -334,9 +334,9 @@ pg_laplace_structural_cluster(PG_FUNCTION_ARGS)
             laplace_spi_finish(spi_top);
             return (Datum) 0;
         }
-        /* seed_coord points INTO this tuptable; the next SPI call (spi_entity_curve)
-         * frees it, so $1 in the KNN would read freed memory ("Unknown WKB type").
-         * Copy it into the caller context to survive every later SPI call. */
+        
+
+
         seed_coord = copy_bytea_datum(seed_coord);
     }
 
@@ -347,8 +347,8 @@ pg_laplace_structural_cluster(PG_FUNCTION_ARGS)
         laplace_spi_finish(spi_top);
         return (Datum) 0;
     }
-    /* seed_curve points into the entity_curve tuptable; copy it into the caller
-     * context so it survives the KNN query and every per-candidate frechet call. */
+    
+
     seed_curve = copy_bytea_datum(seed_curve);
 
     {
@@ -372,11 +372,11 @@ pg_laplace_structural_cluster(PG_FUNCTION_ARGS)
             double fr;
         } ScoredCand;
 
-        /* Snapshot every KNN id into the caller context BEFORE any inner SPI call.
-         * spi_entity_curve / spi_frechet_4d each run their own SPI query, which
-         * reassigns the global SPI_tuptable; iterating SPI_tuptable->vals[r] across
-         * those calls reads rows out of the wrong (inner) result set -> garbage past
-         * r=0, which is why this only ever returned a single neighbor. */
+        
+
+
+
+
         uint64  n_cand      = SPI_processed;
         Datum  *cand        = (Datum *) palloc0(sizeof(Datum) * (n_cand ? n_cand : 1));
         int     n_cand_real = 0;
@@ -412,7 +412,7 @@ pg_laplace_structural_cluster(PG_FUNCTION_ARGS)
             if (idx < n_scored)
                 continue;
 
-            scored[n_scored].entity_id = eid;  /* already copied into caller ctx */
+            scored[n_scored].entity_id = eid;  
             scored[n_scored].fr = fr;
             n_scored++;
         }

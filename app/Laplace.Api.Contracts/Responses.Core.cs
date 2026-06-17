@@ -2,8 +2,8 @@ using System.Text.Json.Serialization;
 
 namespace Laplace.Api.Contracts;
 
-// Typed response wrappers. Property declaration order mirrors the served wire order and is
-// pinned by the endpoint golden shape tests — do not reorder.
+
+
 
 public sealed record HealthResponse(
     [property: JsonPropertyName("status")] string Status,
@@ -41,7 +41,7 @@ public sealed record CapabilityStatus(
     [property: JsonPropertyName("reason"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null,
     [property: JsonPropertyName("provider"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Provider = null);
 
-// ---- error envelopes ----
+
 
 public sealed record ErrorResponse(
     [property: JsonPropertyName("error")] ErrorBody Error);
@@ -63,16 +63,16 @@ public sealed record NotImplementedBody(
 public sealed record PaymentRequiredResponse(
     [property: JsonPropertyName("error")] PaymentRequiredBody Error);
 
-/// <summary>402 envelope. <c>detail</c> is always emitted (null when no quote context exists).</summary>
+
 public sealed record PaymentRequiredBody(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("code")] string Code,
     [property: JsonPropertyName("message")] string Message,
     [property: JsonPropertyName("detail")] object? Detail);
 
-/// <summary>402 detail when no quote was supplied: which service to preflight.</summary>
+
 public sealed record QuoteServiceDetail(
     [property: JsonPropertyName("service_id")] string ServiceId);
 
-/// <summary>402 detail when a quote exists but is not executable yet (camelCase wire — pinned).</summary>
+
 public sealed record QuotePendingDetail(string QuoteId, string Status, string? StripeCheckoutUrl);

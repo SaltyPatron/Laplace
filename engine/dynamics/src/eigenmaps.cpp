@@ -94,9 +94,9 @@ int eigendecompose_laplacian(const SpMat& W,
     const int ncv = std::min(ni - 1, std::max(2 * nev + 1, 20));
     if (ncv <= nev) return -2;
 
-    // Smallest Laplacian eigenvalues are extremal: plain Lanczos matvecs reach
-    // them in O(nnz) per step. Never shift-and-invert here — sparse factorization
-    // of a graph Laplacian fills in catastrophically at vocab scale.
+    
+    
+    
     Spectra::SparseSymMatProd<double> op(L);
     Spectra::SymEigsSolver<Spectra::SparseSymMatProd<double>>
         eigs(op, nev, ncv);

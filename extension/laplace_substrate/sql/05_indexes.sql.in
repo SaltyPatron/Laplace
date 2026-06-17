@@ -12,10 +12,18 @@ CREATE INDEX physicalities_hilbert_btree   ON physicalities USING btree (hilbert
 CREATE INDEX physicalities_radius_btree    ON physicalities USING btree (radius_origin);
 CREATE INDEX physicalities_residual_btree  ON physicalities USING btree (alignment_residual) WHERE alignment_residual IS NOT NULL;
 CREATE INDEX physicalities_observed_brin   ON physicalities USING brin  (observed_at);
--- the generation-corpus invalidation probe (count + max observed_at over
--- trajectory-bearing rows) runs on every generate call — it must stay an
--- index-only scan (IF NOT EXISTS: live DBs converge via module refresh)
+
+
+
 CREATE INDEX IF NOT EXISTS physicalities_traj_probe ON physicalities USING btree (observed_at) WHERE type = 1 AND trajectory IS NOT NULL;
+
+
+
+
+
+
+
+CREATE INDEX IF NOT EXISTS physicalities_constituents_gin ON physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory)) WHERE type = 1 AND trajectory IS NOT NULL;
 
 CREATE INDEX attestations_type_btree          ON attestations USING btree (type_id);
 CREATE INDEX attestations_object_btree        ON attestations USING btree (object_id) WHERE object_id IS NOT NULL;

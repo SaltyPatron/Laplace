@@ -2,8 +2,8 @@
 
 #include <string.h>
 
-/* Each grammar (a structured-knowledge modality recipe) is linked in as an OBJECT
- * lib and exports const TSLanguage* tree_sitter_<name>(void). */
+
+
 extern const TSLanguage* tree_sitter_python(void);
 extern const TSLanguage* tree_sitter_c(void);
 extern const TSLanguage* tree_sitter_cpp(void);
@@ -16,17 +16,17 @@ extern const TSLanguage* tree_sitter_json(void);
 extern const TSLanguage* tree_sitter_markdown(void);
 extern const TSLanguage* tree_sitter_csv(void);
 extern const TSLanguage* tree_sitter_tsv(void);
-/* language grammars */
+
 extern const TSLanguage* tree_sitter_typescript(void);
 extern const TSLanguage* tree_sitter_java(void);
 extern const TSLanguage* tree_sitter_ruby(void);
 extern const TSLanguage* tree_sitter_julia(void);
 extern const TSLanguage* tree_sitter_kotlin(void);
 extern const TSLanguage* tree_sitter_php(void);
-/* grammars whose parser.c is generated at configure time (sql: gh-pages, swift: tree-sitter generate) */
+
 extern const TSLanguage* tree_sitter_sql(void);
 extern const TSLanguage* tree_sitter_swift(void);
-/* HPC/compute grammars */
+
 extern const TSLanguage* tree_sitter_cuda(void);
 extern const TSLanguage* tree_sitter_glsl(void);
 extern const TSLanguage* tree_sitter_hlsl(void);
@@ -57,17 +57,17 @@ static const grammar_entry_t GRAMMARS[] = {
     {"markdown",   tree_sitter_markdown},
     {"csv",        tree_sitter_csv},
     {"tsv",        tree_sitter_tsv},
-    /* language grammars */
+    
     {"typescript", tree_sitter_typescript},
     {"java",       tree_sitter_java},
     {"ruby",       tree_sitter_ruby},
     {"julia",      tree_sitter_julia},
     {"kotlin",     tree_sitter_kotlin},
     {"php",        tree_sitter_php},
-    /* generated-at-configure-time grammars */
+    
     {"sql",        tree_sitter_sql},
     {"swift",      tree_sitter_swift},
-    /* HPC/compute grammars */
+    
     {"cuda",       tree_sitter_cuda},
     {"glsl",       tree_sitter_glsl},
     {"hlsl",       tree_sitter_hlsl},
@@ -99,14 +99,14 @@ static const ext_entry_t EXTS[] = {
     {"csv", "csv"},
     {"tsv", "tsv"},
     {"tab", "tsv"},
-    /* language grammars */
+    
     {"ts", "typescript"}, {"tsx", "typescript"},
     {"java", "java"},
     {"rb", "ruby"}, {"rake", "ruby"}, {"gemspec", "ruby"},
     {"jl", "julia"},
     {"kt", "kotlin"}, {"kts", "kotlin"},
     {"php", "php"}, {"phtml", "php"},
-    /* HPC/compute */
+    
     {"cu", "cuda"}, {"cuh", "cuda"},
     {"glsl", "glsl"}, {"vert", "glsl"}, {"frag", "glsl"},
     {"comp", "glsl"}, {"geom", "glsl"}, {"tesc", "glsl"}, {"tese", "glsl"},

@@ -25,8 +25,8 @@ import sys
 
 import numpy as np
 
-# The poured vocab uses U+2581 (SentencePiece word marker); force UTF-8 stdout so
-# printing token surfaces does not crash under a Windows cp1252 console.
+
+
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -65,7 +65,7 @@ def main():
 
     E = T["token_embd.weight"].astype(np.float64)
     nvocab, d = E.shape
-    C = E[:, :d - 1]                       # content dims; last dim is the bias channel
+    C = E[:, :d - 1]                       
     norms = np.linalg.norm(C, axis=1)
     norms[norms == 0] = 1.0
     Cn = C / norms[:, None]
@@ -99,8 +99,8 @@ def main():
     print(f"  separation = {sep:+.2f} sigma "
           f"({'CARRIES consensus geometry' if sep > 3 else 'NO consensus geometry'})")
 
-    # Witness fidelity: the deposited testimony came from the source model's own
-    # geometry — agreement of pairwise cosines is the faithful instrument test.
+    
+    
     import glob
     if glob.glob(os.path.join(tok_dir, "*.safetensors")):
         smap = oracle._shard_map(tok_dir)
@@ -115,9 +115,9 @@ def main():
             Sn = S / sn[:, None]
             m = min(len(Sn), nvocab)
             print(f"\n== witness fidelity: source {src_name} vs cast ==")
-            # Context only: global rank agreement over random pairs. Most random
-            # pairs are sub-threshold noise the witness never deposited (the
-            # SIMILAR_TO plane is top-k structure, degree-capped) — expect weak.
+            
+            
+            
             pa = rng.integers(0, m, 3000)
             pb = rng.integers(0, m, 3000)
             pk = pa != pb
@@ -127,9 +127,9 @@ def main():
             cr = np.argsort(np.argsort(cast_cos)).astype(np.float64)
             rho = float(np.corrcoef(sr, cr)[0, 1])
             print(f"  all-pairs spearman (context, noise included) = {rho:+.4f}")
-            # THE gate: the witness testified about its top similarity structure —
-            # of each probe word's top-10 source neighbors, what fraction does the
-            # cast rank in its top-100 of {m}? Chance is 100/m.
+            
+            
+            
             probes = rng.choice(m, 300, replace=False)
             sims_src = Sn[probes] @ Sn.T
             sims_cast = Cn[probes] @ Cn[:m].T
@@ -162,7 +162,7 @@ def main():
     in_prompt = [inv.get(i, "?") for i in ids[1:]]
     print(f"  prompt-token ranks: " + ", ".join(
         f"{w}={rank[vocab[w]]}" for w in in_prompt if w in vocab))
-    # The actual prediction: what the cast says comes next (the generation check).
+    
     topk = [int(i) for i in order[:15]]
     print("  top-15 next: " + ", ".join(
         f"{inv.get(i, '?')}({logits[i]:+.2f})" for i in topk))

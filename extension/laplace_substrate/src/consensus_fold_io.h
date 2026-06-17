@@ -1,29 +1,29 @@
-/*
- * consensus_fold_io.h — staging/seed reads, partition routing, the consensus_next
- * writer, and Glicko scratch, shared by BOTH terminal-fold lanes:
- * consensus_fold_engine.c (the sort/merge partition lane) and
- * consensus_fold_walks.c (the no-sort trajectory-journal lane).
- *
- * These primitives used to live once in the engine lane while the walk lane was
- * crammed into the same file; splitting the walk lane out promoted the shared
- * surface here so neither lane re-implements it. In particular the partition
- * ROUTING LAW now has ONE spelling per shape (fold_route_identity / _subject),
- * each documented against its SQL twin (consensus_partition_of, 14_period_fold.sql.in)
- * and its C# twin (ConsensusAccumulatingWriter.PartitionOf); and the Glicko
- * observation-scratch realloc (previously copied three times) is fold_scratch_reserve.
- *
- * Include after postgres.h, access/tableam.h, executor/tuptable.h, utils/rel.h,
- * utils/lsyscache.h, utils/memutils.h, utils/timestamp.h, laplace/core/hash128.h
- * and laplace/core/glicko2.h.
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #ifndef LAPLACE_CONSENSUS_FOLD_IO_H
 #define LAPLACE_CONSENSUS_FOLD_IO_H
 
-#define FOLD_IDENT_LEN     48      /* subject(16) ‖ type(16) ‖ object|zero(16) */
+#define FOLD_IDENT_LEN     48      
 #define FOLD_GAMES_BOUND   (INT64CONST(1) << 27)
-#define FOLD_OUT_SLOTS     1024    /* multi-insert batch                      */
+#define FOLD_OUT_SLOTS     1024    
 
-/* ---- leaf datum/catalog readers ---------------------------------------- */
+
 
 static inline void
 fold_read_bytea16(Datum d, uint8 *out)
@@ -43,7 +43,7 @@ fold_hash_lo(const uint8 *id16)
 {
     uint64 lo;
 
-    memcpy(&lo, id16 + 8, 8);      /* bytea image: [0..7]=Hi, [8..15]=Lo, LE */
+    memcpy(&lo, id16 + 8, 8);      
     return lo;
 }
 
@@ -60,14 +60,14 @@ fold_attno(Relation rel, const char *name)
     return attno;
 }
 
-/* ---- partition routing -------------------------------------------------- */
 
-/*
- * Full-identity routing (subject ‖ type ‖ object|zero16): the partition lane's
- * staging is pre-routed this way by the writer (CopyPartitionAsync), so seeds
- * must re-route by the SAME law to land in the matching partition. Twin of the
- * SQL consensus_partition_of and the C# ConsensusAccumulatingWriter.PartitionOf.
- */
+
+
+
+
+
+
+
 static inline int32
 fold_route_identity(const uint8 *ident48, int32 nparts)
 {
@@ -76,18 +76,18 @@ fold_route_identity(const uint8 *ident48, int32 nparts)
                      ^ fold_hash_lo(ident48 + 32)) % (uint64) nparts);
 }
 
-/*
- * Subject-only routing: the walk lane gathers per subject, so the writer routes
- * a subject's whole row-set into one partition by subject.lo, and the walk seed
- * scan must match that (a weaker spelling than fold_route_identity, on purpose).
- */
+
+
+
+
+
 static inline int32
 fold_route_subject(const uint8 *subject16, int32 nparts)
 {
     return (int32) (fold_hash_lo(subject16) % (uint64) nparts);
 }
 
-/* ---- Glicko observation scratch ---------------------------------------- */
+
 
 typedef struct FoldScratch
 {
@@ -96,7 +96,7 @@ typedef struct FoldScratch
     int64                  cap;
 } FoldScratch;
 
-/* Ensure the scratch can hold `games` observations (grows ×2, allocs in cxt). */
+
 static inline void
 fold_scratch_reserve(FoldScratch *s, int64 games)
 {
@@ -111,7 +111,7 @@ fold_scratch_reserve(FoldScratch *s, int64 games)
     }
 }
 
-/* ---- consensus_next multi-insert writer -------------------------------- */
+
 
 typedef struct FoldOut
 {
@@ -197,4 +197,4 @@ fold_out_emit(FoldOut *o,
     o->n_filled++;
 }
 
-#endif                          /* LAPLACE_CONSENSUS_FOLD_IO_H */
+#endif                          

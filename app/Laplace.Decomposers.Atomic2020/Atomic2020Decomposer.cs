@@ -70,16 +70,14 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
         [EnumeratorCancellation] CancellationToken ct)
     {
         int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
-        var witness = new Atomic2020Witness();
 
         foreach (var split in Splits)
         {
             string file = Path.Combine(ecosystemPath, $"{split}.tsv");
             if (!File.Exists(file)) continue;
 
-            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-                file, "tsv", Source, witness, batch, SourceTrust.StructuredCorpus,
-                $"atomic/{split}", reportUnits: null, contextId: SplitId(split), commitEpoch: 0, ct: ct))
+            await foreach (var change in Atomic2020FastIngest.IngestFileAsync(
+                file, split, batch, SplitId(split), ct))
             {
                 yield return change;
             }

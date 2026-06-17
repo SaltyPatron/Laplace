@@ -42,7 +42,7 @@ internal sealed class ExceptionEnvelopeMiddleware
         }
         catch (SubstrateQueryException ex)
         {
-            // DB is up; the query/schema is wrong. Surface the real SQL error, do not mislabel as unavailable.
+            
             _logger.LogError(ex, "Substrate query error.");
             await Results.Json(
                 new ErrorResponse(new ErrorBody("substrate_query_error", "substrate_query_error", ex.Message)),

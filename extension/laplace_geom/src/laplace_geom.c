@@ -501,9 +501,9 @@ pg_laplace_mantissa_unpack(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
-/* Vertex flag-word field decode — the mantissa.h accessors are the single
- * source of the bit layout; the SQL vertex_atom/vertex_tier helpers delegate
- * here instead of re-spelling shifts and masks. */
+
+
+
 PG_FUNCTION_INFO_V1(pg_laplace_vertex_atom);
 
 Datum
@@ -524,10 +524,10 @@ pg_laplace_vertex_tier(PG_FUNCTION_ARGS)
     PG_RETURN_INT16((int16) laplace_vflag_tier((uint64) PG_GETARG_INT64(0)));
 }
 
-/* One C loop over a stored trajectory: every vertex mantissa-unpacked in
- * process. Replaces the per-vertex fmgr lateral (ST_DumpPoints +
- * laplace_mantissa_unpack per point) that the substrate's constituents()
- * surface used to fan out into. Output is bit-identical to that lateral. */
+
+
+
+
 PG_FUNCTION_INFO_V1(pg_laplace_trajectory_constituents);
 
 Datum
@@ -564,4 +564,49 @@ pg_laplace_trajectory_constituents(PG_FUNCTION_ARGS)
     pfree(xyzm);
     lwgeom_free(l);
     return (Datum) 0;
+}
+
+
+
+
+
+PG_FUNCTION_INFO_V1(pg_laplace_trajectory_constituent_ids);
+
+Datum
+pg_laplace_trajectory_constituent_ids(PG_FUNCTION_ARGS)
+{
+    GSERIALIZED *g;
+    LWGEOM *l = lwgeom_from_datum(PG_GETARG_DATUM(0), &g);
+
+    size_t  n = 0;
+    double *xyzm = geom_to_xyzm_buffer(l, "laplace_trajectory_constituent_ids", &n);
+
+    Datum     *elems = (n > 0) ? (Datum *) palloc(sizeof(Datum) * n) : NULL;
+    hash128_t *seen  = (n > 0) ? (hash128_t *) palloc(sizeof(hash128_t) * n) : NULL;
+    int m = 0;
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        mantissa_payload_t payload;
+        mantissa_unpack(&xyzm[i * 4], &payload);
+
+        bool dup = false;
+        for (int j = 0; j < m; ++j)
+            if (memcmp(&seen[j], &payload.entity_id, sizeof(hash128_t)) == 0) { dup = true; break; }
+        if (dup) continue;
+
+        seen[m] = payload.entity_id;
+        bytea *eid_out = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
+        SET_VARSIZE(eid_out, VARHDRSZ + sizeof(hash128_t));
+        memcpy(VARDATA(eid_out), &payload.entity_id, sizeof(hash128_t));
+        elems[m++] = PointerGetDatum(eid_out);
+    }
+
+    pfree(xyzm);
+    lwgeom_free(l);
+
+    ArrayType *result = (m == 0)
+        ? construct_empty_array(BYTEAOID)
+        : construct_array(elems, m, BYTEAOID, -1, false, TYPALIGN_INT);
+    PG_RETURN_ARRAYTYPE_P(result);
 }

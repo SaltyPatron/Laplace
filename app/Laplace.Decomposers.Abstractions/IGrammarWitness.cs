@@ -3,10 +3,10 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// Thin witness contract: map composed grammar field spans to semantic attestations.
-/// Parsing, composition, and PRECEDES live in laplace_core (Tier 0).
-/// </summary>
+
+
+
+
 public interface IGrammarWitness
 {
     string ModalityId { get; }

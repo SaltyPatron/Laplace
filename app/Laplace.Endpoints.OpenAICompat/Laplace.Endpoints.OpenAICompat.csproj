@@ -10,8 +10,8 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <!-- Build-time OpenAPI emit: the committed doc in web/openapi is the codegen source for
-         every non-C# client (openapi-typescript). CI drift-checks it against this build output. -->
+    
+
     <OpenApiDocumentsDirectory>$(MSBuildProjectDirectory)\..\..\web\openapi</OpenApiDocumentsDirectory>
     <OpenApiGenerateDocumentsOptions>--file-name openapi</OpenApiGenerateDocumentsOptions>
   </PropertyGroup>

@@ -36,7 +36,7 @@ static char* add_char(char* text, size_t* text_size, char c, int index) {
     *text_size = MALLOC_STRING_SIZE;
   }
 
-  // will break when indexes advances more than MALLOC_STRING_SIZE
+  
   if (index + 1 >= *text_size) {
     *text_size += MALLOC_STRING_SIZE;
     char* tmp = malloc(*text_size * sizeof(char));
@@ -163,7 +163,7 @@ unsigned tree_sitter_sql_external_scanner_serialize(void *payload, char *buffer)
   if (state == NULL || state->start_tag == NULL) {
     return 0;
   }
-  // + 1 for the '\0'
+  
   int tag_length = strlen(state->start_tag) + 1;
   if (tag_length >= TREE_SITTER_SERIALIZATION_BUFFER_SIZE) {
     return 0;
@@ -180,7 +180,7 @@ unsigned tree_sitter_sql_external_scanner_serialize(void *payload, char *buffer)
 void tree_sitter_sql_external_scanner_deserialize(void *payload, const char *buffer, unsigned length) {
   LexerState *state = (LexerState *)payload;
   state->start_tag = NULL;
-  // A length of 1 can't exists.
+  
   if (length > 1) {
     state->start_tag = malloc(length);
     memcpy(state->start_tag, buffer, length);

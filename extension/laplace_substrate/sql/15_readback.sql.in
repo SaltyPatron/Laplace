@@ -17,17 +17,17 @@ CREATE OR REPLACE FUNCTION register_canonical(p_name text) RETURNS bytea
     SELECT @extschema@.canonical_id(p_name)
 $$;
 
--- T0 reverse lookup (id -> codepoint) straight from the perfcache: the 1.1M-row
--- codepoint_render table this replaced is retired. Returns NULL when the id is
--- not a renderable codepoint id or the perfcache GUC is unset.
+
+
+
 CREATE OR REPLACE FUNCTION codepoint_for_id(p_id bytea)
     RETURNS integer
     AS 'MODULE_PATHNAME', 'pg_laplace_codepoint_for_id'
     LANGUAGE C LAPLACE_STABLE_STRICT;
 
--- Omniglottal separator test: the engine's Unicode White_Space law over the
--- perfcache WB classes, not an ASCII [[:space:]] regex. STRICT: a NULL render
--- is not a separator (the WHERE drops it), matching the old COALESCE(...'x').
+
+
+
 CREATE OR REPLACE FUNCTION is_all_whitespace(p_text text)
     RETURNS boolean
     AS 'MODULE_PATHNAME', 'pg_laplace_is_all_whitespace'
@@ -51,8 +51,8 @@ CREATE OR REPLACE FUNCTION constituents(p_id bytea)
     ORDER BY 1
 $$;
 
--- The vertex flag layout lives ONCE, in mantissa.h: these delegate to the geom
--- C decoders (public.laplace_vertex_*) instead of re-spelling shifts and masks.
+
+
 CREATE OR REPLACE FUNCTION vertex_atom(p_flags bigint) RETURNS integer
     LANGUAGE sql LAPLACE_IMMUTABLE AS $$
     SELECT public.laplace_vertex_atom(p_flags)

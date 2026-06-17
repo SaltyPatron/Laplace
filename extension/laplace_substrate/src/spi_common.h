@@ -1,20 +1,20 @@
-/*
- * spi_common.h -- shared native-substrate helpers (single source of truth).
- *
- * Before 2026-06-10 every native file rolled its own copies of these:
- * copy_bytea_datum existed FIVE times, spi_realize twice (both carrying the
- * same nulls-string bug). Definitions are static inline so call sites keep
- * their historical names and nothing is added to the module symbol surface.
- *
- * SPI nulls-string LAW: a nulls string for SPI_execute_with_args must start
- * ALL-PRESENT ("   ") and mark 'n' per-parameter conditionally. Initializing
- * a slot to 'n' for a parameter that receives a real value silently NULLs it
- * (context arrays, session context, realize language and a LIMIT all shipped
- * broken that way once).
- *
- * All spi_* readers assume the caller is already SPI-connected and return
- * (Datum) 0 on miss.
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #ifndef LAPLACE_SPI_COMMON_H
 #define LAPLACE_SPI_COMMON_H
 
@@ -30,7 +30,7 @@
 #include "laplace/core/relation_law.h"
 #include "laplace/core/glicko2.h"
 
-/* ---- datum / hash utilities ------------------------------------------- */
+
 
 static inline Datum
 copy_bytea_datum(Datum d)
@@ -87,8 +87,8 @@ hash128_eq(const hash128_t *a, const hash128_t *b)
 static inline Datum
 eff_mu_display_numeric(int64 rating, int64 rd)
 {
-    /* the conservative-μ law has ONE compiled source (engine) — never re-spell
-     * `rating - 2*rd` here; it drifted into five native copies once already */
+    
+
     int64 eff = laplace_effective_mu_fp(rating, rd);
     Datum n = DirectFunctionCall1(int8_numeric, Int64GetDatum(eff));
     Datum b = DirectFunctionCall1(int8_numeric, Int64GetDatum(INT64CONST(1000000000)));
@@ -107,7 +107,7 @@ rel_type_id(const char *name)
     return id;
 }
 
-/* ---- single-value SPI reads ------------------------------------------- */
+
 
 static inline Datum
 spi_realize(Datum id, Datum lang)
@@ -170,10 +170,10 @@ spi_word_language(Datum word)
         "SELECT laplace.word_language($1)", 1, argtypes, args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
-    /* word_language is a non-SRF: one row ALWAYS comes back, NULL-valued when
-     * the word has no HAS_LANGUAGE consensus. Copying without the isnull check
-     * detoasted Datum 0 — a backend AV (postmaster reset) on every is_a prompt
-     * whose topic lacked a language (found via crashdump 2026-06-12). */
+    
+
+
+
     d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
     if (isnull)
         return (Datum) 0;
@@ -195,7 +195,7 @@ spi_render_text(Datum id)
     return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
 }
 
-/* synset ids for a word, copied out of the tuptable; returns count */
+
 static inline int
 spi_fetch_synset_ids(Datum word, Datum **out_ids, int *out_n)
 {
@@ -225,4 +225,4 @@ spi_fetch_synset_ids(Datum word, Datum **out_ids, int *out_n)
     return *out_n;
 }
 
-#endif                          /* LAPLACE_SPI_COMMON_H */
+#endif                          

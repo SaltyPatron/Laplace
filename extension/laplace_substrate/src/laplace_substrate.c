@@ -147,9 +147,9 @@ pg_laplace_score(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(laplace_score_fp(PG_GETARG_FLOAT8(0), PG_GETARG_FLOAT8(1)));
 }
 
-/* The conservative-μ law, compiled truth. The SQL eff_mu() mirrors this inline
- * for the ORDER BY hot path; effective_mu() is the law surface a regress pin
- * asserts eff_mu() against, so the inline can never drift from the engine. */
+
+
+
 PG_FUNCTION_INFO_V1(pg_laplace_effective_mu);
 
 Datum
@@ -158,8 +158,8 @@ pg_laplace_effective_mu(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(laplace_effective_mu_fp(PG_GETARG_INT64(0), PG_GETARG_INT64(1)));
 }
 
-/* The neutral/anchor μ, compiled truth. No-arg IMMUTABLE: the planner folds it
- * to a constant, so refuted()/index predicates pay nothing at runtime. */
+
+
 PG_FUNCTION_INFO_V1(pg_laplace_glicko2_neutral_mu);
 
 Datum
@@ -527,9 +527,9 @@ pg_relation_type_in_family(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(in_family != 0);
 }
 
-/* Expose the BANKED NATIVE relation law to SQL so reads/exports stay within-layer
- * (the 11 ranks ARE the layers). The rank already lives in laplace_relation_lookup;
- * these are thin wrappers — no manifest re-read, no SQL rank table needed. */
+
+
+
 PG_FUNCTION_INFO_V1(pg_relation_rank);
 
 Datum
@@ -542,6 +542,70 @@ pg_relation_rank(PG_FUNCTION_ARGS)
     if (rc != 0 || def == NULL)
         PG_RETURN_NULL();
     PG_RETURN_FLOAT8(def->rank);
+}
+
+
+
+
+
+
+
+
+PG_FUNCTION_INFO_V1(pg_relation_rank_resolved);
+
+Datum
+pg_relation_rank_resolved(PG_FUNCTION_ARGS)
+{
+    bytea*    type_ba = PG_GETARG_BYTEA_PP(0);
+    hash128_t cur_id  = bytea_to_hash128(type_ba);
+    const laplace_relation_def_t* def = NULL;
+
+    
+    if (laplace_relation_lookup(&cur_id, &def) == 0 && def != NULL)
+        PG_RETURN_FLOAT8(def->rank);
+
+    if (SPI_connect() != SPI_OK_CONNECT)
+        PG_RETURN_NULL();
+
+    double out_rank = 0.0;
+    bool   found    = false;
+    for (int hop = 0; hop < 8 && !found; hop++)
+    {
+        bytea* cur_ba       = hash128_to_bytea(&cur_id);
+        Oid    argtypes[1]  = { BYTEAOID };
+        Datum  args[1]      = { PointerGetDatum(cur_ba) };
+        bool   isnull;
+        int    rc = SPI_execute_with_args(
+            "SELECT object_id FROM laplace.consensus "
+            "WHERE subject_id = $1 "
+            "  AND type_id = laplace.relation_type_id('IS_A') "
+            "ORDER BY laplace.eff_mu(rating, rd) DESC LIMIT 1",
+            1, argtypes, args, NULL, true, 1);
+        if (rc != SPI_OK_SELECT || SPI_processed == 0)
+            break;
+
+        Datum pd = SPI_getbinval(SPI_tuptable->vals[0],
+                                 SPI_tuptable->tupdesc, 1, &isnull);
+        if (isnull)
+            break;
+
+        hash128_t parent_id = bytea_to_hash128((bytea*) DatumGetPointer(pd));
+        const laplace_relation_def_t* pdef = NULL;
+        if (laplace_relation_lookup(&parent_id, &pdef) == 0 && pdef != NULL)
+        {
+            out_rank = pdef->rank;   
+            found    = true;
+        }
+        else
+        {
+            cur_id = parent_id;      
+        }
+    }
+
+    SPI_finish();
+    if (found)
+        PG_RETURN_FLOAT8(out_rank);
+    PG_RETURN_NULL();
 }
 
 PG_FUNCTION_INFO_V1(pg_relation_canonical);
@@ -563,6 +627,11 @@ void
 _PG_init(void)
 {
     (void)laplace_dynamics_init();
-    laplace_substrate_perfcache_init();
+    
+
+
+
+
     laplace_corpus_guc_init();
+    laplace_substrate_perfcache_init();
 }

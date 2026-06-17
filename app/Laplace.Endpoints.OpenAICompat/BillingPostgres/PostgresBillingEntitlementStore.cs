@@ -59,8 +59,8 @@ internal sealed class PostgresBillingEntitlementStore : IBillingEntitlementStore
         string tenant, BillingPlan plan, string? stripeCustomerId, string? stripeSubscriptionId,
         DateTimeOffset renewedAt, CancellationToken ct)
     {
-        // Renewal resets the period and used credits but keeps existing Stripe ids when the
-        // webhook omits them (invoice.paid may carry only the subscription).
+        
+        
         const string sql = """
             INSERT INTO app.billing_entitlements
                 (tenant, plan_id, status, period_start, period_end, monthly_credits, used_credits,
@@ -156,9 +156,9 @@ internal sealed class PostgresBillingEntitlementStore : IBillingEntitlementStore
         if (units <= 0)
             return (false, new BillingCreditDebit(tenant, string.Empty, serviceId, units, 0, DateTimeOffset.MinValue, "invalid_units"));
 
-        // Atomic claim: pick the active in-period entitlement with the largest credit limit
-        // for this service that still has >= units remaining, and increment its used count —
-        // one statement, FOR UPDATE row lock, no read-modify-write race.
+        
+        
+        
         const string sql = """
             WITH candidate AS (
                 SELECT tenant, plan_id,

@@ -50,14 +50,14 @@ public class SecondaryIndexPolicyTests
             Assert.True(scope.Dropped);
             Assert.False(scope.TableWasPopulated);
             Assert.Single(scope.DroppedIndexDefs);
-            Assert.Equal(0, await SecondaryIndexCountAsync()); // dropped for index-free load
+            Assert.Equal(0, await SecondaryIndexCountAsync()); 
 
             await scope.RebuildAsync();
             Assert.True(scope.Rebuilt);
-            Assert.Equal(1, await SecondaryIndexCountAsync()); // restored verbatim
+            Assert.Equal(1, await SecondaryIndexCountAsync()); 
         }
 
-        // dispose after an explicit rebuild is a no-op; the index stays exactly once.
+        
         Assert.Equal(1, await SecondaryIndexCountAsync());
     }
 
@@ -72,7 +72,7 @@ public class SecondaryIndexPolicyTests
         Assert.False(scope.Dropped);
         Assert.True(scope.TableWasPopulated);
         Assert.Empty(scope.DroppedIndexDefs);
-        Assert.Equal(1, await SecondaryIndexCountAsync()); // untouched
+        Assert.Equal(1, await SecondaryIndexCountAsync()); 
     }
 
     [Fact]
@@ -81,8 +81,8 @@ public class SecondaryIndexPolicyTests
         await ResetTableAsync(seedRow: false);
         var policy = new SecondaryIndexPolicy(_pg.DataSource);
 
-        // The structural guarantee: a load that throws (or simply never rebuilds explicitly)
-        // must NOT leave the table index-free. Dispose alone restores it.
+        
+        
         await using (var scope = await policy.SuspendForBulkLoadAsync(Table))
         {
             Assert.Equal(0, await SecondaryIndexCountAsync());

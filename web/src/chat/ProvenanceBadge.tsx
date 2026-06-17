@@ -1,9 +1,9 @@
 import type { ProvenanceEntry } from '../store';
 
-/**
- * eff_mu is the Glicko-2 95%-confidence lower bound on truth (rating - 2*rd).
- * Color scales red→green across the displayed range; witnesses = evidence fan-in.
- */
+
+
+
+
 export function ProvenanceBadge({ entry }: { entry: ProvenanceEntry }) {
   if (entry.ordUsed !== undefined) {
     return <span className="badge badge-ord" title="n-gram context order used for this token">ord {entry.ordUsed}</span>;
@@ -12,7 +12,7 @@ export function ProvenanceBadge({ entry }: { entry: ProvenanceEntry }) {
 
   const mu = entry.effMu;
   const clamped = Math.max(0, Math.min(1, mu));
-  const hue = Math.round(clamped * 120); // 0 = red, 120 = green
+  const hue = Math.round(clamped * 120); 
   return (
     <span
       className="badge badge-mu"

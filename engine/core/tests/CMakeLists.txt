@@ -38,8 +38,8 @@ target_link_libraries(laplace_core_tests
     PRIVATE laplace_core GTest::gtest_main
 )
 
-# PRE_TEST: discover at ctest time (not link time) so env.cmd PATH + copied DLLs are present.
-# POST_BUILD discovery fails with 0xc0000139 when laplace_core export ordinals drift vs a stale .exe.
+
+
 gtest_discover_tests(laplace_core_tests
     DISCOVERY_MODE PRE_TEST
     DISCOVERY_TIMEOUT 120

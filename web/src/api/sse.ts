@@ -1,9 +1,9 @@
 import { laplaceHeaders, PaymentRequiredError, ApiError, type ApiOptions, type PaymentRequiredResponse } from './client';
 
-/**
- * SSE chunk shape served by the endpoint. The root-level `laplace` field is the
- * per-line provenance receipt (eff_mu/witnesses on converse, ord_used on generation).
- */
+
+
+
+
 export interface ChatChunk {
   id: string;
   object: string;
@@ -21,10 +21,10 @@ export interface ChatChunk {
   };
 }
 
-/**
- * Streaming via fetch + ReadableStream, never EventSource — EventSource cannot send
- * the X-Laplace-Tenant / X-Laplace-Quote-Id headers, and every gated stream needs them.
- */
+
+
+
+
 export async function* streamChat(
   path: string,
   payload: unknown,
@@ -42,7 +42,7 @@ export async function* streamChat(
     try {
       body = await res.json();
     } catch {
-      /* non-JSON */
+      
     }
     if (res.status === 402 && body) throw new PaymentRequiredError(body as PaymentRequiredResponse);
     throw new ApiError(res.status, `${res.status} ${res.statusText}`);

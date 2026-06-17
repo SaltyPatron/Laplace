@@ -1,8 +1,8 @@
-/*
- * graph_cascade.c - the cascade SRF (A* path realization over the consensus
- * graph; delegates the search to laplace.astar_path). Split out of
- * graph_geometry_reads.c.
- */
+
+
+
+
+
 #include "postgres.h"
 
 #include "catalog/pg_type.h"

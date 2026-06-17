@@ -2,18 +2,18 @@ using Laplace.Api.Contracts;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
-/// <summary>
-/// The substrate read surface consumed by endpoint handlers. The production implementation
-/// (<see cref="SubstrateClient"/>) executes laplace.* SQL functions over Npgsql; tests substitute
-/// a deterministic fake so route response shapes can be pinned without a live database.
-/// </summary>
+
+
+
+
+
 internal interface ISubstrateClient
 {
-    /// <inheritdoc cref="SubstrateClient.ConverseTurnsAsync"/>
+    
     Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
         IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct);
 
-    /// <inheritdoc cref="SubstrateClient.WalkTextStreamAsync"/>
+    
     IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
         string prompt,
         int steps          = 32,
@@ -33,6 +33,6 @@ internal interface ISubstrateClient
     Task<IReadOnlyList<ExplainTraceStep>> ExplainTraceAsync(
         string prompt, int depth, int beam, bool includeEvidence, CancellationToken ct);
 
-    /// <inheritdoc cref="SubstrateClient.EvidenceAsync"/>
+    
     Task<EntityEvidence?> EvidenceAsync(string target, int limit, CancellationToken ct);
 }

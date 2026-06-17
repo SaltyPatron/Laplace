@@ -28,4 +28,4 @@ laplace_spi_finish(bool need_finish)
         SPI_finish();
 }
 
-#endif /* LAPLACE_SPI_NESTED_H */
+#endif 

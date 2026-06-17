@@ -47,20 +47,26 @@ internal static class FoundryCommands
         if (sub == "substrate")
         {
             string? recipeFrom = null, tokenizerDir = null;
-            // Substrate-native vocab: the token list is SELECTED from the substrate's own
-            // content entities (the most-connected wordforms) and the shape (dim/layers/
-            // heads/ffn) is declared on the command line — the foundry generates a fresh
-            // embed/lm_head/operators at that shape. No foreign tokenizer, no source model.
+            
+            
+            
+            
             int nativeVocab = 0, nativeDim = 0, nativeLayers = 0, nativeHeads = 0, nativeKv = 0, nativeFfn = 0;
-            // --crawl "kung,fu,martial,arts": the vocab is the SEEDED CRAWL neighborhood of
-            // those words (foundry_vocab_crawl), not a global frequency top-N. The token list
-            // is exactly what the seeds reference/relate to in the consensus.
+            
+            
+            
             string? crawlSeeds = null; int crawlHops = 3, crawlFanout = 64;
+            
+            
+            
+            
+            bool grapheme = false;
             var positional = new List<string>();
             for (int i = 1; i < args.Length; i++)
             {
                 switch (args[i])
                 {
+                    case "--grapheme-floor": grapheme = true; break;
                     case "--recipe-from" when i + 1 < args.Length: recipeFrom = args[++i]; break;
                     case "--tokenizer"   when i + 1 < args.Length: tokenizerDir = args[++i]; break;
                     case "--native-vocab" when i + 1 < args.Length: nativeVocab = int.Parse(args[++i]); break;
@@ -88,7 +94,7 @@ internal static class FoundryCommands
             if (nativeVocab > 0)
             {
                 if (nativeDim <= 0) return Fail("--native-vocab needs --dim <D> (the hidden size the foundry casts to)");
-                var nativeMold = await MaterializeNativeMoldAsync(nativeVocab, nativeDim, nativeLayers, nativeHeads, nativeKv, nativeFfn, crawlSeeds, crawlHops, crawlFanout);
+                var nativeMold = await MaterializeNativeMoldAsync(nativeVocab, nativeDim, nativeLayers, nativeHeads, nativeKv, nativeFfn, crawlSeeds, crawlHops, crawlFanout, grapheme);
                 if (nativeMold is null) return 2;
                 recipePath = nativeMold;
             }
@@ -101,7 +107,7 @@ internal static class FoundryCommands
                 if (molded is null) return 2;
                 recipePath = molded;
             }
-            return await SynthesizeFromSubstrateAsync(recipePath, outputPath);
+            return await SynthesizeFromSubstrateAsync(recipePath, outputPath, grapheme);
         }
 
         return Fail(
@@ -110,9 +116,9 @@ internal static class FoundryCommands
             + "  substrate --recipe-from <id-prefix> --tokenizer <dir> [out]  pour a mold discovered from a deposed model ('*' = the only one)\n");
     }
 
-    // Reads a discovered recipe out of the substrate (laplace.model_recipes) and lays
-    // it down as a mold directory: config.json straight from the DB, tokenizer files
-    // copied from the caller's dir. Returns the config.json path, or null after Fail.
+    
+    
+    
     private static async Task<string?> MaterializeDiscoveredMoldAsync(string recipeIdPrefix, string tokenizerDir)
     {
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
@@ -142,17 +148,17 @@ internal static class FoundryCommands
         return Path.Combine(moldDir, "config.json");
     }
 
-    // Lays down a mold (config.json + tokenizer.json + tokenizer.model) whose VOCAB is the
-    // substrate's own content entities (laplace.foundry_vocab — the invention's selectable
-    // token list, ranked by consensus richness so the basis carries geometry) and whose
-    // SHAPE is declared on the command line. The tokenizer is a real SentencePiece (SPM)
-    // model: 256 byte-fallback tokens (any character/newline encodes), ▁-prefixed word
-    // pieces with frequency scores, CONTROL/UNKNOWN specials. Word surfaces are content-
-    // addressed, so the parser re-derives the SAME entity id (and coords) that carry the
-    // consensus edges. The foundry casts a fresh embed/lm_head/operators at the asked shape.
+    
+    
+    
+    
+    
+    
+    
+    
     private static async Task<string?> MaterializeNativeMoldAsync(
         int vocabN, int dim, int layers, int heads, int kvHeads, int ffn,
-        string? crawlSeeds = null, int crawlHops = 3, int crawlFanout = 64)
+        string? crawlSeeds = null, int crawlHops = 3, int crawlFanout = 64, bool grapheme = false)
     {
         if (dim % 64 != 0 && heads <= 0)
             { Fail($"--dim {dim} is not a multiple of 64 — pass --heads explicitly so dim/heads is the head size"); return null; }
@@ -165,42 +171,89 @@ internal static class FoundryCommands
         if (layers  <= 0) layers  = 12;
         if (9 * layers + 3 > 300)
             { Fail($"--layers {layers} exceeds the tensor-slot budget (9·L+3 ≤ 300 → L ≤ 33)"); return null; }
-        if (ffn     <= 0) ffn = ((8 * dim / 3 + 255) / 256) * 256;   // canonical SwiGLU width, ÷256
+        if (ffn     <= 0) ffn = ((8 * dim / 3 + 255) / 256) * 256;   
 
-        CodepointPerfcache.Load(ResolveBlob());   // render_text path needs the floor oracle (this process)
+        CodepointPerfcache.Load(ResolveBlob());   
 
-        // The token list is the substrate's own — a permanent substrate function selects it
-        // (the CLI never improvises the SQL). Either:
-        //   --crawl "a,b,c"  → foundry_vocab_crawl: the SEEDED neighborhood of those words
-        //                      (native BFS over the consensus' lexical relations), focused +
-        //                      self-defining — what the seeds reference/relate to.
-        //   (default)        → foundry_vocab: the most-connected wordforms + their 1-hop
-        //                      definitional closure.
+        
+        
+        
+        
+        
+        
+        
         var sel = new List<(string surface, long weight)>(vocabN);
+        var atoms = new List<(string surface, long weight)>();   // grapheme/alphabet floor (BPE base)
         string[]? seeds = crawlSeeds
             ?.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string[] crawlS = [];
         await using (var ds = new NpgsqlDataSourceBuilder(ConnString).Build())
         await using (var conn = await ds.OpenConnectionAsync())
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandTimeout = 0;   // the crawl/closure runs server-side; never hit the read timeout
-            if (seeds is { Length: > 0 })
+            cmd.CommandTimeout = 0;   
+            if (grapheme)
             {
-                cmd.CommandText = "SELECT surface, weight FROM laplace.foundry_vocab_crawl($1, $2, $3, $4)";
-                cmd.Parameters.AddWithValue(seeds);
+                cmd.CommandText = "SELECT surface, weight FROM laplace.grapheme_floor_vocab($1)";
                 cmd.Parameters.AddWithValue(vocabN);
-                cmd.Parameters.AddWithValue(crawlHops);
-                cmd.Parameters.AddWithValue(crawlFanout);
-                Console.WriteLine($"  vocab: seeded crawl from [{string.Join(", ", seeds)}] (hops {crawlHops}, fanout {crawlFanout})");
+                Console.WriteLine($"  vocab: GRAPHEME FLOOR ({vocabN} codepoint/grapheme atoms — "
+                    + "tokenizes any text char-by-char in-engine, no merge path)");
             }
             else
             {
-                cmd.CommandText = "SELECT surface, weight FROM laplace.foundry_vocab($1)";
+                
+                
+                
+                
+                
+                
+                crawlS = seeds is { Length: > 0 } ? seeds : [];
+                if (crawlS.Length == 0)
+                {
+                    int seedN = Math.Min(vocabN, FoundryExport.EnvInt("LAPLACE_FOUNDRY_CRAWL_SEEDS", 1000));
+                    var ss = new List<string>(seedN);
+                    await using (var sc = conn.CreateCommand())
+                    {
+                        sc.CommandTimeout = 0;
+                        sc.CommandText = "SELECT surface FROM laplace.corpus_word_vocab($1, $2)";
+                        sc.Parameters.AddWithValue(seedN);
+                        sc.Parameters.AddWithValue(FoundryExport.EnvInt("LAPLACE_FOUNDRY_WORD_TRAJS", 400000));
+                        await using var sr = await sc.ExecuteReaderAsync();
+                        while (await sr.ReadAsync()) ss.Add(sr.GetString(0));
+                    }
+                    crawlS = ss.ToArray();
+                    Console.WriteLine($"  vocab: corpus-seeded relation-closed crawl ({crawlS.Length} corpus seeds → {vocabN}, hops {crawlHops}, fanout {crawlFanout})");
+                }
+                else
+                    Console.WriteLine($"  vocab: seeded crawl from [{string.Join(", ", seeds!)}] (hops {crawlHops}, fanout {crawlFanout})");
+                cmd.CommandText = "SELECT surface, weight FROM laplace.foundry_vocab_crawl($1, $2, $3, $4)";
+                cmd.Parameters.AddWithValue(crawlS);
                 cmd.Parameters.AddWithValue(vocabN);
+                cmd.Parameters.AddWithValue(crawlHops);
+                cmd.Parameters.AddWithValue(crawlFanout);
             }
-            await using var rdr = await cmd.ExecuteReaderAsync();
-            while (await rdr.ReadAsync())
-                sel.Add((rdr.GetString(0), rdr.GetInt64(1)));
+            await using (var rdr = await cmd.ExecuteReaderAsync())
+            {
+                while (await rdr.ReadAsync())
+                    sel.Add((rdr.GetString(0), rdr.GetInt64(1)));
+            }
+
+            // Grapheme/alphabet atom floor (single codepoints/graphemes) from the substrate, laid
+            // below words so every character is covered without byte-bashing (BPE base before n-grams).
+            if (!grapheme)
+            {
+                await using var ac = conn.CreateCommand();
+                ac.CommandTimeout = 0;
+                ac.CommandText = "SELECT surface, weight FROM laplace.grapheme_floor_vocab($1)";
+                ac.Parameters.AddWithValue(FoundryExport.EnvInt("LAPLACE_FOUNDRY_ATOM_FLOOR", 768));
+                await using var ar = await ac.ExecuteReaderAsync();
+                while (await ar.ReadAsync()) atoms.Add((ar.GetString(0), ar.GetInt64(1)));
+            }
+            
+            
+            
+            if (!grapheme && crawlS.Length > 0)
+                await PinCrawlSeedsInPlaceAsync(conn, crawlS, sel, vocabN);
         }
         if (sel.Count == 0)
         {
@@ -210,43 +263,67 @@ internal static class FoundryCommands
             return null;
         }
 
-        // The ordered SentencePiece table (id = list index): specials, the 256-byte floor,
-        // then ▁-prefixed word pieces. SP type: 1=NORMAL, 2=UNKNOWN, 3=CONTROL, 6=BYTE.
-        // Word score = log-degree (frequent/rich words win longest-match); bytes score low
-        // so they are fallback only; the word always beats its byte decomposition.
-        var pieces = new List<(string piece, float score, int type)>(3 + 256 + sel.Count);
-        pieces.Add(("<unk>", 0f, 2));
-        pieces.Add(("<s>",   0f, 3));
-        pieces.Add(("</s>",  0f, 3));
-        for (int b = 0; b < 256; b++) pieces.Add(($"<0x{b:X2}>", -20f, 6));
-        foreach (var (surface, weight) in sel)
-            pieces.Add(("▁" + surface, (float)(Math.Log(weight + 1.0) + 1.0), 1));
+        
+        
+        
+        
+        var pieces = new List<(string piece, float score, int type)>(3 + 256 + atoms.Count + sel.Count * 2);
+        var seenPiece = new HashSet<string>(StringComparer.Ordinal);
+        bool AddPiece(string p, float score, int type)
+        { if (!seenPiece.Add(p)) return false; pieces.Add((p, score, type)); return true; }
+        AddPiece("<unk>", 0f, 2);
+        AddPiece("<s>",   0f, 3);
+        AddPiece("</s>",  0f, 3);
+        for (int b = 0; b < 256; b++) AddPiece($"<0x{b:X2}>", -20f, 6);
+        if (grapheme)
+        {
+            
+            
+            
+            AddPiece("▁", 1f, 1);
+            foreach (var (surface, weight) in sel)
+                AddPiece(surface, (float)(Math.Log(weight + 1.0) + 1.0), 1);
+        }
+        else
+        {
+            
+            
+            
+            
+            
+            
+            
+            
+            // atoms first (low ids, fallback scores), then words on top — BPE base before n-grams,
+            // so any character is covered. The atom set is also the perfcache/deploy package (ASCII min).
+            int atomCount = 0;
+            foreach (var (surface, _) in atoms)
+                if (AddPiece(surface, -2.0f, 1)) atomCount++;
+            int aliases = 0;
+            foreach (var (surface, weight) in sel)
+            {
+                float sc = (float)(Math.Log(weight + 1.0) + 1.0);
+                AddPiece("▁" + surface, sc, 1);
+                if (!(surface.Length == 1 && surface[0] < 128) && AddPiece(surface, sc, 1)) aliases++;
+            }
+            Console.WriteLine($"  BPE floor: 3 special + 256 byte + {atomCount:N0} grapheme atoms; "
+                + $"+{sel.Count:N0} words, +{aliases:N0} bare aliases = {pieces.Count:N0} pieces");
+        }
         int vocabSize = pieces.Count;
         Console.WriteLine($"  native vocab: {sel.Count:N0} substrate word entities + 256 byte floor + 3 specials = {vocabSize:N0}");
-
-        // FAITHFUL transcription (attestations ARE the tensors): embed and lm_head are the
-        // low-rank factors of the rank-weighted rated adjacency A (truncated SVD to rank=dim),
-        // intermediate layers are no-ops. dim is a NORMAL hidden width (the SVD rank, e.g. 512),
-        // NOT vocab — a 32k-token model is 32000×dim, never 32000². Only constraint: one no-op
-        // layer (the readout transform is the factorization, depth carries no operator here).
-        if (FoundryExport.EnvInt("LAPLACE_FOUNDRY_FAITHFUL", 0) != 0)
-        {
-            layers = 1;
-            Console.WriteLine($"  FAITHFUL: dim={dim} (SVD rank), 1 no-op layer, embed=U√S, lm_head=V√S of A");
-        }
 
         string moldDir = Path.Combine(Path.GetTempPath(), $"laplace-native-mold-d{dim}-v{vocabSize}");
         Directory.CreateDirectory(moldDir);
 
-        // tokenizer.json — the parser reads this to map each piece to its content entity
-        // (▁word → word entity; <0xXX> → byte atom; specials flagged). vocab key = the piece.
+        
+        
         await using (var fs = File.Create(Path.Combine(moldDir, "tokenizer.json")))
         await using (var w = new System.Text.Json.Utf8JsonWriter(fs))
         {
             w.WriteStartObject();
             w.WriteString("version", "1.0");
             w.WriteStartArray("added_tokens");
-            for (int i = 0; i < 3; i++)   // the specials are the only special tokens
+            for (int i = 0; i < 3; i++)   
             {
                 w.WriteStartObject();
                 w.WriteNumber("id", i);
@@ -265,12 +342,12 @@ internal static class FoundryCommands
             w.WriteEndObject();
         }
 
-        // tokenizer.model — the real SentencePiece proto (pieces + scores + types) that
-        // WriteGgufMetadata reads to emit a correct SPM tokenizer into the gguf.
+        
+        
         WriteSentencePieceModel(Path.Combine(moldDir, "tokenizer.model"), pieces);
 
-        // config.json: a flat llama recipe at the asked shape (the native recipe parser is
-        // top-level-only; every field is a scalar/array).
+        
+        
         await using (var fs = File.Create(Path.Combine(moldDir, "config.json")))
         await using (var w = new System.Text.Json.Utf8JsonWriter(fs, new System.Text.Json.JsonWriterOptions { Indented = true }))
         {
@@ -298,8 +375,8 @@ internal static class FoundryCommands
         return Path.Combine(moldDir, "config.json");
     }
 
-    // Write a minimal SentencePiece ModelProto: repeated field 1 = SentencePiece{ piece(1,
-    // string), score(2, float), type(3, varint) }. ParseSentencePieceModel reads exactly this.
+    
+    
     private static void WriteSentencePieceModel(string path, IReadOnlyList<(string piece, float score, int type)> pieces)
     {
         static void Varint(System.IO.Stream s, ulong v) { while (v >= 0x80) { s.WriteByte((byte)(v | 0x80UL)); v >>= 7; } s.WriteByte((byte)v); }
@@ -309,21 +386,34 @@ internal static class FoundryCommands
         {
             using var inner = new System.IO.MemoryStream();
             byte[] pb = Encoding.UTF8.GetBytes(piece);
-            Tag(inner, 1, 2); Varint(inner, (ulong)pb.Length); inner.Write(pb);   // piece
-            Tag(inner, 2, 5); inner.Write(BitConverter.GetBytes(score));          // score (float32 LE)
-            Tag(inner, 3, 0); Varint(inner, (ulong)type);                         // type
+            Tag(inner, 1, 2); Varint(inner, (ulong)pb.Length); inner.Write(pb);   
+            Tag(inner, 2, 5); inner.Write(BitConverter.GetBytes(score));          
+            Tag(inner, 3, 0); Varint(inner, (ulong)type);                         
             byte[] ib = inner.ToArray();
-            Tag(ms, 1, 2); Varint(ms, (ulong)ib.Length); ms.Write(ib);            // ModelProto.pieces[]
+            Tag(ms, 1, 2); Varint(ms, (ulong)ib.Length); ms.Write(ib);            
         }
         File.WriteAllBytes(path, ms.ToArray());
     }
 
-    private static async Task<int> SynthesizeFromSubstrateAsync(string recipePath, string outputPath)
+    private static async Task<int> SynthesizeFromSubstrateAsync(string recipePath, string outputPath, bool grapheme = false)
     {
         if (string.IsNullOrEmpty(recipePath) || !File.Exists(recipePath))
             return Fail(
                 "usage: laplace synthesize substrate <recipe.json> [output.gguf]\n"
                 + $"  (recipe not found: {recipePath})");
+
+        // Build-a-bear recipe? Route to the descriptor-driven, per-head synthesis path
+        // (each head = its own operator). Otherwise fall through to the HF/Llama foundry path.
+        string recipeText = await File.ReadAllTextAsync(recipePath);
+        if (recipeText.Contains("\"laplace.recipe\"", StringComparison.Ordinal))
+        {
+            var babDesc = RecipeDescriptor.Parse(recipeText);
+            string babDir = Path.GetDirectoryName(recipePath) ?? ".";
+            string babTok = Path.Combine(babDir, "tokenizer.json");
+            if (!File.Exists(babTok))
+                return Fail($"tokenizer.json not found alongside recipe: {babTok}");
+            return await SynthesizeBuildABearAsync(babDesc, babDir, babTok, outputPath);
+        }
 
         Console.WriteLine($"synthesize substrate (foundry) → {outputPath}");
         CodepointPerfcache.Load(ResolveBlob());
@@ -342,6 +432,12 @@ internal static class FoundryCommands
         foreach (var t in tokens)
         {
             if (t.TokenId < 0 || t.TokenId >= vocab) continue;
+            
+            
+            
+            
+            
+            if (grapheme && t.IsByteLevel) continue;
             if (!tokenSlots.TryGetValue(t.EntityId, out var slots))
                 tokenSlots[t.EntityId] = slots = new List<int>(1);
             slots.Add(t.TokenId);
@@ -368,48 +464,38 @@ internal static class FoundryCommands
                 tensorCount = SynthInterop.ArchTemplateRequiredTensors(tmplHandle, recipeHandle, sp, (nuint)specs.Length);
         }
         if (tensorCount <= 0) return Fail($"arch_template_required_tensors returned {tensorCount}");
-        Console.WriteLine($"  recipe + arch template: {tensorCount} tensor slots, vocab={vocab}, hidden={dModel}");
+        Console.WriteLine($"  recipe + arch template: {tensorCount} tensor slots, vocab={vocab}, hidden={dModel}, "
+            + $"layers={nLayers}, heads={nHeadsR}/{nKvR}, ffn={intermR}");
+
+        if (RejectRetiredFoundryEnvVars() is { } retired)
+            return Fail(retired);
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
 
-        // ── FAITHFUL transcription path ───────────────────────────────────────────────
-        // attestations ARE the tensors — no basis, no SVD, no operators, no gains, no PMI,
-        // no rank bands, no hand-typed weights. embed = identity, lm_head = the rank-weighted
-        // rated adjacency A (read whole from consensus_adjacency, rank looked up per edge from
-        // the banked law), layers = no-op. logits[Y] = A[Y,X] exactly: the GEMM is the lookup.
-        if (FoundryExport.EnvInt("LAPLACE_FOUNDRY_FAITHFUL", 0) != 0)
-        {
-            int faithfulRc = await WriteFaithfulGgufAsync(
-                ds, recipe, tokens, tokenSlots, vocab, dModel, modelDir, outputPath, specs, tensorCount);
-            SynthInterop.ArchTemplateFree(tmplHandle);
-            SynthInterop.RecipeFree(recipeHandle);
-            return faithfulRc == 0 ? 0 : Fail($"faithful foundry write failed (status {faithfulRc})");
-        }
-
-        // ── read the consensus planes (one set-based query each; entity→ordinal is
-        // perf-cache territory, the DB is never asked per token). The pour draws from
-        // BOTH witness classes over the same token entities: the model behavioral
-        // planes AND the corpus sequence consensus — "the capital of" → "France" is
-        // PRECEDES testimony, and it is exactly what the completion operator encodes.
+        
+        
+        
+        
+        
         int degreeCap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_LE_DEGREE", 48);
         var swPour = Stopwatch.StartNew();
-        // The export reads the FOLDED CONSENSUS — the product of the ingest-time fold, not
-        // the raw geometry. The trajectory order (precedes/follows) was already folded into
-        // the PRECEDES relation at deposit; re-deriving co-occurrence from the trajectories at
-        // export time is recomputing what consensus already holds. So every operator role is
-        // ONE vocab-bounded, INDEX-DRIVEN read (entity_relation_plane: the vocab×vocab edges of
-        // the role's relation set, degree-capped server-side via the (subject_id, type_id)
-        // index) — microseconds, no scan, no corpus build. A deposited model is NOT required;
-        // its behavioral relations (ATTENDS/OV_RELATES/COMPLETES_TO) just join when present.
-        // WITHIN-LAYER reads (the ranks ARE the layers): each role plane is one rank band,
-        // content objects only, eff_mu weights — no flattening, no app/structural metadata
-        // (HAS_POS etc.), no unnamed types. consensus_layer_plane enforces it server-side.
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         Task<FoundryExport.PlaneCoo> LayerAsync(double lo, double hi)
             => FoundryExport.ReadLayerPlaneAsync(ds, lo, hi, tokenSlots, degreeCap);
-        var simTask = LayerAsync(0.50, 0.60);   // equivalence (0.55): sameness/synonym  → embedding
-        var relTask = LayerAsync(0.68, 0.86);   // taxonomic+partitive (0.82/0.73): is-a/has-part → V/O
-        var preTask = LayerAsync(0.60, 0.68);   // causal (0.64): what follows/results    → FFN
-        var attTask = LayerAsync(0.30, 0.50);   // associative+oppositional (0.36/0.45)    → attention
+        var simTask = LayerAsync(0.50, 0.60);   
+        var relTask = LayerAsync(0.68, 0.86);   
+        var preTask = LayerAsync(0.60, 0.68);   
+        var attTask = LayerAsync(0.30, 0.50);   
         await Task.WhenAll(simTask, relTask, preTask, attTask);
         var sim = FoundryExport.Normalize(simTask.Result);
         var rel = FoundryExport.Normalize(relTask.Result);
@@ -422,8 +508,26 @@ internal static class FoundryCommands
         if (planeEdges == 0)
             return Fail("no entity→entity consensus over this vocab — ingest text first");
 
-        // ── generate the basis: LE over the union graph, GSO, Procrustes-anchored
-        // to token content coordinates, deterministic capacity fill, bias channel ──
+        
+        
+        
+        
+        int trajGap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_TRAJ_GAP", Math.Max(2, Math.Min(nLayers, 8)));
+        var swTraj = Stopwatch.StartNew();
+        var traj = FoundryExport.Normalize(
+            await FoundryExport.ReadTrajectoryStrideAsync(ds, trajGap, tokenSlots, degreeCap));
+        Console.WriteLine($"  trajectory order ladder read in {swTraj.Elapsed.TotalSeconds:F1}s "
+            + $"(gap≤{trajGap}): {traj.Nnz:N0} ordered continuation edges");
+
+        
+        
+        
+        var adjacency = FoundryExport.Normalize(
+            await FoundryExport.ReadAdjacencyAsync(ds, tokenSlots, degreeCap));
+        Console.WriteLine($"  rank-weighted adjacency read: {adjacency.Nnz:N0} content edges (banked relation_rank)");
+
+        
+        
         var anchors = new double[vocab][];
         foreach (var t in tokens)
         {
@@ -431,77 +535,164 @@ internal static class FoundryCommands
             anchors[t.TokenId] = [t.ContentX, t.ContentY, t.ContentZ, t.ContentM];
         }
         var basisSeed = Hash128.Blake3(recipe.CanonicalJson);
+
+        
+        
+        
+        
+        
+        
+        
+        
+        string attnMetric = Environment.GetEnvironmentVariable("LAPLACE_FOUNDRY_ATTN_METRIC") ?? "";
+        var attnPlane = att;
+        if (attnMetric is "frechet" or "hausdorff" or "angular")
+        {
+            int mK = FoundryExport.EnvInt("LAPLACE_FOUNDRY_METRIC_K", 16);
+            int mProbe = FoundryExport.EnvInt("LAPLACE_FOUNDRY_METRIC_PROBE", 64);
+            var swMetric = Stopwatch.StartNew();
+            attnPlane = FoundryExport.Normalize(
+                await FoundryExport.ReadMetricEdgesAsync(ds, tokenSlots, attnMetric, mK, mProbe, degreeCap));
+            Console.WriteLine($"  METRIC HEAD ({attnMetric}): {attnPlane.Nnz:N0} trajectory-metric edges "
+                + $"in {swMetric.Elapsed.TotalSeconds:F1}s — a head transcribes laplace_{attnMetric}_4d, not a learned pattern");
+            
+            
+            int coordFilled = await FoundryExport.FillCoordAnchorsAsync(ds, tokenSlots, anchors);
+            if (Environment.GetEnvironmentVariable("LAPLACE_FOUNDRY_COORD_DIRECT") is null)
+                Environment.SetEnvironmentVariable("LAPLACE_FOUNDRY_COORD_DIRECT", "1");
+            if (Environment.GetEnvironmentVariable("LAPLACE_FOUNDRY_COORD_SCALE") is null)
+                Environment.SetEnvironmentVariable("LAPLACE_FOUNDRY_COORD_SCALE", "20");   
+            Console.WriteLine($"  S³ frame: {coordFilled:N0} tokens placed at their native coordinate verbatim (no LE/Procrustes)");
+        }
+        
+        
+        
+        if (FoundryExport.EnvInt("LAPLACE_FOUNDRY_COORD_ONLY", 0) != 0 && attnMetric == "")
+        {
+            int coordOnlyFilled = await FoundryExport.FillCoordAnchorsAsync(ds, tokenSlots, anchors);
+            Console.WriteLine($"  S³ COORD-ONLY: {coordOnlyFilled:N0} tokens placed at native coordinate (NO Lanczos eigensolve)");
+        }
         var swBasis = Stopwatch.StartNew();
-        var unionGraph = FoundryExport.Union(sim, rel, pre, att);
-        // AFFINITY-SVD basis (token = SVD of its relational row) carries the consensus geometry
-        // far better than Laplacian-eigenmaps (measured +3.0σ vs +0.58σ → conditioning works).
-        // It is a dense vocab×vocab SVD, so default it ON for modest vocab and fall back to LE
-        // above the size where dense SVD is impractical. Env forces: 1=on, 0=off.
+        
+        
+        
+        
+        double metricBasisGain = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_METRIC_BASIS_GAIN", 4.0);
+        var metricForBasis = attnMetric != ""
+            ? attnPlane with { Vals = Array.ConvertAll(attnPlane.Vals, v => v * metricBasisGain) }
+            : attnPlane;
+        var unionGraph = attnMetric != ""
+            ? FoundryExport.Union(sim, rel, pre, att, metricForBasis)
+            : FoundryExport.Union(sim, rel, pre, att);
+        
+        
+        
+        
         string? affRaw = Environment.GetEnvironmentVariable("LAPLACE_FOUNDRY_EMBED_AFFINITY");
-        bool affBasis = affRaw == "1" || (affRaw != "0" && vocab <= 3000);
-        Console.WriteLine($"  basis path: {(affBasis ? "AFFINITY-SVD (token = SVD of its relational row)" : "Laplacian-eigenmaps")} (vocab {vocab})");
-        var E = affBasis
-            ? FoundryExport.BuildBasisAffinity(vocab, dModel, unionGraph, anchors, basisSeed, out var basisStats)
-            : FoundryExport.BuildBasis(vocab, dModel, unionGraph, anchors, basisSeed, out basisStats);
+        
+        
+        double[] E;
+        FoundryExport.BasisStats basisStats;
+        if (FoundryExport.EnvInt("LAPLACE_FOUNDRY_COORD_ONLY", 0) != 0)
+        {
+            
+            
+            
+            
+            double cs = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_COORD_SCALE", 20.0);
+            E = new double[(long)vocab * dModel];
+            int placed = 0;
+            for (int t = 0; t < vocab; t++)
+            {
+                if (anchors[t] is not { } a) continue;
+                for (int d = 0; d < 4 && d < dModel; d++) E[(long)t * dModel + d] = a[d] * cs;
+                placed++;
+            }
+            basisStats = new FoundryExport.BasisStats(4, vocab - placed, 0.0);
+            Console.WriteLine($"  EXACT S³ EMBED: {placed:N0} tokens = verbatim coordinate ×{cs} (no LE/GSO/Procrustes/Lanczos/SVD)");
+        }
+        else
+        {
+            bool affBasis = attnMetric == "" && (affRaw == "1" || (affRaw != "0" && vocab <= 3000));
+            Console.WriteLine($"  basis path: {(affBasis ? "AFFINITY-SVD (token = SVD of its relational row)" : "Laplacian-eigenmaps")} (vocab {vocab})");
+            E = affBasis
+                ? FoundryExport.BuildBasisAffinity(vocab, dModel, unionGraph, anchors, basisSeed, out basisStats)
+                : FoundryExport.BuildBasis(vocab, dModel, unionGraph, anchors, basisSeed, out basisStats);
+        }
         Console.WriteLine($"  basis generated in {swBasis.Elapsed.TotalSeconds:F1}s: "
             + $"spectral K={basisStats.SpectralRank}, {basisStats.ZeroSpectralTokens:N0} tokens off-graph (capacity-only rows), "
             + $"procrustes residual={basisStats.ProcrustesResidual:F4}");
+        MirrorDualFormEmbeds(tokens, E, vocab, dModel);
 
-        // ── project the operators through the basis and factor them at mold ranks ─
+        
         double relTol = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_REL_ERR_TOL", 0.0);
         int kAttn = Math.Min(kvDimR, dModel);
         int kFfn  = Math.Min(intermR, dModel);
-        // PER-LAYER-DISTINCT operators: depth traverses the relation RANKS instead of
-        // power-iterating one operator to its dominant eigenvector (which collapsed every
-        // prompt to the same hubs regardless of input). Each layer applies a different
-        // rank's consensus — associative (co-occurrence), taxonomic+partitive (what-it-is/
-        // made-of), causal+sequence (what-follows), equivalence (sameness) — so the model
-        // is a walk down the rank ladder, not M^L. Each is projected through the basis and
-        // factored at the mold ranks; OV/FFN compose outer·inner (factor Mᵀ), attention qᵀk.
-        var rankPlanes = new[] { att, rel, pre, sim };
-        var rankNames  = new[] { "associative", "taxo+part", "causal+seq", "equivalence" };
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        var completion = FoundryExport.Normalize(FoundryExport.Union(pre, traj));
+        var rankPlanes = new[] { attnPlane, rel, completion, sim };
+        var rankNames  = new[] { attnMetric != "" ? $"metric:{attnMetric}" : "associative", "taxo+part", "causal+seq", "equivalence" };
         int nOps = rankPlanes.Length;
-        var fOvR   = new FoundryExport.Factors[nOps];   // transpose:true,  rank kAttn  (V/O)
-        var fFfnR  = new FoundryExport.Factors[nOps];   // transpose:true,  rank kFfn   (FFN)
-        var fAttnR = new FoundryExport.Factors[nOps];   // transpose:false, rank kAttn  (Q/K)
+        var fOvR   = new FoundryExport.Factors[nOps];   
+        var fFfnR  = new FoundryExport.Factors[nOps];   
+        var fAttnR = new FoundryExport.Factors[nOps];   
         var swOps = Stopwatch.StartNew();
         for (int r = 0; r < nOps; r++)
         {
             var m = FoundryExport.ProjectOperator(E, vocab, dModel, rankPlanes[r]);
-            // RESIDUAL CANCELLATION (logical, from the layer math, not a tuned knob): a llama
-            // sublayer computes h += op(h), so a raw operator M nets to (I+M) per layer and
-            // (I+M)^L over depth — the I re-adds the input (the echo) and (I+M)^L power-iterates
-            // to M's dominant eigenvector (the hub/collapse). The residual already supplies I, so
-            // the residual-path operators (V/O, FFN) must be M − I: then h += (M−I)h = M·h, the
-            // pure operator, and depth becomes the product M_L···M_1 of the per-layer-distinct
-            // ranks — no echo, no (I+M)^L. Attention (Q/K scores) is not a residual-add of M·h,
-            // so it keeps the raw operator.
+            
+            
+            
+            
+            
+            
+            
+            
             var mResid = (double[])m.Clone();
             for (int d = 0; d < dModel; d++) mResid[(long)d * dModel + d] -= 1.0;
             fOvR[r]   = FoundryExport.Factor(mResid, dModel, kAttn, relTol, transpose: true);
             fFfnR[r]  = FoundryExport.Factor(mResid, dModel, kFfn,  relTol, transpose: true);
             fAttnR[r] = FoundryExport.Factor(m,      dModel, kAttn, relTol, transpose: false);
         }
+        if (attnMetric != "")
+            FoundryExport.ReportMetricHeadFidelity(E, vocab, dModel, attnPlane, fAttnR[0], attnMetric);
 
-        // FULL RANK-WEIGHTED CONSENSUS UNEMBEDDING (the substrate's whole affinity read out,
-        // not one plane, not the echo). With lm_head == embed, logits = E·h peaks on the INPUT
-        // token (self dot=1: "dog"→dog,caninize). Reading out PRECEDES only is the other error
-        // — a word's continuation is its ENTIRE rank-weighted relational neighborhood: what it
-        // IS / relates to / is part of (sim,rel), what FOLLOWS / completes it (pre), what it
-        // co-occurs / associates with (att). Build
-        //   lm_head[Y,:] = Σ_R wRank(R) · Σ_X A_R[X,Y] · E[X,:]
-        // over every role plane R weighted by its rank authority. Then
-        //   logits[Y] = lm_head[Y]·h ≈ Σ_R wRank(R)·A_R[lastCtx,Y]
-        // = the full rank-weighted consensus affinity of Y to the context — the rating looked
-        // up, every relation contributing by its authority. Content dims only; bias zeroed.
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         var lmHead = new double[(long)vocab * dModel];
         {
             int dC = dModel - 1;
-            var inDeg = new double[vocab];   // Σ_R wRank·Σ_X A_R[X,Y] : Y's full marginal pull
-            // role plane ⇒ rank authority (the rank header weights the operators already use):
-            // equivalence/standards 0.91, taxonomic+partitive 0.82, causal+seq 0.64, assoc 0.36.
-            var roPlanes = new[] { sim, rel, pre, att };
-            var roW      = new[] { 0.91, 0.82, 0.64, 0.36 };
+            var inDeg = new double[vocab];   
+            
+            
+            
+            
+            
+            
+            
+            
+            bool generative = FoundryExport.EnvInt("LAPLACE_FOUNDRY_GENERATIVE", 1) != 0;
+            var roPlanes = generative ? new[] { traj }      : new[] { traj, adjacency };
+            var roW      = generative ? new[] { 1.0 }       : new[] { 1.0, 1.0 };
             for (int pi = 0; pi < roPlanes.Length; pi++)
             {
                 var pl = roPlanes[pi]; double rw = roW[pi];
@@ -515,20 +706,38 @@ internal static class FoundryCommands
                     inDeg[y] += Math.Abs(w);
                 }
             }
-            // PMI / IDF marginal correction: a raw bigram readout predicts whatever is
-            // preceded by EVERYTHING — the function words (but/or/the), regardless of context
-            // (measured: "the dog" → upon,but,or,then,when...). Divide each target row by
-            // √(its marginal) so the logit reflects P(Y|X) lift over P(Y), surfacing the
-            // context-specific follower instead of the global marginal. This is the standard
-            // PMI statistic, not a tuned scalar. Bias dim zeroed (constant carries no signal).
+            
+            
+            
+            
+            
+            
             for (int v = 0; v < vocab; v++)
             {
                 long off = (long)v * dModel;
-                double idf = 1.0 / (inDeg[v] + 1.0);   // full marginal division = conditional P(X→Y)/P(Y)
+                double idf = 1.0 / (inDeg[v] + 1.0);   
                 for (int c = 0; c < dC; c++) lmHead[off + c] *= idf;
                 lmHead[off + dC] = 0.0;
             }
-            // global scale so the average row norm ≈ 1 (sane logit magnitudes).
+            
+            
+            
+            
+            
+            
+            {
+                int suppressed = 0;
+                foreach (var t in tokens)
+                {
+                    if (t.TokenId < 0 || t.TokenId >= vocab) continue;
+                    if (!(t.IsByteLevel || !t.Role.HasFlag(TokenRole.LeadingSpace))) continue;
+                    long o = (long)t.TokenId * dModel;
+                    for (int c = 0; c < dModel; c++) lmHead[o + c] = 0.0;
+                    suppressed++;
+                }
+                Console.WriteLine($"  lm_head: suppressed {suppressed:N0} byte + bare-alias tokens (space-led word continuations only)");
+            }
+            
             double meanSq = 0;
             for (int v = 0; v < vocab; v++)
             {
@@ -544,42 +753,42 @@ internal static class FoundryCommands
             + string.Join("; ", Enumerable.Range(0, nOps).Select(r =>
                 $"{rankNames[r]} OV r{fOvR[r].Rank}/FFN r{fFfnR[r].Rank}/attn r{fAttnR[r].Rank} (s0 {fOvR[r].SpectralNorm:F0})")));
 
-        // Every layer carries the same projected operators via a uniform residual split
-        // (1/√L), so the prompt embedding survives the depth while operator structure accrues.
-        // Gains calibrate the spectrally-normalized operators against the residual stream
-        // (both halves of a composed pair carry the scale, so the operator gets gain²).
+        
+        
+        
+        
         double attnGainEnv  = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_ATTN_GAIN", 1.0);
         double residGainEnv = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RESID_GAIN", 1.0);
-        // The gate reads only the bias channel; after RMSNorm the bias component is
-        // ≈ √(d/2), so gateCol·√(d/2) = GateZ lands SiLU in its near-linear region,
-        // and the up factor is pre-divided by SiLU(GateZ) to neutralize the gain.
+        
+        
+        
         double gateZ = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_GATE_Z", 6.0);
         double gateCol = gateZ / Math.Sqrt(dModel / 2.0);
         double upGain = 1.0 / FoundryExport.Silu(gateZ);
 
-        // Cast the gguf at one (attn, resid) gain pair. The gains scale the spectrally-
-        // normalized operators against the residual stream: too low → the readout echoes
-        // the prompt's last token; too high → the operator collapses the representation.
-        // The basis + factored operators above are computed ONCE; this only re-fills and
-        // writes, so a sweep (LAPLACE_FOUNDRY_GAIN_SWEEP="a:r,a:r,…") finds the sweet spot
-        // in one pour instead of one pour per gain.
+        
+        
+        
+        
+        
+        
         int WriteCast(string outPath, double aGain, double rGain)
         {
-            // Per-factor split: each composed operator (qᵀk, Wo·Wv, Wdown·Wup) is the
-            // PRODUCT of two filled factors, so a per-factor scale s yields a composed
-            // magnitude s². The documented "uniform residual split (1/√L)" is a statement
-            // about the COMPOSED operator's contribution to the residual stream — so each
-            // factor must carry L^(-1/4), NOT L^(-1/2). At L^(-1/2) per factor the composed
-            // split was 1/L: a √L undercount (~4.7× too weak at L=22) that collapses operator
-            // structure into the prompt embedding (weak completion) and flattens attention
-            // scores toward uniform (mean-pooling). gain is squared by the pair too, so the
-            // composed operator scales as gain²/√L.
+            
+            
+            
+            
+            
+            
+            
+            
+            
             double split = Math.Pow(Math.Max(1, nLayers), -0.25);
             double attnScale  = aGain * split;
             double layerScale = rGain * split;
             var gguf = SynthInterop.GgufWriterCreate(outPath);
             if (gguf == IntPtr.Zero) { Console.WriteLine($"  gguf_writer_create failed for {outPath}"); return 2; }
-            WriteGgufMetadata(gguf, recipe, tokens, modelDir);
+            WriteGgufMetadata(gguf, recipe, tokens, modelDir, byteBpe: true);   
             var sw = Stopwatch.StartNew();
             for (int i = 0; i < tensorCount; i++)
             {
@@ -590,18 +799,18 @@ internal static class FoundryCommands
                     name  = Marshal.PtrToStringUTF8((IntPtr)sp.Name) ?? "";
                     rows  = sp.Rank >= 1 ? sp.Shape[0] : 1;
                     cols  = sp.Rank >= 2 ? sp.Shape[1] : 1;
-                    dtype = sp.Dtype;
+                    dtype = 0;   
                 }
                 long nElem = (long)rows * (long)Math.Max(1UL, cols);
                 var vals = new float[nElem];
                 int tr = (int)rows, tc = (int)Math.Max(1UL, cols);
 
-                // The mold is filled ENTIRELY from generated material. Any manifest name
-                // the foundry does not define is a hard error — never a zero-fill.
+                
+                
                 if (name is "model.embed_tokens.weight" or "lm_head.weight")
                 {
-                    // embed = E (input geometry); lm_head = completion-composed unembedding
-                    // (M_pre·embed), so the readout predicts what FOLLOWS, not the input token.
+                    
+                    
                     var src = name == "lm_head.weight" ? lmHead : E;
                     for (int r = 0; r < tr; r++)
                         for (int c = 0; c < tc; c++)
@@ -618,15 +827,15 @@ internal static class FoundryCommands
                     int layerDot = name.IndexOf('.', "model.layers.".Length);
                     int layerIdx = int.Parse(name["model.layers.".Length..layerDot]);
                     string rest = name[(layerDot + 1)..];
-                    // Depth is a GENERATION progression, not an arbitrary cycle. The readout is
-                    // E·(final residual); since lm_head == embed, an equivalence (synonym/self)
-                    // transform last makes logits peak on the INPUT token and its morphology
-                    // (measured: "dog"→dog,caninize,caninekind — pure echo). The next-token
-                    // signal is the CAUSAL/COMPLETION rank (PRECEDES); the depth probe showed the
-                    // right continuation surfaces exactly when it is applied (canine 2001→37) and
-                    // gets re-buried when equivalence runs after it. So LAND completion on the
-                    // final layer (the readout transform reads "what follows", not "what it is").
-                    // rank index: 0=associative 1=taxo+part 2=causal+seq(completion) 3=equivalence
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
                     const int RANK_COMPLETION = 2, RANK_ASSOC = 0, RANK_TAXO = 1;
                     int last = nLayers - 1;
                     int aIdx, fIdx;
@@ -636,10 +845,19 @@ internal static class FoundryCommands
                     var fAttn = fAttnR[aIdx];
                     var fOv   = fOvR[aIdx];
                     var fFfn  = fFfnR[fIdx];
+                    
+                    
+                    
+                    bool coordHead = attnMetric != "" && aIdx == 0;
+                    double coordHeadScale = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_COORD_HEAD_SCALE", Math.Sqrt(Math.Max(1, headDimR)));
                     switch (rest)
                     {
-                        case "self_attn.q_proj.weight": FoundryExport.FillRows(vals, tr, tc, fAttn, attnScale); break;
-                        case "self_attn.k_proj.weight": FoundryExport.FillRowsRight(vals, tr, tc, fAttn, attnScale); break;
+                        case "self_attn.q_proj.weight":
+                            if (coordHead) FoundryExport.FillCoordHead(vals, tr, tc, headDimR, 4, coordHeadScale);
+                            else FoundryExport.FillRows(vals, tr, tc, fAttn, attnScale); break;
+                        case "self_attn.k_proj.weight":
+                            if (coordHead) FoundryExport.FillCoordHead(vals, tr, tc, headDimR, 4, coordHeadScale);
+                            else FoundryExport.FillRowsRight(vals, tr, tc, fAttn, attnScale); break;
                         case "self_attn.v_proj.weight": FoundryExport.FillRowsRight(vals, tr, tc, fOv, layerScale); break;
                         case "self_attn.o_proj.weight": FoundryExport.FillCols(vals, tr, tc, fOv, layerScale); break;
                         case "mlp.gate_proj.weight":    FoundryExport.FillGate(vals, tr, tc, gateCol); break;
@@ -672,7 +890,7 @@ internal static class FoundryCommands
             SynthInterop.GgufWriterFree(gguf);
             if (rcw != 0) { Console.WriteLine($"  gguf_writer_finalize failed (rc={rcw}) for {outPath}"); return 4; }
             long fsz = new FileInfo(outPath).Length;
-            Console.WriteLine($"synthesis complete: {outPath} ({fsz / 1048576.0:F0} MB, attn={aGain} resid={rGain}) in {sw.Elapsed.TotalSeconds:F1}s");
+            Console.WriteLine($"synthesis complete: {outPath} | recipe L={nLayers} H={nHeadsR} D={dModel} V={vocab} ({fsz / 1048576.0:F0} MB, attn={aGain} resid={rGain}) in {sw.Elapsed.TotalSeconds:F1}s");
             return 0;
         }
 
@@ -702,177 +920,353 @@ internal static class FoundryCommands
         return status == 0 ? 0 : Fail($"foundry write failed (status {status})");
     }
 
-    // FAITHFUL generative cast: the attestations transcribed into the container, no learning,
-    // no gains, no rank bands. The rank-weighted rated adjacency A[X,Y] (read whole from
-    // consensus_adjacency — the rank looked up PER EDGE from the banked law server-side) is
-    // factored by truncated SVD to rank=dim: embed = U√S, lm_head = V√S. In the cast,
-    //   logits[Y|X] = lm_head[Y]·embed[X] = Σ_k U[X,k]·S_k·V[Y,k] = A_dim[X,Y]
-    // — the rank-weighted rating LOOKED UP, factored to the hidden width. dim is a NORMAL
-    // embedding size, NOT vocab (a 32k-token model is 32000×dim). Intermediate layers are
-    // no-ops, norms = 1. This is last-token (bigram) order; carrying context across the prompt
-    // is a later layer of work, and the model says so rather than pretend.
-    private static async Task<int> WriteFaithfulGgufAsync(
-        NpgsqlDataSource ds,
-        LlamaRecipeExtractor.RecipeInfo recipe,
-        IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
-        Dictionary<Hash128, List<int>> tokenSlots,
-        int vocab, int dModel, string modelDir, string outputPath,
-        TensorSpec[] specs, int tensorCount)
+    // Build-a-bear synthesis: the recipe's per-head operator array drives the model. Each head is a
+    // DISTINCT operator (relation type / metric / trajectory) filling its OWN rows — not the 4-band
+    // mash tiled across heads. C#-first per-head proof; the fill relocates to native arch_template.cpp
+    // once ablation validates the design. Spine constraints: dense, MHA, uniform heads/layer.
+    private static async Task<int> SynthesizeBuildABearAsync(
+        RecipeDescriptor desc, string modelDir, string tokenizerPath, string outputPath)
     {
-        int cap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_FAITHFUL_CAP", 128);
-        var sw = Stopwatch.StartNew();
-        var A = await FoundryExport.ReadAdjacencyAsync(ds, tokenSlots, cap);
-        if (A.Nnz == 0)
-            return Fail("consensus_adjacency returned no content edges over this vocab — ingest/seed first");
-        var subjects = new HashSet<int>();
-        foreach (var r in A.Rows) subjects.Add(r);
-        Console.WriteLine($"  FAITHFUL adjacency read in {sw.Elapsed.TotalSeconds:F1}s: {A.Nnz:N0} rank-weighted edges "
-            + $"over {subjects.Count:N0}/{vocab:N0} tokens (cap {cap})");
+        Console.WriteLine($"synthesize build-a-bear: {desc.Name} ({desc.Structure}) → {outputPath}");
+        CodepointPerfcache.Load(ResolveBlob());
 
-        // factor A → embed (U) + lm_head (V·S) at rank dModel (the hidden width, not vocab)
-        var swSvd = Stopwatch.StartNew();
-        FoundryExport.FactorAdjacency(A, vocab, dModel, out var embed, out var lmHead, out int usedRank);
-        Console.WriteLine($"  FAITHFUL factorization in {swSvd.Elapsed.TotalSeconds:F1}s: "
-            + $"PPMI-SVD rank {usedRank}/{dModel} → embed=U, lm_head=V·S, no-op layers");
+        if (desc.HiddenSizeAuto)
+            return Fail("hidden_size 'auto' (spectral rank) not yet wired for build-a-bear — set an integer for the spine");
+        if (desc.Structure != "dense")
+            return Fail($"build-a-bear spine supports 'dense' (got '{desc.Structure}'); MoE is Milestone B");
 
-        // ── ACCEPTANCE GATE (in-process, BEFORE the cast) ───────────────────────────────────
-        // The cast's logits[Y|X] rank EXACTLY as lm_head[Y]·embed[X] (the no-op layers pass the
-        // embedding through; the final RMSNorm is a positive per-X scalar that cannot change the
-        // argmax/order over Y). So we can SCORE the model here, without llama.cpp: for each probe
-        // token X, the reconstructed top continuations must reproduce the substrate's own raw
-        // rated adjacency A[X,·] (the ground truth dog→teeth/animal). Overlap is the gate.
+        int dModel = desc.HiddenSizeOr(0);
+        int nLayers = desc.NumLayers;
+        int intermR = desc.IntermediateSize;
+        int nHeads = desc.Layers[0].Heads.Count;
+        int nKv = desc.Layers[0].KvHeads;
+        foreach (var L in desc.Layers)
+            if (L.Heads.Count != nHeads || L.KvHeads != nKv)
+                return Fail("build-a-bear spine requires uniform heads/kv per layer (variable-per-layer is Milestone B)");
+        if (dModel <= 0 || dModel % nHeads != 0)
+            return Fail($"hidden_size {dModel} must be a positive multiple of heads/layer {nHeads}");
+        if (nKv != nHeads)
+            return Fail($"build-a-bear spine requires MHA (kv_heads {nKv} == heads {nHeads}); GQA is Milestone B");
+        int headDim = dModel / nHeads;
+
+        var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
+        int vocab = 0;
+        foreach (var t in tokens) if (t.TokenId + 1 > vocab) vocab = t.TokenId + 1;
+        if (vocab == 0) return Fail("tokenizer produced no tokens");
+
+        var tokenSlots = new Dictionary<Hash128, List<int>>(tokens.Count);
+        foreach (var t in tokens)
         {
-            var id2surf = new string[vocab];
-            var surf2id = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (var t in tokens)
-            {
-                if (t.TokenId < 0 || t.TokenId >= vocab) continue;
-                string s = t.RawToken.StartsWith('▁') ? t.RawToken[1..] : t.RawToken;
-                id2surf[t.TokenId] = s;
-                if (s.Length > 0 && !surf2id.ContainsKey(s)) surf2id[s] = t.TokenId;
-            }
-            // raw-A ground truth: subject ordinal → top objects by weight
-            var rawTop = new Dictionary<int, List<int>>();
-            {
-                var byX = new Dictionary<int, List<(int Y, double W)>>();
-                for (long e = 0; e < A.Nnz; e++)
-                {
-                    int x = A.Rows[e];
-                    if (!byX.TryGetValue(x, out var l)) byX[x] = l = new();
-                    l.Add((A.Cols[e], A.Vals[e]));
-                }
-                foreach (var (x, l) in byX)
-                {
-                    l.Sort((a, b) => b.W.CompareTo(a.W));
-                    rawTop[x] = l.Take(10).Select(p => p.Y).ToList();
-                }
-            }
-            string[] probes = { "dog", "king", "water", "fire", "man", "city", "tree", "food", "house", "river" };
-            int gatePass = 0, gateTotal = 0;
-            Console.WriteLine("  ── acceptance gate: reconstructed continuation vs raw adjacency (ground truth) ──");
-            foreach (var p in probes)
-            {
-                if (!surf2id.TryGetValue(p, out int x) || !rawTop.TryGetValue(x, out var truth) || truth.Count == 0)
-                    continue;
-                gateTotal++;
-                // reconstructed top-5: argmax_Y lm_head[Y]·embed[X]
-                long xo = (long)x * dModel;
-                var scored = new (int Y, double L)[vocab];
-                for (int y = 0; y < vocab; y++)
-                {
-                    long yo = (long)y * dModel; double dot = 0;
-                    for (int c = 0; c < dModel; c++) dot += embed[xo + c] * lmHead[yo + c];
-                    scored[y] = (y, dot);
-                }
-                Array.Sort(scored, (a, b) => b.L.CompareTo(a.L));
-                var recon = scored.Take(5).Select(s => s.Y).ToList();
-                int overlap = recon.Count(y => truth.Contains(y));
-                if (overlap >= 1) gatePass++;
-                string Render(IEnumerable<int> ids) => string.Join(", ",
-                    ids.Select(y => (y >= 0 && y < vocab ? id2surf[y] : null) ?? $"#{y}"));
-                Console.WriteLine($"    {p,-8} recon[{Render(recon)}]  vs truth[{Render(truth.Take(5))}]  overlap={overlap}/5");
-            }
-            string verdict = gateTotal == 0 ? "NO PROBES IN VOCAB"
-                : gatePass >= (gateTotal + 1) / 2 ? $"PASS ({gatePass}/{gateTotal} probes reproduce ≥1 top edge)"
-                : $"WEAK ({gatePass}/{gateTotal}) — rank {dModel} under-captures the adjacency; raise --dim";
-            Console.WriteLine($"  ── gate verdict: {verdict} ──");
+            if (t.TokenId < 0 || t.TokenId >= vocab) continue;
+            if (!tokenSlots.TryGetValue(t.EntityId, out var slots)) tokenSlots[t.EntityId] = slots = new List<int>(1);
+            slots.Add(t.TokenId);
         }
+
+        // HF-config bridge → reuse the dense tensor layout + GGUF metadata (generalize the template in B).
+        byte[] configJson = BuildHfConfigJson(dModel, nLayers, nHeads, nKv, intermR, vocab);
+        string bridgePath = Path.Combine(Path.GetTempPath(),
+            $"laplace-bab-{Convert.ToHexString(desc.RecipeId.ToBytes())[..12]}-config.json");
+        await File.WriteAllBytesAsync(bridgePath, configJson);
+        var recipe = LlamaRecipeExtractor.Parse(bridgePath);
+
+        IntPtr recipeHandle, tmplHandle;
+        var specs = new TensorSpec[300];
+        int tensorCount;
+        unsafe
+        {
+            fixed (byte* jp = configJson) recipeHandle = SynthInterop.RecipeParse(jp, (nuint)configJson.Length);
+            if (recipeHandle == IntPtr.Zero) return Fail("recipe_parse(bridge) returned null");
+            tmplHandle = SynthInterop.ArchTemplateLoad("llama");   // dense transformer layout
+            if (tmplHandle == IntPtr.Zero) return Fail("arch_template_load returned null");
+            fixed (TensorSpec* sp = specs)
+                tensorCount = SynthInterop.ArchTemplateRequiredTensors(tmplHandle, recipeHandle, sp, (nuint)specs.Length);
+        }
+        if (tensorCount <= 0) return Fail($"required_tensors returned {tensorCount}");
+        Console.WriteLine($"  dims: vocab={vocab} hidden={dModel} layers={nLayers} heads={nHeads} headDim={headDim} ffn={intermR} | {tensorCount} tensors");
+
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        int degreeCap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_LE_DEGREE", 48);
+
+        // distinct operators the recipe references
+        var opKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var L in desc.Layers) { foreach (var h in L.Heads) opKeys.Add(h.Key); opKeys.Add(L.Ffn.Key); }
+        opKeys.Add(desc.LmHead.Key);
+
+        // one read returns every relation-type plane present over the vocab
+        var swRead = Stopwatch.StartNew();
+        var typePlanes = await FoundryExport.ReadTypePlanesAsync(ds, tokenSlots, degreeCap);
+        var planeByType = new Dictionary<Hash128, FoundryExport.PlaneCoo>();
+        foreach (var tp in typePlanes) planeByType[tp.TypeId] = FoundryExport.Normalize(tp.Plane);
+
+        var planeByOp = new Dictionary<string, FoundryExport.PlaneCoo>(StringComparer.Ordinal);
+        var trajPlane = FoundryExport.PlaneCoo.Empty;
+        foreach (var opKey in opKeys)
+        {
+            FoundryExport.PlaneCoo plane;
+            if (opKey.StartsWith("relation:", StringComparison.Ordinal))
+            {
+                var tid = RelationTypeRegistry.RelationTypeId(opKey["relation:".Length..]);
+                plane = planeByType.TryGetValue(tid, out var p) ? p : FoundryExport.PlaneCoo.Empty;
+            }
+            else if (opKey.StartsWith("metric:", StringComparison.Ordinal))
+                plane = FoundryExport.Normalize(await FoundryExport.ReadMetricEdgesAsync(
+                    ds, tokenSlots, opKey["metric:".Length..], 16, 64, degreeCap));
+            else if (opKey == "trajectory")
+            {
+                int gap = FoundryExport.EnvInt("LAPLACE_FOUNDRY_TRAJ_GAP", Math.Max(2, Math.Min(nLayers, 8)));
+                trajPlane = FoundryExport.Normalize(await FoundryExport.ReadTrajectoryStrideAsync(ds, gap, tokenSlots, degreeCap));
+                plane = trajPlane;
+            }
+            else if (opKey == "unary")
+                plane = FoundryExport.Normalize(await FoundryExport.ReadAdjacencyAsync(ds, tokenSlots, degreeCap));
+            else
+                plane = FoundryExport.PlaneCoo.Empty;   // coord/spectral live in the embed basis
+            planeByOp[opKey] = plane;
+            Console.WriteLine($"  operator {opKey}: {plane.Nnz:N0} edges");
+        }
+        Console.WriteLine($"  operator planes read in {swRead.Elapsed.TotalSeconds:F1}s");
+
+        // anchors + embed basis (union of all operator planes → spectral frame)
+        var anchors = new double[vocab][];
+        foreach (var t in tokens)
+        {
+            if (t.TokenId < 0 || t.TokenId >= vocab || !t.HasContentCoord) continue;
+            anchors[t.TokenId] = [t.ContentX, t.ContentY, t.ContentZ, t.ContentM];
+        }
+        var unionGraph = FoundryExport.Union(planeByOp.Values.ToArray());
+        if (unionGraph.Nnz == 0) return Fail("no consensus over this vocab for any recipe operator — ingest content first");
+        double[] E = FoundryExport.BuildBasis(vocab, dModel, unionGraph, anchors, desc.RecipeId, out var basisStats);
+        MirrorDualFormEmbeds(tokens, E, vocab, dModel);
+        Console.WriteLine($"  embed basis: spectral K={basisStats.SpectralRank}, {basisStats.ZeroSpectralTokens:N0} off-graph");
+
+        // factor each operator: attn/ov per-head (rank headDim), ffn (rank interm)
+        double relTol = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_REL_ERR_TOL", 0.0);
+        int kFfn = Math.Min(intermR, dModel);
+        var emptyF = new FoundryExport.Factors(Array.Empty<float>(), Array.Empty<float>(), 0, dModel, 0, 1);
+        var fAttn = new Dictionary<string, FoundryExport.Factors>(StringComparer.Ordinal);
+        var fOv = new Dictionary<string, FoundryExport.Factors>(StringComparer.Ordinal);
+        var fFfn = new Dictionary<string, FoundryExport.Factors>(StringComparer.Ordinal);
+        foreach (var (opKey, plane) in planeByOp)
+        {
+            if (plane.Nnz == 0) { fAttn[opKey] = emptyF; fOv[opKey] = emptyF; fFfn[opKey] = emptyF; continue; }
+            var m = FoundryExport.ProjectOperator(E, vocab, dModel, plane);
+            var mResid = (double[])m.Clone();
+            for (int d = 0; d < dModel; d++) mResid[(long)d * dModel + d] -= 1.0;
+            fAttn[opKey] = FoundryExport.Factor(m,      dModel, headDim, relTol, transpose: false);
+            fOv[opKey]   = FoundryExport.Factor(mResid, dModel, headDim, relTol, transpose: true);
+            fFfn[opKey]  = FoundryExport.Factor(mResid, dModel, kFfn,    relTol, transpose: true);
+        }
+
+        // lm_head ← the recipe's lm_head operator (trajectory continuation log-odds)
+        var lmHead = new double[(long)vocab * dModel];
+        {
+            var pl = desc.LmHead.Key == "trajectory" ? trajPlane
+                   : planeByOp.TryGetValue(desc.LmHead.Key, out var lp) ? lp : FoundryExport.PlaneCoo.Empty;
+            int dC = dModel - 1;
+            var inDeg = new double[vocab];
+            for (long e2 = 0; e2 < pl.Nnz; e2++)
+            {
+                int x = pl.Rows[e2], y = pl.Cols[e2];
+                if (x < 0 || x >= vocab || y < 0 || y >= vocab) continue;
+                double w = pl.Vals[e2];
+                long yo = (long)y * dModel, xo = (long)x * dModel;
+                for (int c = 0; c < dC; c++) lmHead[yo + c] += w * E[xo + c];
+                inDeg[y] += Math.Abs(w);
+            }
+            for (int v = 0; v < vocab; v++)
+            {
+                long off = (long)v * dModel;
+                double idf = 1.0 / (inDeg[v] + 1.0);
+                for (int c = 0; c < dC; c++) lmHead[off + c] *= idf;
+                lmHead[off + dC] = 0.0;
+            }
+            double meanSq = 0;
+            for (int v = 0; v < vocab; v++) { long off = (long)v * dModel; for (int c = 0; c < dC; c++) { double t = lmHead[off + c]; meanSq += t * t; } }
+            meanSq /= Math.Max(1, vocab);
+            double g = meanSq > 1e-24 ? 1.0 / Math.Sqrt(meanSq) : 1.0;
+            for (long i = 0; i < (long)vocab * dModel; i++) lmHead[i] *= g;
+        }
+
+        // write GGUF — per-head fill: head h in layer L ← operator desc.Layers[L].Heads[h]
+        double split = Math.Pow(Math.Max(1, nLayers), -0.25);
+        double attnScale = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_ATTN_GAIN", 1.0) * split;
+        double layerScale = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RESID_GAIN", 1.0) * split;
+        double gateZ = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_GATE_Z", 6.0);
+        double gateCol = gateZ / Math.Sqrt(dModel / 2.0);
+        double upGain = 1.0 / FoundryExport.Silu(gateZ);
 
         var gguf = SynthInterop.GgufWriterCreate(outputPath);
         if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
-        WriteGgufMetadata(gguf, recipe, tokens, modelDir);
-        var swW = Stopwatch.StartNew();
+        WriteGgufMetadata(gguf, recipe, tokens, modelDir, byteBpe: true);
+        var sw = Stopwatch.StartNew();
         for (int i = 0; i < tensorCount; i++)
         {
-            string name; ulong rows, cols; int dtype;
+            string name; ulong rows, cols;
             unsafe
             {
                 var sp = specs[i];
-                name  = Marshal.PtrToStringUTF8((IntPtr)sp.Name) ?? "";
-                rows  = sp.Rank >= 1 ? sp.Shape[0] : 1;
-                cols  = sp.Rank >= 2 ? sp.Shape[1] : 1;
-                dtype = sp.Dtype;
+                name = Marshal.PtrToStringUTF8((IntPtr)sp.Name) ?? "";
+                rows = sp.Rank >= 1 ? sp.Shape[0] : 1;
+                cols = sp.Rank >= 2 ? sp.Shape[1] : 1;
             }
+            long nElem = (long)rows * (long)Math.Max(1UL, cols);
+            var vals = new float[nElem];
             int tr = (int)rows, tc = (int)Math.Max(1UL, cols);
-            var vals = new float[(long)tr * tc];   // zero-initialized = the no-op layer fill
 
-            if (name == "model.embed_tokens.weight")
+            if (name is "model.embed_tokens.weight" or "lm_head.weight")
             {
-                // embed[X,c] = U[X,c]·√S  (rows = vocab, cols = dim)
+                var srcE = name == "lm_head.weight" ? lmHead : E;
                 for (int r = 0; r < tr; r++)
                     for (int c = 0; c < tc; c++)
-                        vals[(long)r * tc + c] = (float)embed[(long)r * dModel + c];
-            }
-            else if (name == "lm_head.weight")
-            {
-                // lm_head[Y,c] = V[Y,c]·√S  (rows = vocab, cols = dim)
-                for (int r = 0; r < tr; r++)
-                    for (int c = 0; c < tc; c++)
-                        vals[(long)r * tc + c] = (float)lmHead[(long)r * dModel + c];
+                        vals[(long)r * tc + c] = (float)srcE[(long)r * dModel + c];
             }
             else if (name == "model.norm.weight"
                      || name.EndsWith("input_layernorm.weight", StringComparison.Ordinal)
                      || name.EndsWith("post_attention_layernorm.weight", StringComparison.Ordinal))
-            {
                 Array.Fill(vals, 1.0f);
-            }
             else if (name.StartsWith("model.layers.", StringComparison.Ordinal))
             {
                 int layerDot = name.IndexOf('.', "model.layers.".Length);
+                int layerIdx = int.Parse(name["model.layers.".Length..layerDot]);
                 string rest = name[(layerDot + 1)..];
-                // recognized no-op slots stay zero; an unknown layer tensor is a hard error
+                var layer = desc.Layers[layerIdx];
                 switch (rest)
                 {
-                    case "self_attn.q_proj.weight": case "self_attn.k_proj.weight":
-                    case "self_attn.v_proj.weight": case "self_attn.o_proj.weight":
-                    case "mlp.gate_proj.weight":    case "mlp.up_proj.weight":
-                    case "mlp.down_proj.weight":    break;   // zero (no-op)
-                    default:
-                        Console.WriteLine($"  faithful foundry does not define mold tensor '{name}'");
-                        SynthInterop.GgufWriterFree(gguf); return 3;
+                    case "self_attn.q_proj.weight":
+                        for (int h = 0; h < nHeads; h++)
+                            FoundryExport.FillHead(vals, tr, tc, h, headDim, fAttn[layer.Heads[h].Key], attnScale);
+                        break;
+                    case "self_attn.k_proj.weight":
+                        for (int h = 0; h < nKv; h++)
+                            FoundryExport.FillHeadRight(vals, tr, tc, h, headDim, fAttn[layer.Heads[h].Key], attnScale);
+                        break;
+                    case "self_attn.v_proj.weight":
+                        for (int h = 0; h < nKv; h++)
+                            FoundryExport.FillHeadRight(vals, tr, tc, h, headDim, fOv[layer.Heads[h].Key], layerScale);
+                        break;
+                    case "self_attn.o_proj.weight":
+                        for (int h = 0; h < nHeads; h++)
+                            FoundryExport.FillColsHead(vals, tr, tc, h, headDim, fOv[layer.Heads[h].Key], layerScale);
+                        break;
+                    case "mlp.gate_proj.weight": FoundryExport.FillGate(vals, tr, tc, gateCol); break;
+                    case "mlp.up_proj.weight":   FoundryExport.FillRowsRight(vals, tr, tc, fFfn[layer.Ffn.Key], layerScale * upGain); break;
+                    case "mlp.down_proj.weight": FoundryExport.FillCols(vals, tr, tc, fFfn[layer.Ffn.Key], layerScale); break;
+                    default: SynthInterop.GgufWriterFree(gguf); return Fail($"build-a-bear: undefined tensor '{name}'");
                 }
             }
-            else
-            {
-                Console.WriteLine($"  faithful foundry does not define mold tensor '{name}'");
-                SynthInterop.GgufWriterFree(gguf); return 3;
-            }
+            else { SynthInterop.GgufWriterFree(gguf); return Fail($"build-a-bear: undefined tensor '{name}'"); }
 
-            byte[] tensorBytes = dtype == 0 ? FoundryExport.ToF32Bytes(vals) : FoundryExport.ToBf16Bytes(vals);
+            byte[] tensorBytes = FoundryExport.ToF32Bytes(vals);
             nuint[] ggufDims = cols > 1 ? [(nuint)cols, (nuint)rows] : [(nuint)rows];
             unsafe
             {
                 fixed (nuint* dimsPtr = ggufDims)
-                fixed (byte*  dataPtr = tensorBytes)
-                    SynthInterop.GgufWriterAddTensor(gguf, HfToGgmlName(name), dtype, dimsPtr, (nuint)ggufDims.Length, dataPtr);
+                fixed (byte* dataPtr = tensorBytes)
+                    SynthInterop.GgufWriterAddTensor(gguf, HfToGgmlName(name), 0, dimsPtr, (nuint)ggufDims.Length, dataPtr);
             }
         }
         int rcw = SynthInterop.GgufWriterFinalize(gguf);
         SynthInterop.GgufWriterFree(gguf);
+        SynthInterop.ArchTemplateFree(tmplHandle);
+        SynthInterop.RecipeFree(recipeHandle);
         if (rcw != 0) return Fail($"gguf_writer_finalize failed (rc={rcw}) for {outputPath}");
         long fsz = new FileInfo(outputPath).Length;
-        Console.WriteLine($"FAITHFUL synthesis complete: {outputPath} ({fsz / 1048576.0:F0} MB) in {swW.Elapsed.TotalSeconds:F1}s");
+        Console.WriteLine($"build-a-bear complete: {outputPath} | {desc.Name} L={nLayers} H={nHeads} D={dModel} V={vocab} "
+            + $"({fsz / 1048576.0:F0} MB) in {sw.Elapsed.TotalSeconds:F1}s — {opKeys.Count} distinct operators, per-head (no tiling)");
         return 0;
+    }
+
+    // Minimal HF config (dense Llama tensor layout) synthesized from the build-a-bear dims, so the
+    // native arch template + GGUF metadata can be reused. The operator-per-head logic comes from the
+    // descriptor, not this config — this only carries shapes.
+    private static byte[] BuildHfConfigJson(int hidden, int layers, int heads, int kv, int interm, int vocab)
+    {
+        string cfg = "{"
+            + "\"architectures\":[\"LlamaForCausalLM\"],\"model_type\":\"llama\","
+            + $"\"hidden_size\":{hidden},\"num_hidden_layers\":{layers},"
+            + $"\"num_attention_heads\":{heads},\"num_key_value_heads\":{kv},"
+            + $"\"intermediate_size\":{interm},\"vocab_size\":{vocab},"
+            + "\"hidden_act\":\"silu\",\"rms_norm_eps\":1e-05,\"rope_theta\":10000.0,\"torch_dtype\":\"float32\""
+            + "}";
+        return System.Text.Encoding.UTF8.GetBytes(cfg);
+    }
+
+    
+    
+    private static string? RejectRetiredFoundryEnvVars()
+    {
+        string[] retired =
+        [
+            "LAPLACE_FOUNDRY_FAITHFUL", "LAPLACE_FOUNDRY_TOPIC", "LAPLACE_FOUNDRY_CONTENT",
+            "LAPLACE_FOUNDRY_REPHEAD", "LAPLACE_FOUNDRY_NGRAM", "LAPLACE_FOUNDRY_MULTIHEAD",
+        ];
+        var set = new List<string>();
+        foreach (var name in retired)
+        {
+            string? v = Environment.GetEnvironmentVariable(name);
+            if (!string.IsNullOrEmpty(v) && v is not "0" and not "false" and not "False")
+                set.Add(name);
+        }
+        if (set.Count == 0) return null;
+        return "retired foundry shortcut env vars are set (they bypass the recipe pour): "
+            + string.Join(", ", set) + " — unset them and re-run; synthesis always uses the recipe's layers/heads/dim";
+    }
+
+    
+    
+    private static void MirrorDualFormEmbeds(
+        IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens, double[] e, int vocab, int dModel)
+    {
+        var lead = new Dictionary<Hash128, int>();
+        foreach (var t in tokens)
+            if (t.TokenId >= 0 && t.TokenId < vocab && t.Role.HasFlag(TokenRole.LeadingSpace))
+                lead[t.EntityId] = t.TokenId;
+        int mirrored = 0;
+        foreach (var t in tokens)
+        {
+            if (t.TokenId < 0 || t.TokenId >= vocab) continue;
+            if (t.IsByteLevel || t.Role.HasFlag(TokenRole.Special) || t.Role.HasFlag(TokenRole.LeadingSpace)) continue;
+            if (!lead.TryGetValue(t.EntityId, out int lid)) continue;
+            Array.Copy(e, (long)lid * dModel, e, (long)t.TokenId * dModel, dModel);
+            mirrored++;
+        }
+        if (mirrored > 0)
+            Console.WriteLine($"  dual-form embed: mirrored {mirrored:N0} bare-alias rows from their space-led partners");
+    }
+
+    
+    
+    
+    private static async Task PinCrawlSeedsInPlaceAsync(
+        NpgsqlConnection conn, string[] seeds, List<(string surface, long weight)> sel, int budget)
+    {
+        var bySurf = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (var (s, w) in sel) bySurf[s] = w;
+        long pin = bySurf.Count > 0 ? bySurf.Values.Max() + 1 : 1_000_000;
+        int resolved = 0, pinned = 0;
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 120;
+        cmd.CommandText =
+            "SELECT render_text(word_id(s), 80) FROM unnest($1::text[]) AS s WHERE word_id(s) IS NOT NULL";
+        cmd.Parameters.AddWithValue(seeds);
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        while (await rdr.ReadAsync())
+        {
+            string s = rdr.GetString(0);
+            if (string.IsNullOrWhiteSpace(s)) continue;
+            resolved++;
+            if (!bySurf.ContainsKey(s)) pinned++;
+            bySurf[s] = pin++;
+        }
+        sel.Clear();
+        foreach (var kv in bySurf.OrderByDescending(x => x.Value).Take(budget))
+            sel.Add((kv.Key, kv.Value));
+        int unresolved = seeds.Length - resolved;
+        if (unresolved > 0)
+            Console.WriteLine($"  vocab pin: {resolved}/{seeds.Length} seeds in substrate ({unresolved} unresolved — not ingested); "
+                + $"{pinned} newly pinned, {sel.Count:N0} surfaces in mold");
+        else
+            Console.WriteLine($"  vocab pin: all {resolved} crawl seeds reserved ({pinned} newly pinned), {sel.Count:N0} surfaces in mold");
     }
 
     private static string HfToGgmlName(string hf)
@@ -908,11 +1302,31 @@ internal static class FoundryCommands
         return hf;
     }
 
+    
+    
+    
+    private static readonly char[] ByteToUnicode = BuildByteToUnicode();
+    private static char[] BuildByteToUnicode()
+    {
+        var map = new char[256]; var self = new bool[256];
+        void mark(int lo, int hi) { for (int b = lo; b <= hi; b++) { map[b] = (char)b; self[b] = true; } }
+        mark('!', '~'); mark(0xA1, 0xAC); mark(0xAE, 0xFF);
+        int k = 0; for (int b = 0; b < 256; b++) if (!self[b]) map[b] = (char)(256 + k++);
+        return map;
+    }
+    private static string ByteEncode(string s)
+    {
+        var sb = new StringBuilder();
+        foreach (var b in Encoding.UTF8.GetBytes(s)) sb.Append(ByteToUnicode[b]);
+        return sb.ToString();
+    }
+    private static int ParseByteToken(string p) => Convert.ToInt32(p.Substring(3, 2), 16);   
+
     private static void WriteGgufMetadata(
         IntPtr gguf,
         LlamaRecipeExtractor.RecipeInfo recipe,
         IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
-        string modelDir)
+        string modelDir, bool byteBpe = false)
     {
         SynthInterop.GgufWriterAddMetadataStr(gguf, "general.architecture", "llama");
         SynthInterop.GgufWriterAddMetadataStr(gguf, "general.name", Path.GetFileName(modelDir.TrimEnd('/')));
@@ -927,7 +1341,7 @@ internal static class FoundryCommands
         SynthInterop.GgufWriterAddMetadataF32(gguf, "llama.attention.layer_norm_rms_epsilon", (float)recipe.RmsNormEps);
         SynthInterop.GgufWriterAddMetadataF32(gguf, "llama.rope.freq_base",           (float)recipe.RopeTheta);
 
-        // bos/eos from the mold's generation_config.json when present; llama defaults otherwise.
+        
         uint bosId = 1, eosId = 2;
         string genCfgPath = Path.Combine(modelDir, "generation_config.json");
         if (File.Exists(genCfgPath))
@@ -941,12 +1355,25 @@ internal static class FoundryCommands
                 eosId = eos.GetUInt32();
         }
 
-        SynthInterop.GgufWriterAddMetadataStr(gguf, "tokenizer.ggml.model", "llama");
+        if (byteBpe)
+        {
+            
+            
+            
+            
+            SynthInterop.GgufWriterAddMetadataStr(gguf, "tokenizer.ggml.model", "gpt2");
+            SynthInterop.GgufWriterAddMetadataStr(gguf, "tokenizer.ggml.pre",   "llama3");
+        }
+        else
+            SynthInterop.GgufWriterAddMetadataStr(gguf, "tokenizer.ggml.model", "llama");
         SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.bos_token_id",     bosId);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.eos_token_id",     eosId);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "tokenizer.ggml.unknown_token_id", 0);
         SynthInterop.GgufWriterAddMetadataBool(gguf, "tokenizer.ggml.add_bos_token",    1);
         SynthInterop.GgufWriterAddMetadataBool(gguf, "tokenizer.ggml.add_eos_token",    0);
+        
+        
+        
         SynthInterop.GgufWriterAddMetadataBool(gguf, "tokenizer.ggml.add_space_prefix", 1);
 
         int n = tokens.Count;
@@ -970,6 +1397,22 @@ internal static class FoundryCommands
             for (int i = 0; i < n; i++) { pieces[i] = sorted[i].RawToken; scores[i] = 0f; types[i] = ClassifyTokenType(sorted[i].RawToken); }
         }
 
+        if (byteBpe)
+        {
+            
+            
+            
+            
+            for (int i = 0; i < n; i++)
+            {
+                if (types[i] == 6) { pieces[i] = ByteToUnicode[ParseByteToken(pieces[i])].ToString(); types[i] = 1; }
+                else if (types[i] == 1 && pieces[i].StartsWith("▁", StringComparison.Ordinal)) pieces[i] = ByteEncode(" " + pieces[i][1..]);   
+                else if (types[i] == 1) pieces[i] = ByteEncode(pieces[i]);
+                else types[i] = 3;   
+                scores[i] = 0f;
+            }
+        }
+
         byte[] packed = PackStrings(pieces);
         unsafe
         {
@@ -980,6 +1423,26 @@ internal static class FoundryCommands
                 SynthInterop.GgufWriterAddMetadataF32Array(gguf, "tokenizer.ggml.scores", p, (nuint)n);
             fixed (int* p = types)
                 SynthInterop.GgufWriterAddMetadataI32Array(gguf, "tokenizer.ggml.token_type", p, (nuint)n);
+        }
+        if (byteBpe)
+        {
+            
+            
+            
+            var mseen = new HashSet<string>(); var mlist = new List<string>();
+            for (int i = 0; i < n; i++)
+            {
+                if (types[i] != 1) continue;
+                string pc = pieces[i];
+                for (int k = 0; k + 1 < pc.Length; k++)
+                {
+                    string m = pc[k] + " " + pc[k + 1];
+                    if (mseen.Add(m)) mlist.Add(m);
+                }
+            }
+            byte[] mp = PackStrings(mlist.ToArray());
+            unsafe { fixed (byte* p = mp) SynthInterop.GgufWriterAddMetadataStrArrayPacked(gguf, "tokenizer.ggml.merges", p, (nuint)mp.Length, (nuint)mlist.Count); }
+            Console.WriteLine($"  byte-level BPE: {mlist.Count:N0} merges (ignore_merges: words tokenize direct)");
         }
 
         string cfgPath = Path.Combine(modelDir, "tokenizer_config.json");

@@ -33,6 +33,46 @@ public sealed class OpenSubtitlesDecomposerTests
     private static readonly string[] En = { "Hello there.", "What is your name?", "" };
     private static readonly string[] Es = { "Hola allí.",   "¿Cómo te llamas?",  "" };
 
+    [Fact]
+    public async Task Pair_Allowlist_Filters_Zips()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "laplace-opensub-pairs-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            WriteFixtureZip(dir, "en-es");
+            WriteFixtureZip(dir, "en-fr");
+
+            Environment.SetEnvironmentVariable("LAPLACE_OPENSUBTITLES_PAIRS", "en-es");
+            try
+            {
+                var dec = new OpenSubtitlesDecomposer();
+                var inv = await dec.DescribeInputAsync(new FakeContext(dir, new NullWriter()), DecomposerOptions.Default);
+                Assert.NotNull(inv);
+                Assert.Single(inv!.Files);
+                Assert.Equal("en-es", inv.Files[0].Id);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("LAPLACE_OPENSUBTITLES_PAIRS", null);
+            }
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    private static string WriteFixtureZip(string dir, string pair)
+    {
+        string zipPath = Path.Combine(dir, pair + ".txt.zip");
+        using var fs = File.Create(zipPath);
+        using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
+        WriteEntry(zip, $"OpenSubtitles.{pair}.en", En);
+        WriteEntry(zip, $"OpenSubtitles.{pair}.es", Es);
+        return zipPath;
+    }
+
     private static string WriteFixtureZip(string dir)
     {
         string zipPath = Path.Combine(dir, "en-es.txt.zip");

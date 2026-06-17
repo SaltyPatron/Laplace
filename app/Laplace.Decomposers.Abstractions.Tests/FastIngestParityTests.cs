@@ -10,16 +10,16 @@ public class FastIngestParityTests
     public void OmwFastIngest_ParsesLemmaRow()
     {
         ReadOnlySpan<byte> line = "1740-n\teng:lemma\tcat"u8;
-        Assert.True(OMWFastIngest.TryParseRow(line, "eng", out var row));
+        Assert.True(OMWFastIngest.TryParseRow(line, "eng", out var row, out var valueUtf8));
         Assert.Equal(OMWFastIngest.OmwType.Lemma, row.Type);
-        Assert.Equal("cat", row.Value);
+        Assert.Equal("cat", Encoding.UTF8.GetString(valueUtf8));
         Assert.Equal("eng", row.Lang);
     }
 
     [Fact]
     public void OmwFastIngest_SkipsCommentLines()
     {
-        Assert.False(OMWFastIngest.TryParseRow("# comment"u8, "eng", out _));
+        Assert.False(OMWFastIngest.TryParseRow("# comment"u8, "eng", out _, out _));
     }
 
     [Fact]
@@ -39,10 +39,13 @@ public class FastIngestParityTests
         var required = new (string Project, string[] Needles)[]
         {
             ("Laplace.Decomposers.OpenSubtitles", ["OpenSubtitlesFastIngest", "StreamingUtf8LineReader"]),
-            ("Laplace.Decomposers.UD", ["StreamingUtf8LineReader", "TsvSpan"]),
+            ("Laplace.Decomposers.UD", ["StreamingUtf8LineReader", "TsvSpan", "ContentWitnessBatch"]),
             ("Laplace.Decomposers.OMW", ["OMWFastIngest", "StreamingUtf8LineReader"]),
             ("Laplace.Decomposers.WordNet", ["StreamingUtf8LineReader"]),
-            ("Laplace.Decomposers.Wiktionary", ["WiktionaryFastIngest", "Utf8JsonReader"]),
+            ("Laplace.Decomposers.Wiktionary", ["StructuredGrammarIngest", "WiktionaryGrammarWitness", "IGrammarWitness", "DecomposerOptions.ForWitness(SourceName)"]),
+            ("Laplace.Decomposers.Tatoeba", ["TatoebaFastIngest", "StreamingUtf8LineReader", "ContentWitnessBatch"]),
+            ("Laplace.Decomposers.ConceptNet", ["ConceptNetFastIngest", "StreamingUtf8LineReader", "ContentWitnessBatch", "ConceptNetUri"]),
+            ("Laplace.Decomposers.Atomic2020", ["Atomic2020FastIngest", "StreamingUtf8LineReader", "ContentWitnessBatch"]),
         };
 
         foreach (var (project, needles) in required)

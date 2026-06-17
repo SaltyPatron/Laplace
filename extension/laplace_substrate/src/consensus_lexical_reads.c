@@ -1,7 +1,7 @@
-/*
- * consensus_lexical_reads.c - dictionary read SRFs over consensus (senses, define,
- * synonyms, translations, examples). Split out of consensus_reads.c.
- */
+
+
+
+
 #include "postgres.h"
 
 #include "catalog/pg_type.h"
@@ -39,8 +39,8 @@ emit_senses_rows(ReturnSetInfo *rsinfo, Datum word, Datum context_arr, bool has_
     if (has_context)
     {
         args[2] = context_arr;
-        /* the nulls string must track the actual array: a constant "  n" here
-         * silently nulled $3, making context re-ranking a no-op (2026-06-10) */
+        
+
         rc = SPI_execute_with_args(
             "SELECT s.object_id, ss.object_id, "
             "       laplace.eff_mu_display(s.rating, s.rd), "

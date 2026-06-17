@@ -62,13 +62,13 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task Seeds_All_Codepoints_FromSource()
     {
-        // This test is a self-contained ingest into a fresh DB, so it must own both
-        // process-global native singletons the content witness depends on instead of
-        // free-riding on a sibling test:
-        //   - the T0 perfcache (the codepoint oracle the witness reads), and
-        //   - the record-once emit bank, which short-circuits already-banked roots
-        //     WITHOUT re-emitting them. Stale roots banked by another test would make
-        //     this DB's attestations reference entity rows that were never written here.
+        
+        
+        
+        
+        
+        
+        
         CodepointPerfcache.LoadDefault();
         IntentStage.ResetContentBank();
 
@@ -87,9 +87,9 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         Assert.True(applied >= TotalCodepoints,
             $"presented {applied:N0} entities, expected at least {TotalCodepoints:N0}");
 
-        // T0 renders come from the perfcache (codepoint_for_id), not a shadow table:
-        // seeded codepoint entities reverse-resolve to their codepoints (NUL and
-        // surrogates are non-renderable by law, mirroring the retired table's rows).
+        
+        
+        
         long resolvable = await ScalarLong(
             @"SELECT count(*) FROM laplace.entities e
               WHERE e.type_id = laplace.canonical_id('substrate/type/Codepoint/v1')

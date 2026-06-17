@@ -3,27 +3,27 @@ using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
-/// <summary>
-/// Debug-only forensics for the native PG-binary-COPY blobs produced by an <see cref="IntentStage"/>
-/// tuple buffer. Gated entirely by <c>LAPLACE_COPY_VALIDATE=1</c> (<see cref="Enabled"/>): when off,
-/// <see cref="Validate"/> / <see cref="Checkpoint"/> are never invoked by the writers, so this has
-/// zero runtime cost on the hot path. It has nothing to do with the write algorithm — it only walks
-/// an already-serialized blob row-by-row to localize heap corruption to the exact byte/row/phase.
-/// </summary>
+
+
+
+
+
+
+
 internal static class CopyBlobValidator
 {
-    /// <summary>True when <c>LAPLACE_COPY_VALIDATE=1</c> — callers guard their <see cref="Validate"/>
-    /// / <see cref="Checkpoint"/> calls with this so the forensics are entirely no-cost when off.</summary>
+    
+    
     public static readonly bool Enabled =
         Environment.GetEnvironmentVariable("LAPLACE_COPY_VALIDATE") == "1";
 
-    /// <summary>
-    /// Diagnostic: re-validate the entities buffer at a named staging phase. Because the entities
-    /// buffer provably never reallocs and is only written by complete, checked add_entity rows, any
-    /// corruption observed here must come from an EXTERNAL heap write (e.g. a buffer overrun by a
-    /// later staging phase). Checkpointing after each phase names the exact phase that introduces
-    /// the corruption.
-    /// </summary>
+    
+    
+    
+    
+    
+    
+    
     public static void Checkpoint(IntentStage stage, string phase)
     {
         if (!Enabled) return;
@@ -43,11 +43,11 @@ internal static class CopyBlobValidator
         }
     }
 
-    // Walks the native PG-binary-COPY blob row-by-row and verifies each row begins with
-    // the expected int16 field count and that field length prefixes stay within bounds.
-    // On the FIRST framing violation it throws with the exact byte offset, the row index,
-    // the expected vs observed field count, and a hex window so we can see what bytes
-    // corrupted the stream (recognizable ASCII / hash / double patterns reveal the source).
+    
+    
+    
+    
+    
     public static void Validate(IntPtr ptr, long len, int expectedFields, string tableName, int rowCount)
     {
         if (ptr == IntPtr.Zero || len <= 0) return;
@@ -57,12 +57,12 @@ internal static class CopyBlobValidator
             new ReadOnlySpan<byte>((void*)ptr, checked((int)len)).CopyTo(blob);
         }
 
-        // Entities are STRICTLY fixed-size: int16(4) + [int32(16)+16 id] + [int32(2)+2 tier]
-        // + [int32(16)+16 type_id] + [int32(16)+16 fob | int32(-1) NULL fob].
-        // => stride is 68 bytes (fob present) or 52 bytes (fob NULL). Because the stream
-        // is fixed-size, the FIRST row whose start is not reachable by a valid stride from
-        // the previous row start is the true point of corruption. We detect that precisely
-        // and, on the row-by-row walk below, also confirm field counts/lengths.
+        
+        
+        
+        
+        
+        
         long off = 0;
         int row = 0;
         while (off < len)
@@ -83,7 +83,7 @@ internal static class CopyBlobValidator
                         $"truncated length prefix at field {f}");
                 int flen = (blob[off] << 24) | (blob[off + 1] << 16) | (blob[off + 2] << 8) | blob[off + 3];
                 off += 4;
-                if (flen == -1) continue;          // NULL field
+                if (flen == -1) continue;          
                 if (flen < 0 || off + flen > len)
                     FailCopyBlob(blob, rowStart, row, tableName, expectedFields, fields,
                         $"field {f} length {flen} overruns blob (off={off}, len={len})");
@@ -116,9 +116,9 @@ internal static class CopyBlobValidator
             ascii.Append(c >= 0x20 && c < 0x7F ? (char)c : '.');
         }
 
-        // Walk forward from the blob start to find the FIRST row that fails to land on a
-        // valid fixed-stride boundary (entities only). This pinpoints the originating
-        // corrupt row rather than the row where the desync surfaced.
+        
+        
+        
         var strideReport = new StringBuilder();
         if (tableName == "entities")
         {
@@ -131,8 +131,8 @@ internal static class CopyBlobValidator
             $"expected {expected} fields. Hex window (rowStart marked [>..<]):\n{sb}\nASCII: {ascii}{strideReport}");
     }
 
-    // Re-walks the entities blob assuming the strict fixed layout and reports the first row
-    // whose framing deviates, plus a per-row stride trace around the failure offset.
+    
+    
     private static string DescribeEntityStride(byte[] blob, long failOffset)
     {
         var sb = new StringBuilder();
@@ -160,11 +160,11 @@ internal static class CopyBlobValidator
                 }
                 return sb.ToString();
             }
-            // STRICT fixed-layout check: every field length must be exactly as specified.
-            // We do NOT follow a wrong length (which would mask the true origin); instead we
-            // verify each prefix and stop at the FIRST deviation. Layout:
-            //   [int16=4][int32=16 + 16 id][int32=2 + 2 tier][int32=16 + 16 type_id]
-            //   [int32=16 + 16 fob | int32=-1 NULL]
+            
+            
+            
+            
+            
             int lId   = ReadLen(blob, rowStart + 2);
             int lTier = ReadLen(blob, rowStart + 2 + 4 + 16);
             int lType = ReadLen(blob, rowStart + 2 + 4 + 16 + 4 + 2);

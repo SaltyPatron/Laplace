@@ -4,10 +4,10 @@ using static Laplace.Cli.CliRuntime;
 
 namespace Laplace.Cli;
 
-/// <summary>
-/// No-DB benchmark commands: <c>svd-exact-bench</c> (prove tensor_svd_truncate is fp-exact on a real
-/// tensor) and <c>model-bench</c> (run the whole-model FFN/relation ETL on a real model or hub).
-/// </summary>
+
+
+
+
 internal static class BenchCommands
 {
     public static int SvdExactBenchCmd(string[] rest)
@@ -25,8 +25,8 @@ internal static class BenchCommands
         return pass ? 0 : 1;
     }
 
-    // Benches one model dir, or every model in a hub root. With no arg, walks the default hub
-    // ($LAPLACE_MODEL_HUB or D:\Models\hub) and benches each models--*/snapshots/* that has weights.
+    
+    
     public static async Task<int> ModelBenchCmd(string[] rest)
     {
         var log = ConsoleLoggerProvider.Factory().CreateLogger("model-bench");
@@ -78,24 +78,24 @@ internal static class BenchCommands
 
     private static bool IsModelDir(string dir) => SafetensorSnapshotWitness.IsComplete(dir);
 
-    // HF cache layout: <hub>/models--ORG--NAME/snapshots/<rev>/, weights resolved via blob symlinks.
+    
     private static IEnumerable<string> EnumerateHubModels(string hub)
     {
-        // direct: hub root is itself a model
+        
         if (IsModelDir(hub)) { yield return hub; yield break; }
 
         foreach (var fam in Directory.GetDirectories(hub, "models--*").OrderBy(f => f, StringComparer.Ordinal))
         {
             var snapsDir = Path.Combine(fam, "snapshots");
             if (!Directory.Exists(snapsDir)) continue;
-            // newest snapshot that actually carries weights
+            
             var snap = Directory.GetDirectories(snapsDir)
                                 .OrderByDescending(Directory.GetLastWriteTimeUtc)
                                 .FirstOrDefault(IsModelDir);
             if (snap != null) yield return snap;
         }
 
-        // also allow plain (non-HF) model dirs sitting directly under the hub
+        
         foreach (var d in Directory.GetDirectories(hub).OrderBy(f => f, StringComparer.Ordinal))
             if (!Path.GetFileName(d).StartsWith("models--", StringComparison.Ordinal) && IsModelDir(d))
                 yield return d;

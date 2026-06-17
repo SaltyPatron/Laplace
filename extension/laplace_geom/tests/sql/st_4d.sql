@@ -195,8 +195,8 @@ END;
 $$;
 SELECT 'mantissa_pack_rejects_ordinal_overflow' AS validation_check;
 
--- Vertex flag-word decoders: the single C decode of the mantissa.h layout.
--- HAS_ATOM = bit 0; tier = bits 1..5; atom = bits 31..51.
+
+
 SELECT laplace_vertex_tier((5::bigint << 1)) = 5             AS tier_decode,
        laplace_vertex_atom(1 + (97::bigint << 31)) = 97      AS atom_decode_with_flag,
        laplace_vertex_atom((97::bigint << 31)) IS NULL       AS atom_null_without_flag,

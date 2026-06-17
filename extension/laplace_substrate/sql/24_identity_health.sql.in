@@ -1,4 +1,4 @@
--- Identity law health checks (extension install surface; no ad-hoc SQL).
+
 
 CREATE OR REPLACE FUNCTION fake_tier_band_count()
 RETURNS bigint

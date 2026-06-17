@@ -1,5 +1,5 @@
-# Linux CI / dev-host recipes only. Windows (canonical): scripts/win/*.cmd —
-# see .github/instructions/build-environment.instructions.md (never cmake --install to Program Files).
+
+
 set shell := ["bash", "-uc"]
 
 default:
@@ -46,7 +46,7 @@ build:
     LD_LIBRARY_PATH="$(pwd)/build/engine/core:$(pwd)/build/engine/dynamics:$(pwd)/build/engine/synthesis:${LD_LIBRARY_PATH:-}" cmake --build build
 
 install: build
-    #!/usr/bin/env bash
+    
     umask 0002
     cmake --install build
 
@@ -80,7 +80,7 @@ db-nuke:
     cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- nuke
 
 migrate-new name:
-    #!/usr/bin/env bash
+    
     set -euo pipefail
     if [[ ! "{{name}}" =~ ^[a-z][a-z0-9_]*$ ]]; then
         echo "✗ Migration name must be snake_case (a-z0-9_), starting with a letter."
@@ -97,7 +97,7 @@ seed-t0: build-perfcache build-app
     cd app && dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- ingest unicode
 
 db-fresh: build-perfcache build-app
-    #!/usr/bin/env bash
+    
     set -euo pipefail
     rm -f "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"/lib/postgresql/*/laplace_substrate.so \
           "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"/share/postgresql/*/extension/laplace_substrate*

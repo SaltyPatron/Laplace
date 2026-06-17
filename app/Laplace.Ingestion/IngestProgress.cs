@@ -1,6 +1,6 @@
 namespace Laplace.Ingestion;
 
-/// <summary>ETL progress snapshot — input completion %, not output row inflation.</summary>
+
 public sealed record IngestProgress(
     string   SourceName,
     int      LayerOrder,

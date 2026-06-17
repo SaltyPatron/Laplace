@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace Laplace.Api.Contracts;
 
-// Billing surface response shapes. Declaration order = wire order (golden-pinned).
+
 
 public sealed record BillingCatalogResponse(
     [property: JsonPropertyName("object")] string Object,
@@ -251,7 +251,7 @@ public sealed record UsageResponse(
     [property: JsonPropertyName("total_amount_cents")] long TotalAmountCents,
     [property: JsonPropertyName("entries")] IReadOnlyList<UsageEntry> Entries);
 
-/// <summary>Ledger entry view (camelCase wire — pinned by the usage golden).</summary>
+
 public sealed record UsageEntry(
     string QuoteId,
     string Tenant,

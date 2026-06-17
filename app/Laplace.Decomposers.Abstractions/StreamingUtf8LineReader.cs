@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>Chunked UTF-8 line reader — bounded memory for large JSONL/TSV corpora.</summary>
+
 public static class StreamingUtf8LineReader
 {
     public static async IAsyncEnumerable<ReadOnlyMemory<byte>> ReadLinesAsync(
@@ -11,6 +11,13 @@ public static class StreamingUtf8LineReader
     {
         await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
             FileShare.Read, bufferSize: 1 << 20, useAsync: true);
+        await foreach (var line in ReadLinesAsync(fs, ct))
+            yield return line;
+    }
+
+    public static async IAsyncEnumerable<ReadOnlyMemory<byte>> ReadLinesAsync(
+        Stream stream, [EnumeratorCancellation] CancellationToken ct = default)
+    {
         var carry = ArrayPool<byte>.Shared.Rent(256);
         int carryLen = 0;
         var buf = ArrayPool<byte>.Shared.Rent(1 << 20);
@@ -20,7 +27,7 @@ public static class StreamingUtf8LineReader
         try
         {
             int read;
-            while ((read = await fs.ReadAsync(buf.AsMemory(0, buf.Length), ct)) > 0)
+            while ((read = await stream.ReadAsync(buf.AsMemory(0, buf.Length), ct)) > 0)
             {
                 ct.ThrowIfCancellationRequested();
                 int start = 0;
@@ -33,6 +40,7 @@ public static class StreamingUtf8LineReader
                     {
                         carryLen = 0;
                         start = i + 1;
+                        yield return ReadOnlyMemory<byte>.Empty;
                         continue;
                     }
 

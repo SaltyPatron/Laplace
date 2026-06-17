@@ -1,8 +1,8 @@
-/*
- * consensus_reads.c - relational read SRFs over consensus (related, salient_facts,
- * usage_overlap, relate_path, relation_summary, gaps, shared_objects). Dictionary
- * reads split out to consensus_lexical_reads.c.
- */
+
+
+
+
+
 #include "postgres.h"
 
 #include "catalog/pg_type.h"
@@ -37,8 +37,8 @@ pg_laplace_shared_objects(PG_FUNCTION_ARGS)
     int32 lim;
     Oid   argtypes[3] = { BYTEAARRAYOID, BYTEAOID, INT4OID };
     Datum args[3];
-    /* "  nn" lied twice: $2 was stuck NULL even when a filter was passed, and
-     * $3 (LIMIT) was permanently NULL = unbounded (2026-06-10) */
+    
+
     char  nulls[4] = "   ";
     int   rc;
 
@@ -506,9 +506,9 @@ pg_laplace_gaps(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("gaps: p_word must not be NULL")));
     word = PG_GETARG_DATUM(0);
-    /* RETURNS TABLE with ONE column is SETOF scalar to PG, not a rowtype —
-     * the default InitMaterializedSRF path then errors "return type must be
-     * a row type". Use the caller's expected descriptor instead. */
+    
+
+
     InitMaterializedSRF(fcinfo, MAT_SRF_USE_EXPECTED_DESC);
     bool spi_top = false;
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)

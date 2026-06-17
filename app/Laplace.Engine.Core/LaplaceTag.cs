@@ -1,6 +1,6 @@
 namespace Laplace.Engine.Core;
 
-/// <summary>Normalized tags.scm capture class (mirrors the C LAPLACE_TAG_* enum).</summary>
+
 public enum TagType : ushort
 {
     Other       = 0,
@@ -12,15 +12,15 @@ public enum TagType : ushort
     RefType     = 6,
 }
 
-/// <summary>One tags.scm capture (mirrors C laplace_tag_t, sequential layout).</summary>
+
 public struct LaplaceTag
 {
-    public uint   MatchId;       // captures of one match share this
-    public ushort CaptureType;   // TagType
+    public uint   MatchId;       
+    public ushort CaptureType;   
     public ushort _pad;
     public uint   StartByte;
     public uint   EndByte;
 }
 
-/// <summary>A managed copy of a capture.</summary>
+
 public readonly record struct TagCapture(uint MatchId, TagType Type, uint StartByte, uint EndByte);
