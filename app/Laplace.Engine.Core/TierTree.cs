@@ -90,15 +90,15 @@ public sealed class TierTree : SafeHandle
         return view;
     }
 
-    /// <summary>
-    /// The no-artificial-inflation law: a unary wrapper above the grapheme floor —
-    /// tier &gt; 1, exactly one child, covering the same text span as that child — is
-    /// not a unit of content; its child stands in for it everywhere (emission,
-    /// trajectory references, the natural unit). Descends to the stand-in. Never
-    /// below tier 1: codepoints are perfcache floor, not content roots, so a
-    /// grapheme keeps its single-codepoint composition.
-    /// MUST match collapse_idx in content_witness_batch.c.
-    /// </summary>
+    
+    
+    
+    
+    
+    
+    
+    
+    
     public uint CollapseIndex(uint idx)
     {
         ThrowIfDisposed();
@@ -114,7 +114,7 @@ public sealed class TierTree : SafeHandle
         return idx;
     }
 
-    /// <summary>The natural unit: the top of the tree with its unary wrappers collapsed.</summary>
+    
     public uint NaturalUnitIndex()
     {
         ThrowIfDisposed();
@@ -123,11 +123,11 @@ public sealed class TierTree : SafeHandle
         return CollapseIndex((uint)(nc - 1));
     }
 
-    /// <summary>
-    /// True when a compositional node should be emitted: collapsible wrappers never
-    /// emit anywhere in the tree (their stand-in child does), codepoints never emit
-    /// (perfcache floor), everything else does.
-    /// </summary>
+    
+    
+    
+    
+    
     public bool ShouldEmitCompositional(uint idx)
     {
         ThrowIfDisposed();

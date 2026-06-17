@@ -5,10 +5,10 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Unicode;
 
-/// <summary>
-/// Supplementary UCD attestation tables (category, mappings, aliases). Codepoint geometry and
-/// Hilbert placement are native-owned via <see cref="UnicodeSeed"/> / <see cref="CodepointPerfcache"/>.
-/// </summary>
+
+
+
+
 internal sealed class UcdProperties
 {
     public static readonly Hash128 RelTypeHasGeneralCategory  = RelationTypeRegistry.RelationTypeId("HAS_GENERAL_CATEGORY");

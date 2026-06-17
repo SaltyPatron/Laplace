@@ -178,9 +178,9 @@ def gguf_vocab(tok_dir):
 
 
 def tokenize_words(vocab, prompt):
-    # SentencePiece vocabs key words as ▁word with BOS=1; WordPiece vocabs key
-    # plain (lowercased) pieces and lead with [CLS]. The mold is llama either way —
-    # only the vocab keying differs.
+    
+    
+    
     ids = [vocab.get("[CLS]", 1)]
     for w in prompt.strip().split(" "):
         for key in ("▁" + w, w, w.lower()):

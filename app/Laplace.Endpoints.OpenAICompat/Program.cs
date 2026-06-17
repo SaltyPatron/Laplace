@@ -8,8 +8,8 @@ using Serilog.Formatting.Compact;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Logging: plain console for dev; LAPLACE_LOG_JSON=true switches to structured JSON,
-// LAPLACE_LOG_DIR adds a daily-rolling JSON file (production).
+
+
 builder.Host.UseSerilog((_, lc) =>
 {
     lc.MinimumLevel.Information().Enrich.FromLogContext();
@@ -26,8 +26,8 @@ builder.Host.UseSerilog((_, lc) =>
 builder.Services.AddOpenAiCompatServices();
 builder.Services.AddOpenApi();
 
-// CORS: only active when LAPLACE_CORS_ORIGINS is set (the SPA is served same-origin;
-// this is for the Vite dev server and external browser clients).
+
+
 var corsOrigins = (Environment.GetEnvironmentVariable("LAPLACE_CORS_ORIGINS") ?? string.Empty)
     .Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 if (corsOrigins.Length > 0)
@@ -39,8 +39,8 @@ if (corsOrigins.Length > 0)
         .WithExposedHeaders("X-Correlation-Id")));
 }
 
-// Rate limiting: tenant-partitioned sliding window over /v1, stricter per-IP fixed window
-// on the Stripe webhook; health/metrics/openapi exempt. Limits are per-minute, env-tunable.
+
+
 var perTenantPerMinute = ReadIntEnv("LAPLACE_RATELIMIT_PERMIN", 300);
 var webhookPerMinute = ReadIntEnv("LAPLACE_RATELIMIT_WEBHOOK_PERMIN", 120);
 builder.Services.AddRateLimiter(options =>
@@ -75,8 +75,8 @@ builder.Services.AddRateLimiter(options =>
     });
 });
 
-// OpenTelemetry: Prometheus metrics at /metrics; traces over AspNetCore + Npgsql,
-// exported via OTLP when OTEL_EXPORTER_OTLP_ENDPOINT is set.
+
+
 builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics => metrics
         .AddAspNetCoreInstrumentation()
@@ -97,8 +97,8 @@ app.UseRateLimiter();
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ExceptionEnvelopeMiddleware>();
 
-// SPA hosting: web/dist is copied into wwwroot by build-web.cmd / the publish pipeline.
-// Hashed Vite assets are immutable; index.html must revalidate so deploys take effect.
+
+
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
 {
@@ -117,7 +117,7 @@ app.MapCoreEndpoints();
 app.MapOpenAiCompatEndpoints();
 app.MapBillingEndpoints();
 
-// Unknown API paths stay JSON 404s; everything else falls through to the SPA router.
+
 app.MapFallback("/v1/{*path}", () => Results.Json(
     new Laplace.Api.Contracts.ErrorResponse(
         new Laplace.Api.Contracts.ErrorBody("not_found", "unknown_route", "No such API route.")),

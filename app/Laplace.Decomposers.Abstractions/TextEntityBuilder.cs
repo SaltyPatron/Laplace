@@ -84,8 +84,8 @@ public sealed class TextEntityBuilder
             var childFlags = new ulong[node.ChildCount];
             for (uint ci = 0; ci < node.ChildCount; ci++)
             {
-                // references collapse with the wrapper: the trajectory names the
-                // stand-in, never an unemitted unary wrapper id
+                
+                
                 var child = _tree.GetNode(_tree.CollapseIndex(node.FirstChildIdx + ci));
                 childIds[ci] = child.Id;
                 childFlags[ci] = Trajectory.VertexFlags(
@@ -167,8 +167,8 @@ public sealed class TextEntityBuilder
         }
         catch (InvalidOperationException)
         {
-            // not-loaded is a process-setup bug, never a data condition: a silent
-            // false here turned every emission into a no-op (burned 2026-06-11)
+            
+            
             if (!CodepointPerfcache.IsLoaded) throw;
             rootId = default; rootTier = 0;
             cx = cy = cz = cm = double.NaN;
@@ -281,9 +281,9 @@ public sealed class TextEntityBuilder
 
         if (precedes.Count == 0) return ImmutableArray<AttestationRow>.Empty;
 
-        // The containing natural unit stamps its sequence testimony (docs/OPEN-PROBLEMS.md §13) —
-        // the same context-as-entity pattern model witnesses use for layers. Consensus identity
-        // excludes context, so folds are unchanged; provenance becomes per-document.
+        
+        
+        
         var contextId = tree.GetNode(tree.NaturalUnitIndex()).Id;
         var rows = ImmutableArray.CreateBuilder<AttestationRow>(precedes.Count);
         foreach (var (pair, count) in precedes)

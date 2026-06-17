@@ -1,7 +1,7 @@
--- effective_mu() is the engine's compiled conservative-μ law (the single source
--- of `rating - 2·rd`). eff_mu() below mirrors it inline so the consensus
--- ORDER BY stays index/plan-friendly; word_law regress pins eff_mu = effective_mu
--- so the inline can never drift from the engine.
+
+
+
+
 CREATE OR REPLACE FUNCTION @extschema@.effective_mu(p_rating bigint, p_rd bigint)
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_effective_mu'
@@ -22,8 +22,8 @@ CREATE OR REPLACE FUNCTION refuted(p_rating bigint, p_rd bigint)
     SELECT p_rating + 2 * p_rd < @extschema@.glicko2_neutral_mu()
 $$;
 
--- The neutral/anchor μ — the engine's compiled constant, not a SQL literal.
--- No-arg IMMUTABLE so the planner folds it; refuted()/predicates pay nothing.
+
+
 CREATE OR REPLACE FUNCTION glicko2_neutral_mu() RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_glicko2_neutral_mu'
     LANGUAGE C LAPLACE_IMMUTABLE;

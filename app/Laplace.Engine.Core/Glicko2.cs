@@ -61,7 +61,7 @@ public static unsafe class Glicko2
         }
     }
 
-    /// <summary>Bit-identical to PG <c>laplace_glicko2_accumulate_games</c>.</summary>
+    
     public static Glicko2State AccumulateGames(
         long priorRatingFp1e9,
         long priorRdFp1e9,

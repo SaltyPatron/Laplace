@@ -6,10 +6,10 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Model;
 
-/// <summary>
-/// Deposes a HuggingFace safetensor snapshot (config + tokenizer + weight blobs) into substrate testimony.
-/// Not GGUF — safetensors are tensor containers only; recipe and vocab are external files in the snapshot dir.
-/// </summary>
+
+
+
+
 public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
 {
     public static readonly Hash128 TrustClass =
@@ -83,11 +83,11 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
     public int     LayerOrder   => 10;
     public Hash128 TrustClassId => TrustClass;
 
-    // Registered post-ingest so the recipe round-trips: the recipe entity id IS
-    // Blake3(canonical config JSON), and canonical_id(name) is the same hash law —
-    // registering the canonical JSON itself makes render(recipe_id) return the
-    // full recipe. That is how a discovered mold is read back for the foundry
-    // (synthesize substrate --recipe-from). The six scalar values render too.
+    
+    
+    
+    
+    
     public IReadOnlyCollection<string> CanonicalNamesForReadback
     {
         get
@@ -189,8 +189,8 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         log.LogInformation("phase=merges emitted: {Count} merges, {Batches} batches ({Ms} ms)",
             merges.Count, mergeBatches, phaseSw.ElapsedMilliseconds);
 
-        // The deposition: token→token behavioral planes (SIMILAR_TO/ATTENDS/OV_RELATES/
-        // COMPLETES_TO). Token entities commit at epoch 0, matchups at epoch 1.
+        
+        
         log.LogInformation("phase=etl starting");
         var etl = new ModelTableETL(_modelDir, recipe, tokens, Source, ModelLayerTypeId,
             epochBase: 0, log, persistEvidence: _persistEvidence);
@@ -201,8 +201,8 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         }
         const int finalEpoch = 1;
 
-        // S3 morph: per-witness Projection physicalities + anchored TOKEN_MAPS_TO.
-        // References token entities (epoch 0), so it stamps the matchup epoch.
+        
+        
         var s3 = new WeightTensorETL(_modelDir, recipe, tokens, Source, tokEntityId, log);
         await foreach (var change in s3.EmitS3MorphAsync(finalEpoch, ct))
         {
@@ -210,8 +210,8 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
             yield return change;
         }
 
-        // Tokenizer→token provenance so a deposited model knows which tokens are its own.
-        // Stamped with the highest epoch any ETL stream used (equal epochs are legal).
+        
+        
         foreach (var batch in LlamaTokenizerParser.BuildTokenMapsToCategorical(
             tokens, Source, tokEntityId, batchSz, finalEpoch))
         {
@@ -246,10 +246,10 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         return Task.FromResult<long?>(n > 0 ? n : null);
     }
 
-    // Claim-shaped, not parameter-shaped: the deposit emits above-noise token→token
-    // matchups, so the estimate is vocab × expected above-noise partners per plane —
-    // per layer for the three per-layer planes, once for SIMILAR_TO. Feeds only
-    // ingest inventory/progress; never sizes storage.
+    
+    
+    
+    
     private long EstimateMatchupUnits()
     {
         string configPath = Path.Combine(_modelDir, "config.json");

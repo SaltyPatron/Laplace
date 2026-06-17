@@ -1,19 +1,8 @@
 @echo off
 setlocal
-rem ==== Laplace OpenAI-compatible endpoint (local dev) =======================
-rem Starts the substrate inference server on http://localhost:5187
-rem with billing bypassed so no quote header is required.
-rem
-rem   LAPLACE_DB        connection string (default: localhost/postgres)
-rem   LAPLACE_PORT      port override    (default: 5187)
-rem
-rem Wires into VS Code via .continue/config.json or any OpenAI-compatible
-rem client pointing at http://localhost:5187/v1
-rem ==========================================================================
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 
-rem LAPLACE_DB comes from env.cmd (single source; pre-set to override).
 if not defined LAPLACE_PORT (
     set "LAPLACE_PORT=5187"
 )

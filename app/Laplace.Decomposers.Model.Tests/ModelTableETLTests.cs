@@ -50,27 +50,27 @@ public class ModelTableETLTests
             var entities     = changes.SelectMany(c => c.Entities).ToList();
             var attestations = changes.SelectMany(c => c.Attestations).ToList();
 
-            // Token entities with correct tiers
+            
             Assert.Contains(entities, e => e.Id == e0 && e.Tier == 1);
             Assert.Contains(entities, e => e.Id == e1 && e.Tier == 2);
 
-            // No axis entities (neuron, channel, attn_dim — never materialized)
+            
             var neuronType = Hash128.OfCanonical("substrate/type/Neuron/v1");
             Assert.DoesNotContain(entities, e => e.TypeId == neuronType);
 
-            // ATTENDS: Q·K bilinear produces token→token pairs
-            // Q=identity, K=swap → token0 attends token1 (cosine=1.0) and vice versa
+            
+            
             Assert.Contains(attestations, HasEdge("ATTENDS", e0, e1));
             Assert.Contains(attestations, HasEdge("ATTENDS", e1, e0));
 
-            // OV_RELATES: V=identity, O=swap → each token writes toward the other
+            
             Assert.Contains(attestations, HasEdge("OV_RELATES", e0, e1));
             Assert.Contains(attestations, HasEdge("OV_RELATES", e1, e0));
 
-            // COMPLETES_TO: FFN contraction produces token→token (incl. self-completion)
+            
             Assert.Contains(attestations, a => a.TypeId == RelationTypeRegistry.RelationTypeId("COMPLETES_TO"));
 
-            // Old axis-matchup relation types must never appear
+            
             Assert.DoesNotContain(attestations, a => a.TypeId == RelationTypeRegistry.RelationTypeId("EMBEDS"));
             Assert.DoesNotContain(attestations, a => a.TypeId == RelationTypeRegistry.RelationTypeId("Q_PROJECTS"));
             Assert.DoesNotContain(attestations, a => a.TypeId == RelationTypeRegistry.RelationTypeId("DETECTS"));

@@ -6,16 +6,16 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Code;
 
-/// <summary>
-/// Deposits a source repository as structured code testimony, layered on top of CodeDecomposer.
-/// Beyond raw AST parsing, it adds:
-///   - A repo-root entity + CONTAINS links to each top-level directory/file
-///   - A file-path entity per file (content-addressed via relative path text) + CONTAINS from parent
-///   - HAS_EXAMPLE from the file-path entity to the parsed code root entity
-///   - CALLS/DEFINES/REFERENCES arcs from tree-sitter tags.scm (same as CodeDecomposer)
-/// This lets the substrate answer structural questions: "what files does Laplace have",
-/// "what does bilinear_edges.cpp contain", etc., and is the primary ingest path for this repo.
-/// </summary>
+
+
+
+
+
+
+
+
+
+
 public sealed class RepoDecomposer : IDecomposer
 {
     public static readonly Hash128 Source =
@@ -29,7 +29,7 @@ public sealed class RepoDecomposer : IDecomposer
     private static readonly Dictionary<string, string> ExtToModality =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            // core
+            
             ["py"]   = "python",
             ["c"]    = "c",    ["h"]   = "c",
             ["cpp"]  = "cpp",  ["cc"]  = "cpp", ["cxx"] = "cpp", ["hpp"] = "cpp", ["hh"] = "cpp",
@@ -41,7 +41,7 @@ public sealed class RepoDecomposer : IDecomposer
             ["sh"]   = "bash", ["bash"] = "bash",
             ["json"] = "json",
             ["md"]   = "markdown",
-            // language grammars
+            
             ["java"]    = "java",
             ["rb"]      = "ruby",   ["rake"] = "ruby",
             ["jl"]      = "julia",
@@ -49,7 +49,7 @@ public sealed class RepoDecomposer : IDecomposer
             ["php"]     = "php",
             ["sql"]     = "sql",    ["ddl"]  = "sql",   ["dml"] = "sql",
             ["swift"]   = "swift",
-            // HPC/compute — enabled once grammars compiled
+            
             ["cu"]      = "cuda",   ["cuh"]  = "cuda",
             ["glsl"]    = "glsl",   ["vert"] = "glsl",  ["frag"] = "glsl",
                                     ["comp"] = "glsl",  ["geom"] = "glsl",
@@ -57,7 +57,7 @@ public sealed class RepoDecomposer : IDecomposer
             ["wgsl"]    = "wgsl",
             ["f90"]     = "fortran", ["f95"] = "fortran", ["f"]  = "fortran",
                                      ["for"] = "fortran",
-            ["s"]       = "asm",    // GAS assembly
+            ["s"]       = "asm",    
             ["ll"]      = "llvm",
             ["mlir"]    = "mlir",
             ["cmake"]   = "cmake",
@@ -65,7 +65,7 @@ public sealed class RepoDecomposer : IDecomposer
             ["zig"]     = "zig",
         };
 
-    // Files whose modality is keyed on name rather than extension.
+    
     private static readonly Dictionary<string, string> FileNameToModality =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -77,10 +77,10 @@ public sealed class RepoDecomposer : IDecomposer
     public int     LayerOrder   => 2;
     public Hash128 TrustClassId => TrustClass;
 
-    // Names declared at bootstrap + every grammar node-type witnessed during decompose,
-    // registered after ingest so AST types and relation arcs render by name instead of hex.
-    // Derived from the declaration sites (BootstrapIntentBuilder, GrammarEntityBuilder) —
-    // nothing is retyped here.
+    
+    
+    
+    
     private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
 
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
@@ -108,7 +108,7 @@ public sealed class RepoDecomposer : IDecomposer
         var root = context.EcosystemPath;
         if (!Directory.Exists(root)) yield break;
 
-        // Canonical root entity keyed on the repo path
+        
         var repoId = Hash128.OfCanonical($"repo:{Path.GetFullPath(root)}/v1");
         int batch = options.BatchSize > 1 ? options.BatchSize : 32;
         var b = NewBuilder(0);
@@ -158,7 +158,7 @@ public sealed class RepoDecomposer : IDecomposer
             foreach (var p in phys) b.AddPhysicality(p);
             foreach (var a in atts) b.AddAttestation(a);
 
-            // File-path entity: relative path content-addressed so it reconciles with text search.
+            
             string relPath = Path.GetRelativePath(root, file).Replace('\\', '/');
             var filePathId = ContentEmitter.Emit(b, relPath, Source);
             if (filePathId.HasValue)
@@ -172,11 +172,11 @@ public sealed class RepoDecomposer : IDecomposer
                     codeRootId, "HAS_DEFINITION", filePathId.Value,      Source, SourceTrust.StructuredCorpus));
             }
 
-            // Also keyword-link the filename itself (e.g. "bilinear_edges") to the code root
+            
             var filename = Path.GetFileNameWithoutExtension(file);
             if (!string.IsNullOrEmpty(filename))
             {
-                // Split on underscores, hyphens, dots — each segment links to the code
+                
                 foreach (var seg in filename.Split(new char[] { '_', '-', '.' },
                     StringSplitOptions.RemoveEmptyEntries))
                 {

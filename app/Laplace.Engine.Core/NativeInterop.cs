@@ -208,7 +208,7 @@ public static unsafe partial class NativeInterop
         long tau,
         long nowNs);
 
-    // --- grammar-execution mechanism (sealed behind the engine; returns Laplace AST) ---
+    
 
     [LibraryImport(Library, EntryPoint = "laplace_grammar_lookup_by_id", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr GrammarLookupById(string modalityId);
@@ -231,14 +231,14 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_ast_free")]
     internal static partial void AstFree(IntPtr ast);
 
-    // --- shared composition kernel (one truth for text and any grammar) ---
+    
 
     [LibraryImport(Library, EntryPoint = "hash_composer_compose_node")]
     internal static partial void HashComposerComposeNode(
         byte tier, Hash128* childIds, double* childCoords, nuint n,
         Hash128* outId, double* outCoord, Hilbert128* outHb);
 
-    // --- grapheme floor (owned handle; shared by text and every grammar) ---
+    
 
     [LibraryImport(Library, EntryPoint = "laplace_grapheme_floor_build_owned")]
     internal static partial IntPtr GraphemeFloorBuildOwned(byte* utf8, nuint len, IntPtr* outTree);
@@ -264,7 +264,7 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_grapheme_floor_free_owned")]
     internal static partial void GraphemeFloorFreeOwned(IntPtr floor);
 
-    // --- semantic arcs: tags.scm def/ref extraction (sealed; returns Laplace captures) ---
+    
 
     [LibraryImport(Library, EntryPoint = "laplace_grammar_tags_run")]
     internal static partial int GrammarTagsRun(

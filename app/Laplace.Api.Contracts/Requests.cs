@@ -3,8 +3,8 @@ using System.Text.Json.Serialization;
 
 namespace Laplace.Api.Contracts;
 
-// Request DTOs for every endpoint route. Property names are pinned with explicit
-// snake_case [JsonPropertyName] attributes — the OpenAI-compatible wire contract.
+
+
 
 public sealed record ChatCompletionsRequest(
     [property: JsonPropertyName("model")] string? Model,

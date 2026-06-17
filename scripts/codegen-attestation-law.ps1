@@ -7,7 +7,7 @@ if (-not (Test-Path $py)) { throw "missing $py" }
 python $py
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-# Freshness marker for CI
+
 $stamp = Join-Path $Root 'engine/core/src/generated/.attestation-law-stamp'
 $manifest = @(
     (Get-Item (Join-Path $Root 'engine/manifest/relation_types.toml')).LastWriteTimeUtc.Ticks

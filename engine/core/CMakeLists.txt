@@ -76,7 +76,7 @@ if(WIN32)
         PRIVATE blake3 LibXml2::LibXml2)
 endif()
 
-# tree-sitter runtime + the starter grammars (each = a domain recipe), linked into both core libs.
+
 add_subdirectory(grammars)
 target_link_libraries(laplace_core PRIVATE tree_sitter_rt ${LAPLACE_TS_GRAMMARS})
 if(WIN32)

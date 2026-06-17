@@ -2,7 +2,7 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>Read delimited rows via native grammar field spans (no line.Split).</summary>
+
 public static class GrammarRowReader
 {
     public static async IAsyncEnumerable<(string[] Fields, long UnitsConsumed)> ReadFieldsAsync(

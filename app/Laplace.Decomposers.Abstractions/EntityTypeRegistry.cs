@@ -2,7 +2,7 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>Canonical entity type IDs for <c>laplace.entities.type_id</c>.</summary>
+
 public static class EntityTypeRegistry
 {
     public static Hash128 Id(string canonicalName) =>

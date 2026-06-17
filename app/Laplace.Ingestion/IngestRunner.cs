@@ -79,9 +79,9 @@ public sealed class IngestRunner
 
         await decomposer.InitializeAsync(ctx, ct);
 
-        // Record-once is scoped to this ingest: clear the content witness's bank of
-        // already-emitted ids so a node shared across this source's terms/sentences is
-        // recorded once and referenced thereafter (the content-addressed / Merkle-DAG law).
+        
+        
+        
         Laplace.Engine.Core.IntentStage.ResetContentBank();
 
         log.LogInformation(
@@ -107,13 +107,13 @@ public sealed class IngestRunner
         int batchSize  = Math.Max(1, options.BatchSize);
         int commitRows = Math.Max(0, options.CommitRows);
 
-        // Content-witness rows live in the native ContentStage (c.IntentStages), NOT in
-        // c.Entities/Physicalities — counting only the C# rows reported ~0 for a pass that
-        // emits 100% through the witness, so the row-based flush (CommitRows) and the
-        // producer backpressure (rowBudget) never fired: ALL of WordNet pass-1 accreted into
-        // one 677,880-entity commit held wholly in RAM, and a single staged content entity
-        // was transiently dropped from that oversized commit (the data-36 def ghost). Count
-        // the prebuilt-stage rows so commits stay bounded (~CommitRows) and memory is capped.
+        
+        
+        
+        
+        
+        
+        
         static int RowsOf(SubstrateChange c)
         {
             int rows = c.Entities.Length + c.Physicalities.Length + c.Attestations.Length;
@@ -127,42 +127,33 @@ public sealed class IngestRunner
                 ? (rows >= commitRows || intents >= batchSize)
                 : intents >= batchSize;
 
-        // Default StrictSerial: the record-once content witness emits each distinct node ONCE,
-        // in the earliest batch that contains it, and LATER batches reference it (via trajectory /
-        // attestation object_id). That is a cross-batch dependency — the emitting batch must commit
-        // before the referencing one. Unordered/EpochBarrier parallel commit can run the referencing
-        // batch first → referential failure (PropBank: batch-3 referenced `causative agent` emitted by
-        // batch-0, committed out of order). Serial commit preserves producer order, so refs resolve.
-        // A decomposer whose intents are genuinely self-contained may still opt into parallel.
+        
+        
+        
+        
+        
+        
+        
         var commitPolicy = decomposer is IIngestCommitPolicy cp
             ? cp.CommitParallelism
             : IngestCommitParallelism.StrictSerial;
 
-        if (options.ParallelWorkers > 1 && commitPolicy == IngestCommitParallelism.StrictSerial)
-        {
-            log.LogInformation(
-                "{Source}: LAPLACE_INGEST_WORKERS={Workers} but commit policy is StrictSerial — "
-                + "using pipelined serial commit (decompose overlaps commit); raise epoch barriers "
-                + "or implement IIngestCommitPolicy.EpochBarrier to parallelize DB commits.",
-                decomposer.SourceName, options.ParallelWorkers);
-        }
-
         if (options.ParallelWorkers <= 1
             || commitPolicy == IngestCommitParallelism.StrictSerial)
         {
-            // Pipelined serial path: a single producer task decomposes continuously
-            // into an unbounded channel while THIS thread (the single consumer) batches
-            // and commits in the exact order produced. One consumer preserves the same
-            // strict commit ordering as a fully serial loop, so the cross-batch
-            // referential dependency that breaks parallel workers is unaffected — but
-            // decompose (CPU) now overlaps with the per-batch DB commit (I/O) instead of
-            // the two stages alternating on one thread.
-            //
-            // Backpressure is row-based, not intent-based: intents vary enormously in row
-            // count (UD ~40k rows/intent vs. a 1-row gloss), so an intent-count bound
-            // would either starve overlap for big intents or balloon memory for them.
-            // The producer pauses once the buffered row count exceeds the budget and is
-            // woken as the consumer drains.
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
             long rowBudget = Math.Max((long)commitRows, batchSize) * 3L;
             long bufferedRows = 0;
             var drained = new SemaphoreSlim(0, 1);
@@ -226,7 +217,7 @@ public sealed class IngestRunner
                 await ProcessBatchAsync(batch, decomposer, options, rng,
                                         counters, failures, log, ct);
 
-            // Surface any decompose-side exception (channel completed with error).
+            
             await producer;
         }
         else if (commitPolicy == IngestCommitParallelism.Unordered)
@@ -404,13 +395,17 @@ public sealed class IngestRunner
         var epochBuffer = new List<SubstrateChange>(batchSize * options.ParallelWorkers);
         int currentEpoch = 0;
         long bufferedRows = 0;
-        // An epoch is an UNORDERED parallel set — the barrier exists only BETWEEN epochs.
-        // Flushing an epoch in bounded waves therefore preserves the fence law while capping
-        // memory. Without this, a model-deposit epoch (~1.1B rows) buffered entirely in RAM
-        // before the first apply (observed: zero INGEST_BATCH lines while RSS climbed to 30+ GB;
-        // the prior run's "hang" was this buffer, not the ETL).
-        long flushRows = Math.Max((long)Math.Max(commitRows, 1), 500_000L)
-                         * Math.Max(1, options.ParallelWorkers);
+        
+        
+        
+        
+        
+        
+        
+        long perWorkerCap = commitRows > 0
+            ? (long)Math.Max(commitRows, 1)
+            : Math.Max((long)Math.Max(batchSize, 1) * 1000, 500_000L);
+        long flushRows = perWorkerCap * Math.Max(1, options.ParallelWorkers);
 
         while (await channel.Reader.WaitToReadAsync(ct))
         {
@@ -434,7 +429,8 @@ public sealed class IngestRunner
                 }
                 epochBuffer.Add(intent);
                 bufferedRows += rowsOf(intent);
-                if (bufferedRows >= flushRows)
+                int bufferedRowsInt = bufferedRows > int.MaxValue ? int.MaxValue : (int)bufferedRows;
+                if (shouldFlush(epochBuffer.Count, bufferedRowsInt) || bufferedRows >= flushRows)
                 {
                     await FlushEpochParallelAsync(
                         epochBuffer, decomposer, options, batchSize, commitRows,

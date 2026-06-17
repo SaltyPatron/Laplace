@@ -86,8 +86,8 @@ public sealed class VerbNetDecomposer : IDecomposer
         string? classId = el.GetAttribute("ID");
         if (string.IsNullOrEmpty(classId)) return;
 
-        // Class identity = its numeric class id (51.3.1) decomposed as content + IS_A VerbNet_Class,
-        // shared with PropBank/SemLink/the Predicate Matrix that cite the same class — not a blob.
+        
+        
         Hash128? classAnchor = CategoryAnchor.Emit(b, NumericClassId(classId), ClassTypeId, Source, TC.AcademicCurated);
         if (classAnchor is null) return;
         Hash128 classEntity = classAnchor.Value;
@@ -113,8 +113,8 @@ public sealed class VerbNetDecomposer : IDecomposer
             if (wn.Length > 0)
                 foreach (var raw in wn.Split(' ', StringSplitOptions.RemoveEmptyEntries))
                 {
-                    // The WN sense is the shared sense anchor (normalized key as content) — the same
-                    // id WordNet emits and attests IS_A WordNet_Sense; VerbNet links its lemma to it.
+                    
+                    
                     string? key = SourceEntityIdConventions.NormalizeSenseKey(raw);
                     if (key is null) continue;
                     var senseEntity = ContentEmitter.Emit(b, key, Source);

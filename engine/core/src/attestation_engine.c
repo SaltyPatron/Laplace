@@ -430,7 +430,7 @@ int laplace_attestation_aggregated_batch_build(
     laplace_attestation_staged_t* out) {
     if (!cells || !type_id || !source || !out) return -1;
 
-    /* shared per batch: relation symmetry, context, phi, timestamp */
+    
     const laplace_relation_def_t* def = NULL;
     laplace_rel_symmetry_t symmetry = LAPLACE_REL_SYMMETRY_ASYMMETRIC;
     if (laplace_relation_lookup(type_id, &def) == 0 && def)

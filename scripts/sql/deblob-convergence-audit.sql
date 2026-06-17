@@ -1,6 +1,6 @@
--- De-blob convergence audit. Standing proof that category identity is decomposed content
--- (codepoint floor) converging across witnesses, not OfCanonical("witness/ns/key") blobs.
--- Run after a seed reseed: psql ... -f scripts/sql/deblob-convergence-audit.sql
+
+
+
 SET search_path = laplace, public;
 \pset pager off
 

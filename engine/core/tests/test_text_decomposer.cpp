@@ -150,8 +150,8 @@ TEST(LaplaceCoreTextDecomposer, FinalizedParentIdxIsCorrect) {
     tier_tree_free(t);
 }
 
-/* ---- laplace_content_root_id: THE lookup law (decompose -> compose ->
- * natural unit). Pins that lookup ids are byte-identical to deposit ids. */
+
+
 
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"
@@ -171,8 +171,8 @@ TEST(LaplaceContentRootId, SingleCharCollapsesToCodepointId) {
 }
 
 TEST(LaplaceContentRootId, AsciiWordIsFlatMerkleOverCodepointIds) {
-    /* single-codepoint graphemes pass through (compose n==1), so the word id
-     * is merkle over the T0 ids — the identity the SQL regress pins for 'dog' */
+    
+
     hash128_t id;
     ASSERT_EQ(0, laplace_content_root_id((const uint8_t*)"dog", 3, &id));
     hash128_t kids[3] = { t0_id('d'), t0_id('o'), t0_id('g') };
@@ -182,8 +182,8 @@ TEST(LaplaceContentRootId, AsciiWordIsFlatMerkleOverCodepointIds) {
 }
 
 TEST(LaplaceContentRootId, MultiCodepointGraphemeComposesNested) {
-    /* "e<U+0301>x": grapheme(e,́) then word(grapheme, x) — NOT the flat
-     * merkle over all three codepoints (the retired SQL fork's shape) */
+    
+
     const uint8_t s[] = {0x65, 0xCC, 0x81, 0x78};
     hash128_t id;
     ASSERT_EQ(0, laplace_content_root_id(s, sizeof(s), &id));

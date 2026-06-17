@@ -1,40 +1,40 @@
-/*
- * consensus_fold_engine.c — the engine lane of the terminal fold
- * (HANDOFF-fold-lane "next rung").
- *
- * One call folds ONE staging partition: read the partition's epoch heaps with
- * the table AM (no SPI on the hot path — SPI costs ~1-2 µs/row, which alone
- * forfeits the ≥1M rel/s target at 10⁹ rows), sort in bounded-memory chunks,
- * k-way merge the sorted runs by (relation identity, epoch), fold each
- * relation's epochs in order through the SAME Glicko-2 math as the SQL-lane
- * aggregate (consensus_fold_math.h — drift breaks the regress parity pin),
- * and land the folded rows in consensus_next via the multi-insert path.
- *
- * Sort key: the 48-byte identity preimage (subject ‖ type ‖ object|zero16) —
- * equal bytes ⇔ equal consensus_id, so BLAKE3 runs once per OUTPUT relation,
- * not once per staged row. Runs spill to BufFile when the chunk arena exceeds
- * laplace.fold_mem_mb (default 8192); the merge then streams with small
- * per-run buffers, so the temp envelope is ≤ one partition's bytes — inside
- * the SQL lane's measured 2× envelope.
- *
- * SQL orchestrates, the engine computes: catalog discovery, DDL of
- * consensus_next, the PK build and the atomic swap all stay in
- * finish_consensus_fold (14_period_fold.sql.in). The PK build remains the
- * loud detector for partition-routing drift.
- *
- * Invariants (identical to the SQL lane, see consensus_fold_step.c):
- *   - THE PERIOD RULE: one fold = one rating period. Staging epochs are flush
- *     quanta (RAM bounds), not time — all of a relation's staged games merge
- *     into ONE Glicko period, like one tournament. Distinct deposits at
- *     distinct times remain distinct periods (they fold against the prior
- *     consensus as seeds). This keeps consensus values independent of
- *     LAPLACE_STAGING_THRESHOLD.
- *   - seed (existing consensus row) initializes the state; one φ per relation
- *     per fold — mixed φ raises;
- *   - the q/rem observation split of pg_laplace_glicko2_accumulate_games;
- *   - witness_count: seed restores it, the period adds its games;
- *   - last_observed_at = max over the seed and every staged row.
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #include "postgres.h"
 
 #include "access/heapam.h"
@@ -66,32 +66,32 @@
 
 #define FOLD_ROW_FLAG_OBJ  0x01
 #define FOLD_ROW_FLAG_SEED 0x02
-#define FOLD_RUN_BUF_ROWS  1024    /* per-run merge read buffer               */
+#define FOLD_RUN_BUF_ROWS  1024    
 
 typedef struct FoldRow
 {
     uint8  ident[FOLD_IDENT_LEN];
-    int32  epoch;                  /* 0 = seed                                */
+    int32  epoch;                  
     uint8  flags;
-    int64  v1, v2, v3;             /* seed rating/rd/volatility               */
-    int64  phi, games, sum_score;  /* partial fields; seed: games=witness_cnt */
-    int64  last_ts;                /* TimestampTz raw                         */
+    int64  v1, v2, v3;             
+    int64  phi, games, sum_score;  
+    int64  last_ts;                
 } FoldRow;
 
 typedef struct FoldRun
 {
-    /* exactly one of mem / file is live */
-    FoldRow *mem;                  /* in-memory sorted run                    */
-    BufFile *file;                 /* spilled sorted run                      */
-    int64    remaining;            /* rows not yet handed to the merge        */
-    FoldRow *buf;                  /* read buffer (spilled runs)              */
+    
+    FoldRow *mem;                  
+    BufFile *file;                 
+    int64    remaining;            
+    FoldRow *buf;                  
     int      buf_n, buf_pos;
-    FoldRow  head;                 /* current head, valid when !exhausted     */
+    FoldRow  head;                 
     bool     exhausted;
     int64    mem_pos;
 } FoldRun;
 
-/* ---- chunk sort -------------------------------------------------------- */
+
 
 static int
 fold_row_cmp(const void *pa, const void *pb)
@@ -107,7 +107,7 @@ fold_row_cmp(const void *pa, const void *pb)
     return 0;
 }
 
-/* ---- run access -------------------------------------------------------- */
+
 
 static void
 fold_run_advance(FoldRun *run)
@@ -135,7 +135,7 @@ fold_run_advance(FoldRun *run)
     run->remaining--;
 }
 
-/* binary min-heap of run indices keyed by each run's current head */
+
 static int
 fold_heap_cmp(FoldRun *runs, int a, int b)
 {
@@ -158,14 +158,14 @@ fold_heap_sift_down(FoldRun *runs, int *heap, int n, int i)
     }
 }
 
-/* ---- staging / seed readers -------------------------------------------- */
+
 
 typedef struct FoldBuild
 {
-    MemoryContext cxt;             /* arena + runs live here                  */
+    MemoryContext cxt;             
     FoldRow      *arena;
-    int64         arena_cap;       /* budget ceiling, rows                    */
-    int64         arena_alloc;     /* currently allocated, rows (grows ×2)    */
+    int64         arena_cap;       
+    int64         arena_alloc;     
     int64         arena_n;
     FoldRun      *runs;
     int           n_runs, runs_cap;
@@ -193,8 +193,8 @@ fold_emit_run(FoldBuild *b)
 
     if (!b->spilled && b->n_runs == 1)
     {
-        /* keep the first run in memory; if a second run arrives this one is
-         * spilled retroactively so total memory stays within the budget */
+        
+
         MemoryContext old = MemoryContextSwitchTo(b->cxt);
 
         run->mem = b->arena;
@@ -342,19 +342,19 @@ fold_scan_seeds(FoldBuild *b, int32 partition, int32 nparts)
     table_close(rel, NoLock);
 }
 
-/* ---- group fold state --------------------------------------------------- */
+
 
 typedef struct FoldGroup
 {
     bool   open;
     uint8  ident[FOLD_IDENT_LEN];
     bool   has_obj;
-    bool   any;                    /* glicko state initialized               */
+    bool   any;                    
     glicko2_state_t st;
     int64  witness;
     int64  max_ts;
 
-    bool   partial_open;           /* the fold's ONE period, accumulating      */
+    bool   partial_open;           
     int64  p_phi, p_games, p_sum;
 } FoldGroup;
 
@@ -377,7 +377,7 @@ fold_close_partial(FoldGroup *g, int64 tau, FoldScratch *scratch)
     g->partial_open = false;
 }
 
-/* ---- the fold ----------------------------------------------------------- */
+
 
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_fold_partition);
 
@@ -428,7 +428,7 @@ pg_laplace_consensus_fold_partition(PG_FUNCTION_ARGS)
                  errmsg("consensus_fold_partition: %d tables but %d epochs",
                         n_tables, n_epochs)));
 
-    /* tau once, from the same SQL constant the SQL lane folds with */
+    
     if (SPI_connect() != SPI_OK_CONNECT)
         elog(ERROR, "consensus_fold_partition: SPI_connect failed");
     {
@@ -468,8 +468,8 @@ pg_laplace_consensus_fold_partition(PG_FUNCTION_ARGS)
     build.runs_cap = 16;
     build.runs = (FoldRun *) palloc(sizeof(FoldRun) * build.runs_cap);
 
-    /* 1) staging heaps (epoch order only matters for locality — the sort key
-     *    carries the epoch) */
+    
+
     for (i = 0; i < n_tables; i++)
     {
         int32 epoch;
@@ -487,13 +487,13 @@ pg_laplace_consensus_fold_partition(PG_FUNCTION_ARGS)
         fold_scan_staging(&build, TextDatumGetCString(table_datums[i]), epoch);
     }
 
-    /* 2) existing consensus rows as epoch-0 seeds, routed to this partition */
+    
     if (with_seeds)
         fold_scan_seeds(&build, partition, nparts);
 
     fold_emit_run(&build);
 
-    /* 3) prime the merge */
+    
     heap = (int *) palloc(sizeof(int) * Max(build.n_runs, 1));
     heap_n = 0;
     for (i = 0; i < build.n_runs; i++)
@@ -514,7 +514,7 @@ pg_laplace_consensus_fold_partition(PG_FUNCTION_ARGS)
     for (i = heap_n / 2 - 1; i >= 0; i--)
         fold_heap_sift_down(build.runs, heap, heap_n, i);
 
-    /* 4) output relation (created by the SQL wrapper before this call) */
+    
     memset(&out, 0, sizeof(out));
     {
         RangeVar *rv = makeRangeVar(NULL, "consensus_next", -1);
@@ -531,9 +531,9 @@ pg_laplace_consensus_fold_partition(PG_FUNCTION_ARGS)
                                               ALLOCSET_DEFAULT_SIZES);
     }
 
-    /* 5) consume groups: equal identity = one relation; equal (identity,
-     *    epoch) heads pre-merge exactly like the SQL lane's `partial` CTE;
-     *    epochs then fold in order through the shared math. */
+    
+
+
     memset(&g, 0, sizeof(g));
     memset(&scratch, 0, sizeof(scratch));
     scratch.cxt = fold_cxt;
@@ -596,8 +596,8 @@ pg_laplace_consensus_fold_partition(PG_FUNCTION_ARGS)
                      errmsg("consensus_fold_partition: games must be > 0 (got "
                             INT64_FORMAT ")", row.games)));
 
-        /* the period rule: every staged row of this relation joins the ONE
-         * period of this fold, regardless of which flush epoch journaled it */
+        
+
         if (g.partial_open)
         {
             if (g.p_phi != row.phi)

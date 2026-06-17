@@ -1,8 +1,8 @@
-# Who is holding Laplace artifacts (the LNK1104 / copy-fail explainer).
-# Usage: locks.ps1 [-Kill]
-#   -Kill terminates the SAFE holders (Laplace.Cli, endpoint/test dotnet hosts, engine test exes).
-#   Never kills postgres (deploy DLLs are released by install-extensions.cmd hot-swap / --recycle)
-#   and never kills live build tools (ninja/cmake/icx -- those mean a build is in progress: wait).
+
+
+
+
+
 param([switch]$Kill)
 $ErrorActionPreference = 'SilentlyContinue'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -11,7 +11,7 @@ $buildTools = @('ninja', 'cmake', 'icx', 'icx-cc', 'clang', 'link')
 
 $holders = @()
 
-# Pass 1: processes whose main image lives under the repo.
+
 foreach ($p in Get-Process) {
     $path = $null
     try { $path = $p.MainModule.FileName } catch { continue }
@@ -26,7 +26,7 @@ foreach ($p in Get-Process) {
     }
 }
 
-# Pass 2: dotnet/testhost processes with repo DLLs loaded (dotnet run hosts, test runners).
+
 foreach ($p in Get-Process -Name dotnet, testhost) {
     if ($holders.Pid -contains $p.Id) { continue }
     $hit = $null
@@ -42,7 +42,7 @@ foreach ($p in Get-Process -Name dotnet, testhost) {
     }
 }
 
-# Pass 3: deployed extension DLLs pinned by postgres backends (exclusive-open probe).
+
 if (Test-Path $deployLib) {
     foreach ($f in Get-ChildItem (Join-Path $deployLib '*.dll')) {
         $locked = $false

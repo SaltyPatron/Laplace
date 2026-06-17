@@ -1,9 +1,9 @@
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// HuggingFace-style snapshot bundle for safetensor weight deposition.
-/// Unlike GGUF, .safetensors files are tensor containers only — recipe and tokenizer are external.
-/// </summary>
+
+
+
+
 public static class SafetensorSnapshotWitness
 {
     public const string ConfigFile = "config.json";

@@ -7,7 +7,7 @@ internal ref struct TatoebaSentenceRow
 {
     public long Id { get; init; }
     public string Lang { get; init; }
-    public string Text { get; init; }
+    public ReadOnlySpan<byte> TextUtf8 { get; init; }
 
     public static bool TryParse(ReadOnlySpan<byte> line, out TatoebaSentenceRow row)
     {
@@ -21,7 +21,7 @@ internal ref struct TatoebaSentenceRow
         {
             Id = id,
             Lang = Encoding.UTF8.GetString(langField).Trim(),
-            Text = Encoding.UTF8.GetString(textField),
+            TextUtf8 = textField,
         };
         return true;
     }

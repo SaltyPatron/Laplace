@@ -1,21 +1,8 @@
 @echo off
 setlocal EnableDelayedExpansion
-rem ASan engine tree: build-win-asan\ (RelWithDebInfo + -fsanitize=address, icx).
-rem icx hard-rejects ASan combined with the debug CRT (-MDd), and CMake's compiler ABI probe
-rem runs in the Debug config by default -- so this script pins the dynamic release CRT
-rem (CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL) and the try_compile configuration.
-rem Do NOT configure this tree by hand; that is how the 2026-06-10 dead configure happened.
-rem Run tests from this tree with oneAPI compiler bin on PATH (env.cmd does it; clang_rt.asan*.dll lives there):
-rem   build-engine-asan.cmd laplace_core_tests && ctest --test-dir build-win-asan -R <area>
-rem Usage: build-engine-asan.cmd [--reconfigure] [--configure-only] [targets...]
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
-rem env.cmd prepends build-win\{core,dynamics,synthesis} to PATH; this tree's exes (perfcache emit,
-rem gtest discovery, ctest) must resolve THEIR OWN DLLs, not the Release tree's -- shadow it.
 set "PATH=%LAPLACE_ROOT%\build-win-asan\core;%LAPLACE_ROOT%\build-win-asan\dynamics;%LAPLACE_ROOT%\build-win-asan\synthesis;%PATH%"
-rem icx's ASan runtime (clang_rt.asan_dynamic-x86_64.dll) lives under lib\clang\<ver>\lib\windows,
-rem NOT in bin -- and VS's MSVC toolset on the machine PATH ships a DIFFERENT clang version's copy,
-rem which loads but lacks entrypoints (0xC0000139). Pin Intel's, version-globbed.
 for /d %%v in ("C:\Program Files (x86)\Intel\oneAPI\compiler\latest\lib\clang\*") do set "LAPLACE_ASAN_RT=%%v\lib\windows"
 set "PATH=%LAPLACE_ASAN_RT%;%PATH%"
 
@@ -38,9 +25,6 @@ if not exist build-win-asan\build.ninja goto configure
 goto build
 
 :configure
-rem A cache without build.ninja = a configure that died mid-flight. Its persisted compiler-detection
-rem files (CMakeFiles\<ver>\*.cmake) poison every later configure (the literal-%%LAPLACE_RC%% incident),
-rem so clear them before configuring. .lap-lock is preserved.
 if exist build-win-asan\CMakeCache.txt if not exist build-win-asan\build.ninja (
   echo clearing dead-configure debris from build-win-asan...
   del /q build-win-asan\CMakeCache.txt

@@ -5,9 +5,9 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.ConceptNet;
 
-/// <summary>
-/// Streaming TSV ingest for assertions.csv — no grammar compose, one file pass, bounded memory.
-/// </summary>
+
+
+
 internal static class ConceptNetFastIngest
 {
     public static async IAsyncEnumerable<SubstrateChange> IngestAssertionsAsync(

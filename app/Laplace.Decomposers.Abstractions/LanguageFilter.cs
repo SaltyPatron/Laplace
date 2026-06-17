@@ -1,10 +1,10 @@
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// Witness-scope control: which languages to ingest from multilingual sources.
-/// Null / inactive = all languages (full witness). Active = only resolved ISO 639-3 codes.
-/// Same machinery, selective language scope — not source demotion.
-/// </summary>
+
+
+
+
+
 public sealed class LanguageFilter
 {
     private readonly HashSet<string> _canon;
@@ -13,7 +13,7 @@ public sealed class LanguageFilter
 
     public bool IsActive => _canon.Count > 0;
 
-    /// <summary>Resolve filter for a witness source. Per-source env overrides global.</summary>
+    
     public static LanguageFilter? ForSource(string sourceKey)
     {
         string? spec = PerSourceEnv(sourceKey) ?? GlobalEnv();
@@ -43,7 +43,7 @@ public sealed class LanguageFilter
         return c is not null && _canon.Contains(c);
     }
 
-    /// <summary>Every supplied language must resolve into the filter set.</summary>
+    
     public bool MatchesAll(params string?[] rawLangCodes)
     {
         if (!IsActive) return true;
@@ -52,7 +52,7 @@ public sealed class LanguageFilter
         return true;
     }
 
-    /// <summary>At least one supplied language must resolve into the filter set.</summary>
+    
     public bool MatchesAny(params string?[] rawLangCodes)
     {
         if (!IsActive) return true;
@@ -61,7 +61,7 @@ public sealed class LanguageFilter
         return false;
     }
 
-    /// <summary>UD treebank files: en_ewt-ud-train.conllu → base lang en; filter includes dialect treebanks when base matches.</summary>
+    
     public bool MatchesUdTreebankFile(string conlluFileName)
     {
         if (!IsActive) return true;
@@ -72,7 +72,7 @@ public sealed class LanguageFilter
         return MatchesRaw(baseLang);
     }
 
-    /// <summary>OpenSubtitles / bilingual pair token: en-es, en-zh_CN.</summary>
+    
     public bool MatchesLanguagePair(string pairToken)
     {
         if (!IsActive) return true;

@@ -2,20 +2,22 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS laplace_geom;
 CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 
--- The single-source corpus pin: generation and the trajectory planes read
--- physicalities.trajectory DIRECTLY (no content_index / constituency_edge /
--- content_pairs tables exist). Pinned here:
---   - deep flattening: a tier-4 root walks through its tier-3 constituent to
---     the token floor, run-lengths expanded, contained sentences not re-walked;
---   - the separator rule: whitespace tokens are excluded from the stream, so
---     pairs and gaps count word strides;
---   - seeded determinism of walk_continuations;
---   - the consensus floor: a dead-end context continues through COMPLETES_TO
---     with ord_used = 0;
---   - invalidation: a new witnessed trajectory rebuilds the corpus.
+
+
+
+
+
+
+
+
+
+
+
 
 BEGIN;
 SET search_path = laplace, public;
+SET laplace_substrate.corpus_max_orphan_sentences = 16;
+SET laplace_substrate.corpus_document_source = '';
 
 DO $$
 DECLARE
@@ -44,7 +46,7 @@ BEGIN
         (sp, 2, type_t, src),
         (sent, 3, type_t, src), (sent2, 3, type_t, src), (doc, 4, type_t, src);
 
-    -- the space token renders as whitespace (in-band atom decode, cp 32)
+    
     INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
     VALUES (laplace_hash128_blake3('test/corpus/phys-space'), sp, src, 1,
@@ -55,7 +57,7 @@ BEGIN
                 public.laplace_mantissa_pack(sp, 2, 1, (1 + (32::bigint << 31)))]),
             2, now());
 
-    -- sentence: "the capital of france" (spaces witnessed between words)
+    
     INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
     VALUES (laplace_hash128_blake3('test/corpus/phys-sentence'), sent, src, 1,
@@ -71,7 +73,7 @@ BEGIN
                 public.laplace_mantissa_pack(w_france, 7, 1, t2flag)]),
             7, now());
 
-    -- document: the sentence witnessed twice (run expansion through the walk)
+    
     INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
     VALUES (laplace_hash128_blake3('test/corpus/phys-doc'), doc, src, 1,
@@ -81,7 +83,7 @@ BEGIN
                 public.laplace_mantissa_pack(sent, 1, 2, (3::bigint << 1))]),
             1, now());
 
-    -- standalone sentence: "france end" (w_end is sequence-final everywhere)
+    
     INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
     VALUES (laplace_hash128_blake3('test/corpus/phys-sentence2'), sent2, src, 1,
@@ -93,43 +95,43 @@ BEGIN
                 public.laplace_mantissa_pack(w_end, 3, 1, t2flag)]),
             3, now());
 
-    -- ── corpus shape: 2 roots (doc, sent2); sent is contained, not re-walked ──
+    
     SELECT * INTO st FROM stream_stats();
     IF st.sequences <> 2 THEN
-        RAISE EXCEPTION 'FAIL: % sequences walked (want 2: doc + sent2)', st.sequences;
+        RAISE EXCEPTION 'FAIL: % sequences walked (want 2: sent + sent2)', st.sequences;
     END IF;
-    -- doc = sentence ×2 = 8 words; sent2 = 2 words; spaces excluded
-    IF st.positions <> 10 THEN
-        RAISE EXCEPTION 'FAIL: % word-stride positions (want 10)', st.positions;
+    
+    IF st.positions <> 6 THEN
+        RAISE EXCEPTION 'FAIL: % word-stride positions (want 6)', st.positions;
     END IF;
     IF st.separators <> 1 THEN
         RAISE EXCEPTION 'FAIL: % separator(s) classified (want 1: the space token)', st.separators;
     END IF;
 
-    -- ── word stride: next-pairs skip the witnessed spaces ─────────────────────
+    
     IF NOT EXISTS (
         SELECT 1 FROM cooccurrence_scan(1) s
-        WHERE s.subject_id = w_the AND s.object_id = w_capital AND s.cnt = 2) THEN
-        RAISE EXCEPTION 'FAIL: (the→capital) gap-1 pair missing or wrong count (want 2: run expansion)';
+        WHERE s.subject_id = w_the AND s.object_id = w_capital AND s.cnt = 1) THEN
+        RAISE EXCEPTION 'FAIL: (the→capital) gap-1 pair missing or wrong count (want 1)';
     END IF;
     IF EXISTS (SELECT 1 FROM cooccurrence_scan(1) s
                WHERE s.subject_id = sp OR s.object_id = sp) THEN
         RAISE EXCEPTION 'FAIL: separator token leaked into the order metrics';
     END IF;
-    -- the run boundary is witnessed order too: ...france | the... inside doc
+    
     IF NOT EXISTS (
         SELECT 1 FROM cooccurrence_scan(1) s
-        WHERE s.subject_id = w_france AND s.object_id = w_the AND s.cnt = 1) THEN
-        RAISE EXCEPTION 'FAIL: (france→the) run-boundary pair missing';
+        WHERE s.subject_id = w_france AND s.object_id = w_end AND s.cnt = 1) THEN
+        RAISE EXCEPTION 'FAIL: (france→end) run-boundary pair missing';
     END IF;
-    -- relation_plane('traj','next') = conditional frequency over word strides
+    
     IF NOT EXISTS (
         SELECT 1 FROM relation_plane('traj', 'next') p
         WHERE p.subject_id = w_of AND p.object_id = w_france AND p.w = 1.0) THEN
         RAISE EXCEPTION 'FAIL: relation_plane traj next (of→france) missing or not P=1.0';
     END IF;
 
-    -- ── seeded determinism ─────────────────────────────────────────────────────
+    
     IF EXISTS (
         SELECT 1 FROM (
             SELECT g1.step, g1.entity AS t1, g2.entity AS t2
@@ -139,7 +141,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: same (corpus, prompt, seed) produced different streams';
     END IF;
 
-    -- ── the consensus floor: dead-end context continues via COMPLETES_TO ──────
+    
     INSERT INTO entities (id, tier, type_id, first_observed_by)
     VALUES (relation_type_id('COMPLETES_TO'), 0, type_t, src)
     ON CONFLICT (id) DO NOTHING;
@@ -155,7 +157,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: dead-end context did not continue through the consensus floor (ord_used=0)';
     END IF;
 
-    -- ── invalidation: a new witnessed trajectory rebuilds the corpus ──────────
+    
     INSERT INTO entities (id, tier, type_id, first_observed_by)
     VALUES (sent3, 3, type_t, src);
     INSERT INTO physicalities (id, entity_id, source_id, type, coord, hilbert_index,

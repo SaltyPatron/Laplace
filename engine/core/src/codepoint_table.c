@@ -218,11 +218,11 @@ int codepoint_table_resolve_atom(uint32_t atom, hash128_t* out_id,
     return 0;
 }
 
-/* Unicode White_Space = WB{CR, LF, Newline, WSegSpace} plus exactly
- * {0009 TAB, 00A0 NBSP, 2007 FIGURE SPACE, 202F NARROW NO-BREAK SPACE}
- * (the non-breaking spaces UAX#29 deliberately keeps out of WSegSpace,
- * and TAB which carries no WB whitespace class). The union reproduces
- * PropList.txt White_Space byte-for-byte. */
+
+
+
+
+
 int laplace_codepoint_is_whitespace(uint32_t cp) {
     switch (codepoint_table_wb(cp)) {
         case LAPLACE_WB_CR:

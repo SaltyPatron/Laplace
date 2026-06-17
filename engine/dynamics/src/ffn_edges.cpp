@@ -15,7 +15,7 @@ inline double silu(double x) {
     if (x < -40.0) return 0.0;
     return x / (1.0 + std::exp(-x));
 }
-}  // namespace
+}  
 
 extern "C"
 int ffn_token_pairs_tile(
@@ -39,7 +39,7 @@ int ffn_token_pairs_tile(
 #ifdef LAPLACE_HAS_MKL
     const double* E = emb + row_begin * d;
 
-    // A = act(G, U), neuron-space activation [t x interm].
+    
     std::vector<double> A((std::size_t)t * interm);
     std::vector<double> G, U;
     if (gate) {
@@ -60,14 +60,14 @@ int ffn_token_pairs_tile(
         else              A[i] = U[i];
     }
 
-    // O = A @ down^T [t x d]; the neuron (interm) dimension is contracted here.
+    
     std::vector<double> O((std::size_t)t * d);
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
         (MKL_INT)t, (MKL_INT)d, (MKL_INT)interm,
         1.0, A.data(), (MKL_INT)interm, down, (MKL_INT)interm, 0.0, O.data(), (MKL_INT)d);
 
-    // Normalize O rows so the score against the (already normalized) un-embedding
-    // is a cosine, comparable to the c/sqrt(dim) noise floor.
+    
+    
     for (std::size_t i = 0; i < t; ++i) {
         double* Orow = O.data() + i * d;
         double ss = 0.0;
@@ -76,7 +76,7 @@ int ffn_token_pairs_tile(
         for (std::size_t c = 0; c < d; ++c) Orow[c] *= inv;
     }
 
-    // S = O @ unemb^T [t x n], then threshold.
+    
     std::vector<double> S((std::size_t)t * n);
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
         (MKL_INT)t, (MKL_INT)n, (MKL_INT)d,

@@ -1,8 +1,8 @@
-/*
- * trajectory_generate.c - native stride-continuation generation and co-occurrence
- * scan over the witnessed-trajectory corpus (trajectory_corpus.h). Split out of
- * trajectory_walk.c.
- */
+
+
+
+
+
 #include "postgres.h"
 
 #include <math.h>
@@ -39,7 +39,7 @@ typedef struct StreamPairKey
 
 typedef struct StreamPairEntry
 {
-    StreamPairKey key;             /* dynahash requires key first */
+    StreamPairKey key;             
     int64         cnt;
 } StreamPairEntry;
 
@@ -58,10 +58,10 @@ pg_laplace_cooccurrence_scan(PG_FUNCTION_ARGS)
     int              win_len = 0;
     HASH_SEQ_STATUS  seq;
     StreamPairEntry *e;
-    /* optional vocab bound (the ETL extract filter): when a vocab array is given,
-     * only pairs whose BOTH endpoints are in it are counted and emitted, so the
-     * hash and the output are bounded by the requested vocab, never the whole
-     * stream's all-pairs. NULL/absent = the full unbounded scan (back-compat). */
+    
+
+
+
     bool            *in_vocab = NULL;
 
     if (max_gap < 1 || max_gap > 64)
@@ -96,7 +96,7 @@ pg_laplace_cooccurrence_scan(PG_FUNCTION_ARGS)
     c = corpus_ensure();
     SPI_finish();
 
-    /* build the in-vocab mask from the optional bytea[] arg (the bounded extract) */
+    
     if (PG_NARGS() >= 2 && !PG_ARGISNULL(1))
     {
         ArrayType *va = PG_GETARG_ARRAYTYPE_P(1);
@@ -130,8 +130,8 @@ pg_laplace_cooccurrence_scan(PG_FUNCTION_ARGS)
             continue;
         }
 
-        /* object out of vocab: no in-vocab pair can end here — skip counting, but
-         * still slide the window so gap distances over the kept tokens stay exact. */
+        
+
         if (in_vocab == NULL || in_vocab[tok])
         for (int d = 1; d <= win_len; d++)
         {
@@ -191,7 +191,7 @@ pg_laplace_cooccurrence_scan(PG_FUNCTION_ARGS)
     return (Datum) 0;
 }
 
-/* ── seeded weighted selection (splitmix64) ────────────────────────────────── */
+
 
 static uint64
 splitmix64(uint64 *state)
@@ -208,16 +208,16 @@ rng_uniform(uint64 *state)
     return ((double) (splitmix64(state) >> 11) + 0.5) * (1.0 / 9007199254740992.0);
 }
 
-/* ── continuation distribution for an exact context ────────────────────────── */
+
 
 typedef struct Continuation
 {
     int32 token;
     int64 weight;
-    int32 sep;      /* witnessed separator entity that follows this token, or -1 */
+    int32 sep;      
 } Continuation;
 
-/* binary-search the suffix range matching ctx[0..k), then count next tokens */
+
 static int
 continuations_collect(const GenCorpus *c, const int32 *ctx, int k,
                       Continuation *out, int out_cap)
@@ -225,7 +225,7 @@ continuations_collect(const GenCorpus *c, const int32 *ctx, int k,
     int32 lo = 0, hi = c->n_suffix, first, last;
     int   n = 0;
 
-    while (lo < hi)                     /* lower bound */
+    while (lo < hi)                     
     {
         int32 mid = lo + (hi - lo) / 2;
         if (prefix_cmp(c, c->suffix[mid], ctx, k) < 0) lo = mid + 1;
@@ -233,7 +233,7 @@ continuations_collect(const GenCorpus *c, const int32 *ctx, int k,
     }
     first = lo;
     hi = c->n_suffix;
-    while (lo < hi)                     /* upper bound */
+    while (lo < hi)                     
     {
         int32 mid = lo + (hi - lo) / 2;
         if (prefix_cmp(c, c->suffix[mid], ctx, k) <= 0) lo = mid + 1;
@@ -257,11 +257,11 @@ continuations_collect(const GenCorpus *c, const int32 *ctx, int k,
             if (out[j].token == tok) { out[j].weight++; break; }
         if (j == n)
         {
-            /* representative witnessed trailing separator for this continuation */
+            
             int32 sep = c->sep_after ? c->sep_after[next_pos] : -1;
             if (n == out_cap)
             {
-                /* keep the heaviest seen so far; evict the lightest */
+                
                 int lightest = 0;
                 for (int m = 1; m < n; m++)
                     if (out[m].weight < out[lightest].weight) lightest = m;
@@ -281,7 +281,7 @@ continuations_collect(const GenCorpus *c, const int32 *ctx, int k,
     return n;
 }
 
-/* ── generation ────────────────────────────────────────────────────────────── */
+
 
 Datum
 pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
@@ -323,6 +323,10 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     if (SPI_connect() != SPI_OK_CONNECT)
         elog(ERROR, "walk_continuations: SPI_connect failed");
     c = corpus_ensure();
+    corpus_ensure_suffix(c);   
+
+
+
 
     deconstruct_array(ctx_arr, BYTEAOID, -1, false, TYPALIGN_INT,
                       &elems, &nulls, &n_in);
@@ -362,10 +366,10 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         }
         if (n_cand == 0 && ctx_len > 0)
         {
-            /* The witnessed stream is silent at every order: the COMPLETES_TO
-             * consensus is the floor. eff-μ in whole-μ units as the weight;
-             * stride_used = 0 marks the step as consensus-backed (the precedent
-             * walk is walk_strongest, recall.c). */
+            
+
+
+
             static const char *FLOOR_SQL =
                 "SELECT c.object_id, "
                 "       GREATEST(laplace.eff_mu(c.rating, c.rd) / 1000000000, 1)::int8 "
@@ -400,7 +404,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
                 cand[n_cand].token = corpus_vocab_intern(c, key);
                 cand[n_cand].weight = DatumGetInt64(
                     SPI_getbinval(SPI_tuptable->vals[r], SPI_tuptable->tupdesc, 2, &isnull));
-                cand[n_cand].sep = -1;   /* consensus floor: no witnessed spacing */
+                cand[n_cand].sep = -1;   
                 n_cand++;
             }
             used = 0;
@@ -408,8 +412,8 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         if (n_cand == 0)
             break;
 
-        /* heaviest candidate cap, then weighted draw among them */
-        for (int i = 0; i < n_cand; i++)        /* partial selection sort */
+        
+        for (int i = 0; i < n_cand; i++)        
         {
             int best = i;
             for (int j = i + 1; j < n_cand; j++)
@@ -443,8 +447,8 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
             values[0] = Int32GetDatum(step);
             values[1] = PointerGetDatum(out_tok);
             values[2] = Int32GetDatum(used);
-            /* the witnessed separator entity that followed this word (omniglottal spacing),
-             * NULL when none was witnessed (e.g. CJK adjacency, or the consensus floor) */
+            
+
             if (pick_sep >= 0)
             {
                 bytea *out_sep = (bytea *) palloc(VARHDRSZ + 16);

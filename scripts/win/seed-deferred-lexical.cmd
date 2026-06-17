@@ -1,12 +1,7 @@
 @echo off
 setlocal
-rem Semantic knowledge layer (LAYER 2, with the *Net cluster): conceptnet -> atomic2020 -> ud -> wiktionary.
-rem Commonsense graph, causal-social inference, syntax across languages, omniglottal lexical breadth.
-rem NOT "deferred bulk": the world model's knowledge core. Run in place after the *Net cluster.
-rem Idempotent: completed sources short-circuit on layer-complete marker.
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
-rem Connection/data-path constants come from env.cmd. Reproducibility pins below are deliberate.
 set "LAPLACE_INGEST_LANGS=en"
 if not defined LAPLACE_EMIT_CROSS_LANG set "LAPLACE_EMIT_CROSS_LANG=0"
 set "LAPLACE_INGEST_WORKERS=4"
@@ -19,8 +14,6 @@ cd app
 dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q || exit /b 1
 
 echo ==== ingest conceptnet (/c/en/ graph) ====
-rem Serial commit is decomposer-owned now (RelationTripleDecomposerBase: StrictSerial);
-rem only the memory pin remains.
 set "LAPLACE_INGEST_COMMIT_ROWS=50000"
 dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest conceptnet || exit /b 1
 set "LAPLACE_INGEST_COMMIT_ROWS="

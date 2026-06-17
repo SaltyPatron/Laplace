@@ -14,7 +14,7 @@ internal sealed class StripeBillingOptions
     public string CancelUrl { get; set; } = "http://localhost:5187/billing/cancel";
     public bool Bypass { get; set; }
 
-    /// <summary>Test host only: parse webhook JSON without Stripe.net signature verification.</summary>
+    
     public bool SkipSignatureVerification { get; set; }
 }
 

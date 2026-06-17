@@ -1,6 +1,6 @@
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>ETL work description: input files and record counts (not output row estimates).</summary>
+
 public sealed record IngestFileSpec(string Id, string Path, long InputUnits);
 
 public sealed record IngestInventory(
@@ -22,7 +22,7 @@ public interface IIngestInventoryProvider
         CancellationToken ct = default);
 }
 
-/// <summary>Accurate input scanning — line/record counts from disk, not output row guesses.</summary>
+
 public static class EtlInventory
 {
     public static async Task<long> CountDataLinesAsync(
@@ -46,9 +46,19 @@ public static class EtlInventory
     {
         if (!File.Exists(path)) return 0;
         long n = 0;
+        bool inSentence = false;
         foreach (var line in File.ReadLines(path))
-            if (line.Length > 0 && char.IsDigit(line[0]) && line.Contains('\t', StringComparison.Ordinal))
-                n++;
+        {
+            if (line.Length == 0)
+            {
+                if (inSentence) { n++; inSentence = false; }
+                continue;
+            }
+            if (line[0] == '#') continue;
+            if (char.IsDigit(line[0]) && line.Contains('\t', StringComparison.Ordinal))
+                inSentence = true;
+        }
+        if (inSentence) n++;
         return n;
     }
 

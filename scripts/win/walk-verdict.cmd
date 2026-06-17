@@ -1,13 +1,5 @@
 @echo off
 setlocal
-rem ==== Post-deposit walk verdict ============================================
-rem Run AFTER a bulk behavioral model deposit completes:
-rem   1. rebuild consensus secondary indexes (B2 pre-drop pairs with this)
-rem   2. model-planes-audit: arena populations, strongest rendered testimony,
-rem      one-hop walk probe, cross-layer fusion check
-rem
-rem   walk-verdict.cmd [dbname]     (default: laplace_export)
-rem ==========================================================================
 call "%~dp0env.cmd"
 
 set "VERDICT_DB=%~1"

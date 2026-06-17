@@ -15,8 +15,8 @@ CREATE FUNCTION @extschema@.laplace_mantissa_unpack(vertex geometry,
     AS 'MODULE_PATHNAME', 'pg_laplace_mantissa_unpack'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
 
--- One C loop over a whole stored trajectory (vs ST_DumpPoints + per-vertex
--- unpack laterals). Output rows are bit-identical to that lateral.
+
+
 CREATE FUNCTION @extschema@.laplace_trajectory_constituents(traj geometry,
         OUT ordinal    integer,
         OUT entity_id  bytea,
@@ -26,8 +26,16 @@ CREATE FUNCTION @extschema@.laplace_trajectory_constituents(traj geometry,
     AS 'MODULE_PATHNAME', 'pg_laplace_trajectory_constituents'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT ROWS 16;
 
--- Vertex flag-word field decode (mantissa.h is the single source of the layout).
--- vertex_atom returns NULL when the vertex carries no inline T0 atom.
+
+
+
+CREATE FUNCTION @extschema@.laplace_trajectory_constituent_ids(traj geometry)
+    RETURNS bytea[]
+    AS 'MODULE_PATHNAME', 'pg_laplace_trajectory_constituent_ids'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+
+
+
 CREATE FUNCTION @extschema@.laplace_vertex_atom(flags bigint) RETURNS integer
     AS 'MODULE_PATHNAME', 'pg_laplace_vertex_atom'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

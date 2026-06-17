@@ -44,7 +44,7 @@ internal interface IBillingEntitlementStore
         DateTimeOffset renewedAt,
         CancellationToken ct);
 
-    /// <summary>Returns the deactivated entitlement, or null when no subscription matched.</summary>
+    
     Task<BillingEntitlement?> DeactivateSubscriptionAsync(string stripeSubscriptionId, string status, CancellationToken ct);
 
     Task<IReadOnlyList<BillingEntitlement>> GetByTenantAsync(string tenant, CancellationToken ct);

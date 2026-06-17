@@ -139,16 +139,16 @@ public static class NativeAttestation
     public static Hash128 ResolvePos(string tag, PosReference.PosTagset tagset) =>
         ResolvePos(tag, tagset, out _);
 
-    /// <summary>
-    /// Resolve a source tag through the native pos law. <paramref name="probationary"/> is
-    /// true when the tag is unmapped — the witnessing change MUST emit the probationary pos
-    /// entity (use <see cref="PosReference.Attest"/>, which does this automatically; the
-    /// 2026-06-12 wordnet ghost was a probationary id referenced but never emitted).
-    /// </summary>
+    
+    
+    
+    
+    
+    
     public static Hash128 ResolvePos(string tag, PosReference.PosTagset tagset, out bool probationary) =>
         ResolvePosNative(tag, (int)tagset, out probationary);
 
-    /// <summary>XPOS keeps caller-minted entities (treebank-local tagsets are not normalized law).</summary>
+    
     public static AttestationRow PosXpos(
         Hash128 subject, Hash128 xposEntity, Hash128 sourceId, Hash128? contextId,
         double sourceTrust, long observationCount = 1)
@@ -182,11 +182,11 @@ public static class NativeAttestation
         }
     }
 
-    /// <summary>
-    /// Batch form of <see cref="Aggregated"/> for arenas where every cell shares
-    /// (type, source, context, weight): one P/Invoke per chunk instead of one per cell.
-    /// Fills <paramref name="staged"/>[0..count) — convert rows via <see cref="Row"/>.
-    /// </summary>
+    
+    
+    
+    
+    
     public static void AggregatedBatch(
         AttestationAggregatedCellNative[] cells, int count,
         Hash128 typeId, Hash128 sourceId, Hash128? contextId, double witnessWeight,
@@ -214,7 +214,7 @@ public static class NativeAttestation
 
     public static AttestationRow Row(in AttestationStagedNative staged) => ToRow(staged);
 
-    /// <summary>Rational Score law over a float span — one P/Invoke per call.</summary>
+    
     public static void ScoreBatchFp(ReadOnlySpan<float> values, double arenaScale, Span<long> outFp)
     {
         if (values.Length == 0) return;

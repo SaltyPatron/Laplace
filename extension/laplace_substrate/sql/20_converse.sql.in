@@ -1,12 +1,22 @@
--- THE lookup law: the same decomposer, composer, and collapse law as the
--- deposit path (laplace_content_root_id), so lookup ids are byte-identical to
--- deposit ids for every input. The former SQL formulation (flat per-character
--- blake3 merkle) forked from the engine law on multi-codepoint graphemes and
--- is retired. Requires laplace_substrate.perfcache_path (fails loud if unset).
+
+
+
+
+
 CREATE OR REPLACE FUNCTION word_id(p_text text)
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_word_id'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+
+
+
+
+
+
+CREATE OR REPLACE FUNCTION word_segment(p_text text)
+    RETURNS TABLE(ord int, word text, id bytea)
+    AS 'MODULE_PATHNAME', 'pg_laplace_word_segment'
+    LANGUAGE C STABLE;
 
 CREATE OR REPLACE FUNCTION label(p_id bytea)
     RETURNS text
@@ -14,6 +24,14 @@ CREATE OR REPLACE FUNCTION label(p_id bytea)
     SET search_path = @extschema@, public AS $$
     SELECT COALESCE(
         NULLIF(NULLIF(render(p_id), ''), encode(p_id, 'hex') || '…'),
+        -- abstract entities (e.g. Language) carry their human-readable name as HAS_DEFINITION
+        -- (ISO-639 stores it there); resolve it before the Type:hash fallback.
+        (SELECT render_text(c.object_id)
+         FROM consensus c
+         WHERE c.subject_id = p_id
+           AND c.type_id = relation_type_id('HAS_DEFINITION')
+         ORDER BY eff_mu(c.rating, c.rd) DESC
+         LIMIT 1),
         (SELECT regexp_replace(t.name, '^substrate/type/(.*)/v1$', '\1')
                 || ':' || left(encode(p_id, 'hex'), 8)
          FROM entities e
@@ -26,17 +44,15 @@ CREATE OR REPLACE FUNCTION prompt_words(p_text text)
     RETURNS TABLE(ord int, word text, id bytea)
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
-    WITH toks AS (
-        SELECT t.w, t.ord::int
-        FROM unnest(regexp_split_to_array(p_text, '[^[:alnum:]''-]+'))
-             WITH ORDINALITY AS t(w, ord)
-        WHERE t.w <> '')
-    SELECT t.ord, t.w,
+    
+    
+    
+    SELECT ws.ord, ws.word,
            COALESCE(
-               (SELECT e.id FROM entities e WHERE e.id = word_id(t.w)),
-               (SELECT e.id FROM entities e WHERE e.id = word_id(lower(t.w))))
-    FROM toks t
-    ORDER BY t.ord
+               (SELECT e.id FROM entities e WHERE e.id = ws.id),
+               (SELECT e.id FROM entities e WHERE e.id = word_id(lower(ws.word))))
+    FROM word_segment(p_text) ws
+    ORDER BY ws.ord
 $$;
 
 CREATE OR REPLACE FUNCTION word_language(p_word bytea)
@@ -92,36 +108,15 @@ CREATE OR REPLACE FUNCTION resolve_last_word(p_phrase text)
     LIMIT 1
 $$;
 
--- Longest contiguous token span that resolves to a witnessed entity (leftmost on ties).
--- Fixes code prompts like "sort a list" resolving to "list" via resolve_last_word.
+
+
+
+
+
 CREATE OR REPLACE FUNCTION resolve_phrase(p_phrase text)
     RETURNS bytea
-    LANGUAGE sql LAPLACE_STABLE_STRICT
-    SET search_path = @extschema@, public AS $$
-    WITH toks AS (
-        SELECT btrim(t.w) AS w, t.ord::int
-        FROM unnest(regexp_split_to_array(lower(btrim(p_phrase)), '[^[:alnum:]''_-]+'))
-             WITH ORDINALITY AS t(w, ord)
-        WHERE btrim(t.w) <> ''
-    ),
-    spans AS (
-        SELECT s.ord AS start_ord, e.ord AS end_ord,
-               e.ord - s.ord + 1 AS len,
-               string_agg(t.w, ' ' ORDER BY t.ord) AS phrase
-        FROM toks s
-        JOIN toks e ON e.ord >= s.ord
-        JOIN toks t ON t.ord BETWEEN s.ord AND e.ord
-        GROUP BY s.ord, e.ord
-    ),
-    hits AS (
-        SELECT sp.len, sp.start_ord, word_id(sp.phrase) AS id
-        FROM spans sp
-        WHERE EXISTS (SELECT 1 FROM entities ent WHERE ent.id = word_id(sp.phrase))
-    )
-    SELECT h.id FROM hits h
-    ORDER BY h.len DESC, h.start_ord ASC
-    LIMIT 1
-$$;
+    AS 'MODULE_PATHNAME', 'pg_laplace_resolve_phrase'
+    LANGUAGE C STABLE STRICT;
 
 CREATE OR REPLACE FUNCTION prompt_state(p_text text)
     RETURNS TABLE(ord int, word text, id bytea, language bytea)
@@ -132,9 +127,9 @@ CREATE OR REPLACE FUNCTION prompt_state(p_text text)
     WHERE pw.id IS NOT NULL
 $$;
 
--- First placed content entity among a prompt's resolved words (the structural
--- neighbour query's anchor). Named surface for the CLI `nn` command, which
--- otherwise inlined this join.
+
+
+
 CREATE OR REPLACE FUNCTION first_placed_topic(p_text text)
     RETURNS bytea
     LANGUAGE sql LAPLACE_STABLE_STRICT
@@ -171,46 +166,14 @@ CREATE OR REPLACE FUNCTION type_label(p_type bytea)
                          '_', ' '))
 $$;
 
+
+
+
+
 CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    SELECT COALESCE(
-        NULLIF(render_text(p_id), ''),
-        (SELECT render_text(hs.subject_id)
-         FROM consensus io
-         JOIN consensus hs ON hs.object_id = io.subject_id
-                          AND hs.type_id = relation_type_id('HAS_SENSE')
-         LEFT JOIN consensus lang ON lang.subject_id = hs.subject_id
-                                 AND lang.type_id = relation_type_id('HAS_LANGUAGE')
-                                 AND lang.object_id = p_lang
-         WHERE io.object_id = p_id
-           AND io.type_id = relation_type_id('IS_SENSE_OF')
-           AND NOT refuted(io.rating, io.rd)
-           AND NULLIF(render_text(hs.subject_id), '') IS NOT NULL
-         ORDER BY (lang.object_id IS NOT NULL) DESC, eff_mu(hs.rating, hs.rd) DESC
-         LIMIT 1),
-        (SELECT render_text(m.object_id)
-         FROM consensus m
-         LEFT JOIN consensus lang ON lang.subject_id = m.object_id
-                                 AND lang.type_id = relation_type_id('HAS_LANGUAGE')
-                                 AND lang.object_id = p_lang
-         WHERE m.subject_id = p_id
-           AND m.type_id = relation_type_id('IS_TRANSLATION_OF')
-           AND NOT refuted(m.rating, m.rd)
-           AND NULLIF(render_text(m.object_id), '') IS NOT NULL
-         ORDER BY (lang.object_id IS NOT NULL) DESC, eff_mu(m.rating, m.rd) DESC
-         LIMIT 1),
-        (SELECT regexp_replace(n.name, '^substrate/[a-z_]+/(.+)/v1$', '\1')
-         FROM canonical_names n WHERE n.id = p_id AND n.name LIKE 'substrate/%'),
-        (SELECT render_text(g.object_id)
-         FROM consensus g
-         WHERE g.subject_id = p_id AND g.type_id = relation_type_id('DEFINES')
-           AND NOT refuted(g.rating, g.rd)
-         ORDER BY eff_mu(g.rating, g.rd) DESC
-         LIMIT 1),
-        label(p_id))
-$$;
+    AS 'MODULE_PATHNAME', 'pg_laplace_realize'
+    LANGUAGE C STABLE PARALLEL SAFE;
 
 CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_types bytea[],
                                         p_lang bytea DEFAULT NULL)
@@ -293,9 +256,20 @@ CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT N
               AND c.type_id NOT IN (relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
                                     relation_type_id('HAS_LANGUAGE'))
             ORDER BY eff_mu(c.rating, c.rd) DESC
-            LIMIT p_limit)
+            LIMIT p_limit),
+         
+         lang(id) AS (SELECT COALESCE(p_lang, word_language(p_word))),
+         
+         
+         
+         objs(a) AS (SELECT array_agg(DISTINCT object_id) FROM rels),
+         rendered AS (
+            SELECT u.object_id, NULLIF(u.s, '') AS s
+            FROM objs CROSS JOIN LATERAL unnest(objs.a, render_text_batch(objs.a, 32)) AS u(object_id, s)
+            WHERE objs.a IS NOT NULL
+         )
     SELECT type_label(r.type_id),
-           realize(r.object_id, COALESCE(p_lang, word_language(p_word))),
+           COALESCE(rd.s, realize(r.object_id, (SELECT id FROM lang))),
            CASE WHEN refuted(r.rating, r.rd) THEN 'refuted'
                 WHEN eff_mu(r.rating, r.rd) > glicko2_neutral_mu() THEN 'confirmed'
                 WHEN r.volatility::numeric > glicko2_initial_volatility() * 1.5 THEN 'contested'
@@ -303,6 +277,7 @@ CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT N
            eff_mu_display(r.rating, r.rd),
            round(r.volatility / 1e9, 4), r.witness_count
     FROM rels r
+    LEFT JOIN rendered rd ON rd.object_id = r.object_id
 $$;
 
 CREATE OR REPLACE FUNCTION gaps(p_word bytea)
@@ -367,8 +342,8 @@ BEGIN
     FROM physicalities p
     JOIN prompt_state(p_word) s ON p.entity_id = s.id
     WHERE p.type = 1 AND p.coord IS NOT NULL
-    -- deterministic witness preference: unordered LIMIT 1 let the planner pick
-    -- whichever per-source specimen came first (OPEN-PROBLEMS #2)
+    
+    
     ORDER BY s.ord, p.source_id
     LIMIT 1;
     IF v_id IS NULL THEN RETURN; END IF;
@@ -412,7 +387,7 @@ BEGIN
     FROM physicalities p
     JOIN prompt_state(p_word) s ON p.entity_id = s.id
     WHERE p.type = 1 AND p.coord IS NOT NULL
-    -- deterministic witness preference (OPEN-PROBLEMS #2)
+    
     ORDER BY s.ord, p.source_id
     LIMIT 1;
     IF v_id IS NULL THEN RETURN; END IF;
@@ -439,4 +414,4 @@ BEGIN
 END;
 $sl$;
 
--- laplace.continue_text: legacy shim recreated in 26_generation.sql.in after walk_text loads.
+

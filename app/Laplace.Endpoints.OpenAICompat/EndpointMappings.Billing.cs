@@ -471,21 +471,21 @@ internal static class BillingEndpoints
     private static QuoteNextStep NextStep(BillingQuote quote, string note) =>
         new(new ExecuteHeader("X-Laplace-Quote-Id", quote.QuoteId), note);
 
-    /// <summary>
-    /// The tenant-resolution block repeated across every quote-creating billing route: an explicit
-    /// payload tenant (trimmed) wins, otherwise resolve from the request context. Behavior-identical
-    /// to the inline <c>string.IsNullOrWhiteSpace(payload.Tenant) ? resolver.Resolve… : payload.Tenant.Trim()</c>.
-    /// </summary>
+    
+    
+    
+    
+    
     private static async Task<string> ResolveTenantAsync(string? payloadTenant, HttpRequest request, ITenantResolver resolver, CancellationToken ct) =>
         string.IsNullOrWhiteSpace(payloadTenant)
             ? (await resolver.ResolveAsync(request.HttpContext, ct)).TenantId
             : payloadTenant.Trim();
 
-    /// <summary>
-    /// Shared quote-creation for the metered calculator routes: cap the estimate's billable units to
-    /// int range and create the preflight quote, returning a 400 IResult on ArgumentException. The
-    /// units cast and the try/catch→400 are byte-for-byte the original inline form.
-    /// </summary>
+    
+    
+    
+    
+    
     private static async Task<(BillingQuote? quote, IResult? error)> CreateMeteredQuoteAsync(
         IBillingOrchestrator billing, string tenant, string serviceId, long billableUnits, CancellationToken ct)
     {

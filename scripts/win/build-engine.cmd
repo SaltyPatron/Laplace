@@ -1,12 +1,5 @@
 @echo off
 setlocal EnableDelayedExpansion
-rem Build engine into build-win\ incrementally (NOT cmake --install).
-rem Usage: build-engine.cmd [--reconfigure] [targets...]
-rem   no args        = configure only if needed, then full incremental build
-rem   targets...     = build just those ninja targets (e.g. laplace_core laplace_core_tests)
-rem   --reconfigure  = force a fresh CMake configure first
-rem Mutex-guarded: a second build on build-win waits instead of corrupting the tree.
-rem Agent rules: .github\instructions\build-environment.instructions.md
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 
@@ -27,8 +20,6 @@ if not exist build-win\build.ninja goto configure
 goto build
 
 :configure
-rem A cache without build.ninja = a configure that died mid-flight; its persisted compiler-detection
-rem files poison every later configure. Clear them first (.lap-lock is preserved).
 if exist build-win\CMakeCache.txt if not exist build-win\build.ninja (
   echo clearing dead-configure debris from build-win...
   del /q build-win\CMakeCache.txt

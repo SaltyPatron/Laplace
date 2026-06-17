@@ -37,11 +37,11 @@ public sealed class BootstrapIntentBuilder
         _inner.AddEntity(sourceId, EntityTier.Vocabulary, SourceTypeId, sourceId);
     }
 
-    /// <summary>
-    /// Canonical names declared through this builder (types and relation types, plus the
-    /// resolved canonical of aliased relations). The declaration site is the single source
-    /// of truth — decomposers feed this to CanonicalNamesForReadback instead of retyping names.
-    /// </summary>
+    
+    
+    
+    
+    
     public IReadOnlyCollection<string> CanonicalNames => _canonicalNames;
     private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
 
@@ -57,8 +57,8 @@ public sealed class BootstrapIntentBuilder
     {
         var id = Hash128.OfCanonical($"substrate/type/{canonicalRelationTypeName}/v1");
         _canonicalNames.Add($"substrate/type/{canonicalRelationTypeName}/v1");
-        // Aliased relations (e.g. DEFINES → HAS_DEFINITION) attest under their resolved
-        // canonical id, so name that relation too — readback then matches consensus.
+        
+        
         var r = RelationTypeRegistry.Resolve(canonicalRelationTypeName);
         _canonicalNames.Add($"substrate/type/{r.Canonical}/v1");
         _inner.AddEntity(id, EntityTier.Vocabulary, RelationTypeMetaTypeId, _sourceId);
@@ -88,8 +88,8 @@ public sealed class BootstrapIntentBuilder
     {
         AddTrustClassAttestation();
         RelationTypeRegistry.SeedCanonical(_inner, _sourceId);
-        // Every bootstrapping decomposer gets the canonical pos floor — per-decomposer
-        // SeedCanonical calls were the scattered wheel behind the 2026-06-12 pos ghost.
+        
+        
         PosReference.SeedCanonical(_inner, _sourceId);
         return _inner.Build();
     }

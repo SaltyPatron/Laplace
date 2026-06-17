@@ -8,13 +8,13 @@ namespace Laplace.Decomposers.Unicode;
 
 public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider, IIngestCommitPolicy
 {
-    // Codepoint batches and alias/confusables intents cross-reference arbitrary codepoints
-    // and shared content roots via StageCodepointTarget / ContentEmitter. Parallel commits
-    // within an epoch deadlock on overlapping entity/attestation rows (40P01).
+    
+    
+    
     public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
     public static readonly Hash128 Source     = Hash128.OfCanonical("substrate/source/UnicodeDecomposer/v1");
     public static readonly Hash128 TrustClass = Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
-    /// <summary>Codepoint geometry and UCD property emit are native-owned via <c>unicode_seed</c> / perfcache.</summary>
+    
     public static readonly Hash128 CodepointType = EntityTypeRegistry.Codepoint;
 
     private static readonly Hash128[] CombiningClassIds = BuildCombiningClassIds();
@@ -420,8 +420,8 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider, I
     private void EnsureUcdProperties(IDecomposerContext context)
     {
         if (_ucd is not null) return;
-        // EcosystemPath is the UCD version root (contains ucd/ ucdxml/ uca/) — same convention as
-        // the build's LAPLACE_UCD_PATH; the proper source is D:\Data\Ingest\UCD\Public\UCD\latest.
+        
+        
         string ucdDir = Path.Combine(context.EcosystemPath, "ucd");
         _ucd = UcdProperties.Load(ucdDir);
     }

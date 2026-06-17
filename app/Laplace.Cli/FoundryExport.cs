@@ -6,23 +6,23 @@ using SynInterop = Laplace.Engine.Synthesis.NativeInterop;
 
 namespace Laplace.Cli;
 
-// The foundry: pours adjudicated token→token consensus into a user-declared mold.
-// Inputs are the consensus planes, the recipe (shapes), and the tokenizer (which
-// token entities fill the mold's vocab) — never model weights. The embedding basis
-// is GENERATED (Laplacian eigenmaps over the consensus graph, Gram-Schmidt
-// orthonormalized, Procrustes-anchored to token content coordinates); interior
-// tensors are truncated-SVD factorizations of the consensus operators projected
-// through that basis. There is no inverse score law and no per-witness scale
-// calibration: export renders consensus, it does not invert an ingest.
-//
-// Basis layout per token row [dModel]:
-//   [0..K)          spectral coordinates of the consensus graph (first 4 anchored)
-//   [K..dModel-1)   deterministic capacity dims (seeded from the recipe, no clock)
-//   [dModel-1]      the bias channel: constant BiasValue for every token. Attention
-//                   and FFN factors never write this dim, so it survives depth; the
-//                   gate tensor reads ONLY this dim, making SiLU(gate·x) a stable
-//                   positive scalar — the SwiGLU mold carries a linear FFN operator.
-//                   lm_head sees a uniform logit shift from it (softmax-invariant).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 internal static class FoundryExport
 {
     internal const double BiasValue = 1.0;
@@ -41,11 +41,11 @@ internal static class FoundryExport
             System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= 0 ? v : dflt;
 
-    // A plane is named, never hand-rolled: ('consensus', TYPE) reads adjudicated
-    // eff-μ RELATIVE TO NEUTRAL (signed; refuted < 0); ('traj', next|gap|window, n)
-    // reads conditional frequencies straight from the witnessed trajectories. The
-    // SQL surface (laplace.relation_plane) is the single definition both this reader
-    // and every audit/walk view share.
+    
+    
+    
+    
+    
     internal readonly record struct PlaneSpec(string Family, string Name, int? Arg)
     {
         public static PlaneSpec Consensus(string name) => new("consensus", name, null);
@@ -55,9 +55,9 @@ internal static class FoundryExport
         public override string ToString() => Arg is null ? $"{Family}:{Name}" : $"{Family}:{Name}:{Arg}";
     }
 
-    // One set-based read per plane; entity→ordinal mapping is in-process (perf-cache
-    // derived token entities), so the DB is touched exactly once per plane. Degree-
-    // capped at top-m by |w| per subject ordinal to bound factorization fill-in.
+    
+    
+    
     internal static async Task<PlaneCoo> ReadRelationPlaneAsync(
         NpgsqlDataSource ds, PlaneSpec spec,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
@@ -93,10 +93,10 @@ internal static class FoundryExport
             return PlaneCoo.Empty;
         }
 
-        // Canonical order regardless of DB scan order: the cast law (identical
-        // consensus + identical mold => identical cast) dies here otherwise —
-        // |w| ties at the degree cap kept a scan-order subset, and dictionary
-        // emission order perturbed downstream float summation.
+        
+        
+        
+        
         long kept = 0;
         foreach (var row in adj.Values)
         {
@@ -120,12 +120,12 @@ internal static class FoundryExport
         return new PlaneCoo(rows, cols, vals);
     }
 
-    // Vocab-bounded consensus plane: the native read returns ONLY the vocab×vocab
-    // edges of the given relation types, degree-capped per subject server-side via
-    // the (subject_id, type_id) index — no full-type scan, no millions of rows
-    // streamed to the client. The foundry passes its vocab entity set + the relation
-    // names for one operator role and only maps the returned edges to ordinals. ONE
-    // bounded query per role replaces N full-type reads + in-client filtering.
+    
+    
+    
+    
+    
+    
     internal static async Task<PlaneCoo> ReadConsensusPlaneAsync(
         NpgsqlDataSource ds, string[] relNames,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
@@ -188,11 +188,11 @@ internal static class FoundryExport
         return new PlaneCoo(rows, cols, vals);
     }
 
-    // WITHIN-LAYER plane read: consensus_layer_plane keeps the read inside one rank band
-    // (the ranks ARE the layers), known relations only, and CONTENT objects only (object in
-    // vocab) — so app/structural annotations (HAS_POS etc.) and unnamed types never enter the
-    // tensor. weight w = eff_mu (the adjudicated rating). This is the export's correct source,
-    // replacing the flat entity_relation_plane (which mixed metadata/structural with meaning).
+    
+    
+    
+    
+    
     internal static async Task<PlaneCoo> ReadLayerPlaneAsync(
         NpgsqlDataSource ds, double rankLo, double rankHi,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
@@ -208,7 +208,7 @@ internal static class FoundryExport
             await using var cmd = conn.CreateCommand();
             cmd.CommandTimeout = 600;
             cmd.CommandText =
-                "SELECT subject_id, object_id, w FROM laplace.consensus_layer_plane($1, $2, $3, $4)";
+                "SELECT subject_id, object_id, w, layer_rank FROM laplace.consensus_layer_plane($1, $2, $3, $4)";
             cmd.Parameters.Add(new NpgsqlParameter
                 { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
             cmd.Parameters.AddWithValue(rankLo);
@@ -219,7 +219,11 @@ internal static class FoundryExport
             {
                 if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
                 if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
-                double w = rdr.GetDouble(2);
+                
+                
+                
+                
+                double w = rdr.GetDouble(2) * rdr.GetDouble(3);
                 if (w == 0.0) continue;
                 foreach (int s in subj)
                 {
@@ -255,14 +259,72 @@ internal static class FoundryExport
         return new PlaneCoo(rows, cols, vals);
     }
 
-    // FAITHFUL adjacency read (the generative mold's source): ONE set-based call to
-    // laplace.consensus_adjacency over the whole vocab. The weight is already the
-    // rank-weighted rating Σ relation_rank·eff_mu — the rank looked up PER EDGE from the
-    // banked law server-side, so the caller carries NO band edges and NO hand-typed rank
-    // weights. Maps entity ids → token ordinals via tokenSlots; an entity that resolves to
-    // several token ids fans the same weight to each pairing (the content addressing is the
-    // identity). Degree already capped server-side; we re-cap in canonical order so the cast
-    // is byte-stable regardless of DB scan order.
+    
+    
+    
+    
+    
+    internal sealed record TypePlane(Hash128 TypeId, double Rank, PlaneCoo Plane);
+
+    internal static async Task<List<TypePlane>> ReadTypePlanesAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
+
+        
+        var byType = new Dictionary<Hash128, (double Rank, Dictionary<int, List<(int Col, double W)>> Adj)>();
+        await using var conn = await ds.OpenConnectionAsync();
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandTimeout = 600;
+            cmd.CommandText =
+                "SELECT subject_id, object_id, w, type_id, layer_rank FROM laplace.consensus_type_plane($1, $2)";
+            cmd.Parameters.Add(new NpgsqlParameter
+                { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            cmd.Parameters.AddWithValue(degreeCap);
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+                double w = rdr.GetDouble(2);
+                if (w == 0.0) continue;
+                var tid = FromBytes((byte[])rdr[3]);
+                double rank = rdr.GetDouble(4);
+                if (!byType.TryGetValue(tid, out var entry))
+                    byType[tid] = entry = (rank, new Dictionary<int, List<(int, double)>>());
+                foreach (int s in subj)
+                {
+                    if (!entry.Adj.TryGetValue(s, out var row)) entry.Adj[s] = row = new List<(int, double)>(8);
+                    foreach (int o in obj) row.Add((o, w));
+                }
+            }
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine($"  (consensus_type_plane unavailable: {ex.SqlState} — skipped)");
+            return new List<TypePlane>();
+        }
+
+        var result = new List<TypePlane>(byType.Count);
+        foreach (var (tid, entry) in byType)
+            result.Add(new TypePlane(tid, entry.Rank, CooFromAdj(entry.Adj, degreeCap)));
+        
+        result.Sort((a, b) => b.Rank.CompareTo(a.Rank));
+        return result;
+    }
+
+    
+    
+    
+    
+    
+    
+    
+    
     internal static async Task<PlaneCoo> ReadAdjacencyAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
     {
@@ -294,11 +356,158 @@ internal static class FoundryExport
         return CooFromAdj(adj, degreeCap);
     }
 
-    // Vocab-bounded trajectory ORDER LADDER in ONE walk: entity_trajectory_plane
-    // masks both endpoints to the vocab inside the native scan and emits forward
-    // co-occurrence at every gap 1..maxGap, degree-capped per (subject, gap). We
-    // stream the single result and split it into per-gap adjacency — no per-gap
-    // re-walk, no all-pairs materialization. Returns planes[0..maxGap-1] (gap g → [g-1]).
+    
+    
+    
+    
+    
+    
+    
+    internal static async Task<PlaneCoo> ReadMetricEdgesAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots,
+        string metric, int k, int probe, int degreeCap)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var key in tokenSlots.Keys) vocab[vi++] = key.ToBytes();
+
+        var adj = new Dictionary<int, List<(int Col, double W)>>();
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 0;   
+        cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.metric_edges($1, $2, $3, $4)";
+        cmd.Parameters.Add(new NpgsqlParameter
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        cmd.Parameters.AddWithValue(metric);
+        cmd.Parameters.AddWithValue(k);
+        cmd.Parameters.AddWithValue(probe);
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        while (await rdr.ReadAsync())
+        {
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+            double dist = rdr.GetDouble(2);
+            double w = Math.Exp(-dist);   
+            if (w == 0.0) continue;
+            foreach (int s in subj)
+            {
+                if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
+                foreach (int o in obj) row.Add((o, w));
+            }
+        }
+        return CooFromAdj(adj, degreeCap);
+    }
+
+    
+    
+    
+    
+    
+    internal static void ReportMetricHeadFidelity(
+        double[] e, int vocab, int dModel, PlaneCoo plane, Factors f, string metric)
+    {
+        var nbr = new Dictionary<int, List<int>>();
+        for (long t = 0; t < plane.Nnz; t++)
+        {
+            int s = plane.Rows[t], o = plane.Cols[t];
+            if (!nbr.TryGetValue(s, out var l)) nbr[s] = l = new List<int>();
+            l.Add(o);
+        }
+        if (nbr.Count == 0 || f.Rank == 0) { Console.WriteLine("  metric-head fidelity: no edges to check"); return; }
+        int rank = f.Rank;
+        
+        var K = new double[(long)vocab * rank];
+        for (int o = 0; o < vocab; o++)
+            for (int r = 0; r < rank; r++)
+            {
+                double a = 0;
+                for (int j = 0; j < dModel && j < f.Dim; j++) a += f.Right[(long)r * f.Dim + j] * e[(long)o * dModel + j];
+                K[(long)o * rank + r] = a;
+            }
+        var samples = nbr.Keys.OrderBy(x => x).Take(8).ToList();
+        double recallSum = 0, directSum = 0, noiseSum = 0; int cnt = 0;
+        foreach (int s in samples)
+        {
+            var want = nbr[s]; int kk = want.Count; if (kk == 0) continue;
+            var qs = new double[rank];
+            for (int r = 0; r < rank; r++)
+            {
+                double a = 0;
+                for (int j = 0; j < dModel && j < f.Dim; j++) a += f.Left[(long)r * f.Dim + j] * e[(long)s * dModel + j];
+                qs[r] = a;
+            }
+            var score = new double[vocab];
+            for (int o = 0; o < vocab; o++)
+            {
+                double a = 0;
+                for (int r = 0; r < rank; r++) a += qs[r] * K[(long)o * rank + r];
+                score[o] = a;
+            }
+            var top = Enumerable.Range(0, vocab).Where(o => o != s)
+                                .OrderByDescending(o => score[o]).Take(kk).ToHashSet();
+            recallSum += (double)want.Count(w => top.Contains(w)) / kk;
+
+            
+            
+            
+            
+            var dsc = new double[vocab];
+            for (int o = 0; o < vocab; o++)
+            { double a = 0; for (int d = 0; d < 4 && d < dModel; d++) a += e[(long)s * dModel + d] * e[(long)o * dModel + d]; dsc[o] = a; }
+            var dtop = Enumerable.Range(0, vocab).Where(o => o != s).OrderByDescending(o => dsc[o]).Take(kk).ToHashSet();
+            directSum += (double)want.Count(w => dtop.Contains(w)) / kk;
+
+            
+            noiseSum += (double)kk / vocab;
+            cnt++;
+        }
+        int n = Math.Max(1, cnt);
+        Console.WriteLine($"  metric-head fidelity ({metric}) over {cnt} tokens: "
+            + $"NOISE FLOOR {noiseSum / n * 100:F1}%  |  factored q·k {recallSum / n * 100:F0}%  |  "
+            + $"S³-frame direct (q=k=coord) {directSum / n * 100:F0}%  "
+            + $"[direct = does the rigid frame carry it; factored = does the SVD keep it]");
+    }
+
+    
+    
+    
+    
+    internal static async Task<int> FillCoordAnchorsAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, double[]?[] anchors)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var key in tokenSlots.Keys) vocab[vi++] = key.ToBytes();
+
+        int filled = 0;
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 120;
+        cmd.CommandText = @"SELECT DISTINCT ON (p.entity_id) p.entity_id,
+                ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord)
+            FROM laplace.physicalities p
+            JOIN unnest($1::bytea[]) AS u(id) ON u.id = p.entity_id
+            WHERE p.type = 1 AND p.coord IS NOT NULL
+            ORDER BY p.entity_id, p.source_id";
+        cmd.Parameters.Add(new NpgsqlParameter
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        while (await rdr.ReadAsync())
+        {
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var slots)) continue;
+            var a = new[] { rdr.GetDouble(1), rdr.GetDouble(2), rdr.GetDouble(3), rdr.GetDouble(4) };
+            
+            
+            foreach (int s in slots) { anchors[s] = a; filled++; }
+        }
+        return filled;
+    }
+
+    
+    
+    
+    
+    
     internal static async Task<PlaneCoo[]> ReadTrajectoryLadderAsync(
         NpgsqlDataSource ds, int maxGap,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
@@ -307,7 +516,7 @@ internal static class FoundryExport
         int vi = 0;
         foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
 
-        // adj[g] : subject ordinal -> (object ordinal, w)
+        
         var adj = new Dictionary<int, List<(int Col, double W)>>[maxGap];
         for (int g = 0; g < maxGap; g++) adj[g] = new Dictionary<int, List<(int, double)>>();
 
@@ -315,7 +524,7 @@ internal static class FoundryExport
         try
         {
             await using var cmd = conn.CreateCommand();
-            cmd.CommandTimeout = 0;   // the per-backend corpus build walks the whole stream once
+            cmd.CommandTimeout = 0;   
             cmd.CommandText =
                 "SELECT gap, subject_id, object_id, w FROM laplace.entity_trajectory_plane($1, $2, $3)";
             cmd.Parameters.Add(new NpgsqlParameter
@@ -350,9 +559,160 @@ internal static class FoundryExport
         return planes;
     }
 
-    // Canonical-order COO from a subject->(object,w) adjacency, degree-capped by |w|.
-    // Shared by the bounded readers so the cast law (same consensus + same mold =>
-    // same bytes) holds regardless of DB scan order.
+    
+    
+    
+    
+    internal static async Task<PlaneCoo> ReadGraphemeOrderAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int gap = 1)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
+
+        var adj = new Dictionary<int, List<(int Col, double W)>>();
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 0;   
+        cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.grapheme_order($1, 50000, $2)";
+        cmd.Parameters.Add(new NpgsqlParameter
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        cmd.Parameters.AddWithValue(gap);
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        while (await rdr.ReadAsync())
+        {
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+            double w = rdr.GetDouble(2);
+            if (w <= 0) continue;
+            foreach (int s in subj)
+            {
+                if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
+                foreach (int o in obj) row.Add((o, w));
+            }
+        }
+        return CooFromAdj(adj, 256);   
+    }
+
+    
+    
+    
+    
+    internal static async Task<PlaneCoo> ReadWordOrderAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots,
+        int gap = 1, int trajs = 200000, int cap = 64)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
+
+        var adj = new Dictionary<int, List<(int Col, double W)>>();
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 0;   
+        cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.word_order($1, $2, $3)";
+        cmd.Parameters.Add(new NpgsqlParameter
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        cmd.Parameters.AddWithValue(trajs);
+        cmd.Parameters.AddWithValue(gap);
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        while (await rdr.ReadAsync())
+        {
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+            double w = rdr.GetDouble(2);
+            if (w <= 0) continue;
+            foreach (int s in subj)
+            {
+                if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
+                foreach (int o in obj) row.Add((o, w));
+            }
+        }
+        return CooFromAdj(adj, cap);
+    }
+
+    
+    
+    
+    
+    
+    
+    
+    internal static async Task<PlaneCoo> ReadTrajectoryStrideAsync(
+        NpgsqlDataSource ds, int maxGap,
+        Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
+    {
+        var adj = new Dictionary<int, List<(int Col, double W)>>();
+        await using var conn = await ds.OpenConnectionAsync();
+
+        
+        
+        
+        await using (var warm = conn.CreateCommand())
+        {
+            warm.CommandText = "SELECT laplace.relation_type_id('IS_A')";
+            await warm.ExecuteScalarAsync();
+        }
+
+        
+        int corpusMax = EnvInt("LAPLACE_FOUNDRY_CORPUS_MAX", 200_000);
+        if (corpusMax > 0)
+        {
+            await using var setCmd = conn.CreateCommand();
+            setCmd.CommandText = $"SET laplace_substrate.corpus_max_rows = {corpusMax}";
+            await setCmd.ExecuteNonQueryAsync();
+        }
+        try
+        {
+            
+            
+            await using (var ensure = conn.CreateCommand())
+            {
+                ensure.CommandTimeout = 0;
+                ensure.CommandText = "SELECT laplace.trajectory_pairs_ensure($1)";
+                ensure.Parameters.AddWithValue(maxGap);
+                await ensure.ExecuteScalarAsync();
+            }
+
+            
+            
+            var vocab = new byte[tokenSlots.Count][];
+            int vi = 0;
+            foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandTimeout = 600;
+            cmd.CommandText =
+                "SELECT subject_id, object_id, w FROM laplace.trajectory_pairs_plane($1, $2)";
+            cmd.Parameters.Add(new NpgsqlParameter
+                { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            cmd.Parameters.AddWithValue(maxGap);
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+                if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
+                double w = rdr.GetDouble(2);
+                if (w == 0.0) continue;
+                foreach (int s in subj)
+                {
+                    if (!adj.TryGetValue(s, out var row)) adj[s] = row = new List<(int, double)>(8);
+                    foreach (int o in obj) row.Add((o, w));
+                }
+            }
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
+        {
+            Console.WriteLine($"  (trajectory pairs unavailable: {ex.SqlState} — skipped)");
+            return PlaneCoo.Empty;
+        }
+
+        return CooFromAdj(adj, degreeCap);
+    }
+
+    
+    
+    
     private static PlaneCoo CooFromAdj(Dictionary<int, List<(int Col, double W)>> adj, int degreeCap)
     {
         long kept = 0;
@@ -373,9 +733,9 @@ internal static class FoundryExport
         return new PlaneCoo(rows, cols, vals);
     }
 
-    // Per-plane scale normalization (max |w| → 1) so μ-weighted consensus planes
-    // and frequency-weighted trajectory planes union into operators at comparable
-    // magnitude. Relative structure within each plane is untouched.
+    
+    
+    
     internal static PlaneCoo Normalize(PlaneCoo p)
     {
         double max = 0;
@@ -403,14 +763,14 @@ internal static class FoundryExport
 
     internal sealed record BasisStats(int SpectralRank, int ZeroSpectralTokens, double ProcrustesResidual);
 
-    // AFFINITY-SVD embedding: a token's vector = the SVD reduction of its full relational
-    // affinity ROW (its rank-weighted edges to every other token). Two tokens with similar
-    // relational fingerprints (dog/cat both IS_A mammal, both PRECEDES verbs, …) get similar
-    // rows → similar embeddings. This is the direct factorization of the consensus the user
-    // describes, vs Laplacian-eigenmaps over the capped graph (which measured 0.58σ). The
-    // affinity is symmetrized; the top-k left singular vectors (scaled by √S) are the basis.
-    // NOTE: tensor_svd_truncate needs kmax ≥ min(m,n) = vocab, so this is dense vocab×vocab —
-    // use it at modest vocab (≤~3k); larger vocab needs a sparse solver.
+    
+    
+    
+    
+    
+    
+    
+    
     internal static double[] BuildBasisAffinity(
         int vocab, int dModel, PlaneCoo aff, double[]?[] anchors, Hash128 seed,
         out BasisStats stats)
@@ -423,7 +783,7 @@ internal static class FoundryExport
             if (x < 0 || x >= vocab || y < 0 || y >= vocab) continue;
             float w = (float)aff.Vals[e];
             A[(long)x * vocab + y] += w;
-            A[(long)y * vocab + x] += w;   // symmetrize (similarity is undirected)
+            A[(long)y * vocab + x] += w;   
         }
         var U = new float[(long)vocab * vocab];
         var S = new float[vocab];
@@ -456,115 +816,279 @@ internal static class FoundryExport
         return e2;
     }
 
-    // FAITHFUL low-rank factorization of the rated adjacency for the generative cast.
-    // A[X,Y] = rank-weighted rating of the continuation X→Y (DIRECTED — not symmetrized).
-    // The truncated SVD A ≈ U S Vᵀ to rank = dim is the EXACT optimal rank-dim approximation
-    // (Eckart–Young). embed[X] = U[X]·√S, lm_head[Y] = V[Y]·√S, so in the cast
-    //   logits[Y|X] = lm_head[Y]·embed[X] = Σ_k U[X,k]·S_k·V[Y,k] = A_dim[X,Y]
-    // — the rank-weighted rating LOOKED UP, factored to the hidden width. dim is a NORMAL
-    // embedding size (e.g. 512), NEVER vocab: a 32k-token model is 32000×512, not 32000².
-    // The only loss is the truncation tail (singular values past dim); no learning, no gains.
-    // A is scaled to max|w|→1 first so reconstructed logits keep sane magnitude (the cast's
-    // RMSNorm contributes a per-token positive factor = temperature, not an argmax change).
-    // embed/lmHead come back row-major [vocab × dim], zero-padded past the spectral rank.
-    // NOTE: dense vocab×vocab SVD — modest vocab (≤~4k). Larger needs a sparse/randomized solver.
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     internal static void FactorAdjacency(
-        PlaneCoo adj, int vocab, int dim, out double[] embed, out double[] lmHead, out int usedRank)
+        PlaneCoo adj, int vocab, int dim, out double[] embed, out double[] lmHead, out int usedRank,
+        bool conditional = false, bool suppressSelf = false, double dehub = 0.0)
     {
         var rowSum = new double[vocab];
         var colSum = new double[vocab];
         double total = 0;
-        // accumulate the directed rated adjacency as a SPARSE list (row=subject X, col=object Y)
+        
         var ex = new int[adj.Nnz]; var ey = new int[adj.Nnz]; var ew = new double[adj.Nnz]; int en = 0;
         for (long e = 0; e < adj.Nnz; e++)
         {
             int x = adj.Rows[e], y = adj.Cols[e];
             if (x < 0 || x >= vocab || y < 0 || y >= vocab) continue;
+            if (suppressSelf && x == y) continue;   
             double w = adj.Vals[e];
             ex[en] = x; ey[en] = y; ew[en] = w; en++;
             rowSum[x] += w; colSum[y] += w; total += w;
         }
-        // PPMI: As[X,Y] = max(0, ln( A[X,Y]·T / (rowSum[X]·colSum[Y]) )). This is THE proven
-        // co-occurrence→embedding transform (positive pointwise mutual information; SVD-of-PPMI
-        // equals skip-gram, Levy–Goldberg 2014). It conditions each X→Y rating on the base rates,
-        // so the global hub (high in-degree function words the/I/and) is divided out and X's
-        // SPECIFIC continuation surfaces. It is NON-NEGATIVE and ZERO where there is no edge, so
-        // the SVD spends its rank on real structure, not the hub, and the empty byte/special rows
-        // stay ~0 (no spurious byte continuations). Not a tuned scalar — the marginal conditioning
-        // the invention demands ("whitespace must not weigh as heavily as content words").
-        var As = new float[(long)vocab * vocab];
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        var sx = new int[en]; var sy = new int[en]; var sv = new double[en]; int sn = 0;
         for (int i = 0; i < en; i++)
         {
-            double denom = rowSum[ex[i]] * colSum[ey[i]];
-            if (denom <= 0) continue;
-            double pmi = Math.Log(ew[i] * total / denom);
-            if (pmi > 0) As[(long)ex[i] * vocab + ey[i]] = (float)pmi;
+            double val;
+            if (conditional)
+            {
+                double rs = rowSum[ex[i]];
+                if (rs <= 0) continue;
+                val = Math.Log(ew[i] / rs * vocab);     
+                
+                
+                
+                
+                if (dehub != 0.0 && colSum[ey[i]] > 0 && total > 0)
+                    val -= dehub * Math.Log(colSum[ey[i]] / total);
+            }
+            else
+            {
+                double denom = rowSum[ex[i]] * colSum[ey[i]];
+                if (denom <= 0) continue;
+                val = Math.Log(ew[i] * total / denom);
+                if (val <= 0) continue;                 
+            }
+            if (val == 0) continue;
+            sx[sn] = ex[i]; sy[sn] = ey[i]; sv[sn] = val; sn++;
         }
-        var U  = new float[(long)vocab * vocab];
-        var S  = new float[vocab];
-        var Vt = new float[(long)vocab * vocab];
-        nuint outRank = 0; int rc;
-        unsafe
-        {
-            fixed (float* pa = As, pu = U, ps = S, pvt = Vt)
-                rc = SynInterop.TensorSvdTruncate(pa, (nuint)vocab, (nuint)vocab, 0.0,
-                                                  &outRank, pu, ps, pvt, (nuint)vocab);
-        }
-        if (rc != 0) throw new InvalidOperationException($"tensor_svd_truncate (adjacency) rc={rc} (vocab={vocab})");
-        int kk = Math.Min(dim, (int)outRank);
-        usedRank = kk;
+
         embed  = new double[(long)vocab * dim];
         lmHead = new double[(long)vocab * dim];
-        // S goes ENTIRELY on lm_head, NONE on embed. embed is RMSNorm'd in the cast, and if √S
-        // were on embed the norm would be dominated by the top singular value √S₁, so RMSNorm
-        // would collapse every token onto the top singular DIRECTION → the readout returns one
-        // hub token for all inputs (the "I I I" collapse). With embed = U (unit-scale columns),
-        // RMSNorm preserves each token's true left-singular DIRECTION; lm_head = V·S carries the
-        // full singular weight (it is not normalized). The reconstruction is unchanged:
-        //   logits[Y|X] = lm_head[Y]·RMSNorm(embed[X]) ∝ Σ_k U[X,k]·S_k·V[Y,k] = A_dim[X,Y]
-        // (the per-token 1/‖U[X]‖ from RMSNorm is a positive temperature, not an argmax change).
-        for (int c = 0; c < kk; c++)
+
+        
+        
+        
+        
+        if (vocab <= EnvInt("LAPLACE_FOUNDRY_DENSE_SVD_MAX", 6000))
         {
-            double s = Math.Max(0f, S[c]);
-            for (int i = 0; i < vocab; i++)
+            var As = new float[(long)vocab * vocab];
+            for (int i = 0; i < sn; i++) As[(long)sx[i] * vocab + sy[i]] = (float)sv[i];
+            var U  = new float[(long)vocab * vocab];
+            var S  = new float[vocab];
+            var Vt = new float[(long)vocab * vocab];
+            nuint outRank = 0; int rc;
+            unsafe
             {
-                embed[(long)i * dim + c]  = (double)U[(long)i * vocab + c];            // U[X,c]
-                lmHead[(long)i * dim + c] = (double)Vt[(long)c * vocab + i] * s;       // V[Y,c]·S
+                fixed (float* pa = As, pu = U, ps = S, pvt = Vt)
+                    rc = SynInterop.TensorSvdTruncate(pa, (nuint)vocab, (nuint)vocab, 0.0,
+                                                      &outRank, pu, ps, pvt, (nuint)vocab);
             }
+            if (rc != 0) throw new InvalidOperationException($"tensor_svd_truncate (adjacency) rc={rc} (vocab={vocab})");
+            int kk = Math.Min(dim, (int)outRank);
+            usedRank = kk;
+            
+            for (int c = 0; c < kk; c++)
+            {
+                double s = Math.Max(0f, S[c]);
+                for (int i = 0; i < vocab; i++)
+                {
+                    embed[(long)i * dim + c]  = (double)U[(long)i * vocab + c];
+                    lmHead[(long)i * dim + c] = (double)Vt[(long)c * vocab + i] * s;
+                }
+            }
+        }
+        else
+        {
+            usedRank = FactorSparseRandomized(sx, sy, sv, sn, vocab, dim, embed, lmHead);
         }
     }
 
-    // Generates E [vocab × dModel] row-major. anchors[i] is null or a 4D content
-    // coordinate for vocab ordinal i. The seed must derive from the recipe (never
-    // the clock) so identical consensus + identical mold ⇒ identical cast.
+    
+    
+    
+    
+    
+    internal static int FactorSparseRandomized(
+        int[] sx, int[] sy, double[] sv, int sn, int vocab, int dim, double[] embed, double[] lmHead)
+    {
+        int L = Math.Min(vocab, dim + EnvInt("LAPLACE_FOUNDRY_RSVD_OVERSAMPLE", 16));
+        int q = EnvInt("LAPLACE_FOUNDRY_RSVD_POWER", 1);
+        
+        var Y  = new double[(long)L * vocab];
+        var Om = new double[(long)L * vocab];
+        ulong seed = SplitMix(0x9E3779B97F4A7C15UL ^ (ulong)vocab ^ ((ulong)dim << 32));
+        for (long t = 0; t < (long)L * vocab; t++) Om[t] = Gaussian(ref seed);
+        SpMatVec(sx, sy, sv, sn, Om, Y, L, vocab, false);                 
+        var Z = new double[(long)L * vocab];
+        for (int it = 0; it < q; it++)
+        {
+            Array.Clear(Z); SpMatVec(sx, sy, sv, sn, Y, Z, L, vocab, true);    
+            Array.Clear(Y); SpMatVec(sx, sy, sv, sn, Z, Y, L, vocab, false);   
+        }
+        
+        
+        
+        
+        
+        var G = new double[(long)L * L];
+        System.Threading.Tasks.Parallel.For(0, L, i =>
+        {
+            long bi = (long)i * vocab;
+            for (int j = 0; j <= i; j++)
+            {
+                long bj = (long)j * vocab;
+                double d = 0; for (int t = 0; t < vocab; t++) d += Y[bi + t] * Y[bj + t];
+                G[(long)i * L + j] = d; G[(long)j * L + i] = d;
+            }
+        });
+        var Gf = new float[(long)L * L];
+        for (long t = 0; t < (long)L * L; t++) Gf[t] = (float)G[t];
+        var Wg = new float[(long)L * L]; var Sg = new float[L]; var Vg = new float[(long)L * L];
+        nuint gRank = 0; int grc;
+        unsafe { fixed (float* pg = Gf, pu = Wg, ps = Sg, pv = Vg) grc = SynInterop.TensorSvdTruncate(pg, (nuint)L, (nuint)L, 0.0, &gRank, pu, ps, pv, (nuint)L); }
+        if (grc != 0) throw new InvalidOperationException($"tensor_svd_truncate (rsvd gram) rc={grc} (L={L})");
+        double s0g = Sg.Length > 0 ? Sg[0] : 0;
+        int rkQ = 0; while (rkQ < L && Sg[rkQ] > 1e-10 * s0g && Sg[rkQ] > 0) rkQ++;
+        rkQ = Math.Max(1, rkQ);
+        var Q = new double[(long)rkQ * vocab];                            
+        System.Threading.Tasks.Parallel.For(0, rkQ, k =>
+        {
+            double invsq = 1.0 / Math.Sqrt(Sg[k]);
+            long bk = (long)k * vocab;
+            for (int i = 0; i < L; i++)
+            {
+                double w = (double)Wg[(long)i * L + k] * invsq;
+                long bi = (long)i * vocab;
+                for (int t = 0; t < vocab; t++) Q[bk + t] += w * Y[bi + t];
+            }
+        });
+        var B = new double[(long)rkQ * vocab];                            
+        SpMatVecQ(sx, sy, sv, sn, Q, B, rkQ, vocab);
+        var Bf = new float[(long)rkQ * vocab];
+        for (long t = 0; t < (long)rkQ * vocab; t++) Bf[t] = (float)B[t];
+        var Ub = new float[(long)rkQ * rkQ]; var Sb = new float[rkQ]; var Vtb = new float[(long)rkQ * vocab];
+        nuint outRank = 0; int rc;
+        unsafe
+        {
+            fixed (float* pb = Bf, pu = Ub, ps = Sb, pvt = Vtb)
+                rc = SynInterop.TensorSvdTruncate(pb, (nuint)rkQ, (nuint)vocab, 0.0, &outRank, pu, ps, pvt, (nuint)rkQ);
+        }
+        if (rc != 0) throw new InvalidOperationException($"tensor_svd_truncate (rsvd band) rc={rc} (rkQ={rkQ}, vocab={vocab})");
+        int kk = Math.Min(dim, (int)outRank);
+        
+        System.Threading.Tasks.Parallel.For(0, vocab, x =>
+        {
+            for (int c = 0; c < kk; c++)
+            {
+                double acc = 0;
+                for (int j = 0; j < rkQ; j++) acc += Q[(long)j * vocab + x] * Ub[(long)j * rkQ + c];
+                embed[(long)x * dim + c]  = acc;
+                lmHead[(long)x * dim + c] = (double)Vtb[(long)c * vocab + x] * Math.Max(0f, Sb[c]);
+            }
+        });
+        return kk;
+    }
+
+    
+    
+    static void SpMatVec(int[] sx, int[] sy, double[] sv, int sn, double[] M, double[] Outp, int L, int vocab, bool transpose)
+    {
+        System.Threading.Tasks.Parallel.For(0, L, c =>
+        {
+            long baseC = (long)c * vocab;
+            for (int i = 0; i < sn; i++)
+            {
+                int a = transpose ? sy[i] : sx[i];
+                int b = transpose ? sx[i] : sy[i];
+                Outp[baseC + a] += sv[i] * M[baseC + b];
+            }
+        });
+    }
+    
+    static void SpMatVecQ(int[] sx, int[] sy, double[] sv, int sn, double[] Q, double[] B, int L, int vocab)
+    {
+        System.Threading.Tasks.Parallel.For(0, L, c =>
+        {
+            long baseC = (long)c * vocab;
+            for (int i = 0; i < sn; i++) B[baseC + sy[i]] += Q[baseC + sx[i]] * sv[i];
+        });
+    }
+
+    
+    
+    
     internal static double[] BuildBasis(
         int vocab, int dModel, PlaneCoo leGraph, double[]?[] anchors, Hash128 seed,
         out BasisStats stats)
     {
-        int k = Math.Min(Math.Min(dModel - 1, EnvInt("LAPLACE_FOUNDRY_BASIS_RANK", 256)),
-                         Math.Max(2, vocab - 2));
+        bool coordOnly = EnvInt("LAPLACE_FOUNDRY_COORD_ONLY", 0) != 0;
+        int k = coordOnly
+            ? Math.Min(4, dModel - 1)
+            : Math.Min(Math.Min(dModel - 1, EnvInt("LAPLACE_FOUNDRY_BASIS_RANK", 256)),
+                       Math.Max(2, vocab - 2));
         var y = GC.AllocateUninitializedArray<double>(checked(vocab * k), pinned: true);
-        int rc;
-        unsafe
+        if (coordOnly)
         {
-            fixed (int* pr = leGraph.Rows) fixed (int* pc = leGraph.Cols)
-            fixed (double* pv = leGraph.Vals) fixed (double* py = y)
-                rc = DynInterop.LaplacianEigenmapsFromSparseGraph(
-                    pr, pc, pv, (nuint)leGraph.Nnz, (nuint)vocab, (nuint)k, py);
-        }
-        if (rc != 0)
-            throw new InvalidOperationException(
-                $"laplacian_eigenmaps_from_sparse_graph rc={rc} (vocab={vocab}, K={k}, nnz={leGraph.Nnz})");
-
-        // GSO over the spectral columns (vectors-as-rows: transpose, orthonormalize, transpose back).
-        var yt = new double[(long)k * vocab];
-        for (int i = 0; i < vocab; i++)
-            for (int d = 0; d < k; d++) yt[(long)d * vocab + i] = y[(long)i * k + d];
-        int gsRc;
-        unsafe { fixed (double* p = yt) gsRc = DynInterop.GramSchmidtOrthonormalize(p, (nuint)k, (nuint)vocab); }
-        if (gsRc == 0)
+            
+            
+            
+            
+            
+            
+            Array.Clear(y, 0, y.Length);
             for (int i = 0; i < vocab; i++)
-                for (int d = 0; d < k; d++) y[(long)i * k + d] = yt[(long)d * vocab + i];
+            {
+                var a = anchors[i];
+                if (a is null) continue;
+                for (int d = 0; d < 4 && d < k; d++) y[(long)i * k + d] = a[d];
+            }
+        }
+        else
+        {
+            int rc;
+            unsafe
+            {
+                fixed (int* pr = leGraph.Rows) fixed (int* pc = leGraph.Cols)
+                fixed (double* pv = leGraph.Vals) fixed (double* py = y)
+                    rc = DynInterop.LaplacianEigenmapsFromSparseGraph(
+                        pr, pc, pv, (nuint)leGraph.Nnz, (nuint)vocab, (nuint)k, py);
+            }
+            if (rc != 0)
+                throw new InvalidOperationException(
+                    $"laplacian_eigenmaps_from_sparse_graph rc={rc} (vocab={vocab}, K={k}, nnz={leGraph.Nnz})");
+
+            
+            var yt = new double[(long)k * vocab];
+            for (int i = 0; i < vocab; i++)
+                for (int d = 0; d < k; d++) yt[(long)d * vocab + i] = y[(long)i * k + d];
+            int gsRc;
+            unsafe { fixed (double* p = yt) gsRc = DynInterop.GramSchmidtOrthonormalize(p, (nuint)k, (nuint)vocab); }
+            if (gsRc == 0)
+                for (int i = 0; i < vocab; i++)
+                    for (int d = 0; d < k; d++) y[(long)i * k + d] = yt[(long)d * vocab + i];
+        }
 
         int zeroSpectral = 0;
         for (int i = 0; i < vocab; i++)
@@ -574,13 +1098,34 @@ internal static class FoundryExport
             if (n2 < 1e-24) zeroSpectral++;
         }
 
-        // Procrustes-anchor the first 4 spectral dims to token content coordinates,
-        // rescaled so the anchored block keeps the spectral block's magnitude.
+        
+        
         double resid = double.NaN;
         var fitIdx = new List<int>();
         for (int i = 0; i < vocab; i++) if (anchors[i] is not null) fitIdx.Add(i);
         var e = new double[(long)vocab * dModel];
-        if (fitIdx.Count >= 6 && k >= 4)
+        bool coordDirect = EnvInt("LAPLACE_FOUNDRY_COORD_DIRECT", 0) != 0;
+        if (coordOnly)
+        {
+            
+        }
+        else if (coordDirect && fitIdx.Count > 0)
+        {
+            
+            
+            
+            
+            
+            
+            double cs = EnvDouble("LAPLACE_FOUNDRY_COORD_SCALE", 1.0);
+            for (int i = 0; i < vocab; i++)
+            {
+                var a = anchors[i];
+                if (a is null) continue;
+                for (int d = 0; d < 4 && d < k; d++) y[(long)i * k + d] = a[d] * cs;
+            }
+        }
+        else if (fitIdx.Count >= 6 && k >= 4)
         {
             var yFit = new double[(long)fitIdx.Count * k];
             var b = new double[(long)fitIdx.Count * 4];
@@ -619,10 +1164,10 @@ internal static class FoundryExport
                             specSq += s * s;
                         }
                     }
-                    // The anchoring OVERWRITES the top-4 (most significant) spectral dims with
-                    // the content-coordinate fit. When the fit is poor (high residual) this
-                    // corrupts the strongest geometry rather than aligning it — gate it so the
-                    // pure Laplacian-eigenmap geometry can be used instead.
+                    
+                    
+                    
+                    
                     double scale = anchSq > 0 ? Math.Sqrt(specSq / anchSq) : 1.0;
                     if (EnvInt("LAPLACE_FOUNDRY_PROCRUSTES", 1) != 0)
                         for (int i = 0; i < vocab; i++)
@@ -636,12 +1181,12 @@ internal static class FoundryExport
         for (int i = 0; i < vocab; i++)
             Array.Copy(y, (long)i * k, e, (long)i * dModel, k);
 
-        // Deterministic capacity dims: seeded Gaussian columns that give the embedding
-        // full rank WITHOUT drowning the spectral geometry. The GSO'd spectral block has
-        // per-row energy ≈ k/vocab; size the capacity block to carry only capFrac of that
-        // total, so ≥(1-capFrac) of each normalized row is consensus structure (otherwise
-        // 1792 random dims at spectral magnitude out-energize the 256 real dims and the
-        // similarity cosine washes to noise — measured: +0.05σ → the geometry vanishes).
+        
+        
+        
+        
+        
+        
         double capFrac = EnvDouble("LAPLACE_FOUNDRY_CAP_FRAC", 0.05);
         int capDims = Math.Max(1, dModel - 1 - k);
         double capScale = Math.Sqrt(capFrac * ((double)k / vocab) / capDims);
@@ -652,7 +1197,7 @@ internal static class FoundryExport
                 e[(long)i * dModel + d] = Gaussian(ref s) * capScale;
         }
 
-        // Row-normalize the content dims; the bias channel sits outside the norm.
+        
         for (int i = 0; i < vocab; i++)
         {
             long off = (long)i * dModel;
@@ -668,8 +1213,8 @@ internal static class FoundryExport
         return e;
     }
 
-    // M = Eᵀ·A·E for a sparse signed operator A (per-token weights are all ones, so
-    // the kernel's "scale by √consensus" is the identity and binary gram == Eᵀ A E).
+    
+    
     internal static double[] ProjectOperator(double[] e, int vocab, int dModel, PlaneCoo coo)
     {
         var ones = new double[vocab];
@@ -693,18 +1238,18 @@ internal static class FoundryExport
 
     internal sealed record Factors(float[] Left, float[] Right, int Rank, int Dim, double SampleResidual, double SpectralNorm);
 
-    // Factor M ≈ Leftᵀ·Right with Left/Right [rankCap × d] rows = √Sᵣ·uᵣᵀ / √Sᵣ·vᵣᵀ.
-    // transpose=true factors Mᵀ instead (for operators whose composed orientation
-    // is Wouter·Winner, e.g. Wo·Wv and Wdown·Wup). The native kernel computes the
-    // FULL SVD (its kmax is buffer capacity, required ≥ min(m,n)) and truncates by
-    // rel_err_tol; the mold's rank cap is applied here, keeping the strongest modes.
-    //
-    // Factors are SPECTRALLY NORMALIZED (divided by √s₀ each, so the composed
-    // operator is M/s₀ with spectral norm 1). Plane normalization bounds edge
-    // weights, not ‖EᵀAE‖₂ — unnormalized, one layer's residual add is s₀ (~10²)
-    // times the stream and the forward pass power-iterates onto the dominant
-    // eigendirection, erasing the prompt (measured: paris rank 267→18,559 after
-    // one layer). The layer scales in the fill are the entire depth budget.
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     internal static Factors Factor(double[] m, int d, int rankCap, double relTol, bool transpose)
     {
         var a = new float[(long)d * d];
@@ -738,8 +1283,8 @@ internal static class FoundryExport
             }
         }
 
-        // Sampled recomposition residual — a layout/orientation tripwire, not a fidelity
-        // metric. Large values mean the factor wiring is wrong, not that consensus is.
+        
+        
         double num = 0, den = 0;
         ulong rng = SplitMix(0x9E3779B97F4A7C15UL ^ (ulong)d);
         for (int t = 0; t < 512; t++)
@@ -756,7 +1301,7 @@ internal static class FoundryExport
         return new Factors(left, right, k, d, resid, s0);
     }
 
-    // ── mold tensor fills ─────────────────────────────────────────────────────
+    
 
     internal static void FillRows(float[] vals, int rows, int cols, Factors f, double scale)
     {
@@ -782,15 +1327,70 @@ internal static class FoundryExport
                 vals[(long)i * cols + r] = (float)(scale * f.Left[(long)r * f.Dim + i]);
     }
 
+    // Per-head fill: head `headIdx` occupies rows [headIdx*headDim, (headIdx+1)*headDim) and is
+    // filled from ITS OWN operator factor — one distinct attestation-type/metric operator per head
+    // (build-a-bear), not top-k of one mashed operator tiled across every head.
+    internal static void FillHead(float[] vals, int rows, int cols, int headIdx, int headDim, Factors f, double scale)
+    {
+        int baseRow = headIdx * headDim;
+        if (baseRow >= rows) return;
+        int k = Math.Min(f.Rank, headDim);
+        for (int r = 0; r < k && (baseRow + r) < rows; r++)
+        {
+            long dst = (long)(baseRow + r) * cols;
+            for (int j = 0; j < cols && j < f.Dim; j++)
+                vals[dst + j] = (float)(scale * f.Left[(long)r * f.Dim + j]);
+        }
+    }
+
+    internal static void FillHeadRight(float[] vals, int rows, int cols, int headIdx, int headDim, Factors f, double scale)
+    {
+        int baseRow = headIdx * headDim;
+        if (baseRow >= rows) return;
+        int k = Math.Min(f.Rank, headDim);
+        for (int r = 0; r < k && (baseRow + r) < rows; r++)
+        {
+            long dst = (long)(baseRow + r) * cols;
+            for (int j = 0; j < cols && j < f.Dim; j++)
+                vals[dst + j] = (float)(scale * f.Right[(long)r * f.Dim + j]);
+        }
+    }
+
+    // Per-head column fill for o_proj [dModel, nHeads*headDim]: head h's output occupies columns
+    // [h*headDim, (h+1)*headDim) and is projected back by ITS OWN operator (the OV factor).
+    internal static void FillColsHead(float[] vals, int rows, int cols, int headIdx, int headDim, Factors f, double scale)
+    {
+        int baseCol = headIdx * headDim;
+        if (baseCol >= cols) return;
+        int k = Math.Min(f.Rank, headDim);
+        for (int r = 0; r < k && (baseCol + r) < cols; r++)
+            for (int i = 0; i < rows && i < f.Dim; i++)
+                vals[(long)i * cols + (baseCol + r)] = (float)(scale * f.Left[(long)r * f.Dim + i]);
+    }
+
     internal static void FillGate(float[] vals, int rows, int cols, double gateCol)
     {
         for (int r = 0; r < rows; r++)
             vals[(long)r * cols + (cols - 1)] = (float)gateCol;
     }
 
+    
+    
+    
+    
+    
+    internal static void FillCoordHead(float[] vals, int rows, int cols, int headDim, int coordDims, double scale)
+    {
+        if (headDim <= 0) return;
+        int nh = rows / headDim;
+        for (int h = 0; h < nh; h++)
+            for (int d = 0; d < coordDims && d < headDim && d < cols; d++)
+                vals[(long)(h * headDim + d) * cols + d] = (float)scale;
+    }
+
     internal static double Silu(double z) => z / (1.0 + Math.Exp(-z));
 
-    // ── byte packers (GGUF tensor payloads) ───────────────────────────────────
+    
 
     internal static byte[] ToBf16Bytes(float[] data)
     {
@@ -812,7 +1412,7 @@ internal static class FoundryExport
         return o;
     }
 
-    // ── deterministic PRNG (no clock, no shared Random) ───────────────────────
+    
 
     private static ulong SplitMix(ulong x)
     {

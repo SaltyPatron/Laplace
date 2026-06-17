@@ -39,12 +39,23 @@ internal static class ContentRoundtrip
         await using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = @"
+                WITH RECURSIVE tree(id bytea) AS (
+                    SELECT @doc
+                    UNION
+                    SELECT unnest(public.laplace_trajectory_constituent_ids(p.trajectory))
+                    FROM tree t
+                    JOIN laplace.physicalities p
+                      ON p.entity_id = t.id AND p.type = 1 AND p.trajectory IS NOT NULL
+                    WHERE p.source_id = @s
+                )
                 SELECT p.entity_id, p.n_constituents, (g.path)[1],
                        ST_X(g.geom), ST_Y(g.geom), ST_Z(g.geom), ST_M(g.geom)
-                FROM laplace.physicalities p,
-                     LATERAL ST_DumpPoints(p.trajectory) AS g
-                WHERE p.source_id = @s AND p.type = 1";
+                FROM laplace.physicalities p
+                JOIN tree t ON t.id = p.entity_id
+                CROSS JOIN LATERAL ST_DumpPoints(p.trajectory) AS g
+                WHERE p.source_id = @s AND p.type = 1 AND p.trajectory IS NOT NULL";
             cmd.Parameters.AddWithValue("s", PromptSource.ToBytes());
+            cmd.Parameters.AddWithValue("doc", documentId.ToBytes());
             await using var r = await cmd.ExecuteReaderAsync(ct);
             while (await r.ReadAsync(ct))
             {

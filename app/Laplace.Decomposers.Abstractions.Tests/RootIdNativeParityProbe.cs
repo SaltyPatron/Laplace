@@ -5,12 +5,12 @@ using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-/// <summary>
-/// Parity probe: ContentEmitter.RootId (C# slow-path re-derivation) MUST equal the root
-/// returned by the native content witness batch for every surface a decomposer references.
-/// Sweeps the surfaces of the first WordNet data-0 unit — the unit whose referential proof
-/// trips on the ghost id 1217D71BEBFC827E4D5FCA1EFB41B0B1.
-/// </summary>
+
+
+
+
+
+
 [Collection("GrammarPerfcache")]
 public sealed class RootIdNativeParityProbe
 {
@@ -51,11 +51,11 @@ public sealed class RootIdNativeParityProbe
             $"RootId/native-batch root mismatches ({mismatches.Count}):\n" + string.Join("\n", mismatches.Take(10)));
     }
 
-    /// <summary>
-    /// Pins the 2026-06-12 wordnet ghost: raw ss_type through the UPOS resolver mints a
-    /// probationary id nothing emits. PosWordNet must route the WORDNET tagset mode, whose
-    /// closed set lands on the seeded canonicals.
-    /// </summary>
+    
+    
+    
+    
+    
     [Fact]
     public void Ghost_Is_WordNet_SsType_Misrouted_Through_UposResolver()
     {
@@ -68,7 +68,7 @@ public sealed class RootIdNativeParityProbe
         Assert.False(lawfulProbationary);
         Assert.NotEqual(Convert.ToHexString(misrouted.ToBytes()), Convert.ToHexString(lawful.ToBytes()));
 
-        // The WORDNET tagset mode resolves every ss_type onto a seeded canonical.
+        
         foreach (var (ssType, upos) in new[] { ("n", "NOUN"), ("v", "VERB"), ("a", "ADJ"), ("s", "ADJ"), ("r", "ADV") })
         {
             Assert.Equal(
@@ -78,7 +78,7 @@ public sealed class RootIdNativeParityProbe
         }
     }
 
-    /// <summary>The surfaces EmitSynsetAttestations references: lemmas (surfaced), def, examples.</summary>
+    
     private static IEnumerable<string> SurfacesOf(string line)
     {
         var fields = line.Split(' ');
@@ -91,7 +91,7 @@ public sealed class RootIdNativeParityProbe
         var gloss = line[(bar + 1)..].Trim();
         yield return gloss;
 
-        // def = text before the first quoted example; examples = quoted spans
+        
         int q = gloss.IndexOf('"');
         if (q >= 0)
         {

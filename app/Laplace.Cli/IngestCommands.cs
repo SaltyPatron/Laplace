@@ -46,7 +46,8 @@ internal static class IngestCommands
         LanguageFilter? LangOverride,
         bool? EmitCrossLanguageLinks,
         bool SkipEvidence,
-        bool RegisterOnly);
+        bool RegisterOnly,
+        bool Force = false);
 
     private static IngestCliArgs ParseIngestCliArgs(string[] args)
     {
@@ -55,6 +56,7 @@ internal static class IngestCommands
         bool? emitCross = null;
         bool skipEvidence = false;
         bool registerOnly = false;
+        bool force = false;
         for (int i = 0; i < rest.Count;)
         {
             if (rest[i] == "--langs" && i + 1 < rest.Count)
@@ -78,6 +80,11 @@ internal static class IngestCommands
                 registerOnly = true;
                 rest.RemoveAt(i);
             }
+            else if (rest[i] == "--force")
+            {
+                force = true;
+                rest.RemoveAt(i);
+            }
             else i++;
         }
         return new(
@@ -86,7 +93,8 @@ internal static class IngestCommands
             langs,
             emitCross,
             skipEvidence,
-            registerOnly);
+            registerOnly,
+            force);
     }
 
     private static bool ResolvePersistEvidence(IngestCliArgs? cli)
@@ -104,8 +112,8 @@ internal static class IngestCommands
                         + "  language scope: --langs or LAPLACE_INGEST_LANGS; per-source LAPLACE_{SOURCE}_LANGS\n"
                         + "  --no-evidence: fold consensus only; skip laplace.attestations (or LAPLACE_PERSIST_EVIDENCE=0)");
 
-        // every ingest verb deposits content witnesses, and the native floor
-        // requires the codepoint table — load it once here, not per-verb
+        
+        
         CodepointPerfcache.Load(ResolveBlob());
 
         return cli.Source.ToLowerInvariant() switch
@@ -113,8 +121,8 @@ internal static class IngestCommands
             "unicode"  => await IngestUnicodeViaRunnerAsync(cli),
             "iso639"   => await IngestISO639Async(cli),
             "wordnet"  => await IngestViaRunnerAsync(new WordNetDecomposer(), "/vault/Data/Wordnet", skipLayerCheck: false, cli),
-            "omw"      => await IngestViaRunnerAsync(new OMWDecomposer(), "/vault/Data/omw", skipLayerCheck: false, cli),
-            "ud"       => await IngestViaRunnerAsync(new UDDecomposer(), "/vault/Data/UD-Treebanks", skipLayerCheck: false, cli),
+            "omw"      => await IngestViaRunnerAsync(new OMWDecomposer(), ResolveIngestPath(cli.Path, "/vault/Data/omw"), skipLayerCheck: false, cli),
+            "ud"       => await IngestViaRunnerAsync(new UDDecomposer(), ResolveIngestPath(cli.Path, "/vault/Data/UD-Treebanks"), skipLayerCheck: false, cli),
             "tatoeba"  => await IngestViaRunnerAsync(new TatoebaDecomposer(), "/vault/Data/Tatoeba", skipLayerCheck: false, cli),
             "atomic2020" => await IngestViaRunnerAsync(new Atomic2020Decomposer(), "/vault/Data/Atomic2020", skipLayerCheck: false, cli),
             "conceptnet" => await IngestViaRunnerAsync(new ConceptNetDecomposer(), "/vault/Data/ConceptNet", skipLayerCheck: false, cli),
@@ -135,7 +143,8 @@ internal static class IngestCommands
             "image"      => await IngestViaRunnerAsync(new ImageDecomposer(), string.IsNullOrEmpty(cli.Path) ? "/vault/Data/test-data/images" : cli.Path, skipLayerCheck: true, cli),
             "audio"      => await IngestViaRunnerAsync(new AudioDecomposer(), string.IsNullOrEmpty(cli.Path) ? "/vault/Data/test-data/audio" : cli.Path, skipLayerCheck: true, cli),
             "document"   => await IngestDocumentAsync(cli),
-            _ => Fail($"unknown ingest source '{cli.Source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, code, repo, tabular, tiny-codes, stack, safetensors, image, audio, document)"),
+            "recipe"     => await IngestRecipeAsync(cli),
+            _ => Fail($"unknown ingest source '{cli.Source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, code, repo, tabular, tiny-codes, stack, safetensors, image, audio, document, recipe)"),
         };
     }
 
@@ -153,21 +162,21 @@ internal static class IngestCommands
 
         CodepointPerfcache.Load(ResolveBlob());
 
-        // Bulk deposit: a multi-hour COPY stream into the walk journal must never
-        // hit the 30 s default command timeout — that timeout governs each COPY
-        // write-buffer flush, and a large COMPLETES_TO flush under disk pressure
-        // exceeds it (the TinyLlama walk smoke died there, 2026-06-12). The fold
-        // already sets CommandTimeout=0 per command; the COPY stream has no command
-        // object, so it inherits the connection default — disable it at the source.
+        
+        
+        
+        
+        
+        
         var dsb = new NpgsqlDataSourceBuilder(ConnString);
         dsb.ConnectionStringBuilder.CommandTimeout = 0;
         await using var ds = dsb.Build();
 
         var dec = new ModelDecomposer(modelDir, persistEvidence: ResolvePersistEvidence(cli));
 
-        // Repair lane: re-register readback canonicals (recipe JSON + scalars)
-        // for a deposit whose post-steps died (e.g. a fold ENOSPC) without
-        // re-walking the tensors. Idempotent.
+        
+        
+        
         if (cli.RegisterOnly)
         {
             await RegisterDynamicCanonicalsAsync(ds, dec);
@@ -196,11 +205,11 @@ internal static class IngestCommands
         var inner = new NpgsqlSubstrateWriter(ds,
             logger: loggerFactory.CreateLogger<NpgsqlSubstrateWriter>(),
             bulkFreshSource: true);
-        // The behavioral token planes MERGE: the same (token, ATTENDS, token) pair
-        // legitimately recurs across layers and accumulation windows, and cross-layer
-        // agreement is the strongest testimony — a FRESH fold would silently drop it.
-        // Without evidence the ETL emits testimony walks, and the writer must journal
-        // ALL consensus partials (vocab, S3-morph) as walks too — one shape, one fold.
+        
+        
+        
+        
+        
         bool persistEvidenceResolved = ResolvePersistEvidence(cli);
         var accumulator = new ConsensusAccumulatingWriter(inner, ds,
             freshSource: false,
@@ -214,8 +223,8 @@ internal static class IngestCommands
 
         Console.WriteLine($"deposit safetensor snapshot {modelDir} via IngestRunner → {ConnString} ...");
 
-        // Index-free bulk load is correct ONLY when seeding an empty table; the drop/keep decision
-        // and the structural rebuild-on-exit guarantee live in SecondaryIndexPolicy (SubstrateCRUD).
+        
+        
         var indexPolicy = new SecondaryIndexPolicy(ds, loggerFactory.CreateLogger<SecondaryIndexPolicy>());
         await using var attScope = await indexPolicy.SuspendForBulkLoadAsync("attestations", CancellationToken.None);
         if (attScope.Dropped)
@@ -257,10 +266,10 @@ internal static class IngestCommands
                 return 1;
             }
 
-            // Register BEFORE the fold: readback canonicals (the recipe JSON the
-            // foundry's --recipe-from reads back) depend only on the applied
-            // deposit, and the fold is the long, failure-prone tail — a fold
-            // ENOSPC once ate the recipe registration of a completed deposit.
+            
+            
+            
+            
             await RegisterDynamicCanonicalsAsync(ds, dec);
 
             Console.WriteLine(
@@ -276,12 +285,12 @@ internal static class IngestCommands
         }
         finally
         {
-            // Both scopes dropped their indexes (if at all) BEFORE the run started, so they must be
-            // rebuilt here regardless of how the run/fold above exits — success, failure rows, or a
-            // thrown exception. The scopes' DisposeAsync is the structural safety net; rebuilding
-            // explicitly here narrates the timing. Rebuilding only on the happy path is what stranded
-            // `consensus` index-free in production: a failed/throwing model ingest left it with only
-            // its primary key, forcing recall_session/recall/neighbors into seq-scans over 57M rows.
+            
+            
+            
+            
+            
+            
             sw.Stop();
             if (attScope.Dropped && !attScope.Rebuilt)
             {
@@ -317,6 +326,22 @@ internal static class IngestCommands
 
         return await IngestViaRunnerAsync(
             new DocumentDecomposer(),
+            Path.GetFullPath(cli.Path),
+            skipLayerCheck: true,
+            cli,
+            skipSourceCompletion: true);
+    }
+
+    private static async Task<int> IngestRecipeAsync(IngestCliArgs cli)
+    {
+        if (string.IsNullOrEmpty(cli.Path))
+            return Fail("usage: laplace ingest recipe <recipe.json>\n"
+                        + "  Deposits a build-a-bear recipe (the simulated UI POST) as a content-addressed\n"
+                        + "  Model_Recipe entity, fetchable by export via laplace.model_recipes() / --recipe-from.");
+        if (!File.Exists(cli.Path))
+            return Fail($"ingest recipe: file not found: {cli.Path}");
+        return await IngestViaRunnerAsync(
+            new RecipeDecomposer(Path.GetFullPath(cli.Path)),
             Path.GetFullPath(cli.Path),
             skipLayerCheck: true,
             cli,
@@ -396,11 +421,11 @@ internal static class IngestCommands
             CommitRows             = EnvInt("LAPLACE_INGEST_COMMIT_ROWS", 250_000, min: 0),
             ParallelWorkers        = workers,
             Progress               = progress,
-            // Serial ingest fails fast — no retry/backoff, no silent transient drop: the first
-            // error surfaces and aborts so the real cause is fixed, never retried or swallowed.
-            // Parallel ingest (workers>1) instead retries the genuine concurrency outcomes
-            // (40P01 deadlock / 40001 serialization) the way Postgres prescribes — the victim
-            // re-runs; everything else still fails fast. A persistent fault aborts after the cap.
+            
+            
+            
+            
+            
             RetryPolicy                = workers > 1
                                             ? TransientErrorRetryPolicy.ConcurrencyRetry
                                             : TransientErrorRetryPolicy.NoRetry,
@@ -432,7 +457,8 @@ internal static class IngestCommands
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(
             dec,
-            BuildIngestOptions(sw, dec.SourceName, skipLayerCheck, ecosystemPath, cli, skipSourceCompletion),
+            BuildIngestOptions(sw, dec.SourceName, skipLayerCheck, ecosystemPath, cli,
+                skipSourceCompletion || (cli?.Force ?? false)),
             CancellationToken.None);
         sw.Stop();
 
@@ -447,8 +473,8 @@ internal static class IngestCommands
             Console.Error.WriteLine($"failures: {result.Failures.Count}");
             return 1;
         }
-        // Before the fold: registration depends only on the applied deposit,
-        // and the fold is the failure-prone tail (see safetensors path).
+        
+        
         await RegisterDynamicCanonicalsAsync(ds, dec);
         Console.WriteLine(
             $"consensus: folding {accumulator.ObservationsAccumulated:N0} matches "
@@ -545,7 +571,7 @@ internal static class IngestCommands
         {
             Console.WriteLine("  witnesses:");
             await using var src = conn.CreateCommand();
-            src.CommandTimeout = 0;   // exact per-source counts scan 126M rows (~minute); diagnostic, never cap it
+            src.CommandTimeout = 0;   
             src.CommandText = "SELECT source, evidence, content FROM laplace.source_counts()";
             await using var rdr = await src.ExecuteReaderAsync();
             while (await rdr.ReadAsync())
@@ -646,7 +672,7 @@ internal static class IngestCommands
                 break;
             case "UDDecomposer":
                 Console.WriteLine($"  check ud: HAS_POS={await RelationEvidence("HAS_POS", srcKey):N0} "
-                                + $"HAS_LEMMA={await RelationEvidence("HAS_LEMMA", srcKey):N0}");
+                                + $"IS_LEMMA_OF={await RelationEvidence("IS_LEMMA_OF", srcKey):N0}");
                 break;
             case "TatoebaDecomposer":
                 Console.WriteLine($"  check tatoeba: IS_TRANSLATION_OF={await RelationEvidence("IS_TRANSLATION_OF", srcKey):N0} "

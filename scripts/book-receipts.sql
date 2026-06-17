@@ -1,18 +1,19 @@
--- book-receipts.sql — model-free Q&A over a substrate built from PLAIN TEXT.
---
--- Substrate under test = Unicode floor + literary corpus, ingested via
---   laplace db-roundtrip <file>   (text decomposer folds adjacent-word bigrams
---   into PRECEDES consensus relations, Glicko-rated by corpus frequency).
--- NO model is in the path. Every answer below is consensus traversal with
--- provenance (eff_mu = consensus rating, games = times the adjacency was witnessed).
---
--- Re-run:  psql -U postgres -d laplace -P pager=off -f scripts/book-receipts.sql
+
+
+
+
+
+
+
+
+
 \pset pager off
 \timing on
+SET laplace_substrate.perfcache_path = 'D:/Data/Postgres/laplace/share/laplace_t0_perfcache.bin';
 
 \echo
 \echo ===== SUBSTRATE STATE (plain text folded to consensus) =====
-SELECT * FROM laplace.consensus_stats();
+SELECT * FROM laplace.consensus_stats_approx();
 
 \echo
 \echo ===== relation types carried in consensus (PRECEDES = the book bigrams) =====

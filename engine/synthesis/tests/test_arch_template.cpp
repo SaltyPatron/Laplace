@@ -95,8 +95,8 @@ TEST(LaplaceSynthesisArchTemplate, Layer0QProjShape) {
     arch_template_free(t);
 }
 
-// Absent num_key_value_heads means MHA (kv == heads) — HF config semantics,
-// shared with LlamaRecipeExtractor. MiniLM-shaped: BERT configs carry no kv field.
+
+
 static const char* kMiniLmConfig = R"({
   "architectures": ["BertModel"],
   "hidden_size": 384,

@@ -2,16 +2,16 @@ namespace Laplace.Decomposers.Abstractions;
 
 public enum SpanType { Prose, Code }
 
-/// <summary>A contiguous run of a mixed document, classified prose or code (with a language).</summary>
+
 public readonly record struct DocumentSpan(SpanType Type, string? Language, int Start, int Length);
 
-/// <summary>
-/// Splits a mixed document (an article/tutorial holding prose AND code) into prose vs. code spans,
-/// so each routes to its law — prose to the text decomposer, code to the grammar for its language.
-/// This deterministic pass handles Markdown fenced blocks (``` / ~~~ with an info string); inline
-/// code, indented blocks, and bare-code-via-grammar-as-classifier are later refinements. The spans
-/// share one document, so prose intent and code implementation co-occur (the Rosetta-stone effect).
-/// </summary>
+
+
+
+
+
+
+
 public static class DocumentRouter
 {
     public static IReadOnlyList<DocumentSpan> Split(string doc)
@@ -44,7 +44,7 @@ public static class DocumentRouter
                     int le = NextLine(doc, ls);
                     if (IsCloseFence(doc.AsSpan(ls, le - ls), fenceChar, fenceLen))
                     {
-                        codeEnd = ls;        // code content ends at the close-fence line
+                        codeEnd = ls;        
                         afterClose = le;
                         break;
                     }
@@ -68,7 +68,7 @@ public static class DocumentRouter
         return spans;
     }
 
-    // End index (exclusive) of the line starting at start, including its trailing '\n' if present.
+    
     private static int NextLine(string doc, int start)
     {
         int nl = doc.IndexOf('\n', start);
@@ -87,7 +87,7 @@ public static class DocumentRouter
         while (p < line.Length && line[p] == c) { run++; p++; }
         if (run < 3) return false;
 
-        // info string: first token after the fence is the language.
+        
         while (p < line.Length && (line[p] == ' ' || line[p] == '\t')) p++;
         int infoStart = p;
         while (p < line.Length && line[p] != ' ' && line[p] != '\t' && line[p] != '\r' && line[p] != '\n') p++;
@@ -103,8 +103,8 @@ public static class DocumentRouter
         while (p < line.Length && (line[p] == ' ' || line[p] == '\t')) p++;
         int run = 0;
         while (p < line.Length && line[p] == fenceChar) { run++; p++; }
-        if (run < openLen) return false;                 // close must be at least as long
+        if (run < openLen) return false;                 
         while (p < line.Length && (line[p] == ' ' || line[p] == '\t' || line[p] == '\r' || line[p] == '\n')) p++;
-        return p >= line.Length;                          // nothing but whitespace after
+        return p >= line.Length;                          
     }
 }

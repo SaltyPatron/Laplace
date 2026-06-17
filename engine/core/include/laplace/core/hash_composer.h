@@ -23,14 +23,14 @@ int hash_composer_run(
     hash_composer_atom_resolver_fn resolver,
     void*                          resolver_user_data);
 
-/* Compose one interior node from an ordered sequence of constituents.
- * Identity is content-only (tier is accepted for parity but not hashed):
- *   n == 1 -> out_id = child_ids[0]   (passthrough; strips meaningless unary wrappers)
- *   n  > 1 -> out_id = merkle(child_ids)
- * Placement is the 4D centroid of the child coords; out_hb is its Hilbert key.
- * This is the single composition truth shared by the text law (regular tiers) and
- * the code law (irregular AST sequences); both go through it byte-identically.
- * child_ids has n entries; child_coords has n*4 doubles (XYZM per child). */
+
+
+
+
+
+
+
+
 void hash_composer_compose_node(
     uint8_t          tier,
     const hash128_t* child_ids,

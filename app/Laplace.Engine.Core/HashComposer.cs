@@ -27,14 +27,14 @@ public static unsafe class HashComposer
         }
     }
 
-    /// <summary>
-    /// Composes one interior node from an ordered sequence of constituents — the single
-    /// composition truth shared by the text law and every grammar. Identity is content-only
-    /// (tier is not hashed): n==1 passes the child id through; n&gt;1 is the merkle of the child
-    /// ids. Placement is the 4D centroid of the child coords; <paramref name="outCoord"/> (length
-    /// ≥ 4) receives it and the Hilbert key is returned. <paramref name="childCoords"/> is
-    /// childIds.Length*4 doubles (XYZM per child).
-    /// </summary>
+    
+    
+    
+    
+    
+    
+    
+    
     public static (Hash128 Id, Hilbert128 Hilbert) ComposeNode(
         byte tier,
         ReadOnlySpan<Hash128> childIds,

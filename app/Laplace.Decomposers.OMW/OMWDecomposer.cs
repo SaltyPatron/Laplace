@@ -12,11 +12,11 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider, IInge
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    /// <summary>
-    /// OMW re-attests the SAME synset/lemma rows across languages: parallel batch
-    /// commits collide on those row locks (40P01 deadlocks, 2026-06-12 — the documented
-    /// wordnet/omw serial law). Pipelined serial commit keeps decompose parallelism.
-    /// </summary>
+    
+    
+    
+    
+    
     public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
 
     public Hash128 SourceId     => Source;
@@ -73,10 +73,10 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider, IInge
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    // The ingest/emit path lives entirely in OMWFastIngest (the span-based reader the live
-    // DecomposeAsync delegates to). A second managed copy here previously folded satellite 's' to
-    // 'a' — the same bug, a second time — and was never called; it is gone. Only FileLang remains,
-    // which DescribeInputAsync uses.
+    
+    
+    
+    
     private static string FileLang(string path)
     {
         string name = Path.GetFileNameWithoutExtension(path);

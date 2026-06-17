@@ -2,26 +2,26 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS laplace_geom;
 CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 
--- Lane-parity + period-rule pins for the terminal fold (finish_consensus_fold).
---
--- THE PERIOD RULE: one fold = one rating period. Staging epochs are flush
--- quanta (RAM bounds), not time — all of a relation's staged games merge into
--- ONE Glicko period (one tournament), so consensus values are independent of
--- LAPLACE_STAGING_THRESHOLD. Distinct deposits at distinct times remain
--- distinct periods (they fold against the prior consensus as seeds).
---
--- Pinned here:
---   - the 'sql' and 'engine' lanes are int64-identical to each other, and to
---     the merge fold on single-epoch input (where the lanes lawfully agree);
---   - a relation staged across MULTIPLE epochs folds as ONE period — equal to
---     one laplace_glicko2_accumulate_games call over the summed games;
---   - the incremental path (seeded rebuild + swap) advances seeds by exactly
---     one period, passes untouched rows through, lands new rows;
---   - NULL-object relations route and fold identically in every lane;
---   - the engine lane under forced spill is row-identical to the sql lane;
---   - mixed φ within one fold refuses in both lanes.
--- Rows are placed by consensus_partition_of — the SQL twin of the writer's
--- PartitionOf — because the per-partition fold routes seeds with it.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 BEGIN;
 SET search_path = laplace, public;
@@ -63,7 +63,7 @@ BEGIN
         (sD, 0, type_t, src),
         (sE, 0, type_t, src), (oE, 0, type_t, src);
 
-    -- ── MERGE LANE, single epoch (the regime where all lanes lawfully agree) ──
+    
     PERFORM create_period_staging(2, 1);
     EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,2,$5*2,$6)',
                    period_staging_table(1, consensus_partition_of(sA, rel, oA, 2)))
@@ -83,19 +83,19 @@ BEGIN
     SELECT rating, rd, volatility, witness_count INTO mD_r, mD_rd, mD_v, mD_wc
         FROM consensus WHERE subject_id = sD;
 
-    -- The period rule's expected value for E: 2 games (epoch 1) + 5 games
-    -- (epoch 2) = ONE period of 7 games from the neutral prior.
+    
+    
     SELECT * INTO eE FROM laplace_glicko2_accumulate_games(
         glicko2_neutral_mu(), glicko2_initial_rd(), glicko2_initial_volatility(),
         glicko2_neutral_mu(), phi, 7, s_conf * 7, glicko2_tau());
 
-    -- ── BOTH terminal-fold lanes, fresh + incremental ──────────────────────────
+    
     FOREACH lane IN ARRAY ARRAY['sql', 'engine'] LOOP
         PERFORM set_config('laplace.fold_lane', lane, true);
         DELETE FROM consensus WHERE subject_id IN (sA, sB, sC, sD, sE);
 
-        -- fresh path: A/B/D single-epoch (merge-lane parity); E across two
-        -- epochs (the period-rule pin)
+        
+        
         PERFORM create_period_staging(2, 1);
         EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,2,$5*2,$6)',
                        period_staging_table(1, consensus_partition_of(sA, rel, oA, 2)))
@@ -150,8 +150,8 @@ BEGIN
             RAISE EXCEPTION 'FAIL(%): terminal fold did not consume its staging', lane;
         END IF;
 
-        -- incremental path (a LATER deposit = a new period on the seed): A
-        -- advances by exactly one period; C is brand new; B passes through.
+        
+        
         PERFORM create_period_staging(2, 3);
         EXECUTE format('INSERT INTO %I VALUES ($1,$2,$3,$4,1,$5,$6)',
                        period_staging_table(3, consensus_partition_of(sA, rel, oA, 2)))
@@ -186,12 +186,12 @@ BEGIN
     RAISE NOTICE '✓ consensus_fold: both terminal-fold lanes agree with the merge lane on single-epoch input; multi-epoch input folds as ONE period (the period rule); incremental rebuild+swap advances seeds exactly; NULL object lawful; staging consumed';
 END $$;
 
--- ── engine lane under spill: many relations, tiny memory budget ─────────────
--- The engine lane sorts in bounded chunks and k-way merges spilled runs; the
--- result must equal the sql lane's on the same staged input. 3000 relations ×
--- 2 epochs with fold_mem_mb=1 forces multiple runs (the arena floor is 1024
--- rows), so a relation's epochs meet across run boundaries — and still fold
--- as one period.
+
+
+
+
+
+
 DO $$
 DECLARE
     rel  bytea := laplace_hash128_blake3('test/fold/spill/reltype');
@@ -205,7 +205,7 @@ BEGIN
                laplace_hash128_blake3(convert_to('test/fold/spill/s' || i, 'UTF8')) AS s,
                laplace_hash128_blake3(convert_to('test/fold/spill/o' || i, 'UTF8')) AS o
         FROM generate_series(1, 3000) i;
-    DELETE FROM consensus;  -- both lanes run the fresh path on exactly 3000
+    DELETE FROM consensus;  
 
     FOREACH lane IN ARRAY ARRAY['sql', 'engine'] LOOP
         PERFORM set_config('laplace.fold_lane', lane, true);
@@ -260,13 +260,13 @@ BEGIN
     RAISE NOTICE '✓ consensus_fold: engine lane under spill (3000 relations, 1 MB budget) row-identical to the sql lane';
 END $$;
 
--- ── THE TRAJECTORY JOURNAL: walks fold without sorting ──────────────────────
--- A walk row = (subject, type, layer-context) + vertices packed under the
--- 212-bit law (object ref, games in run_length, zigzagged fp1e9 score in
--- flags). Pinned: the walk fold's values equal one accumulate_games call (the
--- period rule); seeds whose subjects have NO walks pass through the swap
--- unchanged; the conservation receipt (games in == games folded) is enforced
--- by the fold itself.
+
+
+
+
+
+
+
 DO $$
 DECLARE
     type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
@@ -295,15 +295,15 @@ BEGIN
         (sW, 0, type_t, src), (oW1, 0, type_t, src), (oW2, 0, type_t, src),
         (sP, 0, type_t, src), (oP, 0, type_t, src);
 
-    -- a pass-through seed: a relation whose subject has no walks must survive
+    
     DELETE FROM consensus;
     INSERT INTO consensus (id, subject_id, type_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)
     VALUES (consensus_id(sP, rel, oP), sP, rel, oP,
             1700000000000, 120000000000, 60000000, 5, ts);
 
-    -- pack two testimony vertices via the geometry pack, then serialize the
-    -- four vertex doubles little-endian (the fold reads raw double images)
+    
+    
     FOR i IN 1..2 LOOP
         v := public.laplace_mantissa_pack(
                  CASE WHEN i = 1 THEN oW1 ELSE oW2 END, i, 1,
@@ -333,7 +333,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL(walks): % relations folded (want 3: 2 walked + 1 pass-through)', n;
     END IF;
 
-    -- each walked relation = ONE period of one game from the neutral prior
+    
     SELECT * INTO eW FROM laplace_glicko2_accumulate_games(
         glicko2_neutral_mu(), glicko2_initial_rd(), glicko2_initial_volatility(),
         glicko2_neutral_mu(), phi, 1, sc1, glicko2_tau());
@@ -368,13 +368,13 @@ BEGIN
     RAISE NOTICE '✓ consensus_fold: the trajectory journal folds without sorting — walk values equal one accumulate_games period (signed scores), pass-through seeds survive the swap, conservation enforced by the fold, journal consumed';
 END $$;
 
--- ── walk journal: the zero16 law and the partial-conversion contract ─────────
--- In walk-journal mode the writer journals NON-walk consensus partials as
--- walks too (one shape, one fold, one period): a NULL-object partial rides as
--- a zero16 vertex (the identity-preimage law carried into the vertex), and a
--- partial (games, sum) splits into ≤2 score levels — q×(games−rem) and
--- (q+1)×rem — which the fold re-merges into the EXACT accumulate_games period
--- the flat lane would compute from (games, sum).
+
+
+
+
+
+
+
 CREATE FUNCTION pg_temp.walk_vertex(p_oid bytea, p_ord int, p_run int, p_score bigint)
 RETURNS bytea LANGUAGE plpgsql AS $$
 DECLARE
@@ -425,11 +425,11 @@ BEGIN
     DELETE FROM consensus;
 
     PERFORM create_walk_staging(1);
-    -- a NULL-object partial: one zero16 vertex, score scZ observed twice
+    
     EXECUTE format('INSERT INTO %I VALUES ($1, $2, NULL, $3, 1, 2, $4, $5)',
                    'consensus_walk_staging_0')
         USING sZ, rel, phi, ts, pg_temp.walk_vertex(z16, 1, 2, scZ);
-    -- a converted partial (games=5, sum=q·5+1): vertices (q, 4) and (q+1, 1)
+    
     EXECUTE format('INSERT INTO %I VALUES ($1, $2, NULL, $3, 2, 5, $4, $5)',
                    'consensus_walk_staging_0')
         USING sQ, rel, phi, ts,
@@ -466,11 +466,11 @@ BEGIN
     RAISE NOTICE '✓ consensus_fold: converted partials ride the walk journal — zero16 vertex = NULL-object relation, q/rem split re-merges to the exact flat-lane period';
 END $$;
 
--- ── the degenerate-swap guard ───────────────────────────────────────────────
--- A fold that yields an EMPTY consensus_next while consensus is populated is
--- always a bug (an errored/no-op fold, a search_path mishap); swapping it would
--- wipe the substrate's product. consensus_fold_swap must refuse it and leave
--- consensus untouched. (Once wiped a live 14M-row consensus, 2026-06-12.)
+
+
+
+
+
 DO $$
 DECLARE
     type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
@@ -503,7 +503,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL(guard): refused swap still altered consensus';
     END IF;
 
-    -- the override lets a deliberate truncate-by-fold through
+    
     PERFORM set_config('laplace.allow_empty_swap', 'on', true);
     PERFORM consensus_fold_swap();
     PERFORM set_config('laplace.allow_empty_swap', 'off', true);
@@ -515,12 +515,12 @@ BEGIN
     RAISE NOTICE '✓ consensus_fold_swap: degenerate empty swap refused (consensus intact); explicit override permits it';
 END $$;
 
--- ── walk fold: a subject that has BOTH seeds and walks ──────────────────────
--- The scale case the earlier fixtures never covered: a shared subject (the same
--- token witnessed by two models) carries existing consensus seeds AND new walk
--- objects. The fold must emit S + (W − matched), never a cross product. (A
--- seeded TinyLlama fold over an 11.8M MiniLM consensus emitted ~10× the
--- expected rows — this fixture is the regression probe for that.)
+
+
+
+
+
+
 DO $$
 DECLARE
     type_t bytea := laplace_hash128_blake3('substrate/type/Type/v1');
@@ -540,14 +540,14 @@ BEGIN
         (src,0,type_t,NULL), (rel,0,type_t,src), (s,0,type_t,src),
         (oA,0,type_t,src), (oB,0,type_t,src), (oC,0,type_t,src), (oD,0,type_t,src);
     DELETE FROM consensus;
-    -- three existing seeds for s: objects A, B, C
+    
     INSERT INTO consensus (id, subject_id, type_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)
     VALUES (consensus_id(s,rel,oA), s,rel,oA, 1600000000000,120000000000,60000000,2,ts),
            (consensus_id(s,rel,oB), s,rel,oB, 1600000000000,120000000000,60000000,2,ts),
            (consensus_id(s,rel,oC), s,rel,oC, 1600000000000,120000000000,60000000,2,ts);
 
-    -- one walk for s to objects B, C, D (B,C shared with seeds; D new; A untouched)
+    
     PERFORM create_walk_staging(1);
     EXECUTE format('INSERT INTO %I VALUES ($1,$2,NULL,$3,3,3,$4,$5)', 'consensus_walk_staging_0')
         USING s, rel, phi, ts,
@@ -555,8 +555,8 @@ BEGIN
               || pg_temp.walk_vertex(oD,3,1,sc);
 
     n := finish_consensus_fold();
-    -- exactly four relations for s: A (pass-through), B & C (seed folded with walk),
-    -- D (new from walk). NOT a cross product (which would be 3 seeds × 3 walks = 9+).
+    
+    
     SELECT count(*) INTO cnt FROM consensus WHERE subject_id = s;
     IF cnt <> 4 THEN
         RAISE EXCEPTION 'FAIL(shared): % relations for a subject with 3 seeds + 3 walks (want 4: A,B,C,D)', cnt;
@@ -578,7 +578,7 @@ BEGIN
     RAISE NOTICE '✓ consensus_fold: a subject with both seeds and walks emits S + (W − matched), never a cross product';
 END $$;
 
--- ── mixed φ within one fold must refuse, in both lanes ──────────────────────
+
 DO $$
 DECLARE
     rel bytea := laplace_hash128_blake3('test/fold/phi/reltype');
@@ -600,8 +600,8 @@ BEGIN
                            period_staging_table(1, 0)) USING sX, rel, oX, ts;
             n := finish_consensus_fold();
         EXCEPTION WHEN data_exception OR raise_exception THEN
-            refused := true; -- the refusal is the pass (sql lane raises P0001
-                             -- via period_phi_mixed; engine lane data_exception)
+            refused := true; 
+                             
         END;
         IF NOT refused THEN
             RAISE EXCEPTION 'FAIL(%): mixed-phi staging folded without refusing', lane;

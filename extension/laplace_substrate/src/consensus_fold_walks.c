@@ -1,13 +1,13 @@
-/*
- * consensus_fold_walks.c — the walk lane of the terminal fold (the trajectory
- * journal needs no sort). Split out of consensus_fold_engine.c; the staging/seed
- * reads, partition routing, the consensus_next writer and the Glicko scratch it
- * shares with the partition lane live in consensus_fold_io.h.
- *
- * Invariants are identical to the partition lane (see consensus_fold_engine.c and
- * consensus_fold_math.h); parity with the SQL lane is pinned by
- * tests/sql/consensus_fold.sql.
- */
+
+
+
+
+
+
+
+
+
+
 #include "postgres.h"
 
 #include "access/heapam.h"
@@ -33,26 +33,26 @@
 #include "laplace/core/mantissa.h"
 #include "consensus_fold_math.h"
 #include "consensus_fold_io.h"
-/* ═══ the walk fold: the trajectory journal needs no sort ══════════════════════
- *
- * The journal is subject-grouped by construction (one row per subject × type ×
- * layer-context, vertices = testimony-packed object references). The fold:
- * bucket the partition's walks by subject in memory, then per subject merge
- * its walks' vertices in a distinct-entities-bounded map — ONE Glicko period per relation
- * (the period rule) — and emit. Seeds (existing consensus rows) route by the
- * same subject hash and initialize their relation's state. The conservation
- * receipt is in the LOG line: games read == games folded.
- */
+
+
+
+
+
+
+
+
+
+
 
 typedef struct WalkRow
 {
     uint8   subject[16];
     uint8   type[16];
-    uint8   context[16];           /* unused by identity; provenance only */
+    uint8   context[16];           
     int64   phi;
     int64   last_ts;
     int32   n_vertices;
-    double *vertices;              /* 4 doubles per vertex, palloc'd        */
+    double *vertices;              
 } WalkRow;
 
 typedef struct WalkMergeKey
@@ -63,14 +63,14 @@ typedef struct WalkMergeKey
 
 typedef struct WalkMergeEntry
 {
-    WalkMergeKey key;              /* dynahash requires key first */
+    WalkMergeKey key;              
     int64        games;
     int64        sum_score;
 } WalkMergeEntry;
 
 typedef struct SeedRow
 {
-    uint8 ident[FOLD_IDENT_LEN];   /* subject ‖ type ‖ object|zero16 */
+    uint8 ident[FOLD_IDENT_LEN];   
     uint8 has_object;
     int64 rating, rd, volatility, witness_count, last_ts;
 } SeedRow;
@@ -143,7 +143,7 @@ pg_laplace_consensus_fold_walks(PG_FUNCTION_ARGS)
 
     walks = (WalkRow **) palloc(sizeof(WalkRow *) * walks_cap);
 
-    /* 1) read this partition's walk rows (already routed by the writer) */
+    
     snprintf(relname, sizeof(relname), "consensus_walk_staging_%d", partition);
     {
         RangeVar   *rv = makeRangeVar(NULL, relname, -1);
@@ -203,11 +203,11 @@ pg_laplace_consensus_fold_walks(PG_FUNCTION_ARGS)
     }
     walks_in = n_walks;
 
-    /* 2) subject-major order: a sort over walk ROWS (~thousands), never pairs */
+    
     if (n_walks > 1)
         qsort(walks, (size_t) n_walks, sizeof(WalkRow *), walk_row_cmp);
 
-    /* 3) output + scratch */
+    
     memset(&out, 0, sizeof(out));
     {
         RangeVar *rv = makeRangeVar(NULL, "consensus_next", -1);
@@ -227,9 +227,9 @@ pg_laplace_consensus_fold_walks(PG_FUNCTION_ARGS)
     memset(&scratch, 0, sizeof(scratch));
     scratch.cxt = fold_cxt;
 
-    /* 3.5) seeds: EVERY consensus row whose subject routes to this partition —
-     *      including subjects with no walks, which must pass through the swap
-     *      unchanged (losing them would truncate the arena) */
+    
+
+
     {
         SeedRow *seeds = NULL;
         int64    n_seeds = 0, seeds_cap = 8192;
@@ -289,9 +289,9 @@ pg_laplace_consensus_fold_walks(PG_FUNCTION_ARGS)
                 qsort(seeds, (size_t) n_seeds, sizeof(SeedRow), seed_row_cmp);
         }
 
-        /* 4) lockstep subject-major merge: walks fold their ONE period onto
-         *    seeds where present, onto the neutral prior otherwise; seeds
-         *    without walks pass through unchanged */
+        
+
+
         {
             HASHCTL hctl;
             int64   iw = 0, is = 0;
@@ -309,7 +309,7 @@ pg_laplace_consensus_fold_walks(PG_FUNCTION_ARGS)
                 int64  subj_phi = 0;
                 int64  subj_max_ts = PG_INT64_MIN;
 
-                /* the next subject in identity order across both streams */
+                
                 if (iw < n_walks && is < n_seeds)
                 {
                     int c = memcmp(walks[iw]->subject, seeds[is].ident, 16);
@@ -379,7 +379,7 @@ pg_laplace_consensus_fold_walks(PG_FUNCTION_ARGS)
                             games_in += g;
                         }
                     }
-                    /* free this subject's walks as consumed */
+                    
                     for (; iw < j; iw++)
                     {
                         pfree(walks[iw]->vertices);
@@ -387,7 +387,7 @@ pg_laplace_consensus_fold_walks(PG_FUNCTION_ARGS)
                     }
                 }
 
-                /* this subject's seeds: fold-onto or pass-through */
+                
                 for (; is < n_seeds && memcmp(seeds[is].ident, subject, 16) == 0; is++)
                 {
                     SeedRow *s = &seeds[is];
@@ -423,7 +423,7 @@ pg_laplace_consensus_fold_walks(PG_FUNCTION_ARGS)
                         fold_out_emit(&out, s->ident, s->has_object != 0, &st,
                                       s->witness_count + ent->games,
                                       Max(s->last_ts, subj_max_ts));
-                        ent->games = -1;   /* consumed */
+                        ent->games = -1;   
                     }
                     else
                     {
@@ -433,7 +433,7 @@ pg_laplace_consensus_fold_walks(PG_FUNCTION_ARGS)
                     groups++;
                 }
 
-                /* unseeded relations: the neutral prior gains the period */
+                
                 if (merge != NULL)
                 {
                     HASH_SEQ_STATUS hs;
@@ -465,9 +465,9 @@ pg_laplace_consensus_fold_walks(PG_FUNCTION_ARGS)
                         memcpy(ident, subject, 16);
                         memcpy(ident + 16, e->key.type, 16);
                         memcpy(ident + 32, e->key.object, 16);
-                        /* the identity-preimage law carried into the vertex:
-                         * a zero16 object id IS the NULL-object relation (the
-                         * writer journals NULL-object partials as zero16) */
+                        
+
+
                         {
                             static const uint8 zero16[16] = {0};
 
