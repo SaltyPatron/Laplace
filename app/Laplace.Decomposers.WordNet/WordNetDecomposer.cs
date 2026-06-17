@@ -16,8 +16,8 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
 
-    // Synset type is no longer an entity column — synset identity is the decomposed ILI anchor and
-    // its category is an IS_A attestation (see ConceptAnchor). Sense stays a typed blob until #13.
+    
+    
     private static readonly Hash128 SenseTypeId  = EntityTypeRegistry.WordNetSense;
 
     private static readonly Dictionary<string, string> PointerTypes = new()
@@ -200,9 +200,9 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
 
     private static void EmitSynsetEntities(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)
     {
-        // The synset's identity is its ILI concept id decomposed to content (codepoint floor) — not
-        // a wordnet/synset/{pos}/{offset} blob. EmitAnchor stages content only (no attestation), so
-        // it is safe in this entities-only builder; the IS_A category is attested in pass 2.
+        
+        
+        
         ConceptAnchor.EmitAnchor(b, syn.Offset, syn.SsType, Source);
         foreach (var lemma in syn.Lemmas)
             EmitSurface(b, lemma, Source);
@@ -225,13 +225,13 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         return dot >= 0 ? lexname[(dot + 1)..] : lexname;
     }
 
-    // RootId here is LAWFUL re-derivation, not a ghost reference: every surface
-    // this pass attests to was Emitted by EmitSynsetEntities in pass 1 (the
-    // tier-witness law's two-pass shape — witness first, then claim).
+    
+    
+    
     private static void EmitSynsetAttestations(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)
     {
-        // Resolve the shared ILI anchor (emitted as content in pass 1). Null only if the synset is
-        // unmapped in CILI — skip the whole synset's claims rather than dangle them at a phantom id.
+        
+        
         Hash128? synAnchor = ConceptAnchor.SynsetId(syn.Offset, syn.SsType);
         if (synAnchor is null) return;
         Hash128 synId = synAnchor.Value;
@@ -290,8 +290,8 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         foreach (var ptr in syn.Pointers)
         {
             if (!PointerTypes.TryGetValue(ptr.Symbol, out var typeName)) continue;
-            // Pointer target is another synset → its ILI anchor, resolved with the RAW target pos
-            // (a satellite '-s' target must not fold to 'a'). Skip if the target is unmapped.
+            
+            
             Hash128? tgt = ConceptAnchor.SynsetId(ptr.TargetOffset, ptr.TargetPos);
             if (tgt is null) continue;
             b.AddAttestation(NativeAttestation.Categorical(
@@ -322,7 +322,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
             {
                 var senseId   = CategoryAnchor.Id(s.SenseKey);
                 var lemmaId   = RootSurface(s.Lemma);
-                var synAnchor = ConceptAnchor.SynsetId(s.Offset, s.Pos);  // RAW pos — shared ILI anchor
+                var synAnchor = ConceptAnchor.SynsetId(s.Offset, s.Pos);  
                 if (senseId is not null && lemmaId is not null && synAnchor is not null)
                 {
                     CategoryAnchor.AttestCategory(b, senseId.Value, SenseTypeId, Source, SourceTrust.StandardsDerived);

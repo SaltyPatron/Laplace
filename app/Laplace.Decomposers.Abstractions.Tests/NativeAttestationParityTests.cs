@@ -45,8 +45,8 @@ public class NativeAttestationParityTests
         PosReference.Attest(b, form, "NOUN", PosReference.PosTagset.Upos, src, null, SourceTrust.AcademicCurated);
         var change = b.Build();
 
-        // Canonical tag: no probationary entity emitted, one HAS_POS attestation whose id
-        // equals the directly-built canonical row (HAS_UPOS aliases to HAS_POS in the law).
+        
+        
         Assert.Empty(change.Entities);
         var att = Assert.Single(change.Attestations);
         var expected = NativeAttestation.Categorical(
@@ -66,8 +66,8 @@ public class NativeAttestationParityTests
             src, null, SourceTrust.AcademicCurated);
         var change = b.Build();
 
-        // Unmapped tag: the probationary entity rides the SAME change as the attestation —
-        // the referenced id can never be a ghost (the 2026-06-12 wordnet failure class).
+        
+        
         Assert.Equal(Hash128.OfCanonical("substrate/pos/probationary/framenet/IDIO/v1"), posId);
         var ent = Assert.Single(change.Entities);
         Assert.Equal(posId, ent.Id);

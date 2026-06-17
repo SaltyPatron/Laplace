@@ -7,12 +7,12 @@ using Xunit;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
-/// <summary>
-/// Golden-file comparison for wire shapes. Goldens live in the SOURCE tree
-/// (Goldens/*.json) so blessing is a file rename, and are blessed from reviewed
-/// actuals — never hand-typed. Volatile values (generated ids, quote ids,
-/// timestamps) are normalized before comparison so goldens stay deterministic.
-/// </summary>
+
+
+
+
+
+
 internal static partial class GoldenJson
 {
     [GeneratedRegex("^(chatcmpl|cmpl|audit|viz|explain)-[0-9a-f]{32}$")]
@@ -33,14 +33,14 @@ internal static partial class GoldenJson
     private static string GoldensDir([CallerFilePath] string thisFile = "") =>
         Path.Combine(Path.GetDirectoryName(thisFile)!, "Goldens");
 
-    /// <summary>Compare one JSON payload against Goldens/&lt;name&gt;.json.</summary>
+    
     public static void Match(string name, string actualJson)
     {
         var node = JsonNode.Parse(actualJson);
         MatchNode(name, node);
     }
 
-    /// <summary>Compare a pre-built node (e.g. an SSE event sequence) against its golden.</summary>
+    
     public static void MatchNode(string name, JsonNode? node)
     {
         Normalize(node);
@@ -69,11 +69,11 @@ internal static partial class GoldenJson
             File.Delete(actualPath);
     }
 
-    /// <summary>
-    /// Normalize volatile values in place. Matching is value-based (id/timestamp formats)
-    /// plus the one key-based case ('created' unix-seconds numbers), so the same rules
-    /// hold for every route without per-route configuration.
-    /// </summary>
+    
+    
+    
+    
+    
     private static void Normalize(JsonNode? node)
     {
         switch (node)

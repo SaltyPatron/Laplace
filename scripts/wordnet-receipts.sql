@@ -1,14 +1,14 @@
--- wordnet-receipts.sql — model-free dictionary Q&A by walking the deposited
--- forward-pass STEPS over consensus. No model in the path.
---
--- The steps (relation types) ARE the computation:
---   word -HAS_SENSE-> sense -IS_SENSE_OF-> synset    (sense resolution)
---   word -IS_SYNONYM_OF-> synset                     (synset membership)
---   synset -HAS_DEFINITION-> gloss                   (definition)
---   synset -IS_A-> synset (recursive)                (hypernym chain)
---   word -PRECEDES-> word                            (sequence / generation)
---
--- Re-run:  psql -U postgres -d laplace -P pager=off -f scripts/wordnet-receipts.sql
+
+
+
+
+
+
+
+
+
+
+
 \pset pager off
 \timing on
 

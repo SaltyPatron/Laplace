@@ -1,26 +1,26 @@
-/*
- * consensus_fold_step.c — the consensus_fold ordered aggregate, the SQL lane
- * of the terminal fold (OPEN-PROBLEMS §11, HANDOFF-fold-lane).
- *
- * The merge fold pays 2 random index probes per relation against a consensus
- * working set that exceeds RAM, re-touched 3-4x across Glicko periods. The
- * terminal fold replaces probes with one external sort: all staged epochs
- * UNION the existing consensus rows (as period-0 seeds), GROUP BY relation
- * identity with the epochs folded IN ORDER through this aggregate — one fmgr
- * transition per (relation, period partial), zero per-row index probes,
- * sequential I/O end to end. The result lands in a fresh heap whose PK is
- * built once, then atomically swapped in (finish_consensus_fold,
- * 14_period_fold.sql.in). Production indexes on the live table are never
- * dropped or degraded; readers see the old consensus until the swap commits.
- *
- * Invariants carried over from the merge lane (bit-identical by construction):
- *   - epochs fold strictly in order (ORDER BY inside the aggregate call);
- *   - one φ per relation per period (the per-(relation,epoch) pre-merge guards
- *     mixed φ before rows reach this aggregate; a differing φ across epochs is
- *     legal and handled here exactly as sequential merge folds would);
- *   - the observation split (q/rem) matches pg_laplace_glicko2_accumulate_games
- *     exactly, so ratings are int64-identical to the merge lane's output.
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #include "postgres.h"
 #include "fmgr.h"
 #include "funcapi.h"
@@ -30,30 +30,30 @@
 
 #include "laplace/core/glicko2.h"
 
-/* Constants and the partial-application math are shared with the engine lane
- * (consensus_fold_engine.c) via consensus_fold_math.h — lane drift breaks the
- * regress parity pin. */
+
+
+
 #include "consensus_fold_math.h"
 
 typedef struct {
-    bool            seeded;      /* saw the period-0 seed row (existing consensus) */
-    bool            any;         /* state holds at least one input                 */
+    bool            seeded;      
+    bool            any;         
     glicko2_state_t st;
     int64_t         witness_count;
 } ConsensusFoldState;
 
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_fold_step);
 
-/*
- * Transition: (state internal,
- *              is_seed bool,
- *              v1, v2, v3 bigint,   -- seed: rating, rd, volatility
- *              phi bigint,          -- partial: opponent φ for the period
- *              games bigint,        -- seed: prior witness_count; partial: games
- *              sum_score bigint,    -- partial: Σ score (fp 1e9)
- *              tau bigint)
- * Inputs MUST arrive seed-first then epochs ascending (ORDER BY in the call).
- */
+
+
+
+
+
+
+
+
+
+
 Datum
 pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
 {
@@ -117,9 +117,9 @@ pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
             state->any = true;
         }
 
-        /* The exact observation split of pg_laplace_glicko2_accumulate_games —
-         * the math itself lives in consensus_fold_math.h, shared with the
-         * engine lane. */
+        
+
+
         obs = (glicko2_observation_t*)
             palloc(sizeof(glicko2_observation_t) * (Size) games);
         consensus_fold_apply_partial(&state->st, phi, games, sum_score, tau, obs);

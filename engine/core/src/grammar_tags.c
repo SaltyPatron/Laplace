@@ -5,7 +5,7 @@
 
 #include "tree_sitter/api.h"
 
-/* tree-sitter is confined to this translation unit (the seam). */
+
 
 static uint16_t tag_type_of(const char* name, uint32_t len)
 {
@@ -20,7 +20,7 @@ static uint16_t tag_type_of(const char* name, uint32_t len)
             strncmp(s, "struct", 6) == 0 || strncmp(s, "enum", 4) == 0 ||
             strncmp(s, "trait", 5) == 0)
             return LAPLACE_TAG_DEF_TYPE;
-        return LAPLACE_TAG_DEF_VAR;  /* constant / var / field / ... */
+        return LAPLACE_TAG_DEF_VAR;  
     }
 
     if (len > 10 && strncmp(name, "reference.", 10) == 0) {

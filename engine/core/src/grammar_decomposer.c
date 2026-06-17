@@ -4,8 +4,8 @@
 
 #include "tree_sitter/api.h"
 
-/* tree-sitter is confined to this translation unit (the seam). Everything it
- * produces is immediately turned into Laplace-owned data; no TS type escapes. */
+
+
 
 struct laplace_ast {
     laplace_ast_node_t* nodes;
@@ -37,11 +37,11 @@ static uint32_t ast_append(laplace_ast_t* ast, uint32_t type_id,
     return idx;
 }
 
-/* Pre-order: a named node is appended, then its children recurse with it as parent.
- * Anonymous LEAF tokens (operators, punctuation, keywords-as-literals) are appended
- * too — constituency must carry the complete token stream or rendered/generated code
- * loses its syntax. Anonymous interior nodes stay transparent: their descendants
- * link through to the nearest appended ancestor. */
+
+
+
+
+
 static void ast_walk(laplace_ast_t* ast, TSNode node, uint32_t parent_idx) {
     if (ast->oom) return;
     uint32_t next_parent = parent_idx;
@@ -69,7 +69,7 @@ int laplace_grammar_parse(const uint8_t* utf8, size_t len,
     if (!parser) return -3;
     if (!ts_parser_set_language(parser, recipe)) {
         ts_parser_delete(parser);
-        return -2; /* recipe compiled against an incompatible mechanism ABI */
+        return -2; 
     }
 
     TSTree* tree = ts_parser_parse_string(parser, NULL,

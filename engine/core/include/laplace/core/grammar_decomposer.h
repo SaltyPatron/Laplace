@@ -9,29 +9,29 @@
 extern "C" {
 #endif
 
-/* The seam. The grammar-execution mechanism (tree-sitter, compiled in-engine) runs
- * ENTIRELY behind laplace_grammar_parse; nothing past this boundary sees a tree-sitter
- * type. Callers receive a flat, Laplace-owned AST of NAMED nodes in pre-order
- * (parent always precedes its children), which composes into the tier tree the same
- * way text words/sentences do: each node's constituents are an ordered id sequence. */
+
+
+
+
+
 
 #define LAPLACE_AST_ROOT UINT32_MAX
 
 typedef struct {
-    uint32_t type_id;     /* recipe-local node-type id; name via laplace_ast_type_name */
-    uint32_t start_byte;  /* [start_byte, end_byte) byte span in the input */
+    uint32_t type_id;     
+    uint32_t start_byte;  
     uint32_t end_byte;
-    uint32_t parent;      /* index of nearest named ancestor, or LAPLACE_AST_ROOT */
-    uint8_t  is_error;    /* node's subtree contains an ERROR/MISSING */
+    uint32_t parent;      
+    uint8_t  is_error;    
     uint8_t  _pad[3];
 } laplace_ast_node_t;
 
 typedef struct laplace_ast laplace_ast_t;
 
-/* Parse utf8 with a modality recipe. Returns 0 and *out_ast on success;
- * -1 bad args, -2 recipe/mechanism ABI mismatch (set_language failed), -3 OOM/parse failure.
- * Anonymous nodes (keywords/punctuation) are dropped: their bytes remain in the grapheme
- * floor, but they are not AST entities — named descendants link to the nearest named ancestor. */
+
+
+
+
 int laplace_grammar_parse(const uint8_t* utf8, size_t len,
                           const TSLanguage* recipe, laplace_ast_t** out_ast);
 
@@ -40,7 +40,7 @@ int    laplace_ast_get_node(const laplace_ast_t* ast, size_t idx, laplace_ast_no
 const char* laplace_ast_type_name(const laplace_ast_t* ast, uint32_t type_id);
 void   laplace_ast_free(laplace_ast_t* ast);
 
-/* Incremental row iterator for delimited vault files (TSV/CSV lines). */
+
 typedef struct laplace_grammar_row_iter laplace_grammar_row_iter_t;
 
 int laplace_grammar_row_iter_new(const TSLanguage* recipe,
@@ -52,8 +52,8 @@ typedef struct {
     size_t         row_len;
 } laplace_parsed_row_t;
 
-/* Feed a chunk; returns complete rows (AST + row bytes) parsed at newline boundaries.
- * Caller frees via laplace_grammar_row_iter_free_rows. */
+
+
 int laplace_grammar_row_iter_feed(laplace_grammar_row_iter_t* it,
                                   const uint8_t* chunk, size_t len,
                                   laplace_parsed_row_t** out_rows, size_t* out_count);

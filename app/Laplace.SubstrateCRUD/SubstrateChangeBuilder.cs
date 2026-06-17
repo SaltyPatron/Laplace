@@ -76,13 +76,13 @@ public sealed class SubstrateChangeBuilder
 
     private IntentStage? _contentStage;
 
-    /// <summary>
-    /// THE coalesced content stage for this change: every content witness appends
-    /// here, so the writer pays its staging round trips once per change instead of
-    /// once per witness (the per-witness pattern cost iso639 16,681 round trips
-    /// for 51k rows). Lazily created and attached on first use; the writer owns
-    /// disposal after staging, same as any prebuilt stage.
-    /// </summary>
+    
+    
+    
+    
+    
+    
+    
     public IntentStage ContentStage
     {
         get
@@ -96,11 +96,11 @@ public sealed class SubstrateChangeBuilder
         }
     }
 
-    /// <summary>
-    /// Attach one testimony walk (the trajectory journal). Recurrence across
-    /// walks needs no merge here — the fold gathers per subject and merges
-    /// under the period rule.
-    /// </summary>
+    
+    
+    
+    
+    
     public SubstrateChangeBuilder AddTestimonyWalk(TestimonyWalkRow walk)
     {
         ArgumentNullException.ThrowIfNull(walk);
@@ -151,11 +151,11 @@ public sealed class SubstrateChangeBuilder
         var intentId = ComputeIntentId(_sourceId, _sourceContentUnitName,
                                         entities, physicalities, attestations);
 
-        // Detach the stages at hand-off: the writer owns them now (it disposes
-        // after staging, possibly on another thread). A builder reused after
-        // Build() must never touch a handed-over native handle — Emitting into
-        // one is a use-after-free (the 0xC0000005 in ContentWitnessBatchAdd),
-        // and re-Building would re-hand disposed stages to the writer.
+        
+        
+        
+        
+        
         var stages = _intentStages.ToImmutableArray();
         _intentStages.Clear();
         _contentStage = null;

@@ -183,11 +183,11 @@ public static class RelationTypeRegistry
                                    ConcurrentIdSet seenAttestationsThisRun,
                                    ConcurrentDictionary<string, byte>? readbackNames = null)
     {
-        // Normalize: a dynamically-seeded relation type is born NAMED (substrate/type/<CANON>/v1)
-        // so it is a knowable universal anchor that folds across sources/languages — like POS
-        // (substrate/pos/*), CILI (senses), ISO (languages), Unicode (characters) — not an
-        // anonymous head. The name is DERIVED from the resolution (the label actually parsed),
-        // never a hard-coded list, and this is the one chokepoint every decomposer routes through.
+        
+        
+        
+        
+        
         readbackNames?.TryAdd($"substrate/type/{k.Canonical}/v1", 0);
         if (seenEntitiesThisBatch.Add(k.Id))
             builder.AddEntity(new EntityRow(k.Id, EntityTier.Vocabulary, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));

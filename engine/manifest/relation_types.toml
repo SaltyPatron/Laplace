@@ -1,4 +1,4 @@
-# Generated from RelationTypeRegistry — edit here; run codegen-attestation-law.ps1
+
 
 [ranks]
 mandate = 1.0
@@ -1052,7 +1052,7 @@ surface = "SUBFRAME_OF"
 canonical = "HAS_SUBEVENT"
 flip = true
 
-# Dynamic relation families (codegen → laplace_relation_resolve_deprel/feature)
+
 
 [dynamic.deprel]
 prefix = "DEP_"

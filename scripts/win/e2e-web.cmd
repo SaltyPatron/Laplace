@@ -1,12 +1,5 @@
 @echo off
 setlocal
-rem ==== Laplace web e2e (Playwright) =========================================
-rem Builds the SPA into wwwroot, starts the endpoint on :5187 (billing bypass),
-rem runs the Playwright suite against it, then stops the endpoint.
-rem Reuses an already-running serve.cmd endpoint when one is up.
-rem
-rem   e2e-web.cmd [--skip-build] [playwright args...]
-rem ==========================================================================
 call "%~dp0env.cmd"
 
 set "SKIP_BUILD="
@@ -22,7 +15,6 @@ if not defined SKIP_BUILD (
     if errorlevel 1 exit /b 1
 )
 
-rem Probe for an already-running endpoint
 set "REUSE="
 powershell -NoProfile -Command "try { Invoke-RestMethod http://127.0.0.1:5187/health -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }"
 if not errorlevel 1 set "REUSE=1"

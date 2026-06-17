@@ -5,7 +5,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Atomic2020;
 
-/// <summary>Streaming TSV ingest — no grammar compose, byte-level row parse.</summary>
+
 internal static class Atomic2020FastIngest
 {
     public static async IAsyncEnumerable<SubstrateChange> IngestFileAsync(

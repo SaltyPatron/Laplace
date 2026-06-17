@@ -105,7 +105,7 @@ internal static class OpenSubtitlesFastIngest
         if (name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)
             || name.EndsWith(".tsv", StringComparison.OrdinalIgnoreCase))
             return true;
-        // Published pairs use OpenSubtitles.en-es.en (no .txt suffix).
+        
         return leaf.StartsWith("OpenSubtitles.", StringComparison.OrdinalIgnoreCase);
     }
 

@@ -111,11 +111,11 @@ TEST(BilinearEdges, BadArgs) {
 }
 
 TEST(ProjectEmbedding, FloatAndDoubleSrcAgree) {
-    // pts[2x3] @ W[2x3]^T = out[2x2]
+    
     const size_t n = 2, d = 3, r = 2;
     std::vector<float> pts  = { 1.0f, 0.0f, 0.5f,   0.0f, 1.0f, -0.5f };
     std::vector<float> W    = { 2.0f, 1.0f, 0.0f,   0.0f, 1.0f,  2.0f };
-    // Expected (row-major): row0=[2.0, 1.0], row1=[1.0, 0.0]
+    
     std::vector<double> ptsD(pts.begin(), pts.end());
 
     std::vector<double> outF(n * r), outD(n * r);

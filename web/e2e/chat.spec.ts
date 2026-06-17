@@ -22,8 +22,8 @@ test('evidence lookup renders receipts', async ({ page }) => {
   await panel.locator('input').fill('whale');
   await panel.locator('button').click();
 
-  // Known word → evidence list; unknown substrate state → error text. Either way the
-  // panel must respond — a hung lookup is the failure mode this guards.
+  
+  
   await expect(panel.locator('.evidence h3, .error').first()).toBeVisible({ timeout: 15_000 });
 });
 

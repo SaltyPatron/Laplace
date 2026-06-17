@@ -2,19 +2,19 @@ using System.Runtime.InteropServices;
 
 namespace Laplace.Engine.Core;
 
-/// <summary>
-/// The shared, modality-agnostic decomposition mechanism. A grammar is the recipe for
-/// a structured-knowledge modality; this resolves a recipe and parses bytes into a
-/// Laplace AST. Domain decomposers (Code, Chess, ...) sit on top, adding relation types
-/// and trust. The grammar-execution mechanism (compiled into laplace_core) never leaks
-/// past this surface.
-/// </summary>
+
+
+
+
+
+
+
 public static unsafe class GrammarDecomposer
 {
-    /// <summary>Recipe handle for a modality id ("python","json",...). Zero if unknown.</summary>
+    
     public static IntPtr LookupById(string modalityId) => NativeInterop.GrammarLookupById(modalityId);
 
-    /// <summary>Recipe handle by file extension ("py","json",...). Zero if unknown.</summary>
+    
     public static IntPtr LookupByExt(string ext) => NativeInterop.GrammarLookupByExt(ext);
 
     public static GrammarAst Parse(ReadOnlySpan<byte> utf8, IntPtr recipe)
@@ -40,13 +40,13 @@ public static unsafe class GrammarDecomposer
     }
 }
 
-/// <summary>
-/// Owns a native Laplace AST. Pre-order, named nodes only: a node's parent always
-/// precedes it, so reverse-index iteration composes bottom-up (children before parents).
-/// </summary>
+
+
+
+
 public sealed unsafe class GrammarAst : IDisposable
 {
-    public const uint Root = uint.MaxValue; // LAPLACE_AST_ROOT
+    public const uint Root = uint.MaxValue; 
 
     private IntPtr _ast;
 

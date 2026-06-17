@@ -70,7 +70,7 @@ TEST(GrammarCompose, EntityDedupDoesNotInflateCount) {
 TEST(GrammarCompose, PartiallyValidChildSpanDoesNotCrash) {
     const TSLanguage* recipe = laplace_grammar_lookup_by_id("tsv");
     ASSERT_NE(recipe, nullptr);
-    /* Empty middle field: AST has leaf nodes with zero grapheme span mixed with real fields. */
+    
     const char* src = "head\t\ttrail\n";
     laplace_ast_t* ast = nullptr;
     ASSERT_EQ(laplace_grammar_parse(
@@ -89,4 +89,4 @@ TEST(GrammarCompose, PartiallyValidChildSpanDoesNotCrash) {
     laplace_ast_free(ast);
 }
 
-}  // namespace
+}  

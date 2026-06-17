@@ -5,10 +5,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Wiktionary;
 
-/// <summary>
-/// Semantic attestations over tree-sitter-json composed constituents.
-/// Content strings are never re-emitted — ids come from <see cref="GrammarRowComposer.TrySpanEntity"/>.
-/// </summary>
+
+
+
+
 internal sealed class WiktionaryGrammarWitness : IGrammarWitness
 {
     private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;

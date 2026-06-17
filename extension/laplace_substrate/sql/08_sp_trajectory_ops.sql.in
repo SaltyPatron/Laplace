@@ -1,5 +1,5 @@
--- Trajectory + ND-GIST spatial operators used by converse/structural surfaces.
--- Requires PostGIS with gist_geometry_ops_nd (physicalities.coord_gist in 05_indexes.sql.in).
+
+
 
 COMMENT ON INDEX physicalities_coord_gist IS
     'ND-GIST on content coords: KNN via <<->> yields angular ranking on S³.';

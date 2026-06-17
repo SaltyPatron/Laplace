@@ -59,8 +59,8 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        // English-only ingest reads kaikki.org-dictionary-English.jsonl (~1.5M lines).
-        // Never prescan raw-wiktextract-data.jsonl (10.5M lines / 22GB).
+        
+        
         if (options.Languages?.IsActive == true)
             return Task.FromResult<IngestInventory?>(null);
         return CountInventoryAsync(context.EcosystemPath, langs: null, ct);
@@ -68,8 +68,8 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
 
     public async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        // Must respect LAPLACE_INGEST_LANGS — Default would pick raw-wiktextract and
-        // full-scan 22GB before the first batch (ConceptNet has the same law).
+        
+        
         var inv = await DescribeInputAsync(context, DecomposerOptions.ForWitness(SourceName), ct);
         return inv?.TotalInputUnits;
     }

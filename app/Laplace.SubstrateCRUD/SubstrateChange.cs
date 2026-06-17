@@ -11,15 +11,15 @@ public sealed record SubstrateChange(
     ImmutableArray<IntentStage>     IntentStages = default,
     ImmutableArray<TestimonyWalkRow> TestimonyWalks = default);
 
-/// <summary>
-/// THE TRAJECTORY JOURNAL: a subject's thresholded table read at one
-/// (plane, layer) is a WALK — vertices packed under the 212-bit trajectory law
-/// (object reference, games in run_length, zigzagged fp1e9 score in flags;
-/// Engine.Core TestimonyWalk.Pack). φ derives ONCE per witness weight. Walks
-/// exist only on the consensus-only deposit path; the writer journals them to
-/// walk staging and the terminal fold gathers per subject — no global sort,
-/// ONE Glicko period per relation (the period rule).
-/// </summary>
+
+
+
+
+
+
+
+
+
 public sealed record TestimonyWalkRow(
     Hash128   Subject,
     Hash128   TypeId,
@@ -36,12 +36,12 @@ public sealed record SubstrateChangeMetadata(
     string          SourceContentUnitName,
     DateTimeOffset  BuiltAt,
     Hash128?        ParentIntentId,
-    /// <summary>Input records consumed by this intent (sentences, synsets, codepoints, …). 0 = not reported.</summary>
+    
     long            InputUnitsConsumed = 0,
-    /// <summary>
-    /// Commit barrier group. Ingest may parallelize commits within one epoch but never across epochs.
-    /// Bump when later intents reference entities committed only in earlier phases.
-    /// </summary>
+    
+    
+    
+    
     int             CommitEpoch = 0);
 
 public sealed record EntityRow(

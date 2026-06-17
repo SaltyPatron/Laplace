@@ -21,7 +21,7 @@ hash128_t type_id(const char* name) {
     return hash_path(path);
 }
 
-}  // namespace
+}  
 
 TEST(LaplaceRelationLaw, HasUposResolvesToHasPos) {
     hash128_t upos, pos;
@@ -189,8 +189,8 @@ TEST(LaplaceAttestationEngine, AggregatedBatch_IdenticalToPerCell) {
         cells[i].object_is_null = 0;
         cells[i].games = i + 1;
         cells[i].sum_score_fp1e9 = (i % 2 == 0)
-            ? (int64_t)(i + 1) * LAPLACE_GLICKO2_FP_SCALE   /* all-confirm */
-            : 0;                                            /* all-refute */
+            ? (int64_t)(i + 1) * LAPLACE_GLICKO2_FP_SCALE   
+            : 0;                                            
     }
 
     laplace_attestation_staged_t batch[4];
@@ -213,7 +213,7 @@ TEST(LaplaceAttestationEngine, AggregatedBatch_IdenticalToPerCell) {
         EXPECT_TRUE(hash128_equals(&batch[i].object_id, &one.object_id)) << "cell " << i;
     }
 
-    /* symmetric relations must canonicalize endpoint order identically in both paths */
+    
     laplace_attestation_aggregated_cell_t flipped[2];
     flipped[0].subject = hash_path("zz");
     flipped[0].object  = hash_path("aa");

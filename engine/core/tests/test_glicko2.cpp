@@ -262,10 +262,10 @@ TEST(LaplaceCoreGlicko2, DeterministicAcrossMultiplePeriods) {
     EXPECT_EQ(a.volatility, b.volatility);
 }
 
-/* The closed-form consensus-fold period (glicko2_fold_uniform_period) must be
- * int64-IDENTICAL to building the games-long q/rem observation array and
- * folding it through glicko2_update_period — that identity is what lets the
- * fold drop the per-relation observation loop. */
+
+
+
+
 TEST(LaplaceCoreGlicko2, FoldUniformMatchesObservationLoop) {
     const int64_t neutral = 1500000000000LL;
     const int64_t tau     = 500000000LL;

@@ -7,12 +7,12 @@ using Xunit;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
-/// <summary>
-/// Wire-shape goldens for every route. These pin the EXACT serialized form served today —
-/// including the mixed casing reality (snake_case response wrappers, camelCase embedded
-/// records) — so the typed-contract conversion provably changes nothing on the wire.
-/// Substrate-backed routes run against <see cref="FakeSubstrateClient"/>.
-/// </summary>
+
+
+
+
+
+
 public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
 {
     private readonly HttpClient _client;
@@ -22,7 +22,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         _client = factory.CreateClient();
     }
 
-    // ---- core ----
+    
 
     [Fact]
     public async Task Golden_Health()
@@ -79,7 +79,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         Assert.True(json.RootElement.GetProperty("paths").TryGetProperty("/v1/chat/completions", out _));
     }
 
-    // ---- chat/completions ----
+    
 
     [Fact]
     public async Task Golden_Chat_InvalidJson()
@@ -183,7 +183,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.MatchNode("chat-generate-sse", await ReadSseAsync(response));
     }
 
-    // ---- completions ----
+    
 
     [Fact]
     public async Task Golden_Completions_MissingPrompt()
@@ -253,7 +253,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.MatchNode("completions-sse", await ReadSseAsync(response));
     }
 
-    // ---- embeddings ----
+    
 
     [Fact]
     public async Task Golden_Embeddings_MissingInput()
@@ -278,7 +278,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.Match("embeddings-501", await response.Content.ReadAsStringAsync());
     }
 
-    // ---- evidence ----
+    
 
     [Fact]
     public async Task Golden_Evidence()
@@ -296,7 +296,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.Match("evidence-404", await response.Content.ReadAsStringAsync());
     }
 
-    // ---- reports ----
+    
 
     [Fact]
     public async Task Golden_Audit_NoQuote()
@@ -364,7 +364,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.Match("explain-200", await response.Content.ReadAsStringAsync());
     }
 
-    // ---- billing reads ----
+    
 
     [Fact]
     public async Task Golden_Billing_Catalog()
@@ -390,7 +390,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.Match("billing-plans", await response.Content.ReadAsStringAsync());
     }
 
-    // ---- billing flows ----
+    
 
     [Fact]
     public async Task Golden_Preflight()
@@ -512,7 +512,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.Match("usage-200", await usage.Content.ReadAsStringAsync());
     }
 
-    // ---- quote calculators ----
+    
 
     [Fact]
     public async Task Golden_SynthesisQuote()
@@ -592,7 +592,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.Match("recipe-quote-200", await response.Content.ReadAsStringAsync());
     }
 
-    // ---- helpers ----
+    
 
     private async Task<string> CreateQuoteAsync(string serviceId, string tenant)
     {
@@ -669,10 +669,10 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         return await _client.SendAsync(request);
     }
 
-    /// <summary>
-    /// Collect an SSE body as a JSON array: each data: payload parsed as a node,
-    /// the terminal [DONE] sentinel kept as a string.
-    /// </summary>
+    
+    
+    
+    
     private static async Task<JsonArray> ReadSseAsync(HttpResponseMessage response)
     {
         var body = await response.Content.ReadAsStringAsync();

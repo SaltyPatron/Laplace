@@ -38,19 +38,19 @@ CREATE OR REPLACE FUNCTION collocates(p_word text, p_limit int DEFAULT 12)
     LIMIT p_limit
 $$;
 
--- The constituent spatial curve of ANY entity (word_curve is entity-generic; this is the
--- well-named alias used by the structural-cluster surface for code/error-log/structure entities).
+
+
 CREATE OR REPLACE FUNCTION entity_curve(p_entity bytea) RETURNS geometry
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     SELECT word_curve(p_entity)
 $$;
 
--- "Find one, fix 50,000": given a seed entity (a code fragment, an error-log trajectory, a
--- molecule, ...), return every entity whose constituent curve is within Fréchet eps of it.
--- Exact copies are already one entity (Merkle dedup); this catches the *near*-identical ones
--- (same shape, different names/lines). Coord-KNN prefilter bounds the Fréchet refine, exactly
--- as structural_neighbors does. `recurrence` = cross-source physicality count (rough prevalence).
+
+
+
+
+
 CREATE OR REPLACE FUNCTION structural_cluster(
     p_seed  bytea,
     p_eps   double precision DEFAULT 0.05,
@@ -83,7 +83,7 @@ CREATE OR REPLACE FUNCTION nearest_neighbors_4d(p_word text, p_k integer DEFAULT
     LANGUAGE C STABLE STRICT
     AS 'MODULE_PATHNAME', 'pg_laplace_nearest_neighbors_4d';
 
--- Override plpgsql definitions from 20_converse.sql.in (loaded earlier).
+
 CREATE OR REPLACE FUNCTION structural_neighbors(p_word text, p_k integer DEFAULT 10)
     RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
     LANGUAGE C STABLE
@@ -113,9 +113,9 @@ CREATE OR REPLACE FUNCTION consensus_export_unary(p_type_id bytea)
     WHERE c.type_id = p_type_id AND c.object_id IS NULL
 $$;
 
--- Effective-μ export surface: the foundry reads relations weighted by the same
--- conservative law the audits use (rating − 2·rd, in nanophi). Consensus strength
--- is the only export currency — there is no inverse score law.
+
+
+
 CREATE OR REPLACE FUNCTION consensus_export_relations_mu(p_type_id bytea)
     RETURNS TABLE(subject_id bytea, object_id bytea, eff_mu_fp bigint)
     LANGUAGE sql STABLE
@@ -125,10 +125,10 @@ CREATE OR REPLACE FUNCTION consensus_export_relations_mu(p_type_id bytea)
     WHERE c.type_id = p_type_id AND c.object_id IS NOT NULL
 $$;
 
--- Discovered molds: every deposed model's recipe, rendered. The recipe entity id
--- is Blake3 of the canonical config JSON, which deposition registers verbatim in
--- canonical_names — so the full recipe reads back by id and the foundry can pour
--- the same mold with better data (synthesize substrate --recipe-from).
+
+
+
+
 CREATE OR REPLACE FUNCTION model_recipes()
     RETURNS TABLE(recipe_id bytea, recipe_json text, first_observed_by bytea)
     LANGUAGE sql STABLE

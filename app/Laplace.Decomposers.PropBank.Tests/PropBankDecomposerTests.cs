@@ -69,7 +69,7 @@ public sealed class PropBankDecomposerTests
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
         var giveId = ContentEmitter.Emit(b, "give", PropBankDecomposer.Source);
-        var rsId = CategoryAnchor.Id("give.01");   // roleset = "give.01" decomposed as content
+        var rsId = CategoryAnchor.Id("give.01");   
         Assert.NotNull(rsId);
         Assert.NotNull(giveId);
 
@@ -102,7 +102,7 @@ public sealed class PropBankDecomposerTests
         var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
         var rsId = CategoryAnchor.Id("give.01");
 
-        // VerbNet class is now its numeric id "13.1-1" as content (converges with VerbNet/SemLink).
+        
         var vnId = CategoryAnchor.Id(PropBankDecomposer.NumericClassId("give-13.1-1"));
         Assert.NotNull(rsId);
         Assert.NotNull(vnId);

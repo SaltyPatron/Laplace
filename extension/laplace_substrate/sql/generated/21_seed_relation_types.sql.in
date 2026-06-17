@@ -1,4 +1,3 @@
--- AUTO-GENERATED relation type seeds from engine/manifest/relation_types.toml
 INSERT INTO canonical_names (id, name)
 SELECT canonical_id(v.name), v.name
 FROM (VALUES

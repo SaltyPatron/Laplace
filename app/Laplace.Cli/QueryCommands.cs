@@ -264,9 +264,9 @@ internal static class QueryCommands
         return 0;
     }
 
-    // OODA "Act" phase: deposit a PRECEDES witness sequence from build/run feedback.
-    // Usage: laplace attest confirm tok1 tok2 ...   (compiler success → strengthen path)
-    //        laplace attest refute  tok1 tok2 ...   (compiler error  → weaken path)
+    
+    
+    
     public static async Task<int> AttestAsync(string[] args)
     {
         if (args.Length < 2)
@@ -284,8 +284,8 @@ internal static class QueryCommands
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         await using var conn = await ds.OpenConnectionAsync();
 
-        // ids are pure computation under the engine law (same kernel as deposits);
-        // the DB round trip is only the existence check.
+        
+        
         CodepointPerfcache.LoadDefault();
         var ids = new List<(string Token, Hash128 Id)>(tokens.Length);
         foreach (var tok in tokens)

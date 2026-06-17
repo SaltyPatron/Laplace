@@ -42,23 +42,23 @@ std::vector<TensorSpec> tensor_manifest(const recipe_t* r) {
     const size_t hidden_size  = get_int("hidden_size",             2048);
     const size_t n_layers     = get_int("num_hidden_layers",         22);
     const size_t n_heads      = get_int("num_attention_heads",       32);
-    // Absent num_key_value_heads means MHA (kv == heads) — HF config semantics,
-    // shared with LlamaRecipeExtractor; canonical recipes never inject the field.
+    
+    
     const size_t n_kv_heads   = get_int("num_key_value_heads",   n_heads);
     const size_t interm_size  = get_int("intermediate_size",       5632);
 
-    // head_dim may be DECLARED independently of hidden/heads (qwen3_moe: hidden 2048, heads 32,
-    // head_dim 128 → q is 4096-wide, not hidden-wide). Read it explicit, fall back to the ratio.
+    
+    
     const size_t head_dim    = get_int("head_dim", hidden_size / n_heads);
-    const size_t q_dim       = n_heads * head_dim;       // attention q/o width (q_proj rows)
-    const size_t kv_dim      = n_kv_heads * head_dim;    // k/v width (GQA: n_kv_heads ≤ n_heads)
+    const size_t q_dim       = n_heads * head_dim;       
+    const size_t kv_dim      = n_kv_heads * head_dim;    
 
-    // The architecture IS a declared tensor manifest derived from the recipe — the only
-    // branch is the recipe's own fields, so MoE / GQA / qkv-bias / tied variants pour without
-    // a per-family code path. MoE engages when any expert-count field is positive (mixtral
-    // num_local_experts; qwen3_moe num_experts; deepseek_v2 n_routed_experts), but NOT every
-    // layer is sparse: first_k_dense_replace keeps the first K layers dense (deepseek_v2) and
-    // decoder_sparse_step makes only every Nth layer MoE (qwen3_moe). Hub configs are the schema.
+    
+    
+    
+    
+    
+    
     const size_t n_experts     = get_int("num_local_experts",
                                  get_int("num_experts",
                                  get_int("n_routed_experts", 0)));
@@ -109,8 +109,8 @@ std::vector<TensorSpec> tensor_manifest(const recipe_t* r) {
         }
 
         if (n_experts > 0 && i >= first_k_dense && (i + 1) % (sparse_step ? sparse_step : 1) == 0) {
-            // router over the experts, then one SwiGLU expert per slot at the MoE width,
-            // plus an optional always-on shared expert with its sigmoid gate.
+            
+            
             std::snprintf(name_buf, sizeof(name_buf), "model.layers.%zu.mlp.gate.weight", i);
             specs.push_back({name_buf, dtype, {n_experts, hidden_size}});
             for (size_t e = 0; e < n_experts; ++e) {
@@ -172,10 +172,10 @@ struct arch_template {
 
 extern "C" arch_template_t* arch_template_load(const char* template_name) {
     if (!template_name) return nullptr;
-    // Any architecture loads: the tensor manifest is DERIVED FROM THE RECIPE (shapes are
-    // declared fixed math), not branched per family. The old llama-only strcmp gate was the
-    // single chokepoint that forced every cast into one shape regardless of the declared
-    // recipe — MoE / GQA / biased / tied / arbitrary-dim variants now pour from their fields.
+    
+    
+    
+    
     auto* t = new arch_template();
     t->arch_name = template_name;
     return t;

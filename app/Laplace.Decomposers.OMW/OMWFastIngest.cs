@@ -95,11 +95,11 @@ public static class OMWFastIngest
         if (!TryAppendLemmaUtf8(b, valueUtf8, OMWDecomposer.Source, out var root))
             return;
 
-        // The synset is the shared ILI anchor — the SAME content id WordNet emits for this offset.
-        // This is the convergence point: every language's wordform attests onto it, no wordform
-        // dedup. Emit it (idempotent) so OMW is self-contained; WordNet (layer 2) carries the IS_A.
+        
+        
+        
         Hash128? synAnchor = ConceptAnchor.EmitAnchor(b, row.Offset, row.SsType, OMWDecomposer.Source);
-        if (synAnchor is null) return;   // unmapped in CILI — skip (CILI covers PWN-3.0)
+        if (synAnchor is null) return;   
         Hash128 synId = synAnchor.Value;
 
         Hash128 langId = LanguageReference.Resolve(row.Lang);
@@ -135,7 +135,7 @@ public static class OMWFastIngest
         new(OMWDecomposer.Source, unit, null,
             entityCapacity: batch * 6, physicalityCapacity: batch * 6, attestationCapacity: batch * 2);
 
-    /// <summary>Lemma/def/exe values use underscores for spaces in OMW tab files.</summary>
+    
     private static bool TryAppendLemmaUtf8(
         SubstrateChangeBuilder b, ReadOnlySpan<byte> src, Hash128 sourceId, out Hash128 rootId)
     {

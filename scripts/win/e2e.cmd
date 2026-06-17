@@ -2,7 +2,6 @@
 setlocal
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
-rem Connection/data-path constants come from env.cmd (single source; pre-set to override).
 if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=8"
 if not defined LAPLACE_DECOMPOSE_WORKERS set "LAPLACE_DECOMPOSE_WORKERS=10"
 if not defined LAPLACE_FOLD_WORKERS set "LAPLACE_FOLD_WORKERS=8"

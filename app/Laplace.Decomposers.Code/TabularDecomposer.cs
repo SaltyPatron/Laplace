@@ -5,20 +5,20 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Code;
 
-/// <summary>
-/// Delimited content as a structured seed — the <see cref="Laplace.Decomposers.Code.CodeDecomposer"/>'s
-/// sibling for tabular data, and the tabular analog of UDDecomposer. The csv grammar gives the record
-/// skeleton + geometry; THIS layer emits the typed, schema-aware attestations that carry the predictive
-/// signal, exactly as UD emits HAS_UPOS / dependency arcs over raw tokens.
-///
-/// Per (column, value) it deposits a WIN-RATE relation: subject = the column-qualified value
-/// (Geography=France), type = PREDICTS, object = the target outcome — encoded so the Glicko rating
-/// converges to P(outcome | value): games = occurrences, sum_score = outcome-positive occurrences. RD
-/// then shrinks rare-value confidence automatically, and unique-identifier columns self-prune as
-/// single-witness frayed edges. Plus IS_VALUE_IN(column) for structure, and — for categoricals —
-/// IS_INSTANCE_OF the BARE value entity, so ingested world-knowledge (WordNet 'France') reaches the
-/// column-qualified value through content addressing.
-/// </summary>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 public sealed class TabularDecomposer : IDecomposer
 {
     public static readonly Hash128 Source =
@@ -73,7 +73,7 @@ public sealed class TabularDecomposer : IDecomposer
         var files = EnumerateCsv(context.EcosystemPath).ToList();
         if (files.Count == 0) yield break;
 
-        // 1. Load every row via csv grammar field spans (no line.Split).
+        
         var rows = new List<Dictionary<string, string>>();
         foreach (var f in files)
         {
@@ -90,7 +90,7 @@ public sealed class TabularDecomposer : IDecomposer
         }
         if (rows.Count == 0) yield break;
 
-        // 2. Schema: feature columns (drop target + identifiers); numeric vs categorical; quantile edges.
+        
         var featureCols = rows[0].Keys
             .Where(c => !c.Equals(_targetColumn, StringComparison.Ordinal) && !IdLike.Contains(c))
             .ToList();
@@ -110,7 +110,7 @@ public sealed class TabularDecomposer : IDecomposer
             else isNumeric[c] = false;
         }
 
-        // 3a. low-card columns eligible for interaction pairs (exclude high-card like Surname).
+        
         var lowCard = new HashSet<string>(StringComparer.Ordinal);
         foreach (var c in featureCols)
         {
@@ -119,7 +119,7 @@ public sealed class TabularDecomposer : IDecomposer
                 lowCard.Add(c);
         }
 
-        // 3b. Accumulate single (column, token) and low-card pair interactions -> (N, M-positive).
+        
         var counts  = new Dictionary<(string Col, string Tok), (long N, long M)>();
         var counts2 = new Dictionary<(string A, string Ta, string B, string Tb), (long N, long M)>();
         var rowtoks = new List<(string Col, string Tok)>(featureCols.Count);
@@ -146,7 +146,7 @@ public sealed class TabularDecomposer : IDecomposer
                 }
         }
 
-        // 4. Emit: column + outcome entities, then a win-rate PREDICTS per (column, value).
+        
         int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
         double witnessWeight = RelationTypeRank.Associative * SourceTrust.StructuredCorpus;
         var predicts = RelationTypeRegistry.RelationTypeId("PREDICTS");
@@ -163,7 +163,7 @@ public sealed class TabularDecomposer : IDecomposer
             var cq = ValueId(col, tok);
             b.AddEntity(new EntityRow(cq, EntityTier.Vocabulary, ValueTypeId, Source));
 
-            // P(outcome | value-in-column): rating converges to M/N, RD shrinks rare-value confidence.
+            
             b.AddAttestation(NativeAttestation.Aggregated(
                 cq, predicts, OutcomeId, Source, contextId: ColumnId(col),
                 games: nm.N, sumScoreFp1e9: checked(nm.M * Glicko2.FpScale), witnessWeight: witnessWeight));
@@ -187,8 +187,8 @@ public sealed class TabularDecomposer : IDecomposer
             }
         }
 
-        // pair interactions: win-rate PREDICTS for low-card column pairs (captures interactions
-        // the single-field additive sum structurally cannot).
+        
+        
         foreach (var ((pa, ta, pb, tb), nm) in counts2)
         {
             ct.ThrowIfCancellationRequested();

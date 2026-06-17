@@ -1,26 +1,5 @@
 @echo off
 setlocal
-rem ==== Download code training data for Laplace ingest =======================
-rem
-rem   download-code-data.cmd tiny-codes
-rem     Downloads nampdn-ai/tiny-codes (~400 MB parquet) to D:\Data\Ingest\tiny-codes
-rem     Requires HF_TOKEN (user env) and dataset access on huggingface.co
-rem
-rem   download-code-data.cmd stack-v2 [--langs py,...] [--shards N]
-rem     Downloads bigcode/the-stack-v2 language shards (5 per lang by default).
-rem     Each shard is ~300-600 MB.  REQUIRES HuggingFace login:
-rem       huggingface-cli login
-rem     AND acceptance of terms at:
-rem       https://huggingface.co/datasets/bigcode/the-stack-v2
-rem
-rem   download-code-data.cmd authority
-rem     Depth-1 clones the official language/platform sources + docs listed in
-rem     witness-manifest.json functionality.authority_sources into
-rem     D:\Data\Ingest\code-authority. Idempotent: existing clones are skipped.
-rem     The seed/e2e repo loops ingest them after local repositories.
-rem
-rem   Override destination with LAPLACE_TINY_CODES_DIR / LAPLACE_STACK_V2_DIR
-rem ==========================================================================
 call "%~dp0env.cmd"
 
 if "%1"=="" (

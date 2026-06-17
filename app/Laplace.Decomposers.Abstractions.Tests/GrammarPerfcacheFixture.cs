@@ -3,7 +3,7 @@ using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-/// <summary>Loads the T0 perfcache so the codepoint resolver serves real ids/coords.</summary>
+
 public sealed class GrammarPerfcacheFixture : IDisposable
 {
     public GrammarPerfcacheFixture()

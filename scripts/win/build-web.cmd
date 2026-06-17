@@ -1,11 +1,5 @@
 @echo off
 setlocal
-rem ==== Laplace web SPA build ===============================================
-rem install deps -> regenerate API types from the committed OpenAPI doc ->
-rem vite build -> mirror dist into the endpoint's wwwroot (served by Kestrel).
-rem
-rem   build-web.cmd [--skip-install]
-rem ==========================================================================
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%\web"
 

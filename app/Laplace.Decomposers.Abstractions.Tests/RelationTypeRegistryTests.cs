@@ -88,9 +88,9 @@ public class RelationTypeRegistryTests
         }
     }
 
-    // Tombstone for the cell-archive purge: the tensor-role arenas were removed from the
-    // manifest because model deposition is token->token behavioral planes only. If one of
-    // these resolves above probationary again, the manifest re-grew the condemned vocabulary.
+    
+    
+    
     [Fact]
     public void TensorRoleArenas_Purged_FallToProbationary()
     {

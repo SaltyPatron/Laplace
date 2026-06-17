@@ -3,10 +3,10 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// Map tree-sitter-json AST nodes to composed entity ids via <see cref="GrammarRowComposer.TrySpanEntity"/>.
-/// Semantic witnesses attest over constituents grammar_compose already deposited — never re-emit strings.
-/// </summary>
+
+
+
+
 public static class JsonGrammarHelper
 {
     public static bool TryComposedProperty(

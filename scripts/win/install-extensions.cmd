@@ -1,12 +1,5 @@
 @echo off
 setlocal
-rem Deploy extensions to D:\Data\Postgres\laplace and wire PG GUCs. NEVER copy into C:\Program Files\PostgreSQL.
-rem DLLs mapped by live PG backends are HOT-SWAPPED (old image renamed *.stale~N, new file copied in);
-rem running backends keep the old image until they reconnect. --recycle terminates laplace% backends
-rem (KILLS in-flight queries/ingest -- use only when nothing important is running) so the next
-rem connection loads the fresh DLLs/SQL immediately.
-rem Usage: install-extensions.cmd [--recycle]
-rem Agent rules: .github\instructions\build-environment.instructions.md
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 set "DEPLOY=D:\Data\Postgres\laplace"
@@ -22,7 +15,6 @@ call :swapcopy "build-win-ext\laplace_geom\laplace_geom.dll" || exit /b 1
 call :swapcopy "build-win-ext\laplace_substrate\laplace_substrate.dll" || exit /b 1
 call :swapcopy "build-win\core\laplace_core.dll" || exit /b 1
 call :swapcopy "build-win\dynamics\laplace_dynamics.dll" || exit /b 1
-rem T0 perfcache blob: the backend oracle (word_id, codepoint_for_id, render leaves).
 copy /y "build-win\core\perfcache\laplace_t0_perfcache.bin" "%DEPLOY%\share\laplace_t0_perfcache.bin" >nul || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\tbb12.dll" || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\libhwloc-15.dll"
@@ -40,8 +32,6 @@ if "%RECYCLE%"=="1" (
 echo wired: extension_control_path + dynamic_library_path now include %DEPLOY%
 exit /b 0
 
-rem NOTE: no parenthesized blocks below -- %SRC% may contain "(x86)" and a ')' inside a block
-rem closes it mid-expansion ("...was unexpected at this time").
 :swapcopy
 set "SRC=%~1"
 set "BASE=%~nx1"

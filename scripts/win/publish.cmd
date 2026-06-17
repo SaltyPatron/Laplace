@@ -1,13 +1,5 @@
 @echo off
 setlocal
-rem ==== Laplace endpoint publish (release artifact) ==========================
-rem Produces the deployable endpoint under out\endpoint (framework-dependent;
-rem pass --self-contained for a runtime-bundled build, -r <rid> to retarget).
-rem The web SPA build (build-web.cmd) lands in wwwroot before publish once the
-rem web/ tree exists; publish carries wwwroot automatically.
-rem
-rem   publish.cmd [-r linux-x64] [--self-contained] [extra dotnet publish args]
-rem ==========================================================================
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 

@@ -28,7 +28,7 @@ static hash128_t tier_type_id(uint8_t tier) {
     return id;
 }
 
-static int codepoint_resolver(uint32_t atom, void* /*user*/,
+static int codepoint_resolver(uint32_t atom, void* ,
                               hash128_t* out_id, double out_coord[4],
                               hilbert128_t* out_hb) {
     return codepoint_table_resolve_atom(atom, out_id, out_coord, out_hb);
@@ -55,12 +55,12 @@ static void physicality_id_compute(hash128_t entity_id, hash128_t source_id,
     free(buf);
 }
 
-/* The no-artificial-inflation law: a unary wrapper above the grapheme floor —
- * a node with tier > 1, exactly one child, covering the same text span as that
- * child — is NOT a unit of content; its child stands in for it everywhere
- * (id, trajectory reference, emission). collapse_idx descends to the
- * stand-in. Never below tier 1: bare codepoints are perfcache floor, not
- * content roots, so a grapheme keeps its single-codepoint composition. */
+
+
+
+
+
+
 static uint32_t collapse_idx(const tier_tree_t* tree, uint32_t idx) {
     for (;;) {
         tier_node_view_t node;
@@ -75,7 +75,7 @@ static uint32_t collapse_idx(const tier_tree_t* tree, uint32_t idx) {
     return idx;
 }
 
-/* The natural unit: the top of the tree with its unary wrappers collapsed. */
+
 static uint32_t natural_unit_index(const tier_tree_t* tree) {
     size_t nc = tier_tree_node_count(tree);
     if (nc == 0) return 0;
@@ -83,7 +83,7 @@ static uint32_t natural_unit_index(const tier_tree_t* tree) {
 }
 
 static int should_emit_compositional(const tier_tree_t* tree, uint32_t idx) {
-    /* a collapsible wrapper never emits anywhere in the tree */
+    
     if (collapse_idx(tree, idx) != idx) return 0;
     tier_node_view_t node;
     if (tier_tree_get_node(tree, idx, &node) != 0) return 0;
@@ -91,10 +91,10 @@ static int should_emit_compositional(const tier_tree_t* tree, uint32_t idx) {
     return 1;
 }
 
-/* Shared front half: decompose -> compose. Fail loud, not AV: the codepoint
- * floor must be loaded (perfcache) BEFORE the text decomposer runs --
- * segmentation itself reads the perfcache tables, so a post-decomposer guard
- * is unreachable in the unloaded case. */
+
+
+
+
 static int content_tree_build(const uint8_t* utf8, size_t len, tier_tree_t** out_tree) {
     if (len == 0) return -2;
     if (!codepoint_table_is_loaded()) return -3;
@@ -130,9 +130,9 @@ int laplace_content_root_id(
     return 0;
 }
 
-/* Word-tier order key: tier-2 nodes are disjoint spans, so text offset IS
- * reading order. The node array is built bottom-up, not guaranteed left-to-right
- * within a tier, so sort rather than assume. */
+
+
+
 typedef struct { uint32_t off; uint32_t idx; } seg_order_t;
 
 static int seg_order_cmp(const void* a, const void* b) {
@@ -156,7 +156,7 @@ int laplace_content_word_segment(
     seg_order_t* words = (seg_order_t*)malloc(nc * sizeof(seg_order_t));
     if (!words) { tier_tree_free(tree); return -2; }
 
-    /* the Word tier (2) is the UAX#29 word level — collect, then order by span */
+    
     size_t nw = 0;
     for (uint32_t idx = 0; idx < (uint32_t)nc; ++idx) {
         tier_node_view_t node;
@@ -174,12 +174,12 @@ int laplace_content_word_segment(
         if (tier_tree_get_node(tree, words[w].idx, &node) != 0) continue;
         if (node.text_range_len == 0) continue;
         const uint8_t* span = utf8 + node.text_range_off;
-        /* WSegSpace runs are witnessed content (round-trip law) but are NOT
-         * units of order — skip them, exactly as the generation stream does. */
+        
+
         if (laplace_text_is_all_whitespace(span, node.text_range_len)) continue;
 
-        /* the id is the COLLAPSED stand-in (a single-grapheme word is its
-         * grapheme), matching laplace_content_root_id for that word alone. */
+        
+
         tier_node_view_t stand_in;
         tier_tree_get_node(tree, collapse_idx(tree, words[w].idx), &stand_in);
         emit(ctx, ord++, span, node.text_range_len, &stand_in.id);
@@ -190,41 +190,41 @@ int laplace_content_word_segment(
     return 0;
 }
 
-/* ── Record-once bank (the content-addressed / Merkle-DAG law) ────────────────
- * Same content = same id = recorded ONCE, then referenced. A sentence references
- * its words, a word its graphemes, a grapheme its codepoints — the reference is
- * the parent's trajectory (mantissa-packed child ids), which the emit loop below
- * already builds. This bank stops the witness from physically RE-recording a node
- * it already emitted this ingest, so a shared grapheme/word is ONE row, not one
- * per occurrence (the ConceptNet 100M-row balloon). Codepoints are tier 0 and are
- * never emitted at all — the perfcache banks those. Cross-ingest repeats are
- * caught by the writer's existence filter; this kills the in-run re-recording
- * that is the bulk.
- *
- * One decompose thread (LAPLACE_DECOMPOSE_WORKERS=1): unsynchronized. A racy
- * double-record would cost only a redundant row the writer drops on conflict,
- * never corruption. content_witness_reset() clears it at each ingest start. */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 typedef struct { hash128_t* slots; size_t cap; size_t count; } emit_bank_t;
 static emit_bank_t g_emit_bank;
 
 static int emit_bank_slot_empty(const hash128_t* h) { return (h->hi | h->lo) == 0; }
 
-/* 1 if id was already recorded this run, 0 if newly recorded. */
+
 static int emit_bank_record(const hash128_t* id) {
     emit_bank_t* s = &g_emit_bank;
     if (s->cap == 0) {
-        /* Pre-size for the whole source so the table does NOT realloc mid-run. The grow
-         * path (calloc new + rehash + free old) is heap churn that was empirically the
-         * trigger for the latent content-witness heap transient: a single staged content
-         * row would silently vanish from a stage near a grow (the data-36 / sense-21
-         * reseed ghosts) — drop count tracked the grow count, and a run that banked one
-         * id (no grow) never lost a row. 2^22 slots = 67 MB holds ~3.1M distinct ids at
-         * 0.75 load, covering every seed source; memory is not the constraint on this box.
-         * The grow below remains as a correctness backstop for an unexpectedly huge source. */
+        
+
+
+
+
+
+
+
         s->cap = (size_t)1 << 22;
         s->slots = (hash128_t*)calloc(s->cap, sizeof(hash128_t));
-        if (!s->slots) { s->cap = 0; return 0; }  /* OOM: treat as novel; writer dedups */
-    } else if ((s->count + 1) * 4 >= s->cap * 3) {  /* grow at 0.75 load */
+        if (!s->slots) { s->cap = 0; return 0; }  
+    } else if ((s->count + 1) * 4 >= s->cap * 3) {  
         size_t ncap = s->cap << 1;
         hash128_t* ns = (hash128_t*)calloc(ncap, sizeof(hash128_t));
         if (ns) {
@@ -251,7 +251,7 @@ static int emit_bank_record(const hash128_t* id) {
     return 0;
 }
 
-/* 1 if id is already banked, without recording it. */
+
 static int emit_bank_contains(const hash128_t* id) {
     emit_bank_t* s = &g_emit_bank;
     if (s->cap == 0) return 0;
@@ -295,9 +295,9 @@ int content_witness_batch_add(
     tier_tree_get_node(tree, root_idx, &root);
     *out_root_id = root.id;
 
-    /* Trunk short-circuit (O(tier), not O(content)): a unit whose root is already
-     * banked this run is WHOLLY recorded — reference it, do not re-walk its subtree.
-     * Re-ingesting John 3:16 inside the Bible hits this at the verse root. */
+    
+
+
     if (emit_bank_contains(&root.id)) { tier_tree_free(tree); return 0; }
 
     int64_t now_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
@@ -307,8 +307,8 @@ int content_witness_batch_add(
         if (tier_tree_get_node(tree, idx, &node) != 0) continue;
         if (node.tier == 0) continue;
         if (!should_emit_compositional(tree, idx)) continue;
-        /* record-once: a node already emitted this run is referenced by its
-         * parents' trajectories, never physically re-recorded. */
+        
+
         if (emit_bank_record(&node.id)) continue;
 
         hash128_t type_id = tier_type_id(node.tier);
@@ -328,9 +328,9 @@ int content_witness_batch_add(
                 return -2;
             }
             for (uint32_t ci = 0; ci < m; ++ci) {
-                /* references collapse with the wrapper: a parent's trajectory
-                 * names the stand-in (the suppressed unary child's child),
-                 * never an unemitted wrapper id */
+                
+
+
                 tier_node_view_t ch;
                 tier_tree_get_node(tree, collapse_idx(tree, node.first_child_idx + ci), &ch);
                 child_ids[ci] = ch.id;
@@ -348,10 +348,10 @@ int content_witness_batch_add(
         }
 
         hash128_t phys_id;
-        /* UNITS: physicality_id_compute takes the trajectory length in DOUBLES (m*4);
-         * intent_stage_add_physicality takes it in VERTICES (m). Passing m*4 there made
-         * the COPY writer read 32*(m*4) bytes from a 32*m buffer — the transient
-         * ContentWitnessBatchAdd AV, and 4x-vertex garbage trajectories when it survived. */
+        
+
+
+
         physicality_id_compute(node.id, *source_id, node.coord, traj, m * 4, &phys_id);
         if (intent_stage_add_physicality(
                 stage, &phys_id, &node.id, source_id, 1,

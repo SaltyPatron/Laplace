@@ -4,18 +4,18 @@ using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
-/// <summary>
-/// The append-only bulk commit path (the coherent path), isolated from the transactional-upsert
-/// path in <see cref="NpgsqlSubstrateWriter"/>.
-///
-/// The chunked transactional-upsert path holds row locks on hot rows (deadlock) and re-pays
-/// COPY+INSERT per chunk (slow), and bounds RAM that does not need bounding on a 96 GB box. This
-/// path instead COPIES rows into per-source UNLOGGED staging with NO transaction, NO ON CONFLICT
-/// against the live tables, NO preflight / proven-cache — so it is lock-free (parallel across cores)
-/// and the live tables are touched exactly once, by ONE set-based merge at <see cref="FinalizeAsync"/>.
-/// Measured on this PG: append ~1.3M row/s, merge ~135k row/s and ~flat as the target grows (B-tree
-/// inserts are O(log n)).
-/// </summary>
+
+
+
+
+
+
+
+
+
+
+
+
 internal sealed class SubstrateStagingMerge
 {
     private readonly NpgsqlDataSource _ds;
@@ -31,13 +31,13 @@ internal sealed class SubstrateStagingMerge
     private static (string E, string P, string A) StagingNames(string tag) =>
         ($"laplace._lap_stg_{tag}_e", $"laplace._lap_stg_{tag}_p", $"laplace._lap_stg_{tag}_a");
 
-    /// <summary>
-    /// COPY a batch's rows into this source's UNLOGGED staging (append-only, lock-free).
-    /// Rows are NOT visible in the live tables until <see cref="FinalizeAsync"/>.
-    /// Safe to call concurrently from many tasks for the same source (COPY appends; the
-    /// merge dedups). Re-appending the same intent double-counts attestations, so the
-    /// runner appends each intent exactly once (no retry on the append leg).
-    /// </summary>
+    
+    
+    
+    
+    
+    
+    
     public async Task<ApplyResult> AppendAsync(
         IReadOnlyList<SubstrateChange> changes, Hash128 sourceId, CancellationToken ct = default)
     {
@@ -100,13 +100,13 @@ internal sealed class SubstrateStagingMerge
         return new ApplyResult(eAtt, eAtt, pAtt, pAtt, aAtt, aAtt, roundTrips, sw.Elapsed, false);
     }
 
-    /// <summary>
-    /// Merge this source's UNLOGGED staging into the live tables in ONE set operation per
-    /// table — entities/physicalities dedup by id (DISTINCT ON … ON CONFLICT DO NOTHING),
-    /// attestations fold by id (GROUP BY, SUM(observation_count)) — then drop the staging.
-    /// No-op if the source never appended. Entities merge first so attestation/physicality
-    /// FKs resolve against rows merged in the same call.
-    /// </summary>
+    
+    
+    
+    
+    
+    
+    
     public async Task<(int Entities, int Physicalities, int Attestations)> FinalizeAsync(
         Hash128 sourceId, CancellationToken ct = default)
     {
@@ -162,11 +162,11 @@ internal sealed class SubstrateStagingMerge
         return (e, p, a);
     }
 
-    // Concurrent "CREATE TABLE IF NOT EXISTS" from parallel appenders races on pg_type
-    // (23505) — IF NOT EXISTS is not atomic against concurrent creation. Create each
-    // source's staging exactly once: Lazy<Task> runs the DDL a single time and every
-    // appender awaits that same completion (on its own short-lived connection; DDL
-    // auto-commits, so the tables are visible to the COPY connections afterward).
+    
+    
+    
+    
+    
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<Task>> _stagingInit = new();
 
     private Task EnsureStagingAsync(string tag, CancellationToken ct) =>

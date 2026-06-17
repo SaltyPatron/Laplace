@@ -12,10 +12,10 @@
 
 PG_FUNCTION_INFO_V1(pg_laplace_astar_path);
 
-/* The "not refuted" gate and the eff-μ order are the substrate's μ-law surfaces
- * (laplace.refuted / laplace.eff_mu, both SQL-IMMUTABLE so the planner inlines
- * them to the consensus_eff_mu_btree expression). No hand-spelled rating±2·rd
- * or neutral literal here — the law lives once, in the engine. */
+
+
+
+
 static const char *Q_UNDIRECTED =
     "SELECT nbr, rating, rd FROM ("
     "  SELECT object_id AS nbr, rating, rd FROM laplace.consensus"

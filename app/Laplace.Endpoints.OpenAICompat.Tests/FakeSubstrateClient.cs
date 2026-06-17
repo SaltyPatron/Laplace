@@ -4,10 +4,10 @@ using Laplace.Endpoints.OpenAICompat;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
-/// <summary>
-/// Deterministic substrate stand-in for shape tests: fixed rows, fixed ids, no database.
-/// Values are arbitrary but stable — golden files pin the serialized form of exactly this data.
-/// </summary>
+
+
+
+
 internal sealed class FakeSubstrateClient : ISubstrateClient
 {
     private const string WhaleIdHex    = "00112233445566778899aabbccddeeff";

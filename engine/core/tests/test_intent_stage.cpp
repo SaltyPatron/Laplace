@@ -357,11 +357,11 @@ TEST(LaplaceCoreIntentStage, PGEpochOffsetConstantIsCorrect) {
     EXPECT_EQ(INT64_C(946684800000000), INTENT_STAGE_PG_EPOCH_UNIX_US);
 }
 
-// Reproduces the WordNet ingest crash path: a stage created with a zero
-// capacity hint (pure-attestation batch — no entities/physicalities), then
-// grown through hundreds of thousands of attestations via the realloc path,
-// emitted, freed, and repeated across many "batches". Exercises buf_reserve's
-// doubling under load with object_id + context_id populated.
+
+
+
+
+
 TEST(LaplaceCoreIntentStage, AttestationGrowthFromZeroHintLargeBatchesNoCorruption) {
     for (int batch = 0; batch < 4; ++batch) {
         intent_stage_t* s = intent_stage_new(0);
@@ -393,27 +393,27 @@ TEST(LaplaceCoreIntentStage, AttestationGrowthFromZeroHintLargeBatchesNoCorrupti
     SUCCEED();
 }
 
-// Reproduces the deterministic UD ingest crash (batch-4016): a single stage
-// carrying all three tables in the order the writer stages them — every entity
-// first, then every physicality (with variable-length trajectories), then a
-// large attestation loop. The crash surfaced as ENTITIES-buffer corruption
-// "first observed at phase after-attestation-loop": the entities block's row
-// field-count header (00 04) at one row was overwritten, shifting the tail by
-// two bytes. This test stages that exact shape, then walks the emitted ENTITIES
-// blob row-by-row asserting every field count == 4 and every hash128 length
-// prefix == 16 (or -1 for a null first_observed_by). If the attestation growth
-// path corrupts the entities block, this fails at the offending row.
+
+
+
+
+
+
+
+
+
+
 TEST(LaplaceCoreIntentStage, UdBatchShapeEntitiesSurviveAttestationGrowth) {
     const size_t kEntities     = 8527;
     const size_t kPhysicalities = 8500;
     const size_t kAttestations  = 100000;
 
-    // The real writer sizes the hint from the attestation count of the batch.
+    
     intent_stage_t* s = intent_stage_new(kAttestations);
     ASSERT_NE(nullptr, s);
 
-    // Phase 1: entities. Alternate null / non-null first_observed_by exactly as
-    // the decomposer emits (some entities are root-observed, some are not).
+    
+    
     for (size_t i = 0; i < kEntities; ++i) {
         hash128_t id   = make_hash((uint8_t)(i));
         hash128_t type = make_hash((uint8_t)(i >> 8));
@@ -425,10 +425,10 @@ TEST(LaplaceCoreIntentStage, UdBatchShapeEntitiesSurviveAttestationGrowth) {
     }
     ASSERT_EQ(kEntities, intent_stage_entity_count(s));
 
-    // Phase 2: physicalities with trajectories of varying vertex counts. These
-    // append variable-length LINESTRING ZM payloads into the physicalities
-    // buffer, forcing its independent growth between the entity and attestation
-    // phases — the interleaving present in the live failure.
+    
+    
+    
+    
     {
         std::vector<double> traj;
         hilbert128_t hb; std::memset(&hb, 0, sizeof(hb));
@@ -455,9 +455,9 @@ TEST(LaplaceCoreIntentStage, UdBatchShapeEntitiesSurviveAttestationGrowth) {
         ASSERT_EQ(kPhysicalities, intent_stage_physicality_count(s));
     }
 
-    // Phase 3: the large attestation loop — the growth path that surfaced the
-    // corruption. Alternate null object_id / context_id to exercise both the
-    // max-width (152-byte) and short attestation rows.
+    
+    
+    
     for (size_t i = 0; i < kAttestations; ++i) {
         hash128_t id  = make_hash((uint8_t)(i));
         hash128_t sub = make_hash((uint8_t)(i >> 8));
@@ -475,8 +475,8 @@ TEST(LaplaceCoreIntentStage, UdBatchShapeEntitiesSurviveAttestationGrowth) {
     }
     ASSERT_EQ(kAttestations, intent_stage_attestation_count(s));
 
-    // Emit the ENTITIES blob and validate it row-by-row. This is the exact blob
-    // the writer's CheckpointEntities("after-attestation-loop") validates.
+    
+    
     const size_t need = intent_stage_emit_copy_binary(
         s, INTENT_STAGE_TABLE_ENTITIES, nullptr, 0);
     std::vector<uint8_t> buf(need);
@@ -493,11 +493,11 @@ TEST(LaplaceCoreIntentStage, UdBatchShapeEntitiesSurviveAttestationGrowth) {
             << "ENTITIES corruption at row " << row
             << " byte offset " << (size_t)(p - buf.data());
         p += 2;
-        // id (16), tier (int2 = 2), type_id (16): all non-null fixed widths.
-        ASSERT_EQ(16u, read_be32(p)); p += 4 + 16;   // id
-        ASSERT_EQ(2u,  read_be32(p)); p += 4 + 2;     // tier
-        ASSERT_EQ(16u, read_be32(p)); p += 4 + 16;    // type_id
-        // first_observed_by: null (-1) on even rows, 16 bytes on odd rows.
+        
+        ASSERT_EQ(16u, read_be32(p)); p += 4 + 16;   
+        ASSERT_EQ(2u,  read_be32(p)); p += 4 + 2;     
+        ASSERT_EQ(16u, read_be32(p)); p += 4 + 16;    
+        
         const uint32_t fob_len = read_be32(p); p += 4;
         if ((row & 1) == 0) {
             ASSERT_EQ((uint32_t)-1, fob_len) << "row " << row;
@@ -506,7 +506,7 @@ TEST(LaplaceCoreIntentStage, UdBatchShapeEntitiesSurviveAttestationGrowth) {
             p += 16;
         }
     }
-    // After the last entity row we must land exactly on the trailer.
+    
     EXPECT_EQ(end, p) << "entity rows did not consume the blob exactly";
     EXPECT_EQ(0xff, buf[buf.size() - 2]);
     EXPECT_EQ(0xff, buf[buf.size() - 1]);

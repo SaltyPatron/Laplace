@@ -4,7 +4,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Tatoeba;
 
-/// <summary>Streaming TSV ingest — no grammar compose, byte-level filters before parse.</summary>
+
 internal static class TatoebaFastIngest
 {
     public static async IAsyncEnumerable<SubstrateChange> IngestSentencesAsync(

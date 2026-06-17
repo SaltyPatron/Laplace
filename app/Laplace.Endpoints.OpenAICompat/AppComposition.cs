@@ -8,8 +8,8 @@ internal static class AppComposition
 {
     public static IServiceCollection AddOpenAiCompatServices(this IServiceCollection services)
     {
-        // Tenant seam: LAPLACE_AUTH_MODE selects the resolver. "header" is the only mode today;
-        // Azure B2C later registers a JwtTenantResolver here — consumers key on the tenant string.
+        
+        
         var authMode = Environment.GetEnvironmentVariable("LAPLACE_AUTH_MODE") ?? "header";
         services.AddSingleton<ITenantResolver>(authMode.ToLowerInvariant() switch
         {
@@ -31,9 +31,9 @@ internal static class AppComposition
         services.AddSingleton<IStripeCheckoutGateway, StripeCheckoutGateway>();
         services.AddSingleton<IBillingOrchestrator, BillingOrchestrator>();
 
-        // Billing stores: in-memory (test/dev default) or Postgres (production — app schema,
-        // applied by Laplace.Migrations). Both implement the same async contracts; the
-        // dual-implementation store-contract tests pin behavioral parity.
+        
+        
+        
         var billingStore = Environment.GetEnvironmentVariable("LAPLACE_BILLING_STORE") ?? "memory";
         if (string.Equals(billingStore, "postgres", StringComparison.OrdinalIgnoreCase))
         {

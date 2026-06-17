@@ -4,18 +4,18 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// THE staged ingest for any structured corpus — delimited (CSV/TSV, arbitrary delimiter) or
-/// tree-sitter source. Each row is parsed to an AST, its constituents are DECOMPOSED to content
-/// (<see cref="GrammarRowComposer.Materialize"/> → entities/physicalities/attestations + a root),
-/// and only then does the decomposer's <see cref="IGrammarWitness.WalkRow"/> attest over those
-/// composed constituents. This is the real work: tree-sitter → constituent decompose → attest.
-///
-/// The per-decomposer <c>*FastIngest</c> variants SKIP the decompose stage — they read fields by
-/// index and never turn the row's content into constituents — so they are a corner-cut, not a
-/// faster equivalent. New structured decomposers (and the migration of the existing ones) ingest
-/// through here, not through a *FastIngest shortcut.
-/// </summary>
+
+
+
+
+
+
+
+
+
+
+
+
 public static class StructuredGrammarIngest
 {
     public static async IAsyncEnumerable<SubstrateChange> IngestFileAsync(

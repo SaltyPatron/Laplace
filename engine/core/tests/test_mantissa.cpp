@@ -256,19 +256,19 @@ TEST(LaplaceCoreMantissa, TestimonyWalkRoundTrip) {
         EXPECT_EQ(score, scores[i]);
         EXPECT_EQ(g, games[i]);
         EXPECT_EQ(ord, (uint16_t)i);
-        // the exponent-pinning law holds for testimony vertices too
+        
         for (int c = 0; c < 4; c++)
             EXPECT_EQ(fp_biased_exp(walk[i * 4 + c]), kBiasedExpZero);
     }
 
-    // a content vertex is never mistaken for testimony
+    
     const mantissa_payload_t content = {{5, 6}, 1, 1,
         laplace_vertex_flags(2, 1, 104)};
     double cv[4];
     mantissa_pack(cv, &content);
     EXPECT_EQ(-1, laplace_testimony_unpack_vertex(cv, nullptr, nullptr, nullptr, nullptr));
 
-    // scores beyond the 36-bit zigzag budget refuse
+    
     const int64_t too_big[1] = { 1LL << 40 };
     EXPECT_EQ(-2, laplace_testimony_pack_walk(ids, too_big, nullptr, 1, walk));
 }

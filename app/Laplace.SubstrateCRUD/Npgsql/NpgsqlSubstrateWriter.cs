@@ -106,8 +106,8 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         var stagedAttIds  = new List<Hash128>();
         Span<double> coord = stackalloc double[4];
 
-        // Referrer provenance: the proof's failure message names WHO referenced the
-        // missing id (role + unit), turning "decomposer bug somewhere" into a file:line.
+        
+        
         var referenced = new Dictionary<Hash128, string>();
         void Reference(Hash128 id, string role, string unit)
         {
@@ -298,12 +298,12 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
 
         sw.Stop();
 
-        // The round-trip budget law: RT must amortize over rows. The per-witness
-        // prebuilt-stage pattern once cost 16,681 RT for 51k rows — this guard makes
-        // that class of regression a loud failure instead of log archaeology.
-        // LAPLACE_RT_BUDGET_PER_10K (default 64; 0 disables) is the allowed RT per
-        // 10k attempted rows on top of a fixed per-intent allowance; set
-        // LAPLACE_RT_BUDGET_ENFORCE=1 (tests) to throw instead of warn.
+        
+        
+        
+        
+        
+        
         long rowsAttempted = (long)entitiesAttempted + physAttempted + attAttempted;
         if (rowsAttempted >= 1000 && RtBudgetPer10K > 0)
         {
@@ -407,18 +407,18 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         }
     }
 
-    // ======================================================================
-    // Append-only bulk commit (the coherent path) — see SubstrateStagingMerge.
-    // These public methods are thin delegators so ISubstrateWriter is unchanged;
-    // the lock-free fresh-source strategy lives in SubstrateStagingMerge.
-    // ======================================================================
+    
+    
+    
+    
+    
 
-    /// <inheritdoc cref="SubstrateStagingMerge.AppendAsync"/>
+    
     public Task<ApplyResult> AppendAsync(
         IReadOnlyList<SubstrateChange> changes, Hash128 sourceId, CancellationToken ct = default)
         => _staging.AppendAsync(changes, sourceId, ct);
 
-    /// <inheritdoc cref="SubstrateStagingMerge.FinalizeAsync"/>
+    
     public Task<(int Entities, int Physicalities, int Attestations)> FinalizeSourceAsync(
         Hash128 sourceId, CancellationToken ct = default)
         => _staging.FinalizeAsync(sourceId, ct);

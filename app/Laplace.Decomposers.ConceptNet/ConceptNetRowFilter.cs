@@ -29,7 +29,7 @@ internal static class ConceptNetRowFilter
     internal static bool TryParseConceptLang(ReadOnlySpan<byte> uri, out string lang)
     {
         lang = "";
-        // /c/{lang}/...
+        
         if (uri.Length < 5 || uri[0] != (byte)'/' || uri[1] != (byte)'c' || uri[2] != (byte)'/') return false;
         int langStart = 3;
         int langEnd = uri[langStart..].IndexOf((byte)'/');

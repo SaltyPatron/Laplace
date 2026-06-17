@@ -2,9 +2,9 @@
 
 #include <cstring>
 
-// Seam proof: this test includes ONLY Laplace headers — never tree_sitter/api.h.
-// If grammar decomposition compiles and runs against this surface alone, no
-// tree-sitter type has leaked past the seam.
+
+
+
 #include "laplace/core/grammar_registry.h"
 #include "laplace/core/grammar_decomposer.h"
 
@@ -47,8 +47,8 @@ TEST(GrammarRegistry, UnknownModalityIsNull) {
     EXPECT_EQ(laplace_grammar_lookup_by_ext("xyz"), nullptr);
 }
 
-// Every starter grammar's recipe must be ABI-compatible with the compiled-in
-// mechanism (ts_parser_set_language succeeds) and yield at least a root node.
+
+
 TEST(GrammarDecomposer, TsvStructure) {
     const TSLanguage* recipe = laplace_grammar_lookup_by_id("tsv");
     ASSERT_NE(recipe, nullptr);
@@ -77,7 +77,7 @@ TEST(GrammarDecomposer, CsvStructure) {
     laplace_ast_free(ast);
 }
 
-// Modality-agnostic: Python and JSON go through the identical code path.
+
 TEST(GrammarDecomposer, PythonStructure) {
     const TSLanguage* recipe = laplace_grammar_lookup_by_ext("py");
     ASSERT_NE(recipe, nullptr);
@@ -108,8 +108,8 @@ TEST(GrammarDecomposer, JsonStructure) {
     laplace_ast_free(ast);
 }
 
-// Identical Python source must yield identical structure across runs (determinism)
-// and the floor spans must nest under named parents (parent precedes child = pre-order).
+
+
 TEST(GrammarDecomposer, DeterministicAndWellFormedParentLinks) {
     const TSLanguage* recipe = laplace_grammar_lookup_by_id("python");
     ASSERT_NE(recipe, nullptr);
@@ -129,13 +129,13 @@ TEST(GrammarDecomposer, DeterministicAndWellFormedParentLinks) {
         EXPECT_EQ(na.start_byte, nb.start_byte);
         EXPECT_EQ(na.end_byte, nb.end_byte);
         EXPECT_EQ(na.parent, nb.parent);
-        // parent always precedes child (pre-order), or is the root sentinel
+        
         EXPECT_TRUE(na.parent == LAPLACE_AST_ROOT || na.parent < i);
-        // byte span is non-empty and ordered
+        
         EXPECT_LE(na.start_byte, na.end_byte);
     }
     laplace_ast_free(a);
     laplace_ast_free(b);
 }
 
-}  // namespace
+}  

@@ -31,7 +31,7 @@ typedef struct {
   bool inherited;
 } TSFieldMapEntry;
 
-// Used to index the field and supertype maps.
+
 typedef struct {
   uint16_t index;
   uint16_t length;
@@ -169,9 +169,9 @@ static inline bool set_contains(const TSCharacterRange *ranges, uint32_t len, in
   return (lookahead >= range->start && lookahead <= range->end);
 }
 
-/*
- *  Lexer Macros
- */
+
+
+
 
 #ifdef _MSC_VER
 #define UNUSED __pragma(warning(suppress : 4101))
@@ -223,9 +223,9 @@ static inline bool set_contains(const TSCharacterRange *ranges, uint32_t len, in
 
 #define END_STATE() return result;
 
-/*
- *  Parse Table Macros
- */
+
+
+
 
 #define SMALL_STATE(id) ((id) - LARGE_STATE_COUNT)
 
@@ -283,4 +283,4 @@ static inline bool set_contains(const TSCharacterRange *ranges, uint32_t len, in
 }
 #endif
 
-#endif  // TREE_SITTER_PARSER_H_
+#endif  

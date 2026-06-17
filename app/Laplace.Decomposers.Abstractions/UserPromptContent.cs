@@ -4,10 +4,10 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// Deposit path for whole documents: tier-tree entities, CONTENT physicalities, and
-/// distributional PRECEDES bigrams. Used by <c>ingest document</c> and by db-roundtrip's record phase.
-/// </summary>
+
+
+
+
 public static class UserPromptContent
 {
     public static readonly Hash128 Source =

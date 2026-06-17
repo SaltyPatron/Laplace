@@ -1,6 +1,6 @@
--- App-owned billing persistence (schema "app" — never extension-owned "laplace").
--- Backs the endpoint's billing stores when LAPLACE_BILLING_STORE=postgres; the
--- in-memory implementations remain the test/dev default.
+
+
+
 
 CREATE SCHEMA IF NOT EXISTS app;
 
@@ -33,8 +33,8 @@ CREATE TABLE IF NOT EXISTS app.billing_usage (
 CREATE INDEX IF NOT EXISTS billing_usage_tenant_executed
     ON app.billing_usage (tenant, executed_at DESC);
 
--- monthly_credits/used_credits are per-service maps (service_id -> int), mirroring
--- BillingEntitlement's dictionaries; credit consumption mutates used_credits atomically.
+
+
 CREATE TABLE IF NOT EXISTS app.billing_entitlements (
     tenant                 text NOT NULL,
     plan_id                text NOT NULL,

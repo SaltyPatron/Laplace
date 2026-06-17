@@ -5,27 +5,27 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
-/// <summary>
-/// Bulk-load secondary-index policy for substrate tables.
-///
-/// Index-free bulk load is correct ONLY when seeding an EMPTY table: dropping the secondary
-/// indexes forces a full-table rebuild bounded by the WHOLE corpus, not by the incoming source.
-/// On a populated (live, large) substrate that rebuild dwarfs a bounded load, holds locks, and
-/// de-indexes status queries — so we drop+rebuild only when the table is empty; otherwise we keep
-/// indexes live and let the bounded load maintain them incrementally.
-///
-/// The rebuild is structural, not happy-path: <see cref="SuspendForBulkLoadAsync"/> returns a
-/// scope whose <see cref="SecondaryIndexScope.DisposeAsync"/> rebuilds whatever it dropped no
-/// matter how the load exits (success, failure rows, or a thrown exception). Rebuilding only on
-/// success is what once stranded <c>consensus</c> index-free in production: a throwing model ingest
-/// left it with only its primary key, forcing recall/neighbors into seq-scans over tens of millions
-/// of rows. Callers may call <see cref="SecondaryIndexScope.RebuildAsync"/> explicitly to narrate
-/// timing; dispose is then a no-op safety net.
-/// </summary>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 public sealed class SecondaryIndexPolicy
 {
-    // Substrate tables live in the laplace schema. Table identifiers cannot be passed as bind
-    // parameters in EXISTS(SELECT 1 FROM laplace.<t>), so validate before interpolating.
+    
+    
     private static readonly Regex SafeTable = new("^[a-z_][a-z0-9_]*$", RegexOptions.Compiled);
 
     private readonly NpgsqlDataSource _ds;
@@ -44,10 +44,10 @@ public sealed class SecondaryIndexPolicy
         return table;
     }
 
-    /// <summary>
-    /// O(1) existence probe — stops at the first row. Cannot be fooled by stale planner statistics
-    /// the way <c>reltuples</c> can, so the "is this an empty first-seed?" decision is always correct.
-    /// </summary>
+    
+    
+    
+    
     public async Task<bool> TableHasAnyRowsAsync(string table, CancellationToken ct = default)
     {
         RequireSafeTable(table);
@@ -58,11 +58,11 @@ public sealed class SecondaryIndexPolicy
         return r is bool b && b;
     }
 
-    /// <summary>
-    /// Opens a bulk-load scope for <paramref name="table"/>: if the table is empty, drops its
-    /// secondary (non-primary, non-unique) indexes for an index-free load; if populated, keeps
-    /// them live. The returned scope rebuilds exactly what it dropped on dispose.
-    /// </summary>
+    
+    
+    
+    
+    
     public async Task<SecondaryIndexScope> SuspendForBulkLoadAsync(string table, CancellationToken ct = default)
     {
         RequireSafeTable(table);
@@ -73,10 +73,10 @@ public sealed class SecondaryIndexPolicy
         return new SecondaryIndexScope(_ds, _log, table, populated, dropped);
     }
 
-    /// <summary>
-    /// Drops every secondary (non-primary, non-unique) index on <c>laplace.&lt;table&gt;</c> and
-    /// returns their <c>CREATE INDEX</c> definitions so they can be rebuilt verbatim.
-    /// </summary>
+    
+    
+    
+    
     internal static async Task<List<string>> DropSecondaryIndexesAsync(
         NpgsqlDataSource ds, string table, CancellationToken ct)
     {
@@ -112,7 +112,7 @@ public sealed class SecondaryIndexPolicy
         return defs;
     }
 
-    /// <summary>Rebuilds indexes from their <c>CREATE INDEX</c> definitions, with maintenance memory tuned.</summary>
+    
     internal static async Task RebuildIndexesAsync(
         NpgsqlDataSource ds, IReadOnlyList<string> indexDefs, CancellationToken ct)
     {
@@ -134,10 +134,10 @@ public sealed class SecondaryIndexPolicy
     }
 }
 
-/// <summary>
-/// A bulk-load scope returned by <see cref="SecondaryIndexPolicy.SuspendForBulkLoadAsync"/>.
-/// Holds the secondary-index definitions dropped on entry and rebuilds them when the scope exits.
-/// </summary>
+
+
+
+
 public sealed class SecondaryIndexScope : IAsyncDisposable
 {
     private readonly NpgsqlDataSource _ds;
@@ -155,25 +155,25 @@ public sealed class SecondaryIndexScope : IAsyncDisposable
         _pending = new List<string>(droppedDefs);
     }
 
-    /// <summary>The table this scope governs.</summary>
+    
     public string Table { get; }
 
-    /// <summary>True when the table already held rows on entry, so no indexes were dropped.</summary>
+    
     public bool TableWasPopulated { get; }
 
-    /// <summary>The <c>CREATE INDEX</c> definitions dropped on entry (empty when the table was populated).</summary>
+    
     public IReadOnlyList<string> DroppedIndexDefs { get; }
 
-    /// <summary>True when this scope dropped at least one secondary index that must be rebuilt.</summary>
+    
     public bool Dropped => DroppedIndexDefs.Count > 0;
 
-    /// <summary>True once every dropped index has been rebuilt (or there were none to rebuild).</summary>
+    
     public bool Rebuilt => _pending.Count == 0;
 
-    /// <summary>
-    /// Rebuilds any not-yet-rebuilt dropped indexes. Idempotent: a second call (e.g. from dispose
-    /// after an explicit call) is a no-op.
-    /// </summary>
+    
+    
+    
+    
     public async Task RebuildAsync(CancellationToken ct = default)
     {
         if (_pending.Count == 0) return;
@@ -182,7 +182,7 @@ public sealed class SecondaryIndexScope : IAsyncDisposable
         await SecondaryIndexPolicy.RebuildIndexesAsync(_ds, defs, ct);
     }
 
-    /// <summary>Safety net: rebuilds whatever was dropped if a caller did not rebuild explicitly.</summary>
+    
     public async ValueTask DisposeAsync()
     {
         if (_pending.Count == 0) return;
@@ -192,8 +192,8 @@ public sealed class SecondaryIndexScope : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            // Dispose must not throw over an in-flight exception; surface the rebuild failure loudly
-            // instead — a stranded index-free table is the scar this policy exists to prevent.
+            
+            
             _log.LogError(ex, "B2: rebuild of {Count} secondary {Table} index(es) FAILED on scope dispose; "
                 + "the table may be left index-free — rebuild manually", _pending.Count, Table);
         }

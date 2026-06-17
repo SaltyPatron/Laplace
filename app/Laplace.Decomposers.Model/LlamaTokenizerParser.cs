@@ -16,7 +16,7 @@ public enum TokenRole : byte
     LeadingSpace = 1,
     ByteLevel    = 2,
     Special      = 4,
-    Continuation = 8,   // WordPiece "##" pieces: joins the preceding token, no boundary
+    Continuation = 8,   
 }
 
 public sealed class LlamaTokenizerParser
@@ -143,8 +143,8 @@ public sealed class LlamaTokenizerParser
         }
         catch (InvalidOperationException)
         {
-            // not-loaded is a process-setup bug: silently degrading every vocab
-            // token to a raw blake3 blob is worse than failing the deposit
+            
+            
             if (!CodepointPerfcache.IsLoaded) throw;
             entityId = default;
             tier = 0;
@@ -217,8 +217,8 @@ public sealed class LlamaTokenizerParser
         }
         else if (surface.Length > 2 && surface.StartsWith("##", StringComparison.Ordinal))
         {
-            // WordPiece continuation (BERT-family): same content identity as the bare
-            // piece — the role carries the joining semantics, never the identity.
+            
+            
             role |= TokenRole.Continuation;
             surface = surface.Substring(2);
         }
@@ -370,9 +370,9 @@ public sealed class LlamaTokenizerParser
         int batchSize = 8192,
         int commitEpoch = 0)
     {
-        // commitEpoch: these batches are yielded AFTER the ETL streams, which advance the
-        // runner's monotonic epoch — stamping the default 0 here killed a 49-minute deposit
-        // at the finish line (epochs must be non-decreasing).
+        
+        
+        
         int total = records.Count;
         for (int start = 0; start < total; start += batchSize)
         {

@@ -1,6 +1,6 @@
--- Substrate law probes: structural invariants that must hold after ANY deposit.
--- Run by walk-verdict.cmd alongside the planes audit. Each probe prints PASS/FAIL;
--- a FAIL is a law violation, not a tuning note.
+
+
+
 SET search_path = laplace, public;
 \pset pager off
 
