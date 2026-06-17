@@ -186,19 +186,20 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 }
                 roundTrips++;
 
-                foreach (var pre in prebuiltStages)
+                if (prebuiltStages.Count > 0)
                 {
                     try
                     {
-                        entitiesInserted += await StageAndInsertAsync(
-                            conn, pre, IntentStageTable.Entities, "entities", ct);
-                        physicalitiesInserted += await StageAndInsertAsync(
-                            conn, pre, IntentStageTable.Physicalities, "physicalities", ct);
+                        entitiesInserted += await StageAndInsertManyAsync(
+                            conn, prebuiltStages, IntentStageTable.Entities, "entities", ct);
+                        physicalitiesInserted += await StageAndInsertManyAsync(
+                            conn, prebuiltStages, IntentStageTable.Physicalities, "physicalities", ct);
                         roundTrips += 2;
                     }
                     finally
                     {
-                        pre.Dispose();
+                        foreach (var pre in prebuiltStages)
+                            pre.Dispose();
                     }
                 }
 
@@ -337,28 +338,34 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
 
     private static async Task<int> StageAndInsertAsync(
         NpgsqlConnection conn, IntentStage stage, IntentStageTable table, string tableName, CancellationToken ct)
+        => await StageAndInsertManyAsync(conn, new[] { stage }, table, tableName, ct);
+
+    private static async Task<int> StageAndInsertManyAsync(
+        NpgsqlConnection conn,
+        IReadOnlyList<IntentStage> stages,
+        IntentStageTable table,
+        string tableName,
+        CancellationToken ct)
     {
-        (IntPtr ptr, long len) = stage.TupleBuffer(table);
-        string cols = IntentStage.CopyColumnList(table);
-        int rowCount = table switch
+        int totalRowCount = 0;
+        foreach (var s in stages)
         {
-            IntentStageTable.Entities      => stage.EntityCount,
-            IntentStageTable.Physicalities => stage.PhysicalityCount,
-            _                              => stage.AttestationCount,
-        };
-
-        if (rowCount == 0) return 0;
-
-        if (CopyBlobValidator.Enabled)
-        {
-            int expectedFields = table switch
+            totalRowCount += table switch
             {
-                IntentStageTable.Entities      => 4,
-                IntentStageTable.Physicalities => 11,
-                _                              => 9,
+                IntentStageTable.Entities      => s.EntityCount,
+                IntentStageTable.Physicalities => s.PhysicalityCount,
+                _                              => s.AttestationCount,
             };
-            CopyBlobValidator.Validate(ptr, len, expectedFields, tableName, rowCount);
         }
+        if (totalRowCount == 0) return 0;
+
+        string cols = IntentStage.CopyColumnList(table);
+        int expectedFields = table switch
+        {
+            IntentStageTable.Entities      => 4,
+            IntentStageTable.Physicalities => 11,
+            _                              => 9,
+        };
 
         string stageName = $"_laplace_stage_{tableName}";
         await using (var ddl = conn.CreateCommand())
@@ -371,9 +378,24 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             await ddl.ExecuteNonQueryAsync(ct);
         }
 
-        await using (var stream = await conn.BeginRawBinaryCopyAsync(
-            $"COPY {stageName} ({cols}) FROM STDIN (FORMAT BINARY)", ct))
+        foreach (var stage in stages)
+        {
+            int rowCount = table switch
+            {
+                IntentStageTable.Entities      => stage.EntityCount,
+                IntentStageTable.Physicalities => stage.PhysicalityCount,
+                _                              => stage.AttestationCount,
+            };
+            if (rowCount == 0) continue;
+
+            (IntPtr ptr, long len) = stage.TupleBuffer(table);
+            if (CopyBlobValidator.Enabled)
+                CopyBlobValidator.Validate(ptr, len, expectedFields, tableName, rowCount);
+
+            await using var stream = await conn.BeginRawBinaryCopyAsync(
+                $"COPY {stageName} ({cols}) FROM STDIN (FORMAT BINARY)", ct);
             await PgBinaryCopy.WriteNativeBlobAsync(stream, ptr, len, ct);
+        }
 
         await using (var promote = conn.CreateCommand())
         {

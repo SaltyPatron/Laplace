@@ -7,12 +7,18 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.UD;
 
-public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IIngestCommitPolicy
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/UDDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+
+    /// <summary>
+    /// Per-token content witnesses make intents huge; serial commit + a lower
+    /// LAPLACE_INGEST_COMMIT_ROWS (seed-ladder pins 25k) avoids RAM blowups.
+    /// </summary>
+    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
 
     private static readonly Hash128 XposTypeId     = EntityTypeRegistry.UdXpos;
     private static readonly Hash128 FeatureTypeId  = EntityTypeRegistry.UdFeature;
@@ -201,16 +207,18 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
     {
         b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, LanguageTypeId, Source));
 
-        if (!string.IsNullOrEmpty(s.Text)) ContentEmitter.Emit(b, s.Text!, Source);
+        if (s.TextUtf8 is { Length: > 0 })
+            EmitUtf8(b, s.TextUtf8, Source);
 
         var formId = new Hash128?[s.MaxId + 1];
         var refToForm = new Dictionary<string, Hash128>(s.Tokens.Count, StringComparer.Ordinal);
         foreach (var tok in s.Tokens)
         {
-            var fid = ContentEmitter.Emit(b, tok.Form, Source);
+            var fid = EmitUtf8(b, tok.FormUtf8, Source);
             if (tok.Id >= 0) formId[tok.Id] = fid;
             if (fid is { } f) refToForm[tok.Ref] = f;
-            if (tok.Lemma != tok.Form) ContentEmitter.Emit(b, tok.Lemma, Source);
+            if (!tok.FormLemmaSame)
+                EmitUtf8(b, tok.LemmaUtf8, Source);
         }
 
         foreach (var tok in s.Tokens)
@@ -242,10 +250,9 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
             b.AddAttestation(NativeAttestation.Categorical(
                 form, "HAS_LANGUAGE", langId, Source, null, SourceTrust.AcademicCurated));
 
-            if (tok.Lemma != tok.Form)
+            if (!tok.FormLemmaSame)
             {
-                // lawful re-derivation: the first token loop Emitted this lemma
-                var lemmaId = ContentEmitter.RootId(tok.Lemma);
+                var lemmaId = ContentWitnessBatch.RootId(tok.LemmaUtf8);
                 if (lemmaId is not null)
                     b.AddAttestation(NativeAttestation.Categorical(
                         lemmaId.Value, "IS_LEMMA_OF", form, Source, SourceTrust.AcademicCurated));
@@ -288,14 +295,14 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
                     if (val.Length == 0) continue;
                     if (key.Equals("Gloss", StringComparison.OrdinalIgnoreCase))
                     {
-                        var g = ContentEmitter.Emit(b, val, Source);
+                        var g = ContentWitnessBatch.Emit(b, val, Source);
                         if (g is { } gid)
                             b.AddAttestation(NativeAttestation.Categorical(
                                 form, "HAS_DEFINITION", gid, Source, SourceTrust.AcademicCurated));
                     }
                     else if (key.Equals("Translit", StringComparison.OrdinalIgnoreCase))
                     {
-                        var t = ContentEmitter.Emit(b, val, Source);
+                        var t = ContentWitnessBatch.Emit(b, val, Source);
                         if (t is { } tid)
                             b.AddAttestation(NativeAttestation.Categorical(
                                 form, "TRANSCRIBES_AS", tid, Source, SourceTrust.AcademicCurated));
@@ -306,13 +313,22 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
 
         foreach (var mwt in s.Mwts)
         {
-            var surfaceId = ContentEmitter.Emit(b, mwt.Form, Source);
+            var surfaceId = EmitUtf8(b, mwt.FormUtf8, Source);
             if (surfaceId is null) continue;
             for (int id = mwt.Start; id <= mwt.End && id <= s.MaxId; id++)
                 if (formId[id] is { } partId)
                     b.AddAttestation(NativeAttestation.Categorical(
                         surfaceId.Value, "HAS_PART", partId, Source, SourceTrust.AcademicCurated));
         }
+    }
+
+    private static Hash128? EmitUtf8(SubstrateChangeBuilder b, ReadOnlySpan<byte> utf8, Hash128 sourceId) =>
+        ContentWitnessBatch.TryAppendToBuilder(b, utf8, sourceId, out var id) ? id : null;
+
+    private static byte[] CopyUtf8Field(ReadOnlySpan<byte> span)
+    {
+        if (span.IsEmpty) return Array.Empty<byte>();
+        return span.ToArray();
     }
 
     private static LanguageFilter? EffectiveLanguages(DecomposerOptions options) =>
@@ -343,7 +359,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
     {
         var tokens = new List<UdToken>(48);
         var mwts = new List<UdMwt>(4);
-        string? text = null;
+        byte[]? textUtf8 = null;
         int maxId = 0;
 
         await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
@@ -352,15 +368,18 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
             if (line.IsEmpty)
             {
                 if (tokens.Count > 0)
-                    yield return new UdSentence(text, tokens.ToList(), mwts.ToList(), maxId);
-                tokens.Clear(); mwts.Clear(); text = null; maxId = 0;
+                    yield return new UdSentence(textUtf8, tokens.ToList(), mwts.ToList(), maxId);
+                tokens.Clear(); mwts.Clear(); textUtf8 = null; maxId = 0;
                 continue;
             }
             if (line[0] == (byte)'#')
             {
                 int eq = line.IndexOf((byte)'=');
                 if (eq > 0 && line[..eq].Trim((byte)' ').SequenceEqual("# text"u8))
-                    text = System.Text.Encoding.UTF8.GetString(line[(eq + 1)..]).Trim();
+                {
+                    var raw = line[(eq + 1)..].Trim((byte)' ');
+                    textUtf8 = raw.IsEmpty ? null : CopyUtf8Field(raw);
+                }
                 continue;
             }
 
@@ -370,9 +389,9 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
             if (id0.Contains('-'))
             {
                 int dash = id0.IndexOf('-');
-                if (int.TryParse(id0[..dash], out int st) && int.TryParse(id0[(dash + 1)..], out int en))
-                    mwts.Add(new UdMwt(st, en, TsvSpan.TryField(line, 1, out var mwtForm)
-                        ? System.Text.Encoding.UTF8.GetString(mwtForm).Trim() : ""));
+                if (int.TryParse(id0[..dash], out int st) && int.TryParse(id0[(dash + 1)..], out int en)
+                    && TsvSpan.TryField(line, 1, out var mwtForm))
+                    mwts.Add(new UdMwt(st, en, CopyUtf8Field(mwtForm.Trim((byte)' '))));
                 continue;
             }
             bool isEmptyNode = id0.Contains('.');
@@ -380,11 +399,14 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
             if (!isEmptyNode && !int.TryParse(id0, out id)) continue;
 
             if (!TsvSpan.TryField(line, 1, out var formSpan)) continue;
-            string form = System.Text.Encoding.UTF8.GetString(formSpan).Trim();
-            if (form.Length == 0 || form == "_") continue;
-            string lemma = TsvSpan.TryField(line, 2, out var lemmaSpan)
-                ? System.Text.Encoding.UTF8.GetString(lemmaSpan).Trim() : form;
-            if (lemma.Length == 0 || lemma == "_") lemma = form;
+            formSpan = formSpan.Trim((byte)' ');
+            if (formSpan.IsEmpty || formSpan.SequenceEqual("_"u8)) continue;
+            var formUtf8 = CopyUtf8Field(formSpan);
+            ReadOnlySpan<byte> lemmaSpan = TsvSpan.TryField(line, 2, out var ls) ? ls.Trim((byte)' ') : formSpan;
+            if (lemmaSpan.IsEmpty || lemmaSpan.SequenceEqual("_"u8)) lemmaSpan = formSpan;
+            var lemmaUtf8 = lemmaSpan.SequenceEqual(formSpan) ? formUtf8 : CopyUtf8Field(lemmaSpan);
+            bool formLemmaSame = ReferenceEquals(formUtf8, lemmaUtf8)
+                                 || formUtf8.AsSpan().SequenceEqual(lemmaUtf8);
             string upos = TsvSpan.TryField(line, 3, out var uposSpan)
                 ? System.Text.Encoding.UTF8.GetString(uposSpan).Trim() : "";
             string xpos = TsvSpan.TryField(line, 4, out var xposSpan)
@@ -402,17 +424,19 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider
                 ? System.Text.Encoding.UTF8.GetString(miscSpan).Trim() : "_";
 
             if (!isEmptyNode && id > maxId) maxId = id;
-            tokens.Add(new UdToken(isEmptyNode ? -1 : id, id0, form, lemma, upos, xpos, feats, head, deprel, deps, misc));
+            tokens.Add(new UdToken(isEmptyNode ? -1 : id, id0, formUtf8, lemmaUtf8, formLemmaSame,
+                upos, xpos, feats, head, deprel, deps, misc));
         }
         if (tokens.Count > 0)
-            yield return new UdSentence(text, tokens.ToList(), mwts.ToList(), maxId);
+            yield return new UdSentence(textUtf8, tokens.ToList(), mwts.ToList(), maxId);
     }
 
-    private sealed record UdSentence(string? Text, List<UdToken> Tokens, List<UdMwt> Mwts, int MaxId);
+    private sealed record UdSentence(byte[]? TextUtf8, List<UdToken> Tokens, List<UdMwt> Mwts, int MaxId);
 
     private readonly record struct UdToken(
-        int Id, string Ref, string Form, string Lemma, string Upos, string Xpos, string[] Feats,
+        int Id, string Ref, byte[] FormUtf8, byte[] LemmaUtf8, bool FormLemmaSame,
+        string Upos, string Xpos, string[] Feats,
         int Head, string Deprel, string Deps, string Misc);
 
-    private readonly record struct UdMwt(int Start, int End, string Form);
+    private readonly record struct UdMwt(int Start, int End, byte[] FormUtf8);
 }

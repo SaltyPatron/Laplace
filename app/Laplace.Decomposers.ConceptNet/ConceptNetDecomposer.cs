@@ -86,7 +86,9 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
+        // Never full-scan assertions.csv when scoped — DescribeInputAsync returns null and
+        // progress uses InputUnitsConsumed during the single streaming pass.
+        var inv = await DescribeInputAsync(context, DecomposerOptions.ForWitness(SourceName), ct);
         return inv?.TotalInputUnits;
     }
 

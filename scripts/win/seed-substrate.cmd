@@ -4,7 +4,7 @@ rem ==== Invention-complete witness seed (manifest-driven) =====================
 rem Build (incremental) -> DROP+recreate laplace -> seed-ladder.cmd -> audit.
 rem The ladder itself (ordering law, synset hub law, models, deferred lexical)
 rem lives in seed-ladder.cmd -- the executable mirror of witness-manifest.json.
-rem Defaults here: LAPLACE_SKIP_MODELS=1, LAPLACE_SKIP_USAGE=1 (override with =0).
+rem Defaults here: LAPLACE_SKIP_MODELS=1, LAPLACE_SKIP_USAGE=0 (full witness; set =1 to skip usage).
 rem cwd on D: so /vault junctions resolve to D:\Data\Ingest.
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
@@ -14,7 +14,7 @@ if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=4"
 set "LAPLACE_DECOMPOSE_WORKERS=1"
 set "LAPLACE_COPY_VALIDATE=1"
 if not defined LAPLACE_SKIP_MODELS set "LAPLACE_SKIP_MODELS=1"
-if not defined LAPLACE_SKIP_USAGE set "LAPLACE_SKIP_USAGE=1"
+if not defined LAPLACE_SKIP_USAGE set "LAPLACE_SKIP_USAGE=0"
 
 echo ==== build engine + extensions (native exports must match CLI) ====
 call "%~dp0build-engine-libs.cmd" || exit /b 1

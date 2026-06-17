@@ -143,9 +143,18 @@ if "%LAPLACE_LADDER_DRY%"=="1" (
   echo ==== [dry] ingest %* ====
   exit /b 0
 )
+set "_saved_commit_rows=%LAPLACE_INGEST_COMMIT_ROWS%"
+if /i "%~1"=="ud" if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=25000"
+if /i "%~1"=="wiktionary" if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=50000"
 echo ==== ingest %* ====
 dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest %*
-if errorlevel 1 exit /b 1
+if errorlevel 1 (
+  if defined _saved_commit_rows (set "LAPLACE_INGEST_COMMIT_ROWS=%_saved_commit_rows%") else set "LAPLACE_INGEST_COMMIT_ROWS="
+  set "_saved_commit_rows="
+  exit /b 1
+)
+if defined _saved_commit_rows (set "LAPLACE_INGEST_COMMIT_ROWS=%_saved_commit_rows%") else set "LAPLACE_INGEST_COMMIT_ROWS="
+set "_saved_commit_rows="
 exit /b 0
 
 rem Resolve model snapshot: %1=primary env, %2=legacy env, %3=hub family dir, %4=output var name

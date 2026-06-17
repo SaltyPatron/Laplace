@@ -25,8 +25,8 @@ public static class OMWFastIngest
 
             await foreach (var line in StreamingUtf8LineReader.ReadLinesAsync(tabFile, ct))
             {
-                if (!TryParseRow(line.Span, fileLang, out var row)) continue;
-                EmitRow(b, row);
+                if (!TryParseRow(line.Span, fileLang, out var row, out var valueUtf8)) continue;
+                EmitRow(b, row, valueUtf8);
                 if (++count >= batchSize)
                 {
                     yield return b.Build();
@@ -39,9 +39,11 @@ public static class OMWFastIngest
         if (count > 0) yield return b.Build();
     }
 
-    public static bool TryParseRow(ReadOnlySpan<byte> line, string fileLang, out OmwRow row)
+    public static bool TryParseRow(
+        ReadOnlySpan<byte> line, string fileLang, out OmwRow row, out ReadOnlySpan<byte> valueUtf8)
     {
         row = default;
+        valueUtf8 = default;
         if (line.IsEmpty || line[0] == (byte)'#') return false;
         if (!TsvSpan.TryField(line, 0, out var synKey)) return false;
         if (!TsvSpan.TryField(line, 1, out var typeField)) return false;
@@ -77,24 +79,21 @@ public static class OMWFastIngest
         else return false;
 
         if (valueSpan.IsEmpty) return false;
-        string value = Encoding.UTF8.GetString(valueSpan).Replace('_', ' ').Trim();
-        if (value.Length == 0) return false;
+        valueUtf8 = valueSpan;
 
         string synStr = Encoding.UTF8.GetString(synKey);
         int dash = synStr.LastIndexOf('-');
         if (dash < 0 || dash + 1 >= synStr.Length) return false;
         if (!long.TryParse(synStr.AsSpan(0, dash), out long offset)) return false;
-        char ssType = synStr[dash + 1];   // RAW — satellite 's' must not fold to 'a' (drops 10,693 synsets)
-        row = new OmwRow(offset, ssType, lang, rowType, value);
+        char ssType = synStr[dash + 1];
+        row = new OmwRow(offset, ssType, lang, rowType);
         return true;
     }
 
-    private static void EmitRow(SubstrateChangeBuilder b, OmwRow row)
+    private static void EmitRow(SubstrateChangeBuilder b, in OmwRow row, ReadOnlySpan<byte> valueUtf8)
     {
-        var contentId = ContentWitnessBatch.TryAppendToBuilder(
-            b, Encoding.UTF8.GetBytes(row.Value), OMWDecomposer.Source, out var root)
-            ? root : (Hash128?)null;
-        if (contentId is null) return;
+        if (!TryAppendLemmaUtf8(b, valueUtf8, OMWDecomposer.Source, out var root))
+            return;
 
         // The synset is the shared ILI anchor — the SAME content id WordNet emits for this offset.
         // This is the convergence point: every language's wordform attests onto it, no wordform
@@ -110,17 +109,17 @@ public static class OMWFastIngest
         {
             case OmwType.Lemma:
                 b.AddAttestation(NativeAttestation.Categorical(
-                    contentId.Value, "IS_TRANSLATION_OF", synId, OMWDecomposer.Source, null, TC.AcademicCurated));
+                    root, "IS_TRANSLATION_OF", synId, OMWDecomposer.Source, null, TC.AcademicCurated));
                 b.AddAttestation(NativeAttestation.Categorical(
-                    contentId.Value, "HAS_LANGUAGE", langId, OMWDecomposer.Source, null, TC.AcademicCurated));
+                    root, "HAS_LANGUAGE", langId, OMWDecomposer.Source, null, TC.AcademicCurated));
                 break;
             case OmwType.Def:
                 b.AddAttestation(NativeAttestation.Categorical(
-                    synId, "HAS_DEFINITION", contentId.Value, OMWDecomposer.Source, langId, TC.AcademicCurated));
+                    synId, "HAS_DEFINITION", root, OMWDecomposer.Source, langId, TC.AcademicCurated));
                 break;
             case OmwType.Exe:
                 b.AddAttestation(NativeAttestation.Categorical(
-                    synId, "HAS_EXAMPLE", contentId.Value, OMWDecomposer.Source, langId, TC.AcademicCurated));
+                    synId, "HAS_EXAMPLE", root, OMWDecomposer.Source, langId, TC.AcademicCurated));
                 break;
         }
     }
@@ -136,6 +135,16 @@ public static class OMWFastIngest
         new(OMWDecomposer.Source, unit, null,
             entityCapacity: batch * 6, physicalityCapacity: batch * 6, attestationCapacity: batch * 2);
 
+    /// <summary>Lemma/def/exe values use underscores for spaces in OMW tab files.</summary>
+    private static bool TryAppendLemmaUtf8(
+        SubstrateChangeBuilder b, ReadOnlySpan<byte> src, Hash128 sourceId, out Hash128 rootId)
+    {
+        while (src.Length > 0 && src[0] == (byte)' ') src = src[1..];
+        while (src.Length > 0 && src[^1] == (byte)' ') src = src[..^1];
+        if (src.IsEmpty) { rootId = default; return false; }
+        return ContentWitnessBatch.TryAppendUnderscoredToBuilder(b, src, sourceId, out rootId);
+    }
+
     public enum OmwType { Lemma, Def, Exe }
-    public readonly record struct OmwRow(long Offset, char SsType, string Lang, OmwType Type, string Value);
+    public readonly record struct OmwRow(long Offset, char SsType, string Lang, OmwType Type);
 }
