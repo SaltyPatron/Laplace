@@ -1,6 +1,5 @@
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
-using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -30,7 +29,7 @@ internal static class OpenSubtitlesFastIngest
         Hash128 langB = LanguageReference.Resolve(LangSuffix(entB.FullName));
 
         string unitStem = Path.GetFileNameWithoutExtension(zipPath);
-        var b = NewBuilder($"opensubtitles/{unitStem}/0", batchSize);
+        var b = NewBuilder($"opensubtitles/{unitStem}/0", batchSize, langA, langB);
         int n = 0, bn = 0;
 
         await foreach (var (lineA, lineB) in ReadPairedLinesAsync(entA, entB, ct))
@@ -41,8 +40,6 @@ internal static class OpenSubtitlesFastIngest
             var idB = EmitLine(b, lineB);
             if (idA is null || idB is null) continue;
 
-            b.AddEntity(new EntityRow(langA, EntityTier.Vocabulary, EntityTypeRegistry.Language, OpenSubtitlesDecomposer.Source));
-            b.AddEntity(new EntityRow(langB, EntityTier.Vocabulary, EntityTypeRegistry.Language, OpenSubtitlesDecomposer.Source));
             b.AddAttestation(NativeAttestation.Categorical(
                 idA.Value, "IS_TRANSLATION_OF", idB.Value, OpenSubtitlesDecomposer.Source, TC.StructuredCorpus));
             b.AddAttestation(NativeAttestation.Categorical(
@@ -53,7 +50,7 @@ internal static class OpenSubtitlesFastIngest
             if (++n >= batchSize)
             {
                 yield return b.Build();
-                b = NewBuilder($"opensubtitles/{unitStem}/{++bn}", batchSize);
+                b = NewBuilder($"opensubtitles/{unitStem}/{++bn}", batchSize, langA, langB);
                 n = 0;
             }
         }
@@ -73,27 +70,12 @@ internal static class OpenSubtitlesFastIngest
     private static async IAsyncEnumerable<(ReadOnlyMemory<byte> A, ReadOnlyMemory<byte> B)> ReadPairedLinesAsync(
         ZipArchiveEntry entA, ZipArchiveEntry entB, [EnumeratorCancellation] CancellationToken ct)
     {
-        string pathA = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".txt");
-        string pathB = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".txt");
-        try
-        {
-            await using (var s = entA.Open())
-            await using (var fs = File.Create(pathA))
-                await s.CopyToAsync(fs, ct);
-            await using (var s = entB.Open())
-            await using (var fs = File.Create(pathB))
-                await s.CopyToAsync(fs, ct);
-
-            await using var eA = StreamingUtf8LineReader.ReadLinesAsync(pathA, ct).GetAsyncEnumerator(ct);
-            await using var eB = StreamingUtf8LineReader.ReadLinesAsync(pathB, ct).GetAsyncEnumerator(ct);
-            while (await eA.MoveNextAsync() && await eB.MoveNextAsync())
-                yield return (eA.Current, eB.Current);
-        }
-        finally
-        {
-            if (File.Exists(pathA)) File.Delete(pathA);
-            if (File.Exists(pathB)) File.Delete(pathB);
-        }
+        await using var streamA = entA.Open();
+        await using var streamB = entB.Open();
+        await using var eA = StreamingUtf8LineReader.ReadLinesAsync(streamA, ct).GetAsyncEnumerator(ct);
+        await using var eB = StreamingUtf8LineReader.ReadLinesAsync(streamB, ct).GetAsyncEnumerator(ct);
+        while (await eA.MoveNextAsync() && await eB.MoveNextAsync())
+            yield return (eA.Current, eB.Current);
     }
 
     private static bool IsTextEntry(string name)
@@ -105,7 +87,7 @@ internal static class OpenSubtitlesFastIngest
         if (name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)
             || name.EndsWith(".tsv", StringComparison.OrdinalIgnoreCase))
             return true;
-        
+
         return leaf.StartsWith("OpenSubtitles.", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -123,7 +105,14 @@ internal static class OpenSubtitlesFastIngest
         return dot >= 0 ? baseName[(dot + 1)..] : baseName;
     }
 
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch) =>
-        new(OpenSubtitlesDecomposer.Source, unit, null,
-            entityCapacity: batch * 8, physicalityCapacity: batch * 8, attestationCapacity: batch * 4);
+    private static SubstrateChangeBuilder NewBuilder(string unit, int batch, Hash128 langA, Hash128 langB)
+    {
+        var b = new SubstrateChangeBuilder(OpenSubtitlesDecomposer.Source, unit, null,
+            entityCapacity: batch * 4,
+            physicalityCapacity: batch * 8,
+            attestationCapacity: batch * 4);
+        b.AddEntity(new EntityRow(langA, EntityTier.Vocabulary, EntityTypeRegistry.Language, OpenSubtitlesDecomposer.Source));
+        b.AddEntity(new EntityRow(langB, EntityTier.Vocabulary, EntityTypeRegistry.Language, OpenSubtitlesDecomposer.Source));
+        return b;
+    }
 }
