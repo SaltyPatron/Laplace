@@ -1,6 +1,4 @@
-using System.IO.Compression;
 using System.Runtime.CompilerServices;
-using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -55,11 +53,13 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
         var zips = Directory.EnumerateFiles(context.EcosystemPath, "*.txt.zip")
                             .OrderBy(p => p, StringComparer.Ordinal)
                             .ToList();
+        var pairAllow = ResolvePairAllowlist();
 
         foreach (string zipPath in zips)
         {
             ct.ThrowIfCancellationRequested();
             string pairStem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(zipPath));
+            if (pairAllow is not null && !pairAllow.Contains(pairStem)) continue;
             if (options.Languages?.MatchesLanguagePair(pairStem) == false) continue;
 
             await foreach (var change in OpenSubtitlesFastIngest.IngestZipAsync(zipPath, pairStem, batch, ct))
@@ -75,6 +75,7 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
         if (!Directory.Exists(context.EcosystemPath)) return Task.FromResult<IngestInventory?>(null);
         var files = Directory.EnumerateFiles(context.EcosystemPath, "*.txt.zip")
             .Select(p => Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(p)))
+            .Where(pair => ResolvePairAllowlist() is not { } allow || allow.Contains(pair))
             .Where(pair => options.Languages?.MatchesLanguagePair(pair) != false)
             .Select(pair =>
             {
@@ -95,26 +96,11 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    private static bool IsTextEntry(string entryName)
+    internal static HashSet<string>? ResolvePairAllowlist()
     {
-        string leaf = entryName;
-        int slash = leaf.LastIndexOf('/');
-        if (slash >= 0) leaf = leaf[(slash + 1)..];
-        return leaf.StartsWith("OpenSubtitles.", StringComparison.Ordinal);
+        string? env = Environment.GetEnvironmentVariable("LAPLACE_OPENSUBTITLES_PAIRS");
+        if (string.IsNullOrWhiteSpace(env)) return null;
+        return env.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                  .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
-
-    private static string LangSuffix(string entryName)
-    {
-        string leaf = entryName;
-        int slash = leaf.LastIndexOf('/');
-        if (slash >= 0) leaf = leaf[(slash + 1)..];
-        int dot = leaf.LastIndexOf('.');
-        return dot >= 0 && dot + 1 < leaf.Length ? leaf[(dot + 1)..] : "und";
-    }
-
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch) =>
-        new(Source, unit, null,
-            entityCapacity:      batch * 8,
-            physicalityCapacity: batch * 8,
-            attestationCapacity: batch * 4);
 }
