@@ -6,7 +6,7 @@ internal static class ReportEndpoints
 {
     public static void MapReportEndpoints(this WebApplication app)
     {
-        // The trust surface: quote-free receipt drill-down. Target = entity id (32-hex) or word.
+        
         app.MapGet("/v1/evidence/{target}", async (string target, int? limit, ISubstrateClient substrate, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(target))
@@ -133,12 +133,12 @@ internal static class ReportEndpoints
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
     }
 
-    /// <summary>
-    /// Shared skeleton for the metered report trio (audit / visualization / explain): resolve the
-    /// quote, deny with 402 + QuotePendingDetail when the gate fails, otherwise run the route body
-    /// (substrate call → MarkConsumed → Json wrap) inside a SubstrateUnavailable → 503 guard. The
-    /// per-route response object/shape and side-effect ordering live entirely in <paramref name="produce"/>.
-    /// </summary>
+    
+    
+    
+    
+    
+    
     private static async Task<IResult> RunGatedReportAsync(
         HttpRequest request,
         IBillingOrchestrator billing,

@@ -100,8 +100,8 @@ public sealed class PropBankDecomposer : IDecomposer
             string rsId = roleset.GetAttribute("id").Trim();
             if (rsId.Length == 0) continue;
 
-            // Roleset identity = "give.01" decomposed as content + IS_A PropBank_Roleset (shared
-            // with SemLink and the Predicate Matrix that cite the same roleset) — not a blob.
+            
+            
             Hash128? rsAnchor = CategoryAnchor.Emit(b, rsId, RolesetTypeId, Source, TC.AcademicCurated);
             if (rsAnchor is null) continue;
             Hash128 rsEntity = rsAnchor.Value;
@@ -154,8 +154,8 @@ public sealed class PropBankDecomposer : IDecomposer
                 string theta   = link.InnerText.Trim();
                 if (vnClass.Length == 0) continue;
 
-                // VerbNet class = its numeric id as content + IS_A VerbNet_Class — the SAME anchor
-                // VerbNet and SemLink emit for this class (convergence), not a per-witness blob.
+                
+                
                 Hash128? vnAnchor = CategoryAnchor.Emit(b, NumericClassId(vnClass), VerbNetClassTypeId, Source, TC.AcademicCurated);
                 if (vnAnchor is null) continue;
                 Hash128 vnEntity = vnAnchor.Value;

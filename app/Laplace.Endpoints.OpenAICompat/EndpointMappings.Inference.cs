@@ -34,11 +34,11 @@ internal static class InferenceEndpoints
 
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
-            // Chat IS a trajectory walk: the native stride-continuation surface over
-            // witnessed content trajectories is modality-blind — prose and code are both
-            // entity sequences over the same floor — so every chat model walks, and the
-            // intent-routed consensus-lookup path (laplace.recall_session) is the opt-in
-            // grounded path selected by a "converse" model id.
+            
+            
+            
+            
+            
             if (!payload.Model.Contains("converse", StringComparison.OrdinalIgnoreCase))
             {
                 int genSteps = payload.MaxTokens ?? payload.MaxCompletionTokens ?? 128;
@@ -93,10 +93,10 @@ internal static class InferenceEndpoints
                     Metadata: new ChatMetadata(GeneratedTokens: genTokens.Count)));
             }
 
-            // Serve the substrate's intent-routed consensus lookup (laplace.recall_session): parse_ask
-            // classifies the ask, recall() grounds every reply line in witnessed consensus.
-            // Session id is derived from the conversation's earlier turns so recall_session keeps
-            // topic/pronoun continuity ("…and its synonyms?") across calls via its last-topic pointer.
+            
+            
+            
+            
             var sessionId = DeriveSessionId(payload.Messages);
             var userTurns = payload.Messages
                 .Where(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)
@@ -109,8 +109,8 @@ internal static class InferenceEndpoints
                 ? "I hold no consensus about that yet."
                 : string.Join("\n", rows.Select(r => r.Reply));
 
-            // Only the FINAL user turn is new testimony: stateless clients resend the
-            // full history every call, and prior turns were each final once already.
+            
+            
             turnWitness.Enqueue(userTurns[^1], "prompt");
             if (rows.Count > 0) turnWitness.Enqueue(content, "reply");
 
@@ -125,7 +125,7 @@ internal static class InferenceEndpoints
                     completionId, "chat.completion.chunk", created, payload.Model,
                     [new ChatChunkChoice(0, new ChatDelta(Role: "assistant"), null)]), ct);
 
-                // One consensus-grounded reply line per chunk, each carrying its receipt
+                
                 for (int i = 0; i < rows.Count; i++)
                 {
                     var line = rows[i].Reply + (i + 1 < rows.Count ? "\n" : "");
@@ -207,7 +207,7 @@ internal static class InferenceEndpoints
                 return Results.Empty;
             }
 
-            // Non-streaming: collect full sequence then return
+            
             var tokens = new List<GenerateToken>(steps);
             await foreach (var token in substrate.WalkTextStreamAsync(
                 payload.Prompt.Trim(), steps: steps, temperature: temp, ct: ct))
@@ -257,12 +257,12 @@ internal static class InferenceEndpoints
         app.MapReportEndpoints();
     }
 
-    /// <summary>
-    /// Derive a stable 16-byte session id from the conversation's earlier turns (everything but the
-    /// final user message). The same multi-turn conversation reuses the same session, so the
-    /// substrate's recall_session() keeps topic/pronoun continuity ("…and its synonyms?"). A single-message
-    /// request yields null → recall_session falls back to its per-backend session.
-    /// </summary>
+    
+    
+    
+    
+    
+    
     private static byte[]? DeriveSessionId(IReadOnlyList<ChatMessage>? messages)
     {
         var anchor = messages?.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m.Content))?.Content;

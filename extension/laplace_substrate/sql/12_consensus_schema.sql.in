@@ -16,17 +16,17 @@ CREATE INDEX consensus_object_btree       ON consensus (object_id) WHERE object_
 CREATE INDEX consensus_type_btree         ON consensus (type_id);
 CREATE INDEX consensus_subject_type_btree ON consensus (subject_id, type_id);
 
--- COVERING (type_id, subject_id): the per-relation FREQUENCY/degree scans (foundry_vocab's
--- PRECEDES count GROUP BY subject_id, and any "subjects of relation R") read both columns
--- from the index — an index-only scan, no heap fetch. Without it those queries take a Bitmap
--- Heap Scan over the 23 GB table (~1M random page fetches for PRECEDES alone), the multi-minute
--- foundry_vocab hang. consensus_type_btree(type_id) alone is NOT covering (subject_id is heap).
+
+
+
+
+
 CREATE INDEX consensus_type_subject_btree ON consensus (type_id, subject_id) WHERE object_id IS NOT NULL;
 
--- The eff-μ indexes store the PHYSICAL expression (rating - 2*rd) the SQL
--- eff_mu() inlines to; ORDER BY eff_mu(rating, rd) matches these after inlining.
--- This literal is the index ground truth, not a copy of the law (don't wrap it
--- in eff_mu() — a functional index on a schema-qualified function is fragile).
+
+
+
+
 CREATE INDEX consensus_eff_mu_btree ON consensus (((rating - 2*rd)) DESC) WHERE object_id IS NOT NULL;
 
 CREATE INDEX consensus_subject_eff_mu_btree ON consensus (subject_id, ((rating - 2*rd)) DESC) WHERE object_id IS NOT NULL;

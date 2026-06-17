@@ -20,9 +20,9 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
     private static readonly Hash128 FrameTypeId    = EntityTypeRegistry.FrameNetFrame;
     private static readonly Hash128 CorenessTypeId = EntityTypeRegistry.FrameNetCoreness;
 
-    // Frame identity = its name decomposed as content + IS_A FrameNet_Frame (shared with SemLink and
-    // the Predicate Matrix that cite the same frame name) — not a framenet/frame/{name} blob. FEs and
-    // LU lemmas are likewise content. Coreness stays a closed bootstrap vocab (like ordinal).
+    
+    
+    
     private static Hash128 CorenessId(string coreType) =>
         Hash128.OfCanonical($"framenet/coreness/{coreType}");
 
@@ -48,12 +48,12 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
     public int     LayerOrder   => 3;
     public Hash128 TrustClassId => TrustClass;
 
-    // FrameNet attaches lemmas -> frames and shares the lemma arena across intents — the same
-    // cross-intent referential dependency wordnet/omw/iso/unicode and the RelationTriple
-    // decomposers carry. Under LAPLACE_INGEST_WORKERS>1 the default EpochBarrier lets parallel
-    // committers race to lock the same shared lemma/frame entities and deadlock (40P01). The
-    // pipelined StrictSerial path keeps decompose/commit overlap while committing in producer
-    // order, which removes the cycle.
+    
+    
+    
+    
+    
+    
     public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -119,8 +119,8 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    // Only the closed coreness vocab needs name→id registration now; frames/FEs/LUs are content,
-    // readable via their trajectories.
+    
+    
     public IReadOnlyCollection<string> CanonicalNamesForReadback =>
         [.. CorenessValues.Select(c => $"framenet/coreness/{c}")];
 
@@ -154,19 +154,19 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
 
     private static void EmitFrameEntities(SubstrateChangeBuilder b, Frame frame)
     {
-        // The frame anchor IS the decomposed frame name + IS_A FrameNet_Frame (this builder carries
-        // attestation capacity, so the single-pass CategoryAnchor.Emit is fine here).
+        
+        
         CategoryAnchor.Emit(b, frame.Name, FrameTypeId, Source, SourceTrust.AcademicCurated);
         if (frame.Definition.Length > 0) ContentEmitter.Emit(b, frame.Definition, Source);
         foreach (var ex in frame.Examples) ContentEmitter.Emit(b, ex, Source);
 
         foreach (var fe in frame.Elements)
         {
-            ContentEmitter.Emit(b, fe.Name, Source);   // FE name is content (converges into the role inventory)
+            ContentEmitter.Emit(b, fe.Name, Source);   
             if (fe.Definition.Length > 0) ContentEmitter.Emit(b, fe.Definition, Source);
         }
 
-        // LU lemma is content; the unreferenced framenet/lu/{id} blob entity is dropped.
+        
         foreach (var lu in frame.LexUnits)
             ContentEmitter.Emit(b, lu.Lemma, Source);
 
@@ -174,9 +174,9 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
             CategoryAnchor.Emit(b, rel.TargetFrame, FrameTypeId, Source, SourceTrust.AcademicCurated);
     }
 
-    // RootId here is LAWFUL re-derivation, not a ghost reference: every surface
-    // this pass attests to was Emitted by EmitFrameEntities on the same builder
-    // (the tier-witness law — witness first, then claim).
+    
+    
+    
     private static void EmitFrameAttestations(SubstrateChangeBuilder b, Frame frame)
     {
         Hash128? frameAnchor = CategoryAnchor.Id(frame.Name);

@@ -6,23 +6,23 @@ using SynInterop = Laplace.Engine.Synthesis.NativeInterop;
 
 namespace Laplace.Cli;
 
-// The foundry: pours adjudicated token→token consensus into a user-declared mold.
-// Inputs are the consensus planes, the recipe (shapes), and the tokenizer (which
-// token entities fill the mold's vocab) — never model weights. The embedding basis
-// is GENERATED (Laplacian eigenmaps over the consensus graph, Gram-Schmidt
-// orthonormalized, Procrustes-anchored to token content coordinates); interior
-// tensors are truncated-SVD factorizations of the consensus operators projected
-// through that basis. There is no inverse score law and no per-witness scale
-// calibration: export renders consensus, it does not invert an ingest.
-//
-// Basis layout per token row [dModel]:
-//   [0..K)          spectral coordinates of the consensus graph (first 4 anchored)
-//   [K..dModel-1)   deterministic capacity dims (seeded from the recipe, no clock)
-//   [dModel-1]      the bias channel: constant BiasValue for every token. Attention
-//                   and FFN factors never write this dim, so it survives depth; the
-//                   gate tensor reads ONLY this dim, making SiLU(gate·x) a stable
-//                   positive scalar — the SwiGLU mold carries a linear FFN operator.
-//                   lm_head sees a uniform logit shift from it (softmax-invariant).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 internal static class FoundryExport
 {
     internal const double BiasValue = 1.0;
@@ -41,11 +41,11 @@ internal static class FoundryExport
             System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= 0 ? v : dflt;
 
-    // A plane is named, never hand-rolled: ('consensus', TYPE) reads adjudicated
-    // eff-μ RELATIVE TO NEUTRAL (signed; refuted < 0); ('traj', next|gap|window, n)
-    // reads conditional frequencies straight from the witnessed trajectories. The
-    // SQL surface (laplace.relation_plane) is the single definition both this reader
-    // and every audit/walk view share.
+    
+    
+    
+    
+    
     internal readonly record struct PlaneSpec(string Family, string Name, int? Arg)
     {
         public static PlaneSpec Consensus(string name) => new("consensus", name, null);
@@ -55,9 +55,9 @@ internal static class FoundryExport
         public override string ToString() => Arg is null ? $"{Family}:{Name}" : $"{Family}:{Name}:{Arg}";
     }
 
-    // One set-based read per plane; entity→ordinal mapping is in-process (perf-cache
-    // derived token entities), so the DB is touched exactly once per plane. Degree-
-    // capped at top-m by |w| per subject ordinal to bound factorization fill-in.
+    
+    
+    
     internal static async Task<PlaneCoo> ReadRelationPlaneAsync(
         NpgsqlDataSource ds, PlaneSpec spec,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
@@ -93,10 +93,10 @@ internal static class FoundryExport
             return PlaneCoo.Empty;
         }
 
-        // Canonical order regardless of DB scan order: the cast law (identical
-        // consensus + identical mold => identical cast) dies here otherwise —
-        // |w| ties at the degree cap kept a scan-order subset, and dictionary
-        // emission order perturbed downstream float summation.
+        
+        
+        
+        
         long kept = 0;
         foreach (var row in adj.Values)
         {
@@ -120,12 +120,12 @@ internal static class FoundryExport
         return new PlaneCoo(rows, cols, vals);
     }
 
-    // Vocab-bounded consensus plane: the native read returns ONLY the vocab×vocab
-    // edges of the given relation types, degree-capped per subject server-side via
-    // the (subject_id, type_id) index — no full-type scan, no millions of rows
-    // streamed to the client. The foundry passes its vocab entity set + the relation
-    // names for one operator role and only maps the returned edges to ordinals. ONE
-    // bounded query per role replaces N full-type reads + in-client filtering.
+    
+    
+    
+    
+    
+    
     internal static async Task<PlaneCoo> ReadConsensusPlaneAsync(
         NpgsqlDataSource ds, string[] relNames,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
@@ -188,11 +188,11 @@ internal static class FoundryExport
         return new PlaneCoo(rows, cols, vals);
     }
 
-    // WITHIN-LAYER plane read: consensus_layer_plane keeps the read inside one rank band
-    // (the ranks ARE the layers), known relations only, and CONTENT objects only (object in
-    // vocab) — so app/structural annotations (HAS_POS etc.) and unnamed types never enter the
-    // tensor. weight w = eff_mu (the adjudicated rating). This is the export's correct source,
-    // replacing the flat entity_relation_plane (which mixed metadata/structural with meaning).
+    
+    
+    
+    
+    
     internal static async Task<PlaneCoo> ReadLayerPlaneAsync(
         NpgsqlDataSource ds, double rankLo, double rankHi,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
@@ -219,10 +219,10 @@ internal static class FoundryExport
             {
                 if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
                 if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
-                // WEIGHT = relation_rank × eff_mu (the layering law: rank is the relation's AUTHORITY,
-                // eff_mu its consensus significance). Weighting by eff_mu alone let a generic low-rank
-                // high-witness edge (king→person/food) outrank the specific high-rank one (king IS_A
-                // monarch, taxonomic 0.82). rank×eff_mu lifts the authoritative relation.
+                
+                
+                
+                
                 double w = rdr.GetDouble(2) * rdr.GetDouble(3);
                 if (w == 0.0) continue;
                 foreach (int s in subj)
@@ -259,11 +259,11 @@ internal static class FoundryExport
         return new PlaneCoo(rows, cols, vals);
     }
 
-    // PER-TYPE planes — the proper attestation-tensor cast (ranks=layers, types-in-rank=heads,
-    // eff_mu=weights). laplace.consensus_type_plane returns the vocab×vocab rated adjacency
-    // grouped BY relation TYPE (one row group per type, the type's rank = its layer). Each type
-    // becomes its OWN attention head; ranks group heads into layers. This is the separate
-    // per-head/per-layer transcription, NOT 4 coarse rank bands collapsed into one operator.
+    
+    
+    
+    
+    
     internal sealed record TypePlane(Hash128 TypeId, double Rank, PlaneCoo Plane);
 
     internal static async Task<List<TypePlane>> ReadTypePlanesAsync(
@@ -273,7 +273,7 @@ internal static class FoundryExport
         int vi = 0;
         foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
 
-        // type_id -> (rank, subject ordinal -> [(object ordinal, w)])
+        
         var byType = new Dictionary<Hash128, (double Rank, Dictionary<int, List<(int Col, double W)>> Adj)>();
         await using var conn = await ds.OpenConnectionAsync();
         try
@@ -312,19 +312,19 @@ internal static class FoundryExport
         var result = new List<TypePlane>(byType.Count);
         foreach (var (tid, entry) in byType)
             result.Add(new TypePlane(tid, entry.Rank, CooFromAdj(entry.Adj, degreeCap)));
-        // strongest rank first → deterministic head/layer assignment in the cast.
+        
         result.Sort((a, b) => b.Rank.CompareTo(a.Rank));
         return result;
     }
 
-    // FAITHFUL adjacency read (the generative mold's source): ONE set-based call to
-    // laplace.consensus_adjacency over the whole vocab. The weight is already the
-    // rank-weighted rating Σ relation_rank·eff_mu — the rank looked up PER EDGE from the
-    // banked law server-side, so the caller carries NO band edges and NO hand-typed rank
-    // weights. Maps entity ids → token ordinals via tokenSlots; an entity that resolves to
-    // several token ids fans the same weight to each pairing (the content addressing is the
-    // identity). Degree already capped server-side; we re-cap in canonical order so the cast
-    // is byte-stable regardless of DB scan order.
+    
+    
+    
+    
+    
+    
+    
+    
     internal static async Task<PlaneCoo> ReadAdjacencyAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
     {
@@ -356,13 +356,13 @@ internal static class FoundryExport
         return CooFromAdj(adj, degreeCap);
     }
 
-    // METRIC PLANE: a transformer head is a bilinear score between two token entities, and
-    // a head TRANSCRIBES a NAMED substrate metric between their trajectories rather than
-    // learning a pattern. laplace.metric_edges computes, per token, its k nearest neighbours
-    // under the chosen metric (laplace_frechet_4d / hausdorff_4d / angular_distance_4d) over
-    // the realized trajectory — a DISTANCE. Map distance→affinity (exp(−d): near = high) so
-    // the operator scores near pairs up in the attention softmax, then project+factor it into
-    // q/k exactly like a consensus plane: q·k reproduces the metric. metric ∈ frechet|hausdorff|angular.
+    
+    
+    
+    
+    
+    
+    
     internal static async Task<PlaneCoo> ReadMetricEdgesAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots,
         string metric, int k, int probe, int degreeCap)
@@ -374,7 +374,7 @@ internal static class FoundryExport
         var adj = new Dictionary<int, List<(int Col, double W)>>();
         await using var conn = await ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 0;   // pays the bounded angular-KNN + metric refine once
+        cmd.CommandTimeout = 0;   
         cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.metric_edges($1, $2, $3, $4)";
         cmd.Parameters.Add(new NpgsqlParameter
             { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
@@ -387,7 +387,7 @@ internal static class FoundryExport
             if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
             if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[1]), out var obj)) continue;
             double dist = rdr.GetDouble(2);
-            double w = Math.Exp(-dist);   // distance → affinity (near = high score)
+            double w = Math.Exp(-dist);   
             if (w == 0.0) continue;
             foreach (int s in subj)
             {
@@ -398,11 +398,11 @@ internal static class FoundryExport
         return CooFromAdj(adj, degreeCap);
     }
 
-    // Verify the metric HEAD: after project+factor, q·k must reproduce the metric's
-    // neighbour structure. For sampled subjects, rank all tokens by q·k (q_i = Left·E_i,
-    // k_j = Right·E_j over the basis E) and measure recall of the metric's own top-k
-    // neighbours. Proves "layer/head = metric(A,B)" with a number — a transcription
-    // tripwire, not a tuned metric. K = E·Rightᵀ is precomputed once over the vocab.
+    
+    
+    
+    
+    
     internal static void ReportMetricHeadFidelity(
         double[] e, int vocab, int dModel, PlaneCoo plane, Factors f, string metric)
     {
@@ -415,7 +415,7 @@ internal static class FoundryExport
         }
         if (nbr.Count == 0 || f.Rank == 0) { Console.WriteLine("  metric-head fidelity: no edges to check"); return; }
         int rank = f.Rank;
-        // K[o,r] = Right_r · E_o for every token, once.
+        
         var K = new double[(long)vocab * rank];
         for (int o = 0; o < vocab; o++)
             for (int r = 0; r < rank; r++)
@@ -447,17 +447,17 @@ internal static class FoundryExport
                                 .OrderByDescending(o => score[o]).Take(kk).ToHashSet();
             recallSum += (double)want.Count(w => top.Contains(w)) / kk;
 
-            // DIRECT S³-frame: q=k= the 4 coordinate dims of E (cos on the sphere), bypassing the
-            // factored operator — isolates whether the basis CARRIES the metric (rigid frame)
-            // from whether the SVD factorization preserves it. For angular this is cos(coord) by
-            // construction, so it is the ceiling the factored head should approach.
+            
+            
+            
+            
             var dsc = new double[vocab];
             for (int o = 0; o < vocab; o++)
             { double a = 0; for (int d = 0; d < 4 && d < dModel; d++) a += e[(long)s * dModel + d] * e[(long)o * dModel + d]; dsc[o] = a; }
             var dtop = Enumerable.Range(0, vocab).Where(o => o != s).OrderByDescending(o => dsc[o]).Take(kk).ToHashSet();
             directSum += (double)want.Count(w => dtop.Contains(w)) / kk;
 
-            // noise floor: random top-k overlap with the true k neighbours ≈ k/vocab.
+            
             noiseSum += (double)kk / vocab;
             cnt++;
         }
@@ -468,10 +468,10 @@ internal static class FoundryExport
             + $"[direct = does the rigid frame carry it; factored = does the SVD keep it]");
     }
 
-    // Pull every vocab token's NATIVE 4D super-Fibonacci S³ coordinate (physicalities.coord)
-    // straight from the substrate — the mantissa/Hilbert placement the metrics are computed
-    // over, NOT a derived LE eigenmap. Fills the anchor array (one coord per token, lowest
-    // source_id). This is the geometry a metric head reads; LE/Procrustes cannot recover it.
+    
+    
+    
+    
     internal static async Task<int> FillCoordAnchorsAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, double[]?[] anchors)
     {
@@ -496,18 +496,18 @@ internal static class FoundryExport
         {
             if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var slots)) continue;
             var a = new[] { rdr.GetDouble(1), rdr.GetDouble(2), rdr.GetDouble(3), rdr.GetDouble(4) };
-            // OVERWRITE: use the substrate's physicalities.coord verbatim — the exact coordinate
-            // the metric is computed over — not whatever the tokenizer parser pre-seeded.
+            
+            
             foreach (int s in slots) { anchors[s] = a; filled++; }
         }
         return filled;
     }
 
-    // Vocab-bounded trajectory ORDER LADDER in ONE walk: entity_trajectory_plane
-    // masks both endpoints to the vocab inside the native scan and emits forward
-    // co-occurrence at every gap 1..maxGap, degree-capped per (subject, gap). We
-    // stream the single result and split it into per-gap adjacency — no per-gap
-    // re-walk, no all-pairs materialization. Returns planes[0..maxGap-1] (gap g → [g-1]).
+    
+    
+    
+    
+    
     internal static async Task<PlaneCoo[]> ReadTrajectoryLadderAsync(
         NpgsqlDataSource ds, int maxGap,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
@@ -516,7 +516,7 @@ internal static class FoundryExport
         int vi = 0;
         foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
 
-        // adj[g] : subject ordinal -> (object ordinal, w)
+        
         var adj = new Dictionary<int, List<(int Col, double W)>>[maxGap];
         for (int g = 0; g < maxGap; g++) adj[g] = new Dictionary<int, List<(int, double)>>();
 
@@ -524,7 +524,7 @@ internal static class FoundryExport
         try
         {
             await using var cmd = conn.CreateCommand();
-            cmd.CommandTimeout = 0;   // the per-backend corpus build walks the whole stream once
+            cmd.CommandTimeout = 0;   
             cmd.CommandText =
                 "SELECT gap, subject_id, object_id, w FROM laplace.entity_trajectory_plane($1, $2, $3)";
             cmd.Parameters.Add(new NpgsqlParameter
@@ -559,10 +559,10 @@ internal static class FoundryExport
         return planes;
     }
 
-    // GRAPHEME-FLOOR order: P(next grapheme | current) from word constituencies
-    // (laplace.grapheme_order). The grapheme-floor model factors THIS into embed/lm_head,
-    // so the cast generates char-by-char following real letter statistics — and the vocab
-    // (single graphemes) tokenizes any prompt in-engine with no merge path.
+    
+    
+    
+    
     internal static async Task<PlaneCoo> ReadGraphemeOrderAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int gap = 1)
     {
@@ -573,7 +573,7 @@ internal static class FoundryExport
         var adj = new Dictionary<int, List<(int Col, double W)>>();
         await using var conn = await ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 0;   // pays the bounded constituency walk once
+        cmd.CommandTimeout = 0;   
         cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.grapheme_order($1, 50000, $2)";
         cmd.Parameters.Add(new NpgsqlParameter
             { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
@@ -591,13 +591,13 @@ internal static class FoundryExport
                 foreach (int o in obj) row.Add((o, w));
             }
         }
-        return CooFromAdj(adj, 256);   // graphemes have few followers; cap generously
+        return CooFromAdj(adj, 256);   
     }
 
-    // WORD ORDER off the CONTENT TRAJECTORY GEOMETRY (laplace.word_order): P(next word | cur word)
-    // from the witnessed sentence/phrase trajectories (tier>2), masked to the vocab — the word-tier
-    // analog of ReadGraphemeOrderAsync. gap=1 bigram, gap=2 skip-gram. NOT trajectory_pairs, NOT
-    // folded PRECEDES — the sequence read straight from the trajectory LineStrings.
+    
+    
+    
+    
     internal static async Task<PlaneCoo> ReadWordOrderAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots,
         int gap = 1, int trajs = 200000, int cap = 64)
@@ -609,7 +609,7 @@ internal static class FoundryExport
         var adj = new Dictionary<int, List<(int Col, double W)>>();
         await using var conn = await ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 0;   // pays the bounded trajectory walk once
+        cmd.CommandTimeout = 0;   
         cmd.CommandText = "SELECT subject_id, object_id, w FROM laplace.word_order($1, $2, $3)";
         cmd.Parameters.Add(new NpgsqlParameter
             { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
@@ -631,13 +631,13 @@ internal static class FoundryExport
         return CooFromAdj(adj, cap);
     }
 
-    // LIVE trajectory order ladder: trajectory_cooccurrence_by_stride is the native
-    // word-stride scan (cooccurrence_scan in C) — entity_trajectory_plane was retired.
-    // Returns per-(subject,object,gap) witnessed forward counts + the per-(subject,gap)
-    // total, so cnt/total is the conditional P(object follows subject at gap g). We
-    // collapse gaps into one DIRECTED next-token plane, discounting by gap (closer =
-    // stronger continuation), filtered to the mold's vocab. This is the ORDER signal the
-    // folded causal consensus band (147 edges over the probe vocab) was missing.
+    
+    
+    
+    
+    
+    
+    
     internal static async Task<PlaneCoo> ReadTrajectoryStrideAsync(
         NpgsqlDataSource ds, int maxGap,
         Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
@@ -645,16 +645,16 @@ internal static class FoundryExport
         var adj = new Dictionary<int, List<(int Col, double W)>>();
         await using var conn = await ds.OpenConnectionAsync();
 
-        // Force _PG_init so the corpus GUC is registered BEFORE the SET. The prefix-reserve
-        // reorder makes a pre-load SET adoptable, but loading the extension first makes the
-        // bound apply unconditionally.
+        
+        
+        
         await using (var warm = conn.CreateCommand())
         {
             warm.CommandText = "SELECT laplace.relation_type_id('IS_A')";
             await warm.ExecuteScalarAsync();
         }
 
-        // Bound the ONE-TIME corpus build (the GUC the _PG_init reorder made reachable).
+        
         int corpusMax = EnvInt("LAPLACE_FOUNDRY_CORPUS_MAX", 200_000);
         if (corpusMax > 0)
         {
@@ -664,8 +664,8 @@ internal static class FoundryExport
         }
         try
         {
-            // Materialize the order ladder ONCE (rebuilds only when the trajectory probe
-            // moves); the expensive stream build is paid here, globally, not per read.
+            
+            
             await using (var ensure = conn.CreateCommand())
             {
                 ensure.CommandTimeout = 0;
@@ -674,8 +674,8 @@ internal static class FoundryExport
                 await ensure.ExecuteScalarAsync();
             }
 
-            // Vocab-bounded INDEX-SCAN read of the materialized ladder: w is already the
-            // gap-discounted conditional continuation Σ_gap (cnt/subject_total)/gap.
+            
+            
             var vocab = new byte[tokenSlots.Count][];
             int vi = 0;
             foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
@@ -710,9 +710,9 @@ internal static class FoundryExport
         return CooFromAdj(adj, degreeCap);
     }
 
-    // Canonical-order COO from a subject->(object,w) adjacency, degree-capped by |w|.
-    // Shared by the bounded readers so the cast law (same consensus + same mold =>
-    // same bytes) holds regardless of DB scan order.
+    
+    
+    
     private static PlaneCoo CooFromAdj(Dictionary<int, List<(int Col, double W)>> adj, int degreeCap)
     {
         long kept = 0;
@@ -733,9 +733,9 @@ internal static class FoundryExport
         return new PlaneCoo(rows, cols, vals);
     }
 
-    // Per-plane scale normalization (max |w| → 1) so μ-weighted consensus planes
-    // and frequency-weighted trajectory planes union into operators at comparable
-    // magnitude. Relative structure within each plane is untouched.
+    
+    
+    
     internal static PlaneCoo Normalize(PlaneCoo p)
     {
         double max = 0;
@@ -763,14 +763,14 @@ internal static class FoundryExport
 
     internal sealed record BasisStats(int SpectralRank, int ZeroSpectralTokens, double ProcrustesResidual);
 
-    // AFFINITY-SVD embedding: a token's vector = the SVD reduction of its full relational
-    // affinity ROW (its rank-weighted edges to every other token). Two tokens with similar
-    // relational fingerprints (dog/cat both IS_A mammal, both PRECEDES verbs, …) get similar
-    // rows → similar embeddings. This is the direct factorization of the consensus the user
-    // describes, vs Laplacian-eigenmaps over the capped graph (which measured 0.58σ). The
-    // affinity is symmetrized; the top-k left singular vectors (scaled by √S) are the basis.
-    // NOTE: tensor_svd_truncate needs kmax ≥ min(m,n) = vocab, so this is dense vocab×vocab —
-    // use it at modest vocab (≤~3k); larger vocab needs a sparse solver.
+    
+    
+    
+    
+    
+    
+    
+    
     internal static double[] BuildBasisAffinity(
         int vocab, int dModel, PlaneCoo aff, double[]?[] anchors, Hash128 seed,
         out BasisStats stats)
@@ -783,7 +783,7 @@ internal static class FoundryExport
             if (x < 0 || x >= vocab || y < 0 || y >= vocab) continue;
             float w = (float)aff.Vals[e];
             A[(long)x * vocab + y] += w;
-            A[(long)y * vocab + x] += w;   // symmetrize (similarity is undirected)
+            A[(long)y * vocab + x] += w;   
         }
         var U = new float[(long)vocab * vocab];
         var S = new float[vocab];
@@ -816,18 +816,18 @@ internal static class FoundryExport
         return e2;
     }
 
-    // FAITHFUL low-rank factorization of the rated adjacency for the generative cast.
-    // A[X,Y] = rank-weighted rating of the continuation X→Y (DIRECTED — not symmetrized).
-    // The truncated SVD A ≈ U S Vᵀ to rank = dim is the EXACT optimal rank-dim approximation
-    // (Eckart–Young). embed[X] = U[X]·√S, lm_head[Y] = V[Y]·√S, so in the cast
-    //   logits[Y|X] = lm_head[Y]·embed[X] = Σ_k U[X,k]·S_k·V[Y,k] = A_dim[X,Y]
-    // — the rank-weighted rating LOOKED UP, factored to the hidden width. dim is a NORMAL
-    // embedding size (e.g. 512), NEVER vocab: a 32k-token model is 32000×512, not 32000².
-    // The only loss is the truncation tail (singular values past dim); no learning, no gains.
-    // A is scaled to max|w|→1 first so reconstructed logits keep sane magnitude (the cast's
-    // RMSNorm contributes a per-token positive factor = temperature, not an argmax change).
-    // embed/lmHead come back row-major [vocab × dim], zero-padded past the spectral rank.
-    // NOTE: dense vocab×vocab SVD — modest vocab (≤~4k). Larger needs a sparse/randomized solver.
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     internal static void FactorAdjacency(
         PlaneCoo adj, int vocab, int dim, out double[] embed, out double[] lmHead, out int usedRank,
         bool conditional = false, bool suppressSelf = false, double dehub = 0.0)
@@ -835,28 +835,28 @@ internal static class FoundryExport
         var rowSum = new double[vocab];
         var colSum = new double[vocab];
         double total = 0;
-        // accumulate the directed rated adjacency as a SPARSE list (row=subject X, col=object Y)
+        
         var ex = new int[adj.Nnz]; var ey = new int[adj.Nnz]; var ew = new double[adj.Nnz]; int en = 0;
         for (long e = 0; e < adj.Nnz; e++)
         {
             int x = adj.Rows[e], y = adj.Cols[e];
             if (x < 0 || x >= vocab || y < 0 || y >= vocab) continue;
-            if (suppressSelf && x == y) continue;   // no X→X echo (king→king); grapheme keeps doubles
+            if (suppressSelf && x == y) continue;   
             double w = adj.Vals[e];
             ex[en] = x; ey[en] = y; ew[en] = w; en++;
             rowSum[x] += w; colSum[y] += w; total += w;
         }
-        // PPMI: As[X,Y] = max(0, ln( A[X,Y]·T / (rowSum[X]·colSum[Y]) )). This is THE proven
-        // co-occurrence→embedding transform (positive pointwise mutual information; SVD-of-PPMI
-        // equals skip-gram, Levy–Goldberg 2014). It conditions each X→Y rating on the base rates,
-        // so the global hub (high in-degree function words the/I/and) is divided out and X's
-        // SPECIFIC continuation surfaces. It is NON-NEGATIVE and ZERO where there is no edge, so
-        // the SVD spends its rank on real structure, not the hub, and the empty byte/special rows
-        // stay ~0 (no spurious byte continuations). Not a tuned scalar — the marginal conditioning
-        // the invention demands ("whitespace must not weigh as heavily as content words").
-        // Build As as a SPARSE edge list (non-edges = implicit 0 = uniform baseline). conditional
-        // → signed log-odds log(P(Y|X)·V) (the GENERATIVE readout; PPMI's −ln P(Y) inflates rare
-        // next-tokens into a hub, a SIMILARITY transform wrong for generation); else → PPMI (≥0).
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         var sx = new int[en]; var sy = new int[en]; var sv = new double[en]; int sn = 0;
         for (int i = 0; i < en; i++)
         {
@@ -865,11 +865,11 @@ internal static class FoundryExport
             {
                 double rs = rowSum[ex[i]];
                 if (rs <= 0) continue;
-                val = Math.Log(ew[i] / rs * vocab);     // log(P(Y|X)·V); non-edges stay 0 = uniform
-                // DE-HUB: subtract λ·log P(Y) so high-frequency function-word continuations (the/of/and)
-                // lose weight and the "the only one of the" loop weakens. λ=0 = pure conditional flow;
-                // λ=1 ≈ PMI. P(Y)=colSum[Y]/total (≤1 so log<0; the subtraction boosts rare Y more than
-                // frequent Y → frequent hubs relatively suppressed).
+                val = Math.Log(ew[i] / rs * vocab);     
+                
+                
+                
+                
                 if (dehub != 0.0 && colSum[ey[i]] > 0 && total > 0)
                     val -= dehub * Math.Log(colSum[ey[i]] / total);
             }
@@ -878,7 +878,7 @@ internal static class FoundryExport
                 double denom = rowSum[ex[i]] * colSum[ey[i]];
                 if (denom <= 0) continue;
                 val = Math.Log(ew[i] * total / denom);
-                if (val <= 0) continue;                 // PPMI clamps negatives to 0
+                if (val <= 0) continue;                 
             }
             if (val == 0) continue;
             sx[sn] = ex[i]; sy[sn] = ey[i]; sv[sn] = val; sn++;
@@ -887,10 +887,10 @@ internal static class FoundryExport
         embed  = new double[(long)vocab * dim];
         lmHead = new double[(long)vocab * dim];
 
-        // DENSE full SVD for modest vocab; RANDOMIZED sparse-sketch SVD above it. A dense
-        // vocab×vocab matrix is 32k²·4B = 4GB with an O(vocab³) SVD — the SELF-INFLICTED "≤4k"
-        // ceiling. The randomized SVD (Halko–Martinsson–Tropp) NEVER forms it: it sketches the
-        // SPARSE As with a Gaussian, projects, and SVDs only the small L×vocab band. Same factors.
+        
+        
+        
+        
         if (vocab <= EnvInt("LAPLACE_FOUNDRY_DENSE_SVD_MAX", 6000))
         {
             var As = new float[(long)vocab * vocab];
@@ -908,7 +908,7 @@ internal static class FoundryExport
             if (rc != 0) throw new InvalidOperationException($"tensor_svd_truncate (adjacency) rc={rc} (vocab={vocab})");
             int kk = Math.Min(dim, (int)outRank);
             usedRank = kk;
-            // S goes ENTIRELY on lm_head (embed=U keeps unit columns so RMSNorm preserves direction).
+            
             for (int c = 0; c < kk; c++)
             {
                 double s = Math.Max(0f, S[c]);
@@ -925,33 +925,33 @@ internal static class FoundryExport
         }
     }
 
-    // Randomized truncated SVD of the SPARSE signed matrix As (edge sx[i]→sy[i] = sv[i], else 0):
-    // embed = U[:,0:dim], lm_head = (V·S)[:,0:dim] — the SAME factors the dense path returns, with
-    // NO vocab×vocab dense matrix ever formed. Halko–Martinsson–Tropp with q power iterations; the
-    // only dense SVD is on the L×vocab projected band (L = dim + oversample). Matvecs parallelize
-    // over the L sketch rows (each row independent → race-free), so 32k words factor in seconds.
+    
+    
+    
+    
+    
     internal static int FactorSparseRandomized(
         int[] sx, int[] sy, double[] sv, int sn, int vocab, int dim, double[] embed, double[] lmHead)
     {
         int L = Math.Min(vocab, dim + EnvInt("LAPLACE_FOUNDRY_RSVD_OVERSAMPLE", 16));
         int q = EnvInt("LAPLACE_FOUNDRY_RSVD_POWER", 1);
-        // Ω and the running sketch are L×vocab (L vectors as rows).
+        
         var Y  = new double[(long)L * vocab];
         var Om = new double[(long)L * vocab];
         ulong seed = SplitMix(0x9E3779B97F4A7C15UL ^ (ulong)vocab ^ ((ulong)dim << 32));
         for (long t = 0; t < (long)L * vocab; t++) Om[t] = Gaussian(ref seed);
-        SpMatVec(sx, sy, sv, sn, Om, Y, L, vocab, false);                 // Y = As·Ωᵀ
+        SpMatVec(sx, sy, sv, sn, Om, Y, L, vocab, false);                 
         var Z = new double[(long)L * vocab];
         for (int it = 0; it < q; it++)
         {
-            Array.Clear(Z); SpMatVec(sx, sy, sv, sn, Y, Z, L, vocab, true);    // Z = Asᵀ·Y
-            Array.Clear(Y); SpMatVec(sx, sy, sv, sn, Z, Y, L, vocab, false);   // Y = As·Z
+            Array.Clear(Z); SpMatVec(sx, sy, sv, sn, Y, Z, L, vocab, true);    
+            Array.Clear(Y); SpMatVec(sx, sy, sv, sn, Z, Y, L, vocab, false);   
         }
-        // Orthonormalize the range of Y via its Gram matrix G = Y·Yᵀ (L×L). This is RANK-REVEALING:
-        // a sparse log-odds matrix with a dominant direction makes the sketch rank-deficient, which
-        // Gram-Schmidt rejects (rc=-4). The Gram eigendecomposition instead DROPS the deficient
-        // directions (σ_k ≤ eps·σ_0). Q[k] = (1/√σ_k)·Σ_i W[i,k]·Y[i] is then orthonormal by W's
-        // orthonormality, with no division by ~0.
+        
+        
+        
+        
+        
         var G = new double[(long)L * L];
         System.Threading.Tasks.Parallel.For(0, L, i =>
         {
@@ -972,7 +972,7 @@ internal static class FoundryExport
         double s0g = Sg.Length > 0 ? Sg[0] : 0;
         int rkQ = 0; while (rkQ < L && Sg[rkQ] > 1e-10 * s0g && Sg[rkQ] > 0) rkQ++;
         rkQ = Math.Max(1, rkQ);
-        var Q = new double[(long)rkQ * vocab];                            // rkQ×vocab orthonormal rows
+        var Q = new double[(long)rkQ * vocab];                            
         System.Threading.Tasks.Parallel.For(0, rkQ, k =>
         {
             double invsq = 1.0 / Math.Sqrt(Sg[k]);
@@ -984,7 +984,7 @@ internal static class FoundryExport
                 for (int t = 0; t < vocab; t++) Q[bk + t] += w * Y[bi + t];
             }
         });
-        var B = new double[(long)rkQ * vocab];                            // B = Q·As  (rkQ×vocab)
+        var B = new double[(long)rkQ * vocab];                            
         SpMatVecQ(sx, sy, sv, sn, Q, B, rkQ, vocab);
         var Bf = new float[(long)rkQ * vocab];
         for (long t = 0; t < (long)rkQ * vocab; t++) Bf[t] = (float)B[t];
@@ -997,7 +997,7 @@ internal static class FoundryExport
         }
         if (rc != 0) throw new InvalidOperationException($"tensor_svd_truncate (rsvd band) rc={rc} (rkQ={rkQ}, vocab={vocab})");
         int kk = Math.Min(dim, (int)outRank);
-        // U_As = Qᵀ·Ũ (vocab×kk); embed = U_As, lm_head = V·S (S on lm_head, see dense note).
+        
         System.Threading.Tasks.Parallel.For(0, vocab, x =>
         {
             for (int c = 0; c < kk; c++)
@@ -1011,8 +1011,8 @@ internal static class FoundryExport
         return kk;
     }
 
-    // Out[c,a] += Σ_edge sv·M[c,b], (a,b)=(x,y) for As·M (transpose=false) or (y,x) for Asᵀ·M.
-    // Parallel over the L sketch rows c — each row writes only its own band, so no races.
+    
+    
     static void SpMatVec(int[] sx, int[] sy, double[] sv, int sn, double[] M, double[] Outp, int L, int vocab, bool transpose)
     {
         System.Threading.Tasks.Parallel.For(0, L, c =>
@@ -1026,7 +1026,7 @@ internal static class FoundryExport
             }
         });
     }
-    // B[c,y] += Q[c,x]·sv  (B = Q·As). Parallel over c.
+    
     static void SpMatVecQ(int[] sx, int[] sy, double[] sv, int sn, double[] Q, double[] B, int L, int vocab)
     {
         System.Threading.Tasks.Parallel.For(0, L, c =>
@@ -1036,9 +1036,9 @@ internal static class FoundryExport
         });
     }
 
-    // Generates E [vocab × dModel] row-major. anchors[i] is null or a 4D content
-    // coordinate for vocab ordinal i. The seed must derive from the recipe (never
-    // the clock) so identical consensus + identical mold ⇒ identical cast.
+    
+    
+    
     internal static double[] BuildBasis(
         int vocab, int dModel, PlaneCoo leGraph, double[]?[] anchors, Hash128 seed,
         out BasisStats stats)
@@ -1051,12 +1051,12 @@ internal static class FoundryExport
         var y = GC.AllocateUninitializedArray<double>(checked(vocab * k), pinned: true);
         if (coordOnly)
         {
-            // PURE S³ RIGID FRAME — NO Lanczos eigensolve, NO GSO, NO Procrustes. The substrate's
-            // own 4D super-Fibonacci coord IS the embedding (FillCoordAnchors filled `anchors`);
-            // q·k is then cos on S³ = the angular metric EXACTLY. O(vocab), well-conditioned by
-            // construction. This removes the 392s eigensolve and its residual-68 Procrustes — that
-            // ill-conditioned basis collapsed the 32k cast to a single 'or' attractor. Off-graph
-            // tokens stay zero (the row-norm fallback parks them on the bias channel).
+            
+            
+            
+            
+            
+            
             Array.Clear(y, 0, y.Length);
             for (int i = 0; i < vocab; i++)
             {
@@ -1079,7 +1079,7 @@ internal static class FoundryExport
                 throw new InvalidOperationException(
                     $"laplacian_eigenmaps_from_sparse_graph rc={rc} (vocab={vocab}, K={k}, nnz={leGraph.Nnz})");
 
-            // GSO over the spectral columns (vectors-as-rows: transpose, orthonormalize, transpose back).
+            
             var yt = new double[(long)k * vocab];
             for (int i = 0; i < vocab; i++)
                 for (int d = 0; d < k; d++) yt[(long)d * vocab + i] = y[(long)i * k + d];
@@ -1098,8 +1098,8 @@ internal static class FoundryExport
             if (n2 < 1e-24) zeroSpectral++;
         }
 
-        // Procrustes-anchor the first 4 spectral dims to token content coordinates,
-        // rescaled so the anchored block keeps the spectral block's magnitude.
+        
+        
         double resid = double.NaN;
         var fitIdx = new List<int>();
         for (int i = 0; i < vocab; i++) if (anchors[i] is not null) fitIdx.Add(i);
@@ -1107,16 +1107,16 @@ internal static class FoundryExport
         bool coordDirect = EnvInt("LAPLACE_FOUNDRY_COORD_DIRECT", 0) != 0;
         if (coordOnly)
         {
-            // coords are already placed in dims 0..3; no eigenmap to align, nothing to Procrustes.
+            
         }
         else if (coordDirect && fitIdx.Count > 0)
         {
-            // S³ IS THE RIGID FRAME — do not FIT one. The substrate's own 4D super-Fibonacci
-            // coordinate is the entity's position in that fixed frame; place it in dims 0..3
-            // VERBATIM (no LE, no GSO, no Procrustes rotation of an eigenmap that residual~11
-            // proves can't align). q·k is then cos on S³ = angular distance EXACTLY, so a
-            // geometric head reproduces its metric. COORD_SCALE lets the frame dominate the
-            // (optional) LE relation structure left in dims 4..k for the Glicko-rated heads.
+            
+            
+            
+            
+            
+            
             double cs = EnvDouble("LAPLACE_FOUNDRY_COORD_SCALE", 1.0);
             for (int i = 0; i < vocab; i++)
             {
@@ -1164,10 +1164,10 @@ internal static class FoundryExport
                             specSq += s * s;
                         }
                     }
-                    // The anchoring OVERWRITES the top-4 (most significant) spectral dims with
-                    // the content-coordinate fit. When the fit is poor (high residual) this
-                    // corrupts the strongest geometry rather than aligning it — gate it so the
-                    // pure Laplacian-eigenmap geometry can be used instead.
+                    
+                    
+                    
+                    
                     double scale = anchSq > 0 ? Math.Sqrt(specSq / anchSq) : 1.0;
                     if (EnvInt("LAPLACE_FOUNDRY_PROCRUSTES", 1) != 0)
                         for (int i = 0; i < vocab; i++)
@@ -1181,12 +1181,12 @@ internal static class FoundryExport
         for (int i = 0; i < vocab; i++)
             Array.Copy(y, (long)i * k, e, (long)i * dModel, k);
 
-        // Deterministic capacity dims: seeded Gaussian columns that give the embedding
-        // full rank WITHOUT drowning the spectral geometry. The GSO'd spectral block has
-        // per-row energy ≈ k/vocab; size the capacity block to carry only capFrac of that
-        // total, so ≥(1-capFrac) of each normalized row is consensus structure (otherwise
-        // 1792 random dims at spectral magnitude out-energize the 256 real dims and the
-        // similarity cosine washes to noise — measured: +0.05σ → the geometry vanishes).
+        
+        
+        
+        
+        
+        
         double capFrac = EnvDouble("LAPLACE_FOUNDRY_CAP_FRAC", 0.05);
         int capDims = Math.Max(1, dModel - 1 - k);
         double capScale = Math.Sqrt(capFrac * ((double)k / vocab) / capDims);
@@ -1197,7 +1197,7 @@ internal static class FoundryExport
                 e[(long)i * dModel + d] = Gaussian(ref s) * capScale;
         }
 
-        // Row-normalize the content dims; the bias channel sits outside the norm.
+        
         for (int i = 0; i < vocab; i++)
         {
             long off = (long)i * dModel;
@@ -1213,8 +1213,8 @@ internal static class FoundryExport
         return e;
     }
 
-    // M = Eᵀ·A·E for a sparse signed operator A (per-token weights are all ones, so
-    // the kernel's "scale by √consensus" is the identity and binary gram == Eᵀ A E).
+    
+    
     internal static double[] ProjectOperator(double[] e, int vocab, int dModel, PlaneCoo coo)
     {
         var ones = new double[vocab];
@@ -1238,18 +1238,18 @@ internal static class FoundryExport
 
     internal sealed record Factors(float[] Left, float[] Right, int Rank, int Dim, double SampleResidual, double SpectralNorm);
 
-    // Factor M ≈ Leftᵀ·Right with Left/Right [rankCap × d] rows = √Sᵣ·uᵣᵀ / √Sᵣ·vᵣᵀ.
-    // transpose=true factors Mᵀ instead (for operators whose composed orientation
-    // is Wouter·Winner, e.g. Wo·Wv and Wdown·Wup). The native kernel computes the
-    // FULL SVD (its kmax is buffer capacity, required ≥ min(m,n)) and truncates by
-    // rel_err_tol; the mold's rank cap is applied here, keeping the strongest modes.
-    //
-    // Factors are SPECTRALLY NORMALIZED (divided by √s₀ each, so the composed
-    // operator is M/s₀ with spectral norm 1). Plane normalization bounds edge
-    // weights, not ‖EᵀAE‖₂ — unnormalized, one layer's residual add is s₀ (~10²)
-    // times the stream and the forward pass power-iterates onto the dominant
-    // eigendirection, erasing the prompt (measured: paris rank 267→18,559 after
-    // one layer). The layer scales in the fill are the entire depth budget.
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     internal static Factors Factor(double[] m, int d, int rankCap, double relTol, bool transpose)
     {
         var a = new float[(long)d * d];
@@ -1283,8 +1283,8 @@ internal static class FoundryExport
             }
         }
 
-        // Sampled recomposition residual — a layout/orientation tripwire, not a fidelity
-        // metric. Large values mean the factor wiring is wrong, not that consensus is.
+        
+        
         double num = 0, den = 0;
         ulong rng = SplitMix(0x9E3779B97F4A7C15UL ^ (ulong)d);
         for (int t = 0; t < 512; t++)
@@ -1301,7 +1301,7 @@ internal static class FoundryExport
         return new Factors(left, right, k, d, resid, s0);
     }
 
-    // ── mold tensor fills ─────────────────────────────────────────────────────
+    
 
     internal static void FillRows(float[] vals, int rows, int cols, Factors f, double scale)
     {
@@ -1333,11 +1333,11 @@ internal static class FoundryExport
             vals[(long)r * cols + (cols - 1)] = (float)gateCol;
     }
 
-    // DIRECT RIGID-FRAME attention head: q/k SELECT the basis coordinate dims (0..coordDims) so
-    // q·k = coord·coord = cos on S³ = the angular metric EXACTLY (RMSNorm supplies the per-token
-    // unit normalization). No factored operator — the head IS the S³ frame, transcribed (measured
-    // 100% neighbour recall vs 8% for the SVD-factored path, 2.1% noise floor). Every head in the
-    // layer reads the same coordinate block.
+    
+    
+    
+    
+    
     internal static void FillCoordHead(float[] vals, int rows, int cols, int headDim, int coordDims, double scale)
     {
         if (headDim <= 0) return;
@@ -1349,7 +1349,7 @@ internal static class FoundryExport
 
     internal static double Silu(double z) => z / (1.0 + Math.Exp(-z));
 
-    // ── byte packers (GGUF tensor payloads) ───────────────────────────────────
+    
 
     internal static byte[] ToBf16Bytes(float[] data)
     {
@@ -1371,7 +1371,7 @@ internal static class FoundryExport
         return o;
     }
 
-    // ── deterministic PRNG (no clock, no shared Random) ───────────────────────
+    
 
     private static ulong SplitMix(ulong x)
     {

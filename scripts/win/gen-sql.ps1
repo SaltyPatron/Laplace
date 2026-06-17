@@ -2,9 +2,9 @@ param(
     [string]$Root = (Resolve-Path "$PSScriptRoot\..\.."),
     [string]$Version = "0.1.0",
     [string]$Stage = "",
-    # Refresh mode: expand ONE substrate .sql.in module and apply it to a live
-    # database (modules are CREATE OR REPLACE, so this is idempotent), e.g.
-    #   gen-sql.ps1 -Module 26_generation.sql.in -Database laplace_code
+    
+    
+    
     [string]$Module = "",
     [string]$Database = ""
 )
@@ -92,12 +92,12 @@ if ($Module) {
     $sql = ($lines -join "`n")
     $sql = $sql -creplace 'MODULE_PATHNAME', $Name
     $sql = $sql -creplace '@extschema@', 'laplace'
-    # refresh mode reruns whole modules against live DBs: CREATE TABLE/INDEX must be
-    # idempotent (functions already are via CREATE OR REPLACE), and
-    # pg_extension_config_dump only exists inside CREATE EXTENSION scripts
+    
+    
+    
     $sql = $sql -creplace 'CREATE (UNLOGGED )?TABLE (?!IF NOT EXISTS)', 'CREATE $1TABLE IF NOT EXISTS '
     $sql = $sql -creplace 'CREATE (UNIQUE )?INDEX (?!IF NOT EXISTS)', 'CREATE $1INDEX IF NOT EXISTS '
-    $sql = $sql -creplace '(?m)^\s*SELECT pg_extension_config_dump.*$', '-- (pg_extension_config_dump stripped for live refresh)'
+    $sql = $sql -creplace '(?m)^\s*SELECT pg_extension_config_dump.*$', ''
     $sql = "SET search_path = laplace, public;`nSET check_function_bodies = off;`n" + $sql
 
     $tmp = Join-Path $env:TEMP "laplace_refresh_$($Module -replace '\W','_').sql"

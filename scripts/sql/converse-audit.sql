@@ -1,11 +1,11 @@
--- Conversational-capability audit for the laplace.converse() surface.
--- One-shot: psql -h localhost -U postgres -d laplace -P pager=off -f scripts/sql/converse-audit.sql
--- Companion to substrate-audit.sql (structural/ingestion health).
---
--- Validates, against the CURRENT ingested data:
---   * the C/C++ offload + perf-cache the conversational path depends on,
---   * which converse intents are live vs data-starved,
---   * the intent router, end-to-end replies, known logic bugs, and session memory.
+
+
+
+
+
+
+
+
 
 SET search_path = laplace, public;
 SET client_min_messages = warning;

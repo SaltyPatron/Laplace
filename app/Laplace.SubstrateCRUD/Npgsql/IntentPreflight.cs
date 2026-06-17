@@ -4,21 +4,21 @@ using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
-/// <summary>
-/// The existence preflight for the transactional-upsert path: one chunked round-trip that asks the
-/// substrate which of the proposed entity/physicality/attestation ids already exist, returned as a
-/// packed bitmap and decoded back to the id set. The writer feeds the results into its
-/// <see cref="ProvenIdCache"/>s so already-present ids are skipped on subsequent intents.
-/// </summary>
+
+
+
+
+
+
 internal static class IntentPreflight
 {
     private const int ChunkSize = 250_000;
 
-    /// <summary>
-    /// One call to <c>laplace.intent_preflight</c> per 250k-id chunk: returns the sets of ids that
-    /// already exist for entities/physicalities/attestations. The three id lists are independent;
-    /// each is chunked and bitmap-decoded against the same returned row.
-    /// </summary>
+    
+    
+    
+    
+    
     public static async Task<(HashSet<Hash128> Entities, HashSet<Hash128> Phys, HashSet<Hash128> Att)>
         RunAsync(
             NpgsqlConnection conn,
@@ -65,10 +65,10 @@ internal static class IntentPreflight
         return (entExisting, physExisting, attExisting);
     }
 
-    /// <summary>
-    /// Existence check over <c>laplace.entities_exist_bitmap</c> for the referrer-provenance gate:
-    /// every id referenced by a staged row must already exist (fail-closed) before commit.
-    /// </summary>
+    
+    
+    
+    
     public static async Task<HashSet<Hash128>> EntitiesExistAsync(
         NpgsqlConnection conn, IReadOnlyList<Hash128> ids, CancellationToken ct)
     {
@@ -89,7 +89,7 @@ internal static class IntentPreflight
         return existing;
     }
 
-    /// <summary>Collects the distinct ids of one row kind that are not already in <paramref name="proven"/>.</summary>
+    
     public static List<Hash128> CollectUnprovenIds<TRow>(
         IReadOnlyList<SubstrateChange> changes,
         Func<SubstrateChange, System.Collections.Immutable.ImmutableArray<TRow>> select,

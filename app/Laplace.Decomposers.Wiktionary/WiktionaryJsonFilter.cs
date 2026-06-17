@@ -5,7 +5,7 @@ namespace Laplace.Decomposers.Wiktionary;
 
 internal static class WiktionaryJsonFilter
 {
-    /// <summary>Scan only lang_code/lang before full parse — skip for English-only jsonl files.</summary>
+    
     public static bool MatchesLanguageFilter(ReadOnlySpan<byte> json, LanguageFilter langs)
     {
         if (!langs.IsActive) return true;

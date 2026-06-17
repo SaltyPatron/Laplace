@@ -1,9 +1,9 @@
-/*
- * variant_synth.c - variant synthesis (respelling) over witnessed constituency:
- * walk an entity's consensus peers / trajectory points to propose alternative
- * spellings. Fully independent of the generation corpus cache; split out of
- * trajectory_walk.c.
- */
+
+
+
+
+
+
 #include "postgres.h"
 
 #include <math.h>
@@ -27,9 +27,9 @@
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_peer);
 PG_FUNCTION_INFO_V1(pg_laplace_variant_walk);
 PG_FUNCTION_INFO_V1(pg_laplace_respell_variant);
-/* ── variant synthesis over witnessed constituency ─────────────────────────── */
 
-/* copy_bytea_datum lives in spi_common.h */
+
+
 
 static Datum
 consensus_peer_lookup(Datum id, int32 k)
@@ -86,8 +86,8 @@ consensus_peer_lookup(Datum id, int32 k)
         "  SELECT id FROM geometric "
         "  WHERE NOT EXISTS (SELECT 1 FROM elected)"
         ") z "
-        /* deterministic peer pick: hash-order candidates keyed to the subject id, so the
-           same subject always resolves the same peer (substrate invariant: repeatable). */
+        
+
         "ORDER BY public.laplace_hash128_blake3(z.id || $1) LIMIT 1";
 
     Oid   argtypes[2] = { BYTEAOID, INT4OID };
@@ -338,8 +338,8 @@ pg_laplace_respell_variant(PG_FUNCTION_ARGS)
         "JOIN laplace.physicalities p ON p.entity_id = e.id AND p.type = 1 "
         "  AND p.trajectory IS NOT NULL "
         "WHERE n.name = 'substrate/type/grammar/' || $1 || '/' || $2 || '/v1' "
-        /* deterministic seed pick: hash-order keyed to (modality, node_type) so a given
-           grammar type always resolves the same seed (substrate invariant: repeatable). */
+        
+
         "ORDER BY public.laplace_hash128_blake3(e.id || convert_to($1 || '/' || $2, 'UTF8')) LIMIT 1";
     Oid    argtypes[2] = { TEXTOID, TEXTOID };
     Datum  args[2];

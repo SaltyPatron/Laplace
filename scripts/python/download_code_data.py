@@ -21,8 +21,8 @@ from pathlib import Path
 DEFAULT_TINY_DEST  = Path("D:/Data/Ingest/tiny-codes")
 DEFAULT_STACK_DEST = Path("D:/Data/Ingest/stack-v2")
 
-# Maps our grammar ID -> Stack v2 language name(s) as they appear in the repo file tree.
-# The Stack v2 organises data as  data/{StackLangName}/train-*.parquet
+
+
 GRAMMAR_TO_STACK_LANG = {
     "python":      "Python",
     "c":           "C",
@@ -71,8 +71,8 @@ def download_stack_v2(dest: Path, grammar_ids: list[str], shards_per_lang: int):
     print(f"[stack-v2] destination: {dest}")
     print()
 
-    # Enumerate repo files to find per-language shards
-    # Stack v2 layout: data/{Language}/train-{n:05d}-of-{total:05d}.parquet
+    
+    
     try:
         all_files = list(list_repo_files("bigcode/the-stack-v2", repo_type="dataset"))
     except Exception as e:
@@ -82,14 +82,14 @@ def download_stack_v2(dest: Path, grammar_ids: list[str], shards_per_lang: int):
         print("           then run:  huggingface-cli login", file=sys.stderr)
         sys.exit(1)
 
-    # Group parquet files by language
+    
     from collections import defaultdict
     import re
     by_lang: dict[str, list[str]] = defaultdict(list)
     for f in all_files:
         if not f.endswith(".parquet"):
             continue
-        # Normalise path separators
+        
         parts = f.replace("\\", "/").split("/")
         if len(parts) < 3 or parts[0] != "data":
             continue

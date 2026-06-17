@@ -65,7 +65,7 @@ export const useAppStore = create<AppState>((set) => ({
   clearConversation: () => set({ messages: [], pendingQuote: null }),
 }));
 
-/** OpenAPI int64/decimal surface as string|number in generated types — normalize once. */
+
 export function asNum(value: string | number | null | undefined): number {
   return typeof value === 'number' ? value : Number(value ?? 0);
 }

@@ -20,7 +20,7 @@ export interface ApiOptions {
   quoteId?: string;
 }
 
-/** 402 carrier so callers can branch into the quote/checkout flow. */
+
 export class PaymentRequiredError extends Error {
   constructor(public readonly body: PaymentRequiredResponse) {
     super(body.error.message ?? 'Payment required');
@@ -48,7 +48,7 @@ async function parseError(res: Response): Promise<never> {
     const err = (body as ErrorResponse).error;
     if (err?.message) message = err.message;
   } catch {
-    /* non-JSON error body */
+    
   }
   if (res.status === 402 && body) throw new PaymentRequiredError(body as PaymentRequiredResponse);
   throw new ApiError(res.status, message);

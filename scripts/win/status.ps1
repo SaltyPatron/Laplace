@@ -1,6 +1,6 @@
-# One-shot state of the world: trees, deploy currency, PG, endpoint, locks.
-# Run this BEFORE building anything -- it tells you what is already current so you only run what changed.
-# Usage: status.ps1   (call via status.cmd so env.cmd has run and ninja/psql resolve)
+
+
+
 $ErrorActionPreference = 'SilentlyContinue'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $deployLib = 'D:\Data\Postgres\laplace\lib'
@@ -55,8 +55,8 @@ foreach ($pair in $pairs) {
     $d = Join-Path $deployLib $pair.dst
     if (-not (Test-Path $s)) { Write-Host ("{0,-26} NOT BUILT" -f $pair.dst); continue }
     if (-not (Test-Path $d)) { Write-Host ("{0,-26} NOT DEPLOYED (install-extensions.cmd)" -f $pair.dst); continue }
-    # SHA256, not MD5: status.cmd runs Windows PowerShell 5.1, where FIPS policy
-    # can make the MD5 provider throw -> null hashes -> false STALE for everything.
+    
+    
     $h1 = (Get-FileHash $s -Algorithm SHA256).Hash
     $h2 = (Get-FileHash $d -Algorithm SHA256).Hash
     if (-not $h1 -or -not $h2) { Write-Host ("{0,-26} HASH FAILED (PSModulePath pollution? see env.cmd)" -f $pair.dst); continue }

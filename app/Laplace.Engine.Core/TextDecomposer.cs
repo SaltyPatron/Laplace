@@ -46,12 +46,12 @@ public static class TextDecomposer
         return Run(heap.AsSpan());
     }
 
-    /// <summary>
-    /// THE lookup law: the natural content unit's id under the same decomposer,
-    /// composer, and collapse law as the deposit path — byte-identical to what
-    /// content deposition emitted for the same text. Returns null for empty
-    /// input. Requires CodepointPerfcache.Load/LoadDefault first (fails loud).
-    /// </summary>
+    
+    
+    
+    
+    
+    
     public static Hash128? ContentRootId(ReadOnlySpan<byte> utf8)
     {
         if (utf8.Length == 0) return null;

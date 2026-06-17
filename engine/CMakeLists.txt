@@ -123,9 +123,9 @@ endif()
 add_subdirectory("${LAPLACE_EXTERNAL}/blake3/c"
     "${CMAKE_BINARY_DIR}/_deps/blake3" EXCLUDE_FROM_ALL)
 
-# tree-sitter runtime — the grammar-execution engine for all structured-knowledge grammars
-# (code, prose, chess, DNA, chemistry, math, music, ...). Built in-tree (blake3 pattern) so the
-# Windows static core can link it. wasm feature is off by default (no wasmtime dependency).
+
+
+
 add_library(tree_sitter_rt STATIC "${LAPLACE_EXTERNAL}/tree-sitter/lib/src/lib.c")
 target_include_directories(tree_sitter_rt
     PUBLIC  "${LAPLACE_EXTERNAL}/tree-sitter/lib/include"

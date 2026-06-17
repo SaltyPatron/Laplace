@@ -7,37 +7,37 @@ namespace Laplace.Decomposers.Abstractions;
 
 public static class SourceEntityIdConventions
 {
-    // NOTE: the old WordNetSynset(offset,pos) → OfCanonical("wordnet/synset/{pos}/{offset}") blob
-    // keyer is gone. A synset's identity is its ILI concept id decomposed to content (see
-    // ConceptAnchor / WordNetIli below); the offset is only the lookup index into the CILI map.
+    
+    
+    
 
-    // The CILI offset→ILI map, loaded once from LAPLACE_CILI_DIR (the cloned globalwordnet/cili).
-    // Null when the data isn't present (tests / non-ingest contexts) — callers fall back / fail
-    // loudly rather than fabricate.
+    
+    
+    
     private static readonly Lazy<IliMap?> _iliMap = new(() =>
     {
         string dir = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
         return File.Exists(Path.Combine(dir, IliMap.MapFileName)) ? IliMap.Load(dir) : null;
     });
 
-    /// <summary>
-    /// The stable, language-agnostic ILI concept id for a PWN-3.0 (offset, RAW ss_type), e.g.
-    /// <c>"i93445"</c> — or null if the CILI map is unavailable or the synset is unmapped. This is
-    /// the omniglottal anchor every wordnet-family witness resolves to; the offset is only the
-    /// lookup index, never the identity. Pass the RAW ss_type (n/v/a/s/r): satellites (<c>s</c>)
-    /// must NOT be folded to <c>a</c> or 10,693 synsets silently drop out of convergence.
-    /// </summary>
+    
+    
+    
+    
+    
+    
+    
     public static string? WordNetIli(long byteOffset, char ssType) => _iliMap.Value?.Resolve(byteOffset, ssType);
 
-    /// <summary>
-    /// Canonicalize a WordNet sense key to the ONE form every resource converges on:
-    /// <c>lemma%ss:lex_filenum:lex_id</c> (e.g. <c>drop%2:38:00</c>). WordNet's <c>index.sense</c> and
-    /// VerbNet's <c>wn</c> attribute carry the 5-field form with a trailing <c>head:head_id</c>
-    /// (often empty → <c>::</c>); the Predicate Matrix carries only the first three fields. Dropping
-    /// head:head_id is what makes all three decompose to the SAME content id (so a VerbNet member,
-    /// a PropBank/FrameNet row via the matrix, and the WordNet sense itself land on one anchor).
-    /// Leading <c>?</c>/<c>!</c> confidence markers (VerbNet) are stripped. Null if not a sense key.
-    /// </summary>
+    
+    
+    
+    
+    
+    
+    
+    
+    
     public static string? NormalizeSenseKey(string raw)
     {
         if (string.IsNullOrEmpty(raw)) return null;

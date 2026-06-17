@@ -1,7 +1,7 @@
-# Each tree-sitter grammar = the recipe for one structured-knowledge domain (code is grammar #1;
-# chess/DNA/chemistry/math/music are the same engine + another grammar). Compiled as an OBJECT lib
-# and linked into laplace_core. Headers (parser.h / array.h / alloc.h) are bundled in each grammar's
-# src/tree_sitter/, so the grammar's own src/ is the only include dir needed.
+
+
+
+
 set(_TSG "${LAPLACE_EXTERNAL}/tree-sitter-grammars")
 
 function(laplace_add_grammar tgt srcdir)
@@ -16,7 +16,7 @@ function(laplace_add_grammar tgt srcdir)
     add_library(${tgt} OBJECT ${_srcs})
     target_include_directories(${tgt} PRIVATE "${srcdir}")
     set_target_properties(${tgt} PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    target_compile_options(${tgt} PRIVATE -w)   # third-party generated tables
+    target_compile_options(${tgt} PRIVATE -w)   
 endfunction()
 
 laplace_add_grammar(ts_grammar_python     "${_TSG}/tree-sitter-python/src")
@@ -32,7 +32,7 @@ laplace_add_grammar(ts_grammar_markdown   "${_TSG}/tree-sitter-markdown/tree-sit
 laplace_add_grammar(ts_grammar_csv        "${_TSG}/tree-sitter-csv/csv/src")
 laplace_add_grammar(ts_grammar_tsv        "${_TSG}/tree-sitter-csv/tsv/src")
 
-# --- language grammars (initialized submodules with pre-generated parser.c) ---
+
 laplace_add_grammar(ts_grammar_typescript "${_TSG}/tree-sitter-typescript/typescript/src")
 laplace_add_grammar(ts_grammar_java       "${_TSG}/tree-sitter-java/src")
 laplace_add_grammar(ts_grammar_ruby       "${_TSG}/tree-sitter-ruby/src")
@@ -40,14 +40,14 @@ laplace_add_grammar(ts_grammar_julia      "${_TSG}/tree-sitter-julia/src")
 laplace_add_grammar(ts_grammar_kotlin     "${_TSG}/tree-sitter-kotlin/src")
 laplace_add_grammar(ts_grammar_php        "${_TSG}/tree-sitter-php/php/src")
 
-# --- grammars whose upstreams do not commit parser.c (sql: gh-pages only; swift: never) ---
-# Their generated C is vendored in generated/<name>/ — committed artifacts of a scripted
-# step, like engine/core/src/generated/. No network fetch, no tree-sitter CLI, on any
-# machine. Regeneration recipe (grammar bumps only): generated/README.md.
+
+
+
+
 laplace_add_grammar(ts_grammar_sql   "${CMAKE_CURRENT_SOURCE_DIR}/generated/sql")
 laplace_add_grammar(ts_grammar_swift "${CMAKE_CURRENT_SOURCE_DIR}/generated/swift")
 
-# --- HPC/compute grammars ---
+
 laplace_add_grammar(ts_grammar_cuda    "${_TSG}/tree-sitter-cuda/src")
 laplace_add_grammar(ts_grammar_glsl    "${_TSG}/tree-sitter-glsl/src")
 laplace_add_grammar(ts_grammar_hlsl    "${_TSG}/tree-sitter-hlsl/src")

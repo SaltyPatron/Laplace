@@ -1,4 +1,3 @@
--- AUTO-GENERATED POS entity seeds from engine/manifest/pos_tags.toml
 INSERT INTO canonical_names (id, name)
 SELECT canonical_id(v.name), v.name
 FROM (VALUES

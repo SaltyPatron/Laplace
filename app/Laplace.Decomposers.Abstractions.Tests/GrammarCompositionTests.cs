@@ -36,7 +36,7 @@ public sealed class GrammarCompositionTests
         Assert.True(a.Phys.Length > 0, "code file must yield physicalities");
         Assert.NotEqual(default, a.Root);
 
-        Assert.Equal(a.Root, b.Root);                       // deterministic root id
+        Assert.Equal(a.Root, b.Root);                       
         var ids1 = a.Ents.Select(e => e.Id).ToHashSet();
         var ids2 = b.Ents.Select(e => e.Id).ToHashSet();
         Assert.True(ids1.SetEquals(ids2), "entity ids must be deterministic across runs");
@@ -53,10 +53,10 @@ public sealed class GrammarCompositionTests
     [Fact]
     public void Identical_Code_Dedups_Within_A_File()
     {
-        // two identical statements → the second composes to ids already seen (dedup).
+        
         var once  = Compose("x = 1\n", "python");
         var twice = Compose("x = 1\nx = 1\n", "python");
-        // distinct entity ids should NOT double — the repeated statement collapses.
+        
         int distinctOnce  = once.Ents.Select(e => e.Id).Distinct().Count();
         int distinctTwice = twice.Ents.Select(e => e.Id).Distinct().Count();
         Assert.True(distinctTwice <= distinctOnce + 2,
@@ -66,9 +66,9 @@ public sealed class GrammarCompositionTests
     [Fact]
     public void CodeIdentifier_Reconciles_With_ProseWord()
     {
-        // A python identifier 'filter' must compose to the SAME content-addressed id as the
-        // prose word 'filter' — both are the merkle over the same grapheme ids (shared floor +
-        // shared compose kernel = one entity). This is the one-entity / cross-lingual linchpin.
+        
+        
+        
         var (codeEnts, _, _, _) = Compose("filter\n", "python");
 
         byte[] prose = Encoding.UTF8.GetBytes("filter");

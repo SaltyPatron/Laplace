@@ -1,8 +1,8 @@
--- Normalization audit — do attestations fold to UNIVERSAL, source/language-agnostic
--- relation types + values, or fragment per source/language? The substrate is universal
--- (content-addressed); cross-source/cross-language testimony must converge on the SAME
--- universal entity (one NOUN, one nsubj) so consensus folds instead of splintering.
--- Rerunnable:  psql -h localhost -U postgres -d laplace -f scripts/sql/normalization-audit.sql
+
+
+
+
+
 SET search_path = laplace, public;
 SET client_min_messages = warning;
 

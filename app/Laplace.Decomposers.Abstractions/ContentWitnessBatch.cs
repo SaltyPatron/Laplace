@@ -6,7 +6,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>Native content witness → <see cref="IntentStage"/> (no C# row materialization).</summary>
+
 public static class ContentWitnessBatch
 {
     private const int RootMemoCap = 1 << 20;
@@ -26,7 +26,7 @@ public static class ContentWitnessBatch
         return TryAppendToBuilder(builder, canonical, sourceId, out var root) ? root : null;
     }
 
-    /// <summary>Re-derive a content root id without staging (attestation pass after entity pass).</summary>
+    
     public static Hash128? RootId(ReadOnlySpan<byte> canonical)
     {
         if (canonical.IsEmpty) return null;
@@ -60,14 +60,14 @@ public static class ContentWitnessBatch
         Hash128 sourceId,
         out Hash128 rootId)
     {
-        // All content witnesses in one change share the builder's coalesced stage:
-        // the writer stages it once (one COPY + one INSERT per table) instead of
-        // paying the pair per witness. A failed witness leaves the shared stage
-        // intact with its prior successful rows.
+        
+        
+        
+        
         return TryAddToIntentStage(builder.ContentStage, canonical, sourceId, out rootId);
     }
 
-    /// <summary>UTF-8 term with underscores → spaces (ConceptNet URIs, OMW lemmas).</summary>
+    
     public static bool TryAppendUnderscoredToBuilder(
         SubstrateChangeBuilder builder,
         ReadOnlySpan<byte> underscoredUtf8,

@@ -9,13 +9,13 @@ using Parquet.Schema;
 
 namespace Laplace.Decomposers.Code;
 
-/// <summary>
-/// Deposits the tiny-codes dataset (1.6M high-quality code snippets) as structured code testimony.
-/// Each parquet row pairs a natural-language prompt with a code snippet; the code is parsed through
-/// GrammarDecomposer (AST entities + PRECEDES/CALLS/DEFINES/REFERENCES), and a concept entity for
-/// the prompt is linked to the code root via HAS_EXAMPLE/HAS_DEFINITION. Covers Python, TypeScript,
-/// JavaScript, Ruby, Julia, Rust, C++, Bash, Java, C#, Go, SQL.
-/// </summary>
+
+
+
+
+
+
+
 public sealed class TinyCodesDecomposer : IDecomposer
 {
     public static readonly Hash128 Source =
@@ -25,8 +25,8 @@ public sealed class TinyCodesDecomposer : IDecomposer
 
     private static readonly Hash128 CodeConceptTypeId = EntityTypeRegistry.CodeConcept;
 
-    // Maps tiny-codes task_id language prefix (case-insensitive) → tree-sitter modality id.
-    // null entries are known languages with no registered grammar; they are skipped.
+    
+    
     private static readonly Dictionary<string, string?> LangModality =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -118,7 +118,7 @@ public sealed class TinyCodesDecomposer : IDecomposer
                 foreach (var p in phys) b.AddPhysicality(p);
                 foreach (var a in atts) b.AddAttestation(a);
 
-                // Stable concept entity keyed on task_id (or language/idx); the code AST carries the content.
+                
                 if (!string.IsNullOrEmpty(conceptKey))
                 {
                     var conceptId = Hash128.OfCanonical($"tiny-codes/concept/{conceptKey}/v1");
@@ -129,11 +129,11 @@ public sealed class TinyCodesDecomposer : IDecomposer
                         codeRootId, "HAS_DEFINITION", conceptId,  Source, SourceTrust.StructuredCorpus));
                 }
 
-                // Keyword linking: attest HAS_EXAMPLE from each content word of the prompt to the
-                // code root. word_id() in SQL uses the same grapheme-floor composition as
-                // ContentEmitter, so these entity IDs reconcile with the linguistic substrate.
-                // This is what makes "how do I sort a list" resolve through the 'sort' or 'list'
-                // entity to actual code examples.
+                
+                
+                
+                
+                
                 if (!string.IsNullOrWhiteSpace(prompt))
                 {
                     foreach (var kw in ExtractKeywords(prompt))
@@ -177,8 +177,8 @@ public sealed class TinyCodesDecomposer : IDecomposer
 
     private static IEnumerable<string> ExtractKeywords(string prompt)
     {
-        // Split on whitespace and punctuation, yield lower-cased words >= 4 chars that are not stop words.
-        // Limit to first 20 tokens — prompts are short and this caps per-row work.
+        
+        
         int count = 0;
         foreach (var raw in prompt.Split(
             new char[] { ' ', '\t', '\n', '\r', '.', ',', ';', ':', '!', '?', '(', ')', '[', ']', '{', '}', '"', '\'', '/', '\\', '-', '_' },
@@ -187,7 +187,7 @@ public sealed class TinyCodesDecomposer : IDecomposer
             if (count >= 20) break;
             if (raw.Length < 4) continue;
             var w = raw.ToLowerInvariant();
-            // Strip trailing 's' for simple plural normalisation
+            
             var stem = w.Length > 5 && w.EndsWith('s') ? w[..^1] : w;
             if (!StopWords.Contains(w) && !StopWords.Contains(stem))
             {
@@ -204,8 +204,8 @@ public sealed class TinyCodesDecomposer : IDecomposer
         if (slash > 0) lang = lang[..slash];
         lang = lang.Trim();
         if (LangModality.TryGetValue(lang, out var m)) return m;
-        // multi-word values in the shipped dataset: "Neo4j database and Cypher",
-        // "relation database and SQL" — resolve by containment
+        
+        
         if (lang.Contains("cypher", StringComparison.OrdinalIgnoreCase)) return null;
         if (lang.Contains("sql", StringComparison.OrdinalIgnoreCase)) return "sql";
         return null;
@@ -218,8 +218,8 @@ public sealed class TinyCodesDecomposer : IDecomposer
         await using var reader = await ParquetReader.CreateAsync(fs, cancellationToken: ct);
 
         DataField[] fields = reader.Schema.GetDataFields();
-        // the published dataset carries (programming_language, idx, prompt, response);
-        // older/derived exports carry task_id ("python/...") instead
+        
+        
         DataField? taskField   = FindField(fields, "task_id");
         DataField? langField   = FindField(fields, "programming_language");
         DataField? promptField = FindField(fields, "prompt");
@@ -253,8 +253,8 @@ public sealed class TinyCodesDecomposer : IDecomposer
             for (int i = 0; i < count; i++)
             {
                 string? lang = taskIds?[i] ?? langs?[i];
-                // concept identity: task_id when the export carries one, else the
-                // stable (shard, row ordinal) position in the published dataset
+                
+                
                 string? key  = taskIds?[i] ?? $"{fileStem}/{rowBase + i}";
                 yield return (key, lang, prompts[i], resps[i]);
             }

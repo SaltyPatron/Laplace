@@ -18,22 +18,22 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
 
     internal NpgsqlDataSource DataSource => _dataSource;
 
-    /// <summary>
-    /// Call the substrate's session recall path (<c>laplace.recall_session</c>), which routes the
-    /// prompt via <c>parse_ask</c> and grounds every reply line in witnessed consensus
-    /// (definitions, synonyms, relations, walks). Returns every reply row in order — recall_session
-    /// emits multiple rows for compound answers (e.g. definition + hypernym chain).
-    /// Session keeps pronoun/topic continuity across turns via the last-topic pointer.
-    /// </summary>
+    
+    
+    
+    
+    
+    
+    
     public async Task<IReadOnlyList<ConverseRow>> ConverseAsync(string prompt, byte[]? session, CancellationToken ct)
         => await ConverseTurnsAsync([prompt], session, ct);
 
-    /// <summary>
-    /// Replay an ordered list of user turns through <c>laplace.recall_session</c> under a single session,
-    /// returning the reply rows of the FINAL turn. Prior turns seed session_topics so the
-    /// substrate resolves follow-up pronouns ("…and its synonyms?") against the running topic —
-    /// correct even for stateless OpenAI clients (Roo Code) that resend the full history each call.
-    /// </summary>
+    
+    
+    
+    
+    
+    
     public async Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
         IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct)
     {
@@ -41,8 +41,8 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            // A single connection = a single backend, so recall_session's last-topic pointer is
-            // consistent across the replay even when @s is NULL (it falls back to the backend pid).
+            
+            
             var rows = new List<ConverseRow>(8);
             for (int turn = 0; turn < userTurns.Count; turn++)
             {
@@ -55,7 +55,7 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
                 {
-                    if (!isLast) continue; // prior turns only seed context
+                    if (!isLast) continue; 
                     var reply = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
                     var mu = reader.IsDBNull(1) ? 0m : reader.GetDecimal(1);
                     var witnesses = reader.IsDBNull(2) ? 0L : reader.GetInt64(2);
@@ -66,9 +66,9 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
         }
         catch (PostgresException pg)
         {
-            // A SQL-level error (undefined column/function, type mismatch, …) is a query/schema
-            // bug, NOT the database being unreachable. Surface the real SqlState + message so it
-            // is never again mistaken for a segfault or "db unavailable".
+            
+            
+            
             throw new SubstrateQueryException(
                 $"recall_session query failed [{pg.SqlState}] {pg.MessageText}"
                 + (pg.Where is null ? "" : $" @ {pg.Where}"), pg);
@@ -79,13 +79,13 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// Higher-order text walk via longest-context stride descent over the witnessed content
-    /// trajectories (<c>laplace.walk_text</c>): each entity is reproduced verbatim while its
-    /// full preceding context is attested, then recombined when the exact span runs out. No model,
-    /// no HAS_POS gate. Entities are yielded with a leading space so the OpenAI stream detokenizes to
-    /// readable prose (content trajectories drop whitespace, so we re-insert the separator).
-    /// </summary>
+    
+    
+    
+    
+    
+    
+    
     public async IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
         string prompt,
         int steps          = 32,
@@ -372,10 +372,10 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
         return value is null or DBNull ? null : Convert.ToInt64(value);
     }
 
-    /// <summary>
-    /// Receipt drill-down: resolve a target (32-hex entity id, or a word via laplace.word_id)
-    /// to its labeled outbound attestations. Returns null when the target is unknown.
-    /// </summary>
+    
+    
+    
+    
     public async Task<EntityEvidence?> EvidenceAsync(string target, int limit, CancellationToken ct)
     {
         const string resolveSql = """
@@ -508,11 +508,11 @@ internal sealed class SubstrateUnavailableException : Exception
     }
 }
 
-/// <summary>
-/// A SQL-level failure (undefined column/function, type mismatch, etc.) raised while executing a
-/// substrate query. Distinct from <see cref="SubstrateUnavailableException"/>: the database is up;
-/// the query or schema is wrong. Surfaced to the client verbatim so the real cause is visible.
-/// </summary>
+
+
+
+
+
 internal sealed class SubstrateQueryException : Exception
 {
     public SubstrateQueryException(string message, Exception inner)

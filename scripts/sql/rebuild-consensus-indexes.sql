@@ -1,7 +1,7 @@
--- B2 rebuild: recreate consensus secondary indexes after a bulk model deposit.
--- (Dropped during bulk: fresh-bulk folds are PK-only; live secondaries cost ~10-20x
--- fold throughput via random-BLAKE3 B-tree thrash. The two eff_mu expression btrees
--- MUST match eff_mu()'s inlined expression exactly — see 13_mu_law / ARCHITECTURE.)
+
+
+
+
 SET maintenance_work_mem = '2GB';
 CREATE INDEX IF NOT EXISTS consensus_object_btree
     ON laplace.consensus USING btree (object_id) WHERE (object_id IS NOT NULL);

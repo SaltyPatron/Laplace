@@ -64,7 +64,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        // Skip a full-file pre-scan (9+ GB) — progress uses rows consumed during the single pass.
+        
         if (options.Languages?.IsActive == true)
             return Task.FromResult<IngestInventory?>(null);
 
@@ -86,8 +86,8 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        // Never full-scan assertions.csv when scoped — DescribeInputAsync returns null and
-        // progress uses InputUnitsConsumed during the single streaming pass.
+        
+        
         var inv = await DescribeInputAsync(context, DecomposerOptions.ForWitness(SourceName), ct);
         return inv?.TotalInputUnits;
     }

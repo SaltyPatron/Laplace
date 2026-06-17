@@ -8,11 +8,11 @@ using SynInterop = Laplace.Engine.Synthesis.NativeInterop;
 
 namespace Laplace.Decomposers.Model;
 
-// Streams token→token (or element→element) Glicko-2 matchups for every path the architecture
-// defines. One matchup per (source, target) pair whose path score exceeds the noise floor.
-// The intermediate spaces (neuron, attn_dim, kv_dim) are contracted away inside the native
-// tile kernels — they never surface as entities. The architecture profile owns the path list;
-// adding a new modality or architecture means adding new PathSpec entries, not touching this class.
+
+
+
+
+
 public sealed class ModelTableETL
 {
     private const int RowsPerChange = 500_000;
@@ -21,17 +21,17 @@ public sealed class ModelTableETL
         RelationTypeRegistry.Resolve("ATTENDS").Rank * SourceTrust.AiModelProbe;
     private static readonly double[] _one = new double[1];
 
-    // Consensus-only deposits take THE TRAJECTORY JOURNAL: per-subject walks
-    // packed under the 212-bit vertex law — no per-pair AttestationRow, no
-    // per-pair native crossing, no per-pair BLAKE3 id. Evidence-persisting
-    // deposits keep the per-row path. The mode is THREADED IN by the caller
-    // (the writer's resolved mode) — never re-derived from the environment:
-    // the CLI's --no-evidence flag and the env var must agree by construction
-    // (an env-only static here once silently ran the per-pair lane).
+    
+    
+    
+    
+    
+    
+    
     private readonly bool EvidenceMode;
     private long _phiFp1e9 = -1;
 
-    /// <summary>φ for this witness weight, derived once through the native law.</summary>
+    
     private long PhiFp1e9(Hash128 subject, Hash128 typeId, Hash128? obj, Hash128? ctx, long score)
     {
         if (_phiFp1e9 < 0)
@@ -40,12 +40,12 @@ public sealed class ModelTableETL
         return _phiFp1e9;
     }
 
-    /// <summary>
-    /// THE TRAJECTORY JOURNAL: slice one kernel tile's output into per-subject
-    /// walks (the kernel emits row-major, so a subject's objects are
-    /// consecutive) and pack each walk under the 212-bit vertex law. Emits the
-    /// walks into the builder; returns pairs emitted.
-    /// </summary>
+    
+    
+    
+    
+    
+    
     private int EmitWalks(
         SubstrateChangeBuilder b, Hash128 typeId, Hash128? ctx, int cnt,
         int[] oR, int[] oC, long[] oS,
@@ -123,7 +123,7 @@ public sealed class ModelTableETL
         int interm  = _recipe.IntermediateSize;
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        // Index tokens that have entities
+        
         var ents   = new List<Hash128>();
         var entIdx = new int[vocab]; Array.Fill(entIdx, -1);
         var tier   = new byte[vocab];
@@ -139,10 +139,10 @@ public sealed class ModelTableETL
 
         _commitEpoch = _epochBase;
 
-        // Phase 1: emit token entities + per-layer context entities (first epoch — the
-        // fence: matchup attestations reference both, so they must commit first).
-        // The layer-context entities were silently dropped in the post-checkpoint churn,
-        // leaving every per-layer attestation with a dangling context_id (verify-fk fails).
+        
+        
+        
+        
         {
             var eb = NewChunk("token"); int ec = 0;
             for (int t = 0; t < vocab; t++)
@@ -166,10 +166,10 @@ public sealed class ModelTableETL
             _log.LogInformation("phase=etl tokens: {N:N0} corners (+{L} layer contexts)", n, _recipe.NumLayers);
         }
 
-        // Raw embed [n×d] double — source for all projection and FFN inputs
+        
         var embRawD = GatherF32ToD(_profile.EmbedTokens, vocab, d, entIdx, n);
 
-        // L2-normalized un-embedding [n×d] double — the scoring target for all path outputs
+        
         string lmHead = _profile.LmHead ?? _profile.EmbedTokens;
         double[] unembN;
         if (lmHead == _profile.EmbedTokens)
@@ -183,7 +183,7 @@ public sealed class ModelTableETL
             NormD(unembN, n, d);
         }
 
-        // Phase 2: stream path matchups — attestations only; references epoch-fenced entities.
+        
         _commitEpoch = _epochBase + 1;
         foreach (var path in _profile.Paths)
         {
@@ -216,7 +216,7 @@ public sealed class ModelTableETL
             _strands, sw.Elapsed.TotalSeconds);
     }
 
-    // ── global path dispatch ──────────────────────────────────────────────────
+    
 
     private async IAsyncEnumerable<SubstrateChange> EmitGlobalPath(
         PathSpec path, double[] embRawD, double[] unembN,
@@ -229,9 +229,9 @@ public sealed class ModelTableETL
             case SelfSimilarityPath sim:
             {
                 if (!_refMap.ContainsKey(sim.EmbedPattern)) yield break;
-                // Non-token entity sets (patches, audio frames, etc.) require their own
-                // entity index and embedding gather — extend ArchitectureProfile with an
-                // entity-set descriptor when adding those modalities.
+                
+                
+                
                 if (sim.EmbedPattern != _profile.EmbedTokens)
                 {
                     _log.LogWarning("phase=etl SelfSimilarityPath on non-token tensor '{T}' not yet supported",
@@ -250,13 +250,13 @@ public sealed class ModelTableETL
         }
     }
 
-    // ── per-layer path dispatch ───────────────────────────────────────────────
+    
 
-    // The model applies RMSNorm(x)⊙γ before every projection; the planes must too, or
-    // per-channel weighting is wrong in every bilinear score. γ folds exactly into the
-    // weight columns (W·diag(γ)); the per-token scalar normalization is absorbed by the
-    // cosine NormD that follows each projection. preFfn selects post_attention_layernorm
-    // (last entry; equals input_layernorm for single-norm parallel-block architectures).
+    
+    
+    
+    
+    
     private float[]? LoadGamma(int layer, bool preFfn)
     {
         if (_profile.PerLayerNorms.Count == 0) return null;
@@ -313,8 +313,8 @@ public sealed class ModelTableETL
                 if (!_refMap.ContainsKey(vn) || !_refMap.ContainsKey(on)) yield break;
                 var Wv = LoadF32(vn, (long)kvDim * d);
                 var Wo = LoadF32(on, (long)d * attnDim);
-                // V reads the same γ-scaled pre-attention stream; O reads attention
-                // output (already in head space) and stays unfolded.
+                
+                
                 if (LoadGamma(layer, preFfn: false) is { } gAttnV)
                     FoldGammaColumns(Wv, kvDim, d, gAttnV);
                 for (int rb = 0; rb < n; rb += RowTile)
@@ -341,7 +341,7 @@ public sealed class ModelTableETL
                     ? LoadF32(gn, (long)interm * d) : null;
                 var up   = LoadF32(un, (long)interm * d);
                 var down = LoadF32(dn, (long)d * interm);
-                // gate/up read the γ-scaled pre-FFN stream; down reads neuron space.
+                
                 if (LoadGamma(layer, preFfn: true) is { } gFfn)
                 {
                     if (gate is not null) FoldGammaColumns(gate, interm, d, gFfn);
@@ -398,7 +398,7 @@ public sealed class ModelTableETL
         }
     }
 
-    // ── edge emission ─────────────────────────────────────────────────────────
+    
 
     private async IAsyncEnumerable<SubstrateChange> EmitEdges(
         double[] left, int nLeft, double[] right, int nRight, int dim, string typeName,
@@ -450,7 +450,7 @@ public sealed class ModelTableETL
         if (inChunk > 0) yield return b.SetInputUnitsConsumed(inChunk).Build();
     }
 
-    // ── native kernel wrappers ────────────────────────────────────────────────
+    
 
     private static unsafe int RunTile(
         double[] left, int rb, int re, double[] right, int nRight, int dim,
@@ -487,7 +487,7 @@ public sealed class ModelTableETL
         return (int)count;
     }
 
-    // ── math helpers ─────────────────────────────────────────────────────────
+    
 
     private static double NoiseFloor(int dim)
     {
@@ -573,7 +573,7 @@ public sealed class ModelTableETL
         return o;
     }
 
-    // ── tensor loading / gather ───────────────────────────────────────────────
+    
 
     private float[] LoadF32(string name, long elems) =>
         WeightTensorETL.LoadTensorF32(_refMap, name, elems);

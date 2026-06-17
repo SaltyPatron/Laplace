@@ -1,8 +1,8 @@
--- Model behavioral-planes audit: is the deposited token-relation testimony walkable?
--- Run against a DB holding floor + a model deposit (e.g. laplace_export):
---   psql -h localhost -U postgres -d laplace_export -f scripts/sql/model-planes-audit.sql
--- The acceptance frame (2026-06-10 ruling): deposition extracts token->token relations;
--- inference WALKS the Glicko-2 consensus. These probes read the walk surface directly.
+
+
+
+
+
 SET search_path = laplace, public;
 \pset pager off
 

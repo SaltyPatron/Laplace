@@ -155,10 +155,10 @@ Next:
   (or push to main to trigger CI)
 
 Reset paths (each independently resettable):
-  $0 reset                                   # full teardown
-  sudo $BOOTSTRAP reset                      # Layer 0 only
-  cd $REPO_DIR && just db-nuke               # Layer 1 only (drop DB)
-  cd $REPO_DIR && just db-reset              # Layer 1 (re-apply migrations only)
+  $0 reset                                   
+  sudo $BOOTSTRAP reset                      
+  cd $REPO_DIR && just db-nuke               
+  cd $REPO_DIR && just db-reset              
 EOF
 }
 

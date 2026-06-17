@@ -1,20 +1,20 @@
-/*
- * perfcache.c -- the T0 oracle inside the backend.
- *
- * word_id(text) is THE lookup law: laplace_content_root_id runs the same
- * decomposer, composer, and collapse law as the deposit path
- * (content_witness_batch_add), so lookup ids are byte-identical to deposit
- * ids for every input -- including multi-codepoint graphemes, where the
- * retired SQL formulation (flat per-character blake3 merkle) forked from the
- * engine law.
- *
- * codepoint_for_id(bytea) is the reverse T0 lookup that retired the 1.1M-row
- * codepoint_render table: a binary search over a per-backend index of
- * codepoints sorted by record hash, built once on first use (~4.4 MB).
- *
- * Content-id RESOLUTION surfaces (word_segment, resolve_phrase, realize) that
- * read witnessed/consensus data via SPI live in content_resolve.c, not here.
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #include "postgres.h"
 
 #include "fmgr.h"
@@ -68,7 +68,7 @@ laplace_perfcache_ready(void)
     return true;
 }
 
-/* ---- reverse index: codepoints sorted by record hash ------------------- */
+
 
 static uint32_t *rev_idx = NULL;
 static uint64_t  rev_count = 0;
@@ -131,7 +131,7 @@ laplace_perfcache_codepoint_for_id(const uint8_t id[16], uint32_t *out_cp)
             lo = mid + 1;
         else
         {
-            /* mirror the retired codepoint_render row set: no NUL, no surrogates */
+            
             if (cp == 0 || (cp >= 0xD800 && cp <= 0xDFFF))
                 return false;
             *out_cp = cp;
@@ -141,7 +141,7 @@ laplace_perfcache_codepoint_for_id(const uint8_t id[16], uint32_t *out_cp)
     return false;
 }
 
-/* ---- SQL surface -------------------------------------------------------- */
+
 
 PG_FUNCTION_INFO_V1(pg_laplace_word_id);
 
@@ -192,10 +192,10 @@ pg_laplace_codepoint_for_id(PG_FUNCTION_ARGS)
     PG_RETURN_INT32((int32) cp);
 }
 
-/* Omniglottal separator test: true iff the text is non-empty and every
- * codepoint is Unicode White_Space (the banked WB law), in any script.
- * Replaces the ASCII-bound `~ '^[[:space:]]+$'` regex the generation trajectory
- * stream used, which silently kept U+3000, NBSP, U+2000..200A as units of order. */
+
+
+
+
 PG_FUNCTION_INFO_V1(pg_laplace_is_all_whitespace);
 
 Datum

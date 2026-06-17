@@ -5,7 +5,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 [Collection("substrate-pg")]
 public class TypeColumnLawTests
 {
-    // Column law: legacy type column segment banned by ContentRoundtrip refactor.
+    
     private static readonly string LegacyTypeColumn =
         string.Concat((char)107, (char)105, (char)110, (char)100);
 

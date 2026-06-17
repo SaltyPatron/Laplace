@@ -89,7 +89,7 @@ export function ChatView() {
     }
   }
 
-  /** Non-streaming retry path used after a quote is paid (keeps the receipt metadata). */
+  
   async function retryWithQuote() {
     const lastUser = [...messages].reverse().find((m) => m.role === 'user');
     if (!lastUser) return;

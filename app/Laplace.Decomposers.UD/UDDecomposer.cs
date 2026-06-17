@@ -14,10 +14,10 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    /// <summary>
-    /// Per-token content witnesses make intents huge; serial commit + a lower
-    /// LAPLACE_INGEST_COMMIT_ROWS (seed-ladder pins 25k) avoids RAM blowups.
-    /// </summary>
+    
+    
+    
+    
     public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
 
     private static readonly Hash128 XposTypeId     = EntityTypeRegistry.UdXpos;
@@ -33,9 +33,9 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
     public int     LayerOrder   => 2;
     public Hash128 TrustClassId => TrustClass;
 
-    // Dynamic relation types (deprels/features) this run actually parsed, named for readback so
-    // they land in canonical_names — derived from the data, populated centrally by SeedDynamic
-    // (the chokepoint), never a hard-coded list. Thread-safe: parallel workers seed concurrently.
+    
+    
+    
     private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => new List<string>(_canonicalNames.Keys);
 

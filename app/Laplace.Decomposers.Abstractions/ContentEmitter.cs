@@ -3,7 +3,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>Compatibility shim — delegates to <see cref="ContentWitnessBatch"/>.</summary>
+
 public static class ContentEmitter
 {
     public static Hash128? Emit(SubstrateChangeBuilder b, string surface, Hash128 sourceId) =>

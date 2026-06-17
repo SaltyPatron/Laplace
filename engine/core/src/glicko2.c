@@ -177,9 +177,9 @@ static int64_t illinois_f(int64_t x,
     return lhs - rhs;
 }
 
-/* The volatility solve + state commit, shared by the per-observation loop and
- * the closed-form fold path (glicko2_fold_uniform_period). Everything that
- * could drift between the two must live here once. */
+
+
+
 static void glicko2_finish_period(glicko2_state_t* st,
                                   int64_t mu, int64_t phi, int64_t phi_sq,
                                   int64_t sigma, int64_t v_inv, int64_t delta_inner,
@@ -335,14 +335,14 @@ void glicko2_update_period(glicko2_state_t* st,
     glicko2_update_period_impl(st, obs, n, tau, now_ns, NULL);
 }
 
-/* Closed-form period update for the consensus fold: all `games` observations
- * are against ONE opponent (opponent_rating, opponent_phi), scored q,...,q,rem
- * (the apply_partial split). g_j and E_j are then constant across the period,
- * so v_inv and delta_inner collapse to O(1) — and the result is int64-IDENTICAL
- * to the per-observation loop, because each loop term is the same rounded fp
- * value and summing it `games` times is integer multiplication. This removes
- * the per-relation observation array and the O(games) inner loop the fold paid
- * once per relation over hundreds of millions of relations. */
+
+
+
+
+
+
+
+
 void glicko2_fold_uniform_period(glicko2_state_t* st,
                                  int64_t opponent_rating,
                                  int64_t opponent_phi,
@@ -365,11 +365,11 @@ void glicko2_fold_uniform_period(glicko2_state_t* st,
     int64_t g_sq  = laplace_fp_mul(g_j, g_j);
     int64_t E_1mE = laplace_fp_mul(E_j, LAPLACE_FP_ONE - E_j);
 
-    /* loop: v_inv += fp_mul(g_sq, E_1mE), `games` identical terms */
+    
     int64_t v_inv = games * laplace_fp_mul(g_sq, E_1mE);
 
-    /* loop: delta_inner += fp_mul(g_j, score_i - E_j); scores are q (games-1
-     * times) then rem once — the exact split consensus_fold_apply_partial used */
+    
+
     int64_t q   = sum_score / games;
     int64_t rem = sum_score - q * (games - 1);
     int64_t delta_inner = (games - 1) * laplace_fp_mul(g_j, q - E_j)

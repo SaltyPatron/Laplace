@@ -1,6 +1,6 @@
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>ETL work description: input files and record counts (not output row estimates).</summary>
+
 public sealed record IngestFileSpec(string Id, string Path, long InputUnits);
 
 public sealed record IngestInventory(
@@ -22,7 +22,7 @@ public interface IIngestInventoryProvider
         CancellationToken ct = default);
 }
 
-/// <summary>Accurate input scanning — line/record counts from disk, not output row guesses.</summary>
+
 public static class EtlInventory
 {
     public static async Task<long> CountDataLinesAsync(

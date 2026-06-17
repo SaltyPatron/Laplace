@@ -147,9 +147,9 @@ pg_laplace_score(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(laplace_score_fp(PG_GETARG_FLOAT8(0), PG_GETARG_FLOAT8(1)));
 }
 
-/* The conservative-μ law, compiled truth. The SQL eff_mu() mirrors this inline
- * for the ORDER BY hot path; effective_mu() is the law surface a regress pin
- * asserts eff_mu() against, so the inline can never drift from the engine. */
+
+
+
 PG_FUNCTION_INFO_V1(pg_laplace_effective_mu);
 
 Datum
@@ -158,8 +158,8 @@ pg_laplace_effective_mu(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(laplace_effective_mu_fp(PG_GETARG_INT64(0), PG_GETARG_INT64(1)));
 }
 
-/* The neutral/anchor μ, compiled truth. No-arg IMMUTABLE: the planner folds it
- * to a constant, so refuted()/index predicates pay nothing at runtime. */
+
+
 PG_FUNCTION_INFO_V1(pg_laplace_glicko2_neutral_mu);
 
 Datum
@@ -527,9 +527,9 @@ pg_relation_type_in_family(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(in_family != 0);
 }
 
-/* Expose the BANKED NATIVE relation law to SQL so reads/exports stay within-layer
- * (the 11 ranks ARE the layers). The rank already lives in laplace_relation_lookup;
- * these are thin wrappers — no manifest re-read, no SQL rank table needed. */
+
+
+
 PG_FUNCTION_INFO_V1(pg_relation_rank);
 
 Datum
@@ -544,13 +544,13 @@ pg_relation_rank(PG_FUNCTION_ARGS)
     PG_RETURN_FLOAT8(def->rank);
 }
 
-/* Rank-by-inheritance for DYNAMIC relation types (UD deprels/features, enhanced
- * deprels, dbpedia rels) that RelationTypeRegistry.SeedDynamic mints OUTSIDE the
- * compiled law: laplace_relation_lookup misses, so walk the IS_A chain SeedDynamic
- * wrote (DEP_* IS_A DEPENDS_ON@0.73, EDEP_* IS_A ENHANCED_DEPENDS_ON@0.73, FEAT_*
- * IS_A HAS_FEATURE@0.73, ...) to the nearest statically-ranked ancestor. The walk
- * is HERE in C via bounded SPI — never a SQL recursive CTE. Static hits never touch
- * the DB; only unregistered leaves pay the bounded ancestry probe. */
+
+
+
+
+
+
+
 PG_FUNCTION_INFO_V1(pg_relation_rank_resolved);
 
 Datum
@@ -560,7 +560,7 @@ pg_relation_rank_resolved(PG_FUNCTION_ARGS)
     hash128_t cur_id  = bytea_to_hash128(type_ba);
     const laplace_relation_def_t* def = NULL;
 
-    /* fast path: the banked static law, no DB touch */
+    
     if (laplace_relation_lookup(&cur_id, &def) == 0 && def != NULL)
         PG_RETURN_FLOAT8(def->rank);
 
@@ -593,12 +593,12 @@ pg_relation_rank_resolved(PG_FUNCTION_ARGS)
         const laplace_relation_def_t* pdef = NULL;
         if (laplace_relation_lookup(&parent_id, &pdef) == 0 && pdef != NULL)
         {
-            out_rank = pdef->rank;   /* by-value scalar, survives SPI_finish */
+            out_rank = pdef->rank;   
             found    = true;
         }
         else
         {
-            cur_id = parent_id;      /* by-value hash; no SPI memory to retain */
+            cur_id = parent_id;      
         }
     }
 
@@ -627,11 +627,11 @@ void
 _PG_init(void)
 {
     (void)laplace_dynamics_init();
-    /* Define all custom GUCs BEFORE reserving the prefix: perfcache_init calls
-     * MarkGUCPrefixReserved("laplace_substrate"), which deletes any not-yet-defined
-     * placeholder under the prefix. Reserving first made corpus_max_rows unreachable
-     * (a pre-load SET was removed before laplace_corpus_guc_init could adopt it), so
-     * the corpus build could never be bounded. Define first, reserve last. */
+    
+
+
+
+
     laplace_corpus_guc_init();
     laplace_substrate_perfcache_init();
 }

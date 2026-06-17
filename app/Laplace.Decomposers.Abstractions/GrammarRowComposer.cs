@@ -4,7 +4,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>One row: native compose + span index for witness field mapping.</summary>
+
 public sealed unsafe class GrammarRowComposer : IDisposable
 {
     private readonly Hash128 _sourceId;

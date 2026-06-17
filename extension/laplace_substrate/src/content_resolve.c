@@ -1,10 +1,10 @@
-/*
- * content_resolve.c -- content-id resolution surfaces over the engine's content
- * law: word_segment (UAX#29 word segmentation), resolve_phrase (longest witnessed
- * span), and realize (best surface text for an id). Split out of perfcache.c so
- * that file stays the T0 id<->codepoint floor; these are SPI-backed reads over
- * witnessed / consensus data, a different layer.
- */
+
+
+
+
+
+
+
 #include "postgres.h"
 
 #include "fmgr.h"
@@ -20,13 +20,13 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 
-/* ---- omniglottal word segmentation (engine UAX#29) --------------------- */
 
-/* word_segment(text) -> (ord, word, id): the engine's UAX#29 word law as a SRF,
- * replacing the SQL `regexp_split_to_array(p_text, '[^[:alnum:]''-]+')` token
- * fork in prompt_words/resolve_phrase. Same decomposer word_id/deposition use,
- * so 中文 segments by the same law as English, and each word carries its
- * deposition-matching id — the exact-case probe needs no second word_id(). */
+
+
+
+
+
+
 
 typedef struct
 {
@@ -80,14 +80,14 @@ pg_laplace_word_segment(PG_FUNCTION_ARGS)
     return (Datum) 0;
 }
 
-/* ---- longest witnessed phrase span (resolve_phrase) -------------------- */
 
-/* resolve_phrase(text) -> id: the longest contiguous word span (leftmost on
- * ties) whose composed content id is a witnessed entity. The old body built
- * EVERY span with an O(n^2) token self-join and called word_id() twice per
- * span; here one engine segmentation feeds a longest-first scan, each candidate
- * hashed once and probed once. Tries the surface span and its case-folded form
- * (the old body resolved purely case-folded). */
+
+
+
+
+
+
+
 
 typedef struct
 {
@@ -123,7 +123,7 @@ phrase_collect_emit(void *ctx_, uint32_t ordinal,
         }
         ctx->cap = newcap;
     }
-    /* store the byte offset, not the transient pointer (valid only during call) */
+    
     ctx->off[ctx->n] = (uint32_t) (word_utf8 - ctx->base);
     ctx->len[ctx->n] = word_len;
     ctx->n++;
@@ -181,8 +181,8 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "resolve_phrase: SPI_connect failed");
 
-    /* longest-first, leftmost on ties; the id is a stack value so it survives
-     * SPI_finish without a memory-context dance. */
+    
+
     for (int L = ctx.n; L >= 1 && !found; L--)
     {
         for (int i = 0; i + L <= ctx.n && !found; i++)
@@ -219,12 +219,12 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(hash128_to_datum(&found_id));
 }
 
-/* ---- realize: best surface text for an id (native COALESCE ladder) ------ */
 
-/* Run one realize branch; return its first column copied into the caller's
- * context (SPI_palloc survives SPI_finish), or NULL on no-row / NULL / empty.
- * The branch SQL is the SAME predicate the SQL COALESCE used, so semantics are
- * identical — only the short-circuit orchestration moves into C. */
+
+
+
+
+
 static text *
 realize_branch(const char *sql, Datum id, Datum lang, int nargs)
 {
@@ -248,9 +248,9 @@ realize_branch(const char *sql, Datum id, Datum lang, int nargs)
         return NULL;
     src = DatumGetTextPP(d);
     if (VARSIZE_ANY_EXHDR(src) == 0)
-        return NULL;                       /* empty string is not a realization */
+        return NULL;                       
     sz = VARSIZE_ANY(src);
-    dst = (text *) SPI_palloc(sz);         /* upper context: outlives SPI_finish */
+    dst = (text *) SPI_palloc(sz);         
     memcpy(dst, src, sz);
     return dst;
 }
@@ -275,7 +275,7 @@ pg_laplace_realize(PG_FUNCTION_ARGS)
     out = realize_branch("SELECT NULLIF(laplace.render_text($1), '')", id, lang, 1);
     if (out == NULL)
         out = realize_branch(
-            /* render_text ONCE per candidate row (was SELECT + WHERE = 2x) */
+            
             "SELECT q.s FROM ("
             "  SELECT laplace.render_text(hs.subject_id) AS s, "
             "         (lang.object_id IS NOT NULL) AS lp, "
@@ -293,7 +293,7 @@ pg_laplace_realize(PG_FUNCTION_ARGS)
             "ORDER BY q.lp DESC, q.mu DESC LIMIT 1", id, lang, 2);
     if (out == NULL)
         out = realize_branch(
-            /* render_text ONCE per candidate row (was SELECT + WHERE = 2x) */
+            
             "SELECT q.s FROM ("
             "  SELECT laplace.render_text(m.object_id) AS s, "
             "         (lang.object_id IS NOT NULL) AS lp, "

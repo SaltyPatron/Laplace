@@ -1,18 +1,18 @@
--- THE lookup law: the same decomposer, composer, and collapse law as the
--- deposit path (laplace_content_root_id), so lookup ids are byte-identical to
--- deposit ids for every input. The former SQL formulation (flat per-character
--- blake3 merkle) forked from the engine law on multi-codepoint graphemes and
--- is retired. Requires laplace_substrate.perfcache_path (fails loud if unset).
+
+
+
+
+
 CREATE OR REPLACE FUNCTION word_id(p_text text)
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_word_id'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
 
--- THE tokenizer: the engine's omniglottal UAX#29 word law (same decomposer as
--- word_id/deposition), emitting each content word's ordinal, surface, and
--- deposition-matching id. Replaces the SQL `regexp_split_to_array` token split
--- (an ASCII-bound SEMANTIC FORK of the engine segmentation) wherever a prompt
--- is broken into words. Whitespace runs are separators and are not emitted.
+
+
+
+
+
 CREATE OR REPLACE FUNCTION word_segment(p_text text)
     RETURNS TABLE(ord int, word text, id bytea)
     AS 'MODULE_PATHNAME', 'pg_laplace_word_segment'
@@ -36,9 +36,9 @@ CREATE OR REPLACE FUNCTION prompt_words(p_text text)
     RETURNS TABLE(ord int, word text, id bytea)
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
-    -- tokenize with the engine word law (word_segment), NOT a regex split; the
-    -- segmenter already returns each word's deposition id, so the exact-case
-    -- probe reuses it (ws.id) and only the case-folded fallback needs word_id().
+    
+    
+    
     SELECT ws.ord, ws.word,
            COALESCE(
                (SELECT e.id FROM entities e WHERE e.id = ws.id),
@@ -100,11 +100,11 @@ CREATE OR REPLACE FUNCTION resolve_last_word(p_phrase text)
     LIMIT 1
 $$;
 
--- Longest contiguous token span that resolves to a witnessed entity (leftmost on ties).
--- Fixes code prompts like "sort a list" resolving to "list" via resolve_last_word.
--- native: one engine segmentation feeds a longest-first span scan, each
--- candidate hashed once and probed once — NOT the former O(n^2) token self-join
--- that string_agg'd every span and called word_id() twice apiece.
+
+
+
+
+
 CREATE OR REPLACE FUNCTION resolve_phrase(p_phrase text)
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_resolve_phrase'
@@ -119,9 +119,9 @@ CREATE OR REPLACE FUNCTION prompt_state(p_text text)
     WHERE pw.id IS NOT NULL
 $$;
 
--- First placed content entity among a prompt's resolved words (the structural
--- neighbour query's anchor). Named surface for the CLI `nn` command, which
--- otherwise inlined this join.
+
+
+
 CREATE OR REPLACE FUNCTION first_placed_topic(p_text text)
     RETURNS bytea
     LANGUAGE sql LAPLACE_STABLE_STRICT
@@ -158,10 +158,10 @@ CREATE OR REPLACE FUNCTION type_label(p_type bytea)
                          '_', ' '))
 $$;
 
--- native: the COALESCE realization ladder (render_text → sense bridge →
--- translation → canonical name → DEFINES → label), short-circuited in C. The
--- branch SQL is byte-for-byte the former predicates, so semantics are identical;
--- only the lazy-short-circuit orchestration moved off the SQL planner.
+
+
+
+
 CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
     AS 'MODULE_PATHNAME', 'pg_laplace_realize'
@@ -249,11 +249,11 @@ CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT N
                                     relation_type_id('HAS_LANGUAGE'))
             ORDER BY eff_mu(c.rating, c.rd) DESC
             LIMIT p_limit),
-         -- the language anchor is constant across rows — compute it ONCE, not per fact
+         
          lang(id) AS (SELECT COALESCE(p_lang, word_language(p_word))),
-         -- ONE batch render of all distinct objects; the expensive realize() fallback
-         -- (sense/translation bridges) fires only for the few that don't render directly,
-         -- not render_text decoding every object one at a time inside 30x realize().
+         
+         
+         
          objs(a) AS (SELECT array_agg(DISTINCT object_id) FROM rels),
          rendered AS (
             SELECT u.object_id, NULLIF(u.s, '') AS s
@@ -334,8 +334,8 @@ BEGIN
     FROM physicalities p
     JOIN prompt_state(p_word) s ON p.entity_id = s.id
     WHERE p.type = 1 AND p.coord IS NOT NULL
-    -- deterministic witness preference: unordered LIMIT 1 let the planner pick
-    -- whichever per-source specimen came first (OPEN-PROBLEMS #2)
+    
+    
     ORDER BY s.ord, p.source_id
     LIMIT 1;
     IF v_id IS NULL THEN RETURN; END IF;
@@ -379,7 +379,7 @@ BEGIN
     FROM physicalities p
     JOIN prompt_state(p_word) s ON p.entity_id = s.id
     WHERE p.type = 1 AND p.coord IS NOT NULL
-    -- deterministic witness preference (OPEN-PROBLEMS #2)
+    
     ORDER BY s.ord, p.source_id
     LIMIT 1;
     IF v_id IS NULL THEN RETURN; END IF;
@@ -406,4 +406,4 @@ BEGIN
 END;
 $sl$;
 
--- laplace.continue_text: legacy shim recreated in 26_generation.sql.in after walk_text loads.
+

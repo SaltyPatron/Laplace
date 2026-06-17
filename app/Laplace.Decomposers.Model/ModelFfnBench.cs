@@ -6,14 +6,14 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Model;
 
-// Drives the whole-model ETL against a REAL safetensors model, no database. Tallies entities and
-// per-relation-type attestations, the FFN (COMPLETES_TO) edge density, wall-clock, and proves the
-// transient-neuron invariant (zero neuron entities, zero token<->neuron half-relations). This is the
-// modular FFN benchmark: point it at any model on the farm and read the numbers.
+
+
+
+
 public static class ModelFfnBench
 {
-    // The Neuron entity type was purged with the cell archive; the raw hash stays so
-    // the bench can keep asserting that no neuron entity ever materializes again.
+    
+    
     private static readonly Hash128 NeuronType = EntityTypeRegistry.Id("Neuron");
 
     private static readonly (string Name, Hash128 Id)[] RelTypes =
@@ -74,7 +74,7 @@ public static class ModelFfnBench
         }
         sw.Stop();
 
-        long ffn = byType[RelTypes[3].Id];          // COMPLETES_TO
+        long ffn = byType[RelTypes[3].Id];          
         long detects = byType[RelTypes[4].Id];
         long writes  = byType[RelTypes[5].Id];
         double secs = sw.Elapsed.TotalSeconds;

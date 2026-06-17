@@ -102,9 +102,9 @@ CREATE OR REPLACE FUNCTION source_counts()
     RETURNS TABLE(source text, source_id bytea, evidence bigint, content bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-    -- One aggregating scan per table (hash-agg over the handful of sources), FULL
-    -- JOINed — NOT DISTINCT + per-source correlated counts, which was O(sources x rows)
-    -- and timed out on the 77M-row attestations table.
+    
+    
+    
     SELECT @extschema@.render(COALESCE(ev.sid, ct.sid)) AS source,
            COALESCE(ev.sid, ct.sid)                     AS source_id,
            COALESCE(ev.evidence, 0)                     AS evidence,

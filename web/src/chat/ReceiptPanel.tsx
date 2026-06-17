@@ -8,10 +8,10 @@ function outcomeName(outcome: string | number | null | undefined): (typeof OUTCO
   return OUTCOME[asNum(outcome ?? 1)] ?? 'draw';
 }
 
-/**
- * The receipt drill-down: look any word (or entity id) up against /v1/evidence and
- * see the raw witnessed attestations — source, relation, outcome, observation count.
- */
+
+
+
+
 export function ReceiptPanel() {
   const tenant = useAppStore((s) => s.tenant);
   const [target, setTarget] = useState('');

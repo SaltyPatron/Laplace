@@ -1,8 +1,8 @@
-/*
- * recall_route.c - the pure NLU intent router (no SPI): English prompt -> intent
- * + relation-type name. Split out of recall.c; route_prompt_impl/route_free and
- * the shared text helpers are exported via recall_route.h.
- */
+
+
+
+
+
 #include "postgres.h"
 
 #include "catalog/pg_collation.h"
@@ -41,10 +41,10 @@ text_to_cstr(Datum d)
 char *
 trim_dup(const char *s)
 {
-    /* btrim1 is the 1-arg SQL btrim(text); the C symbol btrim is the 2-arg
-     * (string, charset) version -- calling THAT with DirectFunctionCall1 made
-     * it detoast stack garbage as its second argument (AV at entry; the
-     * respond/converse never-worked crash, 2026-06-10). */
+    
+
+
+
     return text_to_cstr(DirectFunctionCall1Coll(btrim1, DEFAULT_COLLATION_OID,
                                                 CStringGetTextDatum(s)));
 }
@@ -105,8 +105,8 @@ regexp_groups(const char *str, const char *pat, const char *flags,
     *g1 = NULL;
     *g2 = NULL;
 
-    /* regexp_match needs a collation AND returns SQL NULL on no-match;
-     * DirectFunctionCall* elogs on a NULL return, so invoke via fcinfo. */
+    
+
     {
         LOCAL_FCINFO(fcinfo, 3);
 

@@ -211,7 +211,7 @@ const uint32_t* laplace_grapheme_floor_cp_to_graph(const laplace_grapheme_floor_
 
 void laplace_grapheme_floor_free_owned(laplace_grapheme_floor_t* f) {
     if (!f) return;
-    laplace_grapheme_floor_free(f);  /* frees the inner arrays + zeroes */
+    laplace_grapheme_floor_free(f);  
     free(f);
 }
 

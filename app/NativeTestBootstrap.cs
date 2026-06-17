@@ -1,10 +1,10 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-/// <summary>
-/// Ensures native engine DLLs resolve when <c>dotnet test</c> runs without <c>scripts\win\env.cmd</c>.
-/// Intel oneAPI runtime dirs still belong on PATH (env.cmd / CI setup-laplace-env).
-/// </summary>
+
+
+
+
 internal static class NativeTestBootstrap
 {
     [ModuleInitializer]
@@ -38,7 +38,7 @@ internal static class NativeTestBootstrap
             var path = Path.Combine(root, "build-win", sub, name + ".dll");
             if (!File.Exists(path)) continue;
             try { NativeLibrary.Load(path); }
-            catch (DllNotFoundException) { /* oneAPI PATH missing — env.cmd required */ }
+            catch (DllNotFoundException) {  }
         }
     }
 }

@@ -1,9 +1,9 @@
-/*
- * trajectory_corpus.c - the per-backend generation index: trajectory stream +
- * suffix array from physicalities.trajectory, cache invalidation, and the
- * stream_stats/stream_reset control verbs. Accessors exported via
- * trajectory_corpus.h. Split out of trajectory_walk.c.
- */
+
+
+
+
+
+
 #include "postgres.h"
 
 #include <math.h>
@@ -31,11 +31,11 @@
 
 PG_FUNCTION_INFO_V1(pg_laplace_stream_reset);
 
-/* Cap the generation-corpus build to this many trajectory edges (0 = unbounded).
- * The full witnessed-sentence corpus (tens of millions of tier>2 trajectories) builds a
- * hundreds-of-millions-token stream + suffix array — too large to build interactively
- * (it OOM/segfaults). Bounding it keeps the build tractable and scopes generation to a
- * manageable witnessed set. Registered as laplace_substrate.corpus_max_rows. */
+
+
+
+
+
 int laplace_corpus_max_rows = 0;
 
 void
@@ -60,7 +60,7 @@ gen_corpus_free(void)
     }
 }
 
-/* ── suffix order ──────────────────────────────────────────────────────────── */
+
 
 static const int32 *cmp_stream;
 static int32        cmp_len;
@@ -84,7 +84,7 @@ suffix_cmp(const void *pa, const void *pb)
     return 0;
 }
 
-/* compare the suffix at stream position s against a context of k tokens */
+
 int
 prefix_cmp(const GenCorpus *c, int32 s, const int32 *ctx, int k)
 {
@@ -98,11 +98,11 @@ prefix_cmp(const GenCorpus *c, int32 s, const int32 *ctx, int k)
     return 0;
 }
 
-/* ── trajectory-stream build: physicalities.trajectory is the single source ──── */
 
-/* the witnessed constituency, one ordered edge scan: parent → (child, run),
- * parents tier > 2, the per-entity trajectory chosen deterministically
- * (lowest source_id — the same canon as constituents()) */
+
+
+
+
 static const char *CORPUS_EDGE_QUERY =
     "SELECT p.entity_id, u.entity_id, GREATEST(u.run_length, 1)::int "
     "FROM (SELECT DISTINCT ON (entity_id) entity_id, trajectory "
@@ -119,10 +119,10 @@ static const char *CORPUS_PROBE =
     "       COALESCE((extract(epoch FROM max(observed_at)) * 1000000)::int8, 0) "
     "FROM laplace.physicalities WHERE type = 1 AND trajectory IS NOT NULL";
 
-/* whitespace-only renders are separators: witnessed in content, excluded from
- * order. One batch query per trajectory-stream build. The predicate is the engine's
- * Unicode White_Space law (is_all_whitespace), NOT an ASCII [[:space:]] regex
- * — U+3000, NBSP, U+2000..200A are separators in every script, not word units. */
+
+
+
+
 static const char *CORPUS_SEPARATOR_QUERY =
     "SELECT v.ord::int4 - 1 "
     "FROM unnest($1::bytea[]) WITH ORDINALITY v(id, ord) "
@@ -132,28 +132,28 @@ static const char *CORPUS_SEPARATOR_QUERY =
 
 typedef struct CorpusNode
 {
-    char  id[16];                  /* dynahash key (must be first)            */
-    int32 idx;                     /* node ordinal                            */
+    char  id[16];                  
+    int32 idx;                     
 } CorpusNode;
 
 typedef struct NodeMeta
 {
-    int32 first_edge;              /* into the edge arena; -1 = leaf          */
+    int32 first_edge;              
     int32 n_edges;
     bool  has_parent;
 } NodeMeta;
 
 typedef struct CorpusEdge
 {
-    int32 child;                   /* node idx                                */
+    int32 child;                   
     int32 run;
 } CorpusEdge;
 
 typedef struct WalkFrame
 {
-    int32 node;                    /* node idx                                */
-    int32 edge_i;                  /* next edge to take                       */
-    int32 rep_left;                /* repetitions left for the current edge   */
+    int32 node;                    
+    int32 edge_i;                  
+    int32 rep_left;                
 } WalkFrame;
 
 static void
@@ -182,8 +182,8 @@ corpus_vocab_intern(GenCorpus *c, const char key[16])
             MemoryContext old = MemoryContextSwitchTo(c->cxt);
 
             c->vocab_cap *= 2;
-            /* repalloc_huge: distinct-entity id table exceeds the 1GB palloc cap on
-             * a large substrate (the 96GB box holds it; the cap is the only limit). */
+            
+
             c->ids = (char (*)[16]) repalloc_huge(c->ids, sizeof(char[16]) * (Size) c->vocab_cap);
             MemoryContextSwitchTo(old);
         }
@@ -205,7 +205,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
     int32      n_nodes = 0, node_cap = 8192;
     CorpusEdge *edges;
     int64      n_edges = 0, edge_cap = 65536;
-    int32     *raw = NULL;          /* leaf vocab ids incl. separators        */
+    int32     *raw = NULL;          
     int64      raw_len = 0, raw_cap = 65536;
     uint8     *is_sep;
     Portal     portal;
@@ -215,7 +215,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
 
     cxt = AllocSetContextCreate(TopMemoryContext, "laplace generation corpus",
                                 ALLOCSET_DEFAULT_SIZES);
-    /* scratch (edges, node metadata, raw stream) dies at the end of the build */
+    
     walk_cxt = AllocSetContextCreate(CurrentMemoryContext,
                                      "laplace corpus walk scratch",
                                      ALLOCSET_DEFAULT_SIZES);
@@ -249,16 +249,16 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
     raw   = (int32 *) palloc(sizeof(int32) * raw_cap);
     MemoryContextSwitchTo(old);
 
-    /* 1) edge scan (cursor: bounded SPI tuptable). Build the source query with an
-     * optional sentence cap: the outer ORDER BY materializes the whole corpus before the
-     * cursor yields a row, so the ONLY effective bound is a LIMIT on the DISTINCT tier>2
-     * sentences BEFORE the dump+sort. corpus_max_rows = max source sentences. */
+    
+
+
+
     {
         StringInfoData q;
         initStringInfo(&q);
-        /* Pick the sentence ids FIRST (cheap seq-scan + LIMIT), then probe their
-         * trajectories via the entity_id index. Joining entities AFTER (tier>2 hash over
-         * 41M) before the LIMIT was the killer — startup-blocked the whole corpus. */
+        
+
+
         appendStringInfoString(&q,
             "WITH s AS (SELECT id FROM laplace.entities WHERE tier > 2");
         if (laplace_corpus_max_rows > 0)
@@ -325,7 +325,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
                 {
                     node_cap *= 2;
                     meta = (NodeMeta *) repalloc_huge(meta, sizeof(NodeMeta) * (Size) node_cap);
-                    /* pn may have moved with meta only; node hash entries are stable */
+                    
                 }
                 cn->idx = n_nodes;
                 meta[n_nodes].first_edge = -1;
@@ -337,7 +337,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
                 meta[cn->idx].has_parent = true;
             cidx = cn->idx;
 
-            /* parent-grouped input: a parent's edges land contiguously */
+            
             if (pidx != cur_parent)
             {
                 if (meta[pidx].n_edges != 0)
@@ -362,9 +362,9 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
     }
     SPI_cursor_close(portal);
 
-    /* the distinct-entities set carries every LEAF; node ids live in the node hash. To map a
-     * leaf node idx back to its 16-byte id during the walk, keep a parallel
-     * id table (filled lazily from hash entries). */
+    
+
+
     {
         char (*node_ids)[16];
         HASH_SEQ_STATUS hs;
@@ -382,7 +382,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
         while ((n = (CorpusNode *) hash_seq_search(&hs)) != NULL)
             memcpy(node_ids[n->idx], n->id, 16);
 
-        /* 2) walk every root (a parent no one contains), node-intern order */
+        
         for (root = 0; root < n_nodes; root++)
         {
             if (meta[root].n_edges == 0 || meta[root].has_parent)
@@ -408,7 +408,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
 
                     if (meta[e->child].n_edges == 0)
                     {
-                        /* leaf: emit run repetitions into the raw stream */
+                        
                         int32 vid = corpus_vocab_intern(c, node_ids[e->child]);
 
                         for (int32 k = 0; k < e->run; k++)
@@ -427,7 +427,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
                         continue;
                     }
 
-                    /* composite child: descend run times */
+                    
                     if (f->rep_left == 0)
                         f->rep_left = e->run;
                     f->rep_left--;
@@ -440,13 +440,13 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
                             CORPUS_WALK_DEPTH_CAP)));
                     depth++;
                     stack[depth].node = e->child;
-                    /* re-read meta for the child frame */
+                    
                     stack[depth].edge_i = 0;
                     stack[depth].rep_left = 0;
                 }
             }
 
-            /* sequence boundary */
+            
             if (raw_len + 2 > raw_cap)
             {
                 old = MemoryContextSwitchTo(walk_cxt);
@@ -460,15 +460,15 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
         }
     }
 
-    /* 3) separator classification (engine Unicode White_Space law via is_all_whitespace,
-     * NOT ASCII): which vocab ids are witnessed whitespace separators. Build-time only. */
+    
+
     old = MemoryContextSwitchTo(walk_cxt);
     is_sep = (uint8 *) palloc0((Size) Max(c->n_vocab, 1));
     MemoryContextSwitchTo(old);
-    /* CHUNKED so the bytea[] passed to SQL never approaches the 1GB array cap on a
-     * large distinct-entity set: classify SEP_CHUNK ids per SPI call, freeing the
-     * per-chunk byteas between batches; the query's ordinal is chunk-local, so the
-     * chunk base maps it back to the global vocab index. */
+    
+
+
+
     if (c->n_vocab > 0)
     {
         const int32   SEP_CHUNK = 2 * 1024 * 1024;
@@ -522,10 +522,10 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
         MemoryContextDelete(sep_cxt);
     }
 
-    /* 4) compact: WORD-only stream (separators dropped from the match stream so n-gram
-     * order stays over words), but record sep_after[pos] = the witnessed separator that
-     * followed each word, so generation replays the exact witnessed spacing omniglottally
-     * (no detok rules). collapse empty sequences. suffix array built lazily. */
+    
+
+
+
     c->stream     = (int32 *) MemoryContextAllocHuge(cxt, sizeof(int32) * (Size) (raw_len + 2));
     c->sep_after  = (int32 *) MemoryContextAllocHuge(cxt, sizeof(int32) * (Size) (raw_len + 2));
     {
@@ -546,8 +546,8 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
                 continue;
             }
             if (is_sep[t])
-                continue;                       /* not a word: stays out of the match stream */
-            /* the witnessed separator immediately following this word, if any */
+                continue;                       
+            
             c->sep_after[c->stream_len] =
                 (i + 1 < raw_len && raw[i + 1] != GEN_SENTINEL && is_sep[raw[i + 1]])
                     ? raw[i + 1] : -1;
@@ -561,10 +561,10 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
         }
     }
 
-    /* The suffix array is the GENERATION index (continuations binary-search), an
-     * O(n·depth) sort over hundreds of millions of suffixes. The trajectory-pair
-     * scans (cooccurrence_scan, the foundry's order ladder) need only c->stream, so
-     * the index is built LAZILY on first generation call — a pour never pays for it. */
+    
+
+
+
     c->suffix = NULL;
     c->n_suffix = 0;
 
@@ -572,8 +572,8 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
     gen_corpus = c;
 }
 
-/* Build the generation suffix index on demand (idempotent): only walk_continuations
- * needs it; cooccurrence/foundry scans skip it entirely. */
+
+
 void
 corpus_ensure_suffix(GenCorpus *c)
 {
@@ -606,7 +606,7 @@ corpus_ensure(void)
     return gen_corpus;
 }
 
-/* ── trajectory-stream observability (the warm verb) ────────────────────────── */
+
 
 PG_FUNCTION_INFO_V1(pg_laplace_stream_stats);
 
@@ -627,7 +627,7 @@ pg_laplace_stream_stats(PG_FUNCTION_ARGS)
     if (SPI_connect() != SPI_OK_CONNECT)
         elog(ERROR, "stream_stats: SPI_connect failed");
     c = corpus_ensure();
-    corpus_ensure_suffix(c);   /* the warm verb fully warms: positions = n_suffix */
+    corpus_ensure_suffix(c);   
     SPI_finish();
 
     max_ts = (TimestampTz) c->probe_max_us
@@ -644,7 +644,7 @@ pg_laplace_stream_stats(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
-/* ── trajectory pairs from the trajectory stream (word-stride by construction) ─ */
+
 
 
 Datum

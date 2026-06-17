@@ -6,7 +6,7 @@ public sealed record DecomposerOptions(
     IReadOnlySet<string>?     IncludeFilter,
     IReadOnlySet<string>?     ExcludeFilter,
     LanguageFilter?           Languages = null,
-    /// <summary>Emit IS_TRANSLATION_OF and other cross-language edges (Wiktionary translations, etc.).</summary>
+    
     bool                      EmitCrossLanguageLinks = true)
 {
     public static DecomposerOptions Default { get; } =

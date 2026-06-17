@@ -6,12 +6,12 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Code;
 
-/// <summary>
-/// Witness adapter that ingests source files as structured content: each file is parsed by its
-/// grammar (the shared <see cref="GrammarDecomposer"/> mechanism) and composed into the substrate
-/// by <see cref="GrammarEntityBuilder"/> — entities/physicalities for the AST + PRECEDES over
-/// siblings. Domain-specific, modality-agnostic underneath; chess/DNA/etc. are sibling adapters.
-/// </summary>
+
+
+
+
+
+
 public sealed class CodeDecomposer : IDecomposer
 {
     public static readonly Hash128 Source =
@@ -19,7 +19,7 @@ public sealed class CodeDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
-    // file extension (no dot) -> modality id; mirrors the engine grammar_registry ext table.
+    
     private static readonly Dictionary<string, string> ExtToModality =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -43,7 +43,7 @@ public sealed class CodeDecomposer : IDecomposer
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        // Structure rides on PRECEDES (canonical); typed semantic arcs come from tags.scm.
+        
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddRelationType("CALLS");
         boot.AddRelationType("DEFINES");
@@ -87,7 +87,7 @@ public sealed class CodeDecomposer : IDecomposer
             }
             catch
             {
-                continue;  // a single unparseable/degenerate file must not abort the run
+                continue;  
             }
 
             foreach (var e in ents) b.AddEntity(e);

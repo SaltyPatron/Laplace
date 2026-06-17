@@ -4,12 +4,12 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Cli;
 
-/// <summary>
-/// Shared CLI runtime: connection string, environment knobs, error reporting, hash rendering, and
-/// the perf-cache resolver/blob path. These are the cross-cutting helpers every command group needs;
-/// command classes import them with <c>using static Laplace.Cli.CliRuntime;</c> so call sites stay
-/// unqualified.
-/// </summary>
+
+
+
+
+
+
 internal static class CliRuntime
 {
     public static string ConnString

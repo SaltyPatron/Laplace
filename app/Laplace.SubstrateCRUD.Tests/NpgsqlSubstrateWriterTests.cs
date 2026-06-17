@@ -223,25 +223,25 @@ public class NpgsqlSubstrateWriterTests
                     OpponentRdFp1e9: 30_000_000_000L))
                 .Build();
 
-        // Two batches: entities duplicated across both, attestation re-observed (3 then 5).
+        
         var r1 = await writer.AppendAsync(new[] { Batch(1, 3) }, src);
         var r2 = await writer.AppendAsync(new[] { Batch(2, 5) }, src);
         Assert.Equal(2, r1.EntitiesInserted);
         Assert.Equal(2, r2.EntitiesInserted);
 
-        // Append is staged only — nothing in the live tables yet.
+        
         Assert.Equal(0L, await CountLiveEntitiesAsync(idA, idB));
 
         var merged = await writer.FinalizeSourceAsync(src);
-        Assert.Equal(2, merged.Entities);       // idA, idB deduped from 4 staged rows
-        Assert.Equal(1, merged.Attestations);   // one attestation id
+        Assert.Equal(2, merged.Entities);       
+        Assert.Equal(1, merged.Attestations);   
 
         Assert.Equal(2L, await CountLiveEntitiesAsync(idA, idB));
 
         await using var cmd = _pg.DataSource.CreateCommand(
             "SELECT observation_count FROM laplace.attestations WHERE id = $1");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, attId.ToBytes());
-        Assert.Equal(8L, (long)(await cmd.ExecuteScalarAsync())!);   // 3 + 5
+        Assert.Equal(8L, (long)(await cmd.ExecuteScalarAsync())!);   
     }
 
     [Fact]

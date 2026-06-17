@@ -57,7 +57,7 @@ jobs:
         env:
           LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
         run: |
-          # Per-source reproducibility pins (mirror scripts/win/seed-deferred-lexical.cmd)
+          
           if [ -n "${{ inputs.langs }}" ]; then export LAPLACE_INGEST_LANGS="${{ inputs.langs }}"; fi
           if [ -n "${{ inputs.workers }}" ]; then export LAPLACE_INGEST_WORKERS="${{ inputs.workers }}"; fi
           if [ -n "${{ inputs.commit-rows }}" ]; then export LAPLACE_INGEST_COMMIT_ROWS="${{ inputs.commit-rows }}"; fi

@@ -45,7 +45,7 @@ DECLARE
     reltype_has_trust_class_id   bytea;
     reltype_is_alias_of_id       bytea;
 
-    -- Vocabulary entities: tier=0 inert; type_id is the discriminator (not compositional altitude).
+    
     VOCAB_TIER CONSTANT smallint := 0;
 
 BEGIN

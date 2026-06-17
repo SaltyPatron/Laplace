@@ -9,18 +9,18 @@ using Parquet.Schema;
 
 namespace Laplace.Decomposers.Code;
 
-/// <summary>
-/// Deposits The Stack v2 (bigcode/the-stack-v2) code shards as structured testimony.
-/// Reads parquet files produced by the download-code-data.cmd / download_code_data.py
-/// pipeline. Each row carries a source file; the code is parsed via GrammarDecomposer
-/// (AST entities + PRECEDES/CALLS/DEFINES/REFERENCES), and keywords from the file path
-/// are linked to the code root via HAS_EXAMPLE so the substrate can answer structural
-/// path queries ("how do I write a merge sort") from first principles.
-///
-/// Language filter: controlled by LAPLACE_STACK_LANGS env var (comma-separated grammar IDs,
-/// e.g. "python,cpp,rust"). Default: all grammars registered at runtime.
-/// Quality filter: is_vendor and is_generated rows are skipped when those columns exist.
-/// </summary>
+
+
+
+
+
+
+
+
+
+
+
+
 public sealed class StackDecomposer : IDecomposer
 {
     public static readonly Hash128 Source =
@@ -28,8 +28,8 @@ public sealed class StackDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
-    // Maps Stack v2 language column values (case-insensitive) → grammar modality ID.
-    // null = no registered grammar; row skipped.
+    
+    
     private static readonly Dictionary<string, string?> StackLangToModality =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -51,7 +51,7 @@ public sealed class StackDecomposer : IDecomposer
             ["SQL"]        = "sql",
             ["JSON"]       = "json",
             ["Markdown"]   = "markdown",
-            // explicitly unsupported (no grammar)
+            
             ["TypeScript JSX"] = null,
             ["JavaScript JSX"] = null,
             ["HTML"]           = null,
@@ -148,7 +148,7 @@ public sealed class StackDecomposer : IDecomposer
                 foreach (var p in phys) b.AddPhysicality(p);
                 foreach (var a in atts) b.AddAttestation(a);
 
-                // Keyword-link path segments to the code root so path queries resolve.
+                
                 if (!string.IsNullOrWhiteSpace(row.Path))
                 {
                     var filename = Path.GetFileNameWithoutExtension(row.Path);

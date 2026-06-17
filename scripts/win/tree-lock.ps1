@@ -1,7 +1,7 @@
-# Build-tree mutex: serializes builds on one tree so agents queue instead of forking new trees.
-# Usage: tree-lock.ps1 <acquire|release> <tree-dir-relative-to-repo-root>
-# Owner = parent process (the .cmd build script's cmd.exe); a dead owner means the lock is stale
-# and is cleared automatically. Wait ceiling: LAPLACE_LOCK_WAIT seconds (default 1800).
+
+
+
+
 param(
     [Parameter(Mandatory = $true)][ValidateSet('acquire', 'release')][string]$Action,
     [Parameter(Mandatory = $true)][string]$Tree

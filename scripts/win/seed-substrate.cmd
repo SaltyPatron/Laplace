@@ -1,14 +1,7 @@
 @echo off
 setlocal EnableDelayedExpansion
-rem ==== Invention-complete witness seed (manifest-driven) =====================
-rem Build (incremental) -> DROP+recreate laplace -> seed-ladder.cmd -> audit.
-rem The ladder itself (ordering law, synset hub law, models, deferred lexical)
-rem lives in seed-ladder.cmd -- the executable mirror of witness-manifest.json.
-rem Defaults here: LAPLACE_SKIP_MODELS=1, LAPLACE_SKIP_USAGE=0 (full witness; set =1 to skip usage).
-rem cwd on D: so /vault junctions resolve to D:\Data\Ingest.
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
-rem Connection/data-path constants come from env.cmd. Reproducibility pins below are deliberate.
 set "LAPLACE_INGEST_LANGS=en"
 if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=4"
 set "LAPLACE_DECOMPOSE_WORKERS=1"

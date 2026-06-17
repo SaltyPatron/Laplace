@@ -4,9 +4,9 @@ CREATE OR REPLACE FUNCTION drop_period_staging()
 DECLARE
     stale text;
 BEGIN
-    -- Both journal shapes: flat epoch staging AND the walk journal. A dead
-    -- run's stale journal must never leak into the next deposit's fold
-    -- (create_walk_staging is IF NOT EXISTS — it would keep stale rows).
+    
+    
+    
     FOR stale IN
         SELECT c.relname FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -100,13 +100,13 @@ BEGIN
     IF to_regclass(p_table) IS NULL THEN
         RAISE EXCEPTION 'materialize_period_partition: staging % does not exist', p_table;
     END IF;
-    -- Stats so the planner sees the real row count (fresh UNLOGGED tables have none).
+    
     EXECUTE format('ANALYZE %I', p_table);
-    -- Probe order is the law here: BLAKE3 keys have zero locality, so unordered
-    -- upserts random-fault the 25GB+ PK leaf-by-leaf (2 probes/row: join + conflict
-    -- arbiter). Sorting the batch by cid turns both probe streams into an ascending
-    -- leaf walk, and the 8 parallel partition folds share buffers instead of
-    -- evicting each other (measured 2026-06-11: 45-70k rel/s unordered).
+    
+    
+    
+    
+    
     EXECUTE format($f$
         WITH merged AS (
             SELECT s.subject_id, s.type_id, s.object_id,
@@ -121,7 +121,7 @@ BEGIN
         keyed AS MATERIALIZED (
             SELECT mm.*, consensus_id(mm.subject_id, mm.type_id, mm.object_id) AS cid
             FROM merged mm
-            ORDER BY cid   -- the computed alias, NOT a second consensus_id() (BLAKE3) per row
+            ORDER BY cid   
         )
         INSERT INTO consensus (id, subject_id, type_id, object_id,
                                rating, rd, volatility, witness_count, last_observed_at)
@@ -165,13 +165,13 @@ BEGIN
 END;
 $$;
 
--- Fresh-source fold: when a source is known to contribute only NEW relations
--- (every (subject,type,object) distinct and absent from consensus -- e.g. a model
--- deposit's per-(role,layer) arenas), the read-modify-write upsert is dead weight.
--- Skip the LEFT JOIN consensus (always empty) and the ON CONFLICT DO UPDATE
--- speculative-insert locking: compute Glicko from the neutral prior and plain-insert.
--- ON CONFLICT DO NOTHING is kept only as a cheap guard; it must never actually fire
--- on a fresh source, so this is bitwise-equal to the upsert path for that input.
+
+
+
+
+
+
+
 CREATE OR REPLACE FUNCTION materialize_period_partition_fresh(p_table text)
     RETURNS bigint LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public
@@ -185,7 +185,7 @@ BEGIN
         RAISE EXCEPTION 'materialize_period_partition_fresh: staging % does not exist', p_table;
     END IF;
     EXECUTE format('ANALYZE %I', p_table);
-    -- Sorted-arbiter law: see materialize_period_partition.
+    
     EXECUTE format($f$
         WITH merged AS (
             SELECT s.subject_id, s.type_id, s.object_id,
@@ -232,23 +232,23 @@ BEGIN
 END;
 $$;
 
--- ── the terminal fold (HANDOFF-fold-lane / OPEN-PROBLEMS §11) ───────────────────
--- The merge fold pays 2 random index probes per relation against a working set
--- beyond RAM, re-touched once per period. The terminal fold replaces every probe
--- with sorting: all staged epochs + the existing consensus rows (as period-0
--- seeds) grouped by relation identity, periods folded IN ORDER — sequential I/O
--- end to end. Two lanes share the math (consensus_fold_math.h): 'sql' runs the
--- ordered aggregate below; 'engine' runs consensus_fold_partition (chunk sort +
--- k-way merge in C). The result lands in a new heap whose PK is built once,
--- then an atomic swap — production indexes are never dropped in place.
 
--- Refresh-safe: on a live DB the fold aggregate is extension-owned — it can be
--- neither dropped nor replaced (no OR REPLACE for aggregates), and its DDL is
--- stable, so refresh skips it when present. A fresh install (or a DB that lost
--- it) creates the chain; gen-sql substitutes MODULE_PATHNAME textually in both
--- install and refresh modes, so the EXECUTE strings resolve identically.
--- args: (is_seed, rating, rd, volatility, phi, games|witness_count, sum_score, tau)
--- Callers MUST order inputs seed-first then epochs ascending (ORDER BY in the call).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 DO $do$
 BEGIN
     IF to_regprocedure(
@@ -277,9 +277,9 @@ BEGIN
     ) $c$;
 END $do$;
 
--- hash128_lo: the low 8 bytes of a Hash128's bytea image as bigint. The image
--- is the raw struct bytes — [0..7] = Hi, [8..15] = Lo, little-endian
--- (Hash128.WriteBytes / ConsensusAccumulatingWriter.WriteHash).
+
+
+
 CREATE OR REPLACE FUNCTION hash128_lo(h bytea)
     RETURNS bigint LANGUAGE sql IMMUTABLE
     SET search_path = @extschema@, public AS $$
@@ -293,13 +293,13 @@ CREATE OR REPLACE FUNCTION hash128_lo(h bytea)
          | (get_byte(h, 15)::bigint << 56);
 $$;
 
--- The routing law: relation identity → staging partition. MUST equal
--- ConsensusAccumulatingWriter.PartitionOf:
---     (Subject.Lo ^ Type.Lo ^ (Object?.Lo ?? 0)) % nparts    (unsigned mod)
--- The writer buckets staged rows C#-side; finish_consensus_fold routes SEEDS
--- with this twin so each identity folds in exactly one partition round. Drift
--- cannot fold silently: a misrouted seed lands in a different round than its
--- staged epochs and the duplicate id fails the terminal PRIMARY KEY build.
+
+
+
+
+
+
+
 CREATE OR REPLACE FUNCTION consensus_partition_of(
         p_subject bytea, p_type bytea, p_object bytea, p_nparts integer)
     RETURNS integer LANGUAGE sql IMMUTABLE
@@ -307,15 +307,15 @@ CREATE OR REPLACE FUNCTION consensus_partition_of(
     SELECT mod(x::numeric
                + CASE WHEN x < 0 THEN 18446744073709551616::numeric ELSE 0::numeric END,
                p_nparts::numeric)::integer
-    -- the XOR operator must not start a line: .sql.in preprocessing eats #-led lines
+    
     FROM (SELECT hash128_lo(p_subject) # hash128_lo(p_type) #
                  COALESCE(hash128_lo(p_object), 0::bigint) AS x) t;
 $$;
 
--- The engine lane of the terminal fold: one call folds one partition's staged
--- epochs (+ routed seeds) straight into consensus_next — table-AM reads, chunk
--- sort + k-way merge, the shared fold math, multi-insert writes. SQL stays the
--- orchestrator (catalog discovery, DDL, PK, swap). consensus_fold_engine.c.
+
+
+
+
 CREATE OR REPLACE FUNCTION consensus_fold_partition(
         p_tables text[], p_epochs int[],
         p_partition integer, p_nparts integer, p_seed boolean)
@@ -323,15 +323,15 @@ CREATE OR REPLACE FUNCTION consensus_fold_partition(
     AS 'MODULE_PATHNAME', 'pg_laplace_consensus_fold_partition'
     LANGUAGE C VOLATILE;
 
--- ── THE TRAJECTORY JOURNAL (the walk lane) ──────────────────────────────────────
--- Model testimony journals as WALKS under the trajectory law: one row per
--- (subject, type, layer-context), vertices mantissa-packed (object reference +
--- games + zigzagged score — the testimony-vertex payload, mantissa.h). The
--- journal is subject-grouped by construction, so the fold needs NO global
--- sort: per subject, merge its walks' objects in a distinct-entities-bounded map, ONE
--- Glicko period per relation (the period rule), emit. Partitioned by
--- subject.lo %% nparts — the gather unit — NOT consensus_partition_of (which
--- hashes the full identity; walks gather by subject alone).
+
+
+
+
+
+
+
+
+
 CREATE OR REPLACE FUNCTION create_walk_staging(p_partitions integer)
     RETURNS void LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public AS $$
@@ -357,18 +357,18 @@ BEGIN
 END;
 $$;
 
--- Fold one walk partition into consensus_next. The conservation receipt is in
--- the LOG line: games read == games folded, every observation exactly once.
+
+
 CREATE OR REPLACE FUNCTION consensus_fold_walks(
         p_partition integer, p_nparts integer, p_seed boolean)
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_consensus_fold_walks'
     LANGUAGE C VOLATILE;
 
--- Fold ONE staged partition into consensus_next, by lane. Shared by the
--- one-shot finish_consensus_fold and the resumable finish_consensus_fold_steps.
--- lane 'engine' (default) = consensus_fold_partition; lane 'sql' = the ordered
--- consensus_fold aggregate — the escape hatch and the parity reference.
+
+
+
+
 CREATE OR REPLACE FUNCTION consensus_fold_one_partition(
         p integer, nparts integer, fresh boolean, lane text)
     RETURNS bigint LANGUAGE plpgsql VOLATILE
@@ -417,13 +417,13 @@ BEGIN
             nparts, p);
     END IF;
 
-    -- The fold query under THE PERIOD RULE: one fold = one rating period.
-    -- Staging epochs are flush quanta (RAM bounds), not time — every staged
-    -- row of a relation pre-merges into ONE partial (φ guard across the whole
-    -- fold), which folds as a single Glicko period on top of the seed. This
-    -- keeps consensus values independent of LAPLACE_STAGING_THRESHOLD;
-    -- distinct deposits at distinct times remain distinct periods because
-    -- they fold against the prior consensus as seeds.
+    
+    
+    
+    
+    
+    
+    
     q := format($q$
         INSERT INTO consensus_next
         WITH staged AS (%s),
@@ -466,11 +466,11 @@ BEGIN
 END;
 $$;
 
--- Terminal-fold shared tail: NOT NULLs, the PK build (the loud detector for
--- partition-routing drift), the atomic swap, ANALYZE. Membership note: a
--- swapped-in consensus is a plain table (extension membership is dropped so
--- the retired heap can be dropped; pg_dump then includes the data natively,
--- and pg_extension_config_dump is CREATE-EXTENSION-only).
+
+
+
+
+
 CREATE OR REPLACE FUNCTION consensus_fold_swap()
     RETURNS void LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public
@@ -478,11 +478,11 @@ CREATE OR REPLACE FUNCTION consensus_fold_swap()
 DECLARE
     rel record;
 BEGIN
-    -- THE DEGENERATE-SWAP GUARD. A fold that produced an empty consensus_next
-    -- while consensus is populated is ALWAYS a bug (a no-op/errored fold, a
-    -- search_path mishap), and swapping it wipes the substrate's product. Refuse.
-    -- A genuinely fresh build has an empty consensus and never trips this.
-    -- (Set laplace.allow_empty_swap=on only for a deliberate truncate-by-fold.)
+    
+    
+    
+    
+    
     IF NOT EXISTS (SELECT 1 FROM consensus_next)
        AND EXISTS (SELECT 1 FROM consensus)
        AND COALESCE(NULLIF(current_setting('laplace.allow_empty_swap', true), ''), 'off') <> 'on'
@@ -513,7 +513,7 @@ BEGIN
     ALTER TABLE consensus_next RENAME TO consensus;
     DROP TABLE consensus_retired;
 
-    -- Staging is consumed either way.
+    
     FOR rel IN
         SELECT c.relname
         FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
@@ -527,16 +527,16 @@ BEGIN
 END;
 $$;
 
--- ── THE PARALLEL WALK FOLD ──────────────────────────────────────────────────
--- The walk partitions are independent by construction: partition p reads only
--- consensus_walk_staging_p and its routed seed slice, and writes consensus_next.
--- So N backends fold concurrently (concurrent heap inserts into the un-indexed
--- consensus_next are safe; the seed scan is read-only over consensus). The
--- caller (ConsensusAccumulatingWriter) runs prepare on one connection, then
--- consensus_fold_walks(p, nwalk, seed) on N connections in parallel, then
--- finalize. finish_consensus_fold() stays the single-connection equivalent —
--- the parity reference and the direct-psql re-fold path. This is a 4× wall-clock
--- cut AND a smaller window for a concurrent install --recycle to kill the fold.
+
+
+
+
+
+
+
+
+
+
 CREATE OR REPLACE FUNCTION walk_fold_prepare(OUT nwalk integer, OUT fresh boolean)
     LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public AS $$
@@ -575,9 +575,9 @@ BEGIN
 END;
 $$;
 
--- Drop the (now consumed) walk journal and run the shared swap tail. Runs after
--- every parallel consensus_fold_walks has committed its partition's rows into
--- consensus_next.
+
+
+
 CREATE OR REPLACE FUNCTION walk_fold_finalize()
     RETURNS void LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public
@@ -617,19 +617,19 @@ DECLARE
     fresh   boolean;
     t0      timestamptz := clock_timestamp();
 BEGIN
-    -- The walk journal (trajectory law) takes precedence: subject-grouped
-    -- walks fold without any global sort.
+    
+    
     SELECT max(substring(c.relname FROM '_(\d+)$')::int) + 1 INTO nwalk
     FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
     WHERE ns.nspname = current_schema() AND c.relkind = 'r'
       AND c.relname ~ '^consensus_walk_staging_\d+$';
 
-    -- One fold per staged PARTITION, never one fold over everything: identity →
-    -- partition is stable across epochs (the writer hashes the relation
-    -- identity), so partitions fold independently and the temp envelope is
-    -- one partition's bytes, not the whole deposit's. The monolithic fold
-    -- needed temp ≈ all staged bytes and hit ENOSPC at 113 GB staged on a
-    -- 125 GB-free volume (TinyLlama, 2026-06-11).
+    
+    
+    
+    
+    
+    
     SELECT max(substring(c.relname FROM '_(\d+)$')::int) + 1 INTO nparts
     FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
     WHERE ns.nspname = current_schema() AND c.relkind = 'r'
@@ -673,8 +673,8 @@ BEGIN
     IF nparts IS NULL THEN
         RETURN 0;
     END IF;
-    -- A mixed fan-out would route one identity to different suffixes in
-    -- different epochs; refuse rather than fold periods out of order.
+    
+    
     IF EXISTS (
         SELECT 1
         FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
@@ -719,11 +719,11 @@ BEGIN
 END;
 $$;
 
--- The resumable terminal fold: one transaction per partition. Each round folds
--- a partition, drops ITS staging tables, and COMMITs — so the remaining
--- staging tables ARE the restart state, and the temp/staging envelope is
--- reclaimed as the fold walks. A re-CALL after any interruption skips folded
--- partitions (their staging is gone) and finishes the swap.
+
+
+
+
+
 CREATE OR REPLACE PROCEDURE finish_consensus_fold_steps(INOUT p_total bigint DEFAULT 0)
     LANGUAGE plpgsql AS $$
 DECLARE
@@ -747,8 +747,8 @@ BEGIN
     END IF;
     resume := to_regclass(current_schema() || '.consensus_next') IS NOT NULL;
 
-    -- Partitions fold ascending, so the highest staged suffix survives until
-    -- the last round and max+1 names the true fan-out even mid-resume.
+    
+    
     SELECT max(substring(c.relname FROM '_(\d+)$')::int) + 1 INTO nparts
     FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
     WHERE ns.nspname = current_schema() AND c.relkind = 'r'
@@ -758,8 +758,8 @@ BEGIN
     END IF;
 
     IF NOT resume THEN
-        -- a fresh start gets the strict fan-out check; a resume cannot (folded
-        -- partitions already dropped their staging)
+        
+        
         IF EXISTS (
             SELECT 1
             FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace

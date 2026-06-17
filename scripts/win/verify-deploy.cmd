@@ -1,7 +1,5 @@
 @echo off
 setlocal
-rem Verify local extension deploy at D:\Data\Postgres\laplace (no rebuild).
-rem Agent rules: .github\instructions\build-environment.instructions.md
 call "%~dp0env.cmd"
 set "DEPLOY=D:\Data\Postgres\laplace"
 set "PSQL=%PGBIN%\psql.exe"

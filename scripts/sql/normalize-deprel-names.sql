@@ -1,23 +1,23 @@
--- Universal UD relation/feature naming.
---
--- UD's deprel/feature heads (DEP_*, EDEP_*, FEAT_*) are seeded by
--- RelationTypeRegistry.SeedDynamic with a content-addressed type_id but NO
--- canonical_names entry, so they are anonymous heads — unlike POS (substrate/pos/*),
--- senses (CILI), languages (ISO 639), characters (Unicode), which are universal NAMED
--- anchors. This registers the universal UD relations under the same convention
--- (substrate/type/<CANON>/v1) so the syntactic heads are knowable and fold across every
--- language/treebank onto one anchor (one nsubj, one Case).
---
--- relation_type_id(name) is the content hash SeedDynamic used, so the id matches the
--- type already in consensus; names ONLY the universal bases present (idempotent). The
--- language-specific subtypes (DEP_NSUBJ_PASS, ...) need their source labels — the durable
--- fix is SeedDynamic registering the name at seed for ALL of them; this backfills the
--- universal bases on the existing substrate.
---
--- Rerunnable:  psql -h localhost -U postgres -d laplace -f scripts/sql/normalize-deprel-names.sql
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 SET search_path = laplace, public;
 
--- universal UD deprels (v2 base relations), both plain (DEP_) and enhanced (EDEP_)
+
 INSERT INTO canonical_names (id, name)
 SELECT relation_type_id(pf.p || '_' || upper(d)),
        'substrate/type/' || pf.p || '_' || upper(d) || '/v1'
@@ -31,7 +31,7 @@ WHERE EXISTS (SELECT 1 FROM consensus c
               WHERE c.type_id = relation_type_id(pf.p || '_' || upper(d)))
 ON CONFLICT (id) DO NOTHING;
 
--- universal UD features (HAS-FEATURE values are FEAT_<NAME>)
+
 INSERT INTO canonical_names (id, name)
 SELECT relation_type_id('FEAT_' || upper(f)),
        'substrate/type/FEAT_' || upper(f) || '/v1'

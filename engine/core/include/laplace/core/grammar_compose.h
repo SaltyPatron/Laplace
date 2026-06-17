@@ -53,9 +53,9 @@ typedef struct {
     hash128_t                        root_id;
 } laplace_compose_result_t;
 
-/* Compose a parsed grammar AST into substrate entities, physicalities, PRECEDES pairs,
- * and a byte-span index for witness walkers. type_meta_id is the vocabulary meta-type
- * for grammar node-type entities (substrate/type/MetaType/v1). Returns 0 on success. */
+
+
+
 int laplace_grammar_compose(
     const uint8_t*              utf8,
     size_t                      len,
@@ -65,7 +65,7 @@ int laplace_grammar_compose(
     hash128_t                   type_meta_id,
     laplace_compose_result_t**  out);
 
-/* Resolve entity id for one AST node index without full result materialization. */
+
 int laplace_grammar_compose_node_id(
     const uint8_t*     utf8,
     size_t             len,
@@ -74,7 +74,7 @@ int laplace_grammar_compose_node_id(
     hash128_t*         out_id,
     uint8_t*           out_tier);
 
-/* Span lookup in a compose result (witness field mapping). */
+
 int laplace_compose_span_lookup(
     const laplace_compose_result_t* r,
     uint32_t start_byte,

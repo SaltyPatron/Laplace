@@ -19,9 +19,9 @@ typedef struct {
     hash128_t       type_id;
     double          rank;
     laplace_rel_symmetry_t symmetry;
-    int16_t         parent_idx;   /* -1 if none */
+    int16_t         parent_idx;
     int16_t         family_root_idx;
-    uint8_t         flip;         /* alias-only; canonical entries 0 */
+    uint8_t         flip;
 } laplace_relation_def_t;
 
 typedef struct {

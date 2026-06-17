@@ -4,12 +4,12 @@ using Xunit;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
-/// <summary>
-/// Behavioral contract for the billing stores, run against BOTH implementations.
-/// The in-memory variant always runs; the Postgres variant runs when LAPLACE_DB points
-/// at a reachable database with the app schema applied (Laplace.Migrations up), and
-/// skips otherwise — so a checkout without Postgres still tests the contract.
-/// </summary>
+
+
+
+
+
+
 public abstract class BillingStoreContractTests
 {
     private protected abstract IBillingQuoteStore Quotes { get; }
@@ -18,7 +18,7 @@ public abstract class BillingStoreContractTests
     private protected abstract IBillingWebhookEventStore WebhookEvents { get; }
     private protected abstract IStripePriceMap PriceMap { get; }
 
-    /// <summary>Overridden by the Postgres variant to skip when no database is reachable.</summary>
+    
     protected virtual bool Available => true;
 
     private void RequireStore() =>
@@ -144,7 +144,7 @@ public abstract class BillingStoreContractTests
         var (exhausted, _) = await Entitlements.TryConsumeCreditAsync(tenant, "synthesis", 1, CancellationToken.None);
         Assert.False(exhausted);
 
-        // Renewal carries forward Stripe ids when the webhook omits them.
+        
         var renewed = await Entitlements.RenewPlanAsync(tenant, plan, null, null, DateTimeOffset.UtcNow, CancellationToken.None);
         Assert.Equal(subscription, renewed.StripeSubscriptionId);
 
@@ -188,10 +188,10 @@ public sealed class InMemoryBillingStoreContractTests : BillingStoreContractTest
     private protected override IStripePriceMap PriceMap { get; } = new InMemoryStripePriceMap();
 }
 
-/// <summary>
-/// Postgres variant. Requires LAPLACE_DB + applied app schema; each fact skips cleanly
-/// when the database (or the app schema) is unavailable.
-/// </summary>
+
+
+
+
 public sealed class PostgresBillingStoreContractTests : BillingStoreContractTests
 {
     private static readonly NpgsqlDataSource? Shared = TryBuild();

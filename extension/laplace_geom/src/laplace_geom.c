@@ -501,9 +501,9 @@ pg_laplace_mantissa_unpack(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
-/* Vertex flag-word field decode — the mantissa.h accessors are the single
- * source of the bit layout; the SQL vertex_atom/vertex_tier helpers delegate
- * here instead of re-spelling shifts and masks. */
+
+
+
 PG_FUNCTION_INFO_V1(pg_laplace_vertex_atom);
 
 Datum
@@ -524,10 +524,10 @@ pg_laplace_vertex_tier(PG_FUNCTION_ARGS)
     PG_RETURN_INT16((int16) laplace_vflag_tier((uint64) PG_GETARG_INT64(0)));
 }
 
-/* One C loop over a stored trajectory: every vertex mantissa-unpacked in
- * process. Replaces the per-vertex fmgr lateral (ST_DumpPoints +
- * laplace_mantissa_unpack per point) that the substrate's constituents()
- * surface used to fan out into. Output is bit-identical to that lateral. */
+
+
+
+
 PG_FUNCTION_INFO_V1(pg_laplace_trajectory_constituents);
 
 Datum
@@ -566,10 +566,10 @@ pg_laplace_trajectory_constituents(PG_FUNCTION_ARGS)
     return (Datum) 0;
 }
 
-/* Native bytea[] of the DISTINCT constituent entity-ids of a trajectory. Same decode as
- * laplace_trajectory_constituents, but returns the id array directly (no SQL array_agg over an
- * SRF) so it can back a content-addressed GIN index (physicalities_constituents_gin) and the
- * @> reverse lookup at native speed. */
+
+
+
+
 PG_FUNCTION_INFO_V1(pg_laplace_trajectory_constituent_ids);
 
 Datum

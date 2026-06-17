@@ -48,12 +48,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     public bool PersistEvidence => _persistEvidence;
 
-    /// <param name="stageAsWalks">THE TRAJECTORY JOURNAL mode: every consensus
-    /// partial journals as a testimony walk — flat period staging is never
-    /// created, so the deposit folds as ONE shape through the terminal walk
-    /// fold. Required whenever the decomposer emits TestimonyWalks (mixed
-    /// shapes are refused by finish_consensus_fold). Threaded explicitly from
-    /// the ingest entry point, never re-derived from the environment.</param>
+    
+    
+    
+    
+    
+    
     public ConsensusAccumulatingWriter(
         ISubstrateWriter inner, NpgsqlDataSource dataSource,
         int? stagingThresholdRelations = null, int? foldWorkers = null,
@@ -70,26 +70,26 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         if (!_persistEvidence)
             _log.LogInformation(
                 "consensus-only deposit: accumulating and folding relations; laplace.attestations writes skipped");
-        // The accumulator is a bounded pre-merge of recurrent pairs before they
-        // stream to the staging journal — never a place testimony accumulates.
-        // The old 250M default held ~most of a model deposit in RAM and OOM'd;
-        // 20M keeps the pre-merge win at a bounded ~2-3 GB.
+        
+        
+        
+        
         _stagingThreshold = stagingThresholdRelations
             ?? (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_STAGING_THRESHOLD"), out var t) && t > 0
                 ? t : 20_000_000);
         _partitions = foldWorkers
             ?? (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_FOLD_WORKERS"), out var w) && w > 0
                 ? w : Math.Clamp(Environment.ProcessorCount - 2, 1, 4));
-        // Staged-but-unfolded epochs live on disk (~rows×110B each); an unbounded backlog
-        // exhausted the drive on the first 1B+-relation behavioral deposit (2026-06-11).
-        // 0 or negative disables the bound.
+        
+        
+        
         _maxFoldBacklog = int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_FOLD_BACKLOG_MAX"), out var bl)
             ? bl : 12;
-        // LAPLACE_FOLD_LANE=terminal: stage every epoch to disk and fold ONCE at the
-        // end through finish_consensus_fold (sequential I/O, zero per-row index probes
-        // — the HANDOFF-fold-lane design). The per-epoch merge fold and its backlog
-        // bound are bypassed; disk must hold the whole staged journal. ("bulk" is the
-        // retired name for the same lane and stays accepted.)
+        
+        
+        
+        
+        
         var lane = Environment.GetEnvironmentVariable("LAPLACE_FOLD_LANE");
         _terminalFold = string.Equals(lane, "terminal", StringComparison.OrdinalIgnoreCase)
                      || string.Equals(lane, "bulk", StringComparison.OrdinalIgnoreCase);
@@ -140,10 +140,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         return await _inner.ApplyManyAsync(ForwardChanges(changes), ct);
     }
 
-    /// <summary>Append path: accumulate consensus exactly as ApplyManyAsync, but forward the
-    /// evidence to the inner writer's lock-free append-to-staging instead of an immediate upsert.
-    /// The evidence is merged in one pass by FinalizeSourceAsync; consensus is materialized
-    /// separately by MaterializeConsensusAsync.</summary>
+    
+    
+    
+    
     public async Task<ApplyResult> AppendAsync(
         IReadOnlyList<SubstrateChange> changes, Hash128 sourceId, CancellationToken ct = default)
     {
@@ -194,8 +194,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
     private IReadOnlyList<SubstrateChange> ForwardChanges(IReadOnlyList<SubstrateChange> changes)
     {
-        // Walks never travel past the journal (the inner writer has no walk
-        // surface); attestation rows forward only when evidence persists.
+        
+        
         bool anyToStrip = false;
         foreach (var c in changes)
         {
@@ -251,11 +251,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         Interlocked.Add(ref _observationsAccumulated, a.ObservationCount);
     }
 
-    // ── THE TRAJECTORY JOURNAL ───────────────────────────────────────────────
-    // Walks bypass the accumulator entirely: they ARE the journal. Buffered per
-    // subject-partition (subject.lo % partitions — the fold's gather unit) and
-    // COPY'd to consensus_walk_staging_{p}. The terminal fold gathers per
-    // subject; recurrence merges there under the period rule.
+    
+    
+    
+    
+    
 
     private const int WalkFlushRows = 65_536;
     private List<TestimonyWalkRow>[]? _walkBuffers;
@@ -296,9 +296,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         }
     }
 
-    /// <summary>Caller holds _stagingGate. One long-lived connection serves the
-    /// whole deposit's walk COPYs — a fresh connection per 65 k-row flush meant
-    /// ~17 000 opens on a 1.1 B-matchup model.</summary>
+    
+    
+    
     private async Task FlushWalksLockedAsync(CancellationToken ct)
     {
         if (_walkBuffers is null || _walkBuffered == 0) return;
@@ -332,17 +332,17 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         _walkBuffered = 0;
     }
 
-    // Async, chunked COPY framing — the twin of CopyPartitionAsync. The earlier
-    // synchronous per-field stream.Write stalled a large COMPLETES_TO flush past
-    // the COPY write timeout (TinyLlama, 2026-06-12); buffer into a 4 MB array and
-    // flush async so the socket and the server-side heap write overlap.
+    
+    
+    
+    
     private static async Task WriteWalkRowsAsync(
         Stream stream, List<TestimonyWalkRow> rows, CancellationToken ct)
     {
-        // Fixed framing per row = 2 (field count) + 20·3 (subject,type,context)
-        // + 12 (phi) + 8 (n_vertices) + 12 (games) + 12 (last_ts) + 4 (walk len);
-        // a NULL context is 4 not 20. The walk bytea is variable and can dwarf the
-        // buffer (a high-degree COMPLETES_TO subject), which PgCopyRowBuffer grows for.
+        
+        
+        
+        
         const int fixedRowBytes = 2 + 20 * 3 + 12 + 8 + 12 + 12 + 4;
         var copy = new PgCopyRowBuffer(stream);
         foreach (var w in rows)
@@ -371,10 +371,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         return o;
     }
 
-    // The routing law: identity → staging partition, stable across epochs so the
-    // bulk fold can consume one partition at a time (bounded pgsql_tmp). MUST
-    // equal laplace.consensus_partition_of (14_period_fold.sql.in) — the fold
-    // routes consensus seeds with the SQL twin; drift fails its PK build loudly.
+    
+    
+    
+    
     private int PartitionOf(Acc acc)
         => (int)((acc.Subject.Lo ^ acc.Type.Lo ^ (acc.Object?.Lo ?? 0UL)) % (ulong)_partitions);
 
@@ -385,10 +385,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         {
             if (_stageAsWalks)
             {
-                // THE TRAJECTORY JOURNAL: partials journal as walks too — one
-                // shape, one fold, one period. The q/rem split is lossless:
-                // (games−rem) observations of q plus rem of (q+1) re-merge in
-                // the fold to the exact (games, sum) the flat lane would stage.
+                
+                
+                
+                
                 ConcurrentDictionary<(Hash128, Hash128, Hash128?), Acc> snap;
                 _swapLock.EnterWriteLock();
                 try
@@ -493,9 +493,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         }
     }
 
-    // A partial (games, sum) becomes ≤2 score levels — q and q+1 with rem of
-    // the latter — chunked to the uint16 run_length bound. A NULL object rides
-    // as zero16, the identity-preimage law carried into the vertex.
+    
+    
+    
     private static TestimonyWalkRow ConvertPartialToWalk(Acc acc)
     {
         long games = acc.Games, sum = acc.SumScoreFp1e9;
@@ -613,10 +613,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         await FlushWalksAsync(ct);
         await FlushPeriodAsync(ct);
 
-        // Walk mode: the partitions are independent, so fold them on N connections
-        // in parallel (prepare → consensus_fold_walks×N → finalize). 'sql' impl or a
-        // single partition fall through to the single-connection finish_consensus_fold
-        // (the parity reference). LAPLACE_FOLD_PARALLEL=0 forces the serial path.
+        
+        
+        
+        
         if (_stageAsWalks
             && _partitions > 1
             && (Environment.GetEnvironmentVariable("LAPLACE_FOLD_IMPL") ?? "engine") != "sql"
@@ -627,13 +627,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
 
         if (_terminalFold || _stageAsWalks)
         {
-            // The walk journal has exactly one fold — the terminal walk fold —
-            // so walk mode takes this path regardless of LAPLACE_FOLD_LANE.
-            // LAPLACE_FOLD_IMPL selects the lane inside the terminal fold:
-            // 'engine' (default, consensus_fold_partition in C) or 'sql' (the
-            // ordered-aggregate escape hatch and parity reference).
-            // LAPLACE_FOLD_RESUMABLE=1 runs the per-partition-COMMIT procedure:
-            // staging drops as the fold walks, and a re-run resumes mid-deposit.
+            
+            
+            
+            
+            
+            
+            
             if (_stageAsWalks && !_terminalFold)
                 _log.LogInformation("walk journal staged: materializing through the terminal walk fold");
             string impl = Environment.GetEnvironmentVariable("LAPLACE_FOLD_IMPL") ?? "engine";
@@ -669,12 +669,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         return Interlocked.Read(ref _foldedRelations);
     }
 
-    // The parallel terminal walk fold. prepare creates consensus_next (autocommit,
-    // so the parallel backends see it); each partition folds on its own connection
-    // (concurrent heap inserts into the un-indexed consensus_next are safe, the seed
-    // scan is read-only); finalize drops the journal and swaps. A killed partition
-    // (e.g. a concurrent install --recycle) aborts the whole fold — the walk journal
-    // persists, so a re-run re-folds without re-ETL, exactly as the serial lane.
+    
+    
+    
+    
+    
+    
     private async Task<long> ParallelWalkFoldAsync(CancellationToken ct)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();

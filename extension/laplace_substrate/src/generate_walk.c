@@ -48,7 +48,7 @@ ensure_edge_plan(void)
     }
 }
 
-/* eff_mu_display_numeric / copy_bytea_datum live in spi_common.h */
+
 
 typedef struct WalkNode
 {
@@ -371,8 +371,8 @@ append_codepoint_utf8(StringInfo out, uint32 cp)
     appendBinaryStringInfo(out, (char *) buf, 4);
 }
 
-/* T0 leaf render: perfcache reverse lookup, in process. Replaced the
- * per-grapheme SPI probe into the retired codepoint_render table. */
+
+
 static bool
 append_codepoint_render(StringInfo out, Datum id)
 {
@@ -611,9 +611,9 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
             out_nulls[i] = true;
         else
         {
-            /* the rendered cstring lives in the SPI context, freed by SPI_finish;
-             * materialize the result text in the CALLER context so it survives to
-             * construct_md_array below (the single-id render_text does the same). */
+            
+
+
             MemoryContext old = MemoryContextSwitchTo(caller_cxt);
             out[i] = CStringGetTextDatum(rendered);
             MemoryContextSwitchTo(old);

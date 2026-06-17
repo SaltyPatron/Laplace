@@ -122,7 +122,7 @@ internal static class WiktionaryWitness
                     foreach (var tg in stags.EnumerateArray())
                         if (tg.ValueKind == JsonValueKind.String)
                         {
-                            // context_id is an entity reference — witness it, never RootId it
+                            
                             dialectCtx = ContentEmitter.Emit(b, tg.GetString()!, WiktionaryDecomposer.Source);
                             break;
                         }
@@ -163,11 +163,11 @@ internal static class WiktionaryWitness
         return true;
     }
 
-    // The tier-witness law: an attestation object must be WITNESSED content, never a
-    // bare RootId — id-without-witness is a ghost reference (no entity, no trajectory,
-    // no tier; invisible to the generation corpus). Emit deposits the content tree
-    // at its natural tier through the builder's coalesced stage (cheap since the
-    // per-witness round-trip cost died), then the claim attests to real content.
+    
+    
+    
+    
+    
     private static void AttestText(
         SubstrateChangeBuilder b, Hash128 subject, string typeName, string? text,
         Hash128? context)

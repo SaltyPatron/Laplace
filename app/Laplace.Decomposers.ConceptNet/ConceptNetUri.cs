@@ -5,7 +5,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.ConceptNet;
 
-/// <summary>Parse /c/&lt;lang&gt;/&lt;term&gt; URIs on UTF-8 spans — no full-uri string materialization.</summary>
+
 internal static class ConceptNetUri
 {
     public static bool TryParseLangAndTerm(

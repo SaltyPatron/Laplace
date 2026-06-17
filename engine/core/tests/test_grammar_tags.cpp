@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-// Seam proof: Laplace headers only — no tree_sitter/api.h.
+
 #include "laplace/core/grammar_registry.h"
 #include "laplace/core/grammar_tags.h"
 
@@ -60,4 +60,4 @@ TEST(GrammarTags, InvalidQueryIsRejected)
     EXPECT_EQ(out, nullptr);
 }
 
-}  // namespace
+}  

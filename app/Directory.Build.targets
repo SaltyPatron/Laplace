@@ -8,10 +8,10 @@
     <Compile Include="$(MSBuildThisFileDirectory)NativeTestBootstrap.cs" />
   </ItemGroup>
 
-  <!-- ALL projects, not just tests: the exe directory wins DLL resolution over PATH,
-       so a bin copy that exists but is not refreshed shadows the current engine build
-       (a stale laplace_core.dll vs new NativeInterop signatures = AV at first P/Invoke,
-       2026-06-10). SkipUnchangedFiles keeps every bin copy current on every build. -->
+  
+
+
+
   <Target Name="LaplaceCopyNativeLibs" AfterTargets="Build"
           Condition="Exists('$(LaplaceBuildWin)\core\laplace_core.dll')">
     <Copy SourceFiles="$(LaplaceBuildWin)\core\laplace_core.dll"

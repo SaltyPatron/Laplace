@@ -27,7 +27,7 @@ static void node_type_entity_id(const char* modality, const char* node_type, has
     hash_canonical(buf, out);
 }
 
-static int codepoint_resolver(uint32_t atom, void* /*user*/,
+static int codepoint_resolver(uint32_t atom, void* ,
                               hash128_t* out_id, double out_coord[4],
                               hilbert128_t* out_hb) {
     return codepoint_table_resolve_atom(atom, out_id, out_coord, out_hb);
@@ -43,7 +43,7 @@ static void physicality_id_compute(hash128_t entity_id, hash128_t source_id,
     size_t o = 0;
     memcpy(buf + o, &entity_id, 16); o += 16;
     memcpy(buf + o, &source_id, 16); o += 16;
-    int16_t physicality_type = 1; /* PhysicalityType.Content */
+    int16_t physicality_type = 1; 
     memcpy(buf + o, &physicality_type, 2); o += 2;
     memcpy(buf + o, coord, 32); o += 32;
     if (traj_n > 0) {
@@ -95,10 +95,10 @@ static int emit_grapheme_floor_entities(
     return 0;
 }
 
-/* JSON rows are huge structured blobs — building one grapheme floor over the
- * entire line decomposes every " { } : , byte and balloons entity counts.
- * Leaf string/number literals get a per-span floor instead (the identity
- * linchpin applies to word content, not JSON syntax). */
+
+
+
+
 static int json_leaf_fill_grapheme_children(
     const uint8_t* utf8, size_t len, laplace_ast_t* ast, size_t idx,
     laplace_compose_result_t* r, hash128_t source_id,
@@ -117,7 +117,7 @@ static int json_leaf_fill_grapheme_children(
     size_t span_len = (size_t)(node.end_byte - node.start_byte);
     const char* nt = laplace_ast_type_name(ast, node.type_id);
     if (nt && strcmp(nt, "string_content") == 0) {
-        /* inner content bytes */
+        
     } else if (nt && strcmp(nt, "string") == 0 && span_len >= 2
                && span[0] == '"' && span[span_len - 1] == '"') {
         span += 1;
