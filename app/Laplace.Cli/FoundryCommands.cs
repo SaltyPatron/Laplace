@@ -457,7 +457,17 @@ internal static class FoundryCommands
                 && FoundryExport.EnvInt("LAPLACE_FOUNDRY_MULTIHEAD", 0) != 0;
             // REPHEAD: shift head + a baked-in repetition penalty (head 1, uniform attention) — the loop cure.
             bool repHead = ngram && !grapheme && FoundryExport.EnvInt("LAPLACE_FOUNDRY_REPHEAD", 0) != 0;
-            int faithfulRc = repHead
+            // CONTENT: knowledge∪order readout (king→monarch) + REPHEAD shift/rep/space-led machinery
+            // + strong de-hub (suppresses function-word AND ontology-root hubs). Word vocab only.
+            bool content = !grapheme && FoundryExport.EnvInt("LAPLACE_FOUNDRY_CONTENT", 0) != 0;
+            // TOPIC: content readout + a uniform topic head (running mean knowledge over the context) so
+            // generation is anchored to the whole prompt's topic, not just the current token's IsA chain.
+            bool topic = !grapheme && FoundryExport.EnvInt("LAPLACE_FOUNDRY_TOPIC", 0) != 0;
+            int faithfulRc = topic
+                ? await WriteWordTopicGgufAsync(ds, recipe, tokens, tokenSlots, vocab, dModel, modelDir, outputPath, specs, tensorCount)
+                : content
+                ? await WriteWordContentGgufAsync(ds, recipe, tokens, tokenSlots, vocab, dModel, modelDir, outputPath, specs, tensorCount)
+                : repHead
                 ? await WriteWordRepGgufAsync(ds, recipe, tokens, tokenSlots, vocab, dModel, modelDir, outputPath, specs, tensorCount)
                 : multiHead
                 ? await WriteWordMultiHeadGgufAsync(ds, recipe, tokens, tokenSlots, vocab, dModel, modelDir, outputPath, specs, tensorCount)
@@ -1310,6 +1320,278 @@ internal static class FoundryCommands
         int rcw = SynthInterop.GgufWriterFinalize(gguf); SynthInterop.GgufWriterFree(gguf);
         if (rcw != 0) return Fail($"gguf finalize failed rc={rcw}");
         Console.WriteLine($"REP synthesis complete: {outputPath} ({new FileInfo(outputPath).Length / 1048576.0:F0} MB, 2 heads: shift+repetition, repGain={repGain}, r={r})");
+        return 0;
+    }
+
+    // CONTENT cast: the proven REPHEAD machinery (RoPE shift head 0 + uniform repetition-penalty
+    // head 1 + space-led suppression for readable detokenization) but the bigram readout A1 is the
+    // KNOWLEDGE band (rank∈[lo,hi] — IS_A/RelatedTo/synonym content) UNION the trajectory order, so
+    // the readout surfaces CONTENT (king→monarch, captain→chieftain) instead of word-order function
+    // words. A STRONG de-hub (subtract λ·log P(Y) in FactorAdjacency) suppresses BOTH the function-
+    // word hubs (the/of/and) AND the ConceptNet ontology-root hubs (concept/abstraction) — the
+    // over-general IsA chain that collapsed the plain knowledge readout to "…concept abstraction".
+    // Both hubs are high-in-degree Y, so one λ knob de-hubs both. Skip channel (A2) stays pure order.
+    private static async Task<int> WriteWordContentGgufAsync(
+        NpgsqlDataSource ds, LlamaRecipeExtractor.RecipeInfo recipe,
+        IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
+        Dictionary<Hash128, List<int>> tokenSlots,
+        int vocab, int dModel, string modelDir, string outputPath,
+        TensorSpec[] specs, int tensorCount)
+    {
+        int nHeads = Math.Max(2, recipe.NumHeads), headDim = dModel / nHeads;
+        double ropeTheta = recipe.RopeTheta > 0 ? recipe.RopeTheta : 10000.0;
+        int trajN = FoundryExport.EnvInt("LAPLACE_FOUNDRY_WORD_TRAJS", 400000);
+        double dehub = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_DEHUB", 0.6);   // calibrated: keeps king→monarch, whale→mammal→animal; kills ontology-root hubs
+        double repGain = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_REP_GAIN", 6.0);
+        double rkLo = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RANK_LO", 0.55);
+        double rkHi = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RANK_HI", 0.85);
+        int r = (dModel - 1) / 5;
+        int CONST = dModel - 1;
+
+        var swR = Stopwatch.StartNew();
+        var order1 = FoundryExport.Normalize(await FoundryExport.ReadWordOrderAsync(ds, tokenSlots, 1, trajN));
+        var know   = FoundryExport.Normalize(await FoundryExport.ReadLayerPlaneAsync(ds, rkLo, rkHi, tokenSlots, 64));
+        var order2 = await FoundryExport.ReadWordOrderAsync(ds, tokenSlots, 2, trajN);
+        if (order1.Nnz == 0) return Fail("order channel empty — ingest text first");
+        // MULTI-CHANNEL B0 readout: logit(Y|cur) = order(cur→Y) + α·knowledge(cur→Y). Factoring
+        // order ∪ knowledge as ONE matrix lets the denser order channel drown the sparser knowledge
+        // (king→monarch never surfaced); making B0 PURE knowledge climbs the IsA chain (whale→mammal→
+        // animal→…→object) instead of flowing. The fix: factor order and knowledge SEPARATELY at half
+        // rank and CONCATENATE them in band B0, so the B0 dot product SUMS the two affinities — prose
+        // FLOW (order) biased toward grounded CONTENT (knowledge, weight α). Skip (B1/B2 via the shift
+        // head) and rep (B3/B4) machinery unchanged.
+        int rh = r / 2;
+        double alpha = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_KNOW_ALPHA", 2.0);
+        double skipW = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_SKIP_W", 0.4);   // full-rank skip drowns the half-rank B0 grounding unless down-weighted
+        FoundryExport.FactorAdjacency(order1, vocab, rh, out var embO, out var lmO, out _, conditional: true, suppressSelf: true, dehub: dehub);
+        FoundryExport.FactorAdjacency(know.Nnz > 0 ? know : order1, vocab, rh, out var embK, out var lmK, out _, conditional: true, suppressSelf: true, dehub: dehub);
+        FoundryExport.FactorAdjacency(order2, vocab, r, out var embS, out var lmS, out _, conditional: true, suppressSelf: true, dehub: dehub);
+        Console.WriteLine($"  content cast (multi-channel B0): order {order1.Nnz:N0} + α·knowledge[{rkLo:F2},{rkHi:F2}] {know.Nnz:N0} (α={alpha}), skip {order2.Nnz:N0}, rh={rh}, dehub={dehub}, in {swR.Elapsed.TotalSeconds:F1}s");
+
+        // deterministic unit identity code per token (Box-Muller on a SplitMix64 stream)
+        var code = new double[(long)vocab * r];
+        ulong st = 0xD1CE5EEDUL;
+        double NextG()
+        {
+            st += 0x9E3779B97F4A7C15UL; ulong z = st;
+            z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL; z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL; z ^= z >> 31;
+            st += 0x9E3779B97F4A7C15UL; ulong z2 = st;
+            z2 = (z2 ^ (z2 >> 30)) * 0xBF58476D1CE4E5B9UL; z2 = (z2 ^ (z2 >> 27)) * 0x94D049BB133111EBUL; z2 ^= z2 >> 31;
+            double u1 = ((z >> 11) + 1.0) / (9007199254740992.0 + 1.0), u2 = (z2 >> 11) / 9007199254740992.0;
+            return Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2.0 * Math.PI * u2);
+        }
+        for (int v = 0; v < vocab; v++)
+        {
+            long oc = (long)v * r; double n2 = 0;
+            for (int i = 0; i < r; i++) { double g = NextG(); code[oc + i] = g; n2 += g * g; }
+            double inv = n2 > 1e-9 ? 1.0 / Math.Sqrt(n2) : 0.0;
+            for (int i = 0; i < r; i++) code[oc + i] *= inv;
+        }
+
+        double constVal = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_SHIFT_CONST", 10.0);
+        var embed  = new double[(long)vocab * dModel];
+        var lmHead = new double[(long)vocab * dModel];
+        for (int v = 0; v < vocab; v++)
+        {
+            long o = (long)v * dModel, oc = (long)v * r, och = (long)v * rh;
+            for (int i = 0; i < rh; i++)
+            {
+                embed[o + i]        = embO[och + i];              // B0a order source
+                lmHead[o + i]       = lmO[och + i];               // B0a order readout (prose flow)
+                embed[o + rh + i]   = embK[och + i];              // B0b knowledge source
+                lmHead[o + rh + i]  = alpha * lmK[och + i];       // B0b knowledge readout (×α, grounding bias)
+            }
+            for (int i = 0; i < r; i++)
+            {
+                lmHead[o + r + i]   = skipW * lmS[oc + i];        // B1 skip readout (prev, via head 0; down-weighted so B0 grounding drives)
+                embed[o + 2 * r + i]= embS[oc + i];               // B2 skip source
+                embed[o + 3 * r + i]= code[oc + i];               // B3 identity source
+                lmHead[o + 4 * r + i] = -repGain * code[oc + i];  // B4 recent-suppression readout
+            }
+            embed[o + CONST] = constVal;
+        }
+        var isCont = new bool[vocab];
+        foreach (var y in order1.Cols) if (y >= 0 && y < vocab) isCont[y] = true;
+        foreach (var y in know.Cols) if (y >= 0 && y < vocab) isCont[y] = true;
+        var isByte = new bool[vocab]; var isLead = new bool[vocab];
+        foreach (var t in tokens) if (t.TokenId >= 0 && t.TokenId < vocab)
+        { if (t.IsByteLevel) isByte[t.TokenId] = true; if (t.Role.HasFlag(TokenRole.LeadingSpace)) isLead[t.TokenId] = true; }
+        int supp = 0;
+        for (int y = 0; y < vocab; y++)
+            if (!isCont[y] || isByte[y] || !isLead[y])
+            { long o = (long)y * dModel; for (int c = 0; c < dModel; c++) lmHead[o + c] = 0; lmHead[o + CONST] = -100.0; supp++; }
+        Console.WriteLine($"  suppressed {supp:N0}/{vocab:N0} byte + non-continuation + bare-alias tokens (space-led words only)");
+
+        double scale = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_SHIFT_SCALE", 4.0);
+        int npairs = headDim / 2;
+        var qbase = new double[headDim]; var kbase = new double[headDim];
+        for (int f = 0; f < npairs; f++)
+        { double thetaF = Math.Pow(ropeTheta, -2.0 * f / headDim), s = scale / Math.Sqrt(npairs);
+          kbase[f] = s; kbase[f + npairs] = 0; qbase[f] = s * Math.Cos(thetaF); qbase[f + npairs] = -s * Math.Sin(thetaF); }
+
+        var gguf = SynthInterop.GgufWriterCreate(outputPath);
+        if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
+        WriteGgufMetadata(gguf, recipe, tokens, modelDir, byteBpe: true);
+        for (int i = 0; i < tensorCount; i++)
+        {
+            string name; ulong rows, cols;
+            unsafe { var sp = specs[i]; name = Marshal.PtrToStringUTF8((IntPtr)sp.Name) ?? ""; rows = sp.Rank >= 1 ? sp.Shape[0] : 1; cols = sp.Rank >= 2 ? sp.Shape[1] : 1; }
+            int tr = (int)rows, tc = (int)Math.Max(1UL, cols);
+            var vals = new float[(long)tr * tc];
+            if (name == "model.embed_tokens.weight")
+                for (int v = 0; v < tr; v++) for (int c = 0; c < tc; c++) vals[(long)v * tc + c] = (float)embed[(long)v * dModel + c];
+            else if (name == "lm_head.weight")
+                for (int v = 0; v < tr; v++) for (int c = 0; c < tc; c++) vals[(long)v * tc + c] = (float)lmHead[(long)v * dModel + c];
+            else if (name == "model.norm.weight" || name.EndsWith("input_layernorm.weight", StringComparison.Ordinal) || name.EndsWith("post_attention_layernorm.weight", StringComparison.Ordinal))
+                Array.Fill(vals, 1.0f);
+            else if (name.EndsWith("self_attn.q_proj.weight", StringComparison.Ordinal))
+                for (int hd = 0; hd < headDim && hd < tr; hd++) vals[(long)hd * tc + CONST] = (float)qbase[hd];
+            else if (name.EndsWith("self_attn.k_proj.weight", StringComparison.Ordinal))
+                for (int hd = 0; hd < headDim && hd < tr; hd++) vals[(long)hd * tc + CONST] = (float)kbase[hd];
+            else if (name.EndsWith("self_attn.v_proj.weight", StringComparison.Ordinal))
+            {
+                for (int j = 0; j < r && j < tr; j++) vals[(long)j * tc + (2 * r + j)] = 1.0f;
+                for (int j = 0; j < r && (headDim + j) < tr; j++) vals[(long)(headDim + j) * tc + (3 * r + j)] = 1.0f;
+            }
+            else if (name.EndsWith("self_attn.o_proj.weight", StringComparison.Ordinal))
+            {
+                for (int j = 0; j < r && (r + j) < tr; j++) vals[(long)(r + j) * tc + j] = 1.0f;
+                for (int j = 0; j < r && (4 * r + j) < tr; j++) vals[(long)(4 * r + j) * tc + (headDim + j)] = 1.0f;
+            }
+            else if (name.StartsWith("model.layers.", StringComparison.Ordinal)) { }
+            else { Console.WriteLine($"  content cast does not define '{name}'"); SynthInterop.GgufWriterFree(gguf); return 3; }
+            byte[] tb = FoundryExport.ToF32Bytes(vals);
+            nuint[] dims = cols > 1 ? new nuint[] { (nuint)cols, (nuint)rows } : new nuint[] { (nuint)rows };
+            unsafe { fixed (nuint* dp = dims) fixed (byte* bp = tb) SynthInterop.GgufWriterAddTensor(gguf, HfToGgmlName(name), 0, dp, (nuint)dims.Length, bp); }
+        }
+        int rcwC = SynthInterop.GgufWriterFinalize(gguf); SynthInterop.GgufWriterFree(gguf);
+        if (rcwC != 0) return Fail($"gguf finalize failed rc={rcwC}");
+        Console.WriteLine($"CONTENT synthesis complete: {outputPath} ({new FileInfo(outputPath).Length / 1048576.0:F0} MB, knowledge+order readout, dehub={dehub})");
+        return 0;
+    }
+
+    // TOPIC-AUGMENTED cast: adds the CONTEXT state the bigram lacks. logit(Y) = order(cur→Y)
+    // + α·knowledge(cur→Y) + βt·topic(ctx→Y) − rep. The TOPIC head is a UNIFORM-attention head
+    // (q=k=0 → softmax over the causal window is uniform → MEAN of the values) whose value is each
+    // token's KNOWLEDGE embedding, so its output is the running mean knowledge vector of the whole
+    // prompt — the topic. lm_head reads βt·lmK against it, biasing every step toward words knowledge-
+    // related to the ENTIRE context (not just the current token), which anchors generation instead of
+    // letting it climb the IsA chain / loop on hubs. Head 1 (also uniform) is the repetition penalty;
+    // the direct B0 order band carries local flow (no shift head). Bands are rh=(d-1)/10 wide so a
+    // head's value/output fits within head_dim for any reasonable head count.
+    private static async Task<int> WriteWordTopicGgufAsync(
+        NpgsqlDataSource ds, LlamaRecipeExtractor.RecipeInfo recipe,
+        IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
+        Dictionary<Hash128, List<int>> tokenSlots,
+        int vocab, int dModel, string modelDir, string outputPath,
+        TensorSpec[] specs, int tensorCount)
+    {
+        int nHeads = Math.Max(2, recipe.NumHeads), headDim = dModel / nHeads;
+        int trajN = FoundryExport.EnvInt("LAPLACE_FOUNDRY_WORD_TRAJS", 400000);
+        double dehub = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_DEHUB", 0.6);
+        double repGain = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_REP_GAIN", 6.0);
+        double rkLo = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RANK_LO", 0.55);
+        double rkHi = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RANK_HI", 0.85);
+        double alpha = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_KNOW_ALPHA", 1.0);
+        double topicG = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_TOPIC_GAIN", 3.0);
+        int r = (dModel - 1) / 5, rh = r / 2;
+        int CONST = dModel - 1;
+        if (rh > headDim) return Fail($"--heads {nHeads}: head_dim {headDim} < band width {rh}; use fewer heads or larger --dim");
+
+        var swR = Stopwatch.StartNew();
+        var order1 = FoundryExport.Normalize(await FoundryExport.ReadWordOrderAsync(ds, tokenSlots, 1, trajN));
+        var know   = FoundryExport.Normalize(await FoundryExport.ReadLayerPlaneAsync(ds, rkLo, rkHi, tokenSlots, 64));
+        if (order1.Nnz == 0) return Fail("order channel empty — ingest text first");
+        FoundryExport.FactorAdjacency(order1, vocab, rh, out var embO, out var lmO, out _, conditional: true, suppressSelf: true, dehub: dehub);
+        FoundryExport.FactorAdjacency(know.Nnz > 0 ? know : order1, vocab, rh, out var embK, out var lmK, out _, conditional: true, suppressSelf: true, dehub: dehub);
+        Console.WriteLine($"  topic-augmented cast: order {order1.Nnz:N0} + α·know[{rkLo:F2},{rkHi:F2}] {know.Nnz:N0} (α={alpha}) + βt·topic (βt={topicG}), rh={rh}, dehub={dehub}, in {swR.Elapsed.TotalSeconds:F1}s");
+
+        // deterministic unit identity code per token (Box-Muller on a SplitMix64 stream)
+        var code = new double[(long)vocab * rh];
+        ulong st = 0xD1CE5EEDUL;
+        double NextG()
+        {
+            st += 0x9E3779B97F4A7C15UL; ulong z = st;
+            z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL; z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL; z ^= z >> 31;
+            st += 0x9E3779B97F4A7C15UL; ulong z2 = st;
+            z2 = (z2 ^ (z2 >> 30)) * 0xBF58476D1CE4E5B9UL; z2 = (z2 ^ (z2 >> 27)) * 0x94D049BB133111EBUL; z2 ^= z2 >> 31;
+            double u1 = ((z >> 11) + 1.0) / (9007199254740992.0 + 1.0), u2 = (z2 >> 11) / 9007199254740992.0;
+            return Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2.0 * Math.PI * u2);
+        }
+        for (int v = 0; v < vocab; v++)
+        {
+            long oc = (long)v * rh; double n2 = 0;
+            for (int i = 0; i < rh; i++) { double g = NextG(); code[oc + i] = g; n2 += g * g; }
+            double inv = n2 > 1e-9 ? 1.0 / Math.Sqrt(n2) : 0.0;
+            for (int i = 0; i < rh; i++) code[oc + i] *= inv;
+        }
+
+        double constVal = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_SHIFT_CONST", 4.0);
+        var embed  = new double[(long)vocab * dModel];
+        var lmHead = new double[(long)vocab * dModel];
+        for (int v = 0; v < vocab; v++)
+        {
+            long o = (long)v * dModel, och = (long)v * rh;
+            for (int i = 0; i < rh; i++)
+            {
+                embed[o + i]           = embO[och + i];            // [0,rh)    order source
+                lmHead[o + i]          = lmO[och + i];             // order readout (direct, local flow)
+                embed[o + rh + i]      = embK[och + i];            // [rh,2rh)  knowledge source (also topic head V)
+                lmHead[o + rh + i]     = alpha * lmK[och + i];     // knowledge readout (direct, local grounding)
+                lmHead[o + 2 * rh + i] = topicG * lmK[och + i];    // [2rh,3rh) TOPIC readout (resid written by head 0)
+                embed[o + 3 * rh + i]  = code[och + i];            // [3rh,4rh) identity source (rep head V)
+                lmHead[o + 4 * rh + i] = -repGain * code[och + i]; // [4rh,5rh) rep readout (resid written by head 1)
+            }
+            embed[o + CONST] = constVal;
+        }
+        var isCont = new bool[vocab];
+        foreach (var y in order1.Cols) if (y >= 0 && y < vocab) isCont[y] = true;
+        foreach (var y in know.Cols) if (y >= 0 && y < vocab) isCont[y] = true;
+        var isByte = new bool[vocab]; var isLead = new bool[vocab];
+        foreach (var t in tokens) if (t.TokenId >= 0 && t.TokenId < vocab)
+        { if (t.IsByteLevel) isByte[t.TokenId] = true; if (t.Role.HasFlag(TokenRole.LeadingSpace)) isLead[t.TokenId] = true; }
+        int supp = 0;
+        for (int y = 0; y < vocab; y++)
+            if (!isCont[y] || isByte[y] || !isLead[y])
+            { long o = (long)y * dModel; for (int c = 0; c < dModel; c++) lmHead[o + c] = 0; lmHead[o + CONST] = -100.0; supp++; }
+        Console.WriteLine($"  suppressed {supp:N0}/{vocab:N0} byte + non-continuation + bare-alias tokens (space-led words only)");
+
+        var gguf = SynthInterop.GgufWriterCreate(outputPath);
+        if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
+        WriteGgufMetadata(gguf, recipe, tokens, modelDir, byteBpe: true);
+        for (int i = 0; i < tensorCount; i++)
+        {
+            string name; ulong rows, cols;
+            unsafe { var sp = specs[i]; name = Marshal.PtrToStringUTF8((IntPtr)sp.Name) ?? ""; rows = sp.Rank >= 1 ? sp.Shape[0] : 1; cols = sp.Rank >= 2 ? sp.Shape[1] : 1; }
+            int tr = (int)rows, tc = (int)Math.Max(1UL, cols);
+            var vals = new float[(long)tr * tc];
+            if (name == "model.embed_tokens.weight")
+                for (int v = 0; v < tr; v++) for (int c = 0; c < tc; c++) vals[(long)v * tc + c] = (float)embed[(long)v * dModel + c];
+            else if (name == "lm_head.weight")
+                for (int v = 0; v < tr; v++) for (int c = 0; c < tc; c++) vals[(long)v * tc + c] = (float)lmHead[(long)v * dModel + c];
+            else if (name == "model.norm.weight" || name.EndsWith("input_layernorm.weight", StringComparison.Ordinal) || name.EndsWith("post_attention_layernorm.weight", StringComparison.Ordinal))
+                Array.Fill(vals, 1.0f);
+            else if (name.EndsWith("self_attn.q_proj.weight", StringComparison.Ordinal)) { /* q=0 → uniform attention (mean over causal window) */ }
+            else if (name.EndsWith("self_attn.k_proj.weight", StringComparison.Ordinal)) { /* k=0 → uniform */ }
+            else if (name.EndsWith("self_attn.v_proj.weight", StringComparison.Ordinal))
+            {   // head 0 (topic) value = knowledge src [rh,2rh); head 1 (rep) value = identity src [3rh,4rh)
+                for (int j = 0; j < rh && j < tr; j++) vals[(long)j * tc + (rh + j)] = 1.0f;
+                for (int j = 0; j < rh && (headDim + j) < tr; j++) vals[(long)(headDim + j) * tc + (3 * rh + j)] = 1.0f;
+            }
+            else if (name.EndsWith("self_attn.o_proj.weight", StringComparison.Ordinal))
+            {   // head 0 output → topic readout resid [2rh,3rh); head 1 output → rep readout resid [4rh,5rh)
+                for (int j = 0; j < rh && (2 * rh + j) < tr; j++) vals[(long)(2 * rh + j) * tc + j] = 1.0f;
+                for (int j = 0; j < rh && (4 * rh + j) < tr; j++) vals[(long)(4 * rh + j) * tc + (headDim + j)] = 1.0f;
+            }
+            else if (name.StartsWith("model.layers.", StringComparison.Ordinal)) { }
+            else { Console.WriteLine($"  topic cast does not define '{name}'"); SynthInterop.GgufWriterFree(gguf); return 3; }
+            byte[] tb = FoundryExport.ToF32Bytes(vals);
+            nuint[] dims = cols > 1 ? new nuint[] { (nuint)cols, (nuint)rows } : new nuint[] { (nuint)rows };
+            unsafe { fixed (nuint* dp = dims) fixed (byte* bp = tb) SynthInterop.GgufWriterAddTensor(gguf, HfToGgmlName(name), 0, dp, (nuint)dims.Length, bp); }
+        }
+        int rcwT = SynthInterop.GgufWriterFinalize(gguf); SynthInterop.GgufWriterFree(gguf);
+        if (rcwT != 0) return Fail($"gguf finalize failed rc={rcwT}");
+        Console.WriteLine($"TOPIC synthesis complete: {outputPath} ({new FileInfo(outputPath).Length / 1048576.0:F0} MB, topic-augmented, α={alpha} βt={topicG} dehub={dehub})");
         return 0;
     }
 
