@@ -6,6 +6,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Wiktionary;
 
+[Obsolete("Corner-cut path — use StructuredGrammarIngest with modality json.")]
 internal static class WiktionaryFastIngest
 {
     public static async IAsyncEnumerable<SubstrateChange> IngestJsonlAsync(

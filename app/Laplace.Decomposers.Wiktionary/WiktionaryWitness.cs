@@ -6,6 +6,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Wiktionary;
 
+[Obsolete("Corner-cut path — use WiktionaryGrammarWitness over composed json spans.")]
 internal static class WiktionaryWitness
 {
     private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;

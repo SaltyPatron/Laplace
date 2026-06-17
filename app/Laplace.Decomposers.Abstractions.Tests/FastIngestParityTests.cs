@@ -42,7 +42,7 @@ public class FastIngestParityTests
             ("Laplace.Decomposers.UD", ["StreamingUtf8LineReader", "TsvSpan", "ContentWitnessBatch"]),
             ("Laplace.Decomposers.OMW", ["OMWFastIngest", "StreamingUtf8LineReader"]),
             ("Laplace.Decomposers.WordNet", ["StreamingUtf8LineReader"]),
-            ("Laplace.Decomposers.Wiktionary", ["WiktionaryFastIngest", "Utf8JsonReader"]),
+            ("Laplace.Decomposers.Wiktionary", ["StructuredGrammarIngest", "WiktionaryGrammarWitness", "IGrammarWitness", "DecomposerOptions.ForWitness(SourceName)"]),
             ("Laplace.Decomposers.Tatoeba", ["TatoebaFastIngest", "StreamingUtf8LineReader", "ContentWitnessBatch"]),
             ("Laplace.Decomposers.ConceptNet", ["ConceptNetFastIngest", "StreamingUtf8LineReader", "ContentWitnessBatch", "ConceptNetUri"]),
             ("Laplace.Decomposers.Atomic2020", ["Atomic2020FastIngest", "StreamingUtf8LineReader", "ContentWitnessBatch"]),

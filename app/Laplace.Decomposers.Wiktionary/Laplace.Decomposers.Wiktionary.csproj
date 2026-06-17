@@ -15,4 +15,8 @@
     <ProjectReference Include="..\Laplace.SubstrateCRUD\Laplace.SubstrateCRUD.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Laplace.Decomposers.Abstractions.Tests" />
+  </ItemGroup>
+
 </Project>

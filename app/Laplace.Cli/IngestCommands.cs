@@ -646,7 +646,7 @@ internal static class IngestCommands
                 break;
             case "UDDecomposer":
                 Console.WriteLine($"  check ud: HAS_POS={await RelationEvidence("HAS_POS", srcKey):N0} "
-                                + $"HAS_LEMMA={await RelationEvidence("HAS_LEMMA", srcKey):N0}");
+                                + $"IS_LEMMA_OF={await RelationEvidence("IS_LEMMA_OF", srcKey):N0}");
                 break;
             case "TatoebaDecomposer":
                 Console.WriteLine($"  check tatoeba: IS_TRANSLATION_OF={await RelationEvidence("IS_TRANSLATION_OF", srcKey):N0} "

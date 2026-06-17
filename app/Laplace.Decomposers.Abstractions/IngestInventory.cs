@@ -46,9 +46,19 @@ public static class EtlInventory
     {
         if (!File.Exists(path)) return 0;
         long n = 0;
+        bool inSentence = false;
         foreach (var line in File.ReadLines(path))
-            if (line.Length > 0 && char.IsDigit(line[0]) && line.Contains('\t', StringComparison.Ordinal))
-                n++;
+        {
+            if (line.Length == 0)
+            {
+                if (inSentence) { n++; inSentence = false; }
+                continue;
+            }
+            if (line[0] == '#') continue;
+            if (char.IsDigit(line[0]) && line.Contains('\t', StringComparison.Ordinal))
+                inSentence = true;
+        }
+        if (inSentence) n++;
         return n;
     }
 

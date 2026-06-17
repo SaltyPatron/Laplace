@@ -86,7 +86,9 @@ consensus_peer_lookup(Datum id, int32 k)
         "  SELECT id FROM geometric "
         "  WHERE NOT EXISTS (SELECT 1 FROM elected)"
         ") z "
-        "ORDER BY random() LIMIT 1";
+        /* deterministic peer pick: hash-order candidates keyed to the subject id, so the
+           same subject always resolves the same peer (substrate invariant: repeatable). */
+        "ORDER BY public.laplace_hash128_blake3(z.id || $1) LIMIT 1";
 
     Oid   argtypes[2] = { BYTEAOID, INT4OID };
     Datum args[2];
@@ -336,7 +338,9 @@ pg_laplace_respell_variant(PG_FUNCTION_ARGS)
         "JOIN laplace.physicalities p ON p.entity_id = e.id AND p.type = 1 "
         "  AND p.trajectory IS NOT NULL "
         "WHERE n.name = 'substrate/type/grammar/' || $1 || '/' || $2 || '/v1' "
-        "ORDER BY random() LIMIT 1";
+        /* deterministic seed pick: hash-order keyed to (modality, node_type) so a given
+           grammar type always resolves the same seed (substrate invariant: repeatable). */
+        "ORDER BY public.laplace_hash128_blake3(e.id || convert_to($1 || '/' || $2, 'UTF8')) LIMIT 1";
     Oid    argtypes[2] = { TEXTOID, TEXTOID };
     Datum  args[2];
     char   nulls[3] = "  ";
