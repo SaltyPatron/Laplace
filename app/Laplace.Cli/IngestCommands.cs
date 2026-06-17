@@ -135,7 +135,8 @@ internal static class IngestCommands
             "image"      => await IngestViaRunnerAsync(new ImageDecomposer(), string.IsNullOrEmpty(cli.Path) ? "/vault/Data/test-data/images" : cli.Path, skipLayerCheck: true, cli),
             "audio"      => await IngestViaRunnerAsync(new AudioDecomposer(), string.IsNullOrEmpty(cli.Path) ? "/vault/Data/test-data/audio" : cli.Path, skipLayerCheck: true, cli),
             "document"   => await IngestDocumentAsync(cli),
-            _ => Fail($"unknown ingest source '{cli.Source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, code, repo, tabular, tiny-codes, stack, safetensors, image, audio, document)"),
+            "recipe"     => await IngestRecipeAsync(cli),
+            _ => Fail($"unknown ingest source '{cli.Source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, code, repo, tabular, tiny-codes, stack, safetensors, image, audio, document, recipe)"),
         };
     }
 
@@ -317,6 +318,22 @@ internal static class IngestCommands
 
         return await IngestViaRunnerAsync(
             new DocumentDecomposer(),
+            Path.GetFullPath(cli.Path),
+            skipLayerCheck: true,
+            cli,
+            skipSourceCompletion: true);
+    }
+
+    private static async Task<int> IngestRecipeAsync(IngestCliArgs cli)
+    {
+        if (string.IsNullOrEmpty(cli.Path))
+            return Fail("usage: laplace ingest recipe <recipe.json>\n"
+                        + "  Deposits a build-a-bear recipe (the simulated UI POST) as a content-addressed\n"
+                        + "  Model_Recipe entity, fetchable by export via laplace.model_recipes() / --recipe-from.");
+        if (!File.Exists(cli.Path))
+            return Fail($"ingest recipe: file not found: {cli.Path}");
+        return await IngestViaRunnerAsync(
+            new RecipeDecomposer(Path.GetFullPath(cli.Path)),
             Path.GetFullPath(cli.Path),
             skipLayerCheck: true,
             cli,
