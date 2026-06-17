@@ -76,6 +76,9 @@ const uint8_t* intent_stage_tuple_ptr(
     intent_stage_table_t  table,
     size_t*               out_len);
 
+int intent_stage_witness_seen(const intent_stage_t* stage, const hash128_t* id);
+int intent_stage_witness_record(intent_stage_t* stage, const hash128_t* id);
+
 #ifdef __cplusplus
 }
 #endif

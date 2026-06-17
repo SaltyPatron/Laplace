@@ -41,10 +41,13 @@ typedef struct GenCorpus
     int64    probe_rows;    
     int64    probe_max_us;  
     int      build_max_rows;
+    int      build_max_orphans;
+    char     document_source[64];
 } GenCorpus;
 
 
 extern int laplace_corpus_max_rows;
+extern int laplace_corpus_max_orphan_sentences;
 extern void laplace_corpus_guc_init(void);
 
 

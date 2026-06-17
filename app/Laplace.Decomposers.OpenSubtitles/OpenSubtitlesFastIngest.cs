@@ -7,12 +7,20 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.OpenSubtitles;
 
+internal readonly struct OpenSubtitlesLinePair
+{
+    public required byte[] LineA { get; init; }
+    public required byte[] LineB { get; init; }
+    public required Hash128 LangA { get; init; }
+    public required Hash128 LangB { get; init; }
+    public required string PairStem { get; init; }
+}
+
 internal static class OpenSubtitlesFastIngest
 {
-    public static async IAsyncEnumerable<SubstrateChange> IngestZipAsync(
+    public static async IAsyncEnumerable<OpenSubtitlesLinePair> ReadZipPairsAsync(
         string zipPath,
         string pairStem,
-        int batchSize,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         using var zip = ZipFile.OpenRead(zipPath);
@@ -28,43 +36,60 @@ internal static class OpenSubtitlesFastIngest
         Hash128 langA = LanguageReference.Resolve(LangSuffix(entA.FullName));
         Hash128 langB = LanguageReference.Resolve(LangSuffix(entB.FullName));
 
-        string unitStem = Path.GetFileNameWithoutExtension(zipPath);
-        var b = NewBuilder($"opensubtitles/{unitStem}/0", batchSize, langA, langB);
-        int n = 0, bn = 0;
-
         await foreach (var (lineA, lineB) in ReadPairedLinesAsync(entA, entB, ct))
         {
             if (lineA.IsEmpty || lineB.IsEmpty) continue;
-
-            var idA = EmitLine(b, lineA);
-            var idB = EmitLine(b, lineB);
-            if (idA is null || idB is null) continue;
-
-            b.AddAttestation(NativeAttestation.Categorical(
-                idA.Value, "IS_TRANSLATION_OF", idB.Value, OpenSubtitlesDecomposer.Source, TC.StructuredCorpus));
-            b.AddAttestation(NativeAttestation.Categorical(
-                idA.Value, "HAS_LANGUAGE", langA, OpenSubtitlesDecomposer.Source, TC.StructuredCorpus));
-            b.AddAttestation(NativeAttestation.Categorical(
-                idB.Value, "HAS_LANGUAGE", langB, OpenSubtitlesDecomposer.Source, TC.StructuredCorpus));
-
-            if (++n >= batchSize)
+            int lenA = TrimCr(lineA);
+            int lenB = TrimCr(lineB);
+            yield return new OpenSubtitlesLinePair
             {
-                yield return b.Build();
-                b = NewBuilder($"opensubtitles/{unitStem}/{++bn}", batchSize, langA, langB);
-                n = 0;
-            }
+                LineA = lineA.Span[..lenA].ToArray(),
+                LineB = lineB.Span[..lenB].ToArray(),
+                LangA = langA,
+                LangB = langB,
+                PairStem = pairStem,
+            };
         }
-
-        if (n > 0) yield return b.Build();
     }
 
-    private static Hash128? EmitLine(SubstrateChangeBuilder b, ReadOnlyMemory<byte> line)
+    public static bool TryAppendPair(
+        SubstrateChangeBuilder b,
+        OpenSubtitlesLinePair pair,
+        out Hash128 rootA)
+    {
+        rootA = default;
+        if (!ContentWitnessBatch.TryAppendToBuilder(
+                b, pair.LineA, OpenSubtitlesDecomposer.Source, out var idA))
+            return false;
+        if (!ContentWitnessBatch.TryAppendToBuilder(
+                b, pair.LineB, OpenSubtitlesDecomposer.Source, out var idB))
+            return false;
+
+        b.AddAttestation(NativeAttestation.Categorical(
+            idA, "IS_TRANSLATION_OF", idB, OpenSubtitlesDecomposer.Source, TC.StructuredCorpus));
+        b.AddAttestation(NativeAttestation.Categorical(
+            idA, "HAS_LANGUAGE", pair.LangA, OpenSubtitlesDecomposer.Source, TC.StructuredCorpus));
+        b.AddAttestation(NativeAttestation.Categorical(
+            idB, "HAS_LANGUAGE", pair.LangB, OpenSubtitlesDecomposer.Source, TC.StructuredCorpus));
+        rootA = idA;
+        return true;
+    }
+
+    public static void Absorb(SubstrateChangeBuilder acc, SubstrateChange micro)
+    {
+        foreach (var e in micro.Entities) acc.AddEntity(e);
+        foreach (var p in micro.Physicalities) acc.AddPhysicality(p);
+        foreach (var a in micro.Attestations) acc.AddAttestation(a);
+        foreach (var s in micro.IntentStages)
+            if (s is { IsInvalid: false })
+                acc.AddIntentStage(s);
+    }
+
+    private static int TrimCr(ReadOnlyMemory<byte> line)
     {
         int len = line.Length;
         if (len > 0 && line.Span[^1] == (byte)'\r') len--;
-        return ContentWitnessBatch.TryAppendToBuilder(
-            b, line.Span[..len], OpenSubtitlesDecomposer.Source, out var root)
-            ? root : null;
+        return len;
     }
 
     private static async IAsyncEnumerable<(ReadOnlyMemory<byte> A, ReadOnlyMemory<byte> B)> ReadPairedLinesAsync(
@@ -105,7 +130,7 @@ internal static class OpenSubtitlesFastIngest
         return dot >= 0 ? baseName[(dot + 1)..] : baseName;
     }
 
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch, Hash128 langA, Hash128 langB)
+    internal static SubstrateChangeBuilder NewBuilder(string unit, int batch, Hash128 langA, Hash128 langB)
     {
         var b = new SubstrateChangeBuilder(OpenSubtitlesDecomposer.Source, unit, null,
             entityCapacity: batch * 4,

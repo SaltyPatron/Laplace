@@ -180,7 +180,71 @@ struct intent_stage {
     byte_buf_t entities;
     byte_buf_t physicalities;
     byte_buf_t attestations;
+    hash128_t* witness_slots;
+    size_t     witness_cap;
+    size_t     witness_count;
 };
+
+static int witness_slot_empty(const hash128_t* h) { return (h->hi | h->lo) == 0; }
+
+static int witness_record_unlocked(intent_stage_t* stage, const hash128_t* id) {
+    if (!stage || !id) return 0;
+    hash128_t* slots = stage->witness_slots;
+    size_t cap = stage->witness_cap;
+    if (cap == 0) {
+        cap = (size_t)1 << 16;
+        slots = (hash128_t*)calloc(cap, sizeof(hash128_t));
+        if (!slots) return 0;
+        stage->witness_slots = slots;
+        stage->witness_cap = cap;
+    } else if ((stage->witness_count + 1) * 4 >= cap * 3) {
+        size_t ncap = cap << 1;
+        hash128_t* ns = (hash128_t*)calloc(ncap, sizeof(hash128_t));
+        if (ns) {
+            size_t nmask = ncap - 1;
+            for (size_t i = 0; i < cap; ++i) {
+                if (witness_slot_empty(&slots[i])) continue;
+                size_t j = (size_t)slots[i].lo & nmask;
+                while (!witness_slot_empty(&ns[j])) j = (j + 1) & nmask;
+                ns[j] = slots[i];
+            }
+            free(slots);
+            slots = ns;
+            stage->witness_slots = slots;
+            stage->witness_cap = ncap;
+            cap = ncap;
+        }
+    }
+    size_t mask = cap - 1;
+    size_t j = (size_t)id->lo & mask;
+    while (!witness_slot_empty(&slots[j])) {
+        if (hash128_equals(&slots[j], id)) return 1;
+        j = (j + 1) & mask;
+    }
+    slots[j] = *id;
+    stage->witness_count++;
+    return 0;
+}
+
+static int witness_contains_unlocked(const intent_stage_t* stage, const hash128_t* id) {
+    if (!stage || !id || stage->witness_cap == 0) return 0;
+    const hash128_t* slots = stage->witness_slots;
+    size_t mask = stage->witness_cap - 1;
+    size_t j = (size_t)id->lo & mask;
+    while (!witness_slot_empty(&slots[j])) {
+        if (hash128_equals(&slots[j], id)) return 1;
+        j = (j + 1) & mask;
+    }
+    return 0;
+}
+
+int intent_stage_witness_seen(const intent_stage_t* stage, const hash128_t* id) {
+    return witness_contains_unlocked(stage, id);
+}
+
+int intent_stage_witness_record(intent_stage_t* stage, const hash128_t* id) {
+    return witness_record_unlocked(stage, id);
+}
 
 intent_stage_t* intent_stage_new(size_t row_capacity_hint) {
     intent_stage_t* s = (intent_stage_t*)calloc(1, sizeof(*s));
@@ -213,6 +277,7 @@ void intent_stage_free(intent_stage_t* stage) {
     free(stage->entities.data);
     free(stage->physicalities.data);
     free(stage->attestations.data);
+    free(stage->witness_slots);
     free(stage);
 }
 

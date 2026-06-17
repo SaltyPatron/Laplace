@@ -1327,6 +1327,35 @@ internal static class FoundryExport
                 vals[(long)i * cols + r] = (float)(scale * f.Left[(long)r * f.Dim + i]);
     }
 
+    // Per-head fill: head `headIdx` occupies rows [headIdx*headDim, (headIdx+1)*headDim) and is
+    // filled from ITS OWN operator factor — one distinct attestation-type/metric operator per head
+    // (build-a-bear), not top-k of one mashed operator tiled across every head.
+    internal static void FillHead(float[] vals, int rows, int cols, int headIdx, int headDim, Factors f, double scale)
+    {
+        int baseRow = headIdx * headDim;
+        if (baseRow >= rows) return;
+        int k = Math.Min(f.Rank, headDim);
+        for (int r = 0; r < k && (baseRow + r) < rows; r++)
+        {
+            long dst = (long)(baseRow + r) * cols;
+            for (int j = 0; j < cols && j < f.Dim; j++)
+                vals[dst + j] = (float)(scale * f.Left[(long)r * f.Dim + j]);
+        }
+    }
+
+    internal static void FillHeadRight(float[] vals, int rows, int cols, int headIdx, int headDim, Factors f, double scale)
+    {
+        int baseRow = headIdx * headDim;
+        if (baseRow >= rows) return;
+        int k = Math.Min(f.Rank, headDim);
+        for (int r = 0; r < k && (baseRow + r) < rows; r++)
+        {
+            long dst = (long)(baseRow + r) * cols;
+            for (int j = 0; j < cols && j < f.Dim; j++)
+                vals[dst + j] = (float)(scale * f.Right[(long)r * f.Dim + j]);
+        }
+    }
+
     internal static void FillGate(float[] vals, int rows, int cols, double gateCol)
     {
         for (int r = 0; r < rows; r++)

@@ -37,14 +37,26 @@ PG_FUNCTION_INFO_V1(pg_laplace_stream_reset);
 
 
 int laplace_corpus_max_rows = 0;
+int laplace_corpus_max_orphan_sentences = 0;
+static char *laplace_corpus_document_source = "UserPrompt";
 
 void
 laplace_corpus_guc_init(void)
 {
     DefineCustomIntVariable(
         "laplace_substrate.corpus_max_rows",
-        "Cap the generation-corpus build to N source sentences (0 = unbounded).",
+        "Deprecated alias for corpus_max_orphan_sentences (0 = use corpus_max_orphan_sentences).",
         NULL, &laplace_corpus_max_rows, 0, 0, INT_MAX,
+        PGC_SUSET, 0, NULL, NULL, NULL);
+    DefineCustomIntVariable(
+        "laplace_substrate.corpus_max_orphan_sentences",
+        "Cap tier-3 orphan sentences in the generation corpus (tier-4 documents and their sentence constituents are always included; 0 = book-only corpus).",
+        NULL, &laplace_corpus_max_orphan_sentences, 0, 0, INT_MAX,
+        PGC_SUSET, 0, NULL, NULL, NULL);
+    DefineCustomStringVariable(
+        "laplace_substrate.corpus_document_source",
+        "Decomposer source name for tier-4 document roots in the generation corpus (e.g. UserPrompt).",
+        NULL, &laplace_corpus_document_source, "UserPrompt",
         PGC_SUSET, 0, NULL, NULL, NULL);
 }
 
@@ -125,10 +137,11 @@ static const char *CORPUS_PROBE =
 
 static const char *CORPUS_SEPARATOR_QUERY =
     "SELECT v.ord::int4 - 1 "
-    "FROM unnest($1::bytea[]) WITH ORDINALITY v(id, ord) "
-    "WHERE laplace.is_all_whitespace(laplace.render_text(v.id, 8))";
+    "FROM unnest($1::bytea[]) WITH ORDINALITY v(id, ord), "
+    "LATERAL (SELECT laplace.render_text_fast(v.id, 8) AS s) r "
+    "WHERE laplace.is_all_whitespace(r.s)";
 
-#define CORPUS_WALK_DEPTH_CAP 64
+#define CORPUS_WALK_DEPTH_CAP 256
 
 typedef struct CorpusNode
 {
@@ -194,22 +207,24 @@ corpus_vocab_intern(GenCorpus *c, const char key[16])
     return ve->id;
 }
 
+static int
+corpus_orphan_cap(void)
+{
+    if (laplace_corpus_max_rows > 0)
+        return laplace_corpus_max_rows;
+    return laplace_corpus_max_orphan_sentences;
+}
+
 static void
 corpus_build(int64 probe_rows, int64 probe_max_us)
 {
     MemoryContext cxt, walk_cxt, old;
     GenCorpus *c;
     HASHCTL    ctl;
-    HTAB      *node_hash;
-    NodeMeta  *meta;
-    int32      n_nodes = 0, node_cap = 8192;
-    CorpusEdge *edges;
-    int64      n_edges = 0, edge_cap = 65536;
-    int32     *raw = NULL;          
+    int32     *raw = NULL;
     int64      raw_len = 0, raw_cap = 65536;
     uint8     *is_sep;
     Portal     portal;
-    int32      cur_parent = -1;
 
     gen_corpus_free();
 
@@ -226,6 +241,9 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
     c->probe_rows = probe_rows;
     c->probe_max_us = probe_max_us;
     c->build_max_rows = laplace_corpus_max_rows;
+    c->build_max_orphans = corpus_orphan_cap();
+    strlcpy(c->document_source, laplace_corpus_document_source,
+            sizeof(c->document_source));
     c->vocab_cap = 4096;
 
     memset(&ctl, 0, sizeof(ctl));
@@ -238,215 +256,125 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
     MemoryContextSwitchTo(old);
 
     old = MemoryContextSwitchTo(walk_cxt);
-    memset(&ctl, 0, sizeof(ctl));
-    ctl.keysize   = 16;
-    ctl.entrysize = sizeof(CorpusNode);
-    ctl.hcxt      = walk_cxt;
-    node_hash = hash_create("corpus nodes", 65536, &ctl,
-                            HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-    meta  = (NodeMeta *) palloc(sizeof(NodeMeta) * node_cap);
-    edges = (CorpusEdge *) palloc(sizeof(CorpusEdge) * edge_cap);
     raw   = (int32 *) palloc(sizeof(int32) * raw_cap);
     MemoryContextSwitchTo(old);
 
-    
-
-
-
     {
         StringInfoData q;
+        char           prev_parent[16];
+        bool           have_parent = false;
+
         initStringInfo(&q);
-        
-
-
         appendStringInfoString(&q,
-            "WITH s AS (SELECT id FROM laplace.entities WHERE tier > 2");
-        if (laplace_corpus_max_rows > 0)
-            appendStringInfo(&q, " LIMIT %d", laplace_corpus_max_rows);
+            "WITH doc AS ("
+            "  SELECT e.id FROM laplace.entities e "
+            "  JOIN laplace.physicalities p "
+            "    ON p.entity_id = e.id AND p.type = 1 AND p.trajectory IS NOT NULL "
+            "  WHERE e.tier = 4");
+        if (c->document_source[0] != '\0')
+            appendStringInfo(&q,
+                " AND p.source_id = laplace.source_id('%s')",
+                c->document_source);
+        appendStringInfoString(&q,
+            "), book_sent AS ("
+            "  SELECT DISTINCT tc.entity_id AS id "
+            "  FROM doc d "
+            "  JOIN laplace.physicalities pd "
+            "    ON pd.entity_id = d.id AND pd.type = 1 AND pd.trajectory IS NOT NULL "
+            "  CROSS JOIN LATERAL public.laplace_trajectory_constituents(pd.trajectory) tc"
+            ")");
+        if (c->build_max_orphans > 0)
+        {
+            appendStringInfoString(&q,
+                ", orphan_sent AS ("
+                "  SELECT e.id "
+                "  FROM laplace.entities e "
+                "  JOIN laplace.physicalities ps "
+                "    ON ps.entity_id = e.id AND ps.type = 1 AND ps.trajectory IS NOT NULL "
+                "  WHERE e.tier = 3 "
+                "    AND NOT EXISTS ("
+                "      SELECT 1 FROM book_sent bs WHERE bs.id = e.id"
+                "    ) "
+                "  ORDER BY ps.observed_at DESC");
+            appendStringInfo(&q, " LIMIT %d", c->build_max_orphans);
+            appendStringInfoString(&q, ")");
+        }
+        appendStringInfoString(&q,
+            ", s AS ("
+            "  SELECT id FROM book_sent");
+        if (c->build_max_orphans > 0)
+            appendStringInfoString(&q, " UNION SELECT id FROM orphan_sent");
         appendStringInfoString(&q,
             ") "
-            "SELECT p.entity_id, u.entity_id, GREATEST(u.run_length, 1)::int "
+            "SELECT pp.entity_id, u.entity_id, GREATEST(u.run_length, 1)::int "
             "FROM (SELECT DISTINCT ON (pp.entity_id) pp.entity_id, pp.trajectory "
             "      FROM laplace.physicalities pp JOIN s ON s.id = pp.entity_id "
             "      WHERE pp.type = 1 AND pp.trajectory IS NOT NULL "
-            "      ORDER BY pp.entity_id, pp.source_id) p, "
-            "LATERAL public.ST_DumpPoints(p.trajectory) dp, "
-            "LATERAL public.laplace_mantissa_unpack(dp.geom) u "
-            "ORDER BY p.entity_id, u.ordinal");
+            "      ORDER BY pp.entity_id, pp.source_id) pp "
+            "CROSS JOIN LATERAL public.laplace_trajectory_constituents(pp.trajectory) u "
+            "WHERE public.laplace_vertex_tier(u.flags) = 2 "
+            "ORDER BY pp.entity_id, u.ordinal");
         portal = SPI_cursor_open_with_args(
-            "corpus_edges", q.data, 0, NULL, NULL, NULL, true, 0);
+            "corpus_sentences", q.data, 0, NULL, NULL, NULL, true, 0);
         pfree(q.data);
-    }
-    for (;;)
-    {
-        SPI_cursor_fetch(portal, true, 65536);
-        if (SPI_processed == 0)
-            break;
 
-        for (uint64 r = 0; r < SPI_processed; r++)
+        memset(prev_parent, 0, sizeof(prev_parent));
+        for (;;)
         {
-            HeapTuple tup = SPI_tuptable->vals[r];
-            TupleDesc td  = SPI_tuptable->tupdesc;
-            bool      isnull;
-            bytea    *pb  = DatumGetByteaPP(SPI_getbinval(tup, td, 1, &isnull));
-            bytea    *cb  = DatumGetByteaPP(SPI_getbinval(tup, td, 2, &isnull));
-            int32     run = DatumGetInt32(SPI_getbinval(tup, td, 3, &isnull));
-            char      key[16];
-            bool      found;
-            CorpusNode *pn, *cn;
-            int32     pidx, cidx;
+            SPI_cursor_fetch(portal, true, 65536);
+            if (SPI_processed == 0)
+                break;
 
-            if (VARSIZE_ANY_EXHDR(pb) != 16 || VARSIZE_ANY_EXHDR(cb) != 16)
-                ereport(ERROR, (errmsg("trajectory_stream: trajectory ids must be 16 bytes")));
-
-            old = MemoryContextSwitchTo(walk_cxt);
-            memcpy(key, VARDATA_ANY(pb), 16);
-            pn = (CorpusNode *) hash_search(node_hash, key, HASH_ENTER, &found);
-            if (!found)
+            for (uint64 r = 0; r < SPI_processed; r++)
             {
-                if (n_nodes == node_cap)
-                {
-                    node_cap *= 2;
-                    meta = (NodeMeta *) repalloc_huge(meta, sizeof(NodeMeta) * (Size) node_cap);
-                }
-                pn->idx = n_nodes;
-                meta[n_nodes].first_edge = -1;
-                meta[n_nodes].n_edges = 0;
-                meta[n_nodes].has_parent = false;
-                n_nodes++;
-            }
-            pidx = pn->idx;
+                HeapTuple tup = SPI_tuptable->vals[r];
+                TupleDesc td  = SPI_tuptable->tupdesc;
+                bool      isnull;
+                bytea    *pb  = DatumGetByteaPP(SPI_getbinval(tup, td, 1, &isnull));
+                bytea    *cb  = DatumGetByteaPP(SPI_getbinval(tup, td, 2, &isnull));
+                int32     run = DatumGetInt32(SPI_getbinval(tup, td, 3, &isnull));
+                char      key[16];
+                int32     vid;
 
-            memcpy(key, VARDATA_ANY(cb), 16);
-            cn = (CorpusNode *) hash_search(node_hash, key, HASH_ENTER, &found);
-            if (!found)
-            {
-                if (n_nodes == node_cap)
-                {
-                    node_cap *= 2;
-                    meta = (NodeMeta *) repalloc_huge(meta, sizeof(NodeMeta) * (Size) node_cap);
-                    
-                }
-                cn->idx = n_nodes;
-                meta[n_nodes].first_edge = -1;
-                meta[n_nodes].n_edges = 0;
-                meta[n_nodes].has_parent = true;
-                n_nodes++;
-            }
-            else
-                meta[cn->idx].has_parent = true;
-            cidx = cn->idx;
-
-            
-            if (pidx != cur_parent)
-            {
-                if (meta[pidx].n_edges != 0)
+                if (VARSIZE_ANY_EXHDR(pb) != 16 || VARSIZE_ANY_EXHDR(cb) != 16)
                     ereport(ERROR, (errmsg(
-                        "trajectory_stream: trajectory edge scan not parent-grouped")));
-                meta[pidx].first_edge = (int32) n_edges;
-                cur_parent = pidx;
-            }
-            if (n_edges == edge_cap)
-            {
-                edge_cap *= 2;
-                edges = (CorpusEdge *) repalloc_huge(edges, sizeof(CorpusEdge) * (Size) edge_cap);
-            }
-            edges[n_edges].child = cidx;
-            edges[n_edges].run = (run < 1) ? 1 : run;
-            n_edges++;
-            meta[pidx].n_edges++;
-            MemoryContextSwitchTo(old);
-        }
-        SPI_freetuptable(SPI_tuptable);
-        CHECK_FOR_INTERRUPTS();
-    }
-    SPI_cursor_close(portal);
+                        "trajectory_stream: sentence ids must be 16 bytes")));
 
-    
-
-
-    {
-        char (*node_ids)[16];
-        HASH_SEQ_STATUS hs;
-        CorpusNode *n;
-        WalkFrame  *stack;
-        int         depth;
-        int32       root;
-
-        node_ids = (char (*)[16]) MemoryContextAllocHuge(walk_cxt, sizeof(char[16]) * (Size) Max(n_nodes, 1));
-        old = MemoryContextSwitchTo(walk_cxt);
-        stack = (WalkFrame *) palloc(sizeof(WalkFrame) * CORPUS_WALK_DEPTH_CAP);
-        MemoryContextSwitchTo(old);
-
-        hash_seq_init(&hs, node_hash);
-        while ((n = (CorpusNode *) hash_seq_search(&hs)) != NULL)
-            memcpy(node_ids[n->idx], n->id, 16);
-
-        
-        for (root = 0; root < n_nodes; root++)
-        {
-            if (meta[root].n_edges == 0 || meta[root].has_parent)
-                continue;
-
-            depth = 0;
-            stack[depth].node = root;
-            stack[depth].edge_i = 0;
-            stack[depth].rep_left = 0;
-
-            while (depth >= 0)
-            {
-                WalkFrame *f = &stack[depth];
-
-                if (f->edge_i >= meta[f->node].n_edges)
+                if (have_parent && memcmp(VARDATA_ANY(pb), prev_parent, 16) != 0)
                 {
-                    depth--;
-                    continue;
-                }
-
-                {
-                    CorpusEdge *e = &edges[meta[f->node].first_edge + f->edge_i];
-
-                    if (meta[e->child].n_edges == 0)
+                    if (raw_len + 2 > raw_cap)
                     {
-                        
-                        int32 vid = corpus_vocab_intern(c, node_ids[e->child]);
-
-                        for (int32 k = 0; k < e->run; k++)
-                        {
-                            if (raw_len + 2 > raw_cap)
-                            {
-                                old = MemoryContextSwitchTo(walk_cxt);
-                                raw_cap *= 2;
-                                raw = (int32 *) repalloc_huge(raw, sizeof(int32) * (Size) raw_cap);
-                                MemoryContextSwitchTo(old);
-                            }
-                            raw[raw_len++] = vid;
-                        }
-                        f->edge_i++;
-                        f->rep_left = 0;
-                        continue;
+                        old = MemoryContextSwitchTo(walk_cxt);
+                        raw_cap *= 2;
+                        raw = (int32 *) repalloc_huge(raw, sizeof(int32) * (Size) raw_cap);
+                        MemoryContextSwitchTo(old);
                     }
-
-                    
-                    if (f->rep_left == 0)
-                        f->rep_left = e->run;
-                    f->rep_left--;
-                    if (f->rep_left == 0)
-                        f->edge_i++;
-
-                    if (depth + 1 >= CORPUS_WALK_DEPTH_CAP)
-                        ereport(ERROR, (errmsg(
-                            "trajectory_stream: constituency deeper than %d (cycle?)",
-                            CORPUS_WALK_DEPTH_CAP)));
-                    depth++;
-                    stack[depth].node = e->child;
-                    
-                    stack[depth].edge_i = 0;
-                    stack[depth].rep_left = 0;
+                    raw[raw_len++] = GEN_SENTINEL;
+                    c->sequences++;
                 }
-            }
+                memcpy(prev_parent, VARDATA_ANY(pb), 16);
+                have_parent = true;
 
-            
+                memcpy(key, VARDATA_ANY(cb), 16);
+                vid = corpus_vocab_intern(c, key);
+                for (int32 k = 0; k < run; k++)
+                {
+                    if (raw_len + 2 > raw_cap)
+                    {
+                        old = MemoryContextSwitchTo(walk_cxt);
+                        raw_cap *= 2;
+                        raw = (int32 *) repalloc_huge(raw, sizeof(int32) * (Size) raw_cap);
+                        MemoryContextSwitchTo(old);
+                    }
+                    raw[raw_len++] = vid;
+                }
+                CHECK_FOR_INTERRUPTS();
+            }
+            SPI_freetuptable(SPI_tuptable);
+        }
+        SPI_cursor_close(portal);
+        if (have_parent)
+        {
             if (raw_len + 2 > raw_cap)
             {
                 old = MemoryContextSwitchTo(walk_cxt);
@@ -456,11 +384,8 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
             }
             raw[raw_len++] = GEN_SENTINEL;
             c->sequences++;
-            CHECK_FOR_INTERRUPTS();
         }
     }
-
-    
 
     old = MemoryContextSwitchTo(walk_cxt);
     is_sep = (uint8 *) palloc0((Size) Max(c->n_vocab, 1));
@@ -601,7 +526,9 @@ corpus_ensure(void)
     if (gen_corpus == NULL
         || gen_corpus->probe_rows != rows
         || gen_corpus->probe_max_us != max_us
-        || gen_corpus->build_max_rows != laplace_corpus_max_rows)
+        || gen_corpus->build_max_rows != laplace_corpus_max_rows
+        || gen_corpus->build_max_orphans != corpus_orphan_cap()
+        || strcmp(gen_corpus->document_source, laplace_corpus_document_source) != 0)
         corpus_build(rows, max_us);
     return gen_corpus;
 }

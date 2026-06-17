@@ -76,7 +76,7 @@ consensus_peer_lookup(Datum id, int32 k)
         "      ORDER BY p2.coord <<->> me.coord "
         "      LIMIT 48"
         "    ) knn "
-        "    ORDER BY laplace.laplace_frechet_4d(knn.t2, me.trajectory) ASC "
+        "    ORDER BY public.laplace_frechet_4d(knn.t2, me.trajectory) ASC "
         "    LIMIT $2"
         "  ) near"
         ") "

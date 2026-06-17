@@ -16,6 +16,8 @@ CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 
 BEGIN;
 SET search_path = laplace, public;
+SET laplace_substrate.corpus_max_orphan_sentences = 16;
+SET laplace_substrate.corpus_document_source = '';
 
 DO $$
 DECLARE
@@ -96,11 +98,11 @@ BEGIN
     
     SELECT * INTO st FROM stream_stats();
     IF st.sequences <> 2 THEN
-        RAISE EXCEPTION 'FAIL: % sequences walked (want 2: doc + sent2)', st.sequences;
+        RAISE EXCEPTION 'FAIL: % sequences walked (want 2: sent + sent2)', st.sequences;
     END IF;
     
-    IF st.positions <> 10 THEN
-        RAISE EXCEPTION 'FAIL: % word-stride positions (want 10)', st.positions;
+    IF st.positions <> 6 THEN
+        RAISE EXCEPTION 'FAIL: % word-stride positions (want 6)', st.positions;
     END IF;
     IF st.separators <> 1 THEN
         RAISE EXCEPTION 'FAIL: % separator(s) classified (want 1: the space token)', st.separators;
@@ -109,8 +111,8 @@ BEGIN
     
     IF NOT EXISTS (
         SELECT 1 FROM cooccurrence_scan(1) s
-        WHERE s.subject_id = w_the AND s.object_id = w_capital AND s.cnt = 2) THEN
-        RAISE EXCEPTION 'FAIL: (the→capital) gap-1 pair missing or wrong count (want 2: run expansion)';
+        WHERE s.subject_id = w_the AND s.object_id = w_capital AND s.cnt = 1) THEN
+        RAISE EXCEPTION 'FAIL: (the→capital) gap-1 pair missing or wrong count (want 1)';
     END IF;
     IF EXISTS (SELECT 1 FROM cooccurrence_scan(1) s
                WHERE s.subject_id = sp OR s.object_id = sp) THEN
@@ -119,8 +121,8 @@ BEGIN
     
     IF NOT EXISTS (
         SELECT 1 FROM cooccurrence_scan(1) s
-        WHERE s.subject_id = w_france AND s.object_id = w_the AND s.cnt = 1) THEN
-        RAISE EXCEPTION 'FAIL: (france→the) run-boundary pair missing';
+        WHERE s.subject_id = w_france AND s.object_id = w_end AND s.cnt = 1) THEN
+        RAISE EXCEPTION 'FAIL: (france→end) run-boundary pair missing';
     END IF;
     
     IF NOT EXISTS (

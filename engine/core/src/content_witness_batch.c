@@ -204,71 +204,62 @@ int laplace_content_word_segment(
 
 
 
-typedef struct { hash128_t* slots; size_t cap; size_t count; } emit_bank_t;
-static emit_bank_t g_emit_bank;
-
-static int emit_bank_slot_empty(const hash128_t* h) { return (h->hi | h->lo) == 0; }
-
-
-static int emit_bank_record(const hash128_t* id) {
-    emit_bank_t* s = &g_emit_bank;
-    if (s->cap == 0) {
-        
-
-
-
-
-
-
-
-        s->cap = (size_t)1 << 22;
-        s->slots = (hash128_t*)calloc(s->cap, sizeof(hash128_t));
-        if (!s->slots) { s->cap = 0; return 0; }  
-    } else if ((s->count + 1) * 4 >= s->cap * 3) {  
-        size_t ncap = s->cap << 1;
-        hash128_t* ns = (hash128_t*)calloc(ncap, sizeof(hash128_t));
-        if (ns) {
-            size_t nmask = ncap - 1;
-            for (size_t i = 0; i < s->cap; ++i) {
-                if (emit_bank_slot_empty(&s->slots[i])) continue;
-                size_t j = (size_t)s->slots[i].lo & nmask;
-                while (!emit_bank_slot_empty(&ns[j])) j = (j + 1) & nmask;
-                ns[j] = s->slots[i];
-            }
-            free(s->slots);
-            s->slots = ns;
-            s->cap = ncap;
-        }
-    }
-    size_t mask = s->cap - 1;
-    size_t j = (size_t)id->lo & mask;
-    while (!emit_bank_slot_empty(&s->slots[j])) {
-        if (hash128_equals(&s->slots[j], id)) return 1;
-        j = (j + 1) & mask;
-    }
-    s->slots[j] = *id;
-    s->count++;
-    return 0;
-}
-
-
-static int emit_bank_contains(const hash128_t* id) {
-    emit_bank_t* s = &g_emit_bank;
-    if (s->cap == 0) return 0;
-    size_t mask = s->cap - 1;
-    size_t j = (size_t)id->lo & mask;
-    while (!emit_bank_slot_empty(&s->slots[j])) {
-        if (hash128_equals(&s->slots[j], id)) return 1;
-        j = (j + 1) & mask;
-    }
-    return 0;
-}
-
 void content_witness_reset(void) {
-    free(g_emit_bank.slots);
-    g_emit_bank.slots = NULL;
-    g_emit_bank.cap = 0;
-    g_emit_bank.count = 0;
+}
+
+static int emit_node(
+    intent_stage_t*  stage,
+    tier_tree_t*     tree,
+    uint32_t         idx,
+    const hash128_t* source_id,
+    int64_t          now_us) {
+    tier_node_view_t node;
+    if (tier_tree_get_node(tree, idx, &node) != 0) return 0;
+    if (node.tier == 0) return 0;
+    if (!should_emit_compositional(tree, idx)) return 0;
+
+    if (intent_stage_witness_record(stage, &node.id)) return 0;
+
+    hash128_t type_id = tier_type_id(node.tier);
+    if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0)
+        return -2;
+
+    double* traj = NULL;
+    size_t m = node.child_count;
+    if (m > 0) {
+        hash128_t* child_ids = (hash128_t*)malloc(m * sizeof(hash128_t));
+        uint64_t*  flags     = (uint64_t*)malloc(m * sizeof(uint64_t));
+        if (!child_ids || !flags) {
+            free(child_ids); free(flags); free(traj);
+            return -2;
+        }
+        for (uint32_t ci = 0; ci < m; ++ci) {
+            tier_node_view_t ch;
+            tier_tree_get_node(tree, collapse_idx(tree, node.first_child_idx + ci), &ch);
+            child_ids[ci] = ch.id;
+            flags[ci] = laplace_vertex_flags(
+                ch.tier, ch.tier == 0 ? 1 : 0, ch.atom);
+        }
+        traj = (double*)malloc(m * 4 * sizeof(double));
+        if (!traj || trajectory_build_flagged(child_ids, flags, m, traj) != 0) {
+            free(child_ids); free(flags); free(traj);
+            return -2;
+        }
+        free(child_ids);
+        free(flags);
+    }
+
+    hash128_t phys_id;
+    physicality_id_compute(node.id, *source_id, node.coord, traj, m * 4, &phys_id);
+    if (intent_stage_add_physicality(
+            stage, &phys_id, &node.id, source_id, 1,
+            node.coord, &node.hilbert, traj, (uint32_t)m,
+            (int32_t)m, 1, 0.0, 1, 0, now_us) != 0) {
+        free(traj);
+        return -2;
+    }
+    free(traj);
+    return 0;
 }
 
 int content_witness_batch_add(
@@ -295,75 +286,22 @@ int content_witness_batch_add(
     tier_tree_get_node(tree, root_idx, &root);
     *out_root_id = root.id;
 
-    
-
-
-    if (emit_bank_contains(&root.id)) { tier_tree_free(tree); return 0; }
+    if (intent_stage_witness_seen(stage, &root.id)) {
+        tier_tree_free(tree);
+        return 0;
+    }
 
     int64_t now_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
 
     for (uint32_t idx = 0; idx < (uint32_t)nc; ++idx) {
-        tier_node_view_t node;
-        if (tier_tree_get_node(tree, idx, &node) != 0) continue;
-        if (node.tier == 0) continue;
-        if (!should_emit_compositional(tree, idx)) continue;
-        
-
-        if (emit_bank_record(&node.id)) continue;
-
-        hash128_t type_id = tier_type_id(node.tier);
-        if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0) {
+        int rc = emit_node(stage, tree, idx, source_id, now_us);
+        if (rc != 0) {
             tier_tree_free(tree);
-            return -2;
+            return rc;
         }
-
-        double* traj = NULL;
-        size_t m = node.child_count;
-        if (m > 0) {
-            hash128_t* child_ids = (hash128_t*)malloc(m * sizeof(hash128_t));
-            uint64_t*  flags     = (uint64_t*)malloc(m * sizeof(uint64_t));
-            if (!child_ids || !flags) {
-                free(child_ids); free(flags); free(traj);
-                tier_tree_free(tree);
-                return -2;
-            }
-            for (uint32_t ci = 0; ci < m; ++ci) {
-                
-
-
-                tier_node_view_t ch;
-                tier_tree_get_node(tree, collapse_idx(tree, node.first_child_idx + ci), &ch);
-                child_ids[ci] = ch.id;
-                flags[ci] = laplace_vertex_flags(
-                    ch.tier, ch.tier == 0 ? 1 : 0, ch.atom);
-            }
-            traj = (double*)malloc(m * 4 * sizeof(double));
-            if (!traj || trajectory_build_flagged(child_ids, flags, m, traj) != 0) {
-                free(child_ids); free(flags); free(traj);
-                tier_tree_free(tree);
-                return -2;
-            }
-            free(child_ids);
-            free(flags);
-        }
-
-        hash128_t phys_id;
-        
-
-
-
-        physicality_id_compute(node.id, *source_id, node.coord, traj, m * 4, &phys_id);
-        if (intent_stage_add_physicality(
-                stage, &phys_id, &node.id, source_id, 1,
-                node.coord, &node.hilbert, traj, (uint32_t)m,
-                (int32_t)m, 1, 0.0, 1, 0, now_us) != 0) {
-            free(traj);
-            tier_tree_free(tree);
-            return -2;
-        }
-        free(traj);
     }
 
     tier_tree_free(tree);
     return 0;
 }
+
