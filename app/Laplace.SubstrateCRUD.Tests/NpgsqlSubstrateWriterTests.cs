@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text;
 using global::Npgsql;
 using Xunit;
 using Laplace.Engine.Core;
@@ -241,6 +242,71 @@ public class NpgsqlSubstrateWriterTests
             "SELECT observation_count FROM laplace.attestations WHERE id = $1");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, attId.ToBytes());
         Assert.Equal(8L, (long)(await cmd.ExecuteScalarAsync())!);   // 3 + 5
+    }
+
+    [Fact]
+    public async Task ApplyAsync_ReobservedAttestation_AccumulatesGames()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var src = Hash128.OfCanonical("substrate/source/test/att-reobserve");
+        var typeId = await EnsureTestTypeAsync(src);
+        var relTypeId = await EnsureTestRelationTypeAsync(src, "HAS_TEST");
+
+        var subj = H(8101);
+        var obj = H(8102);
+        var attId = H(8103);
+        AttestationRow Row(long games) => new(
+            Id: attId, SubjectId: subj, TypeId: relTypeId,
+            ObjectId: obj, SourceId: src, ContextId: null,
+            Outcome: AttestationOutcome.Confirm,
+            LastObservedAtUnixUs: IntentStage.PgEpochUnixUs + games,
+            ObservationCount: games,
+            ScoreFp1e9: 1_000_000_000L,
+            OpponentRdFp1e9: 30_000_000_000L);
+
+        var first = await writer.ApplyAsync(new SubstrateChangeBuilder(src, "att-u1")
+            .AddEntity(subj, 0, typeId)
+            .AddEntity(obj, 0, typeId)
+            .AddAttestation(Row(3))
+            .Build());
+        Assert.Equal(1, first.AttestationsInserted);
+
+        var second = await writer.ApplyAsync(new SubstrateChangeBuilder(src, "att-u2")
+            .AddAttestation(Row(5))
+            .Build());
+        Assert.Equal(0, second.AttestationsInserted);
+        Assert.False(second.TrunkShortcircuitHit);
+
+        await using var cmd = _pg.DataSource.CreateCommand(
+            "SELECT observation_count FROM laplace.attestations WHERE id = $1");
+        cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, attId.ToBytes());
+        Assert.Equal(8L, (long)(await cmd.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task ApplyManyAsync_CoalescesPrebuiltContentStages_BoundedRoundTrips()
+    {
+        CodepointPerfcache.LoadDefault();
+        IntentStage.ResetContentBank();
+
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var src = Hash128.OfCanonical("substrate/source/test/content-coalesce");
+        await EnsureTestTypeAsync(src);
+
+        var batch = Enumerable.Range(0, 8)
+            .Select(i =>
+            {
+                var b = new SubstrateChangeBuilder(src, $"u{i}");
+                Assert.True(b.ContentStage.TryAddContentWitness(
+                    Encoding.UTF8.GetBytes($"word{i}"), src, out _));
+                return b.Build();
+            })
+            .ToList();
+
+        var result = await writer.ApplyManyAsync(batch);
+        Assert.True(result.EntitiesInserted > 0);
+        Assert.True(result.RoundTrips <= 12,
+            $"coalesced batch should be O(tier) DB calls, got {result.RoundTrips}");
     }
 
     private async Task<long> CountLiveEntitiesAsync(Hash128 a, Hash128 b)

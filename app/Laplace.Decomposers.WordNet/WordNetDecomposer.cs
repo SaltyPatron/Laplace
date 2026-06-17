@@ -145,8 +145,23 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
     private static long CountSynsetLines(string path)
     {
         long n = 0;
-        foreach (var line in File.ReadLines(path))
-            if (line.Length > 0 && char.IsDigit(line[0])) n++;
+        using var fs = File.OpenRead(path);
+        Span<byte> buf = stackalloc byte[65536];
+        bool atLineStart = true;
+        int read;
+        while ((read = fs.Read(buf)) > 0)
+        {
+            for (int i = 0; i < read; i++)
+            {
+                byte c = buf[i];
+                if (atLineStart)
+                {
+                    if (c >= (byte)'0' && c <= (byte)'9') n++;
+                    atLineStart = false;
+                }
+                if (c == (byte)'\n') atLineStart = true;
+            }
+        }
         return n;
     }
 
@@ -159,7 +174,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         string suffix = entitiesOnly ? "entities" : "attestations";
         var b = NewBuilder($"wordnet/data-0/{suffix}", entitiesOnly, batch);
         int count = 0, batchNum = 0;
-        var frameTemplates = LoadVerbFrames(dictDir);
+        var frameTemplates = await LoadVerbFramesAsync(dictDir, ct);
 
         foreach (var posFile in PosFiles)
         {
@@ -190,18 +205,18 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         // it is safe in this entities-only builder; the IS_A category is attested in pass 2.
         ConceptAnchor.EmitAnchor(b, syn.Offset, syn.SsType, Source);
         foreach (var lemma in syn.Lemmas)
-            ContentEmitter.Emit(b, Surface(lemma), Source);
+            EmitSurface(b, lemma, Source);
 
         var (def, examples) = ParseGloss(syn.Gloss);
-        if (def.Length > 0) ContentEmitter.Emit(b, def, Source);
-        foreach (var ex in examples) ContentEmitter.Emit(b, ex, Source);
+        if (def.Length > 0) EmitSurface(b, def, Source);
+        foreach (var ex in examples) EmitSurface(b, ex, Source);
 
         if (syn.LexFilenum >= 0 && syn.LexFilenum < Lexnames.Length)
-            ContentEmitter.Emit(b, LexDomain(Lexnames[syn.LexFilenum]), Source);
+            EmitSurface(b, LexDomain(Lexnames[syn.LexFilenum]), Source);
 
         foreach (var (frame, _) in syn.Frames)
             if (frame > 0 && frame < frameTemplates.Length && frameTemplates[frame] is { } tpl)
-                ContentEmitter.Emit(b, tpl, Source);
+                EmitSurface(b, tpl, Source);
     }
 
     private static string LexDomain(string lexname)
@@ -224,7 +239,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
 
         foreach (var lemma in syn.Lemmas)
         {
-            var lemmaId = ContentEmitter.RootId(Surface(lemma));
+            var lemmaId = RootSurface(lemma);
             if (lemmaId is null) continue;
             b.AddAttestation(NativeAttestation.Categorical(
                 lemmaId.Value, "IS_SYNONYM_OF", synId, Source, SourceTrust.StandardsDerived));
@@ -235,14 +250,14 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         var (def, examples) = ParseGloss(syn.Gloss);
         if (def.Length > 0)
         {
-            var defId = ContentEmitter.RootId(def);
+            var defId = RootSurface(def);
             if (defId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
                     synId, "HAS_DEFINITION", defId.Value, Source, SourceTrust.StandardsDerived));
         }
         foreach (var ex in examples)
         {
-            var exId = ContentEmitter.RootId(ex);
+            var exId = RootSurface(ex);
             if (exId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
                     synId, "HAS_EXAMPLE", exId.Value, Source, SourceTrust.StandardsDerived));
@@ -250,7 +265,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
 
         if (syn.LexFilenum >= 0 && syn.LexFilenum < Lexnames.Length)
         {
-            var domainId = ContentEmitter.RootId(LexDomain(Lexnames[syn.LexFilenum]));
+            var domainId = RootSurface(LexDomain(Lexnames[syn.LexFilenum]));
             if (domainId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
                     synId, "HAS_DOMAIN_TOPIC", domainId.Value,
@@ -260,12 +275,12 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         foreach (var (frame, wordNum) in syn.Frames)
         {
             if (frame <= 0 || frame >= frameTemplates.Length || frameTemplates[frame] is not { } tpl) continue;
-            var tplId = ContentEmitter.RootId(tpl);
+            var tplId = RootSurface(tpl);
             if (tplId is null) continue;
             Hash128 subject = synId;
             if (wordNum > 0 && wordNum <= syn.Lemmas.Count)
             {
-                var lemmaId = ContentEmitter.RootId(Surface(syn.Lemmas[wordNum - 1]));
+                var lemmaId = RootSurface(syn.Lemmas[wordNum - 1]);
                 if (lemmaId is { } lid) subject = lid;
             }
             b.AddAttestation(NativeAttestation.Categorical(
@@ -300,16 +315,13 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
             ct.ThrowIfCancellationRequested();
             if (entitiesOnly)
             {
-                // The sense's identity is its (normalized) sense KEY decomposed as content — the
-                // stable cross-resource id VerbNet/PropBank/the Predicate Matrix also cite — never a
-                // wordnet/sense/{key} blob. IS_A WordNet_Sense is attested in the attestation pass.
-                ContentEmitter.Emit(b, s.SenseKey, Source);
-                ContentEmitter.Emit(b, s.Lemma, Source);
+                EmitSurface(b, s.SenseKey, Source);
+                EmitSurface(b, s.Lemma, Source);
             }
             else
             {
                 var senseId   = CategoryAnchor.Id(s.SenseKey);
-                var lemmaId   = ContentEmitter.RootId(s.Lemma);
+                var lemmaId   = RootSurface(s.Lemma);
                 var synAnchor = ConceptAnchor.SynsetId(s.Offset, s.Pos);  // RAW pos — shared ILI anchor
                 if (senseId is not null && lemmaId is not null && synAnchor is not null)
                 {
@@ -340,17 +352,35 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
 
     private static string Surface(string lemma) => lemma.Replace('_', ' ');
 
-    private static string?[] LoadVerbFrames(string dictDir)
+    private static Hash128? EmitSurface(SubstrateChangeBuilder b, string surface, Hash128 sourceId)
+    {
+        if (string.IsNullOrEmpty(surface)) return null;
+        var utf8 = System.Text.Encoding.UTF8.GetBytes(surface);
+        if (surface.Contains('_'))
+            return ContentWitnessBatch.TryAppendUnderscoredToBuilder(b, utf8, sourceId, out var id) ? id : null;
+        return ContentWitnessBatch.TryAppendToBuilder(b, utf8, sourceId, out var root) ? root : null;
+    }
+
+    private static Hash128? RootSurface(string surface)
+    {
+        if (string.IsNullOrEmpty(surface)) return null;
+        string canonical = surface.Contains('_') ? Surface(surface) : surface;
+        return ContentWitnessBatch.RootId(System.Text.Encoding.UTF8.GetBytes(canonical));
+    }
+
+    private static async Task<string?[]> LoadVerbFramesAsync(string dictDir, CancellationToken ct)
     {
         var templates = new string?[40];
         string path = Path.Combine(dictDir, "frames.vrb");
         if (!File.Exists(path)) return templates;
-        foreach (var line in File.ReadLines(path))
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
         {
-            var t = line.Trim();
-            int sp = t.IndexOf(' ');
-            if (sp <= 0 || !int.TryParse(t[..sp], out int num)) continue;
-            if (num > 0 && num < templates.Length) templates[num] = t[sp..].Trim();
+            ReadOnlySpan<byte> line = lineMem.Span.Trim((byte)' ');
+            int sp = line.IndexOf((byte)' ');
+            if (sp <= 0) continue;
+            if (!int.TryParse(System.Text.Encoding.UTF8.GetString(line[..sp]), out int num)) continue;
+            if (num > 0 && num < templates.Length)
+                templates[num] = System.Text.Encoding.UTF8.GetString(line[(sp + 1)..]).Trim();
         }
         return templates;
     }
@@ -368,19 +398,25 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
             await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
             {
                 ct.ThrowIfCancellationRequested();
-                string line = System.Text.Encoding.UTF8.GetString(lineMem.Span);
-                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length < 2) continue;
-                string inflected = parts[0].Replace('_', ' ');
-                var infId = ContentEmitter.Emit(b, inflected, Source);
+                ReadOnlySpan<byte> line = lineMem.Span;
+                int sp = line.IndexOf((byte)' ');
+                if (sp <= 0) continue;
+                var infId = EmitSurface(b, System.Text.Encoding.UTF8.GetString(line[..sp]), Source);
                 if (infId is null) continue;
-                for (int i = 1; i < parts.Length; i++)
+                int idx = sp + 1;
+                while (idx < line.Length)
                 {
-                    string baseForm = parts[i].Replace('_', ' ');
-                    var baseId = ContentEmitter.Emit(b, baseForm, Source);
-                    if (baseId is null) continue;
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        baseId.Value, "IS_LEMMA_OF", infId.Value, Source, SourceTrust.StandardsDerived));
+                    int next = line[idx..].IndexOf((byte)' ');
+                    ReadOnlySpan<byte> part = next < 0 ? line[idx..] : line.Slice(idx, next);
+                    if (!part.IsEmpty)
+                    {
+                        var baseId = EmitSurface(b, System.Text.Encoding.UTF8.GetString(part), Source);
+                        if (baseId is not null)
+                            b.AddAttestation(NativeAttestation.Categorical(
+                                baseId.Value, "IS_LEMMA_OF", infId.Value, Source, SourceTrust.StandardsDerived));
+                    }
+                    if (next < 0) break;
+                    idx += next + 1;
                 }
                 if (++count >= batch)
                 {
@@ -474,15 +510,25 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
     private static async IAsyncEnumerable<WnSense> ParseSensesAsync(
         string path, [EnumeratorCancellation] CancellationToken ct)
     {
-        await foreach (var line in File.ReadLinesAsync(path, ct))
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
         {
-            if (line.Length == 0) continue;
-            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length < 4) continue;
+            ReadOnlySpan<byte> line = lineMem.Span;
+            if (line.IsEmpty) continue;
+            int sp = 0;
+            while (sp < line.Length && line[sp] != (byte)' ') sp++;
+            if (sp <= 0) continue;
+            ReadOnlySpan<byte> senseKeySpan = line[..sp];
+            string senseKey = System.Text.Encoding.UTF8.GetString(senseKeySpan);
 
-            string senseKey = parts[0];
-            if (!long.TryParse(parts[1], out long offset)) continue;
-            if (!int.TryParse(parts[3], out int tagCount)) tagCount = 0;
+            int idx = sp + 1;
+            int offEnd = line[idx..].IndexOf((byte)' ');
+            if (offEnd < 0) continue;
+            if (!long.TryParse(System.Text.Encoding.UTF8.GetString(line.Slice(idx, offEnd)), out long offset)) continue;
+            idx += offEnd + 1;
+            int tagStart = line[idx..].IndexOf((byte)' ');
+            if (tagStart < 0) continue;
+            idx += tagStart + 1;
+            if (!int.TryParse(System.Text.Encoding.UTF8.GetString(line[idx..]), out int tagCount)) tagCount = 0;
 
             int pct = senseKey.IndexOf('%');
             if (pct <= 0 || pct + 1 >= senseKey.Length) continue;
@@ -492,8 +538,6 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
                 '1' => 'n', '2' => 'v', '3' => 'a', '4' => 'r', '5' => 's', _ => 'n',
             };
 
-            // Identity = the normalized sense key as content (shared with VerbNet/PropBank/Matrix);
-            // synset reference resolves to the shared ILI anchor (offset + RAW pos carried below).
             string? normKey = SourceEntityIdConventions.NormalizeSenseKey(senseKey);
             if (normKey is null) continue;
             yield return new WnSense(normKey, offset, pos, lemma, tagCount);

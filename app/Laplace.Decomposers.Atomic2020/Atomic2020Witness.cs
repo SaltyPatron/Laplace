@@ -1,40 +1,33 @@
-using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Atomic2020;
 
-internal sealed class Atomic2020Witness : IGrammarWitness
+internal static class Atomic2020Witness
 {
-    public string ModalityId => "tsv";
-
     private static readonly Hash128 NoneId = Hash128.OfCanonical("substrate/atomic/none/v1");
 
-    public void WalkRow(in GrammarComposeContext composed, in RowContext ctx, SubstrateChangeBuilder b)
+    public static void WalkRow(in Atomic2020TsvRow row, Hash128? contextId, SubstrateChangeBuilder b)
     {
-        if (composed.Composer is null) return;
-        var fields = composed.Composer.FieldSpans();
-        if (fields.Count < 3) return;
-
-        if (!composed.Composer.TrySpanEntity(fields[0].Start, fields[0].End, out var headId))
+        if (!ContentWitnessBatch.TryAppendToBuilder(
+                b, row.Head, Atomic2020Decomposer.Source, out var headId))
             return;
 
-        string rel = Encoding.UTF8.GetString(
-            composed.Utf8.AsSpan((int)fields[1].Start, (int)(fields[1].End - fields[1].Start))).Trim();
+        string rel = row.RelationText();
         if (!Atomic2020Decomposer.RelTypeId.TryGetValue(rel, out var typeName))
             return;
 
         Hash128 tailId;
-        var tailText = Encoding.UTF8.GetString(
-            composed.Utf8.AsSpan((int)fields[2].Start, (int)(fields[2].End - fields[2].Start))).Trim();
+        string tailText = row.TailText();
         if (tailText.Length == 0 || tailText.Equals("none", StringComparison.OrdinalIgnoreCase))
             tailId = NoneId;
-        else if (!composed.Composer.TrySpanEntity(fields[2].Start, fields[2].End, out tailId))
+        else if (!ContentWitnessBatch.TryAppendToBuilder(
+                     b, row.Tail, Atomic2020Decomposer.Source, out tailId))
             return;
 
         b.AddAttestation(NativeAttestation.Categorical(
             headId, typeName, tailId, Atomic2020Decomposer.Source, SourceTrust.StructuredCorpus,
-            contextId: ctx.ContextId));
+            contextId: contextId));
     }
 }
