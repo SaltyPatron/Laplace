@@ -8,7 +8,13 @@
   "rope": true,
   "tie_embeddings": false,
   "norm": "rmsnorm",
-  "vocab": { "source": "tokenizer" },
+  "vocab": {
+    "source": "crawl",
+    "seeds": ["king", "queen", "prince", "princess", "monarch", "throne", "crown", "kingdom", "royal", "ruler", "noble", "duke"],
+    "hops": 2,
+    "fanout": 30,
+    "size": 1500
+  },
   "embed": { "op": "coord" },
   "lm_head": { "op": "trajectory" },
   "layers": [

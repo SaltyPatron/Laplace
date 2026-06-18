@@ -183,7 +183,6 @@ internal static class FoundryCommands
         
         
         var sel = new List<(string surface, long weight)>(vocabN);
-        var atoms = new List<(string surface, long weight)>();   // grapheme/alphabet floor (BPE base)
         string[]? seeds = crawlSeeds
             ?.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         string[] crawlS = [];
@@ -238,20 +237,6 @@ internal static class FoundryCommands
                     sel.Add((rdr.GetString(0), rdr.GetInt64(1)));
             }
 
-            // Grapheme/alphabet atom floor (single codepoints/graphemes) from the substrate, laid
-            // below words so every character is covered without byte-bashing (BPE base before n-grams).
-            if (!grapheme)
-            {
-                await using var ac = conn.CreateCommand();
-                ac.CommandTimeout = 0;
-                ac.CommandText = "SELECT surface, weight FROM laplace.grapheme_floor_vocab($1)";
-                ac.Parameters.AddWithValue(FoundryExport.EnvInt("LAPLACE_FOUNDRY_ATOM_FLOOR", 768));
-                await using var ar = await ac.ExecuteReaderAsync();
-                while (await ar.ReadAsync()) atoms.Add((ar.GetString(0), ar.GetInt64(1)));
-            }
-            
-            
-            
             if (!grapheme && crawlS.Length > 0)
                 await PinCrawlSeedsInPlaceAsync(conn, crawlS, sel, vocabN);
         }
@@ -267,47 +252,27 @@ internal static class FoundryCommands
         
         
         
-        var pieces = new List<(string piece, float score, int type)>(3 + 256 + atoms.Count + sel.Count * 2);
-        var seenPiece = new HashSet<string>(StringComparer.Ordinal);
-        bool AddPiece(string p, float score, int type)
-        { if (!seenPiece.Add(p)) return false; pieces.Add((p, score, type)); return true; }
-        AddPiece("<unk>", 0f, 2);
-        AddPiece("<s>",   0f, 3);
-        AddPiece("</s>",  0f, 3);
-        for (int b = 0; b < 256; b++) AddPiece($"<0x{b:X2}>", -20f, 6);
+        var pieces = new List<(string piece, float score, int type)>(3 + 256 + sel.Count);
+        pieces.Add(("<unk>", 0f, 2));
+        pieces.Add(("<s>",   0f, 3));
+        pieces.Add(("</s>",  0f, 3));
+        for (int b = 0; b < 256; b++) pieces.Add(($"<0x{b:X2}>", -20f, 6));
         if (grapheme)
         {
-            
-            
-            
-            AddPiece("▁", 1f, 1);
+            pieces.Add(("▁", 1f, 1));
             foreach (var (surface, weight) in sel)
-                AddPiece(surface, (float)(Math.Log(weight + 1.0) + 1.0), 1);
+                pieces.Add((surface, (float)(Math.Log(weight + 1.0) + 1.0), 1));
         }
         else
         {
-            
-            
-            
-            
-            
-            
-            
-            
-            // atoms first (low ids, fallback scores), then words on top — BPE base before n-grams,
-            // so any character is covered. The atom set is also the perfcache/deploy package (ASCII min).
-            int atomCount = 0;
-            foreach (var (surface, _) in atoms)
-                if (AddPiece(surface, -2.0f, 1)) atomCount++;
             int aliases = 0;
             foreach (var (surface, weight) in sel)
             {
                 float sc = (float)(Math.Log(weight + 1.0) + 1.0);
-                AddPiece("▁" + surface, sc, 1);
-                if (!(surface.Length == 1 && surface[0] < 128) && AddPiece(surface, sc, 1)) aliases++;
+                pieces.Add(("▁" + surface, sc, 1));
+                if (!(surface.Length == 1 && surface[0] < 128)) { pieces.Add((surface, sc, 1)); aliases++; }
             }
-            Console.WriteLine($"  BPE floor: 3 special + 256 byte + {atomCount:N0} grapheme atoms; "
-                + $"+{sel.Count:N0} words, +{aliases:N0} bare aliases = {pieces.Count:N0} pieces");
+            Console.WriteLine($"  dual-form: +{aliases:N0} bare-word aliases (sentence-initial match; input-only)");
         }
         int vocabSize = pieces.Count;
         Console.WriteLine($"  native vocab: {sel.Count:N0} substrate word entities + 256 byte floor + 3 specials = {vocabSize:N0}");
@@ -409,10 +374,7 @@ internal static class FoundryCommands
         {
             var babDesc = RecipeDescriptor.Parse(recipeText);
             string babDir = Path.GetDirectoryName(recipePath) ?? ".";
-            string babTok = Path.Combine(babDir, "tokenizer.json");
-            if (!File.Exists(babTok))
-                return Fail($"tokenizer.json not found alongside recipe: {babTok}");
-            return await SynthesizeBuildABearAsync(babDesc, babDir, babTok, outputPath);
+            return await SynthesizeBuildABearAsync(babDesc, babDir, outputPath);
         }
 
         Console.WriteLine($"synthesize substrate (foundry) → {outputPath}");
@@ -925,7 +887,7 @@ internal static class FoundryCommands
     // mash tiled across heads. C#-first per-head proof; the fill relocates to native arch_template.cpp
     // once ablation validates the design. Spine constraints: dense, MHA, uniform heads/layer.
     private static async Task<int> SynthesizeBuildABearAsync(
-        RecipeDescriptor desc, string modelDir, string tokenizerPath, string outputPath)
+        RecipeDescriptor desc, string modelDir, string outputPath)
     {
         Console.WriteLine($"synthesize build-a-bear: {desc.Name} ({desc.Structure}) → {outputPath}");
         CodepointPerfcache.Load(ResolveBlob());
@@ -949,6 +911,29 @@ internal static class FoundryCommands
             return Fail($"build-a-bear spine requires MHA (kv_heads {nKv} == heads {nHeads}); GQA is Milestone B");
         int headDim = dModel / nHeads;
 
+        // Resolve the vocab. Substrate-native by default — the recipe's vocab spec drives a
+        // crawl/corpus/grapheme generation (reusing the native-mold gen: atoms floor + words, no
+        // borrowed BPE). vocab.source=tokenizer means use an external tokenizer.json in modelDir.
+        string tokenizerPath;
+        if (desc.Vocab.Source == "tokenizer")
+        {
+            tokenizerPath = Path.Combine(modelDir, "tokenizer.json");
+            if (!File.Exists(tokenizerPath))
+                return Fail($"vocab.source=tokenizer but no tokenizer.json in {modelDir}");
+        }
+        else
+        {
+            Console.WriteLine($"  vocab: substrate-native (source={desc.Vocab.Source}, size={desc.Vocab.Size}, "
+                + $"seeds={desc.Vocab.Seeds.Count}, hops={desc.Vocab.Hops})");
+            string? moldCfg = await MaterializeNativeMoldAsync(
+                desc.Vocab.Size > 0 ? desc.Vocab.Size : 2000,
+                dModel, nLayers, nHeads, nKv, intermR,
+                crawlSeeds: desc.Vocab.Seeds.Count > 0 ? string.Join(",", desc.Vocab.Seeds) : null,
+                crawlHops: desc.Vocab.Hops, crawlFanout: desc.Vocab.Fanout,
+                grapheme: desc.Vocab.Source == "grapheme");
+            if (moldCfg is null) return Fail("substrate vocab generation failed");
+            tokenizerPath = Path.Combine(Path.GetDirectoryName(moldCfg)!, "tokenizer.json");
+        }
         var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
         int vocab = 0;
         foreach (var t in tokens) if (t.TokenId + 1 > vocab) vocab = t.TokenId + 1;
@@ -992,9 +977,14 @@ internal static class FoundryCommands
         foreach (var L in desc.Layers) { foreach (var h in L.Heads) opKeys.Add(h.Key); opKeys.Add(L.Ffn.Key); }
         opKeys.Add(desc.LmHead.Key);
 
-        // one read returns every relation-type plane present over the vocab
+        // Read ONLY the recipe's relation-operator types (not all ~30) — the read-amplification fix:
+        // consensus_type_plane filters by type via consensus_type_subject_btree (~122x fewer edges).
+        var neededTypes = opKeys
+            .Where(k => k.StartsWith("relation:", StringComparison.Ordinal))
+            .Select(k => RelationTypeRegistry.RelationTypeId(k["relation:".Length..]))
+            .ToList();
         var swRead = Stopwatch.StartNew();
-        var typePlanes = await FoundryExport.ReadTypePlanesAsync(ds, tokenSlots, degreeCap);
+        var typePlanes = await FoundryExport.ReadTypePlanesAsync(ds, tokenSlots, degreeCap, neededTypes);
         var planeByType = new Dictionary<Hash128, FoundryExport.PlaneCoo>();
         foreach (var tp in typePlanes) planeByType[tp.TypeId] = FoundryExport.Normalize(tp.Plane);
 
@@ -1097,7 +1087,9 @@ internal static class FoundryCommands
 
         var gguf = SynthInterop.GgufWriterCreate(outputPath);
         if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
-        WriteGgufMetadata(gguf, recipe, tokens, modelDir, byteBpe: true);
+        // tokenizer.json + tokenizer.model live in the vocab dir (the mold), not the recipe dir —
+        // point metadata there so the real SentencePiece scores/merges are embedded (no zero-score fallback).
+        WriteGgufMetadata(gguf, recipe, tokens, Path.GetDirectoryName(tokenizerPath) ?? modelDir, byteBpe: true);
         var sw = Stopwatch.StartNew();
         for (int i = 0; i < tensorCount; i++)
         {
