@@ -267,7 +267,8 @@ internal static class FoundryExport
     internal sealed record TypePlane(Hash128 TypeId, double Rank, PlaneCoo Plane);
 
     internal static async Task<List<TypePlane>> ReadTypePlanesAsync(
-        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int degreeCap,
+        IReadOnlyCollection<Hash128>? typeIds = null)
     {
         var vocab = new byte[tokenSlots.Count][];
         int vi = 0;
@@ -281,10 +282,17 @@ internal static class FoundryExport
             await using var cmd = conn.CreateCommand();
             cmd.CommandTimeout = 600;
             cmd.CommandText =
-                "SELECT subject_id, object_id, w, type_id, layer_rank FROM laplace.consensus_type_plane($1, $2)";
+                "SELECT subject_id, object_id, w, type_id, layer_rank FROM laplace.consensus_type_plane($1, $2, $3)";
             cmd.Parameters.Add(new NpgsqlParameter
                 { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
             cmd.Parameters.AddWithValue(degreeCap);
+            cmd.Parameters.Add(new NpgsqlParameter
+            {
+                Value = (typeIds is { Count: > 0 })
+                    ? typeIds.Select(t => t.ToBytes()).ToArray()
+                    : (object)DBNull.Value,
+                NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+            });
             await using var rdr = await cmd.ExecuteReaderAsync();
             while (await rdr.ReadAsync())
             {
@@ -666,26 +674,21 @@ internal static class FoundryExport
         {
             
             
-            await using (var ensure = conn.CreateCommand())
-            {
-                ensure.CommandTimeout = 0;
-                ensure.CommandText = "SELECT laplace.trajectory_pairs_ensure($1)";
-                ensure.Parameters.AddWithValue(maxGap);
-                await ensure.ExecuteScalarAsync();
-            }
-
-            
-            
+            // Direct, vocab-scoped continuation read from content trajectories — NO global
+            // trajectory_pairs cache, NO lazy rebuild / staleness probe / maintenance. word_order
+            // scans a bounded slice of trajectories and emits gap-ordered intra-vocab pairs.
             var vocab = new byte[tokenSlots.Count][];
             int vi = 0;
             foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
 
+            int trajCap = corpusMax > 0 ? corpusMax : 200_000;
             await using var cmd = conn.CreateCommand();
             cmd.CommandTimeout = 600;
             cmd.CommandText =
-                "SELECT subject_id, object_id, w FROM laplace.trajectory_pairs_plane($1, $2)";
+                "SELECT subject_id, object_id, w FROM laplace.word_order($1, $2, $3)";
             cmd.Parameters.Add(new NpgsqlParameter
                 { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            cmd.Parameters.AddWithValue(trajCap);
             cmd.Parameters.AddWithValue(maxGap);
             await using var rdr = await cmd.ExecuteReaderAsync();
             while (await rdr.ReadAsync())
