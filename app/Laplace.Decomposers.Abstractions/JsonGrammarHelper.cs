@@ -83,6 +83,57 @@ public static class JsonGrammarHelper
         }
     }
 
+    public static int FindRootObjectNode(GrammarAst ast)
+    {
+        for (int i = 0; i < ast.NodeCount; i++)
+        {
+            if (ast.NodeTypeName(ast.GetNode(i).NodeTypeId) == "object")
+                return i;
+        }
+        return -1;
+    }
+
+    public static IEnumerable<(int KeyStringNode, int ValueNode)> EnumerateObjectPairs(
+        GrammarAst ast, int objectNodeIndex)
+    {
+        if (objectNodeIndex < 0) yield break;
+        for (int i = 0; i < ast.NodeCount; i++)
+        {
+            var nd = ast.GetNode(i);
+            if (nd.Parent != (uint)objectNodeIndex) continue;
+            if (ast.NodeTypeName(nd.NodeTypeId) != "pair") continue;
+            int key = PairKeyChild(ast, i);
+            int value = PairValueChild(ast, i);
+            if (key < 0 || value < 0) continue;
+            yield return (key, value);
+        }
+    }
+
+    public static bool TryKeyUtf8(GrammarAst ast, byte[] utf8, int keyStringNode, out ReadOnlySpan<byte> keyUtf8)
+    {
+        keyUtf8 = default;
+        return TryStringNodeSpan(ast, keyStringNode, out uint start, out uint end)
+            && Slice(utf8, start, end, out keyUtf8);
+    }
+
+    public static bool IsObjectNode(GrammarAst ast, int nodeIndex) =>
+        nodeIndex >= 0 && ast.NodeTypeName(ast.GetNode(nodeIndex).NodeTypeId) == "object";
+
+    public static bool IsArrayNode(GrammarAst ast, int nodeIndex) =>
+        nodeIndex >= 0 && ast.NodeTypeName(ast.GetNode(nodeIndex).NodeTypeId) == "array";
+
+    public static IEnumerable<int> StringNodesInArray(GrammarAst ast, int arrayNodeIndex)
+    {
+        if (!IsArrayNode(ast, arrayNodeIndex)) yield break;
+        for (int i = 0; i < ast.NodeCount; i++)
+        {
+            var nd = ast.GetNode(i);
+            if (nd.Parent != (uint)arrayNodeIndex) continue;
+            if (ast.NodeTypeName(nd.NodeTypeId) == "string")
+                yield return i;
+        }
+    }
+
     public static bool TryComposedNode(
         GrammarComposeContext ctx, int nodeIndex, out Hash128 entityId)
     {
@@ -252,13 +303,14 @@ public static class JsonGrammarHelper
 
     private static int PairValueChild(GrammarAst ast, int pairIndex)
     {
-        bool seenKey = false;
+        int key = PairKeyChild(ast, pairIndex);
         for (int i = 0; i < ast.NodeCount; i++)
         {
             if (ast.GetNode(i).Parent != (uint)pairIndex) continue;
-            if (ast.NodeTypeName(ast.GetNode(i).NodeTypeId) != "string") continue;
-            if (!seenKey) { seenKey = true; continue; }
-            return i;
+            if (i == key) continue;
+            string? t = ast.NodeTypeName(ast.GetNode(i).NodeTypeId);
+            if (t is "object" or "array" or "string" or "number" or "true" or "false" or "null")
+                return i;
         }
         return -1;
     }

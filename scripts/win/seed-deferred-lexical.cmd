@@ -1,8 +1,7 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
-set "LAPLACE_INGEST_LANGS=en"
 if not defined LAPLACE_EMIT_CROSS_LANG set "LAPLACE_EMIT_CROSS_LANG=0"
 set "LAPLACE_INGEST_WORKERS=4"
 set "LAPLACE_DECOMPOSE_WORKERS=1"
@@ -13,14 +12,9 @@ call "%~dp0build-engine-libs.cmd" || exit /b 1
 cd app
 dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q || exit /b 1
 
-echo ==== ingest conceptnet (/c/en/ graph) ====
-set "LAPLACE_INGEST_COMMIT_ROWS=50000"
-dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest conceptnet || exit /b 1
-set "LAPLACE_INGEST_COMMIT_ROWS="
-echo ==== ingest atomic2020 ====
-dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest atomic2020 || exit /b 1
-echo ==== ingest ud (en_* treebanks only) ====
-dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest ud --langs en || exit /b 1
-echo ==== ingest wiktionary (English jsonl) ====
-dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- ingest wiktionary --langs en || exit /b 1
+call "%~dp0seed-step.cmd" conceptnet || exit /b 1
+call "%~dp0seed-step.cmd" atomic2020 || exit /b 1
+call "%~dp0seed-step.cmd" ud || exit /b 1
+call "%~dp0seed-step.cmd" wiktionary || exit /b 1
 echo ==== SEMANTIC KNOWLEDGE LAYER COMPLETE ====
+exit /b 0

@@ -1140,8 +1140,12 @@ internal static class FoundryCommands
                 ff[opKey] = FoundryExport.Factor(mResid, dModel, kFfn,    relTol, transpose: true);
 
                 double sc = OpResidScale(opKey);             // resid-contributing ops advance the frame
+                // Dense (M-I)·R[t] per token. Each t writes a disjoint update[to..] slice, so this
+                // parallelizes over tokens with no contention — matches the Parallel.For shape used
+                // throughout the factoring path (SpMatVec/FactorSparseRandomized). Serial here makes
+                // the frame advance O(vocab·dModel²·nLayers·ops) on one core (the >1h hot loop).
                 if (sc > 0)
-                    for (int t = 0; t < vocab; t++)
+                    System.Threading.Tasks.Parallel.For(0, vocab, t =>
                     {
                         long to = (long)t * dModel;
                         for (int i = 0; i < dModel; i++)
@@ -1150,7 +1154,7 @@ internal static class FoundryCommands
                             for (int j = 0; j < dModel; j++) acc += mResid[mi + j] * R[to + j];
                             update[to + i] += sc * acc;
                         }
-                    }
+                    });
             }
             fAttnL.Add(fa); fOvL.Add(fo); fFfnL.Add(ff);
 
