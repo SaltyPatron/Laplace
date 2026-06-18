@@ -111,7 +111,9 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
             var tok  = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
             var ord  = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
             if (tok.Length == 0) continue;
-            yield return new GenerateToken(step, " " + tok, ord);
+            // tok already carries its substrate-observed separator (walk_text appends render_text(sep_entity)).
+            // Never prepend a literal space — that's an English assumption; separators come from the substrate.
+            yield return new GenerateToken(step, tok, ord);
         }
     }
 

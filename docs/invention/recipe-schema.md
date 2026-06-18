@@ -23,6 +23,7 @@ that simulates an ingest or user-create event; it goes through deposit like any 
 | `vocab` | content/build-a-bear stuffing — see below |
 | `embed` | operator for `embed_tokens` (default `{"op":"coord"}`) |
 | `lm_head` | operator for `lm_head` (default `{"op":"trajectory"}`) |
+| `compile` | `"continuation"` (default when `lm_head` is trajectory) or `"full"` — continuation mutes non-sequential heads and compiles a **recipe-slice operator export** (prefix-bigram readout on the vocab crawl), not native `walk_text` |
 | `layers` | array of layer specs — the operator array |
 
 ## `vocab` (content selection)
@@ -46,6 +47,13 @@ Each head/embed/lm_head/ffn is one operator. Operators map to the fixed ETL (see
 | `{"op":"coord"}` | native S³ coordinate | `embed_tokens` |
 | `{"op":"spectral"}` | Laplacian eigenmap of the selected graph | `embed_tokens` (alt) |
 | `{"op":"unary"}` | per-token consensus covariance (`unary_gram`) | ffn (per-token implications) |
+| `{"op":"attribute","type":"HAS_POS"}` (or any word→category type) | `consensus` word→category, compiled as shared-category word↔word plane | a type-coherence head (Q/K affinity within POS/sense class) |
+| `{"op":"context"}` | parameter-free causal prefix mean | uniform-attention head: q=k=0, v=o=identity on the head slice — carries local sequence state in the residual |
+| `{"op":"syntax","type":"DEP_NSUBJ"}` (or any UD dependency) | `consensus_type_plane` for that `type_id` (word→head-word) | syntactic dependency head — same ETL as `relation`, distinct catalog entry for scheduling |
+
+Top-level `attributes: ["HAS_POS", …]` folds word→category structure into `embed_tokens` only (no head
+rows). Per-head `{"op":"attribute","type":"HAS_POS"}` compiles the same consensus into a dedicated
+attention head via the shared-category plane.
 
 ## `layers[]` (the operator array — one entry per layer)
 

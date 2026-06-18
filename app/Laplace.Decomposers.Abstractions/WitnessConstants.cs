@@ -26,5 +26,6 @@ public static class SourceTrust
     public const double AiModelProbe             = 0.50;
     public const double AppDerived               = 0.40;
     public const double UserPrompt               = 0.30;
+    public const double Response                 = 0.20;   // the substrate's own generated output — low/probationary
     public const double Adversarial              = 0.00;
 }

@@ -41,6 +41,12 @@ internal static class FoundryExport
             System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= 0 ? v : dflt;
 
+    internal static double EnvDoubleOr(string name, double ifUnset) =>
+        Environment.GetEnvironmentVariable(name) is { Length: > 0 } raw
+        && double.TryParse(raw, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= 0
+            ? v : ifUnset;
+
     
     
     
@@ -325,14 +331,72 @@ internal static class FoundryExport
         return result;
     }
 
-    
-    
-    
-    
-    
-    
-    
-    
+    // word→category relations (HAS_POS, HAS_SENSE, …) compile to a vocab×vocab plane: tokens that share
+    // the same category object attend to each other. The category entity is not in the recipe vocab, so
+    // entity_relation_plane / consensus_type_plane cannot surface these edges as word↔word heads.
+    internal static async Task<PlaneCoo> ReadAttributePlaneAsync(
+        NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, string relationType, int degreeCap)
+    {
+        var vocab = new byte[tokenSlots.Count][];
+        int vi = 0;
+        foreach (var k in tokenSlots.Keys) vocab[vi++] = k.ToBytes();
+
+        var wordCat = new Dictionary<int, Hash128>();
+        var wordMu = new Dictionary<int, double>();
+        await using var conn = await ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 180;
+        cmd.CommandText =
+            "SELECT subject_id, object_id, " +
+            "GREATEST((eff_mu(rating, rd) - glicko2_neutral_mu())::double precision / 1e9, 0) AS w " +
+            "FROM laplace.consensus " +
+            "WHERE type_id = laplace.relation_type_id($1) AND subject_id = ANY($2)";
+        cmd.Parameters.AddWithValue(relationType);
+        cmd.Parameters.Add(new NpgsqlParameter
+            { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        while (await rdr.ReadAsync())
+        {
+            if (!tokenSlots.TryGetValue(FromBytes((byte[])rdr[0]), out var subj)) continue;
+            var cat = FromBytes((byte[])rdr[1]);
+            double w = rdr.GetDouble(2);
+            if (w <= 0) w = 1e-6;
+            foreach (int t in subj)
+            {
+                wordCat[t] = cat;
+                wordMu[t] = Math.Max(wordMu.GetValueOrDefault(t), w);
+            }
+        }
+
+        var byCat = new Dictionary<Hash128, List<int>>();
+        foreach (var (tok, cat) in wordCat)
+        {
+            if (!byCat.TryGetValue(cat, out var list)) byCat[cat] = list = new List<int>(8);
+            list.Add(tok);
+        }
+
+        var adj = new Dictionary<int, List<(int Col, double W)>>();
+        foreach (var group in byCat.Values)
+        {
+            if (group.Count < 2) continue;
+            for (int i = 0; i < group.Count; i++)
+            {
+                int a = group[i];
+                double muA = wordMu.GetValueOrDefault(a, 1.0);
+                if (!adj.TryGetValue(a, out var row)) adj[a] = row = new List<(int, double)>(8);
+                for (int j = 0; j < group.Count; j++)
+                {
+                    if (i == j) continue;
+                    int b = group[j];
+                    double muB = wordMu.GetValueOrDefault(b, 1.0);
+                    double w = Math.Sqrt(muA * muB);
+                    row.Add((b, w));
+                }
+            }
+        }
+        return CooFromAdj(adj, degreeCap);
+    }
+
     internal static async Task<PlaneCoo> ReadAdjacencyAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int degreeCap)
     {
@@ -710,7 +774,41 @@ internal static class FoundryExport
             return PlaneCoo.Empty;
         }
 
+        // The content trajectories ARE the knowledge (real observed usage). Raw counts preserve the
+        // actual usage flow (incl. the grammatical glue that genuinely follows words); PPMI instead
+        // surfaces context-specific associations by normalizing out each target's global frequency.
+        // Toggle: LAPLACE_FOUNDRY_PPMI=0 keeps the raw usage flow (fluent continuation), =1 (default) PPMI.
+        if (EnvInt("LAPLACE_FOUNDRY_PPMI", 1) != 0) ApplyPpmi(adj);
         return CooFromAdj(adj, degreeCap);
+    }
+
+    // Positive pointwise mutual information over a continuation adjacency.
+    // PMI(s,o) = log( count(s,o)·N / (rowSum[s]·colSum[o]) ); keep only positive (real) associations.
+    private static void ApplyPpmi(Dictionary<int, List<(int Col, double W)>> adj)
+    {
+        var colSum = new Dictionary<int, double>();
+        var rowSum = new Dictionary<int, double>(adj.Count);
+        double n = 0;
+        foreach (var (s, row) in adj)
+        {
+            double rs = 0;
+            foreach (var (o, w) in row) { rs += w; colSum[o] = colSum.GetValueOrDefault(o) + w; n += w; }
+            rowSum[s] = rs;
+        }
+        if (n <= 0) return;
+        foreach (var s in adj.Keys.ToList())
+        {
+            double rs = rowSum[s];
+            var nr = new List<(int, double)>(adj[s].Count);
+            foreach (var (o, w) in adj[s])
+            {
+                double denom = rs * colSum[o];
+                if (denom <= 0) continue;
+                double pmi = Math.Log(w * n / denom);
+                if (pmi > 0) nr.Add((o, pmi));
+            }
+            adj[s] = nr;
+        }
     }
 
     
@@ -1371,6 +1469,52 @@ internal static class FoundryExport
                 vals[(long)i * cols + (baseCol + r)] = (float)(scale * f.Left[(long)r * f.Dim + i]);
     }
 
+    // ---- Context/sequence head (op:"context") ----
+    // q=k=identity (scaled) on the head slice → RoPE + causal mask peak attention on the CURRENT
+    // token (recency), not a uniform prefix mean. v=o=identity passes that token's slice back into
+    // the residual so h[last] ≈ E[last] at lm_head readout — the prefix-conditioning bridge for
+    // source-normalized trajectory bigram. (Uniform q=k=0 was the prefix-mean bug → global attractor.)
+    internal static bool IsContinuationOperator(string opKey) =>
+        opKey is "context" or "trajectory" or "relation:PRECEDES";
+
+    internal static void FillHeadZero(float[] vals, int rows, int cols, int headIdx, int headDim)
+    {
+        int baseRow = headIdx * headDim;
+        for (int r = 0; r < headDim && (baseRow + r) < rows; r++)
+        {
+            long dst = (long)(baseRow + r) * cols;
+            for (int j = 0; j < cols; j++) vals[dst + j] = 0f;
+        }
+    }
+    internal static void FillHeadIdentity(float[] vals, int rows, int cols, int headIdx, int headDim)
+    {
+        int baseRow = headIdx * headDim;
+        for (int r = 0; r < headDim && (baseRow + r) < rows; r++)
+        {
+            long dst = (long)(baseRow + r) * cols;
+            for (int j = 0; j < cols; j++) vals[dst + j] = 0f;
+            if (baseRow + r < cols) vals[dst + (baseRow + r)] = 1f;   // V = the head's slice of the input
+        }
+    }
+    internal static void FillColsHeadIdentity(float[] vals, int rows, int cols, int headIdx, int headDim)
+    {
+        int baseCol = headIdx * headDim;
+        for (int r = 0; r < headDim && (baseCol + r) < cols; r++)
+            for (int i = 0; i < rows; i++)
+                vals[(long)i * cols + (baseCol + r)] = (i == baseCol + r) ? 1f : 0f;   // O maps the slice back
+    }
+
+    internal static void FillHeadIdentityScaled(float[] vals, int rows, int cols, int headIdx, int headDim, float scale)
+    {
+        int baseRow = headIdx * headDim;
+        for (int r = 0; r < headDim && (baseRow + r) < rows; r++)
+        {
+            long dst = (long)(baseRow + r) * cols;
+            for (int j = 0; j < cols; j++) vals[dst + j] = 0f;
+            if (baseRow + r < cols) vals[dst + (baseRow + r)] = scale;
+        }
+    }
+
     internal static void FillGate(float[] vals, int rows, int cols, double gateCol)
     {
         for (int r = 0; r < rows; r++)
@@ -1439,7 +1583,7 @@ internal static class FoundryExport
         return Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2.0 * Math.PI * u2);
     }
 
-    private static unsafe Hash128 FromBytes(byte[] bts)
+    internal static unsafe Hash128 FromBytes(byte[] bts)
     {
         if (bts.Length < 16) return Hash128.Zero;
         fixed (byte* p = bts) return *(Hash128*)p;

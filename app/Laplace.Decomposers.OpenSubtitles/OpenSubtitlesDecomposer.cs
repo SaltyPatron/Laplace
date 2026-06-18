@@ -33,12 +33,17 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
     public int     LayerOrder   => 2;
     public Hash128 TrustClassId => TrustClass;
 
+    internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
+
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddRelationType("IS_TRANSLATION_OF");
         boot.AddRelationType("HAS_LANGUAGE");
         await context.Writer.ApplyAsync(boot.Build(), ct);
+        foreach (var n in boot.CanonicalNames)
+            LanguageNames.TryAdd(n, 0);
     }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(

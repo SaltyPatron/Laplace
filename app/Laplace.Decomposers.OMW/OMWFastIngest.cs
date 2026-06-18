@@ -99,10 +99,12 @@ public static class OMWFastIngest
         
         
         Hash128? synAnchor = ConceptAnchor.EmitAnchor(b, row.Offset, row.SsType, OMWDecomposer.Source);
-        if (synAnchor is null) return;   
+        if (synAnchor is null) return;
         Hash128 synId = synAnchor.Value;
+        ConceptAnchor.AttestSynsetCategory(b, synId, OMWDecomposer.Source, TC.AcademicCurated);
 
         Hash128 langId = LanguageReference.Resolve(row.Lang);
+        OMWDecomposer.TrackLanguage(row.Lang);
         b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, EntityTypeRegistry.Language, OMWDecomposer.Source));
 
         switch (row.Type)

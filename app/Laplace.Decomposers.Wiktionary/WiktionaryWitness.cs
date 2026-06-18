@@ -63,6 +63,7 @@ internal static class WiktionaryWitness
         if (!string.IsNullOrEmpty(langCode))
         {
             Hash128 langId = LanguageReference.Resolve(langCode!);
+            VocabularyNames.TrackLanguage(WiktionaryDecomposer.VocabularyNames, langCode);
             b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, LanguageTypeId, WiktionaryDecomposer.Source));
             b.AddAttestation(NativeAttestation.Categorical(
                 w, "HAS_LANGUAGE", langId, WiktionaryDecomposer.Source, SourceTrust.AcademicCuratedUserInput));
@@ -73,7 +74,8 @@ internal static class WiktionaryWitness
         if (!string.IsNullOrEmpty(pos))
         {
             posCtx = PosReference.Attest(b, w, pos!, PosReference.PosTagset.Wiktionary,
-                WiktionaryDecomposer.Source, null, SourceTrust.AcademicCuratedUserInput);
+                WiktionaryDecomposer.Source, null, SourceTrust.AcademicCuratedUserInput,
+                WiktionaryDecomposer.VocabularyNames);
         }
 
         if (rec.TryGetProperty("senses", out var senses) && senses.ValueKind == JsonValueKind.Array)
@@ -99,12 +101,6 @@ internal static class WiktionaryWitness
                     foreach (var el in coord.EnumerateArray())
                         AttestText(b, w, "IS_COORDINATE_TERM_WITH", Str(el, "word"), posCtx);
 
-                if (sense.TryGetProperty("categories", out var cats) && cats.ValueKind == JsonValueKind.Array)
-                    foreach (var cEl in cats.EnumerateArray())
-                    {
-                        string? cat = cEl.ValueKind == JsonValueKind.String ? cEl.GetString() : Str(cEl, "name");
-                        AttestText(b, w, "HAS_DOMAIN_TOPIC", cat, posCtx);
-                    }
                 if (sense.TryGetProperty("tags", out var tags) && tags.ValueKind == JsonValueKind.Array)
                     foreach (var tEl in tags.EnumerateArray())
                         if (tEl.ValueKind == JsonValueKind.String && RegisterTags.Contains(tEl.GetString()!))

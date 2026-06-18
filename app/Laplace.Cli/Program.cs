@@ -76,6 +76,7 @@ internal static class Program
                 "recall"       => await QueryCommands.RecallAsync(string.Join(' ', args[1..])),
                 "neighbors"    => await QueryCommands.NeighborsAsync(string.Join(' ', args[1..])),
                 "walk"         => await QueryCommands.WalkAsync(args[1..]),
+                "chat"         => await QueryCommands.ChatAsync(args[1..]),
                 "attest"       => await QueryCommands.AttestAsync(args[1..]),
                 "roundtrip"    => DecompositionCommands.Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
                 "db-roundtrip" => await DecompositionCommands.DbRoundtripAsync(args.Length > 1 ? args[1] : ""),

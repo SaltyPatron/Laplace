@@ -26,7 +26,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
         ("xNeed", "X_NEED"), ("xReact", "X_REACT"), ("xWant", "X_WANT"), ("xReason", "X_REASON"),
         ("HinderedBy", "OBSTRUCTED_BY"), ("isAfter", "IS_AFTER"), ("isBefore", "IS_BEFORE"),
         ("isFilledBy", "X_FILLED_BY"), ("Causes", "CAUSES"), ("ObjectUse", "OBJECT_USE"),
-        ("AtLocation", "AT_LOCATION"), ("HasSubEvent", "HAS_SUBEVENT"), ("HasSubevent", "HAS_SUBEVENT"),
+        ("AtLocation", "AT_LOCATION"), ("HasSubEvent", "HAS_SUBEVENT"),
         ("CapableOf", "CAPABLE_OF"), ("Desires", "DESIRES"), ("HasProperty", "HAS_PROPERTY"),
         ("MadeUpOf", "MADE_UP_OF"), ("NotDesires", "NOT_DESIRES"),
     };
@@ -62,8 +62,25 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(1_331_113L);
 
-    public IReadOnlyCollection<string> CanonicalNamesForReadback =>
-        [.. Splits.Select(s => $"atomic/split/{s}"), "substrate/atomic/none/v1"];
+    public IReadOnlyCollection<string> CanonicalNamesForReadback
+    {
+        get
+        {
+            var names = new List<string>
+            {
+                "substrate/atomic/none/v1",
+                "substrate/type/Atomic_Marker/v1",
+                "substrate/type/Atomic_Split/v1",
+            };
+            foreach (var name in Relations.Select(r => r.Type).Distinct())
+            {
+                names.Add($"substrate/type/{name}/v1");
+                names.Add(VocabularyNames.RelationType(
+                    RelationTypeRegistry.Resolve(name).Canonical));
+            }
+            return names;
+        }
+    }
 
     protected override async IAsyncEnumerable<SubstrateChange> StreamTriplesAsync(
         string ecosystemPath, TriplePass pass, DecomposerOptions options,

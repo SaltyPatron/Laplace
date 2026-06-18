@@ -15,6 +15,7 @@ public sealed class VerbNetDecomposer : IDecomposer
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
     private static readonly Hash128 ClassTypeId = EntityTypeRegistry.VerbNetClass;
+    private static readonly Hash128 SenseTypeId  = EntityTypeRegistry.WordNetSense;
 
     internal static string NumericClassId(string classId)
     {
@@ -117,7 +118,7 @@ public sealed class VerbNetDecomposer : IDecomposer
                     
                     string? key = SourceEntityIdConventions.NormalizeSenseKey(raw);
                     if (key is null) continue;
-                    var senseEntity = ContentEmitter.Emit(b, key, Source);
+                    var senseEntity = CategoryAnchor.Emit(b, key, SenseTypeId, Source, TC.AcademicCurated);
                     if (senseEntity is null) continue;
                     b.AddAttestation(NativeAttestation.Categorical(
                         lemmaId.Value, "CORRESPONDS_TO", senseEntity.Value, Source, TC.AcademicCurated));

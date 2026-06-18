@@ -1095,22 +1095,74 @@ internal static class FoundryCommands
         MirrorDualFormEmbeds(tokens, E, vocab, dModel);
         Console.WriteLine($"  embed basis: spectral K={basisStats.SpectralRank}, {basisStats.ZeroSpectralTokens:N0} off-graph");
 
-        // factor each operator: attn/ov per-head (rank headDim), ffn (rank interm)
+        // ---- frame-correct, per-layer operator factoring ----
+        // Each layer's operators are projected against the ACTUAL residual frame at that depth (R),
+        // not the frozen embedding E, then R is advanced through the layer so the next layer projects
+        // against the representation it will really receive. Operators defined only in the E-frame are
+        // depth-blind: every added layer adds an E-frame correction to an already-transformed residual,
+        // so depth can only degrade. Re-projecting per depth is what lets layers compose.
         double relTol = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_REL_ERR_TOL", 0.0);
         int kFfn = Math.Min(intermR, dModel);
         var emptyF = new FoundryExport.Factors(Array.Empty<float>(), Array.Empty<float>(), 0, dModel, 0, 1);
-        var fAttn = new Dictionary<string, FoundryExport.Factors>(StringComparer.Ordinal);
-        var fOv = new Dictionary<string, FoundryExport.Factors>(StringComparer.Ordinal);
-        var fFfn = new Dictionary<string, FoundryExport.Factors>(StringComparer.Ordinal);
-        foreach (var (opKey, plane) in planeByOp)
+        double split = Math.Pow(Math.Max(1, nLayers), -0.25);
+        double attnScale = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_ATTN_GAIN", 1.0) * split;
+        double layerScale = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RESID_GAIN", 1.0) * split;
+        bool contCompile = desc.ContinuationCompile;
+        double ctxQk = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_CTX_QK", 8.0) * split;
+        double OpAttnScale(string key) => (contCompile && !FoundryExport.IsContinuationOperator(key)) ? 0.0 : attnScale;
+        double OpResidScale(string key) => (contCompile && !FoundryExport.IsContinuationOperator(key)) ? 0.0 : layerScale;
+
+        var R = (double[])E.Clone();                       // residual frame: starts at embedding, advances per layer
+        var fAttnL = new List<Dictionary<string, FoundryExport.Factors>>(nLayers);
+        var fOvL   = new List<Dictionary<string, FoundryExport.Factors>>(nLayers);
+        var fFfnL  = new List<Dictionary<string, FoundryExport.Factors>>(nLayers);
+        const double normEps = 1e-6;
+        for (int li = 0; li < nLayers; li++)
         {
-            if (plane.Nnz == 0) { fAttn[opKey] = emptyF; fOv[opKey] = emptyF; fFfn[opKey] = emptyF; continue; }
-            var m = FoundryExport.ProjectOperator(E, vocab, dModel, plane);
-            var mResid = (double[])m.Clone();
-            for (int d = 0; d < dModel; d++) mResid[(long)d * dModel + d] -= 1.0;
-            fAttn[opKey] = FoundryExport.Factor(m,      dModel, headDim, relTol, transpose: false);
-            fOv[opKey]   = FoundryExport.Factor(mResid, dModel, headDim, relTol, transpose: true);
-            fFfn[opKey]  = FoundryExport.Factor(mResid, dModel, kFfn,    relTol, transpose: true);
+            var lyr = desc.Layers[li];
+            var fa = new Dictionary<string, FoundryExport.Factors>(StringComparer.Ordinal);
+            var fo = new Dictionary<string, FoundryExport.Factors>(StringComparer.Ordinal);
+            var ff = new Dictionary<string, FoundryExport.Factors>(StringComparer.Ordinal);
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var h in lyr.Heads) if (h.Key != "context") keys.Add(h.Key);
+            keys.Add(lyr.Ffn.Key);
+
+            var update = new double[(long)vocab * dModel];   // Σ resid-op (M-I)·R[t], gain-scaled
+            foreach (var opKey in keys)
+            {
+                if (!planeByOp.TryGetValue(opKey, out var plane) || plane.Nnz == 0)
+                { fa[opKey] = emptyF; fo[opKey] = emptyF; ff[opKey] = emptyF; continue; }
+                var m = FoundryExport.ProjectOperator(R, vocab, dModel, plane);   // project against CURRENT frame
+                var mResid = (double[])m.Clone();
+                for (int d = 0; d < dModel; d++) mResid[(long)d * dModel + d] -= 1.0;
+                fa[opKey] = FoundryExport.Factor(m,      dModel, headDim, relTol, transpose: false);
+                fo[opKey] = FoundryExport.Factor(mResid, dModel, headDim, relTol, transpose: true);
+                ff[opKey] = FoundryExport.Factor(mResid, dModel, kFfn,    relTol, transpose: true);
+
+                double sc = OpResidScale(opKey);             // resid-contributing ops advance the frame
+                if (sc > 0)
+                    for (int t = 0; t < vocab; t++)
+                    {
+                        long to = (long)t * dModel;
+                        for (int i = 0; i < dModel; i++)
+                        {
+                            double acc = 0; long mi = (long)i * dModel;
+                            for (int j = 0; j < dModel; j++) acc += mResid[mi + j] * R[to + j];
+                            update[to + i] += sc * acc;
+                        }
+                    }
+            }
+            fAttnL.Add(fa); fOvL.Add(fo); fFfnL.Add(ff);
+
+            // R <- RMSNorm(R + update) per token row (the layer's residual transform; self/diagonal proxy)
+            for (int t = 0; t < vocab; t++)
+            {
+                long to = (long)t * dModel;
+                double ss = 0;
+                for (int i = 0; i < dModel; i++) { double v = R[to + i] + update[to + i]; R[to + i] = v; ss += v * v; }
+                double inv = 1.0 / Math.Sqrt(ss / dModel + normEps);
+                for (int i = 0; i < dModel; i++) R[to + i] *= inv;
+            }
         }
 
         // lm_head ← the recipe's lm_head operator (trajectory continuation log-odds)
@@ -1126,7 +1178,9 @@ internal static class FoundryCommands
                 if (x < 0 || x >= vocab || y < 0 || y >= vocab) continue;
                 double w = pl.Vals[e2];
                 long yo = (long)y * dModel, xo = (long)x * dModel;
-                for (int c = 0; c < dC; c++) lmHead[yo + c] += w * E[xo + c];
+                // read the FINAL residual frame R (where the last layer's output lives), not raw E —
+                // the lm_head must be in the same frame as the hidden state it scores.
+                for (int c = 0; c < dC; c++) lmHead[yo + c] += w * R[xo + c];
                 inDeg[y] += Math.Abs(w);
             }
             for (int v = 0; v < vocab; v++)
@@ -1136,17 +1190,37 @@ internal static class FoundryCommands
                 for (int c = 0; c < dC; c++) lmHead[off + c] *= idf;
                 lmHead[off + dC] = 0.0;
             }
-            double meanSq = 0;
-            for (int v = 0; v < vocab; v++) { long off = (long)v * dModel; for (int c = 0; c < dC; c++) { double t = lmHead[off + c]; meanSq += t * t; } }
-            meanSq /= Math.Max(1, vocab);
-            double g = meanSq > 1e-24 ? 1.0 / Math.Sqrt(meanSq) : 1.0;
-            for (long i = 0; i < (long)vocab * dModel; i++) lmHead[i] *= g;
+            // Suppress byte-floor + bare-alias rows: zero their lm_head so generation targets only
+            // space-led word tokens. Otherwise the most frequent separator (space byte <0x20>) has a
+            // runaway logit, wins argmax everywhere, and greedy decode collapses to repeating it.
+            int suppressed = 0;
+            foreach (var t in tokens)
+            {
+                if (t.TokenId < 0 || t.TokenId >= vocab) continue;
+                if (!(t.IsByteLevel || !t.Role.HasFlag(TokenRole.LeadingSpace))) continue;
+                long o = (long)t.TokenId * dModel;
+                for (int c = 0; c < dModel; c++) lmHead[o + c] = 0.0;
+                suppressed++;
+            }
+            Console.WriteLine($"  lm_head: suppressed {suppressed:N0} byte + bare-alias rows (space-led word targets only)");
+            // Per-row L2 normalization: every target row becomes unit-norm, so the next-token logit
+            // is the DIRECTION match (cosine) between the hidden state and each target — not target
+            // magnitude. Without this, high-frequency function words win by row-norm alone regardless
+            // of context (the prompt-independent "function-word soup"). Unit rows = exact directional
+            // retrieval, which is what conditions the readout on the actual prompt.
+            for (int v = 0; v < vocab; v++)
+            {
+                long off = (long)v * dModel;
+                double n2 = 0;
+                for (int c = 0; c < dC; c++) { double t = lmHead[off + c]; n2 += t * t; }
+                if (n2 <= 1e-24) continue;
+                double inv = 1.0 / Math.Sqrt(n2);
+                for (int c = 0; c < dC; c++) lmHead[off + c] *= inv;
+            }
         }
 
-        // write GGUF — per-head fill: head h in layer L ← operator desc.Layers[L].Heads[h]
-        double split = Math.Pow(Math.Max(1, nLayers), -0.25);
-        double attnScale = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_ATTN_GAIN", 1.0) * split;
-        double layerScale = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_RESID_GAIN", 1.0) * split;
+        // write GGUF — per-head fill: head h in layer L ← desc.Layers[L].Heads[h], factored against
+        // that layer's residual frame (fAttnL/fOvL/fFfnL). Scales/muting defined with the frame loop above.
         double gateZ = FoundryExport.EnvDouble("LAPLACE_FOUNDRY_GATE_Z", 6.0);
         double gateCol = gateZ / Math.Sqrt(dModel / 2.0);
         double upGain = 1.0 / FoundryExport.Silu(gateZ);
@@ -1192,23 +1266,39 @@ internal static class FoundryCommands
                 {
                     case "self_attn.q_proj.weight":
                         for (int h = 0; h < nHeads; h++)
-                            FoundryExport.FillHead(vals, tr, tc, h, headDim, fAttn[layer.Heads[h].Key], attnScale);
+                        {
+                            var key = layer.Heads[h].Key;
+                            if (key == "context") FoundryExport.FillHeadIdentityScaled(vals, tr, tc, h, headDim, (float)ctxQk);
+                            else { double s = OpAttnScale(key); if (s > 0) FoundryExport.FillHead(vals, tr, tc, h, headDim, fAttnL[layerIdx][key], s); }
+                        }
                         break;
                     case "self_attn.k_proj.weight":
                         for (int h = 0; h < nKv; h++)
-                            FoundryExport.FillHeadRight(vals, tr, tc, h, headDim, fAttn[layer.Heads[h].Key], attnScale);
+                        {
+                            var key = layer.Heads[h].Key;
+                            if (key == "context") FoundryExport.FillHeadIdentityScaled(vals, tr, tc, h, headDim, (float)ctxQk);
+                            else { double s = OpAttnScale(key); if (s > 0) FoundryExport.FillHeadRight(vals, tr, tc, h, headDim, fAttnL[layerIdx][key], s); }
+                        }
                         break;
                     case "self_attn.v_proj.weight":
                         for (int h = 0; h < nKv; h++)
-                            FoundryExport.FillHeadRight(vals, tr, tc, h, headDim, fOv[layer.Heads[h].Key], layerScale);
+                        {
+                            var key = layer.Heads[h].Key;
+                            if (key == "context") FoundryExport.FillHeadIdentity(vals, tr, tc, h, headDim);
+                            else { double s = OpResidScale(key); if (s > 0) FoundryExport.FillHeadRight(vals, tr, tc, h, headDim, fOvL[layerIdx][key], s); }
+                        }
                         break;
                     case "self_attn.o_proj.weight":
                         for (int h = 0; h < nHeads; h++)
-                            FoundryExport.FillColsHead(vals, tr, tc, h, headDim, fOv[layer.Heads[h].Key], layerScale);
+                        {
+                            var key = layer.Heads[h].Key;
+                            if (key == "context") FoundryExport.FillColsHeadIdentity(vals, tr, tc, h, headDim);
+                            else { double s = OpResidScale(key); if (s > 0) FoundryExport.FillColsHead(vals, tr, tc, h, headDim, fOvL[layerIdx][key], s); }
+                        }
                         break;
-                    case "mlp.gate_proj.weight": FoundryExport.FillGate(vals, tr, tc, gateCol); break;
-                    case "mlp.up_proj.weight":   FoundryExport.FillRowsRight(vals, tr, tc, fFfn[layer.Ffn.Key], layerScale * upGain); break;
-                    case "mlp.down_proj.weight": FoundryExport.FillCols(vals, tr, tc, fFfn[layer.Ffn.Key], layerScale); break;
+                    case "mlp.gate_proj.weight": if (OpResidScale(layer.Ffn.Key) > 0) FoundryExport.FillGate(vals, tr, tc, gateCol); break;
+                    case "mlp.up_proj.weight":   { double s = OpResidScale(layer.Ffn.Key); if (s > 0) FoundryExport.FillRowsRight(vals, tr, tc, fFfnL[layerIdx][layer.Ffn.Key], s * upGain); } break;
+                    case "mlp.down_proj.weight": { double s = OpResidScale(layer.Ffn.Key); if (s > 0) FoundryExport.FillCols(vals, tr, tc, fFfnL[layerIdx][layer.Ffn.Key], s); } break;
                     default: SynthInterop.GgufWriterFree(gguf); return Fail($"build-a-bear: undefined tensor '{name}'");
                 }
             }

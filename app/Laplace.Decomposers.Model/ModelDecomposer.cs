@@ -60,8 +60,10 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
     public static readonly Hash128 HasVocabSizeTypeId   = RelationTypeRegistry.RelationTypeId("HAS_VOCAB_SIZE");
     public static readonly Hash128 IsATypeId            = RelationTypeRegistry.RelationTypeId("IS_A");
 
-    public static readonly Hash128 LlamaArchitectureId =
+    private static readonly Hash128 LlamaArchitectureId =
         Hash128.OfCanonical("substrate/entity/Architecture_Llama/v1");
+
+    private const string LlamaArchitectureCanonical = "substrate/entity/Architecture_Llama/v1";
 
     public static readonly Hash128 ModelLayerTypeId = EntityTypeRegistry.ModelLayer;
 
@@ -97,6 +99,7 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
             var r = LlamaRecipeExtractor.Parse(configPath);
             return new[]
             {
+                LlamaArchitectureCanonical,
                 System.Text.Encoding.UTF8.GetString(r.CanonicalJson),
                 r.HiddenSize.ToString(), r.NumLayers.ToString(), r.NumHeads.ToString(),
                 r.NumKvHeads.ToString(), r.IntermediateSize.ToString(), r.VocabSize.ToString(),
@@ -189,35 +192,19 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         log.LogInformation("phase=merges emitted: {Count} merges, {Batches} batches ({Ms} ms)",
             merges.Count, mergeBatches, phaseSw.ElapsedMilliseconds);
 
-        
-        
-        log.LogInformation("phase=etl starting");
-        var etl = new ModelTableETL(_modelDir, recipe, tokens, Source, ModelLayerTypeId,
-            epochBase: 0, log, persistEvidence: _persistEvidence);
-        await foreach (var change in etl.EmitAsync(ct))
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return change;
-        }
+
+
+
+
+
+
+
         const int finalEpoch = 1;
-
-        
-        
-        var s3 = new WeightTensorETL(_modelDir, recipe, tokens, Source, tokEntityId, log);
-        await foreach (var change in s3.EmitS3MorphAsync(finalEpoch, ct))
+        var edges = new ModelTokenEdgeETL(_modelDir, recipe, tokens, Source, log);
+        await foreach (var change in edges.EmitAsync(finalEpoch, ct))
         {
             ct.ThrowIfCancellationRequested();
             yield return change;
-        }
-
-        
-        
-        foreach (var batch in LlamaTokenizerParser.BuildTokenMapsToCategorical(
-            tokens, Source, tokEntityId, batchSz, finalEpoch))
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return batch;
-            await Task.Yield();
         }
     }
 

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
@@ -15,6 +16,8 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
     internal static readonly Hash128 SentenceRefTypeId = EntityTypeRegistry.TatoebaSentence;
     internal static readonly Hash128 LanguageTypeId   = EntityTypeRegistry.Language;
 
+    internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "TatoebaDecomposer";
@@ -28,6 +31,8 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
         boot.AddRelationType("HAS_EXTERNAL_ID");
         boot.AddRelationType("IS_TRANSLATION_OF");
         await context.Writer.ApplyAsync(boot.Build(), ct);
+        foreach (var n in boot.CanonicalNames)
+            LanguageNames.TryAdd(n, 0);
     }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(

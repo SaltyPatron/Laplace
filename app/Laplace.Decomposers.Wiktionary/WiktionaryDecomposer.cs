@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
@@ -20,6 +21,9 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
 
     public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
 
+    internal static readonly ConcurrentDictionary<string, byte> VocabularyNames = new(StringComparer.Ordinal);
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => VocabularyNames.Keys.ToArray();
+
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
@@ -36,9 +40,14 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
         boot.AddRelationType("RELATED_TO");
         boot.AddRelationType("IS_COORDINATE_TERM_WITH");
         boot.AddRelationType("HAS_USAGE_REGISTER");
-        boot.AddRelationType("HAS_DOMAIN_TOPIC");
+        boot.AddRelationType("HAS_PART");
+        boot.AddRelationType("HAS_VARIANT_OF");
+        boot.AddRelationType("TRANSCRIBES_AS");
+        boot.AddRelationType("IS_TRANSLATION_OF");
         boot.AddRelationType("ETYMOLOGICALLY_DERIVED_FROM");
         await context.Writer.ApplyAsync(boot.Build(), ct);
+        foreach (var n in boot.CanonicalNames)
+            VocabularyNames.TryAdd(n, 0);
     }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
@@ -48,9 +57,24 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
     {
         string? file = ResolveInput(context.EcosystemPath, options.Languages);
         if (file is null) yield break;
-        int batch = options.BatchSize > 1 ? options.BatchSize : 1024;
 
-        await foreach (var change in WiktionaryFastIngest.IngestJsonlAsync(file, batch, options, ct))
+        var witness = new WiktionaryGrammarWitness(options);
+        bool preFilter = WiktionaryJsonFilter.NeedsLanguagePreFilter(file, options.Languages);
+        Func<ReadOnlySpan<byte>, bool>? acceptRow = preFilter && options.Languages is { IsActive: true } langs
+            ? line => WiktionaryJsonFilter.MatchesLanguageFilter(line, langs)
+            : null;
+
+        await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
+            file,
+            modalityId: "json",
+            sourceId: Source,
+            witness: witness,
+            batchSize: options.BatchSize > 1 ? options.BatchSize : 1024,
+            witnessWeight: 0.7,
+            batchLabelPrefix: "wiktionary",
+            reportUnits: null,
+            acceptRow: acceptRow,
+            ct: ct))
         {
             if (!options.DryRun) yield return change;
         }

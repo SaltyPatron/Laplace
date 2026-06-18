@@ -26,9 +26,11 @@ public sealed record OperatorSpec(string Op, string? Type, string? Metric)
     // Stable key for grouping / per-operator factoring and provenance.
     public string Key => Op switch
     {
-        "relation" => $"relation:{Type}",
-        "metric"   => $"metric:{Metric}",
-        _          => Op,
+        "relation"  => $"relation:{Type}",
+        "metric"    => $"metric:{Metric}",
+        "attribute" => $"attribute:{Type}",
+        "syntax"    => $"syntax:{Type}",
+        _           => Op,
     };
 }
 
@@ -51,9 +53,13 @@ public sealed record RecipeDescriptor(
     OperatorSpec LmHead,
     IReadOnlyList<LayerSpec> Layers,
     VocabSpec Vocab,
+    IReadOnlyList<string> Attributes,   // word→category type relations folded into the embed (HAS_POS, …)
+    string Compile,                     // "continuation" (prefix→next readout) | "full" (all heads active)
     byte[] CanonicalJson)
 {
     public bool HiddenSizeAuto => HiddenSize == "auto";
+    public bool ContinuationCompile =>
+        string.Equals(Compile, "continuation", StringComparison.OrdinalIgnoreCase);
     public int  HiddenSizeOr(int fallback) => int.TryParse(HiddenSize, out var v) ? v : fallback;
 
     public static RecipeDescriptor Parse(string recipeJson)
@@ -100,11 +106,25 @@ public sealed record RecipeDescriptor(
         }
 
         var vocab = ParseVocab(root);
+        var attributes = new List<string>();
+        if (root.TryGetProperty("attributes", out var attrs) && attrs.ValueKind == JsonValueKind.Array)
+            foreach (var a in attrs.EnumerateArray())
+            {
+                if (a.ValueKind == JsonValueKind.String && a.GetString() is { } s) attributes.Add(s);
+                else if (a.ValueKind == JsonValueKind.Object && a.TryGetProperty("type", out var at)
+                         && at.GetString() is { } ts) attributes.Add(ts);
+            }
+        string compile = root.TryGetProperty("compile", out var cp) && cp.ValueKind == JsonValueKind.String
+            ? cp.GetString() ?? ""
+            : "";
+        if (compile.Length == 0)
+            compile = lmHead.Key == "trajectory" ? "continuation" : "full";
+
         byte[] canonical = Encoding.UTF8.GetBytes(recipeJson);
 
         return new RecipeDescriptor(
             Hash128.Blake3(canonical), name, structure, hidden, intermediate, layers.Count,
-            rope, tie, norm, embed, lmHead, layers, vocab, canonical);
+            rope, tie, norm, embed, lmHead, layers, vocab, attributes, compile, canonical);
     }
 
     private static int RoundTo64(int x) => Math.Max(64, ((x + 63) / 64) * 64);

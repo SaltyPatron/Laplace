@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
@@ -50,11 +51,14 @@ public static class PosReference
     
     public static Hash128 Attest(
         SubstrateChangeBuilder b, Hash128 subject, string tag, PosTagset tagset,
-        Hash128 sourceId, Hash128? contextId, double sourceTrust, long observationCount = 1)
+        Hash128 sourceId, Hash128? contextId, double sourceTrust,
+        ConcurrentDictionary<string, byte>? readbackNames = null,
+        long observationCount = 1)
     {
         Hash128 posId = NativeAttestation.ResolvePos(tag, tagset, out bool probationary);
         if (probationary)
             b.AddEntity(new EntityRow(posId, EntityTier.Vocabulary, PosTypeId, sourceId));
+        VocabularyNames.TrackProbationaryPos(readbackNames, tag, tagset);
         b.AddAttestation(NativeAttestation.Categorical(
             subject, "HAS_POS", posId, sourceId, contextId, sourceTrust,
             observationCount: observationCount));

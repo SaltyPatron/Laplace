@@ -197,6 +197,37 @@ public sealed class LlamaTokenizerParser
         return 0;
     }
 
+    private static readonly Dictionary<char, byte> UnicodeToByte = BuildUnicodeToByte();
+    private static Dictionary<char, byte> BuildUnicodeToByte()
+    {
+        var map = new char[256]; var self = new bool[256];
+        void mark(int lo, int hi) { for (int b = lo; b <= hi; b++) { map[b] = (char)b; self[b] = true; } }
+        mark('!', '~'); mark(0xA1, 0xAC); mark(0xAE, 0xFF);
+        int k = 0; for (int b = 0; b < 256; b++) if (!self[b]) map[b] = (char)(256 + k++);
+        var rev = new Dictionary<char, byte>(256);
+        for (int b = 0; b < 256; b++) rev[map[b]] = (byte)b;
+        return rev;
+    }
+
+    // GPT-2 byte-level decode: if every char is in the byte-level alphabet, map back to raw bytes
+    // (this is how Ġ / accented / multibyte pieces round-trip; for pure ASCII it is identity).
+    // A leading 0x20 (the Ġ space marker) flags a word-start and is dropped from the canonical form.
+    private static bool TryByteLevelDecode(string raw, out byte[] bytes, out bool leadingSpace)
+    {
+        bytes = Array.Empty<byte>(); leadingSpace = false;
+        if (raw.Length == 0) return false;
+        var buf = new byte[raw.Length];
+        for (int i = 0; i < raw.Length; i++)
+        {
+            if (!UnicodeToByte.TryGetValue(raw[i], out byte b)) return false;
+            buf[i] = b;
+        }
+        int start = 0;
+        if (buf.Length > 1 && buf[0] == (byte)' ') { leadingSpace = true; start = 1; }
+        bytes = start == 0 ? buf : buf[start..];
+        return true;
+    }
+
     public static (byte[] canonical, TokenRole role) Canonicalize(string rawToken)
     {
         if (rawToken.Length == 6 && rawToken.StartsWith("<0x", StringComparison.Ordinal)
@@ -205,6 +236,15 @@ public sealed class LlamaTokenizerParser
             string hex = rawToken.Substring(3, 2);
             if (byte.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out byte b))
                 return ([b], TokenRole.ByteLevel);
+        }
+
+        // GPT-2 byte-level pieces (our native BPE + external gpt2 tokenizers) decode back to bytes.
+        if (rawToken.Length > 0 && rawToken[0] != '▁' && !rawToken.StartsWith("##", StringComparison.Ordinal)
+            && TryByteLevelDecode(rawToken, out byte[] blBytes, out bool blLead) && blBytes.Length > 0)
+        {
+            TokenRole br = TokenRole.ByteLevel;
+            if (blLead) br |= TokenRole.LeadingSpace;
+            return (NormalizeNfc(blBytes), br);
         }
 
         TokenRole role = TokenRole.None;

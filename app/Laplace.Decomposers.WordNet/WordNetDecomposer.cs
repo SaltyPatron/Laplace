@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
@@ -71,6 +72,9 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
     public int     LayerOrder   => 2;
     public Hash128 TrustClassId => TrustClass;
 
+    private static readonly ConcurrentDictionary<string, byte> _vocabularyNames = new(StringComparer.Ordinal);
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => _vocabularyNames.Keys.ToArray();
+
     private static readonly string[] PosFiles = ["data.noun", "data.verb", "data.adj", "data.adv"];
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -78,13 +82,12 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("WordNet_Synset");
         boot.AddType("WordNet_Sense");
-        boot.AddType("WordNet_POS");
-        boot.AddType("WordNet_LexCategory");
 
         boot.AddRelationType("IS_SYNONYM_OF");
         boot.AddRelationType("HAS_POS");
         boot.AddRelationType("HAS_DEFINITION");
         boot.AddRelationType("HAS_EXAMPLE");
+        boot.AddRelationType("HAS_LEX_CATEGORY");
         boot.AddRelationType("HAS_DOMAIN_TOPIC");
         boot.AddRelationType("HAS_VERB_FRAME");
         boot.AddRelationType("IS_LEMMA_OF");
@@ -95,6 +98,8 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
             boot.AddRelationType(RelationTypeRegistry.Resolve(name).Canonical);
 
         await context.Writer.ApplyAsync(boot.Build(), ct);
+        foreach (var n in boot.CanonicalNames)
+            _vocabularyNames.TryAdd(n, 0);
     }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
@@ -212,22 +217,13 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         foreach (var ex in examples) EmitSurface(b, ex, Source);
 
         if (syn.LexFilenum >= 0 && syn.LexFilenum < Lexnames.Length)
-            EmitSurface(b, LexDomain(Lexnames[syn.LexFilenum]), Source);
+            EmitSurface(b, Lexnames[syn.LexFilenum], Source);
 
         foreach (var (frame, _) in syn.Frames)
             if (frame > 0 && frame < frameTemplates.Length && frameTemplates[frame] is { } tpl)
                 EmitSurface(b, tpl, Source);
     }
 
-    private static string LexDomain(string lexname)
-    {
-        int dot = lexname.IndexOf('.');
-        return dot >= 0 ? lexname[(dot + 1)..] : lexname;
-    }
-
-    
-    
-    
     private static void EmitSynsetAttestations(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)
     {
         
@@ -244,7 +240,8 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
             b.AddAttestation(NativeAttestation.Categorical(
                 lemmaId.Value, "IS_SYNONYM_OF", synId, Source, SourceTrust.StandardsDerived));
             PosReference.Attest(b, lemmaId.Value, syn.SsType.ToString(),
-                PosReference.PosTagset.WordNet, Source, null, SourceTrust.StandardsDerived);
+                PosReference.PosTagset.WordNet, Source, null, SourceTrust.StandardsDerived,
+                _vocabularyNames);
         }
 
         var (def, examples) = ParseGloss(syn.Gloss);
@@ -265,10 +262,11 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
 
         if (syn.LexFilenum >= 0 && syn.LexFilenum < Lexnames.Length)
         {
-            var domainId = RootSurface(LexDomain(Lexnames[syn.LexFilenum]));
-            if (domainId is not null)
+            string lexname = Lexnames[syn.LexFilenum];
+            var lexId = RootSurface(lexname);
+            if (lexId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    synId, "HAS_DOMAIN_TOPIC", domainId.Value,
+                    synId, "HAS_LEX_CATEGORY", lexId.Value,
                     Source, SourceTrust.StandardsDerived));
         }
 
