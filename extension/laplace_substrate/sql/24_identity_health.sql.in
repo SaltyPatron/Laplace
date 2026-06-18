@@ -17,7 +17,7 @@ SET search_path = @extschema@, public
 AS $$
     SELECT e.id, e.tier, 'tier_out_of_range'::text
     FROM @extschema@.entities e
-    WHERE e.tier NOT IN (0, 1, 2, 3, 4);
+    WHERE e.tier NOT IN (0, 1, 2, 3, 4, 5);  -- 5 = Vocabulary (system/bootstrap entities; see EntityTier.cs)
 $$;
 
 CREATE OR REPLACE FUNCTION compositional_type_ids()

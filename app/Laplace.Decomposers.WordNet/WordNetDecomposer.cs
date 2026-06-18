@@ -222,6 +222,16 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         foreach (var (frame, _) in syn.Frames)
             if (frame > 0 && frame < frameTemplates.Length && frameTemplates[frame] is { } tpl)
                 EmitSurface(b, tpl, Source);
+
+        // Close the entity pass under pointer references: every pointer target that
+        // EmitSynsetAttestations will reference (via the same ConceptAnchor.SynsetId
+        // resolve, line ~293) must be staged here in phase 1, or the attestation batch
+        // fails referential integrity when a target synset is not independently emitted
+        // (adjective-satellite pos skew / ili-map vs local-dict version drift). EmitAnchor
+        // is content-addressed + idempotent, so this dedups against the target's own line.
+        foreach (var ptr in syn.Pointers)
+            if (PointerTypes.ContainsKey(ptr.Symbol))
+                ConceptAnchor.EmitAnchor(b, ptr.TargetOffset, ptr.TargetPos, Source);
     }
 
     private static void EmitSynsetAttestations(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)

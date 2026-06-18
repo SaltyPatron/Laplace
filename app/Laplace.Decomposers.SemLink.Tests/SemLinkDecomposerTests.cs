@@ -1,3 +1,4 @@
+using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -55,16 +56,12 @@ public sealed class SemLinkDecomposerTests
     public async Task PbVn_Role_Level_Maps_Arg_Content_To_Theta_Content_With_Class_Context()
     {
         var atts = await CollectAttestationsAsync();
-        var b = new SubstrateChangeBuilder(SemLinkDecomposer.Source, "fixture", null);
-        var argId   = ContentEmitter.Emit(b, "ARG0", SemLinkDecomposer.Source);
-        var thetaId = ContentEmitter.Emit(b, "agent", SemLinkDecomposer.Source);
-        var vnId    = CategoryAnchor.Id("13.1-1")!.Value;
-        Assert.NotNull(argId);
-        Assert.NotNull(thetaId);
+        var (argId, thetaId) = ComposedArgThetaIds();
+        var vnId = CategoryAnchor.Id("13.1-1")!.Value;
         Assert.Contains(atts, a =>
             a.ContextId == vnId
-            && (a.SubjectId == argId!.Value || a.ObjectId == argId!.Value)
-            && (a.SubjectId == thetaId!.Value || a.ObjectId == thetaId!.Value));
+            && (a.SubjectId == argId || a.ObjectId == argId)
+            && (a.SubjectId == thetaId || a.ObjectId == thetaId));
     }
 
     [Fact]
@@ -119,10 +116,36 @@ public sealed class SemLinkDecomposerTests
             && a.ObjectId == SemLinkDecomposer.TrustClass);
     }
 
+    private static (Hash128 ArgId, Hash128 ThetaId) ComposedArgThetaIds()
+    {
+        byte[] utf8 = Encoding.UTF8.GetBytes(PbVnJson);
+        var recipe = GrammarDecomposer.LookupById("json");
+        using var ast = GrammarDecomposer.Parse(utf8, recipe);
+        using var composer = new GrammarRowComposer(utf8, ast, SemLinkDecomposer.Source, "json");
+        var (_, _, _, root) = composer.Materialize(1.0);
+        var ctx = new GrammarComposeContext(utf8, ast, root, composer);
+        int rootObj = JsonGrammarHelper.FindRootObjectNode(ast);
+        foreach (var (_, vnObjNode) in JsonGrammarHelper.EnumerateObjectPairs(ast, rootObj))
+        {
+            foreach (var (_, rolesObjNode) in JsonGrammarHelper.EnumerateObjectPairs(ast, vnObjNode))
+            {
+                if (!JsonGrammarHelper.IsObjectNode(ast, rolesObjNode)) continue;
+                foreach (var (argKeyNode, thetaNode) in JsonGrammarHelper.EnumerateObjectPairs(ast, rolesObjNode))
+                {
+                    if (JsonGrammarHelper.TryComposedNode(ctx, argKeyNode, out var argId)
+                        && JsonGrammarHelper.TryComposedNode(ctx, thetaNode, out var thetaId))
+                        return (argId, thetaId);
+                }
+            }
+        }
+        throw new InvalidOperationException("ARG0/agent composed spans not found in fixture JSON");
+    }
+
     private static async Task<List<AttestationRow>> CollectAttestationsAsync()
     {
         var (_, atts) = await CollectAllAsync();
-        return atts;
+        var corr = RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO");
+        return atts.Where(a => a.TypeId == corr).ToList();
     }
 
     private static async Task<(List<EntityRow> Entities, List<AttestationRow> Attestations)> CollectAllAsync()

@@ -1,6 +1,6 @@
 {
   "version": 7,
-  "description": "Witness manifest — the conceptual mirror of seed-ladder.cmd. The ingestion order is a SIGNAL-DEPENDENCY STACK, not a skip list: each layer is a different kind of signal that presupposes the prior. English-scoped by default (LAPLACE_INGEST_LANGS=en); the decomposition logic is language-agnostic, so flipping the filter to all languages runs the same code.",
+  "description": "Witness manifest — the conceptual mirror of seed-ladder.cmd. The ingestion order is a SIGNAL-DEPENDENCY STACK, not a skip list: each layer is a different kind of signal that presupposes the prior. Unset LAPLACE_INGEST_LANGS ingests all languages; set it (e.g. en,de) to scope multilingual corpora.",
   "language_scope": {
     "global_env": "LAPLACE_INGEST_LANGS",
     "per_source_env": "LAPLACE_{SOURCE}_LANGS",
@@ -50,7 +50,7 @@
       "stage": "usage",
       "order": 3,
       "skip_env": "LAPLACE_SKIP_USAGE",
-      "law": "Language in use: cross-lingual alignment + dialogue. Part of the cadence — SKIP_USAGE=1 is an iteration knob, not a 'deferred' verdict.",
+      "law": "Language in use: cross-lingual alignment + dialogue. Required cadence stage by default; LAPLACE_SKIP_USAGE=1 is an iteration-only escape hatch.",
       "sources": [
         { "cli": "tatoeba",       "path": "Tatoeba",       "layer": "L2", "role": "sentences = content trajectories; links.csv → IS_TRANSLATION_OF (cross-lingual alignment)" },
         { "cli": "opensubtitles", "path": "OpenSubtitles", "layer": "L2", "role": "dialogue — language in use" }
@@ -71,7 +71,7 @@
       "stage": "models",
       "order": 5,
       "skip_env": "LAPLACE_SKIP_MODELS",
-      "law": "LAST — model ingestion presupposes that model EXPORT works (the foundry is ingest's inverse), which the code capstone proves the machinery for. UNSET/0 = models REQUIRED (error if missing).",
+      "law": "LAST — model ingestion presupposes that model EXPORT works (the foundry is ingest's inverse), which the code capstone proves the machinery for. Required by default; LAPLACE_SKIP_MODELS=1 is iteration-only.",
       "root": "D:/Models/hub",
       "sources": [
         { "cli": "safetensors", "env": "LAPLACE_MODEL_TINYLLAMA",     "family": "models--TinyLlama--TinyLlama-1.1B-Chat-v1.0" },
@@ -84,8 +84,8 @@
     "LAPLACE_LADDER_START": "floor (default) | proof — proof skips floor + knowledge for a resume.",
     "LAPLACE_LADDER_STOP": "nets = stop after the knowledge layer; usage = stop after usage. The scoped iteration targets for the lexical/semantic decomposers — NEVER a substitute for the full-cadence gate.",
     "LAPLACE_LADDER_DRY": "1 = print the resolved plan, ingest nothing.",
-    "LAPLACE_SKIP_USAGE": "1 skips tatoeba/opensubtitles.",
-    "LAPLACE_SKIP_MODELS": "1 skips safetensor deposits; UNSET/0 = models REQUIRED."
+    "LAPLACE_SKIP_USAGE": "default 0 (tatoeba + opensubtitles run). Set 1 only to skip usage for a faster iteration pass.",
+    "LAPLACE_SKIP_MODELS": "default 0 (TinyLlama + Phi-2 + Qwen safetensors run). Set 1 only to skip models for a faster iteration pass.",
   },
   "authority_sources": {
     "law": "Official language/platform sources and their documentation are the highest-trust code witnesses: the language's own repository testifies its idioms; its docs are the Rosetta intent<->implementation corpus. Acquire with download-code-data.cmd authority; ingest via the repo loop inside the code capstone.",

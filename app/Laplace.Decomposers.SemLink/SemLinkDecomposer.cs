@@ -1,10 +1,7 @@
-using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
-using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.SemLink;
 
@@ -15,13 +12,6 @@ public sealed class SemLinkDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    private static readonly Hash128 RolesetTypeId = EntityTypeRegistry.PropBankRoleset;
-    private static readonly Hash128 VnClassTypeId = EntityTypeRegistry.VerbNetClass;
-    private static readonly Hash128 FrameTypeId   = EntityTypeRegistry.FrameNetFrame;
-
-    
-    
-    
     public Hash128 SourceId     => Source;
     public string  SourceName   => "SemLinkDecomposer";
     public int     LayerOrder   => 3;
@@ -44,11 +34,14 @@ public sealed class SemLinkDecomposer : IDecomposer
     {
         string instancesDir = ResolveInstancesDir(context.EcosystemPath);
 
-        foreach (var change in EmitPbVn(instancesDir, ct))
-        { if (!options.DryRun) yield return change; await Task.Yield(); }
-
-        foreach (var change in EmitVnFn(instancesDir, ct))
-        { if (!options.DryRun) yield return change; await Task.Yield(); }
+        foreach (var (path, kind, label) in DocumentSpecs(instancesDir))
+        {
+            var witness = new SemLinkGrammarWitness(kind);
+            var change = await StructuredGrammarIngest.IngestJsonDocumentAsync(
+                path, witness.ModalityId, Source, witness, witnessWeight: 1.0, label, ct);
+            if (change is not null && !options.DryRun)
+                yield return change;
+        }
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -56,96 +49,16 @@ public sealed class SemLinkDecomposer : IDecomposer
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    private static Hash128? StageCategory(
-        SubstrateChangeBuilder b, string key, Hash128 categoryTypeId)
+    private static IEnumerable<(string Path, SemLinkDocumentKind Kind, string Label)> DocumentSpecs(string dir)
     {
-        Hash128? id = CategoryAnchor.Id(key);
-        if (id is null) return null;
-        b.AddEntity(new EntityRow(id.Value, EntityTier.Vocabulary, categoryTypeId, Source));
-        return id;
+        string pbVn = Path.Combine(dir, "pb-vn2.json");
+        if (File.Exists(pbVn))
+            yield return (pbVn, SemLinkDocumentKind.PbVn, "semlink/pb-vn2");
+
+        string vnFn = Path.Combine(dir, "vn-fn2.json");
+        if (File.Exists(vnFn))
+            yield return (vnFn, SemLinkDocumentKind.VnFn, "semlink/vn-fn2");
     }
-
-    private static IEnumerable<SubstrateChange> EmitPbVn(string dir, CancellationToken ct)
-    {
-        string path = Path.Combine(dir, "pb-vn2.json");
-        if (!File.Exists(path)) yield break;
-
-        using var doc = JsonDocument.Parse(File.ReadAllText(path));
-        var b = NewBuilder("semlink/pb-vn2");
-
-        foreach (var rolesetProp in doc.RootElement.EnumerateObject())
-        {
-            ct.ThrowIfCancellationRequested();
-            string rolesetKey = rolesetProp.Name.Trim();
-            if (rolesetKey.Length == 0 || rolesetProp.Value.ValueKind != JsonValueKind.Object) continue;
-            var rsEntity = StageCategory(b, rolesetKey, RolesetTypeId);
-            if (rsEntity is null) continue;
-
-            foreach (var classProp in rolesetProp.Value.EnumerateObject())
-            {
-                string vnClass = classProp.Name.Trim();
-                if (vnClass.Length == 0) continue;
-                var vnEntity = StageCategory(b, NumericClassId(vnClass), VnClassTypeId);
-                if (vnEntity is null) continue;
-
-                b.AddAttestation(NativeAttestation.Categorical(
-                    rsEntity.Value, "CORRESPONDS_TO", vnEntity.Value, Source, TC.AcademicCurated));
-
-                if (classProp.Value.ValueKind == JsonValueKind.Object)
-                    foreach (var roleProp in classProp.Value.EnumerateObject())
-                    {
-                        string arg = roleProp.Name.Trim();
-                        string theta = roleProp.Value.ValueKind == JsonValueKind.String
-                            ? (roleProp.Value.GetString() ?? "").Trim() : "";
-                        if (arg.Length == 0 || theta.Length == 0) continue;
-                        var argId   = ContentEmitter.Emit(b, arg, Source);
-                        var thetaId = ContentEmitter.Emit(b, theta, Source);
-                        if (argId is null || thetaId is null) continue;
-                        b.AddAttestation(NativeAttestation.Categorical(
-                            argId.Value, "CORRESPONDS_TO", thetaId.Value, Source, TC.AcademicCurated,
-                            contextId: vnEntity.Value));
-                    }
-            }
-        }
-        yield return b.Build();
-    }
-
-    private static IEnumerable<SubstrateChange> EmitVnFn(string dir, CancellationToken ct)
-    {
-        string path = Path.Combine(dir, "vn-fn2.json");
-        if (!File.Exists(path)) yield break;
-
-        using var doc = JsonDocument.Parse(File.ReadAllText(path));
-        var b = NewBuilder("semlink/vn-fn2");
-
-        foreach (var keyProp in doc.RootElement.EnumerateObject())
-        {
-            ct.ThrowIfCancellationRequested();
-            string vnClass = VnClassFromKey(keyProp.Name);
-            if (vnClass.Length == 0) continue;
-            var vnEntity = StageCategory(b, NumericClassId(vnClass), VnClassTypeId);
-            if (vnEntity is null) continue;
-
-            if (keyProp.Value.ValueKind != JsonValueKind.Array) continue;
-            foreach (var frameElem in keyProp.Value.EnumerateArray())
-            {
-                if (frameElem.ValueKind != JsonValueKind.String) continue;
-                string frame = (frameElem.GetString() ?? "").Trim();
-                if (frame.Length == 0) continue;
-                var fnEntity = StageCategory(b, frame, FrameTypeId);
-                if (fnEntity is null) continue;
-                b.AddAttestation(NativeAttestation.Categorical(
-                    vnEntity.Value, "CORRESPONDS_TO", fnEntity.Value, Source, TC.AcademicCurated));
-            }
-        }
-        yield return b.Build();
-    }
-
-    private static SubstrateChangeBuilder NewBuilder(string unit) =>
-        new(Source, unit, null,
-            entityCapacity:      1 << 16,
-            physicalityCapacity: 1 << 16,
-            attestationCapacity: 1 << 15);
 
     internal static string VnClassFromKey(string key)
     {

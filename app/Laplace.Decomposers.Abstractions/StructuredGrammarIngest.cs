@@ -139,4 +139,33 @@ public static class StructuredGrammarIngest
             physicalityCapacity: batchSize * 32,
             attestationCapacity: batchSize * 8)
             .SetCommitEpoch(commitEpoch);
+
+    public static async Task<SubstrateChange?> IngestJsonDocumentAsync(
+        string filePath,
+        string modalityId,
+        Hash128 sourceId,
+        IGrammarWitness witness,
+        double witnessWeight,
+        string batchLabel,
+        CancellationToken ct = default)
+    {
+        IntPtr recipe = GrammarDecomposer.LookupById(modalityId);
+        if (recipe == IntPtr.Zero) return null;
+
+        byte[] utf8 = await File.ReadAllBytesAsync(filePath, ct);
+        if (utf8.Length == 0) return null;
+
+        using var ast = GrammarDecomposer.Parse(utf8, recipe);
+        using var composer = new GrammarRowComposer(utf8, ast, sourceId, modalityId);
+        var (ents, phys, atts, root) = composer.Materialize(witnessWeight);
+
+        var b = NewBuilder(sourceId, batchLabel, 0, 1, commitEpoch: 0);
+        foreach (var e in ents) b.AddEntity(e);
+        foreach (var p in phys) b.AddPhysicality(p);
+        foreach (var a in atts) b.AddAttestation(a);
+
+        var ctx = new GrammarComposeContext(utf8, ast, root, composer);
+        witness.WalkRow(ctx, new RowContext(0, 1), b);
+        return b.SetInputUnitsConsumed(1).Build();
+    }
 }
