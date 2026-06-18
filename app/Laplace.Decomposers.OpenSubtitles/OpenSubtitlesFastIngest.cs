@@ -35,6 +35,8 @@ internal static class OpenSubtitlesFastIngest
         var entB = textEntries[1];
         Hash128 langA = LanguageReference.Resolve(LangSuffix(entA.FullName));
         Hash128 langB = LanguageReference.Resolve(LangSuffix(entB.FullName));
+        VocabularyNames.TrackLanguage(OpenSubtitlesDecomposer.LanguageNames, LangSuffix(entA.FullName));
+        VocabularyNames.TrackLanguage(OpenSubtitlesDecomposer.LanguageNames, LangSuffix(entB.FullName));
 
         await foreach (var (lineA, lineB) in ReadPairedLinesAsync(entA, entB, ct))
         {

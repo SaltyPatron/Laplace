@@ -312,7 +312,13 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
             "      WHERE pp.type = 1 AND pp.trajectory IS NOT NULL "
             "      ORDER BY pp.entity_id, pp.source_id) pp "
             "CROSS JOIN LATERAL public.laplace_trajectory_constituents(pp.trajectory) u "
-            "WHERE public.laplace_vertex_tier(u.flags) = 2 "
+            /* Include words (tier 2), grapheme-segmented content (tier 1, e.g. CJK), AND the
+               whitespace separators between them. Whitespace is classified by is_all_whitespace
+               and folded into sep_after (skipped from the stream, emitted as the observed
+               separator), so generation is language-agnostic and renders real separators.
+               tier=2-only was English-word sabotage: it dropped every separator and every
+               non-word-segmented language from the generation corpus. */
+            "WHERE public.laplace_vertex_tier(u.flags) <= 2 "
             "ORDER BY pp.entity_id, u.ordinal");
         portal = SPI_cursor_open_with_args(
             "corpus_sentences", q.data, 0, NULL, NULL, NULL, true, 0);

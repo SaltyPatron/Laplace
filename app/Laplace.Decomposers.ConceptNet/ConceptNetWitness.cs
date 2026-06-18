@@ -12,8 +12,6 @@ internal sealed class ConceptNetWitness
 
     private readonly ArenaRmsTracker _arena;
     private readonly LanguageFilter? _langs;
-    private readonly HashSet<Hash128> _seenEntBatch = new();
-    private readonly ConcurrentIdSet _seenAttRun = new();
 
     public ConceptNetWitness(ArenaRmsTracker arena, LanguageFilter? langs = null)
     {
@@ -26,16 +24,11 @@ internal sealed class ConceptNetWitness
         string rel = row.RelationText();
         if (rel.StartsWith("/r/", StringComparison.Ordinal)) rel = rel[3..];
 
-        RelationTypeRegistry.RelationTypeResolution? dbp = null;
         string typeName;
         if (ConceptNetDecomposer.RelMap.TryGetValue(rel, out var mapped))
             typeName = mapped;
         else if (rel.StartsWith("dbpedia/", StringComparison.OrdinalIgnoreCase))
-        {
-            var r = RelationTypeRegistry.ResolveDbpedia(rel);
-            dbp = r;
-            typeName = r.Canonical;
-        }
+            return;
         else return;
 
         if (!ConceptNetUri.TryParseLangAndTerm(row.StartUri, out var startLang, out var startTerm)) return;
@@ -47,14 +40,13 @@ internal sealed class ConceptNetWitness
 
         Hash128 startLangId = LanguageReference.Resolve(startLang);
         Hash128 endLangId   = LanguageReference.Resolve(endLang);
+        VocabularyNames.TrackLanguage(ConceptNetDecomposer.LanguageNames, startLang);
+        VocabularyNames.TrackLanguage(ConceptNetDecomposer.LanguageNames, endLang);
         b.AddEntity(new EntityRow(startLangId, EntityTier.Vocabulary, LanguageTypeId, ConceptNetDecomposer.Source));
         b.AddEntity(new EntityRow(endLangId, EntityTier.Vocabulary, LanguageTypeId, ConceptNetDecomposer.Source));
 
         (double weight, string? surface) = ParseMeta(row.MetaJson);
         _arena.Record(typeName, weight);
-
-        if (dbp is { } dyn)
-            RelationTypeRegistry.SeedDynamic(b, dyn, ConceptNetDecomposer.Source, _seenEntBatch, _seenAttRun);
 
         b.AddAttestation(NativeAttestation.Categorical(
             startId, typeName, endId, ConceptNetDecomposer.Source, SourceTrust.UserCuratedResource,

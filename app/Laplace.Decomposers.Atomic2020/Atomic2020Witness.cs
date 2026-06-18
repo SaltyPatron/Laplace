@@ -8,7 +8,7 @@ internal static class Atomic2020Witness
 {
     private static readonly Hash128 NoneId = Hash128.OfCanonical("substrate/atomic/none/v1");
 
-    public static void WalkRow(in Atomic2020TsvRow row, Hash128? contextId, SubstrateChangeBuilder b)
+    public static void WalkRow(in Atomic2020TsvRow row, SubstrateChangeBuilder b)
     {
         if (!ContentWitnessBatch.TryAppendToBuilder(
                 b, row.Head, Atomic2020Decomposer.Source, out var headId))
@@ -27,7 +27,6 @@ internal static class Atomic2020Witness
             return;
 
         b.AddAttestation(NativeAttestation.Categorical(
-            headId, typeName, tailId, Atomic2020Decomposer.Source, SourceTrust.StructuredCorpus,
-            contextId: contextId));
+            headId, typeName, tailId, Atomic2020Decomposer.Source, SourceTrust.StructuredCorpus));
     }
 }

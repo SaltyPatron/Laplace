@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Laplace.Decomposers.Abstractions;
@@ -51,14 +52,18 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
 
     protected override bool RequiresTwoPass => false;
 
+    internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
+
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddRelationType("HAS_EXAMPLE");
-        boot.AddRelationType("HAS_DBPEDIA_RELATION");
         foreach (var typeName in RelMap.Values)
             boot.AddRelationType(RelationTypeRegistry.Resolve(typeName).Canonical);
         await context.Writer.ApplyAsync(boot.Build(), ct);
+        foreach (var n in boot.CanonicalNames)
+            LanguageNames.TryAdd(n, 0);
     }
 
     public Task<IngestInventory?> DescribeInputAsync(

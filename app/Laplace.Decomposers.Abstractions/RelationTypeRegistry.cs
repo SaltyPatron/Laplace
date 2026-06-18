@@ -188,7 +188,7 @@ public static class RelationTypeRegistry
         
         
         
-        readbackNames?.TryAdd($"substrate/type/{k.Canonical}/v1", 0);
+        VocabularyNames.Track(readbackNames, VocabularyNames.RelationType(k.Canonical));
         if (seenEntitiesThisBatch.Add(k.Id))
             builder.AddEntity(new EntityRow(k.Id, EntityTier.Vocabulary, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
         if (k.ParentId is { } parent && seenAttestationsThisRun.Add(k.Id))

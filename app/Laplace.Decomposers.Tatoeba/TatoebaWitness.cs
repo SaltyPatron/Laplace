@@ -12,6 +12,7 @@ internal static class TatoebaWitness
     {
         Hash128 extId = SourceEntityIdConventions.TatoebaSentence(row.Id);
         Hash128 langId = LanguageReference.Resolve(row.Lang);
+        VocabularyNames.TrackLanguage(TatoebaDecomposer.LanguageNames, row.Lang);
         b.AddEntity(new EntityRow(extId, EntityTier.Vocabulary, TatoebaDecomposer.SentenceRefTypeId, TatoebaDecomposer.Source));
         b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, TatoebaDecomposer.LanguageTypeId, TatoebaDecomposer.Source));
 

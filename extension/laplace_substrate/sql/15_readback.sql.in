@@ -83,7 +83,9 @@ CREATE OR REPLACE FUNCTION render(p_id bytea) RETURNS text
     SET search_path = @extschema@, public AS $$
     SELECT COALESCE(
         (SELECT n.name FROM @extschema@.canonical_names n WHERE n.id = p_id),
-        chr(@extschema@.codepoint_for_id(p_id)),
+        (SELECT chr(@extschema@.codepoint_for_id(p_id))
+         FROM @extschema@.entities e
+         WHERE e.id = p_id AND e.tier = 0),
         render_text(p_id),
         encode(p_id, 'hex') || '…')
 $$;

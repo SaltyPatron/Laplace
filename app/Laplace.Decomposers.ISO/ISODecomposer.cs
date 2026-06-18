@@ -69,6 +69,7 @@ public sealed class ISODecomposer : IDecomposer, IIngestCommitPolicy
         {
             var langId = LanguageEntityId.FromIso639_3(rec.Id);
             b.AddEntity(langId, EntityTier.Vocabulary, LanguageTypeId, Source);
+            _codeNames.Add(VocabularyNames.LanguageIso639_3(rec.Id));
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 langId, RelTypeIsLanguageCode, null, Source, null,
                 RelationTypeRank.Partitive * SourceTrust.StandardsDerived));
@@ -97,6 +98,7 @@ public sealed class ISODecomposer : IDecomposer, IIngestCommitPolicy
             if (rec.Scope.Length > 0)
             {
                 var scopeId = Hash128.OfCanonical($"substrate/iso639/scope/{rec.Scope}/v1");
+                _codeNames.Add($"substrate/iso639/scope/{rec.Scope}/v1");
                 b.AddEntity(scopeId, EntityTier.Vocabulary, Iso639CodeTypeId, Source);
                 b.AddAttestation(NativeAttestation.Categorical(
                     langId, "HAS_LANGUAGE_SCOPE", scopeId, Source, SourceTrust.StandardsDerived));
@@ -104,9 +106,17 @@ public sealed class ISODecomposer : IDecomposer, IIngestCommitPolicy
             if (rec.Type.Length > 0)
             {
                 var typeId = Hash128.OfCanonical($"substrate/iso639/type/{rec.Type}/v1");
+                _codeNames.Add($"substrate/iso639/type/{rec.Type}/v1");
                 b.AddEntity(typeId, EntityTier.Vocabulary, Iso639CodeTypeId, Source);
                 b.AddAttestation(NativeAttestation.Categorical(
                     langId, "HAS_LANGUAGE_TYPE", typeId, Source, SourceTrust.StandardsDerived));
+            }
+            if (rec.RefName.Length > 0)
+            {
+                var nameId = ContentEmitter.Emit(b, rec.RefName, Source);
+                if (nameId is { } nid)
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        langId, "HAS_DEFINITION", nid, Source, SourceTrust.StandardsDerived));
             }
         }
 
@@ -134,6 +144,7 @@ public sealed class ISODecomposer : IDecomposer, IIngestCommitPolicy
             foreach (var code in scriptCodes)
             {
                 if (!scriptName.TryGetValue(code, out var name)) continue;
+                _codeNames.Add($"unicode/script/{name}/v1");
                 var scriptId = LanguageGraph.ScriptEntityId(name);
                 b.AddEntity(scriptId, EntityTier.Vocabulary, UcdClassifierTypeId, Source);
                 b.AddAttestation(NativeAttestation.CategoricalResolved(

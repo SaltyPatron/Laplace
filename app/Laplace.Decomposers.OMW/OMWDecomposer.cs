@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
@@ -24,12 +25,22 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider, IInge
     public int     LayerOrder   => 3;
     public Hash128 TrustClassId => TrustClass;
 
+    internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
+
+    internal static void TrackLanguage(string? langInput) =>
+        VocabularyNames.TrackLanguage(LanguageNames, langInput);
+
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddRelationType("HAS_DEFINITION");
         boot.AddRelationType("HAS_EXAMPLE");
+        boot.AddRelationType("IS_TRANSLATION_OF");
+        boot.AddRelationType("HAS_LANGUAGE");
         await context.Writer.ApplyAsync(boot.Build(), ct);
+        foreach (var n in boot.CanonicalNames)
+            LanguageNames.TryAdd(n, 0);
     }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(

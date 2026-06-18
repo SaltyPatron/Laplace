@@ -1,54 +1,14 @@
-using Microsoft.Extensions.Logging;
 using Laplace.Engine.Core;
-using Laplace.SubstrateCRUD;
 using SynInterop = Laplace.Engine.Synthesis.NativeInterop;
 
 namespace Laplace.Decomposers.Model;
 
-public sealed class WeightTensorETL
+// Tensor decode only. A model's weights are an INPUT to the token-to-token extraction, never a
+// record in the substrate: no physicalities (only codepoints surface to the glome; tier>0 nodes
+// are content-derived centroids), no axis entities, no stored matrices. These loaders feed the
+// robust decomposition; nothing here deposits.
+public static class WeightTensorETL
 {
-    private readonly LlamaRecipeExtractor.RecipeInfo _recipe;
-    private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
-    private readonly Hash128 _sourceId;
-    private readonly Hash128 _tokenizerEntityId;
-    private readonly IReadOnlyList<SafetensorsContainerParser.TensorReference> _refs;
-    private readonly ILogger _log;
-
-    public WeightTensorETL(
-        string modelDir,
-        LlamaRecipeExtractor.RecipeInfo recipe,
-        IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
-        Hash128 sourceId,
-        Hash128 tokenizerEntityId,
-        ILogger? log = null)
-    {
-        _recipe   = recipe;
-        _tokens   = tokens;
-        _sourceId = sourceId;
-        _tokenizerEntityId = tokenizerEntityId;
-        _log      = log ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
-        _refs     = SafetensorsContainerParser.ParseModel(modelDir);
-    }
-
-    public async IAsyncEnumerable<SubstrateChange> EmitS3MorphAsync(
-        int commitEpoch = 0,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
-    {
-        var refMap = new Dictionary<string, SafetensorsContainerParser.TensorReference>(
-            _refs.Count, StringComparer.Ordinal);
-        foreach (var r in _refs) refMap[r.Name] = r;
-        int vocabSize = _recipe.VocabSize, dModel = _recipe.HiddenSize;
-        string embedName = ArchitectureProfile.For(_recipe.ModelType).EmbedTokens;
-        float[] embed = LoadTensorF32(refMap, embedName,
-            (long)vocabSize * dModel);
-        var morph = new TokenS3Morph(embed, vocabSize, dModel, _tokens, _sourceId, _tokenizerEntityId, _log, commitEpoch);
-        foreach (var change in morph.Emit())
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return change;
-            await Task.Yield();
-        }
-    }
 
     public static byte[] LoadRawBytes(
         Dictionary<string, SafetensorsContainerParser.TensorReference> refMap, string name)

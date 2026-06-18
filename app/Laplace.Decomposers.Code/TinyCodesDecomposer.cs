@@ -50,6 +50,10 @@ public sealed class TinyCodesDecomposer : IDecomposer
     public int     LayerOrder   => 2;
     public Hash128 TrustClassId => TrustClass;
 
+    private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
+
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
+
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
@@ -60,6 +64,7 @@ public sealed class TinyCodesDecomposer : IDecomposer
         boot.AddRelationType("DEFINES");
         boot.AddRelationType("REFERENCES");
         await context.Writer.ApplyAsync(boot.Build(), ct);
+        _canonicalNames.UnionWith(boot.CanonicalNames);
     }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
@@ -109,6 +114,7 @@ public sealed class TinyCodesDecomposer : IDecomposer
                     var geb = new GrammarEntityBuilder(
                         codeBytes, ast, Source, modality, recipe, GrammarTags.TagsSource(modality));
                     (ents, phys, atts, codeRootId) = geb.Build(SourceTrust.StructuredCorpus);
+                    _canonicalNames.UnionWith(geb.NodeTypeCanonicalNames);
                 }
                 catch { continue; }
 
@@ -121,7 +127,9 @@ public sealed class TinyCodesDecomposer : IDecomposer
                 
                 if (!string.IsNullOrEmpty(conceptKey))
                 {
-                    var conceptId = Hash128.OfCanonical($"tiny-codes/concept/{conceptKey}/v1");
+                    string conceptCanonical = $"tiny-codes/concept/{conceptKey}/v1";
+                    _canonicalNames.Add(conceptCanonical);
+                    var conceptId = Hash128.OfCanonical(conceptCanonical);
                     b.AddEntity(new EntityRow(conceptId, EntityTier.Vocabulary, CodeConceptTypeId, Source));
                     b.AddAttestation(NativeAttestation.Categorical(
                         conceptId,  "HAS_EXAMPLE",   codeRootId, Source, SourceTrust.StructuredCorpus));
@@ -252,9 +260,7 @@ public sealed class TinyCodesDecomposer : IDecomposer
 
             for (int i = 0; i < count; i++)
             {
-                string? lang = taskIds?[i] ?? langs?[i];
-                
-                
+                string? lang = langs?[i];
                 string? key  = taskIds?[i] ?? $"{fileStem}/{rowBase + i}";
                 yield return (key, lang, prompts[i], resps[i]);
             }

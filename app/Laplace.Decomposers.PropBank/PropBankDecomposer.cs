@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Xml;
 using Laplace.Decomposers.Abstractions;
@@ -34,6 +35,10 @@ public sealed class PropBankDecomposer : IDecomposer
 
     private const long EstimatedFramesets = 7_566L;
 
+    private static readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
+
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames.Keys.ToArray();
+
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
@@ -46,6 +51,8 @@ public sealed class PropBankDecomposer : IDecomposer
         boot.AddRelationType("HAS_EXAMPLE");
         boot.AddRelationType("CORRESPONDS_TO");
         await context.Writer.ApplyAsync(boot.Build(), ct);
+        foreach (var n in boot.CanonicalNames)
+            _canonicalNames.TryAdd(n, 0);
     }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
@@ -137,6 +144,7 @@ public sealed class PropBankDecomposer : IDecomposer
             if (num.Length > 0)
             {
                 string ord = num.Equals("M", StringComparison.OrdinalIgnoreCase) ? "m" : num;
+                _canonicalNames.TryAdd($"ordinal/{ord}/v1", 0);
                 Hash128 ordEntity = OrdinalId(ord);
                 b.AddEntity(new EntityRow(ordEntity, EntityTier.Vocabulary, OrdinalTypeId, Source));
                 ctx = ordEntity;
@@ -184,8 +192,7 @@ public sealed class PropBankDecomposer : IDecomposer
                 var exId = ContentEmitter.Emit(b, ex, Source);
                 if (exId is not null)
                     b.AddAttestation(NativeAttestation.Categorical(
-                        rsEntity, "HAS_EXAMPLE", exId.Value, Source, TC.AcademicCurated,
-                        contextId: rsEntity));
+                        rsEntity, "HAS_EXAMPLE", exId.Value, Source, TC.AcademicCurated));
             }
     }
 

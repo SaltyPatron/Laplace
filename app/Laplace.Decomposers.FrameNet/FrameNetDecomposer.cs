@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Xml;
@@ -18,6 +19,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
     private static readonly Hash128 FrameTypeId    = EntityTypeRegistry.FrameNetFrame;
+    private static readonly Hash128 FeTypeId       = EntityTypeRegistry.FrameNetFe;
     private static readonly Hash128 CorenessTypeId = EntityTypeRegistry.FrameNetCoreness;
 
     
@@ -25,6 +27,8 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
     
     private static Hash128 CorenessId(string coreType) =>
         Hash128.OfCanonical($"framenet/coreness/{coreType}");
+
+    private static readonly ConcurrentDictionary<string, byte> _vocabularyNames = new(StringComparer.Ordinal);
 
     private static readonly string[] CorenessValues =
         ["Core", "Peripheral", "Extra-Thematic", "Core-Unexpressed"];
@@ -34,7 +38,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
         ["Inherits from"]   = "INHERITS_FROM",
         ["Uses"]            = "FRAME_USES",
         ["Perspective on"]  = "PERSPECTIVE_ON",
-        ["Subframe of"]     = "SUBFRAME_OF",
+        ["Subframe of"]     = "HAS_SUBEVENT",
         ["Is Causative of"] = "CAUSATIVE_OF",
         ["Is Inchoative of"] = "INCHOATIVE_OF",
         ["Precedes"]        = "PRECEDES",
@@ -71,6 +75,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
         boot.AddRelationType("HAS_EXAMPLE");
         boot.AddRelationType("FRAME_USES");
         boot.AddRelationType("PERSPECTIVE_ON");
+        boot.AddRelationType("INHERITS_FROM");
         boot.AddRelationType("CAUSATIVE_OF");
         boot.AddRelationType("INCHOATIVE_OF");
         boot.AddRelationType("PRECEDES");
@@ -79,6 +84,8 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
         boot.AddRelationType("RELATED_TO");
 
         await context.Writer.ApplyAsync(boot.Build(), ct);
+        foreach (var n in boot.CanonicalNames)
+            _vocabularyNames.TryAdd(n, 0);
 
         var seed = new SubstrateChangeBuilder(
             Source, "bootstrap/framenet-vocab", null,
@@ -121,8 +128,15 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
 
     
     
-    public IReadOnlyCollection<string> CanonicalNamesForReadback =>
-        [.. CorenessValues.Select(c => $"framenet/coreness/{c}")];
+    public IReadOnlyCollection<string> CanonicalNamesForReadback
+    {
+        get
+        {
+            foreach (var c in CorenessValues)
+                _vocabularyNames.TryAdd($"framenet/coreness/{c}", 0);
+            return _vocabularyNames.Keys.ToList();
+        }
+    }
 
     private static async IAsyncEnumerable<SubstrateChange> StreamFramesAsync(
         string frameDir, int batch,
@@ -162,7 +176,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
 
         foreach (var fe in frame.Elements)
         {
-            ContentEmitter.Emit(b, fe.Name, Source);   
+            CategoryAnchor.Emit(b, fe.Name, FeTypeId, Source, SourceTrust.AcademicCurated);
             if (fe.Definition.Length > 0) ContentEmitter.Emit(b, fe.Definition, Source);
         }
 
@@ -200,7 +214,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
 
         foreach (var fe in frame.Elements)
         {
-            var feNameId = ContentEmitter.RootId(fe.Name);
+            var feNameId = CategoryAnchor.Id(fe.Name);
             if (feNameId is null) continue;
             Hash128? coreCtx = CorenessValues.Contains(fe.CoreType) ? CorenessId(fe.CoreType) : null;
             b.AddAttestation(NativeAttestation.Categorical(
@@ -223,7 +237,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
             if (lemmaId is null) continue;
 
             PosReference.Attest(b, lemmaId.Value, lu.Pos, PosReference.PosTagset.FrameNet,
-                Source, null, SourceTrust.AcademicCurated);
+                Source, null, SourceTrust.AcademicCurated, _vocabularyNames);
             b.AddAttestation(NativeAttestation.Categorical(
                 lemmaId.Value, "EVOKES_FRAME", frameId, Source, SourceTrust.AcademicCurated));
         }

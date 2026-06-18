@@ -53,6 +53,7 @@ internal sealed class WiktionaryGrammarWitness : IGrammarWitness
             if (_options.Languages?.MatchesRaw(langCode) == false) return;
 
             Hash128 langEntity = LanguageReference.Resolve(langCode);
+            VocabularyNames.TrackLanguage(WiktionaryDecomposer.VocabularyNames, langCode);
             builder.AddEntity(new EntityRow(langEntity, EntityTier.Vocabulary, LanguageTypeId, WiktionaryDecomposer.Source));
             builder.AddAttestation(NativeAttestation.Categorical(
                 wordId, "HAS_LANGUAGE", langEntity, WiktionaryDecomposer.Source, TC.AcademicCuratedUserInput));
@@ -65,7 +66,8 @@ internal sealed class WiktionaryGrammarWitness : IGrammarWitness
         {
             posCtx = PosReference.Attest(builder, wordId,
                 JsonGrammarHelper.Utf8ToString(posSpan), PosReference.PosTagset.Wiktionary,
-                WiktionaryDecomposer.Source, null, TC.AcademicCuratedUserInput);
+                WiktionaryDecomposer.Source, null, TC.AcademicCuratedUserInput,
+                WiktionaryDecomposer.VocabularyNames);
         }
 
         foreach (int senseObj in JsonGrammarHelper.ObjectNodesInArrayProperty(composed, "senses"))
@@ -108,12 +110,8 @@ internal sealed class WiktionaryGrammarWitness : IGrammarWitness
             if (JsonGrammarHelper.TryComposedPropertyOnObject(composed, coordObj, "word", out var coordId))
                 Attest(b, wordId, "IS_COORDINATE_TERM_WITH", coordId, posCtx);
 
-        foreach (int catNode in JsonGrammarHelper.StringNodesInArrayOnObject(composed, senseObj, "categories"))
-            if (JsonGrammarHelper.TryComposedNode(composed, catNode, out var catId))
-                Attest(b, wordId, "HAS_DOMAIN_TOPIC", catId, posCtx);
-        foreach (int catObj in JsonGrammarHelper.ObjectNodesInArrayOnObject(composed, senseObj, "categories"))
-            if (JsonGrammarHelper.TryComposedPropertyOnObject(composed, catObj, "name", out var catId))
-                Attest(b, wordId, "HAS_DOMAIN_TOPIC", catId, posCtx);
+        // Wiktionary categories are mostly admin/maintenance labels — not semantic domains.
+        // Register/style tags below carry the usable semantic metadata.
 
         foreach (int tagNode in JsonGrammarHelper.StringNodesInArrayOnObject(composed, senseObj, "tags"))
         {

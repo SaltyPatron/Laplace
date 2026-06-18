@@ -36,6 +36,7 @@ public sealed class TabularDecomposer : IDecomposer
     private readonly string _targetColumn;
     private readonly string _positiveValue;
     private readonly int    _numBins;
+    private readonly HashSet<string> _canonicalNames = new(StringComparer.Ordinal);
 
     public TabularDecomposer(string targetColumn = "Exited", string positiveValue = "1", int numBins = 10)
     {
@@ -48,6 +49,8 @@ public sealed class TabularDecomposer : IDecomposer
     public string  SourceName   => "TabularDecomposer";
     public int     LayerOrder   => 2;
     public Hash128 TrustClassId => TrustClass;
+
+    public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
     private Hash128 OutcomeId => Hash128.OfCanonical($"tabular/outcome/{_targetColumn}={_positiveValue}/v1");
     private static Hash128 ColumnId(string col)            => Hash128.OfCanonical($"tabular/column/{col}/v1");
@@ -63,6 +66,7 @@ public sealed class TabularDecomposer : IDecomposer
         boot.AddRelationType("IS_VALUE_IN");
         boot.AddRelationType("IS_INSTANCE_OF");
         boot.AddEntity(new EntityRow(OutcomeId, EntityTier.Vocabulary, OutcomeTypeId, Source));
+        _canonicalNames.Add($"tabular/outcome/{_targetColumn}={_positiveValue}/v1");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -154,7 +158,10 @@ public sealed class TabularDecomposer : IDecomposer
         var b = NewBuilder(0);
         b.AddEntity(new EntityRow(OutcomeId, EntityTier.Vocabulary, OutcomeTypeId, Source));
         foreach (var c in featureCols)
+        {
             b.AddEntity(new EntityRow(ColumnId(c), EntityTier.Vocabulary, ColumnTypeId, Source));
+            _canonicalNames.Add($"tabular/column/{c}/v1");
+        }
 
         int emitted = 0, bn = 0;
         foreach (var ((col, tok), nm) in counts)
@@ -162,6 +169,7 @@ public sealed class TabularDecomposer : IDecomposer
             ct.ThrowIfCancellationRequested();
             var cq = ValueId(col, tok);
             b.AddEntity(new EntityRow(cq, EntityTier.Vocabulary, ValueTypeId, Source));
+            _canonicalNames.Add($"tabular/value/{col}={tok}/v1");
 
             
             b.AddAttestation(NativeAttestation.Aggregated(
@@ -194,6 +202,7 @@ public sealed class TabularDecomposer : IDecomposer
             ct.ThrowIfCancellationRequested();
             var cq = Hash128.OfCanonical($"tabular/pair/{pa}={ta}&{pb}={tb}/v1");
             b.AddEntity(new EntityRow(cq, EntityTier.Vocabulary, ValueTypeId, Source));
+            _canonicalNames.Add($"tabular/pair/{pa}={ta}&{pb}={tb}/v1");
             b.AddAttestation(NativeAttestation.Aggregated(
                 cq, predicts, OutcomeId, Source, contextId: null,
                 games: nm.N, sumScoreFp1e9: checked(nm.M * Glicko2.FpScale), witnessWeight: witnessWeight));

@@ -20,7 +20,6 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
     
     public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
 
-    private static readonly Hash128 XposTypeId     = EntityTypeRegistry.UdXpos;
     private static readonly Hash128 FeatureTypeId  = EntityTypeRegistry.UdFeature;
     private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
 
@@ -39,25 +38,23 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
     private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => new List<string>(_canonicalNames.Keys);
 
-    private static readonly ConcurrentDictionary<(string Lang, string Tag), Hash128> _xposIdMemo =
-        new();
     private static readonly ConcurrentDictionary<(string Name, string Value), Hash128> _featValueIdMemo =
         new();
 
-    private static Hash128 XposId(string lang, string t) =>
-        _xposIdMemo.GetOrAdd((lang, t), static k => Hash128.OfCanonical($"xpos:{k.Lang}:{k.Tag}"));
     private static Hash128 FeatValueId(string name, string value) =>
-        _featValueIdMemo.GetOrAdd((name, value), static k => Hash128.OfCanonical($"featval:{k.Name}:{k.Value}"));
+        _featValueIdMemo.GetOrAdd((name, value), static k =>
+            VocabularyNames.UdFeatureValueId(k.Name, k.Value));
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
-        boot.AddType("UD_XPOS");
         boot.AddRelationType("HAS_DEFINITION");
         boot.AddRelationType("TRANSCRIBES_AS");
         boot.AddRelationType("ENHANCED_DEPENDS_ON");
         boot.AddType("UD_Feature");
         await context.Writer.ApplyAsync(boot.Build(), ct);
+        foreach (var n in boot.CanonicalNames)
+            _canonicalNames.TryAdd(n, 0);
     }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
@@ -206,6 +203,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
                                      ConcurrentDictionary<string, byte> canonicalNames)
     {
         b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, LanguageTypeId, Source));
+        VocabularyNames.TrackLanguage(canonicalNames, langCode);
 
         if (s.TextUtf8 is { Length: > 0 })
             EmitUtf8(b, s.TextUtf8, Source);
@@ -227,18 +225,12 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
 
             if (!string.IsNullOrEmpty(tok.Upos) && tok.Upos != "_")
                 PosReference.Attest(b, form, tok.Upos!, PosReference.PosTagset.Upos,
-                    Source, null, SourceTrust.AcademicCurated);
-
-            if (!string.IsNullOrEmpty(tok.Xpos) && tok.Xpos != "_")
-            {
-                b.AddEntity(new EntityRow(XposId(langCode, tok.Xpos), EntityTier.Vocabulary, XposTypeId, Source));
-                b.AddAttestation(NativeAttestation.PosXpos(
-                    form, XposId(langCode, tok.Xpos), Source, null, SourceTrust.AcademicCurated));
-            }
+                    Source, null, SourceTrust.AcademicCurated, canonicalNames);
 
             foreach (var feat in tok.Feats)
             {
                 if (!RelationTypeRegistry.ParseFeature(feat, out var fName, out var fVal)) continue;
+                VocabularyNames.TrackUdFeatureValue(canonicalNames, fName, fVal);
                 Hash128 valId = FeatValueId(fName, fVal);
                 b.AddEntity(new EntityRow(valId, EntityTier.Vocabulary, FeatureTypeId, Source));
                 RelationTypeRegistry.SeedDynamic(b, RelationTypeRegistry.ResolveFeature(fName), Source, seenEntBatch, seenAttRun, canonicalNames);

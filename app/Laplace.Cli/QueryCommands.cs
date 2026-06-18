@@ -256,11 +256,75 @@ internal static class QueryCommands
                 toks.Add((r.IsDBNull(1) ? "" : r.GetString(1), r.IsDBNull(2) ? 0 : r.GetInt32(2)));
         }
         sw.Stop();
-        Console.WriteLine(prompt + " " + string.Join(' ', toks.Select(t => t.entity)));
+        // entities already carry their substrate-observed separators (walk_text appends sep_entity);
+        // concatenate — never space-join (that's an English assumption).
+        Console.WriteLine(prompt + string.Concat(toks.Select(t => t.entity)));
         if (verbose)
             for (int i = 0; i < toks.Count; i++)
                 Console.WriteLine($"    {i + 1,2}. {toks[i].entity,-22} stride={toks[i].strideUsed}");
         Console.WriteLine($"    [{toks.Count} entities, {sw.Elapsed.TotalMilliseconds:F0} ms — native stride descent, no GPU]");
+        return 0;
+    }
+
+    // Converse and DEPOSIT the result: prompt → native walk → response, with BOTH sides deposited as
+    // content-addressed entities (UserPrompt + Response). The response re-enters the substrate as
+    // citable, reproducible, self-extending content at low trust (the trust hierarchy gates its
+    // influence so the system's own output can't pollute the high-trust corpus or cause collapse).
+    public static async Task<int> ChatAsync(string[] args)
+    {
+        string prompt = string.Join(' ', args).Trim();
+        if (string.IsNullOrWhiteSpace(prompt))
+            return Fail("usage: laplace chat <prompt>");
+
+        CodepointPerfcache.Load(ResolveBlob());   // required by HashComposer for content-witness hashing + coords
+
+        int steps  = EnvInt("LAPLACE_GEN_STEPS", 48, 1);
+        int order  = EnvInt("LAPLACE_GEN_ORDER", EnvInt("LAPLACE_GEN_WINDOW", 5, 1), 1);
+        int topk   = EnvInt("LAPLACE_GEN_TOPK", 8, 1);
+        double temp = EnvDouble("LAPLACE_GEN_TEMP", 0.6);
+
+        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var conn = await ds.OpenConnectionAsync();
+
+        var inner = new NpgsqlSubstrateWriter(ds);
+        await using var acc = new ConsensusAccumulatingWriter(inner, ds);
+        var writer = (ISubstrateWriter)acc;
+
+        // ensure the Response source entity exists (idempotent)
+        await writer.ApplyAsync(ResponseContent.BuildBootstrapChange(), CancellationToken.None);
+
+        // 1. deposit the prompt as a content-addressed UserPrompt (the provenance anchor)
+        Hash128 promptRoot = Hash128.Zero;
+        if (UserPromptContent.TryBuildWitnessChange(Encoding.UTF8.GetBytes(prompt), "chat/prompt", out var pc, out var pr))
+        { await writer.ApplyAsync(pc, CancellationToken.None); promptRoot = pr; }
+
+        // 2. generate via the native walk engine; entities carry their substrate-observed separators
+        var sb = new StringBuilder();
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT entity FROM laplace.walk_text(@p, @steps, @order, @temp, @topk)";
+            cmd.Parameters.AddWithValue("p", prompt);
+            cmd.Parameters.AddWithValue("steps", steps);
+            cmd.Parameters.AddWithValue("order", order);
+            cmd.Parameters.AddWithValue("temp", temp);
+            cmd.Parameters.AddWithValue("topk", topk);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) if (!r.IsDBNull(0)) sb.Append(r.GetString(0));
+        }
+        string response = sb.ToString();
+        Console.WriteLine(prompt + response);
+
+        // 3. deposit the response as a content-addressed Response (low trust), linked to the prompt
+        if (response.Length > 0 &&
+            ResponseContent.TryBuildWitnessChange(Encoding.UTF8.GetBytes(response), "chat/response",
+                promptRoot == Hash128.Zero ? null : promptRoot, out var rc, out var rr))
+        {
+            await writer.ApplyAsync(rc, CancellationToken.None);
+            Console.WriteLine($"    [Response deposited: {Convert.ToHexString(rr.ToBytes())[..16].ToLowerInvariant()} "
+                + $"@ trust {SourceTrust.Response} — content-addressed, citable, self-extending]");
+        }
+
+        await acc.MaterializeConsensusAsync();
         return 0;
     }
 

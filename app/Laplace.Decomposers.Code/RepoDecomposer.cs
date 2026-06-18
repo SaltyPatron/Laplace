@@ -109,7 +109,9 @@ public sealed class RepoDecomposer : IDecomposer
         if (!Directory.Exists(root)) yield break;
 
         
-        var repoId = Hash128.OfCanonical($"repo:{Path.GetFullPath(root)}/v1");
+        string repoCanonical = $"repo:{Path.GetFullPath(root)}/v1";
+        _canonicalNames.Add(repoCanonical);
+        var repoId = Hash128.OfCanonical(repoCanonical);
         int batch = options.BatchSize > 1 ? options.BatchSize : 32;
         var b = NewBuilder(0);
         int inBatch = 0, bn = 0;
@@ -160,17 +162,16 @@ public sealed class RepoDecomposer : IDecomposer
 
             
             string relPath = Path.GetRelativePath(root, file).Replace('\\', '/');
-            var filePathId = ContentEmitter.Emit(b, relPath, Source);
-            if (filePathId.HasValue)
-            {
-                b.AddEntity(new EntityRow(filePathId.Value, EntityTier.Vocabulary, FileTypeId, Source));
-                b.AddAttestation(NativeAttestation.Categorical(
-                    repoId,            "CONTAINS",     filePathId.Value, Source, SourceTrust.StructuredCorpus));
-                b.AddAttestation(NativeAttestation.Categorical(
-                    filePathId.Value,  "HAS_EXAMPLE",  codeRootId,       Source, SourceTrust.StructuredCorpus));
-                b.AddAttestation(NativeAttestation.Categorical(
-                    codeRootId, "HAS_DEFINITION", filePathId.Value,      Source, SourceTrust.StructuredCorpus));
-            }
+            string fileCanonical = $"source/file/{relPath}/v1";
+            _canonicalNames.Add(fileCanonical);
+            var filePathId = Hash128.OfCanonical(fileCanonical);
+            b.AddEntity(new EntityRow(filePathId, EntityTier.Vocabulary, FileTypeId, Source));
+            b.AddAttestation(NativeAttestation.Categorical(
+                repoId,            "CONTAINS",     filePathId, Source, SourceTrust.StructuredCorpus));
+            b.AddAttestation(NativeAttestation.Categorical(
+                filePathId,        "HAS_EXAMPLE",  codeRootId, Source, SourceTrust.StructuredCorpus));
+            b.AddAttestation(NativeAttestation.Categorical(
+                codeRootId, "HAS_DEFINITION", filePathId,      Source, SourceTrust.StructuredCorpus));
 
             
             var filename = Path.GetFileNameWithoutExtension(file);

@@ -56,12 +56,12 @@ internal static class BenchCommands
         {
             Console.WriteLine(new string('=', 78));
             bool ok;
-            try { ok = await ModelFfnBench.RunAsync(dir, log); }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"model-bench: {dir} threw: {ex.Message}");
-                ok = false;
-            }
+            // The FFN/token-bilinear bench is retired: model ingestion no longer materializes
+            // token<->token tensor planes (it stages RELATED_TO edges via ModelTokenEdgeETL and
+            // folds them in SPI). A bench over the new edge path lands with that work.
+            await Task.CompletedTask;
+            Console.WriteLine($"model-bench: {dir} — bilinear bench retired (edge-ETL bench pending)");
+            ok = true;
             if (!ok) failures.Add(dir);
             allOk &= ok;
             Console.WriteLine();

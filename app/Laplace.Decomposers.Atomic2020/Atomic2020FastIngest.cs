@@ -26,7 +26,7 @@ internal static class Atomic2020FastIngest
             ReadOnlySpan<byte> span = line.Span;
             if (!Atomic2020TsvRow.TryParse(span, out var row)) continue;
 
-            Atomic2020Witness.WalkRow(row, splitId, b);
+            Atomic2020Witness.WalkRow(row, b);
             rowsInBatch++;
             if (++inBatch >= batchSize)
             {

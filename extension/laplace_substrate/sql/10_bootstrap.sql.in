@@ -26,6 +26,7 @@ DECLARE
     tc_ai_probe_id       bytea;
     tc_app_derived_id    bytea;
     tc_user_prompt_id    bytea;
+    tc_response_id       bytea;
     tc_adversarial_id    bytea;
 
     reltype_is_a_id              bytea;
@@ -46,7 +47,7 @@ DECLARE
     reltype_is_alias_of_id       bytea;
 
     
-    VOCAB_TIER CONSTANT smallint := 0;
+    VOCAB_TIER CONSTANT smallint := 5;
 
 BEGIN
     type_id             := public.laplace_hash128_blake3('substrate/type/Type/v1'::bytea);
@@ -98,6 +99,7 @@ BEGIN
     tc_ai_probe_id      := public.laplace_hash128_blake3('substrate/trust_class/AIModelProbe/v1'::bytea);
     tc_app_derived_id   := public.laplace_hash128_blake3('substrate/trust_class/AppDerived/v1'::bytea);
     tc_user_prompt_id   := public.laplace_hash128_blake3('substrate/trust_class/UserPromptContent/v1'::bytea);
+    tc_response_id      := public.laplace_hash128_blake3('substrate/trust_class/ResponseContent/v1'::bytea);
     tc_adversarial_id   := public.laplace_hash128_blake3('substrate/trust_class/AdversarialUntrusted/v1'::bytea);
 
     INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
@@ -110,6 +112,7 @@ BEGIN
         (tc_ai_probe_id,      VOCAB_TIER, type_id, subscan_id),
         (tc_app_derived_id,   VOCAB_TIER, type_id, subscan_id),
         (tc_user_prompt_id,   VOCAB_TIER, type_id, subscan_id),
+        (tc_response_id,      VOCAB_TIER, type_id, subscan_id),
         (tc_adversarial_id,   VOCAB_TIER, type_id, subscan_id);
 
     reltype_is_a_id              := public.laplace_hash128_blake3('substrate/type/IS_A/v1'::bytea);

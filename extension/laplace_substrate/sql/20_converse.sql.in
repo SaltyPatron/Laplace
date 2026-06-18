@@ -23,7 +23,24 @@ CREATE OR REPLACE FUNCTION label(p_id bytea)
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
     SELECT COALESCE(
-        NULLIF(NULLIF(render(p_id), ''), encode(p_id, 'hex') || '…'),
+        -- strip substrate wrappers and vocabulary paths so types, POS, morphology, languages,
+        -- and relation entities resolve to clean, usable names via label().
+        NULLIF(NULLIF(
+            regexp_replace(
+                regexp_replace(
+                    regexp_replace(
+                        regexp_replace(
+                            regexp_replace(
+                                regexp_replace(
+                                    regexp_replace(render(p_id),
+                                        '^substrate/(?:type|relation|trust_class|source|entity)/(.*)/v1$', '\1'),
+                                    '^substrate/pos/(?:probationary/[^/]+/)?(.+)/v1$', '\1'),
+                                '^source/file/(.+)/v1$', '\1'),
+                            '^repo:(.+)/v1$', '\1'),
+                        '^language:([a-z]{3})$', '\1'),
+                    '^ud/feature/(.+)$', '\1'),
+                '^tiny-codes/concept/(.+)/v1$', '\1'),
+            ''), encode(p_id, 'hex') || '…'),
         -- abstract entities (e.g. Language) carry their human-readable name as HAS_DEFINITION
         -- (ISO-639 stores it there); resolve it before the Type:hash fallback.
         (SELECT render_text(c.object_id)
@@ -413,5 +430,43 @@ BEGIN
     FROM g;
 END;
 $sl$;
+
+
+-- ===== Exploration: a word's full LINK inventory + cross-word correlation =====
+-- Indexed point-lookups via consensus(subject_id) (consensus_subject_type_btree /
+-- consensus_subject_eff_mu_btree) — not scans; PARALLEL SAFE. strength = the Glicko-2 conservative
+-- estimate eff_mu(rating, rd): factual foundations sit at full weight (~1.0), uncertain ones below.
+
+-- Every LINK a word participates in (subject side): relation, target, strength — not counts.
+CREATE OR REPLACE FUNCTION links(p_word text)
+    RETURNS TABLE(relation text, target text, strength double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT COALESCE(NULLIF(relation_canonical(c.type_id), ''), label(c.type_id)) AS relation,
+           COALESCE(NULLIF(render_text(c.object_id, 80), ''), label(c.object_id)) AS target,
+           (eff_mu(c.rating, c.rd))::float8 / 1e9 AS strength
+    FROM consensus c
+    WHERE c.subject_id = word_id(p_word)
+    ORDER BY strength DESC, relation
+$$;
+
+-- Correlate words: every (relation, target) link across the given words + which words share it.
+-- Rows where cardinality(words) > 1 ARE the correlations (king & queen both IS_A monarch).
+CREATE OR REPLACE FUNCTION correlate(p_words text[])
+    RETURNS TABLE(relation text, target text, words text[], strength double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH v AS (SELECT w AS word, word_id(w) AS id FROM unnest(p_words) AS w WHERE word_id(w) IS NOT NULL),
+    e AS (
+        SELECT v.word,
+               COALESCE(NULLIF(relation_canonical(c.type_id), ''), label(c.type_id)) AS relation,
+               COALESCE(NULLIF(render_text(c.object_id, 80), ''), label(c.object_id)) AS target,
+               (eff_mu(c.rating, c.rd))::float8 / 1e9 AS w
+        FROM v JOIN consensus c ON c.subject_id = v.id
+    )
+    SELECT relation, target, array_agg(DISTINCT word ORDER BY word) AS words, max(w) AS strength
+    FROM e GROUP BY relation, target
+    ORDER BY count(DISTINCT word) DESC, max(w) DESC, relation
+$$;
 
 

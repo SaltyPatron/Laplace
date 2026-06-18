@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Laplace.Decomposers.Abstractions;
@@ -13,6 +14,10 @@ public sealed class SemLinkDecomposer : IDecomposer
         Hash128.OfCanonical("substrate/source/SemLinkDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
+
+    private static readonly Hash128 RolesetTypeId = EntityTypeRegistry.PropBankRoleset;
+    private static readonly Hash128 VnClassTypeId = EntityTypeRegistry.VerbNetClass;
+    private static readonly Hash128 FrameTypeId   = EntityTypeRegistry.FrameNetFrame;
 
     
     
@@ -51,6 +56,15 @@ public sealed class SemLinkDecomposer : IDecomposer
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
+    private static Hash128? StageCategory(
+        SubstrateChangeBuilder b, string key, Hash128 categoryTypeId)
+    {
+        Hash128? id = CategoryAnchor.Id(key);
+        if (id is null) return null;
+        b.AddEntity(new EntityRow(id.Value, EntityTier.Vocabulary, categoryTypeId, Source));
+        return id;
+    }
+
     private static IEnumerable<SubstrateChange> EmitPbVn(string dir, CancellationToken ct)
     {
         string path = Path.Combine(dir, "pb-vn2.json");
@@ -64,14 +78,14 @@ public sealed class SemLinkDecomposer : IDecomposer
             ct.ThrowIfCancellationRequested();
             string rolesetKey = rolesetProp.Name.Trim();
             if (rolesetKey.Length == 0 || rolesetProp.Value.ValueKind != JsonValueKind.Object) continue;
-            var rsEntity = ContentEmitter.Emit(b, rolesetKey, Source);   
+            var rsEntity = StageCategory(b, rolesetKey, RolesetTypeId);
             if (rsEntity is null) continue;
 
             foreach (var classProp in rolesetProp.Value.EnumerateObject())
             {
                 string vnClass = classProp.Name.Trim();
                 if (vnClass.Length == 0) continue;
-                var vnEntity = ContentEmitter.Emit(b, NumericClassId(vnClass), Source);  
+                var vnEntity = StageCategory(b, NumericClassId(vnClass), VnClassTypeId);
                 if (vnEntity is null) continue;
 
                 b.AddAttestation(NativeAttestation.Categorical(
@@ -109,7 +123,7 @@ public sealed class SemLinkDecomposer : IDecomposer
             ct.ThrowIfCancellationRequested();
             string vnClass = VnClassFromKey(keyProp.Name);
             if (vnClass.Length == 0) continue;
-            var vnEntity = ContentEmitter.Emit(b, NumericClassId(vnClass), Source);  
+            var vnEntity = StageCategory(b, NumericClassId(vnClass), VnClassTypeId);
             if (vnEntity is null) continue;
 
             if (keyProp.Value.ValueKind != JsonValueKind.Array) continue;
@@ -118,7 +132,7 @@ public sealed class SemLinkDecomposer : IDecomposer
                 if (frameElem.ValueKind != JsonValueKind.String) continue;
                 string frame = (frameElem.GetString() ?? "").Trim();
                 if (frame.Length == 0) continue;
-                var fnEntity = ContentEmitter.Emit(b, frame, Source);   
+                var fnEntity = StageCategory(b, frame, FrameTypeId);
                 if (fnEntity is null) continue;
                 b.AddAttestation(NativeAttestation.Categorical(
                     vnEntity.Value, "CORRESPONDS_TO", fnEntity.Value, Source, TC.AcademicCurated));
