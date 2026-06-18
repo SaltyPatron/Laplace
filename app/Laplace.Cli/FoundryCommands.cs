@@ -248,6 +248,20 @@ internal static class FoundryCommands
             return null;
         }
 
+        if (!grapheme)
+        {
+            var sw0 = System.Diagnostics.Stopwatch.StartNew();
+            var (bpeM, bpeV) = TrainByteBpe(sel, vocabN, 3 + 256);
+            sw0.Stop();
+            Console.WriteLine($"  [BPE-TEST] {sel.Count:N0} words -> {bpeM.Count:N0} merges, {bpeV.Count:N0} learned pieces in {sw0.ElapsedMilliseconds}ms");
+            Console.Write("  [BPE-TEST] first 30 merges: ");
+            foreach (var m in bpeM.Take(30)) Console.Write($"({m}) ");
+            Console.WriteLine();
+            Console.Write("  [BPE-TEST] sample learned pieces: ");
+            foreach (var (p, f) in bpeV.OrderByDescending(x => x.freq).Take(20)) Console.Write($"{p}={f} ");
+            Console.WriteLine();
+        }
+
         
         
         
@@ -355,9 +369,61 @@ internal static class FoundryCommands
             Tag(inner, 2, 5); inner.Write(BitConverter.GetBytes(score));          
             Tag(inner, 3, 0); Varint(inner, (ulong)type);                         
             byte[] ib = inner.ToArray();
-            Tag(ms, 1, 2); Varint(ms, (ulong)ib.Length); ms.Write(ib);            
+            Tag(ms, 1, 2); Varint(ms, (ulong)ib.Length); ms.Write(ib);
         }
         File.WriteAllBytes(path, ms.ToArray());
+    }
+
+    // Real byte-level BPE trained over the substrate's tier-2 word surfaces + frequencies.
+    // Each word is byte-level encoded (GPT-2 mapping) with a leading-space (Ġ) word-start marker,
+    // then standard iterative pair-merge: repeatedly merge the most frequent adjacent symbol pair.
+    // Returns the ordered merge rules ("a b") and the learned subword pieces (merge products) with
+    // their corpus frequency. The merges ARE the substrate's grapheme co-occurrence, ranked — same
+    // signal as laplace.grapheme_order, computed to full depth here. (TODO: move to C/SPI per perf plan.)
+    private static (List<string> merges, List<(string piece, long freq)> learned) TrainByteBpe(
+        IReadOnlyList<(string surface, long weight)> words, int targetVocab, int reserved)
+    {
+        var wordSyms = new List<(List<string> syms, long freq)>(words.Count);
+        var baseChars = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (surface, weight) in words)
+        {
+            if (string.IsNullOrEmpty(surface)) continue;
+            string enc = ByteEncode(" " + surface);   // Ġ + word, byte-level
+            var syms = new List<string>(enc.Length);
+            foreach (char c in enc) { string s = c.ToString(); syms.Add(s); baseChars.Add(s); }
+            wordSyms.Add((syms, Math.Max(weight, 1)));
+        }
+
+        int budget = targetVocab - reserved - baseChars.Count;   // merges to learn (after specials+256 byte floor)
+        var merges = new List<string>(Math.Max(budget, 0));
+        var learned = new List<(string piece, long freq)>(Math.Max(budget, 0));
+        var pairCounts = new Dictionary<(string, string), long>(1 << 16);
+
+        while (merges.Count < budget)
+        {
+            pairCounts.Clear();
+            foreach (var (syms, freq) in wordSyms)
+                for (int i = 0; i + 1 < syms.Count; i++)
+                {
+                    var key = (syms[i], syms[i + 1]);
+                    pairCounts.TryGetValue(key, out long c); pairCounts[key] = c + freq;
+                }
+            if (pairCounts.Count == 0) break;
+
+            (string, string) best = default; long bestC = -1;
+            foreach (var kv in pairCounts) if (kv.Value > bestC) { bestC = kv.Value; best = kv.Key; }
+            if (bestC <= 0) break;
+
+            string merged = best.Item1 + best.Item2;
+            merges.Add(best.Item1 + " " + best.Item2);
+            learned.Add((merged, bestC));
+
+            foreach (var (syms, _) in wordSyms)
+                for (int i = 0; i + 1 < syms.Count; i++)
+                    if (syms[i] == best.Item1 && syms[i + 1] == best.Item2)
+                    { syms[i] = merged; syms.RemoveAt(i + 1); }
+        }
+        return (merges, learned);
     }
 
     private static async Task<int> SynthesizeFromSubstrateAsync(string recipePath, string outputPath, bool grapheme = false)
