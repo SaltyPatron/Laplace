@@ -292,7 +292,7 @@ public sealed class IngestRunner
             new BoundedChannelOptions(options.ParallelWorkers * batchSize * 4)
             {
                 SingleWriter = true,
-                SingleReader = false,
+                SingleReader = true,
                 FullMode = BoundedChannelFullMode.Wait,
             });
 
@@ -313,34 +313,37 @@ public sealed class IngestRunner
             }
         }, ct);
 
-        await Task.WhenAll(producer);
-
-        var batch = new List<SubstrateChange>(batchSize);
-        int batchRows = 0;
-        while (await channel.Reader.WaitToReadAsync(ct))
+        var consumer = Task.Run(async () =>
         {
-            while (channel.Reader.TryRead(out var intent))
+            var batch = new List<SubstrateChange>(batchSize);
+            int batchRows = 0;
+            while (await channel.Reader.WaitToReadAsync(ct))
             {
-                if (batchSize == 1 && commitRows == 0)
+                while (channel.Reader.TryRead(out var intent))
                 {
-                    await ProcessOneIntentAsync(intent, decomposer, options,
+                    if (batchSize == 1 && commitRows == 0)
+                    {
+                        await ProcessOneIntentAsync(intent, decomposer, options,
+                                                    rng, counters, failures, log, ct);
+                        continue;
+                    }
+                    batch.Add(intent);
+                    batchRows += rowsOf(intent);
+                    if (shouldFlush(batch.Count, batchRows))
+                    {
+                        await ProcessBatchAsync(batch, decomposer, options,
                                                 rng, counters, failures, log, ct);
-                    continue;
-                }
-                batch.Add(intent);
-                batchRows += rowsOf(intent);
-                if (shouldFlush(batch.Count, batchRows))
-                {
-                    await ProcessBatchAsync(batch, decomposer, options,
-                                            rng, counters, failures, log, ct);
-                    batch.Clear();
-                    batchRows = 0;
+                        batch.Clear();
+                        batchRows = 0;
+                    }
                 }
             }
-        }
-        if (batch.Count > 0)
-            await ProcessBatchAsync(batch, decomposer, options,
-                                    rng, counters, failures, log, ct);
+            if (batch.Count > 0)
+                await ProcessBatchAsync(batch, decomposer, options,
+                                        rng, counters, failures, log, ct);
+        }, ct);
+
+        await Task.WhenAll(producer, consumer);
     }
 
     private async Task RunEpochBarrierParallelAsync(

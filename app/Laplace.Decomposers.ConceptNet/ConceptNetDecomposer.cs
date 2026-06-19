@@ -98,17 +98,22 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
         if (!File.Exists(file)) yield break;
         int batch = options.BatchSize > 1 ? options.BatchSize : 65536;
 
+        var witness = new ConceptNetGrammarWitness(options.Languages);
         Func<ReadOnlySpan<byte>, bool>? acceptRow = options.Languages is { IsActive: true } langs
             ? line => ConceptNetRowFilter.MatchesLanguageFilter(line, langs)
             : null;
 
-        await foreach (var change in ConceptNetFastIngest.IngestFileAsync(
+        await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
             file,
+            modalityId: "tsv",
             sourceId: Source,
-            langs: options.Languages,
+            witness: witness,
             batchSize: batch,
-            maxInputUnits: options.MaxInputUnits,
+            witnessWeight: 1.0,
+            batchLabelPrefix: "conceptnet",
+            reportUnits: null,
             acceptRow: acceptRow,
+            maxInputUnits: options.MaxInputUnits,
             ct: ct))
         {
             yield return change;
