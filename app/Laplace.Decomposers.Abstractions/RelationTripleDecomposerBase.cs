@@ -61,7 +61,6 @@ public abstract class RelationTripleDecomposerBase : IDecomposer, IIngestCommitP
                                .WithCancellation(ct))
             {
                 if (!options.DryRun) yield return change;
-                await Task.Yield();
             }
 
             await foreach (var change in StreamTriplesAsync(
@@ -69,7 +68,6 @@ public abstract class RelationTripleDecomposerBase : IDecomposer, IIngestCommitP
                                .WithCancellation(ct))
             {
                 if (!options.DryRun) yield return change;
-                await Task.Yield();
             }
         }
         else

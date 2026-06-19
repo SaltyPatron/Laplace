@@ -452,6 +452,9 @@ internal static class IngestCommands
         };
     }
 
+    private static bool IsEnvEnabled(string name) =>
+        Environment.GetEnvironmentVariable(name) is "1" or "true" or "True" or "yes" or "YES";
+
     private static async Task<int> IngestViaRunnerAsync(
         IDecomposer dec, string ecosystemPath, bool skipLayerCheck, IngestCliArgs? cli = null,
         bool skipSourceCompletion = false)
@@ -462,17 +465,22 @@ internal static class IngestCommands
 
         await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
         var loggerFactory = ConsoleLoggerProvider.Factory();
-        var innerWriter = new NpgsqlSubstrateWriter(ds);
+        bool force = cli?.Force ?? false;
+        bool bulkFresh = force || IsEnvEnabled("LAPLACE_BULK_FRESH");
+        var innerWriter = new NpgsqlSubstrateWriter(ds, bulkFreshSource: bulkFresh);
         bool persistEvidence = ResolvePersistEvidence(cli);
         await using var accumulator = new ConsensusAccumulatingWriter(innerWriter, ds,
+            freshSource: bulkFresh,
             persistEvidence: persistEvidence,
+            stageAsWalks: !persistEvidence,
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
         var writer = (ISubstrateWriter)accumulator;
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader, loggerFactory);
 
         Console.WriteLine($"ingest {dec.SourceName} via IngestRunner → {ConnString} ..."
-            + (persistEvidence ? "" : " (consensus-only, no attestation writes)"));
+            + (persistEvidence ? "" : " (consensus-only, no attestation writes)")
+            + (bulkFresh ? " (bulk-fresh preflight skip)" : ""));
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(
             dec,
