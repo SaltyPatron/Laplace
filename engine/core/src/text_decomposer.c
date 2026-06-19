@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "laplace/core/grapheme_floor.h"
+#include "laplace/core/normalize_nfc.h"
 #include "laplace/core/sentence_break.h"
 #include "laplace/core/tier_tree.h"
 #include "laplace/core/word_break.h"
@@ -22,14 +23,30 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
         return 0;
     }
 
+    // Canonicalization chokepoint: NFC-normalize once here so every content decomposition — and
+    // therefore every content entity id, across both the native compose path and the C# callers
+    // that invoke this directly — shares one canonical form ("café" NFC == "cafe´" NFD). This is
+    // what makes cross-source convergence ("same content = same hash") structural. Pure-ASCII is
+    // already NFC, so fast-path it to avoid an allocation on the hot path.
     const uint8_t* work = utf8;
     size_t work_len = len;
-
-    
+    uint8_t* nfc = NULL;
+    {
+        int has_non_ascii = 0;
+        for (size_t i = 0; i < len; ++i) { if (utf8[i] >= 0x80) { has_non_ascii = 1; break; } }
+        if (has_non_ascii) {
+            size_t nfc_len = 0;
+            if (laplace_normalize_nfc_utf8(utf8, len, &nfc, &nfc_len) == 0 && nfc && nfc_len > 0) {
+                work = nfc;
+                work_len = nfc_len;
+            }
+        }
+    }
 
     tier_tree_t* tree = NULL;
     laplace_grapheme_floor_t floor;
     int rc = laplace_grapheme_floor_build(work, work_len, &tree, &floor);
+    free(nfc);   // the floor copies cps/offsets; the input bytes are not referenced past here
     if (rc != 0) return rc;
 
     uint32_t* cps = floor.cps;

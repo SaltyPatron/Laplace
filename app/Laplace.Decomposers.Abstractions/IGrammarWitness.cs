@@ -27,4 +27,5 @@ public readonly record struct GrammarComposeContext(
     byte[] Utf8,
     GrammarAst Ast,
     Hash128 RootId,
-    GrammarRowComposer? Composer);
+    GrammarRowComposer? Composer,
+    int RootNodeIndex);

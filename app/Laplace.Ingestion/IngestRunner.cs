@@ -134,9 +134,7 @@ public sealed class IngestRunner
         
         
         
-        var commitPolicy = decomposer is IIngestCommitPolicy cp
-            ? cp.CommitParallelism
-            : IngestCommitParallelism.StrictSerial;
+        var commitPolicy = ResolveCommitParallelism(decomposer);
 
         if (options.ParallelWorkers <= 1
             || commitPolicy == IngestCommitParallelism.StrictSerial)
@@ -809,6 +807,29 @@ public sealed class IngestRunner
         ISubstrateReader Reader,
         ILogger Logger,
         string SubstrateVersion) : IDecomposerContext;
+
+    /// <summary>
+    /// Decomposer policy unless <c>LAPLACE_INGEST_COMMIT_PARALLELISM</c> overrides
+    /// (serial | unordered | epoch).
+    /// </summary>
+    internal static IngestCommitParallelism ResolveCommitParallelism(IDecomposer decomposer)
+    {
+        var env = Environment.GetEnvironmentVariable("LAPLACE_INGEST_COMMIT_PARALLELISM");
+        if (!string.IsNullOrWhiteSpace(env))
+        {
+            return env.Trim().ToLowerInvariant() switch
+            {
+                "serial" or "strict" or "strictserial" => IngestCommitParallelism.StrictSerial,
+                "unordered" or "parallel" => IngestCommitParallelism.Unordered,
+                "epoch" or "epochbarrier" or "barrier" => IngestCommitParallelism.EpochBarrier,
+                _ => throw new InvalidOperationException(
+                    $"unknown LAPLACE_INGEST_COMMIT_PARALLELISM='{env}' (use serial, unordered, or epoch)"),
+            };
+        }
+        return decomposer is IIngestCommitPolicy cp
+            ? cp.CommitParallelism
+            : IngestCommitParallelism.StrictSerial;
+    }
 }
 
 public sealed class LayerOrderingViolationException : Exception

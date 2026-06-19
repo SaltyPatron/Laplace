@@ -78,22 +78,16 @@ BEGIN
 END;
 $scb$;
 
+-- structural_neighbors / structural_locale are the SET-BASED plpgsql implementations in
+-- 20_converse.sql (angular distance computed inside the KNN CTE, not per-row). The former C bindings
+-- (pg_laplace_nearest_neighbors_4d / pg_laplace_structural_locale) were N+1 — one SPI angular_distance
+-- per candidate — so they are retired. nearest_neighbors_4d stays the public name as a thin alias.
 CREATE OR REPLACE FUNCTION nearest_neighbors_4d(p_word text, p_k integer DEFAULT 10)
     RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
-    LANGUAGE C STABLE STRICT
-    AS 'MODULE_PATHNAME', 'pg_laplace_nearest_neighbors_4d';
-
-
-CREATE OR REPLACE FUNCTION structural_neighbors(p_word text, p_k integer DEFAULT 10)
-    RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
-    LANGUAGE C STABLE
-    AS 'MODULE_PATHNAME', 'pg_laplace_nearest_neighbors_4d';
-
-CREATE OR REPLACE FUNCTION structural_locale(p_word text, p_near double precision DEFAULT 0.05)
-    RETURNS TABLE(nearest double precision, within_near bigint,
-                  within_2x bigint, within_5x bigint, isolated boolean)
-    LANGUAGE C STABLE
-    AS 'MODULE_PATHNAME', 'pg_laplace_structural_locale';
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT neighbor, geodesic, frechet FROM structural_neighbors(p_word, p_k)
+$$;
 
 CREATE OR REPLACE FUNCTION consensus_export_relations(p_type_id bytea)
     RETURNS TABLE(subject_id bytea, object_id bytea, rating bigint, witness_count bigint)

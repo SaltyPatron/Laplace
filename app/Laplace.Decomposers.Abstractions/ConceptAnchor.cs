@@ -33,7 +33,7 @@ public static class ConceptAnchor
     
     
     public static void AttestSynsetCategory(SubstrateChangeBuilder b, Hash128 synId, Hash128 source, double trust)
-        => b.AddAttestation(NativeAttestation.Categorical(synId, "IS_A", SynsetTypeId, source, trust));
+        => b.AddAttestation(NativeAttestation.Categorical(synId, "IS_TYPED_AS", SynsetTypeId, source, trust));
 
     
     

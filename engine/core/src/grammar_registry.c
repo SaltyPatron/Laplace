@@ -142,6 +142,16 @@ const TSLanguage* laplace_grammar_lookup_by_ext(const char* ext) {
     return NULL;
 }
 
+// The modality id (e.g. "python", "rust") for a file extension, or NULL. This is the single source
+// of truth for ext->modality; managed decomposers route through it instead of duplicating the map.
+const char* laplace_grammar_modality_by_ext(const char* ext) {
+    if (!ext) return NULL;
+    for (size_t i = 0; i < EXT_COUNT; ++i)
+        if (strcmp(EXTS[i].ext, ext) == 0)
+            return EXTS[i].id;
+    return NULL;
+}
+
 size_t laplace_grammar_list(const char** out, size_t cap) {
     if (out)
         for (size_t i = 0; i < GRAMMAR_COUNT && i < cap; ++i)

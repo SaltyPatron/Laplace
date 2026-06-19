@@ -116,7 +116,7 @@ public sealed class PropBankDecomposerTests
         Assert.NotNull(giverId);
         Assert.NotNull(agentId);
         Assert.Contains(atts, a =>
-            a.TypeId == RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO")
+            a.TypeId == RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO")
             && a.ContextId == vnId!.Value
             && (a.SubjectId == giverId!.Value || a.ObjectId == giverId!.Value)
             && (a.SubjectId == agentId!.Value || a.ObjectId == agentId!.Value));

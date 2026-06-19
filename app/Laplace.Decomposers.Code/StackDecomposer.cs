@@ -106,7 +106,7 @@ public sealed class StackDecomposer : IDecomposer
             yield break;
         }
 
-        int batch = options.BatchSize > 1 ? options.BatchSize : 32;
+        int batch = options.BatchSize > 1 ? options.BatchSize : 512;
         var b = NewBuilder(0);
         int inBatch = 0, bn = 0;
 

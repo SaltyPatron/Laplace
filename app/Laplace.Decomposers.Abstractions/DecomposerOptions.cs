@@ -7,7 +7,9 @@ public sealed record DecomposerOptions(
     IReadOnlySet<string>?     ExcludeFilter,
     LanguageFilter?           Languages = null,
     
-    bool                      EmitCrossLanguageLinks = true)
+    bool                      EmitCrossLanguageLinks = true,
+    /// <summary>Stop after this many input rows/units (0 = unlimited). Sandbox / benchmark cap.</summary>
+    long                      MaxInputUnits = 0)
 {
     public static DecomposerOptions Default { get; } =
         new(BatchSize: 1, DryRun: false, IncludeFilter: null, ExcludeFilter: null);

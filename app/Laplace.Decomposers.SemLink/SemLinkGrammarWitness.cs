@@ -59,7 +59,7 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
                     if (!JsonGrammarHelper.TryComposedNode(ctx, thetaNode, out var thetaId))
                         continue;
                     b.AddAttestation(NativeAttestation.Categorical(
-                        argId, "CORRESPONDS_TO", thetaId, SemLinkDecomposer.Source, TC.AcademicCurated,
+                        argId, "ROLE_CORRESPONDS_TO", thetaId, SemLinkDecomposer.Source, TC.AcademicCurated,
                         contextId: vnEntity.Value));
                 }
             }
@@ -101,6 +101,7 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
         Hash128? id = CategoryAnchor.Id(key);
         if (id is null) return null;
         b.AddEntity(new EntityRow(id.Value, EntityTier.Vocabulary, categoryTypeId, SemLinkDecomposer.Source));
+        CategoryAnchor.AttestCategory(b, id.Value, categoryTypeId, SemLinkDecomposer.Source, TC.AcademicCurated);
         return id;
     }
 }

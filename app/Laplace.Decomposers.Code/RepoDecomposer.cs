@@ -26,46 +26,8 @@ public sealed class RepoDecomposer : IDecomposer
     private static readonly Hash128 RepoTypeId = EntityTypeRegistry.RepoRoot;
     private static readonly Hash128 FileTypeId = EntityTypeRegistry.SourceFile;
 
-    private static readonly Dictionary<string, string> ExtToModality =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            
-            ["py"]   = "python",
-            ["c"]    = "c",    ["h"]   = "c",
-            ["cpp"]  = "cpp",  ["cc"]  = "cpp", ["cxx"] = "cpp", ["hpp"] = "cpp", ["hh"] = "cpp",
-            ["js"]   = "javascript", ["mjs"] = "javascript", ["cjs"] = "javascript",
-            ["ts"]   = "typescript", ["tsx"] = "typescript",
-            ["rs"]   = "rust",
-            ["go"]   = "go",
-            ["cs"]   = "c-sharp",
-            ["sh"]   = "bash", ["bash"] = "bash",
-            ["json"] = "json",
-            ["md"]   = "markdown",
-            
-            ["java"]    = "java",
-            ["rb"]      = "ruby",   ["rake"] = "ruby",
-            ["jl"]      = "julia",
-            ["kt"]      = "kotlin", ["kts"]  = "kotlin",
-            ["php"]     = "php",
-            ["sql"]     = "sql",    ["ddl"]  = "sql",   ["dml"] = "sql",
-            ["swift"]   = "swift",
-            
-            ["cu"]      = "cuda",   ["cuh"]  = "cuda",
-            ["glsl"]    = "glsl",   ["vert"] = "glsl",  ["frag"] = "glsl",
-                                    ["comp"] = "glsl",  ["geom"] = "glsl",
-            ["hlsl"]    = "hlsl",   ["hlsli"] = "hlsl",
-            ["wgsl"]    = "wgsl",
-            ["f90"]     = "fortran", ["f95"] = "fortran", ["f"]  = "fortran",
-                                     ["for"] = "fortran",
-            ["s"]       = "asm",    
-            ["ll"]      = "llvm",
-            ["mlir"]    = "mlir",
-            ["cmake"]   = "cmake",
-            ["ispc"]    = "ispc",
-            ["zig"]     = "zig",
-        };
-
-    
+    // ext->modality is owned by the native registry (GrammarDecomposer.ModalityByExt); this map only
+    // covers extension-less filenames the ext lookup can't reach.
     private static readonly Dictionary<string, string> FileNameToModality =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -112,7 +74,7 @@ public sealed class RepoDecomposer : IDecomposer
         string repoCanonical = $"repo:{Path.GetFullPath(root)}/v1";
         _canonicalNames.Add(repoCanonical);
         var repoId = Hash128.OfCanonical(repoCanonical);
-        int batch = options.BatchSize > 1 ? options.BatchSize : 32;
+        int batch = options.BatchSize > 1 ? options.BatchSize : 512;
         var b = NewBuilder(0);
         int inBatch = 0, bn = 0;
         b.AddEntity(new EntityRow(repoId, EntityTier.Vocabulary, RepoTypeId, Source));
@@ -129,8 +91,10 @@ public sealed class RepoDecomposer : IDecomposer
             string fileName = Path.GetFileName(file);
             string ext = Path.GetExtension(file);
             if (ext.Length > 0 && ext[0] == '.') ext = ext[1..];
-            if (!FileNameToModality.TryGetValue(fileName, out var modality) &&
-                !ExtToModality.TryGetValue(ext, out modality)) continue;
+            string? modality = FileNameToModality.TryGetValue(fileName, out var nameMod)
+                ? nameMod
+                : (ext.Length == 0 ? null : GrammarDecomposer.ModalityByExt(ext.ToLowerInvariant()));
+            if (modality is null) continue;
 
             IntPtr recipe = GrammarDecomposer.LookupById(modality);
             if (recipe == IntPtr.Zero) continue;

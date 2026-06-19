@@ -93,8 +93,21 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
             string file = Path.Combine(ecosystemPath, $"{split}.tsv");
             if (!File.Exists(file)) continue;
 
-            await foreach (var change in Atomic2020FastIngest.IngestFileAsync(
-                file, split, batch, SplitId(split), ct))
+            var witness = new Atomic2020GrammarWitness();
+            Hash128 splitId = SplitId(split);
+
+            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
+                file,
+                modalityId: "tsv",
+                sourceId: Source,
+                witness: witness,
+                batchSize: batch,
+                witnessWeight: 1.0,
+                batchLabelPrefix: $"atomic/{split}",
+                reportUnits: null,
+                contextId: splitId,
+                commitEpoch: 0,
+                ct: ct))
             {
                 yield return change;
             }

@@ -51,7 +51,7 @@ public sealed class VerbNetDecomposer : IDecomposer
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         string classDir = ResolveClassDir(context.EcosystemPath);
-        int batch = options.BatchSize > 1 ? options.BatchSize : 64;
+        int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
 
         var b = NewBuilder("verbnet/batch-0", batch);
         int n = 0, bn = 0;

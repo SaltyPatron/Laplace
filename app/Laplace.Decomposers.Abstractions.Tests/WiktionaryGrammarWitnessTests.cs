@@ -29,7 +29,7 @@ public sealed class WiktionaryGrammarWitnessTests
     foreach (var e in ents) b.AddEntity(e);
     foreach (var p in phys) b.AddPhysicality(p);
 
-    var ctx = new GrammarComposeContext(utf8, ast, root, composer);
+    var ctx = new GrammarComposeContext(utf8, ast, root, composer, JsonGrammarHelper.FindRootObjectNode(ast));
     Assert.True(JsonGrammarHelper.TryComposedProperty(ctx, "word", out var wordId), "word must resolve to composed id");
     Assert.NotEqual(default, wordId);
 

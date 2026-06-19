@@ -180,6 +180,7 @@ internal sealed class WiktionaryGrammarWitness : IGrammarWitness
             int argsObj = JsonGrammarHelper.FindNestedObject(composed, etObj, "args");
             if (argsObj < 0) continue;
             if (!JsonGrammarHelper.TryComposedPropertyOnObject(composed, argsObj, "3", out var termId)) continue;
+            if (JsonGrammarHelper.IsEmptyOrDashPlaceholder(composed, argsObj, "3")) continue;
             Attest(b, wordId, "ETYMOLOGICALLY_DERIVED_FROM", termId, null);
         }
     }

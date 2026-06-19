@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "laplace/core/codepoint_table.h"
+#include "laplace/core/content_witness_batch.h"
 #include "laplace/core/grapheme_floor.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/hash_composer.h"
@@ -103,11 +104,13 @@ static int json_leaf_fill_grapheme_children(
     const uint8_t* utf8, size_t len, laplace_ast_t* ast, size_t idx,
     laplace_compose_result_t* r, hash128_t source_id,
     hash128_t** emitted_entity, size_t* emitted_entity_n, size_t* emitted_entity_cap,
-    hash128_t** out_ids, double** out_coords, uint64_t** out_flags, size_t* out_m) {
+    hash128_t** out_ids, double** out_coords, uint64_t** out_flags, size_t* out_m,
+    hash128_t* out_root_id) {
     *out_ids = NULL;
     *out_coords = NULL;
     *out_flags = NULL;
     *out_m = 0;
+    if (out_root_id) hash128_zero(out_root_id);
 
     laplace_ast_node_t node;
     if (laplace_ast_get_node(ast, idx, &node) != 0) return -1;
@@ -127,6 +130,18 @@ static int json_leaf_fill_grapheme_children(
         return -1;
     }
     if (span_len == 0) return -1;
+
+    // Identity convergence: a JSON scalar leaf's entity id must equal the canonical
+    // content root id (laplace_content_root_id) so that the same surface ("New York",
+    // a gloss, a lemma) decomposed by a structured source (Wiktionary/JSON) and by the
+    // content path (WordNet/OMW/VerbNet via ContentWitnessBatch) resolves to ONE entity.
+    // Both call content_tree_build + natural_unit_index, so the ids match by construction.
+    // Falls back to the grapheme-merkle id below if the content tree can't be built
+    // (e.g. perfcache not loaded).
+    if (out_root_id) {
+        if (laplace_content_root_id(span, span_len, out_root_id) != 0)
+            hash128_zero(out_root_id);
+    }
 
     tier_tree_t* local_tree = NULL;
     laplace_grapheme_floor_t local_floor;
@@ -236,6 +251,8 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
         uint64_t*   child_flags  = NULL;
         size_t      m            = 0;
         uint8_t     tier         = 0;
+        hash128_t   leaf_root_id;
+        hash128_zero(&leaf_root_id);
 
         if (kid_n > 0) {
             child_ids    = (hash128_t*)malloc(kid_n * sizeof(hash128_t));
@@ -267,7 +284,8 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
             if (json_leaf_fill_grapheme_children(
                     utf8, len, ast, idx, r, source_id,
                     emitted_entity, emitted_entity_n, emitted_entity_cap,
-                    &child_ids, &child_coords, &child_flags, &m) != 0)
+                    &child_ids, &child_coords, &child_flags, &m,
+                    &leaf_root_id) != 0)
                 continue;
             tier = 2;
         } else {
@@ -309,6 +327,12 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
         hilbert128_t hb;
         hash_composer_compose_node(tier, child_ids, child_coords, m,
                                    &st->comp_id[idx], out_coord, &hb);
+        // For a JSON scalar leaf, adopt the canonical content root id so the entity
+        // (and the span lookup / edge endpoints derived from it) converges with the
+        // content-witness path. Coord/physicality stay grapheme-derived and remain
+        // source-scoped, which is intended.
+        if (leaf_root_id.hi != 0 || leaf_root_id.lo != 0)
+            st->comp_id[idx] = leaf_root_id;
         memcpy(st->comp_coord + idx * 4, out_coord, 4 * sizeof(double));
         st->comp_tier[idx]  = tier;
         st->comp_valid[idx] = 1;
@@ -502,7 +526,7 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
             if (json_leaf_fill_grapheme_children(
                     utf8, len, ast, idx, NULL, source_id,
                     NULL, NULL, NULL,
-                    &child_ids, &jcoords, &child_flags, &m) == 0) {
+                    &child_ids, &jcoords, &child_flags, &m, NULL) == 0) {
                 free(jcoords);
             } else {
                 child_ids = NULL;

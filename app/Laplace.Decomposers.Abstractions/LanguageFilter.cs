@@ -52,6 +52,29 @@ public sealed class LanguageFilter
         return true;
     }
 
+    public bool MatchesAllUtf8(ReadOnlySpan<byte> first, ReadOnlySpan<byte> second)
+    {
+        if (!IsActive) return true;
+        return MatchesRawUtf8(first) && MatchesRawUtf8(second);
+    }
+
+    private bool MatchesRawUtf8(ReadOnlySpan<byte> rawLangCode)
+    {
+        if (!IsActive) return true;
+        if (rawLangCode.IsEmpty) return false;
+        string? c = rawLangCode.Length <= 8
+            ? LanguageReference.ResolveCode(Utf8ToString(rawLangCode))
+            : LanguageReference.ResolveCode(System.Text.Encoding.UTF8.GetString(rawLangCode));
+        return c is not null && _canon.Contains(c);
+    }
+
+    private static string Utf8ToString(ReadOnlySpan<byte> utf8)
+    {
+        Span<char> chars = stackalloc char[8];
+        int n = System.Text.Encoding.UTF8.GetChars(utf8, chars);
+        return new string(chars[..n]);
+    }
+
     
     public bool MatchesAny(params string?[] rawLangCodes)
     {

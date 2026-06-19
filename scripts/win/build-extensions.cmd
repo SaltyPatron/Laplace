@@ -4,10 +4,12 @@ call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 
 set "RECONF=0"
+set "CLEAN_FIRST=0"
 set "TARGETS="
 :parse
 if "%~1"=="" goto parsed
 if /i "%~1"=="--reconfigure" ( set "RECONF=1" & shift /1 & goto parse )
+if /i "%~1"=="--clean-first" ( set "CLEAN_FIRST=1" & shift /1 & goto parse )
 set "TARGETS=!TARGETS! %~1"
 shift /1
 goto parse
@@ -33,10 +35,12 @@ cmake -B build-win-ext -S extension -G Ninja ^
 if errorlevel 1 goto fail
 
 :build
+set "BUILD_FLAGS="
+if "%CLEAN_FIRST%"=="1" set "BUILD_FLAGS=--clean-first"
 if defined TARGETS (
-  cmake --build build-win-ext --target%TARGETS%
+  cmake --build build-win-ext %BUILD_FLAGS% --target%TARGETS%
 ) else (
-  cmake --build build-win-ext
+  cmake --build build-win-ext %BUILD_FLAGS%
 )
 if errorlevel 1 goto fail
 

@@ -61,7 +61,7 @@ public sealed class PropBankDecomposer : IDecomposer
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         string framesDir = ResolveFramesDir(context.EcosystemPath);
-        int batch = options.BatchSize > 1 ? options.BatchSize : 64;
+        int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
 
         var b = NewBuilder("propbank/batch-0", batch);
         int n = 0, bn = 0;
@@ -175,7 +175,7 @@ public sealed class PropBankDecomposer : IDecomposer
                     var thetaId = ContentEmitter.Emit(b, theta, Source);
                     if (thetaId is not null)
                         b.AddAttestation(NativeAttestation.Categorical(
-                            roleId.Value, "CORRESPONDS_TO", thetaId.Value, Source, TC.AcademicCurated,
+                            roleId.Value, "ROLE_CORRESPONDS_TO", thetaId.Value, Source, TC.AcademicCurated,
                             contextId: vnEntity));
                 }
             }

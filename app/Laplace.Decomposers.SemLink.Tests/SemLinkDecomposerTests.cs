@@ -55,7 +55,9 @@ public sealed class SemLinkDecomposerTests
     [Fact]
     public async Task PbVn_Role_Level_Maps_Arg_Content_To_Theta_Content_With_Class_Context()
     {
-        var atts = await CollectAttestationsAsync();
+        var (_, allAtts) = await CollectAllAsync();
+        var atts = allAtts.Where(
+            a => a.TypeId == RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO")).ToList();
         var (argId, thetaId) = ComposedArgThetaIds();
         var vnId = CategoryAnchor.Id("13.1-1")!.Value;
         Assert.Contains(atts, a =>
@@ -123,7 +125,7 @@ public sealed class SemLinkDecomposerTests
         using var ast = GrammarDecomposer.Parse(utf8, recipe);
         using var composer = new GrammarRowComposer(utf8, ast, SemLinkDecomposer.Source, "json");
         var (_, _, _, root) = composer.Materialize(1.0);
-        var ctx = new GrammarComposeContext(utf8, ast, root, composer);
+        var ctx = new GrammarComposeContext(utf8, ast, root, composer, JsonGrammarHelper.FindRootObjectNode(ast));
         int rootObj = JsonGrammarHelper.FindRootObjectNode(ast);
         foreach (var (_, vnObjNode) in JsonGrammarHelper.EnumerateObjectPairs(ast, rootObj))
         {

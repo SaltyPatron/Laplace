@@ -39,9 +39,9 @@ public class ConceptAnchorTests
         Assert.True(b.ContentStage.EntityCount > 0, "decomposed ILI anchor must stage entities");
 
         var change = b.Build();
-        var isA = RelationTypeRegistry.RelationTypeId("IS_A");
-        Assert.Contains(change.Attestations, a =>                  
-            a.SubjectId == id!.Value && a.TypeId == isA && a.ObjectId == EntityTypeRegistry.WordNetSynset);
+        var typedAs = RelationTypeRegistry.RelationTypeId("IS_TYPED_AS");
+        Assert.Contains(change.Attestations, a =>
+            a.SubjectId == id!.Value && a.TypeId == typedAs && a.ObjectId == EntityTypeRegistry.WordNetSynset);
     }
 
     

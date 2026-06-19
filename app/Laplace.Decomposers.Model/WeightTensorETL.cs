@@ -34,6 +34,17 @@ public static class WeightTensorETL
     {
         var tref = refMap[name];
         byte[] raw = LoadRawBytes(refMap, name);
+        // Guard: expectedElements comes from config.json (vocab*hidden, …), independent of the actual
+        // on-disk tensor. If it overshoots the buffer, the decode loops below read past the end of `raw`
+        // into adjacent heap and silently corrupt weights. Reject the mismatch (overflow-safe compare).
+        long bytesPer = BytesPerElement(tref.Dtype);
+        if (expectedElements < 0)
+            throw new ArgumentOutOfRangeException(nameof(expectedElements), "negative element count");
+        if (bytesPer > 0 && expectedElements > raw.LongLength / bytesPer)
+            throw new InvalidDataException(
+                $"safetensors: tensor '{name}' dtype {tref.Dtype} holds {raw.LongLength} bytes, too few " +
+                $"for {expectedElements} elements x {bytesPer}B — config.json shape disagrees with the " +
+                "tensor; refusing to read past the buffer.");
         float[] result = new float[expectedElements];
         long n = expectedElements;
         unsafe
@@ -76,6 +87,17 @@ public static class WeightTensorETL
         }
         return result;
     }
+
+    // Byte size per element, matching the dtype set decoded in LoadTensorF32. Unknown dtypes return 0
+    // so the guard is skipped and the decode switch's default branch throws NotSupported instead.
+    private static long BytesPerElement(string dtype) => dtype switch
+    {
+        "F64" or "I64" => 8,
+        "F32" or "I32" => 4,
+        "F16" or "BF16" or "I16" => 2,
+        "F8_E5M2" or "F8_E4M3" or "I8" or "U8" or "BOOL" => 1,
+        _ => 0,
+    };
 
     private static float DecodeE5M2(byte b)
     {

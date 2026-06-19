@@ -197,6 +197,9 @@ public static unsafe partial class NativeInterop
     internal static partial byte* IntentStageTuplePtr(
         IntPtr stage, int table, nuint* outLen);
 
+    [LibraryImport(Library, EntryPoint = "intent_stage_witness_seen")]
+    internal static partial int IntentStageWitnessSeen(IntPtr stage, Hash128* id);
+
     [LibraryImport(Library, EntryPoint = "glicko2_effective_mu")]
     internal static partial long Glicko2EffectiveMu(Glicko2State* state);
 
@@ -215,6 +218,9 @@ public static unsafe partial class NativeInterop
 
     [LibraryImport(Library, EntryPoint = "laplace_grammar_lookup_by_ext", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr GrammarLookupByExt(string ext);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grammar_modality_by_ext", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr GrammarModalityByExt(string ext);
 
     [LibraryImport(Library, EntryPoint = "laplace_grammar_parse")]
     internal static partial int GrammarParse(byte* utf8, nuint len, IntPtr recipe, IntPtr* outAst);
@@ -313,11 +319,29 @@ public static unsafe partial class NativeInterop
     public static partial int GrammarRowIterFeed(
         IntPtr iter, byte* chunk, nuint len, ParsedRowNative** outRows, nuint* outCount);
 
+    [LibraryImport(Library, EntryPoint = "laplace_grammar_row_iter_feed_lines")]
+    public static partial int GrammarRowIterFeedLines(
+        IntPtr iter, byte* chunk, nuint len, RawRowNative** outRows, nuint* outCount);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grammar_row_iter_parse_row")]
+    public static partial int GrammarRowIterParseRow(
+        IntPtr iter, byte* rowUtf8, nuint rowLen, IntPtr* outAst);
+
     [LibraryImport(Library, EntryPoint = "laplace_grammar_row_iter_free")]
     public static partial void GrammarRowIterFree(IntPtr iter);
 
     [LibraryImport(Library, EntryPoint = "laplace_grammar_row_iter_free_rows")]
     public static partial void GrammarRowIterFreeRows(ParsedRowNative* rows, nuint count);
+
+    [LibraryImport(Library, EntryPoint = "laplace_grammar_row_iter_free_lines")]
+    public static partial void GrammarRowIterFreeLines(RawRowNative* rows, nuint count);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RawRowNative
+    {
+        public IntPtr RowUtf8;
+        public UIntPtr RowLen;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     public struct ParsedRowNative
@@ -367,6 +391,9 @@ public static unsafe partial class NativeInterop
 
     [LibraryImport(Library, EntryPoint = "content_witness_reset")]
     internal static partial void ContentWitnessReset();
+
+    [LibraryImport(Library, EntryPoint = "content_witness_entity_proven")]
+    internal static partial int ContentWitnessEntityProven(Hash128* id);
 
     [LibraryImport(Library, EntryPoint = "laplace_content_root_id")]
     internal static partial int ContentRootId(

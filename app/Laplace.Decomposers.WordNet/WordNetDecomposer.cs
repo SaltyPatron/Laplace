@@ -122,6 +122,9 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
 
         await foreach (var change in StreamExceptionsAsync(dictDir, batch, ct))
         { if (!options.DryRun) yield return change; await Task.Yield(); }
+
+        await foreach (var change in StreamVerbSentencesAsync(dictDir, batch, ct))
+        { if (!options.DryRun) yield return change; await Task.Yield(); }
     }
 
     public Task<IngestInventory?> DescribeInputAsync(
@@ -212,8 +215,8 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         foreach (var lemma in syn.Lemmas)
             EmitSurface(b, lemma, Source);
 
-        var (def, examples) = ParseGloss(syn.Gloss);
-        if (def.Length > 0) EmitSurface(b, def, Source);
+        var (defs, examples) = ParseGloss(syn.Gloss);
+        foreach (var d in defs) EmitSurface(b, d, Source);
         foreach (var ex in examples) EmitSurface(b, ex, Source);
 
         if (syn.LexFilenum >= 0 && syn.LexFilenum < Lexnames.Length)
@@ -254,10 +257,10 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
                 _vocabularyNames);
         }
 
-        var (def, examples) = ParseGloss(syn.Gloss);
-        if (def.Length > 0)
+        var (defs, examples) = ParseGloss(syn.Gloss);
+        foreach (var d in defs)
         {
-            var defId = RootSurface(def);
+            var defId = RootSurface(d);
             if (defId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
                     synId, "HAS_DEFINITION", defId.Value, Source, SourceTrust.StandardsDerived));
@@ -298,8 +301,11 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         foreach (var ptr in syn.Pointers)
         {
             if (!PointerTypes.TryGetValue(ptr.Symbol, out var typeName)) continue;
-            
-            
+            // Verb '@' is troponymy ("to dog is a manner of to pursue"), not noun subsumption — emit the
+            // existing MANNER_OF channel so it is not conflated/rendered as "is a pursue".
+            if (syn.SsType == 'v' && ptr.Symbol == "@")
+                typeName = "MANNER_OF";
+
             Hash128? tgt = ConceptAnchor.SynsetId(ptr.TargetOffset, ptr.TargetPos);
             if (tgt is null) continue;
             b.AddAttestation(NativeAttestation.Categorical(
@@ -437,10 +443,95 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         if (count > 0) yield return b.Build();
     }
 
-    private static (string Def, List<string> Examples) ParseGloss(string gloss)
+    private static async IAsyncEnumerable<SubstrateChange> StreamVerbSentencesAsync(
+        string dictDir, int batch,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        string idxPath = Path.Combine(dictDir, "sentidx.vrb");
+        string sentsPath = Path.Combine(dictDir, "sents.vrb");
+        if (!File.Exists(idxPath) || !File.Exists(sentsPath)) yield break;
+
+        var sentences = await LoadVerbSentencesAsync(sentsPath, ct);
+        if (sentences.Count == 0) yield break;
+
+        var senseIndex = await LoadSenseKeyIndexAsync(Path.Combine(dictDir, "index.sense"), ct);
+        if (senseIndex.Count == 0) yield break;
+
+        var b = NewBuilder("wordnet/sents-0", entitiesOnly: false, batch);
+        int count = 0, batchNum = 0;
+
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(idxPath, ct))
+        {
+            ct.ThrowIfCancellationRequested();
+            ReadOnlySpan<byte> line = lineMem.Span.Trim((byte)' ');
+            if (line.IsEmpty) continue;
+
+            int sp = line.IndexOf((byte)' ');
+            if (sp <= 0) continue;
+            string senseKey = System.Text.Encoding.UTF8.GetString(line[..sp]);
+            string? normKey = SourceEntityIdConventions.NormalizeSenseKey(senseKey);
+            if (normKey is null || !senseIndex.TryGetValue(normKey, out var syn)) continue;
+
+            Hash128? synId = ConceptAnchor.SynsetId(syn.Offset, syn.Pos);
+            if (synId is null) continue;
+
+            ReadOnlySpan<byte> idList = line[(sp + 1)..];
+            int idStart = 0;
+            for (int i = 0; i <= idList.Length; i++)
+            {
+                if (i < idList.Length && idList[i] != (byte)',') continue;
+                var idSpan = idList[idStart..i].Trim((byte)' ');
+                idStart = i + 1;
+                if (idSpan.IsEmpty) continue;
+                if (!int.TryParse(System.Text.Encoding.UTF8.GetString(idSpan), out int sentId)) continue;
+                if (!sentences.TryGetValue(sentId, out string? sentText) || sentText.Length == 0) continue;
+
+                var exId = EmitSurface(b, sentText, Source);
+                if (exId is not null)
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        synId.Value, "HAS_EXAMPLE", exId.Value, Source, SourceTrust.StandardsDerived));
+            }
+
+            if (++count >= batch)
+            {
+                yield return b.Build();
+                b = NewBuilder($"wordnet/sents-{++batchNum}", entitiesOnly: false, batch);
+                count = 0;
+            }
+        }
+        if (count > 0) yield return b.Build();
+    }
+
+    private static async Task<Dictionary<int, string>> LoadVerbSentencesAsync(
+        string path, CancellationToken ct)
+    {
+        var map = new Dictionary<int, string>();
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            ReadOnlySpan<byte> line = lineMem.Span.Trim((byte)' ');
+            if (line.IsEmpty) continue;
+            int sp = line.IndexOf((byte)' ');
+            if (sp <= 0) continue;
+            if (!int.TryParse(System.Text.Encoding.UTF8.GetString(line[..sp]), out int id)) continue;
+            string text = System.Text.Encoding.UTF8.GetString(line[(sp + 1)..]).Trim();
+            if (text.Length > 0) map[id] = text;
+        }
+        return map;
+    }
+
+    private static async Task<Dictionary<string, (long Offset, char Pos)>> LoadSenseKeyIndexAsync(
+        string path, CancellationToken ct)
+    {
+        var map = new Dictionary<string, (long, char)>(StringComparer.Ordinal);
+        await foreach (var s in ParseSensesAsync(path, ct))
+            map.TryAdd(s.SenseKey, (s.Offset, s.Pos));
+        return map;
+    }
+
+    private static (List<string> Defs, List<string> Examples) ParseGloss(string gloss)
     {
         var examples = new List<string>();
-        if (string.IsNullOrEmpty(gloss)) return ("", examples);
+        if (string.IsNullOrEmpty(gloss)) return (new List<string>(), examples);
         var def = new System.Text.StringBuilder(gloss.Length);
         int i = 0;
         while (i < gloss.Length)
@@ -455,7 +546,10 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
             }
             else { def.Append(gloss[i]); i++; }
         }
-        return (def.ToString().Trim().Trim(';', ' ').Trim(), examples);
+        // WordNet glosses use ';' to separate senses/clauses. Split into clean definition units so the
+        // content geometry + co-occurrence (the field the attention/embed dot products read) isn't a
+        // 150-word blob. ';' is the per-source delimiter parameter.
+        return (DelimitedContent.Split(def.ToString(), ';'), examples);
     }
 
     private static async IAsyncEnumerable<WnSynset> ParseDataAsync(
@@ -464,55 +558,64 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
         {
             string line = System.Text.Encoding.UTF8.GetString(lineMem.Span);
-            if (line.Length == 0 || line[0] == ' ') continue;
-
-            int glossSep = line.IndexOf(" | ", StringComparison.Ordinal);
-            string synData = glossSep >= 0 ? line[..glossSep] : line;
-            string gloss   = glossSep >= 0 ? line[(glossSep + 3)..] : "";
-
-            var parts = synData.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length < 4) continue;
-
-            if (!long.TryParse(parts[0], out long offset)) continue;
-            if (!int.TryParse(parts[1], out int lexFilenum)) lexFilenum = -1;
-            char ssType = parts[2].Length > 0 ? parts[2][0] : 'n';
-            if (!int.TryParse(parts[3], NumberStyles.HexNumber, null, out int wCnt)) continue;
-
-            int idx = 4;
-            var lemmas = new List<string>(wCnt);
-            for (int w = 0; w < wCnt && idx + 1 < parts.Length; w++)
-            {
-                lemmas.Add(parts[idx]);
-                idx += 2;
-            }
-
-            if (idx >= parts.Length || !int.TryParse(parts[idx++], out int pCnt)) continue;
-            var pointers = new List<WnPointer>(pCnt);
-            for (int p = 0; p < pCnt && idx + 3 < parts.Length; p++)
-            {
-                string sym = parts[idx++];
-                if (!long.TryParse(parts[idx++], out long tgtOffset)) { idx += 2; continue; }
-                char tgtPos = parts[idx++][0];
-                idx++;
-                pointers.Add(new WnPointer(sym, tgtOffset, tgtPos));
-            }
-
-            var frames = new List<(int Frame, int WordNum)>();
-            if (idx < parts.Length && int.TryParse(parts[idx], out int fCnt) && fCnt > 0)
-            {
-                idx++;
-                for (int f = 0; f < fCnt && idx + 2 < parts.Length + 1; f++)
-                {
-                    if (idx + 2 > parts.Length || parts[idx] != "+") break;
-                    idx++;
-                    if (!int.TryParse(parts[idx++], out int fNum)) break;
-                    if (!int.TryParse(parts[idx++], NumberStyles.HexNumber, null, out int wNum)) break;
-                    frames.Add((fNum, wNum));
-                }
-            }
-
-            yield return new WnSynset(offset, ssType, lexFilenum, lemmas, pointers, gloss, frames);
+            if (TryParseDataLine(line, out var syn))
+                yield return syn;
         }
+    }
+
+    internal static bool TryParseDataLine(string line, out WnSynset syn)
+    {
+        syn = null!;
+        if (line.Length == 0 || line[0] == ' ') return false;
+
+        int glossSep = line.IndexOf(" | ", StringComparison.Ordinal);
+        string synData = glossSep >= 0 ? line[..glossSep] : line;
+        string gloss   = glossSep >= 0 ? line[(glossSep + 3)..] : "";
+
+        var parts = synData.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 4) return false;
+
+        if (!long.TryParse(parts[0], out long offset)) return false;
+        if (!int.TryParse(parts[1], out int lexFilenum)) lexFilenum = -1;
+        char ssType = parts[2].Length > 0 ? parts[2][0] : 'n';
+        if (!int.TryParse(parts[3], NumberStyles.HexNumber, null, out int wCnt)) return false;
+
+        int idx = 4;
+        var lemmas = new List<string>(wCnt);
+        for (int w = 0; w < wCnt && idx + 1 < parts.Length; w++)
+        {
+            lemmas.Add(parts[idx]);
+            idx += 2;
+        }
+
+        if (idx >= parts.Length || !int.TryParse(parts[idx++], out int pCnt)) return false;
+        var pointers = new List<WnPointer>(pCnt);
+        for (int p = 0; p < pCnt && idx + 3 < parts.Length; p++)
+        {
+            string sym = parts[idx++];
+            if (!long.TryParse(parts[idx++], out long tgtOffset)) { idx += 2; continue; }
+            char tgtPos = parts[idx++][0];
+            idx++;
+            pointers.Add(new WnPointer(sym, tgtOffset, tgtPos));
+        }
+
+        var frames = new List<(int Frame, int WordNum)>();
+        if (ssType == 'v' && idx < parts.Length && int.TryParse(parts[idx], out int fCnt) && fCnt > 0)
+        {
+            idx++;
+            for (int f = 0; f < fCnt; f++)
+            {
+                if (idx + 2 >= parts.Length) break;
+                if (parts[idx] != "+") break;
+                idx++;
+                if (!int.TryParse(parts[idx++], out int fNum)) break;
+                if (!int.TryParse(parts[idx++], NumberStyles.HexNumber, null, out int wNum)) break;
+                frames.Add((fNum, wNum));
+            }
+        }
+
+        syn = new WnSynset(offset, ssType, lexFilenum, lemmas, pointers, gloss, frames);
+        return true;
     }
 
     private static async IAsyncEnumerable<WnSense> ParseSensesAsync(
@@ -552,12 +655,12 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         }
     }
 
-    private sealed record WnSynset(
+    internal sealed record WnSynset(
         long Offset, char SsType, int LexFilenum,
         List<string> Lemmas, List<WnPointer> Pointers, string Gloss,
         List<(int Frame, int WordNum)> Frames);
 
-    private readonly record struct WnPointer(string Symbol, long TargetOffset, char TargetPos);
+    internal readonly record struct WnPointer(string Symbol, long TargetOffset, char TargetPos);
 
     private sealed record WnSense(string SenseKey, long Offset, char Pos, string Lemma, int TagCount);
 }

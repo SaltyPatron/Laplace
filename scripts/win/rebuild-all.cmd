@@ -15,6 +15,9 @@ exit /b 2
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 
+set "NATIVE_FLAGS="
+if "%SKIP_CLEAN%"=="1" set "NATIVE_FLAGS=--clean-first"
+
 if "%SKIP_CLEAN%"=="0" (
   echo.
   echo ===== PHASE 1 — CLEAN =====
@@ -28,9 +31,17 @@ if "%SKIP_CLEAN%"=="0" (
     echo removing build-win-ext ...
     rmdir /s /q "%LAPLACE_ROOT%\build-win-ext"
   )
+  if exist "%LAPLACE_ROOT%\app\Laplace.Cli\bin" (
+    echo removing app Release bin ...
+    rmdir /s /q "%LAPLACE_ROOT%\app\Laplace.Cli\bin"
+  )
+  if exist "%LAPLACE_ROOT%\app\Laplace.Cli\obj" (
+    echo removing app Release obj ...
+    rmdir /s /q "%LAPLACE_ROOT%\app\Laplace.Cli\obj"
+  )
 ) else (
   echo.
-  echo ===== PHASE 1 — CLEAN [skipped: --skip-clean] =====
+  echo ===== PHASE 1 — CLEAN [skipped: --skip-clean; native uses --clean-first] =====
 )
 
 echo.
@@ -39,11 +50,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%LAPLACE_ROOT%\scripts\code
 
 echo.
 echo ===== PHASE 3 — BUILD ENGINE =====
-call "%~dp0build-engine.cmd" || exit /b 1
+call "%~dp0build-engine.cmd" %NATIVE_FLAGS% || exit /b 1
 
 echo.
 echo ===== PHASE 4 — BUILD EXTENSIONS =====
-call "%~dp0build-extensions.cmd" || exit /b 1
+call "%~dp0build-extensions.cmd" %NATIVE_FLAGS% || exit /b 1
 
 echo.
 echo ===== PHASE 5 — DEPLOY / INSTALL =====
@@ -53,7 +64,10 @@ if "%SKIP_APP%"=="0" (
   echo.
   echo ===== PHASE 6 — BUILD APP =====
   cd "%LAPLACE_ROOT%\app"
-  dotnet build Laplace.Cli\Laplace.Cli.csproj -c Release -v q || exit /b 1
+  echo dotnet clean Release ...
+  dotnet clean Laplace.slnx -c Release --nologo -v minimal || exit /b 1
+  echo dotnet build Release ...
+  dotnet build Laplace.slnx -c Release -v minimal || exit /b 1
   cd /d "%LAPLACE_ROOT%"
 )
 

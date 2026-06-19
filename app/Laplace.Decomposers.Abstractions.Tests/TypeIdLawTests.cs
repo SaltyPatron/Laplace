@@ -107,11 +107,14 @@ public class TypeIdLawTests
     public void CliProgram_CallsExtensionWalkText()
     {
         var repoRoot = FindRepoRoot();
-        var program = Path.Combine(repoRoot, "app", "Laplace.Cli", "Program.cs");
-        var text = File.ReadAllText(program);
-        
-        
-        
+        var cliDir = Path.Combine(repoRoot, "app", "Laplace.Cli");
+        // Generation moved out of Program.cs into QueryCommands; scan the whole CLI so the invariant
+        // survives that refactor — the CLI drives generation via laplace.walk_text, never the
+        // deprecated laplace.generate(.
+        var sb = new System.Text.StringBuilder();
+        foreach (var f in Directory.EnumerateFiles(cliDir, "*.cs", SearchOption.AllDirectories))
+            sb.Append(File.ReadAllText(f));
+        var text = sb.ToString();
         Assert.Contains("laplace.walk_text", text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("laplace.generate(", text, StringComparison.Ordinal);
     }

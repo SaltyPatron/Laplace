@@ -19,6 +19,8 @@ int content_witness_batch_add(
 
 void content_witness_reset(void);
 
+int content_witness_entity_proven(const hash128_t* id);
+
 int laplace_content_root_id(
     const uint8_t* utf8,
     size_t         len,

@@ -272,10 +272,14 @@ pg_laplace_realize(PG_FUNCTION_ARGS)
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "realize: SPI_connect failed");
 
-    out = realize_branch("SELECT NULLIF(laplace.render_text($1), '')", id, lang, 1);
-    if (out == NULL)
-        out = realize_branch(
-            
+    /*
+     * A synset's own render_text is its bare WordNet offset (e.g. "i46360") — that IS its content,
+     * so a render_text-first chain short-circuits and hides the real lemma. Resolve synset ->
+     * representative lemma FIRST (synset -IS_SENSE_OF- sense -HAS_SENSE- word, language-preferred).
+     * This branch returns NULL for non-synsets (a word is never the object of IS_SENSE_OF), so words
+     * still fall through to render_text below and render directly.
+     */
+    out = realize_branch(
             "SELECT q.s FROM ("
             "  SELECT laplace.render_text(hs.subject_id) AS s, "
             "         (lang.object_id IS NOT NULL) AS lp, "
@@ -291,6 +295,8 @@ pg_laplace_realize(PG_FUNCTION_ARGS)
             "    AND NOT laplace.refuted(io.rating, io.rd)"
             ") q WHERE q.s IS NOT NULL AND q.s <> '' "
             "ORDER BY q.lp DESC, q.mu DESC LIMIT 1", id, lang, 2);
+    if (out == NULL)
+        out = realize_branch("SELECT NULLIF(laplace.render_text($1), '')", id, lang, 1);
     if (out == NULL)
         out = realize_branch(
             

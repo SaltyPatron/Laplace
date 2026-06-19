@@ -41,53 +41,112 @@ static uint32_t ast_append(laplace_ast_t* ast, uint32_t type_id,
 
 
 
+typedef struct { TSNode node; uint32_t parent; } ast_walk_item_t;
 
-static void ast_walk(laplace_ast_t* ast, TSNode node, uint32_t parent_idx) {
-    if (ast->oom) return;
-    uint32_t next_parent = parent_idx;
-    if (ts_node_is_named(node) || ts_node_child_count(node) == 0) {
-        uint32_t idx = ast_append(ast,
-            (uint32_t)ts_node_symbol(node),
-            ts_node_start_byte(node),
-            ts_node_end_byte(node),
-            parent_idx,
-            ts_node_has_error(node) ? 1u : 0u);
-        if (ast->oom) return;
-        next_parent = idx;
+static void ast_walk(laplace_ast_t* ast, TSNode root) {
+    size_t           cap = 256, top = 0;
+    ast_walk_item_t* stack = (ast_walk_item_t*)malloc(cap * sizeof(*stack));
+    if (!stack) { ast->oom = 1; return; }
+    stack[top].node = root;
+    stack[top].parent = LAPLACE_AST_ROOT;
+    top++;
+
+    while (top > 0) {
+        ast_walk_item_t it = stack[--top];
+        TSNode          node = it.node;
+        uint32_t        parent_idx = it.parent;
+        uint32_t        next_parent = parent_idx;
+
+        if (ts_node_is_named(node) || ts_node_child_count(node) == 0) {
+            uint32_t idx = ast_append(ast,
+                (uint32_t)ts_node_symbol(node),
+                ts_node_start_byte(node),
+                ts_node_end_byte(node),
+                parent_idx,
+                ts_node_has_error(node) ? 1u : 0u);
+            if (ast->oom) { free(stack); return; }
+            next_parent = idx;
+        }
+
+        uint32_t n = ts_node_child_count(node);
+        if (n > 0) {
+            if (top + (size_t)n > cap) {
+                size_t ncap = cap;
+                while (top + (size_t)n > ncap) ncap *= 2;
+                ast_walk_item_t* ns = (ast_walk_item_t*)realloc(stack, ncap * sizeof(*ns));
+                if (!ns) { free(stack); ast->oom = 1; return; }
+                stack = ns;
+                cap = ncap;
+            }
+            for (uint32_t i = n; i > 0; --i) {
+                stack[top].node   = ts_node_child(node, i - 1);
+                stack[top].parent = next_parent;
+                top++;
+            }
+        }
     }
-    uint32_t n = ts_node_child_count(node);
-    for (uint32_t i = 0; i < n; ++i)
-        ast_walk(ast, ts_node_child(node, i), next_parent);
+    free(stack);
+}
+
+typedef struct {
+    const TSLanguage* lang;
+    TSParser*         parser;
+} tls_parser_slot_t;
+
+#if defined(_MSC_VER)
+static __declspec(thread) tls_parser_slot_t g_tls_parser = { NULL, NULL };
+#else
+static _Thread_local tls_parser_slot_t g_tls_parser = { NULL, NULL };
+#endif
+
+static TSParser* parser_pool_acquire(const TSLanguage* recipe) {
+    if (g_tls_parser.parser && g_tls_parser.lang == recipe)
+        return g_tls_parser.parser;
+    if (g_tls_parser.parser) {
+        ts_parser_delete(g_tls_parser.parser);
+        g_tls_parser.parser = NULL;
+        g_tls_parser.lang = NULL;
+    }
+    TSParser* parser = ts_parser_new();
+    if (!parser) return NULL;
+    if (!ts_parser_set_language(parser, recipe)) {
+        ts_parser_delete(parser);
+        return NULL;
+    }
+    g_tls_parser.lang = recipe;
+    g_tls_parser.parser = parser;
+    return parser;
+}
+
+int laplace_grammar_parse_with(TSParser* parser, const uint8_t* utf8, size_t len,
+                               const TSLanguage* recipe, laplace_ast_t** out_ast) {
+    if (!parser || !utf8 || !recipe || !out_ast) return -1;
+    *out_ast = NULL;
+
+    ts_parser_reset(parser);
+    TSTree* tree = ts_parser_parse_string(parser, NULL,
+                                          (const char*)utf8, (uint32_t)len);
+    if (!tree) return -3;
+
+    laplace_ast_t* ast = (laplace_ast_t*)calloc(1, sizeof(*ast));
+    if (!ast) { ts_tree_delete(tree); return -3; }
+    ast->lang = recipe;
+
+    ast_walk(ast, ts_tree_root_node(tree));
+
+    ts_tree_delete(tree);
+
+    if (ast->oom) { laplace_ast_free(ast); return -3; }
+    *out_ast = ast;
+    return 0;
 }
 
 int laplace_grammar_parse(const uint8_t* utf8, size_t len,
                           const TSLanguage* recipe, laplace_ast_t** out_ast) {
     if (!utf8 || !recipe || !out_ast) return -1;
-    *out_ast = NULL;
-
-    TSParser* parser = ts_parser_new();
+    TSParser* parser = parser_pool_acquire(recipe);
     if (!parser) return -3;
-    if (!ts_parser_set_language(parser, recipe)) {
-        ts_parser_delete(parser);
-        return -2; 
-    }
-
-    TSTree* tree = ts_parser_parse_string(parser, NULL,
-                                          (const char*)utf8, (uint32_t)len);
-    if (!tree) { ts_parser_delete(parser); return -3; }
-
-    laplace_ast_t* ast = (laplace_ast_t*)calloc(1, sizeof(*ast));
-    if (!ast) { ts_tree_delete(tree); ts_parser_delete(parser); return -3; }
-    ast->lang = recipe;
-
-    ast_walk(ast, ts_tree_root_node(tree), LAPLACE_AST_ROOT);
-
-    ts_tree_delete(tree);
-    ts_parser_delete(parser);
-
-    if (ast->oom) { laplace_ast_free(ast); return -3; }
-    *out_ast = ast;
-    return 0;
+    return laplace_grammar_parse_with(parser, utf8, len, recipe, out_ast);
 }
 
 size_t laplace_ast_node_count(const laplace_ast_t* ast) {

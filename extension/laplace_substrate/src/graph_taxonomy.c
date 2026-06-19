@@ -133,7 +133,12 @@ tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
             "WHERE c.subject_id = $1 "
             "  AND c.type_id = ANY ($2) "
             "  AND c.object_id IS NOT NULL "
-            "  AND NOT laplace.refuted(c.rating, c.rd)",
+            "  AND NOT laplace.refuted(c.rating, c.rd) "
+            /* Skip typing edges (synset -IS_A- the WordNet_Synset *type* entity): a type entity is
+             * not a hypernym, and climbing into it pollutes the taxonomy walk. Real hypernyms are
+             * synsets, which carry no 'substrate/type/%' canonical name, so they are unaffected. */
+            "  AND NOT EXISTS (SELECT 1 FROM laplace.canonical_names n "
+            "                  WHERE n.id = c.object_id AND n.name LIKE 'substrate/type/%')",
             2, argtypes, args, NULL, true, 0);
         pfree(type_datums);
         pfree(DatumGetPointer(args[1]));

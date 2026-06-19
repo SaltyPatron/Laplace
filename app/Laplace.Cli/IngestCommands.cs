@@ -410,14 +410,18 @@ internal static class IngestCommands
         });
         int batch = EnvInt("LAPLACE_INGEST_BATCH", 2048, min: 1);
         int workers = EnvInt("LAPLACE_INGEST_WORKERS", 1, min: 1);
+        long maxUnits = EnvLong("LAPLACE_INGEST_MAX_UNITS", 0, min: 0);
+        var decoOpts = DecomposerOptions.ForWitness(
+            sourceName, batch, cli?.LangOverride, cli?.EmitCrossLanguageLinks);
+        if (maxUnits > 0)
+            decoOpts = decoOpts with { MaxInputUnits = maxUnits };
         return IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = skipLayerCheck,
             SkipSourceCompletion   = skipSourceCompletion,
             EcosystemPath          = ecosystemPath,
             BatchSize              = batch,
-            DecomposerOptions      = DecomposerOptions.ForWitness(
-                sourceName, batch, cli?.LangOverride, cli?.EmitCrossLanguageLinks),
+            DecomposerOptions      = decoOpts,
             CommitRows             = EnvInt("LAPLACE_INGEST_COMMIT_ROWS", 250_000, min: 0),
             ParallelWorkers        = workers,
             Progress               = progress,

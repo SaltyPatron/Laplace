@@ -364,6 +364,13 @@ parent = null
 family_root = "HAS_FRAME_ELEMENT"
 
 [[relation]]
+canonical = "HAS_VALENCE_PATTERN"
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_VALENCE_PATTERN"
+
+[[relation]]
 canonical = "HAS_GENERAL_CATEGORY"
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -586,6 +593,24 @@ rank = "taxonomic"
 symmetry = "asymmetric"
 parent = null
 family_root = "IS_A"
+
+[[relation]]
+# Entity typing (e.g. synset -> WordNet_Synset). De-conflated from IS_A so typing edges never
+# pollute hypernym/subsumption walks. Structural authority, not a content subsumption.
+canonical = "IS_TYPED_AS"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "IS_TYPED_AS"
+
+[[relation]]
+# Frame-semantic inheritance (FrameNet "Inherits from": Revenge inherits from Rewards_and_punishments).
+# De-conflated from IS_A — frame composition is not lexical subsumption and must not pollute hypernym walks.
+canonical = "INHERITS_FROM"
+rank = "taxonomic"
+symmetry = "asymmetric"
+parent = null
+family_root = "INHERITS_FROM"
 
 [[relation]]
 canonical = "IS_AFTER"
@@ -937,6 +962,48 @@ symmetry = "asymmetric"
 parent = null
 family_root = "X_WANT"
 
+[[relation]]
+# WordNet lexicographer-file class (noun.animal, verb.motion) — a coarse semantic category. Was emitted
+# ungoverned (absent from the manifest); register it so it has a rank/family in consensus.
+canonical = "HAS_LEX_CATEGORY"
+rank = "associative"
+symmetry = "asymmetric"
+parent = "HAS_DOMAIN_TOPIC"
+family_root = "HAS_DOMAIN_TOPIC"
+
+[[relation]]
+# Cross-resource ROLE-level alignment (PropBank argument <-> VerbNet thematic role). Distinct from the
+# class/frame-level CORRESPONDS_TO so the model can tell a class equivalence from an argument-role one.
+canonical = "ROLE_CORRESPONDS_TO"
+rank = "equivalence"
+symmetry = "symmetric"
+parent = "CORRESPONDS_TO"
+family_root = "CORRESPONDS_TO"
+
+[[relation]]
+# ISO 639-2 bibliographic code (ger, fre) — distinct channel from the terminologic code.
+canonical = "HAS_ISO639_2B_CODE"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_ISO639_2B_CODE"
+
+[[relation]]
+# ISO 639-2 terminologic code (deu, fra) — distinct channel from the bibliographic code.
+canonical = "HAS_ISO639_2T_CODE"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_ISO639_2T_CODE"
+
+[[relation]]
+# Directional supersession: a retired code/entity is superseded by its successor (not a symmetric variant).
+canonical = "SUPERSEDED_BY"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "SUPERSEDED_BY"
+
 [[alias]]
 surface = "DEFINED_AS"
 canonical = "HAS_DEFINITION"
@@ -983,11 +1050,6 @@ canonical = "OBSTRUCTED_BY"
 flip = false
 
 [[alias]]
-surface = "INHERITS_FROM"
-canonical = "IS_A"
-flip = false
-
-[[alias]]
 surface = "IS_DOMAIN_REGION_MEMBER"
 canonical = "HAS_DOMAIN_REGION"
 flip = true
@@ -1019,7 +1081,7 @@ flip = false
 
 [[alias]]
 surface = "IS_INHERITED_BY"
-canonical = "IS_A"
+canonical = "INHERITS_FROM"
 flip = true
 
 [[alias]]
