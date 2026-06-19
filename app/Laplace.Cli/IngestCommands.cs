@@ -384,6 +384,20 @@ internal static class IngestCommands
         return await IngestViaRunnerAsync(new TabularDecomposer(), path, skipLayerCheck: true, cli);
     }
 
+    private static int ResolveCommitRows(string sourceName)
+    {
+        var raw = Environment.GetEnvironmentVariable("LAPLACE_INGEST_COMMIT_ROWS");
+        if (int.TryParse(raw, out var env) && env >= 0)
+            return env;
+        // High-fanout grammar witnesses emit hundreds of thousands of substrate rows per
+        // input line; keep commit threshold above typical intent size to batch DB applies.
+        return sourceName switch
+        {
+            "ConceptNetDecomposer" => 4_000_000,
+            _ => 250_000,
+        };
+    }
+
     private static IngestRunOptions BuildIngestOptions(
         Stopwatch sw, string sourceName, bool skipLayerCheck, string? ecosystemPath,
         IngestCliArgs? cli = null, bool skipSourceCompletion = false)
@@ -411,6 +425,7 @@ internal static class IngestCommands
         int batch = EnvInt("LAPLACE_INGEST_BATCH", 2048, min: 1);
         int workers = EnvInt("LAPLACE_INGEST_WORKERS", 1, min: 1);
         long maxUnits = EnvLong("LAPLACE_INGEST_MAX_UNITS", 0, min: 0);
+        int commitRows = ResolveCommitRows(sourceName);
         var decoOpts = DecomposerOptions.ForWitness(
             sourceName, batch, cli?.LangOverride, cli?.EmitCrossLanguageLinks);
         if (maxUnits > 0)
@@ -422,7 +437,7 @@ internal static class IngestCommands
             EcosystemPath          = ecosystemPath,
             BatchSize              = batch,
             DecomposerOptions      = decoOpts,
-            CommitRows             = EnvInt("LAPLACE_INGEST_COMMIT_ROWS", 250_000, min: 0),
+            CommitRows             = commitRows,
             ParallelWorkers        = workers,
             Progress               = progress,
             

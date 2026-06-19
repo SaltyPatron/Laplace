@@ -17,6 +17,68 @@ public sealed class StructuredGrammarIngestTests
         public void WalkRow(in GrammarComposeContext composed, in RowContext ctx, SubstrateChangeBuilder builder) { }
     }
 
+    [Fact]
+    public async Task IngestFileAsync_MaxInputUnits_StopsEarly()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"laplace-tsv-cap-{Guid.NewGuid():N}.tsv");
+        try
+        {
+            var lines = Enumerable.Range(1, 20)
+                .Select(i => $"{i}\tRelatedTo\t/c/en/a{i}\t/c/en/b{i}\t{{}}")
+                .ToArray();
+            await File.WriteAllLinesAsync(path, lines, Encoding.UTF8);
+
+            var witness = new NullGrammarWitness("tsv");
+            var changes = new List<SubstrateChange>();
+            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
+                path, "tsv", Src, witness, batchSize: 4, witnessWeight: 1.0,
+                batchLabelPrefix: "test", reportUnits: null, maxInputUnits: 7,
+                composeWorkers: 1))
+            {
+                changes.Add(change);
+            }
+
+            long consumed = changes.Sum(c => c.Metadata.InputUnitsConsumed);
+            Assert.Equal(7, consumed);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4)]
+    public async Task IngestFileAsync_MaxInputUnits_ParallelStopsEarly(int composeWorkers)
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"laplace-tsv-cap-p-{Guid.NewGuid():N}.tsv");
+        try
+        {
+            var lines = Enumerable.Range(1, 20)
+                .Select(i => $"{i}\tRelatedTo\t/c/en/a{i}\t/c/en/b{i}\t{{}}")
+                .ToArray();
+            await File.WriteAllLinesAsync(path, lines, Encoding.UTF8);
+
+            var witness = new NullGrammarWitness("tsv");
+            var changes = new List<SubstrateChange>();
+            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
+                path, "tsv", Src, witness, batchSize: 4, witnessWeight: 1.0,
+                batchLabelPrefix: "test", reportUnits: null, maxInputUnits: 7,
+                composeWorkers: composeWorkers))
+            {
+                changes.Add(change);
+            }
+
+            long consumed = changes.Sum(c => c.Metadata.InputUnitsConsumed);
+            Assert.Equal(7, consumed);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
     [Theory]
     [InlineData(1)]
     [InlineData(4)]

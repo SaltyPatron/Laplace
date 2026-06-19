@@ -32,6 +32,7 @@ public sealed class PropBankDecomposerTests
         <role descr="giver" f="PAG" n="0">
           <rolelinks>
             <rolelink class="give-13.1-1" resource="VerbNet" version="verbnet3.4">agent</rolelink>
+            <rolelink class="Giving" resource="FrameNet" version="1.7">Donor</rolelink>
           </rolelinks>
         </role>
         <role descr="thing given" f="PPT" n="1">
@@ -120,6 +121,48 @@ public sealed class PropBankDecomposerTests
             && a.ContextId == vnId!.Value
             && (a.SubjectId == giverId!.Value || a.ObjectId == giverId!.Value)
             && (a.SubjectId == agentId!.Value || a.ObjectId == agentId!.Value));
+    }
+
+    [Fact]
+    public async Task RoleLink_Corresponds_To_FrameNet_Frame_And_FrameElement()
+    {
+        var atts = await CollectAttestationsAsync();
+        var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
+        var rsId = CategoryAnchor.Id("give.01");
+
+        // FrameNet rolelink: class="Giving" (frame), inner="Donor" (FE). Anchor by frame name so it
+        // shares identity with FrameNet decomposer output — NOT routed through NumericClassId.
+        var fnId = CategoryAnchor.Id("Giving");
+        Assert.NotNull(rsId);
+        Assert.NotNull(fnId);
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO")
+            && (a.SubjectId == rsId!.Value || a.ObjectId == rsId!.Value)
+            && (a.SubjectId == fnId!.Value || a.ObjectId == fnId!.Value));
+
+        var giverId = ContentEmitter.Emit(b, "giver", PropBankDecomposer.Source);
+        var donorId = ContentEmitter.Emit(b, "Donor", PropBankDecomposer.Source);
+        Assert.NotNull(giverId);
+        Assert.NotNull(donorId);
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO")
+            && a.ContextId == fnId!.Value
+            && (a.SubjectId == giverId!.Value || a.ObjectId == giverId!.Value)
+            && (a.SubjectId == donorId!.Value || a.ObjectId == donorId!.Value));
+    }
+
+    [Fact]
+    public async Task Role_Carries_FunctionTag_As_Feature()
+    {
+        var atts = await CollectAttestationsAsync();
+        var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
+        var giverId = ContentEmitter.Emit(b, "giver", PropBankDecomposer.Source);
+        var pagId = ContentEmitter.Emit(b, "PAG", PropBankDecomposer.Source);
+        Assert.NotNull(giverId);
+        Assert.NotNull(pagId);
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_FEATURE")
+            && a.SubjectId == giverId!.Value && a.ObjectId == pagId!.Value);
     }
 
     [Fact]

@@ -18,6 +18,7 @@
 
 #include "perfcache_native.h"
 #include "trajectory_corpus.h"
+#include "spi_common.h"
 
 PG_MODULE_MAGIC;
 
@@ -474,27 +475,6 @@ pg_laplace_intent_preflight(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
-static hash128_t
-bytea_to_hash128(const bytea* b)
-{
-    hash128_t h;
-    if (VARSIZE_ANY_EXHDR(b) < 16)
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-             errmsg("expected 16-byte hash128 bytea")));
-    memcpy(&h, VARDATA_ANY(b), sizeof(hash128_t));
-    return h;
-}
-
-static bytea*
-hash128_to_bytea(const hash128_t* h)
-{
-    bytea* result = (bytea*) palloc(VARHDRSZ + sizeof(hash128_t));
-    SET_VARSIZE(result, VARHDRSZ + sizeof(hash128_t));
-    memcpy(VARDATA(result), h, sizeof(hash128_t));
-    return result;
-}
-
 PG_FUNCTION_INFO_V1(pg_relation_type_resolve);
 
 Datum
@@ -507,7 +487,7 @@ pg_relation_type_resolve(PG_FUNCTION_ARGS)
     pfree(surface);
     if (rc < 0)
         PG_RETURN_NULL();
-    PG_RETURN_BYTEA_P(hash128_to_bytea(&type_id));
+    PG_RETURN_DATUM(hash128_to_datum(&type_id));
 }
 
 PG_FUNCTION_INFO_V1(pg_relation_type_in_family);
@@ -517,7 +497,7 @@ pg_relation_type_in_family(PG_FUNCTION_ARGS)
 {
     bytea*  type_ba = PG_GETARG_BYTEA_PP(0);
     text*   fam_txt = PG_GETARG_TEXT_PP(1);
-    hash128_t type_id = bytea_to_hash128(type_ba);
+    hash128_t type_id = datum_to_hash128(PointerGetDatum(type_ba));
     char*   family  = text_to_cstring(fam_txt);
     int     in_family = 0;
     int     rc = laplace_relation_in_family(&type_id, family, &in_family);
@@ -536,7 +516,7 @@ Datum
 pg_relation_rank(PG_FUNCTION_ARGS)
 {
     bytea*    type_ba = PG_GETARG_BYTEA_PP(0);
-    hash128_t type_id = bytea_to_hash128(type_ba);
+    hash128_t type_id = datum_to_hash128(PointerGetDatum(type_ba));
     const laplace_relation_def_t* def = NULL;
     int       rc = laplace_relation_lookup(&type_id, &def);
     if (rc != 0 || def == NULL)
@@ -557,7 +537,7 @@ Datum
 pg_relation_rank_resolved(PG_FUNCTION_ARGS)
 {
     bytea*    type_ba = PG_GETARG_BYTEA_PP(0);
-    hash128_t cur_id  = bytea_to_hash128(type_ba);
+    hash128_t cur_id  = datum_to_hash128(PointerGetDatum(type_ba));
     const laplace_relation_def_t* def = NULL;
 
     
@@ -571,9 +551,8 @@ pg_relation_rank_resolved(PG_FUNCTION_ARGS)
     bool   found    = false;
     for (int hop = 0; hop < 8 && !found; hop++)
     {
-        bytea* cur_ba       = hash128_to_bytea(&cur_id);
         Oid    argtypes[1]  = { BYTEAOID };
-        Datum  args[1]      = { PointerGetDatum(cur_ba) };
+        Datum  args[1]      = { hash128_to_datum(&cur_id) };
         bool   isnull;
         int    rc = SPI_execute_with_args(
             "SELECT object_id FROM laplace.consensus "
@@ -589,7 +568,7 @@ pg_relation_rank_resolved(PG_FUNCTION_ARGS)
         if (isnull)
             break;
 
-        hash128_t parent_id = bytea_to_hash128((bytea*) DatumGetPointer(pd));
+        hash128_t parent_id = datum_to_hash128(pd);
         const laplace_relation_def_t* pdef = NULL;
         if (laplace_relation_lookup(&parent_id, &pdef) == 0 && pdef != NULL)
         {
@@ -614,7 +593,7 @@ Datum
 pg_relation_canonical(PG_FUNCTION_ARGS)
 {
     bytea*    type_ba = PG_GETARG_BYTEA_PP(0);
-    hash128_t type_id = bytea_to_hash128(type_ba);
+    hash128_t type_id = datum_to_hash128(PointerGetDatum(type_ba));
     const laplace_relation_def_t* def = NULL;
     int       rc = laplace_relation_lookup(&type_id, &def);
     if (rc != 0 || def == NULL || def->canonical == NULL)

@@ -225,12 +225,89 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
 
 
 
-static text *
-realize_branch(const char *sql, Datum id, Datum lang, int nargs)
+/*
+ * Each realize branch is a fixed SQL string run once per row by recall — re-planning every call is
+ * pure overhead. Prepare each branch's plan once (SPI_keepplan → CacheMemoryContext, persists for the
+ * backend) and SPI_execute_plan thereafter. Mirrors edge_plan/constituents_plan in generate_walk.c.
+ *
+ * Branch order is load-bearing: a synset's own render_text is its bare WordNet offset (e.g. "i46360") —
+ * that IS its content, so a render_text-first chain short-circuits and hides the real lemma. Resolve
+ * synset -> representative lemma FIRST (synset -IS_SENSE_OF- sense -HAS_SENSE- word, language-preferred).
+ * That branch returns NULL for non-synsets (a word is never the object of IS_SENSE_OF), so words fall
+ * through to render_text and render directly.
+ */
+enum
 {
-    Oid   argtypes[2] = { BYTEAOID, BYTEAOID };
+    RB_SYNSET_LEMMA = 0,
+    RB_RENDER_TEXT,
+    RB_TRANSLATION,
+    RB_CANONICAL,
+    RB_DEFINES,
+    RB_LABEL,
+    RB_COUNT
+};
+
+typedef struct
+{
+    const char *sql;
+    int         nargs;
+    SPIPlanPtr  plan;
+} realize_plan_t;
+
+static realize_plan_t realize_plans[RB_COUNT] = {
+    [RB_SYNSET_LEMMA] = {
+        "SELECT q.s FROM ("
+        "  SELECT laplace.render_text(hs.subject_id) AS s, "
+        "         (lang.object_id IS NOT NULL) AS lp, "
+        "         laplace.eff_mu(hs.rating, hs.rd) AS mu "
+        "  FROM laplace.consensus io "
+        "  JOIN laplace.consensus hs ON hs.object_id = io.subject_id "
+        "    AND hs.type_id = laplace.relation_type_id('HAS_SENSE') "
+        "  LEFT JOIN laplace.consensus lang ON lang.subject_id = hs.subject_id "
+        "    AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE') "
+        "    AND lang.object_id = $2 "
+        "  WHERE io.object_id = $1 "
+        "    AND io.type_id = laplace.relation_type_id('IS_SENSE_OF') "
+        "    AND NOT laplace.refuted(io.rating, io.rd)"
+        ") q WHERE q.s IS NOT NULL AND q.s <> '' "
+        "ORDER BY q.lp DESC, q.mu DESC LIMIT 1", 2, NULL },
+    [RB_RENDER_TEXT] = {
+        "SELECT NULLIF(laplace.render_text($1), '')", 1, NULL },
+    [RB_TRANSLATION] = {
+        "SELECT q.s FROM ("
+        "  SELECT laplace.render_text(m.object_id) AS s, "
+        "         (lang.object_id IS NOT NULL) AS lp, "
+        "         laplace.eff_mu(m.rating, m.rd) AS mu "
+        "  FROM laplace.consensus m "
+        "  LEFT JOIN laplace.consensus lang ON lang.subject_id = m.object_id "
+        "    AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE') "
+        "    AND lang.object_id = $2 "
+        "  WHERE m.subject_id = $1 "
+        "    AND m.type_id = laplace.relation_type_id('IS_TRANSLATION_OF') "
+        "    AND NOT laplace.refuted(m.rating, m.rd)"
+        ") q WHERE q.s IS NOT NULL AND q.s <> '' "
+        "ORDER BY q.lp DESC, q.mu DESC LIMIT 1", 2, NULL },
+    [RB_CANONICAL] = {
+        "SELECT regexp_replace(n.name, '^substrate/[a-z_]+/(.+)/v1$', '\\1') "
+        "FROM laplace.canonical_names n "
+        "WHERE n.id = $1 AND n.name LIKE 'substrate/%'", 1, NULL },
+    [RB_DEFINES] = {
+        "SELECT laplace.render_text(g.object_id) "
+        "FROM laplace.consensus g "
+        "WHERE g.subject_id = $1 AND g.type_id = laplace.relation_type_id('DEFINES') "
+        "  AND NOT laplace.refuted(g.rating, g.rd) "
+        "ORDER BY laplace.eff_mu(g.rating, g.rd) DESC "
+        "LIMIT 1", 1, NULL },
+    [RB_LABEL] = {
+        "SELECT laplace.label($1)", 1, NULL },
+};
+
+static text *
+realize_branch(int slot, Datum id, Datum lang)
+{
+    realize_plan_t *rp = &realize_plans[slot];
     Datum args[2] = { id, lang };
-    char  nulls[3] = "   ";
+    char  nulls[2] = { ' ', ' ' };
     bool  isnull;
     int   rc;
     Datum d;
@@ -238,9 +315,22 @@ realize_branch(const char *sql, Datum id, Datum lang, int nargs)
     text *dst;
     Size  sz;
 
-    if (nargs == 2 && lang == (Datum) 0)
+    if (rp->plan == NULL)
+    {
+        Oid        argtypes[2] = { BYTEAOID, BYTEAOID };
+        SPIPlanPtr plan = SPI_prepare(rp->sql, rp->nargs, argtypes);
+
+        if (plan == NULL)
+            elog(ERROR, "realize: SPI_prepare failed (slot %d): %s",
+                 slot, SPI_result_code_string(SPI_result));
+        if (SPI_keepplan(plan) != 0)
+            elog(ERROR, "realize: SPI_keepplan failed (slot %d)", slot);
+        rp->plan = plan;
+    }
+
+    if (rp->nargs == 2 && lang == (Datum) 0)
         nulls[1] = 'n';
-    rc = SPI_execute_with_args(sql, nargs, argtypes, args, nulls, true, 1);
+    rc = SPI_execute_plan(rp->plan, args, nulls, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return NULL;
     d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
@@ -248,9 +338,9 @@ realize_branch(const char *sql, Datum id, Datum lang, int nargs)
         return NULL;
     src = DatumGetTextPP(d);
     if (VARSIZE_ANY_EXHDR(src) == 0)
-        return NULL;                       
+        return NULL;
     sz = VARSIZE_ANY(src);
-    dst = (text *) SPI_palloc(sz);         
+    dst = (text *) SPI_palloc(sz);
     memcpy(dst, src, sz);
     return dst;
 }
@@ -272,62 +362,17 @@ pg_laplace_realize(PG_FUNCTION_ARGS)
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "realize: SPI_connect failed");
 
-    /*
-     * A synset's own render_text is its bare WordNet offset (e.g. "i46360") — that IS its content,
-     * so a render_text-first chain short-circuits and hides the real lemma. Resolve synset ->
-     * representative lemma FIRST (synset -IS_SENSE_OF- sense -HAS_SENSE- word, language-preferred).
-     * This branch returns NULL for non-synsets (a word is never the object of IS_SENSE_OF), so words
-     * still fall through to render_text below and render directly.
-     */
-    out = realize_branch(
-            "SELECT q.s FROM ("
-            "  SELECT laplace.render_text(hs.subject_id) AS s, "
-            "         (lang.object_id IS NOT NULL) AS lp, "
-            "         laplace.eff_mu(hs.rating, hs.rd) AS mu "
-            "  FROM laplace.consensus io "
-            "  JOIN laplace.consensus hs ON hs.object_id = io.subject_id "
-            "    AND hs.type_id = laplace.relation_type_id('HAS_SENSE') "
-            "  LEFT JOIN laplace.consensus lang ON lang.subject_id = hs.subject_id "
-            "    AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE') "
-            "    AND lang.object_id = $2 "
-            "  WHERE io.object_id = $1 "
-            "    AND io.type_id = laplace.relation_type_id('IS_SENSE_OF') "
-            "    AND NOT laplace.refuted(io.rating, io.rd)"
-            ") q WHERE q.s IS NOT NULL AND q.s <> '' "
-            "ORDER BY q.lp DESC, q.mu DESC LIMIT 1", id, lang, 2);
+    out = realize_branch(RB_SYNSET_LEMMA, id, lang);
     if (out == NULL)
-        out = realize_branch("SELECT NULLIF(laplace.render_text($1), '')", id, lang, 1);
+        out = realize_branch(RB_RENDER_TEXT, id, lang);
     if (out == NULL)
-        out = realize_branch(
-            
-            "SELECT q.s FROM ("
-            "  SELECT laplace.render_text(m.object_id) AS s, "
-            "         (lang.object_id IS NOT NULL) AS lp, "
-            "         laplace.eff_mu(m.rating, m.rd) AS mu "
-            "  FROM laplace.consensus m "
-            "  LEFT JOIN laplace.consensus lang ON lang.subject_id = m.object_id "
-            "    AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE') "
-            "    AND lang.object_id = $2 "
-            "  WHERE m.subject_id = $1 "
-            "    AND m.type_id = laplace.relation_type_id('IS_TRANSLATION_OF') "
-            "    AND NOT laplace.refuted(m.rating, m.rd)"
-            ") q WHERE q.s IS NOT NULL AND q.s <> '' "
-            "ORDER BY q.lp DESC, q.mu DESC LIMIT 1", id, lang, 2);
+        out = realize_branch(RB_TRANSLATION, id, lang);
     if (out == NULL)
-        out = realize_branch(
-            "SELECT regexp_replace(n.name, '^substrate/[a-z_]+/(.+)/v1$', '\\1') "
-            "FROM laplace.canonical_names n "
-            "WHERE n.id = $1 AND n.name LIKE 'substrate/%'", id, lang, 1);
+        out = realize_branch(RB_CANONICAL, id, lang);
     if (out == NULL)
-        out = realize_branch(
-            "SELECT laplace.render_text(g.object_id) "
-            "FROM laplace.consensus g "
-            "WHERE g.subject_id = $1 AND g.type_id = laplace.relation_type_id('DEFINES') "
-            "  AND NOT laplace.refuted(g.rating, g.rd) "
-            "ORDER BY laplace.eff_mu(g.rating, g.rd) DESC "
-            "LIMIT 1", id, lang, 1);
+        out = realize_branch(RB_DEFINES, id, lang);
     if (out == NULL)
-        out = realize_branch("SELECT laplace.label($1)", id, lang, 1);
+        out = realize_branch(RB_LABEL, id, lang);
 
     laplace_spi_finish(spi_top);
 

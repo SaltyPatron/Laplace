@@ -79,7 +79,6 @@ public abstract class RelationTripleDecomposerBase : IDecomposer, IIngestCommitP
                                .WithCancellation(ct))
             {
                 if (!options.DryRun) yield return change;
-                await Task.Yield();
             }
         }
     }

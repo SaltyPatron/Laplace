@@ -1,21 +1,12 @@
-# ConceptNet ingest sandbox benchmark — partial corpus via LAPLACE_INGEST_MAX_UNITS.
+# ConceptNet sandbox cap via LAPLACE_INGEST_MAX_UNITS. Default cap 5000 (fast sanity check).
+# Compose parallelism: LAPLACE_INGEST_COMPOSE_WORKERS. DB commit: LAPLACE_INGEST_WORKERS (keep 1).
 #
-# One ingest run per invocation by default (single percent cap, single config).
-# Use -AllConfigs to run the full config matrix; use -Retries N to retry failures.
-#
-# KNOWN ISSUE: parallel compose (LAPLACE_INGEST_WORKERS > 1) may crash in native
-# GrammarRowIterParseRow until parallel ingest safety is fully verified.
-# WORKAROUND: default config is 'serial' (Workers=1), or set LAPLACE_INGEST_WORKERS=1.
-
-# PostgreSQL (Windows): restart only via Services (e.g. Restart-Service postgresql-x64-18)
-# or services.msc — do NOT use pg_ctl start/stop; it can corrupt Windows service state.
-# Before running this script after a restart, wait until PG accepts connections:
-#   Test-NetConnection -ComputerName localhost -Port 5432
-# or poll with psql/Npgsql until SELECT 1 succeeds (see wait-for-pg.ps1 in this folder).
+# PostgreSQL (Windows): restart only via Services — do NOT use pg_ctl.
 param(
-    [int] $Percent = 1,
+    [long] $MaxUnits = 5000,
+    [int] $Percent = 0,
     [long] $TotalRows = 34000000,
-    [string] $BenchConfig = 'serial',
+    [string] $BenchConfig = 'compose4',
     [switch] $AllConfigs,
     [int] $Retries = 0,
     [switch] $WhatIf
@@ -34,9 +25,8 @@ if (-not (Test-Path $cli)) {
 }
 
 $benchConfigs = @(
-    @{ Name = 'parallel+unordered'; Commit = 'unordered'; Batch = 65536; Workers = 4 },
-    @{ Name = 'parallel+serial';    Commit = 'serial';    Batch = 65536; Workers = 4 },
-    @{ Name = 'serial';             Commit = 'serial';    Batch = 65536; Workers = 1 }
+    @{ Name = 'compose4'; Compose = 4; CommitWorkers = 1; Batch = 65536 },
+    @{ Name = 'compose1'; Compose = 1; CommitWorkers = 1; Batch = 65536 }
 )
 
 if ($AllConfigs) {
@@ -66,20 +56,30 @@ if (-not (Test-Path $log)) {
     Write-Log 'timestamp,config,pct,max_units,seconds,exit_code'
 }
 
-$cap = [long]([math]::Round($TotalRows * $Percent / 100.0))
+$cap = if ($MaxUnits -gt 0) {
+    $MaxUnits
+} elseif ($Percent -gt 0) {
+    [long]([math]::Round($TotalRows * $Percent / 100.0))
+} else {
+    $existing = [Environment]::GetEnvironmentVariable('LAPLACE_INGEST_MAX_UNITS')
+    $parsed = 0L
+    if ($existing -and [long]::TryParse($existing, [ref]$parsed)) { $parsed } else { 5000 }
+}
+$pctLabel = if ($Percent -gt 0) { "$Percent" } else { 'n/a' }
 $exitCode = 0
 
 foreach ($cfg in $configs) {
-    if ($cfg.Commit) { $env:LAPLACE_INGEST_COMMIT_PARALLELISM = $cfg.Commit }
-    else { Remove-Item Env:\LAPLACE_INGEST_COMMIT_PARALLELISM -ErrorAction SilentlyContinue }
+    Remove-Item Env:\LAPLACE_INGEST_COMMIT_PARALLELISM -ErrorAction SilentlyContinue
     $env:LAPLACE_INGEST_BATCH = "$($cfg.Batch)"
-    $env:LAPLACE_INGEST_WORKERS = "$($cfg.Workers)"
+    $env:LAPLACE_INGEST_WORKERS = "$($cfg.CommitWorkers)"
+    $env:LAPLACE_INGEST_COMPOSE_WORKERS = "$($cfg.Compose)"
     $env:LAPLACE_INGEST_MAX_UNITS = "$cap"
+    $env:LAPLACE_INGEST_COMMIT_ROWS = "4000000"
 
-    Write-Log "---- $($cfg.Name) @ ${Percent}% ($cap rows) ----"
+    Write-Log "---- $($cfg.Name) max_units=$cap compose=$($cfg.Compose) commit_workers=$($cfg.CommitWorkers) ----"
 
     if ($WhatIf) {
-        Write-Host "[WhatIf] ingest conceptnet --force (workers=$($cfg.Workers), batch=$($cfg.Batch), max_units=$cap)"
+        Write-Host "[WhatIf] ingest conceptnet --force (compose=$($cfg.Compose), commit_workers=$($cfg.CommitWorkers), max_units=$cap)"
         continue
     }
 
@@ -100,13 +100,13 @@ foreach ($cfg in $configs) {
 
     $secs = [math]::Round($sw.Elapsed.TotalSeconds, 1)
     $ts = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ssZ')
-    Write-Log "$ts,$($cfg.Name),$Percent,$cap,$secs,$procExit"
+    Write-Log "$ts,$($cfg.Name),$pctLabel,$cap,$secs,$procExit"
 
     if ($procExit -ne 0) {
         $exitCode = $procExit
         $fatal = Test-FatalExit $procExit
         if ($fatal) {
-            Write-Error "Fatal ingest exit $procExit (0x$('{0:X8}' -f [uint32]$procExit)); stopping bench. Use LAPLACE_INGEST_WORKERS=1 or -BenchConfig serial."
+            Write-Error "Fatal ingest exit $procExit (0x$('{0:X8}' -f [uint32]$procExit)); stopping bench."
         }
         Write-Error "Ingest failed with exit $procExit; stopping bench."
     }

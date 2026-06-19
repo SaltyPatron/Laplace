@@ -31,8 +31,9 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider, IInge
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddRelationType("HAS_DEFINITION");
         boot.AddRelationType("HAS_EXAMPLE");
-        boot.AddRelationType("IS_TRANSLATION_OF");
+        boot.AddRelationType("IS_SYNONYM_OF");
         boot.AddRelationType("HAS_LANGUAGE");
+        boot.AddRelationType("HAS_POS");
         await context.Writer.ApplyAsync(boot.Build(), ct);
         foreach (var n in boot.CanonicalNames)
             LanguageNames.TryAdd(n, 0);

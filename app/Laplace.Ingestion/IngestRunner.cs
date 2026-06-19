@@ -313,42 +313,34 @@ public sealed class IngestRunner
             }
         }, ct);
 
-        var consumers = new Task[options.ParallelWorkers];
-        for (int w = 0; w < options.ParallelWorkers; w++)
-        {
-            consumers[w] = Task.Run(async () =>
-            {
-                var localRng = new Random(unchecked((int)decomposer.SourceId.Lo) ^ Environment.CurrentManagedThreadId);
-                var batch = new List<SubstrateChange>(batchSize);
-                int batchRows = 0;
-                while (await channel.Reader.WaitToReadAsync(ct))
-                {
-                    while (channel.Reader.TryRead(out var intent))
-                    {
-                        if (batchSize == 1 && commitRows == 0)
-                        {
-                            await ProcessOneIntentAsync(intent, decomposer, options,
-                                                        localRng, counters, failures, log, ct);
-                            continue;
-                        }
-                        batch.Add(intent);
-                        batchRows += rowsOf(intent);
-                        if (shouldFlush(batch.Count, batchRows))
-                        {
-                            await ProcessBatchAsync(batch, decomposer, options,
-                                                    localRng, counters, failures, log, ct);
-                            batch.Clear();
-                            batchRows = 0;
-                        }
-                    }
-                }
-                if (batch.Count > 0)
-                    await ProcessBatchAsync(batch, decomposer, options,
-                                            localRng, counters, failures, log, ct);
-            }, ct);
-        }
         await Task.WhenAll(producer);
-        await Task.WhenAll(consumers);
+
+        var batch = new List<SubstrateChange>(batchSize);
+        int batchRows = 0;
+        while (await channel.Reader.WaitToReadAsync(ct))
+        {
+            while (channel.Reader.TryRead(out var intent))
+            {
+                if (batchSize == 1 && commitRows == 0)
+                {
+                    await ProcessOneIntentAsync(intent, decomposer, options,
+                                                rng, counters, failures, log, ct);
+                    continue;
+                }
+                batch.Add(intent);
+                batchRows += rowsOf(intent);
+                if (shouldFlush(batch.Count, batchRows))
+                {
+                    await ProcessBatchAsync(batch, decomposer, options,
+                                            rng, counters, failures, log, ct);
+                    batch.Clear();
+                    batchRows = 0;
+                }
+            }
+        }
+        if (batch.Count > 0)
+            await ProcessBatchAsync(batch, decomposer, options,
+                                    rng, counters, failures, log, ct);
     }
 
     private async Task RunEpochBarrierParallelAsync(

@@ -68,6 +68,10 @@ internal sealed class OMWGrammarWitness(string fileLang, OmwIngestPhase phase) :
                     root, "IS_SYNONYM_OF", synId.Value, OMWDecomposer.Source, null, TC.AcademicCurated));
                 b.AddAttestation(NativeAttestation.Categorical(
                     root, "HAS_LANGUAGE", langId, OMWDecomposer.Source, null, TC.AcademicCurated));
+                // The synset's ss_type (a/n/v/r/s) is the lemma's POS in this sense. Emit HAS_POS on the
+                // lemma with the WordNet tagset so OMW converges onto the same POS edges WordNet emits.
+                PosReference.Attest(b, root, row.SsType.ToString(), PosReference.PosTagset.WordNet,
+                    OMWDecomposer.Source, null, TC.AcademicCurated);
                 break;
             case OmwType.Def:
                 b.AddAttestation(NativeAttestation.Categorical(
@@ -102,6 +106,9 @@ internal sealed class OMWGrammarWitness(string fileLang, OmwIngestPhase phase) :
                     root, "IS_SYNONYM_OF", synId, OMWDecomposer.Source, null, TC.AcademicCurated));
                 b.AddAttestation(NativeAttestation.Categorical(
                     root, "HAS_LANGUAGE", langId, OMWDecomposer.Source, null, TC.AcademicCurated));
+                // See EmitAttestationRow: HAS_POS on the lemma from the synset ss_type (WordNet tagset).
+                PosReference.Attest(b, root, row.SsType.ToString(), PosReference.PosTagset.WordNet,
+                    OMWDecomposer.Source, null, TC.AcademicCurated);
                 break;
             case OmwType.Def:
                 b.AddAttestation(NativeAttestation.Categorical(

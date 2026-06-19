@@ -52,6 +52,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
         boot.AddRelationType("TRANSCRIBES_AS");
         boot.AddRelationType("ENHANCED_DEPENDS_ON");
         boot.AddRelationType("HAS_XPOS");
+        boot.AddRelationType("HAS_LANGUAGE");
         boot.AddType("UD_Feature");
         await context.Writer.ApplyAsync(boot.Build(), ct);
         foreach (var n in boot.CanonicalNames)
@@ -312,6 +313,14 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
                         if (t is { } tid)
                             b.AddAttestation(NativeAttestation.Categorical(
                                 form, "TRANSCRIBES_AS", tid, Source, SourceTrust.AcademicCurated));
+                    }
+                    else if (key.Equals("Lang", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Token-level MISC Lang= marks code-switching (a foreign-language token inside an
+                        // otherwise monolingual sentence) — distinct from the file-level HAS_LANGUAGE.
+                        Hash128 miscLangId = LanguageReference.Resolve(val);
+                        b.AddAttestation(NativeAttestation.Categorical(
+                            form, "HAS_LANGUAGE", miscLangId, Source, SourceTrust.AcademicCurated));
                     }
                 }
             }
