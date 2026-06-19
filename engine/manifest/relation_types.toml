@@ -1004,6 +1004,91 @@ symmetry = "asymmetric"
 parent = null
 family_root = "SUPERSEDED_BY"
 
+[[relation]]
+# Unicode character's official name (UnicodeData.txt field 1), e.g. U+0041 -> "LATIN CAPITAL LETTER A".
+# The authoritative human identifier for a codepoint; distinct from HAS_NAME_ALIAS (corrections/abbrevs).
+canonical = "HAS_NAME"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_NAME"
+
+[[relation]]
+# Unicode Line_Break property (LineBreak.txt): AL, BA, CR, ... — the text-segmentation class of a codepoint.
+canonical = "HAS_LINE_BREAK"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_LINE_BREAK"
+
+[[relation]]
+# Unicode East_Asian_Width property (EastAsianWidth.txt): F, H, W, Na, A, N — fixed-width rendering class.
+canonical = "HAS_EAST_ASIAN_WIDTH"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_EAST_ASIAN_WIDTH"
+
+[[relation]]
+# Unicode Joining_Type property (DerivedJoiningType.txt): C, D, L, R, T, U — Arabic/Syriac cursive shaping.
+canonical = "HAS_JOINING_TYPE"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_JOINING_TYPE"
+
+[[relation]]
+# Unicode Numeric_Type property (DerivedNumericType.txt): Decimal, Digit, Numeric — the KIND of numeric,
+# distinct from HAS_NUMERIC_VALUE (the scalar value).
+canonical = "HAS_NUMERIC_TYPE"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_NUMERIC_TYPE"
+
+[[relation]]
+# Unicode Script_Extensions (ScriptExtensions.txt): a codepoint usable across multiple scripts. Weaker,
+# multi-valued sibling of USES_SCRIPT.
+canonical = "USES_SCRIPT_EXTENSION"
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = "USES_SCRIPT"
+family_root = "USES_SCRIPT"
+
+[[relation]]
+# Wiktionary etymology "borrowed" (bor): a word taken from another language without native transmission
+# (English "sushi" <- Japanese). Distinct etymological channel from inheritance/derivation.
+canonical = "BORROWED_FROM"
+rank = "associative"
+symmetry = "asymmetric"
+parent = "HAS_ETYMOLOGY"
+family_root = "HAS_ETYMOLOGY"
+
+[[relation]]
+# Wiktionary etymology "inherited" (inh): native intergenerational transmission within a language lineage
+# (French "mere" <- Latin "mater"). NOT frame-inheritance (INHERITS_FROM) — this is etymological lineage.
+canonical = "INHERITED_FROM"
+rank = "associative"
+symmetry = "asymmetric"
+parent = "HAS_ETYMOLOGY"
+family_root = "HAS_ETYMOLOGY"
+
+[[relation]]
+# FrameNet FE-to-FE "Requires": one frame element's presence structurally requires another's within a frame.
+canonical = "REQUIRES"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "REQUIRES"
+
+[[relation]]
+# FrameNet FE-to-FE "Excludes": two frame elements are mutually exclusive within a frame.
+canonical = "EXCLUDES"
+rank = "oppositional"
+symmetry = "symmetric"
+parent = null
+family_root = "EXCLUDES"
+
 [[alias]]
 surface = "DEFINED_AS"
 canonical = "HAS_DEFINITION"

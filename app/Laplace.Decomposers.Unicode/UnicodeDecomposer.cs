@@ -65,6 +65,11 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider, I
         boot.AddRelationType("HAS_BIDI_CLASS");
         boot.AddRelationType("HAS_MIRROR");
         boot.AddRelationType("HAS_AGE");
+        boot.AddRelationType("HAS_NAME");
+        boot.AddRelationType("HAS_LINE_BREAK");
+        boot.AddRelationType("HAS_EAST_ASIAN_WIDTH");
+        boot.AddRelationType("HAS_JOINING_TYPE");
+        boot.AddRelationType("HAS_NUMERIC_TYPE");
         boot.AddRelationType("HAS_NAME_ALIAS");
         boot.AddRelationType("CONFUSABLE_WITH");
         boot.AddRelationType("HAS_EMOJI_PROPERTY");
@@ -244,6 +249,10 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider, I
             foreach (var n in ucd.AgeEntityIds.Keys)        names.Add($"unicode/age/{n}/v1");
             foreach (var n in ucd.EmojiPropEntityIds.Keys)  names.Add($"unicode/emoji/{n}/v1");
             foreach (var v in ucd.NumericEntityIds.Keys)    names.Add($"unicode/numeric/{v}/v1");
+            foreach (var v in ucd.LineBreakEntityIds.Keys)        names.Add($"unicode/line_break/{v}/v1");
+            foreach (var v in ucd.EastAsianWidthEntityIds.Keys)   names.Add($"unicode/east_asian_width/{v}/v1");
+            foreach (var v in ucd.JoiningTypeEntityIds.Keys)      names.Add($"unicode/joining_type/{v}/v1");
+            foreach (var v in ucd.NumericTypeEntityIds.Keys)      names.Add($"unicode/numeric_type/{v}/v1");
             for (int cc = 1; cc <= 254; cc++)               names.Add($"unicode/combining_class/{cc}/v1");
             names.Add("substrate/type/Byte/v1");
             names.Add("substrate/encoding/ISO-8859-1/v1");
@@ -291,6 +300,36 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider, I
                 AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
 
             uint ucp = (uint)cp;
+
+            // The codepoint's official Unicode name (e.g. "LATIN CAPITAL LETTER A") as searchable content.
+            string? name = ucd.Name[cp];
+            if (name != null)
+            {
+                var nameId = ContentEmitter.Emit(b, name, Source);
+                if (nameId is { } nid)
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasName,
+                        nid, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+            }
+
+            string? lb = ucd.LineBreakForCodepoint(ucp);
+            if (lb != null && ucd.LineBreakEntityIds.TryGetValue(lb, out var lbId))
+                b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasLineBreak,
+                    lbId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+
+            string? eaw = ucd.EastAsianWidthForCodepoint(ucp);
+            if (eaw != null && ucd.EastAsianWidthEntityIds.TryGetValue(eaw, out var eawId))
+                b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasEastAsianWidth,
+                    eawId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+
+            string? jt = ucd.JoiningTypeForCodepoint(ucp);
+            if (jt != null && ucd.JoiningTypeEntityIds.TryGetValue(jt, out var jtId))
+                b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasJoiningType,
+                    jtId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+
+            string? nt = ucd.NumericTypeForCodepoint(ucp);
+            if (nt != null && ucd.NumericTypeEntityIds.TryGetValue(nt, out var ntId))
+                b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasNumericType,
+                    ntId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
 
             string? cat = ucd.GeneralCategory[cp];
             if (cat != null && ucd.CategoryEntityIds.TryGetValue(cat, out var catId))

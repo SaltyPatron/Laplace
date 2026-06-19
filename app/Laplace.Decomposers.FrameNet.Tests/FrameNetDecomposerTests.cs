@@ -34,9 +34,11 @@ public sealed class FrameNetDecomposerTests
     <definition>&lt;def-root&gt;A &lt;fex name="Donor"&gt;Donor&lt;/fex&gt; transfers a &lt;fen&gt;Theme&lt;/fen&gt; to a Recipient. &lt;ex&gt;&lt;fex name="Donor"&gt;She&lt;/fex&gt; &lt;t&gt;gave&lt;/t&gt; him a book.&lt;/ex&gt;&lt;/def-root&gt;</definition>
     <FE coreType="Core" name="Donor" ID="1">
         <definition>&lt;def-root&gt;The person that gives the &lt;fen&gt;Theme&lt;/fen&gt;.&lt;/def-root&gt;</definition>
+        <requiresFE name="Place" ID="2"/>
     </FE>
     <FE coreType="Peripheral" name="Place" ID="2">
         <definition>&lt;def-root&gt;Where the giving happens.&lt;/def-root&gt;</definition>
+        <excludesFE name="Donor" ID="1"/>
     </FE>
     <lexUnit status="Finished_Initial" POS="V" name="give.v" ID="4344"/>
     <lexUnit status="Finished_Initial" POS="N" name="donation.n" ID="5345"/>
@@ -144,6 +146,22 @@ public sealed class FrameNetDecomposerTests
 
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("IS_TYPED_AS"));
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SUBEVENT"));
+    }
+
+    [Fact]
+    public async Task FeToFe_Requires_And_Excludes_Are_Emitted()
+    {
+        var atts = await CollectAttestationsAsync();
+        var donorId = CategoryAnchor.Id("Donor");
+        var placeId = CategoryAnchor.Id("Place");
+        Assert.NotNull(donorId);
+        Assert.NotNull(placeId);
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("REQUIRES")
+            && a.SubjectId == donorId!.Value && a.ObjectId == placeId!.Value);
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("EXCLUDES")
+            && a.SubjectId == placeId!.Value && a.ObjectId == donorId!.Value);
     }
 
     [Fact]

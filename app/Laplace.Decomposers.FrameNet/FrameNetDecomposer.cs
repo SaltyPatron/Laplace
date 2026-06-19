@@ -71,6 +71,8 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
 
         boot.AddRelationType("EVOKES_FRAME");
         boot.AddRelationType("HAS_FRAME_ELEMENT");
+        boot.AddRelationType("REQUIRES");
+        boot.AddRelationType("EXCLUDES");
         boot.AddRelationType("HAS_VALENCE_PATTERN");
         boot.AddRelationType("HAS_DEFINITION");
         boot.AddRelationType("HAS_POS");
@@ -235,6 +237,16 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
                         feNameId.Value, "HAS_DEFINITION", feDefId.Value,
                         Source, SourceTrust.AcademicCurated));
             }
+
+            // FE-to-FE constraints, anchored the same way as HAS_FRAME_ELEMENT (CategoryAnchor by FE name).
+            foreach (var reqName in fe.Requires)
+                if (CategoryAnchor.Id(reqName) is { } reqId)
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        feNameId.Value, "REQUIRES", reqId, Source, SourceTrust.AcademicCurated));
+            foreach (var exName in fe.Excludes)
+                if (CategoryAnchor.Id(exName) is { } exId)
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        feNameId.Value, "EXCLUDES", exId, Source, SourceTrust.AcademicCurated));
         }
 
         foreach (var lu in frame.LexUnits)
@@ -332,7 +344,14 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
             if (string.IsNullOrEmpty(feName)) continue;
             string coreType = (string?)fe.Attribute("coreType") ?? "";
             var (feDef, _) = ParseDefRoot((string?)fe.Element(ns + "definition") ?? "");
-            elements.Add(new FrameElement(feName, coreType, feDef));
+            // FE-to-FE structural constraints: <requiresFE>/<excludesFE> name a sibling FE in this frame.
+            var requires = new List<string>();
+            foreach (var rq in fe.Elements(ns + "requiresFE"))
+                if ((string?)rq.Attribute("name") is { Length: > 0 } rn) requires.Add(rn);
+            var excludes = new List<string>();
+            foreach (var ex in fe.Elements(ns + "excludesFE"))
+                if ((string?)ex.Attribute("name") is { Length: > 0 } en) excludes.Add(en);
+            elements.Add(new FrameElement(feName, coreType, feDef, requires, excludes));
         }
 
         var lus = new List<LexUnit>();
@@ -511,7 +530,9 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
         string Name, string Definition, List<string> Examples,
         List<FrameElement> Elements, List<LexUnit> LexUnits, List<FrameRel> Relations);
 
-    internal sealed record FrameElement(string Name, string CoreType, string Definition);
+    internal sealed record FrameElement(
+        string Name, string CoreType, string Definition,
+        List<string> Requires, List<string> Excludes);
 
     internal sealed record LexUnit(int Id, string Lemma, string Pos);
 

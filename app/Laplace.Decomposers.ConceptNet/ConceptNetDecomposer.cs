@@ -48,6 +48,8 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
     public override string  SourceName   => "ConceptNetDecomposer";
     public override int     LayerOrder   => 2;
     public override Hash128 TrustClassId => TrustClass;
+    /// <summary>Compose is parallel inside StructuredGrammarIngest; DB commit stays serial and batched.</summary>
+    public override IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
 
     protected override bool RequiresTwoPass => false;
 
@@ -96,20 +98,16 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
         if (!File.Exists(file)) yield break;
         int batch = options.BatchSize > 1 ? options.BatchSize : 65536;
 
-        var witness = new ConceptNetGrammarWitness(options.Languages);
         Func<ReadOnlySpan<byte>, bool>? acceptRow = options.Languages is { IsActive: true } langs
             ? line => ConceptNetRowFilter.MatchesLanguageFilter(line, langs)
             : null;
 
-        await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
+        await foreach (var change in ConceptNetFastIngest.IngestFileAsync(
             file,
-            modalityId: "tsv",
             sourceId: Source,
-            witness: witness,
+            langs: options.Languages,
             batchSize: batch,
-            witnessWeight: 1.0,
-            batchLabelPrefix: "conceptnet",
-            reportUnits: null,
+            maxInputUnits: options.MaxInputUnits,
             acceptRow: acceptRow,
             ct: ct))
         {

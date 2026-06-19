@@ -74,20 +74,7 @@ pg_laplace_shared_objects(PG_FUNCTION_ARGS)
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "shared_objects: query failed");
 
-    for (uint64 r = 0; r < SPI_processed; r++)
-    {
-        HeapTuple tup = SPI_tuptable->vals[r];
-        TupleDesc td  = SPI_tuptable->tupdesc;
-        Datum     values[3];
-        bool      nulls_out[3] = { false, false, false };
-        bool      isnull;
-        for (int c = 0; c < 3; c++)
-        {
-            values[c] = SPI_getbinval(tup, td, c + 1, &isnull);
-            nulls_out[c] = isnull;
-        }
-        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls_out);
-    }
+    spi_emit_all_rows(rsinfo);
     laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
@@ -143,20 +130,7 @@ emit_related_rows(ReturnSetInfo *rsinfo, Datum word, Datum type_id, Datum lang, 
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "consensus_reads: related query failed");
 
-    for (uint64 r = 0; r < SPI_processed; r++)
-    {
-        HeapTuple tup = SPI_tuptable->vals[r];
-        TupleDesc td  = SPI_tuptable->tupdesc;
-        Datum     values[3];
-        bool      nulls_out[3] = { false, false, false };
-        bool      isnull;
-        for (int c = 0; c < 3; c++)
-        {
-            values[c] = SPI_getbinval(tup, td, c + 1, &isnull);
-            nulls_out[c] = isnull;
-        }
-        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls_out);
-    }
+    spi_emit_all_rows(rsinfo);
 }
 
 Datum
@@ -258,20 +232,7 @@ pg_laplace_salient_facts(PG_FUNCTION_ARGS)
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "salient_facts: query failed");
 
-    for (uint64 r = 0; r < SPI_processed; r++)
-    {
-        HeapTuple tup = SPI_tuptable->vals[r];
-        TupleDesc td  = SPI_tuptable->tupdesc;
-        Datum     values[4];
-        bool      nulls_out[4] = { false, false, false, false };
-        bool      isnull;
-        for (int c = 0; c < 4; c++)
-        {
-            values[c] = SPI_getbinval(tup, td, c + 1, &isnull);
-            nulls_out[c] = isnull;
-        }
-        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls_out);
-    }
+    spi_emit_all_rows(rsinfo);
     laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
@@ -417,20 +378,7 @@ pg_laplace_relate_path(PG_FUNCTION_ARGS)
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "relate_path: query failed");
 
-    for (uint64 r = 0; r < SPI_processed; r++)
-    {
-        HeapTuple tup = SPI_tuptable->vals[r];
-        TupleDesc td  = SPI_tuptable->tupdesc;
-        Datum     values[3];
-        bool      nulls_out[3] = { false, false, false };
-        bool      isnull;
-        for (int c = 0; c < 3; c++)
-        {
-            values[c] = SPI_getbinval(tup, td, c + 1, &isnull);
-            nulls_out[c] = isnull;
-        }
-        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls_out);
-    }
+    spi_emit_all_rows(rsinfo);
     laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
@@ -478,20 +426,7 @@ pg_laplace_relation_summary(PG_FUNCTION_ARGS)
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "relation_summary: query failed");
 
-    for (uint64 r = 0; r < SPI_processed; r++)
-    {
-        HeapTuple tup = SPI_tuptable->vals[r];
-        TupleDesc td  = SPI_tuptable->tupdesc;
-        Datum     values[6];
-        bool      nulls_out[6] = { false, false, false, false, false, false };
-        bool      isnull;
-        for (int c = 0; c < 6; c++)
-        {
-            values[c] = SPI_getbinval(tup, td, c + 1, &isnull);
-            nulls_out[c] = isnull;
-        }
-        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls_out);
-    }
+    spi_emit_all_rows(rsinfo);
     laplace_spi_finish(spi_top);
     return (Datum) 0;
 }
@@ -532,17 +467,7 @@ pg_laplace_gaps(PG_FUNCTION_ARGS)
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "gaps: query failed");
 
-    for (uint64 r = 0; r < SPI_processed; r++)
-    {
-        HeapTuple tup = SPI_tuptable->vals[r];
-        TupleDesc td  = SPI_tuptable->tupdesc;
-        Datum     values[1];
-        bool      nulls_out[1] = { false };
-        bool      isnull;
-        values[0] = SPI_getbinval(tup, td, 1, &isnull);
-        nulls_out[0] = isnull;
-        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls_out);
-    }
+    spi_emit_all_rows(rsinfo);
     laplace_spi_finish(spi_top);
     return (Datum) 0;
 }

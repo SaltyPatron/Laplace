@@ -45,6 +45,13 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
         boot.AddRelationType("TRANSCRIBES_AS");
         boot.AddRelationType("IS_TRANSLATION_OF");
         boot.AddRelationType("ETYMOLOGICALLY_DERIVED_FROM");
+        boot.AddRelationType("BORROWED_FROM");
+        boot.AddRelationType("INHERITED_FROM");
+        boot.AddRelationType("ETYMOLOGICALLY_RELATED_TO");
+        boot.AddRelationType("DERIVED_FROM");
+        boot.AddRelationType("FORM_OF");
+        boot.AddRelationType("HAS_FEATURE");
+        boot.AddRelationType("MANNER_OF");
         await context.Writer.ApplyAsync(boot.Build(), ct);
         foreach (var n in boot.CanonicalNames)
             VocabularyNames.TryAdd(n, 0);

@@ -18,6 +18,7 @@ public sealed class PropBankDecomposer : IDecomposer
     private static readonly Hash128 RolesetTypeId      = EntityTypeRegistry.PropBankRoleset;
     private static readonly Hash128 VerbNetClassTypeId = EntityTypeRegistry.VerbNetClass;
     private static readonly Hash128 OrdinalTypeId      = EntityTypeRegistry.Ordinal;
+    private static readonly Hash128 FrameNetFrameTypeId = EntityTypeRegistry.FrameNetFrame;
 
     internal static string NumericClassId(string classId)
     {
@@ -44,12 +45,15 @@ public sealed class PropBankDecomposer : IDecomposer
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("PropBank_Roleset");
         boot.AddType("VerbNet_Class");
+        boot.AddType("FrameNet_Frame");
         boot.AddType("Ordinal");
         boot.AddRelationType("HAS_SENSE");
         boot.AddRelationType("HAS_DEFINITION");
         boot.AddRelationType("HAS_SEMANTIC_ROLE");
         boot.AddRelationType("HAS_EXAMPLE");
         boot.AddRelationType("CORRESPONDS_TO");
+        boot.AddRelationType("ROLE_CORRESPONDS_TO");
+        boot.AddRelationType("HAS_FEATURE");
         await context.Writer.ApplyAsync(boot.Build(), ct);
         foreach (var n in boot.CanonicalNames)
             _canonicalNames.TryAdd(n, 0);
@@ -154,29 +158,48 @@ public sealed class PropBankDecomposer : IDecomposer
                 rsEntity, "HAS_SEMANTIC_ROLE", roleId.Value, Source, TC.AcademicCurated,
                 contextId: ctx));
 
+            // The role's function tag (PAG/PPT/GOL proto-roles; TMP/LOC/MNR/DIR/... for ARGM modifiers) is
+            // a distinct semantic channel — emit it as a feature of the role instead of dropping it.
+            string func = role.GetAttribute("f").Trim();
+            if (func.Length > 0)
+            {
+                var funcId = ContentEmitter.Emit(b, func, Source);
+                if (funcId is not null)
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        roleId.Value, "HAS_FEATURE", funcId.Value, Source, TC.AcademicCurated));
+            }
+
             foreach (var link in DescendantElements(role, "rolelink"))
             {
-                if (!link.GetAttribute("resource").Equals("VerbNet", StringComparison.OrdinalIgnoreCase))
-                    continue;
-                string vnClass = link.GetAttribute("class").Trim();
-                string theta   = link.InnerText.Trim();
-                if (vnClass.Length == 0) continue;
+                string resource = link.GetAttribute("resource");
+                string cls      = link.GetAttribute("class").Trim();
+                string inner    = link.InnerText.Trim();
+                if (cls.Length == 0) continue;
 
-                
-                
-                Hash128? vnAnchor = CategoryAnchor.Emit(b, NumericClassId(vnClass), VerbNetClassTypeId, Source, TC.AcademicCurated);
-                if (vnAnchor is null) continue;
-                Hash128 vnEntity = vnAnchor.Value;
+                // VerbNet: class = numeric VN class (lemma-prefixed), inner text = thematic role.
+                // FrameNet: class = frame name (NOT numeric — must not pass through NumericClassId, which
+                // strips lemma prefixes and would corrupt a frame name), inner text = frame element.
+                // Both map roleset -CORRESPONDS_TO- class/frame and role -ROLE_CORRESPONDS_TO- theta/FE,
+                // distinguished by the object's entity type. The FrameNet_Frame anchor shares identity
+                // with the FrameNet decomposer's frames so the two resources converge.
+                Hash128? anchor =
+                    resource.Equals("VerbNet", StringComparison.OrdinalIgnoreCase)
+                        ? CategoryAnchor.Emit(b, NumericClassId(cls), VerbNetClassTypeId, Source, TC.AcademicCurated)
+                    : resource.Equals("FrameNet", StringComparison.OrdinalIgnoreCase)
+                        ? CategoryAnchor.Emit(b, cls, FrameNetFrameTypeId, Source, TC.AcademicCurated)
+                        : null;
+                if (anchor is null) continue;
+                Hash128 classEntity = anchor.Value;
                 b.AddAttestation(NativeAttestation.Categorical(
-                    rsEntity, "CORRESPONDS_TO", vnEntity, Source, TC.AcademicCurated));
+                    rsEntity, "CORRESPONDS_TO", classEntity, Source, TC.AcademicCurated));
 
-                if (theta.Length > 0)
+                if (inner.Length > 0)
                 {
-                    var thetaId = ContentEmitter.Emit(b, theta, Source);
+                    var thetaId = ContentEmitter.Emit(b, inner, Source);
                     if (thetaId is not null)
                         b.AddAttestation(NativeAttestation.Categorical(
                             roleId.Value, "ROLE_CORRESPONDS_TO", thetaId.Value, Source, TC.AcademicCurated,
-                            contextId: vnEntity));
+                            contextId: classEntity));
                 }
             }
         }

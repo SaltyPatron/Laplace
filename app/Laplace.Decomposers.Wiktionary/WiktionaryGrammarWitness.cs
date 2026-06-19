@@ -17,11 +17,11 @@ internal sealed class WiktionaryGrammarWitness : IGrammarWitness
     {
         ["synonyms"]  = "IS_SYNONYM_OF",
         ["antonyms"]  = "IS_ANTONYM_OF",
-        ["hypernyms"] = "HAS_HYPERNYM",
+        // "hypernyms" is handled separately (verb hypernymy is troponymy → MANNER_OF), not via this map.
         ["hyponyms"]  = "HAS_HYPONYM",
         ["meronyms"]  = "HAS_PART",
         ["holonyms"]  = "IS_PART_OF",
-        ["derived"]   = "DERIVATIONALLY_RELATED",
+        // "derived" is handled separately (flipped orientation → DERIVED_FROM), not via this map.
         ["related"]   = "RELATED_TO",
     };
 
@@ -62,19 +62,22 @@ internal sealed class WiktionaryGrammarWitness : IGrammarWitness
             return;
 
         Hash128? posCtx = null;
+        bool isVerb = false;
         if (JsonGrammarHelper.TryPropertyUtf8(composed, "pos", out var posSpan))
         {
+            string pos = JsonGrammarHelper.Utf8ToString(posSpan);
+            isVerb = pos.Equals("verb", StringComparison.OrdinalIgnoreCase);
             posCtx = PosReference.Attest(builder, wordId,
-                JsonGrammarHelper.Utf8ToString(posSpan), PosReference.PosTagset.Wiktionary,
+                pos, PosReference.PosTagset.Wiktionary,
                 WiktionaryDecomposer.Source, null, TC.AcademicCuratedUserInput,
                 WiktionaryDecomposer.VocabularyNames);
         }
 
         foreach (int senseObj in JsonGrammarHelper.ObjectNodesInArrayProperty(composed, "senses"))
-            WalkSense(composed, builder, wordId, senseObj, posCtx);
+            WalkSense(composed, builder, wordId, senseObj, posCtx, isVerb);
 
         WalkSounds(composed, builder, wordId);
-        WalkRootRelations(composed, builder, wordId);
+        WalkRootRelations(composed, builder, wordId, isVerb);
         WalkForms(composed, builder, wordId);
         WalkEtymology(composed, builder, wordId);
     }
@@ -84,7 +87,8 @@ internal sealed class WiktionaryGrammarWitness : IGrammarWitness
         SubstrateChangeBuilder b,
         Hash128 wordId,
         int senseObj,
-        Hash128? posCtx)
+        Hash128? posCtx,
+        bool isVerb)
     {
         foreach (int glossNode in JsonGrammarHelper.StringNodesInArrayOnObject(composed, senseObj, "glosses"))
             if (JsonGrammarHelper.TryComposedNode(composed, glossNode, out var glossId))
@@ -105,6 +109,18 @@ internal sealed class WiktionaryGrammarWitness : IGrammarWitness
             foreach (int relObj in JsonGrammarHelper.ObjectNodesInArrayOnObject(composed, senseObj, prop))
                 if (JsonGrammarHelper.TryComposedPropertyOnObject(composed, relObj, "word", out var relId))
                     Attest(b, wordId, typeName, relId, posCtx);
+
+        // Verb hypernymy is troponymy (MANNER_OF: "to whisper is a manner of to speak"), not noun-style
+        // subsumption — de-conflate it from HAS_HYPERNYM so it never pollutes IS_A hypernym walks.
+        string hyperType = isVerb ? "MANNER_OF" : "HAS_HYPERNYM";
+        foreach (int relObj in JsonGrammarHelper.ObjectNodesInArrayOnObject(composed, senseObj, "hypernyms"))
+            if (JsonGrammarHelper.TryComposedPropertyOnObject(composed, relObj, "word", out var relId))
+                Attest(b, wordId, hyperType, relId, posCtx);
+
+        // "derived" lists terms derived FROM the headword: the edge runs derived-term -> DERIVED_FROM -> headword.
+        foreach (int relObj in JsonGrammarHelper.ObjectNodesInArrayOnObject(composed, senseObj, "derived"))
+            if (JsonGrammarHelper.TryComposedPropertyOnObject(composed, relObj, "word", out var relId))
+                Attest(b, relId, "DERIVED_FROM", wordId, posCtx);
 
         foreach (int coordObj in JsonGrammarHelper.ObjectNodesInArrayOnObject(composed, senseObj, "coordinate_terms"))
             if (JsonGrammarHelper.TryComposedPropertyOnObject(composed, coordObj, "word", out var coordId))
@@ -140,7 +156,7 @@ internal sealed class WiktionaryGrammarWitness : IGrammarWitness
         }
     }
 
-    private void WalkRootRelations(in GrammarComposeContext composed, SubstrateChangeBuilder b, Hash128 wordId)
+    private void WalkRootRelations(in GrammarComposeContext composed, SubstrateChangeBuilder b, Hash128 wordId, bool isVerb)
     {
         if (_options.EmitCrossLanguageLinks)
         {
@@ -154,6 +170,15 @@ internal sealed class WiktionaryGrammarWitness : IGrammarWitness
                 if (JsonGrammarHelper.TryComposedPropertyOnObject(composed, relObj, "word", out var relId))
                     Attest(b, wordId, typeName, relId, null);
 
+        string hyperType = isVerb ? "MANNER_OF" : "HAS_HYPERNYM";
+        foreach (int relObj in JsonGrammarHelper.ObjectNodesInArrayProperty(composed, "hypernyms"))
+            if (JsonGrammarHelper.TryComposedPropertyOnObject(composed, relObj, "word", out var relId))
+                Attest(b, wordId, hyperType, relId, null);
+
+        foreach (int relObj in JsonGrammarHelper.ObjectNodesInArrayProperty(composed, "derived"))
+            if (JsonGrammarHelper.TryComposedPropertyOnObject(composed, relObj, "word", out var relId))
+                Attest(b, relId, "DERIVED_FROM", wordId, null);
+
         foreach (int coordObj in JsonGrammarHelper.ObjectNodesInArrayProperty(composed, "coordinate_terms"))
             if (JsonGrammarHelper.TryComposedPropertyOnObject(composed, coordObj, "word", out var coordId))
                 Attest(b, wordId, "IS_COORDINATE_TERM_WITH", coordId, null);
@@ -161,9 +186,16 @@ internal sealed class WiktionaryGrammarWitness : IGrammarWitness
 
     private static void WalkForms(in GrammarComposeContext composed, SubstrateChangeBuilder b, Hash128 wordId)
     {
+        // An inflected form is a FORM_OF the headword lemma: form -> FORM_OF -> lemma. Its inflection
+        // tags ("plural", "past", ...) are features of the form.
         foreach (int formObj in JsonGrammarHelper.ObjectNodesInArrayProperty(composed, "forms"))
-            if (JsonGrammarHelper.TryComposedPropertyOnObject(composed, formObj, "form", out var formId))
-                Attest(b, wordId, "HAS_VARIANT_OF", formId, null);
+        {
+            if (!JsonGrammarHelper.TryComposedPropertyOnObject(composed, formObj, "form", out var formId)) continue;
+            Attest(b, formId, "FORM_OF", wordId, null);
+            foreach (int tagNode in JsonGrammarHelper.StringNodesInArrayOnObject(composed, formObj, "tags"))
+                if (JsonGrammarHelper.TryComposedNode(composed, tagNode, out var tagId))
+                    Attest(b, formId, "HAS_FEATURE", tagId, null);
+        }
     }
 
     private static void WalkEtymology(in GrammarComposeContext composed, SubstrateChangeBuilder b, Hash128 wordId)
@@ -175,13 +207,25 @@ internal sealed class WiktionaryGrammarWitness : IGrammarWitness
         {
             if (!JsonGrammarHelper.TryPropertyUtf8OnObject(composed, etObj, "name", out var nameSpan)) continue;
             string name = JsonGrammarHelper.Utf8ToString(nameSpan);
-            if (name is not ("bor" or "borrowed" or "der" or "derived" or "inh" or "inherited")) continue;
+
+            // Each etymology template kind is a distinct lineage channel. bor/der/inh are directional from
+            // this entry's language ({{bor|en|fr|term}} → term is arg 3); cog is non-directional
+            // ({{cog|la|term}} → term is arg 2).
+            string etymType, termArg;
+            switch (name)
+            {
+                case "bor": case "borrowed":  etymType = "BORROWED_FROM";               termArg = "3"; break;
+                case "inh": case "inherited": etymType = "INHERITED_FROM";              termArg = "3"; break;
+                case "der": case "derived":   etymType = "ETYMOLOGICALLY_DERIVED_FROM"; termArg = "3"; break;
+                case "cog": case "cognate":   etymType = "ETYMOLOGICALLY_RELATED_TO";   termArg = "2"; break;
+                default: continue;
+            }
 
             int argsObj = JsonGrammarHelper.FindNestedObject(composed, etObj, "args");
             if (argsObj < 0) continue;
-            if (!JsonGrammarHelper.TryComposedPropertyOnObject(composed, argsObj, "3", out var termId)) continue;
-            if (JsonGrammarHelper.IsEmptyOrDashPlaceholder(composed, argsObj, "3")) continue;
-            Attest(b, wordId, "ETYMOLOGICALLY_DERIVED_FROM", termId, null);
+            if (!JsonGrammarHelper.TryComposedPropertyOnObject(composed, argsObj, termArg, out var termId)) continue;
+            if (JsonGrammarHelper.IsEmptyOrDashPlaceholder(composed, argsObj, termArg)) continue;
+            Attest(b, wordId, etymType, termId, null);
         }
     }
 

@@ -9,6 +9,7 @@
 #include "laplace/core/astar.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/glicko2.h"
+#include "spi_common.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_astar_path);
 
@@ -107,15 +108,6 @@ spi_expand(void *ctxp, const hash128_t *node, astar_edge_t *out, int cap)
     return (int) r;
 }
 
-static bytea *
-hash_to_bytea(const hash128_t *h)
-{
-    bytea *b = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
-    SET_VARSIZE(b, VARHDRSZ + sizeof(hash128_t));
-    memcpy(VARDATA(b), h, sizeof(hash128_t));
-    return b;
-}
-
 Datum
 pg_laplace_astar_path(PG_FUNCTION_ARGS)
 {
@@ -181,7 +173,7 @@ pg_laplace_astar_path(PG_FUNCTION_ARGS)
             Datum values[3];
             bool  nulls[3] = { false, false, false };
             values[0] = Int32GetDatum(idx++);
-            values[1] = PointerGetDatum(hash_to_bytea(&step.entity));
+            values[1] = hash128_to_datum(&step.entity);
             values[2] = Float8GetDatum(step.g);
             tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
         }

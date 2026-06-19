@@ -15,7 +15,9 @@ public class RelationTypeRegistryTests
         Assert.Equal(Kid("HAS_POS"), RelationTypeRegistry.Resolve("HAS_UPOS").Id);
         Assert.Equal(Kid("HAS_POS"), RelationTypeRegistry.Resolve("HAS_POS").Id);
         Assert.NotEqual(Kid("HAS_POS"), RelationTypeRegistry.Resolve("HAS_LEX_CATEGORY").Id);
-        Assert.Equal(RelationTypeRank.Probationary, RelationTypeRegistry.Resolve("HAS_LEX_CATEGORY").Rank);
+        // HAS_LEX_CATEGORY is now a registered canonical (manifest: associative, parent HAS_DOMAIN_TOPIC),
+        // no longer an unregistered/probationary surface — but still distinct from the POS family.
+        Assert.Equal(RelationTypeRank.Associative, RelationTypeRegistry.Resolve("HAS_LEX_CATEGORY").Rank);
     }
 
     [Fact]

@@ -20,6 +20,7 @@ public static class StructuredGrammarIngest
         int commitEpoch = 0,
         Func<ReadOnlySpan<byte>, bool>? acceptRow = null,
         int composeWorkers = 0,
+        long maxInputUnits = 0,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         int workers = composeWorkers > 0 ? composeWorkers : ResolveComposeWorkers();
@@ -27,21 +28,27 @@ public static class StructuredGrammarIngest
         {
             await foreach (var change in IngestFileSerialAsync(
                 filePath, modalityId, sourceId, witness, batchSize, witnessWeight,
-                batchLabelPrefix, reportUnits, contextId, commitEpoch, acceptRow, ct))
+                batchLabelPrefix, reportUnits, contextId, commitEpoch, acceptRow,
+                maxInputUnits, ct))
                 yield return change;
             yield break;
         }
 
         await foreach (var change in IngestFileParallelAsync(
             filePath, modalityId, sourceId, witness, batchSize, witnessWeight,
-            batchLabelPrefix, reportUnits, contextId, commitEpoch, acceptRow, workers, ct))
+            batchLabelPrefix, reportUnits, contextId, commitEpoch, acceptRow,
+            workers, maxInputUnits, ct))
             yield return change;
     }
 
     private static int ResolveComposeWorkers()
     {
+        string? compose = Environment.GetEnvironmentVariable("LAPLACE_INGEST_COMPOSE_WORKERS");
+        if (int.TryParse(compose, out int cw) && cw >= 1)
+            return cw;
         string? env = Environment.GetEnvironmentVariable("LAPLACE_INGEST_WORKERS");
-        if (int.TryParse(env, out int w) && w > 1) return w;
+        if (int.TryParse(env, out int w) && w >= 1)
+            return w;
         return 1;
     }
 
@@ -57,6 +64,7 @@ public static class StructuredGrammarIngest
         Hash128? contextId,
         int commitEpoch,
         Func<ReadOnlySpan<byte>, bool>? acceptRow,
+        long maxInputUnits,
         [EnumeratorCancellation] CancellationToken ct)
     {
         IntPtr recipe = GrammarDecomposer.LookupById(modalityId);
@@ -71,6 +79,7 @@ public static class StructuredGrammarIngest
             int inBatch = 0, bn = 0, rowIndex = 0;
             long rowsTotal = 0;
             long rowsInBatch = 0;
+            long rowsParsed = 0;
 
             await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
                 FileShare.Read, bufferSize: 1 << 20, useAsync: true);
@@ -86,9 +95,17 @@ public static class StructuredGrammarIngest
                     if (acceptRow is not null && !acceptRow(row.LineUtf8))
                         continue;
 
+                    if (maxInputUnits > 0 && rowsParsed >= maxInputUnits)
+                    {
+                        if (inBatch > 0)
+                            yield return b.SetInputUnitsConsumed(rowsInBatch).Build();
+                        yield break;
+                    }
+
                     if (!TryParseRow(iter, row.LineUtf8, out IntPtr ast) || ast == IntPtr.Zero)
                         continue;
 
+                    rowsParsed++;
                     rowsInBatch++;
                     using var astHandle = GrammarAst.Adopt(ast);
                     ComposeRow(row.LineUtf8, astHandle, sourceId, modalityId, witness, witnessWeight,
@@ -104,6 +121,9 @@ public static class StructuredGrammarIngest
                         b = NewBuilder(sourceId, batchLabelPrefix, bn, batchSize, commitEpoch);
                         inBatch = 0;
                         rowsInBatch = 0;
+
+                        if (maxInputUnits > 0 && rowsParsed >= maxInputUnits)
+                            yield break;
                     }
                 }
 
@@ -133,10 +153,14 @@ public static class StructuredGrammarIngest
         int commitEpoch,
         Func<ReadOnlySpan<byte>, bool>? acceptRow,
         int workers,
+        long maxInputUnits,
         [EnumeratorCancellation] CancellationToken ct)
     {
         IntPtr recipe = GrammarDecomposer.LookupById(modalityId);
         if (recipe == IntPtr.Zero) yield break;
+
+        using var capCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var runCt = capCts.Token;
 
         var workChannel = Channel.CreateBounded<ComposeWork>(
             new BoundedChannelOptions(workers * 8)
@@ -163,17 +187,22 @@ public static class StructuredGrammarIngest
                     FileShare.Read, bufferSize: 1 << 20, useAsync: true);
                 var buf = new byte[1 << 20];
                 int read;
-                while ((read = await fs.ReadAsync(buf, ct)) > 0)
+                while ((read = await fs.ReadAsync(buf, runCt)) > 0)
                 {
-                    ct.ThrowIfCancellationRequested();
+                    runCt.ThrowIfCancellationRequested();
                     foreach (var row in FeedRawLines(lineIter, buf, read))
                     {
                         if (acceptRow is not null && !acceptRow(row.LineUtf8))
                             continue;
                         await workChannel.Writer.WriteAsync(
-                            new ComposeWork(seq++, row.LineUtf8), ct);
+                            new ComposeWork(seq++, row.LineUtf8), runCt);
                     }
                 }
+            }
+            catch (OperationCanceledException) when (capCts.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
+                workChannel.Writer.TryComplete();
+                return;
             }
             catch (Exception ex)
             {
@@ -185,9 +214,10 @@ public static class StructuredGrammarIngest
                 NativeInterop.GrammarRowIterFree(lineIter);
                 workChannel.Writer.TryComplete();
             }
-        }, ct);
+        }, runCt);
 
         var consumerTasks = new Task[workers];
+        long parsedCount = 0;
         for (int w = 0; w < workers; w++)
         {
             int workerId = w;
@@ -204,11 +234,17 @@ public static class StructuredGrammarIngest
 
                 try
                 {
-                    while (await workChannel.Reader.WaitToReadAsync(ct))
+                    while (await workChannel.Reader.WaitToReadAsync(runCt))
                     {
                         while (workChannel.Reader.TryRead(out var work))
                         {
+                            if (maxInputUnits > 0 && Volatile.Read(ref parsedCount) >= maxInputUnits)
+                                continue;
+
                             if (!TryParseRow(parseIter, work.LineUtf8, out IntPtr ast) || ast == IntPtr.Zero)
+                                continue;
+
+                            if (!TryClaimParsedRow(maxInputUnits, ref parsedCount))
                                 continue;
 
                             using var astHandle = GrammarAst.Adopt(ast);
@@ -219,7 +255,7 @@ public static class StructuredGrammarIngest
                             if (++inBatch >= batchSize)
                             {
                                 await outChannel.Writer.WriteAsync(
-                                    b.SetInputUnitsConsumed(rowsInBatch).Build(), ct);
+                                    b.SetInputUnitsConsumed(rowsInBatch).Build(), runCt);
                                 rowIndex = workerId * 1_000_000;
                                 b = NewBuilder(sourceId, batchLabelPrefix, workerId * 1000 + inBatch, batchSize, commitEpoch);
                                 inBatch = 0;
@@ -230,13 +266,19 @@ public static class StructuredGrammarIngest
 
                     if (inBatch > 0)
                         await outChannel.Writer.WriteAsync(
-                            b.SetInputUnitsConsumed(rowsInBatch).Build(), ct);
+                            b.SetInputUnitsConsumed(rowsInBatch).Build(), runCt);
+                }
+                catch (OperationCanceledException) when (capCts.IsCancellationRequested && !ct.IsCancellationRequested)
+                {
+                    if (inBatch > 0)
+                        await outChannel.Writer.WriteAsync(
+                            b.SetInputUnitsConsumed(rowsInBatch).Build(), CancellationToken.None);
                 }
                 finally
                 {
                     NativeInterop.GrammarRowIterFree(parseIter);
                 }
-            }, ct);
+            }, runCt);
         }
 
         var closer = Task.Run(async () =>
@@ -244,9 +286,10 @@ public static class StructuredGrammarIngest
             await producer;
             await Task.WhenAll(consumerTasks);
             outChannel.Writer.TryComplete();
-        }, ct);
+        }, runCt);
 
         long rowsReported = 0;
+        bool capped = false;
         while (await outChannel.Reader.WaitToReadAsync(ct))
         {
             while (outChannel.Reader.TryRead(out var change))
@@ -254,12 +297,36 @@ public static class StructuredGrammarIngest
                 rowsReported += change.Metadata.InputUnitsConsumed;
                 reportUnits?.Invoke(rowsReported);
                 yield return change;
+
+                if (maxInputUnits > 0 && rowsReported >= maxInputUnits && !capped)
+                {
+                    capped = true;
+                    capCts.Cancel();
+                }
             }
         }
 
         await closer;
         if (producer.IsFaulted)
             throw producer.Exception!.GetBaseException();
+    }
+
+    private static bool TryClaimParsedRow(long maxInputUnits, ref long parsedCount)
+    {
+        if (maxInputUnits <= 0)
+        {
+            Interlocked.Increment(ref parsedCount);
+            return true;
+        }
+
+        while (true)
+        {
+            long cur = Volatile.Read(ref parsedCount);
+            if (cur >= maxInputUnits)
+                return false;
+            if (Interlocked.CompareExchange(ref parsedCount, cur + 1, cur) == cur)
+                return true;
+        }
     }
 
     private static void ComposeRow(
