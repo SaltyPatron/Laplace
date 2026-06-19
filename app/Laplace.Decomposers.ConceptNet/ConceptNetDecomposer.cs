@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -59,6 +58,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddRelationType("HAS_EXAMPLE");
+        boot.AddRelationType("HAS_LANGUAGE");
         foreach (var typeName in RelMap.Values)
             boot.AddRelationType(RelationTypeRegistry.Resolve(typeName).Canonical);
         await context.Writer.ApplyAsync(boot.Build(), ct);
@@ -75,18 +75,9 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
 
         string file = Path.Combine(context.EcosystemPath, "assertions.csv");
         if (!File.Exists(file)) return Task.FromResult<IngestInventory?>(null);
-        return CountInventoryAsync(file, options.Languages, ct);
-    }
-
-    private static async Task<IngestInventory?> CountInventoryAsync(
-        string file, LanguageFilter? langs, CancellationToken ct)
-    {
-        long n = await EtlInventory.CountDataLinesAsync(file, line =>
-        {
-            if (langs?.IsActive != true) return true;
-            return ConceptNetRowFilter.MatchesLanguageFilter(line, langs);
-        }, ct: ct);
-        return new IngestInventory("assertions", n, [new IngestFileSpec("assertions", file, n)]);
+        long n = EtlInventory.EstimateNewlineCount(file, ct);
+        return Task.FromResult<IngestInventory?>(
+            new IngestInventory("assertions", n, [new IngestFileSpec("assertions", file, n)]));
     }
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -103,10 +94,24 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
     {
         string file = Path.Combine(ecosystemPath, "assertions.csv");
         if (!File.Exists(file)) yield break;
-        int batch = options.BatchSize > 1 ? options.BatchSize : 8192;
+        int batch = options.BatchSize > 1 ? options.BatchSize : 65536;
 
-        await foreach (var change in ConceptNetFastIngest.IngestAssertionsAsync(
-            file, batch, options.Languages, ct))
+        var witness = new ConceptNetGrammarWitness(options.Languages);
+        Func<ReadOnlySpan<byte>, bool>? acceptRow = options.Languages is { IsActive: true } langs
+            ? line => ConceptNetRowFilter.MatchesLanguageFilter(line, langs)
+            : null;
+
+        await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
+            file,
+            modalityId: "tsv",
+            sourceId: Source,
+            witness: witness,
+            batchSize: batch,
+            witnessWeight: 1.0,
+            batchLabelPrefix: "conceptnet",
+            reportUnits: null,
+            acceptRow: acceptRow,
+            ct: ct))
         {
             yield return change;
         }

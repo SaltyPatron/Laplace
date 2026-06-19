@@ -16,7 +16,8 @@ internal readonly struct OpenSubtitlesLinePair
     public required string PairStem { get; init; }
 }
 
-internal static class OpenSubtitlesFastIngest
+/// <summary>Zip paired-line IO + ContentWitnessBatch attestation (raw subtitle lines, not tabular).</summary>
+internal static class OpenSubtitlesZipIngest
 {
     public static async IAsyncEnumerable<OpenSubtitlesLinePair> ReadZipPairsAsync(
         string zipPath,

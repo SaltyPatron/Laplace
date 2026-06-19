@@ -6,12 +6,14 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Tatoeba;
 
-public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider, IIngestCommitPolicy
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/TatoebaDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
+
+    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
     internal static readonly Hash128 SentenceRefTypeId = EntityTypeRegistry.TatoebaSentence;
     internal static readonly Hash128 LanguageTypeId   = EntityTypeRegistry.Language;
@@ -42,14 +44,21 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
     {
         string sentences = Path.Combine(context.EcosystemPath, "sentences.csv");
         string links     = Path.Combine(context.EcosystemPath, "links.csv");
-        int batch = options.BatchSize > 1 ? options.BatchSize : 2048;
+        int batch = options.BatchSize > 1 ? options.BatchSize : 65536;
 
         var allowedSentenceIds = options.Languages?.IsActive == true ? new HashSet<long>() : null;
 
         if (File.Exists(sentences))
         {
-            await foreach (var change in TatoebaFastIngest.IngestSentencesAsync(
-                sentences, batch, options.Languages, allowedSentenceIds, ct))
+            var witness = new TatoebaGrammarWitness(TatoebaRowKind.Sentence, allowedSentenceIds);
+            Func<ReadOnlySpan<byte>, bool>? acceptSent = options.Languages is { IsActive: true } langs
+                ? line => TatoebaRowFilter.MatchesSentenceLanguageFilter(line, langs)
+                : null;
+
+            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
+                sentences, "tsv", Source, witness, batch, 1.0, "tatoeba/sent",
+                reportUnits: null, contextId: null, commitEpoch: 0,
+                acceptRow: acceptSent, ct: ct))
             {
                 if (!options.DryRun) yield return change;
             }
@@ -57,8 +66,15 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider
 
         if (File.Exists(links))
         {
-            await foreach (var change in TatoebaFastIngest.IngestLinksAsync(
-                links, batch, allowedSentenceIds, ct))
+            var witness = new TatoebaGrammarWitness(TatoebaRowKind.Link, allowedSentenceIds);
+            Func<ReadOnlySpan<byte>, bool>? acceptLink = allowedSentenceIds is not null
+                ? line => TatoebaRowFilter.MatchesLinkFilter(line, allowedSentenceIds)
+                : null;
+
+            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
+                links, "tsv", Source, witness, batch, 1.0, "tatoeba/link",
+                reportUnits: null, contextId: null, commitEpoch: 1,
+                acceptRow: acceptLink, ct: ct))
             {
                 if (!options.DryRun) yield return change;
             }

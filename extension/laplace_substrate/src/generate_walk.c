@@ -27,6 +27,9 @@ static const char *EDGE_QUERY =
     "  AND ($2::bytea IS NULL OR c.type_id = $2) "
     "  AND NOT laplace.refuted(c.rating, c.rd) "
     "  AND NOT (c.object_id = ANY ($4::bytea[])) "
+    /* never walk into a typing edge (entity -IS_A- its type) — those aren't content steps */
+    "  AND NOT EXISTS (SELECT 1 FROM laplace.canonical_names n "
+    "                  WHERE n.id = c.object_id AND n.name LIKE 'substrate/type/%') "
     "ORDER BY laplace.eff_mu(c.rating, c.rd) DESC "
     "LIMIT $3";
 

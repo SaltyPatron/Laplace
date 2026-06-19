@@ -57,7 +57,11 @@ exit /b %ERRORLEVEL%
 :run_ingest_ud_commit
 set "_saved=%LAPLACE_INGEST_COMMIT_ROWS%"
 if /i "%STEP%"=="ud" if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=25000"
-if /i "%STEP%"=="conceptnet" if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=50000"
+if /i "%STEP%"=="conceptnet" (
+  if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=500000"
+  if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=65536"
+  if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=4"
+)
 call :run_ingest_impl
 set "RC=%ERRORLEVEL%"
 if defined _saved (set "LAPLACE_INGEST_COMMIT_ROWS=%_saved%") else set "LAPLACE_INGEST_COMMIT_ROWS="

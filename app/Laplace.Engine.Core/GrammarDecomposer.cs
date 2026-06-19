@@ -14,8 +14,16 @@ public static unsafe class GrammarDecomposer
     
     public static IntPtr LookupById(string modalityId) => NativeInterop.GrammarLookupById(modalityId);
 
-    
+
     public static IntPtr LookupByExt(string ext) => NativeInterop.GrammarLookupByExt(ext);
+
+    // The modality id for a file extension, from the native registry (the single source of truth —
+    // all 31 compiled grammars), or null. Returns a pointer to a static string; no free needed.
+    public static string? ModalityByExt(string ext)
+    {
+        var p = NativeInterop.GrammarModalityByExt(ext);
+        return p == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(p);
+    }
 
     public static GrammarAst Parse(ReadOnlySpan<byte> utf8, IntPtr recipe)
     {

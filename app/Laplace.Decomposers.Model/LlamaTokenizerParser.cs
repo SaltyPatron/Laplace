@@ -242,8 +242,12 @@ public sealed class LlamaTokenizerParser
         if (rawToken.Length > 0 && rawToken[0] != '▁' && !rawToken.StartsWith("##", StringComparison.Ordinal)
             && TryByteLevelDecode(rawToken, out byte[] blBytes, out bool blLead) && blBytes.Length > 0)
         {
-            TokenRole br = TokenRole.ByteLevel;
-            if (blLead) br |= TokenRole.LeadingSpace;
+            // GPT-2 byte-level decoding succeeds on ANY ASCII piece, so it is the canonicalization
+            // mechanism, not a signal that the token is a raw byte. Reserve TokenRole.ByteLevel for
+            // the explicit <0xNN> form above; here only the leading-space role is meaningful. (This
+            // keeps clean words like "the" in export word/grapheme vocabs — FoundryCommands filters
+            // byte-level tokens out of those.)
+            TokenRole br = blLead ? TokenRole.LeadingSpace : TokenRole.None;
             return (NormalizeNfc(blBytes), br);
         }
 
@@ -343,12 +347,27 @@ public sealed class LlamaTokenizerParser
             return merges;
         foreach (var el in arr.EnumerateArray())
         {
-            string? pair = el.ValueKind == JsonValueKind.String ? el.GetString() : null;
-            if (string.IsNullOrEmpty(pair)) continue;
-            int sp = pair!.IndexOf(' ');
-            if (sp <= 0 || sp + 1 >= pair.Length) continue;
-            (byte[] l, _) = Canonicalize(pair[..sp]);
-            (byte[] r, _) = Canonicalize(pair[(sp + 1)..]);
+            string? left, right;
+            if (el.ValueKind == JsonValueKind.String)
+            {
+                // Legacy form: "a b" (space-joined).
+                string? pair = el.GetString();
+                if (string.IsNullOrEmpty(pair)) continue;
+                int sp = pair!.IndexOf(' ');
+                if (sp <= 0 || sp + 1 >= pair.Length) continue;
+                left = pair[..sp];
+                right = pair[(sp + 1)..];
+            }
+            else if (el.ValueKind == JsonValueKind.Array && el.GetArrayLength() == 2)
+            {
+                // Modern HF tokenizer form: ["a", "b"].
+                left = el[0].GetString();
+                right = el[1].GetString();
+            }
+            else continue;
+            if (string.IsNullOrEmpty(left) || string.IsNullOrEmpty(right)) continue;
+            (byte[] l, _) = Canonicalize(left!);
+            (byte[] r, _) = Canonicalize(right!);
             merges.Add((l, r));
         }
         return merges;

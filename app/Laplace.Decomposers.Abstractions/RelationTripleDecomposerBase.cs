@@ -34,7 +34,7 @@ public abstract class RelationTripleDecomposerBase : IDecomposer, IIngestCommitP
     
     
     
-    public virtual IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
+    public virtual IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
     protected abstract bool RequiresTwoPass { get; }
 

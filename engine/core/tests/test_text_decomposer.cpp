@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "laplace/core/content_witness_batch.h"
+#include "laplace/core/hash128.h"
 #include "laplace/core/text_decomposer.h"
 #include "laplace/core/tier_tree.h"
 
@@ -73,21 +75,33 @@ TEST(LaplaceCoreTextDecomposer, ASCIIHelloWorldTopology) {
     tier_tree_free(t);
 }
 
-TEST(LaplaceCoreTextDecomposer, DistinctNormalizationFormsStayDistinct) {
+TEST(LaplaceCoreTextDecomposer, NormalizationFormsConverge) {
+    // NFC and NFD encodings of "é" are the SAME content. text_decomposer_run NFC-normalizes at its
+    // chokepoint, so both decompose identically and resolve to ONE content entity id. This is the
+    // structural basis of cross-source convergence ("same content = same hash"). Replaces the old
+    // DistinctNormalizationFormsStayDistinct, which locked in the pre-NFC, fragmenting behavior.
+    const uint8_t pre[] = {0xC3, 0xA9};        // "é" NFC (U+00E9)
+    const uint8_t dec[] = {0x65, 0xCC, 0x81};  // "é" NFD (e + combining acute U+0301)
+
     tier_tree_t* a = nullptr;
     tier_tree_t* b = nullptr;
-    const uint8_t pre[] = {0xC3, 0xA9};
-    const uint8_t dec[] = {0x65, 0xCC, 0x81};
     ASSERT_EQ(0, laplace_text_decomposer_run(pre, sizeof(pre), &a));
     ASSERT_EQ(0, laplace_text_decomposer_run(dec, sizeof(dec), &b));
-    EXPECT_NE(tier_tree_node_count(a), tier_tree_node_count(b));
+    ASSERT_EQ(tier_tree_node_count(a), tier_tree_node_count(b));
     tier_node_view_t la, lb;
     tier_tree_get_node(a, 0, &la);
     tier_tree_get_node(b, 0, &lb);
-    EXPECT_EQ(0u, la.tier); EXPECT_EQ(0x00E9u, la.atom);
-    EXPECT_EQ(0u, lb.tier); EXPECT_EQ(0x0065u, lb.atom);
+    EXPECT_EQ(0u, la.tier); EXPECT_EQ(0x00E9u, la.atom);  // both normalize to NFC U+00E9
+    EXPECT_EQ(0u, lb.tier); EXPECT_EQ(0x00E9u, lb.atom);
     tier_tree_free(a);
     tier_tree_free(b);
+
+    // The identity must converge, not just the tree shape.
+    hash128_t id_nfc, id_nfd;
+    ASSERT_EQ(0, laplace_content_root_id(pre, sizeof(pre), &id_nfc));
+    ASSERT_EQ(0, laplace_content_root_id(dec, sizeof(dec), &id_nfd));
+    EXPECT_EQ(id_nfc.hi, id_nfd.hi);
+    EXPECT_EQ(id_nfc.lo, id_nfd.lo);
 }
 
 TEST(LaplaceCoreTextDecomposer, DeterministicAcrossRuns) {
@@ -184,11 +198,14 @@ TEST(LaplaceContentRootId, AsciiWordIsFlatMerkleOverCodepointIds) {
 TEST(LaplaceContentRootId, MultiCodepointGraphemeComposesNested) {
     
 
-    const uint8_t s[] = {0x65, 0xCC, 0x81, 0x78};
+    // q (U+0071) + combining acute (U+0301) is a multi-codepoint grapheme with NO precomposed form,
+    // so it survives NFC (unlike e + acute, which composes to U+00E9). It must still nest: one
+    // grapheme node holding both codepoints, under the word — not a flat 3-codepoint merkle.
+    const uint8_t s[] = {0x71, 0xCC, 0x81, 0x78};
     hash128_t id;
     ASSERT_EQ(0, laplace_content_root_id(s, sizeof(s), &id));
 
-    hash128_t g_kids[2] = { t0_id(0x0065), t0_id(0x0301) };
+    hash128_t g_kids[2] = { t0_id(0x0071), t0_id(0x0301) };
     hash128_t grapheme;
     hash128_merkle(1, g_kids, 2, &grapheme);
     hash128_t w_kids[2] = { grapheme, t0_id(0x0078) };
@@ -196,7 +213,7 @@ TEST(LaplaceContentRootId, MultiCodepointGraphemeComposesNested) {
     hash128_merkle(2, w_kids, 2, &nested);
     EXPECT_TRUE(hash128_equals(&id, &nested));
 
-    hash128_t flat_kids[3] = { t0_id(0x0065), t0_id(0x0301), t0_id(0x0078) };
+    hash128_t flat_kids[3] = { t0_id(0x0071), t0_id(0x0301), t0_id(0x0078) };
     hash128_t flat;
     hash128_merkle(2, flat_kids, 3, &flat);
     EXPECT_FALSE(hash128_equals(&id, &flat));

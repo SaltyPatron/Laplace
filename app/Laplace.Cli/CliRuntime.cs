@@ -32,6 +32,12 @@ internal static class CliRuntime
         return int.TryParse(raw, out var v) && v >= min ? v : fallback;
     }
 
+    public static long EnvLong(string name, long fallback, long min)
+    {
+        var raw = Environment.GetEnvironmentVariable(name);
+        return long.TryParse(raw, out var v) && v >= min ? v : fallback;
+    }
+
     public static double EnvDouble(string name, double fallback)
     {
         var raw = Environment.GetEnvironmentVariable(name);

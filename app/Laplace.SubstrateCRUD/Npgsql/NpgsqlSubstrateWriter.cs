@@ -112,6 +112,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         void Reference(Hash128 id, string role, string unit)
         {
             if (seenEntityArg.Contains(id) || _provenEntities.Contains(id) || seenEntity.Contains(id)) return;
+            if (IntentStage.IsContentWitnessProven(id)) return;
             if (!referenced.ContainsKey(id)) referenced.Add(id, $"{role} in {unit}");
         }
 

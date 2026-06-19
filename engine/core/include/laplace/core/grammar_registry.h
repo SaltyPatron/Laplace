@@ -16,6 +16,7 @@ typedef struct TSLanguage TSLanguage;
 
 const TSLanguage* laplace_grammar_lookup_by_id(const char* modality_id);
 const TSLanguage* laplace_grammar_lookup_by_ext(const char* ext);
+const char* laplace_grammar_modality_by_ext(const char* ext);
 
 
 size_t laplace_grammar_list(const char** out, size_t cap);

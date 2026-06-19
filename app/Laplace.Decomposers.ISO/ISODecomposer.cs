@@ -72,7 +72,7 @@ public sealed class ISODecomposer : IDecomposer, IIngestCommitPolicy
             _codeNames.Add(VocabularyNames.LanguageIso639_3(rec.Id));
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 langId, RelTypeIsLanguageCode, null, Source, null,
-                RelationTypeRank.Partitive * SourceTrust.StandardsDerived));
+                RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
 
             if (rec.Part1.Length > 0)
             {
@@ -82,10 +82,13 @@ public sealed class ISODecomposer : IDecomposer, IIngestCommitPolicy
                 b.AddEntity(iso1Id, EntityTier.Vocabulary, Iso639CodeTypeId, Source);
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
                     langId, RelTypeHasIso6391Code, iso1Id, Source, null,
-                    RelationTypeRank.Partitive * SourceTrust.StandardsDerived));
+                    RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
             }
 
-            foreach (var p2 in new[] { rec.Part2b, rec.Part2t }.Distinct())
+            // ISO 639-2 bibliographic (2/B) and terminologic (2/T) codes are distinct channels — they
+            // differ for ~20 languages (ger/deu, fre/fra). Emit each under its own relation so which-is-which
+            // is recoverable; when they coincide both relations simply point at the one shared code entity.
+            foreach (var (p2, rel) in new[] { (rec.Part2b, "HAS_ISO639_2B_CODE"), (rec.Part2t, "HAS_ISO639_2T_CODE") })
             {
                 if (p2.Length == 0) continue;
                 var iso2Name = $"iso639-2:{p2}";
@@ -93,7 +96,7 @@ public sealed class ISODecomposer : IDecomposer, IIngestCommitPolicy
                 var iso2Id = Hash128.OfCanonical(iso2Name);
                 b.AddEntity(iso2Id, EntityTier.Vocabulary, Iso639CodeTypeId, Source);
                 b.AddAttestation(NativeAttestation.Categorical(
-                    langId, "HAS_ISO639_2_CODE", iso2Id, Source, SourceTrust.StandardsDerived));
+                    langId, rel, iso2Id, Source, SourceTrust.StandardsDerived));
             }
             if (rec.Scope.Length > 0)
             {
@@ -130,7 +133,7 @@ public sealed class ISODecomposer : IDecomposer, IIngestCommitPolicy
             b.AddEntity(macroId, EntityTier.Vocabulary, LanguageTypeId, Source);
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 indivId, RelTypeMemberOfMacrolanguage, macroId, Source, null,
-                RelationTypeRank.Taxonomic * SourceTrust.StandardsDerived));
+                RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
         }
 
         string unidata = Path.GetFullPath(
@@ -168,8 +171,9 @@ public sealed class ISODecomposer : IDecomposer, IIngestCommitPolicy
                 var sucId = LanguageEntityId.FromIso639_3(changeTo);
                 b.AddEntity(retId, EntityTier.Vocabulary, LanguageTypeId, Source);
                 b.AddEntity(sucId, EntityTier.Vocabulary, LanguageTypeId, Source);
+                // Retirement is directional (retired -> successor), not a symmetric variant.
                 b.AddAttestation(NativeAttestation.Categorical(
-                    retId, "HAS_VARIANT_OF", sucId, Source, SourceTrust.StandardsDerived));
+                    retId, "SUPERSEDED_BY", sucId, Source, SourceTrust.StandardsDerived));
             }
         }
 

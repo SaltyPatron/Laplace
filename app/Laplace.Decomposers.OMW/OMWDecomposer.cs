@@ -13,12 +13,7 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider, IInge
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    
-    
-    
-    
-    
-    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
+    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.EpochBarrier;
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "OMWDecomposer";
@@ -50,9 +45,31 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider, IInge
     {
         string wnsDir = Path.Combine(context.EcosystemPath, "wns");
         if (!Directory.Exists(wnsDir)) yield break;
-        int batch = options.BatchSize > 1 ? options.BatchSize : 8192;
 
-        await foreach (var change in OMWFastIngest.IngestAsync(wnsDir, options.Languages, batch, ct))
+        int batch = options.BatchSize > 1 ? options.BatchSize : 2048;
+        long cap = options.MaxInputUnits;
+        bool legacy = string.Equals(
+            Environment.GetEnvironmentVariable("LAPLACE_OMW_LEGACY"),
+            "1", StringComparison.Ordinal);
+
+        if (legacy)
+        {
+            await foreach (var change in OMWGrammarIngest.IngestFilesAsync(
+                wnsDir, options.Languages, batch, cap, OmwIngestPhase.Combined, ct))
+            {
+                if (!options.DryRun) yield return change;
+            }
+            yield break;
+        }
+
+        await foreach (var change in OMWGrammarIngest.IngestFilesAsync(
+            wnsDir, options.Languages, batch, cap, OmwIngestPhase.Content, ct))
+        {
+            if (!options.DryRun) yield return change;
+        }
+
+        await foreach (var change in OMWGrammarIngest.IngestFilesAsync(
+            wnsDir, options.Languages, batch, cap, OmwIngestPhase.Attestations, ct))
         {
             if (!options.DryRun) yield return change;
         }
@@ -64,11 +81,11 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider, IInge
         string wnsDir = Path.Combine(context.EcosystemPath, "wns");
         if (!Directory.Exists(wnsDir)) return null;
         var files = new List<IngestFileSpec>();
-        foreach (string tab in Directory.EnumerateFiles(wnsDir, "wn-data-*.tab", SearchOption.AllDirectories))
+        foreach (string tab in OMWTabFiles.EnumerateTabFiles(wnsDir, options.Languages)
+                     .OrderBy(p => p, StringComparer.Ordinal))
         {
-            string lang = FileLang(tab);
-            if (options.Languages?.MatchesRaw(lang) == false) continue;
-            long n = await EtlInventory.CountDataLinesAsync(tab, ct: ct);
+            string lang = OMWTabFiles.FileLang(tab);
+            long n = EtlInventory.EstimateNewlineCount(tab, ct);
             files.Add(new(lang, tab, n));
         }
         long total = 0;
@@ -83,15 +100,4 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider, IInge
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-
-    
-    
-    
-    
-    private static string FileLang(string path)
-    {
-        string name = Path.GetFileNameWithoutExtension(path);
-        int dash = name.LastIndexOf('-');
-        return dash >= 0 && dash + 1 < name.Length ? name[(dash + 1)..] : "und";
-    }
 }

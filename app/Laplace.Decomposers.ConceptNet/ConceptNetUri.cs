@@ -9,9 +9,9 @@ namespace Laplace.Decomposers.ConceptNet;
 internal static class ConceptNetUri
 {
     public static bool TryParseLangAndTerm(
-        ReadOnlySpan<byte> uri, out string lang, out ReadOnlySpan<byte> termUnderscored)
+        ReadOnlySpan<byte> uri, out ReadOnlySpan<byte> lang, out ReadOnlySpan<byte> termUnderscored)
     {
-        lang = "";
+        lang = default;
         termUnderscored = default;
         if (uri.Length < 5 || uri[0] != (byte)'/' || uri[1] != (byte)'c' || uri[2] != (byte)'/')
             return false;
@@ -19,7 +19,7 @@ internal static class ConceptNetUri
         int langStart = i;
         while (i < uri.Length && uri[i] != (byte)'/') i++;
         if (i == langStart || i >= uri.Length) return false;
-        lang = Encoding.UTF8.GetString(uri[langStart..i]);
+        lang = uri[langStart..i];
         i++;
         int termStart = i;
         int termEnd = uri[termStart..].IndexOf((byte)'/');

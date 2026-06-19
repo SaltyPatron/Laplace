@@ -29,6 +29,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
         Hash128.OfCanonical($"framenet/coreness/{coreType}");
 
     private static readonly ConcurrentDictionary<string, byte> _vocabularyNames = new(StringComparer.Ordinal);
+    internal static ConcurrentDictionary<string, byte> VocabularyNames => _vocabularyNames;
 
     private static readonly string[] CorenessValues =
         ["Core", "Peripheral", "Extra-Thematic", "Core-Unexpressed"];
@@ -42,7 +43,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
         ["Is Causative of"] = "CAUSATIVE_OF",
         ["Is Inchoative of"] = "INCHOATIVE_OF",
         ["Precedes"]        = "PRECEDES",
-        ["See also"]        = "RELATED_TO",
+        ["See also"]        = "ALSO_SEE",
     };
 
     private const string Ns = "http://framenet.icsi.berkeley.edu";
@@ -70,6 +71,7 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
 
         boot.AddRelationType("EVOKES_FRAME");
         boot.AddRelationType("HAS_FRAME_ELEMENT");
+        boot.AddRelationType("HAS_VALENCE_PATTERN");
         boot.AddRelationType("HAS_DEFINITION");
         boot.AddRelationType("HAS_POS");
         boot.AddRelationType("HAS_EXAMPLE");
@@ -105,9 +107,13 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
     {
         string frameDir    = Path.Combine(context.EcosystemPath, "frame");
         string fulltextDir = Path.Combine(context.EcosystemPath, "fulltext");
-        int batch = options.BatchSize > 1 ? options.BatchSize : 256;
+        int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
 
         await foreach (var change in StreamFramesAsync(frameDir, batch, ct))
+        { if (!options.DryRun) yield return change; await Task.Yield(); }
+
+        string luDir = Path.Combine(context.EcosystemPath, "lu");
+        await foreach (var change in FrameNetLuIngest.StreamLuAsync(luDir, batch, Source, ct))
         { if (!options.DryRun) yield return change; await Task.Yield(); }
 
         await foreach (var change in StreamFulltextAsync(fulltextDir, batch, ct))
@@ -247,8 +253,15 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
             if (!RelationTypes.TryGetValue(rel.Type, out var typeName)) continue;
             Hash128? tgt = CategoryAnchor.Id(rel.TargetFrame);
             if (tgt is null) continue;
-            b.AddAttestation(NativeAttestation.Categorical(
-                frameId, typeName, tgt.Value, Source, SourceTrust.AcademicCurated));
+            // "X Subframe of Y" means X is a sub-event of the larger frame Y, so the HAS_SUBEVENT
+            // edge runs Y -> X (subject HAS_SUBEVENT object). Every other FrameNet relation keeps
+            // this frame as the subject.
+            if (rel.Type == "Subframe of")
+                b.AddAttestation(NativeAttestation.Categorical(
+                    tgt.Value, typeName, frameId, Source, SourceTrust.AcademicCurated));
+            else
+                b.AddAttestation(NativeAttestation.Categorical(
+                    frameId, typeName, tgt.Value, Source, SourceTrust.AcademicCurated));
         }
     }
 

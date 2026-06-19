@@ -42,6 +42,24 @@ public static class EtlInventory
         return n;
     }
 
+    /// <summary>Fast newline count for progress bars — no per-line string allocation.</summary>
+    public static long EstimateNewlineCount(string path, CancellationToken ct = default)
+    {
+        if (!File.Exists(path)) return 0;
+        long n = 0;
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            bufferSize: 1 << 20, useAsync: false);
+        var buf = new byte[1 << 20];
+        int read;
+        while ((read = fs.Read(buf, 0, buf.Length)) > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            for (int i = 0; i < read; i++)
+                if (buf[i] == (byte)'\n') n++;
+        }
+        return n;
+    }
+
     public static long CountConlluSentences(string path)
     {
         if (!File.Exists(path)) return 0;

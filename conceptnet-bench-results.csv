@@ -1,0 +1,15 @@
+timestamp,config,pct,max_units,seconds,exit_code
+---- parallel+unordered @ 1% (100000 rows) ----
+2026-06-19T08:58:46Z,parallel+unordered,1,100000,14.1,-1073741819
+---- parallel+serial @ 1% (100000 rows) ----
+2026-06-19T09:03:06Z,parallel+serial,1,100000,259.6,-1073741819
+---- serial @ 1% (100000 rows) ----
+2026-06-19T09:03:14Z,serial,1,100000,8,1
+=== CONCEPTNET BENCH DONE ===
+---- serial @ 1% (340000 rows) ----
+---- parallel+unordered @ 1% (340000 rows) ----
+---- parallel+serial @ 1% (340000 rows) ----
+---- serial @ 1% (340000 rows) ----
+---- serial @ 1% (340000 rows) ----
+2026-06-19T09:09:30Z,serial,1,340000,7,1
+---- serial @ 100% (100000 rows) ----

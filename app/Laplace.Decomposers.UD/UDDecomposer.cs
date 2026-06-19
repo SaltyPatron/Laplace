@@ -51,6 +51,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
         boot.AddRelationType("HAS_DEFINITION");
         boot.AddRelationType("TRANSCRIBES_AS");
         boot.AddRelationType("ENHANCED_DEPENDS_ON");
+        boot.AddRelationType("HAS_XPOS");
         boot.AddType("UD_Feature");
         await context.Writer.ApplyAsync(boot.Build(), ct);
         foreach (var n in boot.CanonicalNames)
@@ -64,7 +65,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
     {
         string treebanksDir = Path.Combine(context.EcosystemPath, "ud-treebanks-v2.17");
         if (!Directory.Exists(treebanksDir)) yield break;
-        int batchSentences = options.BatchSize > 1 ? options.BatchSize : 256;
+        int batchSentences = options.BatchSize > 1 ? options.BatchSize : 4096;
 
         int workers = int.TryParse(
             Environment.GetEnvironmentVariable("LAPLACE_DECOMPOSE_WORKERS"), out var w) && w > 0
@@ -226,6 +227,19 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
             if (!string.IsNullOrEmpty(tok.Upos) && tok.Upos != "_")
                 PosReference.Attest(b, form, tok.Upos!, PosReference.PosTagset.Upos,
                     Source, null, SourceTrust.AcademicCurated, canonicalNames);
+
+            // XPOS: treebank-specific POS tag (Penn Treebank etc.), distinct from universal UPOS.
+            // Namespaced so the tag "NN" doesn't collide with the word "NN"; emitted under HAS_XPOS,
+            // scoped to the language as context. (Previously parsed but never emitted.)
+            if (!string.IsNullOrEmpty(tok.Xpos) && tok.Xpos != "_")
+            {
+                string xposName = $"substrate/pos/xpos/{tok.Xpos}/v1";
+                Hash128 xposId = Hash128.OfCanonical(xposName);
+                canonicalNames.TryAdd(xposName, 0);
+                b.AddEntity(new EntityRow(xposId, EntityTier.Vocabulary, PosReference.PosTypeId, Source));
+                b.AddAttestation(NativeAttestation.Categorical(
+                    form, "HAS_XPOS", xposId, Source, langId, TC.AcademicCurated));
+            }
 
             foreach (var feat in tok.Feats)
             {

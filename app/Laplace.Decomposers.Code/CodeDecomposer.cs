@@ -19,23 +19,6 @@ public sealed class CodeDecomposer : IDecomposer
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
-    
-    private static readonly Dictionary<string, string> ExtToModality =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["py"] = "python",
-            ["c"] = "c", ["h"] = "c",
-            ["cpp"] = "cpp", ["cc"] = "cpp", ["cxx"] = "cpp", ["hpp"] = "cpp", ["hh"] = "cpp",
-            ["js"] = "javascript", ["mjs"] = "javascript", ["cjs"] = "javascript",
-            ["rs"] = "rust",
-            ["go"] = "go",
-            ["cs"] = "c-sharp",
-            ["sh"] = "bash", ["bash"] = "bash",
-            ["json"] = "json",
-            ["csv"] = "csv",
-            ["md"] = "markdown", ["markdown"] = "markdown",
-        };
-
     public Hash128 SourceId     => Source;
     public string  SourceName   => "CodeDecomposer";
     public int     LayerOrder   => 2;
@@ -58,7 +41,7 @@ public sealed class CodeDecomposer : IDecomposer
     {
         var files = EnumerateCodeFiles(context.EcosystemPath).ToList();
         if (files.Count == 0) yield break;
-        int batch = options.BatchSize > 1 ? options.BatchSize : 64;
+        int batch = options.BatchSize > 1 ? options.BatchSize : 512;
 
         var b = NewBuilder(0);
         int inBatch = 0, bn = 0;
@@ -135,7 +118,8 @@ public sealed class CodeDecomposer : IDecomposer
     {
         string ext = Path.GetExtension(path);
         if (ext.Length > 0 && ext[0] == '.') ext = ext[1..];
-        return ExtToModality.TryGetValue(ext, out var m) ? m : null;
+        // Single source of truth: the native registry's EXTS[] (all 31 compiled grammars).
+        return ext.Length == 0 ? null : GrammarDecomposer.ModalityByExt(ext.ToLowerInvariant());
     }
 
     private static SubstrateChangeBuilder NewBuilder(int n) =>

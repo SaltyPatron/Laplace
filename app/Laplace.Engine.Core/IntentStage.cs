@@ -179,6 +179,15 @@ public sealed class IntentStage : SafeHandle
     
     public static void ResetContentBank() => NativeInterop.ContentWitnessReset();
 
+    public static bool IsContentWitnessProven(Hash128 id)
+    {
+        unsafe
+        {
+            Hash128 h = id;
+            return NativeInterop.ContentWitnessEntityProven(&h) != 0;
+        }
+    }
+
     public bool TryAddContentWitness(ReadOnlySpan<byte> canonical, Hash128 sourceId, out Hash128 rootId)
     {
         rootId = default;
@@ -198,6 +207,16 @@ public sealed class IntentStage : SafeHandle
                 rootId = root;
                 return true;
             }
+        }
+    }
+
+    public bool WitnessContains(Hash128 id)
+    {
+        ThrowIfDisposed();
+        unsafe
+        {
+            Hash128 h = id;
+            return NativeInterop.IntentStageWitnessSeen(handle, &h) != 0;
         }
     }
 

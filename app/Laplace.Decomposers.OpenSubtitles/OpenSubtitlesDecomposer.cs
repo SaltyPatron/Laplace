@@ -7,12 +7,14 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.OpenSubtitles;
 
-public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvider
+public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvider, IIngestCommitPolicy
 {
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/OpenSubtitlesDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
+
+    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
     private static readonly (string Pair, long Pairs)[] PairCounts =
     {
@@ -53,7 +55,7 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
     {
         if (!Directory.Exists(context.EcosystemPath)) yield break;
 
-        int batch = options.BatchSize > 1 ? options.BatchSize : 8192;
+        int batch = options.BatchSize > 1 ? options.BatchSize : 65536;
         int workers = ResolveDecomposeWorkers();
         int chunk = Math.Clamp(batch / 4, 512, 4096);
         var zips = SelectZips(context.EcosystemPath, options);
@@ -97,7 +99,7 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
                 while (zipQueue.TryDequeue(out var zip))
                 {
                     ct.ThrowIfCancellationRequested();
-                    await foreach (var pair in OpenSubtitlesFastIngest.ReadZipPairsAsync(zip.Path, zip.Stem, ct))
+                    await foreach (var pair in OpenSubtitlesZipIngest.ReadZipPairsAsync(zip.Path, zip.Stem, ct))
                         await pairChannel.Writer.WriteAsync(pair, ct);
                 }
             }, ct);
@@ -131,7 +133,7 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
                         langA = pair.LangA;
                         langB = pair.LangB;
                         bn = 0;
-                        local = OpenSubtitlesFastIngest.NewBuilder(
+                        local = OpenSubtitlesZipIngest.NewBuilder(
                             $"opensubtitles/w{worker}/{stem}/0", chunk, langA, langB);
                         count = 0;
                     }
@@ -140,11 +142,11 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
                         stem = pair.PairStem;
                         langA = pair.LangA;
                         langB = pair.LangB;
-                        local = OpenSubtitlesFastIngest.NewBuilder(
+                        local = OpenSubtitlesZipIngest.NewBuilder(
                             $"opensubtitles/w{worker}/{stem}/0", chunk, langA, langB);
                     }
 
-                    if (!OpenSubtitlesFastIngest.TryAppendPair(local, pair, out _))
+                    if (!OpenSubtitlesZipIngest.TryAppendPair(local, pair, out _))
                         continue;
 
                     if (++count >= chunk)
@@ -152,7 +154,7 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
                         await microChannel.Writer.WriteAsync(
                             local.SetInputUnitsConsumed(count).Build(), ct);
                         bn++;
-                        local = OpenSubtitlesFastIngest.NewBuilder(
+                        local = OpenSubtitlesZipIngest.NewBuilder(
                             $"opensubtitles/w{worker}/{stem}/{bn}", chunk, langA, langB);
                         count = 0;
                     }
@@ -188,7 +190,7 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
                 accUnits = 0;
             }
 
-            OpenSubtitlesFastIngest.Absorb(acc, micro);
+            OpenSubtitlesZipIngest.Absorb(acc, micro);
             accUnits += Math.Max(1, micro.Metadata.InputUnitsConsumed);
 
             if (accUnits >= batch)
@@ -217,22 +219,22 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
         Hash128 langA = default, langB = default;
         int n = 0, bn = 0;
 
-        await foreach (var pair in OpenSubtitlesFastIngest.ReadZipPairsAsync(zipPath, pairStem, ct))
+        await foreach (var pair in OpenSubtitlesZipIngest.ReadZipPairsAsync(zipPath, pairStem, ct))
         {
             if (b is null)
             {
                 langA = pair.LangA;
                 langB = pair.LangB;
-                b = OpenSubtitlesFastIngest.NewBuilder($"opensubtitles/{unitStem}/0", batchSize, langA, langB);
+                b = OpenSubtitlesZipIngest.NewBuilder($"opensubtitles/{unitStem}/0", batchSize, langA, langB);
             }
 
-            if (!OpenSubtitlesFastIngest.TryAppendPair(b, pair, out _)) continue;
+            if (!OpenSubtitlesZipIngest.TryAppendPair(b, pair, out _)) continue;
 
             if (++n >= batchSize)
             {
                 yield return b.SetInputUnitsConsumed(n).Build();
                 bn++;
-                b = OpenSubtitlesFastIngest.NewBuilder(
+                b = OpenSubtitlesZipIngest.NewBuilder(
                     $"opensubtitles/{unitStem}/{bn}", batchSize, langA, langB);
                 n = 0;
             }

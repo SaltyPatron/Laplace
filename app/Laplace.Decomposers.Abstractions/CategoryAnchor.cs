@@ -36,7 +36,7 @@ public static class CategoryAnchor
     
     public static void AttestCategory(
         SubstrateChangeBuilder b, Hash128 anchor, Hash128 categoryTypeId, Hash128 source, double trust)
-        => b.AddAttestation(NativeAttestation.Categorical(anchor, "IS_A", categoryTypeId, source, trust));
+        => b.AddAttestation(NativeAttestation.Categorical(anchor, "IS_TYPED_AS", categoryTypeId, source, trust));
 
     
     

@@ -87,7 +87,7 @@ public sealed class VerbNetDecomposerTests
             && a.SubjectId == lendId!.Value && a.ObjectId == classId!.Value);
         
         Assert.Contains(atts, a =>
-            a.TypeId == RelationTypeRegistry.RelationTypeId("IS_A")
+            a.TypeId == RelationTypeRegistry.RelationTypeId("IS_TYPED_AS")
             && a.SubjectId == classId!.Value
             && a.ObjectId == Hash128.OfCanonical("substrate/type/VerbNet_Class/v1"));
 

@@ -21,7 +21,7 @@ public sealed class TextEntityBuilderEmissionTests
         byte[] bytes = Encoding.UTF8.GetBytes(text);
         Assert.True(TextEntityBuilder.TryBuildRows(bytes, Src, out _, out var phys, out var rootId, out _));
         byte[] rebuilt = ReconstructFromPhysicalities(phys, rootId);
-        Assert.Equal(bytes, rebuilt);
+        Assert.Equal(Nfc(bytes), rebuilt);
     }
 
     private static readonly string GalileoPath =
@@ -37,7 +37,24 @@ public sealed class TextEntityBuilderEmissionTests
         byte[] bytes = File.ReadAllBytes(GalileoPath);
         Assert.True(TextEntityBuilder.TryBuildRows(bytes, Src, out _, out var phys, out var rootId, out _));
         byte[] rebuilt = ReconstructFromPhysicalities(phys, rootId);
-        Assert.Equal(bytes, rebuilt);
+        Assert.Equal(Nfc(bytes), rebuilt);
+    }
+
+    // The substrate canonicalizes content to NFC at the text-decomposer chokepoint, so a roundtrip
+    // reconstructs the canonical form, not the raw bytes (e.g. Greek oxia U+1F79 → tonos U+03CC).
+    // ASCII/already-NFC input is unchanged.
+    private static unsafe byte[] Nfc(byte[] utf8)
+    {
+        if (utf8.Length == 0) return utf8;
+        byte* outPtr = null;
+        nuint outLen = 0;
+        fixed (byte* p = utf8)
+        {
+            if (NativeInterop.NormalizeNfcUtf8(p, (nuint)utf8.Length, &outPtr, &outLen) != 0)
+                return utf8;
+        }
+        try { return new ReadOnlySpan<byte>(outPtr, (int)outLen).ToArray(); }
+        finally { if (outPtr != null) System.Runtime.InteropServices.NativeMemory.Free(outPtr); }
     }
 
     private static byte[] ReconstructFromPhysicalities(

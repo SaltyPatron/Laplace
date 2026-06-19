@@ -3,8 +3,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "tree_sitter/api.h"
+
 struct laplace_grammar_row_iter {
     const TSLanguage* recipe;
+    TSParser*         parser;
     uint8_t*          carry;
     size_t            carry_len;
     size_t            carry_cap;
@@ -18,6 +21,13 @@ int laplace_grammar_row_iter_new(const TSLanguage* recipe,
         (laplace_grammar_row_iter_t*)calloc(1, sizeof(*it));
     if (!it) return -3;
     it->recipe = recipe;
+    it->parser = ts_parser_new();
+    if (!it->parser) { free(it); return -3; }
+    if (!ts_parser_set_language(it->parser, recipe)) {
+        ts_parser_delete(it->parser);
+        free(it);
+        return -2;
+    }
     *out = it;
     return 0;
 }
@@ -37,43 +47,32 @@ static int append_carry(laplace_grammar_row_iter_t* it,
     return 0;
 }
 
-int laplace_grammar_row_iter_feed(laplace_grammar_row_iter_t* it,
-                                  const uint8_t* chunk, size_t len,
-                                  laplace_parsed_row_t** out_rows, size_t* out_count) {
-    if (!it || !out_rows || !out_count) return -1;
+static int split_carry_lines(laplace_grammar_row_iter_t* it,
+                             laplace_raw_row_t** out_rows, size_t* out_count) {
     *out_rows = NULL;
     *out_count = 0;
-    if (it->oom) return -3;
-    if (chunk && len > 0) {
-        if (append_carry(it, chunk, len) != 0) return -3;
-    }
 
     size_t row_cap = 0, row_n = 0;
-    laplace_parsed_row_t* rows = NULL;
+    laplace_raw_row_t* rows = NULL;
     size_t start = 0;
     for (size_t i = 0; i < it->carry_len; ++i) {
         if (it->carry[i] != '\n') continue;
         size_t row_len = i - start;
         if (row_len > 0) {
-            laplace_ast_t* ast = NULL;
-            int rc = laplace_grammar_parse(it->carry + start, row_len + 1, it->recipe, &ast);
-            if (rc == 0 && ast) {
-                if (row_n >= row_cap) {
-                    size_t ncap = row_cap ? row_cap * 2 : 64;
-                    laplace_parsed_row_t* n = (laplace_parsed_row_t*)realloc(
-                        rows, ncap * sizeof(*n));
-                    if (!n) { laplace_ast_free(ast); it->oom = 1; goto fail; }
-                    rows = n;
-                    row_cap = ncap;
-                }
-                uint8_t* copy = (uint8_t*)malloc(row_len);
-                if (!copy) { laplace_ast_free(ast); it->oom = 1; goto fail; }
-                memcpy(copy, it->carry + start, row_len);
-                rows[row_n].ast = ast;
-                rows[row_n].row_utf8 = copy;
-                rows[row_n].row_len = row_len;
-                row_n++;
+            if (row_n >= row_cap) {
+                size_t ncap = row_cap ? row_cap * 2 : 64;
+                laplace_raw_row_t* n = (laplace_raw_row_t*)realloc(
+                    rows, ncap * sizeof(*n));
+                if (!n) { it->oom = 1; goto fail; }
+                rows = n;
+                row_cap = ncap;
             }
+            uint8_t* copy = (uint8_t*)malloc(row_len);
+            if (!copy) { it->oom = 1; goto fail; }
+            memcpy(copy, it->carry + start, row_len);
+            rows[row_n].row_utf8 = copy;
+            rows[row_n].row_len = row_len;
+            row_n++;
         }
         start = i + 1;
     }
@@ -91,16 +90,83 @@ int laplace_grammar_row_iter_feed(laplace_grammar_row_iter_t* it,
     return 0;
 
 fail:
-    for (size_t j = 0; j < row_n; ++j) {
-        laplace_ast_free(rows[j].ast);
+    for (size_t j = 0; j < row_n; ++j)
         free(rows[j].row_utf8);
-    }
     free(rows);
     return -3;
 }
 
+int laplace_grammar_row_iter_feed_lines(laplace_grammar_row_iter_t* it,
+                                        const uint8_t* chunk, size_t len,
+                                        laplace_raw_row_t** out_rows, size_t* out_count) {
+    if (!it || !out_rows || !out_count) return -1;
+    *out_rows = NULL;
+    *out_count = 0;
+    if (it->oom) return -3;
+    if (chunk && len > 0) {
+        if (append_carry(it, chunk, len) != 0) return -3;
+    }
+    return split_carry_lines(it, out_rows, out_count);
+}
+
+int laplace_grammar_row_iter_parse_row(laplace_grammar_row_iter_t* it,
+                                       const uint8_t* row_utf8, size_t row_len,
+                                       laplace_ast_t** out_ast) {
+    if (!it || !row_utf8 || !out_ast) return -1;
+    *out_ast = NULL;
+    if (it->oom || !it->parser) return -3;
+    return laplace_grammar_parse_with(it->parser, row_utf8, row_len, it->recipe, out_ast);
+}
+
+int laplace_grammar_row_iter_feed(laplace_grammar_row_iter_t* it,
+                                  const uint8_t* chunk, size_t len,
+                                  laplace_parsed_row_t** out_rows, size_t* out_count) {
+    if (!it || !out_rows || !out_count) return -1;
+    *out_rows = NULL;
+    *out_count = 0;
+    if (it->oom) return -3;
+    if (chunk && len > 0) {
+        if (append_carry(it, chunk, len) != 0) return -3;
+    }
+
+    laplace_raw_row_t* raw = NULL;
+    size_t raw_n = 0;
+    if (split_carry_lines(it, &raw, &raw_n) != 0) return -3;
+
+    if (raw_n == 0) return 0;
+
+    laplace_parsed_row_t* rows =
+        (laplace_parsed_row_t*)calloc(raw_n, sizeof(*rows));
+    if (!rows) {
+        laplace_grammar_row_iter_free_lines(raw, raw_n);
+        it->oom = 1;
+        return -3;
+    }
+
+    size_t out_n = 0;
+    for (size_t i = 0; i < raw_n; ++i) {
+        laplace_ast_t* ast = NULL;
+        int rc = laplace_grammar_row_iter_parse_row(
+            it, raw[i].row_utf8, raw[i].row_len, &ast);
+        if (rc == 0 && ast) {
+            rows[out_n].ast = ast;
+            rows[out_n].row_utf8 = raw[i].row_utf8;
+            rows[out_n].row_len = raw[i].row_len;
+            out_n++;
+        } else {
+            free(raw[i].row_utf8);
+        }
+    }
+    free(raw);
+
+    *out_rows = rows;
+    *out_count = out_n;
+    return 0;
+}
+
 void laplace_grammar_row_iter_free(laplace_grammar_row_iter_t* it) {
     if (!it) return;
+    if (it->parser) ts_parser_delete(it->parser);
     free(it->carry);
     free(it);
 }
@@ -111,5 +177,12 @@ void laplace_grammar_row_iter_free_rows(laplace_parsed_row_t* rows, size_t count
         if (rows[i].ast) laplace_ast_free(rows[i].ast);
         free(rows[i].row_utf8);
     }
+    free(rows);
+}
+
+void laplace_grammar_row_iter_free_lines(laplace_raw_row_t* rows, size_t count) {
+    if (!rows) return;
+    for (size_t i = 0; i < count; ++i)
+        free(rows[i].row_utf8);
     free(rows);
 }
