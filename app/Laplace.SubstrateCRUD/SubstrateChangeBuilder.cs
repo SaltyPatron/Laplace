@@ -67,6 +67,17 @@ public sealed class SubstrateChangeBuilder
         return this;
     }
 
+    /// <summary>
+    /// Records an entity id in the within-batch dedup set, returning true if it was novel. Lets the
+    /// grammar compose path drain entities straight into <see cref="ContentStage"/> (native, no
+    /// managed <see cref="EntityRow"/>) while sharing the exact dedup set used by
+    /// <see cref="AddEntity(EntityRow)"/> — so an id staged by either route is emitted exactly once.
+    /// </summary>
+    public bool TrySeeEntity(Hash128 id) => _seenEntities.Add(id);
+
+    /// <summary>As <see cref="TrySeeEntity"/>, for physicality ids.</summary>
+    public bool TrySeePhysicality(Hash128 id) => _seenPhysicalities.Add(id);
+
     public SubstrateChangeBuilder AddIntentStage(IntentStage stage)
     {
         ArgumentNullException.ThrowIfNull(stage);

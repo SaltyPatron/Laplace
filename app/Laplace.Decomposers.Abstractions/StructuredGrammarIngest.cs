@@ -169,8 +169,19 @@ public static class StructuredGrammarIngest
                 SingleReader = false,
                 FullMode = BoundedChannelFullMode.Wait,
             });
-        var outChannel = Channel.CreateUnbounded<SubstrateChange>(
-            new UnboundedChannelOptions { SingleWriter = false, SingleReader = true });
+        // Bounded, not unbounded: the compose workers are far faster than the downstream
+        // commit consumer, so an unbounded out-channel let them race ahead and pile built
+        // SubstrateChange batches (each ~hundreds of thousands of rows) in RAM — one of the two
+        // measured 16 GB blowup co-causes. FullMode.Wait back-pressures compose to the commit
+        // rate (the producer/workChannel chain then pauses file reads). No deadlock: the single
+        // reader (the DecomposeAsync enumerator) always drains as the runner commits.
+        var outChannel = Channel.CreateBounded<SubstrateChange>(
+            new BoundedChannelOptions(Math.Max(workers * 4, 8))
+            {
+                SingleWriter = false,
+                SingleReader = true,
+                FullMode = BoundedChannelFullMode.Wait,
+            });
 
         var producer = Task.Run(async () =>
         {
@@ -342,11 +353,10 @@ public static class StructuredGrammarIngest
         SubstrateChangeBuilder b)
     {
         using var composer = new GrammarRowComposer(lineUtf8, ast, sourceId, modalityId);
-        var (ents, phys, atts, root) = composer.Materialize(witnessWeight);
-
-        foreach (var e in ents) b.AddEntity(e);
-        foreach (var p2 in phys) b.AddPhysicality(p2);
-        foreach (var a in atts) b.AddAttestation(a);
+        // Native-direct: compose entities + physicalities drain straight into the builder's native
+        // ContentStage (no managed EntityRow/PhysicalityRow marshal — the measured client-bound
+        // cost), deduped within the batch via the builder's shared seen-set; PRECEDES ride managed.
+        var root = composer.DrainInto(b, witnessWeight);
 
         witness.WalkRow(
             new GrammarComposeContext(lineUtf8, ast, root, composer,
@@ -403,9 +413,12 @@ public static class StructuredGrammarIngest
     private static SubstrateChangeBuilder NewBuilder(
         Hash128 sourceId, string prefix, int bn, int batchSize, int commitEpoch) =>
         new SubstrateChangeBuilder(sourceId, $"{prefix}/{bn}", null,
-            entityCapacity: batchSize * 32,
-            physicalityCapacity: batchSize * 32,
-            attestationCapacity: batchSize * 8)
+            // Compose entities/physicalities drain into the native ContentStage now, not these
+            // managed arrays — so capacity is sized for witness rows + PRECEDES, not the old
+            // batchSize*32 fanout (the second measured 16 GB blowup co-cause).
+            entityCapacity: batchSize,
+            physicalityCapacity: batchSize,
+            attestationCapacity: batchSize * 4)
             .SetCommitEpoch(commitEpoch);
 
     public static async Task<SubstrateChange?> IngestJsonDocumentAsync(

@@ -106,16 +106,13 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         var stagedAttIds  = new List<Hash128>();
         Span<double> coord = stackalloc double[4];
 
-        
-        
-        var referenced = new Dictionary<Hash128, string>();
-        void Reference(Hash128 id, string role, string unit)
-        {
-            if (seenEntityArg.Contains(id) || _provenEntities.Contains(id) || seenEntity.Contains(id)) return;
-            if (IntentStage.IsContentWitnessProven(id)) return;
-            if (!referenced.ContainsKey(id)) referenced.Add(id, $"{role} in {unit}");
-        }
-
+        // Referential integrity is no longer pre-checked per batch. Identity is content-addressed
+        // and the tier DAG is acyclic, so a "forward" reference to a not-yet-deposited entity is not
+        // an error: the referent lands with the identical id (this batch, a sibling worker, or
+        // already present), and FK/triggers are disabled (session_replication_role=replica) for the
+        // bulk insert. End-of-run soundness is proven by reconstruction (db-roundtrip) — the same
+        // trunk⟹leaves containment the dedup descent relies on. Deleting this EXISTS check is what
+        // frees decomposers from the global two-pass / StrictSerial it used to force.
         foreach (var c in changes)
             foreach (var e in c.Entities)
             {
@@ -123,8 +120,6 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                 if (_provenEntities.Contains(e.Id)) continue;
                 if (!seenEntity.Add(e.Id)) continue;
                 stage.AddEntity(e.Id, e.Tier, e.TypeId, e.FirstObservedBy);
-                Reference(e.TypeId, $"entity {Convert.ToHexString(e.Id.ToBytes())} type_id", c.Metadata.SourceContentUnitName);
-                if (e.FirstObservedBy is Hash128 fob) Reference(fob, $"entity {Convert.ToHexString(e.Id.ToBytes())} first_observed_by", c.Metadata.SourceContentUnitName);
             }
         CopyBlobValidator.Checkpoint(stage, "after-entity-loop");
         foreach (var c in changes)
@@ -140,8 +135,6 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                                               : p.TrajectoryXyzm.AsSpan(),
                     p.NConstituents, p.AlignmentResidual, p.SourceDim, p.ObservedAtUnixUs);
                 stagedPhysIds.Add(p.Id);
-                Reference(p.EntityId, $"physicality {Convert.ToHexString(p.Id.ToBytes())} entity_id", c.Metadata.SourceContentUnitName);
-                Reference(p.SourceId, $"physicality {Convert.ToHexString(p.Id.ToBytes())} source_id", c.Metadata.SourceContentUnitName);
             }
         CopyBlobValidator.Checkpoint(stage, "after-physicality-loop");
         var attGamesDelta = new Dictionary<Hash128, (long Games, long MaxTsUs)>();
@@ -160,12 +153,6 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                     (short)a.Outcome,
                     a.LastObservedAtUnixUs, a.ObservationCount);
                 stagedAttIds.Add(a.Id);
-                var attHex = Convert.ToHexString(a.Id.ToBytes());
-                Reference(a.SubjectId, $"attestation {attHex} subject_id", c.Metadata.SourceContentUnitName);
-                Reference(a.TypeId, $"attestation {attHex} type_id", c.Metadata.SourceContentUnitName);
-                Reference(a.SourceId, $"attestation {attHex} source_id", c.Metadata.SourceContentUnitName);
-                if (a.ObjectId  is Hash128 aObj) Reference(aObj, $"attestation {attHex} object_id", c.Metadata.SourceContentUnitName);
-                if (a.ContextId is Hash128 aCtx) Reference(aCtx, $"attestation {attHex} context_id", c.Metadata.SourceContentUnitName);
             }
         CopyBlobValidator.Checkpoint(stage, "after-attestation-loop");
 
@@ -209,28 +196,6 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                     entitiesInserted += await StageAndInsertAsync(
                         conn, stage, IntentStageTable.Entities, "entities", ct);
                     roundTrips += 3;
-                }
-
-                if (referenced.Count > 0)
-                {
-                    var refList = new List<Hash128>(referenced.Keys);
-                    var present = await IntentPreflight.EntitiesExistAsync(conn, refList, ct);
-                    roundTrips++;
-                    if (present.Count != refList.Count)
-                    {
-                        Hash128 firstMissing = default;
-                        int missingCount = 0;
-                        foreach (var id in refList)
-                            if (!present.Contains(id))
-                            {
-                                if (missingCount == 0) firstMissing = id;
-                                missingCount++;
-                            }
-                        throw new SubstrateReferentialIntegrityException(
-                            missingCount, Convert.ToHexString(firstMissing.ToBytes()),
-                            referenced.GetValueOrDefault(firstMissing));
-                    }
-                    _provenEntities.AddRange(present);
                 }
 
                 if (stage.PhysicalityCount > 0)
@@ -379,6 +344,12 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             await ddl.ExecuteNonQueryAsync(ct);
         }
 
+        // One COPY per (table, call) — not one per stage. The native tuple buffers are
+        // header/trailer-free, so every stage's blob streams into a single binary COPY
+        // (Header once → all blobs → Trailer once). A ConceptNet committed batch carries
+        // ~one content stage per 65536-row grammar batch (commitRows=4M ⇒ ~60 stages); the
+        // per-stage COPY loop turned that into ~120 round-trips/batch. This collapses it to one.
+        var blobs = new List<(IntPtr Ptr, long Len)>(stages.Count);
         foreach (var stage in stages)
         {
             int rowCount = table switch
@@ -393,9 +364,14 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             if (CopyBlobValidator.Enabled)
                 CopyBlobValidator.Validate(ptr, len, expectedFields, tableName, rowCount);
 
+            blobs.Add((ptr, len));
+        }
+
+        if (blobs.Count > 0)
+        {
             await using var stream = await conn.BeginRawBinaryCopyAsync(
                 $"COPY {stageName} ({cols}) FROM STDIN (FORMAT BINARY)", ct);
-            await PgBinaryCopy.WriteNativeBlobAsync(stream, ptr, len, ct);
+            await PgBinaryCopy.WriteNativeBlobsAsync(stream, blobs, ct);
         }
 
         await using (var promote = conn.CreateCommand())

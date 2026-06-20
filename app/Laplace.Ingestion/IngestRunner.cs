@@ -134,10 +134,13 @@ public sealed class IngestRunner
         
         
         
-        var commitPolicy = ResolveCommitParallelism(decomposer);
-
-        if (options.ParallelWorkers <= 1
-            || commitPolicy == IngestCommitParallelism.StrictSerial)
+        // Referential integrity is no longer pre-checked, so every SubstrateChange is a
+        // self-contained, independently-consistent batch and commit order across batches is
+        // irrelevant (the consensus fold is commutative). Multi-worker runs therefore all use the
+        // one bounded N-consumer lane; the old StrictSerial / EpochBarrier routing and
+        // IIngestCommitPolicy are obsolete (RunEpochBarrierParallelAsync, FlushEpochParallelAsync,
+        // and ResolveCommitParallelism were deleted in the Phase 7 cleanup).
+        if (options.ParallelWorkers <= 1)
         {
             
             
@@ -218,15 +221,9 @@ public sealed class IngestRunner
             
             await producer;
         }
-        else if (commitPolicy == IngestCommitParallelism.Unordered)
-        {
-            await RunUnorderedParallelAsync(
-                decomposer, ctx, options, batchSize, commitRows, ShouldFlush, RowsOf,
-                counters, failures, log, rng, ct);
-        }
         else
         {
-            await RunEpochBarrierParallelAsync(
+            await RunUnorderedParallelAsync(
                 decomposer, ctx, options, batchSize, commitRows, ShouldFlush, RowsOf,
                 counters, failures, log, rng, ct);
         }
@@ -288,11 +285,21 @@ public sealed class IngestRunner
         Random rng,
         CancellationToken ct)
     {
+        // Unordered = self-contained batches committed by N concurrent workers, each on its
+        // own connection. No serial pin: every SubstrateChange carries its own entities,
+        // physicalities, and attestations, so a batch is independently consistent and order
+        // across batches is irrelevant (the consensus fold is commutative). Concurrent inserts
+        // into the live indexes scale ~2.5x on this box (measured). A fatal in any worker
+        // cancels the shared token so the producer stops instead of deadlocking on a full channel.
+        int workers = Math.Max(1, options.ParallelWorkers);
+        using var stopCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var runCt = stopCts.Token;
+
         var channel = Channel.CreateBounded<SubstrateChange>(
-            new BoundedChannelOptions(options.ParallelWorkers * batchSize * 4)
+            new BoundedChannelOptions(workers * batchSize * 4)
             {
                 SingleWriter = true,
-                SingleReader = true,
+                SingleReader = false,
                 FullMode = BoundedChannelFullMode.Wait,
             });
 
@@ -300,229 +307,67 @@ public sealed class IngestRunner
         {
             try
             {
-                await foreach (var intent in decomposer.DecomposeAsync(ctx, options.DecomposerOptions, ct)
-                                                        .WithCancellation(ct))
+                await foreach (var intent in decomposer.DecomposeAsync(ctx, options.DecomposerOptions, runCt)
+                                                        .WithCancellation(runCt))
                 {
                     Interlocked.Increment(ref counters._unitsProduced);
-                    await channel.Writer.WriteAsync(intent, ct);
+                    await channel.Writer.WriteAsync(intent, runCt);
                 }
             }
             finally
             {
                 channel.Writer.TryComplete();
             }
-        }, ct);
+        }, runCt);
 
-        var consumer = Task.Run(async () =>
-        {
-            var batch = new List<SubstrateChange>(batchSize);
-            int batchRows = 0;
-            while (await channel.Reader.WaitToReadAsync(ct))
-            {
-                while (channel.Reader.TryRead(out var intent))
-                {
-                    if (batchSize == 1 && commitRows == 0)
-                    {
-                        await ProcessOneIntentAsync(intent, decomposer, options,
-                                                    rng, counters, failures, log, ct);
-                        continue;
-                    }
-                    batch.Add(intent);
-                    batchRows += rowsOf(intent);
-                    if (shouldFlush(batch.Count, batchRows))
-                    {
-                        await ProcessBatchAsync(batch, decomposer, options,
-                                                rng, counters, failures, log, ct);
-                        batch.Clear();
-                        batchRows = 0;
-                    }
-                }
-            }
-            if (batch.Count > 0)
-                await ProcessBatchAsync(batch, decomposer, options,
-                                        rng, counters, failures, log, ct);
-        }, ct);
-
-        await Task.WhenAll(producer, consumer);
-    }
-
-    private async Task RunEpochBarrierParallelAsync(
-        IDecomposer decomposer,
-        InternalContext ctx,
-        IngestRunOptions options,
-        int batchSize,
-        int commitRows,
-        Func<int, int, bool> shouldFlush,
-        Func<SubstrateChange, int> rowsOf,
-        RunCounters counters,
-        List<IngestFailure> failures,
-        ILogger log,
-        Random rng,
-        CancellationToken ct)
-    {
-        var channel = Channel.CreateBounded<SubstrateChange>(
-            new BoundedChannelOptions(options.ParallelWorkers * batchSize * 8)
-            {
-                SingleWriter = true,
-                SingleReader = true,
-                FullMode = BoundedChannelFullMode.Wait,
-            });
-
-        var producer = Task.Run(async () =>
-        {
-            try
-            {
-                await foreach (var intent in decomposer.DecomposeAsync(ctx, options.DecomposerOptions, ct)
-                                                        .WithCancellation(ct))
-                {
-                    Interlocked.Increment(ref counters._unitsProduced);
-                    await channel.Writer.WriteAsync(intent, ct);
-                }
-            }
-            finally
-            {
-                channel.Writer.TryComplete();
-            }
-        }, ct);
-
-        var epochBuffer = new List<SubstrateChange>(batchSize * options.ParallelWorkers);
-        int currentEpoch = 0;
-        long bufferedRows = 0;
-        
-        
-        
-        
-        
-        
-        
-        long perWorkerCap = commitRows > 0
-            ? (long)Math.Max(commitRows, 1)
-            : Math.Max((long)Math.Max(batchSize, 1) * 1000, 500_000L);
-        long flushRows = perWorkerCap * Math.Max(1, options.ParallelWorkers);
-
-        while (await channel.Reader.WaitToReadAsync(ct))
-        {
-            while (channel.Reader.TryRead(out var intent))
-            {
-                int intentEpoch = intent.Metadata.CommitEpoch;
-                if (intentEpoch < currentEpoch)
-                {
-                    throw new InvalidOperationException(
-                        $"Intent {intent.Metadata.SourceContentUnitName} commit epoch {intentEpoch} "
-                        + $"is behind current epoch {currentEpoch}; epochs must be non-decreasing.");
-                }
-                if (intentEpoch > currentEpoch)
-                {
-                    await FlushEpochParallelAsync(
-                        epochBuffer, decomposer, options, batchSize, commitRows,
-                        shouldFlush, rowsOf, counters, failures, log, rng, ct);
-                    epochBuffer.Clear();
-                    bufferedRows = 0;
-                    currentEpoch = intentEpoch;
-                }
-                epochBuffer.Add(intent);
-                bufferedRows += rowsOf(intent);
-                int bufferedRowsInt = bufferedRows > int.MaxValue ? int.MaxValue : (int)bufferedRows;
-                if (shouldFlush(epochBuffer.Count, bufferedRowsInt) || bufferedRows >= flushRows)
-                {
-                    await FlushEpochParallelAsync(
-                        epochBuffer, decomposer, options, batchSize, commitRows,
-                        shouldFlush, rowsOf, counters, failures, log, rng, ct);
-                    epochBuffer.Clear();
-                    bufferedRows = 0;
-                }
-            }
-        }
-
-        await FlushEpochParallelAsync(
-            epochBuffer, decomposer, options, batchSize, commitRows,
-            shouldFlush, rowsOf, counters, failures, log, rng, ct);
-        await producer;
-    }
-
-    private async Task FlushEpochParallelAsync(
-        List<SubstrateChange> intents,
-        IDecomposer decomposer,
-        IngestRunOptions options,
-        int batchSize,
-        int commitRows,
-        Func<int, int, bool> shouldFlush,
-        Func<SubstrateChange, int> rowsOf,
-        RunCounters counters,
-        List<IngestFailure> failures,
-        ILogger log,
-        Random rng,
-        CancellationToken ct)
-    {
-        if (intents.Count == 0) return;
-
-        int workers = Math.Min(options.ParallelWorkers, intents.Count);
-        if (workers <= 1)
-        {
-            var batch = new List<SubstrateChange>(batchSize);
-            int batchRows = 0;
-            foreach (var intent in intents)
-            {
-                if (batchSize == 1 && commitRows == 0)
-                {
-                    await ProcessOneIntentAsync(intent, decomposer, options, rng,
-                                                counters, failures, log, ct);
-                    continue;
-                }
-                batch.Add(intent);
-                batchRows += rowsOf(intent);
-                if (shouldFlush(batch.Count, batchRows))
-                {
-                    await ProcessBatchAsync(batch, decomposer, options, rng,
-                                            counters, failures, log, ct);
-                    batch.Clear();
-                    batchRows = 0;
-                }
-            }
-            if (batch.Count > 0)
-                await ProcessBatchAsync(batch, decomposer, options, rng,
-                                        counters, failures, log, ct);
-            return;
-        }
-
-        int chunkSize = Math.Max(1, (intents.Count + workers - 1) / workers);
-        var tasks = new List<Task>(workers);
+        var consumers = new Task[workers];
         for (int w = 0; w < workers; w++)
         {
-            int start = w * chunkSize;
-            if (start >= intents.Count) break;
-            int end = Math.Min(start + chunkSize, intents.Count);
             int workerId = w;
-            tasks.Add(Task.Run(async () =>
+            consumers[w] = Task.Run(async () =>
             {
                 var localRng = new Random(unchecked((int)decomposer.SourceId.Lo) ^ workerId);
                 var batch = new List<SubstrateChange>(batchSize);
                 int batchRows = 0;
-                for (int i = start; i < end; i++)
+                try
                 {
-                    var intent = intents[i];
-                    if (batchSize == 1 && commitRows == 0)
+                    while (await channel.Reader.WaitToReadAsync(runCt))
                     {
-                        await ProcessOneIntentAsync(intent, decomposer, options,
-                                                    localRng, counters, failures, log, ct);
-                        continue;
+                        while (channel.Reader.TryRead(out var intent))
+                        {
+                            if (batchSize == 1 && commitRows == 0)
+                            {
+                                await ProcessOneIntentAsync(intent, decomposer, options,
+                                                            localRng, counters, failures, log, runCt);
+                                continue;
+                            }
+                            batch.Add(intent);
+                            batchRows += rowsOf(intent);
+                            if (shouldFlush(batch.Count, batchRows))
+                            {
+                                await ProcessBatchAsync(batch, decomposer, options,
+                                                        localRng, counters, failures, log, runCt);
+                                batch.Clear();
+                                batchRows = 0;
+                            }
+                        }
                     }
-                    batch.Add(intent);
-                    batchRows += rowsOf(intent);
-                    if (shouldFlush(batch.Count, batchRows))
-                    {
+                    if (batch.Count > 0)
                         await ProcessBatchAsync(batch, decomposer, options,
-                                                localRng, counters, failures, log, ct);
-                        batch.Clear();
-                        batchRows = 0;
-                    }
+                                                localRng, counters, failures, log, runCt);
                 }
-                if (batch.Count > 0)
-                    await ProcessBatchAsync(batch, decomposer, options,
-                                            localRng, counters, failures, log, ct);
-            }, ct));
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    stopCts.Cancel();   // a fatal commit aborts the run; unblock the producer
+                    throw;
+                }
+            }, runCt);
         }
-        await Task.WhenAll(tasks);
+
+        var all = new Task[workers + 1];
+        all[0] = producer;
+        Array.Copy(consumers, 0, all, 1, workers);
+        await Task.WhenAll(all);
     }
 
     private async Task ProcessOneIntentAsync(
@@ -802,29 +647,6 @@ public sealed class IngestRunner
         ISubstrateReader Reader,
         ILogger Logger,
         string SubstrateVersion) : IDecomposerContext;
-
-    /// <summary>
-    /// Decomposer policy unless <c>LAPLACE_INGEST_COMMIT_PARALLELISM</c> overrides
-    /// (serial | unordered | epoch).
-    /// </summary>
-    internal static IngestCommitParallelism ResolveCommitParallelism(IDecomposer decomposer)
-    {
-        var env = Environment.GetEnvironmentVariable("LAPLACE_INGEST_COMMIT_PARALLELISM");
-        if (!string.IsNullOrWhiteSpace(env))
-        {
-            return env.Trim().ToLowerInvariant() switch
-            {
-                "serial" or "strict" or "strictserial" => IngestCommitParallelism.StrictSerial,
-                "unordered" or "parallel" => IngestCommitParallelism.Unordered,
-                "epoch" or "epochbarrier" or "barrier" => IngestCommitParallelism.EpochBarrier,
-                _ => throw new InvalidOperationException(
-                    $"unknown LAPLACE_INGEST_COMMIT_PARALLELISM='{env}' (use serial, unordered, or epoch)"),
-            };
-        }
-        return decomposer is IIngestCommitPolicy cp
-            ? cp.CommitParallelism
-            : IngestCommitParallelism.StrictSerial;
-    }
 }
 
 public sealed class LayerOrderingViolationException : Exception

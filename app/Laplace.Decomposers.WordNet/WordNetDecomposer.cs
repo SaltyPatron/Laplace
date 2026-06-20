@@ -110,14 +110,9 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         string dictDir = Path.Combine(context.EcosystemPath, "WordNet-3.0", "dict");
         int batch = options.BatchSize > 1 ? options.BatchSize : 2048;
 
-        await foreach (var change in StreamDataAsync(dictDir, batch, entitiesOnly: true, ct))
+        await foreach (var change in StreamDataAsync(dictDir, batch, ct))
         { if (!options.DryRun) yield return change; await Task.Yield(); }
-        await foreach (var change in StreamSensesAsync(dictDir, batch, entitiesOnly: true, ct))
-        { if (!options.DryRun) yield return change; await Task.Yield(); }
-
-        await foreach (var change in StreamDataAsync(dictDir, batch, entitiesOnly: false, ct))
-        { if (!options.DryRun) yield return change; await Task.Yield(); }
-        await foreach (var change in StreamSensesAsync(dictDir, batch, entitiesOnly: false, ct))
+        await foreach (var change in StreamSensesAsync(dictDir, batch, ct))
         { if (!options.DryRun) yield return change; await Task.Yield(); }
 
         await foreach (var change in StreamExceptionsAsync(dictDir, batch, ct))
@@ -176,11 +171,10 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     private static async IAsyncEnumerable<SubstrateChange> StreamDataAsync(
-        string dictDir, int batch, bool entitiesOnly,
+        string dictDir, int batch,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        string suffix = entitiesOnly ? "entities" : "attestations";
-        var b = NewBuilder($"wordnet/data-0/{suffix}", entitiesOnly, batch);
+        var b = NewBuilder("wordnet/data-0", batch);
         int count = 0, batchNum = 0;
         var frameTemplates = await LoadVerbFramesAsync(dictDir, ct);
 
@@ -192,13 +186,13 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
             await foreach (var syn in ParseDataAsync(filePath, ct))
             {
                 ct.ThrowIfCancellationRequested();
-                if (entitiesOnly) EmitSynsetEntities(b, syn, frameTemplates);
-                else              EmitSynsetAttestations(b, syn, frameTemplates);
+                EmitSynsetEntities(b, syn, frameTemplates);
+                EmitSynsetAttestations(b, syn, frameTemplates);
 
                 if (++count >= batch)
                 {
                     yield return b.SetInputUnitsConsumed(count).Build();
-                    b = NewBuilder($"wordnet/data-{++batchNum}/{suffix}", entitiesOnly, batch);
+                    b = NewBuilder($"wordnet/data-{++batchNum}", batch);
                     count = 0;
                 }
             }
@@ -225,16 +219,6 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         foreach (var (frame, _) in syn.Frames)
             if (frame > 0 && frame < frameTemplates.Length && frameTemplates[frame] is { } tpl)
                 EmitSurface(b, tpl, Source);
-
-        // Close the entity pass under pointer references: every pointer target that
-        // EmitSynsetAttestations will reference (via the same ConceptAnchor.SynsetId
-        // resolve, line ~293) must be staged here in phase 1, or the attestation batch
-        // fails referential integrity when a target synset is not independently emitted
-        // (adjective-satellite pos skew / ili-map vs local-dict version drift). EmitAnchor
-        // is content-addressed + idempotent, so this dedups against the target's own line.
-        foreach (var ptr in syn.Pointers)
-            if (PointerTypes.ContainsKey(ptr.Symbol))
-                ConceptAnchor.EmitAnchor(b, ptr.TargetOffset, ptr.TargetPos, Source);
     }
 
     private static void EmitSynsetAttestations(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)
@@ -314,55 +298,49 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
     }
 
     private static async IAsyncEnumerable<SubstrateChange> StreamSensesAsync(
-        string dictDir, int batch, bool entitiesOnly,
+        string dictDir, int batch,
         [EnumeratorCancellation] CancellationToken ct)
     {
         string path = Path.Combine(dictDir, "index.sense");
         if (!File.Exists(path)) yield break;
 
-        string suffix = entitiesOnly ? "entities" : "attestations";
-        var b = NewBuilder($"wordnet/sense-0/{suffix}", entitiesOnly, batch);
+        var b = NewBuilder("wordnet/sense-0", batch);
         int count = 0, batchNum = 0;
 
         await foreach (var s in ParseSensesAsync(path, ct))
         {
             ct.ThrowIfCancellationRequested();
-            if (entitiesOnly)
+            EmitSurface(b, s.SenseKey, Source);
+            EmitSurface(b, s.Lemma, Source);
+
+            var senseId   = CategoryAnchor.Id(s.SenseKey);
+            var lemmaId   = RootSurface(s.Lemma);
+            var synAnchor = ConceptAnchor.SynsetId(s.Offset, s.Pos);
+            if (senseId is not null && lemmaId is not null && synAnchor is not null)
             {
-                EmitSurface(b, s.SenseKey, Source);
-                EmitSurface(b, s.Lemma, Source);
-            }
-            else
-            {
-                var senseId   = CategoryAnchor.Id(s.SenseKey);
-                var lemmaId   = RootSurface(s.Lemma);
-                var synAnchor = ConceptAnchor.SynsetId(s.Offset, s.Pos);  
-                if (senseId is not null && lemmaId is not null && synAnchor is not null)
-                {
-                    CategoryAnchor.AttestCategory(b, senseId.Value, SenseTypeId, Source, SourceTrust.StandardsDerived);
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        lemmaId.Value, "HAS_SENSE", senseId.Value, Source, SourceTrust.StandardsDerived,
-                        magnitude: s.TagCount, arenaScale: 1.0));
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        senseId.Value, "IS_SENSE_OF", synAnchor.Value, Source, SourceTrust.StandardsDerived));
-                }
+                CategoryAnchor.AttestCategory(b, senseId.Value, SenseTypeId, Source, SourceTrust.StandardsDerived);
+                b.AddAttestation(NativeAttestation.Categorical(
+                    lemmaId.Value, "HAS_SENSE", senseId.Value, Source, SourceTrust.StandardsDerived,
+                    magnitude: s.TagCount, arenaScale: 1.0));
+                b.AddAttestation(NativeAttestation.Categorical(
+                    senseId.Value, "IS_SENSE_OF", synAnchor.Value, Source, SourceTrust.StandardsDerived));
             }
 
             if (++count >= batch)
             {
                 yield return b.Build();
-                b = NewBuilder($"wordnet/sense-{++batchNum}/{suffix}", entitiesOnly, batch);
+                b = NewBuilder($"wordnet/sense-{++batchNum}", batch);
                 count = 0;
             }
         }
         if (count > 0) yield return b.Build();
     }
 
-    private static SubstrateChangeBuilder NewBuilder(string unit, bool entitiesOnly, int batch) =>
+    private static SubstrateChangeBuilder NewBuilder(string unit, int batch) =>
         new(Source, unit, null,
-            entityCapacity:      entitiesOnly ? batch * 6 : 0,
-            physicalityCapacity: entitiesOnly ? batch * 6 : 0,
-            attestationCapacity: entitiesOnly ? 0 : batch * 8);
+            entityCapacity:      batch * 6,
+            physicalityCapacity: batch * 6,
+            attestationCapacity: batch * 8);
 
     private static string Surface(string lemma) => lemma.Replace('_', ' ');
 
@@ -403,7 +381,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         string dictDir, int batch,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var b = NewBuilder("wordnet/exc-0", entitiesOnly: false, batch);
+        var b = NewBuilder("wordnet/exc-0", batch);
         int count = 0, batchNum = 0;
         foreach (var excFile in new[] { "noun.exc", "verb.exc", "adj.exc", "adv.exc" })
         {
@@ -435,7 +413,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
                 if (++count >= batch)
                 {
                     yield return b.Build();
-                    b = NewBuilder($"wordnet/exc-{++batchNum}", entitiesOnly: false, batch);
+                    b = NewBuilder($"wordnet/exc-{++batchNum}", batch);
                     count = 0;
                 }
             }
@@ -457,7 +435,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
         var senseIndex = await LoadSenseKeyIndexAsync(Path.Combine(dictDir, "index.sense"), ct);
         if (senseIndex.Count == 0) yield break;
 
-        var b = NewBuilder("wordnet/sents-0", entitiesOnly: false, batch);
+        var b = NewBuilder("wordnet/sents-0", batch);
         int count = 0, batchNum = 0;
 
         await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(idxPath, ct))
@@ -495,7 +473,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, I
             if (++count >= batch)
             {
                 yield return b.Build();
-                b = NewBuilder($"wordnet/sents-{++batchNum}", entitiesOnly: false, batch);
+                b = NewBuilder($"wordnet/sents-{++batchNum}", batch);
                 count = 0;
             }
         }

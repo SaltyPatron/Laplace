@@ -74,9 +74,15 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         
         
         
+        // Peak RAM of the in-memory (subject,type,object)->Acc accumulator is bounded by this
+        // threshold (the dict is swapped out to staging when it reaches it). 20M distinct relations
+        // is multiple GB for relation-heavy sources (ConceptNet) — the third measured client-RAM
+        // source after the unbounded compose channel and the batchSize*32 over-alloc. 4M keeps the
+        // working set well under a GB; the native parallel walk fold drains periods concurrently.
+        // (Phase 4 replaces this dict entirely with the walk journal.) Overridable via env.
         _stagingThreshold = stagingThresholdRelations
             ?? (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_STAGING_THRESHOLD"), out var t) && t > 0
-                ? t : 20_000_000);
+                ? t : 4_000_000);
         _partitions = foldWorkers
             ?? (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_FOLD_WORKERS"), out var w) && w > 0
                 ? w : Math.Clamp(Environment.ProcessorCount - 2, 1, 4));

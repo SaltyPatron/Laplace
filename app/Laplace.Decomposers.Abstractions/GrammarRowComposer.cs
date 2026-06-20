@@ -80,6 +80,120 @@ public sealed unsafe class GrammarRowComposer : IDisposable
                 precedes.ToImmutable(), NativeInterop.ComposeRootId(_compose));
     }
 
+    /// <summary>
+    /// Drains the native compose result straight into <paramref name="stage"/> (entities +
+    /// physicalities) with no managed <c>EntityRow</c>/<c>PhysicalityRow</c> marshal — the stage's
+    /// native tuple buffers stream directly to COPY. This is the same one-hop path the
+    /// content-witness composer already uses; the grammar composer just emitted managed rows
+    /// instead. PRECEDES bigrams carry Glicko signal the native attestation row can't hold, so
+    /// they are appended to <paramref name="precedesOut"/> as managed <c>AttestationRow</c>s (low
+    /// volume) for the existing consensus path, until the walk-journal fold subsumes them.
+    /// <paramref name="nowUs"/> is threaded in (not read from the clock) so output is reproducible.
+    /// Returns the compose root id. Byte-for-byte identical entity/physicality blobs to
+    /// <see cref="Materialize"/>+re-stage for the same <paramref name="nowUs"/>.
+    /// </summary>
+    public Hash128 DrainInto(
+        IntentStage stage, double witnessWeight, long nowUs,
+        ImmutableArray<AttestationRow>.Builder precedesOut)
+    {
+        ArgumentNullException.ThrowIfNull(stage);
+        ArgumentNullException.ThrowIfNull(precedesOut);
+
+        nuint nEnt = NativeInterop.ComposeEntityCount(_compose);
+        for (nuint i = 0; i < nEnt; i++)
+        {
+            NativeInterop.ComposeEntityNative e;
+            NativeInterop.ComposeGetEntity(_compose, i, &e);
+            stage.AddEntity(e.Id, e.Tier, e.TypeId, _sourceId);
+        }
+
+        nuint nPhys = NativeInterop.ComposePhysicalityCount(_compose);
+        Span<double> coord = stackalloc double[4];
+        for (nuint i = 0; i < nPhys; i++)
+        {
+            NativeInterop.ComposePhysicalityNative ph;
+            NativeInterop.ComposeGetPhysicality(_compose, i, &ph);
+            coord[0] = ph.Coord0; coord[1] = ph.Coord1; coord[2] = ph.Coord2; coord[3] = ph.Coord3;
+            int trajLen = (int)ph.TrajectoryN.ToUInt64();
+            var traj = trajLen > 0
+                ? new ReadOnlySpan<double>(ph.TrajectoryXyzm.ToPointer(), trajLen)
+                : ReadOnlySpan<double>.Empty;
+            stage.AddPhysicality(
+                ph.Id, ph.EntityId, _sourceId, (short)PhysicalityType.Content,
+                coord, ph.Hilbert, traj, (int)ph.NConstituents.ToUInt64(),
+                alignmentResidual: null, sourceDim: null, observedAtUnixUs: nowUs);
+        }
+
+        nuint nPrec = NativeInterop.ComposePrecedesCount(_compose);
+        for (nuint i = 0; i < nPrec; i++)
+        {
+            NativeInterop.ComposePrecedesNative pr;
+            NativeInterop.ComposeGetPrecedes(_compose, i, &pr);
+            long sumScore = checked(pr.Games * Glicko2.FpScale);
+            precedesOut.Add(NativeAttestation.Aggregated(
+                pr.SubjectId, GrammarEntityBuilder.PrecedesTypeId, pr.ObjectId,
+                _sourceId, contextId: null,
+                games: pr.Games, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
+        }
+
+        return NativeInterop.ComposeRootId(_compose);
+    }
+
+    /// <summary>
+    /// Live drain: writes the compose entities + physicalities straight into
+    /// <see cref="SubstrateChangeBuilder.ContentStage"/> (native, no managed row marshal), deduped
+    /// within the batch via the builder's shared seen-set (so an id also emitted by a witness via
+    /// <see cref="SubstrateChangeBuilder.AddEntity(EntityRow)"/> is staged once). PRECEDES bigrams
+    /// ride as managed attestations through the builder. Returns the compose root id.
+    /// </summary>
+    public Hash128 DrainInto(SubstrateChangeBuilder builder, double witnessWeight)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        var stage = builder.ContentStage;
+
+        nuint nEnt = NativeInterop.ComposeEntityCount(_compose);
+        for (nuint i = 0; i < nEnt; i++)
+        {
+            NativeInterop.ComposeEntityNative e;
+            NativeInterop.ComposeGetEntity(_compose, i, &e);
+            if (builder.TrySeeEntity(e.Id))
+                stage.AddEntity(e.Id, e.Tier, e.TypeId, _sourceId);
+        }
+
+        nuint nPhys = NativeInterop.ComposePhysicalityCount(_compose);
+        Span<double> coord = stackalloc double[4];
+        for (nuint i = 0; i < nPhys; i++)
+        {
+            NativeInterop.ComposePhysicalityNative ph;
+            NativeInterop.ComposeGetPhysicality(_compose, i, &ph);
+            if (!builder.TrySeePhysicality(ph.Id)) continue;
+            coord[0] = ph.Coord0; coord[1] = ph.Coord1; coord[2] = ph.Coord2; coord[3] = ph.Coord3;
+            int trajLen = (int)ph.TrajectoryN.ToUInt64();
+            var traj = trajLen > 0
+                ? new ReadOnlySpan<double>(ph.TrajectoryXyzm.ToPointer(), trajLen)
+                : ReadOnlySpan<double>.Empty;
+            stage.AddPhysicality(
+                ph.Id, ph.EntityId, _sourceId, (short)PhysicalityType.Content,
+                coord, ph.Hilbert, traj, (int)ph.NConstituents.ToUInt64(),
+                alignmentResidual: null, sourceDim: null, observedAtUnixUs: nowUs);
+        }
+
+        nuint nPrec = NativeInterop.ComposePrecedesCount(_compose);
+        for (nuint i = 0; i < nPrec; i++)
+        {
+            NativeInterop.ComposePrecedesNative pr;
+            NativeInterop.ComposeGetPrecedes(_compose, i, &pr);
+            long sumScore = checked(pr.Games * Glicko2.FpScale);
+            builder.AddAttestation(NativeAttestation.Aggregated(
+                pr.SubjectId, GrammarEntityBuilder.PrecedesTypeId, pr.ObjectId,
+                _sourceId, contextId: null,
+                games: pr.Games, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
+        }
+
+        return NativeInterop.ComposeRootId(_compose);
+    }
+
     public bool TrySpanEntity(uint startByte, uint endByte, out Hash128 id)
     {
         id = default;

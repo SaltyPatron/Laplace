@@ -59,7 +59,12 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
     
     
     
-    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
+    // Each frame/LU/fulltext batch is a self-contained builder; the only out-of-batch (and
+    // out-of-source) references are name-anchor edges (TargetFrame, FE Requires/Excludes,
+    // EVOKES_FRAME) that resolve by content-addressed id wherever the referent lands. The
+    // per-batch referential EXISTS pre-check is gone, so forward/cross-batch anchors are legal
+    // and N workers can commit concurrently.
+    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
@@ -188,12 +193,14 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
             if (fe.Definition.Length > 0) ContentEmitter.Emit(b, fe.Definition, Source);
         }
 
-        
+
         foreach (var lu in frame.LexUnits)
             ContentEmitter.Emit(b, lu.Lemma, Source);
 
-        foreach (var rel in frame.Relations)
-            CategoryAnchor.Emit(b, rel.TargetFrame, FrameTypeId, Source, SourceTrust.AcademicCurated);
+        // Relation targets are frames OWNED by their own frame files; their entity rows land there
+        // under the identical content-addressed id. We only need the id to anchor the attestation
+        // (CategoryAnchor.Id below), not an entity row here — pre-emitting one was purely to satisfy
+        // the deleted referential EXISTS pre-check, so it is removed.
     }
 
     

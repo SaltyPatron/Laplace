@@ -19,7 +19,11 @@ if not "%~9"=="" set "EXTRA=%EXTRA% %~9"
 
 if not defined LAPLACE_EMIT_CROSS_LANG set "LAPLACE_EMIT_CROSS_LANG=0"
 if not defined LAPLACE_DECOMPOSE_WORKERS set "LAPLACE_DECOMPOSE_WORKERS=1"
-if not defined LAPLACE_COPY_VALIDATE set "LAPLACE_COPY_VALIDATE=1"
+rem COPY-blob re-validation is a debug-only detector for the native AV/heap-corruption bug
+rem that was root-caused and fixed (commits 87eeee3 vertices-not-doubles, 97b58e9 walk header).
+rem It is read-only (can only detect, never prevent/cause) and costs a full blob copy+field-walk
+rem per COPY on the hot path. Default off; set LAPLACE_COPY_VALIDATE=1 to re-arm for debugging.
+if not defined LAPLACE_COPY_VALIDATE set "LAPLACE_COPY_VALIDATE=0"
 
 cd /d "%LAPLACE_ROOT%\app"
 
@@ -57,10 +61,12 @@ exit /b %ERRORLEVEL%
 set "_saved=%LAPLACE_INGEST_COMMIT_ROWS%"
 if /i "%STEP%"=="ud" if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=25000"
 if /i "%STEP%"=="conceptnet" (
-  if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=4000000"
+  rem Unordered parallel commit: N workers commit self-contained batches concurrently.
+  rem Smaller commit batches = better parallel granularity (measured GiST scaling peaks ~8 workers).
+  if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=500000"
   if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=65536"
   if not defined LAPLACE_INGEST_COMPOSE_WORKERS set "LAPLACE_INGEST_COMPOSE_WORKERS=4"
-  if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=1"
+  if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=8"
 )
 call :run_ingest_impl
 set "RC=%ERRORLEVEL%"
