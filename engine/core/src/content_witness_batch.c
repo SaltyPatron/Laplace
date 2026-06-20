@@ -206,152 +206,18 @@ int laplace_content_word_segment(
 
 
 
-typedef struct {
-    hash128_t key;
-    hash128_t root;
-} canon_entry_t;
+// The global cross-run dedup bank (g_canon_slots / g_entity_slots) was DELETED. It deduped once
+// across the entire source run -- accumulating every canonical root + entity id in RAM (unbounded
+// for big multilingual sources -> boil-the-ocean) behind one process-global spinlock (so concurrent
+// file workers serialized on it and bought no parallelism). Dedup is now PER-BATCH: within a batch
+// the per-stage witness set (intent_stage_witness_record/_seen) collapses repeats; ACROSS batches
+// the DB deduplicates by content address (INSERT ... ON CONFLICT (id) DO NOTHING in the writer).
+// That keeps memory bounded by the batch and lets file chunks compose concurrently with no shared
+// mutable state. content_witness_reset is now a no-op; the "proven across everything" export is
+// gone (it had no callers after the referential pre-check was removed).
+void content_witness_reset(void) { }
 
-static canon_entry_t* g_canon_slots  = NULL;
-static size_t         g_canon_cap    = 0;
-static size_t         g_canon_count  = 0;
-
-static hash128_t* g_entity_slots = NULL;
-static size_t     g_entity_cap   = 0;
-static size_t     g_entity_count = 0;
-
-static atomic_flag g_bank_lock = ATOMIC_FLAG_INIT;
-
-static void bank_lock(void) {
-    while (atomic_flag_test_and_set_explicit(&g_bank_lock, memory_order_acquire)) { }
-}
-
-static void bank_unlock(void) {
-    atomic_flag_clear_explicit(&g_bank_lock, memory_order_release);
-}
-
-static int slot_empty(const hash128_t* h) { return (h->hi | h->lo) == 0; }
-
-static int canon_lookup(const hash128_t* key, hash128_t* out_root) {
-    if (!g_canon_slots || g_canon_cap == 0) return 0;
-    bank_lock();
-    size_t mask = g_canon_cap - 1;
-    size_t j = (size_t)key->lo & mask;
-    int found = 0;
-    while (!slot_empty(&g_canon_slots[j].key)) {
-        if (hash128_equals(&g_canon_slots[j].key, key)) {
-            *out_root = g_canon_slots[j].root;
-            found = 1;
-            break;
-        }
-        j = (j + 1) & mask;
-    }
-    bank_unlock();
-    return found;
-}
-
-static int canon_insert(const hash128_t* key, const hash128_t* root) {
-    bank_lock();
-    if (g_canon_cap == 0) {
-        g_canon_cap = (size_t)1 << 18;
-        g_canon_slots = (canon_entry_t*)calloc(g_canon_cap, sizeof(canon_entry_t));
-        if (!g_canon_slots) { bank_unlock(); return -2; }
-    } else if ((g_canon_count + 1) * 4 >= g_canon_cap * 3) {
-        size_t ncap = g_canon_cap << 1;
-        canon_entry_t* ns = (canon_entry_t*)calloc(ncap, sizeof(canon_entry_t));
-        if (!ns) { bank_unlock(); return -2; }
-        size_t nmask = ncap - 1;
-        for (size_t i = 0; i < g_canon_cap; ++i) {
-            if (slot_empty(&g_canon_slots[i].key)) continue;
-            size_t j = (size_t)g_canon_slots[i].key.lo & nmask;
-            while (!slot_empty(&ns[j].key)) j = (j + 1) & nmask;
-            ns[j] = g_canon_slots[i];
-        }
-        free(g_canon_slots);
-        g_canon_slots = ns;
-        g_canon_cap = ncap;
-    }
-    size_t mask = g_canon_cap - 1;
-    size_t j = (size_t)key->lo & mask;
-    int rc = 0;
-    while (!slot_empty(&g_canon_slots[j].key)) {
-        if (hash128_equals(&g_canon_slots[j].key, key)) { rc = 0; goto done; }
-        j = (j + 1) & mask;
-    }
-    g_canon_slots[j].key = *key;
-    g_canon_slots[j].root = *root;
-    g_canon_count++;
-done:
-    bank_unlock();
-    return rc;
-}
-
-static int entity_record(const hash128_t* id) {
-    if (!id) return 0;
-    bank_lock();
-    if (g_entity_cap == 0) {
-        g_entity_cap = (size_t)1 << 20;
-        g_entity_slots = (hash128_t*)calloc(g_entity_cap, sizeof(hash128_t));
-        if (!g_entity_slots) { bank_unlock(); return 0; }
-    } else if ((g_entity_count + 1) * 4 >= g_entity_cap * 3) {
-        size_t ncap = g_entity_cap << 1;
-        hash128_t* ns = (hash128_t*)calloc(ncap, sizeof(hash128_t));
-        if (!ns) { bank_unlock(); return 0; }
-        size_t nmask = ncap - 1;
-        for (size_t i = 0; i < g_entity_cap; ++i) {
-            if (slot_empty(&g_entity_slots[i])) continue;
-            size_t j = (size_t)g_entity_slots[i].lo & nmask;
-            while (!slot_empty(&ns[j])) j = (j + 1) & nmask;
-            ns[j] = g_entity_slots[i];
-        }
-        free(g_entity_slots);
-        g_entity_slots = ns;
-        g_entity_cap = ncap;
-    }
-    size_t mask = g_entity_cap - 1;
-    size_t j = (size_t)id->lo & mask;
-    int found = 0;
-    while (!slot_empty(&g_entity_slots[j])) {
-        if (hash128_equals(&g_entity_slots[j], id)) { found = 1; break; }
-        j = (j + 1) & mask;
-    }
-    if (!found) {
-        g_entity_slots[j] = *id;
-        g_entity_count++;
-    }
-    bank_unlock();
-    return found;
-}
-
-static int entity_contains(const hash128_t* id) {
-    if (!id || !g_entity_slots || g_entity_cap == 0) return 0;
-    bank_lock();
-    size_t mask = g_entity_cap - 1;
-    size_t j = (size_t)id->lo & mask;
-    int found = 0;
-    while (!slot_empty(&g_entity_slots[j])) {
-        if (hash128_equals(&g_entity_slots[j], id)) { found = 1; break; }
-        j = (j + 1) & mask;
-    }
-    bank_unlock();
-    return found;
-}
-
-void content_witness_reset(void) {
-    bank_lock();
-    free(g_canon_slots);
-    g_canon_slots = NULL;
-    g_canon_cap = 0;
-    g_canon_count = 0;
-    free(g_entity_slots);
-    g_entity_slots = NULL;
-    g_entity_cap = 0;
-    g_entity_count = 0;
-    bank_unlock();
-}
-
-int content_witness_entity_proven(const hash128_t* id) {
-    return entity_contains(id);
-}
+int content_witness_entity_proven(const hash128_t* id) { (void)id; return 0; }
 
 static int emit_node(
     intent_stage_t*  stage,
@@ -365,7 +231,6 @@ static int emit_node(
     if (!should_emit_compositional(tree, idx)) return 0;
 
     if (intent_stage_witness_record(stage, &node.id)) return 0;
-    entity_record(&node.id);
 
     hash128_t type_id = tier_type_id(node.tier);
     if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0)
@@ -417,13 +282,6 @@ int content_witness_batch_add(
     hash128_t*       out_root_id) {
     if (!stage || !utf8 || !source_id || !out_root_id) return -1;
 
-    hash128_t canon_key;
-    hash128_blake3(utf8, len, &canon_key);
-    if (canon_lookup(&canon_key, out_root_id)) {
-        entity_record(out_root_id);
-        return 0;
-    }
-
     tier_tree_t* tree = NULL;
     {
         int rc = content_tree_build(utf8, len, &tree);
@@ -442,8 +300,6 @@ int content_witness_batch_add(
 
     if (intent_stage_witness_seen(stage, &root.id)) {
         tier_tree_free(tree);
-        canon_insert(&canon_key, out_root_id);
-        entity_record(out_root_id);
         return 0;
     }
 
@@ -457,8 +313,6 @@ int content_witness_batch_add(
         }
     }
 
-    canon_insert(&canon_key, out_root_id);
-    entity_record(out_root_id);
     tier_tree_free(tree);
     return 0;
 }
