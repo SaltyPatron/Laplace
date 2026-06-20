@@ -68,6 +68,10 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
         if (!Directory.Exists(treebanksDir)) yield break;
         int batchSentences = options.BatchSize > 1 ? options.BatchSize : 4096;
 
+        // Each producer composes into its OWN per-batch stage and dedup is per-batch (per-stage
+        // witness) now that the process-global content bank is deleted -- so concurrent file
+        // producers share no mutable state and parallelize safely. Stream treebank files to a
+        // threadpool, bounded by the per-batch channel.
         int workers = int.TryParse(
             Environment.GetEnvironmentVariable("LAPLACE_DECOMPOSE_WORKERS"), out var w) && w > 0
             ? w : Math.Clamp(Environment.ProcessorCount - 4, 1, 16);

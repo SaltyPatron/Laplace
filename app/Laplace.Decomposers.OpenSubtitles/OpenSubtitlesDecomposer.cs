@@ -276,6 +276,8 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
                   .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
+    // Per-worker stages + per-batch dedup (the process-global content bank was deleted) make
+    // concurrent file producers independent and safe -> parallelize across zip files.
     private static int ResolveDecomposeWorkers() =>
         int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_DECOMPOSE_WORKERS"), out var w) && w > 0
             ? w

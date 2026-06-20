@@ -71,11 +71,16 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             foreach (var e in c.Entities)
                 if (seenEntityArg.Add(e.Id)) uniqueEntityIds.Add(e.Id);
 
-        var entToCheck = new List<Hash128>(uniqueEntityIds.Count);
-        foreach (var id in uniqueEntityIds)
-            if (!_provenEntities.Contains(id)) entToCheck.Add(id);
-
-        var physToCheck = IntentPreflight.CollectUnprovenIds(changes, static c => c.Physicalities, static p => p.Id, _provenPhys);
+        // Entities/physicalities are NOT preflighted. Probing every id up front
+        // (pg_laplace_intent_preflight) did not scale to per-batch re-emission volume and crashed the
+        // backend ("connection forcibly closed"); and the ProvenId caches it fed grew UNBOUNDED across
+        // the run (the same boil-the-ocean as the just-deleted content bank). They dedup per-batch
+        // (the staged HashSets below) + at the DB by content address (INSERT ... ON CONFLICT (id) DO
+        // NOTHING). Attestations still preflight (unless this is a fresh bulk source) because their
+        // insert is ON CONFLICT DO NOTHING, so an already-present attestation must route to the locked
+        // observation_count UPDATE below to sum re-observations.
+        var entToCheck = new List<Hash128>();
+        var physToCheck = new List<Hash128>();
         var attToCheck = _bulkFreshSource
             ? new List<Hash128>()
             : IntentPreflight.CollectUnprovenIds(changes, static c => c.Attestations, static a => a.Id, _provenAtt);
