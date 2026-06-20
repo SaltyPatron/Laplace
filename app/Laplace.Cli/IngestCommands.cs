@@ -478,6 +478,19 @@ internal static class IngestCommands
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader, loggerFactory);
 
+
+
+
+
+        var indexPolicy = new SecondaryIndexPolicy(ds, loggerFactory.CreateLogger<SecondaryIndexPolicy>());
+        await using var physScope = await indexPolicy.SuspendForBulkLoadAsync("physicalities", CancellationToken.None);
+        if (physScope.Dropped)
+            Console.WriteLine($"B2: dropped {physScope.DroppedIndexDefs.Count} secondary physicalities index(es) "
+                            + "(incl. coord GiST + trajectory GIN) for index-free bulk load (empty table); rebuilt after apply");
+        else if (physScope.TableWasPopulated)
+            Console.WriteLine("B2: physicalities populated — keeping indexes live (incremental maintenance; "
+                            + "fresh-DB seeds drop once and rebuild after all decomposers)");
+
         Console.WriteLine($"ingest {dec.SourceName} via IngestRunner → {ConnString} ..."
             + (persistEvidence ? "" : " (consensus-only, no attestation writes)")
             + (bulkFresh ? " (bulk-fresh preflight skip)" : ""));
@@ -509,6 +522,19 @@ internal static class IngestCommands
         var materialized = await accumulator.MaterializeConsensusAsync();
         Console.WriteLine($"consensus: {materialized:N0} relations materialized "
                         + $"(accumulated at ingest; evidence = provenance-only)");
+
+
+
+        if (physScope.Dropped && !physScope.Rebuilt)
+        {
+            Console.WriteLine($"B2: rebuilding {physScope.DroppedIndexDefs.Count} secondary physicalities "
+                            + "index(es) (coord GiST via Hilbert-packed bulk build) ...");
+            var ixSw = Stopwatch.StartNew();
+            await physScope.RebuildAsync(CancellationToken.None);
+            ixSw.Stop();
+            Console.WriteLine($"B2: secondary physicalities indexes rebuilt in {ixSw.Elapsed.TotalSeconds:F1}s");
+        }
+
         try { await PrintIngestValidationAsync(ds, dec); }
         catch (Exception ex)
         { Console.Error.WriteLine($"warn: ingest validation failed (ingest itself is complete): {ex.Message}"); }

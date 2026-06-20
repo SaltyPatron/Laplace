@@ -8,17 +8,25 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.PropBank;
 
-public sealed class PropBankDecomposer : IDecomposer
+public sealed class PropBankDecomposer : IDecomposer, IIngestCommitPolicy
 {
+    // Each unit's rows are self-contained. PropBank owns its rolesets (it emits + types them);
+    // the VerbNet-class / FrameNet-frame correspondence targets are owned by their own decomposers
+    // and resolve by content-addressed id wherever they land (this source or another, this batch or
+    // a later one). With the per-batch referential EXISTS pre-check gone these cross-source anchors
+    // are legal, so N workers can commit batches concurrently.
+    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
+
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/PropBankDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    private static readonly Hash128 RolesetTypeId      = EntityTypeRegistry.PropBankRoleset;
-    private static readonly Hash128 VerbNetClassTypeId = EntityTypeRegistry.VerbNetClass;
-    private static readonly Hash128 OrdinalTypeId      = EntityTypeRegistry.Ordinal;
-    private static readonly Hash128 FrameNetFrameTypeId = EntityTypeRegistry.FrameNetFrame;
+    private static readonly Hash128 RolesetTypeId = EntityTypeRegistry.PropBankRoleset;
+    private static readonly Hash128 OrdinalTypeId = EntityTypeRegistry.Ordinal;
+    // VerbNet_Class / FrameNet_Frame correspondence targets are now anchored by content-addressed id
+    // (CategoryAnchor.Id) and typed by their owning decomposers, so PropBank no longer references
+    // their type ids here. The types are still declared in InitializeAsync for vocab readback.
 
     internal static string NumericClassId(string classId)
     {
@@ -180,13 +188,18 @@ public sealed class PropBankDecomposer : IDecomposer
                 // FrameNet: class = frame name (NOT numeric — must not pass through NumericClassId, which
                 // strips lemma prefixes and would corrupt a frame name), inner text = frame element.
                 // Both map roleset -CORRESPONDS_TO- class/frame and role -ROLE_CORRESPONDS_TO- theta/FE,
-                // distinguished by the object's entity type. The FrameNet_Frame anchor shares identity
-                // with the FrameNet decomposer's frames so the two resources converge.
+                // distinguished by the object's entity type. The FrameNet_Frame / VerbNet_Class anchors
+                // share identity with their owning decomposers' entities so the resources converge.
+                // We only need the anchor's content-addressed id to hang the CORRESPONDS_TO edge on;
+                // the entity row and its typing edge are emitted by the resource that owns it (VerbNet
+                // / FrameNet), wherever that lands. Pre-typing it here existed solely to keep the
+                // attestation from dangling under the deleted referential EXISTS pre-check, so the
+                // Emit is downgraded to Id (no entity/typing row written for another source's anchor).
                 Hash128? anchor =
                     resource.Equals("VerbNet", StringComparison.OrdinalIgnoreCase)
-                        ? CategoryAnchor.Emit(b, NumericClassId(cls), VerbNetClassTypeId, Source, TC.AcademicCurated)
+                        ? CategoryAnchor.Id(NumericClassId(cls))
                     : resource.Equals("FrameNet", StringComparison.OrdinalIgnoreCase)
-                        ? CategoryAnchor.Emit(b, cls, FrameNetFrameTypeId, Source, TC.AcademicCurated)
+                        ? CategoryAnchor.Id(cls)
                         : null;
                 if (anchor is null) continue;
                 Hash128 classEntity = anchor.Value;

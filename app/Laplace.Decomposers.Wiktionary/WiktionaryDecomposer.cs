@@ -19,7 +19,10 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
     public int     LayerOrder   => 2;
     public Hash128 TrustClassId => TrustClass;
 
-    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
+    // Unordered: rows are self-contained; the cross-entry relations (HAS_HYPERNYM, IS_SYNONYM_OF,
+    // IS_TRANSLATION_OF, ETYMOLOGICALLY_DERIVED_FROM) name target lemmas by content-addressed id, so
+    // forward/cross-entry references are legal and N workers can commit batches concurrently.
+    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
     internal static readonly ConcurrentDictionary<string, byte> VocabularyNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => VocabularyNames.Keys.ToArray();
@@ -109,18 +112,35 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
 
     internal static string? ResolveInput(string dir, LanguageFilter? langs)
     {
+        // An active language filter swaps the full multilingual corpus (raw-wiktextract-data.jsonl)
+        // for the English-only kaikki.org export. Log this explicitly so a filtered run is never
+        // silently a different corpus than an unfiltered one.
         if (langs?.IsActive == true)
         {
             string eng = Path.Combine(dir, "kaikki.org-dictionary-English.jsonl");
-            if (File.Exists(eng)) return eng;
+            if (File.Exists(eng))
+            {
+                Console.Error.WriteLine(
+                    $"[WiktionaryDecomposer] Language filter active -> using English-only corpus '{eng}' " +
+                    "(kaikki.org-dictionary-English.jsonl), NOT the full multilingual raw-wiktextract-data.jsonl.");
+                return eng;
+            }
         }
         foreach (var name in new[] { "raw-wiktextract-data.jsonl", "kaikki.org-dictionary-English.jsonl" })
         {
             string p = Path.Combine(dir, name);
-            if (File.Exists(p)) return p;
+            if (File.Exists(p))
+            {
+                Console.Error.WriteLine($"[WiktionaryDecomposer] Using input corpus '{p}'.");
+                return p;
+            }
         }
         if (Directory.Exists(dir))
-            foreach (var p in Directory.EnumerateFiles(dir, "*.jsonl")) return p;
+            foreach (var p in Directory.EnumerateFiles(dir, "*.jsonl"))
+            {
+                Console.Error.WriteLine($"[WiktionaryDecomposer] Falling back to first *.jsonl in dir: '{p}'.");
+                return p;
+            }
         return null;
     }
 

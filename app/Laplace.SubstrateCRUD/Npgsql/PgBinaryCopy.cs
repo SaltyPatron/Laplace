@@ -36,21 +36,45 @@ internal static class PgBinaryCopy
         Stream stream, IntPtr ptr, long len, CancellationToken ct = default)
     {
         await stream.WriteAsync(Header, ct);
-        if (len > 0)
-        {
-            var window = new byte[(int)Math.Min(DefaultChunkBytes, len)];
-            for (long off = 0; off < len; off += window.Length)
-            {
-                int n = (int)Math.Min(window.Length, len - off);
-                unsafe
-                {
-                    new ReadOnlySpan<byte>((void*)(ptr + (nint)off), n).CopyTo(window);
-                }
-                await stream.WriteAsync(window.AsMemory(0, n), ct);
-            }
-        }
+        await WriteBlobBodyAsync(stream, ptr, len, null, ct);
         await stream.WriteAsync(Trailer, ct);
         await stream.FlushAsync(ct);
+    }
+
+
+
+
+
+
+    public static async Task WriteNativeBlobsAsync(
+        Stream stream, IReadOnlyList<(IntPtr Ptr, long Len)> blobs, CancellationToken ct = default)
+    {
+        await stream.WriteAsync(Header, ct);
+        long maxLen = 0;
+        foreach (var (_, len) in blobs) if (len > maxLen) maxLen = len;
+        byte[]? window = maxLen > 0
+            ? new byte[(int)Math.Min(DefaultChunkBytes, maxLen)]
+            : null;
+        foreach (var (ptr, len) in blobs)
+            await WriteBlobBodyAsync(stream, ptr, len, window, ct);
+        await stream.WriteAsync(Trailer, ct);
+        await stream.FlushAsync(ct);
+    }
+
+    private static async Task WriteBlobBodyAsync(
+        Stream stream, IntPtr ptr, long len, byte[]? reuse, CancellationToken ct)
+    {
+        if (len <= 0) return;
+        byte[] window = reuse ?? new byte[(int)Math.Min(DefaultChunkBytes, len)];
+        for (long off = 0; off < len; off += window.Length)
+        {
+            int n = (int)Math.Min(window.Length, len - off);
+            unsafe
+            {
+                new ReadOnlySpan<byte>((void*)(ptr + (nint)off), n).CopyTo(window);
+            }
+            await stream.WriteAsync(window.AsMemory(0, n), ct);
+        }
     }
 
     

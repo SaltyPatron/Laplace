@@ -147,16 +147,20 @@ public class NpgsqlSubstrateWriterTests
     }
 
     [Fact]
-    public async Task ApplyAsync_FailsClosedOnMissingReference()
+    public async Task ApplyAsync_AcceptsForwardReference_NoPreCheck()
     {
+        // Referential integrity is no longer pre-checked per batch. Identity is content-addressed
+        // and the tier DAG is acyclic, so a "forward" reference to a not-yet-deposited subject is
+        // legal — the apply succeeds and writes the rows (FK/triggers disabled via replica role;
+        // the referent lands with the identical id later, and reconstruction proves soundness).
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
-        var src = Hash128.OfCanonical("substrate/source/test/rollback");
+        var src = Hash128.OfCanonical("substrate/source/test/forwardref");
         var typeId = await EnsureTestTypeAsync(src);
 
         var goodEntity = H(5001);
         var missingSubject = H(5099);
         var relationTypeId = await EnsureTestRelationTypeAsync(src, "HAS_TEST_ROLLBACK");
-        var change = new SubstrateChangeBuilder(src, "rollback-unit")
+        var change = new SubstrateChangeBuilder(src, "forwardref-unit")
             .AddEntity(goodEntity, 0, relationTypeId)
             .AddAttestation(new AttestationRow(
                 H(5002), missingSubject, relationTypeId, null, src, null,
@@ -164,15 +168,15 @@ public class NpgsqlSubstrateWriterTests
                 1_000_000_000L, 30_000_000_000L))
             .Build();
 
-        var ex = await Assert.ThrowsAsync<SubstrateReferentialIntegrityException>(
-            () => writer.ApplyAsync(change));
-        Assert.Equal(1, ex.MissingCount);
+        var result = await writer.ApplyAsync(change);
+        Assert.Equal(1, result.EntitiesInserted);
+        Assert.Equal(1, result.AttestationsInserted);
 
         await using var cmd = _pg.DataSource.CreateCommand(
             "SELECT count(*) FROM laplace.entities WHERE id = $1");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, goodEntity.ToBytes());
         var n = (long)(await cmd.ExecuteScalarAsync())!;
-        Assert.Equal(0L, n);
+        Assert.Equal(1L, n);
     }
 
     [Fact]

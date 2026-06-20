@@ -13,7 +13,7 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider, IInge
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.EpochBarrier;
+    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "OMWDecomposer";
@@ -49,28 +49,9 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider, IInge
 
         int batch = options.BatchSize > 1 ? options.BatchSize : 2048;
         long cap = options.MaxInputUnits;
-        bool legacy = string.Equals(
-            Environment.GetEnvironmentVariable("LAPLACE_OMW_LEGACY"),
-            "1", StringComparison.Ordinal);
-
-        if (legacy)
-        {
-            await foreach (var change in OMWGrammarIngest.IngestFilesAsync(
-                wnsDir, options.Languages, batch, cap, OmwIngestPhase.Combined, ct))
-            {
-                if (!options.DryRun) yield return change;
-            }
-            yield break;
-        }
 
         await foreach (var change in OMWGrammarIngest.IngestFilesAsync(
-            wnsDir, options.Languages, batch, cap, OmwIngestPhase.Content, ct))
-        {
-            if (!options.DryRun) yield return change;
-        }
-
-        await foreach (var change in OMWGrammarIngest.IngestFilesAsync(
-            wnsDir, options.Languages, batch, cap, OmwIngestPhase.Attestations, ct))
+            wnsDir, options.Languages, batch, cap, ct))
         {
             if (!options.DryRun) yield return change;
         }

@@ -18,14 +18,14 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
     
     
     
-    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
+    // Multi-worker production emits independent per-file batches that the runner commits via one
+    // Unordered N-consumer lane (forward refs are legal). Relation-type entity + IS_A seeding is
+    // re-emitted per batch (content-addressed + ON CONFLICT dedups), so there is no run-wide shared
+    // mutable seen-set and therefore no cross-worker seeding race.
+    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
     private static readonly Hash128 FeatureTypeId  = EntityTypeRegistry.UdFeature;
     private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
-
-    private static readonly string[] UposTags =
-        ["ADJ","ADP","ADV","AUX","CCONJ","DET","INTJ","NOUN","NUM",
-         "PART","PRON","PROPN","PUNCT","SCONJ","SYM","VERB","X"];
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "UDDecomposer";
@@ -75,12 +75,11 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
         var files = ListTreebankFiles(treebanksDir, options);
         if (files.Count == 0) yield break;
 
-        var seenAttRun = new ConcurrentIdSet();
-
         if (workers <= 1 || files.Count == 1)
         {
             var b = NewBuilder("ud/batch-0", batchSentences);
             var seenEntBatch = new HashSet<Hash128>();
+            var seenAttBatch = new ConcurrentIdSet();
             int sentCount = 0, batchNum = 0;
             foreach (string conllu in files)
             {
@@ -91,13 +90,14 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
                 await foreach (var sentence in ParseSentencesAsync(conllu, ct))
                 {
                     ct.ThrowIfCancellationRequested();
-                    EmitSentence(b, sentence, langId, langCode, seenEntBatch, seenAttRun, _canonicalNames);
+                    EmitSentence(b, sentence, langId, langCode, seenEntBatch, seenAttBatch, _canonicalNames);
 
                     if (++sentCount >= batchSentences)
                     {
                         if (!options.DryRun) yield return b.SetInputUnitsConsumed(sentCount).Build();
                         b = NewBuilder($"ud/batch-{++batchNum}", batchSentences);
                         seenEntBatch.Clear();
+                        seenAttBatch = new ConcurrentIdSet();
                         sentCount = 0;
                         await Task.Yield();
                     }
@@ -133,15 +133,17 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
 
                     var b = NewBuilder($"ud/w{worker}/{stem}/0", batchSentences);
                     var seenEntBatch = new HashSet<Hash128>();
+                    var seenAttBatch = new ConcurrentIdSet();
                     int sentCount = 0, batchNum = 0;
                     await foreach (var sentence in ParseSentencesAsync(conllu, ct))
                     {
-                        EmitSentence(b, sentence, langId, langCode, seenEntBatch, seenAttRun, _canonicalNames);
+                        EmitSentence(b, sentence, langId, langCode, seenEntBatch, seenAttBatch, _canonicalNames);
                         if (++sentCount >= batchSentences)
                         {
                             if (!options.DryRun) await channel.Writer.WriteAsync(b.SetInputUnitsConsumed(sentCount).Build(), ct);
                             b = NewBuilder($"ud/w{worker}/{stem}/{++batchNum}", batchSentences);
                             seenEntBatch.Clear();
+                            seenAttBatch = new ConcurrentIdSet();
                             sentCount = 0;
                         }
                     }
@@ -201,7 +203,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
             entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build();
 
     private static void EmitSentence(SubstrateChangeBuilder b, UdSentence s, Hash128 langId, string langCode,
-                                     HashSet<Hash128> seenEntBatch, ConcurrentIdSet seenAttRun,
+                                     HashSet<Hash128> seenEntBatch, ConcurrentIdSet seenAttBatch,
                                      ConcurrentDictionary<string, byte> canonicalNames)
     {
         b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, LanguageTypeId, Source));
@@ -248,7 +250,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
                 VocabularyNames.TrackUdFeatureValue(canonicalNames, fName, fVal);
                 Hash128 valId = FeatValueId(fName, fVal);
                 b.AddEntity(new EntityRow(valId, EntityTier.Vocabulary, FeatureTypeId, Source));
-                RelationTypeRegistry.SeedDynamic(b, RelationTypeRegistry.ResolveFeature(fName), Source, seenEntBatch, seenAttRun, canonicalNames);
+                RelationTypeRegistry.SeedDynamic(b, RelationTypeRegistry.ResolveFeature(fName), Source, seenEntBatch, seenAttBatch, canonicalNames);
                 var featRel = RelationTypeRegistry.ResolveFeature(fName);
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
                     form, featRel.Id, valId, Source, null, featRel.Rank * SourceTrust.AcademicCurated));
@@ -268,7 +270,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
             if (tok.Head > 0 && tok.Head <= s.MaxId && formId[tok.Head] is { } headId
                 && !string.IsNullOrEmpty(tok.Deprel) && tok.Deprel != "_")
             {
-                RelationTypeRegistry.SeedDeprel(b, tok.Deprel, Source, seenEntBatch, seenAttRun, canonicalNames);
+                RelationTypeRegistry.SeedDeprel(b, tok.Deprel, Source, seenEntBatch, seenAttBatch, canonicalNames);
                 var dep = RelationTypeRegistry.ResolveDeprel(tok.Deprel);
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
                     form, dep.Id, headId, Source, null, dep.Rank * SourceTrust.AcademicCurated));
@@ -284,7 +286,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
                     string erel = edge[(colon + 1)..].Trim();
                     if (erel.Length == 0 || headRef == "0") continue;
                     if (!refToForm.TryGetValue(headRef, out var eHead)) continue;
-                    RelationTypeRegistry.SeedEnhancedDeprel(b, erel, Source, seenEntBatch, seenAttRun, canonicalNames);
+                    RelationTypeRegistry.SeedEnhancedDeprel(b, erel, Source, seenEntBatch, seenAttBatch, canonicalNames);
                     var edep = RelationTypeRegistry.ResolveEnhancedDeprel(erel);
                     b.AddAttestation(NativeAttestation.CategoricalResolved(
                         form, edep.Id, eHead, Source, null, edep.Rank * SourceTrust.AcademicCurated));

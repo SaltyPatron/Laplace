@@ -7,15 +7,23 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.VerbNet;
 
-public sealed class VerbNetDecomposer : IDecomposer
+public sealed class VerbNetDecomposer : IDecomposer, IIngestCommitPolicy
 {
+    // Each unit's rows are self-contained. VerbNet owns its classes (it emits + types them); the
+    // IS_A parent-class edge and the WordNet-sense CORRESPONDS_TO edge resolve by content-addressed
+    // id against entities owned by VerbNet (the parent class, in another batch) and WordNet (the
+    // sense, in another source). With the per-batch referential EXISTS pre-check gone these
+    // cross-batch / cross-source anchors are legal, so N workers can commit batches concurrently.
+    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
+
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/VerbNetDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
     private static readonly Hash128 ClassTypeId = EntityTypeRegistry.VerbNetClass;
-    private static readonly Hash128 SenseTypeId  = EntityTypeRegistry.WordNetSense;
+    // WordNet_Sense correspondence targets are now anchored by content-addressed id (CategoryAnchor.Id)
+    // and typed by the WordNet decomposer, so no WordNet_Sense type id is referenced here.
 
     internal static string NumericClassId(string classId)
     {
@@ -95,7 +103,11 @@ public sealed class VerbNetDecomposer : IDecomposer
 
         if (parentClassId is not null)
         {
-            Hash128? parentAnchor = CategoryAnchor.Emit(b, NumericClassId(parentClassId), ClassTypeId, Source, TC.AcademicCurated);
+            // The parent class is itself a VerbNet class; its own EmitClass call writes and types its
+            // entity row (this same batch for an enclosing class, or another batch for a top-level
+            // parent). We only need its content-addressed id to anchor the IS_A edge — pre-emitting a
+            // typed anchor here was solely to satisfy the deleted referential EXISTS pre-check.
+            Hash128? parentAnchor = CategoryAnchor.Id(NumericClassId(parentClassId));
             if (parentAnchor is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
                     classEntity, "IS_A", parentAnchor.Value, Source, TC.AcademicCurated));
@@ -118,7 +130,11 @@ public sealed class VerbNetDecomposer : IDecomposer
                     
                     string? key = SourceEntityIdConventions.NormalizeSenseKey(raw);
                     if (key is null) continue;
-                    var senseEntity = CategoryAnchor.Emit(b, key, SenseTypeId, Source, TC.AcademicCurated);
+                    // WordNet senses are owned and typed by the WordNet decomposer; this is a
+                    // cross-source CORRESPONDS_TO that needs only the sense's content-addressed id.
+                    // Pre-emitting a typed WordNet_Sense anchor here was forward-reference
+                    // defensiveness for the deleted referential EXISTS pre-check.
+                    var senseEntity = CategoryAnchor.Id(key);
                     if (senseEntity is null) continue;
                     b.AddAttestation(NativeAttestation.Categorical(
                         lemmaId.Value, "CORRESPONDS_TO", senseEntity.Value, Source, TC.AcademicCurated));
