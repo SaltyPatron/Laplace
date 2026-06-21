@@ -25,13 +25,16 @@ public sealed class LanguageFilter
     {
         LanguageReference.EnsureLoaded();
         var canon = new HashSet<string>(StringComparer.Ordinal);
+        var unresolved = new List<string>();
         foreach (var part in commaSeparated.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             string? c = LanguageReference.ResolveCode(part);
             if (c is not null) canon.Add(c);
+            else unresolved.Add(part);
         }
-        if (canon.Count == 0)
-            throw new ArgumentException($"LanguageFilter: no resolvable languages in '{commaSeparated}'");
+        if (unresolved.Count > 0)
+            throw new ArgumentException(
+                $"LanguageFilter: unresolvable language(s) in '{commaSeparated}': {string.Join(", ", unresolved)}");
         return new LanguageFilter(canon);
     }
 

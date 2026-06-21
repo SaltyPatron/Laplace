@@ -4,7 +4,15 @@ namespace Laplace.Decomposers.OMW;
 
 public static class OMWTabFiles
 {
-    internal static readonly string[] TabGlobPatterns = ["wn-data-*.tab", "wn-wikt-*.tab"];
+    // wn-data (curated wordnet projects) + wn-wikt (Wiktionary-derived) + wn-cldr (Unicode CLDR-derived,
+    // 122 languages — by far the largest non-data/wikt source) + wn-nodia (diacritic-stripped variant,
+    // e.g. Arabic) all share the same <offset>-<pos>\t[<lang>:]lemma|def|exe\t<value> row shape that
+    // OMWRowParser already parses generically. Deliberately excluded: wn-freq-*.tab (word\tfrequency —
+    // a different shape; OMWRowParser's type-field match rejects it, so adding it here would silently
+    // ingest nothing rather than ingest wrong data) and <lang>-changes.tab (version changelogs, not
+    // lexical content).
+    internal static readonly string[] TabGlobPatterns =
+        ["wn-data-*.tab", "wn-wikt-*.tab", "wn-cldr-*.tab", "wn-nodia-*.tab"];
 
     public static IEnumerable<string> EnumerateTabFiles(string wnsDir, LanguageFilter? langs)
     {

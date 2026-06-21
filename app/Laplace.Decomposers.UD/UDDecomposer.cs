@@ -74,9 +74,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider{
         // witness) now that the process-global content bank is deleted -- so concurrent file
         // producers share no mutable state and parallelize safely. Stream treebank files to a
         // threadpool, bounded by the per-batch channel.
-        int workers = int.TryParse(
-            Environment.GetEnvironmentVariable("LAPLACE_DECOMPOSE_WORKERS"), out var w) && w > 0
-            ? w : Math.Clamp(Environment.ProcessorCount - 4, 1, 16);
+        int workers = IngestParallelism.ResolveFileWorkers(coreHeadroom: 4);
 
         var files = ListTreebankFiles(treebanksDir, options);
         if (files.Count == 0) yield break;

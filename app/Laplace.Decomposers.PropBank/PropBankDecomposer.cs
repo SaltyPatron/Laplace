@@ -36,7 +36,8 @@ public sealed class PropBankDecomposer : IDecomposer{
     public int     LayerOrder   => 2;
     public Hash128 TrustClassId => TrustClass;
 
-    private const long EstimatedFramesets = 7_566L;
+    // 7,566 under frames/ plus the top-level AMR-UMR-91-rolesets.xml frameset (see EnumerateFramesetFiles).
+    private const long EstimatedFramesets = 7_567L;
 
     private static readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
 
@@ -72,7 +73,7 @@ public sealed class PropBankDecomposer : IDecomposer{
         var b = NewBuilder("propbank/batch-0", batch);
         int n = 0, bn = 0;
 
-        foreach (var file in EnumerateFramesetFiles(framesDir))
+        foreach (var file in EnumerateFramesetFiles(framesDir, context.EcosystemPath))
         {
             ct.ThrowIfCancellationRequested();
             var doc = new XmlDocument();
@@ -251,11 +252,31 @@ public sealed class PropBankDecomposer : IDecomposer{
         return ecosystemPath;
     }
 
-    private static IEnumerable<string> EnumerateFramesetFiles(string dir)
+    // The distribution root (propbank-frames-main/, i.e. the parent of the resolved frames/
+    // directory) carries the bulk of framesets under frames/, but also ships a handful of
+    // standalone top-level frameset files (e.g. AMR-UMR-91-rolesets.xml for AMR/UMR reification
+    // rolesets) that never landed under frames/. Scan both frames/ and its parent — deduped by
+    // full path — and rely on the existing root.Name == "frameset" guard in DecomposeAsync to skip
+    // any non-frameset XML that happens to live alongside (there are none today, but the guard
+    // makes that safe). The parent scan is skipped when ResolveFramesDir already fell back to the
+    // ecosystem root itself, so this never walks outside the vault.
+    private static IEnumerable<string> EnumerateFramesetFiles(string framesDir, string ecosystemPath)
     {
-        if (!Directory.Exists(dir)) yield break;
-        foreach (var f in Directory.EnumerateFiles(dir, "*.xml")
-                                   .OrderBy(p => p, StringComparer.Ordinal))
-            yield return f;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string? parent = string.Equals(
+            Path.GetFullPath(framesDir).TrimEnd(Path.DirectorySeparatorChar),
+            Path.GetFullPath(ecosystemPath).TrimEnd(Path.DirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase)
+            ? null
+            : Path.GetDirectoryName(framesDir);
+
+        foreach (var d in new[] { framesDir, parent })
+        {
+            if (string.IsNullOrEmpty(d) || !Directory.Exists(d)) continue;
+            foreach (var f in Directory.EnumerateFiles(d, "*.xml")
+                                       .OrderBy(p => p, StringComparer.Ordinal))
+                if (seen.Add(Path.GetFullPath(f)))
+                    yield return f;
+        }
     }
 }

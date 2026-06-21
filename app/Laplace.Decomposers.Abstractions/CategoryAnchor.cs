@@ -26,8 +26,9 @@ public static class CategoryAnchor
     public static Hash128? Emit(
         SubstrateChangeBuilder b, string key, Hash128 categoryTypeId, Hash128 source, double trust)
     {
-        if (string.IsNullOrEmpty(key)) return null;
-        Hash128? id = ContentEmitter.Emit(b, key, source);
+        string? normalized = Normalize(key);
+        if (normalized is null) return null;
+        Hash128? id = ContentEmitter.Emit(b, normalized, source);
         if (id is null) return null;
         AttestCategory(b, id.Value, categoryTypeId, source, trust);
         return id;
@@ -43,5 +44,13 @@ public static class CategoryAnchor
     
     
     public static Hash128? Id(string key) =>
-        string.IsNullOrEmpty(key) ? null : ContentEmitter.RootId(key);
+        Normalize(key) is { } normalized ? ContentEmitter.RootId(normalized) : null;
+
+    // Frame/class/roleset keys arrive from independently-produced files (FrameNet XML, MapNet TSV,
+    // PredicateMatrix TSV, WordFrameNet native text, SemLink JSON) that all happen to agree on the
+    // same surface convention today — but unlike language/POS/sense keys, there is no canonical
+    // lookup table backing that agreement, only convention. Trim defensively at the one chokepoint
+    // every category key passes through, instead of relying on every caller to trim its own field.
+    private static string? Normalize(string key) =>
+        string.IsNullOrEmpty(key) ? null : key.Trim() is { Length: > 0 } trimmed ? trimmed : null;
 }

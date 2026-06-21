@@ -276,10 +276,7 @@ public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvi
 
     // Per-worker stages + per-batch dedup (the process-global content bank was deleted) make
     // concurrent file producers independent and safe -> parallelize across zip files.
-    private static int ResolveDecomposeWorkers() =>
-        int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_DECOMPOSE_WORKERS"), out var w) && w > 0
-            ? w
-            : Math.Clamp(Environment.ProcessorCount - 2, 1, 16);
+    private static int ResolveDecomposeWorkers() => IngestParallelism.ResolveFileWorkers();
 
     private static List<(string Path, string Stem)> SelectZips(string dir, DecomposerOptions options)
     {
