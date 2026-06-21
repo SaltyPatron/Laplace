@@ -101,6 +101,42 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
         }
     }
 
+    /// <summary>
+    /// other_resources/external_vn2pb.json: VerbNet-class key (lemma-prefixed, e.g. <c>turn-26.6.1</c>,
+    /// the canonical VerbNet class id surface, unlike vn-fn2's class-prefixed <c>26.6.1-turn</c>) to an
+    /// array of PropBank roleset names. Same shape as <see cref="WalkVnFn"/>, pointed at PropBank
+    /// rolesets instead of FrameNet frames, and additional to pb-vn2.json's roleset-keyed direction.
+    /// </summary>
+    private static void WalkVnPbExternal(in GrammarComposeContext ctx, SubstrateChangeBuilder b)
+    {
+        int rootObj = JsonGrammarHelper.FindRootObjectNode(ctx.Ast);
+        if (rootObj < 0) return;
+
+        foreach (var (vnKeyNode, rolesetValueNode) in JsonGrammarHelper.EnumerateObjectPairs(ctx.Ast, rootObj))
+        {
+            if (!JsonGrammarHelper.TryKeyUtf8(ctx.Ast, ctx.Utf8, vnKeyNode, out var vnKeySpan))
+                continue;
+            string vnClass = JsonGrammarHelper.Utf8ToString(vnKeySpan).Trim();
+            if (vnClass.Length == 0) continue;
+
+            var vnEntity = StageCategory(b, SemLinkDecomposer.NumericClassId(vnClass), VnClassTypeId);
+            if (vnEntity is null) continue;
+
+            if (!JsonGrammarHelper.IsArrayNode(ctx.Ast, rolesetValueNode)) continue;
+            foreach (int rolesetNode in JsonGrammarHelper.StringNodesInArray(ctx.Ast, rolesetValueNode))
+            {
+                if (!JsonGrammarHelper.TryKeyUtf8(ctx.Ast, ctx.Utf8, rolesetNode, out var rolesetSpan))
+                    continue;
+                string roleset = JsonGrammarHelper.Utf8ToString(rolesetSpan).Trim();
+                if (roleset.Length == 0) continue;
+                var rsEntity = StageCategory(b, roleset, RolesetTypeId);
+                if (rsEntity is null) continue;
+                b.AddAttestation(NativeAttestation.Categorical(
+                    vnEntity.Value, "CORRESPONDS_TO", rsEntity.Value, SemLinkDecomposer.Source, TC.AcademicCurated));
+            }
+        }
+    }
+
     private static void WalkCategoryToSynset(
         in GrammarComposeContext ctx,
         SubstrateChangeBuilder b,

@@ -395,9 +395,17 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         await using (var promote = conn.CreateCommand())
         {
             promote.CommandTimeout = 0;
+            // Set-based dedup: a single NOT EXISTS anti-join filters the already-present majority
+            // in one operation (content-addressed id is the PK), so we never pay per-row speculative
+            // insertion for rows the substrate already holds. The trailing ON CONFLICT DO NOTHING is
+            // NOT the dedup mechanism — it is only the thin concurrency tie-breaker for the rare case
+            // two parallel commit workers stage the same novel id in overlapping transactions (the
+            // anti-join can't see the other's uncommitted insert). ORDER BY id keeps insert locality.
             promote.CommandText =
                 $"INSERT INTO laplace.{tableName} ({cols}) " +
-                $"SELECT {cols} FROM {stageName} ORDER BY id ON CONFLICT DO NOTHING";
+                $"SELECT {cols} FROM {stageName} s " +
+                $"WHERE NOT EXISTS (SELECT 1 FROM laplace.{tableName} t WHERE t.id = s.id) " +
+                $"ORDER BY id ON CONFLICT DO NOTHING";
             return await promote.ExecuteNonQueryAsync(ct);
         }
     }

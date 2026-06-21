@@ -63,6 +63,17 @@ public sealed class SemLinkDecomposer : IDecomposer{
             }
             break;
         }
+
+        string? roleMappingPath = SemLinkRoleMappingIngest.ResolvePath(context.EcosystemPath);
+        if (roleMappingPath is not null)
+        {
+            int rmBatch = options.BatchSize > 0 ? options.BatchSize : 4096;
+            await foreach (var change in SemLinkRoleMappingIngest.StreamAsync(roleMappingPath, rmBatch, ct))
+            {
+                if (!options.DryRun)
+                    yield return change;
+            }
+        }
     }
 
     private static async IAsyncEnumerable<SubstrateChange> StreamJsonDocumentAsync(
@@ -195,6 +206,13 @@ public sealed class SemLinkDecomposer : IDecomposer{
             break;
         }
 
+        string? roleMappingPath = SemLinkRoleMappingIngest.ResolvePath(context.EcosystemPath);
+        if (roleMappingPath is not null)
+        {
+            long? roleCount = await SemLinkRoleMappingIngest.EstimateUnitCountAsync(roleMappingPath, ct);
+            if (roleCount is not null) total += roleCount.Value;
+        }
+
         return total > 0 ? total : null;
     }
 
@@ -221,6 +239,26 @@ public sealed class SemLinkDecomposer : IDecomposer{
         string fnWn = Path.Combine(dir, "fn-wn.json");
         if (File.Exists(fnWn))
             yield return (fnWn, SemLinkDocumentKind.FnWn, "semlink/fn-wn");
+
+        string vnPbExternal = Path.Combine(OtherResourcesDir(dir), "external_vn2pb.json");
+        if (File.Exists(vnPbExternal))
+            yield return (vnPbExternal, SemLinkDocumentKind.VnPbExternal, "semlink/external_vn2pb");
+    }
+
+    /// <summary>
+    /// other_resources/ is a sibling of instances/ under semlink-master/, not nested under it
+    /// (see <see cref="InstanceDirCandidates"/>). Resolve it relative to the instances dir we already
+    /// picked so a vault layout that moved instances/ doesn't silently strand other_resources/ too.
+    /// </summary>
+    private static string OtherResourcesDir(string instancesDir)
+    {
+        string? parent = Path.GetDirectoryName(instancesDir);
+        if (parent is not null)
+        {
+            string sibling = Path.Combine(parent, "other_resources");
+            if (Directory.Exists(sibling)) return sibling;
+        }
+        return instancesDir;
     }
 
     internal static string VnClassFromKey(string key) =>
