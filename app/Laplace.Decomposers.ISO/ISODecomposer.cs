@@ -41,6 +41,7 @@ public sealed class ISODecomposer : IDecomposer{
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("Language");
         boot.AddType("ISO639Code");
+        boot.AddType("LanguageVariant");
         boot.AddRelationType("IS_LANGUAGE_CODE");
         boot.AddRelationType("HAS_ISO639_1_CODE");
         boot.AddRelationType("USES_SCRIPT");

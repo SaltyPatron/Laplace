@@ -18,7 +18,6 @@ if not "%~8"=="" set "EXTRA=%EXTRA% %~8"
 if not "%~9"=="" set "EXTRA=%EXTRA% %~9"
 
 if not defined LAPLACE_EMIT_CROSS_LANG set "LAPLACE_EMIT_CROSS_LANG=0"
-if not defined LAPLACE_DECOMPOSE_WORKERS set "LAPLACE_DECOMPOSE_WORKERS=1"
 rem COPY-blob re-validation is a debug-only detector for the native AV/heap-corruption bug
 rem that was root-caused and fixed (commits 87eeee3 vertices-not-doubles, 97b58e9 walk header).
 rem It is read-only (can only detect, never prevent/cause) and costs a full blob copy+field-walk
@@ -30,7 +29,7 @@ cd /d "%LAPLACE_ROOT%\app"
 if /i "%STEP%"=="unicode"       goto run_ingest
 if /i "%STEP%"=="iso639"        goto run_ingest
 if /i "%STEP%"=="wordnet"       goto run_ingest
-if /i "%STEP%"=="omw"           goto run_ingest
+if /i "%STEP%"=="omw"           goto run_ingest_omw_commit
 if /i "%STEP%"=="verbnet"       goto run_ingest
 if /i "%STEP%"=="propbank"      goto run_ingest
 if /i "%STEP%"=="framenet"      goto run_ingest
@@ -81,6 +80,34 @@ if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=50000"
 call :run_ingest_impl
 set "RC=%ERRORLEVEL%"
 if defined _saved (set "LAPLACE_INGEST_COMMIT_ROWS=%_saved%") else set "LAPLACE_INGEST_COMMIT_ROWS="
+exit /b %RC%
+
+:run_ingest_omw_commit
+rem OMW = 1226 .tab files. The validated OMW config (scripts/win/decomposer-test.cmd) runs the
+rem files in PARALLEL (ResolveFileWorkers auto-scales when LAPLACE_DECOMPOSE_WORKERS is a parallel
+rem value) with a SINGLE compose worker per file. The seed orchestration otherwise forces
+rem LAPLACE_DECOMPOSE_WORKERS=1 (one file at a time = the ~20-min crawl) and inherits the global
+rem LAPLACE_INGEST_COMPOSE_WORKERS=4, which drives the multi-threaded within-file compose path
+rem that spiked the native heap to -3 (laplace_grammar_compose returned -3). Pin OMW to the
+rem proven shape: parallel files, serial compose per file, commit parallelism via INGEST_WORKERS.
+set "_saved_dw=%LAPLACE_DECOMPOSE_WORKERS%"
+set "_saved_cw=%LAPLACE_INGEST_COMPOSE_WORKERS%"
+set "_saved_iw=%LAPLACE_INGEST_WORKERS%"
+set /a "_omw_dw=%NUMBER_OF_PROCESSORS%-2"
+if !_omw_dw! LSS 1 set "_omw_dw=1"
+if !_omw_dw! GTR 16 set "_omw_dw=16"
+set "LAPLACE_DECOMPOSE_WORKERS=!_omw_dw!"
+set "LAPLACE_INGEST_COMPOSE_WORKERS=1"
+rem Parallel file reading alone bought ~nothing (commit was single-threaded); the DB commit/apply
+rem is the real OMW bottleneck. Pin commit parallelism to the validated OMW value (4).
+if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=4"
+if "!LAPLACE_INGEST_WORKERS!"=="1" set "LAPLACE_INGEST_WORKERS=4"
+echo OMW parallelism: files=!LAPLACE_DECOMPOSE_WORKERS! compose=1 commit=!LAPLACE_INGEST_WORKERS!
+call :run_ingest_impl
+set "RC=%ERRORLEVEL%"
+if defined _saved_dw (set "LAPLACE_DECOMPOSE_WORKERS=%_saved_dw%") else set "LAPLACE_DECOMPOSE_WORKERS="
+if defined _saved_cw (set "LAPLACE_INGEST_COMPOSE_WORKERS=%_saved_cw%") else set "LAPLACE_INGEST_COMPOSE_WORKERS="
+if defined _saved_iw (set "LAPLACE_INGEST_WORKERS=%_saved_iw%") else set "LAPLACE_INGEST_WORKERS="
 exit /b %RC%
 
 :run_ingest_path
