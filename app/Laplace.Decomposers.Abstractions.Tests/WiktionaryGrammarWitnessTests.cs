@@ -32,6 +32,7 @@ public sealed class WiktionaryGrammarWitnessTests
     var ctx = new GrammarComposeContext(utf8, ast, root, composer, JsonGrammarHelper.FindRootObjectNode(ast));
     Assert.True(JsonGrammarHelper.TryComposedProperty(ctx, "word", out var wordId), "word must resolve to composed id");
     Assert.NotEqual(default, wordId);
+    Assert.Equal(ContentWitnessBatch.RootId("filter"), wordId);
 
     var witness = new WiktionaryGrammarWitness(DecomposerOptions.ForWitness("WiktionaryDecomposer"));
     witness.WalkRow(ctx, new RowContext(0, 1), b);

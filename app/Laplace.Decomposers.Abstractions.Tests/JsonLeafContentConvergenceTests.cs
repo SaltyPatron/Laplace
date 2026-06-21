@@ -38,4 +38,38 @@ public sealed class JsonLeafContentConvergenceTests
         Assert.NotNull(contentId);
         Assert.Equal(contentId!.Value, leafId);
     }
+
+    [Fact]
+    public void JsonStringLeaf_EscapedUnicode_ConvergesWith_ContentPath()
+    {
+        const string surface = "caf\u00e9";
+        string doc = "{\"w\":\"caf\\u00e9\"}";
+        byte[] utf8 = Encoding.UTF8.GetBytes(doc);
+
+        using var ast = GrammarDecomposer.Parse(utf8, "json");
+        using var composer = new GrammarRowComposer(utf8, ast, Src, "json");
+        var ctx = new GrammarComposeContext(
+            utf8, ast, default, composer, JsonGrammarHelper.FindRootObjectNode(ast));
+
+        Assert.True(JsonGrammarHelper.TryComposedProperty(ctx, "w", out var leafId));
+        var contentId = ContentWitnessBatch.RootId(surface);
+        Assert.NotNull(contentId);
+        Assert.Equal(contentId!.Value, leafId);
+    }
+
+    [Fact]
+    public void JsonGrammarHelper_PropertyLookup_UsesContentRoot_NotComposeMerkle()
+    {
+        const string surface = "New York";
+        string doc = "{\"word\":\"" + surface + "\"}";
+        byte[] utf8 = Encoding.UTF8.GetBytes(doc);
+
+        using var ast = GrammarDecomposer.Parse(utf8, "json");
+        using var composer = new GrammarRowComposer(utf8, ast, Src, "json");
+        var ctx = new GrammarComposeContext(
+            utf8, ast, default, composer, JsonGrammarHelper.FindRootObjectNode(ast));
+
+        Assert.True(JsonGrammarHelper.TryComposedProperty(ctx, "word", out var wordId));
+        Assert.Equal(ContentWitnessBatch.RootId(surface), wordId);
+    }
 }

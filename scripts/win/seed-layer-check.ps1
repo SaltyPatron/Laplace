@@ -4,7 +4,9 @@ param(
 
     [Parameter(Mandatory = $true)][string] $Src,
 
-    [Parameter(Mandatory = $true)][int] $Layer
+    [Parameter(Mandatory = $true)][int] $Layer,
+
+    [string] $Dbname = $(if ($env:LAPLACE_DBNAME) { $env:LAPLACE_DBNAME } else { 'laplace' })
 
 )
 
@@ -48,7 +50,7 @@ SELECT laplace.evidence_count(
 
 
 
-$result = (& $psql -h localhost -U postgres -d laplace -tAc $q).Trim()
+$result = (& $psql -h localhost -U postgres -d $Dbname -tAc $q).Trim()
 
 Write-Output "STAT_${Key}=$result"
 

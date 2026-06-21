@@ -65,6 +65,7 @@ public sealed class VerbNetDecomposerTests
         Assert.All(atts, a => Assert.Contains(a.TypeId, canonical));
 
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("IS_A"));
+        Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS"));
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE"));
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_VERB_FRAME"));
         Assert.Contains(atts, a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_EXAMPLE"));
@@ -72,7 +73,7 @@ public sealed class VerbNetDecomposerTests
     }
 
     [Fact]
-    public async Task Member_IsA_Class_And_Class_IsA_ParentClass()
+    public async Task Member_MemberOfVerbNetClass_And_Subclass_IsA_ParentClass()
     {
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(VerbNetDecomposer.Source, "fixture", null);
@@ -83,6 +84,9 @@ public sealed class VerbNetDecomposerTests
         Assert.NotNull(lendId);
         Assert.NotNull(classId);
         Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS")
+            && a.SubjectId == lendId!.Value && a.ObjectId == classId!.Value);
+        Assert.DoesNotContain(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("IS_A")
             && a.SubjectId == lendId!.Value && a.ObjectId == classId!.Value);
         
@@ -152,6 +156,7 @@ public sealed class VerbNetDecomposerTests
             e.Id == Hash128.OfCanonical("substrate/type/VerbNet_Class/v1")
             && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE"));
+        Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS"));
         Assert.Contains(boot.Attestations, a =>
             a.SubjectId == VerbNetDecomposer.Source
             && a.TypeId == BootstrapIntentBuilder.HasTrustClassTypeId

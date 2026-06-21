@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "description": "Witness manifest — the conceptual mirror of seed-ladder.cmd. The ingestion order is a SIGNAL-DEPENDENCY STACK, not a skip list: each layer is a different kind of signal that presupposes the prior. Unset LAPLACE_INGEST_LANGS ingests all languages; set it (e.g. en,de) to scope multilingual corpora.",
   "language_scope": {
     "global_env": "LAPLACE_INGEST_LANGS",
@@ -9,9 +9,9 @@
   },
   "cadence_law": "floor (atoms + the language axis) → document (raw-text distributional trajectories: the corpus that proves AI-via-SQL answers from text ALONE) → knowledge (the *Net synset hub + the semantic/syntactic graph — uniform :ingest steps converging on shared content anchors) → usage (language in use) → code capstone (the full tree-sitter/grammar/AST pipeline; the precondition for model export) → models (LAST, because deposition presupposes export). Each layer ENRICHES the prior; none is 'deferred bulk'. The QKVO/FFN-exact analog lives in the knowledge layer; the de-blob lives there.",
   "anchor_law": "Concepts are decomposed CONTENT, never OfCanonical(\"witness/namespace/string\") blobs. A synset's identity is its Collaborative Interlingual Index (CILI, e.g. i46531) decomposed to codepoints — NOT the WordNet byte-offset, which is a file address that differs across languages and versions. Witness → source_id; category (synset/sense/class/frame/roleset) and pos → IS_A / HAS_POS attestations. Every language's distinct wordforms (dog != perro — never merged) converge by attesting onto the same shared concept anchor. The codepoint floor is the only dedup level. The shared de-blob surfaces are ConceptAnchor (ILI-resolving) and CategoryAnchor (key-as-content + IS_A); decomposers are thin callers, never minting their own blobs.",
-  "vault_root": "D:/Data/Ingest",
-  "repos_root": "D:/Repositories",
-  "models_root": "D:/Models/hub",
+  "vault_root": "D:/Data/Ingest on Windows (env.cmd sets INGEST and LAPLACE_DATA_ROOT); /vault/Data on Linux. Override LAPLACE_DATA_ROOT only when the vault lives elsewhere.",
+  "repos_root": "<REPOS> — example only; env.cmd default D:/Repositories",
+  "models_root": "<LAPLACE_MODEL_HUB> — example only; env.cmd default D:/Models/hub",
   "cadence": [
     {
       "stage": "floor",
@@ -39,11 +39,13 @@
         { "order": 3,  "cli": "verbnet",    "path": "VerbNet",                 "layer": "L2", "links": "Levin classes (CategoryAnchor); members carry wn sense keys → WN synset → ILI; thematic roles → shared role inventory." },
         { "order": 4,  "cli": "propbank",   "path": "PropBank",                "layer": "L2", "links": "rolesets (CategoryAnchor) → VerbNet class → WN → ILI; args Arg0-4 + ArgM standardized." },
         { "order": 5,  "cli": "framenet",   "path": "FrameNet/framenet_v17",   "layer": "L3", "links": "frames + FEs + LUs (CategoryAnchor); LUs map to WN synsets → ILI." },
-        { "order": 6,  "cli": "semlink",    "path": "SemLink",                 "layer": "L3", "links": "PB<->VN<->FN alignment, CORRESPONDS_TO only (owners attest IS_A). Predicate Matrix extends the bridge to WN (WSD-aligned) → ILI." },
-        { "order": 7,  "cli": "conceptnet", "path": "ConceptNet",              "layer": "L2", "links": "/c/<lang>/word[/pos/wn/sense] graph — word=content, lang=attestation, /r/X relations universal across languages; /wn/ carries the synset→ILI bridge; TranslationOf cross-lingual links." },
-        { "order": 8,  "cli": "atomic2020", "path": "Atomic2020",              "layer": "L2", "links": "event heads ('PersonX gives Y') = event anchors; xIntent/xEffect/... role-typed; converges with ConceptNet via RelationTypeRegistry." },
-        { "order": 9,  "cli": "ud",         "path": "UD-Treebanks",            "layer": "L2", "links": "forms/lemmas=content, UPOS→PosReference, deprel→core+subtype FEATURE (ResolveDeprel), features→ResolveFeature — all universal/omniglottal." },
-        { "order": 10, "cli": "wiktionary", "path": "Wiktionary",              "layer": "L2", "links": "wordforms=content, lang=attestation, senses.glosses=HAS_DEFINITION, translations=cross-lingual concept links (wiktextract jsonl)." }
+        { "order": 6,  "cli": "mapnet",     "path": "MapNet-0.1",              "layer": "L3", "links": "FrameNet frame/LU→WordNet synset via mapping_frame_synsets.txt and mapping_lus_synsets.txt (MultiWordNet pos#offset keys); CORRESPONDS_TO ILI synsets via CILI; vault-root MapNet-0.1/ or MapNet/." },
+        { "order": 7,  "cli": "wordframenet", "path": "WordFrameNet",          "layer": "L3", "links": "FrameNet LU→WordNet synset via Adimen WFN/XWFN TSV (lu_synset.map or *.txt); CORRESPONDS_TO ILI synsets via CILI; download WFN.tar.gz or XWFN.tar.gz from adimen.ehu.eus." },
+        { "order": 8,  "cli": "semlink",    "path": "SemLink",                 "layer": "L3", "links": "PB<->VN<->FN via semlink-master/instances/pb-vn2.json and vn-fn2.json; Predicate Matrix at vault-root PredicateMatrix.v1.3/PredicateMatrix.v1.3.txt (or PredicateMatrix.txt under SemLink); optional pb/vn/fn-wn.json bridges; WSD-aligned CORRESPONDS_TO PB/VN/FN→ILI synsets via CILI at vault-root CILI/." },
+        { "order": 9,  "cli": "conceptnet", "path": "ConceptNet",              "layer": "L2", "links": "/c/<lang>/word[/pos/wn/sense] graph — word=content, lang=attestation, /r/X relations universal across languages; /wn/ carries the synset→ILI bridge; TranslationOf cross-lingual links." },
+        { "order": 10, "cli": "atomic2020", "path": "Atomic2020",              "layer": "L2", "links": "event heads ('PersonX gives Y') = event anchors; xIntent/xEffect/... role-typed; converges with ConceptNet via RelationTypeRegistry." },
+        { "order": 11, "cli": "ud",         "path": "UD-Treebanks",            "layer": "L2", "links": "forms/lemmas=content, UPOS→PosReference, deprel→core+subtype FEATURE (ResolveDeprel), features→ResolveFeature — all universal/omniglottal." },
+        { "order": 12, "cli": "wiktionary", "path": "Wiktionary",              "layer": "L2", "links": "wordforms=content, lang=attestation, senses.glosses=HAS_DEFINITION, translations=cross-lingual concept links (wiktextract jsonl)." }
       ]
     },
     {
@@ -85,11 +87,11 @@
     "LAPLACE_LADDER_STOP": "nets = stop after the knowledge layer; usage = stop after usage. The scoped iteration targets for the lexical/semantic decomposers — NEVER a substitute for the full-cadence gate.",
     "LAPLACE_LADDER_DRY": "1 = print the resolved plan, ingest nothing.",
     "LAPLACE_SKIP_USAGE": "default 0 (tatoeba + opensubtitles run). Set 1 only to skip usage for a faster iteration pass.",
-    "LAPLACE_SKIP_MODELS": "default 0 (TinyLlama + Phi-2 + Qwen safetensors run). Set 1 only to skip models for a faster iteration pass.",
+    "LAPLACE_SKIP_MODELS": "default 0 (TinyLlama + Phi-2 + Qwen safetensors run). Set 1 only to skip models for a faster iteration pass."
   },
   "authority_sources": {
     "law": "Official language/platform sources and their documentation are the highest-trust code witnesses: the language's own repository testifies its idioms; its docs are the Rosetta intent<->implementation corpus. Acquire with download-code-data.cmd authority; ingest via the repo loop inside the code capstone.",
-    "root": "D:/Data/Ingest/code-authority",
+    "root": "<LAPLACE_DATA_ROOT>/code-authority",
     "clones": [
       { "repo": "postgres/postgres", "dir": "postgres", "witnesses": "C + SQL idioms from the database the substrate lives in" },
       { "repo": "python/cpython",    "dir": "cpython",  "witnesses": "C + Python from the language's source of truth" },

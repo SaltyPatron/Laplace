@@ -12,6 +12,15 @@ permissions:
 
 jobs:
 
+  pipeline-validate:
+    name: Ingest pipeline manifest alignment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate witness-manifest vs orchestration scripts
+        run: python scripts/validate-pipeline.py
+
   attestation-engine-law:
     name: Attestation engine law (native-only policy)
     runs-on: ubuntu-latest

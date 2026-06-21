@@ -63,6 +63,7 @@ internal static class FrameNetLuIngest
 
         string lemma = LemmaOf(luName);
         if (lemma.Length == 0) return null;
+        string luKey = SourceEntityIdConventions.FrameNetLuKey(frameName, luName);
 
         string definition = CollapseWs((string?)root.Element(ns + "definition") ?? "");
 
@@ -124,12 +125,12 @@ internal static class FrameNetLuIngest
             sentences.Add(new LuSentence(text, target));
         }
 
-        return new LuDocument(id, frameName, lemma, pos, definition, patterns, sentences);
+        return new LuDocument(id, frameName, luName, luKey, lemma, pos, definition, patterns, sentences);
     }
 
     private static void EmitLu(SubstrateChangeBuilder b, LuDocument lu, Hash128 source)
     {
-        Hash128? luAnchor = CategoryAnchor.Emit(b, lu.Id.ToString(), LuTypeId, source, SourceTrust.AcademicCurated);
+        Hash128? luAnchor = CategoryAnchor.Emit(b, lu.LuKey, LuTypeId, source, SourceTrust.AcademicCurated);
         Hash128? frameAnchor = CategoryAnchor.Emit(b, lu.FrameName, EntityTypeRegistry.FrameNetFrame, source, SourceTrust.AcademicCurated);
         if (luAnchor is null || frameAnchor is null) return;
         Hash128 luId = luAnchor.Value;
@@ -221,7 +222,7 @@ internal static class FrameNetLuIngest
             attestationCapacity: batch * 64);
 
     internal sealed record LuDocument(
-        int Id, string FrameName, string Lemma, string Pos, string Definition,
+        int Id, string FrameName, string LuName, string LuKey, string Lemma, string Pos, string Definition,
         List<string> ValencePatterns, List<LuSentence> Sentences);
 
     internal sealed record LuSentence(string Text, string? TargetText);

@@ -209,6 +209,18 @@ public sealed class FrameNetDecomposerTests
     }
 
     [Fact]
+    public async Task SubframeOf_Emits_Parent_HasSubevent_Child()
+    {
+        var atts = await CollectAttestationsAsync();
+        var givingId = CategoryAnchor.Id("Giving")!.Value;
+        var parentId = CategoryAnchor.Id("Commerce_scenario")!.Value;
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SUBEVENT")
+            && a.SubjectId == parentId
+            && a.ObjectId == givingId);
+    }
+
+    [Fact]
     public async Task Relation_Targets_Are_Shared_Content_Anchors()
     {
         string dir = Path.Combine(Path.GetTempPath(), "fn-test-" + Guid.NewGuid().ToString("N"));

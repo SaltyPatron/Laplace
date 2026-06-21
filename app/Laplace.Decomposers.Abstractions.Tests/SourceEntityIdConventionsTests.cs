@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
@@ -7,6 +8,25 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 
 public class SourceEntityIdConventionsTests
 {
+    private static string? _savedCiliDir;
+    private static string? _savedDataRoot;
+
+    private static void WithCiliDir(string dir, Action body)
+    {
+        _savedCiliDir = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR");
+        _savedDataRoot = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT");
+        Environment.SetEnvironmentVariable("LAPLACE_CILI_DIR", dir);
+        Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", null);
+        SourceEntityIdConventions.ResetIliMapCacheForTests();
+        try { body(); }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_CILI_DIR", _savedCiliDir);
+            Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", _savedDataRoot);
+            SourceEntityIdConventions.ResetIliMapCacheForTests();
+        }
+    }
+
     private static string NewTempDir()
     {
         string d = Path.Combine(Path.GetTempPath(),
@@ -146,5 +166,148 @@ public class SourceEntityIdConventionsTests
                     "substrate/source/test-text/v1", new[] { Path.Combine(b, "corpus.txt") }));
         }
         finally { Directory.Delete(a, true); Directory.Delete(b, true); }
+    }
+
+    [Fact]
+    public void NumericVerbNetClassId_Strips_Lemma_Prefix()
+    {
+        Assert.Equal("13.1", SourceEntityIdConventions.NumericVerbNetClassId("give-13.1"));
+        Assert.Equal("13.1-1", SourceEntityIdConventions.NumericVerbNetClassId("give-13.1-1"));
+        Assert.Equal("13.1", SourceEntityIdConventions.NumericVerbNetClassId("13.1"));
+    }
+
+    [Fact]
+    public void VerbNetClassFromSemLinkKey_Splits_Off_Member_Lemma()
+    {
+        Assert.Equal("26.5", SourceEntityIdConventions.VerbNetClassFromSemLinkKey("26.5-shake"));
+        Assert.Equal("13.1-1", SourceEntityIdConventions.VerbNetClassFromSemLinkKey("13.1-1-give"));
+    }
+
+    [Fact]
+    public void NormalizeSenseKey_Canonicalizes_To_ThreeFields()
+    {
+        Assert.Equal("give%2:40:03", SourceEntityIdConventions.NormalizeSenseKey("give%2:40:03::"));
+        Assert.Equal("ache%2:37:06", SourceEntityIdConventions.NormalizeSenseKey("?ache%2:37:06"));
+        Assert.Null(SourceEntityIdConventions.NormalizeSenseKey("notasensekey"));
+    }
+
+    [Fact]
+    public void FrameNetLuKey_Normalizes_Frame_And_LuName()
+    {
+        Assert.Equal("Giving/give.v", SourceEntityIdConventions.FrameNetLuKey("Giving", "give.v"));
+        Assert.Equal("Accoutrements/accoutrement.n",
+            SourceEntityIdConventions.FrameNetLuKey(" Accoutrements ", " accoutrement.n "));
+    }
+
+    [Fact]
+    public void ParseMapNetSynsetKey_Parses_PosHashOffset()
+    {
+        Assert.Equal((57580L, 'a'), SourceEntityIdConventions.ParseMapNetSynsetKey("a#00057580"));
+        Assert.Equal((1142646L, 'v'), SourceEntityIdConventions.ParseMapNetSynsetKey("v#01142646"));
+        Assert.Equal((20977L, 'n'), SourceEntityIdConventions.ParseMapNetSynsetKey("n#00020977"));
+        Assert.Null(SourceEntityIdConventions.ParseMapNetSynsetKey("NULL"));
+    }
+
+    [Fact]
+    public void ParseMcrSynsetKey_Parses_PredicateMatrix_Ili_Tokens()
+    {
+        Assert.Equal((2244956L, 'v'), SourceEntityIdConventions.ParseMcrSynsetKey("ili-30-02244956-v"));
+        Assert.Equal((941990L, 'v'), SourceEntityIdConventions.ParseMcrSynsetKey("30-00941990-v"));
+        Assert.Null(SourceEntityIdConventions.ParseMcrSynsetKey("NULL"));
+    }
+
+    [Fact]
+    public void ResolveSynsetAnchor_Parses_Mcr_WnRdf_And_SenseKeys()
+    {
+        string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
+        if (File.Exists(Path.Combine(cili, IliMap.MapFileName)))
+        {
+            CodepointPerfcache.LoadDefault();
+            Hash128? ili = SourceEntityIdConventions.ResolveSynsetAnchor("30-02244956-v");
+            Assert.NotNull(ili);
+            Assert.Equal(ConceptAnchor.SynsetId(2244956, 'v'), ili);
+            Assert.Equal(
+                ConceptAnchor.SynsetId(2244956, 'v'),
+                SourceEntityIdConventions.ResolveSynsetAnchor(
+                    "http://wordnet-rdf.princeton.edu/wn31/02244956-v"));
+        }
+
+        Hash128? sense = SourceEntityIdConventions.ResolveSynsetAnchor("give%2:40:03::");
+        Assert.NotNull(sense);
+        Assert.Equal(SenseAnchor.Id("give%2:40:03"), sense);
+
+        Assert.Null(SourceEntityIdConventions.ResolveSynsetAnchor("communication"));
+    }
+
+    [Fact]
+    public void StripPredicateMatrixNamespace_Removes_Type_Prefix()
+    {
+        Assert.Equal("eng", SourceEntityIdConventions.StripPredicateMatrixNamespace("id:eng"));
+        Assert.Equal("ili-30-02244956-v", SourceEntityIdConventions.StripPredicateMatrixNamespace("ili-30-02244956-v"));
+    }
+
+    [Fact]
+    public void EnsureCiliMapForIngest_Throws_When_Map_Missing()
+    {
+        WithCiliDir(NewTempDir(), () =>
+        {
+            var ex = Assert.Throws<CiliMapMissingException>(() =>
+                SourceEntityIdConventions.EnsureCiliMapForIngest(NullLogger.Instance, "OMWDecomposer"));
+            Assert.Equal(SourceEntityIdConventions.CiliMapPath(), ex.ExpectedPath);
+            Assert.Contains("OMWDecomposer", ex.Message);
+            Assert.Contains(IliMap.MapFileName, ex.Message);
+        });
+    }
+
+    [Fact]
+    public void EnsureCiliMapForIngest_Throws_When_Map_Empty()
+    {
+        WithCiliDir(NewTempDir(), () =>
+        {
+            File.WriteAllText(SourceEntityIdConventions.CiliMapPath(), "");
+            Assert.Throws<CiliMapMissingException>(() =>
+                SourceEntityIdConventions.EnsureCiliMapForIngest(NullLogger.Instance, "SemLinkDecomposer"));
+        });
+    }
+
+    [Fact]
+    public void EnsureCiliMapForIngest_Succeeds_When_Map_Has_Entries()
+    {
+        WithCiliDir(NewTempDir(), () =>
+        {
+            File.WriteAllText(SourceEntityIdConventions.CiliMapPath(),
+                "i46531\t10676319-n\n");
+            SourceEntityIdConventions.EnsureCiliMapForIngest(NullLogger.Instance, "OMWDecomposer");
+            Assert.NotNull(SourceEntityIdConventions.WordNetIli(10676319, 'n'));
+        });
+    }
+
+    [Fact]
+    public void WarnIfCiliMapMissing_Does_Not_Throw_When_Map_Missing()
+    {
+        WithCiliDir(NewTempDir(), () =>
+            SourceEntityIdConventions.WarnIfCiliMapMissing(NullLogger.Instance, "WordNetDecomposer"));
+    }
+
+    [Fact]
+    public void CiliMapPath_Defaults_To_DataRoot_Cili()
+    {
+        _savedCiliDir = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR");
+        _savedDataRoot = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT");
+        try
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_CILI_DIR", null);
+            Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", @"D:\Data\Ingest");
+            SourceEntityIdConventions.ResetIliMapCacheForTests();
+            Assert.Equal(
+                Path.Combine(@"D:\Data\Ingest", "CILI", IliMap.MapFileName),
+                SourceEntityIdConventions.CiliMapPath());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_CILI_DIR", _savedCiliDir);
+            Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", _savedDataRoot);
+            SourceEntityIdConventions.ResetIliMapCacheForTests();
+        }
     }
 }

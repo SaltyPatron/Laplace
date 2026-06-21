@@ -9,7 +9,7 @@ if "%1"=="" (
 
 if /i "%1"=="authority" (
     setlocal EnableDelayedExpansion
-    set "AUTH=D:\Data\Ingest\code-authority"
+    set "AUTH=!INGEST!\code-authority"
     if not exist "!AUTH!" mkdir "!AUTH!"
     for %%R in ("postgres/postgres" "python/cpython" "dotnet/docs" "dotnet/runtime") do (
         for /f "tokens=2 delims=/" %%N in ("%%~R") do (

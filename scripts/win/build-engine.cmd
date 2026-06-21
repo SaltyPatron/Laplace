@@ -27,6 +27,7 @@ if exist build-win\CMakeCache.txt if not exist build-win\build.ninja (
   del /q build-win\CMakeCache.txt
   rmdir /s /q build-win\CMakeFiles 2>nul
 )
+set "LAPLACE_UCD=%LAPLACE_DATA_ROOT%\UCD\Public\UCD\latest"
 cmake -B build-win -S engine -G Ninja ^
   -DCMAKE_BUILD_TYPE=Release ^
   "-DCMAKE_MAKE_PROGRAM=D:/Microsoft Visual Studio/2026/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe" ^
@@ -35,10 +36,10 @@ cmake -B build-win -S engine -G Ninja ^
   -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON ^
   -DBLAKE3_SIMD_TYPE=none ^
   -DBUILD_TESTING=ON ^
-  "-DLAPLACE_UCD_PATH=D:/Data/Ingest/UCD/Public/UCD/latest" ^
-  "-DLAPLACE_UCDXML_ZIP=D:/Data/Ingest/UCD/Public/UCD/latest/ucdxml/ucd.nounihan.flat.zip" ^
-  "-DLAPLACE_DUCET_FILE=D:/Data/Ingest/UCD/Public/UCD/latest/uca/allkeys.txt" ^
-  "-DLAPLACE_UCD_CONFORMANCE_DIR=D:/Data/Ingest/UCD/Public/UCD/latest/ucd" ^
+  "-DLAPLACE_UCD_PATH=%LAPLACE_UCD%" ^
+  "-DLAPLACE_UCDXML_ZIP=%LAPLACE_UCD%\ucdxml\ucd.nounihan.flat.zip" ^
+  "-DLAPLACE_DUCET_FILE=%LAPLACE_UCD%\uca\allkeys.txt" ^
+  "-DLAPLACE_UCD_CONFORMANCE_DIR=%LAPLACE_UCD%\ucd" ^
   "-DLIBXML2_INCLUDE_DIR=C:/Program Files/PostgreSQL/18/include" ^
   "-DLIBXML2_LIBRARY=C:/Program Files/PostgreSQL/18/lib/libxml2.lib"
 if errorlevel 1 goto fail

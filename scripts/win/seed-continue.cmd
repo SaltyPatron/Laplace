@@ -8,7 +8,7 @@ cd /d "%LAPLACE_ROOT%\app"
 
 
 
-set "KNOWLEDGE=wordnet omw verbnet propbank framenet semlink conceptnet atomic2020 ud wiktionary"
+set "KNOWLEDGE=wordnet omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary"
 
 
 

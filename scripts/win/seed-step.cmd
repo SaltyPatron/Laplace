@@ -35,6 +35,8 @@ if /i "%STEP%"=="verbnet"       goto run_ingest
 if /i "%STEP%"=="propbank"      goto run_ingest
 if /i "%STEP%"=="framenet"      goto run_ingest
 if /i "%STEP%"=="semlink"       goto run_ingest
+if /i "%STEP%"=="mapnet"        goto run_ingest
+if /i "%STEP%"=="wordframenet" goto run_ingest
 if /i "%STEP%"=="conceptnet"    goto run_ingest_ud_commit
 if /i "%STEP%"=="atomic2020"    goto run_ingest
 if /i "%STEP%"=="ud"            goto run_ingest_ud_commit
@@ -148,7 +150,7 @@ exit /b 1
 echo seed-step commands (run one at a time):
 echo   floor:     unicode  iso639
 echo   document:  document ^<path^>
-echo   knowledge: wordnet  omw  verbnet  propbank  framenet  semlink  conceptnet  atomic2020  ud  wiktionary
+echo   knowledge: wordnet  omw  verbnet  propbank  framenet  mapnet  wordframenet  semlink  conceptnet  atomic2020  ud  wiktionary
 echo   usage:     tatoeba  opensubtitles
 echo   code:      stack ^<path^>  repo ^<path^>  tiny-codes ^<path^>
 echo   models:    model-tinyllama  model-phi  model-qwen  safetensors ^<snapshot-dir^>

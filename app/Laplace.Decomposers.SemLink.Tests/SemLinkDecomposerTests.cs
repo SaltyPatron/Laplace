@@ -31,6 +31,15 @@ public sealed class SemLinkDecomposerTests
     private const string VnFnJson =
         """{"13.1-1-give": ["Giving", "Commerce_sell"], "21.1-1-chip": ["Cause_to_fragment"]}""";
 
+    private const string PbWnJson =
+        """{"give.01": "30-02244956-v", "speak.01": "30-00941990-v"}""";
+
+    private const string PredicateMatrixHeader =
+        "1_ID_LANG\t1_ID_POS\t2_ID_PRED\t3_ID_ROLE\t4_VN_CLASS\t5_VN_CLASS_NUMBER\t6_VN_SUBCLASS\t7_VN_SUBCLASS_NUMBER\t8_VN_LEMA\t9_VN_ROLE\t10_WN_SENSE\t11_MCR_iliOffset\t12_FN_FRAME\t13_FN_LE\t14_FN_FRAME_ELEMENT\t15_PB_ROLESET\t16_PB_ARG";
+
+    private const string PredicateMatrixRow =
+        "id:eng\tid:v\tid:give.01\tid:0\tvn:give\t13.1\t13.1-1\t1\tgive\tvn:Agent\twn:give%2:40:03\tili-30-02244956-v\tfn:Giving\tNULL\tNULL\tpb:give.01\tpb:0";
+
     [Fact]
     public async Task Attestations_Are_Only_RegistryRouted_CorrespondsTo()
     {
@@ -112,10 +121,64 @@ public sealed class SemLinkDecomposerTests
         Assert.Contains(boot.Entities, e =>
             e.Id == SemLinkDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO"));
+        Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO"));
         Assert.Contains(boot.Attestations, a =>
             a.SubjectId == SemLinkDecomposer.Source
             && a.TypeId == BootstrapIntentBuilder.HasTrustClassTypeId
             && a.ObjectId == SemLinkDecomposer.TrustClass);
+    }
+
+    [Fact]
+    public void ResolvePaths_Finds_VaultRoot_Versioned_PredicateMatrix()
+    {
+        string vault = Path.Combine(Path.GetTempPath(), "sl-vault-" + Guid.NewGuid().ToString("N"));
+        string semlink = Path.Combine(vault, "SemLink");
+        string pmDir = Path.Combine(vault, "PredicateMatrix.v1.3");
+        Directory.CreateDirectory(Path.Combine(semlink, "semlink-master", "instances"));
+        Directory.CreateDirectory(pmDir);
+        File.WriteAllText(Path.Combine(semlink, "semlink-master", "instances", "pb-vn2.json"), "{}");
+        string pmFile = Path.Combine(pmDir, "PredicateMatrix.v1.3.txt");
+        File.WriteAllText(pmFile, PredicateMatrixHeader + Environment.NewLine);
+        try
+        {
+            var paths = PredicateMatrixIngest.ResolvePaths(semlink).ToList();
+            Assert.Contains(pmFile, paths);
+        }
+        finally
+        {
+            try { Directory.Delete(vault, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task PredicateMatrix_Links_Roleset_VnClass_And_Frame_To_Synset_When_Cili_Present()
+    {
+        string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
+        if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return;
+
+        var atts = await CollectPredicateMatrixAttestationsAsync();
+        var rsId = CategoryAnchor.Id("give.01")!.Value;
+        var vnId = CategoryAnchor.Id("13.1-1")!.Value;
+        var fnId = CategoryAnchor.Id("Giving")!.Value;
+        Hash128? synId = ConceptAnchor.SynsetId(2244956, 'v');
+        Assert.NotNull(synId);
+
+        Assert.Contains(atts, a => a.SubjectId == rsId && a.ObjectId == synId);
+        Assert.Contains(atts, a => a.SubjectId == vnId && a.ObjectId == synId);
+        Assert.Contains(atts, a => a.SubjectId == fnId && a.ObjectId == synId);
+    }
+
+    [Fact]
+    public async Task PbWn_Json_Links_Roleset_To_Synset_When_Cili_Present()
+    {
+        string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
+        if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return;
+
+        var atts = await CollectPbWnAttestationsAsync();
+        var rsId = CategoryAnchor.Id("give.01")!.Value;
+        Hash128? synId = ConceptAnchor.SynsetId(2244956, 'v');
+        Assert.NotNull(synId);
+        Assert.Contains(atts, a => a.SubjectId == rsId && a.ObjectId == synId);
     }
 
     private static (Hash128 ArgId, Hash128 ThetaId) ComposedArgThetaIds()
@@ -150,12 +213,70 @@ public sealed class SemLinkDecomposerTests
         return atts.Where(a => a.TypeId == corr).ToList();
     }
 
+    private static async Task<List<AttestationRow>> CollectPredicateMatrixAttestationsAsync()
+    {
+        var (_, atts) = await CollectPredicateMatrixAsync();
+        var corr = RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO");
+        return atts.Where(a => a.TypeId == corr).ToList();
+    }
+
+    private static async Task<List<AttestationRow>> CollectPbWnAttestationsAsync()
+    {
+        var (_, atts) = await CollectPbWnAsync();
+        var corr = RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO");
+        return atts.Where(a => a.TypeId == corr).ToList();
+    }
+
     private static async Task<(List<EntityRow> Entities, List<AttestationRow> Attestations)> CollectAllAsync()
     {
         string dir = Path.Combine(Path.GetTempPath(), "sl-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(dir, "instances"));
         await File.WriteAllTextAsync(Path.Combine(dir, "instances", "pb-vn2.json"), PbVnJson);
         await File.WriteAllTextAsync(Path.Combine(dir, "instances", "vn-fn2.json"), VnFnJson);
+        try
+        {
+            var dec = new SemLinkDecomposer();
+            var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
+            var ents = new List<EntityRow>();
+            var atts = new List<AttestationRow>();
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            {
+                ents.AddRange(change.Entities.ToArray());
+                atts.AddRange(change.Attestations.ToArray());
+            }
+            return (ents, atts);
+        }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { } }
+    }
+
+    private static async Task<(List<EntityRow> Entities, List<AttestationRow> Attestations)> CollectPredicateMatrixAsync()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "sl-pm-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "PredicateMatrix"));
+        await File.WriteAllTextAsync(
+            Path.Combine(dir, "PredicateMatrix", "PredicateMatrix.txt"),
+            PredicateMatrixHeader + Environment.NewLine + PredicateMatrixRow + Environment.NewLine);
+        try
+        {
+            var dec = new SemLinkDecomposer();
+            var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
+            var ents = new List<EntityRow>();
+            var atts = new List<AttestationRow>();
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            {
+                ents.AddRange(change.Entities.ToArray());
+                atts.AddRange(change.Attestations.ToArray());
+            }
+            return (ents, atts);
+        }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { } }
+    }
+
+    private static async Task<(List<EntityRow> Entities, List<AttestationRow> Attestations)> CollectPbWnAsync()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "sl-pbwn-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "instances"));
+        await File.WriteAllTextAsync(Path.Combine(dir, "instances", "pb-wn.json"), PbWnJson);
         try
         {
             var dec = new SemLinkDecomposer();

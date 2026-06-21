@@ -732,6 +732,15 @@ parent = "IS_A"
 family_root = "IS_A"
 
 [[relation]]
+# VerbNet MEMBER element: lemma belongs to a Levin/VN class. De-conflated from IS_A so class
+# membership does not pollute WordNet-style hypernym/subsumption walks.
+canonical = "MEMBER_OF_VERBNET_CLASS"
+rank = "taxonomic"
+symmetry = "asymmetric"
+parent = null
+family_root = "MEMBER_OF_VERBNET_CLASS"
+
+[[relation]]
 canonical = "MEMBER_OF_MACROLANGUAGE"
 rank = "standards_structural"
 symmetry = "asymmetric"

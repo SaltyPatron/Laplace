@@ -9,7 +9,8 @@ namespace Laplace.Decomposers.VerbNet;
 
 public sealed class VerbNetDecomposer : IDecomposer{
     // Each unit's rows are self-contained. VerbNet owns its classes (it emits + types them); the
-    // IS_A parent-class edge and the WordNet-sense CORRESPONDS_TO edge resolve by content-addressed
+    // IS_A parent-class edge, MEMBER_OF_VERBNET_CLASS lemma membership, and the WordNet-sense
+    // CORRESPONDS_TO edge resolve by content-addressed
     // id against entities owned by VerbNet (the parent class, in another batch) and WordNet (the
     // sense, in another source). With the per-batch referential EXISTS pre-check gone these
     // cross-batch / cross-source anchors are legal, so N workers can commit batches concurrently.
@@ -23,13 +24,8 @@ public sealed class VerbNetDecomposer : IDecomposer{
     // WordNet_Sense correspondence targets are now anchored by content-addressed id (CategoryAnchor.Id)
     // and typed by the WordNet decomposer, so no WordNet_Sense type id is referenced here.
 
-    internal static string NumericClassId(string classId)
-    {
-        if (classId.Length == 0 || char.IsDigit(classId[0])) return classId;
-        for (int i = classId.IndexOf('-'); i >= 0 && i + 1 < classId.Length; i = classId.IndexOf('-', i + 1))
-            if (char.IsDigit(classId[i + 1])) return classId[(i + 1)..];
-        return classId;
-    }
+    internal static string NumericClassId(string classId) =>
+        SourceEntityIdConventions.NumericVerbNetClassId(classId);
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "VerbNetDecomposer";
@@ -44,6 +40,7 @@ public sealed class VerbNetDecomposer : IDecomposer{
         boot.AddType("VerbNet_Class");
         boot.AddType("WordNet_Sense");
         boot.AddRelationType("IS_A");
+        boot.AddRelationType("MEMBER_OF_VERBNET_CLASS");
         boot.AddRelationType("HAS_THEMATIC_ROLE");
         boot.AddRelationType("HAS_VERB_FRAME");
         boot.AddRelationType("HAS_EXAMPLE");
@@ -118,7 +115,7 @@ public sealed class VerbNetDecomposer : IDecomposer{
             var lemmaId = ContentEmitter.Emit(b, name, Source);
             if (lemmaId is null) continue;
             b.AddAttestation(NativeAttestation.Categorical(
-                lemmaId.Value, "IS_A", classEntity, Source, TC.AcademicCurated));
+                lemmaId.Value, "MEMBER_OF_VERBNET_CLASS", classEntity, Source, TC.AcademicCurated));
 
             string wn = member.GetAttribute("wn");
             if (wn.Length > 0)
@@ -128,11 +125,7 @@ public sealed class VerbNetDecomposer : IDecomposer{
                     
                     string? key = SourceEntityIdConventions.NormalizeSenseKey(raw);
                     if (key is null) continue;
-                    // WordNet senses are owned and typed by the WordNet decomposer; this is a
-                    // cross-source CORRESPONDS_TO that needs only the sense's content-addressed id.
-                    // Pre-emitting a typed WordNet_Sense anchor here was forward-reference
-                    // defensiveness for the deleted referential EXISTS pre-check.
-                    var senseEntity = CategoryAnchor.Id(key);
+                    var senseEntity = SenseAnchor.Id(key);
                     if (senseEntity is null) continue;
                     b.AddAttestation(NativeAttestation.Categorical(
                         lemmaId.Value, "CORRESPONDS_TO", senseEntity.Value, Source, TC.AcademicCurated));
