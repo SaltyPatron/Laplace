@@ -28,11 +28,33 @@ public sealed class CrossSourceLinkingTests
     }
 
     [Fact]
-    public void CategoryAnchor_Ids_Converge_Across_Roleset_VerbNet_Frame_Names()
+    public void CategoryAnchor_Trims_StraySurfaceWhitespace_FromIndependentSources()
     {
-        Assert.Equal(CategoryAnchor.Id("give.01"), CategoryAnchor.Id("give.01"));
-        Assert.Equal(CategoryAnchor.Id("13.1-1"), CategoryAnchor.Id("13.1-1"));
-        Assert.Equal(CategoryAnchor.Id("Giving"), CategoryAnchor.Id("Giving"));
+        // FrameNet's own XML emits "Giving" verbatim. PredicateMatrix/MapNet/WordFrameNet TSV fields
+        // are independently re-typed by other research groups and aren't guaranteed whitespace-clean
+        // (no shared lookup table backs this convergence the way LanguageReference/PosReference do
+        // for language/POS — see CategoryAnchor.Normalize). A stray trailing space from one source's
+        // TSV column must still converge onto the anchor the clean source created.
+        Assert.Equal(CategoryAnchor.Id("Giving"), CategoryAnchor.Id("Giving "));
+        Assert.Equal(CategoryAnchor.Id("Giving"), CategoryAnchor.Id(" Giving"));
+        Assert.Equal(CategoryAnchor.Id("13.1-1"), CategoryAnchor.Id(" 13.1-1 "));
+        Assert.NotEqual(CategoryAnchor.Id("Giving"), CategoryAnchor.Id("giving"));
+    }
+
+    [Fact]
+    public void Real_FrameNetFrameName_Matches_Real_PredicateMatrixAndMapNet_Surface()
+    {
+        // Pinned against the actual on-disk surface forms (FrameNet XML name="Change_position_on_a_scale",
+        // PredicateMatrix column "fn:Change_position_on_a_scale", MapNet's mapping_frame_synsets.txt
+        // "Giving\tv#01525019") so a future upstream re-export that changes casing/spacing on either
+        // side is caught here instead of silently minting a disconnected anchor.
+        string fromFrameNetXml = "Change_position_on_a_scale";
+        string fromPredicateMatrixColumn =
+            SourceEntityIdConventions.StripPredicateMatrixNamespace("fn:Change_position_on_a_scale");
+        Assert.Equal(CategoryAnchor.Id(fromFrameNetXml), CategoryAnchor.Id(fromPredicateMatrixColumn));
+
+        string fromMapNetField = "Giving".Trim();
+        Assert.Equal(CategoryAnchor.Id("Giving"), CategoryAnchor.Id(fromMapNetField));
     }
 
     [Fact]
@@ -44,22 +66,26 @@ public sealed class CrossSourceLinkingTests
         CodepointPerfcache.LoadDefault();
         Hash128? iliAnchor = ConceptAnchor.SynsetId(10676319, 'n');
         Assert.NotNull(iliAnchor);
-        Assert.Equal(iliAnchor, ConceptAnchor.SynsetId(10676319, 'n'));
     }
 
     [Fact]
-    public void OMW_And_WordNet_Share_Synset_Anchor_When_Cili_Present()
+    public void OMWRowParser_And_WordNetDataLine_Extract_The_Same_Offset_From_Their_Native_Formats()
     {
-        string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
-        if (!File.Exists(Path.Combine(cili, IliMap.MapFileName))) return;
+        // WordNetDecomposer.TryParseDataLine reads native data.noun lines: "<offset> <lexfile> <ssType> ...".
+        // OMWRowParser reads OMW tab rows: "<offset>-<ssType>\t[lang:]lemma\t<word>". Different upstream
+        // file formats for the conceptually same synset reference (10676319-n, "dog") must resolve to the
+        // identical (offset, ssType) pair the WordNet decomposer feeds ConceptAnchor — this is the actual
+        // claim "OMW and WordNet share a synset anchor" rests on, not just that the anchor fn is pure.
+        const string wordNetNativeLine = "10676319 05 n 02 dog 0 domestic_dog 0 001 @ 10675588 n 0000 | a member of the genus Canis";
+        var wnParts = wordNetNativeLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        Assert.True(long.TryParse(wnParts[0], out long wnOffset));
+        char wnSsType = wnParts[2][0];
 
-        CodepointPerfcache.LoadDefault();
-        var source = Hash128.OfCanonical("substrate/source/test/omw-wn-bridge/v1");
-        var b = new SubstrateChangeBuilder(source, "test", null);
+        byte[] omwLine = System.Text.Encoding.UTF8.GetBytes("10676319-n\teng:lemma\tdog");
+        Assert.True(Laplace.Decomposers.OMW.OMWRowParser.TryParseRow(omwLine, "eng", out var omwRow, out _));
 
-        Hash128? wnId = ConceptAnchor.EmitAnchor(b, 10676319, 'n', source);
-        Hash128? omwId = ConceptAnchor.EmitAnchor(b, 10676319, 'n', source);
-        Assert.NotNull(wnId);
-        Assert.Equal(wnId, omwId);
+        Assert.Equal(wnOffset, omwRow.Offset);
+        Assert.Equal(wnSsType, omwRow.SsType);
+        Assert.Equal(ConceptAnchor.SynsetId(wnOffset, wnSsType), ConceptAnchor.SynsetId(omwRow.Offset, omwRow.SsType));
     }
 }

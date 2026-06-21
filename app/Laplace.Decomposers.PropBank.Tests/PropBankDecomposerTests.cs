@@ -50,6 +50,24 @@ public sealed class PropBankDecomposerTests
 </frameset>
 """;
 
+    // Shape mirrors the real top-level AMR-UMR-91-rolesets.xml shipped at the propbank-frames-main/
+    // distribution root (sibling to frames/), not under frames/ itself.
+    private const string TopLevelFramesetXml = """
+<frameset>
+  <predicate lemma="be-destined-for">
+    <roleset id="be-destined-for.91" name="91-rolesets for AMR/UMR-specific roles">
+      <roles>
+        <role descr="thing destined" f="PPT" n="1"/>
+        <role descr="destination" f="GOL" n="2"/>
+      </roles>
+      <example name="be-destined-for.91: AMR reification" src="">
+        <text>The package is destined for the warehouse .</text>
+      </example>
+    </roleset>
+  </predicate>
+</frameset>
+""";
+
     [Fact]
     public async Task Attestations_Use_RegistryRouted_Canonical_Type_Ids()
     {
@@ -163,6 +181,52 @@ public sealed class PropBankDecomposerTests
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_FEATURE")
             && a.SubjectId == giverId!.Value && a.ObjectId == pagId!.Value);
+    }
+
+    [Fact]
+    public async Task DecomposeAsync_Includes_TopLevel_Frameset_File_Alongside_FramesDir()
+    {
+        // Mirrors the real propbank-frames-main/ distribution layout: most framesets live under
+        // frames/, but a handful (e.g. AMR-UMR-91-rolesets.xml) ship as standalone top-level files
+        // in the distribution root, sibling to frames/, and must still be parsed.
+        string root = Path.Combine(Path.GetTempPath(), "pb-test-" + Guid.NewGuid().ToString("N"));
+        string dist = Path.Combine(root, "propbank-frames-main");
+        Directory.CreateDirectory(Path.Combine(dist, "frames"));
+        await File.WriteAllTextAsync(Path.Combine(dist, "frames", "give.xml"), FramesetXml);
+        await File.WriteAllTextAsync(Path.Combine(dist, "AMR-UMR-91-rolesets.xml"), TopLevelFramesetXml);
+        // Non-frameset files that legitimately live at the distribution root must not break parsing.
+        await File.WriteAllTextAsync(Path.Combine(dist, "README.md"), "not xml");
+        try
+        {
+            var dec = new PropBankDecomposer();
+            var ctx = new FakeContext(new NullWriter()) { EcosystemPath = root };
+            var atts = new List<AttestationRow>();
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+                atts.AddRange(change.Attestations.ToArray());
+
+            var giveId = ContentEmitter.Emit(
+                new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null),
+                "give", PropBankDecomposer.Source);
+            var beDestinedForId = CategoryAnchor.Id("be-destined-for.91");
+            Assert.NotNull(giveId);
+            Assert.NotNull(beDestinedForId);
+
+            // Roleset from frames/give.xml is present (sanity: the frames/ directory still works).
+            Assert.Contains(atts, a =>
+                a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SENSE")
+                && a.SubjectId == giveId!.Value && a.ObjectId == CategoryAnchor.Id("give.01")!.Value);
+
+            // Roleset from the top-level AMR-UMR-91-rolesets.xml file is also present — this is the
+            // gap: without scanning the distribution root alongside frames/, this assertion fails.
+            var beDestinedForLemmaId = ContentEmitter.Emit(
+                new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null),
+                "be-destined-for", PropBankDecomposer.Source);
+            Assert.NotNull(beDestinedForLemmaId);
+            Assert.Contains(atts, a =>
+                a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SENSE")
+                && a.SubjectId == beDestinedForLemmaId!.Value && a.ObjectId == beDestinedForId!.Value);
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
     }
 
     [Fact]

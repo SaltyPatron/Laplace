@@ -17,7 +17,7 @@ internal static class OMWGrammarIngest
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         int batch = batchSize > 1 ? batchSize : DefaultBatch;
-        int fileWorkers = ResolveFileWorkers();
+        int fileWorkers = IngestParallelism.ResolveFileWorkers();
 
         var tabFiles = OMWTabFiles.EnumerateTabFiles(wnsDir, langs)
             .OrderBy(p => p, StringComparer.Ordinal)
@@ -34,13 +34,6 @@ internal static class OMWGrammarIngest
         await foreach (var change in IngestFilesParallelAsync(
             tabFiles, batch, maxInputUnits, fileWorkers, ct))
             yield return change;
-    }
-
-    private static int ResolveFileWorkers()
-    {
-        string? env = Environment.GetEnvironmentVariable("LAPLACE_INGEST_WORKERS");
-        if (int.TryParse(env, out int w) && w > 1) return w;
-        return 1;
     }
 
     private static async IAsyncEnumerable<SubstrateChange> IngestFilesSerialAsync(
@@ -99,11 +92,12 @@ internal static class OMWGrammarIngest
             }, ct);
         }
 
-        var closer = Task.Run(async () =>
-        {
-            await Task.WhenAll(workers);
-            outChannel.Writer.TryComplete();
-        }, ct);
+        // Must always complete the channel, even on worker fault -- otherwise an exception in any one
+        // of N parallel file-workers is swallowed into this unobserved closer task, the channel never
+        // signals done, and the consumer's WaitToReadAsync below hangs forever with zero CPU and no
+        // error surfaced anywhere. Propagate the fault into the channel so the consumer rethrows it.
+        var closer = Task.Run(() => Task.WhenAll(workers), ct)
+            .ContinueWith(t => outChannel.Writer.TryComplete(t.Exception), TaskScheduler.Default);
 
         long rowsParsed = 0;
         while (await outChannel.Reader.WaitToReadAsync(ct))

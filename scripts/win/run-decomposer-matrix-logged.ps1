@@ -23,23 +23,24 @@ function Write-Log([string]$Line) {
 
 function Invoke-TeeCmd([string]$Label, [string]$Arguments) {
     Write-Log "==== START: $Label ===="
-    $outFile = [System.IO.Path]::GetTempFileName()
+    $code = 0
     try {
-        cmd /c "$Arguments > `"$outFile`" 2>&1"
-        $code = $LASTEXITCODE
-        Get-Content -Path $outFile -Encoding utf8 | ForEach-Object {
-            Add-Content -Path $Log -Value $_ -Encoding utf8
-            Write-Host $_
+        cmd /c $Arguments 2>&1 | ForEach-Object {
+            $line = "$_"
+            Add-Content -Path $Log -Value $line -Encoding utf8
+            Write-Host $line
         }
-        if ($code -ne 0) {
-            Write-Log "==== FAILED ($code): $Label ===="
-            exit $code
-        }
-        Write-Log "==== OK: $Label ===="
+        if ($LASTEXITCODE -ne $null) { $code = $LASTEXITCODE }
     }
-    finally {
-        Remove-Item -Path $outFile -Force -ErrorAction SilentlyContinue
+    catch {
+        Write-Log "==== ERROR: $Label — $_ ===="
+        exit 1
     }
+    if ($code -ne 0) {
+        Write-Log "==== FAILED ($code): $Label ===="
+        exit $code
+    }
+    Write-Log "==== OK: $Label ===="
 }
 
 Set-Location $Root

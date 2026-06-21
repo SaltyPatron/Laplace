@@ -33,4 +33,22 @@ public sealed class LanguageFilterTests
         Assert.True(f.MatchesLanguagePair("de-en"));
         Assert.False(f.MatchesLanguagePair("de-fr"));
     }
+
+    [Fact]
+    public void MultiLanguage_Spec_By_FullName_ResolvesAll()
+    {
+        var f = LanguageFilter.FromSpec("English, Japanese, Mandarin Chinese");
+        Assert.True(f.MatchesRaw("eng"));
+        Assert.True(f.MatchesRaw("jpn"));
+        Assert.True(f.MatchesRaw("cmn"));
+        Assert.False(f.MatchesRaw("de"));
+    }
+
+    [Fact]
+    public void UnresolvableToken_In_MultiLanguage_Spec_ThrowsNamingIt()
+    {
+        var ex = Assert.Throws<ArgumentException>(
+            () => LanguageFilter.FromSpec("English, Mandarin"));
+        Assert.Contains("Mandarin", ex.Message);
+    }
 }

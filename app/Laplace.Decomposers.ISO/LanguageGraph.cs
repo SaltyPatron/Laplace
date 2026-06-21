@@ -8,6 +8,9 @@ internal static class LanguageGraph
     public static Laplace.Engine.Core.Hash128 ScriptEntityId(string ucdName) =>
         Laplace.Engine.Core.Hash128.OfCanonical($"unicode/script/{ucdName}/v1");
 
+    public static Laplace.Engine.Core.Hash128 VariantEntityId(string subtag) =>
+        Laplace.Engine.Core.Hash128.OfCanonical($"substrate/iso639/variant/{subtag.ToLowerInvariant()}/v1");
+
     public static Dictionary<string, string> LoadScriptCodeToUcdName(string unidataDir)
     {
         var map = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -38,6 +41,42 @@ internal static class LanguageGraph
             string macro = f[0].Trim(), indiv = f[1].Trim();
             if (macro.Length == 3 && indiv.Length == 3) yield return (indiv, macro);
         }
+    }
+
+    /// Parses the IANA language-subtag-registry.txt 'Type: variant' record blocks, yielding the
+    /// variant subtag together with its declared Prefix tags (the language/tag chain(s) the
+    /// variant attaches to). A variant may have zero, one, or many Prefix lines; records with no
+    /// Prefix are yielded with an empty array.
+    public static IEnumerable<(string Subtag, string[] Prefixes)> Variants(string iso639Dir)
+    {
+        string path = Path.Combine(iso639Dir, "iana", "language-subtag-registry.txt");
+        if (!File.Exists(path)) yield break;
+
+        string type = "", subtag = "";
+        var prefixes = new List<string>();
+
+        foreach (var rawLine in File.ReadLines(path))
+        {
+            if (rawLine == "%%")
+            {
+                if (type == "variant" && subtag.Length != 0)
+                    yield return (subtag, prefixes.ToArray());
+                type = ""; subtag = ""; prefixes.Clear();
+                continue;
+            }
+            int c = rawLine.IndexOf(':');
+            if (c <= 0) continue;
+            string key = rawLine[..c].Trim();
+            string val = rawLine[(c + 1)..].Trim();
+            switch (key)
+            {
+                case "Type":   type = val.ToLowerInvariant(); break;
+                case "Subtag": subtag = val; break;
+                case "Prefix": prefixes.Add(val); break;
+            }
+        }
+        if (type == "variant" && subtag.Length != 0)
+            yield return (subtag, prefixes.ToArray());
     }
 
     public static IEnumerable<(string Lang, string[] Scripts)> LanguageScripts(string iso639Dir)

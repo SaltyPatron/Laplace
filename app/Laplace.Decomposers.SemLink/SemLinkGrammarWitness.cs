@@ -5,7 +5,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.SemLink;
 
-internal enum SemLinkDocumentKind { PbVn, VnFn, PbWn, VnWn, FnWn }
+internal enum SemLinkDocumentKind { PbVn, VnFn, PbWn, VnWn, FnWn, VnPbExternal }
 
 internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammarWitness
 {
@@ -24,6 +24,7 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
             case SemLinkDocumentKind.PbWn: WalkCategoryToSynset(composed, builder, RolesetTypeId, NormalizeRolesetKey); break;
             case SemLinkDocumentKind.VnWn: WalkCategoryToSynset(composed, builder, VnClassTypeId, NormalizeVnClassKey); break;
             case SemLinkDocumentKind.FnWn: WalkCategoryToSynset(composed, builder, FrameTypeId, static k => k); break;
+            case SemLinkDocumentKind.VnPbExternal: WalkVnPbExternal(composed, builder); break;
         }
     }
 

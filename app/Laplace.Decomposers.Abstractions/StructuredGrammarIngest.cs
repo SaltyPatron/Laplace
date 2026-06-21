@@ -44,12 +44,7 @@ public static class StructuredGrammarIngest
     private static int ResolveComposeWorkers()
     {
         string? compose = Environment.GetEnvironmentVariable("LAPLACE_INGEST_COMPOSE_WORKERS");
-        if (int.TryParse(compose, out int cw) && cw >= 1)
-            return cw;
-        string? env = Environment.GetEnvironmentVariable("LAPLACE_INGEST_WORKERS");
-        if (int.TryParse(env, out int w) && w >= 1)
-            return w;
-        return 1;
+        return int.TryParse(compose, out int cw) && cw >= 1 ? cw : 1;
     }
 
     private static async IAsyncEnumerable<SubstrateChange> IngestFileSerialAsync(
@@ -298,12 +293,14 @@ public static class StructuredGrammarIngest
             }, runCt);
         }
 
+        // Must always complete the channel, even on producer/consumer fault -- otherwise the exception
+        // is swallowed into this unobserved closer task, the channel never signals done, and the
+        // consumer's WaitToReadAsync below hangs forever with zero CPU and no error surfaced anywhere.
         var closer = Task.Run(async () =>
         {
             await producer;
             await Task.WhenAll(consumerTasks);
-            outChannel.Writer.TryComplete();
-        }, runCt);
+        }, runCt).ContinueWith(t => outChannel.Writer.TryComplete(t.Exception), TaskScheduler.Default);
 
         long rowsReported = 0;
         bool capped = false;

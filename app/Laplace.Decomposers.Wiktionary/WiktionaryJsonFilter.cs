@@ -16,6 +16,10 @@ internal static class WiktionaryJsonFilter
         while (reader.Read())
         {
             if (reader.TokenType != JsonTokenType.PropertyName) continue;
+            // Only the row's own top-level lang/lang_code fields are authoritative.
+            // Nested occurrences (translations[].lang_code, senses[].tags, etc.) live
+            // at CurrentDepth > 1 and must not be allowed to gate the row.
+            if (reader.CurrentDepth != 1) continue;
             if (!reader.ValueTextEquals("lang_code") && !reader.ValueTextEquals("lang")) continue;
             if (!reader.Read() || reader.TokenType != JsonTokenType.String) return false;
             matched = langs.MatchesRaw(reader.GetString());

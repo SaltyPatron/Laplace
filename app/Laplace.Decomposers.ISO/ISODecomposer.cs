@@ -25,6 +25,7 @@ public sealed class ISODecomposer : IDecomposer{
     private static readonly Hash128 RelTypeMemberOfMacrolanguage =
         RelationTypeRegistry.RelationTypeId("MEMBER_OF_MACROLANGUAGE");
     private static readonly Hash128 UcdClassifierTypeId = EntityTypeRegistry.UcdClassifier;
+    private static readonly Hash128 LanguageVariantTypeId = EntityTypeRegistry.LanguageVariant;
 
     public Hash128 SourceId    => Source;
     public string  SourceName  => "ISO639Decomposer";
@@ -172,6 +173,24 @@ public sealed class ISODecomposer : IDecomposer{
                 // Retirement is directional (retired -> successor), not a symmetric variant.
                 b.AddAttestation(NativeAttestation.Categorical(
                     retId, "SUPERSEDED_BY", sucId, Source, SourceTrust.StandardsDerived));
+            }
+        }
+
+        foreach (var (subtag, prefixes) in LanguageGraph.Variants(context.EcosystemPath))
+        {
+            var variantId = LanguageGraph.VariantEntityId(subtag);
+            _codeNames.Add($"substrate/iso639/variant/{subtag.ToLowerInvariant()}/v1");
+            b.AddEntity(variantId, EntityTier.Vocabulary, LanguageVariantTypeId, Source);
+
+            foreach (var prefix in prefixes)
+            {
+                var parentId = LanguageReference.Resolve(prefix);
+                if (parentId.Equals(undId)) continue;
+                b.AddEntity(parentId, EntityTier.Vocabulary, LanguageTypeId, Source);
+                // A variant can attach under several prefixes (e.g. multiple base tags it may
+                // follow); each is its own HAS_VARIANT_OF edge from the variant to that parent.
+                b.AddAttestation(NativeAttestation.Categorical(
+                    variantId, "HAS_VARIANT_OF", parentId, Source, SourceTrust.StandardsDerived));
             }
         }
 

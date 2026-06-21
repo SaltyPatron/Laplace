@@ -23,6 +23,7 @@ public static class EntityTypeRegistry
     public static readonly Hash128 Grapheme           = Id("Grapheme");
     public static readonly Hash128 Iso639Code         = Id("ISO639Code");
     public static readonly Hash128 Language           = Id("Language");
+    public static readonly Hash128 LanguageVariant    = Id("LanguageVariant");
     public static readonly Hash128 ModelAxis          = Id("Model_Axis");
     public static readonly Hash128 ModelLayer         = Id("Model_Layer");
     public static readonly Hash128 ModelRecipe        = Id("Model_Recipe");
