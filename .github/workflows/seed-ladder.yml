@@ -58,8 +58,14 @@ jobs:
   framenet:
     needs: wordnet
     uses: ./.github/workflows/framenet.yml
+  mapnet:
+    needs: [wordnet, framenet]
+    uses: ./.github/workflows/mapnet.yml
+  wordframenet:
+    needs: [wordnet, framenet]
+    uses: ./.github/workflows/wordframenet.yml
   semlink:
-    needs: [verbnet, propbank, framenet]
+    needs: [wordnet, verbnet, propbank, framenet]
     uses: ./.github/workflows/semlink.yml
 
   convergence:

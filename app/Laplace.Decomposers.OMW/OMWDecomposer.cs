@@ -42,6 +42,8 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider{
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
+        SourceEntityIdConventions.EnsureCiliMapForIngest(context.Logger, SourceName);
+
         string wnsDir = Path.Combine(context.EcosystemPath, "wns");
         if (!Directory.Exists(wnsDir)) yield break;
 

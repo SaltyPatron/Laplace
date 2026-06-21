@@ -11,8 +11,10 @@ PSQL=(psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -tAc)
 log() { echo "[ladder] $*"; }
 die() { echo "::error::$*"; exit 1; }
 
-LADDER=(unicode iso639 wordnet)
-[[ "${LADDER_FULL:-0}" == "1" ]] && LADDER+=(omw ud)
+# Floor then knowledge — order matches witness-manifest.json knowledge sources.
+KNOWLEDGE=(wordnet omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary)
+LADDER=(unicode iso639 "${KNOWLEDGE[0]}")
+[[ "${LADDER_FULL:-0}" == "1" ]] && LADDER+=("${KNOWLEDGE[@]:1}")
 
 for s in "${LADDER[@]}"; do
   echo "::group::ingest $s"

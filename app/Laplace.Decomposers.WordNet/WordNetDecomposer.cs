@@ -16,7 +16,6 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
     
     
-    private static readonly Hash128 SenseTypeId  = EntityTypeRegistry.WordNetSense;
 
     private static readonly Dictionary<string, string> PointerTypes = new()
     {
@@ -104,6 +103,8 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
+        SourceEntityIdConventions.WarnIfCiliMapMissing(context.Logger, SourceName);
+
         string dictDir = Path.Combine(context.EcosystemPath, "WordNet-3.0", "dict");
         int batch = options.BatchSize > 1 ? options.BatchSize : 2048;
 
@@ -310,12 +311,12 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
             EmitSurface(b, s.SenseKey, Source);
             EmitSurface(b, s.Lemma, Source);
 
-            var senseId   = CategoryAnchor.Id(s.SenseKey);
+            var senseId   = SenseAnchor.IdNormalized(s.SenseKey);
             var lemmaId   = RootSurface(s.Lemma);
             var synAnchor = ConceptAnchor.SynsetId(s.Offset, s.Pos);
             if (senseId is not null && lemmaId is not null && synAnchor is not null)
             {
-                CategoryAnchor.AttestCategory(b, senseId.Value, SenseTypeId, Source, SourceTrust.StandardsDerived);
+                SenseAnchor.AttestSenseCategory(b, senseId.Value, Source, SourceTrust.StandardsDerived);
                 b.AddAttestation(NativeAttestation.Categorical(
                     lemmaId.Value, "HAS_SENSE", senseId.Value, Source, SourceTrust.StandardsDerived,
                     magnitude: s.TagCount, arenaScale: 1.0));

@@ -135,6 +135,7 @@ FROM (VALUES
     ('substrate/type/MADE_UP_OF/v1'),
     ('substrate/type/MANNER_OF/v1'),
     ('substrate/type/MEMBER_OF_MACROLANGUAGE/v1'),
+    ('substrate/type/MEMBER_OF_VERBNET_CLASS/v1'),
     ('substrate/type/MERGES_WITH/v1'),
     ('substrate/type/MOTIVATED_BY_GOAL/v1'),
     ('substrate/type/NORMALIZES_TO/v1'),

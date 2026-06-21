@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG="${AUDIT_LOG:-/tmp/laplace-decomposer-audit.log}"
+DATA_ROOT="${LAPLACE_DATA_ROOT:-/vault/Data}"
 PSQL=(psql -h /var/run/postgresql -U laplace_admin -d laplace -v ON_ERROR_STOP=1)
 TINYLLAMA="${LAPLACE_TINYLLAMA_DIR:-${TINYLLAMA_DIR:-}}"
 
@@ -59,20 +60,30 @@ run_just() {
 }
 
 vault_check() {
-  section "VAULT"
+  section "VAULT (LAPLACE_DATA_ROOT=$DATA_ROOT)"
   local ok=0
   for f in \
-    "/vault/Data/Unicode/Public/17.0.0/uca/allkeys.txt" \
-    "/vault/Data/Unicode/Public/17.0.0/ucdxml/ucd.nounihan.flat.zip" \
-    "/vault/Data/ISO639/iso-639-3.tab" \
-    "/vault/Data/Wordnet/WordNet-3.0/dict/data.noun" \
-    "/vault/Data/Wordnet/WordNet-3.0/dict/index.sense" \
-    "/vault/Data/omw/wns" \
-    "/vault/Data/UD-Treebanks/ud-treebanks-v2.17" \
-    "/vault/Data/Tatoeba/sentences.csv" \
-    "/vault/Data/Atomic2020/train.tsv" \
-    "/vault/Data/ConceptNet/assertions.csv" \
-    "/vault/Data/Wiktionary" \
+    "$DATA_ROOT/UCD/Public/UCD/latest/ucd/UnicodeData.txt" \
+    "$DATA_ROOT/ISO639/iso-639-3.tab" \
+    "$DATA_ROOT/Wordnet/WordNet-3.0/dict/data.noun" \
+    "$DATA_ROOT/Wordnet/WordNet-3.0/dict/index.sense" \
+    "$DATA_ROOT/OMW/wns" \
+    "$DATA_ROOT/omw/wns" \
+    "$DATA_ROOT/VerbNet" \
+    "$DATA_ROOT/PropBank" \
+    "$DATA_ROOT/FrameNet/framenet_v17" \
+    "$DATA_ROOT/MapNet-0.1/mapping_frame_synsets.txt" \
+    "$DATA_ROOT/MapNet/mapping_frame_synsets.txt" \
+    "$DATA_ROOT/SemLink/semlink-master/instances/pb-vn2.json" \
+    "$DATA_ROOT/SemLink/semlink-master/instances/vn-fn2.json" \
+    "$DATA_ROOT/PredicateMatrix.v1.3/PredicateMatrix.v1.3.txt" \
+    "$DATA_ROOT/CILI/ili-map-pwn30.tab" \
+    "$DATA_ROOT/CILI/ili-map.ttl" \
+    "$DATA_ROOT/ConceptNet/assertions.csv" \
+    "$DATA_ROOT/Atomic2020/train.tsv" \
+    "$DATA_ROOT/UD-Treebanks/ud-treebanks-v2.17" \
+    "$DATA_ROOT/Wiktionary" \
+    "$DATA_ROOT/Tatoeba/sentences.csv" \
     "$TINYLLAMA/config.json"
   do
     if [[ -e "$f" ]]; then echo "  ok  $f"; else echo "  MISSING  $f"; ok=1; fi
@@ -111,10 +122,17 @@ if should_run "unicode-ingest"; then
 fi
 
 AUDIT_FAIL=0
-declare -A LAYER=( [iso639]=1 [wordnet]=2 [omw]=3 [ud]=4
-                   [tatoeba]=4 [atomic2020]=4 [conceptnet]=4 [wiktionary]=4 )
-LADDER=(iso639 wordnet omw ud)
-[[ $FULL -eq 1 ]] && LADDER+=(tatoeba atomic2020 conceptnet wiktionary)
+# Sequential layer markers — matches witness-manifest knowledge order.
+declare -A LAYER=(
+  [iso639]=1
+  [wordnet]=2 [omw]=3 [verbnet]=4 [propbank]=5 [framenet]=6
+  [mapnet]=7 [wordframenet]=8 [semlink]=9
+  [conceptnet]=10 [atomic2020]=11 [ud]=12 [wiktionary]=13
+  [tatoeba]=14 [opensubtitles]=15
+)
+KNOWLEDGE=(wordnet omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary)
+LADDER=(iso639 "${KNOWLEDGE[@]}")
+[[ $FULL -eq 1 ]] && LADDER+=(tatoeba opensubtitles)
 for src in "${LADDER[@]}"; do
   should_run "$src" || continue
   prev=$(( ${LAYER[$src]} - 1 ))

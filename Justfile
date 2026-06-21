@@ -2,6 +2,8 @@
 
 set shell := ["bash", "-uc"]
 
+export LAPLACE_DATA_ROOT := env_var_or_default("LAPLACE_DATA_ROOT", "/vault/Data")
+
 default:
     @just --list
 
@@ -120,6 +122,22 @@ e2e *models: build-app
 
 ingest-all: build-app
     scripts/ingest-source.sh all
+
+decomposer-test source: build-app
+    @chmod +x scripts/decomposer-test.sh scripts/decomposer-isolate.sh scripts/decomposer-ensure-floor.sh
+    scripts/decomposer-test.sh {{source}}
+
+decomposer-promote source: build-app
+    @chmod +x scripts/decomposer-promote.sh
+    scripts/decomposer-promote.sh {{source}}
+
+decomposer-matrix *flags: build-app
+    @chmod +x scripts/decomposer-matrix.sh scripts/decomposer-test.sh scripts/decomposer-promote.sh
+    scripts/decomposer-matrix.sh {{flags}}
+
+decomposer-isolate dbname:
+    @chmod +x scripts/decomposer-isolate.sh
+    scripts/decomposer-isolate.sh {{dbname}}
 
 ingest-tinyllama: build-app
     scripts/ingest-source.sh safetensors "${LAPLACE_TINYLLAMA_DIR:?set LAPLACE_TINYLLAMA_DIR to the HF snapshot dir (config+tokenizer+weights)}"

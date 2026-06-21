@@ -31,12 +31,12 @@ call "%SCRIPTS%seed-step.cmd" iso639 || exit /b 1
 exit /b 0
 
 :stage_document
-call :require_path "!INGEST!\test-data\text" "  acquire test corpus under D:\Data\Ingest\test-data\text" || exit /b 1
+call :require_path "!INGEST!\test-data\text" "  acquire test corpus under !INGEST!\test-data\text" || exit /b 1
 call "%SCRIPTS%seed-step.cmd" document "!INGEST!\test-data\text" || exit /b 1
 exit /b 0
 
 :stage_knowledge
-for %%s in (wordnet omw verbnet propbank framenet semlink conceptnet atomic2020 ud wiktionary) do (
+for %%s in (wordnet omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary) do (
   call "%SCRIPTS%seed-step.cmd" %%s || exit /b 1
 )
 exit /b 0
@@ -46,8 +46,8 @@ if "%LAPLACE_SKIP_USAGE%"=="1" (
   echo ERROR: LAPLACE_SKIP_USAGE=1 — usage stage is required; unset or set to 0
   exit /b 1
 )
-call :require_path "!INGEST!\Tatoeba" "  acquire Tatoeba under D:\Data\Ingest\Tatoeba" || exit /b 1
-call :require_path "!INGEST!\OpenSubtitles" "  acquire OpenSubtitles under D:\Data\Ingest\OpenSubtitles" || exit /b 1
+call :require_path "!INGEST!\Tatoeba" "  acquire Tatoeba under !INGEST!\Tatoeba" || exit /b 1
+call :require_path "!INGEST!\OpenSubtitles" "  acquire OpenSubtitles under !INGEST!\OpenSubtitles" || exit /b 1
 call "%SCRIPTS%seed-step.cmd" tatoeba || exit /b 1
 call "%SCRIPTS%seed-step.cmd" opensubtitles || exit /b 1
 exit /b 0
@@ -55,7 +55,7 @@ exit /b 0
 :stage_code
 call :require_path "!INGEST!\stack-v2" "  run scripts\win\download-code-data.cmd stack-v2" || exit /b 1
 call "%SCRIPTS%seed-step.cmd" stack "!INGEST!\stack-v2" || exit /b 1
-call :require_path "!REPOS!\Laplace" "  clone Laplace repo to D:\Repositories\Laplace" || exit /b 1
+call :require_path "!REPOS!\Laplace" "  clone Laplace repo to !REPOS!\Laplace" || exit /b 1
 call "%SCRIPTS%seed-step.cmd" repo "!REPOS!\Laplace" || exit /b 1
 call :require_path "!INGEST!\code-authority" "  run scripts\win\download-code-data.cmd authority" || exit /b 1
 for /d %%a in ("!INGEST!\code-authority\*") do (

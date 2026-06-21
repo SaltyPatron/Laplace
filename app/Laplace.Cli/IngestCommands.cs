@@ -108,7 +108,7 @@ internal static class IngestCommands
         var cli = ParseIngestCliArgs(args);
         if (string.IsNullOrEmpty(cli.Source))
             return Fail("usage: laplace ingest <source> [path] [--langs en,...] [--emit-cross-lang] [--no-evidence]\n"
-                        + "  sources: unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | code | repo | tabular | tiny-codes | stack | safetensors | image | audio | document\n"
+                        + "  sources: unicode | iso639 | wordnet | omw | ud | tatoeba | atomic2020 | conceptnet | wiktionary | framenet | opensubtitles | verbnet | propbank | semlink | mapnet | wordframenet | code | repo | tabular | tiny-codes | stack | safetensors | image | audio | document\n"
                         + "  language scope: --langs or LAPLACE_INGEST_LANGS; per-source LAPLACE_{SOURCE}_LANGS\n"
                         + "  --no-evidence: fold consensus only; skip laplace.attestations (or LAPLACE_PERSIST_EVIDENCE=0)");
 
@@ -120,31 +120,33 @@ internal static class IngestCommands
         {
             "unicode"  => await IngestUnicodeViaRunnerAsync(cli),
             "iso639"   => await IngestISO639Async(cli),
-            "wordnet"  => await IngestViaRunnerAsync(new WordNetDecomposer(), "/vault/Data/Wordnet", skipLayerCheck: false, cli),
-            "omw"      => await IngestViaRunnerAsync(new OMWDecomposer(), ResolveIngestPath(cli.Path, "/vault/Data/omw"), skipLayerCheck: false, cli),
-            "ud"       => await IngestViaRunnerAsync(new UDDecomposer(), ResolveIngestPath(cli.Path, "/vault/Data/UD-Treebanks"), skipLayerCheck: false, cli),
-            "tatoeba"  => await IngestViaRunnerAsync(new TatoebaDecomposer(), "/vault/Data/Tatoeba", skipLayerCheck: false, cli),
-            "atomic2020" => await IngestViaRunnerAsync(new Atomic2020Decomposer(), "/vault/Data/Atomic2020", skipLayerCheck: false, cli),
-            "conceptnet" => await IngestViaRunnerAsync(new ConceptNetDecomposer(), "/vault/Data/ConceptNet", skipLayerCheck: false, cli),
-            "wiktionary" => await IngestViaRunnerAsync(new WiktionaryDecomposer(), "/vault/Data/Wiktionary", skipLayerCheck: false, cli),
-            "framenet" => await IngestViaRunnerAsync(new FrameNetDecomposer(), "/vault/Data/FrameNet/framenet_v17", skipLayerCheck: false, cli),
-            "opensubtitles" => await IngestViaRunnerAsync(new OpenSubtitlesDecomposer(), "/vault/Data/OpenSubtitles", skipLayerCheck: false, cli),
-            "verbnet"  => await IngestViaRunnerAsync(new VerbNetDecomposer(),  "/vault/Data/VerbNet",  skipLayerCheck: false, cli),
-            "propbank" => await IngestViaRunnerAsync(new PropBankDecomposer(), "/vault/Data/PropBank", skipLayerCheck: false, cli),
-            "semlink"  => await IngestViaRunnerAsync(new SemLinkDecomposer(),  "/vault/Data/SemLink",  skipLayerCheck: false, cli),
+            "wordnet"  => await IngestViaRunnerAsync(new WordNetDecomposer(), IngestDataPaths.Resolve("wordnet", cli.Path), skipLayerCheck: false, cli),
+            "omw"      => await IngestViaRunnerAsync(new OMWDecomposer(), IngestDataPaths.Resolve("omw", cli.Path), skipLayerCheck: false, cli),
+            "ud"       => await IngestViaRunnerAsync(new UDDecomposer(), IngestDataPaths.Resolve("ud", cli.Path), skipLayerCheck: false, cli),
+            "tatoeba"  => await IngestViaRunnerAsync(new TatoebaDecomposer(), IngestDataPaths.Resolve("tatoeba", cli.Path), skipLayerCheck: false, cli),
+            "atomic2020" => await IngestViaRunnerAsync(new Atomic2020Decomposer(), IngestDataPaths.Resolve("atomic2020", cli.Path), skipLayerCheck: false, cli),
+            "conceptnet" => await IngestViaRunnerAsync(new ConceptNetDecomposer(), IngestDataPaths.Resolve("conceptnet", cli.Path), skipLayerCheck: false, cli),
+            "wiktionary" => await IngestViaRunnerAsync(new WiktionaryDecomposer(), IngestDataPaths.Resolve("wiktionary", cli.Path), skipLayerCheck: false, cli),
+            "framenet" => await IngestViaRunnerAsync(new FrameNetDecomposer(), IngestDataPaths.Resolve("framenet", cli.Path), skipLayerCheck: false, cli),
+            "opensubtitles" => await IngestViaRunnerAsync(new OpenSubtitlesDecomposer(), IngestDataPaths.Resolve("opensubtitles", cli.Path), skipLayerCheck: false, cli),
+            "verbnet"  => await IngestViaRunnerAsync(new VerbNetDecomposer(),  IngestDataPaths.Resolve("verbnet", cli.Path),  skipLayerCheck: false, cli),
+            "propbank" => await IngestViaRunnerAsync(new PropBankDecomposer(), IngestDataPaths.Resolve("propbank", cli.Path), skipLayerCheck: false, cli),
+            "semlink"  => await IngestViaRunnerAsync(new SemLinkDecomposer(),  IngestDataPaths.Resolve("semlink", cli.Path),  skipLayerCheck: false, cli),
+            "mapnet"   => await IngestViaRunnerAsync(new MapNetDecomposer(),   IngestDataPaths.Resolve("mapnet", cli.Path),   skipLayerCheck: false, cli),
+            "wordframenet" => await IngestViaRunnerAsync(new WordFrameNetDecomposer(), IngestDataPaths.Resolve("wordframenet", cli.Path), skipLayerCheck: false, cli),
             "code"       => await IngestCodeAsync(cli),
             "repo"       => await IngestRepoAsync(cli),
             "tabular"    => await IngestTabularAsync(cli),
             "tiny-codes" => await IngestViaRunnerAsync(new TinyCodesDecomposer(),
-                ResolveIngestPath(cli.Path, "/vault/Data/tiny-codes"), skipLayerCheck: true, cli),
+                IngestDataPaths.Resolve("tiny-codes", cli.Path), skipLayerCheck: true, cli),
             "stack"      => await IngestViaRunnerAsync(new StackDecomposer(),
-                ResolveIngestPath(cli.Path, "/vault/Data/stack-v2"), skipLayerCheck: true, cli),
+                IngestDataPaths.Resolve("stack", cli.Path), skipLayerCheck: true, cli),
             "model" or "safetensors" or "safetensor" => await IngestSafetensorSnapshotAsync(cli.Path, cli),
-            "image"      => await IngestViaRunnerAsync(new ImageDecomposer(), string.IsNullOrEmpty(cli.Path) ? "/vault/Data/test-data/images" : cli.Path, skipLayerCheck: true, cli),
-            "audio"      => await IngestViaRunnerAsync(new AudioDecomposer(), string.IsNullOrEmpty(cli.Path) ? "/vault/Data/test-data/audio" : cli.Path, skipLayerCheck: true, cli),
+            "image"      => await IngestViaRunnerAsync(new ImageDecomposer(), IngestDataPaths.Resolve("image", cli.Path), skipLayerCheck: true, cli),
+            "audio"      => await IngestViaRunnerAsync(new AudioDecomposer(), IngestDataPaths.Resolve("audio", cli.Path), skipLayerCheck: true, cli),
             "document"   => await IngestDocumentAsync(cli),
             "recipe"     => await IngestRecipeAsync(cli),
-            _ => Fail($"unknown ingest source '{cli.Source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, code, repo, tabular, tiny-codes, stack, safetensors, image, audio, document, recipe)"),
+            _ => Fail($"unknown ingest source '{cli.Source}' (supported: unicode, iso639, wordnet, omw, ud, tatoeba, atomic2020, conceptnet, wiktionary, framenet, opensubtitles, verbnet, propbank, semlink, mapnet, wordframenet, code, repo, tabular, tiny-codes, stack, safetensors, image, audio, document, recipe)"),
         };
     }
 
@@ -349,10 +351,10 @@ internal static class IngestCommands
     }
 
     private static async Task<int> IngestUnicodeViaRunnerAsync(IngestCliArgs cli)
-        => await IngestViaRunnerAsync(new UnicodeDecomposer(), "/vault/Data/UCD/Public/UCD/latest", skipLayerCheck: true, cli);
+        => await IngestViaRunnerAsync(new UnicodeDecomposer(), IngestDataPaths.Resolve("unicode", cli.Path), skipLayerCheck: true, cli);
 
     private static async Task<int> IngestISO639Async(IngestCliArgs cli)
-        => await IngestViaRunnerAsync(new ISODecomposer(), "/vault/Data/ISO639", skipLayerCheck: false, cli);
+        => await IngestViaRunnerAsync(new ISODecomposer(), IngestDataPaths.Resolve("iso639", cli.Path), skipLayerCheck: false, cli);
 
     private static string ResolveIngestPath(string? cliPath, string defaultPath)
         => Path.GetFullPath(string.IsNullOrWhiteSpace(cliPath) ? defaultPath : cliPath);
@@ -743,6 +745,12 @@ internal static class IngestCommands
                 break;
             case "SemLinkDecomposer":
                 Console.WriteLine($"  check semlink: CORRESPONDS_TO={await RelationEvidence("CORRESPONDS_TO", srcKey):N0}");
+                break;
+            case "MapNetDecomposer":
+                Console.WriteLine($"  check mapnet: CORRESPONDS_TO={await RelationEvidence("CORRESPONDS_TO", srcKey):N0}");
+                break;
+            case "WordFrameNetDecomposer":
+                Console.WriteLine($"  check wordframenet: CORRESPONDS_TO={await RelationEvidence("CORRESPONDS_TO", srcKey):N0}");
                 break;
             case "OpenSubtitlesDecomposer":
                 Console.WriteLine($"  check opensubtitles: IS_TRANSLATION_OF={await RelationEvidence("IS_TRANSLATION_OF", srcKey):N0}");

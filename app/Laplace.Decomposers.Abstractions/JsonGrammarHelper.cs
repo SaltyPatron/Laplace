@@ -19,14 +19,9 @@ public static class JsonGrammarHelper
         if (ctx.Composer is null) return false;
         if (!TryObjectPropertyStringSpan(ctx.Ast, ctx.Utf8, objectNodeIndex, property, out uint start, out uint end))
             return false;
-        if (ctx.Composer.TrySpanEntity(start, end, out entityId))
+        if (TryContentRootFromJsonStringSpan(ctx.Utf8, start, end, out entityId))
             return true;
-        if (!TryDecodedCanonicalBytes(ctx.Utf8, start, end, out byte[] decoded))
-            return false;
-        if (ContentWitnessBatch.RootId(decoded) is not Hash128 root)
-            return false;
-        entityId = root;
-        return true;
+        return ctx.Composer.TrySpanEntity(start, end, out entityId);
     }
 
     public static bool TryPropertyUtf8(
@@ -130,17 +125,8 @@ public static class JsonGrammarHelper
         entityId = default;
         if (ctx.Composer is null) return false;
         if (TryStringNodeSpan(ctx.Ast, nodeIndex, out uint start, out uint end))
-        {
-            if (ctx.Composer.TrySpanEntity(start, end, out entityId))
-                return true;
-            if (TryDecodedCanonicalBytes(ctx.Utf8, start, end, out byte[] decoded)
-                && ContentWitnessBatch.RootId(decoded) is Hash128 root)
-            {
-                entityId = root;
-                return true;
-            }
-            return false;
-        }
+            return TryContentRootFromJsonStringSpan(ctx.Utf8, start, end, out entityId)
+                || ctx.Composer.TrySpanEntity(start, end, out entityId);
         var nd = ctx.Ast.GetNode(nodeIndex);
         return ctx.Composer.TrySpanEntity(nd.StartByte, nd.EndByte, out entityId);
     }
@@ -179,6 +165,23 @@ public static class JsonGrammarHelper
 
     private static ReadOnlySpan<byte> PropertyUtf8(string property) =>
         PropertyUtf8Cache.GetOrAdd(property, static p => Encoding.UTF8.GetBytes(p));
+
+    /// <summary>
+    /// Decode a JSON string leaf and mint the same content-addressed root id as
+    /// <see cref="ContentWitnessBatch"/> (text decomposer natural unit). Prefer this over
+    /// compose-path span lookup so Wiktionary/ConceptNet witnesses converge with WordNet/OMW.
+    /// </summary>
+    internal static bool TryContentRootFromJsonStringSpan(
+        byte[] utf8, uint start, uint end, out Hash128 entityId)
+    {
+        entityId = default;
+        if (!TryDecodedCanonicalBytes(utf8, start, end, out byte[] decoded))
+            return false;
+        if (ContentWitnessBatch.RootId(decoded) is not Hash128 root)
+            return false;
+        entityId = root;
+        return true;
+    }
 
     private static bool TryDecodedSpan(byte[] utf8, uint start, uint end, out ReadOnlySpan<byte> decoded)
     {
@@ -334,26 +337,21 @@ public static class JsonGrammarHelper
         start = end = 0;
         var nd = ast.GetNode(nodeIndex);
         string? t = ast.NodeTypeName(nd.NodeTypeId);
+        // Use the full quoted string node so escape sequences (\uXXXX, …) outside
+        // string_content are included when decoding to canonical UTF-8.
+        if (t == "string")
+        {
+            start = nd.StartByte;
+            end = nd.EndByte;
+            return end > start;
+        }
         if (t == "string_content")
         {
             start = nd.StartByte;
             end = nd.EndByte;
             return true;
         }
-        if (t != "string") return false;
-        foreach (int i in ChildrenOf(ast, nodeIndex))
-        {
-            if (ast.NodeTypeName(ast.GetNode(i).NodeTypeId) == "string_content")
-            {
-                var ch = ast.GetNode(i);
-                start = ch.StartByte;
-                end = ch.EndByte;
-                return true;
-            }
-        }
-        start = nd.StartByte;
-        end = nd.EndByte;
-        return true;
+        return false;
     }
 
     private static int PairKeyChild(GrammarAst ast, int pairIndex)

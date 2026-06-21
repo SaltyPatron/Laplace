@@ -74,6 +74,100 @@ static int is_json_modality(const char* modality_id) {
     return modality_id && strcmp(modality_id, "json") == 0;
 }
 
+static int json_hex_digit(uint8_t c) {
+    if (c >= '0' && c <= '9') return (int)(c - '0');
+    if (c >= 'a' && c <= 'f') return (int)(c - 'a' + 10);
+    if (c >= 'A' && c <= 'F') return (int)(c - 'A' + 10);
+    return -1;
+}
+
+static size_t utf8_encode_codepoint(uint32_t cp, uint8_t* out) {
+    if (cp <= 0x7Fu) {
+        out[0] = (uint8_t)cp;
+        return 1;
+    }
+    if (cp <= 0x7FFu) {
+        out[0] = (uint8_t)(0xC0u | (cp >> 6));
+        out[1] = (uint8_t)(0x80u | (cp & 0x3Fu));
+        return 2;
+    }
+    if (cp <= 0xFFFFu) {
+        out[0] = (uint8_t)(0xE0u | (cp >> 12));
+        out[1] = (uint8_t)(0x80u | ((cp >> 6) & 0x3Fu));
+        out[2] = (uint8_t)(0x80u | (cp & 0x3Fu));
+        return 3;
+    }
+    out[0] = (uint8_t)(0xF0u | (cp >> 18));
+    out[1] = (uint8_t)(0x80u | ((cp >> 12) & 0x3Fu));
+    out[2] = (uint8_t)(0x80u | ((cp >> 6) & 0x3Fu));
+    out[3] = (uint8_t)(0x80u | (cp & 0x3Fu));
+    return 4;
+}
+
+static int json_span_has_escapes(const uint8_t* span, size_t span_len) {
+    for (size_t i = 0; i < span_len; ++i)
+        if (span[i] == (uint8_t)'\\') return 1;
+    return 0;
+}
+
+// Decode JSON string escapes (\n, \uXXXX, …) into UTF-8. Caller frees *out when non-null.
+static int json_unescape_utf8(const uint8_t* span, size_t span_len,
+                              uint8_t** out, size_t* out_len) {
+    *out = NULL;
+    *out_len = 0;
+    if (!span || span_len == 0) return -1;
+    if (!json_span_has_escapes(span, span_len)) return -1;
+
+    uint8_t* buf = (uint8_t*)malloc(span_len);
+    if (!buf) return -3;
+    size_t w = 0;
+    for (size_t i = 0; i < span_len; ++i) {
+        uint8_t c = span[i];
+        if (c != (uint8_t)'\\' || i + 1 >= span_len) {
+            buf[w++] = c;
+            continue;
+        }
+        uint8_t esc = span[++i];
+        switch (esc) {
+            case '"':  buf[w++] = (uint8_t)'"'; break;
+            case '\\': buf[w++] = (uint8_t)'\\'; break;
+            case '/':  buf[w++] = (uint8_t)'/'; break;
+            case 'b':  buf[w++] = (uint8_t)'\b'; break;
+            case 'f':  buf[w++] = (uint8_t)'\f'; break;
+            case 'n':  buf[w++] = (uint8_t)'\n'; break;
+            case 'r':  buf[w++] = (uint8_t)'\r'; break;
+            case 't':  buf[w++] = (uint8_t)'\t'; break;
+            case 'u':
+                if (i + 4 >= span_len) { free(buf); return -1; }
+                {
+                    int h0 = json_hex_digit(span[i + 1]);
+                    int h1 = json_hex_digit(span[i + 2]);
+                    int h2 = json_hex_digit(span[i + 3]);
+                    int h3 = json_hex_digit(span[i + 4]);
+                    if (h0 < 0 || h1 < 0 || h2 < 0 || h3 < 0) { free(buf); return -1; }
+                    uint32_t cp = (uint32_t)((h0 << 12) | (h1 << 8) | (h2 << 4) | h3);
+                    i += 4;
+                    uint8_t tmp[4];
+                    size_t n = utf8_encode_codepoint(cp, tmp);
+                    if (w + n > span_len) {
+                        uint8_t* grown = (uint8_t*)realloc(buf, w + n + span_len);
+                        if (!grown) { free(buf); return -3; }
+                        buf = grown;
+                    }
+                    memcpy(buf + w, tmp, n);
+                    w += n;
+                }
+                break;
+            default:
+                buf[w++] = esc;
+                break;
+        }
+    }
+    *out = buf;
+    *out_len = w;
+    return 0;
+}
+
 static int emit_grapheme_floor_entities(
     laplace_compose_result_t* r, hash128_t source_id,
     tier_tree_t* tree, const laplace_grapheme_floor_t* floor,
@@ -131,6 +225,18 @@ static int json_leaf_fill_grapheme_children(
     }
     if (span_len == 0) return -1;
 
+    const uint8_t* content_span = span;
+    size_t content_len = span_len;
+    uint8_t* decoded_owned = NULL;
+    if (json_span_has_escapes(span, span_len)) {
+        if (json_unescape_utf8(span, span_len, &decoded_owned, &content_len) != 0
+            || content_len == 0) {
+            free(decoded_owned);
+            return -1;
+        }
+        content_span = decoded_owned;
+    }
+
     // Identity convergence: a JSON scalar leaf's entity id must equal the canonical
     // content root id (laplace_content_root_id) so that the same surface ("New York",
     // a gloss, a lemma) decomposed by a structured source (Wiktionary/JSON) and by the
@@ -139,19 +245,22 @@ static int json_leaf_fill_grapheme_children(
     // Falls back to the grapheme-merkle id below if the content tree can't be built
     // (e.g. perfcache not loaded).
     if (out_root_id) {
-        if (laplace_content_root_id(span, span_len, out_root_id) != 0)
+        if (laplace_content_root_id(content_span, content_len, out_root_id) != 0)
             hash128_zero(out_root_id);
     }
 
     tier_tree_t* local_tree = NULL;
     laplace_grapheme_floor_t local_floor;
     memset(&local_floor, 0, sizeof(local_floor));
-    if (laplace_grapheme_floor_build(span, span_len, &local_tree, &local_floor) != 0)
+    if (laplace_grapheme_floor_build(content_span, content_len, &local_tree, &local_floor) != 0) {
+        free(decoded_owned);
         return -1;
+    }
     if (codepoint_table_is_loaded()) {
         if (hash_composer_run(local_tree, codepoint_resolver, NULL) != 0) {
             laplace_grapheme_floor_free(&local_floor);
             tier_tree_free(local_tree);
+            free(decoded_owned);
             return -1;
         }
     }
@@ -163,6 +272,7 @@ static int json_leaf_fill_grapheme_children(
         if (erc != 0) {
             laplace_grapheme_floor_free(&local_floor);
             tier_tree_free(local_tree);
+            free(decoded_owned);
             return erc;
         }
     }
@@ -178,6 +288,7 @@ static int json_leaf_fill_grapheme_children(
         free(flags);
         laplace_grapheme_floor_free(&local_floor);
         tier_tree_free(local_tree);
+        free(decoded_owned);
         return -3;
     }
     size_t w = 0;
@@ -195,12 +306,14 @@ static int json_leaf_fill_grapheme_children(
         free(ids);
         free(coords);
         free(flags);
+        free(decoded_owned);
         return -1;
     }
     *out_ids = ids;
     *out_coords = coords;
     *out_flags = flags;
     *out_m = w;
+    free(decoded_owned);
     return 0;
 }
 

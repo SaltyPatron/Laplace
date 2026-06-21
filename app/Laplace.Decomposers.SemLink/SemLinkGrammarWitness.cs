@@ -5,7 +5,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.SemLink;
 
-internal enum SemLinkDocumentKind { PbVn, VnFn }
+internal enum SemLinkDocumentKind { PbVn, VnFn, PbWn, VnWn, FnWn }
 
 internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammarWitness
 {
@@ -17,10 +17,14 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
 
     public void WalkRow(in GrammarComposeContext composed, in RowContext ctx, SubstrateChangeBuilder builder)
     {
-        if (kind == SemLinkDocumentKind.PbVn)
-            WalkPbVn(composed, builder);
-        else
-            WalkVnFn(composed, builder);
+        switch (kind)
+        {
+            case SemLinkDocumentKind.PbVn: WalkPbVn(composed, builder); break;
+            case SemLinkDocumentKind.VnFn: WalkVnFn(composed, builder); break;
+            case SemLinkDocumentKind.PbWn: WalkCategoryToSynset(composed, builder, RolesetTypeId, NormalizeRolesetKey); break;
+            case SemLinkDocumentKind.VnWn: WalkCategoryToSynset(composed, builder, VnClassTypeId, NormalizeVnClassKey); break;
+            case SemLinkDocumentKind.FnWn: WalkCategoryToSynset(composed, builder, FrameTypeId, static k => k); break;
+        }
     }
 
     private static void WalkPbVn(in GrammarComposeContext ctx, SubstrateChangeBuilder b)
@@ -95,6 +99,56 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
             }
         }
     }
+
+    private static void WalkCategoryToSynset(
+        in GrammarComposeContext ctx,
+        SubstrateChangeBuilder b,
+        Hash128 categoryTypeId,
+        Func<string, string?> normalizeKey)
+    {
+        int rootObj = JsonGrammarHelper.FindRootObjectNode(ctx.Ast);
+        if (rootObj < 0) return;
+
+        foreach (var (keyNode, valueNode) in JsonGrammarHelper.EnumerateObjectPairs(ctx.Ast, rootObj))
+        {
+            if (!JsonGrammarHelper.TryKeyUtf8(ctx.Ast, ctx.Utf8, keyNode, out var keySpan))
+                continue;
+            string? key = normalizeKey(JsonGrammarHelper.Utf8ToString(keySpan).Trim());
+            if (key is null || key.Length == 0) continue;
+
+            var category = StageCategory(b, key, categoryTypeId);
+            if (category is null) continue;
+
+            foreach (string target in WnTargets(ctx, valueNode))
+            {
+                Hash128? synId = SourceEntityIdConventions.ResolveSynsetAnchor(target);
+                if (synId is null) continue;
+                b.AddAttestation(NativeAttestation.Categorical(
+                    category.Value, "CORRESPONDS_TO", synId.Value, SemLinkDecomposer.Source, TC.AcademicCurated));
+            }
+        }
+    }
+
+    private static IEnumerable<string> WnTargets(GrammarComposeContext ctx, int valueNode)
+    {
+        if (JsonGrammarHelper.IsArrayNode(ctx.Ast, valueNode))
+        {
+            foreach (int item in JsonGrammarHelper.StringNodesInArray(ctx.Ast, valueNode))
+            {
+                if (JsonGrammarHelper.TryKeyUtf8(ctx.Ast, ctx.Utf8, item, out var span))
+                    yield return JsonGrammarHelper.Utf8ToString(span).Trim();
+            }
+            yield break;
+        }
+
+        if (JsonGrammarHelper.TryKeyUtf8(ctx.Ast, ctx.Utf8, valueNode, out var single))
+            yield return JsonGrammarHelper.Utf8ToString(single).Trim();
+    }
+
+    private static string? NormalizeRolesetKey(string key) => key.Length == 0 ? null : key;
+
+    private static string? NormalizeVnClassKey(string key) =>
+        key.Length == 0 ? null : SemLinkDecomposer.NumericClassId(key);
 
     private static Hash128? StageCategory(SubstrateChangeBuilder b, string key, Hash128 categoryTypeId)
     {

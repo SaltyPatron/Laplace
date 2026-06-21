@@ -16,12 +16,9 @@ public sealed class SemLinkDecomposer : IDecomposer{
     public int     LayerOrder   => 3;
     public Hash128 TrustClassId => TrustClass;
 
-    // The SemLink mapping files are top-level JSON objects whose pairs are the mapping records
-    // (roleset -> {vnClass -> {arg -> theta}} for pb-vn2, vnClassKey -> [frame,...] for vn-fn2).
-    // Each record is self-contained: it stages its own VerbNet/PropBank/FrameNet category anchors
-    // and the CORRESPONDS_TO / ROLE_CORRESPONDS_TO attestations over content-addressed ids. The
-    // referents are owned by the VerbNet/PropBank/FrameNet decomposers and converge by deterministic
-    // identity, so cross-source / forward references across batches are legal and order-independent.
+    // SemLink mapping files are top-level JSON objects (pb-vn2, vn-fn2, optional pb/vn/fn-wn JSON bridges)
+    // or Predicate Matrix TSV (PredicateMatrix.txt). Each record stages category anchors and CORRESPONDS_TO
+    // edges over content-addressed ids; WordNet synset targets resolve via CILI/ILI (ConceptAnchor).
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
@@ -30,6 +27,7 @@ public sealed class SemLinkDecomposer : IDecomposer{
         boot.AddType("PropBank_Roleset");
         boot.AddType("FrameNet_Frame");
         boot.AddRelationType("CORRESPONDS_TO");
+        boot.AddRelationType("ROLE_CORRESPONDS_TO");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -38,31 +36,36 @@ public sealed class SemLinkDecomposer : IDecomposer{
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
+        SourceEntityIdConventions.EnsureCiliMapForIngest(context.Logger, SourceName);
+
         string instancesDir = ResolveInstancesDir(context.EcosystemPath);
         int batchSize = options.BatchSize > 0 ? options.BatchSize : 1;
 
-        foreach (var (path, kind, label) in DocumentSpecs(instancesDir))
+        foreach (var (path, kind, label) in JsonDocumentSpecs(instancesDir))
         {
             var witness = new SemLinkGrammarWitness(kind);
-            await foreach (var change in StreamDocumentAsync(
+            await foreach (var change in StreamJsonDocumentAsync(
                                path, witness, label, batchSize, ct))
             {
                 if (!options.DryRun)
                     yield return change;
             }
         }
+
+        foreach (string pmPath in PredicateMatrixIngest.ResolvePaths(context.EcosystemPath))
+        {
+            int pmBatch = options.BatchSize > 0 ? options.BatchSize : 4096;
+            await foreach (var change in PredicateMatrixIngest.StreamAsync(
+                               pmPath, pmBatch, options.Languages, ct))
+            {
+                if (!options.DryRun)
+                    yield return change;
+            }
+            break;
+        }
     }
 
-    /// <summary>
-    /// Streams one SemLink mapping document as bounded batches of top-level records instead of one
-    /// whole-file change. The file is a single top-level JSON object; this parses it once to obtain
-    /// the byte span of each top-level pair (the mapping records), then re-emits each batch of
-    /// <paramref name="batchSize"/> records as a small sub-document object <c>{pair,pair,...}</c> and
-    /// runs the existing compose + witness machinery over it. Memory and commit are thereby bounded
-    /// to a batch. Hashing / compose / the CORRESPONDS_TO + ROLE_CORRESPONDS_TO witness logic are
-    /// reused verbatim — only the document fed to them is sliced.
-    /// </summary>
-    private static async IAsyncEnumerable<SubstrateChange> StreamDocumentAsync(
+    private static async IAsyncEnumerable<SubstrateChange> StreamJsonDocumentAsync(
         string path,
         SemLinkGrammarWitness witness,
         string label,
@@ -176,7 +179,7 @@ public sealed class SemLinkDecomposer : IDecomposer{
     {
         string instancesDir = ResolveInstancesDir(context.EcosystemPath);
         long total = 0;
-        foreach (var (path, _, _) in DocumentSpecs(instancesDir))
+        foreach (var (path, _, _) in JsonDocumentSpecs(instancesDir))
         {
             IntPtr recipe = GrammarDecomposer.LookupById("json");
             if (recipe == IntPtr.Zero) continue;
@@ -184,12 +187,20 @@ public sealed class SemLinkDecomposer : IDecomposer{
             if (utf8.Length == 0) continue;
             total += ReadTopLevelPairSpans(utf8, recipe).Count;
         }
+
+        foreach (string pmPath in PredicateMatrixIngest.ResolvePaths(context.EcosystemPath))
+        {
+            long? lines = await PredicateMatrixIngest.EstimateLineCountAsync(pmPath, ct);
+            if (lines is not null) total += lines.Value;
+            break;
+        }
+
         return total > 0 ? total : null;
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    private static IEnumerable<(string Path, SemLinkDocumentKind Kind, string Label)> DocumentSpecs(string dir)
+    private static IEnumerable<(string Path, SemLinkDocumentKind Kind, string Label)> JsonDocumentSpecs(string dir)
     {
         string pbVn = Path.Combine(dir, "pb-vn2.json");
         if (File.Exists(pbVn))
@@ -198,35 +209,48 @@ public sealed class SemLinkDecomposer : IDecomposer{
         string vnFn = Path.Combine(dir, "vn-fn2.json");
         if (File.Exists(vnFn))
             yield return (vnFn, SemLinkDocumentKind.VnFn, "semlink/vn-fn2");
+
+        string pbWn = Path.Combine(dir, "pb-wn.json");
+        if (File.Exists(pbWn))
+            yield return (pbWn, SemLinkDocumentKind.PbWn, "semlink/pb-wn");
+
+        string vnWn = Path.Combine(dir, "vn-wn.json");
+        if (File.Exists(vnWn))
+            yield return (vnWn, SemLinkDocumentKind.VnWn, "semlink/vn-wn");
+
+        string fnWn = Path.Combine(dir, "fn-wn.json");
+        if (File.Exists(fnWn))
+            yield return (fnWn, SemLinkDocumentKind.FnWn, "semlink/fn-wn");
     }
 
-    internal static string VnClassFromKey(string key)
-    {
-        int last = key.LastIndexOf('-');
-        if (last > 0 && last + 1 < key.Length && char.IsLetter(key[last + 1]))
-            return key[..last];
-        return key;
-    }
+    internal static string VnClassFromKey(string key) =>
+        SourceEntityIdConventions.VerbNetClassFromSemLinkKey(key);
 
-    internal static string NumericClassId(string classId)
-    {
-        if (classId.Length == 0 || char.IsDigit(classId[0])) return classId;
-        for (int i = classId.IndexOf('-'); i >= 0 && i + 1 < classId.Length; i = classId.IndexOf('-', i + 1))
-            if (char.IsDigit(classId[i + 1])) return classId[(i + 1)..];
-        return classId;
-    }
+    internal static string NumericClassId(string classId) =>
+        SourceEntityIdConventions.NumericVerbNetClassId(classId);
 
     private static string ResolveInstancesDir(string ecosystemPath)
     {
-        foreach (var c in new[]
-                 {
-                     Path.Combine(ecosystemPath, "semlink-master", "instances"),
-                     Path.Combine(ecosystemPath, "instances"),
-                     ecosystemPath,
-                 })
-            if (File.Exists(Path.Combine(c, "pb-vn2.json")) ||
-                File.Exists(Path.Combine(c, "vn-fn2.json")))
+        foreach (var c in InstanceDirCandidates(ecosystemPath))
+            if (HasJsonMappings(c) || HasPredicateMatrix(c))
                 return c;
         return ecosystemPath;
     }
+
+    private static IEnumerable<string> InstanceDirCandidates(string ecosystemPath)
+    {
+        yield return Path.Combine(ecosystemPath, "semlink-master", "instances");
+        yield return Path.Combine(ecosystemPath, "instances");
+        yield return ecosystemPath;
+    }
+
+    private static bool HasJsonMappings(string dir) =>
+        File.Exists(Path.Combine(dir, "pb-vn2.json"))
+        || File.Exists(Path.Combine(dir, "vn-fn2.json"))
+        || File.Exists(Path.Combine(dir, "pb-wn.json"))
+        || File.Exists(Path.Combine(dir, "vn-wn.json"))
+        || File.Exists(Path.Combine(dir, "fn-wn.json"));
+
+    private static bool HasPredicateMatrix(string dir) =>
+        PredicateMatrixIngest.ExistsLocally(dir);
 }

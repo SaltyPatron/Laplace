@@ -17,7 +17,10 @@ set "PATH=%LAPLACE_ROOT%\build-win\core;%LAPLACE_ROOT%\build-win\dynamics;%LAPLA
 set "LAPLACE_RC=C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/rc.exe"
 set "LAPLACE_MT=C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/mt.exe"
 if not defined PGPASSWORD set "PGPASSWORD=postgres"
+rem Production hosts must set PGPASSWORD (and LAPLACE_DB) explicitly — do not rely on this default.
 if not defined LAPLACE_DBNAME set "LAPLACE_DBNAME=laplace"
+if not defined LAPLACE_CANONICAL_DB set "LAPLACE_CANONICAL_DB=laplace"
+if not defined LAPLACE_ISOLATE_PREFIX set "LAPLACE_ISOLATE_PREFIX=laplace_d"
 if not defined LAPLACE_DB set "LAPLACE_DB=Host=localhost;Username=postgres;Password=postgres;Database=%LAPLACE_DBNAME%"
 if not defined LAPLACE_SKIP_USAGE set "LAPLACE_SKIP_USAGE=0"
 if not defined LAPLACE_SKIP_MODELS set "LAPLACE_SKIP_MODELS=0"
@@ -26,5 +29,6 @@ if not defined LAPLACE_INGEST_COMPOSE_WORKERS set "LAPLACE_INGEST_COMPOSE_WORKER
 if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=65536"
 if not defined LAPLACE_PERFCACHE_BIN set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ROOT%\build-win\core\perfcache\laplace_t0_perfcache.bin"
 if not defined INGEST set "INGEST=D:\Data\Ingest"
+if not defined LAPLACE_DATA_ROOT set "LAPLACE_DATA_ROOT=%INGEST%"
 if not defined REPOS set "REPOS=D:\Repositories"
 if not defined LAPLACE_MODEL_HUB set "LAPLACE_MODEL_HUB=D:\Models\hub"

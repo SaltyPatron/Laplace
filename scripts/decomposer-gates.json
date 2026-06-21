@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "description": "Per-source ingest gates — consensus thresholds mirror .github/workflows/*.yml; prerequisites mirror witness-manifest signal-dependency order.",
+  "naming": {
+    "canonical_db": "laplace",
+    "isolate_prefix": "laplace_d",
+    "isolated_pattern": "{prefix}_{source}",
+    "law": "laplace = cumulative canonical DB (promote-only re-ingest). laplace_d_<source> = throwaway isolated proof DB (fresh db-isolate + prerequisite ingests + target). No pg clone between isolated DBs."
+  },
+  "manifest_order": [
+    "unicode", "iso639", "document",
+    "wordnet", "omw", "verbnet", "propbank", "framenet", "mapnet", "wordframenet", "semlink",
+    "conceptnet", "atomic2020", "ud", "wiktionary",
+    "tatoeba", "opensubtitles"
+  ],
+  "sources": {
+    "unicode": {
+      "decomposer": "UnicodeDecomposer",
+      "layer": 0,
+      "prerequisites": [],
+      "consensus_gates": [
+        { "relation": "HAS_SCRIPT", "min": 1 },
+        { "relation": "DECODES_TO", "min": 1 },
+        { "relation": "CONFUSABLE_WITH", "min": 1 }
+      ]
+    },
+    "iso639": {
+      "decomposer": "ISO639Decomposer",
+      "layer": 1,
+      "prerequisites": ["unicode"],
+      "consensus_gates": [
+        { "relation": "HAS_ISO639_2_CODE", "min": 1, "fallback": "source_evidence", "fallback_relations": ["HAS_ISO639_1_CODE", "HAS_ISO639_2_CODE", "HAS_ISO639_3_CODE"], "fallback_min": 1 },
+        { "relation": "USES_SCRIPT", "min": 1 }
+      ]
+    },
+    "document": {
+      "decomposer": "UserPrompt",
+      "layer": 2,
+      "prerequisites": ["iso639"],
+      "consensus_gates": [],
+      "skip_layer_complete": true
+    },
+    "wordnet": {
+      "decomposer": "WordNetDecomposer",
+      "layer": 2,
+      "prerequisites": ["iso639"],
+      "consensus_gates": [
+        { "relation": "IS_A", "min": 50000 },
+        { "relation": "HAS_DOMAIN_TOPIC", "min": 1 },
+        { "relation": "HAS_VERB_FRAME", "min": 1 }
+      ]
+    },
+    "omw": {
+      "decomposer": "OMWDecomposer",
+      "layer": 3,
+      "prerequisites": ["wordnet"],
+      "consensus_gates": [
+        { "relation": "HAS_LANGUAGE", "min": 1 }
+      ]
+    },
+    "verbnet": {
+      "decomposer": "VerbNetDecomposer",
+      "layer": 2,
+      "prerequisites": ["iso639"],
+      "consensus_gates": [
+        { "relation": "HAS_THEMATIC_ROLE", "min": 500 },
+        { "relation": "HAS_VERB_FRAME", "min": 1000 }
+      ]
+    },
+    "propbank": {
+      "decomposer": "PropBankDecomposer",
+      "layer": 2,
+      "prerequisites": ["iso639"],
+      "consensus_gates": [
+        { "relation": "HAS_SEMANTIC_ROLE", "min": 10000 },
+        { "relation": "HAS_SENSE", "min": 5000 }
+      ]
+    },
+    "framenet": {
+      "decomposer": "FrameNetDecomposer",
+      "layer": 3,
+      "prerequisites": ["wordnet"],
+      "consensus_gates": [
+        { "relation": "EVOKES_FRAME", "min": 5000 },
+        { "relation": "HAS_FRAME_ELEMENT", "min": 5000 }
+      ]
+    },
+    "mapnet": {
+      "decomposer": "MapNetDecomposer",
+      "layer": 3,
+      "prerequisites": ["wordnet", "framenet"],
+      "consensus_gates": [
+        { "relation": "CORRESPONDS_TO", "min": 1000 }
+      ]
+    },
+    "wordframenet": {
+      "decomposer": "WordFrameNetDecomposer",
+      "layer": 3,
+      "prerequisites": ["wordnet", "framenet"],
+      "consensus_gates": [
+        { "relation": "CORRESPONDS_TO", "min": 1000 }
+      ]
+    },
+    "semlink": {
+      "decomposer": "SemLinkDecomposer",
+      "layer": 3,
+      "prerequisites": ["wordnet", "verbnet", "propbank", "framenet"],
+      "consensus_gates": [
+        { "relation": "CORRESPONDS_TO", "min": 10000 }
+      ]
+    },
+    "conceptnet": {
+      "decomposer": "ConceptNetDecomposer",
+      "layer": 2,
+      "prerequisites": ["iso639"],
+      "consensus_gates": [
+        { "relation": "CAPABLE_OF", "min": 1 },
+        { "relation": "RELATED_TO", "min": 1 }
+      ]
+    },
+    "atomic2020": {
+      "decomposer": "Atomic2020Decomposer",
+      "layer": 2,
+      "prerequisites": ["iso639"],
+      "consensus_gates": [
+        { "relation": "X_INTENT", "min": 1 },
+        { "relation": "OBSTRUCTED_BY", "min": 1 }
+      ]
+    },
+    "ud": {
+      "decomposer": "UDDecomposer",
+      "layer": 2,
+      "prerequisites": ["iso639"],
+      "consensus_gates": [
+        { "relation": "HAS_POS", "min": 10000 },
+        { "relation": "ENHANCED_DEPENDS_ON", "min": 1 }
+      ]
+    },
+    "wiktionary": {
+      "decomposer": "WiktionaryDecomposer",
+      "layer": 2,
+      "prerequisites": ["iso639"],
+      "consensus_gates": [
+        { "relation": "HAS_DEFINITION", "min": 100000 },
+        { "relation": "IS_COORDINATE_TERM_WITH", "min": 1 },
+        { "relation": "HAS_USAGE_REGISTER", "min": 1 }
+      ]
+    },
+    "tatoeba": {
+      "decomposer": "TatoebaDecomposer",
+      "layer": 2,
+      "prerequisites": ["iso639"],
+      "consensus_gates": [
+        { "relation": "IS_TRANSLATION_OF", "min": 100000 }
+      ]
+    },
+    "opensubtitles": {
+      "decomposer": "OpenSubtitlesDecomposer",
+      "layer": 2,
+      "prerequisites": ["iso639"],
+      "consensus_gates": [
+        { "relation": "IS_TRANSLATION_OF", "min": 1000000 }
+      ]
+    }
+  }
+}

@@ -25,9 +25,15 @@ internal sealed class ConceptNetGrammarWitness : IGrammarWitness
                 out var rel, out var startUri, out var endUri, out var meta))
             return;
 
+        if (ConceptNetUri.IsExternalUrlRelation(rel))
+        {
+            WalkExternalUrl(b, startUri, endUri);
+            return;
+        }
+
         if (!ConceptNetRelations.TryResolveType(rel, out var typeName)) return;
-        if (!ConceptNetUri.TryParseLangAndTerm(startUri, out var startLang, out var startTerm)) return;
-        if (!ConceptNetUri.TryParseLangAndTerm(endUri, out var endLang, out var endTerm)) return;
+        if (!ConceptNetUri.TryParseConceptUri(startUri, out var startLang, out var startTerm, out var startPos, out var startWn)) return;
+        if (!ConceptNetUri.TryParseConceptUri(endUri, out var endLang, out var endTerm, out var endPos, out var endWn)) return;
         if (_langs?.MatchesAllUtf8(startLang, endLang) == false) return;
 
         if (!ConceptNetUri.TryAppendTerm(b, startTerm, ConceptNetDecomposer.Source, out var startId)) return;
@@ -51,6 +57,11 @@ internal sealed class ConceptNetGrammarWitness : IGrammarWitness
             startId, "HAS_LANGUAGE", startLangId, ConceptNetDecomposer.Source, SourceTrust.UserCuratedResource));
         b.AddAttestation(NativeAttestation.Categorical(
             endId, "HAS_LANGUAGE", endLangId, ConceptNetDecomposer.Source, SourceTrust.UserCuratedResource));
+
+        AttestPosIfPresent(b, startId, startPos);
+        AttestPosIfPresent(b, endId, endPos);
+        AttestSynsetBridgeIfPresent(b, startId, startPos, startWn);
+        AttestSynsetBridgeIfPresent(b, endId, endPos, endWn);
 
         if (!surfaceUtf8.IsEmpty)
         {
@@ -122,5 +133,34 @@ internal sealed class ConceptNetGrammarWitness : IGrammarWitness
             }
         }
         catch (JsonException) { }
+    }
+
+    private static void WalkExternalUrl(SubstrateChangeBuilder b, ReadOnlySpan<byte> startUri, ReadOnlySpan<byte> endUri)
+    {
+        if (!ConceptNetUri.TryParseConceptUri(startUri, out _, out var term, out var pos, out var startWn)) return;
+        if (!ConceptNetUri.TryAppendTerm(b, term, ConceptNetDecomposer.Source, out var termId)) return;
+        AttestPosIfPresent(b, termId, pos);
+        AttestSynsetBridgeIfPresent(b, termId, pos, startWn);
+
+        Hash128? synId = ConceptNetUri.ResolveSynsetFromExternalUrl(endUri);
+        if (synId is null) return;
+        b.AddAttestation(NativeAttestation.Categorical(
+            termId, "CORRESPONDS_TO", synId.Value, ConceptNetDecomposer.Source, SourceTrust.UserCuratedResource));
+    }
+
+    private static void AttestSynsetBridgeIfPresent(
+        SubstrateChangeBuilder b, Hash128 termId, char? pos, ReadOnlySpan<byte> wnSuffix)
+    {
+        Hash128? synId = ConceptNetUri.ResolveSynsetFromWnSuffix(wnSuffix, pos);
+        if (synId is null) return;
+        b.AddAttestation(NativeAttestation.Categorical(
+            termId, "CORRESPONDS_TO", synId.Value, ConceptNetDecomposer.Source, SourceTrust.UserCuratedResource));
+    }
+
+    private static void AttestPosIfPresent(SubstrateChangeBuilder b, Hash128 termId, char? pos)
+    {
+        if (pos is not { } p) return;
+        PosReference.Attest(b, termId, p.ToString(), PosReference.PosTagset.WordNet,
+            ConceptNetDecomposer.Source, null, SourceTrust.UserCuratedResource);
     }
 }

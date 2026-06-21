@@ -26,13 +26,9 @@ public sealed class PropBankDecomposer : IDecomposer{
     // (CategoryAnchor.Id) and typed by their owning decomposers, so PropBank no longer references
     // their type ids here. The types are still declared in InitializeAsync for vocab readback.
 
-    internal static string NumericClassId(string classId)
-    {
-        if (classId.Length == 0 || char.IsDigit(classId[0])) return classId;
-        for (int i = classId.IndexOf('-'); i >= 0 && i + 1 < classId.Length; i = classId.IndexOf('-', i + 1))
-            if (char.IsDigit(classId[i + 1])) return classId[(i + 1)..];
-        return classId;
-    }
+    internal static string NumericClassId(string classId) =>
+        SourceEntityIdConventions.NumericVerbNetClassId(classId);
+
     internal static Hash128 OrdinalId(string n)         => Hash128.OfCanonical($"ordinal/{n}/v1");
 
     public Hash128 SourceId     => Source;

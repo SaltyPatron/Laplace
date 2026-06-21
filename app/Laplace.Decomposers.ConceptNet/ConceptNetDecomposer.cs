@@ -56,6 +56,8 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddRelationType("HAS_EXAMPLE");
         boot.AddRelationType("HAS_LANGUAGE");
+        boot.AddRelationType("HAS_POS");
+        boot.AddRelationType("CORRESPONDS_TO");
         foreach (var typeName in RelMap.Values)
             boot.AddRelationType(RelationTypeRegistry.Resolve(typeName).Canonical);
         await context.Writer.ApplyAsync(boot.Build(), ct);

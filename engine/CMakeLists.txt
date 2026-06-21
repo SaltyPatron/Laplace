@@ -45,8 +45,18 @@ set(LAPLACE_EXTERNAL "${CMAKE_CURRENT_SOURCE_DIR}/../external"
 
 set(LAPLACE_UNICODE_VERSION "17.0.0"
     CACHE STRING "Unicode version pinned for substrate determinism. MUST be a stable release; never alpha/beta.")
-set(LAPLACE_UCD_PATH "/vault/Data/Unicode/Public/${LAPLACE_UNICODE_VERSION}"
-    CACHE PATH "Path to the Public/<ver>/ tree of the pinned Unicode version (contains ucd/, ucdxml/, etc.)")
+if(NOT DEFINED LAPLACE_UCD_PATH)
+    if(DEFINED ENV{LAPLACE_DATA_ROOT} AND NOT "$ENV{LAPLACE_DATA_ROOT}" STREQUAL "")
+        set(_LAPLACE_DATA_ROOT "$ENV{LAPLACE_DATA_ROOT}")
+    elseif(WIN32)
+        set(_LAPLACE_DATA_ROOT "D:/Data/Ingest")
+    else()
+        set(_LAPLACE_DATA_ROOT "/vault/Data")
+    endif()
+    set(LAPLACE_UCD_PATH "${_LAPLACE_DATA_ROOT}/UCD/Public/UCD/latest")
+endif()
+set(LAPLACE_UCD_PATH "${LAPLACE_UCD_PATH}"
+    CACHE PATH "Path to the UCD tree (contains ucd/, ucdxml/, uca/, etc.)")
 set(LAPLACE_UCDXML_ZIP "${LAPLACE_UCD_PATH}/ucdxml/ucd.nounihan.flat.zip"
     CACHE FILEPATH "UCDXML zip (nounihan flat). 67 MB uncompressed; carries all properties the engine codegen needs.")
 if(NOT EXISTS "${LAPLACE_UCDXML_ZIP}")
