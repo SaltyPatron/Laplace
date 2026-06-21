@@ -85,8 +85,11 @@ public static class StructuredGrammarIngest
                 FileShare.Read, bufferSize: 4 << 20, useAsync: true);
             var buf = new byte[4 << 20];
             int read;
-            while ((read = await fs.ReadAsync(buf, ct)) > 0)
+            bool eof = false;
+            while (!eof)
             {
+                read = await fs.ReadAsync(buf, ct);
+                if (read <= 0) { eof = true; read = 0; }   // final pass: flush the held-back record
                 ct.ThrowIfCancellationRequested();
 
                 foreach (var row in FeedRawLines(iter, buf, read))
@@ -127,7 +130,7 @@ public static class StructuredGrammarIngest
                     }
                 }
 
-                reportUnits?.Invoke(rowsTotal);
+                if (read > 0) reportUnits?.Invoke(rowsTotal);
             }
 
             if (inBatch > 0)
@@ -198,8 +201,11 @@ public static class StructuredGrammarIngest
                     FileShare.Read, bufferSize: 1 << 20, useAsync: true);
                 var buf = new byte[1 << 20];
                 int read;
-                while ((read = await fs.ReadAsync(buf, runCt)) > 0)
+                bool eof = false;
+                while (!eof)
                 {
+                    read = await fs.ReadAsync(buf, runCt);
+                    if (read <= 0) { eof = true; read = 0; }   // final pass: flush the held-back record
                     runCt.ThrowIfCancellationRequested();
                     foreach (var row in FeedRawLines(lineIter, buf, read))
                     {

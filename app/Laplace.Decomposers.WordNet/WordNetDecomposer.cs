@@ -8,10 +8,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.WordNet;
 
-public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider, IIngestCommitPolicy
-{
-    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
-
+public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/WordNetDecomposer/v1");
     public static readonly Hash128 TrustClass =

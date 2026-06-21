@@ -32,12 +32,6 @@ public sealed class UnicodeDecomposerTests
 
     private static UnicodeDecomposer NewDecomposer() => new UnicodeDecomposer();
 
-    [Fact]
-    public void CommitParallelism_IsStrictSerial()
-    {
-        Assert.Equal(IngestCommitParallelism.StrictSerial, NewDecomposer().CommitParallelism);
-    }
-
     private static IDecomposerContext Context(ISubstrateWriter writer) =>
         new FakeContext(writer);
 

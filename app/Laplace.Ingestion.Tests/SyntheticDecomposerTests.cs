@@ -19,7 +19,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     public Task InitializeAsync() => Task.CompletedTask;
     public Task DisposeAsync() => Task.CompletedTask;
 
-    private sealed class SyntheticDecomposer : IDecomposer, IIngestCommitPolicy
+    private sealed class SyntheticDecomposer : IDecomposer
     {
         private readonly int _unitCount;
 
@@ -31,7 +31,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
 
         public Hash128 SourceId { get; }
         public string SourceName => "SyntheticTest";
-        public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
         public int LayerOrder => 0;
         public Hash128 TrustClassId =>
             Hash128.OfCanonical("substrate/trust_class/SubstrateMandate/v1");
@@ -330,7 +329,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class OverlapDecomposer : IDecomposer, IIngestCommitPolicy
+    private sealed class OverlapDecomposer : IDecomposer
     {
         private readonly int _unitCount;
         private readonly Hash128 _shared;
@@ -344,8 +343,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
             BitConverter.TryWriteBytes(seed.AsSpan(8, 4), -1);
             _shared = Hash128.Blake3(seed);
         }
-
-        public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
         public Hash128 SourceId { get; }
         public string SourceName => "SyntheticOverlap";

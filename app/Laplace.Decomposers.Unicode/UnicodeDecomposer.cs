@@ -6,12 +6,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Unicode;
 
-public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider, IIngestCommitPolicy
-{
+public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
     
     
     
-    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.StrictSerial;
     public static readonly Hash128 Source     = Hash128.OfCanonical("substrate/source/UnicodeDecomposer/v1");
     public static readonly Hash128 TrustClass = Hash128.OfCanonical("substrate/trust_class/StandardsDerived/v1");
     

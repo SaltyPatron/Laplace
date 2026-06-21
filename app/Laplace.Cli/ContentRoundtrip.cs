@@ -39,7 +39,7 @@ internal static class ContentRoundtrip
         await using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = @"
-                WITH RECURSIVE tree(id bytea) AS (
+                WITH RECURSIVE tree(id) AS (
                     SELECT @doc
                     UNION
                     SELECT unnest(public.laplace_trajectory_constituent_ids(p.trajectory))

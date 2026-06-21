@@ -6,14 +6,12 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Tatoeba;
 
-public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider, IIngestCommitPolicy
-{
+public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider{
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/TatoebaDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
-    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
     internal static readonly Hash128 SentenceRefTypeId = EntityTypeRegistry.TatoebaSentence;
     internal static readonly Hash128 LanguageTypeId   = EntityTypeRegistry.Language;

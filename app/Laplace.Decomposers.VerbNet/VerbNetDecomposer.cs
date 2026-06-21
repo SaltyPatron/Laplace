@@ -7,14 +7,12 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.VerbNet;
 
-public sealed class VerbNetDecomposer : IDecomposer, IIngestCommitPolicy
-{
+public sealed class VerbNetDecomposer : IDecomposer{
     // Each unit's rows are self-contained. VerbNet owns its classes (it emits + types them); the
     // IS_A parent-class edge and the WordNet-sense CORRESPONDS_TO edge resolve by content-addressed
     // id against entities owned by VerbNet (the parent class, in another batch) and WordNet (the
     // sense, in another source). With the per-batch referential EXISTS pre-check gone these
     // cross-batch / cross-source anchors are legal, so N workers can commit batches concurrently.
-    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/VerbNetDecomposer/v1");

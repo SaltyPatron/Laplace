@@ -7,8 +7,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Wiktionary;
 
-public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider, IIngestCommitPolicy
-{
+public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider{
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/WiktionaryDecomposer/v1");
     public static readonly Hash128 TrustClass =
@@ -22,7 +21,6 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
     // Unordered: rows are self-contained; the cross-entry relations (HAS_HYPERNYM, IS_SYNONYM_OF,
     // IS_TRANSLATION_OF, ETYMOLOGICALLY_DERIVED_FROM) name target lemmas by content-addressed id, so
     // forward/cross-entry references are legal and N workers can commit batches concurrently.
-    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
     internal static readonly ConcurrentDictionary<string, byte> VocabularyNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => VocabularyNames.Keys.ToArray();

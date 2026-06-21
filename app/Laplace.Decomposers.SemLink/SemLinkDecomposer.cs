@@ -5,8 +5,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.SemLink;
 
-public sealed class SemLinkDecomposer : IDecomposer, IIngestCommitPolicy
-{
+public sealed class SemLinkDecomposer : IDecomposer{
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/SemLinkDecomposer/v1");
     public static readonly Hash128 TrustClass =
@@ -23,7 +22,6 @@ public sealed class SemLinkDecomposer : IDecomposer, IIngestCommitPolicy
     // and the CORRESPONDS_TO / ROLE_CORRESPONDS_TO attestations over content-addressed ids. The
     // referents are owned by the VerbNet/PropBank/FrameNet decomposers and converge by deterministic
     // identity, so cross-source / forward references across batches are legal and order-independent.
-    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
