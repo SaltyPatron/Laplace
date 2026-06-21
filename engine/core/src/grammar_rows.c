@@ -2,8 +2,11 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 
 #include "tree_sitter/api.h"
+
+typedef struct { uint32_t s; uint32_t e; } laplace_row_rng_t;
 
 struct laplace_grammar_row_iter {
     const TSLanguage* recipe;
@@ -12,6 +15,8 @@ struct laplace_grammar_row_iter {
     size_t            carry_len;
     size_t            carry_cap;
     int               oom;
+    TSSymbol          row_symbol;      /* the grammar's `row` record symbol, 0 if none */
+    int               row_structured;  /* 1 => frame records via the grammar, not via '\n' */
 };
 
 int laplace_grammar_row_iter_new(const TSLanguage* recipe,
@@ -28,6 +33,13 @@ int laplace_grammar_row_iter_new(const TSLanguage* recipe,
         free(it);
         return -2;
     }
+    /* Row-structured grammars (csv/tsv/psv) expose a `row` record rule: the grammar itself frames
+       records — honoring quoted fields that span newlines — so we parse and emit `row` nodes rather
+       than blindly cutting on '\n'. Line-structured usage (e.g. JSONL through the `json` grammar)
+       has no `row` symbol and keeps '\n' framing, which is correct there: a JSONL record cannot hold
+       a raw newline. */
+    it->row_symbol = ts_language_symbol_for_name(recipe, "row", 3, true);
+    it->row_structured = it->row_symbol != 0;
     *out = it;
     return 0;
 }
@@ -47,7 +59,7 @@ static int append_carry(laplace_grammar_row_iter_t* it,
     return 0;
 }
 
-static int split_carry_lines(laplace_grammar_row_iter_t* it,
+static int split_carry_lines(laplace_grammar_row_iter_t* it, int finalize,
                              laplace_raw_row_t** out_rows, size_t* out_count) {
     *out_rows = NULL;
     *out_count = 0;
@@ -77,6 +89,27 @@ static int split_carry_lines(laplace_grammar_row_iter_t* it,
         start = i + 1;
     }
 
+    /* At end-of-stream, flush a trailing record that has no terminating newline. */
+    if (finalize && start < it->carry_len) {
+        size_t row_len = it->carry_len - start;
+        if (row_len > 0) {
+            if (row_n >= row_cap) {
+                size_t ncap = row_cap ? row_cap * 2 : 64;
+                laplace_raw_row_t* n = (laplace_raw_row_t*)realloc(rows, ncap * sizeof(*n));
+                if (!n) { it->oom = 1; goto fail; }
+                rows = n;
+                row_cap = ncap;
+            }
+            uint8_t* copy = (uint8_t*)malloc(row_len);
+            if (!copy) { it->oom = 1; goto fail; }
+            memcpy(copy, it->carry + start, row_len);
+            rows[row_n].row_utf8 = copy;
+            rows[row_n].row_len = row_len;
+            row_n++;
+        }
+        start = it->carry_len;
+    }
+
     if (start > 0 && start < it->carry_len) {
         size_t rem = it->carry_len - start;
         memmove(it->carry, it->carry + start, rem);
@@ -96,6 +129,81 @@ fail:
     return -3;
 }
 
+/* Grammar-framed record splitting: parse the accumulated carry with the grammar and emit each
+   complete `row` record's bytes. Unlike the '\n' scan, this honors records that span newlines (a
+   quoted CSV/TSV field), because the grammar — not a byte scan — decides where a record ends. The
+   final row is held back unless `finalize` is set, since more bytes may still extend it. */
+static int split_carry_records(laplace_grammar_row_iter_t* it, int finalize,
+                               laplace_raw_row_t** out_rows, size_t* out_count) {
+    *out_rows = NULL;
+    *out_count = 0;
+    if (it->carry_len == 0) return 0;
+
+    ts_parser_reset(it->parser);
+    TSTree* tree = ts_parser_parse_string(it->parser, NULL,
+                                          (const char*)it->carry, (uint32_t)it->carry_len);
+    if (!tree) return -3;
+
+    TSNode   root   = ts_tree_root_node(tree);
+    uint32_t nchild = ts_node_child_count(root);
+
+    laplace_row_rng_t* rr = NULL;
+    size_t rcap = 0, rn = 0;
+    for (uint32_t i = 0; i < nchild; ++i) {
+        TSNode c = ts_node_child(root, i);
+        if (ts_node_symbol(c) != it->row_symbol) continue;
+        if (rn >= rcap) {
+            size_t ncap = rcap ? rcap * 2 : 64;
+            laplace_row_rng_t* n = (laplace_row_rng_t*)realloc(rr, ncap * sizeof(*n));
+            if (!n) { free(rr); ts_tree_delete(tree); it->oom = 1; return -3; }
+            rr = n; rcap = ncap;
+        }
+        rr[rn].s = ts_node_start_byte(c);
+        rr[rn].e = ts_node_end_byte(c);
+        rn++;
+    }
+
+    size_t   emit       = 0;
+    uint32_t tail_start = (uint32_t)it->carry_len;
+    if (rn > 0) {
+        emit       = finalize ? rn : (rn - 1);
+        tail_start = (emit < rn) ? rr[emit].s : (uint32_t)it->carry_len;
+    } else {
+        tail_start = 0;   /* nothing framed yet — keep the whole carry for the next chunk */
+    }
+
+    if (emit > 0) {
+        laplace_raw_row_t* rows = (laplace_raw_row_t*)malloc(emit * sizeof(*rows));
+        if (!rows) { free(rr); ts_tree_delete(tree); it->oom = 1; return -3; }
+        size_t outn = 0;
+        for (size_t i = 0; i < emit; ++i) {
+            if (rr[i].e <= rr[i].s) continue;   /* drop empty rows (parity with line framing) */
+            uint32_t rl = rr[i].e - rr[i].s;
+            uint8_t* copy = (uint8_t*)malloc(rl);
+            if (!copy) {
+                for (size_t j = 0; j < outn; ++j) free(rows[j].row_utf8);
+                free(rows); free(rr); ts_tree_delete(tree); it->oom = 1; return -3;
+            }
+            memcpy(copy, it->carry + rr[i].s, rl);
+            rows[outn].row_utf8 = copy;
+            rows[outn].row_len  = rl;
+            outn++;
+        }
+        *out_rows  = rows;
+        *out_count = outn;
+    }
+
+    if (tail_start > 0) {
+        size_t rem = it->carry_len - tail_start;
+        if (rem > 0) memmove(it->carry, it->carry + tail_start, rem);
+        it->carry_len = rem;
+    }
+
+    free(rr);
+    ts_tree_delete(tree);
+    return 0;
+}
+
 int laplace_grammar_row_iter_feed_lines(laplace_grammar_row_iter_t* it,
                                         const uint8_t* chunk, size_t len,
                                         laplace_raw_row_t** out_rows, size_t* out_count) {
@@ -103,10 +211,14 @@ int laplace_grammar_row_iter_feed_lines(laplace_grammar_row_iter_t* it,
     *out_rows = NULL;
     *out_count = 0;
     if (it->oom) return -3;
+    /* A zero-length feed is the end-of-stream signal: flush any held-back final record. */
+    int finalize = (chunk == NULL || len == 0);
     if (chunk && len > 0) {
         if (append_carry(it, chunk, len) != 0) return -3;
     }
-    return split_carry_lines(it, out_rows, out_count);
+    if (it->row_structured)
+        return split_carry_records(it, finalize, out_rows, out_count);
+    return split_carry_lines(it, finalize, out_rows, out_count);
 }
 
 int laplace_grammar_row_iter_parse_row(laplace_grammar_row_iter_t* it,
@@ -131,7 +243,7 @@ int laplace_grammar_row_iter_feed(laplace_grammar_row_iter_t* it,
 
     laplace_raw_row_t* raw = NULL;
     size_t raw_n = 0;
-    if (split_carry_lines(it, &raw, &raw_n) != 0) return -3;
+    if (split_carry_lines(it, 0, &raw, &raw_n) != 0) return -3;
 
     if (raw_n == 0) return 0;
 

@@ -41,10 +41,6 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
     public override int     LayerOrder   => 2;
     public override Hash128 TrustClassId => TrustClass;
 
-    // Unordered: each train/dev/test row is self-contained, so N workers can commit batches concurrently.
-    public override IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
-
-    protected override bool RequiresTwoPass => false;
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
@@ -86,7 +82,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
     }
 
     protected override async IAsyncEnumerable<SubstrateChange> StreamTriplesAsync(
-        string ecosystemPath, TriplePass pass, DecomposerOptions options,
+        string ecosystemPath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
         int batch = options.BatchSize > 1 ? options.BatchSize : 4096;

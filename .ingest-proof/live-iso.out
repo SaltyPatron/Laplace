@@ -1,0 +1,17 @@
+B2: physicalities populated - keeping indexes live (incremental maintenance; fresh-DB seeds drop once and rebuild after all decomposers)
+ingest ISO639Decomposer via IngestRunner  Host=localhost;Username=postgres;Password=postgres;Database=laplace;Include Error Detail=true;Search Path=laplace,public ...
+done: 6 intents applied, 19,698 novel entities, 11,043 physicalities, 11 round-trips, 6.6s
+registered 8,684 canonical names
+consensus: folding 42,760 matches across 4 partition(s) ...
+consensus: 34,831 relations materialized (accumulated at ingest; evidence = provenance-only)
+substrate counts:
+  entities                :    1,195,000
+  entities/codepoint (T0) :    1,114,074
+  entities/compositional (T1-T4):       70,723
+  entities/vocabulary (tier 0):          128
+  physicalities           :    1,185,053
+  physicalities/content   :    1,185,053
+  attestations (evidence) :    1,666,639
+  consensus (relations)   :    1,666,441
+  witness [ISO639Decomposer] L1: 34,832 attestations, 11,043 content, layer_complete=True
+  check languages: 184 ISO code attestations

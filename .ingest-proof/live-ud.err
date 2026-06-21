@@ -1,0 +1,43 @@
+[02:00:20.857] INF UDDecomposer: INGEST_PATH source=UDDecomposer ecosystem_path=D:\vault\Data\UD-Treebanks exists=True
+[02:00:20.993] INF UDDecomposer: INGEST_START source=UDDecomposer layer=2 unit_type=sentences input_units=97896 files=29
+[02:00:27.581] INF UDDecomposer: INGEST_BATCH source=UDDecomposer intents=32 rows=194272 rows_new=20910e+21087p+126340a elapsed_ms=5,824 rate_rows_s=33,356 round_trips=11
+INGEST_PROGRESS source=UDDecomposer layer=2 unit_type=sentences input=10602/97896 input_pct=10.8 files=8/29 file_pct=27.6 current=en_ctetex-ud-test rows_new=168,337 rate_rows_s=24,704 round_trips=11 elapsed_s=7 status=running
+[02:00:33.705] INF UDDecomposer: INGEST_BATCH source=UDDecomposer intents=19 rows=220235 rows_new=15151e+15173p+122563a elapsed_ms=5,984 rate_rows_s=36,805 round_trips=11
+INGEST_PROGRESS source=UDDecomposer layer=2 unit_type=sentences input=18234/97896 input_pct=18.6 files=11/29 file_pct=37.9 current=en_littleprince-ud-test rows_new=321,224 rate_rows_s=24,827 round_trips=22 elapsed_s=13 status=running
+[02:00:39.202] INF UDDecomposer: INGEST_BATCH source=UDDecomposer intents=19 rows=195449 rows_new=12112e+12275p+101628a elapsed_ms=5,347 rate_rows_s=36,553 round_trips=11
+INGEST_PROGRESS source=UDDecomposer layer=2 unit_type=sentences input=24890/97896 input_pct=25.4 files=15/29 file_pct=51.7 current=en_gentle-ud-test rows_new=447,239 rate_rows_s=24,261 round_trips=33 elapsed_s=18 status=running
+[02:00:44.278] INF UDDecomposer: INGEST_BATCH source=UDDecomposer intents=13 rows=194557 rows_new=10074e+10135p+91989a elapsed_ms=4,969 rate_rows_s=39,158 round_trips=11
+INGEST_PROGRESS source=UDDecomposer layer=2 unit_type=sentences input=30616/97896 input_pct=31.3 files=16/29 file_pct=55.2 current=en_lines-ud-dev rows_new=559,437 rate_rows_s=23,794 round_trips=44 elapsed_s=24 status=running
+[02:00:44.608] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus stage e1: 542,235 partial relations  4 partition(s) in 215ms (2,519,648 rel/s); fold queue depth 1
+[02:00:50.822] INF UDDecomposer: INGEST_BATCH source=UDDecomposer intents=18 rows=211775 rows_new=11384e+11528p+99679a elapsed_ms=6,212 rate_rows_s=34,092 round_trips=11
+INGEST_PROGRESS source=UDDecomposer layer=2 unit_type=sentences input=37351/97896 input_pct=38.2 files=19/29 file_pct=65.5 current=en_ewt-ud-test rows_new=682,028 rate_rows_s=22,693 round_trips=55 elapsed_s=30 status=running
+[02:00:51.470] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold: period fold consensus_period_staging_e0001_1: 135555 relations materialized in 00:00:06.857821
+[02:00:51.486] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold: period fold consensus_period_staging_e0001_0: 135655 relations materialized in 00:00:06.866426
+[02:00:51.490] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold: period fold consensus_period_staging_e0001_2: 135112 relations materialized in 00:00:06.857669
+[02:00:51.505] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold: period fold consensus_period_staging_e0001_3: 135913 relations materialized in 00:00:06.892906
+[02:00:51.595] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold e1: 542,235 relations materialized across 4 partition(s) in 6,984ms (77,630 rel/s); epochs folded 1/1
+[02:00:56.455] INF UDDecomposer: INGEST_BATCH source=UDDecomposer intents=18 rows=210388 rows_new=10245e+10295p+86491a elapsed_ms=5,513 rate_rows_s=38,162 round_trips=11
+INGEST_PROGRESS source=UDDecomposer layer=2 unit_type=sentences input=44998/97896 input_pct=46.0 files=21/29 file_pct=72.4 current=en_gum-ud-test rows_new=789,059 rate_rows_s=22,110 round_trips=66 elapsed_s=36 status=running
+[02:01:01.658] INF UDDecomposer: INGEST_BATCH source=UDDecomposer intents=19 rows=195056 rows_new=9942e+9984p+74848a elapsed_ms=5,128 rate_rows_s=38,038 round_trips=11
+INGEST_PROGRESS source=UDDecomposer layer=2 unit_type=sentences input=52428/97896 input_pct=53.6 files=24/29 file_pct=82.8 current=en_childes-ud-test rows_new=883,833 rate_rows_s=21,614 round_trips=77 elapsed_s=41 status=running
+[02:01:06.813] INF UDDecomposer: INGEST_BATCH source=UDDecomposer intents=16 rows=202865 rows_new=9496e+9549p+75127a elapsed_ms=5,034 rate_rows_s=40,299 round_trips=11
+INGEST_PROGRESS source=UDDecomposer layer=2 unit_type=sentences input=59469/97896 input_pct=60.7 files=26/29 file_pct=89.7 current=en_lines-ud-train rows_new=978,005 rate_rows_s=21,240 round_trips=88 elapsed_s=46 status=running
+[02:01:11.767] INF UDDecomposer: INGEST_BATCH source=UDDecomposer intents=14 rows=200337 rows_new=8960e+9010p+72282a elapsed_ms=4,881 rate_rows_s=41,040 round_trips=11
+INGEST_PROGRESS source=UDDecomposer layer=2 unit_type=sentences input=66637/97896 input_pct=68.1 files=26/29 file_pct=89.7 current=en_lines-ud-train rows_new=1,068,257 rate_rows_s=20,946 round_trips=99 elapsed_s=51 status=running
+[02:01:16.607] INF UDDecomposer: INGEST_BATCH source=UDDecomposer intents=14 rows=197448 rows_new=8958e+9050p+68673a elapsed_ms=4,777 rate_rows_s=41,337 round_trips=11
+INGEST_PROGRESS source=UDDecomposer layer=2 unit_type=sentences input=73805/97896 input_pct=75.4 files=26/29 file_pct=89.7 current=en_lines-ud-train rows_new=1,154,938 rate_rows_s=20,683 round_trips=110 elapsed_s=56 status=running
+[02:01:21.837] INF UDDecomposer: INGEST_BATCH source=UDDecomposer intents=13 rows=216627 rows_new=8590e+8653p+79487a elapsed_ms=5,038 rate_rows_s=42,999 round_trips=11
+INGEST_PROGRESS source=UDDecomposer layer=2 unit_type=sentences input=80461/97896 input_pct=82.2 files=26/29 file_pct=89.7 current=en_lines-ud-train rows_new=1,251,668 rate_rows_s=20,496 round_trips=121 elapsed_s=61 status=running
+[02:01:25.843] INF UDDecomposer: INGEST_BATCH source=UDDecomposer intents=15 rows=198586 rows_new=8721e+8742p+62251a elapsed_ms=3,939 rate_rows_s=50,419 round_trips=11
+INGEST_PROGRESS source=UDDecomposer layer=2 unit_type=sentences input=88141/97896 input_pct=90.0 files=26/29 file_pct=89.7 current=en_lines-ud-train rows_new=1,331,382 rate_rows_s=20,459 round_trips=132 elapsed_s=65 status=running
+[02:01:30.578] INF UDDecomposer: INGEST_BATCH source=UDDecomposer intents=12 rows=203020 rows_new=7763e+7828p+73251a elapsed_ms=4,639 rate_rows_s=43,763 round_trips=11
+INGEST_PROGRESS source=UDDecomposer layer=2 unit_type=sentences input=94269/97896 input_pct=96.3 files=26/29 file_pct=89.7 current=en_lines-ud-train rows_new=1,420,224 rate_rows_s=20,344 round_trips=143 elapsed_s=70 status=running
+[02:01:30.891] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus stage e2: 814,650 partial relations  4 partition(s) in 242ms (3,365,410 rel/s); fold queue depth 1
+[02:01:34.143] INF UDDecomposer: INGEST_BATCH source=UDDecomposer intents=9 rows=129657 rows_new=3891e+3974p+47410a elapsed_ms=3,252 rate_rows_s=39,868 round_trips=11
+INGEST_PROGRESS source=UDDecomposer layer=2 unit_type=sentences input=97001/97896 input_pct=99.1 files=29/29 file_pct=100.0 current=en_ewt-ud-train rows_new=1,475,499 rate_rows_s=20,109 round_trips=154 elapsed_s=73 status=running
+[02:01:34.152] INF UDDecomposer: INGEST_COMPLETE source=UDDecomposer layer=2 input_done=97001 input_total=97896 files_done=29 files_total=29 intents=231/231 rows_new=146197e+147283p+1182019a elapsed_s=73.4 failed=0 status=ok
+[02:01:44.785] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold: period fold consensus_period_staging_e0002_3: 202928 relations materialized in 00:00:13.893629
+[02:01:44.867] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold: period fold consensus_period_staging_e0002_1: 203593 relations materialized in 00:00:13.975942
+[02:01:44.884] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold: period fold consensus_period_staging_e0002_0: 203882 relations materialized in 00:00:13.992095
+[02:01:44.910] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold: period fold consensus_period_staging_e0002_2: 204247 relations materialized in 00:00:14.019044
+[02:01:44.926] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold e2: 814,650 relations materialized across 4 partition(s) in 14,035ms (58,044 rel/s); epochs folded 2/2

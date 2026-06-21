@@ -7,14 +7,12 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.OpenSubtitles;
 
-public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvider, IIngestCommitPolicy
-{
+public sealed class OpenSubtitlesDecomposer : IDecomposer, IIngestInventoryProvider{
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/OpenSubtitlesDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/StructuredCorpus/v1");
 
-    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
     private static readonly (string Pair, long Pairs)[] PairCounts =
     {

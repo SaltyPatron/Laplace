@@ -8,14 +8,12 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.PropBank;
 
-public sealed class PropBankDecomposer : IDecomposer, IIngestCommitPolicy
-{
+public sealed class PropBankDecomposer : IDecomposer{
     // Each unit's rows are self-contained. PropBank owns its rolesets (it emits + types them);
     // the VerbNet-class / FrameNet-frame correspondence targets are owned by their own decomposers
     // and resolve by content-addressed id wherever they land (this source or another, this batch or
     // a later one). With the per-batch referential EXISTS pre-check gone these cross-source anchors
     // are legal, so N workers can commit batches concurrently.
-    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/PropBankDecomposer/v1");

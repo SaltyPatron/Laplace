@@ -6,14 +6,12 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.OMW;
 
-public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider, IIngestCommitPolicy
-{
+public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider{
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/OMWDecomposer/v1");
     public static readonly Hash128 TrustClass =
         Hash128.OfCanonical("substrate/trust_class/AcademicCurated/v1");
 
-    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
     public Hash128 SourceId     => Source;
     public string  SourceName   => "OMWDecomposer";

@@ -48,17 +48,6 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
     public override string  SourceName   => "ConceptNetDecomposer";
     public override int     LayerOrder   => 2;
     public override Hash128 TrustClassId => TrustClass;
-    /// <summary>
-    /// Each assertions.csv row composes its subject, object, and the relation attestation into
-    /// one self-contained builder, so a batch is independently consistent (nothing references an
-    /// out-of-batch entity) and the Glicko consensus fold is commutative. Commit is therefore
-    /// Unordered: N workers commit batches concurrently on their own connections. The old
-    /// StrictSerial pin serialized the whole load behind one backend for no correctness reason.
-    /// </summary>
-    public override IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
-
-    protected override bool RequiresTwoPass => false;
-
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
     public IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
 
@@ -97,7 +86,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
     }
 
     protected override async IAsyncEnumerable<SubstrateChange> StreamTriplesAsync(
-        string ecosystemPath, TriplePass pass, DecomposerOptions options,
+        string ecosystemPath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
         string file = Path.Combine(ecosystemPath, "assertions.csv");

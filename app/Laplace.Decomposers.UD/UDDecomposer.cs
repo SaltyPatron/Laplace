@@ -7,8 +7,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.UD;
 
-public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IIngestCommitPolicy
-{
+public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider{
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/UDDecomposer/v1");
     public static readonly Hash128 TrustClass =
@@ -22,7 +21,6 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
     // Unordered N-consumer lane (forward refs are legal). Relation-type entity + IS_A seeding is
     // re-emitted per batch (content-addressed + ON CONFLICT dedups), so there is no run-wide shared
     // mutable seen-set and therefore no cross-worker seeding race.
-    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
     private static readonly Hash128 FeatureTypeId  = EntityTypeRegistry.UdFeature;
     private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
@@ -66,7 +64,11 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider, IInges
     {
         string treebanksDir = Path.Combine(context.EcosystemPath, "ud-treebanks-v2.17");
         if (!Directory.Exists(treebanksDir)) yield break;
-        int batchSentences = options.BatchSize > 1 ? options.BatchSize : 4096;
+        // Each UD sentence expands to ~140 rows (grapheme/word tiers + POS/deprel/feature relations),
+        // so the global LAPLACE_INGEST_BATCH (65536, sized for 1-row-per-unit sources) would make a
+        // batch of ~9M rows and a builder that pre-allocates *40/*60 of that -> ~9GB across 16 workers.
+        // Cap sentences/batch so each batch is ~70k rows and the in-flight builders stay bounded.
+        int batchSentences = Math.Clamp(options.BatchSize > 1 ? options.BatchSize : 512, 64, 512);
 
         // Each producer composes into its OWN per-batch stage and dedup is per-batch (per-stage
         // witness) now that the process-global content bank is deleted -- so concurrent file

@@ -1,0 +1,6 @@
+==== PHASE 8: db-reset ====
+wired: extension_control_path + dynamic_library_path now include D:\Data\Postgres\laplace
+==== DB-RESET COMPLETE ====
+==== unicode       exit=0 elapsed_s=135.4   peak_rss_gb=1.95 ====
+==== iso639        exit=0 elapsed_s=5.7     peak_rss_gb=0.23 ====
+==== wordnet       exit=0 elapsed_s=142.6   peak_rss_gb=1.48 ====

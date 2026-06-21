@@ -11,8 +11,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.FrameNet;
 
-public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
-{
+public sealed class FrameNetDecomposer : IDecomposer{
     public static readonly Hash128 Source =
         Hash128.OfCanonical("substrate/source/FrameNetDecomposer/v1");
     public static readonly Hash128 TrustClass =
@@ -64,7 +63,6 @@ public sealed class FrameNetDecomposer : IDecomposer, IIngestCommitPolicy
     // EVOKES_FRAME) that resolve by content-addressed id wherever the referent lands. The
     // per-batch referential EXISTS pre-check is gone, so forward/cross-batch anchors are legal
     // and N workers can commit concurrently.
-    public IngestCommitParallelism CommitParallelism => IngestCommitParallelism.Unordered;
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {

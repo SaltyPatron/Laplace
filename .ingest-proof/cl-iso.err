@@ -1,0 +1,11 @@
+[02:07:30.675] INF ISO639Decomposer: INGEST_PATH source=ISO639Decomposer ecosystem_path=/vault/Data/ISO639 exists=True
+[02:07:30.681] INF ISO639Decomposer: INGEST_START source=ISO639Decomposer layer=1 unit_type=units input_units=7929 files=0
+[02:07:32.481] INF ISO639Decomposer: INGEST_BATCH source=ISO639Decomposer intents=6 rows=59558 rows_new=19698e+11043p+34795a elapsed_ms=1,620 rate_rows_s=36,775 round_trips=11
+INGEST_PROGRESS source=ISO639Decomposer layer=1 unit_type=units input=0/7929 input_pct=0.0  current=iso639/names-4 rows_new=65,536 rate_rows_s=34,419 round_trips=11 elapsed_s=2 status=running
+[02:07:32.489] INF ISO639Decomposer: INGEST_COMPLETE source=ISO639Decomposer layer=1 input_done=0 input_total=7929 files_done=0 files_total=0 intents=6/6 rows_new=19698e+11043p+34795a elapsed_s=1.9 failed=0 status=ok
+[02:07:32.590] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus stage e1: 34,831 partial relations  4 partition(s) in 64ms (540,016 rel/s); fold queue depth 1
+[02:07:32.908] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold: period fold consensus_period_staging_e0001_2: 8729 relations materialized in 00:00:00.314939
+[02:07:32.910] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold: period fold consensus_period_staging_e0001_1: 8701 relations materialized in 00:00:00.316797
+[02:07:32.912] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold: period fold consensus_period_staging_e0001_0: 8660 relations materialized in 00:00:00.318972
+[02:07:32.913] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold: period fold consensus_period_staging_e0001_3: 8741 relations materialized in 00:00:00.32025
+[02:07:32.946] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold e1: 34,831 relations materialized across 4 partition(s) in 354ms (98,186 rel/s); epochs folded 1/1

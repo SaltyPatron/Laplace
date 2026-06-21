@@ -142,4 +142,37 @@ public sealed class StructuredGrammarIngestTests
             if (File.Exists(path)) File.Delete(path);
         }
     }
+
+    // RFC-4180: a quoted field may contain a literal newline; the surrounding record is ONE row.
+    // The tree-sitter csv grammar models this (quoted text = '"' (any-non-'"' | '""')* '"'); a raw
+    // '\n' pre-split severs the record before the grammar can honor the quote. This is the front-door
+    // bug: the splitter usurps the grammar's record-boundary job and gets it wrong.
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4)]
+    public async Task IngestFileAsync_QuotedEmbeddedNewline_IsOneRecord(int composeWorkers)
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"laplace-csv-qnl-{Guid.NewGuid():N}.csv");
+        try
+        {
+            // One logical record, four fields; field 3 = "line1\nline2".
+            await File.WriteAllTextAsync(path, "a,b,\"line1\nline2\",c\n");
+
+            var witness = new NullGrammarWitness("csv");
+            var changes = new List<SubstrateChange>();
+            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
+                path, "csv", Src, witness, batchSize: 8, witnessWeight: 1.0,
+                batchLabelPrefix: "test", reportUnits: null, composeWorkers: composeWorkers))
+            {
+                changes.Add(change);
+            }
+
+            long consumed = changes.Sum(c => c.Metadata.InputUnitsConsumed);
+            Assert.Equal(1, consumed);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
 }

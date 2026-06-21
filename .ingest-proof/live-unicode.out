@@ -1,0 +1,21 @@
+B2: dropped 10 secondary physicalities index(es) (incl. coord GiST + trajectory GIN) for index-free bulk load (empty table); rebuilt after apply
+ingest UnicodeDecomposer via IngestRunner  Host=localhost;Username=postgres;Password=postgres;Database=laplace;Include Error Detail=true;Search Path=laplace,public ...
+done: 19 intents applied, 1,174,017 novel entities, 1,114,202 physicalities, 142 round-trips, 94.7s
+registered 1,081 canonical names
+consensus: folding 1,631,861 matches across 4 partition(s) ...
+consensus: 1,631,645 relations materialized (accumulated at ingest; evidence = provenance-only)
+B2: rebuilding 10 secondary physicalities index(es) (coord GiST via Hilbert-packed bulk build) ...
+B2: secondary physicalities indexes rebuilt in 14.2s
+substrate counts:
+  entities                :    1,195,000
+  entities/codepoint (T0) :    1,114,074
+  entities/compositional (T1-T4):       70,723
+  entities/vocabulary (tier 0):          128
+  physicalities           :    1,185,053
+  physicalities/content   :    1,185,053
+  attestations (evidence) :    1,666,639
+  consensus (relations)   :    1,657,752
+  witness [UnicodeDecomposer] L0: 1,631,806 attestations, 1,174,010 content, layer_complete=True
+  check U+0041 'A':
+    render  : A  tier=1
+    coord   : (0.003966, 0.104601, 0.993832, 0.036618)

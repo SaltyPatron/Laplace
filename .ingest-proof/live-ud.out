@@ -1,0 +1,17 @@
+B2: physicalities populated - keeping indexes live (incremental maintenance; fresh-DB seeds drop once and rebuild after all decomposers)
+ingest UDDecomposer via IngestRunner  Host=localhost;Username=postgres;Password=postgres;Database=laplace;Include Error Detail=true;Search Path=laplace,public ...
+done: 231 intents applied, 146,197 novel entities, 147,283 physicalities, 154 round-trips, 73.4s
+registered 851 canonical names
+consensus: folding 6,287,027 matches across 4 partition(s) ...
+consensus: 1,356,885 relations materialized (accumulated at ingest; evidence = provenance-only)
+substrate counts:
+  entities                :    1,341,200
+  entities/codepoint (T0) :    1,114,074
+  entities/compositional (T1-T4):      216,077
+  entities/vocabulary (tier 0):          128
+  physicalities           :    1,332,336
+  physicalities/content   :    1,332,336
+  attestations (evidence) :    2,848,695
+  consensus (relations)   :    2,848,461
+  witness [UDDecomposer] L2: 1,182,056 attestations, 147,283 content, layer_complete=True
+  check ud: HAS_POS=53,408 IS_LEMMA_OF=19,906

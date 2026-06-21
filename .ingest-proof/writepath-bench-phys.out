@@ -1,0 +1,29 @@
+SET
+SET
+==== SETUP: generating synthetic physicality rows (4D points) ====
+DROP TABLE
+psql:D:/Repositories/Laplace/.ingest-proof/writepath-bench-phys.sql:9: NOTICE:  table "bench_psrc" does not exist, skipping
+SELECT 1000000
+CREATE INDEX
+DROP TABLE
+psql:D:/Repositories/Laplace/.ingest-proof/writepath-bench-phys.sql:23: NOTICE:  table "bench_pa" does not exist, skipping
+DROP TABLE
+psql:D:/Repositories/Laplace/.ingest-proof/writepath-bench-phys.sql:24: NOTICE:  table "bench_pb" does not exist, skipping
+CREATE TABLE
+CREATE TABLE
+==== PATH A: per-batch temp + promote + drop ====
+psql:D:/Repositories/Laplace/.ingest-proof/writepath-bench-phys.sql:52: NOTICE:  PHYS PATH A  rows=1000000  secs=29.25  rows_per_s=34188
+DO
+==== PATH B: append-once + single sorted merge ====
+psql:D:/Repositories/Laplace/.ingest-proof/writepath-bench-phys.sql:70: NOTICE:  PHYS PATH B  rows=1000000  secs=28.16  rows_per_s=35514
+DO
+==== per-index isolation: cost of building each index over 1M rows ====
+psql:D:/Repositories/Laplace/.ingest-proof/writepath-bench-phys.sql:95: NOTICE:  NO-INDEX insert 1M rows: secs=0.86  rows_per_s=1166773
+psql:D:/Repositories/Laplace/.ingest-proof/writepath-bench-phys.sql:95: NOTICE:  build GiST coord index: secs=5.88
+psql:D:/Repositories/Laplace/.ingest-proof/writepath-bench-phys.sql:95: NOTICE:  build PK btree(id): secs=0.23
+psql:D:/Repositories/Laplace/.ingest-proof/writepath-bench-phys.sql:95: NOTICE:  build btree(hilbert): secs=0.31
+DO
+==== CLEANUP ====
+DROP TABLE
+DROP TABLE
+DROP TABLE

@@ -1,0 +1,32 @@
+[01:58:08.093] INF UnicodeDecomposer: INGEST_PATH source=UnicodeDecomposer ecosystem_path=/vault/Data/UCD/Public/UCD/latest exists=True
+[01:58:08.097] INF UnicodeDecomposer: INGEST_START source=UnicodeDecomposer layer=0 unit_type=codepoints input_units=1114112 files=0
+[01:58:19.632] INF UnicodeDecomposer: INGEST_BATCH source=UnicodeDecomposer intents=1 rows=510501 rows_new=88232e+65498p+379422a elapsed_ms=10,794 rate_rows_s=47,295 round_trips=13
+INGEST_PROGRESS source=UnicodeDecomposer layer=0 unit_type=codepoints input=65536/1114112 input_pct=5.9  rows_new=533,152 rate_rows_s=45,411 round_trips=13 elapsed_s=12 status=running
+[01:58:29.461] INF UnicodeDecomposer: INGEST_BATCH source=UnicodeDecomposer intents=1 rows=359612 rows_new=99172e+65536p+228232a elapsed_ms=9,499 rate_rows_s=37,857 round_trips=13
+INGEST_PROGRESS source=UnicodeDecomposer layer=0 unit_type=codepoints input=131072/1114112 input_pct=11.8  rows_new=926,092 rate_rows_s=42,933 round_trips=26 elapsed_s=22 status=running
+[01:58:40.876] INF UnicodeDecomposer: INGEST_BATCH source=UnicodeDecomposer intents=1 rows=449340 rows_new=66613e+65536p+317841a elapsed_ms=11,184 rate_rows_s=40,176 round_trips=13
+INGEST_PROGRESS source=UnicodeDecomposer layer=0 unit_type=codepoints input=196608/1114112 input_pct=17.6  rows_new=1,376,082 rate_rows_s=41,719 round_trips=39 elapsed_s=33 status=running
+[01:58:47.966] INF UnicodeDecomposer: INGEST_BATCH source=UnicodeDecomposer intents=1 rows=302452 rows_new=65536e+65536p+171380a elapsed_ms=6,940 rate_rows_s=43,583 round_trips=11
+INGEST_PROGRESS source=UnicodeDecomposer layer=0 unit_type=codepoints input=262144/1114112 input_pct=23.5  rows_new=1,678,534 rate_rows_s=41,885 round_trips=50 elapsed_s=40 status=running
+[01:58:54.047] INF UnicodeDecomposer: INGEST_BATCH source=UnicodeDecomposer intents=2 rows=262148 rows_new=131072e+131072p+4a elapsed_ms=6,080 rate_rows_s=43,118 round_trips=11
+INGEST_PROGRESS source=UnicodeDecomposer layer=0 unit_type=codepoints input=393216/1114112 input_pct=35.3  rows_new=1,940,682 rate_rows_s=42,046 round_trips=61 elapsed_s=46 status=running
+[01:58:59.949] INF UnicodeDecomposer: INGEST_BATCH source=UnicodeDecomposer intents=2 rows=262148 rows_new=131072e+131072p+4a elapsed_ms=5,900 rate_rows_s=44,430 round_trips=11
+INGEST_PROGRESS source=UnicodeDecomposer layer=0 unit_type=codepoints input=524288/1114112 input_pct=47.1  rows_new=2,202,830 rate_rows_s=42,316 round_trips=72 elapsed_s=52 status=running
+[01:59:06.141] INF UnicodeDecomposer: INGEST_BATCH source=UnicodeDecomposer intents=2 rows=262148 rows_new=131072e+131072p+4a elapsed_ms=6,191 rate_rows_s=42,345 round_trips=11
+INGEST_PROGRESS source=UnicodeDecomposer layer=0 unit_type=codepoints input=655360/1114112 input_pct=58.8  rows_new=2,464,978 rate_rows_s=42,318 round_trips=83 elapsed_s=58 status=running
+[01:59:12.159] INF UnicodeDecomposer: INGEST_BATCH source=UnicodeDecomposer intents=2 rows=262148 rows_new=131072e+131072p+4a elapsed_ms=6,018 rate_rows_s=43,563 round_trips=11
+INGEST_PROGRESS source=UnicodeDecomposer layer=0 unit_type=codepoints input=786432/1114112 input_pct=70.6  rows_new=2,727,126 rate_rows_s=42,434 round_trips=94 elapsed_s=64 status=running
+[01:59:18.181] INF UnicodeDecomposer: INGEST_BATCH source=UnicodeDecomposer intents=2 rows=262148 rows_new=131072e+131072p+4a elapsed_ms=6,021 rate_rows_s=43,542 round_trips=11
+INGEST_PROGRESS source=UnicodeDecomposer layer=0 unit_type=codepoints input=917504/1114112 input_pct=82.4  rows_new=2,989,274 rate_rows_s=42,528 round_trips=105 elapsed_s=70 status=running
+[01:59:32.093] INF UnicodeDecomposer: INGEST_BATCH source=UnicodeDecomposer intents=2 rows=527450 rows_new=131453e+131072p+265306a elapsed_ms=13,491 rate_rows_s=39,098 round_trips=13
+INGEST_PROGRESS source=UnicodeDecomposer layer=0 unit_type=codepoints input=1048576/1114112 input_pct=94.1  rows_new=3,517,105 rate_rows_s=41,770 round_trips=118 elapsed_s=84 status=running
+[01:59:42.262] INF UnicodeDecomposer: INGEST_BATCH source=UnicodeDecomposer intents=1 rows=393216 rows_new=65536e+65536p+262144a elapsed_ms=9,989 rate_rows_s=39,365 round_trips=11
+INGEST_PROGRESS source=UnicodeDecomposer layer=0 unit_type=codepoints input=1114112/1114112 input_pct=100.0  rows_new=3,910,321 rate_rows_s=41,436 round_trips=129 elapsed_s=94 status=running
+[01:59:42.550] INF UnicodeDecomposer: INGEST_BATCH source=UnicodeDecomposer intents=2 rows=16710 rows_new=2115e+128p+7424a elapsed_ms=286 rate_rows_s=58,495 round_trips=13
+[01:59:42.557] INF UnicodeDecomposer: INGEST_COMPLETE source=UnicodeDecomposer layer=0 input_done=1114112 input_total=1114112 files_done=0 files_total=0 intents=19/19 rows_new=1174017e+1114202p+1631769a elapsed_s=94.7 failed=0 status=ok
+[01:59:42.986] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus stage e1: 1,631,645 partial relations  4 partition(s) in 419ms (3,891,483 rel/s); fold queue depth 1
+[02:00:00.457] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold: period fold consensus_period_staging_e0001_2: 407255 relations materialized in 00:00:17.467185
+[02:00:01.105] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold: period fold consensus_period_staging_e0001_0: 408387 relations materialized in 00:00:18.115913
+[02:00:01.269] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold: period fold consensus_period_staging_e0001_1: 407995 relations materialized in 00:00:18.27954
+[02:00:03.434] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold: period fold consensus_period_staging_e0001_3: 408008 relations materialized in 00:00:20.444873
+[02:00:03.462] INF Laplace.SubstrateCRUD.Npgsql.ConsensusAccumulatingWriter: consensus fold e1: 1,631,645 relations materialized across 4 partition(s) in 20,473ms (79,694 rel/s); epochs folded 1/1

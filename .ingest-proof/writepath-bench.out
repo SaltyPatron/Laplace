@@ -1,0 +1,23 @@
+SET
+SET
+==== SETUP: generating synthetic entity rows ====
+DROP TABLE
+psql:D:/Repositories/Laplace/.ingest-proof/writepath-bench.sql:11: NOTICE:  table "bench_src" does not exist, skipping
+SELECT 2000000
+CREATE INDEX
+psql:D:/Repositories/Laplace/.ingest-proof/writepath-bench.sql:22: NOTICE:  table "bench_a" does not exist, skipping
+DROP TABLE
+psql:D:/Repositories/Laplace/.ingest-proof/writepath-bench.sql:23: NOTICE:  table "bench_b" does not exist, skipping
+DROP TABLE
+CREATE TABLE
+CREATE TABLE
+==== PATH A: per-batch temp-table create + promote + drop (current path) ====
+psql:D:/Repositories/Laplace/.ingest-proof/writepath-bench.sql:54: NOTICE:  PATH A  rows=2000000  secs=19.47  rows_per_s=102746
+DO
+==== PATH B: append-all-once + single sorted bulk merge (staging path) ====
+psql:D:/Repositories/Laplace/.ingest-proof/writepath-bench.sql:73: NOTICE:  PATH B  rows=2000000  secs=18.19  rows_per_s=109931
+DO
+==== CLEANUP ====
+DROP TABLE
+DROP TABLE
+DROP TABLE

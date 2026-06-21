@@ -28,8 +28,11 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         _bulkFreshSource = bulkFreshSource;
         _staging = new SubstrateStagingMerge(dataSource);
         bool cacheOn = Environment.GetEnvironmentVariable("LAPLACE_PROVEN_CACHE") != "0";
+        // Bounded client-side "already in the DB" cache (3 of these: ent/phys/att). 32M was ~5GB of
+        // ConcurrentDictionary across the three on a fresh insert-heavy source; 4M keeps it ~600MB and
+        // still absorbs the hot repeats — cold misses fall through to the DB ON CONFLICT floor.
         int cacheMax = int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_PROVEN_CACHE_MAX"), out var m) && m > 0
-            ? m : 32_000_000;
+            ? m : 4_000_000;
         _provenEntities = new ProvenIdCache(cacheOn, cacheMax);
         _provenPhys     = new ProvenIdCache(cacheOn, cacheMax);
         _provenAtt      = new ProvenIdCache(cacheOn, cacheMax);
@@ -79,15 +82,25 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         // NOTHING). Attestations still preflight (unless this is a fresh bulk source) because their
         // insert is ON CONFLICT DO NOTHING, so an already-present attestation must route to the locked
         // observation_count UPDATE below to sum re-observations.
-        var entToCheck = new List<Hash128>();
         var physToCheck = new List<Hash128>();
         var attToCheck = _bulkFreshSource
             ? new List<Hash128>()
             : IntentPreflight.CollectUnprovenIds(changes, static c => c.Attestations, static a => a.Id, _provenAtt);
 
-        var (existingEntities, existingPhys, existingAtt) = await IntentPreflight.RunAsync(
-            conn, entToCheck, physToCheck, attToCheck, ct);
-        if (entToCheck.Count > 0 || physToCheck.Count > 0 || attToCheck.Count > 0) roundTrips++;
+        // P2 — "which ones don't you have?" Rather than staging every entity and leaning on the
+        // per-row ON CONFLICT floor, ask the DB once via the scalable, chunked entities_exist_bitmap
+        // (NOT the old per-id intent_preflight that crashed the backend) which of this batch's ids it
+        // already holds, then stage only the novel ones. A fresh bulk source skips the probe (the DB
+        // holds nothing for it yet, so every id is novel and asking is wasted round trips); a re-ingest
+        // or incremental run gets the idempotency win — present ids are never re-staged or re-COPYed.
+        var existingEntities = _bulkFreshSource
+            ? new HashSet<Hash128>()
+            : await IntentPreflight.EntitiesExistAsync(conn, uniqueEntityIds, ct);
+        if (!_bulkFreshSource && uniqueEntityIds.Count > 0) roundTrips++;
+
+        var (_, existingPhys, existingAtt) = await IntentPreflight.RunAsync(
+            conn, System.Array.Empty<Hash128>(), physToCheck, attToCheck, ct);
+        if (physToCheck.Count > 0 || attToCheck.Count > 0) roundTrips++;
         _provenEntities.AddRange(existingEntities);
         _provenPhys.AddRange(existingPhys);
         _provenAtt.AddRange(existingAtt);

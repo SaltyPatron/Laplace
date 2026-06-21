@@ -1,0 +1,1 @@
+[02:02:33.976] INF UDDecomposer: UDDecomposer: already ingested (completion marker present) - short-circuiting; a re-ingest would double-count testimony into consensus. To re-run: per-source eviction first.
