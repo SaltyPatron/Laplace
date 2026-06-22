@@ -83,6 +83,7 @@ public sealed class IngestRunner
         
         
         Laplace.Engine.Core.IntentStage.ResetContentBank();
+        Laplace.Engine.Core.IntentStage.SetBulkFreshBypass(options.BulkFresh);
 
         log.LogInformation(
             "INGEST_PATH source={Source} ecosystem_path={Path} exists={Exists}",
@@ -295,8 +296,19 @@ public sealed class IngestRunner
         using var stopCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var runCt = stopCts.Token;
 
+        // Channel capacity: bound to ~2× the number of SubstrateChange items needed to fill
+        // one commit batch per worker. grammar-compose sources carry native IntentStages
+        // (not just managed rows), so the old workers*batchSize*4 formula (which gives 32 K
+        // for OMW) allowed the channel to accumulate gigabytes of IntentStages during GiST
+        // maintenance stalls, exhausting the native heap and returning -3 from
+        // laplace_grammar_compose. The correct multiplier is commitRows/batchSize (the number
+        // of SubstrateChange items per commit), not batchSize (rows per SubstrateChange).
+        int intentsPerCommit = commitRows > 0
+            ? commitRows / Math.Max(1, batchSize) + 1
+            : batchSize;
+        int channelCap = workers * intentsPerCommit * 2 + workers;
         var channel = Channel.CreateBounded<SubstrateChange>(
-            new BoundedChannelOptions(workers * batchSize * 4)
+            new BoundedChannelOptions(channelCap)
             {
                 SingleWriter = true,
                 SingleReader = false,

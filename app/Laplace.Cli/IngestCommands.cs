@@ -402,7 +402,7 @@ internal static class IngestCommands
 
     private static IngestRunOptions BuildIngestOptions(
         Stopwatch sw, string sourceName, bool skipLayerCheck, string? ecosystemPath,
-        IngestCliArgs? cli = null, bool skipSourceCompletion = false)
+        IngestCliArgs? cli = null, bool skipSourceCompletion = false, bool bulkFresh = false)
     {
         long lastMs = -10_000;
         var progress = new Progress<Laplace.Ingestion.IngestProgress>(p =>
@@ -442,6 +442,7 @@ internal static class IngestCommands
             CommitRows             = commitRows,
             ParallelWorkers        = workers,
             Progress               = progress,
+            BulkFresh              = bulkFresh,
             
             
             
@@ -500,7 +501,7 @@ internal static class IngestCommands
         var result = await runner.RunAsync(
             dec,
             BuildIngestOptions(sw, dec.SourceName, skipLayerCheck, ecosystemPath, cli,
-                skipSourceCompletion || (cli?.Force ?? false)),
+                skipSourceCompletion || (cli?.Force ?? false), bulkFresh: bulkFresh),
             CancellationToken.None);
         sw.Stop();
 

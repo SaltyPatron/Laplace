@@ -71,8 +71,18 @@ internal static class OMWGrammarIngest
         ISubstrateReader? containmentReader,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var outChannel = Channel.CreateUnbounded<SubstrateChange>(
-            new UnboundedChannelOptions { SingleWriter = false, SingleReader = true });
+        // Bounded: file workers are faster than the downstream commit consumer. An unbounded
+        // channel lets them race ahead by hundreds of files during any DB stall (e.g. speculative-
+        // insert blocking), accumulating gigabytes of SubstrateChange batches in managed heap and
+        // exhausting native memory for subsequent grammar_compose calls (returns -3).
+        // Back-pressure via FullMode.Wait serialises production to the commit rate.
+        var outChannel = Channel.CreateBounded<SubstrateChange>(
+            new BoundedChannelOptions(fileWorkers * 4)
+            {
+                SingleWriter = false,
+                SingleReader = true,
+                FullMode = BoundedChannelFullMode.Wait,
+            });
 
         var workers = new Task[Math.Min(fileWorkers, tabFiles.Count)];
         int nextFile = -1;

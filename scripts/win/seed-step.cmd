@@ -112,20 +112,20 @@ if defined LAPLACE_DECOMPOSE_WORKERS (
 exit /b 0
 
 :run_ingest_omw_commit
-rem OMW = 1226 .tab files. File fan-out: ResolveFileWorkers (~P-core-2). Within-file compose pinned
-rem to 1 (native heap safety) so total native compose threads ~= file workers, not file*compose.
-rem Commit pool (LAPLACE_INGEST_WORKERS) is separate I/O-bound work — do not charge against decompose.
-set "_saved_cw=%LAPLACE_INGEST_COMPOSE_WORKERS%"
+rem OMW = 1226 .tab files. File fan-out: ResolveFileWorkers (~P-core-2). Native compose is
+rem thread-safe (confirmed by static analysis); COMPOSE_WORKERS inherits env default (4).
+rem 8 commit workers + 500K commit rows = fewer, larger commits = lower DB round-trip overhead.
 set "_saved_iw=%LAPLACE_INGEST_WORKERS%"
-set "LAPLACE_INGEST_COMPOSE_WORKERS=1"
-if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=4"
-if "!LAPLACE_INGEST_WORKERS!"=="1" set "LAPLACE_INGEST_WORKERS=4"
+set "_saved_cr=%LAPLACE_INGEST_COMMIT_ROWS%"
+if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=8"
+if "!LAPLACE_INGEST_WORKERS!"=="1" set "LAPLACE_INGEST_WORKERS=8"
+if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=500000"
 call :probe_file_workers 2
-echo OMW parallelism: files=!_file_workers! compose=1 commit=!LAPLACE_INGEST_WORKERS!
+echo OMW parallelism: files=!_file_workers! compose=%LAPLACE_INGEST_COMPOSE_WORKERS% commit=!LAPLACE_INGEST_WORKERS! commitRows=%LAPLACE_INGEST_COMMIT_ROWS%
 call :run_ingest_impl
 set "RC=%ERRORLEVEL%"
-if defined _saved_cw (set "LAPLACE_INGEST_COMPOSE_WORKERS=%_saved_cw%") else set "LAPLACE_INGEST_COMPOSE_WORKERS="
 if defined _saved_iw (set "LAPLACE_INGEST_WORKERS=%_saved_iw%") else set "LAPLACE_INGEST_WORKERS="
+if defined _saved_cr (set "LAPLACE_INGEST_COMMIT_ROWS=%_saved_cr%") else set "LAPLACE_INGEST_COMMIT_ROWS="
 exit /b %RC%
 
 :run_ingest_path

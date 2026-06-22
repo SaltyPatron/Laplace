@@ -204,10 +204,17 @@ public static class StructuredGrammarIngest
 
                     if (pending is null)
                     {
-                        rowsInBatch++;
-                        using (astHandle)
-                            ComposeRow(row.LineUtf8, astHandle, sourceId, modalityId, witness, witnessWeight,
-                                contextId, rowIndex++, rowsTotal, b);
+                        try
+                        {
+                            using (astHandle)
+                                ComposeRow(row.LineUtf8, astHandle, sourceId, modalityId, witness, witnessWeight,
+                                    contextId, rowIndex++, rowsTotal, b);
+                            rowsInBatch++;
+                        }
+                        catch (InvalidOperationException ex) when (ex.Message.Contains("laplace_grammar_compose"))
+                        {
+                            continue;
+                        }
 
                         if (reportUnits is not null && rowsTotal % 100 == 0)
                             reportUnits(rowsTotal);
@@ -227,7 +234,16 @@ public static class StructuredGrammarIngest
                     }
 
                     // Two-phase: compose now, defer drain/walk until the chunk is probed.
-                    var composer = new GrammarRowComposer(row.LineUtf8, astHandle, sourceId, modalityId);
+                    GrammarRowComposer composer;
+                    try
+                    {
+                        composer = new GrammarRowComposer(row.LineUtf8, astHandle, sourceId, modalityId);
+                    }
+                    catch (InvalidOperationException ex) when (ex.Message.Contains("laplace_grammar_compose"))
+                    {
+                        astHandle.Dispose();
+                        continue;
+                    }
                     pending.Add(new PendingRow(composer, astHandle, row.LineUtf8, rowIndex++, rowsTotal));
 
                     if (reportUnits is not null && rowsTotal % 100 == 0)
@@ -446,9 +462,16 @@ public static class StructuredGrammarIngest
 
                             if (pending is null)
                             {
-                                using (astHandle)
-                                    ComposeRow(work.LineUtf8, astHandle, sourceId, modalityId, witness, witnessWeight,
-                                        contextId, rowIndex++, work.Sequence + 1, b);
+                                try
+                                {
+                                    using (astHandle)
+                                        ComposeRow(work.LineUtf8, astHandle, sourceId, modalityId, witness, witnessWeight,
+                                            contextId, rowIndex++, work.Sequence + 1, b);
+                                }
+                                catch (InvalidOperationException ex) when (ex.Message.Contains("laplace_grammar_compose"))
+                                {
+                                    continue;
+                                }
 
                                 rowsInBatch++;
                                 if (++inBatch >= batchSize)
@@ -463,7 +486,16 @@ public static class StructuredGrammarIngest
                                 continue;
                             }
 
-                            var composer = new GrammarRowComposer(work.LineUtf8, astHandle, sourceId, modalityId);
+                            GrammarRowComposer composer;
+                            try
+                            {
+                                composer = new GrammarRowComposer(work.LineUtf8, astHandle, sourceId, modalityId);
+                            }
+                            catch (InvalidOperationException ex) when (ex.Message.Contains("laplace_grammar_compose"))
+                            {
+                                astHandle.Dispose();
+                                continue;
+                            }
                             pending.Add(new PendingRow(composer, astHandle, work.LineUtf8, rowIndex++, work.Sequence + 1));
                             if (pending.Count >= ContainmentProbeChunk)
                                 await DrainPendingAsync(runCt);
