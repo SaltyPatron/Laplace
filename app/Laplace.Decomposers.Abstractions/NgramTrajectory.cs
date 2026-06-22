@@ -29,7 +29,7 @@ public static class NgramTrajectory
         Hilbert128 hb    = Hilbert128.Encode(cen);
         double[]   traj  = Trajectory.Build(childIds);
         Hash128    physId = PhysicalityId.Compute(
-            id, sourceId, PhysicalityType.Content, cen[0], cen[1], cen[2], cen[3], traj);
+            id, PhysicalityType.Content, cen[0], cen[1], cen[2], cen[3], traj);
 
         var entity = new EntityRow(id, tier, typeId, sourceId);
         var phys = new PhysicalityRow(

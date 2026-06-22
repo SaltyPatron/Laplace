@@ -195,7 +195,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
 
                 var coord = ByteAtoms.Coord(bv);
                 Hash128 physId = PhysicalityId.Compute(
-                    byteId, Source, PhysicalityType.Content,
+                    byteId, PhysicalityType.Content,
                     coord[0], coord[1], coord[2], coord[3], ReadOnlySpan<double>.Empty);
                 bb.AddPhysicality(new PhysicalityRow(
                     Id: physId, EntityId: byteId, SourceId: Source,
@@ -285,7 +285,7 @@ public sealed class UnicodeDecomposer : IDecomposer, IIngestInventoryProvider{
             b.AddEntity(entityId, tier: 0, CodepointType, firstObservedBy: Source);
 
             Hash128 physId = PhysicalityId.Compute(
-                entityId, Source, PhysicalityType.Content,
+                entityId, PhysicalityType.Content,
                 r.CoordX, r.CoordY, r.CoordZ, r.CoordM,
                 ReadOnlySpan<double>.Empty);
 

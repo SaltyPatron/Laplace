@@ -1,7 +1,6 @@
 CREATE TABLE physicalities (
     id                 bytea            PRIMARY KEY CHECK (octet_length(id) = 16),
     entity_id          bytea            NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-    source_id          bytea            NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
     type               smallint         NOT NULL,
     coord              geometry(PointZM)    NOT NULL,
     hilbert_index      bytea                NOT NULL CHECK (octet_length(hilbert_index) = 16),
@@ -13,7 +12,7 @@ CREATE TABLE physicalities (
     alignment_residual double precision,
     source_dim         integer          CHECK (source_dim IS NULL OR source_dim > 0),
     observed_at        timestamptz      NOT NULL DEFAULT now(),
-    UNIQUE (entity_id, source_id, type)
+    UNIQUE (entity_id, type)
 );
 
 SELECT pg_extension_config_dump('physicalities', '');

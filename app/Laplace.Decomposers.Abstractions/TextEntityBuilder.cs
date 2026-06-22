@@ -99,7 +99,7 @@ public sealed class TextEntityBuilder
         unsafe { cx = node.Coord[0]; cy = node.Coord[1]; cz = node.Coord[2]; cm = node.Coord[3]; }
 
         var physId = PhysicalityId.Compute(
-            node.Id, _sourceId, PhysicalityType.Content,
+            node.Id, PhysicalityType.Content,
             cx, cy, cz, cm,
             trajectoryXyzm ?? ReadOnlySpan<double>.Empty);
 
