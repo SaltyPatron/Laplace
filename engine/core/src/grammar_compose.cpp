@@ -523,6 +523,71 @@ static int push_phys(laplace_compose_result_t* r, hash128_t entity_id, hash128_t
     return 0;
 }
 
+// Open-addressing lookup: entity index whose id == target, or UINT32_MAX. slot[] holds first
+// occurrence indices keyed by id.lo (power-of-two cap).
+static uint32_t containment_idmap_find(
+    const uint32_t* slot, size_t cap,
+    const laplace_compose_result_t* r, hash128_t target) {
+    size_t p = (size_t)(target.lo & (cap - 1));
+    for (;;) {
+        uint32_t s = slot[p];
+        if (s == UINT32_MAX) return UINT32_MAX;
+        if (r->entities[s].id.hi == target.hi && r->entities[s].id.lo == target.lo) return s;
+        p = (p + 1) & (cap - 1);
+    }
+}
+
+// Build the containment tier tree: one flat node per emitted entity (node i <-> entities[i], same
+// id + tier), with parent_idx pointing at the entity index of each compositional node's structural
+// (AST) parent. Graphemes and type-meta nodes stay roots (TIER_TREE_INVALID) and are probed
+// directly; with a full per-node existing-bitmap this is exactly correct by the Merkle invariant
+// (a present composite implies all its constituents are present), and the compositional parent links
+// let a present trunk short-circuit its whole subtree. Returns NULL on allocation failure (callers
+// then emit all entities — never wrong, just unfiltered).
+static tier_tree_t* build_containment_tree(
+    const laplace_compose_result_t* r, laplace_ast_t* ast, const compose_state_t* st) {
+    size_t ec = r->entity_count;
+    if (ec == 0) return NULL;
+    tier_tree_t* t = tier_tree_new(ec);
+    if (!t) return NULL;
+    for (size_t i = 0; i < ec; ++i) {
+        uint32_t idx = tier_tree_add_leaf(t, r->entities[i].tier, 0, 0, 0);
+        if (idx == TIER_TREE_INVALID) { tier_tree_free(t); return NULL; }
+        tier_tree_set_id(t, idx, &r->entities[i].id);
+    }
+
+    size_t cap = 1;
+    while (cap < ec * 2) cap <<= 1;
+    uint32_t* slot = (uint32_t*)malloc(cap * sizeof(uint32_t));
+    if (!slot) return t;  // tree without parent links is still correct under a full bitmap
+    for (size_t i = 0; i < cap; ++i) slot[i] = UINT32_MAX;
+    for (size_t i = 0; i < ec; ++i) {
+        size_t p = (size_t)(r->entities[i].id.lo & (cap - 1));
+        while (slot[p] != UINT32_MAX) {
+            if (r->entities[slot[p]].id.hi == r->entities[i].id.hi
+                && r->entities[slot[p]].id.lo == r->entities[i].id.lo) break;
+            p = (p + 1) & (cap - 1);
+        }
+        if (slot[p] == UINT32_MAX) slot[p] = (uint32_t)i;
+    }
+
+    if (st && st->n > 0 && st->comp_valid && st->comp_id) {
+        for (size_t a = 0; a < st->n; ++a) {
+            if (!st->comp_valid[a]) continue;
+            laplace_ast_node_t nd;
+            if (laplace_ast_get_node(ast, a, &nd) != 0) continue;
+            if (nd.parent == LAPLACE_AST_ROOT || nd.parent >= st->n) continue;
+            if (!st->comp_valid[nd.parent]) continue;
+            uint32_t ce = containment_idmap_find(slot, cap, r, st->comp_id[a]);
+            uint32_t pe = containment_idmap_find(slot, cap, r, st->comp_id[nd.parent]);
+            if (ce != UINT32_MAX && pe != UINT32_MAX && ce != pe)
+                tier_tree_set_parent(t, ce, pe);
+        }
+    }
+    free(slot);
+    return t;
+}
+
 int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
                             const char* modality_id, hash128_t source_id,
                             hash128_t type_meta_id, laplace_compose_result_t** out) {
@@ -725,6 +790,10 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
         }
     }
 
+    // Containment tree for managed-side MerkleDedup.TrunkShortcircuit (owned by r, freed in
+    // laplace_compose_result_free). NULL on alloc failure => caller emits all entities.
+    r->tree = build_containment_tree(r, ast, &st);
+
     free(emitted_entity);
     free(emitted_type);
     free(st.comp_id);
@@ -811,6 +880,10 @@ hash128_t laplace_compose_root_id(const laplace_compose_result_t* r) {
     return r ? r->root_id : z;
 }
 
+tier_tree_t* laplace_compose_get_tier_tree(const laplace_compose_result_t* r) {
+    return r ? r->tree : NULL;
+}
+
 int laplace_compose_get_entity(const laplace_compose_result_t* r, size_t i,
                                laplace_compose_entity_t* out) {
     if (!r || !out || i >= r->entity_count) return -1;
@@ -840,5 +913,6 @@ void laplace_compose_result_free(laplace_compose_result_t* r) {
     free(r->physicalities);
     free(r->precedes);
     free(r->spans);
+    tier_tree_free(r->tree);
     free(r);
 }

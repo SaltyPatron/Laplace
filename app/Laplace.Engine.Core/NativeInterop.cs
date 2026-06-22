@@ -300,6 +300,11 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_compose_root_id")]
     public static partial Hash128 ComposeRootId(IntPtr result);
 
+    
+    
+    [LibraryImport(Library, EntryPoint = "laplace_compose_get_tier_tree")]
+    public static partial IntPtr ComposeGetTierTree(IntPtr result);
+
     [LibraryImport(Library, EntryPoint = "laplace_compose_get_entity")]
     public static partial int ComposeGetEntity(IntPtr result, nuint i, ComposeEntityNative* outEntity);
 

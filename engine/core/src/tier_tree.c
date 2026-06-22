@@ -206,6 +206,13 @@ int tier_tree_set_id(tier_tree_t* tree, uint32_t idx, const hash128_t* id) {
     return 0;
 }
 
+int tier_tree_set_parent(tier_tree_t* tree, uint32_t idx, uint32_t parent_idx) {
+    if (!tree || idx >= tree->count) return -1;
+    if (parent_idx != TIER_TREE_INVALID && parent_idx >= tree->count) return -1;
+    tree->parent_idx[idx] = parent_idx;
+    return 0;
+}
+
 int tier_tree_set_coord(tier_tree_t* tree, uint32_t idx, const double coord[4]) {
     if (!tree || !coord || idx >= tree->count) return -1;
     tree->coord[idx * 4 + 0] = coord[0];

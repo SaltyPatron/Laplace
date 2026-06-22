@@ -6,6 +6,7 @@
 #include "laplace/core/grammar_decomposer.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/hilbert4d.h"
+#include "laplace/core/tier_tree.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,6 +52,13 @@ typedef struct {
     laplace_compose_span_t*          spans;
     size_t                           span_count;
     hash128_t                        root_id;
+    /* Containment tier tree over the emitted entities: node i corresponds 1:1 to entities[i]
+     * (same id, same tier), node->parent points at the entity index of its compositional parent
+     * (TIER_TREE_INVALID for roots, graphemes and type-meta nodes). Built by laplace_grammar_compose;
+     * owned by this result and freed by laplace_compose_result_free. Consumed managed-side by
+     * MerkleDedup.TrunkShortcircuit to emit only novel subtrees. May be NULL if the tree could not
+     * be allocated (callers must fall back to emitting all entities). */
+    tier_tree_t*                     tree;
 } laplace_compose_result_t;
 
 
@@ -87,6 +95,11 @@ size_t laplace_compose_entity_count(const laplace_compose_result_t* r);
 size_t laplace_compose_physicality_count(const laplace_compose_result_t* r);
 size_t laplace_compose_precedes_count(const laplace_compose_result_t* r);
 hash128_t laplace_compose_root_id(const laplace_compose_result_t* r);
+
+/* Borrowed pointer to the containment tier tree (see laplace_compose_result_t::tree). The returned
+ * tree is owned by the compose result and must NOT be freed by the caller; it is valid until
+ * laplace_compose_result_free is called. Returns NULL if no tree was built. */
+tier_tree_t* laplace_compose_get_tier_tree(const laplace_compose_result_t* r);
 
 int laplace_compose_get_entity(const laplace_compose_result_t* r, size_t i,
                                laplace_compose_entity_t* out);

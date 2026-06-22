@@ -44,10 +44,22 @@ public sealed class GrammarEntityBuilder
     public IReadOnlyCollection<string> NodeTypeCanonicalNames => _nodeTypeNames;
     private readonly HashSet<string> _nodeTypeNames = new(StringComparer.Ordinal);
 
+    public (ImmutableArray<EntityRow> Entities,
+            ImmutableArray<PhysicalityRow> Physicalities,
+            ImmutableArray<AttestationRow> Attestations,
+            Hash128 RootId) Build(double witnessWeight)
+        => Build(witnessWeight, existingBitmap: null);
+
+    
+    
+    
+    
+    
+    
     public unsafe (ImmutableArray<EntityRow> Entities,
                    ImmutableArray<PhysicalityRow> Physicalities,
                    ImmutableArray<AttestationRow> Attestations,
-                   Hash128 RootId) Build(double witnessWeight)
+                   Hash128 RootId) Build(double witnessWeight, byte[]? existingBitmap)
     {
         int n = _ast.NodeCount;
         if (_utf8.Length == 0 || n == 0)
@@ -70,9 +82,41 @@ public sealed class GrammarEntityBuilder
             var entities      = ImmutableArray.CreateBuilder<EntityRow>();
             var physicalities = ImmutableArray.CreateBuilder<PhysicalityRow>();
 
+            
+            
+            bool[]? novelEntity = null;
+            HashSet<Hash128>? novelIds = null;
+            if (existingBitmap is { Length: > 0 })
+            {
+                IntPtr treePtr = NativeInterop.ComposeGetTierTree(composeResult);
+                nuint nEnt0 = NativeInterop.ComposeEntityCount(composeResult);
+                if (treePtr != IntPtr.Zero)
+                {
+                    using var tree = TierTree.FromBorrowedHandle(treePtr);
+                    int nodeCount = tree.NodeCount;
+                    if (nodeCount > 0 && nodeCount == (int)nEnt0
+                        && existingBitmap.Length >= (nodeCount + 7) / 8)
+                    {
+                        var novelIdx = new uint[nodeCount];
+                        int novelCount = MerkleDedup.TrunkShortcircuit(tree, existingBitmap, novelIdx);
+                        novelEntity = new bool[nodeCount];
+                        for (int i = 0; i < novelCount; i++) novelEntity[novelIdx[i]] = true;
+                        novelIds = new HashSet<Hash128>(novelCount);
+                        for (nuint i = 0; i < nEnt0; i++)
+                        {
+                            if (!novelEntity[(int)i]) continue;
+                            NativeInterop.ComposeEntityNative e;
+                            NativeInterop.ComposeGetEntity(composeResult, i, &e);
+                            novelIds.Add(e.Id);
+                        }
+                    }
+                }
+            }
+
             nuint nEnt = NativeInterop.ComposeEntityCount(composeResult);
             for (nuint i = 0; i < nEnt; i++)
             {
+                if (novelEntity is not null && !novelEntity[(int)i]) continue;
                 NativeInterop.ComposeEntityNative e;
                 NativeInterop.ComposeGetEntity(composeResult, i, &e);
                 entities.Add(new EntityRow(e.Id, e.Tier, e.TypeId, _sourceId));
@@ -83,6 +127,7 @@ public sealed class GrammarEntityBuilder
             {
                 NativeInterop.ComposePhysicalityNative ph;
                 NativeInterop.ComposeGetPhysicality(composeResult, i, &ph);
+                if (novelIds is not null && !novelIds.Contains(ph.EntityId)) continue;
                 int trajLen = (int)ph.TrajectoryN.ToUInt64();
                 double[] traj = trajLen > 0
                     ? new ReadOnlySpan<double>(ph.TrajectoryXyzm.ToPointer(), trajLen).ToArray()

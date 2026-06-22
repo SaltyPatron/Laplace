@@ -92,6 +92,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
         foreach (var name in PointerTypes.Values)
             boot.AddRelationType(RelationTypeRegistry.Resolve(name).Canonical);
+        boot.AddRelationType("MANNER_OF");
 
         await context.Writer.ApplyAsync(boot.Build(), ct);
         foreach (var n in boot.CanonicalNames)

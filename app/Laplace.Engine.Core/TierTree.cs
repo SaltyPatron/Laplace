@@ -6,7 +6,7 @@ public sealed class TierTree : SafeHandle
 {
     public const uint Invalid = uint.MaxValue;
 
-    private TierTree(IntPtr handle) : base(IntPtr.Zero, ownsHandle: true)
+    private TierTree(IntPtr handle, bool ownsHandle) : base(IntPtr.Zero, ownsHandle)
     {
         SetHandle(handle);
     }
@@ -24,13 +24,23 @@ public sealed class TierTree : SafeHandle
         if (capacityHint < 0) throw new ArgumentOutOfRangeException(nameof(capacityHint));
         IntPtr handle = NativeInterop.TierTreeNew((nuint)capacityHint);
         if (handle == IntPtr.Zero) throw new OutOfMemoryException("tier_tree_new returned NULL");
-        return new TierTree(handle);
+        return new TierTree(handle, ownsHandle: true);
     }
 
     internal static TierTree FromExistingHandle(IntPtr handle)
     {
         if (handle == IntPtr.Zero) throw new ArgumentException("handle is null", nameof(handle));
-        return new TierTree(handle);
+        return new TierTree(handle, ownsHandle: true);
+    }
+
+    
+    
+    
+    
+    public static TierTree FromBorrowedHandle(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero) throw new ArgumentException("handle is null", nameof(handle));
+        return new TierTree(handle, ownsHandle: false);
     }
 
     public int NodeCount

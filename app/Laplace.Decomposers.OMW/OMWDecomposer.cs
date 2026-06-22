@@ -51,7 +51,7 @@ public sealed class OMWDecomposer : IDecomposer, IIngestInventoryProvider{
         long cap = options.MaxInputUnits;
 
         await foreach (var change in OMWGrammarIngest.IngestFilesAsync(
-            wnsDir, options.Languages, batch, cap, ct))
+            wnsDir, options.Languages, batch, cap, context.Reader, ct))
         {
             if (!options.DryRun) yield return change;
         }

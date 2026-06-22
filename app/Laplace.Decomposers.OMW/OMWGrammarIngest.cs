@@ -14,6 +14,7 @@ internal static class OMWGrammarIngest
         LanguageFilter? langs,
         int batchSize,
         long maxInputUnits,
+        ISubstrateReader? containmentReader = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         int batch = batchSize > 1 ? batchSize : DefaultBatch;
@@ -26,13 +27,13 @@ internal static class OMWGrammarIngest
         if (fileWorkers <= 1 || tabFiles.Count <= 1)
         {
             await foreach (var change in IngestFilesSerialAsync(
-                tabFiles, batch, maxInputUnits, ct))
+                tabFiles, batch, maxInputUnits, containmentReader, ct))
                 yield return change;
             yield break;
         }
 
         await foreach (var change in IngestFilesParallelAsync(
-            tabFiles, batch, maxInputUnits, fileWorkers, ct))
+            tabFiles, batch, maxInputUnits, fileWorkers, containmentReader, ct))
             yield return change;
     }
 
@@ -40,6 +41,7 @@ internal static class OMWGrammarIngest
         IReadOnlyList<string> tabFiles,
         int batch,
         long maxInputUnits,
+        ISubstrateReader? containmentReader,
         [EnumeratorCancellation] CancellationToken ct)
     {
         long rowsParsed = 0;
@@ -51,7 +53,7 @@ internal static class OMWGrammarIngest
             if (maxInputUnits > 0 && rowsParsed >= maxInputUnits)
                 yield break;
 
-            await foreach (var change in IngestOneFileAsync(tabFile, batch, fileBn++, ct))
+            await foreach (var change in IngestOneFileAsync(tabFile, batch, fileBn++, containmentReader, ct))
             {
                 rowsParsed += change.Metadata.InputUnitsConsumed;
                 yield return change;
@@ -66,6 +68,7 @@ internal static class OMWGrammarIngest
         int batch,
         long maxInputUnits,
         int fileWorkers,
+        ISubstrateReader? containmentReader,
         [EnumeratorCancellation] CancellationToken ct)
     {
         var outChannel = Channel.CreateUnbounded<SubstrateChange>(
@@ -84,7 +87,7 @@ internal static class OMWGrammarIngest
                     if (fileIdx >= tabFiles.Count) break;
 
                     string tabFile = tabFiles[fileIdx];
-                    await foreach (var change in IngestOneFileAsync(tabFile, batch, fileIdx, ct))
+                    await foreach (var change in IngestOneFileAsync(tabFile, batch, fileIdx, containmentReader, ct))
                     {
                         await outChannel.Writer.WriteAsync(change, ct);
                     }
@@ -121,6 +124,7 @@ internal static class OMWGrammarIngest
         string tabFile,
         int batch,
         int fileBn,
+        ISubstrateReader? containmentReader,
         [EnumeratorCancellation] CancellationToken ct)
     {
         string fileLang = OMWTabFiles.FileLang(tabFile);
@@ -138,6 +142,7 @@ internal static class OMWGrammarIngest
             contextId: null,
             commitEpoch: 0,
             acceptRow: static line => line.Length > 0 && line[0] != (byte)'#',
+            containmentReader: containmentReader,
             ct: ct))
         {
             yield return change;

@@ -82,6 +82,7 @@ public sealed class WiktionaryDecomposer : IDecomposer, IIngestInventoryProvider
             batchLabelPrefix: "wiktionary",
             reportUnits: null,
             acceptRow: acceptRow,
+            containmentReader: context.Reader,
             ct: ct))
         {
             if (!options.DryRun) yield return change;

@@ -45,11 +45,17 @@ public abstract class RelationTripleDecomposerBase : IDecomposer
     protected abstract IAsyncEnumerable<SubstrateChange> StreamTriplesAsync(
         string ecosystemPath, DecomposerOptions options, CancellationToken ct);
 
+    
+    
+    
+    protected ISubstrateReader? ContainmentReader { get; private set; }
+
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
+        ContainmentReader = context.Reader;
         await foreach (var change in StreamTriplesAsync(
                            context.EcosystemPath, options, ct)
                            .WithCancellation(ct))

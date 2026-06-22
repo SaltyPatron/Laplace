@@ -74,14 +74,16 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             foreach (var e in c.Entities)
                 if (seenEntityArg.Add(e.Id)) uniqueEntityIds.Add(e.Id);
 
-        // Entities/physicalities are NOT preflighted. Probing every id up front
-        // (pg_laplace_intent_preflight) did not scale to per-batch re-emission volume and crashed the
+        // Physicalities are NOT preflighted up front. Probing every id via the per-id
+        // pg_laplace_intent_preflight did not scale to per-batch re-emission volume and crashed the
         // backend ("connection forcibly closed"); and the ProvenId caches it fed grew UNBOUNDED across
-        // the run (the same boil-the-ocean as the just-deleted content bank). They dedup per-batch
-        // (the staged HashSets below) + at the DB by content address (INSERT ... ON CONFLICT (id) DO
-        // NOTHING). Attestations still preflight (unless this is a fresh bulk source) because their
-        // insert is ON CONFLICT DO NOTHING, so an already-present attestation must route to the locked
-        // observation_count UPDATE below to sum re-observations.
+        // the run (the same boil-the-ocean as the just-deleted content bank). Physicalities instead
+        // dedup per-batch (the staged HashSets below) + the client ProvenId cache + the set-based
+        // NOT EXISTS anti-join at promote time (StageAndInsertManyAsync) — no per-row ON CONFLICT.
+        // Entities ARE preflighted set-based via the scalable chunked entities_exist_bitmap (below),
+        // so already-present entities are never re-staged. Attestations still preflight (unless this is
+        // a fresh bulk source) because an already-present attestation must route to the locked
+        // observation_count UPDATE below to sum re-observations rather than being dropped at insert.
         var physToCheck = new List<Hash128>();
         var attToCheck = _bulkFreshSource
             ? new List<Hash128>()
@@ -395,17 +397,33 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         await using (var promote = conn.CreateCommand())
         {
             promote.CommandTimeout = 0;
-            // Set-based dedup: a single NOT EXISTS anti-join filters the already-present majority
-            // in one operation (content-addressed id is the PK), so we never pay per-row speculative
-            // insertion for rows the substrate already holds. The trailing ON CONFLICT DO NOTHING is
-            // NOT the dedup mechanism — it is only the thin concurrency tie-breaker for the rare case
-            // two parallel commit workers stage the same novel id in overlapping transactions (the
-            // anti-join can't see the other's uncommitted insert). ORDER BY id keeps insert locality.
+            // Set-based dedup is the ONLY dedup mechanism: a single NOT EXISTS anti-join filters the
+            // already-present majority in one operation (content-addressed id is the PK), so the DB
+            // only ever receives genuinely-novel rows. There is deliberately NO trailing
+            // `ON CONFLICT DO NOTHING`: that was a per-row speculative-insert crutch that masked,
+            // rather than eliminated, duplicate work — and for attestations it silently DROPPED a
+            // concurrent batch's re-observation count (a present id hit DO NOTHING instead of routing
+            // to the locked observation_count UPDATE). The remaining cross-worker race — two parallel
+            // commit workers staging the same novel id in overlapping transactions, where neither
+            // anti-join sees the other's uncommitted insert — now surfaces as a unique_violation
+            // (SQLSTATE 23505), which IngestRunner's ConcurrencyRetry classifies as transient and
+            // retries the whole batch; on retry the now-committed row is visible to the anti-join (and
+            // to the attestation preflight) so it is correctly skipped/summed with zero duplicates and
+            // zero lost counts. Single-worker runs (the default) never race, so the anti-join alone is
+            // exact. ORDER BY id keeps insert locality.
+            // DISTINCT ON (id) collapses intra-stage duplicates (e.g. graphemes shared across the
+            // several content stages coalesced into one COPY, or any id staged twice) — the other job
+            // ON CONFLICT used to do silently. It is set-based and safe for all three tables: entity
+            // and physicality ids are fully content-addressed so duplicate rows are byte-identical, and
+            // attestations only reach this promote via the main stage, which has already pre-summed
+            // re-observations per id (attGamesDelta + seenAtt) so there are no intra-stage attestation
+            // duplicates to collapse. The NOT EXISTS anti-join then filters everything the table already
+            // holds. This mirrors SubstrateStagingMerge.FinalizeAsync's DISTINCT ON (id) merge.
             promote.CommandText =
                 $"INSERT INTO laplace.{tableName} ({cols}) " +
-                $"SELECT {cols} FROM {stageName} s " +
+                $"SELECT DISTINCT ON (id) {cols} FROM {stageName} s " +
                 $"WHERE NOT EXISTS (SELECT 1 FROM laplace.{tableName} t WHERE t.id = s.id) " +
-                $"ORDER BY id ON CONFLICT DO NOTHING";
+                $"ORDER BY id";
             return await promote.ExecuteNonQueryAsync(ct);
         }
     }

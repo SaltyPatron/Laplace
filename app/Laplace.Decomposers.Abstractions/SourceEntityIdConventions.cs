@@ -24,10 +24,10 @@ public static class SourceEntityIdConventions
         throw new CiliMapMissingException(path, sourceName);
     }
 
-    public static void WarnIfCiliMapMissing(ILogger logger, string sourceName)
+    public static void WarnIfCiliMapMissing(ILogger? logger, string sourceName)
     {
         var (ok, path, _) = EvaluateCiliMap();
-        if (ok) return;
+        if (ok || logger is null) return;
         logger.LogWarning(
             "CILI ILI map missing or empty at {CiliMapPath}; {Source} ingest will proceed " +
             "without ILI-resolved synset anchors.",

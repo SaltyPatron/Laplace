@@ -19,25 +19,23 @@ internal sealed class Atomic2020GrammarWitness : IGrammarWitness
         if (fields.Count < 3) return;
 
         ReadOnlySpan<byte> utf8 = composed.Utf8;
-        ReadOnlySpan<byte> head = Slice(utf8, fields[0]);
-        ReadOnlySpan<byte> rel = Slice(utf8, fields[1]);
-        ReadOnlySpan<byte> tail = Slice(utf8, fields[2]);
-        if (head.IsEmpty || rel.IsEmpty) return;
+        string headText = Encoding.UTF8.GetString(Slice(utf8, fields[0])).Trim();
+        string relName  = Encoding.UTF8.GetString(Slice(utf8, fields[1])).Trim();
+        string tailText = Encoding.UTF8.GetString(Slice(utf8, fields[2])).Trim();
+        if (headText.Length == 0 || relName.Length == 0) return;
 
         if (!ContentWitnessBatch.TryAppendToBuilder(
-                b, head, Atomic2020Decomposer.Source, out var headId))
+                b, Encoding.UTF8.GetBytes(headText), Atomic2020Decomposer.Source, out var headId))
             return;
 
-        string relName = Encoding.UTF8.GetString(rel).Trim();
         if (!Atomic2020Decomposer.RelTypeId.TryGetValue(relName, out var typeName))
             return;
 
         Hash128 tailId;
-        string tailText = Encoding.UTF8.GetString(tail).Trim();
         if (tailText.Length == 0 || tailText.Equals("none", StringComparison.OrdinalIgnoreCase))
             tailId = NoneId;
         else if (!ContentWitnessBatch.TryAppendToBuilder(
-                     b, tail, Atomic2020Decomposer.Source, out tailId))
+                     b, Encoding.UTF8.GetBytes(tailText), Atomic2020Decomposer.Source, out tailId))
             return;
 
         b.AddAttestation(NativeAttestation.Categorical(
