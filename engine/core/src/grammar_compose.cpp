@@ -913,6 +913,33 @@ int laplace_compose_get_precedes(const laplace_compose_result_t* r, size_t i,
     return 0;
 }
 
+int laplace_compose_drain_into_stage(const laplace_compose_result_t* r,
+                                     intent_stage_t* stage,
+                                     hash128_t source_id,
+                                     int64_t now_us) {
+    if (!r || !stage) return -1;
+    for (size_t i = 0; i < r->entity_count; ++i) {
+        const laplace_compose_entity_t* e = &r->entities[i];
+        if (intent_stage_witness_seen(stage, &e->id)) continue;
+        int rc = intent_stage_add_entity(stage, &e->id, (int16_t)e->tier, &e->type_id, &source_id);
+        if (rc != 0) return rc;
+        intent_stage_witness_record(stage, &e->id);
+    }
+    for (size_t i = 0; i < r->phys_count; ++i) {
+        const laplace_compose_physicality_t* p = &r->physicalities[i];
+        if (intent_stage_witness_seen(stage, &p->id)) continue;
+        uint32_t n_verts = (uint32_t)(p->trajectory_n / 4);
+        int rc = intent_stage_add_physicality(
+            stage, &p->id, &p->entity_id, &source_id,
+            (int16_t)1 /* PhysicalityType.Content */, p->coord, &p->hilbert,
+            p->trajectory_xyzm, n_verts, (int32_t)p->n_constituents,
+            1, 0.0, 1, 0, now_us);
+        if (rc != 0) return rc;
+        intent_stage_witness_record(stage, &p->id);
+    }
+    return 0;
+}
+
 void laplace_compose_result_free(laplace_compose_result_t* r) {
     if (!r) return;
     free(r->entities);

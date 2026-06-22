@@ -314,6 +314,9 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_compose_get_precedes")]
     public static partial int ComposeGetPrecedes(IntPtr result, nuint i, ComposePrecedesNative* outPrec);
 
+    [LibraryImport(Library, EntryPoint = "laplace_compose_drain_into_stage")]
+    public static partial int ComposeDrainIntoStage(IntPtr result, IntPtr stage, Hash128 source, long nowUs);
+
     [LibraryImport(Library, EntryPoint = "laplace_compose_span_lookup")]
     public static partial int ComposeSpanLookup(IntPtr result, uint startByte, uint endByte, Hash128* outId);
 

@@ -33,6 +33,7 @@ cd /d "%LAPLACE_ROOT%\app"
 
 if /i "%STEP%"=="unicode"       goto run_ingest
 if /i "%STEP%"=="iso639"        goto run_ingest
+if /i "%STEP%"=="cili"          goto run_ingest
 if /i "%STEP%"=="wordnet"       goto run_ingest
 if /i "%STEP%"=="omw"           goto run_ingest_omw_commit
 if /i "%STEP%"=="verbnet"       goto run_ingest

@@ -17,6 +17,7 @@ internal static class IngestDataPaths
         ["unicode"]       = "UCD/Public/UCD/latest",
         ["iso639"]        = "ISO639",
         ["document"]      = "test-data/text",
+        ["cili"]          = "CILI",
         ["wordnet"]       = "Wordnet",
         ["omw"]           = "OMW",
         ["verbnet"]       = "VerbNet",
