@@ -23,6 +23,11 @@ rem that was root-caused and fixed (commits 87eeee3 vertices-not-doubles, 97b58e
 rem It is read-only (can only detect, never prevent/cause) and costs a full blob copy+field-walk
 rem per COPY on the hot path. Default off; set LAPLACE_COPY_VALIDATE=1 to re-arm for debugging.
 if not defined LAPLACE_COPY_VALIDATE set "LAPLACE_COPY_VALIDATE=0"
+rem Bulk-fresh skips the per-batch entity-existence probe (entities_exist_bitmap round-trip)
+rem and attestation preflight — decomposers do all content-addressing client-side, the DB gets
+rem a plain COPY stream + ON CONFLICT DO NOTHING for entities as the only dedup mechanism.
+rem Default on for seed operations (initial loads). Set LAPLACE_BULK_FRESH=0 to force incremental.
+if not defined LAPLACE_BULK_FRESH set "LAPLACE_BULK_FRESH=1"
 
 cd /d "%LAPLACE_ROOT%\app"
 
@@ -41,7 +46,7 @@ if /i "%STEP%"=="atomic2020"    goto run_ingest
 if /i "%STEP%"=="ud"            goto run_ingest_ud_commit
 if /i "%STEP%"=="wiktionary"    goto run_ingest_wikt_commit
 if /i "%STEP%"=="tatoeba"       goto run_ingest
-if /i "%STEP%"=="opensubtitles" goto run_ingest
+if /i "%STEP%"=="opensubtitles" goto run_ingest_opensubtitles_commit
 if /i "%STEP%"=="document"      goto run_ingest_path
 if /i "%STEP%"=="stack"         goto run_ingest_path
 if /i "%STEP%"=="repo"          goto run_ingest_path
@@ -59,20 +64,32 @@ call :run_ingest_impl
 exit /b %ERRORLEVEL%
 
 :run_ingest_ud_commit
+rem UD: parallel treebank files (ResolveFileWorkers, headroom=4) + separate commit pool.
 set "_saved=%LAPLACE_INGEST_COMMIT_ROWS%"
 if /i "%STEP%"=="ud" if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=25000"
 if /i "%STEP%"=="conceptnet" (
-  rem Unordered parallel commit: N workers commit self-contained batches concurrently.
-  rem Smaller commit batches = better parallel granularity (measured GiST scaling peaks ~8 workers).
+  rem ConceptNet: single assertions.csv; file workers irrelevant. Commit pool sized for GiST I/O.
   if not defined LAPLACE_INGEST_COMMIT_ROWS set "LAPLACE_INGEST_COMMIT_ROWS=500000"
   if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=65536"
   if not defined LAPLACE_INGEST_COMPOSE_WORKERS set "LAPLACE_INGEST_COMPOSE_WORKERS=4"
   if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=8"
 )
+if /i "%STEP%"=="ud" (
+  call :probe_file_workers 4
+  echo UD parallelism: files=!_file_workers! commit=!LAPLACE_INGEST_WORKERS!
+)
 call :run_ingest_impl
 set "RC=%ERRORLEVEL%"
 if defined _saved (set "LAPLACE_INGEST_COMMIT_ROWS=%_saved%") else set "LAPLACE_INGEST_COMMIT_ROWS="
 exit /b %RC%
+
+:run_ingest_opensubtitles_commit
+rem OpenSubtitles: parallel zip files (ResolveFileWorkers) + separate commit pool.
+if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=4"
+call :probe_file_workers 2
+echo OpenSubtitles parallelism: files=!_file_workers! commit=!LAPLACE_INGEST_WORKERS!
+call :run_ingest_impl
+exit /b %ERRORLEVEL%
 
 :run_ingest_wikt_commit
 set "_saved=%LAPLACE_INGEST_COMMIT_ROWS%"
@@ -82,30 +99,31 @@ set "RC=%ERRORLEVEL%"
 if defined _saved (set "LAPLACE_INGEST_COMMIT_ROWS=%_saved%") else set "LAPLACE_INGEST_COMMIT_ROWS="
 exit /b %RC%
 
+:probe_file_workers
+rem Optional arg 1 = cpu-topology headroom (default 2). Sets _file_workers for echo only.
+set "_probe_hr=%~1"
+if not defined _probe_hr set "_probe_hr=2"
+if defined LAPLACE_DECOMPOSE_WORKERS (
+  set "_file_workers=!LAPLACE_DECOMPOSE_WORKERS!"
+) else (
+  set "_file_workers=?"
+  for /f "delims=" %%i in ('dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- cpu-topology --cpu-bound-workers !_probe_hr! 2^>nul') do set "_file_workers=%%i"
+)
+exit /b 0
+
 :run_ingest_omw_commit
-rem OMW = 1226 .tab files. The validated OMW config (scripts/win/decomposer-test.cmd) runs the
-rem files in PARALLEL (ResolveFileWorkers auto-scales when LAPLACE_DECOMPOSE_WORKERS is a parallel
-rem value) with a SINGLE compose worker per file. The seed orchestration otherwise forces
-rem LAPLACE_DECOMPOSE_WORKERS=1 (one file at a time = the ~20-min crawl) and inherits the global
-rem LAPLACE_INGEST_COMPOSE_WORKERS=4, which drives the multi-threaded within-file compose path
-rem that spiked the native heap to -3 (laplace_grammar_compose returned -3). Pin OMW to the
-rem proven shape: parallel files, serial compose per file, commit parallelism via INGEST_WORKERS.
-set "_saved_dw=%LAPLACE_DECOMPOSE_WORKERS%"
+rem OMW = 1226 .tab files. File fan-out: ResolveFileWorkers (~P-core-2). Within-file compose pinned
+rem to 1 (native heap safety) so total native compose threads ~= file workers, not file*compose.
+rem Commit pool (LAPLACE_INGEST_WORKERS) is separate I/O-bound work — do not charge against decompose.
 set "_saved_cw=%LAPLACE_INGEST_COMPOSE_WORKERS%"
 set "_saved_iw=%LAPLACE_INGEST_WORKERS%"
-set /a "_omw_dw=%NUMBER_OF_PROCESSORS%-2"
-if !_omw_dw! LSS 1 set "_omw_dw=1"
-if !_omw_dw! GTR 16 set "_omw_dw=16"
-set "LAPLACE_DECOMPOSE_WORKERS=!_omw_dw!"
 set "LAPLACE_INGEST_COMPOSE_WORKERS=1"
-rem Parallel file reading alone bought ~nothing (commit was single-threaded); the DB commit/apply
-rem is the real OMW bottleneck. Pin commit parallelism to the validated OMW value (4).
 if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=4"
 if "!LAPLACE_INGEST_WORKERS!"=="1" set "LAPLACE_INGEST_WORKERS=4"
-echo OMW parallelism: files=!LAPLACE_DECOMPOSE_WORKERS! compose=1 commit=!LAPLACE_INGEST_WORKERS!
+call :probe_file_workers 2
+echo OMW parallelism: files=!_file_workers! compose=1 commit=!LAPLACE_INGEST_WORKERS!
 call :run_ingest_impl
 set "RC=%ERRORLEVEL%"
-if defined _saved_dw (set "LAPLACE_DECOMPOSE_WORKERS=%_saved_dw%") else set "LAPLACE_DECOMPOSE_WORKERS="
 if defined _saved_cw (set "LAPLACE_INGEST_COMPOSE_WORKERS=%_saved_cw%") else set "LAPLACE_INGEST_COMPOSE_WORKERS="
 if defined _saved_iw (set "LAPLACE_INGEST_WORKERS=%_saved_iw%") else set "LAPLACE_INGEST_WORKERS="
 exit /b %RC%

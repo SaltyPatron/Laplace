@@ -3,7 +3,6 @@ setlocal EnableDelayedExpansion
 call "%~dp0env.cmd"
 cd /d "%LAPLACE_ROOT%"
 set "LAPLACE_INGEST_WORKERS=4"
-set "LAPLACE_DECOMPOSE_WORKERS=1"
 set "LAPLACE_COPY_VALIDATE=1"
 if not defined LAPLACE_SKIP_MODELS set "LAPLACE_SKIP_MODELS=0"
 if not defined LAPLACE_SKIP_USAGE set "LAPLACE_SKIP_USAGE=0"

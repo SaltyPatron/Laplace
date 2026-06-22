@@ -3,6 +3,7 @@ setlocal
 call "%~dp0env.cmd"
 set "PSQL="%PGBIN%\psql.exe" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1"
 
+rem On hybrid Intel CPUs, consider capping max_parallel_workers near P-core count (laplace cpu-topology --p-cores).
 %PSQL% ^
  -c "ALTER SYSTEM SET shared_buffers = '12GB';" ^
  -c "ALTER SYSTEM SET effective_cache_size = '32GB';" ^

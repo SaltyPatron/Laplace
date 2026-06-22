@@ -85,7 +85,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 ? t : 4_000_000);
         _partitions = foldWorkers
             ?? (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_FOLD_WORKERS"), out var w) && w > 0
-                ? w : Math.Clamp(Environment.ProcessorCount - 2, 1, 4));
+                ? w : CpuTopology.ResolveIoBoundWorkers(defaultCap: 4));
         
         
         

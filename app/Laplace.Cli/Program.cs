@@ -61,7 +61,8 @@ internal static class Program
                 + "  db-roundtrip <file>\n"
                 + "  svd-exact-bench [model-dir] [tensor]  (prove tensor_svd_truncate is fp-exact on a real tensor; no DB)\n"
                 + "  model-bench [model-dir]              (run the whole-model FFN/relation ETL on a real model; no DB)\n"
-                + "  stats");
+                + "  stats\n"
+                + "  cpu-topology [--p-cores | --cpu-bound-workers [headroom] | --io-bound-workers]");
             return 2;
         }
         try
@@ -81,6 +82,7 @@ internal static class Program
                 "roundtrip"    => DecompositionCommands.Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
                 "db-roundtrip" => await DecompositionCommands.DbRoundtripAsync(args.Length > 1 ? args[1] : ""),
                 "stats"        => await IngestCommands.StatsAsync(),
+                "cpu-topology" => CpuTopologyCommands.Run(args[1..]),
                 "svd-exact-bench" => BenchCommands.SvdExactBenchCmd(args[1..]),
                 "model-bench"     => await BenchCommands.ModelBenchCmd(args[1..]),
                 _ => Fail($"unknown command '{args[0]}'"),

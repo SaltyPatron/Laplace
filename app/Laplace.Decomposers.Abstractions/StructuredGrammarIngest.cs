@@ -113,7 +113,9 @@ public static class StructuredGrammarIngest
     private static int ResolveComposeWorkers()
     {
         string? compose = Environment.GetEnvironmentVariable("LAPLACE_INGEST_COMPOSE_WORKERS");
-        return int.TryParse(compose, out int cw) && cw >= 1 ? cw : 1;
+        if (int.TryParse(compose, out int cw) && cw >= 1)
+            return cw;
+        return Math.Min(4, CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 8));
     }
 
     private static async IAsyncEnumerable<SubstrateChange> IngestFileSerialAsync(

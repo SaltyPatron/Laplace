@@ -428,21 +428,29 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             // Per-table natural key: entities/attestations key on id; physicalities additionally on
             // (entity_id, source_id, type). This mirrors SubstrateStagingMerge.FinalizeAsync's merge
             // (which kept a bare ON CONFLICT DO NOTHING and so was never exposed to this hazard).
-            (string distinctOn, string orderBy, string naturalKeyFilter) = table switch
+            // Entities are pure content-addresses: same id = same bytes, always idempotent.
+            // ON CONFLICT DO NOTHING is safe here and eliminates the 23505 cross-worker race
+            // that exhausts the transient-retry budget when many commit workers share the entity
+            // key space (OMW, ConceptNet, etc.). The concern that removed ON CONFLICT globally
+            // was attestation observation_count semantics — not applicable to entities.
+            (string distinctOn, string orderBy, string naturalKeyFilter, string conflictClause) = table switch
             {
                 IntentStageTable.Physicalities => (
                     "entity_id, source_id, type",
                     "entity_id, source_id, type, id",
                     $" AND NOT EXISTS (SELECT 1 FROM laplace.{tableName} n " +
-                    "WHERE n.entity_id = s.entity_id AND n.source_id = s.source_id AND n.type = s.type)"),
-                _ => ("id", "id", string.Empty),
+                    "WHERE n.entity_id = s.entity_id AND n.source_id = s.source_id AND n.type = s.type)",
+                    string.Empty),
+                IntentStageTable.Entities => ("id", "id", string.Empty, " ON CONFLICT (id) DO NOTHING"),
+                _ => ("id", "id", string.Empty, string.Empty),
             };
             promote.CommandText =
                 $"INSERT INTO laplace.{tableName} ({cols}) " +
                 $"SELECT DISTINCT ON ({distinctOn}) {cols} FROM {stageName} s " +
                 $"WHERE NOT EXISTS (SELECT 1 FROM laplace.{tableName} t WHERE t.id = s.id)" +
                 naturalKeyFilter + " " +
-                $"ORDER BY {orderBy}";
+                $"ORDER BY {orderBy}" +
+                conflictClause;
             return await promote.ExecuteNonQueryAsync(ct);
         }
     }
