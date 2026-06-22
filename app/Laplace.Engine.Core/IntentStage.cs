@@ -179,6 +179,13 @@ public sealed class IntentStage : SafeHandle
     
     public static void ResetContentBank() => NativeInterop.ContentWitnessReset();
 
+    // When true, TryAddContentWitness bypasses the global native bank and emits via
+    // BuildContentTree+EmitContentTree instead. The bank is a cross-run dedup optimisation
+    // that grows monotonically until reset; for bulk-fresh loads the DB's ON CONFLICT /
+    // NOT EXISTS handles uniqueness, so the bank buys nothing but OOMs on large corpora.
+    private static volatile bool _bulkFreshBypass;
+    public static void SetBulkFreshBypass(bool enabled) => _bulkFreshBypass = enabled;
+
     public static bool IsContentWitnessProven(Hash128 id)
     {
         unsafe
@@ -193,6 +200,17 @@ public sealed class IntentStage : SafeHandle
         rootId = default;
         if (canonical.IsEmpty) return false;
         ThrowIfDisposed();
+
+        if (_bulkFreshBypass)
+        {
+            // Bulk-fresh: the global bank grows monotonically and OOMs on large corpora (e.g.
+            // OMW 1226 files). Skip the bank and emit via the two-phase tree path — DB uniqueness
+            // is guaranteed by ON CONFLICT DO NOTHING / NOT EXISTS, not the proven-set.
+            var tree = BuildContentTree(canonical);
+            if (tree is null) return false;
+            using (tree) return EmitContentTree(tree, sourceId, ReadOnlySpan<byte>.Empty, out rootId);
+        }
+
         unsafe
         {
             Hash128 src = sourceId;

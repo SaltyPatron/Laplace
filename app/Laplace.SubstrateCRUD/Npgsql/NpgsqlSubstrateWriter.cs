@@ -163,9 +163,17 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
             {
                 if (_provenAtt.Contains(a.Id) || !seenAtt.Add(a.Id))
                 {
-                    var d = attGamesDelta.TryGetValue(a.Id, out var cur) ? cur : (0L, 0L);
-                    attGamesDelta[a.Id] = (checked(d.Item1 + a.ObservationCount),
-                                           Math.Max(d.Item2, a.LastObservedAtUnixUs));
+                    // Bulk-fresh loads don't carry re-observation semantics: every attestation is
+                    // a first-time write to an empty (or near-empty) DB. Routing already-seen IDs
+                    // to attGamesDelta issues a FOR UPDATE lock query against all 4 commit workers
+                    // simultaneously → each waits for the others indefinitely (no SKIP LOCKED).
+                    // Silently drop the duplicate; the first staging attempt covers the row.
+                    if (!_bulkFreshSource)
+                    {
+                        var d = attGamesDelta.TryGetValue(a.Id, out var cur) ? cur : (0L, 0L);
+                        attGamesDelta[a.Id] = (checked(d.Item1 + a.ObservationCount),
+                                               Math.Max(d.Item2, a.LastObservedAtUnixUs));
+                    }
                     continue;
                 }
                 stage.AddAttestation(
@@ -245,7 +253,7 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                         "  SELECT unnest(@ids) AS id, unnest(@games) AS games, unnest(@ts) AS ts_us" +
                         "), locked AS MATERIALIZED (" +
                         "  SELECT a.id FROM laplace.attestations a " +
-                        "  WHERE a.id IN (SELECT id FROM d) ORDER BY a.id FOR UPDATE" +
+                        "  WHERE a.id IN (SELECT id FROM d) ORDER BY a.id FOR UPDATE SKIP LOCKED" +
                         ") " +
                         "UPDATE laplace.attestations a SET " +
                         "  observation_count = a.observation_count + d.games, " +

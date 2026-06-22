@@ -340,7 +340,11 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
 
     uint32_t** children_of = (uint32_t**)calloc(n, sizeof(uint32_t*));
     uint32_t*  child_counts = (uint32_t*)calloc(n, sizeof(uint32_t));
-    if (!children_of || !child_counts) return -3;
+    if (!children_of || !child_counts) {
+        free(children_of);
+        free(child_counts);
+        return -3;
+    }
 
     for (size_t i = 0; i < n; ++i) {
         laplace_ast_node_t nd;
@@ -348,8 +352,14 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
         if (nd.parent != LAPLACE_AST_ROOT && nd.parent < n) {
             uint32_t p = nd.parent;
             uint32_t cc = child_counts[p]++;
-            children_of[p] = (uint32_t*)realloc(children_of[p], (size_t)(cc + 1) * sizeof(uint32_t));
-            if (!children_of[p]) return -3;
+            uint32_t* new_ch = (uint32_t*)realloc(children_of[p], (size_t)(cc + 1) * sizeof(uint32_t));
+            if (!new_ch) {
+                for (size_t j = 0; j < n; ++j) free(children_of[j]);
+                free(children_of);
+                free(child_counts);
+                return -3;
+            }
+            children_of[p] = new_ch;
             children_of[p][cc] = (uint32_t)i;
         }
     }
