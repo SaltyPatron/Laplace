@@ -196,19 +196,14 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
 
                 if (prebuiltStages.Count > 0)
                 {
-                    try
-                    {
-                        entitiesInserted += await StageAndInsertManyAsync(
-                            conn, prebuiltStages, IntentStageTable.Entities, "entities", ct);
-                        physicalitiesInserted += await StageAndInsertManyAsync(
-                            conn, prebuiltStages, IntentStageTable.Physicalities, "physicalities", ct);
-                        roundTrips += 2;
-                    }
-                    finally
-                    {
-                        foreach (var pre in prebuiltStages)
-                            pre.Dispose();
-                    }
+                    // No try/finally here: prebuiltStages must remain alive across retries.
+                    // A 23505 transient race disposes these on the first attempt, making the
+                    // retry crash with ObjectDisposedException. Dispose only after CommitAsync.
+                    entitiesInserted += await StageAndInsertManyAsync(
+                        conn, prebuiltStages, IntentStageTable.Entities, "entities", ct);
+                    physicalitiesInserted += await StageAndInsertManyAsync(
+                        conn, prebuiltStages, IntentStageTable.Physicalities, "physicalities", ct);
+                    roundTrips += 2;
                 }
 
                 if (stage.EntityCount > 0)
@@ -264,6 +259,9 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                     roundTrips++;
                 }
                 await tx.CommitAsync(ct);
+
+                foreach (var pre in prebuiltStages)
+                    pre.Dispose();
 
                 _provenEntities.AddRange(seenEntity);
                 _provenPhys.AddRange(stagedPhysIds);
@@ -397,33 +395,54 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
         await using (var promote = conn.CreateCommand())
         {
             promote.CommandTimeout = 0;
-            // Set-based dedup is the ONLY dedup mechanism: a single NOT EXISTS anti-join filters the
-            // already-present majority in one operation (content-addressed id is the PK), so the DB
-            // only ever receives genuinely-novel rows. There is deliberately NO trailing
-            // `ON CONFLICT DO NOTHING`: that was a per-row speculative-insert crutch that masked,
-            // rather than eliminated, duplicate work — and for attestations it silently DROPPED a
-            // concurrent batch's re-observation count (a present id hit DO NOTHING instead of routing
-            // to the locked observation_count UPDATE). The remaining cross-worker race — two parallel
-            // commit workers staging the same novel id in overlapping transactions, where neither
-            // anti-join sees the other's uncommitted insert — now surfaces as a unique_violation
-            // (SQLSTATE 23505), which IngestRunner's ConcurrencyRetry classifies as transient and
-            // retries the whole batch; on retry the now-committed row is visible to the anti-join (and
-            // to the attestation preflight) so it is correctly skipped/summed with zero duplicates and
-            // zero lost counts. Single-worker runs (the default) never race, so the anti-join alone is
-            // exact. ORDER BY id keeps insert locality.
-            // DISTINCT ON (id) collapses intra-stage duplicates (e.g. graphemes shared across the
-            // several content stages coalesced into one COPY, or any id staged twice) — the other job
-            // ON CONFLICT used to do silently. It is set-based and safe for all three tables: entity
-            // and physicality ids are fully content-addressed so duplicate rows are byte-identical, and
-            // attestations only reach this promote via the main stage, which has already pre-summed
-            // re-observations per id (attGamesDelta + seenAtt) so there are no intra-stage attestation
-            // duplicates to collapse. The NOT EXISTS anti-join then filters everything the table already
-            // holds. This mirrors SubstrateStagingMerge.FinalizeAsync's DISTINCT ON (id) merge.
+            // Set-based dedup is the ONLY dedup mechanism: a NOT EXISTS anti-join filters the
+            // already-present majority in one operation, so the DB only ever receives genuinely-novel
+            // rows. There is deliberately NO trailing `ON CONFLICT DO NOTHING`: that was a per-row
+            // speculative-insert crutch that masked, rather than eliminated, duplicate work — and for
+            // attestations it silently DROPPED a concurrent batch's re-observation count (a present id
+            // hit DO NOTHING instead of routing to the locked observation_count UPDATE).
+            //
+            // CRITICAL: the anti-join + DISTINCT must honor EVERY unique constraint on the target, not
+            // just the `id` PK. The schema (extension/laplace_substrate/sql) declares:
+            //   * entities       — PK (id) only                       (02_entities.sql.in:2)
+            //   * physicalities  — PK (id) + UNIQUE (entity_id, source_id, type)
+            //                                                          (03_physicalities.sql.in:2,16)
+            //   * attestations   — PK (id) only                       (04_attestations.sql.in:2)
+            // The id is content-addressed from (entity_id, source_id, type, coord, trajectory, …), so a
+            // physicality with a DIFFERENT id can still collide on the SECONDARY natural key
+            // (entity_id, source_id, type) — a deterministic duplicate (e.g. the same entity given two
+            // coords by one source) the bare ON CONFLICT used to absorb. The retry net does NOT help
+            // there (it is not a race), so we must filter it set-based: dedup the stage on the natural
+            // key (deterministic ORDER BY → keep the lowest-id winner, drop the rest) AND anti-join the
+            // natural key against the live table. This reproduces the old ON CONFLICT DO NOTHING
+            // semantics (one content physicality per entity+source+type) while staying purely set-based.
+            //
+            // The remaining cross-worker race — two parallel commit workers staging the same novel key
+            // in overlapping transactions, where neither anti-join sees the other's uncommitted insert —
+            // still surfaces as a unique_violation (SQLSTATE 23505) on whichever constraint, which
+            // IngestRunner's ConcurrencyRetry classifies as transient and retries; on retry the
+            // now-committed row is visible to the anti-join so it is correctly skipped/summed with zero
+            // duplicates and zero lost counts. Single-worker runs (the default) never race, so the
+            // anti-join alone is exact. DISTINCT ON + ORDER BY also keep insert locality.
+            //
+            // Per-table natural key: entities/attestations key on id; physicalities additionally on
+            // (entity_id, source_id, type). This mirrors SubstrateStagingMerge.FinalizeAsync's merge
+            // (which kept a bare ON CONFLICT DO NOTHING and so was never exposed to this hazard).
+            (string distinctOn, string orderBy, string naturalKeyFilter) = table switch
+            {
+                IntentStageTable.Physicalities => (
+                    "entity_id, source_id, type",
+                    "entity_id, source_id, type, id",
+                    $" AND NOT EXISTS (SELECT 1 FROM laplace.{tableName} n " +
+                    "WHERE n.entity_id = s.entity_id AND n.source_id = s.source_id AND n.type = s.type)"),
+                _ => ("id", "id", string.Empty),
+            };
             promote.CommandText =
                 $"INSERT INTO laplace.{tableName} ({cols}) " +
-                $"SELECT DISTINCT ON (id) {cols} FROM {stageName} s " +
-                $"WHERE NOT EXISTS (SELECT 1 FROM laplace.{tableName} t WHERE t.id = s.id) " +
-                $"ORDER BY id";
+                $"SELECT DISTINCT ON ({distinctOn}) {cols} FROM {stageName} s " +
+                $"WHERE NOT EXISTS (SELECT 1 FROM laplace.{tableName} t WHERE t.id = s.id)" +
+                naturalKeyFilter + " " +
+                $"ORDER BY {orderBy}";
             return await promote.ExecuteNonQueryAsync(ct);
         }
     }

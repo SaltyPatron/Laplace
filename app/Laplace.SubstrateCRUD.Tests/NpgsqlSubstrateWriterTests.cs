@@ -147,6 +147,58 @@ public class NpgsqlSubstrateWriterTests
     }
 
     [Fact]
+    public async Task ApplyAsync_PhysicalitiesSharingNaturalKey_DifferentIds_NoConflict()
+    {
+        // Regression: physicalities carry a SECONDARY unique constraint UNIQUE (entity_id, source_id,
+        // type) (extension/laplace_substrate/sql/03_physicalities.sql.in:16). The id is content-addressed
+        // from (entity_id, source_id, type, coord, trajectory, …), so two rows with DIFFERENT coords get
+        // DIFFERENT ids yet collide on the natural key. After the bare ON CONFLICT DO NOTHING was
+        // removed, the id-only anti-join let both through and the COPY promote hard-errored with 23505
+        // on physicalities_entity_id_source_id_type_key. The set-based promote must instead keep one
+        // deterministic winner and drop the duplicate (old DO NOTHING semantics) — no exception.
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var src = Hash128.OfCanonical("substrate/source/test/phys-natkey");
+        var typeId = await EnsureTestTypeAsync(src);
+        var entId = H(9001);
+
+        PhysicalityRow Phys(int idSeed, double x) => new(
+            Id: H(idSeed), EntityId: entId, SourceId: src,
+            Type: PhysicalityType.Content,
+            CoordX: x, CoordY: 0.2, CoordZ: 0.3, CoordM: 0.4,
+            HilbertIndex: Hilbert128.Encode(stackalloc double[] { x, 0.2, 0.3, 0.4 }),
+            TrajectoryXyzm: null,
+            NConstituents: 0,
+            AlignmentResidual: null,
+            SourceDim: null,
+            ObservedAtUnixUs: IntentStage.PgEpochUnixUs);
+
+        // Two physicalities, same (entity_id, source_id, type) but different id, in ONE apply.
+        var change = new SubstrateChangeBuilder(src, "phys-natkey-unit")
+            .AddEntity(entId, 0, typeId)
+            .AddPhysicality(Phys(9101, 0.10))
+            .AddPhysicality(Phys(9102, 0.99))
+            .Build();
+
+        var result = await writer.ApplyAsync(change);   // would raise 23505 before the fix
+        Assert.Equal(1, result.PhysicalitiesInserted);
+
+        await using var cnt = _pg.DataSource.CreateCommand(
+            "SELECT count(*) FROM laplace.physicalities WHERE entity_id = $1 AND source_id = $2");
+        cnt.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, entId.ToBytes());
+        cnt.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, src.ToBytes());
+        Assert.Equal(1L, (long)(await cnt.ExecuteScalarAsync())!);
+
+        // Re-apply a THIRD novel id on the already-present natural key: 0 inserted, still no throw
+        // (the natural-key anti-join filters it; idempotent re-ingest).
+        var reapply = new SubstrateChangeBuilder(src, "phys-natkey-reapply")
+            .AddPhysicality(Phys(9103, 0.55))
+            .Build();
+        var second = await writer.ApplyAsync(reapply);
+        Assert.Equal(0, second.PhysicalitiesInserted);
+        Assert.Equal(1L, (long)(await cnt.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
     public async Task ApplyAsync_AcceptsForwardReference_NoPreCheck()
     {
         // Referential integrity is no longer pre-checked per batch. Identity is content-addressed
