@@ -106,6 +106,7 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
                 reportUnits: null,
                 contextId: splitId,
                 commitEpoch: 0,
+                containmentReader: ContainmentReader,
                 ct: ct))
             {
                 yield return change;

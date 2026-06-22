@@ -21,6 +21,7 @@ public static class StructuredGrammarIngest
         Func<ReadOnlySpan<byte>, bool>? acceptRow = null,
         int composeWorkers = 0,
         long maxInputUnits = 0,
+        ISubstrateReader? containmentReader = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         int workers = composeWorkers > 0 ? composeWorkers : ResolveComposeWorkers();
@@ -29,7 +30,7 @@ public static class StructuredGrammarIngest
             await foreach (var change in IngestFileSerialAsync(
                 filePath, modalityId, sourceId, witness, batchSize, witnessWeight,
                 batchLabelPrefix, reportUnits, contextId, commitEpoch, acceptRow,
-                maxInputUnits, ct))
+                maxInputUnits, containmentReader, ct))
                 yield return change;
             yield break;
         }
@@ -37,8 +38,76 @@ public static class StructuredGrammarIngest
         await foreach (var change in IngestFileParallelAsync(
             filePath, modalityId, sourceId, witness, batchSize, witnessWeight,
             batchLabelPrefix, reportUnits, contextId, commitEpoch, acceptRow,
-            workers, maxInputUnits, ct))
+            workers, maxInputUnits, containmentReader, ct))
             yield return change;
+    }
+
+    
+    
+    private const int ContainmentProbeChunk = 1024;
+
+    private readonly record struct PendingRow(
+        GrammarRowComposer Composer, GrammarAst Ast, byte[] LineUtf8, int RowIndex, long RowsTotal);
+
+    
+    
+    
+    
+    
+    
+    private static async Task<byte[][]?> ProbeContainmentAsync(
+        List<PendingRow> pending, ISubstrateReader reader, CancellationToken ct)
+    {
+        if (pending.Count == 0) return null;
+        var perRow = new Hash128[pending.Count][];
+        int total = 0;
+        for (int i = 0; i < pending.Count; i++)
+        {
+            perRow[i] = pending[i].Composer.EntityIds();
+            total += perRow[i].Length;
+        }
+        if (total == 0) return null;
+
+        var candidates = new Hash128[total];
+        int off = 0;
+        for (int i = 0; i < perRow.Length; i++)
+        {
+            Array.Copy(perRow[i], 0, candidates, off, perRow[i].Length);
+            off += perRow[i].Length;
+        }
+
+        byte[] combined = await reader.EntitiesExistBitmapAsync(candidates, ct);
+        long combinedBits = (long)combined.Length * 8;
+
+        var result = new byte[pending.Count][];
+        int g = 0;
+        for (int i = 0; i < pending.Count; i++)
+        {
+            int n = perRow[i].Length;
+            var bm = new byte[(n + 7) / 8];
+            for (int j = 0; j < n; j++)
+            {
+                int gi = g + j;
+                if (gi < combinedBits && (combined[gi >> 3] & (1 << (gi & 7))) != 0)
+                    bm[j >> 3] |= (byte)(1 << (j & 7));
+            }
+            result[i] = bm;
+            g += n;
+        }
+        return result;
+    }
+
+    
+    private static void DrainAndWalk(
+        in PendingRow pr, Hash128 sourceId, IGrammarWitness witness, double witnessWeight,
+        Hash128? contextId, SubstrateChangeBuilder b, byte[]? bitmap)
+    {
+        var root = pr.Composer.DrainInto(b, witnessWeight, bitmap);
+        witness.WalkRow(
+            new GrammarComposeContext(pr.LineUtf8, pr.Ast, root, pr.Composer,
+                JsonGrammarHelper.FindRootObjectNode(pr.Ast)),
+            new RowContext(pr.RowIndex, pr.RowsTotal, contextId),
+            b);
     }
 
     private static int ResolveComposeWorkers()
@@ -60,6 +129,7 @@ public static class StructuredGrammarIngest
         int commitEpoch,
         Func<ReadOnlySpan<byte>, bool>? acceptRow,
         long maxInputUnits,
+        ISubstrateReader? containmentReader,
         [EnumeratorCancellation] CancellationToken ct)
     {
         IntPtr recipe = GrammarDecomposer.LookupById(modalityId);
@@ -67,6 +137,12 @@ public static class StructuredGrammarIngest
 
         IntPtr iter = CreateRowIter(recipe);
         if (iter == IntPtr.Zero) yield break;
+
+        // Two-phase tier-containment dedup: when a reader is supplied, compose rows into a bounded
+        // pending buffer, batch-probe their entity ids with the existing entities_exist_bitmap, then
+        // drain only the novel subtrees (MerkleDedup.TrunkShortcircuit inside GrammarRowComposer).
+        // reader == null keeps the original one-pass behavior byte-for-byte.
+        var pending = containmentReader is not null ? new List<PendingRow>(ContainmentProbeChunk) : null;
 
         try
         {
@@ -95,6 +171,24 @@ public static class StructuredGrammarIngest
 
                     if (maxInputUnits > 0 && rowsParsed >= maxInputUnits)
                     {
+                        if (pending is { Count: > 0 })
+                        {
+                            var maps = await ProbeContainmentAsync(pending, containmentReader!, ct);
+                            for (int k = 0; k < pending.Count; k++)
+                            {
+                                DrainAndWalk(pending[k], sourceId, witness, witnessWeight, contextId, b, maps?[k]);
+                                pending[k].Composer.Dispose();
+                                pending[k].Ast.Dispose();
+                                rowsInBatch++;
+                                if (++inBatch >= batchSize)
+                                {
+                                    yield return b.SetInputUnitsConsumed(rowsInBatch).Build();
+                                    b = NewBuilder(sourceId, batchLabelPrefix, ++bn, batchSize, commitEpoch);
+                                    inBatch = 0; rowsInBatch = 0;
+                                }
+                            }
+                            pending.Clear();
+                        }
                         if (inBatch > 0)
                             yield return b.SetInputUnitsConsumed(rowsInBatch).Build();
                         yield break;
@@ -104,28 +198,82 @@ public static class StructuredGrammarIngest
                         continue;
 
                     rowsParsed++;
-                    rowsInBatch++;
-                    using var astHandle = GrammarAst.Adopt(ast);
-                    ComposeRow(row.LineUtf8, astHandle, sourceId, modalityId, witness, witnessWeight,
-                        contextId, rowIndex++, rowsTotal, b);
+                    var astHandle = GrammarAst.Adopt(ast);
+
+                    if (pending is null)
+                    {
+                        rowsInBatch++;
+                        using (astHandle)
+                            ComposeRow(row.LineUtf8, astHandle, sourceId, modalityId, witness, witnessWeight,
+                                contextId, rowIndex++, rowsTotal, b);
+
+                        if (reportUnits is not null && rowsTotal % 100 == 0)
+                            reportUnits(rowsTotal);
+
+                        if (++inBatch >= batchSize)
+                        {
+                            yield return b.SetInputUnitsConsumed(rowsInBatch).Build();
+                            bn++;
+                            b = NewBuilder(sourceId, batchLabelPrefix, bn, batchSize, commitEpoch);
+                            inBatch = 0;
+                            rowsInBatch = 0;
+
+                            if (maxInputUnits > 0 && rowsParsed >= maxInputUnits)
+                                yield break;
+                        }
+                        continue;
+                    }
+
+                    // Two-phase: compose now, defer drain/walk until the chunk is probed.
+                    var composer = new GrammarRowComposer(row.LineUtf8, astHandle, sourceId, modalityId);
+                    pending.Add(new PendingRow(composer, astHandle, row.LineUtf8, rowIndex++, rowsTotal));
 
                     if (reportUnits is not null && rowsTotal % 100 == 0)
                         reportUnits(rowsTotal);
 
-                    if (++inBatch >= batchSize)
+                    if (pending.Count >= ContainmentProbeChunk)
                     {
-                        yield return b.SetInputUnitsConsumed(rowsInBatch).Build();
-                        bn++;
-                        b = NewBuilder(sourceId, batchLabelPrefix, bn, batchSize, commitEpoch);
-                        inBatch = 0;
-                        rowsInBatch = 0;
-
-                        if (maxInputUnits > 0 && rowsParsed >= maxInputUnits)
-                            yield break;
+                        var maps = await ProbeContainmentAsync(pending, containmentReader!, ct);
+                        bool capHit = false;
+                        for (int k = 0; k < pending.Count; k++)
+                        {
+                            DrainAndWalk(pending[k], sourceId, witness, witnessWeight, contextId, b, maps?[k]);
+                            pending[k].Composer.Dispose();
+                            pending[k].Ast.Dispose();
+                            rowsInBatch++;
+                            if (++inBatch >= batchSize)
+                            {
+                                yield return b.SetInputUnitsConsumed(rowsInBatch).Build();
+                                b = NewBuilder(sourceId, batchLabelPrefix, ++bn, batchSize, commitEpoch);
+                                inBatch = 0; rowsInBatch = 0;
+                                if (maxInputUnits > 0 && rowsParsed >= maxInputUnits) capHit = true;
+                            }
+                        }
+                        pending.Clear();
+                        if (capHit) yield break;
                     }
                 }
 
                 if (read > 0) reportUnits?.Invoke(rowsTotal);
+            }
+
+            if (pending is { Count: > 0 })
+            {
+                var maps = await ProbeContainmentAsync(pending, containmentReader!, ct);
+                for (int k = 0; k < pending.Count; k++)
+                {
+                    DrainAndWalk(pending[k], sourceId, witness, witnessWeight, contextId, b, maps?[k]);
+                    pending[k].Composer.Dispose();
+                    pending[k].Ast.Dispose();
+                    rowsInBatch++;
+                    if (++inBatch >= batchSize)
+                    {
+                        yield return b.SetInputUnitsConsumed(rowsInBatch).Build();
+                        b = NewBuilder(sourceId, batchLabelPrefix, ++bn, batchSize, commitEpoch);
+                        inBatch = 0; rowsInBatch = 0;
+                    }
+                }
+                pending.Clear();
             }
 
             if (inBatch > 0)
@@ -133,6 +281,12 @@ public static class StructuredGrammarIngest
         }
         finally
         {
+            if (pending is not null)
+                foreach (var pr in pending)
+                {
+                    pr.Composer.Dispose();
+                    pr.Ast.Dispose();
+                }
             if (iter != IntPtr.Zero)
                 NativeInterop.GrammarRowIterFree(iter);
         }
@@ -152,6 +306,7 @@ public static class StructuredGrammarIngest
         Func<ReadOnlySpan<byte>, bool>? acceptRow,
         int workers,
         long maxInputUnits,
+        ISubstrateReader? containmentReader,
         [EnumeratorCancellation] CancellationToken ct)
     {
         IntPtr recipe = GrammarDecomposer.LookupById(modalityId);
@@ -243,6 +398,32 @@ public static class StructuredGrammarIngest
                 int inBatch = 0;
                 long rowsInBatch = 0;
                 int rowIndex = workerId * 1_000_000;
+                var pending = containmentReader is not null ? new List<PendingRow>(ContainmentProbeChunk) : null;
+
+                // Drains the deferred pending buffer: one batch-probe of all held entity ids, then
+                // emit only the novel subtrees per row. Mutates b/inBatch/rowsInBatch/rowIndex.
+                async Task DrainPendingAsync(CancellationToken fct)
+                {
+                    if (pending is not { Count: > 0 }) return;
+                    var maps = await ProbeContainmentAsync(pending, containmentReader!, fct);
+                    for (int k = 0; k < pending.Count; k++)
+                    {
+                        DrainAndWalk(pending[k], sourceId, witness, witnessWeight, contextId, b, maps?[k]);
+                        pending[k].Composer.Dispose();
+                        pending[k].Ast.Dispose();
+                        rowsInBatch++;
+                        if (++inBatch >= batchSize)
+                        {
+                            await outChannel.Writer.WriteAsync(
+                                b.SetInputUnitsConsumed(rowsInBatch).Build(), fct);
+                            rowIndex = workerId * 1_000_000;
+                            b = NewBuilder(sourceId, batchLabelPrefix, workerId * 1000 + inBatch, batchSize, commitEpoch);
+                            inBatch = 0;
+                            rowsInBatch = 0;
+                        }
+                    }
+                    pending.Clear();
+                }
 
                 try
                 {
@@ -259,35 +440,54 @@ public static class StructuredGrammarIngest
                             if (!TryClaimParsedRow(maxInputUnits, ref parsedCount))
                                 continue;
 
-                            using var astHandle = GrammarAst.Adopt(ast);
-                            ComposeRow(work.LineUtf8, astHandle, sourceId, modalityId, witness, witnessWeight,
-                                contextId, rowIndex++, work.Sequence + 1, b);
+                            var astHandle = GrammarAst.Adopt(ast);
 
-                            rowsInBatch++;
-                            if (++inBatch >= batchSize)
+                            if (pending is null)
                             {
-                                await outChannel.Writer.WriteAsync(
-                                    b.SetInputUnitsConsumed(rowsInBatch).Build(), runCt);
-                                rowIndex = workerId * 1_000_000;
-                                b = NewBuilder(sourceId, batchLabelPrefix, workerId * 1000 + inBatch, batchSize, commitEpoch);
-                                inBatch = 0;
-                                rowsInBatch = 0;
+                                using (astHandle)
+                                    ComposeRow(work.LineUtf8, astHandle, sourceId, modalityId, witness, witnessWeight,
+                                        contextId, rowIndex++, work.Sequence + 1, b);
+
+                                rowsInBatch++;
+                                if (++inBatch >= batchSize)
+                                {
+                                    await outChannel.Writer.WriteAsync(
+                                        b.SetInputUnitsConsumed(rowsInBatch).Build(), runCt);
+                                    rowIndex = workerId * 1_000_000;
+                                    b = NewBuilder(sourceId, batchLabelPrefix, workerId * 1000 + inBatch, batchSize, commitEpoch);
+                                    inBatch = 0;
+                                    rowsInBatch = 0;
+                                }
+                                continue;
                             }
+
+                            var composer = new GrammarRowComposer(work.LineUtf8, astHandle, sourceId, modalityId);
+                            pending.Add(new PendingRow(composer, astHandle, work.LineUtf8, rowIndex++, work.Sequence + 1));
+                            if (pending.Count >= ContainmentProbeChunk)
+                                await DrainPendingAsync(runCt);
                         }
                     }
 
+                    await DrainPendingAsync(runCt);
                     if (inBatch > 0)
                         await outChannel.Writer.WriteAsync(
                             b.SetInputUnitsConsumed(rowsInBatch).Build(), runCt);
                 }
                 catch (OperationCanceledException) when (capCts.IsCancellationRequested && !ct.IsCancellationRequested)
                 {
+                    try { await DrainPendingAsync(CancellationToken.None); } catch { /* best effort */ }
                     if (inBatch > 0)
                         await outChannel.Writer.WriteAsync(
                             b.SetInputUnitsConsumed(rowsInBatch).Build(), CancellationToken.None);
                 }
                 finally
                 {
+                    if (pending is not null)
+                        foreach (var pr in pending)
+                        {
+                            pr.Composer.Dispose();
+                            pr.Ast.Dispose();
+                        }
                     NativeInterop.GrammarRowIterFree(parseIter);
                 }
             }, runCt);
@@ -431,6 +631,7 @@ public static class StructuredGrammarIngest
         IGrammarWitness witness,
         double witnessWeight,
         string batchLabel,
+        ISubstrateReader? containmentReader = null,
         CancellationToken ct = default)
     {
         IntPtr recipe = GrammarDecomposer.LookupById(modalityId);
@@ -441,7 +642,10 @@ public static class StructuredGrammarIngest
 
         using var ast = GrammarDecomposer.Parse(utf8, recipe);
         using var composer = new GrammarRowComposer(utf8, ast, sourceId, modalityId);
-        var (ents, phys, atts, root) = composer.Materialize(witnessWeight);
+        byte[]? bitmap = containmentReader is not null
+            ? await containmentReader.EntitiesExistBitmapAsync(composer.EntityIds(), ct)
+            : null;
+        var (ents, phys, atts, root) = composer.Materialize(witnessWeight, bitmap);
 
         var b = NewBuilder(sourceId, batchLabel, 0, 1, commitEpoch: 0);
         foreach (var e in ents) b.AddEntity(e);

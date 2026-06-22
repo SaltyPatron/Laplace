@@ -38,13 +38,13 @@ public sealed class VerbNetDecomposer : IDecomposer{
     {
         var boot = new BootstrapIntentBuilder(Source, SourceName, TrustClass);
         boot.AddType("VerbNet_Class");
-        boot.AddType("WordNet_Sense");
         boot.AddRelationType("IS_A");
         boot.AddRelationType("MEMBER_OF_VERBNET_CLASS");
         boot.AddRelationType("HAS_THEMATIC_ROLE");
         boot.AddRelationType("HAS_VERB_FRAME");
         boot.AddRelationType("HAS_EXAMPLE");
         boot.AddRelationType("CORRESPONDS_TO");
+        boot.AddRelationType("EVOKES_FRAME");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -121,8 +121,6 @@ public sealed class VerbNetDecomposer : IDecomposer{
             if (wn.Length > 0)
                 foreach (var raw in wn.Split(' ', StringSplitOptions.RemoveEmptyEntries))
                 {
-                    
-                    
                     string? key = SourceEntityIdConventions.NormalizeSenseKey(raw);
                     if (key is null) continue;
                     var senseEntity = SenseAnchor.Id(key);
@@ -130,6 +128,15 @@ public sealed class VerbNetDecomposer : IDecomposer{
                     b.AddAttestation(NativeAttestation.Categorical(
                         lemmaId.Value, "CORRESPONDS_TO", senseEntity.Value, Source, TC.AcademicCurated));
                 }
+
+            string fnframe = member.GetAttribute("fnframe").Trim();
+            if (fnframe.Length > 0)
+            {
+                var frameId = CategoryAnchor.Id(fnframe);
+                if (frameId is not null)
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        lemmaId.Value, "EVOKES_FRAME", frameId.Value, Source, TC.AcademicCurated));
+            }
         }
 
         foreach (var role in ChildElements(el, "THEMROLES", "THEMROLE"))

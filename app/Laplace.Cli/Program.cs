@@ -81,7 +81,6 @@ internal static class Program
                 "roundtrip"    => DecompositionCommands.Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
                 "db-roundtrip" => await DecompositionCommands.DbRoundtripAsync(args.Length > 1 ? args[1] : ""),
                 "stats"        => await IngestCommands.StatsAsync(),
-                "indexes"      => await IngestCommands.IndexesAsync(args[1..]),
                 "svd-exact-bench" => BenchCommands.SvdExactBenchCmd(args[1..]),
                 "model-bench"     => await BenchCommands.ModelBenchCmd(args[1..]),
                 _ => Fail($"unknown command '{args[0]}'"),

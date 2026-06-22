@@ -30,6 +30,7 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider{
         boot.AddType("Tatoeba_Sentence");
         boot.AddRelationType("HAS_EXTERNAL_ID");
         boot.AddRelationType("IS_TRANSLATION_OF");
+        boot.AddRelationType("HAS_LANGUAGE");
         await context.Writer.ApplyAsync(boot.Build(), ct);
         foreach (var n in boot.CanonicalNames)
             LanguageNames.TryAdd(n, 0);
@@ -64,7 +65,7 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider{
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 sentences, "tsv", Source, witness, batch, 1.0, "tatoeba/sent",
                 reportUnits: null, contextId: null, commitEpoch: 0,
-                acceptRow: acceptSent, ct: ct))
+                acceptRow: acceptSent, containmentReader: context.Reader, ct: ct))
             {
                 if (!options.DryRun) yield return change;
             }
@@ -80,7 +81,7 @@ public sealed class TatoebaDecomposer : IDecomposer, IIngestInventoryProvider{
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 links, "tsv", Source, witness, batch, 1.0, "tatoeba/link",
                 reportUnits: null, contextId: null, commitEpoch: 1,
-                acceptRow: acceptLink, ct: ct))
+                acceptRow: acceptLink, containmentReader: context.Reader, ct: ct))
             {
                 if (!options.DryRun) yield return change;
             }

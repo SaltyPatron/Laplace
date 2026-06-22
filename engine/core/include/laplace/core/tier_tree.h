@@ -58,6 +58,13 @@ int tier_tree_set_id(tier_tree_t* tree, uint32_t idx, const hash128_t* id);
 int tier_tree_set_coord(tier_tree_t* tree, uint32_t idx, const double coord[4]);
 int tier_tree_set_hilbert(tier_tree_t* tree, uint32_t idx, const hilbert128_t* hilbert);
 
+/* Directly set node idx's parent. Used when a tier tree is assembled flat (one node per already
+ * computed entity, in child-before-parent order) rather than via add_node/finalize — e.g. the
+ * grammar compose containment tree consumed by merkle_dedup_trunk_shortcircuit. parent_idx may be
+ * TIER_TREE_INVALID to mark a root. No structural validation (first_child/child_count are not
+ * touched); merkle_dedup only reads the parent array + node count. */
+int tier_tree_set_parent(tier_tree_t* tree, uint32_t idx, uint32_t parent_idx);
+
 const uint8_t*      tier_tree_tier_array(const tier_tree_t* tree);
 const uint32_t*     tier_tree_first_child_idx_array(const tier_tree_t* tree);
 const uint32_t*     tier_tree_child_count_array(const tier_tree_t* tree);

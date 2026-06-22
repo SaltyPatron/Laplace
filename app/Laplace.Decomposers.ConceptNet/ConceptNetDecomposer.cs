@@ -91,6 +91,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
         string ecosystemPath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        SourceEntityIdConventions.WarnIfCiliMapMissing(null, SourceName);
         string file = Path.Combine(ecosystemPath, "assertions.csv");
         if (!File.Exists(file)) yield break;
         int batch = options.BatchSize > 1 ? options.BatchSize : 65536;
@@ -111,6 +112,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase, IIngest
             reportUnits: null,
             acceptRow: acceptRow,
             maxInputUnits: options.MaxInputUnits,
+            containmentReader: ContainmentReader,
             ct: ct))
         {
             yield return change;

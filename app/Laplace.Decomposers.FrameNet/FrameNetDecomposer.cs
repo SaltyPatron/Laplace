@@ -86,6 +86,7 @@ public sealed class FrameNetDecomposer : IDecomposer{
         boot.AddRelationType("CAUSATIVE_OF");
         boot.AddRelationType("INCHOATIVE_OF");
         boot.AddRelationType("PRECEDES");
+        boot.AddRelationType("ALSO_SEE");
         boot.AddRelationType("IS_A");
         boot.AddRelationType("HAS_SUBEVENT");
         boot.AddRelationType("RELATED_TO");
