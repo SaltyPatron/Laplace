@@ -113,7 +113,8 @@ public sealed class RepoDecomposer : IDecomposer
                 using var ast = GrammarDecomposer.Parse(bytes, recipe);
                 var geb = new GrammarEntityBuilder(
                     bytes, ast, Source, modality, recipe, GrammarTags.TagsSource(modality));
-                (ents, phys, atts, codeRootId) = geb.Build(SourceTrust.StructuredCorpus);
+                (ents, phys, atts, codeRootId) = await geb.BuildAsync(
+                    SourceTrust.StructuredCorpus, context.Reader, ct);
                 _canonicalNames.UnionWith(geb.NodeTypeCanonicalNames);
             }
             catch { continue; }

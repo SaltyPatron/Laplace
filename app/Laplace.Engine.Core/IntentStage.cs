@@ -210,6 +210,67 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
+    /// <summary>
+    /// Build the content tier tree for a UTF-8 span without emitting anything. The returned tree is
+    /// owned by the caller (dispose it). First half of the two-phase containment path: build once,
+    /// probe <see cref="TierTree.NodeIds"/> against the DB existing-bitmap, then emit only novel
+    /// nodes via <see cref="EmitContentTree"/> — no second decomposition.
+    /// </summary>
+    public static TierTree? BuildContentTree(ReadOnlySpan<byte> canonical)
+    {
+        if (canonical.IsEmpty) return null;
+        unsafe
+        {
+            IntPtr treePtr = IntPtr.Zero;
+            fixed (byte* p = canonical)
+            {
+                int rc = NativeInterop.ContentWitnessTreeBuild(p, (nuint)canonical.Length, &treePtr);
+                if (rc == -3) throw new InvalidOperationException(
+                    "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
+                if (rc != 0 || treePtr == IntPtr.Zero) return null;
+            }
+            return TierTree.FromExistingHandle(treePtr);
+        }
+    }
+
+    /// <summary>
+    /// Emit a pre-built content tier tree. When <paramref name="existingBitmap"/> is non-empty only
+    /// novel subtrees are staged (MerkleDedup.TrunkShortcircuit, indexed by tree node order); a
+    /// present trunk skips its whole subtree. An empty bitmap emits all nodes. <paramref name="rootId"/>
+    /// always receives the natural-unit root so attestations can be wired even when the subtree is skipped.
+    /// </summary>
+    public bool EmitContentTree(
+        TierTree tree, Hash128 sourceId, ReadOnlySpan<byte> existingBitmap, out Hash128 rootId)
+    {
+        rootId = default;
+        ArgumentNullException.ThrowIfNull(tree);
+        ThrowIfDisposed();
+        unsafe
+        {
+            Hash128 src = sourceId;
+            Hash128 root = default;
+            int rc;
+            if (existingBitmap.IsEmpty)
+            {
+                rc = NativeInterop.ContentWitnessEmitTree(
+                    handle, tree.DangerousNativeHandle, &src, null, 0, &root);
+            }
+            else
+            {
+                fixed (byte* bm = existingBitmap)
+                {
+                    rc = NativeInterop.ContentWitnessEmitTree(
+                        handle, tree.DangerousNativeHandle, &src, bm, (nuint)tree.NodeCount, &root);
+                }
+            }
+            if (rc == -3) throw new InvalidOperationException(
+                "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
+            if (rc != 0) return false;
+            rootId = root;
+            return true;
+        }
+    }
+
     public bool WitnessContains(Hash128 id)
     {
         ThrowIfDisposed();

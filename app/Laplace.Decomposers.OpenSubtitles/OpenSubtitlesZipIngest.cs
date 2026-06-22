@@ -133,12 +133,16 @@ internal static class OpenSubtitlesZipIngest
         return dot >= 0 ? baseName[(dot + 1)..] : baseName;
     }
 
-    internal static SubstrateChangeBuilder NewBuilder(string unit, int batch, Hash128 langA, Hash128 langB)
+    internal static SubstrateChangeBuilder NewBuilder(
+        string unit, int batch, Hash128 langA, Hash128 langB, ISubstrateReader? reader = null)
     {
         var b = new SubstrateChangeBuilder(OpenSubtitlesDecomposer.Source, unit, null,
             entityCapacity: batch * 4,
             physicalityCapacity: batch * 8,
             attestationCapacity: batch * 4);
+        // Subtitle-line content (TryAppendPair) is deferred and tier-deduped per micro-batch when a
+        // reader is available; the language entities above are plain managed rows.
+        b.EnableDeferredContent(reader);
         b.AddEntity(new EntityRow(langA, EntityTier.Vocabulary, EntityTypeRegistry.Language, OpenSubtitlesDecomposer.Source));
         b.AddEntity(new EntityRow(langB, EntityTier.Vocabulary, EntityTypeRegistry.Language, OpenSubtitlesDecomposer.Source));
         return b;

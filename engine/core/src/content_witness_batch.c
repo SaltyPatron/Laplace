@@ -9,6 +9,7 @@
 #include "laplace/core/hash128.h"
 #include "laplace/core/hash_composer.h"
 #include "laplace/core/intent_stage.h"
+#include "laplace/core/merkle_dedup.h"
 #include "laplace/core/text_decomposer.h"
 #include "laplace/core/tier_tree.h"
 #include "laplace/core/mantissa.h"
@@ -220,11 +221,11 @@ void content_witness_reset(void) { }
 int content_witness_entity_proven(const hash128_t* id) { (void)id; return 0; }
 
 static int emit_node(
-    intent_stage_t*  stage,
-    tier_tree_t*     tree,
-    uint32_t         idx,
-    const hash128_t* source_id,
-    int64_t          now_us) {
+    intent_stage_t*    stage,
+    const tier_tree_t* tree,
+    uint32_t           idx,
+    const hash128_t*   source_id,
+    int64_t            now_us) {
     tier_node_view_t node;
     if (tier_tree_get_node(tree, idx, &node) != 0) return 0;
     if (node.tier == 0) return 0;
@@ -274,6 +275,68 @@ static int emit_node(
     return 0;
 }
 
+// Build the content tier tree for a UTF-8 span and hand back the retained handle. The caller owns
+// it and must release it with tier_tree_free. This is the first half of the two-phase containment
+// path: build once, probe the node ids against the DB existing-bitmap, then emit only novel nodes
+// via content_witness_emit_tree — avoiding a second decomposition (the grammar compose path does the
+// same with its retained compose result).
+int content_witness_tree_build(
+    const uint8_t* utf8,
+    size_t         len,
+    tier_tree_t**  out_tree) {
+    if (!utf8 || !out_tree) return -1;
+    return content_tree_build(utf8, len, out_tree);
+}
+
+// Emit a pre-built content tier tree into the stage. When existing_bitmap is non-NULL, only the
+// novel subtrees (MerkleDedup.TrunkShortcircuit over the tree node order) are emitted — a present
+// trunk skips its whole subtree, exactly like TextEntityBuilder. existing_bitmap == NULL emits all
+// nodes (tier-0 is skipped inside emit_node). out_root_id always receives the natural-unit root id
+// so the caller can wire attestations even when the subtree is skipped.
+int content_witness_emit_tree(
+    intent_stage_t*    stage,
+    const tier_tree_t* tree,
+    const hash128_t*   source_id,
+    const uint8_t*     existing_bitmap,
+    size_t             bitmap_bits,
+    hash128_t*         out_root_id) {
+    if (!stage || !tree || !source_id || !out_root_id) return -1;
+
+    size_t nc = tier_tree_node_count(tree);
+
+    uint32_t root_idx = natural_unit_index(tree);
+    tier_node_view_t root;
+    tier_tree_get_node(tree, root_idx, &root);
+    *out_root_id = root.id;
+
+    if (intent_stage_witness_seen(stage, &root.id)) return 0;
+
+    int64_t now_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
+
+    if (existing_bitmap && bitmap_bits > 0) {
+        uint32_t* novel = (uint32_t*)malloc(nc * sizeof(uint32_t));
+        if (!novel) return -2;
+        size_t novel_n = 0;
+        if (merkle_dedup_trunk_shortcircuit(
+                tree, existing_bitmap, bitmap_bits, novel, &novel_n) != 0) {
+            free(novel);
+            return -2;
+        }
+        for (size_t k = 0; k < novel_n; ++k) {
+            int rc = emit_node(stage, tree, novel[k], source_id, now_us);
+            if (rc != 0) { free(novel); return rc; }
+        }
+        free(novel);
+        return 0;
+    }
+
+    for (uint32_t idx = 0; idx < (uint32_t)nc; ++idx) {
+        int rc = emit_node(stage, tree, idx, source_id, now_us);
+        if (rc != 0) return rc;
+    }
+    return 0;
+}
+
 int content_witness_batch_add(
     intent_stage_t*  stage,
     const uint8_t*   utf8,
@@ -291,29 +354,8 @@ int content_witness_batch_add(
         }
     }
 
-    size_t nc = tier_tree_node_count(tree);
-
-    uint32_t root_idx = natural_unit_index(tree);
-    tier_node_view_t root;
-    tier_tree_get_node(tree, root_idx, &root);
-    *out_root_id = root.id;
-
-    if (intent_stage_witness_seen(stage, &root.id)) {
-        tier_tree_free(tree);
-        return 0;
-    }
-
-    int64_t now_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
-
-    for (uint32_t idx = 0; idx < (uint32_t)nc; ++idx) {
-        int rc = emit_node(stage, tree, idx, source_id, now_us);
-        if (rc != 0) {
-            tier_tree_free(tree);
-            return rc;
-        }
-    }
-
+    int rc = content_witness_emit_tree(stage, tree, source_id, NULL, 0, out_root_id);
     tier_tree_free(tree);
-    return 0;
+    return rc;
 }
 

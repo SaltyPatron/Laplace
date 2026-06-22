@@ -86,14 +86,43 @@ public sealed class SubstrateChangeBuilder
     }
 
     private IntentStage? _contentStage;
+    private ContentBatch? _deferredContent;
+    private ISubstrateReader? _contentReader;
 
-    
-    
-    
-    
-    
-    
-    
+    /// <summary>
+    /// Per-batch deferred content cache used by the two-phase tier-containment dedup path. Non-null
+    /// only after <see cref="EnableDeferredContent"/> with a reader; content emitters route through it.
+    /// </summary>
+    public ContentBatch? DeferredContent => _deferredContent;
+
+    /// <summary>
+    /// Enables compose/decompose-time tier-containment dedup for content emissions on this builder.
+    /// When <paramref name="reader"/> is non-null, <c>ContentWitnessBatch.TryAppendToBuilder</c> defers
+    /// staging into <see cref="DeferredContent"/>; <see cref="BuildAsync"/> then probes each content
+    /// tree's node ids once and stages only the novel subtrees. A null reader is a no-op, preserving
+    /// the original one-pass native content-witness behavior byte-for-byte.
+    /// </summary>
+    public SubstrateChangeBuilder EnableDeferredContent(ISubstrateReader? reader)
+    {
+        if (reader is not null)
+        {
+            _contentReader = reader;
+            _deferredContent ??= new ContentBatch();
+        }
+        return this;
+    }
+
+    /// <summary>
+    /// Flushes any deferred content (one batched existence probe, then emit only novel subtrees) and
+    /// builds. Equivalent to <see cref="Build"/> when no deferred content is enabled.
+    /// </summary>
+    public async Task<SubstrateChange> BuildAsync(CancellationToken ct = default)
+    {
+        if (_deferredContent is { HasPending: true } cb && _contentReader is { } reader)
+            await cb.ProbeAndFlushAsync(ContentStage, reader, ct);
+        return Build();
+    }
+
     public IntentStage ContentStage
     {
         get

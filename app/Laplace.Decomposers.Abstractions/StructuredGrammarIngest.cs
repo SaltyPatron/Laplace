@@ -146,7 +146,7 @@ public static class StructuredGrammarIngest
 
         try
         {
-            var b = NewBuilder(sourceId, batchLabelPrefix, 0, batchSize, commitEpoch);
+            var b = NewBuilder(sourceId, batchLabelPrefix, 0, batchSize, commitEpoch, containmentReader);
             int inBatch = 0, bn = 0, rowIndex = 0;
             long rowsTotal = 0;
             long rowsInBatch = 0;
@@ -182,15 +182,15 @@ public static class StructuredGrammarIngest
                                 rowsInBatch++;
                                 if (++inBatch >= batchSize)
                                 {
-                                    yield return b.SetInputUnitsConsumed(rowsInBatch).Build();
-                                    b = NewBuilder(sourceId, batchLabelPrefix, ++bn, batchSize, commitEpoch);
+                                    yield return await b.SetInputUnitsConsumed(rowsInBatch).BuildAsync(ct);
+                                    b = NewBuilder(sourceId, batchLabelPrefix, ++bn, batchSize, commitEpoch, containmentReader);
                                     inBatch = 0; rowsInBatch = 0;
                                 }
                             }
                             pending.Clear();
                         }
                         if (inBatch > 0)
-                            yield return b.SetInputUnitsConsumed(rowsInBatch).Build();
+                            yield return await b.SetInputUnitsConsumed(rowsInBatch).BuildAsync(ct);
                         yield break;
                     }
 
@@ -212,9 +212,9 @@ public static class StructuredGrammarIngest
 
                         if (++inBatch >= batchSize)
                         {
-                            yield return b.SetInputUnitsConsumed(rowsInBatch).Build();
+                            yield return await b.SetInputUnitsConsumed(rowsInBatch).BuildAsync(ct);
                             bn++;
-                            b = NewBuilder(sourceId, batchLabelPrefix, bn, batchSize, commitEpoch);
+                            b = NewBuilder(sourceId, batchLabelPrefix, bn, batchSize, commitEpoch, containmentReader);
                             inBatch = 0;
                             rowsInBatch = 0;
 
@@ -243,8 +243,8 @@ public static class StructuredGrammarIngest
                             rowsInBatch++;
                             if (++inBatch >= batchSize)
                             {
-                                yield return b.SetInputUnitsConsumed(rowsInBatch).Build();
-                                b = NewBuilder(sourceId, batchLabelPrefix, ++bn, batchSize, commitEpoch);
+                                yield return await b.SetInputUnitsConsumed(rowsInBatch).BuildAsync(ct);
+                                b = NewBuilder(sourceId, batchLabelPrefix, ++bn, batchSize, commitEpoch, containmentReader);
                                 inBatch = 0; rowsInBatch = 0;
                                 if (maxInputUnits > 0 && rowsParsed >= maxInputUnits) capHit = true;
                             }
@@ -268,8 +268,8 @@ public static class StructuredGrammarIngest
                     rowsInBatch++;
                     if (++inBatch >= batchSize)
                     {
-                        yield return b.SetInputUnitsConsumed(rowsInBatch).Build();
-                        b = NewBuilder(sourceId, batchLabelPrefix, ++bn, batchSize, commitEpoch);
+                        yield return await b.SetInputUnitsConsumed(rowsInBatch).BuildAsync(ct);
+                        b = NewBuilder(sourceId, batchLabelPrefix, ++bn, batchSize, commitEpoch, containmentReader);
                         inBatch = 0; rowsInBatch = 0;
                     }
                 }
@@ -277,7 +277,7 @@ public static class StructuredGrammarIngest
             }
 
             if (inBatch > 0)
-                yield return b.SetInputUnitsConsumed(rowsInBatch).Build();
+                yield return await b.SetInputUnitsConsumed(rowsInBatch).BuildAsync(ct);
         }
         finally
         {
@@ -394,7 +394,7 @@ public static class StructuredGrammarIngest
                 if (parseIter == IntPtr.Zero)
                     return;
 
-                var b = NewBuilder(sourceId, batchLabelPrefix, workerId, batchSize, commitEpoch);
+                var b = NewBuilder(sourceId, batchLabelPrefix, workerId, batchSize, commitEpoch, containmentReader);
                 int inBatch = 0;
                 long rowsInBatch = 0;
                 int rowIndex = workerId * 1_000_000;
@@ -415,9 +415,9 @@ public static class StructuredGrammarIngest
                         if (++inBatch >= batchSize)
                         {
                             await outChannel.Writer.WriteAsync(
-                                b.SetInputUnitsConsumed(rowsInBatch).Build(), fct);
+                                await b.SetInputUnitsConsumed(rowsInBatch).BuildAsync(fct), fct);
                             rowIndex = workerId * 1_000_000;
-                            b = NewBuilder(sourceId, batchLabelPrefix, workerId * 1000 + inBatch, batchSize, commitEpoch);
+                            b = NewBuilder(sourceId, batchLabelPrefix, workerId * 1000 + inBatch, batchSize, commitEpoch, containmentReader);
                             inBatch = 0;
                             rowsInBatch = 0;
                         }
@@ -452,9 +452,9 @@ public static class StructuredGrammarIngest
                                 if (++inBatch >= batchSize)
                                 {
                                     await outChannel.Writer.WriteAsync(
-                                        b.SetInputUnitsConsumed(rowsInBatch).Build(), runCt);
+                                        await b.SetInputUnitsConsumed(rowsInBatch).BuildAsync(runCt), runCt);
                                     rowIndex = workerId * 1_000_000;
-                                    b = NewBuilder(sourceId, batchLabelPrefix, workerId * 1000 + inBatch, batchSize, commitEpoch);
+                                    b = NewBuilder(sourceId, batchLabelPrefix, workerId * 1000 + inBatch, batchSize, commitEpoch, containmentReader);
                                     inBatch = 0;
                                     rowsInBatch = 0;
                                 }
@@ -471,14 +471,14 @@ public static class StructuredGrammarIngest
                     await DrainPendingAsync(runCt);
                     if (inBatch > 0)
                         await outChannel.Writer.WriteAsync(
-                            b.SetInputUnitsConsumed(rowsInBatch).Build(), runCt);
+                            await b.SetInputUnitsConsumed(rowsInBatch).BuildAsync(runCt), runCt);
                 }
                 catch (OperationCanceledException) when (capCts.IsCancellationRequested && !ct.IsCancellationRequested)
                 {
                     try { await DrainPendingAsync(CancellationToken.None); } catch { /* best effort */ }
                     if (inBatch > 0)
                         await outChannel.Writer.WriteAsync(
-                            b.SetInputUnitsConsumed(rowsInBatch).Build(), CancellationToken.None);
+                            await b.SetInputUnitsConsumed(rowsInBatch).BuildAsync(CancellationToken.None), CancellationToken.None);
                 }
                 finally
                 {
@@ -614,7 +614,8 @@ public static class StructuredGrammarIngest
     private readonly record struct ComposeWork(long Sequence, byte[] LineUtf8);
 
     private static SubstrateChangeBuilder NewBuilder(
-        Hash128 sourceId, string prefix, int bn, int batchSize, int commitEpoch) =>
+        Hash128 sourceId, string prefix, int bn, int batchSize, int commitEpoch,
+        ISubstrateReader? containmentReader = null) =>
         new SubstrateChangeBuilder(sourceId, $"{prefix}/{bn}", null,
             // Compose entities/physicalities drain into the native ContentStage now, not these
             // managed arrays — so capacity is sized for witness rows + PRECEDES, not the old
@@ -622,7 +623,10 @@ public static class StructuredGrammarIngest
             entityCapacity: batchSize,
             physicalityCapacity: batchSize,
             attestationCapacity: batchSize * 4)
-            .SetCommitEpoch(commitEpoch);
+            .SetCommitEpoch(commitEpoch)
+            // Witness content emissions (ContentWitnessBatch.*) are deferred and tier-deduped per
+            // batch when a reader is available; compose entities still drain straight into the stage.
+            .EnableDeferredContent(containmentReader);
 
     public static async Task<SubstrateChange?> IngestJsonDocumentAsync(
         string filePath,
@@ -647,7 +651,7 @@ public static class StructuredGrammarIngest
             : null;
         var (ents, phys, atts, root) = composer.Materialize(witnessWeight, bitmap);
 
-        var b = NewBuilder(sourceId, batchLabel, 0, 1, commitEpoch: 0);
+        var b = NewBuilder(sourceId, batchLabel, 0, 1, commitEpoch: 0, containmentReader);
         foreach (var e in ents) b.AddEntity(e);
         foreach (var p in phys) b.AddPhysicality(p);
         foreach (var a in atts) b.AddAttestation(a);
@@ -655,6 +659,6 @@ public static class StructuredGrammarIngest
         var ctx = new GrammarComposeContext(utf8, ast, root, composer,
             JsonGrammarHelper.FindRootObjectNode(ast));
         witness.WalkRow(ctx, new RowContext(0, 1), b);
-        return b.SetInputUnitsConsumed(1).Build();
+        return await b.SetInputUnitsConsumed(1).BuildAsync(ct);
     }
 }

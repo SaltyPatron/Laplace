@@ -394,6 +394,21 @@ public static unsafe partial class NativeInterop
         Hash128* sourceId,
         Hash128* outRootId);
 
+    [LibraryImport(Library, EntryPoint = "content_witness_tree_build")]
+    internal static partial int ContentWitnessTreeBuild(
+        byte* utf8,
+        nuint len,
+        IntPtr* outTree);
+
+    [LibraryImport(Library, EntryPoint = "content_witness_emit_tree")]
+    internal static partial int ContentWitnessEmitTree(
+        IntPtr stage,
+        IntPtr tree,
+        Hash128* sourceId,
+        byte* existingBitmap,
+        nuint bitmapBits,
+        Hash128* outRootId);
+
     [LibraryImport(Library, EntryPoint = "content_witness_reset")]
     internal static partial void ContentWitnessReset();
 

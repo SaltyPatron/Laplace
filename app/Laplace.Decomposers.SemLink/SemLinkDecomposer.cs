@@ -45,7 +45,7 @@ public sealed class SemLinkDecomposer : IDecomposer{
         {
             var witness = new SemLinkGrammarWitness(kind);
             await foreach (var change in StreamJsonDocumentAsync(
-                               path, witness, label, batchSize, ct))
+                               path, witness, label, batchSize, context.Reader, ct))
             {
                 if (!options.DryRun)
                     yield return change;
@@ -81,6 +81,7 @@ public sealed class SemLinkDecomposer : IDecomposer{
         SemLinkGrammarWitness witness,
         string label,
         int batchSize,
+        ISubstrateReader? containmentReader,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         IntPtr recipe = GrammarDecomposer.LookupById(witness.ModalityId);
@@ -101,8 +102,9 @@ public sealed class SemLinkDecomposer : IDecomposer{
             int end = Math.Min(start + batchSize, pairSpans.Count);
             byte[] subDoc = BuildSubDocument(utf8, pairSpans, start, end);
 
-            var change = ComposeBatch(
-                subDoc, recipe, witness, $"{label}/{batchIndex}", recordCount: end - start, ct);
+            var change = await ComposeBatchAsync(
+                subDoc, recipe, witness, $"{label}/{batchIndex}", recordCount: end - start,
+                containmentReader, ct);
             batchIndex++;
             if (change is not null)
                 yield return change;
@@ -162,15 +164,18 @@ public sealed class SemLinkDecomposer : IDecomposer{
     /// stage CORRESPONDS_TO / ROLE_CORRESPONDS_TO. Hashing and compose are reused; nothing here
     /// reimplements identity.
     /// </summary>
-    private static SubstrateChange? ComposeBatch(
+    private static async Task<SubstrateChange?> ComposeBatchAsync(
         byte[] subDoc, IntPtr recipe, SemLinkGrammarWitness witness,
-        string batchLabel, int recordCount, CancellationToken ct)
+        string batchLabel, int recordCount, ISubstrateReader? containmentReader, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
         using var ast = GrammarDecomposer.Parse(subDoc, recipe);
         using var composer = new GrammarRowComposer(subDoc, ast, Source, witness.ModalityId);
-        var (ents, phys, atts, root) = composer.Materialize(witnessWeight: 1.0);
+        byte[]? bitmap = containmentReader is not null
+            ? await containmentReader.EntitiesExistBitmapAsync(composer.EntityIds(), ct)
+            : null;
+        var (ents, phys, atts, root) = composer.Materialize(witnessWeight: 1.0, bitmap);
 
         var b = new SubstrateChangeBuilder(Source, batchLabel, null,
             entityCapacity: recordCount,
