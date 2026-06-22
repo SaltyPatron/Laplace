@@ -19,6 +19,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Laplace.Decomposers.Unicode\Laplace.Decomposers.Unicode.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.ISO\Laplace.Decomposers.ISO.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.CILI\Laplace.Decomposers.CILI.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.WordNet\Laplace.Decomposers.WordNet.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.OMW\Laplace.Decomposers.OMW.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers.UD\Laplace.Decomposers.UD.csproj" />

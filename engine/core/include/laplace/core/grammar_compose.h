@@ -6,6 +6,7 @@
 #include "laplace/core/grammar_decomposer.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/hilbert4d.h"
+#include "laplace/core/intent_stage.h"
 #include "laplace/core/tier_tree.h"
 
 #ifdef __cplusplus
@@ -107,6 +108,16 @@ int laplace_compose_get_physicality(const laplace_compose_result_t* r, size_t i,
                                     laplace_compose_physicality_t* out);
 int laplace_compose_get_precedes(const laplace_compose_result_t* r, size_t i,
                                  laplace_compose_precedes_t* out);
+
+/* Bulk drain: stream all compose entities + physicalities straight into the intent stage in one
+ * call, with no per-row managed round-trip. Within-batch dedup via the stage witness set
+ * (intent_stage_witness_seen/record). Content physicalities are typed PhysicalityType.Content (1);
+ * trajectory_n is a double count so vertex count = trajectory_n / 4. PRECEDES bigrams are NOT drained
+ * here (they ride the managed attestation-aggregation path). Returns 0 on success. */
+int laplace_compose_drain_into_stage(const laplace_compose_result_t* r,
+                                     intent_stage_t* stage,
+                                     hash128_t source_id,
+                                     int64_t now_us);
 
 #ifdef __cplusplus
 }

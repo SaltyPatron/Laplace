@@ -7,6 +7,7 @@ using System.Text;
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Atomic2020;
+using Laplace.Decomposers.CILI;
 using Laplace.Decomposers.Code;
 using Laplace.Decomposers.ConceptNet;
 using Laplace.Decomposers.ISO;
@@ -120,6 +121,7 @@ internal static class IngestCommands
         {
             "unicode"  => await IngestUnicodeViaRunnerAsync(cli),
             "iso639"   => await IngestISO639Async(cli),
+            "cili"     => await IngestViaRunnerAsync(new CILIDecomposer(), IngestDataPaths.Resolve("cili", cli.Path), skipLayerCheck: false, cli),
             "wordnet"  => await IngestViaRunnerAsync(new WordNetDecomposer(), IngestDataPaths.Resolve("wordnet", cli.Path), skipLayerCheck: false, cli),
             "omw"      => await IngestViaRunnerAsync(new OMWDecomposer(), IngestDataPaths.Resolve("omw", cli.Path), skipLayerCheck: false, cli),
             "ud"       => await IngestViaRunnerAsync(new UDDecomposer(), IngestDataPaths.Resolve("ud", cli.Path), skipLayerCheck: false, cli),
@@ -740,6 +742,11 @@ internal static class IngestCommands
                 break;
             case "OMWDecomposer":
                 Console.WriteLine($"  check omw: HAS_DEFINITION={await RelationEvidence("HAS_DEFINITION", srcKey):N0}");
+                break;
+            case "CILIDecomposer":
+                Console.WriteLine($"  check cili: HAS_DEFINITION={await RelationEvidence("HAS_DEFINITION", srcKey):N0} "
+                                + $"HAS_NAME_ALIAS={await RelationEvidence("HAS_NAME_ALIAS", srcKey):N0} "
+                                + $"IS_TYPED_AS={await RelationEvidence("IS_TYPED_AS", srcKey):N0}");
                 break;
             case "FrameNetDecomposer":
                 Console.WriteLine($"  check framenet: HAS_FRAME_ELEMENT={await RelationEvidence("HAS_FRAME_ELEMENT", srcKey):N0}");
