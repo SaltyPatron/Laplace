@@ -425,7 +425,7 @@ internal static class IngestCommands
                 + (p.UnitsFailed > 0 ? $" failed={p.UnitsFailed:N0} status=failed" : " status=running"));
         });
         int batch = EnvInt("LAPLACE_INGEST_BATCH", 2048, min: 1);
-        int workers = EnvInt("LAPLACE_INGEST_WORKERS", 1, min: 1);
+        int workers = EnvInt("LAPLACE_INGEST_WORKERS", CpuTopology.ResolveIoBoundWorkers(defaultCap: 8), min: 1);
         long maxUnits = EnvLong("LAPLACE_INGEST_MAX_UNITS", 0, min: 0);
         int commitRows = ResolveCommitRows(sourceName);
         var decoOpts = DecomposerOptions.ForWitness(

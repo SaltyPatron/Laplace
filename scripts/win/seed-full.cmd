@@ -6,7 +6,6 @@ cd /d "%LAPLACE_ROOT%"
 set "LAPLACE_SKIP_MODELS=1"
 set "LAPLACE_INGEST_LANGS="
 if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=4"
-set "LAPLACE_DECOMPOSE_WORKERS=1"
 if not defined LAPLACE_COPY_VALIDATE set "LAPLACE_COPY_VALIDATE=0"
 
 echo ==== FULL SEED FROM SCRATCH (all languages, no model deposition) ====

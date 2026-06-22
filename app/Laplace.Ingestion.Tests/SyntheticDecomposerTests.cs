@@ -249,6 +249,35 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         Assert.True(result.AttestationsInserted >= 3);
     }
 
+    /// <summary>
+    /// Simulates OMW-style parallel file workers (N Task.Run producers, shared vocabulary entity
+    /// across files) combined with parallel commit workers. Correctness relies on commit-layer
+    /// idempotency (entity ON CONFLICT DO NOTHING + attestation observation_count UPDATE), not
+    /// compose-time bitmap probes seeing sibling workers' uncommitted rows.
+    /// </summary>
+    [Fact]
+    public async Task ParallelFileDecomposeAndCommit_ConvergesWithSharedVocabulary()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var reader = new NpgsqlSubstrateReader(_pg.DataSource);
+        var runner = new IngestRunner(writer, reader);
+        var srcId = Hash128.OfCanonical("substrate/source/SyntheticMultiFile/v1");
+        var decomposer = new MultiFileParallelDecomposer(fileCount: 8, batchesPerFile: 6, sourceId: srcId);
+
+        var options = IngestRunOptions.Default with
+        {
+            SkipLayerOrderingCheck = true,
+            ParallelWorkers = 4,
+            BatchSize = 2,
+        };
+
+        var result = await runner.RunAsync(decomposer, options);
+        Assert.Equal(48, result.UnitsApplied);
+        Assert.Equal(0, result.UnitsFailed);
+        // 1 shared grapheme-like entity + 8 files * 6 batches * 1 unique entity each = 49
+        Assert.Equal(49, result.EntitiesInserted);
+    }
+
     [Fact]
     public async Task ParallelBatched_ConvergesUnderCrossWorkerIdOverlap()
     {
@@ -325,6 +354,95 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
 
         public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
             => Task.FromResult<long?>(6);
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class MultiFileParallelDecomposer : IDecomposer
+    {
+        private readonly int _fileCount;
+        private readonly int _batchesPerFile;
+        private readonly Hash128 _sharedVocab;
+
+        public MultiFileParallelDecomposer(int fileCount, int batchesPerFile, Hash128 sourceId)
+        {
+            _fileCount = fileCount;
+            _batchesPerFile = batchesPerFile;
+            SourceId = sourceId;
+            var seed = new byte[12];
+            BitConverter.TryWriteBytes(seed.AsSpan(0, 8), sourceId.Lo);
+            BitConverter.TryWriteBytes(seed.AsSpan(8, 4), -99);
+            _sharedVocab = Hash128.Blake3(seed);
+        }
+
+        public Hash128 SourceId { get; }
+        public string SourceName => "SyntheticMultiFile";
+        public int LayerOrder => 0;
+        public Hash128 TrustClassId =>
+            Hash128.OfCanonical("substrate/trust_class/SubstrateMandate/v1");
+
+        public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+        {
+            var bitmap = await context.Reader.EntitiesExistBitmapAsync(new[] { SourceId }, ct);
+            if (bitmap.Length > 0 && (bitmap[0] & 1) != 0) return;
+            await context.Writer.ApplyAsync(
+                new BootstrapIntentBuilder(SourceId, SourceName, TrustClassId).Build(), ct);
+        }
+
+        public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+            IDecomposerContext context, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct = default)
+        {
+            var outChannel = System.Threading.Channels.Channel.CreateUnbounded<SubstrateChange>(
+                new System.Threading.Channels.UnboundedChannelOptions
+                {
+                    SingleWriter = false,
+                    SingleReader = true,
+                });
+
+            int fileWorkers = Math.Min(6, _fileCount);
+            int nextFile = -1;
+            var workers = new Task[fileWorkers];
+            for (int w = 0; w < fileWorkers; w++)
+            {
+                workers[w] = Task.Run(async () =>
+                {
+                    while (true)
+                    {
+                        int fileIdx = Interlocked.Increment(ref nextFile);
+                        if (fileIdx >= _fileCount) break;
+
+                        var seed = new byte[12];
+                        for (int b = 0; b < _batchesPerFile; b++)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            BitConverter.TryWriteBytes(seed.AsSpan(0, 8), SourceId.Lo);
+                            BitConverter.TryWriteBytes(seed.AsSpan(8, 4), fileIdx * 1000 + b);
+                            var uniq = Hash128.Blake3(seed);
+                            var change = new SubstrateChangeBuilder(SourceId, $"file-{fileIdx}/batch-{b}")
+                                .AddEntity(_sharedVocab, 0, BootstrapIntentBuilder.SourceTypeId)
+                                .AddEntity(uniq, 0, BootstrapIntentBuilder.SourceTypeId)
+                                .Build();
+                            await outChannel.Writer.WriteAsync(change, ct);
+                        }
+                    }
+                }, ct);
+            }
+
+            var closer = Task.Run(() => Task.WhenAll(workers), ct)
+                .ContinueWith(t => outChannel.Writer.TryComplete(t.Exception), TaskScheduler.Default);
+
+            while (await outChannel.Reader.WaitToReadAsync(ct))
+            {
+                while (outChannel.Reader.TryRead(out var change))
+                    yield return change;
+            }
+
+            await closer;
+        }
+
+        public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+            => Task.FromResult<long?>(_fileCount * _batchesPerFile);
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
