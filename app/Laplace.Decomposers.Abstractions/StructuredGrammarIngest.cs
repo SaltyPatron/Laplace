@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Channels;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -213,6 +214,8 @@ public static class StructuredGrammarIngest
                         }
                         catch (InvalidOperationException ex) when (ex.Message.Contains("laplace_grammar_compose"))
                         {
+                            Console.Error.WriteLine(
+                                $"[COMPOSE_SKIP] {filePath}:{rowsTotal} rc={ex.Message} row={System.Text.Encoding.UTF8.GetString(row.LineUtf8[..Math.Min(row.LineUtf8.Length, 200)])}");
                             continue;
                         }
 
@@ -241,6 +244,8 @@ public static class StructuredGrammarIngest
                     }
                     catch (InvalidOperationException ex) when (ex.Message.Contains("laplace_grammar_compose"))
                     {
+                        Console.Error.WriteLine(
+                            $"[COMPOSE_SKIP] {filePath}:{rowsTotal} rc={ex.Message} row={System.Text.Encoding.UTF8.GetString(row.LineUtf8[..Math.Min(row.LineUtf8.Length, 200)])}");
                         astHandle.Dispose();
                         continue;
                     }
@@ -470,6 +475,8 @@ public static class StructuredGrammarIngest
                                 }
                                 catch (InvalidOperationException ex) when (ex.Message.Contains("laplace_grammar_compose"))
                                 {
+                                    Console.Error.WriteLine(
+                                        $"[COMPOSE_SKIP] {filePath}:{work.Sequence} rc={ex.Message} row={System.Text.Encoding.UTF8.GetString(work.LineUtf8[..Math.Min(work.LineUtf8.Length, 200)])}");
                                     continue;
                                 }
 
@@ -493,6 +500,8 @@ public static class StructuredGrammarIngest
                             }
                             catch (InvalidOperationException ex) when (ex.Message.Contains("laplace_grammar_compose"))
                             {
+                                Console.Error.WriteLine(
+                                    $"[COMPOSE_SKIP] {filePath}:{work.Sequence} rc={ex.Message} row={System.Text.Encoding.UTF8.GetString(work.LineUtf8[..Math.Min(work.LineUtf8.Length, 200)])}");
                                 astHandle.Dispose();
                                 continue;
                             }
