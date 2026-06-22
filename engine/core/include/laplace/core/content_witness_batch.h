@@ -5,6 +5,7 @@
 
 #include "laplace/core/hash128.h"
 #include "laplace/core/intent_stage.h"
+#include "laplace/core/tier_tree.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,6 +17,21 @@ int content_witness_batch_add(
     size_t           len,
     const hash128_t* source_id,
     hash128_t*       out_root_id);
+
+// Two-phase containment helpers: build the content tier tree once (caller frees with
+// tier_tree_free), probe its node ids against the DB existing-bitmap, then emit only novel nodes.
+int content_witness_tree_build(
+    const uint8_t* utf8,
+    size_t         len,
+    tier_tree_t**  out_tree);
+
+int content_witness_emit_tree(
+    intent_stage_t*    stage,
+    const tier_tree_t* tree,
+    const hash128_t*   source_id,
+    const uint8_t*     existing_bitmap,
+    size_t             bitmap_bits,
+    hash128_t*         out_root_id);
 
 void content_witness_reset(void);
 

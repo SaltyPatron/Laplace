@@ -61,8 +61,37 @@ public static class ContentWitnessBatch
         SubstrateChangeBuilder builder,
         ReadOnlySpan<byte> canonical,
         Hash128 sourceId,
+        out Hash128 rootId)
+    {
+        // When the builder has deferred content enabled (a reader is available), build the content
+        // tier tree once and defer staging to the batch flush — which probes node ids and stages only
+        // novel subtrees (tier-containment dedup). Otherwise fall back to the original native add.
+        if (builder.DeferredContent is { } cb)
+            return cb.Append(canonical, sourceId, out rootId);
+        return TryAddToIntentStage(builder.ContentStage, canonical, sourceId, out rootId);
+    }
+
+    /// <summary>
+    /// Build the content tier tree for <paramref name="canonical"/> without emitting. Caller disposes
+    /// the returned tree. Used by the two-phase containment path (build once, probe roots/node ids,
+    /// then <see cref="TryEmitTree"/> only the novel subtrees).
+    /// </summary>
+    public static TierTree? BuildTree(ReadOnlySpan<byte> canonical) =>
+        IntentStage.BuildContentTree(canonical);
+
+    /// <summary>
+    /// Emit a pre-built content tier tree into the builder's content stage. An empty
+    /// <paramref name="existingBitmap"/> emits all nodes; a non-empty bitmap (indexed by tree node
+    /// order, from <see cref="TierTree.NodeIds"/> probed via <c>entities_exist_bitmap</c>) emits only
+    /// novel subtrees via MerkleDedup.TrunkShortcircuit.
+    /// </summary>
+    public static bool TryEmitTree(
+        SubstrateChangeBuilder builder,
+        TierTree tree,
+        Hash128 sourceId,
+        ReadOnlySpan<byte> existingBitmap,
         out Hash128 rootId) =>
-        TryAddToIntentStage(builder.ContentStage, canonical, sourceId, out rootId);
+        builder.ContentStage.EmitContentTree(tree, sourceId, existingBitmap, out rootId);
 
     
     public static bool TryAppendUnderscoredToBuilder(

@@ -109,15 +109,21 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
         string dictDir = Path.Combine(context.EcosystemPath, "WordNet-3.0", "dict");
         int batch = options.BatchSize > 1 ? options.BatchSize : 2048;
 
-        await foreach (var change in StreamDataAsync(dictDir, batch, ct))
+        // Decompose-time tier-containment dedup: when a reader is available, each batch builder defers
+        // its content-witness emissions (lemmas, glosses, examples, sense keys, frames, exceptions,
+        // verb sentences), probes the distinct content roots/node-ids once via entities_exist_bitmap,
+        // and stages only the novel subtrees. reader == null keeps the original one-pass behavior.
+        ISubstrateReader? reader = context.Reader;
+
+        await foreach (var change in StreamDataAsync(dictDir, batch, reader, ct))
         { if (!options.DryRun) yield return change; await Task.Yield(); }
-        await foreach (var change in StreamSensesAsync(dictDir, batch, ct))
+        await foreach (var change in StreamSensesAsync(dictDir, batch, reader, ct))
         { if (!options.DryRun) yield return change; await Task.Yield(); }
 
-        await foreach (var change in StreamExceptionsAsync(dictDir, batch, ct))
+        await foreach (var change in StreamExceptionsAsync(dictDir, batch, reader, ct))
         { if (!options.DryRun) yield return change; await Task.Yield(); }
 
-        await foreach (var change in StreamVerbSentencesAsync(dictDir, batch, ct))
+        await foreach (var change in StreamVerbSentencesAsync(dictDir, batch, reader, ct))
         { if (!options.DryRun) yield return change; await Task.Yield(); }
     }
 
@@ -170,10 +176,10 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     private static async IAsyncEnumerable<SubstrateChange> StreamDataAsync(
-        string dictDir, int batch,
+        string dictDir, int batch, ISubstrateReader? reader,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var b = NewBuilder("wordnet/data-0", batch);
+        var b = NewBuilder("wordnet/data-0", batch, reader);
         int count = 0, batchNum = 0;
         var frameTemplates = await LoadVerbFramesAsync(dictDir, ct);
 
@@ -190,13 +196,13 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
                 if (++count >= batch)
                 {
-                    yield return b.SetInputUnitsConsumed(count).Build();
-                    b = NewBuilder($"wordnet/data-{++batchNum}", batch);
+                    yield return await b.SetInputUnitsConsumed(count).BuildAsync(ct);
+                    b = NewBuilder($"wordnet/data-{++batchNum}", batch, reader);
                     count = 0;
                 }
             }
         }
-        if (count > 0) yield return b.SetInputUnitsConsumed(count).Build();
+        if (count > 0) yield return await b.SetInputUnitsConsumed(count).BuildAsync(ct);
     }
 
     private static void EmitSynsetEntities(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)
@@ -297,13 +303,13 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
     }
 
     private static async IAsyncEnumerable<SubstrateChange> StreamSensesAsync(
-        string dictDir, int batch,
+        string dictDir, int batch, ISubstrateReader? reader,
         [EnumeratorCancellation] CancellationToken ct)
     {
         string path = Path.Combine(dictDir, "index.sense");
         if (!File.Exists(path)) yield break;
 
-        var b = NewBuilder("wordnet/sense-0", batch);
+        var b = NewBuilder("wordnet/sense-0", batch, reader);
         int count = 0, batchNum = 0;
 
         await foreach (var s in ParseSensesAsync(path, ct))
@@ -327,19 +333,20 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
             if (++count >= batch)
             {
-                yield return b.Build();
-                b = NewBuilder($"wordnet/sense-{++batchNum}", batch);
+                yield return await b.BuildAsync(ct);
+                b = NewBuilder($"wordnet/sense-{++batchNum}", batch, reader);
                 count = 0;
             }
         }
-        if (count > 0) yield return b.Build();
+        if (count > 0) yield return await b.BuildAsync(ct);
     }
 
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch) =>
-        new(Source, unit, null,
+    private static SubstrateChangeBuilder NewBuilder(string unit, int batch, ISubstrateReader? reader = null) =>
+        new SubstrateChangeBuilder(Source, unit, null,
             entityCapacity:      batch * 6,
             physicalityCapacity: batch * 6,
-            attestationCapacity: batch * 8);
+            attestationCapacity: batch * 8)
+            .EnableDeferredContent(reader);
 
     private static string Surface(string lemma) => lemma.Replace('_', ' ');
 
@@ -377,10 +384,10 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
     }
 
     private static async IAsyncEnumerable<SubstrateChange> StreamExceptionsAsync(
-        string dictDir, int batch,
+        string dictDir, int batch, ISubstrateReader? reader,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var b = NewBuilder("wordnet/exc-0", batch);
+        var b = NewBuilder("wordnet/exc-0", batch, reader);
         int count = 0, batchNum = 0;
         foreach (var excFile in new[] { "noun.exc", "verb.exc", "adj.exc", "adv.exc" })
         {
@@ -411,17 +418,17 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
                 }
                 if (++count >= batch)
                 {
-                    yield return b.Build();
-                    b = NewBuilder($"wordnet/exc-{++batchNum}", batch);
+                    yield return await b.BuildAsync(ct);
+                    b = NewBuilder($"wordnet/exc-{++batchNum}", batch, reader);
                     count = 0;
                 }
             }
         }
-        if (count > 0) yield return b.Build();
+        if (count > 0) yield return await b.BuildAsync(ct);
     }
 
     private static async IAsyncEnumerable<SubstrateChange> StreamVerbSentencesAsync(
-        string dictDir, int batch,
+        string dictDir, int batch, ISubstrateReader? reader,
         [EnumeratorCancellation] CancellationToken ct)
     {
         string idxPath = Path.Combine(dictDir, "sentidx.vrb");
@@ -434,7 +441,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
         var senseIndex = await LoadSenseKeyIndexAsync(Path.Combine(dictDir, "index.sense"), ct);
         if (senseIndex.Count == 0) yield break;
 
-        var b = NewBuilder("wordnet/sents-0", batch);
+        var b = NewBuilder("wordnet/sents-0", batch, reader);
         int count = 0, batchNum = 0;
 
         await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(idxPath, ct))
@@ -471,12 +478,12 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
             if (++count >= batch)
             {
-                yield return b.Build();
-                b = NewBuilder($"wordnet/sents-{++batchNum}", batch);
+                yield return await b.BuildAsync(ct);
+                b = NewBuilder($"wordnet/sents-{++batchNum}", batch, reader);
                 count = 0;
             }
         }
-        if (count > 0) yield return b.Build();
+        if (count > 0) yield return await b.BuildAsync(ct);
     }
 
     private static async Task<Dictionary<int, string>> LoadVerbSentencesAsync(

@@ -50,22 +50,64 @@ public sealed class GrammarEntityBuilder
             Hash128 RootId) Build(double witnessWeight)
         => Build(witnessWeight, existingBitmap: null);
 
-    
-    
-    
-    
-    
-    
-    public unsafe (ImmutableArray<EntityRow> Entities,
-                   ImmutableArray<PhysicalityRow> Physicalities,
-                   ImmutableArray<AttestationRow> Attestations,
-                   Hash128 RootId) Build(double witnessWeight, byte[]? existingBitmap)
-    {
-        int n = _ast.NodeCount;
-        if (_utf8.Length == 0 || n == 0)
-            return (ImmutableArray<EntityRow>.Empty, ImmutableArray<PhysicalityRow>.Empty,
-                    ImmutableArray<AttestationRow>.Empty, default);
+    private static readonly (ImmutableArray<EntityRow>,
+                             ImmutableArray<PhysicalityRow>,
+                             ImmutableArray<AttestationRow>, Hash128) Empty =
+        (ImmutableArray<EntityRow>.Empty, ImmutableArray<PhysicalityRow>.Empty,
+         ImmutableArray<AttestationRow>.Empty, default);
 
+    
+    
+    
+    
+    
+    
+    public (ImmutableArray<EntityRow> Entities,
+            ImmutableArray<PhysicalityRow> Physicalities,
+            ImmutableArray<AttestationRow> Attestations,
+            Hash128 RootId) Build(double witnessWeight, byte[]? existingBitmap)
+    {
+        if (_utf8.Length == 0 || _ast.NodeCount == 0) return Empty;
+        IntPtr composeResult = Compose();
+        try { return Extract(composeResult, witnessWeight, existingBitmap); }
+        finally
+        {
+            if (composeResult != IntPtr.Zero)
+                NativeInterop.ComposeResultFree(composeResult);
+        }
+    }
+
+    /// <summary>
+    /// Reader-driven tier-containment dedup, mirroring the structured/grammar ingest path: compose
+    /// once, probe the composed entity ids via the existing <c>entities_exist_bitmap</c> facility,
+    /// then emit only novel subtrees through <see cref="MerkleDedup.TrunkShortcircuit"/>. PRECEDES
+    /// and tag attestations still flow (they carry new evidence).
+    /// </summary>
+    public async Task<(ImmutableArray<EntityRow> Entities,
+                       ImmutableArray<PhysicalityRow> Physicalities,
+                       ImmutableArray<AttestationRow> Attestations,
+                       Hash128 RootId)> BuildAsync(
+        double witnessWeight, ISubstrateReader? containmentReader, CancellationToken ct = default)
+    {
+        if (_utf8.Length == 0 || _ast.NodeCount == 0) return Empty;
+        if (containmentReader is null) return Build(witnessWeight, null);
+
+        IntPtr composeResult = Compose();
+        try
+        {
+            byte[]? bitmap =
+                await containmentReader.EntitiesExistBitmapAsync(ComposeEntityIds(composeResult), ct);
+            return Extract(composeResult, witnessWeight, bitmap);
+        }
+        finally
+        {
+            if (composeResult != IntPtr.Zero)
+                NativeInterop.ComposeResultFree(composeResult);
+        }
+    }
+
+    private unsafe IntPtr Compose()
+    {
         IntPtr composeResult = IntPtr.Zero;
         fixed (byte* p = _utf8)
         {
@@ -75,8 +117,29 @@ public sealed class GrammarEntityBuilder
             if (rc != 0 || composeResult == IntPtr.Zero)
                 throw new InvalidOperationException($"laplace_grammar_compose returned {rc}");
         }
+        return composeResult;
+    }
 
-        try
+    private static unsafe Hash128[] ComposeEntityIds(IntPtr composeResult)
+    {
+        nuint nEnt = NativeInterop.ComposeEntityCount(composeResult);
+        var ids = new Hash128[(int)nEnt];
+        for (nuint i = 0; i < nEnt; i++)
+        {
+            NativeInterop.ComposeEntityNative e;
+            NativeInterop.ComposeGetEntity(composeResult, i, &e);
+            ids[(int)i] = e.Id;
+        }
+        return ids;
+    }
+
+    private unsafe (ImmutableArray<EntityRow> Entities,
+                    ImmutableArray<PhysicalityRow> Physicalities,
+                    ImmutableArray<AttestationRow> Attestations,
+                    Hash128 RootId) Extract(
+        IntPtr composeResult, double witnessWeight, byte[]? existingBitmap)
+    {
+        int n = _ast.NodeCount;
         {
             long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
             var entities      = ImmutableArray.CreateBuilder<EntityRow>();
@@ -176,11 +239,6 @@ public sealed class GrammarEntityBuilder
             attestations.AddRange(BuildTagAttestations(nodes, compId, compValid, witnessWeight));
             return (entities.ToImmutable(), physicalities.ToImmutable(),
                     attestations.ToImmutable(), NativeInterop.ComposeRootId(composeResult));
-        }
-        finally
-        {
-            if (composeResult != IntPtr.Zero)
-                NativeInterop.ComposeResultFree(composeResult);
         }
     }
 

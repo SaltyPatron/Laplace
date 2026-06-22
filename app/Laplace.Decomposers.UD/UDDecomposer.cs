@@ -79,12 +79,50 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider{
         var files = ListTreebankFiles(treebanksDir, options);
         if (files.Count == 0) yield break;
 
+        // Compose-time tier-containment dedup: when a reader is available, buffer each batch, probe
+        // its distinct content roots/node-ids via the existing entities_exist_bitmap, and stage only
+        // novel subtrees (MerkleDedup.TrunkShortcircuit in the native content emit). reader == null
+        // keeps the original one-pass streaming behavior byte-for-byte.
+        ISubstrateReader? reader = context.Reader;
+
         if (workers <= 1 || files.Count == 1)
         {
-            var b = NewBuilder("ud/batch-0", batchSentences);
-            var seenEntBatch = new HashSet<Hash128>();
-            var seenAttBatch = new ConcurrentIdSet();
-            int sentCount = 0, batchNum = 0;
+            if (reader is null)
+            {
+                var b = NewBuilder("ud/batch-0", batchSentences);
+                var seenEntBatch = new HashSet<Hash128>();
+                var seenAttBatch = new ConcurrentIdSet();
+                int sentCount = 0, batchNum = 0;
+                foreach (string conllu in files)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    string langCode = ExtractLangCode(Path.GetFileName(conllu));
+                    Hash128 langId = LanguageReference.Resolve(langCode);
+
+                    await foreach (var sentence in ParseSentencesAsync(conllu, ct))
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        EmitSentence(b, sentence, langId, langCode, seenEntBatch, seenAttBatch, _canonicalNames);
+
+                        if (++sentCount >= batchSentences)
+                        {
+                            if (!options.DryRun) yield return b.SetInputUnitsConsumed(sentCount).Build();
+                            b = NewBuilder($"ud/batch-{++batchNum}", batchSentences);
+                            seenEntBatch.Clear();
+                            seenAttBatch = new ConcurrentIdSet();
+                            sentCount = 0;
+                            await Task.Yield();
+                        }
+                    }
+                    if (!options.DryRun)
+                        yield return PeriodBoundary(Path.GetFileNameWithoutExtension(conllu));
+                }
+                if (sentCount > 0 && !options.DryRun) yield return b.SetInputUnitsConsumed(sentCount).Build();
+                yield break;
+            }
+
+            var buffer = new List<(UdSentence, Hash128, string)>(batchSentences);
+            int bn = 0;
             foreach (string conllu in files)
             {
                 ct.ThrowIfCancellationRequested();
@@ -94,22 +132,23 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider{
                 await foreach (var sentence in ParseSentencesAsync(conllu, ct))
                 {
                     ct.ThrowIfCancellationRequested();
-                    EmitSentence(b, sentence, langId, langCode, seenEntBatch, seenAttBatch, _canonicalNames);
-
-                    if (++sentCount >= batchSentences)
+                    buffer.Add((sentence, langId, langCode));
+                    if (buffer.Count >= batchSentences)
                     {
-                        if (!options.DryRun) yield return b.SetInputUnitsConsumed(sentCount).Build();
-                        b = NewBuilder($"ud/batch-{++batchNum}", batchSentences);
-                        seenEntBatch.Clear();
-                        seenAttBatch = new ConcurrentIdSet();
-                        sentCount = 0;
-                        await Task.Yield();
+                        var change = await BuildBatchAsync(buffer, $"ud/batch-{bn++}", batchSentences, reader, ct);
+                        buffer.Clear();
+                        if (change is not null && !options.DryRun) yield return change;
                     }
                 }
                 if (!options.DryRun)
                     yield return PeriodBoundary(Path.GetFileNameWithoutExtension(conllu));
             }
-            if (sentCount > 0 && !options.DryRun) yield return b.SetInputUnitsConsumed(sentCount).Build();
+            if (buffer.Count > 0)
+            {
+                var change = await BuildBatchAsync(buffer, $"ud/batch-{bn++}", batchSentences, reader, ct);
+                buffer.Clear();
+                if (change is not null && !options.DryRun) yield return change;
+            }
             yield break;
         }
 
@@ -135,24 +174,52 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider{
                     Hash128 langId = LanguageReference.Resolve(langCode);
                     string stem = Path.GetFileNameWithoutExtension(conllu);
 
-                    var b = NewBuilder($"ud/w{worker}/{stem}/0", batchSentences);
-                    var seenEntBatch = new HashSet<Hash128>();
-                    var seenAttBatch = new ConcurrentIdSet();
-                    int sentCount = 0, batchNum = 0;
-                    await foreach (var sentence in ParseSentencesAsync(conllu, ct))
+                    if (reader is null)
                     {
-                        EmitSentence(b, sentence, langId, langCode, seenEntBatch, seenAttBatch, _canonicalNames);
-                        if (++sentCount >= batchSentences)
+                        var b = NewBuilder($"ud/w{worker}/{stem}/0", batchSentences);
+                        var seenEntBatch = new HashSet<Hash128>();
+                        var seenAttBatch = new ConcurrentIdSet();
+                        int sentCount = 0, batchNum = 0;
+                        await foreach (var sentence in ParseSentencesAsync(conllu, ct))
                         {
-                            if (!options.DryRun) await channel.Writer.WriteAsync(b.SetInputUnitsConsumed(sentCount).Build(), ct);
-                            b = NewBuilder($"ud/w{worker}/{stem}/{++batchNum}", batchSentences);
-                            seenEntBatch.Clear();
-                            seenAttBatch = new ConcurrentIdSet();
-                            sentCount = 0;
+                            EmitSentence(b, sentence, langId, langCode, seenEntBatch, seenAttBatch, _canonicalNames);
+                            if (++sentCount >= batchSentences)
+                            {
+                                if (!options.DryRun) await channel.Writer.WriteAsync(b.SetInputUnitsConsumed(sentCount).Build(), ct);
+                                b = NewBuilder($"ud/w{worker}/{stem}/{++batchNum}", batchSentences);
+                                seenEntBatch.Clear();
+                                seenAttBatch = new ConcurrentIdSet();
+                                sentCount = 0;
+                            }
+                        }
+                        if (sentCount > 0 && !options.DryRun)
+                            await channel.Writer.WriteAsync(b.SetInputUnitsConsumed(sentCount).Build(), ct);
+                    }
+                    else
+                    {
+                        var buffer = new List<(UdSentence, Hash128, string)>(batchSentences);
+                        int batchNum = 0;
+                        await foreach (var sentence in ParseSentencesAsync(conllu, ct))
+                        {
+                            buffer.Add((sentence, langId, langCode));
+                            if (buffer.Count >= batchSentences)
+                            {
+                                var change = await BuildBatchAsync(
+                                    buffer, $"ud/w{worker}/{stem}/{batchNum++}", batchSentences, reader, ct);
+                                buffer.Clear();
+                                if (change is not null && !options.DryRun)
+                                    await channel.Writer.WriteAsync(change, ct);
+                            }
+                        }
+                        if (buffer.Count > 0)
+                        {
+                            var change = await BuildBatchAsync(
+                                buffer, $"ud/w{worker}/{stem}/{batchNum++}", batchSentences, reader, ct);
+                            buffer.Clear();
+                            if (change is not null && !options.DryRun)
+                                await channel.Writer.WriteAsync(change, ct);
                         }
                     }
-                    if (sentCount > 0 && !options.DryRun)
-                        await channel.Writer.WriteAsync(b.SetInputUnitsConsumed(sentCount).Build(), ct);
                     if (!options.DryRun)
                         await channel.Writer.WriteAsync(PeriodBoundary(stem), ct);
                 }
@@ -208,23 +275,24 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider{
 
     private static void EmitSentence(SubstrateChangeBuilder b, UdSentence s, Hash128 langId, string langCode,
                                      HashSet<Hash128> seenEntBatch, ConcurrentIdSet seenAttBatch,
-                                     ConcurrentDictionary<string, byte> canonicalNames)
+                                     ConcurrentDictionary<string, byte> canonicalNames,
+                                     ContentBatch? cb = null)
     {
         b.AddEntity(new EntityRow(langId, EntityTier.Vocabulary, LanguageTypeId, Source));
         VocabularyNames.TrackLanguage(canonicalNames, langCode);
 
         if (s.TextUtf8 is { Length: > 0 })
-            EmitUtf8(b, s.TextUtf8, Source);
+            EmitUtf8(b, s.TextUtf8, Source, cb);
 
         var formId = new Hash128?[s.MaxId + 1];
         var refToForm = new Dictionary<string, Hash128>(s.Tokens.Count, StringComparer.Ordinal);
         foreach (var tok in s.Tokens)
         {
-            var fid = EmitUtf8(b, tok.FormUtf8, Source);
+            var fid = EmitUtf8(b, tok.FormUtf8, Source, cb);
             if (tok.Id >= 0) formId[tok.Id] = fid;
             if (fid is { } f) refToForm[tok.Ref] = f;
             if (!tok.FormLemmaSame)
-                EmitUtf8(b, tok.LemmaUtf8, Source);
+                EmitUtf8(b, tok.LemmaUtf8, Source, cb);
         }
 
         foreach (var tok in s.Tokens)
@@ -308,14 +376,14 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider{
                     if (val.Length == 0) continue;
                     if (key.Equals("Gloss", StringComparison.OrdinalIgnoreCase))
                     {
-                        var g = ContentWitnessBatch.Emit(b, val, Source);
+                        var g = EmitUtf8(b, System.Text.Encoding.UTF8.GetBytes(val), Source, cb);
                         if (g is { } gid)
                             b.AddAttestation(NativeAttestation.Categorical(
                                 form, "HAS_DEFINITION", gid, Source, SourceTrust.AcademicCurated));
                     }
                     else if (key.Equals("Translit", StringComparison.OrdinalIgnoreCase))
                     {
-                        var t = ContentWitnessBatch.Emit(b, val, Source);
+                        var t = EmitUtf8(b, System.Text.Encoding.UTF8.GetBytes(val), Source, cb);
                         if (t is { } tid)
                             b.AddAttestation(NativeAttestation.Categorical(
                                 form, "TRANSCRIBES_AS", tid, Source, SourceTrust.AcademicCurated));
@@ -334,7 +402,7 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider{
 
         foreach (var mwt in s.Mwts)
         {
-            var surfaceId = EmitUtf8(b, mwt.FormUtf8, Source);
+            var surfaceId = EmitUtf8(b, mwt.FormUtf8, Source, cb);
             if (surfaceId is null) continue;
             for (int id = mwt.Start; id <= mwt.End && id <= s.MaxId; id++)
                 if (formId[id] is { } partId)
@@ -343,8 +411,135 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider{
         }
     }
 
-    private static Hash128? EmitUtf8(SubstrateChangeBuilder b, ReadOnlySpan<byte> utf8, Hash128 sourceId) =>
-        ContentWitnessBatch.TryAppendToBuilder(b, utf8, sourceId, out var id) ? id : null;
+    /// <summary>
+    /// Emit one content text. With no <see cref="ContentBatch"/> (reader unavailable) this is the
+    /// original one-pass native content-witness add. Under a batch it routes through the two-phase
+    /// tier-containment path: in the collect pass it builds (once) the content tier tree and returns
+    /// its root id without staging; in the emit pass it stages only the novel subtrees (the per-tree
+    /// existing-bitmap drives MerkleDedup.TrunkShortcircuit inside the native content emit).
+    /// </summary>
+    private static Hash128? EmitUtf8(
+        SubstrateChangeBuilder b, ReadOnlySpan<byte> utf8, Hash128 sourceId, ContentBatch? cb)
+    {
+        if (utf8.IsEmpty) return null;
+        if (cb is null)
+            return ContentWitnessBatch.TryAppendToBuilder(b, utf8, sourceId, out var id) ? id : null;
+
+        var key = Hash128.Blake3(utf8);
+        if (cb.Collecting)
+        {
+            if (!cb.Map.TryGetValue(key, out var entry))
+            {
+                entry = (ContentWitnessBatch.BuildTree(utf8), null);
+                cb.Map[key] = entry;
+            }
+            if (entry.Tree is null) return null;
+            return entry.Tree.GetNode(entry.Tree.NaturalUnitIndex()).Id;
+        }
+
+        if (!cb.Map.TryGetValue(key, out var e) || e.Tree is null) return null;
+        return ContentWitnessBatch.TryEmitTree(
+            b, e.Tree, sourceId, e.Bitmap ?? ReadOnlySpan<byte>.Empty, out var rid) ? rid : null;
+    }
+
+    /// <summary>
+    /// Per-batch content tier-tree cache for the two-phase containment path: collect builds one tree
+    /// per distinct content text (deduped by Blake3 of the canonical bytes), the probe fills each
+    /// tree's existing-bitmap from <c>entities_exist_bitmap</c>, and emit stages only novel subtrees.
+    /// Trees are native handles, freed on <see cref="Dispose"/>.
+    /// </summary>
+    private sealed class ContentBatch : IDisposable
+    {
+        public bool Collecting;
+        public readonly Dictionary<Hash128, (TierTree? Tree, byte[]? Bitmap)> Map = new();
+
+        public void Dispose()
+        {
+            foreach (var e in Map.Values) e.Tree?.Dispose();
+            Map.Clear();
+        }
+    }
+
+    
+    
+    
+    
+    private async Task<SubstrateChange?> BuildBatchAsync(
+        List<(UdSentence S, Hash128 LangId, string LangCode)> batch, string unit,
+        int batchSentences, ISubstrateReader reader, CancellationToken ct)
+    {
+        if (batch.Count == 0) return null;
+        using var cb = new ContentBatch { Collecting = true };
+
+        // Pass A — collect: build each distinct content text's tier tree once (no staging). The
+        // collect builder is purely managed (collect-mode EmitUtf8 never touches the native content
+        // stage), so it allocates no intent stage and is simply dropped.
+        var collectBuilder = NewBuilder(unit + "/collect", batchSentences);
+        var collectEnt = new HashSet<Hash128>();
+        var collectAtt = new ConcurrentIdSet();
+        foreach (var (s, langId, langCode) in batch)
+            EmitSentence(collectBuilder, s, langId, langCode, collectEnt, collectAtt, _canonicalNames, cb);
+
+        await ProbeContentRootsAsync(cb, reader, ct);
+
+        // Pass B — emit: stage only novel subtrees (present trunks skipped) into the real builder.
+        cb.Collecting = false;
+        var b = NewBuilder(unit, batchSentences);
+        var seenEntBatch = new HashSet<Hash128>();
+        var seenAttBatch = new ConcurrentIdSet();
+        foreach (var (s, langId, langCode) in batch)
+            EmitSentence(b, s, langId, langCode, seenEntBatch, seenAttBatch, _canonicalNames, cb);
+
+        return b.SetInputUnitsConsumed(batch.Count).Build();
+    }
+
+    
+    
+    
+    private static async Task ProbeContentRootsAsync(
+        ContentBatch cb, ISubstrateReader reader, CancellationToken ct)
+    {
+        var keys = new List<Hash128>(cb.Map.Count);
+        var perTree = new List<Hash128[]>(cb.Map.Count);
+        int total = 0;
+        foreach (var kv in cb.Map)
+        {
+            if (kv.Value.Tree is null) continue;
+            var ids = kv.Value.Tree.NodeIds();
+            if (ids.Length == 0) continue;
+            keys.Add(kv.Key);
+            perTree.Add(ids);
+            total += ids.Length;
+        }
+        if (total == 0) return;
+
+        var candidates = new Hash128[total];
+        int off = 0;
+        foreach (var ids in perTree)
+        {
+            Array.Copy(ids, 0, candidates, off, ids.Length);
+            off += ids.Length;
+        }
+
+        byte[] combined = await reader.EntitiesExistBitmapAsync(candidates, ct);
+        long combinedBits = (long)combined.Length * 8;
+
+        int g = 0;
+        for (int i = 0; i < keys.Count; i++)
+        {
+            int n = perTree[i].Length;
+            var bm = new byte[(n + 7) / 8];
+            for (int j = 0; j < n; j++)
+            {
+                int gi = g + j;
+                if (gi < combinedBits && (combined[gi >> 3] & (1 << (gi & 7))) != 0)
+                    bm[j >> 3] |= (byte)(1 << (j & 7));
+            }
+            var e = cb.Map[keys[i]];
+            cb.Map[keys[i]] = (e.Tree, bm);
+            g += n;
+        }
+    }
 
     private static byte[] CopyUtf8Field(ReadOnlySpan<byte> span)
     {

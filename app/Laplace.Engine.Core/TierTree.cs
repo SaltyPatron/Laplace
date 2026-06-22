@@ -184,6 +184,24 @@ public sealed class TierTree : SafeHandle
         get { ThrowIfDisposed(); return NativeInterop.TierTreeIdArray(handle); }
     }
 
+    
+    
+    
+    public Hash128[] NodeIds()
+    {
+        ThrowIfDisposed();
+        int n = NodeCount;
+        var ids = new Hash128[n];
+        if (n == 0) return ids;
+        IntPtr p = NativeInterop.TierTreeIdArray(handle);
+        if (p == IntPtr.Zero) throw new InvalidOperationException("tier_tree_id_array returned NULL");
+        unsafe
+        {
+            new ReadOnlySpan<Hash128>((void*)p, n).CopyTo(ids);
+        }
+        return ids;
+    }
+
     public IntPtr DangerousNativeHandle => handle;
 
     private void ThrowIfDisposed()

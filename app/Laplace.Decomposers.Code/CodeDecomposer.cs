@@ -66,7 +66,8 @@ public sealed class CodeDecomposer : IDecomposer
                 using var ast = GrammarDecomposer.Parse(bytes, recipe);
                 var geb = new GrammarEntityBuilder(
                     bytes, ast, Source, modality, recipe, GrammarTags.TagsSource(modality));
-                (ents, phys, atts, _) = geb.Build(SourceTrust.StructuredCorpus);
+                (ents, phys, atts, _) = await geb.BuildAsync(
+                    SourceTrust.StructuredCorpus, context.Reader, ct);
             }
             catch
             {
