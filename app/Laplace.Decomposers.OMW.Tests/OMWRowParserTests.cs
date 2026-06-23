@@ -19,6 +19,20 @@ public sealed class OMWRowParserTests
         Assert.Equal("unable", Encoding.UTF8.GetString(value));
     }
 
+    [Theory]
+    [InlineData("13983515-n\tarb:lemma:root\tظلم", "arb", "ظلم")]
+    [InlineData("03012209-a\tarb:lemma:brokenplural\tأول", "arb", "أول")]
+    public void TryParseRow_LemmaWithMorphologySubtype_ParsesAsLemma(
+        string rowText, string expectedLang, string expectedValue)
+    {
+        byte[] line = Encoding.UTF8.GetBytes(rowText);
+
+        Assert.True(OMWRowParser.TryParseRow(line, "arb", out var row, out var value));
+        Assert.Equal(OmwType.Lemma, row.Type);
+        Assert.Equal(expectedLang, row.Lang);
+        Assert.Equal(expectedValue, Encoding.UTF8.GetString(value));
+    }
+
     [Fact]
     public void EnumerateTabFiles_IncludesDataAndWiktGlobs()
     {

@@ -594,9 +594,20 @@ internal static class IngestCommands
     {
         await using var conn = await ds.OpenConnectionAsync();
 
+        // Validation is a post-fold diagnostic, not a hot path: on a fresh-DB seed the
+        // counters/render/define helpers scan freshly-written tables with cold caches, which
+        // can exceed Npgsql's 30s default and surface as "Exception while reading from stream".
+        // Every command in this method runs without a timeout (CommandTimeout = 0).
+        NpgsqlCommand Cmd()
+        {
+            var c = conn.CreateCommand();
+            c.CommandTimeout = 0;
+            return c;
+        }
+
         async Task<long> EvidenceForSource(string sourceKey)
         {
-            await using var c = conn.CreateCommand();
+            await using var c = Cmd();
             c.CommandText = "SELECT laplace.evidence_count(p_source => laplace.source_id($1))";
             c.Parameters.AddWithValue(sourceKey);
             return (long)(await c.ExecuteScalarAsync() ?? 0L);
@@ -604,7 +615,7 @@ internal static class IngestCommands
 
         async Task<long> ContentForSource(string sourceKey)
         {
-            await using var c = conn.CreateCommand();
+            await using var c = Cmd();
             c.CommandText = "SELECT laplace.content_count(p_source => laplace.source_id($1))";
             c.Parameters.AddWithValue(sourceKey);
             return (long)(await c.ExecuteScalarAsync() ?? 0L);
@@ -612,7 +623,7 @@ internal static class IngestCommands
 
         async Task<long> RelationEvidence(string relationType, string? sourceKey = null)
         {
-            await using var c = conn.CreateCommand();
+            await using var c = Cmd();
             c.CommandText = sourceKey is null
                 ? "SELECT laplace.evidence_count(p_type => laplace.relation_type_id($1))"
                 : "SELECT laplace.evidence_count(p_type => laplace.relation_type_id($1), p_source => laplace.source_id($2))";
@@ -623,7 +634,7 @@ internal static class IngestCommands
 
         async Task<bool> LayerMarkedComplete(int layer, string sourceKey)
         {
-            await using var c = conn.CreateCommand();
+            await using var c = Cmd();
             c.CommandText =
                 "SELECT laplace.evidence_count("
                 + "p_type => laplace.canonical_id('substrate/type/HasLayerCompleted/' || $1 || '/v1'), "
@@ -635,8 +646,7 @@ internal static class IngestCommands
 
         Console.WriteLine("substrate counts:");
         {
-            await using var counts = conn.CreateCommand();
-            counts.CommandTimeout = 0;
+            await using var counts = Cmd();
             counts.CommandText = "SELECT metric, value FROM laplace.substrate_counts()";
             await using var rdr = await counts.ExecuteReaderAsync();
             while (await rdr.ReadAsync())
@@ -646,8 +656,7 @@ internal static class IngestCommands
         if (decomposer is null)
         {
             Console.WriteLine("  witnesses:");
-            await using var src = conn.CreateCommand();
-            src.CommandTimeout = 0;   
+            await using var src = Cmd();
             src.CommandText = "SELECT source, evidence, content FROM laplace.source_counts()";
             await using var rdr = await src.ExecuteReaderAsync();
             while (await rdr.ReadAsync())
@@ -683,7 +692,7 @@ internal static class IngestCommands
                 // Geometry is source-free: the physicality for U+0041 is one row keyed by
                 // (entity_id, type), no source. Provenance ("the Unicode source deposited this")
                 // is counted via attestations, not via a physicality source filter.
-                await using var cmd = conn.CreateCommand();
+                await using var cmd = Cmd();
                 cmd.CommandText = @"SELECT laplace.render(laplace.canonical_id('A')), f.tier,
                                            p.x, p.y, p.z, p.m, encode(p.hilbert_index, 'hex')
                                     FROM laplace.entity_facets(laplace.canonical_id('A')) f
@@ -712,7 +721,7 @@ internal static class IngestCommands
             }
             case "WordNetDecomposer":
             {
-                await using var cmd = conn.CreateCommand();
+                await using var cmd = Cmd();
                 cmd.CommandText = @"
                     SELECT laplace.word_id('dog') IS NOT NULL AS dog_ok,
                            (SELECT count(*) FROM laplace.senses(laplace.word_id('dog'))) AS sense_n,

@@ -211,13 +211,12 @@ int laplace_content_word_segment(
 // for big multilingual sources -> boil-the-ocean) behind one process-global spinlock (so concurrent
 // file workers serialized on it and bought no parallelism). Dedup is now PER-BATCH: within a batch
 // the per-stage witness set (intent_stage_witness_record/_seen) collapses repeats; ACROSS batches
-// the DB deduplicates by content address (INSERT ... ON CONFLICT (id) DO NOTHING in the writer).
-// That keeps memory bounded by the batch and lets file chunks compose concurrently with no shared
-// mutable state. content_witness_reset is now a no-op; the "proven across everything" export is
-// gone (it had no callers after the referential pre-check was removed).
+// the DB deduplicates by content address (the set-based id anti-join in laplace_apply_batch -- no
+// ON CONFLICT). That keeps memory bounded by the batch and lets file chunks compose concurrently
+// with no shared mutable state. content_witness_reset is now a no-op kept only because the ingest
+// runner still calls it per run; the "proven across everything" export and its content_witness_
+// entity_proven probe are gone (they had no callers after the referential pre-check was removed).
 void content_witness_reset(void) { }
-
-int content_witness_entity_proven(const hash128_t* id) { (void)id; return 0; }
 
 static int emit_node(
     intent_stage_t*    stage,

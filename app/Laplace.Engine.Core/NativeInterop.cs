@@ -414,9 +414,6 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "content_witness_reset")]
     internal static partial void ContentWitnessReset();
 
-    [LibraryImport(Library, EntryPoint = "content_witness_entity_proven")]
-    internal static partial int ContentWitnessEntityProven(Hash128* id);
-
     [LibraryImport(Library, EntryPoint = "laplace_content_root_id")]
     internal static partial int ContentRootId(
         byte* utf8,

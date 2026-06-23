@@ -9,6 +9,10 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 
 
 
+// Reads the real on-disk CILI ili-map-pwn30.tab. Must be serialized against SourceEntityIdConventionsTests,
+// which mutates the process-global LAPLACE_CILI_DIR env var to a temp dir; joining the GrammarPerfcache
+// collection prevents that mutation from overlapping these loads (which would otherwise see an empty map).
+[Collection("GrammarPerfcache")]
 public class IliMapTests
 {
     private static string? CiliDir()
