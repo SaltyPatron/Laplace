@@ -45,6 +45,7 @@ public sealed class VerbNetDecomposer : IDecomposer{
         boot.AddRelationType("HAS_EXAMPLE");
         boot.AddRelationType("CORRESPONDS_TO");
         boot.AddRelationType("EVOKES_FRAME");
+        boot.AddRelationType("HAS_NAME_ALIAS");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -96,6 +97,12 @@ public sealed class VerbNetDecomposer : IDecomposer{
         Hash128? classAnchor = CategoryAnchor.Emit(b, NumericClassId(classId), ClassTypeId, Source, TC.AcademicCurated);
         if (classAnchor is null) return;
         Hash128 classEntity = classAnchor.Value;
+
+        // The class anchors on the numeric id (13.1) for SemLink/PropBank convergence; surface the
+        // full VerbNet class id (give-13.1) as the display name so it never renders as a bare "13.1".
+        if (ContentEmitter.Emit(b, classId, Source) is { } classNameId)
+            b.AddAttestation(NativeAttestation.Categorical(
+                classEntity, "HAS_NAME_ALIAS", classNameId, Source, TC.AcademicCurated));
 
         if (parentClassId is not null)
         {
