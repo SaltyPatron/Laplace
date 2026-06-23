@@ -210,7 +210,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
                 ? new ReadOnlySpan<double>(ph.TrajectoryXyzm.ToPointer(), trajLen)
                 : ReadOnlySpan<double>.Empty;
             stage.AddPhysicality(
-                ph.Id, ph.EntityId, _sourceId, (short)PhysicalityType.Content,
+                ph.Id, ph.EntityId, (short)PhysicalityType.Content,
                 coord, ph.Hilbert, traj, (int)ph.NConstituents.ToUInt64(),
                 alignmentResidual: null, sourceDim: null, observedAtUnixUs: nowUs);
         }
@@ -249,47 +249,38 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         var stage = builder.ContentStage;
 
-        if (existingBitmap is null)
+        // Row-wise drain into the native stage, deduped within the batch via the builder's shared
+        // seen-set. A non-null existingBitmap drives the two-phase containment path (a present subtree
+        // skips its whole subtree); a null bitmap treats every node as novel.
+        var filter = ComputeFilter(existingBitmap);
+
+        nuint nEnt = NativeInterop.ComposeEntityCount(_compose);
+        for (nuint i = 0; i < nEnt; i++)
         {
-            // Hot path (bulk-fresh, no containment bitmap): stream every entity + physicality from the
-            // native compose buffer straight into the native stage in ONE call — eliminates the per-row
-            // ComposeGetEntity+AddEntity P/Invoke pair (the measured per-row interop tax). Dedup is the
-            // stage's native witness set (shared with the ContentWitnessBatch tree-emit path).
-            stage.DrainComposeContent(_compose, _sourceId, nowUs);
+            if (!filter.EntityNovel(i)) continue;
+            NativeInterop.ComposeEntityNative e;
+            NativeInterop.ComposeGetEntity(_compose, i, &e);
+            if (builder.TrySeeEntity(e.Id))
+                stage.AddEntity(e.Id, e.Tier, e.TypeId, _sourceId);
         }
-        else
+
+        nuint nPhys = NativeInterop.ComposePhysicalityCount(_compose);
+        Span<double> coord = stackalloc double[4];
+        for (nuint i = 0; i < nPhys; i++)
         {
-            // Two-phase containment path: a present-subtree bitmap drives novelty, so it stays row-wise.
-            var filter = ComputeFilter(existingBitmap);
-
-            nuint nEnt = NativeInterop.ComposeEntityCount(_compose);
-            for (nuint i = 0; i < nEnt; i++)
-            {
-                if (!filter.EntityNovel(i)) continue;
-                NativeInterop.ComposeEntityNative e;
-                NativeInterop.ComposeGetEntity(_compose, i, &e);
-                if (builder.TrySeeEntity(e.Id))
-                    stage.AddEntity(e.Id, e.Tier, e.TypeId, _sourceId);
-            }
-
-            nuint nPhys = NativeInterop.ComposePhysicalityCount(_compose);
-            Span<double> coord = stackalloc double[4];
-            for (nuint i = 0; i < nPhys; i++)
-            {
-                NativeInterop.ComposePhysicalityNative ph;
-                NativeInterop.ComposeGetPhysicality(_compose, i, &ph);
-                if (!filter.PhysNovel(ph.EntityId)) continue;
-                if (!builder.TrySeePhysicality(ph.Id)) continue;
-                coord[0] = ph.Coord0; coord[1] = ph.Coord1; coord[2] = ph.Coord2; coord[3] = ph.Coord3;
-                int trajLen = (int)ph.TrajectoryN.ToUInt64();
-                var traj = trajLen > 0
-                    ? new ReadOnlySpan<double>(ph.TrajectoryXyzm.ToPointer(), trajLen)
-                    : ReadOnlySpan<double>.Empty;
-                stage.AddPhysicality(
-                    ph.Id, ph.EntityId, _sourceId, (short)PhysicalityType.Content,
-                    coord, ph.Hilbert, traj, (int)ph.NConstituents.ToUInt64(),
-                    alignmentResidual: null, sourceDim: null, observedAtUnixUs: nowUs);
-            }
+            NativeInterop.ComposePhysicalityNative ph;
+            NativeInterop.ComposeGetPhysicality(_compose, i, &ph);
+            if (!filter.PhysNovel(ph.EntityId)) continue;
+            if (!builder.TrySeePhysicality(ph.Id)) continue;
+            coord[0] = ph.Coord0; coord[1] = ph.Coord1; coord[2] = ph.Coord2; coord[3] = ph.Coord3;
+            int trajLen = (int)ph.TrajectoryN.ToUInt64();
+            var traj = trajLen > 0
+                ? new ReadOnlySpan<double>(ph.TrajectoryXyzm.ToPointer(), trajLen)
+                : ReadOnlySpan<double>.Empty;
+            stage.AddPhysicality(
+                ph.Id, ph.EntityId, (short)PhysicalityType.Content,
+                coord, ph.Hilbert, traj, (int)ph.NConstituents.ToUInt64(),
+                alignmentResidual: null, sourceDim: null, observedAtUnixUs: nowUs);
         }
 
         nuint nPrec = NativeInterop.ComposePrecedesCount(_compose);

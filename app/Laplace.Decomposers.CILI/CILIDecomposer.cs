@@ -33,7 +33,13 @@ public sealed class CILIDecomposer : IDecomposer
     public Hash128 TrustClassId => TrustClass;
 
     private readonly HashSet<string> _names = new(StringComparer.Ordinal);
+    private readonly object _namesLock = new();
     public IReadOnlyCollection<string> CanonicalNamesForReadback => _names;
+
+    private void RecordName(string name)
+    {
+        lock (_namesLock) _names.Add(name);
+    }
 
     public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
@@ -41,7 +47,7 @@ public sealed class CILIDecomposer : IDecomposer
         boot.AddType("WordNet_Synset");
         boot.AddRelationType("IS_TYPED_AS");
         boot.AddRelationType("HAS_DEFINITION");
-        boot.AddRelationType("HAS_NAME_ALIAS");
+        boot.AddRelationType("HAS_SYNSET_KEY");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -51,71 +57,90 @@ public sealed class CILIDecomposer : IDecomposer
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         string root = context.EcosystemPath;
+        if (options.DryRun) yield break;
+
+        // O(tier) skip-present via the SHARED two-phase containment (the same mechanism the grammar
+        // sources use — not a CILI-specific dedup): each builder probes its content tree node ids and
+        // stages only NOVEL subtrees, so the graphemes/words shared across 117k definitions are
+        // committed ONCE, not re-COPYed and re-anti-joined every record.
+        var reader = context.Reader;
+
+        // P-CORE-PINNED PARALLEL COMPOSE. CILI's per-record work (content-id derivation = BLAKE3
+        // over the ILI/definition canonical bytes + attestation assembly) is a pure function of the
+        // record, so it fans out across P-core-pinned workers instead of running serial on one
+        // thread. Each worker owns its own builder over a disjoint slice; ids are content-addressed
+        // so duplicate ids across workers fold in the server-side merge. (Worker count alone would
+        // let the OS scatter onto E-cores; the helper pins each worker thread.)
+        int workers = IngestParallelism.ResolveFileWorkers(coreHeadroom: 1);
 
         // ---- Pass 1: ili.ttl — concept nodes + authoritative English definitions ----
         // <iN> a <Concept> ; skos:definition "..."@en ; dc:source pwn30:OFFSET-POS .
         string ttl = Path.Combine(root, "ili.ttl");
         if (File.Exists(ttl))
         {
-            var b = NewBuilder("cili/concepts", 0);
-            int n = 0, bn = 0;
-            await foreach (var (ili, def) in ParseIliTtlAsync(ttl, ct))
-            {
-                if (ContentEmitter.Emit(b, ili, Source) is not { } id) continue;
-                b.AddAttestation(NativeAttestation.Categorical(
-                    id, "IS_TYPED_AS", SynsetTypeId, Source, TC.AcademicCurated));
-                if (def is { Length: > 0 } && ContentEmitter.Emit(b, def, Source) is { } dId)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        id, "HAS_DEFINITION", dId, Source, TC.AcademicCurated, EngLang));
-
-                if (++n >= BatchSize)
+            var changes = PCoreParallelCompose.RunAsync(
+                ParseIliTtlAsync(ttl, ct),
+                workers, BatchSize,
+                () => NewBuilder("cili/concepts", 0).EnableDeferredContent(reader),
+                (b, rec) =>
                 {
-                    if (!options.DryRun) yield return b.Build();
-                    b = NewBuilder("cili/concepts", ++bn);
-                    n = 0;
-                    await Task.Yield();
-                }
-            }
-            if (n > 0 && !options.DryRun) yield return b.Build();
+                    var (ili, def) = rec;
+                    if (ContentEmitter.Emit(b, ili, Source) is not { } id) return;
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        id, "IS_TYPED_AS", SynsetTypeId, Source, TC.AcademicCurated));
+                    if (def is { Length: > 0 } && ContentEmitter.Emit(b, def, Source) is { } dId)
+                        b.AddAttestation(NativeAttestation.Categorical(
+                            id, "HAS_DEFINITION", dId, Source, TC.AcademicCurated, EngLang));
+                },
+                ct);
+            await foreach (var change in changes.WithCancellation(ct))
+                yield return change;
         }
 
         // ---- Pass 2: ili-map-*.tab — cross-wordnet-version synset offset maps ----
         // Each line: iN \t OFFSET-POS  (pwn15/16/17/171/20/21/30/31, recursive).
-        // Records, per version, that this ILI concept is aliased by that version's synset key,
-        // so the full cross-version mapping is queryable first-class substrate.
+        // The map is an ATTESTATION on the shared ILI concept, not a new entity per row: the
+        // version-specific synset key (OFFSET-POS) is CONTENT (its own Merkle DAG / tiers / geometry),
+        // and the WordNet VERSION is the attestation's CONTEXT (provenance) — neither is ever baked
+        // into an id. This keeps the cross-version mapping first-class and provenance-bearing while
+        // converging on the same content-addressed ILI concept the other wordnets resolve to (no
+        // CILI-private alias entity, no dead nameless row).
         var tabs = Directory.EnumerateFiles(root, "ili-map-*.tab", SearchOption.AllDirectories)
                             .OrderBy(p => p, StringComparer.Ordinal);
         foreach (var tab in tabs)
         {
             ct.ThrowIfCancellationRequested();
             string version = VersionLabel(tab);
-            var mb = NewBuilder($"cili/map/{version}", 0);
-            int mn = 0, mbn = 0;
-            await foreach (var line in File.ReadLinesAsync(tab, ct))
-            {
-                int sep = line.IndexOf('\t');
-                if (sep <= 0) continue;
-                string ili = line[..sep].Trim();
-                string offsetPos = line[(sep + 1)..].Trim();
-                if (ili.Length == 0 || offsetPos.Length == 0 || ili[0] != 'i') continue;
-
-                if (ContentEmitter.Emit(mb, ili, Source) is not { } id) continue;
-                string aliasName = $"substrate/cili/synset-key/{version}:{offsetPos}/v1";
-                var aliasId = Hash128.OfCanonical(aliasName);
-                _names.Add(aliasName);
-                mb.AddEntity(aliasId, EntityTier.Vocabulary, SynsetTypeId, Source);
-                mb.AddAttestation(NativeAttestation.Categorical(
-                    id, "HAS_NAME_ALIAS", aliasId, Source, TC.AcademicCurated));
-
-                if (++mn >= BatchSize)
+            var changes = PCoreParallelCompose.RunAsync(
+                ParseIliMapAsync(tab, ct),
+                workers, BatchSize,
+                () => NewBuilder($"cili/map/{version}", 0).EnableDeferredContent(reader),
+                (mb, rec) =>
                 {
-                    if (!options.DryRun) yield return mb.Build();
-                    mb = NewBuilder($"cili/map/{version}", ++mbn);
-                    mn = 0;
-                    await Task.Yield();
-                }
-            }
-            if (mn > 0 && !options.DryRun) yield return mb.Build();
+                    var (ili, offsetPos) = rec;
+                    if (ContentEmitter.Emit(mb, ili, Source) is not { } id) return;
+                    if (ContentEmitter.Emit(mb, offsetPos, Source) is not { } keyId) return;
+                    var verCtx = ContentEmitter.Emit(mb, version, Source) ?? id;
+                    mb.AddAttestation(NativeAttestation.Categorical(
+                        id, "HAS_SYNSET_KEY", keyId, Source, TC.AcademicCurated, verCtx));
+                },
+                ct);
+            await foreach (var change in changes.WithCancellation(ct))
+                yield return change;
+        }
+    }
+
+    private static async IAsyncEnumerable<(string Ili, string OffsetPos)> ParseIliMapAsync(
+        string tab, [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var line in File.ReadLinesAsync(tab, ct))
+        {
+            int sep = line.IndexOf('\t');
+            if (sep <= 0) continue;
+            string ili = line[..sep].Trim();
+            string offsetPos = line[(sep + 1)..].Trim();
+            if (ili.Length == 0 || offsetPos.Length == 0 || ili[0] != 'i') continue;
+            yield return (ili, offsetPos);
         }
     }
 

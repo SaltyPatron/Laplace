@@ -548,7 +548,7 @@ CREATE OR REPLACE FUNCTION grapheme_order(p_vocab bytea[], p_words int DEFAULT 5
         FROM physicalities p
         JOIN entities e ON e.id = p.entity_id AND e.tier = 2
         WHERE p.type = 1 AND p.trajectory IS NOT NULL
-        ORDER BY p.entity_id, p.source_id LIMIT p_words
+        ORDER BY p.entity_id, p.id LIMIT p_words
     ),
     g AS (
         
@@ -590,7 +590,7 @@ CREATE OR REPLACE FUNCTION word_order(p_vocab bytea[], p_trajs int DEFAULT 10000
         FROM physicalities p
         JOIN entities e ON e.id = p.entity_id AND e.tier > 2
         WHERE p.type = 1 AND p.trajectory IS NOT NULL
-        ORDER BY p.entity_id, p.source_id LIMIT p_trajs
+        ORDER BY p.entity_id, p.id LIMIT p_trajs
     ),
     g AS (
         SELECT t.sid, tc.ordinal AS ord, tc.entity_id AS wid
@@ -620,7 +620,7 @@ CREATE OR REPLACE FUNCTION corpus_word_vocab(p_size int, p_trajs int DEFAULT 400
         SELECT DISTINCT ON (p.entity_id) p.entity_id, p.trajectory
         FROM physicalities p JOIN entities e ON e.id = p.entity_id AND e.tier > 2
         WHERE p.type = 1 AND p.trajectory IS NOT NULL
-        ORDER BY p.entity_id, p.source_id LIMIT p_trajs
+        ORDER BY p.entity_id, p.id LIMIT p_trajs
     ),
     w AS (
         SELECT tc.entity_id AS id, count(*) AS c
@@ -660,7 +660,7 @@ CREATE OR REPLACE FUNCTION metric_edges(
         FROM physicalities p
         JOIN unnest(p_vocab) AS u(id) ON u.id = p.entity_id
         WHERE p.type = 1
-        ORDER BY p.entity_id, p.source_id
+        ORDER BY p.entity_id, p.id
     ),
     cand AS (
         

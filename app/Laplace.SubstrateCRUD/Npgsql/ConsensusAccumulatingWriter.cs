@@ -85,7 +85,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                 ? t : 4_000_000);
         _partitions = foldWorkers
             ?? (int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_FOLD_WORKERS"), out var w) && w > 0
-                ? w : CpuTopology.ResolveIoBoundWorkers(defaultCap: 4));
+                ? w
+                // The fold (materialize_period_partition_fresh) is SERVER-SIDE Glicko COMPUTE, not I/O.
+                // It was capped at 4 IO-bound workers, so a 70s fold left ~20 cores idle. Size it to the
+                // CPU so the consensus fold parallelizes across the box (the staging COPY already hits
+                // 3.5M rel/s; the fold was the floor at 44k rel/s / 4-way).
+                : CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 24));
         
         
         

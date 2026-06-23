@@ -196,7 +196,7 @@ public sealed class GrammarEntityBuilder
                     ? new ReadOnlySpan<double>(ph.TrajectoryXyzm.ToPointer(), trajLen).ToArray()
                     : [];
                 physicalities.Add(new PhysicalityRow(
-                    Id: ph.Id, EntityId: ph.EntityId, SourceId: ph.SourceId,
+                    Id: ph.Id, EntityId: ph.EntityId, SourceId: _sourceId,
                     Type: PhysicalityType.Content,
                     CoordX: ph.Coord0, CoordY: ph.Coord1, CoordZ: ph.Coord2, CoordM: ph.Coord3,
                     HilbertIndex: ph.Hilbert,

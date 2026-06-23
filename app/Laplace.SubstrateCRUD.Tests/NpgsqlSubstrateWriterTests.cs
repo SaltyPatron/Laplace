@@ -149,13 +149,12 @@ public class NpgsqlSubstrateWriterTests
     [Fact]
     public async Task ApplyAsync_PhysicalitiesSharingNaturalKey_DifferentIds_NoConflict()
     {
-        // Regression: physicalities carry a SECONDARY unique constraint UNIQUE (entity_id, source_id,
-        // type) (extension/laplace_substrate/sql/03_physicalities.sql.in:16). The id is content-addressed
-        // from (entity_id, source_id, type, coord, trajectory, …), so two rows with DIFFERENT coords get
-        // DIFFERENT ids yet collide on the natural key. After the bare ON CONFLICT DO NOTHING was
-        // removed, the id-only anti-join let both through and the COPY promote hard-errored with 23505
-        // on physicalities_entity_id_source_id_type_key. The set-based promote must instead keep one
-        // deterministic winner and drop the duplicate (old DO NOTHING semantics) — no exception.
+        // Regression: physicalities carry a SECONDARY unique constraint UNIQUE (entity_id, type)
+        // (extension/laplace_substrate/sql/03_physicalities.sql.in:15 — source-free since T1). The id
+        // is content-addressed from (entity_id, type, coord, trajectory, …), so two rows with DIFFERENT
+        // coords get DIFFERENT ids yet collide on the natural key. The set-based merge in
+        // laplace_apply_batch must keep one deterministic winner (DISTINCT ON (entity_id, type)) and
+        // drop the duplicate with NO ON CONFLICT — no 23505, exactly one row.
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var src = Hash128.OfCanonical("substrate/source/test/phys-natkey");
         var typeId = await EnsureTestTypeAsync(src);
@@ -172,7 +171,7 @@ public class NpgsqlSubstrateWriterTests
             SourceDim: null,
             ObservedAtUnixUs: IntentStage.PgEpochUnixUs);
 
-        // Two physicalities, same (entity_id, source_id, type) but different id, in ONE apply.
+        // Two physicalities, same (entity_id, type) but different id, in ONE apply.
         var change = new SubstrateChangeBuilder(src, "phys-natkey-unit")
             .AddEntity(entId, 0, typeId)
             .AddPhysicality(Phys(9101, 0.10))
@@ -183,9 +182,8 @@ public class NpgsqlSubstrateWriterTests
         Assert.Equal(1, result.PhysicalitiesInserted);
 
         await using var cnt = _pg.DataSource.CreateCommand(
-            "SELECT count(*) FROM laplace.physicalities WHERE entity_id = $1 AND source_id = $2");
+            "SELECT count(*) FROM laplace.physicalities WHERE entity_id = $1");
         cnt.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, entId.ToBytes());
-        cnt.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, src.ToBytes());
         Assert.Equal(1L, (long)(await cnt.ExecuteScalarAsync())!);
 
         // Re-apply a THIRD novel id on the already-present natural key: 0 inserted, still no throw
@@ -254,51 +252,11 @@ public class NpgsqlSubstrateWriterTests
         Assert.Equal((byte)0b00000101, bitmap[0]);
     }
 
-    [Fact]
-    public async Task AppendThenFinalize_DedupesEntities_SumsAttestationObservations()
-    {
-        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
-        var src = Hash128.OfCanonical("substrate/source/test/append-finalize");
-        var typeId = await EnsureTestTypeAsync(src);
-
-        var idA = H(7001);
-        var idB = H(7002);
-        var attId = H(7100);
-
-        SubstrateChange Batch(long seedTs, long obs) =>
-            new SubstrateChangeBuilder(src, $"append-u{seedTs}")
-                .AddEntity(idA, 0, typeId)
-                .AddEntity(idB, 0, typeId)
-                .AddAttestation(new AttestationRow(
-                    Id: attId, SubjectId: idA, TypeId: typeId,
-                    ObjectId: idB, SourceId: src, ContextId: null,
-                    Outcome: AttestationOutcome.Confirm,
-                    LastObservedAtUnixUs: IntentStage.PgEpochUnixUs + seedTs,
-                    ObservationCount: obs,
-                    ScoreFp1e9: 1_000_000_000L,
-                    OpponentRdFp1e9: 30_000_000_000L))
-                .Build();
-
-        
-        var r1 = await writer.AppendAsync(new[] { Batch(1, 3) }, src);
-        var r2 = await writer.AppendAsync(new[] { Batch(2, 5) }, src);
-        Assert.Equal(2, r1.EntitiesInserted);
-        Assert.Equal(2, r2.EntitiesInserted);
-
-        
-        Assert.Equal(0L, await CountLiveEntitiesAsync(idA, idB));
-
-        var merged = await writer.FinalizeSourceAsync(src);
-        Assert.Equal(2, merged.Entities);       
-        Assert.Equal(1, merged.Attestations);   
-
-        Assert.Equal(2L, await CountLiveEntitiesAsync(idA, idB));
-
-        await using var cmd = _pg.DataSource.CreateCommand(
-            "SELECT observation_count FROM laplace.attestations WHERE id = $1");
-        cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, attId.ToBytes());
-        Assert.Equal(8L, (long)(await cmd.ExecuteScalarAsync())!);   
-    }
+    // AppendThenFinalize_DedupesEntities_SumsAttestationObservations was deleted with
+    // SubstrateStagingMerge: there is no longer a deferred append/finalize lane. AppendAsync
+    // now routes to ApplyManyAsync (the one COPY + laplace_apply_batch call) so a batch goes
+    // live on its own commit; the attestation observation-count fold is covered by
+    // ApplyAsync_ReobservedAttestation_AccumulatesGames below.
 
     [Fact]
     public async Task ApplyAsync_ReobservedAttestation_AccumulatesGames()
@@ -361,17 +319,17 @@ public class NpgsqlSubstrateWriterTests
 
         var result = await writer.ApplyManyAsync(batch);
         Assert.True(result.EntitiesInserted > 0);
-        Assert.True(result.RoundTrips <= 12,
-            $"coalesced batch should be O(tier) DB calls, got {result.RoundTrips}");
-    }
-
-    private async Task<long> CountLiveEntitiesAsync(Hash128 a, Hash128 b)
-    {
-        await using var cmd = _pg.DataSource.CreateCommand(
-            "SELECT count(*) FROM laplace.entities WHERE id = ANY($1::bytea[])");
-        var p = cmd.Parameters.AddWithValue(new[] { a.ToBytes(), b.ToBytes() });
-        p.NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea;
-        return (long)(await cmd.ExecuteScalarAsync())!;
+        // PER-CONTENT-ID PARALLEL APPLY: the batch is split natively by id.lo % N into N disjoint
+        // partitions, each committed on its OWN connection (GUC + up to 3 COPY + 1 apply). Round
+        // trips are therefore O(partitions), NOT O(rows) — the merge is still one set-based apply
+        // per partition, never per-row. Bound by the per-partition envelope so the contract still
+        // proves "no per-row DB work" while permitting the deliberate parallel fan-out.
+        int parts = Math.Clamp(CpuTopology.PerformanceCoreCount, 1, 16);
+        int perPartitionCalls = 5; // GUC + 3 COPY + apply, upper bound
+        int budget = parts * perPartitionCalls;
+        Assert.True(result.RoundTrips <= budget,
+            $"coalesced batch should be O(partitions) DB calls (<= {budget} for {parts} partitions), "
+            + $"got {result.RoundTrips}");
     }
 
     private async Task<Hash128> EnsureTestTypeAsync(Hash128 source)

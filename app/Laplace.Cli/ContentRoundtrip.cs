@@ -38,6 +38,9 @@ internal static class ContentRoundtrip
         await using (var conn = await ds.OpenConnectionAsync(ct))
         await using (var cmd = conn.CreateCommand())
         {
+            // Geometry is source-free: the content trajectory is the content itself (one row
+            // per (entity_id, type)), so reconstruction descends the content DAG with no source
+            // filter — the trajectory constituents ARE the reconstruction.
             cmd.CommandText = @"
                 WITH RECURSIVE tree(id) AS (
                     SELECT @doc
@@ -46,15 +49,13 @@ internal static class ContentRoundtrip
                     FROM tree t
                     JOIN laplace.physicalities p
                       ON p.entity_id = t.id AND p.type = 1 AND p.trajectory IS NOT NULL
-                    WHERE p.source_id = @s
                 )
                 SELECT p.entity_id, p.n_constituents, (g.path)[1],
                        ST_X(g.geom), ST_Y(g.geom), ST_Z(g.geom), ST_M(g.geom)
                 FROM laplace.physicalities p
                 JOIN tree t ON t.id = p.entity_id
                 CROSS JOIN LATERAL ST_DumpPoints(p.trajectory) AS g
-                WHERE p.source_id = @s AND p.type = 1 AND p.trajectory IS NOT NULL";
-            cmd.Parameters.AddWithValue("s", PromptSource.ToBytes());
+                WHERE p.type = 1 AND p.trajectory IS NOT NULL";
             cmd.Parameters.AddWithValue("doc", documentId.ToBytes());
             await using var r = await cmd.ExecuteReaderAsync(ct);
             while (await r.ReadAsync(ct))

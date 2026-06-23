@@ -11,8 +11,13 @@ CREATE TABLE physicalities (
     n_constituents     integer          NOT NULL DEFAULT 0 CHECK (n_constituents >= 0),
     alignment_residual double precision,
     source_dim         integer          CHECK (source_dim IS NULL OR source_dim > 0),
-    observed_at        timestamptz      NOT NULL DEFAULT now(),
-    UNIQUE (entity_id, type)
+    observed_at        timestamptz      NOT NULL DEFAULT now()
+    -- No (entity_id, type) natural key: a physicality is keyed by its content-addressed id
+    -- (BLAKE3 of entity_id|type|coord|trajectory). Under bit-perfect determinism id = f(entity,type),
+    -- so the id PK already enforces one-per-content; a divergent geometry across compose paths is a
+    -- determinism BUG to catch in a test, not to silently collapse with a relational unique. Dedup is
+    -- the hash. "Building block" content is the same tree => same id => one physicality, referenced by
+    -- id in other trajectories (no separate BuildingBlock row).
 );
 
 SELECT pg_extension_config_dump('physicalities', '');

@@ -190,8 +190,9 @@ TEST(LaplaceCoreIntentStage, AddPhysicalityRoundTripsAllFields) {
     for (int i = 0; i < 16; ++i) hb.bytes[i] = (uint8_t)(0x40 + i);
     double traj[8] = { 1.0, 2.0, 3.0, 4.0,  5.0, 6.0, 7.0, 8.0 };
 
+    (void)sid;
     ASSERT_EQ(0, intent_stage_add_physicality(
-        s, &id, &eid, &sid,
+        s, &id, &eid,
         1,
         coord, &hb,
         traj, 2,
@@ -209,13 +210,11 @@ TEST(LaplaceCoreIntentStage, AddPhysicalityRoundTripsAllFields) {
                                                   buf.data(), buf.size()));
 
     const uint8_t* p = buf.data() + kHeader;
-    EXPECT_EQ(11, (int16_t)read_be16(p)); p += 2;
+    EXPECT_EQ(10, (int16_t)read_be16(p)); p += 2;
     EXPECT_EQ(16u, read_be32(p)); p += 4;
     for (int i = 0; i < 16; ++i) EXPECT_EQ(0x01, *p++);
     EXPECT_EQ(16u, read_be32(p)); p += 4;
     for (int i = 0; i < 16; ++i) EXPECT_EQ(0x02, *p++);
-    EXPECT_EQ(16u, read_be32(p)); p += 4;
-    for (int i = 0; i < 16; ++i) EXPECT_EQ(0x03, *p++);
     EXPECT_EQ(2u, read_be32(p)); p += 4;
     EXPECT_EQ(1, (int16_t)read_be16(p)); p += 2;
     EXPECT_EQ(37u, read_be32(p)); p += 4;
@@ -260,7 +259,7 @@ TEST(LaplaceCoreIntentStage, AddPhysicalityNullTrajectoryIsValid) {
     double coord[4] = {0, 0, 0, 0};
     hilbert128_t hb; std::memset(&hb, 0, sizeof(hb));
     ASSERT_EQ(0, intent_stage_add_physicality(
-        s, &z, &z, &z, 1, coord, &hb, nullptr, 0, 0,
+        s, &z, &z, 1, coord, &hb, nullptr, 0, 0,
         1, 0.0, 1, 0, 0));
     EXPECT_EQ(1u, intent_stage_physicality_count(s));
     intent_stage_free(s);
@@ -273,7 +272,7 @@ TEST(LaplaceCoreIntentStage, AddPhysicalityRejectsTrajectoryNullPointerNonZeroCo
     double coord[4] = {0, 0, 0, 0};
     hilbert128_t hb; std::memset(&hb, 0, sizeof(hb));
     EXPECT_NE(0, intent_stage_add_physicality(
-        s, &z, &z, &z, 1, coord, &hb, nullptr, 2, 0,
+        s, &z, &z, 1, coord, &hb, nullptr, 2, 0,
         1, 0.0, 1, 0, 0));
     intent_stage_free(s);
 }
@@ -345,7 +344,7 @@ TEST(LaplaceCoreIntentStage, EachTableHasIndependentRowCount) {
     double coord[4] = {0, 0, 0, 0};
     hilbert128_t hb; std::memset(&hb, 0, sizeof(hb));
     ASSERT_EQ(0, intent_stage_add_entity(s, &z, 0, &z, nullptr));
-    ASSERT_EQ(0, intent_stage_add_physicality(s, &z, &z, &z, 1, coord, &hb, nullptr, 0, 0, 1, 0, 1, 0, 0));
+    ASSERT_EQ(0, intent_stage_add_physicality(s, &z, &z, 1, coord, &hb, nullptr, 0, 0, 1, 0, 1, 0, 0));
     ASSERT_EQ(0, intent_stage_add_attestation(s, &z, &z, &z, nullptr, &z, nullptr, 1, 0, 0));
     EXPECT_EQ(1u, intent_stage_entity_count(s));
     EXPECT_EQ(1u, intent_stage_physicality_count(s));
@@ -444,9 +443,8 @@ TEST(LaplaceCoreIntentStage, UdBatchShapeEntitiesSurviveAttestationGrowth) {
             }
             hash128_t id  = make_hash((uint8_t)(i));
             hash128_t ent = make_hash((uint8_t)(i % kEntities));
-            hash128_t src = make_hash((uint8_t)(i >> 8));
             ASSERT_EQ(0, intent_stage_add_physicality(
-                s, &id, &ent, &src, (int16_t)(i % 3), coord, &hb,
+                s, &id, &ent, (int16_t)(i % 3), coord, &hb,
                 traj.data(), verts, (int32_t)verts,
                 0, 0.5, 0, (int32_t)(i % 16),
                 INTENT_STAGE_PG_EPOCH_UNIX_US + (int64_t)i))
@@ -511,5 +509,104 @@ TEST(LaplaceCoreIntentStage, UdBatchShapeEntitiesSurviveAttestationGrowth) {
     EXPECT_EQ(0xff, buf[buf.size() - 2]);
     EXPECT_EQ(0xff, buf[buf.size() - 1]);
 
+    intent_stage_free(s);
+}
+
+// Helper: walk one table's emitted blob, collect (id.lo) of every row.
+static void collect_ids_lo(const intent_stage_t* s, intent_stage_table_t table,
+                           std::vector<uint64_t>& out) {
+    const size_t need = intent_stage_emit_copy_binary(s, table, nullptr, 0);
+    std::vector<uint8_t> buf(need);
+    EXPECT_EQ(need, intent_stage_emit_copy_binary(s, table, buf.data(), buf.size()));
+    const uint8_t* p   = buf.data() + kHeader;
+    const uint8_t* end = buf.data() + buf.size() - kTrailer;
+    while (p + 2 <= end) {
+        const uint16_t cols = read_be16(p);
+        if (cols == 0xffff) break;     // trailer
+        p += 2;
+        // field 1 = id (16 bytes). id.lo is bytes [8..16).
+        const uint32_t f1 = read_be32(p); p += 4;
+        ASSERT_EQ(16u, f1);
+        uint64_t lo = 0;
+        std::memcpy(&lo, p + 8, 8);     // little-endian struct layout, matches partition router
+        out.push_back(lo);
+        p += 16;
+        for (uint16_t c = 1; c < cols; ++c) {
+            const int32_t flen = (int32_t)read_be32(p); p += 4;
+            if (flen > 0) p += (size_t)flen;
+        }
+    }
+}
+
+TEST(LaplaceCoreIntentStage, PartitionRoutesEveryRowDisjointByIdLo) {
+    intent_stage_t* s = intent_stage_new(0);
+    ASSERT_NE(nullptr, s);
+
+    const size_t kN = 4;
+    const size_t kEnt = 500, kPhys = 300, kAtt = 700;
+    hilbert128_t hb; std::memset(&hb, 0, sizeof(hb));
+    double coord[4] = {1.0, 2.0, 3.0, 4.0};
+
+    for (size_t i = 0; i < kEnt; ++i) {
+        hash128_t id; id.hi = 0x1111; id.lo = i * 2654435761ULL + 7;
+        hash128_t t = make_hash(0x22);
+        ASSERT_EQ(0, intent_stage_add_entity(s, &id, (int16_t)(i % 7), &t, nullptr));
+    }
+    for (size_t i = 0; i < kPhys; ++i) {
+        hash128_t id; id.hi = 0x2222; id.lo = i * 40503ULL + 13;
+        hash128_t e = make_hash(0x33);
+        ASSERT_EQ(0, intent_stage_add_physicality(
+            s, &id, &e, 1, coord, &hb, nullptr, 0, 0, 1, 0.0, 1, 0,
+            INTENT_STAGE_PG_EPOCH_UNIX_US));
+    }
+    for (size_t i = 0; i < kAtt; ++i) {
+        hash128_t id; id.hi = 0x3333; id.lo = i * 2246822519ULL + 29;
+        hash128_t sub = make_hash(0x44), kid = make_hash(0x45), src = make_hash(0x46);
+        ASSERT_EQ(0, intent_stage_add_attestation(
+            s, &id, &sub, &kid, nullptr, &src, nullptr, 1,
+            INTENT_STAGE_PG_EPOCH_UNIX_US, 1));
+    }
+
+    intent_stage_t* parts[kN];
+    ASSERT_EQ(0, intent_stage_partition(s, kN, parts));
+
+    size_t total_ent = 0, total_phys = 0, total_att = 0;
+    for (size_t k = 0; k < kN; ++k) {
+        ASSERT_NE(nullptr, parts[k]);
+        total_ent  += intent_stage_entity_count(parts[k]);
+        total_phys += intent_stage_physicality_count(parts[k]);
+        total_att  += intent_stage_attestation_count(parts[k]);
+
+        // Disjointness invariant: every id routed to partition k has id.lo % N == k.
+        for (auto table : {INTENT_STAGE_TABLE_ENTITIES,
+                           INTENT_STAGE_TABLE_PHYSICALITIES,
+                           INTENT_STAGE_TABLE_ATTESTATIONS}) {
+            std::vector<uint64_t> los;
+            collect_ids_lo(parts[k], table, los);
+            for (uint64_t lo : los)
+                EXPECT_EQ(k, (size_t)(lo % kN)) << "row landed in wrong partition";
+        }
+    }
+    // Conservation: no row lost or duplicated.
+    EXPECT_EQ(kEnt,  total_ent);
+    EXPECT_EQ(kPhys, total_phys);
+    EXPECT_EQ(kAtt,  total_att);
+
+    for (size_t k = 0; k < kN; ++k) intent_stage_free(parts[k]);
+    intent_stage_free(s);
+}
+
+TEST(LaplaceCoreIntentStage, PartitionCountOnePreservesAllRows) {
+    intent_stage_t* s = intent_stage_new(0);
+    ASSERT_NE(nullptr, s);
+    for (size_t i = 0; i < 50; ++i) {
+        hash128_t id; id.hi = 1; id.lo = i;
+        hash128_t t = make_hash(0x22);
+        ASSERT_EQ(0, intent_stage_add_entity(s, &id, 0, &t, nullptr));
+    }
+    intent_stage_t* parts[1];
+    ASSERT_EQ(0, intent_stage_partition(s, 1, parts));
+    EXPECT_EQ(50u, intent_stage_entity_count(parts[0]));
+    intent_stage_free(parts[0]);
     intent_stage_free(s);
 }

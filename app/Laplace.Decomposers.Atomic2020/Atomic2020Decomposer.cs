@@ -15,8 +15,15 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase
 
     private static readonly Hash128 MarkerTypeId = EntityTypeRegistry.AtomicMarker;
     private static readonly Hash128 SplitTypeId  = EntityTypeRegistry.AtomicSplit;
+
+    // SCHEMA, not content: the single absence-sentinel for ATOMIC's literal "none" tail
+    // (a relation with no annotated filler). It is a fixed marker, not a concept, and must
+    // NOT converge with the content word "none" — so it stays app/meta vocabulary (no geometry).
     private static readonly Hash128 NoneId       = Hash128.OfCanonical("substrate/atomic/none/v1");
 
+    // SCHEMA, not content: the fixed dataset-split enum (train/dev/test). Used only as
+    // attestation contextId (the provenance edge's context), never baked into a content id.
+    // Small, fixed, correctly geometry-free app/meta vocabulary.
     private static Hash128 SplitId(string s) => Hash128.OfCanonical($"atomic/split/{s}");
 
     private static readonly (string Rel, string Type)[] Relations =

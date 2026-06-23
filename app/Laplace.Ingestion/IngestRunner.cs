@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
@@ -42,16 +43,12 @@ public sealed class IngestRunner
         long entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
         long totalRoundTrips = 0;
 
-        if (!options.SkipLayerOrderingCheck)
-        {
-            for (int layer = 0; layer < decomposer.LayerOrder; layer++)
-            {
-                if (!await _reader.HasSourceEverCompletedAsync(layer, ct))
-                {
-                    throw new LayerOrderingViolationException(decomposer.LayerOrder, layer);
-                }
-            }
-        }
+        // No ingest-order dependency. Identity is content-addressed, so a reference to
+        // not-yet-ingested content is a forward reference that resolves when that content lands
+        // (or is already present) — John 3:16 converges whether it arrives before or after the
+        // whole Bible. T0 codepoints come from the perfcache FILE (client-side), not from
+        // "ingesting unicode first". Sources may ingest in any order and concurrently with each
+        // other; the old layer-ordering check was procedural thinking that contradicts the DAG.
 
         if (!options.SkipSourceCompletion
             && await _reader.HasSourceCompletedAsync(decomposer.SourceId, decomposer.LayerOrder, ct))
@@ -138,9 +135,7 @@ public sealed class IngestRunner
         // Referential integrity is no longer pre-checked, so every SubstrateChange is a
         // self-contained, independently-consistent batch and commit order across batches is
         // irrelevant (the consensus fold is commutative). Multi-worker runs therefore all use the
-        // one bounded N-consumer lane; the old StrictSerial / EpochBarrier routing and
-        // IIngestCommitPolicy are obsolete (RunEpochBarrierParallelAsync, FlushEpochParallelAsync,
-        // and ResolveCommitParallelism were deleted in the Phase 7 cleanup).
+        // one bounded N-consumer lane.
         if (options.ParallelWorkers <= 1)
         {
             
@@ -286,32 +281,42 @@ public sealed class IngestRunner
         Random rng,
         CancellationToken ct)
     {
-        // Unordered = self-contained batches committed by N concurrent workers, each on its
-        // own connection. No serial pin: every SubstrateChange carries its own entities,
-        // physicalities, and attestations, so a batch is independently consistent and order
-        // across batches is irrelevant (the consensus fold is commutative). Concurrent inserts
-        // into the live indexes scale ~2.5x on this box (measured). A fatal in any worker
-        // cancels the shared token so the producer stops instead of deadlocking on a full channel.
-        int workers = Math.Max(1, options.ParallelWorkers);
+        // HEAVY COMPUTE IS PARALLEL; THE LIGHT MERGE IS PER-CONTENT-ID PARALLEL. The decomposer's
+        // DecomposeAsync runs parse / compose / BLAKE3 / geometry / tier build in parallel and
+        // yields already-computed SubstrateChanges. The commit is no longer a serial lane: the
+        // writer (NpgsqlSubstrateWriter) splits each batch's staged rows NATIVELY by id.lo % N
+        // (intent_stage_partition) into N disjoint partitions and COPYs+applies them on N
+        // connections IN PARALLEL. Because a given content id lands in exactly one partition, the
+        // set-based anti-join cannot collide cross-partition — no 23505, no ON CONFLICT, no retry.
+        //
+        // The id-partition lives in laplace_core precisely because a native IntentStage carries
+        // many ids that managed code cannot split out of the opaque tuple blob; the old approach of
+        // routing a whole intent to a worker by ONE representative id left the intent's OTHER novel
+        // ids shared across two workers (the 23505 bug). Splitting PER ROW by each row's own id
+        // fixes that by construction.
+        //
+        // The consumer here stays SINGLE so that two apply calls never run concurrently over an
+        // overlapping id-space (a cross-batch collision the in-call partition cannot prevent): the
+        // partition's parallelism is INSIDE one apply call, ordered by this one consumer. The heavy
+        // commit work therefore fans out across N connections without a serial commit floor, while
+        // the single consumer keeps the merge collision-proof. A fatal cancels the shared token so
+        // the producer stops instead of deadlocking on a full channel.
         using var stopCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var runCt = stopCts.Token;
 
-        // Channel capacity: bound to ~2× the number of SubstrateChange items needed to fill
-        // one commit batch per worker. grammar-compose sources carry native IntentStages
-        // (not just managed rows), so the old workers*batchSize*4 formula (which gives 32 K
-        // for OMW) allowed the channel to accumulate gigabytes of IntentStages during GiST
-        // maintenance stalls, exhausting the native heap and returning -3 from
-        // laplace_grammar_compose. The correct multiplier is commitRows/batchSize (the number
-        // of SubstrateChange items per commit), not batchSize (rows per SubstrateChange).
+        // Channel capacity: bound to a few commit batches so the parallel compose overlaps the
+        // serial apply without unbounded native-IntentStage accumulation (the old 32K-deep channel
+        // exhausted the native heap during stalls → -3 from laplace_grammar_compose). Multiplier is
+        // commitRows/batchSize (SubstrateChange items per commit), not batchSize (rows per item).
         int intentsPerCommit = commitRows > 0
             ? commitRows / Math.Max(1, batchSize) + 1
             : batchSize;
-        int channelCap = workers * intentsPerCommit * 2 + workers;
+        int channelCap = intentsPerCommit * 4 + 4;
         var channel = Channel.CreateBounded<SubstrateChange>(
             new BoundedChannelOptions(channelCap)
             {
                 SingleWriter = true,
-                SingleReader = false,
+                SingleReader = true,
                 FullMode = BoundedChannelFullMode.Wait,
             });
 
@@ -332,54 +337,169 @@ public sealed class IngestRunner
             }
         }, runCt);
 
-        var consumers = new Task[workers];
-        for (int w = 0; w < workers; w++)
+        // PARALLEL COMMIT LANES — this is what kills the single consumer that ran the commit on one
+        // thread (the 7.5%-CPU floor). The router splits every change's rows by id.lo % N (native
+        // stages via IntentStage.Partition; managed rows + walks by id.lo % N) so a given content id is
+        // only ever committed by ONE lane. Lanes run concurrently and their id-spaces are disjoint, so
+        // the set-based apply can never collide cross-lane (no 23505) while the per-attestation
+        // consensus accumulate AND the COPY/apply now run on N cores instead of one. Within a lane it
+        // stays serial, so the same id is never applied twice at once. (Pair with LAPLACE_APPLY_PARTITIONS=1
+        // so the writer does not re-partition an already-partitioned lane sub-change.)
+        int lanes = Math.Max(1,
+            int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_COMMIT_LANES"), out var cl) && cl > 0
+                ? cl : CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 12));
+
+        if (lanes == 1)
         {
-            int workerId = w;
-            consumers[w] = Task.Run(async () =>
-            {
-                var localRng = new Random(unchecked((int)decomposer.SourceId.Lo) ^ workerId);
-                var batch = new List<SubstrateChange>(batchSize);
-                int batchRows = 0;
-                try
-                {
-                    while (await channel.Reader.WaitToReadAsync(runCt))
-                    {
-                        while (channel.Reader.TryRead(out var intent))
-                        {
-                            if (batchSize == 1 && commitRows == 0)
-                            {
-                                await ProcessOneIntentAsync(intent, decomposer, options,
-                                                            localRng, counters, failures, log, runCt);
-                                continue;
-                            }
-                            batch.Add(intent);
-                            batchRows += rowsOf(intent);
-                            if (shouldFlush(batch.Count, batchRows))
-                            {
-                                await ProcessBatchAsync(batch, decomposer, options,
-                                                        localRng, counters, failures, log, runCt);
-                                batch.Clear();
-                                batchRows = 0;
-                            }
-                        }
-                    }
-                    if (batch.Count > 0)
-                        await ProcessBatchAsync(batch, decomposer, options,
-                                                localRng, counters, failures, log, runCt);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    stopCts.Cancel();   // a fatal commit aborts the run; unblock the producer
-                    throw;
-                }
-            }, runCt);
+            await DrainLaneAsync(channel.Reader, decomposer, options, counters, failures, log,
+                                 batchSize, commitRows, shouldFlush, rowsOf, stopCts, runCt);
+            await producer;
+            return;
         }
 
-        var all = new Task[workers + 1];
-        all[0] = producer;
-        Array.Copy(consumers, 0, all, 1, workers);
-        await Task.WhenAll(all);
+        var laneChans = new Channel<SubstrateChange>[lanes];
+        for (int k = 0; k < lanes; k++)
+            laneChans[k] = Channel.CreateBounded<SubstrateChange>(
+                new BoundedChannelOptions(channelCap)
+                { SingleWriter = true, SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
+
+        var laneTasks = new Task[lanes];
+        for (int k = 0; k < lanes; k++)
+        {
+            int lane = k;
+            laneTasks[lane] = Task.Run(() => DrainLaneAsync(
+                laneChans[lane].Reader, decomposer, options, counters, failures, log,
+                batchSize, commitRows, shouldFlush, rowsOf, stopCts, runCt), runCt);
+        }
+
+        var router = Task.Run(async () =>
+        {
+            try
+            {
+                while (await channel.Reader.WaitToReadAsync(runCt))
+                    while (channel.Reader.TryRead(out var c))
+                    {
+                        var subs = PartitionChange(c, lanes);
+                        for (int k = 0; k < lanes; k++)
+                            if (subs[k] is { } s)
+                                await laneChans[k].Writer.WriteAsync(s, runCt);
+                    }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                stopCts.Cancel();
+                throw;
+            }
+            finally
+            {
+                for (int k = 0; k < lanes; k++) laneChans[k].Writer.TryComplete();
+            }
+        }, runCt);
+
+        await Task.WhenAll(producer, router);
+        await Task.WhenAll(laneTasks);
+    }
+
+    // One commit lane: drains its id-partitioned sub-changes, batches, and applies them serially on its
+    // own connection path. N of these run concurrently over disjoint id-spaces.
+    private async Task DrainLaneAsync(
+        ChannelReader<SubstrateChange> reader,
+        IDecomposer decomposer, IngestRunOptions options, RunCounters counters,
+        List<IngestFailure> failures, ILogger log, int batchSize, int commitRows,
+        Func<int, int, bool> shouldFlush, Func<SubstrateChange, int> rowsOf,
+        CancellationTokenSource stopCts, CancellationToken runCt)
+    {
+        var localRng = new Random(unchecked((int)decomposer.SourceId.Lo));
+        var batch = new List<SubstrateChange>(batchSize);
+        int batchRows = 0;
+        try
+        {
+            while (await reader.WaitToReadAsync(runCt))
+                while (reader.TryRead(out var intent))
+                {
+                    if (batchSize == 1 && commitRows == 0)
+                    {
+                        await ProcessOneIntentAsync(intent, decomposer, options,
+                                                    localRng, counters, failures, log, runCt);
+                        continue;
+                    }
+                    batch.Add(intent);
+                    batchRows += rowsOf(intent);
+                    if (shouldFlush(batch.Count, batchRows))
+                    {
+                        await ProcessBatchAsync(batch, decomposer, options,
+                                                localRng, counters, failures, log, runCt);
+                        batch.Clear();
+                        batchRows = 0;
+                    }
+                }
+            if (batch.Count > 0)
+                await ProcessBatchAsync(batch, decomposer, options,
+                                        localRng, counters, failures, log, runCt);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            stopCts.Cancel();
+            throw;
+        }
+    }
+
+    // Split one change into N id-disjoint sub-changes (lane k = rows with id.lo % N == k). Native
+    // IntentStages are split by IntentStage.Partition (the same id.lo % N the apply uses); managed rows
+    // and walks are bucketed by their own id. The source's native stages are consumed (disposed) here;
+    // each lane's partition handles are disposed by the writer when applied. Lanes with no rows are null.
+    private static SubstrateChange[] PartitionChange(SubstrateChange c, int n)
+    {
+        var result = new SubstrateChange[n];
+        var ents = new List<EntityRow>[n];
+        var phys = new List<PhysicalityRow>[n];
+        var atts = new List<AttestationRow>[n];
+        var stageParts = new List<IntentStage>[n];
+        List<TestimonyWalkRow>[]? walks = c.TestimonyWalks.IsDefaultOrEmpty ? null : new List<TestimonyWalkRow>[n];
+        for (int k = 0; k < n; k++)
+        {
+            ents[k] = new List<EntityRow>();
+            phys[k] = new List<PhysicalityRow>();
+            atts[k] = new List<AttestationRow>();
+            stageParts[k] = new List<IntentStage>();
+            if (walks != null) walks[k] = new List<TestimonyWalkRow>();
+        }
+
+        foreach (var e in c.Entities) ents[(int)(e.Id.Lo % (ulong)n)].Add(e);
+        foreach (var p in c.Physicalities) phys[(int)(p.Id.Lo % (ulong)n)].Add(p);
+        foreach (var a in c.Attestations) atts[(int)(a.Id.Lo % (ulong)n)].Add(a);
+        if (walks != null)
+            foreach (var w in c.TestimonyWalks) walks[(int)(w.Subject.Lo % (ulong)n)].Add(w);
+
+        if (!c.IntentStages.IsDefaultOrEmpty)
+            foreach (var st in c.IntentStages)
+            {
+                if (st.IsInvalid) continue;
+                var split = st.Partition(n);
+                for (int k = 0; k < n; k++) stageParts[k].Add(split[k]);
+                st.Dispose();
+            }
+
+        for (int k = 0; k < n; k++)
+        {
+            bool any = ents[k].Count > 0 || phys[k].Count > 0 || atts[k].Count > 0
+                       || stageParts[k].Count > 0 || (walks != null && walks[k].Count > 0);
+            if (!any)
+            {
+                foreach (var s in stageParts[k]) s.Dispose();
+                result[k] = null!;
+                continue;
+            }
+            result[k] = c with
+            {
+                Entities = ents[k].ToImmutableArray(),
+                Physicalities = phys[k].ToImmutableArray(),
+                Attestations = atts[k].ToImmutableArray(),
+                IntentStages = stageParts[k].ToImmutableArray(),
+                TestimonyWalks = walks != null ? walks[k].ToImmutableArray() : c.TestimonyWalks,
+            };
+        }
+        return result;
     }
 
     private async Task ProcessOneIntentAsync(

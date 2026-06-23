@@ -34,17 +34,16 @@ static int codepoint_resolver(uint32_t atom, void* ,
     return codepoint_table_resolve_atom(atom, out_id, out_coord, out_hb);
 }
 
-static void physicality_id_compute(hash128_t entity_id, hash128_t source_id,
+static void physicality_id_compute(hash128_t entity_id,
                                    double coord[4], const double* traj, size_t traj_n,
                                    hash128_t* out) {
     size_t traj_bytes = traj_n * sizeof(double);
-    size_t total = 16 + 16 + 2 + 32 + traj_bytes;
+    size_t total = 16 + 2 + 32 + traj_bytes;
     uint8_t* buf = (uint8_t*)malloc(total);
     if (!buf) { hash128_zero(out); return; }
     size_t o = 0;
     memcpy(buf + o, &entity_id, 16); o += 16;
-    memcpy(buf + o, &source_id, 16); o += 16;
-    int16_t physicality_type = 1; 
+    int16_t physicality_type = 1;
     memcpy(buf + o, &physicality_type, 2); o += 2;
     memcpy(buf + o, coord, 32); o += 32;
     if (traj_n > 0) {
@@ -66,7 +65,7 @@ typedef struct {
 static int push_entity(laplace_compose_result_t* r, hash128_t id, uint8_t tier,
                        hash128_t type_id);
 static int compose_id_push(hash128_t** ids, size_t* count, size_t* cap, hash128_t id);
-static int push_phys(laplace_compose_result_t* r, hash128_t entity_id, hash128_t source_id,
+static int push_phys(laplace_compose_result_t* r, hash128_t entity_id,
                      double coord[4], hilbert128_t* hb,
                      const hash128_t* child_ids, const uint64_t* child_flags, size_t m);
 
@@ -169,7 +168,7 @@ static int json_unescape_utf8(const uint8_t* span, size_t span_len,
 }
 
 static int emit_grapheme_floor_entities(
-    laplace_compose_result_t* r, hash128_t source_id,
+    laplace_compose_result_t* r,
     tier_tree_t* tree, const laplace_grapheme_floor_t* floor,
     hash128_t** emitted_entity, size_t* emitted_entity_n, size_t* emitted_entity_cap) {
     hash128_t grapheme_type;
@@ -184,7 +183,7 @@ static int emit_grapheme_floor_entities(
         if (push_entity(r, gv.id, 1, grapheme_type) != 0) return -3;
         uint64_t gf = laplace_vertex_flags(1, 0, 0);
         hash128_t gid = gv.id;
-        if (push_phys(r, gv.id, source_id, gv.coord, &gv.hilbert, &gid, &gf, 1) != 0)
+        if (push_phys(r, gv.id, gv.coord, &gv.hilbert, &gid, &gf, 1) != 0)
             return -3;
     }
     return 0;
@@ -196,7 +195,7 @@ static int emit_grapheme_floor_entities(
 
 static int json_leaf_fill_grapheme_children(
     const uint8_t* utf8, size_t len, laplace_ast_t* ast, size_t idx,
-    laplace_compose_result_t* r, hash128_t source_id,
+    laplace_compose_result_t* r,
     hash128_t** emitted_entity, size_t* emitted_entity_n, size_t* emitted_entity_cap,
     hash128_t** out_ids, double** out_coords, uint64_t** out_flags, size_t* out_m,
     hash128_t* out_root_id) {
@@ -267,7 +266,7 @@ static int json_leaf_fill_grapheme_children(
 
     if (r && emitted_entity) {
         int erc = emit_grapheme_floor_entities(
-            r, source_id, local_tree, &local_floor,
+            r, local_tree, &local_floor,
             emitted_entity, emitted_entity_n, emitted_entity_cap);
         if (erc != 0) {
             laplace_grapheme_floor_free(&local_floor);
@@ -320,7 +319,7 @@ static int json_leaf_fill_grapheme_children(
 static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
                              const char* modality_id,
                              const laplace_grapheme_floor_t* floor, tier_tree_t* tree,
-                             laplace_compose_result_t* r, hash128_t source_id,
+                             laplace_compose_result_t* r,
                              hash128_t** emitted_entity, size_t* emitted_entity_n,
                              size_t* emitted_entity_cap,
                              compose_state_t* st) {
@@ -405,7 +404,7 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
             tier = (uint8_t)((max_tier + 1) < 255 ? (max_tier + 1) : 255);
         } else if (is_json_modality(modality_id)) {
             if (json_leaf_fill_grapheme_children(
-                    utf8, len, ast, idx, r, source_id,
+                    utf8, len, ast, idx, r,
                     emitted_entity, emitted_entity_n, emitted_entity_cap,
                     &child_ids, &child_coords, &child_flags, &m,
                     &leaf_root_id) != 0)
@@ -505,7 +504,7 @@ static int compose_id_push(hash128_t** ids, size_t* count, size_t* cap, hash128_
     return 1;
 }
 
-static int push_phys(laplace_compose_result_t* r, hash128_t entity_id, hash128_t source_id,
+static int push_phys(laplace_compose_result_t* r, hash128_t entity_id,
                      double coord[4], hilbert128_t* hb,
                      const hash128_t* child_ids, const uint64_t* child_flags, size_t m) {
     double* traj = (double*)malloc(m * 4 * sizeof(double));
@@ -515,7 +514,7 @@ static int push_phys(laplace_compose_result_t* r, hash128_t entity_id, hash128_t
         return -3;
     }
     hash128_t phys_id;
-    physicality_id_compute(entity_id, source_id, coord, traj, m * 4, &phys_id);
+    physicality_id_compute(entity_id, coord, traj, m * 4, &phys_id);
 
     laplace_compose_physicality_t* n = (laplace_compose_physicality_t*)realloc(
         r->physicalities, (r->phys_count + 1) * sizeof(*n));
@@ -524,7 +523,6 @@ static int push_phys(laplace_compose_result_t* r, hash128_t entity_id, hash128_t
     laplace_compose_physicality_t* p = &r->physicalities[r->phys_count++];
     p->id = phys_id;
     p->entity_id = entity_id;
-    p->source_id = source_id;
     memcpy(p->coord, coord, 4 * sizeof(double));
     p->hilbert = *hb;
     p->trajectory_xyzm = traj;
@@ -603,6 +601,10 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
                             hash128_t type_meta_id, laplace_compose_result_t** out) {
     if (!utf8 || !ast || !modality_id || !out) return -1;
     *out = NULL;
+    // Geometry is source-free: physicality ids no longer hash source. source_id is retained on the
+    // ABI for callers that pass it (and for entity first-observed provenance on the managed side),
+    // but it does not enter any content/geometry id computed here.
+    (void)source_id;
     if (len == 0 || laplace_ast_node_count(ast) == 0) return 0;
 
     laplace_compose_result_t* r = (laplace_compose_result_t*)calloc(1, sizeof(*r));
@@ -648,7 +650,7 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
             {
                 uint64_t gf = laplace_vertex_flags(1, 0, 0);
                 hash128_t gid = gv.id;
-                if (push_phys(r, gv.id, source_id, gv.coord, &gv.hilbert,
+                if (push_phys(r, gv.id, gv.coord, &gv.hilbert,
                               &gid, &gf, 1) != 0) { rc = -3; goto fail; }
             }
         }
@@ -657,7 +659,7 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
     if (!json_mod)
         g_first = laplace_grapheme_floor_graph_first_idx(&floor);
 
-    rc = compose_ast_nodes(utf8, len, ast, modality_id, &floor, tree, r, source_id,
+    rc = compose_ast_nodes(utf8, len, ast, modality_id, &floor, tree, r,
                            &emitted_entity, &emitted_entity_n, &emitted_entity_cap, &st);
     if (rc != 0) goto fail_st;
 
@@ -712,7 +714,7 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
         } else if (json_mod) {
             double* jcoords = NULL;
             if (json_leaf_fill_grapheme_children(
-                    utf8, len, ast, idx, NULL, source_id,
+                    utf8, len, ast, idx, NULL,
                     NULL, NULL, NULL,
                     &child_ids, &jcoords, &child_flags, &m, NULL) == 0) {
                 free(jcoords);
@@ -743,7 +745,7 @@ int laplace_grammar_compose(const uint8_t* utf8, size_t len, laplace_ast_t* ast,
             }
         }
         if (m > 0 && child_ids) {
-            if (push_phys(r, id, source_id, st.comp_coord + idx * 4, &hb,
+            if (push_phys(r, id, st.comp_coord + idx * 4, &hb,
                           child_ids, child_flags, m) != 0) {
                 free(child_ids); free(child_flags);
                 rc = -3; goto fail_emit;
@@ -843,9 +845,7 @@ int laplace_grammar_compose_node_id(const uint8_t* utf8, size_t len, laplace_ast
         hash_composer_run(tree, codepoint_resolver, NULL);
 
     compose_state_t st = {0};
-    hash128_t no_source;
-    hash128_zero(&no_source);
-    rc = compose_ast_nodes(utf8, len, ast, "text", &floor, tree, NULL, no_source,
+    rc = compose_ast_nodes(utf8, len, ast, "text", &floor, tree, NULL,
                            NULL, NULL, NULL, &st);
     if (rc == 0 && st.comp_valid[ast_node_index]) {
         *out_id = st.comp_id[ast_node_index];
@@ -910,33 +910,6 @@ int laplace_compose_get_precedes(const laplace_compose_result_t* r, size_t i,
                                  laplace_compose_precedes_t* out) {
     if (!r || !out || i >= r->precedes_count) return -1;
     *out = r->precedes[i];
-    return 0;
-}
-
-int laplace_compose_drain_into_stage(const laplace_compose_result_t* r,
-                                     intent_stage_t* stage,
-                                     hash128_t source_id,
-                                     int64_t now_us) {
-    if (!r || !stage) return -1;
-    for (size_t i = 0; i < r->entity_count; ++i) {
-        const laplace_compose_entity_t* e = &r->entities[i];
-        if (intent_stage_witness_seen(stage, &e->id)) continue;
-        int rc = intent_stage_add_entity(stage, &e->id, (int16_t)e->tier, &e->type_id, &source_id);
-        if (rc != 0) return rc;
-        intent_stage_witness_record(stage, &e->id);
-    }
-    for (size_t i = 0; i < r->phys_count; ++i) {
-        const laplace_compose_physicality_t* p = &r->physicalities[i];
-        if (intent_stage_witness_seen(stage, &p->id)) continue;
-        uint32_t n_verts = (uint32_t)(p->trajectory_n / 4);
-        int rc = intent_stage_add_physicality(
-            stage, &p->id, &p->entity_id, &source_id,
-            (int16_t)1 /* PhysicalityType.Content */, p->coord, &p->hilbert,
-            p->trajectory_xyzm, n_verts, (int32_t)p->n_constituents,
-            1, 0.0, 1, 0, now_us);
-        if (rc != 0) return rc;
-        intent_stage_witness_record(stage, &p->id);
-    }
     return 0;
 }
 

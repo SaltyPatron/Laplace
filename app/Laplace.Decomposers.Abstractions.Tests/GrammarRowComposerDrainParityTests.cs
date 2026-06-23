@@ -41,7 +41,7 @@ public sealed class GrammarRowComposerDrainParityTests
         {
             coord[0] = p.CoordX; coord[1] = p.CoordY; coord[2] = p.CoordZ; coord[3] = p.CoordM;
             expected.AddPhysicality(
-                p.Id, p.EntityId, p.SourceId, (short)p.Type, coord, p.HilbertIndex,
+                p.Id, p.EntityId, (short)p.Type, coord, p.HilbertIndex,
                 p.TrajectoryXyzm ?? ReadOnlySpan<double>.Empty, p.NConstituents,
                 p.AlignmentResidual, p.SourceDim, NowUs);
         }

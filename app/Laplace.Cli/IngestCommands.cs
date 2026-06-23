@@ -50,6 +50,11 @@ internal static class IngestCommands
         bool RegisterOnly,
         bool Force = false);
 
+    // Sources routed through the generic EtlDecomposer to prove parity with their bespoke
+    // decomposer. The old decomposer switch stays in place for everything else (Migrate retires it).
+    private static readonly HashSet<string> EtlGenericRouted =
+        new(StringComparer.OrdinalIgnoreCase) { "omw", "conceptnet", "atomic2020", "wiktionary" };
+
     private static IngestCliArgs ParseIngestCliArgs(string[] args)
     {
         var rest = new List<string>(args);
@@ -113,11 +118,24 @@ internal static class IngestCommands
                         + "  language scope: --langs or LAPLACE_INGEST_LANGS; per-source LAPLACE_{SOURCE}_LANGS\n"
                         + "  --no-evidence: fold consensus only; skip laplace.attestations (or LAPLACE_PERSIST_EVIDENCE=0)");
 
-        
-        
+
+
         CodepointPerfcache.Load(ResolveBlob());
 
-        return cli.Source.ToLowerInvariant() switch
+        // Make the bespoke witnesses of the already-grammar-conforming sources available to the
+        // generic EtlDecomposer (the parity oracle path); harmless for sources still on old classes.
+        EtlWitnessRegistrations.RegisterAll();
+
+        string sourceKey = cli.Source.ToLowerInvariant();
+
+        // Manifest-driven generic path: a complete EtlManifest row drives ONE EtlDecomposer. Routed
+        // for the already-conforming sources to prove parity; opt the rest in by completing their row.
+        if (EtlGenericRouted.Contains(sourceKey) && EtlManifest.IsRoutable(sourceKey))
+            return await IngestViaRunnerAsync(
+                new EtlDecomposer(EtlManifest.Get(sourceKey)),
+                IngestDataPaths.Resolve(sourceKey, cli.Path), skipLayerCheck: false, cli);
+
+        return sourceKey switch
         {
             "unicode"  => await IngestUnicodeViaRunnerAsync(cli),
             "iso639"   => await IngestISO639Async(cli),
@@ -662,13 +680,15 @@ internal static class IngestCommands
         {
             case "UnicodeDecomposer":
             {
+                // Geometry is source-free: the physicality for U+0041 is one row keyed by
+                // (entity_id, type), no source. Provenance ("the Unicode source deposited this")
+                // is counted via attestations, not via a physicality source filter.
                 await using var cmd = conn.CreateCommand();
                 cmd.CommandText = @"SELECT laplace.render(laplace.canonical_id('A')), f.tier,
                                            p.x, p.y, p.z, p.m, encode(p.hilbert_index, 'hex')
                                     FROM laplace.entity_facets(laplace.canonical_id('A')) f
                                     CROSS JOIN laplace.entity_physicalities(laplace.canonical_id('A')) p
-                                    WHERE p.type = 1
-                                      AND p.source_id = laplace.source_id('UnicodeDecomposer')";
+                                    WHERE p.type = 1";
                 await using var rdr = await cmd.ExecuteReaderAsync();
                 if (await rdr.ReadAsync())
                 {
@@ -677,6 +697,9 @@ internal static class IngestCommands
                     Console.WriteLine($"    coord   : ({rdr.GetDouble(2):F6}, {rdr.GetDouble(3):F6}, {rdr.GetDouble(4):F6}, {rdr.GetDouble(5):F6})");
                 }
                 else Console.WriteLine("  FAIL: no Unicode CONTENT for U+0041");
+                await rdr.CloseAsync();
+                long uniProv = await EvidenceForSource("UnicodeDecomposer");
+                Console.WriteLine($"    provenance: {uniProv:N0} UnicodeDecomposer attestations");
                 break;
             }
             case "ISO639Decomposer":

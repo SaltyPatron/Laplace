@@ -157,10 +157,26 @@ public sealed class TabularDecomposer : IDecomposer
 
         var b = NewBuilder(0);
         b.AddEntity(new EntityRow(OutcomeId, EntityTier.Vocabulary, OutcomeTypeId, Source));
+        // The outcome's target-column name and positive-value token are content (meaningful surface
+        // strings): emit them via ContentEmitter and link the version-resolving outcome anchor to them
+        // as IS_INSTANCE_OF, so the names get geometry and stay context rather than baked into the id.
+        if (ContentEmitter.Emit(b, _targetColumn, Source) is { } targetNameId)
+            b.AddAttestation(NativeAttestation.Categorical(
+                OutcomeId, "IS_INSTANCE_OF", targetNameId, Source, SourceTrust.StructuredCorpus));
+        if (ContentEmitter.Emit(b, _positiveValue, Source) is { } posValId)
+            b.AddAttestation(NativeAttestation.Categorical(
+                OutcomeId, "IS_INSTANCE_OF", posValId, Source, SourceTrust.StructuredCorpus));
         foreach (var c in featureCols)
         {
             b.AddEntity(new EntityRow(ColumnId(c), EntityTier.Vocabulary, ColumnTypeId, Source));
             _canonicalNames.Add($"tabular/column/{c}/v1");
+
+            // The column NAME is content (a meaningful surface string like "Geography"/"Age"):
+            // emit it via ContentEmitter so it gets a Merkle DAG + tiers + geometry, and link the
+            // version-resolving column anchor to it as IS_INSTANCE_OF (naming is context, not id).
+            if (ContentEmitter.Emit(b, c, Source) is { } colNameId)
+                b.AddAttestation(NativeAttestation.Categorical(
+                    ColumnId(c), "IS_INSTANCE_OF", colNameId, Source, SourceTrust.StructuredCorpus));
         }
 
         int emitted = 0, bn = 0;
@@ -200,6 +216,9 @@ public sealed class TabularDecomposer : IDecomposer
         foreach (var ((pa, ta, pb, tb), nm) in counts2)
         {
             ct.ThrowIfCancellationRequested();
+            // Structural conjunction anchor: the AND of two value anchors, not a single meaningful
+            // content string. Its constituents (the two columns + their value tokens) already carry
+            // content/geometry from the per-value loop above, so this composite stays an anchor.
             var cq = Hash128.OfCanonical($"tabular/pair/{pa}={ta}&{pb}={tb}/v1");
             b.AddEntity(new EntityRow(cq, EntityTier.Vocabulary, ValueTypeId, Source));
             _canonicalNames.Add($"tabular/pair/{pa}={ta}&{pb}={tb}/v1");

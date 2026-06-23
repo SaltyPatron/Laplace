@@ -172,7 +172,7 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "intent_stage_add_physicality")]
     internal static partial int IntentStageAddPhysicality(
         IntPtr stage,
-        Hash128* id, Hash128* entityId, Hash128* sourceId,
+        Hash128* id, Hash128* entityId,
         short physicalityType,
         double* coord, Hilbert128* hilbertIndex,
         double* trajectoryXyzm, uint trajectoryNVertices,
@@ -199,6 +199,9 @@ public static unsafe partial class NativeInterop
 
     [LibraryImport(Library, EntryPoint = "intent_stage_witness_seen")]
     internal static partial int IntentStageWitnessSeen(IntPtr stage, Hash128* id);
+
+    [LibraryImport(Library, EntryPoint = "intent_stage_partition")]
+    internal static partial int IntentStagePartition(IntPtr src, nuint partCount, IntPtr* outParts);
 
     [LibraryImport(Library, EntryPoint = "glicko2_effective_mu")]
     internal static partial long Glicko2EffectiveMu(Glicko2State* state);
@@ -314,9 +317,6 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_compose_get_precedes")]
     public static partial int ComposeGetPrecedes(IntPtr result, nuint i, ComposePrecedesNative* outPrec);
 
-    [LibraryImport(Library, EntryPoint = "laplace_compose_drain_into_stage")]
-    public static partial int ComposeDrainIntoStage(IntPtr result, IntPtr stage, Hash128 source, long nowUs);
-
     [LibraryImport(Library, EntryPoint = "laplace_compose_span_lookup")]
     public static partial int ComposeSpanLookup(IntPtr result, uint startByte, uint endByte, Hash128* outId);
 
@@ -373,7 +373,6 @@ public static unsafe partial class NativeInterop
     {
         public Hash128 Id;
         public Hash128 EntityId;
-        public Hash128 SourceId;
         public double Coord0, Coord1, Coord2, Coord3;
         public Hilbert128 Hilbert;
         public IntPtr TrajectoryXyzm;

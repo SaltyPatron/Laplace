@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -69,7 +68,6 @@ public sealed class IntentStage : SafeHandle
     public void AddPhysicality(
         Hash128         id,
         Hash128         entityId,
-        Hash128         sourceId,
         short           physicalityType,
         ReadOnlySpan<double> coord,
         Hilbert128      hilbertIndex,
@@ -96,7 +94,7 @@ public sealed class IntentStage : SafeHandle
                 double arVal = alignmentResidual ?? 0.0;
                 int    sdVal = sourceDim          ?? 0;
                 int rc = NativeInterop.IntentStageAddPhysicality(
-                    handle, &id, &entityId, &sourceId, physicalityType, pCoord, &hilbertIndex,
+                    handle, &id, &entityId, physicalityType, pCoord, &hilbertIndex,
                     nVerts == 0 ? null : pTraj, nVerts, nConstituents,
                     arNull, arVal, sdNull, sdVal, observedAtUnixUs);
                 if (rc != 0) throw new InvalidOperationException("intent_stage_add_physicality failed");
@@ -187,21 +185,6 @@ public sealed class IntentStage : SafeHandle
     private static volatile bool _bulkFreshBypass;
     public static void SetBulkFreshBypass(bool enabled) => _bulkFreshBypass = enabled;
 
-    // Bounded, per-process "already emitted this run" cache, keyed by (content hash, source). In
-    // bulk-fresh the native bank is bypassed and EmitContentTree gets an EMPTY bitmap => every
-    // occurrence of repeated content (the word "the", shared graphemes/codepoints, synsets shared
-    // across 1226 OMW languages) re-builds and re-stages the WHOLE tier tree, and the DB discards
-    // the duplicates. That redundant client work is the measured client-bound bottleneck. A repeat
-    // of the same (canonical, source) is deterministic — identical entity ids, coords, physicalities,
-    // already staged on first sight — so returning the memoized root and skipping build+stage is
-    // exact. Relations the caller wires via the root are unaffected (they are emitted outside this).
-    // Bounded with clear-on-cap => cannot OOM (the unbounded growth that killed the old bank). A
-    // dropped (evicted) entry just re-emits once and the DB de-dups it: a missed optimization, never
-    // a correctness fault. Each seed source is its own process, so this cache is single-source.
-    private const int EmittedTreeCap = 1 << 20;
-    private static readonly ConcurrentDictionary<(Hash128 Content, Hash128 Source), Hash128> _emittedTrees = new();
-    public static void ResetEmittedTreeCache() => _emittedTrees.Clear();
-
     public static bool IsContentWitnessProven(Hash128 id)
     {
         unsafe
@@ -222,25 +205,9 @@ public sealed class IntentStage : SafeHandle
             // Bulk-fresh: the global bank grows monotonically and OOMs on large corpora (e.g.
             // OMW 1226 files). Skip the bank and emit via the two-phase tree path — DB uniqueness
             // is guaranteed by ON CONFLICT DO NOTHING / NOT EXISTS, not the proven-set.
-            // Repeat-skip: if this exact (canonical, source) was already emitted this run, the tree
-            // is deterministic and already staged — return the memoized root without re-building or
-            // re-staging it (the dominant client-bound cost on repetitive corpora).
-            var cacheKey = (Hash128.Blake3(canonical), sourceId);
-            if (_emittedTrees.TryGetValue(cacheKey, out var cachedRoot))
-            {
-                rootId = cachedRoot;
-                return true;
-            }
             var tree = BuildContentTree(canonical);
             if (tree is null) return false;
-            bool emitted;
-            using (tree) emitted = EmitContentTree(tree, sourceId, ReadOnlySpan<byte>.Empty, out rootId);
-            if (emitted)
-            {
-                if (_emittedTrees.Count >= EmittedTreeCap) _emittedTrees.Clear();
-                _emittedTrees[cacheKey] = rootId;
-            }
-            return emitted;
+            using (tree) return EmitContentTree(tree, sourceId, ReadOnlySpan<byte>.Empty, out rootId);
         }
 
         unsafe
@@ -321,6 +288,42 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
+    /// <summary>
+    /// Per-content-id partition: route every staged row into one of <paramref name="partCount"/>
+    /// fresh stages by (row.id.lo % partCount). A given content id lands in exactly one partition,
+    /// so the key space across the returned stages is disjoint — the property that lets N commit
+    /// workers COPY + apply in parallel with no cross-worker id collision (no 23505, no ON CONFLICT,
+    /// no serial lane). The managed code cannot do this split (the native tuple blob is opaque), so
+    /// the row-level routing lives in laplace_core. Each returned stage is owned by the caller.
+    /// </summary>
+    public IntentStage[] Partition(int partCount)
+    {
+        ThrowIfDisposed();
+        if (partCount < 1) throw new ArgumentOutOfRangeException(nameof(partCount));
+        if (partCount == 1) return new[] { this };
+
+        var raw = new IntPtr[partCount];
+        unsafe
+        {
+            fixed (IntPtr* p = raw)
+            {
+                int rc = NativeInterop.IntentStagePartition(handle, (nuint)partCount, p);
+                if (rc != 0) throw new InvalidOperationException("intent_stage_partition failed");
+            }
+        }
+        var parts = new IntentStage[partCount];
+        for (int i = 0; i < partCount; i++)
+        {
+            if (raw[i] == IntPtr.Zero)
+            {
+                for (int j = 0; j < i; j++) parts[j].Dispose();
+                throw new InvalidOperationException("intent_stage_partition returned a null partition");
+            }
+            parts[i] = new IntentStage(raw[i]);
+        }
+        return parts;
+    }
+
     public bool WitnessContains(Hash128 id)
     {
         ThrowIfDisposed();
@@ -329,18 +332,6 @@ public sealed class IntentStage : SafeHandle
             Hash128 h = id;
             return NativeInterop.IntentStageWitnessSeen(handle, &h) != 0;
         }
-    }
-
-    /// <summary>
-    /// Bulk-drain a grammar compose result's entities + physicalities straight into this stage in one
-    /// native call — no per-row managed P/Invoke. Within-batch dedup uses this stage's native witness
-    /// set. PRECEDES are not drained here (they ride the managed attestation path).
-    /// </summary>
-    public void DrainComposeContent(IntPtr composeResult, Hash128 sourceId, long nowUs)
-    {
-        ThrowIfDisposed();
-        int rc = NativeInterop.ComposeDrainIntoStage(composeResult, handle, sourceId, nowUs);
-        if (rc != 0) throw new InvalidOperationException($"laplace_compose_drain_into_stage failed: {rc}");
     }
 
     private void ThrowIfDisposed()

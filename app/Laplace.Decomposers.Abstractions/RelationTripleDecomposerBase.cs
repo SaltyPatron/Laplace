@@ -10,30 +10,6 @@ public abstract class RelationTripleDecomposerBase : IDecomposer
     public abstract int                 LayerOrder   { get; }
     public abstract Engine.Core.Hash128 TrustClassId { get; }
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
     public abstract Task InitializeAsync(
         IDecomposerContext context, CancellationToken ct = default);
 
@@ -45,9 +21,6 @@ public abstract class RelationTripleDecomposerBase : IDecomposer
     protected abstract IAsyncEnumerable<SubstrateChange> StreamTriplesAsync(
         string ecosystemPath, DecomposerOptions options, CancellationToken ct);
 
-    
-    
-    
     protected ISubstrateReader? ContainmentReader { get; private set; }
 
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
