@@ -453,7 +453,7 @@ CREATE OR REPLACE FUNCTION links(p_word text)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     SELECT COALESCE(NULLIF(relation_canonical(c.type_id), ''), label(c.type_id)) AS relation,
-           COALESCE(NULLIF(render_text(c.object_id, 80), ''), label(c.object_id)) AS target,
+           label(c.object_id) AS target,
            (eff_mu(c.rating, c.rd))::float8 / 1e9 AS strength
     FROM consensus c
     WHERE c.subject_id = word_id(p_word)
@@ -470,7 +470,7 @@ CREATE OR REPLACE FUNCTION correlate(p_words text[])
     e AS (
         SELECT v.word,
                COALESCE(NULLIF(relation_canonical(c.type_id), ''), label(c.type_id)) AS relation,
-               COALESCE(NULLIF(render_text(c.object_id, 80), ''), label(c.object_id)) AS target,
+               label(c.object_id) AS target,
                (eff_mu(c.rating, c.rd))::float8 / 1e9 AS w
         FROM v JOIN consensus c ON c.subject_id = v.id
     )
