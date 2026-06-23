@@ -51,6 +51,7 @@ public sealed class ISODecomposer : IDecomposer{
         boot.AddRelationType("HAS_LANGUAGE_TYPE");
         boot.AddRelationType("HAS_VARIANT_OF");
         boot.AddRelationType("HAS_DEFINITION");
+        boot.AddRelationType("HAS_NAME_ALIAS");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
 
@@ -123,8 +124,15 @@ public sealed class ISODecomposer : IDecomposer{
             {
                 var nameId = ContentEmitter.Emit(b, rec.RefName, Source);
                 if (nameId is { } nid)
+                {
+                    // The reference name ("English") is the language's human-readable display name.
+                    // HAS_NAME_ALIAS makes label() surface "English" instead of the bare ISO code
+                    // "eng"; HAS_DEFINITION keeps it queryable as the language's gloss.
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        langId, "HAS_NAME_ALIAS", nid, Source, SourceTrust.StandardsDerived));
                     b.AddAttestation(NativeAttestation.Categorical(
                         langId, "HAS_DEFINITION", nid, Source, SourceTrust.StandardsDerived));
+                }
             }
         }
 
