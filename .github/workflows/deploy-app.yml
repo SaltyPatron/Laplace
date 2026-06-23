@@ -44,6 +44,11 @@ concurrency:
 env:
   PGDATABASE: laplace
   LAPLACE_DATA_ROOT: /vault/Data
+  # Conservative ingest concurrency — matches _ingest.yml. Aggressive defaults
+  # exhaust the Npgsql pool (max 100) on parallel decomposers like CILI.
+  LAPLACE_INGEST_WORKERS: "2"
+  LAPLACE_DECOMPOSE_WORKERS: "2"
+  LAPLACE_FOLD_WORKERS: "4"
 
 jobs:
   deploy:
