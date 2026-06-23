@@ -47,6 +47,7 @@ public sealed class CILIDecomposer : IDecomposer
         boot.AddType("WordNet_Synset");
         boot.AddRelationType("IS_TYPED_AS");
         boot.AddRelationType("HAS_DEFINITION");
+        boot.AddRelationType("HAS_NAME_ALIAS");
         boot.AddRelationType("HAS_SYNSET_KEY");
         await context.Writer.ApplyAsync(boot.Build(), ct);
     }
@@ -89,8 +90,15 @@ public sealed class CILIDecomposer : IDecomposer
                     b.AddAttestation(NativeAttestation.Categorical(
                         id, "IS_TYPED_AS", SynsetTypeId, Source, TC.AcademicCurated));
                     if (def is { Length: > 0 } && ContentEmitter.Emit(b, def, Source) is { } dId)
+                    {
+                        // The ILI id (i92375) stays the content-address anchor for convergence, but
+                        // surface the English definition as the display name so the concept never
+                        // renders as the opaque "i92375".
+                        b.AddAttestation(NativeAttestation.Categorical(
+                            id, "HAS_NAME_ALIAS", dId, Source, TC.AcademicCurated, EngLang));
                         b.AddAttestation(NativeAttestation.Categorical(
                             id, "HAS_DEFINITION", dId, Source, TC.AcademicCurated, EngLang));
+                    }
                 },
                 ct);
             await foreach (var change in changes.WithCancellation(ct))
