@@ -377,3 +377,7 @@ app/Laplace.Endpoints.OpenAICompat/wwwroot/
 web/node_modules/
 web/dist/
 out/
+
+# real (secret-bearing) deploy env files — only the .example is tracked
+deploy/windows/laplace-api.env
+deploy/linux/laplace-api.env

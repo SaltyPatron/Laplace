@@ -68,7 +68,7 @@ public sealed class SemLinkDecomposer : IDecomposer{
         if (roleMappingPath is not null)
         {
             int rmBatch = options.BatchSize > 0 ? options.BatchSize : 4096;
-            await foreach (var change in SemLinkRoleMappingIngest.StreamAsync(roleMappingPath, rmBatch, ct))
+            await foreach (var change in SemLinkRoleMappingIngest.StreamAsync(roleMappingPath, rmBatch, context.Reader, ct))
             {
                 if (!options.DryRun)
                     yield return change;

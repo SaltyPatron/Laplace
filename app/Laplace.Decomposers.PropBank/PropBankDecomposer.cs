@@ -69,8 +69,9 @@ public sealed class PropBankDecomposer : IDecomposer{
     {
         string framesDir = ResolveFramesDir(context.EcosystemPath);
         int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
+        var reader = context.Reader;
 
-        var b = NewBuilder("propbank/batch-0", batch);
+        var b = NewBuilder("propbank/batch-0", batch, reader);
         int n = 0, bn = 0;
 
         foreach (var file in EnumerateFramesetFiles(framesDir, context.EcosystemPath))
@@ -88,12 +89,12 @@ public sealed class PropBankDecomposer : IDecomposer{
 
             if (++n >= batch)
             {
-                if (!options.DryRun) yield return b.Build();
-                b = NewBuilder($"propbank/batch-{++bn}", batch);
+                if (!options.DryRun) yield return await b.BuildAsync(ct);
+                b = NewBuilder($"propbank/batch-{++bn}", batch, reader);
                 n = 0; await Task.Yield();
             }
         }
-        if (n > 0 && !options.DryRun) yield return b.Build();
+        if (n > 0 && !options.DryRun) yield return await b.BuildAsync(ct);
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -227,11 +228,15 @@ public sealed class PropBankDecomposer : IDecomposer{
             }
     }
 
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch) =>
-        new(Source, unit, null,
+    // Lemmas, roleset names/definitions, role descriptions, function tags, theta roles, and examples
+    // all route through the SHARED two-phase containment (EnableDeferredContent) so content shared
+    // across 7.5k framesets is committed once; the builder MUST be drained via BuildAsync.
+    private static SubstrateChangeBuilder NewBuilder(string unit, int batch, ISubstrateReader? reader) =>
+        new SubstrateChangeBuilder(Source, unit, null,
             entityCapacity:      batch * 96,
             physicalityCapacity: batch * 96,
-            attestationCapacity: batch * 48);
+            attestationCapacity: batch * 48)
+            .EnableDeferredContent(reader);
 
     private static IEnumerable<XmlElement> DescendantElements(XmlElement el, string name)
     {

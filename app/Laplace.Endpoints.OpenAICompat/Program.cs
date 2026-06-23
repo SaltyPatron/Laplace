@@ -1,4 +1,6 @@
+using System.Net;
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.HttpOverrides;
 using Laplace.Endpoints.OpenAICompat;
 using Npgsql;
 using OpenTelemetry.Metrics;
@@ -90,6 +92,19 @@ builder.Services.AddOpenTelemetry()
     });
 
 var app = builder.Build();
+
+// Behind a reverse proxy (nginx on Linux, ANCM on IIS) the peer is the proxy on
+// loopback; honor its X-Forwarded-For/-Proto so client IP + scheme are real.
+// Trust only loopback proxies so the headers can't be spoofed by real clients.
+var forwardedHeaders = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+};
+forwardedHeaders.KnownIPNetworks.Clear();
+forwardedHeaders.KnownProxies.Clear();
+forwardedHeaders.KnownProxies.Add(IPAddress.Loopback);
+forwardedHeaders.KnownProxies.Add(IPAddress.IPv6Loopback);
+app.UseForwardedHeaders(forwardedHeaders);
 
 if (corsOrigins.Length > 0)
     app.UseCors();

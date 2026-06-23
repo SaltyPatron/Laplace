@@ -107,7 +107,8 @@ public sealed class StackDecomposer : IDecomposer
         }
 
         int batch = options.BatchSize > 1 ? options.BatchSize : 512;
-        var b = NewBuilder(0);
+        var reader = context.Reader;
+        var b = NewBuilder(0, reader);
         int inBatch = 0, bn = 0;
 
         foreach (var file in files)
@@ -167,15 +168,15 @@ public sealed class StackDecomposer : IDecomposer
 
                 if (++inBatch >= batch)
                 {
-                    if (!options.DryRun) yield return b.Build();
-                    b = NewBuilder(++bn);
+                    if (!options.DryRun) yield return await b.BuildAsync(ct);
+                    b = NewBuilder(++bn, reader);
                     inBatch = 0;
                     await Task.Yield();
                 }
             }
         }
 
-        if (inBatch > 0 && !options.DryRun) yield return b.Build();
+        if (inBatch > 0 && !options.DryRun) yield return await b.BuildAsync(ct);
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -255,9 +256,13 @@ public sealed class StackDecomposer : IDecomposer
             yield return f;
     }
 
-    private static SubstrateChangeBuilder NewBuilder(int n) =>
-        new(Source, $"stack-v2/{n}", null,
-            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 4096);
+    // Filename keyword segments route through the SHARED two-phase containment
+    // (EnableDeferredContent); the parsed-code grammar tree is already containment-deduped inside
+    // GrammarEntityBuilder.BuildAsync. Drain via BuildAsync so the deferred probe runs.
+    private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? reader) =>
+        new SubstrateChangeBuilder(Source, $"stack-v2/{n}", null,
+            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 4096)
+            .EnableDeferredContent(reader);
 
     private readonly record struct StackRow(string? Content, string? Language, string? Path);
 }

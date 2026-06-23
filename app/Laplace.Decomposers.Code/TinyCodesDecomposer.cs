@@ -83,7 +83,8 @@ public sealed class TinyCodesDecomposer : IDecomposer
         }
 
         int batch = options.BatchSize > 1 ? options.BatchSize : 512;
-        var b = NewBuilder(0);
+        var reader = context.Reader;
+        var b = NewBuilder(0, reader);
         int inBatch = 0, bn = 0;
 
         foreach (var file in files)
@@ -126,12 +127,14 @@ public sealed class TinyCodesDecomposer : IDecomposer
                 foreach (var a in atts) b.AddAttestation(a);
 
                 
-                if (!string.IsNullOrEmpty(conceptKey))
+                // The concept/task key is CONTENT, not a synthetic nameless id: emit its surface via the
+                // shared CategoryAnchor (ContentEmitter + IS_TYPED_AS CodeConcept), exactly like CILI's
+                // HAS_SYNSET_KEY treats a synset key as content. This gives the key a Merkle DAG / tiers
+                // / geometry and converges identical task keys across shards, instead of baking the
+                // string into a bare Hash128.OfCanonical("tiny-codes/concept/{key}/v1") vocabulary row.
+                if (!string.IsNullOrEmpty(conceptKey)
+                    && CategoryAnchor.Emit(b, conceptKey, CodeConceptTypeId, Source, SourceTrust.StructuredCorpus) is { } conceptId)
                 {
-                    string conceptCanonical = $"tiny-codes/concept/{conceptKey}/v1";
-                    _canonicalNames.Add(conceptCanonical);
-                    var conceptId = Hash128.OfCanonical(conceptCanonical);
-                    b.AddEntity(new EntityRow(conceptId, EntityTier.Vocabulary, CodeConceptTypeId, Source));
                     b.AddAttestation(NativeAttestation.Categorical(
                         conceptId,  "HAS_EXAMPLE",   codeRootId, Source, SourceTrust.StructuredCorpus));
                     b.AddAttestation(NativeAttestation.Categorical(
@@ -156,15 +159,15 @@ public sealed class TinyCodesDecomposer : IDecomposer
 
                 if (++inBatch >= batch)
                 {
-                    if (!options.DryRun) yield return b.Build();
-                    b = NewBuilder(++bn);
+                    if (!options.DryRun) yield return await b.BuildAsync(ct);
+                    b = NewBuilder(++bn, reader);
                     inBatch = 0;
                     await Task.Yield();
                 }
             }
         }
 
-        if (inBatch > 0 && !options.DryRun) yield return b.Build();
+        if (inBatch > 0 && !options.DryRun) yield return await b.BuildAsync(ct);
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -290,7 +293,11 @@ public sealed class TinyCodesDecomposer : IDecomposer
             yield return f;
     }
 
-    private static SubstrateChangeBuilder NewBuilder(int n) =>
-        new(Source, $"tiny-codes/{n}", null,
-            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 4096);
+    // Concept/task keys and prompt keywords route through the SHARED two-phase containment
+    // (EnableDeferredContent); the parsed-code grammar tree is already containment-deduped inside
+    // GrammarEntityBuilder.BuildAsync. Drain via BuildAsync so the deferred probe runs.
+    private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? reader) =>
+        new SubstrateChangeBuilder(Source, $"tiny-codes/{n}", null,
+            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 4096)
+            .EnableDeferredContent(reader);
 }

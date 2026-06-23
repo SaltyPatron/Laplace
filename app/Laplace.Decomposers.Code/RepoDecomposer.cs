@@ -70,12 +70,16 @@ public sealed class RepoDecomposer : IDecomposer
         var root = context.EcosystemPath;
         if (!Directory.Exists(root)) yield break;
 
-        
+        // LOCAL PROVENANCE ANCHOR, not content: the repo root is identified by its absolute on-disk
+        // path, which is machine-specific and must NOT converge across machines (two checkouts of the
+        // same repo on different hosts are different roots). So it stays a geometry-free Vocabulary
+        // anchor (Hash128.OfCanonical), unlike the relative file paths below which ARE content.
         string repoCanonical = $"repo:{Path.GetFullPath(root)}/v1";
         _canonicalNames.Add(repoCanonical);
         var repoId = Hash128.OfCanonical(repoCanonical);
         int batch = options.BatchSize > 1 ? options.BatchSize : 512;
-        var b = NewBuilder(0);
+        var reader = context.Reader;
+        var b = NewBuilder(0, reader);
         int inBatch = 0, bn = 0;
         b.AddEntity(new EntityRow(repoId, EntityTier.Vocabulary, RepoTypeId, Source));
 
@@ -125,12 +129,14 @@ public sealed class RepoDecomposer : IDecomposer
             foreach (var p in phys) b.AddPhysicality(p);
             foreach (var a in atts) b.AddAttestation(a);
 
-            
+            // The relative file path IS content (a meaningful surface string that converges across
+            // checkouts): emit it via the shared CategoryAnchor (ContentEmitter + IS_TYPED_AS
+            // SourceFile), exactly like CILI treats a synset key, instead of baking it into a nameless
+            // Hash128.OfCanonical("source/file/{relPath}/v1") vocabulary row with no geometry.
             string relPath = Path.GetRelativePath(root, file).Replace('\\', '/');
-            string fileCanonical = $"source/file/{relPath}/v1";
-            _canonicalNames.Add(fileCanonical);
-            var filePathId = Hash128.OfCanonical(fileCanonical);
-            b.AddEntity(new EntityRow(filePathId, EntityTier.Vocabulary, FileTypeId, Source));
+            var filePathAnchor = CategoryAnchor.Emit(b, relPath, FileTypeId, Source, SourceTrust.StructuredCorpus);
+            if (filePathAnchor is null) continue;
+            Hash128 filePathId = filePathAnchor.Value;
             b.AddAttestation(NativeAttestation.Categorical(
                 repoId,            "CONTAINS",     filePathId, Source, SourceTrust.StructuredCorpus));
             b.AddAttestation(NativeAttestation.Categorical(
@@ -156,14 +162,14 @@ public sealed class RepoDecomposer : IDecomposer
 
             if (++inBatch >= batch)
             {
-                if (!options.DryRun) yield return b.Build();
-                b = NewBuilder(++bn);
+                if (!options.DryRun) yield return await b.BuildAsync(ct);
+                b = NewBuilder(++bn, reader);
                 inBatch = 0;
                 await Task.Yield();
             }
         }
 
-        if (inBatch > 0 && !options.DryRun) yield return b.Build();
+        if (inBatch > 0 && !options.DryRun) yield return await b.BuildAsync(ct);
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -171,7 +177,11 @@ public sealed class RepoDecomposer : IDecomposer
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    private static SubstrateChangeBuilder NewBuilder(int n) =>
-        new(Source, $"repo/{n}", null,
-            entityCapacity: 4096, physicalityCapacity: 4096, attestationCapacity: 4096);
+    // Relative file paths and filename keyword segments route through the SHARED two-phase
+    // containment (EnableDeferredContent); the parsed-code grammar tree is already containment-deduped
+    // inside GrammarEntityBuilder.BuildAsync. Drain via BuildAsync so the deferred probe runs.
+    private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? reader) =>
+        new SubstrateChangeBuilder(Source, $"repo/{n}", null,
+            entityCapacity: 4096, physicalityCapacity: 4096, attestationCapacity: 4096)
+            .EnableDeferredContent(reader);
 }

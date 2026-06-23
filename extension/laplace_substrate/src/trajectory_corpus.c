@@ -120,7 +120,7 @@ static const char *CORPUS_EDGE_QUERY =
     "FROM (SELECT DISTINCT ON (entity_id) entity_id, trajectory "
     "      FROM laplace.physicalities "
     "      WHERE type = 1 AND trajectory IS NOT NULL "
-    "      ORDER BY entity_id, source_id) p "
+    "      ORDER BY entity_id) p "
     "JOIN laplace.entities e ON e.id = p.entity_id AND e.tier > 2, "
     "LATERAL public.ST_DumpPoints(p.trajectory) dp, "
     "LATERAL public.laplace_mantissa_unpack(dp.geom) u "
@@ -310,7 +310,7 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
             "FROM (SELECT DISTINCT ON (pp.entity_id) pp.entity_id, pp.trajectory "
             "      FROM laplace.physicalities pp JOIN s ON s.id = pp.entity_id "
             "      WHERE pp.type = 1 AND pp.trajectory IS NOT NULL "
-            "      ORDER BY pp.entity_id, pp.source_id) pp "
+            "      ORDER BY pp.entity_id) pp "
             "CROSS JOIN LATERAL public.laplace_trajectory_constituents(pp.trajectory) u "
             /* Include words (tier 2), grapheme-segmented content (tier 1, e.g. CJK), AND the
                whitespace separators between them. Whitespace is classified by is_all_whitespace

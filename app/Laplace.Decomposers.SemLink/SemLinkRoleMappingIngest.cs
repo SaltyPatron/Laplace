@@ -49,6 +49,7 @@ internal static class SemLinkRoleMappingIngest
     internal static async IAsyncEnumerable<SubstrateChange> StreamAsync(
         string path,
         int batchSize,
+        ISubstrateReader? containmentReader = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (batchSize <= 0) batchSize = 4096;
@@ -64,7 +65,7 @@ internal static class SemLinkRoleMappingIngest
         var root = doc.DocumentElement;
         if (root is null) yield break;
 
-        var batch = NewBuilder("semlink/vn-fn-role-mapping/0", batchSize);
+        var batch = NewBuilder("semlink/vn-fn-role-mapping/0", batchSize, containmentReader);
         int count = 0, batchNum = 0;
 
         foreach (XmlNode clsNode in root.ChildNodes)
@@ -110,8 +111,9 @@ internal static class SemLinkRoleMappingIngest
 
                     if (++count >= batchSize)
                     {
-                        yield return batch.SetInputUnitsConsumed(count).Build();
-                        batch = NewBuilder($"semlink/vn-fn-role-mapping/{++batchNum}", batchSize);
+                        batch.SetInputUnitsConsumed(count);
+                        yield return await batch.BuildAsync(ct);
+                        batch = NewBuilder($"semlink/vn-fn-role-mapping/{++batchNum}", batchSize, containmentReader);
                         count = 0;
                     }
                 }
@@ -119,7 +121,10 @@ internal static class SemLinkRoleMappingIngest
         }
 
         if (count > 0)
-            yield return batch.SetInputUnitsConsumed(count).Build();
+        {
+            batch.SetInputUnitsConsumed(count);
+            yield return await batch.BuildAsync(ct);
+        }
     }
 
     internal static async Task<long?> EstimateUnitCountAsync(string path, CancellationToken ct)
@@ -140,9 +145,13 @@ internal static class SemLinkRoleMappingIngest
         return total > 0 ? total : null;
     }
 
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch) =>
-        new(SemLinkDecomposer.Source, unit, null,
+    // VerbNet role names and FrameNet-FE / VerbNet-class category anchors are CONTENT (ContentEmitter /
+    // CategoryAnchor): route them through the SHARED two-phase containment (EnableDeferredContent) like
+    // every other content-emitting source; drain via BuildAsync so the deferred probe runs.
+    private static SubstrateChangeBuilder NewBuilder(string unit, int batch, ISubstrateReader? reader) =>
+        new SubstrateChangeBuilder(SemLinkDecomposer.Source, unit, null,
             entityCapacity: batch * 2,
             physicalityCapacity: 0,
-            attestationCapacity: batch * 2);
+            attestationCapacity: batch * 2)
+            .EnableDeferredContent(reader);
 }
