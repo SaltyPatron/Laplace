@@ -89,6 +89,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
         boot.AddRelationType("IS_LEMMA_OF");
         boot.AddRelationType("HAS_SENSE");
         boot.AddRelationType("IS_SENSE_OF");
+        boot.AddRelationType("HAS_NAME_ALIAS");
 
         foreach (var name in PointerTypes.Values)
             boot.AddRelationType(RelationTypeRegistry.Resolve(name).Canonical);
@@ -329,6 +330,26 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
                     magnitude: s.TagCount, arenaScale: 1.0));
                 b.AddAttestation(NativeAttestation.Categorical(
                     senseId.Value, "IS_SENSE_OF", synAnchor.Value, Source, SourceTrust.StandardsDerived));
+
+                // The sense key (lemma%ss_type:lex_filenum:lex_id) is a JOIN anchor, not a label —
+                // its content-address must stay the key for VerbNet/SemLink/CILI convergence, but its
+                // composite fields belong as first-class structure, not mashed in the surfaced node.
+                // Emit the parsed fields and a human-readable name alias (the lemma) so the sense never
+                // surfaces as the raw key.
+                b.AddAttestation(NativeAttestation.Categorical(
+                    senseId.Value, "HAS_NAME_ALIAS", lemmaId.Value, Source, SourceTrust.StandardsDerived));
+                PosReference.Attest(b, senseId.Value, s.Pos.ToString(),
+                    PosReference.PosTagset.WordNet, Source, null, SourceTrust.StandardsDerived,
+                    _vocabularyNames);
+                int lexFilenum = ParseLexFilenum(s.SenseKey);
+                if (lexFilenum >= 0 && lexFilenum < Lexnames.Length)
+                {
+                    EmitSurface(b, Lexnames[lexFilenum], Source);
+                    var lexId = RootSurface(Lexnames[lexFilenum]);
+                    if (lexId is not null)
+                        b.AddAttestation(NativeAttestation.Categorical(
+                            senseId.Value, "HAS_LEX_CATEGORY", lexId.Value, Source, SourceTrust.StandardsDerived));
+                }
             }
 
             if (++count >= batch)
@@ -349,6 +370,15 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
             .EnableDeferredContent(reader);
 
     private static string Surface(string lemma) => lemma.Replace('_', ' ');
+
+    // Sense key: lemma%ss_type:lex_filenum:lex_id[:head_word:head_id]. Return lex_filenum (00-44) or -1.
+    private static int ParseLexFilenum(string senseKey)
+    {
+        int pct = senseKey.IndexOf('%');
+        if (pct < 0 || pct + 1 >= senseKey.Length) return -1;
+        var fields = senseKey[(pct + 1)..].Split(':');
+        return fields.Length >= 2 && int.TryParse(fields[1], out var n) ? n : -1;
+    }
 
     private static Hash128? EmitSurface(SubstrateChangeBuilder b, string surface, Hash128 sourceId)
     {
