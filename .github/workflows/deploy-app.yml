@@ -37,10 +37,16 @@ jobs:
 
       - uses: ./.github/actions/setup-laplace-env
 
-      - name: build + install engine/extension
+      # The native engine + laplace_substrate extension are a separately-built,
+      # already-installed dependency under /opt/laplace (like the custom PG/PostGIS).
+      # This deploy ships the app layer against them; it does NOT rebuild them.
+      - name: verify installed engine + extension
         run: |
-          just build
-          just install
+          test -f /opt/laplace/lib/liblaplace_core.so \
+            || { echo "::error::engine missing at /opt/laplace/lib — run the native build/install first"; exit 1; }
+          test -f /opt/laplace/share/postgresql/18/extension/laplace_substrate.control \
+            || { echo "::error::laplace_substrate extension not installed under /opt/laplace"; exit 1; }
+          echo "engine + extension present."
 
       - name: build migrations (deploy.sh publishes the API itself)
         run: dotnet build app/Laplace.Migrations/Laplace.Migrations.csproj -c Release
