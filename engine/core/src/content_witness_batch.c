@@ -37,16 +37,15 @@ static int codepoint_resolver(uint32_t atom, void* ,
     return codepoint_table_resolve_atom(atom, out_id, out_coord, out_hb);
 }
 
-static void physicality_id_compute(hash128_t entity_id, hash128_t source_id,
+static void physicality_id_compute(hash128_t entity_id,
                                    const double coord[4], const double* traj, size_t traj_n,
                                    hash128_t* out) {
     size_t traj_bytes = traj_n * sizeof(double);
-    size_t total = 16 + 16 + 2 + 32 + traj_bytes;
+    size_t total = 16 + 2 + 32 + traj_bytes;
     uint8_t* buf = (uint8_t*)malloc(total);
     if (!buf) { hash128_zero(out); return; }
     size_t o = 0;
     memcpy(buf + o, &entity_id, 16); o += 16;
-    memcpy(buf + o, &source_id, 16); o += 16;
     int16_t physicality_type = 1;
     memcpy(buf + o, &physicality_type, 2); o += 2;
     memcpy(buf + o, coord, 32); o += 32;
@@ -263,9 +262,9 @@ static int emit_node(
     }
 
     hash128_t phys_id;
-    physicality_id_compute(node.id, *source_id, node.coord, traj, m * 4, &phys_id);
+    physicality_id_compute(node.id, node.coord, traj, m * 4, &phys_id);
     if (intent_stage_add_physicality(
-            stage, &phys_id, &node.id, source_id, 1,
+            stage, &phys_id, &node.id, 1,
             node.coord, &node.hilbert, traj, (uint32_t)m,
             (int32_t)m, 1, 0.0, 1, 0, now_us) != 0) {
         free(traj);

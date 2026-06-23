@@ -21,9 +21,10 @@ public sealed class FrameNetDecomposer : IDecomposer{
     private static readonly Hash128 FeTypeId       = EntityTypeRegistry.FrameNetFe;
     private static readonly Hash128 CorenessTypeId = EntityTypeRegistry.FrameNetCoreness;
 
-    
-    
-    
+    // SCHEMA, not content: the four FrameNet coreness levels (Core / Peripheral /
+    // Extra-Thematic / Core-Unexpressed) are a small, fixed, closed enum used only as the
+    // contextId qualifier on HAS_FRAME_ELEMENT edges. They are app/meta Vocabulary with no
+    // geometry by design, so Hash128.OfCanonical (not ContentEmitter) is correct here.
     private static Hash128 CorenessId(string coreType) =>
         Hash128.OfCanonical($"framenet/coreness/{coreType}");
 

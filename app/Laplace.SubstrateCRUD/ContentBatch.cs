@@ -93,52 +93,55 @@ public sealed class ContentBatch : IDisposable
         if (_map.Count == 0) return;
 
         var entries = new List<Entry>(_map.Count);
-        var perTree = new List<Hash128[]>(_map.Count);
-        int total = 0;
+        var perTreeIds = new List<Hash128[]>(_map.Count);
+        var perTreeTiers = new List<byte[]>(_map.Count);
         foreach (var e in _map.Values)
         {
             var ids = e.Tree.NodeIds();
+            var tiers = new byte[ids.Length];
+            for (int j = 0; j < ids.Length; j++)
+                tiers[j] = e.Tree.GetNode((uint)j).Tier;
             entries.Add(e);
-            perTree.Add(ids);
-            total += ids.Length;
+            perTreeIds.Add(ids);
+            perTreeTiers.Add(tiers);
+        }
+
+        // T0 codepoints (perfcache-guaranteed present) and T1 graphemes are NEVER probed: a present
+        // trunk short-circuits its whole subtree, and a novel trunk emits its leaves which the
+        // id-keyed apply dedups idempotently. Only trunks (tier >= 2 — words and up) ever hit the
+        // existence bitmap. That makes the probe O(trunks), not O(nodes) — most nodes in a content
+        // tree are codepoints/graphemes, so this is the bulk of the probe payload.
+        var candidates = new List<Hash128>();
+        for (int i = 0; i < perTreeIds.Count; i++)
+        {
+            var ids = perTreeIds[i]; var tiers = perTreeTiers[i];
+            for (int j = 0; j < ids.Length; j++)
+                if (tiers[j] >= 2) candidates.Add(ids[j]);
         }
 
         byte[]? combined = null;
         long combinedBits = 0;
-        if (total > 0)
+        if (candidates.Count > 0)
         {
-            var candidates = new Hash128[total];
-            int off = 0;
-            foreach (var ids in perTree)
-            {
-                Array.Copy(ids, 0, candidates, off, ids.Length);
-                off += ids.Length;
-            }
-            combined = await _reader.EntitiesExistBitmapAsync(candidates, ct).ConfigureAwait(false);
+            combined = await _reader.EntitiesExistBitmapAsync(candidates.ToArray(), ct).ConfigureAwait(false);
             combinedBits = (long)combined.Length * 8;
         }
 
         var stage = _stageProvider();
-        int g = 0;
+        int g = 0;   // running index into the tier>=2 candidate bitmap, in (tree, node) order
         for (int i = 0; i < entries.Count; i++)
         {
-            int n = perTree[i].Length;
-            if (combined is not null && n > 0)
+            var ids = perTreeIds[i]; var tiers = perTreeTiers[i];
+            int n = ids.Length;
+            var bm = new byte[(n + 7) / 8];
+            for (int j = 0; j < n; j++)
             {
-                var bm = new byte[(n + 7) / 8];
-                for (int j = 0; j < n; j++)
-                {
-                    int gi = g + j;
-                    if (gi < combinedBits && (combined[gi >> 3] & (1 << (gi & 7))) != 0)
-                        bm[j >> 3] |= (byte)(1 << (j & 7));
-                }
-                stage.EmitContentTree(entries[i].Tree, entries[i].Source, bm, out _);
+                if (tiers[j] < 2) continue;   // tier<=1: bit 0 (novel) — emitted under novel trunks, skipped under present
+                if (combined is not null && g < combinedBits && (combined[g >> 3] & (1 << (g & 7))) != 0)
+                    bm[j >> 3] |= (byte)(1 << (j & 7));
+                g++;
             }
-            else
-            {
-                stage.EmitContentTree(entries[i].Tree, entries[i].Source, ReadOnlySpan<byte>.Empty, out _);
-            }
-            g += n;
+            stage.EmitContentTree(entries[i].Tree, entries[i].Source, bm, out _);
         }
 
         foreach (var e in _map.Values) e.Tree?.Dispose();

@@ -1,6 +1,7 @@
 if(WIN32)
     add_library(laplace_substrate MODULE
         src/laplace_substrate.c
+        src/apply_batch.c
         src/consensus_fold_step.c
         src/consensus_fold_engine.c
         src/consensus_fold_walks.c
@@ -45,6 +46,7 @@ set(EXT_VERSION ${PROJECT_VERSION})
 
 set(EXT_C_SOURCES
     src/laplace_substrate.c
+    src/apply_batch.c
     src/consensus_fold_step.c
     src/consensus_fold_engine.c
     src/consensus_fold_walks.c
@@ -123,6 +125,7 @@ set(EXT_SQL_MODULES
     sql/24_identity_health.sql.in
     sql/25_intent_preflight.sql.in
     sql/26_generation.sql.in
+    sql/27_apply_batch.sql.in
 )
 
 set(EXT_BUILT_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}--${EXT_VERSION}.sql)

@@ -16,6 +16,8 @@ extern const TSLanguage* tree_sitter_json(void);
 extern const TSLanguage* tree_sitter_markdown(void);
 extern const TSLanguage* tree_sitter_csv(void);
 extern const TSLanguage* tree_sitter_tsv(void);
+extern const TSLanguage* tree_sitter_turtle(void);
+extern const TSLanguage* tree_sitter_xml(void);
 
 extern const TSLanguage* tree_sitter_typescript(void);
 extern const TSLanguage* tree_sitter_java(void);
@@ -57,7 +59,9 @@ static const grammar_entry_t GRAMMARS[] = {
     {"markdown",   tree_sitter_markdown},
     {"csv",        tree_sitter_csv},
     {"tsv",        tree_sitter_tsv},
-    
+    {"turtle",     tree_sitter_turtle},
+    {"xml",        tree_sitter_xml},
+
     {"typescript", tree_sitter_typescript},
     {"java",       tree_sitter_java},
     {"ruby",       tree_sitter_ruby},
@@ -99,7 +103,10 @@ static const ext_entry_t EXTS[] = {
     {"csv", "csv"},
     {"tsv", "tsv"},
     {"tab", "tsv"},
-    
+    {"conllu", "tsv"},   /* CoNLL-U (UD) is tab-separated: reuse the tsv row grammar */
+    {"ttl", "turtle"},   /* CILI synset glosses */
+    {"xml", "xml"},      /* FrameNet / PropBank / VerbNet frame definitions */
+
     {"ts", "typescript"}, {"tsx", "typescript"},
     {"java", "java"},
     {"rb", "ruby"}, {"rake", "ruby"}, {"gemspec", "ruby"},

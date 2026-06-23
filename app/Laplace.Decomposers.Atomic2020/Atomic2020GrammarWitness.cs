@@ -8,6 +8,8 @@ namespace Laplace.Decomposers.Atomic2020;
 
 internal sealed class Atomic2020GrammarWitness : IGrammarWitness
 {
+    // SCHEMA, not content: absence-sentinel for ATOMIC's literal "none"/empty tail. Fixed marker,
+    // must match the decomposer's NoneId; never emitted through ContentEmitter (it is not a concept).
     private static readonly Hash128 NoneId = Hash128.OfCanonical("substrate/atomic/none/v1");
 
     public string ModalityId => "tsv";

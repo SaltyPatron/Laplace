@@ -560,7 +560,7 @@ internal static class FoundryExport
             FROM laplace.physicalities p
             JOIN unnest($1::bytea[]) AS u(id) ON u.id = p.entity_id
             WHERE p.type = 1 AND p.coord IS NOT NULL
-            ORDER BY p.entity_id, p.source_id";
+            ORDER BY p.entity_id, p.id";
         cmd.Parameters.Add(new NpgsqlParameter
             { Value = vocab, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
         await using var rdr = await cmd.ExecuteReaderAsync();

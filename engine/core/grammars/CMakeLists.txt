@@ -32,6 +32,9 @@ laplace_add_grammar(ts_grammar_markdown   "${_TSG}/tree-sitter-markdown/tree-sit
 laplace_add_grammar(ts_grammar_csv        "${_TSG}/tree-sitter-csv/csv/src")
 laplace_add_grammar(ts_grammar_tsv        "${_TSG}/tree-sitter-csv/tsv/src")
 
+laplace_add_grammar(ts_grammar_turtle     "${_TSG}/tree-sitter-turtle/src")
+laplace_add_grammar(ts_grammar_xml        "${_TSG}/tree-sitter-xml/xml/src")
+
 
 laplace_add_grammar(ts_grammar_typescript "${_TSG}/tree-sitter-typescript/typescript/src")
 laplace_add_grammar(ts_grammar_java       "${_TSG}/tree-sitter-java/src")
@@ -65,6 +68,7 @@ set(LAPLACE_TS_GRAMMARS
     ts_grammar_python ts_grammar_c ts_grammar_cpp ts_grammar_javascript ts_grammar_rust
     ts_grammar_go ts_grammar_c_sharp ts_grammar_bash ts_grammar_json ts_grammar_markdown
     ts_grammar_csv ts_grammar_tsv
+    ts_grammar_turtle ts_grammar_xml
     ts_grammar_typescript ts_grammar_java ts_grammar_ruby ts_grammar_julia
     ts_grammar_kotlin ts_grammar_php
     ts_grammar_sql ts_grammar_swift

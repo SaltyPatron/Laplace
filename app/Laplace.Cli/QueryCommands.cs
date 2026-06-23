@@ -466,7 +466,8 @@ internal static class QueryCommands
 
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT p.type, p.x, p.y, p.z, p.m, p.radius, p.n_constituents, laplace.render(p.source_id) "
+            // Geometry is source-free: entity_physicalities no longer carries a source.
+            cmd.CommandText = "SELECT p.type, p.x, p.y, p.z, p.m, p.radius, p.n_constituents "
                             + "FROM laplace.entity_physicalities(@id) p";
             cmd.Parameters.AddWithValue("id", id.ToBytes());
             await using var r = await cmd.ExecuteReaderAsync();
@@ -476,7 +477,7 @@ internal static class QueryCommands
             {
                 n++;
                 Console.WriteLine($"    type={r.GetInt16(0)}  coord=({r.GetDouble(1):F4},{r.GetDouble(2):F4},{r.GetDouble(3):F4},{r.GetDouble(4):F4})"
-                    + $"  r={r.GetDouble(5):F6}  n_constituents={r.GetInt32(6)}  source={r.GetString(7)}");
+                    + $"  r={r.GetDouble(5):F6}  n_constituents={r.GetInt32(6)}");
             }
             if (n == 0) Console.WriteLine("    (none)");
         }

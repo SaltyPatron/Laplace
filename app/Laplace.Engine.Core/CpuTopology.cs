@@ -31,6 +31,91 @@ public static class CpuTopology
     public static int ResolveIoBoundWorkers(int defaultCap = 8) =>
         Math.Clamp(Math.Min(LogicalProcessorCount, defaultCap), 1, defaultCap);
 
+    /// <summary>
+    /// Logical-processor indices that belong to performance (P) cores. Empty when the topology is
+    /// not hybrid or could not be detected (in which case pinning is a no-op and work simply runs
+    /// unpinned across all cores). Detected on BOTH OSes: Windows via the same
+    /// GetLogicalProcessorInformationEx walk; Linux via /sys/devices/cpu_core/cpus.
+    /// </summary>
+    public static IReadOnlyList<int> PerformanceCoreCpuIndices => PCoreIndices.Value;
+
+    internal static int[]? TestPCoreIndicesOverride;
+
+    private static readonly Lazy<int[]> PCoreIndices =
+        new(DetectPerformanceCoreIndices, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    /// <summary>
+    /// Pin the CURRENT OS thread to the performance-core set, on Windows AND Linux. Worker COUNT
+    /// alone does not keep compute on P-cores — the scheduler scatters threads onto the weak
+    /// E-cores; this restricts the thread's affinity to the P-core logical processors. Returns true
+    /// if affinity was actually applied (so callers can VERIFY pinning, not just request it).
+    /// No-op returning false on a non-hybrid box or when the P-core set is unknown.
+    /// </summary>
+    public static bool PinCurrentThreadToPerformanceCores()
+    {
+        var idx = PerformanceCoreCpuIndices;
+        if (idx.Count == 0) return false;
+
+        if (OperatingSystem.IsWindows())
+            return TryPinWindows(idx);
+        if (OperatingSystem.IsLinux())
+            return TryPinLinux(idx);
+        return false;
+    }
+
+    /// <summary>
+    /// Run <paramref name="body"/> over [0, count) on <paramref name="workers"/> threads, each
+    /// pinned to the P-core set (verified). Used to parallelize a pure per-record compose across
+    /// P-cores. Falls back to unpinned threads when the topology is not hybrid.
+    /// </summary>
+    public static void RunPinnedParallel(int count, int workers, Action<int> body)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        if (count <= 0) return;
+        workers = Math.Clamp(workers, 1, count);
+
+        if (workers == 1)
+        {
+            PinCurrentThreadToPerformanceCores();
+            for (int i = 0; i < count; i++) body(i);
+            return;
+        }
+
+        var threads = new Thread[workers];
+        var next = -1;
+        Exception? failure = null;
+        for (int w = 0; w < workers; w++)
+        {
+            threads[w] = new Thread(() =>
+            {
+                PinCurrentThreadToPerformanceCores();
+                int i;
+                while ((i = Interlocked.Increment(ref next)) < count)
+                {
+                    try { body(i); }
+                    catch (Exception ex) { Interlocked.CompareExchange(ref failure, ex, null); return; }
+                }
+            }) { IsBackground = true, Name = $"compose-pcore-{w}" };
+            threads[w].Start();
+        }
+        foreach (var t in threads) t.Join();
+        if (failure is not null) throw failure;
+    }
+
+    private static int[] DetectPerformanceCoreIndices()
+    {
+        if (TestPCoreIndicesOverride is not null) return TestPCoreIndicesOverride;
+        try
+        {
+            if (OperatingSystem.IsWindows() && TryDetectWindowsPCoreIndices(out var win))
+                return win;
+            if (OperatingSystem.IsLinux() && TryDetectLinuxPCoreIndices(out var lin))
+                return lin;
+        }
+        catch { /* detection is best-effort; unknown => no pinning */ }
+        return Array.Empty<int>();
+    }
+
     internal static CpuSnapshot Detect() => DetectPlatform();
 
     private static CpuSnapshot DetectPlatform()
@@ -142,6 +227,157 @@ public static class CpuTopology
         string? raw = Environment.GetEnvironmentVariable(name);
         return int.TryParse(raw, out value) && value > 0;
     }
+
+    // ---- Performance-core logical-processor index detection (P-core mask) ----
+
+    private static bool TryDetectWindowsPCoreIndices(out int[] indices)
+    {
+        indices = Array.Empty<int>();
+        const int RelationProcessorCore = 0;
+        uint size = 0;
+        if (!GetLogicalProcessorInformationEx(RelationProcessorCore, IntPtr.Zero, ref size)
+            && Marshal.GetLastWin32Error() != 122)
+            return false;
+
+        IntPtr buffer = Marshal.AllocHGlobal((int)size);
+        try
+        {
+            if (!GetLogicalProcessorInformationEx(RelationProcessorCore, buffer, ref size))
+                return false;
+
+            int offset = 0;
+            // Per core: (group-0 affinity mask, LP count). All LPs are assumed in processor group 0;
+            // boxes with >64 logical processors use multiple groups and are left unpinned (rare on
+            // the hybrid desktop SKUs this targets).
+            var cores = new List<(ulong Mask, int LpCount, int Group)>();
+            while (offset < (int)size)
+            {
+                var header = Marshal.PtrToStructure<LogicalProcessorInfoHeader>(buffer + offset);
+                if (header.Relationship == RelationProcessorCore)
+                {
+                    int relOffset = offset + Marshal.SizeOf<LogicalProcessorInfoHeader>();
+                    ushort groupCount = (ushort)Marshal.ReadInt16(buffer, relOffset + 22);
+                    if (groupCount >= 1)
+                    {
+                        int groupOffset = relOffset + 24;       // first GROUP_AFFINITY entry
+                        ulong mask = (ulong)Marshal.ReadInt64(buffer, groupOffset);
+                        ushort group = (ushort)Marshal.ReadInt16(buffer, groupOffset + 8);
+                        int lp = 0;
+                        for (int g = 0; g < groupCount; g++)
+                            lp += BitOperations.PopCount((ulong)Marshal.ReadInt64(buffer, groupOffset + g * 16));
+                        cores.Add((mask, lp, group));
+                    }
+                }
+                if (header.Size == 0) break;
+                offset += (int)header.Size;
+            }
+            if (cores.Count == 0) return false;
+
+            int maxLp = cores.Max(c => c.LpCount);
+            int minLp = cores.Where(c => c.LpCount > 0).Select(c => c.LpCount).DefaultIfEmpty(maxLp).Min();
+            if (maxLp == minLp) return false; // not hybrid: nothing to pin to
+
+            var idx = new List<int>();
+            foreach (var c in cores)
+            {
+                if (c.LpCount != maxLp || c.Group != 0) continue; // P-cores in group 0
+                ulong m = c.Mask;
+                while (m != 0)
+                {
+                    int bit = BitOperations.TrailingZeroCount(m);
+                    idx.Add(bit);
+                    m &= m - 1;
+                }
+            }
+            if (idx.Count == 0) return false;
+            idx.Sort();
+            indices = idx.ToArray();
+            return true;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    private static bool TryDetectLinuxPCoreIndices(out int[] indices)
+    {
+        indices = Array.Empty<int>();
+        // Intel hybrid exposes P-cores and E-cores as separate CPU PMUs:
+        //   /sys/devices/cpu_core/cpus  -> P-core logical CPUs (e.g. "0-15")
+        //   /sys/devices/cpu_atom/cpus  -> E-core logical CPUs
+        // Non-hybrid kernels expose neither; we then leave the set empty (no pinning).
+        const string pcorePath = "/sys/devices/cpu_core/cpus";
+        if (!File.Exists(pcorePath)) return false;
+        try
+        {
+            string raw = File.ReadAllText(pcorePath).Trim();
+            var idx = ParseCpuList(raw);
+            if (idx.Length == 0) return false;
+            indices = idx;
+            return true;
+        }
+        catch { return false; }
+    }
+
+    // Parse a Linux cpulist like "0-7,16,18-19" into explicit indices.
+    internal static int[] ParseCpuList(string s)
+    {
+        var result = new List<int>();
+        foreach (var part in s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            int dash = part.IndexOf('-');
+            if (dash < 0)
+            {
+                if (int.TryParse(part, out int v)) result.Add(v);
+            }
+            else if (int.TryParse(part[..dash], out int lo) && int.TryParse(part[(dash + 1)..], out int hi))
+            {
+                for (int i = lo; i <= hi; i++) result.Add(i);
+            }
+        }
+        result.Sort();
+        return result.ToArray();
+    }
+
+    // ---- Affinity application (verified) ----
+
+    private static bool TryPinWindows(IReadOnlyList<int> cpuIndices)
+    {
+        ulong mask = 0;
+        foreach (int i in cpuIndices)
+        {
+            if (i >= 64) return false; // single-group affinity only
+            mask |= 1UL << i;
+        }
+        if (mask == 0) return false;
+        IntPtr prior = SetThreadAffinityMask(GetCurrentThread(), (UIntPtr)mask);
+        return prior != IntPtr.Zero; // 0 == failure per Win32 contract
+    }
+
+    private static bool TryPinLinux(IReadOnlyList<int> cpuIndices)
+    {
+        // cpu_set_t is a 1024-bit bitmap (128 bytes). Set the P-core bits and apply to the calling
+        // thread (pid 0 == current thread for sched_setaffinity).
+        const int setBytes = 128;
+        var set = new byte[setBytes];
+        foreach (int i in cpuIndices)
+        {
+            if (i < 0 || i >= setBytes * 8) continue;
+            set[i >> 3] |= (byte)(1 << (i & 7));
+        }
+        int rc = sched_setaffinity(0, (IntPtr)setBytes, set);
+        return rc == 0;
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentThread();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr SetThreadAffinityMask(IntPtr hThread, UIntPtr dwThreadAffinityMask);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int sched_setaffinity(int pid, IntPtr cpusetsize, byte[] mask);
 
     internal readonly record struct CpuSnapshot(
         int PerformanceCoreCount,

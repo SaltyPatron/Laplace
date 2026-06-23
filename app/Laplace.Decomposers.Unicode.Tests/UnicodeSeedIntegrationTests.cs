@@ -103,12 +103,13 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         Assert.True(physCount >= TotalCodepoints,
             $"content physicalities {physCount:N0} < codepoint count {TotalCodepoints:N0}");
 
+        // Geometry is source-free: the content physicality for U+0041 is one row keyed by
+        // (entity_id, type) with no source filter (provenance lives on attestations).
         await using var conn = await _ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT p.x, p.y, p.z, p.m
                             FROM laplace.entity_physicalities(laplace.canonical_id('A')) p
-                            WHERE p.source_id = @s AND p.type = 1";
-        cmd.Parameters.AddWithValue("s", UnicodeDecomposer.Source.ToBytes());
+                            WHERE p.type = 1";
         await using var r = await cmd.ExecuteReaderAsync();
         Assert.True(await r.ReadAsync(), "no CONTENT physicality for U+0041");
         double x = r.GetDouble(0), y = r.GetDouble(1), z = r.GetDouble(2), m = r.GetDouble(3);

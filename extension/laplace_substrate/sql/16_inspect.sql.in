@@ -5,18 +5,21 @@ CREATE OR REPLACE FUNCTION entity_facets(p_id bytea)
     SELECT e.tier, e.type_id FROM entities e WHERE e.id = p_id
 $$;
 
+-- Geometry is source-free: a physicality is one row per (entity_id, type) with no
+-- source column (provenance lives on attestations). The legacy source_id output and
+-- ORDER BY p.source_id are gone; rows order deterministically by (type, id).
 CREATE OR REPLACE FUNCTION entity_physicalities(p_id bytea)
     RETURNS TABLE(type smallint, x double precision, y double precision,
                   z double precision, m double precision,
-                  radius double precision, n_constituents integer, source_id bytea,
+                  radius double precision, n_constituents integer,
                   hilbert_index bytea)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     SELECT p.type, ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord),
-           p.radius_origin, p.n_constituents, p.source_id, p.hilbert_index
+           p.radius_origin, p.n_constituents, p.hilbert_index
     FROM physicalities p
     WHERE p.entity_id = p_id
-    ORDER BY p.type, p.source_id
+    ORDER BY p.type, p.id
 $$;
 
 CREATE OR REPLACE FUNCTION attestations_out(p_id bytea, p_limit integer DEFAULT 40)

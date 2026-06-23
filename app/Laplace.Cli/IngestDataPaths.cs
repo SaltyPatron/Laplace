@@ -47,31 +47,6 @@ internal static class IngestDataPaths
             throw new InvalidOperationException($"no manifest path for ingest source '{cliSource}'");
 
         var path = Path.Combine(DataRoot, relative);
-        // Legacy self-hosted layout used lowercase omw/.
-        if (cliSource.Equals("omw", StringComparison.OrdinalIgnoreCase)
-            && !Directory.Exists(path))
-        {
-            var legacy = Path.Combine(DataRoot, "omw");
-            if (Directory.Exists(legacy))
-                path = legacy;
-        }
-
-        if (cliSource.Equals("mapnet", StringComparison.OrdinalIgnoreCase)
-            && !Directory.Exists(path))
-        {
-            var legacy = Path.Combine(DataRoot, "MapNet");
-            if (Directory.Exists(legacy))
-                path = legacy;
-        }
-
-        if (cliSource.Equals("wordframenet", StringComparison.OrdinalIgnoreCase)
-            && !Directory.Exists(path))
-        {
-            var legacy = Path.Combine(DataRoot, "eXtendedWFN");
-            if (Directory.Exists(legacy))
-                path = legacy;
-        }
-
         return Path.GetFullPath(path);
     }
 }

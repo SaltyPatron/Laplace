@@ -26,3 +26,4 @@
 #include "24_identity_health.sql.in"
 #include "25_intent_preflight.sql.in"
 #include "26_generation.sql.in"
+#include "27_apply_batch.sql.in"

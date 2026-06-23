@@ -30,14 +30,14 @@ static const uint8_t kCopyBinarySignature[11] = {
 static const char* const kEntityColumns =
     "id, tier, type_id, first_observed_by";
 static const char* const kPhysicalityColumns =
-    "id, entity_id, source_id, type, coord, hilbert_index, trajectory, "
+    "id, entity_id, type, coord, hilbert_index, trajectory, "
     "n_constituents, alignment_residual, source_dim, observed_at";
 static const char* const kAttestationColumns =
     "id, subject_id, type_id, object_id, source_id, context_id, "
     "outcome, last_observed_at, observation_count";
 
 #define ENTITY_COL_COUNT       4
-#define PHYSICALITY_COL_COUNT 11
+#define PHYSICALITY_COL_COUNT 10
 #define ATTESTATION_COL_COUNT  9
 
 typedef struct {
@@ -321,7 +321,6 @@ int intent_stage_add_physicality(
     intent_stage_t*     stage,
     const hash128_t*    id,
     const hash128_t*    entity_id,
-    const hash128_t*    source_id,
     int16_t             type,
     const double        coord[4],
     const hilbert128_t* hilbert_index,
@@ -333,7 +332,7 @@ int intent_stage_add_physicality(
     int                 source_dim_is_null,
     int32_t             source_dim,
     int64_t             observed_at_unix_us) {
-    if (!stage || !id || !entity_id || !source_id || !coord || !hilbert_index) return -1;
+    if (!stage || !id || !entity_id || !coord || !hilbert_index) return -1;
     if (n_constituents < 0) return -1;
     if (trajectory_n_vertices > 0 && !trajectory_xyzm) return -1;
     byte_buf_t* b = &stage->physicalities;
@@ -341,7 +340,6 @@ int intent_stage_add_physicality(
     if (buf_append_be16(b, PHYSICALITY_COL_COUNT) != 0) return -1;
     if (buf_append_field_hash128(b, id) != 0) return -1;
     if (buf_append_field_hash128(b, entity_id) != 0) return -1;
-    if (buf_append_field_hash128(b, source_id) != 0) return -1;
     if (buf_append_field_int2(b, type) != 0) return -1;
     if (buf_append_field_pointzm(b, coord) != 0) return -1;
     if (buf_append_field_bytes(b, hilbert_index->bytes, 16) != 0) return -1;
@@ -403,6 +401,125 @@ int intent_stage_add_attestation(
     if (buf_append_field_timestamptz(b, last_observed_at_unix_us) != 0) return -1;
     if (buf_append_field_int8(b, observation_count) != 0) return -1;
     b->row_count++;
+    return 0;
+}
+
+/*
+ * Per-content-id partition of a staging blob into N disjoint output stages by id.lo % N.
+ *
+ * WHY NATIVE: the staging tuple blob is the wire-format the writer COPYs verbatim; managed
+ * code holds only an opaque (ptr,len) and cannot split a row out of it. Routing a whole
+ * managed intent to a worker by ONE representative id leaves the intent's *other* novel ids
+ * shared across two workers (both pass the apply anti-join → 23505). The split must be
+ * PER-ROW, by each row's OWN id, so a given content id lands in exactly one worker's stream
+ * and the key space is provably disjoint across workers — that is what makes the apply
+ * ON-CONFLICT-free and serial-lane-free.
+ *
+ * Every staging row begins with: be16 column-count, then field 1 = the 16-byte content id
+ * (entities.id, physicalities.id, attestations.id all lead). Each field is a be32 length
+ * (or -1 = NULL) followed by that many bytes. We walk fields to find the row boundary and
+ * copy the whole row verbatim into partition (id.lo % part_count). No re-encoding: the bytes
+ * are already in PG binary-COPY field form, so a copied row is byte-identical to the source.
+ */
+static uint32_t be32_at(const uint8_t* p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16)
+         | ((uint32_t)p[2] << 8)  | (uint32_t)p[3];
+}
+
+/* Returns the byte length of one row starting at src[off], or 0 on malformed input. */
+static size_t row_byte_len(const uint8_t* src, size_t len, size_t off) {
+    if (off + 2 > len) return 0;
+    uint16_t cols = (uint16_t)((src[off] << 8) | src[off + 1]);
+    size_t p = off + 2;
+    for (uint16_t c = 0; c < cols; ++c) {
+        if (p + 4 > len) return 0;
+        int32_t flen = (int32_t)be32_at(src + p);
+        p += 4;
+        if (flen < 0) continue;            /* NULL field: length prefix only */
+        if (p + (size_t)flen > len) return 0;
+        p += (size_t)flen;
+    }
+    return p - off;
+}
+
+static int partition_one_buf(
+    const byte_buf_t* src,
+    byte_buf_t*       outs,
+    size_t            part_count) {
+    const uint8_t* data = src->data;
+    const size_t   len  = src->len;
+    size_t off = 0;
+    for (size_t r = 0; r < src->row_count; ++r) {
+        size_t rlen = row_byte_len(data, len, off);
+        if (rlen == 0) return -1;
+        /* field 1 starts at off+2: be32 length (==16) then the 16-byte id. id.lo is the
+         * little-endian-stored low 8 bytes; the blob stores the hash128 struct verbatim
+         * (hi then lo as laid out in memory) so lo occupies bytes [8..16) of the id field. */
+        size_t id_off = off + 2 + 4;           /* skip col-count + field-1 length prefix */
+        uint64_t lo;
+        memcpy(&lo, data + id_off + 8, 8);      /* hash128_t = { uint64 hi; uint64 lo; } */
+        size_t part = (size_t)(lo % (uint64_t)part_count);
+        if (buf_append(&outs[part], data + off, rlen) != 0) return -1;
+        outs[part].row_count++;
+        off += rlen;
+    }
+    return 0;
+}
+
+int intent_stage_partition(
+    const intent_stage_t* src,
+    size_t                part_count,
+    intent_stage_t**      out_parts) {
+    if (!src || !out_parts || part_count == 0) return -1;
+
+    intent_stage_t** parts = out_parts;
+    for (size_t i = 0; i < part_count; ++i) parts[i] = NULL;
+
+    for (size_t i = 0; i < part_count; ++i) {
+        parts[i] = intent_stage_new(0);
+        if (!parts[i]) {
+            for (size_t j = 0; j < i; ++j) { intent_stage_free(parts[j]); parts[j] = NULL; }
+            return -1;
+        }
+    }
+
+    /* Gather the three output buffers per partition for the per-table router. */
+    for (size_t t = 0; t < 3; ++t) {
+        const byte_buf_t* sb;
+        switch (t) {
+            case 0: sb = &src->entities;      break;
+            case 1: sb = &src->physicalities; break;
+            default: sb = &src->attestations; break;
+        }
+        if (sb->row_count == 0) continue;
+        /* partition_one_buf needs a flat array of the right table's buffers. */
+        byte_buf_t* tbl_outs = (byte_buf_t*)malloc(part_count * sizeof(byte_buf_t));
+        if (!tbl_outs) {
+            for (size_t i = 0; i < part_count; ++i) { intent_stage_free(parts[i]); parts[i] = NULL; }
+            return -1;
+        }
+        for (size_t i = 0; i < part_count; ++i) {
+            switch (t) {
+                case 0: tbl_outs[i] = parts[i]->entities;      break;
+                case 1: tbl_outs[i] = parts[i]->physicalities; break;
+                default: tbl_outs[i] = parts[i]->attestations; break;
+            }
+        }
+        int rc = partition_one_buf(sb, tbl_outs, part_count);
+        /* Copy the (possibly realloc'd/grown) buffers back into the partition stages. */
+        for (size_t i = 0; i < part_count; ++i) {
+            switch (t) {
+                case 0: parts[i]->entities      = tbl_outs[i]; break;
+                case 1: parts[i]->physicalities = tbl_outs[i]; break;
+                default: parts[i]->attestations = tbl_outs[i]; break;
+            }
+        }
+        free(tbl_outs);
+        if (rc != 0) {
+            for (size_t i = 0; i < part_count; ++i) { intent_stage_free(parts[i]); parts[i] = NULL; }
+            return -1;
+        }
+    }
     return 0;
 }
 

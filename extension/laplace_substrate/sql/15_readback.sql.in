@@ -44,7 +44,7 @@ CREATE OR REPLACE FUNCTION constituents(p_id bytea)
         WHERE p.entity_id = p_id
           AND p.type = 1
           AND p.trajectory IS NOT NULL
-        ORDER BY p.source_id
+        ORDER BY p.id
         LIMIT 1
     ) t
     CROSS JOIN LATERAL public.laplace_trajectory_constituents(t.traj) AS u

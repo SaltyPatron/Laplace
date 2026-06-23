@@ -40,7 +40,6 @@ int intent_stage_add_physicality(
     intent_stage_t*     stage,
     const hash128_t*    id,
     const hash128_t*    entity_id,
-    const hash128_t*    source_id,
     int16_t             type,
     const double        coord[4],
     const hilbert128_t* hilbert_index,
@@ -78,6 +77,18 @@ const uint8_t* intent_stage_tuple_ptr(
 
 int intent_stage_witness_seen(const intent_stage_t* stage, const hash128_t* id);
 int intent_stage_witness_record(intent_stage_t* stage, const hash128_t* id);
+
+/*
+ * Per-content-id partition: route every staged row of `src` into one of `part_count` fresh
+ * output stages by (row.id.lo % part_count). out_parts must point to an array of at least
+ * part_count intent_stage_t* slots; on success each slot owns a new stage the caller must
+ * free, and the key space is disjoint across partitions (a given id appears in exactly one).
+ * Returns 0 on success, -1 on error (no partitions are leaked on failure).
+ */
+int intent_stage_partition(
+    const intent_stage_t* src,
+    size_t                part_count,
+    intent_stage_t**      out_parts);
 
 #ifdef __cplusplus
 }

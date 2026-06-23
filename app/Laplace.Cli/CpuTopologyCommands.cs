@@ -25,6 +25,17 @@ internal static class CpuTopologyCommands
                 case "--io-bound-workers":
                     Console.WriteLine(CpuTopology.ResolveIoBoundWorkers(defaultCap: 8));
                     return 0;
+                case "--p-core-indices":
+                    Console.WriteLine(string.Join(",", CpuTopology.PerformanceCoreCpuIndices));
+                    return 0;
+                case "--verify-pin":
+                {
+                    bool pinned = CpuTopology.PinCurrentThreadToPerformanceCores();
+                    Console.WriteLine(
+                        $"pin_applied={pinned.ToString().ToLowerInvariant()} "
+                        + $"p_core_indices=[{string.Join(",", CpuTopology.PerformanceCoreCpuIndices)}]");
+                    return pinned ? 0 : 2;
+                }
             }
         }
 
@@ -33,6 +44,7 @@ internal static class CpuTopologyCommands
             + $"p_cores={CpuTopology.PerformanceCoreCount} "
             + $"e_cores={CpuTopology.EfficientCoreCount} "
             + $"logical={CpuTopology.LogicalProcessorCount} "
+            + $"p_core_indices=[{string.Join(",", CpuTopology.PerformanceCoreCpuIndices)}] "
             + $"cpu_bound_workers={CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 16)} "
             + $"io_bound_workers={CpuTopology.ResolveIoBoundWorkers(defaultCap: 8)}");
         return 0;
