@@ -53,6 +53,10 @@ env:
   LAPLACE_DECOMPOSE_WORKERS: "2"
   LAPLACE_FOLD_WORKERS: "4"
   LAPLACE_APPLY_PARTITIONS: "6"
+  # Language scope: UD/Wiktionary are huge multilingual corpora — English-only
+  # per the ingest convention (unscoped UD = 4.3GB of every-language treebanks).
+  LAPLACE_UD_LANGS: en
+  LAPLACE_WIKTIONARY_LANGS: en
 
 jobs:
   deploy:
