@@ -115,15 +115,16 @@ public sealed class FrameNetDecomposer : IDecomposer{
         string frameDir    = Path.Combine(context.EcosystemPath, "frame");
         string fulltextDir = Path.Combine(context.EcosystemPath, "fulltext");
         int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
+        var reader = context.Reader;
 
-        await foreach (var change in StreamFramesAsync(frameDir, batch, ct))
+        await foreach (var change in StreamFramesAsync(frameDir, batch, reader, ct))
         { if (!options.DryRun) yield return change; await Task.Yield(); }
 
         string luDir = Path.Combine(context.EcosystemPath, "lu");
-        await foreach (var change in FrameNetLuIngest.StreamLuAsync(luDir, batch, Source, ct))
+        await foreach (var change in FrameNetLuIngest.StreamLuAsync(luDir, batch, Source, reader, ct))
         { if (!options.DryRun) yield return change; await Task.Yield(); }
 
-        await foreach (var change in StreamFulltextAsync(fulltextDir, batch, ct))
+        await foreach (var change in StreamFulltextAsync(fulltextDir, batch, reader, ct))
         { if (!options.DryRun) yield return change; await Task.Yield(); }
     }
 
@@ -152,11 +153,11 @@ public sealed class FrameNetDecomposer : IDecomposer{
     }
 
     private static async IAsyncEnumerable<SubstrateChange> StreamFramesAsync(
-        string frameDir, int batch,
+        string frameDir, int batch, ISubstrateReader? reader,
         [EnumeratorCancellation] CancellationToken ct)
     {
         if (!Directory.Exists(frameDir)) yield break;
-        var b = NewBuilder("framenet/frame-0", batch);
+        var b = NewBuilder("framenet/frame-0", batch, reader);
         int count = 0, batchNum = 0;
 
         foreach (var path in Directory.EnumerateFiles(frameDir, "*.xml").OrderBy(p => p, StringComparer.Ordinal))
@@ -170,13 +171,13 @@ public sealed class FrameNetDecomposer : IDecomposer{
 
             if (++count >= batch)
             {
-                yield return b.Build();
-                b = NewBuilder($"framenet/frame-{++batchNum}", batch);
+                yield return await b.BuildAsync(ct);
+                b = NewBuilder($"framenet/frame-{++batchNum}", batch, reader);
                 count = 0;
                 await Task.Yield();
             }
         }
-        if (count > 0) yield return b.Build();
+        if (count > 0) yield return await b.BuildAsync(ct);
     }
 
     private static void EmitFrameEntities(SubstrateChangeBuilder b, Frame frame)
@@ -285,11 +286,11 @@ public sealed class FrameNetDecomposer : IDecomposer{
     }
 
     private static async IAsyncEnumerable<SubstrateChange> StreamFulltextAsync(
-        string fulltextDir, int batch,
+        string fulltextDir, int batch, ISubstrateReader? reader,
         [EnumeratorCancellation] CancellationToken ct)
     {
         if (!Directory.Exists(fulltextDir)) yield break;
-        var b = NewBuilder("framenet/fulltext-0", batch);
+        var b = NewBuilder("framenet/fulltext-0", batch, reader);
         int count = 0, batchNum = 0;
 
         foreach (var path in Directory.EnumerateFiles(fulltextDir, "*.xml").OrderBy(p => p, StringComparer.Ordinal))
@@ -309,21 +310,27 @@ public sealed class FrameNetDecomposer : IDecomposer{
 
                 if (++count >= batch)
                 {
-                    yield return b.Build();
-                    b = NewBuilder($"framenet/fulltext-{++batchNum}", batch);
+                    yield return await b.BuildAsync(ct);
+                    b = NewBuilder($"framenet/fulltext-{++batchNum}", batch, reader);
                     count = 0;
                     await Task.Yield();
                 }
             }
         }
-        if (count > 0) yield return b.Build();
+        if (count > 0) yield return await b.BuildAsync(ct);
     }
 
-    private static SubstrateChangeBuilder NewBuilder(string unit, int batch) =>
-        new(Source, unit, null,
+    // Every content emission (frame/FE/LU names, definitions, examples, fulltext sentences) routes
+    // through the SHARED two-phase containment (EnableDeferredContent) — the same mechanism the
+    // grammar sources and CILI use — so the graphemes/words shared across thousands of frames are
+    // committed ONCE, not re-COPYed per frame. The builder MUST be drained with BuildAsync (not
+    // Build) so the deferred-content probe-and-flush actually runs.
+    private static SubstrateChangeBuilder NewBuilder(string unit, int batch, ISubstrateReader? reader) =>
+        new SubstrateChangeBuilder(Source, unit, null,
             entityCapacity:      batch * 32,
             physicalityCapacity: batch * 32,
-            attestationCapacity: batch * 32);
+            attestationCapacity: batch * 32)
+            .EnableDeferredContent(reader);
 
 
     internal static Frame? ParseFrame(string path)

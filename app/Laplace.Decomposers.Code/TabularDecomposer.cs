@@ -154,8 +154,9 @@ public sealed class TabularDecomposer : IDecomposer
         int batch = options.BatchSize > 1 ? options.BatchSize : 4096;
         double witnessWeight = RelationTypeRank.Associative * SourceTrust.StructuredCorpus;
         var predicts = RelationTypeRegistry.RelationTypeId("PREDICTS");
+        var reader = context.Reader;
 
-        var b = NewBuilder(0);
+        var b = NewBuilder(0, reader);
         b.AddEntity(new EntityRow(OutcomeId, EntityTier.Vocabulary, OutcomeTypeId, Source));
         // The outcome's target-column name and positive-value token are content (meaningful surface
         // strings): emit them via ContentEmitter and link the version-resolving outcome anchor to them
@@ -205,8 +206,8 @@ public sealed class TabularDecomposer : IDecomposer
 
             if (++emitted >= batch)
             {
-                if (!options.DryRun) yield return b.Build();
-                b = NewBuilder(++bn);
+                if (!options.DryRun) yield return await b.BuildAsync(ct);
+                b = NewBuilder(++bn, reader);
                 emitted = 0;
             }
         }
@@ -227,13 +228,13 @@ public sealed class TabularDecomposer : IDecomposer
                 games: nm.N, sumScoreFp1e9: checked(nm.M * Glicko2.FpScale), witnessWeight: witnessWeight));
             if (++emitted >= batch)
             {
-                if (!options.DryRun) yield return b.Build();
-                b = NewBuilder(++bn);
+                if (!options.DryRun) yield return await b.BuildAsync(ct);
+                b = NewBuilder(++bn, reader);
                 emitted = 0;
             }
         }
 
-        if (emitted > 0 && !options.DryRun) yield return b.Build();
+        if (emitted > 0 && !options.DryRun) yield return await b.BuildAsync(ct);
     }
 
     public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -241,9 +242,13 @@ public sealed class TabularDecomposer : IDecomposer
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    private static SubstrateChangeBuilder NewBuilder(int n) =>
-        new(Source, $"tabular/{n}", null,
-            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 16384);
+    // Target/column names, value tokens, and the per-value bare-token content all route through the
+    // SHARED two-phase containment (EnableDeferredContent); the column/value/outcome/pair ids are
+    // structural anchors with their content attached via IS_INSTANCE_OF. Drain via BuildAsync.
+    private static SubstrateChangeBuilder NewBuilder(int n, ISubstrateReader? reader) =>
+        new SubstrateChangeBuilder(Source, $"tabular/{n}", null,
+            entityCapacity: 8192, physicalityCapacity: 8192, attestationCapacity: 16384)
+            .EnableDeferredContent(reader);
 
     private string Tokenize(string col, string v,
                             Dictionary<string, bool> isNumeric, Dictionary<string, double[]> edges)

@@ -1,0 +1,49 @@
+name: deploy-app (API + SPA -> hart-server)
+
+# Builds the native engine + extension, the API, and the SPA, then publishes
+# the API to /opt/laplace/app and (re)starts the systemd service behind nginx.
+# Runs on the self-hosted runner that IS hart-server. One-time host setup
+# (systemd unit, nginx vhost, sudoers) must already be done via
+# deploy/linux/bootstrap-host.sh.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "app/Laplace.Endpoints.OpenAICompat/**"
+      - "app/Laplace.Api.Contracts/**"
+      - "web/**"
+      - "deploy/linux/**"
+      - ".github/workflows/deploy-app.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-app
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: build + publish + restart
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 45
+    env:
+      PGDATABASE: laplace
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: build + install engine/extension
+        run: |
+          just build
+          just install
+
+      - name: build migrations (deploy.sh publishes the API itself)
+        run: dotnet build app/Laplace.Migrations/Laplace.Migrations.csproj -c Release
+
+      - name: deploy (publish SPA+API, migrate DB, restart service)
+        run: bash deploy/linux/deploy.sh

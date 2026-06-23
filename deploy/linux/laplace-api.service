@@ -1,0 +1,25 @@
+[Unit]
+Description=Laplace API (OpenAI-compat endpoints + self-hosted SPA)
+Documentation=https://github.com/SaltyPatron/Laplace
+After=network.target laplace-postgresql.service
+Wants=laplace-postgresql.service
+
+[Service]
+Type=simple
+User=laplace-runner
+Group=laplace-runner
+WorkingDirectory=/opt/laplace/app
+# All runtime config comes from this env file (LAPLACE_DB, LD_LIBRARY_PATH,
+# ASPNETCORE_URLS, billing/auth knobs). It is rendered by bootstrap-host.sh
+# from deploy/linux/laplace-api.env.example + GitHub Actions variables/secrets.
+EnvironmentFile=/opt/laplace/app/laplace-api.env
+ExecStart=/usr/bin/dotnet /opt/laplace/app/Laplace.Endpoints.OpenAICompat.dll
+Restart=on-failure
+RestartSec=5
+# Graceful shutdown: Kestrel stops on SIGINT.
+KillSignal=SIGINT
+TimeoutStopSec=30
+SyslogIdentifier=laplace-api
+
+[Install]
+WantedBy=multi-user.target
