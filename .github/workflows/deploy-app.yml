@@ -44,11 +44,15 @@ concurrency:
 env:
   PGDATABASE: laplace
   LAPLACE_DATA_ROOT: /vault/Data
-  # Conservative ingest concurrency — matches _ingest.yml. Aggressive defaults
-  # exhaust the Npgsql pool (max 100) on parallel decomposers like CILI.
+  # Bound ingest connection fan-out — the cluster caps at max_connections=100.
+  # The real driver is the apply side: ResolveApplyPartitions defaults to
+  # clamp(P-core,1,16) connections, multiplied by pipelined batches. Capping it
+  # (+ low decompose/fold workers) keeps concurrent connections well under 100
+  # even when queries slow under load (what blew CILI's pool at the defaults).
   LAPLACE_INGEST_WORKERS: "2"
   LAPLACE_DECOMPOSE_WORKERS: "2"
   LAPLACE_FOLD_WORKERS: "4"
+  LAPLACE_APPLY_PARTITIONS: "6"
 
 jobs:
   deploy:
