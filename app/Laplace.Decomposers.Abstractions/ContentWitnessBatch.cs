@@ -54,9 +54,6 @@ public static class ContentWitnessBatch
         out Hash128 rootId) =>
         stage.TryAddContentWitness(canonical, sourceId, out rootId);
 
-    /// <summary>True when a prior content witness in this ingest run already emitted the entity.</summary>
-    public static bool IsEntityProven(Hash128 id) => IntentStage.IsContentWitnessProven(id);
-
     public static bool TryAppendToBuilder(
         SubstrateChangeBuilder builder,
         ReadOnlySpan<byte> canonical,

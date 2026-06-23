@@ -1,21 +1,38 @@
-name: deploy-app (API + SPA -> hart-server)
+name: deploy-app (build → install → migrate → seed → serve)
 
-# Builds the native engine + extension, the API, and the SPA, then publishes
-# the API to /opt/laplace/app and (re)starts the systemd service behind nginx.
-# Runs on the self-hosted runner that IS hart-server. One-time host setup
-# (systemd unit, nginx vhost, sudoers) must already be done via
+# Full app-layer deploy on the self-hosted runner (= hart-server). Unlike a
+# decoupled app push, this REBUILDS AND INSTALLS the native engine + Postgres
+# extension so /opt/laplace is never stale, re-migrates a fresh DB against the
+# just-installed extension, publishes API+SPA, then seeds the ordered ladder
+# (each source an individual, validated step). One-time host setup is
 # deploy/linux/bootstrap-host.sh.
 
 on:
   workflow_dispatch:
+    inputs:
+      fresh_db:
+        description: "nuke + re-migrate + reseed (required after any engine/extension change)"
+        type: boolean
+        default: true
+      full_ladder:
+        description: "also seed the multi-hour corpora (atomic2020/conceptnet/wiktionary/tatoeba/opensubtitles)"
+        type: boolean
+        default: false
+      skip_seed:
+        description: "deploy only; do not run the seed ladder"
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
-      - "app/Laplace.Endpoints.OpenAICompat/**"
-      - "app/Laplace.Api.Contracts/**"
+      - "engine/**"
+      - "extension/**"
+      - "app/**"
       - "web/**"
       - "deploy/linux/**"
+      - "scripts/ingest-source.sh"
       - ".github/workflows/deploy-app.yml"
+      - "Justfile"
 
 permissions:
   contents: read
@@ -24,32 +41,114 @@ concurrency:
   group: deploy-app
   cancel-in-progress: false
 
+env:
+  PGDATABASE: laplace
+  LAPLACE_DATA_ROOT: /vault/Data
+
 jobs:
   deploy:
-    name: build + publish + restart
+    name: build → install → migrate → seed → serve
     runs-on: [self-hosted, laplace]
-    timeout-minutes: 45
-    env:
-      PGDATABASE: laplace
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
-
       - uses: ./.github/actions/setup-laplace-env
 
-      # The native engine + laplace_substrate extension are a separately-built,
-      # already-installed dependency under /opt/laplace (like the custom PG/PostGIS).
-      # This deploy ships the app layer against them; it does NOT rebuild them.
-      - name: verify installed engine + extension
+      # The runner has no `just` on PATH (root cause of the red build workflows).
+      # Self-heal it into a runner-local bin — no host mutation, no sudo.
+      - name: ensure 'just' on PATH
         run: |
-          test -f /opt/laplace/lib/liblaplace_core.so \
-            || { echo "::error::engine missing at /opt/laplace/lib — run the native build/install first"; exit 1; }
-          test -f /opt/laplace/share/postgresql/18/extension/laplace_substrate.control \
-            || { echo "::error::laplace_substrate extension not installed under /opt/laplace"; exit 1; }
-          echo "engine + extension present."
+          if ! command -v just >/dev/null 2>&1; then
+            mkdir -p "$HOME/.local/bin"
+            curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to "$HOME/.local/bin"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: build migrations (deploy.sh publishes the API itself)
+      # Rebuild AND install the engine + extension so /opt/laplace matches the
+      # code. Justfile defaults (LAPLACE_PG_PREFIX=/usr/lib/postgresql/18,
+      # INSTALL_STAGED=ON, INSTALL_PREFIX=/opt/laplace) match the build cache.
+      - name: build + install engine + extension → /opt/laplace
+        run: |
+          just build
+          just install
+          # fail loudly if the install did not actually refresh the engine
+          test -f /opt/laplace/lib/liblaplace_core.so
+
+      - name: stop API service (release DB + app dir)
+        run: sudo systemctl stop laplace-api || true
+
+      - name: build migrations
         run: dotnet build app/Laplace.Migrations/Laplace.Migrations.csproj -c Release
 
-      - name: deploy (publish SPA+API, migrate DB, restart service)
+      # fresh_db guarantees the DB carries the just-installed extension's current
+      # SQL (CREATE EXTENSION IF NOT EXISTS won't refresh a stale one in place).
+      - name: migrate
+        run: |
+          MIG=app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll
+          if [ "${{ inputs.fresh_db }}" = "false" ]; then
+            dotnet "$MIG" up
+          else
+            dotnet "$MIG" nuke --yes
+            dotnet "$MIG" up
+          fi
+
+      - name: publish API + SPA → /opt/laplace/app
         run: bash deploy/linux/deploy.sh
+
+      # Perfcache blob for the ingest CLI (built by `just build`).
+      - name: locate T0 perfcache
+        if: ${{ !inputs.skip_seed }}
+        run: echo "LAPLACE_PERFCACHE_BIN=$(find build -name laplace_t0_perfcache.bin | head -1)" >> "$GITHUB_ENV"
+
+      # ---- seed ladder: ordered, each an individual step ----
+      # Foundation linkers — the anchors everything else points into.
+      - name: seed unicode (L0 — codepoints + T0 perfcache)
+        if: ${{ !inputs.skip_seed }}
+        run: scripts/ingest-source.sh unicode
+      - name: seed iso639 (L1 — language axis)
+        if: ${{ !inputs.skip_seed }}
+        run: scripts/ingest-source.sh iso639
+      - name: seed cili (L2 — interlingual concept anchors, before wordnet/omw)
+        if: ${{ !inputs.skip_seed }}
+        run: scripts/ingest-source.sh cili
+      - name: seed wordnet (L2 — English lexicon; first real answers)
+        if: ${{ !inputs.skip_seed }}
+        run: scripts/ingest-source.sh wordnet
+
+      # Core knowledge — independent of the lexicon chain; tolerate absent data.
+      - name: seed verbnet/propbank/ud (L2)
+        if: ${{ !inputs.skip_seed }}
+        run: |
+          for s in verbnet propbank ud; do
+            echo "::group::seed $s"; scripts/ingest-source.sh "$s" || echo "::warning::seed $s failed (data may be absent)"; echo "::endgroup::"
+          done
+      - name: seed omw/framenet + bridges (L3 — need wordnet/verbnet/propbank/framenet)
+        if: ${{ !inputs.skip_seed }}
+        run: |
+          for s in omw framenet semlink mapnet wordframenet; do
+            echo "::group::seed $s"; scripts/ingest-source.sh "$s" || echo "::warning::seed $s failed (data may be absent)"; echo "::endgroup::"
+          done
+
+      # Multi-hour breadth corpora — opt-in only.
+      - name: seed full corpora (opt-in)
+        if: ${{ !inputs.skip_seed && inputs.full_ladder }}
+        run: |
+          for s in atomic2020 conceptnet wiktionary tatoeba opensubtitles; do
+            echo "::group::seed $s"; scripts/ingest-source.sh "$s" || echo "::warning::seed $s failed"; echo "::endgroup::"
+          done
+
+      - name: start API service
+        run: sudo systemctl start laplace-api
+
+      # ---- validate / confirm ----
+      - name: validate — health, substrate counts, real recall
+        run: |
+          sleep 3
+          echo "== health =="; curl -fsS http://127.0.0.1:5187/health; echo
+          echo "== substrate counts =="
+          psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -c "SELECT metric, value FROM laplace.substrate_counts();"
+          echo "== recall must answer now that wordnet is seeded =="
+          curl -fsS -X POST http://127.0.0.1:5187/v1/chat/completions \
+            -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
+            --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}'

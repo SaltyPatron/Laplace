@@ -8,7 +8,10 @@ LOGDIR="${INGEST_LOGDIR:-/tmp}"
 DATA_ROOT="${LAPLACE_DATA_ROOT:-/vault/Data}"
 
 # Canonical order from scripts/win/witness-manifest.json (do not reorder ad hoc).
-FLOOR=(unicode iso639)
+# FLOOR = anchors everything points into: codepoints, languages, interlingual
+# concept index (CILI). CILI must precede wordnet/omw so multilingual senses
+# attach to pre-existing concept anchors (maximal convergence).
+FLOOR=(unicode iso639 cili)
 KNOWLEDGE=(wordnet omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary)
 USAGE=(tatoeba opensubtitles)
 
@@ -51,7 +54,7 @@ case "$source" in
         build_cli
         ingest safetensors "$path"
         ;;
-    unicode|iso639|document|omw|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|propbank|framenet|mapnet|wordframenet|semlink)
+    unicode|iso639|cili|document|omw|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|propbank|framenet|mapnet|wordframenet|semlink)
         build_cli
         if [[ "$source" == "document" && -z "$path" ]]; then
             path="${INGEST_DOCUMENT_PATH:-$DATA_ROOT/test-data/text}"

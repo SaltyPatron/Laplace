@@ -112,26 +112,57 @@ public sealed class CILIDecomposer : IDecomposer
             ct.ThrowIfCancellationRequested();
             string version = VersionLabel(tab);
             var changes = PCoreParallelCompose.RunAsync(
-                ParseIliMapAsync(tab, ct),
+                ParseIliMapAsync(tab, version, ct),
                 workers, BatchSize,
                 () => NewBuilder($"cili/map/{version}", 0).EnableDeferredContent(reader),
-                (mb, rec) =>
-                {
-                    var (ili, offsetPos) = rec;
-                    if (ContentEmitter.Emit(mb, ili, Source) is not { } id) return;
-                    if (ContentEmitter.Emit(mb, offsetPos, Source) is not { } keyId) return;
-                    var verCtx = ContentEmitter.Emit(mb, version, Source) ?? id;
-                    mb.AddAttestation(NativeAttestation.Categorical(
-                        id, "HAS_SYNSET_KEY", keyId, Source, TC.AcademicCurated, verCtx));
-                },
+                EmitMapRow,
+                ct);
+            await foreach (var change in changes.WithCancellation(ct))
+                yield return change;
+        }
+
+        // ---- Pass 3: ili-map-*.ttl — turtle-form cross-version maps ----
+        // The .tab pass above only catches the .tab files (pwn15..pwn31). The CILI distribution ALSO
+        // ships the maps in turtle: ili-map-odwn13.ttl (Open Dutch WordNet — the ONLY source for the
+        // odwn13 offsets, never present as a .tab) plus ili-map.ttl / ili-map-wn30.ttl / ili-map-wn31.ttl.
+        // Each data line is `<iN> owl:sameAs PREFIX:OFFSET-POS . # gloss` (or the `ili:iN ...` form). The
+        // synset-key content emitted is the bare OFFSET-POS (so it converges with the .tab pass and the
+        // wordnets), and the wordnet PREFIX (pwn30/pwn31/odwn13/...) is the attestation's version context
+        // — provenance, never baked into an id. Dropping these silently lost the entire odwn13 mapping.
+        var ttlMaps = Directory.EnumerateFiles(root, "ili-map-*.ttl", SearchOption.AllDirectories)
+                               .OrderBy(p => p, StringComparer.Ordinal);
+        foreach (var ttlMap in ttlMaps)
+        {
+            ct.ThrowIfCancellationRequested();
+            string version = VersionLabel(ttlMap);
+            var changes = PCoreParallelCompose.RunAsync(
+                ParseIliMapTtlAsync(ttlMap, version, ct),
+                workers, BatchSize,
+                () => NewBuilder($"cili/map/{version}", 0).EnableDeferredContent(reader),
+                EmitMapRow,
                 ct);
             await foreach (var change in changes.WithCancellation(ct))
                 yield return change;
         }
     }
 
-    private static async IAsyncEnumerable<(string Ili, string OffsetPos)> ParseIliMapAsync(
-        string tab, [EnumeratorCancellation] CancellationToken ct)
+    /// <summary>
+    /// Stages one HAS_SYNSET_KEY attestation: the version-specific synset key (OFFSET-POS) is CONTENT
+    /// and the wordnet version is the attestation CONTEXT. Shared by the .tab and .ttl map passes so
+    /// both forms converge on the same content-addressed ILI concept and synset-key entities.
+    /// </summary>
+    private static void EmitMapRow(SubstrateChangeBuilder mb, (string Ili, string OffsetPos, string Version) rec)
+    {
+        var (ili, offsetPos, version) = rec;
+        if (ContentEmitter.Emit(mb, ili, Source) is not { } id) return;
+        if (ContentEmitter.Emit(mb, offsetPos, Source) is not { } keyId) return;
+        var verCtx = ContentEmitter.Emit(mb, version, Source) ?? id;
+        mb.AddAttestation(NativeAttestation.Categorical(
+            id, "HAS_SYNSET_KEY", keyId, Source, TC.AcademicCurated, verCtx));
+    }
+
+    private static async IAsyncEnumerable<(string Ili, string OffsetPos, string Version)> ParseIliMapAsync(
+        string tab, string version, [EnumeratorCancellation] CancellationToken ct)
     {
         await foreach (var line in File.ReadLinesAsync(tab, ct))
         {
@@ -140,8 +171,57 @@ public sealed class CILIDecomposer : IDecomposer
             string ili = line[..sep].Trim();
             string offsetPos = line[(sep + 1)..].Trim();
             if (ili.Length == 0 || offsetPos.Length == 0 || ili[0] != 'i') continue;
-            yield return (ili, offsetPos);
+            yield return (ili, offsetPos, version);
         }
+    }
+
+    /// <summary>
+    /// Parses a turtle-form ILI map line: `&lt;iN&gt; owl:sameAs PREFIX:OFFSET-POS . # gloss`, or the
+    /// `ili:iN owl:sameAs PREFIX:OFFSET-POS .` form. Whitespace between the three terms is a tab OR
+    /// spaces (the distribution mixes both). Yields the bare ILI ("iN") and the bare synset key
+    /// (OFFSET-POS, prefix stripped) so the emission converges with the .tab pass and the wordnets.
+    /// </summary>
+    private static async IAsyncEnumerable<(string Ili, string OffsetPos, string Version)> ParseIliMapTtlAsync(
+        string path, string version, [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var raw in File.ReadLinesAsync(path, ct))
+        {
+            string line = raw.Trim();
+            if (line.Length == 0 || line[0] == '@' || line[0] == '#') continue;
+
+            int sameAs = line.IndexOf("owl:sameAs", StringComparison.Ordinal);
+            if (sameAs < 0) continue;
+
+            string subject = line[..sameAs].Trim();
+            string ili = NormalizeIli(subject);
+            if (ili.Length == 0) continue;
+
+            // object term: from after "owl:sameAs" up to the statement-terminating '.' (or a trailing
+            // " # gloss" comment, whichever comes first). It is `PREFIX:OFFSET-POS`.
+            string rest = line[(sameAs + "owl:sameAs".Length)..].Trim();
+            int hash = rest.IndexOf('#');
+            if (hash >= 0) rest = rest[..hash];
+            int dot = rest.LastIndexOf('.');
+            if (dot >= 0) rest = rest[..dot];
+            string objTerm = rest.Trim();
+            if (objTerm.Length == 0) continue;
+
+            int prefixColon = objTerm.IndexOf(':');
+            string offsetPos = prefixColon >= 0 ? objTerm[(prefixColon + 1)..].Trim() : objTerm;
+            if (offsetPos.Length == 0) continue;
+
+            yield return (ili, offsetPos, version);
+        }
+    }
+
+    /// <summary>Normalizes an ILI subject term (`&lt;i1&gt;` or `ili:i1`) to the bare `i1`.</summary>
+    private static string NormalizeIli(string term)
+    {
+        string s = term;
+        if (s.StartsWith("ili:", StringComparison.Ordinal)) s = s["ili:".Length..];
+        if (s.Length >= 2 && s[0] == '<' && s[^1] == '>') s = s[1..^1];
+        s = s.Trim();
+        return s.Length > 0 && s[0] == 'i' && s.Length > 1 && char.IsDigit(s[1]) ? s : string.Empty;
     }
 
     private static SubstrateChangeBuilder NewBuilder(string label, int bn) =>

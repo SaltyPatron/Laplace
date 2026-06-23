@@ -53,6 +53,15 @@ public static class OMWRowParser
             typeSpan = typeField[(colon + 1)..];
         }
 
+        // OMW lemma rows carry an optional morphology SUBTYPE after a second colon
+        // (e.g. Arabic "arb:lemma:root", "arb:lemma:brokenplural" — the lemma value is the verbal
+        // root / broken-plural surface form of the synset). Strip the subtype so these lexicalizations
+        // are ingested as lemmas instead of being silently dropped by an exact "lemma" match. def/exe
+        // never carry a subtype, so this only affects lemma rows.
+        int subColon = typeSpan.IndexOf((byte)':');
+        if (subColon >= 0)
+            typeSpan = typeSpan[..subColon];
+
         OmwType rowType;
         ReadOnlySpan<byte> valueSpan;
         if (typeSpan.SequenceEqual("lemma"u8))

@@ -185,15 +185,6 @@ public sealed class IntentStage : SafeHandle
     private static volatile bool _bulkFreshBypass;
     public static void SetBulkFreshBypass(bool enabled) => _bulkFreshBypass = enabled;
 
-    public static bool IsContentWitnessProven(Hash128 id)
-    {
-        unsafe
-        {
-            Hash128 h = id;
-            return NativeInterop.ContentWitnessEntityProven(&h) != 0;
-        }
-    }
-
     public bool TryAddContentWitness(ReadOnlySpan<byte> canonical, Hash128 sourceId, out Hash128 rootId)
     {
         rootId = default;

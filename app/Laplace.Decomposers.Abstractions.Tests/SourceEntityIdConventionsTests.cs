@@ -6,6 +6,12 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
+// WithCiliDir mutates the process-global LAPLACE_CILI_DIR env var and resets the static IliMap cache.
+// That mutation must not overlap any test that reads the real on-disk CILI map (IliMapTests,
+// ConceptAnchorTests, CrossSourceLinkingTests) or it momentarily repoints them at a temp dir and they
+// observe an empty/foreign map. Joining the GrammarPerfcache collection serializes this class against
+// those readers (xUnit runs a collection's tests without inter-class parallelism); no assertion changes.
+[Collection("GrammarPerfcache")]
 public class SourceEntityIdConventionsTests
 {
     private static string? _savedCiliDir;
