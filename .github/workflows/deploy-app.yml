@@ -55,23 +55,22 @@ jobs:
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
 
-      # The runner has no `just` on PATH (root cause of the red build workflows).
-      # Self-heal it into a runner-local bin — no host mutation, no sudo.
-      - name: ensure 'just' on PATH
-        run: |
-          if ! command -v just >/dev/null 2>&1; then
-            mkdir -p "$HOME/.local/bin"
-            curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to "$HOME/.local/bin"
-          fi
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      # Rebuild AND install the engine + extension so /opt/laplace matches the
-      # code. Justfile defaults (LAPLACE_PG_PREFIX=/usr/lib/postgresql/18,
-      # INSTALL_STAGED=ON, INSTALL_PREFIX=/opt/laplace) match the build cache.
+      # Rebuild + install the engine + extension directly via cmake — NOT `just`
+      # (the runner's modern `just` rejects the Justfile's blank recipe lines).
+      # These mirror the Justfile `build`/`install` recipes; the oneAPI toolchain
+      # env + build-tree LD_LIBRARY_PATH come from setup-laplace-env, and the flags
+      # match the existing build/CMakeCache.txt (stock PG18 headers, staged install
+      # to /opt/laplace). Runs as laplace-runner, which owns /opt/laplace.
       - name: build + install engine + extension → /opt/laplace
         run: |
-          just build
-          just install
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
+            -DLAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/usr/lib/postgresql/18}" \
+            -DCMAKE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" \
+            -DLAPLACE_INSTALL_STAGED="${LAPLACE_INSTALL_STAGED:-ON}"
+          cmake --build build
+          umask 0002
+          cmake --install build
           # fail loudly if the install did not actually refresh the engine
           test -f /opt/laplace/lib/liblaplace_core.so
 
