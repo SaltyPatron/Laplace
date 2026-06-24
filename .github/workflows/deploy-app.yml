@@ -98,12 +98,13 @@ jobs:
       - name: migrate
         run: |
           MIG=app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll
-          if [ "${{ inputs.fresh_db }}" = "false" ]; then
-            dotnet "$MIG" up
-          else
+          # Reseed is destructive — nuke ONLY on an explicit fresh_db=true dispatch. On push (inputs
+          # unset) or any other run we just `up` + the in-place sync step below — no nuke, no data loss.
+          # This is what turns a commit into a safe hot-deploy instead of a full reseed.
+          if [ "${{ inputs.fresh_db }}" = "true" ]; then
             dotnet "$MIG" nuke --yes
-            dotnet "$MIG" up
           fi
+          dotnet "$MIG" up
 
       # In-place extension SQL upgrade WITHOUT a reseed. The extension version is a content hash of the
       # SQL (extension/laplace_substrate CMakeLists), and migrate's CREATE EXTENSION is a one-time DbUp
@@ -152,33 +153,33 @@ jobs:
 
       # Perfcache blob for the ingest CLI (built by `just build`).
       - name: locate T0 perfcache
-        if: ${{ !inputs.skip_seed }}
+        if: ${{ inputs.fresh_db == 'true' && !inputs.skip_seed }}
         run: echo "LAPLACE_PERFCACHE_BIN=$(find build -name laplace_t0_perfcache.bin | head -1)" >> "$GITHUB_ENV"
 
       # ---- seed ladder: ordered, each an individual step ----
       # Foundation linkers — the anchors everything else points into.
       - name: seed unicode (L0 — codepoints + T0 perfcache)
-        if: ${{ !inputs.skip_seed }}
+        if: ${{ inputs.fresh_db == 'true' && !inputs.skip_seed }}
         run: scripts/ingest-source.sh unicode
       - name: seed iso639 (L1 — language axis)
-        if: ${{ !inputs.skip_seed }}
+        if: ${{ inputs.fresh_db == 'true' && !inputs.skip_seed }}
         run: scripts/ingest-source.sh iso639
       - name: seed cili (L2 — interlingual concept anchors, before wordnet/omw)
-        if: ${{ !inputs.skip_seed }}
+        if: ${{ inputs.fresh_db == 'true' && !inputs.skip_seed }}
         run: scripts/ingest-source.sh cili
       - name: seed wordnet (L2 — English lexicon; first real answers)
-        if: ${{ !inputs.skip_seed }}
+        if: ${{ inputs.fresh_db == 'true' && !inputs.skip_seed }}
         run: scripts/ingest-source.sh wordnet
 
       # Core knowledge — independent of the lexicon chain; tolerate absent data.
       - name: seed verbnet/propbank/ud (L2)
-        if: ${{ !inputs.skip_seed }}
+        if: ${{ inputs.fresh_db == 'true' && !inputs.skip_seed }}
         run: |
           for s in verbnet propbank ud; do
             echo "::group::seed $s"; scripts/ingest-source.sh "$s" || echo "::warning::seed $s failed (data may be absent)"; echo "::endgroup::"
           done
       - name: seed omw/framenet + bridges (L3 — need wordnet/verbnet/propbank/framenet)
-        if: ${{ !inputs.skip_seed }}
+        if: ${{ inputs.fresh_db == 'true' && !inputs.skip_seed }}
         run: |
           for s in omw framenet semlink mapnet wordframenet; do
             echo "::group::seed $s"; scripts/ingest-source.sh "$s" || echo "::warning::seed $s failed (data may be absent)"; echo "::endgroup::"
@@ -186,7 +187,7 @@ jobs:
 
       # Multi-hour breadth corpora — opt-in only.
       - name: seed full corpora (opt-in)
-        if: ${{ !inputs.skip_seed && inputs.full_ladder }}
+        if: ${{ inputs.fresh_db == 'true' && !inputs.skip_seed && inputs.full_ladder }}
         run: |
           for s in atomic2020 conceptnet wiktionary tatoeba opensubtitles; do
             echo "::group::seed $s"; scripts/ingest-source.sh "$s" || echo "::warning::seed $s failed"; echo "::endgroup::"
