@@ -65,6 +65,7 @@ function Build-Extension {
 
     $ctl = Get-Content -LiteralPath (Join-Path $Root "extension\$Name\$Name.control.in") -Encoding UTF8 -Raw
     $ctl = $ctl -replace '@PROJECT_VERSION@', $Version
+    $ctl = $ctl -replace '@EXT_VERSION@', $Version   # laplace_substrate.control.in uses @EXT_VERSION@; geom uses @PROJECT_VERSION@
     $ctl = $ctl -replace "\`$libdir/$Name", $Name
     $outCtl = Join-Path "$Stage\extension" "$Name.control"
     [System.IO.File]::WriteAllText($outCtl, $ctl, [System.Text.UTF8Encoding]::new($false))

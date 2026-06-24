@@ -50,6 +50,12 @@ public sealed class BootstrapIntentBuilder
         var id = Hash128.OfCanonical($"substrate/type/{canonicalTypeName}/v1");
         _canonicalNames.Add($"substrate/type/{canonicalTypeName}/v1");
         _inner.AddEntity(id, EntityTier.Vocabulary, TypeMetaTypeId, _sourceId);
+        // Substrate-native legibility: name the entity type via a codepoint-walk content entity +
+        // HAS_NAME_ALIAS, so even unregistered types (e.g. WordNet_Sense) render from their own
+        // codepoints instead of a bare hash. See render() COALESCE in 15_readback.sql.in.
+        if (ContentWitnessBatch.Emit(_inner, canonicalTypeName, _sourceId) is { } nameId)
+            _inner.AddAttestation(NativeAttestation.Categorical(
+                id, "HAS_NAME_ALIAS", nameId, _sourceId, null, SourceTrust.SubstrateMandate));
         return id;
     }
 

@@ -9,6 +9,17 @@ public sealed record HealthResponse(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("stream")] string Stream);
 
+// Deep readiness: the substrate is reachable AND seeded AND the T0 perfcache is loaded.
+// A green liveness probe with an unseeded DB or unset perfcache is the documented
+// "hollow deploy" trap — this is the probe that refuses to lie about it.
+public sealed record ReadinessResponse(
+    [property: JsonPropertyName("ready")] bool Ready,
+    [property: JsonPropertyName("substrate_reachable")] bool SubstrateReachable,
+    [property: JsonPropertyName("entities")] long Entities,
+    [property: JsonPropertyName("consensus_relations")] long ConsensusRelations,
+    [property: JsonPropertyName("perfcache_ready")] bool PerfcacheReady,
+    [property: JsonPropertyName("detail"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Detail = null);
+
 public sealed record ModelList(
     [property: JsonPropertyName("object")] string Object,
     [property: JsonPropertyName("data")] IReadOnlyList<ModelInfo> Data);

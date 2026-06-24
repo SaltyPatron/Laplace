@@ -176,6 +176,13 @@ public static class RelationTypeRegistry
             if (k.ParentId is { } parent)
                 builder.AddAttestation(NativeAttestation.Categorical(
                     k.Id, "IS_A", parent, sourceId, null, SourceTrust.SubstrateMandate));
+        // Substrate-native legibility: each relation type's name is a codepoint-walk content
+        // entity, reached by HAS_NAME_ALIAS — render() reconstructs it from its own codepoints, so
+        // the type never surfaces as a bare hash and needs no canonical_names code-table row.
+        foreach (var k in all)
+            if (ContentWitnessBatch.Emit(builder, k.Canonical, sourceId) is { } nameId)
+                builder.AddAttestation(NativeAttestation.Categorical(
+                    k.Id, "HAS_NAME_ALIAS", nameId, sourceId, null, SourceTrust.SubstrateMandate));
     }
 
     public static void SeedDynamic(SubstrateChangeBuilder builder, in RelationTypeResolution k, Hash128 sourceId,

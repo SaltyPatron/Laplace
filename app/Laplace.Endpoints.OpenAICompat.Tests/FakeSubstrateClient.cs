@@ -33,6 +33,9 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     {
         await Task.CompletedTask;
         yield return new GenerateToken(1, " the", 5);
+        // Sentinel: exercises the mid-stream failure path after the 200 + first token are committed.
+        if (prompt.Contains("trigger-stream-error", StringComparison.OrdinalIgnoreCase))
+            throw new SubstrateUnavailableException("substrate went away mid-walk.", new InvalidOperationException());
         yield return new GenerateToken(2, " whale", 4);
         yield return new GenerateToken(3, " sings", 3);
     }
@@ -140,6 +143,31 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
                     ObservationCount: 7)
             ]));
     }
+
+    public Task<EmbeddingResult> EmbeddingAsync(string input, bool includeMeaning, int meaningLimit, CancellationToken ct)
+    {
+        if (input is "unknown-word")
+            return Task.FromResult(new EmbeddingResult(null, null, Array.Empty<MeaningNeighbor>()));
+
+        return Task.FromResult(new EmbeddingResult(
+            WhaleIdHex,
+            new EmbeddingForm(0.5, -0.25, 0.125, 0.8125, 1.0, 5),
+            includeMeaning
+                ?
+                [
+                    new MeaningNeighbor("IS_A", "cetacean", 0.91m, 42),
+                    new MeaningNeighbor("HAS_DEFINITION", "a large marine mammal", 0.88m, 30)
+                ]
+                : Array.Empty<MeaningNeighbor>()));
+    }
+
+    public Task<ReadinessResponse> ReadinessAsync(CancellationToken ct) =>
+        Task.FromResult(new ReadinessResponse(
+            Ready: true,
+            SubstrateReachable: true,
+            Entities: 4_440_000,
+            ConsensusRelations: 6_100_000,
+            PerfcacheReady: true));
 
     private static VisualizationEdge TopEdge() => new(
         SubjectIdHex: WhaleIdHex,

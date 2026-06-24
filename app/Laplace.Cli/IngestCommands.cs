@@ -120,6 +120,10 @@ internal static class IngestCommands
 
 
 
+        // NOTE: no process-wide CPU pin. The machine is shared (the user works on it; GPUs, hypervisor,
+        // WSL all run too). Seizing every P-core logical thread starves the box. The OS hybrid scheduler
+        // already keeps active CPU-bound work on P-cores when they're free and leaves headroom for the
+        // user; worker counts (compose/decompose/commit) are the place to bound load, not affinity.
         CodepointPerfcache.Load(ResolveBlob());
 
         // Make the bespoke witnesses of the already-grammar-conforming sources available to the

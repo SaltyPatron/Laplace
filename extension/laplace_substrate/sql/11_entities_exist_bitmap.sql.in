@@ -2,3 +2,18 @@ CREATE OR REPLACE FUNCTION entities_exist_bitmap(ids bytea[])
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_entities_exist_bitmap'
     LANGUAGE C STABLE;
+
+-- Universal O(tier) containment probe — the top-down sibling of entities_exist_bitmap. The substrate
+-- IS a content-addressed Merkle DAG: an entity's id = BLAKE3(its constituents), so a PRESENT trunk
+-- implies its whole subtree is present. Given a batch's tree as node ids + a parent-index array
+-- (parents[k] = 0-based index of node k's parent, < 0 for a root), it returns the SAME present-bitmap
+-- contract as entities_exist_bitmap (bit k set ⟺ candidate k present, LSB-first) but descends ONLY
+-- under novel parents — a present trunk short-circuits its subtree, so re-ingesting known content
+-- costs O(tier-depth) DB checks, not O(nodes). The bitmap is built in C (one home for the bit
+-- convention); the native content emit then does the staging descent. This is how dedup works for
+-- EVERY source and modality — the schema's operating model, not a per-decomposer add-on. (T0/T1
+-- codepoints/graphemes are perfcache-known and are simply never put in the tree handed here.)
+CREATE OR REPLACE FUNCTION content_descent_bitmap(ids bytea[], parents int[])
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_content_descent_bitmap'
+    LANGUAGE C STABLE;

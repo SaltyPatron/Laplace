@@ -38,16 +38,35 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
         IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct)
     {
         const string sql = "SELECT reply, eff_mu, witnesses FROM laplace.recall_session(@p, @s);";
+        // recall_session is session-stateful: each call appends a row to laplace.session_topics
+        // (ord = max+1) and reads the most-recent prior topic for anaphora. The OpenAI protocol is
+        // stateless — the client resends the full history every turn — so without clearing first,
+        // session_topics accumulates the whole history again on every request and never shrinks
+        // (O(N^2) rows over a conversation, leaked until PG restart since the table is UNLOGGED and
+        // never GC'd). Rebuild the session's topic log atomically from the supplied history instead:
+        // truncate this session's rows, then replay, so the table mirrors the conversation exactly.
+        const string resetSql = "DELETE FROM laplace.session_topics WHERE session_id = @s;";
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            
-            
+            await using var tx = await conn.BeginTransactionAsync(ct);
+
+            if (session is not null)
+            {
+                await using var reset = new NpgsqlCommand(resetSql, conn, tx);
+                reset.Parameters.Add(new NpgsqlParameter("s", NpgsqlDbType.Bytea) { Value = session });
+                await reset.ExecuteNonQueryAsync(ct);
+            }
+
+            // Only the final turn's reply is returned; the earlier turns are replayed purely to
+            // re-seed session context. (That replay is still O(N) recall calls per request — the
+            // deeper win is a recall-side "record context turn" entrypoint that resolves+inserts a
+            // topic without the full render; that's a recall-layer change, flagged separately.)
             var rows = new List<ConverseRow>(8);
             for (int turn = 0; turn < userTurns.Count; turn++)
             {
                 bool isLast = turn + 1 == userTurns.Count;
-                await using var cmd = new NpgsqlCommand(sql, conn);
+                await using var cmd = new NpgsqlCommand(sql, conn, tx);
                 cmd.Parameters.AddWithValue("p", userTurns[turn]);
                 cmd.Parameters.Add(new NpgsqlParameter("s", NpgsqlDbType.Bytea)
                     { Value = (object?)session ?? DBNull.Value });
@@ -55,13 +74,15 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
                 {
-                    if (!isLast) continue; 
+                    if (!isLast) continue;
                     var reply = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
                     var mu = reader.IsDBNull(1) ? 0m : reader.GetDecimal(1);
                     var witnesses = reader.IsDBNull(2) ? 0L : reader.GetInt64(2);
                     rows.Add(new ConverseRow(reply, mu, witnesses));
                 }
             }
+
+            await tx.CommitAsync(ct);
             return rows;
         }
         catch (PostgresException pg)
@@ -483,6 +504,135 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
         }
 
         return samples;
+    }
+
+
+
+
+
+
+    public async Task<ReadinessResponse> ReadinessAsync(CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+            long entities = 0, consensus = 0;
+            await using (var cmd = new NpgsqlCommand("SELECT metric, value FROM laplace.substrate_counts();", conn))
+            await using (var reader = await cmd.ExecuteReaderAsync(ct))
+            {
+                while (await reader.ReadAsync(ct))
+                {
+                    switch (reader.GetString(0))
+                    {
+                        case "entities": entities = reader.GetInt64(1); break;
+                        case "consensus (relations)": consensus = reader.GetInt64(1); break;
+                    }
+                }
+            }
+
+
+
+
+            bool perfcacheReady;
+            string? detail = null;
+            try
+            {
+                await using var probe = new NpgsqlCommand("SELECT laplace.word_id('the');", conn);
+                await probe.ExecuteScalarAsync(ct);
+                perfcacheReady = true;
+            }
+            catch (PostgresException pg) when (pg.SqlState == PostgresErrorCodes.ObjectNotInPrerequisiteState)
+            {
+                perfcacheReady = false;
+                detail = pg.MessageText;
+            }
+
+            var ready = entities > 0 && consensus > 0 && perfcacheReady;
+            if (ready)
+                return new ReadinessResponse(true, true, entities, consensus, true);
+
+            detail ??= entities == 0 ? "substrate has no entities (unseeded)"
+                : consensus == 0 ? "substrate has no consensus relations (unseeded)"
+                : "T0 perfcache not loaded";
+            return new ReadinessResponse(false, true, entities, consensus, perfcacheReady, detail);
+        }
+        catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
+        {
+            return new ReadinessResponse(false, false, 0, 0, false, $"substrate unreachable: {ex.Message}");
+        }
+    }
+
+    // FORM = S³ geometry coordinate; MEANING = Glicko-2 salient consensus neighbours (rank-weighted by
+    // consensus_out_readable, so scaffolding stays out of the top). Form and meaning kept separate.
+    public async Task<EmbeddingResult> EmbeddingAsync(string input, bool includeMeaning, int meaningLimit, CancellationToken ct)
+    {
+        const string resolveSql = """
+            SELECT CASE
+                WHEN @target ~ '^[0-9a-f]{32}$' THEN decode(@target, 'hex')
+                ELSE laplace.word_id(@target)
+            END;
+            """;
+        const string formSql = """
+            SELECT x, y, z, m, radius, n_constituents
+            FROM laplace.entity_physicalities(@id)
+            ORDER BY type
+            LIMIT 1;
+            """;
+        const string meaningSql = """
+            SELECT type, object, eff_mu, witnesses
+            FROM laplace.consensus_out_readable(@id, @limit);
+            """;
+        try
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+            byte[]? entityId;
+            await using (var resolve = new NpgsqlCommand(resolveSql, conn))
+            {
+                resolve.Parameters.AddWithValue("target", input.Trim().ToLowerInvariant());
+                entityId = await resolve.ExecuteScalarAsync(ct) as byte[];
+            }
+            if (entityId is null)
+                return new EmbeddingResult(null, null, Array.Empty<MeaningNeighbor>());
+
+            EmbeddingForm? form = null;
+            await using (var cmd = new NpgsqlCommand(formSql, conn))
+            {
+                cmd.Parameters.Add(new NpgsqlParameter("id", NpgsqlDbType.Bytea) { Value = entityId });
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                if (await reader.ReadAsync(ct))
+                    form = new EmbeddingForm(
+                        reader.GetDouble(0), reader.GetDouble(1), reader.GetDouble(2),
+                        reader.GetDouble(3), reader.GetDouble(4), reader.GetInt32(5));
+            }
+
+            var meaning = new List<MeaningNeighbor>();
+            if (includeMeaning)
+            {
+                await using var cmd = new NpgsqlCommand(meaningSql, conn);
+                cmd.Parameters.Add(new NpgsqlParameter("id", NpgsqlDbType.Bytea) { Value = entityId });
+                cmd.Parameters.AddWithValue("limit", Math.Clamp(meaningLimit, 1, 100));
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                    meaning.Add(new MeaningNeighbor(
+                        Relation: reader.IsDBNull(0) ? "?" : reader.GetString(0),
+                        ObjectLabel: reader.IsDBNull(1) ? "?" : reader.GetString(1),
+                        EffMu: reader.IsDBNull(2) ? 0m : reader.GetDecimal(2),
+                        Witnesses: reader.IsDBNull(3) ? 0L : reader.GetInt64(3)));
+            }
+
+            return new EmbeddingResult(Convert.ToHexStringLower(entityId), form, meaning);
+        }
+        catch (PostgresException pg)
+        {
+            throw new SubstrateQueryException(
+                $"embedding query failed [{pg.SqlState}] {pg.MessageText}", pg);
+        }
+        catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
+        {
+            throw new SubstrateUnavailableException("Substrate embedding query failed.", ex);
+        }
     }
 
     public async ValueTask DisposeAsync()

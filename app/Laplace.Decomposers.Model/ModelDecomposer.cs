@@ -96,7 +96,9 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         {
             string configPath = Path.Combine(_modelDir, "config.json");
             if (!File.Exists(configPath)) return Array.Empty<string>();
-            var r = LlamaRecipeExtractor.Parse(configPath);
+            LlamaRecipeExtractor.RecipeInfo r;
+            try { r = LlamaRecipeExtractor.Parse(configPath); }
+            catch (Exception) { return Array.Empty<string>(); }
             return new[]
             {
                 LlamaArchitectureCanonical,
@@ -118,11 +120,14 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         boot.AddType("Ngram");
         boot.AddType("Model_Layer");
 
+        boot.AddType("Model_Circuit");
+
         boot.AddRelationType("MERGES_WITH");
         boot.AddRelationType("SIMILAR_TO");
         boot.AddRelationType("ATTENDS");
         boot.AddRelationType("OV_RELATES");
         boot.AddRelationType("COMPLETES_TO");
+        boot.AddRelationType("ENCODES");
         boot.AddRelationType("TOKEN_MAPS_TO");
         boot.AddRelationType("HAS_HIDDEN_SIZE");
         boot.AddRelationType("HAS_NUM_LAYERS");
@@ -145,16 +150,71 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         string configPath    = Path.Combine(_modelDir, "config.json");
         string tokenizerPath = Path.Combine(_modelDir, "tokenizer.json");
 
-        var recipe = LlamaRecipeExtractor.Parse(configPath);
-        log.LogInformation("phase=recipe parsed: {Layers} layers, {Heads} heads/{Kv} kv, "
-            + "d_model={DModel}, vocab={Vocab} ({Ms} ms)",
-            recipe.NumLayers, recipe.NumHeads, recipe.NumKvHeads, recipe.HiddenSize,
-            recipe.VocabSize, phaseSw.ElapsedMilliseconds);
-        await context.Writer.ApplyAsync(LlamaRecipeExtractor.BuildChange(
-            recipe, Source, ModelRecipeTypeId,
-            HasHiddenSizeTypeId, HasNumLayersTypeId, HasNumHeadsTypeId, HasNumKvHeadsTypeId,
-            HasIntermSizeTypeId, HasVocabSizeTypeId,
-            IsATypeId, LlamaArchitectureId), ct);
+        // ── Lane A: shape-inferred manifest (the frozen contract; never throws) ────────────────
+        var cfgResult = ModelConfigReader.Read(configPath);
+        ModelManifest manifest;
+        try
+        {
+            var headers = SafetensorsContainerParser.ParseModel(_modelDir);
+            manifest = TensorRoleClassifier.Build(headers, cfgResult, _sourceName);
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning("phase=manifest: tensor headers unavailable ({Msg}); recipe-only path", ex.Message);
+            manifest = new ModelManifest
+            {
+                Config = cfgResult.Config, Roles = Array.Empty<TensorRole>(),
+                Modality = cfgResult.Modality,
+                Coverage = cfgResult.Coverage == Coverage.Full ? Coverage.Partial : cfgResult.Coverage,
+                ModelName = _sourceName,
+            };
+        }
+        log.LogInformation("phase=manifest: model_type={Mt} modality={Mod} coverage={Cov} layers={L} roles={R} "
+            + "(moe={Moe}, mla={Mla})", manifest.Config.ModelType, manifest.Modality, manifest.Coverage,
+            manifest.LayerCount, manifest.Roles.Count, manifest.Config.IsMoe, manifest.Config.IsMla);
+
+        // Legacy HF config-scalar deposit (best effort): keeps the existing HAS_* scalars + IS_A
+        // architecture edge for known decoders, but an unknown model_type must never crash ingest.
+        try
+        {
+            var recipe = LlamaRecipeExtractor.Parse(configPath);
+            await context.Writer.ApplyAsync(LlamaRecipeExtractor.BuildChange(
+                recipe, Source, ModelRecipeTypeId,
+                HasHiddenSizeTypeId, HasNumLayersTypeId, HasNumHeadsTypeId, HasNumKvHeadsTypeId,
+                HasIntermSizeTypeId, HasVocabSizeTypeId,
+                IsATypeId, LlamaArchitectureId), ct);
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning("phase=recipe: legacy config-scalar deposit skipped ({Msg})", ex.Message);
+        }
+
+        // ── Lane D: synthesize a portable laplace.recipe from the manifest, deposit it (closes the
+        // ingest↔export loop with Mold-A-Model). Independent of the legacy deposit above. ─────────
+        try
+        {
+            var synth = RecipeSynthesizer.Synthesize(manifest);
+            await context.Writer.ApplyAsync(RecipeExtractor.BuildChange(
+                synth, Source, ModelRecipeTypeId, HasHiddenSizeTypeId, HasNumLayersTypeId), ct);
+            log.LogInformation("phase=recipe: synthesized laplace.recipe ({Layers} layers) deposited", synth.NumLayers);
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning("phase=recipe: recipe synthesis skipped ({Msg})", ex.Message);
+        }
+
+        if (manifest.Coverage == Coverage.Unsupported)
+        {
+            log.LogWarning("phase=ingest: model '{Name}' unsupported; recipe scalars deposited, no circuit decrypt",
+                _sourceName);
+            yield break;
+        }
+        if (!File.Exists(tokenizerPath))
+        {
+            log.LogWarning("phase=ingest: no tokenizer.json for '{Name}' (modality={Mod}); recipe-only ingest",
+                _sourceName, manifest.Modality);
+            yield break;
+        }
 
         byte[] tokBytes = File.ReadAllBytes(tokenizerPath);
         var tokEntityId = Hash128.Blake3(tokBytes);
@@ -200,7 +260,9 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
 
 
         const int finalEpoch = 1;
-        var edges = new ModelTokenEdgeETL(_modelDir, recipe, tokens, Source, log);
+        // Lane C decoder ring: cross-reference each circuit's strongest pairs against seed knowledge.
+        var classifier = new HeadClassifier(context.Reader, Source, _sourceName, log);
+        var edges = new ModelTokenEdgeETL(_modelDir, manifest, tokens, Source, log, classifier);
         await foreach (var change in edges.EmitAsync(finalEpoch, ct))
         {
             ct.ThrowIfCancellationRequested();
@@ -241,7 +303,9 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
     {
         string configPath = Path.Combine(_modelDir, "config.json");
         if (!File.Exists(configPath)) return 0;
-        var r = LlamaRecipeExtractor.Parse(configPath);
+        LlamaRecipeExtractor.RecipeInfo r;
+        try { r = LlamaRecipeExtractor.Parse(configPath); }
+        catch (Exception) { return 0; }
 
         long distinctVocab = r.VocabSize;
         string tokenizerPath = Path.Combine(_modelDir, "tokenizer.json");

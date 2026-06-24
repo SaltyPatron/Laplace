@@ -55,17 +55,19 @@ public class ModelTokenEdgeETLTests
                 };
             }
 
-            var recipe = Recipe(vocab: n, hidden: d);
-            var etl = new ModelTokenEdgeETL(dir, recipe, tokens, Source);
+            var manifest = ToyManifest(dir, vocab: n, hidden: d);
+            var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
             var changes = new List<SubstrateChange>();
             await foreach (var c in etl.EmitAsync(commitEpoch: 1)) changes.Add(c);
 
             var atts = changes.SelectMany(c => c.Attestations).ToList();
-            var relatedTo = RelationTypeRegistry.RelationTypeId("RELATED_TO");
+            // Reconciliation: the embedding self-similarity plane is SIMILAR_TO (what ModelDecomposer
+            // bootstraps and ArchitectureProfile's SelfSimilarityPath declares), not RELATED_TO.
+            var similarTo = RelationTypeRegistry.RelationTypeId("SIMILAR_TO");
 
-            // (1) it staged token<->token RELATED_TO edges
+            // (1) it staged token<->token SIMILAR_TO edges
             Assert.NotEmpty(atts);
-            Assert.All(atts, a => Assert.Equal(relatedTo, a.TypeId));
+            Assert.All(atts, a => Assert.Equal(similarTo, a.TypeId));
 
             // (2) every endpoint is a content token entity — nothing else
             var tokenSet = new HashSet<Hash128>(ent);
@@ -102,15 +104,29 @@ public class ModelTokenEdgeETLTests
         }
     }
 
-    private static LlamaRecipeExtractor.RecipeInfo Recipe(int vocab, int hidden) => new()
+    private static ModelManifest ToyManifest(string dir, int vocab, int hidden)
     {
-        RecipeEntityId = Hash128.OfCanonical("substrate/test/model-edges/recipe"),
-        Architecture = "LlamaForCausalLM",
-        HiddenSize = hidden, NumLayers = 1, NumHeads = 1, NumKvHeads = 1,
-        IntermediateSize = hidden, VocabSize = vocab,
-        TorchDtype = "float32", HiddenAct = "silu", RopeTheta = 10000, RmsNormEps = 1e-5,
-        ModelType = "llama", CanonicalJson = Encoding.UTF8.GetBytes("{}"),
-    };
+        var cfg = new ModelConfig
+        {
+            ModelType = "llama", Architecture = "LlamaForCausalLM",
+            VocabSize = vocab, HiddenSize = hidden, NumLayers = 1, NumHeads = 1, NumKvHeads = 1,
+            HeadDim = hidden, IntermediateSize = hidden, NumExperts = 0,
+            TieWordEmbeddings = false, QkNorm = false, RopeTheta = 10000, NormEps = 1e-5,
+            MlaQLoraRank = 0, MlaKvLoraRank = 0, QkRopeHeadDim = 0, QkNopeHeadDim = 0, VHeadDim = 0,
+            RecipeEntityId = Hash128.OfCanonical("substrate/test/model-edges/recipe"),
+            CanonicalJson = Encoding.UTF8.GetBytes("{}"),
+        };
+        var roles = new[]
+        {
+            new TensorRole("model.embed_tokens.weight", new[] { vocab, hidden }, "F32",
+                TensorRoleKind.Embedding, LayerIndex: -1, ExpertIndex: -1),
+        };
+        return new ModelManifest
+        {
+            Config = cfg, Roles = roles, Modality = Modality.Text, Coverage = Coverage.Full,
+            ModelName = "toy-model",
+        };
+    }
 
     private static TensorSpec Tensor(string name, int[] shape, float[] values) => new(name, shape, values);
 

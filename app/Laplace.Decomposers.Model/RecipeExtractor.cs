@@ -25,15 +25,19 @@ public sealed class RecipeExtractor
     }
 
     public static RecipeInfo Parse(string recipeJsonPath)
+        => ParseText(File.ReadAllText(recipeJsonPath), recipeJsonPath);
+
+    // Parse a recipe document already in memory (used by RecipeSynthesizer on ingest, where the
+    // recipe is built from the manifest and never touches disk). `origin` is only for diagnostics.
+    public static RecipeInfo ParseText(string recipeJson, string origin = "(in-memory)")
     {
-        byte[] raw = File.ReadAllBytes(recipeJsonPath);
-        using var doc = JsonDocument.Parse(raw);
+        using var doc = JsonDocument.Parse(recipeJson);
         var root = doc.RootElement;
 
         string kind = root.TryGetProperty("kind", out var k) ? k.GetString() ?? "" : "";
         if (kind != "laplace.recipe")
             throw new InvalidOperationException(
-                $"not a laplace.recipe (kind='{kind}'): {recipeJsonPath}");
+                $"not a laplace.recipe (kind='{kind}'): {origin}");
 
         string name = root.TryGetProperty("name", out var n) ? n.GetString() ?? "recipe" : "recipe";
         string structure = root.TryGetProperty("structure", out var s) ? s.GetString() ?? "dense" : "dense";
@@ -44,12 +48,12 @@ public sealed class RecipeExtractor
                        : hs.GetString() ?? "auto";
 
         if (!root.TryGetProperty("layers", out var layers) || layers.ValueKind != JsonValueKind.Array)
-            throw new InvalidOperationException($"recipe has no layers[]: {recipeJsonPath}");
+            throw new InvalidOperationException($"recipe has no layers[]: {origin}");
         int numLayers = layers.GetArrayLength();
         if (root.TryGetProperty("num_layers", out var nl) && nl.ValueKind == JsonValueKind.Number
             && nl.GetInt32() != numLayers)
             throw new InvalidOperationException(
-                $"num_layers ({nl.GetInt32()}) != layers.length ({numLayers}) in {recipeJsonPath}");
+                $"num_layers ({nl.GetInt32()}) != layers.length ({numLayers}) in {origin}");
 
         byte[] canonical = CanonicalizeJson(root);
         var recipeId = Hash128.Blake3(canonical);

@@ -12,8 +12,9 @@
       "billing": "preflight_quote_required"
     },
     "embeddings": {
-      "status": "pending",
-      "reason": "requires Stream E physicality lookup path"
+      "status": "live",
+      "backend": "laplace.entity_physicalities (form) + laplace.consensus_out_readable (meaning)",
+      "billing": "embeddings"
     },
     "audit_reports": {
       "status": "live",

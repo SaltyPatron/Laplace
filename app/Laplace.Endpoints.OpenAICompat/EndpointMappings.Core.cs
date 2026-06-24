@@ -6,21 +6,36 @@ internal static class CoreEndpoints
 {
     public static void MapCoreEndpoints(this WebApplication app)
     {
+        // Liveness: the process is up and serving. Cheap, no DB — for the orchestrator's restart signal.
         app.MapGet("/health", () => Results.Json(new HealthResponse("ok", "F-scaffold")))
             .WithTags("core").Produces<HealthResponse>();
+
+        // Readiness: the substrate is reachable, seeded, and perfcache-loaded. 503 until all hold,
+        // so a load balancer / deploy gate won't route traffic to (or bless) a hollow stack.
+        app.MapGet("/health/ready", async (ISubstrateClient substrate, CancellationToken ct) =>
+        {
+            var report = await substrate.ReadinessAsync(ct);
+            return Results.Json(report, statusCode: report.Ready
+                ? StatusCodes.Status200OK
+                : StatusCodes.Status503ServiceUnavailable);
+        }).WithTags("core")
+          .Produces<ReadinessResponse>()
+          .Produces<ReadinessResponse>(StatusCodes.Status503ServiceUnavailable);
 
         app.MapGet("/v1/models", () => Results.Json(new ModelList("list",
         [
             new ModelInfo("laplace-converse-001", "model", 0, "laplace"),
             new ModelInfo("laplace-completions-001", "model", 0, "laplace"),
             new ModelInfo("laplace-code-001", "model", 0, "laplace"),
-            new ModelInfo("laplace-embeddings-pending", "model", 0, "laplace", Status: "pending")
+            // Two-level embeddings: form = S³ geometry vector; meaning = Glicko-2 salient neighbours.
+            new ModelInfo("laplace-embed-form-001", "model", 0, "laplace"),
+            new ModelInfo("laplace-embed-meaning-001", "model", 0, "laplace")
         ]))).WithTags("core").Produces<ModelList>();
 
         app.MapGet("/v1/capabilities", () => Results.Json(new CapabilitiesResponse("F-scaffold", new CapabilityEndpoints(
             ChatCompletions: new CapabilityStatus("live", Backend: "laplace.recall_session", Billing: "preflight_quote_required"),
             Completions: new CapabilityStatus("live", Backend: "laplace.completions", Billing: "preflight_quote_required"),
-            Embeddings: new CapabilityStatus("pending", Reason: "requires Stream E physicality lookup path"),
+            Embeddings: new CapabilityStatus("live", Backend: "laplace.entity_physicalities (form) + laplace.consensus_out_readable (meaning)", Billing: "embeddings"),
             AuditReports: new CapabilityStatus("live", Backend: "laplace.substrate_counts + laplace.consensus_stats + laplace.top_relations", Billing: "audit.deep_report"),
             Visualizations: new CapabilityStatus("live", Backend: "laplace.top_relations + laplace.entity_physicalities", Billing: "visualization.deep_export"),
             ExplainabilityReports: new CapabilityStatus("live", Backend: "laplace.walk_branches + laplace.attestations_out", Billing: "explain.trace"),

@@ -290,23 +290,24 @@ CREATE OR REPLACE FUNCTION consensus_layer_plane(
     SET search_path = @extschema@, public AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
          edges AS MATERIALIZED (
-             
-             
-             
-             
-             
-             SELECT c.subject_id, c.object_id, c.rating, c.rd,
-                    relation_rank_resolved(c.type_id) AS rk  
+             -- keep type_id; resolve rank ONCE per distinct type below, not per-edge.
+             -- relation_rank_resolved does an SPI IS_A-inheritance walk, so the former
+             -- per-edge call was the hot cost (mirrors the consensus_type_plane fix).
+             SELECT c.subject_id, c.object_id, c.rating, c.rd, c.type_id
              FROM v
              JOIN consensus c ON c.subject_id = v.id
-             JOIN v vo        ON vo.id = c.object_id   
-                                                       
+             JOIN v vo        ON vo.id = c.object_id
+         ),
+         rk AS (
+             SELECT d.type_id, r.rank
+             FROM (SELECT DISTINCT type_id FROM edges) d
+             CROSS JOIN LATERAL relation_rank_resolved(d.type_id) AS r(rank)
+             WHERE r.rank IS NOT NULL AND r.rank BETWEEN p_rank_lo AND p_rank_hi
          ),
          ranked AS (
              SELECT e.subject_id, e.object_id,
-                    (eff_mu(e.rating, e.rd))::float8 / 1e9 AS w, e.rk
-             FROM edges e
-             WHERE e.rk IS NOT NULL AND e.rk BETWEEN p_rank_lo AND p_rank_hi
+                    (eff_mu(e.rating, e.rd))::float8 / 1e9 AS w, rk.rank AS rk
+             FROM edges e JOIN rk ON rk.type_id = e.type_id
          ),
          capped AS (
              SELECT r.subject_id, r.object_id, r.w, r.rk,
@@ -712,7 +713,8 @@ CREATE OR REPLACE FUNCTION foundry_crawl(
 
 
 CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
-        p_seeds text[], p_max int DEFAULT 32000, p_hops int DEFAULT 3, p_fanout int DEFAULT 64)
+        p_seeds text[], p_max int DEFAULT 32000, p_hops int DEFAULT 3, p_fanout int DEFAULT 64,
+        p_rank_floor float8 DEFAULT 0.5)
     RETURNS TABLE(entity_id bytea, surface text, weight bigint)
     LANGUAGE sql VOLATILE
     SET search_path = @extschema@, public AS $$
@@ -730,13 +732,13 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
     
     
     rel_types AS (
-        SELECT array_agg(relation_type_id(n)) AS ids
-        FROM unnest(ARRAY[
-            'IS_A','IS_SYNONYM_OF','IS_COORDINATE_TERM_WITH','IS_ANTONYM_OF',
-            'HAS_PART','PART_OF','MEMBER_OF','HAS_MEMBER','DERIVATIONALLY_RELATED',
-            'FORM_OF','HAS_HYPONYM','IS_HYPERNYM_OF','SIMILAR_TO','PERTAINS_TO',
-            'HAS_SENSE','IS_SENSE_OF'
-        ]) AS n
+
+
+
+        SELECT array_agg(e.id) AS ids
+        FROM entities e
+        WHERE e.type_id = canonical_id('substrate/type/RelationType/v1')
+          AND relation_rank_resolved(e.id) >= p_rank_floor
     ),
     crawled AS (
         SELECT c.entity_id, c.weight,

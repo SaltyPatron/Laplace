@@ -106,40 +106,69 @@ public sealed class ContentBatch : IDisposable
             perTreeTiers.Add(tiers);
         }
 
-        // T0 codepoints (perfcache-guaranteed present) and T1 graphemes are NEVER probed: a present
-        // trunk short-circuits its whole subtree, and a novel trunk emits its leaves which the
-        // id-keyed apply dedups idempotently. Only trunks (tier >= 2 — words and up) ever hit the
-        // existence bitmap. That makes the probe O(trunks), not O(nodes) — most nodes in a content
-        // tree are codepoints/graphemes, so this is the bulk of the probe payload.
+        // T0 codepoints (perfcache-guaranteed present) and T1 graphemes are NEVER checked: they are
+        // known by construction and simply never enter the descent. Only trunks (tier >= 2 — words and
+        // up) form the descent forest. The substrate is a content-addressed Merkle DAG, so a PRESENT
+        // trunk implies its whole subtree is present; the descent therefore checks only nodes under a
+        // novel parent and short-circuits present subtrees — O(tier-depth) per document, not O(nodes).
+        //
+        // Build the forest once: candidate ids + a parent-index array (parent's position in the
+        // candidate list, < 0 = root or a parent below tier 2). nodeToCand[i][j] maps tree i's node j
+        // to its candidate index (-1 if not a tier>=2 candidate).
         var candidates = new List<Hash128>();
-        for (int i = 0; i < perTreeIds.Count; i++)
-        {
-            var ids = perTreeIds[i]; var tiers = perTreeTiers[i];
-            for (int j = 0; j < ids.Length; j++)
-                if (tiers[j] >= 2) candidates.Add(ids[j]);
-        }
-
-        byte[]? combined = null;
-        long combinedBits = 0;
-        if (candidates.Count > 0)
-        {
-            combined = await _reader.EntitiesExistBitmapAsync(candidates.ToArray(), ct).ConfigureAwait(false);
-            combinedBits = (long)combined.Length * 8;
-        }
-
-        var stage = _stageProvider();
-        int g = 0;   // running index into the tier>=2 candidate bitmap, in (tree, node) order
+        var parents = new List<int>();
+        var nodeToCand = new int[entries.Count][];
         for (int i = 0; i < entries.Count; i++)
         {
             var ids = perTreeIds[i]; var tiers = perTreeTiers[i];
+            var map = new int[ids.Length];
+            for (int j = 0; j < ids.Length; j++) map[j] = -1;
+            for (int j = 0; j < ids.Length; j++)
+            {
+                if (tiers[j] < 2) continue;
+                map[j] = candidates.Count;
+                candidates.Add(ids[j]);
+                parents.Add(-1);            // resolved below, once every node has a candidate index
+            }
+            nodeToCand[i] = map;
+        }
+        for (int i = 0; i < entries.Count; i++)
+        {
+            var ids = perTreeIds[i]; var tiers = perTreeTiers[i];
+            var map = nodeToCand[i]; var tree = entries[i].Tree;
+            for (int j = 0; j < ids.Length; j++)
+            {
+                if (tiers[j] < 2) continue;
+                uint pj = tree.GetNode((uint)j).ParentIdx;
+                int parentCand = (pj == TierTree.Invalid || pj >= (uint)ids.Length) ? -1 : map[pj];
+                parents[map[j]] = parentCand;   // -1 ⇒ this node is a descent root
+            }
+        }
+
+        // One top-down server-side probe → a present-bitmap (bit c set ⟺ candidate c present),
+        // identical contract to the flat entities_exist_bitmap, just O(tier) instead of O(nodes). The
+        // bitmap and the trunk-descent live native (content_descent_bitmap builds the bits;
+        // content_witness_emit_tree does the staging descent); C# only marshals the forest and walks
+        // the result into each tree's bitmap, exactly as the original flat path did.
+        byte[]? combined = candidates.Count > 0
+            ? await _reader.ContentDescentBitmapAsync(candidates, parents, ct).ConfigureAwait(false)
+            : null;
+        long combinedBits = combined is null ? 0 : (long)combined.Length * 8;
+
+        var stage = _stageProvider();
+        for (int i = 0; i < entries.Count; i++)
+        {
+            var ids = perTreeIds[i]; var tiers = perTreeTiers[i];
+            var map = nodeToCand[i];
             int n = ids.Length;
-            var bm = new byte[(n + 7) / 8];
+            var bm = new byte[(n + 7) / 8];   // bit j set = node j PRESENT (EmitContentTree skips present subtrees)
             for (int j = 0; j < n; j++)
             {
                 if (tiers[j] < 2) continue;   // tier<=1: bit 0 (novel) — emitted under novel trunks, skipped under present
-                if (combined is not null && g < combinedBits && (combined[g >> 3] & (1 << (g & 7))) != 0)
+                int c = map[j];
+                if (combined is not null && c >= 0 && c < combinedBits &&
+                    (combined[c >> 3] & (1 << (c & 7))) != 0)
                     bm[j >> 3] |= (byte)(1 << (j & 7));
-                g++;
             }
             stage.EmitContentTree(entries[i].Tree, entries[i].Source, bm, out _);
         }

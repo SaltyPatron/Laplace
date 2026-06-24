@@ -50,26 +50,32 @@ internal static class InferenceEndpoints
                     var genCreated = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                     var response = request.HttpContext.Response;
                     ServerSentEvents.Begin(response);
-
-                    await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
-                        genId, "chat.completion.chunk", genCreated, payload.Model,
-                        [new ChatChunkChoice(0, new ChatDelta(Role: "assistant"), null)]), ct);
-
-                    var genStreamText = new StringBuilder();
-                    await foreach (var token in substrate.WalkTextStreamAsync(
-                        prompt, steps: genSteps, temperature: genTemp, ct: ct))
+                    try
                     {
-                        genStreamText.Append(token.Token);
                         await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
                             genId, "chat.completion.chunk", genCreated, payload.Model,
-                            [new ChatChunkChoice(0, new ChatDelta(Content: token.Token), null)],
-                            Laplace: new ChunkProvenance(OrdUsed: (int)token.Mu)), ct);
+                            [new ChatChunkChoice(0, new ChatDelta(Role: "assistant"), null)]), ct);
+
+                        var genStreamText = new StringBuilder();
+                        await foreach (var token in substrate.WalkTextStreamAsync(
+                            prompt, steps: genSteps, temperature: genTemp, ct: ct))
+                        {
+                            genStreamText.Append(token.Token);
+                            await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
+                                genId, "chat.completion.chunk", genCreated, payload.Model,
+                                [new ChatChunkChoice(0, new ChatDelta(Content: token.Token), null)],
+                                Laplace: new ChunkProvenance(OrdUsed: (int)token.Mu)), ct);
+                        }
+                        turnWitness.Enqueue(prompt, "prompt");
+                        turnWitness.Enqueue(genStreamText.ToString().TrimStart(), "reply");
+                        await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
+                            genId, "chat.completion.chunk", genCreated, payload.Model,
+                            [new ChatChunkChoice(0, new ChatDelta(Content: ""), "stop")]), ct);
                     }
-                    turnWitness.Enqueue(prompt, "prompt");
-                    turnWitness.Enqueue(genStreamText.ToString().TrimStart(), "reply");
-                    await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
-                        genId, "chat.completion.chunk", genCreated, payload.Model,
-                        [new ChatChunkChoice(0, new ChatDelta(Content: ""), "stop")]), ct);
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        await ServerSentEvents.WriteErrorAsync(response, "stream_failed", ex.Message, ct);
+                    }
                     await ServerSentEvents.WriteDoneAsync(response, ct);
                     return Results.Empty;
                 }
@@ -190,19 +196,25 @@ internal static class InferenceEndpoints
                 var created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 var response = request.HttpContext.Response;
                 ServerSentEvents.Begin(response);
-
-                var streamText = new StringBuilder();
-                await foreach (var token in substrate.WalkTextStreamAsync(
-                    payload.Prompt.Trim(), steps: steps, temperature: temp, ct: ct))
+                try
                 {
-                    streamText.Append(token.Token);
-                    await ServerSentEvents.WriteJsonAsync(response, new CompletionChunk(
-                        completionId, "text_completion", created, payload.Model,
-                        [new CompletionChoice(token.Token, 0, null,
-                            payload.Logprobs.HasValue ? new CompletionLogprobs([(double)token.Mu]) : null)]), ct);
+                    var streamText = new StringBuilder();
+                    await foreach (var token in substrate.WalkTextStreamAsync(
+                        payload.Prompt.Trim(), steps: steps, temperature: temp, ct: ct))
+                    {
+                        streamText.Append(token.Token);
+                        await ServerSentEvents.WriteJsonAsync(response, new CompletionChunk(
+                            completionId, "text_completion", created, payload.Model,
+                            [new CompletionChoice(token.Token, 0, null,
+                                payload.Logprobs.HasValue ? new CompletionLogprobs([(double)token.Mu]) : null)]), ct);
+                    }
+                    turnWitness.Enqueue(payload.Prompt.Trim(), "prompt");
+                    turnWitness.Enqueue(streamText.ToString().TrimStart(), "reply");
                 }
-                turnWitness.Enqueue(payload.Prompt.Trim(), "prompt");
-                turnWitness.Enqueue(streamText.ToString().TrimStart(), "reply");
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    await ServerSentEvents.WriteErrorAsync(response, "stream_failed", ex.Message, ct);
+                }
                 await ServerSentEvents.WriteDoneAsync(response, ct);
                 return Results.Empty;
             }
@@ -238,21 +250,56 @@ internal static class InferenceEndpoints
         .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
         .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired);
 
-        app.MapPost("/v1/embeddings", async (HttpRequest request, CancellationToken ct) =>
+        app.MapPost("/v1/embeddings", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<EmbeddingsRequest>(request, ct);
             if (payload is null)
                 return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
             if (string.IsNullOrWhiteSpace(payload.Model))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'model' is required.");
-            if (!EmbeddingsInputPresent(payload.Input))
+            var inputs = ReadEmbeddingInputs(payload.Input);
+            if (inputs.Count == 0)
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'input' must be a non-empty string or array of strings.");
-            return EndpointJson.NotImplemented("embeddings", "Pending Stream E physicality lookup path.");
+
+            var quoteId = AppComposition.ResolveQuoteId(request) ?? "";
+            var gate = await billing.EnsureExecutableAsync(quoteId, "embeddings", ct);
+            if (!gate.Allowed)
+                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null
+                    ? new QuoteServiceDetail("embeddings")
+                    : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
+            if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
+
+            // The dense `embedding` is always the S³ FORM coordinate (the only true vector); the MEANING
+            // level — Glicko-2 salient neighbours — is attached unless a form-only model was requested.
+            bool includeMeaning = !payload.Model.Contains("form", StringComparison.OrdinalIgnoreCase);
+
+            var data = new List<EmbeddingData>(inputs.Count);
+            for (int i = 0; i < inputs.Count; i++)
+            {
+                var result = await substrate.EmbeddingAsync(inputs[i], includeMeaning, meaningLimit: 10, ct);
+                var vector = result.Form is { } f
+                    ? new double[] { f.X, f.Y, f.Z, f.M, f.Radius }
+                    : Array.Empty<double>();
+                data.Add(new EmbeddingData("embedding", i, vector, new EmbeddingProvenance(
+                    Input: inputs[i],
+                    Resolved: result.EntityIdHex is not null,
+                    EntityId: result.EntityIdHex,
+                    Form: result.Form is { } ff
+                        ? new EmbeddingFormView(ff.X, ff.Y, ff.Z, ff.M, ff.Radius, ff.Constituents)
+                        : null,
+                    Meaning: includeMeaning && result.Meaning.Count > 0
+                        ? result.Meaning.Select(m => new MeaningNeighborView(m.Relation, m.ObjectLabel, m.EffMu, m.Witnesses)).ToArray()
+                        : null)));
+            }
+
+            var tokens = inputs.Sum(s => Math.Max(1, s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length));
+            return Results.Json(new EmbeddingsResponse("list", data, payload.Model, new EmbeddingsUsage(tokens, tokens)));
         })
         .WithTags("openai")
         .Accepts<EmbeddingsRequest>("application/json")
+        .Produces<EmbeddingsResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
-        .Produces<NotImplementedResponse>(StatusCodes.Status501NotImplemented);
+        .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired);
 
         app.MapReportEndpoints();
     }
@@ -283,15 +330,23 @@ internal static class InferenceEndpoints
             _                    => null
         };
 
-    private static bool EmbeddingsInputPresent(JsonElement? input)
+    // OpenAI's `input` is a string or an array of strings. Normalize to a trimmed, non-empty list.
+    private static List<string> ReadEmbeddingInputs(JsonElement? input)
     {
+        var list = new List<string>();
         if (input is not { } element)
-            return false;
-        return element.ValueKind switch
+            return list;
+        switch (element.ValueKind)
         {
-            JsonValueKind.String => !string.IsNullOrWhiteSpace(element.GetString()),
-            JsonValueKind.Array => element.GetArrayLength() > 0,
-            _ => false
-        };
+            case JsonValueKind.String:
+                if (element.GetString() is { } s && !string.IsNullOrWhiteSpace(s)) list.Add(s.Trim());
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                    if (item.ValueKind == JsonValueKind.String && item.GetString() is { } v && !string.IsNullOrWhiteSpace(v))
+                        list.Add(v.Trim());
+                break;
+        }
+        return list;
     }
 }

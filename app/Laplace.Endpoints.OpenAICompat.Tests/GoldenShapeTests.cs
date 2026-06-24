@@ -33,6 +33,20 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
     }
 
     [Fact]
+    public async Task HealthReady_WhenSubstrateSeeded_Returns200WithCounts()
+    {
+        using var response = await _client.GetAsync("/health/ready");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(json.RootElement.GetProperty("ready").GetBoolean());
+        Assert.True(json.RootElement.GetProperty("substrate_reachable").GetBoolean());
+        Assert.True(json.RootElement.GetProperty("perfcache_ready").GetBoolean());
+        Assert.True(json.RootElement.GetProperty("entities").GetInt64() > 0);
+        Assert.True(json.RootElement.GetProperty("consensus_relations").GetInt64() > 0);
+    }
+
+    [Fact]
     public async Task Golden_Models()
     {
         using var response = await _client.GetAsync("/v1/models");
@@ -183,7 +197,27 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.MatchNode("chat-generate-sse", await ReadSseAsync(response));
     }
 
-    
+    [Fact]
+    public async Task Chat_Generate_Sse_MidStreamFailure_EmitsErrorFrameThenDone()
+    {
+        var quoteId = await ApproveQuoteAsync("chat.completions", "stream-error-tenant", "evt_stream_error");
+        using var response = await PostWithQuoteAsync("/v1/chat/completions", new
+        {
+            model = "laplace-completions-001",
+            stream = true,
+            max_tokens = 8,
+            messages = new[] { new { role = "user", content = "trigger-stream-error please" } }
+        }, quoteId);
+
+        // The 200 + first token are already sent, so the failure must arrive as a data frame, not a 5xx.
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var events = await ReadSseAsync(response);
+
+        var errorFrame = events.FirstOrDefault(e => e is JsonObject o && o.ContainsKey("error"));
+        Assert.NotNull(errorFrame);
+        Assert.Equal("stream_failed", errorFrame!["error"]!["code"]!.GetValue<string>());
+        Assert.Equal("[DONE]", events[^1]!.GetValue<string>());
+    }
 
     [Fact]
     public async Task Golden_Completions_MissingPrompt()
@@ -267,15 +301,45 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
     }
 
     [Fact]
-    public async Task Golden_Embeddings_NotImplemented()
+    public async Task Embeddings_MeaningModel_ReturnsFormVectorAndMeaningNeighbors()
     {
-        using var response = await _client.PostAsJsonAsync("/v1/embeddings", new
+        var quoteId = await ApproveQuoteAsync("embeddings", "embed-tenant", "evt_embed");
+        using var response = await PostWithQuoteAsync("/v1/embeddings", new
         {
-            model = "laplace-embeddings-pending",
+            model = "laplace-embed-meaning-001",
             input = "whale"
-        });
-        Assert.Equal(HttpStatusCode.NotImplemented, response.StatusCode);
-        GoldenJson.Match("embeddings-501", await response.Content.ReadAsStringAsync());
+        }, quoteId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("list", json.RootElement.GetProperty("object").GetString());
+        var item = json.RootElement.GetProperty("data")[0];
+        // FORM: dense S³ coordinate [x,y,z,m,radius].
+        Assert.Equal(5, item.GetProperty("embedding").GetArrayLength());
+        var lap = item.GetProperty("laplace");
+        Assert.True(lap.GetProperty("resolved").GetBoolean());
+        Assert.True(lap.TryGetProperty("form", out _));
+        // MEANING: Glicko-2 salient neighbours present and ranked.
+        Assert.True(lap.GetProperty("meaning").GetArrayLength() > 0);
+        Assert.Equal("IS_A", lap.GetProperty("meaning")[0].GetProperty("relation").GetString());
+    }
+
+    [Fact]
+    public async Task Embeddings_FormModel_OmitsMeaningLevel()
+    {
+        var quoteId = await ApproveQuoteAsync("embeddings", "embed-form-tenant", "evt_embed_form");
+        using var response = await PostWithQuoteAsync("/v1/embeddings", new
+        {
+            model = "laplace-embed-form-001",
+            input = "whale"
+        }, quoteId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var item = json.RootElement.GetProperty("data")[0];
+        Assert.Equal(5, item.GetProperty("embedding").GetArrayLength());
+        // form-only model: the meaning level is omitted entirely.
+        Assert.False(item.GetProperty("laplace").TryGetProperty("meaning", out _));
     }
 
     

@@ -20,11 +20,16 @@
       "owned_by": "laplace"
     },
     {
-      "id": "laplace-embeddings-pending",
+      "id": "laplace-embed-form-001",
       "object": "model",
       "created": 0,
-      "owned_by": "laplace",
-      "status": "pending"
+      "owned_by": "laplace"
+    },
+    {
+      "id": "laplace-embed-meaning-001",
+      "object": "model",
+      "created": 0,
+      "owned_by": "laplace"
     }
   ]
 }
