@@ -107,40 +107,75 @@ CREATE OR REPLACE FUNCTION define(p_word bytea, p_limit int DEFAULT 5)
 -- co-members; translations() (below) keeps the cross-language ones. This is the synset
 -- traversal — synonymy and translation are the two halves of one emergent structure,
 -- not stored edges. eff_mu is the Glicko-2 conservative strength of the membership edge.
+-- A member may be a homograph shared across languages — the codepoints "roi" are simultaneously
+-- French, Dutch, Indonesian, Breton, Boro, ... one content-addressed lemma carrying many
+-- HAS_LANGUAGE edges. Collapsing it to word_language()'s single arbitrary pick (bor) makes it
+-- invisible to a French query, so we EXPLODE each member over its full HAS_LANGUAGE set instead.
+-- sense_mu carries the Glicko-2 eff_mu of the SOURCE word's sense that reached the member, so
+-- dominant-sense members (king's "a male sovereign", 1154) outrank weaker senses (magnate, 1075).
+DROP FUNCTION IF EXISTS synset_members(bytea);
 CREATE OR REPLACE FUNCTION synset_members(p_word bytea)
-    RETURNS TABLE(member bytea, lang bytea, mu bigint, witnesses bigint)
+    RETURNS TABLE(member bytea, lang bytea, mu bigint, witnesses bigint, sense_mu numeric)
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
-    WITH syn AS (SELECT DISTINCT synset_id AS id FROM senses(p_word)),
+    -- Exclude named-entity (instance) synsets: a name identical across languages is a name,
+    -- not a translation. WordNet @i (IS_INSTANCE_OF) marks person/place instances (Billie Jean
+    -- King, M.L. King, B.B. King) whose OMW members are the untranslated proper name; @
+    -- (HAS_HYPERNYM) marks real concepts (monarch, magnate). Dropping instance synsets here keeps
+    -- both synonyms() and translations() to lexical equivalents only.
+    WITH syn AS (
+        SELECT s.synset_id AS id, max(s.eff_mu) AS sense_mu
+        FROM senses(p_word) s
+        WHERE NOT EXISTS (
+            SELECT 1 FROM consensus i
+            WHERE i.subject_id = s.synset_id
+              AND i.type_id = relation_type_id('IS_INSTANCE_OF'))
+        GROUP BY s.synset_id
+    ),
     members AS (
-        SELECT c.object_id AS w, c.rating, c.rd, c.witness_count
+        SELECT c.object_id AS w, c.rating, c.rd, c.witness_count, syn.sense_mu
         FROM consensus c JOIN syn ON c.subject_id = syn.id
         WHERE c.type_id = relation_type_id('IS_SYNONYM_OF') AND c.object_id IS NOT NULL
         UNION ALL
-        SELECT c.subject_id AS w, c.rating, c.rd, c.witness_count
+        SELECT c.subject_id AS w, c.rating, c.rd, c.witness_count, syn.sense_mu
         FROM consensus c JOIN syn ON c.object_id = syn.id
         WHERE c.type_id = relation_type_id('IS_SYNONYM_OF')
+    ),
+    agg AS (
+        SELECT m.w,
+               max(eff_mu(m.rating, m.rd)) AS mu,
+               sum(m.witness_count)::bigint AS witnesses,
+               max(m.sense_mu) AS sense_mu
+        FROM members m
+        WHERE m.w <> p_word
+        GROUP BY m.w
     )
-    SELECT m.w, word_language(m.w),
-           max(eff_mu(m.rating, m.rd)) AS mu, sum(m.witness_count)::bigint AS witnesses
-    FROM members m
-    WHERE m.w <> p_word
-    GROUP BY m.w
+    SELECT a.w, hl.object_id AS lang, a.mu::bigint, a.witnesses, a.sense_mu
+    FROM agg a
+    LEFT JOIN consensus hl
+      ON hl.subject_id = a.w AND hl.type_id = relation_type_id('HAS_LANGUAGE')
 $$;
 
 CREATE OR REPLACE FUNCTION synonyms(p_word bytea, p_limit int DEFAULT 10)
     RETURNS TABLE(synonym text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
+    -- Same-language co-members, matched against the source word's PRIMARY language only: the
+    -- source lemma is often a cross-language homograph (king = eng AND est "shoe"), and pulling
+    -- in every shared tag would leak Estonian/Finnish co-members (kuningas) as English synonyms.
+    -- word_language() is the dominant reading; explode in synset_members() means a member counts
+    -- iff it actually carries that language. Deduped by surface form, dominant sense first.
     WITH src_lang AS (SELECT word_language(p_word) AS id)
     SELECT t.synonym, t.mu::numeric, t.witnesses
     FROM (
-        SELECT render_text(sm.member, 64) AS synonym, sm.mu, sm.witnesses
+        SELECT render_text(sm.member, 64) AS synonym,
+               max(sm.mu) AS mu, max(sm.witnesses) AS witnesses, max(sm.sense_mu) AS sense_mu
         FROM synset_members(p_word) sm
-        WHERE sm.lang IS NOT DISTINCT FROM (SELECT id FROM src_lang)
+        WHERE sm.lang = (SELECT id FROM src_lang)
+        GROUP BY render_text(sm.member, 64)
     ) t
     WHERE NULLIF(btrim(t.synonym), '') IS NOT NULL
-    ORDER BY t.mu DESC, t.witnesses DESC, t.synonym
+    ORDER BY t.sense_mu DESC NULLS LAST, t.mu DESC, t.witnesses DESC, t.synonym
     LIMIT p_limit
 $$;
 
@@ -151,17 +186,27 @@ CREATE OR REPLACE FUNCTION translations(p_word bytea, p_limit int DEFAULT 24)
     RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
-    WITH src_lang AS (SELECT word_language(p_word) AS id)
-    SELECT t.translation, t.language, t.mu::numeric, t.witnesses
-    FROM (
-        SELECT render_text(sm.member, 64) AS translation, label(sm.lang) AS language,
-               sm.mu, sm.witnesses
+    -- Distinct foreign equivalents, one row per surface form (a homograph like rei spans 11
+    -- Romance languages; we show it once with its best-ranked language rather than 11 near-dup
+    -- rows). Excludes the full source language set so neither the English nor a coincidental
+    -- same-spelling homograph reading (king=est) is listed. Dominant sense first.
+    WITH src_langs AS (
+        SELECT c.object_id AS id FROM consensus c
+        WHERE c.subject_id = p_word AND c.type_id = relation_type_id('HAS_LANGUAGE')
+    ),
+    per_word AS (
+        SELECT DISTINCT ON (render_text(sm.member, 64))
+               render_text(sm.member, 64) AS translation, label(sm.lang) AS language,
+               sm.mu, sm.witnesses, sm.sense_mu
         FROM synset_members(p_word) sm
         WHERE sm.lang IS NOT NULL
-          AND sm.lang IS DISTINCT FROM (SELECT id FROM src_lang)
-    ) t
+          AND sm.lang NOT IN (SELECT id FROM src_langs)
+        ORDER BY render_text(sm.member, 64), sm.sense_mu DESC NULLS LAST, sm.mu DESC, sm.witnesses DESC
+    )
+    SELECT t.translation, t.language, t.mu::numeric, t.witnesses
+    FROM per_word t
     WHERE NULLIF(btrim(t.translation), '') IS NOT NULL
-    ORDER BY t.mu DESC, t.witnesses DESC, t.language
+    ORDER BY t.sense_mu DESC NULLS LAST, t.mu DESC, t.witnesses DESC, t.language
     LIMIT p_limit
 $$;
 
@@ -174,17 +219,21 @@ CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
     RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    WITH src_lang AS (SELECT word_language(p_word) AS id),
+    WITH src_langs AS (
+        SELECT c.object_id AS id FROM consensus c
+        WHERE c.subject_id = p_word AND c.type_id = relation_type_id('HAS_LANGUAGE')
+    ),
     want AS (SELECT NULLIF(btrim(lower(COALESCE(p_lang, ''))), '') AS name),
     cand AS (
-        SELECT sm.member, sm.lang, sm.mu, sm.witnesses, label(sm.lang) AS code
+        SELECT sm.member, sm.lang, sm.mu, sm.witnesses, sm.sense_mu, label(sm.lang) AS code
         FROM synset_members(p_word) sm
         WHERE sm.lang IS NOT NULL
-          AND sm.lang IS DISTINCT FROM (SELECT id FROM src_lang)
+          AND sm.lang NOT IN (SELECT id FROM src_langs)
     )
     SELECT t.tr, t.code, t.mu::numeric, t.witnesses
     FROM (
-        SELECT render_text(c.member, 64) AS tr, c.code, c.mu, c.witnesses
+        SELECT render_text(c.member, 64) AS tr, c.code,
+               max(c.mu) AS mu, max(c.witnesses) AS witnesses, max(c.sense_mu) AS sense_mu
         FROM cand c, want w
         WHERE w.name IS NULL
            OR lower(c.code) = w.name
@@ -192,9 +241,10 @@ CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
                       WHERE d.subject_id = c.lang
                         AND d.type_id = relation_type_id('HAS_DEFINITION')
                         AND lower(render_text(d.object_id, 32)) = w.name)
+        GROUP BY render_text(c.member, 64), c.code
     ) t
     WHERE NULLIF(btrim(t.tr), '') IS NOT NULL
-    ORDER BY t.mu DESC, t.witnesses DESC, t.code
+    ORDER BY t.sense_mu DESC NULLS LAST, t.mu DESC, t.witnesses DESC, t.code
     LIMIT p_limit
 $$;
 
