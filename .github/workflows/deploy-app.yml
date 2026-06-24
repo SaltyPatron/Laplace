@@ -165,6 +165,15 @@ jobs:
             echo "::group::seed $s"; scripts/ingest-source.sh "$s" || echo "::warning::seed $s failed"; echo "::endgroup::"
           done
 
+      # Space-filling-curve clustering for recall/render locality — done ONCE here (one heap rewrite)
+      # instead of re-sorting every ingest batch by hilbert_index (which dominated ingest cost).
+      - name: cluster physicalities by Hilbert index (recall locality)
+        if: ${{ !inputs.skip_seed }}
+        run: |
+          psql -d laplace -U laplace_admin \
+            -c "CLUSTER laplace.physicalities USING physicalities_hilbert_btree" \
+            -c "ANALYZE laplace.physicalities" || echo "::warning::physicalities CLUSTER skipped (data is seeded; locality optimization only)"
+
       - name: start API service
         run: sudo systemctl start laplace-api
 
