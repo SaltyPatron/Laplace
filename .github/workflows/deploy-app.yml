@@ -114,20 +114,22 @@ jobs:
       # for genuinely destructive table/bootstrap migrations now.
       - name: sync extension SQL in place (no reseed)
         run: |
-          SHARE="$(/opt/laplace/pgsql-18/bin/pg_config --sharedir)/extension"
-          CTRL="$SHARE/laplace_substrate.control"
-          NEW=$(sed -n "s/^default_version = '\(.*\)'/\1/p" "$CTRL")
+          # Ask Postgres for the versions — robust no matter where the extension dir actually is
+          # (CREATE EXTENSION already resolves it; pg_config --sharedir does not always match it).
+          AVAIL=$(psql -d laplace -U laplace_admin -tAX -c "SELECT default_version FROM pg_available_extensions WHERE name='laplace_substrate'" | tr -d '[:space:]')
           INSTALLED=$(psql -d laplace -U laplace_admin -tAX -c "SELECT extversion FROM pg_extension WHERE extname='laplace_substrate'" | tr -d '[:space:]')
-          echo "laplace_substrate: installed='$INSTALLED' built='$NEW'"
-          test -n "$NEW" || { echo "::error::no default_version in $CTRL"; exit 1; }
+          echo "laplace_substrate: installed='$INSTALLED' available='$AVAIL'"
+          test -n "$AVAIL" || { echo "::error::laplace_substrate missing from pg_available_extensions"; exit 1; }
           if [ -z "$INSTALLED" ]; then
             psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS laplace_substrate"
-          elif [ "$INSTALLED" != "$NEW" ]; then
-            cp "$SHARE/laplace_substrate_upgrade.sql" "$SHARE/laplace_substrate--$INSTALLED--$NEW.sql"
-            psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -c "ALTER EXTENSION laplace_substrate UPDATE TO '$NEW'"
-            echo "OK upgraded laplace_substrate $INSTALLED -> $NEW in place (no reseed)"
+          elif [ "$INSTALLED" != "$AVAIL" ]; then
+            SHARE=$(dirname "$(find /opt/laplace -name laplace_substrate.control -not -path '*/build*' 2>/dev/null | head -1)")
+            test -n "$SHARE" || { echo "::error::could not locate installed laplace_substrate.control under /opt/laplace"; exit 1; }
+            cp "$SHARE/laplace_substrate_upgrade.sql" "$SHARE/laplace_substrate--$INSTALLED--$AVAIL.sql"
+            psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -c "ALTER EXTENSION laplace_substrate UPDATE TO '$AVAIL'"
+            echo "OK upgraded laplace_substrate $INSTALLED -> $AVAIL in place (no reseed)"
           else
-            echo "OK laplace_substrate already at $NEW"
+            echo "OK laplace_substrate already at $AVAIL"
           fi
 
       # The recall path (resolve_phrase/word_id) mmaps the T0 perfcache via the
