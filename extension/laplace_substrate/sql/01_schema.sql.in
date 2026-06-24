@@ -1,4 +1,4 @@
-CREATE FUNCTION laplace_substrate_version()
+CREATE OR REPLACE FUNCTION laplace_substrate_version()
     RETURNS text
     AS 'MODULE_PATHNAME', 'pg_laplace_substrate_version'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

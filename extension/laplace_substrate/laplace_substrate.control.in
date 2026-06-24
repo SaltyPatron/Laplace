@@ -1,4 +1,4 @@
-default_version = '@PROJECT_VERSION@'
+default_version = '@EXT_VERSION@'
 module_pathname = '$libdir/laplace_substrate'
 relocatable = false
 schema = 'laplace'

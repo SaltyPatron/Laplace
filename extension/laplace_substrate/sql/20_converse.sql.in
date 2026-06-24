@@ -336,7 +336,7 @@ CREATE OR REPLACE FUNCTION recall(p_prompt text, p_context bytea DEFAULT NULL)
     LANGUAGE C STABLE
     AS 'MODULE_PATHNAME', 'pg_laplace_recall';
 
-CREATE UNLOGGED TABLE session_topics (
+CREATE UNLOGGED TABLE IF NOT EXISTS session_topics (
     session_id  bytea       NOT NULL,
     ord         integer     NOT NULL,
     prompt      text        NOT NULL,

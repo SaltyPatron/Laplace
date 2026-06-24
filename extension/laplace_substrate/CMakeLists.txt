@@ -42,7 +42,23 @@ if(WIN32)
 endif()
 
 set(EXT_NAME    laplace_substrate)
-set(EXT_VERSION ${PROJECT_VERSION})
+
+# Version = a 16-hex content hash of the SQL sources, so it changes IFF the SQL changes. This is what
+# makes `ALTER EXTENSION laplace_substrate UPDATE` usable: a SQL edit yields a new version, and the
+# deploy applies the (idempotent) upgrade body in place — no reseed. A fixed version would make every
+# update a forbidden same-version no-op (the reason SQL changes used to require fresh_db).
+file(GLOB _ext_sql_sources CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/sql/*.sql.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/sql/*.h.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/sql/generated/*.sql.in)
+list(SORT _ext_sql_sources)
+set(_ext_sql_hashes "")
+foreach(_f ${_ext_sql_sources})
+    file(SHA256 ${_f} _fh)
+    string(APPEND _ext_sql_hashes "${_fh}")
+endforeach()
+string(SHA256 _ext_sql_hash "${_ext_sql_hashes}")
+string(SUBSTRING ${_ext_sql_hash} 0 16 EXT_VERSION)
 
 set(EXT_C_SOURCES
     src/laplace_substrate.c
@@ -99,6 +115,7 @@ configure_file(
 
 set(EXT_SQL_MODULES
     sql/laplace_substrate.sql.in
+    sql/laplace_substrate_upgrade.sql.in
     sql/01_schema.sql.in
     sql/02_entities.sql.in
     sql/03_physicalities.sql.in
@@ -150,7 +167,32 @@ add_custom_command(
     VERBATIM
 )
 
-add_custom_target(${EXT_NAME}_sql ALL DEPENDS ${EXT_BUILT_SQL})
+# Upgrade body (run by `ALTER EXTENSION ... UPDATE`): same preprocessing as the install script but
+# over laplace_substrate_upgrade.sql.in (modules minus one-time data 10/21), all idempotent. Generic
+# filename; the deploy copies it to laplace_substrate--<installed>--<EXT_VERSION>.sql for the actual
+# installed version (core Postgres has no ANY-from wildcard; a from--to script is named per deploy).
+set(EXT_UPGRADE_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}_upgrade.sql)
+set(EXT_UPGRADE_TMP ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}_upgrade.tmp)
+add_custom_command(
+    OUTPUT  ${EXT_UPGRADE_SQL}
+    DEPENDS ${EXT_SQL_MODULES}
+            ${CMAKE_CURRENT_BINARY_DIR}/sql/sqldefines.h
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMAND ${LAPLACE_SQLPP} -traditional-cpp -w -P -Upixel -Ubool
+            -I${CMAKE_CURRENT_SOURCE_DIR}/sql
+            -I${CMAKE_CURRENT_SOURCE_DIR}/sql/generated
+            -I${CMAKE_CURRENT_BINARY_DIR}/sql
+            ${CMAKE_CURRENT_SOURCE_DIR}/sql/${EXT_NAME}_upgrade.sql.in
+            > ${EXT_UPGRADE_TMP}
+    COMMAND bash -c "grep -v '^#' ${EXT_UPGRADE_TMP} \
+            | perl -lpe \"s'MODULE_PATHNAME'\\\$libdir/${EXT_NAME}'g\" \
+            > ${EXT_UPGRADE_SQL}"
+    COMMAND ${CMAKE_COMMAND} -E remove ${EXT_UPGRADE_TMP}
+    COMMENT "Preprocessing ${EXT_NAME} upgrade body → ${EXT_NAME}_upgrade.sql"
+    VERBATIM
+)
+
+add_custom_target(${EXT_NAME}_sql ALL DEPENDS ${EXT_BUILT_SQL} ${EXT_UPGRADE_SQL})
 add_dependencies(${EXT_NAME} ${EXT_NAME}_sql)
 
 install(TARGETS ${EXT_NAME}
@@ -161,6 +203,7 @@ install(TARGETS ${EXT_NAME}
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.control
     ${EXT_BUILT_SQL}
+    ${EXT_UPGRADE_SQL}
     DESTINATION ${LAPLACE_EXT_SHAREDIR}
     PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )
