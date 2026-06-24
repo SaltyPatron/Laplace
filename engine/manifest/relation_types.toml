@@ -1,17 +1,22 @@
 
 
 [ranks]
+# Recalibrated for SEMANTIC SALIENCE (recall), not structural authority: content relations on top,
+# grammatical glue and Unicode/standards METADATA at the floor. This single read-time weight also
+# drives model-export plane weighting (consensus_*_plane / foundry_vocab / adjacency).
 mandate = 1.0
-standards_structural = 0.91
-taxonomic = 0.82
+definitional = 0.97
+taxonomic = 0.90
+equivalence = 0.82
 partitive = 0.73
 causal = 0.64
-equivalence = 0.55
 oppositional = 0.45
 associative = 0.36
 tensor_calculation = 0.27
-scalar_valued = 0.18
-probationary = 0.09
+lexical_glue = 0.18
+scalar_valued = 0.12
+standards_structural = 0.08
+probationary = 0.05
 
 [[relation]]
 canonical = "ADJACENT_TO_PIXEL"
@@ -288,7 +293,7 @@ family_root = "HAS_DBPEDIA_RELATION"
 
 [[relation]]
 canonical = "HAS_DEFINITION"
-rank = "associative"
+rank = "definitional"
 symmetry = "asymmetric"
 parent = null
 family_root = "HAS_DEFINITION"
@@ -344,7 +349,7 @@ family_root = "HAS_EXTERNAL_ID"
 
 [[relation]]
 canonical = "HAS_FEATURE"
-rank = "partitive"
+rank = "lexical_glue"
 symmetry = "asymmetric"
 parent = null
 family_root = "HAS_FEATURE"
@@ -463,7 +468,7 @@ family_root = "HAS_PART"
 
 [[relation]]
 canonical = "HAS_POS"
-rank = "partitive"
+rank = "lexical_glue"
 symmetry = "asymmetric"
 parent = null
 family_root = "HAS_POS"
@@ -498,7 +503,7 @@ family_root = "HAS_SEMANTIC_ROLE"
 
 [[relation]]
 canonical = "HAS_SENSE"
-rank = "partitive"
+rank = "lexical_glue"
 symmetry = "asymmetric"
 parent = null
 family_root = "HAS_SENSE"
@@ -568,7 +573,7 @@ family_root = "HAS_VERB_FRAME"
 
 [[relation]]
 canonical = "HAS_XPOS"
-rank = "partitive"
+rank = "lexical_glue"
 symmetry = "asymmetric"
 parent = "HAS_POS"
 family_root = "HAS_POS"
@@ -663,7 +668,7 @@ family_root = "IS_LANGUAGE_CODE"
 
 [[relation]]
 canonical = "IS_LEMMA_OF"
-rank = "equivalence"
+rank = "lexical_glue"
 symmetry = "asymmetric"
 parent = null
 family_root = "IS_LEMMA_OF"
@@ -684,7 +689,7 @@ family_root = "IS_PIXEL_OF"
 
 [[relation]]
 canonical = "IS_SENSE_OF"
-rank = "taxonomic"
+rank = "lexical_glue"
 symmetry = "asymmetric"
 parent = null
 family_root = "IS_SENSE_OF"
@@ -854,7 +859,7 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "PRECEDES"
-rank = "associative"
+rank = "lexical_glue"
 symmetry = "asymmetric"
 parent = null
 family_root = "PRECEDES"
@@ -1214,20 +1219,20 @@ flip = true
 prefix = "DEP_"
 separator = ":"
 root = "DEPENDS_ON"
-rank = "partitive"
+rank = "lexical_glue"
 symmetry = "asymmetric"
 
 [dynamic.enhanced_deprel]
 prefix = "EDEP_"
 separator = ":"
 root = "ENHANCED_DEPENDS_ON"
-rank = "partitive"
+rank = "lexical_glue"
 symmetry = "asymmetric"
 
 [dynamic.feature]
 prefix = "FEAT_"
 root = "HAS_FEATURE"
-rank = "partitive"
+rank = "lexical_glue"
 symmetry = "asymmetric"
 lowercase_input = false
 
