@@ -1,10 +1,13 @@
-CREATE TYPE laplace_glicko2_result AS (
-    rating     bigint,
-    rd         bigint,
-    volatility bigint
-);
+DO $idem$ BEGIN
+    CREATE TYPE laplace_glicko2_result AS (
+        rating     bigint,
+        rd         bigint,
+        volatility bigint
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $idem$;
 
-CREATE FUNCTION laplace_glicko2_sfunc(
+CREATE OR REPLACE FUNCTION laplace_glicko2_sfunc(
     internal,
     bigint, bigint, bigint,
     bigint, bigint, bigint,
@@ -13,12 +16,12 @@ CREATE FUNCTION laplace_glicko2_sfunc(
     AS 'MODULE_PATHNAME', 'pg_laplace_glicko2_sfunc'
     LANGUAGE C;
 
-CREATE FUNCTION laplace_glicko2_finalfunc(internal)
+CREATE OR REPLACE FUNCTION laplace_glicko2_finalfunc(internal)
     RETURNS laplace_glicko2_result
     AS 'MODULE_PATHNAME', 'pg_laplace_glicko2_finalfunc'
     LANGUAGE C;
 
-CREATE AGGREGATE laplace_glicko2_accumulate(
+CREATE OR REPLACE AGGREGATE laplace_glicko2_accumulate(
     prior_rating     bigint,
     prior_rd         bigint,
     prior_volatility bigint,
@@ -32,17 +35,17 @@ CREATE AGGREGATE laplace_glicko2_accumulate(
     FINALFUNC = laplace_glicko2_finalfunc
 );
 
-CREATE FUNCTION laplace_score(v double precision, m double precision)
+CREATE OR REPLACE FUNCTION laplace_score(v double precision, m double precision)
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_score'
     LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION laplace_score_inverse(score bigint, m double precision)
+CREATE OR REPLACE FUNCTION laplace_score_inverse(score bigint, m double precision)
     RETURNS double precision
     AS 'MODULE_PATHNAME', 'pg_laplace_score_inverse'
     LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION laplace_glicko2_accumulate_games(
+CREATE OR REPLACE FUNCTION laplace_glicko2_accumulate_games(
     prior_rating     bigint,
     prior_rd         bigint,
     prior_volatility bigint,

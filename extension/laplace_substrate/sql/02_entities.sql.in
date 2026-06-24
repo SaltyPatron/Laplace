@@ -1,4 +1,4 @@
-CREATE TABLE entities (
+CREATE TABLE IF NOT EXISTS entities (
     id                 bytea            PRIMARY KEY CHECK (octet_length(id) = 16),
     tier               smallint         NOT NULL CHECK (tier >= 0 AND tier < 256),
     type_id            bytea            NOT NULL,

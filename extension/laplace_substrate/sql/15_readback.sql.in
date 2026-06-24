@@ -3,7 +3,7 @@ CREATE OR REPLACE FUNCTION canonical_id(p_name text) RETURNS bytea
     SELECT public.laplace_hash128_blake3(convert_to(p_name, 'UTF8'))
 $$;
 
-CREATE TABLE canonical_names (
+CREATE TABLE IF NOT EXISTS canonical_names (
     id   bytea PRIMARY KEY CHECK (octet_length(id) = 16),
     name text  NOT NULL
 );

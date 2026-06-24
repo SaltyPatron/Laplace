@@ -1,4 +1,4 @@
-CREATE TABLE consensus (
+CREATE TABLE IF NOT EXISTS consensus (
     id                bytea       PRIMARY KEY CHECK (octet_length(id) = 16),
     subject_id        bytea       NOT NULL REFERENCES entities(id),
     type_id           bytea       NOT NULL REFERENCES entities(id),
@@ -12,24 +12,24 @@ CREATE TABLE consensus (
 
 SELECT pg_extension_config_dump('consensus', '');
 
-CREATE INDEX consensus_object_btree       ON consensus (object_id) WHERE object_id IS NOT NULL;
-CREATE INDEX consensus_type_btree         ON consensus (type_id);
-CREATE INDEX consensus_subject_type_btree ON consensus (subject_id, type_id);
+CREATE INDEX IF NOT EXISTS consensus_object_btree       ON consensus (object_id) WHERE object_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS consensus_type_btree         ON consensus (type_id);
+CREATE INDEX IF NOT EXISTS consensus_subject_type_btree ON consensus (subject_id, type_id);
 
 
 
 
 
 
-CREATE INDEX consensus_type_subject_btree ON consensus (type_id, subject_id) WHERE object_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS consensus_type_subject_btree ON consensus (type_id, subject_id) WHERE object_id IS NOT NULL;
 
 
 
 
 
-CREATE INDEX consensus_eff_mu_btree ON consensus (((rating - 2*rd)) DESC) WHERE object_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS consensus_eff_mu_btree ON consensus (((rating - 2*rd)) DESC) WHERE object_id IS NOT NULL;
 
-CREATE INDEX consensus_subject_eff_mu_btree ON consensus (subject_id, ((rating - 2*rd)) DESC) WHERE object_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS consensus_subject_eff_mu_btree ON consensus (subject_id, ((rating - 2*rd)) DESC) WHERE object_id IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION consensus_id(
     p_subject bytea, p_type bytea, p_object bytea)

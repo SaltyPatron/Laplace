@@ -48,7 +48,7 @@ CREATE OR REPLACE FUNCTION attestations_in(p_id bytea, p_limit integer DEFAULT 4
     LIMIT p_limit
 $$;
 
-CREATE FUNCTION consensus_out_readable(p_id bytea, p_limit integer DEFAULT 40)
+CREATE OR REPLACE FUNCTION consensus_out_readable(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(type text, object text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
@@ -60,7 +60,7 @@ CREATE FUNCTION consensus_out_readable(p_id bytea, p_limit integer DEFAULT 40)
     LIMIT p_limit
 $$;
 
-CREATE FUNCTION top_relations_readable(p_limit integer DEFAULT 10, p_type bytea DEFAULT NULL)
+CREATE OR REPLACE FUNCTION top_relations_readable(p_limit integer DEFAULT 10, p_type bytea DEFAULT NULL)
     RETURNS TABLE(subject text, type text, object text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
@@ -69,7 +69,7 @@ CREATE FUNCTION top_relations_readable(p_limit integer DEFAULT 10, p_type bytea 
     FROM top_relations(p_limit, p_type) t
 $$;
 
-CREATE FUNCTION attestation_response(
+CREATE OR REPLACE FUNCTION attestation_response(
     p_subject_id        bytea,
     p_relation_type_id  bytea,
     p_source_scope      bytea[]    DEFAULT NULL,
@@ -110,7 +110,7 @@ AS $$
     LIMIT GREATEST(1, p_top_k)
 $$;
 
-CREATE FUNCTION attestation_response_type(
+CREATE OR REPLACE FUNCTION attestation_response_type(
     p_subject_id   bytea,
     p_relation_type_id      bytea,
     p_source_scope bytea[]    DEFAULT NULL,
@@ -130,7 +130,7 @@ AS $$
     SELECT * FROM attestation_response(p_subject_id, p_relation_type_id, p_source_scope, p_context_id, p_top_k)
 $$;
 
-CREATE FUNCTION attestation_unary_response(
+CREATE OR REPLACE FUNCTION attestation_unary_response(
     p_subject_id        bytea,
     p_relation_type_id  bytea,
     p_source_scope bytea[]    DEFAULT NULL,
@@ -166,7 +166,7 @@ AS $$
           )
 $$;
 
-CREATE FUNCTION attestation_unary_response_type(
+CREATE OR REPLACE FUNCTION attestation_unary_response_type(
     p_subject_id   bytea,
     p_relation_type_id      bytea,
     p_source_scope bytea[]    DEFAULT NULL,

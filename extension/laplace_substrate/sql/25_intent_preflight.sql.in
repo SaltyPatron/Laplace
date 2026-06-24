@@ -1,10 +1,13 @@
-CREATE TYPE intent_preflight_result AS (
-    entity_exists bytea,
-    phys_exists   bytea,
-    att_exists    bytea
-);
+DO $idem$ BEGIN
+    CREATE TYPE intent_preflight_result AS (
+        entity_exists bytea,
+        phys_exists   bytea,
+        att_exists    bytea
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $idem$;
 
-CREATE FUNCTION intent_preflight(
+CREATE OR REPLACE FUNCTION intent_preflight(
     entity_ids bytea[],
     phys_ids   bytea[],
     att_ids    bytea[])

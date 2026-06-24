@@ -27,9 +27,9 @@ $$;
 CREATE OR REPLACE FUNCTION glicko2_neutral_mu() RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_glicko2_neutral_mu'
     LANGUAGE C LAPLACE_IMMUTABLE;
-CREATE FUNCTION glicko2_initial_rd() RETURNS bigint
+CREATE OR REPLACE FUNCTION glicko2_initial_rd() RETURNS bigint
     LANGUAGE sql LAPLACE_IMMUTABLE AS $$ SELECT 350000000000::bigint $$;
-CREATE FUNCTION glicko2_initial_volatility() RETURNS bigint
+CREATE OR REPLACE FUNCTION glicko2_initial_volatility() RETURNS bigint
     LANGUAGE sql LAPLACE_IMMUTABLE AS $$ SELECT 60000000::bigint $$;
-CREATE FUNCTION glicko2_tau() RETURNS bigint
+CREATE OR REPLACE FUNCTION glicko2_tau() RETURNS bigint
     LANGUAGE sql LAPLACE_IMMUTABLE AS $$ SELECT 500000000::bigint $$;
