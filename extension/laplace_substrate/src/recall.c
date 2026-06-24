@@ -354,14 +354,47 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
     }
     else if (route.intent && strcmp(route.intent, "translate") == 0)
     {
+        Oid   types[2] = { BYTEAOID, TEXTOID };
+        Datum args[2];
+        char  nulls[3] = "  ";
+
+        args[0] = topic;
+        if (route.phrase2)
+            args[1] = CStringGetTextDatum(route.phrase2);
+        else
+            nulls[1] = 'n';
+        n = spi_forward_replies(buf,
+            "SELECT t.translation || ' [' || COALESCE(t.language, '?') || ']', "
+            "       t.eff_mu, t.witnesses FROM laplace.translate_to($1, $2) t",
+            2, types, args, nulls);
+        if (n == 0)
+        {
+            if (route.phrase2)
+            {
+                Datum lbl = spi_label(topic);
+                const char *name = (lbl != (Datum) 0) ? text_to_cstr(lbl) : "?";
+                char  msg[384];
+
+                snprintf(msg, sizeof(msg),
+                         "I hold no witnessed %s translation of \"%s\" yet.",
+                         route.phrase2, name);
+                reply_buf_add(buf, CStringGetTextDatum(msg), (Datum) 0, (Datum) 0,
+                              false, true, true);
+            }
+            else
+                emit_label_fallback(buf, topic, "no translation consensus yet.");
+        }
+    }
+    else if (route.intent && strcmp(route.intent, "languages") == 0)
+    {
         Oid   types[1] = { BYTEAOID };
         Datum args[1] = { topic };
         n = spi_forward_replies(buf,
-            "SELECT t.translation || ' [' || COALESCE(t.language, '?') || ']', "
-            "       t.eff_mu, t.witnesses FROM laplace.translations($1) t",
+            "SELECT lc.reply, lc.eff_mu, lc.witnesses "
+            "FROM laplace.language_coverage($1) lc",
             1, types, args, NULL);
         if (n == 0)
-            emit_label_fallback(buf, topic, "no translation consensus yet.");
+            emit_label_fallback(buf, topic, "no cross-language consensus yet.");
     }
     else if (route.intent && strcmp(route.intent, "synonyms") == 0)
     {
@@ -378,7 +411,8 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
         Oid   types[1] = { BYTEAOID };
         Datum args[1] = { topic };
         n = spi_forward_replies(buf,
-            "SELECT e.example, e.eff_mu, e.witnesses FROM laplace.examples($1) e",
+            "SELECT replace(e.example, '%s', laplace.label($1)), e.eff_mu, e.witnesses "
+            "FROM laplace.examples($1) e",
             1, types, args, NULL);
         if (n == 0)
             emit_label_fallback(buf, topic, "no example consensus yet.");
@@ -400,7 +434,7 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
         Datum args[2] = { topic,
                           CStringGetTextDatum(route.type_name ? route.type_name : "") };
         n = spi_forward_replies(buf,
-            "SELECT f.fact, f.eff_mu, f.witnesses "
+            "SELECT replace(f.fact, '%s', laplace.label($1)), f.eff_mu, f.witnesses "
             "FROM laplace.related($1, laplace.relation_type_id($2), laplace.word_language($1)) f",
             2, types, args, NULL);
         if (n == 0)
@@ -470,28 +504,31 @@ respond_impl(const char *prompt, Datum context, bool ctx_null, ReplyBuf *buf)
 
 
 
-        Oid   wtypes[1] = { BYTEAOID };
-        Datum wargs[1] = { topic };
+        /* A bare word or unmatched phrase: lead with the witnessed gloss — the most useful
+           answer for a known noun like "king" (the old order led with a lone POS-walk edge).
+           Fall back to a strongest-relation walk, then a held-but-bare note. */
+        Oid   dtypes[2] = { TEXTOID, BYTEAOID };
+        Datum dargs[2] = { CStringGetTextDatum(prompt), topic };
         n = spi_forward_replies(buf,
-            "SELECT COALESCE(laplace.realize($1, laplace.word_language($1)), laplace.label($1)) "
-            "       || string_agg(' —' || COALESCE(laplace.type_label(g.type_id), '?') || E'\\u2192 ' "
-            "                     || COALESCE(laplace.realize(g.entity_id, laplace.word_language($1)), "
-            "                                 laplace.label(g.entity_id)), '' ORDER BY g.step), "
-            "       min(g.eff_mu), NULL::bigint "
-            "FROM laplace.walk_strongest($1, NULL::bytea, 6) g HAVING count(*) > 0",
-            1, wtypes, wargs, NULL);
+            "SELECT laplace.label($2) || ': ' || d.definition, d.eff_mu, d.witnesses "
+            "FROM laplace.define($2, "
+            "  COALESCE((SELECT array_agg(ps.id) FROM laplace.prompt_state($1) ps "
+            "            WHERE ps.id <> $2), ARRAY[]::bytea[]), 3) d",
+            2, dtypes, dargs, NULL);
         if (n == 0)
         {
-            Oid   dtypes[2] = { TEXTOID, BYTEAOID };
-            Datum dargs[2] = { CStringGetTextDatum(prompt), topic };
+            Oid   wtypes[1] = { BYTEAOID };
+            Datum wargs[1] = { topic };
             n = spi_forward_replies(buf,
-                "SELECT laplace.label($2) || ': ' || d.definition, d.eff_mu, d.witnesses "
-                "FROM laplace.define($2, "
-                "  COALESCE((SELECT array_agg(ps.id) FROM laplace.prompt_state($1) ps "
-                "            WHERE ps.id <> $2), ARRAY[]::bytea[]), 3) d",
-                2, dtypes, dargs, NULL);
+                "SELECT COALESCE(laplace.realize($1, laplace.word_language($1)), laplace.label($1)) "
+                "       || string_agg(' —' || COALESCE(laplace.type_label(g.type_id), '?') || E'\\u2192 ' "
+                "                     || COALESCE(laplace.realize(g.entity_id, laplace.word_language($1)), "
+                "                                 laplace.label(g.entity_id)), '' ORDER BY g.step), "
+                "       min(g.eff_mu), NULL::bigint "
+                "FROM laplace.walk_strongest($1, NULL::bytea, 6) g HAVING count(*) > 0",
+                1, wtypes, wargs, NULL);
             if (n == 0)
-                emit_label_fallback(buf, topic, "no continuation or gloss witnessed yet.");
+                emit_label_fallback(buf, topic, "no gloss or continuation witnessed yet.");
         }
     }
     else

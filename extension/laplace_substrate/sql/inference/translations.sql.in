@@ -1,0 +1,21 @@
+-- inference/translations.sql.in
+-- Translations are EMERGENT, never stored as direct edges. A word reaches its cross-language
+-- equivalents through the shared synset's members whose language differs from the source word
+-- — king -> {Roi(fra), 王(lzh), ราชา(tha), 국왕(kor), konge(dan), ...}. Ranked by Glicko-2 strength.
+CREATE OR REPLACE FUNCTION translations(p_word bytea, p_limit int DEFAULT 24)
+    RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+    SET search_path = @extschema@, public AS $$
+    WITH src_lang AS (SELECT word_language(p_word) AS id)
+    SELECT t.translation, t.language, t.mu::numeric, t.witnesses
+    FROM (
+        SELECT render_text(sm.member, 64) AS translation, label(sm.lang) AS language,
+               sm.mu, sm.witnesses
+        FROM synset_members(p_word) sm
+        WHERE sm.lang IS NOT NULL
+          AND sm.lang IS DISTINCT FROM (SELECT id FROM src_lang)
+    ) t
+    WHERE NULLIF(btrim(t.translation), '') IS NOT NULL
+    ORDER BY t.mu DESC, t.witnesses DESC, t.language
+    LIMIT p_limit
+$$;

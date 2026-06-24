@@ -147,12 +147,20 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
                 "INSERT INTO laplace.physicalities "
                 "  (id, entity_id, type, coord, hilbert_index, trajectory, "
                 "   n_constituents, alignment_residual, source_dim, observed_at) "
-                "SELECT DISTINCT ON (s.id) "
-                "       s.id, s.entity_id, s.type, s.coord, s.hilbert_index, s.trajectory, "
-                "       s.n_constituents, s.alignment_residual, s.source_dim, s.observed_at "
-                "FROM %s s "
-                "WHERE NOT EXISTS (SELECT 1 FROM laplace.physicalities p WHERE p.id = s.id) "
-                "ORDER BY s.id",
+                "SELECT d.id, d.entity_id, d.type, d.coord, d.hilbert_index, d.trajectory, "
+                "       d.n_constituents, d.alignment_residual, d.source_dim, d.observed_at "
+                /* Outer ORDER BY hilbert_index => the heap is appended in space-filling-curve
+                   order, so a content node and its spatial/constituent neighbours co-locate on
+                   the same pages (clustered-by-construction — recall/render walk locally instead
+                   of scattering across the content-hash id space). The inner DISTINCT ON (s.id)
+                   keeps the exact id dedup (no ON CONFLICT). A post-seed CLUSTER perfects it. */
+                "FROM (SELECT DISTINCT ON (s.id) "
+                "        s.id, s.entity_id, s.type, s.coord, s.hilbert_index, s.trajectory, "
+                "        s.n_constituents, s.alignment_residual, s.source_dim, s.observed_at "
+                "      FROM %s s "
+                "      WHERE NOT EXISTS (SELECT 1 FROM laplace.physicalities p WHERE p.id = s.id) "
+                "      ORDER BY s.id) d "
+                "ORDER BY d.hilbert_index",
                 stage_phys));
         }
     }

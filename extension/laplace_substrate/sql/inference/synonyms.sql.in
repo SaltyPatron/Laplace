@@ -1,0 +1,19 @@
+-- inference/synonyms.sql.in
+-- Same-language synset co-members of a word (king -> {male monarch, mogul, tycoon, queen}).
+-- Shares the synset traversal in synset_members(); keeps only members in the source word's
+-- own language. Ranked by Glicko-2 conservative strength.
+CREATE OR REPLACE FUNCTION synonyms(p_word bytea, p_limit int DEFAULT 10)
+    RETURNS TABLE(synonym text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+    SET search_path = @extschema@, public AS $$
+    WITH src_lang AS (SELECT word_language(p_word) AS id)
+    SELECT t.synonym, t.mu::numeric, t.witnesses
+    FROM (
+        SELECT render_text(sm.member, 64) AS synonym, sm.mu, sm.witnesses
+        FROM synset_members(p_word) sm
+        WHERE sm.lang IS NOT DISTINCT FROM (SELECT id FROM src_lang)
+    ) t
+    WHERE NULLIF(btrim(t.synonym), '') IS NOT NULL
+    ORDER BY t.mu DESC, t.witnesses DESC, t.synonym
+    LIMIT p_limit
+$$;

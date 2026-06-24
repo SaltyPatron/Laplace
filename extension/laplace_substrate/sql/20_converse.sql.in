@@ -53,19 +53,15 @@ CREATE OR REPLACE FUNCTION label(p_id bytea)
                 '^tiny-codes/concept/(.+)/v1$', '\1'),
             ''), encode(p_id, 'hex') || '…'),
         -- abstract entities (e.g. Language) carry their human-readable name as HAS_DEFINITION
-        -- (ISO-639 stores it there); resolve it before the Type:hash fallback.
+        -- (ISO-639 stores it there). NO type:hash / hash-ellipsis fallback after this: a genuinely
+        -- unnamed entity returns NULL (loud), never the "POS:6ea49d29" placeholder that masked the
+        -- unfinished name links. The chain-completing, language-scoped resolver is realize(id, lang).
         (SELECT render_text(c.object_id)
          FROM consensus c
          WHERE c.subject_id = p_id
            AND c.type_id = relation_type_id('HAS_DEFINITION')
          ORDER BY eff_mu(c.rating, c.rd) DESC
-         LIMIT 1),
-        (SELECT regexp_replace(t.name, '^substrate/type/(.*)/v1$', '\1')
-                || ':' || left(encode(p_id, 'hex'), 8)
-         FROM entities e
-         JOIN canonical_names t ON t.id = e.type_id
-         WHERE e.id = p_id),
-        encode(p_id, 'hex') || '…')
+         LIMIT 1))
 $$;
 
 CREATE OR REPLACE FUNCTION prompt_words(p_text text)
@@ -106,15 +102,125 @@ CREATE OR REPLACE FUNCTION define(p_word bytea, p_limit int DEFAULT 5)
     LANGUAGE C STABLE STRICT
     AS 'MODULE_PATHNAME', 'pg_laplace_define';
 
+-- A word's synset co-members reached through the shared synset: word -> senses ->
+-- synset, then the synset's IS_SYNONYM_OF members. synonyms() keeps the SAME-language
+-- co-members; translations() (below) keeps the cross-language ones. This is the synset
+-- traversal — synonymy and translation are the two halves of one emergent structure,
+-- not stored edges. eff_mu is the Glicko-2 conservative strength of the membership edge.
+CREATE OR REPLACE FUNCTION synset_members(p_word bytea)
+    RETURNS TABLE(member bytea, lang bytea, mu bigint, witnesses bigint)
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+    SET search_path = @extschema@, public AS $$
+    WITH syn AS (SELECT DISTINCT synset_id AS id FROM senses(p_word)),
+    members AS (
+        SELECT c.object_id AS w, c.rating, c.rd, c.witness_count
+        FROM consensus c JOIN syn ON c.subject_id = syn.id
+        WHERE c.type_id = relation_type_id('IS_SYNONYM_OF') AND c.object_id IS NOT NULL
+        UNION ALL
+        SELECT c.subject_id AS w, c.rating, c.rd, c.witness_count
+        FROM consensus c JOIN syn ON c.object_id = syn.id
+        WHERE c.type_id = relation_type_id('IS_SYNONYM_OF')
+    )
+    SELECT m.w, word_language(m.w),
+           max(eff_mu(m.rating, m.rd)) AS mu, sum(m.witness_count)::bigint AS witnesses
+    FROM members m
+    WHERE m.w <> p_word
+    GROUP BY m.w
+$$;
+
 CREATE OR REPLACE FUNCTION synonyms(p_word bytea, p_limit int DEFAULT 10)
     RETURNS TABLE(synonym text, eff_mu numeric, witnesses bigint)
-    LANGUAGE C STABLE STRICT
-    AS 'MODULE_PATHNAME', 'pg_laplace_synonyms';
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+    SET search_path = @extschema@, public AS $$
+    WITH src_lang AS (SELECT word_language(p_word) AS id)
+    SELECT t.synonym, t.mu::numeric, t.witnesses
+    FROM (
+        SELECT render_text(sm.member, 64) AS synonym, sm.mu, sm.witnesses
+        FROM synset_members(p_word) sm
+        WHERE sm.lang IS NOT DISTINCT FROM (SELECT id FROM src_lang)
+    ) t
+    WHERE NULLIF(btrim(t.synonym), '') IS NOT NULL
+    ORDER BY t.mu DESC, t.witnesses DESC, t.synonym
+    LIMIT p_limit
+$$;
 
+-- Translations are EMERGENT, never stored as direct edges. A word reaches its
+-- cross-language equivalents through the shared synset's members whose language differs
+-- from the source word — king -> {Roi(fra), 王(jpn), ราชา(tha), 국왕(kor), ...}.
 CREATE OR REPLACE FUNCTION translations(p_word bytea, p_limit int DEFAULT 24)
     RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
-    LANGUAGE C STABLE STRICT
-    AS 'MODULE_PATHNAME', 'pg_laplace_translations';
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+    SET search_path = @extschema@, public AS $$
+    WITH src_lang AS (SELECT word_language(p_word) AS id)
+    SELECT t.translation, t.language, t.mu::numeric, t.witnesses
+    FROM (
+        SELECT render_text(sm.member, 64) AS translation, label(sm.lang) AS language,
+               sm.mu, sm.witnesses
+        FROM synset_members(p_word) sm
+        WHERE sm.lang IS NOT NULL
+          AND sm.lang IS DISTINCT FROM (SELECT id FROM src_lang)
+    ) t
+    WHERE NULLIF(btrim(t.translation), '') IS NOT NULL
+    ORDER BY t.mu DESC, t.witnesses DESC, t.language
+    LIMIT p_limit
+$$;
+
+-- Scoped translation for the recall router: resolve the requested language by ISO code
+-- (fra) OR human name (French, via HAS_DEFINITION) against the small candidate set of the
+-- word's synset languages, so "how do you say king in french" answers in French specifically.
+-- p_lang NULL/'' => every cross-language member (same as translations()).
+CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
+                                        p_limit int DEFAULT 24)
+    RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH src_lang AS (SELECT word_language(p_word) AS id),
+    want AS (SELECT NULLIF(btrim(lower(COALESCE(p_lang, ''))), '') AS name),
+    cand AS (
+        SELECT sm.member, sm.lang, sm.mu, sm.witnesses, label(sm.lang) AS code
+        FROM synset_members(p_word) sm
+        WHERE sm.lang IS NOT NULL
+          AND sm.lang IS DISTINCT FROM (SELECT id FROM src_lang)
+    )
+    SELECT t.tr, t.code, t.mu::numeric, t.witnesses
+    FROM (
+        SELECT render_text(c.member, 64) AS tr, c.code, c.mu, c.witnesses
+        FROM cand c, want w
+        WHERE w.name IS NULL
+           OR lower(c.code) = w.name
+           OR EXISTS (SELECT 1 FROM consensus d
+                      WHERE d.subject_id = c.lang
+                        AND d.type_id = relation_type_id('HAS_DEFINITION')
+                        AND lower(render_text(d.object_id, 32)) = w.name)
+    ) t
+    WHERE NULLIF(btrim(t.tr), '') IS NOT NULL
+    ORDER BY t.mu DESC, t.witnesses DESC, t.code
+    LIMIT p_limit
+$$;
+
+-- One-line omniglottal coverage summary: across how many (and which) languages a word's
+-- synset is witnessed. Returns a single conversational row, or none when nothing is known.
+CREATE OR REPLACE FUNCTION language_coverage(p_word bytea, p_limit int DEFAULT 40)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH langs AS (
+        SELECT DISTINCT label(sm.lang) AS code
+        FROM synset_members(p_word) sm
+        WHERE sm.lang IS NOT NULL
+        UNION
+        SELECT label(word_language(p_word))
+    ),
+    shown AS (SELECT code FROM langs WHERE code IS NOT NULL ORDER BY code LIMIT p_limit)
+    SELECT COALESCE(label(p_word), '?') || ' is witnessed across '
+           || (SELECT count(*) FROM langs WHERE code IS NOT NULL)::text || ' languages: '
+           || (SELECT string_agg(code, ', ' ORDER BY code) FROM shown)
+           || CASE WHEN (SELECT count(*) FROM langs WHERE code IS NOT NULL) > p_limit
+                   THEN ', …' ELSE '' END,
+           NULL::numeric,
+           (SELECT count(*) FROM langs WHERE code IS NOT NULL)::bigint
+    WHERE (SELECT count(*) FROM langs WHERE code IS NOT NULL) > 0
+$$;
 
 CREATE OR REPLACE FUNCTION hypernyms(p_word bytea, p_depth int DEFAULT 8)
     RETURNS TABLE(depth int, hypernym text, gloss text)
@@ -458,6 +564,54 @@ CREATE OR REPLACE FUNCTION links(p_word text)
     FROM consensus c
     WHERE c.subject_id = word_id(p_word)
     ORDER BY strength DESC, relation
+$$;
+
+-- The SQL-transformer attention head. A query word attends over the entities it is
+-- consensus-connected to (plus its synset co-members); the attention WEIGHT is the Glicko-2
+-- conservative strength eff_mu(rating, rd) — this is what replaces geometric nearest-neighbor,
+-- which on the densely-packed 3-sphere is semantically noisy. The S3 position (angular
+-- geodesic between the two coords on the glome) is reported alongside as the geometric
+-- annotation, fusing the embedding geometry with the consensus attention in one read.
+CREATE OR REPLACE FUNCTION attention(p_word bytea, p_k int DEFAULT 12)
+    RETURNS TABLE(neighbor text, relation text, attention double precision,
+                  geodesic double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH qcoord AS (
+        SELECT coord FROM physicalities WHERE entity_id = p_word AND type = 1 LIMIT 1),
+    edges AS (
+        SELECT c.object_id AS nb, c.type_id, eff_mu(c.rating, c.rd) AS mu
+        FROM consensus c
+        WHERE c.subject_id = p_word AND c.object_id IS NOT NULL
+          -- exclude the positional/grammatical scaffolding (sequence order, POS, morphology,
+          -- aliasing): those are the substrate's "positional encoding", not semantic attention.
+          AND c.type_id NOT IN (relation_type_id('HAS_LANGUAGE'),
+                                relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
+                                relation_type_id('PRECEDES'), relation_type_id('FOLLOWS'),
+                                relation_type_id('HAS_POS'), relation_type_id('HAS_XPOS'),
+                                relation_type_id('HAS_FEATURE'), relation_type_id('HAS_LEX_CATEGORY'),
+                                relation_type_id('HAS_NAME_ALIAS'), relation_type_id('IS_LEMMA_OF'),
+                                relation_type_id('HAS_LANGUAGE_SCOPE'), relation_type_id('HAS_LANGUAGE_TYPE'))
+        UNION ALL
+        SELECT sm.member, relation_type_id('IS_SYNONYM_OF'), sm.mu
+        FROM synset_members(p_word) sm
+    ),
+    best AS (
+        SELECT nb, (array_agg(type_id ORDER BY mu DESC))[1] AS type_id, max(mu) AS mu
+        FROM edges WHERE nb <> p_word GROUP BY nb)
+    SELECT t.neighbor, t.relation, t.attention, t.geodesic
+    FROM (
+        SELECT label(b.nb) AS neighbor, type_label(b.type_id) AS relation,
+               (b.mu::double precision / 1e9) AS attention,
+               CASE WHEN qc.coord IS NOT NULL AND p.coord IS NOT NULL
+                    THEN laplace_angular_distance_4d(p.coord, qc.coord) END AS geodesic
+        FROM best b
+        LEFT JOIN physicalities p ON p.entity_id = b.nb AND p.type = 1
+        CROSS JOIN qcoord qc
+    ) t
+    WHERE NULLIF(btrim(t.neighbor), '') IS NOT NULL
+    ORDER BY t.attention DESC NULLS LAST, t.geodesic NULLS LAST
+    LIMIT p_k
 $$;
 
 -- Correlate words: every (relation, target) link across the given words + which words share it.

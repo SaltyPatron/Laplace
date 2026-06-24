@@ -247,6 +247,33 @@ route_prompt_impl(const char *prompt, RouteResult *r)
         goto done;
     }
 
+    /* Translation, scoped to a target language. "how do you say X in LANG",
+       "translate X to LANG", "what is X in LANG" — X=g1, LANG=g2. Placed before is_a /
+       what_is / the generic how-do→example rule so a translation request is never
+       misrouted to VerbNet example templates (the old "%s" leak). */
+    if (try_groups(p,
+                   "^(?:translate|how\\s+(?:do|would|can|should)\\s+(?:i|you|we|one)\\s+say|how\\s+to\\s+say|say)\\s+(.+?)\\s+(?:in|to|into)\\s+([a-z][a-z '\\-]*?)\\??$",
+                   r, "translate", NULL, true))
+        goto done;
+    if (try_groups(p,
+                   "^what(?:'s|\\s+is|\\s+are)\\s+(?:(?:a|an|the)\\s+)?(.+?)\\s+in\\s+([a-z][a-z '\\-]*?)\\??$",
+                   r, "translate", NULL, true))
+        goto done;
+    if (try_groups(p,
+                   "^(?:translate|how\\s+(?:do|would|can|should)\\s+(?:i|you|we|one)\\s+say|how\\s+to\\s+say)\\s+(.+?)\\??$",
+                   r, "translate", NULL, false))
+        goto done;
+
+    /* Omniglottal coverage: "how many / which languages is X (witnessed) in",
+       "languages of X". */
+    if (try_groups_alt(p,
+                       "^(?:in\\s+)?how\\s+many\\s+languages?\\s+(?:is|are|does|do|has|have|can)?\\s*(.+?)(?:\\s+(?:have|in|cover|witnessed|known|appear|exist|be))?\\??$",
+                       "^(?:what|which)\\s+languages?\\s+(?:is|are|does|do|has|have|can)\\s+(.+?)(?:\\s+(?:have|in|cover|witnessed|known|appear|exist|be))?\\??$",
+                       r, "languages", NULL))
+        goto done;
+    if (try_groups(p, "^languages?\\s+(?:of|for)\\s+(.+?)\\??$", r, "languages", NULL, false))
+        goto done;
+
     if (try_groups(p, "^(?:is|are)\\s+(?:(?:a|an|the)\\s+)?(.+?)\\s+(?:a|an|the)\\s+(.+?)\\??$",
                    r, "is_a", NULL, true))
         goto done;
@@ -257,10 +284,6 @@ route_prompt_impl(const char *prompt, RouteResult *r)
 
     if (try_groups(p, "^(?:tell\\s+me\\s+about|describe|about)\\s+(.+?)\\??$",
                    r, "describe", NULL, false))
-        goto done;
-
-    if (try_groups(p, "^translate\\s+(.+?)(?:\\s+(?:in|to|into)\\s+.+)?$",
-                   r, "translate", NULL, false))
         goto done;
 
     if (try_groups(p, "^(?:walk|continue|free[- ]?associate(?:\\s+from)?)\\s+(.+?)\\??$",

@@ -241,9 +241,9 @@ enum
     RB_SYNSET_LEMMA = 0,
     RB_RENDER_TEXT,
     RB_TRANSLATION,
+    RB_HAS_NAME,
     RB_CANONICAL,
     RB_DEFINES,
-    RB_LABEL,
     RB_COUNT
 };
 
@@ -298,8 +298,28 @@ static realize_plan_t realize_plans[RB_COUNT] = {
         "  AND NOT laplace.refuted(g.rating, g.rd) "
         "ORDER BY laplace.eff_mu(g.rating, g.rd) DESC "
         "LIMIT 1", 1, NULL },
-    [RB_LABEL] = {
-        "SELECT laplace.label($1)", 1, NULL },
+    [RB_HAS_NAME] = {
+        /* A concept's name is an attestation, language-preferred: subject -HAS_NAME/HAS_NAME_ALIAS->
+         * name string, ranked by (the name's HAS_LANGUAGE = $2) then HAS_NAME over the alias then
+         * consensus mu. Placed AFTER render_text so true content (codepoint -> glyph, word -> text)
+         * renders as itself; a concept whose own render is a bare key resolves to its deposited name
+         * here. There is NO label() crutch after this — a genuinely unnamed concept returns NULL
+         * (loud), never the "POS:6ea49d29" type:hash placeholder. */
+        "SELECT q.s FROM ("
+        "  SELECT laplace.render_text(nm.object_id) AS s, "
+        "         (lang.object_id IS NOT NULL) AS lp, "
+        "         (nm.type_id = laplace.relation_type_id('HAS_NAME')) AS prim, "
+        "         laplace.eff_mu(nm.rating, nm.rd) AS mu "
+        "  FROM laplace.consensus nm "
+        "  LEFT JOIN laplace.consensus lang ON lang.subject_id = nm.object_id "
+        "    AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE') "
+        "    AND lang.object_id = $2 "
+        "  WHERE nm.subject_id = $1 "
+        "    AND nm.type_id IN (laplace.relation_type_id('HAS_NAME'), "
+        "                       laplace.relation_type_id('HAS_NAME_ALIAS')) "
+        "    AND NOT laplace.refuted(nm.rating, nm.rd)"
+        ") q WHERE q.s IS NOT NULL AND q.s <> '' "
+        "ORDER BY q.lp DESC, q.prim DESC, q.mu DESC LIMIT 1", 2, NULL },
 };
 
 static text *
@@ -368,11 +388,11 @@ pg_laplace_realize(PG_FUNCTION_ARGS)
     if (out == NULL)
         out = realize_branch(RB_TRANSLATION, id, lang);
     if (out == NULL)
+        out = realize_branch(RB_HAS_NAME, id, lang);
+    if (out == NULL)
         out = realize_branch(RB_CANONICAL, id, lang);
     if (out == NULL)
         out = realize_branch(RB_DEFINES, id, lang);
-    if (out == NULL)
-        out = realize_branch(RB_LABEL, id, lang);
 
     laplace_spi_finish(spi_top);
 

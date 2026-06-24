@@ -1,0 +1,33 @@
+-- inference/translate_to.sql.in
+-- Scoped translation for the recall router: resolve the requested language by ISO code (fra)
+-- OR human name (French, via HAS_DEFINITION) against the small candidate set of the word's
+-- synset languages, so "how do you say king in french" answers in French specifically.
+-- p_lang NULL/'' => every cross-language member (same as translations()).
+CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
+                                        p_limit int DEFAULT 24)
+    RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH src_lang AS (SELECT word_language(p_word) AS id),
+    want AS (SELECT NULLIF(btrim(lower(COALESCE(p_lang, ''))), '') AS name),
+    cand AS (
+        SELECT sm.member, sm.lang, sm.mu, sm.witnesses, label(sm.lang) AS code
+        FROM synset_members(p_word) sm
+        WHERE sm.lang IS NOT NULL
+          AND sm.lang IS DISTINCT FROM (SELECT id FROM src_lang)
+    )
+    SELECT t.tr, t.code, t.mu::numeric, t.witnesses
+    FROM (
+        SELECT render_text(c.member, 64) AS tr, c.code, c.mu, c.witnesses
+        FROM cand c, want w
+        WHERE w.name IS NULL
+           OR lower(c.code) = w.name
+           OR EXISTS (SELECT 1 FROM consensus d
+                      WHERE d.subject_id = c.lang
+                        AND d.type_id = relation_type_id('HAS_DEFINITION')
+                        AND lower(render_text(d.object_id, 32)) = w.name)
+    ) t
+    WHERE NULLIF(btrim(t.tr), '') IS NOT NULL
+    ORDER BY t.mu DESC, t.witnesses DESC, t.code
+    LIMIT p_limit
+$$;
