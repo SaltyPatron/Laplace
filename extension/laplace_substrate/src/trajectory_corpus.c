@@ -271,9 +271,16 @@ corpus_build(int64 probe_rows, int64 probe_max_us)
             "  JOIN laplace.physicalities p "
             "    ON p.entity_id = e.id AND p.type = 1 AND p.trajectory IS NOT NULL "
             "  WHERE e.tier = 4");
+        /* Geometry is source-free: physicalities no longer carry source_id. A document's
+           provenance lives on the word-level (UAX-29) PRECEDES attestations it CONTEXTUALIZES
+           -- i.e. the tier-4 document is the context_id of its source's evidence. Scope the
+           book corpus to documents witnessed by the configured decomposer source through that
+           context link; the doc->sentence->word composition itself stays geometric (trajectory). */
         if (c->document_source[0] != '\0')
             appendStringInfo(&q,
-                " AND p.source_id = laplace.source_id('%s')",
+                " AND EXISTS (SELECT 1 FROM laplace.attestations a"
+                " WHERE a.context_id = e.id"
+                " AND a.source_id = laplace.source_id('%s'))",
                 c->document_source);
         appendStringInfoString(&q,
             "), book_sent AS ("

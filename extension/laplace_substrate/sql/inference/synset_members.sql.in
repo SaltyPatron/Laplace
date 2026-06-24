@@ -1,0 +1,26 @@
+-- inference/synset_members.sql.in
+-- A word's synset co-members reached through the shared synset: word -> senses -> synset,
+-- then the synset's IS_SYNONYM_OF members (both edge directions). synonyms() keeps the
+-- SAME-language co-members; translations() keeps the cross-language ones — synonymy and
+-- translation are the two halves of one emergent structure, never stored as direct edges.
+-- mu is the Glicko-2 conservative strength eff_mu(rating, rd) of the membership edge.
+CREATE OR REPLACE FUNCTION synset_members(p_word bytea)
+    RETURNS TABLE(member bytea, lang bytea, mu bigint, witnesses bigint)
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+    SET search_path = @extschema@, public AS $$
+    WITH syn AS (SELECT DISTINCT synset_id AS id FROM senses(p_word)),
+    members AS (
+        SELECT c.object_id AS w, c.rating, c.rd, c.witness_count
+        FROM consensus c JOIN syn ON c.subject_id = syn.id
+        WHERE c.type_id = relation_type_id('IS_SYNONYM_OF') AND c.object_id IS NOT NULL
+        UNION ALL
+        SELECT c.subject_id AS w, c.rating, c.rd, c.witness_count
+        FROM consensus c JOIN syn ON c.object_id = syn.id
+        WHERE c.type_id = relation_type_id('IS_SYNONYM_OF')
+    )
+    SELECT m.w, word_language(m.w),
+           max(eff_mu(m.rating, m.rd)) AS mu, sum(m.witness_count)::bigint AS witnesses
+    FROM members m
+    WHERE m.w <> p_word
+    GROUP BY m.w
+$$;

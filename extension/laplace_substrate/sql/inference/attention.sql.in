@@ -1,0 +1,48 @@
+-- inference/attention.sql.in
+-- The SQL-transformer attention head. A query word attends over the entities it is
+-- consensus-connected to (plus its synset co-members); the attention WEIGHT is the Glicko-2
+-- conservative strength eff_mu(rating, rd) — this is what replaces geometric nearest-neighbor,
+-- which on the densely-packed 3-sphere is semantically noisy. The S3 position (angular
+-- geodesic between the two coords on the glome) is reported alongside as the geometric
+-- annotation, fusing the embedding geometry with the consensus attention in one read.
+CREATE OR REPLACE FUNCTION attention(p_word bytea, p_k int DEFAULT 12)
+    RETURNS TABLE(neighbor text, relation text, attention double precision,
+                  geodesic double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    WITH qcoord AS (
+        SELECT coord FROM physicalities WHERE entity_id = p_word AND type = 1 LIMIT 1),
+    edges AS (
+        SELECT c.object_id AS nb, c.type_id, eff_mu(c.rating, c.rd) AS mu
+        FROM consensus c
+        WHERE c.subject_id = p_word AND c.object_id IS NOT NULL
+          -- exclude the positional/grammatical scaffolding (sequence order, POS, morphology,
+          -- aliasing): those are the substrate's "positional encoding", not semantic attention.
+          AND c.type_id NOT IN (relation_type_id('HAS_LANGUAGE'),
+                                relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
+                                relation_type_id('PRECEDES'), relation_type_id('FOLLOWS'),
+                                relation_type_id('HAS_POS'), relation_type_id('HAS_XPOS'),
+                                relation_type_id('HAS_FEATURE'), relation_type_id('HAS_LEX_CATEGORY'),
+                                relation_type_id('HAS_NAME_ALIAS'), relation_type_id('IS_LEMMA_OF'),
+                                relation_type_id('HAS_LANGUAGE_SCOPE'), relation_type_id('HAS_LANGUAGE_TYPE'))
+        UNION ALL
+        SELECT sm.member, relation_type_id('IS_SYNONYM_OF'), sm.mu
+        FROM synset_members(p_word) sm
+    ),
+    best AS (
+        SELECT nb, (array_agg(type_id ORDER BY mu DESC))[1] AS type_id, max(mu) AS mu
+        FROM edges WHERE nb <> p_word GROUP BY nb)
+    SELECT t.neighbor, t.relation, t.attention, t.geodesic
+    FROM (
+        SELECT label(b.nb) AS neighbor, type_label(b.type_id) AS relation,
+               (b.mu::double precision / 1e9) AS attention,
+               CASE WHEN qc.coord IS NOT NULL AND p.coord IS NOT NULL
+                    THEN laplace_angular_distance_4d(p.coord, qc.coord) END AS geodesic
+        FROM best b
+        LEFT JOIN physicalities p ON p.entity_id = b.nb AND p.type = 1
+        CROSS JOIN qcoord qc
+    ) t
+    WHERE NULLIF(btrim(t.neighbor), '') IS NOT NULL
+    ORDER BY t.attention DESC NULLS LAST, t.geodesic NULLS LAST
+    LIMIT p_k
+$$;
