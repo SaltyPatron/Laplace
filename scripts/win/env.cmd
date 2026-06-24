@@ -29,7 +29,8 @@ rem File-level decompose fan-out (OMW/UD/OpenSubtitles): leave LAPLACE_DECOMPOSE
 rem IngestParallelism.ResolveFileWorkers auto-scales to P-core count minus headroom. Commit pool
 rem (LAPLACE_INGEST_WORKERS above) is separate and I/O-bound — do not conflate the two.
 rem Within-file compose (grammar): LAPLACE_INGEST_COMPOSE_WORKERS; OMW seed-step pins this to 1.
-if not defined LAPLACE_INGEST_COMPOSE_WORKERS set "LAPLACE_INGEST_COMPOSE_WORKERS=4"
+rem Leave LAPLACE_INGEST_COMPOSE_WORKERS UNSET so the code resolves P-cores-1 (7 on a 14900KS),
+rem not a hardcoded 4. OMW's seed-step still pins it to 1 explicitly for its key-sharing race.
 if not defined LAPLACE_INGEST_BATCH set "LAPLACE_INGEST_BATCH=65536"
 if not defined LAPLACE_PERFCACHE_BIN set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ROOT%\build-win\core\perfcache\laplace_t0_perfcache.bin"
 if not defined INGEST set "INGEST=D:\Data\Ingest"

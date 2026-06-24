@@ -3,7 +3,17 @@ setlocal
 call "%~dp0env.cmd"
 set "PSQL="%PGBIN%\psql.exe" -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1"
 
-rem On hybrid Intel CPUs, consider capping max_parallel_workers near P-core count (laplace cpu-topology --p-cores).
+rem Derive PG parallelism from the real P-core count. Hybrid CPU: keep parallel workers on the fast
+rem P-cores (8 on a 14900KS), OFF the slow E-cores, and leave headroom for the client ingest pools
+rem (compose/decompose/commit) and the interactive user. Falls back to 8 if the CLI isn't built yet.
+set "PCORES=8"
+pushd "%LAPLACE_ROOT%\app" >nul 2>&1
+for /f "usebackq delims=" %%i in (`dotnet run --project Laplace.Cli\Laplace.Cli.csproj -c Release --no-build -- cpu-topology --p-cores 2^>nul`) do set "PCORES=%%i"
+popd >nul 2>&1
+set /a "PCORES=PCORES" 2>nul || set "PCORES=8"
+if %PCORES% lss 1 set "PCORES=8"
+set /a "PGATHER=(PCORES+1)/2"
+echo tune-pg: P-cores=%PCORES% -^> max_parallel_workers=%PCORES%, per_gather=%PGATHER%, maintenance_workers=%PGATHER%
 %PSQL% ^
  -c "ALTER SYSTEM SET shared_buffers = '12GB';" ^
  -c "ALTER SYSTEM SET effective_cache_size = '32GB';" ^
@@ -17,11 +27,12 @@ rem On hybrid Intel CPUs, consider capping max_parallel_workers near P-core coun
  -c "ALTER SYSTEM SET checkpoint_completion_target = 0.9;" ^
  -c "ALTER SYSTEM SET max_connections = 200;" ^
  -c "ALTER SYSTEM SET max_worker_processes = 32;" ^
- -c "ALTER SYSTEM SET max_parallel_workers = 24;" ^
- -c "ALTER SYSTEM SET max_parallel_workers_per_gather = 8;" ^
- -c "ALTER SYSTEM SET max_parallel_maintenance_workers = 8;" ^
+ -c "ALTER SYSTEM SET max_parallel_workers = %PCORES%;" ^
+ -c "ALTER SYSTEM SET max_parallel_workers_per_gather = %PGATHER%;" ^
+ -c "ALTER SYSTEM SET max_parallel_maintenance_workers = %PGATHER%;" ^
  -c "ALTER SYSTEM SET wal_buffers = '128MB';" ^
  -c "ALTER SYSTEM SET effective_io_concurrency = 256;" ^
+ -c "ALTER SYSTEM SET maintenance_io_concurrency = 256;" ^
  -c "ALTER SYSTEM SET random_page_cost = 1.1;" ^
  -c "ALTER SYSTEM SET autovacuum_vacuum_cost_delay = 0;" ^
  || exit /b 1

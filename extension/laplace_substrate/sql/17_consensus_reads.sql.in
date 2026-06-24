@@ -5,7 +5,9 @@ CREATE OR REPLACE FUNCTION top_relations(p_limit integer DEFAULT 50, p_type byte
            eff_mu_display(c.rating, c.rd), c.witness_count
     FROM consensus c
     WHERE c.object_id IS NOT NULL AND (p_type IS NULL OR c.type_id = p_type)
-    ORDER BY eff_mu(c.rating, c.rd) DESC
+    -- rank-weighted: when p_type pins one relation the rank factor is constant (pure eff_mu order);
+    -- when scanning all relations, salient ones surface above scaffolding within the LIMIT.
+    ORDER BY relation_rank_resolved(c.type_id) * (eff_mu(c.rating, c.rd) / 1e9) DESC
     LIMIT p_limit
 $$;
 
@@ -15,7 +17,8 @@ CREATE OR REPLACE FUNCTION completions(p_subject bytea, p_limit integer DEFAULT 
     SELECT c.object_id, c.type_id, eff_mu_display(c.rating, c.rd), c.witness_count
     FROM consensus c
     WHERE c.subject_id = p_subject AND c.object_id IS NOT NULL
-    ORDER BY eff_mu(c.rating, c.rd) DESC
+    -- rank-weighted: salient completions (meaning) outrank grammatical scaffolding in the LIMIT cut.
+    ORDER BY relation_rank_resolved(c.type_id) * (eff_mu(c.rating, c.rd) / 1e9) DESC
     LIMIT p_limit
 $$;
 
@@ -26,7 +29,8 @@ CREATE OR REPLACE FUNCTION consensus_out(p_id bytea, p_limit integer DEFAULT 40)
     SELECT c.type_id, c.object_id, c.rating, c.rd, c.volatility, c.witness_count
     FROM consensus c
     WHERE c.subject_id = p_id
-    ORDER BY eff_mu(c.rating, c.rd) DESC
+    -- rank-weighted: salient out-edges surface above scaffolding so the LIMIT keeps meaning.
+    ORDER BY relation_rank_resolved(c.type_id) * (eff_mu(c.rating, c.rd) / 1e9) DESC
     LIMIT p_limit
 $$;
 
@@ -37,8 +41,40 @@ CREATE OR REPLACE FUNCTION consensus_in(p_id bytea, p_limit integer DEFAULT 40)
     SELECT c.subject_id, c.type_id, c.rating, c.rd, c.volatility, c.witness_count
     FROM consensus c
     WHERE c.object_id = p_id
-    ORDER BY eff_mu(c.rating, c.rd) DESC
+    -- rank-weighted: salient in-edges surface above scaffolding so the LIMIT keeps meaning.
+    ORDER BY relation_rank_resolved(c.type_id) * (eff_mu(c.rating, c.rd) / 1e9) DESC
     LIMIT p_limit
+$$;
+
+-- Decoder ring (Lane C): given a batch of circuit (subject||object) token pairs — each element a
+-- 32-byte concatenation of the two 16-byte content addresses — return, per pair, the STRONGEST
+-- relation those two tokens already hold in consensus (the seed knowledge: IS_A, SYNONYM, …). The
+-- caller (HeadClassifier) tallies the returned relation_types across a circuit's strongest pairs to
+-- decide what that (layerL.headH) circuit ENCODES. Set-based: collapses what would otherwise be one
+-- round-trip per sampled pair into a single call.
+CREATE OR REPLACE FUNCTION classify_circuit(p_pairs bytea[])
+    RETURNS TABLE(subject_id bytea, object_id bytea, type_id bytea, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+    WITH pairs AS (
+        SELECT substring(p FROM 1 FOR 16)  AS subj,
+               substring(p FROM 17 FOR 16) AS obj
+        FROM unnest(p_pairs) AS p
+        WHERE octet_length(p) = 32
+    ),
+    ranked AS (
+        SELECT pr.subj, pr.obj, c.type_id,
+               eff_mu_display(c.rating, c.rd) AS emu,
+               c.witness_count                AS w,
+               row_number() OVER (
+                   PARTITION BY pr.subj, pr.obj
+                   ORDER BY eff_mu(c.rating, c.rd) DESC) AS rn
+        FROM pairs pr
+        JOIN consensus c
+          ON c.subject_id = pr.subj AND c.object_id = pr.obj
+    )
+    SELECT subj, obj, type_id, emu, w
+    FROM ranked
+    WHERE rn = 1
 $$;
 
 CREATE OR REPLACE FUNCTION walk_branches(

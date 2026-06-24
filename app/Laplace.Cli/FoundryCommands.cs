@@ -520,10 +520,16 @@ internal static class FoundryCommands
         
         Task<FoundryExport.PlaneCoo> LayerAsync(double lo, double hi)
             => FoundryExport.ReadLayerPlaneAsync(ds, lo, hi, tokenSlots, degreeCap);
-        var simTask = LayerAsync(0.50, 0.60);   
-        var relTask = LayerAsync(0.68, 0.86);   
-        var preTask = LayerAsync(0.60, 0.68);   
-        var attTask = LayerAsync(0.30, 0.50);   
+        // Bands map to rank CLASSES in engine/manifest/relation_types.toml [ranks]. They were
+        // silently broken by the rank recalibration: definitional(0.97)/taxonomic(0.90)/mandate(1.0)
+        // moved ABOVE the old 0.86 ceiling, so the "what IS X" backbone (IS_A, HAS_DEFINITION,
+        // hypernyms) was excluded from embed + every operator → starved layers, bigram lm_head.
+        // Each band stays bound to ONE role; scaffolding (lexical_glue 0.18, scalar 0.12,
+        // standards_structural 0.08, probationary 0.05) stays excluded — sequence enters via `traj`.
+        var simTask = LayerAsync(0.78, 0.87);   // equivalence(0.82)                       → embed identity (synonym clustering)
+        var relTask = LayerAsync(0.70, 1.001);  // partitive+taxonomic+definitional+mandate → V/O taxonomic routing ("what is X")
+        var preTask = LayerAsync(0.55, 0.70);   // causal(0.64)                             → FFN
+        var attTask = LayerAsync(0.30, 0.52);   // associative(0.36)+oppositional(0.45)     → attention
         await Task.WhenAll(simTask, relTask, preTask, attTask);
         var sim = FoundryExport.Normalize(simTask.Result);
         var rel = FoundryExport.Normalize(relTask.Result);

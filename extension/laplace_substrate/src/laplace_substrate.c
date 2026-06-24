@@ -342,6 +342,131 @@ pg_laplace_entities_exist_bitmap(PG_FUNCTION_ARGS)
     PG_RETURN_BYTEA_P(result);
 }
 
+PG_FUNCTION_INFO_V1(pg_laplace_content_descent_bitmap);
+
+/*
+ * content_descent_bitmap(ids bytea[], parents int[]) -> bytea
+ *
+ * The top-down O(tier) containment probe. Same return contract as entities_exist_bitmap (bit i set
+ * ⟺ candidate i is PRESENT, LSB-first), but tree-aware: parents[k] is the 0-based index of node k's
+ * parent (< 0 = root). The substrate is a content-addressed Merkle DAG, so a present trunk implies
+ * its whole subtree is present; the recursive descent only checks nodes under a novel parent and
+ * never expands a present trunk's children — O(tier-depth) DB checks, not O(nodes). Drop-in for the
+ * flat entities_exist_bitmap; the caller's existing bit-walk and the native content emit consume it
+ * unchanged. The bitmap is built here in C so the LSB-first convention lives in one place.
+ */
+Datum
+pg_laplace_content_descent_bitmap(PG_FUNCTION_ARGS)
+{
+    ArrayType*  ids_array;
+    ArrayType*  par_array;
+    int         candidate_count;
+    int         parent_count;
+    int         bitmap_bytes;
+    bytea*      result;
+    uint8*      bm;
+    Oid         argtypes[2];
+    Datum       args[2];
+    int         spi_rc;
+    uint64      i;
+
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
+        ereport(ERROR,
+            (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+             errmsg("content_descent_bitmap: ids and parents must not be NULL")));
+
+    ids_array = PG_GETARG_ARRAYTYPE_P(0);
+    par_array = PG_GETARG_ARRAYTYPE_P(1);
+
+    if (ARR_NDIM(ids_array) > 1 || ARR_NDIM(par_array) > 1)
+        ereport(ERROR,
+            (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+             errmsg("content_descent_bitmap: arrays must be 1-dimensional")));
+    if (ARR_ELEMTYPE(ids_array) != BYTEAOID)
+        ereport(ERROR,
+            (errcode(ERRCODE_DATATYPE_MISMATCH),
+             errmsg("content_descent_bitmap: ids element type must be bytea")));
+    if (ARR_ELEMTYPE(par_array) != INT4OID)
+        ereport(ERROR,
+            (errcode(ERRCODE_DATATYPE_MISMATCH),
+             errmsg("content_descent_bitmap: parents element type must be int4")));
+    if (ARR_HASNULL(ids_array) || ARR_HASNULL(par_array))
+        ereport(ERROR,
+            (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+             errmsg("content_descent_bitmap: arrays must not contain NULL")));
+
+    candidate_count = ARR_NDIM(ids_array) == 0
+                      ? 0 : ArrayGetNItems(ARR_NDIM(ids_array), ARR_DIMS(ids_array));
+    parent_count    = ARR_NDIM(par_array) == 0
+                      ? 0 : ArrayGetNItems(ARR_NDIM(par_array), ARR_DIMS(par_array));
+    if (candidate_count != parent_count)
+        ereport(ERROR,
+            (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+             errmsg("content_descent_bitmap: ids and parents length mismatch (%d vs %d)",
+                    candidate_count, parent_count)));
+
+    bitmap_bytes = (candidate_count + 7) / 8;
+    result = (bytea*) palloc(VARHDRSZ + bitmap_bytes);
+    SET_VARSIZE(result, VARHDRSZ + bitmap_bytes);
+    bm = (uint8*) VARDATA(result);
+    /* start ALL PRESENT; the descent clears the bit of every node it proves novel. Nodes never
+     * visited (under a present trunk) stay present — exactly the containment invariant. */
+    if (bitmap_bytes > 0)
+        memset(bm, 0xFF, bitmap_bytes);
+
+    if (candidate_count == 0)
+        PG_RETURN_BYTEA_P(result);
+
+    if (SPI_connect() != SPI_OK_CONNECT)
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("content_descent_bitmap: SPI_connect failed")));
+
+    argtypes[0] = BYTEAARRAYOID; args[0] = PointerGetDatum(ids_array);
+    argtypes[1] = INT4ARRAYOID;  args[1] = PointerGetDatum(par_array);
+
+    spi_rc = SPI_execute_with_args(
+        "WITH RECURSIVE nodes(idx, id, parent) AS ("
+        "    SELECT (u.ord - 1)::int, u.id, ($2)[u.ord] "
+        "    FROM unnest($1::bytea[]) WITH ORDINALITY u(id, ord)), "
+        "descent AS ("
+        "    SELECT n.idx, NOT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id = n.id) AS novel "
+        "    FROM nodes n WHERE n.parent < 0 "
+        "  UNION ALL "
+        "    SELECT c.idx, NOT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id = c.id) "
+        "    FROM descent d JOIN nodes c ON c.parent = d.idx WHERE d.novel) "
+        "SELECT idx FROM descent WHERE novel",
+        2, argtypes, args, NULL, true, 0);
+
+    if (spi_rc != SPI_OK_SELECT)
+    {
+        SPI_finish();
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("content_descent_bitmap: descent failed (rc=%d)", spi_rc)));
+    }
+
+    for (i = 0; i < SPI_processed; i++)
+    {
+        bool   isnull;
+        Datum  d = SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1, &isnull);
+        if (!isnull)
+        {
+            int pos = DatumGetInt32(d);
+            if (pos >= 0 && pos < candidate_count)
+                bm[pos >> 3] &= (uint8) ~(1u << (pos & 7u));   /* novel ⇒ clear PRESENT */
+        }
+    }
+
+    SPI_finish();
+
+    /* keep padding bits beyond candidate_count clear, matching entities_exist_bitmap */
+    if (bitmap_bytes > 0 && (candidate_count & 7) != 0)
+        bm[bitmap_bytes - 1] &= (uint8)((1u << (candidate_count & 7)) - 1);
+
+    PG_RETURN_BYTEA_P(result);
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_intent_preflight);
 
 static bytea*

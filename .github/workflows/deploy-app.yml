@@ -204,7 +204,11 @@ jobs:
       - name: validate — health, substrate counts, real recall
         run: |
           sleep 3
-          echo "== health =="; curl -fsS http://127.0.0.1:5187/health; echo
+          echo "== liveness =="; curl -fsS http://127.0.0.1:5187/health; echo
+          # Readiness asserts substrate reachable + seeded + perfcache loaded. -f makes the
+          # 503-until-ready response fail this step, so a hollow (empty-DB / no-perfcache) stack
+          # can never validate green — the documented hollow-deploy trap, closed at the gate.
+          echo "== readiness =="; curl -fsS http://127.0.0.1:5187/health/ready; echo
           echo "== substrate counts =="
           psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 -c "SELECT metric, value FROM laplace.substrate_counts();"
           echo "== recall must answer now that wordnet is seeded =="

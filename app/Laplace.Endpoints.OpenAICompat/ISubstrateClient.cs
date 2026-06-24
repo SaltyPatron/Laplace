@@ -33,6 +33,12 @@ internal interface ISubstrateClient
     Task<IReadOnlyList<ExplainTraceStep>> ExplainTraceAsync(
         string prompt, int depth, int beam, bool includeEvidence, CancellationToken ct);
 
-    
+
     Task<EntityEvidence?> EvidenceAsync(string target, int limit, CancellationToken ct);
+
+
+    Task<ReadinessResponse> ReadinessAsync(CancellationToken ct);
+
+    // Two-level embedding for one input: S³ FORM coordinate + (optional) Glicko-2 MEANING neighbours.
+    Task<EmbeddingResult> EmbeddingAsync(string input, bool includeMeaning, int meaningLimit, CancellationToken ct);
 }

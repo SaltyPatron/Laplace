@@ -72,6 +72,7 @@ spi_exec_count(const char *sql)
     return (int64) SPI_processed;
 }
 
+
 PG_FUNCTION_INFO_V1(pg_laplace_apply_batch);
 
 Datum
@@ -106,7 +107,19 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
                  errmsg("laplace_apply_batch: SPI_connect failed")));
 
     /*
-     * (1) entities — content addresses. Anti-join the id PK; no ON CONFLICT.
+     * Bulk merge, matching the consensus fold (materialize_period_partition_fresh): triggers/FK OFF
+     * for the duration. Content is content-addressed and the client stages entities with their
+     * physicalities, so referential integrity holds by construction — the per-row FK RI trigger is
+     * pure RBAR tax (measured ~1.3 s / 50k rows). Disabling triggers does NOT disable CHECK
+     * constraints (octet_length, n_constituents) — those still fire. SET (session-scoped) on this
+     * dedicated apply connection; restored when the connection is recycled.
+     */
+    SPI_execute("SET session_replication_role = replica", false, 0);
+
+    /*
+     * (1) entities — content addresses, deduped by the id PK. Bulk insert with ON CONFLICT (id)
+     * DO NOTHING (the unique index IS the dedup — one probe, inline, no separate anti-join), sorted
+     * by id. Partition-by-id.lo%N keeps key spaces disjoint across concurrent apply calls.
      */
     if (SPI_execute(psprintf("SELECT to_regclass('%s') IS NOT NULL", stage_ent),
                     true, 1) == SPI_OK_SELECT && SPI_processed == 1)
@@ -115,25 +128,22 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
         bool present = DatumGetBool(SPI_getbinval(SPI_tuptable->vals[0],
                                                   SPI_tuptable->tupdesc, 1, &isnull));
         if (!isnull && present)
-        {
             ent_ins = spi_exec_count(psprintf(
                 "INSERT INTO laplace.entities "
                 "  (id, tier, type_id, first_observed_by, created_at) "
                 "SELECT DISTINCT ON (s.id) "
                 "       s.id, s.tier, s.type_id, s.first_observed_by, s.created_at "
-                "FROM %s s "
-                "WHERE NOT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id = s.id) "
-                "ORDER BY s.id",
-                stage_ent));
-        }
+                "FROM %s s ORDER BY s.id "
+                "ON CONFLICT (id) DO NOTHING", stage_ent));
     }
 
     /*
-     * (2) physicalities — keyed by the content-addressed id ALONE (like entities).
-     * id = BLAKE3(entity_id|type|coord|trajectory); under bit-perfect determinism
-     * id = f(entity,type), so the id anti-join is exact. No (entity_id,type) natural
-     * key, no ON CONFLICT. (O(rows) anti-join today; the O(tier) merkle trunk-descent
-     * over the batch's tier tree is the follow-up that flows the tree compose->apply.)
+     * (2) physicalities — same generic core, SPATIAL strategy: the hilbert-range
+     * cursor scan fills the existing_bitmap (sequential range scan on the clustered
+     * heap, not random id-PK probes), then the SAME merkle_dedup_filter_novel +
+     * INSERT … WHERE s.id = ANY($1). The inner DISTINCT ON (s.id) keeps within-batch
+     * dedup; the outer ORDER BY hilbert_index appends to the heap in space-filling
+     * order (clustered-by-construction).
      */
     if (SPI_execute(psprintf("SELECT to_regclass('%s') IS NOT NULL", stage_phys),
                     true, 1) == SPI_OK_SELECT && SPI_processed == 1)
@@ -142,27 +152,22 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
         bool present = DatumGetBool(SPI_getbinval(SPI_tuptable->vals[0],
                                                   SPI_tuptable->tupdesc, 1, &isnull));
         if (!isnull && present)
-        {
+            /* dedup key is the id PK ("dedup is the hash" — no (entity_id,type) unique exists).
+             * DISTINCT ON (s.id) collapses within-batch repeats; ON CONFLICT (id) DO NOTHING is the
+             * cross-batch dedup (one inline probe, no separate anti-join). Inner ORDER BY id for the
+             * DISTINCT ON; outer ORDER BY hilbert_index appends to the heap in space-filling order. */
             phys_ins = spi_exec_count(psprintf(
                 "INSERT INTO laplace.physicalities "
                 "  (id, entity_id, type, coord, hilbert_index, trajectory, "
                 "   n_constituents, alignment_residual, source_dim, observed_at) "
                 "SELECT d.id, d.entity_id, d.type, d.coord, d.hilbert_index, d.trajectory, "
                 "       d.n_constituents, d.alignment_residual, d.source_dim, d.observed_at "
-                /* Outer ORDER BY hilbert_index => the heap is appended in space-filling-curve
-                   order, so a content node and its spatial/constituent neighbours co-locate on
-                   the same pages (clustered-by-construction — recall/render walk locally instead
-                   of scattering across the content-hash id space). The inner DISTINCT ON (s.id)
-                   keeps the exact id dedup (no ON CONFLICT). A post-seed CLUSTER perfects it. */
                 "FROM (SELECT DISTINCT ON (s.id) "
                 "        s.id, s.entity_id, s.type, s.coord, s.hilbert_index, s.trajectory, "
                 "        s.n_constituents, s.alignment_residual, s.source_dim, s.observed_at "
-                "      FROM %s s "
-                "      WHERE NOT EXISTS (SELECT 1 FROM laplace.physicalities p WHERE p.id = s.id) "
-                "      ORDER BY s.id) d "
-                "ORDER BY d.hilbert_index",
-                stage_phys));
-        }
+                "      FROM %s s ORDER BY s.id) d "
+                "ORDER BY d.hilbert_index "
+                "ON CONFLICT (id) DO NOTHING", stage_phys));
     }
 
     /*
@@ -206,7 +211,10 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
                 "WHERE a.id = d.id AND a.id IN (SELECT id FROM locked)",
                 stage_att));
 
-            /* novel: INSERT the ids the substrate did not hold before this batch. */
+            /* novel: INSERT the ids the substrate did not hold before this batch, as one
+             * set-based id anti-join. The fold above ran first, so present-set and novel-set
+             * are disjoint; this inserts only the genuinely new ids (DISTINCT ON collapses any
+             * within-batch repeats). */
             att_ins = spi_exec_count(psprintf(
                 "INSERT INTO laplace.attestations "
                 "  (id, subject_id, type_id, object_id, source_id, context_id, "
@@ -216,8 +224,7 @@ pg_laplace_apply_batch(PG_FUNCTION_ARGS)
                 "       s.context_id, s.outcome, s.last_observed_at, s.observation_count "
                 "FROM %s s "
                 "WHERE NOT EXISTS (SELECT 1 FROM laplace.attestations a WHERE a.id = s.id) "
-                "ORDER BY s.id",
-                stage_att));
+                "ORDER BY s.id", stage_att));
         }
     }
 

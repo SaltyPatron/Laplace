@@ -277,7 +277,9 @@ CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT N
             WHERE c.object_id IS NOT NULL
               AND c.type_id NOT IN (relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
                                     relation_type_id('HAS_LANGUAGE'))
-            ORDER BY eff_mu(c.rating, c.rd) DESC
+            -- rank-weighted: the p_limit cut keeps salient relations (meaning) over residual
+            -- scaffolding (HAS_POS/PRECEDES/…) that the explicit filter above doesn't catch.
+            ORDER BY relation_rank_resolved(c.type_id) * (eff_mu(c.rating, c.rd) / 1e9) DESC
             LIMIT p_limit),
          
          lang(id) AS (SELECT COALESCE(p_lang, word_language(p_word))),
@@ -300,6 +302,8 @@ CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT N
            round(r.volatility / 1e9, 4), r.witness_count
     FROM rels r
     LEFT JOIN rendered rd ON rd.object_id = r.object_id
+    -- output rank-ordered too, not just the cut: salient facts first.
+    ORDER BY relation_rank_resolved(r.type_id) * (eff_mu(r.rating, r.rd) / 1e9) DESC
 $$;
 
 CREATE OR REPLACE FUNCTION gaps(p_word bytea)
@@ -451,7 +455,11 @@ CREATE OR REPLACE FUNCTION links(p_word text)
            (eff_mu(c.rating, c.rd))::float8 / 1e9 AS strength
     FROM consensus c
     WHERE c.subject_id = word_id(p_word)
-    ORDER BY strength DESC, relation
+    -- rank-weighted: order by relation salience × strength so semantically meaningful links
+    -- (IS_A/HAS_DEFINITION/SYNONYM) surface above grammatical scaffolding (HAS_LANGUAGE/HAS_POS/
+    -- PRECEDES). The returned `strength` column is unchanged (raw eff_mu); only the order changes.
+    ORDER BY relation_rank_resolved(c.type_id) * (eff_mu(c.rating, c.rd) / 1e9) DESC,
+             strength DESC, relation
 $$;
 
 #include "inference/attention.sql.in"

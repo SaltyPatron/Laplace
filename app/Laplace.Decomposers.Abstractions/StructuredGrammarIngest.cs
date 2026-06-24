@@ -116,7 +116,12 @@ public static class StructuredGrammarIngest
         string? compose = Environment.GetEnvironmentVariable("LAPLACE_INGEST_COMPOSE_WORKERS");
         if (int.TryParse(compose, out int cw) && cw >= 1)
             return cw;
-        return Math.Min(4, CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 8));
+        // Conservative default for a SHARED, in-use machine. The 8 P-cores (16 logical) must be split
+        // across the user, the GPUs/hypervisor/WSL, Postgres's own parallel workers, AND the other
+        // ingest pools (decompose file workers + commit lanes). Compose grabbing all of them starves
+        // the box — the 4 was deliberate headroom, not arbitrary. Raise LAPLACE_INGEST_COMPOSE_WORKERS
+        // for a dedicated run.
+        return Math.Min(4, CpuTopology.ResolveCpuBoundWorkers(headroom: 2, maxCap: 8));
     }
 
     private static async IAsyncEnumerable<SubstrateChange> IngestFileSerialAsync(

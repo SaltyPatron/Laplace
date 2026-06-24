@@ -26,14 +26,18 @@ public sealed class ArchitectureProfile
     
     public required IReadOnlyList<PathSpec> Paths { get; init; }
 
+    // The generic, shape-inferred pipeline (ModelManifest / TensorRoleClassifier) replaces this
+    // name-keyed profile, so unknown model_types must NOT throw — partial/unsupported is decided by
+    // the manifest's Coverage verdict, never by an exception here. Unknown types fall back to the
+    // standard HF decoder naming (model.layers.{L}.self_attn.* / mlp.*), which the manifest path
+    // will simply ignore where it does not apply.
     public static ArchitectureProfile For(string modelType) => modelType.ToLowerInvariant() switch
     {
         "llama"  => Llama,
         "phi"    => Phi,
         "qwen2"  => Qwen2,
         "bert"   => Bert,
-        _ => throw new NotSupportedException(
-            $"no ArchitectureProfile for model_type '{modelType}' — add it"),
+        _        => Llama,
     };
 
     public static readonly ArchitectureProfile Llama = new()

@@ -31,7 +31,10 @@ CREATE OR REPLACE FUNCTION attestations_out(p_id bytea, p_limit integer DEFAULT 
            a.outcome, a.observation_count
     FROM attestations a
     WHERE a.subject_id = p_id
-    ORDER BY a.observation_count DESC, a.outcome DESC
+    -- rank-weighted: semantically salient relations (HAS_DEFINITION/IS_A/…) surface above
+    -- grammatical scaffolding (HAS_LANGUAGE/HAS_POS/PRECEDES) regardless of raw witness volume,
+    -- so the LIMIT cut keeps the meaningful edges. Witness count / outcome break ties within a rank.
+    ORDER BY relation_rank_resolved(a.type_id) DESC, a.observation_count DESC, a.outcome DESC
     LIMIT p_limit
 $$;
 
@@ -44,7 +47,8 @@ CREATE OR REPLACE FUNCTION attestations_in(p_id bytea, p_limit integer DEFAULT 4
            a.outcome, a.observation_count
     FROM attestations a
     WHERE a.object_id = p_id
-    ORDER BY a.observation_count DESC, a.outcome DESC
+    -- rank-weighted: salient relations first so the LIMIT cut keeps meaning over scaffolding.
+    ORDER BY relation_rank_resolved(a.type_id) DESC, a.observation_count DESC, a.outcome DESC
     LIMIT p_limit
 $$;
 
@@ -56,7 +60,9 @@ CREATE OR REPLACE FUNCTION consensus_out_readable(p_id bytea, p_limit integer DE
            eff_mu_display(c.rating, c.rd), c.witness_count
     FROM consensus c
     WHERE c.subject_id = p_id
-    ORDER BY eff_mu(c.rating, c.rd) DESC
+    -- rank-weighted: scale strength by relation salience so meaning outranks scaffolding, and the
+    -- LIMIT cut keeps the salient rows. Bare eff_mu let high-witness grammar edges sort to the top.
+    ORDER BY relation_rank_resolved(c.type_id) * (eff_mu(c.rating, c.rd) / 1e9) DESC
     LIMIT p_limit
 $$;
 

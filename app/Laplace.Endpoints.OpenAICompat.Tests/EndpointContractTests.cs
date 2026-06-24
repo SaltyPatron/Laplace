@@ -29,6 +29,22 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
     }
 
     [Fact]
+    public async Task HealthReady_WhenSubstrateUnreachable_Returns503AndDoesNotLie()
+    {
+        // This factory wires the real SubstrateClient with no DB behind it. Readiness must
+        // report 503 + substrate_reachable=false rather than a hollow "ok". Liveness stays 200.
+        using var live = await _client.GetAsync("/health");
+        Assert.Equal(HttpStatusCode.OK, live.StatusCode);
+
+        using var response = await _client.GetAsync("/health/ready");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(json.RootElement.GetProperty("ready").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("substrate_reachable").GetBoolean());
+    }
+
+    [Fact]
     public async Task Capabilities_ExposeLiveAndPendingStatus()
     {
         using var response = await _client.GetAsync("/v1/capabilities");
@@ -41,7 +57,7 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
         Assert.Equal("live", endpoints.GetProperty("audit_reports").GetProperty("status").GetString());
         Assert.Equal("live", endpoints.GetProperty("visualizations").GetProperty("status").GetString());
         Assert.Equal("live", endpoints.GetProperty("explainability_reports").GetProperty("status").GetString());
-        Assert.Equal("pending", endpoints.GetProperty("embeddings").GetProperty("status").GetString());
+        Assert.Equal("live", endpoints.GetProperty("embeddings").GetProperty("status").GetString());
     }
 
     [Fact]
