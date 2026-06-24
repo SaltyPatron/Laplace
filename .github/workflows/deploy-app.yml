@@ -185,6 +185,13 @@ jobs:
             echo "::group::seed $s"; scripts/ingest-source.sh "$s" || echo "::warning::seed $s failed (data may be absent)"; echo "::endgroup::"
           done
 
+      # Bring the app up as soon as the foundation (through bridges) is seeded — it serves real recall
+      # immediately while the multi-hour corpora accrete behind a LIVE app. On a non-fresh push the seed
+      # steps above are skipped, so this runs right after publish (fast hot-deploy). nginx (:8080) fronts
+      # Kestrel (127.0.0.1:5187); the API was stopped at the top of the job for the file-swap + DB nuke.
+      - name: start API service
+        run: sudo systemctl start laplace-api
+
       # Multi-hour breadth corpora — opt-in only.
       - name: seed full corpora (opt-in)
         if: ${{ inputs.fresh_db == 'true' && !inputs.skip_seed && inputs.full_ladder }}
@@ -192,9 +199,6 @@ jobs:
           for s in atomic2020 conceptnet wiktionary tatoeba opensubtitles; do
             echo "::group::seed $s"; scripts/ingest-source.sh "$s" || echo "::warning::seed $s failed"; echo "::endgroup::"
           done
-
-      - name: start API service
-        run: sudo systemctl start laplace-api
 
       # ---- validate / confirm ----
       - name: validate — health, substrate counts, real recall
