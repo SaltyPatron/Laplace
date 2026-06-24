@@ -1,11 +1,18 @@
 -- inference/synset_members.sql.in
--- A word's synset co-members reached through the shared synset: word -> senses -> synset,
--- then the synset's IS_SYNONYM_OF members (both edge directions). synonyms() keeps the
--- SAME-language co-members; translations() keeps the cross-language ones — synonymy and
--- translation are the two halves of one emergent structure, never stored as direct edges.
--- mu is the Glicko-2 conservative strength eff_mu(rating, rd) of the membership edge.
+-- A word's synset co-members reached through the shared synset: word -> senses -> synset, then
+-- the synset's IS_SYNONYM_OF members (both edge directions). synonyms() keeps the SAME-language
+-- co-members; translations() keeps the cross-language ones — synonymy and translation are the
+-- two halves of one emergent structure, never stored as direct edges.
+--
+-- A member may be a homograph shared across languages — the codepoints "roi" are simultaneously
+-- French, Dutch, Indonesian, Breton, Boro, ... one content-addressed lemma carrying many
+-- HAS_LANGUAGE edges. Collapsing it to word_language()'s single arbitrary pick (bor) makes it
+-- invisible to a French query, so we EXPLODE each member over its full HAS_LANGUAGE set instead.
+-- sense_mu carries the Glicko-2 eff_mu of the SOURCE word's sense that reached the member, so
+-- dominant-sense members (king's "a male sovereign", 1154) outrank weaker senses (magnate, 1075).
+DROP FUNCTION IF EXISTS synset_members(bytea);
 CREATE OR REPLACE FUNCTION synset_members(p_word bytea)
-    RETURNS TABLE(member bytea, lang bytea, mu bigint, witnesses bigint)
+    RETURNS TABLE(member bytea, lang bytea, mu bigint, witnesses bigint, sense_mu numeric)
     LANGUAGE sql LAPLACE_STABLE_STRICT
     SET search_path = @extschema@, public AS $$
     -- Exclude named-entity (instance) synsets: a name identical across languages is a name,
@@ -14,25 +21,34 @@ CREATE OR REPLACE FUNCTION synset_members(p_word bytea)
     -- (HAS_HYPERNYM) marks real concepts (monarch, magnate). Dropping instance synsets here keeps
     -- both synonyms() and translations() to lexical equivalents only.
     WITH syn AS (
-        SELECT DISTINCT s.synset_id AS id
+        SELECT s.synset_id AS id, max(s.eff_mu) AS sense_mu
         FROM senses(p_word) s
         WHERE NOT EXISTS (
             SELECT 1 FROM consensus i
             WHERE i.subject_id = s.synset_id
               AND i.type_id = relation_type_id('IS_INSTANCE_OF'))
+        GROUP BY s.synset_id
     ),
     members AS (
-        SELECT c.object_id AS w, c.rating, c.rd, c.witness_count
+        SELECT c.object_id AS w, c.rating, c.rd, c.witness_count, syn.sense_mu
         FROM consensus c JOIN syn ON c.subject_id = syn.id
         WHERE c.type_id = relation_type_id('IS_SYNONYM_OF') AND c.object_id IS NOT NULL
         UNION ALL
-        SELECT c.subject_id AS w, c.rating, c.rd, c.witness_count
+        SELECT c.subject_id AS w, c.rating, c.rd, c.witness_count, syn.sense_mu
         FROM consensus c JOIN syn ON c.object_id = syn.id
         WHERE c.type_id = relation_type_id('IS_SYNONYM_OF')
+    ),
+    agg AS (
+        SELECT m.w,
+               max(eff_mu(m.rating, m.rd)) AS mu,
+               sum(m.witness_count)::bigint AS witnesses,
+               max(m.sense_mu) AS sense_mu
+        FROM members m
+        WHERE m.w <> p_word
+        GROUP BY m.w
     )
-    SELECT m.w, word_language(m.w),
-           max(eff_mu(m.rating, m.rd)) AS mu, sum(m.witness_count)::bigint AS witnesses
-    FROM members m
-    WHERE m.w <> p_word
-    GROUP BY m.w
+    SELECT a.w, hl.object_id AS lang, a.mu::bigint, a.witnesses, a.sense_mu
+    FROM agg a
+    LEFT JOIN consensus hl
+      ON hl.subject_id = a.w AND hl.type_id = relation_type_id('HAS_LANGUAGE')
 $$;
