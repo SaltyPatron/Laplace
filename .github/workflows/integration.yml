@@ -258,6 +258,12 @@ jobs:
 
   db-deploy:
     name: Install extensions + apply DbUp migrations (Layer 1)
+    # DESTRUCTIVE (db-nuke + reseed + model) and shares the live `laplace` DB with deploy-app — running
+    # it on every push raced deploy-app and wiped the seeded DB (the "second process that redoes it").
+    # Explicit dispatch only. The build/capability check jobs above (engine/postgis/gdal/dotnet/…) still
+    # run on push as non-destructive CI; everything downstream of db-deploy (dotnet-test/regress) gates
+    # with it. TODO: point this at a throwaway laplace-ci DB so even a dispatch can't touch prod.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     needs: [engine, dotnet]
     runs-on: [self-hosted, laplace]
     steps:
