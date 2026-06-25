@@ -57,7 +57,14 @@ public static class PosReference
     {
         Hash128 posId = NativeAttestation.ResolvePos(tag, tagset, out bool probationary);
         if (probationary)
+        {
             b.AddEntity(new EntityRow(posId, EntityTier.Vocabulary, PosTypeId, sourceId));
+            // A non-UPOS-mappable tag gets its source-tag string as a substrate-native name so it is
+            // legible/walkable instead of a code-table-only island. DB folds the repeat emissions.
+            if (ContentWitnessBatch.Emit(b, tag, sourceId) is { } nameId)
+                b.AddAttestation(NativeAttestation.Categorical(
+                    posId, "HAS_NAME_ALIAS", nameId, sourceId, null, sourceTrust));
+        }
         VocabularyNames.TrackProbationaryPos(readbackNames, tag, tagset);
         b.AddAttestation(NativeAttestation.Categorical(
             subject, "HAS_POS", posId, sourceId, contextId, sourceTrust,
@@ -72,6 +79,14 @@ public static class PosReference
         builder.AddEntity(new EntityRow(PosTypeId, EntityTier.Vocabulary,
             BootstrapIntentBuilder.TypeMetaTypeId, sourceId));
         foreach (var tag in Canonical)
-            builder.AddEntity(new EntityRow(CanonicalId(tag), EntityTier.Vocabulary, PosTypeId, sourceId));
+        {
+            Hash128 posId = CanonicalId(tag);
+            builder.AddEntity(new EntityRow(posId, EntityTier.Vocabulary, PosTypeId, sourceId));
+            // Substrate-native legibility: the UPOS tag name is a codepoint-walk content entity reached
+            // by HAS_NAME_ALIAS, so POS categories render without a canonical_names code-table row.
+            if (ContentWitnessBatch.Emit(builder, tag, sourceId) is { } nameId)
+                builder.AddAttestation(NativeAttestation.Categorical(
+                    posId, "HAS_NAME_ALIAS", nameId, sourceId, null, SourceTrust.SubstrateMandate));
+        }
     }
 }

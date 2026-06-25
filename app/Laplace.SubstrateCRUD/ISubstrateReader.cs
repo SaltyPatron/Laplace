@@ -17,6 +17,16 @@ public interface ISubstrateReader
 
     Task<byte[]> EntitiesExistBitmapAsync(IReadOnlyList<Hash128> candidates, CancellationToken ct = default);
 
+    // Mark ids as proven-present in the reader's session seen-set (content is immutable ⇒ permanent).
+    // The deferred-content path calls this after staging a batch so re-emitted content is never
+    // re-probed or re-staged. Default no-op for readers without a seen-set (test doubles).
+    void MarkProven(IReadOnlyList<Hash128> ids) { }
+
+    // compose IS the dedup: cache a canonical's natural-unit root so a re-seen canonical skips
+    // BuildContentTree entirely and just attests via the cached root. Defaults: no cache (test doubles).
+    bool TryGetCachedRoot(Hash128 canonicalKey, out Hash128 rootId) { rootId = default; return false; }
+    void CacheRoot(Hash128 canonicalKey, Hash128 rootId) { }
+
     // Top-down O(tier) containment probe: same present-bitmap contract as EntitiesExistBitmapAsync
     // (bit k set ⟺ candidate k present) but tree-aware — parents[k] = 0-based parent index, <0 = root;
     // a present trunk short-circuits its subtree. Default: fall back to the flat probe (ignores the

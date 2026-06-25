@@ -69,8 +69,12 @@ public class RelationTypeRegistryTests
     [Fact]
     public void SeedEnhancedDeprel_SubtypedRel_StagesParentChain()
     {
+        // SeedDynamic now emits a substrate-native HAS_NAME_ALIAS for the type name (content witness),
+        // matching SeedCanonical — so the T0 perfcache must be loaded and the type-name codepoint walk
+        // needs room beyond the bare entity + IS_A chain.
+        CodepointPerfcache.LoadDefault();
         var b = new SubstrateChangeBuilder(Hash128.OfCanonical("src"), "test/edep", null,
-            entityCapacity: 8, physicalityCapacity: 0, attestationCapacity: 8);
+            entityCapacity: 64, physicalityCapacity: 64, attestationCapacity: 64);
         RelationTypeRegistry.SeedEnhancedDeprel(b, "advcl:cond", Hash128.OfCanonical("src"),
             new HashSet<Hash128>(), new ConcurrentIdSet());
         var change = b.Build();

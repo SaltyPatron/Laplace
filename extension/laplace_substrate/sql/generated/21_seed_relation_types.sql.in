@@ -89,6 +89,7 @@ FROM (VALUES
     ('substrate/type/HAS_SENSE_OF/v1'),
     ('substrate/type/HAS_SUBEVENT/v1'),
     ('substrate/type/HAS_SUBSTANCE/v1'),
+    ('substrate/type/HAS_SYNSET_KEY/v1'),
     ('substrate/type/HAS_THEMATIC_ROLE/v1'),
     ('substrate/type/HAS_TITLECASE_MAPPING/v1'),
     ('substrate/type/HAS_UPOS/v1'),

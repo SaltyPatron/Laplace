@@ -24,10 +24,13 @@ deploy\windows\Install-LaplaceSite.ps1          # site 'Laplace' on http://local
 copy deploy\windows\laplace-api.env.example deploy\windows\laplace-api.env
 
 # 3. build SPA + publish API + inject env into web.config + sync to the site
-deploy\windows\publish.ps1                       # -> C:\inetpub\laplace-api
+deploy\windows\publish.ps1                       # -> D:\Data\inetsrv\laplace-api
 ```
 
 Redeploy = re-run `publish.ps1`. IIS recycles the app pool on `web.config` change.
+The site's physical path is **`D:\Data\inetsrv\laplace-api`** (a user-writable folder, NOT
+`C:\inetpub`) so `publish.ps1` syncs into it with no elevation — only the one-time
+`Install-LaplaceSite.ps1` (IIS metabase config) needs admin.
 
 ## hart-server (Linux, nginx + systemd, LAN-only)
 

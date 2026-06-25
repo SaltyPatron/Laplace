@@ -215,3 +215,7 @@ jobs:
           curl -fsS -X POST http://127.0.0.1:5187/v1/chat/completions \
             -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
             --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}'
+          echo; echo "== embeddings: two-level form (S³) + meaning (Glicko-2) =="
+          curl -fsS -X POST http://127.0.0.1:5187/v1/embeddings \
+            -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
+            --data '{"model":"laplace-embed-meaning-001","input":"dog"}'

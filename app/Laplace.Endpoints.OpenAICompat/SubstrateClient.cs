@@ -37,61 +37,47 @@ internal sealed class SubstrateClient : ISubstrateClient, IAsyncDisposable
     public async Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
         IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct)
     {
-        const string sql = "SELECT reply, eff_mu, witnesses FROM laplace.recall_session(@p, @s);";
-        // recall_session is session-stateful: each call appends a row to laplace.session_topics
-        // (ord = max+1) and reads the most-recent prior topic for anaphora. The OpenAI protocol is
-        // stateless — the client resends the full history every turn — so without clearing first,
-        // session_topics accumulates the whole history again on every request and never shrinks
-        // (O(N^2) rows over a conversation, leaked until PG restart since the table is UNLOGGED and
-        // never GC'd). Rebuild the session's topic log atomically from the supplied history instead:
-        // truncate this session's rows, then replay, so the table mirrors the conversation exactly.
-        const string resetSql = "DELETE FROM laplace.session_topics WHERE session_id = @s;";
+        // De-forked from session_topics: recall(prompt, context) answers the latest turn given an
+        // explicit conversational-context id and writes nothing (STABLE, not the VOLATILE recall_session
+        // that appended to the UNLOGGED session_topics table). The context is the prior turn's topic,
+        // resolved once via resolve_topic (cheap resolution, NOT a full recall) — pronoun-aware, so
+        // "what is its size?" still binds to the prior subject. That kills the O(N²): the old path
+        // replayed every prior turn through full recall each request to rebuild ephemeral session state;
+        // here it's one resolve + one recall per request. The durable conversation record is the content
+        // trajectory TurnWitness already writes (prompts are content — decompose/compose/dedup), so the
+        // session needs no replay. recall consumes only the single most-recent context, so the
+        // immediately-prior turn is sufficient; deeper anaphora would come from that content trajectory,
+        // never a replay. The `session` arg is now unused — context derives from the turn sequence itself.
+        const string sql = """
+            SELECT reply, eff_mu, witnesses
+            FROM laplace.recall(@p, CASE WHEN @prior = '' THEN NULL
+                                         ELSE laplace.resolve_topic(@prior, NULL) END);
+            """;
         try
         {
+            var prompt = userTurns[^1];
+            var prior  = userTurns.Count >= 2 ? userTurns[^2] : "";
+
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            await using var tx = await conn.BeginTransactionAsync(ct);
+            await using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("p", prompt);
+            cmd.Parameters.AddWithValue("prior", prior);
 
-            if (session is not null)
-            {
-                await using var reset = new NpgsqlCommand(resetSql, conn, tx);
-                reset.Parameters.Add(new NpgsqlParameter("s", NpgsqlDbType.Bytea) { Value = session });
-                await reset.ExecuteNonQueryAsync(ct);
-            }
-
-            // Only the final turn's reply is returned; the earlier turns are replayed purely to
-            // re-seed session context. (That replay is still O(N) recall calls per request — the
-            // deeper win is a recall-side "record context turn" entrypoint that resolves+inserts a
-            // topic without the full render; that's a recall-layer change, flagged separately.)
             var rows = new List<ConverseRow>(8);
-            for (int turn = 0; turn < userTurns.Count; turn++)
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
             {
-                bool isLast = turn + 1 == userTurns.Count;
-                await using var cmd = new NpgsqlCommand(sql, conn, tx);
-                cmd.Parameters.AddWithValue("p", userTurns[turn]);
-                cmd.Parameters.Add(new NpgsqlParameter("s", NpgsqlDbType.Bytea)
-                    { Value = (object?)session ?? DBNull.Value });
-
-                await using var reader = await cmd.ExecuteReaderAsync(ct);
-                while (await reader.ReadAsync(ct))
-                {
-                    if (!isLast) continue;
-                    var reply = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
-                    var mu = reader.IsDBNull(1) ? 0m : reader.GetDecimal(1);
-                    var witnesses = reader.IsDBNull(2) ? 0L : reader.GetInt64(2);
-                    rows.Add(new ConverseRow(reply, mu, witnesses));
-                }
+                var reply = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+                var mu = reader.IsDBNull(1) ? 0m : reader.GetDecimal(1);
+                var witnesses = reader.IsDBNull(2) ? 0L : reader.GetInt64(2);
+                rows.Add(new ConverseRow(reply, mu, witnesses));
             }
-
-            await tx.CommitAsync(ct);
             return rows;
         }
         catch (PostgresException pg)
         {
-            
-            
-            
             throw new SubstrateQueryException(
-                $"recall_session query failed [{pg.SqlState}] {pg.MessageText}"
+                $"recall query failed [{pg.SqlState}] {pg.MessageText}"
                 + (pg.Where is null ? "" : $" @ {pg.Where}"), pg);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)

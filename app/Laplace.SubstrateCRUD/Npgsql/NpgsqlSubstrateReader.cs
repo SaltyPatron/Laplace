@@ -55,27 +55,66 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         return result is long l ? l : 0L;
     }
 
+    // Session "proven present" set. Content is content-addressed and IMMUTABLE, so a proven id is
+    // present forever — never stale, never rebuilt. This is the seen-set/perfcache: a re-emitted trunk
+    // (re-quoted verse, repeated word, pwn15/16/17 re-ref) is a hit here and never re-probes the DB nor
+    // re-stages. Thread-safe because the reader is shared across parallel compose workers; correctness
+    // does not depend on it (apply_batch ON CONFLICT is the floor), so a racy double-add is harmless.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte> _proven = new();
+
     public async Task<byte[]> EntitiesExistBitmapAsync(IReadOnlyList<Hash128> candidates, CancellationToken ct = default)
     {
         if (candidates is null) throw new ArgumentNullException(nameof(candidates));
-        if (candidates.Count == 0) return Array.Empty<byte>();
+        int n = candidates.Count;
+        var bm = new byte[(n + 7) / 8];
+        if (n == 0) return bm;
 
-        var byteaArray = new byte[candidates.Count][];
-        for (int i = 0; i < candidates.Count; i++) byteaArray[i] = candidates[i].ToBytes();
+        // Seen-set first: proven ids are present by construction — no DB probe. Only the UNKNOWNS hit
+        // the DB. This is what drives the re-emission tax to zero round-trips.
+        var unknownIdx = new List<int>(n);
+        for (int i = 0; i < n; i++)
+        {
+            if (_proven.ContainsKey(candidates[i])) bm[i >> 3] |= (byte)(1 << (i & 7));
+            else unknownIdx.Add(i);
+        }
+        if (unknownIdx.Count == 0) return bm;   // everything already proven — zero DB work
 
-        await using var cmd = _ds.CreateCommand(
-            "SELECT laplace.entities_exist_bitmap($1)");
+        var byteaArray = new byte[unknownIdx.Count][];
+        for (int u = 0; u < unknownIdx.Count; u++) byteaArray[u] = candidates[unknownIdx[u]].ToBytes();
+
+        await using var cmd = _ds.CreateCommand("SELECT laplace.entities_exist_bitmap($1)");
         var p = cmd.Parameters.AddWithValue(byteaArray);
         p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
         var result = await cmd.ExecuteScalarAsync(ct);
-        return result switch
+        var dbBm = result as byte[] ?? Array.Empty<byte>();
+        long dbBits = (long)dbBm.Length * 8;
+
+        // Map the unknowns' DB results back to the candidate bitmap; cache the present ones (immutable).
+        for (int u = 0; u < unknownIdx.Count; u++)
         {
-            byte[] bytes => bytes,
-            null         => Array.Empty<byte>(),
-            _            => throw new InvalidOperationException(
-                $"entities_exist_bitmap returned unexpected type: {result.GetType()}")
-        };
+            if (u < dbBits && (dbBm[u >> 3] & (1 << (u & 7))) != 0)
+            {
+                int i = unknownIdx[u];
+                bm[i >> 3] |= (byte)(1 << (i & 7));
+                _proven.TryAdd(candidates[i], 1);
+            }
+        }
+        return bm;
     }
+
+    public void MarkProven(IReadOnlyList<Hash128> ids)
+    {
+        if (ids is null) return;
+        for (int i = 0; i < ids.Count; i++) _proven.TryAdd(ids[i], 1);
+    }
+
+    // Canonical-hash → natural-unit-root cache. compose IS the dedup: a canonical already composed this
+    // session has a known, immutable content-address, so the expensive BuildContentTree (BLAKE3 +
+    // geometry per node) is skipped on re-occurrence — the occurrence just attests via the cached root.
+    // Session-scoped, thread-safe across the parallel compose workers.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, Hash128> _rootCache = new();
+    public bool TryGetCachedRoot(Hash128 canonicalKey, out Hash128 rootId) => _rootCache.TryGetValue(canonicalKey, out rootId);
+    public void CacheRoot(Hash128 canonicalKey, Hash128 rootId) => _rootCache.TryAdd(canonicalKey, rootId);
 
     /// <summary>
     /// Top-down O(tier) containment probe — the tree-aware sibling of

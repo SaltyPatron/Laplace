@@ -177,7 +177,12 @@ public sealed class CILIDecomposer : IDecomposer
             int sep = line.IndexOf('\t');
             if (sep <= 0) continue;
             string ili = line[..sep].Trim();
-            string offsetPos = line[(sep + 1)..].Trim();
+            // Take ONLY the second column. Some ili-map rows carry a trailing 3rd field; the previous
+            // `line[(sep+1)..]` swept it into the synset key (e.g. "01927847-n\t1"), corrupting the
+            // content so those keys never converged with the bare "01927847-n" the wordnets emit.
+            string rest = line[(sep + 1)..];
+            int sep2 = rest.IndexOf('\t');
+            string offsetPos = (sep2 >= 0 ? rest[..sep2] : rest).Trim();
             if (ili.Length == 0 || offsetPos.Length == 0 || ili[0] != 'i') continue;
             yield return (ili, offsetPos, version);
         }

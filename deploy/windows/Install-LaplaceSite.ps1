@@ -12,7 +12,7 @@ param(
   [string]$SiteName     = "Laplace",
   [string]$PoolName     = "LaplacePool",
   [int]   $Port         = 8080,
-  [string]$PhysicalPath = "C:\inetpub\laplace-api"
+  [string]$PhysicalPath = "D:\Data\inetsrv\laplace-api"
 )
 $ErrorActionPreference = "Stop"
 $appcmd = "$env:windir\system32\inetsrv\appcmd.exe"

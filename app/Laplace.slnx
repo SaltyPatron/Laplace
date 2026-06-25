@@ -42,5 +42,8 @@
   <Project Path="Laplace.Api.Contracts/Laplace.Api.Contracts.csproj" />
   <Project Path="Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj" />
   <Project Path="Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj" />
+  <Project Path="Laplace.Modality/Laplace.Modality.csproj" />
+  <Project Path="Laplace.Modality.Chess/Laplace.Modality.Chess.csproj" />
+  <Project Path="Laplace.Modality.Chess.Tests/Laplace.Modality.Chess.Tests.csproj" />
   <Project Path="Laplace.Cli/Laplace.Cli.csproj" />
 </Solution>
