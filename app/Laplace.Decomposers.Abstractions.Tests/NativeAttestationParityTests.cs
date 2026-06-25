@@ -69,11 +69,11 @@ public class NativeAttestationParityTests
         
         
         Assert.Equal(Hash128.OfCanonical("substrate/pos/probationary/framenet/IDIO/v1"), posId);
-        var ent = Assert.Single(change.Entities);
-        Assert.Equal(posId, ent.Id);
-        Assert.Equal(PosReference.PosTypeId, ent.TypeId);
-        var att = Assert.Single(change.Attestations);
-        Assert.Equal(posId, att.ObjectId);
+        // The probationary POS entity is emitted, plus its substrate-native HAS_NAME_ALIAS name (a
+        // content-walk of the tag), so assert the POS entity + the form→HAS_POS edge are present rather
+        // than that they are the only rows in the batch.
+        Assert.Contains(change.Entities, e => e.Id == posId && e.TypeId == PosReference.PosTypeId);
+        Assert.Contains(change.Attestations, att => att.ObjectId == posId && att.SubjectId == form);
     }
 
 

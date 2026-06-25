@@ -63,6 +63,13 @@ public sealed class ContentBatch : IDisposable
         if (canonical.IsEmpty) return false;
 
         var key = Hash128.Blake3(canonical);
+
+        // compose IS the dedup: a canonical already composed this session has a known, immutable root —
+        // skip the expensive BuildContentTree (BLAKE3 + geometry per node) and hand back the cached root
+        // so the caller still wires THIS occurrence's attestation. Only NOVEL canonicals pay the build.
+        if (_reader.TryGetCachedRoot(key, out rootId))
+            return true;
+
         if (!_map.TryGetValue(key, out var e))
         {
             var tree = IntentStage.BuildContentTree(canonical);
@@ -72,6 +79,7 @@ public sealed class ContentBatch : IDisposable
             _bufferedNodes += tree.NodeCount;
         }
         rootId = e.Tree.GetNode(e.Tree.NaturalUnitIndex()).Id;
+        _reader.CacheRoot(key, rootId);
 
         // Bounded auto-flush: keep the resident native tier-tree set small even when a single builder
         // emits hundreds of thousands of distinct content units. The probe is async; this is a rare,
@@ -106,72 +114,45 @@ public sealed class ContentBatch : IDisposable
             perTreeTiers.Add(tiers);
         }
 
-        // T0 codepoints (perfcache-guaranteed present) and T1 graphemes are NEVER checked: they are
-        // known by construction and simply never enter the descent. Only trunks (tier >= 2 — words and
-        // up) form the descent forest. The substrate is a content-addressed Merkle DAG, so a PRESENT
-        // trunk implies its whole subtree is present; the descent therefore checks only nodes under a
-        // novel parent and short-circuits present subtrees — O(tier-depth) per document, not O(nodes).
-        //
-        // Build the forest once: candidate ids + a parent-index array (parent's position in the
-        // candidate list, < 0 = root or a parent below tier 2). nodeToCand[i][j] maps tree i's node j
-        // to its candidate index (-1 if not a tier>=2 candidate).
+        // T0 codepoints + T1 graphemes are NEVER checked — perfcache-known by construction. Only trunks
+        // (tier >= 2) are candidates. The reader's session seen-set fronts the probe: a re-emitted trunk
+        // (content is immutable ⇒ proven-present is permanent) is an in-memory hit and never re-probes
+        // the DB. One batched entities_exist_bitmap over the UNKNOWN trunks ("which of these do you
+        // have?"); present (seen-set ∪ DB) → bit set → the native emit skips that subtree.
         var candidates = new List<Hash128>();
-        var parents = new List<int>();
-        var nodeToCand = new int[entries.Count][];
         for (int i = 0; i < entries.Count; i++)
         {
             var ids = perTreeIds[i]; var tiers = perTreeTiers[i];
-            var map = new int[ids.Length];
-            for (int j = 0; j < ids.Length; j++) map[j] = -1;
             for (int j = 0; j < ids.Length; j++)
-            {
-                if (tiers[j] < 2) continue;
-                map[j] = candidates.Count;
-                candidates.Add(ids[j]);
-                parents.Add(-1);            // resolved below, once every node has a candidate index
-            }
-            nodeToCand[i] = map;
-        }
-        for (int i = 0; i < entries.Count; i++)
-        {
-            var ids = perTreeIds[i]; var tiers = perTreeTiers[i];
-            var map = nodeToCand[i]; var tree = entries[i].Tree;
-            for (int j = 0; j < ids.Length; j++)
-            {
-                if (tiers[j] < 2) continue;
-                uint pj = tree.GetNode((uint)j).ParentIdx;
-                int parentCand = (pj == TierTree.Invalid || pj >= (uint)ids.Length) ? -1 : map[pj];
-                parents[map[j]] = parentCand;   // -1 ⇒ this node is a descent root
-            }
+                if (tiers[j] >= 2) candidates.Add(ids[j]);
         }
 
-        // One top-down server-side probe → a present-bitmap (bit c set ⟺ candidate c present),
-        // identical contract to the flat entities_exist_bitmap, just O(tier) instead of O(nodes). The
-        // bitmap and the trunk-descent live native (content_descent_bitmap builds the bits;
-        // content_witness_emit_tree does the staging descent); C# only marshals the forest and walks
-        // the result into each tree's bitmap, exactly as the original flat path did.
         byte[]? combined = candidates.Count > 0
-            ? await _reader.ContentDescentBitmapAsync(candidates, parents, ct).ConfigureAwait(false)
+            ? await _reader.EntitiesExistBitmapAsync(candidates, ct).ConfigureAwait(false)
             : null;
         long combinedBits = combined is null ? 0 : (long)combined.Length * 8;
 
         var stage = _stageProvider();
+        int g = 0;   // running index into the tier>=2 candidate bitmap, in (tree, node) order
         for (int i = 0; i < entries.Count; i++)
         {
             var ids = perTreeIds[i]; var tiers = perTreeTiers[i];
-            var map = nodeToCand[i];
             int n = ids.Length;
             var bm = new byte[(n + 7) / 8];   // bit j set = node j PRESENT (EmitContentTree skips present subtrees)
             for (int j = 0; j < n; j++)
             {
-                if (tiers[j] < 2) continue;   // tier<=1: bit 0 (novel) — emitted under novel trunks, skipped under present
-                int c = map[j];
-                if (combined is not null && c >= 0 && c < combinedBits &&
-                    (combined[c >> 3] & (1 << (c & 7))) != 0)
+                if (tiers[j] < 2) continue;   // tier<=1: emitted under novel trunks, skipped under present
+                if (combined is not null && g < combinedBits && (combined[g >> 3] & (1 << (g & 7))) != 0)
                     bm[j >> 3] |= (byte)(1 << (j & 7));
+                g++;
             }
             stage.EmitContentTree(entries[i].Tree, entries[i].Source, bm, out _);
         }
+
+        // After staging, every checked trunk is present — the present ones were, the novel ones are now
+        // staged (immutable ⇒ they WILL be inserted). Mark them all proven so the NEXT occurrence is a
+        // seen-set hit: zero DB probe, zero re-stage. This is the re-emission tax going to zero.
+        if (candidates.Count > 0) _reader.MarkProven(candidates);
 
         foreach (var e in _map.Values) e.Tree?.Dispose();
         _map.Clear();

@@ -195,15 +195,26 @@ public static class RelationTypeRegistry
         
         
         
+        // Readback name kept only as a render-perf cache; the source of truth is the substrate-native
+        // HAS_NAME_ALIAS emitted below, so render()/realize()/label() reconstruct the name from codepoints
+        // (DEP_DET, FEAT_*, EDEP_* rendered empty before — 0 HAS_NAME_ALIAS, code-table only).
         VocabularyNames.Track(readbackNames, VocabularyNames.RelationType(k.Canonical));
         if (seenEntitiesThisBatch.Add(k.Id))
             builder.AddEntity(new EntityRow(k.Id, EntityTier.Vocabulary, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
-        if (k.ParentId is { } parent && seenAttestationsThisRun.Add(k.Id))
+        // Parent edge + substrate-native name alias, once per run — emitted even when the type has no
+        // parent, so a parentless dynamic type is still legible and walkable in the DAG.
+        if (seenAttestationsThisRun.Add(k.Id))
         {
             builder.AddEntity(new EntityRow(k.Id, EntityTier.Vocabulary, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
-            builder.AddEntity(new EntityRow(parent, EntityTier.Vocabulary, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
-            builder.AddAttestation(NativeAttestation.Categorical(
-                k.Id, "IS_A", parent, sourceId, null, SourceTrust.AcademicCurated));
+            if (k.ParentId is { } parent)
+            {
+                builder.AddEntity(new EntityRow(parent, EntityTier.Vocabulary, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
+                builder.AddAttestation(NativeAttestation.Categorical(
+                    k.Id, "IS_A", parent, sourceId, null, SourceTrust.AcademicCurated));
+            }
+            if (ContentWitnessBatch.Emit(builder, k.Canonical, sourceId) is { } nameId)
+                builder.AddAttestation(NativeAttestation.Categorical(
+                    k.Id, "HAS_NAME_ALIAS", nameId, sourceId, null, SourceTrust.AcademicCurated));
         }
     }
 

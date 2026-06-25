@@ -1,18 +1,26 @@
 namespace Laplace.Decomposers.Abstractions;
 
+// SINGLE SOURCE OF TRUTH is engine/manifest/relation_types.toml [ranks]. These C# constants mirror it
+// for the few attestations whose witness weight is computed managed-side (Unicode/ISO standards props,
+// response/prompt content, dbpedia) rather than resolved natively, and they are the expected values in
+// RelationTypeRegistryTests. They were STALE after the "semantic salience" recalibration: structural
+// metadata sat at 0.91 (near-top) instead of the new 0.08 floor — over-weighting Unicode scaffolding
+// ~11x — and taxonomic/equivalence had drifted. Realigned to the manifest bands here.
 public static class RelationTypeRank
 {
     public const double Mandate             = 1.00;
-    public const double StandardsStructural = 0.91;
-    public const double Taxonomic           = 0.82;
+    public const double Definitional        = 0.97;
+    public const double Taxonomic           = 0.90;
+    public const double Equivalence         = 0.82;
     public const double Partitive           = 0.73;
     public const double Causal              = 0.64;
-    public const double Equivalence         = 0.55;
     public const double Oppositional        = 0.45;
     public const double Associative         = 0.36;
     public const double TensorCalculation   = 0.27;
-    public const double ScalarValued        = 0.18;
-    public const double Probationary        = 0.09;
+    public const double LexicalGlue         = 0.18;
+    public const double ScalarValued        = 0.12;
+    public const double StandardsStructural = 0.08;
+    public const double Probationary        = 0.05;
 }
 
 public static class SourceTrust

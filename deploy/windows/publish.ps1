@@ -8,7 +8,7 @@
 [CmdletBinding()]
 param(
   [string]$RepoRoot      = (Resolve-Path "$PSScriptRoot\..\.."),
-  [string]$OutDir        = "C:\inetpub\laplace-api",
+  [string]$OutDir        = "D:\Data\inetsrv\laplace-api",
   [string]$EnvFile       = "$PSScriptRoot\laplace-api.env",
   [string]$Configuration = "Release"
 )

@@ -311,7 +311,10 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider{
                 string xposName = $"substrate/pos/xpos/{tok.Xpos}/v1";
                 Hash128 xposId = Hash128.OfCanonical(xposName);
                 canonicalNames.TryAdd(xposName, 0);
-                b.AddEntity(new EntityRow(xposId, EntityTier.Vocabulary, PosReference.PosTypeId, Source));
+                // Substrate-native name (once per batch) so the XPOS tag is legible/walkable, not just a
+                // canonical_names code-table entry.
+                VocabularyAnchor.Emit(b, xposId, PosReference.PosTypeId, tok.Xpos, Source,
+                    TC.AcademicCurated, seenEntBatch);
                 b.AddAttestation(NativeAttestation.Categorical(
                     form, "HAS_XPOS", xposId, Source, langId, TC.AcademicCurated));
             }
@@ -321,7 +324,10 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider{
                 if (!RelationTypeRegistry.ParseFeature(feat, out var fName, out var fVal)) continue;
                 VocabularyNames.TrackUdFeatureValue(canonicalNames, fName, fVal);
                 Hash128 valId = FeatValueId(fName, fVal);
-                b.AddEntity(new EntityRow(valId, EntityTier.Vocabulary, FeatureTypeId, Source));
+                // Substrate-native name (once per batch) so the feature value (e.g. "Number=Sing") is
+                // legible/walkable instead of a path-hash island named only by the code-table.
+                VocabularyAnchor.Emit(b, valId, FeatureTypeId, $"{fName}={fVal}", Source,
+                    SourceTrust.AcademicCurated, seenEntBatch);
                 RelationTypeRegistry.SeedDynamic(b, RelationTypeRegistry.ResolveFeature(fName), Source, seenEntBatch, seenAttBatch, canonicalNames);
                 var featRel = RelationTypeRegistry.ResolveFeature(fName);
                 b.AddAttestation(NativeAttestation.CategoricalResolved(

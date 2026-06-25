@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Laplace.Modality</RootNamespace>
+    <AssemblyName>Laplace.Modality</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Generic turn-based engine. Depends only on Engine.Core for content-addressing (Hash128);
+         deliberately free of Npgsql/SubstrateCRUD so the engine stays domain- and storage-agnostic.
+         The substrate read/write/fold seams are interfaces (IEdgeRatings, ITurnLearner) implemented
+         by the host (the CLI). -->
+    <ProjectReference Include="..\Laplace.Engine.Core\Laplace.Engine.Core.csproj" />
+  </ItemGroup>
+
+</Project>

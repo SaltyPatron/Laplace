@@ -282,7 +282,9 @@ internal static class InferenceEndpoints
                     : Array.Empty<double>();
                 data.Add(new EmbeddingData("embedding", i, vector, new EmbeddingProvenance(
                     Input: inputs[i],
-                    Resolved: result.EntityIdHex is not null,
+                    // word_id yields a content address for any token; "resolved" means the substrate
+                    // actually holds geometry for it (witnessed), not merely that an address exists.
+                    Resolved: result.Form is not null,
                     EntityId: result.EntityIdHex,
                     Form: result.Form is { } ff
                         ? new EmbeddingFormView(ff.X, ff.Y, ff.Z, ff.M, ff.Radius, ff.Constituents)

@@ -619,6 +619,37 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         await copy.FinalizeAsync(ct);
     }
 
+    /// <summary>
+    /// Online turn-by-turn fold for iterative modalities (e.g. chess self-play). Flushes the
+    /// currently-accumulated edges as one rating period and AWAITS the incremental in-place fold —
+    /// <c>materialize_period_partition</c>, which reads each edge's existing rating as the Glicko-2
+    /// prior and <c>ON CONFLICT DO UPDATE</c>s only the touched edges (then drops its staging table).
+    /// Unlike <see cref="MaterializeConsensusAsync"/> this NEVER runs the full-table rebuild/swap
+    /// (<c>finish_consensus_fold</c> / <c>consensus_fold_swap</c>) or the walk fold, so the updated
+    /// consensus rows are queryable the instant it returns — the immediate, no-drain update. Requires
+    /// the flat incremental lane (stageAsWalks:false, not the terminal/bulk lane) and a seeded source
+    /// (freshSource:false) so existing ratings are carried forward as priors. Returns the cumulative
+    /// folded-relation count.
+    /// </summary>
+    public async Task<long> FoldIncrementalAsync(CancellationToken ct = default)
+    {
+        if (_stageAsWalks)
+            throw new InvalidOperationException(
+                "FoldIncrementalAsync requires the flat incremental lane; this writer is in walk-journal "
+                + "mode (walks only fold at MaterializeConsensusAsync via the terminal walk fold)");
+        if (_terminalFold)
+            throw new InvalidOperationException(
+                "FoldIncrementalAsync requires the incremental lane; LAPLACE_FOLD_LANE=terminal/bulk "
+                + "defers all folding to the full rebuild at MaterializeConsensusAsync");
+
+        await FlushPeriodAsync(ct).ConfigureAwait(false);
+        // FlushPeriodAsync chained this period's per-partition materialize_period_partition fold into
+        // _foldChain (and that task awaits all prior chained folds); await it so the touched consensus
+        // edges are updated in place before we return.
+        await _foldChain.ConfigureAwait(false);
+        return Interlocked.Read(ref _foldedRelations);
+    }
+
     public async Task<long> MaterializeConsensusAsync(CancellationToken ct = default)
     {
         await FlushWalksAsync(ct);

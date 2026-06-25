@@ -503,10 +503,17 @@ family_root = "HAS_SEMANTIC_ROLE"
 
 [[relation]]
 canonical = "HAS_SENSE"
-rank = "lexical_glue"
+rank = "equivalence"
 symmetry = "asymmetric"
 parent = null
 family_root = "HAS_SENSE"
+
+[[relation]]
+canonical = "HAS_SYNSET_KEY"
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_SYNSET_KEY"
 
 [[relation]]
 canonical = "HAS_SUBEVENT"
@@ -689,7 +696,7 @@ family_root = "IS_PIXEL_OF"
 
 [[relation]]
 canonical = "IS_SENSE_OF"
-rank = "lexical_glue"
+rank = "equivalence"
 symmetry = "asymmetric"
 parent = null
 family_root = "IS_SENSE_OF"

@@ -48,10 +48,14 @@ public class PosReferenceTests
     {
         var b = new Laplace.SubstrateCRUD.SubstrateChangeBuilder(
             Hash128.OfCanonical("substrate/test/pos/source"), "test/pos-seed", null,
-            entityCapacity: 18, physicalityCapacity: 0, attestationCapacity: 0);
+            entityCapacity: 256, physicalityCapacity: 256, attestationCapacity: 256);
         PosReference.SeedCanonical(b, Hash128.OfCanonical("substrate/test/pos/source"));
         var change = b.Build();
-        Assert.Equal(PosReference.Canonical.Length + 1, change.Entities.Length);
+        // The Pos type entity + one Vocabulary entity per canonical UPOS tag. SeedCanonical now also
+        // emits each tag's HAS_NAME_ALIAS name (content-walk entities, typed Word/etc.), so assert the
+        // POS-typed vocabulary count rather than the total entity count.
+        Assert.Equal(PosReference.Canonical.Length,
+            change.Entities.Count(e => e.TypeId == PosReference.PosTypeId));
         Assert.Contains(change.Entities, e => e.Id == PosReference.PosTypeId);
         Assert.Contains(change.Entities, e => e.Id == PosReference.CanonicalId("VERB"));
     }
