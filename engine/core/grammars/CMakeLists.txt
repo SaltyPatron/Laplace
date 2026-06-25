@@ -49,6 +49,7 @@ laplace_add_grammar(ts_grammar_php        "${_TSG}/tree-sitter-php/php/src")
 
 laplace_add_grammar(ts_grammar_sql   "${CMAKE_CURRENT_SOURCE_DIR}/generated/sql")
 laplace_add_grammar(ts_grammar_swift "${CMAKE_CURRENT_SOURCE_DIR}/generated/swift")
+laplace_add_grammar(ts_grammar_pgn   "${CMAKE_CURRENT_SOURCE_DIR}/generated/pgn")
 
 
 laplace_add_grammar(ts_grammar_cuda    "${_TSG}/tree-sitter-cuda/src")
@@ -75,4 +76,5 @@ set(LAPLACE_TS_GRAMMARS
     ts_grammar_cuda ts_grammar_glsl ts_grammar_hlsl ts_grammar_wgsl ts_grammar_fortran
     ts_grammar_asm ts_grammar_nasm ts_grammar_llvm ts_grammar_mlir ts_grammar_cmake
     ts_grammar_ispc ts_grammar_zig
+    ts_grammar_pgn
     PARENT_SCOPE)

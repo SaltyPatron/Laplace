@@ -14,6 +14,7 @@ public class GrammarModalityByExtTests
     [InlineData("ts", "typescript")]
     [InlineData("java", "java")]
     [InlineData("cu", "cuda")]
+    [InlineData("pgn", "pgn")]
     public void ResolvesFromNativeRegistry(string ext, string modality)
         => Assert.Equal(modality, GrammarDecomposer.ModalityByExt(ext));
 

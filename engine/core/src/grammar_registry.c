@@ -42,6 +42,8 @@ extern const TSLanguage* tree_sitter_cmake(void);
 extern const TSLanguage* tree_sitter_ispc(void);
 extern const TSLanguage* tree_sitter_zig(void);
 
+extern const TSLanguage* tree_sitter_pgn(void);
+
 typedef const TSLanguage* (*ts_lang_fn)(void);
 
 typedef struct { const char* id; ts_lang_fn fn; } grammar_entry_t;
@@ -84,6 +86,8 @@ static const grammar_entry_t GRAMMARS[] = {
     {"cmake",      tree_sitter_cmake},
     {"ispc",       tree_sitter_ispc},
     {"zig",        tree_sitter_zig},
+
+    {"pgn",        tree_sitter_pgn},   /* chess Portable Game Notation (own grammar) */
 };
 static const size_t GRAMMAR_COUNT = sizeof(GRAMMARS) / sizeof(GRAMMARS[0]);
 
@@ -130,6 +134,7 @@ static const ext_entry_t EXTS[] = {
     {"cmake", "cmake"},
     {"ispc", "ispc"},
     {"zig", "zig"},
+    {"pgn", "pgn"},      /* chess Portable Game Notation */
 };
 static const size_t EXT_COUNT = sizeof(EXTS) / sizeof(EXTS[0]);
 

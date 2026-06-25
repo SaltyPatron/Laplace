@@ -79,29 +79,7 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, ITurnLe
             .EnableDeferredContent(_reader);
 
         foreach (var e in edges)
-        {
-            var subj = CategoryAnchor.Emit(
-                b, e.SubjectKey, ChessVocabulary.PositionType, ChessVocabulary.SourceId, ChessVocabulary.Trust);
-            var obj = CategoryAnchor.Emit(
-                b, e.ObjectKey, ChessVocabulary.PositionType, ChessVocabulary.SourceId, ChessVocabulary.Trust);
-            if (subj is null || obj is null) continue;
-
-            long sumScoreFp1e9 = e.MoverOutcome switch
-            {
-                PlyOutcome.Win  => 1_000_000_000L,
-                PlyOutcome.Draw =>   500_000_000L,
-                _               =>             0L,
-            };
-            b.AddAttestation(NativeAttestation.Aggregated(
-                subject: subj.Value,
-                typeId: ChessVocabulary.MoveType,
-                obj: obj.Value,
-                sourceId: ChessVocabulary.SourceId,
-                contextId: null,
-                games: 1,
-                sumScoreFp1e9: sumScoreFp1e9,
-                witnessWeight: _witnessWeight));
-        }
+            ChessGraph.AppendMoveEdge(b, e.SubjectKey, e.ObjectKey, e.MoverOutcome, _witnessWeight);
 
         var change = await b.BuildAsync(ct);
         await _writer.ApplyAsync(change, ct);
