@@ -38,6 +38,7 @@ CREATE OR REPLACE FUNCTION label(p_id bytea)
         -- and relation entities resolve to clean, usable names via label().
         NULLIF(NULLIF(
             regexp_replace(
+            regexp_replace(
                 regexp_replace(
                     regexp_replace(
                         regexp_replace(
@@ -51,6 +52,9 @@ CREATE OR REPLACE FUNCTION label(p_id bytea)
                         '^language:([a-z]{3})$', '\1'),
                     '^ud/feature/(.+)$', '\1'),
                 '^tiny-codes/concept/(.+)/v1$', '\1'),
+            -- opaque join keys (ILI concept ids "i90107", synset offsets "00006150-n") are NOT names;
+            -- null them so the HAS_DEFINITION fallback below renders the concept's gloss, not a hash-like id.
+            '^(i[0-9]+|[0-9]{6,}-[nvarspNVARSP])$', ''),
             ''), encode(p_id, 'hex') || '…'),
         -- abstract entities (e.g. Language) carry their human-readable name as HAS_DEFINITION
         -- (ISO-639 stores it there). NO type:hash / hash-ellipsis fallback after this: a genuinely

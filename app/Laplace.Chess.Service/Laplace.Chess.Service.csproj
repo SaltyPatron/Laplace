@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Laplace.Chess.Service</RootNamespace>
+    <AssemblyName>Laplace.Chess.Service</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The shared chess substrate service: the generic engine + chess modality + the substrate host,
+         used by BOTH the CLI and the web host (no fork). -->
+    <ProjectReference Include="..\Laplace.Modality\Laplace.Modality.csproj" />
+    <ProjectReference Include="..\Laplace.Modality.Chess\Laplace.Modality.Chess.csproj" />
+    <ProjectReference Include="..\Laplace.Decomposers.Abstractions\Laplace.Decomposers.Abstractions.csproj" />
+    <ProjectReference Include="..\Laplace.SubstrateCRUD\Laplace.SubstrateCRUD.csproj" />
+    <ProjectReference Include="..\Laplace.Engine.Core\Laplace.Engine.Core.csproj" />
+  </ItemGroup>
+
+</Project>

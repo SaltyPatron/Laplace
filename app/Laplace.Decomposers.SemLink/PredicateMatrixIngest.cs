@@ -17,13 +17,17 @@ internal static class PredicateMatrixIngest
     private const int ColVnClass = 4;
     private const int ColVnSubclass = 6;
     private const int ColVnLemma = 8;
+    private const int ColVnRole = 9;     // 10_VN_ROLE  — the thematic role (was dropped)
+    private const int ColWnSense = 10;   // 11_WN_SENSE — lemma-specific WN sense key (was dropped)
     private const int ColMcrIli = 11;
     private const int ColFnFrame = 12;
+    private const int ColFnFe = 14;      // 15_FN_FRAME_ELEMENT — the frame element (was dropped)
     private const int ColPbRoleset = 15;
 
     private static readonly Hash128 RolesetTypeId = EntityTypeRegistry.PropBankRoleset;
     private static readonly Hash128 VnClassTypeId = EntityTypeRegistry.VerbNetClass;
     private static readonly Hash128 FrameTypeId = EntityTypeRegistry.FrameNetFrame;
+    private static readonly Hash128 FeTypeId = EntityTypeRegistry.FrameNetFe;
 
     internal static async IAsyncEnumerable<SubstrateChange> StreamAsync(
         string path,
@@ -66,15 +70,53 @@ internal static class PredicateMatrixIngest
             Hash128? synId = SynsetAnchor(fields[ColMcrIli]);
             if (synId is null) continue;
 
+            // The lemma-specific WN sense (was dropped) — sense-level precision that converges with
+            // WordNet's own sense entities, so each predicate corresponds not just to the broad synset
+            // but to the exact sense. null when the row carries no sense ("wn:NULL").
+            string wnSenseRaw = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColWnSense]);
+            Hash128? senseId = wnSenseRaw.Equals("NULL", StringComparison.OrdinalIgnoreCase)
+                ? null : SenseAnchor.Id(wnSenseRaw);
+
             if (TryRoleset(fields[ColPbRoleset], out string? roleset) && roleset is not null)
+            {
                 StageCorrespondsTo(batch, seen, CategoryAnchor.Id(roleset), RolesetTypeId, synId.Value);
+                if (senseId is { } rs) StageCorrespondsTo(batch, seen, CategoryAnchor.Id(roleset), RolesetTypeId, rs);
+            }
 
             if (TryFrame(fields[ColFnFrame], out string? frame) && frame is not null)
+            {
                 StageCorrespondsTo(batch, seen, CategoryAnchor.Id(frame), FrameTypeId, synId.Value);
+                if (senseId is { } fs) StageCorrespondsTo(batch, seen, CategoryAnchor.Id(frame), FrameTypeId, fs);
+            }
 
             string? vnClass = VerbNetClassKey(fields);
             if (vnClass is not null)
+            {
                 StageCorrespondsTo(batch, seen, CategoryAnchor.Id(vnClass), VnClassTypeId, synId.Value);
+                if (senseId is { } vs) StageCorrespondsTo(batch, seen, CategoryAnchor.Id(vnClass), VnClassTypeId, vs);
+            }
+
+            // Role-level alignment — PredicateMatrix uniquely carries the VN thematic-role <-> FN
+            // frame-element correspondence in the SAME row as the predicate links, but it was dropped,
+            // so only predicate-level links existed (no ARG/role circularization). Emit it keyed
+            // EXACTLY as SemLinkRoleMappingIngest (VN role via ContentEmitter, FN FE via CategoryAnchor +
+            // FrameNetFe, scoped by VN class) so the two sources reinforce one consensus edge, not fork.
+            if (vnClass is not null && fields.Length > ColFnFe)
+            {
+                string vnRole = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColVnRole]).Trim();
+                string fnFe   = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColFnFe]).Trim();
+                if (vnRole.Length > 0 && !vnRole.Equals("NULL", StringComparison.OrdinalIgnoreCase)
+                    && fnFe.Length > 0 && !fnFe.Equals("NULL", StringComparison.OrdinalIgnoreCase))
+                {
+                    var vnRoleId = ContentEmitter.Emit(batch, vnRole, SemLinkDecomposer.Source);
+                    var feId     = CategoryAnchor.Emit(batch, fnFe, FeTypeId, SemLinkDecomposer.Source, TC.AcademicCurated);
+                    if (vnRoleId is { } vr && feId is { } fe
+                        && seen.Add((vr, fe)))
+                        batch.AddAttestation(NativeAttestation.Categorical(
+                            vr, "ROLE_CORRESPONDS_TO", fe, SemLinkDecomposer.Source, TC.AcademicCurated,
+                            contextId: CategoryAnchor.Id(vnClass)));
+                }
+            }
 
             if (++count >= batchSize)
             {

@@ -42,6 +42,7 @@
     <ProjectReference Include="..\Laplace.Engine.Synthesis\Laplace.Engine.Synthesis.csproj" />
     <ProjectReference Include="..\Laplace.SubstrateCRUD\Laplace.SubstrateCRUD.csproj" />
     <ProjectReference Include="..\Laplace.Ingestion\Laplace.Ingestion.csproj" />
+    <ProjectReference Include="..\Laplace.Chess.Service\Laplace.Chess.Service.csproj" />
   </ItemGroup>
 
 </Project>
