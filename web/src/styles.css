@@ -153,3 +153,39 @@ table.catalog th { color: var(--muted); font-weight: 500; }
   .receipt-panel { display: none; }
   .message { max-width: 92%; }
 }
+
+/* --- chess --- */
+.chess { display: flex; gap: 1.5rem; padding: 1rem; height: 100%; overflow: auto; }
+.chess-main { display: flex; flex-direction: column; gap: 0.75rem; }
+.board {
+  display: grid;
+  grid-template-columns: repeat(8, 56px);
+  grid-template-rows: repeat(8, 56px);
+  border: 2px solid var(--border);
+  width: max-content;
+  user-select: none;
+}
+.square { display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; }
+.square.light { background: #b6c2da; }
+.square.dark { background: #5b6b8c; }
+.square.sel { outline: 3px solid var(--accent); outline-offset: -3px; }
+.square.target::after {
+  content: ''; position: absolute; width: 16px; height: 16px; border-radius: 50%;
+  background: rgba(79, 140, 255, 0.55);
+}
+.piece { font-size: 40px; line-height: 1; color: #0b0e14; text-shadow: 0 1px 1px rgba(255, 255, 255, 0.35); }
+.chess-controls { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.chess-controls .status { min-width: 6rem; color: var(--accent); font-weight: 600; }
+.chess-controls .fen { color: var(--muted); font-size: 0.78rem; flex-basis: 100%; }
+.chess-side { display: flex; flex-direction: column; gap: 1rem; min-width: 16rem; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; }
+.panel h3 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.panel .row { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.panel .muted, .muted { color: var(--muted); font-size: 0.82rem; }
+.stats { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.2rem; font-size: 0.9rem; }
+.moves { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.15rem; }
+.moves li { display: flex; align-items: center; gap: 0.5rem; font-variant-numeric: tabular-nums; }
+.moves .uci { width: 4rem; font-family: ui-monospace, monospace; }
+.moves .mu { color: var(--confirm); }
+.moves li.prior .mu { color: var(--muted); }
+.moves .tag { color: var(--muted); font-size: 0.7rem; }

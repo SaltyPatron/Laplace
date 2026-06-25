@@ -36,7 +36,12 @@ call "%SCRIPTS%seed-step.cmd" document "!INGEST!\test-data\text" || exit /b 1
 exit /b 0
 
 :stage_knowledge
-for %%s in (wordnet omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary) do (
+rem CILI (the ILI interlingual index) MUST be first: wordnet/omw bind their synsets to the ILI
+rem concepts it creates, so the language-agnostic hub has to exist before the synset sources run.
+rem conceptnet QUARANTINED: runaway — consumed 197M units from a 34M-line input (6x explosion),
+rem ~8h, 300M+ rows, rate collapsed. Broken decomposer (exploding its input). Fix the explosion
+rem (decomposer audit) before re-adding; re-running it as-is wrecks the DB.
+for %%s in (cili wordnet omw verbnet propbank framenet mapnet wordframenet semlink atomic2020 ud wiktionary) do (
   call "%SCRIPTS%seed-step.cmd" %%s || exit /b 1
 )
 exit /b 0

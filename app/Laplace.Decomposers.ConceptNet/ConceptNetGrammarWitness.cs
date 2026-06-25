@@ -47,12 +47,18 @@ internal sealed class ConceptNetGrammarWitness : IGrammarWitness
         b.AddEntity(new EntityRow(endLangId, EntityTier.Vocabulary, LanguageTypeId, ConceptNetDecomposer.Source));
 
         double weight = 1.0;
-        ParseMeta(meta, ref weight, out var surfaceUtf8);
+        ParseMeta(meta, ref weight, out var surfaceUtf8, out var datasetUtf8);
         _arena.Record(typeName, weight);
+
+        // Provenance: tag the edge with the ConceptNet dataset it came from (the contributor source),
+        // so the fold treats /d/wiktionary/en vs /d/conceptnet/4 as distinct evidence, not one source.
+        Hash128? datasetCtx = datasetUtf8.IsEmpty
+            ? null
+            : ContentWitnessBatch.Emit(b, Encoding.UTF8.GetString(datasetUtf8), ConceptNetDecomposer.Source);
 
         b.AddAttestation(NativeAttestation.Categorical(
             startId, typeName, endId, ConceptNetDecomposer.Source, SourceTrust.UserCuratedResource,
-            magnitude: weight, arenaScale: _arena.Scale(typeName)));
+            magnitude: weight, arenaScale: _arena.Scale(typeName), contextId: datasetCtx));
         b.AddAttestation(NativeAttestation.Categorical(
             startId, "HAS_LANGUAGE", startLangId, ConceptNetDecomposer.Source, SourceTrust.UserCuratedResource));
         b.AddAttestation(NativeAttestation.Categorical(
@@ -110,9 +116,11 @@ internal sealed class ConceptNetGrammarWitness : IGrammarWitness
             VocabularyNames.TrackLanguage(ConceptNetDecomposer.LanguageNames, Encoding.UTF8.GetString(langUtf8));
     }
 
-    private static void ParseMeta(ReadOnlySpan<byte> json, ref double weight, out ReadOnlySpan<byte> surfaceUtf8)
+    private static void ParseMeta(ReadOnlySpan<byte> json, ref double weight,
+        out ReadOnlySpan<byte> surfaceUtf8, out ReadOnlySpan<byte> datasetUtf8)
     {
         surfaceUtf8 = default;
+        datasetUtf8 = default;
         if (json.IsEmpty) return;
         try
         {
@@ -129,6 +137,15 @@ internal sealed class ConceptNetGrammarWitness : IGrammarWitness
                 {
                     if (reader.Read() && reader.TokenType == JsonTokenType.String)
                         surfaceUtf8 = reader.ValueSpan;
+                }
+                // dataset (e.g. "/d/wiktionary/en") is the assertion's provenance — previously dropped
+                // (only weight + surfaceText were read), so every ConceptNet edge collapsed onto one
+                // generic source. Capture it as the edge's context so the Glicko fold sees distinct
+                // sources. ("dataset" is top-level only; nested sources[].contributor is not matched here.)
+                else if (reader.ValueTextEquals("dataset"u8))
+                {
+                    if (reader.Read() && reader.TokenType == JsonTokenType.String)
+                        datasetUtf8 = reader.ValueSpan;
                 }
             }
         }

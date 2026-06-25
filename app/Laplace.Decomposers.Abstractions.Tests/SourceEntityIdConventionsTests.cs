@@ -209,6 +209,9 @@ public class SourceEntityIdConventionsTests
     public void ParseMapNetSynsetKey_Parses_PosHashOffset()
     {
         Assert.Equal((57580L, 'a'), SourceEntityIdConventions.ParseMapNetSynsetKey("a#00057580"));
+        // REAL MapNet format carries a trailing '$' terminator — every actual data row has it.
+        Assert.Equal((57580L, 'a'), SourceEntityIdConventions.ParseMapNetSynsetKey("a#00057580$"));
+        Assert.Equal((1142646L, 'v'), SourceEntityIdConventions.ParseMapNetSynsetKey("v#01142646$"));
         Assert.Equal((1142646L, 'v'), SourceEntityIdConventions.ParseMapNetSynsetKey("v#01142646"));
         Assert.Equal((20977L, 'n'), SourceEntityIdConventions.ParseMapNetSynsetKey("n#00020977"));
         Assert.Null(SourceEntityIdConventions.ParseMapNetSynsetKey("NULL"));

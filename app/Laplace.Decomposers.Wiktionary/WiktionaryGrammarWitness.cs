@@ -211,21 +211,37 @@ internal sealed class WiktionaryGrammarWitness : IGrammarWitness
             // Each etymology template kind is a distinct lineage channel. bor/der/inh are directional from
             // this entry's language ({{bor|en|fr|term}} → term is arg 3); cog is non-directional
             // ({{cog|la|term}} → term is arg 2).
-            string etymType, termArg;
+            // Term-arg layouts verified against kaikki: bor/der/inh = {{t|lang|src-lang|TERM}} (arg3);
+            // cog/doublet = {{t|lang|TERM}} (arg2); suffix = {{suffix|lang|BASE|-sfx}} (base arg2);
+            // prefix = {{prefix|lang|pre-|BASE}} (base arg3); affix/compound/blend are multi-morpheme
+            // ({{affix|lang|A|B|C}}, args 2,3,4). m/mention/l/link are inline text mentions, not lineage
+            // relations, so they stay dropped (would over-generate ETYMOLOGICALLY_RELATED_TO noise).
+            string etymType;
+            string[] termArgs;
             switch (name)
             {
-                case "bor": case "borrowed":  etymType = "BORROWED_FROM";               termArg = "3"; break;
-                case "inh": case "inherited": etymType = "INHERITED_FROM";              termArg = "3"; break;
-                case "der": case "derived":   etymType = "ETYMOLOGICALLY_DERIVED_FROM"; termArg = "3"; break;
-                case "cog": case "cognate":   etymType = "ETYMOLOGICALLY_RELATED_TO";   termArg = "2"; break;
+                case "bor": case "borrowed":  etymType = "BORROWED_FROM";               termArgs = new[] { "3" }; break;
+                case "inh": case "inherited": etymType = "INHERITED_FROM";              termArgs = new[] { "3" }; break;
+                case "der": case "derived":   etymType = "ETYMOLOGICALLY_DERIVED_FROM"; termArgs = new[] { "3" }; break;
+                case "cog": case "cognate":   etymType = "ETYMOLOGICALLY_RELATED_TO";   termArgs = new[] { "2" }; break;
+                case "suffix": case "suf":    etymType = "ETYMOLOGICALLY_DERIVED_FROM"; termArgs = new[] { "2" }; break;
+                case "prefix": case "pre":    etymType = "ETYMOLOGICALLY_DERIVED_FROM"; termArgs = new[] { "3" }; break;
+                case "af": case "affix": case "com": case "compound": case "blend":
+                                              etymType = "ETYMOLOGICALLY_DERIVED_FROM"; termArgs = new[] { "2", "3", "4" }; break;
+                case "doublet": case "dbt":   etymType = "ETYMOLOGICALLY_RELATED_TO";   termArgs = new[] { "2" }; break;
+                case "back-form": case "back-formation": case "bf":
+                                              etymType = "ETYMOLOGICALLY_DERIVED_FROM"; termArgs = new[] { "2" }; break;
                 default: continue;
             }
 
             int argsObj = JsonGrammarHelper.FindNestedObject(composed, etObj, "args");
             if (argsObj < 0) continue;
-            if (!JsonGrammarHelper.TryComposedPropertyOnObject(composed, argsObj, termArg, out var termId)) continue;
-            if (JsonGrammarHelper.IsEmptyOrDashPlaceholder(composed, argsObj, termArg)) continue;
-            Attest(b, wordId, etymType, termId, null);
+            foreach (var termArg in termArgs)
+            {
+                if (!JsonGrammarHelper.TryComposedPropertyOnObject(composed, argsObj, termArg, out var termId)) continue;
+                if (JsonGrammarHelper.IsEmptyOrDashPlaceholder(composed, argsObj, termArg)) continue;
+                Attest(b, wordId, etymType, termId, null);
+            }
         }
     }
 

@@ -157,7 +157,12 @@ public static class SourceEntityIdConventions
         if (hash <= 0 || hash + 1 >= s.Length) return null;
         char ssType = s[0];
         if (ssType is not ('n' or 'v' or 'a' or 's' or 'r')) return null;
-        if (!long.TryParse(s.AsSpan(hash + 1), out long offset) || offset <= 0) return null;
+        // MapNet offsets carry a trailing '$' terminator (e.g. a#00057580$). Take the digit run after
+        // '#' and stop at any non-digit suffix — otherwise TryParse fails on the '$' and EVERY row drops.
+        var rest = s.AsSpan(hash + 1);
+        int n = 0;
+        while (n < rest.Length && char.IsDigit(rest[n])) n++;
+        if (n == 0 || !long.TryParse(rest[..n], out long offset) || offset <= 0) return null;
         return (offset, ssType);
     }
 

@@ -3,38 +3,40 @@ using Laplace.Engine.Core;
 namespace Laplace.Modality;
 
 /// <summary>
-/// One learned action edge produced by playing/analysing a game: <c>subject —[type]→ object</c>, with
-/// the mover's per-ply credit and an optional context (e.g. the move's own content id, retained for
-/// provenance even though consensus is keyed only by subject/type/object).
+/// One action edge produced by playing/analysing a game, expressed in the modality's <b>canonical
+/// surfaces</b> (not pre-hashed ids): <c>SubjectKey —[move]→ ObjectKey</c>, with the mover's per-ply
+/// credit. The host turns these surfaces into substrate entities by <b>composing</b> them
+/// (<c>ContentEmitter</c>) — so a state/move becomes a content node with emergent tier/coordinate/id,
+/// never a blind-hashed opaque atom. The engine deliberately does not mint ids itself.
 /// </summary>
 public readonly record struct RecordedEdge(
-    Hash128    Subject,
-    Hash128    Type,
-    Hash128    Object,
-    Hash128?   Context,
+    string     SubjectKey,
+    string     ObjectKey,
+    string?    MoveKey,
     PlyOutcome MoverOutcome);
 
 /// <summary>
-/// Content-addressing for states and action edges. The edge id MUST match the substrate's
-/// <c>consensus_id(subject,type,object)</c> = BLAKE3(subject ‖ type ‖ COALESCE(object, 0¹⁶)), so the
-/// host can look up a candidate move's rating without a per-move round trip to compute the id
-/// server-side. (Verified against <c>laplace.consensus_id</c> at startup — see the engine's parity
-/// check.)
+/// Content-addresses a modality canonical surface to its substrate id by <b>composing</b> it (the
+/// host implements this with <c>ContentEmitter.RootId</c>, so the id is the Merkle root of the
+/// codepoint→…→ tree, with tier/coordinate emergent). This is the only way the engine obtains a
+/// state/move id — it never calls <c>OfCanonical</c> on an instance.
+/// </summary>
+public interface IContentAddresser
+{
+    /// <summary>Composed content id (Merkle root) of a canonical surface string.</summary>
+    Hash128 Address(string canonicalSurface);
+}
+
+/// <summary>
+/// The substrate's edge (consensus) key. Mirrors <c>laplace.consensus_id(subject,type,object)</c> =
+/// BLAKE3(subject ‖ type ‖ COALESCE(object, 0¹⁶)), so a candidate move's rating can be looked up by id
+/// without a per-move round trip. This is a <i>relation key</i>, not a content node — it is correctly a
+/// hash of the three ids, unlike a state/move which must be composed.
 /// </summary>
 public static class ConsensusKeys
 {
     private static readonly byte[] ZeroObject = new byte[16];
 
-    /// <summary>16-byte content id for a state from its modality canonical key.</summary>
-    public static Hash128 StateId<TState, TAction>(ITurnModality<TState, TAction> modality, TState state)
-        => Hash128.OfCanonical($"{modality.Name}/state/{modality.StateKey(state)}");
-
-    /// <summary>16-byte content id for a move from its modality canonical key.</summary>
-    public static Hash128 ActionId<TState, TAction>(
-        ITurnModality<TState, TAction> modality, TState state, TAction action)
-        => Hash128.OfCanonical($"{modality.Name}/action/{modality.ActionKey(state, action)}");
-
-    /// <summary>Edge (consensus) id = BLAKE3(subject ‖ type ‖ object). Mirrors laplace.consensus_id.</summary>
     public static Hash128 EdgeId(Hash128 subject, Hash128 type, Hash128 obj)
     {
         Span<byte> buf = stackalloc byte[48];
@@ -44,7 +46,6 @@ public static class ConsensusKeys
         return Hash128.Blake3(buf);
     }
 
-    /// <summary>Edge id for a nullable object, matching the COALESCE(object, 0¹⁶) in the SQL.</summary>
     public static Hash128 EdgeId(Hash128 subject, Hash128 type, Hash128? obj)
     {
         if (obj is { } o) return EdgeId(subject, type, o);
@@ -58,13 +59,13 @@ public static class ConsensusKeys
 
 /// <summary>
 /// Reads the confidence-discounted strength (<c>eff_mu = rating − 2·rd</c>, fixed-point ×1e9) of
-/// consensus edges by id. Unrated edges return <see cref="UnratedEffMu"/> — the Glicko-2 prior lower
-/// bound (neutral μ, max rd) — so a never-seen move sits on the same scale as rated ones: below a
-/// confirmed win, above a refuted move. That is the explore/exploit gradient, for free.
+/// consensus edges by id. Unrated edges return <see cref="GlickoPriors.UnratedEffMu"/> — the Glicko-2
+/// prior lower bound — so a never-seen move sits on the same scale as rated ones: below a confirmed
+/// win, above a refuted move. That is the explore/exploit gradient, for free.
 /// </summary>
 public interface IEdgeRatings
 {
-    /// <summary>eff_mu per edge id, in the same order; <see cref="UnratedEffMu"/> where absent.</summary>
+    /// <summary>eff_mu per edge id, in the same order; the unrated prior where absent.</summary>
     Task<double[]> EffMuAsync(IReadOnlyList<Hash128> edgeIds, CancellationToken ct = default);
 }
 
@@ -72,8 +73,9 @@ public interface IEdgeRatings
 public interface ITurnLearner
 {
     /// <summary>
-    /// Persist the game's action edges as attestations and fold the touched consensus edges in place
-    /// (no batch drain / table rebuild), so the updated ratings are queryable on the next move.
+    /// Compose the visited states/moves as content entities and persist the game's action edges as
+    /// attestations whose <i>score is the game result</i>, then fold the touched consensus edges in
+    /// place (no batch drain / table rebuild) so the updated ratings are queryable on the next move.
     /// </summary>
     Task LearnGameAsync(IReadOnlyList<RecordedEdge> edges, CancellationToken ct = default);
 }
@@ -81,8 +83,8 @@ public interface ITurnLearner
 public static class GlickoPriors
 {
     // Ratings/rd are fixed-point ×1e9: a real Glicko value of 1500 is stored as 1500e9 = 1.5e12.
-    // These mirror glicko2_neutral_mu() and glicko2_initial_rd() in 13_mu_law.sql.in, in the same
-    // raw storage units the consensus query returns for (rating - 2*rd).
+    // Mirrors glicko2_neutral_mu() and glicko2_initial_rd() in 13_mu_law.sql.in, in the same raw
+    // storage units the consensus query returns for (rating - 2*rd).
 
     /// <summary>glicko2_neutral_mu — real 1500, stored 1500×1e9.</summary>
     public const double NeutralMu = 1_500_000_000_000d;

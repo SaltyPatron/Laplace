@@ -969,6 +969,158 @@
           }
         }
       }
+    },
+    "/chess/new": {
+      "get": {
+        "tags": [
+          "chess"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/legal": {
+      "post": {
+        "tags": [
+          "chess"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/move": {
+      "post": {
+        "tags": [
+          "chess"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/bestmove": {
+      "post": {
+        "tags": [
+          "chess"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BestMoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/train/start": {
+      "post": {
+        "tags": [
+          "chess"
+        ],
+        "parameters": [
+          {
+            "name": "temperature",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+              "type": [
+                "number",
+                "string"
+              ],
+              "format": "double"
+            }
+          },
+          {
+            "name": "weight",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+              "type": [
+                "number",
+                "string"
+              ],
+              "format": "double"
+            }
+          },
+          {
+            "name": "maxPlies",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/train/stop": {
+      "post": {
+        "tags": [
+          "chess"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/chess/train/status": {
+      "get": {
+        "tags": [
+          "chess"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1183,6 +1335,27 @@
                 "$ref": "#/components/schemas/BillingReceipt"
               }
             ]
+          }
+        }
+      },
+      "BestMoveRequest": {
+        "required": [
+          "fen",
+          "temperature"
+        ],
+        "type": "object",
+        "properties": {
+          "fen": {
+            "type": "string"
+          },
+          "temperature": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
           }
         }
       },
@@ -2861,6 +3034,17 @@
           }
         }
       },
+      "FenRequest": {
+        "required": [
+          "fen"
+        ],
+        "type": "object",
+        "properties": {
+          "fen": {
+            "type": "string"
+          }
+        }
+      },
       "HealthResponse": {
         "required": [
           "status",
@@ -3029,6 +3213,21 @@
             "items": {
               "$ref": "#/components/schemas/ModelInfo"
             }
+          }
+        }
+      },
+      "MoveRequest": {
+        "required": [
+          "fen",
+          "uci"
+        ],
+        "type": "object",
+        "properties": {
+          "fen": {
+            "type": "string"
+          },
+          "uci": {
+            "type": "string"
           }
         }
       },
@@ -4431,6 +4630,9 @@
     },
     {
       "name": "billing"
+    },
+    {
+      "name": "chess"
     }
   ]
 }

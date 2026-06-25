@@ -131,6 +131,7 @@ app.MapOpenApi();
 app.MapCoreEndpoints();
 app.MapOpenAiCompatEndpoints();
 app.MapBillingEndpoints();
+app.MapChessEndpoints();
 
 
 app.MapFallback("/v1/{*path}", () => Results.Json(

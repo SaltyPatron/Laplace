@@ -1,5 +1,7 @@
+using Laplace.Chess.Service;
 using Laplace.Endpoints.OpenAICompat.Auth;
 using Laplace.Endpoints.OpenAICompat.BillingPostgres;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Laplace.Endpoints.OpenAICompat;
@@ -22,6 +24,12 @@ internal static class AppComposition
         services.AddSingleton<ISubstrateClient>(sp => sp.GetRequiredService<SubstrateClient>());
         services.AddSingleton<TurnWitness>();
         services.AddHostedService(sp => sp.GetRequiredService<TurnWitness>());
+
+        // The chess modality engine: plays + trains over the substrate (LAPLACE_CHESS_DB ?? LAPLACE_DB).
+        var chessWeight = double.TryParse(Environment.GetEnvironmentVariable("LAPLACE_CHESS_WEIGHT"), out var w) ? w : 0.5d;
+        services.AddSingleton(sp => new ChessEngineService(
+            ChessEngineService.ResolveConnString(), chessWeight,
+            sp.GetService<ILoggerFactory>()?.CreateLogger("chess")));
         services.AddSingleton<IBillingCatalog, StaticBillingCatalog>();
         services.AddSingleton<IStripeCatalogSync, StripeCatalogSync>();
         services.AddSingleton<ISynthesisQuoteCalculator, SynthesisQuoteCalculator>();

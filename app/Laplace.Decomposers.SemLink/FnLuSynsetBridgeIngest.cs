@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using System.Text.RegularExpressions;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -14,10 +13,6 @@ namespace Laplace.Decomposers.SemLink;
 internal static class FnLuSynsetBridgeIngest
 {
     private static readonly Hash128 LuTypeId = EntityTypeRegistry.FrameNetLu;
-
-    private static readonly Regex WfnNativeDataLine = new(
-        @"^(\S+)\s+([avnr])\s+(\d{8}-[avnr])\b",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     internal static async IAsyncEnumerable<SubstrateChange> StreamAsync(
         string path,
@@ -148,12 +143,43 @@ internal static class FnLuSynsetBridgeIngest
         lemma = "";
         pos = "";
         synRaw = "";
-        var match = WfnNativeDataLine.Match(line);
-        if (!match.Success) return false;
-        lemma = match.Groups[1].Value;
-        pos = match.Groups[2].Value;
-        synRaw = match.Groups[3].Value;
-        return true;
+        // Flat whitespace-delimited row — SPLIT and field-address, never regex an imagined shape.
+        // Two layouts coexist in WFN/XWFN: "<lemma> <pos> <offset>-<ss> [gloss]" (space-delimited,
+        // multi-word lemmas allowed) and "<lemma>|<pos> <offset>-<ss> <n> [gloss]" (pipe-joined
+        // lemma|pos). Anchor on the one structural field — the <digits>-<ss> synset token — and the
+        // pos (token before it) and lemma (the rest) fall out, for either layout and any offset width.
+        var tok = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (tok.Length < 2) return false;
+
+        int syn = -1;
+        for (int i = 1; i < tok.Length; i++)
+            if (IsOffsetPos(tok[i])) { syn = i; break; }
+        if (syn < 1) return false;
+        synRaw = tok[syn];
+
+        string head = tok[syn - 1];   // pos; in the pipe layout it carries the lemma too
+        int pipe = head.IndexOf('|');
+        if (pipe > 0)
+        {
+            lemma = head[..pipe];
+            pos = head[(pipe + 1)..];
+        }
+        else
+        {
+            pos = head;
+            lemma = syn - 1 == 1 ? tok[0] : string.Join('_', tok[..(syn - 1)]);   // multi-word lemma → joined
+        }
+        return lemma.Length > 0 && pos.Length > 0;
+    }
+
+    /// <summary>A WordNet offset-pos synset token: <c>&lt;digits&gt;-&lt;n|v|a|s|r&gt;</c> (any offset width).</summary>
+    private static bool IsOffsetPos(string s)
+    {
+        int dash = s.IndexOf('-');
+        if (dash <= 0 || dash + 1 >= s.Length) return false;
+        for (int i = 0; i < dash; i++)
+            if (!char.IsDigit(s[i])) return false;
+        return s[dash + 1] is 'n' or 'v' or 'a' or 's' or 'r';
     }
 
     internal static bool TryParseRow(string line, out string frame, out string luName, out string synRaw)
