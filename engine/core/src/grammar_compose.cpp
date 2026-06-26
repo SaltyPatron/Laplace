@@ -4,12 +4,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "laplace/core/attestation_engine.h"
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/grapheme_floor.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/hash_composer.h"
+#include "laplace/core/intent_stage.h"
+#include "laplace/core/merkle_dedup.h"
 #include "laplace/core/mantissa.h"
+#include "laplace/core/relation_law.h"
 #include "laplace/core/tier_tree.h"
 #include "laplace/core/hilbert4d.h"
 #include "laplace/core/trajectory.h"
@@ -910,6 +914,131 @@ int laplace_compose_get_precedes(const laplace_compose_result_t* r, size_t i,
                                  laplace_compose_precedes_t* out) {
     if (!r || !out || i >= r->precedes_count) return -1;
     *out = r->precedes[i];
+    return 0;
+}
+
+typedef struct {
+    uint8_t  emit_all;
+    uint8_t* novel_entity;
+    size_t   entity_n;
+    hash128_t* novel_ids;
+    size_t   novel_id_n;
+} compose_emit_filter_t;
+
+static compose_emit_filter_t make_emit_filter(
+    const laplace_compose_result_t* r,
+    const uint8_t*                  existing_bitmap,
+    size_t                          bitmap_bits) {
+    compose_emit_filter_t f = {1, NULL, 0, NULL, 0};
+    if (!r || !existing_bitmap || existing_bitmap == NULL || bitmap_bits == 0) return f;
+    tier_tree_t* tree = r->tree;
+    if (!tree) return f;
+    const size_t node_count = tier_tree_node_count(tree);
+    if (node_count == 0 || node_count != r->entity_count || bitmap_bits < node_count) return f;
+
+    uint32_t* novel_idx = (uint32_t*)malloc(node_count * sizeof(uint32_t));
+    if (!novel_idx) return f;
+    size_t novel_count = 0;
+    if (merkle_dedup_trunk_shortcircuit(tree, existing_bitmap, bitmap_bits,
+                                        novel_idx, &novel_count) != 0) {
+        free(novel_idx);
+        return f;
+    }
+
+    f.emit_all = 0;
+    f.novel_entity = (uint8_t*)calloc(node_count, 1);
+    f.entity_n = node_count;
+    if (!f.novel_entity) { free(novel_idx); return f; }
+    for (size_t i = 0; i < novel_count; ++i)
+        f.novel_entity[novel_idx[i]] = 1;
+
+    f.novel_ids = (hash128_t*)malloc(novel_count * sizeof(hash128_t));
+    f.novel_id_n = 0;
+    if (f.novel_ids) {
+        for (size_t i = 0; i < r->entity_count; ++i) {
+            if (!f.novel_entity[i]) continue;
+            f.novel_ids[f.novel_id_n++] = r->entities[i].id;
+        }
+    }
+    free(novel_idx);
+    return f;
+}
+
+static void free_emit_filter(compose_emit_filter_t* f) {
+    if (!f) return;
+    free(f->novel_entity);
+    free(f->novel_ids);
+    f->novel_entity = NULL;
+    f->novel_ids = NULL;
+}
+
+static int entity_novel(const compose_emit_filter_t* f, size_t idx) {
+    return f->emit_all || (f->novel_entity && idx < f->entity_n && f->novel_entity[idx]);
+}
+
+static int phys_novel(const compose_emit_filter_t* f, const hash128_t* entity_id) {
+    if (f->emit_all || !f->novel_ids) return 1;
+    for (size_t i = 0; i < f->novel_id_n; ++i) {
+        if (hash128_equals(entity_id, &f->novel_ids[i])) return 1;
+    }
+    return 0;
+}
+
+int laplace_compose_drain_into_stage(
+    const laplace_compose_result_t* r,
+    intent_stage_t*                 stage,
+    const hash128_t*                source_id,
+    int64_t                         now_unix_us,
+    double                          witness_weight,
+    const uint8_t*                  existing_bitmap,
+    size_t                          bitmap_bits) {
+    if (!r || !stage || !source_id) return -1;
+
+    compose_emit_filter_t filter = make_emit_filter(r, existing_bitmap, bitmap_bits);
+
+    for (size_t i = 0; i < r->entity_count; ++i) {
+        if (!entity_novel(&filter, i)) continue;
+        const laplace_compose_entity_t* e = &r->entities[i];
+        if (intent_stage_witness_seen(stage, &e->id)) continue;
+        if (intent_stage_add_entity(stage, &e->id, (int16_t)e->tier, &e->type_id, source_id) != 0) {
+            free_emit_filter(&filter);
+            return -1;
+        }
+        intent_stage_witness_record(stage, &e->id);
+    }
+
+    for (size_t i = 0; i < r->phys_count; ++i) {
+        const laplace_compose_physicality_t* ph = &r->physicalities[i];
+        if (!phys_novel(&filter, &ph->entity_id)) continue;
+        if (intent_stage_witness_seen(stage, &ph->id)) continue;
+        if (intent_stage_add_physicality(
+                stage, &ph->id, &ph->entity_id, 1, ph->coord, &ph->hilbert,
+                ph->trajectory_xyzm, (uint32_t)ph->trajectory_n, (int32_t)ph->n_constituents,
+                1, 0.0, 1, 0, now_unix_us) != 0) {
+            free_emit_filter(&filter);
+            return -1;
+        }
+        intent_stage_witness_record(stage, &ph->id);
+    }
+
+    hash128_t precedes_type;
+    if (laplace_relation_resolve("PRECEDES", &precedes_type) != 0) {
+        free_emit_filter(&filter);
+        return -1;
+    }
+
+    for (size_t i = 0; i < r->precedes_count; ++i) {
+        const laplace_compose_precedes_t* pr = &r->precedes[i];
+        int64_t sum_score = pr->games * LAPLACE_GLICKO2_FP_SCALE;
+        if (laplace_attestation_aggregated_add(
+                stage, &pr->subject_id, &precedes_type, &pr->object_id, 0,
+                source_id, NULL, 1, pr->games, sum_score, witness_weight, now_unix_us) != 0) {
+            free_emit_filter(&filter);
+            return -1;
+        }
+    }
+
+    free_emit_filter(&filter);
     return 0;
 }
 

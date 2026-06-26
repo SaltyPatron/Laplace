@@ -249,50 +249,43 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         var stage = builder.ContentStage;
 
-        // Row-wise drain into the native stage, deduped within the batch via the builder's shared
-        // seen-set. A non-null existingBitmap drives the two-phase containment path (a present subtree
-        // skips its whole subtree); a null bitmap treats every node as novel.
-        var filter = ComputeFilter(existingBitmap);
+        unsafe
+        {
+            Hash128 src = _sourceId;
+            if (existingBitmap is { Length: > 0 })
+            {
+                fixed (byte* bm = existingBitmap)
+                {
+                    int rc = NativeInterop.ComposeDrainIntoStage(
+                        _compose, stage.DangerousNativeHandle, &src, nowUs, witnessWeight,
+                        bm, (nuint)existingBitmap.Length * 8);
+                    if (rc != 0)
+                        throw new InvalidOperationException($"laplace_compose_drain_into_stage returned {rc}");
+                }
+            }
+            else
+            {
+                int rc = NativeInterop.ComposeDrainIntoStage(
+                    _compose, stage.DangerousNativeHandle, &src, nowUs, witnessWeight, null, 0);
+                if (rc != 0)
+                    throw new InvalidOperationException($"laplace_compose_drain_into_stage returned {rc}");
+            }
+        }
 
+        // Keep the builder's within-batch seen-set in sync with what the native drain staged.
         nuint nEnt = NativeInterop.ComposeEntityCount(_compose);
         for (nuint i = 0; i < nEnt; i++)
         {
-            if (!filter.EntityNovel(i)) continue;
             NativeInterop.ComposeEntityNative e;
             NativeInterop.ComposeGetEntity(_compose, i, &e);
-            if (builder.TrySeeEntity(e.Id))
-                stage.AddEntity(e.Id, e.Tier, e.TypeId, _sourceId);
+            builder.TrySeeEntity(e.Id);
         }
-
         nuint nPhys = NativeInterop.ComposePhysicalityCount(_compose);
-        Span<double> coord = stackalloc double[4];
         for (nuint i = 0; i < nPhys; i++)
         {
             NativeInterop.ComposePhysicalityNative ph;
             NativeInterop.ComposeGetPhysicality(_compose, i, &ph);
-            if (!filter.PhysNovel(ph.EntityId)) continue;
-            if (!builder.TrySeePhysicality(ph.Id)) continue;
-            coord[0] = ph.Coord0; coord[1] = ph.Coord1; coord[2] = ph.Coord2; coord[3] = ph.Coord3;
-            int trajLen = (int)ph.TrajectoryN.ToUInt64();
-            var traj = trajLen > 0
-                ? new ReadOnlySpan<double>(ph.TrajectoryXyzm.ToPointer(), trajLen)
-                : ReadOnlySpan<double>.Empty;
-            stage.AddPhysicality(
-                ph.Id, ph.EntityId, (short)PhysicalityType.Content,
-                coord, ph.Hilbert, traj, (int)ph.NConstituents.ToUInt64(),
-                alignmentResidual: null, sourceDim: null, observedAtUnixUs: nowUs);
-        }
-
-        nuint nPrec = NativeInterop.ComposePrecedesCount(_compose);
-        for (nuint i = 0; i < nPrec; i++)
-        {
-            NativeInterop.ComposePrecedesNative pr;
-            NativeInterop.ComposeGetPrecedes(_compose, i, &pr);
-            long sumScore = checked(pr.Games * Glicko2.FpScale);
-            builder.AddAttestation(NativeAttestation.Aggregated(
-                pr.SubjectId, GrammarEntityBuilder.PrecedesTypeId, pr.ObjectId,
-                _sourceId, contextId: null,
-                games: pr.Games, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
+            builder.TrySeePhysicality(ph.Id);
         }
 
         return NativeInterop.ComposeRootId(_compose);

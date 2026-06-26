@@ -50,11 +50,7 @@ internal static class IngestCommands
         bool RegisterOnly,
         bool Force = false);
 
-    // Sources routed through the generic EtlDecomposer to prove parity with their bespoke
-    // decomposer. The old decomposer switch stays in place for everything else (Migrate retires it).
-    private static readonly HashSet<string> EtlGenericRouted =
-        new(StringComparer.OrdinalIgnoreCase) { "omw", "conceptnet", "atomic2020", "wiktionary" };
-
+    // Retired: manifest-complete sources route through EtlDecomposer above.
     private static IngestCliArgs ParseIngestCliArgs(string[] args)
     {
         var rest = new List<string>(args);
@@ -132,9 +128,8 @@ internal static class IngestCommands
 
         string sourceKey = cli.Source.ToLowerInvariant();
 
-        // Manifest-driven generic path: a complete EtlManifest row drives ONE EtlDecomposer. Routed
-        // for the already-conforming sources to prove parity; opt the rest in by completing their row.
-        if (EtlGenericRouted.Contains(sourceKey) && EtlManifest.IsRoutable(sourceKey))
+        // Manifest-driven generic path: every complete EtlManifest row drives ONE EtlDecomposer.
+        if (EtlManifest.IsRoutable(sourceKey))
             return await IngestViaRunnerAsync(
                 new EtlDecomposer(EtlManifest.Get(sourceKey)),
                 IngestDataPaths.Resolve(sourceKey, cli.Path), skipLayerCheck: false, cli);
@@ -145,12 +140,8 @@ internal static class IngestCommands
             "iso639"   => await IngestISO639Async(cli),
             "cili"     => await IngestViaRunnerAsync(new CILIDecomposer(), IngestDataPaths.Resolve("cili", cli.Path), skipLayerCheck: false, cli),
             "wordnet"  => await IngestViaRunnerAsync(new WordNetDecomposer(), IngestDataPaths.Resolve("wordnet", cli.Path), skipLayerCheck: false, cli),
-            "omw"      => await IngestViaRunnerAsync(new OMWDecomposer(), IngestDataPaths.Resolve("omw", cli.Path), skipLayerCheck: false, cli),
             "ud"       => await IngestViaRunnerAsync(new UDDecomposer(), IngestDataPaths.Resolve("ud", cli.Path), skipLayerCheck: false, cli),
             "tatoeba"  => await IngestViaRunnerAsync(new TatoebaDecomposer(), IngestDataPaths.Resolve("tatoeba", cli.Path), skipLayerCheck: false, cli),
-            "atomic2020" => await IngestViaRunnerAsync(new Atomic2020Decomposer(), IngestDataPaths.Resolve("atomic2020", cli.Path), skipLayerCheck: false, cli),
-            "conceptnet" => await IngestViaRunnerAsync(new ConceptNetDecomposer(), IngestDataPaths.Resolve("conceptnet", cli.Path), skipLayerCheck: false, cli),
-            "wiktionary" => await IngestViaRunnerAsync(new WiktionaryDecomposer(), IngestDataPaths.Resolve("wiktionary", cli.Path), skipLayerCheck: false, cli),
             "framenet" => await IngestViaRunnerAsync(new FrameNetDecomposer(), IngestDataPaths.Resolve("framenet", cli.Path), skipLayerCheck: false, cli),
             "opensubtitles" => await IngestViaRunnerAsync(new OpenSubtitlesDecomposer(), IngestDataPaths.Resolve("opensubtitles", cli.Path), skipLayerCheck: false, cli),
             "verbnet"  => await IngestViaRunnerAsync(new VerbNetDecomposer(),  IngestDataPaths.Resolve("verbnet", cli.Path),  skipLayerCheck: false, cli),

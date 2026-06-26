@@ -29,6 +29,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/relation_law.h
     include/laplace/core/pos_law.h
     include/laplace/core/attestation_engine.h
+    include/laplace/core/etl_ingest.h
 )
 
 set(LAPLACE_CORE_SOURCES
@@ -63,6 +64,8 @@ set(LAPLACE_CORE_SOURCES
     src/generated/relation_law.c
     src/generated/pos_law.c
     src/attestation_engine.c
+    src/etl_ingest.c
+    src/etl_witness_conceptnet.c
 )
 
 add_library(laplace_core SHARED ${LAPLACE_CORE_SOURCES})
