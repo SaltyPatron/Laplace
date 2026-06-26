@@ -33,35 +33,45 @@ public sealed class ChessPgnDecomposer : IDecomposer
         IDecomposerContext context, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
+        // Simple serial yielder: enumerated ONCE (no re-processing), one tiny parse per game, the
+        // deferred-content skip kept on (repeated openings/positions don't re-emit). The IngestRunner
+        // parallelizes the commit lanes + the consensus fold runs parallel partitions — that's the
+        // parallelism; rolling our own on top double-enumerated and re-processed.
         var modality = new ChessModality();
         foreach (var file in EnumerateFiles(context.EcosystemPath))
         {
             ct.ThrowIfCancellationRequested();
-            byte[] bytes;
-            try { bytes = await File.ReadAllBytesAsync(file, ct); } catch { continue; }
-            if (bytes.Length == 0) continue;
+            string text;
+            try { text = await File.ReadAllTextAsync(file, ct); } catch { continue; }
+            if (text.Length == 0 || options.DryRun) continue;
 
-            using var ast = GrammarDecomposer.Parse(bytes, "pgn");
             var builder = NewBuilder(context);
             int inBatch = 0;
-
-            foreach (var (moves, result) in EnumerateGames(ast, bytes))
+            foreach (var gameText in SplitGames(text))
             {
                 ct.ThrowIfCancellationRequested();
+                var gameBytes = Encoding.UTF8.GetBytes(gameText);
+                List<string> moves;
+                GameOutcome? result;
+                using (var ast = GrammarDecomposer.Parse(gameBytes, "pgn"))
+                    (moves, result) = ExtractGame(ast, gameBytes);
                 AppendGame(builder, modality, moves, result);
                 if (++inBatch >= GamesPerBatch)
                 {
-                    if (!options.DryRun) yield return await builder.SetInputUnitsConsumed(inBatch).BuildAsync(ct);
+                    yield return await builder.SetInputUnitsConsumed(inBatch).BuildAsync(ct);
                     builder = NewBuilder(context);
                     inBatch = 0;
                 }
             }
-            if (inBatch > 0 && !options.DryRun)
+            if (inBatch > 0)
                 yield return await builder.SetInputUnitsConsumed(inBatch).BuildAsync(ct);
         }
     }
 
     private static SubstrateChangeBuilder NewBuilder(IDecomposerContext ctx)
+        // Deferred-content skip ON: chess openings/positions repeat massively across games, so the
+        // probe lets repeated content stage once instead of re-emitting every occurrence (the row
+        // explosion we hit with it off). Serial enumeration keeps the probe's connection use bounded.
         => new SubstrateChangeBuilder(ChessVocabulary.SourceId, "chess/pgn").EnableDeferredContent(ctx.Reader);
 
     /// <summary>Replay one game's SAN moves, emitting MOVE edges scored by result. Aborts on an unresolved move.</summary>
@@ -81,10 +91,23 @@ public sealed class ChessPgnDecomposer : IDecomposer
         }
     }
 
-    /// <summary>Walk the parse tree (document order), yielding each game's ordered mainline SAN + result.</summary>
-    private static IEnumerable<(List<string> Moves, GameOutcome? Result)> EnumerateGames(GrammarAst ast, byte[] utf8)
+    /// <summary>Split a PGN file into individual game texts (each starts with [Event) — cheap, no parse.</summary>
+    private static IEnumerable<string> SplitGames(string text)
+    {
+        int i = text.IndexOf("[Event ", StringComparison.Ordinal);
+        while (i >= 0)
+        {
+            int next = text.IndexOf("[Event ", i + 7, StringComparison.Ordinal);
+            yield return next < 0 ? text[i..] : text[i..next];
+            i = next;
+        }
+    }
+
+    /// <summary>Walk one game's parse tree: ordered mainline SAN + the terminating result.</summary>
+    private static (List<string> Moves, GameOutcome? Result) ExtractGame(GrammarAst ast, byte[] utf8)
     {
         var moves = new List<string>();
+        GameOutcome? result = null;
         int n = ast.NodeCount;
         for (int i = 0; i < n; i++)
         {
@@ -96,11 +119,10 @@ public sealed class ChessPgnDecomposer : IDecomposer
             }
             else if (name == "game_result")
             {
-                yield return (moves, ParseResult(Text(utf8, node)));
-                moves = new List<string>();
+                result = ParseResult(Text(utf8, node));
             }
         }
-        if (moves.Count > 0) yield return (moves, null);
+        return (moves, result);
     }
 
     private static bool InsideVariation(GrammarAst ast, LaplaceAstNode node)

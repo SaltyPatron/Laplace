@@ -298,8 +298,16 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
 
             Hash128? tgt = ConceptAnchor.SynsetId(ptr.TargetOffset, ptr.TargetPos);
             if (tgt is null) continue;
+            // Lexical pointer (source word index set): the relation is word-level — attribute it to the
+            // specific source WORD, not the whole synset, so antonymy/derivation surface at the word.
+            Hash128 subject = synId;
+            if (ptr.SrcWord > 0 && ptr.SrcWord <= syn.Lemmas.Count)
+            {
+                var srcId = RootSurface(syn.Lemmas[ptr.SrcWord - 1]);
+                if (srcId is { } sid) subject = sid;
+            }
             b.AddAttestation(NativeAttestation.Categorical(
-                synId, typeName, tgt.Value, Source, SourceTrust.StandardsDerived));
+                subject, typeName, tgt.Value, Source, SourceTrust.StandardsDerived));
         }
     }
 
@@ -609,8 +617,13 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
             string sym = parts[idx++];
             if (!long.TryParse(parts[idx++], out long tgtOffset)) { idx += 2; continue; }
             char tgtPos = parts[idx++][0];
-            idx++;
-            pointers.Add(new WnPointer(sym, tgtOffset, tgtPos));
+            // source/target word indices (4 hex SSTT): "0000" = SEMANTIC (synset-to-synset); non-zero =
+            // LEXICAL (word-to-word: antonymy/derivation/pertainymy/participle). Previously skipped, so
+            // every lexical pointer was wrongly emitted at synset level.
+            string srcTgt = parts[idx++];
+            int srcWord = srcTgt.Length >= 4 && int.TryParse(srcTgt.AsSpan(0, 2), NumberStyles.HexNumber, null, out int sw) ? sw : 0;
+            int tgtWord = srcTgt.Length >= 4 && int.TryParse(srcTgt.AsSpan(2, 2), NumberStyles.HexNumber, null, out int tw) ? tw : 0;
+            pointers.Add(new WnPointer(sym, tgtOffset, tgtPos, srcWord, tgtWord));
         }
 
         var frames = new List<(int Frame, int WordNum)>();
@@ -674,7 +687,7 @@ public sealed class WordNetDecomposer : IDecomposer, IIngestInventoryProvider{
         List<string> Lemmas, List<WnPointer> Pointers, string Gloss,
         List<(int Frame, int WordNum)> Frames);
 
-    internal readonly record struct WnPointer(string Symbol, long TargetOffset, char TargetPos);
+    internal readonly record struct WnPointer(string Symbol, long TargetOffset, char TargetPos, int SrcWord, int TgtWord);
 
     private sealed record WnSense(string SenseKey, long Offset, char Pos, string Lemma, int TagCount);
 }

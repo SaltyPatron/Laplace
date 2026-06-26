@@ -27,17 +27,22 @@ public static class ChessGameFetcher
             $"{Sanitize(user)}_{site}.pgn");
 
     public static Task<int> FetchAsync(
-        string user, string site, int? max, string outPath, Action<string>? log, CancellationToken ct)
+        string user, string site, int? max, int minTcSeconds, string outPath, Action<string>? log, CancellationToken ct)
         => site.ToLowerInvariant() switch
         {
             "lichess" => FetchLichessAsync(user, max, outPath, log, ct),
-            "chesscom" or "chess.com" or "chess" => FetchChessComAsync(user, max, outPath, log, ct),
+            "chesscom" or "chess.com" or "chess" => FetchChessComAsync(user, max, minTcSeconds, outPath, log, ct),
             _ => throw new ArgumentException($"unknown site '{site}' (chesscom|lichess)", nameof(site)),
         };
 
-    /// <summary>chess.com Published-Data API: archives index → monthly PGN bundles, concatenated.</summary>
+    /// <summary>
+    /// chess.com Published-Data API: archives newest-first, split into individual games, optionally kept
+    /// only when base time control ≥ <paramref name="minTcSeconds"/> (e.g. 600 = rapid+classical, dropping
+    /// blitz/bullet for cleaner move quality; daily/correspondence always kept). Stops at <paramref name="max"/>
+    /// KEPT games, so the cap selects the most-recent quality games rather than the oldest.
+    /// </summary>
     public static async Task<int> FetchChessComAsync(
-        string user, int? max, string outPath, Action<string>? log, CancellationToken ct)
+        string user, int? max, int minTcSeconds, string outPath, Action<string>? log, CancellationToken ct)
     {
         var archUrl = $"https://api.chess.com/pub/player/{Uri.EscapeDataString(user)}/games/archives";
         log?.Invoke($"chess.com archives: {archUrl}");
@@ -45,10 +50,12 @@ public static class ChessGameFetcher
         using var doc = JsonDocument.Parse(archJson);
         var archives = doc.RootElement.GetProperty("archives").EnumerateArray()
             .Select(e => e.GetString()!).ToList();
-        log?.Invoke($"  {archives.Count} monthly archives");
+        archives.Reverse(); // newest month first → cap keeps recent games
+        log?.Invoke($"  {archives.Count} monthly archives (newest first)"
+            + (minTcSeconds > 0 ? $", min base TC {minTcSeconds}s" : ""));
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
-        int games = 0;
+        int kept = 0;
         await using (var w = new StreamWriter(outPath, append: false, new UTF8Encoding(false)))
         {
             foreach (var a in archives)
@@ -56,15 +63,46 @@ public static class ChessGameFetcher
                 ct.ThrowIfCancellationRequested();
                 var pgn = await GetStringWithRetryAsync($"{a}/pgn", ct);
                 if (string.IsNullOrWhiteSpace(pgn)) continue;
-                await w.WriteAsync(pgn);
-                if (!pgn.EndsWith('\n')) await w.WriteAsync('\n');
-                await w.WriteAsync('\n');
-                games += CountGames(pgn);
-                log?.Invoke($"  {a[^7..]}: {games} games");
-                if (max is { } m && games >= m) break;
+                foreach (var game in SplitGames(pgn))
+                {
+                    if (minTcSeconds > 0 && BaseTcSeconds(game) < minTcSeconds) continue;
+                    await w.WriteAsync(game);
+                    await w.WriteAsync("\n\n");
+                    if (++kept >= (max ?? int.MaxValue)) break;
+                }
+                log?.Invoke($"  {a[^7..]}: {kept} kept");
+                if (max is { } m && kept >= m) break;
             }
         }
-        return games;
+        return kept;
+    }
+
+    /// <summary>Split a chess.com monthly PGN bundle into individual game texts (each starts with [Event).</summary>
+    private static IEnumerable<string> SplitGames(string bundle)
+    {
+        int i = bundle.IndexOf("[Event ", StringComparison.Ordinal);
+        while (i >= 0)
+        {
+            int next = bundle.IndexOf("[Event ", i + 7, StringComparison.Ordinal);
+            yield return (next < 0 ? bundle[i..] : bundle[i..next]).Trim();
+            i = next;
+        }
+    }
+
+    /// <summary>Base seconds from a game's [TimeControl] tag ("600"→600, "180+2"→180, "1/86400"→daily=max).</summary>
+    private static int BaseTcSeconds(string game)
+    {
+        const string key = "[TimeControl \"";
+        int t = game.IndexOf(key, StringComparison.Ordinal);
+        if (t < 0) return 0;
+        t += key.Length;
+        int end = game.IndexOf('"', t);
+        if (end < 0) return 0;
+        var tc = game[t..end];
+        if (tc.StartsWith("1/", StringComparison.Ordinal)) return int.MaxValue; // daily/correspondence
+        int plus = tc.IndexOf('+');
+        var basePart = plus >= 0 ? tc[..plus] : tc;
+        return int.TryParse(basePart, out var s) ? s : 0;
     }
 
     /// <summary>lichess games API: streams the user's games as PGN directly to the file.</summary>

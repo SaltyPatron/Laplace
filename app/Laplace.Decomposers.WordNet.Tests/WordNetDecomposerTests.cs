@@ -1,3 +1,4 @@
+using System.Linq;
 using Laplace.Decomposers.WordNet;
 using Xunit;
 
@@ -5,6 +6,26 @@ namespace Laplace.Decomposers.WordNet.Tests;
 
 public sealed class WordNetDecomposerTests
 {
+    [Fact]
+    public void TryParseDataLine_LexicalPointers_CaptureSourceWord()
+    {
+        // Real data.adj synset "able": "=" pointers are SEMANTIC (source/target 0000, synset-level);
+        // "+" (derivation) and "!" (antonym) carry source/target word indices (0101) — they are
+        // WORD-level. The parser previously skipped that field, so every lexical pointer was wrongly
+        // emitted at synset level. This proves the distinction is now captured (no DB needed).
+        const string line =
+            "00001740 00 a 01 able 0 005 = 05200169 n 0000 = 05616246 n 0000 "
+            + "+ 05616246 n 0101 + 05200169 n 0101 ! 00002098 a 0101 "
+            + "| (usually followed by `to') having the necessary means or skill";
+
+        Assert.True(WordNetDecomposer.TryParseDataLine(line, out var syn));
+        var antonym = Assert.Single(syn.Pointers, p => p.Symbol == "!");
+        Assert.Equal(1, antonym.SrcWord);   // LEXICAL — antonym attributed to source word "able"
+        Assert.Equal(1, antonym.TgtWord);
+        Assert.All(syn.Pointers.Where(p => p.Symbol == "="), p => Assert.Equal(0, p.SrcWord)); // SEMANTIC
+        Assert.Contains(syn.Pointers, p => p.Symbol == "+" && p.SrcWord == 1);                 // LEXICAL derivation
+    }
+
     [Fact]
     public void TryParseDataLine_VerbSynset_ParsesVerbFrames()
     {

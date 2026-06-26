@@ -67,14 +67,12 @@ public sealed class SecondaryIndexPolicy
     {
         RequireSafeTable(table);
         bool populated = await TableHasAnyRowsAsync(table, ct);
-        // BULK seed mode (LAPLACE_BULK_FRESH=1): drop secondary indexes even on a POPULATED table. The
-        // big seed sources (conceptnet ~100M rows, wiktionary) pour tens of millions of random-key
-        // (BLAKE3) rows; into LIVE secondary indexes that is the page-split / write-amplification cliff
-        // that collapses the insert rate as the table grows — the conceptnet slowdown. The id PK is
-        // never dropped, so the dedup existence-check stays fast; dropping the SECONDARY indexes for the
-        // bulk load and rebuilding after (SecondaryIndexScope.DisposeAsync) is pure win.
-        bool bulk = string.Equals(Environment.GetEnvironmentVariable("LAPLACE_BULK_FRESH"), "1", StringComparison.Ordinal);
-        var dropped = (populated && !bulk)
+        // NEVER drop secondary indexes on a POPULATED table. The dedup existence-checks — entities_exist_bitmap,
+        // the "which of these do you have?" content probe, the seen-set DB lookups — REQUIRE these indexes;
+        // dropping them turns every dedup probe into a seq scan and destroys the ingest. Indexes stay live.
+        // Throughput comes from the dedup REDUCING how much is inserted (compose-is-dedup) + bulk COPY of the
+        // genuinely-novel rows — never from dropping indexes. (Drop only on the first empty table.)
+        var dropped = populated
             ? new List<string>()
             : await DropSecondaryIndexesAsync(_ds, table, ct);
         return new SecondaryIndexScope(_ds, _log, table, populated, dropped);
