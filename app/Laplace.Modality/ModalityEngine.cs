@@ -32,6 +32,13 @@ public sealed class ModalityEngine<TState, TAction>
     private readonly Hash128 _moveTypeId;
     private readonly IContentAddresser _addresser;
     private readonly IEdgeRatings _ratings;
+    private readonly IStateValuer? _valuer;
+
+    // Hard ranks for FORCED terminal outcomes, placed far outside the learned eff_mu range
+    // (GlickoPriors.NeutralMu = 1500×1e9): any forced win outranks every heuristic value, any forced
+    // loss ranks below every move, and a forced draw sits at neutral. So win ≫ … ≫ draw ≫ … ≫ loss.
+    private const double TerminalWinValue  = 4_000_000_000_000d;
+    private const double TerminalLossValue =   100_000_000_000d;
 
     public ModalityEngine(
         ITurnModality<TState, TAction> modality, Hash128 moveTypeId,
@@ -41,6 +48,10 @@ public sealed class ModalityEngine<TState, TAction>
         _addresser  = addresser ?? throw new ArgumentNullException(nameof(addresser));
         _ratings    = ratings   ?? throw new ArgumentNullException(nameof(ratings));
         _moveTypeId = moveTypeId;
+        // If the host can value a state by folding its substructures, the engine reasons over them
+        // (negamax over the successor's value, blended with the exact move edge) instead of relying only
+        // on the whole-position MOVE edge. Hosts that don't implement it keep the move-edge behaviour.
+        _valuer     = ratings as IStateValuer ?? addresser as IStateValuer;
     }
 
     public ITurnModality<TState, TAction> Modality => _modality;
@@ -68,12 +79,76 @@ public sealed class ModalityEngine<TState, TAction>
             throw new InvalidOperationException(
                 $"ratings returned {effMu.Length} values for {actions.Count} edges");
 
+        // Substructure-fold reasoning: value each successor by folding its substructures, then take the
+        // negamax reflection (a position good for the opponent is bad for us) and blend with the exact
+        // move edge. Without a valuer, this is a no-op and the move edge stands alone.
+        double[]? succVals = null;
+        if (_valuer is not null)
+        {
+            var nextSurfaces = new string[actions.Count];
+            for (int i = 0; i < actions.Count; i++) nextSurfaces[i] = _modality.StateKey(nexts[i]);
+            succVals = await _valuer.ValueStatesAsync(nextSurfaces, ct).ConfigureAwait(false);
+            if (succVals.Length != actions.Count)
+                throw new InvalidOperationException(
+                    $"valuer returned {succVals.Length} values for {actions.Count} states");
+        }
+
+        int mover = _modality.SideToMove(state);
         var result = new MoveCandidate<TState, TAction>[actions.Count];
         for (int i = 0; i < actions.Count; i++)
+        {
+            // A move into a TERMINAL state is a HARD rank that overrides the learned fold: a forced win
+            // (a checkmate confirms it worked) ≫ any heuristic value ≫ a draw ≫ a forced loss. So the
+            // engine always takes a forced mate and never walks into one. (Non-terminal moves fall to the
+            // learned substructure fold + move edge below.)
+            if (_modality.Terminal(nexts[i]) is { } term)
+            {
+                double tEff = term.ForMover(mover) switch
+                {
+                    PlyOutcome.Win  => TerminalWinValue,
+                    PlyOutcome.Loss => TerminalLossValue,
+                    _               => GlickoPriors.NeutralMu, // forced draw = neutral
+                };
+                result[i] = new MoveCandidate<TState, TAction>(
+                    actions[i], nexts[i], toIds[i], edgeIds[i], tEff, Rated: true);
+                continue;
+            }
+
+            // Depth-2 mate safety (movegen only — NO eval, NO DB): reject any move that lets the
+            // opponent deliver mate on the reply. Depth-1 can't see this; it's the single biggest
+            // blunder, and it's deterministic regardless of how fuzzy the learned positional eval is.
+            if (AllowsOpponentMate(nexts[i]))
+            {
+                result[i] = new MoveCandidate<TState, TAction>(
+                    actions[i], nexts[i], toIds[i], edgeIds[i], TerminalLossValue, Rated: true);
+                continue;
+            }
+
+            double eff   = effMu[i];
+            bool   rated = eff != GlickoPriors.UnratedEffMu;
+            if (succVals is not null)
+            {
+                // Negamax: our value of this move = reflection of the successor's side-to-move value.
+                double reflected = 2d * GlickoPriors.NeutralMu - succVals[i];
+                eff   = rated ? 0.5d * (reflected + effMu[i]) : reflected;
+                rated = rated || succVals[i] != GlickoPriors.NeutralMu;
+            }
             result[i] = new MoveCandidate<TState, TAction>(
-                actions[i], nexts[i], toIds[i], edgeIds[i], effMu[i],
-                Rated: effMu[i] != GlickoPriors.UnratedEffMu);
+                actions[i], nexts[i], toIds[i], edgeIds[i], eff, rated);
+        }
         return result;
+    }
+
+    // True if the side to move at <paramref name="state"/> has any move that ends the game as THEIR win
+    // (a mate). Used to reject our candidate moves that walk into a forced mate-in-1 — pure movegen, no
+    // eval/DB, so the guard is exact even when the learned eval is weak.
+    private bool AllowsOpponentMate(TState state)
+    {
+        int opp = _modality.SideToMove(state);
+        foreach (var a in _modality.LegalActions(state))
+            if (_modality.Terminal(_modality.Apply(state, a)) is { } t && t.ForMover(opp) == PlyOutcome.Win)
+                return true;
+        return false;
     }
 
     /// <summary>

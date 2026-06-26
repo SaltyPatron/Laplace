@@ -61,6 +61,27 @@ public sealed class ChessEngineService : IAsyncDisposable
 
     public string NewGameFen() => ChessModality.StartFen;
 
+    // The authoritative game state, carried WITH its repetition history across the stateless per-FEN
+    // endpoints. Play is one game at a time, so a single live state suffices: each move advances it, and
+    // the incoming FEN re-syncs it (a mismatch — new game, jump, undo — rebuilds fresh from that FEN,
+    // degrading to the old stateless behavior). Without this, FromFen reset the history every call, so
+    // threefold repetition / 50-move / stalemate never fired and the bot could shuffle forever.
+    private ChessState? _live;
+    private readonly object _liveLock = new();
+
+    private ChessState SyncState(string fen)
+    {
+        lock (_liveLock)
+        {
+            if (_live is { } live && live.Board.ToFen() == fen) return live;
+            var s = _modality!.FromFen(fen);
+            _live = s;
+            return s;
+        }
+    }
+
+    private void SetLive(ChessState s) { lock (_liveLock) { _live = s; } }
+
     private async Task<ModalityEngine<ChessState, ChessMove>> EngineAsync(CancellationToken ct)
     {
         if (_engine is not null) return _engine;
@@ -95,6 +116,10 @@ public sealed class ChessEngineService : IAsyncDisposable
     public async Task<IReadOnlyList<ChessMoveScore>> ScoreAsync(string fen, CancellationToken ct = default)
     {
         var engine = await EngineAsync(ct);
+        // Scoring is READ-ONLY: never touch the live game state. (SyncState mutates _live on a FEN
+        // mismatch; the UI's constant legal-move refresh racing the bot's move via SyncState here was
+        // clobbering _live to a stale position → the bot then scored the wrong side. Only ApplyMove /
+        // BestMove advance the authoritative game.) Repetition history is irrelevant to move scoring.
         var state = _modality!.FromFen(fen);
         var cands = await engine.ScoreMovesAsync(state, ct);
         return cands
@@ -106,13 +131,14 @@ public sealed class ChessEngineService : IAsyncDisposable
     public async Task<ChessBestMove> BestMoveAsync(string fen, double temperature = 0d, CancellationToken ct = default)
     {
         var engine = await EngineAsync(ct);
-        var state = _modality!.FromFen(fen);
-        if (_modality.Terminal(state) is { } term)
+        var state = SyncState(fen);
+        if (_modality!.Terminal(state) is { } term)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
         var cands = await engine.ScoreMovesAsync(state, ct);
         var chosen = ModalityEngine<ChessState, ChessMove>.Select(cands, temperature, Rng());
         var next = chosen.Next;
+        SetLive(next); // advance the authoritative game so the bot's move enters the repetition history
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
         return new ChessBestMove(chosen.Action.ToUci(), next.Board.ToFen(), chosen.EffMu / 1e9,
             chosen.Rated, status != "ongoing", status);
@@ -121,27 +147,30 @@ public sealed class ChessEngineService : IAsyncDisposable
     public async Task<ChessApplyResult> ApplyMoveAsync(string fen, string uci, CancellationToken ct = default)
     {
         await EngineAsync(ct);
-        var state = _modality!.FromFen(fen);
+        var state = SyncState(fen);
         ChessMove? mv = null;
-        foreach (var m in _modality.LegalActions(state))
+        foreach (var m in _modality!.LegalActions(state))
             if (m.ToUci() == uci) { mv = m; break; }
         if (mv is null)
             return new ChessApplyResult(fen, false, "illegal move", Legal: false);
         var next = _modality.Apply(state, mv.Value);
+        SetLive(next); // record the human move in the authoritative game's repetition history
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
         return new ChessApplyResult(next.Board.ToFen(), status != "ongoing", status, Legal: true);
     }
 
     // ---- training ----
 
-    public bool StartTraining(double temperature, double weight, int maxPlies)
+    /// <summary>Start background self-play. <paramref name="maxGames"/> ≤ 0 runs until stopped;
+    /// &gt; 0 plays exactly that many games then stops.</summary>
+    public bool StartTraining(double temperature, double weight, int maxPlies, int maxGames = 0)
     {
         lock (_statLock)
         {
             if (_trainTask is { IsCompleted: false }) return false;
             _trainTemp = temperature; _trainWeight = weight; _trainMaxPlies = maxPlies;
             _trainCts = new CancellationTokenSource();
-            _trainTask = Task.Run(() => TrainLoopAsync(_trainCts.Token));
+            _trainTask = Task.Run(() => TrainLoopAsync(maxGames, _trainCts.Token));
             return true;
         }
     }
@@ -181,17 +210,19 @@ public sealed class ChessEngineService : IAsyncDisposable
         }
     }
 
-    private async Task TrainLoopAsync(CancellationToken ct)
+    private async Task TrainLoopAsync(int maxGames, CancellationToken ct)
     {
         var engine = await EngineAsync(ct);
         var rng = new Random();
-        while (!ct.IsCancellationRequested)
+        int played = 0;
+        while (!ct.IsCancellationRequested && (maxGames <= 0 || played < maxGames))
         {
             try
             {
-                var played = await engine.PlayGameAsync(_modality!.Initial(), _trainTemp, rng, _trainMaxPlies, ct);
-                await _host!.LearnGameAsync(played.Edges, ct);
-                RecordGame(played);
+                var g = await engine.PlayGameAsync(_modality!.Initial(), _trainTemp, rng, _trainMaxPlies, ct);
+                await _host!.LearnGameAsync(g.Edges, ct);
+                RecordGame(g);
+                played++;
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex) { _log.LogWarning(ex, "chess train game failed"); }

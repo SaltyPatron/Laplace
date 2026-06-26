@@ -69,6 +69,20 @@ public interface IEdgeRatings
     Task<double[]> EffMuAsync(IReadOnlyList<Hash128> edgeIds, CancellationToken ct = default);
 }
 
+/// <summary>
+/// Values a state by <b>folding the consensus over its substructures</b> (the reasoning read), not by a
+/// single whole-state lookup. The host composes the state into its bounded substructure nodes and folds
+/// their learned outcome consensus, weighted by predictiveness — so a never-seen state inherits value
+/// from the substructures it shares with seen states. Returns a <b>side-to-move-relative</b> eff_mu
+/// (rating units ×1e9): the expected result for the side to move in that state. Neutral μ where there is
+/// no evidence. When a host implements this, <see cref="ModalityEngine{TState,TAction}"/> scores each
+/// candidate by the negamax reflection of its successor's value, blended with the exact move edge.
+/// </summary>
+public interface IStateValuer
+{
+    Task<double[]> ValueStatesAsync(IReadOnlyList<string> stateSurfaces, CancellationToken ct = default);
+}
+
 /// <summary>Writes a finished game's edges into the substrate and folds them online (immediately).</summary>
 public interface ITurnLearner
 {

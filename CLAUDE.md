@@ -60,9 +60,19 @@ the black box into a crystal ball.*
   (registry = CILI), languages → **ISO 639**, POS → **UPOS**, relation types → the GWN/ConceptNet
   inventory name — `blake3`'d, never an invented `substrate/type/X/v1` namespace. ILI is the
   cross-source/cross-version convergence key.
+- **The convergence index is the backbone, and identity IS the index.** ILI / synsets / frames / UPOS /
+  ISO-639 / rolesets are the "linguistic highways" every source dedups onto (bridge sources =
+  interchanges). Once they're real composed nodes, **recall, multi-hop reasoning, translation,
+  generation, and GGUF export are one operation** — a plane-weighted traversal of the consensus field
+  over that index, differing only in which relation-rank planes they up-weight and where they enter/exit.
+  "Queryable against the substrate" and "inference/generation" are the same fact. **Today the index is
+  corrupt** (concept ids are string-walks of opaque keys, ILI resolution is a file lookup that silently
+  misses, interchanges rest on format coincidence) — WS3 paves it. Full model:
+  `docs/convergence-index-and-inference.md`.
 
-See memories `laplace-convergence-architecture`, `vocabulary-is-content-not-anchors`,
-`laplace-4d-geometry-architecture`, `model-extraction-philosophy` for the full model.
+See memories `convergence-index-the-backbone`, `laplace-convergence-architecture`,
+`vocabulary-is-content-not-anchors`, `laplace-4d-geometry-architecture`, `model-extraction-philosophy`
+for the full model.
 
 ## 2. How to work here (hard rules)
 
