@@ -101,7 +101,7 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
 
             Hash128? fileContext = _src.ContextIdFromFile?.Invoke(file);
 
-            if (NativeGrammarIngest.CanUseNative(_src))
+            if (NativeGrammarIngest.CanUseNative(_src, options))
             {
                 await foreach (var change in NativeGrammarIngest.IngestFileAsync(
                     file,
@@ -113,6 +113,7 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
                     commitEpoch: 0,
                     maxInputUnits: fileCap,
                     containmentReader: _containmentReader,
+                    options: options,
                     ct: ct))
                 {
                     if (!options.DryRun)

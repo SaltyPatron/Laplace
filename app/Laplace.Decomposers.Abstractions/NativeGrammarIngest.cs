@@ -11,11 +11,16 @@ namespace Laplace.Decomposers.Abstractions;
 /// </summary>
 public static unsafe class NativeGrammarIngest
 {
-    public static bool CanUseNative(in EtlSource src) =>
-        string.Equals(src.Name, "Atomic2020Decomposer", StringComparison.Ordinal)
-        || (src.NodeEdgeMap.Count > 0
-            && src.Anchor == AnchorResolver.None
-            && !EtlWitnessFactory.IsRegistered(src.Name));
+    public static bool CanUseNative(in EtlSource src, DecomposerOptions? options = null)
+    {
+        if (string.Equals(src.Name, "ConceptNetDecomposer", StringComparison.Ordinal))
+            return options?.Languages?.IsActive != true;
+        if (string.Equals(src.Name, "Atomic2020Decomposer", StringComparison.Ordinal))
+            return true;
+        return src.NodeEdgeMap.Count > 0
+               && src.Anchor == AnchorResolver.None
+               && !EtlWitnessFactory.IsRegistered(src.Name);
+    }
 
     private static readonly NativeInterop.EtlExistProbeFn ProbeCallback = ProbeCallbackImpl;
 
@@ -29,9 +34,10 @@ public static unsafe class NativeGrammarIngest
         int commitEpoch,
         long maxInputUnits,
         ISubstrateReader? containmentReader,
+        DecomposerOptions? options = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (!CanUseNative(src))
+        if (!CanUseNative(src, options))
             throw new InvalidOperationException($"source {src.Name} is not on the native ETL path");
 
         IntPtr sess = OpenSession(src, contextId);
@@ -63,7 +69,7 @@ public static unsafe class NativeGrammarIngest
                     long fileCap = cap > 0 ? cap - rowsReported : 0;
                     using var stage = IntentStage.New(Math.Max(batchSize * 32, 4096));
                     long emitted = FeedBatch(sess, filePath, batchSize, fileCap, stage, probeFn, probeCtx,
-                        out int rc);
+                        acceptFn: null, acceptCtx: IntPtr.Zero, out int rc);
 
                     if (rc < 0) yield break;
                     if (emitted == 0 && rc == 0) break;
@@ -95,11 +101,7 @@ public static unsafe class NativeGrammarIngest
     private static unsafe IntPtr OpenSession(EtlSource src, Hash128? contextId)
     {
         NativeInterop.EtlEdgeRuleNative[]? edgeArray = null;
-        int witnessKind = string.Equals(src.Name, "Atomic2020Decomposer", StringComparison.Ordinal)
-            ? NativeInterop.EtlWitnessAtomic2020
-            : src.NodeEdgeMap.Count > 0
-                ? NativeInterop.EtlWitnessFieldEdges
-                : NativeInterop.EtlWitnessNone;
+        int witnessKind = ResolveWitnessKind(src);
 
         if (witnessKind == NativeInterop.EtlWitnessFieldEdges)
         {
@@ -144,6 +146,17 @@ public static unsafe class NativeGrammarIngest
         return sess;
     }
 
+    private static int ResolveWitnessKind(EtlSource src)
+    {
+        if (string.Equals(src.Name, "Atomic2020Decomposer", StringComparison.Ordinal))
+            return NativeInterop.EtlWitnessAtomic2020;
+        if (string.Equals(src.Name, "ConceptNetDecomposer", StringComparison.Ordinal))
+            return NativeInterop.EtlWitnessConceptNet;
+        if (src.NodeEdgeMap.Count > 0)
+            return NativeInterop.EtlWitnessFieldEdges;
+        return NativeInterop.EtlWitnessNone;
+    }
+
     private static unsafe long FeedBatch(
         IntPtr sess,
         string filePath,
@@ -152,12 +165,14 @@ public static unsafe class NativeGrammarIngest
         IntentStage stage,
         NativeInterop.EtlExistProbeFn? probeFn,
         IntPtr probeCtx,
+        NativeInterop.EtlAcceptRowFn? acceptFn,
+        IntPtr acceptCtx,
         out int rc)
     {
         var stats = default(NativeInterop.EtlStatsNative);
         rc = NativeInterop.EtlSessionFeedFile(
             sess, filePath, (nuint)batchSize, (nuint)Math.Max(0, fileCap),
-            stage.DangerousNativeHandle, probeFn, probeCtx, &stats);
+            stage.DangerousNativeHandle, probeFn, probeCtx, acceptFn, acceptCtx, &stats);
         return (long)stats.RowsEmitted;
     }
 
