@@ -521,6 +521,28 @@ int laplace_attestation_categorical_add(
     return staged_to_intent(stage, &staged);
 }
 
+int laplace_attestation_aggregated_add(
+    intent_stage_t*  stage,
+    const hash128_t* subject,
+    const hash128_t* type_id,
+    const hash128_t* object,
+    uint8_t          object_is_null,
+    const hash128_t* source,
+    const hash128_t* context,
+    uint8_t          context_is_null,
+    int64_t          games,
+    int64_t          sum_score_fp1e9,
+    double           witness_weight,
+    int64_t          now_unix_us) {
+    if (!stage || !subject || !type_id || !source) return -1;
+    laplace_attestation_staged_t staged;
+    int rc = laplace_attestation_aggregated_build(
+        subject, type_id, object, object_is_null, source, context, context_is_null,
+        games, sum_score_fp1e9, witness_weight, now_unix_us, &staged);
+    if (rc != 0) return rc;
+    return staged_to_intent(stage, &staged);
+}
+
 int laplace_attestation_witness_batch_add(
     intent_stage_t*                        stage,
     const laplace_attestation_witness_edge_t* edges,

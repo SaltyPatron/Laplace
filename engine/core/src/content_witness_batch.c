@@ -132,6 +132,49 @@ int laplace_content_root_id(
     return 0;
 }
 
+static int expand_underscores(const uint8_t* in, size_t len, uint8_t** out_buf) {
+    uint8_t* buf = (uint8_t*)malloc(len);
+    if (!buf) return -1;
+    for (size_t i = 0; i < len; ++i) buf[i] = (in[i] == '_') ? (uint8_t)' ' : in[i];
+    *out_buf = buf;
+    return 0;
+}
+
+static int has_underscores(const uint8_t* s, size_t len) {
+    for (size_t i = 0; i < len; ++i)
+        if (s[i] == '_') return 1;
+    return 0;
+}
+
+int content_witness_root_id_underscored(
+    const uint8_t* utf8,
+    size_t         len,
+    hash128_t*     out_root_id) {
+    if (!utf8 || !out_root_id) return -1;
+    if (!has_underscores(utf8, len)) return laplace_content_root_id(utf8, len, out_root_id);
+    uint8_t* expanded = NULL;
+    if (expand_underscores(utf8, len, &expanded) != 0) return -2;
+    int rc = laplace_content_root_id(expanded, len, out_root_id);
+    free(expanded);
+    return rc;
+}
+
+int content_witness_add_underscored(
+    intent_stage_t*  stage,
+    const uint8_t*   utf8,
+    size_t           len,
+    const hash128_t* source_id,
+    hash128_t*       out_root_id) {
+    if (!stage || !utf8 || !source_id || !out_root_id) return -1;
+    if (!has_underscores(utf8, len))
+        return content_witness_batch_add(stage, utf8, len, source_id, out_root_id);
+    uint8_t* expanded = NULL;
+    if (expand_underscores(utf8, len, &expanded) != 0) return -2;
+    int rc = content_witness_batch_add(stage, expanded, len, source_id, out_root_id);
+    free(expanded);
+    return rc;
+}
+
 
 
 

@@ -108,6 +108,21 @@ int laplace_compose_get_physicality(const laplace_compose_result_t* r, size_t i,
 int laplace_compose_get_precedes(const laplace_compose_result_t* r, size_t i,
                                  laplace_compose_precedes_t* out);
 
+/*
+ * Drain compose entities + physicalities + PRECEDES aggregated attestations into `stage`.
+ * When `existing_bitmap` is non-null with `bitmap_bits` >= tier-tree node count, only novel
+ * subtrees are emitted (merkle_dedup_trunk_shortcircuit). `witness_weight` scales PRECEDES Glicko.
+ * Returns 0 on success.
+ */
+int laplace_compose_drain_into_stage(
+    const laplace_compose_result_t* r,
+    intent_stage_t*                 stage,
+    const hash128_t*                source_id,
+    int64_t                         now_unix_us,
+    double                          witness_weight,
+    const uint8_t*                  existing_bitmap,
+    size_t                          bitmap_bits);
+
 #ifdef __cplusplus
 }
 #endif

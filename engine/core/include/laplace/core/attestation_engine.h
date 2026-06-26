@@ -185,6 +185,20 @@ int laplace_attestation_categorical_add(
     int              confirm,
     int64_t          observation_count);
 
+int laplace_attestation_aggregated_add(
+    intent_stage_t*  stage,
+    const hash128_t* subject,
+    const hash128_t* type_id,
+    const hash128_t* object,
+    uint8_t          object_is_null,
+    const hash128_t* source,
+    const hash128_t* context,
+    uint8_t          context_is_null,
+    int64_t          games,
+    int64_t          sum_score_fp1e9,
+    double           witness_weight,
+    int64_t          now_unix_us);
+
 typedef struct {
     const char*      surface_relation;
     const hash128_t* subject;

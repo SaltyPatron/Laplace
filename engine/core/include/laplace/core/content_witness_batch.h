@@ -18,6 +18,20 @@ int content_witness_batch_add(
     const hash128_t* source_id,
     hash128_t*       out_root_id);
 
+/* ConceptNet/OMW terms use underscores for spaces; expand to spaces then emit. */
+int content_witness_add_underscored(
+    intent_stage_t*  stage,
+    const uint8_t*   utf8,
+    size_t           len,
+    const hash128_t* source_id,
+    hash128_t*       out_root_id);
+
+/* Root id only (no stage emit) for trunk-before-compose probes. */
+int content_witness_root_id_underscored(
+    const uint8_t* utf8,
+    size_t         len,
+    hash128_t*     out_root_id);
+
 // Two-phase containment helpers: build the content tier tree once (caller frees with
 // tier_tree_free), probe its node ids against the DB existing-bitmap, then emit only novel nodes.
 int content_witness_tree_build(

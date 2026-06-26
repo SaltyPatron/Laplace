@@ -99,8 +99,32 @@ public sealed class EtlDecomposer : IDecomposer, IIngestInventoryProvider
             if (cap > 0 && consumed >= cap) yield break;
             long fileCap = cap > 0 ? cap - consumed : 0;
 
-            var witness = new EtlWitness(new EtlWitnessContext(_src, file, options));
             Hash128? fileContext = _src.ContextIdFromFile?.Invoke(file);
+
+            if (NativeGrammarIngest.CanUseNative(_src))
+            {
+                await foreach (var change in NativeGrammarIngest.IngestFileAsync(
+                    file,
+                    _src,
+                    batchSize: batch,
+                    batchLabelPrefix: $"{_src.Name}/{fileBn++}",
+                    reportUnits: null,
+                    contextId: fileContext,
+                    commitEpoch: 0,
+                    maxInputUnits: fileCap,
+                    containmentReader: _containmentReader,
+                    ct: ct))
+                {
+                    if (!options.DryRun)
+                    {
+                        consumed += change.Metadata.InputUnitsConsumed;
+                        yield return change;
+                    }
+                }
+                continue;
+            }
+
+            var witness = new EtlWitness(new EtlWitnessContext(_src, file, options));
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
                 file,
                 modalityId: _src.Modality.GrammarId,

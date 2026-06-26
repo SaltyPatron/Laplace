@@ -592,4 +592,83 @@ public static unsafe partial class NativeInterop
 
     [LibraryImport(Library, EntryPoint = "laplace_score_fp")]
     internal static partial long ScoreFp(double v, double m);
+
+    public const int EtlWitnessNone = 0;
+    public const int EtlWitnessAtomic2020 = 1;
+    public const int EtlWitnessFieldEdges = 2;
+    public const int EtlWitnessConceptNet = 3;
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public unsafe delegate int EtlAcceptRowFn(IntPtr ctx, byte* line, nuint len);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct EtlEdgeRuleNative
+    {
+        public ushort SubjectField;
+        public ushort ObjectField;
+        public byte SubjectKind;
+        public byte ObjectKind;
+        [MarshalAs(UnmanagedType.LPUTF8Str)]
+        public string RelationSurface;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct EtlConfigNative
+    {
+        [MarshalAs(UnmanagedType.LPUTF8Str)]
+        public string ModalityId;
+        public Hash128 SourceId;
+        public Hash128 TypeMetaId;
+        public double WitnessWeight;
+        public double TrustWeight;
+        public long NowUnixUs;
+        public int WitnessKind;
+        public IntPtr EdgeRules;
+        public nuint EdgeRuleCount;
+        public Hash128 ContextId;
+        public byte ContextIsNull;
+        public byte SkipCommentRows;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct EtlStatsNative
+    {
+        public ulong RowsRead;
+        public ulong RowsParsed;
+        public ulong RowsComposeSkipped;
+        public ulong RowsEmitted;
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public unsafe delegate int EtlExistProbeFn(
+        IntPtr ctx, Hash128* ids, nuint n, byte* outBitmap, nuint bitmapBits);
+
+    [LibraryImport(Library, EntryPoint = "laplace_etl_session_open")]
+    internal static partial int EtlSessionOpen(EtlConfigNative* cfg, IntPtr* outSess);
+
+    [LibraryImport(Library, EntryPoint = "laplace_etl_session_close")]
+    internal static partial void EtlSessionClose(IntPtr sess);
+
+    [LibraryImport(Library, EntryPoint = "laplace_etl_session_feed_file", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int EtlSessionFeedFile(
+        IntPtr sess,
+        string path,
+        nuint batchRowCap,
+        nuint maxRows,
+        IntPtr stage,
+        EtlExistProbeFn? probe,
+        IntPtr probeCtx,
+        EtlAcceptRowFn? accept,
+        IntPtr acceptCtx,
+        EtlStatsNative* stats);
+
+    [LibraryImport(Library, EntryPoint = "laplace_compose_drain_into_stage")]
+    internal static partial int ComposeDrainIntoStage(
+        IntPtr compose,
+        IntPtr stage,
+        Hash128* sourceId,
+        long nowUnixUs,
+        double witnessWeight,
+        byte* existingBitmap,
+        nuint bitmapBits);
 }
