@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Laplace.Decomposers.Abstractions;
@@ -13,8 +14,15 @@ namespace Laplace.Chess.Service;
 /// clean structure (ordered <c>san_move</c> tokens + the <c>game_result</c>, free of clocks/comments),
 /// then supplies the chess semantics itself: replay each game through the perft-verified movegen
 /// (<see cref="San.Resolve"/>), compose each position from its substructures, and score the resulting
-/// <c>MOVE</c> edges by the game result. The substrate fills with chess positions + rated moves — not
-/// PGN-notation text — so these edges fold into the same graph self-play uses.
+/// edges by the game result. The substrate fills with chess positions + rated moves — not PGN-notation
+/// text — so these edges fold into the same graph self-play uses.
+///
+/// <para><b>Stage 1 (this class) STREAMS</b>: it reads each file record-by-record (one game at a time),
+/// never the whole file or its AST in bulk — so peak RAM is O(one game), independent of file size (the
+/// 195 MB+ files ingest on a Pi). Per-game evidence is <b>Elo-weighted by the OPPONENT's rating</b> (the
+/// anti-trap: a result against a strong defender is stronger evidence; Scholar's-Mate win-rate collapses
+/// once weighted by defender Elo). Clock/criticality weighting + game-level dedup-before-compute (the
+/// present-trunk skip) are the native O(tier) write path's job (Track 1), not done here.</para>
 /// </summary>
 public sealed class ChessPgnDecomposer : IDecomposer
 {
@@ -23,7 +31,6 @@ public sealed class ChessPgnDecomposer : IDecomposer
     public int     LayerOrder   => 20;
     public Hash128 TrustClassId => ChessVocabulary.SourceId;
 
-    private const double Weight = 0.7;     // human game corpus
     private const int GamesPerBatch = 64;
 
     public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -33,29 +40,31 @@ public sealed class ChessPgnDecomposer : IDecomposer
         IDecomposerContext context, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        // Simple serial yielder: enumerated ONCE (no re-processing), one tiny parse per game, the
-        // deferred-content skip kept on (repeated openings/positions don't re-emit). The IngestRunner
-        // parallelizes the commit lanes + the consensus fold runs parallel partitions — that's the
-        // parallelism; rolling our own on top double-enumerated and re-processed.
+        if (options.DryRun) yield break;
+
+        // Serial yielder: one tiny parse per streamed game, the deferred-content skip kept on. The
+        // IngestRunner parallelizes the commit lanes + the consensus fold runs parallel partitions —
+        // that's the parallelism; rolling our own on top double-enumerated and re-processed.
         var modality = new ChessModality();
         foreach (var file in EnumerateFiles(context.EcosystemPath))
         {
             ct.ThrowIfCancellationRequested();
-            string text;
-            try { text = await File.ReadAllTextAsync(file, ct); } catch { continue; }
-            if (text.Length == 0 || options.DryRun) continue;
-
             var builder = NewBuilder(context);
             int inBatch = 0;
-            foreach (var gameText in SplitGames(text))
+            await foreach (var gameText in StreamGamesAsync(file, ct).WithCancellation(ct))
             {
                 ct.ThrowIfCancellationRequested();
                 var gameBytes = Encoding.UTF8.GetBytes(gameText);
+
                 List<string> moves;
                 GameOutcome? result;
                 using (var ast = GrammarDecomposer.Parse(gameBytes, "pgn"))
                     (moves, result) = ExtractGame(ast, gameBytes);
-                AppendGame(builder, modality, moves, result);
+                if (result is null || moves.Count == 0) continue;
+
+                var (whiteElo, blackElo) = ParseElos(gameText);
+                AppendGame(builder, modality, moves, result.Value, whiteElo, blackElo);
+
                 if (++inBatch >= GamesPerBatch)
                 {
                     yield return await builder.SetInputUnitsConsumed(inBatch).BuildAsync(ct);
@@ -69,16 +78,49 @@ public sealed class ChessPgnDecomposer : IDecomposer
     }
 
     private static SubstrateChangeBuilder NewBuilder(IDecomposerContext ctx)
-        // Deferred-content skip ON: chess openings/positions repeat massively across games, so the
-        // probe lets repeated content stage once instead of re-emitting every occurrence (the row
-        // explosion we hit with it off). Serial enumeration keeps the probe's connection use bounded.
+        // Deferred-content skip ON: chess openings/positions repeat massively across games, so the probe
+        // lets repeated content stage once instead of re-emitting every occurrence. Serial enumeration
+        // keeps the probe's connection use bounded.
         => new SubstrateChangeBuilder(ChessVocabulary.SourceId, "chess/pgn").EnableDeferredContent(ctx.Reader);
 
-    /// <summary>Replay one game's SAN moves, emitting MOVE edges scored by result. Aborts on an unresolved move.</summary>
-    private static void AppendGame(
-        SubstrateChangeBuilder b, ChessModality m, List<string> sans, GameOutcome? result)
+    /// <summary>
+    /// Stream a PGN file game-by-game: read lines, accumulate from one <c>[Event </c> tag to the next,
+    /// yield each game's text, discard. Peak RAM = O(one game), never the whole file. UTF-8.
+    /// </summary>
+    private static async IAsyncEnumerable<string> StreamGamesAsync(
+        string path, [EnumeratorCancellation] CancellationToken ct)
     {
-        if (result is null || sans.Count == 0) return;
+        using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        var sb = new StringBuilder(2048);
+        bool inGame = false;
+        string? line;
+        while ((line = await reader.ReadLineAsync(ct).ConfigureAwait(false)) is not null)
+        {
+            if (line.StartsWith("[Event ", StringComparison.Ordinal))
+            {
+                if (inGame && sb.Length > 0) { yield return sb.ToString(); sb.Clear(); }
+                inGame = true;
+            }
+            if (inGame) { sb.Append(line); sb.Append('\n'); }
+        }
+        if (sb.Length > 0) yield return sb.ToString();
+    }
+
+    // Constant witness weight across the whole run → constant φ per relation (the fold/accumulator
+    // invariant). Trust (Elo, confirmed mate) is encoded in the GAME-COUNT, not the weight.
+    private const double PgnWitnessWeight = 0.7;
+
+    /// <summary>Replay one game's SAN moves, emitting edges scored by result. Trust is the Glicko
+    /// observation count: weighted by the OPPONENT (defender) Elo — the anti-trap — and boosted for the
+    /// side that delivered a CONFIRMED mate (terminal <c>#</c>) vs a bare result (resignation/time, the
+    /// opponent's judgment). Aborts on an unresolved move (malformed/illegal token).</summary>
+    private static void AppendGame(
+        SubstrateChangeBuilder b, ChessModality m, List<string> sans, GameOutcome result,
+        int whiteElo, int blackElo)
+    {
+        bool mate = sans.Count > 0 && sans[^1].IndexOf('#') >= 0; // '#' = proven checkmate
+        int? winner = result.IsDraw ? null : result.Winner;
+
         var state = m.Initial();
         foreach (var san in sans)
         {
@@ -86,21 +128,30 @@ public sealed class ChessPgnDecomposer : IDecomposer
             if (mv is null) return; // malformed/illegal token → skip the rest of this game
             int mover = m.SideToMove(state);
             var next = m.Apply(state, mv.Value);
-            ChessGraph.AppendMoveEdge(b, m.StateKey(state), m.StateKey(next), result.Value.ForMover(mover), Weight);
+            long games = EloGames(mover == 0 ? blackElo : whiteElo);
+            if (mate && winner == mover) games += games / 2; // +50% for the confirmed-mating side
+            ChessGraph.AppendMoveEdge(
+                b, m.StateKey(state), m.StateKey(next), result.ForMover(mover), games, PgnWitnessWeight);
             state = next;
         }
     }
 
-    /// <summary>Split a PGN file into individual game texts (each starts with [Event) — cheap, no parse.</summary>
-    private static IEnumerable<string> SplitGames(string text)
+    /// <summary>Defender Elo → Glicko observation count (1..12): unknown → a neutral middle; rises with
+    /// strength so master games dominate the fold and weak games barely move it.</summary>
+    private static long EloGames(int elo)
+        => elo <= 0 ? 3 : Math.Clamp((long)Math.Round((elo - 600) / 200.0), 1, 12);
+
+    private static (int White, int Black) ParseElos(string game)
+        => (TagInt(game, "WhiteElo"), TagInt(game, "BlackElo"));
+
+    /// <summary>Read an integer PGN tag value (<c>[Tag "1234"]</c>) by a cheap scan; 0 if absent/blank.</summary>
+    private static int TagInt(string game, string tag)
     {
-        int i = text.IndexOf("[Event ", StringComparison.Ordinal);
-        while (i >= 0)
-        {
-            int next = text.IndexOf("[Event ", i + 7, StringComparison.Ordinal);
-            yield return next < 0 ? text[i..] : text[i..next];
-            i = next;
-        }
+        int i = game.IndexOf("[" + tag + " \"", StringComparison.Ordinal);
+        if (i < 0) return 0;
+        i += tag.Length + 3;
+        int j = game.IndexOf('"', i);
+        return j > i && int.TryParse(game.AsSpan(i, j - i), out var v) ? v : 0;
     }
 
     /// <summary>Walk one game's parse tree: ordered mainline SAN + the terminating result.</summary>
@@ -155,9 +206,11 @@ public sealed class ChessPgnDecomposer : IDecomposer
         {
             try
             {
-                var t = File.ReadAllText(f);
-                int i = 0;
-                while ((i = t.IndexOf("[Event ", i, StringComparison.Ordinal)) >= 0) { games++; i += 7; }
+                // Stream-count [Event tags — never read the whole file (the 195 MB+ files would OOM).
+                using var r = new StreamReader(f);
+                string? line;
+                while ((line = r.ReadLine()) is not null)
+                    if (line.StartsWith("[Event ", StringComparison.Ordinal)) games++;
             }
             catch { /* skip unreadable */ }
         }

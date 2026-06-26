@@ -136,7 +136,40 @@ public sealed class IngestRunner
         // self-contained, independently-consistent batch and commit order across batches is
         // irrelevant (the consensus fold is commutative). Multi-worker runs therefore all use the
         // one bounded N-consumer lane.
-        if (options.ParallelWorkers <= 1)
+        bool syncIngest = Environment.GetEnvironmentVariable("LAPLACE_INGEST_SYNC") == "1";
+        if (syncIngest)
+        {
+            // Fully synchronous: iterate the decomposer INLINE and apply each batch on the SAME thread —
+            // NO producer Task, so compose and apply never overlap. Diagnostic/mitigation for the native
+            // heap-corruption race (producer composing into laplace_core while a consumer applies into it
+            // concurrently). Opt-in via LAPLACE_INGEST_SYNC=1; the default channel path is unchanged.
+            var sbatch = new List<SubstrateChange>(batchSize);
+            int sbatchRows = 0;
+            await foreach (var intent in decomposer
+                .DecomposeAsync(ctx, options.DecomposerOptions, ct).WithCancellation(ct))
+            {
+                Interlocked.Increment(ref counters._unitsProduced);
+                if (batchSize == 1 && commitRows == 0)
+                {
+                    await ProcessOneIntentAsync(intent, decomposer, options, rng,
+                                                counters, failures, log, ct);
+                    continue;
+                }
+                sbatch.Add(intent);
+                sbatchRows += RowsOf(intent);
+                if (ShouldFlush(sbatch.Count, sbatchRows))
+                {
+                    await ProcessBatchAsync(sbatch, decomposer, options, rng,
+                                            counters, failures, log, ct);
+                    sbatch.Clear();
+                    sbatchRows = 0;
+                }
+            }
+            if (sbatch.Count > 0)
+                await ProcessBatchAsync(sbatch, decomposer, options, rng,
+                                        counters, failures, log, ct);
+        }
+        else if (options.ParallelWorkers <= 1)
         {
             
             

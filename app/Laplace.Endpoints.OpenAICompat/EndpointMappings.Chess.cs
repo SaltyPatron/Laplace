@@ -26,8 +26,9 @@ internal static class ChessEndpoints
             Results.Json(await svc.BestMoveAsync(req.Fen, req.Temperature ?? 0d, ct))).WithTags("chess");
 
         // Background self-play training controls + live status.
-        app.MapPost("/chess/train/start", (double? temperature, double? weight, int? maxPlies, ChessEngineService svc) =>
-            Results.Json(new { started = svc.StartTraining(temperature ?? 120d, weight ?? 0.5d, maxPlies ?? 400) }))
+        // games ≤ 0 (or omitted) trains until /stop; games > 0 plays exactly that many then stops.
+        app.MapPost("/chess/train/start", (double? temperature, double? weight, int? maxPlies, int? games, ChessEngineService svc) =>
+            Results.Json(new { started = svc.StartTraining(temperature ?? 120d, weight ?? 0.5d, maxPlies ?? 400, games ?? 0) }))
             .WithTags("chess");
 
         app.MapPost("/chess/train/stop", (ChessEngineService svc) =>

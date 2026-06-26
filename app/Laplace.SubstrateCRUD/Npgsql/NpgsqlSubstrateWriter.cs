@@ -174,13 +174,24 @@ public sealed class NpgsqlSubstrateWriter : ISubstrateWriter
                     }
                 }
 
-                var tasks = new Task<(int e, int p, int a, long f, int rt)>[parts];
-                for (int k = 0; k < parts; k++)
+                (int e, int p, int a, long f, int rt)[] results;
+                if (parts == 1)
                 {
-                    int idx = k;
-                    tasks[k] = Task.Run(() => ApplyPartitionAsync(perPartition[idx], idx, ct), ct);
+                    // One partition ⇒ run INLINE on this thread, no Task.Run. A serial config
+                    // (LAPLACE_APPLY_PARTITIONS=1) is then genuinely single-threaded — the heap-corruption
+                    // race only bites under concurrent native calls, so this is the deterministic-safe lane.
+                    results = new[] { await ApplyPartitionAsync(perPartition[0], 0, ct) };
                 }
-                var results = await Task.WhenAll(tasks);
+                else
+                {
+                    var tasks = new Task<(int e, int p, int a, long f, int rt)>[parts];
+                    for (int k = 0; k < parts; k++)
+                    {
+                        int idx = k;
+                        tasks[k] = Task.Run(() => ApplyPartitionAsync(perPartition[idx], idx, ct), ct);
+                    }
+                    results = await Task.WhenAll(tasks);
+                }
 
                 foreach (var r in results)
                 {

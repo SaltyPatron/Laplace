@@ -477,13 +477,22 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             for (int k = 0; k < _partitions; k++) buckets[k] = new List<Acc>();
             foreach (var acc in snapshot.Values) buckets[PartitionOf(acc)].Add(acc);
 
-            var copies = new Task[_partitions];
-            for (int k = 0; k < _partitions; k++)
+            if (_partitions == 1)
             {
-                int part = k;
-                copies[k] = Task.Run(() => CopyPartitionAsync(epoch, part, buckets[part], ct), ct);
+                // One partition ⇒ run INLINE, no Task.Run, so a serial config is genuinely
+                // single-threaded (no concurrent native staging racing the compose).
+                await CopyPartitionAsync(epoch, 0, buckets[0], ct);
             }
-            await Task.WhenAll(copies);
+            else
+            {
+                var copies = new Task[_partitions];
+                for (int k = 0; k < _partitions; k++)
+                {
+                    int part = k;
+                    copies[k] = Task.Run(() => CopyPartitionAsync(epoch, part, buckets[part], ct), ct);
+                }
+                await Task.WhenAll(copies);
+            }
             stageSw.Stop();
             int staged = Interlocked.Increment(ref _epochsStaged);
             _log.LogInformation(
