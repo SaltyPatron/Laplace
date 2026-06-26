@@ -136,3 +136,50 @@ Hilbert-range partitioning removes the race at the source.)
 No perf number enters this doc or memory without a committed, re-runnable script, the exact output,
 and the hardware it ran on. Hardware of record: i9-14900KS (8 P-cores / 16 E-cores), 48 GB RAM,
 2× Samsung 990 EVO NVMe RAID-0, PostgreSQL 18 native Windows.
+
+## 8. Two stages, dedup-before-compute, and the invariant (added 2026-06-25)
+
+§3 covers dedup→sorted-append. Three clarifications that the chess session surfaced; they generalize
+to **every** decomposer.
+
+### 8.1 Tree-sitter strips INPUT — one job, Stage 1 only
+The parser's sole role is **packaging → raw content records** (PGN/JSON/CSV/`.tab`/code → records).
+Then it is **out of the loop**: Stage 2 (content-address → descent → Hilbert append → fold) is pure
+native engine and never re-enters the parser. For files too large to hold (9 GB Wiktionary), Stage 1
+**streams** records (line reader / `Utf8JsonReader` / `[Event]` split) — never the whole file or AST;
+peak RAM = O(batch). **Anti-pattern (live chess bug):** routing *domain* content back through the
+*text* composer — composing a chess position's surface STRING through UAX29 word/grapheme segmentation
+exploded ~150 chars into hundreds of nodes per position. That single flat composition was the root of
+the lookup-table behavior, the row explosion, a 20%-CPU read storm (the flat existence probe), and the
+`AccessViolation` parse-storm crash. Decompose structured content **directly** (chess: bitboard →
+substructure token → BLAKE3 → geometry), not via the prose composer.
+
+### 8.2 The descent gates the COMPUTE, not just the load
+§3.2's descent prunes the rowset that reaches the insert. Push it earlier: hash the record cheaply
+(pre-process) and ask the **top trunk** ("seen this whole game / synset / concept / document?") *before
+decomposing*. A present trunk ⟹ the whole subtree is present ⟹ **skip the decompose itself**, not only
+the insert. The top-tier prune is the largest win (skips the entire replay/decomposition); the
+occurrence still folds its attestation. First occurrence pays the compute; every repeat (the 1226th
+shared OMW synset, the millionth duplicate ConceptNet assertion, the 100,000th identical mate game) is
+a cheap Glicko game-count fold. This is the café rule = monotonic densification = the <30-min Pi-scale
+target.
+
+### 8.3 Identity=content, provenance=attestation, meaning=the Glicko matchup — generic
+Every source reduces to this once Stage 1 strips its input. OMW = one ILI synset node + 1226 language
+**attestations** (ILI the convergence key). ConceptNet = one concept node + N source-weighted assertion
+attestations ("earth round" vs "flat" resolved by attestation weight). Chess = one position/substructure
++ per-game attestations (player/Elo/clock provenance). The per-source difference is **only** the
+Stage-1 strip; Stage 2 is identical.
+
+### 8.4 The invariant to instrument
+A correct ingest has **conflicts ≈ 0** and **round-trips ≈ tier-depth**.
+- **`ON CONFLICT` firing on millions of rows = the descent was skipped** (you shipped rows the DB
+  already had — brute bulk-insert, O(rows)). Zero conflicts is the proof dedup ran.
+- **`round_trips=40` is NOT 40 tiers.** Traced in `NpgsqlSubstrateWriter.ApplyManyAsync`: round-trips =
+  Σ over `_applyPartitions` of (~3 SPI ops each). `_applyPartitions` ≈ core count, so ~40 = the apply
+  **fan-out**, and it is **double-partitioned** unless `LAPLACE_APPLY_PARTITIONS=1` is paired with
+  `LAPLACE_COMMIT_LANES` (the runner already partitions into lanes; the writer re-partitions each lane).
+  Round-trips ∝ cores = fan-out; ∝ depth = the tier-walk §3 specifies. The fan-out count is the symptom;
+  the rows/s killer is the O(rows) *work* inside each (flat compose + `ON CONFLICT`), not the count.
+- Fastest confirmations before any rewrite: set `LAPLACE_APPLY_PARTITIONS=1` (kill the double-partition)
+  and log **conflicts-per-batch** — watch conflicts and round-trips against the invariant.

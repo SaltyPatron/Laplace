@@ -183,6 +183,37 @@ public sealed class VerbNetDecomposer : IDecomposer{
                         classEntity, "HAS_EXAMPLE", exId.Value, Source, TC.AcademicCurated,
                         contextId: classEntity));
             }
+
+            // SEMANTICS: the logical predicate decomposition (e.g. take_in(Goal, Theme)) — the real
+            // meaning of the frame, previously dropped for just the DESCRIPTION string. The verb class
+            // ENTAILS each predicate; each predicate HAS_SEMANTIC_ROLE its thematic-role arguments
+            // (content-keyed by bare role name so they converge with the class's HAS_THEMATIC_ROLE roles).
+            foreach (XmlNode semNode in frame.GetElementsByTagName("SEMANTICS"))
+            {
+                if (semNode is not XmlElement sem) continue;
+                foreach (XmlNode predNode in sem.GetElementsByTagName("PRED"))
+                {
+                    if (predNode is not XmlElement pred) continue;
+                    string predVal = pred.GetAttribute("value").Trim();
+                    if (predVal.Length == 0) continue;
+                    var predId = ContentEmitter.Emit(b, predVal, Source);
+                    if (predId is null) continue;
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        classEntity, "ENTAILS", predId.Value, Source, TC.AcademicCurated));
+                    foreach (XmlNode argNode in pred.GetElementsByTagName("ARG"))
+                    {
+                        if (argNode is not XmlElement arg) continue;
+                        if (!arg.GetAttribute("type").Trim().Equals("ThemRole", StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        string roleVal = arg.GetAttribute("value").Trim().TrimStart('?');
+                        if (roleVal.Length == 0) continue;
+                        var roleId = ContentEmitter.Emit(b, roleVal, Source);
+                        if (roleId is not null)
+                            b.AddAttestation(NativeAttestation.Categorical(
+                                predId.Value, "HAS_SEMANTIC_ROLE", roleId.Value, Source, TC.AcademicCurated));
+                    }
+                }
+            }
         }
 
         foreach (var subWrap in DirectChildren(el, "SUBCLASSES"))

@@ -65,13 +65,15 @@ internal static class ChessCommands
     private static async Task<int> FetchAsync(string[] a)
     {
         if (a.Length == 0 || a[0].StartsWith("--"))
-            return Fail("usage: laplace chess fetch <username> [--site chesscom|lichess] [--max N] [--out <path>]");
+            return Fail("usage: laplace chess fetch <username> [--site chesscom|lichess] [--max N] [--min-tc SECONDS] [--out <path>]\n"
+                      + "  --min-tc: keep only games with base time control >= SECONDS (600 = rapid+classical, drops blitz/bullet)");
         var user = a[0];
         var site = ArgStr(a, "--site", "chesscom");
         int? max = ArgIntOrNull(a, "--max");
+        int minTc = ArgInt(a, "--min-tc", 0);
         var outPath = ArgStr(a, "--out", ChessGameFetcher.DefaultOut(user, site));
-        Console.WriteLine($"fetching {user} from {site} -> {outPath}");
-        int games = await ChessGameFetcher.FetchAsync(user, site, max, outPath, Console.WriteLine, CancellationToken.None);
+        Console.WriteLine($"fetching {user} from {site} -> {outPath}" + (minTc > 0 ? $" (min TC {minTc}s)" : ""));
+        int games = await ChessGameFetcher.FetchAsync(user, site, max, minTc, outPath, Console.WriteLine, CancellationToken.None);
         Console.WriteLine($"done: {games} games written to {outPath}");
         Console.WriteLine($"next: laplace ingest chess \"{outPath}\"  (once the pgn grammar is built into laplace_core)");
         return 0;
