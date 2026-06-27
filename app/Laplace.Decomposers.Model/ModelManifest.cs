@@ -152,4 +152,48 @@ public sealed class ModelManifest
 
     public TensorRole? Single(int layer, TensorRoleKind kind) =>
         Roles.FirstOrDefault(r => r.LayerIndex == layer && r.Kind == kind);
+
+    // ── Norm sub-role accessors (Track A1) ─────────────────────────────────────────────────────
+    // TensorRoleKind.Norm is a single shape-inferred kind ([d] 1-D scale). A transformer block has
+    // more than one: input_layernorm (precedes Q/K/V), post_attention_layernorm (precedes gate/up),
+    // and — depending on the family — Qwen3 per-head q_norm/k_norm and MLA latent q_a/kv_a norms.
+    // They are distinguishable ONLY by tensor name; name is the sanctioned tiebreak among same-shape
+    // tensors (see TensorRoleClassifier doctrine). Every accessor returns null when absent, and the
+    // caller treats null as identity (no scaling) — these never throw. Folding the diagonal gain γ
+    // into the consuming operator is what Track A2 does (W·diag(γ))·x = W·(γ⊙x).
+    private static bool NameHas(TensorRole r, string token) =>
+        r.Name.Contains(token, StringComparison.OrdinalIgnoreCase);
+    private static bool IsQkNorm(TensorRole r)   => NameHas(r, "q_norm") || NameHas(r, "k_norm");
+    private static bool IsLatentNorm(TensorRole r)=> NameHas(r, "q_a_layernorm") || NameHas(r, "kv_a_layernorm");
+    private static bool IsPostNorm(TensorRole r)  => NameHas(r, "post_attention") || NameHas(r, "ffn_norm")
+                                                   || NameHas(r, "ln_2") || NameHas(r, "post_ln");
+
+    private IEnumerable<TensorRole> LayerNorms(int layer) =>
+        Roles.Where(r => r.LayerIndex == layer && r.Kind == TensorRoleKind.Norm);
+
+    // Pre-attention norm (scales the residual before Q/K/V). Matches the HF/llama names; falls back
+    // to the layer's sole "plain" norm for parallel-block models (Phi-2: one shared input_layernorm
+    // feeds both attention and MLP).
+    public TensorRole? InputNorm(int layer)
+    {
+        var norms = LayerNorms(layer).ToList();
+        var named = norms.FirstOrDefault(r => NameHas(r, "input_layernorm") || NameHas(r, "attention_norm")
+                                           || NameHas(r, "ln_1") || NameHas(r, "pre_ln"));
+        if (named is not null) return named;
+        // Parallel/single-norm block: the one norm that isn't a q/k, post, or latent norm.
+        var plain = norms.Where(r => !IsQkNorm(r) && !IsPostNorm(r) && !IsLatentNorm(r)).ToList();
+        return plain.Count == 1 ? plain[0] : null;
+    }
+
+    // Pre-MLP norm (scales the residual before gate/up). Falls back to InputNorm for parallel blocks.
+    public TensorRole? PostAttnNorm(int layer) =>
+        LayerNorms(layer).FirstOrDefault(IsPostNorm) ?? InputNorm(layer);
+
+    // Qwen3 per-head RMSNorm on the head_dim, applied to Q/K after projection, before RoPE.
+    public TensorRole? QNorm(int layer) => LayerNorms(layer).FirstOrDefault(r => NameHas(r, "q_norm"));
+    public TensorRole? KNorm(int layer) => LayerNorms(layer).FirstOrDefault(r => NameHas(r, "k_norm"));
+
+    // MLA (DeepSeek) latent norms, applied to the down-projected latents before up-projection.
+    public TensorRole? QaLatentNorm(int layer)  => LayerNorms(layer).FirstOrDefault(r => NameHas(r, "q_a_layernorm"));
+    public TensorRole? KvaLatentNorm(int layer) => LayerNorms(layer).FirstOrDefault(r => NameHas(r, "kv_a_layernorm"));
 }

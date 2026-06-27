@@ -200,6 +200,13 @@ public sealed class ModelTokenEdgeETL
         }
         catch (Exception ex) { _log.LogWarning("phase=edges L{L}: attn load failed: {Msg}", L, ex.Message); yield break; }
 
+        // A2: fold the pre-attention norm gain into Q/K so the bilinear sees the normed residual.
+        var gIn = LoadGain(refMap, _manifest.InputNorm(L), d);
+        if (gIn is not null) { ScaleCols(Wq, attn, d, gIn); ScaleCols(Wk, kvDim, d, gIn); }
+        // Qwen3 per-head q/k RMSNorm gains ([hd]), applied to the head slices below (post-projection).
+        var gQ = LoadGain(refMap, _manifest.QNorm(L), hd);
+        var gK = LoadGain(refMap, _manifest.KNorm(L), hd);
+
         var Q = new double[(long)n * attn];
         var Kraw = new double[(long)n * kvDim];
         var Kexp = new double[(long)n * attn];
@@ -226,6 +233,8 @@ public sealed class ModelTokenEdgeETL
             ct.ThrowIfCancellationRequested();
             SliceHead(Q, Qh, n, attn, h, hd);
             SliceHead(Kexp, Kh, n, attn, h, hd);
+            if (gQ is not null) ScaleColsD(Qh, n, hd, gQ);   // A2: per-head q_norm (pre-RoPE in-model)
+            if (gK is not null) ScaleColsD(Kh, n, hd, gK);   // A2: per-head k_norm
             await foreach (var change in EmitBilinearPairs(
                 Qh, Kh, n, hd, typeId, weight, ents, ents, commitEpoch,
                 new CircuitDescriptor(L, h, "attention", "ATTENDS"), sampleForDecoder: true, ct))
@@ -254,6 +263,11 @@ public sealed class ModelTokenEdgeETL
             Wo = WeightTensorETL.LoadTensorF32(refMap, oRole.Name, (long)d * attn);
         }
         catch (Exception ex) { _log.LogWarning("phase=edges L{L}: OV load failed: {Msg}", L, ex.Message); yield break; }
+
+        // A2: V reads the same pre-attention-normed residual → fold γ_input into Wv columns.
+        // Wo writes back to the (post-attention) residual, so it is NOT norm-scaled.
+        var gIn = LoadGain(refMap, _manifest.InputNorm(L), d);
+        if (gIn is not null) ScaleCols(Wv, kvDim, d, gIn);
 
         var Vraw = new double[(long)n * kvDim];
         var Vexp = new double[(long)n * attn];
@@ -306,6 +320,15 @@ public sealed class ModelTokenEdgeETL
             if (gateRole is not null) gate = LoadDouble(refMap, gateRole.Name, (long)I * d);
         }
         catch (Exception ex) { _log.LogWarning("phase=edges L{L}: MLP load failed: {Msg}", L, ex.Message); yield break; }
+
+        // A2: gate/up read the post-attention-normed residual → fold γ_post into their input columns.
+        // down writes back to the residual, and the unemb comparison side stays raw — neither scaled.
+        var gPost = LoadGain(refMap, _manifest.PostAttnNorm(L), d);
+        if (gPost is not null)
+        {
+            ScaleColsD(up, I, d, gPost);
+            if (gate is not null) ScaleColsD(gate, I, d, gPost);
+        }
 
         var typeId = RelationTypeRegistry.RelationTypeId("COMPLETES_TO");
         double weight = WeightFor("COMPLETES_TO");
@@ -459,6 +482,33 @@ public sealed class ModelTokenEdgeETL
                 if (DynInterop.NormRowsD(p, (nuint)n, (nuint)dim) != 0)
                     throw new InvalidOperationException("norm_rows_d failed");
         }
+    }
+
+    // ── Track A2: norm-gain folding ────────────────────────────────────────────────────────────
+    // A transformer block reads the residual AFTER RMSNorm/LayerNorm: the operator sees x⊙γ, not x.
+    // Folding the diagonal gain into the consuming weight is exact — (W·diag(γ))·x = W·(γ⊙x) — and
+    // scaling the weight's input columns is cheaper than scaling the n-row probe (weights ≪ n·d).
+    // The per-row RMS rescale is scale-invariant under the bilinear/cosine score, so the diagonal
+    // gain is the complete first-order correction for RMSNorm models (LayerNorm mean/β unmodeled).
+    // Load a [dim] norm gain γ as float, or null when the role is absent / shape disagrees (→ identity).
+    private static float[]? LoadGain(
+        Dictionary<string, SafetensorsContainerParser.TensorReference> refMap, TensorRole? role, int dim)
+    {
+        if (role is null) return null;
+        try { return WeightTensorETL.LoadTensorF32(refMap, role.Name, dim); }
+        catch (Exception) { return null; }
+    }
+
+    // Scale each row's input columns by γ[j] (the diagonal half of W·diag(γ)). M is [rows, dim] row-major.
+    private static void ScaleCols(float[] M, long rows, int dim, float[] g)
+    {
+        for (long i = 0; i < rows; i++)
+            for (int j = 0; j < dim; j++) M[i * dim + j] *= g[j];
+    }
+    private static void ScaleColsD(double[] M, long rows, int dim, float[] g)
+    {
+        for (long i = 0; i < rows; i++)
+            for (int j = 0; j < dim; j++) M[i * dim + j] *= g[j];
     }
 
     // Bounded selection of the strongest pairs for the decoder ring; never affects what is folded.
