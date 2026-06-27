@@ -9,6 +9,15 @@ namespace Laplace.Decomposers.Abstractions;
 public static class SourceEntityIdConventions
 {
     private static Lazy<IliMap?> _iliMap = new(LoadIliMap);
+    // Non-default WordNet-version maps (e.g. pwn16 for MapNet/WordFrameNet), loaded on demand & cached.
+    private static readonly ConcurrentDictionary<string, IliMap?> _versionMaps = new();
+
+    // Synset-anchor resolution telemetry — a miss is a silently-dropped edge (the bug class that hid
+    // the satellite a/s and pwn16 drops). Surfaced at ingest end so drops are never invisible again.
+    private static long _synsetHits;
+    private static long _synsetMisses;
+    public static long SynsetHits   => Interlocked.Read(ref _synsetHits);
+    public static long SynsetMisses => Interlocked.Read(ref _synsetMisses);
 
     public static string CiliDirectory() =>
         Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR")
@@ -72,7 +81,23 @@ public static class SourceEntityIdConventions
     
     
     
-    public static string? WordNetIli(long byteOffset, char ssType) => _iliMap.Value?.Resolve(byteOffset, ssType);
+    public static string? WordNetIli(long byteOffset, char ssType) => WordNetIli(byteOffset, ssType, "pwn30");
+
+    /// <summary>
+    /// Resolve against a specific WordNet-version ILI map. <paramref name="version"/> "pwn30" (or empty)
+    /// uses the default map; other versions (e.g. "pwn16" for MapNet/WordFrameNet) load on demand.
+    /// Counts hits/misses (<see cref="SynsetHits"/>/<see cref="SynsetMisses"/>) so dropped edges show up.
+    /// </summary>
+    public static string? WordNetIli(long byteOffset, char ssType, string version)
+    {
+        IliMap? map = string.IsNullOrEmpty(version) || version == "pwn30"
+            ? _iliMap.Value
+            : _versionMaps.GetOrAdd(version, static v => IliMap.LoadVersion(CiliDirectory(), v));
+        string? ili = map?.Resolve(byteOffset, ssType);
+        if (ili is null) Interlocked.Increment(ref _synsetMisses);
+        else Interlocked.Increment(ref _synsetHits);
+        return ili;
+    }
 
     
     
@@ -171,7 +196,7 @@ public static class SourceEntityIdConventions
     /// MCR/Predicate Matrix keys, MapNet pos#offset keys, and WN-RDF tail tokens (<c>107755101-n</c>) → ILI synset (<see cref="ConceptAnchor"/>);
     /// normalized sense keys → <see cref="SenseAnchor"/>.
     /// </summary>
-    public static Hash128? ResolveSynsetAnchor(string? raw)
+    public static Hash128? ResolveSynsetAnchor(string? raw, string version = "pwn30")
     {
         if (string.IsNullOrWhiteSpace(raw) || raw.Equals("NULL", StringComparison.OrdinalIgnoreCase))
             return null;
@@ -180,9 +205,9 @@ public static class SourceEntityIdConventions
         if (slash >= 0 && slash + 1 < s.Length)
             s = s[(slash + 1)..];
         if (ParseMcrSynsetKey(s) is { } mcr)
-            return ConceptAnchor.SynsetId(mcr.Offset, mcr.SsType);
+            return ConceptAnchor.SynsetId(mcr.Offset, mcr.SsType, version);
         if (ParseMapNetSynsetKey(s) is { } mapNet)
-            return ConceptAnchor.SynsetId(mapNet.Offset, mapNet.SsType);
+            return ConceptAnchor.SynsetId(mapNet.Offset, mapNet.SsType, version);
         string? senseKey = NormalizeSenseKey(s);
         return senseKey is null ? null : SenseAnchor.Id(senseKey);
     }

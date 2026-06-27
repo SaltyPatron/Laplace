@@ -19,7 +19,12 @@ int tensor_svd_truncate(
     if (rel_err_tol < 0.0 || rel_err_tol >= 1.0) return -1;
 
     const size_t k = (m < n) ? m : n;
-    if (kmax < k) return -1;
+    // kmax is the OUTPUT rank cap (target reduced dim) — the whole point of a *truncating* SVD.
+    // We compute the full thin SVD (rank k), truncate by tolerance, then clamp to kmax below, so at
+    // most kmax components are ever written to the caller's [.,kmax]-strided buffers. The previous
+    // guard `kmax < k → -1` made rank reduction impossible for tall matrices (e.g. a 32000×2048
+    // embedding wants kmax=64 but min(m,n)=2048), which silently disabled the SIMILAR_TO plane.
+    if (kmax == 0) return -1;
 
 #ifdef LAPLACE_HAS_MKL
     std::vector<float> Acopy(A, A + m * n);
@@ -51,6 +56,7 @@ int tensor_svd_truncate(
         r = i - 1;
     }
     if (r == 0) r = 1;
+    if (r > kmax) r = kmax;   // honor the caller's output-rank cap so writes fit [.,kmax] buffers
 
     for (size_t row = 0; row < m; ++row)
         std::memcpy(U + row * kmax, Ufull.data() + row * k, r * sizeof(float));

@@ -41,9 +41,19 @@ public sealed class ModelTokenEdgeETL
 
     // "all" runs every circuit plane; "similarity" restricts to the embedding plane (cheap path for
     // smoke tests / constrained hosts). Default honors the plan: run every circuit.
-    private static readonly bool DeepPlanes =
-        !string.Equals(Environment.GetEnvironmentVariable("LAPLACE_MODEL_PLANES"),
-            "similarity", StringComparison.OrdinalIgnoreCase);
+    // LAPLACE_MODEL_PLANES selects which planes run: "all" (default — similarity + CONTINUES_TO +
+    // per-layer attention/OV/MLP), "similarity" (embedding plane only — cheap smoke), or "continues"
+    // (embedding + LM-head direct path only — targeted CONTINUES_TO without the per-layer cost).
+    private static readonly string PlanesMode =
+        (Environment.GetEnvironmentVariable("LAPLACE_MODEL_PLANES") ?? "all").ToLowerInvariant();
+    private static bool RunSimilarity => PlanesMode is "all" or "similarity";
+    private static bool RunContinues  => PlanesMode is "all" or "continues";
+    private static bool RunLayers     => PlanesMode == "all";
+
+    // Track A2: norm-gain folding is ON by default; LAPLACE_MODEL_NORMFOLD=0 disables it so the
+    // pre-fold baseline (B0) can be captured on the identical eval harness for a true before/after.
+    private static readonly bool NormFold =
+        !string.Equals(Environment.GetEnvironmentVariable("LAPLACE_MODEL_NORMFOLD"), "0", StringComparison.Ordinal);
 
     private readonly string _modelDir;
     private readonly ModelManifest _manifest;
@@ -114,16 +124,23 @@ public sealed class ModelTokenEdgeETL
             Array.Copy(embed, (long)rowOfToken[i] * d, Af, (long)i * d, d);
 
         // ── Plane 1: SIMILAR_TO (embedding self-similarity, robust SVD reduction) ──────────────
-        await foreach (var change in EmitSimilarityPlane(Af, ents, n, d, commitEpoch, ct))
-            yield return change;
+        if (RunSimilarity)
+            await foreach (var change in EmitSimilarityPlane(Af, ents, n, d, commitEpoch, ct))
+                yield return change;
 
-        if (!DeepPlanes || !_manifest.TextPlanesRunnable)
+        if (!_manifest.TextPlanesRunnable)
         {
-            if (!_manifest.TextPlanesRunnable)
-                _log.LogInformation("phase=edges: coverage={Cov} modality={Mod}; embedding-plane only",
-                    _manifest.Coverage, _manifest.Modality);
+            _log.LogInformation("phase=edges: coverage={Cov} modality={Mod}; embedding-plane only",
+                _manifest.Coverage, _manifest.Modality);
             yield break;
         }
+
+        // ── Plane: CONTINUES_TO (LM-head direct path E·W_U, UNTIED only; global, not per-layer) ──
+        if (RunContinues)
+            await foreach (var change in EmitContinuesPlane(Af, ents, rowOfToken, n, d, commitEpoch, refMap, ct))
+                yield return change;
+
+        if (!RunLayers) yield break;
 
         // The deep planes contract on the hidden dim, so they need the gathered rows as double.
         var Ad = new double[(long)n * d];
@@ -178,6 +195,55 @@ public sealed class ModelTokenEdgeETL
             yield return change;
     }
 
+    // ── Plane: CONTINUES_TO (LM-head direct path) ───────────────────────────────────────────────
+    // The "direct path" logit of token j following token i is E[i]·W_U[j] (embedding · unembedding):
+    // how strongly token i, sitting in the residual, directly promotes token j as the next token.
+    // This is the generative/continuation signal. It is meaningful ONLY for UNTIED embeddings — when
+    // tied, W_U == E and E[i]·E[j] is just SIMILAR_TO (symmetric), so we skip to avoid a redundant
+    // (and mislabeled) plane. Directional: CONTINUES_TO(i→j) ≠ CONTINUES_TO(j→i).
+    private async IAsyncEnumerable<SubstrateChange> EmitContinuesPlane(
+        float[] Af, List<Hash128> ents, List<int> rowOfToken, int n, int d, int commitEpoch,
+        Dictionary<string, SafetensorsContainerParser.TensorReference> refMap,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var cfg = _manifest.Config;
+        var embedRole = _manifest.Embedding;
+        var lmRole = _manifest.LmHead;   // explicit lm_head, or (tied) falls back to the embedding role
+        if (cfg.TieWordEmbeddings || lmRole is null || embedRole is null
+            || string.Equals(lmRole.Name, embedRole.Name, StringComparison.Ordinal))
+        {
+            _log.LogInformation("phase=edges: CONTINUES_TO skipped — tied embeddings (≡ SIMILAR_TO)");
+            yield break;
+        }
+
+        float[] Ufull;
+        try { Ufull = WeightTensorETL.LoadTensorF32(refMap, lmRole.Name, (long)cfg.VocabSize * d); }
+        catch (Exception ex)
+        { _log.LogWarning("phase=edges: lm_head load failed ({Msg}); CONTINUES_TO skipped", ex.Message); yield break; }
+
+        // EXACT full-d direct path: gather the content-token unembedding rows aligned with `ents`/Af,
+        // normalize both sides to cosine, and fold the full E·Uᵀ. The native MKL bilinear is ~n²·d and
+        // costs seconds; no rank truncation — the score is the true direct-path projection.
+        var Ed = new double[(long)n * d];
+        var Ud = new double[(long)n * d];
+        for (int i = 0; i < n; i++)
+        {
+            long erow = (long)i * d, urow = (long)rowOfToken[i] * d;
+            for (int t = 0; t < d; t++) { Ed[erow + t] = Af[erow + t]; Ud[erow + t] = Ufull[urow + t]; }
+        }
+        NormRows(Ed, n, d);
+        NormRows(Ud, n, d);
+
+        var typeId = RelationTypeRegistry.RelationTypeId("CONTINUES_TO");
+        double weight = WeightFor("CONTINUES_TO");
+        _log.LogInformation("phase=edges: folding CONTINUES_TO (LM-head direct path, untied, full d={D}) over {N} tokens", d, n);
+        await foreach (var change in EmitBilinearPairs(
+            Ed, Ud, n, d, typeId, weight, ents, ents, commitEpoch,
+            new CircuitDescriptor(Layer: -1, Head: -1, Plane: "continues", RelationName: "CONTINUES_TO"),
+            sampleForDecoder: true, ct))
+            yield return change;
+    }
+
     // ── Plane 2: ATTENDS (per layer, per head QK bilinear) ──────────────────────────────────────
     private async IAsyncEnumerable<SubstrateChange> EmitAttentionLayer(
         int L, float[] Af, double[] Ad, List<Hash128> ents, int n, int d, int commitEpoch,
@@ -201,11 +267,15 @@ public sealed class ModelTokenEdgeETL
         catch (Exception ex) { _log.LogWarning("phase=edges L{L}: attn load failed: {Msg}", L, ex.Message); yield break; }
 
         // A2: fold the pre-attention norm gain into Q/K so the bilinear sees the normed residual.
-        var gIn = LoadGain(refMap, _manifest.InputNorm(L), d);
-        if (gIn is not null) { ScaleCols(Wq, attn, d, gIn); ScaleCols(Wk, kvDim, d, gIn); }
-        // Qwen3 per-head q/k RMSNorm gains ([hd]), applied to the head slices below (post-projection).
-        var gQ = LoadGain(refMap, _manifest.QNorm(L), hd);
-        var gK = LoadGain(refMap, _manifest.KNorm(L), hd);
+        // Qwen3 per-head q/k RMSNorm gains ([hd]) apply to the head slices below (post-projection).
+        float[]? gQ = null, gK = null;
+        if (NormFold)
+        {
+            var gIn = LoadGain(refMap, _manifest.InputNorm(L), d);
+            if (gIn is not null) { ScaleCols(Wq, attn, d, gIn); ScaleCols(Wk, kvDim, d, gIn); }
+            gQ = LoadGain(refMap, _manifest.QNorm(L), hd);
+            gK = LoadGain(refMap, _manifest.KNorm(L), hd);
+        }
 
         var Q = new double[(long)n * attn];
         var Kraw = new double[(long)n * kvDim];
@@ -266,8 +336,11 @@ public sealed class ModelTokenEdgeETL
 
         // A2: V reads the same pre-attention-normed residual → fold γ_input into Wv columns.
         // Wo writes back to the (post-attention) residual, so it is NOT norm-scaled.
-        var gIn = LoadGain(refMap, _manifest.InputNorm(L), d);
-        if (gIn is not null) ScaleCols(Wv, kvDim, d, gIn);
+        if (NormFold)
+        {
+            var gIn = LoadGain(refMap, _manifest.InputNorm(L), d);
+            if (gIn is not null) ScaleCols(Wv, kvDim, d, gIn);
+        }
 
         var Vraw = new double[(long)n * kvDim];
         var Vexp = new double[(long)n * attn];
@@ -323,11 +396,14 @@ public sealed class ModelTokenEdgeETL
 
         // A2: gate/up read the post-attention-normed residual → fold γ_post into their input columns.
         // down writes back to the residual, and the unemb comparison side stays raw — neither scaled.
-        var gPost = LoadGain(refMap, _manifest.PostAttnNorm(L), d);
-        if (gPost is not null)
+        if (NormFold)
         {
-            ScaleColsD(up, I, d, gPost);
-            if (gate is not null) ScaleColsD(gate, I, d, gPost);
+            var gPost = LoadGain(refMap, _manifest.PostAttnNorm(L), d);
+            if (gPost is not null)
+            {
+                ScaleColsD(up, I, d, gPost);
+                if (gate is not null) ScaleColsD(gate, I, d, gPost);
+            }
         }
 
         var typeId = RelationTypeRegistry.RelationTypeId("COMPLETES_TO");
@@ -374,6 +450,12 @@ public sealed class ModelTokenEdgeETL
         var oR = new int[cap]; var oC = new int[cap]; var oV = new double[cap]; var oS = new long[cap];
         var collector = (_classifier is null || !sampleForDecoder) ? null : new TopPairCollector(TopPairsPerCircuit);
 
+        // Symmetric relations (SIMILAR_TO) score identically both ways, so the tile emits each pair
+        // twice (a→b and b→a) with the same value — pure redundancy. Emit each once (oR<oC) for those.
+        // Directional relations (ATTENDS/OV_RELATES) have genuinely different scores per direction → keep both.
+        bool canonicalize = RelationTypeRegistry.Resolve(descriptor.RelationName).Symmetry
+                            == RelationTypeRegistry.Symmetry.Symmetric;
+
         var b = NewChunk(commitEpoch); int inChunk = 0;
         for (int rb = 0; rb < n; rb += RowTile)
         {
@@ -383,7 +465,8 @@ public sealed class ModelTokenEdgeETL
             if (cnt < 0) yield break;
             for (int e = 0; e < cnt; e++)
             {
-                if (oC[e] == oR[e]) continue;   // no self-edge
+                if (oC[e] == oR[e]) continue;                       // no self-edge
+                if (canonicalize && oC[e] < oR[e]) continue;        // symmetric: emit each pair once
                 b.AddAttestation(NativeAttestation.Aggregated(
                     rowEnts[oR[e]], typeId, colEnts[oC[e]], _source, null, 1, oS[e], weight));
                 collector?.Offer(rowEnts[oR[e]], colEnts[oC[e]], oS[e]);
@@ -423,6 +506,16 @@ public sealed class ModelTokenEdgeETL
                 rank = rc == 0 ? (int)r : 0;
                 return rc;
             }
+        }
+    }
+
+    // Project rows of `pts`[n,d] onto the basis `w`[r,d]: out[i,t] = Σ_j pts[i,j]·w[t,j] (= pts·wᵀ).
+    private static int RunProject(float[] pts, int n, int d, float[] w, int r, double[] outp)
+    {
+        unsafe
+        {
+            fixed (float* pp = pts) fixed (float* pw = w) fixed (double* po = outp)
+                return DynInterop.ProjectEmbedding(pp, (nuint)n, (nuint)d, pw, (nuint)r, po);
         }
     }
 

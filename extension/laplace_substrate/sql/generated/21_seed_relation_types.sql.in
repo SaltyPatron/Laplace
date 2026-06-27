@@ -17,6 +17,7 @@ FROM (VALUES
     ('substrate/type/COMPLETES_TO/v1'),
     ('substrate/type/CONFUSABLE_WITH/v1'),
     ('substrate/type/CONTAINS/v1'),
+    ('substrate/type/CONTINUES_TO/v1'),
     ('substrate/type/CORRESPONDS_TO/v1'),
     ('substrate/type/CREATED_BY/v1'),
     ('substrate/type/DECODES_TO/v1'),

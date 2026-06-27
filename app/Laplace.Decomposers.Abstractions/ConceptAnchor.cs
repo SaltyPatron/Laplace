@@ -54,9 +54,9 @@ public static class ConceptAnchor
     
     
     
-    public static Hash128? SynsetId(long offset, char ssType)
+    public static Hash128? SynsetId(long offset, char ssType, string version = "pwn30")
     {
-        string? ili = SourceEntityIdConventions.WordNetIli(offset, ssType);
+        string? ili = SourceEntityIdConventions.WordNetIli(offset, ssType, version);
         return ili is null ? null : ContentEmitter.RootId(ili);
     }
 }

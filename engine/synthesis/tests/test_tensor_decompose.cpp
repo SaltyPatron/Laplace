@@ -34,7 +34,8 @@ TEST(TensorDecompose, NullArgsRejected) {
     EXPECT_EQ(tensor_svd_truncate(A.data(), 4, 3, 0.0, nullptr, buf, buf, buf, 3), -1);
     EXPECT_EQ(tensor_svd_truncate(A.data(), 0, 3, 0.0, &r, buf, buf, buf, 3), -1);
     EXPECT_EQ(tensor_svd_truncate(A.data(), 4, 3, 1.0, &r, buf, buf, buf, 3), -1);
-    EXPECT_EQ(tensor_svd_truncate(A.data(), 4, 3, 0.0, &r, buf, buf, buf, 1), -1);
+    EXPECT_EQ(tensor_svd_truncate(A.data(), 4, 3, 0.0, &r, buf, buf, buf, 0), -1)  // only kmax==0 is invalid
+        << "kmax is an output-rank cap; only 0 is rejected (kmax<min(m,n) is the normal truncation case)";
 }
 
 TEST(TensorDecompose, FullRankWhenTolZero) {
@@ -73,4 +74,28 @@ TEST(TensorDecompose, AllZeroTensorHasRankZero) {
     if (rc == -2) GTEST_SKIP() << "LAPACK/MKL unavailable in this build";
     ASSERT_EQ(rc, 0);
     EXPECT_EQ(r, 0u);
+}
+
+// Regression for the SIMILAR_TO ingest failure: a TALL matrix reduced to a target rank far below
+// min(m,n) — exactly a 32000×2048 model embedding asking for rank 64 (scaled here to 100×8 → rank 2).
+// The old `kmax < min(m,n) → -1` guard rejected this, silently disabling the whole plane.
+TEST(TensorDecompose, TruncatesTallMatrixToKmaxBelowMinDim) {
+    const size_t m = 100, n = 8, kmax = 2;
+    std::vector<float> A(m * n, 0.0f);
+    // Four nonzero columns of clearly decreasing energy → true rank 4 > kmax, forcing truncation.
+    for (size_t i = 0; i < m; ++i) {
+        A[i * n + 0] = 10.0f * ((i % 2) ? 1.0f : -1.0f);
+        A[i * n + 1] = 3.0f  * ((i % 3) ? 1.0f : 0.0f);
+        A[i * n + 2] = 1.0f  * ((i % 5) ? 1.0f : 0.0f);
+        A[i * n + 3] = 0.3f  * ((i % 7) ? 1.0f : 0.0f);
+    }
+    std::vector<float> U(m * kmax), S(kmax), Vt(kmax * n);
+    size_t r = 99;
+    int rc = tensor_svd_truncate(A.data(), m, n, 0.0, &r, U.data(), S.data(), Vt.data(), kmax);
+    if (rc == -2) GTEST_SKIP() << "LAPACK/MKL unavailable in this build";
+    ASSERT_EQ(rc, 0) << "tall-matrix truncation to kmax < min(m,n) must succeed (was the SVD bug)";
+    EXPECT_LE(r, kmax) << "kept rank must honor the output cap";
+    EXPECT_GE(r, 1u);
+    EXPECT_GT(S[0], 0.0f);
+    EXPECT_GE(S[0], S[r - 1]) << "singular values descending";
 }

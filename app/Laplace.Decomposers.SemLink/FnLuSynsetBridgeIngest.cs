@@ -14,11 +14,18 @@ internal static class FnLuSynsetBridgeIngest
 {
     private static readonly Hash128 LuTypeId = EntityTypeRegistry.FrameNetLu;
 
+    /// <summary>
+    /// MapNet and WordFrameNet synsets use Princeton WordNet 1.6 offsets (MultiWordNet alignment) —
+    /// confirmed ~99.7% coverage vs pwn16 against ~0.5% vs pwn30. Both callers pass this.
+    /// </summary>
+    internal const string MultiWordNetVersion = "pwn16";
+
     internal static async IAsyncEnumerable<SubstrateChange> StreamAsync(
         string path,
         Hash128 source,
         string labelPrefix,
         int batchSize,
+        string synsetVersion = "pwn30",
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (batchSize <= 0) batchSize = 4096;
@@ -42,7 +49,7 @@ internal static class FnLuSynsetBridgeIngest
             if (!TryParseRow(line, out string? frame, out string? luName, out string? synRaw))
                 continue;
 
-            Hash128? synId = SourceEntityIdConventions.ResolveSynsetAnchor(synRaw);
+            Hash128? synId = SourceEntityIdConventions.ResolveSynsetAnchor(synRaw, synsetVersion);
             if (synId is null) continue;
 
             Hash128? luId = CategoryAnchor.Id(SourceEntityIdConventions.FrameNetLuKey(frame, luName));
@@ -72,6 +79,7 @@ internal static class FnLuSynsetBridgeIngest
         Hash128 source,
         string labelPrefix,
         int batchSize,
+        string synsetVersion = "pwn30",
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (batchSize <= 0) batchSize = 4096;
@@ -103,7 +111,7 @@ internal static class FnLuSynsetBridgeIngest
                 !TryParseWfnNativeDataLine(line, out string lemma, out string pos, out string synRaw))
                 continue;
 
-            Hash128? synId = SourceEntityIdConventions.ResolveSynsetAnchor(synRaw);
+            Hash128? synId = SourceEntityIdConventions.ResolveSynsetAnchor(synRaw, synsetVersion);
             if (synId is null) continue;
 
             string luName = PosSuffix(pos) is { Length: > 0 } sfx ? $"{lemma}.{sfx}" : lemma;

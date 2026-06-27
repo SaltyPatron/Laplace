@@ -50,6 +50,7 @@ internal static class Program
             Console.Error.WriteLine(
                 "usage: laplace <command> [args]\n"
                 + "  ingest <source> [path]            (unicode | iso639 | wordnet | omw | ud | model)\n"
+                + "  document <recipe.json> [out-dir]  extract provenance.json (the canonical source material)\n"
                 + "  synthesize substrate <recipe.json> [output.gguf] [--source-scope <ids>] [--format <name>]\n"
                 + "  decompose <text>\n"
                 + "  inspect <text>\n"
@@ -61,6 +62,7 @@ internal static class Program
                 + "  db-roundtrip <file>\n"
                 + "  svd-exact-bench [model-dir] [tensor]  (prove tensor_svd_truncate is fp-exact on a real tensor; no DB)\n"
                 + "  model-bench [model-dir]              (run the whole-model FFN/relation ETL on a real model; no DB)\n"
+                + "  eval ingest-fidelity [relation] [ground-truth] [n]   (AUC of a model plane vs seed relations)\n"
                 + "  stats\n"
                 + "  cpu-topology [--p-cores | --cpu-bound-workers [headroom] | --io-bound-workers]");
             return 2;
@@ -70,6 +72,7 @@ internal static class Program
             return args[0] switch
             {
                 "ingest"       => await IngestCommands.IngestAsync(args[1..]),
+                "document"     => await DocumentCommands.RunAsync(args[1..]),
                 "synthesize"   => await FoundryCommands.SynthesizeAsync(args[1..]),
                 "decompose"    => DecompositionCommands.Decompose(string.Join(' ', args[1..])),
                 "inspect"      => await QueryCommands.InspectAsync(string.Join(' ', args[1..])),
@@ -82,6 +85,7 @@ internal static class Program
                 "chess"        => await ChessCommands.RunAsync(args[1..]),
                 "roundtrip"    => DecompositionCommands.Roundtrip(args.Length > 1 ? args[1] : "", args.Length > 2 ? args[2] : null),
                 "db-roundtrip" => await DecompositionCommands.DbRoundtripAsync(args.Length > 1 ? args[1] : ""),
+                "eval"         => await EvalCommands.RunAsync(args[1..]),
                 "stats"        => await IngestCommands.StatsAsync(),
                 "cpu-topology" => CpuTopologyCommands.Run(args[1..]),
                 "svd-exact-bench" => BenchCommands.SvdExactBenchCmd(args[1..]),

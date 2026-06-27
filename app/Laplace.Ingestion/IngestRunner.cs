@@ -297,13 +297,16 @@ public sealed class IngestRunner
         log.LogInformation(
             "INGEST_COMPLETE source={Source} layer={Layer} input_done={InputDone} input_total={InputTotal} "
             + "files_done={FilesDone} files_total={FilesTotal} intents={Applied}/{Produced} "
-            + "rows_new={Ent}e+{Phys}p+{Att}a elapsed_s={Elapsed:F1} failed={Failed} status={Status}",
+            + "rows_new={Ent}e+{Phys}p+{Att}a elapsed_s={Elapsed:F1} failed={Failed} status={Status} "
+            + "synset_hit_cum={SynHit} synset_miss_cum={SynMiss} lang_miss_cum={LangMiss}",
             decomposer.SourceName, decomposer.LayerOrder,
             counters.InputUnitsDone, declaredInput,
             counters.FilesDone, declaredFiles,
             result.UnitsApplied, result.UnitsAttempted,
             result.EntitiesInserted, result.PhysicalitiesInserted, result.AttestationsInserted,
-            result.WallClock.TotalSeconds, result.UnitsFailed, status);
+            result.WallClock.TotalSeconds, result.UnitsFailed, status,
+            SourceEntityIdConventions.SynsetHits, SourceEntityIdConventions.SynsetMisses,
+            LanguageReference.ResolveMisses);
         _obs.OnRunFinished(decomposer.SourceName, result);
         if (emptySourceNoOp)
             throw new InvalidOperationException(
