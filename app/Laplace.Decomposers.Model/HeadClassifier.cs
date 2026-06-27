@@ -22,7 +22,8 @@ public sealed record CircuitDescriptor(int Layer, int Head, string Plane, string
 public sealed class HeadClassifier
 {
     public static readonly Hash128 EncodesTypeId      = RelationTypeRegistry.RelationTypeId("ENCODES");
-    public static readonly Hash128 ModelCircuitTypeId = Hash128.OfCanonical("substrate/type/Model_Circuit/v1");
+    // Routed through the centralized minter (behavior-preserving) per the type-id law — see TypeIdLawTests.
+    public static readonly Hash128 ModelCircuitTypeId = EntityTypeRegistry.Id("Model_Circuit");
 
     private readonly ISubstrateReader _reader;
     private readonly Hash128 _source;

@@ -97,9 +97,13 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
                 AND laplace.codepoint_for_id(e.id) IS NOT NULL");
         Assert.True(resolvable > 1_100_000, $"perfcache-resolvable codepoints unexpectedly few: {resolvable:N0}");
 
-        long physCount = await ScalarLong(
-            "SELECT laplace.content_count(@s)",
-            ("s", UnicodeDecomposer.Source.ToBytes()));
+        // The content-physicality count is content_count(NULL): count(*) of type-1 physicalities.
+        // We query it source-free on purpose — physicalities carry NO source (geometry is source-free
+        // by design), so "did the seed create a content physicality for every codepoint" is the total
+        // type-1 count. The source-scoped content_count(source) instead counts ATTESTED codepoints
+        // (it inner-joins attestations), which legitimately excludes unassigned/reserved codepoints
+        // that carry no Unicode properties — source attribution is already covered by `resolvable` above.
+        long physCount = await ScalarLong("SELECT laplace.content_count()");
         Assert.True(physCount >= TotalCodepoints,
             $"content physicalities {physCount:N0} < codepoint count {TotalCodepoints:N0}");
 

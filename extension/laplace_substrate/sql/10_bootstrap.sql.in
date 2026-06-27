@@ -47,7 +47,11 @@ DECLARE
     reltype_is_alias_of_id       bytea;
 
     
-    VOCAB_TIER CONSTANT smallint := 5;
+    -- Abstract anchors are Word-composition tier (their canonical name is a token); their CATEGORY
+    -- is carried by type_id (the meta-type stamped alongside), never by the tier axis. Was 5 — a
+    -- category jammed into the depth field, which left substrate_counts (reads tier 0) disagreeing
+    -- with the writer. Tier is composition depth only; matches EntityTier.Vocabulary = Word (2).
+    VOCAB_TIER CONSTANT smallint := 2;
 
 BEGIN
     type_id             := public.laplace_hash128_blake3('substrate/type/Type/v1'::bytea);

@@ -75,13 +75,18 @@ public class TextDecomposerTests
     }
 
     [Fact]
-    public void DistinctNormalizationForms_StayDistinct()
+    public void NormalizationForms_ConvergeUnderNfc()
     {
+        // text_decomposer.c applies an NFC canonicalization chokepoint, so the precomposed form
+        // U+00E9 (é) and the decomposed form U+0065 U+0301 (e + combining acute) collapse to one
+        // canonical form ("café" NFC == "cafe´" NFD). Both therefore yield the same node tree with
+        // U+00E9 at the leaf. (Prior assertions of "stay distinct" reflected an abandoned no-NFC
+        // direction; the chokepoint is the deliberate current design.)
         using var pre = TextDecomposer.Run(new byte[] { 0xC3, 0xA9 });
         using var dec = TextDecomposer.Run(new byte[] { 0x65, 0xCC, 0x81 });
-        Assert.NotEqual(pre.NodeCount, dec.NodeCount);
+        Assert.Equal(pre.NodeCount, dec.NodeCount);
         Assert.Equal(0x00E9u, pre.GetNode(0).Atom);
-        Assert.Equal(0x0065u, dec.GetNode(0).Atom);
+        Assert.Equal(0x00E9u, dec.GetNode(0).Atom);
     }
 
     [Fact]

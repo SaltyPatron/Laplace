@@ -9,7 +9,17 @@ public sealed record SubstrateChange(
     ImmutableArray<AttestationRow>  Attestations,
     SubstrateChangeMetadata         Metadata,
     ImmutableArray<IntentStage>     IntentStages = default,
-    ImmutableArray<TestimonyWalkRow> TestimonyWalks = default);
+    ImmutableArray<TestimonyWalkRow> TestimonyWalks = default)
+{
+    /// <summary>
+    /// True when this change counts as a whole source unit for run-metric accounting
+    /// (UnitsAttempted/Applied/Failed). The parallel ingest path splits one unit's rows across N lanes
+    /// via IngestRunner.PartitionChange; exactly ONE resulting sub-change keeps CountsAsUnit=true so the
+    /// unit is counted once, not once per lane its rows scatter to. Every whole-unit code path (the
+    /// decomposer-built changes and the non-parallel ingest path) leaves this at the default, true.
+    /// </summary>
+    public bool CountsAsUnit { get; init; } = true;
+}
 
 
 

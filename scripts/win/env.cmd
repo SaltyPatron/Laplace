@@ -24,7 +24,10 @@ if not defined LAPLACE_ISOLATE_PREFIX set "LAPLACE_ISOLATE_PREFIX=laplace_d"
 if not defined LAPLACE_DB set "LAPLACE_DB=Host=localhost;Username=postgres;Password=postgres;Database=%LAPLACE_DBNAME%"
 if not defined LAPLACE_SKIP_USAGE set "LAPLACE_SKIP_USAGE=0"
 if not defined LAPLACE_SKIP_MODELS set "LAPLACE_SKIP_MODELS=0"
-if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=1"
+rem Commit pool default: parallel (8) so EVERY decomposer commits multi-worker, not just
+rem the steps that override it (omw/conceptnet/ud). Was 1; raised so light steps (unicode,
+rem cili, wordnet, verbnet, ...) also use the full commit pool. Set =1 to force serial commit.
+if not defined LAPLACE_INGEST_WORKERS set "LAPLACE_INGEST_WORKERS=8"
 rem File-level decompose fan-out (OMW/UD/OpenSubtitles): leave LAPLACE_DECOMPOSE_WORKERS unset so
 rem IngestParallelism.ResolveFileWorkers auto-scales to P-core count minus headroom. Commit pool
 rem (LAPLACE_INGEST_WORKERS above) is separate and I/O-bound — do not conflate the two.

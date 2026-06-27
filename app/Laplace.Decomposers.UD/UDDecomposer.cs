@@ -364,8 +364,20 @@ public sealed class UDDecomposer : IDecomposer, IIngestInventoryProvider{
                     string erel = edge[(colon + 1)..].Trim();
                     if (erel.Length == 0 || headRef == "0") continue;
                     if (!refToForm.TryGetValue(headRef, out var eHead)) continue;
-                    RelationTypeRegistry.SeedEnhancedDeprel(b, erel, Source, seenEntBatch, seenAttBatch, canonicalNames);
-                    var edep = RelationTypeRegistry.ResolveEnhancedDeprel(erel);
+                    // Enhanced deprels lexicalize the case-marker lemma + morphological case
+                    // (e.g. 'obl:в:acc', 'nmod:accanto_a') straight into the relation label. That tail
+                    // is denormalized redundancy — the preposition is already its own token with a
+                    // basic 'case' deprel, the case is already a FEAT_CASE on the noun, and universal
+                    // subtypes (nsubj:pass) are retained by the basic DEP_ layer above. Typing the
+                    // enhanced edge by the full lexicalized string mints ~4,000 language-specific
+                    // EDEP_* leaf types for zero recoverable new information; the native resolver
+                    // already derives EDEP_<base> as the parent. Normalize to that universal base so
+                    // the enhanced edge contributes its (often conjunction-propagated) structure
+                    // without exploding the type vocabulary past the 256 bit-flag plane.
+                    int esub = erel.IndexOf(':');
+                    string ebase = esub > 0 ? erel[..esub] : erel;
+                    RelationTypeRegistry.SeedEnhancedDeprel(b, ebase, Source, seenEntBatch, seenAttBatch, canonicalNames);
+                    var edep = RelationTypeRegistry.ResolveEnhancedDeprel(ebase);
                     b.AddAttestation(NativeAttestation.CategoricalResolved(
                         form, edep.Id, eHead, Source, null, edep.Rank * SourceTrust.AcademicCurated));
                 }
