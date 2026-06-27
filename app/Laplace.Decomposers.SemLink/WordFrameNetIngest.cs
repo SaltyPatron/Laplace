@@ -147,8 +147,9 @@ internal static class WordFrameNetIngest
         string platformDefault = OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data";
         if (seen.Add(platformDefault)) yield return platformDefault;
 
-        string? parent = Path.GetDirectoryName(Path.GetFullPath(ecosystemPath));
-        if (!string.IsNullOrEmpty(parent) && seen.Add(parent))
-            yield return parent;
+        // NOTE: we deliberately do NOT treat the ecosystem path's parent directory as a vault root.
+        // Doing so globbed arbitrary unrelated files when the ecosystem path was a temp/working dir
+        // (e.g. the OS temp root's locked installer logs → IOException). The real vault is reached via
+        // LAPLACE_DATA_ROOT, the platform default, and the ecosystem path itself + its nested WFN dirs.
     }
 }

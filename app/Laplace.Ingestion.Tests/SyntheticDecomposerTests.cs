@@ -511,18 +511,22 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     }
 
     [Fact]
-    public async Task LayerOrderingEnforced_RejectsLayerNWithoutPrereq()
+    public async Task HighLayerSource_IngestsWithoutOrderingPrereq()
     {
+        // The substrate is a content-addressed DAG: identity is content and references are forward
+        // references that resolve whenever the referenced content lands, so there is NO ingest-order
+        // dependency. The old layer-ordering check (which threw LayerOrderingViolationException) was
+        // deliberately removed — see the comment in IngestRunner.RunAsync ("procedural thinking that
+        // contradicts the DAG"). A high-layer source must therefore run to completion without throwing.
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var runner = new IngestRunner(writer, reader);
         var srcId = Hash128.OfCanonical("substrate/source/SyntheticLayer/v1");
         var decomposer = new HighLayerDecomposer(srcId);
 
-        var options = IngestRunOptions.Default;
+        var result = await runner.RunAsync(decomposer, IngestRunOptions.Default);
 
-        await Assert.ThrowsAsync<LayerOrderingViolationException>(
-            () => runner.RunAsync(decomposer, options));
+        Assert.Equal(0, result.UnitsFailed);
     }
 
     private sealed class HighLayerDecomposer : IDecomposer

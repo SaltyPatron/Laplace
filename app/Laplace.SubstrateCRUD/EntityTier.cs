@@ -7,6 +7,7 @@ namespace Laplace.SubstrateCRUD;
 
 public static class EntityTier
 {
+    // Tier is a single axis: COMPOSITION DEPTH. Nothing else may live here.
     public const byte Codepoint = 0;
     public const byte Grapheme  = 1;
     public const byte Word      = 2;
@@ -14,8 +15,12 @@ public static class EntityTier
     public const byte Document  = 4;
 
     /// <summary>
-    /// Abstract vocabulary (POS, morphology values, languages, category anchors, relation types).
-    /// Must not share tier 0 with codepoint atoms — tier 0 is perfcache/codepoint geometry only.
+    /// Abstract anchors (POS, morphology values, languages, trust classes, relation types, meta-types)
+    /// are NOT a composition tier. Their *category* lives in <c>type_id</c> (their meta-type), never in
+    /// the tier field — the previous <c>Vocabulary = 5</c> jammed a category into the depth axis. Their
+    /// canonical name is a single token, so their composition depth is Word. Identity stays distinct
+    /// from content words via <c>type_id</c> (the ids differ), so Word-tier never flattens an anchor
+    /// into a literal text occurrence of its name.
     /// </summary>
-    public const byte Vocabulary = 5;
+    public const byte Vocabulary = Word;
 }

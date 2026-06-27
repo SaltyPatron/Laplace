@@ -285,18 +285,31 @@ public sealed class IngestRunner
             TotalRoundTrips: totalRoundTrips,
             WallClock: sw.Elapsed,
             Failures: failures);
+        // Anti-false-green: a source that reports input (units or files) but applied ZERO units did not
+        // ingest — it's a grammar/format mismatch the pipeline silently swallowed (the ConceptNet /
+        // Atomic2020 no-op: 0 rows parsed, status reported ok). Re-runs of an already-seeded source still
+        // APPLY their units (dedup happens at the DB via ON CONFLICT), so UnitsApplied stays > 0 — this
+        // only fires on a genuine "consumed nothing from a non-empty source".
+        long declaredInput = inventory?.TotalInputUnits ?? 0;
+        long declaredFiles = inventory?.FileCount ?? 0;
+        bool emptySourceNoOp = result.UnitsApplied == 0 && (declaredInput > 0 || declaredFiles > 0);
+        string status = result.UnitsFailed > 0 ? "failed" : (emptySourceNoOp ? "empty-noop" : "ok");
         log.LogInformation(
             "INGEST_COMPLETE source={Source} layer={Layer} input_done={InputDone} input_total={InputTotal} "
             + "files_done={FilesDone} files_total={FilesTotal} intents={Applied}/{Produced} "
             + "rows_new={Ent}e+{Phys}p+{Att}a elapsed_s={Elapsed:F1} failed={Failed} status={Status}",
             decomposer.SourceName, decomposer.LayerOrder,
-            counters.InputUnitsDone, inventory?.TotalInputUnits ?? 0,
-            counters.FilesDone, inventory?.FileCount ?? 0,
+            counters.InputUnitsDone, declaredInput,
+            counters.FilesDone, declaredFiles,
             result.UnitsApplied, result.UnitsAttempted,
             result.EntitiesInserted, result.PhysicalitiesInserted, result.AttestationsInserted,
-            result.WallClock.TotalSeconds, result.UnitsFailed,
-            result.UnitsFailed > 0 ? "failed" : "ok");
+            result.WallClock.TotalSeconds, result.UnitsFailed, status);
         _obs.OnRunFinished(decomposer.SourceName, result);
+        if (emptySourceNoOp)
+            throw new InvalidOperationException(
+                $"{decomposer.SourceName}: source declares {declaredInput} input unit(s) / {declaredFiles} file(s) "
+                + "but ingested 0 — grammar/format mismatch (silent no-op). Failing instead of reporting success. "
+                + "Check the decomposer's modality/grammar matches the actual file format.");
         return result;
     }
 
@@ -513,6 +526,9 @@ public sealed class IngestRunner
                 st.Dispose();
             }
 
+        // Exactly one non-empty partition carries the unit's identity for run-metric accounting, so a
+        // unit is counted once (not once per lane its rows scatter to). The rest are CountsAsUnit=false.
+        bool unitCounted = false;
         for (int k = 0; k < n; k++)
         {
             bool any = ents[k].Count > 0 || phys[k].Count > 0 || atts[k].Count > 0
@@ -523,6 +539,8 @@ public sealed class IngestRunner
                 result[k] = null!;
                 continue;
             }
+            bool isRepresentative = !unitCounted;
+            unitCounted = true;
             result[k] = c with
             {
                 Entities = ents[k].ToImmutableArray(),
@@ -530,6 +548,7 @@ public sealed class IngestRunner
                 Attestations = atts[k].ToImmutableArray(),
                 IntentStages = stageParts[k].ToImmutableArray(),
                 TestimonyWalks = walks != null ? walks[k].ToImmutableArray() : c.TestimonyWalks,
+                CountsAsUnit = isRepresentative,
             };
         }
         return result;
@@ -545,7 +564,7 @@ public sealed class IngestRunner
         ILogger log,
         CancellationToken ct)
     {
-        Interlocked.Increment(ref counters._unitsAttempted);
+        if (intent.CountsAsUnit) Interlocked.Increment(ref counters._unitsAttempted);
 
         Exception? lastEx = null;
         int attempt = 0;
@@ -560,7 +579,7 @@ public sealed class IngestRunner
                 }
                 var apply = await _writer.ApplyAsync(intent, ct);
 
-                Interlocked.Increment(ref counters._unitsApplied);
+                if (intent.CountsAsUnit) Interlocked.Increment(ref counters._unitsApplied);
                 Interlocked.Add(ref counters._entitiesInserted, apply.EntitiesInserted);
                 Interlocked.Add(ref counters._physicalitiesInserted, apply.PhysicalitiesInserted);
                 Interlocked.Add(ref counters._attestationsInserted, apply.AttestationsInserted);
@@ -590,7 +609,7 @@ public sealed class IngestRunner
                         RetryAttempts: attempt,
                         OccurredAt: DateTimeOffset.UtcNow);
                     lock (failures) failures.Add(fatal);
-                    Interlocked.Increment(ref counters._unitsFailed);
+                    if (intent.CountsAsUnit) Interlocked.Increment(ref counters._unitsFailed);
                     _obs.OnIntentFailed(decomposer.SourceName, fatal);
                     log.LogError(ex, "Fatal ingest error on intent {IntentId} (unit {Unit}); aborting run.",
                         intent.Metadata.IntentId, intent.Metadata.SourceContentUnitName);
@@ -627,7 +646,12 @@ public sealed class IngestRunner
     {
         if (batch.Count == 0) return;
 
-        Interlocked.Add(ref counters._unitsAttempted, batch.Count);
+        // Count whole units, not partitioned sub-changes: the parallel path splits one unit's rows
+        // across lanes, and only its representative sub-change has CountsAsUnit=true (whole units
+        // elsewhere default to true, so unitCount == batch.Count on the non-parallel path).
+        int unitCount = 0;
+        foreach (var c in batch) if (c.CountsAsUnit) unitCount++;
+        Interlocked.Add(ref counters._unitsAttempted, unitCount);
 
         Exception? lastEx = null;
         int attempt = 0;
@@ -642,7 +666,7 @@ public sealed class IngestRunner
                 }
                 var apply = await _writer.ApplyManyAsync(batch, ct);
 
-                Interlocked.Add(ref counters._unitsApplied,           batch.Count);
+                Interlocked.Add(ref counters._unitsApplied,           unitCount);
                 Interlocked.Add(ref counters._entitiesInserted,       apply.EntitiesInserted);
                 Interlocked.Add(ref counters._physicalitiesInserted,  apply.PhysicalitiesInserted);
                 Interlocked.Add(ref counters._attestationsInserted,   apply.AttestationsInserted);
@@ -711,7 +735,9 @@ public sealed class IngestRunner
                 typeName, msg, wasTransient, attempts, now);
 
         lock (failures) failures.AddRange(batchFailures);
-        Interlocked.Add(ref counters._unitsFailed, batch.Count);
+        int failedUnits = 0;
+        foreach (var c in batch) if (c.CountsAsUnit) failedUnits++;
+        Interlocked.Add(ref counters._unitsFailed, failedUnits);
         foreach (var f in batchFailures)
             _obs.OnIntentFailed(sourceName, f);
     }

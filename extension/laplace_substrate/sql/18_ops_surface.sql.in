@@ -79,9 +79,11 @@ CREATE OR REPLACE FUNCTION substrate_counts()
               @extschema@.canonical_id('substrate/type/Document/v1')
           ])
     UNION ALL
-    SELECT 'entities/vocabulary (tier 0)', count(*) FROM @extschema@.entities e
-        WHERE e.tier = 0
-          AND e.type_id <> ALL(ARRAY[
+    -- Vocabulary/anchors are identified by type_id (NOT a content-composition type), never by tier.
+    -- Previously filtered on tier=0, which both mislabeled them and disagreed with the writer's
+    -- VOCAB_TIER. Anchors now sit at Word tier with a meta-type type_id; tier is composition depth only.
+    SELECT 'entities/vocabulary (by type_id)', count(*) FROM @extschema@.entities e
+        WHERE e.type_id <> ALL(ARRAY[
               @extschema@.canonical_id('substrate/type/Codepoint/v1'),
               @extschema@.canonical_id('substrate/type/Grapheme/v1'),
               @extschema@.canonical_id('substrate/type/Word/v1'),

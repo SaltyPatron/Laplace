@@ -15,10 +15,13 @@ public static class ChessVocabulary
 {
     public const string SourceName = "ChessSelfPlay";
 
+    // Type ids route through EntityTypeRegistry.Id (the centralized minter) instead of raw
+    // OfCanonical here — behavior-preserving (Id(name) == OfCanonical($"substrate/type/{name}/v1"))
+    // and conformant with the type-id law (TypeIdLawTests). SourceId is not a type, so it stays raw.
     public static readonly Hash128 SourceId         = Hash128.OfCanonical("substrate/source/ChessSelfPlay/v1");
-    public static readonly Hash128 PositionType     = Hash128.OfCanonical("substrate/type/Chess_Position/v1");
-    public static readonly Hash128 SubstructureType = Hash128.OfCanonical("substrate/type/Chess_Substructure/v1");
-    public static readonly Hash128 MoveType         = Hash128.OfCanonical("substrate/type/MOVE/v1");
+    public static readonly Hash128 PositionType     = EntityTypeRegistry.Id("Chess_Position");
+    public static readonly Hash128 SubstructureType = EntityTypeRegistry.Id("Chess_Substructure");
+    public static readonly Hash128 MoveType         = EntityTypeRegistry.Id("MOVE");
 
     /// <summary>
     /// Unary relation: "with this node present, the side to move scored <i>result</i>." Folded over
@@ -26,14 +29,14 @@ public static class ChessVocabulary
     /// substructures it shares with seen positions (the lookup-table fix) and the substrate <i>measures</i>
     /// which structural features predict winning — never hand-tuned weights.
     /// </summary>
-    public static readonly Hash128 OutcomeType = Hash128.OfCanonical("substrate/type/OUTCOME/v1");
+    public static readonly Hash128 OutcomeType = EntityTypeRegistry.Id("OUTCOME");
 
     /// <summary>
     /// Sentinel object of every <see cref="OutcomeType"/> attestation, so the row is structurally
     /// identical to the proven scored MOVE edge (subject → type → object), folding the same way. The
     /// subject (the substructure / position) carries the identity; the object is constant.
     /// </summary>
-    public static readonly Hash128 OutcomeObject = Hash128.OfCanonical("substrate/type/Chess_Result/v1");
+    public static readonly Hash128 OutcomeObject = EntityTypeRegistry.Id("Chess_Result");
 
     /// <summary>Trust of the self-play corpus (the substrate's own play); tune as needed.</summary>
     public const double Trust = SourceTrust.StructuredCorpus;

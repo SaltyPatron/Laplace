@@ -49,6 +49,7 @@ if /i "%STEP%"=="wiktionary"    goto run_ingest_wikt_commit
 if /i "%STEP%"=="tatoeba"       goto run_ingest
 if /i "%STEP%"=="opensubtitles" goto run_ingest_opensubtitles_commit
 if /i "%STEP%"=="document"      goto run_ingest_path
+if /i "%STEP%"=="chess"         goto run_ingest_path
 if /i "%STEP%"=="stack"         goto run_ingest_path
 if /i "%STEP%"=="repo"          goto run_ingest_path
 if /i "%STEP%"=="tiny-codes"    goto run_ingest_path

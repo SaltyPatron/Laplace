@@ -1011,9 +1011,13 @@ int laplace_compose_drain_into_stage(
         const laplace_compose_physicality_t* ph = &r->physicalities[i];
         if (!phys_novel(&filter, &ph->entity_id)) continue;
         if (intent_stage_witness_seen(stage, &ph->id)) continue;
+        // trajectory_n is a count of DOUBLES (m vertices * 4 coords XYZM), per push_phys + the .NET
+        // getter. intent_stage_add_physicality wants the VERTEX count, so divide by 4 — passing the
+        // doubles-count made the linestring writer read 4x past the buffer (heap-buffer-overflow,
+        // caught by ASAN at intent_stage.c:171). The content-witness drain already passes vertices.
         if (intent_stage_add_physicality(
                 stage, &ph->id, &ph->entity_id, 1, ph->coord, &ph->hilbert,
-                ph->trajectory_xyzm, (uint32_t)ph->trajectory_n, (int32_t)ph->n_constituents,
+                ph->trajectory_xyzm, (uint32_t)(ph->trajectory_n / 4), (int32_t)ph->n_constituents,
                 1, 0.0, 1, 0, now_unix_us) != 0) {
             free_emit_filter(&filter);
             return -1;

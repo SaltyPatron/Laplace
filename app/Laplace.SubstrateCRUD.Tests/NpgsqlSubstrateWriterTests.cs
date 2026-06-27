@@ -147,14 +147,15 @@ public class NpgsqlSubstrateWriterTests
     }
 
     [Fact]
-    public async Task ApplyAsync_PhysicalitiesSharingNaturalKey_DifferentIds_NoConflict()
+    public async Task ApplyAsync_PhysicalitiesSameEntityType_DistinctIds_CoexistAndDedupById()
     {
-        // Regression: physicalities carry a SECONDARY unique constraint UNIQUE (entity_id, type)
-        // (extension/laplace_substrate/sql/03_physicalities.sql.in:15 — source-free since T1). The id
-        // is content-addressed from (entity_id, type, coord, trajectory, …), so two rows with DIFFERENT
-        // coords get DIFFERENT ids yet collide on the natural key. The set-based merge in
-        // laplace_apply_batch must keep one deterministic winner (DISTINCT ON (entity_id, type)) and
-        // drop the duplicate with NO ON CONFLICT — no 23505, exactly one row.
+        // Current design (extension/laplace_substrate/sql/03_physicalities.sql.in:15): there is
+        // deliberately NO (entity_id, type) natural key — "Dedup is the hash." A physicality is keyed
+        // by its content-addressed id (BLAKE3 of entity_id|type|coord|trajectory). So two rows with the
+        // same (entity_id, type) but DIFFERENT coords have DIFFERENT ids and both persist; the apply
+        // never raises 23505 (no natural-key unique to violate). Re-applying the SAME ids is idempotent
+        // via the id anti-join. (Replaces a stale regression test that asserted a natural-key collapse
+        // for a constraint that was removed.)
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var src = Hash128.OfCanonical("substrate/source/test/phys-natkey");
         var typeId = await EnsureTestTypeAsync(src);
@@ -171,29 +172,37 @@ public class NpgsqlSubstrateWriterTests
             SourceDim: null,
             ObservedAtUnixUs: IntentStage.PgEpochUnixUs);
 
-        // Two physicalities, same (entity_id, type) but different id, in ONE apply.
+        // Two physicalities, same (entity_id, type) but different id, in ONE apply — both persist.
         var change = new SubstrateChangeBuilder(src, "phys-natkey-unit")
             .AddEntity(entId, 0, typeId)
             .AddPhysicality(Phys(9101, 0.10))
             .AddPhysicality(Phys(9102, 0.99))
             .Build();
 
-        var result = await writer.ApplyAsync(change);   // would raise 23505 before the fix
-        Assert.Equal(1, result.PhysicalitiesInserted);
+        var result = await writer.ApplyAsync(change);   // no 23505: there is no natural-key unique
+        Assert.Equal(2, result.PhysicalitiesInserted);
 
         await using var cnt = _pg.DataSource.CreateCommand(
             "SELECT count(*) FROM laplace.physicalities WHERE entity_id = $1");
         cnt.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, entId.ToBytes());
-        Assert.Equal(1L, (long)(await cnt.ExecuteScalarAsync())!);
+        Assert.Equal(2L, (long)(await cnt.ExecuteScalarAsync())!);
 
-        // Re-apply a THIRD novel id on the already-present natural key: 0 inserted, still no throw
-        // (the natural-key anti-join filters it; idempotent re-ingest).
-        var reapply = new SubstrateChangeBuilder(src, "phys-natkey-reapply")
+        // Re-apply the SAME two ids: 0 inserted (id anti-join is the dedup), still no throw, still 2 rows.
+        var reapplySame = new SubstrateChangeBuilder(src, "phys-natkey-reapply-same")
+            .AddPhysicality(Phys(9101, 0.10))
+            .AddPhysicality(Phys(9102, 0.99))
+            .Build();
+        var same = await writer.ApplyAsync(reapplySame);
+        Assert.Equal(0, same.PhysicalitiesInserted);
+        Assert.Equal(2L, (long)(await cnt.ExecuteScalarAsync())!);
+
+        // A THIRD distinct id (distinct coord) is a distinct physicality — it persists.
+        var third = new SubstrateChangeBuilder(src, "phys-natkey-third")
             .AddPhysicality(Phys(9103, 0.55))
             .Build();
-        var second = await writer.ApplyAsync(reapply);
-        Assert.Equal(0, second.PhysicalitiesInserted);
-        Assert.Equal(1L, (long)(await cnt.ExecuteScalarAsync())!);
+        var thirdResult = await writer.ApplyAsync(third);
+        Assert.Equal(1, thirdResult.PhysicalitiesInserted);
+        Assert.Equal(3L, (long)(await cnt.ExecuteScalarAsync())!);
     }
 
     [Fact]
