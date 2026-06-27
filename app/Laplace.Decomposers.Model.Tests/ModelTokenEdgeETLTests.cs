@@ -104,6 +104,95 @@ public class ModelTokenEdgeETLTests
         }
     }
 
+    [Fact]
+    public async Task Fold_NormGain_ShiftsAttendOrdering()
+    {
+        // Track A2 known-answer. With identity Q/K, ATTENDS(i→j) = Σ_c γ_c² · e_i,c · e_j,c.
+        // t0=(1,1); t1=(2,0) lives on dim0, t2=(0,2) on dim1. A γ favoring dim0 must make t0→t1
+        // outrank t0→t2, and a γ favoring dim1 must flip it. If the gain were NOT folded the two
+        // would tie regardless of γ — so this proves the fold is applied and on the right axis.
+        var embed = new float[] { 1, 1,  2, 0,  0, 2,  3, 3 };   // 4 tokens (n≥4 required), d=2
+
+        var byDim0 = await RunAttend(embed, gamma: new float[] { 2f, 1f });
+        var byDim1 = await RunAttend(embed, gamma: new float[] { 1f, 2f });
+
+        Assert.True(byDim0[(0, 1)] > byDim0[(0, 2)],
+            $"γ=(2,1) should make t0→t1 outrank t0→t2; got {byDim0[(0, 1)]} vs {byDim0[(0, 2)]}");
+        Assert.True(byDim1[(0, 2)] > byDim1[(0, 1)],
+            $"γ=(1,2) should make t0→t2 outrank t0→t1; got {byDim1[(0, 2)]} vs {byDim1[(0, 1)]}");
+    }
+
+    // Run EmitAsync on a 4-token, d=2 toy with identity Q/K and the given input_layernorm gain;
+    // return the ATTENDS score for each (subjectIdx, objectIdx) pair.
+    private static async Task<Dictionary<(int, int), long>> RunAttend(float[] embed, float[] gamma)
+    {
+        const int n = 4, d = 2;
+        string dir = Path.Combine(Path.GetTempPath(), "laplace-fold-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            WriteSafetensors(Path.Combine(dir, "model.safetensors"), new[]
+            {
+                Tensor("model.embed_tokens.weight", new[] { n, d }, embed),
+                Tensor("model.layers.0.self_attn.q_proj.weight", new[] { d, d }, new float[] { 1, 0, 0, 1 }),
+                Tensor("model.layers.0.self_attn.k_proj.weight", new[] { d, d }, new float[] { 1, 0, 0, 1 }),
+                Tensor("model.layers.0.input_layernorm.weight", new[] { d }, gamma),
+            });
+
+            var ent = new Hash128[n];
+            var tokens = new LlamaTokenizerParser.TokenRecord[n];
+            for (int i = 0; i < n; i++)
+            {
+                ent[i] = Hash128.OfCanonical($"substrate/test/fold/tok/{i}");
+                tokens[i] = new LlamaTokenizerParser.TokenRecord
+                {
+                    TokenId = i, RawToken = $"t{i}", CanonicalBytes = Encoding.UTF8.GetBytes($"t{i}"),
+                    EntityId = ent[i], Tier = 2, IsByteLevel = false, Role = TokenRole.None,
+                    ContentX = double.NaN, ContentY = double.NaN, ContentZ = double.NaN, ContentM = double.NaN,
+                    HasContentCoord = false,
+                };
+            }
+
+            var cfg = new ModelConfig
+            {
+                ModelType = "llama", Architecture = "LlamaForCausalLM",
+                VocabSize = n, HiddenSize = d, NumLayers = 1, NumHeads = 1, NumKvHeads = 1,
+                HeadDim = d, IntermediateSize = d, NumExperts = 0,
+                TieWordEmbeddings = false, QkNorm = false, RopeTheta = 10000, NormEps = 1e-5,
+                MlaQLoraRank = 0, MlaKvLoraRank = 0, QkRopeHeadDim = 0, QkNopeHeadDim = 0, VHeadDim = 0,
+                RecipeEntityId = Hash128.OfCanonical("substrate/test/fold/recipe"),
+                CanonicalJson = Encoding.UTF8.GetBytes("{}"),
+            };
+            var roles = new[]
+            {
+                new TensorRole("model.embed_tokens.weight", new[] { n, d }, "F32", TensorRoleKind.Embedding, -1, -1),
+                new TensorRole("model.layers.0.self_attn.q_proj.weight", new[] { d, d }, "F32", TensorRoleKind.AttnQ, 0, -1),
+                new TensorRole("model.layers.0.self_attn.k_proj.weight", new[] { d, d }, "F32", TensorRoleKind.AttnK, 0, -1),
+                new TensorRole("model.layers.0.input_layernorm.weight", new[] { d }, "F32", TensorRoleKind.Norm, 0, -1),
+            };
+            var manifest = new ModelManifest
+            {
+                Config = cfg, Roles = roles, Modality = Modality.Text, Coverage = Coverage.Full, ModelName = "fold-model",
+            };
+
+            var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
+            var attends = RelationTypeRegistry.RelationTypeId("ATTENDS");
+            var map = new Dictionary<(int, int), long>();
+            await foreach (var c in etl.EmitAsync(commitEpoch: 1))
+                foreach (var a in c.Attestations)
+                {
+                    if (a.TypeId != attends || a.ObjectId is not { } o) continue;
+                    int si = Array.IndexOf(ent, a.SubjectId), oi = Array.IndexOf(ent, o);
+                    if (si >= 0 && oi >= 0) map[(si, oi)] = a.SumScoreFp1e9 ?? a.ScoreFp1e9;
+                }
+            return map;
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     private static ModelManifest ToyManifest(string dir, int vocab, int hidden)
     {
         var cfg = new ModelConfig
