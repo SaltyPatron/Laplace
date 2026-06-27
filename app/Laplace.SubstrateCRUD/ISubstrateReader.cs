@@ -42,4 +42,13 @@ public interface ISubstrateReader
     Task<IReadOnlyList<CircuitRelation>> ClassifyCircuitAsync(
         IReadOnlyList<(Hash128 Subject, Hash128 Object)> pairs, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<CircuitRelation>>(Array.Empty<CircuitRelation>());
+
+    // Eval harness (Track 0a): the consensus strength (eff_mu, human scale) of a SPECIFIC relation
+    // type between each (subject, object) pair. ClassifyCircuitAsync only returns the single strongest
+    // relation per pair, so it cannot answer "how strongly does the model assert SIMILAR_TO between
+    // dog and puppy" — which is exactly what the AUC/precision@k gates need. Returns one value per
+    // input pair, in order; 0 where the edge is absent or unfolded. Default empty for test doubles.
+    Task<IReadOnlyList<double>> GetEdgeStrengthsAsync(
+        IReadOnlyList<(Hash128 Subject, Hash128 Object)> pairs, Hash128 typeId, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<double>>(Array.Empty<double>());
 }

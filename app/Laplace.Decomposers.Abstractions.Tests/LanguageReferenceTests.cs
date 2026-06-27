@@ -4,9 +4,14 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
+[Collection("LanguageReference")]
 public class LanguageReferenceTests
 {
-    private const string IsoDir = "/vault/Data/ISO639";
+    // Was a hardcoded Linux "/vault/Data/ISO639" — always absent on this Windows host, so all five
+    // tests silently no-op'd (which is why the Berber→und class of bug was never caught). OS-aware now.
+    private static string IsoDir =>
+        Environment.GetEnvironmentVariable("LAPLACE_ISO639_DIR") is { Length: > 0 } d ? d
+        : OperatingSystem.IsWindows() ? @"D:\Data\Ingest\ISO639" : "/vault/Data/ISO639";
     private static bool RefPresent => File.Exists(Path.Combine(IsoDir, "iso-639-3.tab"));
 
     private static bool Ensure()

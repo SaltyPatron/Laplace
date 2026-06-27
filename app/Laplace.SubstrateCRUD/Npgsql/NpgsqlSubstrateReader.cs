@@ -187,4 +187,36 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         }
         return rows;
     }
+
+    public async Task<IReadOnlyList<double>> GetEdgeStrengthsAsync(
+        IReadOnlyList<(Hash128 Subject, Hash128 Object)> pairs, Hash128 typeId, CancellationToken ct = default)
+    {
+        if (pairs is null) throw new ArgumentNullException(nameof(pairs));
+        if (pairs.Count == 0) return Array.Empty<double>();
+
+        var subj = new byte[pairs.Count][];
+        var obj  = new byte[pairs.Count][];
+        for (int i = 0; i < pairs.Count; i++)
+        {
+            subj[i] = pairs[i].Subject.ToBytes();
+            obj[i]  = pairs[i].Object.ToBytes();
+        }
+
+        // Left-join each ordered pair to its consensus row via consensus_id(subject,type,object);
+        // eff_mu_display is the human-scale (rating-2·rd)/1e9. COALESCE→0 for absent/unfolded edges.
+        await using var cmd = _ds.CreateCommand(@"
+            SELECT COALESCE(laplace.eff_mu_display(c.rating, c.rd), 0)::float8
+            FROM unnest($1::bytea[]) WITH ORDINALITY AS s(sid, ord)
+            JOIN unnest($2::bytea[]) WITH ORDINALITY AS o(oid, ord) USING (ord)
+            LEFT JOIN laplace.consensus c ON c.id = laplace.consensus_id(s.sid, $3, o.oid)
+            ORDER BY s.ord");
+        var p1 = cmd.Parameters.AddWithValue(subj); p1.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+        var p2 = cmd.Parameters.AddWithValue(obj);  p2.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+        var p3 = cmd.Parameters.AddWithValue(typeId.ToBytes()); p3.NpgsqlDbType = NpgsqlDbType.Bytea;
+
+        var outv = new List<double>(pairs.Count);
+        await using var rdr = await cmd.ExecuteReaderAsync(ct);
+        while (await rdr.ReadAsync(ct)) outv.Add(rdr.GetDouble(0));
+        return outv;
+    }
 }

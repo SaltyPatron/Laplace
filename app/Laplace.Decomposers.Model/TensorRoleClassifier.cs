@@ -20,7 +20,10 @@ namespace Laplace.Decomposers.Model;
 //   otherwise           -> Unknown
 public static partial class TensorRoleClassifier
 {
-    [GeneratedRegex(@"\.(?:layers?|h|blocks?|encoder\.layer)\.(\d+)\.", RegexOptions.IgnoreCase)]
+    // Leading boundary is start-of-name OR a dot: some exports name layer tensors "layers.N.…"
+    // with no "model." prefix (e.g. Qwen3-Embedding). Requiring a literal leading dot silently gave
+    // every such tensor LayerIndex=-1, mis-indexing the whole model. `(?:^|\.)` covers both.
+    [GeneratedRegex(@"(?:^|\.)(?:layers?|h|blocks?|encoder\.layer)\.(\d+)\.", RegexOptions.IgnoreCase)]
     private static partial Regex LayerIndexRegex();
 
     [GeneratedRegex(@"\.experts?\.(\d+)\.", RegexOptions.IgnoreCase)]
@@ -88,6 +91,11 @@ public static partial class TensorRoleClassifier
             if (c.NumExperts > 0 && s[0] == c.NumExperts) return MoeExpertMember(nm);
             return TensorRoleKind.Conv;
         }
+
+        // The shape probes below index s[0]/s[1]; anything that isn't a 2-D matrix here (0-D scalars,
+        // stray 1-element buffers in vision/detection checkpoints) carries no token-circuit role and
+        // must classify as Unknown rather than crash. rank==1 and rank>=3 are already handled above.
+        if (rank != 2) return TensorRoleKind.Unknown;
 
         // rank == 2 from here. An expert slice (…experts.{N}.w1) is an MLP member tagged Moe*.
         if (isExpertSlice)

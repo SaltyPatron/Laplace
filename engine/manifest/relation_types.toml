@@ -110,6 +110,13 @@ parent = null
 family_root = "COMPLETES_TO"
 
 [[relation]]
+canonical = "CONTINUES_TO"
+rank = "tensor_calculation"
+symmetry = "asymmetric"
+parent = null
+family_root = "CONTINUES_TO"
+
+[[relation]]
 canonical = "CONFUSABLE_WITH"
 rank = "standards_structural"
 symmetry = "symmetric"

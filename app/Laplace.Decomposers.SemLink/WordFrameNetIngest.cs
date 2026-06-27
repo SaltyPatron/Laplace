@@ -43,9 +43,11 @@ internal static class WordFrameNetIngest
 
         var stream = LooksLikeNativeWfn(path)
             ? FnLuSynsetBridgeIngest.StreamWfnNativeAsync(
-                  path, WordFrameNetDecomposer.Source, label, batchSize, ct)
+                  path, WordFrameNetDecomposer.Source, label, batchSize,
+                  FnLuSynsetBridgeIngest.MultiWordNetVersion, ct)
             : FnLuSynsetBridgeIngest.StreamAsync(
-                  path, WordFrameNetDecomposer.Source, label, batchSize, ct);
+                  path, WordFrameNetDecomposer.Source, label, batchSize,
+                  FnLuSynsetBridgeIngest.MultiWordNetVersion, ct);
         await foreach (var change in stream)
             yield return change;
     }

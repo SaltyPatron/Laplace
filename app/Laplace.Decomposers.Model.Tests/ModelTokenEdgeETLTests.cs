@@ -97,6 +97,13 @@ public class ModelTokenEdgeETLTests
             Assert.NotEmpty(cross);
             Assert.True(same.Min() > cross.Max(),
                 $"within-cluster edges must outscore cross-cluster; same.min={same.Min()} cross.max={cross.Max()}");
+
+            // Symmetric SIMILAR_TO must be canonicalized — no pair emitted in both orders (a→b AND b→a).
+            var seen = new HashSet<(Hash128, Hash128)>();
+            foreach (var a in atts) seen.Add((a.SubjectId, a.ObjectId!.Value));
+            foreach (var a in atts)
+                Assert.False(seen.Contains((a.ObjectId!.Value, a.SubjectId)),
+                    "symmetric SIMILAR_TO emitted a redundant mirror pair");
         }
         finally
         {
@@ -186,6 +193,84 @@ public class ModelTokenEdgeETLTests
                     if (si >= 0 && oi >= 0) map[(si, oi)] = a.SumScoreFp1e9 ?? a.ScoreFp1e9;
                 }
             return map;
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SimilarTo_Symmetric_Directional_Planes_Asymmetric()
+    {
+        // The dedup gate relies on this contract: SIMILAR_TO is symmetric (canonicalize), the
+        // tensor-calculation planes are directional (keep both orderings).
+        Assert.Equal(RelationTypeRegistry.Symmetry.Symmetric, RelationTypeRegistry.Resolve("SIMILAR_TO").Symmetry);
+        Assert.Equal(RelationTypeRegistry.Symmetry.Asymmetric, RelationTypeRegistry.Resolve("ATTENDS").Symmetry);
+        Assert.Equal(RelationTypeRegistry.Symmetry.Asymmetric, RelationTypeRegistry.Resolve("OV_RELATES").Symmetry);
+    }
+
+    [Theory]
+    [InlineData(true)]    // untied (distinct lm_head) → CONTINUES_TO emitted
+    [InlineData(false)]   // tied (no lm_head) → skipped, since E·E ≡ SIMILAR_TO
+    public async Task ContinuesTo_EmittedOnlyWhenUntied(bool untied)
+    {
+        const int n = 6, d = 4;
+        // Distinct embedding vs unembedding (shifted) so the direct path E·W_U is genuinely directional.
+        var embed  = new float[] { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1, 1,1,0,0, 0,0,1,1 };
+        var lmhead = new float[] { 0,1,0,0, 0,0,1,0, 0,0,0,1, 1,0,0,0, 0,1,1,0, 1,0,0,1 };
+
+        string dir = Path.Combine(Path.GetTempPath(), "laplace-cont-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var tensors = new List<TensorSpec> { Tensor("model.embed_tokens.weight", new[] { n, d }, embed) };
+            if (untied) tensors.Add(Tensor("lm_head.weight", new[] { n, d }, lmhead));
+            WriteSafetensors(Path.Combine(dir, "model.safetensors"), tensors);
+
+            var ent = new Hash128[n];
+            var tokens = new LlamaTokenizerParser.TokenRecord[n];
+            for (int i = 0; i < n; i++)
+            {
+                ent[i] = Hash128.OfCanonical($"substrate/test/cont/tok/{i}");
+                tokens[i] = new LlamaTokenizerParser.TokenRecord
+                {
+                    TokenId = i, RawToken = $"t{i}", CanonicalBytes = Encoding.UTF8.GetBytes($"t{i}"),
+                    EntityId = ent[i], Tier = 2, IsByteLevel = false, Role = TokenRole.None,
+                    ContentX = double.NaN, ContentY = double.NaN, ContentZ = double.NaN, ContentM = double.NaN,
+                    HasContentCoord = false,
+                };
+            }
+
+            var cfg = new ModelConfig
+            {
+                ModelType = "llama", Architecture = "LlamaForCausalLM",
+                VocabSize = n, HiddenSize = d, NumLayers = 1, NumHeads = 1, NumKvHeads = 1,
+                HeadDim = d, IntermediateSize = d, NumExperts = 0,
+                TieWordEmbeddings = !untied, QkNorm = false, RopeTheta = 10000, NormEps = 1e-5,
+                MlaQLoraRank = 0, MlaKvLoraRank = 0, QkRopeHeadDim = 0, QkNopeHeadDim = 0, VHeadDim = 0,
+                RecipeEntityId = Hash128.OfCanonical("substrate/test/cont/recipe"),
+                CanonicalJson = Encoding.UTF8.GetBytes("{}"),
+            };
+            var roles = new List<TensorRole>
+            {
+                new("model.embed_tokens.weight", new[] { n, d }, "F32", TensorRoleKind.Embedding, -1, -1),
+            };
+            if (untied) roles.Add(new("lm_head.weight", new[] { n, d }, "F32", TensorRoleKind.LmHead, -1, -1));
+            var manifest = new ModelManifest
+            {
+                Config = cfg, Roles = roles, Modality = Modality.Text, Coverage = Coverage.Full, ModelName = "cont-model",
+            };
+
+            var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
+            var continuesTo = RelationTypeRegistry.RelationTypeId("CONTINUES_TO");
+            int count = 0;
+            await foreach (var c in etl.EmitAsync(commitEpoch: 1))
+                foreach (var a in c.Attestations)
+                    if (a.TypeId == continuesTo) count++;
+
+            if (untied) Assert.True(count > 0, "untied model must emit CONTINUES_TO (LM-head direct path)");
+            else        Assert.Equal(0, count);
         }
         finally
         {

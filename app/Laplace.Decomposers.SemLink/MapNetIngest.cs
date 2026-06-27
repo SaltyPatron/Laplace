@@ -26,7 +26,8 @@ internal static class MapNetIngest
         if (Path.GetFileName(path).Equals(LuMappingFile, StringComparison.OrdinalIgnoreCase))
         {
             await foreach (var change in FnLuSynsetBridgeIngest.StreamAsync(
-                               path, MapNetDecomposer.Source, "mapnet/lu", batchSize, ct))
+                               path, MapNetDecomposer.Source, "mapnet/lu", batchSize,
+                               FnLuSynsetBridgeIngest.MultiWordNetVersion, ct))
                 yield return change;
             yield break;
         }
@@ -176,7 +177,9 @@ internal static class MapNetIngest
     private static Hash128? SynsetAnchor(string raw)
     {
         var parsed = SourceEntityIdConventions.ParseMapNetSynsetKey(raw);
-        return parsed is null ? null : ConceptAnchor.SynsetId(parsed.Value.Offset, parsed.Value.SsType);
+        return parsed is null ? null
+            : ConceptAnchor.SynsetId(parsed.Value.Offset, parsed.Value.SsType,
+                                     FnLuSynsetBridgeIngest.MultiWordNetVersion);
     }
 
     private static void StageCorrespondsTo(

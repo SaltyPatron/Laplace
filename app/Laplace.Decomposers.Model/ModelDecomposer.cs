@@ -127,6 +127,7 @@ public sealed class ModelDecomposer : IDecomposer, IIngestInventoryProvider
         boot.AddRelationType("ATTENDS");
         boot.AddRelationType("OV_RELATES");
         boot.AddRelationType("COMPLETES_TO");
+        boot.AddRelationType("CONTINUES_TO");
         boot.AddRelationType("ENCODES");
         boot.AddRelationType("TOKEN_MAPS_TO");
         boot.AddRelationType("HAS_HIDDEN_SIZE");
