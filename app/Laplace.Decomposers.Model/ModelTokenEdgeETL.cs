@@ -42,12 +42,12 @@ public sealed class ModelTokenEdgeETL
     // "all" runs every circuit plane; "similarity" restricts to the embedding plane (cheap path for
     // smoke tests / constrained hosts). Default honors the plan: run every circuit.
     // LAPLACE_MODEL_PLANES selects which planes run: "all" (default — similarity + CONTINUES_TO +
-    // per-layer attention/OV/MLP), "similarity" (embedding plane only — cheap smoke), or "continues"
-    // (embedding + LM-head direct path only — targeted CONTINUES_TO without the per-layer cost).
+    // per-layer attention/OV/MLP), "similarity" (embedding plane only), "continues" (LM-head direct
+    // path only), or "shallow" (similarity + CONTINUES_TO, no per-layer — the cheap knowledge planes).
     private static readonly string PlanesMode =
         (Environment.GetEnvironmentVariable("LAPLACE_MODEL_PLANES") ?? "all").ToLowerInvariant();
-    private static bool RunSimilarity => PlanesMode is "all" or "similarity";
-    private static bool RunContinues  => PlanesMode is "all" or "continues";
+    private static bool RunSimilarity => PlanesMode is "all" or "similarity" or "shallow";
+    private static bool RunContinues  => PlanesMode is "all" or "continues" or "shallow";
     private static bool RunLayers     => PlanesMode == "all";
 
     // Track A2: norm-gain folding is ON by default; LAPLACE_MODEL_NORMFOLD=0 disables it so the
