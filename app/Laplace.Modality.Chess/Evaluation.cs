@@ -46,9 +46,14 @@ public static class Evaluation
     private static readonly int[] EgMaterial = { 94, 281, 297, 512, 936, 0 };
 
     /// <summary>Evaluate <paramref name="b"/> in centipawns from the side-to-move's perspective, using
-    /// only the enabled overlay <paramref name="terms"/> (default: all).</summary>
-    public static int Evaluate(Board b, EvalTerm terms = EvalTerm.All)
+    /// only the enabled overlay <paramref name="terms"/> (default: all). <paramref name="mgPstOverride"/>/
+    /// <paramref name="egPstOverride"/> swap the hand-tuned PeSTO piece-square tables for substrate-LEARNED
+    /// ones (same <c>[type-1][idx]</c> shape); null keeps PeSTO — so default behaviour is unchanged.</summary>
+    public static int Evaluate(
+        Board b, EvalTerm terms = EvalTerm.All, int[][]? mgPstOverride = null, int[][]? egPstOverride = null)
     {
+        var mgTab = mgPstOverride ?? MgPst;
+        var egTab = egPstOverride ?? EgPst;
         int mgMat = 0, egMat = 0, mgPst = 0, egPst = 0, phase = 0;
         int wBishops = 0, bBishops = 0;
         ulong wPawns = 0, bPawns = 0;
@@ -70,8 +75,8 @@ public static class Evaluation
 
             mgMat += sign * MgMaterial[ti];
             egMat += sign * EgMaterial[ti];
-            mgPst += sign * MgPst[ti][idx];
-            egPst += sign * EgPst[ti][idx];
+            mgPst += sign * mgTab[ti][idx];
+            egPst += sign * egTab[ti][idx];
             phase += PhaseInc[ti];
 
             switch (type)
@@ -270,4 +275,23 @@ public static class Evaluation
     // must follow every table they reference (else they capture nulls). Indexed by piece type 1..6 → 0..5.
     private static readonly int[][] MgPst = { MgPawn, MgKnight, MgBishop, MgRook, MgQueen, MgKing };
     private static readonly int[][] EgPst = { EgPawn, EgKnight, EgBishop, EgRook, EgQueen, EgKing };
+
+    /// <summary>Return the PeSTO PST tables with a learned delta ADDED on top (PeSTO floor + corpus nudge) —
+    /// the "blend, don't replace" path (a flat learned table replacing PeSTO regresses hard; PeSTO + a small
+    /// learned overlay is the honest way to fold corpus knowledge into the leaf eval). Shapes must match
+    /// <c>[6][64]</c>; returns fresh tables (PeSTO stays untouched).</summary>
+    public static (int[][] Mg, int[][] Eg) BlendPeStoWith(int[][] addMg, int[][] addEg)
+    {
+        var mg = new int[6][]; var eg = new int[6][];
+        for (int t = 0; t < 6; t++)
+        {
+            mg[t] = new int[64]; eg[t] = new int[64];
+            for (int i = 0; i < 64; i++)
+            {
+                mg[t][i] = MgPst[t][i] + (addMg[t][i]);
+                eg[t][i] = EgPst[t][i] + (addEg[t][i]);
+            }
+        }
+        return (mg, eg);
+    }
 }

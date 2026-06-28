@@ -18,8 +18,16 @@ Everything shaken out across the "make the chess side sing" build. Status legend
   aqtinstall → `D:\Qt`), driving `laplace-uci` vs `D:\stockfish`. Our own tooling, no third-party harness.
 - **Openings decomposer** — built + tested (parses `openings/*.tsv` via the `pgn` tree-sitter grammar, replays
   all ~3,700 ECO lines 100%). NOT yet ingested.
-- **Substrate root-injection seam** — `IRootBias` + `SubstrateRootBias` + `laplace chess substrate-test`.
-  First measurement: **NULL result (−17±54)** — naive raw `MOVE`-edge eff_mu is not a free Elo boost (see §2).
+- **Substrate root-injection seam** — `IRootBias` + `SubstrateRootBias` (raw edge) + `SubstructureFoldBias`
+  (generalizing fold) + `laplace chess substrate-test --mode fold|edge|off [--openings]`.
+  - raw `MOVE`-edge eff_mu = **NULL (−17)** — popularity, not strength (see §2).
+  - **substructure-fold = FIRST REAL POSITIVE: +24 ±23 Elo / 500g** (opening-seeded from the 2,668 INGESTED
+    ECO positions via `OpeningSeed` → `MatchRunner` openingFens). Generalizes via shared substructures; flips
+    the null. Shared `SubstrateStateValuer` (fold extracted from `SubstrateTurnHost`); `ChessCompose.Gate`
+    unifies the native-compose lock. 5/5 fold-math unit tests.
+- **Overlay-ablation ladder** (`laplace chess ladder`, 120g/term, opening-seeded): Material +759, Pst +307
+  (the two pillars), RookFiles +50, PawnStructure +26, Tempo +23, BishopPair +3 (≈0). ⇒ the 4 positional
+  overlays add little individually = substrate-learn candidates; Material+PST are the floor.
 - **Test coverage** — ~99 chess tests in `test-app.cmd` (Modality.Chess 84+ incl. eval/search/match,
   Chess.Service 9, Chess.Uci 8). Corpus: **~1M games / ~29M moves** → folded into 34.5M consensus relations.
 
