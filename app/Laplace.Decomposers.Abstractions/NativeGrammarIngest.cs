@@ -17,8 +17,12 @@ public static unsafe class NativeGrammarIngest
             return options?.Languages?.IsActive != true;
         if (string.Equals(src.Name, "Atomic2020Decomposer", StringComparison.Ordinal))
             return true;
+        // IliSynset anchor fields now resolve natively (etl_anchor.c lp_resolve_synset_anchor),
+        // bit-identically to ResolveSynsetAnchor (AnchorResolverParityTests). SenseKey/FrameCategory
+        // still EMIT their anchor entity via SenseAnchor.Emit/CategoryAnchor.Emit, which the native
+        // field-edge witness does not do — so they stay on the C# path until ported.
         return src.NodeEdgeMap.Count > 0
-               && src.Anchor == AnchorResolver.None
+               && src.Anchor is AnchorResolver.None or AnchorResolver.IliSynset
                && !EtlWitnessFactory.IsRegistered(src.Name);
     }
 
@@ -100,6 +104,13 @@ public static unsafe class NativeGrammarIngest
 
     private static unsafe IntPtr OpenSession(EtlSource src, Hash128? contextId)
     {
+        // The native session loads the ILI map from LAPLACE_CILI_DIR. Mirror C#'s own CILI resolution
+        // (env var OR the built-in default) into that env so native reads the exact same map file —
+        // otherwise an unset env would make the native anchor path silently resolve nothing while the
+        // C# path would have found the default map, dropping every cross-lingual edge.
+        if (src.Anchor == AnchorResolver.IliSynset)
+            Environment.SetEnvironmentVariable("LAPLACE_CILI_DIR", SourceEntityIdConventions.CiliDirectory());
+
         int witnessKind = ResolveWitnessKind(src);
         // The structs are blittable now (IntPtr, not [MarshalAs] string), so WE marshal the UTF8. Native
         // strdups both modality_id and each relation_surface (etl_ingest.c session_open), so free these

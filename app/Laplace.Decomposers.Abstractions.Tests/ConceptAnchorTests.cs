@@ -52,7 +52,7 @@ public class ConceptAnchorTests
     
     
     [Fact]
-    public void Satellite_ResolvesOnlyAsRawPos_FoldToAdjectiveWouldDropIt()
+    public void Satellite_ResolvesUnderBothPos_AsCollapseDoesNotDrop()
     {
         string cili = Environment.GetEnvironmentVariable("LAPLACE_CILI_DIR") ?? @"D:\Data\Ingest\CILI";
         string mapPath = Path.Combine(cili, IliMap.MapFileName);
@@ -73,7 +73,13 @@ public class ConceptAnchorTests
         }
         Assert.True(satOffset > 0, "expected a satellite synset in the CILI map");
 
-        Assert.NotNull(ConceptAnchor.SynsetId(satOffset, 's')); 
-        Assert.Null(ConceptAnchor.SynsetId(satOffset, 'a'));    
+        // #3 fix: adjective a/s collapse. A satellite (stored '-s' in pwn) now resolves under BOTH 's'
+        // and the '-a' OMW writes for satellites, to the SAME ILI id — instead of the 'a' lookup silently
+        // dropping it (the bug that lost ~3% of OMW lemmas, incl. i12345's foreign words).
+        var asS = ConceptAnchor.SynsetId(satOffset, 's');
+        var asA = ConceptAnchor.SynsetId(satOffset, 'a');
+        Assert.NotNull(asS);
+        Assert.NotNull(asA);
+        Assert.Equal(asS, asA);
     }
 }
